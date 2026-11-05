@@ -26,7 +26,7 @@ class ObservationTest : public ::testing::Test {
     const loom_serve_service_t service = {
         .name = IREE_SV("model"),
         .runtime = {.self = this},
-        .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING,
+        .kind = LOOM_SERVICE_KIND_EMBEDDING,
         .snapshot =
             [](void* self) {
               auto* test = static_cast<ObservationTest*>(self);

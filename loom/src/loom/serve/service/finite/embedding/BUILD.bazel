@@ -4,28 +4,12 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
 
 package(
     default_visibility = ["//loom/src/loom/serve:implementation"],
     features = ["layering_check"],
     licenses = ["notice"],
-)
-
-loom_cc_library(
-    name = "protocol",
-    srcs = ["protocol.c"],
-    hdrs = ["protocol.h"],
-    deps = [
-        "//loom/src/loom/serve/service/finite:protocol",
-        "//loom/src/loom/util:json",
-        "//loom/src/loom/util:stream",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:base64",
-        "//runtime/src/iree/base/internal:json",
-        "//runtime/src/iree/base/internal:unicode",
-        "//runtime/src/iree/vm",
-    ],
 )
 
 loom_cc_library(
@@ -51,15 +35,15 @@ loom_cc_library(
         "//loom/src/loom/serve/server:router",
         "//loom/src/loom/serve/service",
         "//loom/src/loom/serve/service/finite:http",
-        "//loom/src/loom/serve/service/finite:model",
-        "//loom/src/loom/serve/service/finite:service",
-        "//loom/src/loom/serve/service/finite/embedding:protocol",
         "//loom/src/loom/serve/testing:http_harness",
         "//loom/src/loom/serve/testing:model",
         "//loom/src/loom/serve/testing:model_wait",
         "//loom/src/loom/serve/testing:package",
         "//loom/src/loom/serve/transport/http:listener",
         "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/service/finite:model",
+        "//loom/src/loom/service/finite:service",
+        "//loom/src/loom/service/finite/embedding:protocol",
         "//loom/src/loom/service/telemetry:record",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
@@ -102,13 +86,13 @@ loom_cc_library(
     }),
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
-        ":protocol",
         ":source_service_fixture",
         "//loom/src/loom/runtime/program:package",
         "//loom/src/loom/runtime/testing:stalled_stderr",
-        "//loom/src/loom/serve/service/finite:result",
         "//loom/src/loom/serve/testing:model",
         "//loom/src/loom/serve/testing:package",
+        "//loom/src/loom/service/finite:result",
+        "//loom/src/loom/service/finite/embedding:protocol",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:temp_file",
     ],
@@ -185,10 +169,10 @@ loom_cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
-        ":protocol",
         ":source_service_fixture",
         "//loom/src/loom/serve/service/finite:http",
         "//loom/src/loom/serve/testing:model",
+        "//loom/src/loom/service/finite/embedding:protocol",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:temp_file",
     ],
@@ -214,16 +198,4 @@ loom_cc_library(
         "//runtime/src/iree/testing:temp_file",
     ],
     alwayslink = True,
-)
-
-loom_cc_test(
-    name = "protocol_test",
-    srcs = ["protocol_test.cc"],
-    deps = [
-        ":protocol",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-        "//runtime/src/iree/vm",
-    ],
 )

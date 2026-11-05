@@ -8,13 +8,13 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "loom/serve/service/finite/embedding/protocol.h"
 #include "loom/serve/service/text/epoch.h"
 #include "loom/serve/service/text/epoch_upload.h"
 #include "loom/serve/service/text/media_epoch.h"
 #include "loom/serve/service/text/media_projector.h"
 #include "loom/serve/service/text/readiness.h"
 #include "loom/serve/service/text/service_test_fixture.h"
+#include "loom/service/finite/embedding/protocol.h"
 
 namespace {
 
@@ -28,12 +28,12 @@ class MediaExecutionTest : public SourceTextServiceTest {
     const char* source = std::getenv("LOOM_SERVE_TEST_MEDIA_SOURCE");
     ASSERT_NE(source, nullptr);
     IREE_ASSERT_OK(producer_document_.Load(source));
-    const loom_serve_finite_model_options_t options = {
+    const loom_service_finite_model_options_t options = {
         .sources = producer_document_.value().sources,
         .asset_directory = IREE_SV("."),
         .options = IREE_SV("{}"),
     };
-    IREE_ASSERT_OK(loom_serve_finite_model_allocate(
+    IREE_ASSERT_OK(loom_service_finite_model_allocate(
         device_, storage_owner_, &options, host_allocator_, &producer_));
   }
 
@@ -51,11 +51,11 @@ class MediaExecutionTest : public SourceTextServiceTest {
     iree_hal_semaphore_release(gate_);
     loom_serve_text_media_epoch_deinitialize(&packet_);
     SourceTextServiceTest::TearDown();
-    IREE_EXPECT_OK(loom_serve_finite_model_free(producer_));
-    loom_serve_finite_result_release(result_);
+    IREE_EXPECT_OK(loom_service_finite_model_free(producer_));
+    loom_service_finite_result_release(result_);
     for (size_t i = 0; i < requests_.size(); ++i) {
       iree_vm_buffer_release(prepared_[i].bytes);
-      loom_serve_embedding_request_deinitialize(&requests_[i]);
+      loom_service_embedding_request_deinitialize(&requests_[i]);
     }
   }
 
@@ -75,33 +75,34 @@ class MediaExecutionTest : public SourceTextServiceTest {
     // physical rows backwards. Original request and row ordinals are required.
     std::array<iree_host_size_t, 3> rows;
     for (size_t i = 0; i < requests_.size(); ++i) {
-      IREE_ASSERT_OK(loom_serve_embedding_request_initialize(
+      IREE_ASSERT_OK(loom_service_embedding_request_initialize(
           iree_make_cstring_view(bodies[i]), host_allocator_, &requests_[i]));
-      IREE_ASSERT_OK(loom_serve_finite_model_prepare_request(
+      IREE_ASSERT_OK(loom_service_finite_model_prepare_request(
           producer_, requests_[i].base.input, &prepared_[i]));
       rows[i] = requests_[i].base.count;
     }
-    IREE_ASSERT_OK(loom_serve_finite_model_prepare_batch(
+    IREE_ASSERT_OK(loom_service_finite_model_prepare_batch(
         producer_, prepared_.size(), prepared_.data(), rows.data()));
     bool code_ready = false;
     IREE_ASSERT_OK(
-        loom_serve_finite_model_advance_batch(producer_, false, &code_ready));
+        loom_service_finite_model_advance_batch(producer_, false, &code_ready));
     ASSERT_TRUE(code_ready);
     loom_runtime_residency_admission_t admission;
     IREE_ASSERT_OK(loom_runtime_residency_try_admit(
-        loom_serve_finite_model_residency(producer_), &admission));
+        loom_service_finite_model_residency(producer_), &admission));
     ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
     loom_runtime_execution_frontier_t ready;
-    IREE_ASSERT_OK(loom_serve_finite_model_submit(producer_, &result_, &ready));
+    IREE_ASSERT_OK(
+        loom_service_finite_model_submit(producer_, &result_, &ready));
     EXPECT_EQ(ready.values[1], 0u);
   }
 
   void RemoveProducer() {
-    ASSERT_NO_FATAL_FAILURE(Wait(loom_serve_finite_result_ready(result_)));
-    loom_serve_finite_model_complete(producer_);
+    ASSERT_NO_FATAL_FAILURE(Wait(loom_service_finite_result_ready(result_)));
+    loom_service_finite_model_complete(producer_);
     IREE_ASSERT_OK(
-        loom_serve_finite_model_free(std::exchange(producer_, nullptr)));
-    loom_serve_finite_result_release(std::exchange(result_, nullptr));
+        loom_service_finite_model_free(std::exchange(producer_, nullptr)));
+    loom_service_finite_result_release(std::exchange(result_, nullptr));
   }
 
   static int32_t Fingerprint(float value, uint32_t image_row = 0) {
@@ -113,13 +114,13 @@ class MediaExecutionTest : public SourceTextServiceTest {
   // Production source document outliving the projector.
   loom_serve::testing::ModelDocument producer_document_;
   // Independent finite model sharing the text device and workspace.
-  loom_serve_finite_model_t* producer_ = nullptr;
+  loom_service_finite_model_t* producer_ = nullptr;
   // Original cohort ownership shared by the text requests.
-  loom_serve_finite_result_t* result_ = nullptr;
+  loom_service_finite_result_t* result_ = nullptr;
   // HTTP protocol and source input storage retained through producer work.
-  std::array<loom_serve_embedding_request_t, 3> requests_ = {};
+  std::array<loom_service_embedding_request_t, 3> requests_ = {};
   // Source-prepared request bytes, independent of cohort result ownership.
-  std::array<loom_serve_prepared_request_t, 3> prepared_ = {};
+  std::array<loom_service_prepared_request_t, 3> prepared_ = {};
   // Explicitly gated consumer for delayed-capture retirement coverage.
   loom_runtime_execution_t* consumer_ = nullptr;
   // Owner-signalled readiness; no sleep or deadline models queue retirement.

@@ -942,7 +942,7 @@ loom_cc_test(
     deps = [
         ":test_compiler",
         ":test_device",
-        "//loom/src/loom/serve/service/finite:component_tests",
+        "//loom/src/loom/service/finite:component_tests",
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
@@ -1626,12 +1626,12 @@ loom_cc_test(
         "//loom/src/loom/runtime/parameter:weights_streaming_test.cc",
         "//loom/src/loom/runtime/parameter:weights_test.cc",
         "//loom/src/loom/runtime/parameter:weights_test_base.h",
-        "//loom/src/loom/serve/service:executables_test.cc",
+        "//loom/src/loom/service:executables_test.cc",
     ],
     args = [
         "--weight_sources=$(rootpath //loom/src/loom/runtime/parameter/testdata/weights:stages.loom)",
         "--gtest_filter=Streaming/*:Backing/WeightPackingTest.InvocationWorkingSet*:Pressure/*",
-        "--executable_sources=$(rootpath //loom/src/loom/serve/service/testdata/executables:prepare.loom)",
+        "--executable_sources=$(rootpath //loom/src/loom/service/testdata/executables:prepare.loom)",
     ],
     data = [
         "//loom/src/loom/runtime/parameter/testdata/weights:boundaries.loom",
@@ -1642,7 +1642,7 @@ loom_cc_test(
         "//loom/src/loom/runtime/parameter/testdata/weights:policy.loom",
         "//loom/src/loom/runtime/parameter/testdata/weights:stages.loom",
         "//loom/src/loom/runtime/parameter/testdata/weights:streaming_policy.loom",
-        "//loom/src/loom/serve/service/testdata/executables:prepare.loom",
+        "//loom/src/loom/service/testdata/executables:prepare.loom",
     ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/execute:x86_task_hal",
@@ -1669,7 +1669,7 @@ loom_cc_test(
         "//loom/src/loom/runtime/testing:device",
         "//loom/src/loom/runtime/testing:native_allocator",
         "//loom/src/loom/runtime/testing:worker_gate",
-        "//loom/src/loom/serve/service:executables",
+        "//loom/src/loom/service:executables",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",

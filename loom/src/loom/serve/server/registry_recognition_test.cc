@@ -492,12 +492,12 @@ TEST_F(RegistryRecognitionTest, InvalidOptionsLeaveAdmissionAvailable) {
 class RegistryActivityTest : public RegistryRecognitionTest {
  protected:
   void Configure(loom_serve_model_configuration_t* configuration) override {
-    configuration->kind = LOOM_SERVE_MODEL_KIND_ACTIVITY;
+    configuration->kind = LOOM_SERVICE_KIND_ACTIVITY;
   }
 };
 
 TEST_F(RegistryActivityTest, CompoundOutputSurvivesDrainAndReplacement) {
-  EXPECT_EQ(Model()->service.kind, LOOM_SERVE_MODEL_KIND_ACTIVITY);
+  EXPECT_EQ(Model()->service.kind, LOOM_SERVICE_KIND_ACTIVITY);
   EXPECT_EQ(Model()->service.endpoint, nullptr);
   EXPECT_EQ(Model()->service.accept, nullptr);
   EXPECT_EQ(Model()->service.capabilities.output_modalities.count, 0u);
@@ -505,7 +505,7 @@ TEST_F(RegistryActivityTest, CompoundOutputSurvivesDrainAndReplacement) {
   IREE_ASSERT_OK(Open(&input, LOOM_SERVE_RECOGNITION_OUTPUT_ALL));
   EXPECT_EQ(input.stream, nullptr);
   ASSERT_NO_FATAL_FAILURE(Prepare());
-  EXPECT_EQ(Model()->service.kind, LOOM_SERVE_MODEL_KIND_ACTIVITY);
+  EXPECT_EQ(Model()->service.kind, LOOM_SERVICE_KIND_ACTIVITY);
   EXPECT_EQ(Model()->service.endpoint, nullptr);
   EXPECT_EQ(Model()->service.accept, nullptr);
   const auto outputs = Model()->service.capabilities.output_modalities;

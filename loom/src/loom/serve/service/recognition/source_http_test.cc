@@ -132,7 +132,7 @@ class SourceRecognitionHttpTest : public ::testing::Test {
     IREE_ASSERT_OK(http_.Initialize(server_, listener_));
     const loom_serve_recognition_service_options_t service_options = {
         .name = IREE_SV("recognition"),
-        .kind = LOOM_SERVE_MODEL_KIND_RECOGNITION,
+        .kind = LOOM_SERVICE_KIND_RECOGNITION,
         .pending_capacity = 2,
         .request_limit = 1024,
         .document_limit = 4096,
@@ -234,7 +234,7 @@ TEST_F(SourceRecognitionHttpTest, DeploymentRoleRequiresItsDeclaredOutput) {
   interface_ = {};
   const struct {
     // Deployment contract checked before the service is published.
-    loom_serve_model_kind_t kind;
+    loom_service_kind_t kind;
     // Capability mask supplied by the generator dependency.
     loom_serve_recognition_output_flags_t outputs;
     // Whether that source satisfies the deployment contract.
@@ -242,19 +242,18 @@ TEST_F(SourceRecognitionHttpTest, DeploymentRoleRequiresItsDeclaredOutput) {
     // Actual output modalities published on successful preparation.
     size_t modality_count;
   } cases[] = {
-      {LOOM_SERVE_MODEL_KIND_RECOGNITION,
-       LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT, true, 1},
-      {LOOM_SERVE_MODEL_KIND_ACTIVITY, LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY,
+      {LOOM_SERVICE_KIND_RECOGNITION, LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
        true, 1},
-      {LOOM_SERVE_MODEL_KIND_RECOGNITION, LOOM_SERVE_RECOGNITION_OUTPUT_ALL,
-       true, 2},
-      {LOOM_SERVE_MODEL_KIND_ACTIVITY, LOOM_SERVE_RECOGNITION_OUTPUT_ALL, true,
+      {LOOM_SERVICE_KIND_ACTIVITY, LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY, true,
+       1},
+      {LOOM_SERVICE_KIND_RECOGNITION, LOOM_SERVE_RECOGNITION_OUTPUT_ALL, true,
        2},
-      {LOOM_SERVE_MODEL_KIND_RECOGNITION,
-       LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY, false, 0},
-      {LOOM_SERVE_MODEL_KIND_ACTIVITY, LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+      {LOOM_SERVICE_KIND_ACTIVITY, LOOM_SERVE_RECOGNITION_OUTPUT_ALL, true, 2},
+      {LOOM_SERVICE_KIND_RECOGNITION, LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY,
        false, 0},
-      {LOOM_SERVE_MODEL_KIND_TEXT, LOOM_SERVE_RECOGNITION_OUTPUT_ALL, false, 0},
+      {LOOM_SERVICE_KIND_ACTIVITY, LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT,
+       false, 0},
+      {LOOM_SERVICE_KIND_TEXT, LOOM_SERVE_RECOGNITION_OUTPUT_ALL, false, 0},
   };
   for (const auto& row : cases) {
     SCOPED_TRACE(row.kind);
@@ -280,9 +279,9 @@ TEST_F(SourceRecognitionHttpTest, DeploymentRoleRequiresItsDeclaredOutput) {
       EXPECT_EQ(interface_.capabilities.output_modalities.count,
                 row.modality_count);
       EXPECT_EQ(interface_.accept != nullptr,
-                row.kind == LOOM_SERVE_MODEL_KIND_RECOGNITION);
+                row.kind == LOOM_SERVICE_KIND_RECOGNITION);
       EXPECT_EQ(interface_.endpoint != nullptr,
-                row.kind == LOOM_SERVE_MODEL_KIND_RECOGNITION);
+                row.kind == LOOM_SERVICE_KIND_RECOGNITION);
       EXPECT_NE(interface_.try_open_recognition, nullptr);
       loom_serve_recognition_service_free(service_);
       service_ = nullptr;

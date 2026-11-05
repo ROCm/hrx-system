@@ -32,11 +32,12 @@ TEST_F(SourceEmbeddingServiceTest,
       iree::testing::MakeTempFilePath("variant_weights");
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(directory));
   interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
-  IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
+  IREE_ASSERT_OK(
+      loom_service_finite_model_free(std::exchange(model_, nullptr)));
   ASSERT_NO_FATAL_FAILURE(CreateModel(directory));
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
-  auto* residency = loom_serve_finite_model_residency(model_);
+  auto* residency = loom_service_finite_model_residency(model_);
   IREE_ASSERT_OK(loom_runtime_residency_activate(residency));
   const auto weights = loom_runtime_residency_activity(residency);
   StartRouter();

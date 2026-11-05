@@ -45,7 +45,7 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     // Acquired candidate, accessed by the owner only.
     loom_runtime_variant_entry_t* entry = nullptr;
     // Borrowed completion storage until owner publication.
-    loom_serve_variant_selection_fn_t completion = nullptr;
+    loom_service_variant_selection_fn_t completion = nullptr;
     // Opaque caller state whose lifetime is the subject of these tests.
     void* user_data = nullptr;
     // Device-boundary readiness, protected by the inherited mutex.
@@ -119,7 +119,7 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
   }
   static iree_status_t Select(void* self, loom_runtime_variant_id_t id,
                               loom_runtime_variant_id_t expected,
-                              loom_serve_variant_selection_fn_t completion,
+                              loom_service_variant_selection_fn_t completion,
                               void* user_data) {
     auto* dependency = static_cast<loom_serve_test_variant_dependency_t*>(self);
     if (expected != Selected(self) || dependency->selection.entry) {
@@ -226,7 +226,7 @@ class HttpRouterVariantTest : public HttpRouterTest {
     managed_capacity_ = 1;
     factory_ = {
         .self = &model_,
-        .kinds = 1u << LOOM_SERVE_MODEL_KIND_EMBEDDING,
+        .kinds = 1u << LOOM_SERVICE_KIND_EMBEDDING,
         .device_names = {1, kDeviceNames},
         .pool_count = 1,
         .pools = kPools,

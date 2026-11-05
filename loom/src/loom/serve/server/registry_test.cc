@@ -90,7 +90,7 @@ class RegistryTest : public ::testing::TestWithParam<bool> {
   void SetUp() override {
     ASSERT_TRUE(path_);
     const loom_serve_registration_factory_t factory = {
-        .kinds = 1u << LOOM_SERVE_MODEL_KIND_EMBEDDING,
+        .kinds = 1u << LOOM_SERVICE_KIND_EMBEDDING,
         .device_names = {2, kDeviceNames},
         .pool_count = 1,
         .pools = kPools,
@@ -257,7 +257,7 @@ TEST_P(RegistryAllocationTest, FailurePreservesDeclarationAndSlotForRetry) {
         iree_string_view_empty(), nullptr, declaration_allocator.allocator(),
         &configuration));
     const loom_serve_registration_factory_t factory = {
-        .kinds = 1u << LOOM_SERVE_MODEL_KIND_EMBEDDING,
+        .kinds = 1u << LOOM_SERVICE_KIND_EMBEDDING,
         .device_names = {1, kDeviceNames},
         .pool_count = 1,
         .pools = kPools,
@@ -310,8 +310,8 @@ INSTANTIATE_TEST_SUITE_P(ExplicitBindings, RegistryAllocationTest,
 
 TEST(RegistryAdmissionTest, NativeSpeechRejectionsPreserveOwnedInput) {
   const loom_serve_service_t services[] = {
-      {.name = IREE_SV("vectors"), .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING},
-      {.name = IREE_SV("http-speech"), .kind = LOOM_SERVE_MODEL_KIND_SPEECH},
+      {.name = IREE_SV("vectors"), .kind = LOOM_SERVICE_KIND_EMBEDDING},
+      {.name = IREE_SV("http-speech"), .kind = LOOM_SERVICE_KIND_SPEECH},
   };
   loom_serve_registry_t* registry = nullptr;
   IREE_ASSERT_OK(
@@ -355,12 +355,12 @@ TEST(RegistryAdmissionTest, NativeSpeechRejectionsPreserveOwnedInput) {
 
 TEST(RegistryAdmissionTest, NativeRecognitionUsesTypedAdmissionPolicy) {
   const loom_serve_service_t services[] = {
-      {.name = IREE_SV("vectors"), .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING},
+      {.name = IREE_SV("vectors"), .kind = LOOM_SERVICE_KIND_EMBEDDING},
       {
           .name = IREE_SV("http-recognition"),
-          .kind = LOOM_SERVE_MODEL_KIND_RECOGNITION,
+          .kind = LOOM_SERVICE_KIND_RECOGNITION,
       },
-      {.name = IREE_SV("activity"), .kind = LOOM_SERVE_MODEL_KIND_ACTIVITY},
+      {.name = IREE_SV("activity"), .kind = LOOM_SERVICE_KIND_ACTIVITY},
   };
   loom_serve_registry_t* registry = nullptr;
   IREE_ASSERT_OK(

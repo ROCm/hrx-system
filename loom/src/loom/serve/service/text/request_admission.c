@@ -458,9 +458,9 @@ static iree_status_t loom_serve_text_prepare_media(
         service->pending.values[service->pending.count - 1]->receipt.serial;
   }
   if (!service->projector) {
-    loom_serve_finite_model_t* model = NULL;
+    loom_service_finite_model_t* model = NULL;
     iree_status_t status =
-        loom_serve_finite_component_prepare(service->image, &model);
+        loom_service_finite_component_prepare(service->image, &model);
     if (!iree_status_is_ok(status)) {
       // Registration/source preparation is service availability, not a defect
       // in this HTTP payload. Preserve the component's original diagnostic.

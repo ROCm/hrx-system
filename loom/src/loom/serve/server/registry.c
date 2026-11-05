@@ -8,8 +8,9 @@
 
 #include "loom/runtime/host/clock.h"
 #include "loom/runtime/wake.h"
-#include "loom/serve/service/kind.h"
+#include "loom/serve/service/endpoint.h"
 #include "loom/serve/service/text/checkpoint_control.h"
+#include "loom/service/kind.h"
 #include "loom/service/telemetry/record.h"
 #include "loom/service/telemetry/tracing.h"
 
@@ -300,7 +301,7 @@ iree_status_t loom_serve_registry_try_open_speech(
   *out_stream = NULL;
   loom_serve_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
-      registry, name, 1u << LOOM_SERVE_MODEL_KIND_SPEECH, "speech", false,
+      registry, name, 1u << LOOM_SERVICE_KIND_SPEECH, "speech", false,
       &service));
   if (!service) {
     return iree_ok_status();
@@ -319,7 +320,7 @@ iree_status_t loom_serve_registry_try_upload_voice(
   *out_upload = NULL;
   loom_serve_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
-      registry, name, 1u << LOOM_SERVE_MODEL_KIND_SPEECH, "voice upload", false,
+      registry, name, 1u << LOOM_SERVICE_KIND_SPEECH, "voice upload", false,
       &service));
   if (!service) {
     return iree_ok_status();
@@ -336,7 +337,7 @@ iree_status_t loom_serve_registry_remove_voice(loom_serve_registry_t* registry,
                                                iree_string_view_t id) {
   loom_serve_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
-      registry, name, 1u << LOOM_SERVE_MODEL_KIND_SPEECH, "voice removal", true,
+      registry, name, 1u << LOOM_SERVICE_KIND_SPEECH, "voice removal", true,
       &service));
   if (!service->remove_voice) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -351,11 +352,11 @@ iree_status_t loom_serve_registry_try_open_recognition(
     loom_serve_recognition_stream_t** out_stream) {
   *out_stream = NULL;
   loom_serve_service_t* service = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
-      registry, name,
-      (1u << LOOM_SERVE_MODEL_KIND_RECOGNITION) |
-          (1u << LOOM_SERVE_MODEL_KIND_ACTIVITY),
-      "recognition", false, &service));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_registry_find_admission(registry, name,
+                                         (1u << LOOM_SERVICE_KIND_RECOGNITION) |
+                                             (1u << LOOM_SERVICE_KIND_ACTIVITY),
+                                         "recognition", false, &service));
   if (!service) {
     return iree_ok_status();
   }
@@ -373,8 +374,7 @@ iree_status_t loom_serve_registry_try_open_text(
   *out_stream = NULL;
   loom_serve_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
-      registry, name, 1u << LOOM_SERVE_MODEL_KIND_TEXT, "text", false,
-      &service));
+      registry, name, 1u << LOOM_SERVICE_KIND_TEXT, "text", false, &service));
   if (!service) {
     return iree_ok_status();
   }
@@ -393,8 +393,7 @@ iree_status_t loom_serve_registry_try_open_text_checkpoint(
   loom_serve_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_registry_find_admission(
       registry, name,
-      (1u << LOOM_SERVE_MODEL_KIND_TEXT) |
-          (1u << LOOM_SERVE_MODEL_KIND_SEQUENCE),
+      (1u << LOOM_SERVICE_KIND_TEXT) | (1u << LOOM_SERVICE_KIND_SEQUENCE),
       "retained sequence",
       request->action == LOOM_SERVE_TEXT_CHECKPOINT_ACTION_RELEASE, &service));
   if (!service) {
@@ -493,7 +492,7 @@ iree_status_t loom_serve_registry_register(
     // access.
     model->service.kind = model->configuration.kind;
     model->service.endpoint =
-        loom_serve_model_kind_endpoint(model->configuration.kind);
+        loom_serve_service_endpoint(model->configuration.kind);
     model->service.telemetry.counters = &model->counters;
     model->service.telemetry.latency = &model->latency;
     model->service.telemetry.stream = model->stream;
@@ -546,7 +545,7 @@ bool loom_serve_registry_has_component(
     const loom_serve_registered_model_t* model,
     loom_serve_model_component_t component) {
   return component == LOOM_SERVE_MODEL_COMPONENT_PRIMARY ||
-         (model->configuration.kind == LOOM_SERVE_MODEL_KIND_TEXT &&
+         (model->configuration.kind == LOOM_SERVICE_KIND_TEXT &&
           (model->configuration.text.image.contract ||
            model->configuration.text.image.prepare.size != 0));
 }

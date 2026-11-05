@@ -12,11 +12,11 @@
 #include "loom/runtime/telemetry/sample.h"
 #include "loom/runtime/telemetry/stream.h"
 #include "loom/runtime/wake.h"
-#include "loom/serve/service/kind.h"
 #include "loom/serve/service/reasoning.h"
-#include "loom/serve/service/reconfiguration.h"
 #include "loom/serve/transport/http/server.h"
 #include "loom/service/inspection.h"
+#include "loom/service/kind.h"
+#include "loom/service/reconfiguration.h"
 #include "loom/service/telemetry/latency.h"
 #include "loom/service/telemetry/record.h"
 
@@ -95,7 +95,7 @@ typedef struct loom_serve_service_t {
   // utilities use independent CPU states and never call this model's methods.
   const iree_tokenizer_t* tokenizer;
   // Immutable deployment role, independent of model lifetime.
-  loom_serve_model_kind_t kind;
+  loom_service_kind_t kind;
   // Primary inference endpoint with process lifetime; excludes utilities and
   // modality-specific control routes such as text checkpoints. NULL means
   // native-only inference and requires an absent accept callback.
@@ -125,7 +125,7 @@ typedef struct loom_serve_service_t {
   loom_service_inspection_t inspection;
   // Optional service-owned executable pool and preferred-choice policy. Its
   // producers and queued selections participate in is_pending retirement.
-  loom_serve_reconfiguration_t reconfiguration;
+  loom_service_reconfiguration_t reconfiguration;
   // Optional observation owned by the service and live through retirement.
   struct {
     // Bounded immutable-record history; NULL when this service has no stream.

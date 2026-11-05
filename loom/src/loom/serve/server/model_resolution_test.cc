@@ -299,7 +299,7 @@ TEST_F(ModelResolutionTest, RejectedSubmissionOwesNoWakeOrBorrow) {
 
 TEST_F(ModelResolutionTest, RemovalJoinsResolutionBeforeReleasingDeclaration) {
   const loom_serve_registration_factory_t factory = {
-      .kinds = 1u << LOOM_SERVE_MODEL_KIND_TEXT,
+      .kinds = 1u << LOOM_SERVICE_KIND_TEXT,
       .device_names = {1, kDeviceNames},
       .pool_count = 1,
       .pools = kPools,

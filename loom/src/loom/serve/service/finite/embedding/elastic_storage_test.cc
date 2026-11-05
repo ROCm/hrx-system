@@ -289,8 +289,9 @@ TEST_F(ElasticEmbeddingServiceTest,
       iree::testing::MakeTempFilePath("dynamic_pressure");
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
   interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
-  IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
+  IREE_ASSERT_OK(
+      loom_service_finite_model_free(std::exchange(model_, nullptr)));
   StartManagedRouter();
   EXPECT_NE(Read(Send({}, "/v1/models", "GET")).find(R"("data":[])"),
             std::string::npos);
@@ -334,15 +335,16 @@ TEST_F(ElasticEmbeddingServiceTest,
       iree::testing::MakeTempFilePath("checkpoint_embedding");
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
   interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
-  IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
+  IREE_ASSERT_OK(
+      loom_service_finite_model_free(std::exchange(model_, nullptr)));
   constexpr uint64_t kSlabBytes = 4096;
   ASSERT_NO_FATAL_FAILURE(CreateModel(package));
   retained_ = std::exchange(model_, nullptr);
   ASSERT_NO_FATAL_FAILURE(CreateModel(package));
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
-  auto* retained_residency = loom_serve_finite_model_residency(retained_);
-  auto* residency = loom_serve_finite_model_residency(model_);
+  auto* retained_residency = loom_service_finite_model_residency(retained_);
+  auto* residency = loom_service_finite_model_residency(model_);
   IREE_ASSERT_OK(loom_runtime_residency_acquire(retained_residency));
   IREE_ASSERT_OK(loom_runtime_residency_await(retained_residency));
   EXPECT_EQ(
@@ -467,7 +469,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   // Retire the model with prepared parameters on the serialized owner that
   // must admit its peer. The one-slab budget cannot hold both parameter sets.
   interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
   std::swap(model_, retained_);
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
   const int peer = Send(R"({"model":"fixture","input":"a"})");
@@ -496,7 +498,7 @@ TEST_F(ElasticEmbeddingServiceTest,
 
   // Final removal retains reusable physical backing without any model owning
   // it. The same device and host executor remain available for replacements.
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
   loom_serve_test_embedding_model_lifecycle_t final_removal;
   final_removal.model = std::exchange(model_, nullptr);
   removal_status = final_removal.Retire(device_, storage_owner_);

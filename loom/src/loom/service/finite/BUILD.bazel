@@ -1,0 +1,243 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "component_tests",
+    testonly = True,
+    srcs = ["component_test.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/storage:memory",
+        "//loom/src/loom/runtime/testing:application",
+        "//loom/src/loom/runtime/testing:device",
+        "//loom/src/loom/service/finite:component",
+        "//loom/src/loom/service/finite:model",
+        "//loom/src/loom/service/finite:result",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:temp_file",
+        "//runtime/src/iree/vm",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "component",
+    srcs = ["component.c"],
+    hdrs = ["component.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/program:compilation",
+        "//loom/src/loom/service/finite:model",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "protocol",
+    hdrs = ["protocol.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/service:kind",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "consumer",
+    hdrs = ["consumer.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/service/finite:protocol",
+        "//loom/src/loom/service/finite:result",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "call",
+    srcs = ["call.c"],
+    hdrs = ["call.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/service/finite:consumer",
+        "//loom/src/loom/service/finite:protocol",
+        "//loom/src/loom/service/finite:result",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "call_test",
+    srcs = ["call_test.cc"],
+    deps = [
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/service/finite:call",
+        "//loom/src/loom/service/finite:consumer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "service",
+    srcs = ["service.c"],
+    hdrs = ["service.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime:service",
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/host:timer",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/telemetry:stream",
+        "//loom/src/loom/service:execution_reconfiguration",
+        "//loom/src/loom/service:inspection",
+        "//loom/src/loom/service:kind",
+        "//loom/src/loom/service:reconfiguration",
+        "//loom/src/loom/service/finite:call",
+        "//loom/src/loom/service/finite:consumer",
+        "//loom/src/loom/service/finite:model",
+        "//loom/src/loom/service/finite:protocol",
+        "//loom/src/loom/service/finite:result",
+        "//loom/src/loom/service/telemetry:latency",
+        "//loom/src/loom/service/telemetry:record",
+        "//loom/src/loom/service/telemetry:tracing",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "registration",
+    srcs = ["registration.c"],
+    hdrs = ["registration.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/parameter:activation",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/program:compilation",
+        "//loom/src/loom/runtime/telemetry:stream",
+        "//loom/src/loom/service/finite:model",
+        "//loom/src/loom/service/finite:protocol",
+        "//loom/src/loom/service/finite:service",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_assert_dependency_boundary(
+    name = "registration_is_independent_of_serving",
+    forbidden_subtrees = ["//loom/src/loom/serve/..."],
+    message = "Finite preparation and retirement must not depend on serving",
+    target = "//loom/src/loom/service/finite:registration",
+)
+
+loom_cc_library(
+    name = "result",
+    srcs = ["result.c"],
+    hdrs = ["result.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime/execution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "model",
+    srcs = ["model.c"],
+    hdrs = ["model.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/execution:dispatch",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/parameter:bank",
+        "//loom/src/loom/runtime/parameter:module",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/parameter:sources",
+        "//loom/src/loom/runtime/parameter:weights",
+        "//loom/src/loom/runtime/program",
+        "//loom/src/loom/runtime/program:compilation",
+        "//loom/src/loom/runtime/program:input",
+        "//loom/src/loom/runtime/program:jit",
+        "//loom/src/loom/runtime/program:json",
+        "//loom/src/loom/runtime/program:module",
+        "//loom/src/loom/runtime/program:preparation",
+        "//loom/src/loom/runtime/program:sources",
+        "//loom/src/loom/runtime/program:stage_set",
+        "//loom/src/loom/runtime/program:stage_table",
+        "//loom/src/loom/runtime/program:tokenizer_cache",
+        "//loom/src/loom/runtime/program:tokenizer_load",
+        "//loom/src/loom/runtime/program:variant_pool",
+        "//loom/src/loom/service:executables",
+        "//loom/src/loom/service:execution_reconfiguration",
+        "//loom/src/loom/service:prepared_request",
+        "//loom/src/loom/service/finite:result",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "result_test",
+    srcs = ["result_test.cc"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_task",
+    ]),
+    deps = [
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/execution:retirement",
+        "//loom/src/loom/runtime/execution:workspace",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/service/finite:result",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)

@@ -18,12 +18,12 @@
 #include "iree/testing/gtest.h"
 #include "loom/runtime/device/device.h"
 #include "loom/runtime/program/compilation.h"
-#include "loom/serve/service/finite/model.h"
-#include "loom/serve/service/finite/service.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model_wait.h"
 #include "loom/serve/transport/http/listener.h"
+#include "loom/service/finite/model.h"
+#include "loom/service/finite/service.h"
 #include "loom/service/telemetry/record.h"
 
 namespace loom_serve::testing::embedding {
@@ -43,7 +43,7 @@ struct loom_serve_test_embedding_model_lifecycle_t {
 
   iree_status_t Run(loom_runtime_device_t* device,
                     loom_runtime_pool_t* storage_owner,
-                    const loom_serve_finite_model_options_t& options,
+                    const loom_service_finite_model_options_t& options,
                     iree_allocator_t host_allocator = iree_allocator_system());
 
   iree_status_t Retire(loom_runtime_device_t* device,
@@ -62,9 +62,9 @@ struct loom_serve_test_embedding_model_lifecycle_t {
   // Optional live service advanced by this same serialized pool owner.
   loom_serve_service_t* service = nullptr;
   // Owned in-progress load, consumed at its terminal owner turn.
-  loom_serve_finite_load_t* load = nullptr;
+  loom_service_finite_load_t* load = nullptr;
   // Prepared model returned by loading, or owned model consumed by retirement.
-  loom_serve_finite_model_t* model = nullptr;
+  loom_service_finite_model_t* model = nullptr;
   // Copied terminal evidence, surviving failed or cancelled preparation.
   loom_runtime_compilation_report_t report = {};
   // Exclusive single-drainer process; asynchronous callbacks only wake it.
@@ -170,14 +170,14 @@ class SourceEmbeddingServiceTest : public ::testing::Test {
   // Explicit storage owner selected independently from execution placement.
   loom_runtime_pool_t* storage_owner_ = nullptr;
   // Shared source-JIT finite model.
-  loom_serve_finite_model_t* model_ = nullptr;
+  loom_service_finite_model_t* model_ = nullptr;
   // A second actual model retaining parameter capacity during the pressure
   // test.
-  loom_serve_finite_model_t* retained_ = nullptr;
+  loom_service_finite_model_t* retained_ = nullptr;
   // Source package directory, independent of temporary replacements.
   std::string directory_;
   // Production batched protocol service.
-  loom_serve_finite_service_t* service_ = nullptr;
+  loom_service_finite_service_t* service_ = nullptr;
   // Serialized callbacks used by both direct turns and the shared router.
   loom_serve_service_t interface_ = {};
   // Production loopback carrier, independent of scheduler turns.

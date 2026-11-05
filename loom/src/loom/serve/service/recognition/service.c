@@ -13,8 +13,9 @@
 #include "loom/serve/media/audio_decoder.h"
 #include "loom/serve/media/audio_resampler.h"
 #include "loom/serve/media/audio_source.h"
-#include "loom/serve/service/kind.h"
+#include "loom/serve/service/endpoint.h"
 #include "loom/serve/service/recognition/transcription.h"
+#include "loom/service/kind.h"
 #include "loom/service/telemetry/record.h"
 #include "loom/util/json.h"
 
@@ -730,13 +731,13 @@ loom_serve_service_t loom_serve_recognition_service_interface(
       .runtime = {.self = service,
                   .vtable = &vtable,
                   .capacity_domain = service->generator.capacity_domain},
-      .accept = service->options.kind == LOOM_SERVE_MODEL_KIND_RECOGNITION
+      .accept = service->options.kind == LOOM_SERVICE_KIND_RECOGNITION
                     ? loom_serve_transcription_accept
                     : NULL,
       .try_open_recognition = loom_serve_recognition_try_open,
       .tokenizer = service->generator.tokenizer,
       .kind = service->options.kind,
-      .endpoint = loom_serve_model_kind_endpoint(service->options.kind),
+      .endpoint = loom_serve_service_endpoint(service->options.kind),
       .capabilities = {.input_modalities = {IREE_ARRAYSIZE(input), input},
                        .output_modalities =
                            outputs[service->generator.outputs]},
@@ -769,20 +770,20 @@ iree_status_t loom_serve_recognition_service_allocate(
     loom_runtime_telemetry_stream_t* telemetry, iree_allocator_t host_allocator,
     loom_serve_recognition_service_t** out_service) {
   *out_service = NULL;
-  if (options->kind != LOOM_SERVE_MODEL_KIND_RECOGNITION &&
-      options->kind != LOOM_SERVE_MODEL_KIND_ACTIVITY) {
+  if (options->kind != LOOM_SERVICE_KIND_RECOGNITION &&
+      options->kind != LOOM_SERVICE_KIND_ACTIVITY) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "recognition owner requires recognition or "
                             "activity deployment kind");
   }
   const loom_serve_recognition_output_flags_t required =
-      options->kind == LOOM_SERVE_MODEL_KIND_RECOGNITION
+      options->kind == LOOM_SERVICE_KIND_RECOGNITION
           ? LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT
           : LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY;
   if (!(generator.outputs & required)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "source outputs do not support '%s' deployment",
-                            loom_serve_model_kind_name(options->kind));
+                            loom_service_kind_name(options->kind));
   }
   if (!options->name.size || !options->pending_capacity ||
       !options->decode_frames || !options->conversion_limit ||

@@ -7,11 +7,11 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_MEDIA_PROJECTOR_H_
 #define LOOM_SERVE_SERVICE_TEXT_MEDIA_PROJECTOR_H_
 
-#include "loom/serve/service/finite/model.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/text/input.h"
 #include "loom/serve/service/text/media_input.h"
 #include "loom/serve/service/text/readiness.h"
+#include "loom/service/finite/model.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -68,7 +68,7 @@ void loom_serve_text_media_request_free(
 // one larger checked projection is allowed alone. Prepared windows drain before
 // new decoding. CPU and producer readiness are independent of text's channels.
 iree_status_t loom_serve_text_media_projector_allocate(
-    loom_serve_finite_model_t* model, iree_host_size_t capacity,
+    loom_service_finite_model_t* model, iree_host_size_t capacity,
     iree_task_executor_t* executor, iree_async_proactor_t* proactor,
     loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_serve_text_media_projector_t** out_projector);

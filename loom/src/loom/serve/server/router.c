@@ -24,9 +24,9 @@
 #include "loom/serve/server/http/variants.h"
 #include "loom/serve/server/maintenance.h"
 #include "loom/serve/service/inspection.h"
-#include "loom/serve/service/kind.h"
 #include "loom/serve/service/reasoning.h"
 #include "loom/serve/transport/http/multipart.h"
+#include "loom/service/kind.h"
 #include "loom/service/telemetry/record.h"
 #include "loom/util/json.h"
 
@@ -619,8 +619,7 @@ static iree_status_t loom_serve_router_describe_service(
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(output, ",\"loom\":{\"kind\":"));
   IREE_RETURN_IF_ERROR(loom_serve_router_quote(
-      output,
-      iree_make_cstring_view(loom_serve_model_kind_name(service->kind))));
+      output, iree_make_cstring_view(loom_service_kind_name(service->kind))));
   if (service->endpoint) {
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(output, ",\"endpoint\":"));
@@ -1476,13 +1475,13 @@ static iree_status_t loom_serve_router_accept(
             IREE_SV("model has no HTTP inference endpoint"), output);
       }
       const bool voice_removal =
-          state->service.kind == LOOM_SERVE_MODEL_KIND_SPEECH &&
+          state->service.kind == LOOM_SERVICE_KIND_SPEECH &&
           iree_string_view_equal(request->target,
                                  IREE_SV("/v1/audio/voices/remove"));
       if (voice_removal ||
           (checkpoint && !post &&
-           (state->service.kind == LOOM_SERVE_MODEL_KIND_TEXT ||
-            state->service.kind == LOOM_SERVE_MODEL_KIND_SEQUENCE))) {
+           (state->service.kind == LOOM_SERVICE_KIND_TEXT ||
+            state->service.kind == LOOM_SERVICE_KIND_SEQUENCE))) {
         // Deletion releases retained state without opening inference. The
         // owning modality validates and retires its retained references.
         if (state->phase != LOOM_SERVE_REGISTRATION_READY) {
@@ -1507,7 +1506,7 @@ static iree_status_t loom_serve_router_accept(
             post && (iree_string_view_equal(
                          request->target,
                          iree_make_cstring_view(state->service.endpoint)) ||
-                     (state->service.kind == LOOM_SERVE_MODEL_KIND_SPEECH &&
+                     (state->service.kind == LOOM_SERVICE_KIND_SPEECH &&
                       iree_string_view_equal(request->target,
                                              IREE_SV("/v1/audio/voices"))));
         router->held.values[router->held.count++] =

@@ -3,7 +3,7 @@
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -19,4 +19,110 @@ loom_cc_library(
         "//loom/src/loom/service/telemetry:record",
         "//runtime/src/iree/base",
     ],
+)
+
+loom_cc_library(
+    name = "kind",
+    srcs = ["kind.c"],
+    hdrs = ["kind.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "kind_test",
+    srcs = ["kind_test.cc"],
+    deps = [
+        "//loom/src/loom/service:kind",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "prepared_request",
+    srcs = ["prepared_request.c"],
+    hdrs = ["prepared_request.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "reconfiguration",
+    hdrs = ["reconfiguration.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime/program:sources",
+        "//loom/src/loom/runtime/program:variant_pool",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "prepared_request_test",
+    srcs = ["prepared_request_test.cc"],
+    deps = [
+        "//loom/src/loom/service:prepared_request",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "execution_reconfiguration",
+    srcs = ["execution_reconfiguration.c"],
+    hdrs = ["execution_reconfiguration.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime:wake",
+        "//loom/src/loom/runtime/program:compilation",
+        "//loom/src/loom/runtime/program:sources",
+        "//loom/src/loom/runtime/program:variant_pool",
+        "//loom/src/loom/service:reconfiguration",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "executables",
+    srcs = ["executables.c"],
+    hdrs = ["executables.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c:task_pool",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/parameter:bank",
+        "//loom/src/loom/runtime/parameter:module",
+        "//loom/src/loom/runtime/parameter:residency",
+        "//loom/src/loom/runtime/parameter:sources",
+        "//loom/src/loom/runtime/parameter:weights",
+        "//loom/src/loom/runtime/program:compilation",
+        "//loom/src/loom/runtime/program:jit",
+        "//loom/src/loom/runtime/program:module",
+        "//loom/src/loom/runtime/program:parameter_layout",
+        "//loom/src/loom/runtime/program:preparation",
+        "//loom/src/loom/runtime/program:sources",
+        "//loom/src/loom/runtime/program:stage_set",
+        "//loom/src/loom/runtime/program:stage_table",
+        "//loom/src/loom/runtime/program:variant_pool",
+        "//loom/src/loom/runtime/storage:memory",
+        "//loom/src/loom/service:execution_reconfiguration",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+exports_files(
+    ["executables_test.cc"],
+    visibility = ["//visibility:public"],
 )

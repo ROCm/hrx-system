@@ -9,8 +9,8 @@
 #include <inttypes.h>
 
 #include "loom/runtime/telemetry/stream.h"
-#include "loom/serve/service/kind.h"
 #include "loom/serve/telemetry/sample.h"
+#include "loom/service/kind.h"
 #include "loom/service/telemetry/record.h"
 #include "loom/util/json.h"
 
@@ -159,7 +159,7 @@ static iree_status_t loom_serve_observation_model(
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, ",\"name_truncated\":%s,\"kind\":\"%s\",\"phase\":",
       service->name.size > 256 ? "true" : "false",
-      loom_serve_model_kind_name(service->kind)));
+      loom_service_kind_name(service->kind)));
   IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
       &stream, iree_make_cstring_view(snapshot.phase)));
   if (model->configuration.device.size) {

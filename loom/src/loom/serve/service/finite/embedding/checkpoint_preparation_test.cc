@@ -26,7 +26,7 @@ TEST_F(SourceEmbeddingServiceTest,
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
   loom_serve::testing::ModelDocument document;
   IREE_ASSERT_OK(document.Load(package + "/model.json"));
-  const loom_serve_finite_model_options_t options = {
+  const loom_service_finite_model_options_t options = {
       .sources = document.value().sources,
       .asset_directory = IREE_SV("."),
       .options = IREE_SV("{}"),
@@ -52,10 +52,10 @@ TEST_F(SourceEmbeddingServiceTest,
   // Loading indexes the checkpoint without activating it. First use doubles
   // the factor from 1.0 to 2.0 in place; later requests reuse that value.
   EXPECT_EQ(loom_runtime_residency_activity(
-                loom_serve_finite_model_residency(retained_))
+                loom_service_finite_model_residency(retained_))
                 .activations,
             0u);
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
   std::swap(model_, retained_);
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
   const int prepared = Send(R"({"model":"fixture","input":"a"})");
@@ -67,10 +67,10 @@ TEST_F(SourceEmbeddingServiceTest,
   ASSERT_NO_FATAL_FAILURE(Accept(changed));
   Drain();
   EXPECT_NE(Read(changed).find(R"("embedding":[12,6])"), std::string::npos);
-  EXPECT_EQ(
-      loom_runtime_residency_activity(loom_serve_finite_model_residency(model_))
-          .activations,
-      1u);
+  EXPECT_EQ(loom_runtime_residency_activity(
+                loom_service_finite_model_residency(model_))
+                .activations,
+            1u);
 }
 
 TEST_F(SourceEmbeddingServiceTest,
@@ -80,13 +80,13 @@ TEST_F(SourceEmbeddingServiceTest,
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
   retained_ = std::exchange(model_, nullptr);
   ASSERT_NO_FATAL_FAILURE(CreateModel(package));
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
   CheckAbandonedCohort(0, R"("embedding":[2,2,2,2])");
-  EXPECT_EQ(
-      loom_runtime_residency_activity(loom_serve_finite_model_residency(model_))
-          .activations,
-      1u);
+  EXPECT_EQ(loom_runtime_residency_activity(
+                loom_service_finite_model_residency(model_))
+                .activations,
+            1u);
 }
 
 TEST_F(SourceEmbeddingServiceTest,
@@ -96,12 +96,12 @@ TEST_F(SourceEmbeddingServiceTest,
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
   retained_ = std::exchange(model_, nullptr);
   ASSERT_NO_FATAL_FAILURE(CreateModel(package));
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
-  EXPECT_EQ(
-      loom_runtime_residency_activity(loom_serve_finite_model_residency(model_))
-          .activations,
-      0u);
+  EXPECT_EQ(loom_runtime_residency_activity(
+                loom_service_finite_model_residency(model_))
+                .activations,
+            0u);
   StartRouter();
   const auto control = [this](const char* target) {
     return Read(Send(R"({"model":"fixture"})", target));
@@ -156,10 +156,10 @@ TEST_F(SourceEmbeddingServiceTest,
   IREE_EXPECT_OK(http_.Join());
   // Reversible admission never evicted/reloaded the in-place prepared
   // parameter. Applying preparation twice would also change the exact output.
-  EXPECT_EQ(
-      loom_runtime_residency_activity(loom_serve_finite_model_residency(model_))
-          .activations,
-      1u);
+  EXPECT_EQ(loom_runtime_residency_activity(
+                loom_service_finite_model_residency(model_))
+                .activations,
+            1u);
 }
 
 }  // namespace loom_serve::testing::embedding

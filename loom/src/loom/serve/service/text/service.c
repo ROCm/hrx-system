@@ -15,8 +15,7 @@
 #include "loom/runtime/host/host.h"
 #include "loom/runtime/wake.h"
 #include "loom/serve/media/image_codec.h"
-#include "loom/serve/service/execution_reconfiguration.h"
-#include "loom/serve/service/kind.h"
+#include "loom/serve/service/endpoint.h"
 #include "loom/serve/service/text/admission.h"
 #include "loom/serve/service/text/chat.h"
 #include "loom/serve/service/text/checkpoint_http.h"
@@ -43,6 +42,8 @@
 #include "loom/serve/service/text/session.h"
 #include "loom/serve/service/text/session_cache.h"
 #include "loom/serve/service/text/telemetry.h"
+#include "loom/service/execution_reconfiguration.h"
+#include "loom/service/kind.h"
 #include "loom/service/telemetry/record.h"
 #include "loom/service/telemetry/tracing.h"
 
@@ -819,7 +820,7 @@ void loom_serve_text_service_free(loom_serve_text_service_t* service,
   loom_serve_text_capture_snapshot_release(service->capture);
   loom_serve_text_media_projector_free(service->projector);
   const iree_allocator_t host_allocator = service->host_allocator;
-  loom_serve_execution_reconfiguration_free(service->reconfiguration);
+  loom_service_execution_reconfiguration_free(service->reconfiguration);
   loom_serve_text_service_capacity_discard(service);
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
     loom_serve_text_session_deinitialize(service->sessions[i]);
@@ -949,7 +950,7 @@ iree_status_t loom_serve_text_service_allocate(
         loom_serve_text_service_initialize(service, options->row_count, stream);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_execution_reconfiguration_allocate(
+    status = loom_service_execution_reconfiguration_allocate(
         loom_serve_text_model_execution_update(model),
         options->variant_capacity, host_allocator, &service->reconfiguration);
   }
@@ -972,8 +973,8 @@ static void loom_serve_text_set_observer(
       observer.user_data);
   loom_serve_text_readiness_set_observer(&service->readiness, observer);
   loom_serve_text_media_projector_set_observer(service->projector, observer);
-  loom_serve_execution_reconfiguration_set_observer(service->reconfiguration,
-                                                    observer);
+  loom_service_execution_reconfiguration_set_observer(service->reconfiguration,
+                                                      observer);
   loom_runtime_residency_set_reclaimer(
       loom_serve_text_model_residency(service->model),
       observer.wake
@@ -1001,8 +1002,8 @@ static bool loom_serve_text_is_pending(void* self) {
          loom_serve_text_warmup_is_pending(
              loom_serve_text_model_warmup(service->model)) ||
          loom_serve_text_media_projector_is_pending(service->projector) ||
-         loom_serve_finite_component_is_pending(service->image) ||
-         loom_serve_execution_reconfiguration_pending(
+         loom_service_finite_component_is_pending(service->image) ||
+         loom_service_execution_reconfiguration_pending(
              service->reconfiguration) ||
          loom_serve_text_heartbeat_is_pending(&service->heartbeat);
 }
@@ -1144,7 +1145,7 @@ static iree_status_t loom_serve_text_advance_work(
     loom_serve_text_stop(service, iree_status_code(service->telemetry.failure));
     return iree_ok_status();
   }
-  *out_progress |= loom_serve_execution_reconfiguration_advance(
+  *out_progress |= loom_service_execution_reconfiguration_advance(
       service->reconfiguration, /*quiescent=*/true, /*stopping=*/false);
   // Release/suspend controls can free capacity for a stalled generation queue.
   // They run only after the previous epoch relinquishes its retained views.
@@ -1228,11 +1229,11 @@ static iree_status_t loom_serve_text_advance(void* self,
   if (service->stopping) {
     flags |= LOOM_RUNTIME_SERVICE_FLAG_STOPPING;
   }
-  const bool image_progress = loom_serve_finite_component_advance(
+  const bool image_progress = loom_service_finite_component_advance(
       service->image,
       iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
   const bool configuration_progress =
-      loom_serve_execution_reconfiguration_advance(
+      loom_service_execution_reconfiguration_advance(
           service->reconfiguration, /*quiescent=*/false,
           iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
   iree_status_t status = loom_serve_text_heartbeat_advance(
@@ -1469,11 +1470,9 @@ loom_serve_service_t loom_serve_text_service_interface(
       .try_open_text = encodes ? NULL : loom_serve_text_open,
       .try_open_text_checkpoint = loom_serve_text_open_checkpoint,
       .tokenizer = loom_serve_text_model_tokenizer(service->model),
-      .kind =
-          encodes ? LOOM_SERVE_MODEL_KIND_SEQUENCE : LOOM_SERVE_MODEL_KIND_TEXT,
-      .endpoint = loom_serve_model_kind_endpoint(
-          encodes ? LOOM_SERVE_MODEL_KIND_SEQUENCE
-                  : LOOM_SERVE_MODEL_KIND_TEXT),
+      .kind = encodes ? LOOM_SERVICE_KIND_SEQUENCE : LOOM_SERVICE_KIND_TEXT,
+      .endpoint = loom_serve_service_endpoint(
+          encodes ? LOOM_SERVICE_KIND_SEQUENCE : LOOM_SERVICE_KIND_TEXT),
       .capabilities =
           {.input_modalities = {images ? IREE_ARRAYSIZE(image_modalities)
                                        : IREE_ARRAYSIZE(modalities),
@@ -1493,7 +1492,7 @@ loom_serve_service_t loom_serve_text_service_interface(
       .snapshot = loom_serve_text_snapshot,
       .inspection = {.request_at = loom_serve_text_request_at,
                      .session_at = loom_serve_text_session_at},
-      .reconfiguration = loom_serve_execution_reconfiguration_interface(
+      .reconfiguration = loom_service_execution_reconfiguration_interface(
           service->reconfiguration),
       .telemetry = {.stream = service->telemetry.stream,
                     .counters = &service->telemetry.counters,

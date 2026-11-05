@@ -11,10 +11,10 @@
 #include "loom/runtime/execution/execution.h"
 #include "loom/runtime/parameter/activity.h"
 #include "loom/runtime/parameter/residency.h"
-#include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/image/request.h"
-#include "loom/serve/service/prepared_request.h"
+#include "loom/service/execution_reconfiguration.h"
 #include "loom/service/image/preparation.h"
+#include "loom/service/prepared_request.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -44,14 +44,15 @@ typedef struct loom_serve_image_generator_t {
   // does not capture executables, parameters, or an invocation.
   iree_status_t (*prepare)(void* self,
                            const loom_serve_image_request_t* request,
-                           loom_serve_prepared_request_t* out_prepared);
+                           loom_service_prepared_request_t* out_prepared);
   // Captures one cohort from compatible requests in stable client order.
   // Output lengths are the protocol-validated F32 CHW extents in that order.
   // The source packs one upload and command; failure retains no invocation.
-  iree_status_t (*prepare_batch)(void* self, iree_host_size_t count,
-                                 const loom_serve_prepared_request_t* requests,
-                                 const iree_host_size_t* output_lengths,
-                                 loom_service_image_prepared_t* out_prepared);
+  iree_status_t (*prepare_batch)(
+      void* self, iree_host_size_t count,
+      const loom_service_prepared_request_t* requests,
+      const iree_host_size_t* output_lengths,
+      loom_service_image_prepared_t* out_prepared);
   // Installs the serialized owner's nonblocking wake before preparation. The
   // owner detaches it only after every accepted compilation has retired.
   void (*set_observer)(void* self, loom_runtime_wake_callback_t observer);
@@ -88,7 +89,7 @@ typedef struct loom_serve_image_generator_t {
   // Optional independent execution compiler over retained preparation/state.
   // Selection affects subsequent preparations. An active request pins its
   // generation through all parts; CPU preparation serializes with selection.
-  loom_serve_execution_update_t execution_update;
+  loom_service_execution_update_t execution_update;
   // Optional immutable input tokenizer, live through the model lifetime. Raw
   // HTTP utilities borrow it independently of the serialized invocation.
   const iree_tokenizer_t* tokenizer;

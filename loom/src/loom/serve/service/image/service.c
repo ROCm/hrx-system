@@ -17,10 +17,11 @@
 #include "loom/runtime/host/timer.h"
 #include "loom/runtime/parameter/telemetry.h"
 #include "loom/runtime/wake.h"
-#include "loom/serve/service/execution_reconfiguration.h"
+#include "loom/serve/service/endpoint.h"
 #include "loom/serve/service/image/output.h"
-#include "loom/serve/service/kind.h"
+#include "loom/service/execution_reconfiguration.h"
 #include "loom/service/image/telemetry.h"
+#include "loom/service/kind.h"
 #include "loom/service/telemetry/record.h"
 #include "loom/service/telemetry/tracing.h"
 #include "loom/util/json.h"
@@ -37,7 +38,7 @@ typedef struct loom_serve_image_job_t {
   // Request work returned by CPU tasks through their existing release handoff.
   loom_service_image_work_t work;
   // Owned source bytes and compatibility facts, published by CPU preparation.
-  loom_serve_prepared_request_t prepared;
+  loom_service_prepared_request_t prepared;
   // Owned input rejection, published by CPU preparation.
   iree_status_t status;
   // Stable byte offset in the complete cohort RGB result.
@@ -71,7 +72,7 @@ struct loom_serve_image_service_t {
   // Borrowed, serialized native model invocation.
   loom_serve_image_generator_t generator;
   // Candidate ownership and pending selection, retired before the generator.
-  loom_serve_execution_reconfiguration_t* reconfiguration;
+  loom_service_execution_reconfiguration_t* reconfiguration;
   // Copied model geometry and policy; the route name is borrowed.
   loom_serve_image_service_options_t options;
   // Borrowed application executor, shared with JIT and all CPU/model work.
@@ -147,7 +148,7 @@ struct loom_serve_image_service_t {
     // Next terminal encoding slot; earlier jobs have already retired.
     iree_host_size_t next;
     // Borrowed prepared values, contiguous for source batch capture.
-    loom_serve_prepared_request_t* requests;
+    loom_service_prepared_request_t* requests;
     // Protocol-validated byte lengths in the same source packing order.
     iree_host_size_t* output_lengths;
     // Copied source selection, published by CPU batch capture.
@@ -1059,8 +1060,8 @@ static void loom_serve_image_set_observer(
   service->events.observer = observer;
   iree_slim_mutex_unlock(&service->events.mutex);
   loom_runtime_timer_set_observer(&service->timer, observer);
-  loom_serve_execution_reconfiguration_set_observer(service->reconfiguration,
-                                                    observer);
+  loom_service_execution_reconfiguration_set_observer(service->reconfiguration,
+                                                      observer);
   service->generator.set_observer(service->generator.self, observer);
 }
 
@@ -1085,7 +1086,7 @@ static bool loom_serve_image_is_pending(void* self) {
   return loom_serve_image_is_active(service) ||
          (service->generator.is_pending &&
           service->generator.is_pending(service->generator.self)) ||
-         loom_serve_execution_reconfiguration_pending(
+         loom_service_execution_reconfiguration_pending(
              service->reconfiguration) ||
          loom_runtime_timer_is_pending(&service->timer);
 }
@@ -1106,7 +1107,7 @@ static iree_status_t loom_serve_image_advance(
         service->status,
         service->generator.query_status(service->generator.self));
   }
-  *out_progress |= loom_serve_execution_reconfiguration_advance(
+  *out_progress |= loom_service_execution_reconfiguration_advance(
       service->reconfiguration,
       iree_status_is_ok(service->status) &&
           (service->phase == IMAGE_PHASE_IDLE ||
@@ -1211,15 +1212,15 @@ loom_serve_service_t loom_serve_image_service_interface(
                   .capacity_domain = service->generator.capacity_domain},
       .accept = loom_serve_image_accept,
       .tokenizer = service->generator.tokenizer,
-      .kind = LOOM_SERVE_MODEL_KIND_IMAGE,
-      .endpoint = loom_serve_model_kind_endpoint(LOOM_SERVE_MODEL_KIND_IMAGE),
+      .kind = LOOM_SERVICE_KIND_IMAGE,
+      .endpoint = loom_serve_service_endpoint(LOOM_SERVICE_KIND_IMAGE),
       .capabilities = {.input_modalities = {IREE_ARRAYSIZE(input_modalities),
                                             input_modalities},
                        .output_modalities = {IREE_ARRAYSIZE(output_modalities),
                                              output_modalities}},
       .snapshot = loom_serve_image_snapshot,
       .inspection = {.request_at = loom_serve_image_request_at},
-      .reconfiguration = loom_serve_execution_reconfiguration_interface(
+      .reconfiguration = loom_service_execution_reconfiguration_interface(
           service->reconfiguration),
       .telemetry = {.stream = service->telemetry.stream,
                     .counters = &service->telemetry.counters,
@@ -1242,7 +1243,7 @@ void loom_serve_image_service_free(loom_serve_image_service_t* service) {
                                          ? LOOM_SERVICE_TELEMETRY_FAILED
                                          : LOOM_SERVICE_TELEMETRY_CANCELLED);
   }
-  loom_serve_execution_reconfiguration_free(service->reconfiguration);
+  loom_service_execution_reconfiguration_free(service->reconfiguration);
   service->generator.set_observer(service->generator.self,
                                   (loom_runtime_wake_callback_t){0});
   loom_runtime_timer_deinitialize(&service->timer);
@@ -1275,7 +1276,7 @@ iree_status_t loom_serve_image_service_allocate(
       !options->height || !options->name.size || !options->pending_capacity ||
       options->heartbeat_interval < 0 ||
       options->pending_capacity >=
-          IREE_HOST_SIZE_MAX / sizeof(loom_serve_prepared_request_t)) {
+          IREE_HOST_SIZE_MAX / sizeof(loom_service_prepared_request_t)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "image service requires a generator, geometry, "
                             "name and queue capacity");
@@ -1314,7 +1315,7 @@ iree_status_t loom_serve_image_service_allocate(
                                     (void**)&service->cohort.output_lengths);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_execution_reconfiguration_allocate(
+    status = loom_service_execution_reconfiguration_allocate(
         generator.execution_update, options->variant_capacity, host_allocator,
         &service->reconfiguration);
   }

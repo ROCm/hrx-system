@@ -478,7 +478,7 @@ struct loom_serve_test_model_service_t {
                         .capacity_domain = capacity_domain},
             .accept = Accept,
             .tokenizer = tokenizer,
-            .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING,
+            .kind = LOOM_SERVICE_KIND_EMBEDDING,
             .endpoint = "/v1/test",
             .capabilities = {.reasoning = reasoning},
             .snapshot = Snapshot,

@@ -20,7 +20,7 @@
 #include "loom/runtime/program/program.h"
 #include "loom/runtime/program/stage_set.h"
 #include "loom/runtime/program/tokenizer_load.h"
-#include "loom/serve/service/executables.h"
+#include "loom/service/executables.h"
 #include "loomc/iree.h"
 
 struct loom_serve_image_model_t {
@@ -78,7 +78,7 @@ struct loom_serve_image_model_t {
   // Owned immutable indexes shared by resident and demand-read consumers.
   loom_runtime_parameter_sources_t* parameter_sources;
   // Shared source-generation and request-code ownership.
-  loom_serve_executables_t* executables;
+  loom_service_executables_t* executables;
   // Cold retained shapes sharing one parameter and issue-time buffer bank.
   struct {
     // Number of owned slots, including partially initialized slots on failure.
@@ -133,7 +133,7 @@ static void loom_serve_image_model_release_buffers(
 
 static void loom_serve_image_model_release_consumers(
     loom_serve_image_model_t* model) {
-  loom_serve_executables_retire(model->executables);
+  loom_service_executables_retire(model->executables);
   loom_runtime_program_free(model->control.program);
   model->control.program = NULL;
   iree_vm_module_release(model->control.runner);
@@ -151,7 +151,7 @@ void loom_serve_image_model_retire(loom_serve_image_model_t* model,
                                    void (*wake)(void* user_data),
                                    void* user_data) {
   if (model->executables) {
-    loom_serve_executables_set_observer(
+    loom_service_executables_set_observer(
         model->executables, (loom_runtime_wake_callback_t){wake, user_data});
   }
   if (model->execution) {
@@ -169,7 +169,7 @@ bool loom_serve_image_model_is_retired(loom_serve_image_model_t* model) {
   bool retired =
       !model->execution || loom_runtime_execution_is_retired(model->execution);
   retired &= loom_runtime_parameter_bank_is_retired(model->parameters);
-  retired &= loom_serve_executables_is_retired(model->executables);
+  retired &= loom_service_executables_is_retired(model->executables);
   return retired;
 }
 
@@ -183,7 +183,7 @@ static iree_status_t loom_serve_image_model_destroy_resources(
   loom_serve_image_model_release_consumers(model);
   loom_runtime_parameter_bank_retire(model->parameters, NULL, NULL);
   IREE_ASSERT(loom_serve_image_model_is_retired(model));
-  IREE_RETURN_IF_ERROR(loom_serve_executables_free(model->executables));
+  IREE_RETURN_IF_ERROR(loom_service_executables_free(model->executables));
   model->executables = NULL;
   loom_runtime_residency_free(model->residency);
   model->residency = NULL;
@@ -224,7 +224,7 @@ iree_status_t loom_serve_image_model_free(loom_serve_image_model_t* model) {
   status = iree_status_join(
       status, loom_runtime_parameter_bank_await_retirement(model->parameters));
   status = iree_status_join(
-      status, loom_serve_executables_await_retirement(model->executables));
+      status, loom_service_executables_await_retirement(model->executables));
   return iree_status_join(status,
                           loom_serve_image_model_destroy_resources(model));
 }
@@ -530,7 +530,7 @@ static iree_status_t loom_serve_image_model_link(
   IREE_RETURN_IF_ERROR(loom_runtime_residency_allocate(
       loom_runtime_pool_residency_cache(model->pool), model->execution,
       group ? 1 : 0, &group, host_allocator, &model->residency));
-  const loom_serve_executable_options_t options = {
+  const loom_service_executable_options_t options = {
       .device = model->owner,
       .pool = model->pool,
       .jit = model->jit,
@@ -554,12 +554,12 @@ static iree_status_t loom_serve_image_model_link(
       &options.recording, NULL, model->stages.count, model->stages.values,
       host_allocator, &model->stages.table));
   IREE_RETURN_IF_ERROR(loom_serve_image_create_control(model, module));
-  loom_serve_executable_options_t bound_options = options;
+  loom_service_executable_options_t bound_options = options;
   bound_options.stages = model->stages.table;
   bound_options.runner = model->control.runner;
   bound_options.parameter_module = model->control.parameters;
-  return loom_serve_executables_allocate(&bound_options, host_allocator,
-                                         &model->executables);
+  return loom_service_executables_allocate(&bound_options, host_allocator,
+                                           &model->executables);
 }
 
 typedef enum loom_serve_image_load_phase_e {
@@ -912,8 +912,8 @@ iree_string_view_t loom_serve_image_model_name(
 
 iree_status_t loom_serve_image_model_prepare_request(
     loom_serve_image_model_t* model, const loom_serve_image_request_t* request,
-    loom_serve_prepared_request_t* out_prepared) {
-  *out_prepared = (loom_serve_prepared_request_t){0};
+    loom_service_prepared_request_t* out_prepared) {
+  *out_prepared = (loom_service_prepared_request_t){0};
   const iree_string_view_t prompt = iree_string_builder_view(&request->prompt);
   const iree_string_view_t selections =
       iree_string_builder_view(&request->loras);
@@ -967,8 +967,8 @@ iree_status_t loom_serve_image_model_prepare_request(
   }
   if (iree_status_is_ok(status)) {
     iree_vm_buffer_retain(bytes);
-    *out_prepared =
-        (loom_serve_prepared_request_t){bytes, (uint64_t)units, (uint64_t)tag};
+    *out_prepared = (loom_service_prepared_request_t){bytes, (uint64_t)units,
+                                                      (uint64_t)tag};
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
@@ -977,10 +977,10 @@ iree_status_t loom_serve_image_model_prepare_request(
 
 static iree_status_t loom_serve_image_prepare_batch(
     loom_serve_image_model_t* model, iree_host_size_t count,
-    const loom_serve_prepared_request_t* requests, int64_t* out_tag) {
+    const loom_service_prepared_request_t* requests, int64_t* out_tag) {
   iree_vm_buffer_t* ranges = NULL;
   iree_vm_buffer_t* packed = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_prepared_requests_pack(
+  IREE_RETURN_IF_ERROR(loom_service_prepared_requests_pack(
       count, requests, model->host_allocator, &ranges, &packed));
   iree_vm_variant_t arguments[] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
@@ -1002,7 +1002,7 @@ static iree_status_t loom_serve_image_prepare_batch(
   const iree_host_size_t stage_count =
       model->stages.count +
       (declarations ? loom_runtime_preparation_stage_count(declarations) : 0);
-  loom_serve_executables_declare(model->executables, declarations);
+  loom_service_executables_declare(model->executables, declarations);
   int32_t selected = 0;
   if (iree_status_is_ok(status)) {
     status = iree_vm_i32_from_variant(results[0], &selected);
@@ -1041,8 +1041,8 @@ static iree_status_t loom_serve_image_prepare_batch(
 
 static iree_status_t loom_serve_image_model_submit_stage(
     loom_serve_image_model_t* model) {
-  const loom_runtime_stage_launch_t* stage =
-      loom_serve_executables_stage(model->executables, model->invocation.stage);
+  const loom_runtime_stage_launch_t* stage = loom_service_executables_stage(
+      model->executables, model->invocation.stage);
   iree_vm_variant_t arguments[] = {
       iree_vm_variant_from_i32((int32_t)stage->first_part),
       iree_vm_variant_from_i32((int32_t)stage->part_count),
@@ -1074,47 +1074,47 @@ iree_status_t loom_serve_image_model_activate(loom_serve_image_model_t* model) {
 
 iree_status_t loom_serve_image_model_deactivate(loom_serve_image_model_t* model,
                                                 bool* out_complete) {
-  return loom_serve_executables_deactivate(model->executables, out_complete);
+  return loom_service_executables_deactivate(model->executables, out_complete);
 }
 
 loom_runtime_residency_t* loom_serve_image_model_residency(
     const loom_serve_image_model_t* model) {
-  return loom_serve_executables_residency(model->executables);
+  return loom_service_executables_residency(model->executables);
 }
 
 loom_runtime_residency_snapshot_t loom_serve_image_model_parameters(
     const loom_serve_image_model_t* model) {
-  return loom_serve_executables_parameters(model->executables);
+  return loom_service_executables_parameters(model->executables);
 }
 
 void loom_serve_image_model_set_pinned(loom_serve_image_model_t* model,
                                        bool pinned) {
-  loom_serve_executables_set_pinned(model->executables, pinned);
+  loom_service_executables_set_pinned(model->executables, pinned);
 }
 
 iree_status_t loom_serve_image_model_query_status(
     loom_serve_image_model_t* model) {
-  return model ? loom_serve_executables_query_status(model->executables)
+  return model ? loom_service_executables_query_status(model->executables)
                : iree_ok_status();
 }
 
 bool loom_serve_image_model_is_pending(const loom_serve_image_model_t* model) {
-  return model && loom_serve_executables_is_pending(model->executables);
+  return model && loom_service_executables_is_pending(model->executables);
 }
 
 loom_runtime_storage_usage_t loom_serve_image_model_weight_statistics(
     const loom_serve_image_model_t* model) {
-  return loom_serve_executables_parameters(model->executables).memory;
+  return loom_service_executables_parameters(model->executables).memory;
 }
 
 loom_runtime_parameter_activity_t loom_serve_image_model_parameter_activity(
     const loom_serve_image_model_t* model) {
-  return loom_serve_executables_parameters(model->executables).activity;
+  return loom_service_executables_parameters(model->executables).activity;
 }
 
 iree_status_t loom_serve_image_model_prepare_batch(
     loom_serve_image_model_t* model, iree_host_size_t count,
-    const loom_serve_prepared_request_t* requests,
+    const loom_service_prepared_request_t* requests,
     const iree_host_size_t* output_lengths,
     loom_service_image_prepared_t* out_prepared) {
   *out_prepared = (loom_service_image_prepared_t){0};
@@ -1127,7 +1127,7 @@ iree_status_t loom_serve_image_model_prepare_batch(
     }
     output_length += output_lengths[i];
   }
-  loom_serve_executables_capture(model->executables);
+  loom_service_executables_capture(model->executables);
   int64_t tag = 0;
   iree_status_t status =
       loom_serve_image_prepare_batch(model, count, requests, &tag);
@@ -1154,20 +1154,20 @@ iree_status_t loom_serve_image_model_prepare_batch(
 }
 
 void loom_serve_image_model_discard_batch(loom_serve_image_model_t* model) {
-  loom_serve_executables_release(model->executables);
+  loom_service_executables_release(model->executables);
   iree_vm_buffer_release(model->invocation.payload);
   model->invocation.payload = NULL;
 }
 
 void loom_serve_image_model_set_observer(
     loom_serve_image_model_t* model, loom_runtime_wake_callback_t observer) {
-  loom_serve_executables_set_observer(model->executables, observer);
+  loom_service_executables_set_observer(model->executables, observer);
 }
 
 static iree_status_t loom_serve_image_bind_parameters(
     loom_serve_image_model_t* model) {
   const iree_const_byte_span_t offsets =
-      loom_serve_executables_parameter_offsets(model->executables);
+      loom_service_executables_parameter_offsets(model->executables);
   if (!offsets.data_length) {
     return iree_ok_status();
   }
@@ -1193,11 +1193,11 @@ static iree_status_t loom_serve_image_bind_parameters(
 
 iree_status_t loom_serve_image_model_advance_batch(
     loom_serve_image_model_t* model, bool cancel, bool* out_complete) {
-  IREE_RETURN_IF_ERROR(
-      loom_serve_executables_advance(model->executables, cancel, out_complete));
+  IREE_RETURN_IF_ERROR(loom_service_executables_advance(model->executables,
+                                                        cancel, out_complete));
   if (!cancel && *out_complete) {
     IREE_RETURN_IF_ERROR(loom_serve_image_bind_parameters(model));
-    const loom_runtime_stage_launch_t* stage = loom_serve_executables_stage(
+    const loom_runtime_stage_launch_t* stage = loom_service_executables_stage(
         model->executables, model->invocation.stage);
     const iree_device_size_t alignment =
         iree_max(stage->transient.minimum_alignment, 1);
@@ -1231,8 +1231,8 @@ iree_status_t loom_serve_image_model_advance_batch(
     // and feedback retirement. Its storage and all split command parts share
     // one private high-water until that collection releases the admission pin.
     IREE_RETURN_IF_ERROR(loom_runtime_residency_prepare_working_set(
-        loom_serve_executables_residency(model->executables), invocation_bytes,
-        0));
+        loom_service_executables_residency(model->executables),
+        invocation_bytes, 0));
     // Register geometry for every member of this allocation transaction so
     // they can occupy one backing range without sharing their lifetimes.
     return loom_runtime_execution_reserve_workspace(
@@ -1318,8 +1318,8 @@ iree_const_byte_span_t loom_serve_image_model_complete(
   iree_vm_buffer_release(model->invocation.payload);
   model->invocation.payload = NULL;
   loom_runtime_residency_release(
-      loom_serve_executables_residency(model->executables));
-  loom_serve_executables_release(model->executables);
+      loom_service_executables_residency(model->executables));
+  loom_service_executables_release(model->executables);
   return iree_make_const_byte_span(model->output.data,
                                    model->output.data_length);
 }
@@ -1330,7 +1330,7 @@ iree_status_t loom_serve_image_model_generate(
     iree_const_byte_span_t* out_rgb) {
   *out_rgb = iree_const_byte_span_empty();
   *out_prepared = (loom_service_image_prepared_t){0};
-  loom_serve_prepared_request_t prepared_request = {0};
+  loom_service_prepared_request_t prepared_request = {0};
   IREE_RETURN_IF_ERROR(loom_serve_image_model_prepare_request(
       model, request, &prepared_request));
   const iree_host_size_t output_length =
@@ -1359,7 +1359,7 @@ iree_status_t loom_serve_image_model_generate(
   iree_notification_deinitialize(&notification);
   if (iree_status_is_ok(status)) {
     status = loom_runtime_residency_acquire_wait(
-        loom_serve_executables_residency(model->executables));
+        loom_service_executables_residency(model->executables));
   }
   if (!iree_status_is_ok(status)) {
     loom_serve_image_model_discard_batch(model);
@@ -1400,13 +1400,13 @@ static iree_status_t loom_serve_image_generator_admit(
 
 static iree_status_t loom_serve_image_generator_prepare(
     void* self, const loom_serve_image_request_t* request,
-    loom_serve_prepared_request_t* out_prepared) {
+    loom_service_prepared_request_t* out_prepared) {
   return loom_serve_image_model_prepare_request(self, request, out_prepared);
 }
 
 static iree_status_t loom_serve_image_generator_prepare_batch(
     void* self, iree_host_size_t count,
-    const loom_serve_prepared_request_t* requests,
+    const loom_service_prepared_request_t* requests,
     const iree_host_size_t* output_lengths,
     loom_service_image_prepared_t* out_prepared) {
   return loom_serve_image_model_prepare_batch(self, count, requests,
@@ -1468,7 +1468,7 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
       .parameter_activity = loom_serve_image_generator_parameter_activity,
       .query_status = loom_serve_image_generator_query_status,
       .is_pending = loom_serve_image_generator_is_pending,
-      .execution_update = loom_serve_executables_update(model->executables),
+      .execution_update = loom_service_executables_update(model->executables),
       .tokenizer = loom_runtime_tokenizer_value(model->tokenizer),
       .capacity_domain = loom_runtime_residency_cache(model->residency)};
 }

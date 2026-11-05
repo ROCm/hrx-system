@@ -266,7 +266,7 @@ TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
   const loom_runtime_pool_binding_t pool = {IREE_SV("pool"), 1};
   const loom_serve_registration_factory_t factory = {
       .self = &service,
-      .kinds = 1u << LOOM_SERVE_MODEL_KIND_EMBEDDING,
+      .kinds = 1u << LOOM_SERVICE_KIND_EMBEDDING,
       .device_names = {1, &device_name},
       .pool_count = 1,
       .pools = &pool,

@@ -22,9 +22,9 @@ static void loom_serve_text_reconfiguration_dispose(void* value) {
   loom_serve_text_variant_free(value);
 }
 
-loom_serve_execution_update_t loom_serve_text_model_execution_update(
+loom_service_execution_update_t loom_serve_text_model_execution_update(
     loom_serve_text_model_t* model) {
-  return (loom_serve_execution_update_t){
+  return (loom_service_execution_update_t){
       .self = model,
       .compile = loom_serve_text_reconfiguration_compile,
       .select = loom_serve_text_reconfiguration_select,

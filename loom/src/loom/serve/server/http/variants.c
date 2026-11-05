@@ -302,7 +302,7 @@ static iree_status_t loom_serve_http_variant_write(
 static iree_status_t loom_serve_http_variant_response(
     loom_serve_http_variants_t* variants,
     loom_serve_http_connection_t* connection,
-    const loom_serve_reconfiguration_t* configuration,
+    const loom_service_reconfiguration_t* configuration,
     loom_runtime_variant_id_t id, int code, iree_string_builder_t* scratch) {
   loom_runtime_variant_snapshot_t snapshot;
   if (!loom_runtime_variant_pool_snapshot(configuration->pool, id, &snapshot)) {
@@ -379,7 +379,7 @@ static iree_status_t loom_serve_http_variant_inventory(
   }
   const loom_serve_registered_model_t* model =
       loom_serve_registry_at(variants->registry, index);
-  const loom_serve_reconfiguration_t* configuration =
+  const loom_service_reconfiguration_t* configuration =
       &model->service.reconfiguration;
   if (id) {
     return loom_serve_http_variant_response(variants, connection, configuration,
@@ -529,7 +529,7 @@ iree_status_t loom_serve_http_variants_accept(
     status = iree_allocator_malloc(variants->host_allocator, sizeof(*wait),
                                    (void**)&wait);
   }
-  loom_serve_reconfiguration_t configuration = {0};
+  loom_service_reconfiguration_t configuration = {0};
   loom_runtime_variant_id_t id = input.id;
   if (iree_status_is_ok(status)) {
     const loom_serve_registered_model_t* model =
@@ -637,7 +637,7 @@ iree_status_t loom_serve_http_variants_advance(
       }
       iree_status_free(wait->selection.status);
     } else if (wait->connection) {
-      const loom_serve_reconfiguration_t* configuration =
+      const loom_service_reconfiguration_t* configuration =
           &model->service.reconfiguration;
       loom_runtime_variant_snapshot_t snapshot;
       if (model->incarnation != wait->incarnation || model->removal ||

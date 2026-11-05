@@ -33,7 +33,7 @@ struct loom_serve_test_registration_dependency_t {
       .hold_completion = true,
   };
   // Immutable deployment role supplied by the real configuration parser.
-  loom_serve_model_kind_t kind = LOOM_SERVE_MODEL_KIND_EMBEDDING;
+  loom_service_kind_t kind = LOOM_SERVICE_KIND_EMBEDDING;
   // Model-protocol counters supplied by the dependency, not synthesized by
   // routing.
   loom_service_telemetry_counters_t counters = {};
@@ -139,7 +139,7 @@ struct loom_serve_test_registration_dependency_t {
     *service =
         dependency->service.Interface(nullptr, dependency->capacity_domain);
     service->kind = dependency->kind;
-    if (service->kind == LOOM_SERVE_MODEL_KIND_ACTIVITY) {
+    if (service->kind == LOOM_SERVICE_KIND_ACTIVITY) {
       service->endpoint = nullptr;
       service->accept = nullptr;
     }
@@ -333,9 +333,9 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
     managed_capacity_ = 1;
     factory_ = {
         .self = &managed_,
-        .kinds = (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
-                 (1u << LOOM_SERVE_MODEL_KIND_TEXT) |
-                 (1u << LOOM_SERVE_MODEL_KIND_ACTIVITY),
+        .kinds = (1u << LOOM_SERVICE_KIND_EMBEDDING) |
+                 (1u << LOOM_SERVICE_KIND_TEXT) |
+                 (1u << LOOM_SERVICE_KIND_ACTIVITY),
         .device_names = {1, kDeviceNames},
         .pool_count = 1,
         .pools = kPools,

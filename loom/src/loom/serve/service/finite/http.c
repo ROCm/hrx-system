@@ -5,9 +5,10 @@
 
 #include "loom/serve/service/finite/http.h"
 
-#include "loom/serve/service/kind.h"
+#include "loom/serve/service/endpoint.h"
 #include "loom/serve/transport/http/request.h"
 #include "loom/serve/transport/http/server.h"
+#include "loom/service/kind.h"
 #include "loom/util/json.h"
 
 static iree_status_t loom_serve_finite_http_begin(iree_string_builder_t* output,
@@ -75,8 +76,8 @@ static iree_status_t loom_serve_finite_http_reject(
 }
 
 static iree_status_t loom_serve_finite_http_encode(
-    void* self, const loom_serve_finite_protocol_t* protocol,
-    const loom_serve_finite_request_t* request, iree_string_view_t name,
+    void* self, const loom_service_finite_protocol_t* protocol,
+    const loom_service_finite_request_t* request, iree_string_view_t name,
     const iree_const_byte_span_t* rows, uint64_t input_tokens,
     iree_string_builder_t* output) {
   IREE_RETURN_IF_ERROR(loom_serve_finite_http_begin(output, "200 OK"));
@@ -84,7 +85,7 @@ static iree_status_t loom_serve_finite_http_encode(
 }
 
 static iree_status_t loom_serve_finite_http_end(
-    void* self, const loom_serve_finite_protocol_t* protocol,
+    void* self, const loom_service_finite_protocol_t* protocol,
     const iree_status_t status, bool rejected, iree_string_builder_t* output,
     bool* out_delivered) {
   *out_delivered = false;
@@ -98,7 +99,7 @@ static iree_status_t loom_serve_finite_http_end(
                                        out_delivered);
   }
   // System One uses 422 for invalid decision inputs; embeddings uses 400.
-  const char* invalid_status = protocol->kind == LOOM_SERVE_MODEL_KIND_DECISION
+  const char* invalid_status = protocol->kind == LOOM_SERVICE_KIND_DECISION
                                    ? "422 Unprocessable Entity"
                                    : "400 Bad Request";
   const char* code = iree_status_is_resource_exhausted(status)
@@ -115,25 +116,26 @@ static iree_status_t loom_serve_finite_http_end(
       message, output, out_delivered);
 }
 
-static loom_serve_finite_consumer_t loom_serve_finite_http_consumer(
+static loom_service_finite_consumer_t loom_serve_finite_http_consumer(
     loom_serve_http_connection_t* connection) {
-  static const loom_serve_finite_consumer_vtable_t vtable = {
+  static const loom_service_finite_consumer_vtable_t vtable = {
       .is_open = loom_serve_finite_http_open,
       .cancel = loom_serve_finite_http_cancel,
       .encode = loom_serve_finite_http_encode,
       .end = loom_serve_finite_http_end,
   };
-  return (loom_serve_finite_consumer_t){.self = connection, .vtable = &vtable};
+  return (loom_service_finite_consumer_t){.self = connection,
+                                          .vtable = &vtable};
 }
 
 static void loom_serve_finite_http_decline(
-    loom_serve_finite_service_t* service, iree_time_t arrival_time,
+    loom_service_finite_service_t* service, iree_time_t arrival_time,
     loom_serve_http_connection_t* connection, iree_string_view_t response) {
   bool delivered = false;
   iree_status_t status =
       loom_serve_finite_http_send(connection, response, &delivered);
-  loom_serve_finite_service_record_decline(service, arrival_time, delivered,
-                                           status);
+  loom_service_finite_service_record_decline(service, arrival_time, delivered,
+                                             status);
   iree_status_free(status);
 }
 
@@ -141,13 +143,12 @@ static iree_status_t loom_serve_finite_http_accept(
     void* self, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request,
     loom_runtime_service_flags_t flags) {
-  loom_serve_finite_service_t* service = self;
+  loom_service_finite_service_t* service = self;
   const iree_time_t arrival_time = iree_time_now();
   if (!iree_string_view_equal(request->method, IREE_SV("POST")) ||
       !iree_string_view_equal(
-          request->target,
-          iree_make_cstring_view(loom_serve_model_kind_endpoint(
-              loom_serve_finite_service_kind(service))))) {
+          request->target, iree_make_cstring_view(loom_serve_service_endpoint(
+                               loom_service_finite_service_kind(service))))) {
     loom_serve_finite_http_decline(
         service, arrival_time, connection,
         IREE_SV("HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n"
@@ -172,13 +173,13 @@ static iree_status_t loom_serve_finite_http_accept(
     return iree_ok_status();
   }
   bool accepted = false;
-  iree_status_t status = loom_serve_finite_service_try_accept(
+  iree_status_t status = loom_service_finite_service_try_accept(
       service, request->body, arrival_time,
       loom_serve_finite_http_consumer(connection), &accepted);
   if (!iree_status_is_ok(status)) {
     loom_serve_http_connection_abort(connection);
-    loom_serve_finite_service_record_decline(service, arrival_time, false,
-                                             status);
+    loom_service_finite_service_record_decline(service, arrival_time, false,
+                                               status);
     return status;
   }
   if (!accepted) {
@@ -193,9 +194,9 @@ static iree_status_t loom_serve_finite_http_accept(
 }
 
 loom_serve_service_t loom_serve_finite_http_interface(
-    loom_serve_finite_service_t* service) {
-  const loom_serve_finite_service_interface_t finite =
-      loom_serve_finite_service_interface(service);
+    loom_service_finite_service_t* service) {
+  const loom_service_finite_service_interface_t finite =
+      loom_service_finite_service_interface(service);
   static const iree_string_view_t input_modalities[] = {IREE_SVL("text")};
   return (loom_serve_service_t){
       .name = finite.name,
@@ -203,7 +204,7 @@ loom_serve_service_t loom_serve_finite_http_interface(
       .accept = loom_serve_finite_http_accept,
       .tokenizer = finite.tokenizer,
       .kind = finite.kind,
-      .endpoint = loom_serve_model_kind_endpoint(finite.kind),
+      .endpoint = loom_serve_service_endpoint(finite.kind),
       .capabilities = {.input_modalities = {IREE_ARRAYSIZE(input_modalities),
                                             input_modalities},
                        .output_modalities = {1, finite.output_modality}},

@@ -201,7 +201,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
                               loom_service_image_prepared_t* out_prepared) {
     ImageRequest input;
     IREE_RETURN_IF_ERROR(input.Initialize(body, width, height));
-    loom_serve_prepared_request_t request = {};
+    loom_service_prepared_request_t request = {};
     IREE_RETURN_IF_ERROR(
         loom_serve_image_model_prepare_request(model_, &input.value, &request));
     const iree_host_size_t output_length =
@@ -1738,7 +1738,7 @@ class ImageSpecializationTest : public SourceImageServiceTest {
         }
       }
       // Independent CPU payloads retained until the batch captures its copy.
-      std::array<loom_serve_prepared_request_t, 2> requests = {};
+      std::array<loom_service_prepared_request_t, 2> requests = {};
     } prepared;
     IREE_ASSERT_OK(loom_serve_image_model_prepare_request(
         model_, &inputs[0].value, &prepared.requests[0]));
@@ -1753,7 +1753,7 @@ class ImageSpecializationTest : public SourceImageServiceTest {
       ImageRequest input;
       IREE_ASSERT_OK(
           input.Initialize(iree_make_cstring_view(body), kWidth, kHeight));
-      loom_serve_prepared_request_t rejected = {};
+      loom_service_prepared_request_t rejected = {};
       IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                             loom_serve_image_model_prepare_request(
                                 model_, &input.value, &rejected));

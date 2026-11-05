@@ -232,7 +232,7 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
 // Returns source work/compatibility facts and owned bytes, or zeros on failure.
 iree_status_t loom_serve_image_model_prepare_request(
     loom_serve_image_model_t* model, const loom_serve_image_request_t* request,
-    loom_serve_prepared_request_t* out_prepared);
+    loom_service_prepared_request_t* out_prepared);
 
 // CPU-only preparation of one compatible cohort in stable client order. The
 // caller supplies protocol-validated F32 RGB byte lengths in the same order.
@@ -241,7 +241,7 @@ iree_status_t loom_serve_image_model_prepare_request(
 // Prepared request bytes remain caller-owned and can be released on return.
 iree_status_t loom_serve_image_model_prepare_batch(
     loom_serve_image_model_t* model, iree_host_size_t count,
-    const loom_serve_prepared_request_t* requests,
+    const loom_service_prepared_request_t* requests,
     const iree_host_size_t* output_lengths,
     loom_service_image_prepared_t* out_prepared);
 

@@ -370,7 +370,7 @@ class ReconfigurationTextServiceTest : public SourceTextServiceTest {
   // Borrowed owner callbacks, invoked without a concurrent router owner.
   loom_serve_service_t interface_ = {};
   // Borrowed modality policy; its pool has no preferred-choice field.
-  loom_serve_reconfiguration_t configuration_ = {};
+  loom_service_reconfiguration_t configuration_ = {};
   // Initially preferred executable identity, used for explicit rollback.
   loom_runtime_variant_id_t original_ = 0;
   // Owner-thread terminal selection delivery, alive through TearDown.

@@ -206,7 +206,7 @@ TEST_F(ConfigurationTest, SpeechOwnsAssetsAndSourceOptions) {
   IREE_ASSERT_OK(Parse(Document(
       "speech",
       R"(,"assets":"voices","pending_requests":4,"options":{"voice":"alba"})")));
-  EXPECT_EQ(model_.kind, LOOM_SERVE_MODEL_KIND_SPEECH);
+  EXPECT_EQ(model_.kind, LOOM_SERVICE_KIND_SPEECH);
   EXPECT_EQ(String(model_.assets), "voices");
   EXPECT_EQ(model_.pending_requests, 4u);
   EXPECT_EQ(model_.variant_capacity, 0u);
@@ -229,7 +229,7 @@ TEST_F(ConfigurationTest, SequenceRequiresWeightsButNoTokenizerOrSampler) {
   IREE_ASSERT_OK(Parse(Document(
       "sequence",
       R"(,"weights":"model.irpa","rows":4,"context_capacity":96,"prefill_capacity":32,"checkpoint_capacity":4,"session_cache_capacity":1)")));
-  EXPECT_EQ(model_.kind, LOOM_SERVE_MODEL_KIND_SEQUENCE);
+  EXPECT_EQ(model_.kind, LOOM_SERVICE_KIND_SEQUENCE);
   EXPECT_EQ(String(model_.text.weights), "model.irpa");
   EXPECT_EQ(model_.text.tokenizer.size, 0u);
   EXPECT_EQ(model_.text.max_tokens, 0u);
@@ -282,8 +282,8 @@ TEST_F(ConfigurationTest, ContinuingRecognitionOwnsAssetsAndSourceOptions) {
         kind,
         R"(,"assets":"checkpoint","pending_requests":4,"options":{"context_frames":4096})")));
     EXPECT_EQ(model_.kind, std::string(kind) == "recognition"
-                               ? LOOM_SERVE_MODEL_KIND_RECOGNITION
-                               : LOOM_SERVE_MODEL_KIND_ACTIVITY);
+                               ? LOOM_SERVICE_KIND_RECOGNITION
+                               : LOOM_SERVICE_KIND_ACTIVITY);
     EXPECT_EQ(String(model_.assets), "checkpoint");
     EXPECT_EQ(model_.pending_requests, 4u);
     EXPECT_EQ(model_.variant_capacity, 0u);
@@ -657,7 +657,7 @@ TEST_F(ConfigurationTest, MissingDefinitionNamesTheRequiredObject) {
 TEST_F(ConfigurationTest,
        TextDefaultsAndSpecializationsRemainModelIndependent) {
   IREE_ASSERT_OK(Parse(Text()));
-  EXPECT_EQ(model_.kind, LOOM_SERVE_MODEL_KIND_TEXT);
+  EXPECT_EQ(model_.kind, LOOM_SERVICE_KIND_TEXT);
   EXPECT_EQ(model_.text.rows, 4u);
   EXPECT_EQ(model_.text.max_sessions, 0u);
   EXPECT_EQ(model_.variant_capacity, 16u);
@@ -810,7 +810,7 @@ TEST_F(ConfigurationTest, CardPresetMayBoundSessionsWithoutInitialRows) {
 
 TEST_F(ConfigurationTest, ImageDefaultsAndSpecializations) {
   IREE_ASSERT_OK(Parse(Image()));
-  EXPECT_EQ(model_.kind, LOOM_SERVE_MODEL_KIND_IMAGE);
+  EXPECT_EQ(model_.kind, LOOM_SERVICE_KIND_IMAGE);
   EXPECT_EQ(model_.image.width, 384u);
   EXPECT_EQ(model_.image.height, 384u);
   EXPECT_EQ(model_.image.text_tokens, 512u);

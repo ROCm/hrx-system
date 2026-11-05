@@ -9,7 +9,7 @@
 #include <inttypes.h>
 
 #include "loom/runtime/telemetry/sample.h"
-#include "loom/serve/service/kind.h"
+#include "loom/service/kind.h"
 #include "loom/service/telemetry/latency.h"
 #include "loom/service/telemetry/record.h"
 
@@ -59,8 +59,7 @@ static iree_status_t loom_serve_http_metrics_identity(
   IREE_RETURN_IF_ERROR(loom_serve_http_metrics_label(output, service->name));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, ",kind="));
   IREE_RETURN_IF_ERROR(loom_serve_http_metrics_label(
-      output,
-      iree_make_cstring_view(loom_serve_model_kind_name(service->kind))));
+      output, iree_make_cstring_view(loom_service_kind_name(service->kind))));
   if (model->incarnation) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         output, ",incarnation=\"%" PRIu64 "\"", model->incarnation));

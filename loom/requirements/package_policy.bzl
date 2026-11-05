@@ -50,6 +50,10 @@ PACKAGE_POLICIES = [
         ],
     ),
     package_policy(
+        packages = ["loom/src/loom/service/..."],
+        forbidden_deps = ["//loom/src/loom/serve/..."],
+    ),
+    package_policy(
         packages = ["loom/binding/c/target/spirv/vulkan/..."],
         build_requirements = [ARCH_SPIRV, VULKAN_API],
     ),

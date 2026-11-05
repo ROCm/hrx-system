@@ -6,8 +6,8 @@
 #ifndef LOOM_SERVE_SERVICE_FINITE_HTTP_H_
 #define LOOM_SERVE_SERVICE_FINITE_HTTP_H_
 
-#include "loom/serve/service/finite/service.h"
 #include "loom/serve/service/service.h"
+#include "loom/service/finite/service.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +18,7 @@ extern "C" {
 // owned by its registration; accepted connections retain their input through
 // the same source/CPU retirement as native requests.
 loom_serve_service_t loom_serve_finite_http_interface(
-    loom_serve_finite_service_t* service);
+    loom_service_finite_service_t* service);
 
 #ifdef __cplusplus
 }  // extern "C"

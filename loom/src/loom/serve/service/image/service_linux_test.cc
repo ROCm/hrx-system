@@ -81,7 +81,7 @@ struct loom_serve_test_image_gate_t {
   }
   static iree_status_t Prepare(void* self,
                                const loom_serve_image_request_t* request,
-                               loom_serve_prepared_request_t* out_prepared) {
+                               loom_service_prepared_request_t* out_prepared) {
     *out_prepared = {.units = 1, .tag = 17};
     IREE_RETURN_IF_ERROR(iree_vm_buffer_create(16, 8, iree_allocator_system(),
                                                &out_prepared->bytes));
@@ -91,7 +91,7 @@ struct loom_serve_test_image_gate_t {
   }
   static iree_status_t PrepareBatch(
       void* self, iree_host_size_t count,
-      const loom_serve_prepared_request_t* requests, const iree_host_size_t*,
+      const loom_service_prepared_request_t* requests, const iree_host_size_t*,
       loom_service_image_prepared_t* out_prepared) {
     EXPECT_EQ(count, 1u);
     static_cast<loom_serve_test_image_gate_t*>(self)->admission_available =

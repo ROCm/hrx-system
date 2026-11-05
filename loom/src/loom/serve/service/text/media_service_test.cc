@@ -9,8 +9,8 @@
 #include <cstring>
 
 #include "loom/serve/media/image_codec.h"
-#include "loom/serve/service/finite/component.h"
 #include "loom/serve/service/text/service_test_fixture.h"
+#include "loom/service/finite/component.h"
 
 namespace {
 
@@ -27,7 +27,7 @@ class MediaServiceTest : public SourceTextServiceTest {
     const char* source = std::getenv("LOOM_SERVE_TEST_PROJECTOR_SOURCE");
     ASSERT_NE(source, nullptr);
     IREE_ASSERT_OK(projector_document_.Load(source));
-    const loom_serve_finite_model_options_t options = {
+    const loom_service_finite_model_options_t options = {
         .sources = projector_document_.value().sources,
         .asset_directory = IREE_SV("."),
         .options = ProjectorOptions(),
@@ -40,7 +40,7 @@ class MediaServiceTest : public SourceTextServiceTest {
         },
         loom_serve_http_server_notification(server_),
     };
-    IREE_ASSERT_OK(loom_serve_finite_component_allocate(
+    IREE_ASSERT_OK(loom_service_finite_component_allocate(
         device_, storage_owner_, &options, observer, host_allocator_, &image_));
     auto service_options = ServiceOptions();
     service_options.image = image_;
@@ -63,7 +63,7 @@ class MediaServiceTest : public SourceTextServiceTest {
       bool complete = false;
       while (!complete) {
         const auto ticket = iree_notification_prepare_wait(notification);
-        auto status = loom_serve_finite_component_retire(image_, &complete);
+        auto status = loom_service_finite_component_retire(image_, &complete);
         if (complete || !iree_status_is_ok(status)) {
           iree_notification_cancel_wait(notification);
           IREE_ASSERT_OK(status);
@@ -73,7 +73,7 @@ class MediaServiceTest : public SourceTextServiceTest {
                                         IREE_TIME_INFINITE_FUTURE);
         }
       }
-      loom_serve_finite_component_free(image_);
+      loom_service_finite_component_free(image_);
     }
     SourceTextServiceTest::TearDown();
   }
@@ -155,7 +155,7 @@ class MediaServiceTest : public SourceTextServiceTest {
   // Source documents outlive lazy preparation and final component retirement.
   loom_serve::testing::ModelDocument projector_document_;
   // Independent optional image computation on the actual text device.
-  loom_serve_finite_component_t* image_ = nullptr;
+  loom_service_finite_component_t* image_ = nullptr;
   // Serialized production HTTP owner, including its native projection window.
   loom_serve_text_service_t* service_ = nullptr;
   // Borrowed callbacks driven on the ordinary shared executor.
@@ -353,9 +353,9 @@ TEST_F(FailedMediaServiceTest, ComponentFailureRejectsImagesButPreservesText) {
     }
   }
   EXPECT_EQ(Content(Read(clients[2])), Oracle::Complete("abxa", 4));
-  EXPECT_EQ(loom_serve_finite_component_phase(image_),
-            enabled ? LOOM_SERVE_FINITE_COMPONENT_FAILED
-                    : LOOM_SERVE_FINITE_COMPONENT_DECLARED);
+  EXPECT_EQ(loom_service_finite_component_phase(image_),
+            enabled ? LOOM_SERVICE_FINITE_COMPONENT_FAILED
+                    : LOOM_SERVICE_FINITE_COMPONENT_DECLARED);
   EXPECT_EQ(interface_.telemetry.counters->rejected, 2u);
   EXPECT_EQ(interface_.telemetry.counters->completed, 1u);
   EXPECT_EQ(interface_.telemetry.counters->failed, 0u);
@@ -579,8 +579,8 @@ TEST_F(MediaServiceTest, CrossRequestImagesConditionTextAndRetainedFollowup) {
     EXPECT_EQ(Read(clients[0]).find("HTTP/1.1 501"), 0u);
     EXPECT_EQ(Read(clients[1]).find("HTTP/1.1 501"), 0u);
     EXPECT_EQ(Content(Read(clients[2])), Oracle::Complete("abxa", 4));
-    EXPECT_EQ(loom_serve_finite_component_phase(image_),
-              LOOM_SERVE_FINITE_COMPONENT_DECLARED);
+    EXPECT_EQ(loom_service_finite_component_phase(image_),
+              LOOM_SERVICE_FINITE_COMPONENT_DECLARED);
     return;
   }
   // The projector incorporates the whole cohort width into its first feature.
@@ -597,7 +597,7 @@ TEST_F(MediaServiceTest, CrossRequestImagesConditionTextAndRetainedFollowup) {
   EXPECT_EQ(first_response, Complete(first_oracle, 4));
   EXPECT_EQ(Content(Read(clients[1])), Complete(second_oracle, 4));
   EXPECT_EQ(Content(Read(clients[2])), Oracle::Complete("abxa", 4));
-  const auto report = *loom_serve_finite_component_report(image_);
+  const auto report = *loom_service_finite_component_report(image_);
   const int followup =
       Send(Request(first + "," + Message("assistant", first_response) + "," +
                        Message("user", "x"),
@@ -611,7 +611,7 @@ TEST_F(MediaServiceTest, CrossRequestImagesConditionTextAndRetainedFollowup) {
   EXPECT_EQ(Content(response), Complete(first_oracle, 4));
   EXPECT_EQ(response.find("\"cached_tokens\":0"), std::string::npos)
       << response;
-  EXPECT_EQ(loom_serve_finite_component_report(image_)->commands,
+  EXPECT_EQ(loom_service_finite_component_report(image_)->commands,
             report.commands);
   EXPECT_EQ(interface_.telemetry.counters->completed, 4u);
   EXPECT_EQ(interface_.telemetry.counters->rejected, 0u);

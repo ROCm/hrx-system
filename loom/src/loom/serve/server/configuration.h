@@ -10,7 +10,7 @@
 #include "loom/runtime/device/pool.h"
 #include "loom/runtime/program/sources.h"
 #include "loom/runtime/program/variant_pool.h"
-#include "loom/serve/service/kind.h"
+#include "loom/service/kind.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -98,7 +98,7 @@ typedef struct loom_serve_model_configuration_t {
   // Allocator owning decoded strings, retained when this declaration is moved.
   iree_allocator_t host_allocator;
   // Selects the native modality contract and the configuration union member.
-  loom_serve_model_kind_t kind;
+  loom_service_kind_t kind;
   // Owned visible ASCII identifier used in JSON and HTTP header selectors.
   iree_string_view_t name;
   // Owned machine-local device key; empty until singleton admission resolves

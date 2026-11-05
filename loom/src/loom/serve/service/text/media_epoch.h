@@ -66,7 +66,7 @@ typedef struct loom_serve_text_media_epoch_t {
     // Coalesced device feature copies; source control uploads are independent.
     iree_host_size_t operation_count;
     // Borrowed producer results for intersecting images.
-    const loom_serve_finite_result_t** results;
+    const loom_service_finite_result_t** results;
     // Number of populated producer references, not projected rows.
     iree_host_size_t result_count;
   } transfer;
