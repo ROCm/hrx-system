@@ -903,7 +903,7 @@ class Translator final : private Initialization::Evaluation {
     if (!destruction) {
       return value;
     }
-    IREE_ASSERT(!full_expression_marks_.empty());
+    IREE_ASSERT(full_expression_mark_);
     temporary_destructions_.push_back({
         .destruction = *destruction,
         .object_type = expression->type,
@@ -914,26 +914,30 @@ class Translator final : private Initialization::Evaluation {
     return value;
   }
 
-  size_t begin_full_expression() override {
-    auto mark = temporary_destructions_.size();
-    full_expression_marks_.push_back(mark);
-    return mark;
+  FullExpression begin_full_expression() override {
+    FullExpression expression = {
+        .mark = temporary_destructions_.size(),
+        .parent_mark = full_expression_mark_,
+    };
+    full_expression_mark_ = expression.mark;
+    return expression;
   }
 
-  void finish_full_expression(size_t mark) override {
-    IREE_ASSERT(!full_expression_marks_.empty());
-    IREE_ASSERT_EQ(full_expression_marks_.back(), mark);
-    IREE_ASSERT_LE(mark, temporary_destructions_.size());
-    for (size_t index = temporary_destructions_.size(); index > mark; --index) {
+  void finish_full_expression(FullExpression expression) override {
+    IREE_ASSERT(full_expression_mark_);
+    IREE_ASSERT_EQ(*full_expression_mark_, expression.mark);
+    IREE_ASSERT_LE(expression.mark, temporary_destructions_.size());
+    for (size_t index = temporary_destructions_.size(); index > expression.mark;
+         --index) {
       emit_destruction(temporary_destructions_[index - 1]);
     }
-    temporary_destructions_.resize(mark);
-    full_expression_marks_.pop_back();
+    temporary_destructions_.resize(expression.mark);
+    full_expression_mark_ = expression.parent_mark;
   }
 
   bool adopt_temporary(Value value) {
-    IREE_ASSERT(!full_expression_marks_.empty());
-    auto mark = full_expression_marks_.back();
+    IREE_ASSERT(full_expression_mark_);
+    auto mark = *full_expression_mark_;
     for (size_t index = temporary_destructions_.size(); index > mark; --index) {
       auto& action = temporary_destructions_[index - 1];
       if (action.identity && same_value(*action.identity, value)) {
@@ -955,8 +959,8 @@ class Translator final : private Initialization::Evaluation {
 
   StorageProjection materialize_temporary(cxx::ExpressionAST* expression,
                                           Value value) {
-    IREE_ASSERT(!full_expression_marks_.empty());
-    auto mark = full_expression_marks_.back();
+    IREE_ASSERT(full_expression_mark_);
+    auto mark = *full_expression_mark_;
     for (size_t index = temporary_destructions_.size(); index > mark; --index) {
       auto& action = temporary_destructions_[index - 1];
       if (!action.identity || !same_value(*action.identity, value)) {
@@ -1215,7 +1219,7 @@ class Translator final : private Initialization::Evaluation {
     locals_.clear();
     active_destructions_.clear();
     temporary_destructions_.clear();
-    full_expression_marks_.clear();
+    full_expression_mark_.reset();
     conditional_cleanup_anchors_.clear();
     extend_temporary_lifetime_ = false;
     break_destruction_marks_.clear();
@@ -6625,8 +6629,9 @@ class Translator final : private Initialization::Evaluation {
   // completes. Result-object transfer removes only the selected final value;
   // side temporaries retain reverse construction order.
   std::vector<DestructionAction> temporary_destructions_;
-  // Nested full expressions retain the temporary prefix owned by their parent.
-  std::vector<size_t> full_expression_marks_;
+  // Temporary prefix owned by the current full expression. Lexical caller
+  // tokens retain parent marks without a heap-backed translator stack.
+  std::optional<size_t> full_expression_mark_;
   // Structured conditional expressions hoist branch-only temporary storage
   // before the outermost conditional operation so cleanup remains dominated.
   std::vector<loom_op_t*> conditional_cleanup_anchors_;
