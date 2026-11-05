@@ -152,6 +152,28 @@ TEST_F(BytecodeLocationTest, IndexesExactEntryRanges) {
   EXPECT_EQ(error_count_, 0u);
 }
 
+TEST_F(BytecodeLocationTest, RejectsCountBeforeRetainingEntryRanges) {
+  const uint8_t data[] = {
+      0x02,                // Two locations.
+      LOOM_LOCATION_NONE,  // Only one complete minimum record.
+      0x00,
+  };
+  const loom_bytecode_reader_section_t section =
+      MakeSection(data, sizeof(data));
+  loom_bytecode_table_entry_metadata_t* entries = nullptr;
+  iree_host_size_t count = 0;
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DEFERRED,
+      loom_bytecode_location_table_index(&decoder_, &module_view_, &section,
+                                         &retained_arena_, &entries, &count));
+
+  EXPECT_EQ(error_count_, 1u);
+  EXPECT_EQ(retained_arena_.used_allocation_size, 0u);
+  EXPECT_EQ(entries, nullptr);
+  EXPECT_EQ(count, 0u);
+}
+
 TEST_F(BytecodeLocationTest, MaterializesCoordinateBeyondCompactRange) {
   const uint8_t data[] = {
       0x02,                // Location count.

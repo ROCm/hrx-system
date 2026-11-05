@@ -196,11 +196,14 @@ static iree_status_t loom_bytecode_read_complete_type(
   }
   loom_bytecode_structural_type_plan_t plan = {0};
   loom_bytecode_structural_type_fact_t fact = {0};
+  uint64_t dependency_count_offset = kind_offset;
   fact.base.kind = kind;
   switch (kind) {
     case LOOM_TYPE_FUNCTION: {
       uint64_t argument_count = 0;
       uint64_t result_count = 0;
+      dependency_count_offset =
+          loom_bytecode_reader_cursor_absolute_position(cursor);
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
           materializer->decoder, cursor, &argument_count));
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
@@ -222,6 +225,8 @@ static iree_status_t loom_bytecode_read_complete_type(
       uint64_t parameter_count = 0;
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
           materializer->decoder, cursor, &name_id));
+      dependency_count_offset =
+          loom_bytecode_reader_cursor_absolute_position(cursor);
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
           materializer->decoder, cursor, &parameter_count));
       if (name_id >=
@@ -253,6 +258,11 @@ static iree_status_t loom_bytecode_read_complete_type(
       return loom_bytecode_complete_type_invalid(
           materializer, cursor, IREE_SV("invalid_scoped_type_kind"));
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      materializer->decoder, cursor, IREE_SV("scoped_type_children"),
+      plan.dependency_count,
+      /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0,
+      dependency_count_offset));
   loom_type_id_t* children = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       materializer->scratch_arena, plan.dependency_count, sizeof(*children),

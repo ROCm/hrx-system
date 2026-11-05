@@ -179,6 +179,45 @@ TEST_F(BytecodeEncodingValidatorTest, IndexesExactInstanceRange) {
   EXPECT_EQ(error_count_, 0u);
 }
 
+TEST_F(BytecodeEncodingValidatorTest, RejectsFamilyCountBeforeRetainingIds) {
+  const uint8_t data[] = {
+      0x02,  // Two families.
+      0x00,  // Only the required instance-count byte remains.
+  };
+  const loom_bytecode_reader_section_t section =
+      MakeSection(data, sizeof(data));
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
+                        loom_bytecode_encoding_table_validate(
+                            &decoder_, &context_, &module_view_,
+                            &scratch_arena_, &types_, &section));
+
+  EXPECT_EQ(error_count_, 1u);
+  EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+}
+
+TEST_F(BytecodeEncodingValidatorTest, RejectsInstanceCountBeforeIndexing) {
+  const uint8_t data[] = {
+      0x00,  // No families.
+      0x02,  // Two instances with no records.
+  };
+  const loom_bytecode_reader_section_t section =
+      MakeSection(data, sizeof(data));
+  loom_bytecode_encoding_metadata_t* entries = nullptr;
+  iree_host_size_t count = 0;
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DEFERRED,
+      loom_bytecode_encoding_table_index(&decoder_, &context_, &module_view_,
+                                         &scratch_arena_, &types_, &section,
+                                         &retained_arena_, &entries, &count));
+
+  EXPECT_EQ(error_count_, 1u);
+  EXPECT_EQ(retained_arena_.used_allocation_size, 0u);
+  EXPECT_EQ(entries, nullptr);
+  EXPECT_EQ(count, 0u);
+}
+
 TEST_F(BytecodeEncodingValidatorTest, IndexesMixedTypeAndEncodingPrefixes) {
   const uint8_t type_data[] = {
       3,

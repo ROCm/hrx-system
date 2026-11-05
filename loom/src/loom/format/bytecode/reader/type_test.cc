@@ -225,6 +225,78 @@ class BytecodeTypeTest : public ::testing::Test {
   loom_module_t* module_ = nullptr;
 };
 
+TEST_F(BytecodeTypeTest, RejectsCountBeforeRetainingPlan) {
+  const uint8_t data[] = {
+      0x02,                     // Two types.
+      LOOM_BYTECODE_TYPE_NONE,  // Only one minimum record.
+  };
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED, BuildPlan(data, sizeof(data)));
+
+  EXPECT_EQ(error_count_, 1u);
+  EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+}
+
+TEST_F(BytecodeTypeTest, RejectsFunctionChildCountBeforeRetainingFact) {
+  const uint8_t data[] = {
+      LOOM_BYTECODE_TYPE_FUNCTION,
+      0x02,  // Two arguments.
+      0x00,  // No results or child references.
+  };
+  loom_bytecode_type_plan_entry_t entry = {};
+  loom_bytecode_type_fact_t* fact = nullptr;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
+                        DecodeEntry(/*type_index=*/0, data, sizeof(data),
+                                    /*absolute_offset=*/0, &entry, &fact));
+
+  EXPECT_EQ(error_count_, 1u);
+  EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+  EXPECT_EQ(fact, nullptr);
+}
+
+TEST_F(BytecodeTypeTest, RejectsDialectChildCountBeforeRetainingFact) {
+  iree_string_view_t strings[] = {IREE_SV("example.wrapper")};
+  module_view_.strings.values = strings;
+  module_view_.strings.count = IREE_ARRAYSIZE(strings);
+  const uint8_t data[] = {
+      LOOM_BYTECODE_TYPE_DIALECT,
+      0x00,  // Type name.
+      0x02,  // Two parameters with no references.
+  };
+  loom_bytecode_type_plan_entry_t entry = {};
+  loom_bytecode_type_fact_t* fact = nullptr;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
+                        DecodeEntry(/*type_index=*/0, data, sizeof(data),
+                                    /*absolute_offset=*/0, &entry, &fact));
+
+  EXPECT_EQ(error_count_, 1u);
+  EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+  EXPECT_EQ(fact, nullptr);
+}
+
+TEST_F(BytecodeTypeTest, RejectsParameterizedCountBeforeRetainingFact) {
+  iree_string_view_t strings[] = {IREE_SV("wire.parameters")};
+  module_view_.strings.values = strings;
+  module_view_.strings.count = IREE_ARRAYSIZE(strings);
+  const uint8_t data[] = {
+      LOOM_BYTECODE_TYPE_PARAMETERIZED,
+      0x00,  // Family name.
+      0x02,  // Two parameters with no records.
+  };
+  loom_bytecode_type_plan_entry_t entry = {};
+  loom_bytecode_type_fact_t* fact = nullptr;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
+                        DecodeEntry(/*type_index=*/0, data, sizeof(data),
+                                    /*absolute_offset=*/0, &entry, &fact));
+
+  EXPECT_EQ(error_count_, 1u);
+  EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+  EXPECT_EQ(fact, nullptr);
+}
+
 TEST_F(BytecodeTypeTest, BuildsAndMaterializesTopologicalPlan) {
   const uint8_t data[] = {
       0x03,

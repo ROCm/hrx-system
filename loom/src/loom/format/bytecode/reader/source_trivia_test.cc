@@ -74,6 +74,23 @@ TEST_F(BytecodeSourceTriviaTest, MaterializationPublishesConcreteTrivia) {
   EXPECT_EQ(error_count_, 0u);
 }
 
+TEST_F(BytecodeSourceTriviaTest, RejectsCountBeforeRetainingComments) {
+  const uint8_t data[] = {0x04};  // Two comments with no length records.
+  loom_bytecode_reader_cursor_t cursor;
+  loom_bytecode_reader_cursor_initialize(data, sizeof(data), 8192,
+                                         IREE_SV("TEST"), &cursor);
+  loom_bytecode_source_trivia_t source_trivia = {};
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
+                        loom_bytecode_source_trivia_materialize(
+                            &decoder_, &cursor, &arena_, &source_trivia));
+
+  EXPECT_EQ(error_count_, 1u);
+  EXPECT_EQ(arena_.used_allocation_size, 0u);
+  EXPECT_EQ(source_trivia.comments, nullptr);
+  EXPECT_EQ(source_trivia.comment_count, 0u);
+}
+
 TEST_F(BytecodeSourceTriviaTest, MaterializationNormalizesCommentPrefix) {
   const uint8_t data[] = {0x02, 0x04, ' ', 'o', 'n', 'e'};
   loom_bytecode_reader_cursor_t cursor;

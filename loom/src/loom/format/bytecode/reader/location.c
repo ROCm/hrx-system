@@ -46,6 +46,9 @@ static iree_status_t loom_bytecode_location_table_begin(
         validator->decoder, IREE_SV("LOCATIONS"), count,
         LOOM_BYTECODE_MAX_LOCATION_COUNT, count_offset);
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      validator->decoder, &table.cursor, IREE_SV("LOCATIONS"), count,
+      /*minimum_entry_length=*/2, /*minimum_trailing_length=*/0, count_offset));
   table.count = (iree_host_size_t)count;
   validator->module_view->locations.count = table.count;
   *out_table = table;

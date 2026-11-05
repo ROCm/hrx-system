@@ -78,6 +78,33 @@ static iree_status_t DeferDiagnostic(void* user_data,
   return iree_status_from_code(IREE_STATUS_DEFERRED);
 }
 
+class ObservedBytecodeArena {
+ public:
+  explicit ObservedBytecodeArena(iree_host_size_t block_size) {
+    iree_arena_block_pool_initialize(block_size, {this, Allocate}, &block_pool);
+  }
+  ~ObservedBytecodeArena() { iree_arena_block_pool_deinitialize(&block_pool); }
+
+  // Largest backing allocation requested by bytecode reader scratch storage.
+  iree_host_size_t largest_allocation = 0;
+  // Reader scratch block pool using the observed backing allocator.
+  iree_arena_block_pool_t block_pool = {};
+
+ private:
+  static iree_status_t Allocate(void* self, iree_allocator_command_t command,
+                                const void* parameters, void** pointer) {
+    auto* observer = static_cast<ObservedBytecodeArena*>(self);
+    if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+      const auto* allocation =
+          static_cast<const iree_allocator_alloc_params_t*>(parameters);
+      observer->largest_allocation =
+          iree_max(observer->largest_allocation, allocation->byte_length);
+    }
+    const iree_allocator_t system = iree_allocator_system();
+    return system.ctl(system.self, command, parameters, pointer);
+  }
+};
+
 static iree_status_t VerifyMaterializedModule(
     bool verify_module, const loom_bytecode_read_options_t& read_options,
     loom_bytecode_read_result_t* read_result, loom_module_t** inout_module) {
@@ -131,6 +158,19 @@ class ReaderTest : public ::testing::Test {
     size_t nested_dict_first_value_kind = 0;
     // Byte offset of the second key inside the nested dict value.
     size_t nested_dict_second_key = 0;
+  };
+
+  struct BodyOpCountOffsets {
+    // Byte offset of the operation operand count.
+    size_t operand_count = 0;
+    // Byte offset of the operation successor count.
+    size_t successor_count = 0;
+    // Byte offset of the operation result count.
+    size_t result_count = 0;
+    // Byte offset of the operation tied-result count.
+    size_t tied_result_count = 0;
+    // Byte offset of the operation nested-region count.
+    size_t region_count = 0;
   };
 
   struct AttributeValueOffsets {
@@ -1614,6 +1654,67 @@ class ReaderTest : public ::testing::Test {
     return module;
   }
 
+  loom_module_t* CreateWideBodyOpModule() {
+    loom_module_t* module = CreateModule("reader_wide_body_op");
+    loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+    IREE_CHECK_OK(loom_module_intern_type(module, i32, &i32));
+
+    loom_builder_t module_builder;
+    loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                            &module_builder);
+    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(
+        loom_builder_intern_string(&module_builder, IREE_SV("wide"), &name_id));
+    uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
+    const loom_symbol_ref_t symbol = {
+        .module_id = 0,
+        .symbol_id = symbol_id,
+    };
+    loom_type_t argument_types[17];
+    loom_type_t result_types[17];
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(argument_types); ++i) {
+      argument_types[i] = i32;
+      result_types[i] = i32;
+    }
+    loom_op_t* func_op = nullptr;
+    IREE_CHECK_OK(loom_test_func_build(
+        &module_builder, /*build_flags=*/0, /*visibility=*/0, /*cc=*/0, symbol,
+        argument_types, IREE_ARRAYSIZE(argument_types),
+        /*result_types=*/nullptr,
+        /*result_count=*/0, /*result_dims=*/nullptr, /*result_dim_count=*/0,
+        /*result_encodings=*/nullptr, /*result_encoding_count=*/0,
+        LOOM_LOCATION_UNKNOWN, &func_op));
+
+    loom_func_like_t function = loom_func_like_cast(module, func_op);
+    uint16_t argument_count = 0;
+    const loom_value_id_t* arguments =
+        loom_func_like_arg_ids(function, &argument_count);
+    if (argument_count != IREE_ARRAYSIZE(argument_types)) {
+      ADD_FAILURE() << "expected 17 wide function arguments";
+      return module;
+    }
+    loom_builder_t body_builder;
+    loom_builder_initialize(
+        module, &module->arena,
+        loom_region_entry_block(loom_func_like_body(function)), &body_builder);
+    loom_op_t* assume_op = nullptr;
+    IREE_CHECK_OK(loom_test_assume_build(
+        &body_builder, arguments, argument_count, /*predicates=*/nullptr,
+        /*predicates_count=*/0, result_types, IREE_ARRAYSIZE(result_types),
+        LOOM_LOCATION_UNKNOWN, &assume_op));
+    const loom_value_slice_t results = loom_test_assume_results(assume_op);
+    loom_op_t* use_op = nullptr;
+    IREE_CHECK_OK(loom_test_use_build(&body_builder, results.values,
+                                      results.count, LOOM_LOCATION_UNKNOWN,
+                                      &use_op));
+    loom_op_t* yield_op = nullptr;
+    IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
+                                        /*value_count=*/0,
+                                        LOOM_LOCATION_UNKNOWN, &yield_op));
+    return module;
+  }
+
   std::vector<uint8_t> WriteModule(
       const loom_module_t* module,
       const loom_bytecode_write_options_t* options = nullptr) {
@@ -2299,6 +2400,12 @@ class ReaderTest : public ::testing::Test {
     return offset;
   }
 
+  size_t RootRegionBlockCountOffset(const std::vector<uint8_t>& bytes) {
+    size_t offset = RootRegionSourceFlagsOffset(bytes);
+    ReadUVarint(bytes, &offset);  // region source_flags
+    return offset;
+  }
+
   size_t RootBlockSourceTriviaOffset(const std::vector<uint8_t>& bytes) {
     size_t offset = RootRegionSourceFlagsOffset(bytes);
     ReadUVarint(bytes, &offset);                 // region source_flags
@@ -2359,6 +2466,51 @@ class ReaderTest : public ::testing::Test {
     uint64_t operand_count = ReadUVarint(bytes, &offset);
     EXPECT_GE(operand_count, 1u);
     return offset;
+  }
+
+  BodyOpCountOffsets FirstFixedBodyOpCountOffsets(
+      const std::vector<uint8_t>& bytes) {
+    uint64_t arg_count = 0;
+    size_t offset = RootBlockValueListOffset(bytes, &arg_count);
+    for (uint64_t i = 0; i < arg_count; ++i) {
+      ReadValueDefOffsets(bytes, &offset);
+    }
+    EXPECT_GE(ReadUVarint(bytes, &offset), 1u);  // op_count
+    ReadUVarint(bytes, &offset);                 // op_table_index_plus1
+    ++offset;                                    // flags
+    ReadUVarint(bytes, &offset);                 // location_id
+    SkipSourceTrivia(bytes, &offset);
+
+    BodyOpCountOffsets count_offsets;
+    count_offsets.operand_count = offset;
+    const uint64_t operand_count = ReadUVarint(bytes, &offset);
+    for (uint64_t i = 0; i < operand_count; ++i) {
+      ReadUVarint(bytes, &offset);
+    }
+    count_offsets.successor_count = offset;
+    const uint64_t successor_count = ReadUVarint(bytes, &offset);
+    for (uint64_t i = 0; i < successor_count; ++i) {
+      ReadUVarint(bytes, &offset);
+    }
+    count_offsets.result_count = offset;
+    const uint64_t result_count = ReadUVarint(bytes, &offset);
+    for (uint64_t i = 0; i < result_count; ++i) {
+      ReadValueDefOffsets(bytes, &offset);
+    }
+    count_offsets.tied_result_count = offset;
+    const uint64_t tied_result_count = ReadUVarint(bytes, &offset);
+    for (uint64_t i = 0; i < tied_result_count; ++i) {
+      ReadUVarint(bytes, &offset);
+      ReadUVarint(bytes, &offset);
+    }
+    const uint64_t attr_count = ReadUVarint(bytes, &offset);
+    for (uint64_t i = 0; i < attr_count; ++i) {
+      ReadUVarint(bytes, &offset);  // key_id
+      const uint8_t kind = bytes[offset++];
+      SkipAttributeValue(bytes, &offset, kind);
+    }
+    count_offsets.region_count = offset;
+    return count_offsets;
   }
 
   size_t FirstBodyOpTableIndexOffset(const std::vector<uint8_t>& bytes) {
@@ -2673,6 +2825,49 @@ class ReaderTest : public ::testing::Test {
     EXPECT_EQ(error_ids.front(), expected_error_id);
   }
 
+  iree_host_size_t ReadModuleLargestArenaAllocation(
+      const std::vector<uint8_t>& bytes) {
+    ObservedBytecodeArena storage(4096);
+    std::vector<std::string> error_ids;
+    loom_bytecode_read_result_t result = {0};
+    const loom_bytecode_read_options_t options = {
+        .diagnostic_sink = {CaptureDiagnostic, &error_ids},
+    };
+    loom_module_t* module = nullptr;
+    IREE_EXPECT_OK(loom_bytecode_read_module(
+        iree_make_const_byte_span(bytes.data(), bytes.size()),
+        IREE_SV("test.loombc"), &context_, &storage.block_pool, &options,
+        &result, &module, iree_allocator_system()));
+
+    EXPECT_EQ(result.error_count, 0u);
+    EXPECT_TRUE(error_ids.empty());
+    EXPECT_NE(module, nullptr);
+    loom_module_free(module);
+    return storage.largest_allocation;
+  }
+
+  void ExpectReadModuleCountErrorWithoutAllocationGrowth(
+      const std::vector<uint8_t>& bytes,
+      iree_host_size_t valid_largest_allocation) {
+    ObservedBytecodeArena storage(4096);
+    std::vector<std::string> error_ids;
+    loom_bytecode_read_result_t result = {0};
+    const loom_bytecode_read_options_t options = {
+        .diagnostic_sink = {CaptureDiagnostic, &error_ids},
+    };
+    loom_module_t* module = nullptr;
+    IREE_ASSERT_OK(loom_bytecode_read_module(
+        iree_make_const_byte_span(bytes.data(), bytes.size()),
+        IREE_SV("test.loombc"), &context_, &storage.block_pool, &options,
+        &result, &module, iree_allocator_system()));
+
+    EXPECT_EQ(result.error_count, 1u);
+    EXPECT_EQ(error_ids, (std::vector<std::string>{"ERR_BYTECODE_009"}));
+    EXPECT_EQ(module, nullptr);
+    EXPECT_LE(storage.largest_allocation, valid_largest_allocation);
+    loom_module_free(module);
+  }
+
   void ExpectCanonicalBytecodeRoundTrip(loom_module_t* module) {
     auto first = WriteModule(module);
     loom_module_t* read_module = nullptr;
@@ -2707,6 +2902,82 @@ TEST_F(ReaderTest, AcceptsEmptyModuleMetadata) {
   EXPECT_EQ(result.first_module.string_count, 2u);
   EXPECT_EQ(result.first_module.symbol_count, 0u);
 
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsImpossibleModuleCountBeforeScratchAllocation) {
+  std::vector<uint8_t> bytes(24, 0);
+  std::memcpy(bytes.data(), LOOM_BYTECODE_MAGIC, LOOM_BYTECODE_MAGIC_LENGTH);
+  bytes[4] = LOOM_BYTECODE_FORMAT_VERSION;
+  bytes[5] = LOOM_BYTECODE_LOCATION_MODE_SOURCE_LOCATIONS;
+  bytes[6] = 0xFF;
+  bytes[7] = 0xFF;
+
+  ObservedBytecodeArena storage(4096);
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result = {0};
+  const loom_bytecode_index_options_t options = {
+      .diagnostic_sink = {CaptureDiagnostic, &error_ids},
+  };
+  IREE_ASSERT_OK(loom_bytecode_read_metadata(
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("test.loombc"), &context_, &storage.block_pool, &options,
+      &result));
+
+  EXPECT_EQ(result.error_count, 1u);
+  EXPECT_EQ(error_ids, (std::vector<std::string>{"ERR_BYTECODE_009"}));
+  EXPECT_LE(storage.largest_allocation, 4096u);
+}
+
+TEST_F(ReaderTest, RejectsImpossibleSectionCountBeforeScratchAllocation) {
+  loom_module_t* module = CreateModule("empty");
+  auto bytes = WriteModule(module);
+  bytes[(size_t)ModuleOffset(bytes)] = 127;
+
+  ObservedBytecodeArena storage(4096);
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result = {0};
+  const loom_bytecode_index_options_t options = {
+      .diagnostic_sink = {CaptureDiagnostic, &error_ids},
+  };
+  IREE_ASSERT_OK(loom_bytecode_read_metadata(
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("test.loombc"), &context_, &storage.block_pool, &options,
+      &result));
+
+  EXPECT_EQ(result.error_count, 1u);
+  EXPECT_EQ(error_ids, (std::vector<std::string>{"ERR_BYTECODE_009"}));
+  EXPECT_LE(storage.largest_allocation, 4096u);
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsLargeSymbolCountBeforeScratchAllocation) {
+  loom_module_t* module = CreateModule("empty");
+  auto bytes = WriteModule(module);
+  const SectionEntry symbols =
+      FindSection(bytes, LOOM_BYTECODE_SECTION_SYMBOLS);
+  ASSERT_GE(symbols.length, 4u);
+  const size_t symbols_offset =
+      (size_t)ModuleOffset(bytes) + (size_t)symbols.offset;
+  bytes[symbols_offset + 0] = 0xFF;
+  bytes[symbols_offset + 1] = 0xFF;
+  bytes[symbols_offset + 2] = 0x03;  // 65,535 symbols.
+  bytes[symbols_offset + 3] = 0x00;  // No imports; header ends here.
+
+  ObservedBytecodeArena storage(4096);
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result = {0};
+  const loom_bytecode_index_options_t options = {
+      .diagnostic_sink = {CaptureDiagnostic, &error_ids},
+  };
+  IREE_ASSERT_OK(loom_bytecode_read_metadata(
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("test.loombc"), &context_, &storage.block_pool, &options,
+      &result));
+
+  EXPECT_EQ(result.error_count, 1u);
+  EXPECT_EQ(error_ids, (std::vector<std::string>{"ERR_BYTECODE_008"}));
+  EXPECT_LE(storage.largest_allocation, 4096u);
   loom_module_free(module);
 }
 
@@ -4905,6 +5176,10 @@ TEST_F(ReaderTest, CanonicalRoundTripPreservesBodyShapes) {
   loom_module_t* co_result_module = CreateCoResultDimFunctionModule();
   ExpectCanonicalBytecodeRoundTrip(co_result_module);
   loom_module_free(co_result_module);
+
+  loom_module_t* wide_module = CreateWideBodyOpModule();
+  ExpectCanonicalBytecodeRoundTrip(wide_module);
+  loom_module_free(wide_module);
 }
 
 TEST_F(ReaderTest, CanonicalRoundTripPreservesTypesAttrsAndPredicates) {
@@ -5498,6 +5773,58 @@ TEST_F(ReaderTest, RejectsBodySummaryCountExceedingBodyLength) {
   bytes[value_count_offset] = 0x7F;
 
   ExpectReadModuleError(bytes, "ERR_BYTECODE_016");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsImpossibleBodyCountsBeforeArenaAllocation) {
+  loom_module_t* module = CreateFunctionModule();
+  const auto valid_bytes = WriteModule(module);
+  const iree_host_size_t valid_largest_allocation =
+      ReadModuleLargestArenaAllocation(valid_bytes);
+  const BodyOpCountOffsets count_offsets =
+      FirstFixedBodyOpCountOffsets(valid_bytes);
+  const struct {
+    const char* name;
+    size_t offset;
+    uint16_t count;
+  } cases[] = {
+      {"operands", count_offsets.operand_count, 8192},
+      {"successors", count_offsets.successor_count, 127},
+      {"results", count_offsets.result_count, 8192},
+      {"tied results", count_offsets.tied_result_count, 8192},
+      {"regions", count_offsets.region_count, 127},
+  };
+
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    auto bytes = valid_bytes;
+    ASSERT_LT(test_case.offset + 1, bytes.size());
+    if (test_case.count < 128) {
+      bytes[test_case.offset] = (uint8_t)test_case.count;
+    } else {
+      bytes[test_case.offset] = (uint8_t)(test_case.count | 0x80);
+      bytes[test_case.offset + 1] = (uint8_t)(test_case.count >> 7);
+    }
+    ExpectReadModuleCountErrorWithoutAllocationGrowth(bytes,
+                                                      valid_largest_allocation);
+  }
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsImpossibleBlockCountBeforeArenaAllocation) {
+  loom_module_t* module = CreateFunctionModule();
+  auto bytes = WriteModule(module);
+  const iree_host_size_t valid_largest_allocation =
+      ReadModuleLargestArenaAllocation(bytes);
+  const size_t block_count_offset = RootRegionBlockCountOffset(bytes);
+  ASSERT_LT(block_count_offset + 1, bytes.size());
+  bytes[block_count_offset] = 0x80;
+  bytes[block_count_offset + 1] = 0x40;  // 8,192 blocks.
+
+  ExpectReadModuleCountErrorWithoutAllocationGrowth(bytes,
+                                                    valid_largest_allocation);
 
   loom_module_free(module);
 }

@@ -169,6 +169,80 @@ TEST_F(BytecodeDecoderTest, RangeValidationRejectsOverflow) {
   EXPECT_EQ(loom_error_def_code(captured_.error), 7u);
 }
 
+TEST_F(BytecodeDecoderTest, CountBytesAcceptExactFitWithTrailingBytes) {
+  const uint8_t data[7] = {};
+  loom_bytecode_reader_cursor_t cursor;
+  loom_bytecode_reader_cursor_initialize(data, sizeof(data), 16384,
+                                         IREE_SV("TEST"), &cursor);
+
+  IREE_EXPECT_OK(loom_bytecode_reader_validate_count_bytes(
+      &decoder_, &cursor, IREE_SV("entries"), /*count=*/3,
+      /*minimum_entry_length=*/2, /*minimum_trailing_length=*/1,
+      /*count_offset=*/123));
+
+  EXPECT_EQ(error_count_, 0u);
+  EXPECT_EQ(cursor.cursor.position, 0u);
+}
+
+TEST_F(BytecodeDecoderTest, CountBytesRejectMissingEntriesAtCount) {
+  const uint8_t data[6] = {};
+  loom_bytecode_reader_cursor_t cursor;
+  loom_bytecode_reader_cursor_initialize(data, sizeof(data), 16384,
+                                         IREE_SV("TEST"), &cursor);
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DEFERRED,
+      loom_bytecode_reader_validate_count_bytes(
+          &decoder_, &cursor, IREE_SV("entries"), /*count=*/3,
+          /*minimum_entry_length=*/2, /*minimum_trailing_length=*/1,
+          /*count_offset=*/123));
+
+  EXPECT_EQ(error_count_, 1u);
+  ASSERT_NE(captured_.error, nullptr);
+  EXPECT_EQ(loom_error_def_code(captured_.error), 9u);
+  EXPECT_EQ(captured_.origin.start, 123u);
+  EXPECT_EQ(cursor.cursor.position, 0u);
+}
+
+TEST_F(BytecodeDecoderTest, CountBytesRejectMissingTrailingBytes) {
+  const uint8_t data[2] = {};
+  loom_bytecode_reader_cursor_t cursor;
+  loom_bytecode_reader_cursor_initialize(data, sizeof(data), 16384,
+                                         IREE_SV("TEST"), &cursor);
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DEFERRED,
+      loom_bytecode_reader_validate_count_bytes(
+          &decoder_, &cursor, IREE_SV("entries"), /*count=*/0,
+          /*minimum_entry_length=*/1, /*minimum_trailing_length=*/3,
+          /*count_offset=*/123));
+
+  EXPECT_EQ(error_count_, 1u);
+  ASSERT_NE(captured_.error, nullptr);
+  EXPECT_EQ(loom_error_def_code(captured_.error), 3u);
+  EXPECT_EQ(captured_.origin.start, 16384u);
+  EXPECT_EQ(cursor.cursor.position, 0u);
+}
+
+TEST_F(BytecodeDecoderTest, CountBytesRejectWithoutProductOverflow) {
+  const uint8_t data[8] = {};
+  loom_bytecode_reader_cursor_t cursor;
+  loom_bytecode_reader_cursor_initialize(data, sizeof(data), 16384,
+                                         IREE_SV("TEST"), &cursor);
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DEFERRED,
+      loom_bytecode_reader_validate_count_bytes(
+          &decoder_, &cursor, IREE_SV("entries"), UINT64_MAX,
+          /*minimum_entry_length=*/2, /*minimum_trailing_length=*/0,
+          /*count_offset=*/123));
+
+  EXPECT_EQ(error_count_, 1u);
+  ASSERT_NE(captured_.error, nullptr);
+  EXPECT_EQ(loom_error_def_code(captured_.error), 9u);
+  EXPECT_EQ(captured_.origin.start, 123u);
+}
+
 TEST_F(BytecodeDecoderTest, DiagnosticSinkFailurePropagates) {
   loom_bytecode_reader_decoder_initialize(
       loom_diagnostic_sink_t{FailDiagnostic, nullptr},

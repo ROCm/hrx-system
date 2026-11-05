@@ -290,6 +290,10 @@ static iree_status_t loom_bytecode_attribute_impl_decode_at_depth(
             materializer->decoder, IREE_SV("f64_array"), count, UINT16_MAX,
             count_offset);
       }
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+          materializer->decoder, cursor, IREE_SV("f64_array"), count,
+          /*minimum_entry_length=*/sizeof(uint64_t),
+          /*minimum_trailing_length=*/0, count_offset));
       double* values = NULL;
       if (count > 0) {
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -350,6 +354,10 @@ static iree_status_t loom_bytecode_attribute_impl_decode_at_depth(
             materializer->decoder, IREE_SV("i64_array"), count, UINT16_MAX,
             count_offset);
       }
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+          materializer->decoder, cursor, IREE_SV("i64_array"), count,
+          /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0,
+          count_offset));
       int64_t* values = NULL;
       if (count > 0) {
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -374,6 +382,10 @@ static iree_status_t loom_bytecode_attribute_impl_decode_at_depth(
             materializer->decoder, IREE_SV("string_array"), count, UINT16_MAX,
             count_offset);
       }
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+          materializer->decoder, cursor, IREE_SV("string_array"), count,
+          /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0,
+          count_offset));
       loom_string_id_t* values = NULL;
       if (count > 0) {
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -491,6 +503,10 @@ static iree_status_t loom_bytecode_attribute_impl_decode_at_depth(
             materializer->decoder, collection_name, count, UINT16_MAX,
             count_offset);
       }
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+          materializer->decoder, cursor, collection_name, count,
+          /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0,
+          count_offset));
       loom_symbol_ref_t* values = NULL;
       if (count > 0) {
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -605,6 +621,10 @@ static iree_status_t loom_bytecode_attribute_impl_decode_at_depth(
             materializer->decoder, IREE_SV("dict_entries"), entry_count,
             UINT16_MAX, count_offset);
       }
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+          materializer->decoder, cursor, IREE_SV("dict_entries"), entry_count,
+          /*minimum_entry_length=*/2, /*minimum_trailing_length=*/0,
+          count_offset));
       loom_named_attr_t* entries = NULL;
       if (entry_count > 0) {
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -713,6 +733,11 @@ static iree_status_t loom_bytecode_attribute_impl_decode_at_depth(
             materializer->decoder, IREE_SV("parameterized_attribute_array"),
             element_count, UINT16_MAX, count_offset);
       }
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+          materializer->decoder, cursor,
+          IREE_SV("parameterized_attribute_array"), element_count,
+          /*minimum_entry_length=*/2, /*minimum_trailing_length=*/0,
+          count_offset));
       loom_attribute_t* attributes = NULL;
       if (element_count > 0) {
         IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
