@@ -464,6 +464,7 @@ loom_cc_test(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
         "//runtime/src/iree/tokenizer",
         "//runtime/src/iree/tokenizer/vocab",
     ],

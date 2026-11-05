@@ -47,6 +47,8 @@ struct loom_serve_text_state_reservation_t {
   iree_host_size_t restore_count;
   // Owned exact physical range union input for admission and commitment.
   loom_serve_memory_range_t* commitments;
+  // Source allocation per commitment, coallocated with the native ranges.
+  iree_host_size_t* commitment_allocations;
   // Number of physical ranges, zero for fixed-backed state.
   iree_host_size_t commitment_count;
   // Complete physical footprint of this continuation and shared model state.
