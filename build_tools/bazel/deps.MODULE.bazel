@@ -19,6 +19,7 @@ single_version_override(
     patch_strip = 1,
     patches = [
         "//build_tools/third_party/rules_cc:sanitizer_debug_info.patch",
+        "//build_tools/third_party/rules_cc:compressed_debug_info.patch",
         "//build_tools/third_party/rules_cc:optimized_profile.patch",
     ],
     version = "0.2.26",

@@ -85,6 +85,13 @@ _iree_cmake_integration_test(
 
 _iree_cmake_integration_test(
   NAME
+    cmake_debug_info_test
+  SRCS
+    cmake_debug_info_test.py
+)
+
+_iree_cmake_integration_test(
+  NAME
     cmake_data_dependencies_test
   SRCS
     cmake_data_dependencies_test.py

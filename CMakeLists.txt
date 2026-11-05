@@ -89,6 +89,8 @@ option(IREE_ENABLE_UBSAN "Enable undefined behavior sanitizer." OFF)
 option(IREE_ENABLE_FUZZING "Enable libFuzzer-based fuzz targets." OFF)
 option(IREE_ENABLE_SPLIT_DWARF
   "Enable gsplit-dwarf for debug information if supported." OFF)
+option(IREE_ENABLE_COMPRESSED_DEBUG_INFO
+  "Compress full debug information in Linux objects and linked binaries." ON)
 option(IREE_ENABLE_THIN_ARCHIVES
   "Enables thin ar archives on ELF systems." OFF)
 option(IREE_ENABLE_WERROR_FLAG "Treat warnings as errors for IREE code." ON)
