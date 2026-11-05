@@ -60,7 +60,7 @@ typedef struct iree_hal_amd_gpu_executable_placement_t {
 // Optional cold state for images with queue-scoped shader globals. Ordinary
 // images allocate neither this directory nor additional physical placements.
 typedef struct iree_hal_amd_gpu_executable_tsan_t {
-  // Embedded membership; the registry borrows this executable until removal.
+  // Embedded membership; queue edits temporarily retain this live executable.
   iree_hal_amd_gpu_tsan_client_t client;
   // Captured device-owned services needed to place a later queue variant.
   iree_hal_amd_gpu_executable_options_t options;
@@ -1108,7 +1108,7 @@ iree_status_t iree_hal_amd_gpu_executable_create(
       executable->tsan->options.memory = &executable->tsan->memory;
       executable->tsan->packet_count = packet_count;
       executable->tsan->client = (iree_hal_amd_gpu_tsan_client_t){
-          .user_data = executable,
+          .resource = (iree_hal_resource_t*)executable,
           .prepare = iree_hal_amd_gpu_executable_prepare_queue,
           .release = iree_hal_amd_gpu_executable_release_queue,
       };

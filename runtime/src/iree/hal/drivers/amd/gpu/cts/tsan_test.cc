@@ -7,7 +7,9 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <semaphore>
 #include <string>
+#include <thread>
 #include <tuple>
 
 #include "iree/hal/api.h"
@@ -321,6 +323,54 @@ TEST_P(GpuTsanTest, NewImageIncludesAlreadyAcquiredQueue) {
                                          nullptr, 0));
   acquired.reset();
   EXPECT_EQ(reports_.load(), 2u);
+  EXPECT_EQ(errors_.load(), 0u);
+}
+
+TEST_P(GpuTsanTest, ImageLoadOverlapsFinalReleaseWithAcquiredQueue) {
+  ASSERT_NO_FATAL_FAILURE(
+      Load(IREE_HAL_AMD_GPU_SANITIZER_REPORT_POLICY_REPORT_ONLY));
+  iree::hal::cts::Ref<iree_hal_queue_t> acquired;
+  IREE_ASSERT_OK(AcquireQueue(acquired.out()));
+  const auto* targets =
+      iree_hal_device_spec_executables(iree_hal_device_spec(device_));
+  iree_hal_executable_load_params_t params;
+  iree_hal_executable_load_params_initialize(&params);
+  params.executable_data = artifact_;
+  iree::hal::cts::Ref<iree_hal_executable_t> loaded;
+  std::binary_semaphore begin_load(0);
+  std::thread loader([&] {
+    begin_load.acquire();
+    IREE_ASSERT_OK(iree_hal_executable_load(iree_hal_queue_family(acquired),
+                                            &targets->targets[0], &params,
+                                            loaded.out()));
+  });
+  begin_load.release();
+  constexpr uint64_t kDispatches = 32;
+  for (uint64_t value = 1; value <= kDispatches && !HasFatalFailure();
+       ++value) {
+    Dispatch(0, safe_, value);
+  }
+  iree_hal_executable_release(executable_);
+  executable_ = nullptr;
+  loader.join();
+  ASSERT_FALSE(HasFatalFailure());
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(done_[0], kDispatches,
+                                         iree_infinite_timeout(), 0));
+
+  // The new image's dynamic placement must remain usable after the old image's
+  // last captured reference retires. Configuration arrives through real SDMA.
+  iree_hal_executable_function_t function;
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      loaded, IREE_SV("report_race"), &function));
+  uint64_t value = kDispatches + 1;
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(acquired, {}, {1, &done_[0], &value},
+                                         loaded, function, Config(), {}, {},
+                                         nullptr, 0));
+  loaded.reset();
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(done_[0], value, iree_infinite_timeout(), 0));
+  EXPECT_EQ(reports_.load(), 1u);
+  EXPECT_EQ(capacity_reports_.load(), 0u);
   EXPECT_EQ(errors_.load(), 0u);
 }
 
