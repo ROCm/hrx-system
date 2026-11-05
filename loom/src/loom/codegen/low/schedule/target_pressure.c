@@ -898,10 +898,12 @@ void loom_low_schedule_target_pressure_repair_packing_completions(
     uint32_t* active_value_count =
         &pressure_state
              ->active_register_packing_completion_value_counts[resource_id];
-    if (*active_sink != LOOM_LOW_SCHEDULE_NODE_NONE &&
-        state->nodes[*active_sink].scheduled_ordinal ==
-            LOOM_LOW_SCHEDULE_NODE_NONE &&
-        *active_value_count != 0) {
+    // New live values nominate their completion when they are added. An empty
+    // resource stays empty until then; only a retired anchor needs rediscovery.
+    if (*active_sink == LOOM_LOW_SCHEDULE_NODE_NONE ||
+        (state->nodes[*active_sink].scheduled_ordinal ==
+             LOOM_LOW_SCHEDULE_NODE_NONE &&
+         *active_value_count != 0)) {
       continue;
     }
     *active_sink = LOOM_LOW_SCHEDULE_NODE_NONE;
