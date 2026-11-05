@@ -20,6 +20,15 @@ package(
     licenses = ["notice"],
 )
 
+AUDIO_FUZZ_SEEDS = [
+    "//loom/src/loom/serve/media/testdata/audio:sample.flac",
+    "//loom/src/loom/serve/media/testdata/audio:sample.mp3",
+    "//loom/src/loom/serve/media/testdata/audio_fuzz:f32.txt",
+    "//loom/src/loom/serve/media/testdata/audio_fuzz:media_type.txt",
+    "//loom/src/loom/serve/media/testdata/audio_fuzz:s16.txt",
+    "//loom/src/loom/serve/media/testdata/audio_fuzz:wave.txt",
+]
+
 IMAGE_FUZZ_SEEDS = [
     "//loom/src/loom/serve/media/testdata/image_fuzz:gif.txt",
     "//loom/src/loom/serve/media/testdata/image_fuzz:jpeg.txt",
@@ -314,6 +323,27 @@ loom_cc_library(
     hdrs = ["audio_recording.h"],
     deps = [
         ":audio_decoder",
+        ":audio_source",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_fuzz(
+    name = "audio_recording_fuzz",
+    srcs = ["audio_recording_fuzz.cc"],
+    args = [
+        "-seed_inputs=" + ",".join([
+            "$(rootpath %s)" % seed
+            for seed in AUDIO_FUZZ_SEEDS
+        ]),
+    ],
+    data = AUDIO_FUZZ_SEEDS,
+    defines = iree_select({
+        "//loom/config/serve:wav": ["LOOM_FUZZ_AUDIO_WAV=1"],
+        "//conditions:default": ["LOOM_FUZZ_AUDIO_WAV=0"],
+    }),
+    deps = [
+        ":audio_recording",
         ":audio_source",
         "//runtime/src/iree/base",
     ],
