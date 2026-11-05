@@ -10,6 +10,19 @@
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 
 py_library(
+    name = "amdf_info_archive",
+    srcs = ["amdf_info_archive.py"],
+    deps = ["//loom/packaging/python:release_lib"],
+)
+
+py_test(
+    name = "amdf_info_archive_test",
+    size = "small",
+    srcs = ["amdf_info_archive_test.py"],
+    deps = [":amdf_info_archive"],
+)
+
+py_library(
     name = "loom_wheel",
     srcs = ["loom_wheel.py"],
     deps = ["//loom/packaging/python:release_lib"],
@@ -257,6 +270,7 @@ py_test(
 test_suite(
     name = "presubmit_tests",
     tests = [
+        ":amdf_info_archive_test",
         ":change_scope_test",
         ":ci_core_common_test",
         ":ci_core_linux_test",

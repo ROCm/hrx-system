@@ -167,7 +167,7 @@ class LoomServerTest(unittest.TestCase):
     def server_inputs(self, platform: str) -> Path:
         inputs = self.root / f"inputs-{platform}"
         inputs.mkdir()
-        binary = inputs / release.SERVER_BINARIES[platform]
+        binary = inputs / release.standalone_binary_name("loom-serve", platform)
         binary.write_bytes(b"standalone server")
         return inputs
 
@@ -197,9 +197,12 @@ class LoomServerTest(unittest.TestCase):
                 command = run.call_args_list[0].args[0]
                 self.assertEqual(Path(command[1]).name, "loom_server_qualify.py")
                 self.assertEqual(command[-2:], ["1.2.3", self.commit])
-                binary_name = release.SERVER_BINARIES[platform]
+                binary_name = release.standalone_binary_name("loom-serve", platform)
                 self.assertEqual(
-                    one.path.name, release.server_archive_name(self.identity, platform)
+                    one.path.name,
+                    release.standalone_archive_name(
+                        self.identity, "loom-serve", platform
+                    ),
                 )
                 with ZipFile(one.path) as archive:
                     self.assertEqual(archive.namelist(), [binary_name])

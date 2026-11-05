@@ -2,10 +2,10 @@
 
 An SDK release publishes `hrx-loom` for Linux x86-64 and Windows x86-64 from one
 reviewed source revision. Each platform has Release, Tracy, Debug, and ASAN
-wheels. GitHub Releases receives all eight wheels, a standalone `loom-serve`
-archive for each platform, and `SHA256SUMS`. Stable releases also publish the two
-Release wheels to PyPI. Publication uses the exact artifacts that passed the
-installed tests.
+wheels. GitHub Releases receives all eight wheels, standalone `loom-serve` and
+`amdf-info` archives for each platform, and `SHA256SUMS`. Stable releases also
+publish the two Release wheels to PyPI. Publication uses the exact artifacts
+that passed the installed tests.
 
 This guide covers release ownership and maintenance. The [SDK build guide](README.md)
 covers local builds, native profiles, and installed tests. Commands below run
@@ -34,9 +34,18 @@ invokes no build tool. Existing PR sanitizer jobs retain their source-test
 coverage; they do not produce instrumented SDK wheels.
 
 The publication workflow consumes `loom-sdk-wheel-*` and
-`loom-server-archive-*` artifacts. The `loom-sdk-inputs-windows-*` artifacts
+`loom-standalone-archive-*` artifacts. The `loom-sdk-inputs-windows-*` artifacts
 contain inputs awaiting native qualification and are not publication artifacts.
 Build and qualification artifacts are retained for 14 days.
+
+The standalone `amdf-info` archive contains the exact executable from the Release
+wheel. Destination-OS qualification runs help, text inventory, and JSON inventory
+with only that executable in its directory, an empty `PATH`, and no SDK loader
+overrides before exporting the archive. It adds no build or Python installation.
+The executable embeds libamdf; Linux retains the wheel's glibc baseline, and
+Windows retains its Microsoft C runtime prerequisite. Device activation remains
+separate hardware qualification. CI bootstrap consumers can pin a release archive
+and its SHA-256 without configuring the repository's build graph.
 
 ## Publishing account setup
 
@@ -129,7 +138,7 @@ candidate and stable identities, while ordinary development continues on
 The first candidate sets `package-version` to `X.Y.Zrc1` and pins an immutable,
 qualified catalog reference. Tag its merged release-line commit as
 `vX.Y.Zrc1`. The tag publishes a public GitHub prerelease with direct wheel and
-standalone-server installation instructions. It does not enter the PyPI
+standalone-executable installation instructions. It does not enter the PyPI
 environment or stage a PyPI upload.
 
 Feedback fixes land on `main` first and are then cherry-picked onto the release
@@ -168,7 +177,7 @@ Publication consumes those bytes without recompiling. GitHub publication
 completes before the stable-only PyPI publication starts.
 
 GitHub publication writes a compact SDK description naming the installation
-path, attached native profiles, standalone servers, and checksum document.
+path, attached native profiles, standalone executables, and checksum document.
 Stable releases install from PyPI; prereleases install their attached Release
 wheel directly. The body comes from the committed SDK identity and artifact
 contract, so the first release cannot expand into the repository's complete
@@ -181,8 +190,8 @@ The normal filenames have no local-version suffix; instrumented filenames use
 All profiles install the same distribution, so users choose an instrumented
 wheel explicitly or use separate virtual environments.
 
-A complete GitHub release has eight wheels, two standalone server archives, and
-`SHA256SUMS`. A stable release additionally has the two normal wheels on PyPI.
+A complete GitHub release has eight wheels, four standalone executable archives,
+and `SHA256SUMS`. A stable release additionally has the two normal wheels on PyPI.
 From a checkout of the release tag, a downloaded complete bundle can be checked
 without network access:
 
@@ -230,6 +239,7 @@ publication jobs.
 | Wheel contents, native profiles, and Linux ABI audit | [BUILD.bazel](BUILD.bazel), [defs.bzl](defs.bzl), [native.bzl](native.bzl), [manylinux.bzl](manylinux.bzl) |
 | Compiler, runner image, and cross-SDK pins | [Artifact workflow](../../../.github/workflows/build_loom_sdk_artifacts.yml), [Windows setup](../../../.github/scripts/setup_windows_cross.sh), [SDK manifest](../../../.github/scripts/windows-sdk-channel.json) |
 | Artifact export and installed qualification | [loom_wheel.py](../../../build_tools/ci/loom_wheel.py), [installed oracle](../../src/loom/tooling/target/cpu/serve/wheel_model_card_test.py) |
+| Standalone executables | [loom_server.py](../../../build_tools/ci/loom_server.py), [amdf_info_archive.py](../../../build_tools/ci/amdf_info_archive.py) |
 | Identity, bundle checks, and publication retries | [release.py](release.py), [loom_release.py](../../../build_tools/ci/loom_release.py), [release workflow](../../../.github/workflows/release_loom_sdk.yml) |
 
 A compiler, sysroot, native-library, or packaging change is qualified through

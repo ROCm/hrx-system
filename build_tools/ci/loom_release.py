@@ -33,10 +33,16 @@ GITHUB_ASSET_PAGE_SIZE = 100
 def github_release_body(identity: release.Identity, repository: str) -> str:
     """Builds the bounded product description used for GitHub releases."""
     server_archives = "".join(
-        f"- `{release.server_archive_name(identity, platform)}`\n"
+        f"- `{release.standalone_archive_name(identity, 'loom-serve', platform)}`\n"
         for platform in release.PLATFORMS
     )
-    linux_archive = release.server_archive_name(identity, release.LINUX_X86_64_PLATFORM)
+    info_archives = "".join(
+        f"- `{release.standalone_archive_name(identity, 'amdf-info', platform)}`\n"
+        for platform in release.PLATFORMS
+    )
+    linux_archive = release.standalone_archive_name(
+        identity, "loom-serve", release.LINUX_X86_64_PLATFORM
+    )
     if identity.release_channel is release.ReleaseChannel.STABLE:
         installation = (
             "Install the optimized profile from PyPI:\n\n"
@@ -74,8 +80,14 @@ def github_release_body(identity: release.Identity, repository: str) -> str:
         f"unzip {linux_archive}\n"
         "./loom-serve --version\n"
         "```\n\n"
+        "For native AMD GPU/NPU discovery and activation checks without installing "
+        "the SDK, use the standalone `amdf-info` archive:\n\n"
+        f"{info_archives}\n"
+        "Each contains one executable with libamdf embedded and requires neither "
+        "ROCr nor XRT. `amdf-info --format=json` reports the native inventory; "
+        "`amdf-info --device=rdna --activate` checks device acquisition and release.\n\n"
         "The attached wheels include Release, Tracy, Debug, and ASAN profiles. "
-        "`SHA256SUMS` records the exact qualified wheels and server archives."
+        "`SHA256SUMS` records the exact qualified wheels and standalone archives."
     )
     if len(body) > GITHUB_RELEASE_BODY_MAXIMUM:
         raise ValueError(
@@ -173,7 +185,12 @@ def publish_github(
             names.add(name)
             if (
                 name.endswith(".whl")
-                or (name.startswith("loom-serve-") and name.endswith(".zip"))
+                or (
+                    name.startswith(
+                        tuple(f"{tool}-" for tool in release.STANDALONE_TOOLS)
+                    )
+                    and name.endswith(".zip")
+                )
             ) and name not in assets:
                 raise ValueError(
                     f"Unexpected GitHub release artifact: {name}; use a new version"

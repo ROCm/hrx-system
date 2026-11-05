@@ -20,18 +20,20 @@ from release import (
     LINUX_X86_64_PLATFORM,
     PLATFORMS,
     PROFILES,
-    SERVER_BINARIES,
+    STANDALONE_TOOLS,
     ReleaseChannel,
     checksum_document,
-    inspect_server_archive,
+    inspect_standalone_archive,
     inspect_wheel,
     main,
     parse_identity,
     read_identity,
     release_artifacts,
-    release_servers,
-    server_archive_name,
+    release_standalones,
+    standalone_archive_name,
+    standalone_binary_name,
     write_checksums,
+    write_standalone_archive,
 )
 
 
@@ -76,10 +78,11 @@ class ReleaseTest(unittest.TestCase):
                 archive.writestr(prefix + name, text)
         return path
 
-    def server(
+    def standalone(
         self,
         platform=LINUX_X86_64_PLATFORM,
         *,
+        tool="loom-serve",
         member_name=None,
         timestamp=(1980, 1, 1, 0, 0, 0),
         create_system=3,
@@ -90,8 +93,8 @@ class ReleaseTest(unittest.TestCase):
         archive_comment=b"",
         payload=b"native executable",
     ):
-        path = self.root / server_archive_name(self.identity, platform)
-        expected_name = SERVER_BINARIES[platform]
+        path = self.root / standalone_archive_name(self.identity, tool, platform)
+        expected_name = standalone_binary_name(tool, platform)
         information = ZipInfo(member_name or expected_name, timestamp)
         information.create_system = create_system
         information.external_attr = mode << 16
@@ -276,17 +279,42 @@ class ReleaseTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     inspect_wheel(renamed, self.identity, self.description)
 
-    def test_standalone_server_archives_preserve_platform_identity(self):
-        for platform in PLATFORMS:
-            with self.subTest(platform=platform):
-                path = self.server(platform)
-                server = inspect_server_archive(path, self.identity)
-                self.assertEqual(server.platform, platform)
-                self.assertEqual(
-                    server.digest, hashlib.sha256(path.read_bytes()).hexdigest()
-                )
+    def test_standalone_archives_preserve_platform_identity(self):
+        for tool in STANDALONE_TOOLS:
+            for platform in PLATFORMS:
+                with self.subTest(tool=tool, platform=platform):
+                    path = self.standalone(platform, tool=tool)
+                    artifact = inspect_standalone_archive(path, self.identity)
+                    self.assertEqual(
+                        (artifact.tool, artifact.platform), (tool, platform)
+                    )
+                    self.assertEqual(
+                        artifact.digest, hashlib.sha256(path.read_bytes()).hexdigest()
+                    )
 
-    def test_standalone_server_archive_shape_is_exact(self):
+    def test_archive_writer_preserves_payload_with_reproducible_metadata(self):
+        binary = self.root / "amdf-info"
+        binary.write_bytes(b"qualified executable")
+        name = standalone_archive_name(
+            self.identity, "amdf-info", LINUX_X86_64_PLATFORM
+        )
+        first = self.root / name
+        write_standalone_archive(binary, first)
+        artifact = inspect_standalone_archive(first, self.identity)
+        with ZipFile(first) as archive:
+            self.assertEqual(archive.read(binary.name), binary.read_bytes())
+        other = self.root / "other"
+        other.mkdir()
+        second = other / name
+        write_standalone_archive(binary, second)
+        self.assertEqual(first.read_bytes(), second.read_bytes())
+        self.assertEqual(
+            artifact.digest, inspect_standalone_archive(second, self.identity).digest
+        )
+        with self.assertRaises(FileExistsError):
+            write_standalone_archive(binary, first)
+
+    def test_standalone_archive_shape_is_exact(self):
         invalid = (
             {"member_name": "nested/loom-serve"},
             {"timestamp": (2026, 1, 1, 0, 0, 0)},
@@ -300,24 +328,31 @@ class ReleaseTest(unittest.TestCase):
         )
         for options in invalid:
             with self.subTest(options=options):
-                path = self.server(**options)
+                path = self.standalone(**options)
                 with self.assertRaises(ValueError):
-                    inspect_server_archive(path, self.identity)
+                    inspect_standalone_archive(path, self.identity)
 
-        path = self.server()
+        path = self.standalone()
         with ZipFile(path, "a") as archive:
             archive.writestr("companion.txt", "not part of the distribution")
         with self.assertRaisesRegex(ValueError, "must contain only"):
-            inspect_server_archive(path, self.identity)
+            inspect_standalone_archive(path, self.identity)
 
-    def test_standalone_server_filename_cannot_relabel_an_archive(self):
-        path = self.server()
+    def test_standalone_filename_cannot_relabel_an_archive(self):
+        path = self.standalone()
         renamed = path.with_name(path.name.replace(self.identity.version, "1.2.4"))
         path.rename(renamed)
         with self.assertRaisesRegex(ValueError, "Unexpected standalone"):
-            inspect_server_archive(renamed, self.identity)
+            inspect_standalone_archive(renamed, self.identity)
         with self.assertRaisesRegex(ValueError, "Unexpected standalone"):
-            release_servers(self.root, self.identity)
+            release_standalones(self.root, self.identity)
+
+        renamed.unlink()
+        path = self.standalone()
+        renamed = path.with_name(path.name.replace("loom-serve", "amdf-info"))
+        path.rename(renamed)
+        with self.assertRaisesRegex(ValueError, "must contain only amdf-info"):
+            inspect_standalone_archive(renamed, self.identity)
 
     def test_bundle_is_complete_and_retries_preserve_exact_bytes(self):
         self.wheel()
@@ -329,15 +364,16 @@ class ReleaseTest(unittest.TestCase):
                 self.wheel(profile, platform)
         with self.assertRaises(SystemExit):
             self.command("bundle", str(self.root), "--tag", "v" + self.identity.version)
-        for platform in PLATFORMS:
-            self.server(platform)
+        for tool in STANDALONE_TOOLS:
+            for platform in PLATFORMS:
+                self.standalone(platform, tool=tool)
         self.command("bundle", str(self.root), "--tag", "v" + self.identity.version)
         artifacts = release_artifacts(self.root, self.identity, self.description)
         checksum = self.root / "SHA256SUMS"
         original = checksum.read_bytes()
         self.assertEqual(
-            len(artifacts),
-            len(PROFILES) * len(PLATFORMS) + len(SERVER_BINARIES),
+            {artifact.path for artifact in artifacts},
+            set(self.root.glob("*.whl")) | set(self.root.glob("*.zip")),
         )
         self.assertEqual(original, checksum_document(artifacts).encode())
         write_checksums(self.root, artifacts)

@@ -15,13 +15,11 @@ import json
 import os
 import re
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from build_tools.ci import native_artifact_security
 from loom.packaging.python import release
@@ -38,7 +36,7 @@ class ServerPlatform:
 
 PLATFORMS = {
     release.LINUX_X86_64_PLATFORM: ServerPlatform(
-        release.SERVER_BINARIES[release.LINUX_X86_64_PLATFORM],
+        release.standalone_binary_name("loom-serve", release.LINUX_X86_64_PLATFORM),
         # ThinLTO replays preprocessor options during backend compilation.
         # Scope the intentional undefinition to suppress that one false warning.
         (
@@ -49,7 +47,7 @@ PLATFORMS = {
         ),
     ),
     release.WINDOWS_X86_64_PLATFORM: ServerPlatform(
-        release.SERVER_BINARIES[release.WINDOWS_X86_64_PLATFORM],
+        release.standalone_binary_name("loom-serve", release.WINDOWS_X86_64_PLATFORM),
         ("--config=windows-x86_64", "--features=static_link_msvcrt_release"),
     ),
 }
@@ -244,15 +242,6 @@ def _native_platform() -> str | None:
     return None
 
 
-def _write_archive(binary: Path, archive: Path) -> None:
-    information = ZipInfo(binary.name, (1980, 1, 1, 0, 0, 0))
-    information.create_system = 3
-    information.external_attr = (stat.S_IFREG | 0o755) << 16
-    information.compress_type = ZIP_DEFLATED
-    with ZipFile(archive, "x", compression=ZIP_DEFLATED, compresslevel=9) as output:
-        output.writestr(information, binary.read_bytes())
-
-
 def qualify_server(
     root: Path,
     inputs: Path,
@@ -298,10 +287,10 @@ def qualify_server(
         check=True,
     )
 
-    filename = release.server_archive_name(identity, platform_name)
+    filename = release.standalone_archive_name(identity, "loom-serve", platform_name)
     with tempfile.TemporaryDirectory() as temporary:
         candidate = Path(temporary) / filename
-        _write_archive(binary, candidate)
+        release.write_standalone_archive(binary, candidate)
         digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
         output.mkdir(parents=True, exist_ok=False)
         destination = output / filename
