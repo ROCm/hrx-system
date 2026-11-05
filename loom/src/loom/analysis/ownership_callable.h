@@ -7,15 +7,16 @@
 // Callable ownership summaries and their single structural call-graph walk.
 //
 // State is scoped to one lifetime-analysis invocation. The graph owns
-// structural observations; the CFG solver updates argument/result summaries
-// monotonically. Cleanup may insert release operations without changing these
-// callable edges.
+// structural observations and exact carrier aliases; the CFG solver updates
+// argument/result summaries monotonically. Cleanup may insert release
+// operations without changing these callable edges or aliases.
 
 #ifndef LOOM_ANALYSIS_OWNERSHIP_CALLABLE_H_
 #define LOOM_ANALYSIS_OWNERSHIP_CALLABLE_H_
 
 #include "loom/analysis/ownership_lifetime.h"
 #include "loom/analysis/scc.h"
+#include "loom/ir/local_value_domain.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,6 +30,7 @@ typedef enum loom_ownership_lifetime_value_state_e {
 
 typedef struct loom_ownership_lifetime_callee_t
     loom_ownership_lifetime_callee_t;
+typedef struct loom_ownership_lifetime_alias_t loom_ownership_lifetime_alias_t;
 
 typedef struct loom_ownership_lifetime_function_summary_t {
   // Function-like op this summary describes.
@@ -54,6 +56,14 @@ typedef struct loom_ownership_lifetime_function_summary_t {
   bool transfers_ownership;
   // Arena-owned callable edges retained by the structural graph walk.
   loom_ownership_lifetime_callee_t* callees;
+  // Required nonwriting aliases retained by the structural graph walk.
+  loom_ownership_lifetime_alias_t* aliases;
+  // Function-local value domain retained across inference iterations. NULL
+  // until the first transfer; only the active function acquires its scratch.
+  loom_local_value_domain_t* value_domain;
+  // Canonical carrier ordinals in |value_domain|, or NULL without aliases.
+  // Flattened once before the first transfer and immutable thereafter.
+  loom_value_ordinal_t* alias_owners;
   // True when suppressed analysis saw a possible diagnostic on this summary.
   bool needs_diagnostic_rerun;
 } loom_ownership_lifetime_function_summary_t;
@@ -108,6 +118,13 @@ iree_status_t loom_ownership_lifetime_build_graph(
     loom_ownership_lifetime_module_state_t* module_state,
     iree_arena_allocator_t* arena, loom_ownership_lifetime_graph_t* out_graph,
     loom_scc_list_t* out_sccs);
+
+// Acquires the summary's function-local value domain, preparing exact carrier
+// owners on the first transfer. Later transfers restore the retained domain
+// without inspecting source IR. The caller releases the domain after use.
+iree_status_t loom_ownership_lifetime_acquire_value_domain(
+    loom_ownership_lifetime_module_state_t* module_state,
+    loom_ownership_lifetime_function_summary_t* summary);
 
 // Returns the nested execution operation requiring CFG lowering when the
 // function may own resources, or NULL when its control boundary is supported.

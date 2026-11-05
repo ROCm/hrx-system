@@ -10,6 +10,8 @@
 // function-local value domain. It checks that owned resources are consumed,
 // released, discarded, or escaped exactly once along every CFG path and that
 // path joins do not hide an owned obligation on only some predecessors.
+// Required nonwriting aliases share one obligation; direct branch payloads
+// transfer ownership through the shared control-flow interface at any IR level.
 // Functions that create or transfer ownership require flat execution control:
 // straight-line operations or CFG blocks. Nested execution regions in those
 // functions produce a diagnostic; this analysis does not lower their control.

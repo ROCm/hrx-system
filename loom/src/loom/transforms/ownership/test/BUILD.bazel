@@ -20,6 +20,7 @@ loom_check_test_suite(
         "ownership_lifetime.loom-test",
         "ownership_regions.loom-test",
         "reference_copy.loom-test",
+        "reference_forwarding.loom-test",
         "reference_release.loom-test",
         "test_resource_lifetime.loom-test",
     ],
