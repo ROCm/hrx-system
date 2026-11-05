@@ -155,3 +155,25 @@ void loom_serve_activation_free(loom_serve_activation_t* activation) {
   iree_slim_mutex_deinitialize(&activation->event.mutex);
   iree_allocator_free(activation->host_allocator, activation);
 }
+
+iree_status_t loom_serve_activation_poll(
+    loom_serve_activation_t** operation, loom_serve_residency_t* residency,
+    iree_async_proactor_pool_t* pool, void (*wake)(void* user_data),
+    void* user_data, loom_serve_activation_flags_t flags,
+    iree_allocator_t host_allocator, loom_serve_activation_phase_t* out_phase) {
+  *out_phase = LOOM_SERVE_ACTIVATION_COMPLETE;
+  if (!*operation) {
+    if (iree_any_bit_set(flags, LOOM_SERVE_ACTIVATION_FLAG_CANCEL)) {
+      return iree_ok_status();
+    }
+    IREE_RETURN_IF_ERROR(loom_serve_activation_allocate(
+        residency, pool, wake, user_data, host_allocator, operation));
+  }
+  iree_status_t status =
+      loom_serve_activation_advance(*operation, flags, out_phase);
+  if (*out_phase == LOOM_SERVE_ACTIVATION_COMPLETE) {
+    loom_serve_activation_free(*operation);
+    *operation = NULL;
+  }
+  return status;
+}

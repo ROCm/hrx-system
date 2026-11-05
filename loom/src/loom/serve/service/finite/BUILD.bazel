@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 
 package(
@@ -144,6 +145,38 @@ loom_cc_library(
         "//runtime/src/iree/task",
         "//runtime/src/iree/vm",
     ],
+)
+
+loom_cc_library(
+    name = "registration",
+    srcs = ["registration.c"],
+    hdrs = ["registration.h"],
+    deps = [
+        ":model",
+        ":protocol",
+        ":service",
+        "//loom/src/loom/runtime/telemetry:stream",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/serve/runtime/parameter:activation",
+        "//loom/src/loom/serve/runtime/parameter:residency",
+        "//loom/src/loom/serve/runtime/program:compilation",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_assert_dependency_boundary(
+    name = "registration_has_no_catalogue_dependency",
+    forbidden_subtrees = [
+        "//loom/src/loom/serve/server/...",
+        "//loom/src/loom/serve/service/image/...",
+        "//loom/src/loom/serve/service/recognition/...",
+        "//loom/src/loom/serve/service/speech/...",
+        "//loom/src/loom/serve/service/text/...",
+    ],
+    message = "Finite preparation and retirement must not depend on a server catalogue or sibling service implementation",
+    target = ":registration",
 )
 
 loom_cc_library(

@@ -87,9 +87,10 @@ const loom_serve_compilation_report_t* loom_serve_finite_load_report(
 loom_serve_finite_model_t* loom_serve_finite_load_take_model(
     loom_serve_finite_load_t* load);
 
-// Destroys a terminal operation and any untaken model. Preparation submits no
-// queue work, so partial-load cleanup requires no asynchronous retirement.
-// A platform release failure preserves the operation and remaining ownership.
+// Destroys a terminal operation and any untaken model after advance has joined
+// accepted preparation work, including backing allocation and failed-load
+// retirement. A platform release failure preserves the operation and remaining
+// ownership.
 iree_status_t loom_serve_finite_load_free(loom_serve_finite_load_t* load);
 
 // Source ABI (all metadata integers and F32 results are little-endian):

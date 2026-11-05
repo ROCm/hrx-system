@@ -209,6 +209,58 @@ TEST_P(ActivationTest, PendingReadinessUsesReplacementObserver) {
   EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_COMPLETE);
 }
 
+TEST_P(ActivationTest, NullableSlotCreatesAndRetiresOneWarmup) {
+  IREE_ASSERT_OK(loom_serve_activation_advance(
+      activation_, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &phase_));
+  loom_serve_activation_free(activation_);
+  activation_ = nullptr;
+  IREE_ASSERT_OK(loom_serve_activation_poll(
+      &activation_, residency_, loom_serve_host_proactor_pool(host_), Wake,
+      this, 0, iree_allocator_system(), &phase_));
+  EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_LOADING);
+  auto* pending = activation_;
+  ASSERT_NE(pending, nullptr);
+  IREE_ASSERT_OK(loom_serve_activation_poll(
+      &activation_, residency_, loom_serve_host_proactor_pool(host_), Wake,
+      this, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, iree_allocator_system(),
+      &phase_));
+  EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_LOADING);
+  EXPECT_EQ(activation_, pending);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
+  AwaitWake();
+  IREE_ASSERT_OK(loom_serve_activation_poll(
+      &activation_, residency_, loom_serve_host_proactor_pool(host_), Wake,
+      this, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, iree_allocator_system(),
+      &phase_));
+  EXPECT_EQ(phase_, LOOM_SERVE_ACTIVATION_COMPLETE);
+  EXPECT_EQ(activation_, nullptr);
+}
+
 INSTANTIATE_TEST_SUITE_P(Workers, ActivationTest, ::testing::Values(1u, 4u));
+
+TEST(ActivationSlotTest, EmptyCancellationNeedsNoResourcesOrAllocation) {
+  loom_serve_activation_t* activation = nullptr;
+  loom_serve_activation_phase_t phase = LOOM_SERVE_ACTIVATION_WAITING;
+  IREE_ASSERT_OK(loom_serve_activation_poll(
+      &activation, nullptr, nullptr, nullptr, nullptr,
+      LOOM_SERVE_ACTIVATION_FLAG_CANCEL, iree_allocator_null(), &phase));
+  EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_COMPLETE);
+  EXPECT_EQ(activation, nullptr);
+}
+
+TEST(ActivationSlotTest, AllocationFailurePreservesEmptySlot) {
+  loom_serve_activation_t* activation = nullptr;
+  loom_serve_activation_phase_t phase = LOOM_SERVE_ACTIVATION_WAITING;
+  const iree_allocator_t failing = {
+      nullptr, [](void*, iree_allocator_command_t, const void*, void**) {
+        return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+      }};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_serve_activation_poll(&activation, nullptr, nullptr, nullptr,
+                                 nullptr, 0, failing, &phase));
+  EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_COMPLETE);
+  EXPECT_EQ(activation, nullptr);
+}
 
 }  // namespace

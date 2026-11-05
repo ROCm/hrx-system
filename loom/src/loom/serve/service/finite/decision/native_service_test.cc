@@ -17,6 +17,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/serve/server/driver.h"
 #include "loom/serve/service/finite/decision/protocol.h"
+#include "loom/serve/service/finite/registration.h"
 #include "loom/serve/service/finite/service.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/service_application.h"
@@ -37,31 +38,26 @@ class NativeDecisionServiceTest : public ::testing::Test {
     group_ = loom_serve_test_application_device_group(application);
     device_ = loom_serve_test_application_device_at(application, 0);
     pool_ = loom_serve_device_group_pool_at(group_, 0);
-    auto* host = loom_serve_test_application_host(application);
+    const loom_serve_wake_callback_t observer = {Wake, this};
+    loom_serve_device_group_set_observer(group_, observer);
     const char* source = std::getenv("LOOM_SERVE_TEST_MODEL_SOURCE");
     ASSERT_NE(source, nullptr);
     const std::string file = source;
-    loom_serve::testing::ModelDocument document;
     IREE_ASSERT_OK(
-        document.Load(file.substr(0, file.find_last_of('/')) + "/model.json"));
+        document_.Load(file.substr(0, file.find_last_of('/')) + "/model.json"));
     const loom_serve_finite_model_options_t model_options = {
-        .sources = document.value().sources,
+        .sources = document_.value().sources,
         .asset_directory = IREE_SV("."),
         .options = IREE_SV("{\"batch_units\":64}"),
     };
-    IREE_ASSERT_OK(loom_serve_finite_model_allocate(
-        device_, pool_, &model_options, iree_allocator_system(), &model_));
-    IREE_ASSERT_OK(loom_serve_finite_service_allocate(
-        host, model_, loom_serve_decision_protocol(), IREE_SV("decision"), 3, 0,
-        0, nullptr, iree_allocator_system(), &service_));
+    IREE_ASSERT_OK(AllocateRegistration(model_options));
+    IREE_ASSERT_OK(Prepare(0));
     interface_ = loom_serve_finite_service_interface(service_);
     loom_serve_registry_t* registry = nullptr;
     IREE_ASSERT_OK(loom_serve_registry_allocate(
         1, &interface_, 0, {}, iree_allocator_system(), &registry));
     loom_serve_driver_initialize(registry, &driver_);
-    const loom_serve_wake_callback_t observer = {Wake, this};
     loom_serve_driver_set_observer(&driver_, observer);
-    loom_serve_device_group_set_observer(group_, observer);
   }
 
   void TearDown() override {
@@ -72,11 +68,9 @@ class NativeDecisionServiceTest : public ::testing::Test {
       loom_serve_finite_call_close(std::exchange(call, nullptr));
     }
     iree_hal_buffer_release(std::exchange(target_, nullptr));
-    if (service_) {
+    if (registration_) {
       RetireService();
     }
-    IREE_EXPECT_OK(
-        loom_serve_finite_model_free(std::exchange(model_, nullptr)));
     if (consumer_) {
       IREE_EXPECT_OK(loom_serve_execution_drain(consumer_));
     }
@@ -91,6 +85,44 @@ class NativeDecisionServiceTest : public ::testing::Test {
     iree_notification_post(
         &static_cast<NativeDecisionServiceTest*>(self)->notification_,
         IREE_ALL_WAITERS);
+  }
+
+  iree_status_t AllocateRegistration(
+      const loom_serve_finite_model_options_t& model_options) {
+    preparation_complete_ = false;
+    const loom_serve_finite_registration_options_t service_options = {
+        .protocol = loom_serve_decision_protocol(),
+        .name = IREE_SV("decision"),
+        .capacity = 3,
+    };
+    return loom_serve_finite_registration_allocate(
+        device_, pool_, &model_options, &service_options, {Wake, this},
+        iree_allocator_system(), &registration_);
+  }
+
+  iree_status_t Prepare(loom_serve_finite_load_flags_t flags) {
+    iree_status_t status = iree_ok_status();
+    loom_serve_compilation_report_t report = {};
+    while (!preparation_complete_) {
+      const auto ticket = iree_notification_prepare_wait(&notification_);
+      status =
+          iree_status_join(status, loom_serve_device_group_advance(group_));
+      status = iree_status_join(
+          status, loom_serve_finite_registration_prepare(
+                      registration_,
+                      flags | (iree_status_is_ok(status)
+                                   ? 0
+                                   : LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL),
+                      &preparation_complete_, &service_, &report));
+      if (preparation_complete_) {
+        iree_notification_cancel_wait(&notification_);
+      } else {
+        iree_notification_commit_wait(&notification_, ticket,
+                                      IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+    }
+    return status;
   }
 
   template <typename Predicate>
@@ -119,6 +151,10 @@ class NativeDecisionServiceTest : public ::testing::Test {
   }
 
   void RetireService() {
+    if (!preparation_complete_) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                            Prepare(LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL));
+    }
     if (driver_.registry) {
       ASSERT_NO_FATAL_FAILURE(
           DriveUntil([&] { return !interface_.is_pending(interface_.self); },
@@ -127,7 +163,23 @@ class NativeDecisionServiceTest : public ::testing::Test {
       IREE_ASSERT_OK(
           loom_serve_registry_free(std::exchange(driver_.registry, nullptr)));
     }
-    loom_serve_finite_service_free(std::exchange(service_, nullptr));
+    bool complete = false;
+    while (!complete) {
+      const auto ticket = iree_notification_prepare_wait(&notification_);
+      auto status = loom_serve_device_group_advance(group_);
+      status = iree_status_join(status, loom_serve_finite_registration_retire(
+                                            registration_, &complete));
+      if (complete || !iree_status_is_ok(status)) {
+        iree_notification_cancel_wait(&notification_);
+      } else {
+        iree_notification_commit_wait(&notification_, ticket,
+                                      IREE_DURATION_ZERO,
+                                      IREE_TIME_INFINITE_FUTURE);
+      }
+      IREE_ASSERT_OK(status);
+    }
+    service_ = nullptr;
+    loom_serve_finite_registration_free(std::exchange(registration_, nullptr));
   }
 
   // Real asynchronous composition: application threads enter for admission and
@@ -241,9 +293,13 @@ class NativeDecisionServiceTest : public ::testing::Test {
   loom_serve_device_t* device_ = nullptr;
   // Shared physical admission independent of execution placement.
   loom_serve_pool_t* pool_ = nullptr;
-  // Source model, retired independently of retained device output.
-  loom_serve_finite_model_t* model_ = nullptr;
-  // Real finite admission, batching, and CPU/device progression.
+  // Owns source views until every preparation/cancellation attempt retires.
+  loom_serve::testing::ModelDocument document_;
+  // Shared production preparation/service/retirement owner.
+  loom_serve_finite_registration_t* registration_ = nullptr;
+  // Preparation loans have retired, including on terminal failure.
+  bool preparation_complete_ = false;
+  // Borrowed real admission, batching, and CPU/device progression.
   loom_serve_finite_service_t* service_ = nullptr;
   // Owner-side operations, with no listener or HTTP notification.
   loom_serve_service_t interface_ = {};
@@ -262,6 +318,54 @@ class NativeDecisionServiceTest : public ::testing::Test {
   // Host destination alive through the downstream feedback operation.
   std::array<float, 2> values_ = {};
 };
+
+TEST_F(NativeDecisionServiceTest, PreparationFailurePublishesNoService) {
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+  loom_serve_finite_model_options_t options = {
+      .sources = document_.value().sources,
+      .asset_directory = IREE_SV("."),
+      .options = IREE_SV("{\"batch_units\":64}"),
+  };
+  options.sources.prepare = IREE_SV("missing-prepare.loom");
+  IREE_ASSERT_OK(AllocateRegistration(options));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND, Prepare(0));
+  EXPECT_TRUE(preparation_complete_);
+  EXPECT_EQ(service_, nullptr);
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+}
+
+TEST_F(NativeDecisionServiceTest, UnstartedCancellationDoesNotReadSource) {
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+  const loom_serve_finite_model_options_t options = {
+      .sources = {.prepare = IREE_SV("missing-prepare.loom")},
+  };
+  IREE_ASSERT_OK(AllocateRegistration(options));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        Prepare(LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL));
+  EXPECT_TRUE(preparation_complete_);
+  EXPECT_EQ(service_, nullptr);
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+}
+
+TEST_F(NativeDecisionServiceTest, PreparationCancellationJoinsAcceptedLoad) {
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+  const loom_serve_finite_model_options_t options = {
+      .sources = document_.value().sources,
+      .asset_directory = IREE_SV("."),
+      .options = IREE_SV("{\"batch_units\":64}"),
+  };
+  IREE_ASSERT_OK(AllocateRegistration(options));
+  loom_serve_compilation_report_t report = {};
+  IREE_ASSERT_OK(loom_serve_finite_registration_prepare(
+      registration_, 0, &preparation_complete_, &service_, &report));
+  EXPECT_FALSE(preparation_complete_);
+  EXPECT_EQ(service_, nullptr);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
+                        Prepare(LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL));
+  EXPECT_TRUE(preparation_complete_);
+  EXPECT_EQ(service_, nullptr);
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+}
 
 TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
   ASSERT_NO_FATAL_FAILURE(Open(0));
@@ -330,7 +434,6 @@ TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
     loom_serve_finite_call_close(std::exchange(call, nullptr));
   }
   ASSERT_NO_FATAL_FAILURE(RetireService());
-  IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
 
   // Accepted downstream captures, not the source model or caller receipts,
   // now own the result. Releasing the gate must still yield the packed output.
@@ -467,7 +570,6 @@ TEST_F(NativeDecisionServiceTest, JsonResponseOutlivesModelAndResourceOwner) {
     });
   }
   ASSERT_NO_FATAL_FAILURE(RetireService());
-  IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
   const auto response = loom_serve_finite_call_response(retained.get());
   EXPECT_TRUE(iree_string_view_equal(
       response,

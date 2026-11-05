@@ -67,6 +67,17 @@ void loom_serve_activation_set_observer(loom_serve_activation_t* activation,
 // Called only after terminal advance, with all completion access joined.
 void loom_serve_activation_free(loom_serve_activation_t* activation);
 
+// Advances one nullable owner slot, creating it on first demand and releasing
+// it at COMPLETE. Cancellation of an empty slot completes without allocation.
+// Nonterminal results retain the operation; LOADING owes a readiness wake,
+// while WAITING retries only after owner activity changes available capacity.
+// Borrowed inputs remain live through terminal collection. Never waits.
+iree_status_t loom_serve_activation_poll(
+    loom_serve_activation_t** operation, loom_serve_residency_t* residency,
+    iree_async_proactor_pool_t* pool, void (*wake)(void* user_data),
+    void* user_data, loom_serve_activation_flags_t flags,
+    iree_allocator_t host_allocator, loom_serve_activation_phase_t* out_phase);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
