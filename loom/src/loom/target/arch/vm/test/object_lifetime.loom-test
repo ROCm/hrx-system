@@ -248,6 +248,7 @@ retired 0
 
 // The right edge transfers its guard to a different register at the join.
 // No hidden source owner may survive the joined value's last native use.
+// Keep the call boundary so constant folding cannot erase the tested edge.
 // RUN: emit vm-object-lifetime
 vm.target<core> @vm
 
@@ -261,7 +262,7 @@ low.func.decl import(native, "read", module = "lifetime") target<vm.core>(@vm) a
 
 low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
 
-low.func.def target<vm.core>(@vm) abi(vm_function) @select(%condition: reg<vm.value : i1>, %left: reg<vm.ref : ptr<@Object>>, %right: reg<vm.ref : ptr<@Object>>) asm {
+low.func.def noinline target<vm.core>(@vm) abi(vm_function) @select(%condition: reg<vm.value : i1>, %left: reg<vm.ref : ptr<@Object>>, %right: reg<vm.ref : ptr<@Object>>) asm {
   low.cond_br %condition, ^left_path, ^right_path : reg<vm.value : i1>
 ^left_path:
   low.br ^joined(%left: reg<vm.ref : ptr<@Object>>)

@@ -169,7 +169,8 @@ loom_low_allocation_packet_move_append_relation(
     loom_low_allocation_packet_move_builder_t* builder,
     const loom_low_placement_relation_t* relation,
     const loom_low_allocation_assignment_t* source_assignment,
-    const loom_low_allocation_assignment_t* destination_assignment) {
+    const loom_low_allocation_assignment_t* destination_assignment,
+    uint32_t end_point) {
   if (relation->unit_count == 0 || destination_assignment == NULL) {
     return LOOM_LOW_ALLOCATION_PACKET_TRANSFER_PRESENCE_DEAD;
   }
@@ -189,12 +190,33 @@ loom_low_allocation_packet_move_append_relation(
   }
 
   const iree_host_size_t move_start = builder->raw_move_count;
-  loom_low_allocation_move_plan_append_assignment(
-      builder->context->move_plan, source_assignment,
-      relation->source_unit_offset, destination_assignment,
-      relation->result_unit_offset, relation->unit_count,
-      relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE,
-      &builder->raw_move_count);
+  const loom_low_allocation_move_plan_context_t* move_context =
+      &builder->context->move_plan->context;
+  const bool is_reference = iree_any_bit_set(
+      move_context->descriptor_set
+          ->reg_classes[source_assignment->descriptor_reg_class_id]
+          .flags,
+      LOOM_LOW_REG_CLASS_FLAG_REFERENCE);
+  // A final observation transfers the guard instead of leaving a stale owner
+  // behind. Each reference unit can end independently; required aliases are
+  // included in its retained storage-component lifetime.
+  const uint32_t transfer_unit_count = is_reference ? 1 : relation->unit_count;
+  for (uint32_t unit = 0; unit < relation->unit_count;
+       unit += transfer_unit_count) {
+    const bool consume_source =
+        relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE ||
+        (is_reference &&
+         !loom_low_allocation_unit_liveness_storage_component_live_at_point(
+             move_context->unit_liveness, move_context->assignment_map.liveness,
+             builder->context->placement, relation->source_ordinal,
+             relation->source_unit_offset + unit, transfer_unit_count,
+             end_point));
+    loom_low_allocation_move_plan_append_assignment(
+        builder->context->move_plan, source_assignment,
+        relation->source_unit_offset + unit, destination_assignment,
+        relation->result_unit_offset + unit, transfer_unit_count,
+        consume_source, &builder->raw_move_count);
+  }
   const iree_host_size_t live_unit_count = builder->raw_move_count - move_start;
   return live_unit_count == relation->unit_count
              ? 0
@@ -330,7 +352,8 @@ loom_low_allocation_packet_move_build_group(
         loom_low_allocation_packet_move_try_assignment(
             assignment_map, relation->source_ordinal);
     presence |= loom_low_allocation_packet_move_append_relation(
-        builder, relation, source_assignment, destination_assignment);
+        builder, relation, source_assignment, destination_assignment,
+        operation_point->end_point);
   }
 
   loom_low_move_sequence_input_flags_t input_flags = 0;
