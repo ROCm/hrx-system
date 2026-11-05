@@ -40,6 +40,7 @@ iree_py_library(
         "//loom/py/loom/dialect/tensor",
         "//loom/py/loom/dialect/test",
         "//loom/py/loom/dialect/tile",
+        "//loom/py/loom/dialect/type",
         "//loom/py/loom/dialect/vector",
         "//loom/py/loom/dialect/view",
     ],

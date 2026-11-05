@@ -190,6 +190,8 @@ def _type_builtin_descriptor_rows(all_types: Sequence[Any]) -> dict[str, TypeDef
     for type_def in all_types:
         if type_def.ir_kind == "dialect":
             continue
+        if type_def.ir_kind == "reference" and type_def.reference_ownership != 0:
+            continue
         kind = TYPE_IR_KIND_MAP[type_def.ir_kind]
         previous = rows.get(kind)
         if previous is not None:
@@ -209,6 +211,7 @@ def _emit_tables_header() -> str:
         "",
         "extern const loom_type_descriptor_t* const",
         "    loom_type_registry_builtin_descriptors[LOOM_TYPE_COUNT_];",
+        "extern const loom_type_descriptor_t* const loom_type_registry_reference_descriptors[2];",
         "",
         "extern const loom_type_registry_entry_t",
         "    loom_type_registry_entries_storage[];",
@@ -343,6 +346,8 @@ def generate_type_builders(all_types: Sequence[Any], *, path: str = "ops", names
     header.extend(_generate_parameterized_type_header_lines(all_types, namespace))
     header.extend(["#ifdef __cplusplus", "}", "#endif", "", f"#endif  // {guard}", ""])
     source = [GENERATED_HEADER, f'#include "loom/{path}/type_builders.h"', '#include "loom/ir/module.h"', ""]
+    if any(type_def.ir_kind == "reference" for type_def in all_types):
+        source.append('#include "loom/ops/reference_type.h"')
     source.extend(_generate_parameterized_type_source_lines(all_types))
     return "\n".join(header), "\n".join(source)
 
@@ -351,6 +356,14 @@ def generate_type_registry(
     all_types: list[Any],
 ) -> tuple[str, str, str]:
     """Generate type_registry.h, type_registry_tables.h, and type_registry_tables.c."""
+    reference_rows: dict[int, TypeDef] = {}
+    for type_def in all_types:
+        if type_def.ir_kind != "reference":
+            continue
+        previous = reference_rows.get(type_def.reference_ownership)
+        if previous is not None:
+            raise ValueError(f"Managed handle ownership {type_def.reference_ownership} has duplicate registry names {previous.name!r} and {type_def.name!r}")
+        reference_rows[type_def.reference_ownership] = type_def
     header = [GENERATED_HEADER]
     header.append("#ifndef LOOM_OPS_TYPE_REGISTRY_H_")
     header.append("#define LOOM_OPS_TYPE_REGISTRY_H_")
@@ -397,6 +410,10 @@ def generate_type_registry(
     header.append("const loom_type_descriptor_t* loom_type_registry_lookup_builtin(")
     header.append("    loom_type_kind_t kind);")
     header.append("")
+    header.append("// Returns the descriptor for an owning or borrowed managed handle.")
+    header.append("const loom_type_descriptor_t* loom_type_registry_lookup_reference(")
+    header.append("    loom_reference_ownership_t ownership);")
+    header.append("")
     header.append("// Resolves the type-owned value fact domain for |type|, or NULL if the")
     header.append("// registered type has no extension fact domain.")
     header.append("const loom_value_fact_domain_t* loom_type_registry_resolve_fact_domain(")
@@ -438,6 +455,11 @@ def generate_type_registry(
     for kind, type_def in sorted(_type_builtin_descriptor_rows(all_types).items()):
         ident = _type_c_ident(type_def.name)
         source.append(f"    [{kind}] = &loom_type_{ident}_descriptor,")
+    source.append("};")
+    source.append("")
+    source.append("const loom_type_descriptor_t* const loom_type_registry_reference_descriptors[2] = {")
+    for ownership, type_def in reference_rows.items():
+        source.append(f"    [{ownership}] = &loom_type_{_type_c_ident(type_def.name)}_descriptor,")
     source.append("};")
     source.append("")
 

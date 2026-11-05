@@ -113,6 +113,7 @@ from loom.ir import (
     Predicate,
     PredicateArg,
     PredicateListAttr,
+    ReferenceType,
     Region,
     RegisterType,
     ScalarType,
@@ -348,6 +349,11 @@ def _compact_type_definition(
     ir_type: Type, type_registry: dict[Any, Any] | None
 ) -> TypeDef | None:
     """Resolves a compact Python value class to its registered declaration."""
+
+    if isinstance(ir_type, ReferenceType):
+        from loom.builtin_types import BUILTIN_REFERENCE_TYPES
+
+        return BUILTIN_REFERENCE_TYPES[ir_type.ownership]
 
     if type_registry is not None:
         type_def = type_registry.get(type(ir_type))

@@ -577,12 +577,19 @@ typedef struct loom_symbol_definition_descriptor_t {
   // Operand field index plus one containing a kernel workload signature, or 0
   // when the signature is stored in a region or the symbol is not a kernel.
   uint8_t kernel_workload_operand_field_index_plus_one;
+  // External managed-payload identity, absent when both indices are zero.
+  struct {
+    // Attribute index plus one for the provider namespace string.
+    uint8_t namespace_attr_index_plus_one;
+    // Attribute index plus one for the provider's exact payload name string.
+    uint8_t name_attr_index_plus_one;
+  } type_contract;
   // Optional domain that computes typed facts for symbols defined by this op.
   const loom_symbol_fact_domain_t* fact_domain;
 } loom_symbol_definition_descriptor_t;
 
 static_assert(sizeof(loom_symbol_definition_descriptor_t) ==
-                  (IREE_PTR_SIZE == 8 ? 32 : 24),
+                  (IREE_PTR_SIZE == 8 ? 40 : 28),
               "loom_symbol_definition_descriptor_t must remain compact");
 
 static inline iree_string_view_t loom_symbol_definition_descriptor_name(

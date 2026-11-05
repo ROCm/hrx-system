@@ -99,8 +99,9 @@ typedef struct loom_type_descriptor_t {
   // Descriptor-backed parameter schema whose type_descriptor refers to this
   // descriptor, or NULL when not declared.
   const loom_parameterized_type_descriptor_t* parameterized;
-  // Borrowed immutable identity for MANAGED_REFERENCE, otherwise NULL. Managed
-  // references are opaque dialect types with no parameters or interior format.
+  // Static payload identity for an opaque managed dialect type, otherwise NULL.
+  // Declaration-backed ref/ptr types carry their resolved identity in the type
+  // value instead of sharing one payload key across the family descriptor.
   const loom_type_reference_key_t* reference;
 } loom_type_descriptor_t;
 

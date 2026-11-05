@@ -184,6 +184,7 @@ from loom.dsl import (
     SymbolKernelContract,
     SymbolReference,
     SymbolReferenceRole,
+    SymbolTypeContract,
     TargetFactSpecialization,
     TargetLikeInterface,
     TotalBitCountEqual,
@@ -3591,6 +3592,42 @@ class TestSymbolReference:
     def test_rejects_untyped_role(self) -> None:
         with _raises(ValueError, match="role must be a SymbolReferenceRole"):
             SymbolReference("record", ["record"], role="availability")  # type: ignore[arg-type]
+
+
+class TestSymbolTypeContract:
+    def test_key_requires_distinct_fields(self) -> None:
+        with _raises(ValueError, match="distinct fields"):
+            SymbolTypeContract(namespace="key", name="key")
+
+    def test_key_requires_two_required_strings(self) -> None:
+        for kind, optional in (("i64", False), ("string", True)):
+            with _raises(ValueError, match="must be"):
+                Op(
+                    "test.type",
+                    traits=[SYMBOL_DEFINE],
+                    attrs=[
+                        AttrDef("name", "symbol"),
+                        AttrDef("provider", "string"),
+                        AttrDef("payload", kind, optional=optional),
+                    ],
+                    symbol_def=SymbolDefinition(
+                        field="name",
+                        name="managed type",
+                        interfaces=["record"],
+                        type_contract=SymbolTypeContract(
+                            namespace="provider", name="payload"
+                        ),
+                    ),
+                )
+
+    def test_type_contract_excludes_callable_contracts(self) -> None:
+        with _raises(ValueError, match="requires a record"):
+            SymbolDefinition(
+                field="name",
+                name="managed type",
+                interfaces=["callable"],
+                type_contract=SymbolTypeContract(namespace="provider", name="payload"),
+            )
 
 
 class TestSymbolKernelContract:

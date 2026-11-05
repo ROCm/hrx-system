@@ -34,6 +34,7 @@ TYPE_IR_KIND_MAP: dict[str, str] = {
     "storage": "LOOM_TYPE_STORAGE",
     "pool": "LOOM_TYPE_POOL",
     "group": "LOOM_TYPE_GROUP",
+    "reference": "LOOM_TYPE_REFERENCE",
     "dialect": "LOOM_TYPE_DIALECT",
 }
 
@@ -54,13 +55,13 @@ def indirect_parameterized_type_defs(
 ) -> tuple[TypeDef, ...]:
     """Returns descriptor-backed types stored in immutable parameter slots."""
 
-    return tuple(type_def for type_def in parameterized_type_defs(types) if not type_def.uses_inline_enum_parameter)
+    return tuple(type_def for type_def in parameterized_type_defs(types) if type_def.ir_kind == "dialect")
 
 
 def type_ir_kind_c_name(type_def: TypeDef) -> str:
     """Returns the runtime type-kind constant for a declaration."""
 
-    if type_def.uses_inline_enum_parameter:
+    if type_def.uses_inline_enum_parameter or type_def.ir_kind == "reference":
         try:
             return TYPE_IR_KIND_MAP[type_def.ir_kind]
         except KeyError as error:
@@ -133,6 +134,14 @@ def generate_header_lines(types: Sequence[TypeDef], namespace: str = "LOOM_PARAM
         lines.append("")
     for type_def in parameterized_type_defs(types):
         prefix = type_api_prefix(type_def)
+        if type_def.ir_kind == "reference":
+            mode = "OWNED" if type_def.reference_ownership == 0 else "BORROWED"
+            lines.append(f"static inline bool {prefix}_isa(loom_type_t type) {{")
+            lines.append(f"  return loom_type_is_reference(type) && loom_type_reference_ownership(type) == LOOM_REFERENCE_OWNERSHIP_{mode};")
+            lines.append("}")
+            lines.append(f"iree_status_t {prefix}_make(loom_module_t* module, loom_symbol_ref_t declaration, loom_type_t* out_type);")
+            lines.append("")
+            continue
         for parameter in type_def.params:
             enum_def = parameter.enum_def
             if parameter.attr_type not in ("enum", "enum_array", "signed_enum_set") or enum_def is None or enum_def.c_type is not None:
@@ -219,6 +228,13 @@ def generate_source_lines(types: Sequence[TypeDef]) -> list[str]:
         if type_def.uses_inline_enum_parameter:
             lines.extend(_enum_names_lines(type_def, type_def.params[0], linkage=""))
             lines.append("")
+        elif type_def.ir_kind == "reference":
+            prefix = type_api_prefix(type_def)
+            mode = "OWNED" if type_def.reference_ownership == 0 else "BORROWED"
+            lines.append(f"iree_status_t {prefix}_make(loom_module_t* module, loom_symbol_ref_t declaration, loom_type_t* out_type) {{")
+            lines.append(f"  return loom_reference_type_make(module, LOOM_REFERENCE_OWNERSHIP_{mode}, declaration, out_type);")
+            lines.append("}")
+            lines.append("")
     for type_def in indirect_parameterized_type_defs(types):
         prefix = type_api_prefix(type_def)
         lines.append(f"iree_status_t {prefix}_make(")
@@ -303,8 +319,11 @@ def generate_metadata_lines(types: Sequence[TypeDef]) -> list[str]:
         type_ident = type_def.name.replace(".", "_")
         lines.append(f"    .type_descriptor = &loom_type_{type_ident}_descriptor,")
         lines.append(f"    .ir_kind = {type_ir_kind_c_name(type_def)},")
-        if not type_def.uses_inline_enum_parameter:
+        if type_def.ir_kind == "dialect":
             lines.append(f"    .kind = {type_kind_c_name(type_def)},")
+        if type_def.ir_kind == "reference":
+            mode = "OWNED" if type_def.reference_ownership == 0 else "BORROWED"
+            lines.append(f"    .reference_ownership = LOOM_REFERENCE_OWNERSHIP_{mode},")
         type_flags = inline_type_flags_c_expr(type_def)
         if type_flags is not None:
             lines.append(f"    .type_flags = {type_flags},")

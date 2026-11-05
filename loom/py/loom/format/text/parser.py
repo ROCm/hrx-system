@@ -1868,6 +1868,8 @@ def _parse_type_interior(
 
     if type_def.uses_attribute_parameters:
         try:
+            if type_def.ir_kind == "reference":
+                return type_def(module=module, **parsed_attrs)
             return type_def(**parsed_attrs)
         except (TypeError, ValueError) as error:
             raise ParseError(str(error), location, filename) from error
