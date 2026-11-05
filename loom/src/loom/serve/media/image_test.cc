@@ -6,6 +6,7 @@
 
 #include "loom/serve/media/image.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -442,6 +443,73 @@ TEST(ImageTest, PreservesOrientationForDeviceSampling) {
   std::vector<uint8_t> pixels(info.pixel_length);
   IREE_ASSERT_OK(image.Decode(pixels));
   EXPECT_EQ(pixels.size(), 18u);
+}
+
+TEST(ImageTest, RejectsJpegWarningsWithoutProcessDiagnostics) {
+  if (!loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_JPEG)) {
+    return;
+  }
+  std::string truncated = kOrientedJpeg;
+  truncated.resize(truncated.size() - 4);
+  const std::string url = DataUrl("image/jpeg", truncated.c_str());
+  ImageInput image;
+  ::testing::internal::CaptureStderr();
+  iree_status_t status = image.Initialize(url);
+  if (iree_status_is_ok(status)) {
+    std::vector<uint8_t> pixels(image.info().pixel_length);
+    status = image.Decode(pixels);
+  }
+  const std::string process_diagnostics =
+      ::testing::internal::GetCapturedStderr();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, status);
+  EXPECT_TRUE(process_diagnostics.empty()) << process_diagnostics;
+}
+
+TEST(ImageTest, RejectsPngErrorsWithoutProcessDiagnostics) {
+  const auto* codec =
+      loom_serve_media_image_codec(LOOM_SERVE_MEDIA_IMAGE_FORMAT_PNG);
+  if (!codec) {
+    return;
+  }
+  std::vector<uint8_t> compressed(iree_base64_decoded_size(IREE_SV(kPng)));
+  size_t written = 0;
+  IREE_ASSERT_OK(iree_base64_decode(
+      IREE_SV(kPng), iree_make_byte_span(compressed.data(), compressed.size()),
+      &written));
+  compressed.resize(written);
+  loom_serve_media_image_inspection_t inspection = {
+      .data = iree_make_const_byte_span(compressed.data(), compressed.size()),
+  };
+  codec->inspect(1, &inspection);
+  IREE_ASSERT_OK(inspection.status);
+  // Corrupt the IDAT CRC after inspection so realization owns the error.
+  const uint8_t idat_type[] = {'I', 'D', 'A', 'T'};
+  const auto idat = std::search(compressed.begin(), compressed.end(),
+                                std::begin(idat_type), std::end(idat_type));
+  ASSERT_NE(idat, compressed.end());
+  const size_t type_offset = idat - compressed.begin();
+  ASSERT_GE(type_offset, 4u);
+  const uint32_t length = (uint32_t)compressed[type_offset - 4] << 24 |
+                          (uint32_t)compressed[type_offset - 3] << 16 |
+                          (uint32_t)compressed[type_offset - 2] << 8 |
+                          (uint32_t)compressed[type_offset - 1];
+  const size_t crc_offset = type_offset + sizeof(idat_type) + length;
+  ASSERT_LT(crc_offset, compressed.size());
+  compressed[crc_offset] ^= 1;
+  std::vector<uint8_t> pixels((size_t)inspection.info.width *
+                              inspection.info.height *
+                              inspection.info.pixel_format);
+  loom_serve_media_image_decoding_t decoding = {
+      .data = iree_make_const_byte_span(compressed.data(), compressed.size()),
+      .info = &inspection.info,
+      .pixels = iree_make_byte_span(pixels.data(), pixels.size()),
+  };
+  ::testing::internal::CaptureStderr();
+  codec->decode(1, &decoding);
+  const std::string process_diagnostics =
+      ::testing::internal::GetCapturedStderr();
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, decoding.status);
+  EXPECT_TRUE(process_diagnostics.empty()) << process_diagnostics;
 }
 
 TEST(ImageTest, DecodesIntoCallerOwnedExactStorage) {

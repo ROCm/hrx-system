@@ -21,11 +21,29 @@ typedef struct loom_serve_media_jpeg_error_t {
   char message[JMSG_LENGTH_MAX];
 } loom_serve_media_jpeg_error_t;
 
-static void loom_serve_media_jpeg_error_exit(j_common_ptr common) {
+static void loom_serve_media_jpeg_fail(j_common_ptr common) {
   loom_serve_media_jpeg_error_t* error =
       (loom_serve_media_jpeg_error_t*)common->err;
   (*common->err->format_message)(common, error->message);
   longjmp(error->jump, 1);
+}
+
+static void loom_serve_media_jpeg_emit_message(j_common_ptr common,
+                                               int message_level) {
+  if (message_level < 0) {
+    // A decoder warning means the input was malformed even when libjpeg can
+    // synthesize partial pixels. Report it through the codec status instead of
+    // letting libjpeg write an unsolicited process-level diagnostic.
+    loom_serve_media_jpeg_fail(common);
+  }
+}
+
+static void loom_serve_media_jpeg_error_initialize(
+    struct jpeg_decompress_struct* decoder,
+    loom_serve_media_jpeg_error_t* error) {
+  decoder->err = jpeg_std_error(&error->base);
+  error->base.error_exit = loom_serve_media_jpeg_fail;
+  error->base.emit_message = loom_serve_media_jpeg_emit_message;
 }
 
 static iree_status_t loom_serve_media_jpeg_inspect(
@@ -36,8 +54,7 @@ static iree_status_t loom_serve_media_jpeg_inspect(
   }
   struct jpeg_decompress_struct decoder;
   loom_serve_media_jpeg_error_t error = {0};
-  decoder.err = jpeg_std_error(&error.base);
-  error.base.error_exit = loom_serve_media_jpeg_error_exit;
+  loom_serve_media_jpeg_error_initialize(&decoder, &error);
   volatile bool created = false;
   if (setjmp(error.jump)) {
     if (created) {
@@ -72,8 +89,7 @@ static iree_status_t loom_serve_media_jpeg_decode(
     iree_byte_span_t pixels) {
   struct jpeg_decompress_struct decoder;
   loom_serve_media_jpeg_error_t error = {0};
-  decoder.err = jpeg_std_error(&error.base);
-  error.base.error_exit = loom_serve_media_jpeg_error_exit;
+  loom_serve_media_jpeg_error_initialize(&decoder, &error);
   volatile bool created = false;
   if (setjmp(error.jump)) {
     if (created) {
