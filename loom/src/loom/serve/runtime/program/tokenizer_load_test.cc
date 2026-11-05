@@ -7,11 +7,13 @@
 #include "loom/serve/runtime/program/tokenizer_load.h"
 
 #include <atomic>
+#include <fstream>
 #include <string>
 
 #include "iree/base/threading/notification.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/testing/temp_file.h"
 #include "iree/tokenizer/vocab/vocab.h"
 #include "loom/model/card.h"
 #include "loom/serve/runtime/host/host.h"
@@ -50,9 +52,40 @@ class TokenizerLoadTest : public ::testing::Test {
     EXPECT_TRUE(loom_serve_tokenizer_load_take(&load_, &status_, &tokenizer_));
     IREE_EXPECT_OK(status_);
     loom_serve_tokenizer_release(tokenizer_);
+    // The model/load allocator may retire while shared cache entries remain.
+    EXPECT_EQ(load_allocations_.load(), 0u);
     loom_serve_tokenizer_cache_free(cache_);
+    EXPECT_EQ(load_allocations_.load(), 0u);
     loom_serve_package_release(sources_.package);
     loom_model_card_release(sources_.card);
+    if (file_.Exists()) {
+      EXPECT_TRUE(file_.Remove());
+    }
+  }
+
+  iree_allocator_t LoadAllocator() {
+    return {&load_allocations_,
+            +[](void* self, iree_allocator_command_t command,
+                const void* parameters, void** pointer) -> iree_status_t {
+              auto* count = static_cast<std::atomic<size_t>*>(self);
+              const bool had_pointer =
+                  (command == IREE_ALLOCATOR_COMMAND_FREE ||
+                   command == IREE_ALLOCATOR_COMMAND_REALLOC) &&
+                  *pointer != nullptr;
+              const auto system = iree_allocator_system();
+              auto status =
+                  system.ctl(system.self, command, parameters, pointer);
+              if (iree_status_is_ok(status)) {
+                if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+                  if (had_pointer) {
+                    --*count;
+                  }
+                } else if (!had_pointer && *pointer) {
+                  ++*count;
+                }
+              }
+              return status;
+            }};
   }
 
   static loomc_status_t Submit(void* user_data, loomc_task_t* task) {
@@ -73,7 +106,7 @@ class TokenizerLoadTest : public ::testing::Test {
     return loom_serve_tokenizer_load_start(
         cache_, {Submit, this}, &sources_, directory, locator,
         [](void* self) { ++static_cast<TokenizerLoadTest*>(self)->wakes_; },
-        this, iree_allocator_system(), &load_);
+        this, LoadAllocator(), &load_);
   }
 
   iree_status_t SelectTokenizer(const std::string& tokenizer) {
@@ -92,7 +125,7 @@ class TokenizerLoadTest : public ::testing::Test {
     return loom_serve_tokenizer_load_start(
         cache_, {Submit, this}, &sources_, IREE_SV("ignored-for-card"), name,
         [](void* self) { ++static_cast<TokenizerLoadTest*>(self)->wakes_; },
-        this, iree_allocator_system(), &load_);
+        this, LoadAllocator(), &load_);
   }
 
   void RunQueued() {
@@ -113,6 +146,7 @@ class TokenizerLoadTest : public ::testing::Test {
                   IREE_SV("b")),
               1);
     EXPECT_EQ(wakes_, 1);
+    EXPECT_EQ(load_allocations_.load(), 0u);
   }
 
   void CheckSingleWorker();
@@ -135,6 +169,10 @@ class TokenizerLoadTest : public ::testing::Test {
   bool reject_ = false;
   // Number of terminal notifications received by the serialized owner.
   int wakes_ = 0;
+  // Outstanding operation-allocator objects, distinct from shared storage.
+  std::atomic<size_t> load_allocations_{0};
+  // Optional filesystem source, removed after cached mappings retire.
+  iree::testing::TempFilePath file_{"tokenizer_cache", ".json"};
 };
 
 TEST_F(TokenizerLoadTest, LegacyPathResolvesAgainstItsDeclaredDirectory) {
@@ -201,6 +239,26 @@ TEST_F(TokenizerLoadTest, InlineCompletionPublishesOneOwnedResult) {
   inline_ = true;
   IREE_ASSERT_OK(Start());
   CheckResult();
+}
+
+TEST_F(TokenizerLoadTest, FileSourceAndValueOutliveTheirLoaderAllocator) {
+  std::ofstream file(file_.path(), std::ios::binary);
+  file << R"({"model":{"type":"BPE","vocab":{"a":0,"b":1},"merges":[]}})";
+  file.close();
+  ASSERT_TRUE(file.good());
+  IREE_ASSERT_OK(Start(file_.path_view()));
+  RunQueued();
+  CheckResult();
+  // The file producer has retired. A package lookup still reuses its value
+  // without borrowing the first load's allocator for either identity or data.
+  loom_serve_tokenizer_t* first = tokenizer_;
+  tokenizer_ = nullptr;
+  wakes_ = 0;
+  IREE_ASSERT_OK(Start());
+  RunQueued();
+  CheckResult();
+  EXPECT_EQ(tokenizer_, first);
+  loom_serve_tokenizer_release(first);
 }
 
 TEST_F(TokenizerLoadTest, EqualBytesAcrossLocatorsShareOneTokenizer) {
@@ -294,7 +352,7 @@ void TokenizerLoadTest::CheckSingleWorker() {
               iree_notification_post(static_cast<iree_notification_t*>(data),
                                      IREE_ALL_WAITERS);
             },
-            &parent->notification, iree_allocator_system(), &test->load_);
+            &parent->notification, test->LoadAllocator(), &test->load_);
       },
       [](loomc_task_t* task) {
         auto* parent =

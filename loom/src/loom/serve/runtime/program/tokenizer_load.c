@@ -16,7 +16,7 @@
 struct loom_serve_tokenizer_load_t {
   // Accepted task ownership ends at its final publication callback.
   loomc_task_t task;
-  // Allocator owning this operation and the transferred tokenizer.
+  // Allocator owning this operation and its copied locator until take.
   iree_allocator_t host_allocator;
   // Borrowed shared cache owned beyond every accepted load.
   loom_serve_tokenizer_cache_t* cache;
@@ -68,9 +68,11 @@ static void loom_serve_tokenizer_load_execute(
   loom_serve_tokenizer_load_t* load = (loom_serve_tokenizer_load_t*)task;
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, load->locator.data, load->locator.size);
+  const iree_allocator_t shared_allocator =
+      loom_serve_tokenizer_cache_allocator(load->cache);
   loomc_source_t* contents = NULL;
-  iree_status_t status = loom_serve_sources_open(
-      &load->sources, load->locator, load->host_allocator, &contents);
+  iree_status_t status = loom_serve_sources_open(&load->sources, load->locator,
+                                                 shared_allocator, &contents);
   if (iree_status_is_ok(status)) {
     const loomc_byte_span_t bytes = loomc_source_contents(contents);
     loom_serve_tokenizer_acquisition_t acquisition;
@@ -82,7 +84,7 @@ static void loom_serve_tokenizer_load_execute(
       iree_tokenizer_t* value = NULL;
       status = iree_tokenizer_from_huggingface_json(
           iree_make_string_view((const char*)bytes.data, bytes.data_length),
-          load->host_allocator, &value);
+          shared_allocator, &value);
       const iree_status_t publication_status =
           loom_serve_tokenizer_cache_complete(load->cache, contents, status,
                                               value, &load->tokenizer);
