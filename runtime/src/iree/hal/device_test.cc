@@ -196,10 +196,27 @@ TEST(DeviceCreateParamsTest, DefaultParamsIncludeDiscardEventSink) {
       iree_hal_device_create_params_default();
   EXPECT_TRUE(iree_hal_device_event_sink_is_valid(params.event_sink));
   EXPECT_EQ(IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAG_NONE, params.runtime_features);
+  EXPECT_EQ(IREE_ASYNC_WAIT_FLAG_YIELD, params.completion_wait_flags);
 }
 
 TEST(DeviceCreateParamsTest, VerifyRejectsZeroedParams) {
   iree_hal_device_create_params_t params = {0};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        iree_hal_device_create_params_verify(&params));
+}
+
+TEST(DeviceCreateParamsTest, VerifyCompletionWaitPolicy) {
+  auto params = iree_hal_device_create_params_default();
+  params.proactor_pool = reinterpret_cast<iree_async_proactor_pool_t*>(1);
+  const iree_async_wait_flags_t policies[] = {
+      IREE_ASYNC_WAIT_FLAG_NONE, IREE_ASYNC_WAIT_FLAG_YIELD,
+      IREE_ASYNC_WAIT_FLAG_ACTIVE,
+      IREE_ASYNC_WAIT_FLAG_YIELD | IREE_ASYNC_WAIT_FLAG_ACTIVE};
+  for (auto policy : policies) {
+    params.completion_wait_flags = policy;
+    IREE_EXPECT_OK(iree_hal_device_create_params_verify(&params));
+  }
+  params.completion_wait_flags = 1u << 31;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_device_create_params_verify(&params));
 }

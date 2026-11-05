@@ -43,6 +43,14 @@ IREE_API_EXPORT iree_status_t iree_hal_device_create_params_verify(
         IREE_STATUS_INVALID_ARGUMENT,
         "HAL device creation requires a valid device event sink");
   }
+  if (IREE_UNLIKELY(
+          params->completion_wait_flags &
+          ~(IREE_ASYNC_WAIT_FLAG_YIELD | IREE_ASYNC_WAIT_FLAG_ACTIVE))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "HAL device creation requested unknown completion "
+                            "wait flags 0x%08X",
+                            params->completion_wait_flags);
+  }
   if (IREE_UNLIKELY(params->runtime_features &
                     ~IREE_HAL_DEVICE_RUNTIME_FEATURE_FLAGS_KNOWN)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

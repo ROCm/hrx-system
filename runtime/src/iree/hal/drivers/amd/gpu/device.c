@@ -1499,9 +1499,15 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
     memcpy(device->membership.completion_tail,
            device->sources + device->queue_count,
            device->membership.completion_tail_count * sizeof(*device->sources));
+    const iree_duration_t completion_spin_ns =
+        iree_any_bit_set(
+            create_params->completion_wait_flags,
+            IREE_ASYNC_WAIT_FLAG_YIELD | IREE_ASYNC_WAIT_FLAG_ACTIVE)
+            ? options->completion_spin_ns
+            : 0;
     status = iree_hal_amd_gpu_completion_initialize(
-        context, source_count, device->sources, options->completion_spin_ns,
-        affinity, host_allocator, &device->completion);
+        context, source_count, device->sources, completion_spin_ns, affinity,
+        host_allocator, &device->completion);
   }
   if (iree_status_is_ok(status)) {
     *out_device = (void*)device;
