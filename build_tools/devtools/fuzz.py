@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import sys
@@ -55,6 +56,31 @@ def default_fuzz_cache_dir(
 def bazel_fuzz_target_dir(target: str) -> Path:
     package, target_name = split_bazel_target_label(target)
     return default_fuzz_cache_dir() / package / target_name
+
+
+def bazel_fuzz_target_shard(target: str, shard_count: int) -> int:
+    digest = hashlib.sha256(target.encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") % shard_count
+
+
+def bazel_fuzz_campaign_result_path(
+    target_pattern: str, shard_index: int, shard_count: int
+) -> Path:
+    readable_pattern = (
+        target_pattern.removeprefix("//")
+        .replace("/...", "-all")
+        .replace("...", "all")
+        .replace(":", "-")
+        .replace("/", "-")
+    )
+    pattern_digest = hashlib.sha256(target_pattern.encode("utf-8")).hexdigest()[:8]
+    campaign_name = f"{sanitize_path_part(readable_pattern)}-{pattern_digest}"
+    return (
+        default_fuzz_cache_dir()
+        / "campaigns"
+        / campaign_name
+        / f"shard-{shard_index}-of-{shard_count}.json"
+    )
 
 
 def cmake_fuzz_target_dir(target: str) -> Path:

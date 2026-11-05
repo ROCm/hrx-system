@@ -525,10 +525,13 @@ deps; add --dep TARGET for anything inference misses.""",
             epilog="""Examples:
   python dev.py bazel fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz
   python dev.py bazel fuzz //runtime/src/iree/tokenizer/... -- -max_total_time=60
+  python dev.py bazel fuzz --workers=4 --shard=0/3 //... -- -max_total_time=3600
 
 This builds with --config=fuzzer, resolves executable paths with cquery, then
 runs each fuzzer in a fresh child process with independent peak-memory accounting.
-Single-target runs forward interruption signals and return the fuzzer exit code.""",
+--workers bounds host concurrency, --shard=INDEX/COUNT assigns zero-based stable
+target shards across machines, and --result=PATH overrides the default JSON result
+path.""",
         )
     if command == "fuzz" and lane == "cmake":
         return CommandHelp(
@@ -888,19 +891,24 @@ disable inference and `-k/--keep` to inspect the generated scratch package."""
 
 Use `iree-bazel-fuzz` for libFuzzer sessions without holding the Bazel server
 lock. It builds with `--config=fuzzer`, resolves fuzzer binaries with cquery,
-and runs the binaries directly. A single target replaces the wrapper process
-with the fuzzer; `...` patterns discover labels ending in `_fuzz`, build them
-together, and launch each fuzzer binary directly.
+and runs the binaries directly. `...` patterns discover labels ending in
+`_fuzz`, build the selected stable shard together, and launch at most the
+requested number of fuzzer processes at once. The default is one worker.
 
 ```bash
 iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz
 iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz -- -max_total_time=60
-iree-bazel-fuzz //runtime/src/iree/tokenizer/... -- -max_total_time=60 -jobs=8
+iree-bazel-fuzz --workers=4 //runtime/src/iree/tokenizer/... -- -max_total_time=60
+iree-bazel-fuzz --workers=4 --shard=0/3 //... -- -max_total_time=3600
 ```
 
 Corpus and artifact directories live under
 `IREE_FUZZ_CACHE` when set, otherwise the platform user cache directory under
-`iree-fuzz-cache/`. Fuzzer arguments go after `--`."""
+`iree-fuzz-cache/`. Each run writes a compact JSON campaign result there;
+`--result=PATH` overrides its location. Shards use a stable hash of each target
+label, so adding a target does not move existing targets between machines.
+Fuzzer arguments go after `--`; libFuzzer `-jobs` multiplies work inside every
+selected target and is usually inappropriate for pattern campaigns."""
 
     return bazel_agent_markdown()
 
