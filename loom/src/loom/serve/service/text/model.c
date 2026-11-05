@@ -343,7 +343,7 @@ static iree_status_t loom_serve_text_load_link(loom_serve_text_load_t* load) {
       model->shape_count, model->shapes, model->stage_count,
       model->stage_bindings, model->host_allocator, &model->control));
   model->stage_workspace_bytes =
-      loom_serve_module_workspace_requirement(model->control.native_module)
+      loom_serve_module_workspace_requirement(model->control.native_module, 0)
           .allocation_size;
   IREE_RETURN_IF_ERROR(loom_serve_residency_prepare_working_set(
       model->residency, model->stage_workspace_bytes, 0));

@@ -383,6 +383,7 @@ static iree_status_t loom_serve_finite_create_control(
   }
   const loom_serve_module_options_t options = {
       .binding_capacity = 2,
+      .executions = {1, &model->execution},
       .stages = {model->stages.table->part_count, model->stages.table->parts},
   };
   iree_vm_module_t* native_modules[5] = {0};
@@ -393,9 +394,8 @@ static iree_status_t loom_serve_finite_create_control(
   if (iree_status_is_ok(status)) {
     iree_vm_buffer_release(model->control.tags);
     model->control.tags = read_only_tags;
-    status =
-        loom_serve_module_create(&model->control.hal_types, model->execution,
-                                 options, host_allocator, &native_modules[0]);
+    status = loom_serve_module_create(&model->control.hal_types, options,
+                                      host_allocator, &native_modules[0]);
   }
   if (iree_status_is_ok(status)) {
     model->control.runner = native_modules[0];
@@ -1113,10 +1113,10 @@ iree_status_t loom_serve_finite_model_advance_batch(
     const uint64_t input_bytes =
         iree_vm_buffer_length(model->invocation.payload);
     const uint64_t private_bytes =
-        input_bytes +
-        iree_min(loom_serve_module_workspace_requirement(model->control.runner)
-                     .allocation_size,
-                 UINT64_MAX - input_bytes);
+        input_bytes + iree_min(loom_serve_module_workspace_requirement(
+                                   model->control.runner, 0)
+                                   .allocation_size,
+                               UINT64_MAX - input_bytes);
     return loom_serve_residency_prepare_working_set(
         loom_serve_executables_residency(model->executables), private_bytes,
         loom_serve_finite_result_output_length(model->invocation.result));

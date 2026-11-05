@@ -2,9 +2,9 @@ func.decl import("runner") @execute_3(%stage: i32, %control: hal.buffer, %tokens
 
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
 
-func.decl import("runner") @fence(%work: i64) -> (hal.fence)
+func.decl import("runner") @fence(%execution: i32, %work: i64) -> (hal.fence)
 
-func.decl import("runner") @join(%ready: hal.fence)
+func.decl import("runner") @join(%execution: i32, %ready: hal.fence)
 
 // This model entry selects prepared stages without owning per-session state.
 // Its result is an accepted submission on the hosting runner's execution domain.
@@ -39,8 +39,28 @@ func.def public @fork(%next_stage: i32, %control: hal.buffer, %tokens: hal.buffe
 func.def public @dependencies(%ready: hal.fence, %control: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %next_control: hal.buffer, %next_tokens: hal.buffer, %next_progress: hal.buffer) -> (hal.fence) {
   %c0 = scalar.constant 0 : i32
   %producer = func.call @execute_3(%c0, %control, %tokens, %progress) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
-  %produced = func.call @fence(%producer) : (i64) -> (hal.fence)
-  func.call @join(%ready) : (hal.fence)
+  %produced = func.call @fence(%c0, %producer) : (i32, i64) -> (hal.fence)
+  func.call @join(%c0, %ready) : (i32, hal.fence)
   %next = func.call @execute_3(%c0, %next_control, %next_tokens, %next_progress) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
   func.return %produced : hal.fence
+}
+
+// Producer and consumer use distinct execution timelines. Only the peer's
+// later work imports the gate, so primary work and earlier peer feedback stay
+// independent. An invalid final stage fails after both owners accepted work.
+func.def public @peers(%ready: hal.fence, %last_stage: i32, %control: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %next_control: hal.buffer, %next_tokens: hal.buffer, %next_progress: hal.buffer) -> (hal.fence) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c3 = scalar.constant 3 : i32
+  %offset = scalar.constant 0 : i64
+  %length = scalar.constant 516 : i64
+  %producer = func.call @execute_3(%c0, %control, %tokens, %progress) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %produced = func.call @fence(%c0, %producer) : (i32, i64) -> (hal.fence)
+  func.call @join(%c1, %produced) : (i32, hal.fence)
+  %consumer = func.call @execute_3(%c3, %control, %tokens, %progress) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %download = func.call @feedback(%c1, %tokens, %offset, %length) : (i32, hal.buffer, i64, i64) -> (i64)
+  %consumed = func.call @fence(%c1, %consumer) : (i32, i64) -> (hal.fence)
+  func.call @join(%c1, %ready) : (i32, hal.fence)
+  %next = func.call @execute_3(%last_stage, %next_control, %next_tokens, %next_progress) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  func.return %consumed : hal.fence
 }

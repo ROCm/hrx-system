@@ -20,15 +20,26 @@ iree_status_t JitModuleTest::PrepareVm() {
   IREE_RETURN_IF_ERROR(iree_hal_module_register_types(environment_, &table));
   IREE_RETURN_IF_ERROR(iree_hal_module_types_resolve(table, &types_));
   const loom_serve_stage_t stages[] = {
-      {commands_[0], 1, transients_[0], dispatches_[0]},
-      {commands_[1], 1, transients_[1], dispatches_[1]},
+      {
+          .command_buffer = commands_[0],
+          .binding_count = 1,
+          .transient = transients_[0],
+          .dispatch = dispatches_[0],
+      },
+      {
+          .command_buffer = commands_[1],
+          .binding_count = 1,
+          .transient = transients_[1],
+          .dispatch = dispatches_[1],
+      },
   };
   loom_serve_module_options_t options = {
       .binding_capacity = 1,
+      .executions = {1, &execution_},
       .stages = {commands_[1] || dispatches_[1] ? 2u : 1u, stages},
   };
-  IREE_RETURN_IF_ERROR(loom_serve_module_create(&types_, execution_, options,
-                                                host_allocator_, &native_));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_module_create(&types_, options, host_allocator_, &native_));
   const std::string directory = std::filesystem::absolute(directory_).string();
   const std::string path = directory + "/control.loom";
   iree_const_byte_span_t image;

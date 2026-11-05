@@ -89,18 +89,19 @@ iree_status_t loom_serve_text_control_initialize(
            state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS].data,
            lengths[TEXT_HOST_STATE_ORIGINS]);
   }
-  const iree_byte_span_t feedback[] = {
-      control->host.bytes[TEXT_HOST_OUTPUTS],
-      control->host.bytes[TEXT_HOST_RESULTS],
-      control->host.bytes[TEXT_HOST_NEXT_RESULTS],
+  const loom_serve_module_feedback_t feedback[] = {
+      {.destination = control->host.bytes[TEXT_HOST_OUTPUTS]},
+      {.destination = control->host.bytes[TEXT_HOST_RESULTS]},
+      {.destination = control->host.bytes[TEXT_HOST_NEXT_RESULTS]},
   };
   const loom_serve_module_options_t options = {
       .binding_capacity = 7,
+      .executions = {1, &execution},
       .stages = {stage_count, stages},
       .feedback = {IREE_ARRAYSIZE(feedback), feedback},
   };
-  status = loom_serve_module_create(&source->types, execution, options,
-                                    host_allocator, &control->native_module);
+  status = loom_serve_module_create(&source->types, options, host_allocator,
+                                    &control->native_module);
   IREE_RETURN_IF_ERROR(status);
   iree_vm_module_t* libraries[] = {control->native_module, NULL, NULL, NULL,
                                    NULL};

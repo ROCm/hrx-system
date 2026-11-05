@@ -199,13 +199,16 @@ The [runner-module contract](https://github.com/ROCm/hrx-system/blob/main/loom/s
 defines arity, buffer types and lifetime. This is a coarse serving capability,
 not a source program's ownership of the entire device or process scheduler.
 
-Independent work can use explicit dependencies. `runner.fence(work)` returns a
-`hal.fence` for a previously accepted work value. It captures that producer,
-not later submissions or the separate feedback branch. `runner.join(ready)`
-orders subsequent model work after the supplied fence without waiting on the
-CPU or synchronizing other models. A null fence represents no external work.
-Completion describes readiness; storage ownership still extends through the
-last accepted consumer, including when a dependency fails.
+Independent work can use explicit dependencies. Each stage and feedback slot
+has an execution owner; returned work values belong to that owner's timeline.
+`runner.fence(execution, work)` returns a `hal.fence` for a previously accepted
+work value on that execution. It captures that producer, not later submissions
+or the separate feedback branch. `runner.join(execution, ready)` orders
+subsequent work on the selected execution after the supplied fence without
+waiting on the CPU or synchronizing other executions. A null fence represents
+no external work. Singleton services use execution zero. Completion describes
+readiness; storage ownership still extends through the last accepted consumer,
+including when a dependency fails.
 
 ### Read checkpoint bytes on demand
 
@@ -231,13 +234,13 @@ A control program can enqueue independent reads before joining either one:
 
 ```text
 producer = runner.execute_N(descriptor_stage, ...)
-produced = runner.fence(producer)
+produced = runner.fence(0, producer)
 first = parameters.gather(source_a, key_a, produced, ranges_a, 0, count_a, target_a)
 second = parameters.gather(source_b, key_b, produced, ranges_b, 0, count_b, target_b)
 runner.execute_N(independent_stage, ...)
-runner.join(first)
+runner.join(0, first)
 runner.execute_N(first_consumer, ...)
-runner.join(second)
+runner.join(0, second)
 runner.execute_N(second_consumer, ...)
 ```
 

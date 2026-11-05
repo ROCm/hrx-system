@@ -11,6 +11,13 @@
 
 #include "iree/vm/reflection.h"
 
+typedef struct loom_serve_module_execution_t {
+  // Retained external execution capability shared with the host I/O path.
+  loom_serve_execution_t* execution;
+  // Peak private requirement of the currently bound stages on this timeline.
+  iree_hal_pool_reservation_request_t workspace_requirement;
+} loom_serve_module_execution_t;
+
 typedef struct loom_serve_module_t {
   // Native module prefix owning all declaration storage below.
   iree_vm_module_t base;
@@ -22,16 +29,16 @@ typedef struct loom_serve_module_t {
   iree_vm_ref_type_t types[2];
   // Largest execute_N arity, independent of the loaded stage table.
   uint16_t binding_capacity;
-  // Retained external execution capability, shared with the host's I/O path.
-  loom_serve_execution_t* execution;
+  // Immutable execution identities, retained independently of stage bindings.
+  loom_serve_module_execution_t* executions;
+  // Number of initialized execution entries, including during construction.
+  iree_host_size_t execution_count;
   // Number of retained stages, independent of the export arity family.
   iree_host_size_t stage_count;
   // Owned stage array with retained command buffers or direct executables.
   loom_serve_stage_t* stages;
-  // Private high-water requirement of the currently bound, ordered stages.
-  iree_hal_pool_reservation_request_t workspace_requirement;
   // Copied descriptors borrowing stable host feedback storage.
-  iree_byte_span_t* feedback;
+  loom_serve_module_feedback_t* feedback;
   // Number of registered feedback slots.
   iree_host_size_t feedback_count;
   // Owned name storage used by the export directory.
@@ -51,7 +58,7 @@ void loom_serve_module_bind_feedback(iree_vm_module_t* base,
                                      iree_host_size_t slot,
                                      iree_byte_span_t destination) {
   loom_serve_module_t* module = (loom_serve_module_t*)base;
-  module->feedback[slot] = destination;
+  module->feedback[slot].destination = destination;
 }
 
 void loom_serve_module_clear_stages(iree_vm_module_t* base) {
@@ -63,18 +70,26 @@ void loom_serve_module_clear_stages(iree_vm_module_t* base) {
   iree_allocator_free(module->host_allocator, module->stages);
   module->stages = NULL;
   module->stage_count = 0;
-  module->workspace_requirement = (iree_hal_pool_reservation_request_t){0};
+  for (iree_host_size_t i = 0; i < module->execution_count; ++i) {
+    module->executions[i].workspace_requirement =
+        (iree_hal_pool_reservation_request_t){0};
+  }
 }
 
 iree_hal_pool_reservation_request_t loom_serve_module_workspace_requirement(
-    const iree_vm_module_t* base) {
-  return ((const loom_serve_module_t*)base)->workspace_requirement;
+    const iree_vm_module_t* base, uint32_t execution_index) {
+  return ((const loom_serve_module_t*)base)
+      ->executions[execution_index]
+      .workspace_requirement;
 }
 
 static void loom_serve_module_destroy(iree_vm_module_t* base) {
   loom_serve_module_t* module = (loom_serve_module_t*)base;
   loom_serve_module_clear_stages(base);
-  loom_serve_execution_release(module->execution);
+  for (iree_host_size_t i = 0; i < module->execution_count; ++i) {
+    loom_serve_execution_release(module->executions[i].execution);
+  }
+  iree_allocator_free(module->host_allocator, module->executions);
   iree_allocator_free(module->host_allocator, module->arguments);
   iree_allocator_free(module->host_allocator, module->callables);
   iree_allocator_free(module->host_allocator, module->exports);
@@ -93,6 +108,8 @@ static iree_status_t loom_serve_module_execute(
                             "runner stage %u is not loaded", index);
   }
   const loom_serve_stage_t* stage = &module->stages[index];
+  loom_serve_execution_t* execution =
+      module->executions[stage->execution_index].execution;
   if (stage->binding_count != params->function_ordinal) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "runner stage %u expects %u buffers", index,
@@ -125,8 +142,7 @@ static iree_status_t loom_serve_module_execute(
         .allocation_size = stage->transient.required_byte_length,
         .min_alignment = stage->transient.minimum_alignment,
     };
-    status =
-        loom_serve_execution_alloca(module->execution, 1, &request, &workspace);
+    status = loom_serve_execution_alloca(execution, 1, &request, &workspace);
     if (iree_status_is_ok(status)) {
       bindings[stage->transient.binding_index] = (iree_hal_buffer_binding_t){
           workspace, 0, stage->transient.required_byte_length};
@@ -141,17 +157,16 @@ static iree_status_t loom_serve_module_execute(
                                    module->descriptor.process_storage_size -
                                    stage->binding_count *
                                        sizeof(iree_hal_buffer_ref_t));
-      status = loom_serve_dispatch_issue(stage->dispatch, module->execution,
-                                         table, scratch, out_value);
+      status = loom_serve_dispatch_issue(stage->dispatch, execution, table,
+                                         scratch, out_value);
     } else {
-      status = loom_serve_execution_execute(
-          module->execution, stage->command_buffer, table, out_value);
+      status = loom_serve_execution_execute(execution, stage->command_buffer,
+                                            table, out_value);
     }
   }
   if (workspace) {
     status = iree_status_join(
-        status,
-        loom_serve_execution_dealloca(module->execution, workspace, out_value));
+        status, loom_serve_execution_dealloca(execution, workspace, out_value));
     iree_hal_buffer_release(workspace);
   }
   return status;
@@ -167,7 +182,7 @@ static iree_status_t loom_serve_module_feedback(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "runner feedback slot %u is not registered", slot);
   }
-  if (length > module->feedback[slot].data_length) {
+  if (length > module->feedback[slot].destination.data_length) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "runner feedback exceeds host destination");
   }
@@ -181,11 +196,12 @@ static iree_status_t loom_serve_module_feedback(
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
       .download = {.source_buffer = (iree_hal_buffer_t*)ref.object,
                    .source_offset = offset,
-                   .target = module->feedback[slot].data,
+                   .target = module->feedback[slot].destination.data,
                    .length = length},
   };
-  return loom_serve_execution_feedback(module->execution, 1, &operation,
-                                       out_value);
+  return loom_serve_execution_feedback(
+      module->executions[module->feedback[slot].execution_index].execution, 1,
+      &operation, out_value);
 }
 
 static iree_status_t loom_serve_module_start(
@@ -200,26 +216,36 @@ static iree_status_t loom_serve_module_start(
             ? loom_serve_module_feedback(module, &params->call, &value)
             : loom_serve_module_execute(module, params, &value));
     iree_vm_call_value_result_store(&params->call, 0, value);
-  } else if (params->function_ordinal == module->binding_capacity + 2) {
-    value = iree_vm_call_value_argument_load(&params->call, 0);
-    const loom_serve_execution_frontier_t frontier =
-        loom_serve_execution_frontier(module->execution);
-    if (value > frontier.values[0]) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "runner fence requires an accepted work value");
-    }
-    iree_hal_fence_t* fence = NULL;
-    IREE_RETURN_IF_ERROR(iree_hal_fence_create_at(
-        frontier.semaphores[0], value, module->host_allocator, &fence));
-    void* owned = fence;
-    iree_vm_ref_t result = iree_vm_ref_from_ptr_move(&owned, module->types[1]);
-    iree_vm_call_ref_result_store_move(&params->call, 0, &result);
   } else {
-    iree_vm_ref_t fence = iree_vm_ref_null();
-    iree_vm_call_ref_argument_load_borrow(&params->call, 0, &fence);
-    IREE_RETURN_IF_ERROR(loom_serve_execution_barrier(
-        module->execution,
-        iree_hal_fence_semaphore_list((iree_hal_fence_t*)fence.object)));
+    const uint32_t index =
+        (uint32_t)iree_vm_call_value_argument_load(&params->call, 0);
+    if (index >= module->execution_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "runner execution %u is not registered", index);
+    }
+    loom_serve_execution_t* execution = module->executions[index].execution;
+    if (params->function_ordinal == module->binding_capacity + 2) {
+      value = iree_vm_call_value_argument_load(&params->call, 1);
+      const loom_serve_execution_frontier_t frontier =
+          loom_serve_execution_frontier(execution);
+      if (value > frontier.values[0]) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "runner fence requires an accepted work value");
+      }
+      iree_hal_fence_t* fence = NULL;
+      IREE_RETURN_IF_ERROR(iree_hal_fence_create_at(
+          frontier.semaphores[0], value, module->host_allocator, &fence));
+      void* owned = fence;
+      iree_vm_ref_t result =
+          iree_vm_ref_from_ptr_move(&owned, module->types[1]);
+      iree_vm_call_ref_result_store_move(&params->call, 0, &result);
+    } else {
+      iree_vm_ref_t fence = iree_vm_ref_null();
+      iree_vm_call_ref_argument_load_borrow(&params->call, 0, &fence);
+      IREE_RETURN_IF_ERROR(loom_serve_execution_barrier(
+          execution,
+          iree_hal_fence_semaphore_list((iree_hal_fence_t*)fence.object)));
+    }
   }
   *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
   return iree_ok_status();
@@ -277,25 +303,39 @@ iree_status_t loom_serve_module_bind_stages(iree_vm_module_t* base,
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "replacement requires at least one stage");
   }
-  uint64_t workspace_length = 0;
-  uint64_t workspace_alignment = 0;
   for (iree_host_size_t i = 0; i < stage_count; ++i) {
-    if (stages[i].binding_count > module->binding_capacity) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "replacement stage %zu exceeds binding capacity",
-                              i);
+    if (stages[i].binding_count > module->binding_capacity ||
+        stages[i].execution_index >= module->execution_count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "replacement stage %zu exceeds runner capabilities", i);
     }
-    workspace_length =
-        iree_max(workspace_length, stages[i].transient.required_byte_length);
-    workspace_alignment =
-        iree_max(workspace_alignment, stages[i].transient.minimum_alignment);
   }
   loom_serve_stage_t* replacement = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc_array(module->host_allocator, stage_count,
                                   sizeof(*replacement), (void**)&replacement));
-  iree_status_t status = loom_serve_execution_reserve_workspace(
-      module->execution, workspace_length, workspace_alignment);
+  iree_hal_pool_reservation_request_t* requirements = NULL;
+  iree_status_t status = iree_allocator_malloc_array(
+      module->host_allocator, module->execution_count, sizeof(*requirements),
+      (void**)&requirements);
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < stage_count; ++i) {
+      iree_hal_pool_reservation_request_t* requirement =
+          &requirements[stages[i].execution_index];
+      requirement->allocation_size =
+          iree_max(requirement->allocation_size,
+                   stages[i].transient.required_byte_length);
+      requirement->min_alignment = iree_max(
+          requirement->min_alignment, stages[i].transient.minimum_alignment);
+    }
+    for (iree_host_size_t i = 0;
+         i < module->execution_count && iree_status_is_ok(status); ++i) {
+      status = loom_serve_execution_reserve_workspace(
+          module->executions[i].execution, requirements[i].allocation_size,
+          requirements[i].min_alignment);
+    }
+  }
   if (iree_status_is_ok(status)) {
     // Retain the complete replacement before releasing anything: a candidate
     // may share commands or executables with any slot in the previous table.
@@ -307,41 +347,41 @@ iree_status_t loom_serve_module_bind_stages(iree_vm_module_t* base,
     loom_serve_module_clear_stages(base);
     module->stages = replacement;
     module->stage_count = stage_count;
-    module->workspace_requirement = iree_hal_make_pool_reservation_request(
-        workspace_length, workspace_alignment);
+    for (iree_host_size_t i = 0; i < module->execution_count; ++i) {
+      module->executions[i].workspace_requirement = requirements[i];
+    }
   } else {
     iree_allocator_free(module->host_allocator, replacement);
   }
+  iree_allocator_free(module->host_allocator, requirements);
   return status;
 }
 
 iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
-                                       loom_serve_execution_t* execution,
                                        loom_serve_module_options_t options,
                                        iree_allocator_t host_allocator,
                                        iree_vm_module_t** out_module) {
   *out_module = NULL;
-  if (!options.stages.count || options.binding_capacity == UINT16_MAX) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "runner module requires stages and a representable binding capacity");
+  if (!options.executions.count || options.executions.count > UINT32_MAX ||
+      !options.stages.count || options.binding_capacity == UINT16_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "runner module requires executions, stages and "
+                            "representable capacities");
   }
-  uint64_t workspace_length = 0;
-  uint64_t workspace_alignment = 0;
-  for (iree_host_size_t i = 0; i < options.stages.count; ++i) {
-    if (options.stages.values[i].binding_count > options.binding_capacity) {
+  for (iree_host_size_t i = 0; i < options.executions.count; ++i) {
+    if (!options.executions.values[i]) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "runner stage exceeds binding capacity");
+                              "runner execution %zu is null", i);
     }
-    const loom_cmd_program_transient_requirement_t* transient =
-        &options.stages.values[i].transient;
-    workspace_length =
-        iree_max(workspace_length, transient->required_byte_length);
-    workspace_alignment =
-        iree_max(workspace_alignment, transient->minimum_alignment);
   }
-  IREE_RETURN_IF_ERROR(loom_serve_execution_reserve_workspace(
-      execution, workspace_length, workspace_alignment));
+  for (iree_host_size_t i = 0; i < options.feedback.count; ++i) {
+    if (options.feedback.values[i].execution_index >=
+        options.executions.count) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "runner feedback %zu requires a registered execution", i);
+    }
+  }
   loom_serve_module_t* module = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*module), (void**)&module));
@@ -349,10 +389,6 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
   module->types[0] = types->buffer;
   module->types[1] = types->fence;
   module->binding_capacity = options.binding_capacity;
-  module->execution = execution;
-  module->workspace_requirement = iree_hal_make_pool_reservation_request(
-      workspace_length, workspace_alignment);
-  loom_serve_execution_retain(execution);
   const iree_host_size_t export_count = options.binding_capacity + 4;
   module->descriptor = (iree_vm_module_descriptor_t){
       .name = IREE_SVL("runner"),
@@ -365,17 +401,19 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
   module->descriptor.process_storage_size =
       (options.binding_capacity + 1) * sizeof(iree_hal_buffer_binding_t) +
       options.binding_capacity * sizeof(iree_hal_buffer_ref_t);
-  iree_status_t status = iree_allocator_clone(
-      host_allocator,
-      iree_make_const_byte_span(options.stages.values,
-                                options.stages.count * sizeof(*module->stages)),
-      (void**)&module->stages);
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, options.executions.count, sizeof(*module->executions),
+      (void**)&module->executions);
   if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < options.stages.count; ++i) {
-      iree_hal_command_buffer_retain(module->stages[i].command_buffer);
-      loom_serve_dispatch_retain(module->stages[i].dispatch);
+    for (iree_host_size_t i = 0; i < options.executions.count; ++i) {
+      module->executions[i].execution = options.executions.values[i];
+      loom_serve_execution_retain(options.executions.values[i]);
     }
-    module->stage_count = options.stages.count;
+    module->execution_count = options.executions.count;
+    status = loom_serve_module_bind_stages(&module->base, options.stages.count,
+                                           options.stages.values);
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc(host_allocator, export_count * 16,
                                    (void**)&module->names);
   }
@@ -411,15 +449,15 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
       module->arguments[i] = (iree_vm_module_signature_type_t){
           IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0};
     }
-    // Signatures sort by field count, then type. The one-argument signatures
-    // are execute_0(i32), fence(i64), and join(hal.fence). Feedback has four
-    // fields and its scalar offset sorts before execute_3's third reference.
+    // Signatures sort by field count, then type. execute_0 precedes the
+    // two-field fence(i32, i64), execute_1(i32, buffer), and join(i32, fence).
+    // Feedback's scalar offset sorts before execute_3's third reference.
     const iree_host_size_t feedback_ordinal =
         iree_min(3, options.binding_capacity + 1) + 2;
     for (iree_host_size_t i = 0; i <= options.binding_capacity; ++i) {
       char* name = module->names + i * 16;
       const int length = snprintf(name, 16, "execute_%zu", i);
-      const iree_host_size_t ordinal = i ? i + 2 + (i >= 3) : 0;
+      const iree_host_size_t ordinal = i + (i >= 1) + (i >= 2) + (i >= 3);
       module->callables[ordinal].signature = (iree_vm_module_signature_t){
           .arguments = {module->arguments, i + 1, 1, i, 0},
           .results = {&loom_serve_module_result, 1, 1, 0, 0},
@@ -453,14 +491,23 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
     };
     static const iree_vm_module_signature_type_t fence_type = {
         IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 1};
+    static const iree_vm_module_signature_type_t fence_arguments[] = {
+        {IREE_VM_SCALAR_TYPE_I32, 0},
+        {IREE_VM_SCALAR_TYPE_I64, 0},
+    };
+    static const iree_vm_module_signature_type_t join_arguments[] = {
+        {IREE_VM_SCALAR_TYPE_I32, 0},
+        {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 1},
+    };
+    const iree_host_size_t join_ordinal = 2 + (options.binding_capacity >= 1);
     module->callables[1].signature = (iree_vm_module_signature_t){
-        .arguments = {&loom_serve_module_result, 1, 1, 0, 0},
+        .arguments = {fence_arguments, 2, 2, 0, 0},
         .results = {&fence_type, 1, 0, 1, 0},
     };
-    module->callables[2].signature = (iree_vm_module_signature_t){
-        .arguments = {&fence_type, 1, 0, 1, 0},
+    module->callables[join_ordinal].signature = (iree_vm_module_signature_t){
+        .arguments = {join_arguments, 2, 1, 1, 0},
     };
-    module->descriptor.counts.callable_fields.value_count += 1;
+    module->descriptor.counts.callable_fields.value_count += 3;
     module->descriptor.counts.callable_fields.ref_count += 2;
     module->exports[ordinal + 1] = (iree_vm_module_export_declaration_t){
         .export_name = IREE_SVL("fence"),
@@ -469,7 +516,7 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
     };
     module->exports[ordinal + 2] = (iree_vm_module_export_declaration_t){
         .export_name = IREE_SVL("join"),
-        .callable_type_ordinal = 2,
+        .callable_type_ordinal = join_ordinal,
         .function_ordinal = ordinal + 2,
     };
     qsort(module->exports, export_count, sizeof(*module->exports),

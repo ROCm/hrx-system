@@ -102,20 +102,28 @@ TEST_P(JitModuleTest, SourceDefaultsAndOverridesShareVmAndGpuState) {
 TEST_P(JitModuleTest, RebindingChangesWorkspaceWithoutRelinkingVm) {
   IREE_ASSERT_OK(Compile("5", 0, IREE_SV("temporary_advance"), "64"));
   IREE_ASSERT_OK(PrepareVm());
-  EXPECT_EQ(loom_serve_module_workspace_requirement(native_).allocation_size,
+  EXPECT_EQ(loom_serve_module_workspace_requirement(native_, 0).allocation_size,
             transients_[0].required_byte_length);
   // This candidate did not exist when the original workspace was registered.
   IREE_ASSERT_OK(Compile("7", 1, IREE_SV("temporary_advance"), "4160"));
   const loom_serve_stage_t mixed[] = {
-      {commands_[0], 1, transients_[0]},
-      {commands_[1], 1, transients_[1]},
+      {
+          .command_buffer = commands_[0],
+          .binding_count = 1,
+          .transient = transients_[0],
+      },
+      {
+          .command_buffer = commands_[1],
+          .binding_count = 1,
+          .transient = transients_[1],
+      },
   };
   IREE_ASSERT_OK(
       loom_serve_module_bind_stages(native_, IREE_ARRAYSIZE(mixed), mixed));
-  EXPECT_EQ(loom_serve_module_workspace_requirement(native_).allocation_size,
+  EXPECT_EQ(loom_serve_module_workspace_requirement(native_, 0).allocation_size,
             transients_[1].required_byte_length);
   IREE_ASSERT_OK(loom_serve_module_bind_stages(native_, 1, mixed));
-  EXPECT_EQ(loom_serve_module_workspace_requirement(native_).allocation_size,
+  EXPECT_EQ(loom_serve_module_workspace_requirement(native_, 0).allocation_size,
             transients_[0].required_byte_length);
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       loom_serve_pool_storage(storage_owner_),
@@ -130,8 +138,9 @@ TEST_P(JitModuleTest, RebindingChangesWorkspaceWithoutRelinkingVm) {
       loom_serve_execution_transfer(execution_, 1, &upload, &completion));
   for (size_t i = 0; i < 2; ++i) {
     loom_serve_module_clear_stages(native_);
-    EXPECT_EQ(loom_serve_module_workspace_requirement(native_).allocation_size,
-              0u);
+    EXPECT_EQ(
+        loom_serve_module_workspace_requirement(native_, 0).allocation_size,
+        0u);
     iree_vm_variant_t empty_arguments[] = {
         iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffer_)};
     iree_vm_variant_t empty_results[1] = {};
@@ -143,20 +152,33 @@ TEST_P(JitModuleTest, RebindingChangesWorkspaceWithoutRelinkingVm) {
     iree_vm_variant_span_reset(
         iree_vm_variant_span_from_array(empty_arguments));
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(empty_results));
-    const loom_serve_stage_t restored = {commands_[i], 1, transients_[i]};
+    const loom_serve_stage_t restored = {
+        .command_buffer = commands_[i],
+        .binding_count = 1,
+        .transient = transients_[i],
+    };
     IREE_ASSERT_OK(loom_serve_module_bind_stages(native_, 1, &restored));
-    const loom_serve_stage_t wrong_arity = {commands_[i], 2, transients_[i]};
+    const loom_serve_stage_t wrong_arity = {
+        .command_buffer = commands_[i],
+        .binding_count = 2,
+        .transient = transients_[i],
+    };
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
         loom_serve_module_bind_stages(native_, 1, &wrong_arity));
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                           loom_serve_module_bind_stages(native_, 0, nullptr));
-    EXPECT_EQ(loom_serve_module_workspace_requirement(native_).allocation_size,
-              transients_[i].required_byte_length);
-    EXPECT_EQ(loom_serve_module_workspace_requirement(native_).min_alignment,
+    EXPECT_EQ(
+        loom_serve_module_workspace_requirement(native_, 0).allocation_size,
+        transients_[i].required_byte_length);
+    EXPECT_EQ(loom_serve_module_workspace_requirement(native_, 0).min_alignment,
               transients_[i].minimum_alignment);
     if (i) {
-      const loom_serve_stage_t replacement = {commands_[i], 1, transients_[i]};
+      const loom_serve_stage_t replacement = {
+          .command_buffer = commands_[i],
+          .binding_count = 1,
+          .transient = transients_[i],
+      };
       const loom_serve_stage_t expanded[] = {replacement, replacement,
                                              replacement};
       IREE_ASSERT_OK(loom_serve_module_bind_stages(
@@ -164,7 +186,7 @@ TEST_P(JitModuleTest, RebindingChangesWorkspaceWithoutRelinkingVm) {
       // Three ordered calls require one peak, not three private allocations
       // simultaneously.
       EXPECT_EQ(
-          loom_serve_module_workspace_requirement(native_).allocation_size,
+          loom_serve_module_workspace_requirement(native_, 0).allocation_size,
           transients_[i].required_byte_length);
       IREE_ASSERT_OK(loom_serve_module_bind_stages(native_, 1, &replacement));
     }

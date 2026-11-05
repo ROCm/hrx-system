@@ -20,7 +20,6 @@ iree_package_boundary(
 
 exports_files(
     [
-        "control_test.cc",
         "executable_test.cc",
         "jit_module_test.cc",
         "jit_test.cc",
@@ -149,6 +148,34 @@ loom_cc_library(
         "//runtime/src/iree/module/hal:types",
         "//runtime/src/iree/vm",
     ],
+)
+
+loom_cc_library(
+    name = "control_tests",
+    testonly = True,
+    srcs = ["control_test.cc"],
+    deps = [
+        ":jit",
+        ":module",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/runtime/execution:queues",
+        "//loom/src/loom/serve/runtime/execution:workspace",
+        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/serve/testing:compiler",
+        "//loom/src/loom/serve/testing:device",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode:module",
+    ],
+    alwayslink = True,
 )
 
 loom_cc_library(

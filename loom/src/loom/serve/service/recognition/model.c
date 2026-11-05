@@ -573,10 +573,12 @@ static iree_status_t loom_serve_recognition_create_control(
         tags.data + i * sizeof(int64_t),
         (uint64_t)loom_serve_preparation_stage(model->preparation, i)->tag);
   }
+  const loom_serve_module_feedback_t feedback = {.destination = model->output};
   const loom_serve_module_options_t options = {
       .binding_capacity = 5,
+      .executions = {1, &model->execution},
       .stages = {model->stages.count, stages},
-      .feedback = {1, &model->output},
+      .feedback = {1, &feedback},
   };
   iree_vm_module_t* native_modules[4] = {0};
   iree_vm_buffer_t* read_only_tags = NULL;
@@ -586,9 +588,8 @@ static iree_status_t loom_serve_recognition_create_control(
   if (iree_status_is_ok(status)) {
     iree_vm_buffer_release(model->control.tags);
     model->control.tags = read_only_tags;
-    status =
-        loom_serve_module_create(&model->control.hal_types, model->execution,
-                                 options, host_allocator, &native_modules[0]);
+    status = loom_serve_module_create(&model->control.hal_types, options,
+                                      host_allocator, &native_modules[0]);
   }
   iree_allocator_free(host_allocator, stages);
   if (iree_status_is_ok(status)) {
@@ -597,7 +598,7 @@ static iree_status_t loom_serve_recognition_create_control(
                               &private_bytes) ||
         !iree_checked_add_u64(
             private_bytes,
-            loom_serve_module_workspace_requirement(native_modules[0])
+            loom_serve_module_workspace_requirement(native_modules[0], 0)
                 .allocation_size,
             &private_bytes)) {
       status =

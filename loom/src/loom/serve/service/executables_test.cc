@@ -208,10 +208,11 @@ class ExecutablesTest : public WeightsTest {
         &table_));
     const loom_serve_module_options_t module_options = {
         .binding_capacity = static_cast<uint16_t>(arena_bytes ? 2 : 1),
+        .executions = {1, &execution_},
         .stages = {table_->part_count, table_->parts},
     };
-    IREE_RETURN_IF_ERROR(loom_serve_module_create(
-        &hal_types_, execution_, module_options, host_allocator_, &runner_));
+    IREE_RETURN_IF_ERROR(loom_serve_module_create(&hal_types_, module_options,
+                                                  host_allocator_, &runner_));
     options.stages = table_;
     options.runner = runner_;
     IREE_RETURN_IF_ERROR(loom_serve_parameters_module_create(

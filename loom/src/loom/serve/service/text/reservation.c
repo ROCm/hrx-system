@@ -109,7 +109,7 @@ uint64_t loom_serve_text_reservation_memory_footprint(
   const uint64_t extents[] = {
       loom_serve_residency_activation_footprint(model->residency),
       loom_serve_text_state_reservation_footprint(reservation->state),
-      loom_serve_module_workspace_requirement(model->control.native_module)
+      loom_serve_module_workspace_requirement(model->control.native_module, 0)
           .allocation_size,
       2ull * model->source.prefill_capacity *
           LOOM_SERVE_TEXT_MEDIA_PACKET_RECORD_BYTES,

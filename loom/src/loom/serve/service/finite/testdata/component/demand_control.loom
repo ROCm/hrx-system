@@ -4,9 +4,9 @@ func.decl import("input") @require(%condition: i32, %message: buffer)
 
 func.decl import("runner") @execute_2(%stage: i32, %input: hal.buffer, %output: hal.buffer) -> (i64)
 
-func.decl import("runner") @fence(%work: i64) -> (hal.fence)
+func.decl import("runner") @fence(%execution: i32, %work: i64) -> (hal.fence)
 
-func.decl import("runner") @join(%ready: hal.fence)
+func.decl import("runner") @join(%execution: i32, %ready: hal.fence)
 
 func.decl import("parameters") @gather(%source: i32, %key: buffer, %wait: hal.fence, %descriptors: hal.buffer, %offset: i64, %count: i64, %target: hal.buffer) -> (hal.fence)
 
@@ -65,15 +65,15 @@ func.def public @run(%stage: i32, %input: hal.buffer, %output: hal.buffer) {
   %second_offset = scalar.constant 48 : i64
   %key = buffer.constant utf8("factor") : buffer
   %producer = func.call @execute_2(%c0, %input, %output) : (i32, hal.buffer, hal.buffer) -> (i64)
-  %produced = func.call @fence(%producer) : (i64) -> (hal.fence)
+  %produced = func.call @fence(%c0, %producer) : (i32, i64) -> (hal.fence)
   %first = func.call @gather(%c0, %key, %produced, %output, %first_offset, %count, %output) : (i32, buffer, hal.fence, hal.buffer, i64, i64, hal.buffer) -> (hal.fence)
   %second = func.call @gather(%c1, %key, %produced, %output, %second_offset, %count, %output) : (i32, buffer, hal.fence, hal.buffer, i64, i64, hal.buffer) -> (hal.fence)
   %reject = scalar.cmpi ne, %stage, %c0 : i32
   scf.if %reject {
     func.call @require(%c0, %key) : (i32, buffer)
   }
-  func.call @join(%first) : (hal.fence)
-  func.call @join(%second) : (hal.fence)
+  func.call @join(%c0, %first) : (i32, hal.fence)
+  func.call @join(%c0, %second) : (i32, hal.fence)
   %consumer = func.call @execute_2(%c1, %input, %output) : (i32, hal.buffer, hal.buffer) -> (i64)
   func.return
 }
