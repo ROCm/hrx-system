@@ -61,3 +61,30 @@ low.func.def public target<vm.core>(@vm) abi(vm_function) @borrow_twice(%pointer
   low.func.call @inspect(%pointer) : (reg<vm.ref : ptr<@Object>>)
   return %pointer, %pointer
 }
+
+// ====
+// Typed Low registers preserve the owning source obligation at normal exits.
+// RUN: pass ownership-lifetime
+vm.target<core> @vm
+
+type.decl import("provider", "object") @Object
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @missing_consumption(%owner: reg<vm.ref : ref<@Object>>) asm {
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="owner"}
+  return
+}
+
+// ====
+// The typed Low callable contract distinguishes independent owner and borrow
+// fields exactly as the High contract does.
+// RUN: pass ownership-lifetime
+vm.target<core> @vm
+
+type.decl import("provider", "object") @Object
+
+low.func.decl import(native, "take", module = "provider") target<vm.core>(@vm) abi(vm_function) @take(%owner: reg<vm.ref : ref<@Object>>)
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @consume_and_return(%owner: reg<vm.ref : ref<@Object>>, %pointer: reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>) asm {
+  low.func.call @take(%owner) : (reg<vm.ref : ref<@Object>>)
+  return %pointer
+}

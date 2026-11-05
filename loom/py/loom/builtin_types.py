@@ -346,7 +346,8 @@ ref_type = TypeDef(
     doc=(
         "Nullable owning handle to a declared opaque managed payload. "
         "Passing or returning a ref transfers its ownership; subsequent uses "
-        "require an independently acquired owner."
+        "require an independently acquired owner. Every source owner must be "
+        "released or transferred on each normal execution path."
     ),
 )
 
