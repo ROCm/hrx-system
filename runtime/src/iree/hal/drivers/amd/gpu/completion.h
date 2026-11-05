@@ -39,10 +39,14 @@ typedef struct iree_hal_amd_gpu_retirement_callback_t {
 // resources. No driver call or MMIO read is permitted to observe this word.
 typedef struct iree_hal_amd_gpu_completion_wait_t {
   // Borrowed CPU-cacheable atomic word, or NULL for event-only observation.
-  // Storage remains live until the next callback, source replacement, or join.
+  // Storage belongs to signal when supplied; otherwise it remains live until
+  // source replacement or worker join, including across helper callbacks.
   const iree_atomic_int32_t* address;
   // Last consumed value. A change requests another authoritative source drain.
   int32_t value;
+  // Optional borrowed signal owning the word. The worker retains it under the
+  // drain mutex before observing, preventing reuse or trim during those reads.
+  struct iree_hal_amd_gpu_signal_t* signal;
 } iree_hal_amd_gpu_completion_wait_t;
 
 // On success, consumes a bounded batch of authoritative completion records.
@@ -67,14 +71,15 @@ typedef bool (*iree_hal_amd_gpu_completion_fn_t)(
 
 // One completion source, such as queue retirement or shader reports. Callback
 // bindings are immutable and borrowed until source replacement or worker join.
-// The drain mutex protects table replacement, callbacks, and wait-hint
-// observation, including the lifetime of each borrowed coherent word.
+// The drain mutex serializes callbacks. Only the worker stores hints here;
+// helpers discard their hints. Replacement joins both callbacks and unlocked
+// observation before returning the old table's ownership.
 typedef struct iree_hal_amd_gpu_completion_source_t {
   // Bounded observation or terminal native-failure delivery.
   iree_hal_amd_gpu_completion_fn_t fn;
   // Borrowed source state, live through the callback's final access.
   void* user_data;
-  // Consumer-owned next wake hint, replaced after each authoritative drain.
+  // Worker-owned next wake hint, unchanged throughout unlocked observation.
   iree_hal_amd_gpu_completion_wait_t wait;
 } iree_hal_amd_gpu_completion_source_t;
 
@@ -87,17 +92,17 @@ typedef struct iree_hal_amd_gpu_completion_source_t {
 typedef struct iree_hal_amd_gpu_completion_t {
   // Borrowed context whose event and API table outlive the worker join.
   const iree_hal_amd_gpu_context_t* context;
-  // Number of sources, protected by drain_mutex.
+  // Number of sources, stable during callbacks and unlocked observation.
   iree_host_size_t source_count;
-  // Borrowed contiguous source array, replaced only under drain_mutex.
+  // Borrowed contiguous array, replaced after joining callbacks and observers.
   iree_hal_amd_gpu_completion_source_t* sources;
   // Maximum active observation after progress, in ns; zero parks immediately.
   iree_duration_t spin_ns;
   // Owned thread, or NULL after failed initialization or a successful join.
   iree_thread_t* thread;
-  // Stop and source-replacement requests interrupt active coherent observation.
+  // Stop/replacement requests and the worker's active observation lifetime.
   iree_atomic_int32_t state;
-  // Serializes source retirement and every borrowed wait-hint observation.
+  // Serializes source callbacks and table swaps, never polling or waiting.
   iree_slim_mutex_t drain_mutex;
   // First native execution/observation failure. Cold membership can observe it
   // before the terminal worker joins, without taking the drain mutex.

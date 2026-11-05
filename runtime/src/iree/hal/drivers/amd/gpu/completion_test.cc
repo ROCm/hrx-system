@@ -14,8 +14,11 @@
 #include <mutex>
 #include <semaphore>
 #include <thread>
+#include <utility>
 #include <vector>
 
+#include "iree/base/threading/processor.h"
+#include "iree/hal/drivers/amd/gpu/queue/signal.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -692,42 +695,207 @@ TEST_F(CompletionTest, CallerRetiresWhileWorkerParks) {
   EXPECT_EQ(calls, 2u);
 }
 
-TEST_F(CompletionTest, ActiveObservationProtectsBorrowedHintFromCallerDrain) {
-  auto* word = new iree_atomic_int32_t;
-  iree_atomic_store(word, 0, iree_memory_order_relaxed);
-  std::binary_semaphore armed{0};
-  std::binary_semaphore consumed{0};
+// Real signal ownership and trim, with CPU storage standing in for the native
+// coherent allocation. One cell makes premature reuse and retained capacity
+// observable without allocating additional signal blocks.
+struct SignalStorage {
+  explicit SignalStorage(
+      iree_hal_amd_gpu_signal_pool_notification_t notification = {}) {
+    iree_hal_amd_gpu_signal_pool_initialize(notification, &pool);
+    iree_hal_amd_gpu_signal_block_initialize(&pool, this, &value, 0x1000, 8, 0,
+                                             &signal, 1, 1, frontiers, &block);
+  }
+  ~SignalStorage() {
+    if (block.pool) {
+      iree_hal_amd_gpu_signal_block_deinitialize(&block);
+    }
+    iree_hal_amd_gpu_signal_pool_deinitialize(&pool);
+  }
+
+  // Producer-owned native value, observed through the low coherent word.
+  uint64_t value = 0;
+  // Existing per-cell metadata, including the independently retained borrow.
+  iree_hal_amd_gpu_signal_t signal = {};
+  // One signal's immutable one-queue frontier plus its header.
+  uint64_t frontiers[3] = {};
+  // Actual single-cell capacity and concurrent return path.
+  iree_hal_amd_gpu_signal_pool_t pool = {};
+  // Actual independently trimmable block.
+  iree_hal_amd_gpu_signal_block_t block = {};
+};
+
+// The producer reference keeps this counter live until it publishes completion.
+// Waiting for the real observer pin avoids a test hook or elapsed-time guess.
+static void AwaitObservation(iree_hal_amd_gpu_signal_t* signal) {
+  while (iree_atomic_ref_count_load(&signal->state.live.ref_count) != 2) {
+    iree_processor_yield();
+  }
+}
+
+TEST_F(CompletionTest, CallerDrainsWhileWorkerObservesRetainedSignal) {
+  SignalStorage storage;
+  auto* signal = iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 1);
+  auto* word = reinterpret_cast<iree_atomic_int32_t*>(signal->host_value);
+  std::binary_semaphore retired{0};
   uint32_t calls = 0;
   WaitCallback callback = [&](amdf_status_t status,
                               iree_hal_amd_gpu_completion_wait_t* out_wait) {
     EXPECT_TRUE(amdf_status_is_ok(status));
-    if (++calls == 3) {
-      delete word;
-      word = nullptr;
-      EXPECT_TRUE(amdf_status_is_ok(
-          iree_hal_amd_gpu_completion_request_stop(&completion_)));
-      consumed.release();
+    ++calls;
+    if (!signal) {
       return false;
     }
-    *out_wait = {.address = word, .value = 0};
-    if (calls == 2) {
-      armed.release();
+    if (!iree_atomic_load(word, iree_memory_order_acquire)) {
+      iree_hal_amd_gpu_signal_release(signal);
+      signal = nullptr;
+      retired.release();
+      return true;
     }
+    *out_wait = {.address = word, .value = 1, .signal = signal};
     return calls == 1;
+  };
+  std::atomic<bool> other_ready = false;
+  Callback other = [&](amdf_status_t status) {
+    return other_ready.exchange(false);
+  };
+  iree_hal_amd_gpu_completion_source_t sources[] = {Source(callback),
+                                                    Source(other)};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, IREE_ARRAYSIZE(sources), sources, IREE_DURATION_INFINITE, {},
+      iree_allocator_system(), &completion_));
+  AwaitObservation(signal);
+  other_ready.store(true);
+  while (!iree_hal_amd_gpu_completion_try_drain(&completion_)) {
+    iree_processor_yield();
+  }
+  EXPECT_EQ(iree_atomic_ref_count_load(&signal->state.live.ref_count), 2);
+  EXPECT_EQ(iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 1),
+            nullptr);
+  EXPECT_FALSE(iree_hal_amd_gpu_signal_block_try_deinitialize(&storage.block));
+  EXPECT_EQ(event_.signal_count(), 0u);
+
+  // Native completion races a helper and the worker. Either can retire the
+  // producer; only the observer's final read permits recycling the cell.
+  iree_atomic_store(word, 0, iree_memory_order_release);
+  iree_hal_amd_gpu_completion_try_drain(&completion_);
+  retired.acquire();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_TRUE(iree_hal_amd_gpu_signal_block_try_deinitialize(&storage.block));
+}
+
+TEST_F(CompletionTest, SourceReplacementReturnsObservationBeforeTrim) {
+  auto storage = std::make_unique<SignalStorage>();
+  auto* signal = iree_hal_amd_gpu_signal_pool_try_acquire(&storage->pool, 1);
+  uint32_t calls = 0;
+  WaitCallback callback = [&](amdf_status_t status,
+                              iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    *out_wait = {
+        .address = reinterpret_cast<iree_atomic_int32_t*>(signal->host_value),
+        .value = 1,
+        .signal = signal,
+    };
+    return ++calls == 1;
+  };
+  auto source =
+      std::make_unique<iree_hal_amd_gpu_completion_source_t>(Source(callback));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, source.get(), IREE_DURATION_INFINITE, {},
+      iree_allocator_system(), &completion_));
+  AwaitObservation(signal);
+  iree_hal_amd_gpu_completion_set_sources(&completion_, 0, nullptr);
+  EXPECT_EQ(iree_atomic_ref_count_load(&signal->state.live.ref_count), 1);
+  // The source owner has separately joined its producer. Removal joins all
+  // observer borrows, so its final signal return can now detach the block.
+  iree_hal_amd_gpu_signal_release(signal);
+  EXPECT_TRUE(iree_hal_amd_gpu_signal_block_try_deinitialize(&storage->block));
+  storage.reset();
+  source.reset();
+  callback = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+}
+
+TEST_F(CompletionTest, StopAndFailureReturnObservationSignals) {
+  for (amdf_status_t failure :
+       {AMDF_STATUS_OK, amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL)}) {
+    SignalStorage storage;
+    auto* signal = iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 1);
+    uint32_t calls = 0;
+    uint32_t failures = 0;
+    WaitCallback callback = [&](amdf_status_t status,
+                                iree_hal_amd_gpu_completion_wait_t* out_wait) {
+      if (!amdf_status_is_ok(status)) {
+        EXPECT_EQ(status, failure);
+        EXPECT_EQ(iree_atomic_ref_count_load(&signal->state.live.ref_count), 1);
+        ++failures;
+        return false;
+      }
+      *out_wait = {
+          .address = reinterpret_cast<iree_atomic_int32_t*>(signal->host_value),
+          .value = 1,
+          .signal = signal,
+      };
+      return ++calls == 1;
+    };
+    auto source = Source(callback);
+    IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+        &context_, 1, &source, IREE_DURATION_INFINITE, {},
+        iree_allocator_system(), &completion_));
+    AwaitObservation(signal);
+    if (!amdf_status_is_ok(failure)) {
+      iree_hal_amd_gpu_completion_request_failure(&completion_, failure);
+    }
+    IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+    EXPECT_EQ(failures, amdf_status_is_ok(failure) ? 0u : 1u);
+    EXPECT_EQ(iree_atomic_ref_count_load(&signal->state.live.ref_count), 1);
+    iree_hal_amd_gpu_signal_release(signal);
+    EXPECT_TRUE(iree_hal_amd_gpu_signal_block_try_deinitialize(&storage.block));
+  }
+}
+
+TEST_F(CompletionTest, HelperAndWorkerReuseOneSignalWithoutGrowingCapacity) {
+  std::binary_semaphore returned{0};
+  SignalStorage storage(
+      {[](void* user_data) {
+         static_cast<std::binary_semaphore*>(user_data)->release();
+       },
+       &returned});
+  std::atomic<iree_hal_amd_gpu_signal_t*> pending = nullptr;
+  bool new_signal = true;
+  WaitCallback callback = [&](amdf_status_t status,
+                              iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    auto* signal = pending.load();
+    if (!signal) {
+      return false;
+    }
+    auto* word = reinterpret_cast<iree_atomic_int32_t*>(signal->host_value);
+    if (!iree_atomic_load(word, iree_memory_order_acquire)) {
+      pending.store(nullptr);
+      new_signal = true;
+      iree_hal_amd_gpu_signal_release(signal);
+      return true;
+    }
+    *out_wait = {.address = word, .value = 1, .signal = signal};
+    return std::exchange(new_signal, false);
   };
   auto source = Source(callback);
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
       &context_, 1, &source, IREE_DURATION_INFINITE, {},
       iree_allocator_system(), &completion_));
-  armed.acquire();
-  // The worker owns the hint until observation ends. A caller cannot retire
-  // its backing concurrently with that coherent load.
-  EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
-  iree_atomic_store(word, 1, iree_memory_order_release);
-  consumed.acquire();
+  for (uint32_t i = 0; i < 128; ++i) {
+    auto* signal = iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 1);
+    ASSERT_EQ(signal, &storage.signal);
+    pending.store(signal);
+    EXPECT_EQ(NativeEvent::Signal(event_.handle()), AMDF_STATUS_OK);
+    AwaitObservation(signal);
+    iree_atomic_store(
+        reinterpret_cast<iree_atomic_int32_t*>(signal->host_value), 0,
+        iree_memory_order_release);
+    iree_hal_amd_gpu_completion_try_drain(&completion_);
+    returned.acquire();
+  }
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
-  EXPECT_EQ(word, nullptr);
-  EXPECT_EQ(calls, 3u);
+  EXPECT_EQ(storage.pool.block_count, 1u);
+  EXPECT_TRUE(iree_hal_amd_gpu_signal_block_try_deinitialize(&storage.block));
 }
 
 TEST_F(CompletionTest, StopJoinsCallerDrainBeforeOwnerExit) {
