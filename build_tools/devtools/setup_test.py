@@ -138,6 +138,11 @@ class SetupPlanTest(unittest.TestCase):
             )
             self.assertIn("--disable-version-check", semgrep_probe.argv)
             self.assertEqual(semgrep_probe.expected_pattern, r"\b1\.96\.0\b")
+            zizmor_probe = next(
+                step for step in plan.steps if step.label == "check zizmor"
+            )
+            self.assertEqual(zizmor_probe.argv[-1], "--version")
+            self.assertEqual(zizmor_probe.expected_pattern, r"\b1\.32\.0\b")
             self.assertTrue(
                 any("--group bazel" in step.describe() for step in commands)
             )

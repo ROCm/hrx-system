@@ -25,7 +25,8 @@ COMMON_TOOLS = (
 )
 SEMGREP_WARNING_FILTER = "ignore:pkg_resources is deprecated as an API:UserWarning"
 SEMGREP_VERSION_PATTERN = r"\b1\.96\.0\b"
-SEMGREP_SETUP_HINT = (
+ZIZMOR_VERSION_PATTERN = r"\b1\.32\.0\b"
+STATIC_ANALYSIS_SETUP_HINT = (
     "run python dev.py bazel setup --venv to install the managed tool environment"
 )
 SEMGREP_WINDOWS_HINT = (
@@ -37,8 +38,15 @@ OPTIONAL_COMMON_TOOLS = (
         "semgrep",
         ("--disable-version-check", "--version"),
         SEMGREP_VERSION_PATTERN,
-        SEMGREP_SETUP_HINT,
+        STATIC_ANALYSIS_SETUP_HINT,
         SEMGREP_WARNING_FILTER,
+    ),
+    (
+        "zizmor",
+        ("--version",),
+        ZIZMOR_VERSION_PATTERN,
+        STATIC_ANALYSIS_SETUP_HINT,
+        None,
     ),
     ("clang-tidy", ("--version",), None, None, None),
     ("clang-apply-replacements", ("--version",), None, None, None),
