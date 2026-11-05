@@ -22,6 +22,12 @@ static iree_status_t AcceptDiagnostic(void* user_data,
   return iree_ok_status();
 }
 
+static iree_status_t CaptureErrorId(void* user_data,
+                                    const loom_diagnostic_t* diagnostic) {
+  *static_cast<const char**>(user_data) = loom_error_def_id(diagnostic->error);
+  return iree_ok_status();
+}
+
 class BytecodeAttributeTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -150,6 +156,53 @@ TEST_F(BytecodeAttributeTest, RejectsCountBeforeRetainingPredicates) {
   EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
   EXPECT_EQ(predicates, nullptr);
   EXPECT_EQ(predicate_count, 0u);
+}
+
+TEST_F(BytecodeAttributeTest, RejectsAggregateCountsBeforeScratchAllocation) {
+  loom_attr_descriptor_t symbol_array = {
+      .attr_kind = LOOM_ATTR_SYMBOL_ARRAY,
+  };
+  loom_attr_descriptor_t symbol_set = {
+      .attr_kind = LOOM_ATTR_SYMBOL_SET,
+  };
+  loom_attr_descriptor_t parameterized_array = {
+      .attr_kind = LOOM_ATTR_PARAMETERIZED_ARRAY,
+  };
+  parameterized_array.reference.parameterized_attr_kind =
+      LOOM_PARAMETERIZED_ATTR_KIND_ANY;
+  const struct {
+    const char* name;
+    loom_bytecode_attr_kind_t kind;
+    const loom_attr_descriptor_t* descriptor;
+  } cases[] = {
+      {"f64 array", LOOM_BYTECODE_ATTR_F64_ARRAY, nullptr},
+      {"i64 array", LOOM_BYTECODE_ATTR_I64_ARRAY, nullptr},
+      {"string array", LOOM_BYTECODE_ATTR_STRING_ARRAY, nullptr},
+      {"symbol array", LOOM_BYTECODE_ATTR_SYMBOL_ARRAY, &symbol_array},
+      {"symbol set", LOOM_BYTECODE_ATTR_SYMBOL_SET, &symbol_set},
+      {"dictionary", LOOM_BYTECODE_ATTR_DICT, nullptr},
+      {"parameterized array", LOOM_BYTECODE_ATTR_PARAMETERIZED_ARRAY,
+       &parameterized_array},
+  };
+  const uint8_t data[] = {0x7F};  // 127 elements with no entry records.
+
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    loom_bytecode_attribute_materializer_t materializer = MakeMaterializer();
+    loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
+    loom_attribute_t attr = loom_attr_absent();
+    const uint32_t previous_error_count = error_count_;
+
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_DEFERRED,
+        loom_bytecode_attribute_decode_named(
+            &materializer, &cursor, test_case.descriptor, test_case.kind, &attr,
+            /*available_type_count=*/0));
+
+    EXPECT_EQ(error_count_, previous_error_count + 1);
+    EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+    EXPECT_TRUE(loom_attr_is_absent(attr));
+  }
 }
 
 TEST_F(BytecodeAttributeTest, ByteFormsValidateAndMaterializeExactPayloads) {
@@ -304,6 +357,52 @@ TEST_F(BytecodeAttributeTest, CompleteBindingsSurviveAttributeScratchReset) {
   EXPECT_EQ(loom_type_kind(type), LOOM_TYPE_GROUP);
   EXPECT_EQ(loom_dim_value_id(loom_type_dim(type, 0)), width);
   EXPECT_EQ(error_count_, 0u);
+}
+
+TEST_F(BytecodeAttributeTest,
+       RejectsScopedTypeChildCountBeforeScratchAllocation) {
+  const uint8_t data[] = {
+      1,  // Scoped type reference follows.
+      6,  // Scoped record byte length.
+      1,  // One scoped type record.
+      LOOM_BYTECODE_TYPE_FUNCTION,
+      0x80,
+      0x40,  // 8,192 argument types.
+      0,     // No result types.
+      1,     // Root record ordinal.
+  };
+  const char* error_id = nullptr;
+  uint32_t error_count = 0;
+  loom_bytecode_reader_decoder_t decoder;
+  loom_bytecode_reader_decoder_initialize(
+      loom_diagnostic_sink_t{CaptureErrorId, &error_id},
+      IREE_SV("attribute_test.loombc"), &error_count, &decoder);
+  loom_bytecode_attribute_materializer_t materializer = MakeMaterializer();
+  materializer.decoder = &decoder;
+  loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
+  iree_arena_allocator_t scope_arena;
+  iree_arena_initialize(&block_pool_, &scope_arena);
+  loom_bytecode_type_bindings_t bindings = {.arena = &scope_arena};
+  const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
+      .symbol_name = IREE_SV("function"),
+      .values = nullptr,
+      .value_count = 0,
+      .bindings = &bindings,
+  };
+  loom_attribute_t attr = loom_attr_absent();
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_DEFERRED,
+      loom_bytecode_attribute_materialize_ssa(
+          &materializer, &cursor, /*descriptor=*/nullptr,
+          LOOM_BYTECODE_ATTR_TYPE, &attr, /*available_type_count=*/0, &scope));
+
+  EXPECT_EQ(error_count, 1u);
+  EXPECT_STREQ(error_id, "ERR_BYTECODE_009");
+  EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+  EXPECT_EQ(bindings.count, 0u);
+  EXPECT_TRUE(loom_attr_is_absent(attr));
+  iree_arena_deinitialize(&scope_arena);
 }
 
 TEST_F(BytecodeAttributeTest, ScopedRegisterRetainsCarrierAndBoundValueType) {

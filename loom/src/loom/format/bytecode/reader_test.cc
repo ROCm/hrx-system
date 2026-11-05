@@ -160,6 +160,19 @@ class ReaderTest : public ::testing::Test {
     size_t nested_dict_second_key = 0;
   };
 
+  struct BodyOpCountOffsets {
+    // Byte offset of the operation operand count.
+    size_t operand_count = 0;
+    // Byte offset of the operation successor count.
+    size_t successor_count = 0;
+    // Byte offset of the operation result count.
+    size_t result_count = 0;
+    // Byte offset of the operation tied-result count.
+    size_t tied_result_count = 0;
+    // Byte offset of the operation nested-region count.
+    size_t region_count = 0;
+  };
+
   struct AttributeValueOffsets {
     // Byte offset of the attribute value kind byte.
     size_t kind = 0;
@@ -2326,6 +2339,12 @@ class ReaderTest : public ::testing::Test {
     return offset;
   }
 
+  size_t RootRegionBlockCountOffset(const std::vector<uint8_t>& bytes) {
+    size_t offset = RootRegionSourceFlagsOffset(bytes);
+    ReadUVarint(bytes, &offset);  // region source_flags
+    return offset;
+  }
+
   size_t RootBlockSourceTriviaOffset(const std::vector<uint8_t>& bytes) {
     size_t offset = RootRegionSourceFlagsOffset(bytes);
     ReadUVarint(bytes, &offset);                 // region source_flags
@@ -2386,6 +2405,51 @@ class ReaderTest : public ::testing::Test {
     uint64_t operand_count = ReadUVarint(bytes, &offset);
     EXPECT_GE(operand_count, 1u);
     return offset;
+  }
+
+  BodyOpCountOffsets FirstFixedBodyOpCountOffsets(
+      const std::vector<uint8_t>& bytes) {
+    uint64_t arg_count = 0;
+    size_t offset = RootBlockValueListOffset(bytes, &arg_count);
+    for (uint64_t i = 0; i < arg_count; ++i) {
+      ReadValueDefOffsets(bytes, &offset);
+    }
+    EXPECT_GE(ReadUVarint(bytes, &offset), 1u);  // op_count
+    ReadUVarint(bytes, &offset);                 // op_table_index_plus1
+    ++offset;                                    // flags
+    ReadUVarint(bytes, &offset);                 // location_id
+    SkipSourceTrivia(bytes, &offset);
+
+    BodyOpCountOffsets count_offsets;
+    count_offsets.operand_count = offset;
+    const uint64_t operand_count = ReadUVarint(bytes, &offset);
+    for (uint64_t i = 0; i < operand_count; ++i) {
+      ReadUVarint(bytes, &offset);
+    }
+    count_offsets.successor_count = offset;
+    const uint64_t successor_count = ReadUVarint(bytes, &offset);
+    for (uint64_t i = 0; i < successor_count; ++i) {
+      ReadUVarint(bytes, &offset);
+    }
+    count_offsets.result_count = offset;
+    const uint64_t result_count = ReadUVarint(bytes, &offset);
+    for (uint64_t i = 0; i < result_count; ++i) {
+      ReadValueDefOffsets(bytes, &offset);
+    }
+    count_offsets.tied_result_count = offset;
+    const uint64_t tied_result_count = ReadUVarint(bytes, &offset);
+    for (uint64_t i = 0; i < tied_result_count; ++i) {
+      ReadUVarint(bytes, &offset);
+      ReadUVarint(bytes, &offset);
+    }
+    const uint64_t attr_count = ReadUVarint(bytes, &offset);
+    for (uint64_t i = 0; i < attr_count; ++i) {
+      ReadUVarint(bytes, &offset);  // key_id
+      const uint8_t kind = bytes[offset++];
+      SkipAttributeValue(bytes, &offset, kind);
+    }
+    count_offsets.region_count = offset;
+    return count_offsets;
   }
 
   size_t FirstBodyOpTableIndexOffset(const std::vector<uint8_t>& bytes) {
@@ -2698,6 +2762,49 @@ class ReaderTest : public ::testing::Test {
     }
     ASSERT_FALSE(error_ids.empty());
     EXPECT_EQ(error_ids.front(), expected_error_id);
+  }
+
+  iree_host_size_t ReadModuleLargestArenaAllocation(
+      const std::vector<uint8_t>& bytes) {
+    ObservedBytecodeArena storage(4096);
+    std::vector<std::string> error_ids;
+    loom_bytecode_read_result_t result = {0};
+    const loom_bytecode_read_options_t options = {
+        .diagnostic_sink = {CaptureDiagnostic, &error_ids},
+    };
+    loom_module_t* module = nullptr;
+    IREE_EXPECT_OK(loom_bytecode_read_module(
+        iree_make_const_byte_span(bytes.data(), bytes.size()),
+        IREE_SV("test.loombc"), &context_, &storage.block_pool, &options,
+        &result, &module, iree_allocator_system()));
+
+    EXPECT_EQ(result.error_count, 0u);
+    EXPECT_TRUE(error_ids.empty());
+    EXPECT_NE(module, nullptr);
+    loom_module_free(module);
+    return storage.largest_allocation;
+  }
+
+  void ExpectReadModuleCountErrorWithoutAllocationGrowth(
+      const std::vector<uint8_t>& bytes,
+      iree_host_size_t valid_largest_allocation) {
+    ObservedBytecodeArena storage(4096);
+    std::vector<std::string> error_ids;
+    loom_bytecode_read_result_t result = {0};
+    const loom_bytecode_read_options_t options = {
+        .diagnostic_sink = {CaptureDiagnostic, &error_ids},
+    };
+    loom_module_t* module = nullptr;
+    IREE_ASSERT_OK(loom_bytecode_read_module(
+        iree_make_const_byte_span(bytes.data(), bytes.size()),
+        IREE_SV("test.loombc"), &context_, &storage.block_pool, &options,
+        &result, &module, iree_allocator_system()));
+
+    EXPECT_EQ(result.error_count, 1u);
+    EXPECT_EQ(error_ids, (std::vector<std::string>{"ERR_BYTECODE_009"}));
+    EXPECT_EQ(module, nullptr);
+    EXPECT_LE(storage.largest_allocation, valid_largest_allocation);
+    loom_module_free(module);
   }
 
   void ExpectCanonicalBytecodeRoundTrip(loom_module_t* module) {
@@ -5601,6 +5708,58 @@ TEST_F(ReaderTest, RejectsBodySummaryCountExceedingBodyLength) {
   bytes[value_count_offset] = 0x7F;
 
   ExpectReadModuleError(bytes, "ERR_BYTECODE_016");
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsImpossibleBodyCountsBeforeArenaAllocation) {
+  loom_module_t* module = CreateFunctionModule();
+  const auto valid_bytes = WriteModule(module);
+  const iree_host_size_t valid_largest_allocation =
+      ReadModuleLargestArenaAllocation(valid_bytes);
+  const BodyOpCountOffsets count_offsets =
+      FirstFixedBodyOpCountOffsets(valid_bytes);
+  const struct {
+    const char* name;
+    size_t offset;
+    uint16_t count;
+  } cases[] = {
+      {"operands", count_offsets.operand_count, 8192},
+      {"successors", count_offsets.successor_count, 127},
+      {"results", count_offsets.result_count, 8192},
+      {"tied results", count_offsets.tied_result_count, 8192},
+      {"regions", count_offsets.region_count, 127},
+  };
+
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    auto bytes = valid_bytes;
+    ASSERT_LT(test_case.offset + 1, bytes.size());
+    if (test_case.count < 128) {
+      bytes[test_case.offset] = (uint8_t)test_case.count;
+    } else {
+      bytes[test_case.offset] = (uint8_t)(test_case.count | 0x80);
+      bytes[test_case.offset + 1] = (uint8_t)(test_case.count >> 7);
+    }
+    ExpectReadModuleCountErrorWithoutAllocationGrowth(bytes,
+                                                      valid_largest_allocation);
+  }
+
+  loom_module_free(module);
+}
+
+TEST_F(ReaderTest, RejectsImpossibleBlockCountBeforeArenaAllocation) {
+  loom_module_t* module = CreateFunctionModule();
+  auto bytes = WriteModule(module);
+  const iree_host_size_t valid_largest_allocation =
+      ReadModuleLargestArenaAllocation(bytes);
+  const size_t block_count_offset = RootRegionBlockCountOffset(bytes);
+  ASSERT_LT(block_count_offset + 1, bytes.size());
+  bytes[block_count_offset] = 0x80;
+  bytes[block_count_offset + 1] = 0x40;  // 8,192 blocks.
+
+  ExpectReadModuleCountErrorWithoutAllocationGrowth(bytes,
+                                                    valid_largest_allocation);
 
   loom_module_free(module);
 }

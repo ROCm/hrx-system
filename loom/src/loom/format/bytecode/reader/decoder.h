@@ -109,11 +109,27 @@ iree_status_t loom_bytecode_reader_emit_count_exceeds(
 // Validates that |count| entries and required trailing bytes can fit in the
 // unread cursor range. The division-based bound avoids multiplying an
 // untrusted count and must run before any count-sized allocation.
-iree_status_t loom_bytecode_reader_validate_count_bytes(
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t
+loom_bytecode_reader_validate_count_bytes(
     loom_bytecode_reader_decoder_t* decoder,
     const loom_bytecode_reader_cursor_t* cursor, iree_string_view_t table_name,
     uint64_t count, uint64_t minimum_entry_length,
-    uint64_t minimum_trailing_length, uint64_t count_offset);
+    uint64_t minimum_trailing_length, uint64_t count_offset) {
+  IREE_ASSERT(minimum_entry_length > 0);
+  const uint64_t remaining = loom_bytecode_cursor_remaining(&cursor->cursor);
+  if (minimum_trailing_length > remaining) {
+    return loom_bytecode_reader_emit_unexpected_end(
+        decoder, loom_bytecode_reader_cursor_absolute_position(cursor),
+        minimum_trailing_length, remaining);
+  }
+  const uint64_t count_limit =
+      (remaining - minimum_trailing_length) / minimum_entry_length;
+  if (count > count_limit) {
+    return loom_bytecode_reader_emit_count_exceeds(decoder, table_name, count,
+                                                   count_limit, count_offset);
+  }
+  return iree_ok_status();
+}
 
 // Emits an out-of-range table-reference diagnostic.
 iree_status_t loom_bytecode_reader_emit_table_ref(

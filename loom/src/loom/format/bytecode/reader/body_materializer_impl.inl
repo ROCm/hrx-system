@@ -252,6 +252,7 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t
 loom_bytecode_body_reader_read_op_record(
     loom_bytecode_body_reader_t* body_reader,
     loom_bytecode_reader_cursor_t* cursor, loom_builder_t* builder,
+    uint32_t depth,
     loom_bytecode_body_op_record_t* out_record) {
   uint64_t op_offset = loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t op_table_index_plus1 = 0;
@@ -297,6 +298,8 @@ loom_bytecode_body_reader_read_op_record(
 
   uint64_t operand_count = 0;
   uint64_t result_count = 0;
+  const uint64_t operand_count_offset =
+      loom_bytecode_reader_cursor_absolute_position(cursor);
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
       body_reader->values.decoder, cursor, &operand_count));
   if (operand_count > UINT16_MAX || operand_count > IREE_HOST_SIZE_MAX) {
@@ -304,6 +307,11 @@ loom_bytecode_body_reader_read_op_record(
         &body_reader->values, op_offset,
         IREE_SV("operand_count_exceeds_field_width"));
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      body_reader->values.decoder, cursor, IREE_SV("body_operands"),
+      operand_count,
+      /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0,
+      operand_count_offset));
   loom_value_id_t* operands = NULL;
   if (operand_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -372,6 +380,11 @@ loom_bytecode_body_reader_read_op_record(
         &body_reader->values, successor_count_offset,
         IREE_SV("successor_count_exceeds_field_width"));
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      body_reader->values.decoder, cursor, IREE_SV("body_successors"),
+      successor_count,
+      /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0,
+      successor_count_offset));
   loom_block_t** successors = NULL;
   if (successor_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -400,6 +413,8 @@ loom_bytecode_body_reader_read_op_record(
     }
   }
 
+  const uint64_t result_count_offset =
+      loom_bytecode_reader_cursor_absolute_position(cursor);
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
       body_reader->values.decoder, cursor, &result_count));
   if (result_count > UINT16_MAX || result_count > IREE_HOST_SIZE_MAX) {
@@ -407,6 +422,11 @@ loom_bytecode_body_reader_read_op_record(
         &body_reader->values, op_offset,
         IREE_SV("result_count_exceeds_field_width"));
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      body_reader->values.decoder, cursor, IREE_SV("body_results"),
+      result_count,
+      /*minimum_entry_length=*/2, /*minimum_trailing_length=*/0,
+      result_count_offset));
   loom_value_id_t* results = NULL;
   if (result_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -422,6 +442,8 @@ loom_bytecode_body_reader_read_op_record(
   body_reader->counts.value_count += result_count;
 
   uint64_t tied_result_count = 0;
+  const uint64_t tied_result_count_offset =
+      loom_bytecode_reader_cursor_absolute_position(cursor);
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
       body_reader->values.decoder, cursor, &tied_result_count));
   if (tied_result_count > UINT16_MAX ||
@@ -430,6 +452,11 @@ loom_bytecode_body_reader_read_op_record(
         &body_reader->values, op_offset,
         IREE_SV("tied_result_count_exceeds_field_width"));
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      body_reader->values.decoder, cursor, IREE_SV("body_tied_results"),
+      tied_result_count,
+      /*minimum_entry_length=*/2, /*minimum_trailing_length=*/0,
+      tied_result_count_offset));
   loom_tied_result_t* tied_results = NULL;
   if (tied_result_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -556,6 +583,8 @@ loom_bytecode_body_reader_read_op_record(
   }
 
   uint64_t region_count = 0;
+  const uint64_t region_count_offset =
+      loom_bytecode_reader_cursor_absolute_position(cursor);
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
       body_reader->values.decoder, cursor, &region_count));
   if (region_count > UINT8_MAX || region_count > IREE_HOST_SIZE_MAX) {
@@ -563,6 +592,16 @@ loom_bytecode_body_reader_read_op_record(
         &body_reader->values, op_offset,
         IREE_SV("region_count_exceeds_field_width"));
   }
+  if (region_count > 0 && depth + 1 >= LOOM_BYTECODE_MAX_REGION_DEPTH) {
+    return loom_bytecode_value_scope_emit_invalid(
+        &body_reader->values, region_count_offset,
+        IREE_SV("region_nesting_exceeds_bytecode_maximum_depth"));
+  }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      body_reader->values.decoder, cursor, IREE_SV("body_regions"),
+      region_count,
+      /*minimum_entry_length=*/2, /*minimum_trailing_length=*/0,
+      region_count_offset));
 
   loom_op_t* op = NULL;
   if (operand_segment_count > 0) {
@@ -623,7 +662,7 @@ static iree_status_t loom_bytecode_body_reader_read_op(
     uint32_t depth) {
   loom_bytecode_body_op_record_t record = {0};
   IREE_RETURN_IF_ERROR(loom_bytecode_body_reader_read_op_record(
-      body_reader, cursor, builder, &record));
+      body_reader, cursor, builder, depth, &record));
   for (uint64_t i = 0; i < record.op->region_count; ++i) {
     loom_region_t* region = NULL;
     IREE_RETURN_IF_ERROR(loom_bytecode_body_reader_read_region(
@@ -755,6 +794,11 @@ static iree_status_t loom_bytecode_body_reader_read_region(
         &body_reader->values, block_count_offset,
         IREE_SV("region_block_count_exceeds_field_width"));
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      body_reader->values.decoder, cursor, IREE_SV("region_blocks"),
+      block_count,
+      /*minimum_entry_length=*/4, /*minimum_trailing_length=*/0,
+      block_count_offset));
   loom_region_t* region = NULL;
   IREE_RETURN_IF_ERROR(loom_module_allocate_region(
       body_reader->values.output_module, (uint16_t)block_count, &region));
