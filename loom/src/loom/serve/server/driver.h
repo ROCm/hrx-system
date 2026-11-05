@@ -26,6 +26,9 @@ typedef struct loom_serve_driver_t {
   iree_host_size_t cursor;
   // Monotonic abort intent; accepted borrowers still require collection.
   bool stopping;
+  // Every slot has been visited in a traversal that began with abort intent.
+  // Late failures require another complete turn before owner detachment.
+  bool stopping_applied;
   // Owned terminal application failure, consumed by the outer owner after
   // retirement. Managed model-local failures remain in their registry slots.
   iree_status_t status;
@@ -66,8 +69,9 @@ void loom_serve_driver_advance(loom_serve_driver_t* driver,
                                bool* out_progress);
 
 // Collects pending ownership after the turn and any adapter delivery. A late
-// application abort seals every managed slot and reports progress so the owner
-// runs the required retirement turn without relying on another external event.
+// application abort seals every managed slot and reports progress so every
+// borrowed and managed service receives a stopping turn without relying on
+// another external event.
 // False while stopping permits detachment; failed release still leaves the
 // registry owned.
 bool loom_serve_driver_collect(loom_serve_driver_t* driver, bool* out_progress);

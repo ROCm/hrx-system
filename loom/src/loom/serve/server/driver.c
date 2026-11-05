@@ -61,6 +61,7 @@ void loom_serve_driver_advance(loom_serve_driver_t* driver,
                                bool* out_progress) {
   *out_progress = false;
   driver->stopping |= !iree_status_is_ok(driver->status);
+  driver->stopping_applied = driver->stopping;
   for (iree_host_size_t i = 0; i < driver->capacity; ++i) {
     const iree_host_size_t index = (driver->cursor + i) % driver->capacity;
     loom_serve_registered_model_t* model =
@@ -123,8 +124,10 @@ void loom_serve_driver_advance(loom_serve_driver_t* driver,
 
 bool loom_serve_driver_collect(loom_serve_driver_t* driver,
                                bool* out_progress) {
-  bool pending = false;
   driver->stopping |= !iree_status_is_ok(driver->status);
+  bool pending =
+      driver->capacity && driver->stopping && !driver->stopping_applied;
+  *out_progress |= pending;
   for (iree_host_size_t i = 0; i < driver->capacity; ++i) {
     loom_serve_registered_model_t* model =
         loom_serve_registry_at(driver->registry, i);

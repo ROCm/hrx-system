@@ -55,6 +55,11 @@ struct Service {
           service.visits->push_back(2 * service.index);
           service.flags = flags;
           *out_progress = false;
+          if (iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING) &&
+              !service.pending) {
+            *out_progress = service.requests;
+            service.requests = false;
+          }
           if (service.fail) {
             service.fail = false;
             return iree_make_status(IREE_STATUS_DATA_LOSS, "dependency failed");
@@ -175,6 +180,61 @@ TEST_F(DriverTest, ApplicationFailureStopsPeersButRetainsPendingOwnership) {
   services_[0].pending = false;
   progress = false;
   loom_serve_driver_advance(&driver_, wake, {}, &progress);
+  EXPECT_FALSE(loom_serve_driver_collect(&driver_, &progress));
+  EXPECT_FALSE(progress);
+}
+
+TEST_F(DriverTest, LastServiceFailureMustStopEarlierQueuedBorrowers) {
+  services_[0].requests = true;
+  services_[2].fail = true;
+  bool progress = false;
+  loom_serve_driver_advance(&driver_, {}, {}, &progress);
+  EXPECT_TRUE(driver_.stopping);
+  EXPECT_TRUE(services_[0].requests);
+  EXPECT_FALSE(services_[0].flags & LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+
+  // The terminal error is progress, but collection must also retain the owner.
+  // A caller cannot detach merely because no asynchronous callback remains.
+  progress = false;
+  EXPECT_TRUE(loom_serve_driver_collect(&driver_, &progress));
+  EXPECT_TRUE(progress);
+  loom_serve_driver_advance(&driver_, {}, {}, &progress);
+  EXPECT_FALSE(services_[0].requests);
+  for (const auto& service : services_) {
+    EXPECT_TRUE(service.flags & LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+  }
+  progress = false;
+  EXPECT_FALSE(loom_serve_driver_collect(&driver_, &progress));
+  EXPECT_FALSE(progress);
+}
+
+TEST_F(DriverTest, AdapterFailureRequiresOneCompleteStoppingTurn) {
+  services_[0].requests = true;
+  services_[0].pending = true;
+  bool progress = false;
+  loom_serve_driver_advance(&driver_, {}, {}, &progress);
+  EXPECT_FALSE(progress);
+  driver_.status =
+      iree_make_status(IREE_STATUS_DATA_LOSS, "adapter delivery failed");
+  EXPECT_TRUE(loom_serve_driver_collect(&driver_, &progress));
+  EXPECT_TRUE(progress);
+
+  loom_serve_driver_advance(&driver_, {}, {}, &progress);
+  EXPECT_FALSE(progress);
+  for (const auto& service : services_) {
+    EXPECT_TRUE(service.flags & LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+  }
+  // Once all services have seen stop, accepted work owes the next wake. It
+  // remains pending but does not manufacture progress while the loan is held.
+  EXPECT_TRUE(loom_serve_driver_collect(&driver_, &progress));
+  EXPECT_FALSE(progress);
+  EXPECT_TRUE(services_[0].requests);
+
+  services_[0].pending = false;
+  loom_serve_driver_advance(&driver_, {}, {}, &progress);
+  EXPECT_TRUE(progress);
+  EXPECT_FALSE(services_[0].requests);
+  progress = false;
   EXPECT_FALSE(loom_serve_driver_collect(&driver_, &progress));
   EXPECT_FALSE(progress);
 }
