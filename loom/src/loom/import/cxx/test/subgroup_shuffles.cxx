@@ -33,7 +33,7 @@ struct WidePayload<BFloats16> {
 // Use object bits, including floating NaNs, without numerical
 // conversions. Each wide component carries a distinct source-lane fingerprint.
 template <class T>
-LOOM_FORCE_INLINE T payload(unsigned long long bits) {
+LOOM_INLINE T payload(unsigned long long bits) {
   if constexpr (sizeof(T) > 16) {
     T values{};
     for (unsigned component = 0; component < WidePayload<T>::count;
@@ -62,7 +62,7 @@ LOOM_FORCE_INLINE T payload(unsigned long long bits) {
 }
 
 template <class T>
-LOOM_FORCE_INLINE bool same_bits(T left, T right) {
+LOOM_INLINE bool same_bits(T left, T right) {
   if constexpr (sizeof(T) > 16) {
     bool equal = true;
     for (unsigned component = 0; component < WidePayload<T>::count;
@@ -95,10 +95,11 @@ LOOM_FORCE_INLINE bool same_bits(T left, T right) {
 // The oracle searches actual topology metadata. It assumes neither workitem
 // order within a subgroup nor that the final physical subgroup is full.
 template <class T>
-LOOM_FORCE_INLINE unsigned mismatch(
-    loom::kernel::subgroup::shuffle_result<T> actual, unsigned source_lane,
-    bool in_range, unsigned subgroup, const unsigned* lanes,
-    const unsigned* subgroups, const unsigned long long* input) {
+LOOM_INLINE unsigned mismatch(loom::kernel::subgroup::shuffle_result<T> actual,
+                              unsigned source_lane, bool in_range,
+                              unsigned subgroup, const unsigned* lanes,
+                              const unsigned* subgroups,
+                              const unsigned long long* input) {
   bool found = false;
   T expected = payload<T>(0);
   for (unsigned other = 0; other < 83; ++other) {
@@ -116,8 +117,8 @@ LOOM_FORCE_INLINE unsigned mismatch(
 }
 
 template <class T>
-LOOM_FORCE_INLINE void exchange_values(const unsigned long long* input,
-                                       unsigned* output) {
+LOOM_INLINE void exchange_values(const unsigned long long* input,
+                                 unsigned* output) {
   const unsigned item = loom::kernel::workitem::id.x;
   const unsigned lane = loom::kernel::subgroup::lane_id();
   const unsigned subgroup = loom::kernel::subgroup::id();

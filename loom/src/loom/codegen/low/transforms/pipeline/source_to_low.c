@@ -741,6 +741,9 @@ iree_status_t loom_low_source_to_low_run(loom_pass_t* pass,
         .representation_projections = &projection_index,
         .source_signature_projections = &source_signature_index,
         .call_interfaces = call_interface_index,
+        .source_has_direct_callers =
+            loom_low_source_invocation_facts_has_direct_callers(
+                &invocation_facts, selection->func),
         .emitter = pass->diagnostic_emitter,
         .max_errors = state ? state->max_errors : 20,
         .control_flow_lowering = state ? state->control_flow_lowering

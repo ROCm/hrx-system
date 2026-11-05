@@ -15,7 +15,7 @@ struct Observation {
   unsigned after;
 };
 
-[[loom::force_inline]] static void update(unsigned* value, unsigned enabled) {
+[[loom::inline]] static void update(unsigned* value, unsigned enabled) {
   if (enabled) {
     *value += 4;
   }
@@ -49,7 +49,7 @@ static unsigned value_initialized() {
          nested[0] + nested[1];
 }
 
-[[loom::force_inline]] static void fill(unsigned* values, unsigned count) {
+[[loom::inline]] static void fill(unsigned* values, unsigned count) {
   for (unsigned i = 0; i < count; ++i) {
     values[i] = i + 3;
   }

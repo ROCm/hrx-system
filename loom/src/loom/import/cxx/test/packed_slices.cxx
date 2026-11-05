@@ -11,7 +11,7 @@
 namespace loomt = loom::type;
 
 template <class T>
-static LOOM_FORCE_INLINE void slice_payloads(const T* input, T* output) {
+static LOOM_INLINE void slice_payloads(const T* input, T* output) {
   using Source = T __attribute__((ext_vector_type(16)));
   using Four = T __attribute__((ext_vector_type(4)));
   using Eight = T __attribute__((ext_vector_type(8)));

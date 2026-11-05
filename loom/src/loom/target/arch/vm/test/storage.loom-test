@@ -2,7 +2,7 @@
 
 vm.target<core> @vm
 
-low.func.def target<vm.core>(@vm) abi(vm_function) @identity(%a: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
+low.func.def noinline target<vm.core>(@vm) abi(vm_function) @identity(%a: reg<vm.value : i64>) -> (reg<vm.value : i64>) asm {
   return %a
 }
 

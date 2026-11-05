@@ -85,10 +85,10 @@ const unsigned ffn_output_size = 768u;
 [[loom::config("ffn_routed_gate_up.token_capacity")]]
 const unsigned ffn_token_capacity = 16u;
 
-static LOOM_FORCE_INLINE Q4ScaleMinimum q4k_scale_from_header(unsigned scale0,
-                                                              unsigned scale1,
-                                                              unsigned scale2,
-                                                              unsigned group) {
+static LOOM_INLINE Q4ScaleMinimum q4k_scale_from_header(unsigned scale0,
+                                                        unsigned scale1,
+                                                        unsigned scale2,
+                                                        unsigned group) {
   loom::assume(group < 8u);
   bool low_group = group < 4u;
   unsigned scale_shift = (group % 4u) * 8u;
@@ -105,7 +105,7 @@ static LOOM_FORCE_INLINE Q4ScaleMinimum q4k_scale_from_header(unsigned scale0,
   return {scale, minimum};
 }
 
-static LOOM_FORCE_INLINE Q4ChunkPair q4k_chunk_pair(
+static LOOM_INLINE Q4ChunkPair q4k_chunk_pair(
     WeightU32View weights, unsigned weight_word_count, unsigned block_word_base,
     unsigned group_pair, unsigned half, U32x4 header_words) {
   loom::assume(group_pair < 4u && half < 2u);
@@ -137,9 +137,9 @@ static LOOM_FORCE_INLINE Q4ChunkPair q4k_chunk_pair(
           minimum * float(high_values.minimum)};
 }
 
-static LOOM_FORCE_INLINE float q4k_q8_1_dot(U8x16 q4_values, float scale,
-                                            float minimum, I8x16 q8_values,
-                                            float q8_scale, float q8_sum) {
+static LOOM_INLINE float q4k_q8_1_dot(U8x16 q4_values, float scale,
+                                      float minimum, I8x16 q8_values,
+                                      float q8_scale, float q8_sum) {
   I32x4 partial = {};
   partial = loom::vector::dot4i(q4_values, q8_values, partial);
   int sum = loom::vector::reduce::addi(partial, 0);

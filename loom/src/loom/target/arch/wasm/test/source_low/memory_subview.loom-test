@@ -123,16 +123,15 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @subview_prefetch_stri
 
 // ====
 
-// Ordinary helpers preserve exact caller facts without requiring source
-// inlining. The exact origin makes the initial view legal; the runtime-varying
-// row stride still prevents the nested offset from fitting Wasm's address type.
-func.def @make_storage_crop(%input: buffer, %origin: offset, %columns: index) -> (%result_storage: encoding<storage>, view<2x3xf32, %result_storage>) {
+// Storage encodings are compile-time metadata and cannot cross the Wasm call
+// ABI. Both helpers therefore inline despite the cold policy, preserving the
+// caller's bounded origin and stride facts through 32-bit address lowering.
+func.def cold @make_storage_crop(%input: buffer, %origin: offset, %columns: index) -> (%result_storage: encoding<storage>, view<2x3xf32, %result_storage>) {
   %layout = encoding.layout.strided [%columns, 1] : encoding<layout>
   %schema = encoding.define #encoding.f32 : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
   %input_aligned = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
   %source = buffer.view %input_aligned[%origin] : buffer -> view<4x[%columns]xf32, %storage>
-  // ERROR@+1: WASM/006 {op_name="view.subview", bit_count="32"}
   %crop, %crop_storage = view.subview %source[1, 2] : view<4x[%columns]xf32, %storage> -> view<2x3xf32, %crop_storage>
   func.return %crop_storage, %crop : encoding<storage>, view<2x3xf32, %crop_storage>
 }
@@ -152,6 +151,17 @@ func.def public @subview_composed_helpers(%input: buffer, %output: buffer, %widt
   %destination = buffer.view %output_aligned[%output_origin] : buffer -> view<1xf32>
   view.store %value, %destination[0] : f32, view<1xf32>
   func.return
+}
+
+// ----
+low.func.def public target<wasm.core.simd128> abi(wasm_function) @subview_composed_helpers(%input_aligned: reg<wasm.i32>, %output_aligned: reg<wasm.i32>, %columns: reg<wasm.i32>) asm {
+  %35 = i32.const 4
+  %36 = i32.mul %columns, %35
+  %39 = i32.add %36, %36
+  %40 = i32.add %input_aligned, %39
+  %value = f32.load %40 {offset = 20}
+  f32.store %output_aligned, %value {offset = 4}
+  return
 }
 
 // ====

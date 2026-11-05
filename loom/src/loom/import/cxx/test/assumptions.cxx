@@ -10,30 +10,30 @@
 #include <loomcxx/kernel.h>
 #include <loomcxx/view.h>
 
-[[loom::force_inline]] unsigned bound_pair(unsigned first, unsigned second) {
+[[loom::inline]] unsigned bound_pair(unsigned first, unsigned second) {
   __builtin_assume(first < 256u && second < 256u);
   return first * 257u + second;
 }
 
-[[loom::force_inline]] unsigned bound_seven(unsigned a, unsigned b, unsigned c,
-                                            unsigned d, unsigned e, unsigned f,
-                                            unsigned g) {
+[[loom::inline]] unsigned bound_seven(unsigned a, unsigned b, unsigned c,
+                                      unsigned d, unsigned e, unsigned f,
+                                      unsigned g) {
   loom::assume(a < 256u && b < 256u && c < 256u && d < 256u && e < 256u &&
                f < 256u && g < 256u);
   return a + 2u * b + 3u * c + 5u * d + 7u * e + 11u * f + 13u * g;
 }
 
 template <unsigned Limit>
-[[loom::force_inline]] unsigned refine(unsigned value) {
+[[loom::inline]] unsigned refine(unsigned value) {
   loom::assume(((value < 256u) && ((value) < (1u << Limit))) && value < 64u);
   return value * 17u;
 }
 
-[[loom::force_inline]] unsigned bound_repeated(unsigned value) {
+[[loom::inline]] unsigned bound_repeated(unsigned value) {
   return refine<5>(value);
 }
 
-[[loom::force_inline]] unsigned bound_capacity(unsigned value) {
+[[loom::inline]] unsigned bound_capacity(unsigned value) {
   constexpr unsigned capacity = 28672;
   constexpr unsigned stride = 16;
   loom::assume(value <
@@ -41,27 +41,27 @@ template <unsigned Limit>
   return value * 16u + 336u;
 }
 
-[[loom::force_inline]] unsigned bound_cast(unsigned value) {
+[[loom::inline]] unsigned bound_cast(unsigned value) {
   loom::assume(value < static_cast<unsigned char>(272u));
   return value + 5u;
 }
 
-[[loom::force_inline]] unsigned bound_byte(unsigned char value) {
+[[loom::inline]] unsigned bound_byte(unsigned char value) {
   loom::assume(value < 256u);
   return value + (value >= 128u ? 1024u : 0u);
 }
 
-[[loom::force_inline]] unsigned bound_wide(unsigned long long value) {
+[[loom::inline]] unsigned bound_wide(unsigned long long value) {
   loom::assume(value < (0xffffffffu + 257u));
   return (unsigned)(value * 3u);
 }
 
-[[loom::force_inline]] unsigned bound_size(unsigned value) {
+[[loom::inline]] unsigned bound_size(unsigned value) {
   loom::assume(value < sizeof(++value) * 4u);
   return value;
 }
 
-[[loom::force_inline]] unsigned bound_scoped(unsigned value) {
+[[loom::inline]] unsigned bound_scoped(unsigned value) {
   if (value < 256u) {
     loom::assume(value < 256u);
     return value + 1u;
@@ -69,19 +69,18 @@ template <unsigned Limit>
   return value + 3u;
 }
 
-[[loom::force_inline]] unsigned bound_inclusive(unsigned tokens) {
+[[loom::inline]] unsigned bound_inclusive(unsigned tokens) {
   constexpr unsigned capacity = 427u;
   loom::assume(tokens <= capacity);
   return tokens * 19u + 3u;
 }
 
-[[loom::force_inline]] int bound_signed(int hidden, int capacity) {
+[[loom::inline]] int bound_signed(int hidden, int capacity) {
   loom::assume(hidden > 0 && hidden <= capacity);
   return hidden * 23 + capacity;
 }
 
-[[loom::force_inline]] unsigned bound_unsigned(unsigned tokens,
-                                               unsigned capacity) {
+[[loom::inline]] unsigned bound_unsigned(unsigned tokens, unsigned capacity) {
   loom::assume(tokens <= capacity);
   return tokens ^ capacity;
 }
@@ -669,8 +668,8 @@ LOOM_CHECK_SCENARIO(assumption_kernel_values) {
 }
 
 template <class Index>
-static LOOM_FORCE_INLINE void assumed_table_indices(const Index* input,
-                                                    unsigned* output) {
+static LOOM_INLINE void assumed_table_indices(const Index* input,
+                                              unsigned* output) {
   unsigned lane = loom::kernel::workitem::id.x;
   auto* table =
       loom::buffer::alloca<unsigned, loom::memory_space::workgroup, 16>(6);

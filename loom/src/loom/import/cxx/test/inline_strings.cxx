@@ -11,11 +11,13 @@
 static const char* text() { return "a\0b"; }
 
 static unsigned code_units(unsigned position) {
+  loom::assume(position < 3u);
   return static_cast<unsigned char>(text()[position]) + u8"é"[position] +
          u"\U0001F9F5"[position];
 }
 
 static unsigned writable(unsigned position, unsigned replacement) {
+  loom::assume(position < 8u);
   alignas(16) char first[8] = "abc";
   const char second[8] = {"abc"};
   first[position] = replacement;
@@ -24,6 +26,7 @@ static unsigned writable(unsigned position, unsigned replacement) {
 }
 
 static unsigned wide_units(unsigned position) {
+  loom::assume(position < 4u);
   char16_t utf16[4] = u"\U0001F9F5";
   char32_t utf32[4] = U"\U0001F9F5";
   wchar_t wide[4] = L"\U0001F9F5";
@@ -31,6 +34,7 @@ static unsigned wide_units(unsigned position) {
 }
 
 static int narrow_units(unsigned position) {
+  loom::assume(position < 2u);
   signed char signed_bytes[] = "\xff";
   unsigned char unsigned_bytes[] = {"\xff"};
   char8_t utf8[4] = u8"é";
@@ -38,6 +42,7 @@ static int narrow_units(unsigned position) {
 }
 
 static unsigned nested(unsigned row, unsigned position) {
+  loom::assume(row < 2u && position < 4u);
   struct Record {
     // String-initialized member retaining its declared array extent.
     char label[4];
@@ -52,6 +57,7 @@ static unsigned nested(unsigned row, unsigned position) {
 }
 
 static unsigned volatile_units(unsigned position) {
+  loom::assume(position < 4u);
   volatile char16_t observed[4] = u"\U0001F9F5";
   volatile char table[1][4] = {"abc"};
   return observed[position] + table[0][position];
@@ -65,6 +71,7 @@ static unsigned literal_aliases() {
 }
 
 static unsigned payloads(unsigned position, unsigned replacement) {
+  loom::assume(position < 16u);
   auto* original = loom::buffer::constant<16>("a\0\xffZ");
   auto* first =
       loom::buffer::alloca_init<loom::memory_space::private_, 16>("a\0\xffZ");

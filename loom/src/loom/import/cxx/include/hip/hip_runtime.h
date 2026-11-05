@@ -14,7 +14,7 @@
 #define __device__ LOOM_DEVICE
 #define __host__
 #define __shared__ LOOM_WORKGROUP
-#define __forceinline__ LOOM_FORCE_INLINE
+#define __forceinline__ LOOM_INLINE
 #define threadIdx ::loom::kernel::workitem::id
 #define blockIdx ::loom::kernel::workgroup::id
 #define blockDim ::loom::kernel::workgroup::size
@@ -27,19 +27,19 @@
 
 using uint3 = loom::kernel::uint3;
 
-[[loom::device, loom::force_inline]] static inline float __shfl_xor(
+[[loom::device, loom::inline]] static inline float __shfl_xor(
     float value, int mask, int width = warpSize) {
   return loom::kernel::subgroup::shuffle_xor(value, mask, width).value;
 }
 
-[[loom::device, loom::force_inline]] static inline float __expf(float value) {
+[[loom::device, loom::inline]] static inline float __expf(float value) {
   return loom::scalar::approximate::expf(value);
 }
 
 // HIP spellings are ordinary source wrappers over Loom's typed vocabulary.
-#define LOOMCXX_HIP_UNARY(name, operation)                                     \
-  [[loom::device, loom::force_inline]] static inline float name(float value) { \
-    return loom::scalar::operation(value);                                     \
+#define LOOMCXX_HIP_UNARY(name, operation)                               \
+  [[loom::device, loom::inline]] static inline float name(float value) { \
+    return loom::scalar::operation(value);                               \
   }
 LOOMCXX_HIP_UNARY(expf, expf)
 LOOMCXX_HIP_UNARY(exp2f, exp2f)
@@ -58,23 +58,20 @@ LOOMCXX_HIP_UNARY(fabsf, absf)
 LOOMCXX_HIP_UNARY(erff, erff)
 #undef LOOMCXX_HIP_UNARY
 
-[[loom::device, loom::force_inline]] static inline float fmaxf(float lhs,
-                                                               float rhs) {
+[[loom::device, loom::inline]] static inline float fmaxf(float lhs, float rhs) {
   return loom::scalar::maxnumf(lhs, rhs);
 }
 
-[[loom::device, loom::force_inline]] static inline float fminf(float lhs,
-                                                               float rhs) {
+[[loom::device, loom::inline]] static inline float fminf(float lhs, float rhs) {
   return loom::scalar::minnumf(lhs, rhs);
 }
 
-[[loom::device, loom::force_inline]] static inline float powf(float lhs,
-                                                              float rhs) {
+[[loom::device, loom::inline]] static inline float powf(float lhs, float rhs) {
   return loom::scalar::powf(lhs, rhs);
 }
 
-[[loom::device, loom::force_inline]] static inline float fmaf(float a, float b,
-                                                              float c) {
+[[loom::device, loom::inline]] static inline float fmaf(float a, float b,
+                                                        float c) {
   return loom::scalar::fmaf(a, b, c);
 }
 

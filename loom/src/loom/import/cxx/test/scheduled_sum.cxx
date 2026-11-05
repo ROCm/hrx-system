@@ -14,7 +14,7 @@ struct ScheduledSumConfiguration {
   loom::type::index input_count;
 };
 
-LOOM_FORCE_INLINE static ScheduledSumConfiguration make_configuration(
+LOOM_INLINE static ScheduledSumConfiguration make_configuration(
     unsigned columns, unsigned input_count) {
   return {columns, loom::index::cast(input_count)};
 }

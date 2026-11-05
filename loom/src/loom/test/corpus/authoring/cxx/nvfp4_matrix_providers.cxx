@@ -26,7 +26,7 @@ struct NvFp4Parameters {
   NvFp4Scale scale;
 };
 
-LOOM_FORCE_INLINE NvFp4Schema nvfp4_schema() {
+LOOM_INLINE NvFp4Schema nvfp4_schema() {
   return loom::encoding::define<loom::encoding::f4e2m1{
       .payload_elements = 16,
       .payload_registers = 2,

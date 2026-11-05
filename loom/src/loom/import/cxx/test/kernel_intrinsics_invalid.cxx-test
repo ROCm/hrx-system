@@ -2,7 +2,7 @@
 // Reachable device helpers do not acquire a kernel ancestor from their caller.
 #include <loomcxx/kernel.h>
 [[loom::device]] static unsigned lane() {
-  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or force-inline helper"
+  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or inline helper"
   return loom::kernel::workitem::id.x;
 }
 [[loom::kernel]] void entry(unsigned* output) { output[0] = lane(); }
@@ -11,34 +11,34 @@
 #include <loomcxx/kernel.h>
 // A C++ inline hint does not establish a required-inline IR contract.
 inline unsigned group() {
-  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or force-inline helper"
+  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or inline helper"
   return loom::kernel::workgroup::id.x;
 }
 
 // ====
 #include <loomcxx/kernel.h>
 unsigned group_size() {
-  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or force-inline helper"
+  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or inline helper"
   return loom::kernel::workgroup::size.x;
 }
 
 // ====
 #include <loomcxx/kernel.h>
 unsigned group_count() {
-  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or force-inline helper"
+  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or inline helper"
   return loom::kernel::workgroup::count.x;
 }
 
 // ====
 #include <loomcxx/kernel.h>
 unsigned subgroup_size() {
-  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or force-inline helper"
+  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or inline helper"
   return loom::kernel::subgroup::size();
 }
 
 // ====
 #include <loomcxx/kernel.h>
 float exchange(float value) {
-  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or force-inline helper"
+  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or inline helper"
   return loom::kernel::subgroup::shuffle_xor(value, 1, 32).value;
 }

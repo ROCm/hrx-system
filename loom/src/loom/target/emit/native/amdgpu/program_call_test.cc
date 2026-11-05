@@ -124,7 +124,8 @@ class AmdgpuProgramCallTest : public ::testing::Test {
     };
     IREE_ASSERT_OK(loom_low_func_def_build(
         &builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0,
-        /*cc=*/0, /*effect_contract=*/0, /*inline_policy=*/0,
+        /*cc=*/0, /*effect_contract=*/0, /*temperature=*/0,
+        /*inline_policy=*/0,
         /*allocation=*/0, /*schedule=*/0, descriptor_set_name,
         /*target=*/loom_symbol_ref_t{}, /*abi=*/0, loom_named_attr_slice_t{},
         loom_named_attr_slice_t{}, LOOM_STRING_ID_INVALID,
@@ -229,7 +230,8 @@ TEST_F(AmdgpuProgramCallTest, EmptySignatureHasNoCarrierPointers) {
   loom_op_t* void_op = nullptr;
   IREE_ASSERT_OK(loom_low_func_def_build(
       &builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0,
-      /*cc=*/0, /*effect_contract=*/0, /*inline_policy=*/0,
+      /*cc=*/0, /*effect_contract=*/0, /*temperature=*/0,
+      /*inline_policy=*/0,
       /*allocation=*/0, /*schedule=*/0, descriptor_set_name,
       /*target=*/loom_symbol_ref_t{}, /*abi=*/0, loom_named_attr_slice_t{},
       loom_named_attr_slice_t{}, LOOM_STRING_ID_INVALID,

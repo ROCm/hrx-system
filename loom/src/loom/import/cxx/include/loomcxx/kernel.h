@@ -39,7 +39,7 @@
 // Declares uninitialized scalar, vector, or fixed scalar-array storage shared
 // by every invocation in the enclosing kernel workgroup.
 #define LOOM_WORKGROUP [[loom::workgroup]]
-#define LOOM_FORCE_INLINE [[loom::force_inline]] inline
+#define LOOM_INLINE [[loom::inline]] inline
 // Declares an ordinary C++ function whose calls apply the named link-selected
 // Loom template family. The declaration has no C++ definition; its parameters
 // and result define the semantic family signature at each call site.
@@ -505,7 +505,7 @@ template <scan_mode Mode = scan_mode::inclusive,
 }  // namespace workgroup::scan
 
 // Topology queries and collective intrinsics require a kernel body or a
-// force-inline helper. Other helpers receive topology values as arguments.
+// inline helper. Other helpers receive topology values as arguments.
 namespace workitem {
 
 // Zero-based invocation coordinate within the current workgroup.

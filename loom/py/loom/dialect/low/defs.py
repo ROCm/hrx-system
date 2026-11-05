@@ -57,6 +57,7 @@ from loom.dialect.func.defs import (
     CallingConv,
     EffectContract,
     InlinePolicyAttr,
+    Temperature,
 )
 from loom.dialect.memory import MemoryAccessFlags
 from loom.dialect.symbol import Retain, Visibility
@@ -260,6 +261,7 @@ _FUNC_COMMON_ATTRS = [
     AttrDef("visibility", "enum", enum_def=Visibility, optional=True),
     AttrDef("cc", "enum", enum_def=CallingConv, optional=True),
     AttrDef("effect_contract", "enum", enum_def=EffectContract, optional=True),
+    AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
     AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     AttrDef("allocation", "enum", enum_def=LowAllocationMode, optional=True),
     AttrDef("schedule", "enum", enum_def=LowScheduleMode, optional=True),
@@ -314,6 +316,7 @@ _FUNC_MODIFIER_FORMAT: list[FormatElement] = [
     OptionalGroup([Attr("retain")], anchor="retain"),
     OptionalGroup([Attr("cc")], anchor="cc"),
     OptionalGroup([Attr("effect_contract")], anchor="effect_contract"),
+    OptionalGroup([Attr("temperature")], anchor="temperature"),
     OptionalGroup([Attr("inline_policy")], anchor="inline_policy"),
     OptionalGroup(
         [kw("allocation"), GLUE, LPAREN, Attr("allocation"), GLUE, RPAREN],
@@ -509,6 +512,7 @@ _FUNC_LIKE_COMMON: dict[str, Any] = dict(
     visibility="visibility",
     cc="cc",
     effect_contract="effect_contract",
+    temperature="temperature",
     inline_policy="inline_policy",
     predicates="predicates",
 )
@@ -753,6 +757,7 @@ low_func_call = Op(
             symbol_ref=SymbolReference("function", ["callable"]),
         ),
         AttrDef("effect_contract", "enum", enum_def=EffectContract, optional=True),
+        AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
         AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     ],
     results=[Result("results", REGISTER, variadic=True)],
@@ -763,6 +768,7 @@ low_func_call = Op(
             operands="operands",
             results="results",
             effect_contract="effect_contract",
+            temperature="temperature",
             inline_policy="inline_policy",
             kind=CallLikeKind.LOW_INTERNAL,
         ),
@@ -773,6 +779,7 @@ low_func_call = Op(
     verify="loom_low_func_call_verify",
     format=[
         OptionalGroup([Attr("effect_contract")], anchor="effect_contract"),
+        OptionalGroup([Attr("temperature")], anchor="temperature"),
         OptionalGroup([Attr("inline_policy")], anchor="inline_policy"),
         SymbolRef("callee"),
         GLUE,
@@ -1822,9 +1829,9 @@ low_invoke = Op(
         "register-typed value. Views require storage and layout information "
         "beyond that carrier and are not accepted as operands or results; use "
         "a source helper taking views or pass buffers and offsets explicitly. "
-        "Authored inline policy has the "
-        "same meaning as on low.func.call; targets without a Low call ABI may "
-        "require the normalized edge to inline before emission."
+        "Authored temperature and inline policy have the same meaning as on "
+        "low.func.call; targets without a Low call ABI may require the "
+        "normalized edge to inline before emission."
     ),
     operands=[Operand("operands", ANY, variadic=True)],
     attrs=[
@@ -1834,6 +1841,7 @@ low_invoke = Op(
             symbol_ref=SymbolReference("function", ["callable"]),
         ),
         AttrDef("effect_contract", "enum", enum_def=EffectContract, optional=True),
+        AttrDef("temperature", "enum", enum_def=Temperature, optional=True),
         AttrDef("inline_policy", "enum", enum_def=InlinePolicyAttr, optional=True),
     ],
     results=[Result("results", ANY, variadic=True)],
@@ -1848,6 +1856,7 @@ low_invoke = Op(
             operands="operands",
             results="results",
             effect_contract="effect_contract",
+            temperature="temperature",
             inline_policy="inline_policy",
             kind=CallLikeKind.LOW_INVOKE,
         ),
@@ -1858,6 +1867,7 @@ low_invoke = Op(
     verify="loom_low_invoke_verify",
     format=[
         OptionalGroup([Attr("effect_contract")], anchor="effect_contract"),
+        OptionalGroup([Attr("temperature")], anchor="temperature"),
         OptionalGroup([Attr("inline_policy")], anchor="inline_policy"),
         SymbolRef("callee"),
         GLUE,

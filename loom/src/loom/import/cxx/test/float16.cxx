@@ -8,7 +8,7 @@
 
 using Half4 = _Float16 __attribute__((ext_vector_type(4)));
 
-[[loom::force_inline]] static Half4 scale(Half4 value, _Float16 factor) {
+[[loom::inline]] static Half4 scale(Half4 value, _Float16 factor) {
   return value * factor;
 }
 

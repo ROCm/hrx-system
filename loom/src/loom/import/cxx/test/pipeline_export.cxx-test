@@ -21,7 +21,7 @@ constexpr generic_target worker_target{
 [[loom::symbol("deployment.array")]]
 extern const loom::target::declaration array_target;
 
-[[loom::symbol("workers.adjust"), loom::force_inline, loom::target(array_target)]]
+[[loom::symbol("workers.adjust"), loom::inline, loom::target(array_target)]]
 unsigned adjust(unsigned value);
 
 [[loom::pipeline("kernel")]] void child(unsigned factor, [[loom::launch]] Bytes output);
@@ -59,7 +59,7 @@ constexpr rendered_target_worker_target_type rendered_target_worker_target{
   .subgroup_size = 32,
 };
 
-[[loom::symbol("workers.adjust"), loom::target(rendered_target_deployment_array), loom::force_inline]]
+[[loom::symbol("workers.adjust"), loom::target(rendered_target_deployment_array), loom::inline]]
 unsigned workers_adjust(unsigned v21);
 
 [[loom::pipeline("kernel"), loom::symbol("resident"), loom::retain, loom::target(rendered_target_deployment_array)]]

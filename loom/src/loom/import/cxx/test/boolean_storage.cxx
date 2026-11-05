@@ -7,9 +7,9 @@
 #include <loomcxx/check.h>
 #include <loomcxx/kernel.h>
 
-[[loom::force_inline]] static void invert(bool* value) { *value = !*value; }
-[[loom::force_inline]] static bool* identity(bool* value) { return value; }
-[[loom::force_inline]] static void initialize(bool* value, unsigned input) {
+[[loom::inline]] static void invert(bool* value) { *value = !*value; }
+[[loom::inline]] static bool* identity(bool* value) { return value; }
+[[loom::inline]] static void initialize(bool* value, unsigned input) {
   *value = input;
 }
 

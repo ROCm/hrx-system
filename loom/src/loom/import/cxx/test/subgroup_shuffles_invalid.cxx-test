@@ -58,7 +58,7 @@ struct Result { unsigned value; bool valid; };
 #include <loomcxx/kernel.h>
 #include <loomcxx/vector.h>
 using Matrix = loom::type::vector<loom::type::shape<2, 4>, unsigned>;
-[[loom::force_inline]] Matrix rank_two(Matrix value) {
+[[loom::inline]] Matrix rank_two(Matrix value) {
   // ERROR@+1: LOWERING/059 "subgroup shuffle requires a scalar or rank-one vector payload"
   return loom::kernel::subgroup::shuffle_up(value, 1, 32).value;
 }
@@ -66,7 +66,7 @@ using Matrix = loom::type::vector<loom::type::shape<2, 4>, unsigned>;
 // ====
 #include <loomcxx/kernel.h>
 unsigned missing_kernel(unsigned value) {
-  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or force-inline helper"
+  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or inline helper"
   return loom::kernel::subgroup::shuffle_index(value, 0, 32).value;
 }
 
@@ -75,7 +75,7 @@ unsigned missing_kernel(unsigned value) {
 // vectors use loom::type::vector instead of changing that source contract.
 #include <loomcxx/kernel.h>
 using Packed = bool __attribute__((ext_vector_type(4)));
-[[loom::force_inline]] Packed packed_boolean(Packed value) {
+[[loom::inline]] Packed packed_boolean(Packed value) {
   // ERROR@+1: LOWERING/059 "vectors require non-boolean scalar lanes"
   return loom::kernel::subgroup::shuffle_up(value, 1, 32).value;
 }

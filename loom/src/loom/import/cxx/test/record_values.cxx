@@ -25,9 +25,9 @@ struct Packet {
   State state;
 };
 
-[[loom::force_inline]] static Empty forward_empty(Empty value) { return value; }
+[[loom::inline]] static Empty forward_empty(Empty value) { return value; }
 
-[[loom::force_inline]] static Pair update_pair(Pair value, unsigned count) {
+[[loom::inline]] static Pair update_pair(Pair value, unsigned count) {
   Pair original = value;
   Pair copy(value);
   for (unsigned index = 0; index < count; ++index) {
@@ -69,7 +69,7 @@ unsigned record_sequencing(unsigned input, unsigned choose) {
   return selected + value.first * 3u + value.second * 5u;
 }
 
-[[loom::force_inline]] static State advance_state(State value, unsigned count) {
+[[loom::inline]] static State advance_state(State value, unsigned count) {
   State original = value;
   State copy{value};
   for (unsigned index = 0; index < count; ++index) {

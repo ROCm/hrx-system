@@ -12,7 +12,7 @@ CHECK-NOT: *scalar.cmpi*
 
 // ====
 // Conditional helper mutation promotes the stored bytes through an SSA merge.
-[[loom::force_inline]] static void invert(bool* value) { *value = !*value; }
+[[loom::inline]] static void invert(bool* value) { *value = !*value; }
 bool conditional(bool input, bool enabled) {
   bool value = input;
   if (enabled) invert(&value);

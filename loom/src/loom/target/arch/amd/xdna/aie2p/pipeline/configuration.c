@@ -127,7 +127,7 @@ static iree_status_t loom_aie2p_native_config_function(
           (visibility ? LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY : 0) |
           (retain ? LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_RETAIN : 0) |
           (visibility || retain ? LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI : 0),
-      visibility, retain, 0, 0, 0, 0, 0, config->contract, config->target,
+      visibility, retain, 0, 0, 0, 0, 0, 0, config->contract, config->target,
       LOOM_TARGET_ABI_ARRAY_PROGRAM, loom_named_attr_slice_empty(),
       loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(), symbol, NULL, 0, NULL, 0, NULL, 0, NULL, 0,

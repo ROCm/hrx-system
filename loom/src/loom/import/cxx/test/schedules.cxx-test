@@ -169,7 +169,7 @@ func.def @sum_320_4(%input: buffer, %input_byte_offset: offset, %start: i32) -> 
 // ====
 // RUN: roundtrip
 // Scheduling expressions retain values until Loom specialization.
-[[loom::force_inline]] static unsigned sum(unsigned count, unsigned factor,
+[[loom::inline]] static unsigned sum(unsigned count, unsigned factor,
                                            unsigned long long depth) {
   unsigned total = 0;
   [[loom::unroll(factor + 1u), loom::pipeline(depth / sizeof(unsigned)),

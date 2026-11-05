@@ -730,6 +730,34 @@ or `-`, with no leading `@`. Functions and configuration values share one Loom
 namespace; conflicting exact names diagnose instead of receiving an automatic
 suffix.
 
+## Callable placement policy
+
+Callable policy uses the same vocabulary in C++ and Loom IR. `loom::inline`
+requires expansion at the current IR stage, while `loom::noinline` requires a
+real callable boundary. A target that cannot represent an authored retained
+boundary diagnoses `noinline` instead of silently discarding it. The ordinary
+C++ `inline` keyword retains its language linkage meaning and does not imply
+Loom's placement policy.
+
+`loom::hot` and `loom::cold` carry execution-temperature hints independently
+of that binding decision. A hot function may spend more code size to remove
+call overhead; a cold function retains its boundary unless another explicit or
+target requirement forces expansion. Each policy pair is mutually exclusive:
+
+```cpp
+[[loom::inline, loom::hot]] unsigned clamp_lane(unsigned value) {
+  return value < 64u ? value : 63u;
+}
+
+[[loom::noinline, loom::cold]] unsigned report_invalid_lane(unsigned value) {
+  return value;
+}
+```
+
+The `LOOM_INLINE` facade macro combines `[[loom::inline]]` with the ordinary
+C++ `inline` keyword for header helpers. Direct attributes remain available
+when linkage and placement need separate control.
+
 ## Translation-unit and runtime imports
 
 A called namespace-scope prototype becomes an ordinary High `func.decl` when
@@ -1500,15 +1528,15 @@ inactive lanes and partial subgroups do not supply an implicit identity.
 #include <loomcxx/kernel.h>
 using UInt4 = unsigned __attribute__((ext_vector_type(4)));
 
-[[loom::force_inline]] UInt4 exchange(UInt4 local, unsigned elected_lane) {
+[[loom::inline]] UInt4 exchange(UInt4 local, unsigned elected_lane) {
   return loom::kernel::subgroup::broadcast(local, elected_lane);
 }
 
-[[loom::force_inline]] unsigned long long ready_streams(bool ready) {
+[[loom::inline]] unsigned long long ready_streams(bool ready) {
   return loom::kernel::subgroup::vote::ballot(ready);
 }
 
-[[loom::force_inline]] UInt4 predecessor_or(UInt4 local, UInt4 identity) {
+[[loom::inline]] UInt4 predecessor_or(UInt4 local, UInt4 identity) {
   auto previous = loom::kernel::subgroup::shuffle_up(
       local, 1u, loom::kernel::subgroup::size());
   return previous.valid ? previous.value : identity;
@@ -1521,7 +1549,7 @@ These become `kernel.subgroup.broadcast ... : vector<4xi32>, i32`,
 both High results directly to the source record. Declarations use ordinary
 `[[loom::op("kernel.subgroup.broadcast")]]` bindings; custom names and concrete
 template instances use the same admission path. Calls require a kernel body or
-a `loom::force_inline` helper. Each argument is evaluated once, and the shared
+a `loom::inline` helper. Each argument is evaluated once, and the shared
 compiler owns convergence, value facts, and target lowering.
 
 Collectives do not imply memory synchronization. An execution rendezvous names
@@ -2551,7 +2579,7 @@ operands of `scf.for`. Mutation of a binding inside the loop does not change
 its schedule. Source widths, promotions, and signedness are preserved.
 
 ```cpp
-LOOM_FORCE_INLINE int sum(const int* input, unsigned columns,
+LOOM_INLINE int sum(const int* input, unsigned columns,
                           unsigned factor, unsigned depth) {
   int total = 0;
   [[loom::unroll(factor), loom::pipeline(depth)]]
@@ -2803,7 +2831,7 @@ reads, writes, and aliases. Ordinary helpers can update local state through
 pointers, including across branches and loops:
 
 ```cpp
-[[loom::force_inline]] void increment(unsigned* value) { ++*value; }
+[[loom::inline]] void increment(unsigned* value) { ++*value; }
 
 unsigned update(unsigned input, bool enabled) {
   unsigned value = input;

@@ -27,7 +27,7 @@ struct FloatReductions {
   Floats4 vector_sum;
 };
 
-LOOM_FORCE_INLINE IntegerReductions reduce_integers(int signed_value,
+LOOM_INLINE IntegerReductions reduce_integers(int signed_value,
                                                     unsigned unsigned_value,
                                                     Integers4 vector_value) {
   return {
@@ -44,7 +44,7 @@ LOOM_FORCE_INLINE IntegerReductions reduce_integers(int signed_value,
   };
 }
 
-LOOM_FORCE_INLINE FloatReductions reduce_floats(float value,
+LOOM_INLINE FloatReductions reduce_floats(float value,
                                                 Floats4 vector_value) {
   return {
       loom::kernel::subgroup::reduce::addf<8>(value),
@@ -102,7 +102,7 @@ struct PreservedCollectives {
   Floats2 workgroup_suffix;
 };
 
-LOOM_FORCE_INLINE PreservedCollectives preserve_collectives(float value,
+LOOM_INLINE PreservedCollectives preserve_collectives(float value,
                                                           Floats2 vector) {
   return {
       loom::kernel::subgroup::reduce::addf<8, 1, collective_math::preserve>(value),

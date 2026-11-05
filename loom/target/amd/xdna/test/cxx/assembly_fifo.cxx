@@ -29,7 +29,7 @@ struct Stream {
 
 FifoState query_load_fifos();
 
-[[loom::force_inline]] void subtract_blocks(Buffer input, Buffer output) {
+[[loom::inline]] void subtract_blocks(Buffer input, Buffer output) {
   Stream stream{input, output, query_load_fifos()};
   for (int block = 0; block < 4; ++block) {
     stream = loom::low::assembly<Aie2p, Stream>(R"loom(

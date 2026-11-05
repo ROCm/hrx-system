@@ -16,8 +16,8 @@ namespace loomt = loom::type;
 extern const unsigned slice_width;
 
 template <class T>
-static LOOM_FORCE_INLINE void slice_values(const T* input, T* output,
-                                           unsigned trial) {
+static LOOM_INLINE void slice_values(const T* input, T* output,
+                                     unsigned trial) {
   using Dynamic = loomt::vector<loomt::shape<loomt::dynamic>, T>;
   using Pair = T __attribute__((ext_vector_type(2)));
   using SemanticPair = loomt::vector<loomt::shape<2>, T>;

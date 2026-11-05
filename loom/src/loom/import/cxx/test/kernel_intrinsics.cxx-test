@@ -58,7 +58,7 @@ func.def @synchronize() {
 // barrier. Import preserves the helper boundary; kernel legalization expands
 // it before proving convergence in the caller's fact scope.
 #include <loomcxx/kernel.h>
-LOOM_FORCE_INLINE bool header_enables_barrier(const unsigned* header) {
+LOOM_INLINE bool header_enables_barrier(const unsigned* header) {
   return header[0] != 0;
 }
 [[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
@@ -96,12 +96,12 @@ kernel.def @guarded_barrier() {
 // ====
 // Required-inline helpers defer placement until their kernel use is expanded.
 #include <loomcxx/kernel.h>
-[[loom::force_inline]] static unsigned topology() {
+[[loom::inline]] static unsigned topology() {
   return loom::kernel::workitem::id.x + loom::kernel::workgroup::id.x +
          loom::kernel::workgroup::size.x + loom::kernel::workgroup::count.x +
          loom::kernel::subgroup::size();
 }
-[[loom::device, loom::force_inline]] static float exchange(float value) {
+[[loom::device, loom::inline]] static float exchange(float value) {
   return loom::kernel::subgroup::shuffle_xor(value, 1, 32).value;
 }
 [[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]

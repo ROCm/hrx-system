@@ -55,11 +55,18 @@ void reject_misplaced_binding_attributes(
               "retain requires a leading attribute on a namespace-scope "
               "callable");
         }
-        if ((name == "force_inline" || name == "noinline") &&
+        if ((name == "inline" || name == "noinline") &&
             scope != BindingAttributeScope::Declaration) {
           diagnostics.reject(
               unit, attribute,
               "inline policy requires a leading function declaration "
+              "attribute");
+        }
+        if ((name == "hot" || name == "cold") &&
+            scope != BindingAttributeScope::Declaration) {
+          diagnostics.reject(
+              unit, attribute,
+              "temperature hint requires a leading function declaration "
               "attribute");
         }
         if ((name == "template_def" || name == "priority") &&

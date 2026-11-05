@@ -43,7 +43,7 @@ unsigned external(unsigned value) { return value; }
 
 // ====
 // ERROR@+1: LOWERING/059 "import bindings require ordinary non-inline functions"
-[[loom::import("service"), loom::force_inline]] unsigned external(unsigned value);
+[[loom::import("service"), loom::inline]] unsigned external(unsigned value);
 
 // ====
 static unsigned external(unsigned value);

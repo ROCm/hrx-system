@@ -250,10 +250,8 @@ static iree_status_t loom_aie2p_map_argument(
     loom_low_lower_abi_argument_t* out_argument) {
   loom_type_t source_type = loom_module_value_type(
       loom_low_lower_context_module(context), source_argument_id);
-  const loom_func_like_t source_function =
-      loom_low_lower_context_source_function(context);
-  const bool is_direct_helper = loom_func_like_inline_policy(source_function) ==
-                                LOOM_INLINE_POLICY_NOINLINE;
+  const bool is_direct_helper =
+      loom_low_lower_context_source_has_direct_callers(context);
   if (loom_type_is_view(source_type) && is_direct_helper) {
     *out_argument = (loom_low_lower_abi_argument_t){
         .kind = LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT,

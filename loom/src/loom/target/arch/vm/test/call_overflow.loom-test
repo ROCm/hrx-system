@@ -3,7 +3,7 @@
 vm.target<core> @vm
 
 // Overflow arguments come from ABI cells, not uninitialized local registers.
-low.func.def target<vm.core>(@vm) abi(vm_function) @wide_identity(%a0: reg<vm.value : i64>, %a1: reg<vm.value : i64>, %a2: reg<vm.value : i64>, %a3: reg<vm.value : i64>, %a4: reg<vm.value : i64>, %a5: reg<vm.value : i64>, %a6: reg<vm.value : i64>, %a7: reg<vm.value : i64>, %a8: reg<vm.value : i64>, %a9: reg<vm.value : i64>, %a10: reg<vm.value : i64>, %a11: reg<vm.value : i64>, %a12: reg<vm.value : i64>, %a13: reg<vm.value : i64>, %a14: reg<vm.value : i64>, %a15: reg<vm.value : i64>, %a16: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
+low.func.def noinline target<vm.core>(@vm) abi(vm_function) @wide_identity(%a0: reg<vm.value : i64>, %a1: reg<vm.value : i64>, %a2: reg<vm.value : i64>, %a3: reg<vm.value : i64>, %a4: reg<vm.value : i64>, %a5: reg<vm.value : i64>, %a6: reg<vm.value : i64>, %a7: reg<vm.value : i64>, %a8: reg<vm.value : i64>, %a9: reg<vm.value : i64>, %a10: reg<vm.value : i64>, %a11: reg<vm.value : i64>, %a12: reg<vm.value : i64>, %a13: reg<vm.value : i64>, %a14: reg<vm.value : i64>, %a15: reg<vm.value : i64>, %a16: reg<vm.value : i64>) -> (reg<vm.value : i64>, reg<vm.value : i64>) asm {
   return %a0, %a16
 }
 

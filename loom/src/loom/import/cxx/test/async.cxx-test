@@ -8,7 +8,7 @@ using lane_view =
 using tile_view =
     loom::type::view<loom::type::shape<64, 4>, unsigned char, layout2>;
 
-LOOM_FORCE_INLINE void copy_pair(lane_view source, lane_view destination,
+LOOM_INLINE void copy_pair(lane_view source, lane_view destination,
                                  bool enabled) {
   auto load = loom::kernel::async::copy<
       loom::kernel::async::direction::global_to_workgroup,
@@ -23,7 +23,7 @@ LOOM_FORCE_INLINE void copy_pair(lane_view source, lane_view destination,
   loom::kernel::async::wait<0>(transfers);
 }
 
-LOOM_FORCE_INLINE void gather_pair(lane_view source, tile_view destination,
+LOOM_INLINE void gather_pair(lane_view source, tile_view destination,
                                    bool enabled) {
   auto first = loom::kernel::async::gather<loom::cache::scope::workgroup,
                                            loom::cache::temporal::regular>(
@@ -35,7 +35,7 @@ LOOM_FORCE_INLINE void gather_pair(lane_view source, tile_view destination,
   loom::kernel::async::wait<0>(transfers);
 }
 
-LOOM_FORCE_INLINE void cluster_pair(lane_view source, lane_view destination,
+LOOM_INLINE void cluster_pair(lane_view source, lane_view destination,
                                     unsigned participants, bool enabled) {
   auto first = loom::kernel::async::cluster::gather<
       loom::cache::scope::cluster, loom::cache::temporal::high_temporal>(
@@ -48,7 +48,7 @@ LOOM_FORCE_INLINE void cluster_pair(lane_view source, lane_view destination,
   loom::kernel::async::wait<0>(transfers);
 }
 
-LOOM_FORCE_INLINE void empty_stage() {
+LOOM_INLINE void empty_stage() {
   auto stage = loom::kernel::async::group();
   loom::kernel::async::wait<0>(stage);
 }

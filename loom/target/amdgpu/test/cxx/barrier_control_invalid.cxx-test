@@ -1,7 +1,7 @@
 // RUN: emit source-low target=amdgpu:gfx1151 output=none
 #include <loomcxx/kernel.h>
 
-static LOOM_FORCE_INLINE bool is_first_lane() {
+static LOOM_INLINE bool is_first_lane() {
   return loom::kernel::workitem::id.x == 0u;
 }
 
@@ -18,7 +18,7 @@ void lane_result_control() {
 
 #include <loomcxx/kernel.h>
 
-static LOOM_FORCE_INLINE void synchronize_workgroup() {
+static LOOM_INLINE void synchronize_workgroup() {
   // ERROR@+1: STRUCTURE/038 {op_name="kernel.barrier", required_uniform_scope="workgroup", control_kind="cfg_selector", control_value="active", control_op_name="cfg.cond_br", control_distribution="lane_predicate"}
   loom::kernel::workgroup::barrier();
 }

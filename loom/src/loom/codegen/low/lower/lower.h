@@ -1209,6 +1209,10 @@ typedef struct loom_low_lower_options_t {
       source_signature_projections;
   // Physical interfaces published by callee plans before caller planning.
   const loom_low_lower_call_interface_index_t* call_interfaces;
+  // True when source inlining retained at least one direct semantic caller of
+  // the function being lowered. Target ABI mapping consumes this physical
+  // boundary fact instead of interpreting the authored inline policy.
+  bool source_has_direct_callers;
   // Structured diagnostic emitter for user legality and lowering failures.
   iree_diagnostic_emitter_t emitter;
   // Maximum number of errors to emit before aborting. Zero means no limit.
@@ -1348,6 +1352,12 @@ loom_builder_t* loom_low_lower_context_builder(
 
 // Returns the source function being lowered.
 loom_func_like_t loom_low_lower_context_source_function(
+    const loom_low_lower_context_t* context);
+
+// Returns whether source inlining retained a direct semantic caller of the
+// source function. This is false for standalone lowering without module call
+// planning and for source functions used only as module roots.
+bool loom_low_lower_context_source_has_direct_callers(
     const loom_low_lower_context_t* context);
 
 // Returns the function-wide required payload read scope selected before op

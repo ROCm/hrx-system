@@ -22,6 +22,6 @@ void entry() {
 // ====
 [[loom::op("kernel.subgroup.vote.any")]] bool any(bool);
 bool entry(bool predicate) {
-  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or force-inline helper"
+  // ERROR@+1: LOWERING/059 "kernel intrinsic requires a kernel or inline helper"
   return any(predicate);
 }

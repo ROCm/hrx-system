@@ -87,7 +87,8 @@ class LowFunctionRequirementsTest : public ::testing::Test {
     loom_op_t* function = nullptr;
     IREE_CHECK_OK(loom_low_func_def_build(
         &builder, /*build_flags=*/0, /*visibility=*/0, /*retain=*/0,
-        /*cc=*/0, /*effect_contract=*/0, /*inline_policy=*/0,
+        /*cc=*/0, /*effect_contract=*/0, /*temperature=*/0,
+        /*inline_policy=*/0,
         /*allocation=*/0, /*schedule=*/0, descriptor_set_name_,
         /*target=*/loom_symbol_ref_t{}, /*abi=*/0,
         loom_named_attr_slice_empty(), loom_named_attr_slice_empty(),
@@ -409,7 +410,8 @@ TEST_F(LowFunctionRequirementsTest, RetainsUniqueDirectCalleesInCallOrder) {
     loom_op_t* call = nullptr;
     IREE_ASSERT_OK(loom_low_func_call_build(
         &builder, /*build_flags=*/0, /*effect_contract=*/0,
-        /*inline_policy=*/0, callee, /*operands=*/nullptr,
+        /*temperature=*/0, /*inline_policy=*/0, callee,
+        /*operands=*/nullptr,
         /*operands_count=*/0, /*result_types=*/nullptr, /*result_count=*/0,
         /*tied_results=*/nullptr, /*tied_result_count=*/0,
         LOOM_LOCATION_UNKNOWN, &call));
@@ -457,7 +459,8 @@ TEST_F(LowFunctionRequirementsTest, RetainsManyUniqueDirectCalleesInCallOrder) {
     loom_op_t* call = nullptr;
     IREE_ASSERT_OK(loom_low_func_call_build(
         &builder, /*build_flags=*/0, /*effect_contract=*/0,
-        /*inline_policy=*/0, callee, /*operands=*/nullptr,
+        /*temperature=*/0, /*inline_policy=*/0, callee,
+        /*operands=*/nullptr,
         /*operands_count=*/0, /*result_types=*/nullptr, /*result_count=*/0,
         /*tied_results=*/nullptr, /*tied_result_count=*/0,
         LOOM_LOCATION_UNKNOWN, &call));

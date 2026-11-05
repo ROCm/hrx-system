@@ -2,8 +2,8 @@
 struct Counter {
   unsigned value;
 
-  [[loom::force_inline]] void add(unsigned amount) { value += amount; }
-  [[loom::force_inline]] unsigned read() const { return value; }
+  [[loom::inline]] void add(unsigned amount) { value += amount; }
+  [[loom::inline]] unsigned read() const { return value; }
 };
 
 unsigned update(Counter value, unsigned amount) {

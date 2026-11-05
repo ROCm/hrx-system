@@ -525,11 +525,39 @@ static const loom_target_legalizer_provider_t* const
         &kLoomWasmLegalizerProvider,
 };
 
+static loom_target_call_policy_t loom_wasm_select_call_policy(
+    const loom_resolved_target_t* resolved_target, const loom_module_t* module,
+    loom_call_like_kind_t kind, loom_call_like_t call,
+    loom_func_like_t callee) {
+  (void)resolved_target;
+  (void)call;
+  if (kind != LOOM_CALL_LIKE_KIND_SEMANTIC || !module ||
+      !loom_func_like_isa(callee)) {
+    return LOOM_TARGET_CALL_POLICY_DIRECT;
+  }
+
+  uint16_t argument_count = 0;
+  const loom_value_id_t* arguments =
+      loom_func_like_arg_ids(callee, &argument_count);
+  const loom_value_id_t* results = loom_op_const_results(callee.op);
+  const iree_host_size_t value_count =
+      (iree_host_size_t)argument_count + callee.op->result_count;
+  for (iree_host_size_t i = 0; i < value_count; ++i) {
+    const loom_value_id_t value =
+        i < argument_count ? arguments[i] : results[i - argument_count];
+    if (!loom_wasm_source_type_is_callable(
+            loom_module_value_type(module, value))) {
+      return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+    }
+  }
+  return LOOM_TARGET_CALL_POLICY_DIRECT;
+}
+
 const loom_target_provider_t loom_wasm_target_provider = {
     .profile_type = &kProfileType,
     .select_profile = loom_wasm_select_profile,
     .materialize_definition = loom_wasm_materialize_definition,
-    .select_call_policy = loom_target_select_call_policy_direct,
+    .select_call_policy = loom_wasm_select_call_policy,
     .register_context = loom_wasm_ops_register_dialect,
     .initialize_low_descriptor_registry =
         loom_wasm_low_descriptor_registry_initialize,

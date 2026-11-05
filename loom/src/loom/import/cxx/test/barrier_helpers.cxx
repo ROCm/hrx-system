@@ -11,7 +11,7 @@ constexpr unsigned kWorkgroupSize = 64u;
 constexpr unsigned kWorkgroupCount = 2u;
 constexpr unsigned kElementCount = kWorkgroupSize * kWorkgroupCount;
 
-LOOM_FORCE_INLINE unsigned read_active_workgroups(const unsigned* header) {
+LOOM_INLINE unsigned read_active_workgroups(const unsigned* header) {
   return header[0];
 }
 

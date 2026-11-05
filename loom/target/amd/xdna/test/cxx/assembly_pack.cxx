@@ -10,7 +10,7 @@ struct [[loom::representation("amd.xdna.aie2p.core")]] Aie2p {};
 using SignedBytes = signed char __attribute__((ext_vector_type(128)));
 using Packed = unsigned char __attribute__((ext_vector_type(64)));
 
-[[loom::force_inline]] Packed saturate_s4(SignedBytes values) {
+[[loom::inline]] Packed saturate_s4(SignedBytes values) {
   return loom::low::assembly<Aie2p, Packed>(R"loom(
       (%values: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x2>) {
         set.pack-size 0
@@ -22,7 +22,7 @@ using Packed = unsigned char __attribute__((ext_vector_type(64)));
                                             values);
 }
 
-[[loom::force_inline]] Packed truncate_s4(SignedBytes values) {
+[[loom::inline]] Packed truncate_s4(SignedBytes values) {
   return loom::low::assembly<Aie2p, Packed>(R"loom(
       (%values: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x2>) {
         set.pack-size 0
@@ -34,8 +34,8 @@ using Packed = unsigned char __attribute__((ext_vector_type(64)));
                                             values);
 }
 
-[[loom::force_inline]] void pack_blocks(const signed char* input,
-                                        unsigned char* output) {
+[[loom::inline]] void pack_blocks(const signed char* input,
+                                  unsigned char* output) {
   const auto* source = reinterpret_cast<const SignedBytes*>(input);
   auto* destination = reinterpret_cast<Packed*>(output);
   const Packed guard = {

@@ -22,7 +22,7 @@ using Float8 = float __attribute__((ext_vector_type(8)));
 // depend on any target's chosen accumulation sequence or observed result bits.
 constexpr double kGroupErrorFactor = 32.0 * 0x1p-24 / (1.0 - 32.0 * 0x1p-24);
 
-[[loom::force_inline]] static Codes16 lookup(Codes16 table, Bytes16 indices) {
+[[loom::inline]] static Codes16 lookup(Codes16 table, Bytes16 indices) {
   return {table[indices[0]],  table[indices[1]],  table[indices[2]],
           table[indices[3]],  table[indices[4]],  table[indices[5]],
           table[indices[6]],  table[indices[7]],  table[indices[8]],

@@ -551,15 +551,15 @@ func.def @choose_count(%enabled: i1, %count: i32) -> (i32) {
 #include <loomcxx/kernel.h>
 #include <loomcxx/target.h>
 
-LOOM_FORCE_INLINE const unsigned* select_counts(bool use_left, const unsigned* left, const unsigned* right) {
+LOOM_INLINE const unsigned* select_counts(bool use_left, const unsigned* left, const unsigned* right) {
   return use_left ? left : right;
 }
 
-LOOM_FORCE_INLINE unsigned read_count(bool use_left, const unsigned* left, const unsigned* right) {
+LOOM_INLINE unsigned read_count(bool use_left, const unsigned* left, const unsigned* right) {
   return select_counts(use_left, left, right)[0];
 }
 
-LOOM_FORCE_INLINE unsigned launch_width() {
+LOOM_INLINE unsigned launch_width() {
   return loom::target::subgroup::size();
 }
 

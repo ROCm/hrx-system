@@ -1997,8 +1997,9 @@ static iree_status_t loom_aie2p_array_resident_materialize_worker(
   IREE_RETURN_IF_ERROR(loom_low_func_def_build(
       &ir_builder, build_flags,
       /*visibility=*/0, LOOM_LOW_RETAIN_RETAIN,
-      /*cc=*/0, /*effect_contract=*/0, /*inline_policy=*/0, /*allocation=*/0,
-      /*schedule=*/0, builder->representation_contract, loom_symbol_ref_null(),
+      /*cc=*/0, /*effect_contract=*/0, /*temperature=*/0,
+      /*inline_policy=*/0, /*allocation=*/0, /*schedule=*/0,
+      builder->representation_contract, loom_symbol_ref_null(),
       /*abi=*/0, loom_named_attr_slice_empty(), loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), resident_ref,
       /*arg_types=*/NULL, /*arg_types_count=*/0,

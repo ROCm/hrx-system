@@ -16,9 +16,9 @@ using UInt4 = unsigned __attribute__((ext_vector_type(4)));
 // The caller launches 96 invocations: three complete wave32 subgroups, or one
 // complete wave64 subgroup and a 32-invocation tail. It supplies independently
 // generated payload[i] = 19 + 13*i and publication[i] = 1.
-[[loom::force_inline]] unsigned cooperative_subgroup(
-    const unsigned* payload, const unsigned* publication,
-    unsigned expected_width) {
+[[loom::inline]] unsigned cooperative_subgroup(const unsigned* payload,
+                                               const unsigned* publication,
+                                               unsigned expected_width) {
   unsigned item = loom::kernel::workitem::id.x;
   unsigned lane = loom::kernel::subgroup::lane_id();
   unsigned width = loom::kernel::subgroup::size();
@@ -114,7 +114,7 @@ using UInt4 = unsigned __attribute__((ext_vector_type(4)));
 }
 
 // An explicit 32-bit mask is a separate source contract, used only by wave32.
-[[loom::force_inline]] unsigned narrow_subgroup() {
+[[loom::inline]] unsigned narrow_subgroup() {
   unsigned lane = loom::kernel::subgroup::lane_id();
   unsigned mask = loom::kernel::subgroup::vote::ballot<unsigned>(lane == 31);
   unsigned active = loom::kernel::subgroup::active_mask<unsigned>();

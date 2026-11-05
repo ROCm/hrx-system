@@ -16,8 +16,8 @@ using StageView = loomt::view<loomt::shape<loomt::dynamic>, unsigned,
 
 constexpr unsigned kWorkgroupSize = 32u;
 
-static LOOM_FORCE_INLINE void store_stage(StageView stages, unsigned stage,
-                                          unsigned lane) {
+static LOOM_INLINE void store_stage(StageView stages, unsigned stage,
+                                    unsigned lane) {
   unsigned consumer_lane = (lane + 1u) % kWorkgroupSize;
   loom::view::store(stage + 8u + consumer_lane, stages,
                     stage * kWorkgroupSize + consumer_lane);

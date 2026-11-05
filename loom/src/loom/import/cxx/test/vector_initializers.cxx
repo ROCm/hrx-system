@@ -13,16 +13,14 @@ typedef float F4 __attribute__((vector_size(16)));
 typedef unsigned char B16 __attribute__((vector_size(16)));
 typedef unsigned E4 __attribute__((ext_vector_type(4)));
 
-[[loom::force_inline]] static I4 offsets(int input) {
+[[loom::inline]] static I4 offsets(int input) {
   return I4{input, input + 1, input + 2, input + 3};
 }
 
-[[loom::force_inline]] static U4 add(U4 first, U4 second) {
-  return first + second;
-}
+[[loom::inline]] static U4 add(U4 first, U4 second) { return first + second; }
 
 template <typename Vector>
-[[loom::force_inline]] static Vector first(unsigned input) {
+[[loom::inline]] static Vector first(unsigned input) {
   return Vector{input};
 }
 
@@ -50,8 +48,8 @@ unsigned constructor_nested(unsigned input, unsigned lane) {
   return (U4{input, 1u, 2u, 3u} + U4{9u, 8u, 7u, 6u})[lane];
 }
 
-[[loom::force_inline]] static unsigned record(unsigned* trace, unsigned digit,
-                                              unsigned value) {
+[[loom::inline]] static unsigned record(unsigned* trace, unsigned digit,
+                                        unsigned value) {
   trace[0] = trace[0] * 10u + digit;
   return value;
 }

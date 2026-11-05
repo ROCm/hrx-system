@@ -244,6 +244,12 @@ loom_func_like_t loom_low_lower_context_source_function(
   return context->source_function;
 }
 
+bool loom_low_lower_context_source_has_direct_callers(
+    const loom_low_lower_context_t* context) {
+  return context->options != NULL &&
+         context->options->source_has_direct_callers;
+}
+
 bool loom_low_lower_context_source_is_retained(
     const loom_low_lower_context_t* context) {
   const loom_symbol_ref_t source_ref =

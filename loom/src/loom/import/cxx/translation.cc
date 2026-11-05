@@ -177,7 +177,7 @@ class Translator final : private Initialization::Evaluation {
     if (current_function_.kind == FunctionKind::Pipeline) {
       fail(owner, "kernel intrinsic in a pipeline requires a strand body");
     }
-    fail(owner, "kernel intrinsic requires a kernel or force-inline helper");
+    fail(owner, "kernel intrinsic requires a kernel or inline helper");
   }
 
   void require_launch_configuration_context(cxx::AST* owner) {
@@ -191,7 +191,7 @@ class Translator final : private Initialization::Evaluation {
       return;
     }
     fail(owner,
-         "target launch query requires a kernel configuration or force-inline "
+         "target launch query requires a kernel configuration or inline "
          "helper");
   }
 
