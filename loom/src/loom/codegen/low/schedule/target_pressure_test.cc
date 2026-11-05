@@ -483,7 +483,10 @@ TEST_F(TargetPressureScoringTest, ActiveCompletionsRetainDomainIdentity) {
       SCOPED_TRACE(live_units);
       for (uint16_t domain = 0; domain < IREE_ARRAYSIZE(domains); ++domain) {
         live[domain] = live_units;
-        required[domain].live_units = live_units;
+        required[domain] = {
+            .live_units = live_units,
+            .non_replayable_live_units = live_units,
+        };
       }
       for (uint32_t candidate = 0; candidate < IREE_ARRAYSIZE(nodes);
            ++candidate) {
@@ -502,6 +505,50 @@ TEST_F(TargetPressureScoringTest, ActiveCompletionsRetainDomainIdentity) {
                   advances_full_bank ? 4u : UINT32_MAX);
         EXPECT_EQ(score.active_unspillable_completion_domain_id,
                   advances_full_bank ? candidate : UINT16_MAX);
+      }
+    }
+    // Filling one bank preserves its selected transaction's missing operand.
+    // Only storage without an outside-domain replay recipe makes that
+    // reservation stronger than the ordinary physical-pressure comparison.
+    for (bool live_replayable : {false, true}) {
+      for (bool candidate_replayable : {false, true}) {
+        live[0] = 3;
+        live[1] = 0;
+        required[0] = {
+            .live_units = 3,
+            .non_replayable_live_units = live_replayable ? 2u : 3u,
+            .candidate_delta_units = 1,
+            .non_replayable_candidate_delta_units =
+                candidate_replayable ? 0 : 1,
+        };
+        required[1] = {};
+        for (uint32_t candidate = 0; candidate < IREE_ARRAYSIZE(nodes);
+             ++candidate) {
+          SCOPED_TRACE(::testing::Message()
+                       << kind << "," << live_replayable << ","
+                       << candidate_replayable << "," << candidate);
+          loom_low_schedule_candidate_score_t score = {
+              .pressure_cliff_units = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
+              .units_until_pressure_cliff =
+                  LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
+              .active_unspillable_completion_capacity = UINT32_MAX,
+              .active_unspillable_transaction_final_capacity = UINT32_MAX,
+              .active_unspillable_completion_domain_id = UINT16_MAX,
+          };
+          loom_low_schedule_target_pressure_score_candidate(&state, &pressure,
+                                                            candidate, &score);
+          const bool consumes_headroom =
+              kind == LOOM_LOW_SCHEDULE_COMPLETION_NOMINATION_TRANSACTION &&
+              candidate != 0;
+          EXPECT_EQ(
+              iree_any_bit_set(
+                  score.flags,
+                  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_CONSUMES_COMPLETION_HEADROOM),
+              consumes_headroom);
+          EXPECT_EQ(
+              score.consumes_non_replayable_headroom,
+              consumes_headroom && !live_replayable && !candidate_replayable);
+        }
       }
     }
   }

@@ -1170,6 +1170,11 @@ static void loom_low_schedule_score_active_unspillable_completions(
               completion_domain_id, candidate_node)) {
         score->flags |=
             LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_CONSUMES_COMPLETION_HEADROOM;
+        score->consumes_non_replayable_headroom |=
+            required->non_replayable_candidate_delta_units > 0 &&
+            required->non_replayable_live_units +
+                    (uint64_t)required->non_replayable_candidate_delta_units >=
+                capacity;
       }
     }
     const bool can_improve_active =

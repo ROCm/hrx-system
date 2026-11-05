@@ -15,6 +15,7 @@
 #include "loom/codegen/low/representation_binding.h"
 #include "loom/codegen/low/schedule/diagnostics.h"
 #include "loom/codegen/low/schedule/effect_dependencies.h"
+#include "loom/codegen/low/schedule/required_pressure.h"
 #include "loom/codegen/low/storage_relation.h"
 #include "loom/codegen/low/storage_transport.h"
 #include "loom/ir/context.h"
@@ -1634,6 +1635,7 @@ iree_status_t loom_low_schedule_fill_nodes(
       IREE_RETURN_IF_ERROR(
           loom_low_schedule_initialize_node_value_ordinals(state, node));
       loom_low_schedule_classify_short_register_move_results(state, node);
+      loom_low_schedule_required_pressure_classify_node(state, node);
       loom_low_schedule_index_active_structural_results(state, node);
       IREE_RETURN_IF_ERROR(
           loom_low_schedule_apply_structural_model(state, node));
