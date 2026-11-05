@@ -490,6 +490,9 @@ TEST_F(XdnaNativeTest, ReplacesDeviceMappingsOverRetainedBacking) {
           .access = IREE_HAL_MEMORY_ACCESS_ALL,
           .operation = epoch ? IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE
                              : IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+          .previous_source =
+              epoch ? backings[(epoch - 1 + i) % 2].get() : nullptr,
+          .previous_source_offset = epoch ? (epoch + i) * unit : 0,
       };
       if (i < 2) {
         IREE_ASSERT_OK(iree_hal_buffer_map_write(backings[backing], offset,

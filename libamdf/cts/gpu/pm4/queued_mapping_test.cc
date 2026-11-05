@@ -455,6 +455,10 @@ TEST_P(Pm4QueuedMappingTest, PendingUseThenReplacementThenComputeAndDetach) {
         .memory = backing_[generation % 2].memory,
         .access = access_,
         .source_byte_offset = (generation % 4) * kPageLength,
+        .previous_memory = backing_[(generation + 1) % 2].memory,
+        .previous_source_byte_offset =
+            generation ? ((generation - 1) % 4) * kPageLength
+                       : kBackingLength - kPageLength,
     };
     ASSERT_EQ(api_->kernel_queue_update_memory(queue_, reservation_,
                                                kGpuAccessOrdinal, 1, &update,
@@ -482,6 +486,8 @@ TEST_P(Pm4QueuedMappingTest, PendingUseThenReplacementThenComputeAndDetach) {
   const amdf_memory_mapping_update_t detach = {
       .target_byte_offset = target_offset_,
       .byte_length = kPageLength,
+      .previous_memory = backing_[(kGenerationCount - 1) % 2].memory,
+      .previous_source_byte_offset = ((kGenerationCount - 1) % 4) * kPageLength,
   };
   ASSERT_EQ(
       api_->kernel_queue_update_memory(queue_, reservation_, kGpuAccessOrdinal,

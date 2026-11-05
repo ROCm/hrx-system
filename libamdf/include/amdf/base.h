@@ -74,7 +74,7 @@ typedef uint32_t amdf_abi_version_t;
 #define AMDF_ABI_VERSION(N) ((amdf_abi_version_t)(N))
 
 /// Latest ABI version implemented by these headers.
-#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION(19)
+#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION(20)
 
 /// The unmangled symbol used to acquire the immutable API table.
 #define AMDF_QUERY_API_SYMBOL "amdf_query_api"

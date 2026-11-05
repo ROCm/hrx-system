@@ -276,6 +276,12 @@ typedef struct iree_hal_memory_contract_t {
   iree_hal_pool_placement_t placement;
   // Achieved public host mapping contract.
   iree_hal_pool_host_access_t host;
+  // Schema of optional immutable backend qualification in backend_data.
+  iree_hal_memory_backend_type_t backend_type;
+  // Owned POD qualification allocated with host_allocator, or NULL. Contains
+  // no backing identities, installed ranges, or retained native resources.
+  // Consumers use it only when they implement backend_type's private schema.
+  void* backend_data;
   // Native mapping-source facts shared by every allocation and inherited view.
   struct {
     // Schema of prepared descriptors; meaningful only with nonzero granularity.

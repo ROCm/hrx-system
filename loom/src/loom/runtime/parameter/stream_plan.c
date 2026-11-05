@@ -246,6 +246,7 @@ void loom_runtime_weight_stream_plan_deinitialize(
     loom_runtime_weight_stream_plan_t* plan, iree_allocator_t allocator) {
   for (iree_host_size_t i = 0; plan->groups && i < plan->group_count; ++i) {
     iree_hal_semaphore_release(plan->groups[i].mapped);
+    iree_hal_buffer_release(plan->groups[i].target);
   }
   iree_allocator_free(allocator, plan->reads);
   iree_allocator_free(allocator, plan->fragments);

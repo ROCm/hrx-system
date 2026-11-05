@@ -212,6 +212,7 @@ IREE_API_EXPORT void iree_hal_memory_contract_release(
     iree_hal_memory_contract_t* contract) {
   if (contract && iree_atomic_ref_count_dec(&contract->ref_count) == 1) {
     iree_hal_memory_contract_release(contract->mapping_source.alias_contract);
+    iree_allocator_free(contract->host_allocator, contract->backend_data);
     iree_allocator_free(contract->host_allocator, contract->transition_details);
     iree_allocator_free_aligned(contract->host_allocator, contract);
   }

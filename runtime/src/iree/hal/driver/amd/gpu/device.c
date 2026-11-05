@@ -571,6 +571,9 @@ static void iree_hal_amd_gpu_device_initialize_memory(
   };
   device->memory.families[0] = (iree_hal_amd_fabric_memory_family_t){
       .queue_family_ordinal = native_family_ordinal,
+      .copy_family_ordinal = device->transfers.file_staging
+                                 ? device->transfers.family_ordinal
+                                 : UINT32_MAX,
       .supported_usage =
           IREE_HAL_BUFFER_USAGE_DISPATCH | IREE_HAL_BUFFER_USAGE_TRANSFER,
       .minimum_access = device->memory.capabilities.minimum_access,
@@ -1614,6 +1617,7 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
   const iree_hal_amd_gpu_executable_options_t options = {
       .target = &device->target,
       .native_family_ordinal = device->memory.families[0].queue_family_ordinal,
+      .copy_family_ordinal = device->memory.families[0].copy_family_ordinal,
       .memory = &memory,
       .code_queue = device->code_queue,
       .notification = device->memory.notification,

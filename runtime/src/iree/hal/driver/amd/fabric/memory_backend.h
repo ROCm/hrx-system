@@ -31,6 +31,8 @@ typedef struct iree_hal_amd_fabric_memory_binding_t {
 typedef struct iree_hal_amd_fabric_memory_family_t {
   // Exact native execution family used by pair queries.
   uint32_t queue_family_ordinal;
+  // Private copy executor, or UINT32_MAX when this family has none.
+  uint32_t copy_family_ordinal;
   // HAL usages implemented by this family over ordinary native storage.
   iree_hal_buffer_usage_t supported_usage;
   // Native permissions required even when logical HAL usage is narrower.

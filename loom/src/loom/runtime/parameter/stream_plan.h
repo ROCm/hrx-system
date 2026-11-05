@@ -41,6 +41,8 @@ typedef struct loom_runtime_weight_direct_read_t {
   iree_host_size_t count;
   // Payload bytes contributed by these fragments, excluding storage padding.
   uint64_t byte_length;
+  // Storage-relative origin of the physical target used by this gather.
+  iree_device_size_t target_offset;
   // Previous read on the lane and this window's mapping readiness.
   iree_hal_semaphore_t* waits[2];
   // Values paired with waits, retained through provider submission.
@@ -66,6 +68,11 @@ typedef struct loom_runtime_weight_group_t {
   iree_host_size_t mapping_group;
   // Owned mapping readiness, released after accepted reads capture it.
   iree_hal_semaphore_t* mapped;
+  // Borrowed acquisition retained through all activation consumer retirement.
+  loom_runtime_memory_operation_t* operation;
+  // Owned release-tracked physical span, prepared after mapping readiness.
+  // NULL for fixed storage or before this lane starts the group's first read.
+  iree_hal_buffer_t* target;
   // Read frontier established by this group.
   uint64_t signal_value;
 } loom_runtime_weight_group_t;

@@ -25,6 +25,11 @@ iree_status_t iree_hal_amd_fabric_memory_translate_pair(
     const amdf_memory_pair_info_t* source,
     iree_hal_memory_pair_info_t* out_pair);
 
+// Qualifies a validated pair for copy-engine handoff using global queue cache
+// controls. Ranged or program-side recipes remain explicitly unsupported.
+iree_hal_memory_transition_t iree_hal_amd_fabric_memory_queue_transition(
+    const iree_hal_memory_pair_info_t* pair);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

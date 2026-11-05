@@ -54,6 +54,80 @@ iree_hal_amd_fabric_memory_select_transition_route(
   return profile;
 }
 
+iree_status_t iree_hal_amd_fabric_memory_capture_copy_protocols(
+    iree_hal_amd_fabric_memory_transition_query_t* query,
+    iree_hal_memory_contract_t* contract) {
+  contract->backend_type = IREE_HAL_MEMORY_BACKEND_AMDF;
+  bool has_copy = false;
+  for (uint32_t id = 1; id < contract->scope_count; ++id) {
+    has_copy |=
+        query->sites[id].kind == IREE_HAL_AMD_FABRIC_MEMORY_SITE_QUEUE &&
+        query->sites[id].copy_family_ordinal != UINT32_MAX;
+  }
+  if (!has_copy) {
+    return iree_ok_status();
+  }
+  iree_hal_amd_fabric_memory_copy_protocol_t* protocols = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array_uninitialized(
+      contract->host_allocator, contract->scope_count, sizeof(*protocols),
+      (void**)&protocols));
+  contract->backend_data = protocols;
+  const iree_hal_memory_effects_t unsupported = {
+      IREE_HAL_MEMORY_EFFECT_UNSUPPORTED};
+  const iree_host_size_t route_count =
+      iree_hal_amd_fabric_memory_owned_route_count(query) +
+      query->provider_options->import_count;
+  iree_status_t status = iree_ok_status();
+  for (uint32_t id = 0; id < contract->scope_count && iree_status_is_ok(status);
+       ++id) {
+    protocols[id] = (iree_hal_amd_fabric_memory_copy_protocol_t){
+        .begin = {unsupported, unsupported}, .end = {unsupported, unsupported}};
+    const iree_hal_amd_fabric_memory_transition_site_t* site =
+        &query->sites[id];
+    if (site->kind != IREE_HAL_AMD_FABRIC_MEMORY_SITE_QUEUE ||
+        site->copy_family_ordinal == UINT32_MAX || !route_count) {
+      continue;
+    }
+    amdf_memory_profile_site_t copy = site->native;
+    copy.value.device.queue_family_ordinal = site->copy_family_ordinal;
+    for (uint32_t edge = 0; edge < 2 && iree_status_is_ok(status); ++edge) {
+      iree_hal_memory_transition_t* effects =
+          edge ? &protocols[id].end : &protocols[id].begin;
+      *effects = (iree_hal_memory_transition_t){0};
+      query->native.producer = edge ? copy : site->native;
+      query->native.consumer = edge ? site->native : copy;
+      for (iree_host_size_t route = 0;
+           route < route_count && iree_status_is_ok(status); ++route) {
+        iree_hal_amd_fabric_memory_select_transition_route(query, route);
+        amdf_memory_pair_info_t native = {
+            .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+            .structure_size = sizeof(native)};
+        const amdf_status_t result = query->api->memory_scope_query_pair_info(
+            query->provider_options->memory.scope, &query->native, &native);
+        if (result == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+          *effects = (iree_hal_memory_transition_t){unsupported, unsupported};
+          break;
+        }
+        status = IREE_HAL_AMD_STATUS_FROM_AMDF(result,
+                                               "memory_scope_query_pair_info");
+        iree_hal_memory_pair_info_t pair = {0};
+        if (iree_status_is_ok(status)) {
+          status = iree_hal_amd_fabric_memory_translate_pair(&native, &pair);
+        }
+        if (iree_status_is_ok(status)) {
+          const iree_hal_memory_transition_t transition =
+              iree_hal_amd_fabric_memory_queue_transition(&pair);
+          effects->release = iree_hal_memory_effects_combine(
+              effects->release, transition.release);
+          effects->acquire = iree_hal_memory_effects_combine(
+              effects->acquire, transition.acquire);
+        }
+      }
+    }
+  }
+  return status;
+}
+
 iree_status_t iree_hal_amd_fabric_memory_capture_queue_atomics(
     iree_hal_amd_fabric_memory_transition_query_t* query,
     iree_hal_memory_scope_id_t site_id,

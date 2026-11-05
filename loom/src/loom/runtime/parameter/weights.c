@@ -640,6 +640,7 @@ static iree_status_t loom_runtime_weight_enumerate(
   const loom_runtime_weight_direct_read_t* read = user_data;
   *out_key = read->fragments[i].key;
   *out_span = read->fragments[i].range;
+  out_span->buffer_offset -= read->target_offset;
   return iree_ok_status();
 }
 
@@ -865,7 +866,7 @@ static iree_status_t loom_runtime_weight_stream_direct(
   read->wait_values[0] += lane->fragment_index / WEIGHT_STREAM_WINDOW;
   read->signal_value = read->wait_values[0] + 1;
   window->gathers[index] = (iree_io_parameter_gather_t){
-      .target_buffer = job->views[group->storage_index],
+      .target_buffer = group->target ? group->target : job->views[group->storage_index],
       .count = count,
       .enumerator = {loom_runtime_weight_enumerate, read},
       .wait_semaphore_list = {read->waits[1] ? 2 : 1, read->waits,
@@ -991,17 +992,59 @@ static bool loom_runtime_weight_stream_lane_finished(
   return lane->cursor >= weights->span_count;
 }
 
-static void loom_runtime_weight_stream_execute(loomc_task_t* task,
-                                             loomc_host_size_t worker_ordinal) {
+static iree_status_t loom_runtime_weight_stream_target(
+    loom_runtime_weight_stream_lane_t* lane, bool* out_ready) {
+  *out_ready = true;
+  loom_runtime_weight_stream_t* job = lane->stream;
+  loom_runtime_weight_group_t* group = &job->plan.groups[lane->cursor];
+  if (!job->weights->pool || group->target || !group->count) {
+    return iree_ok_status();
+  }
+  uint64_t value = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_query(group->mapped, &value));
+  if (value < 1) {
+    *out_ready = false;
+    return iree_ok_status();
+  }
+  const loom_runtime_weight_group_t* mapping =
+      &job->plan.groups[group->mapping_group];
+  const iree_host_size_t slab_index =
+      mapping->backing.offset /
+      loom_runtime_virtual_buffer_mapping_size(mapping->backing.buffer);
+  const iree_hal_buffer_binding_t span =
+      mapping->operation
+          ? loom_runtime_memory_operation_backing(mapping->operation, 0)
+          : loom_runtime_virtual_buffer_backing(mapping->backing.buffer,
+                                                slab_index);
+  // File requests retain this coarse I/O view independently of readiness
+  // failure. Page ownership itself remains the directory's reservation value.
+  IREE_RETURN_IF_ERROR(
+      iree_hal_buffer_subspan(span.buffer, span.offset, span.length,
+                              job->weights->host_allocator, &group->target));
+  return loom_runtime_retirement_track(&job->weights->activation.retirement,
+                                       &group->target,
+                                       job->weights->host_allocator);
+}
+
+static void loom_runtime_weight_stream_execute(
+    loomc_task_t* task, loomc_host_size_t worker_ordinal) {
   IREE_TRACE_ZONE_BEGIN(z0);
   loom_runtime_weight_stream_lane_t* lane = (void*)task;
+  bool waiting_for_mapping = false;
   while (iree_status_is_ok(lane->status) && lane->window_count < 2 &&
+         !waiting_for_mapping &&
          !loom_runtime_weight_stream_lane_finished(lane)) {
     loom_runtime_weight_stream_window_t window = {0};
     while (iree_status_is_ok(lane->status) &&
            window.operation_count < WEIGHT_STREAM_WINDOW &&
            !loom_runtime_weight_stream_lane_finished(lane)) {
       if (lane->ordinal < WEIGHT_LANES) {
+        bool ready = false;
+        lane->status = loom_runtime_weight_stream_target(lane, &ready);
+        if (!iree_status_is_ok(lane->status) || !ready) {
+          waiting_for_mapping = !ready;
+          break;
+        }
         const loom_runtime_weight_group_t* group =
             &lane->stream->plan.groups[lane->cursor];
         const iree_host_size_t count =
@@ -1027,7 +1070,14 @@ static void loom_runtime_weight_stream_execute(loomc_task_t* task,
     if (iree_status_is_ok(lane->status)) {
       lane->status = loom_runtime_weight_stream_flush(lane->stream, &window);
     }
-    lane->windows[lane->window_count++] = window.frontier;
+    if (window.operation_count) {
+      lane->windows[lane->window_count++] = window.frontier;
+    }
+  }
+  if (iree_status_is_ok(lane->status) && waiting_for_mapping &&
+      !lane->window_count) {
+    lane->windows[lane->window_count++] = (loom_runtime_weight_stream_point_t){
+        lane->stream->plan.groups[lane->cursor].mapped, 1};
   }
   IREE_TRACE_ZONE_END(z0);
 }
@@ -1148,6 +1198,7 @@ static iree_status_t loom_runtime_weight_stream(
       if (group->mapping_group != i) {
         group->mapped = plan->groups[group->mapping_group].mapped;
         iree_hal_semaphore_retain(group->mapped);
+        group->operation = plan->groups[group->mapping_group].operation;
         continue;
       }
       status = iree_hal_semaphore_create(
@@ -1165,6 +1216,9 @@ static iree_status_t loom_runtime_weight_stream(
               iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                "physical pool cannot back model parameters");
         }
+        if (iree_status_is_ok(status)) {
+          group->operation = weights->activation.backing[weights->activation.backing_count - 1];
+        }
       }
     }
   }
@@ -1179,6 +1233,7 @@ static iree_status_t loom_runtime_weight_stream(
           weights->pool ? group->mapped : weights->activation.backing_ready;
       for (iree_host_size_t r = group->read_begin; r < group->read_end; ++r) {
         loom_runtime_weight_direct_read_t* read = &plan->reads[r];
+        read->target_offset = weights->pool ? plan->groups[group->mapping_group].backing.offset : 0;
         read->waits[0] = lanes[lane];
         read->wait_values[0] = frontiers[lane];
         read->waits[1] = mapped;
@@ -1257,6 +1312,11 @@ static iree_status_t loom_runtime_weight_stream(
 // accounting and retirement queries become constant-time after activation.
 static bool loom_runtime_weights_collect_backing(
     loom_runtime_weights_t* weights) {
+  // Active read lanes borrow immutable completed operation spans. They and
+  // their captured I/O views must retire before those results are released.
+  if (!loom_runtime_retirement_is_idle(&weights->activation.retirement)) {
+    return false;
+  }
   while (weights->activation.backing_retired <
          weights->activation.backing_count) {
     loom_runtime_memory_operation_t** operation =

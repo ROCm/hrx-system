@@ -86,12 +86,16 @@ TEST_P(FabricVirtualBufferTest, BatchedReplacementChangesRealGpuAddresses) {
   ASSERT_NO_FATAL_FAILURE(CopyAndVerify(0x1000, 0x2000));
   for (auto& mapping : mappings) {
     mapping.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE;
+    mapping.previous_source = mapping.source;
+    mapping.previous_source_offset = mapping.source_offset;
   }
   std::swap(mappings[0].source_offset, mappings[1].source_offset);
   IREE_ASSERT_OK(Map(mappings));
   ASSERT_NO_FATAL_FAILURE(CopyAndVerify(0x2000, 0x1000));
   for (auto& mapping : mappings) {
     mapping.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
+    mapping.previous_source = mapping.source;
+    mapping.previous_source_offset = mapping.source_offset;
     mapping.source = nullptr;
     mapping.source_offset = 0;
     mapping.access = 0;
@@ -219,6 +223,9 @@ TEST_P(FabricVirtualBufferTest, CpuAndGpuShareStableViewsAcrossReplacement) {
           .access = IREE_HAL_MEMORY_ACCESS_ALL,
           .operation = epoch ? IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE
                              : IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+          .previous_source =
+              epoch ? backings[(epoch - 1 + i) % 2].get() : nullptr,
+          .previous_source_offset = epoch ? (epoch + i) * unit : 0,
       };
     }
     IREE_ASSERT_OK(Map(mappings));
@@ -404,6 +411,9 @@ TEST_P(FabricVirtualBufferTest,
           .access = IREE_HAL_MEMORY_ACCESS_ALL,
           .operation = epoch ? IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE
                              : IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+          .previous_source =
+              epoch ? backings[(epoch - 1 + 2 * i) % backings.size()].get()
+                    : nullptr,
       };
     }
     IREE_ASSERT_OK(Map(mappings));

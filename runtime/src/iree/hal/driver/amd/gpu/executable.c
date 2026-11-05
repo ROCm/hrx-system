@@ -531,6 +531,57 @@ static iree_status_t iree_hal_amd_gpu_executable_query_transition(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_amd_gpu_executable_copy_protocol(
+    iree_hal_amd_gpu_executable_t* executable,
+    const iree_hal_amd_gpu_executable_options_t* options,
+    iree_hal_amd_fabric_memory_copy_protocol_t* out_protocol) {
+  const iree_hal_memory_effects_t unsupported = {
+      IREE_HAL_MEMORY_EFFECT_UNSUPPORTED};
+  *out_protocol = (iree_hal_amd_fabric_memory_copy_protocol_t){
+      .begin = {unsupported, unsupported}, .end = {unsupported, unsupported}};
+  if (options->copy_family_ordinal == UINT32_MAX) {
+    return iree_ok_status();
+  }
+  const amdf_memory_site_t sites[] = {
+      {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+       .structure_size = sizeof(amdf_memory_site_t),
+       .kind = AMDF_MEMORY_SITE_KIND_DEVICE,
+       .value.device = {.memory = executable->memories[0].handle,
+                        .access_ordinal = 0,
+                        .queue_family_ordinal =
+                            options->native_family_ordinal}},
+      {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+       .structure_size = sizeof(amdf_memory_site_t),
+       .kind = AMDF_MEMORY_SITE_KIND_DEVICE,
+       .value.device = {.memory = executable->memories[0].handle,
+                        .access_ordinal = 0,
+                        .queue_family_ordinal = options->copy_family_ordinal}},
+  };
+  iree_status_t status = iree_ok_status();
+  for (uint32_t edge = 0; edge < 2 && iree_status_is_ok(status); ++edge) {
+    amdf_memory_pair_info_t native = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+        .structure_size = sizeof(native)};
+    const amdf_status_t result =
+        executable->context->api->memory_query_pair_info(
+            &sites[edge], &sites[1 - edge], &native);
+    if (result == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+      continue;
+    }
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(result, "memory_query_pair_info");
+    iree_hal_memory_pair_info_t pair;
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_amd_fabric_memory_translate_pair(&native, &pair);
+    }
+    if (iree_status_is_ok(status)) {
+      iree_hal_memory_transition_t* effects =
+          edge ? &out_protocol->end : &out_protocol->begin;
+      *effects = iree_hal_amd_fabric_memory_queue_transition(&pair);
+    }
+  }
+  return status;
+}
+
 static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
     iree_hal_amd_gpu_executable_t* executable,
     const iree_hal_amd_gpu_executable_options_t* options,
@@ -595,6 +646,11 @@ static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
     access_classes |= 1u << iree_hal_amd_gpu_executable_global_access(
                           &executable->image.symbols[i]);
   }
+  iree_hal_amd_fabric_memory_copy_protocol_t copy_protocol;
+  if (access_classes & ~1u) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_executable_copy_protocol(
+        executable, options, &copy_protocol));
+  }
   iree_status_t status = iree_ok_status();
   for (uint32_t access = 1; access < IREE_ARRAYSIZE(executable->contracts) &&
                             iree_status_is_ok(status);
@@ -610,6 +666,25 @@ static iree_status_t iree_hal_amd_gpu_executable_initialize_contracts(
       break;
     }
     executable->contracts[access] = contract;
+    contract->backend_type = IREE_HAL_MEMORY_BACKEND_AMDF;
+    if (options->copy_family_ordinal != UINT32_MAX) {
+      iree_hal_amd_fabric_memory_copy_protocol_t* protocols = NULL;
+      status = iree_allocator_malloc_array_uninitialized(
+          contract->host_allocator, contract->scope_count, sizeof(*protocols),
+          (void**)&protocols);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
+      contract->backend_data = protocols;
+      const iree_hal_memory_effects_t unsupported = {
+          IREE_HAL_MEMORY_EFFECT_UNSUPPORTED};
+      for (uint32_t id = 0; id < contract->scope_count; ++id) {
+        protocols[id] = (iree_hal_amd_fabric_memory_copy_protocol_t){
+            .begin = {unsupported, unsupported},
+            .end = {unsupported, unsupported}};
+      }
+      protocols[family->memory.queue_scope_id] = copy_protocol;
+    }
     iree_hal_buffer_usage_t usage =
         (iree_any_bit_set(access, IREE_HAL_MEMORY_ACCESS_READ)
              ? IREE_HAL_BUFFER_USAGE_TRANSFER_SOURCE |

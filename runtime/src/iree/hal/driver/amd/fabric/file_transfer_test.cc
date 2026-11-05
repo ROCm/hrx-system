@@ -428,13 +428,10 @@ TEST_P(FileTransferTest, NativeAdmissionUsesAchievedBackingCapabilities) {
     storage_.memory.host_features = item.features;
     ASSERT_NO_FATAL_FAILURE(Initialize());
     iree_hal_memory_effects_t before, after;
-    iree::Status status = iree_hal_amd_fabric_file_transfer_prepare_ranges(
+    iree::Status status = iree_hal_amd_fabric_file_transfer_prepare_source(
         &transfer_, &storage_.api, &family, 0, &before, &after);
     IREE_ASSERT_OK(status);
-    ASSERT_EQ(transfer_.sources.count, 1u);
-    EXPECT_EQ(transfer_.sources.host_count,
-              item.route == Route::kHost ? 1u : 0u);
-    const auto& range = transfer_.sources.ranges[0];
+    const auto& range = transfer_.source;
     EXPECT_EQ(range.storage, &storage_.memory);
     EXPECT_EQ(range.source_offset, kNativeOffset);
     EXPECT_EQ(range.contents.data_length, kLength);

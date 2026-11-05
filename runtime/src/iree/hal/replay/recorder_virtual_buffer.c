@@ -181,17 +181,24 @@ iree_status_t iree_hal_replay_recorder_queue_map(
     payload->scope_id = mappings[i].scope.id;
     payload->operation = mappings[i].operation;
     payload->access = mappings[i].access;
-    iree_hal_buffer_ref_t source_ref = {
-        .buffer = mappings[i].source,
-        .offset = mappings[i].source_offset,
-        .length = mappings[i].target_range.byte_length,
+    const iree_hal_buffer_ref_t sources[] = {
+        {.buffer = mappings[i].source,
+         .offset = mappings[i].source_offset,
+         .length = mappings[i].target_range.byte_length},
+        {.buffer = mappings[i].previous_source,
+         .offset = mappings[i].previous_source_offset,
+         .length = mappings[i].target_range.byte_length},
     };
-    iree_hal_replay_recorder_buffer_ref_make_payload(source_ref,
-                                                     &payload->source_ref);
-    if (source_ref.buffer) {
-      can_record &=
-          iree_hal_replay_recorder_find_buffer_id(
-              recorder, source_ref.buffer) != IREE_HAL_REPLAY_OBJECT_ID_NONE;
+    iree_hal_replay_buffer_ref_payload_t* source_payloads[] = {
+        &payload->source_ref, &payload->previous_source_ref};
+    for (iree_host_size_t j = 0; j < IREE_ARRAYSIZE(sources); ++j) {
+      iree_hal_replay_recorder_buffer_ref_make_payload(sources[j],
+                                                       source_payloads[j]);
+      if (sources[j].buffer) {
+        can_record &=
+            iree_hal_replay_recorder_find_buffer_id(
+                recorder, sources[j].buffer) != IREE_HAL_REPLAY_OBJECT_ID_NONE;
+      }
     }
   }
   iree_hal_replay_semaphore_timepoint_payload_t* wait_payloads = NULL;

@@ -321,12 +321,14 @@ TEST_F(ReplayRecorderVirtualBufferTest,
       .source = source,
       .access = IREE_HAL_MEMORY_ACCESS_ALL,
       .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE,
+      .previous_source = source_tail,
   };
   uint64_t replaced = 5;
   IREE_ASSERT_OK(iree_hal_queue_map(queue_, Point(&first_written),
                                     Point(&replaced), 1, &replacement,
                                     IREE_HAL_QUEUE_MAP_FLAG_BORROW_BUFFERS));
   replacement.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_PROTECT;
+  replacement.previous_source = nullptr;
   replacement.access = IREE_HAL_MEMORY_ACCESS_NONE;
   uint64_t revoked = 6;
   IREE_ASSERT_OK(iree_hal_queue_map(queue_, Point(&replaced), Point(&revoked),
@@ -346,6 +348,7 @@ TEST_F(ReplayRecorderVirtualBufferTest,
                                       Point(&alias_written), alias, 0, file, 20,
                                       16, nullptr, IREE_HAL_WRITE_FLAG_NONE));
   replacement.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
+  replacement.previous_source = replacement.source;
   replacement.source = nullptr;
   replacement.access = IREE_HAL_MEMORY_ACCESS_NONE;
   uint64_t detached = 10;
@@ -653,14 +656,10 @@ TEST_F(ReplayRecorderVirtualBufferTest,
   IREE_ASSERT_OK(iree_hal_queue_write(queue_, Point(&deallocated),
                                       Point(&written), reservation, 32, file, 0,
                                       64, nullptr, IREE_HAL_WRITE_FLAG_NONE));
-  update.source = nullptr;
-  update.source_offset = 0;
-  update.access = IREE_HAL_MEMORY_ACCESS_NONE;
-  update.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
-  uint64_t detached = 5;
-  IREE_ASSERT_OK(iree_hal_queue_map(queue_, Point(&written), Point(&detached),
-                                    1, &update, IREE_HAL_QUEUE_MAP_FLAG_NONE));
-  Wait(detached);
+  Wait(written);
+  // The transient source has retired; the host mappings own its committed
+  // storage. Whole-reservation detach needs no former source descriptor.
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(reservation, all_));
   IREE_ASSERT_OK(iree_hal_buffer_unmap_range(&host_maps[1]));
   iree_hal_buffer_release(reservation);
   iree_hal_pool_release(pool);

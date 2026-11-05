@@ -564,6 +564,9 @@ amdf_memory_mapping_update_t replacement = {
     .memory_access_ordinal = slab_gpu_access,
     .access = admitted_access,
     .source_byte_offset = slab_offset,
+    .previous_memory = old_slab,
+    .previous_memory_access_ordinal = old_slab_gpu_access,
+    .previous_source_byte_offset = old_slab_offset,
 };
 status = api->memory_reservation_update(arena, arena_gpu_access, 1,
                                        &replacement);
@@ -571,6 +574,15 @@ status = api->memory_reservation_update(arena, arena_gpu_access, 1,
 
 `admitted_access` includes the intended permissions and the queried native
 `required_access` bits, within the source and reservation's supported access.
+The previous source describes the backing currently installed throughout this
+range; null declares a hole. The caller already owns that allocation and its
+mapping lifetime. Updates crossing prior or new source boundaries use separate
+entries, so the native provider receives every affected allocation directly.
+The library validates each source's admission and geometry without maintaining
+another inventory of installed mappings or verifying the declared prior state.
+The prior source may name another admitted logical device sharing the selected
+native mapping group, because that consumer may have installed the old backing.
+The desired source still names the selected live device's access.
 
 Success establishes the replacement's translation readiness before returning.
 The next operation on an existing queue can use the unchanged arena address.

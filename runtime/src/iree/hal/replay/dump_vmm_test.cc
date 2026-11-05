@@ -535,6 +535,7 @@ TEST(ReplayDumpTest, EmitsReservationAndMappingBatchPayloads) {
           .target_offset = 4096,
           .byte_length = 4096,
           .source_ref = {.buffer_id = 19, .offset = 8192, .length = 4096},
+          .previous_source_ref = {.length = 4096},
           .access = IREE_HAL_MEMORY_ACCESS_READ,
       },
       {
@@ -543,6 +544,13 @@ TEST(ReplayDumpTest, EmitsReservationAndMappingBatchPayloads) {
           .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND,
           .target_offset = 12288,
           .byte_length = 4096,
+          .source_ref = {.length = 4096},
+          .previous_source_ref =
+              {
+                  .buffer_id = 19,
+                  .offset = 12288,
+                  .length = 4096,
+              },
       },
   };
   const iree_const_byte_span_t batch_payloads[] = {
@@ -585,10 +593,13 @@ TEST(ReplayDumpTest, EmitsReservationAndMappingBatchPayloads) {
         output,
         HasSubstr("mappings=[{target_buffer_id=17 scope_id=2 operation=1 "
                   "target=[4096, +4096] access=0x00000001 "
-                  "source={buffer_id=19 offset=8192 length=4096 slot=0}},"
+                  "source={buffer_id=19 offset=8192 length=4096 slot=0} "
+                  "previous_source={buffer_id=0 offset=0 length=4096 slot=0}},"
                   "{target_buffer_id=17 scope_id=2 operation=2 "
                   "target=[12288, +4096] access=0x00000000 "
-                  "source={buffer_id=0 offset=0 length=0 slot=0}}]"));
+                  "source={buffer_id=0 offset=0 length=4096 slot=0} "
+                  "previous_source={buffer_id=19 offset=12288 length=4096 "
+                  "slot=0}}]"));
     options.format = IREE_HAL_REPLAY_DUMP_FORMAT_JSONL;
     output.clear();
     IREE_ASSERT_OK(DumpReplayToString(input, &options, &output));
@@ -601,15 +612,18 @@ TEST(ReplayDumpTest, EmitsReservationAndMappingBatchPayloads) {
     EXPECT_THAT(output, HasSubstr("\"source_pool_ids\":[11,13]"));
     EXPECT_THAT(
         output,
-        HasSubstr("\"mappings\":[{\"target_buffer_id\":17,\"scope_id\":2,"
-                  "\"operation\":1,"
-                  "\"target_offset\":4096,\"byte_length\":4096,\"access\":1,"
-                  "\"source\":{\"buffer_id\":19,\"offset\":8192,\"length\":"
-                  "4096,\"buffer_slot\":0}},"
-                  "{\"target_buffer_id\":17,\"scope_id\":2,\"operation\":2,"
-                  "\"target_offset\":12288,\"byte_length\":4096,\"access\":0,"
-                  "\"source\":{\"buffer_id\":0,\"offset\":0,\"length\":0,"
-                  "\"buffer_slot\":0}}]"));
+        HasSubstr(
+            "\"mappings\":[{\"target_buffer_id\":17,\"scope_id\":2,"
+            "\"operation\":1,"
+            "\"target_offset\":4096,\"byte_length\":4096,\"access\":1,"
+            "\"source\":{\"buffer_id\":19,\"offset\":8192,\"length\":"
+            "4096,\"buffer_slot\":0},\"previous_source\":{\"buffer_id\":0,"
+            "\"offset\":0,\"length\":4096,\"buffer_slot\":0}},"
+            "{\"target_buffer_id\":17,\"scope_id\":2,\"operation\":2,"
+            "\"target_offset\":12288,\"byte_length\":4096,\"access\":0,"
+            "\"source\":{\"buffer_id\":0,\"offset\":0,\"length\":4096,"
+            "\"buffer_slot\":0},\"previous_source\":{\"buffer_id\":19,"
+            "\"offset\":12288,\"length\":4096,\"buffer_slot\":0}}]"));
   }
 }
 

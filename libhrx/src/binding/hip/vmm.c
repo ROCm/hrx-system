@@ -1445,6 +1445,139 @@ static hipError_t iree_hip_vmm_build_mapping_unmap(
   return hipSuccess;
 }
 
+// Order temporary edits by canonical scope and address so locations sharing
+// one native projection contribute only one removal for each backing range.
+static int iree_hip_vmm_compare_mapping_edits(const void* lhs,
+                                              const void* rhs) {
+  const hrx_memory_mapping_t* a = lhs;
+  const hrx_memory_mapping_t* b = rhs;
+  if (a->scope.id != b->scope.id) {
+    return a->scope.id < b->scope.id ? -1 : 1;
+  }
+  return (a->target_offset > b->target_offset) -
+         (a->target_offset < b->target_offset);
+}
+
+// HIP owns both backing boundaries and per-location permissions. A pointer-only
+// unmap intersects those existing records; untouched or inaccessible locations
+// have no native binding to remove. Temporary descriptors die with this call.
+static hipError_t iree_hip_vmm_remove_mappings(
+    iree_hip_vmm_reservation_t* reservation, size_t offset, size_t size) {
+  const size_t end = offset + size;
+  size_t capacity = 0;
+  for (size_t i = 0; i < reservation->access_range_count; ++i) {
+    const iree_hip_vmm_access_range_t* access = &reservation->access_ranges[i];
+    const size_t begin = iree_max(offset, access->offset);
+    const size_t limit = iree_min(end, access->offset + access->size);
+    if (begin >= limit) {
+      continue;
+    }
+    const size_t count = iree_hip_vmm_mapping_lower_bound(reservation, limit) -
+                         iree_hip_vmm_mapping_containing(reservation, begin);
+    if (!iree_host_size_checked_add(capacity, count, &capacity)) {
+      return hipErrorOutOfMemory;
+    }
+  }
+  hrx_memory_mapping_t inline_mappings[8];
+  hrx_memory_mapping_t* mappings = inline_mappings;
+  hipError_t result = hipSuccess;
+  if (capacity > IREE_ARRAYSIZE(inline_mappings)) {
+    result = iree_hip_vmm_from_iree_status(
+        iree_allocator_malloc_array(iree_allocator_system(), capacity,
+                                    sizeof(*mappings), (void**)&mappings));
+  }
+  hrx_memory_scope_t scopes[IREE_HAL_STREAMING_MAX_DEVICES + 1];
+  uint32_t projections[IREE_HAL_STREAMING_MAX_DEVICES + 1];
+  size_t scope_count = 0;
+  size_t count = 0;
+  for (size_t i = 0;
+       i < reservation->access_range_count && result == hipSuccess; ++i) {
+    const iree_hip_vmm_access_range_t* access = &reservation->access_ranges[i];
+    const size_t begin = iree_max(offset, access->offset);
+    const size_t limit = iree_min(end, access->offset + access->size);
+    if (begin >= limit) {
+      continue;
+    }
+    hrx_device_t device = reservation->device;
+    const bool host = access->location_type == hipMemLocationTypeHost;
+    if (!host) {
+      result = iree_hip_vmm_from_hrx_status(
+          hrx_gpu_device_get(access->location_id, &device));
+    }
+    hrx_memory_scope_t scope = {0};
+    uint32_t projection = 0;
+    if (result == hipSuccess) {
+      result = iree_hip_vmm_from_hrx_status(hrx_device_query_memory_scope(
+          device, 0, host ? HRX_MEMORY_SITE_HOST : HRX_MEMORY_SITE_PROGRAM,
+          &scope));
+    }
+    if (result == hipSuccess) {
+      result =
+          iree_hip_vmm_from_hrx_status(hrx_virtual_buffer_resolve_projection(
+              reservation->virtual_buffer, scope, &projection));
+    }
+    if (result != hipSuccess) {
+      continue;
+    }
+    size_t scope_index = 0;
+    while (scope_index < scope_count &&
+           projections[scope_index] != projection) {
+      ++scope_index;
+    }
+    if (scope_index == scope_count) {
+      scopes[scope_count] = scope;
+      projections[scope_count++] = projection;
+    }
+    size_t position = iree_hip_vmm_mapping_containing(reservation, begin);
+    while (position < reservation->mapping_count &&
+           reservation->mappings[position].virtual_offset < limit) {
+      const iree_hip_vmm_mapping_t* binding =
+          &reservation->mappings[position++];
+      const size_t start = iree_max(begin, binding->virtual_offset);
+      mappings[count++] = (hrx_memory_mapping_t){
+          .target = reservation->virtual_buffer,
+          .scope = scopes[scope_index],
+          .target_offset = start,
+          .byte_length =
+              iree_min(limit, binding->virtual_offset + binding->size) - start,
+          .operation = HRX_MEMORY_MAPPING_OPERATION_UNBIND,
+          .previous_source = binding->allocation->backing,
+          .previous_source_offset =
+              binding->physical_offset + start - binding->virtual_offset,
+      };
+    }
+  }
+  if (result == hipSuccess) {
+    qsort(mappings, count, sizeof(*mappings),
+          iree_hip_vmm_compare_mapping_edits);
+    size_t normalized_count = 0;
+    for (size_t i = 0; i < count; ++i) {
+      const hrx_memory_mapping_t current = mappings[i];
+      hrx_memory_mapping_t* previous =
+          normalized_count ? &mappings[normalized_count - 1] : NULL;
+      if (previous && previous->scope.id == current.scope.id &&
+          previous->previous_source == current.previous_source &&
+          current.target_offset <=
+              previous->target_offset + previous->byte_length &&
+          current.previous_source_offset - previous->previous_source_offset ==
+              current.target_offset - previous->target_offset) {
+        previous->byte_length =
+            iree_max(previous->target_offset + previous->byte_length,
+                     current.target_offset + current.byte_length) -
+            previous->target_offset;
+      } else {
+        mappings[normalized_count++] = current;
+      }
+    }
+    result =
+        iree_hip_vmm_update_mappings(reservation, normalized_count, mappings);
+  }
+  if (mappings != inline_mappings) {
+    iree_allocator_free(iree_allocator_system(), mappings);
+  }
+  return result;
+}
+
 static hipError_t iree_hip_vmm_detach_failed(
     iree_hip_vmm_reservation_t* reservation, size_t offset, size_t size) {
   if (offset != 0 || size != reservation->size) {
@@ -1528,13 +1661,7 @@ hipError_t iree_hip_vmm_unmap(void* ptr, size_t size) {
   }
   if (result == hipSuccess) {
     if (reservation->mapping_completion) {
-      const hrx_memory_mapping_t mapping = {
-          .target = reservation->virtual_buffer,
-          .target_offset = offset,
-          .byte_length = size,
-          .operation = HRX_MEMORY_MAPPING_OPERATION_UNBIND,
-      };
-      result = iree_hip_vmm_update_mappings(reservation, 1, &mapping);
+      result = iree_hip_vmm_remove_mappings(reservation, offset, size);
     } else {
       result = iree_hip_vmm_from_hrx_status(hrx_allocator_virtual_memory_unmap(
           reservation->allocator, reservation->virtual_buffer, offset, size));

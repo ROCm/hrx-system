@@ -175,12 +175,16 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
         .source = source,
         .access = HRX_MEMORY_ACCESS_NONE,
         .operation = HRX_MEMORY_MAPPING_OPERATION_REPLACE,
+        .previous_source = source,
+        .previous_source_offset = unit,
     };
     predecessor = completed++;
     IREE_ASSERT_OK(hrx_status_to_iree(
         hrx_queue_map(device_, 0, &wait_list, &signal_list, 1, &replacement,
                       HRX_QUEUE_MAP_FLAG_BORROW_BUFFERS)));
     replacement.operation = HRX_MEMORY_MAPPING_OPERATION_PROTECT;
+    replacement.previous_source = nullptr;
+    replacement.previous_source_offset = 0;
     replacement.access = HRX_MEMORY_ACCESS_READ;
     predecessor = completed++;
     IREE_ASSERT_OK(hrx_status_to_iree(
@@ -201,6 +205,8 @@ TEST_F(CpuVirtualBufferTest, BatchedAliasesCaptureDependenciesAndSources) {
           .target_offset = unit,
           .byte_length = unit,
           .operation = HRX_MEMORY_MAPPING_OPERATION_UNBIND,
+          .previous_source = source,
+          .previous_source_offset = i == 0 ? 0 : unit,
       };
     }
     predecessor = completed++;

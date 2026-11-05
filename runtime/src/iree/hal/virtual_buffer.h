@@ -19,12 +19,14 @@ extern "C" {
 // HAL to discover or track installed sources. Backends can use native bind and
 // protection primitives when their APIs cannot replace arbitrary intervals.
 typedef enum iree_hal_memory_mapping_operation_e {
-  // Replaces any previous mapping in the range, including holes. A NULL source
-  // clears the range. This is the default for callers managing sparse ranges.
+  // Replaces the caller-described prior mapping. A NULL previous_source
+  // declares a hole; a NULL source clears the range. Entries crossing prior
+  // source boundaries are split by the owner of those mappings.
   IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE = 0,
   // Installs a non-NULL source in a range the caller knows is unbound.
   IREE_HAL_MEMORY_MAPPING_OPERATION_BIND = 1,
-  // Removes a complete bound range. Requires a NULL source and zero access.
+  // Removes a bound range described by previous_source. Requires a NULL
+  // source and zero access.
   IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND = 2,
   // Changes access to a bound range. The caller supplies the same source and
   // source offset currently bound there, including when revoking all access.
@@ -210,6 +212,13 @@ typedef struct iree_hal_memory_mapping_t {
   // Prior-state contract and requested update; zero selects general
   // replacement.
   iree_hal_memory_mapping_operation_t operation;
+  // Borrowed backing currently installed throughout the range for REPLACE or
+  // UNBIND. NULL declares an unbound range. BIND requires NULL; PROTECT uses
+  // source as both prior and desired backing and requires NULL here.
+  iree_hal_buffer_t* previous_source;
+  // Byte offset in previous_source corresponding to target_range.byte_offset;
+  // zero when previous_source is NULL.
+  iree_device_size_t previous_source_offset;
 } iree_hal_memory_mapping_t;
 
 //===----------------------------------------------------------------------===//
@@ -232,6 +241,9 @@ typedef struct iree_hal_memory_mapping_update_t {
   iree_hal_memory_access_t access;
   // Caller-declared binding state, already validated against backend support.
   iree_hal_memory_mapping_operation_t operation;
+  // Caller-supplied prior source in native coordinates; NULL for an unbound
+  // range. PROTECT resolves its single source into both source descriptors.
+  iree_hal_buffer_native_binding_t previous_source;
 } iree_hal_memory_mapping_update_t;
 
 // Shared prefix for native virtual-buffer implementations. The ordinary buffer
@@ -256,6 +268,12 @@ typedef struct iree_hal_virtual_buffer_t {
   uint64_t source_native_type_mask;
   // Scope-indexed native projections; INVALID for excluded sites and ANY.
   const uint32_t* projections;
+  // Additional immutable native qualification at one contributing source
+  // site. NULL when the common source contract describes every requirement.
+  // Called only during cold admission, never to inspect installed mappings.
+  bool (*source_is_compatible)(const struct iree_hal_virtual_buffer_t* target,
+                               const iree_hal_memory_contract_t* source,
+                               uint32_t scope_id);
 } iree_hal_virtual_buffer_t;
 
 // Borrowed mapping target after a view's allocation prerequisites complete.
