@@ -151,7 +151,8 @@ static amdf_status_t iree_hal_amd_gpu_pm4_cleanup(
                     : iree_hal_amd_gpu_user_queue_deinitialize(
                           &queue->storage, queue->producer.ring.reserved_words);
   if (!amdf_status_is_ok(status)) {
-    queue->context->cleanup_blocked = true;
+    iree_atomic_store(&queue->context->cleanup_blocked, 1,
+                      iree_memory_order_relaxed);
     return status;
   }
   queue->kernel = NULL;

@@ -94,9 +94,10 @@ typedef struct iree_hal_amd_gpu_context_t {
     // Accepted native memory callbacks that still borrow this context.
     iree_host_size_t pending_count;
   } memory;
-  // A child failed its native ownership join. The cold owner serializes this
-  // latch with final cleanup; no context resource may be released afterward.
-  bool cleanup_blocked;
+  // Monotonic failure latch shared by independent native cleanup callers.
+  // Final destruction joins those callers before checking it; an unproven
+  // native owner prevents release of every context resource.
+  iree_atomic_int32_t cleanup_blocked;
 } iree_hal_amd_gpu_context_t;
 
 // Reports a native execution failure and requests the parent's terminal join.

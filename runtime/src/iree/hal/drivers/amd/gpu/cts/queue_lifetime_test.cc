@@ -7,6 +7,7 @@
 #include <array>
 #include <memory>
 #include <semaphore>
+#include <thread>
 
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/amd/gpu/cts/test_device.h"
@@ -135,7 +136,8 @@ TEST_P(GpuNativeQueueLifetimeTest, NativeSignalReaderSurvivesProducerRelease) {
             command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ? 0u : 1u);
 }
 
-TEST_P(GpuNativeQueueLifetimeTest, RecordedOutputSurvivesMembershipGrowth) {
+TEST_P(GpuNativeQueueLifetimeTest,
+       RecordedOutputSurvivesConcurrentMembershipGrowth) {
   Ref<iree_hal_buffer_t> output;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool_, iree_hal_make_pool_reservation_request(256, 4),
@@ -157,36 +159,53 @@ TEST_P(GpuNativeQueueLifetimeTest, RecordedOutputSurvivesMembershipGrowth) {
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
   std::array<Ref<iree_hal_queue_t>, 3> acquired;
-  for (auto& queue : acquired) {
-    IREE_ASSERT_OK(AcquireQueue(queue.out()));
-  }
-  IREE_ASSERT_OK(iree_hal_device_trim(device_));
+  IREE_ASSERT_OK(AcquireQueue(acquired[0].out()));
   Ref<iree_hal_semaphore_t> done;
   CreateSemaphore(done.out());
   iree_hal_semaphore_t* handle = done;
-  uint64_t one = 1, two = 2;
-  IREE_ASSERT_OK(iree_hal_queue_execute(acquired.back(), {}, {1, &handle, &one},
-                                        recording, {}, 0));
-  std::array<uint32_t, 64> observed = {};
-  const iree_hal_transfer_operation_t download = {
-      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-      .download =
-          {
-              .source_buffer = output,
-              .target = observed.data(),
-              .length = sizeof(observed),
-          },
-  };
-  IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &handle, &one},
-                                         {1, &handle, &two}, 1, &download,
-                                         nullptr));
-  acquired.back().reset();
-  IREE_ASSERT_OK(iree_hal_device_trim(device_));
-  IREE_ASSERT_OK(
-      iree_hal_semaphore_wait(done, two, iree_infinite_timeout(), 0));
-  for (uint32_t value : observed) {
-    EXPECT_EQ(value, pattern);
+  uint64_t one = 1, two = 2, three = 3;
+  std::jthread constructor;
+  {
+    // Hold one native allocation before it reaches libamdf. Another acquired
+    // coordinate must grow the frontier, run the existing resident recording,
+    // and retire its output without waiting for that constructor.
+    NativeMemoryGate::Hold hold(&memory_gate_);
+    constructor =
+        std::jthread([&] { IREE_EXPECT_OK(AcquireQueue(acquired[1].out())); });
+    hold.WaitEntered();
+    IREE_ASSERT_OK(AcquireQueue(acquired[2].out()));
+    IREE_ASSERT_OK(iree_hal_device_trim(device_));
+    IREE_ASSERT_OK(iree_hal_queue_execute(acquired[2], {}, {1, &handle, &one},
+                                          recording, {}, 0));
+    std::array<uint32_t, 64> observed = {};
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = output,
+                .target = observed.data(),
+                .length = sizeof(observed),
+            },
+    };
+    IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[0], {1, &handle, &one},
+                                           {1, &handle, &two}, 1, &download,
+                                           nullptr));
+    acquired[2].reset();
+    IREE_ASSERT_OK(iree_hal_device_trim(device_));
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_wait(done, two, iree_infinite_timeout(), 0));
+    for (uint32_t value : observed) {
+      EXPECT_EQ(value, pattern);
+    }
   }
+  constructor.join();
+  ASSERT_NE(acquired[1].get(), nullptr);
+  // The delayed constructor catches up before accepting this frontier, which
+  // transitively includes the wider coordinate of the already-released queue.
+  IREE_ASSERT_OK(iree_hal_queue_barrier(acquired[1], {1, &handle, &two},
+                                        {1, &handle, &three}, nullptr, 0));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(done, three, iree_infinite_timeout(), 0));
 }
 
 TEST_P(GpuNativeQueueLifetimeTest,

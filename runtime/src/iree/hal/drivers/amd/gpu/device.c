@@ -791,7 +791,8 @@ static bool iree_hal_amd_gpu_device_is_idle(iree_hal_amd_gpu_device_t* device) {
 // final context/event teardown stays on this original cold owner.
 static bool iree_hal_amd_gpu_device_release_children(
     iree_hal_amd_gpu_device_t* device) {
-  if (device->context->cleanup_blocked ||
+  if (iree_atomic_load(&device->context->cleanup_blocked,
+                       iree_memory_order_relaxed) ||
       (iree_atomic_load(&device->membership.terminal.completed,
                         iree_memory_order_acquire) &&
        !amdf_status_is_ok(device->membership.terminal.status))) {
@@ -866,7 +867,8 @@ static bool iree_hal_amd_gpu_device_release_children(
   iree_allocator_free(device->host_allocator, device->memory.tsan);
   if (device->memory.asan) {
     if (!iree_hal_amd_fabric_asan_deinitialize(device->memory.asan)) {
-      device->context->cleanup_blocked = true;
+      iree_atomic_store(&device->context->cleanup_blocked, 1,
+                        iree_memory_order_relaxed);
       return false;
     }
     iree_allocator_free(device->host_allocator, device->memory.asan);
@@ -879,7 +881,8 @@ static bool iree_hal_amd_gpu_device_release_children(
   amdf_status_t completion_status =
       iree_hal_amd_gpu_context_deinitialize_completion(device->context);
   if (!amdf_status_is_ok(completion_status)) {
-    device->context->cleanup_blocked = true;
+    iree_atomic_store(&device->context->cleanup_blocked, 1,
+                      iree_memory_order_relaxed);
     iree_hal_amd_gpu_context_report(device->context, completion_status,
                                     "completion cleanup");
     return false;
@@ -1525,7 +1528,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   } else if (iree_hal_amd_gpu_device_release_children(device)) {
     iree_allocator_free(host_allocator, device);
   } else {
-    context->cleanup_blocked = true;
+    iree_atomic_store(&context->cleanup_blocked, 1, iree_memory_order_relaxed);
   }
   return status;
 }

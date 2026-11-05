@@ -805,7 +805,8 @@ iree_status_t iree_hal_amd_gpu_sdma_queue_allocate(
   } else {
     const amdf_status_t cleanup = iree_hal_amd_gpu_sdma_queue_free(queue);
     if (!amdf_status_is_ok(cleanup)) {
-      context->cleanup_blocked = true;
+      iree_atomic_store(&context->cleanup_blocked, 1,
+                        iree_memory_order_relaxed);
       iree_hal_amd_gpu_context_report(context, cleanup, "SDMA queue rollback");
     }
   }
