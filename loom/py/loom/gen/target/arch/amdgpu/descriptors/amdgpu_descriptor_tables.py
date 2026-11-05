@@ -113,12 +113,10 @@ def _descriptor_identity_source(
             descriptors_by_key[descriptor.key] = descriptor
             descriptors.append(descriptor)
     identity_domain = amdgpu_descriptor_identity_domain(descriptors)
+    selected_identities = tuple((ordinal, key, descriptors_by_key[key]) for ordinal, key in enumerate(identity_domain.keys) if key in descriptors_by_key)
 
     pool = CStringPool("AMDGPU_DESCRIPTOR_IDENTITY")
-    for key in identity_domain.keys:
-        descriptor = descriptors_by_key.get(key)
-        if descriptor is None:
-            raise ValueError(f"AMDGPU descriptor identity '{key}' has no descriptor")
+    for _, key, descriptor in selected_identities:
         pool.intern(f"descriptor_{key}", key)
         if descriptor.semantic_tag is not None:
             pool.intern(f"semantic_{key}", descriptor.semantic_tag)
@@ -143,13 +141,12 @@ def _descriptor_identity_source(
             "kAmdgpuDescriptorIdentityStringData",
             layout=layout,
         ),
-        (f"const loom_low_descriptor_identity_t {AMDGPU_DESCRIPTOR_IDENTITY_TABLE_SYMBOL}[] = {{"),
+        (f"const loom_low_descriptor_identity_t {AMDGPU_DESCRIPTOR_IDENTITY_TABLE_SYMBOL}[LOOM_AMDGPU_DESCRIPTOR_IDENTITY_COUNT] = {{"),
     ]
-    for key in identity_domain.keys:
-        descriptor = descriptors_by_key[key]
+    for ordinal, key, descriptor in selected_identities:
         lines.extend(
             [
-                "    {",
+                f"    [{ordinal}] = {{",
                 f"        .key_string_ref = {pool.ref(f'descriptor_{key}')},",
                 (f"        .semantic_tag_string_ref = {c_spelling.optional_string_expr(pool, f'semantic_{key}' if descriptor.semantic_tag is not None else None)},"),
                 "    },",

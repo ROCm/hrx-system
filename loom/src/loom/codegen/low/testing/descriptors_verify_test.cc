@@ -68,7 +68,7 @@ enum : loom_string_ref_t {
 #define TEST_STRING_REF(field) TEST_STRING_##field
 
 struct TestTables {
-  loom_low_descriptor_identity_t descriptor_identities[2];
+  loom_low_descriptor_identity_t descriptor_identities[3];
   uint64_t descriptor_stable_ids[2];
   loom_low_descriptor_t descriptors[2];
   // Independently mutable layouts for table validation tests.
@@ -265,8 +265,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->set.string_pool.data_length[0] = sizeof(kTestStrings) - 1;
   tables->set.descriptor_identities = tables->descriptor_identities;
   tables->set.descriptor_stable_ids = tables->descriptor_stable_ids;
-  tables->set.descriptor_identity_count =
-      IREE_ARRAYSIZE(tables->descriptor_identities);
+  tables->set.descriptor_identity_count = 2;
   tables->set.descriptors = tables->descriptors;
   tables->set.descriptor_layouts = tables->descriptor_layouts;
   tables->set.descriptor_layout_count =
@@ -1917,6 +1916,27 @@ TEST(LowDescriptorsTest, RejectsMismatchedDescriptorStableId) {
   TestTables tables;
   InitializeTestTables(&tables);
   tables.descriptor_stable_ids[1] = tables.descriptor_stable_ids[0];
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsUnreferencedDescriptorIdentitySlots) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptor_identities[2] = tables.descriptor_identities[1];
+  tables.descriptor_identities[1] = {};
+  tables.descriptors[1].identity_ordinal = 2;
+  tables.set.descriptor_identity_count = 3;
+
+  IREE_EXPECT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, RejectsReferencedEmptyDescriptorIdentitySlot) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.descriptors[1].identity_ordinal = 2;
+  tables.set.descriptor_identity_count = 3;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));

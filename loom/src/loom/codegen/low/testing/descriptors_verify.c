@@ -331,22 +331,6 @@ static iree_status_t loom_low_verify_tables_present(
   return iree_ok_status();
 }
 
-static iree_status_t loom_low_verify_descriptor_identities(
-    const loom_low_descriptor_set_t* descriptor_set) {
-  for (uint32_t i = 0; i < descriptor_set->descriptor_identity_count; ++i) {
-    const loom_low_descriptor_identity_t* identity =
-        &descriptor_set->descriptor_identities[i];
-    iree_string_view_t key = iree_string_view_empty();
-    IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-        descriptor_set, identity->key_string_ref, "descriptor_identity.key",
-        &key));
-    IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
-        descriptor_set, identity->semantic_tag_string_ref,
-        "descriptor_identity.semantic_tag"));
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_low_verify_descriptor_refs(
     const loom_low_descriptor_set_t* descriptor_set) {
   if (descriptor_set->descriptor_ref_count < descriptor_set->descriptor_count) {
@@ -2524,8 +2508,13 @@ static iree_status_t loom_low_verify_descriptor(
   }
   const loom_low_descriptor_identity_t* identity =
       &descriptor_set->descriptor_identities[identity_ordinal];
-  const iree_string_view_t descriptor_key =
-      loom_low_descriptor_set_string(descriptor_set, identity->key_string_ref);
+  iree_string_view_t descriptor_key = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
+      descriptor_set, identity->key_string_ref, "descriptor_identity.key",
+      &descriptor_key));
+  IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
+      descriptor_set, identity->semantic_tag_string_ref,
+      "descriptor_identity.semantic_tag"));
   const uint64_t expected_stable_id =
       loom_low_descriptor_stable_id_from_key(descriptor_key);
   const uint64_t stable_id =
@@ -3863,7 +3852,6 @@ iree_status_t loom_low_descriptor_set_verify(
       descriptor_set->target_stable_id, target_key, "target_stable_id"));
   IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
       descriptor_set, descriptor_set->feature_key_string_ref, "set.feature"));
-  IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_identities(descriptor_set));
 
   // Operand forms can reference a later descriptor before its full validation.
   // Establish every selected layout index before following those references.

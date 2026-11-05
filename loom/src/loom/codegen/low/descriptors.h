@@ -1670,8 +1670,9 @@ typedef struct loom_low_descriptor_set_t {
   loom_string_ref_t target_key_string_ref;
   // String-pool reference for the feature namespace key.
   loom_string_ref_t feature_key_string_ref;
-  // Shared descriptor identities indexed by each descriptor's identity
-  // ordinal. Generated catalogs fit in the uint16_t ordinal domain.
+  // Shared descriptor identity slots indexed by each descriptor's identity
+  // ordinal. Generated catalogs fit in the uint16_t ordinal domain. Slots not
+  // referenced by a linked target family may be empty.
   const loom_low_descriptor_identity_t* descriptor_identities;
   // Durable stable IDs indexed directly by descriptor ordinal.
   const uint64_t* descriptor_stable_ids;
@@ -1679,7 +1680,7 @@ typedef struct loom_low_descriptor_set_t {
   const loom_low_descriptor_t* descriptors;
   // Interned structural layouts referenced by descriptor layout indices.
   const loom_low_descriptor_layout_t* descriptor_layouts;
-  // Number of rows in the shared descriptor identity catalog.
+  // Exclusive upper bound of addressable descriptor identity ordinals.
   uint32_t descriptor_identity_count;
   // Number of rows in the shared descriptor_layouts table.
   uint32_t descriptor_layout_count;
