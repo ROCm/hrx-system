@@ -13,9 +13,9 @@
 bool loom_serve_text_session_cache_inspect(
     const loom_serve_text_session_cache_t* cache, iree_host_size_t row_count,
     loom_serve_text_session_t* const* rows, iree_host_size_t index,
-    loom_serve_http_session_snapshot_t* out_snapshot) {
+    loom_service_session_snapshot_t* out_snapshot) {
   const loom_serve_text_session_lifetime_t* lifetime = NULL;
-  *out_snapshot = (loom_serve_http_session_snapshot_t){0};
+  *out_snapshot = (loom_service_session_snapshot_t){0};
   if (index < row_count) {
     const loom_serve_text_session_t* row = rows[index];
     lifetime = &row->lifetime;

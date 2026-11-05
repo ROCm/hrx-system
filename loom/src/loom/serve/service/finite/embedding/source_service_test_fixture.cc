@@ -21,6 +21,7 @@
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/finite/embedding/protocol.h"
+#include "loom/serve/service/finite/http.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/package.h"
 #include "loom/serve/testing/service_application.h"
@@ -232,7 +233,7 @@ void SourceEmbeddingServiceTest::CreateService(
   IREE_ASSERT_OK(loom_serve_finite_service_allocate(
       host_, model_, loom_serve_embedding_protocol(), IREE_SV("fixture"), 16,
       16, heartbeat_interval, nullptr, host_allocator_, &service_));
-  interface_ = loom_serve_finite_service_interface(service_);
+  interface_ = loom_serve_finite_http_interface(service_);
   EXPECT_EQ(interface_.runtime.capacity_domain,
             loom_serve_pool_residency_cache(storage_owner_));
   const loom_runtime_wake_callback_t observer = {

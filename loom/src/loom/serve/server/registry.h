@@ -216,7 +216,7 @@ typedef struct loom_serve_registered_model_t {
   // Independent tokenizer processes still borrowing the model.
   iree_host_size_t tokenizer_count;
   // Copied scheduler observation for one response; never a readiness signal.
-  loom_serve_service_snapshot_t snapshot;
+  loom_service_snapshot_t snapshot;
   // Final work totals after service destruction, or zero before publication.
   loom_service_telemetry_counters_t counters;
   // Final duration distributions after service destruction, or zero before
@@ -273,7 +273,7 @@ loom_serve_registered_model_t* loom_serve_registry_at(
 // Snapshots service state only after publication and before retirement.
 // Other states report their registration phase without calling a service.
 // The registry owner serializes this query with model advancement/removal.
-loom_serve_service_snapshot_t loom_serve_registry_snapshot(
+loom_service_snapshot_t loom_serve_registry_snapshot(
     const loom_serve_registered_model_t* model);
 
 // Moves a validated declaration, including its owning allocator, into a

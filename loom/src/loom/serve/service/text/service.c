@@ -1331,7 +1331,7 @@ static iree_status_t loom_serve_text_sample(
   return loom_serve_text_heartbeat_sample(&service->heartbeat, sink);
 }
 
-static loom_serve_service_snapshot_t loom_serve_text_snapshot(void* self) {
+static loom_service_snapshot_t loom_serve_text_snapshot(void* self) {
   loom_serve_text_service_t* service = self;
   const loom_service_text_statistics_t state =
       loom_serve_text_heartbeat_read(&service->heartbeat);
@@ -1364,7 +1364,7 @@ static loom_serve_service_snapshot_t loom_serve_text_snapshot(void* self) {
         queued_arrival,
         service->input_counts.requests[active_count].receipt.arrival_time);
   }
-  return (loom_serve_service_snapshot_t){
+  return (loom_service_snapshot_t){
       .phase = image_phase && !strcmp(state.phase, "idle") ? image_phase
                                                            : state.phase,
       .queued_requests = service->pending.count +
@@ -1381,12 +1381,12 @@ static loom_serve_service_snapshot_t loom_serve_text_snapshot(void* self) {
 
 static bool loom_serve_text_request_at(
     void* self, iree_host_size_t index,
-    loom_serve_http_request_snapshot_t* out_snapshot) {
+    loom_service_request_snapshot_t* out_snapshot) {
   const loom_serve_text_service_t* service = self;
   if (index < service->pending.count) {
     const loom_serve_text_pending_request_t* pending =
         service->pending.values[index];
-    *out_snapshot = (loom_serve_http_request_snapshot_t){
+    *out_snapshot = (loom_service_request_snapshot_t){
         .id = pending->receipt.serial,
         .phase = "queued",
         .arrival_time = pending->receipt.arrival_time,
@@ -1395,7 +1395,7 @@ static bool loom_serve_text_request_at(
     *out_snapshot = loom_serve_text_session_request_snapshot(
         service->sessions[index - service->pending.count]);
   } else if (index - service->pending.count == service->row_count) {
-    *out_snapshot = (loom_serve_http_request_snapshot_t){
+    *out_snapshot = (loom_service_request_snapshot_t){
         .id = service->control.consumer.self ? service->control.receipt.serial
                                              : 0,
         .phase = "control",
@@ -1407,7 +1407,7 @@ static bool loom_serve_text_request_at(
         index - service->pending.count - service->row_count - 1;
     const loom_serve_text_input_count_request_t* query =
         &service->input_counts.requests[query_index];
-    *out_snapshot = (loom_serve_http_request_snapshot_t){
+    *out_snapshot = (loom_service_request_snapshot_t){
         .id = query->receipt.serial,
         .phase =
             query_index == 0 && service->cpu_work == TEXT_CPU_WORK_INPUT_COUNT
@@ -1423,7 +1423,7 @@ static bool loom_serve_text_request_at(
 
 static bool loom_serve_text_session_at(
     void* self, iree_host_size_t index,
-    loom_serve_http_session_snapshot_t* out_snapshot) {
+    loom_service_session_snapshot_t* out_snapshot) {
   const loom_serve_text_service_t* service = self;
   return loom_serve_text_session_cache_inspect(
       &service->cache, service->row_count, service->sessions, index,

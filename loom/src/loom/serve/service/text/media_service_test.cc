@@ -195,7 +195,7 @@ class CachedMediaServiceTest : public MediaServiceTest {
 
   size_t CachedSessions() {
     size_t count = 0;
-    loom_serve_http_session_snapshot_t snapshot = {};
+    loom_service_session_snapshot_t snapshot = {};
     for (size_t i = 0; interface_.inspection.session_at(interface_.runtime.self,
                                                         i, &snapshot);
          ++i) {

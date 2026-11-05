@@ -14,6 +14,7 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "iree/async/proactor.h"
 #include "iree/base/internal/json.h"
@@ -24,6 +25,7 @@
 #include "loom/serve/service/finite/call.h"
 #include "loom/serve/service/finite/decision/protocol.h"
 #include "loom/serve/service/finite/embedding/protocol.h"
+#include "loom/serve/service/finite/http.h"
 #include "loom/serve/service/finite/service.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model.h"
@@ -72,7 +74,7 @@ class SourceDecisionServiceTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_serve_finite_service_allocate(
         host_, models_[0], loom_serve_decision_protocol(), IREE_SV("decisions"),
         16, 16, 0, nullptr, host_allocator_, &services_[0]));
-    interfaces_[0] = loom_serve_finite_service_interface(services_[0]);
+    interfaces_[0] = loom_serve_finite_http_interface(services_[0]);
     EXPECT_EQ(interfaces_[0].runtime.capacity_domain,
               loom_serve_pool_residency_cache(storage_owner_));
     const loom_runtime_wake_callback_t observer = {
@@ -116,14 +118,18 @@ class SourceDecisionServiceTest : public ::testing::Test {
     iree_notification_deinitialize(&notification_);
   }
   int Send(const std::string& body, const char* target = "/v1/systemone",
-           const char* method = "POST") {
+           const char* method = "POST",
+           const char* content_type = "application/json") {
     if (http_.failed() || HasFatalFailure()) {
       return -1;
     }
-    const std::string request = std::string(method) + " " + target +
-                                " HTTP/1.1\r\nHost: local\r\nContent-Type: "
-                                "application/json\r\nContent-Length: " +
-                                std::to_string(body.size()) + "\r\n\r\n" + body;
+    std::string request =
+        std::string(method) + " " + target + " HTTP/1.1\r\nHost: local\r\n";
+    if (content_type) {
+      request += std::string("Content-Type: ") + content_type + "\r\n";
+    }
+    request +=
+        "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
     int client = -1;
     [&] { IREE_ASSERT_OK(http_.Send(request, &client)); }();
     return client;
@@ -191,7 +197,7 @@ class SourceDecisionServiceTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_serve_finite_service_allocate(
         host_, models_[1], loom_serve_embedding_protocol(), IREE_SV("vectors"),
         16, 16, 0, nullptr, host_allocator_, &services_[1]));
-    interfaces_[1] = loom_serve_finite_service_interface(services_[1]);
+    interfaces_[1] = loom_serve_finite_http_interface(services_[1]);
     interfaces_[0].runtime.vtable->set_observer(interfaces_[0].runtime.self,
                                                 {});
     loom_serve_device_group_set_observer(resources_.device_group, {});
@@ -261,6 +267,161 @@ void CheckSingleNoulResponse(const std::string& response) {
   // Vulkan F32 division permits 2.5 ULP error for normal divisors. At 2/3,
   // one ULP is 2^-24. Exact dyadic cohort probabilities remain wire-checked.
   EXPECT_NEAR(probability, 2.0 / 3.0, 2.5 * 0x1p-24);
+}
+
+TEST_F(SourceDecisionServiceTest, PreflightRejectionsHaveOneRequestLifetime) {
+  struct Case {
+    // Target presented directly to the finite HTTP adapter.
+    const char* target;
+    // Wire request method.
+    const char* method;
+    // Header value, or null to omit the header.
+    const char* content_type;
+    // Exact HTTP status for this preflight rejection.
+    const char* status;
+    // Exact JSON error message, independent of request contents.
+    const char* message;
+  };
+  const Case cases[] = {
+      {"/v1/embeddings", "POST", "application/json", "404 Not Found",
+       "unknown finite-result endpoint"},
+      {"/v1/systemone", "GET", "application/json", "404 Not Found",
+       "unknown finite-result endpoint"},
+      {"/v1/systemone", "POST", "text/plain", "415 Unsupported Media Type",
+       "Content-Type must be application/json"},
+      {"/v1/systemone", "POST", nullptr, "415 Unsupported Media Type",
+       "Content-Type must be application/json"},
+  };
+  for (const auto& test : cases) {
+    const int client = Send(kNoul, test.target, test.method, test.content_type);
+    ASSERT_NO_FATAL_FAILURE(Accept(client));
+    EXPECT_EQ(Read(client),
+              std::string("HTTP/1.1 ") + test.status +
+                  "\r\nContent-Type: application/json\r\nConnection: close"
+                  "\r\n\r\n{\"error\":{\"type\":\"finite_request_error\","
+                  "\"message\":\"" +
+                  test.message + "\"}}");
+  }
+  const auto& counters = *interfaces_[0].telemetry.counters;
+  EXPECT_EQ(counters.requests, IREE_ARRAYSIZE(cases));
+  EXPECT_EQ(counters.rejected, IREE_ARRAYSIZE(cases));
+  EXPECT_EQ(counters.cancelled, 0u);
+  EXPECT_EQ(counters.failed, 0u);
+  EXPECT_EQ(counters.batches, 0u);
+  EXPECT_FALSE(
+      interfaces_[0].runtime.vtable->is_pending(interfaces_[0].runtime.self));
+
+  const int valid =
+      Send(kNoul, "/v1/systemone", "POST", "Application/JSON; Charset=UTF-8");
+  ASSERT_NO_FATAL_FAILURE(Accept(valid));
+  Drain();
+  CheckSingleNoulResponse(Read(valid));
+  EXPECT_EQ(counters.requests, IREE_ARRAYSIZE(cases) + 1);
+  EXPECT_EQ(counters.completed, 1u);
+}
+
+TEST_F(SourceDecisionServiceTest, DisconnectedPreflightRejectionRetiresClaim) {
+  const int client = Send(kNoul, "/v1/systemone", "POST", "text/plain");
+  const loom_serve_http_request_t* request = nullptr;
+  loom_serve_http_connection_t* connection = nullptr;
+  IREE_ASSERT_OK(http_.TakeRequest(client, &connection, &request));
+  const linger reset = {1, 0};
+  ASSERT_EQ(setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+            0);
+  ASSERT_EQ(close(client), 0);
+  iree_notification_await(
+      loom_serve_http_server_notification(server_),
+      [](void* value) {
+        return loom_serve_http_connection_failed(
+            static_cast<loom_serve_http_connection_t*>(value));
+      },
+      connection, iree_infinite_timeout());
+  IREE_ASSERT_OK(interfaces_[0].accept(interfaces_[0].runtime.self, connection,
+                                       request, 0));
+  const auto& counters = *interfaces_[0].telemetry.counters;
+  EXPECT_EQ(counters.requests, 1u);
+  EXPECT_EQ(counters.cancelled, 1u);
+  EXPECT_EQ(counters.rejected, 0u);
+  EXPECT_EQ(counters.failed, 0u);
+  EXPECT_FALSE(
+      interfaces_[0].runtime.vtable->is_pending(interfaces_[0].runtime.self));
+}
+
+TEST_F(SourceDecisionServiceTest, NativePressureRejectsHttpWithoutTakingAJob) {
+  using Call = std::unique_ptr<loom_serve_finite_call_t,
+                               decltype(&loom_serve_finite_call_close)>;
+  std::vector<Call> calls;
+  for (size_t i = 0; i < 16; ++i) {
+    iree_string_builder_t body;
+    iree_string_builder_initialize(host_allocator_, &body);
+    IREE_EXPECT_OK(iree_string_builder_append_cstring(&body, kNoul));
+    loom_serve_finite_call_t* call = nullptr;
+    IREE_EXPECT_OK(loom_serve_finite_service_try_open(
+        services_[0], &body, LOOM_SERVE_FINITE_OUTPUT_JSON, &call));
+    iree_string_builder_deinitialize(&body);
+    calls.emplace_back(call, loom_serve_finite_call_close);
+    EXPECT_NE(call, nullptr);
+  }
+  const int client = Send(kNoul);
+  ASSERT_NO_FATAL_FAILURE(Accept(client));
+  EXPECT_EQ(Read(client),
+            "HTTP/1.1 503 Service Unavailable\r\n"
+            "Content-Type: application/json\r\nConnection: close\r\n\r\n"
+            "{\"error\":{\"type\":\"finite_request_error\",\"message\":"
+            "\"finite admission queue is full\"}}");
+  EXPECT_EQ(
+      interfaces_[0].snapshot(interfaces_[0].runtime.self).queued_requests,
+      16u);
+  calls.clear();
+  Drain();
+  const auto& counters = *interfaces_[0].telemetry.counters;
+  EXPECT_EQ(counters.requests, 17u);
+  EXPECT_EQ(counters.rejected, 1u);
+  EXPECT_EQ(counters.cancelled, 16u);
+  EXPECT_EQ(counters.batches, 0u);
+  const int next = Send(kNoul);
+  ASSERT_NO_FATAL_FAILURE(Accept(next));
+  Drain();
+  CheckSingleNoulResponse(Read(next));
+  EXPECT_EQ(counters.completed, 1u);
+}
+
+TEST_F(SourceDecisionServiceTest, AdmissionAllocationFailureRetiresHttpClaim) {
+  bool fail_allocation = false;
+  const iree_allocator_t allocator = {
+      &fail_allocation, [](void* self, iree_allocator_command_t command,
+                           const void* parameters, void** pointer) {
+        if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+            *static_cast<bool*>(self)) {
+          return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+        }
+        const auto system = iree_allocator_system();
+        return system.ctl(system.self, command, parameters, pointer);
+      }};
+  loom_serve_finite_service_t* service = nullptr;
+  IREE_ASSERT_OK(loom_serve_finite_service_allocate(
+      host_, models_[0], loom_serve_decision_protocol(), IREE_SV("decisions"),
+      1, 0, 0, nullptr, allocator, &service));
+  std::unique_ptr<loom_serve_finite_service_t,
+                  decltype(&loom_serve_finite_service_free)>
+      owner(service, loom_serve_finite_service_free);
+  const auto http = loom_serve_finite_http_interface(service);
+  fail_allocation = true;
+  const int client = Send(kNoul);
+  const loom_serve_http_request_t* request = nullptr;
+  loom_serve_http_connection_t* connection = nullptr;
+  IREE_ASSERT_OK(http_.TakeRequest(client, &connection, &request));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        http.accept(http.runtime.self, connection, request, 0));
+  std::string response;
+  IREE_ASSERT_OK(http_.Read(client, /*allow_empty=*/true, &response));
+  EXPECT_TRUE(response.empty());
+  const auto& counters = *http.telemetry.counters;
+  EXPECT_EQ(counters.requests, 1u);
+  EXPECT_EQ(counters.failed, 1u);
+  EXPECT_EQ(counters.rejected, 0u);
+  EXPECT_EQ(counters.cancelled, 0u);
+  EXPECT_FALSE(http.runtime.vtable->is_pending(http.runtime.self));
 }
 
 TEST_F(SourceDecisionServiceTest, NativeAndHttpShareOneCohort) {

@@ -933,7 +933,7 @@ loom_cc_library(
         ":model",
         ":sequence",
         "//loom/src/loom/serve/runtime/host:clock",
-        "//loom/src/loom/serve/service:inspection",
+        "//loom/src/loom/service:inspection",
         "//loom/src/loom/service/telemetry:record",
         "//runtime/src/iree/base",
         "//runtime/src/iree/tokenizer",

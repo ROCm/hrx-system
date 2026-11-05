@@ -215,12 +215,12 @@ loom_serve_registered_model_t* loom_serve_registry_at(
   return &registry->models[index];
 }
 
-loom_serve_service_snapshot_t loom_serve_registry_snapshot(
+loom_service_snapshot_t loom_serve_registry_snapshot(
     const loom_serve_registered_model_t* model) {
   return model->phase == LOOM_SERVE_REGISTRATION_READY
              ? model->service.snapshot(model->service.runtime.self)
-             : (loom_serve_service_snapshot_t){
-                   .phase = loom_serve_registry_phase(model)};
+             : (loom_service_snapshot_t){.phase =
+                                             loom_serve_registry_phase(model)};
 }
 
 static iree_status_t loom_serve_registry_find_admission(
@@ -611,7 +611,7 @@ loom_runtime_service_flags_t loom_serve_registry_service_flags(
     return LOOM_RUNTIME_SERVICE_FLAG_STOPPING;
   }
   if (model->removal == LOOM_SERVE_REMOVAL_DRAIN) {
-    const loom_serve_service_snapshot_t snapshot =
+    const loom_service_snapshot_t snapshot =
         model->service.snapshot(model->service.runtime.self);
     if (!snapshot.queued_requests && !snapshot.active_requests &&
         !model->tokenizer_count) {
@@ -788,7 +788,7 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
       (model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_WAITING ||
        model->parameter_operation ==
            LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING)) {
-    const loom_serve_service_snapshot_t snapshot =
+    const loom_service_snapshot_t snapshot =
         model->service.snapshot(model->service.runtime.self);
     if (model->removal || !iree_status_is_ok(model->status) ||
         (!snapshot.queued_requests && !snapshot.active_requests &&
@@ -828,7 +828,7 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
   if (model->phase == LOOM_SERVE_REGISTRATION_READY &&
       (model->removal || !iree_status_is_ok(model->status)) &&
       model->parameter_operation == LOOM_SERVE_PARAMETER_OPERATION_NONE) {
-    const loom_serve_service_snapshot_t snapshot =
+    const loom_service_snapshot_t snapshot =
         model->service.snapshot(model->service.runtime.self);
     if (!snapshot.queued_requests && !snapshot.active_requests &&
         !model->tokenizer_count && !model->held_count &&
@@ -844,7 +844,7 @@ iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
   if (model->phase == LOOM_SERVE_REGISTRATION_READY &&
       model->parameter_operation ==
           LOOM_SERVE_PARAMETER_OPERATION_DEACTIVATING) {
-    const loom_serve_service_snapshot_t snapshot =
+    const loom_service_snapshot_t snapshot =
         model->service.snapshot(model->service.runtime.self);
     if (!snapshot.queued_requests && !snapshot.active_requests &&
         !model->service.runtime.vtable->is_active(

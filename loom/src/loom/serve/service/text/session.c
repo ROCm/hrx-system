@@ -102,9 +102,9 @@ void loom_serve_text_session_deinitialize(loom_serve_text_session_t* session) {
   memset(session, 0, sizeof(*session));
 }
 
-loom_serve_http_request_snapshot_t loom_serve_text_session_request_snapshot(
+loom_service_request_snapshot_t loom_serve_text_session_request_snapshot(
     const loom_serve_text_session_t* session) {
-  return (loom_serve_http_request_snapshot_t){
+  return (loom_service_request_snapshot_t){
       .id = session->request.consumer.self ? session->lifetime.serial : 0,
       .session = session->lifetime.id,
       .phase = "active",

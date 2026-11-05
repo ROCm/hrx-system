@@ -148,8 +148,7 @@ static iree_status_t loom_serve_observation_model(
     const loom_serve_registered_model_t* model, iree_host_size_t index,
     iree_string_builder_t* output) {
   const loom_serve_service_t* service = &model->service;
-  const loom_serve_service_snapshot_t snapshot =
-      loom_serve_registry_snapshot(model);
+  const loom_service_snapshot_t snapshot = loom_serve_registry_snapshot(model);
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, "{\"slot\":%zu,\"incarnation\":\"%" PRIu64 "\",\"name\":", index,
       model->incarnation));

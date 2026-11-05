@@ -23,6 +23,7 @@
 #include "loom/serve/server/http/tokenization.h"
 #include "loom/serve/server/http/variants.h"
 #include "loom/serve/server/maintenance.h"
+#include "loom/serve/service/inspection.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/service/reasoning.h"
 #include "loom/serve/transport/http/multipart.h"
@@ -425,7 +426,7 @@ static iree_status_t loom_serve_router_model(
 
 static const char* loom_serve_router_admission_phase(
     const loom_serve_registered_model_t* state,
-    const loom_serve_service_snapshot_t* snapshot) {
+    const loom_service_snapshot_t* snapshot) {
   if (state->removal) {
     return "removing";
   }
@@ -685,7 +686,7 @@ static iree_status_t loom_serve_router_describe_service(
       IREE_RETURN_IF_ERROR(
           loom_serve_router_describe_parameters(admission, output));
     }
-    const loom_serve_service_snapshot_t state =
+    const loom_service_snapshot_t state =
         loom_serve_registry_snapshot(admission);
     IREE_RETURN_IF_ERROR(
         iree_string_builder_append_cstring(output, ",\"status\":{\"phase\":"));
@@ -1149,7 +1150,7 @@ static iree_status_t loom_serve_router_inspect(
         IREE_SV("model has no live service; inspect /v1/status"),
         &router->output);
   }
-  const loom_serve_http_inspection_t* inspection = &model->service.inspection;
+  const loom_service_inspection_t* inspection = &model->service.inspection;
   if (kind == LOOM_SERVE_HTTP_INSPECT_REQUESTS ? !inspection->request_at
                                                : !inspection->session_at) {
     return loom_serve_http_response_reject(

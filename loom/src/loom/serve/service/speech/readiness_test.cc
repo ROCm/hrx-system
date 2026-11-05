@@ -277,13 +277,12 @@ class SpeechReadinessTest : public ::testing::Test {
       auto* test = static_cast<SpeechReadinessTest*>(self);
       return test->actual_.snapshot(test->actual_.runtime.self);
     };
-    wrapped.inspection.request_at =
-        [](void* self, iree_host_size_t index,
-           loom_serve_http_request_snapshot_t* out) {
-          auto* test = static_cast<SpeechReadinessTest*>(self);
-          return test->actual_.inspection.request_at(test->actual_.runtime.self,
-                                                     index, out);
-        };
+    wrapped.inspection.request_at = [](void* self, iree_host_size_t index,
+                                       loom_service_request_snapshot_t* out) {
+      auto* test = static_cast<SpeechReadinessTest*>(self);
+      return test->actual_.inspection.request_at(test->actual_.runtime.self,
+                                                 index, out);
+    };
     if (start) {
       StartRouter();
     } else {

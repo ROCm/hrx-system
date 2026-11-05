@@ -92,6 +92,10 @@ loom_cc_library(
     deps = [
         ":consumer",
         ":protocol",
+        ":service",
+        "//loom/src/loom/serve/service",
+        "//loom/src/loom/serve/service:kind",
+        "//loom/src/loom/serve/transport/http:request",
         "//loom/src/loom/serve/transport/http:server",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
@@ -119,21 +123,20 @@ loom_cc_library(
     deps = [
         ":call",
         ":consumer",
-        ":http",
         ":model",
         ":protocol",
         ":result",
+        "//loom/src/loom/runtime:service",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/telemetry:stream",
         "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/runtime/host:timer",
         "//loom/src/loom/serve/runtime/parameter:residency",
-        "//loom/src/loom/serve/service",
         "//loom/src/loom/serve/service:execution_reconfiguration",
         "//loom/src/loom/serve/service:kind",
-        "//loom/src/loom/serve/transport/http:request",
-        "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/serve/service:reconfiguration",
+        "//loom/src/loom/service:inspection",
         "//loom/src/loom/service/telemetry:latency",
         "//loom/src/loom/service/telemetry:record",
         "//loom/src/loom/service/telemetry:tracing",
@@ -168,14 +171,16 @@ loom_cc_library(
 
 iree_assert_dependency_boundary(
     name = "registration_has_no_catalogue_dependency",
+    forbidden_dependencies = ["//loom/src/loom/serve/service:service"],
     forbidden_subtrees = [
         "//loom/src/loom/serve/server/...",
         "//loom/src/loom/serve/service/image/...",
         "//loom/src/loom/serve/service/recognition/...",
         "//loom/src/loom/serve/service/speech/...",
         "//loom/src/loom/serve/service/text/...",
+        "//loom/src/loom/serve/transport/http/...",
     ],
-    message = "Finite preparation and retirement must not depend on a server catalogue or sibling service implementation",
+    message = "Finite preparation and retirement must not depend on HTTP, a server catalogue, or sibling service implementations",
     target = ":registration",
 )
 

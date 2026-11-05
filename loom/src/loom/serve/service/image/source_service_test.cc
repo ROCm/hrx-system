@@ -542,7 +542,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     EXPECT_EQ(Read(clients[3].release()).find("HTTP/1.1 400"), 0u);
     // The later compatible item overtakes the incompatible geometry without
     // changing either item's private palette or terminal image dimensions.
-    loom_serve_http_request_snapshot_t request;
+    loom_service_request_snapshot_t request;
     ASSERT_TRUE(
         interface.inspection.request_at(interface.runtime.self, 0, &request));
     EXPECT_EQ(request.id, 2u);

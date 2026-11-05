@@ -47,6 +47,8 @@ loom_cc_library(
         "//loom/src/loom/serve/server:model_registration",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/serve/server:router",
+        "//loom/src/loom/serve/service",
+        "//loom/src/loom/serve/service/finite:http",
         "//loom/src/loom/serve/service/finite:model",
         "//loom/src/loom/serve/service/finite:service",
         "//loom/src/loom/serve/service/finite/embedding:protocol",
@@ -185,6 +187,7 @@ loom_cc_library(
     deps = [
         ":protocol",
         ":source_service_fixture",
+        "//loom/src/loom/serve/service/finite:http",
         "//loom/src/loom/serve/testing:model",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:temp_file",

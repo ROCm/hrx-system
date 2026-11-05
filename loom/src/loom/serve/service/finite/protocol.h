@@ -24,12 +24,10 @@ typedef struct loom_serve_finite_request_t {
 // Native modality wiring for the shared finite cohort service, not a model
 // plugin interface. Source programs still own preparation and learned math.
 typedef struct loom_serve_finite_protocol_t {
-  // Native finite protocol role, including its canonical POST endpoint.
+  // Native finite semantic role, independent of transport selection.
   loom_serve_model_kind_t kind;
   // Client-visible output modality with static storage.
   iree_string_view_t output_modality;
-  // Static HTTP status for malformed schema or source input rejection.
-  const char* invalid_status;
   // Complete concrete request size, including its initial finite request
   // member.
   iree_host_size_t request_size;

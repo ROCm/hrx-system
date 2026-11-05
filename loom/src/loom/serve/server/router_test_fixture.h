@@ -344,7 +344,7 @@ struct loom_serve_test_model_service_t {
     return !service->wait_for_shared_activity && !service->pending.empty();
   }
 
-  static loom_serve_service_snapshot_t Snapshot(void* self) {
+  static loom_service_snapshot_t Snapshot(void* self) {
     auto* service = static_cast<loom_serve_test_model_service_t*>(self);
     std::lock_guard<std::mutex> lock(service->mutex);
     const size_t queued = service->pending.size() - service->waiting;

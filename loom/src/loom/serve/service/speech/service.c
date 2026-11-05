@@ -1176,10 +1176,10 @@ static const char* loom_serve_speech_row_phase(
   return speech_row_phases[row->phase];
 }
 
-static loom_serve_service_snapshot_t loom_serve_speech_snapshot(void* self) {
+static loom_service_snapshot_t loom_serve_speech_snapshot(void* self) {
   const loom_serve_speech_service_t* service = self;
   const iree_time_t now = iree_time_now();
-  loom_serve_service_snapshot_t snapshot = {
+  loom_service_snapshot_t snapshot = {
       .phase = speech_phases[service->phase],
       .queued_requests = service->pending_count,
       .oldest_queued_age = service->pending_count
@@ -1209,7 +1209,7 @@ static loom_serve_service_snapshot_t loom_serve_speech_snapshot(void* self) {
 
 static bool loom_serve_speech_request_at(
     void* self, iree_host_size_t index,
-    loom_serve_http_request_snapshot_t* out_snapshot) {
+    loom_service_request_snapshot_t* out_snapshot) {
   const loom_serve_speech_service_t* service = self;
   const loom_serve_speech_job_t* job = NULL;
   const char* phase = "queued";
@@ -1237,7 +1237,7 @@ static bool loom_serve_speech_request_at(
   if (!job) {
     return false;
   }
-  *out_snapshot = (loom_serve_http_request_snapshot_t){
+  *out_snapshot = (loom_service_request_snapshot_t){
       .id = job->id,
       .phase = phase,
       .arrival_time = job->arrival_time,
@@ -1246,8 +1246,7 @@ static bool loom_serve_speech_request_at(
 }
 
 static void loom_serve_speech_heartbeat(loom_serve_speech_service_t* service) {
-  const loom_serve_service_snapshot_t state =
-      loom_serve_speech_snapshot(service);
+  const loom_service_snapshot_t state = loom_serve_speech_snapshot(service);
   loom_runtime_telemetry_record_t record = {
       .time_ns = iree_time_now(), .event = &LOOM_SERVICE_TELEMETRY_SNAPSHOT};
   loom_service_telemetry_snapshot_record_t telemetry_payload = {

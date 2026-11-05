@@ -11,6 +11,7 @@
 #include "loom/serve/service/finite/component.h"
 #include "loom/serve/service/finite/decision/protocol.h"
 #include "loom/serve/service/finite/embedding/protocol.h"
+#include "loom/serve/service/finite/http.h"
 #include "loom/serve/service/finite/model.h"
 #include "loom/serve/service/finite/registration.h"
 #include "loom/serve/service/finite/service.h"
@@ -47,7 +48,7 @@ static iree_status_t loom_serve_model_finite_prepare(
           : 0,
       out_complete, &service, out_report);
   if (iree_status_is_ok(status) && *out_complete) {
-    *out_service = loom_serve_finite_service_interface(service);
+    *out_service = loom_serve_finite_http_interface(service);
   }
   return status;
 }

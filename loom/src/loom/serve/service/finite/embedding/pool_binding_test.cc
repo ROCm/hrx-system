@@ -10,6 +10,7 @@
 #include "iree/testing/temp_file.h"
 #include "loom/serve/service/finite/embedding/protocol.h"
 #include "loom/serve/service/finite/embedding/source_service_test_fixture.h"
+#include "loom/serve/service/finite/http.h"
 #include "loom/serve/testing/model.h"
 
 namespace loom_serve::testing::embedding {
@@ -36,7 +37,7 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
     IREE_ASSERT_OK(loom_serve_finite_service_allocate(
         host_, model_, loom_serve_embedding_protocol(), IREE_SV("fixture"), 16,
         16, 0, nullptr, host_allocator_, &service_));
-    interface_ = loom_serve_finite_service_interface(service_);
+    interface_ = loom_serve_finite_http_interface(service_);
     EXPECT_EQ(interface_.runtime.capacity_domain,
               loom_serve_pool_residency_cache(isolated_));
   }

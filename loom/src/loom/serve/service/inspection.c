@@ -44,7 +44,7 @@ static iree_status_t loom_serve_inspection_identity(
 }
 
 static iree_status_t loom_serve_inspection_request(
-    const loom_serve_http_request_snapshot_t* state, iree_time_t now,
+    const loom_service_request_snapshot_t* state, iree_time_t now,
     iree_string_builder_t* output) {
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, "{\"id\":%" PRIu64 ",\"phase\":", state->id));
@@ -61,7 +61,7 @@ static iree_status_t loom_serve_inspection_request(
 }
 
 static iree_status_t loom_serve_inspection_session(
-    const loom_serve_http_session_snapshot_t* state,
+    const loom_service_session_snapshot_t* state,
     iree_string_builder_t* output) {
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, "{\"id\":%" PRIu64 ",\"name\":", state->id));
@@ -83,7 +83,7 @@ static iree_status_t loom_serve_inspection_session(
 }
 
 iree_status_t loom_serve_http_inspection_format(
-    const loom_serve_http_inspection_t* inspection, void* self,
+    const loom_service_inspection_t* inspection, void* self,
     loom_serve_http_inspection_kind_t kind, iree_host_size_t offset,
     iree_time_t now, iree_string_builder_t* output) {
   IREE_RETURN_IF_ERROR(
@@ -93,8 +93,8 @@ iree_status_t loom_serve_http_inspection_format(
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t count = 0; count < 64 && iree_status_is_ok(status);
        ++count, ++offset) {
-    loom_serve_http_request_snapshot_t request = {0};
-    loom_serve_http_session_snapshot_t session = {0};
+    loom_service_request_snapshot_t request = {0};
+    loom_service_session_snapshot_t session = {0};
     if (!(kind == LOOM_SERVE_HTTP_INSPECT_REQUESTS
               ? inspection->request_at(self, offset, &request)
               : inspection->session_at(self, offset, &session))) {

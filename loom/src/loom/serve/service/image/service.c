@@ -973,10 +973,10 @@ static iree_status_t loom_serve_image_sample(
   return loom_service_image_sample_totals(&service->telemetry.totals, sink);
 }
 
-static loom_serve_service_snapshot_t loom_serve_image_snapshot(void* self) {
+static loom_service_snapshot_t loom_serve_image_snapshot(void* self) {
   const loom_serve_image_service_t* service = self;
   const iree_time_t now = iree_time_now();
-  return (loom_serve_service_snapshot_t){
+  return (loom_service_snapshot_t){
       .phase = image_phases[service->phase],
       .queued_requests = service->pending_count,
       .active_requests = service->cohort.count - service->cohort.next,
@@ -990,7 +990,7 @@ static loom_serve_service_snapshot_t loom_serve_image_snapshot(void* self) {
 
 static bool loom_serve_image_request_at(
     void* self, iree_host_size_t index,
-    loom_serve_http_request_snapshot_t* out_snapshot) {
+    loom_service_request_snapshot_t* out_snapshot) {
   const loom_serve_image_service_t* service = self;
   const loom_serve_image_job_t* job = NULL;
   const char* phase = "queued";
@@ -1004,7 +1004,7 @@ static bool loom_serve_image_request_at(
   } else {
     return false;
   }
-  *out_snapshot = (loom_serve_http_request_snapshot_t){
+  *out_snapshot = (loom_service_request_snapshot_t){
       .id = job->id,
       .phase = phase,
       .arrival_time = job->arrival_time,
@@ -1015,8 +1015,7 @@ static bool loom_serve_image_request_at(
 // Heartbeat work is a scheduler turn, woken by an asynchronous timer. These
 // phases describe ownership, not individual completed device dispatches.
 static void loom_serve_image_heartbeat(loom_serve_image_service_t* service) {
-  const loom_serve_service_snapshot_t state =
-      loom_serve_image_snapshot(service);
+  const loom_service_snapshot_t state = loom_serve_image_snapshot(service);
   loom_runtime_telemetry_record_t record = {
       .time_ns = iree_time_now(),
       .request = loom_serve_image_active(service),

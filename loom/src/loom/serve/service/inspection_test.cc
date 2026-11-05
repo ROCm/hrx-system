@@ -15,7 +15,7 @@ namespace {
 
 struct loom_serve_test_inspection_inventory_t {
   static bool RequestAt(void* self, iree_host_size_t index,
-                        loom_serve_http_request_snapshot_t* out_snapshot) {
+                        loom_service_request_snapshot_t* out_snapshot) {
     auto* inventory =
         static_cast<loom_serve_test_inspection_inventory_t*>(self);
     ++inventory->queries;
@@ -32,7 +32,7 @@ struct loom_serve_test_inspection_inventory_t {
   }
 
   static bool SessionAt(void* self, iree_host_size_t index,
-                        loom_serve_http_session_snapshot_t* out_snapshot) {
+                        loom_service_session_snapshot_t* out_snapshot) {
     auto* inventory =
         static_cast<loom_serve_test_inspection_inventory_t*>(self);
     ++inventory->queries;
@@ -71,7 +71,7 @@ TEST(InspectionTest, RejectsSignsEmptyAndOverflowOffsets) {
 
 TEST(InspectionTest, BoundsEmptySlotsAndFormatsPublishedMetadata) {
   loom_serve_test_inspection_inventory_t inventory;
-  const loom_serve_http_inspection_t inspection = {
+  const loom_service_inspection_t inspection = {
       .request_at = loom_serve_test_inspection_inventory_t::RequestAt,
       .session_at = loom_serve_test_inspection_inventory_t::SessionAt,
   };
@@ -111,7 +111,7 @@ TEST(InspectionTest, BoundsEmptySlotsAndFormatsPublishedMetadata) {
 
 TEST(InspectionTest, FormattingFailureStopsQuerying) {
   loom_serve_test_inspection_inventory_t inventory;
-  const loom_serve_http_inspection_t inspection = {
+  const loom_service_inspection_t inspection = {
       .session_at = loom_serve_test_inspection_inventory_t::SessionAt,
   };
   char bytes[16];

@@ -681,7 +681,6 @@ const loom_serve_finite_protocol_t* loom_serve_decision_protocol(void) {
   static const loom_serve_finite_protocol_t protocol = {
       .kind = LOOM_SERVE_MODEL_KIND_DECISION,
       .output_modality = IREE_SVL("decision"),
-      .invalid_status = "422 Unprocessable Entity",
       .request_size = sizeof(loom_serve_decision_request_t),
       .initialize = loom_serve_decision_initialize,
       .deinitialize = loom_serve_decision_deinitialize,

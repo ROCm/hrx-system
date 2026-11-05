@@ -532,14 +532,14 @@ class SourceTextServiceTest : public ::testing::Test {
     EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 1u);
     // Metadata stays owner-readable while preparation borrows the second
     // prompt and the device still owns the first epoch's rows.
-    loom_serve_http_request_snapshot_t queued_snapshot = {};
+    loom_service_request_snapshot_t queued_snapshot = {};
     ASSERT_TRUE(interface.inspection.request_at(interface.runtime.self, 0,
                                                 &queued_snapshot));
     EXPECT_EQ(queued_snapshot.id, 2u);
     EXPECT_STREQ(queued_snapshot.phase, "queued");
     uint64_t active_requests = 0;
     for (iree_host_size_t i = 1;; ++i) {
-      loom_serve_http_request_snapshot_t snapshot = {};
+      loom_service_request_snapshot_t snapshot = {};
       if (!interface.inspection.request_at(interface.runtime.self, i,
                                            &snapshot)) {
         break;

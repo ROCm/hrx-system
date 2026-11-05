@@ -678,10 +678,9 @@ static bool loom_serve_recognition_is_pending(void* self) {
   return loom_serve_recognition_is_active(service);
 }
 
-static loom_serve_service_snapshot_t loom_serve_recognition_snapshot(
-    void* self) {
+static loom_service_snapshot_t loom_serve_recognition_snapshot(void* self) {
   loom_serve_recognition_service_t* service = self;
-  loom_serve_service_snapshot_t snapshot = {.phase = "idle"};
+  loom_service_snapshot_t snapshot = {.phase = "idle"};
   const iree_time_t now = iree_time_now();
   for (iree_host_size_t i = 0; i < service->capacity; ++i) {
     const loom_serve_recognition_job_t* row = &service->rows[i];

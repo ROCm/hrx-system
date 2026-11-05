@@ -12,11 +12,11 @@
 #include "loom/runtime/telemetry/sample.h"
 #include "loom/runtime/telemetry/stream.h"
 #include "loom/runtime/wake.h"
-#include "loom/serve/service/inspection.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/service/reasoning.h"
 #include "loom/serve/service/reconfiguration.h"
 #include "loom/serve/transport/http/server.h"
+#include "loom/service/inspection.h"
 #include "loom/service/telemetry/latency.h"
 #include "loom/service/telemetry/record.h"
 
@@ -40,24 +40,6 @@ typedef struct loom_serve_text_checkpoint_request_t
 typedef struct loom_serve_text_checkpoint_control_t
     loom_serve_text_checkpoint_control_t;
 typedef struct loom_serve_text_stream_t loom_serve_text_stream_t;
-
-// Copied scheduler ownership, not hardware utilization. Finite active requests
-// include preparation, capacity waiting and encoding; text active requests
-// hold admitted rows. No request content or borrowed mutable buffers escape.
-typedef struct loom_serve_service_snapshot_t {
-  // Modality-owned phase label with process lifetime.
-  const char* phase;
-  // Requests waiting outside the active invocation/cohort.
-  iree_host_size_t queued_requests;
-  // Requests retained by the active invocation/cohort, including reset peers
-  // whose accepted work still has to retire.
-  iree_host_size_t active_requests;
-  // Nanoseconds since the oldest queued request was accepted; zero if empty.
-  iree_duration_t oldest_queued_age;
-  // Nanoseconds since the oldest active request was accepted, including prior
-  // queue residence; zero if empty. This is ownership age, not device time.
-  iree_duration_t oldest_active_age;
-} loom_serve_service_snapshot_t;
 
 // One named service borrowing a model on serialized task-owner turns. Network
 // progress is independent; these callbacks never run concurrently. Names are
@@ -137,10 +119,10 @@ typedef struct loom_serve_service_t {
   } capabilities;
   // Copies published ownership on the serialized owner without invoking model
   // work or reading state still borrowed by a CPU/device task.
-  loom_serve_service_snapshot_t (*snapshot)(void* self);
+  loom_service_snapshot_t (*snapshot)(void* self);
   // Optional bounded metadata queries on the same serialized owner. No task
   // payload or model borrow escapes into an observation response.
-  loom_serve_http_inspection_t inspection;
+  loom_service_inspection_t inspection;
   // Optional service-owned executable pool and preferred-choice policy. Its
   // producers and queued selections participate in is_pending retirement.
   loom_serve_reconfiguration_t reconfiguration;

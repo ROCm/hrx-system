@@ -52,7 +52,21 @@ class NativeDecisionServiceTest : public ::testing::Test {
     };
     IREE_ASSERT_OK(AllocateRegistration(model_options));
     IREE_ASSERT_OK(Prepare(0));
-    interface_ = loom_serve_finite_service_interface(service_);
+    const auto finite = loom_serve_finite_service_interface(service_);
+    interface_ = {
+        .name = finite.name,
+        .runtime = finite.runtime,
+        .kind = finite.kind,
+        .snapshot = finite.snapshot,
+        .inspection = finite.inspection,
+        .reconfiguration = finite.reconfiguration,
+        .telemetry =
+            {
+                .stream = finite.telemetry.stream,
+                .counters = finite.telemetry.counters,
+                .latency = finite.telemetry.latency,
+            },
+    };
     loom_serve_registry_t* registry = nullptr;
     IREE_ASSERT_OK(loom_serve_registry_allocate(
         1, &interface_, 0, {}, iree_allocator_system(), &registry));

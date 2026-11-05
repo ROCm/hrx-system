@@ -75,7 +75,6 @@ loom_cc_library(
     name = "service",
     hdrs = ["service.h"],
     deps = [
-        ":inspection",
         ":kind",
         ":reasoning",
         ":reconfiguration",
@@ -84,6 +83,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/telemetry:sample",
         "//loom/src/loom/runtime/telemetry:stream",
         "//loom/src/loom/serve/transport/http:server",
+        "//loom/src/loom/service:inspection",
         "//loom/src/loom/service/telemetry:latency",
         "//loom/src/loom/service/telemetry:record",
         "//runtime/src/iree/base",
@@ -211,6 +211,7 @@ loom_cc_library(
     hdrs = ["inspection.h"],
     deps = [
         "//loom/src/loom/serve/telemetry:record",
+        "//loom/src/loom/service:inspection",
         "//loom/src/loom/service/telemetry:record",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",

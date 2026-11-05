@@ -20,6 +20,7 @@
 #include "loom/serve/runtime/program/compilation.h"
 #include "loom/serve/service/finite/model.h"
 #include "loom/serve/service/finite/service.h"
+#include "loom/serve/service/service.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model_wait.h"
 #include "loom/serve/transport/http/listener.h"

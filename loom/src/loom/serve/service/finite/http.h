@@ -6,24 +6,19 @@
 #ifndef LOOM_SERVE_SERVICE_FINITE_HTTP_H_
 #define LOOM_SERVE_SERVICE_FINITE_HTTP_H_
 
-#include "loom/serve/service/finite/consumer.h"
-#include "loom/serve/transport/http/server.h"
+#include "loom/serve/service/finite/service.h"
+#include "loom/serve/service/service.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Moves the connection claim into a receipt. Its request body remains borrowed
-// through consumer.end, including peer failure during CPU preparation.
-loom_serve_finite_consumer_t loom_serve_finite_http_consumer(
-    loom_serve_http_connection_t* connection);
-
-// Consumes an unadmitted connection claim with an encoded request rejection.
-// scratch is reusable caller-owned storage, reset before encoding.
-iree_status_t loom_serve_finite_http_reject(
-    loom_serve_http_connection_t* connection, const char* code,
-    const char* type, iree_string_view_t message,
-    iree_string_builder_t* scratch, bool* out_delivered);
+// Adds HTTP routing and request delivery to the real finite service. Copies
+// borrowed capabilities without allocating adapter state. The service remains
+// owned by its registration; accepted connections retain their input through
+// the same source/CPU retirement as native requests.
+loom_serve_service_t loom_serve_finite_http_interface(
+    loom_serve_finite_service_t* service);
 
 #ifdef __cplusplus
 }  // extern "C"

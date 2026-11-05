@@ -30,7 +30,7 @@ class ObservationTest : public ::testing::Test {
         .snapshot =
             [](void* self) {
               auto* test = static_cast<ObservationTest*>(self);
-              return loom_serve_service_snapshot_t{
+              return loom_service_snapshot_t{
                   .phase = "idle",
                   .active_requests = test->active_,
               };

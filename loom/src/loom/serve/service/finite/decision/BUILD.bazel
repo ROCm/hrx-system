@@ -49,6 +49,7 @@ loom_cc_library(
         "//loom/src/loom/serve/server:resources",
         "//loom/src/loom/serve/server:router",
         "//loom/src/loom/serve/service/finite:call",
+        "//loom/src/loom/serve/service/finite:http",
         "//loom/src/loom/serve/service/finite:model",
         "//loom/src/loom/serve/service/finite:registration",
         "//loom/src/loom/serve/service/finite:result",

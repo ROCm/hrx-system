@@ -13,7 +13,6 @@
 #include "loom/runtime/wake.h"
 #include "loom/serve/runtime/host/timer.h"
 #include "loom/serve/service/execution_reconfiguration.h"
-#include "loom/serve/service/finite/http.h"
 #include "loom/serve/service/finite/result.h"
 #include "loom/serve/service/kind.h"
 #include "loom/service/telemetry/record.h"
@@ -43,7 +42,7 @@ typedef struct loom_serve_finite_job_t {
   iree_host_size_t result_index;
   // Borrowed row views populated only during result encoding.
   iree_const_byte_span_t* rows;
-  // Owned complete response, copied into transport before recycling the cohort.
+  // Owned encoded response, transferred to the consumer before job retirement.
   iree_string_builder_t response;
 } loom_serve_finite_job_t;
 
@@ -70,7 +69,7 @@ struct loom_serve_finite_service_t {
   loom_serve_execution_reconfiguration_t* reconfiguration;
   // Immutable native modality contract, borrowed through service lifetime.
   const loom_serve_finite_protocol_t* protocol;
-  // Borrowed catalog route identifier.
+  // Borrowed deployment identifier.
   iree_string_view_t name;
   // Bound on total accepted requests across all ownership phases.
   iree_host_size_t capacity;
@@ -107,7 +106,7 @@ struct loom_serve_finite_service_t {
   struct {
     // Joins final callback accesses with owner collection/destruction.
     iree_slim_mutex_t mutex;
-    // Borrowed common router wake interface.
+    // Borrowed serialized-owner wake interface.
     loom_runtime_wake_callback_t observer;
     // CPU release or device readiness awaiting collection.
     bool ready;
@@ -129,8 +128,6 @@ struct loom_serve_finite_service_t {
   } device;
   // Independent heartbeat readiness, drained before service destruction.
   loom_serve_timer_t timer;
-  // Scheduler-side error response storage, disjoint from CPU job outputs.
-  iree_string_builder_t response;
   // Producer-owned observation; neither counters nor publication wait on sinks.
   struct {
     // Bounded typed event storage with independent reader cursors.
@@ -202,16 +199,10 @@ static void loom_serve_finite_batch_event(
   loom_runtime_telemetry_stream_append(service->telemetry.stream, &record);
 }
 
-// Rejections before job allocation still have complete request lifetimes.
-static void loom_serve_finite_decline(loom_serve_finite_service_t* service,
-                                      uint64_t id, iree_time_t arrival_time,
-                                      loom_serve_http_connection_t* connection,
-                                      const char* code,
-                                      iree_string_view_t message) {
-  bool delivered = false;
-  iree_status_t status =
-      loom_serve_finite_http_reject(connection, code, "finite_request_error",
-                                    message, &service->response, &delivered);
+void loom_serve_finite_service_record_decline(
+    loom_serve_finite_service_t* service, iree_time_t arrival_time,
+    bool delivered, const iree_status_t status) {
+  const uint64_t id = loom_serve_finite_request_begin(service, arrival_time);
   if (!iree_status_is_ok(status)) {
     loom_serve_finite_error(service, id, status);
   }
@@ -221,7 +212,6 @@ static void loom_serve_finite_decline(loom_serve_finite_service_t* service,
                                 : delivered ? LOOM_SERVICE_TELEMETRY_REJECTED
                                             : LOOM_SERVICE_TELEMETRY_CANCELLED,
                                 status);
-  iree_status_free(status);
 }
 
 static void loom_serve_finite_job_destroy(loom_serve_finite_service_t* service,
@@ -518,10 +508,10 @@ static bool loom_serve_finite_is_pending(void* self) {
          loom_serve_timer_is_pending(&service->timer);
 }
 
-static loom_serve_service_snapshot_t loom_serve_finite_snapshot(void* self) {
+static loom_service_snapshot_t loom_serve_finite_snapshot(void* self) {
   const loom_serve_finite_service_t* service = self;
   const iree_time_t now = iree_time_now();
-  return (loom_serve_service_snapshot_t){
+  return (loom_service_snapshot_t){
       .phase = finite_phases[service->phase],
       .queued_requests = service->pending_count,
       .active_requests = service->cohort_count,
@@ -546,7 +536,7 @@ static void loom_serve_finite_heartbeat(loom_serve_finite_service_t* service) {
 
 static bool loom_serve_finite_request_at(
     void* self, iree_host_size_t index,
-    loom_serve_http_request_snapshot_t* out_snapshot) {
+    loom_service_request_snapshot_t* out_snapshot) {
   const loom_serve_finite_service_t* service = self;
   const loom_serve_finite_job_t* job = NULL;
   const char* phase = "queued";
@@ -558,7 +548,7 @@ static bool loom_serve_finite_request_at(
   } else {
     return false;
   }
-  *out_snapshot = (loom_serve_http_request_snapshot_t){
+  *out_snapshot = (loom_service_request_snapshot_t){
       .id = job->id,
       .phase = phase,
       .arrival_time = job->arrival_time,
@@ -812,6 +802,37 @@ static iree_status_t loom_serve_finite_job_allocate(
   return iree_ok_status();
 }
 
+static void loom_serve_finite_job_admit(loom_serve_finite_service_t* service,
+                                        loom_serve_finite_job_t* job,
+                                        iree_string_view_t body,
+                                        iree_time_t arrival_time) {
+  job->arrival_time = arrival_time;
+  job->id = loom_serve_finite_request_begin(service, arrival_time);
+  job->body = body;
+  service->pending[service->pending_count++] = job;
+  ++service->count;
+}
+
+iree_status_t loom_serve_finite_service_try_accept(
+    loom_serve_finite_service_t* service, iree_string_view_t body,
+    iree_time_t arrival_time, loom_serve_finite_consumer_t consumer,
+    bool* out_accepted) {
+  *out_accepted = false;
+  if (service->stopping) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "finite service admission has stopped");
+  }
+  if (service->count == service->capacity) {
+    return iree_ok_status();
+  }
+  loom_serve_finite_job_t* job = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_finite_job_allocate(service, &job));
+  job->consumer = consumer;
+  loom_serve_finite_job_admit(service, job, body, arrival_time);
+  *out_accepted = true;
+  return iree_ok_status();
+}
+
 iree_status_t loom_serve_finite_service_try_open(
     loom_serve_finite_service_t* service, iree_string_builder_t* body,
     loom_serve_finite_output_format_t output_format,
@@ -829,68 +850,13 @@ iree_status_t loom_serve_finite_service_try_open(
   iree_status_t status = loom_serve_finite_call_allocate(
       body, output_format, service->host_allocator, out_call, &job->consumer);
   if (iree_status_is_ok(status)) {
-    job->arrival_time = iree_time_now();
-    job->id = loom_serve_finite_request_begin(service, job->arrival_time);
-    job->body = loom_serve_finite_call_body(*out_call);
-    service->pending[service->pending_count++] = job;
-    ++service->count;
+    loom_serve_finite_job_admit(
+        service, job, loom_serve_finite_call_body(*out_call), iree_time_now());
   } else {
     iree_string_builder_deinitialize(&job->response);
     iree_allocator_free(service->host_allocator, job);
   }
   return status;
-}
-
-static iree_status_t loom_serve_finite_accept(
-    void* self, loom_serve_http_connection_t* connection,
-    const loom_serve_http_request_t* request,
-    loom_runtime_service_flags_t flags) {
-  loom_serve_finite_service_t* service = self;
-  const iree_time_t arrival_time = iree_time_now();
-  const uint64_t id = loom_serve_finite_request_begin(service, arrival_time);
-  if (!iree_string_view_equal(request->method, IREE_SV("POST")) ||
-      !iree_string_view_equal(
-          request->target,
-          iree_make_cstring_view(
-              loom_serve_model_kind_endpoint(service->protocol->kind)))) {
-    loom_serve_finite_decline(service, id, arrival_time, connection,
-                              "404 Not Found",
-                              IREE_SV("unknown finite-result endpoint"));
-    return iree_ok_status();
-  }
-  iree_string_view_t content_type;
-  if (!loom_serve_http_request_lookup_header(request, IREE_SV("content-type"),
-                                             &content_type) ||
-      !(iree_string_view_equal_case(content_type,
-                                    IREE_SV("application/json")) ||
-        iree_string_view_equal_case(
-            content_type, IREE_SV("application/json; charset=utf-8")))) {
-    loom_serve_finite_decline(service, id, arrival_time, connection,
-                              "415 Unsupported Media Type",
-                              IREE_SV("Content-Type must be application/json"));
-    return iree_ok_status();
-  }
-  if (service->count == service->capacity) {
-    loom_serve_finite_decline(service, id, arrival_time, connection,
-                              "503 Service Unavailable",
-                              IREE_SV("finite admission queue is full"));
-    return iree_ok_status();
-  }
-  loom_serve_finite_job_t* job = NULL;
-  iree_status_t status = loom_serve_finite_job_allocate(service, &job);
-  if (!iree_status_is_ok(status)) {
-    loom_serve_http_connection_abort(connection);
-    loom_serve_finite_request_end(service, id, arrival_time, 0,
-                                  LOOM_SERVICE_TELEMETRY_FAILED, status);
-    return status;
-  }
-  ++service->count;
-  job->id = id;
-  job->arrival_time = arrival_time;
-  job->consumer = loom_serve_finite_http_consumer(connection);
-  job->body = request->body;
-  service->pending[service->pending_count++] = job;
-  return iree_ok_status();
 }
 
 static void loom_serve_finite_set_observer(
@@ -905,7 +871,7 @@ static void loom_serve_finite_set_observer(
                                                     observer);
 }
 
-loom_serve_service_t loom_serve_finite_service_interface(
+loom_serve_finite_service_interface_t loom_serve_finite_service_interface(
     loom_serve_finite_service_t* service) {
   static const loom_runtime_service_vtable_t vtable = {
       .set_observer = loom_serve_finite_set_observer,
@@ -913,21 +879,15 @@ loom_serve_service_t loom_serve_finite_service_interface(
       .is_active = loom_serve_finite_is_active,
       .advance = loom_serve_finite_advance,
   };
-  static const iree_string_view_t input_modalities[] = {IREE_SVL("text")};
-  return (loom_serve_service_t){
+  return (loom_serve_finite_service_interface_t){
       .name = service->name,
       .runtime = {.self = service,
                   .vtable = &vtable,
                   .capacity_domain = loom_serve_residency_cache(
                       loom_serve_finite_model_residency(service->model))},
-      .accept = loom_serve_finite_accept,
-      .tokenizer = loom_serve_finite_model_tokenizer(service->model),
       .kind = service->protocol->kind,
-      .endpoint = loom_serve_model_kind_endpoint(service->protocol->kind),
-      .capabilities =
-          {.input_modalities = {IREE_ARRAYSIZE(input_modalities),
-                                input_modalities},
-           .output_modalities = {1, &service->protocol->output_modality}},
+      .tokenizer = loom_serve_finite_model_tokenizer(service->model),
+      .output_modality = &service->protocol->output_modality,
       .snapshot = loom_serve_finite_snapshot,
       .inspection = {.request_at = loom_serve_finite_request_at},
       .reconfiguration = loom_serve_execution_reconfiguration_interface(
@@ -935,6 +895,11 @@ loom_serve_service_t loom_serve_finite_service_interface(
       .telemetry = {.stream = service->telemetry.stream,
                     .counters = &service->telemetry.counters,
                     .latency = &service->telemetry.latency}};
+}
+
+loom_serve_model_kind_t loom_serve_finite_service_kind(
+    const loom_serve_finite_service_t* service) {
+  return service->protocol->kind;
 }
 
 void loom_serve_finite_service_free(loom_serve_finite_service_t* service) {
@@ -953,7 +918,6 @@ void loom_serve_finite_service_free(loom_serve_finite_service_t* service) {
   iree_status_free(service->failure);
   loom_serve_execution_reconfiguration_free(service->reconfiguration);
   loom_serve_timer_deinitialize(&service->timer);
-  iree_string_builder_deinitialize(&service->response);
   iree_slim_mutex_deinitialize(&service->event.mutex);
   iree_allocator_free(service->host_allocator, service->pending);
   iree_allocator_free(service->host_allocator, service->cohort);
@@ -993,7 +957,6 @@ iree_status_t loom_serve_finite_service_allocate(
   service->executor = loom_serve_host_executor(host);
   iree_slim_mutex_initialize(&service->event.mutex);
   loom_serve_timer_initialize(&service->timer);
-  iree_string_builder_initialize(host_allocator, &service->response);
   iree_status_t status = iree_allocator_malloc_array(host_allocator, capacity,
                                                      sizeof(*service->pending),
                                                      (void**)&service->pending);

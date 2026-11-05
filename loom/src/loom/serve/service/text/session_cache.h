@@ -43,7 +43,7 @@ typedef struct loom_serve_text_session_cache_t {
 bool loom_serve_text_session_cache_inspect(
     const loom_serve_text_session_cache_t* cache, iree_host_size_t row_count,
     loom_serve_text_session_t* const* rows, iree_host_size_t index,
-    loom_serve_http_session_snapshot_t* out_snapshot);
+    loom_service_session_snapshot_t* out_snapshot);
 
 // Allocates host records only. Zero disables automatic retention. The caller
 // reserves capacity+1 native endpoints when enabled and bounds capacity before

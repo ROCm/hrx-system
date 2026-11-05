@@ -933,7 +933,7 @@ TEST_P(SourceSpeechServiceTest,
           "ready") {
         return false;
       }
-      loom_serve_http_request_snapshot_t request;
+      loom_service_request_snapshot_t request;
       for (size_t index = 0; interface_.inspection.request_at(
                interface_.runtime.self, index, &request);
            ++index) {
