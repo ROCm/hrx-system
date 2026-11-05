@@ -1748,6 +1748,7 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
         &restore_count, &restore_ranges);
   }
   loom_serve_memory_range_t* commitments = NULL;
+  iree_host_size_t* commitment_allocations = NULL;
   if (iree_status_is_ok(status) && state->memory.pool) {
     iree_host_size_t capacity = range_count + restore_count +
                                 LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT + 1;
@@ -1756,9 +1757,19 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
         capacity += state->storage.regions[i].blocks.count;
       }
     }
-    status =
-        iree_allocator_malloc_array(state->host_allocator, capacity,
-                                    sizeof(*commitments), (void**)&commitments);
+    iree_host_size_t allocation_size = 0, allocations_offset = 0;
+    status = IREE_STRUCT_LAYOUT(
+        0, &allocation_size,
+        IREE_STRUCT_FIELD(capacity, loom_serve_memory_range_t, NULL),
+        IREE_STRUCT_FIELD(capacity, iree_host_size_t, &allocations_offset));
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc(state->host_allocator, allocation_size,
+                                     (void**)&commitments);
+    }
+    if (iree_status_is_ok(status)) {
+      commitment_allocations =
+          (iree_host_size_t*)((uint8_t*)commitments + allocations_offset);
+    }
   }
   iree_host_size_t commitment_count = 0;
   if (iree_status_is_ok(status) && state->memory.pool) {
@@ -1768,6 +1779,7 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
       loom_serve_virtual_buffer_t* buffer =
           state->memory.buffers[range->buffer_index];
       if (buffer) {
+        commitment_allocations[commitment_count] = range->buffer_index;
         commitments[commitment_count++] =
             (loom_serve_memory_range_t){buffer, range->offset, range->length};
       }
@@ -1778,12 +1790,14 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
     for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
          ++i) {
       if (state->memory.buffers[i] && state->memory.private_lengths[i]) {
+        commitment_allocations[commitment_count] = i;
         commitments[commitment_count++] = (loom_serve_memory_range_t){
             state->memory.buffers[i], 0, state->memory.private_lengths[i]};
       }
     }
     if (reader != UINT32_MAX) {
       iree_hal_buffer_t* view = state->recurrent.buffers[reader];
+      commitment_allocations[commitment_count] = 1;
       commitments[commitment_count++] = (loom_serve_memory_range_t){
           state->memory.buffers[1], iree_hal_buffer_byte_offset(view),
           iree_hal_buffer_byte_length(view)};
@@ -1794,6 +1808,7 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
             &state->storage.regions[i];
         for (iree_host_size_t plane = 0; plane < region->blocks.count;
              ++plane) {
+          commitment_allocations[commitment_count] = region->allocation;
           commitments[commitment_count++] = (loom_serve_memory_range_t){
               state->memory.buffers[region->allocation],
               region->blocks.origin + plane * region->blocks.stride +
@@ -1806,6 +1821,7 @@ iree_status_t loom_serve_text_state_row_prepare_reserve(
   reservation->restore_ranges = restore_ranges;
   reservation->restore_count = restore_count;
   reservation->commitments = commitments;
+  reservation->commitment_allocations = commitment_allocations;
   reservation->commitment_count = commitment_count;
   loom_serve_memory_footprint_t footprint = {0};
   if (iree_status_is_ok(status)) {

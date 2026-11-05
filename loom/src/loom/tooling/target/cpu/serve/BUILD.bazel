@@ -164,6 +164,19 @@ loom_cc_library(
     alwayslink = True,
 )
 
+loom_cc_library(
+    name = "test_elastic_device",
+    testonly = True,
+    srcs = ["test_elastic_device.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_task",
+    ]),
+    deps = [
+        "//loom/src/loom/serve/testing:device",
+    ],
+    alwayslink = True,
+)
+
 loomc_cc_binary(
     name = "loom-serve-test-tool",
     testonly = True,
@@ -1518,6 +1531,26 @@ loom_cc_test(
     deps = [
         ":test_compiler",
         ":test_device",
+        "//loom/src/loom/serve/service/text:checkpoint_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "source_text_checkpoint_elastic_test",
+    data = TEXT_SOURCES,
+    env = {
+        "LOOM_SERVE_TEST_MODEL_SOURCE": "$(rootpath //loom/src/loom/serve/fixture/text:prepare.loom)",
+    },
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:x86_task_hal",
+    ]) + select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":test_compiler",
+        ":test_elastic_device",
         "//loom/src/loom/serve/service/text:checkpoint_tests",
         "//runtime/src/iree/testing:gtest_main",
     ],
