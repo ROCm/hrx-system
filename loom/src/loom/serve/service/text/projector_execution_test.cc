@@ -144,8 +144,10 @@ TEST_P(PixelProjectorExecutionTest, RgbAndRgbaCohortConditionsRetainedText) {
       projector_, prepared_.size(), prepared_.data(), expected_rows));
   ASSERT_NO_FATAL_FAILURE(ResolveCode());
   loom_serve_residency_admission_t admission;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(
-      loom_serve_finite_model_residency(projector_), &admission));
+  loom_serve_residency_t* model_residency =
+      loom_serve_finite_model_residency(projector_);
+  IREE_ASSERT_OK(
+      loom_serve_residency_try_admit(1, &model_residency, &admission));
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   loom_serve_execution_frontier_t ready;
   IREE_ASSERT_OK(loom_serve_finite_model_submit(projector_, &result_, &ready));

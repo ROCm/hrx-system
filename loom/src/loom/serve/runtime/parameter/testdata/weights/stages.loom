@@ -75,6 +75,12 @@ kernel.def @copy_raw_kernel() {
   kernel.return
 }
 
+command.def public @copy_raw() launch(%weights: buffer, %output: buffer) {
+  %data = command.parameter %weights, "raw" : view<8xi32>
+  kernel.launch @copy_raw_kernel(%data, %output) : (view<8xi32>, buffer)
+  command.return
+}
+
 // These consumers expose distinct policy selections for direct-range boundary
 // validation; each reflected tensor has the same complete 32-byte extent.
 command.def public @direct_gap() launch(%weights: buffer, %output: buffer) {

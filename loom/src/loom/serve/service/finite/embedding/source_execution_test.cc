@@ -392,8 +392,10 @@ class DeviceResultTest : public SourceEmbeddingServiceTest {
         loom_serve_finite_model_advance_batch(model_, false, &code_ready));
     ASSERT_TRUE(code_ready);
     loom_serve_residency_admission_t admission;
-    IREE_ASSERT_OK(loom_serve_residency_try_admit(
-        loom_serve_finite_model_residency(model_), &admission));
+    loom_serve_residency_t* model_residency =
+        loom_serve_finite_model_residency(model_);
+    IREE_ASSERT_OK(
+        loom_serve_residency_try_admit(1, &model_residency, &admission));
     ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
     loom_serve_execution_frontier_t frontier;
     IREE_ASSERT_OK(

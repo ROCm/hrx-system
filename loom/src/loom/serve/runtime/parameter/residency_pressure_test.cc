@@ -180,8 +180,9 @@ TEST_P(ResidencyPressureTest,
   const loom_serve_memory_range_t range = {incoming, 0, 2 * kSlabBytes};
   loom_serve_memory_operation_t* operation = nullptr;
   loom_serve_residency_admission_t logical;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-      residencies_[1], 1, &range, nullptr, nullptr, 0, &logical, &operation));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(1, &residencies_[1], 0, 1,
+                                                      &range, nullptr, nullptr,
+                                                      0, &logical, &operation));
   EXPECT_EQ(logical, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
   EXPECT_EQ(operation, nullptr);
   loom_serve_memory_admission_t physical;
@@ -195,8 +196,9 @@ TEST_P(ResidencyPressureTest,
   // Dropping retention changes eligibility, not actual backing. Both callers
   // use the same owner fact and wait for its ordinary asynchronous release.
   history_retained_ = false;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-      residencies_[1], 1, &range, nullptr, nullptr, 0, &logical, &operation));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(1, &residencies_[1], 0, 1,
+                                                      &range, nullptr, nullptr,
+                                                      0, &logical, &operation));
   EXPECT_EQ(logical, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
   EXPECT_EQ(history_requests_, 1u);
   EXPECT_EQ(state_statistics_.committed_bytes, kSlabBytes);
@@ -204,8 +206,9 @@ TEST_P(ResidencyPressureTest,
   IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(state_));
   history_pending_ = false;
   DrainNativeReturns();
-  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-      residencies_[1], 1, &range, nullptr, nullptr, 0, &logical, &operation));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit_state(1, &residencies_[1], 0, 1,
+                                                      &range, nullptr, nullptr,
+                                                      0, &logical, &operation));
   const auto free_operation = [](loom_serve_memory_operation_t* operation) {
     loom_serve_memory_operation_await(operation);
     loom_serve_memory_operation_free(operation);
@@ -304,8 +307,8 @@ TEST_P(ResidencyPressureTest, LogicalAdmissionCollectsFailureBeforeEviction) {
   loom_serve_residency_admission_t admission;
   loom_serve_memory_operation_t* incoming_operation = nullptr;
   IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-      residencies_[1], 1, &incoming_range, nullptr, nullptr, 0, &admission,
-      &incoming_operation));
+      1, &residencies_[1], 0, 1, &incoming_range, nullptr, nullptr, 0,
+      &admission, &incoming_operation));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
   EXPECT_EQ(incoming_operation, nullptr);
   EXPECT_EQ(history_requests_, 0u);
@@ -318,8 +321,8 @@ TEST_P(ResidencyPressureTest, LogicalAdmissionCollectsFailureBeforeEviction) {
   // Logical admission must collect that result before requesting history loss.
   EXPECT_EQ(state_statistics_.pending_bytes, kSlabBytes);
   IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-      residencies_[1], 1, &incoming_range, nullptr, nullptr, 0, &admission,
-      &incoming_operation));
+      1, &residencies_[1], 0, 1, &incoming_range, nullptr, nullptr, 0,
+      &admission, &incoming_operation));
   const std::unique_ptr<loom_serve_memory_operation_t, decltype(free_operation)>
       incoming_operation_owner(incoming_operation, free_operation);
   EXPECT_EQ(history_requests_, 0u);
@@ -364,7 +367,8 @@ TEST_P(ResidencyPressureTest, WarmAdmissionDoesNotQueryNativeCapacity) {
               },
       });
   loom_serve_residency_admission_t admission;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  IREE_ASSERT_OK(
+      loom_serve_residency_try_admit(1, &residencies_[0], &admission));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   // A fitting private-workspace increase also reads only owner facts.
   IREE_EXPECT_OK(

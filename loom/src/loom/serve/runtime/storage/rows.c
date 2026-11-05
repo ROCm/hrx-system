@@ -91,7 +91,7 @@ iree_status_t loom_serve_rows_try_reserve(
   }
   IREE_ASSERT(!state->backing.operation);
   IREE_RETURN_IF_ERROR(loom_serve_residency_try_admit_state(
-      residency, range_count, ranges, NULL, state->backing.semaphore,
+      1, &residency, 0, range_count, ranges, NULL, state->backing.semaphore,
       state->backing.value + 1, out_admission, &state->backing.operation));
   if (*out_admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
     if (state->pool) {

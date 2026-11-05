@@ -18,11 +18,43 @@ exports_files(
         "bank_test.cc",
         "residency_pressure_test.cc",
         "weights_test.cc",
-        "weights_test_base.h",
         "weights_packing_test.cc",
         "weights_streaming_test.cc",
     ],
     visibility = ["//loom/src/loom/serve:implementation"],
+)
+
+loom_cc_library(
+    name = "weights_test_base",
+    testonly = True,
+    srcs = ["weights_test_base.cc"],
+    hdrs = ["weights_test_base.h"],
+    deps = [
+        ":activation",
+        ":residency",
+        ":sources",
+        ":weights",
+        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
+        "//loom/src/loom/serve/testing:compiler",
+        "//loom/src/loom/serve/testing:device",
+        "//loom/src/loom/serve/testing:native_allocator",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal/testing:deferred_pool",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "residency_tests",
+    testonly = True,
+    srcs = ["residency_test.cc"],
+    deps = [":weights_test_base"],
+    alwayslink = True,
 )
 
 loom_cc_library(

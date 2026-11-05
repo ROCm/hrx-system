@@ -361,7 +361,7 @@ class TextPlacementTest
   void Run() {
     for (auto* residency : residencies_) {
       loom_serve_residency_admission_t admission;
-      IREE_ASSERT_OK(loom_serve_residency_try_admit(residency, &admission));
+      IREE_ASSERT_OK(loom_serve_residency_try_admit(1, &residency, &admission));
       ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
     }
     for (auto* residency : residencies_) {

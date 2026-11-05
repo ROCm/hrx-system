@@ -132,7 +132,8 @@ TEST_F(SourceTextServiceTest, NativeWorkspaceReplacementPreservesAdmission) {
     IREE_ASSERT_OK(loom_serve_residency_prepare_working_set(peer_residency,
                                                             peer_bytes(), 0));
     loom_serve_residency_admission_t admission;
-    IREE_ASSERT_OK(loom_serve_residency_try_admit(peer_residency, &admission));
+    IREE_ASSERT_OK(
+        loom_serve_residency_try_admit(1, &peer_residency, &admission));
     EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
   }
   IREE_ASSERT_OK(loom_serve_text_model_select_variant(model_, nullptr));
@@ -140,7 +141,8 @@ TEST_F(SourceTextServiceTest, NativeWorkspaceReplacementPreservesAdmission) {
     // Restoring the smaller original releases only private-workspace credit.
     // The identical waiting peer now fits; rows and parameters never moved.
     loom_serve_residency_admission_t admission;
-    IREE_ASSERT_OK(loom_serve_residency_try_admit(peer_residency, &admission));
+    IREE_ASSERT_OK(
+        loom_serve_residency_try_admit(1, &peer_residency, &admission));
     ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
     loom_serve_residency_cancel_admission(peer_residency);
     loom_serve_residency_release(peer_residency);
@@ -174,7 +176,8 @@ TEST_F(SourceTextServiceTest, NativeWorkspaceReplacementPreservesAdmission) {
     IREE_ASSERT_OK(loom_serve_residency_prepare_working_set(peer_residency,
                                                             peer_bytes(), 0));
     loom_serve_residency_admission_t admission;
-    IREE_ASSERT_OK(loom_serve_residency_try_admit(peer_residency, &admission));
+    IREE_ASSERT_OK(
+        loom_serve_residency_try_admit(1, &peer_residency, &admission));
     EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
     loom_serve_residency_cancel_admission(peer_residency);
   }

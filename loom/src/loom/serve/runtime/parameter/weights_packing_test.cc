@@ -194,7 +194,7 @@ TEST_P(WeightPackingTest,
     // not: neither backing nor parameter I/O may start, and the caller retains
     // no partial pin.
     IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-        residencies_[0], 1, &range, nullptr, nullptr, 0, &admission,
+        1, &residencies_[0], 0, 1, &range, nullptr, nullptr, 0, &admission,
         &operation));
     EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
     EXPECT_EQ(operation, nullptr);
@@ -210,8 +210,8 @@ TEST_P(WeightPackingTest,
     range.length = kSlabBytes;
   }
   IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-      residencies_[0], pool_ ? 1 : 0, &range, nullptr, nullptr, 0, &admission,
-      &operation));
+      1, &residencies_[0], 0, pool_ ? 1 : 0, &range, nullptr, nullptr, 0,
+      &admission, &operation));
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   loom_serve_memory_operation_await(operation);
   IREE_EXPECT_OK(loom_serve_memory_operation_query_status(operation));
@@ -226,7 +226,7 @@ TEST_P(WeightPackingTest,
     // still exceed capacity. Denial preserves the accepted consumer's pin.
     range.length = 3 * kSlabBytes;
     IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-        residencies_[0], 1, &range, nullptr, nullptr, 0, &admission,
+        1, &residencies_[0], 0, 1, &range, nullptr, nullptr, 0, &admission,
         &operation));
     EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
     EXPECT_EQ(operation, nullptr);
@@ -260,7 +260,7 @@ TEST_P(WeightPackingTest, InvocationWorkingSetRetiresColdActivationCredit) {
         &state_statistics_, &state_));
     range = {state_, 0, kSlabBytes};
     IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-        residencies_[0], 1, &range, nullptr, nullptr, 0, &admission,
+        1, &residencies_[0], 0, 1, &range, nullptr, nullptr, 0, &admission,
         &operation));
     EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
     EXPECT_EQ(operation, nullptr);
@@ -274,8 +274,8 @@ TEST_P(WeightPackingTest, InvocationWorkingSetRetiresColdActivationCredit) {
   loom_serve_residency_release(residencies_[0]);
   ASSERT_NO_FATAL_FAILURE(TrimWorkspace());
   IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-      residencies_[0], pool_ ? 1 : 0, &range, nullptr, nullptr, 0, &admission,
-      &operation));
+      1, &residencies_[0], 0, pool_ ? 1 : 0, &range, nullptr, nullptr, 0,
+      &admission, &operation));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   loom_serve_memory_operation_await(operation);
   IREE_EXPECT_OK(loom_serve_memory_operation_query_status(operation));
@@ -296,7 +296,7 @@ TEST_P(WeightPackingTest, InvocationWorkingSetRetiresColdActivationCredit) {
     IREE_ASSERT_OK(loom_serve_residency_deactivate(residencies_[0], &complete));
     EXPECT_TRUE(complete);
     IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-        residencies_[0], 1, &range, nullptr, nullptr, 0, &admission,
+        1, &residencies_[0], 0, 1, &range, nullptr, nullptr, 0, &admission,
         &operation));
     EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
     EXPECT_EQ(operation, nullptr);
@@ -347,7 +347,7 @@ TEST_P(WeightPackingTest,
       loom_serve_residency_set_pinned(residencies_[0], true);
       loom_serve_residency_set_pinned(residencies_[0], false);
       IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-          residencies_[1], 1, &range, nullptr, nullptr, 0, &admission,
+          1, &residencies_[1], 0, 1, &range, nullptr, nullptr, 0, &admission,
           &operation));
       EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
       EXPECT_EQ(operation, nullptr);
@@ -360,8 +360,8 @@ TEST_P(WeightPackingTest,
   // shared producer is enough to admit state without another parameter load.
   ASSERT_NO_FATAL_FAILURE(TrimWorkspace());
   IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-      residencies_[1], pool_ ? 1 : 0, &range, nullptr, nullptr, 0, &admission,
-      &operation));
+      1, &residencies_[1], 0, pool_ ? 1 : 0, &range, nullptr, nullptr, 0,
+      &admission, &operation));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   loom_serve_memory_operation_await(operation);
   IREE_EXPECT_OK(loom_serve_memory_operation_query_status(operation));
@@ -418,7 +418,7 @@ TEST_P(WeightPackingTest,
         &state_statistics_, &state_));
     range = {state_, 0, kSlabBytes};
     IREE_EXPECT_OK(loom_serve_residency_try_admit_state(
-        residencies_[0], 1, &range, nullptr, nullptr, 0, &admission,
+        1, &residencies_[0], 0, 1, &range, nullptr, nullptr, 0, &admission,
         &operation));
     EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
     EXPECT_EQ(operation, nullptr);
@@ -428,7 +428,7 @@ TEST_P(WeightPackingTest,
       loom_serve_residency_prepare_working_set(residencies_[0], 1, 0));
   if (pool_) {
     IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-        residencies_[0], 1, &range, nullptr, nullptr, 0, &admission,
+        1, &residencies_[0], 0, 1, &range, nullptr, nullptr, 0, &admission,
         &operation));
     EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
     EXPECT_EQ(operation, nullptr);
@@ -436,8 +436,8 @@ TEST_P(WeightPackingTest,
   IREE_ASSERT_OK(loom_serve_residency_check_private_peak(residencies_[0], 0));
   loom_serve_residency_set_private_peak(residencies_[0], 0);
   IREE_ASSERT_OK(loom_serve_residency_try_admit_state(
-      residencies_[0], pool_ ? 1 : 0, &range, nullptr, nullptr, 0, &admission,
-      &operation));
+      1, &residencies_[0], 0, pool_ ? 1 : 0, &range, nullptr, nullptr, 0,
+      &admission, &operation));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   loom_serve_memory_operation_await(operation);
   IREE_EXPECT_OK(loom_serve_memory_operation_query_status(operation));
@@ -489,7 +489,8 @@ TEST_P(WeightPackingTest,
   IREE_ASSERT_OK(loom_serve_residency_cache_query_status(ResidencyCache()));
   EXPECT_FALSE(loom_serve_residency_cache_is_reclaiming(ResidencyCache()));
   loom_serve_residency_admission_t admission;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[1], &admission));
+  IREE_ASSERT_OK(
+      loom_serve_residency_try_admit(1, &residencies_[1], &admission));
   if (pool_) {
     // The failed producer still owns its working set until terminal teardown,
     // but accepted loading is no longer a reason to wait for future capacity.

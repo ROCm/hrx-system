@@ -325,10 +325,15 @@ def _is_internal_header_name(relative_path: str) -> bool:
 
 
 def _is_test_source_name(name: str) -> bool:
-    return (
-        name.endswith("_test.c")
-        or name.endswith("_test.cc")
-        or name.endswith("_test.h")
+    return name.endswith(
+        (
+            "_test.c",
+            "_test.cc",
+            "_test.h",
+            "_test_base.c",
+            "_test_base.cc",
+            "_test_base.h",
+        )
     )
 
 
@@ -788,6 +793,19 @@ def _run_self_tests() -> int:
         "loom/src/loom/sanitizer/options_test.cc",
         '#include "iree/base/tooling/flags.h"\n',
         (),
+    )
+    ok &= _expect_core_tooling_flags_self_test(
+        "shared test fixture flags are in scope",
+        "loom/src/loom/serve/runtime/parameter/weights_test_base.cc",
+        '#include "iree/base/tooling/flags.h"\n'
+        'IREE_FLAG(string, sources, "", "Source fixtures");\n',
+        (),
+    )
+    ok &= _expect_core_tooling_flags_self_test(
+        "test-like production filename remains checked",
+        "loom/src/loom/sanitizer/options_test_baseline.cc",
+        '#include "iree/base/tooling/flags.h"\n',
+        ("core Loom compiler source must not include tooling flags",),
     )
     ok &= _expect_tooling_target_ownership_self_test(
         "target tooling manifest passes",

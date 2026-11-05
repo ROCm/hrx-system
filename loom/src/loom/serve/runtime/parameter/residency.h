@@ -271,29 +271,36 @@ typedef enum loom_serve_residency_admission_e {
   // An older waiter has priority or idle-cache maintenance is releasing
   // backing.
   LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED,
-  // One pin protects enqueued activation and subsequent consuming work.
+  // One pin per member protects activation and subsequent consuming work.
   LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED,
 } loom_serve_residency_admission_t;
 
-// New-work admission with one outstanding interest per residency. An actual
-// capacity denial starts a FIFO; subsequent weighted admissions join it, even
-// for an already-active model. Accepted work uses acquire/try_acquire directly
-// so nested execution pins never wait behind the work they must unblock.
-// Parameter-free working sets bypass weight pressure. Acquiring parameters
-// preserves an existing interest: model-owned state may still need capacity.
-// The caller withdraws it with cancel_admission only after the complete
-// request/cohort is admitted or abandoned. All calls share the cache's
-// serialized owner. No callback or task waits are installed.
+// New-work admission across a nonempty span of distinct physical caches, with
+// one outstanding interest per residency. Membership stays fixed until every
+// interest is withdrawn. All caches share one serialized host owner. A capacity
+// denial queues the whole span in one turn; subsequent weighted admissions
+// respect every cache FIFO, even for an already-active model. Accepted work
+// uses acquire/try_acquire so nested execution never waits behind its
+// consumers. Parameter-free working sets bypass weight pressure. Acquiring
+// parameters preserves an existing interest: model-owned state may still need
+// capacity. The caller withdraws every interest with cancel_admission only
+// after the complete request/cohort is admitted or abandoned. Success owns one
+// pin per member; ordinary denial owns none and starts no parameter loading.
+// Terminal loading failure preserves all pins until their owners retire.
+// History reclamation requires every owner's retained-state bound to permit
+// admission. No callback or task waits are installed.
 iree_status_t loom_serve_residency_try_admit(
-    loom_serve_residency_t* residency,
+    iree_host_size_t residency_count,
+    loom_serve_residency_t* const* residencies,
     loom_serve_residency_admission_t* out_admission);
 
 // Admits parameters and the caller's complete mutable-state range union before
-// submitting either. Ranges belong to this residency's physical owner and
-// their logical borrowers exclude policy reclamation for the call. Denial
+// submitting either. The state_owner index selects one member whose physical
+// pool owns the ranges; their logical borrowers exclude reclamation for the
+// call. Every other pool is prepared before committing this state union. Denial
 // retains neither a parameter pin nor new backing; FIFO interest remains.
-// Success owns a parameter pin and publishes state backing on readiness/value,
-// independently of parameter loading on the execution timeline. The caller
+// Success owns a pin per member and publishes state backing on readiness/value,
+// independently of parameter loading on each execution timeline. The caller
 // owns the returned operation through actual native retirement, including
 // terminal activation failure. A fixed-backed caller supplies no ranges or
 // readiness. An optional source forecast includes the complete incoming state
@@ -301,8 +308,9 @@ iree_status_t loom_serve_residency_try_admit(
 // It is queried only under pressure, never to admit work. No task or device
 // wait occurs.
 iree_status_t loom_serve_residency_try_admit_state(
-    loom_serve_residency_t* residency, iree_host_size_t range_count,
-    const loom_serve_memory_range_t* ranges,
+    iree_host_size_t residency_count,
+    loom_serve_residency_t* const* residencies, iree_host_size_t state_owner,
+    iree_host_size_t range_count, const loom_serve_memory_range_t* ranges,
     const loom_serve_residency_forecast_t* forecast,
     iree_hal_semaphore_t* readiness, uint64_t value,
     loom_serve_residency_admission_t* out_admission,

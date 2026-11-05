@@ -99,7 +99,8 @@ iree_status_t loom_serve_activation_advance(
     activation->phase = LOOM_SERVE_ACTIVATION_COMPLETE;
   } else {
     loom_serve_residency_admission_t admission;
-    status = loom_serve_residency_try_admit(activation->residency, &admission);
+    status =
+        loom_serve_residency_try_admit(1, &activation->residency, &admission);
     if (iree_status_is_ok(status) &&
         admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
       loom_serve_residency_cancel_admission(activation->residency);

@@ -39,8 +39,8 @@ static iree_status_t loom_serve_text_admit_state(
       .self = context, .query = loom_serve_text_forecast_state};
   loom_serve_residency_admission_t admission;
   const iree_status_t status = loom_serve_residency_try_admit_state(
-      context->model->residency, range_count, ranges, &forecast, readiness,
-      value, &admission, out_operation);
+      1, &context->model->residency, 0, range_count, ranges, &forecast,
+      readiness, value, &admission, out_operation);
   switch (admission) {
     case LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY:
       *context->result = LOOM_SERVE_TEXT_RESERVE_CAPACITY;

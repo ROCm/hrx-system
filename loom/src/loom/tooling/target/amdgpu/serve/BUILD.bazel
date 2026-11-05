@@ -952,7 +952,6 @@ loom_cc_test(
         "//loom/src/loom/serve/runtime/parameter:weights_packing_test.cc",
         "//loom/src/loom/serve/runtime/parameter:weights_streaming_test.cc",
         "//loom/src/loom/serve/runtime/parameter:weights_test.cc",
-        "//loom/src/loom/serve/runtime/parameter:weights_test_base.h",
         "//loom/src/loom/serve/service:executables_test.cc",
         "//loom/src/loom/serve/service/image:parameter_test.cc",
     ],
@@ -996,6 +995,7 @@ loom_cc_test(
         "//loom/src/loom/serve/runtime/parameter:residency",
         "//loom/src/loom/serve/runtime/parameter:sources",
         "//loom/src/loom/serve/runtime/parameter:weights",
+        "//loom/src/loom/serve/runtime/parameter:weights_test_base",
         "//loom/src/loom/serve/runtime/program",
         "//loom/src/loom/serve/runtime/program:jit",
         "//loom/src/loom/serve/runtime/program:module",
@@ -1021,6 +1021,30 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",
         "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "residency_test",
+    args = [
+        "--weight_sources=$(rootpath //loom/src/loom/serve/runtime/parameter/testdata/weights:stages.loom)",
+        "--weight_device_uri=amdgpu:?feedback",
+    ],
+    data = [
+        "//loom/src/loom/serve/runtime/parameter/testdata/weights:packing.loom",
+        "//loom/src/loom/serve/runtime/parameter/testdata/weights:policy.loom",
+        "//loom/src/loom/serve/runtime/parameter/testdata/weights:stages.loom",
+    ],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = _GPU_TEST_TAGS,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+    ] + _GPU_REQUIREMENTS),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/runtime/parameter:residency_tests",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

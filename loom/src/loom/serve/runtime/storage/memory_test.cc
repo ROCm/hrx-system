@@ -1343,7 +1343,7 @@ TEST_F(DeviceMemoryTest, AdmissionIncludesWorkspaceSlabGranularity) {
       claim(residency, loom_serve_residency_free);
   IREE_ASSERT_OK(loom_serve_residency_prepare_working_set(residency, 256, 0));
   loom_serve_residency_admission_t admission;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(residency, &admission));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(1, &residency, &admission));
   // Half a slab remains, but even this small invocation needs one whole
   // workspace slab. Reject it before any queue allocation is accepted.
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
@@ -1400,7 +1400,7 @@ TEST_F(DeviceMemoryTest, PermanentStorageIsNotDiscountedAsWorkspace) {
       loom_serve_residency_prepare_working_set(residency, 2 * kSlabSize, 0));
   const auto before = loom_serve_execution_frontier(execution);
   loom_serve_residency_admission_t admission;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(residency, &admission));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(1, &residency, &admission));
   // Permanent roots do not fulfill the invocation's protected scratch credit.
   // The two footprints cannot fit in this owner's three-slab budget.
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);

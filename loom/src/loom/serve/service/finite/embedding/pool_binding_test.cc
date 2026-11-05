@@ -151,8 +151,10 @@ TEST_F(PoolBindingTest, RetainedResultsChargeOnlyTheirExplicitPool) {
   EXPECT_NE(loom_serve_pool_memory(shared_), loom_serve_pool_memory(isolated_));
   ASSERT_NO_FATAL_FAILURE(Prepare(producer_));
   loom_serve_residency_admission_t admission;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(
-      loom_serve_finite_model_residency(producer_), &admission));
+  loom_serve_residency_t* model_residency =
+      loom_serve_finite_model_residency(producer_);
+  IREE_ASSERT_OK(
+      loom_serve_residency_try_admit(1, &model_residency, &admission));
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   ASSERT_NO_FATAL_FAILURE(Submit(producer_, shared_));
   IREE_ASSERT_OK(
@@ -162,7 +164,7 @@ TEST_F(PoolBindingTest, RetainedResultsChargeOnlyTheirExplicitPool) {
   EXPECT_TRUE(loom_serve_residency_cache_is_pending(cache));
   ASSERT_NO_FATAL_FAILURE(Prepare(peer_));
   auto* residency = loom_serve_finite_model_residency(peer_);
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(residency, &admission));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(1, &residency, &admission));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
   EXPECT_TRUE(loom_serve_residency_snapshot(residency).admission.waiting);
 
@@ -171,7 +173,7 @@ TEST_F(PoolBindingTest, RetainedResultsChargeOnlyTheirExplicitPool) {
   loom_serve_finite_model_release_batch(peer_);
   EXPECT_FALSE(loom_serve_residency_snapshot(residency).admission.waiting);
   ASSERT_NO_FATAL_FAILURE(Prepare(peer_));
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(residency, &admission));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(1, &residency, &admission));
   EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
 
   StartRouter();
@@ -189,7 +191,7 @@ TEST_F(PoolBindingTest, RetainedResultsChargeOnlyTheirExplicitPool) {
   loom_serve_http_server_request_stop(server_);
   IREE_ASSERT_OK(http_.Join());
   EXPECT_FALSE(loom_serve_residency_cache_is_pending(cache));
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(residency, &admission));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(1, &residency, &admission));
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   ASSERT_NO_FATAL_FAILURE(Submit(peer_, shared_));
   EXPECT_LE(loom_serve_memory_pool_statistics(loom_serve_pool_memory(shared_))
@@ -203,8 +205,10 @@ TEST_F(PoolBindingTest, RetainedResultsChargeOnlyTheirExplicitPool) {
 TEST_F(PoolBindingTest, LastResultOutlivesEveryModelInItsPool) {
   ASSERT_NO_FATAL_FAILURE(Prepare(producer_));
   loom_serve_residency_admission_t admission;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(
-      loom_serve_finite_model_residency(producer_), &admission));
+  loom_serve_residency_t* model_residency =
+      loom_serve_finite_model_residency(producer_);
+  IREE_ASSERT_OK(
+      loom_serve_residency_try_admit(1, &model_residency, &admission));
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   ASSERT_NO_FATAL_FAILURE(Submit(producer_, shared_));
   IREE_ASSERT_OK(
@@ -226,8 +230,10 @@ TEST_F(PoolBindingTest, TrimReclaimsOnlyTheSelectedPoolAndPreservesReload) {
        {std::pair{producer_, shared_}, std::pair{model_, isolated_}}) {
     ASSERT_NO_FATAL_FAILURE(Prepare(model));
     loom_serve_residency_admission_t admission;
-    IREE_ASSERT_OK(loom_serve_residency_try_admit(
-        loom_serve_finite_model_residency(model), &admission));
+    loom_serve_residency_t* model_residency =
+        loom_serve_finite_model_residency(model);
+    IREE_ASSERT_OK(
+        loom_serve_residency_try_admit(1, &model_residency, &admission));
     ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
     ASSERT_NO_FATAL_FAILURE(Submit(model, pool));
     loom_serve_finite_result_release(std::exchange(result_, nullptr));
@@ -256,7 +262,8 @@ TEST_F(PoolBindingTest, TrimReclaimsOnlyTheSelectedPoolAndPreservesReload) {
 
   ASSERT_NO_FATAL_FAILURE(Prepare(producer_));
   loom_serve_residency_admission_t admission;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(shared_residency, &admission));
+  IREE_ASSERT_OK(
+      loom_serve_residency_try_admit(1, &shared_residency, &admission));
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   ASSERT_NO_FATAL_FAILURE(Submit(producer_, shared_));
   EXPECT_EQ(loom_serve_residency_activity(shared_residency).activations,
