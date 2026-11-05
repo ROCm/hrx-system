@@ -45,6 +45,7 @@ from loom.gen.target.contracts.lower_rule_rows import (
 )
 from loom.gen.target.contracts.lower_rules import (
     _collect_report_keys,
+    _encode_guard_ref_storage,
     _intern_diagnostic_params,
     _intern_optional_rows,
     _intern_rows,
@@ -2294,6 +2295,32 @@ def test_generated_tables_intern_guards_and_diagnostic_params() -> None:
     assert tuple(row for row, _ in unique_params) == (params[0], params[2])
     assert tuple(source_index for _, source_index in unique_params) == (0, 2)
     assert param_refs == (0, 0, 1)
+
+
+def test_guard_ref_storage_keeps_the_most_used_rows_byte_addressable() -> None:
+    rows = tuple(range(256))
+    refs = (*range(256), *(255 for _ in range(10)))
+    storage = _encode_guard_ref_storage(rows, refs)
+
+    assert not storage.uses_fixed_width
+    assert storage.rows[:255] == (*range(254), 255)
+    assert storage.rows[255] == 254
+    assert storage.values[254:258] == (0xFF, 0xFF, 0x00, 0xFE)
+    assert storage.starts[254:257] == (254, 257, 258)
+    assert storage.values[258:] == (0xFE,) * 10
+
+
+def test_guard_ref_storage_uses_fixed_width_when_offsets_exceed_u16() -> None:
+    rows = tuple(range(256))
+    refs = tuple(range(256)) * 255 + tuple(range(255))
+    storage = _encode_guard_ref_storage(rows, refs)
+
+    assert storage.uses_fixed_width
+    assert storage.rows == rows
+    assert len(storage.values) == 3 * len(refs)
+    assert storage.values[:3] == (0xFF, 0x00, 0x00)
+    assert storage.values[-3:] == (0xFF, 0xFE, 0x00)
+    assert storage.starts == tuple(range(len(refs) + 1))
 
 
 def test_generated_tables_intern_source_memory_shapes() -> None:

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import heapq
 from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -87,6 +88,16 @@ class GeneratedLowerRuleSet:
     source: str
 
 
+@dataclass(frozen=True, slots=True)
+class _GuardRefStorage[RowT]:
+    """Generated guard rows and their compact or direct reference storage."""
+
+    rows: tuple[RowT, ...]
+    values: tuple[int, ...]
+    starts: tuple[int, ...]
+    uses_fixed_width: bool
+
+
 def _intern_rows[RowT: Hashable](
     rows: Sequence[RowT],
 ) -> tuple[tuple[RowT, ...], tuple[int, ...]]:
@@ -101,6 +112,60 @@ def _intern_rows[RowT: Hashable](
             unique_rows.append(row)
         row_refs.append(ordinal)
     return tuple(unique_rows), tuple(row_refs)
+
+
+def _encode_guard_ref_storage[RowT](rows: tuple[RowT, ...], refs: tuple[int, ...]) -> _GuardRefStorage[RowT]:
+    """Makes the 255 most-used guard rows directly byte-addressable."""
+
+    if len(rows) <= 255:
+        return _GuardRefStorage(
+            rows=rows,
+            values=refs,
+            starts=tuple(range(len(refs) + 1)),
+            uses_fixed_width=False,
+        )
+
+    frequencies = [0] * len(rows)
+    for ref in refs:
+        frequencies[ref] += 1
+    hot_ordinals = frozenset(
+        heapq.nlargest(
+            255,
+            range(len(rows)),
+            key=lambda ordinal: (frequencies[ordinal], -ordinal),
+        )
+    )
+    ordered_ordinals = (
+        *(ordinal for ordinal in range(len(rows)) if ordinal in hot_ordinals),
+        *(ordinal for ordinal in range(len(rows)) if ordinal not in hot_ordinals),
+    )
+    remapped_ordinals = [0] * len(rows)
+    for new_ordinal, old_ordinal in enumerate(ordered_ordinals):
+        remapped_ordinals[old_ordinal] = new_ordinal
+
+    values = []
+    starts = []
+    for ref in refs:
+        starts.append(len(values))
+        remapped_ref = remapped_ordinals[ref]
+        if remapped_ref < 255:
+            values.append(remapped_ref)
+        else:
+            values.extend((0xFF, remapped_ref & 0xFF, remapped_ref >> 8))
+    starts.append(len(values))
+    if len(values) > _U16_MAX:
+        return _GuardRefStorage(
+            rows=rows,
+            values=tuple(byte for ref in refs for byte in (0xFF, ref & 0xFF, ref >> 8)),
+            starts=tuple(range(len(refs) + 1)),
+            uses_fixed_width=True,
+        )
+    return _GuardRefStorage(
+        rows=tuple(rows[ordinal] for ordinal in ordered_ordinals),
+        values=tuple(values),
+        starts=tuple(starts),
+        uses_fixed_width=False,
+    )
 
 
 def _primary_descriptor_feature_classes(
@@ -358,6 +423,9 @@ def _generate_source(
     ) = _primary_descriptor_feature_classes(table)
     descriptor_refs = {key: index for index, key in enumerate(descriptor_ref_keys)}
     report_key_ordinals = {key: index + 1 for index, key in enumerate(report_keys)}
+    unique_guards, logical_guard_refs = _intern_rows(table.guards)
+    guard_ref_storage = _encode_guard_ref_storage(unique_guards, logical_guard_refs)
+    unique_guards = guard_ref_storage.rows
     wide_report_keys = tuple(
         (rule_index, report_key_ordinals[rule.report_key])
         for rule_index, rule in enumerate(table.rules)
@@ -424,7 +492,15 @@ def _generate_source(
         lower_rule_rows.emit_optional_array(
             source_nodes_name,
             "loom_low_lower_source_node_t",
-            [lower_rule_rows.source_node_row(row) for row in table.source_nodes],
+            [
+                lower_rule_rows.source_node_row(
+                    replace(
+                        row,
+                        guard_start=guard_ref_storage.starts[row.guard_start],
+                    )
+                )
+                for row in table.source_nodes
+            ],
         )
     )
 
@@ -596,7 +672,6 @@ def _generate_source(
         )
     )
 
-    unique_guards, guard_refs = _intern_rows(table.guards)
     storage_operand_schemas, _ = _intern_rows(tuple(row.storage_operand_schema for row in unique_guards if row.storage_operand_schema is not None))
     storage_operand_schema_ordinals = {schema: ordinal for ordinal, schema in enumerate(storage_operand_schemas)}
     storage_operand_schemas_name = f"k{c_table_prefix}StorageOperandSchemas"
@@ -645,7 +720,7 @@ def _generate_source(
         lower_rule_rows.emit_optional_value_array(
             guard_refs_name,
             "loom_low_lower_guard_ref_t",
-            [str(ref) for ref in guard_refs],
+            [f"UINT8_C(0x{ref:02X})" for ref in guard_ref_storage.values],
         )
     )
 
@@ -738,7 +813,10 @@ def _generate_source(
             "loom_low_lower_rule_t",
             [
                 lower_rule_rows.rule_row(
-                    row,
+                    replace(
+                        row,
+                        guard_start=guard_ref_storage.starts[row.guard_start],
+                    ),
                     report_key_ordinals,
                     primary_descriptor_feature_class=feature_class,
                 )
@@ -813,8 +891,9 @@ def _generate_source(
             guards_name=guards_name,
             storage_operand_schemas=storage_operand_schemas,
             storage_operand_schemas_name=storage_operand_schemas_name,
-            guard_refs=guard_refs,
+            guard_refs=guard_ref_storage.values,
             guard_refs_name=guard_refs_name,
+            guard_refs_use_fixed_width=guard_ref_storage.uses_fixed_width,
             literal_data_name=literal_data_name,
             attr_copies_name=attr_copies_name,
             tied_results_name=tied_results_name,
