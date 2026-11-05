@@ -110,6 +110,16 @@ SEMGREP_PATH_PREFIXES = (
     "libhrx/",
 )
 SEMGREP_DEFAULT_MAX_JOBS = 14
+ZIZMOR_PATH_PREFIXES = (
+    ".github/actions/",
+    ".github/workflows/",
+)
+ZIZMOR_EXACT_PATHS = frozenset(
+    {
+        ".github/dependabot.yml",
+        ".github/dependabot.yaml",
+    }
+)
 CLANG_TIDY_DEFAULT_CORE_DIVISOR = 2
 CLANG_TIDY_DEFAULT_MAX_JOBS = 96
 CLANG_TIDY_ASPECT = "//build_tools/clang_tidy:clang_tidy.bzl%collect_clang_tidy_aspect"
@@ -1081,6 +1091,13 @@ def is_clang_tidy_candidate_file(path: str) -> bool:
     )
 
 
+def is_zizmor_candidate_file(path: str) -> bool:
+    return (
+        path in ZIZMOR_EXACT_PATHS
+        or any(path.startswith(prefix) for prefix in ZIZMOR_PATH_PREFIXES)
+    ) and Path(path).suffix in (".yml", ".yaml")
+
+
 def is_clang_tidy_infra_file(path: str) -> bool:
     return path.startswith(CLANG_TIDY_INFRA_PREFIX)
 
@@ -1820,6 +1837,30 @@ def run_semgrep(inputs: PresubmitInputs, profile: str, verbose: bool) -> bool:
             and ok
         )
     return ok
+
+
+def zizmor_command() -> list[str]:
+    return [
+        "zizmor",
+        "--offline",
+        "--min-severity=low",
+        "--min-confidence=low",
+        "--no-progress",
+        ".github",
+    ]
+
+
+def run_zizmor(inputs: PresubmitInputs, profile: str, verbose: bool) -> bool:
+    if not any(is_zizmor_candidate_file(path) for path in inputs.selected_paths):
+        return skip_step("Zizmor", "no selected GitHub automation inputs")
+    if sys.platform == "win32":
+        return skip_step(
+            "Zizmor",
+            "enforced by the Linux paranoid presubmit",
+        )
+    if shutil.which("zizmor") is None:
+        return require_static_tool("zizmor", "Zizmor", profile)
+    return run_command(zizmor_command(), "Zizmor GitHub automation", verbose)
 
 
 def clang_tidy_bazel_command(
@@ -2664,6 +2705,13 @@ def run_clang_tidy(
 
 
 STATIC_ANALYSIS_PROVIDERS = (
+    StaticAnalysisProvider(
+        name="Zizmor",
+        profiles=frozenset(("paranoid", "ci")),
+        runner=lambda inputs, profile, lane, verbose: run_zizmor(
+            inputs, profile, verbose
+        ),
+    ),
     StaticAnalysisProvider(
         name="Semgrep",
         profiles=frozenset(("paranoid", "ci")),

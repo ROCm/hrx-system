@@ -145,6 +145,15 @@ def common_setup_plan(
                 label="check semgrep",
             )
         )
+        plan.add(
+            CheckCommandStep(
+                [tool_env.tool("zizmor"), "--version"],
+                cwd=REPO_ROOT,
+                env=tool_env.path_env(),
+                expected_pattern=doctor.ZIZMOR_VERSION_PATTERN,
+                label="check zizmor",
+            )
+        )
     elif include_docs:
         plan.add(
             CommandStep(

@@ -421,6 +421,50 @@ class PresubmitTest(unittest.TestCase):
         for config in presubmit.SEMGREP_CONFIGS:
             self.assertIn(config, command)
 
+    def test_zizmor_candidates_are_scoped_to_github_automation(self):
+        for path in (
+            ".github/workflows/presubmit.yml",
+            ".github/actions/setup/action.yaml",
+            ".github/dependabot.yml",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(presubmit.is_zizmor_candidate_file(path))
+        for path in (
+            ".github/CODEOWNERS",
+            ".github/scripts/setup.py",
+            "workflow.yml",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(presubmit.is_zizmor_candidate_file(path))
+
+    def test_zizmor_scan_is_offline_and_covers_github_automation(self):
+        command = presubmit.zizmor_command()
+
+        self.assertEqual(command[0], "zizmor")
+        self.assertIn("--offline", command)
+        self.assertIn("--min-severity=low", command)
+        self.assertIn("--min-confidence=low", command)
+        self.assertEqual(command[-1], ".github")
+
+    def test_zizmor_runs_once_for_selected_github_automation(self):
+        with (
+            mock.patch.object(presubmit.sys, "platform", "linux"),
+            mock.patch.object(presubmit.shutil, "which", return_value="zizmor"),
+            mock.patch.object(
+                presubmit, "run_command", return_value=True
+            ) as run_command,
+        ):
+            ok = presubmit.run_zizmor(
+                input_scope([".github/workflows/presubmit.yml"]),
+                profile="ci",
+                verbose=False,
+            )
+
+        self.assertTrue(ok)
+        run_command.assert_called_once_with(
+            presubmit.zizmor_command(), "Zizmor GitHub automation", False
+        )
+
     def test_libamdf_static_analysis_scope_includes_sources_and_headers(self):
         for path in (
             "libamdf/src/allocator.c",

@@ -24,7 +24,7 @@ permissions:
 jobs:
   build:
     name: Build
-    uses: ./.github/workflows/build_loom_sdk_artifacts.yml
+    uses: $/.github/workflows/build_loom_sdk_artifacts.yml
     with:
       profile: ${{ inputs.profile }}
 
