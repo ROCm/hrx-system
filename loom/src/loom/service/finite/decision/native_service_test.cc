@@ -530,7 +530,7 @@ TEST_F(NativeDecisionServiceTest, StopDuringPreparationJoinsInputBorrowers) {
 
 TEST_F(NativeDecisionServiceTest, NativeCallerUsesExecutorWithoutHostPolling) {
   Owner owner(*this);
-  ASSERT_NO_FATAL_FAILURE(owner.Call([&] {
+  auto admit_requests = [&] {
     EXPECT_FALSE(
         interface_.runtime.vtable->has_requests(interface_.runtime.self));
     ASSERT_NO_FATAL_FAILURE(Open(0));
@@ -540,12 +540,13 @@ TEST_F(NativeDecisionServiceTest, NativeCallerUsesExecutorWithoutHostPolling) {
     for (size_t i = 0; i < 2; ++i) {
       loom_service_finite_call_set_observer(calls_[i], {Wake, this});
     }
-  }));
+  };
+  ASSERT_NO_FATAL_FAILURE(owner.Call(admit_requests));
   owner.WaitUntil([&] {
     return loom_service_finite_call_is_complete(calls_[0]) &&
            loom_service_finite_call_is_complete(calls_[1]);
   });
-  ASSERT_NO_FATAL_FAILURE(owner.Call([&] {
+  auto verify_results_and_admit = [&] {
     IREE_ASSERT_OK(loom_service_finite_call_status(calls_[0]));
     IREE_ASSERT_OK(loom_service_finite_call_status(calls_[1]));
     EXPECT_FALSE(
@@ -560,7 +561,8 @@ TEST_F(NativeDecisionServiceTest, NativeCallerUsesExecutorWithoutHostPolling) {
     EXPECT_EQ(loom_service_finite_result_ready(first->result).values[1], 0u);
     ASSERT_NO_FATAL_FAILURE(Open(2));
     loom_service_finite_call_set_observer(calls_[2], {Wake, this});
-  }));
+  };
+  ASSERT_NO_FATAL_FAILURE(owner.Call(verify_results_and_admit));
   owner.WaitUntil(
       [&] { return loom_service_finite_call_is_complete(calls_[2]); });
   owner.Call(
@@ -573,13 +575,14 @@ TEST_F(NativeDecisionServiceTest, JsonResponseOutlivesModelAndResourceOwner) {
       retained(nullptr, loom_service_finite_call_close);
   {
     Owner owner(*this);
-    ASSERT_NO_FATAL_FAILURE(owner.Call([&] {
+    auto admit_requests = [&] {
       for (size_t i = 0; i < 2; ++i) {
         ASSERT_NO_FATAL_FAILURE(
             Open(i, kRequest, LOOM_SERVICE_FINITE_OUTPUT_JSON));
         loom_service_finite_call_set_observer(calls_[i], {Wake, this});
       }
-    }));
+    };
+    ASSERT_NO_FATAL_FAILURE(owner.Call(admit_requests));
     owner.WaitUntil([&] {
       return loom_service_finite_call_is_complete(calls_[0]) &&
              loom_service_finite_call_is_complete(calls_[1]);
