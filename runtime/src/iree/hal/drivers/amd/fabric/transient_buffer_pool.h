@@ -34,6 +34,8 @@ typedef struct iree_hal_amd_fabric_transient_buffer_pool_t {
   iree_allocator_t host_allocator;
   // Serializes acquisition, available-list publication, and chunk retirement.
   iree_slim_mutex_t mutex;
+  // Coalesces cache misses; cached acquisition and release never take it.
+  iree_slim_mutex_t growth_mutex;
   // Chunks with available slots, directly indexed by slot size.
   iree_hal_amd_fabric_transient_buffer_chunk_t*
       available[IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_CLASS_COUNT];

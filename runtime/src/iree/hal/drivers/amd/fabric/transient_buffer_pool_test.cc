@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <barrier>
+#include <semaphore>
 #include <thread>
 #include <vector>
 
@@ -32,6 +33,11 @@ class TransientBufferPoolTest : public ::testing::Test {
                                const void* params, void** inout_pointer) {
     auto* self = static_cast<TransientBufferPoolTest*>(user_data);
     const bool had_pointer = *inout_pointer != nullptr;
+    if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+        self->pause_growth_.exchange(false)) {
+      self->growth_entered_.release();
+      self->resume_growth_.acquire();
+    }
     if (command != IREE_ALLOCATOR_COMMAND_FREE && self->fail_growth_) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "chunk growth");
     }
@@ -65,6 +71,12 @@ class TransientBufferPoolTest : public ::testing::Test {
   std::atomic<size_t> live_{0};
   // Failure injection, changed only while no thread uses the allocator.
   bool fail_growth_ = false;
+  // Pauses exactly one allocator call before allocation or failure.
+  std::atomic<bool> pause_growth_{false};
+  // Readiness boundary while the growth caller owns no published chunk.
+  std::binary_semaphore growth_entered_{0};
+  // Resumes the allocator after independent reuse and retirement complete.
+  std::binary_semaphore resume_growth_{0};
 };
 
 TEST_F(TransientBufferPoolTest, CapacityAlignmentAndLargeTables) {
@@ -183,6 +195,112 @@ TEST_F(TransientBufferPoolTest, FailedGrowthPreservesExistingSlots) {
                         iree_hal_amd_fabric_transient_buffer_pool_acquire(
                             &pool_, SIZE_MAX, 1, &failed));
   EXPECT_EQ(allocations_.load(), 1u);
+}
+
+TEST_F(TransientBufferPoolTest, CachedReuseReturnAndTrimProgressDuringGrowth) {
+  iree_hal_amd_fabric_transient_buffer_slots_t full, cached, growing;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_transient_buffer_pool_acquire(
+      &pool_, 32768, 64, &full));
+  IREE_ASSERT_OK(iree_hal_amd_fabric_transient_buffer_pool_acquire(&pool_, 512,
+                                                                   1, &cached));
+  pause_growth_ = true;
+  std::thread grower([&] {
+    IREE_EXPECT_OK(iree_hal_amd_fabric_transient_buffer_pool_acquire(
+        &pool_, 65536, 1, &growing));
+  });
+  growth_entered_.acquire();
+
+  // Reinsert a formerly full chunk, reuse it, and trim another empty class
+  // before allowing the allocator to finish the new class's backing.
+  iree_hal_amd_fabric_transient_buffer_pool_release(full.chunk, full.data);
+  iree_hal_amd_fabric_transient_buffer_slots_t reused;
+  IREE_EXPECT_OK(iree_hal_amd_fabric_transient_buffer_pool_acquire(
+      &pool_, 32768, 1, &reused));
+  EXPECT_EQ(reused.data, full.data);
+  Release(cached);
+  iree_hal_amd_fabric_transient_buffer_pool_trim(&pool_);
+  EXPECT_EQ(live_.load(), 1u);
+  EXPECT_EQ(allocations_.load(), 2u);
+
+  resume_growth_.release();
+  grower.join();
+  EXPECT_EQ(allocations_.load(), 3u);
+  Release(full);
+  Release(growing);
+}
+
+TEST_F(TransientBufferPoolTest,
+       GrowthPreservesChunksReturnedBeforePublication) {
+  iree_hal_amd_fabric_transient_buffer_slots_t full, growing;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_transient_buffer_pool_acquire(
+      &pool_, 32768, 64, &full));
+  pause_growth_ = true;
+  std::thread grower([&] {
+    IREE_EXPECT_OK(iree_hal_amd_fabric_transient_buffer_pool_acquire(
+        &pool_, 32768, 1, &growing));
+  });
+  growth_entered_.acquire();
+  Release(full);
+  resume_growth_.release();
+  grower.join();
+  EXPECT_NE(growing.chunk, full.chunk);
+  EXPECT_EQ(live_.load(), 2u);
+  // Trim can reach the returned chunk behind the newly published one, and
+  // cannot reclaim the new chunk's acquired slot.
+  iree_hal_amd_fabric_transient_buffer_pool_trim(&pool_);
+  EXPECT_EQ(live_.load(), 1u);
+  memset(growing.data, 0xA5, growing.stride);
+  Release(growing);
+}
+
+TEST_F(TransientBufferPoolTest, FailedGrowthPreservesConcurrentReturns) {
+  iree_hal_amd_fabric_transient_buffer_slots_t full, failed;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_transient_buffer_pool_acquire(
+      &pool_, 32768, 64, &full));
+  fail_growth_ = true;
+  pause_growth_ = true;
+  std::thread grower([&] {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          iree_hal_amd_fabric_transient_buffer_pool_acquire(
+                              &pool_, 32768, 1, &failed));
+  });
+  growth_entered_.acquire();
+  iree_hal_amd_fabric_transient_buffer_pool_release(full.chunk, full.data);
+  resume_growth_.release();
+  grower.join();
+  EXPECT_EQ(failed.chunk, nullptr);
+  EXPECT_EQ(failed.count, 0u);
+  iree_hal_amd_fabric_transient_buffer_slots_t reused;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_transient_buffer_pool_acquire(
+      &pool_, 32768, 1, &reused));
+  EXPECT_EQ(reused.data, full.data);
+  EXPECT_EQ(allocations_.load(), 1u);
+  Release(full);
+}
+
+TEST_F(TransientBufferPoolTest, ConcurrentGrowthRequestsShareOneChunk) {
+  iree_hal_amd_fabric_transient_buffer_slots_t first, second;
+  pause_growth_ = true;
+  std::thread first_grower([&] {
+    IREE_EXPECT_OK(iree_hal_amd_fabric_transient_buffer_pool_acquire(
+        &pool_, 512, 1, &first));
+  });
+  growth_entered_.acquire();
+  std::binary_semaphore second_entered(0);
+  std::thread second_grower([&] {
+    second_entered.release();
+    IREE_EXPECT_OK(iree_hal_amd_fabric_transient_buffer_pool_acquire(
+        &pool_, 512, 1, &second));
+  });
+  second_entered.acquire();
+  resume_growth_.release();
+  first_grower.join();
+  second_grower.join();
+  EXPECT_EQ(allocations_.load(), 1u);
+  EXPECT_EQ(first.chunk, second.chunk);
+  EXPECT_NE(first.data, second.data);
+  Release(first);
+  Release(second);
 }
 
 TEST_F(TransientBufferPoolTest, ConcurrentReuseReleaseAndTrim) {

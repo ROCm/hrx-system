@@ -44,6 +44,7 @@ void iree_hal_amd_fabric_transient_buffer_pool_initialize(
   memset(out_pool, 0, sizeof(*out_pool));
   out_pool->host_allocator = host_allocator;
   iree_slim_mutex_initialize(&out_pool->mutex);
+  iree_slim_mutex_initialize(&out_pool->growth_mutex);
 }
 
 void iree_hal_amd_fabric_transient_buffer_pool_trim(
@@ -79,11 +80,13 @@ void iree_hal_amd_fabric_transient_buffer_pool_deinitialize(
   iree_hal_amd_fabric_transient_buffer_pool_trim(pool);
   IREE_ASSERT(pool->chunk_count == 0,
               "transient buffer storage still has live slots");
+  iree_slim_mutex_deinitialize(&pool->growth_mutex);
   iree_slim_mutex_deinitialize(&pool->mutex);
 }
 
-// The pool lock serializes cold growth with available-list publication.
-static iree_status_t iree_hal_amd_fabric_transient_buffer_pool_grow(
+// Initializes private storage without excluding cached acquisition or release.
+// Publication and the first slot acquisition happen together under pool->mutex.
+static iree_status_t iree_hal_amd_fabric_transient_buffer_chunk_allocate(
     iree_hal_amd_fabric_transient_buffer_pool_t* pool, uint32_t slot_shift,
     iree_hal_amd_fabric_transient_buffer_chunk_t** out_chunk) {
   const iree_host_size_t slot_size = (iree_host_size_t)1 << slot_shift;
@@ -137,7 +140,6 @@ static iree_status_t iree_hal_amd_fabric_transient_buffer_pool_grow(
   }
   IREE_ASAN_POISON_MEMORY_REGION((uint8_t*)chunk + data_offset,
                                  slot_size * slot_count);
-  ++pool->chunk_count;
   *out_chunk = chunk;
   return iree_ok_status();
 }
@@ -160,11 +162,25 @@ iree_status_t iree_hal_amd_fabric_transient_buffer_pool_acquire(
   iree_hal_amd_fabric_transient_buffer_chunk_t* chunk = pool->available[index];
   iree_status_t status = iree_ok_status();
   if (!chunk) {
-    status = iree_hal_amd_fabric_transient_buffer_pool_grow(pool, slot_shift,
-                                                            &chunk);
-    if (iree_status_is_ok(status)) {
-      pool->available[index] = chunk;
+    iree_slim_mutex_unlock(&pool->mutex);
+    iree_slim_mutex_lock(&pool->growth_mutex);
+    iree_slim_mutex_lock(&pool->mutex);
+    // A prior grower or a returning slot may already have supplied this class.
+    chunk = pool->available[index];
+    if (!chunk) {
+      iree_slim_mutex_unlock(&pool->mutex);
+      status = iree_hal_amd_fabric_transient_buffer_chunk_allocate(
+          pool, slot_shift, &chunk);
+      iree_slim_mutex_lock(&pool->mutex);
+      if (iree_status_is_ok(status)) {
+        // Preserve chunks returned while allocation was in progress. Keep
+        // exclusion through the first claim so trim cannot reclaim this chunk.
+        chunk->next = pool->available[index];
+        pool->available[index] = chunk;
+        ++pool->chunk_count;
+      }
     }
+    iree_slim_mutex_unlock(&pool->growth_mutex);
   }
   if (iree_status_is_ok(status)) {
     // A free bit can precede its count publication. Limiting acquisition to
