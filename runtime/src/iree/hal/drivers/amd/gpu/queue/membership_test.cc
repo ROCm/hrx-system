@@ -7,7 +7,9 @@
 #include "iree/hal/drivers/amd/gpu/queue/membership.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <functional>
+#include <mutex>
 #include <semaphore>
 #include <thread>
 
@@ -15,6 +17,41 @@
 #include "iree/testing/status_matchers.h"
 
 namespace {
+
+// Native events coalesce signals. A counting semaphore would preserve stale
+// wakes and could hide a missing notification after a source-table handoff.
+class NativeEvent {
+ public:
+  void Wait() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    waiting_ = true;
+    condition_.notify_all();
+    condition_.wait(lock, [&] { return signaled_; });
+    signaled_ = false;
+    waiting_ = false;
+  }
+
+  void Signal() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    signaled_ = true;
+    condition_.notify_all();
+  }
+
+  void AwaitIdle() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return waiting_ && !signaled_; });
+  }
+
+ private:
+  // Serializes native event state and dependency observation.
+  std::mutex mutex_;
+  // Observes actual wait entry without elapsed-time readiness assumptions.
+  std::condition_variable condition_;
+  // A pending wake, consumed once regardless of how many signals preceded it.
+  bool signaled_ = false;
+  // Whether the sole completion worker is inside the native wait boundary.
+  bool waiting_ = false;
+};
 
 // The protocol queue is a dependency. The actual membership implementation
 // owns construction, worker/source handoffs, final release, and terminal joins.
@@ -45,11 +82,11 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
     context_.event_sink = {[](void*, const iree_hal_device_event_t*) {},
                            nullptr};
     gpu_.event_wait = [](amdf_gpu_event_t* event, uint64_t) {
-      reinterpret_cast<MembershipTest*>(event)->event_.acquire();
+      reinterpret_cast<MembershipTest*>(event)->event_.Wait();
       return AMDF_STATUS_OK;
     };
     gpu_.event_signal = [](amdf_gpu_event_t* event) {
-      reinterpret_cast<MembershipTest*>(event)->event_.release();
+      reinterpret_cast<MembershipTest*>(event)->event_.Signal();
       return AMDF_STATUS_OK;
     };
     vtable_.destroy = [](iree_hal_queue_t* base) {
@@ -242,8 +279,8 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
   Queue provisioned_;
   // Borrowed provisioned array entry.
   iree_hal_queue_t* provisioned_ptr_ = nullptr;
-  // Persistent native event notifications.
-  std::counting_semaphore<> event_{0};
+  // Coalescing native notification shared by GPU completion and host wakes.
+  NativeEvent event_;
   // Admission closure receipt, without elapsed-time readiness assumptions.
   std::counting_semaphore<> closed_{0};
   // Observation of accepted work that still requires its retirement proof.
@@ -267,6 +304,74 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
   // Native scratch detachment dependency, borrowing a live queue.
   std::function<void(Queue*)> trim_;
 };
+
+TEST_P(MembershipTest, IdleQueueReleaseRearmsRetainedDownload) {
+  struct Download {
+    // Arms preemption inside the next bounded completion metadata check.
+    std::atomic<bool> pause{false};
+    // Observes the worker before a membership change requests replacement.
+    std::binary_semaphore entered{0};
+    // Resumes observation with ready bytes while replacement is pending.
+    std::binary_semaphore resume{0};
+    // Receives final CPU-copy completion without another device event.
+    std::binary_semaphore copied{0};
+    // Worker-owned ready-copy predicate, cleared after the transform.
+    bool ready = false;
+  } download;
+  membership_.completion_tail_count = 1;
+  membership_.completion_tail[0] = {
+      .fn =
+          [](void* user_data, amdf_status_t,
+             iree_hal_amd_gpu_completion_scope_t*,
+             iree_hal_amd_gpu_completion_wait_t*,
+             iree_hal_amd_gpu_completion_copy_t* out_copy) {
+            auto* download = static_cast<Download*>(user_data);
+            if (download->pause.exchange(false)) {
+              // Model scheduler preemption during the short metadata check,
+              // before the worker can accept the copy outside exclusion.
+              download->entered.release();
+              download->resume.acquire();
+              download->ready = true;
+            }
+            if (download->ready && out_copy) {
+              *out_copy = {
+                  .fn =
+                      [](void* user_data) {
+                        auto* download = static_cast<Download*>(user_data);
+                        download->ready = false;
+                        download->copied.release();
+                      },
+                  .user_data = download,
+              };
+            }
+            return false;
+          },
+      .user_data = &download,
+  };
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* queue = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &queue));
+  event_.AwaitIdle();
+  download.pause.store(true);
+  EXPECT_EQ(iree_hal_amd_gpu_context_signal(&context_), AMDF_STATUS_OK);
+  download.entered.acquire();
+  const int32_t observing_state =
+      iree_atomic_load(&completion_.state, iree_memory_order_acquire);
+  std::jthread releaser([&] { iree_hal_queue_release(queue); });
+  while (iree_atomic_load(&completion_.state, iree_memory_order_acquire) ==
+         observing_state) {
+    std::this_thread::yield();
+  }
+  // Replacement excludes this round's new copy borrow. The membership owner
+  // must wake retained sources after swapping tables, even for idle removal.
+  download.resume.release();
+  releaser.join();
+  download.copied.acquire();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(destroyed_.load(), 1u);
+}
 
 TEST_P(MembershipTest, CompletionCallbackCanAcquireAndReleaseAnIdleQueue) {
   iree_hal_queue_params_t params;

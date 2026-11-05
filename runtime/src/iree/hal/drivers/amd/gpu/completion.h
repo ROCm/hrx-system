@@ -194,9 +194,11 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
 // copies, and coherent observations using the old table. Retained callbacks
 // continue with their ownership retargeted to the replacement. Interrupts
 // observation, including an infinite observation policy, without stopping the
-// worker or invoking a native API. The cold owner then signals the context's
-// native event to rebuild wake hints for remaining queues and handles any
-// native wake failure. The replacement remains live until the next replacement
+// worker or invoking a native API. After every replacement, including removal
+// of idle sources, the owner signals the context's native event to revisit
+// retained work and rebuild wake hints, and handles any native wake failure.
+// The worker may consume an earlier event while replacement excludes its drain
+// or a ready copy. The replacement remains live until the next replacement
 // or deinitialization; it is a distinct array with initially empty wait hints.
 // Callback/user-data pairs uniquely identify sources, and retained sources keep
 // their relative order. The cold owner serializes
