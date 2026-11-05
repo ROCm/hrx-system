@@ -9,7 +9,7 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=loom/docs/examples/example.shlib
-source "${script_dir}/../../example.shlib"
+source "${LOOM_EXAMPLE_LIBRARY:-${script_dir}/../../example.shlib}"
 repo_root="${LOOM_EXAMPLE_REPO_ROOT}"
 loom_example_configure_inputs \
   --config=loom-importer-cxx \
