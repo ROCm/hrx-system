@@ -26,7 +26,7 @@
 static const loom_pass_info_t kPipelineOutlinePassInfo = {
     .name = IREE_SVL("outline-pipeline-strands"),
     .description =
-        IREE_SVL("Outline strand bodies with typed capture arguments."),
+        IREE_SVL("Outline lexical pipeline bodies with typed captures."),
     .kind = LOOM_PASS_MODULE,
 };
 
@@ -35,10 +35,15 @@ const loom_pass_info_t* loom_pipeline_outline_pass_info(void) {
 }
 
 typedef struct loom_pipeline_outline_entry_t {
-  // Source declaration whose body becomes an ordinary callable.
-  loom_op_t* strand;
-  // Stable worker environment retained before the construction is changed.
-  const loom_target_facts_t* target_facts;
+  // Source strand or concurrent graph whose body becomes a callable.
+  loom_op_t* declaration;
+  // The declaration kind selects its retained execution context.
+  union {
+    // Enclosing pipeline carrying a concurrent graph's target requirements.
+    const loom_op_t* pipeline;
+    // Stable strand environment retained before construction changes.
+    const loom_target_facts_t* target_facts;
+  } context;
 } loom_pipeline_outline_entry_t;
 
 typedef struct loom_pipeline_outline_collection_t {
@@ -50,11 +55,13 @@ typedef struct loom_pipeline_outline_collection_t {
   iree_arena_allocator_t* target_arena;
   // Canonical target scopes seeded during the construction traversal.
   loom_value_fact_table_t* facts;
-  // Strands in preorder; reverse consumption factors nested declarations first.
-  loom_pipeline_outline_entry_t* strands;
-  // Number of initialized strand entries.
+  // Enclosing pipeline currently being inventoried.
+  const loom_op_t* pipeline;
+  // Lexical bodies in preorder; reverse consumption factors inner bodies first.
+  loom_pipeline_outline_entry_t* entries;
+  // Number of initialized lexical-body entries.
   iree_host_size_t count;
-  // Allocated strand entries.
+  // Allocated lexical-body entries.
   iree_host_size_t capacity;
 } loom_pipeline_outline_collection_t;
 
@@ -66,12 +73,14 @@ static iree_status_t loom_pipeline_outline_collect(
   loom_pipeline_outline_collection_t* collection = user_data;
   IREE_RETURN_IF_ERROR(loom_value_fact_table_seed_nested_target_scopes(
       collection->facts, collection->module, op));
-  if (!loom_pipeline_strand_isa(op)) {
+  const bool concurrent = loom_pipeline_concurrent_isa(op);
+  if (!concurrent && !loom_pipeline_strand_isa(op)) {
     return iree_ok_status();
   }
-  loom_region_t* body = loom_pipeline_strand_body(op);
+  loom_region_t* body = concurrent ? loom_pipeline_concurrent_body(op)
+                                   : loom_pipeline_strand_body(op);
   const loom_op_t* first = loom_region_entry_block(body)->first_op;
-  if (body->block_count == 1 &&
+  if (!concurrent && body->block_count == 1 &&
       (loom_pipeline_end_isa(first) ||
        (loom_func_call_isa(first) && loom_pipeline_end_isa(first->next_op)))) {
     return iree_ok_status();
@@ -79,32 +88,38 @@ static iree_status_t loom_pipeline_outline_collect(
   if (collection->count == collection->capacity) {
     IREE_RETURN_IF_ERROR(iree_arena_grow_array(
         collection->arena, collection->count, collection->count + 1,
-        sizeof(*collection->strands), &collection->capacity,
-        (void**)&collection->strands));
+        sizeof(*collection->entries), &collection->capacity,
+        (void**)&collection->entries));
   }
   loom_target_facts_t* target_facts = NULL;
-  const loom_target_facts_t* source_target =
-      loom_value_fact_table_block_target_facts(collection->facts,
-                                               loom_region_entry_block(body));
-  if (source_target != NULL) {
-    IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(
-        source_target, collection->target_arena, &target_facts));
+  if (!concurrent) {
+    const loom_target_facts_t* source_target =
+        loom_value_fact_table_block_target_facts(collection->facts,
+                                                 loom_region_entry_block(body));
+    if (source_target != NULL) {
+      IREE_RETURN_IF_ERROR(loom_target_facts_builder_clone(
+          source_target, collection->target_arena, &target_facts));
+    }
   }
-  collection->strands[collection->count++] = (loom_pipeline_outline_entry_t){
-      .strand = op,
-      .target_facts = target_facts,
-  };
+  loom_pipeline_outline_entry_t* entry =
+      &collection->entries[collection->count++];
+  entry->declaration = op;
+  if (concurrent) {
+    entry->context.pipeline = collection->pipeline;
+  } else {
+    entry->context.target_facts = target_facts;
+  }
   return iree_ok_status();
 }
 
 static iree_status_t loom_pipeline_outline_symbol(
     loom_module_t* module, loom_symbol_map_t* names,
-    iree_arena_allocator_t* arena, uint32_t* next_name,
+    iree_arena_allocator_t* arena, const char* role, uint32_t* next_name,
     loom_symbol_ref_t* out_symbol) {
   loom_string_id_t name = LOOM_STRING_ID_INVALID;
   do {
     char text[48];
-    iree_snprintf(text, sizeof(text), "__pipeline_strand_%u", (*next_name)++);
+    iree_snprintf(text, sizeof(text), "__pipeline_%s_%u", role, (*next_name)++);
     IREE_RETURN_IF_ERROR(
         loom_module_intern_string(module, iree_make_cstring_view(text), &name));
   } while (loom_symbol_map_find(names, name) != LOOM_SYMBOL_ID_INVALID);
@@ -115,13 +130,16 @@ static iree_status_t loom_pipeline_outline_symbol(
   return iree_ok_status();
 }
 
-static iree_status_t loom_pipeline_outline_strand(loom_rewriter_t* rewriter,
-                                                  loom_op_t* strand,
-                                                  loom_symbol_ref_t symbol,
-                                                  iree_arena_allocator_t* arena,
-                                                  loom_op_t** out_function) {
+static iree_status_t loom_pipeline_outline_body(
+    loom_rewriter_t* rewriter, const loom_pipeline_outline_entry_t* outline,
+    loom_symbol_ref_t symbol, iree_arena_allocator_t* arena,
+    loom_op_t** out_function) {
   loom_module_t* module = rewriter->module;
-  loom_region_t* source_body = loom_pipeline_strand_body(strand);
+  loom_op_t* declaration = outline->declaration;
+  const bool concurrent = loom_pipeline_concurrent_isa(declaration);
+  loom_region_t* source_body = concurrent
+                                   ? loom_pipeline_concurrent_body(declaration)
+                                   : loom_pipeline_strand_body(declaration);
   loom_local_value_domain_t domain;
   IREE_RETURN_IF_ERROR(loom_local_value_domain_acquire_for_region_tree(
       module, source_body, arena, &domain));
@@ -140,14 +158,27 @@ static iree_status_t loom_pipeline_outline_strand(loom_rewriter_t* rewriter,
   loom_builder_initialize(module, &module->arena, loom_module_block(module),
                           &builder);
   loom_op_t* function = NULL;
-  IREE_RETURN_IF_ERROR(loom_func_def_build(
-      &builder, LOOM_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY, 0, /*linkage=*/0, 0,
-      0, 0, 0, LOOM_INLINE_POLICY_INLINE, loom_symbol_ref_null(),
-      /*source_signature=*/loom_attr_absent(), 0, loom_named_attr_slice_empty(),
-      LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), symbol,
-      capture_types, capture_count, NULL, 0, NULL, 0, NULL, 0, strand->location,
-      &function));
-  loom_region_t* target_body = loom_func_def_body(function);
+  if (concurrent) {
+    loom_pipeline_def_build_flags_t flags = 0;
+    loom_symbol_ref_t target = loom_symbol_ref_null();
+    if (loom_pipeline_def_has_target(outline->context.pipeline)) {
+      flags |= LOOM_PIPELINE_DEF_BUILD_FLAG_HAS_TARGET;
+      target = loom_pipeline_def_target(outline->context.pipeline);
+    }
+    IREE_RETURN_IF_ERROR(loom_pipeline_def_build(
+        &builder, flags, 0, 0, 0, target, symbol, NULL, 0, capture_types,
+        capture_count, NULL, 0, declaration->location, &function));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_func_def_build(
+        &builder, LOOM_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY, 0, /*linkage=*/0,
+        0, 0, 0, 0, LOOM_INLINE_POLICY_INLINE, loom_symbol_ref_null(),
+        /*source_signature=*/loom_attr_absent(), 0,
+        loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
+        loom_named_attr_slice_empty(), symbol, capture_types, capture_count,
+        NULL, 0, NULL, 0, NULL, 0, declaration->location, &function));
+  }
+  loom_region_t* target_body = concurrent ? loom_pipeline_def_body(function)
+                                          : loom_func_def_body(function);
   loom_block_t* entry = loom_region_entry_block(target_body);
   IREE_RETURN_IF_ERROR(loom_module_assign_value_types(
       module, captures, entry->arg_ids, capture_count));
@@ -162,13 +193,46 @@ static iree_status_t loom_pipeline_outline_strand(loom_rewriter_t* rewriter,
   IREE_RETURN_IF_ERROR(loom_ir_remap_map_values(&remap, captures,
                                                 entry->arg_ids, capture_count));
 
+  if (concurrent) {
+    // The graph remains single-block construction. Moving its operations into
+    // the parameter block preserves allocation lifetimes without a CFG wrapper.
+    loom_block_t* source = loom_region_entry_block(source_body);
+    iree_status_t status = iree_ok_status();
+    for (loom_op_t* op = source->first_op; op && iree_status_is_ok(status);) {
+      loom_op_t* next = op->next_op;
+      if (loom_pipeline_yield_isa(op)) {
+        status = loom_rewriter_erase(rewriter, op);
+      } else {
+        status = loom_rewriter_move_to_block_end(rewriter, op, entry, function);
+        if (iree_status_is_ok(status)) {
+          status = loom_ir_remap_op_references(rewriter, op, &remap);
+        }
+      }
+      op = next;
+    }
+    IREE_RETURN_IF_ERROR(status);
+    loom_builder_enter_region(&builder, function, target_body);
+    loom_op_t* finish = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_pipeline_finish_build(&builder, declaration->location, &finish));
+    loom_builder_set_before(&rewriter->builder, declaration);
+    loom_op_t* composition = NULL;
+    IREE_RETURN_IF_ERROR(loom_pipeline_compose_build(
+        &rewriter->builder, symbol, NULL, 0, captures, capture_count,
+        declaration->location, &composition));
+    IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, declaration));
+    *out_function = function;
+    return iree_ok_status();
+  }
+
   loom_block_t* moved_entry = NULL;
-  IREE_RETURN_IF_ERROR(loom_rewriter_move_region_blocks(
-      rewriter, source_body, strand, target_body, 1, function, &moved_entry));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_move_region_blocks(rewriter, source_body, declaration,
+                                       target_body, 1, function, &moved_entry));
   loom_builder_enter_region(&builder, function, target_body);
   loom_op_t* branch = NULL;
   IREE_RETURN_IF_ERROR(loom_cfg_br_build(&builder, moved_entry, NULL, 0,
-                                         strand->location, &branch));
+                                         declaration->location, &branch));
   for (uint16_t i = 1; i < target_body->block_count; ++i) {
     loom_block_t* block = target_body->blocks[i];
     for (uint16_t a = 0; a < block->arg_count; ++a) {
@@ -192,14 +256,14 @@ static iree_status_t loom_pipeline_outline_strand(loom_rewriter_t* rewriter,
       op = next;
     }
   }
-  loom_builder_enter_region(&rewriter->builder, strand, source_body);
+  loom_builder_enter_region(&rewriter->builder, declaration, source_body);
   loom_op_t* call = NULL;
   IREE_RETURN_IF_ERROR(loom_func_call_build(
       &rewriter->builder, 0, 0, 0, 0, symbol, captures, capture_count, NULL, 0,
-      NULL, 0, strand->location, &call));
+      NULL, 0, declaration->location, &call));
   loom_op_t* end = NULL;
   IREE_RETURN_IF_ERROR(
-      loom_pipeline_end_build(&rewriter->builder, strand->location, &end));
+      loom_pipeline_end_build(&rewriter->builder, declaration->location, &end));
   *out_function = function;
   return iree_ok_status();
 }
@@ -299,6 +363,7 @@ iree_status_t loom_pipeline_outline_run(loom_pass_t* pass,
         loom_pass_value_fact_scope_function_for_target(function, target_facts),
         &collection.facts));
     loom_region_t* body = loom_pipeline_def_body(definition);
+    collection.pipeline = definition;
     IREE_RETURN_IF_ERROR(loom_value_fact_table_seed_root_target_scope(
         collection.facts, module, body, definition));
     loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
@@ -325,18 +390,20 @@ iree_status_t loom_pipeline_outline_run(loom_pass_t* pass,
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = collection.count;
        i > 0 && iree_status_is_ok(status); --i) {
-    const loom_pipeline_outline_entry_t* entry = &collection.strands[i - 1];
+    const loom_pipeline_outline_entry_t* entry = &collection.entries[i - 1];
+    const bool concurrent = loom_pipeline_concurrent_isa(entry->declaration);
     loom_symbol_ref_t symbol = loom_symbol_ref_null();
     status = loom_pipeline_outline_symbol(module, &names, pass->arena,
+                                          concurrent ? "concurrent" : "strand",
                                           &next_name, &symbol);
     if (iree_status_is_ok(status)) {
       loom_op_t* function = NULL;
-      status = loom_pipeline_outline_strand(&rewriter, entry->strand, symbol,
-                                            pass->arena, &function);
-      if (iree_status_is_ok(status)) {
+      status = loom_pipeline_outline_body(&rewriter, entry, symbol, pass->arena,
+                                          &function);
+      if (iree_status_is_ok(status) && !concurrent) {
         status = loom_pipeline_outline_register_worker(
-            pass, module, function, entry->target_facts, environment, versions,
-            &next_target_context);
+            pass, module, function, entry->context.target_facts, environment,
+            versions, &next_target_context);
       }
     }
   }

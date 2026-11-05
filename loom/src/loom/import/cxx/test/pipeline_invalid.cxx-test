@@ -302,16 +302,10 @@ using Bytes = loom::type::buffer<unsigned char>;
 }
 
 // ====
-[[loom::pipeline]] void concurrent_child() {
-  // ERROR@+1: LOWERING/059 "pipeline schedules support serial regions only"
-  [[loom::concurrent]] {}
-}
-
-// ====
 #include <loomcxx/pipeline.h>
 [[loom::pipeline]] void nested_in_strand() {
   [[loom::strand(loom::type::indices{loom::type::index{0}, loom::type::index{2}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}})]] {
-    // ERROR@+1: LOWERING/059 "pipeline serial regions belong outside strands"
+    // ERROR@+1: LOWERING/059 "pipeline schedule regions belong outside strands"
     [[loom::serial]] {}
   }
 }
@@ -373,4 +367,25 @@ namespace loomt = loom::type;
     // ERROR@+1: LOWERING/059 "pipeline strands cannot exit an enclosing loop"
     [[loom::strand(loomt::indices{loomt::index{0}}, loomt::indices{loomt::index{1}}, loomt::indices{loomt::index{1}})]] { continue; }
   }
+}
+
+// ====
+#include <loomcxx/pipeline.h>
+[[loom::pipeline]] void concurrent_in_strand() {
+  [[loom::strand(loom::type::indices{loom::type::index{0}}, loom::type::indices{loom::type::index{1}}, loom::type::indices{loom::type::index{1}})]] {
+    // ERROR@+1: LOWERING/059 "pipeline schedule regions belong outside strands"
+    [[loom::concurrent]] {}
+  }
+}
+
+// ====
+[[loom::pipeline]] void concurrent_mutation([[loom::launch]] unsigned value) {
+  // ERROR@+1: LOWERING/059 "schedule regions cannot update enclosing automatic values because they have no results"
+  [[loom::concurrent]] { ++value; }
+}
+
+// ====
+[[loom::pipeline]] void concurrent_return() {
+  // ERROR@+1: LOWERING/059 "schedule regions cannot contain function returns"
+  [[loom::concurrent]] { return; }
 }

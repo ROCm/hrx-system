@@ -638,7 +638,11 @@ static iree_status_t loom_symbol_reference_visit_region(
         loom_symbol_reference_source_scope_t child_source_scope =
             nested_source_scope;
         child_source_scope.has_path_condition |= loom_scf_if_isa(op);
-        child_source_scope.serial_schedule |= loom_pipeline_serial_isa(op);
+        if (loom_pipeline_serial_isa(op)) {
+          child_source_scope.serial_schedule = true;
+        } else if (loom_pipeline_concurrent_isa(op)) {
+          child_source_scope.serial_schedule = false;
+        }
         if (op_symbol_id != LOOM_SYMBOL_ID_INVALID) {
           child_source_scope.root_region_index_plus_one = (uint8_t)(i + 1);
         }

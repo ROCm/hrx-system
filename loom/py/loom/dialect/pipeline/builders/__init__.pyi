@@ -88,3 +88,9 @@ class PipelineBuilder(DialectBuilder):
         *,
         location_id: int | None = ...,
     ) -> None: ...
+    def concurrent(
+        self,
+        *,
+        body: Region | None = ...,
+        location_id: int | None = ...,
+    ) -> None: ...

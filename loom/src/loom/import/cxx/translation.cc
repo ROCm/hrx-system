@@ -4664,10 +4664,7 @@ class Translator final : private Initialization::Evaluation {
            "schedule regions require a command_program or pipeline body");
     }
     if (pipeline && pipeline_strand_depth_) {
-      fail(schedule.body, "pipeline serial regions belong outside strands");
-    }
-    if (pipeline && schedule.kind != ScheduleRegion::Kind::Serial) {
-      fail(schedule.body, "pipeline schedules support serial regions only");
+      fail(schedule.body, "pipeline schedule regions belong outside strands");
     }
     if (!live_mutations(schedule.body).empty()) {
       fail(schedule.body,
@@ -4677,10 +4674,14 @@ class Translator final : private Initialization::Evaluation {
 
     loom_op_t* op;
     loom_region_t* region;
-    if (pipeline) {
+    if (pipeline && schedule.kind == ScheduleRegion::Kind::Serial) {
       check(loom_pipeline_serial_build(&builder_, locations_.get(schedule.body),
                                        &op));
       region = loom_pipeline_serial_body(op);
+    } else if (pipeline) {
+      check(loom_pipeline_concurrent_build(&builder_,
+                                           locations_.get(schedule.body), &op));
+      region = loom_pipeline_concurrent_body(op);
     } else if (schedule.kind == ScheduleRegion::Kind::Serial) {
       check(loom_command_serial_build(&builder_, locations_.get(schedule.body),
                                       &op));

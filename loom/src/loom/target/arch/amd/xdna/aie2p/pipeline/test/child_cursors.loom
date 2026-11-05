@@ -1,6 +1,7 @@
 // A child-local FIFO starts at slot zero on every invocation. One record per
 // visit leaves the two-slot ring halfway through a turn; preserving that cursor
 // across visits would write the second slot instead of the first.
+// The lexical concurrent group owns the inlined child's protocol identities.
 aie2p.target<array> @device
 
 pipeline.def @write_record() run(%storage: buffer, %outgoing_storage: buffer, %output: buffer, %phase: index) {
@@ -41,16 +42,18 @@ pipeline.def @write_record() run(%storage: buffer, %outgoing_storage: buffer, %o
 
 pipeline.def<kernel> public retain target(@device) @fresh_records() run(%output_argument: buffer) {
   %output = buffer.assume.alignment %output_argument {minimum_alignment = 4} : buffer
-  %memory = pipeline.memory<workgroup>[0, 2] : pool
-  %bytes = index.constant 8 : offset
-  %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
-  %outgoing_storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
   %begin = index.constant 0 : index
   %count = index.constant 3 : index
   %step = index.constant 1 : index
   pipeline.serial {
     scf.for %phase = [%begin to %count step %step] {
-      pipeline.compose @write_record(%storage, %outgoing_storage, %output, %phase) : (buffer, buffer, buffer, index)
+      pipeline.concurrent {
+        %memory = pipeline.memory<workgroup>[0, 2] : pool
+        %bytes = index.constant 8 : offset
+        %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+        %outgoing_storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+        pipeline.compose @write_record(%storage, %outgoing_storage, %output, %phase) : (buffer, buffer, buffer, index)
+      }
     }
   }
 }

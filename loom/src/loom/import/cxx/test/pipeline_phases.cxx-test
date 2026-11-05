@@ -122,3 +122,55 @@ pipeline.def<kernel> public @local_exits() run(%output: buffer) {
 }
 
 pipeline.decl @child() run(%27: buffer, %28: i32)
+
+// ====
+#include <loomcxx/pipeline.h>
+using Bytes = loom::type::buffer<unsigned>;
+[[loom::pipeline]] void child([[loom::launch]] Bytes output, unsigned phase);
+[[loom::pipeline("kernel")]] void nested([[loom::launch]] Bytes output) {
+  [[loom::serial]] {
+    for (unsigned phase = 0; phase < 3; ++phase) {
+      [[loom::concurrent]] {
+        loom::pipeline::compose<child>(output, phase);
+        [[loom::serial]] {
+          loom::pipeline::compose<child>(output, phase + 1u);
+          [[loom::concurrent]] {
+            loom::pipeline::compose<child>(output, phase + 2u);
+          }
+        }
+      }
+    }
+    loom::pipeline::compose<child>(output, 3u);
+  }
+}
+
+// ----
+pipeline.def<kernel> public @nested() run(%output: buffer) {
+  pipeline.serial {
+    %phase = scalar.constant 0 : i32
+    %2 = index.cast %phase : i32 to offset
+    %3 = scalar.constant 3 : i32
+    %4 = index.cast %3 : i32 to offset
+    %5 = index.constant 1 : offset
+    scf.for %phase = [%2 to %4 step %5] {
+      %7 = index.cast %phase : offset to i32
+      pipeline.concurrent {
+        pipeline.compose @child(%output, %7) : (buffer, i32)
+        pipeline.serial {
+          %8 = scalar.constant 1 : i32
+          %9 = scalar.addi %7, %8 : i32
+          pipeline.compose @child(%output, %9) : (buffer, i32)
+          pipeline.concurrent {
+            %10 = scalar.constant 2 : i32
+            %11 = scalar.addi %7, %10 : i32
+            pipeline.compose @child(%output, %11) : (buffer, i32)
+          }
+        }
+      }
+    }
+    %12 = scalar.constant 3 : i32
+    pipeline.compose @child(%output, %12) : (buffer, i32)
+  }
+}
+
+pipeline.decl @child() run(%13: buffer, %14: i32)

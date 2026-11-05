@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/error/error_catalog.h"
+#include "loom/error/parameter.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/pipeline/ops.h"
@@ -46,9 +48,17 @@ static iree_status_t loom_test_pipeline_select(
       &realization->invocations, state->engines, 2, state->pass->arena,
       &state->execution, &conflict));
   if (conflict.second_worker != IREE_HOST_SIZE_MAX) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "test device requires independent concurrent engines");
+    *out_valid = false;
+    const loom_diagnostic_param_t parameters[] = {
+        loom_param_string(IREE_SV("independent concurrent engines"))};
+    return iree_diagnostic_emit(
+        state->pass->diagnostic_emitter,
+        &(loom_diagnostic_emission_t){
+            .op = realization->invocations.workers[conflict.second_worker]
+                      .strand->declaration,
+            .error = LOOM_ERR_LOWERING_066,
+            .params = parameters,
+            .param_count = IREE_ARRAYSIZE(parameters)});
   }
   *out_valid = true;
   return iree_ok_status();

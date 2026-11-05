@@ -1,0 +1,259 @@
+// RUN: pass inline-callables,outline-pipeline-strands,cfg-simplify,outline-pipeline-strands
+
+// Lexical graph extraction preserves dependent captures, target requirements,
+// and fresh local storage. The second outline pass is idempotent.
+target.decl @device
+
+func.decl @consume(%width: index, %payload: view<[%width]xi32>, %state: buffer)
+
+pipeline.def<kernel> public target(@device) @root(%width: index) run(%payload: view<[%width]xi32>, %pool: pool) {
+  %bytes = index.constant 32 : offset
+  pipeline.serial {
+    pipeline.concurrent {
+      %local_pool = pipeline.memory<workgroup>[0] : pool
+      %state = buffer.alloca<workgroup> pool(%local_pool) align(16) %bytes : buffer
+      pipeline.strand workers([0], [1], [1]) {
+        func.call @consume(%width, %payload, %state) : (index, view<[%width]xi32>, buffer)
+      }
+      pipeline.serial {
+        pipeline.concurrent {
+          pipeline.strand workers([1], [1], [1]) {
+            func.call @consume(%width, %payload, %state) : (index, view<[%width]xi32>, buffer)
+          }
+        }
+      }
+    }
+  }
+}
+
+// ----
+target.decl @device
+
+func.decl @consume(%width: index, %payload: view<[%width]xi32>, %state: buffer)
+
+pipeline.def<kernel> public target(@device) @root(%width: index) run(%payload: view<[%width]xi32>, %pool: pool) {
+  %bytes = index.constant 32 : offset
+  pipeline.serial {
+    pipeline.compose @__pipeline_concurrent_1(%bytes, %width, %payload) : (offset, index, view<[%width]xi32>)
+  }
+}
+
+pipeline.def target(@device) @__pipeline_concurrent_0() run(%width: index, %payload: view<[%width]xi32>, %state: buffer) {
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @consume(%width, %payload, %state) : (index, view<[%width]xi32>, buffer)
+  }
+}
+
+pipeline.def target(@device) @__pipeline_concurrent_1() run(%bytes: offset, %width: index, %payload: view<[%width]xi32>) {
+  %local_pool = pipeline.memory<workgroup>[0] : pool
+  %state = buffer.alloca<workgroup> pool(%local_pool) align(16) %bytes : buffer
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @consume(%width, %payload, %state) : (index, view<[%width]xi32>, buffer)
+  }
+  pipeline.serial {
+    pipeline.compose @__pipeline_concurrent_0(%width, %payload, %state) : (index, view<[%width]xi32>, buffer)
+  }
+}
+
+// ====
+// RUN: pass inline-callables,outline-pipeline-strands,test.realize-pipeline,symbol-dce,cfg-simplify
+
+// The two serial branches progress independently. Engine 0 never joins engine
+// 1's intermediate child, but both join before the following consumer starts.
+func.decl @record(%branch: index, %phase: index)
+
+func.def @worker(%branch: index, %phase: index) {
+  func.call @record(%branch, %phase) : (index, index)
+  func.return
+}
+
+pipeline.def @left() run(%phase: index) {
+  %branch = index.constant 0 : index
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @worker(%branch, %phase) : (index, index)
+  }
+}
+
+pipeline.def @right() run(%phase: index) {
+  %branch = index.constant 1 : index
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @worker(%branch, %phase) : (index, index)
+  }
+}
+
+pipeline.def public @root() run(%phase: index) {
+  pipeline.serial {
+    pipeline.concurrent {
+      pipeline.serial {
+        pipeline.compose @left(%phase) : (index)
+        pipeline.compose @left(%phase) : (index)
+      }
+      pipeline.serial {
+        pipeline.compose @right(%phase) : (index)
+      }
+    }
+    pipeline.compose @right(%phase) : (index)
+  }
+}
+
+// ----
+func.decl @record(%branch: index, %phase: index)
+
+func.def @__pipeline_worker_0(%phase: index) {
+  %18 = index.constant 0 : index
+  func.call @record(%18, %phase) : (index, index)
+  func.return
+}
+
+func.def @__pipeline_worker_1(%phase: index) {
+  %19 = index.constant 0 : index
+  func.call @record(%19, %phase) : (index, index)
+  func.return
+}
+
+func.def @__pipeline_worker_2(%phase: index) {
+  %20 = index.constant 1 : index
+  func.call @record(%20, %phase) : (index, index)
+  func.return
+}
+
+func.def @__pipeline_worker_3(%phase: index) {
+  %21 = index.constant 1 : index
+  func.call @record(%21, %phase) : (index, index)
+  func.return
+}
+
+func.decl @__test_phase_join(%22: index)
+
+func.decl @__test_phase_enter(%23: index)
+
+func.def inline @__pipeline_engine_0(%24: index) {
+  func.call @__pipeline_worker_3(%24) : (index)
+  func.return
+}
+
+func.def inline @__pipeline_engine_1(%27: index) {
+  func.call @__pipeline_worker_2(%27) : (index)
+  func.return
+}
+
+func.def inline @__pipeline_engine_2(%30: index) {
+  func.call @__pipeline_worker_1(%30) : (index)
+  func.return
+}
+
+func.def inline @__pipeline_engine_3(%33: index) {
+  func.call @__pipeline_worker_0(%33) : (index)
+  func.return
+}
+
+func.def inline @__pipeline_engine_4(%36: index) {
+  %40 = index.constant 0 : index
+  func.call @__test_phase_enter(%40) : (index)
+  func.call @__pipeline_engine_3(%36) : (index)
+  %41 = index.constant 0 : index
+  func.call @__test_phase_join(%41) : (index)
+  %38 = index.constant 0 : index
+  func.call @__test_phase_enter(%38) : (index)
+  func.call @__pipeline_engine_2(%36) : (index)
+  %39 = index.constant 0 : index
+  func.call @__test_phase_join(%39) : (index)
+  func.return
+}
+
+func.def inline @__pipeline_engine_5(%42: index) {
+  %44 = index.constant 1 : index
+  func.call @__test_phase_enter(%44) : (index)
+  func.call @__pipeline_engine_1(%42) : (index)
+  %45 = index.constant 1 : index
+  func.call @__test_phase_join(%45) : (index)
+  func.return
+}
+
+func.def public inline @__pipeline_engine_6(%46: index) {
+  %50 = index.constant 0 : index
+  func.call @__test_phase_enter(%50) : (index)
+  func.call @__pipeline_engine_4(%46) : (index)
+  %51 = index.constant 0 : index
+  func.call @__test_phase_join(%51) : (index)
+  %48 = index.constant 0 : index
+  func.call @__test_phase_enter(%48) : (index)
+  %49 = index.constant 0 : index
+  func.call @__test_phase_join(%49) : (index)
+  func.return
+}
+
+func.def public inline @__pipeline_engine_7(%52: index) {
+  %56 = index.constant 1 : index
+  func.call @__test_phase_enter(%56) : (index)
+  func.call @__pipeline_engine_5(%52) : (index)
+  %57 = index.constant 1 : index
+  func.call @__test_phase_join(%57) : (index)
+  %54 = index.constant 1 : index
+  func.call @__test_phase_enter(%54) : (index)
+  func.call @__pipeline_engine_0(%52) : (index)
+  %55 = index.constant 1 : index
+  func.call @__test_phase_join(%55) : (index)
+  func.return
+}
+
+// ====
+// RUN: pass inline-callables,outline-pipeline-strands,test.realize-pipeline
+
+// Group syntax grants no sharing between concurrently live branches.
+func.decl @record()
+
+func.def @worker() {
+  func.call @record() : ()
+  func.return
+}
+
+pipeline.def @child() run() {
+  // ERROR@+1: LOWERING/066 "independent concurrent engines"
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @worker() : ()
+  }
+}
+
+pipeline.def public @root() run() {
+  pipeline.serial {
+    pipeline.concurrent {
+      pipeline.compose @child() : ()
+      pipeline.compose @child() : ()
+    }
+  }
+}
+
+// ----
+
+// ====
+// RUN: pass outline-pipeline-strands,inline-callables,canonicalize,outline-pipeline-strands
+
+// Empty and adjacent scopes retain the enclosing order without a worker or a
+// runtime submission. Their normalized graph remains valid after inlining.
+pipeline.def public @empty() run() {
+  pipeline.concurrent {
+    pipeline.concurrent {
+    }
+  }
+  pipeline.serial {
+    pipeline.concurrent {
+    }
+    pipeline.concurrent {
+    }
+  }
+}
+
+// ----
+pipeline.def public @empty() run() {
+  pipeline.serial {
+    pipeline.compose @__pipeline_concurrent_1() : ()
+    pipeline.compose @__pipeline_concurrent_0() : ()
+  }
+}
+
+pipeline.def @__pipeline_concurrent_0() run() {
+}
+
+pipeline.def @__pipeline_concurrent_1() run() {
+}

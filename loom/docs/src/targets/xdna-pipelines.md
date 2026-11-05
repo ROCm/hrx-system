@@ -98,7 +98,9 @@ sequencer's execution order. Communication that needs instruction execution
 still runs on its selected core.
 
 `pipeline.memory<workgroup>[0, 3]` selects the invocation's tile-local pool.
-It allocates nothing and introduces no synchronization. The three `buffer.alloca`
+Generic child pipelines and nested groups borrow that same coordinate space;
+the selected pool must exist in their materializing invocation. The query
+allocates nothing and introduces no synchronization. The three `buffer.alloca`
 operations create distinct allocation roots in that pool. Their `buffer.view`
 operations describe how slots and payload elements occupy those allocations.
 Compute accesses and DMA routes must have legal mappings to that memory.
@@ -115,6 +117,51 @@ At K=512, the authored channel storage totals 4104 bytes: 2048 for input slots,
 64-byte private reduction buffer. Alignment and transport/control storage are
 additional physical requirements accounted for during lowering. The compiler
 checks the complete placement against the device's available memory.
+
+## Order phases and overlap independent branches
+
+`pipeline.serial` completes each child before advancing. A
+`pipeline.concurrent` group inside it runs independent branches together, then
+joins the whole group before the next serial child. Both scopes nest, so a
+branch can have its own ordered phases without making its siblings wait at
+those intermediate boundaries.
+
+Given composable `project_gate`, `activate_gate`, `project_up`, and `combine`
+pipelines, an FFN schedule can express that relationship directly:
+
+```loom
+pipeline.serial {
+  pipeline.concurrent {
+    pipeline.serial {
+      pipeline.compose @project_gate(%input, %gate) : (buffer, buffer)
+      pipeline.compose @activate_gate(%gate) : (buffer)
+    }
+    pipeline.compose @project_up(%input, %up) : (buffer, buffer)
+  }
+  pipeline.compose @combine(%gate, %up, %output) : (buffer, buffer, buffer)
+}
+```
+
+The two projections use disjoint progress engines and write separate buffers.
+`activate_gate` may reuse `project_gate`'s engines after it completes, while the
+up branch progresses independently. `combine` starts after both branches
+finish and can reuse their engines. Buffers declared outside the groups survive
+these boundaries. This is one device invocation; the host submits no intermediate
+phases. In C++, the matching scopes are `[[loom::serial]]` and
+`[[loom::concurrent]]`, with `loom::pipeline::compose<callee>(...)` for each child.
+
+Runtime loops and conditions belong in serial schedules. Repeating a concurrent
+group calls the same resident phase bodies; it does not stamp out more workers
+per iteration. Group-owned channels start a fresh protocol lifetime on each
+visit, while outer channels keep their published records and cursor state.
+Direct strands belong in a concurrent graph or a composed child definition.
+
+A serial completion boundary waits for the child's strands and transfers. Its
+children must be able to finish without work from a later phase: for example,
+a producer that fills a bounded channel and needs its consumer to release slots
+belongs in the same concurrent group as that consumer. Completion neither
+empties an outer channel nor supplies missing credits. The compiler rejects
+overlapping concurrent engine assignments and unsupported completion graphs.
 
 ## Publication and reuse surround the actual transfer
 

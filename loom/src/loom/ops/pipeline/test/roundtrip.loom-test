@@ -88,3 +88,50 @@ pipeline.def<kernel> @local_storage(%column: index) run() {
     channel.publish %write : write<tile<16xi32>>
   }
 }
+
+// ====
+// RUN: roundtrip
+
+pipeline.decl @child() run(%state: buffer)
+pipeline.def public @mixed() run(%state: buffer, %count: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.serial {
+    scf.for %iteration = [%begin to %count step %step] {
+      pipeline.concurrent {
+        pipeline.compose @child(%state) : (buffer)
+        pipeline.serial {
+          pipeline.compose @child(%state) : (buffer)
+          pipeline.concurrent {
+            pipeline.strand workers([0], [1], [1]) {
+            }
+          }
+        }
+      }
+    }
+    pipeline.compose @child(%state) : (buffer)
+  }
+}
+
+// ----
+pipeline.decl @child() run(%state: buffer)
+
+pipeline.def public @mixed() run(%state: buffer, %count: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.serial {
+    scf.for %iteration = [%begin to %count step %step] {
+      pipeline.concurrent {
+        pipeline.compose @child(%state) : (buffer)
+        pipeline.serial {
+          pipeline.compose @child(%state) : (buffer)
+          pipeline.concurrent {
+            pipeline.strand workers([0], [1], [1]) {
+            }
+          }
+        }
+      }
+    }
+    pipeline.compose @child(%state) : (buffer)
+  }
+}

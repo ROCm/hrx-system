@@ -16,6 +16,7 @@ loom_check_test_suite(
     name = "test",
     srcs = [
         "compose.loom-test",
+        "concurrent.loom-test",
         "control.loom-test",
         "loop_preparation.loom-test",
         "memory.loom-test",

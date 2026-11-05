@@ -433,3 +433,52 @@ void root() {
     loom::view::store(7u, values, loom::type::index{0});
   }
 }
+
+// ====
+#include <loomcxx/pipeline.h>
+using Bytes = loom::type::buffer<unsigned>;
+[[loom::pipeline]] void child([[loom::launch]] Bytes output, unsigned phase);
+[[loom::pipeline("kernel")]] void nested([[loom::launch]] Bytes output) {
+  [[loom::serial]] {
+    for (unsigned phase = 0; phase < 3; ++phase) {
+      [[loom::concurrent]] {
+        loom::pipeline::compose<child>(output, phase);
+        [[loom::serial]] {
+          loom::pipeline::compose<child>(output, phase + 1u);
+          [[loom::concurrent]] {
+            loom::pipeline::compose<child>(output, phase + 2u);
+          }
+        }
+      }
+    }
+    loom::pipeline::compose<child>(output, 3u);
+  }
+}
+
+// ----
+#include <loomcxx/pipeline.h>
+
+[[loom::pipeline("kernel"), loom::symbol("nested")]]
+void nested([[loom::launch]] loom::type::buffer<unsigned char> output);
+
+[[loom::pipeline, loom::symbol("child")]]
+void child([[loom::launch]] loom::type::buffer<unsigned char> v13, unsigned v14);
+
+[[loom::pipeline("kernel"), loom::symbol("nested")]]
+void nested([[loom::launch]] loom::type::buffer<unsigned char> output) {
+  [[loom::serial]] {
+    for (unsigned phase = 0u; phase < 3u; ++phase) {
+      unsigned v7 = phase;
+      [[loom::concurrent]] {
+        loom::pipeline::compose<child>(output, v7);
+        [[loom::serial]] {
+          loom::pipeline::compose<child>(output, (v7 + 1u));
+          [[loom::concurrent]] {
+            loom::pipeline::compose<child>(output, (v7 + 2u));
+          }
+        }
+      }
+    }
+    loom::pipeline::compose<child>(output, 3u);
+  }
+}

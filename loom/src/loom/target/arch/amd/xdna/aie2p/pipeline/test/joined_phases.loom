@@ -119,3 +119,80 @@ check.scenario public @repeated_nested_joins {
   }
   check.return
 }
+
+// Two independent state words evolve concurrently. The left branch reuses its
+// core for two ordered additions while the right branch doubles independently.
+// The recording core observes both only after the whole group completes.
+pipeline.def<kernel> public retain target(@device) @concurrent_phases() run(%output_argument: buffer) {
+  %output = buffer.assume.alignment %output_argument {minimum_alignment = 4} : buffer
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %output_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %bytes = index.constant 4 : offset
+  %origin = index.constant 0 : offset
+  %left = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+  %right = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+  %output_storage = buffer.alloca<workgroup> pool(%output_memory) align(4) %bytes : buffer
+  %slots = buffer.view %output_storage[%origin] : buffer -> view<1x1xi32>
+  %begin = index.constant 0 : index
+  %count = index.constant 7 : index
+  %step = index.constant 1 : index
+  %records_per_phase = index.constant 2 : index
+  %fixed_increment = index.constant 5 : index
+  %outgoing = channel.bind<fifo> %slots, %step : view<1x1xi32>, index -> channel<tile<1xi32>>
+  pipeline.serial {
+    pipeline.compose @initialize(%left) : (buffer)
+    pipeline.compose @initialize(%right) : (buffer)
+    scf.for %phase = [%begin to %count step %step] {
+      %amount = index.add %phase, %step : index
+      pipeline.concurrent {
+        pipeline.serial {
+          pipeline.compose @add(%left, %amount) : (buffer, index)
+          pipeline.compose @add(%left, %fixed_increment) : (buffer, index)
+        }
+        pipeline.concurrent {
+          pipeline.compose @double(%right) : (buffer)
+        }
+      }
+      %left_record = index.mul %phase, %records_per_phase : index
+      %right_record = index.add %left_record, %step : index
+      pipeline.compose @record(%left, %outgoing, %output, %left_record) : (buffer, channel<tile<1xi32>>, buffer, index)
+      pipeline.compose @record(%right, %outgoing, %output, %right_record) : (buffer, channel<tile<1xi32>>, buffer, index)
+    }
+  }
+}
+
+func.def @concurrent_reference(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %count = index.constant 7 : index
+  %step = index.constant 1 : index
+  %records_per_phase = index.constant 2 : index
+  %initial = scalar.constant 1 : i32
+  %left_bias = scalar.constant 23 : i32
+  %right_bias = scalar.constant 17 : i32
+  %values = buffer.view %output[%origin] : buffer -> view<14xi32>
+  %final_left, %final_right = scf.for %phase = [%begin to %count step %step](%left = %initial : i32, %right = %initial : i32) -> (i32, i32) {
+    %iteration = index.cast %phase : index to i32
+    %left_base = scalar.addi %left, %iteration : i32
+    %next_left = scalar.addi %left_base, %left_bias : i32
+    %right_scaled = scalar.addi %right, %right : i32
+    %next_right = scalar.addi %right_scaled, %right_bias : i32
+    %left_record = index.mul %phase, %records_per_phase : index
+    %right_record = index.add %left_record, %step : index
+    view.store %next_left, %values[%left_record] : i32, view<14xi32>
+    view.store %next_right, %values[%right_record] : i32, view<14xi32>
+    scf.yield %next_left, %next_right : i32, i32
+  }
+  func.return
+}
+
+check.scenario public @repeated_concurrent_joins {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-9999) : tensor<46xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<46xi32> -> tensor<14xi32>
+    check.compare<@concurrent_phases, @concurrent_reference>(%output) : (tensor<14xi32>) -> () {
+      check.expect.equal actual(%storage) expected(%storage) : tensor<46xi32>
+    }
+  }
+  check.return
+}

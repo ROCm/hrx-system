@@ -29,7 +29,8 @@ enum {
   LOOM_OP_PIPELINE_DECL = LOOM_OP_KIND(LOOM_DIALECT_PIPELINE, 6),
   LOOM_OP_PIPELINE_SERIAL = LOOM_OP_KIND(LOOM_DIALECT_PIPELINE, 7),
   LOOM_OP_PIPELINE_YIELD = LOOM_OP_KIND(LOOM_DIALECT_PIPELINE, 8),
-  LOOM_OP_PIPELINE_COUNT_ = 9,
+  LOOM_OP_PIPELINE_CONCURRENT = LOOM_OP_KIND(LOOM_DIALECT_PIPELINE, 9),
+  LOOM_OP_PIPELINE_COUNT_ = 10,
 };
 
 // Required materialization boundary. An absent scope permits a generic pipeline program that may span targets and runtime operations.
@@ -144,7 +145,7 @@ iree_status_t loom_pipeline_end_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 
-// LOOM_OP_PIPELINE_COMPOSE: Compose a child pipeline into the enclosing invocation. Each composition constructs fresh child storage and independently progressing strands; it never submits another invocation. Inside pipeline.serial the child completes before the schedule advances; outside it, composition does not wait for child completion. Specialization and run operands substitute the child's complete typed signature. Child target and materialization requirements remain binding.
+// LOOM_OP_PIPELINE_COMPOSE: Compose a child pipeline into the enclosing invocation. Each composition constructs fresh child storage and independently progressing strands; it never submits another invocation. When the nearest schedule is pipeline.serial the child completes before that schedule advances. In a concurrent graph, composition adds no sibling dependency; the enclosing group owns its completion boundary. Specialization and run operands substitute the child's complete typed signature. Child target and materialization requirements remain binding.
 // pipeline.compose @column[%column](%input, %output) : [index](channel<tile<16xi32>>, channel<tile<16xi32>>)
 LOOM_DEFINE_ISA(loom_pipeline_compose_isa, LOOM_OP_PIPELINE_COMPOSE)
 LOOM_DEFINE_SEGMENTED_OPERANDS(loom_pipeline_compose_specializations, 0)
@@ -163,7 +164,7 @@ iree_status_t loom_pipeline_compose_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_PIPELINE_MEMORY: Select a borrowed memory pool at worker coordinates in the enclosing kernel pipeline invocation. Coordinates use the strand worker domain; the invocation supplies the execution instance, not the target symbol. Repeated selections of the same memory identify the same pool. The query neither allocates storage nor synchronizes access: buffer.alloca creates fresh allocation roots and channel operations govern record ownership. Each accessing worker must have a legal mapping to the selected backing. The pool remains valid for the invocation and may be passed to generic construction helpers. Selection belongs to construction outside strand bodies, within an explicit kernel scope.
+// LOOM_OP_PIPELINE_MEMORY: Select a borrowed memory pool at worker coordinates in the enclosing pipeline invocation. Coordinates use the strand worker domain; the invocation supplies the execution instance, not the target symbol. Repeated selections of the same memory identify the same pool. The query neither allocates storage nor synchronizes access: buffer.alloca creates fresh allocation roots and channel operations govern record ownership. Each accessing worker must have a legal mapping to the selected backing. The pool remains valid for the invocation and may be passed to generic construction helpers. Selection belongs to construction outside strand bodies. Composed children borrow the enclosing invocation's coordinate space and backing pools; the materializing target verifies that the selected pool exists. A memory selection does not require the child to own an executable artifact.
 // %memory = pipeline.memory<workgroup>[%column, 3] : pool
 LOOM_DEFINE_ISA(loom_pipeline_memory_isa, LOOM_OP_PIPELINE_MEMORY)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_pipeline_memory_coordinates, 0)
@@ -223,7 +224,7 @@ iree_status_t loom_pipeline_signature_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_PIPELINE_SERIAL: Order complete child pipelines within one resident invocation. Each composition in the region completes its strands and asynchronous memory operations before the schedule advances. Structured control repeats or selects child lifetimes; nested serial regions complete before their enclosing schedule advances. Completed writes are visible to subsequent children. Outer storage and published channel records survive the boundary; completion neither empties outer channels nor orders unrelated concurrent strands. Child completion cannot retain uncompleted transfers or owned read/write capabilities. Strands belong to composed child definitions, where they progress concurrently.
+// LOOM_OP_PIPELINE_SERIAL: Order complete child pipelines within one resident invocation. Each composition in the region completes its strands and asynchronous memory operations before the schedule advances. Structured control repeats or selects child lifetimes; nested schedule regions complete before their enclosing schedule advances. Completed writes are visible to subsequent children. Outer storage and published channel records survive the boundary; completion neither empties outer channels nor orders unrelated concurrent strands. Child completion cannot retain uncompleted transfers or owned read/write capabilities. Strands belong to composed child definitions or concurrent regions.
 // pipeline.serial {
 // }
 LOOM_DEFINE_ISA(loom_pipeline_serial_isa, LOOM_OP_PIPELINE_SERIAL)
@@ -233,10 +234,25 @@ iree_status_t loom_pipeline_serial_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 
-// LOOM_OP_PIPELINE_YIELD: Complete a resident serial schedule. Implicit at the end of its region.
+// LOOM_OP_PIPELINE_YIELD: Complete a resident schedule region. Implicit at the end of its region.
 // pipeline.yield
 LOOM_DEFINE_ISA(loom_pipeline_yield_isa, LOOM_OP_PIPELINE_YIELD)
 iree_status_t loom_pipeline_yield_build(
+    loom_builder_t* builder,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_pipeline_yield_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_PIPELINE_CONCURRENT: Construct a concurrent child graph within one resident invocation. Sibling strands, compositions, and nested schedules progress without dependency edges between siblings. The complete group joins before its enclosing serial schedule advances. Local storage and channels belong to the group; outer storage and published records survive its completion. The single-block graph has lexical captures and no results. Runtime repetition and selection belong in nested serial branches; nesting serial and concurrent groups preserves each group's completion boundary.
+// pipeline.concurrent {
+//   pipeline.serial {
+//   }
+// }
+LOOM_DEFINE_ISA(loom_pipeline_concurrent_isa, LOOM_OP_PIPELINE_CONCURRENT)
+LOOM_DEFINE_REGION(loom_pipeline_concurrent_body, 0)
+iree_status_t loom_pipeline_concurrent_build(
     loom_builder_t* builder,
     loom_location_id_t location,
     loom_op_t** out_op);
