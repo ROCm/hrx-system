@@ -82,6 +82,14 @@ TEST_F(NFKDNormalizerTest, LongAsciiRun) {
                         /*expect_pending_after_process=*/true);
 }
 
+TEST_F(NFKDNormalizerTest, MalformedUtf8ConsumesOneByteAtATime) {
+  const std::string input = {static_cast<char>(0xC0), static_cast<char>(0x80),
+                             static_cast<char>(0xF6), '@', 'A'};
+  const std::string expected = "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD@A";
+  TestWithAllChunkSizes(normalizer(), input, expected,
+                        /*expect_pending_after_process=*/true);
+}
+
 //===----------------------------------------------------------------------===//
 // Precomposed Characters Are Decomposed (Canonical Decomposition)
 //===----------------------------------------------------------------------===//

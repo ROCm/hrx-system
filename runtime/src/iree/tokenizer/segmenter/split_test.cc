@@ -168,7 +168,7 @@ TEST(SplitSegmenterTest, IsolatedMatchAtEnd) {
 
   // "hello  " -> ["hello", "  "]
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL("hello  "), {"hello", "  "},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 TEST(SplitSegmenterTest, IsolatedOnlyMatches) {
@@ -178,7 +178,7 @@ TEST(SplitSegmenterTest, IsolatedOnlyMatches) {
 
   // "   " -> ["   "]
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL("   "), {"   "},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 TEST(SplitSegmenterTest, IsolatedAdjacentMatches) {
@@ -189,7 +189,7 @@ TEST(SplitSegmenterTest, IsolatedAdjacentMatches) {
 
   // "ab" -> ["a", "b"]
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL("ab"), {"a", "b"},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 //===----------------------------------------------------------------------===//
@@ -220,7 +220,7 @@ TEST(SplitSegmenterTest, RemovedAtEnd) {
 
   // "a,b," -> ["a", "b"]
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL("a,b,"), {"a", "b"},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 TEST(SplitSegmenterTest, RemovedConsecutive) {
@@ -278,10 +278,9 @@ TEST(SplitSegmenterTest, MergedWithNextAtEnd) {
 
   // "a," -> ["a", ","]
   // Trailing comma has nothing to merge with, emitted standalone.
-  // The comma isn't emitted during process (DFA in accept at end of input),
-  // so consumed=0 and has_pending=false. All segmentation happens in finalize.
+  // The comma remains in the DFA's accepting state until finalization.
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL("a,"), {"a", ","},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 //===----------------------------------------------------------------------===//
@@ -349,7 +348,7 @@ TEST(SplitSegmenterTest, UnicodeLetterPattern) {
   TestWithAllChunkSizesUtf8(segmenter.get(),
                             iree_make_string_view(input.c_str(), input.size()),
                             {"hello", " ", "世界"},
-                            /*expect_pending_after_process=*/false);
+                            /*expect_pending_after_process=*/true);
 }
 
 //===----------------------------------------------------------------------===//
@@ -365,7 +364,7 @@ TEST(SplitSegmenterTest, GPT2StyleSimple) {
   // "Hello world" -> ["Hello", " ", "world"]
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL("Hello world"),
                         {"Hello", " ", "world"},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 TEST(SplitSegmenterTest, GPT2StyleWithPunctuation) {
@@ -377,7 +376,7 @@ TEST(SplitSegmenterTest, GPT2StyleWithPunctuation) {
   // "Hello, world!" -> ["Hello", ",", " ", "world", "!"]
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL("Hello, world!"),
                         {"Hello", ",", " ", "world", "!"},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 //===----------------------------------------------------------------------===//
@@ -442,7 +441,7 @@ TEST(SplitSegmenterTest, SingleCharMatch) {
   IREE_ASSERT_OK(segmenter.status());
 
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL(" "), {" "},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 //===----------------------------------------------------------------------===//
@@ -496,7 +495,7 @@ TEST(SplitSegmenterTest, LookaheadNewlinesAtEnd) {
   IREE_ASSERT_OK(segmenter.status());
 
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL("A\n\n"), {"A", "\n\n"},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 TEST(SplitSegmenterTest, GPT2FullPattern_ConsecutiveNewlines) {
@@ -509,7 +508,7 @@ TEST(SplitSegmenterTest, GPT2FullPattern_ConsecutiveNewlines) {
 
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL("\n\nAll:"),
                         {"\n", "\n", "All", ":"},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 TEST(SplitSegmenterTest, GPT2FullPattern_SpacePlusPunctuation) {
@@ -526,7 +525,7 @@ TEST(SplitSegmenterTest, GPT2FullPattern_SpacePlusPunctuation) {
   IREE_ASSERT_OK(segmenter.status());
 
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL("s  <"), {"s", " ", " <"},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 //===----------------------------------------------------------------------===//
@@ -810,13 +809,13 @@ TEST(SplitSegmenterTest, ConsecutiveMatchesContiguousCapacityOne) {
 // that absolute position reconstruction matches HuggingFace's single-pass
 // pre_tokenize_str() output.
 
-// MERGED_WITH_NEXT: verify finalize() produces unsigned-wraparound offsets
-// when the pending match is before chunk_base.
+// MERGED_WITH_NEXT retains the pending match until finalize can merge it with
+// trailing content. Every returned offset remains within the supplied view.
 //
 // HuggingFace ground truth:
 //   Split(",", behavior="merged_with_next").pre_tokenize_str("a,b")
 //   → [("a", (0, 1)), (",b", (1, 3))]
-TEST(SplitSegmenterTest, StreamingOffsets_MergedWithNextWraparound) {
+TEST(SplitSegmenterTest, StreamingOffsets_MergedWithNextRetainsInput) {
   ScopedSplitSegmenter segmenter(
       ",", IREE_TOKENIZER_UTIL_REGEX_SPLIT_MERGED_WITH_NEXT);
   IREE_ASSERT_OK(segmenter.status());
@@ -826,44 +825,38 @@ TEST(SplitSegmenterTest, StreamingOffsets_MergedWithNextWraparound) {
   iree_host_size_t consumed = 0;
   iree_host_size_t segment_count = 0;
 
-  // Process "a,b" (3 bytes).
-  // MERGED_WITH_NEXT: emit gap "a" [0,1), pending "," [1,2). Consume all
-  // (has_pending=true).
+  // MERGED_WITH_NEXT emits "a" and retains ",b" because the pending comma may
+  // still need to merge with the following content.
   IREE_ASSERT_OK(iree_tokenizer_segmenter_state_process(
       state.get(), iree_make_cstring_view("a,b"),
       iree_tokenizer_make_segment_output(segments, 8), &consumed,
       &segment_count));
 
-  EXPECT_EQ(consumed, 3u);
+  EXPECT_EQ(consumed, 1u);
   ASSERT_EQ(segment_count, 1u);
   EXPECT_EQ(segments[0].start, 0u);  // "a" at [0,1)
   EXPECT_EQ(segments[0].end, 1u);
   EXPECT_TRUE(iree_tokenizer_segmenter_state_has_pending(state.get()));
 
-  // Finalize with empty remaining_input.
-  // Pending "," merged with trailing "b" → ",b" at absolute [1,3).
-  // chunk_base=3, so relative offsets wrap unsigned.
-  iree_host_size_t position = consumed;
+  // Finalize receives the retained prefix. The merged segment is [0,2)
+  // relative to that ",b" view.
   iree_host_size_t finalize_count = 0;
   IREE_ASSERT_OK(iree_tokenizer_segmenter_state_finalize(
-      state.get(), iree_string_view_empty(),
+      state.get(), iree_make_cstring_view(",b"),
       iree_tokenizer_make_segment_output(segments, 8), &finalize_count));
 
   ASSERT_EQ(finalize_count, 1u);
-  // Verify absolute reconstruction matches HF: (",b", (1, 3)).
-  size_t abs_start = position + segments[0].start;
-  size_t abs_end = position + segments[0].end;
-  EXPECT_EQ(abs_start, 1u);
-  EXPECT_EQ(abs_end, 3u);
+  EXPECT_EQ(segments[0].start, 0u);
+  EXPECT_EQ(segments[0].end, 2u);
 }
 
-// CONTIGUOUS: two adjacent matches extend pending. Finalize emits both pending
-// and trailing gap with unsigned-wraparound offsets.
+// CONTIGUOUS retains adjacent matches until finalize emits the merged match
+// and trailing gap relative to the retained view.
 //
 // HuggingFace ground truth:
 //   Split(",", behavior="contiguous").pre_tokenize_str("a,,b")
 //   → [("a", (0, 1)), (",,", (1, 3)), ("b", (3, 4))]
-TEST(SplitSegmenterTest, StreamingOffsets_ContiguousWraparound) {
+TEST(SplitSegmenterTest, StreamingOffsets_ContiguousRetainsInput) {
   ScopedSplitSegmenter segmenter(",",
                                  IREE_TOKENIZER_UTIL_REGEX_SPLIT_CONTIGUOUS);
   IREE_ASSERT_OK(segmenter.status());
@@ -873,38 +866,33 @@ TEST(SplitSegmenterTest, StreamingOffsets_ContiguousWraparound) {
   iree_host_size_t consumed = 0;
   iree_host_size_t segment_count = 0;
 
-  // Process "a,,b" (4 bytes).
-  // CONTIGUOUS: emit gap "a" [0,1), extend pending to [1,3) for ",,".
-  // Consume all (has_pending=true).
+  // CONTIGUOUS emits "a" and retains ",,b" while the comma run is pending.
   IREE_ASSERT_OK(iree_tokenizer_segmenter_state_process(
       state.get(), iree_make_cstring_view("a,,b"),
       iree_tokenizer_make_segment_output(segments, 8), &consumed,
       &segment_count));
 
-  EXPECT_EQ(consumed, 4u);
+  EXPECT_EQ(consumed, 1u);
   ASSERT_EQ(segment_count, 1u);
   EXPECT_EQ(segments[0].start, 0u);  // "a" at [0,1)
   EXPECT_EQ(segments[0].end, 1u);
   EXPECT_TRUE(iree_tokenizer_segmenter_state_has_pending(state.get()));
 
-  // Finalize: pending ",," at [1,3) and trailing "b" at [3,4).
-  // Both wrap unsigned since chunk_base=4.
-  iree_host_size_t position = consumed;
+  // Finalize: pending ",," at [0,2) and trailing "b" at [2,3).
   iree_host_size_t finalize_count = 0;
   IREE_ASSERT_OK(iree_tokenizer_segmenter_state_finalize(
-      state.get(), iree_string_view_empty(),
+      state.get(), iree_make_cstring_view(",,b"),
       iree_tokenizer_make_segment_output(segments, 8), &finalize_count));
 
   ASSERT_EQ(finalize_count, 2u);
-  // Verify absolute reconstruction matches HF: (",,", (1, 3)), ("b", (3, 4)).
-  EXPECT_EQ(position + segments[0].start, 1u);
-  EXPECT_EQ(position + segments[0].end, 3u);
-  EXPECT_EQ(position + segments[1].start, 3u);
-  EXPECT_EQ(position + segments[1].end, 4u);
+  EXPECT_EQ(segments[0].start, 0u);
+  EXPECT_EQ(segments[0].end, 2u);
+  EXPECT_EQ(segments[1].start, 2u);
+  EXPECT_EQ(segments[1].end, 3u);
 }
 
-// MERGED_WITH_NEXT: 2-chunk streaming. Pending crosses chunk boundaries with
-// unsigned wraparound on the second emission.
+// MERGED_WITH_NEXT: appended input extends the retained view while matcher
+// state skips the prefix it already scanned.
 //
 // Each chunk must contain a non-matching byte after any match to trigger
 // the DFA's NO_TRANSITION callback (greedy matching defers emission until
@@ -930,40 +918,81 @@ TEST(SplitSegmenterTest, StreamingOffsets_CrossChunkMergedWithNext) {
       iree_tokenizer_make_segment_output(segments, 8), &consumed,
       &segment_count));
 
-  EXPECT_EQ(consumed, 3u);
+  EXPECT_EQ(consumed, 1u);
   ASSERT_EQ(segment_count, 1u);
   EXPECT_EQ(segments[0].start, 0u);
   EXPECT_EQ(segments[0].end, 1u);
   EXPECT_TRUE(iree_tokenizer_segmenter_state_has_pending(state.get()));
 
-  // Chunk 2: ",c" (2 bytes, position=3).
-  // 'c' confirms the comma match. The new match flushes old pending merged
-  // with the gap: ",b" at absolute [1,3). New pending=[3,4).
-  // Relative to chunk_base=3: start=1-3 wraps unsigned.
+  // The next view retains ",b" and appends ",c". The new match flushes the
+  // old pending comma with "b" and leaves the second comma pending.
   iree_host_size_t position_chunk2 = consumed;
   IREE_ASSERT_OK(iree_tokenizer_segmenter_state_process(
-      state.get(), iree_make_cstring_view(",c"),
+      state.get(), iree_make_cstring_view(",b,c"),
       iree_tokenizer_make_segment_output(segments, 8), &consumed,
       &segment_count));
 
   EXPECT_EQ(consumed, 2u);
   ASSERT_EQ(segment_count, 1u);
-  // Verify absolute reconstruction matches HF: (",b", (1, 3)).
   EXPECT_EQ(position_chunk2 + segments[0].start, 1u);
   EXPECT_EQ(position_chunk2 + segments[0].end, 3u);
   EXPECT_TRUE(iree_tokenizer_segmenter_state_has_pending(state.get()));
 
-  // Finalize: pending "," merged with trailing "c" → ",c" at absolute [3,5).
+  // Finalize receives the retained ",c" suffix.
   iree_host_size_t position_finalize = position_chunk2 + consumed;
   iree_host_size_t finalize_count = 0;
   IREE_ASSERT_OK(iree_tokenizer_segmenter_state_finalize(
-      state.get(), iree_string_view_empty(),
+      state.get(), iree_make_cstring_view(",c"),
       iree_tokenizer_make_segment_output(segments, 8), &finalize_count));
 
   ASSERT_EQ(finalize_count, 1u);
-  // Verify absolute reconstruction matches HF: (",c", (3, 5)).
   EXPECT_EQ(position_finalize + segments[0].start, 3u);
   EXPECT_EQ(position_finalize + segments[0].end, 5u);
+}
+
+// A retained unmatched prefix must never underflow out_consumed when a later
+// byte completes an inverted match. This byte sequence is the minimized input
+// from the split segmenter streaming fuzzer.
+TEST(SplitSegmenterTest, StreamingOffsets_InvertRetainsUnmatchedPrefix) {
+  ScopedSplitSegmenter segmenter("[a-zA-Z]+",
+                                 IREE_TOKENIZER_UTIL_REGEX_SPLIT_ISOLATED,
+                                 /*invert=*/true);
+  IREE_ASSERT_OK(segmenter.status());
+  testing::ScopedSegmenterState state(segmenter.get());
+
+  const char input[] = {'\x16', '\x10', 'z', '\x16'};
+  iree_tokenizer_segment_t segments[4];
+  iree_host_size_t consumed = 0;
+  iree_host_size_t segment_count = 0;
+
+  for (iree_host_size_t input_size = 1; input_size <= 3; ++input_size) {
+    IREE_ASSERT_OK(iree_tokenizer_segmenter_state_process(
+        state.get(), iree_make_string_view(input, input_size),
+        iree_tokenizer_make_segment_output(segments, 4), &consumed,
+        &segment_count));
+    EXPECT_EQ(consumed, 0u);
+    EXPECT_EQ(segment_count, 0u);
+  }
+
+  IREE_ASSERT_OK(iree_tokenizer_segmenter_state_process(
+      state.get(), iree_make_string_view(input, sizeof(input)),
+      iree_tokenizer_make_segment_output(segments, 4), &consumed,
+      &segment_count));
+  EXPECT_EQ(consumed, 3u);
+  ASSERT_EQ(segment_count, 2u);
+  EXPECT_EQ(segments[0].start, 0u);
+  EXPECT_EQ(segments[0].end, 2u);
+  EXPECT_EQ(segments[1].start, 2u);
+  EXPECT_EQ(segments[1].end, 3u);
+
+  iree_host_size_t finalize_count = 0;
+  IREE_ASSERT_OK(iree_tokenizer_segmenter_state_finalize(
+      state.get(),
+      iree_make_string_view(input + consumed, sizeof(input) - consumed),
+      iree_tokenizer_make_segment_output(segments, 4), &finalize_count));
+  ASSERT_EQ(finalize_count, 1u);
+  EXPECT_EQ(segments[0].start, 0u);
+  EXPECT_EQ(segments[0].end, 1u);
 }
 
 // CONTIGUOUS: flush() emits segments with absolute offsets and resets state.
@@ -983,13 +1012,13 @@ TEST(SplitSegmenterTest, StreamingOffsets_FlushAbsolute) {
   iree_host_size_t consumed = 0;
   iree_host_size_t segment_count = 0;
 
-  // Process "a,,b" — emit gap, accumulate pending.
+  // Process "a,,b" — emit gap, retain pending and trailing bytes.
   IREE_ASSERT_OK(iree_tokenizer_segmenter_state_process(
       state.get(), iree_make_cstring_view("a,,b"),
       iree_tokenizer_make_segment_output(segments, 8), &consumed,
       &segment_count));
 
-  EXPECT_EQ(consumed, 4u);
+  EXPECT_EQ(consumed, 1u);
   ASSERT_EQ(segment_count, 1u);
   EXPECT_EQ(segments[0].start, 0u);
   EXPECT_EQ(segments[0].end, 1u);
@@ -1031,13 +1060,13 @@ TEST(SplitSegmenterTest, StreamingOffsets_FlushPartialCapacity) {
   iree_host_size_t consumed = 0;
   iree_host_size_t segment_count = 0;
 
-  // Process "a,,b" — emit gap "a", accumulate pending ",,".
+  // Process "a,,b" — emit gap "a", retain pending and trailing bytes.
   IREE_ASSERT_OK(iree_tokenizer_segmenter_state_process(
       state.get(), iree_make_cstring_view("a,,b"),
       iree_tokenizer_make_segment_output(segments, 8), &consumed,
       &segment_count));
 
-  EXPECT_EQ(consumed, 4u);
+  EXPECT_EQ(consumed, 1u);
   ASSERT_EQ(segment_count, 1u);
   EXPECT_TRUE(iree_tokenizer_segmenter_state_has_pending(state.get()));
 
@@ -1532,9 +1561,9 @@ TEST(SplitLiteralTest, InvertIsolated) {
   IREE_ASSERT_OK(segmenter.status());
 
   // "XabY" with inverted ISOLATED -> ["X", "ab", "Y"]
-  // Note: has_pending=true because trailing gap "Y" is emitted in finalize.
+  // The trailing gap remains in the caller-owned unconsumed suffix.
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL("XabY"), {"X", "ab", "Y"},
-                        /*expect_pending_after_process=*/true);
+                        /*expect_pending_after_process=*/false);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1599,7 +1628,7 @@ TEST(SplitSegmenterTest, DeepSeekV3CJKPattern) {
   TestWithAllChunkSizesUtf8(segmenter.get(),
                             iree_make_string_view(input.c_str(), input.size()),
                             {"Hello ", "你好世界", " ", "こんにちは"},
-                            /*expect_pending_after_process=*/false);
+                            /*expect_pending_after_process=*/true);
 }
 
 TEST(SplitSegmenterTest, DeepSeekV3CJKPatternLimitedCapacity) {
@@ -1734,7 +1763,7 @@ TEST(SplitSegmenterTest, GreedyBlankLinesAndLongTrailingIndentation) {
   std::string spaces(512, ' ');
   std::string input = "\n" + spaces;
   auto view = iree_make_string_view(input.data(), input.size());
-  TestWithAllChunkSizes(segmenter.get(), view, {"\n", spaces}, false);
+  TestWithAllChunkSizes(segmenter.get(), view, {"\n", spaces}, true);
   TestLimitedOutputCapacity(segmenter.get(), view, {"\n", spaces});
 }
 
@@ -1824,7 +1853,7 @@ TEST(SplitSegmenterTest, SpacePunctuationSingleSegment) {
 
   // " <" matches ` ?[\p{P}\p{S}]+` (2 chars) over `\s+` (1 char).
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL(" <"), {" <"},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 // Tests the full GPT-2-style regex pattern from real tokenizer configs.
@@ -1847,7 +1876,7 @@ TEST(SplitSegmenterTest, FullGpt2PatternSpacePunctuation) {
 
   // " <" matches ` ?[\p{P}\p{S}]+[\r\n]*` as a single segment.
   TestWithAllChunkSizes(segmenter.get(), IREE_SVL(" <"), {" <"},
-                        /*expect_pending_after_process=*/false);
+                        /*expect_pending_after_process=*/true);
 }
 
 }  // namespace

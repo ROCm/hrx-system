@@ -277,6 +277,14 @@ TEST_F(RegexReplaceNormalizerTest, Unicode_WithSpaces) {
                         /*expect_pending_after_process=*/false);
 }
 
+TEST_F(RegexReplaceNormalizerTest, MalformedUtf8PassesThrough) {
+  auto normalizer = CreateRegexReplace(IREE_SV(".@"), iree_string_view_empty());
+  const std::string input(1, static_cast<char>(0xF6));
+  EXPECT_EQ(ProcessAndFinalize(normalizer.get(), input,
+                               /*expect_pending_after_process=*/true),
+            input);
+}
+
 // Complex patterns.
 
 TEST_F(RegexReplaceNormalizerTest, WordCharacter) {
