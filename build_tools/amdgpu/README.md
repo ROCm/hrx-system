@@ -136,7 +136,6 @@ repository. It is inert by default. A real producer is selected with:
 ```bash
 --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm
 --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=llvm-tools
---repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=llvm-project
 --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=auto
 ```
 
