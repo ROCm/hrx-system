@@ -32,6 +32,13 @@ bool loom_low_lower_source_value_storage_op_is_identity(
     const loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_trait_flags_t traits);
 
+// Returns true when |source_op| is the allocation-free structural form of the
+// ValueDuplication interface. Implementations with observable behavior retain
+// ordinary target-owned lowering instead.
+bool loom_low_lower_source_value_storage_op_is_duplication(
+    const loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_trait_flags_t traits);
+
 // Returns true when |source_value_id| needs a materialized target-Low result.
 bool loom_low_lower_source_value_storage_result_required(
     const loom_low_lower_context_t* context, loom_value_id_t source_value_id);

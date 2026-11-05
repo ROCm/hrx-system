@@ -51,7 +51,7 @@ SCALAR_BITWISE_CATEGORY = OpCategory(
 )
 SCALAR_ANALYSIS_CATEGORY = OpCategory(
     "analysis",
-    doc="Scalar fact and predicate refinement operations.",
+    doc="Scalar ownership, fact, and predicate refinement operations.",
 )
 
 SCALAR_OP_CATEGORIES = (

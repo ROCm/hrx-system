@@ -1318,6 +1318,31 @@ static inline loom_value_slice_t loom_direct_branch_args(const loom_op_t* op) {
 }
 
 //===----------------------------------------------------------------------===//
+// ValueDuplication interface
+//===----------------------------------------------------------------------===//
+
+// Returns true if |op| implements the generated ValueDuplication interface.
+// Generation proves that the complete operand and result lists are equally
+// sized positional tuples whose result types remap source-tuple references to
+// the corresponding result identities.
+bool loom_value_duplication_isa(const loom_module_t* module,
+                                const loom_op_t* op);
+
+// Returns the complete source tuple of a verified value-duplication op.
+loom_value_slice_t loom_value_duplication_sources(const loom_module_t* module,
+                                                  const loom_op_t* op);
+
+// Returns the complete result tuple of a verified value-duplication op.
+loom_value_slice_t loom_value_duplication_duplicates(
+    const loom_module_t* module, const loom_op_t* op);
+
+// Transfers each source fact tuple to its corresponding duplicate result.
+iree_status_t loom_value_duplication_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
+
+//===----------------------------------------------------------------------===//
 // RegionBranch interface
 //===----------------------------------------------------------------------===//
 

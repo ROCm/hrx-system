@@ -18,7 +18,10 @@ from loom.dsl import (
     ATTR_TYPE_I64,
     ATTR_TYPE_SYMBOL,
     INTEGER,
+    PAYLOAD_SCALAR,
+    STORAGE_RELATION,
     TERMINATOR,
+    UNIQUE_IDENTITY,
     AttrDef,
     CachePolicyInterface,
     CallLikeInterface,
@@ -44,6 +47,8 @@ from loom.dsl import (
     TargetFactSpecialization,
     TargetLikeInterface,
     Trait,
+    ValueDuplicationInterface,
+    VariadicValuesMatch,
     YieldCountMatches,
     YieldTypesMatch,
 )
@@ -102,6 +107,69 @@ def test_generate_tables_rejects_direct_branch_with_multiple_successors() -> Non
             "test",
             0,
             [_direct_branch_test_op(successors=[Successor("dest"), Successor("other")])],
+        )
+
+
+def _value_duplication_test_op(
+    *,
+    interface: ValueDuplicationInterface | None = None,
+    operands: list[Operand] | None = None,
+    results: list[Result] | None = None,
+    constraints: list[Constraint] | None = None,
+    traits: list[Trait] | None = None,
+    facts: str | None = "loom_test_duplicate_facts",
+) -> Op:
+    return Op(
+        "test.duplicate",
+        group=Dialect("test"),
+        operands=([Operand("sources", PAYLOAD_SCALAR, variadic=True)] if operands is None else operands),
+        results=([Result("duplicates", PAYLOAD_SCALAR, variadic=True)] if results is None else results),
+        constraints=([VariadicValuesMatch("duplicates", "sources")] if constraints is None else constraints),
+        traits=[UNIQUE_IDENTITY, STORAGE_RELATION] if traits is None else traits,
+        interfaces=[interface or ValueDuplicationInterface(sources="sources", duplicates="duplicates")],
+        facts=facts,
+    )
+
+
+def test_generate_tables_marks_value_duplication_interface() -> None:
+    source = generate_tables_c("test", 0, [_value_duplication_test_op()])
+
+    assert "LOOM_OP_VTABLE_VALUE_DUPLICATION" in source
+
+
+def test_generate_tables_rejects_value_duplication_without_unique_identity() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"ValueDuplicationInterface on 'test\.duplicate': operation must declare UniqueIdentity",
+    ):
+        generate_tables_c(
+            "test",
+            0,
+            [_value_duplication_test_op(traits=[STORAGE_RELATION])],
+        )
+
+
+def test_generate_tables_rejects_value_duplication_without_positional_remap() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"operation must declare VariadicValuesMatch",
+    ):
+        generate_tables_c(
+            "test",
+            0,
+            [_value_duplication_test_op(constraints=[])],
+        )
+
+
+def test_generate_tables_rejects_value_duplication_without_fact_transfer() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"operation must provide fact inference",
+    ):
+        generate_tables_c(
+            "test",
+            0,
+            [_value_duplication_test_op(facts=None)],
         )
 
 

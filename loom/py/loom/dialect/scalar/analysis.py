@@ -4,12 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Scalar analysis ops: value predicates and compile-time contracts.
+"""Scalar structural ops: ownership, predicates, and compile-time contracts.
 
-These ops preserve authored requirements on SSA values for analysis and
-specialization. Operations that reach code generation must explicitly define
-an executable identity contract; compile-time queries instead diagnose if
-specialization leaves them unresolved.
+These operations preserve authored requirements and ownership boundaries on
+SSA values. Executable structural operations define their lowering contract;
+compile-time queries instead diagnose if specialization leaves them unresolved.
 """
 
 from loom.assembly import COLON, PredicateList, Ref, Refs, TypeOf, TypesOf
@@ -18,20 +17,51 @@ from loom.dsl import (
     FACT_IDENTITY,
     PAYLOAD_SCALAR,
     PURE,
+    STORAGE_RELATION,
+    UNIQUE_IDENTITY,
     AttrDef,
     Op,
     Operand,
     OpPhase,
     Result,
     SameType,
+    ValueDuplicationInterface,
     VariadicValuesMatch,
 )
 
 __all__ = [
     "scalar_assume",
     "scalar_constexpr",
+    "scalar_duplicate",
     "ALL_ANALYSIS_OPS",
 ]
+
+# ============================================================================
+# scalar.duplicate — distinct ownership identity
+# ============================================================================
+
+scalar_duplicate = Op(
+    "scalar.duplicate",
+    group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Create another local owner of a scalar value tuple. Each result has "
+        "the same logical value as its positional source and a distinct SSA "
+        "ownership identity. Allocation may coalesce non-overlapping source "
+        "and result storage; the operation does not promise disjoint storage."
+    ),
+    operands=[Operand("sources", PAYLOAD_SCALAR, variadic=True)],
+    results=[Result("duplicates", PAYLOAD_SCALAR, variadic=True)],
+    constraints=[VariadicValuesMatch("duplicates", "sources")],
+    traits=[UNIQUE_IDENTITY, STORAGE_RELATION],
+    interfaces=[ValueDuplicationInterface(sources="sources", duplicates="duplicates")],
+    facts="loom_value_duplication_facts",
+    format=[Refs("sources"), COLON, TypesOf("duplicates")],
+    examples=[
+        "%copy = scalar.duplicate %value : i32",
+        "%copy_x, %copy_y = scalar.duplicate %x, %y : f32, f32",
+    ],
+)
 
 # ============================================================================
 # scalar.assume — predicate-constrained identity
@@ -88,4 +118,8 @@ scalar_constexpr = Op(
 # Registry
 # ============================================================================
 
-ALL_ANALYSIS_OPS: tuple[Op, ...] = (scalar_assume, scalar_constexpr)
+ALL_ANALYSIS_OPS: tuple[Op, ...] = (
+    scalar_assume,
+    scalar_constexpr,
+    scalar_duplicate,
+)

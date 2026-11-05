@@ -279,6 +279,7 @@ __all__ = [
     "CallLikeInterface",
     "CallLikeKind",
     "DirectBranchInterface",
+    "ValueDuplicationInterface",
     "FuncLikeInterface",
     "InlinePolicy",
     "LoopLikeInterface",
@@ -5804,6 +5805,26 @@ class DirectBranchInterface(NamedTuple):
     args: str | None
     # Sole successor field naming the destination block.
     dest: str
+
+
+class ValueDuplicationInterface(NamedTuple):
+    """Interface for operations that create another owner of a value tuple.
+
+    Implementing operations consume one complete source tuple and produce one
+    equally sized duplicate tuple. Positional result types match source types
+    after remapping references from source tuple values to their corresponding
+    duplicate tuple values. The interface promises a distinct ownership
+    identity, not disjoint physical storage or a particular lowering.
+
+    The generator proves the constrained shape, allowing C consumers to query
+    one compact operation-vtable marker and use the generic operand and result
+    storage directly.
+    """
+
+    # Sole variadic operand field holding the complete source tuple.
+    sources: str
+    # Sole variadic result field holding the complete duplicate tuple.
+    duplicates: str
 
 
 class FuncLikeInterface(NamedTuple):

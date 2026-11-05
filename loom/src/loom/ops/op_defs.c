@@ -317,6 +317,38 @@ void loom_op_refresh_effective_traits(const loom_module_t* module,
   }
 }
 
+//===----------------------------------------------------------------------===//
+// ValueDuplication interface
+//===----------------------------------------------------------------------===//
+
+bool loom_value_duplication_isa(const loom_module_t* module,
+                                const loom_op_t* op) {
+  if (op == NULL) {
+    return false;
+  }
+  const loom_op_vtable_t* vtable = loom_op_vtable(module, op);
+  return vtable != NULL && iree_any_bit_set(vtable->vtable_flags,
+                                            LOOM_OP_VTABLE_VALUE_DUPLICATION);
+}
+
+loom_value_slice_t loom_value_duplication_sources(const loom_module_t* module,
+                                                  const loom_op_t* op) {
+  IREE_ASSERT(loom_value_duplication_isa(module, op));
+  return (loom_value_slice_t){
+      .values = loom_op_operands(op),
+      .count = op->operand_count,
+  };
+}
+
+loom_value_slice_t loom_value_duplication_duplicates(
+    const loom_module_t* module, const loom_op_t* op) {
+  IREE_ASSERT(loom_value_duplication_isa(module, op));
+  return (loom_value_slice_t){
+      .values = loom_op_results(op),
+      .count = op->result_count,
+  };
+}
+
 bool loom_op_may_write(const loom_module_t* module, const loom_op_t* op) {
   return loom_traits_may_write(loom_op_effective_traits(module, op));
 }

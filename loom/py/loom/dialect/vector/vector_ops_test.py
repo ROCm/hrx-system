@@ -7,14 +7,13 @@
 from __future__ import annotations
 
 from loom.dialect.scalar import ALL_SCALAR_OPS, FastMathFlags
+from loom.dialect.scalar.analysis import ALL_ANALYSIS_OPS
 from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import DECOMPOSABLE, FLOAT, I1, INTEGER, SAFE_TO_SPECULATE, Op
 
 SCALAR_TO_VECTOR_SUFFIX_EXCLUSIONS = {
-    "assume": "scalar.assume refines scalar predicate facts, not vector lanes.",
     "constant": "vector literal splats are typed as splati or splatf.",
-    "constexpr": "scalar.constexpr must specialize before vector lowering.",
 }
 
 
@@ -23,7 +22,7 @@ def _op_suffix(op: Op) -> str:
 
 
 def test_vector_seed_mirrors_scalar_spelling_for_lanewise_ops() -> None:
-    scalar_names = {_op_suffix(op) for op in ALL_SCALAR_OPS}
+    scalar_names = {_op_suffix(op) for op in ALL_SCALAR_OPS if op not in ALL_ANALYSIS_OPS}
     vector_names = {_op_suffix(op) for op in ALL_VECTOR_OPS}
 
     missing = sorted(scalar_names - vector_names - set(SCALAR_TO_VECTOR_SUFFIX_EXCLUSIONS))

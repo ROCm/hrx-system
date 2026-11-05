@@ -91,6 +91,15 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "value_duplication",
+    srcs = ["value_duplication.c"],
+    deps = [
+        ":headers",
+        "//loom/src/loom/ir:facts",
+    ],
+)
+
 # Complete operation support. Native constructors can select :builders without
 # the erasure, result/block removal, or bulk replacement implementation.
 loom_cc_library_group(
@@ -98,6 +107,7 @@ loom_cc_library_group(
     deps = [
         ":builders",
         ":mutation",
+        ":value_duplication",
     ],
 )
 

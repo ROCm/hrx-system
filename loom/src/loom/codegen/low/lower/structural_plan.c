@@ -10,6 +10,7 @@
 
 #include "loom/codegen/low/lower/context.h"
 #include "loom/codegen/low/lower/source_call.h"
+#include "loom/codegen/low/lower/source_value_storage.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
@@ -103,6 +104,15 @@ iree_status_t loom_low_lower_structural_plan_op(
       loom_op_effective_traits(context->module, source_op);
   if (loom_traits_are_fact_identity(traits) ||
       loom_traits_are_value_alias(traits)) {
+    for (uint16_t i = 0; i < source_op->result_count; ++i) {
+      loom_low_lower_inherit_value_type(context,
+                                        loom_op_const_operands(source_op)[i],
+                                        loom_op_const_results(source_op)[i]);
+    }
+    return iree_ok_status();
+  }
+  if (loom_low_lower_source_value_storage_op_is_duplication(context, source_op,
+                                                            traits)) {
     for (uint16_t i = 0; i < source_op->result_count; ++i) {
       loom_low_lower_inherit_value_type(context,
                                         loom_op_const_operands(source_op)[i],

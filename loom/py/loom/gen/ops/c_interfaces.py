@@ -31,6 +31,8 @@ from loom.dsl import (
     RegionBranchInterface,
     TargetFactSpecialization,
     TargetLikeInterface,
+    TiedResult,
+    ValueDuplicationInterface,
 )
 from loom.fields import compute_layout
 from loom.gen.ops import c_queries, c_symbols
@@ -62,9 +64,9 @@ _MEMORY_ACCESS_OPERATION_KIND_MAP: dict[MemoryAccessOperationKind, str] = {
 # The generator code is entirely table-driven off INTERFACES. Adding an
 # interface does not require any changes to the emission loops.
 #
-# DirectBranchInterface is a compact structural interface: its declaration is
-# validated here, while membership is emitted as a vtable flag and cached on
-# each operation instance. Its constrained shape needs no per-kind vtable.
+# DirectBranchInterface and ValueDuplicationInterface are compact structural
+# interfaces. Their declarations are validated here and membership is emitted
+# as vtable flags. Their constrained shapes need no per-kind interface vtable.
 
 
 @dataclass(frozen=True, slots=True)
@@ -716,6 +718,34 @@ def op_implements_direct_branch(op: Op) -> bool:
         return True
     if len(op.operands) != 1 or op.operands[0].name != iface.args or not op.operands[0].variadic:
         raise ValueError(f"{interface_name} on {op.name!r}: args {iface.args!r} must name the sole variadic operand field")
+    return True
+
+
+def op_implements_value_duplication(op: Op) -> bool:
+    """Validates and returns ValueDuplicationInterface membership for ``op``."""
+    iface = c_queries.find_interface(op, ValueDuplicationInterface)
+    if iface is None:
+        return False
+    interface_name = "ValueDuplicationInterface"
+    if len(op.operands) != 1 or op.operands[0].name != iface.sources or not op.operands[0].variadic:
+        raise ValueError(f"{interface_name} on {op.name!r}: sources {iface.sources!r} must name the sole variadic operand field")
+    if len(op.results) != 1 or op.results[0].name != iface.duplicates or not op.results[0].variadic:
+        raise ValueError(f"{interface_name} on {op.name!r}: duplicates {iface.duplicates!r} must name the sole variadic result field")
+    if isinstance(op.results[0], TiedResult):
+        raise ValueError(f"{interface_name} on {op.name!r}: duplicate results cannot be tied")
+    if op.results[0].allocates:
+        raise ValueError(f"{interface_name} on {op.name!r}: duplicate results cannot declare fresh resource allocation")
+    if op.regions or op.successors:
+        raise ValueError(f"{interface_name} on {op.name!r}: operation cannot have regions or successors")
+    if not op.has_trait("UniqueIdentity"):
+        raise ValueError(f"{interface_name} on {op.name!r}: operation must declare UniqueIdentity")
+    if op.has_trait("FactIdentity") or op.has_trait("ValueAlias"):
+        raise ValueError(f"{interface_name} on {op.name!r}: duplicate ownership cannot be a FactIdentity or ValueAlias")
+    expected_constraint = (iface.duplicates, iface.sources)
+    if not any(constraint.name == "VariadicValuesMatch" and constraint.args == expected_constraint for constraint in op.constraints):
+        raise ValueError(f"{interface_name} on {op.name!r}: operation must declare VariadicValuesMatch{expected_constraint!r}")
+    if op.facts is None:
+        raise ValueError(f"{interface_name} on {op.name!r}: operation must provide fact inference")
     return True
 
 
