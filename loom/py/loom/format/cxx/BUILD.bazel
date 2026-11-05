@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:python.bzl", "iree_py_library", "iree_py_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -77,4 +78,14 @@ iree_py_library(
     name = "test_support",
     testonly = True,
     srcs = ["test_support.py"],
+)
+
+iree_py_test(
+    name = "external_declarations_test",
+    size = "small",
+    srcs = ["external_declarations_test.py"],
+    args = ["$(rootpath //loom/src/loom/tools/loom-import-cxx)"],
+    data = ["//loom/src/loom/tools/loom-import-cxx"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    deps = [":cxx"],
 )

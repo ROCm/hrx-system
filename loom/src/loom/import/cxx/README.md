@@ -65,6 +65,13 @@ remain the lossless forms. An operation without a validated C++ spelling stops
 rendering with the operation name and the unsupported semantic boundary; the
 tool never emits a partial approximation.
 
+External function declarations preserve their `loom::import` module and optional
+symbol names. A separate `loom::symbol` attribute preserves the Loom callable
+identity when its C++ identifier needs a different spelling. Reimport therefore
+keeps both the external binding and calls to that declaration. Opaque signature
+types without a validated C++ carrier produce a diagnostic; they are never
+replaced with `auto`, which would change the function's type and template status.
+
 ## Resident pipelines and ordered phases
 
 `[[loom::pipeline]]` declares a composable child graph. Adding the `"kernel"`

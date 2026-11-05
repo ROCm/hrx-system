@@ -12,7 +12,6 @@ from loom.builtin_types import ChannelReadMode
 from loom.format.cxx.errors import CxxRenderError
 from loom.ir import (
     BufferType,
-    DialectType,
     DynamicEncoding,
     EncodingInstance,
     EncodingType,
@@ -219,8 +218,6 @@ class CxxTypes:
             return "loom::type::pool"
         if isinstance(value_type, ParameterizedType):
             return self.parameterized(value_type, signed)
-        if isinstance(value_type, DialectType):
-            return "auto"
         raise CxxRenderError(
             None, f"value type {value_type!r} has no C++ value spelling"
         )

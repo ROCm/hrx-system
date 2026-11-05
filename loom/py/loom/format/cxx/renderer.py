@@ -45,7 +45,7 @@ from loom.ir import (
 )
 
 
-def _buffer_payload_literal(contents: bytes | Utf8Attr) -> str:
+def _string_literal(contents: bytes | Utf8Attr) -> str:
     """Quotes exact payload code units without greedy hexadecimal escapes."""
     text = (
         contents.value if isinstance(contents, Utf8Attr) else contents.decode("latin1")
@@ -310,7 +310,7 @@ class CxxRenderer(CxxConfigRenderer):
                 callee = f"loom::buffer::alloca_init<{space}, {alignment}>"
                 attributes = ("contents", "memory_space", "base_alignment")
             result = resolved.value_id("result")
-            literal = _buffer_payload_literal(resolved.attr("contents"))
+            literal = _string_literal(resolved.attr("contents"))
             self._declare(result, f"{callee}({literal})", declaration_type="auto*")
             self.expression_types[result] = (
                 "const unsigned char*" if immutable else "unsigned char*"
@@ -1480,6 +1480,15 @@ class CxxRenderer(CxxConfigRenderer):
         resolved = self._resolved(function)
         symbol = str(resolved.attr("callee"))
         attributes = [f'loom::symbol("{symbol}")']
+        if (
+            function.name == "func.decl"
+            and (import_module := resolved.attr("import_module")) is not None
+        ):
+            arguments = [_string_literal(import_module.encode("utf-8"))]
+            import_symbol = resolved.attr("import_symbol")
+            if import_symbol is not None:
+                arguments.append(_string_literal(import_symbol.encode("utf-8")))
+            attributes.append(f"loom::import({', '.join(arguments)})")
         if retain := self._retention_attribute(function):
             attributes.append(retain)
         target = resolved.attr("target")
@@ -1541,7 +1550,15 @@ class CxxRenderer(CxxConfigRenderer):
     def _render_function_declaration(self, function: Operation) -> None:
         if function.name == "func.decl":
             self._validate_projected_attributes(
-                function, ("callee", "inline_policy", "retain", "target")
+                function,
+                (
+                    "callee",
+                    "import_module",
+                    "import_symbol",
+                    "inline_policy",
+                    "retain",
+                    "target",
+                ),
             )
         self._analyze_buffers(function)
         self.writer.attributes(self._function_attributes(function))
