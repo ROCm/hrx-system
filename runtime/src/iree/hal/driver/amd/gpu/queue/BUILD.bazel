@@ -662,6 +662,8 @@ _PROGRAM_TARGETS = [
     "gfx12-5-generic",
 ]
 
+exports_files(["fixup.loom"])
+
 [
     loom_target_profile(
         name = "fixup_program_profile_" + target,
@@ -679,6 +681,7 @@ _PROGRAM_TARGETS = [
         testonly = True,
         srcs = ["fixup.loom"],
         out = "fixup_program_" + target + ".hsaco",
+        roots = ["apply_fixups"],
         target = ":fixup_program_profile_" + target,
         target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
     )

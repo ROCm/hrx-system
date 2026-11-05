@@ -151,15 +151,17 @@ constexpr InstanceState kStates[] = {
 
 class ProgramPreparationTest
     : public ::testing::TestWithParam<
-          std::tuple<uint32_t, uint32_t, bool, bool, bool>> {};
+          std::tuple<uint32_t, uint32_t, bool, bool, bool, bool>> {};
 
 TEST_P(ProgramPreparationTest, CapturedPreparationMatchesEmittedPackets) {
-  const auto [state_index, value_count, first, profiling, fixups] = GetParam();
+  const auto [state_index, value_count, first, profiling, fixups,
+              static_counts] = GetParam();
   const auto& state = kStates[state_index];
   SCOPED_TRACE(state.name);
   const iree_hal_amd_gpu_aql_program_pool_t pool = {
       .blit = 0x100000,
       .fixup = 0x200000,
+      .counts = 0x250000,
       .materialize = 0x300000,
       .materialize_profile = 0x400000,
   };
@@ -176,13 +178,19 @@ TEST_P(ProgramPreparationTest, CapturedPreparationMatchesEmittedPackets) {
       .initialized = state.initialized,
       .reserved = true,
   };
-  auto flags = iree_hal_amd_gpu_aql_program_prepare(&program, &instance,
+  const iree_hal_amd_gpu_aql_count_table_t counts = {
+      .offset = 2048,
+      .count = static_counts ? 65u : 0u,
+  };
+  auto flags = iree_hal_amd_gpu_aql_program_prepare(&program, &instance, counts,
                                                     value_count, first);
   if (profiling) {
     flags |= IREE_HAL_AMD_GPU_AQL_PROGRAM_PROFILE;
   }
   const bool copy = first && state.copy;
-  const bool relocate = first && fixups && (state.relocate || value_count > 1);
+  const bool relocate =
+      first &&
+      (static_counts || (fixups && (state.relocate || value_count > 1)));
   EXPECT_EQ((flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_FIRST) != 0, first);
   EXPECT_EQ((flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_INITIALIZE) != 0, copy);
   EXPECT_EQ((flags & IREE_HAL_AMD_GPU_AQL_PROGRAM_FIXUP) != 0, relocate);
@@ -191,7 +199,7 @@ TEST_P(ProgramPreparationTest, CapturedPreparationMatchesEmittedPackets) {
     kernels.push_back(pool.blit);
   }
   if (relocate) {
-    kernels.push_back(pool.fixup);
+    kernels.push_back(static_counts ? pool.counts : pool.fixup);
   }
   kernels.push_back(profiling ? pool.materialize_profile : pool.materialize);
   const uint32_t prefix = iree_hal_amd_gpu_aql_program_prefix_count(flags);
@@ -219,9 +227,10 @@ TEST_P(ProgramPreparationTest, CapturedPreparationMatchesEmittedPackets) {
       &ring, prefix + kBlockPackets + 1, &position));
   std::array<uint64_t, 32> upload = {};
   constexpr uint64_t kUploadAddress = 0x600000;
-  ASSERT_EQ(iree_hal_amd_gpu_aql_program_emit(
-                &pool, &program, &instance, 128, kBlockPackets, &ring, nullptr,
-                position, kUploadAddress, 0x700000, upload.data(), flags),
+  ASSERT_EQ(iree_hal_amd_gpu_aql_program_emit(&pool, &program, &instance,
+                                              counts, 128, kBlockPackets, &ring,
+                                              nullptr, position, kUploadAddress,
+                                              0x700000, upload.data(), flags),
             AMDF_STATUS_OK);
   for (uint32_t i = 0; i < prefix; ++i) {
     const auto& packet = packets[(position + i) % packets.size()];
@@ -239,6 +248,10 @@ TEST_P(ProgramPreparationTest, CapturedPreparationMatchesEmittedPackets) {
   const auto* arguments =
       reinterpret_cast<const iree_hal_amd_gpu_aql_program_arguments_t*>(
           upload.data());
+  const size_t count_extent =
+      static_counts ? sizeof(iree_hal_amd_gpu_aql_count_arguments_t) -
+                          sizeof(iree_hal_amd_gpu_fixup_arguments_t)
+                    : 0;
   if (copy) {
     EXPECT_EQ(arguments->copy.source, program.upload_address);
     EXPECT_EQ(arguments->copy.target, instance.address);
@@ -253,14 +266,24 @@ TEST_P(ProgramPreparationTest, CapturedPreparationMatchesEmittedPackets) {
               program.upload_address + program.fixup_offset);
     EXPECT_EQ(arguments->fixup.target, instance.address);
     EXPECT_EQ(arguments->fixup.entry_count, program.fixup_count);
-    EXPECT_EQ(arguments->fixup.values,
-              kUploadAddress + sizeof(*arguments) + (profiling ? 16 : 0));
+    EXPECT_EQ(arguments->fixup.values, kUploadAddress + sizeof(*arguments) +
+                                           count_extent + (profiling ? 16 : 0));
+    if (static_counts) {
+      const auto* count_arguments =
+          reinterpret_cast<const iree_hal_amd_gpu_aql_count_arguments_t*>(
+              &arguments->fixup);
+      EXPECT_EQ(count_arguments->launches,
+                program.upload_address + counts.offset);
+      EXPECT_EQ(count_arguments->launch_count, counts.count);
+    }
   }
   const auto* materialize =
-      first ? &arguments->materialize
-            : reinterpret_cast<
-                  const iree_hal_amd_gpu_aql_materialize_arguments_t*>(
-                  upload.data());
+      reinterpret_cast<const iree_hal_amd_gpu_aql_materialize_arguments_t*>(
+          reinterpret_cast<const uint8_t*>(upload.data()) +
+          (first ? offsetof(iree_hal_amd_gpu_aql_program_arguments_t,
+                            materialize) +
+                       count_extent
+                 : 0));
   EXPECT_EQ(materialize->packets, instance.address + 128);
   EXPECT_EQ(materialize->first, (position + prefix) % packets.size());
   EXPECT_EQ(materialize->packet_count, kBlockPackets);
@@ -270,6 +293,7 @@ INSTANTIATE_TEST_SUITE_P(
     InstancePreparation, ProgramPreparationTest,
     ::testing::Combine(::testing::Range(0u, uint32_t{IREE_ARRAYSIZE(kStates)}),
                        ::testing::Values(1u, 2u), ::testing::Bool(),
-                       ::testing::Bool(), ::testing::Bool()));
+                       ::testing::Bool(), ::testing::Bool(),
+                       ::testing::Bool()));
 
 }  // namespace

@@ -1,0 +1,11 @@
+// The target supplies its native register/instruction representation. The
+// address and result ABI are identical across the supported target families.
+low.func.def target<amdgpu.gfx12.generic.core> @load_count_tuple(%address: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x3>) asm {
+  %value = flat_load_dwordx3 %address : reg<amdgpu.vgpr x3>
+  return %value
+}
+
+func.def public inline @load_counts(%address: i64) -> (vector<3xi32>) {
+  %counts = low.invoke @load_count_tuple(%address) : (i64) -> (vector<3xi32>)
+  func.return %counts : vector<3xi32>
+}

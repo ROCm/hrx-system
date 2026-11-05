@@ -33,14 +33,19 @@ typedef struct iree_hal_amd_gpu_aql_command_buffer_t {
   iree_hal_amd_gpu_command_inputs_t inputs;
   // Allocated host block descriptor capacity, grown only while recording.
   uint32_t block_capacity;
+  // Temporary static-count descriptors with data-relative kernarg offsets.
+  iree_hal_amd_gpu_aql_count_t* counts;
+  // Allocated descriptor capacity, grown only while recording.
+  uint32_t count_capacity;
   // Maximum packets per block from the family's native ring geometry.
   uint32_t maximum_packet_count;
   // Physical LDS capacity used at the public dispatch boundary.
   uint32_t maximum_group_segment_byte_length;
   // Adjacent explicit execution/cache barriers, combined before emission.
   uint32_t pending_barrier;
-  // Last payload's complete header in stable host recording storage. Indirect
-  // dispatches name their patch arguments' desired header, never INVALID.
+  // Last payload's complete header in stable host recording storage. Dynamic
+  // indirect dispatches name their patch arguments' desired header, not
+  // INVALID.
   uint32_t* last_header;
   // The last payload begins after all earlier payloads have completed, so its
   // release fence can cover their writes without an additional native packet.
@@ -104,6 +109,7 @@ static void iree_hal_amd_gpu_aql_command_buffer_destroy(
                                                  &buffer->timestamps);
   iree_hal_amd_gpu_recording_deinitialize(&buffer->recording);
   iree_hal_amd_gpu_command_inputs_deinitialize(&buffer->inputs);
+  iree_allocator_free(host_allocator, buffer->counts);
   iree_hal_resource_set_free(buffer->resources);
   iree_arena_block_pool_deinitialize(&buffer->resource_blocks);
   iree_allocator_free(host_allocator, buffer);
@@ -340,6 +346,24 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
     buffer->pending_barrier = 0;
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_flush_barrier(buffer));
+  if (buffer->program->counts.count) {
+    uint32_t offset = 0;
+    iree_hal_amd_gpu_aql_count_t* counts = NULL;
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
+        &buffer->recording, buffer->program->counts.count * sizeof(*counts), 8,
+        &offset, (void**)&counts));
+    const uint32_t data_offset =
+        iree_hal_amd_gpu_recording_data_offset(&buffer->recording);
+    buffer->program->counts.offset = data_offset + offset;
+    for (uint32_t i = 0; i < buffer->program->counts.count; ++i) {
+      iree_hal_amd_gpu_aql_count_t count = buffer->counts[i];
+      count.argument_offset += data_offset;
+      counts[i] = count;
+    }
+    iree_allocator_free(buffer->host_allocator, buffer->counts);
+    buffer->counts = NULL;
+    buffer->count_capacity = 0;
+  }
   const uint64_t length = iree_align_uint64(buffer->recording.commands.length,
                                             buffer->recording.alignment) +
                           buffer->recording.data.length;
@@ -362,7 +386,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
                            buffer->recording.data.length &&
                            (buffer->pool->storage.resident.host_access &
                             AMDF_MEMORY_MAP_FLAG_WRITE);
-    if (buffer->program->block_count == 1 &&
+    if (!buffer->program->counts.count && buffer->program->block_count == 1 &&
         !buffer->requires_device_publication &&
         ((length <= 512 &&
           fixup_count <= 512 / sizeof(iree_hal_amd_gpu_fixup_t)) ||
@@ -499,6 +523,8 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
     }
   }
   const bool indirect = iree_hal_dispatch_uses_indirect_parameters(flags);
+  const bool dynamic_counts =
+      (flags & IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS) != 0;
   const bool external_arguments =
       iree_hal_dispatch_uses_indirect_arguments(flags);
   const bool initialize_grid = cooperative && buffer->pool->grid_sync;
@@ -516,7 +542,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
   if (cooperative) {
     header |= IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED;
   }
-  if (indirect) {
+  if (dynamic_counts) {
     header = iree_hal_amd_gpu_aql_barrier_join(
         header, IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM);
   }
@@ -586,7 +612,7 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
   uint32_t offset = 0;
   iree_hal_amd_gpu_aql_packet_t* packets = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_packets(
-      buffer, (indirect ? 2 : 1) + initialize_grid, &offset, &packets));
+      buffer, (dynamic_counts ? 2 : 1) + initialize_grid, &offset, &packets));
   if (initialize_grid) {
     packets[0] =
         iree_hal_amd_gpu_aql_grid_sync_packet(buffer->pool->grid_sync, 0);
@@ -594,13 +620,15 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
         buffer, offset + 40, 0, argument_offset + grid_offset,
         IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
   }
-  const uint32_t target_offset = offset + (indirect + initialize_grid) * 64;
-  iree_hal_amd_gpu_aql_packet_t* target = packets + indirect + initialize_grid;
+  const uint32_t target_offset =
+      offset + (dynamic_counts + initialize_grid) * 64;
+  iree_hal_amd_gpu_aql_packet_t* target =
+      packets + dynamic_counts + initialize_grid;
   *target = iree_hal_amd_gpu_aql_dispatch_packet(function, &geometry, header, 0,
                                                  0, flags);
   // An indirect producer is itself ordered before publishing its target.
   buffer->last_ordered =
-      indirect || !buffer->last_header ||
+      dynamic_counts || !buffer->last_header ||
       (target->words[0] & IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED) != 0;
   buffer->last_header = &target->words[0];
   const iree_hal_amd_gpu_recording_fixup_flags_t argument_flags =
@@ -625,29 +653,52 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
     IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_add_binding(
         &buffer->inputs, config.workgroup_count_ref, 1, 12, 4, false,
         &counts_value));
-    uint32_t patch_offset = 0;
-    iree_hal_amd_gpu_aql_indirect_arguments_t* patch = NULL;
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_recording_data(
-        &buffer->recording, sizeof(*patch), 8, &patch_offset, (void**)&patch));
-    iree_hal_amd_gpu_aql_indirect_prepare(layout, &geometry, flags, 0, 0, 0,
-                                          target->words[0], patch);
-    buffer->last_header = &patch->header;
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
-        buffer, patch_offset + 8, counts_value,
-        config.workgroup_count_ref.offset,
-        IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA));
-    if (!external_arguments && layout->indirect_copy_count) {
+    if (!dynamic_counts) {
+      const uint32_t count = buffer->program->counts.count;
+      const uint32_t maximum_count = UINT32_MAX / sizeof(*buffer->counts);
+      if (count == maximum_count) {
+        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "static count table exceeds 4 GiB");
+      }
+      if (count == buffer->count_capacity) {
+        const uint32_t capacity =
+            iree_min(iree_max(buffer->count_capacity * 2, 16u), maximum_count);
+        IREE_RETURN_IF_ERROR(iree_allocator_realloc(
+            buffer->host_allocator, capacity * sizeof(*buffer->counts),
+            (void**)&buffer->counts));
+        buffer->count_capacity = capacity;
+      }
+      iree_hal_amd_gpu_aql_count_prepare(
+          layout, &geometry, flags, target_offset, counts_value,
+          config.workgroup_count_ref.offset, argument_offset,
+          &buffer->counts[count]);
+      ++buffer->program->counts.count;
+    } else {
+      uint32_t patch_offset = 0;
+      iree_hal_amd_gpu_aql_indirect_arguments_t* patch = NULL;
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amd_gpu_recording_data(&buffer->recording, sizeof(*patch), 8,
+                                          &patch_offset, (void**)&patch));
+      iree_hal_amd_gpu_aql_indirect_prepare(layout, &geometry, flags, 0, 0, 0,
+                                            target->words[0], patch);
+      buffer->last_header = &patch->header;
       IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
-          buffer, patch_offset + 16, argument_value, argument_addend,
-          IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA | argument_flags));
+          buffer, patch_offset + 8, counts_value,
+          config.workgroup_count_ref.offset,
+          IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA));
+      if (!external_arguments && layout->indirect_copy_count) {
+        IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+            buffer, patch_offset + 16, argument_value, argument_addend,
+            IREE_HAL_AMD_GPU_RECORDING_FIXUP_TARGET_DATA | argument_flags));
+      }
+      packets[initialize_grid] =
+          iree_hal_amd_gpu_aql_indirect_packet(buffer->pool->indirect, 0);
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
+          buffer, offset + initialize_grid * 64 + 40, 0, patch_offset,
+          IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
+      target->words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
+      buffer->requires_device_publication = true;
     }
-    packets[initialize_grid] =
-        iree_hal_amd_gpu_aql_indirect_packet(buffer->pool->indirect, 0);
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_command_pointer(
-        buffer, offset + initialize_grid * 64 + 40, 0, patch_offset,
-        IREE_HAL_AMD_GPU_RECORDING_FIXUP_ADDEND_DATA));
-    target->words[0] = IREE_HAL_AMD_GPU_AQL_HEADER_INVALID;
-    buffer->requires_device_publication = true;
   }
   iree_hal_amd_gpu_aql_program_block_t* block =
       &buffer->program->blocks[buffer->program->block_count - 1];
@@ -873,14 +924,9 @@ iree_status_t iree_hal_amd_gpu_aql_command_invocation_write(
                             "AQL control program exceeds 48-bit addressing");
   }
   const uint64_t values_offset =
-      program->host_template
-          ? program->host_template->fixup_offset
-          : sizeof(iree_hal_amd_gpu_aql_program_arguments_t) +
-                (program->profile
-                     ? sizeof(
-                           iree_hal_amd_gpu_aql_materialize_profile_arguments_t) -
-                           sizeof(iree_hal_amd_gpu_aql_materialize_arguments_t)
-                     : 0);
+      program->host_template ? program->host_template->fixup_offset
+                             : iree_hal_amd_gpu_aql_program_argument_length(
+                                   program->counts, program->profile != NULL);
   uint64_t* values = (void*)((uint8_t*)upload + values_offset);
   values[0] = address;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_command_inputs_write(
