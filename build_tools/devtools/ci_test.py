@@ -1402,6 +1402,30 @@ class CiTest(unittest.TestCase):
         self.assertFalse(
             any("--//loom/config:shared_tools" in step.argv for step in steps)
         )
+        self.assertFalse(
+            any(step.name == "Build repository fuzz targets" for step in steps)
+        )
+
+    def test_bazel_cpu_asan_platform_lane_builds_fuzz_targets(self):
+        args = ci.parse_arguments(["iree-bazel-cpu-asan"])
+
+        with mock.patch.dict(
+            ci.os.environ, {"IREE_CI_PLATFORM_COVERAGE": "1"}, clear=True
+        ):
+            steps = ci.steps_from_args(args)
+
+        fuzz_step = next(
+            step for step in steps if step.name == "Build repository fuzz targets"
+        )
+        self.assertEqual(
+            fuzz_step.argv[:5],
+            ("python3", "dev.py", "bazel", "fuzz", "--compile-only"),
+        )
+        self.assertEqual(fuzz_step.argv[-1], "//...")
+        self.assertIn(
+            "--//loom/config/serve:image_codecs=png,jpeg,gif,webp", fuzz_step.argv
+        )
+        self.assertIn("--//loom/config/serve:audio_codecs=wav,mp3,flac", fuzz_step.argv)
 
     def test_bazel_cpu_msan_command_builds_without_tests(self):
         args = ci.parse_arguments(

@@ -527,9 +527,13 @@ deps; add --dep TARGET for anything inference misses.""",
   python dev.py bazel fuzz //runtime/src/iree/tokenizer/... -- -max_total_time=60
   python dev.py bazel fuzz --workers=4 --shard=0/4 //runtime/... -- -max_total_time=3600
   python dev.py bazel fuzz --workers=2 //loom/... -- -max_total_time=3600
+  python dev.py bazel fuzz --compile-only //...
 
-This builds with --config=fuzzer, resolves executable paths with cquery, then
-runs each fuzzer in a fresh child process with independent peak-memory accounting.
+Campaigns build with --config=fuzzer, resolve executable paths with cquery, then
+run each fuzzer in a fresh child process with independent peak-memory accounting.
+--compile-only builds every compatible selected target with --config=asan and
+stops. This qualifies compilation and linking while reusing an ASAN build's
+dependency objects; use a campaign for full dependency coverage instrumentation.
 --workers bounds host concurrency, --shard=INDEX/COUNT assigns zero-based stable
 target shards across machines, and --result=PATH overrides the default JSON result
 path. Keep runtime and Loom campaigns separate so their process cost, duration,
@@ -903,6 +907,7 @@ iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz
 iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz -- -max_total_time=60
 iree-bazel-fuzz --workers=4 --shard=0/4 //runtime/... -- -max_total_time=3600
 iree-bazel-fuzz --workers=2 //loom/... -- -max_total_time=3600
+iree-bazel-fuzz --compile-only //...
 ```
 
 The recursive pattern is the campaign boundary. Run runtime and Loom campaigns
@@ -911,6 +916,13 @@ duration, and host. `//...` remains available for a deliberate whole-tree
 sweep. A caller with local Bazel packages outside that sweep can repeat
 `--ignore-directory=PATH`; the exclusion applies only to recursive target
 discovery and does not change ordinary Bazel build, run, or query behavior.
+
+`--compile-only` retains recursive discovery, stable sharding, and incompatible
+target filtering, but builds with `--config=asan` and stops after one invocation.
+This qualifies each fuzz binary while reusing dependency objects from an ASAN
+build; campaigns retain `--config=fuzzer` coverage instrumentation throughout
+the dependency graph. Compile-only mode does not accept worker, result, or
+fuzzer-process arguments.
 
 Corpus and artifact directories live under
 `IREE_FUZZ_CACHE` when set, otherwise the platform user cache directory under

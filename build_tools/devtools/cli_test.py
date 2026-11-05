@@ -719,6 +719,16 @@ class CliTest(unittest.TestCase):
         self.assertIn("<corpus>", description)
         self.assertIn("-artifact_prefix=<artifacts>/", description)
 
+    def test_bazel_fuzz_compile_only_stops_after_build(self):
+        args = cli.parse_arguments(["bazel", "fuzz", "--compile-only", "//loom/..."])
+
+        plan = args.handler(args)
+        description = normalized_plan_description(plan)
+
+        self.assertIn("bazel build --config=asan '<fuzz targets>'", description)
+        self.assertNotIn("launch script", description)
+        self.assertNotIn("run at most", description)
+
     def test_bazel_compile_commands_defaults_to_repo_roots(self):
         args = cli.parse_arguments(["bazel", "compile-commands"])
 
