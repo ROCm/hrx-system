@@ -123,7 +123,7 @@ struct loom_serve_text_state_t {
   // Owned directory; records outlive every asynchronous borrower.
   loom_serve_text_state_row_t** rows;
   // Prepared logical plans whose selected IDs exclude compaction until freed.
-  iree_host_size_t prepared_reservations;
+  struct loom_serve_text_state_reservation_t* prepared_reservations;
   // Validated source geometry and retained initialization payloads.
   loom_serve_text_storage_t storage;
   // Explicit endpoint records, separate from active row capacity.

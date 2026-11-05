@@ -1355,13 +1355,15 @@ TEST_P(WeightsTest, ReclaimsIdleHistoryOnlyWhenProtectedParametersFit) {
       &state_statistics_, &state_));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, kSlabBytes));
   struct loom_serve_test_weight_cache_owner_t {
+    // Actual source ledger, shared with this test's real virtual reservation.
+    const loom_serve_memory_statistics_t* memory;
     // Logical ownership can be released once, independently of physical trim.
     bool retained = true;
     // Accepted maintenance keeps backing alive until its owner retires it.
     bool pending = false;
     // Counts requests, not repeated probes while retirement is pending.
     uint32_t requests = 0;
-  } owner;
+  } owner = {&state_statistics_};
   loom_serve_residency_set_reclaimer(
       residencies_[1],
       {&owner,
@@ -1378,6 +1380,16 @@ TEST_P(WeightsTest, ReclaimsIdleHistoryOnlyWhenProtectedParametersFit) {
        [](void* self) {
          return static_cast<loom_serve_test_weight_cache_owner_t*>(self)
              ->pending;
+       },
+       [](void* self, const loom_serve_residency_forecast_t*,
+          loom_serve_residency_projection_t* projection) {
+         const auto* owner =
+             static_cast<const loom_serve_test_weight_cache_owner_t*>(self);
+         *projection = {
+             .resident_bytes =
+                 owner->memory->committed_bytes + owner->memory->pending_bytes,
+         };
+         return iree_ok_status();
        }});
   auto* cache = ResidencyCache();
   loom_serve_residency_admission_t admission;

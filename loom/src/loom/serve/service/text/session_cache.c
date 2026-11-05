@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "loom/serve/service/text/retention.h"
+
 bool loom_serve_text_session_cache_inspect(
     const loom_serve_text_session_cache_t* cache, iree_host_size_t row_count,
     loom_serve_text_session_t* const* rows, iree_host_size_t index,
@@ -83,14 +85,45 @@ loom_serve_text_session_cache_entry_t* loom_serve_text_session_cache_find(
   return NULL;
 }
 
+static bool loom_serve_text_session_cache_entry_eligible(
+    const loom_serve_text_session_cache_entry_t* entry,
+    const loom_serve_text_session_cache_entry_t* protected_entry) {
+  return entry != protected_entry && !entry->endpoint.pending &&
+         entry->lifetime.id;
+}
+
+static bool loom_serve_text_session_cache_row_eligible(
+    const loom_serve_text_session_t* row,
+    const loom_serve_text_session_t* protected_row) {
+  return row != protected_row && !row->request.consumer.self &&
+         !row->preparing && loom_serve_text_row_position(row->row);
+}
+
+void loom_serve_text_session_cache_select_reclaimable(
+    const loom_serve_text_session_cache_t* cache, iree_host_size_t row_count,
+    loom_serve_text_session_t* const* rows,
+    const loom_serve_text_session_t* protected_row,
+    const loom_serve_text_session_cache_entry_t* protected_entry) {
+  for (iree_host_size_t i = 0; i < row_count; ++i) {
+    if (loom_serve_text_session_cache_row_eligible(rows[i], protected_row)) {
+      loom_serve_text_retention_add_row(rows[i]->row);
+    }
+  }
+  for (iree_host_size_t i = 0; i < cache->entry_extent; ++i) {
+    const loom_serve_text_session_cache_entry_t* entry = &cache->entries[i];
+    if (loom_serve_text_session_cache_entry_eligible(entry, protected_entry)) {
+      loom_serve_text_retention_add_checkpoint(entry->endpoint.state);
+    }
+  }
+}
+
 loom_serve_text_session_cache_entry_t* loom_serve_text_session_cache_oldest(
     loom_serve_text_session_cache_t* cache,
     const loom_serve_text_session_cache_entry_t* protected_entry) {
   loom_serve_text_session_cache_entry_t* oldest = NULL;
   for (iree_host_size_t i = 0; i < cache->entry_extent; ++i) {
     loom_serve_text_session_cache_entry_t* entry = &cache->entries[i];
-    if (entry != protected_entry && !entry->endpoint.pending &&
-        entry->lifetime.id &&
+    if (loom_serve_text_session_cache_entry_eligible(entry, protected_entry) &&
         (!oldest || entry->lifetime.serial < oldest->lifetime.serial)) {
       oldest = entry;
     }
@@ -155,8 +188,7 @@ bool loom_serve_text_session_cache_evict(
   loom_serve_text_session_t* oldest = NULL;
   for (iree_host_size_t i = 0; i < row_count; ++i) {
     loom_serve_text_session_t* row = rows[i];
-    if (row != protected_row && !row->request.consumer.self &&
-        !row->preparing && loom_serve_text_row_position(row->row) &&
+    if (loom_serve_text_session_cache_row_eligible(row, protected_row) &&
         (!oldest || row->lifetime.serial < oldest->lifetime.serial)) {
       oldest = row;
     }

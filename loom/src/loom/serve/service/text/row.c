@@ -148,26 +148,6 @@ iree_status_t loom_serve_text_row_try_restore(
   return iree_ok_status();
 }
 
-iree_status_t loom_serve_text_row_submit_reserve(
-    loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
-    const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
-    loom_serve_text_reserve_result_t* out_result,
-    loom_serve_execution_frontier_t* out_frontier) {
-  *out_result = LOOM_SERVE_TEXT_RESERVE_STATE_CAPACITY;
-  *out_frontier = (loom_serve_execution_frontier_t){0};
-  loom_serve_text_reservation_t reservation;
-  IREE_RETURN_IF_ERROR(loom_serve_text_reservation_prepare(
-      row, mode, (loom_serve_text_checkpoint_t*)checkpoint, extent,
-      &reservation));
-  iree_status_t status = iree_ok_status();
-  if (reservation.state) {
-    status = loom_serve_text_reservation_submit(&reservation, out_result,
-                                                out_frontier);
-  }
-  loom_serve_text_reservation_deinitialize(&reservation);
-  return status;
-}
-
 void loom_serve_text_row_complete_reserve(loom_serve_text_row_t* row) {
   loom_serve_text_state_row_complete_reserve(row->state);
   loom_serve_residency_cancel_admission(row->model->residency);

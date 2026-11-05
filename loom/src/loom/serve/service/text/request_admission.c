@@ -11,6 +11,7 @@
 #include "iree/base/threading/mutex.h"
 #include "loom/serve/service/text/pending_continuation.h"
 #include "loom/serve/service/text/reservation.h"
+#include "loom/serve/service/text/retention.h"
 
 // Publication reads only owner-managed entries, never borrowed row/VM state.
 void loom_serve_text_pending_observe(loom_serve_text_service_t* service) {
@@ -112,9 +113,38 @@ bool loom_serve_text_cache_reclaim_pending(void* self) {
   return service->pool.trim.pending;
 }
 
+static bool loom_serve_text_cache_can_reclaim(
+    const loom_serve_text_service_t* service) {
+  return !service->stopping && !loom_serve_text_has_work(service) &&
+         !service->control.consumer.self;
+}
+
+iree_status_t loom_serve_text_cache_forecast(
+    void* self, const loom_serve_residency_forecast_t* request,
+    loom_serve_residency_projection_t* out_projection) {
+  loom_serve_text_service_t* service = self;
+  *out_projection = (loom_serve_residency_projection_t){0};
+  if (!loom_serve_text_cache_can_reclaim(service)) {
+    // No inspection of borrowed model state. Its entire pool charge remains
+    // unclassified and therefore protected by the common forecast.
+    return iree_ok_status();
+  }
+  loom_serve_text_prefix_cache_select_reclaimable(
+      &service->prefixes, service->pending.prepared.prefix);
+  loom_serve_text_session_cache_select_reclaimable(
+      &service->cache, service->row_count, service->sessions,
+      service->pending.prepared.session, service->pending.prepared.cached);
+  const iree_status_t status =
+      request ? request->query(request->self, out_projection)
+              : loom_serve_text_retention_forecast(service->model, NULL, false,
+                                                   out_projection);
+  loom_serve_text_retention_clear(service->model);
+  return status;
+}
+
 bool loom_serve_text_cache_reclaim_request(void* self) {
   loom_serve_text_service_t* service = self;
-  if (loom_serve_text_has_work(service) || service->control.consumer.self) {
+  if (!loom_serve_text_cache_can_reclaim(service)) {
     return false;
   }
   if (!loom_serve_text_prefix_cache_evict(&service->prefixes,

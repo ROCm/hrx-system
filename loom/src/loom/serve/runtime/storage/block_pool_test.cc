@@ -152,6 +152,52 @@ TEST(BlockPoolTest, SharedOwnersSurviveCompactionAndLastRelease) {
   loom_serve_block_pool_deinitialize(&pool);
 }
 
+TEST(BlockPoolTest, ColdPlacementPrefersFreeBackedIdsWithoutChangingOwners) {
+  for (uint32_t mask = 0; mask < 256; ++mask) {
+    SCOPED_TRACE(mask);
+    loom_serve_block_pool_t pool;
+    IREE_ASSERT_OK(
+        loom_serve_block_pool_initialize(8, iree_allocator_system(), &pool));
+    std::array<uint32_t, 8> blocks;
+    loom_serve_block_pool_acquire(&pool, blocks.size(), blocks.data());
+    // Hold two IDs, including a shared owner, throughout free-list repair.
+    const uint32_t shared = 2;
+    loom_serve_block_pool_retain(&pool, 1, &shared);
+    for (uint32_t block : {0, 1, 3, 4, 6, 7}) {
+      loom_serve_block_pool_release(&pool, 1, &block);
+    }
+    struct Preference {
+      // Source-provided backing membership, independent of logical ownership.
+      uint32_t mask;
+      // Each free ID must be visited once, with no owned IDs examined.
+      uint32_t visited = 0;
+    } preference = {mask};
+    loom_serve_block_pool_prioritize(
+        &pool,
+        [](void* self, uint32_t block) {
+          auto* preference = static_cast<Preference*>(self);
+          EXPECT_EQ(preference->visited & (1u << block), 0u);
+          preference->visited |= 1u << block;
+          return (preference->mask & (1u << block)) != 0;
+        },
+        &preference);
+    EXPECT_EQ(preference.visited, 0xdbu);
+    EXPECT_EQ(pool.references[2], 2u);
+    EXPECT_EQ(pool.references[5], 1u);
+    loom_serve_block_pool_acquire(&pool, 6, blocks.data());
+    std::set<uint32_t> acquired(blocks.begin(), blocks.begin() + 6);
+    EXPECT_EQ(acquired, (std::set<uint32_t>{0, 1, 3, 4, 6, 7}));
+    bool unbacked = false;
+    for (size_t i = 0; i < 6; ++i) {
+      const bool preferred = (mask & (1u << blocks[i])) != 0;
+      EXPECT_FALSE(unbacked && preferred);
+      unbacked |= !preferred;
+    }
+    loom_serve_block_pool_prioritize(&pool, nullptr, nullptr);
+    loom_serve_block_pool_deinitialize(&pool);
+  }
+}
+
 TEST(BlockPoolTest, CompactionMovesOnlyIntoDisjointFreeSlots) {
   // Exhaust every ownership pattern in a small pool, including all-live and
   // all-free. This checks the actual planning and commit contract, not a

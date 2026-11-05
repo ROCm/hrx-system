@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "loom/serve/service/text/retention.h"
+
 iree_status_t loom_serve_text_prefix_cache_initialize(
     iree_host_size_t capacity, iree_allocator_t host_allocator,
     loom_serve_text_prefix_cache_t* out_cache) {
@@ -72,13 +74,30 @@ void loom_serve_text_prefix_cache_release(
   --cache->count;
 }
 
+static bool loom_serve_text_prefix_cache_eligible(
+    const loom_serve_text_prefix_entry_t* entry,
+    const loom_serve_text_prefix_entry_t* protected_entry) {
+  return entry->state && !entry->pending && entry != protected_entry;
+}
+
+void loom_serve_text_prefix_cache_select_reclaimable(
+    const loom_serve_text_prefix_cache_t* cache,
+    const loom_serve_text_prefix_entry_t* protected_entry) {
+  for (iree_host_size_t i = 0; i < cache->capacity; ++i) {
+    const loom_serve_text_prefix_entry_t* entry = &cache->entries[i];
+    if (loom_serve_text_prefix_cache_eligible(entry, protected_entry)) {
+      loom_serve_text_retention_add_checkpoint(entry->state);
+    }
+  }
+}
+
 static loom_serve_text_prefix_entry_t* loom_serve_text_prefix_cache_oldest(
     loom_serve_text_prefix_cache_t* cache,
     const loom_serve_text_prefix_entry_t* protected_entry) {
   loom_serve_text_prefix_entry_t* oldest = NULL;
   for (iree_host_size_t i = 0; i < cache->capacity; ++i) {
     loom_serve_text_prefix_entry_t* entry = &cache->entries[i];
-    if (entry->state && !entry->pending && entry != protected_entry &&
+    if (loom_serve_text_prefix_cache_eligible(entry, protected_entry) &&
         (!oldest || entry->serial < oldest->serial)) {
       oldest = entry;
     }

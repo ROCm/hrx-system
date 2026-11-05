@@ -97,6 +97,12 @@ bool loom_serve_text_prefix_cache_evict(
     loom_serve_text_prefix_cache_t* cache,
     const loom_serve_text_prefix_entry_t* protected_entry);
 
+// Marks each reference eviction could release for one source retention query.
+// The caller clears all model marks after that query, including on failure.
+void loom_serve_text_prefix_cache_select_reclaimable(
+    const loom_serve_text_prefix_cache_t* cache,
+    const loom_serve_text_prefix_entry_t* protected_entry);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

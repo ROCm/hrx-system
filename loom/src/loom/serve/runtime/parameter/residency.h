@@ -198,9 +198,30 @@ void loom_serve_residency_set_pinned(loom_serve_residency_t* residency,
 // Read on the serialized owner; this does not acquire or release protection.
 bool loom_serve_residency_is_pinned(const loom_serve_residency_t* residency);
 
+// Cold projection of one model's state after eligible histories retire.
+typedef struct loom_serve_residency_projection_t {
+  // Actual committed plus pending state already included in the pool ledger.
+  uint64_t resident_bytes;
+  // Necessary remaining backing, including a supplied incoming request. This
+  // is a lower bound permitting legal reuse/relocation, never an admission.
+  uint64_t minimum_bytes;
+} loom_serve_residency_projection_t;
+
+// Caller-owned request projection, borrowed for one serialized admission.
+// The service temporarily identifies eligible history before invoking it.
+typedef struct loom_serve_residency_forecast_t {
+  // Borrowed caller context owning the prepared request.
+  void* self;
+  // Reads source-owned logical requirements without changing their plan.
+  // May allocate temporary host scratch; failure preserves every history.
+  iree_status_t (*query)(void* self,
+                         loom_serve_residency_projection_t* out_projection);
+} loom_serve_residency_forecast_t;
+
 // Optional model-owned idle history, distinct from parameter pinning. Callbacks
 // run on the shared host owner inside a physical-capacity request. They never
-// allocate, submit device work, wait, or recurse into admission. The owner
+// submit device work, wait, or recurse into admission. Release/readiness do not
+// allocate; a cold forecast may allocate temporary host scratch. The owner
 // excludes live CPU/device borrowers and protects explicit retained endpoints.
 typedef struct loom_serve_residency_reclaimer_t {
   // Borrowed owner, alive until this registration removes the callbacks.
@@ -212,6 +233,12 @@ typedef struct loom_serve_residency_reclaimer_t {
   // Whether requested or ordinary maintenance can still release backing.
   // Completion/cancellation clears this through the same serialized owner.
   bool (*is_pending)(void* self);
+  // Projects this owner's state after all eligible histories retire. A supplied
+  // request belongs to this registration and includes its new demand. Owners
+  // in one cache report disjoint state. Unknown state remains protected.
+  iree_status_t (*forecast)(void* self,
+                            const loom_serve_residency_forecast_t* request,
+                            loom_serve_residency_projection_t* out_projection);
 } loom_serve_residency_reclaimer_t;
 
 // Installs/removes borrowed callbacks on the serialized owner. An empty value
@@ -269,11 +296,16 @@ iree_status_t loom_serve_residency_try_admit(
 // independently of parameter loading on the execution timeline. The caller
 // owns the returned operation through actual native retirement, including
 // terminal activation failure. A fixed-backed caller supplies no ranges or
-// readiness. No task or device wait occurs.
+// readiness. An optional source forecast includes the complete incoming state
+// and legal placement changes after denial; NULL retains exact-range demand.
+// It is queried only under pressure, never to admit work. No task or device
+// wait occurs.
 iree_status_t loom_serve_residency_try_admit_state(
     loom_serve_residency_t* residency, iree_host_size_t range_count,
-    const loom_serve_memory_range_t* ranges, iree_hal_semaphore_t* readiness,
-    uint64_t value, loom_serve_residency_admission_t* out_admission,
+    const loom_serve_memory_range_t* ranges,
+    const loom_serve_residency_forecast_t* forecast,
+    iree_hal_semaphore_t* readiness, uint64_t value,
+    loom_serve_residency_admission_t* out_admission,
     loom_serve_memory_operation_t** out_operation);
 
 // Withdraws this model's pending admission, without changing any owned pin or
