@@ -12,7 +12,7 @@ namespace loom {
 namespace {
 
 static loom_trait_flags_t ProjectEffects(const loom_low_effect_t* effects,
-                                         uint16_t effect_count) {
+                                         uint8_t effect_count) {
   const loom_low_descriptor_layout_t layout = {.effect_count = effect_count};
   loom_low_descriptor_set_t descriptor_set = {
       .descriptor_layouts = &layout,

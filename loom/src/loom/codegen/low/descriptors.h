@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 68u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 70u
 
 // Sentinel for absent target-family or descriptor-set stable IDs.
 #define LOOM_LOW_STABLE_ID_NONE UINT64_C(0)
@@ -1280,44 +1280,44 @@ static_assert(sizeof(loom_low_descriptor_t) == 32,
 typedef struct loom_low_descriptor_layout_t {
   // First feature-mask word required by this descriptor.
   uint16_t feature_mask_word_start;
-  // Number of feature-mask words required by this descriptor.
-  uint16_t feature_mask_word_count;
   // First target-owned fixed encoding field value for this descriptor.
   uint16_t encoding_field_value_start;
-  // Number of target-owned fixed encoding field values for this descriptor.
-  uint16_t encoding_field_value_count;
   // First immediate row for this descriptor.
   uint16_t immediate_start;
-  // Number of immediate rows for this descriptor.
-  uint16_t immediate_count;
   // First effect row for this descriptor.
   uint16_t effect_start;
-  // Number of effect rows for this descriptor.
-  uint16_t effect_count;
   // First constraint row for this descriptor.
   uint16_t constraint_start;
-  // Number of constraint rows for this descriptor.
-  uint16_t constraint_count;
   // First storage-lease row for this descriptor.
   uint16_t storage_lease_start;
-  // Number of storage-lease rows for this descriptor.
-  uint16_t storage_lease_count;
   // First operand-form row for descriptor-family packet selection.
   uint16_t operand_form_start;
-  // Number of operand-form rows for this descriptor.
-  uint16_t operand_form_count;
   // Target-owned encoding format identifier. Zero means no target-specific
   // format selector is required by generic descriptor consumers.
   uint16_t encoding_format_id;
+  // Number of feature-mask words required by this descriptor.
+  uint8_t feature_mask_word_count;
+  // Number of target-owned fixed encoding field values for this descriptor.
+  uint8_t encoding_field_value_count;
+  // Number of immediate rows for this descriptor.
+  uint8_t immediate_count;
+  // Number of effect rows for this descriptor.
+  uint8_t effect_count;
+  // Number of constraint rows for this descriptor.
+  uint8_t constraint_count;
+  // Number of storage-lease rows for this descriptor.
+  uint8_t storage_lease_count;
+  // Number of operand-form rows for this descriptor.
+  uint8_t operand_form_count;
   // Minimum packet operand count. Fixed descriptors accept exactly this count;
   // variadic descriptors accept this count or greater.
-  uint16_t minimum_packet_operand_count;
+  uint8_t minimum_packet_operand_count;
   // Canonical low IR operation used to represent this descriptor packet.
   loom_low_descriptor_op_kind_t op_kind;
 } loom_low_descriptor_layout_t;
 
-static_assert(sizeof(loom_low_descriptor_layout_t) == 34,
-              "loom_low_descriptor_layout_t must be 34 bytes");
+static_assert(sizeof(loom_low_descriptor_layout_t) == 26,
+              "loom_low_descriptor_layout_t must be 26 bytes");
 
 // Descriptor facts owned by one descriptor-set view. Rows correspond exactly
 // to the structural rows in loom_low_descriptor_set_t::descriptors. Keeping
@@ -1670,11 +1670,12 @@ typedef struct loom_low_descriptor_set_t {
   uint32_t descriptor_count;
   // Exclusive upper bound of descriptor ordinals addressable by this view.
   uint32_t descriptor_ordinal_count;
-  // Descriptor ordinals ordered by the referenced row's stable_id. Shared
-  // backing storage may include descriptors outside the view; lookup filters
+  // Compact descriptor ordinals ordered by the referenced row's stable_id.
+  // Generated backing storage is limited to the uint16_t ordinal domain.
+  // Shared storage may include descriptors outside the view; lookup filters
   // those ordinals through |descriptor_membership_words|. Generation rejects
   // distinct keys with the same stable identity.
-  const uint32_t* descriptor_refs;
+  const uint16_t* descriptor_refs;
   // Number of descriptor ordinal references in backing storage.
   uint32_t descriptor_ref_count;
   // Sparse encoding-equivalent physical forms available during scheduling.

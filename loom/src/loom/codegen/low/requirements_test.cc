@@ -53,7 +53,7 @@ struct RequirementTables {
   // View-owned descriptor rows paired with the structural rows.
   loom_low_descriptor_view_t descriptor_views[1];
   // Descriptor ordinals ordered by stable identity.
-  uint32_t descriptor_refs[1];
+  uint16_t descriptor_refs[1];
   // Operand/result rows referenced by the test descriptor.
   loom_low_operand_t operands[3];
   // Register class rows accepted by the test operands.

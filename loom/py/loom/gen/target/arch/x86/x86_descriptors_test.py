@@ -581,7 +581,7 @@ def test_storage_generation_emits_current_public_views() -> None:
     ):
         assert f"static const loom_low_descriptor_t k{view_prefix}Descriptors[]" not in source
         assert f"static const loom_low_descriptor_view_t k{view_prefix}DescriptorViews[]" not in source
-        assert f"static const uint32_t k{view_prefix}DescriptorRefs[]" not in source
+        assert f"static const uint16_t k{view_prefix}DescriptorRefs[]" not in source
         assert f"static const loom_low_asm_form_t k{view_prefix}AsmForms[]" not in source
     assert "static const loom_low_asm_form_t kX86AvxVnniCoreAsmForms[]" in source
     assert source.count(".descriptors = kX86Avx512FeaturesCoreStorageDescriptors,") == 8

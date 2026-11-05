@@ -1182,6 +1182,7 @@ def compile_descriptor_set(
     projected_descriptors_by_key: dict[str, Descriptor] = {}
     for descriptor in spec.descriptors:
         operand_layout = validation.validate_descriptor_operands(descriptor)
+        validation.validate_descriptor_layout_counts(descriptor, operand_layout)
         validation.validate_descriptor_speculation(descriptor)
         validation.validate_descriptor_state_assignment(descriptor, reg_class_inputs)
         validation.validate_descriptor_idempotent_state_update(descriptor, reg_class_inputs)
@@ -1216,6 +1217,10 @@ def compile_descriptor_set(
     selected_descriptors = [projected_descriptors_by_key[descriptor.key] for descriptor in source_descriptors]
     if not selected_descriptors:
         raise ValueError(f"descriptor set '{spec.key}' selected no descriptors")
+    validation.validate_u16_table_count(
+        len(selected_descriptors),
+        f"descriptor set '{spec.key}' descriptor",
+    )
     validation.validate_descriptor_asm_surface(spec, selected_descriptors)
     descriptor_ordinals = {descriptor.key: i for i, descriptor in enumerate(selected_descriptors)}
     for reg_class in spec.reg_classes:

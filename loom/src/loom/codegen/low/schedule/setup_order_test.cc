@@ -564,8 +564,8 @@ TEST_F(SetupOrderTest, ContinuationsConsumeRetainedStorageIdentity) {
                  << " retained=" << test_case.retained);
     const bool constant = test_case.source_kind == kConstant;
     const bool cross_bank = test_case.source_kind == kCrossBank;
-    const uint16_t source_operand_count = constant ? 0 : 1;
-    const uint16_t result_operand_count = constant ? 1 : 2;
+    const uint8_t source_operand_count = constant ? 0 : 1;
+    const uint8_t result_operand_count = constant ? 1 : 2;
     const loom_low_descriptor_t descriptors[] = {
         {
             .operand_count = uint16_t(source_operand_count + 1),

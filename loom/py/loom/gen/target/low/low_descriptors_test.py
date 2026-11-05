@@ -2019,6 +2019,7 @@ def test_descriptor_set_family_emits_one_storage_table_and_ordered_headers() -> 
     assert source.count("static const loom_low_descriptor_t kTestLowCoreDescriptors[]") == 1
     assert "kTestLowExtensionCoreDescriptors" not in source
     assert ".descriptors = kTestLowCoreDescriptors," in source
+    assert source.count("static const uint16_t kTestLowCoreDescriptorRefs[]") == 1
     assert source.count(".descriptor_refs = kTestLowCoreDescriptorRefs,") == 2
     assert "kTestLowExtensionCoreDescriptorRefs" not in source
     assert "kTestLowExtensionCoreAsmForms" not in source
