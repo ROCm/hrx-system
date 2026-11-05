@@ -37,6 +37,9 @@ typedef struct loom_serve_device_options_t {
   // Application-selected key, copied at creation. Empty is accepted only for
   // a singleton group, where the key is "device". Keys are visible ASCII.
   iree_string_view_t name;
+  // Policy for device-owned completion waits, passed to HAL creation. NONE
+  // disables optional active observation. The server selects ACTIVE by default.
+  iree_async_wait_flags_t completion_wait_flags;
 } loom_serve_device_options_t;
 
 // Creates every requested HAL device from its application-selected driver,

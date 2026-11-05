@@ -46,6 +46,8 @@ typedef struct loom_serve_device_configuration_t {
 // allocation domain, or {"host_numa":N} names an OS NUMA node. Device keys
 // resolve independently of consumer membership; the sealed group later resolves
 // the physical node and qualifies required placement for every backing source.
+// Optional root "wait_mode" is "active" (default) or "blocking", applied to
+// device-owned completion waits for every device. Requests remain asynchronous.
 // Pool defaults are automatic placement, elastic backing,
 // 1 GiB weight slabs, 64 MiB state slabs, no byte limit, and disabled expiry.
 // Byte counts accept integer JSON numbers or strings parsed by
@@ -63,6 +65,13 @@ iree_status_t loom_serve_device_configuration_initialize(
 iree_status_t loom_serve_device_configuration_initialize_uri(
     iree_string_view_t uri, iree_allocator_t host_allocator,
     loom_serve_device_configuration_t* out_configuration);
+
+// Overrides the completion policy for every device with "active" or "blocking".
+// Rejects other values without changing the configuration. Applies only to
+// subsequent device creation; this does not change an existing device group.
+iree_status_t loom_serve_device_configuration_set_wait_mode(
+    loom_serve_device_configuration_t* configuration,
+    iree_string_view_t wait_mode);
 
 void loom_serve_device_configuration_deinitialize(
     loom_serve_device_configuration_t* configuration);

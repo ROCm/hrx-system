@@ -20,6 +20,10 @@ IREE_FLAG(string, devices, "",
           "Machine JSON with named devices and explicit storage pools. "
           "Mutually exclusive "
           "with --device and single-device memory/idle options.");
+IREE_FLAG(string, wait_mode, "",
+          "Device completion policy for all devices: active favors latency; "
+          "blocking disables optional polling. Requests remain asynchronous. "
+          "Overrides wait_mode in --devices; default active.");
 IREE_FLAG(string, pool_backing, "",
           "elastic shares demand-committed parameter/state/workspace slabs; "
           "fixed backs retained storage eagerly and supports device address "
@@ -151,6 +155,12 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
   *out_group = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_device_configuration_from_flags(
       host_allocator, out_configuration));
+  if (FLAG_wait_mode[0]) {
+    IREE_RETURN_IF_ERROR(
+        loom_serve_device_configuration_set_wait_mode(
+            out_configuration, iree_make_cstring_view(FLAG_wait_mode)),
+        "--wait_mode");
+  }
   iree_status_t status = iree_ok_status();
   struct {
     // URI scheme borrowed from decoded configuration through this function.

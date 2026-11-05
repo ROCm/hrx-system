@@ -10,6 +10,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "iree/async/operation.h"
 #include "iree/base/api.h"
 #include "iree/base/time.h"
 #include "iree/hal/allocator.h"
@@ -282,14 +283,27 @@ typedef struct iree_hal_device_create_params_t {
   // Runtime services requested for executables loaded into the device.
   iree_hal_device_runtime_feature_flags_t runtime_features;
 
+  // Policy for device-owned completion waits. Defaults to YIELD.
+  // NONE disables optional active observation; YIELD permits bounded
+  // observation; ACTIVE prioritizes completion latency over CPU use.
+  // Backends select the mechanism and budget. Backends without active
+  // observation retain their native completion notifications.
+  //
+  // Does not create workers, configure borrowed executors, or override
+  // flags supplied to explicit host waits. Submission and completion
+  // semantics are unchanged.
+  iree_async_wait_flags_t completion_wait_flags;
+
 } iree_hal_device_create_params_t;
 
-// Returns default device creation parameters with a discard event sink.
+// Returns default device creation parameters with a discard event sink
+// and the YIELD completion-wait policy.
 static inline iree_hal_device_create_params_t
 iree_hal_device_create_params_default(void) {
   iree_hal_device_create_params_t params;
   memset(&params, 0, sizeof(params));
   params.event_sink = iree_hal_device_event_sink_discard();
+  params.completion_wait_flags = IREE_ASYNC_WAIT_FLAG_YIELD;
   return params;
 }
 

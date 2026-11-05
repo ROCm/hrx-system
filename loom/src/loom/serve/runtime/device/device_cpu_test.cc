@@ -34,11 +34,13 @@ TEST_P(CpuDeviceTest, DevicesUseApplicationWorkerBudgetAndOneGroup) {
           .driver = loom_serve_host_task_driver(host_),
           .uri = IREE_SV("task"),
           .name = iree_make_cstring_view(first_name),
+          .completion_wait_flags = IREE_ASYNC_WAIT_FLAG_ACTIVE,
       },
       {
           .driver = loom_serve_host_task_driver(host_),
           .uri = IREE_SV("task"),
           .name = IREE_SV("second"),
+          .completion_wait_flags = IREE_ASYNC_WAIT_FLAG_NONE,
       }};
   IREE_ASSERT_OK(
       loom_serve_device_group_allocate(host_, IREE_ARRAYSIZE(options), options,
@@ -67,6 +69,33 @@ TEST_P(CpuDeviceTest, DevicesUseApplicationWorkerBudgetAndOneGroup) {
     EXPECT_EQ(dispatch->execution.unit_count,
               iree_task_executor_worker_count(loom_serve_host_executor(host_)));
   }
+}
+
+TEST_P(CpuDeviceTest, CompletionPolicyReachesHalCreationAndFailureCleanup) {
+  const loom_serve_device_options_t options[] = {
+      {
+          .driver = loom_serve_host_task_driver(host_),
+          .uri = IREE_SV("task"),
+          .name = IREE_SV("first"),
+          .completion_wait_flags = IREE_ASYNC_WAIT_FLAG_ACTIVE,
+      },
+      {
+          .driver = loom_serve_host_task_driver(host_),
+          .uri = IREE_SV("task"),
+          .name = IREE_SV("second"),
+          .completion_wait_flags = 1u << 31,
+      }};
+  iree::Status status =
+      loom_serve_device_group_allocate(host_, IREE_ARRAYSIZE(options), options,
+                                       iree_allocator_system(), &group_);
+  EXPECT_EQ(status.code(), iree::StatusCode::kInvalidArgument);
+  EXPECT_THAT(status.ToString(),
+              ::testing::HasSubstr("unknown completion wait flags"));
+  EXPECT_THAT(status.ToString(),
+              ::testing::HasSubstr("creating serving device 1"));
+  EXPECT_EQ(group_, nullptr);
+  IREE_ASSERT_OK(loom_serve_device_group_allocate(
+      host_, 1, options, iree_allocator_system(), &group_));
 }
 
 TEST_P(CpuDeviceTest, LaterUriFailureReleasesBorrowedWorkers) {

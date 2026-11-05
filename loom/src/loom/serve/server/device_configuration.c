@@ -357,23 +357,28 @@ static iree_status_t loom_serve_device_configuration_pool(
 static iree_status_t loom_serve_device_configuration_root(
     void* self, iree_string_view_t key, iree_json_value_type_t type,
     iree_string_view_t value) {
-  iree_string_view_t* objects = self;
+  iree_string_view_t* fields = self;
   iree_host_size_t index;
   if (iree_string_view_equal(key, IREE_SV("devices"))) {
     index = 0;
   } else if (iree_string_view_equal(key, IREE_SV("pools"))) {
     index = 1;
+  } else if (iree_string_view_equal(key, IREE_SV("wait_mode"))) {
+    index = 2;
   } else {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "unknown machine configuration field '%.*s'",
                             (int)key.size, key.data);
   }
-  if (objects[index].data || type != IREE_JSON_VALUE_TYPE_OBJECT) {
+  const iree_json_value_type_t expected_type =
+      index == 2 ? IREE_JSON_VALUE_TYPE_STRING : IREE_JSON_VALUE_TYPE_OBJECT;
+  if (fields[index].data || type != expected_type) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "machine configuration requires one 'devices' and one 'pools' object");
+        "duplicate or wrongly typed machine configuration field '%.*s'",
+        (int)key.size, key.data);
   }
-  objects[index] = value;
+  fields[index] = value;
   return iree_ok_status();
 }
 
@@ -389,10 +394,10 @@ iree_status_t loom_serve_device_configuration_initialize(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "trailing device configuration JSON");
   }
-  iree_string_view_t objects[2] = {0};
+  iree_string_view_t fields[3] = {0};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
-      object, loom_serve_device_configuration_root, objects));
-  if (!objects[0].data || !objects[1].data) {
+      object, loom_serve_device_configuration_root, fields));
+  if (!fields[0].data || !fields[1].data) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "machine configuration requires 'devices' and 'pools'");
@@ -406,18 +411,27 @@ iree_status_t loom_serve_device_configuration_initialize(
       .configuration = out_configuration,
       .next_string = out_configuration->strings};
   iree_status_t status = iree_json_enumerate_object_typed(
-      objects[0], loom_serve_device_configuration_entry, &parser);
+      fields[0], loom_serve_device_configuration_entry, &parser);
   if (iree_status_is_ok(status) && !out_configuration->count) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "devices must contain at least one named device");
   }
   if (iree_status_is_ok(status)) {
     status = iree_json_enumerate_object_typed(
-        objects[1], loom_serve_device_configuration_pool, &parser);
+        fields[1], loom_serve_device_configuration_pool, &parser);
   }
   if (iree_status_is_ok(status) && !out_configuration->pool_count) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "pools must contain at least one named pool");
+  }
+  iree_string_view_t wait_mode = IREE_SV("active");
+  if (iree_status_is_ok(status) && fields[2].data) {
+    status =
+        loom_serve_device_configuration_string(&parser, fields[2], &wait_mode);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_device_configuration_set_wait_mode(out_configuration,
+                                                           wait_mode);
   }
   if (!iree_status_is_ok(status)) {
     loom_serve_device_configuration_deinitialize(out_configuration);
@@ -447,6 +461,8 @@ iree_status_t loom_serve_device_configuration_initialize_uri(
   out_configuration->options[0].name = IREE_SV("device");
   out_configuration->options[0].uri =
       iree_make_string_view(out_configuration->strings, uri.size);
+  out_configuration->options[0].completion_wait_flags =
+      IREE_ASYNC_WAIT_FLAG_ACTIVE;
   iree_status_t status =
       iree_allocator_malloc(host_allocator, sizeof(*out_configuration->pools),
                             (void**)&out_configuration->pools);
@@ -465,6 +481,24 @@ iree_status_t loom_serve_device_configuration_initialize_uri(
     loom_serve_device_configuration_deinitialize(out_configuration);
   }
   return status;
+}
+
+iree_status_t loom_serve_device_configuration_set_wait_mode(
+    loom_serve_device_configuration_t* configuration,
+    iree_string_view_t wait_mode) {
+  iree_async_wait_flags_t flags;
+  if (iree_string_view_equal(wait_mode, IREE_SV("active"))) {
+    flags = IREE_ASYNC_WAIT_FLAG_ACTIVE;
+  } else if (iree_string_view_equal(wait_mode, IREE_SV("blocking"))) {
+    flags = IREE_ASYNC_WAIT_FLAG_NONE;
+  } else {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "wait_mode must be active or blocking");
+  }
+  for (iree_host_size_t i = 0; i < configuration->count; ++i) {
+    configuration->options[i].completion_wait_flags = flags;
+  }
+  return iree_ok_status();
 }
 
 void loom_serve_device_configuration_deinitialize(

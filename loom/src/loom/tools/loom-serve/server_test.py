@@ -23,6 +23,37 @@ FORMAT = Path(sys.argv.pop(1)).resolve()
 
 
 class ServerTest(unittest.TestCase):
+    def test_wait_mode_accepts_both_policies(self):
+        for mode in ("active", "blocking"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                log = Path(temporary) / "server.log"
+                with running_server(
+                    [
+                        str(SERVER),
+                        "--device=task",
+                        "--pool_backing=fixed",
+                        f"--wait_mode={mode}",
+                        "--workers=1",
+                        "--listen=127.0.0.1:0",
+                    ],
+                    log,
+                ) as (process, bound_address):
+                    self.assertIsNotNone(bound_address, log.read_text())
+                    address = urlsplit(f"http://{bound_address}")
+                    control(address, "GET", "/v1/status", 200)
+                self.assertEqual(process.returncode, 0, log.read_text())
+
+    def test_invalid_wait_mode_fails_before_opening_a_device(self):
+        result = subprocess.run(
+            [str(SERVER), "--device=not-opened", "--wait_mode=busy"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--wait_mode", result.stderr)
+        self.assertIn("must be active or blocking", result.stderr)
+        self.assertNotIn('"event":"ready"', result.stderr)
+
     def test_byte_size_flags_publish_exact_limits(self):
         with tempfile.TemporaryDirectory() as temporary:
             log = Path(temporary) / "server.log"
@@ -341,6 +372,7 @@ class ServerTest(unittest.TestCase):
             (settings / "devices.json").write_text(
                 json.dumps(
                     {
+                        "wait_mode": "blocking",
                         "devices": {key: {"uri": "task"} for key in device_keys},
                         "pools": {
                             pool_keys[0]: {
@@ -372,6 +404,7 @@ class ServerTest(unittest.TestCase):
                 [
                     str(SERVER),
                     "--devices=settings/devices.json",
+                    "--wait_mode=active",
                     "--workers=2",
                     "--listen=127.0.0.1:0",
                     "--flagfile=settings/server.flags",
