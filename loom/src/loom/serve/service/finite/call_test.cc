@@ -10,7 +10,8 @@
 
 namespace {
 
-class FiniteCallTest : public ::testing::Test {
+class FiniteCallTest
+    : public ::testing::TestWithParam<loom_serve_finite_output_format_t> {
  protected:
   void SetUp() override {
     iree_string_builder_initialize(iree_allocator_system(), &body_);
@@ -41,7 +42,7 @@ class FiniteCallTest : public ::testing::Test {
 
   // Caller-owned input before acceptance, initialized empty afterward.
   iree_string_builder_t body_;
-  // Reusable encoding storage, unused by native delivery.
+  // Encoding storage, moved to JSON receipts on successful completion.
   iree_string_builder_t response_;
   // Independent caller ownership of the receipt.
   loom_serve_finite_call_t* call_ = nullptr;
@@ -49,44 +50,58 @@ class FiniteCallTest : public ::testing::Test {
   loom_serve_finite_consumer_t consumer_ = {};
 };
 
-TEST_F(FiniteCallTest, AllocationFailurePreservesInput) {
+TEST_P(FiniteCallTest, AllocationFailurePreservesInput) {
   const auto original = iree_string_builder_view(&body_);
   const iree_allocator_t failing = {
       nullptr, [](void*, iree_allocator_command_t, const void*, void**) {
         return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
       }};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_RESOURCE_EXHAUSTED,
-      loom_serve_finite_call_allocate(&body_, failing, &call_, &consumer_));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_serve_finite_call_allocate(
+                            &body_, GetParam(), failing, &call_, &consumer_));
   EXPECT_EQ(call_, nullptr);
   EXPECT_EQ(consumer_.self, nullptr);
   EXPECT_EQ(iree_string_builder_view(&body_).data, original.data);
   EXPECT_EQ(iree_string_builder_size(&body_), original.size);
 }
 
-TEST_F(FiniteCallTest, FixedAndSizingBuildersCannotTransferBorrowedStorage) {
+TEST_P(FiniteCallTest, UnknownOutputPreservesInput) {
+  const auto original = iree_string_builder_view(&body_);
+  const auto unknown = static_cast<loom_serve_finite_output_format_t>(
+      2 + static_cast<int>(GetParam()));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_finite_call_allocate(&body_, unknown, iree_allocator_system(),
+                                      &call_, &consumer_));
+  EXPECT_EQ(call_, nullptr);
+  EXPECT_EQ(consumer_.self, nullptr);
+  EXPECT_EQ(iree_string_builder_view(&body_).data, original.data);
+  EXPECT_EQ(iree_string_builder_size(&body_), original.size);
+}
+
+TEST_P(FiniteCallTest, FixedAndSizingBuildersCannotTransferBorrowedStorage) {
   char storage[8] = "{}";
   iree_string_builder_t borrowed;
   iree_string_builder_initialize_with_storage(storage, sizeof(storage),
                                               &borrowed);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_finite_call_allocate(&borrowed, iree_allocator_system(),
-                                      &call_, &consumer_));
+      loom_serve_finite_call_allocate(
+          &borrowed, GetParam(), iree_allocator_system(), &call_, &consumer_));
   EXPECT_EQ(borrowed.buffer, storage);
   iree_string_builder_deinitialize(&borrowed);
   iree_string_builder_initialize(iree_allocator_null(), &borrowed);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_finite_call_allocate(&borrowed, iree_allocator_system(),
-                                      &call_, &consumer_));
+      loom_serve_finite_call_allocate(
+          &borrowed, GetParam(), iree_allocator_system(), &call_, &consumer_));
   iree_string_builder_deinitialize(&borrowed);
 }
 
-TEST_F(FiniteCallTest, CallerCloseDoesNotReleaseBorrowedInput) {
+TEST_P(FiniteCallTest, CallerCloseDoesNotReleaseBorrowedInput) {
   const auto original = iree_string_builder_view(&body_);
   IREE_ASSERT_OK(loom_serve_finite_call_allocate(
-      &body_, iree_allocator_system(), &call_, &consumer_));
+      &body_, GetParam(), iree_allocator_system(), &call_, &consumer_));
   EXPECT_EQ(loom_serve_finite_call_body(call_).data, original.data);
   EXPECT_EQ(iree_string_builder_size(&body_), 0u);
   auto* borrowed = call_;
@@ -97,9 +112,9 @@ TEST_F(FiniteCallTest, CallerCloseDoesNotReleaseBorrowedInput) {
                                      IREE_SV("{\"state\":42}")));
 }
 
-TEST_F(FiniteCallTest, RejectedReceiptRetainsStatusAndNotifiesCompletion) {
+TEST_P(FiniteCallTest, RejectedReceiptRetainsStatusAndNotifiesCompletion) {
   IREE_ASSERT_OK(loom_serve_finite_call_allocate(
-      &body_, iree_allocator_system(), &call_, &consumer_));
+      &body_, GetParam(), iree_allocator_system(), &call_, &consumer_));
   uint32_t notifications = 0;
   loom_serve_finite_call_set_observer(
       call_,
@@ -112,11 +127,77 @@ TEST_F(FiniteCallTest, RejectedReceiptRetainsStatusAndNotifiesCompletion) {
   EXPECT_EQ(notifications, 1u);
   EXPECT_TRUE(loom_serve_finite_call_is_complete(call_));
   EXPECT_EQ(loom_serve_finite_call_output(call_), nullptr);
+  EXPECT_TRUE(
+      iree_string_view_is_empty(loom_serve_finite_call_response(call_)));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_serve_finite_call_status(call_));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_serve_finite_call_status(call_));
   loom_serve_finite_call_set_observer(call_, {});
+}
+
+INSTANTIATE_TEST_SUITE_P(OutputFormats, FiniteCallTest,
+                         ::testing::Values(LOOM_SERVE_FINITE_OUTPUT_DEVICE,
+                                           LOOM_SERVE_FINITE_OUTPUT_JSON));
+
+TEST(FiniteCallJsonTest, MovesSuccessfulResponseWithoutCopying) {
+  iree_string_builder_t input;
+  iree_string_builder_initialize(iree_allocator_system(), &input);
+  IREE_ASSERT_OK(iree_string_builder_append_cstring(&input, "{\"state\":42}"));
+  loom_serve_finite_call_t* call = nullptr;
+  loom_serve_finite_consumer_t consumer;
+  auto status = loom_serve_finite_call_allocate(
+      &input, LOOM_SERVE_FINITE_OUTPUT_JSON, iree_allocator_system(), &call,
+      &consumer);
+  iree_string_builder_deinitialize(&input);
+  IREE_ASSERT_OK(status);
+  EXPECT_NE(consumer.vtable->encode, nullptr);
+  EXPECT_EQ(consumer.vtable->publish, nullptr);
+  EXPECT_TRUE(iree_string_view_is_empty(loom_serve_finite_call_response(call)));
+
+  iree_string_builder_t response;
+  iree_string_builder_initialize(iree_allocator_system(), &response);
+  IREE_EXPECT_OK(
+      iree_string_builder_append_cstring(&response, "{\"answer\":42}"));
+  const auto original = iree_string_builder_view(&response);
+  bool delivered = false;
+  IREE_EXPECT_OK(consumer.vtable->end(consumer.self, nullptr, iree_ok_status(),
+                                      false, &response, &delivered));
+  EXPECT_TRUE(delivered);
+  EXPECT_EQ(iree_string_builder_size(&response), 0u);
+  EXPECT_EQ(iree_string_builder_buffer(&response), nullptr);
+  iree_string_builder_deinitialize(&response);
+  EXPECT_TRUE(loom_serve_finite_call_is_complete(call));
+  EXPECT_EQ(loom_serve_finite_call_output(call), nullptr);
+  const auto retained = loom_serve_finite_call_response(call);
+  EXPECT_EQ(retained.data, original.data);
+  EXPECT_TRUE(iree_string_view_equal(retained, IREE_SV("{\"answer\":42}")));
+  loom_serve_finite_call_close(call);
+}
+
+TEST(FiniteCallJsonTest, FailureDoesNotPublishPartialEncoding) {
+  iree_string_builder_t input;
+  iree_string_builder_initialize(iree_allocator_system(), &input);
+  loom_serve_finite_call_t* call = nullptr;
+  loom_serve_finite_consumer_t consumer;
+  IREE_ASSERT_OK(loom_serve_finite_call_allocate(
+      &input, LOOM_SERVE_FINITE_OUTPUT_JSON, iree_allocator_system(), &call,
+      &consumer));
+  iree_string_builder_deinitialize(&input);
+  iree_string_builder_t response;
+  iree_string_builder_initialize(iree_allocator_system(), &response);
+  IREE_EXPECT_OK(iree_string_builder_append_cstring(&response, "{\"answer\":"));
+  bool delivered = false;
+  IREE_EXPECT_OK(consumer.vtable->end(
+      consumer.self, nullptr, iree_status_from_code(IREE_STATUS_DATA_LOSS),
+      false, &response, &delivered));
+  EXPECT_TRUE(delivered);
+  EXPECT_TRUE(loom_serve_finite_call_is_complete(call));
+  EXPECT_TRUE(iree_string_view_is_empty(loom_serve_finite_call_response(call)));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                        loom_serve_finite_call_status(call));
+  iree_string_builder_deinitialize(&response);
+  loom_serve_finite_call_close(call);
 }
 
 }  // namespace

@@ -5,10 +5,12 @@
 
 #include <array>
 #include <cstdlib>
+#include <memory>
 #include <string>
 #include <type_traits>
 #include <utility>
 
+#include "iree/base/internal/json.h"
 #include "iree/base/threading/notification.h"
 #include "iree/task/owner.h"
 #include "iree/testing/gtest.h"
@@ -215,13 +217,15 @@ class NativeDecisionServiceTest : public ::testing::Test {
     iree_task_owner_t owner_;
   };
 
-  void Open(size_t index, const char* text = kRequest) {
+  void Open(size_t index, const char* text = kRequest,
+            loom_serve_finite_output_format_t output_format =
+                LOOM_SERVE_FINITE_OUTPUT_DEVICE) {
     iree_string_builder_t body;
     iree_string_builder_initialize(iree_allocator_system(), &body);
     auto status = iree_string_builder_append_cstring(&body, text);
     if (iree_status_is_ok(status)) {
-      status =
-          loom_serve_finite_service_try_open(service_, &body, &calls_[index]);
+      status = loom_serve_finite_service_try_open(
+          service_, &body, output_format, &calls_[index]);
     }
     if (iree_status_is_ok(status) && calls_[index]) {
       EXPECT_EQ(iree_string_builder_size(&body), 0u);
@@ -339,17 +343,20 @@ TEST_F(NativeDecisionServiceTest, DeviceOutputEscapesBeforeServiceRetirement) {
 
 TEST_F(NativeDecisionServiceTest, PressurePreservesInputAndRejectionIsLocal) {
   ASSERT_NO_FATAL_FAILURE(Open(0));
-  ASSERT_NO_FATAL_FAILURE(Open(1, "{}"));
+  ASSERT_NO_FATAL_FAILURE(Open(1, "{}", LOOM_SERVE_FINITE_OUTPUT_JSON));
   ASSERT_NO_FATAL_FAILURE(Open(2));
   iree_string_builder_t body;
   iree_string_builder_initialize(iree_allocator_system(), &body);
   IREE_EXPECT_OK(iree_string_builder_append_cstring(&body, kRequest));
   const auto original = iree_string_builder_view(&body);
-  IREE_EXPECT_OK(
-      loom_serve_finite_service_try_open(service_, &body, &calls_[3]));
-  EXPECT_EQ(calls_[3], nullptr);
-  EXPECT_EQ(iree_string_builder_view(&body).data, original.data);
-  EXPECT_EQ(iree_string_builder_size(&body), original.size);
+  for (auto format :
+       {LOOM_SERVE_FINITE_OUTPUT_DEVICE, LOOM_SERVE_FINITE_OUTPUT_JSON}) {
+    IREE_EXPECT_OK(loom_serve_finite_service_try_open(service_, &body, format,
+                                                      &calls_[3]));
+    EXPECT_EQ(calls_[3], nullptr);
+    EXPECT_EQ(iree_string_builder_view(&body).data, original.data);
+    EXPECT_EQ(iree_string_builder_size(&body), original.size);
+  }
   iree_string_builder_deinitialize(&body);
   loom_serve_finite_call_close(std::exchange(calls_[2], nullptr));
 
@@ -395,7 +402,8 @@ TEST_F(NativeDecisionServiceTest, StopDuringPreparationJoinsInputBorrowers) {
   const auto original = iree_string_builder_view(&body);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      loom_serve_finite_service_try_open(service_, &body, &calls_[1]));
+      loom_serve_finite_service_try_open(
+          service_, &body, LOOM_SERVE_FINITE_OUTPUT_DEVICE, &calls_[1]));
   EXPECT_EQ(calls_[1], nullptr);
   EXPECT_EQ(iree_string_builder_view(&body).data, original.data);
   EXPECT_EQ(iree_string_builder_size(&body), original.size);
@@ -432,6 +440,102 @@ TEST_F(NativeDecisionServiceTest, NativeCallerUsesExecutorWithoutHostPolling) {
   owner.WaitUntil(
       [&] { return loom_serve_finite_call_is_complete(calls_[2]); });
   owner.Call([&] { IREE_EXPECT_OK(loom_serve_finite_call_status(calls_[2])); });
+}
+
+TEST_F(NativeDecisionServiceTest, JsonResponseOutlivesModelAndResourceOwner) {
+  std::unique_ptr<loom_serve_finite_call_t,
+                  decltype(&loom_serve_finite_call_close)>
+      retained(nullptr, loom_serve_finite_call_close);
+  {
+    Owner owner(*this);
+    ASSERT_NO_FATAL_FAILURE(owner.Call([&] {
+      for (size_t i = 0; i < 2; ++i) {
+        ASSERT_NO_FATAL_FAILURE(
+            Open(i, kRequest, LOOM_SERVE_FINITE_OUTPUT_JSON));
+        loom_serve_finite_call_set_observer(calls_[i], {Wake, this});
+      }
+    }));
+    owner.WaitUntil([&] {
+      return loom_serve_finite_call_is_complete(calls_[0]) &&
+             loom_serve_finite_call_is_complete(calls_[1]);
+    });
+    owner.Call([&] {
+      IREE_EXPECT_OK(loom_serve_finite_call_status(calls_[1]));
+      EXPECT_EQ(loom_serve_finite_call_output(calls_[1]), nullptr);
+      loom_serve_finite_call_set_observer(calls_[1], {});
+      retained.reset(std::exchange(calls_[1], nullptr));
+    });
+  }
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+  IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
+  const auto response = loom_serve_finite_call_response(retained.get());
+  EXPECT_TRUE(iree_string_view_equal(
+      response,
+      IREE_SV(
+          "{\"model\":\"decision\",\"answers\":{\"truth\":{\"type\":\"noul\","
+          "\"noul\":0.25}},\"usage\":{\"input_tokens\":0,\"output_tokens\":0}"
+          "}")));
+}
+
+TEST_F(NativeDecisionServiceTest, MixedDeviceAndJsonCallsShareOneDownload) {
+  ASSERT_NO_FATAL_FAILURE(Open(0));
+  ASSERT_NO_FATAL_FAILURE(Open(1, kRequest, LOOM_SERVE_FINITE_OUTPUT_JSON));
+  ASSERT_NO_FATAL_FAILURE(Open(2, kRequest, LOOM_SERVE_FINITE_OUTPUT_JSON));
+  ASSERT_NO_FATAL_FAILURE(DriveUntil([&] {
+    return loom_serve_finite_call_is_complete(calls_[0]) &&
+           loom_serve_finite_call_is_complete(calls_[1]) &&
+           loom_serve_finite_call_is_complete(calls_[2]);
+  }));
+  IREE_ASSERT_OK(loom_serve_finite_call_status(calls_[0]));
+  const auto* device_output = loom_serve_finite_call_output(calls_[0]);
+  ASSERT_NE(device_output, nullptr);
+  EXPECT_EQ(device_output->request_index, 0u);
+  EXPECT_EQ(loom_serve_finite_result_ready(device_output->result).values[1],
+            0u);
+  for (size_t i = 1; i < 3; ++i) {
+    IREE_ASSERT_OK(loom_serve_finite_call_status(calls_[i]));
+    EXPECT_EQ(loom_serve_finite_call_output(calls_[i]), nullptr);
+    auto value = loom_serve_finite_call_response(calls_[i]);
+    for (const char* key : {"answers", "truth", "noul"}) {
+      IREE_ASSERT_OK(iree_json_lookup_object_value(
+          value, iree_make_cstring_view(key), &value));
+    }
+    double probability = 0;
+    IREE_ASSERT_OK(iree_json_parse_double(value, &probability));
+    // Three requests share one cohort; separate launches would produce 2/3.
+    // Vulkan F32 division allows 2.5 ULP at this normal divisor.
+    EXPECT_NEAR(probability, 1.0 / 3.0, 2.5 * 0x1p-25);
+  }
+  ASSERT_NO_FATAL_FAILURE(Open(3));
+  ASSERT_NO_FATAL_FAILURE(DriveUntil(
+      [&] { return loom_serve_finite_call_is_complete(calls_[3]); }));
+  IREE_ASSERT_OK(loom_serve_finite_call_status(calls_[3]));
+  const auto* next_output = loom_serve_finite_call_output(calls_[3]);
+  ASSERT_NE(next_output, nullptr);
+  // Both JSON requests used one feedback operation, and the following device
+  // call adds none. This queries the next cohort's captured producer frontier.
+  EXPECT_EQ(loom_serve_finite_result_ready(next_output->result).values[1], 1u);
+}
+
+TEST_F(NativeDecisionServiceTest, JsonCancellationJoinsEncodingBorrowers) {
+  ASSERT_NO_FATAL_FAILURE(Open(0, kRequest, LOOM_SERVE_FINITE_OUTPUT_JSON));
+  ASSERT_NO_FATAL_FAILURE(Open(1, kRequest, LOOM_SERVE_FINITE_OUTPUT_JSON));
+  ASSERT_NO_FATAL_FAILURE(DriveUntil([&] {
+    return std::string(interface_.snapshot(interface_.self).phase) ==
+           "encoding";
+  }));
+  loom_serve_finite_call_close(std::exchange(calls_[0], nullptr));
+  ASSERT_NO_FATAL_FAILURE(DriveUntil(
+      [&] { return loom_serve_finite_call_is_complete(calls_[1]); }));
+  IREE_ASSERT_OK(loom_serve_finite_call_status(calls_[1]));
+  ASSERT_NO_FATAL_FAILURE(RetireService());
+  const auto response = loom_serve_finite_call_response(calls_[1]);
+  EXPECT_TRUE(iree_string_view_equal(
+      response,
+      IREE_SV(
+          "{\"model\":\"decision\",\"answers\":{\"truth\":{\"type\":\"noul\","
+          "\"noul\":0.25}},\"usage\":{\"input_tokens\":0,\"output_tokens\":0}"
+          "}")));
 }
 
 }  // namespace

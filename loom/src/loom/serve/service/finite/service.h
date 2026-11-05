@@ -45,10 +45,13 @@ loom_serve_service_t loom_serve_finite_service_interface(
 // the owning input builder and returns a call; success with NULL means bounded
 // pressure. Both pressure and failure preserve input. The modality's normal
 // source preparation, cohort packing, and residency policy are shared with
-// HTTP. Native calls publish retained device results without downloading or
-// encoding them; the caller imports their dependency before device composition.
+// HTTP. Device calls publish retained rows without downloading or encoding;
+// the caller imports their dependency before device composition. JSON calls
+// select the shared cohort download and publish owned semantic output after
+// encoding. Compatible calls of either format can share a cohort.
 iree_status_t loom_serve_finite_service_try_open(
     loom_serve_finite_service_t* service, iree_string_builder_t* body,
+    loom_serve_finite_output_format_t output_format,
     loom_serve_finite_call_t** out_call);
 
 // After owner retirement only. CPU/process release, not completion, releases

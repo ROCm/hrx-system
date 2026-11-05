@@ -264,7 +264,8 @@ TEST_F(SourceDecisionServiceTest, NativeAndHttpShareOneCohort) {
   iree_string_builder_initialize(host_allocator_, &body);
   IREE_EXPECT_OK(iree_string_builder_append_cstring(&body, kNoul));
   loom_serve_finite_call_t* call = nullptr;
-  auto status = loom_serve_finite_service_try_open(services_[0], &body, &call);
+  auto status = loom_serve_finite_service_try_open(
+      services_[0], &body, LOOM_SERVE_FINITE_OUTPUT_DEVICE, &call);
   iree_string_builder_deinitialize(&body);
   std::unique_ptr<loom_serve_finite_call_t,
                   decltype(&loom_serve_finite_call_close)>
@@ -292,6 +293,34 @@ TEST_F(SourceDecisionServiceTest, NativeAndHttpShareOneCohort) {
   EXPECT_NE(response.find(R"("truth":{"type":"noul","noul":0.25})"),
             std::string::npos)
       << response;
+}
+
+TEST_F(SourceDecisionServiceTest, NativeJsonMatchesHttpResponseBody) {
+  iree_string_builder_t body;
+  iree_string_builder_initialize(host_allocator_, &body);
+  IREE_EXPECT_OK(iree_string_builder_append_cstring(&body, kNoul));
+  loom_serve_finite_call_t* call = nullptr;
+  auto status = loom_serve_finite_service_try_open(
+      services_[0], &body, LOOM_SERVE_FINITE_OUTPUT_JSON, &call);
+  iree_string_builder_deinitialize(&body);
+  std::unique_ptr<loom_serve_finite_call_t,
+                  decltype(&loom_serve_finite_call_close)>
+      native(call, loom_serve_finite_call_close);
+  IREE_ASSERT_OK(status);
+  ASSERT_NE(native, nullptr);
+  const int client = Send(kNoul);
+  ASSERT_NO_FATAL_FAILURE(Accept(client));
+  Drain();
+  ASSERT_TRUE(loom_serve_finite_call_is_complete(native.get()));
+  IREE_ASSERT_OK(loom_serve_finite_call_status(native.get()));
+  const auto http_response = Read(client);
+  ASSERT_EQ(http_response.find("HTTP/1.1 200"), 0u);
+  const auto separator = http_response.find("\r\n\r\n");
+  ASSERT_NE(separator, std::string::npos);
+  const auto native_response = loom_serve_finite_call_response(native.get());
+  EXPECT_EQ(std::string(native_response.data, native_response.size),
+            http_response.substr(separator + 4));
+  EXPECT_NE(http_response.find(R"("noul":0.25)"), std::string::npos);
 }
 
 TEST_F(SourceDecisionServiceTest, PacksQuestionsAndRetainsResultsAcrossReset) {

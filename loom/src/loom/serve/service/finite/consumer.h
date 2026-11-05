@@ -35,8 +35,9 @@ typedef struct loom_serve_finite_consumer_vtable_t {
                           uint64_t input_tokens, iree_string_builder_t* output);
   // Consumes the receipt after source/CPU borrowers retire. status is borrowed;
   // CANCELLED drops interest, rejected identifies a request-scoped rejection.
-  // Output is borrowed reusable storage, containing successful encoding or
-  // available for an error response. out_delivered reports
+  // Output contains successful encoding or is available for an error response.
+  // A consumer may move its owning builder, leaving it initialized and empty;
+  // otherwise storage remains borrowed through this call. out_delivered reports
   // acceptance by a still-interested consumer, not physical I/O completion.
   // Delivery failures are request-local and never fail the model's peers.
   iree_status_t (*end)(void* self, const loom_serve_finite_protocol_t* protocol,

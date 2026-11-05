@@ -815,6 +815,7 @@ static iree_status_t loom_serve_finite_job_allocate(
 
 iree_status_t loom_serve_finite_service_try_open(
     loom_serve_finite_service_t* service, iree_string_builder_t* body,
+    loom_serve_finite_output_format_t output_format,
     loom_serve_finite_call_t** out_call) {
   *out_call = NULL;
   if (service->stopping) {
@@ -827,7 +828,7 @@ iree_status_t loom_serve_finite_service_try_open(
   loom_serve_finite_job_t* job = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_finite_job_allocate(service, &job));
   iree_status_t status = loom_serve_finite_call_allocate(
-      body, service->host_allocator, out_call, &job->consumer);
+      body, output_format, service->host_allocator, out_call, &job->consumer);
   if (iree_status_is_ok(status)) {
     job->arrival_time = iree_time_now();
     job->id = loom_serve_finite_request_begin(service, job->arrival_time);
