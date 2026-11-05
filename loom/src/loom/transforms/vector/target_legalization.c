@@ -1081,6 +1081,24 @@ static iree_status_t loom_vector_legalize_extract(
   bool rewritten = false;
   IREE_RETURN_IF_ERROR(
       loom_vector_project_regular_partition(op, context->rewriter, &rewritten));
+  if (!rewritten && context->vector_packet_policy != NULL &&
+      !iree_any_bit_set(
+          context->vector_packet_policy->flags,
+          LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_STORE_COMPUTED_PACKETS_ONLY) &&
+      !context->source_function_has_unsupported_vector_carrier) {
+    const loom_value_id_t source = loom_vector_extract_source(op);
+    const loom_value_t* source_value =
+        loom_module_value(context->module, source);
+    loom_op_t* source_op = loom_value_is_block_arg(source_value)
+                               ? NULL
+                               : loom_value_def_op(source_value);
+    if (source_op != NULL && loom_vector_load_isa(source_op)) {
+      // Native-memory targets preserve the load's selected packets before
+      // scalar extraction. Scalar-memory targets keep pure loads scalar.
+      IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_load(
+          context, source_op, context->vector_packet_policy, &rewritten));
+    }
+  }
   if (!rewritten) {
     IREE_RETURN_IF_ERROR(loom_vector_extract_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));

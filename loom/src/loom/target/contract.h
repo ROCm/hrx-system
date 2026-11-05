@@ -132,6 +132,8 @@ typedef enum loom_target_vector_packet_policy_flag_bits_e {
   // Restricts store packetization to producer graphs or exact partitions that
   // preserve vector computation. Scalar-memory targets use this to terminate
   // packetized computation without regrouping pure load and copy graphs.
+  // Native computation packets retain their widths even when the terminal
+  // stores lower to narrower memory accesses.
   LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_STORE_COMPUTED_PACKETS_ONLY = 1u << 4,
   // Keeps packet snapshots in SSA. Rewrites that require temporary private
   // storage remain with their target fallback instead.

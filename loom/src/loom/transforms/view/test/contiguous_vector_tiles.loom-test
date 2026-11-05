@@ -1,0 +1,90 @@
+// RUN: pass linearize-view-accesses,canonicalize,cse
+
+// A complete contiguous matrix remains one memory access after flattening.
+func.def @complete_matrix(%input: buffer, %output: buffer, %origin: offset) {
+  %source = buffer.view %input[%origin] : buffer -> view<8x8xbf16>
+  %destination = buffer.view %output[%origin] : buffer -> view<8x8xbf16>
+  %value = vector.load %source[0, 0] {cache_scope = device, cache_temporal = non_temporal} : view<8x8xbf16> -> vector<8x8xbf16>
+  vector.store %value, %destination[0, 0] {cache_scope = system, cache_temporal = bypass} : vector<8x8xbf16>, view<8x8xbf16>
+  func.return
+}
+
+// ----
+func.def @complete_matrix(%input: buffer, %output: buffer, %origin: offset) {
+  %source = buffer.view %input[%origin] : buffer -> view<64xbf16>
+  %destination = buffer.view %output[%origin] : buffer -> view<64xbf16>
+  %7 = vector.load %source[0] {cache_scope = device, cache_temporal = non_temporal} : view<64xbf16> -> vector<64xbf16>
+  vector.store %7, %destination[0] {cache_scope = system, cache_temporal = bypass} : vector<64xbf16>, view<64xbf16>
+  func.return
+}
+
+// ====
+
+// Four adjacent rows coalesce; padding between planes remains untouched.
+func.def @padded_planes(%input: buffer, %output: buffer, %origin: offset, %plane0: index) {
+  %plane = index.assume %plane0 [range(%plane0, 0, 1)] : index
+  %layout = encoding.layout.strided [48, 8, 1] : encoding<layout>
+  %source = buffer.view %input[%origin] : buffer -> view<3x4x8xi32, %layout>
+  %destination = buffer.view %output[%origin] : buffer -> view<3x4x8xi32, %layout>
+  %value = vector.load %source[%plane, 0, 0] : view<3x4x8xi32, %layout> -> vector<2x4x8xi32>
+  vector.store %value, %destination[%plane, 0, 0] : vector<2x4x8xi32>, view<3x4x8xi32, %layout>
+  func.return
+}
+
+// ----
+func.def @padded_planes(%input: buffer, %output: buffer, %origin: offset, %plane0: index) {
+  %plane = index.assume %plane0 [range(%plane0, 0, 1)] : index
+  %source = buffer.view %input[%origin] : buffer -> view<128xi32>
+  %destination = buffer.view %output[%origin] : buffer -> view<128xi32>
+  %10 = index.constant 48 : index
+  %11 = index.mul %plane, %10 : index
+  %12 = vector.load %source[%11] : view<128xi32> -> vector<32xi32>
+  %13 = index.add %11, %10 : index
+  %14 = vector.load %source[%13] : view<128xi32> -> vector<32xi32>
+  vector.store %12, %destination[%11] : vector<32xi32>, view<128xi32>
+  vector.store %14, %destination[%13] : vector<32xi32>, view<128xi32>
+  func.return
+}
+
+// ====
+
+// A singleton axis contributes no displacement, regardless of its stride.
+func.def @singleton_axis(%input: buffer, %output: buffer, %origin: offset) {
+  %layout = encoding.layout.strided [16, 99, 1] : encoding<layout>
+  %source = buffer.view %input[%origin] : buffer -> view<2x1x16xf16, %layout>
+  %destination = buffer.view %output[%origin] : buffer -> view<2x1x16xf16, %layout>
+  %value = vector.load %source[0, 0, 0] : view<2x1x16xf16, %layout> -> vector<2x1x16xf16>
+  vector.store %value, %destination[0, 0, 0] : vector<2x1x16xf16>, view<2x1x16xf16, %layout>
+  func.return
+}
+
+// ----
+func.def @singleton_axis(%input: buffer, %output: buffer, %origin: offset) {
+  %source = buffer.view %input[%origin] : buffer -> view<32xf16>
+  %destination = buffer.view %output[%origin] : buffer -> view<32xf16>
+  %8 = vector.load %source[0] : view<32xf16> -> vector<32xf16>
+  vector.store %8, %destination[0] : vector<32xf16>, view<32xf16>
+  func.return
+}
+
+// ====
+
+// A tile covering only half of each physical row retains separate accesses.
+func.def @partial_rows(%input: buffer, %output: buffer, %origin: offset) {
+  %source = buffer.view %input[%origin] : buffer -> view<2x16xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<2x16xi8>
+  %value = vector.load %source[0, 8] : view<2x16xi8> -> vector<2x8xi8>
+  vector.store %value, %destination[0, 8] : vector<2x8xi8>, view<2x16xi8>
+  func.return
+}
+
+// ----
+func.def @partial_rows(%input: buffer, %output: buffer, %origin: offset) {
+  %source = buffer.view %input[%origin] : buffer -> view<32xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<32xi8>
+  %7 = vector.load %source[8] : view<32xi8> -> vector<8xi8>
+  %8 = vector.load %source[24] : view<32xi8> -> vector<8xi8>
+  vector.store %7, %destination[8] : vector<8xi8>, view<32xi8>
+  vector.store %8, %destination[24] : vector<8xi8>, view<32xi8>
+  func.return
+}

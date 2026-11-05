@@ -54,12 +54,12 @@ func.def target(@target) @insert_dynamic(%input: buffer, %output: buffer, %value
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<5xi64>
   %destination = buffer.view %output[%base] : buffer -> view<5xi64>
-  %27 = view.load %source[0] : view<5xi64> -> i64
-  %28 = view.load %source[1] : view<5xi64> -> i64
-  %29 = view.load %source[2] : view<5xi64> -> i64
-  %30 = view.load %source[3] : view<5xi64> -> i64
-  %31 = view.load %source[4] : view<5xi64> -> i64
-  %values = vector.from_elements %27, %28, %29, %30, %31 : vector<5xi64>
+  %26 = view.load %source[0] : view<5xi64> -> i64
+  %27 = view.load %source[1] : view<5xi64> -> i64
+  %28 = view.load %source[2] : view<5xi64> -> i64
+  %29 = view.load %source[3] : view<5xi64> -> i64
+  %30 = view.load %source[4] : view<5xi64> -> i64
+  %values = vector.from_elements %26, %27, %28, %29, %30 : vector<5xi64>
   %9 = index.constant 0 : index
   %10 = index.constant 4 : index
   %11 = index.cmp ult, %position, %10 : index
@@ -69,11 +69,10 @@ func.def target(@target) @insert_dynamic(%input: buffer, %output: buffer, %value
   %18 = vector.insert %value into %16[%17] : i64, vector<4xi64>
   %19 = scf.select %11, %18, %16 : vector<4xi64>
   %20 = vector.slice %values[4] : vector<5xi64> -> vector<1xi64>
-  %33 = vector.insert %value into %20[0] : i64, vector<1xi64>
-  %24 = scf.select %14, %33, %20 : vector<1xi64>
+  %32 = vector.insert %value into %20[0] : i64, vector<1xi64>
+  %24 = scf.select %14, %32, %20 : vector<1xi64>
   vector.store %19, %destination[0] : vector<4xi64>, view<5xi64>
-  %26 = vector.extract %24[0] : vector<1xi64> -> i64
-  view.store %26, %destination[4] : i64, view<5xi64>
+  vector.store %24, %destination[4] : vector<1xi64>, view<5xi64>
   func.return
 }
 
@@ -169,46 +168,46 @@ func.def target(@target) @insert_dynamic(%input: buffer, %output: buffer, %value
 
 // ----
 low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @insert_dynamic(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>, %value: reg<spirv.id : i64>, %position: reg<spirv.id : index>) where [range(%position, 0, 4)] asm {
-  %45 = OpConstant.offset64 0
-  %46 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %45
-  %47 = OpLoad.storage_buffer.i64 %46
-  %48 = OpConstant.offset64 8
-  %49 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %48
-  %50 = OpLoad.storage_buffer.i64 %49
-  %51 = OpConstant.offset64 16
-  %52 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %51
-  %53 = OpLoad.storage_buffer.i64 %52
-  %54 = OpConstant.offset64 24
-  %55 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %54
-  %56 = OpLoad.storage_buffer.i64 %55
-  %57 = OpConstant.offset64 32
-  %58 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %57
-  %59 = OpLoad.storage_buffer.i64 %58
-  %60 = OpConstant.i32 0 : reg<spirv.id : index>
-  %61 = OpConstant.i32 4 : reg<spirv.id : index>
-  %62 = OpBitcast.i32.u32 %position
-  %63 = OpBitcast.i32.u32 %61
-  %64 = OpULessThan.u32 %62, %63
-  %67 = OpUGreaterThanEqual.u32 %62, %63
-  %68 = OpCompositeConstruct.v4i64 %47, %50, %53, %56
-  %69 = OpSelect %64, %position, %60 : reg<spirv.id : index>
-  %70 = OpVectorInsertDynamic.i64.v4i64 %68, %value, %69
-  %71 = OpCompositeConstruct.v4bool %64, %64, %64, %64
-  %72 = OpSelect.v4i64 %71, %70, %68
-  %73 = OpSelect.i64 %67, %value, %59
-  %74 = OpCompositeExtract.v4i64.i64 %72, 0
-  %75 = OpCompositeExtract.v4i64.i64 %72, 1
-  %76 = OpCompositeExtract.v4i64.i64 %72, 2
-  %77 = OpCompositeExtract.v4i64.i64 %72, 3
-  %79 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %45
-  OpStore.storage_buffer.i64 %79, %74
-  %81 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %48
-  OpStore.storage_buffer.i64 %81, %75
-  %83 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %51
-  OpStore.storage_buffer.i64 %83, %76
-  %85 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %54
-  OpStore.storage_buffer.i64 %85, %77
-  %87 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %57
-  OpStore.storage_buffer.i64 %87, %73
+  %43 = OpConstant.offset64 0
+  %44 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %43
+  %45 = OpLoad.storage_buffer.i64 %44
+  %46 = OpConstant.offset64 8
+  %47 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %46
+  %48 = OpLoad.storage_buffer.i64 %47
+  %49 = OpConstant.offset64 16
+  %50 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %49
+  %51 = OpLoad.storage_buffer.i64 %50
+  %52 = OpConstant.offset64 24
+  %53 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %52
+  %54 = OpLoad.storage_buffer.i64 %53
+  %55 = OpConstant.offset64 32
+  %56 = OpPtrAccessChain.storage_buffer.i64.byte_offset %input, %55
+  %57 = OpLoad.storage_buffer.i64 %56
+  %58 = OpConstant.i32 0 : reg<spirv.id : index>
+  %59 = OpConstant.i32 4 : reg<spirv.id : index>
+  %60 = OpBitcast.i32.u32 %position
+  %61 = OpBitcast.i32.u32 %59
+  %62 = OpULessThan.u32 %60, %61
+  %65 = OpUGreaterThanEqual.u32 %60, %61
+  %66 = OpCompositeConstruct.v4i64 %45, %48, %51, %54
+  %67 = OpSelect %62, %position, %58 : reg<spirv.id : index>
+  %68 = OpVectorInsertDynamic.i64.v4i64 %66, %value, %67
+  %69 = OpCompositeConstruct.v4bool %62, %62, %62, %62
+  %70 = OpSelect.v4i64 %69, %68, %66
+  %71 = OpCompositeExtract.v4i64.i64 %70, 0
+  %72 = OpCompositeExtract.v4i64.i64 %70, 1
+  %73 = OpCompositeExtract.v4i64.i64 %70, 2
+  %74 = OpCompositeExtract.v4i64.i64 %70, 3
+  %76 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %43
+  OpStore.storage_buffer.i64 %76, %71
+  %78 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %46
+  OpStore.storage_buffer.i64 %78, %72
+  %80 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %49
+  OpStore.storage_buffer.i64 %80, %73
+  %82 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %52
+  OpStore.storage_buffer.i64 %82, %74
+  %83 = OpSelect.i64 %65, %value, %57
+  %85 = OpPtrAccessChain.storage_buffer.i64.byte_offset %output, %55
+  OpStore.storage_buffer.i64 %85, %83
   return
 }

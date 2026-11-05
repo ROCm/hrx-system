@@ -346,3 +346,138 @@ pipeline.def public target(@construction) @publish_width() run(%output: channel<
     channel.publish %write : write<tile<1xi32>>
   }
 }
+
+// ====
+
+// Independently bound concrete targets can have identical semantics. An inline
+// wrapper may carry its retained leaf call across that equivalent boundary.
+// RUN: pass specialize-target-callgraph,inline-callables,canonicalize
+
+test.target<low_core> @caller_device {subgroup_size = 32}
+
+test.target<low_core> @callee_device {subgroup_size = 32}
+
+func.def noinline @width() -> (index) {
+  %value = target.subgroup.size : index
+  func.return %value : index
+}
+
+func.def public inline target(@callee_device) @forward() -> (index) {
+  %value = func.call @width() : () -> (index)
+  func.return %value : index
+}
+
+func.def public target(@caller_device) @caller() -> (index) {
+  %value = func.call @forward() : () -> (index)
+  func.return %value : index
+}
+
+// ----
+test.target<low_core> @caller_device {subgroup_size = 32}
+
+test.target<low_core> @callee_device {subgroup_size = 32}
+
+func.def noinline @width() -> (index) {
+  %value = index.constant 32 : index
+  func.return %value : index
+}
+
+func.def public inline target(@callee_device) @forward() -> (index) {
+  %value = func.call pure @width() : () -> (index)
+  func.return %value : index
+}
+
+func.def public target(@caller_device) @caller() -> (index) {
+  %value = func.call pure @width() : () -> (index)
+  func.return %value : index
+}
+
+// ====
+
+// Equal effective values do not erase explicit-input provenance. The leaf
+// call remains in the explicitly constrained context.
+// RUN: pass specialize-target-callgraph,inline-callables,canonicalize
+
+test.target<low_core> @caller_device {subgroup_size = 32}
+
+test.target<low_core> @callee_device {index_bitwidth = 64, subgroup_size = 32}
+
+func.def noinline @width() -> (index) {
+  %value = target.subgroup.size : index
+  func.return %value : index
+}
+
+func.def public inline target(@callee_device) @forward() -> (index) {
+  %value = func.call @width() : () -> (index)
+  func.return %value : index
+}
+
+func.def public target(@caller_device) @caller() -> (index) {
+  %value = func.call @forward() : () -> (index)
+  func.return %value : index
+}
+
+// ----
+test.target<low_core> @caller_device {subgroup_size = 32}
+
+test.target<low_core> @callee_device {index_bitwidth = 64, subgroup_size = 32}
+
+func.def noinline @width() -> (index) {
+  %value = index.constant 32 : index
+  func.return %value : index
+}
+
+func.def public inline target(@callee_device) @forward() -> (index) {
+  %value = func.call pure @width() : () -> (index)
+  func.return %value : index
+}
+
+func.def public target(@caller_device) @caller() -> (index) {
+  %value = func.call pure @forward() : () -> (index)
+  func.return %value : index
+}
+
+// ====
+
+// A different concrete target keeps the wrapper boundary and the leaf call
+// selected for that target.
+// RUN: pass specialize-target-callgraph,inline-callables,canonicalize
+
+test.target<low_core> @caller_device {subgroup_size = 32}
+
+test.target<low_core> @callee_device {subgroup_size = 64}
+
+func.def noinline @width() -> (index) {
+  %value = target.subgroup.size : index
+  func.return %value : index
+}
+
+func.def public inline target(@callee_device) @forward() -> (index) {
+  %value = func.call @width() : () -> (index)
+  func.return %value : index
+}
+
+func.def public target(@caller_device) @caller() -> (index) {
+  %value = func.call @forward() : () -> (index)
+  func.return %value : index
+}
+
+// ----
+test.target<low_core> @caller_device {subgroup_size = 32}
+
+test.target<low_core> @callee_device {subgroup_size = 64}
+
+func.def noinline @width() -> (index) {
+  %value = index.constant 64 : index
+  func.return %value : index
+}
+
+func.def public inline target(@callee_device) @forward() -> (index) {
+  %value = func.call pure @width() : () -> (index)
+  func.return %value : index
+}
+
+func.def public target(@caller_device) @caller() -> (index) {
+  %value = func.call pure @forward() : () -> (index)
+  func.return %value : index
+}

@@ -541,3 +541,31 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exchange_f32_zero
   vst.acc.index %34, %destination_aligned, %24
   return %previous
 }
+
+// ====
+
+// Flattened matrix rows remain wide memory accesses and split at native width.
+func.def @copy_contiguous_bf16_matrix(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source_aligned, %destination_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %source = buffer.view %source_aligned[%base] : buffer -> view<8x16xbf16>
+  %destination = buffer.view %destination_aligned[%base] : buffer -> view<8x16xbf16>
+  %value = vector.load %source[0, 0] : view<8x16xbf16> -> vector<8x16xbf16>
+  vector.store %value, %destination[0, 0] : vector<8x16xbf16>, view<8x16xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @copy_contiguous_bf16_matrix() asm {
+  %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %destination_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %19 = vlda.512.bf16x32 %source_aligned, 0
+  %20 = vlda.512.bf16x32 %source_aligned, 64
+  %21 = vlda.512.bf16x32 %source_aligned, 128
+  %22 = vlda.512.bf16x32 %source_aligned, 192
+  vst.512.bf16x32 %19, %destination_aligned, 0
+  vst.512.bf16x32 %20, %destination_aligned, 64
+  vst.512.bf16x32 %21, %destination_aligned, 128
+  vst.512.bf16x32 %22, %destination_aligned, 192
+  return
+}

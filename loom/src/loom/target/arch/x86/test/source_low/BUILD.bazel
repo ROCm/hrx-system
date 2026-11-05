@@ -33,6 +33,7 @@ loom_check_test_suite(
         "memory_byte_offset_reuse.loom-test",
         "memory_float8.loom-test",
         "memory_packed_tails.loom-test",
+        "memory_scalar_consumers.loom-test",
         "memory_scalar_narrow.loom-test",
         "memory_shared_components.loom-test",
         "memory_signed_terms.loom-test",

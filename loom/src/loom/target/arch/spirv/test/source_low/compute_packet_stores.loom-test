@@ -1,0 +1,173 @@
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low control-flow=structured-low
+
+// Native four-lane comparisons and selects survive scalar halfword stores.
+// The final scalar lane remains exact without widening either memory access.
+func.def @halfword_packets(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<9xi16>
+  %destination = buffer.view %output[%base] : buffer -> view<9xi16>
+  %values = vector.load %source[0] : view<9xi16> -> vector<9xi16>
+  %c0 = vector.splati 0 : vector<9xi16>
+  %c1 = vector.splati 1 : vector<9xi16>
+  %mask = vector.cmpi ne, %values, %c0 : vector<9xi16> -> vector<9xi1>
+  %selected = vector.select %mask, %c1, %c0 : vector<9xi16>
+  vector.store %selected, %destination[0] : vector<9xi16>, view<9xi16>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @halfword_packets(%input: reg<spirv.ptr.storage_buffer>, %output: reg<spirv.ptr.storage_buffer>) asm {
+  %47 = OpConstant.offset64 0
+  %48 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %47
+  %49 = OpLoad.storage_buffer.i16 %48
+  %50 = OpConstant.offset64 2
+  %51 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %50
+  %52 = OpLoad.storage_buffer.i16 %51
+  %53 = OpConstant.offset64 4
+  %54 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %53
+  %55 = OpLoad.storage_buffer.i16 %54
+  %56 = OpConstant.offset64 6
+  %57 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %56
+  %58 = OpLoad.storage_buffer.i16 %57
+  %59 = OpCompositeConstruct.v4i16 %49, %52, %55, %58
+  %60 = OpConstant.offset64 8
+  %61 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %60
+  %62 = OpLoad.storage_buffer.i16 %61
+  %63 = OpConstant.offset64 10
+  %64 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %63
+  %65 = OpLoad.storage_buffer.i16 %64
+  %66 = OpConstant.offset64 12
+  %67 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %66
+  %68 = OpLoad.storage_buffer.i16 %67
+  %69 = OpConstant.offset64 14
+  %70 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %69
+  %71 = OpLoad.storage_buffer.i16 %70
+  %72 = OpCompositeConstruct.v4i16 %62, %65, %68, %71
+  %73 = OpConstant.offset64 16
+  %74 = OpPtrAccessChain.storage_buffer.i16.byte_offset %input, %73
+  %75 = OpLoad.storage_buffer.i16 %74
+  %76 = OpConstant.i16 0
+  %77 = OpCompositeConstruct.v4i16 %76, %76, %76, %76
+  %78 = OpConstant.i16 0 : reg<spirv.id>
+  %79 = OpINotEqual.v4i16 %59, %77
+  %80 = OpINotEqual.v4i16 %72, %77
+  %81 = OpINotEqual.i16 %75, %78
+  %82 = OpConstant.i16 1
+  %83 = OpCompositeConstruct.v4i16 %82, %82, %82, %82
+  %84 = OpConstant.i16 1 : reg<spirv.id>
+  %85 = OpSelect.v4i16 %79, %83, %77
+  %86 = OpSelect.v4i16 %80, %83, %77
+  %87 = OpSelect.i16 %81, %84, %78
+  %88 = OpCompositeExtract.v4i16.i16 %85, 0
+  %89 = OpCompositeExtract.v4i16.i16 %85, 1
+  %90 = OpCompositeExtract.v4i16.i16 %85, 2
+  %91 = OpCompositeExtract.v4i16.i16 %85, 3
+  %93 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %47
+  OpStore.storage_buffer.i16 %93, %88
+  %95 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %50
+  OpStore.storage_buffer.i16 %95, %89
+  %97 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %53
+  OpStore.storage_buffer.i16 %97, %90
+  %99 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %56
+  OpStore.storage_buffer.i16 %99, %91
+  %100 = OpCompositeExtract.v4i16.i16 %86, 0
+  %101 = OpCompositeExtract.v4i16.i16 %86, 1
+  %102 = OpCompositeExtract.v4i16.i16 %86, 2
+  %103 = OpCompositeExtract.v4i16.i16 %86, 3
+  %105 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %60
+  OpStore.storage_buffer.i16 %105, %100
+  %107 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %63
+  OpStore.storage_buffer.i16 %107, %101
+  %109 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %66
+  OpStore.storage_buffer.i16 %109, %102
+  %111 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %69
+  OpStore.storage_buffer.i16 %111, %103
+  %113 = OpPtrAccessChain.storage_buffer.i16.byte_offset %output, %73
+  OpStore.storage_buffer.i16 %113, %87
+  return
+}
+
+// ====
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low control-flow=structured-low
+
+// Four-lane and three-lane arithmetic packets share one seven-byte snapshot.
+// The second store still consumes the original bytes after the in-place update.
+func.def @mixed_packets_shared_snapshot(%memory: buffer, %original: buffer) {
+  %base = index.constant 0 : offset
+  %in_place = buffer.view %memory[%base] : buffer -> view<7xi8>
+  %snapshot = buffer.view %original[%base] : buffer -> view<7xi8>
+  %values = vector.load %in_place[0] : view<7xi8> -> vector<7xi8>
+  %c0 = vector.splati 0 : vector<7xi8>
+  %c1 = vector.splati 1 : vector<7xi8>
+  %mask = vector.cmpi ne, %values, %c0 : vector<7xi8> -> vector<7xi1>
+  %selected = vector.select %mask, %c1, %c0 : vector<7xi8>
+  vector.store %selected, %in_place[0] : vector<7xi8>, view<7xi8>
+  vector.store %values, %snapshot[0] : vector<7xi8>, view<7xi8>
+  func.return
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @mixed_packets_shared_snapshot(%memory: reg<spirv.ptr.storage_buffer>, %original: reg<spirv.ptr.storage_buffer>) asm {
+  %39 = OpConstant.offset64 0
+  %40 = OpPtrAccessChain.storage_buffer.i8.byte_offset %memory, %39
+  %41 = OpLoad.storage_buffer.i8 %40
+  %42 = OpConstant.offset64 1
+  %43 = OpPtrAccessChain.storage_buffer.i8.byte_offset %memory, %42
+  %44 = OpLoad.storage_buffer.i8 %43
+  %45 = OpConstant.offset64 2
+  %46 = OpPtrAccessChain.storage_buffer.i8.byte_offset %memory, %45
+  %47 = OpLoad.storage_buffer.i8 %46
+  %48 = OpConstant.offset64 3
+  %49 = OpPtrAccessChain.storage_buffer.i8.byte_offset %memory, %48
+  %50 = OpLoad.storage_buffer.i8 %49
+  %51 = OpCompositeConstruct.v4i8 %41, %44, %47, %50
+  %52 = OpConstant.offset64 4
+  %53 = OpPtrAccessChain.storage_buffer.i8.byte_offset %memory, %52
+  %54 = OpLoad.storage_buffer.i8 %53
+  %55 = OpConstant.offset64 5
+  %56 = OpPtrAccessChain.storage_buffer.i8.byte_offset %memory, %55
+  %57 = OpLoad.storage_buffer.i8 %56
+  %58 = OpConstant.offset64 6
+  %59 = OpPtrAccessChain.storage_buffer.i8.byte_offset %memory, %58
+  %60 = OpLoad.storage_buffer.i8 %59
+  %61 = OpCompositeConstruct.v3i8 %54, %57, %60
+  %62 = OpConstant.i8 0
+  %63 = OpCompositeConstruct.v4i8 %62, %62, %62, %62
+  %64 = OpINotEqual.v4i8 %51, %63
+  %65 = OpConstant.i8 1
+  %66 = OpCompositeConstruct.v4i8 %65, %65, %65, %65
+  %67 = OpSelect.v4i8 %64, %66, %63
+  %68 = OpCompositeExtract.v4i8.i8 %67, 0
+  %69 = OpCompositeExtract.v4i8.i8 %67, 1
+  %70 = OpCompositeExtract.v4i8.i8 %67, 2
+  %71 = OpCompositeExtract.v4i8.i8 %67, 3
+  OpStore.storage_buffer.i8 %40, %68
+  OpStore.storage_buffer.i8 %43, %69
+  OpStore.storage_buffer.i8 %46, %70
+  OpStore.storage_buffer.i8 %49, %71
+  %81 = OpCompositeConstruct.v3i8 %62, %62, %62
+  %82 = OpINotEqual.v3i8 %61, %81
+  %84 = OpCompositeConstruct.v3i8 %65, %65, %65
+  %85 = OpSelect.v3i8 %82, %84, %81
+  %86 = OpCompositeExtract.v3i8.i8 %85, 0
+  %87 = OpCompositeExtract.v3i8.i8 %85, 1
+  %88 = OpCompositeExtract.v3i8.i8 %85, 2
+  OpStore.storage_buffer.i8 %53, %86
+  OpStore.storage_buffer.i8 %56, %87
+  OpStore.storage_buffer.i8 %59, %88
+  %96 = OpPtrAccessChain.storage_buffer.i8.byte_offset %original, %39
+  OpStore.storage_buffer.i8 %96, %41
+  %98 = OpPtrAccessChain.storage_buffer.i8.byte_offset %original, %42
+  OpStore.storage_buffer.i8 %98, %44
+  %100 = OpPtrAccessChain.storage_buffer.i8.byte_offset %original, %45
+  OpStore.storage_buffer.i8 %100, %47
+  %102 = OpPtrAccessChain.storage_buffer.i8.byte_offset %original, %48
+  OpStore.storage_buffer.i8 %102, %50
+  %104 = OpPtrAccessChain.storage_buffer.i8.byte_offset %original, %52
+  OpStore.storage_buffer.i8 %104, %54
+  %106 = OpPtrAccessChain.storage_buffer.i8.byte_offset %original, %55
+  OpStore.storage_buffer.i8 %106, %57
+  %108 = OpPtrAccessChain.storage_buffer.i8.byte_offset %original, %58
+  OpStore.storage_buffer.i8 %108, %60
+  return
+}

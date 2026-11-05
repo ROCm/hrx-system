@@ -28,6 +28,7 @@
 #include "loom/pass/value_facts.h"
 #include "loom/rewrite/callable.h"
 #include "loom/rewrite/rewriter.h"
+#include "loom/target/facts.h"
 #include "loom/target/function_version.h"
 #include "loom/target/pass_environment.h"
 #include "loom/target/provider.h"
@@ -538,8 +539,16 @@ static bool loom_inline_shares_target_context(
                                                  entry->source_symbol_id);
     if (caller_version != NULL && callee_version->target_context_ordinal !=
                                       LOOM_TARGET_CONTEXT_ORDINAL_INVALID) {
+      // Independent versions can retain equivalent resolved environments.
+      // Ordinal equality proves identity; inequality alone proves nothing
+      // about the target semantics carried by their indexed fact records.
       return callee_version->target_context_ordinal ==
-             caller_version->target_context_ordinal;
+                 caller_version->target_context_ordinal ||
+             (callee_version->resolved_target.provider ==
+                  caller_version->resolved_target.provider &&
+              loom_target_facts_are_equivalent(
+                  callee_version->resolved_target.facts,
+                  caller_version->resolved_target.facts));
     }
   }
   if (callee_version != NULL && !callee_version->authored_target_is_exact) {

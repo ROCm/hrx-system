@@ -509,7 +509,7 @@ CHECK-NOT: vst.512.*
 
 // ====
 
-// RUN: with-checks emit source-low output=low
+// RUN: emit source-low output=low
 
 aie2p.target<core> @target
 
@@ -525,27 +525,19 @@ func.def target(@target) @transpose_rank2_bf16_tile(%source: buffer, %output: bu
 }
 
 // ----
-CHECK: * = vlda.128.bf16x8 %source_aligned, 0
-CHECK: * = vlda.128.bf16x8 %source_aligned, 16
-CHECK: * = vlda.128.bf16x8 %source_aligned, 32
-CHECK: * = vlda.128.bf16x8 %source_aligned, 48
-CHECK: * = vlda.128.bf16x8 %source_aligned, 64
-CHECK: * = vlda.128.bf16x8 %source_aligned, 80
-CHECK: * = vlda.128.bf16x8 %source_aligned, 96
-CHECK: * = vlda.128.bf16x8 %source_aligned, 112
-CHECK: * = mova.i32 52
-CHECK: * = vshuffle *
-CHECK: * = mova.i32 53
-CHECK: vst.128.bf16x8 *, %output_aligned, 0
-CHECK: vst.128.bf16x8 *, %output_aligned, 16
-CHECK: vst.128.bf16x8 *, %output_aligned, 32
-CHECK: vst.128.bf16x8 *, %output_aligned, 48
-CHECK: vst.128.bf16x8 *, %output_aligned, 64
-CHECK: vst.128.bf16x8 *, %output_aligned, 80
-CHECK: vst.128.bf16x8 *, %output_aligned, 96
-CHECK: vst.128.bf16x8 *, %output_aligned, 112
-CHECK-NOT: * = lda.u16 *
-CHECK-NOT: st.s16 *
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @transpose_rank2_bf16_tile() asm {
+  %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %18 = vlda.512.bf16x32 %source_aligned, 0
+  %19 = vlda.512.bf16x32 %source_aligned, 64
+  %23 = mova.i32 52
+  %24 = vshuffle %18, %19, %23
+  %25 = mova.i32 53
+  %26 = vshuffle %18, %19, %25
+  vst.512.bf16x32 %24, %output_aligned, 0
+  vst.512.bf16x32 %26, %output_aligned, 64
+  return
+}
 
 // ====
 

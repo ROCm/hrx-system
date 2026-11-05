@@ -1160,6 +1160,15 @@ static iree_status_t loom_vector_packet_store_lane_count_is_supported(
           context, packet_type, LOOM_VALUE_ID_INVALID)) {
     return iree_ok_status();
   }
+  if (iree_all_bits_set(
+          policy->flags,
+          LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_STORE_COMPUTED_PACKETS_ONLY)) {
+    // Scalar-memory targets consume native computation through narrower
+    // stores. A missing vector memory instruction must not force those
+    // producers to be replayed at scalar width.
+    *out_supported = true;
+    return iree_ok_status();
+  }
   const loom_target_contract_vector_lane_projection_t projection = {
       .source_lane_count = store_lane_count,
       .projected_lane_count = lane_count,
@@ -1463,7 +1472,9 @@ iree_status_t loom_vector_packet_legalize_store(
   loom_vector_packet_shape_t shape = {0};
   const bool requires_packet_shape = loom_vector_packet_shape_from_type(
       context, policy, store_footprint.vector_type, &shape);
-  if (!requires_packet_shape && has_vector_packet_components) {
+  if (has_vector_packet_components &&
+      (!requires_packet_shape ||
+       (require_computed_packets && partition_has_computed_packets))) {
     const loom_value_t* source_value =
         loom_module_value(context->module, store_footprint.value);
     loom_op_t* source_op = loom_value_is_block_arg(source_value)
