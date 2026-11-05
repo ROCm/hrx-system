@@ -30,6 +30,8 @@ class BazelTest(unittest.TestCase):
                 "--workers=4",
                 "--shard=1/3",
                 "--result=.notes/fuzz-result.json",
+                "--ignore-directory=local-experiments",
+                "--ignore-directory=vendor/workspaces",
                 "//...",
                 "--config=asan",
                 "--",
@@ -42,6 +44,10 @@ class BazelTest(unittest.TestCase):
         self.assertEqual(command.shard_index, 1)
         self.assertEqual(command.shard_count, 3)
         self.assertEqual(command.result_path, Path(".notes/fuzz-result.json"))
+        self.assertEqual(
+            command.ignored_directories,
+            [Path("local-experiments"), Path("vendor/workspaces")],
+        )
         self.assertEqual(command.bazel_args, ["--config=asan"])
         self.assertEqual(command.program_args, ["-max_total_time=60"])
 
@@ -52,10 +58,37 @@ class BazelTest(unittest.TestCase):
             ["--shard=2/2", "//..."],
             ["--shard=0/0", "//..."],
             ["--shard=broken", "//..."],
+            ["--ignore-directory=", "//..."],
+            ["--ignore-directory=/tmp", "//..."],
+            ["--ignore-directory=../outside", "//..."],
+            ["--ignore-directory=local-experiments", "//pkg:one_fuzz"],
         ]
         for arguments in invalid_arguments:
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
                 bazel_dev.parse_bazel_fuzz_args(arguments)
+
+    def test_bazel_fuzz_finds_packages_below_ignored_directories(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            repository_root = Path(temporary_dir)
+            (repository_root / "local/first").mkdir(parents=True)
+            (repository_root / "local/first/BUILD").write_text("")
+            (repository_root / "local/second/nested").mkdir(parents=True)
+            (repository_root / "local/second/BUILD.bazel").write_text("")
+            (repository_root / "local/without-package").mkdir(parents=True)
+
+            packages = bazel_dev.bazel_packages_under_directories(
+                repository_root,
+                [Path("local"), Path("local/second")],
+            )
+
+            self.assertEqual(packages, ["local/first", "local/second"])
+
+    def test_bazel_fuzz_rejects_missing_ignored_directory(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            with self.assertRaisesRegex(ValueError, "does not exist"):
+                bazel_dev.bazel_packages_under_directories(
+                    Path(temporary_dir), [Path("missing")]
+                )
 
     def test_bazel_fuzz_target_shards_are_stable(self):
         targets = [
@@ -1298,6 +1331,7 @@ class BazelTest(unittest.TestCase):
                 program_args=["-runs=10"],
                 worker_count=2,
                 result_path=temporary_path / "result.json",
+                ignored_directories=[Path("local-experiments")],
             )
             step = bazel_dev.BazelFuzzStep("bazel", command)
             events = []
@@ -1367,6 +1401,14 @@ class BazelTest(unittest.TestCase):
                     bazel_dev,
                     "run_captured",
                     return_value=discovered,
+                ) as query,
+                mock.patch.object(
+                    bazel_dev,
+                    "bazel_packages_under_directories",
+                    return_value=[
+                        "local-experiments/first",
+                        "local-experiments/second",
+                    ],
                 ),
                 mock.patch.object(bazel_dev, "run_quietly", side_effect=build),
                 mock.patch.object(
@@ -1396,6 +1438,17 @@ class BazelTest(unittest.TestCase):
                 result = step.run(verbose=True)
 
             self.assertEqual(result, 23)
+            query.assert_called_once_with(
+                [
+                    "bazel",
+                    "query",
+                    "--deleted_packages=local-experiments/first",
+                    "--deleted_packages=local-experiments/second",
+                    "//...",
+                ],
+                cwd=bazel_dev.REPO_ROOT,
+                env=None,
+            )
             self.assertEqual(
                 events[0],
                 (
