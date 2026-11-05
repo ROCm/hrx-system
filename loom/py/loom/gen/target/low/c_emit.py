@@ -314,7 +314,6 @@ def _asm_form_row_lines(
     return [
         [
             f".mnemonic_string_ref = {pool.ref(asm_form.mnemonic_label)},",
-            f".native_assembly_mnemonic_string_ref = {c_spelling.optional_string_expr(pool, asm_form.native_assembly_mnemonic_label)},",
             f".descriptor_ordinal = {asm_form.descriptor_ordinal},",
             f".layout_index = {asm_form.layout_index},",
         ]
@@ -330,6 +329,10 @@ def _asm_layout_flags_expr(layout: CompiledAsmLayout) -> str:
         flags.append("LOOM_LOW_ASM_LAYOUT_FLAG_REQUIRED_NAMED_IMMEDIATES")
     if layout.native_owns_immediate_syntax:
         flags.append("LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_IMMEDIATE_SYNTAX")
+    if layout.native_uses_descriptor_mnemonic:
+        flags.append("LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_DESCRIPTOR")
+    if layout.native_uses_form_mnemonic_prefix:
+        flags.append("LOOM_LOW_ASM_LAYOUT_FLAG_NATIVE_MNEMONIC_FORM_PREFIX")
     return " | ".join(flags) if flags else "0"
 
 
@@ -345,6 +348,7 @@ def _asm_layout_row_lines(layouts: Sequence[CompiledAsmLayout]) -> list[list[str
             f".operand_segment_count = {layout.operand_segment_count},",
             f".explicit_immediate_count = {layout.explicit_immediate_count},",
             f".native_assembly_value_count = {layout.native_assembly_value_count},",
+            f".native_mnemonic_data = {layout.native_mnemonic_data},",
             f".flags = {_asm_layout_flags_expr(layout)},",
         ]
         for layout in layouts
@@ -1266,6 +1270,13 @@ def emit_source_for_views(
         f"k{spec.c_table_prefix}AsmForms",
         _asm_form_row_lines(compiled, compiled.asm_forms),
     )
+    asm_native_mnemonic_table_symbol = None
+    if asm_table_storage.native_mnemonic_labels:
+        asm_native_mnemonic_table_symbol = view_array_emitter.append_value_array(
+            "loom_string_ref_t",
+            f"k{spec.c_table_prefix}AsmNativeMnemonicStringRefs",
+            [pool.ref(label) for label in asm_table_storage.native_mnemonic_labels],
+        )
     _emit_array(
         lines,
         "loom_low_asm_layout_t",
@@ -1496,6 +1507,9 @@ def emit_source_for_views(
         if view.asm_forms:
             view_lines.append(f"    .asm_forms = {asm_form_table_symbol},")
             view_lines.append(f"    .asm_form_count = IREE_ARRAYSIZE({asm_form_table_symbol}),")
+            if asm_native_mnemonic_table_symbol is not None:
+                view_lines.append(f"    .asm_native_mnemonic_string_refs = {asm_native_mnemonic_table_symbol},")
+                view_lines.append(f"    .asm_native_mnemonic_count = IREE_ARRAYSIZE({asm_native_mnemonic_table_symbol}),")
             append_optional_table(
                 "asm_layouts",
                 "AsmLayouts",

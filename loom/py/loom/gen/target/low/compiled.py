@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from loom.gen.support.string_pool import CStringPool
 from loom.gen.target.low.validation import (
     validate_asm_layout_counts,
+    validate_u8,
     validate_u16_table_count,
 )
 from loom.target.low_descriptors import (
@@ -406,7 +407,7 @@ class CompiledAsmForm:
 
 @dataclass(frozen=True, slots=True)
 class CompiledAsmLayout:
-    """Exact emitted formatting spans, independent of assembly identity."""
+    """Exact emitted formatting spans and native mnemonic recipe."""
 
     # First result type recipe, or None when all results use carrier inference.
     result_type_start: int | None
@@ -426,6 +427,12 @@ class CompiledAsmLayout:
     explicit_immediate_count: int
     # Number of native assembly value rows.
     native_assembly_value_count: int
+    # Explicit mnemonic-pool index plus one, or a form-prefix trim length.
+    native_mnemonic_data: int
+    # Native assembly uses the descriptor mnemonic instead of the form mnemonic.
+    native_uses_descriptor_mnemonic: bool
+    # Native assembly trims native_mnemonic_data bytes from the form mnemonic.
+    native_uses_form_mnemonic_prefix: bool
     # Explicit aliases or defaults require named syntax for the entire form.
     has_named_immediates: bool
     # The named dictionary cannot be omitted after any positional prefix.
@@ -469,6 +476,8 @@ class CompiledAsmTableStorage:
     immediates: list[CompiledAsmImmediate] = field(default_factory=list)
     # Native assembly values addressed by assembly-form spans.
     native_values: list[CompiledNativeAsmValue] = field(default_factory=list)
+    # Distinct non-derived native assembly mnemonic string-pool labels.
+    native_mnemonic_labels: list[str] = field(default_factory=list)
     # Indices of formatting layouts already in storage.
     _layout_indices: dict[CompiledAsmLayout, int] = field(default_factory=dict, init=False, repr=False)
     # Starts of exact default ownership sequences already in storage.
@@ -493,8 +502,18 @@ class CompiledAsmTableStorage:
         init=False,
         repr=False,
     )
+    # Compact indices of distinct non-derived native assembly mnemonics.
+    _native_mnemonic_indices: dict[str, int] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
 
-    def append_forms(self, asm_forms: Sequence[CompiledAsmForm]) -> None:
+    def append_forms(
+        self,
+        asm_forms: Sequence[CompiledAsmForm],
+        descriptors: Sequence[Descriptor],
+    ) -> None:
         """Interns each form's exact table spans into this storage."""
 
         for asm_form in asm_forms:
@@ -532,6 +551,35 @@ class CompiledAsmTableStorage:
                 self.native_values,
                 self._native_value_starts,
             )
+            native_mnemonic_data = 0
+            native_uses_descriptor_mnemonic = False
+            native_uses_form_mnemonic_prefix = False
+            native_mnemonic = asm_form.native_assembly_mnemonic
+            if native_mnemonic is not None:
+                descriptor_mnemonic = descriptors[asm_form.descriptor_ordinal].mnemonic
+                if native_mnemonic == descriptor_mnemonic:
+                    native_uses_descriptor_mnemonic = True
+                elif asm_form.mnemonic.encode().startswith(native_mnemonic.encode()):
+                    native_mnemonic_data = len(asm_form.mnemonic.encode()) - len(native_mnemonic.encode())
+                    validate_u8(
+                        native_mnemonic_data,
+                        f"asm form '{asm_form.mnemonic}' native mnemonic suffix length",
+                    )
+                    native_uses_form_mnemonic_prefix = True
+                else:
+                    native_mnemonic_index = self._native_mnemonic_indices.get(native_mnemonic)
+                    if native_mnemonic_index is None:
+                        native_mnemonic_label = asm_form.native_assembly_mnemonic_label
+                        if native_mnemonic_label is None:
+                            raise ValueError("compiled native assembly mnemonic is missing its string-pool label")
+                        native_mnemonic_index = len(self.native_mnemonic_labels)
+                        validate_u8(
+                            native_mnemonic_index + 1,
+                            "asm native mnemonic count",
+                        )
+                        self._native_mnemonic_indices[native_mnemonic] = native_mnemonic_index
+                        self.native_mnemonic_labels.append(native_mnemonic_label)
+                    native_mnemonic_data = native_mnemonic_index + 1
             layout = CompiledAsmLayout(
                 result_type_start=result_type_start,
                 tied_result_start=tied_result_start,
@@ -542,6 +590,9 @@ class CompiledAsmTableStorage:
                 operand_segment_count=len(asm_form.operand_segments),
                 explicit_immediate_count=asm_form.explicit_immediate_count,
                 native_assembly_value_count=len(asm_form.native_assembly_values),
+                native_mnemonic_data=native_mnemonic_data,
+                native_uses_descriptor_mnemonic=native_uses_descriptor_mnemonic,
+                native_uses_form_mnemonic_prefix=native_uses_form_mnemonic_prefix,
                 has_named_immediates=asm_form.has_named_immediates,
                 requires_named_immediates=asm_form.requires_named_immediates,
                 native_owns_immediate_syntax=asm_form.native_owns_immediate_syntax,

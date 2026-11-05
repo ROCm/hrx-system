@@ -730,6 +730,7 @@ def test_shared_operand_rows_keep_descriptor_local_source_positions() -> None:
         {"native_assembly_values": ()},
         {"native_assembly_values": (NativeAsmValue(NativeAsmValueKind.MODIFIER_LITERAL, literal="mode:1"),)},
         {"native_assembly_values": (NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="rhs"), NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="lhs"))},
+        {"native_assembly_mnemonic": "native.layout.alternate"},
     ],
 )
 def test_assembly_layout_interning_preserves_every_projection(changes) -> None:
@@ -741,6 +742,13 @@ def test_assembly_layout_interning_preserves_every_projection(changes) -> None:
         immediates=(AsmImmediate("i32_value", "literal"),),
         native_assembly_values=(NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="lhs"), NativeAsmValue(NativeAsmValueKind.OPERAND, field_name="rhs")),
     )
+
+    def form_for_ordinal(ordinal: int) -> AsmForm:
+        form_changes = {"native_assembly_mnemonic": "native.layout"}
+        if ordinal:
+            form_changes.update(changes)
+        return replace(form, **form_changes)
+
     descriptors = tuple(
         replace(
             base,
@@ -748,7 +756,7 @@ def test_assembly_layout_interning_preserves_every_projection(changes) -> None:
             mnemonic=f"test.layout.{ordinal}",
             operands=(base.operands[0], replace(base.operands[0], field_name="carry"), *base.operands[1:]),
             immediates=TEST_LOW_CONST_I32_DESCRIPTOR.immediates,
-            asm_forms=(replace(form, native_assembly_mnemonic=f"native.layout.{ordinal}", **(changes if ordinal else {})),),
+            asm_forms=(form_for_ordinal(ordinal),),
         )
         for ordinal in range(2)
     )
@@ -763,6 +771,7 @@ def test_assembly_layout_interning_preserves_every_projection(changes) -> None:
         assert tuple(storage.operand_segments[layout.operand_segment_start : layout.operand_segment_start + layout.operand_segment_count]) == asm_form.operand_segments
         assert tuple(storage.immediates[layout.immediate_start : layout.immediate_start + len(asm_form.immediates)]) == asm_form.immediates
         assert layout.explicit_immediate_count == asm_form.explicit_immediate_count
+        assert layout.native_mnemonic_data != 0
         assert layout.has_named_immediates == asm_form.has_named_immediates
         assert layout.requires_named_immediates == asm_form.requires_named_immediates
         assert layout.native_owns_immediate_syntax == asm_form.native_owns_immediate_syntax
@@ -772,7 +781,7 @@ def test_assembly_layout_interning_preserves_every_projection(changes) -> None:
         else:
             assert tuple(storage.result_types[layout.result_type_start : layout.result_type_start + len(asm_form.result_types)]) == asm_form.result_types
     before = tuple(storage.layouts)
-    storage.append_forms(compiled.asm_forms)
+    storage.append_forms(compiled.asm_forms, compiled.descriptors)
     assert tuple(storage.layouts) == before
 
 
