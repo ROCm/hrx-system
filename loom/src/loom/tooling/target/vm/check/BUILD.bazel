@@ -41,3 +41,21 @@ loom_cc_library(
         "//runtime/src/iree/base",
     ],
 )
+
+loom_cc_library(
+    name = "object_lifetime",
+    testonly = True,
+    srcs = ["object_lifetime.cc"],
+    hdrs = ["object_lifetime.h"],
+    target_compatible_with = _VM_BINARY_COMPATIBLE_WITH,
+    visibility = ["//loom/src/loom/tools/loom-check:__pkg__"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//loom/src/loom/tools/loom-check:provider",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm:test_support",
+        "//runtime/src/iree/vm/bytecode:module",
+    ],
+)

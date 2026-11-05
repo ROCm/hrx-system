@@ -89,6 +89,9 @@
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_SPIRV_BINARY
 #if LOOM_CHECK_HAVE_ARTIFACT_VM_BINARY
 #include "loom/tooling/target/vm/check/provider.h"
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
+#include "loom/tooling/target/vm/check/object_lifetime.h"
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_VM_BINARY
 #if LOOM_CHECK_HAVE_ARTIFACT_WASM_BINARY
 #include "loom/tooling/target/wasm/loom_check_provider.h"
@@ -136,6 +139,9 @@ static const loom_check_provider_t* const kLoomCheckProviders[] = {
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_SPIRV_BINARY
 #if LOOM_CHECK_HAVE_ARTIFACT_VM_BINARY
     &loom_vm_emit_check_provider,
+#if LOOM_CHECK_HAVE_TEST_PROVIDER
+    &loom_vm_object_lifetime_check_provider,
+#endif  // LOOM_CHECK_HAVE_TEST_PROVIDER
 #endif  // LOOM_CHECK_HAVE_ARTIFACT_VM_BINARY
 #if LOOM_CHECK_HAVE_ARTIFACT_WASM_BINARY
     &loom_wasm_emit_check_provider,

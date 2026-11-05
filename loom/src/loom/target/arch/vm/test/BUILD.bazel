@@ -41,6 +41,7 @@ loom_check_test_suite(
         "managed_consumption.loom-test",
         "managed_types.loom-test",
         "native_references.loom-test",
+        "object_lifetime.loom-test",
         "reference_transfers.loom-test",
         "storage.loom-test",
         "storage_transfers.loom-test",
