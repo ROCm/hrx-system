@@ -9,6 +9,12 @@
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
 load("@rules_testing//lib:util.bzl", "TestingAspectInfo", "util")
 load("//build_tools/bazel:cc_fuzz.bzl", "iree_cc_fuzz")
+load(
+    "//build_tools/bazel:runfiles.bzl",
+    "IreeRunfilesArgumentsInfo",
+    "RUNFILES_PATH_BEGIN",
+    "RUNFILES_PATH_END",
+)
 
 _TEST_DYNAMIC_LIBRARY_ENVIRONMENT = "IREE_TEST_DYNAMIC_LIBRARY_PATH"
 
@@ -16,6 +22,13 @@ def _test_cc_fuzz_adds_fuzzer_contract(name, **kwargs):
     util.helper_target(
         iree_cc_fuzz,
         name = name + "_subject",
+        args = [
+            "-seed_inputs=$(rootpath :generate_rule_fixture.data),$(rootpath :empty_suppressions.txt)",
+        ],
+        data = [
+            ":empty_suppressions.txt",
+            ":generate_rule_fixture.data",
+        ],
         defines = ["USER_DEFINE"],
         deps = [":dynamic_library_environment_library"],
         linkopts = ["-Wl,--user-linkopt"],
@@ -55,6 +68,25 @@ def _test_cc_fuzz_adds_fuzzer_contract_impl(env, target):
             env.fail("expected %r in fuzz tags %r" % (expected_tag, attrs.tags))
     if not attrs.testonly:
         env.fail("expected fuzz target to be testonly")
+    runfiles_arguments = target[IreeRunfilesArgumentsInfo]
+    configured_argument = (
+        "-seed_inputs=" +
+        "build_tools/bazel/test/generate_rule_fixture.data," +
+        "build_tools/bazel/test/empty_suppressions.txt"
+    )
+    env.expect.that_collection(runfiles_arguments.arguments).contains_exactly([
+        configured_argument,
+    ])
+    env.expect.that_collection(runfiles_arguments.marked_arguments).contains_exactly([
+        "-seed_inputs=" +
+        RUNFILES_PATH_BEGIN +
+        "build_tools/bazel/test/generate_rule_fixture.data" +
+        RUNFILES_PATH_END +
+        "," +
+        RUNFILES_PATH_BEGIN +
+        "build_tools/bazel/test/empty_suppressions.txt" +
+        RUNFILES_PATH_END,
+    ])
     library_path = target[RunEnvironmentInfo].environment[_TEST_DYNAMIC_LIBRARY_ENVIRONMENT]
     if not library_path.endswith("dynamic_library_root.so"):
         env.fail("unexpected fuzz dynamic-library path %r" % library_path)
