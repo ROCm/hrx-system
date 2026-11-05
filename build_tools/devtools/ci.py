@@ -441,6 +441,20 @@ def bazel_build_step(
     return CiStep(name, dev_command(*command))
 
 
+def bazel_fuzz_build_step() -> CiStep:
+    return CiStep(
+        "Build repository fuzz targets",
+        dev_command(
+            "bazel",
+            "fuzz",
+            "--compile-only",
+            *ci_config.BAZEL_DEFAULT_OPTIONS,
+            *codec_options("bazel"),
+            "//...",
+        ),
+    )
+
+
 def bazel_test_step(
     name: str,
     targets: tuple[str, ...],
@@ -775,22 +789,24 @@ def cpu_sanitizer_steps(targets: tuple[str, ...]) -> list[CiStep]:
 def cpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
     scoped_targets = targets + ci_config.CPU_BAZEL_TARGET_EXCLUDES
     if config in ci_config.SANITIZER_TEST_CONFIGS:
-        steps = [
-            *platform_coverage_build_steps(
-                bazel_build_step(
-                    f"Build IREE with {config.upper()}",
-                    scoped_targets,
-                    config=config,
-                )
-            ),
+        steps = platform_coverage_build_steps(
+            bazel_build_step(
+                f"Build IREE with {config.upper()}",
+                scoped_targets,
+                config=config,
+            )
+        )
+        if config == "asan":
+            steps.extend(platform_coverage_build_steps(bazel_fuzz_build_step()))
+        steps.append(
             bazel_test_step(
                 f"Test IREE with {config.upper()}",
                 scoped_targets + ci_config.CPU_SANITIZERS_XFAIL_TARGETS,
                 config=config,
                 test_tag_filters=ci_config.CPU_RESOURCE_TAG_EXCLUDES,
                 test_language_filters=ci_config.PYTHON_TEST_BAZEL_LANGUAGE_EXCLUSIONS,
-            ),
-        ]
+            )
+        )
         return steps
     if config in ci_config.SANITIZER_BUILD_CONFIGS:
         return [
