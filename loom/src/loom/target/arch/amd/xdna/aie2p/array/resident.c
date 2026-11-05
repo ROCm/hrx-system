@@ -954,8 +954,8 @@ static iree_status_t loom_aie2p_array_resident_build_private_fold_span(
         span->byte_length, location, /*value_name=*/NULL, &step));
     IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_build_constant(
         builder, ir_builder, AIE2P_CORE_DESCRIPTOR_REF_CONSTANT_I32,
-        span->byte_length * span->repeat_count, location, /*value_name=*/NULL,
-        &end));
+        (int64_t)span->byte_length * span->repeat_count, location,
+        /*value_name=*/NULL, &end));
     IREE_RETURN_IF_ERROR(
         loom_region_append_block(builder->module, region, &loop_body));
     IREE_RETURN_IF_ERROR(

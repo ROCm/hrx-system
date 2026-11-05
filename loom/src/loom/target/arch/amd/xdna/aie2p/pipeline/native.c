@@ -31,7 +31,8 @@ iree_status_t loom_aie2p_native_reject(
 static iree_status_t loom_aie2p_native_inventory(
     loom_aie2p_native_context_t* context) {
   const loom_xdna_array_family_t* family = context->family;
-  const iree_host_size_t tile_count = family->column_count * family->row_count;
+  const iree_host_size_t tile_count =
+      (iree_host_size_t)family->column_count * family->row_count;
   iree_arena_allocator_t* arena = context->pass->arena;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, tile_count, sizeof(*context->tiles), (void**)&context->tiles));
@@ -858,7 +859,8 @@ static iree_status_t loom_aie2p_native_select(
   loom_pipeline_execution_conflict_t conflict;
   IREE_RETURN_IF_ERROR(loom_pipeline_execution_build(
       &realization->invocations, core_engines,
-      context->family->column_count * context->family->row_count,
+      (iree_host_size_t)context->family->column_count *
+          context->family->row_count,
       context->pass->arena, &context->execution, &conflict));
   if (conflict.second_worker != IREE_HOST_SIZE_MAX) {
     return loom_aie2p_native_reject(
