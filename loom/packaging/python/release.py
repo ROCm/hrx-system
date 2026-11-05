@@ -8,6 +8,7 @@
 
 import argparse
 import email.parser
+import enum
 import hashlib
 import json
 import re
@@ -30,6 +31,11 @@ SERVER_BINARIES = {
 }
 
 
+class ReleaseChannel(enum.StrEnum):
+    STABLE = "stable"
+    PRERELEASE = "prerelease"
+
+
 @dataclass(frozen=True)
 class Identity:
     # Canonical PEP 440 base version; native configuration owns local suffixes.
@@ -37,15 +43,25 @@ class Identity:
     # Published discovery reference, or None for an unassociated build.
     catalog: str | None
 
-    def check_tag(self, tag: str) -> None:
-        if ".dev" in self.version or self.catalog is None:
-            raise ValueError(
-                "A release needs a non-development version and model catalog"
-            )
-        if tag != "v" + self.version:
-            raise ValueError(
-                f"Tag {tag!r} does not match version.json (v{self.version})"
-            )
+    @property
+    def tag(self) -> str:
+        return "v" + self.version
+
+    @property
+    def release_channel(self) -> ReleaseChannel:
+        if ".dev" in self.version:
+            raise ValueError("A release needs a non-development version")
+        if re.fullmatch(rf"{_NUMBER}\.{_NUMBER}\.{_NUMBER}", self.version):
+            return ReleaseChannel.STABLE
+        return ReleaseChannel.PRERELEASE
+
+    def check_tag(self, tag: str) -> ReleaseChannel:
+        if self.catalog is None:
+            raise ValueError("A release needs a model catalog")
+        channel = self.release_channel
+        if tag != self.tag:
+            raise ValueError(f"Tag {tag!r} does not match version.json ({self.tag})")
+        return channel
 
     def document(self) -> dict:
         return {"package-version": self.version, "model-catalog": self.catalog}
@@ -304,13 +320,13 @@ def main(argv: list[str] | None = None) -> int:
             identity = parse_identity(
                 {"package-version": args.version, "model-catalog": args.catalog}
             )
-            identity.check_tag("v" + args.version)
+            identity.check_tag(identity.tag)
             document = json.dumps(identity.document(), indent=2) + "\n"
             print(document, end="")
             if not args.dry_run:
                 args.identity.write_text(document, encoding="utf-8", newline="\n")
         elif args.command == "check-tag":
-            identity.check_tag(args.tag)
+            print(identity.check_tag(args.tag).value)
         else:
             description = args.description.read_text(encoding="utf-8")
             if args.command == "verify":
