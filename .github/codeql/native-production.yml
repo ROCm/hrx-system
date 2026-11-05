@@ -1,0 +1,34 @@
+name: HRX native production
+
+paths:
+  - libamdf/include
+  - libamdf/src
+  - loom/src
+  - runtime/src
+
+# The workflow's matching sparse checkout keeps these paths physically absent
+# from no-build extraction; these filters also define the result policy when
+# the configuration is used independently.
+paths-ignore:
+  - "**/cts/**"
+  - "**/test/**"
+  - "**/tests/**"
+  - "**/testdata/**"
+  - "**/testing/**"
+  - "**/benchmark/**"
+  - "**/benchmarks/**"
+  - "**/fuzz/**"
+  - "**/test.*"
+  - "**/test_*.*"
+  - "**/*_test.*"
+  - "**/*_test_*.*"
+  - "**/*_testdata.*"
+  - "**/*benchmark*.*"
+  - "**/*fuzz*.*"
+
+# Loom verifies its compact wire and table ordinals before analysis and
+# intentionally compares them with host-sized table views. This query cannot
+# observe those producer invariants; the remaining overflow queries stay on.
+query-filters:
+  - exclude:
+      id: cpp/comparison-with-wider-type

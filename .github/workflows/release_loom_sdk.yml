@@ -77,9 +77,17 @@ jobs:
       actions: read
       contents: read
 
+  security:
+    name: Security / Native production
+    needs: identity
+    uses: $/.github/workflows/codeql_cpp.yml
+    permissions:
+      contents: read
+      security-events: write
+
   bundle:
     name: Bundle / Verify artifact set
-    needs: [build_release, build_tracy, build_debug, build_asan]
+    needs: [build_release, build_tracy, build_debug, build_asan, security]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
