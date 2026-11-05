@@ -14,6 +14,13 @@ package(
     licenses = ["notice"],
 )
 
+CHAT_FUZZ_SEEDS = [
+    "//loom/src/loom/serve/service/text/testdata/chat_fuzz:history.json",
+    "//loom/src/loom/serve/service/text/testdata/chat_fuzz:parts.txt",
+    "//loom/src/loom/serve/service/text/testdata/chat_fuzz:tool.txt",
+    "//loom/src/loom/serve/service/text/testdata/chat_fuzz:user.txt",
+]
+
 exports_files(
     ["client_test.py"],
     visibility = ["//loom/src/loom/serve:implementation"],
@@ -548,6 +555,31 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm:test_support",
+    ],
+)
+
+loom_cc_fuzz(
+    name = "chat_fuzz",
+    srcs = ["chat_fuzz.cc"],
+    args = [
+        "--loom_control=$(rootpath //loom/src/loom/serve/fixture/text:portable_chat.loom)",
+        "--loom_tokenizer=$(rootpath //loom/src/loom/serve/fixture/text:tokenizer.json)",
+        "-seed_inputs=" + ",".join([
+            "$(rootpath %s)" % seed
+            for seed in CHAT_FUZZ_SEEDS
+        ]),
+    ],
+    data = CHAT_FUZZ_SEEDS + [
+        "//loom/src/loom/serve/fixture/text:portable_chat.loom",
+        "//loom/src/loom/serve/fixture/text:tokenizer.json",
+    ],
+    deps = [
+        ":chat",
+        "//loom/src/loom/serve/runtime/program:compilation",
+        "//loom/src/loom/serve/runtime/program:sources",
+        "//loom/src/loom/serve/testing:text_policy",
+        "//loom/src/loom/util:json",
+        "//runtime/src/iree/base",
     ],
 )
 
