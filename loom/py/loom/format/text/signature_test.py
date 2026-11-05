@@ -145,6 +145,16 @@ def test_decl_tied_result_to_function_arg() -> None:
     assert _roundtrip(text) == text
 
 
+def test_parses_tied_result_type_change_fact() -> None:
+    parser = Parser()
+    parser.register_ops(ALL_FUNC_OPS)
+    parser.register_types(ALL_BUILTIN_TYPES)
+    module = parser.parse("func.decl @f(%x: i32) -> (%x as i64)")
+
+    tied = module.body.ops[0].tied_results[0]
+    assert tied.has_type_change
+
+
 def test_ssa_encoding() -> None:
     # SSA encoding value in type.
     text = "func.def @f(%enc: encoding, %arg: tile<4xf32, %enc>) {\n  func.return %arg : tile<4xf32, %enc>\n}"
