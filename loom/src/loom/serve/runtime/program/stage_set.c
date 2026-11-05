@@ -6,7 +6,7 @@
 
 #include "loom/serve/runtime/program/stage_set.h"
 
-#include "loom/target/arch/cmd/program.h"
+#include "loom/runtime/command/program.h"
 #include "loomc/iree.h"
 
 typedef struct loom_serve_stage_set_job_t loom_serve_stage_set_job_t;

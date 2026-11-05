@@ -6,7 +6,7 @@
 
 #include "loom/target/arch/cmd/check/program_plan.h"
 
-#include "loom/target/arch/cmd/program.h"
+#include "loom/runtime/command/program.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/compile_diagnostics.h"
 #include "loomc/iree.h"

@@ -10,9 +10,9 @@
 #include "iree/vm/environment.h"
 #include "iree/vm/program.h"
 #include "iree/vm/variant.h"
+#include "loom/runtime/command/program.h"
 #include "loom/serve/runtime/program/compilation.h"
 #include "loom/serve/runtime/program/sources.h"
-#include "loom/target/arch/cmd/program.h"
 #include "loomc/config.h"
 #include "loomc/target.h"
 

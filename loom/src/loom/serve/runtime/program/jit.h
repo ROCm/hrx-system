@@ -7,11 +7,11 @@
 #ifndef LOOM_SERVE_RUNTIME_PROGRAM_JIT_H_
 #define LOOM_SERVE_RUNTIME_PROGRAM_JIT_H_
 
+#include "loom/runtime/command/program.h"
 #include "loom/serve/runtime/execution/dispatch.h"
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/runtime/program/compilation.h"
 #include "loom/serve/runtime/program/sources.h"
-#include "loom/target/arch/cmd/program.h"
 #include "loomc/config.h"
 #include "loomc/sanitizer.h"
 

@@ -9,8 +9,8 @@
 
 #include "iree/module/hal/types.h"
 #include "iree/vm/module.h"
+#include "loom/runtime/command/program.h"
 #include "loom/serve/runtime/execution/dispatch.h"
-#include "loom/target/arch/cmd/program.h"
 
 #ifdef __cplusplus
 extern "C" {

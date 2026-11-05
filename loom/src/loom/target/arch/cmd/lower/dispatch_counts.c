@@ -12,7 +12,7 @@
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/command/ops.h"
 #include "loom/ops/kernel/ops.h"
-#include "loom/target/arch/cmd/program.h"
+#include "loom/runtime/command/program.h"
 
 typedef struct loom_cmd_dispatch_count_build_t {
   // Source module owning schedule operations and values.

@@ -12,8 +12,8 @@
 // IREE unaligned little-endian helpers. All offsets and the total artifact
 // length are 32-bit byte counts.
 
-#ifndef LOOM_TARGET_ARCH_CMD_FORMAT_H_
-#define LOOM_TARGET_ARCH_CMD_FORMAT_H_
+#ifndef LOOM_RUNTIME_COMMAND_FORMAT_H_
+#define LOOM_RUNTIME_COMMAND_FORMAT_H_
 
 #include "iree/base/api.h"
 
@@ -143,4 +143,4 @@ iree_status_t loom_cmd_program_format_calculate_layout(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TARGET_ARCH_CMD_FORMAT_H_
+#endif  // LOOM_RUNTIME_COMMAND_FORMAT_H_

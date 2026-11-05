@@ -4,10 +4,10 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/arch/cmd/hal_command_buffer.h"
+#include "loom/runtime/command/hal_command_buffer.h"
 
 #include "iree/base/alignment.h"
-#include "loom/target/arch/cmd/format.h"
+#include "loom/runtime/command/format.h"
 
 // Cold-path scratch for translating one entry's logical arguments to HAL slots.
 typedef struct loom_cmd_program_hal_layout_t {

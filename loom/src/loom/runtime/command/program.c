@@ -4,13 +4,13 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/target/arch/cmd/program.h"
+#include "loom/runtime/command/program.h"
 
 #include <inttypes.h>
 #include <string.h>
 
 #include "iree/base/alignment.h"
-#include "loom/target/arch/cmd/format.h"
+#include "loom/runtime/command/format.h"
 
 loom_cmd_program_launch_binding_t loom_cmd_program_launch_binding_at(
     const loom_cmd_program_t* program, uint32_t index) {

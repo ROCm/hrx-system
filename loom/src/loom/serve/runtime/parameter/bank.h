@@ -6,10 +6,10 @@
 #ifndef LOOM_SERVE_RUNTIME_PARAMETER_BANK_H_
 #define LOOM_SERVE_RUNTIME_PARAMETER_BANK_H_
 
+#include "loom/runtime/command/program.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/runtime/parameter/weights.h"
-#include "loom/target/arch/cmd/program.h"
 
 #ifdef __cplusplus
 extern "C" {

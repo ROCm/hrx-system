@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_RUNTIME_PROGRAM_PARAMETER_LAYOUT_H_
 #define LOOM_SERVE_RUNTIME_PROGRAM_PARAMETER_LAYOUT_H_
 
-#include "loom/target/arch/cmd/program.h"
+#include "loom/runtime/command/program.h"
 
 #ifdef __cplusplus
 extern "C" {

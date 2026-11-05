@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef LOOM_TARGET_ARCH_CMD_HAL_COMMAND_BUFFER_H_
-#define LOOM_TARGET_ARCH_CMD_HAL_COMMAND_BUFFER_H_
+#ifndef LOOM_RUNTIME_COMMAND_HAL_COMMAND_BUFFER_H_
+#define LOOM_RUNTIME_COMMAND_HAL_COMMAND_BUFFER_H_
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
-#include "loom/target/arch/cmd/program.h"
+#include "loom/runtime/command/program.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -62,4 +62,4 @@ iree_status_t loom_cmd_program_hal_command_buffer_create(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TARGET_ARCH_CMD_HAL_COMMAND_BUFFER_H_
+#endif  // LOOM_RUNTIME_COMMAND_HAL_COMMAND_BUFFER_H_

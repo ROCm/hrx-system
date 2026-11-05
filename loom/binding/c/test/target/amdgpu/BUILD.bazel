@@ -85,7 +85,7 @@ loom_cc_test(
         "//loom/binding/c/target/amdgpu",
         "//loom/binding/c/target/cmd",
         "//loom/binding/c/test:test_util",
-        "//loom/src/loom/target/arch/cmd:program",
+        "//loom/src/loom/runtime/command:program",
         "//runtime/src/iree/base",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

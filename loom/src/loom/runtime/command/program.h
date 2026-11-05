@@ -6,8 +6,8 @@
 
 // Immutable target-neutral portable command programs.
 
-#ifndef LOOM_TARGET_ARCH_CMD_PROGRAM_H_
-#define LOOM_TARGET_ARCH_CMD_PROGRAM_H_
+#ifndef LOOM_RUNTIME_COMMAND_PROGRAM_H_
+#define LOOM_RUNTIME_COMMAND_PROGRAM_H_
 
 #include "iree/base/api.h"
 
@@ -413,4 +413,4 @@ loom_cmd_program_parameter_t loom_cmd_program_parameter_at(
 }  // extern "C"
 #endif
 
-#endif  // LOOM_TARGET_ARCH_CMD_PROGRAM_H_
+#endif  // LOOM_RUNTIME_COMMAND_PROGRAM_H_

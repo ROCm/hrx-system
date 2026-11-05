@@ -7,21 +7,12 @@
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
-    "loom_cc_test",
 )
 
 package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
-)
-
-package_group(
-    name = "hal_command_buffer_consumers",
-    packages = [
-        "//loom/src/loom/serve/runtime/program",
-        "//loom/src/loom/tooling/execution/hal",
-    ],
 )
 
 loom_cc_library(
@@ -32,43 +23,6 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir",
         "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
-    name = "program",
-    srcs = [
-        "format.c",
-        "program.c",
-    ],
-    hdrs = [
-        "format.h",
-        "program.h",
-    ],
-    # Serialized command readers own neither compiler IR nor process state.
-    tags = ["LINKABLE_MORE_THAN_ONCE"],
-    visibility = [
-        "//loom/binding/c/test/target/amdgpu:__pkg__",
-        "//loom/src/loom/serve:implementation",
-        "//loom/src/loom/target/arch/cmd:__subpackages__",
-        "//loom/src/loom/tooling/execution/hal:__pkg__",
-    ],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base:core_headers",
-    ],
-)
-
-loom_cc_library(
-    name = "hal_command_buffer",
-    srcs = ["hal_command_buffer.c"],
-    hdrs = ["hal_command_buffer.h"],
-    visibility = [":hal_command_buffer_consumers"],
-    deps = [
-        ":program",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base:core_headers",
-        "//runtime/src/iree/hal",
     ],
 )
 
@@ -89,18 +43,6 @@ loom_cc_library(
         "//loom/src/loom/target/arch/cmd/lower:program_plan",
         "//loom/src/loom/target/arch/cmd/lower:serialize",
         "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_test(
-    name = "program_test",
-    srcs = ["program_test.cc"],
-    deps = [
-        ":program",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base:core_headers",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

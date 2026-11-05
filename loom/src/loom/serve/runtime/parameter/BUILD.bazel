@@ -32,8 +32,8 @@ loom_cc_library(
     deps = [
         ":residency",
         ":weights",
+        "//loom/src/loom/runtime/command:program",
         "//loom/src/loom/serve/runtime/device",
-        "//loom/src/loom/target/arch/cmd:program",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
