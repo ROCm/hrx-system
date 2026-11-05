@@ -22,6 +22,10 @@ if [[ -n "${RUNFILES_DIR:-}" ]]; then
   repo_root="${RUNFILES_DIR}/${workspace}"
   link_modules="${repo_root}/loom/binding/c/example/link_modules"
   loom_format="${repo_root}/loom/src/loom/tools/loom-format/loom-format"
+elif [[ -n "${LOOM_DOCS_C_EXAMPLE_DIR:-}" ]]; then
+  repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
+  link_modules="${LOOM_DOCS_C_EXAMPLE_DIR}/link_modules"
+  loom_format="${LOOM_DOCS_TOOL_DIR:?LOOM_DOCS_TOOL_DIR is required}/loom-format"
 else
   repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
   "${repo_root}/build_tools/bin/iree-bazel-build" \

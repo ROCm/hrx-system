@@ -15,17 +15,25 @@ output_dir="${1:-${repo_root}/build/loom-docs/examples/guide/functions-and-contr
 mkdir -p -- "${output_dir}"
 output_dir="$(cd -- "${output_dir}" && pwd -P)"
 
-"${repo_root}/build_tools/bin/iree-bazel-build" --config=asan \
-  //loom/src/loom/tools/loom-format \
-  //loom/src/loom/tools/loom-link \
-  //loom/src/loom/tools/loom-compile \
-  //loom/src/loom/tools/loom-benchmark \
-  //loom/py/loom/tools:loom-compile-report
-loom_format="${repo_root}/bazel-bin/loom/src/loom/tools/loom-format/loom-format"
-loom_link="${repo_root}/bazel-bin/loom/src/loom/tools/loom-link/loom-link"
-loom_compile="${repo_root}/bazel-bin/loom/src/loom/tools/loom-compile/loom-compile"
-loom_report="${repo_root}/bazel-bin/loom/py/loom/tools/loom-compile-report"
-loom_benchmark="${repo_root}/bazel-bin/loom/src/loom/tools/loom-benchmark/loom-benchmark"
+if [[ -n "${LOOM_DOCS_TOOL_DIR:-}" ]]; then
+  loom_format="${LOOM_DOCS_TOOL_DIR}/loom-format"
+  loom_link="${LOOM_DOCS_TOOL_DIR}/loom-link"
+  loom_compile="${LOOM_DOCS_TOOL_DIR}/loom-compile"
+  loom_report="${LOOM_DOCS_TOOL_DIR}/loom-compile-report"
+  loom_benchmark="${LOOM_DOCS_TOOL_DIR}/loom-benchmark"
+else
+  "${repo_root}/build_tools/bin/iree-bazel-build" --config=asan \
+    //loom/src/loom/tools/loom-format \
+    //loom/src/loom/tools/loom-link \
+    //loom/src/loom/tools/loom-compile \
+    //loom/src/loom/tools/loom-benchmark \
+    //loom/py/loom/tools:loom-compile-report
+  loom_format="${repo_root}/bazel-bin/loom/src/loom/tools/loom-format/loom-format"
+  loom_link="${repo_root}/bazel-bin/loom/src/loom/tools/loom-link/loom-link"
+  loom_compile="${repo_root}/bazel-bin/loom/src/loom/tools/loom-compile/loom-compile"
+  loom_report="${repo_root}/bazel-bin/loom/py/loom/tools/loom-compile-report"
+  loom_benchmark="${repo_root}/bazel-bin/loom/src/loom/tools/loom-benchmark/loom-benchmark"
+fi
 
 cp -- "${script_dir}/read-ahead.loom" "${output_dir}/read-ahead.loom"
 cp -- "${script_dir}/read-ahead-tests.loom" "${output_dir}/read-ahead-tests.loom"

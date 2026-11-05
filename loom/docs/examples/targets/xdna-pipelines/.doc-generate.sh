@@ -10,7 +10,14 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 if [[ -n "${RUNFILES_DIR:-}" ]]; then
   repo_root="${RUNFILES_DIR}/${TEST_WORKSPACE:-_main}"
-  tools_root="${repo_root}"
+  export LOOM_FORMAT="${repo_root}/loom/src/loom/tools/loom-format/loom-format"
+  export LOOM_IMPORT_CXX="${repo_root}/loom/src/loom/tools/loom-import-cxx/loom-import-cxx"
+  export LOOM_COMPILE="${repo_root}/loom/src/loom/tools/loom-compile/loom-compile"
+elif [[ -n "${LOOM_DOCS_TOOL_DIR:-}" ]]; then
+  repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
+  export LOOM_FORMAT="${LOOM_DOCS_TOOL_DIR}/loom-format"
+  export LOOM_IMPORT_CXX="${LOOM_DOCS_TOOL_DIR}/loom-import-cxx"
+  export LOOM_COMPILE="${LOOM_DOCS_TOOL_DIR}/loom-compile"
 else
   repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
   "${repo_root}/build_tools/bin/iree-bazel-build" --config=asan \
@@ -18,11 +25,10 @@ else
     //loom/src/loom/tools/loom-format \
     //loom/src/loom/tools/loom-import-cxx \
     //loom/src/loom/tools/loom-compile
-  tools_root="${repo_root}/bazel-bin"
+  export LOOM_FORMAT="${repo_root}/bazel-bin/loom/src/loom/tools/loom-format/loom-format"
+  export LOOM_IMPORT_CXX="${repo_root}/bazel-bin/loom/src/loom/tools/loom-import-cxx/loom-import-cxx"
+  export LOOM_COMPILE="${repo_root}/bazel-bin/loom/src/loom/tools/loom-compile/loom-compile"
 fi
-export LOOM_FORMAT="${tools_root}/loom/src/loom/tools/loom-format/loom-format"
-export LOOM_IMPORT_CXX="${tools_root}/loom/src/loom/tools/loom-import-cxx/loom-import-cxx"
-export LOOM_COMPILE="${tools_root}/loom/src/loom/tools/loom-compile/loom-compile"
 
 output_dir="${1:-${TEST_UNDECLARED_OUTPUTS_DIR:-${repo_root}/build/loom-docs/examples/targets/xdna-pipelines}}"
 mkdir -p -- "${output_dir}"

@@ -32,6 +32,33 @@ class ChangeScopeTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertFalse(change_scope.loom_only([*compiler, path]))
 
+    def test_documentation_scope_matches_website_inputs_and_owners(self):
+        for path in (
+            ".github/workflows/build_loom_sdk_artifacts.yml",
+            ".github/workflows/build_loom_sdk.yml",
+            ".github/workflows/ci_iree.yml",
+            "build_tools/ci/change_scope.py",
+            "build_tools/ci/loom_wheel.py",
+            "build_tools/devtools/setup.py",
+            "dev.py",
+            "requirements-analysis.lock.txt",
+            "requirements-dev.lock.txt",
+            "loom/binding/c/loomc.h",
+            "loom/docs/mkdocs.yml",
+            "loom/py/loom/gen/docs/reference.py",
+            "loom/src/loom/editor/textmate/loom.tmLanguage.json",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(change_scope.loom_docs_affected([path]))
+        for path in (
+            "README.md",
+            "build_tools/ci/github_actions_watch.py",
+            "loom/src/loom/ir/op.c",
+            "runtime/src/iree/base/api.h",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(change_scope.loom_docs_affected([path]))
+
     def test_revision_difference_includes_renames_deletions_and_all_commits(self):
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)
@@ -108,6 +135,11 @@ class ChangeScopeTest(unittest.TestCase):
             self.assertFalse(change_scope.select_loom_only(repository, ""))
             self.assertFalse(change_scope.select_loom_only(repository, "0" * 40))
             self.assertTrue(change_scope.select_loom_only(repository, renamed_revision))
+            self.assertTrue(change_scope.select_loom_docs(repository, ""))
+            self.assertTrue(change_scope.select_loom_docs(repository, "0" * 40))
+            self.assertFalse(
+                change_scope.select_loom_docs(repository, renamed_revision)
+            )
 
 
 if __name__ == "__main__":

@@ -21,6 +21,9 @@ if [[ -n "${RUNFILES_DIR:-}" ]]; then
   workspace="${TEST_WORKSPACE:-_main}"
   repo_root="${RUNFILES_DIR}/${workspace}"
   jit_task_pool="${repo_root}/loom/binding/c/example/jit_task_pool"
+elif [[ -n "${LOOM_DOCS_C_EXAMPLE_DIR:-}" ]]; then
+  repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
+  jit_task_pool="${LOOM_DOCS_C_EXAMPLE_DIR}/jit_task_pool"
 else
   repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
   "${repo_root}/build_tools/bin/iree-bazel-build" \

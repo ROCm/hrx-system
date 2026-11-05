@@ -21,6 +21,9 @@ if [[ -n "${RUNFILES_DIR:-}" ]]; then
   workspace="${TEST_WORKSPACE:-_main}"
   repo_root="${RUNFILES_DIR}/${workspace}"
   product_frontier="${repo_root}/loom/binding/c/example/product_frontier"
+elif [[ -n "${LOOM_DOCS_C_EXAMPLE_DIR:-}" ]]; then
+  repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
+  product_frontier="${LOOM_DOCS_C_EXAMPLE_DIR}/product_frontier"
 else
   repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
   "${repo_root}/build_tools/bin/iree-bazel-build" \

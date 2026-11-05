@@ -24,6 +24,12 @@ if [[ -n "${RUNFILES_DIR:-}" ]]; then
   export LOOM_LINK="${repo_root}/loom/src/loom/tools/loom-link/loom-link"
   export LOOM_COMPILE="${repo_root}/loom/src/loom/tools/loom-compile/loom-compile"
   loom_check="${repo_root}/loom/src/loom/tools/loom-check/loom-check"
+elif [[ -n "${LOOM_DOCS_TOOL_DIR:-}" ]]; then
+  repo_root="$(cd -- "${script_dir}/../../../.." && pwd -P)"
+  export LOOM_FORMAT="${LOOM_DOCS_TOOL_DIR}/loom-format"
+  export LOOM_LINK="${LOOM_DOCS_TOOL_DIR}/loom-link"
+  export LOOM_COMPILE="${LOOM_DOCS_TOOL_DIR}/loom-compile"
+  loom_check="${LOOM_DOCS_TOOL_DIR}/loom-check"
 else
   repo_root="$(cd -- "${script_dir}/../../../.." && pwd -P)"
   "${repo_root}/build_tools/bin/iree-bazel-build" \
