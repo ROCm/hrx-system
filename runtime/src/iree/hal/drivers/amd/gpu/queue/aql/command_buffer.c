@@ -351,21 +351,26 @@ static iree_status_t iree_hal_amd_gpu_aql_command_end(
   if (length) {
     const uint32_t fixup_count =
         iree_hal_amd_gpu_recording_fixup_count(&buffer->recording);
-    // Direct dispatch sequences admit a larger bounded host template. Native
-    // control packets retain the smaller bound on packet/private-data work.
+    // Direct dispatch sequences admit a larger bounded host template. Immutable
+    // arguments stay resident, so only packet bytes consume that copy budget.
+    // Mutable arguments/fixups retain their dispatch and combined-byte limits.
+    // Native control packets retain the smaller packet/private-data bound.
     const bool direct = buffer->program->block_count == 1 &&
                         buffer->program->blocks[0].packet_count ==
                             buffer->program->dispatch_count;
+    const bool constants = direct && !buffer->inputs.count &&
+                           buffer->recording.data.length &&
+                           (buffer->pool->storage.resident.host_access &
+                            AMDF_MEMORY_MAP_FLAG_WRITE);
     if (buffer->program->block_count == 1 &&
         !buffer->requires_device_publication &&
         ((length <= 512 &&
           fixup_count <= 512 / sizeof(iree_hal_amd_gpu_fixup_t)) ||
-         (direct && buffer->program->dispatch_count <= 32 && length <= 8192 &&
+         (direct &&
+          (constants
+               ? buffer->recording.commands.length <= 8192
+               : buffer->program->dispatch_count <= 32 && length <= 8192) &&
           fixup_count <= IREE_HAL_AMD_GPU_AQL_HOST_TEMPLATE_MAX_FIXUPS))) {
-      const bool constants = direct && !buffer->inputs.count &&
-                             buffer->recording.data.length &&
-                             (buffer->pool->storage.resident.host_access &
-                              AMDF_MEMORY_MAP_FLAG_WRITE);
       const uint32_t template_length =
           constants ? buffer->recording.commands.length : (uint32_t)length;
       const uint32_t template_fixup_count = constants ? 0 : fixup_count;
