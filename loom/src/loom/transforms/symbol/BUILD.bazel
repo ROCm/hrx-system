@@ -227,8 +227,15 @@ loom_cc_test(
 
 loom_cc_library(
     name = "inline_callables",
-    srcs = ["inline_callables.c"],
-    hdrs = ["inline_callables.h"],
+    srcs = [
+        "inline_callables.c",
+        "inline_execution.c",
+    ],
+    hdrs = [
+        "inline_callables.h",
+        "inline_execution.h",
+        "inline_plan.h",
+    ],
     deps = [
         ":inline_profitability",
         "//loom/src/loom/analysis:availability",
