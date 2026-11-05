@@ -1203,20 +1203,6 @@ typedef struct loom_serve_residency_state_t {
   loom_serve_memory_operation_t** operation;
 } loom_serve_residency_state_t;
 
-static iree_status_t loom_serve_residency_commit_state(
-    loom_serve_residency_t* residency,
-    const loom_serve_residency_state_t* state,
-    loom_serve_memory_demand_t immediate,
-    loom_serve_memory_admission_t* out_admission) {
-  *out_admission = LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE;
-  if (!residency->cache->pool) {
-    return iree_ok_status();
-  }
-  return loom_serve_memory_pool_commit_with_demand_async(
-      residency->cache->pool, state->range_count, state->ranges, immediate,
-      state->readiness, state->value, out_admission, state->operation);
-}
-
 // A cold necessary bound, not a reservation or a claim that compaction will
 // succeed. Unknown mutable owners stay protected. Known owners replace only
 // their own actual charge with source-derived retained/incoming requirements.
@@ -1454,14 +1440,21 @@ static iree_status_t loom_serve_residency_acquire_parameters(
       }
     }
   }
-  const bool committing_state =
+  const bool preparing_state =
       iree_status_is_ok(status) &&
       admission == LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE && state;
-  if (committing_state) {
-    loom_serve_residency_t* residency = residencies[state_owner];
-    status = loom_serve_residency_commit_state(
-        residency, state, loom_serve_residency_missing_demand(residency),
-        &admission);
+  if (preparing_state && residencies[state_owner]->cache->pool) {
+    loom_serve_memory_pool_t* pool = residencies[state_owner]->cache->pool;
+    loom_serve_memory_demand_t demand =
+        loom_serve_residency_missing_demand(residencies[state_owner]);
+    loom_serve_memory_demand_add(&demand, footprint.missing_demand);
+    status = loom_serve_memory_pool_prepare(pool, demand, &admission);
+    if (iree_status_is_ok(status) &&
+        admission == LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE) {
+      status = loom_serve_memory_pool_commit_admitted_async(
+          pool, state->range_count, state->ranges, state->readiness,
+          state->value, state->operation);
+    }
   }
   if (!iree_status_is_ok(status) ||
       admission != LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE) {
@@ -1472,7 +1465,7 @@ static iree_status_t loom_serve_residency_acquire_parameters(
     }
     if (admission == LOOM_SERVE_MEMORY_ADMISSION_DEFERRED) {
       *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;
-    } else if (iree_status_is_ok(status) && committing_state &&
+    } else if (iree_status_is_ok(status) && preparing_state &&
                state->forecast) {
       // Exact placement can fail while source-guided relocation remains legal.
       bool possible = false;

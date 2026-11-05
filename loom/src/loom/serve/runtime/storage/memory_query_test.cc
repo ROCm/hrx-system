@@ -13,6 +13,79 @@ namespace {
 
 using loom_serve::testing::memory::MemoryTest;
 
+TEST_F(MemoryTest, FootprintRetainsAllocationClassesForAdmittedCommit) {
+  const auto bulk = loom_serve_pool_weight_geometry(storage_owner);
+  const auto state = loom_serve_pool_state_geometry(storage_owner);
+  const uint64_t mapping = state.mapping_size;
+  ASSERT_LT(2 * mapping, bulk.mapping_size);
+  ASSERT_GE(state.backing_size, 2 * mapping);
+  const uint64_t physical_bytes =
+      bulk.mapping_size + state.backing_size + 2 * mapping;
+  ASSERT_NO_FATAL_FAILURE(
+      UseDeferredBacking(physical_bytes, nullptr, /*distinct_classes=*/true));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool, bulk, bulk.mapping_size + mapping, 256, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool, bulk, 2 * mapping, 256, &statistics[1], &second));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(pool, state, mapping, 256,
+                                                    &statistics[2], &third));
+  // A short weight tail shares a state parent; a larger tail is dedicated.
+  // Overlapping ranges must preserve both byte totals and allocation classes.
+  const loom_serve_memory_range_t ranges[] = {
+      {first, bulk.mapping_size - 4, 8},
+      {first, bulk.mapping_size, mapping},
+      {second, 0, 4},
+      {third, 0, 4},
+      {second, 4, 4},
+  };
+  loom_serve_memory_footprint_t footprint;
+  IREE_ASSERT_OK(loom_serve_memory_ranges_footprint(IREE_ARRAYSIZE(ranges),
+                                                    ranges, &footprint));
+  const uint64_t logical_bytes = bulk.mapping_size + 4 * mapping;
+  EXPECT_EQ(footprint.total_bytes, logical_bytes);
+  EXPECT_EQ(footprint.missing_bytes, logical_bytes);
+  EXPECT_EQ(footprint.missing_demand.weight_bytes, bulk.mapping_size);
+  EXPECT_EQ(footprint.missing_demand.packed_bytes, 2 * mapping);
+  EXPECT_EQ(footprint.missing_demand.dedicated_bytes, 2 * mapping);
+  loom_serve_memory_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_memory_pool_prepare(pool, footprint.missing_demand,
+                                                &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_MEMORY_ADMISSION_AVAILABLE);
+  EXPECT_EQ(loom_serve_memory_pool_snapshot(pool).pending_bytes, 0u);
+  EXPECT_EQ(loom_serve_memory_pool_snapshot(pool).committed_bytes, 0u);
+
+  deferred_backing->defer = true;
+  loom_serve_memory_operation_t* operation = nullptr;
+  IREE_ASSERT_OK(loom_serve_memory_pool_commit_admitted_async(
+      pool, IREE_ARRAYSIZE(ranges), ranges, nullptr, 0, &operation));
+  const auto release_operation = [](loom_serve_memory_operation_t* operation) {
+    loom_serve_memory_operation_await(operation);
+    loom_serve_memory_operation_free(operation);
+  };
+  std::unique_ptr<loom_serve_memory_operation_t, decltype(release_operation)>
+      operation_owner(operation, release_operation);
+  deferred_backing->WaitForAcquisition();
+  EXPECT_EQ(loom_serve_memory_pool_snapshot(pool).pending_bytes, logical_bytes);
+  IREE_EXPECT_OK(loom_serve_memory_ranges_footprint(IREE_ARRAYSIZE(ranges),
+                                                    ranges, &footprint));
+  EXPECT_EQ(footprint.total_bytes, logical_bytes);
+  EXPECT_EQ(footprint.missing_bytes, 0u);
+  EXPECT_EQ(footprint.missing_demand.weight_bytes, 0u);
+  EXPECT_EQ(footprint.missing_demand.packed_bytes, 0u);
+  EXPECT_EQ(footprint.missing_demand.dedicated_bytes, 0u);
+  deferred_backing->ResumeAcquisitions();
+  loom_serve_memory_operation_await(operation);
+  IREE_ASSERT_OK(loom_serve_memory_operation_query_status(operation));
+  operation_owner.reset();
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
+            physical_bytes);
+  RoundTrip(loom_serve_virtual_buffer_handle(first), 0, 0x12345678);
+  RoundTrip(loom_serve_virtual_buffer_handle(first), bulk.mapping_size,
+            0x23456789);
+  RoundTrip(loom_serve_virtual_buffer_handle(second), 0, 0x3456789A);
+  RoundTrip(loom_serve_virtual_buffer_handle(third), 0, 0x456789AB);
+}
+
 TEST_F(MemoryTest, BackingSelectionCountsActualUnionAndClearsFailedVisitors) {
   const auto geometry = loom_serve_pool_state_geometry(storage_owner);
   const uint64_t sparse_length = iree_device_align(

@@ -289,6 +289,8 @@ typedef struct loom_serve_memory_footprint_t {
   uint64_t total_bytes;
   // Additional commitment, excluding live or already accepted backing.
   uint64_t missing_bytes;
+  // The same missing mappings classified for physical pool admission.
+  loom_serve_memory_demand_t missing_demand;
 } loom_serve_memory_footprint_t;
 
 // Physical footprint of the caller-validated range union. Overlapping views
@@ -352,19 +354,16 @@ iree_status_t loom_serve_memory_pool_commit_async(
     uint64_t value, loom_serve_memory_admission_t* out_admission,
     loom_serve_memory_operation_t** out_operation);
 
-// Commits the same range union while admitting additional immediate demand
-// owned by the caller (such as parameters loaded after mutable-state growth).
-// The demand excludes these ranges and existing committed or pending backing.
-// Denial submits neither ranges nor additional demand. Success publishes range
-// ownership before returning; the caller commits additional demand in the same
-// serialized owner turn, before another admission can consume that headroom.
-// This checks the serving owner's ledger, not available device memory.
-iree_status_t loom_serve_memory_pool_commit_with_demand_async(
+// Commits a range union whose missing_demand already passed pool_prepare,
+// together with every other demand in the caller's admission. The serialized
+// owner cannot yield or admit other work between prepare and commitment, and
+// the caller protects these roots from reclamation throughout that interval.
+// No capacity decision or reclaimer runs here. Allocation and platform failure
+// retain the same operation ownership and readiness contract as commit_async.
+iree_status_t loom_serve_memory_pool_commit_admitted_async(
     loom_serve_memory_pool_t* pool, iree_host_size_t range_count,
-    const loom_serve_memory_range_t* ranges,
-    loom_serve_memory_demand_t immediate, iree_hal_semaphore_t* readiness,
-    uint64_t value, loom_serve_memory_admission_t* out_admission,
-    loom_serve_memory_operation_t** out_operation);
+    const loom_serve_memory_range_t* ranges, iree_hal_semaphore_t* readiness,
+    uint64_t value, loom_serve_memory_operation_t** out_operation);
 
 // Copies the unkept physical slab set of these distinct reservations and queues
 // its return to the shared cache. The caller has retired every consumer and
