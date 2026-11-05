@@ -11,21 +11,15 @@
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/gpu/umd/wddm/device.h"
 #include "libamdf/src/gpu/umd/wddm/memory_profile.h"
+#include "libamdf/src/gpu/umd/wddm/provider/api.h"
 #include "libamdf/src/platform/windows/endpoint.h"
 #include "libamdf/src/platform/windows/endpoint_properties.h"
 
 static amdf_status_t amdf_gpu_wddm_device_release_native(
     amdf_gpu_umd_device_t* device) {
-  if (device->wkmi_adapter.native != NULL) {
+  if (device->provider_adapter.native != NULL) {
     const amdf_status_t status =
-        amdf_gpu_wddm_wkmi_adapter_deinitialize(&device->wkmi_adapter);
-    if (!amdf_status_is_ok(status)) {
-      return status;
-    }
-  }
-  if (device->wkmi_loader.module != NULL) {
-    const amdf_status_t status =
-        amdf_gpu_wddm_wkmi_loader_deinitialize(&device->wkmi_loader);
+        amdf_gpu_dxg_adapter_deinitialize(&device->provider_adapter);
     if (!amdf_status_is_ok(status)) {
       return status;
     }
@@ -67,10 +61,9 @@ amdf_status_t amdf_gpu_umd_device_create(
   if (!amdf_kmt_api_supports_paging_devices(&endpoint->instance->kmt)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  amdf_windows_gpu_memory_capabilities_t memory_capabilities = {0};
+  amdf_gpu_dxg_memory_capabilities_t memory_capabilities = {0};
   const amdf_status_t capabilities_status =
-      amdf_windows_gpu_query_memory_capabilities(endpoint,
-                                                 &memory_capabilities);
+      amdf_gpu_wddm_query_memory_capabilities(endpoint, &memory_capabilities);
   if (!amdf_status_is_ok(capabilities_status)) {
     return capabilities_status;
   }
@@ -95,14 +88,22 @@ amdf_status_t amdf_gpu_umd_device_create(
   device->physical_adapter_index = endpoint->physical_adapter_index;
   device->memory_capabilities = memory_capabilities;
 
-  status = amdf_gpu_wddm_wkmi_loader_initialize(host_allocator,
-                                                &device->wkmi_loader);
-  if (amdf_status_is_ok(status)) {
-    status = amdf_gpu_wddm_wkmi_adapter_initialize(
-        &device->wkmi_loader, endpoint->adapter,
-        endpoint->physical_adapter_index, host_allocator, &device->wkmi_adapter,
-        &device->properties);
-  }
+  amdf_gpu_wddm_provider_native_api_t provider_native_api = {
+      .kmt = &endpoint->instance->kmt,
+      .d3d12 = &endpoint->instance->d3d12,
+  };
+  const amdf_dxg_provider_gpu_adapter_open_info_t open_info = {
+      .adapter_handle = (uint32_t)endpoint->adapter,
+      .physical_adapter_index = endpoint->physical_adapter_index,
+      .adapter_luid = device->adapter_luid,
+      .native_transport =
+          {
+              .context = &provider_native_api,
+          },
+  };
+  status = amdf_gpu_dxg_adapter_initialize(
+      amdf_gpu_wddm_default_api(), &open_info, host_allocator,
+      &device->provider_adapter, &device->properties);
   if (amdf_status_is_ok(status)) {
     device->memory_capabilities.program_gfx_major =
         (uint32_t)device->properties.gfx_ip_major;

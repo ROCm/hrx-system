@@ -198,18 +198,20 @@ http_file(
     url = "https://raw.githubusercontent.com/amd/xdna-driver/025503bab93a2f347c07a878cf066c05d7662ae0/include/uapi/drm/amdxdna_accel.h",
 )
 
-http_file(
-    name = "amdf_wkmi_header",
-    downloaded_file_path = "wkmi.h",
-    sha256 = "3f1ae16835ead93f263e6b5148e1e4f6823435ef4debef9371a6f2607acc4541",
-    url = "https://raw.githubusercontent.com/ROCm/rocm-systems/6b7847ef03b76c004f57b8cf40cdef9621ee6f53/shared/amdgpu-windows-interop/wkmi/wkmi.h",
+http_archive(
+    name = "directx_headers",
+    build_file = "//build_tools/third_party/dxg_headers:directx_headers.BUILD.bazel",
+    sha256 = "65419b6c8af46d2a8d7db65769cb6bc3c60e02dc0cf9d6f25b437d825778cceb",
+    strip_prefix = "DirectX-Headers-6064ae312901a77e8700e84a2341470d050fcbca",
+    url = "https://github.com/microsoft/DirectX-Headers/archive/6064ae312901a77e8700e84a2341470d050fcbca.tar.gz",
 )
 
-http_file(
-    name = "amdf_wkmi_library",
-    downloaded_file_path = "wkmi.lib",
-    sha256 = "cf7fc4c38520353ba2f1169bf7a42befbe07069950430d39edb5d8efae881dd1",
-    url = "https://therock-dvc.s3.amazonaws.com/rocm-systems/files/md5/ad/32f8a14a6bb2da2b28650137c6b331",
+http_archive(
+    name = "libdxg_headers",
+    build_file = "//build_tools/third_party/dxg_headers:libdxg_headers.BUILD.bazel",
+    sha256 = "f7223bd894c58ed72d36fe606ea45655f5a80e5062e6defc47f09ecfa87d89a5",
+    strip_prefix = "libdxg-5c28ebb4ead460c23ec5e87decb7d1af7285bb59",
+    url = "https://github.com/microsoft/libdxg/archive/5c28ebb4ead460c23ec5e87decb7d1af7285bb59.tar.gz",
 )
 
 http_archive(

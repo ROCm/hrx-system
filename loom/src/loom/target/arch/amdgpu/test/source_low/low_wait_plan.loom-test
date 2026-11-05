@@ -147,6 +147,112 @@ low.func.def target<amdgpu.rdna3.core>(@target) @scratch_store_load_memory_effec
   s_endpgm
 
 // ====
+// RUN: emit amdgpu-assembly @gfx11_glc_load_waits_for_same_wave_store
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_glc_load_waits_for_same_wave_store(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %storage: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
+  global_store_b32_saddr %addr, %value, %storage
+  %loaded = global_load_b32_saddr %addr, %storage {glc = 1}
+  global_store_b32_saddr %addr, %loaded, %output
+  return
+}
+
+// GLC bypasses and invalidates the first-level cache before rereading L2. The
+// preceding write must therefore complete beyond the ordinary same-wave cache
+// path before the load issues.
+// ----
+  global_store_b32 v1, v0, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  global_load_b32 v0, v1, s[0:1] offset:0 glc
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  global_store_b32 v1, v0, s[2:3] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @gfx11_glc_load_keeps_later_store_fast_path
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @gfx11_glc_load_keeps_later_store_fast_path(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %storage: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %loaded = global_load_b32_saddr %addr, %storage {glc = 1}
+  global_store_b32_saddr %addr, %value, %storage
+  return %loaded
+}
+
+// A bypassing read does not make a later same-wave store wait for load
+// completion. The memory dependency preserves issue order, while the return
+// and program exit independently drain the outstanding load and store.
+// ----
+  global_load_b32 v2, v0, s[0:1] offset:0 glc
+  global_store_b32 v0, v1, s[0:1] offset:0
+  s_waitcnt_vscnt vscnt(0)
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @cdna2_glc_load_waits_for_same_wave_store
+
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_glc_load_waits_for_same_wave_store(%addr: reg<amdgpu.vgpr>, %value: reg<amdgpu.vgpr>, %storage: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>) asm {
+  global_store_dword_saddr %addr, %value, %storage
+  %loaded = global_load_dword_saddr %addr, %storage {glc = 1} : reg<amdgpu.vgpr>
+  global_store_dword_saddr %addr, %loaded, %output
+  return
+}
+
+// CDNA2 GLC loads likewise bypass the write-through L1. Its unified VMEM
+// counter must complete the preceding store before the load can reread L2.
+// ----
+  global_store_dword v1, v0, s[0:1] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_load_dword v0, v1, s[0:1] offset:0 glc
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_store_dword v1, v0, s[2:3] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @cdna2_glc_global_to_lds_waits_for_global_store
+
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_glc_global_to_lds_waits_for_global_store(%address: reg<amdgpu.vgpr x2>, %value: reg<amdgpu.vgpr>, %m0: reg<amdgpu.m0>) asm {
+  global_store_dword_vaddr %address, %value
+  global_load_lds_dword_vaddr %address, %m0 {glc = 1}
+  return
+}
+
+// The load writes LDS but reads the same global address that the preceding
+// store updates. GLC makes that global read require store completion.
+// ----
+  global_store_dword v[2:3], v0, off offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_load_dword v[2:3], off offset:0 glc lds
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @cdna2_glc_global_to_lds_keeps_fast_path
+
+amdgpu.target<gfx90a> @target
+
+low.func.def target<amdgpu.cdna2.core>(@target) @cdna2_glc_global_to_lds_keeps_fast_path(%address: reg<amdgpu.vgpr x2>, %m0: reg<amdgpu.m0>) asm {
+  global_load_lds_dword_vaddr %address, %m0
+  global_load_lds_ubyte_vaddr %address, %m0 {glc = 1}
+  return
+}
+
+// GLC applies to the global read. The dependency between these instructions is
+// on their LDS writes, so bypassing the global cache does not require the first
+// instruction's VMEM completion.
+// ----
+  global_load_dword v[0:1], off offset:0 lds
+  global_load_ubyte v[0:1], off offset:0 glc lds
+  s_endpgm
+
+// ====
 // RUN: emit amdgpu-assembly @gfx1170_vcc_dependency_delay
 
 amdgpu.target<gfx1170> @target

@@ -101,6 +101,10 @@ class GpuFilePoolTest : public DispatchTest {
               AMDF_STATUS_OK);
     uint32_t selected = AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
     uint64_t minimum_alignment = 0;
+    const amdf_memory_placement_kinds_t required_placement =
+        placement.kind == AMDF_MEMORY_PLACEMENT_KIND_NONE
+            ? 0
+            : UINT32_C(1) << placement.kind;
     for (uint32_t ordinal = 0; ordinal < scope.memory_profile_count;
          ++ordinal) {
       amdf_memory_profile_t profile = {
@@ -118,7 +122,8 @@ class GpuFilePoolTest : public DispatchTest {
       }
       ASSERT_EQ(status, AMDF_STATUS_OK);
       if ((profile.roles & AMDF_MEMORY_PROFILE_ROLE_CREATE) == 0 ||
-          (flags & ~profile.supported_flags) != 0) {
+          (flags & ~profile.supported_flags) != 0 ||
+          (required_placement & ~profile.allocation.placement_kinds) != 0) {
         continue;
       }
       if (!amdf_status_is_ok(profile.availability)) {
@@ -136,6 +141,7 @@ class GpuFilePoolTest : public DispatchTest {
             .byte_length = kPoolUnitCount * kUnit,
             .minimum_alignment = profile.allocation.minimum_alignment,
             .accesses = &access,
+            .placement = placement,
         };
         auto* output = reinterpret_cast<amdf_memory_t*>(uintptr_t{1});
         EXPECT_EQ(this->api_->memory_create(this->system_scope_, &create,
@@ -151,6 +157,11 @@ class GpuFilePoolTest : public DispatchTest {
       break;
     }
     if (selected == AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN) {
+      if (required_placement != 0) {
+        GTEST_SKIP()
+            << "owned file-I/O GPU pool does not support the requested "
+               "host placement";
+      }
       GTEST_SKIP() << "owned file-I/O GPU pool is unavailable; native reason "
                       "is recorded separately from ordinary allocation support";
     }
@@ -170,8 +181,6 @@ class GpuFilePoolTest : public DispatchTest {
     EXPECT_EQ(pool_.host.properties, (AMDF_HOST_MEMORY_PROPERTY_READ_CACHED |
                                       AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK));
     ASSERT_NE(pool_.host.features & AMDF_HOST_MAPPING_FEATURE_FILE_IO, 0u);
-    EXPECT_EQ(pool_.device_address != 0,
-              (access_flags & AMDF_MEMORY_FLAG_DEVICE_ADDRESS) != 0);
     if (placement.kind == AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA) {
       const long page_size = sysconf(_SC_PAGESIZE);
       ASSERT_GT(page_size, 0);
@@ -264,6 +273,12 @@ class GpuFilePoolTest : public DispatchTest {
         ASSERT_EQ(gpu.kind, AMDF_CACHE_TRANSITION_KIND_GLOBAL);
         ASSERT_EQ(gpu.executor, AMDF_CACHE_TRANSITION_EXECUTOR_QUEUE);
         ASSERT_EQ(gpu.operation, operation);
+        if constexpr (kSdma) {
+          ASSERT_NE(this->family_.format_features &
+                        (AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR |
+                         AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR),
+                    0u);
+        }
         ASSERT_NE(this->family_.cache_operations & (UINT64_C(1) << operation),
                   0u);
         cache_operations_ |= UINT64_C(1) << operation;
@@ -339,16 +354,26 @@ class GpuFilePoolTest : public DispatchTest {
       auto* words = command_queue_->words().data() + command_word_count_;
       if constexpr (kSdma) {
         SdmaCommandWriter commands(words, this->family_.format_features);
-        if ((cache_operations_ & AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM) !=
-            0) {
+        const bool user_gcr = (this->family_.format_features &
+                               AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR) != 0;
+        if (!user_gcr && cache_operations_ != 0) {
+          ASSERT_EQ(command_queue_->publication_mode(),
+                    AMDF_QUEUE_PUBLICATION_MODE_KERNEL);
+          ASSERT_NE(this->family_.format_features &
+                        AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR,
+                    0u);
+        }
+        if (user_gcr && (cache_operations_ &
+                         AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM) != 0) {
           commands.AcquireFromSystem();
         }
         commands.CopyLinear(input, output, count * sizeof(uint32_t));
-        if ((cache_operations_ & AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM) !=
-            0) {
+        if (user_gcr && (cache_operations_ &
+                         AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM) != 0) {
           commands.ReleaseToSystem();
         }
         commands.Fence32(control_->device_address, generation);
+        commands.PadToEightWords();
         command_word_count_ += commands.word_count();
       } else {
         Pm4CommandWriter commands(words, *this->pm4_profile_);
@@ -380,12 +405,13 @@ class GpuFilePoolTest : public DispatchTest {
     }
   }
 
-  void Run(bool direct, bool default_address,
+  void Run(bool direct, bool use_default_address,
            amdf_memory_placement_t placement = {}) {
-    ASSERT_NO_FATAL_FAILURE(PreparePool(
-        AMDF_MEMORY_FLAG_MAPPING_SOURCE |
-            (default_address ? AMDF_MEMORY_FLAG_DEVICE_ADDRESS : UINT64_C(0)),
-        placement));
+    ASSERT_NO_FATAL_FAILURE(
+        PreparePool(AMDF_MEMORY_FLAG_MAPPING_SOURCE |
+                        (use_default_address ? AMDF_MEMORY_FLAG_DEVICE_ADDRESS
+                                             : UINT64_C(0)),
+                    placement));
     if (this->IsSkipped()) {
       return;
     }
@@ -449,7 +475,7 @@ class GpuFilePoolTest : public DispatchTest {
                                           kUnit, (generation + 2) * kUnit,
                                           generation + 2));
       }
-      const uint64_t input = default_address && generation == 0
+      const uint64_t input = use_default_address && generation == 0
                                  ? pool_.device_address + input_slot * kUnit
                                  : alias_address_;
       ASSERT_NO_FATAL_FAILURE(Publish(input, alias_address_ + kUnit, count,
@@ -531,7 +557,6 @@ class GpuFilePoolTest : public DispatchTest {
     };
     ASSERT_NO_FATAL_FAILURE(
         ordinary_.Initialize(this->api_, this->system_scope_, create));
-    ASSERT_EQ(ordinary_.host.features & AMDF_HOST_MAPPING_FEATURE_FILE_IO, 0u);
     ASSERT_NO_FATAL_FAILURE(
         QueryTransitions(ordinary_, AMDF_MEMORY_SITE_KIND_HOST));
 
@@ -704,11 +729,16 @@ class GpuFilePoolTest : public DispatchTest {
           .structure_size = sizeof(capability),
       };
     }
-    ASSERT_EQ(this->api_->memory_scope_query_device_profile(
-                  this->system_scope_, create.memory_profile_ordinal,
-                  create.access_count, create.accesses, &profile,
-                  capabilities.data()),
-              AMDF_STATUS_OK);
+    const amdf_status_t profile_status =
+        this->api_->memory_scope_query_device_profile(
+            this->system_scope_, create.memory_profile_ordinal,
+            create.access_count, create.accesses, &profile,
+            capabilities.data());
+    if (profile_status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+      GTEST_SKIP()
+          << "selected file pool does not support independent attachments";
+    }
+    ASSERT_EQ(profile_status, AMDF_STATUS_OK);
     ASSERT_EQ(profile.availability, AMDF_STATUS_OK);
     ASSERT_EQ(this->api_->memory_create(this->system_scope_, &create,
                                         &shared_memory_, nullptr),

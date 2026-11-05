@@ -25,9 +25,23 @@ _AMDF_CONFIG_CMAKE_OPTIONS = {
             all_of(Equal("CMAKE_SYSTEM_NAME", "Linux"), Equal("IREE_ARCH", "x86_64")),
         ),
     ),
+    "//libamdf/config/provider:dxg": any_of(
+        all_of(
+            Equal("CMAKE_SYSTEM_NAME", "Windows"),
+            any_of("AMDF_FAMILY_RDNA", "AMDF_FAMILY_CDNA"),
+        ),
+        all_of(Equal("CMAKE_SYSTEM_NAME", "Linux"), Equal("IREE_ARCH", "x86_64")),
+    ),
     "//libamdf/config/provider:wddm": all_of(
         any_of("AMDF_FAMILY_RDNA", "AMDF_FAMILY_CDNA"),
         Equal("CMAKE_SYSTEM_NAME", "Windows"),
+    ),
+    "//libamdf/config/provider:xdna": all_of(
+        "AMDF_FAMILY_XDNA",
+        any_of(
+            Equal("CMAKE_SYSTEM_NAME", "Windows"),
+            all_of(Equal("CMAKE_SYSTEM_NAME", "Linux"), Equal("IREE_ARCH", "x86_64")),
+        ),
     ),
 }
 
@@ -120,32 +134,6 @@ class AmdfBuildFileFunctions(
         declaration(**kwargs)
         self._converter.body += "endif()\n"
         self._emit_platform_guard_end(policy["target_compatible_with"])
-
-    def amdf_windows_sidecar_library(self, **kwargs):
-        kwargs = dict(kwargs)
-        kwargs["target_compatible_with"] = (
-            kwargs.get("target_compatible_with") or []
-        ) + [
-            "@platforms//cpu:x86_64",
-            "@platforms//os:windows",
-        ]
-        self.amdf_cc_binary(
-            _cmake_rule="amdf_windows_sidecar_library", _native_linking=True, **kwargs
-        )
-
-    def iree_dynamic_library_bundle(self, **kwargs):
-        # CMake colocates private companions with the public library, matching
-        # the installed layout. Bazel's runfiles tree requires the explicit
-        # environment bindings carried by this rule.
-        del kwargs
-
-    def amdf_windows_sidecar_test(self, **kwargs):
-        kwargs = dict(kwargs)
-        kwargs["target_compatible_with"] = [
-            "@platforms//cpu:x86_64",
-            "@platforms//os:windows",
-        ]
-        self.amdf_cc_test(_cmake_rule="amdf_windows_sidecar_test", **kwargs)
 
     def amdf_library(
         self,
@@ -274,9 +262,6 @@ PROJECT_CONFIG = bazel_to_cmake_config.ProjectConfig(
         "//libamdf:amdf_shared_artifact": ["amdf::amdf"],
         "//libamdf:amdf_static": ["amdf::amdf_static"],
         "//libamdf:headers": ["amdf::headers"],
-        "//libamdf/src/gpu/umd/wddm/wkmi:runtime": [
-            "libamdf::src::gpu::umd::wddm::wkmi::amdf_wkmi_bridge",
-        ],
     },
     convert_unmatched_target=convert_unmatched_target,
 )

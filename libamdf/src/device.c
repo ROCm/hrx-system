@@ -24,6 +24,7 @@ amdf_status_t amdf_device_initialize(amdf_device_t* device,
   device->host_allocator = amdf_endpoint_host_allocator(endpoint);
   device->vtable = vtable;
   device->endpoint = endpoint;
+  device->endpoint_id = amdf_endpoint_get_cached_info(endpoint)->id;
   device->provider_instance = amdf_endpoint_get_instance(endpoint);
   device->engine_kind = engine_kind;
   amdf_child_tracker_initialize(&device->children);

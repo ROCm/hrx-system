@@ -7,6 +7,7 @@
 #include "libamdf/src/platform/host_memory.h"
 
 #include <emmintrin.h>
+#define NTDDI_VERSION NTDDI_WIN10_RS4
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -77,9 +78,17 @@ amdf_status_t amdf_platform_host_backing_populate(
 }
 
 amdf_status_t amdf_platform_host_memory_allocate(uint64_t byte_length,
+                                                 uint64_t minimum_alignment,
                                                  void** out_pointer) {
-  void* pointer = VirtualAlloc(NULL, (SIZE_T)byte_length,
-                               MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+  MEM_ADDRESS_REQUIREMENTS requirements = {0};
+  requirements.Alignment = (SIZE_T)minimum_alignment;
+  MEM_EXTENDED_PARAMETER parameter = {0};
+  parameter.Type = MemExtendedParameterAddressRequirements;
+  parameter.Pointer = &requirements;
+  void* pointer = VirtualAlloc2(GetCurrentProcess(), NULL, (SIZE_T)byte_length,
+                                MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE,
+                                minimum_alignment != 0 ? &parameter : NULL,
+                                minimum_alignment != 0 ? 1 : 0);
   if (pointer == NULL) {
     return amdf_make_status(AMDF_STATUS_DOMAIN_WIN32, GetLastError());
   }

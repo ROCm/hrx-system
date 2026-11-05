@@ -953,7 +953,7 @@ def amdgpu_windows_steps(
         bazel_configure_step(extra_options=ci_config.AMDGPU_WINDOWS_BAZEL_OPTIONS),
         bazel_test_step(
             "Query Windows GPU native queue capabilities",
-            ("//libamdf/src/gpu/umd/wddm/wkmi:adapter_info_system_test",),
+            ("//libamdf/src/gpu/umd/wddm/provider:adapter_info_system_test",),
             config=config,
             available_resources=ci_config.AMDGPU_WINDOWS_RESOURCES,
             test_env=amd_test_env(),

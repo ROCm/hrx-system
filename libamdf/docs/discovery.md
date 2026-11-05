@@ -114,12 +114,11 @@ from the native device query, without PCI or GFX memory tables.
 Windows opens KMT adapters for metadata queries. Those handles and the graphics
 kernel's process bookkeeping are distinct from the driver process context and
 GPU address domain acquired by device creation. GPU qualification uses a private
-`amdf_wkmi_bridge.dll` companion, which contains the pinned binary-only WKMI C++
-and CRT ABI behind a versioned C table. Successful qualification releases the
-temporary WKMI adapter state and unloads the bridge before endpoint open returns.
-Subsequent GPU information queries copy cached identity, ASIC revision, compute
-geometry, LDS limits and XCC topology. Memory limits are queried during explicit
-device creation and retained by the live device.
+record decoder shared with WSL and a statically linked native KMT provider.
+Successful qualification releases the temporary parsed adapter state before
+endpoint open returns. Subsequent GPU information queries copy cached identity,
+ASIC revision, compute geometry, LDS limits and XCC topology. Memory limits are
+queried during explicit device creation and retained by the live device.
 
 Hardware profiles and installed native interfaces answer different questions.
 XDNA target identity selects architecture encodings and firmware bootstrap,
@@ -146,8 +145,8 @@ An advertised command/publication pair promises a matching queue implementation
 for that endpoint, subject to normal live admission and resource availability.
 Missing families describe the provider's services, not necessarily every
 capability of the silicon. Windows GPU PM4/SDMA families require the loaded KMT
-and WKMI surfaces to provide hardware-scheduled queues; the XDNA family requires
-the KMT operations needed by its native path.
+surface and decoded scheduler profiles to provide usable queues; the XDNA
+family requires the KMT operations needed by its native path.
 
 `endpoint_query_queue_family_info` copies cached records. It allocates nothing,
 performs no system call, and neither initializes nor waits for a device. A HAL

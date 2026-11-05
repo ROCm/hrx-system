@@ -80,6 +80,6 @@ Runtime-only consumers outside `libamdf/` retain their own subsystem prefix.
 
 ## Verification
 
-Exercise both Bazel and CMake for build-system changes. Installation changes
-also require the standalone consumer under `build_tools/cmake/package_smoke/`
-to build against the installed package rather than build-tree targets.
+Exercise Bazel locally for build-system changes. CMake packaging and the
+standalone installed-package consumer under `build_tools/cmake/package_smoke/`
+are qualified by CI; do not configure or build them locally.

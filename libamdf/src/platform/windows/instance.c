@@ -24,16 +24,27 @@ amdf_status_t amdf_platform_instance_create(
   InitializeSRWLock(&instance->native_lock);
   status = amdf_kmt_api_initialize(&instance->kmt);
   if (amdf_status_is_ok(status)) {
+    amdf_d3d12_api_initialize(&instance->d3d12);
     status = amdf_windows_endpoint_metadata_api_initialize(
         &instance->endpoint_metadata);
   }
   if (amdf_status_is_ok(status)) {
     *out_instance = instance;
   } else {
-    const amdf_status_t close_status =
-        amdf_kmt_api_deinitialize(&instance->kmt);
-    if (!amdf_status_is_ok(close_status)) {
-      status = close_status;
+    if (instance->d3d12.dxgi_module != NULL ||
+        instance->d3d12.d3d12_module != NULL) {
+      const amdf_status_t close_status =
+          amdf_d3d12_api_deinitialize(&instance->d3d12);
+      if (!amdf_status_is_ok(close_status)) {
+        status = close_status;
+      }
+    }
+    if (instance->kmt.module != NULL) {
+      const amdf_status_t close_status =
+          amdf_kmt_api_deinitialize(&instance->kmt);
+      if (!amdf_status_is_ok(close_status)) {
+        status = close_status;
+      }
     }
     amdf_free(host_allocator, instance);
   }
@@ -66,6 +77,9 @@ amdf_status_t amdf_platform_instance_destroy(
     amdf_platform_instance_t* instance) {
   amdf_status_t status = amdf_windows_endpoint_metadata_api_deinitialize(
       &instance->endpoint_metadata);
+  if (amdf_status_is_ok(status)) {
+    status = amdf_d3d12_api_deinitialize(&instance->d3d12);
+  }
   if (amdf_status_is_ok(status)) {
     status = amdf_kmt_api_deinitialize(&instance->kmt);
   }

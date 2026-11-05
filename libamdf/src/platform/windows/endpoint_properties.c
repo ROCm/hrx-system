@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "libamdf/src/pci.h"
+#include "libamdf/src/platform/dxg/endpoint_identity.h"
 
 #define AMDF_WINDOWS_DRIVER_DESCRIPTION_CAPACITY                \
   (sizeof(((D3DKMT_DRIVER_DESCRIPTION*)0)->DriverDescription) / \
@@ -32,42 +33,12 @@ static LUID amdf_windows_luid_decode(uint64_t value) {
   return luid;
 }
 
-static uint32_t amdf_windows_hash_word(uint32_t hash, uint32_t value) {
-  for (uint32_t i = 0; i < 4; ++i) {
-    hash ^= value & 0xFFu;
-    hash *= 16777619u;
-    value >>= 8;
-  }
-  return hash;
-}
-
-static uint32_t amdf_windows_hash_device_ids(
-    const D3DKMT_DEVICE_IDS* device_ids) {
-  uint32_t hash = 2166136261u;
-  hash = amdf_windows_hash_word(hash, device_ids->VendorID);
-  hash = amdf_windows_hash_word(hash, device_ids->DeviceID);
-  hash = amdf_windows_hash_word(hash, device_ids->SubVendorID);
-  hash = amdf_windows_hash_word(hash, device_ids->SubSystemID);
-  hash = amdf_windows_hash_word(hash, device_ids->RevisionID);
-  hash = amdf_windows_hash_word(hash, device_ids->BusType);
-  return hash;
-}
-
-static amdf_endpoint_id_t amdf_windows_endpoint_id_encode(
-    LUID adapter_luid, uint32_t physical_adapter_index,
-    const D3DKMT_DEVICE_IDS* device_ids) {
-  amdf_endpoint_id_t id;
-  id.words[0] = amdf_windows_luid_encode(adapter_luid);
-  id.words[1] = ((uint64_t)amdf_windows_hash_device_ids(device_ids) << 32) |
-                physical_adapter_index;
-  return id;
-}
-
 void amdf_windows_endpoint_id_decode(const amdf_endpoint_id_t* id,
                                      LUID* out_adapter_luid,
                                      uint32_t* out_physical_adapter_index) {
-  *out_adapter_luid = amdf_windows_luid_decode(id->words[0]);
-  *out_physical_adapter_index = (uint32_t)id->words[1];
+  uint64_t adapter_luid = 0;
+  amdf_dxg_endpoint_id_decode(id, &adapter_luid, out_physical_adapter_index);
+  *out_adapter_luid = amdf_windows_luid_decode(adapter_luid);
 }
 
 static amdf_status_t amdf_windows_copy_endpoint_name(
@@ -143,10 +114,19 @@ amdf_status_t amdf_windows_query_endpoint_info(const amdf_kmt_api_t* api,
 
   amdf_endpoint_info_t endpoint_info = {0};
   if (amdf_status_is_ok(status)) {
+    const amdf_dxg_device_ids_t native_device_ids = {
+        .vendor_id = device_ids.DeviceIds.VendorID,
+        .device_id = device_ids.DeviceIds.DeviceID,
+        .subsystem_vendor_id = device_ids.DeviceIds.SubVendorID,
+        .subsystem_device_id = device_ids.DeviceIds.SubSystemID,
+        .revision_id = device_ids.DeviceIds.RevisionID,
+        .bus_type = device_ids.DeviceIds.BusType,
+    };
     endpoint_info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
     endpoint_info.structure_size = sizeof(endpoint_info);
-    endpoint_info.id = amdf_windows_endpoint_id_encode(
-        adapter_luid, physical_adapter_index, &device_ids.DeviceIds);
+    endpoint_info.id =
+        amdf_dxg_endpoint_id_encode(amdf_windows_luid_encode(adapter_luid),
+                                    physical_adapter_index, &native_device_ids);
     endpoint_info.native_identity.type =
         AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER;
     endpoint_info.native_identity.value.windows_adapter.luid =

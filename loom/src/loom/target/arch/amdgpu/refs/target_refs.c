@@ -200,7 +200,7 @@ loom_amdgpu_descriptor_immediate_slots_t loom_amdgpu_descriptor_immediate_slots(
         .sdwa_dst_sel = LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE,
         .literal = LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE,
         .address_offset = LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE,
-        .cache_scope = LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE,
+        .cache_coherence = LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE,
     };
   }
   const uint32_t descriptor_ordinal =
@@ -210,7 +210,7 @@ loom_amdgpu_descriptor_immediate_slots_t loom_amdgpu_descriptor_immediate_slots(
         .sdwa_dst_sel = LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE,
         .literal = LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE,
         .address_offset = LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE,
-        .cache_scope = LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE,
+        .cache_coherence = LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE,
     };
   }
   return kLoomAmdgpuDescriptorImmediateSlotValues

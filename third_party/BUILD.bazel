@@ -103,8 +103,14 @@ alias(
 )
 
 alias(
-    name = "amdf_wkmi",
-    actual = "//build_tools/third_party/wkmi",
+    name = "amdf_dxg_headers",
+    actual = "@libdxg_headers//:headers",
+    visibility = [":libamdf_users"],
+)
+
+alias(
+    name = "amdf_directx_wsl_stubs",
+    actual = "@directx_headers//:wsl_stubs",
     visibility = [":libamdf_users"],
 )
 

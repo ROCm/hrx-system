@@ -39,6 +39,8 @@ typedef struct amdf_kmt_api_t {
   PFND3DKMT_OPENADAPTERFROMLUID open_adapter_from_luid;
   // Queries immutable adapter and physical-device properties.
   PFND3DKMT_QUERYADAPTERINFO query_adapter_info;
+  // Samples one GPU engine clock against the host performance counter.
+  PFND3DKMT_QUERYCLOCKCALIBRATION query_clock_calibration;
   // Samples process residency budget and usage for one physical memory group.
   PFND3DKMT_QUERYVIDEOMEMORYINFO query_video_memory_info;
   // Issues provider-specific queries on an explicitly created device.
@@ -61,6 +63,10 @@ typedef struct amdf_kmt_api_t {
   PFND3DKMT_CREATEALLOCATION2 create_allocation;
   // Destroys one physical allocation or resource.
   PFND3DKMT_DESTROYALLOCATION2 destroy_allocation;
+  // Queries the storage required to open one shared native resource.
+  PFND3DKMT_QUERYRESOURCEINFOFROMNTHANDLE query_resource_info_from_handle;
+  // Opens one shared native resource into a logical device.
+  PFND3DKMT_OPENRESOURCEFROMNTHANDLE open_resource_from_handle;
   // Reserves one device virtual-address range without physical backing.
   PFND3DKMT_RESERVEGPUVIRTUALADDRESS reserve_gpu_virtual_address;
   // Releases one unmapped device virtual-address reservation.
@@ -81,12 +87,20 @@ typedef struct amdf_kmt_api_t {
   PFND3DKMT_INVALIDATECACHE invalidate_cache;
   // Waits for a monitored paging fence from the host.
   PFND3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU wait_from_cpu;
+  // Creates one synchronization object for software-scheduled progress.
+  PFND3DKMT_CREATESYNCHRONIZATIONOBJECT2 create_synchronization_object;
+  // Destroys one separately owned synchronization object.
+  PFND3DKMT_DESTROYSYNCHRONIZATIONOBJECT destroy_synchronization_object;
   // Creates one hardware queue from a virtual context.
   PFND3DKMT_CREATEHWQUEUE create_hardware_queue;
   // Destroys one hardware queue.
   PFND3DKMT_DESTROYHWQUEUE destroy_hardware_queue;
   // Publishes one command to a hardware queue.
   PFND3DKMT_SUBMITCOMMANDTOHWQUEUE submit_command_to_hardware_queue;
+  // Publishes one command to a software-scheduled context.
+  PFND3DKMT_SUBMITCOMMAND submit_command;
+  // Signals software-scheduled progress after accepted work.
+  PFND3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU signal_from_gpu;
   // Closes an adapter handle.
   PFND3DKMT_CLOSEADAPTER close_adapter;
 } amdf_kmt_api_t;
@@ -115,6 +129,9 @@ bool amdf_kmt_api_supports_memory(const amdf_kmt_api_t* api);
 // Returns true when the complete GPU allocation and virtual-memory procedure
 // set exists.
 bool amdf_kmt_api_supports_gpu_memory(const amdf_kmt_api_t* api);
+
+// Returns true when KMT can import one shared native resource.
+bool amdf_kmt_api_supports_shared_resource_import(const amdf_kmt_api_t* api);
 
 // Returns true when the complete GPU kernel-submission procedure set exists.
 bool amdf_kmt_api_supports_gpu_kernel_execution(const amdf_kmt_api_t* api);

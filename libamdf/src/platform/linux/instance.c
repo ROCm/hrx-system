@@ -27,15 +27,26 @@ amdf_status_t amdf_platform_instance_create(
     return status;
   }
   instance->host_allocator = host_allocator;
+  instance->sysfs_descriptor = -1;
+  instance->connection.descriptor = -1;
+  instance->kmt.connection = &instance->connection;
+  instance->kmt.host_allocator = &instance->host_allocator;
   instance->page_size = (size_t)page_size;
   const int mutex_error = pthread_mutex_init(&instance->native_mutex, NULL);
   if (mutex_error != 0) {
     amdf_free(host_allocator, instance);
     return amdf_linux_error(mutex_error);
   }
-  instance->sysfs_descriptor = open("/sys", O_PATH | O_DIRECTORY | O_CLOEXEC);
-  if (instance->sysfs_descriptor < 0) {
-    status = amdf_linux_error(errno);
+  status = amdf_linux_dxg_connection_initialize(&instance->connection);
+  if (amdf_status_is_ok(status)) {
+    instance->kind = AMDF_LINUX_PLATFORM_KIND_DXG;
+  } else if (status == amdf_linux_error(ENOENT)) {
+    instance->kind = AMDF_LINUX_PLATFORM_KIND_NATIVE_DEVICE;
+    instance->sysfs_descriptor = open("/sys", O_PATH | O_DIRECTORY | O_CLOEXEC);
+    status = instance->sysfs_descriptor < 0 ? amdf_linux_error(errno)
+                                            : AMDF_STATUS_OK;
+  }
+  if (!amdf_status_is_ok(status)) {
     const int mutex_error = pthread_mutex_destroy(&instance->native_mutex);
     amdf_assert(mutex_error == 0);
     (void)mutex_error;
@@ -52,7 +63,9 @@ amdf_status_t amdf_platform_instance_destroy(
   amdf_status_t status =
       amdf_platform_host_export_deinitialize(&instance->host_export);
   const amdf_status_t close_status =
-      amdf_linux_file_close(&instance->sysfs_descriptor);
+      instance->kind == AMDF_LINUX_PLATFORM_KIND_DXG
+          ? amdf_linux_dxg_connection_deinitialize(&instance->connection)
+          : amdf_linux_file_close(&instance->sysfs_descriptor);
   if (amdf_status_is_ok(status)) {
     status = close_status;
   }

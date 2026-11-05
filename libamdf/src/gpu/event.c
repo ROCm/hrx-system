@@ -62,8 +62,8 @@ amdf_status_t AMDF_CALL amdf_gpu_event_create(
   }
   event->device = device;
   amdf_gpu_umd_event_result_t result = {0};
-  status = amdf_gpu_umd_event_create(amdf_gpu_device_get_umd(device),
-                                     &event->umd, &result);
+  status = amdf_gpu_device_get_umd_api(device)->event_create(
+      amdf_gpu_device_get_umd(device), &event->umd, &result);
   if (amdf_status_is_ok(status)) {
     event->info = (amdf_gpu_event_info_t){
         .type = AMDF_STRUCTURE_TYPE_GPU_EVENT_INFO,
@@ -108,7 +108,7 @@ amdf_status_t AMDF_CALL amdf_gpu_event_signal(amdf_gpu_event_t* event) {
   if (event == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  return amdf_gpu_umd_event_signal(event->umd);
+  return amdf_gpu_device_get_umd_api(event->device)->event_signal(event->umd);
 }
 
 amdf_device_t* amdf_gpu_event_get_device(const amdf_gpu_event_t* event) {
@@ -120,14 +120,16 @@ amdf_status_t AMDF_CALL amdf_gpu_event_wait(amdf_gpu_event_t* event,
   if (event == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  return amdf_gpu_umd_event_wait(event->umd, timeout_nanoseconds);
+  return amdf_gpu_device_get_umd_api(event->device)
+      ->event_wait(event->umd, timeout_nanoseconds);
 }
 
 amdf_status_t AMDF_CALL amdf_gpu_event_destroy(amdf_gpu_event_t* event) {
   if (event == NULL) {
     return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
   }
-  const amdf_status_t status = amdf_gpu_umd_event_destroy(event->umd);
+  const amdf_status_t status =
+      amdf_gpu_device_get_umd_api(event->device)->event_destroy(event->umd);
   if (amdf_status_is_ok(status)) {
     amdf_device_unregister_child(event->device);
     amdf_free(event->host_allocator, event);

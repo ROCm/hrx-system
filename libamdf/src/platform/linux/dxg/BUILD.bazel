@@ -1,0 +1,149 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+load("//libamdf/build_tools/bazel:cc_test.bzl", "amdf_cc_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+amdf_cc_library(
+    name = "connection",
+    srcs = ["connection.c"],
+    hdrs = ["connection.h"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = ["//libamdf/src/platform/linux:file"],
+)
+
+amdf_cc_library(
+    name = "kmt_types",
+    hdrs = ["kmt_types.h"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        "//third_party:amdf_directx_wsl_stubs",
+        "//third_party:amdf_dxg_headers",
+    ],
+)
+
+amdf_cc_library(
+    name = "kmt",
+    srcs = ["kmt.c"],
+    hdrs = [
+        "kmt.h",
+        "kmt_operations.inc",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":connection",
+        ":kmt_types",
+        "//libamdf/src:allocator",
+    ],
+)
+
+amdf_cc_library(
+    name = "endpoint",
+    srcs = ["endpoint.c"],
+    hdrs = ["endpoint.h"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":kmt",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform",
+        "//libamdf/src/platform/dxg:endpoint_identity",
+        "//libamdf/src/platform/linux:endpoint_state",
+        "//libamdf/src/platform/linux:instance",
+    ],
+)
+
+amdf_cc_test(
+    name = "connection_test",
+    srcs = ["connection_test.cc"],
+    linkopts = [
+        "-Wl,--wrap=close",
+        "-Wl,--wrap=ioctl",
+        "-Wl,--wrap=open",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":connection",
+        "//libamdf/src/platform/linux:file",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "kmt_test",
+    srcs = ["kmt_test.cc"],
+    linkopts = ["-Wl,--wrap=amdf_linux_dxg_connection_invoke"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":kmt",
+        "//libamdf/src:allocator",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "kmt_query_test",
+    srcs = ["kmt_query_test.cc"],
+    linkopts = ["-Wl,--wrap=amdf_linux_dxg_connection_invoke"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":kmt",
+        "//libamdf/src:allocator",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)
+
+amdf_cc_test(
+    name = "endpoint_test",
+    srcs = ["endpoint_test.cc"],
+    linkopts = ["-Wl,--wrap=amdf_linux_dxg_connection_invoke"],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":endpoint",
+        "//libamdf/src:allocator",
+        "//libamdf/src/platform",
+        "//libamdf/src/platform/dxg:endpoint_identity",
+        "//libamdf/src/platform/linux:endpoint",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
+    ],
+)

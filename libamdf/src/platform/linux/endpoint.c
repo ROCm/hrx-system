@@ -19,6 +19,7 @@
 
 #include "libamdf/src/allocator.h"
 #include "libamdf/src/pci.h"
+#include "libamdf/src/platform/linux/dxg/endpoint.h"
 #include "libamdf/src/platform/linux/file.h"
 
 // Sysfs attributes are bounded single records. A short read is their complete
@@ -174,6 +175,10 @@ static amdf_status_t amdf_linux_query_endpoint(
 amdf_status_t amdf_platform_endpoint_enumerate(
     amdf_platform_instance_t* instance, uint32_t capacity,
     amdf_endpoint_summary_t* summaries, uint32_t* out_count) {
+  if (instance->kind == AMDF_LINUX_PLATFORM_KIND_DXG) {
+    return amdf_linux_dxg_endpoint_enumerate(instance, capacity, summaries,
+                                             out_count);
+  }
   if ((size_t)capacity > SIZE_MAX / sizeof(*summaries)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
   }
@@ -447,6 +452,9 @@ static amdf_status_t amdf_linux_open_device_file(
 amdf_status_t amdf_platform_endpoint_open(
     amdf_platform_instance_t* instance, const amdf_endpoint_id_t* id,
     amdf_platform_endpoint_t** out_endpoint, amdf_endpoint_info_t* out_info) {
+  if (instance->kind == AMDF_LINUX_PLATFORM_KIND_DXG) {
+    return amdf_linux_dxg_endpoint_open(instance, id, out_endpoint, out_info);
+  }
   amdf_platform_endpoint_t* endpoint = NULL;
   amdf_status_t status =
       amdf_calloc(instance->host_allocator, sizeof(*endpoint),
@@ -494,6 +502,12 @@ amdf_queue_publication_modes_t
 amdf_platform_endpoint_query_queue_publication_modes(
     const amdf_platform_endpoint_t* endpoint,
     amdf_queue_command_type_t command_type) {
+  if (endpoint->instance->kind == AMDF_LINUX_PLATFORM_KIND_DXG) {
+    return command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4 ||
+                   command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
+               ? AMDF_QUEUE_PUBLICATION_MODE_KERNEL
+               : 0;
+  }
   if (command_type == AMDF_QUEUE_COMMAND_TYPE_XDNA &&
       endpoint->info.engine_kind == AMDF_ENGINE_KIND_XDNA) {
     // Expected implemented transport; activation qualifies the native ABI.
@@ -503,6 +517,9 @@ amdf_platform_endpoint_query_queue_publication_modes(
 }
 
 amdf_status_t amdf_platform_endpoint_close(amdf_platform_endpoint_t* endpoint) {
+  if (endpoint->instance->kind == AMDF_LINUX_PLATFORM_KIND_DXG) {
+    return amdf_linux_dxg_endpoint_close(endpoint);
+  }
   amdf_free(endpoint->instance->host_allocator, endpoint);
   return AMDF_STATUS_OK;
 }

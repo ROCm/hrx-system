@@ -55,6 +55,8 @@ typedef enum loom_amdgpu_wait_frontier_node_flag_bits_e {
   LOOM_AMDGPU_WAIT_FRONTIER_NODE_FLAG_REFINED_WRITE = 1u << 1,
   // Consumes preceding reads and writes independently of its own access spaces.
   LOOM_AMDGPU_WAIT_FRONTIER_NODE_FLAG_ORDERS_MEMORY = 1u << 2,
+  // Non-atomic VMEM read bypasses the cache path that orders same-wave writes.
+  LOOM_AMDGPU_WAIT_FRONTIER_NODE_FLAG_BYPASSING_VMEM_READ = 1u << 3,
 } loom_amdgpu_wait_frontier_node_flag_bits_t;
 typedef uint8_t loom_amdgpu_wait_frontier_node_flags_t;
 
@@ -73,7 +75,7 @@ typedef struct loom_amdgpu_wait_frontier_node_t {
   loom_amdgpu_wait_memory_space_flags_t read_space_flags;
   // Normalized memory spaces written by this node.
   loom_amdgpu_wait_memory_space_flags_t write_space_flags;
-  // Source refinement and incoming memory-ordering obligations on this node.
+  // Source refinement, ordering, and cache-path facts for this node.
   loom_amdgpu_wait_frontier_node_flags_t flags;
   // Completion-order class for asynchronous VMEM results.
   uint8_t vmem_result_order_class;

@@ -29,7 +29,10 @@ amdf_cc_library(
     name = "host_export",
     srcs = ["host_export.c"],
     target_compatible_with = ["@platforms//os:linux"],
-    visibility = ["//libamdf/src/platform:__pkg__"],
+    visibility = [
+        "//libamdf/src/platform:__pkg__",
+        "//libamdf/src/platform/linux:__subpackages__",
+    ],
     deps = [
         ":dma_buf",
         ":file",
@@ -108,12 +111,17 @@ amdf_cc_library(
     hdrs = ["instance.h"],
     linkopts = ["-pthread"],
     target_compatible_with = ["@platforms//os:linux"],
-    visibility = ["//libamdf/src/platform:__pkg__"],
+    visibility = [
+        "//libamdf/src/platform:__pkg__",
+        "//libamdf/src/platform/linux:__subpackages__",
+    ],
     deps = [
         ":file",
         ":host_export",
         "//libamdf/src:allocator",
         "//libamdf/src/platform",
+        "//libamdf/src/platform/linux/dxg:connection",
+        "//libamdf/src/platform/linux/dxg:kmt",
     ],
 )
 
@@ -129,17 +137,30 @@ amdf_cc_library(
 )
 
 amdf_cc_library(
+    name = "endpoint_state",
+    hdrs = ["endpoint_state.h"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//libamdf/src:__subpackages__"],
+    deps = [
+        ":instance",
+        "//libamdf/src/platform",
+        "//libamdf/src/platform/linux/dxg:kmt",
+    ],
+)
+
+amdf_cc_library(
     name = "endpoint",
     srcs = ["endpoint.c"],
     hdrs = ["endpoint.h"],
     target_compatible_with = ["@platforms//os:linux"],
     visibility = ["//libamdf/src:__subpackages__"],
     deps = [
+        ":endpoint_state",
         ":file",
         ":instance",
         "//libamdf/src:allocator",
         "//libamdf/src:pci",
-        "//libamdf/src/platform",
+        "//libamdf/src/platform/linux/dxg:endpoint",
         "//third_party:linux_drm_uapi",
     ],
 )
@@ -151,6 +172,26 @@ amdf_cc_library(
     deps = [
         ":endpoint",
         ":instance",
+    ],
+)
+
+amdf_cc_test(
+    name = "instance_test",
+    srcs = ["instance_test.cc"],
+    linkopts = [
+        "-Wl,--wrap=close",
+        "-Wl,--wrap=open",
+    ],
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        ":file",
+        ":instance",
+        "//libamdf/src:allocator",
+        "//third_party:google_test",
+        "//third_party:google_test_main",
     ],
 )
 

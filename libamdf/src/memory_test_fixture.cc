@@ -294,6 +294,8 @@ void InitializeFakeDevice(uint64_t identity, amdf_instance_t* instance,
   out_device->base.vtable = &kFakeDeviceVtable;
   out_device->base.provider_instance = instance;
   out_device->base.engine_kind = AMDF_ENGINE_KIND_GPU;
+  out_device->base.endpoint_id.words[0] = identity;
+  out_device->base.endpoint_id.words[1] = identity ^ UINT64_C(0xA5A5A5A5);
   amdf_child_tracker_initialize(&out_device->base.children);
   out_device->request.device = &out_device->base;
   out_device->request.requirements.access =

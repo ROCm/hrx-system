@@ -10,5 +10,4 @@ package(default_visibility = ["//libamdf:__pkg__"])
 exports_files([
     "amdf_cts.cmake",
     "amdf_exports.def",
-    "amdf_windows_sidecar.cmake",
 ])

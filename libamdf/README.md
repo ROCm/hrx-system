@@ -96,7 +96,8 @@ runtime's execution model.
 | --- | --- | --- |
 | CPU | Linux and Windows host memory | CPU-only backing and explicit host views into shared memory; no synthetic CPU device. |
 | RDNA / CDNA on Linux | KFD and DRM | System and local memory, caller-page registration, peer topology and shared GPU addresses, native user queues. |
-| RDNA on Windows | WDDM / KMT and the private WKMI bridge | System and local memory, host registration, same-adapter D3D12 buffer import/re-export, native kernel-published PM4 and SDMA ranges. |
+| RDNA on WSL | DXG / KMT with source-owned private records | System and local memory, host registration, sparse GPU addresses, and native kernel-published PM4 and SDMA ranges. |
+| RDNA on Windows | WDDM / KMT with the built-in native provider | System and local memory, host registration, same-adapter D3D12 buffer import/re-export, native kernel-published PM4 and SDMA ranges. |
 | XDNA on Linux | Modern amdxdna DRM | NPU4/NPU5/NPU6 support, resident data, context-private instruction storage and kernel-mediated instruction submission. |
 | XDNA on Windows | MCDM / KMT | NPU4/NPU5/NPU6 support, resident data, context-private instruction storage and native transaction-interpreter submission. |
 
@@ -228,8 +229,10 @@ The build produces two link modes from one implementation:
 - `//libamdf:amdf_shared_artifact` names the loadable DLL or shared object for
   clients that resolve `amdf_query_api` at runtime.
 
-Windows GPU distributions install the private WKMI bridge beside `amdf.dll`.
-It is neither a public link input nor part of the libamdf ABI.
+Linux GPU builds contain both native KFD/DRM and WSL DXG/KMT providers in
+`libamdf.so`. Instance creation selects the provider from the available Linux
+device service, so the same library and wheel run on native Linux and under
+WSL without a companion runtime file or deployment setting.
 
 `AMDF_BUILD` controls the CMake subtree and defaults to `OFF` unless the XDNA
 HAL driver requires it. The Bazel equivalent is

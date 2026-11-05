@@ -160,9 +160,9 @@ typedef struct loom_amdgpu_descriptor_immediate_slots_t {
   uint8_t literal;
   // Descriptor-local address offset immediate, or the NONE sentinel.
   uint8_t address_offset;
-  // Descriptor-local vector-memory cache-scope immediate, or the NONE
-  // sentinel.
-  uint8_t cache_scope;
+  // Descriptor-local vector-memory coherence immediate, or the NONE
+  // sentinel. This names GLC on GFX11/CDNA2 and SCOPE on GFX12.
+  uint8_t cache_coherence;
 } loom_amdgpu_descriptor_immediate_slots_t;
 
 static_assert(sizeof(loom_amdgpu_descriptor_immediate_slots_t) == 4,

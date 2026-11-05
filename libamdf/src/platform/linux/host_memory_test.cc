@@ -136,6 +136,18 @@ class HostMemoryTest : public ::testing::Test {
   NativeState native_;
 };
 
+TEST(HostMemoryAlignmentTest, ReleasesOnlyTheAlignedPayloadExtent) {
+  const uint64_t alignment = UINT64_C(2) << 20;
+  void* pointer = nullptr;
+  ASSERT_EQ(amdf_platform_host_memory_allocate(4096, alignment, &pointer),
+            AMDF_STATUS_OK);
+  ASSERT_NE(pointer, nullptr);
+  EXPECT_EQ(reinterpret_cast<uintptr_t>(pointer) % alignment, 0u);
+  *static_cast<uint32_t*>(pointer) = 0x13579BDFu;
+  EXPECT_EQ(*static_cast<uint32_t*>(pointer), 0x13579BDFu);
+  EXPECT_EQ(amdf_platform_host_memory_free(pointer, 4096), AMDF_STATUS_OK);
+}
+
 TEST(HostBackingAlignmentTest, StrongAlignmentKeepsTheExactPayloadExtent) {
   amdf_platform_host_backing_t backing = {};
   ASSERT_EQ(

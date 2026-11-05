@@ -132,6 +132,7 @@ class GpuUserQueueTest : public ::testing::Test {
                                uint64_t reset_epoch, FakeNativeState* state) {
     device->base.host_allocator = amdf_allocator_system();
     device->base.endpoint = reinterpret_cast<amdf_endpoint_t*>(uintptr_t{1});
+    device->base.endpoint_id.words[0] = id;
     device->base.engine_kind = AMDF_ENGINE_KIND_GPU;
     amdf_child_tracker_initialize(&device->base.children);
     device->umd.state = state;
@@ -852,6 +853,12 @@ amdf_status_t AMDF_CALL amdf_endpoint_query_queue_family_info(
   return AMDF_STATUS_OK;
 }
 
+const amdf_endpoint_info_t* amdf_endpoint_get_cached_info(
+    const amdf_endpoint_t*) {
+  static const amdf_endpoint_info_t info = {};
+  return &info;
+}
+
 amdf_status_t amdf_endpoint_register_device(amdf_endpoint_t*) {
   return AMDF_STATUS_OK;
 }
@@ -868,6 +875,25 @@ amdf_instance_t* amdf_endpoint_get_instance(const amdf_endpoint_t*) {
 
 amdf_gpu_umd_device_t* amdf_gpu_device_get_umd(amdf_device_t* device) {
   return &reinterpret_cast<TestGpuDevice*>(device)->umd;
+}
+
+const amdf_gpu_umd_api_t* amdf_gpu_device_get_umd_api(const amdf_device_t*) {
+  static const amdf_gpu_umd_api_t api = {
+      .user_queue_create = amdf_gpu_umd_user_queue_create,
+      .user_queue_map = amdf_gpu_umd_user_queue_map,
+      .user_queue_mapping_destroy = amdf_gpu_umd_user_queue_mapping_destroy,
+      .user_queue_mapping_flush = amdf_gpu_umd_user_queue_mapping_flush,
+      .user_queue_query_status = amdf_gpu_umd_user_queue_query_status,
+      .user_queue_query_scratch = amdf_gpu_umd_user_queue_query_scratch,
+      .user_queue_resume_scratch = amdf_gpu_umd_user_queue_resume_scratch,
+      .user_queue_trim_scratch = amdf_gpu_umd_user_queue_trim_scratch,
+      .user_queue_set_dispatch_timestamps =
+          amdf_gpu_umd_user_queue_set_dispatch_timestamps,
+      .user_queue_wait_consumed = amdf_gpu_umd_user_queue_wait_consumed,
+      .user_queue_destroy = amdf_gpu_umd_user_queue_destroy,
+      .user_queue_inactivate = amdf_gpu_umd_user_queue_inactivate,
+  };
+  return &api;
 }
 
 const amdf_gpu_device_info_t* amdf_gpu_device_get_info(

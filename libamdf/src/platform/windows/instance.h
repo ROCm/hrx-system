@@ -8,6 +8,7 @@
 #define AMDF_SRC_PLATFORM_WINDOWS_INSTANCE_H_
 
 #include "libamdf/src/platform/instance.h"
+#include "libamdf/src/platform/windows/d3d12_api.h"
 #include "libamdf/src/platform/windows/endpoint_metadata.h"
 #include "libamdf/src/platform/windows/kmt_api.h"
 
@@ -16,6 +17,8 @@ struct amdf_platform_instance_t {
   amdf_allocator_t host_allocator;
   // Immutable KMT procedure table owned by this platform instance.
   amdf_kmt_api_t kmt;
+  // Direct3D entry points owned for typed shared-resource inspection.
+  amdf_d3d12_api_t d3d12;
   // Native Config Manager and CPU topology procedures for passive attachment.
   amdf_windows_endpoint_metadata_api_t endpoint_metadata;
   // Serializes cold native connection preparation and device teardown.

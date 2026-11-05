@@ -45,8 +45,8 @@ amdf_status_t AMDF_CALL amdf_gpu_device_query_queue_clock_info(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  return amdf_gpu_umd_query_queue_clock_info(amdf_gpu_device_get_umd(device),
-                                             command_type, out_info);
+  return amdf_gpu_device_get_umd_api(device)->query_queue_clock_info(
+      amdf_gpu_device_get_umd(device), command_type, out_info);
 }
 
 amdf_status_t AMDF_CALL amdf_gpu_device_query_clock_sample(
@@ -61,6 +61,6 @@ amdf_status_t AMDF_CALL amdf_gpu_device_query_clock_sample(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  return amdf_gpu_umd_query_clock_sample(amdf_gpu_device_get_umd(device),
-                                         command_type, out_sample);
+  return amdf_gpu_device_get_umd_api(device)->query_clock_sample(
+      amdf_gpu_device_get_umd(device), command_type, out_sample);
 }

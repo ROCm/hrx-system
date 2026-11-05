@@ -36,7 +36,6 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 include("${PROJECT_SOURCE_DIR}/libamdf/build_tools/cmake/amdf_cts.cmake")
 include("${PROJECT_SOURCE_DIR}/libamdf/build_tools/cmake/amdf_library.cmake")
 include("${PROJECT_SOURCE_DIR}/libamdf/build_tools/cmake/amdf_package.cmake")
-include("${PROJECT_SOURCE_DIR}/libamdf/build_tools/cmake/amdf_windows_sidecar.cmake")
 """,
 )
 
@@ -57,12 +56,6 @@ amdf_library(
         "include/amdf/xdna_trace.h",
     ],
     components = ["//libamdf/src/provider"],
-    runtime_data = select({
-        "//libamdf/config/provider:wddm": [
-            "//libamdf/src/gpu/umd/wddm/wkmi:runtime",
-        ],
-        "//conditions:default": [],
-    }),
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "@platforms//os:windows": [],

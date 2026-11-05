@@ -1,0 +1,143 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "libamdf/src/gpu/umd/dxg/endpoint_properties.h"
+
+#include <stddef.h>
+
+bool amdf_gpu_dxg_endpoint_properties_translate(
+    const amdf_dxg_provider_gpu_properties_t* provider_properties,
+    amdf_gpu_endpoint_properties_t* out_properties) {
+  const uint32_t xcc_count = provider_properties->xcc_count;
+  const uint32_t shader_engine_count = provider_properties->shader_engine_count;
+  // Private adapter records may omit this field. ROCr uses 32 as the effective
+  // limit for the same native record shape.
+  const uint32_t maximum_scratch_wave_count_per_compute_unit =
+      provider_properties->maximum_scratch_wave_count_per_compute_unit
+          ? provider_properties->maximum_scratch_wave_count_per_compute_unit
+          : 32u;
+  if (provider_properties->gfx_ip_major < 0 ||
+      provider_properties->gfx_ip_minor < 0 ||
+      provider_properties->gfx_ip_stepping < 0 || xcc_count == 0 ||
+      shader_engine_count == 0 || shader_engine_count % xcc_count != 0) {
+    return false;
+  }
+
+  amdf_gpu_endpoint_properties_t properties = {
+      .gfx_ip =
+          {
+              .major = (uint32_t)provider_properties->gfx_ip_major,
+              .minor = (uint32_t)provider_properties->gfx_ip_minor,
+              .stepping = (uint32_t)provider_properties->gfx_ip_stepping,
+          },
+      // The provider carries the complete HSAKMT capability word. The low four
+      // bits are the ASIC revision used for compiler-target selection.
+      .asic_revision = provider_properties->asic_revision & 0xFu,
+      .compute =
+          {
+              .wavefront_size = provider_properties->wavefront_size,
+              .compute_unit_count = provider_properties->compute_unit_count,
+              .maximum_wave_count_per_compute_unit =
+                  provider_properties->maximum_wave_count_per_compute_unit,
+              .maximum_scratch_wave_count_per_compute_unit =
+                  maximum_scratch_wave_count_per_compute_unit,
+              .local_data_share_byte_length =
+                  provider_properties->local_data_share_byte_length,
+          },
+      .topology =
+          {
+              .xcc_count = xcc_count,
+              .shader_engine_count_per_xcc = shader_engine_count / xcc_count,
+          },
+  };
+  if (provider_properties->supports_pm4_kernel_queue != 0) {
+    amdf_queue_format_features_t format_features =
+        provider_properties->gfx_ip_major >= 10
+            ? AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR
+            : 0;
+    const bool rdna_scratch =
+        (properties.gfx_ip.major == 11 &&
+         (properties.gfx_ip.minor == 0 || properties.gfx_ip.minor == 5 ||
+          properties.gfx_ip.minor == 7)) ||
+        (properties.gfx_ip.major == 12 &&
+         (properties.gfx_ip.minor == 0 || properties.gfx_ip.minor == 5));
+    if (rdna_scratch && xcc_count == 1 && shader_engine_count != 0 &&
+        properties.compute.maximum_scratch_wave_count_per_compute_unit != 0) {
+      format_features |= AMDF_GPU_PM4_FORMAT_FEATURE_DISPATCH_SCRATCH;
+    }
+    properties.queue_families[properties.queue_family_count++] =
+        (amdf_gpu_queue_family_properties_t){
+            .command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+            .format_version = AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1,
+            .format_features = format_features,
+            .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
+            .roles = AMDF_QUEUE_ROLE_COMPUTE | AMDF_QUEUE_ROLE_TRANSFER |
+                     AMDF_QUEUE_ROLE_ATOMIC | AMDF_QUEUE_ROLE_CACHE_CONTROL,
+            .cache_operations = AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM |
+                                AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM,
+            .cache_transition_kinds = AMDF_CACHE_TRANSITION_KINDS_GLOBAL,
+            .atomic_capabilities = amdf_gpu_pm4_atomic_capabilities(),
+            .kernel_queue_capabilities =
+                AMDF_KERNEL_QUEUE_CAPABILITY_VIRTUAL_MEMORY,
+        };
+  }
+  if (provider_properties->supports_sdma_kernel_queue != 0) {
+    // The native adapter record identifies the packet layout. Clients receive
+    // encoding features and never need to reconstruct them from GFX identity.
+    // Driver-managed immutable streams receive native GCR prologue/epilogue.
+    // Their completion boundary is native retirement, not an in-stream fence.
+    amdf_queue_format_features_t format_features =
+        AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR;
+    // Rectangular geometry follows the native packet family, independently
+    // of the fence and scope fields below. Unknown families omit this command.
+    switch (provider_properties->gfx_ip_major) {
+      case 9:
+        format_features |= AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT;
+        break;
+      case 10:
+      case 11:
+        format_features |=
+            AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT |
+            AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_EXTENDED_Z;
+        break;
+      case 12:
+        if (provider_properties->gfx_ip_minor == 0 ||
+            provider_properties->gfx_ip_minor == 5) {
+          format_features |= AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT |
+                             AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_WIDE;
+        }
+        break;
+      default:
+        break;
+    }
+    if (provider_properties->gfx_ip_major >= 12) {
+      format_features |= AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM;
+    } else if (provider_properties->gfx_ip_major >= 10) {
+      format_features |= AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_MEMORY_TYPE;
+    }
+    if (provider_properties->gfx_ip_major == 12 &&
+        provider_properties->gfx_ip_minor >= 5) {
+      format_features |= AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE;
+    }
+    properties.queue_families[properties.queue_family_count++] =
+        (amdf_gpu_queue_family_properties_t){
+            .command_type = AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA,
+            .format_version = AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1,
+            .format_features = format_features,
+            .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
+            .roles = AMDF_QUEUE_ROLE_TRANSFER | AMDF_QUEUE_ROLE_CACHE_CONTROL,
+            .cache_operations = AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM |
+                                AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM,
+            .cache_transition_kinds = AMDF_CACHE_TRANSITION_KINDS_GLOBAL,
+            .kernel_queue_capabilities =
+                provider_properties->supports_sdma_hardware_queue
+                    ? AMDF_KERNEL_QUEUE_CAPABILITY_VIRTUAL_MEMORY
+                    : 0,
+        };
+  }
+  *out_properties = properties;
+  return true;
+}

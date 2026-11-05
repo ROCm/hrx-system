@@ -20,6 +20,12 @@ LIBAMDF_GPU = build_requirement(
     enabled_by = Label("//libamdf/config/family:gpu"),
 )
 
+LIBAMDF_DXG = build_requirement(
+    id = "libamdf.dxg",
+    label = Label("//libamdf/requirements:dxg"),
+    enabled_by = Label("//libamdf/config/provider:dxg"),
+)
+
 LIBAMDF_XDNA = build_requirement(
     id = "libamdf.xdna",
     label = Label("//libamdf/requirements:xdna"),
@@ -50,6 +56,7 @@ XDNA_RESOURCE = run_requirement(
 REQUIREMENTS = [
     LIBAMDF,
     LIBAMDF_GPU,
+    LIBAMDF_DXG,
     LIBAMDF_XDNA,
     AMDGPU_RESOURCE,
     AMDGPU_PEERS_RESOURCE,

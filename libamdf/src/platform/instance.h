@@ -18,7 +18,7 @@ extern "C" {
 
 typedef struct amdf_platform_instance_t amdf_platform_instance_t;
 
-// Creates the compile-time-selected platform instance.
+// Creates one platform instance and binds its available native service.
 amdf_status_t amdf_platform_instance_create(
     amdf_allocator_t host_allocator, amdf_platform_instance_t** out_instance);
 

@@ -57,7 +57,12 @@ class TargetConverter:
                 ],
                 "//third_party:catch2": ["iree::third_party::catch2"],
                 "//third_party:cxx_parser": ["iree::third_party::cxx_parser"],
-                "//third_party:amdf_wkmi": ["iree::third_party::amdf_wkmi"],
+                "//third_party:amdf_dxg_headers": [
+                    "$<BUILD_LOCAL_INTERFACE:iree::third_party::amdf_dxg_headers>"
+                ],
+                "//third_party:amdf_directx_wsl_stubs": [
+                    "$<BUILD_LOCAL_INTERFACE:iree::third_party::amdf_directx_wsl_stubs>"
+                ],
                 # Driver protocol headers are private build inputs, not
                 # dependencies of the installed libamdf static interface.
                 "//third_party:linux_udmabuf_uapi": [

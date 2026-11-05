@@ -25,6 +25,8 @@ typedef struct amdf_gpu_kernel_queue_t {
   amdf_kernel_queue_t base;
   // Exact native kernel-mediated GPU queue lease.
   amdf_gpu_umd_kernel_queue_t* umd;
+  // Immutable operations copied from the creating GPU device.
+  const amdf_gpu_umd_api_t* umd_api;
   // Nonzero only while one host caller publishes a native submission.
   amdf_atomic_uint32_t publishing;
   // Greatest successfully accepted native progress point.
@@ -48,7 +50,7 @@ static uint64_t amdf_gpu_kernel_queue_refresh_retirement(
     return retired;
   }
   const uint64_t progress =
-      amdf_gpu_umd_kernel_queue_query_progress(queue->umd);
+      queue->umd_api->kernel_queue_query_progress(queue->umd);
   const uint64_t completed = progress < submitted ? progress : submitted;
   while (retired < completed && !amdf_atomic_uint64_compare_exchange_acq_rel(
                                     &queue->retired, &retired, completed)) {
@@ -63,7 +65,7 @@ static amdf_status_t amdf_gpu_kernel_queue_query_status(
   out_status->retired_submission =
       amdf_atomic_uint64_load_acquire(&queue->retired);
   out_status->terminal_status =
-      amdf_gpu_umd_kernel_queue_query_terminal_status(queue->umd);
+      queue->umd_api->kernel_queue_query_terminal_status(queue->umd);
   out_status->state =
       amdf_status_is_ok(out_status->terminal_status)
           ? AMDF_QUEUE_STATE_ACTIVE
@@ -94,7 +96,7 @@ static amdf_status_t amdf_gpu_kernel_queue_request_notification(
       amdf_atomic_uint64_load_acquire(&queue->retired) >= submission
           ? 0
           : submission;
-  return amdf_gpu_umd_kernel_queue_request_notification(
+  return queue->umd_api->kernel_queue_request_notification(
       queue->umd, native_submission, event);
 }
 
@@ -113,16 +115,16 @@ static amdf_status_t amdf_gpu_kernel_queue_wait(
   }
 
   const uint64_t retired = amdf_gpu_kernel_queue_refresh_retirement(queue);
-  status = amdf_gpu_umd_kernel_queue_query_terminal_status(queue->umd);
+  status = queue->umd_api->kernel_queue_query_terminal_status(queue->umd);
   if (!amdf_status_is_ok(status) || retired >= submission) {
     return status;
   }
-  status = amdf_gpu_umd_kernel_queue_wait(queue->umd, submission, &deadline);
+  status = queue->umd_api->kernel_queue_wait(queue->umd, submission, &deadline);
   // A native error is observable even when independent progress proves that
   // accepted commands have completed. Neither fact substitutes for the other.
   amdf_gpu_kernel_queue_refresh_retirement(queue);
   return amdf_status_is_ok(status)
-             ? amdf_gpu_umd_kernel_queue_query_terminal_status(queue->umd)
+             ? queue->umd_api->kernel_queue_query_terminal_status(queue->umd)
              : status;
 }
 
@@ -134,7 +136,7 @@ static amdf_status_t amdf_gpu_kernel_queue_destroy_native(
           amdf_atomic_uint64_load_acquire(&queue->submitted)) {
     return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
   }
-  const amdf_status_t status = amdf_gpu_umd_kernel_queue_destroy(queue->umd);
+  const amdf_status_t status = queue->umd_api->kernel_queue_destroy(queue->umd);
   queue->umd = NULL;
   return status;
 }
@@ -155,7 +157,7 @@ static amdf_status_t amdf_gpu_kernel_queue_claim(amdf_gpu_kernel_queue_t* queue,
   amdf_status_t status = AMDF_STATUS_OK;
   if (last_submitted - retired >= capacity) {
     retired = amdf_gpu_kernel_queue_refresh_retirement(queue);
-    status = amdf_gpu_umd_kernel_queue_query_terminal_status(queue->umd);
+    status = queue->umd_api->kernel_queue_query_terminal_status(queue->umd);
     if (amdf_status_is_ok(status) && last_submitted - retired >= capacity) {
       status = amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
     }
@@ -178,7 +180,7 @@ static amdf_status_t amdf_gpu_kernel_queue_update_memory(
     const amdf_memory_mapping_update_t* updates, bool* mutation_started,
     uint64_t* accepted_submission) {
   amdf_gpu_kernel_queue_t* queue = (amdf_gpu_kernel_queue_t*)base_queue;
-  uint32_t capacity = amdf_gpu_umd_kernel_queue_mapping_capacity(queue->umd);
+  uint32_t capacity = queue->umd_api->kernel_queue_mapping_capacity(queue->umd);
   if (capacity > base_queue->info.maximum_pending_submission_count) {
     capacity = base_queue->info.maximum_pending_submission_count;
   }
@@ -218,7 +220,8 @@ amdf_gpu_kernel_queue_inactivate(amdf_kernel_queue_t* base_queue) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
   amdf_gpu_kernel_queue_t* queue = (amdf_gpu_kernel_queue_t*)base_queue;
-  const amdf_status_t status = amdf_gpu_umd_kernel_queue_inactivate(queue->umd);
+  const amdf_status_t status =
+      queue->umd_api->kernel_queue_inactivate(queue->umd);
   queue->inactivated = amdf_status_is_ok(status);
   return status;
 }
@@ -282,16 +285,17 @@ amdf_status_t AMDF_CALL amdf_gpu_kernel_queue_create(
   amdf_atomic_uint32_initialize(&queue->publishing, 0);
   amdf_atomic_uint64_initialize(&queue->submitted, 0);
   amdf_atomic_uint64_initialize(&queue->retired, 0);
+  queue->umd_api = amdf_gpu_device_get_umd_api(device);
   status = amdf_kernel_queue_initialize(
       &queue->base, &amdf_gpu_kernel_queue_vtable, device, &info);
   if (amdf_status_is_ok(status)) {
-    status = amdf_gpu_umd_kernel_queue_create(
+    status = queue->umd_api->kernel_queue_create(
         amdf_gpu_device_get_umd(device), family_info.command_type, &queue->umd);
   }
   if (amdf_status_is_ok(status)) {
     queue->base.info.notification_types =
-        amdf_gpu_umd_kernel_queue_query_notification_types(queue->umd);
-    if (amdf_gpu_umd_kernel_queue_mapping_capacity(queue->umd) != 0) {
+        queue->umd_api->kernel_queue_query_notification_types(queue->umd);
+    if (queue->umd_api->kernel_queue_mapping_capacity(queue->umd) != 0) {
       queue->base.info.capabilities |=
           AMDF_KERNEL_QUEUE_CAPABILITY_VIRTUAL_MEMORY;
     }
@@ -373,8 +377,8 @@ amdf_status_t AMDF_CALL amdf_gpu_kernel_queue_submit(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  status = amdf_gpu_umd_kernel_queue_submit(queue->umd, command_address,
-                                            command->byte_length, submission);
+  status = queue->umd_api->kernel_queue_submit(
+      queue->umd, command_address, command->byte_length, submission);
   if (amdf_status_is_ok(status)) {
     amdf_atomic_uint64_store_release(&queue->submitted, submission);
     *out_submission = submission;

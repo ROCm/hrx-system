@@ -770,15 +770,15 @@ def _descriptor_address_offset_immediate_slot(
     )
 
 
-def _descriptor_cache_scope_immediate_slot(
+def _descriptor_cache_coherence_immediate_slot(
     descriptor_set: DescriptorSet,
     descriptor: Descriptor,
 ) -> int | None:
     return _descriptor_immediate_slot(
         descriptor_set,
         descriptor,
-        "cache scope",
-        lambda immediate: immediate.field_name == "scope",
+        "cache coherence",
+        lambda immediate: immediate.field_name in ("glc", "scope"),
     )
 
 
@@ -829,7 +829,7 @@ def _materialize_descriptor_ref_tables(
                 _descriptor_sdwa_dst_sel_immediate_slot(descriptor_set, descriptor, trait_names),
                 _descriptor_literal_immediate_slot(descriptor_set, descriptor),
                 _descriptor_address_offset_immediate_slot(descriptor_set, descriptor),
-                _descriptor_cache_scope_immediate_slot(descriptor_set, descriptor),
+                _descriptor_cache_coherence_immediate_slot(descriptor_set, descriptor),
             )
             for descriptor, trait_names in zip(descriptor_set.descriptors, descriptor_traits, strict=True)
         ]
@@ -942,14 +942,14 @@ def _emit_source(
         immediate_slot_refs_by_descriptor_set_key[descriptor_set_table.descriptor_set_key] = immediate_slot_refs
 
     lines.append("const loom_amdgpu_descriptor_immediate_slots_t kLoomAmdgpuDescriptorImmediateSlotValues[] = {")
-    for sdwa_dst_sel_slot, literal_slot, address_offset_slot, cache_scope_slot in immediate_slot_values:
+    for sdwa_dst_sel_slot, literal_slot, address_offset_slot, cache_coherence_slot in immediate_slot_values:
         lines.extend(
             [
                 "    {",
                 f"        .sdwa_dst_sel = {'LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE' if sdwa_dst_sel_slot is None else f'UINT8_C({sdwa_dst_sel_slot})'},",
                 f"        .literal = {'LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE' if literal_slot is None else f'UINT8_C({literal_slot})'},",
                 f"        .address_offset = {'LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE' if address_offset_slot is None else f'UINT8_C({address_offset_slot})'},",
-                f"        .cache_scope = {'LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE' if cache_scope_slot is None else f'UINT8_C({cache_scope_slot})'},",
+                f"        .cache_coherence = {'LOOM_AMDGPU_DESCRIPTOR_IMMEDIATE_SLOT_NONE' if cache_coherence_slot is None else f'UINT8_C({cache_coherence_slot})'},",
                 "    },",
             ]
         )

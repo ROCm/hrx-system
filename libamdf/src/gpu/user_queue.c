@@ -26,6 +26,8 @@ typedef struct amdf_gpu_user_queue_t {
   amdf_user_queue_t base;
   // Exact native directly published GPU queue.
   amdf_gpu_umd_user_queue_t* umd;
+  // Immutable operations copied from the creating GPU device.
+  const amdf_gpu_umd_api_t* umd_api;
 } amdf_gpu_user_queue_t;
 
 _Static_assert(offsetof(amdf_gpu_user_queue_t, base) == 0,
@@ -36,6 +38,8 @@ typedef struct amdf_gpu_user_queue_mapping_t {
   amdf_user_queue_mapping_t base;
   // Exact native producer-local queue mapping.
   amdf_gpu_umd_user_queue_mapping_t* umd;
+  // Immutable operations copied from the mapped GPU queue.
+  const amdf_gpu_umd_api_t* umd_api;
 } amdf_gpu_user_queue_mapping_t;
 
 _Static_assert(offsetof(amdf_gpu_user_queue_mapping_t, base) == 0,
@@ -46,7 +50,7 @@ static amdf_status_t amdf_gpu_user_queue_mapping_destroy_native(
   amdf_gpu_user_queue_mapping_t* mapping =
       (amdf_gpu_user_queue_mapping_t*)base_mapping;
   const amdf_status_t status =
-      amdf_gpu_umd_user_queue_mapping_destroy(mapping->umd);
+      mapping->umd_api->user_queue_mapping_destroy(mapping->umd);
   if (amdf_status_is_ok(status)) {
     mapping->umd = NULL;
   }
@@ -57,7 +61,7 @@ static amdf_status_t amdf_gpu_user_queue_mapping_flush(
     amdf_user_queue_mapping_t* base_mapping) {
   amdf_gpu_user_queue_mapping_t* mapping =
       (amdf_gpu_user_queue_mapping_t*)base_mapping;
-  return amdf_gpu_umd_user_queue_mapping_flush(mapping->umd);
+  return mapping->umd_api->user_queue_mapping_flush(mapping->umd);
 }
 
 static const amdf_user_queue_mapping_vtable_t
@@ -118,10 +122,11 @@ static amdf_status_t amdf_gpu_user_queue_map(
   status = amdf_user_queue_mapping_initialize(
       &mapping->base, &amdf_gpu_user_queue_mapping_vtable, base_queue,
       producer_device, &info);
+  mapping->umd_api = queue->umd_api;
   amdf_gpu_umd_user_queue_mapping_result_t result = {0};
   if (amdf_status_is_ok(status)) {
-    status = amdf_gpu_umd_user_queue_map(queue->umd, producer_umd,
-                                         &mapping->umd, &result);
+    status = queue->umd_api->user_queue_map(queue->umd, producer_umd,
+                                            &mapping->umd, &result);
   }
   if (amdf_status_is_ok(status)) {
     mapping->base.info.ring_address = result.ring_address;
@@ -146,7 +151,7 @@ static amdf_status_t amdf_gpu_user_queue_map(
 static amdf_status_t amdf_gpu_user_queue_query_status(
     amdf_user_queue_t* base_queue, amdf_user_queue_status_t* out_status) {
   amdf_gpu_user_queue_t* queue = (amdf_gpu_user_queue_t*)base_queue;
-  return amdf_gpu_umd_user_queue_query_status(queue->umd, out_status);
+  return queue->umd_api->user_queue_query_status(queue->umd, out_status);
 }
 
 static amdf_status_t amdf_gpu_user_queue_wait_consumed(
@@ -159,14 +164,14 @@ static amdf_status_t amdf_gpu_user_queue_wait_consumed(
     return status;
   }
   amdf_gpu_user_queue_t* queue = (amdf_gpu_user_queue_t*)base_queue;
-  return amdf_gpu_umd_user_queue_wait_consumed(queue->umd, published_index,
-                                               &deadline);
+  return queue->umd_api->user_queue_wait_consumed(queue->umd, published_index,
+                                                  &deadline);
 }
 
 static amdf_status_t amdf_gpu_user_queue_destroy_native(
     amdf_user_queue_t* base_queue) {
   amdf_gpu_user_queue_t* queue = (amdf_gpu_user_queue_t*)base_queue;
-  const amdf_status_t status = amdf_gpu_umd_user_queue_destroy(queue->umd);
+  const amdf_status_t status = queue->umd_api->user_queue_destroy(queue->umd);
   if (status != amdf_make_api_status(AMDF_STATUS_CODE_BUSY)) {
     queue->umd = NULL;
   }
@@ -188,8 +193,8 @@ amdf_gpu_user_queue_inactivate(amdf_user_queue_t* base_queue) {
   if (base_queue->vtable != &amdf_gpu_user_queue_vtable) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  return amdf_gpu_umd_user_queue_inactivate(
-      ((amdf_gpu_user_queue_t*)base_queue)->umd);
+  amdf_gpu_user_queue_t* queue = (amdf_gpu_user_queue_t*)base_queue;
+  return queue->umd_api->user_queue_inactivate(queue->umd);
 }
 
 static amdf_status_t amdf_gpu_user_queue_validate_scratch(
@@ -511,11 +516,12 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_create(
   }
   status = amdf_user_queue_initialize(&queue->base, &amdf_gpu_user_queue_vtable,
                                       device, &info);
+  queue->umd_api = amdf_gpu_device_get_umd_api(device);
   amdf_gpu_umd_user_queue_result_t result = {0};
   if (amdf_status_is_ok(status)) {
-    status =
-        amdf_gpu_umd_user_queue_create(amdf_gpu_device_get_umd(device),
-                                       &umd_create_info, &queue->umd, &result);
+    status = queue->umd_api->user_queue_create(amdf_gpu_device_get_umd(device),
+                                               &umd_create_info, &queue->umd,
+                                               &result);
   }
   if (amdf_status_is_ok(status)) {
     queue->base.info.queue_id = result.queue_id;
@@ -550,8 +556,8 @@ amdf_gpu_user_queue_query_scratch(amdf_user_queue_t* base_queue,
     return status;
   }
   amdf_gpu_aql_scratch_request_t request = {0};
-  status = amdf_gpu_umd_user_queue_query_scratch(
-      ((amdf_gpu_user_queue_t*)base_queue)->umd, &request);
+  amdf_gpu_user_queue_t* queue = (amdf_gpu_user_queue_t*)base_queue;
+  status = queue->umd_api->user_queue_query_scratch(queue->umd, &request);
   if (amdf_status_is_ok(status)) {
     request.type = out_request->type;
     request.structure_size = out_request->structure_size;
@@ -575,8 +581,8 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_resume_scratch(
   if (!amdf_status_is_ok(status)) {
     return status;
   }
-  return amdf_gpu_umd_user_queue_resume_scratch(
-      ((amdf_gpu_user_queue_t*)base_queue)->umd, &umd_scratch);
+  amdf_gpu_user_queue_t* queue = (amdf_gpu_user_queue_t*)base_queue;
+  return queue->umd_api->user_queue_resume_scratch(queue->umd, &umd_scratch);
 }
 
 amdf_status_t AMDF_CALL
@@ -587,8 +593,8 @@ amdf_gpu_user_queue_trim_scratch(amdf_user_queue_t* base_queue) {
   if (base_queue->vtable != &amdf_gpu_user_queue_vtable) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  return amdf_gpu_umd_user_queue_trim_scratch(
-      ((amdf_gpu_user_queue_t*)base_queue)->umd);
+  amdf_gpu_user_queue_t* queue = (amdf_gpu_user_queue_t*)base_queue;
+  return queue->umd_api->user_queue_trim_scratch(queue->umd);
 }
 
 amdf_status_t AMDF_CALL amdf_gpu_user_queue_set_dispatch_timestamps(
@@ -602,6 +608,7 @@ amdf_status_t AMDF_CALL amdf_gpu_user_queue_set_dispatch_timestamps(
        AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS) == 0) {
     return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  return amdf_gpu_umd_user_queue_set_dispatch_timestamps(
-      ((amdf_gpu_user_queue_t*)base_queue)->umd, enabled != 0);
+  amdf_gpu_user_queue_t* queue = (amdf_gpu_user_queue_t*)base_queue;
+  return queue->umd_api->user_queue_set_dispatch_timestamps(queue->umd,
+                                                            enabled != 0);
 }

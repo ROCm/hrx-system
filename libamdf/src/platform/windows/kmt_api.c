@@ -20,6 +20,9 @@ static void amdf_kmt_resolve_procedures(amdf_kmt_api_t* api) {
       api->module, "D3DKMTOpenAdapterFromLuid");
   api->query_adapter_info = (PFND3DKMT_QUERYADAPTERINFO)GetProcAddress(
       api->module, "D3DKMTQueryAdapterInfo");
+  api->query_clock_calibration =
+      (PFND3DKMT_QUERYCLOCKCALIBRATION)GetProcAddress(
+          api->module, "D3DKMTQueryClockCalibration");
   api->query_video_memory_info = (PFND3DKMT_QUERYVIDEOMEMORYINFO)GetProcAddress(
       api->module, "D3DKMTQueryVideoMemoryInfo");
   api->escape = (PFND3DKMT_ESCAPE)GetProcAddress(api->module, "D3DKMTEscape");
@@ -41,6 +44,12 @@ static void amdf_kmt_resolve_procedures(amdf_kmt_api_t* api) {
       api->module, "D3DKMTCreateAllocation2");
   api->destroy_allocation = (PFND3DKMT_DESTROYALLOCATION2)GetProcAddress(
       api->module, "D3DKMTDestroyAllocation2");
+  api->query_resource_info_from_handle =
+      (PFND3DKMT_QUERYRESOURCEINFOFROMNTHANDLE)GetProcAddress(
+          api->module, "D3DKMTQueryResourceInfoFromNtHandle");
+  api->open_resource_from_handle =
+      (PFND3DKMT_OPENRESOURCEFROMNTHANDLE)GetProcAddress(
+          api->module, "D3DKMTOpenResourceFromNtHandle");
   api->reserve_gpu_virtual_address =
       (PFND3DKMT_RESERVEGPUVIRTUALADDRESS)GetProcAddress(
           api->module, "D3DKMTReserveGpuVirtualAddress");
@@ -64,6 +73,12 @@ static void amdf_kmt_resolve_procedures(amdf_kmt_api_t* api) {
   api->wait_from_cpu =
       (PFND3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU)GetProcAddress(
           api->module, "D3DKMTWaitForSynchronizationObjectFromCpu");
+  api->create_synchronization_object =
+      (PFND3DKMT_CREATESYNCHRONIZATIONOBJECT2)GetProcAddress(
+          api->module, "D3DKMTCreateSynchronizationObject2");
+  api->destroy_synchronization_object =
+      (PFND3DKMT_DESTROYSYNCHRONIZATIONOBJECT)GetProcAddress(
+          api->module, "D3DKMTDestroySynchronizationObject");
   api->create_hardware_queue = (PFND3DKMT_CREATEHWQUEUE)GetProcAddress(
       api->module, "D3DKMTCreateHwQueue");
   api->destroy_hardware_queue = (PFND3DKMT_DESTROYHWQUEUE)GetProcAddress(
@@ -78,6 +93,11 @@ static void amdf_kmt_resolve_procedures(amdf_kmt_api_t* api) {
         (PFND3DKMT_SUBMITCOMMANDTOHWQUEUE)GetProcAddress(
             api->module, "D3DKMTSubmitCommandToHwQueue");
   }
+  api->submit_command = (PFND3DKMT_SUBMITCOMMAND)GetProcAddress(
+      api->module, "D3DKMTSubmitCommand");
+  api->signal_from_gpu =
+      (PFND3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMGPU)GetProcAddress(
+          api->module, "D3DKMTSignalSynchronizationObjectFromGpu");
   api->close_adapter =
       (PFND3DKMT_CLOSEADAPTER)GetProcAddress(api->module, "D3DKMTCloseAdapter");
 }
@@ -111,11 +131,19 @@ bool amdf_kmt_api_supports_gpu_memory(const amdf_kmt_api_t* api) {
          api->free_gpu_virtual_address != NULL && api->invalidate_cache != NULL;
 }
 
+bool amdf_kmt_api_supports_shared_resource_import(const amdf_kmt_api_t* api) {
+  return api->query_resource_info_from_handle != NULL &&
+         api->open_resource_from_handle != NULL;
+}
+
 bool amdf_kmt_api_supports_gpu_kernel_execution(const amdf_kmt_api_t* api) {
   return amdf_kmt_api_supports_device_contexts(api) &&
          api->wait_from_cpu != NULL && api->create_hardware_queue != NULL &&
          api->destroy_hardware_queue != NULL &&
-         api->submit_command_to_hardware_queue != NULL;
+         api->submit_command_to_hardware_queue != NULL &&
+         api->create_synchronization_object != NULL &&
+         api->destroy_synchronization_object != NULL &&
+         api->submit_command != NULL && api->signal_from_gpu != NULL;
 }
 
 bool amdf_kmt_api_supports_xdna_kernel_execution(const amdf_kmt_api_t* api) {

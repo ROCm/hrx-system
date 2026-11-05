@@ -181,7 +181,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/vulkan_headers/vulkan
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/catch2/catch2.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/cxx/cxx.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/mimalloc/mimalloc.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/wkmi/wkmi.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/build_tools/third_party/dxg_headers/dxg_headers.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/vulkan/vulkan.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/d3d12/d3d12.cmake")
 
@@ -223,9 +223,10 @@ endif()
 if(IREE_VULKAN_AVAILABLE)
   iree_configure_vulkan_headers()
 endif()
-if(AMDF_BUILD AND WIN32 AND IREE_ARCH STREQUAL "x86_64" AND
+if(AMDF_BUILD AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+   IREE_ARCH STREQUAL "x86_64" AND
    (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA))
-  iree_configure_amdf_wkmi()
+  iree_configure_amdf_dxg_headers()
 endif()
 if(IREE_BUILD_TESTS AND (IREE_HAL_DRIVER_VULKAN OR
     LOOM_ARTIFACT_SPIRV_BINARY))

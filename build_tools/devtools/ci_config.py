@@ -280,8 +280,8 @@ AMDGPU_WINDOWS_BAZEL_OPTIONS = (
 AMDGPU_WINDOWS_RESOURCES = ("libamdf.resource.amd_gpu",)
 AMDGPU_WINDOWS_BAZEL_TARGETS = (
     "//libamdf/src/gpu/umd/wddm:memory_test",
-    "//libamdf/src/gpu/umd/wddm/wkmi:allocation_test",
-    "//libamdf/src/gpu/umd/wddm/wkmi:kernel_queue_test",
+    "//libamdf/src/gpu/umd/wddm/provider:allocation_test",
+    "//libamdf/src/gpu/umd/wddm/provider:kernel_queue_test",
     "//libamdf/cts/gpu:gpu_extension_dynamic",
     "//libamdf/cts/gpu:kernel_queue_dynamic",
     "//libamdf/cts/gpu:native_lifetime",

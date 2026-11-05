@@ -268,7 +268,7 @@ amdf_status_t amdf_host_memory_prepare(
     }
   } else {
     status = amdf_platform_host_memory_allocate(
-        native_length,
+        native_length, 0,
         &memory->accesses[memory->backing_access_ordinal].native);
   }
   if (amdf_status_is_ok(status)) {

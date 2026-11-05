@@ -8,6 +8,7 @@
 #define AMDF_SRC_GPU_DEVICE_H_
 
 #include "amdf/gpu.h"
+#include "libamdf/src/gpu/umd/api.h"
 #include "libamdf/src/gpu/umd/device.h"
 
 #ifdef __cplusplus
@@ -25,6 +26,10 @@ amdf_status_t AMDF_CALL amdf_gpu_device_query_info(
 
 // Returns the UMD device borrowed from one GPU device.
 amdf_gpu_umd_device_t* amdf_gpu_device_get_umd(amdf_device_t* device);
+
+// Returns the immutable UMD operations selected for one GPU device.
+const amdf_gpu_umd_api_t* amdf_gpu_device_get_umd_api(
+    const amdf_device_t* device);
 
 // Returns immutable identity and reset state borrowed from one GPU device.
 const amdf_gpu_device_info_t* amdf_gpu_device_get_info(
