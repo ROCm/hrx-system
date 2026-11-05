@@ -123,6 +123,28 @@ step in build actions.
 Header diagnostics cover first-party source and generated code. External and
 vendored third-party headers retain their own style policy.
 
+### `iree-output-parameter-order`
+
+Parameters named `out_*` form the final contiguous group of parameters in a
+function signature. Inputs, mutable state, flags, and allocators precede that
+group. Multiple outputs retain their natural order within it:
+
+```c
+bool poll(void* user_data, status_t status, scope_t* scope,
+          wait_t* out_wait, copy_t* out_copy);
+```
+
+The check covers function declarations and definitions, callback typedefs,
+function-pointer fields and parameters, C++ methods, and lambdas. It reports
+the first output followed by a non-output parameter. It offers no automatic
+fix because changing a signature also requires updating its callers and every
+implementation of a callback contract.
+
+The check is registered but disabled in the repository policy while existing
+signatures and their callers are migrated. Explicitly enabling
+`iree-output-parameter-order` audits these declarations; removing its exclusion
+from `clang_tidy_config.yaml` enables repository-wide enforcement.
+
 ### `iree-assert-output-call`
 
 `iree-assert-output-call` diagnoses calls with writable `out_*` parameters

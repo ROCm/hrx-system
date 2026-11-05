@@ -27,6 +27,38 @@
 #define IREE_ASSERT_EQ(x, y, ...) IREE_ASSERT((x) == (y), __VA_ARGS__)
 #endif  // IREE_ASSERT_EQ
 
+void output_order_declaration(int* out_declaration, int input);
+
+void output_order_definition(int* out_definition, int* state) {
+  *out_definition = *state;
+}
+
+typedef void (*output_order_callback_t)(void* user_data, int* out_callback,
+                                        void* scope);
+typedef void output_order_function_t(int* out_function_type, int input);
+
+struct output_order_vtable_t {
+  void (*fn)(int* out_field, int input);
+};
+
+void output_order_nested(void (*callback)(int* out_nested, void* scope));
+void (*output_order_variable)(int* out_variable, int input);
+void output_order_array(int out_array[4], int input);
+void output_order_unnamed(int* out_unnamed, int);
+void output_order_interleaved(int* out_first, int input, int* out_second);
+
+#define OUTPUT_ORDER_DECLARATION(name) void name(int* out_macro, int input)
+OUTPUT_ORDER_DECLARATION(output_order_macro);
+
+void output_order_valid_inputs(int input, int* state);
+void output_order_valid_empty(void);
+void output_order_valid_single(int* out_value);
+void output_order_valid_multiple(void* user_data, int* state, int flags,
+                                 int* out_wait, int* out_copy);
+typedef void (*output_order_valid_callback_t)(void* user_data, void* scope,
+                                              int* out_wait, int* out_copy);
+typedef void (*output_order_valid_unnamed_t)(void*, int*, int*);
+
 int iree_clang_tidy_style_direct_goto(int flag) {
   if (flag) {
     goto cleanup;

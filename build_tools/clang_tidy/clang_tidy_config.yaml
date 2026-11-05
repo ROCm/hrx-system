@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 ---
-Checks: '-*,iree-*,-iree-unbounded-recursion,readability-braces-around-statements'
+Checks: '-*,iree-*,-iree-unbounded-recursion,-iree-output-parameter-order,readability-braces-around-statements'
 HeaderFilterRegex: '.*'
 ExcludeHeaderFilterRegex: '(^|/)(external|third_party)/'
 ...
