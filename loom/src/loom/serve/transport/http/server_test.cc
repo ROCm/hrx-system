@@ -458,6 +458,40 @@ TEST_F(HttpServerTest, ConfiguredBodiesAndClaimsOutliveOtherPeers) {
   }
 }
 
+TEST_F(HttpServerTest, CancellationPreservesClaimedInputThroughPeerRetirement) {
+  int client = Connect();
+  ASSERT_TRUE(Write(client,
+                    "POST /held HTTP/1.1\r\nHost: local\r\n"
+                    "Content-Length: 5\r\n\r\ninput"));
+  const loom_serve_http_request_t* request = nullptr;
+  auto* connection = Take(&request);
+  ASSERT_NE(connection, nullptr);
+  loom_serve_http_connection_cancel(connection);
+  loom_serve_http_connection_cancel(connection);
+  EXPECT_TRUE(loom_serve_http_connection_failed(connection));
+  EXPECT_EQ(Read(client), "");
+  ASSERT_EQ(close(client), 0);
+
+  // Repeated admission collects retired peers and recycles every other slot.
+  // This cancelled slot still owns its parser until the application releases
+  // it.
+  for (size_t i = 0; i < loom_serve_http_server_connection_capacity(server_);
+       ++i) {
+    client = Connect();
+    ASSERT_TRUE(Write(client, "GET /peer HTTP/1.1\r\nHost: local\r\n\r\n"));
+    const loom_serve_http_request_t* peer_request = nullptr;
+    auto* peer = Take(&peer_request);
+    ASSERT_NE(peer, nullptr);
+    EXPECT_NE(peer, connection);
+    EXPECT_TRUE(iree_string_view_equal(request->body, IREE_SV("input")));
+    loom_serve_http_connection_abort(peer);
+    EXPECT_EQ(Read(client), "");
+    ASSERT_EQ(close(client), 0);
+  }
+  EXPECT_TRUE(iree_string_view_equal(request->body, IREE_SV("input")));
+  loom_serve_http_connection_abort(connection);
+}
+
 TEST_F(HttpServerTest, PeerResetReturnsOwnershipAndListenerSurvives) {
   int client = Connect();
   ASSERT_TRUE(Write(client, "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n"));

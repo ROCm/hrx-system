@@ -32,6 +32,7 @@ loom_cc_library(
     name = "source_service_tests",
     testonly = True,
     srcs = [
+        "native_service_test.cc",
         "source_service_test.cc",
     ],
     target_compatible_with = select({
@@ -41,11 +42,14 @@ loom_cc_library(
     visibility = ["//loom/src/loom/serve:implementation"],
     deps = [
         "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/serve/runtime/execution",
         "//loom/src/loom/serve/runtime/host",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/serve/server:resources",
         "//loom/src/loom/serve/server:router",
+        "//loom/src/loom/serve/service/finite:call",
         "//loom/src/loom/serve/service/finite:model",
+        "//loom/src/loom/serve/service/finite:result",
         "//loom/src/loom/serve/service/finite:service",
         "//loom/src/loom/serve/service/finite/decision:protocol",
         "//loom/src/loom/serve/service/finite/embedding:protocol",
@@ -59,6 +63,7 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
     ],
     alwayslink = True,

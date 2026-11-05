@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 
 #include "iree/async/proactor.h"
@@ -20,6 +21,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/serve/server/resources.h"
 #include "loom/serve/server/router.h"
+#include "loom/serve/service/finite/call.h"
 #include "loom/serve/service/finite/decision/protocol.h"
 #include "loom/serve/service/finite/embedding/protocol.h"
 #include "loom/serve/service/finite/service.h"
@@ -255,6 +257,41 @@ void CheckSingleNoulResponse(const std::string& response) {
   // Vulkan F32 division permits 2.5 ULP error for normal divisors. At 2/3,
   // one ULP is 2^-24. Exact dyadic cohort probabilities remain wire-checked.
   EXPECT_NEAR(probability, 2.0 / 3.0, 2.5 * 0x1p-24);
+}
+
+TEST_F(SourceDecisionServiceTest, NativeAndHttpShareOneCohort) {
+  iree_string_builder_t body;
+  iree_string_builder_initialize(host_allocator_, &body);
+  IREE_EXPECT_OK(iree_string_builder_append_cstring(&body, kNoul));
+  loom_serve_finite_call_t* call = nullptr;
+  auto status = loom_serve_finite_service_try_open(services_[0], &body, &call);
+  iree_string_builder_deinitialize(&body);
+  std::unique_ptr<loom_serve_finite_call_t,
+                  decltype(&loom_serve_finite_call_close)>
+      native(call, loom_serve_finite_call_close);
+  IREE_ASSERT_OK(status);
+  ASSERT_NE(native, nullptr);
+  const int client = Send(kNoul);
+  ASSERT_NO_FATAL_FAILURE(Accept(client));
+  while (!loom_serve_finite_call_output(native.get()) &&
+         !loom_serve_finite_call_is_complete(native.get())) {
+    ASSERT_TRUE(Step());
+  }
+  const auto* output = loom_serve_finite_call_output(native.get());
+  ASSERT_NE(output, nullptr);
+  EXPECT_EQ(output->request_index, 0u);
+  EXPECT_EQ(output->row_count, 1u);
+  EXPECT_FALSE(loom_serve_finite_call_is_complete(native.get()));
+  native.reset();
+  Drain();
+  // Two questions in one source cohort produce .25; independent per-request
+  // dispatches would produce 2/3. Removing the native peer must not renumber
+  // the surviving HTTP request's reversed physical row.
+  const auto response = Read(client);
+  EXPECT_EQ(response.find("HTTP/1.1 200"), 0u);
+  EXPECT_NE(response.find(R"("truth":{"type":"noul","noul":0.25})"),
+            std::string::npos)
+      << response;
 }
 
 TEST_F(SourceDecisionServiceTest, PacksQuestionsAndRetainsResultsAcrossReset) {

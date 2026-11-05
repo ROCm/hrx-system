@@ -12,12 +12,12 @@
 #include "loom/serve/service/kind.h"
 
 // Initial member of each modality's request. The source packet and protocol
-// metadata survive until CPU encoding releases the cohort, including reset
-// peers.
+// metadata survive until the service releases the request's final CPU borrower,
+// including cancelled peers.
 typedef struct loom_serve_finite_request_t {
   // Owned read-only source packet, with modality-defined indexed records.
   iree_vm_buffer_t* input;
-  // Expected result rows in this HTTP request's original order.
+  // Expected result rows in this request's original order.
   iree_host_size_t count;
 } loom_serve_finite_request_t;
 

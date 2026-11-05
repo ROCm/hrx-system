@@ -198,6 +198,13 @@ iree_status_t loom_serve_http_connection_send(
 iree_status_t loom_serve_http_connection_send_generated(
     loom_serve_http_connection_t* connection, iree_net_send_prefix_t prefix);
 
+// Cancels peer I/O immediately while preserving the application claim and all
+// request views. Idempotent; failed becomes true. The owner must still finish
+// or abort after its input borrowers retire. Does not wait for network
+// retirement.
+void loom_serve_http_connection_cancel(
+    loom_serve_http_connection_t* connection);
+
 // Relinquishes the connection and all request views. Finish drains every
 // accepted send before closing; abort cancels outstanding network work. Neither
 // waits for the network. Both invalidate the application's borrowed pointers.

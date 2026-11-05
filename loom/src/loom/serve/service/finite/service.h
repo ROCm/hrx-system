@@ -7,6 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_FINITE_SERVICE_H_
 #define LOOM_SERVE_SERVICE_FINITE_SERVICE_H_
 
+#include "loom/serve/service/finite/call.h"
 #include "loom/serve/service/finite/model.h"
 #include "loom/serve/service/finite/protocol.h"
 #include "loom/serve/service/service.h"
@@ -40,7 +41,17 @@ iree_status_t loom_serve_finite_service_allocate(
 loom_serve_service_t loom_serve_finite_service_interface(
     loom_serve_finite_service_t* service);
 
-// After router retirement only. CPU/process release, not completion, releases
+// Native admission on the same serialized owner as advance. Acceptance moves
+// the owning input builder and returns a call; success with NULL means bounded
+// pressure. Both pressure and failure preserve input. The modality's normal
+// source preparation, cohort packing, and residency policy are shared with
+// HTTP. Native calls publish retained device results without downloading or
+// encoding them; the caller imports their dependency before device composition.
+iree_status_t loom_serve_finite_service_try_open(
+    loom_serve_finite_service_t* service, iree_string_builder_t* body,
+    loom_serve_finite_call_t** out_call);
+
+// After owner retirement only. CPU/process release, not completion, releases
 // borrowed inputs/results. Failed device work belongs to outer model teardown.
 void loom_serve_finite_service_free(loom_serve_finite_service_t* service);
 

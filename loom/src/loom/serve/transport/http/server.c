@@ -553,6 +553,17 @@ void loom_serve_http_connection_finish(
   }
 }
 
+void loom_serve_http_connection_cancel(
+    loom_serve_http_connection_t* connection) {
+  iree_slim_mutex_lock(&connection->server->mutex);
+  if (iree_status_is_ok(connection->failure)) {
+    connection->failure = iree_status_from_code(IREE_STATUS_CANCELLED);
+    loom_serve_http_notify_locked(connection->server);
+  }
+  iree_slim_mutex_unlock(&connection->server->mutex);
+  loom_serve_http_connection_close(connection);
+}
+
 void loom_serve_http_connection_abort(
     loom_serve_http_connection_t* connection) {
   iree_slim_mutex_lock(&connection->server->mutex);
