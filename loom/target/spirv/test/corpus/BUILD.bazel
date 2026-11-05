@@ -471,7 +471,8 @@ _ALL_ROOTS_XFAIL = [
 ]
 
 _SPIRV_EXECUTION_XFAILS = {
-    "control/branch/guards.loom:@selected_fragment_scale_values": "TARGET/002",
+    # Native fragment loads require 16-byte alignment; this source proves four.
+    "control/branch/guards.loom:@selected_fragment_scale_values": "TARGET/050",
     "control/branch/structured.loom:@structured_branch_values": "TARGET/001",
     "function/buffer/arguments.loom:@buffer_argument_values": "TARGET/001",
     "function/buffer/arguments.loom:@buffer_extent_values": "TARGET/001",

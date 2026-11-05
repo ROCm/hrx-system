@@ -49,6 +49,7 @@ from loom.target.arch.spirv.builtins import (  # noqa: E402
     BUILTIN_SCALAR_INDEX_QUERIES,
 )
 from loom.target.arch.spirv.cooperative_matrix import (  # noqa: E402
+    COOPERATIVE_MATRIX_ARITHMETIC,
     COOPERATIVE_MATRIX_CASES,
     COOPERATIVE_MATRIX_TYPES,
     CooperativeMatrixCase,
@@ -777,6 +778,20 @@ def _cooperative_matrix_rows() -> list[_PacketRow]:
                 result_type=value,
                 operand_types=(_scalar_value(matrix_type.scalar),),
             )
+        )
+        rows.extend(
+            _PacketRow(
+                matrix_type.arithmetic_key(operation),
+                opcode=operation.opcode,
+                form=("LOOM_SPIRV_PACKET_FORM_BINARY_LHS_TYPE" if operation.operand_count == 2 else "LOOM_SPIRV_PACKET_FORM_UNARY_TYPED"),
+                result_type=value,
+                operand_types=(value,) * operation.operand_count,
+                immediate_count=int(operation.controls_contraction),
+                no_contraction=operation.controls_contraction,
+                contraction_controlled=operation.controls_contraction,
+            )
+            for operation in COOPERATIVE_MATRIX_ARITHMETIC
+            if operation.supports(matrix_type)
         )
         for role in matrix_type.source_roles:
             is_load = role != "result"

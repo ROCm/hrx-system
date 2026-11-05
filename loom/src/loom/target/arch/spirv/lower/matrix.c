@@ -57,6 +57,97 @@ loom_spirv_scope_t loom_spirv_matrix_scope(void) {
   return LOOM_SPIRV_SCOPE_SUBGROUP;
 }
 
+bool loom_spirv_matrix_fragment(const loom_value_fact_table_t* fact_table,
+                                loom_value_id_t source_value_id,
+                                loom_vector_fragment_fact_t* out_fragment) {
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(fact_table, source_value_id);
+  return loom_vector_fragment_fact_query_value_facts(&fact_table->context,
+                                                     facts, out_fragment) &&
+         loom_vector_fragment_fact_has_matrix_shape(*out_fragment);
+}
+
+static bool loom_spirv_fragment_dimension(
+    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
+    uint16_t* out_dimension) {
+  int64_t dimension = 0;
+  if (value_id == LOOM_VALUE_ID_INVALID ||
+      !loom_value_facts_as_exact_i64(
+          loom_value_fact_table_lookup(fact_table, value_id), &dimension) ||
+      dimension <= 0 || dimension > UINT16_MAX) {
+    return false;
+  }
+  *out_dimension = (uint16_t)dimension;
+  return true;
+}
+
+static bool loom_spirv_fragment_role(
+    loom_vector_fragment_fact_t fragment,
+    loom_contract_operand_role_t* out_contract_role,
+    loom_spirv_cooperative_matrix_use_t* out_use) {
+  if (fragment.role_flags == LOOM_VECTOR_FRAGMENT_ROLE_FLAG_LHS) {
+    *out_contract_role = LOOM_CONTRACT_OPERAND_ROLE_LHS;
+    *out_use = LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_AKHR;
+    return true;
+  }
+  if (fragment.role_flags == LOOM_VECTOR_FRAGMENT_ROLE_FLAG_RHS) {
+    *out_contract_role = LOOM_CONTRACT_OPERAND_ROLE_RHS;
+    *out_use = LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_BKHR;
+    return true;
+  }
+  if (loom_vector_fragment_fact_is_accumulator_like(fragment)) {
+    *out_contract_role = LOOM_CONTRACT_OPERAND_ROLE_ACCUMULATOR;
+    *out_use = LOOM_SPIRV_COOPERATIVE_MATRIX_USE_MATRIX_ACCUMULATOR_KHR;
+    return true;
+  }
+  return false;
+}
+
+bool loom_spirv_matrix_fragment_type(const loom_module_t* module,
+                                     const loom_value_fact_table_t* fact_table,
+                                     loom_value_id_t source_value_id,
+                                     loom_vector_fragment_fact_t fragment,
+                                     loom_spirv_value_type_t* out_type) {
+  *out_type = (loom_spirv_value_type_t){
+      .value_class = LOOM_SPIRV_VALUE_CLASS_COOPERATIVE_MATRIX,
+      .cooperative_matrix = {.scope = loom_spirv_matrix_scope()},
+  };
+  if (!loom_spirv_fragment_dimension(
+          fact_table, loom_vector_fragment_fact_row_value(fragment),
+          &out_type->cooperative_matrix.rows) ||
+      !loom_spirv_fragment_dimension(
+          fact_table, loom_vector_fragment_fact_column_value(fragment),
+          &out_type->cooperative_matrix.columns)) {
+    return false;
+  }
+  if (fragment.shape_rank == 3) {
+    uint16_t block_count = 0;
+    if (!loom_spirv_fragment_dimension(
+            fact_table, loom_vector_fragment_fact_block_value(fragment),
+            &block_count) ||
+        block_count != 1) {
+      return false;
+    }
+  }
+
+  loom_contract_operand_role_t contract_role =
+      LOOM_CONTRACT_OPERAND_ROLE_UNKNOWN;
+  if (!loom_spirv_fragment_role(fragment, &contract_role,
+                                &out_type->cooperative_matrix.use)) {
+    return false;
+  }
+  loom_contract_operand_t contract_operand = {0};
+  loom_contract_rejection_bits_t rejection_bits = LOOM_CONTRACT_REJECTION_NONE;
+  if (!loom_contract_vector_operand_from_fragment(
+          module, source_value_id, fragment, contract_role, &contract_operand,
+          &rejection_bits) ||
+      !loom_spirv_matrix_component_type(contract_operand.numeric_type,
+                                        &out_type->scalar_type)) {
+    return false;
+  }
+  return true;
+}
+
 static bool loom_spirv_contract_numeric_is_signed_integer(
     loom_contract_numeric_type_t numeric_type) {
   switch (numeric_type) {
@@ -205,7 +296,7 @@ static void loom_spirv_matrix_diagnostic_make_context_params(
   params[6] = loom_param_string(matrix_constraint);
 }
 
-static iree_status_t loom_spirv_matrix_contract_query_reject(
+iree_status_t loom_spirv_matrix_contract_query_reject(
     const loom_target_contract_query_environment_t* environment,
     const loom_op_t* source_op, iree_string_view_t matrix_constraint,
     uint32_t source_rejection_bits, uint32_t target_rejection_bits,

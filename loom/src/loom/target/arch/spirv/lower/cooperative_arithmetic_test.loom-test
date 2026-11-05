@@ -1,0 +1,316 @@
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=COOPERATIVE_MATRIX_KHR
+
+// A source carrier wider than an ordinary SPIR-V vector stays one matrix.
+kernel.def @accumulator_8() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %source = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %in = buffer.view %source[%origin] : buffer -> view<32x16xf32>
+  %out = buffer.view %destination[%origin] : buffer -> view<16x16xf32>
+  %a = vector.fragment.load<init> %in[0, 0] shape [%tile, %tile] : view<32x16xf32> -> vector<8xf32>
+  %b = vector.fragment.load<init> %in[16, 0] shape [%tile, %tile] : view<32x16xf32> -> vector<8xf32>
+  %added = vector.addf %a, %b : vector<8xf32>
+  %product = vector.mulf<contract> %added, %a : vector<8xf32>
+  %difference = vector.subf %product, %b : vector<8xf32>
+  %quotient = vector.divf %difference, %a : vector<8xf32>
+  %negative = vector.negf %quotient : vector<8xf32>
+  vector.fragment.store<result> %negative, %out[0, 0] shape [%tile, %tile] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_count(1, 1, 1) @accumulator_8() asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %destination = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %19 = OpConstant.offset64 16
+  %20 = OpUConvert.offset64.u32 %19
+  %21 = OpConstant.offset64 0
+  %22 = OpPtrAccessChain.storage_buffer.f32.byte_offset %source, %21
+  %a = OpCooperativeMatrixLoadKHR.init.f32.16x16.subgroup.storage_buffer %22, %20, 0 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %24 = OpConstant.offset64 16
+  %25 = OpUConvert.offset64.u32 %24
+  %26 = OpConstant.offset64 1024
+  %27 = OpPtrAccessChain.storage_buffer.f32.byte_offset %source, %26
+  %b = OpCooperativeMatrixLoadKHR.init.f32.16x16.subgroup.storage_buffer %27, %25, 0 : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %added = OpFAdd.cooperative.f32.16x16.accumulator %a, %b : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %product = OpFMul.cooperative.f32.16x16.accumulator %added, %a {allow_contraction = 1} : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %difference = OpFSub.cooperative.f32.16x16.accumulator %product, %b : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %quotient = OpFDiv.cooperative.f32.16x16.accumulator %difference, %a : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %negative = OpFNegate.cooperative.f32.16x16.accumulator %quotient : reg<spirv.id : spirv.cooperative_matrix<16x16xf32, subgroup, matrix_accumulator>>
+  %34 = OpConstant.offset64 16
+  %35 = OpUConvert.offset64.u32 %34
+  %36 = OpConstant.offset64 0
+  %37 = OpPtrAccessChain.storage_buffer.f32.byte_offset %destination, %36
+  OpCooperativeMatrixStoreKHR.result.f32.16x16.subgroup.storage_buffer %37, %negative, %35, 0
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=FLOAT16,STORAGE_BUFFER_16BIT_ACCESS,COOPERATIVE_MATRIX_KHR
+
+// Arithmetic preserves A/B uses independently of the accumulator use.
+kernel.def @operand_1() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer, %a: f16, %b: f16, %c: f16) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %destination = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %out = buffer.view %destination[%origin] : buffer -> view<16x16xf16>
+  %a_vector = vector.splat %a : vector<1xf16>
+  %b_vector = vector.splat %b : vector<1xf16>
+  %c_vector = vector.splat %c : vector<1xf16>
+  %lhs = vector.fragment<lhs> %a_vector shape [%tile, %tile] : vector<1xf16>
+  %rhs = vector.fragment<rhs> %b_vector shape [%tile, %tile] : vector<1xf16>
+  %init = vector.fragment<init> %c_vector shape [%tile, %tile] : vector<1xf16>
+  %negative = vector.negf %lhs : vector<1xf16>
+  %sum = vector.addf %rhs, %rhs : vector<1xf16>
+  %result = vector.mma %negative, %sum, %init : vector<1xf16>, vector<1xf16>, vector<1xf16>
+  %product = vector.mulf %result, %init : vector<1xf16>
+  vector.fragment.store<result> %product, %out[0, 0] shape [%tile, %tile] : vector<1xf16>, view<16x16xf16>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, f16, f16, f16) -> ()}) workgroup_count(1, 1, 1) @operand_1(%a: reg<spirv.id : f16>, %b: reg<spirv.id : f16>, %c: reg<spirv.id : f16>) asm {
+  %destination = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %lhs = OpCompositeConstruct.cooperative.f16.16x16.lhs %a : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_a>>
+  %rhs = OpCompositeConstruct.cooperative.f16.16x16.rhs %b : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_b>>
+  %init = OpCompositeConstruct.cooperative.f16.16x16.accumulator %c : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_accumulator>>
+  %negative = OpFNegate.cooperative.f16.16x16.lhs %lhs : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_a>>
+  %sum = OpFAdd.cooperative.f16.16x16.rhs %rhs, %rhs : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_b>>
+  %result = OpCooperativeMatrixMulAddKHR.f16.16x16x16.f16.subgroup %negative, %sum, %init : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_accumulator>>
+  %product = OpFMul.cooperative.f16.16x16.accumulator %result, %init : reg<spirv.id : spirv.cooperative_matrix<16x16xf16, subgroup, matrix_accumulator>>
+  %31 = OpConstant.offset64 16
+  %32 = OpUConvert.offset64.u32 %31
+  %33 = OpConstant.offset64 0
+  %34 = OpPtrAccessChain.storage_buffer.f16.byte_offset %destination, %33
+  OpCooperativeMatrixStoreKHR.result.f16.16x16.subgroup.storage_buffer %34, %product, %32, 0
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=COOPERATIVE_MATRIX_KHR
+
+kernel.def @integer_4() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %source = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=i32, payload_elements=4, payload_registers=4>> : encoding<storage>
+  %in = buffer.view %source[%origin] : buffer -> view<32x16xi32, %storage>
+  %out = buffer.view %destination[%origin] : buffer -> view<16x16xi32, %storage>
+  %a = vector.fragment.load<init> %in[0, 0] shape [%tile, %tile] : view<32x16xi32, %storage> -> vector<4xi32>
+  %b = vector.fragment.load<init> %in[16, 0] shape [%tile, %tile] : view<32x16xi32, %storage> -> vector<4xi32>
+  %added = vector.addi %a, %b : vector<4xi32>
+  %product = vector.muli %added, %a : vector<4xi32>
+  %difference = vector.subi %product, %b : vector<4xi32>
+  %signed = vector.divsi %difference, %a : vector<4xi32>
+  %unsigned = vector.divui %signed, %b : vector<4xi32>
+  %negative = vector.negi %unsigned : vector<4xi32>
+  vector.fragment.store<result> %negative, %out[0, 0] shape [%tile, %tile] : vector<4xi32>, view<16x16xi32, %storage>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_count(1, 1, 1) @integer_4() asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %destination = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %21 = OpConstant.offset64 16
+  %22 = OpUConvert.offset64.u32 %21
+  %23 = OpConstant.offset64 0
+  %24 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %23
+  %a = OpCooperativeMatrixLoadKHR.init.i32.16x16.subgroup.storage_buffer %24, %22, 0 : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
+  %26 = OpConstant.offset64 16
+  %27 = OpUConvert.offset64.u32 %26
+  %28 = OpConstant.offset64 1024
+  %29 = OpPtrAccessChain.storage_buffer.i32.byte_offset %source, %28
+  %b = OpCooperativeMatrixLoadKHR.init.i32.16x16.subgroup.storage_buffer %29, %27, 0 : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
+  %added = OpIAdd.cooperative.i32.16x16.accumulator %a, %b : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
+  %product = OpIMul.cooperative.i32.16x16.accumulator %added, %a : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
+  %difference = OpISub.cooperative.i32.16x16.accumulator %product, %b : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
+  %signed = OpSDiv.cooperative.i32.16x16.accumulator %difference, %a : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
+  %unsigned = OpUDiv.cooperative.i32.16x16.accumulator %signed, %b : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
+  %negative = OpSNegate.cooperative.i32.16x16.accumulator %unsigned : reg<spirv.id : spirv.cooperative_matrix<16x16xs32, subgroup, matrix_accumulator>>
+  %37 = OpConstant.offset64 16
+  %38 = OpUConvert.offset64.u32 %37
+  %39 = OpConstant.offset64 0
+  %40 = OpPtrAccessChain.storage_buffer.i32.byte_offset %destination, %39
+  OpCooperativeMatrixStoreKHR.result.i32.16x16.subgroup.storage_buffer %40, %negative, %38, 0
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=COOPERATIVE_MATRIX_KHR
+
+kernel.def @unsigned_4() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %source = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=u32, payload_elements=4, payload_registers=4>> : encoding<storage>
+  %in = buffer.view %source[%origin] : buffer -> view<32x16xi32, %storage>
+  %out = buffer.view %destination[%origin] : buffer -> view<16x16xi32, %storage>
+  %a = vector.fragment.load<init> %in[0, 0] shape [%tile, %tile] : view<32x16xi32, %storage> -> vector<4xi32>
+  %b = vector.fragment.load<init> %in[16, 0] shape [%tile, %tile] : view<32x16xi32, %storage> -> vector<4xi32>
+  %added = vector.addi %a, %b : vector<4xi32>
+  %product = vector.muli %added, %a : vector<4xi32>
+  %difference = vector.subi %product, %b : vector<4xi32>
+  %signed = vector.divsi %difference, %a : vector<4xi32>
+  %unsigned = vector.divui %signed, %b : vector<4xi32>
+  %negative = vector.negi %unsigned : vector<4xi32>
+  vector.fragment.store<result> %negative, %out[0, 0] shape [%tile, %tile] : vector<4xi32>, view<16x16xi32, %storage>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, buffer) -> ()}) workgroup_count(1, 1, 1) @unsigned_4() asm {
+  %source = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %destination = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %21 = OpConstant.offset64 16
+  %22 = OpUConvert.offset64.u32 %21
+  %23 = OpConstant.offset64 0
+  %24 = OpPtrAccessChain.storage_buffer.u32.byte_offset %source, %23
+  %a = OpCooperativeMatrixLoadKHR.init.u32.16x16.subgroup.storage_buffer %24, %22, 0 : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %26 = OpConstant.offset64 16
+  %27 = OpUConvert.offset64.u32 %26
+  %28 = OpConstant.offset64 1024
+  %29 = OpPtrAccessChain.storage_buffer.u32.byte_offset %source, %28
+  %b = OpCooperativeMatrixLoadKHR.init.u32.16x16.subgroup.storage_buffer %29, %27, 0 : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %added = OpIAdd.cooperative.u32.16x16.accumulator %a, %b : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %product = OpIMul.cooperative.u32.16x16.accumulator %added, %a : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %difference = OpISub.cooperative.u32.16x16.accumulator %product, %b : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %signed = OpSDiv.cooperative.u32.16x16.accumulator %difference, %a : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %unsigned = OpUDiv.cooperative.u32.16x16.accumulator %signed, %b : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %negative = OpSNegate.cooperative.u32.16x16.accumulator %unsigned : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %37 = OpConstant.offset64 16
+  %38 = OpUConvert.offset64.u32 %37
+  %39 = OpConstant.offset64 0
+  %40 = OpPtrAccessChain.storage_buffer.u32.byte_offset %destination, %39
+  OpCooperativeMatrixStoreKHR.result.u32.16x16.subgroup.storage_buffer %40, %negative, %38, 0
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=INT8,COOPERATIVE_MATRIX_KHR
+
+kernel.def @integer_operands_8() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer, %a: i8, %b: i8, %c: i32) {
+  %base = index.constant 0 : offset
+  %m = index.constant 16 : index
+  %k = index.constant 32 : index
+  %unit = index.constant 1 : index
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %lhs_schema = encoding.define #encoding.operand<element_format=u8, payload_elements=32, payload_registers=8> : encoding<schema>
+  %rhs_schema = encoding.define #encoding.operand<element_format=i8, payload_elements=32, payload_registers=8> : encoding<schema>
+  %acc_schema = encoding.define #encoding.operand<element_format=u32, payload_elements=8, payload_registers=8> : encoding<schema>
+  %output_storage = encoding.define #encoding.storage<layout=#encoding.layout.dense, schema=#encoding.operand<element_format=u32, payload_elements=8, payload_registers=8>> : encoding<storage>
+  %view = buffer.view %aligned[%base] : buffer -> view<16x16xi32, %output_storage>
+  %a_values = vector.splat %a : vector<8xi8>
+  %b_values = vector.splat %b : vector<8xi8>
+  %c_values = vector.splat %c : vector<8xi32>
+  %lhs = vector.fragment<lhs> %a_values shape [blocks(%unit), %m, %k] using {schema = %lhs_schema : encoding<schema>} : vector<8xi8>
+  %rhs = vector.fragment<rhs> %b_values shape [blocks(%unit), %k, %m] using {schema = %rhs_schema : encoding<schema>} : vector<8xi8>
+  %init = vector.fragment<init> %c_values shape [blocks(%unit), %m, %m] using {schema = %acc_schema : encoding<schema>} : vector<8xi32>
+  %negative = vector.negi %lhs : vector<8xi8>
+  %sum = vector.addi %rhs, %rhs : vector<8xi8>
+  %result = vector.mma %negative, %sum, %init : vector<8xi8>, vector<8xi8>, vector<8xi32>
+  vector.fragment.store<result> %result, %view[0, 0] shape [%m, %m] : vector<8xi32>, view<16x16xi32, %output_storage>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, i8, i8, i32) -> ()}) workgroup_count(1, 1, 1) @integer_operands_8(%a: reg<spirv.id : i8>, %b: reg<spirv.id : i8>, %c: reg<spirv.id : i32>) asm {
+  %aligned = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %29 = OpBitcast.i8.u8 %a
+  %lhs = OpCompositeConstruct.cooperative.u8.16x32.lhs %29 : reg<spirv.id : spirv.cooperative_matrix<16x32xu8, subgroup, matrix_a>>
+  %rhs = OpCompositeConstruct.cooperative.i8.32x16.rhs %b : reg<spirv.id : spirv.cooperative_matrix<32x16xs8, subgroup, matrix_b>>
+  %32 = OpBitcast.i32.u32 %c
+  %init = OpCompositeConstruct.cooperative.u32.16x16.accumulator %32 : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %negative = OpSNegate.cooperative.u8.16x32.lhs %lhs : reg<spirv.id : spirv.cooperative_matrix<16x32xu8, subgroup, matrix_a>>
+  %sum = OpIAdd.cooperative.i8.32x16.rhs %rhs, %rhs : reg<spirv.id : spirv.cooperative_matrix<32x16xs8, subgroup, matrix_b>>
+  %result = OpCooperativeMatrixMulAddKHR.u8_s8.16x16x32.u32.subgroup %negative, %sum, %init : reg<spirv.id : spirv.cooperative_matrix<16x16xu32, subgroup, matrix_accumulator>>
+  %37 = OpConstant.offset64 16
+  %38 = OpUConvert.offset64.u32 %37
+  %39 = OpConstant.offset64 0
+  %40 = OpPtrAccessChain.storage_buffer.u32.byte_offset %aligned, %39
+  OpCooperativeMatrixStoreKHR.result.u32.16x16.subgroup.storage_buffer %40, %result, %38, 0
+  return
+}
+
+// ====
+
+// RUN: emit spirv-low target=spirv:vulkan1.3+bda+hal features=FLOAT16,STORAGE_BUFFER_16BIT_ACCESS,COOPERATIVE_MATRIX_KHR
+
+// Equal source carriers do not make A and B matrix uses interchangeable.
+kernel.def @incompatible_uses() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer, %a: f16, %b: f16, %c: f16) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %destination = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %out = buffer.view %destination[%origin] : buffer -> view<16x16xf16>
+  %a_vector = vector.splat %a : vector<1xf16>
+  %b_vector = vector.splat %b : vector<1xf16>
+  %c_vector = vector.splat %c : vector<1xf16>
+  %lhs = vector.fragment<lhs> %a_vector shape [%tile, %tile] : vector<1xf16>
+  %rhs = vector.fragment<rhs> %b_vector shape [%tile, %tile] : vector<1xf16>
+  %init = vector.fragment<init> %c_vector shape [%tile, %tile] : vector<1xf16>
+  // ERROR@+1: TARGET/039 "cooperative_matrix.arithmetic_types"
+  %negative = vector.addf %lhs, %rhs : vector<1xf16>
+  %sum = vector.addf %rhs, %rhs : vector<1xf16>
+  %result = vector.mma %negative, %sum, %init : vector<1xf16>, vector<1xf16>, vector<1xf16>
+  %product = vector.mulf %result, %init : vector<1xf16>
+  vector.fragment.store<result> %product, %out[0, 0] shape [%tile, %tile] : vector<1xf16>, view<16x16xf16>
+  kernel.return
+}
+
+// ====
+
+// RUN: emit spirv-low control-flow=structured-low target=spirv:vulkan1.3+bda+hal features=COOPERATIVE_MATRIX_KHR
+
+kernel.def @divergent_arithmetic() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %source = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %destination = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %in = buffer.view %source[%origin] : buffer -> view<16x16xf32>
+  %out = buffer.view %destination[%origin] : buffer -> view<16x16xf32>
+  %a = vector.fragment.load<init> %in[0, 0] shape [%tile, %tile] : view<16x16xf32> -> vector<4xf32>
+  %first = index.constant 0 : index
+  %thread = kernel.workitem.id<x> : index
+  %writer = index.cmp eq, %thread, %first : index
+  scf.if %writer {
+    // ERROR@+1: TARGET/039 "full_subgroup_participation"
+    %negative = vector.negf %a : vector<4xf32>
+    vector.fragment.store<result> %negative, %out[0, 0] shape [%tile, %tile] : vector<4xf32>, view<16x16xf32>
+  }
+  kernel.return
+}

@@ -21,6 +21,13 @@ package(
 _SPIRV_ROOT_VISIBILITY = ["//loom/src/loom/target/arch/spirv:__pkg__"]
 
 loom_generated_source(
+    name = "cooperative_arithmetic_rows_gen",
+    generator = "//loom/py/loom/gen/target/arch/spirv:cooperative_arithmetic",
+    output = "cooperative_arithmetic_rows.inl",
+    output_flag = "--tables",
+)
+
+loom_generated_source(
     name = "collective_rows_gen",
     generator = "//loom/py/loom/gen/target/arch/spirv:collective_rows",
     output = "collective_rows.inl",
@@ -38,6 +45,7 @@ loom_cc_library(
     name = "lower",
     srcs = [
         "collective_arithmetic.c",
+        "cooperative_arithmetic.c",
         "matrix.c",
         "registry.c",
         "workgroup.c",
@@ -46,6 +54,7 @@ loom_cc_library(
     ],
     hdrs = [
         "collective_arithmetic.h",
+        "cooperative_arithmetic.h",
         "lower.h",
         "matrix.h",
         "workgroup.h",
@@ -54,6 +63,7 @@ loom_cc_library(
     ],
     textual_hdrs = [
         ":collective_rows.inl",
+        ":cooperative_arithmetic_rows.inl",
         ":workgroup_reduce_rows.inl",
         "//loom/src/loom/target/arch/spirv/contracts:tables.inl",
     ],
@@ -142,6 +152,13 @@ loom_check_test_suite(
 loom_check_test_suite(
     name = "cooperative_initializer_tests",
     srcs = ["cooperative_initializer_test.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
+)
+
+loom_check_test_suite(
+    name = "cooperative_arithmetic_tests",
+    srcs = ["cooperative_arithmetic_test.loom-test"],
     tags = ["hostonly"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
 )

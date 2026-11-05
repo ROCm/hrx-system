@@ -39,6 +39,7 @@ from loom.target.arch.spirv.builtins import (
     BUILTIN_SCALAR_INDEX_QUERIES,
 )
 from loom.target.arch.spirv.cooperative_matrix import (
+    COOPERATIVE_MATRIX_ARITHMETIC,
     COOPERATIVE_MATRIX_TYPES,
     cooperative_matrix_memory_variants,
 )
@@ -858,12 +859,49 @@ def test_floating_packets_control_operation_contraction() -> None:
                     )
                 )
     expected_keys.update(("spirv.op_f_convert.bf16.f32", "spirv.op_f_convert.f32.bf16"))
+    cooperative_keys = {
+        matrix_type.arithmetic_key(operation)
+        for matrix_type in COOPERATIVE_MATRIX_TYPES
+        for operation in COOPERATIVE_MATRIX_ARITHMETIC
+        if operation.supports(matrix_type) and operation.controls_contraction
+    }
+    expected_keys.update(cooperative_keys)
     assert {key for key, row in rows.items() if row.no_contraction} == expected_keys
     arithmetic_keys = {f"spirv.op_{operation}.{prefix}{scalar}" for operation in ("fadd", "fsub", "fmul", "fdiv", "frem") for prefix in ("", "v2", "v3", "v4") for scalar in ("f16", "f32", "f64")}
     arithmetic_keys.update(f"spirv.op_vector_times_scalar.v{lanes}{element}" for lanes in (2, 3, 4) for element in ("f16", "f32", "f64"))
+    arithmetic_keys.update(cooperative_keys)
     assert {key for key, row in rows.items() if row.contraction_controlled} == arithmetic_keys
     generated_fmul = _generated_row(generate_tables(), "spirv.op_fmul.f32")
     assert (".flags = LOOM_SPIRV_PACKET_FLAG_NO_CONTRACTION | LOOM_SPIRV_PACKET_FLAG_CONTRACTION_CONTROLLED,") in generated_fmul
+
+
+def test_cooperative_arithmetic_preserves_native_component_shape_and_use() -> None:
+    rows = {row.descriptor_key: row for row in _packet_rows()}
+    descriptors = {row.key: row for row in SPIRV_LOGICAL_CORE_DESCRIPTOR_SET.descriptors}
+    floating = {"addf", "subf", "mulf", "divf", "negf"}
+    integer = {"addi", "subi", "muli", "divsi", "divui", "negi"}
+    assert {operation.source for operation in COOPERATIVE_MATRIX_ARITHMETIC} == floating | integer
+    for matrix_type in COOPERATIVE_MATRIX_TYPES:
+        expected = floating if matrix_type.scalar.suffix in ("f16", "f32") else integer
+        if matrix_type.scalar.suffix == "bf16":
+            expected = set()
+        for operation in COOPERATIVE_MATRIX_ARITHMETIC:
+            key = matrix_type.arithmetic_key(operation)
+            assert (key in rows) == (operation.source in expected)
+            if key not in rows:
+                continue
+            row = rows[key]
+            unary = operation.source in ("negf", "negi")
+            assert row.form == ("LOOM_SPIRV_PACKET_FORM_UNARY_TYPED" if unary else "LOOM_SPIRV_PACKET_FORM_BINARY_LHS_TYPE")
+            assert row.operand_types == (row.result_type,) * (1 if unary else 2)
+            assert f".scalar_type = {matrix_type.scalar.scalar_enum}" in row.result_type
+            assert f".rows = {matrix_type.rows}, .columns = {matrix_type.columns}" in row.result_type
+            assert f".use = {matrix_type.use_c_expression}" in row.result_type
+            assert descriptors[key].feature_mask_words == (matrix_type.feature_bits,)
+            controls_contraction = operation.source in floating and not unary
+            assert row.contraction_controlled == controls_contraction
+            assert row.no_contraction == controls_contraction
+            assert row.immediate_count == int(controls_contraction)
 
 
 def test_generation_emits_complete_ordinary_vector_float_comparisons() -> None:
