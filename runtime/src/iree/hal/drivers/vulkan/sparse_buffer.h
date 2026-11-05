@@ -55,6 +55,10 @@ iree_status_t iree_hal_vulkan_sparse_buffer_create_bound_sync(
     const iree_hal_memory_trace_t* allocation_trace,
     iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
 
+// Returns the captured payload extent of the complete physical block set.
+iree_hal_buffer_allocation_info_t iree_hal_vulkan_sparse_buffer_allocation_info(
+    iree_hal_buffer_t* buffer);
+
 // Returns true if |buffer| is a Vulkan sparse HAL buffer.
 bool iree_hal_vulkan_sparse_buffer_isa(iree_hal_buffer_t* buffer);
 

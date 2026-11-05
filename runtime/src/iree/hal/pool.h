@@ -23,6 +23,7 @@ extern "C" {
 
 typedef struct iree_async_notification_t iree_async_notification_t;
 typedef struct iree_async_frontier_tracker_t iree_async_frontier_tracker_t;
+typedef struct iree_hal_memory_credit_t iree_hal_memory_credit_t;
 
 //===----------------------------------------------------------------------===//
 // Types and Enums
@@ -935,6 +936,22 @@ typedef struct iree_hal_pool_vtable_t {
       const iree_hal_pool_t* pool,
       iree_hal_external_storage_class_t storage_class,
       iree_hal_pool_import_requirements_t* out_requirements);
+
+  // Native-only cold admission interfaces owned by slab_pool.h. NULL for
+  // caches and suballocators, whose logical reservations are not native cost.
+  iree_status_t(IREE_API_PTR* query_allocation_cost)(
+      iree_hal_pool_t* pool, iree_host_size_t request_count,
+      const iree_hal_pool_reservation_request_t* requests,
+      uint64_t* out_byte_length);
+
+  // Moves pre-admitted capacity into accepted native owners before submission.
+  iree_status_t(IREE_API_PTR* acquire_with_credit)(
+      iree_hal_pool_t* pool, iree_host_size_t request_count,
+      const iree_hal_pool_reservation_request_t* requests,
+      iree_hal_memory_credit_t* credit,
+      iree_hal_pool_reservation_t* out_reservations,
+      iree_hal_pool_acquire_info_t* out_infos,
+      iree_hal_pool_acquire_callback_t completion);
 } iree_hal_pool_vtable_t;
 IREE_HAL_ASSERT_VTABLE_LAYOUT(iree_hal_pool_vtable_t);
 

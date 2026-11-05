@@ -171,6 +171,61 @@ static void iree_hal_vulkan_slab_provider_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
+static iree_status_t iree_hal_vulkan_slab_provider_shape_request(
+    const iree_hal_vulkan_slab_provider_t* provider,
+    iree_hal_slab_request_t request, iree_hal_vulkan_buffer_spec_t* out_spec,
+    uint64_t* out_byte_length) {
+  if (IREE_UNLIKELY(request.min_length == 0)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "Vulkan slab allocations must be non-empty");
+  }
+
+  iree_device_size_t allocation_size = request.min_length;
+  const iree_device_size_t native_alignment =
+      provider->min_alignment ? provider->min_alignment : 1;
+  if (IREE_UNLIKELY(!iree_device_size_checked_align(
+          allocation_size, native_alignment, &allocation_size))) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "Vulkan slab allocation size overflow aligning %" PRIu64
+        " bytes to a %" PRIu64 "-byte allocation boundary",
+        (uint64_t)request.min_length, (uint64_t)native_alignment);
+  }
+
+  // Vulkan guarantees the native alignment captured by the provider. The
+  // direct allocator only needs to create an aligned interior view when this
+  // acquisition asks for a stronger address alignment.
+  const iree_device_size_t min_address_alignment =
+      request.min_alignment > native_alignment ? request.min_alignment : 0;
+
+  *out_spec = (iree_hal_vulkan_buffer_spec_t){
+      .type = provider->properties.memory_type,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .usage = provider->properties.supported_usage,
+      .queue_family_affinity = provider->queue_family_affinity_mask,
+      .min_alignment = min_address_alignment,
+      .flags = provider->mapping_granularity
+                   ? IREE_HAL_VULKAN_BUFFER_ALLOCATION_FLAG_MAPPING_SOURCE
+                   : IREE_HAL_VULKAN_BUFFER_ALLOCATION_FLAG_NONE,
+  };
+  *out_byte_length = allocation_size;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_vulkan_slab_provider_query_allocation_cost(
+    iree_hal_slab_provider_t* base_provider, iree_hal_slab_request_t request,
+    uint64_t* out_byte_length) {
+  const iree_hal_vulkan_slab_provider_t* provider =
+      iree_hal_vulkan_slab_provider_cast(base_provider);
+  iree_hal_vulkan_buffer_spec_t spec;
+  uint64_t allocation_size = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_vulkan_slab_provider_shape_request(
+      provider, request, &spec, &allocation_size));
+  return iree_hal_vulkan_allocator_query_allocation_cost(
+      provider->allocator, provider->memory_type_index, &spec, allocation_size,
+      out_byte_length);
+}
+
 static iree_status_t iree_hal_vulkan_slab_provider_acquire_slab(
     iree_hal_slab_provider_t* base_provider, iree_device_size_t min_length,
     iree_device_size_t alignment, iree_hal_slab_t* out_slab,
@@ -182,41 +237,12 @@ static iree_status_t iree_hal_vulkan_slab_provider_acquire_slab(
   IREE_TRACE_ZONE_BEGIN(z0);
   memset(out_slab, 0, sizeof(*out_slab));
 
-  if (IREE_UNLIKELY(min_length == 0)) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                             "Vulkan slab allocations must be non-empty"));
-  }
-
-  iree_device_size_t allocation_size = min_length;
-  const iree_device_size_t native_alignment =
-      provider->min_alignment ? provider->min_alignment : 1;
-  if (IREE_UNLIKELY(!iree_device_size_checked_align(
-          allocation_size, native_alignment, &allocation_size))) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(
-                IREE_STATUS_OUT_OF_RANGE,
-                "Vulkan slab allocation size overflow aligning %" PRIu64
-                " bytes to a %" PRIu64 "-byte allocation boundary",
-                (uint64_t)min_length, (uint64_t)native_alignment));
-  }
-
-  // Vulkan guarantees the native alignment captured by the provider. The
-  // direct allocator only needs to create an aligned interior view when this
-  // acquisition asks for a stronger address alignment.
-  const iree_device_size_t min_address_alignment =
-      alignment > native_alignment ? alignment : 0;
-
-  const iree_hal_vulkan_buffer_spec_t buffer_spec = {
-      .type = provider->properties.memory_type,
-      .access = IREE_HAL_MEMORY_ACCESS_ALL,
-      .usage = provider->properties.supported_usage,
-      .queue_family_affinity = provider->queue_family_affinity_mask,
-      .min_alignment = min_address_alignment,
-      .flags = provider->mapping_granularity
-                   ? IREE_HAL_VULKAN_BUFFER_ALLOCATION_FLAG_MAPPING_SOURCE
-                   : IREE_HAL_VULKAN_BUFFER_ALLOCATION_FLAG_NONE,
-  };
+  iree_hal_vulkan_buffer_spec_t buffer_spec;
+  uint64_t allocation_size = 0;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_vulkan_slab_provider_shape_request(
+              provider, (iree_hal_slab_request_t){min_length, alignment},
+              &buffer_spec, &allocation_size));
   iree_hal_buffer_t* buffer = NULL;
   iree_status_t status =
       iree_hal_vulkan_allocator_allocate_direct_buffer_from_type(
@@ -248,7 +274,8 @@ static iree_status_t iree_hal_vulkan_slab_provider_acquire_slab(
                            IREE_HAL_MEMORY_TYPE_HOST_VISIBLE)
             ? IREE_HAL_HOST_MEMORY_PROPERTY_READ_UNCACHED
             : IREE_HAL_HOST_MEMORY_PROPERTY_NONE;
-    out_slab->allocation_alignment = iree_max(alignment, native_alignment);
+    out_slab->allocation_alignment =
+        iree_max(alignment, provider->min_alignment);
     iree_atomic_fetch_add(&provider->total_acquired, 1,
                           iree_memory_order_relaxed);
   } else {
@@ -529,6 +556,8 @@ void iree_hal_vulkan_slab_provider_execute(
 static const iree_hal_slab_provider_vtable_t
     iree_hal_vulkan_slab_provider_vtable = {
         .destroy = iree_hal_vulkan_slab_provider_destroy,
+        .query_allocation_cost =
+            iree_hal_vulkan_slab_provider_query_allocation_cost,
         .acquire_slabs = iree_hal_vulkan_slab_provider_acquire_slabs,
         .release_slabs = iree_hal_vulkan_slab_provider_release_slabs,
         .wrap_buffer = iree_hal_vulkan_slab_provider_wrap_buffer,

@@ -219,7 +219,7 @@ TEST_F(AllocationTest, DeferredBackingDoesNotBlockIndependentWarmAllocation) {
   auto* cold_buffer = Capture(deferred_, &cold);
   Preparation cold_prepared, warm_prepared;
   EXPECT_TRUE(cold_prepared.Begin(cold));
-  ASSERT_EQ(deferred_->pending.count, 1u);
+  ASSERT_EQ(deferred_->PendingRequestCount(), 1u);
   auto* warm_buffer = Capture(pool_, &warm);
   EXPECT_FALSE(warm_prepared.Begin(warm));
   warm_prepared.Await();
@@ -275,7 +275,7 @@ TEST_P(AllocationBatchTest, AcceptanceCommitsAndRetirementDecommitsWholeBatch) {
   deferred_->defer = true;
   Preparation prepared;
   EXPECT_TRUE(prepared.Begin(operation));
-  EXPECT_EQ(deferred_->pending.count, count);
+  EXPECT_EQ(deferred_->PendingRequestCount(), count);
   deferred_->CompleteOne();
   prepared.Await();
   IREE_ASSERT_OK(prepared.status);

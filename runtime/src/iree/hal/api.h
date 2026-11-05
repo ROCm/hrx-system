@@ -27,6 +27,7 @@
 #include "iree/hal/executable.h"         // IWYU pragma: export
 #include "iree/hal/fence.h"              // IWYU pragma: export
 #include "iree/hal/file.h"               // IWYU pragma: export
+#include "iree/hal/memory_budget.h"      // IWYU pragma: export
 #include "iree/hal/memory_scope.h"       // IWYU pragma: export
 #include "iree/hal/pool.h"               // IWYU pragma: export
 #include "iree/hal/pool_wait.h"          // IWYU pragma: export

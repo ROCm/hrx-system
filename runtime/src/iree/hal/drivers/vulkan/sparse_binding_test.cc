@@ -8,10 +8,12 @@
 #include <cstring>
 #include <vector>
 
+#include "iree/base/internal/math.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/drivers/vulkan/buffer.h"
 #include "iree/hal/drivers/vulkan/queue.h"
 #include "iree/hal/drivers/vulkan/queue_test_util.h"
+#include "iree/hal/drivers/vulkan/sparse_buffer.h"
 
 namespace iree::hal::cts {
 namespace {
@@ -106,6 +108,66 @@ class VulkanSparseBindingTest : public CtsTestBase<> {
   // Cold address-only geometry, queried without creating native resources.
   iree_hal_virtual_buffer_capabilities_t capabilities_ = {};
 };
+
+TEST_P(VulkanSparseBindingTest, BoundBlocksReportCompleteNativePayload) {
+  // Exercise the multi-allocation owner at a small size instead of requesting
+  // more than the driver's (potentially multi-gigabyte) allocation limit.
+  const VkDeviceSize length = 3 * capabilities_.mapping_granularity;
+  const VkBufferCreateInfo create_info = {
+      .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+      .flags = VK_BUFFER_CREATE_SPARSE_BINDING_BIT,
+      .size = length,
+      .usage =
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+      .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+  };
+  VkBuffer handle = VK_NULL_HANDLE;
+  IREE_ASSERT_OK(iree_vkCreateBuffer(IREE_VULKAN_DEVICE(&sparse_queue_->syms),
+                                     sparse_queue_->logical_device,
+                                     &create_info, nullptr, &handle));
+  VkMemoryRequirements requirements = {};
+  iree_vkGetBufferMemoryRequirements(IREE_VULKAN_DEVICE(&sparse_queue_->syms),
+                                     sparse_queue_->logical_device, handle,
+                                     &requirements);
+  const uint32_t memory_type =
+      iree_math_count_trailing_zeros_u32(requirements.memoryTypeBits);
+  const iree_hal_buffer_placement_t placement = {
+      .device = device_,
+      .queue_family_affinity =
+          iree_hal_make_queue_family_affinity(iree_hal_queue_family_ordinal(
+              iree_hal_queue_family(transfer_queue_))),
+  };
+  const iree_hal_memory_trace_t trace = {};
+  Ref<iree_hal_buffer_t> buffer;
+  iree_status_t status = iree_hal_vulkan_sparse_buffer_create_bound_sync(
+      &sparse_queue_->syms, sparse_queue_->logical_device, sparse_queue_,
+      placement, IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL, IREE_HAL_MEMORY_ACCESS_ALL,
+      IREE_HAL_BUFFER_USAGE_TRANSFER, length, length, handle, length, 0, 0,
+      requirements, memory_type, requirements.alignment, 0, &trace,
+      iree_allocator_system(), buffer.out());
+  if (!iree_status_is_ok(status)) {
+    iree_vkDestroyBuffer(IREE_VULKAN_DEVICE(&sparse_queue_->syms),
+                         sparse_queue_->logical_device, handle, nullptr);
+  }
+  IREE_ASSERT_OK(status);
+  const auto allocation = iree_hal_vulkan_buffer_allocation_info(buffer);
+  EXPECT_EQ(requirements.size, allocation.byte_length);
+  EXPECT_EQ(0u, allocation.byte_offset);
+  EXPECT_EQ(requirements.alignment, allocation.granularity);
+  const uint32_t pattern = 0x1234CAFEu;
+  SemaphoreList filled(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_queue_fill(transfer_queue_, {}, filled, buffer, 0,
+                                     length, &pattern, sizeof(pattern), nullptr,
+                                     IREE_HAL_FILL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_list_wait(filled, iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE));
+  const auto bytes =
+      ReadBufferBytes(buffer, length - sizeof(pattern), sizeof(pattern));
+  ASSERT_EQ(sizeof(pattern), bytes.size());
+  uint32_t actual = 0;
+  memcpy(&actual, bytes.data(), sizeof(actual));
+  EXPECT_EQ(pattern, actual);
+}
 
 TEST_P(VulkanSparseBindingTest, DeferredMultiBufferBindingsAliasAndReplace) {
   iree_device_size_t granularity = capabilities_.mapping_granularity;

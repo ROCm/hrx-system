@@ -691,6 +691,23 @@ static void iree_hal_amdgpu_slab_provider_destroy(
   IREE_TRACE_ZONE_END(z0);
 }
 
+static iree_status_t iree_hal_amdgpu_slab_provider_query_allocation_cost(
+    iree_hal_slab_provider_t* base_provider, iree_hal_slab_request_t request,
+    uint64_t* out_byte_length) {
+  const iree_hal_amdgpu_slab_provider_t* provider =
+      iree_hal_amdgpu_slab_provider_cast(base_provider);
+  if (!request.min_length) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "AMDGPU slab allocations must be non-empty");
+  }
+  if (!iree_device_size_checked_align(
+          request.min_length, provider->allocation_granule, out_byte_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMDGPU native allocation extent overflows");
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amdgpu_slab_provider_acquire_slab(
     iree_hal_slab_provider_t* base_provider, iree_device_size_t min_length,
     iree_device_size_t alignment, iree_hal_slab_t* out_slab,
@@ -703,21 +720,11 @@ static iree_status_t iree_hal_amdgpu_slab_provider_acquire_slab(
   IREE_TRACE_ZONE_BEGIN(z0);
   memset(out_slab, 0, sizeof(*out_slab));
 
-  if (IREE_UNLIKELY(min_length == 0)) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                             "AMDGPU slab allocations must be non-empty"));
-  }
-  iree_device_size_t allocation_size = 0;
-  if (IREE_UNLIKELY(!iree_device_size_checked_align(
-          min_length, provider->allocation_granule, &allocation_size))) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_make_status(
-                IREE_STATUS_OUT_OF_RANGE,
-                "AMDGPU slab allocation size overflow aligning %" PRIu64
-                " bytes to a %" PRIu64 "-byte HSA allocation granule",
-                (uint64_t)min_length, (uint64_t)provider->allocation_granule));
-  }
+  uint64_t allocation_size = 0;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_amdgpu_slab_provider_query_allocation_cost(
+              base_provider, (iree_hal_slab_request_t){min_length, alignment},
+              &allocation_size));
 
   iree_hal_amdgpu_slab_handle_t* slab_handle = NULL;
   iree_status_t status =
@@ -1232,6 +1239,8 @@ static void iree_hal_amdgpu_slab_provider_release_slabs(
 static const iree_hal_slab_provider_vtable_t
     iree_hal_amdgpu_slab_provider_vtable = {
         .destroy = iree_hal_amdgpu_slab_provider_destroy,
+        .query_allocation_cost =
+            iree_hal_amdgpu_slab_provider_query_allocation_cost,
         .acquire_slabs = iree_hal_amdgpu_slab_provider_acquire_slabs,
         .release_slabs = iree_hal_amdgpu_slab_provider_release_slabs,
         .wrap_buffer = iree_hal_amdgpu_slab_provider_wrap_buffer,

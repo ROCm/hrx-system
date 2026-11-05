@@ -97,6 +97,13 @@ iree_async_notification_t* iree_hal_vulkan_allocator_memory_notification(
 iree_hal_vulkan_allocation_queue_t* iree_hal_vulkan_allocator_allocation_queue(
     iree_hal_allocator_t* base_allocator);
 
+// Queries exact native payload cost using the same construction preflight as
+// allocation. Creates and destroys an unbound VkBuffer; acquires no memory.
+iree_status_t iree_hal_vulkan_allocator_query_allocation_cost(
+    iree_hal_vulkan_allocator_t* allocator, uint32_t memory_type_index,
+    const iree_hal_vulkan_buffer_spec_t* spec,
+    iree_device_size_t allocation_size, uint64_t* out_byte_length);
+
 // Allocates one whole Vulkan buffer from a required memory type index.
 //
 // This is the primitive used by Vulkan slab providers and private staging. It

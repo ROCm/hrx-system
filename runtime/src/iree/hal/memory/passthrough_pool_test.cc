@@ -333,9 +333,18 @@ static void CompleteNativeRelease(
       iree_hal_test_opaque_slab_provider_release_slab);
 }
 
+static iree_status_t iree_hal_test_opaque_slab_provider_query_allocation_cost(
+    iree_hal_slab_provider_t* provider, iree_hal_slab_request_t request,
+    uint64_t* out_byte_length) {
+  *out_byte_length = request.min_length;
+  return iree_ok_status();
+}
+
 const iree_hal_slab_provider_vtable_t
     iree_hal_test_opaque_slab_provider_vtable = {
         .destroy = iree_hal_test_opaque_slab_provider_destroy,
+        .query_allocation_cost =
+            iree_hal_test_opaque_slab_provider_query_allocation_cost,
         .acquire_slabs = iree_hal_test_opaque_slab_provider_acquire_slabs,
         .release_slabs = iree_hal_test_opaque_slab_provider_release_slabs,
         .wrap_buffer = iree_hal_test_opaque_slab_provider_wrap_buffer,
@@ -551,6 +560,125 @@ class NativePassthroughPoolTest : public ::testing::Test {
   // Owned public source pool reference.
   iree_hal_pool_t* pool_ = nullptr;
 };
+
+TEST_F(NativePassthroughPoolTest, NativeCreditReturnsDespiteBlockedPeer) {
+  struct BudgetDisposal {
+    // Borrowed source outliving the capacity owner.
+    iree_hal_pool_t* pool;
+    // Source ledger visible when the last native credit releases the account.
+    iree_hal_pool_stats_t statistics = {};
+    // Whether the account allocator has observed its final release.
+    bool released = false;
+  } disposal{pool_};
+  const iree_allocator_t budget_allocator = {
+      &disposal,
+      [](void* user_data, iree_allocator_command_t command,
+         const void* parameters, void** pointer) -> iree_status_t {
+        auto* disposal = static_cast<BudgetDisposal*>(user_data);
+        if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+          iree_hal_pool_query_stats(disposal->pool, &disposal->statistics);
+          disposal->released = true;
+        }
+        const auto allocator = iree_allocator_system();
+        return allocator.ctl(allocator.self, command, parameters, pointer);
+      }};
+  iree_hal_memory_budget_t* budget = nullptr;
+  IREE_ASSERT_OK(iree_hal_memory_budget_create(4096, notification_,
+                                               budget_allocator, &budget));
+  const auto request = MakeReservationRequest(2048, 16);
+  iree_hal_pool_reservation_t reservations[3] = {};
+  iree_hal_pool_acquire_info_t infos[3] = {};
+  int completed = 0;
+  const iree_hal_pool_acquire_callback_t completion = {
+      [](void* user_data, iree_status_t status,
+         iree_hal_pool_acquire_result_t result) {
+        IREE_EXPECT_OK(status);
+        EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+        ++*static_cast<int*>(user_data);
+      },
+      &completed};
+  iree_hal_memory_credit_t credit = {};
+  ASSERT_TRUE(iree_hal_memory_budget_try_reserve(budget, 2048, &credit));
+  native_->deferred.acquire = true;
+  IREE_ASSERT_OK(iree_hal_slab_pool_acquire_with_credit(
+      pool_, 1, &request, &credit, &reservations[0], &infos[0], completion));
+  EXPECT_EQ(credit.budget, nullptr);
+  EXPECT_EQ(completed, 0);
+  native_->deferred.acquire = false;
+  ASSERT_TRUE(iree_hal_memory_budget_try_reserve(budget, 2048, &credit));
+  IREE_ASSERT_OK(iree_hal_slab_pool_acquire_with_credit(
+      pool_, 1, &request, &credit, &reservations[1], &infos[1], completion));
+  ASSERT_EQ(completed, 1);
+  EXPECT_FALSE(iree_hal_memory_budget_try_reserve(budget, 1, &credit));
+
+  // Output and native return from B remain independent of pending A.
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(MaterializeOneReservation(
+      pool_, &reservations[1], IREE_HAL_POOL_MATERIALIZE_FLAG_NONE, &buffer));
+  const uint8_t expected = 0xA7;
+  IREE_ASSERT_OK(iree_hal_buffer_map_fill(buffer, 0, 2048, &expected, 1));
+  uint8_t actual = 0;
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(buffer, 2047, &actual, 1));
+  EXPECT_EQ(actual, expected);
+  iree_hal_buffer_release(buffer);
+  native_->deferred.release = true;
+  ReleaseOneReservation(pool_, &reservations[1], nullptr);
+  EXPECT_EQ(iree_hal_memory_budget_charged(budget), 4096u);
+  EXPECT_FALSE(iree_hal_memory_budget_try_reserve(budget, 1, &credit));
+  CompleteNativeRelease(native_);
+  EXPECT_EQ(iree_hal_memory_budget_charged(budget), 2048u);
+  ASSERT_NE(native_->deferred.acquisition, nullptr);
+  ASSERT_TRUE(iree_hal_memory_budget_try_reserve(budget, 2048, &credit));
+  IREE_ASSERT_OK(iree_hal_slab_pool_acquire_with_credit(
+      pool_, 1, &request, &credit, &reservations[2], &infos[2], completion));
+  CompleteNativeAcquire(native_);
+  EXPECT_EQ(completed, 3);
+  native_->deferred.release = false;
+  ReleaseOneReservation(pool_, &reservations[0], nullptr);
+  EXPECT_EQ(iree_hal_memory_budget_charged(budget), 2048u);
+  // The last native credit owns the account through terminal publication. Its
+  // allocator can observe the source before the native callback returns.
+  iree_hal_memory_budget_release(budget);
+  EXPECT_FALSE(disposal.released);
+  ReleaseOneReservation(pool_, &reservations[2], nullptr);
+  EXPECT_TRUE(disposal.released);
+  EXPECT_EQ(disposal.statistics.bytes_committed, 0u);
+  EXPECT_EQ(disposal.statistics.slab_count, 0u);
+}
+
+TEST_F(NativePassthroughPoolTest,
+       CreditSubmissionFailureLeavesCallerOwnership) {
+  iree_hal_memory_budget_t* budget = nullptr;
+  IREE_ASSERT_OK(iree_hal_memory_budget_create(
+      4096, notification_, iree_allocator_system(), &budget));
+  const auto request = MakeReservationRequest(2048, 16);
+  iree_hal_pool_reservation_t reservation = {};
+  iree_hal_pool_acquire_info_t info = {};
+  iree_hal_memory_credit_t credit = {};
+  ASSERT_TRUE(iree_hal_memory_budget_try_reserve(budget, 2047, &credit));
+  const iree_hal_pool_acquire_callback_t unexpected = {
+      [](void*, iree_status_t status, iree_hal_pool_acquire_result_t) {
+        IREE_EXPECT_OK(status);
+        ADD_FAILURE() << "submission failure must not complete";
+      },
+      nullptr};
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_slab_pool_acquire_with_credit(pool_, 1, &request, &credit,
+                                             &reservation, &info, unexpected));
+  EXPECT_EQ(credit.byte_length, 2047u);
+  iree_hal_memory_credit_return(&credit);
+  ASSERT_TRUE(iree_hal_memory_budget_try_reserve(budget, 2048, &credit));
+  allocations_.fail_at = allocations_.allocation_count + 1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_slab_pool_acquire_with_credit(pool_, 1, &request, &credit,
+                                             &reservation, &info, unexpected));
+  EXPECT_EQ(credit.byte_length, 2048u);
+  iree_hal_memory_credit_return(&credit);
+  EXPECT_EQ(iree_hal_memory_budget_charged(budget), 0u);
+  iree_hal_memory_budget_release(budget);
+}
 
 TEST_F(NativePassthroughPoolTest, NativeExtentLimitBoundsCompleteBacking) {
   for (const bool guarded : {false, true}) {

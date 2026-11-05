@@ -221,6 +221,55 @@ TEST_P(ResidencyPressureTest,
   ASSERT_NO_FATAL_FAILURE(Check(loom_serve_virtual_buffer_handle(incoming)));
 }
 
+TEST_P(ResidencyPressureTest, NativePublicationDoesNotDoubleCountTrimPressure) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking(2 * kSlabBytes));
+  IREE_ASSERT_OK(Compile(0, "direct_incomplete"));
+  const auto root = Root(0, 0, kSlabBytes);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  const auto run = [&] {
+    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
+    ASSERT_NO_FATAL_FAILURE(ReadOutputOn(execution_, 0));
+    for (size_t i = 0; i < output_.size(); ++i) {
+      EXPECT_EQ(output_[i], 30 + i);
+    }
+    loom_serve_residency_release(residencies_[0]);
+  };
+  ASSERT_NO_FATAL_FAILURE(run());
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
+      pool_, loom_serve_pool_state_geometry(storage_owner_), kSlabBytes, 256,
+      &state_statistics_, &state_));
+  deferred_backing_->defer = true;
+  const loom_serve_memory_range_t range = {state_, 0, kSlabBytes};
+  loom_serve_memory_admission_t admission;
+  loom_serve_memory_operation_t* operation = nullptr;
+  IREE_ASSERT_OK(loom_serve_memory_pool_commit_async(
+      pool_, 1, &range, nullptr, 0, &admission, &operation));
+  deferred_backing_->WaitForAcquisition();
+  loom_serve_memory_pool_set_observer(
+      pool_, loom_serve_test_weight_activation_wake_t::Notify, &publication_);
+  // Native allocation completes after collection. Its physical commitment and
+  // still-pending logical mapping represent the same bytes, not two demands.
+  deferred_backing_->statistics_observer = [this] {
+    deferred_backing_->statistics_observer = {};
+    observed_ = true;
+    deferred_backing_->CompleteOne();
+    publication_.Await();
+  };
+  IREE_EXPECT_OK(
+      loom_serve_residency_cache_trim(ResidencyCache(), 2 * kSlabBytes));
+  EXPECT_TRUE(observed_);
+  EXPECT_EQ(loom_serve_weights_activity(plans_[0]).deactivations, 0u);
+  loom_serve_memory_operation_await(operation);
+  IREE_EXPECT_OK(loom_serve_memory_operation_query_status(operation));
+  loom_serve_memory_operation_free(operation);
+  deferred_backing_->ResumeAcquisitions();
+  ASSERT_NO_FATAL_FAILURE(run());
+  EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations, 1u);
+  ASSERT_NO_FATAL_FAILURE(Fill(loom_serve_virtual_buffer_handle(state_)));
+  ASSERT_NO_FATAL_FAILURE(Check(loom_serve_virtual_buffer_handle(state_)));
+}
+
 TEST_P(ResidencyPressureTest, FailedPublicationDoesNotInventHistoryPressure) {
   ASSERT_NO_FATAL_FAILURE(UseDeferredBacking(2 * kSlabBytes));
   ASSERT_NO_FATAL_FAILURE(RegisterHistory());

@@ -175,6 +175,13 @@ typedef struct iree_hal_slab_request_t {
   iree_device_size_t min_alignment;
 } iree_hal_slab_request_t;
 
+// Returns the native payload extent for validated acquisition geometry without
+// acquiring physical backing. The result includes all native padding and is
+// stable for this provider's immutable construction contract.
+iree_status_t iree_hal_slab_provider_query_allocation_cost(
+    iree_hal_slab_provider_t* provider, iree_hal_slab_request_t request,
+    uint64_t* out_byte_length);
+
 typedef enum iree_hal_slab_operation_type_e {
   IREE_HAL_SLAB_OPERATION_ACQUIRE = 0,
   IREE_HAL_SLAB_OPERATION_RELEASE,
@@ -480,6 +487,12 @@ void iree_hal_slab_provider_release_slabs_inline(
 struct iree_hal_slab_provider_vtable_t {
   // Destroys a concrete slab provider implementation.
   void (*destroy)(iree_hal_slab_provider_t* provider);
+
+  // Supplies native cost before ownership is accepted. Import-only providers
+  // may omit this; credited owned allocation then fails before native work.
+  iree_status_t (*query_allocation_cost)(iree_hal_slab_provider_t* provider,
+                                         iree_hal_slab_request_t request,
+                                         uint64_t* out_byte_length);
 
   // Accepts a typed native acquisition using caller-owned stable storage.
   // The implementation supplies exactly one completion, including on failure.

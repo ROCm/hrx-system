@@ -59,6 +59,9 @@ typedef struct iree_hal_vulkan_sparse_buffer_t {
   // Inline native facts shared with dense and queue-ordered Vulkan storage.
   iree_hal_vulkan_buffer_native_t native;
 
+  // Complete native payload and logical origin across the physical blocks.
+  iree_hal_buffer_allocation_info_t allocation_info;
+
   // Count of allocated physical VkDeviceMemory blocks.
   iree_host_size_t physical_block_count;
 
@@ -72,6 +75,11 @@ static iree_hal_vulkan_sparse_buffer_t* iree_hal_vulkan_sparse_buffer_cast(
     iree_hal_buffer_t* base_value) {
   IREE_HAL_ASSERT_TYPE(base_value, &iree_hal_vulkan_sparse_buffer_vtable);
   return (iree_hal_vulkan_sparse_buffer_t*)base_value;
+}
+
+iree_hal_buffer_allocation_info_t iree_hal_vulkan_sparse_buffer_allocation_info(
+    iree_hal_buffer_t* base_buffer) {
+  return iree_hal_vulkan_sparse_buffer_cast(base_buffer)->allocation_info;
 }
 
 static iree_status_t iree_hal_vulkan_sparse_buffer_calculate_block_size(
@@ -303,6 +311,11 @@ iree_status_t iree_hal_vulkan_sparse_buffer_create_bound_sync(
     buffer->host_allocator = host_allocator;
     buffer->syms = *syms;
     buffer->logical_device = logical_device;
+    buffer->allocation_info = (iree_hal_buffer_allocation_info_t){
+        .byte_length = memory_requirements.size,
+        .byte_offset = handle_offset,
+        .granularity = memory_requirements.alignment,
+    };
     iree_hal_vulkan_buffer_initialize_bindings(
         &buffer->base, VK_NULL_HANDLE, handle, handle_length, device_address,
         handle_offset, &buffer->native);

@@ -105,6 +105,15 @@ class MappingQueue : public iree_hal_queue_t {
               iree_hal_queue_release(self->queue_);
               self->queue_ = nullptr;
             },
+        .barrier =
+            [](iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
+               iree_hal_semaphore_list_t signals,
+               const iree_hal_queue_barriers_t* barriers,
+               iree_hal_queue_barrier_flags_t flags) {
+              return iree_hal_queue_barrier(
+                  static_cast<MappingQueue*>(base)->queue_, waits, signals,
+                  barriers, flags);
+            },
         .alloca =
             [](iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
                iree_hal_semaphore_list_t signals, iree_hal_pool_t* pool,
@@ -129,36 +138,43 @@ class MappingQueue : public iree_hal_queue_t {
                const iree_hal_memory_mapping_t* mappings,
                iree_hal_queue_map_flags_t flags) {
               auto* self = static_cast<MappingQueue*>(base);
-              if (self->observe_mappings) {
-                self->mapping_waits.emplace_back();
+              const bool observe = self->observe_mappings.load();
+              Observation observation;
+              if (observe) {
                 for (iree_host_size_t i = 0; i < waits.count; ++i) {
-                  self->mapping_waits.back().push_back(waits.semaphores[i]);
+                  observation.waits.push_back(waits.semaphores[i]);
                   EXPECT_EQ(waits.payload_values[i], 1u);
                 }
                 EXPECT_EQ(signals.count, 1u);
-                self->mapping_signals.push_back(signals.semaphores[0]);
+                observation.signal = signals.semaphores[0];
               }
-              if (self->fail_next_map) {
-                self->fail_next_map = false;
-                return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
-              }
-              if (self->gate_next_mapping) {
+              iree_status_t status = iree_ok_status();
+              if (self->fail_next_map.exchange(false)) {
+                status = iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+              } else if (auto* gate =
+                             self->gate_next_mapping.exchange(nullptr)) {
                 std::vector<iree_hal_semaphore_t*> semaphores;
                 std::vector<uint64_t> values;
                 for (iree_host_size_t i = 0; i < waits.count; ++i) {
                   semaphores.push_back(waits.semaphores[i]);
                   values.push_back(waits.payload_values[i]);
                 }
-                semaphores.push_back(self->gate_next_mapping);
+                semaphores.push_back(gate);
                 values.push_back(1);
-                self->gate_next_mapping = nullptr;
-                return iree_hal_queue_map(
+                status = iree_hal_queue_map(
                     self->queue_,
                     {semaphores.size(), semaphores.data(), values.data()},
                     signals, count, mappings, flags);
+              } else {
+                status = iree_hal_queue_map(self->queue_, waits, signals, count,
+                                            mappings, flags);
               }
-              return iree_hal_queue_map(self->queue_, waits, signals, count,
-                                        mappings, flags);
+              if (observe) {
+                std::lock_guard<std::mutex> lock(self->mapping_mutex_);
+                self->mappings_.push_back(std::move(observation));
+                self->mapping_condition_.notify_all();
+              }
+              return status;
             },
     };
     iree_hal_queue_initialize(iree_hal_queue_family(queue), &params, &vtable,
@@ -171,18 +187,38 @@ class MappingQueue : public iree_hal_queue_t {
     }
   }
 
+  struct Observation {
+    // Borrowed wait identities, retained by the observed operations.
+    std::vector<iree_hal_semaphore_t*> waits;
+    // Borrowed mapping completion, retained by the observed operation.
+    iree_hal_semaphore_t* signal = nullptr;
+  };
+
+  std::vector<Observation> WaitForMappings(size_t count) {
+    std::unique_lock<std::mutex> lock(mapping_mutex_);
+    mapping_condition_.wait(lock, [&] { return mappings_.size() >= count; });
+    return mappings_;
+  }
+
+  void ClearMappings() {
+    std::lock_guard<std::mutex> lock(mapping_mutex_);
+    mappings_.clear();
+  }
+
   // Rejects one mapping submission without changing its signal semaphores.
-  bool fail_next_map = false;
+  std::atomic<bool> fail_next_map{false};
   // Borrowed prerequisite added to exactly one real mapping submission.
-  iree_hal_semaphore_t* gate_next_mapping = nullptr;
-  // Records dependencies before the real queue captures a mapping batch.
-  bool observe_mappings = false;
-  // Borrowed wait identities, inspected while operations retain their stages.
-  std::vector<std::vector<iree_hal_semaphore_t*>> mapping_waits;
-  // Borrowed mapping-stage identities, inspected before operation retirement.
-  std::vector<iree_hal_semaphore_t*> mapping_signals;
+  std::atomic<iree_hal_semaphore_t*> gate_next_mapping{nullptr};
+  // Records dependencies after the real queue captures a mapping batch.
+  std::atomic<bool> observe_mappings{false};
 
  private:
+  // Protects mapping observations published by arbitrary native workers.
+  std::mutex mapping_mutex_;
+  // Signals completed capture without relying on native callback timing.
+  std::condition_variable mapping_condition_;
+  // Borrowed identities inspected while the test retains observed operations.
+  std::vector<Observation> mappings_;
   // Retained native queue used for all accepted operations.
   iree_hal_queue_t* queue_ = nullptr;
 };

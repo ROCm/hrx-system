@@ -13,14 +13,16 @@
 extern "C" {
 #endif  // __cplusplus
 
-typedef struct iree_hal_buffer_t iree_hal_buffer_t;
+typedef struct loom_serve_backing_parent_t loom_serve_backing_parent_t;
 
 // Mutable state for one touched slot in a logical virtual reservation.
 typedef struct loom_serve_backing_entry_t {
   // Logical slot index within the virtual reservation.
   iree_host_size_t index;
-  // Owned physical handle, or null for uncommitted storage.
-  iree_hal_buffer_t* physical;
+  // Physical parent retained by this slot lease, or NULL when uncommitted.
+  loom_serve_backing_parent_t* physical;
+  // Source byte origin within the parent, independent of the logical index.
+  iree_device_size_t physical_offset;
   // Whether physical is currently mapped into its virtual slot.
   bool mapped;
   // Whether a current retained range requires this slab.

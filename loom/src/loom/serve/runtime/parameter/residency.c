@@ -583,13 +583,17 @@ iree_status_t loom_serve_residency_cache_trim(
   if (!cache->pool) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(loom_serve_memory_pool_query_status(cache->pool));
+  // Release decisions consume the logical owner ledger. A native allocation
+  // and its pending mapping are the same bytes; physical statistics cannot be
+  // added to pending logical demand without counting that allocation twice.
   iree_status_t status = iree_ok_status();
   for (loom_serve_residency_group_t* entry = cache->groups.oldest;
        entry && iree_status_is_ok(status); entry = entry->next) {
     const loom_runtime_storage_statistics_t memory =
-        loom_serve_memory_pool_statistics(cache->pool);
+        loom_serve_memory_pool_snapshot(cache->pool);
     const uint64_t remaining = memory.committed_bytes + memory.pending_bytes -
-                               memory.releasing_bytes - memory.cached_bytes;
+                               memory.releasing_bytes + memory.abandoned_bytes;
     if (remaining <= target_bytes) {
       break;
     }

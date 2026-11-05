@@ -5,6 +5,8 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <algorithm>
+#include <future>
+#include <utility>
 #include <vector>
 
 #include "iree/hal/cts/util/test_base.h"
@@ -138,6 +140,65 @@ TEST_P(PoolTest, BaselineConstruction) {
     EXPECT_EQ(stats.bytes_committed,
               memory.backing->native_allocation.byte_length);
   }
+}
+
+TEST_P(PoolTest, CreditedNativeCostsMatchPhysicalOwners) {
+  Ref<iree_hal_pool_t> pool;
+  IREE_ASSERT_OK(CreateOwnedPool(IREE_HAL_BUFFER_USAGE_TRANSFER, pool.out()));
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(pool, &capabilities);
+  const auto alignment =
+      std::min<iree_device_size_t>(capabilities.max_allocation_alignment, 8192);
+  const iree_hal_pool_reservation_request_t requests[] = {
+      iree_hal_make_pool_reservation_request(1023, 1),
+      iree_hal_make_pool_reservation_request(1025, alignment),
+      iree_hal_make_pool_reservation_request(8192, alignment),
+  };
+  uint64_t cost = 0;
+  IREE_ASSERT_OK(iree_hal_slab_pool_query_allocation_cost(
+      pool, IREE_ARRAYSIZE(requests), requests, &cost));
+  iree_hal_pool_stats_t stats;
+  iree_hal_pool_query_stats(pool, &stats);
+  EXPECT_EQ(stats.bytes_committed, 0u);
+  EXPECT_EQ(stats.reserve_count, 0u);
+  iree_hal_memory_budget_t* budget = nullptr;
+  IREE_ASSERT_OK(iree_hal_memory_budget_create(
+      cost, nullptr, iree_allocator_system(), &budget));
+  iree_hal_memory_credit_t credit = {};
+  ASSERT_TRUE(iree_hal_memory_budget_try_reserve(budget, cost, &credit));
+  iree_hal_pool_reservation_t reservations[IREE_ARRAYSIZE(requests)] = {};
+  iree_hal_pool_acquire_info_t infos[IREE_ARRAYSIZE(requests)] = {};
+  std::promise<iree_status_t> completed;
+  auto completion = completed.get_future();
+  IREE_ASSERT_OK(iree_hal_slab_pool_acquire_with_credit(
+      pool, IREE_ARRAYSIZE(requests), requests, &credit, reservations, infos,
+      {[](void* user_data, iree_status_t status,
+          iree_hal_pool_acquire_result_t result) {
+         EXPECT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
+         static_cast<std::promise<iree_status_t>*>(user_data)->set_value(
+             std::move(status));
+       },
+       &completed}));
+  IREE_ASSERT_OK(completion.get());
+  EXPECT_EQ(credit.budget, nullptr);
+  EXPECT_EQ(iree_hal_memory_budget_charged(budget), cost);
+  iree_hal_buffer_t* buffers[IREE_ARRAYSIZE(requests)] = {};
+  IREE_ASSERT_OK(iree_hal_pool_materialize_reservations(
+      pool, IREE_ARRAYSIZE(requests), requests, reservations,
+      IREE_HAL_POOL_MATERIALIZE_FLAG_TRANSFER_RESERVATION_OWNERSHIP, buffers));
+  uint64_t actual_cost = 0;
+  for (auto* buffer : buffers) {
+    actual_cost += iree_hal_buffer_memory_view(buffer)
+                       .backing->native_allocation.byte_length;
+    iree_hal_buffer_release(buffer);
+  }
+  EXPECT_EQ(actual_cost, cost);
+  // Final source destruction joins actual native disposal, not just reservation
+  // return. The independent budget remains alive to observe the result.
+  pool.reset();
+  EXPECT_EQ(iree_hal_memory_budget_charged(budget), 0u);
+  EXPECT_EQ(iree_hal_memory_budget_abandoned(budget), 0u);
+  iree_hal_memory_budget_release(budget);
 }
 
 TEST_P(PoolTest, RejectsEmptyAllocation) {

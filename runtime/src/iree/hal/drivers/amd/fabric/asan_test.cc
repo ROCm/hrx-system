@@ -118,6 +118,7 @@ struct Native {
           out->host_mapping.supported_access =
               AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
           out->allocation.byte_length_granularity = 4096;
+          out->allocation.native_byte_length_granularity = 4096;
           out->allocation.minimum_alignment = 4096;
           out->allocation.maximum_alignment = 4096;
           out->allocation.maximum_byte_length = UINT64_MAX;
@@ -200,6 +201,8 @@ struct Native {
         };
     api.memory_query_info = [](amdf_memory_t* handle, amdf_memory_info_t* out) {
       out->byte_length = reinterpret_cast<Memory*>(handle)->bytes.size();
+      out->native_allocation_byte_length = out->byte_length;
+      out->native_allocation_granularity = 4096;
       out->alignment = 4096;
       return AMDF_STATUS_OK;
     };

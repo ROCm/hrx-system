@@ -731,10 +731,11 @@ TEST_F(ElasticTextServiceTest,
 TEST_F(ElasticTextServiceTest,
        RetirementJoinsStateTrimWithoutWaitingForNativeFree) {
   auto options = ModelOptions();
-  // The reservation spans a full physical class so its first page enters the
-  // retained cache. Native disposal then occurs at explicit pool trim.
+  // Occupy a full KV parent so the warm model below cannot share it. Returning
+  // this reservation then leaves a whole parent for explicit pool trim.
   options.pool_capacity =
       loom_serve_test_application_options_default().slab_size / 4;
+  options.context_capacity = options.pool_capacity;
   loom_serve_text_model_t* retiring = nullptr;
   IREE_ASSERT_OK(loom_serve_text_model_allocate(
       device_, storage_owner_, &options, host_allocator_, &retiring));
@@ -745,6 +746,11 @@ TEST_F(ElasticTextServiceTest,
       retiring, release_model);
   const int32_t tokens[] = {0, 1, 2};
   auto* row = loom_serve_text_model_row(retiring, 0);
+  bool admitted = false;
+  IREE_ASSERT_OK(loom_serve_text_row_try_reserve(
+      row, LOOM_SERVE_TEXT_RESERVE_FRESH, nullptr, options.context_capacity,
+      &admitted));
+  ASSERT_TRUE(admitted);
   IREE_ASSERT_OK(
       loom_serve_text_row_prefill(row, IREE_ARRAYSIZE(tokens), tokens));
   IREE_ASSERT_OK(loom_serve_text_row_reset(row));

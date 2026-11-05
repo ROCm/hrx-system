@@ -577,7 +577,7 @@ TEST_P(TaskQueueAllocaTest, DeferredAllocationDoesNotBlockSameQueueWork) {
   IREE_ASSERT_OK(iree_hal_queue_alloca(queues_[0], no_waits, held_allocated,
                                        deferred, 1, &request,
                                        &pending_buffers_[0]));
-  ASSERT_EQ(deferred->pending.count, 1u);
+  ASSERT_EQ(deferred->PendingRequestCount(), 1u);
 
   iree_hal_semaphore_list_t ready_allocated = {1, &semaphores_[1],
                                                &allocated_value};
@@ -681,7 +681,7 @@ TEST_P(TaskQueueAllocaTest, CapacityCanReturnDuringDeferredProbe) {
   deferred->CompleteOne();
   // The first exhausted result prepares the capacity wait and submits a
   // second probe. Return capacity while that probe is still held.
-  ASSERT_EQ(deferred->pending.count, 1u);
+  ASSERT_EQ(deferred->PendingRequestCount(), 1u);
   iree_hal_semaphore_list_t initial_released = {1, &semaphores_[0],
                                                 &released_value};
   IREE_ASSERT_OK(iree_hal_queue_dealloca(

@@ -119,6 +119,13 @@ const iree_hal_slab_provider_vtable_t RetainingProvider::vtable_ = {
         [](iree_hal_slab_provider_t* base) {
           delete static_cast<RetainingProvider*>(base);
         },
+    .query_allocation_cost =
+        [](iree_hal_slab_provider_t* base, iree_hal_slab_request_t request,
+           uint64_t* out_length) {
+          return iree_hal_slab_provider_query_allocation_cost(
+              static_cast<RetainingProvider*>(base)->source_, request,
+              out_length);
+        },
     .acquire_slabs =
         [](iree_hal_slab_provider_t* base,
            iree_hal_slab_acquire_request_t* request) {
@@ -304,7 +311,8 @@ class MemoryLossTest : public ::testing::Test {
   iree_status_t Prepare(uint64_t count,
                         loom_serve_memory_admission_t* out_admission) {
     return loom_serve_memory_pool_prepare(
-        pool_, {.packed_bytes = count * kSlabSize}, out_admission);
+        pool_, {.packed_bytes = count * kSlabSize, .packed_count = count},
+        out_admission);
   }
 
   void ExpectLoss(iree_status_t status) {

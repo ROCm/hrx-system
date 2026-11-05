@@ -9,6 +9,38 @@
 #include "iree/hal/device_group.h"
 #include "iree/hal/memory_backend.h"
 
+IREE_API_EXPORT iree_status_t iree_hal_slab_pool_query_allocation_cost(
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    uint64_t* out_byte_length) {
+  *out_byte_length = 0;
+  const iree_hal_pool_vtable_t* vtable =
+      (const iree_hal_pool_vtable_t*)pool->resource.vtable;
+  if (!vtable->query_allocation_cost) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "pool is not a native allocation source");
+  }
+  return vtable->query_allocation_cost(pool, request_count, requests,
+                                       out_byte_length);
+}
+
+IREE_API_EXPORT iree_status_t iree_hal_slab_pool_acquire_with_credit(
+    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_memory_credit_t* credit,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos,
+    iree_hal_pool_acquire_callback_t completion) {
+  const iree_hal_pool_vtable_t* vtable =
+      (const iree_hal_pool_vtable_t*)pool->resource.vtable;
+  if (!vtable->acquire_with_credit) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "pool is not a native allocation source");
+  }
+  return vtable->acquire_with_credit(pool, request_count, requests, credit,
+                                     out_reservations, out_infos, completion);
+}
+
 IREE_API_EXPORT void iree_hal_slab_pool_options_initialize(
     iree_hal_slab_pool_options_t* out_options) {
   memset(out_options, 0, sizeof(*out_options));

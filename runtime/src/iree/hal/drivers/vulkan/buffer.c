@@ -132,6 +132,9 @@ static iree_hal_vulkan_buffer_t* iree_hal_vulkan_buffer_cast(
 
 iree_hal_buffer_allocation_info_t iree_hal_vulkan_buffer_allocation_info(
     iree_hal_buffer_t* base_buffer) {
+  if (iree_hal_vulkan_sparse_buffer_isa(base_buffer)) {
+    return iree_hal_vulkan_sparse_buffer_allocation_info(base_buffer);
+  }
   const iree_hal_vulkan_buffer_t* buffer =
       iree_hal_vulkan_buffer_cast(base_buffer);
   return (iree_hal_buffer_allocation_info_t){

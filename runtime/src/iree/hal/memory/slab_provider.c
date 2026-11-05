@@ -9,6 +9,18 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/notification.h"
 
+iree_status_t iree_hal_slab_provider_query_allocation_cost(
+    iree_hal_slab_provider_t* provider, iree_hal_slab_request_t request,
+    uint64_t* out_byte_length) {
+  *out_byte_length = 0;
+  if (!provider->vtable->query_allocation_cost) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "native source does not describe allocation cost");
+  }
+  return provider->vtable->query_allocation_cost(provider, request,
+                                                 out_byte_length);
+}
+
 void iree_hal_slab_provider_initialize(
     const iree_hal_slab_provider_vtable_t* vtable,
     iree_allocator_t host_allocator, iree_hal_slab_provider_t* provider) {

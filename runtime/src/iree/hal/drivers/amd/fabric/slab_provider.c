@@ -584,6 +584,37 @@ static void iree_hal_amd_fabric_slab_initialize(
   };
 }
 
+static iree_status_t iree_hal_amd_fabric_slab_provider_query_allocation_cost(
+    iree_hal_slab_provider_t* base_provider, iree_hal_slab_request_t request,
+    uint64_t* out_byte_length) {
+  const iree_hal_amd_fabric_slab_provider_t* provider =
+      iree_hal_amd_fabric_slab_provider_cast(base_provider);
+  if (!iree_all_bits_set(provider->options.memory.profile.roles,
+                         AMDF_MEMORY_PROFILE_ROLE_CREATE)) {
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "AMD provider admits imported storage only");
+  }
+  uint64_t logical_length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_memory_allocation_size(
+      &provider->options.memory, request.min_length, &logical_length));
+  const amdf_memory_construction_capabilities_t* construction =
+      &provider->options.memory.profile.allocation;
+  uint64_t native_length = 0;
+  if (!iree_checked_add_u64(logical_length,
+                            construction->native_byte_length_prefix,
+                            &native_length) ||
+      !iree_checked_add_u64(native_length,
+                            construction->native_byte_length_granularity - 1,
+                            &native_length)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "AMD native allocation extent overflows");
+  }
+  *out_byte_length = native_length /
+                     construction->native_byte_length_granularity *
+                     construction->native_byte_length_granularity;
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amd_fabric_slab_provider_acquire_slab(
     iree_hal_slab_provider_t* base_provider, iree_device_size_t min_length,
     iree_device_size_t min_alignment, iree_hal_slab_t* out_slab,
@@ -1174,6 +1205,8 @@ static void iree_hal_amd_fabric_slab_provider_release_slabs(
 static const iree_hal_slab_provider_vtable_t
     iree_hal_amd_fabric_slab_provider_vtable = {
         .destroy = iree_hal_amd_fabric_slab_provider_destroy,
+        .query_allocation_cost =
+            iree_hal_amd_fabric_slab_provider_query_allocation_cost,
         .acquire_slabs = iree_hal_amd_fabric_slab_provider_acquire_slabs,
         .import_slab = iree_hal_amd_fabric_slab_provider_import_slab,
         .release_slabs = iree_hal_amd_fabric_slab_provider_release_slabs,

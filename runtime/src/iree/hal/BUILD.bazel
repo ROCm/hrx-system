@@ -66,6 +66,7 @@ iree_runtime_cc_library(
         "fence.c",
         "file.c",
         "memory_backend.c",
+        "memory_budget.c",
         "memory_scope.c",
         "pool.c",
         "pool_wait.c",
@@ -105,6 +106,7 @@ iree_runtime_cc_library(
         "fence.h",
         "file.h",
         "memory_backend.h",
+        "memory_budget.h",
         "memory_scope.h",
         "pool.h",
         "pool_wait.h",
@@ -146,6 +148,16 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async:platform",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal/utils:host_semaphore",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "memory_budget_test",
+    srcs = ["memory_budget_test.cc"],
+    deps = [
+        ":hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
