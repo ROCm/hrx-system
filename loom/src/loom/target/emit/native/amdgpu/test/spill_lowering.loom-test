@@ -315,6 +315,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@gfx11_generic_target) @gfx11_spi
   scratch_store_b32 off, v4, off offset:20
   scratch_store_b64 off, v[5:6], off offset:24
   scratch_store_b32 off, v7, off offset:32
+  s_waitcnt vmcnt(0) lgkmcnt(63)
   scratch_load_b32 v0, off, off offset:20
   scratch_load_b64 v[1:2], off, off offset:24
   scratch_load_b32 v3, off, off offset:32

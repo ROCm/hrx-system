@@ -1,0 +1,393 @@
+// RUN: emit amdgpu-assembly @nested_read_after_write_gfx942
+
+// The outer effect is completed in the prologue. Its static backedge state
+// cannot reintroduce that dependency into the inner loop.
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @nested_read_after_write_gfx942(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %payload: reg<amdgpu.vgpr>, %count: reg<amdgpu.sgpr>) asm {
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  low.br ^prologue
+^prologue:
+  %value = global_load_dword_saddr %address, %base : reg<amdgpu.vgpr>
+  low.br ^inner(%begin: reg<amdgpu.sgpr>)
+^inner(%index: reg<amdgpu.sgpr>):
+  %next = global_load_dword_saddr %address, %base : reg<amdgpu.vgpr>
+  %advanced = s_add_u32 %index, %step
+  %more = s_cmp_lt_i32 %advanced, %count
+  low.cond_br %more, ^backedge, ^tail : reg<amdgpu.scc>
+^backedge:
+  low.br ^inner(%advanced: reg<amdgpu.sgpr>)
+^tail:
+  global_store_dword_saddr %address, %payload, %base
+  %repeat = s_cmp_lt_i32 %begin, %count
+  low.cond_br %repeat, ^prologue, ^exit : reg<amdgpu.scc>
+^exit:
+  return
+}
+
+// ----
+  s_mov_b32 s3, 0
+  s_mov_b32 s4, 1
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_load_dword v2, v0, s[0:1] offset:0
+  s_mov_b32 s5, s3
+.Lbb2:
+  global_load_dword v2, v0, s[0:1] offset:0
+  s_add_u32 s5, s5, s4
+  s_cmp_lt_i32 s5, s2
+  s_cbranch_scc0 .Lbb4
+.Lbb3:
+  s_branch .Lbb2
+.Lbb4:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_store_dword v0, v1, s[0:1] offset:0
+  s_cmp_lt_i32 s3, s2
+  s_cbranch_scc1 .Lbb1
+.Lbb5:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @nested_write_after_read_gfx942
+
+// The outer effect is completed in the prologue. Its static backedge state
+// cannot reintroduce that dependency into the inner loop.
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @nested_write_after_read_gfx942(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %payload: reg<amdgpu.vgpr>, %count: reg<amdgpu.sgpr>) asm {
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  low.br ^prologue
+^prologue:
+  global_store_dword_saddr %address, %payload, %base
+  low.br ^inner(%begin: reg<amdgpu.sgpr>)
+^inner(%index: reg<amdgpu.sgpr>):
+  global_store_dword_saddr %address, %payload, %base
+  %advanced = s_add_u32 %index, %step
+  %more = s_cmp_lt_i32 %advanced, %count
+  low.cond_br %more, ^backedge, ^tail : reg<amdgpu.scc>
+^backedge:
+  low.br ^inner(%advanced: reg<amdgpu.sgpr>)
+^tail:
+  %value = global_load_dword_saddr %address, %base : reg<amdgpu.vgpr>
+  %repeat = s_cmp_lt_i32 %begin, %count
+  low.cond_br %repeat, ^prologue, ^exit : reg<amdgpu.scc>
+^exit:
+  return
+}
+
+// ----
+  s_mov_b32 s3, 0
+  s_mov_b32 s4, 1
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_store_dword v0, v1, s[0:1] offset:0
+  s_mov_b32 s5, s3
+.Lbb2:
+  global_store_dword v0, v1, s[0:1] offset:0
+  s_add_u32 s5, s5, s4
+  s_cmp_lt_i32 s5, s2
+  s_cbranch_scc0 .Lbb4
+.Lbb3:
+  s_branch .Lbb2
+.Lbb4:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_load_dword v2, v0, s[0:1] offset:0
+  s_cmp_lt_i32 s3, s2
+  s_cbranch_scc1 .Lbb1
+.Lbb5:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @nested_read_after_write_gfx1100
+
+// The outer effect is completed in the prologue. Its static backedge state
+// cannot reintroduce that dependency into the inner loop.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @nested_read_after_write_gfx1100(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %payload: reg<amdgpu.vgpr>, %count: reg<amdgpu.sgpr>) asm {
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  low.br ^prologue
+^prologue:
+  %value = global_load_b32_saddr %address, %base
+  low.br ^inner(%begin: reg<amdgpu.sgpr>)
+^inner(%index: reg<amdgpu.sgpr>):
+  %next = global_load_b32_saddr %address, %base
+  %advanced = s_add_u32 %index, %step
+  %more = s_cmp_lt_i32 %advanced, %count
+  low.cond_br %more, ^backedge, ^tail : reg<amdgpu.scc>
+^backedge:
+  low.br ^inner(%advanced: reg<amdgpu.sgpr>)
+^tail:
+  global_store_b32_saddr %address, %payload, %base
+  %repeat = s_cmp_lt_i32 %begin, %count
+  low.cond_br %repeat, ^prologue, ^exit : reg<amdgpu.scc>
+^exit:
+  return
+}
+
+// ----
+  s_mov_b32 s3, 0
+  s_mov_b32 s4, 1
+.Lbb1:
+  s_waitcnt_vscnt vscnt(0)
+  global_load_b32 v2, v0, s[0:1] offset:0
+  s_mov_b32 s5, s3
+.Lbb2:
+  global_load_b32 v2, v0, s[0:1] offset:0
+  s_add_u32 s5, s5, s4
+  s_cmp_lt_i32 s5, s2
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb4
+.Lbb3:
+  s_branch .Lbb2
+.Lbb4:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  global_store_b32 v0, v1, s[0:1] offset:0
+  s_cmp_lt_i32 s3, s2
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc1 .Lbb1
+.Lbb5:
+  s_waitcnt_vscnt vscnt(0)
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @nested_write_after_read_gfx1100
+
+// The outer effect is completed in the prologue. Its static backedge state
+// cannot reintroduce that dependency into the inner loop.
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @nested_write_after_read_gfx1100(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %payload: reg<amdgpu.vgpr>, %count: reg<amdgpu.sgpr>) asm {
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  low.br ^prologue
+^prologue:
+  global_store_b32_saddr %address, %payload, %base
+  low.br ^inner(%begin: reg<amdgpu.sgpr>)
+^inner(%index: reg<amdgpu.sgpr>):
+  global_store_b32_saddr %address, %payload, %base
+  %advanced = s_add_u32 %index, %step
+  %more = s_cmp_lt_i32 %advanced, %count
+  low.cond_br %more, ^backedge, ^tail : reg<amdgpu.scc>
+^backedge:
+  low.br ^inner(%advanced: reg<amdgpu.sgpr>)
+^tail:
+  %value = global_load_b32_saddr %address, %base
+  %repeat = s_cmp_lt_i32 %begin, %count
+  low.cond_br %repeat, ^prologue, ^exit : reg<amdgpu.scc>
+^exit:
+  return
+}
+
+// ----
+  s_mov_b32 s3, 0
+  s_mov_b32 s4, 1
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(63)
+  global_store_b32 v0, v1, s[0:1] offset:0
+  s_mov_b32 s5, s3
+.Lbb2:
+  global_store_b32 v0, v1, s[0:1] offset:0
+  s_add_u32 s5, s5, s4
+  s_cmp_lt_i32 s5, s2
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc0 .Lbb4
+.Lbb3:
+  s_branch .Lbb2
+.Lbb4:
+  s_waitcnt_vscnt vscnt(0)
+  global_load_b32 v2, v0, s[0:1] offset:0
+  s_cmp_lt_i32 s3, s2
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_cbranch_scc1 .Lbb1
+.Lbb5:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @nested_bypassed_read
+
+// Incoming completion is path- and memory-space-specific. New producers
+// belong to the local outgoing state and survive the incoming-state filter.
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @nested_bypassed_read(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %payload: reg<amdgpu.vgpr>, %count: reg<amdgpu.sgpr>) asm {
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  global_store_dword_saddr %address, %payload, %base
+  %skip = s_cmp_lt_i32 %begin, %count
+  low.cond_br %skip, ^prologue, ^skip : reg<amdgpu.scc>
+^prologue:
+  %seed = global_load_dword_saddr %address, %base : reg<amdgpu.vgpr>
+  low.br ^inner(%begin: reg<amdgpu.sgpr>)
+^skip:
+  low.br ^inner(%begin: reg<amdgpu.sgpr>)
+^inner(%index: reg<amdgpu.sgpr>):
+  %next = global_load_dword_saddr %address, %base : reg<amdgpu.vgpr>
+  %advanced = s_add_u32 %index, %step
+  %more = s_cmp_lt_i32 %advanced, %count
+  low.cond_br %more, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^inner(%advanced: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// ----
+  global_store_dword v1, v0, s[0:1] offset:0
+  s_mov_b32 s3, 0
+  s_cmp_lt_i32 s3, s2
+  s_mov_b32 s4, 1
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_load_dword v0, v1, s[0:1] offset:0
+  s_branch .Lbb3
+.Lbb2:
+.Lbb3:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_load_dword v0, v1, s[0:1] offset:0
+  s_add_u32 s3, s3, s4
+  s_cmp_lt_i32 s3, s2
+  s_cbranch_scc0 .Lbb5
+.Lbb4:
+  s_branch .Lbb3
+.Lbb5:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @nested_fresh_store
+
+// Incoming completion is path- and memory-space-specific. New producers
+// belong to the local outgoing state and survive the incoming-state filter.
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @nested_fresh_store(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %payload: reg<amdgpu.vgpr>, %count: reg<amdgpu.sgpr>) asm {
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  global_store_dword_saddr %address, %payload, %base
+  low.br ^prologue
+^prologue:
+  %seed = global_load_dword_saddr %address, %base : reg<amdgpu.vgpr>
+  global_store_dword_saddr %address, %payload, %base
+  low.br ^inner(%begin: reg<amdgpu.sgpr>)
+^inner(%index: reg<amdgpu.sgpr>):
+  %next = global_load_dword_saddr %address, %base : reg<amdgpu.vgpr>
+  %advanced = s_add_u32 %index, %step
+  %more = s_cmp_lt_i32 %advanced, %count
+  low.cond_br %more, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^inner(%advanced: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// ----
+  global_store_dword v1, v0, s[0:1] offset:0
+  s_mov_b32 s3, 0
+  s_mov_b32 s4, 1
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_load_dword v2, v1, s[0:1] offset:0
+  s_nop 0
+  global_store_dword v1, v0, s[0:1] offset:0
+.Lbb2:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  global_load_dword v0, v1, s[0:1] offset:0
+  s_add_u32 s3, s3, s4
+  s_cmp_lt_i32 s3, s2
+  s_cbranch_scc0 .Lbb4
+.Lbb3:
+  s_branch .Lbb2
+.Lbb4:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @nested_disjoint_read
+
+// Incoming completion is path- and memory-space-specific. New producers
+// belong to the local outgoing state and survive the incoming-state filter.
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @nested_disjoint_read(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %payload: reg<amdgpu.vgpr>, %count: reg<amdgpu.sgpr>) asm {
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  global_store_dword_saddr %address, %payload, %base
+  low.br ^prologue
+^prologue:
+  %seed = ds_read_b32 %address
+  low.br ^inner(%begin: reg<amdgpu.sgpr>)
+^inner(%index: reg<amdgpu.sgpr>):
+  %next = global_load_dword_saddr %address, %base : reg<amdgpu.vgpr>
+  %advanced = s_add_u32 %index, %step
+  %more = s_cmp_lt_i32 %advanced, %count
+  low.cond_br %more, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^inner(%advanced: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// ----
+  global_store_dword v1, v0, s[0:1] offset:0
+  s_mov_b32 s3, 0
+  s_mov_b32 s4, 1
+.Lbb1:
+  ds_read_b32 v0, v1 offset:0
+.Lbb2:
+  s_waitcnt vmcnt(0) lgkmcnt(0)
+  global_load_dword v0, v1, s[0:1] offset:0
+  s_add_u32 s3, s3, s4
+  s_cmp_lt_i32 s3, s2
+  s_cbranch_scc0 .Lbb4
+.Lbb3:
+  s_branch .Lbb2
+.Lbb4:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @nested_generic_read
+
+// Incoming completion is path- and memory-space-specific. New producers
+// belong to the local outgoing state and survive the incoming-state filter.
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @nested_generic_read(%address: reg<amdgpu.vgpr>, %base: reg<amdgpu.sgpr x2>, %payload: reg<amdgpu.vgpr>, %count: reg<amdgpu.sgpr>, %generic: reg<amdgpu.vgpr x2>) asm {
+  %begin = s_mov_b32 0
+  %step = s_mov_b32 1
+  global_store_dword_saddr %address, %payload, %base
+  low.br ^prologue
+^prologue:
+  %seed = flat_load_dwordx2 %generic : reg<amdgpu.vgpr x2>
+  low.br ^inner(%begin: reg<amdgpu.sgpr>)
+^inner(%index: reg<amdgpu.sgpr>):
+  %next = global_load_dword_saddr %address, %base : reg<amdgpu.vgpr>
+  %advanced = s_add_u32 %index, %step
+  %more = s_cmp_lt_i32 %advanced, %count
+  low.cond_br %more, ^backedge, ^exit : reg<amdgpu.scc>
+^backedge:
+  low.br ^inner(%advanced: reg<amdgpu.sgpr>)
+^exit:
+  return
+}
+
+// ----
+  global_store_dword v1, v0, s[0:1] offset:0
+  s_mov_b32 s3, 0
+  s_mov_b32 s4, 1
+.Lbb1:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  flat_load_dwordx2 v[2:3], v[2:3] offset:0
+.Lbb2:
+  s_nop 0
+  global_load_dword v0, v1, s[0:1] offset:0
+  s_add_u32 s3, s3, s4
+  s_cmp_lt_i32 s3, s2
+  s_cbranch_scc0 .Lbb4
+.Lbb3:
+  s_branch .Lbb2
+.Lbb4:
+  s_endpgm
