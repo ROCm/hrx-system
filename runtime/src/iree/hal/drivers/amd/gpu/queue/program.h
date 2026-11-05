@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVERS_AMD_GPU_QUEUE_PROGRAM_H_
 
 #include "iree/base/threading/mutex.h"
+#include "iree/base/threading/notification.h"
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
 #include "iree/hal/drivers/amd/gpu/queue/fixup.h"
@@ -21,6 +22,8 @@ typedef struct iree_hal_amd_gpu_program_growth_t
     iree_hal_amd_gpu_program_growth_t;
 typedef struct iree_hal_amd_gpu_program_constant_page_t
     iree_hal_amd_gpu_program_constant_page_t;
+typedef struct iree_hal_amd_gpu_program_visit_t
+    iree_hal_amd_gpu_program_visit_t;
 
 // Device-owned native program storage. Recorders acquire backing and register
 // sealed programs on their callers. Invocation growth and retired releases use
@@ -37,12 +40,19 @@ typedef struct iree_hal_amd_gpu_program_pool_t {
   iree_hal_amd_fabric_memory_options_t upload;
   // Device-local storage, including qualified shared DRAM on unified devices.
   iree_hal_amd_fabric_memory_options_t resident;
-  // Protects registered programs and queue membership during cold changes.
-  iree_slim_mutex_t registry_mutex;
-  // Registered programs, protected by registry_mutex.
-  iree_hal_amd_gpu_program_t* head;
-  // Installed native-domain coordinate extent, protected by registry_mutex.
-  uint32_t queue_count;
+  // Program membership is independent of allocation and per-program cleanup.
+  struct {
+    // Protects only list links, coordinate extent, and traversal borrows.
+    iree_slim_mutex_t mutex;
+    // Registered programs; removal redirects pending traversal cursors.
+    iree_hal_amd_gpu_program_t* head;
+    // Coordinate extent reconciled by each recording before registration.
+    uint32_t queue_count;
+    // Borrowed caller-stack traversals, each accessing at most one program.
+    iree_hal_amd_gpu_program_visit_t* visits;
+    // Joins a removed program's final traversal access outside the mutex.
+    iree_notification_t notification;
+  } registry;
   // Shared immutable storage, independent of writable program instances.
   struct {
     // Coalesces cold page growth without blocking metadata returns.
@@ -70,10 +80,10 @@ void iree_hal_amd_gpu_program_pool_deinitialize(
 
 // Extends publisher metadata before a new native queue becomes usable. Existing
 // recordings keep their native placements and invocation leases. Host
-// allocation happens outside each program's metadata lock; no native allocation
-// is needed. Partial failure leaves existing queues usable and can be retried.
-// Sealing a concurrent recording reconciles this extent under the same registry
-// lock.
+// allocation happens outside registry and per-program metadata locks; no native
+// allocation is needed. Partial failure leaves existing queues usable and can
+// be retried. Sealing a concurrent recording reconciles the admitted extent
+// before registering. Unrelated program removal never joins this traversal.
 iree_status_t iree_hal_amd_gpu_program_pool_reserve_queues(
     iree_hal_amd_gpu_program_pool_t* pool, uint32_t queue_count);
 
@@ -160,9 +170,9 @@ typedef struct iree_hal_amd_gpu_program_queue_t {
 struct iree_hal_amd_gpu_program_t {
   // Borrowed device-owned placement and registry.
   iree_hal_amd_gpu_program_pool_t* pool;
-  // Previous registered program, protected by pool->registry_mutex.
+  // Previous registered program, protected by pool->registry.mutex.
   iree_hal_amd_gpu_program_t* previous;
-  // Next registered program, protected by pool->registry_mutex.
+  // Next registered program, protected by pool->registry.mutex.
   iree_hal_amd_gpu_program_t* next;
   // Optional staging when physical-local storage has no host view. Retained
   // through every initial copy reader, then released by an idle trim.

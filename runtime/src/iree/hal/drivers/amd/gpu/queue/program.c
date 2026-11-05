@@ -264,6 +264,67 @@ void iree_hal_amd_gpu_program_constant_release(
   }
 }
 
+// A registry traversal borrows only its current program. Removal redirects
+// pending cursors under the registry mutex, so their next nodes need no borrow.
+// The stack record outlives every visit and is unlinked before its caller
+// exits.
+struct iree_hal_amd_gpu_program_visit_t {
+  // Borrowed pool, live through the control caller's final registry access.
+  iree_hal_amd_gpu_program_pool_t* pool;
+  // Next active traversal, protected by the registry mutex.
+  iree_hal_amd_gpu_program_visit_t* next;
+  // Program currently borrowed outside the registry mutex, or NULL.
+  iree_hal_amd_gpu_program_t* current;
+  // Next registered program to visit, redirected by concurrent removal.
+  iree_hal_amd_gpu_program_t* pending;
+  // A destructor is joining the current borrow and requires a return wake.
+  bool joining;
+};
+
+// Called under registry exclusion after publishing any wider queue extent.
+static void iree_hal_amd_gpu_program_visit_initialize(
+    iree_hal_amd_gpu_program_pool_t* pool,
+    iree_hal_amd_gpu_program_visit_t* out_visit) {
+  *out_visit = (iree_hal_amd_gpu_program_visit_t){
+      .pool = pool,
+      .next = pool->registry.visits,
+      .pending = pool->registry.head,
+  };
+  pool->registry.visits = out_visit;
+}
+
+static iree_hal_amd_gpu_program_t* iree_hal_amd_gpu_program_visit_next(
+    iree_hal_amd_gpu_program_visit_t* visit) {
+  iree_hal_amd_gpu_program_pool_t* pool = visit->pool;
+  iree_slim_mutex_lock(&pool->registry.mutex);
+  const bool joining = visit->joining;
+  visit->joining = false;
+  iree_hal_amd_gpu_program_t* program = visit->pending;
+  visit->current = program;
+  visit->pending = program ? program->next : NULL;
+  iree_slim_mutex_unlock(&pool->registry.mutex);
+  if (joining) {
+    iree_notification_post(&pool->registry.notification, IREE_ALL_WAITERS);
+  }
+  return program;
+}
+
+static void iree_hal_amd_gpu_program_visit_deinitialize(
+    iree_hal_amd_gpu_program_visit_t* visit) {
+  iree_hal_amd_gpu_program_pool_t* pool = visit->pool;
+  iree_slim_mutex_lock(&pool->registry.mutex);
+  iree_hal_amd_gpu_program_visit_t** link = &pool->registry.visits;
+  while (*link != visit) {
+    link = &(*link)->next;
+  }
+  *link = visit->next;
+  const bool joining = visit->joining;
+  iree_slim_mutex_unlock(&pool->registry.mutex);
+  if (joining) {
+    iree_notification_post(&pool->registry.notification, IREE_ALL_WAITERS);
+  }
+}
+
 iree_status_t iree_hal_amd_gpu_program_pool_initialize(
     iree_hal_amd_gpu_context_t* context, uint32_t native_family_ordinal,
     uint32_t queue_count, iree_allocator_t host_allocator,
@@ -281,9 +342,10 @@ iree_status_t iree_hal_amd_gpu_program_pool_initialize(
                          .address_kinds = UINT64_C(1)
                                           << AMDF_MEMORY_ADDRESS_GPU,
                      }},
-      .queue_count = queue_count,
+      .registry.queue_count = queue_count,
   };
-  iree_slim_mutex_initialize(&out_pool->registry_mutex);
+  iree_slim_mutex_initialize(&out_pool->registry.mutex);
+  iree_notification_initialize(&out_pool->registry.notification);
   iree_slim_mutex_initialize(&out_pool->constants.growth_mutex);
   iree_slim_mutex_initialize(&out_pool->constants.mutex);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_context_query_program_memory(
@@ -292,9 +354,9 @@ iree_status_t iree_hal_amd_gpu_program_pool_initialize(
   return iree_ok_status();
 }
 
-// The registry owner serializes cold queue growth. Instance-table growth can
-// still race the host allocation, so prepare a replacement outside the hot
-// metadata mutex and install only while it covers the latest instance extent.
+// Prepare outside metadata exclusion and reconcile both dimensions before
+// installation. Another traversal can widen the queue table, or an invocation
+// can grow the instance table, while this caller allocates its proposal.
 static iree_status_t iree_hal_amd_gpu_program_reserve_queues(
     iree_hal_amd_gpu_program_t* program, uint32_t queue_count) {
   const iree_allocator_t allocator = program->pool->host_allocator;
@@ -324,7 +386,8 @@ static iree_status_t iree_hal_amd_gpu_program_reserve_queues(
       iree_hal_amd_gpu_program_instance_t** instances =
           (void*)((uint8_t*)proposal + instances_offset);
       iree_slim_mutex_lock(&program->mutex);
-      if (capacity == program->capacity) {
+      complete = queue_count <= program->queue_count;
+      if (!complete && capacity == program->capacity) {
         memcpy(proposal, program->queues,
                program->queue_count * sizeof(*proposal));
         for (uint32_t i = program->queue_count; i < queue_count; ++i) {
@@ -353,25 +416,33 @@ static iree_status_t iree_hal_amd_gpu_program_reserve_queues(
 
 iree_status_t iree_hal_amd_gpu_program_pool_reserve_queues(
     iree_hal_amd_gpu_program_pool_t* pool, uint32_t queue_count) {
-  iree_slim_mutex_lock(&pool->registry_mutex);
-  pool->queue_count = iree_max(pool->queue_count, queue_count);
+  iree_hal_amd_gpu_program_visit_t visit;
+  iree_slim_mutex_lock(&pool->registry.mutex);
+  pool->registry.queue_count =
+      iree_max(pool->registry.queue_count, queue_count);
+  queue_count = pool->registry.queue_count;
+  iree_hal_amd_gpu_program_visit_initialize(pool, &visit);
+  iree_slim_mutex_unlock(&pool->registry.mutex);
   iree_status_t status = iree_ok_status();
-  for (iree_hal_amd_gpu_program_t* program = pool->head;
-       program && iree_status_is_ok(status); program = program->next) {
-    status =
-        iree_hal_amd_gpu_program_reserve_queues(program, pool->queue_count);
+  iree_hal_amd_gpu_program_t* program = NULL;
+  while (iree_status_is_ok(status) &&
+         (program = iree_hal_amd_gpu_program_visit_next(&visit))) {
+    status = iree_hal_amd_gpu_program_reserve_queues(program, queue_count);
   }
-  iree_slim_mutex_unlock(&pool->registry_mutex);
+  iree_hal_amd_gpu_program_visit_deinitialize(&visit);
   return status;
 }
 
 void iree_hal_amd_gpu_program_pool_trim(iree_hal_amd_gpu_program_pool_t* pool) {
-  iree_slim_mutex_lock(&pool->registry_mutex);
-  for (iree_hal_amd_gpu_program_t* program = pool->head; program;
-       program = program->next) {
+  iree_hal_amd_gpu_program_visit_t visit;
+  iree_slim_mutex_lock(&pool->registry.mutex);
+  iree_hal_amd_gpu_program_visit_initialize(pool, &visit);
+  iree_slim_mutex_unlock(&pool->registry.mutex);
+  iree_hal_amd_gpu_program_t* program = NULL;
+  while ((program = iree_hal_amd_gpu_program_visit_next(&visit))) {
     iree_hal_amd_gpu_program_trim(program);
   }
-  iree_slim_mutex_unlock(&pool->registry_mutex);
+  iree_hal_amd_gpu_program_visit_deinitialize(&visit);
   iree_hal_amd_gpu_program_constants_trim(pool);
 }
 
@@ -380,12 +451,14 @@ void iree_hal_amd_gpu_program_pool_deinitialize(
   if (!pool->context) {
     return;
   }
-  IREE_ASSERT(!pool->head);
+  IREE_ASSERT(!pool->registry.head);
+  IREE_ASSERT(!pool->registry.visits);
   IREE_ASSERT(!pool->constants.count);
   iree_hal_amd_gpu_program_constants_trim(pool);
   iree_slim_mutex_deinitialize(&pool->constants.growth_mutex);
   iree_slim_mutex_deinitialize(&pool->constants.mutex);
-  iree_slim_mutex_deinitialize(&pool->registry_mutex);
+  iree_notification_deinitialize(&pool->registry.notification);
+  iree_slim_mutex_deinitialize(&pool->registry.mutex);
   pool->context = NULL;
 }
 
@@ -472,9 +545,9 @@ iree_status_t iree_hal_amd_gpu_program_initialize(
     iree_hal_amd_gpu_program_pool_t* pool, uint32_t alignment,
     uint32_t byte_length, uint32_t fixup_count,
     iree_hal_amd_gpu_program_t* out_program) {
-  iree_slim_mutex_lock(&pool->registry_mutex);
-  const uint32_t queue_count = pool->queue_count;
-  iree_slim_mutex_unlock(&pool->registry_mutex);
+  iree_slim_mutex_lock(&pool->registry.mutex);
+  const uint32_t queue_count = pool->registry.queue_count;
+  iree_slim_mutex_unlock(&pool->registry.mutex);
   *out_program = (iree_hal_amd_gpu_program_t){
       .pool = pool,
       .capacity = queue_count,
@@ -538,17 +611,24 @@ iree_status_t iree_hal_amd_gpu_program_seal(
     initial->initialized = true;
     iree_atomic_store(&program->source_ready, 1, iree_memory_order_release);
   }
-  iree_slim_mutex_lock(&program->pool->registry_mutex);
-  iree_status_t status = iree_hal_amd_gpu_program_reserve_queues(
-      program, program->pool->queue_count);
+  iree_hal_amd_gpu_program_pool_t* pool = program->pool;
+  iree_status_t status = iree_ok_status();
+  iree_slim_mutex_lock(&pool->registry.mutex);
+  while (program->queue_count < pool->registry.queue_count &&
+         iree_status_is_ok(status)) {
+    const uint32_t queue_count = pool->registry.queue_count;
+    iree_slim_mutex_unlock(&pool->registry.mutex);
+    status = iree_hal_amd_gpu_program_reserve_queues(program, queue_count);
+    iree_slim_mutex_lock(&pool->registry.mutex);
+  }
   if (iree_status_is_ok(status)) {
-    program->next = program->pool->head;
+    program->next = pool->registry.head;
     if (program->next) {
       program->next->previous = program;
     }
-    program->pool->head = program;
+    pool->registry.head = program;
   }
-  iree_slim_mutex_unlock(&program->pool->registry_mutex);
+  iree_slim_mutex_unlock(&pool->registry.mutex);
   return status;
 }
 
@@ -897,22 +977,52 @@ void iree_hal_amd_gpu_program_trim(iree_hal_amd_gpu_program_t* program) {
   iree_hal_amd_gpu_program_upload_free(program->pool, upload);
 }
 
+static bool iree_hal_amd_gpu_program_visits_joined(void* user_data) {
+  iree_hal_amd_gpu_program_t* program = user_data;
+  iree_hal_amd_gpu_program_pool_t* pool = program->pool;
+  bool joined = true;
+  iree_slim_mutex_lock(&pool->registry.mutex);
+  for (iree_hal_amd_gpu_program_visit_t* visit = pool->registry.visits; visit;
+       visit = visit->next) {
+    joined &= visit->current != program;
+  }
+  iree_slim_mutex_unlock(&pool->registry.mutex);
+  return joined;
+}
+
 void iree_hal_amd_gpu_program_deinitialize(
     iree_hal_amd_gpu_program_t* program) {
   if (!program->pool) {
     return;
   }
-  iree_slim_mutex_lock(&program->pool->registry_mutex);
+  iree_hal_amd_gpu_program_pool_t* pool = program->pool;
+  iree_slim_mutex_lock(&pool->registry.mutex);
   if (program->previous) {
     program->previous->next = program->next;
   }
   if (program->next) {
     program->next->previous = program->previous;
   }
-  if (program->pool->head == program) {
-    program->pool->head = program->next;
+  if (pool->registry.head == program) {
+    pool->registry.head = program->next;
   }
-  iree_slim_mutex_unlock(&program->pool->registry_mutex);
+  bool joining = false;
+  for (iree_hal_amd_gpu_program_visit_t* visit = pool->registry.visits; visit;
+       visit = visit->next) {
+    if (visit->pending == program) {
+      visit->pending = program->next;
+    }
+    if (visit->current == program) {
+      visit->joining = true;
+      joining = true;
+    }
+  }
+  iree_slim_mutex_unlock(&pool->registry.mutex);
+  if (joining) {
+    iree_notification_await(&pool->registry.notification,
+                            iree_hal_amd_gpu_program_visits_joined, program,
+                            iree_infinite_timeout());
+  }
   iree_hal_amd_gpu_program_upload_free(program->pool, program->upload);
   program->upload = NULL;
   if (program->instances) {

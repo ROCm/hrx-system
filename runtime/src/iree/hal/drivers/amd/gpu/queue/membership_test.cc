@@ -206,8 +206,11 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
     // real program registry's ordinary coordinate-growth operation.
     programs_.host_allocator = iree_allocator_system();
     programs_.context = &context_;
-    programs_.queue_count = 1;
-    iree_slim_mutex_initialize(&programs_.registry_mutex);
+    programs_.registry.queue_count = 1;
+    iree_slim_mutex_initialize(&programs_.registry.mutex);
+    iree_notification_initialize(&programs_.registry.notification);
+    iree_slim_mutex_initialize(&programs_.constants.growth_mutex);
+    iree_slim_mutex_initialize(&programs_.constants.mutex);
     membership_.context = &context_;
     membership_.host_allocator = iree_allocator_system();
     membership_.publication = &publication_;

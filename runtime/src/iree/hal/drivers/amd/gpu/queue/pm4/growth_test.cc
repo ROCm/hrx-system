@@ -638,7 +638,7 @@ class ProgramGrowthTest : public GrowthTest {
       JoinPublication();
       EXPECT_EQ(completed_, completed);
       EXPECT_EQ(failed_, 0u);
-      EXPECT_EQ(programs_.storage.head, program);
+      EXPECT_EQ(programs_.storage.registry.head, program);
       EXPECT_EQ(
           iree_atomic_load(&growth_.pending_count, iree_memory_order_acquire),
           1);
@@ -654,7 +654,7 @@ class ProgramGrowthTest : public GrowthTest {
     iree_hal_amd_gpu_context_join_memory(&context_);
     JoinPublication();
     iree_hal_amd_gpu_context_join_memory(&context_);
-    EXPECT_EQ(programs_.storage.head, nullptr);
+    EXPECT_EQ(programs_.storage.registry.head, nullptr);
     EXPECT_EQ(
         iree_atomic_load(&growth_.pending_count, iree_memory_order_acquire), 0);
     EXPECT_EQ(completed_, completed);
