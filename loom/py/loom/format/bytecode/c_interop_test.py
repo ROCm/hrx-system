@@ -31,7 +31,8 @@ from loom.dialect.test import (
     test_scope_type,
     test_tile_attr,
 )
-from loom.format.bytecode.reader import read_module
+from loom.dialect.type import ALL_TYPE_OPS
+from loom.format.bytecode.reader import BytecodeError, read_module
 from loom.format.bytecode.writer import write_module
 from loom.format.text.parser import Parser
 from loom.format.text.printer import Printer
@@ -56,6 +57,7 @@ from loom.ir import (
     ShapedType,
     SignedEnumSetAttr,
     StringArrayAttr,
+    SymbolKind,
     SymbolName,
     SymbolNameArray,
     SymbolNameSet,
@@ -866,10 +868,127 @@ def _test_byte_attribute_interop(
     assert printer.print_module(selected) == canonical
 
 
+def _test_managed_type_interop(
+    loom_format: Path, loom_link: Path, fixture: Path
+) -> None:
+    parser = Parser()
+    printer = Printer()
+    for operations in (ALL_FUNC_OPS, ALL_TYPE_OPS):
+        parser.register_ops(operations)
+        printer.register_ops(operations)
+    parser.register_types(ALL_BUILTIN_TYPES)
+    printer.register_types(ALL_BUILTIN_TYPES)
+    source, client_source, provider_source = _fixture_sources(fixture)
+    module = parser.parse(source)
+    canonical = printer.print_module(module)
+    for candidate in (
+        read_module(write_module(module)),
+        _roundtrip_through_c(loom_format, source),
+        _roundtrip_through_c(loom_format, module),
+    ):
+        assert printer.print_module(candidate) == canonical
+        assert candidate.type_declarations == module.type_declarations
+
+    with tempfile.TemporaryDirectory(prefix="loom-managed-selected-") as directory:
+        source_path = Path(directory) / "source.loombc"
+        selected_path = Path(directory) / "selected.loombc"
+        source_path.write_bytes(write_module(module))
+        _run_loom_format(
+            [
+                loom_link,
+                source_path,
+                "--root=entry",
+                "--to=bc",
+                f"--output={selected_path}",
+            ]
+        )
+        selected = read_module(selected_path.read_bytes())
+    assert {symbol.name for symbol in selected.symbols} == {"Frame", "Decoder", "entry"}
+    selected_text = printer.print_module(selected)
+    assert printer.print_module(parser.parse(selected_text)) == selected_text
+
+    for change in (
+        {"namespace": "other"},
+        {"name": "different"},
+        {"declaration": SymbolName("Other")},
+        {"declaration": SymbolName("unused")},
+    ):
+        invalid = parser.parse(source)
+        entry = next(symbol.op for symbol in invalid.symbols if symbol.name == "entry")
+        value = invalid.values[entry.regions[0].blocks[0].arg_ids[0]]
+        value.type = replace(value.type, **change)
+        encoded = write_module(invalid)
+        failure = None
+        try:
+            read_module(encoded)
+        except BytecodeError as error:
+            failure = str(error)
+        assert failure is not None, (
+            "Python reader accepted an inconsistent managed type"
+        )
+        assert "managed type" in failure, failure
+        with tempfile.TemporaryDirectory(prefix="loom-managed-invalid-") as directory:
+            source_path = Path(directory) / "invalid.loombc"
+            source_path.write_bytes(encoded)
+            result = subprocess.run(
+                [loom_format, "--from=bc", "--to=text", source_path],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+            )
+            assert result.returncode != 0
+            assert "managed_type_key_disagrees" in result.stderr, result.stderr
+
+    with tempfile.TemporaryDirectory(prefix="loom-managed-link-") as directory:
+        for suffix in ("loom", "loombc"):
+            client_path = Path(directory) / f"client.{suffix}"
+            provider_path = Path(directory) / f"provider.{suffix}"
+            output_path = Path(directory) / "linked.loombc"
+            for path, text in (
+                (client_path, client_source),
+                (provider_path, provider_source),
+            ):
+                if suffix == "loom":
+                    path.write_text(text, encoding="utf-8")
+                else:
+                    path.write_bytes(write_module(parser.parse(text)))
+            arguments = [
+                loom_link,
+                client_path,
+                f"--library={provider_path}",
+                "--root=entry",
+                "--to=bc",
+                f"--output={output_path}",
+            ]
+            _run_loom_format(arguments)
+            linked = read_module(output_path.read_bytes())
+            assert any(
+                symbol.name == "consume" and symbol.kind == SymbolKind.FUNC_DEF
+                for symbol in linked.symbols
+            )
+            linked_text = printer.print_module(linked)
+            assert printer.print_module(parser.parse(linked_text)) == linked_text
+            # A valid provider module with the wrong nested ownership mode
+            # must fail at callable matching.
+            wrong = provider_source.replace("ptr<@Provider>", "ref<@Provider>")
+            if suffix == "loom":
+                provider_path.write_text(wrong, encoding="utf-8")
+            else:
+                provider_path.write_bytes(write_module(parser.parse(wrong)))
+            mismatch = subprocess.run(
+                arguments, capture_output=True, text=True, encoding="utf-8", check=False
+            )
+            assert mismatch.returncode != 0
+            assert "incompatible arg type at index 1" in mismatch.stderr, (
+                mismatch.stderr
+            )
+
+
 def main() -> None:
-    if len(sys.argv) != 6:
+    if len(sys.argv) != 7:
         raise ValueError(
-            "expected C loom-format, loom-link, predicate, scoped-type, and byte-attribute fixture paths"
+            "expected C loom-format, loom-link, predicate, scoped-type, byte-attribute, and managed-type fixture paths"
         )
     _test_predicate_attribute_interop(
         Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
@@ -877,6 +996,7 @@ def main() -> None:
     _test_byte_attribute_interop(
         Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[5])
     )
+    _test_managed_type_interop(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[6]))
     _test_instance_flags_interop(Path(sys.argv[1]))
     _test_scoped_type_interop(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[4]))
     _test_shared_projected_graph(Path(sys.argv[1]), Path(sys.argv[2]))

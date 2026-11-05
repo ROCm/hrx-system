@@ -21,6 +21,7 @@ from loom.ir import (
     ParameterizedAttr,
     ParameterizedAttrArray,
     ParameterizedType,
+    ReferenceType,
     Region,
     RegisterType,
     ScalarType,
@@ -182,7 +183,9 @@ class SymbolReferenceProjectionBuilder:
         attr_type = getattr(attr_def, "attr_type", None)
         symbol_ref = getattr(attr_def, "symbol_ref", None)
         names = None
-        if attr_type == "symbol" or isinstance(value, SymbolName):
+        if isinstance(value, ReferenceType):
+            names = (str(value.declaration),)
+        elif attr_type == "symbol" or isinstance(value, SymbolName):
             names = (str(value),)
         elif attr_type in ("symbol_array", "symbol_set") or isinstance(
             value, SymbolNameArray | SymbolNameSet
@@ -194,7 +197,11 @@ class SymbolReferenceProjectionBuilder:
                 and symbol_ref.role is SymbolReferenceRole.AVAILABILITY
             ):
                 return (), ()
-            interfaces = 0
+            interfaces = (
+                SYMBOL_INTERFACE_BITS["record"]
+                if isinstance(value, ReferenceType)
+                else 0
+            )
             role = SymbolReferenceRole.DEPENDENCY
             if symbol_ref is not None:
                 role = symbol_ref.role

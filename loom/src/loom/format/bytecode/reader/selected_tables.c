@@ -504,7 +504,30 @@ static iree_status_t loom_bytecode_selected_table_prepare_type_plan(
     const loom_bytecode_type_plan_entry_t* plan_entry,
     const loom_bytecode_type_fact_t* fact,
     loom_bytecode_selected_table_payload_t* payload) {
-  if (fact != NULL) {
+  if (fact != NULL && fact->kind == LOOM_TYPE_REFERENCE) {
+    const loom_bytecode_reference_type_fact_t* reference =
+        (const loom_bytecode_reference_type_fact_t*)fact;
+    loom_string_id_t namespace_id = LOOM_STRING_ID_INVALID;
+    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_intern_string(
+        materializer, reference->namespace_id, &namespace_id));
+    IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_intern_string(
+        materializer, reference->name_id, &name_id));
+    loom_symbol_ref_t declaration = loom_symbol_ref_null();
+    bool found = false;
+    IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_resolve_symbol(
+        materializer, reference->declaration_name_id, &declaration, &found));
+    if (!found) {
+      return iree_make_status(
+          IREE_STATUS_NOT_FOUND,
+          "managed type declaration is outside the selected symbol closure");
+    }
+    payload->type.form = LOOM_BYTECODE_SELECTED_TYPE_DIRECT;
+    payload->type.direct.value = loom_type_reference(
+        reference->ownership, namespace_id, name_id, declaration.symbol_id);
+    payload->type.direct.encoding_id = NULL;
+    return iree_ok_status();
+  } else if (fact != NULL) {
     return loom_bytecode_selected_table_prepare_structural_type(
         materializer, plan_entry, fact, payload);
   }

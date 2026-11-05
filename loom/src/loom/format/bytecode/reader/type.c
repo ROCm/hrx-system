@@ -61,6 +61,9 @@ iree_status_t loom_bytecode_type_decode_kind(
     case LOOM_BYTECODE_TYPE_GROUP:
       *out_kind = LOOM_TYPE_GROUP;
       return iree_ok_status();
+    case LOOM_BYTECODE_TYPE_REFERENCE:
+      *out_kind = LOOM_TYPE_REFERENCE;
+      return iree_ok_status();
     default: {
       loom_diagnostic_param_t params[] = {
           loom_param_u32(kind_byte),
@@ -212,6 +215,15 @@ iree_status_t loom_bytecode_type_materialize_prefix(
             materializer, (const loom_bytecode_parameterized_type_fact_t*)fact,
             &type, &type_id);
         iree_arena_checkpoint_restore(&checkpoint);
+      } else if (fact->kind == LOOM_TYPE_REFERENCE) {
+        const loom_bytecode_reference_type_fact_t* reference =
+            (const loom_bytecode_reference_type_fact_t*)fact;
+        const loom_symbol_id_t declaration_id =
+            loom_symbol_map_find(&materializer->module_view->symbols.map,
+                                 reference->declaration_name_id);
+        type =
+            loom_type_reference(reference->ownership, reference->namespace_id,
+                                reference->name_id, declaration_id);
       } else {
         loom_bytecode_structural_type_fact_t* structural_fact =
             (loom_bytecode_structural_type_fact_t*)fact;

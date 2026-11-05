@@ -30,7 +30,8 @@ typedef iree_status_t (*loom_bytecode_source_symbol_resolver_fn_t)(
 
 // Source-to-output symbol projection for incremental materialization.
 typedef struct loom_bytecode_source_symbol_resolver_t {
-  // Resolver invoked for references outside the complete symbol selection.
+  // Resolver invoked for reached source identities, including selected symbols
+  // whose output identities may already have been reserved by the caller.
   loom_bytecode_source_symbol_resolver_fn_t fn;
   // Caller-owned payload passed to |fn|.
   void* user_data;

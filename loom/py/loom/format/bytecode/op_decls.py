@@ -44,6 +44,7 @@ def default_op_decls() -> tuple[Any, ...]:
     from loom.dialect.target import ALL_TARGET_OPS
     from loom.dialect.template import ALL_TEMPLATE_OPS
     from loom.dialect.test import ALL_TEST_OPS
+    from loom.dialect.type import ALL_TYPE_OPS
     from loom.dialect.vector import ALL_VECTOR_OPS
     from loom.dialect.view import ALL_VIEW_OPS
 
@@ -51,6 +52,7 @@ def default_op_decls() -> tuple[Any, ...]:
         *ALL_TEST_OPS,
         *ALL_SCALAR_OPS,
         *ALL_FUNC_OPS,
+        *ALL_TYPE_OPS,
         *ALL_TEMPLATE_OPS,
         *ALL_ENCODING_OPS,
         *ALL_POOL_OPS,
