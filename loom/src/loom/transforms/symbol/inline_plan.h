@@ -83,10 +83,6 @@ typedef struct loom_inline_symbol_info_t {
   uint32_t incoming_non_call_ref_count;
   // Number of incoming call edges selected for required inlining.
   uint32_t planned_call_removals;
-  // Whether the authored body is linear before any call closure is expanded.
-  bool direct_body_is_linear;
-  // Whether the authored body directly depends on inherited target context.
-  bool direct_body_is_contextual;
   // Whether the function body remains linear after its required call closure
   // is flattened in callee-before-caller order.
   bool body_will_be_linear;
@@ -101,6 +97,10 @@ typedef struct loom_inline_profitability_symbol_t {
   uint32_t expanded_body_cost;
   // Head of the optional-call list targeting this symbol.
   uint32_t first_candidate_by_target;
+  // Whether the authored body is linear before any call closure is expanded.
+  bool direct_body_is_linear;
+  // Whether the authored body directly depends on inherited target context.
+  bool direct_body_is_contextual;
 } loom_inline_profitability_symbol_t;
 
 typedef struct loom_inline_plan_entry_t {

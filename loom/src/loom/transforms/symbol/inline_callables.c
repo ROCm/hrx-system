@@ -367,16 +367,13 @@ static void loom_inline_initialize_symbol_infos(
     info->symbol = &state->module->symbols.entries[i];
     info->function =
         loom_func_like_cast(state->module, info->symbol->defining_op);
-    info->direct_body_is_linear =
+    info->body_will_be_linear =
         loom_callable_body_is_linear(state->module, info->function);
-    info->body_will_be_linear = info->direct_body_is_linear;
     info->body_has_callable_exit =
         loom_symbol_reference_symbol_has_callable_exit(
             state->options.references, (loom_symbol_id_t)i);
-    info->direct_body_is_contextual =
-        loom_symbol_reference_symbol_is_contextual(state->options.references,
-                                                   (loom_symbol_id_t)i);
-    info->body_is_contextual = info->direct_body_is_contextual;
+    info->body_is_contextual = loom_symbol_reference_symbol_is_contextual(
+        state->options.references, (loom_symbol_id_t)i);
   }
 }
 
@@ -1158,6 +1155,11 @@ static iree_status_t loom_inline_initialize_profitability(
       state->profitability_symbols[i] = (loom_inline_profitability_symbol_t){
           .expanded_body_cost = UINT32_MAX,
           .first_candidate_by_target = LOOM_INLINE_PLAN_ENTRY_INVALID,
+          .direct_body_is_linear = loom_callable_body_is_linear(
+              state->module, state->symbols[i].function),
+          .direct_body_is_contextual =
+              loom_symbol_reference_symbol_is_contextual(
+                  state->options.references, (loom_symbol_id_t)i),
       };
     }
   }
@@ -1336,10 +1338,10 @@ static iree_status_t loom_inline_compute_direct_body_cost(
 static iree_status_t loom_inline_recompute_profitability_symbol(
     loom_inline_callables_plan_t* state, loom_symbol_id_t symbol_id) {
   loom_inline_symbol_info_t* source_info = &state->symbols[symbol_id];
-  source_info->body_will_be_linear = source_info->direct_body_is_linear;
-  source_info->body_is_contextual = source_info->direct_body_is_contextual;
   loom_inline_profitability_symbol_t* profitability =
       &state->profitability_symbols[symbol_id];
+  source_info->body_will_be_linear = profitability->direct_body_is_linear;
+  source_info->body_is_contextual = profitability->direct_body_is_contextual;
   IREE_RETURN_IF_ERROR(loom_inline_compute_direct_body_cost(
       state, symbol_id, &profitability->expanded_body_cost));
 
@@ -1604,13 +1606,15 @@ iree_status_t loom_inline_callables_plan_execute(
   if (loom_pass_has_error_diagnostics(state->pass)) {
     return iree_ok_status();
   }
-  const loom_scc_list_t required_sccs = state->sccs;
-  IREE_RETURN_IF_ERROR(
-      loom_inline_select_profitable_entries(state, &required_sccs));
-  loom_inline_preflight_required_entries(state);
-  IREE_RETURN_IF_ERROR(loom_inline_emit_blockers(state));
-  if (loom_pass_has_error_diagnostics(state->pass)) {
-    return iree_ok_status();
+  if (state->candidate_count != 0) {
+    const loom_scc_list_t required_sccs = state->sccs;
+    IREE_RETURN_IF_ERROR(
+        loom_inline_select_profitable_entries(state, &required_sccs));
+    loom_inline_preflight_required_entries(state);
+    IREE_RETURN_IF_ERROR(loom_inline_emit_blockers(state));
+    if (loom_pass_has_error_diagnostics(state->pass)) {
+      return iree_ok_status();
+    }
   }
   if (state->statistics.required_edges == 0 &&
       state->statistics.profitable_edges == 0) {
