@@ -1,6 +1,7 @@
 // RUN: emit source-low output=low
 
-// A direct-call target retains semantic calls, including noinline policy.
+// A direct-call target admits semantic calls. Profitability expands the
+// ordinary cohort while authored noinline retains its boundary.
 wasm.target<simd128> @target
 
 func.def target(@target) @callee(%value: i32, %delta: i32) -> (i32) {
@@ -21,7 +22,7 @@ low.func.def target<wasm.core.simd128>(@target) @callee(%value: reg<wasm.i32>, %
 }
 
 low.func.def public target<wasm.core.simd128>(@target) abi(wasm_function) @caller(%value: reg<wasm.i32>, %delta: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) asm {
-  %ordinary = low.func.call pure @callee(%value, %delta) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
-  %explicit = low.func.call pure noinline @callee(%ordinary, %delta) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
-  return %ordinary, %explicit
+  %result = i32.add %value, %delta
+  %explicit = low.func.call pure noinline @callee(%result, %delta) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  return %result, %explicit
 }

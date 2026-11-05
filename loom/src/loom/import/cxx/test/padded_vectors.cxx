@@ -58,6 +58,7 @@ static unsigned pack_padding(const unsigned char* first, const unsigned char* se
 }
 
 static Observation half_objects(Half3* values, unsigned index) {
+  loom::assume(index < 2u);
   values[0] = Half3{1.0f, 2.0f, 3.0f};
   values[1] = Half3{4.0f, 5.0f, 6.0f};
   auto* first_bytes = reinterpret_cast<unsigned char*>(&values[0]);

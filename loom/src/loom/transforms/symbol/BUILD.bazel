@@ -209,10 +209,28 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "inline_profitability",
+    srcs = ["inline_profitability.c"],
+    hdrs = ["inline_profitability.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "inline_profitability_test",
+    srcs = ["inline_profitability_test.cc"],
+    deps = [
+        ":inline_profitability",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "inline_callables",
     srcs = ["inline_callables.c"],
     hdrs = ["inline_callables.h"],
     deps = [
+        ":inline_profitability",
         "//loom/src/loom/analysis:availability",
         "//loom/src/loom/analysis:scc",
         "//loom/src/loom/analysis:symbol_references",
@@ -238,6 +256,7 @@ loom_cc_library(
         "//loom/src/loom/target:provider",
         "//loom/src/loom/transforms/cleanup:canonicalizer",
         "//loom/src/loom/transforms/cleanup:pass_environment",
+        "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
     ],
 )

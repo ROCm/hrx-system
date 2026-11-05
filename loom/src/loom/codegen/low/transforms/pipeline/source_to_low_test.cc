@@ -1277,8 +1277,9 @@ TEST_F(LowLowerPassTest, InvokeNormalizesToDirectLowCallWithPolicyPreserved) {
       .count = IREE_ARRAYSIZE(function_version_values),
   };
 
-  IREE_ASSERT_OK(RunInlineCallables(module.get(), &function_versions,
-                                    IREE_SV("policy=target")));
+  IREE_ASSERT_OK(
+      RunInlineCallables(module.get(), &function_versions,
+                         IREE_SV("budget=0,hot-budget=0,policy=target")));
   EXPECT_FALSE(iree_any_bit_set(call_op->flags, LOOM_OP_FLAG_DEAD));
   EXPECT_TRUE(HasSymbol(module.get(), IREE_SV("helper")));
 }
@@ -1595,8 +1596,9 @@ TEST_F(LowLowerPassTest, LowCallPolicyIsSelectedPerCallerProvider) {
       .count = IREE_ARRAYSIZE(function_version_values),
   };
 
-  IREE_ASSERT_OK(RunInlineCallables(module.get(), &function_versions,
-                                    IREE_SV("policy=target")));
+  IREE_ASSERT_OK(
+      RunInlineCallables(module.get(), &function_versions,
+                         IREE_SV("budget=0,hot-budget=0,policy=target")));
   EXPECT_FALSE(HasSymbol(module.get(), IREE_SV("required_helper")));
   EXPECT_TRUE(HasSymbol(module.get(), IREE_SV("direct_helper")));
 
@@ -1744,8 +1746,9 @@ TEST_F(LowLowerPassTest, CallPolicyDistinguishesSemanticAndLowStages) {
       .count = IREE_ARRAYSIZE(function_version_values),
   };
 
-  IREE_ASSERT_OK(RunInlineCallables(module.get(), &function_versions,
-                                    IREE_SV("policy=target")));
+  IREE_ASSERT_OK(
+      RunInlineCallables(module.get(), &function_versions,
+                         IREE_SV("budget=0,hot-budget=0,policy=target")));
   EXPECT_FALSE(HasSymbol(module.get(), IREE_SV("source_helper")));
   EXPECT_TRUE(HasSymbol(module.get(), IREE_SV("low_helper")));
 }

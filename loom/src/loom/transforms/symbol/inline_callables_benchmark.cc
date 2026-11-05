@@ -4,11 +4,11 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Benchmarks complete required-inline callable composition over verified
-// modules. Source construction, parsing, verification, per-iteration module
-// cloning, and target-version setup happen outside the timed region; each
-// measurement contains only the production inline-callables pass over a fresh
-// module.
+// Benchmarks required and profitability-selected callable composition over
+// verified modules. Source construction, parsing, verification, per-iteration
+// module cloning, and target-version setup happen outside the timed region;
+// each measurement contains only the production inline-callables pass over a
+// fresh module.
 
 #include <cstdint>
 #include <cstdlib>
@@ -45,6 +45,11 @@ enum class CallableMode : uint8_t {
   kTargetLow = 1,
 };
 
+enum class InlineSelection : uint8_t {
+  kRequired = 0,
+  kOptional = 1,
+};
+
 enum class CompositionShape : uint8_t {
   // Linear wrappers around one two-block CFG leaf. Output size is constant.
   kLinearCfgLeaf = 0,
@@ -66,6 +71,7 @@ enum class DefinitionRole : uint8_t {
 typedef struct CallableSyntax {
   const char* module_prefix;
   const char* private_definition;
+  const char* optional_private_definition;
   const char* public_definition;
   const char* body_introducer;
   const char* value_type;
@@ -77,6 +83,7 @@ typedef struct CallableSyntax {
 static constexpr CallableSyntax kAuthoredFuncSyntax = {
     .module_prefix = "",
     .private_definition = "func.def inline ",
+    .optional_private_definition = "func.def ",
     .public_definition = "func.def public ",
     .body_introducer = "{\n",
     .value_type = "i32",
@@ -88,6 +95,8 @@ static constexpr CallableSyntax kAuthoredFuncSyntax = {
 static constexpr CallableSyntax kTargetLowSyntax = {
     .module_prefix = "test.target<low_core> @target\n\n",
     .private_definition = "low.func.def target<test.low.core>(@target) ",
+    .optional_private_definition =
+        "low.func.def target<test.low.core>(@target) ",
     .public_definition = "low.func.def public target<test.low.core>(@target) ",
     .body_introducer = "{\n",
     .value_type = "reg<test.i32>",
@@ -98,6 +107,7 @@ static constexpr CallableSyntax kTargetLowSyntax = {
 
 typedef struct CompositionWorkload {
   CallableMode mode;
+  InlineSelection selection;
   CompositionShape shape;
   uint32_t scale;
 } CompositionWorkload;
@@ -115,9 +125,12 @@ static const CallableSyntax& SyntaxForMode(CallableMode mode) {
 static void AppendDefinitionHeader(std::string& source,
                                    const CallableSyntax& syntax,
                                    DefinitionRole role,
+                                   InlineSelection selection,
                                    const std::string& name) {
-  source.append(role == DefinitionRole::kPrivate ? syntax.private_definition
-                                                 : syntax.public_definition);
+  source.append(role == DefinitionRole::kPublic ? syntax.public_definition
+                : selection == InlineSelection::kRequired
+                    ? syntax.private_definition
+                    : syntax.optional_private_definition);
   source.push_back('@');
   source.append(name);
   source.append("(%value: ");
@@ -161,8 +174,9 @@ static void AppendReturn(std::string& source, const CallableSyntax& syntax,
 static void AppendCfgIdentityDefinition(std::string& source,
                                         const CallableSyntax& syntax,
                                         DefinitionRole role,
+                                        InlineSelection selection,
                                         const std::string& name) {
-  AppendDefinitionHeader(source, syntax, role, name);
+  AppendDefinitionHeader(source, syntax, role, selection, name);
   source.append("  ");
   source.append(syntax.branch_op);
   source.append(" ^exit(%value: ");
@@ -174,13 +188,11 @@ static void AppendCfgIdentityDefinition(std::string& source,
   source.append("}\n\n");
 }
 
-static void AppendCallingDefinition(std::string& source,
-                                    const CallableSyntax& syntax,
-                                    DefinitionRole role,
-                                    const std::string& name,
-                                    const std::string& callee_name,
-                                    CompositionShape shape) {
-  AppendDefinitionHeader(source, syntax, role, name);
+static void AppendCallingDefinition(
+    std::string& source, const CallableSyntax& syntax, DefinitionRole role,
+    InlineSelection selection, const std::string& name,
+    const std::string& callee_name, CompositionShape shape) {
+  AppendDefinitionHeader(source, syntax, role, selection, name);
   AppendCall(source, syntax, "%result", callee_name, "%value");
   if (shape == CompositionShape::kCfgChain ||
       shape == CompositionShape::kNestedSharedCfgFanout) {
@@ -206,16 +218,18 @@ static std::string BuildChainSource(const CompositionWorkload& workload) {
 
   const uint32_t leaf_index = workload.scale - 1;
   AppendCfgIdentityDefinition(source, syntax, DefinitionRole::kPrivate,
+                              workload.selection,
                               "helper_" + std::to_string(leaf_index));
   for (uint32_t callee_index = leaf_index; callee_index > 0; --callee_index) {
     const uint32_t caller_index = callee_index - 1;
-    AppendCallingDefinition(source, syntax, DefinitionRole::kPrivate,
-                            "helper_" + std::to_string(caller_index),
-                            "helper_" + std::to_string(callee_index),
-                            workload.shape);
+    AppendCallingDefinition(
+        source, syntax, DefinitionRole::kPrivate, workload.selection,
+        "helper_" + std::to_string(caller_index),
+        "helper_" + std::to_string(callee_index), workload.shape);
   }
-  AppendCallingDefinition(source, syntax, DefinitionRole::kPublic, "entry",
-                          "helper_0", CompositionShape::kLinearCfgLeaf);
+  AppendCallingDefinition(source, syntax, DefinitionRole::kPublic,
+                          workload.selection, "entry", "helper_0",
+                          CompositionShape::kLinearCfgLeaf);
   return source;
 }
 
@@ -228,15 +242,17 @@ static std::string BuildSharedFanoutSource(
 
   if (workload.shape == CompositionShape::kNestedSharedCfgFanout) {
     AppendCfgIdentityDefinition(source, syntax, DefinitionRole::kPrivate,
-                                "leaf");
-    AppendCallingDefinition(source, syntax, DefinitionRole::kPrivate, "shared",
-                            "leaf", workload.shape);
+                                workload.selection, "leaf");
+    AppendCallingDefinition(source, syntax, DefinitionRole::kPrivate,
+                            workload.selection, "shared", "leaf",
+                            workload.shape);
   } else {
     AppendCfgIdentityDefinition(source, syntax, DefinitionRole::kPrivate,
-                                "shared");
+                                workload.selection, "shared");
   }
 
-  AppendDefinitionHeader(source, syntax, DefinitionRole::kPublic, "entry");
+  AppendDefinitionHeader(source, syntax, DefinitionRole::kPublic,
+                         workload.selection, "entry");
   std::string operand_name = "%value";
   for (uint32_t call_index = 0; call_index < workload.scale; ++call_index) {
     const std::string result_name = "%result_" + std::to_string(call_index);
@@ -385,6 +401,7 @@ typedef struct RunMetrics {
   iree_host_size_t module_arena_bytes;
   iree_host_size_t pass_arena_bytes;
   int64_t required_edge_count;
+  int64_t profitable_edge_count;
   int64_t cloned_call_count;
   int64_t transferred_call_count;
 } RunMetrics;
@@ -452,6 +469,8 @@ class InlineCallablesBenchmarkFixture {
         workload_.mode == CallableMode::kTargetLow ? 2 : 1;
     const iree_host_size_t expected_block_count = ExpectedOutputBlockCount();
     const int64_t expected_required_edge_count = ExpectedRequiredEdgeCount();
+    const int64_t expected_profitable_edge_count =
+        ExpectedProfitableEdgeCount();
     const int64_t expected_transferred_call_count =
         ExpectedTransferredCallCount();
     if (metrics.output_shape.symbol_count != expected_symbol_count ||
@@ -459,9 +478,11 @@ class InlineCallablesBenchmarkFixture {
         metrics.output_shape.op_count != expected_block_count ||
         metrics.output_shape.call_count != 0 ||
         metrics.required_edge_count != expected_required_edge_count ||
+        metrics.profitable_edge_count != expected_profitable_edge_count ||
         metrics.transferred_call_count != expected_transferred_call_count ||
-        metrics.cloned_call_count !=
-            expected_required_edge_count - expected_transferred_call_count) {
+        metrics.cloned_call_count != expected_required_edge_count +
+                                         expected_profitable_edge_count -
+                                         expected_transferred_call_count) {
       std::abort();
     }
 
@@ -511,6 +532,9 @@ class InlineCallablesBenchmarkFixture {
   }
 
   int64_t ExpectedRequiredEdgeCount() const {
+    if (workload_.selection == InlineSelection::kOptional) {
+      return 0;
+    }
     switch (workload_.shape) {
       case CompositionShape::kLinearCfgLeaf:
       case CompositionShape::kCfgChain:
@@ -519,6 +543,22 @@ class InlineCallablesBenchmarkFixture {
         return workload_.scale;
       case CompositionShape::kNestedSharedCfgFanout:
         return workload_.scale + 1;
+    }
+    std::abort();
+  }
+
+  int64_t ExpectedProfitableEdgeCount() const {
+    if (workload_.selection == InlineSelection::kRequired) {
+      return 0;
+    }
+    switch (workload_.shape) {
+      case CompositionShape::kLinearCfgLeaf:
+      case CompositionShape::kCfgChain:
+        return workload_.scale;
+      case CompositionShape::kSharedCfgFanout:
+      case CompositionShape::kIndependentSharedCfgFanout:
+      case CompositionShape::kNestedSharedCfgFanout:
+        std::abort();
     }
     std::abort();
   }
@@ -552,9 +592,11 @@ class InlineCallablesBenchmarkFixture {
 };
 
 static void BM_InlineComposition(benchmark::State& state, CallableMode mode,
+                                 InlineSelection selection,
                                  CompositionShape shape) {
   const CompositionWorkload workload = {
       .mode = mode,
+      .selection = selection,
       .shape = shape,
       .scale = static_cast<uint32_t>(state.range(0)),
   };
@@ -593,9 +635,12 @@ static void BM_InlineComposition(benchmark::State& state, CallableMode mode,
         .environment =
             mode == CallableMode::kTargetLow ? &pass_environment : nullptr,
     };
-    const iree_string_view_t pass_options = mode == CallableMode::kTargetLow
-                                                ? IREE_SV("policy=target")
-                                                : IREE_SV("");
+    iree_string_view_t pass_options = IREE_SV("");
+    if (mode == CallableMode::kTargetLow) {
+      pass_options = IREE_SV("policy=target");
+    } else if (selection == InlineSelection::kOptional) {
+      pass_options = IREE_SV("budget=4294967295");
+    }
     IREE_CHECK_OK(loom_inline_callables_create(&pass, pass_options));
     state.ResumeTiming();
 
@@ -611,6 +656,8 @@ static void BM_InlineComposition(benchmark::State& state, CallableMode mode,
         .pass_arena_bytes = pass_arena.used_allocation_size,
         .required_edge_count = ReadPassStatistic(pass_info, statistic_storage,
                                                  IREE_SV("required-edges")),
+        .profitable_edge_count = ReadPassStatistic(pass_info, statistic_storage,
+                                                   IREE_SV("profitable-edges")),
         .cloned_call_count = ReadPassStatistic(pass_info, statistic_storage,
                                                IREE_SV("calls-cloned")),
         .transferred_call_count = ReadPassStatistic(
@@ -632,6 +679,8 @@ static void BM_InlineComposition(benchmark::State& state, CallableMode mode,
       static_cast<double>(fixture.input_shape().op_count);
   state.counters["required_edges"] =
       static_cast<double>(metrics.required_edge_count);
+  state.counters["profitable_edges"] =
+      static_cast<double>(metrics.profitable_edge_count);
   state.counters["calls_cloned"] =
       static_cast<double>(metrics.cloned_call_count);
   state.counters["calls_transferred"] =
@@ -659,66 +708,85 @@ static void RegisterCompositionScales(benchmark::Benchmark* benchmark) {
 }
 
 BENCHMARK_CAPTURE(BM_InlineComposition, Func_LinearCfgLeaf,
-                  CallableMode::kAuthoredFunc, CompositionShape::kLinearCfgLeaf)
+                  CallableMode::kAuthoredFunc, InlineSelection::kRequired,
+                  CompositionShape::kLinearCfgLeaf)
     ->Apply(RegisterCompositionScales)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();
 
 BENCHMARK_CAPTURE(BM_InlineComposition, Func_CfgChain,
-                  CallableMode::kAuthoredFunc, CompositionShape::kCfgChain)
+                  CallableMode::kAuthoredFunc, InlineSelection::kRequired,
+                  CompositionShape::kCfgChain)
     ->Apply(RegisterCompositionScales)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();
 
 BENCHMARK_CAPTURE(BM_InlineComposition, Func_SharedCfgFanout,
-                  CallableMode::kAuthoredFunc,
+                  CallableMode::kAuthoredFunc, InlineSelection::kRequired,
                   CompositionShape::kSharedCfgFanout)
     ->Apply(RegisterCompositionScales)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();
 
 BENCHMARK_CAPTURE(BM_InlineComposition, Func_IndependentSharedCfgFanout,
-                  CallableMode::kAuthoredFunc,
+                  CallableMode::kAuthoredFunc, InlineSelection::kRequired,
                   CompositionShape::kIndependentSharedCfgFanout)
     ->Apply(RegisterCompositionScales)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();
 
 BENCHMARK_CAPTURE(BM_InlineComposition, Func_NestedSharedCfgFanout,
-                  CallableMode::kAuthoredFunc,
+                  CallableMode::kAuthoredFunc, InlineSelection::kRequired,
                   CompositionShape::kNestedSharedCfgFanout)
     ->Apply(RegisterCompositionScales)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();
 
 BENCHMARK_CAPTURE(BM_InlineComposition, LowTarget_LinearCfgLeaf,
-                  CallableMode::kTargetLow, CompositionShape::kLinearCfgLeaf)
+                  CallableMode::kTargetLow, InlineSelection::kRequired,
+                  CompositionShape::kLinearCfgLeaf)
     ->Apply(RegisterCompositionScales)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();
 
 BENCHMARK_CAPTURE(BM_InlineComposition, LowTarget_CfgChain,
-                  CallableMode::kTargetLow, CompositionShape::kCfgChain)
+                  CallableMode::kTargetLow, InlineSelection::kRequired,
+                  CompositionShape::kCfgChain)
     ->Apply(RegisterCompositionScales)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();
 
 BENCHMARK_CAPTURE(BM_InlineComposition, LowTarget_SharedCfgFanout,
-                  CallableMode::kTargetLow, CompositionShape::kSharedCfgFanout)
+                  CallableMode::kTargetLow, InlineSelection::kRequired,
+                  CompositionShape::kSharedCfgFanout)
     ->Apply(RegisterCompositionScales)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();
 
 BENCHMARK_CAPTURE(BM_InlineComposition, LowTarget_IndependentSharedCfgFanout,
-                  CallableMode::kTargetLow,
+                  CallableMode::kTargetLow, InlineSelection::kRequired,
                   CompositionShape::kIndependentSharedCfgFanout)
     ->Apply(RegisterCompositionScales)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();
 
 BENCHMARK_CAPTURE(BM_InlineComposition, LowTarget_NestedSharedCfgFanout,
-                  CallableMode::kTargetLow,
+                  CallableMode::kTargetLow, InlineSelection::kRequired,
                   CompositionShape::kNestedSharedCfgFanout)
+    ->Apply(RegisterCompositionScales)
+    ->Unit(benchmark::kMicrosecond)
+    ->Complexity();
+
+BENCHMARK_CAPTURE(BM_InlineComposition, OptionalFunc_LinearCfgLeaf,
+                  CallableMode::kAuthoredFunc, InlineSelection::kOptional,
+                  CompositionShape::kLinearCfgLeaf)
+    ->Apply(RegisterCompositionScales)
+    ->Unit(benchmark::kMicrosecond)
+    ->Complexity();
+
+BENCHMARK_CAPTURE(BM_InlineComposition, OptionalFunc_CfgChain,
+                  CallableMode::kAuthoredFunc, InlineSelection::kOptional,
+                  CompositionShape::kCfgChain)
     ->Apply(RegisterCompositionScales)
     ->Unit(benchmark::kMicrosecond)
     ->Complexity();

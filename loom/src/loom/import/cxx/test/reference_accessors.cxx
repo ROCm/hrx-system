@@ -76,6 +76,7 @@ static unsigned& identity(unsigned& value) { return value; }
 static unsigned& forward(unsigned& value) { return identity(value); }
 
 static unsigned storage_alias(unsigned sample, unsigned input, unsigned index) {
+  loom::assume(index < 4u);
   volatile unsigned observed = sample;
   unsigned values[4] = {input, 3u, 5u, 7u};
   unsigned& element = at(values, index);
@@ -98,6 +99,7 @@ struct Array1D {
 };
 
 static unsigned array_access(unsigned value, int index) {
+  loom::assume(index >= 1 && index <= 4);
   Array1D<unsigned, 1, 4> array{};
   array[index] = value;
   array(index) += 2u;
@@ -115,6 +117,7 @@ struct Matrix {
 };
 
 static unsigned matrix_access(unsigned value, unsigned row, unsigned column) {
+  loom::assume(row < 2u && column < 3u);
   unsigned values[2][3] = {};
   Matrix<unsigned, 2, 3> matrix{values};
   matrix(row, column) = value;

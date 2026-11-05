@@ -7,7 +7,7 @@ func.def public @call_mixed_i32(%input: vector<1xi32>, %delta: i32) -> (i32, i32
   func.return %mixed, %uniform : i32, i32
 }
 
-func.def @add_i32(%value: i32, %delta: i32) -> (i32) {
+func.def noinline @add_i32(%value: i32, %delta: i32) -> (i32) {
   %wide_value = scalar.extui %value : i32 to i64
   %wide_delta = scalar.extui %delta : i32 to i64
   %sum = scalar.addi %wide_value, %wide_delta : i64
@@ -23,7 +23,7 @@ low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signa
   return %mixed, %uniform
 }
 
-low.func.def target<x86.avx2.core> @add_i32(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def noinline target<x86.avx2.core> @add_i32(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %wide_value = movzx.gpr64.gpr32 %value
   %wide_delta = movzx.gpr64.gpr32 %delta
   %26 = copy %wide_value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -41,7 +41,7 @@ func.def public @call_mixed_i64(%input: vector<1xi64>, %delta: i64) -> (i64, i64
   func.return %mixed, %uniform : i64, i64
 }
 
-func.def @add_i64(%value: i64, %delta: i64) -> (i64) {
+func.def noinline @add_i64(%value: i64, %delta: i64) -> (i64) {
   %result = scalar.addi %value, %delta : i64
   func.return %result : i64
 }
@@ -54,7 +54,7 @@ low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signa
   return %mixed, %uniform
 }
 
-low.func.def target<x86.avx2.core> @add_i64(%value: reg<x86.gpr64>, %delta: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def noinline target<x86.avx2.core> @add_i64(%value: reg<x86.gpr64>, %delta: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %21 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
   %result = add.gpr64 %21, %delta
   return %result
@@ -98,7 +98,7 @@ func.def public @call_loop(%input: vector<1xi32>, %delta: i32, %count: index) ->
   func.return %result : i32
 }
 
-func.def @repeat_add(%value: i32, %delta: i32, %count: index) -> (i32) {
+func.def noinline @repeat_add(%value: i32, %delta: i32, %count: index) -> (i32) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %result = scf.for %i = [%c0 to %count step %c1](%current = %value : i32) -> (i32) {
@@ -108,7 +108,7 @@ func.def @repeat_add(%value: i32, %delta: i32, %count: index) -> (i32) {
   func.return %result : i32
 }
 
-func.def @advance_i32(%value: i32, %delta: i32) -> (i32) {
+func.def noinline @advance_i32(%value: i32, %delta: i32) -> (i32) {
   %result = scalar.addi %value, %delta : i32
   func.return %result : i32
 }
@@ -120,7 +120,7 @@ low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signa
   return %result
 }
 
-low.func.def target<x86.avx2.core> @repeat_add(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>, %count: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def noinline target<x86.avx2.core> @repeat_add(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>, %count: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %c0 = mov.imm64 0
   low.br ^_bb1(%c0: reg<x86.gpr64>, %value: reg<x86.gpr32>)
 ^_bb1(%i: reg<x86.gpr64>, %current: reg<x86.gpr32>):
@@ -133,7 +133,7 @@ low.func.def target<x86.avx2.core> @repeat_add(%value: reg<x86.gpr32>, %delta: r
   return %current
 }
 
-low.func.def target<x86.avx2.core> @advance_i32(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def noinline target<x86.avx2.core> @advance_i32(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %44 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %result = add.gpr32 %44, %delta
   return %result
@@ -146,7 +146,7 @@ func.def public @call_scalar(%value: i32, %delta: i32) -> (i32) {
   func.return %result : i32
 }
 
-func.def @scalar_add(%value: i32, %delta: i32) -> (i32) {
+func.def noinline @scalar_add(%value: i32, %delta: i32) -> (i32) {
   %result = scalar.addi %value, %delta : i32
   func.return %result : i32
 }
@@ -157,7 +157,7 @@ low.func.def public target<x86.avx2.core> abi(object_function) @call_scalar(%val
   return %result
 }
 
-low.func.def target<x86.avx2.core> @scalar_add(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def noinline target<x86.avx2.core> @scalar_add(%value: reg<x86.gpr32>, %delta: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %15 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %result = add.gpr32 %15, %delta
   return %result

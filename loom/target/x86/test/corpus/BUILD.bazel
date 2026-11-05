@@ -53,8 +53,6 @@ loom_corpus_test(
     target_compatible_with = ["@platforms//cpu:x86_64"],
     xfails = {
         X86_TASK_HARDWARE_PROFILE.name: {
-            "function/rodata.loom:@rodata_copy_values": "SUBRANGE/026",
-            "function/rodata.loom:@rodata_extent_values": "TARGET/001",
             "numeric/float/activations.loom:@activation_portable_values": "LOWERING/036",
             "numeric/float/activations.loom:@activation_values": "LOWERING/036",
             "numeric/float/activations.loom:@ordinary_activation_values": "LOWERING/036",

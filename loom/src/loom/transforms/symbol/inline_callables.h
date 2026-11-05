@@ -10,6 +10,7 @@
 #include "loom/analysis/symbol_references.h"
 #include "loom/pass/types.h"
 #include "loom/target/function_version.h"
+#include "loom/transforms/symbol/inline_profitability.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,6 +52,9 @@ typedef struct loom_inline_callables_plan_options_t {
   // Defers required semantic calls whose callee directly owns func.exit until
   // a later completion plan can preserve the callable exit destination.
   bool defer_callable_exits;
+  // Materialization budgets for otherwise optional ordinary calls. Zeroed
+  // options preserve only explicit, structural, and target-required expansion.
+  loom_inline_profitability_options_t profitability;
 } loom_inline_callables_plan_options_t;
 
 // Arena-owned call plan shared with the driver that establishes applicability.
@@ -90,9 +94,11 @@ const loom_pass_info_t* loom_inline_callables_pass_info(void);
 iree_status_t loom_inline_callables_create(loom_pass_t* pass,
                                            iree_string_view_t options);
 
-// Runs module-level required callable inlining. Command program calls expand
-// with their serial ordering intact. Template calls stay intact;
-// select-templates{rewrite=inline} owns their applicability and expansion.
+// Runs module-level callable inlining. Required calls always expand; optional
+// calls expand in whole callee cohorts selected by the configured ordinary and
+// hot profitability budgets. Command program calls expand with their serial
+// ordering intact. Template calls stay intact; select-templates{rewrite=inline}
+// owns their applicability and expansion.
 iree_status_t loom_inline_callables_run(loom_pass_t* pass,
                                         loom_module_t* module);
 

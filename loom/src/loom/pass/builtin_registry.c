@@ -93,6 +93,18 @@ static const loom_pass_option_enum_value_t kInlineCallablesStageValues[] = {
 
 static const loom_pass_option_schema_t kInlineCallablesOptionSchema[] = {
     {
+        .name = IREE_SVL("budget"),
+        .kind = LOOM_PASS_OPTION_SCHEMA_UINT32,
+        .minimum_uint32 = 0,
+        .maximum_uint32 = UINT32_MAX,
+    },
+    {
+        .name = IREE_SVL("hot-budget"),
+        .kind = LOOM_PASS_OPTION_SCHEMA_UINT32,
+        .minimum_uint32 = 0,
+        .maximum_uint32 = UINT32_MAX,
+    },
+    {
         .name = IREE_SVL("policy"),
         .kind = LOOM_PASS_OPTION_SCHEMA_ENUM,
         .enum_values = kInlineCallablesPolicyValues,

@@ -1,0 +1,304 @@
+// RUN: pass inline-callables
+
+func.def public @tiny_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @default_budget_entry(%value: i32) -> (i32) {
+  %result = func.call @tiny_helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public @tiny_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @default_budget_entry(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass inline-callables{budget=1,hot-budget=1}
+
+func.def public @over_budget_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @over_budget_entry(%value: i32) -> (i32) {
+  %result = func.call @over_budget_helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public @over_budget_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @over_budget_entry(%value: i32) -> (i32) {
+  %result = func.call @over_budget_helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass inline-callables{budget=1,hot-budget=2}
+
+func.def public hot @hot_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @hot_budget_entry(%value: i32) -> (i32) {
+  %result = func.call @hot_helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public hot @hot_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @hot_budget_entry(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass inline-callables{budget=3,hot-budget=2}
+
+func.def public @mixed_temperature_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @mixed_temperature_entry(%value: i32) -> (i32, i32) {
+  %ordinary = func.call @mixed_temperature_helper(%value) : (i32) -> (i32)
+  %hot = func.call hot @mixed_temperature_helper(%value) : (i32) -> (i32)
+  func.return %ordinary, %hot : i32, i32
+}
+
+// ----
+func.def public @mixed_temperature_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @mixed_temperature_entry(%value: i32) -> (i32, i32) {
+  %ordinary = func.call @mixed_temperature_helper(%value) : (i32) -> (i32)
+  %result = test.addi %value, %value : i32
+  func.return %ordinary, %result : i32, i32
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+func.def public cold @cold_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @cold_entry(%value: i32) -> (i32) {
+  %result = func.call @cold_helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public cold @cold_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @cold_entry(%value: i32) -> (i32) {
+  %result = func.call @cold_helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass inline-callables{budget=0,hot-budget=0}
+
+func.def @disabled_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @disabled_entry(%value: i32) -> (i32) {
+  %result = func.call @disabled_helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def @disabled_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @disabled_entry(%value: i32) -> (i32) {
+  %result = func.call @disabled_helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass inline-callables{budget=3,hot-budget=0}
+
+func.def inline @required_leaf(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+func.def public @expanded_helper(%value: i32) -> (i32) {
+  %inner = func.call @required_leaf(%value) : (i32) -> (i32)
+  %result = test.addi %inner, %value : i32
+  func.return %result : i32
+}
+
+func.def public @expanded_cost_entry(%value: i32) -> (i32) {
+  %result = func.call @expanded_helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public @expanded_helper(%value: i32) -> (i32) {
+  %result$2 = test.addi %value, %value : i32
+  %result$6 = test.addi %result$2, %value : i32
+  func.return %result$6 : i32
+}
+
+func.def public @expanded_cost_entry(%value: i32) -> (i32) {
+  %result = func.call @expanded_helper(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// RUN: pass inline-callables{budget=3,hot-budget=0}
+
+func.def @single_use_selected(%value: i32) -> (i32) {
+  %first = test.addi %value, %value : i32
+  %second = test.addi %first, %value : i32
+  func.return %second : i32
+}
+
+func.def @single_use_retained(%value: i32) -> (i32) {
+  %first = test.addi %value, %value : i32
+  %second = test.addi %first, %value : i32
+  %third = test.addi %second, %value : i32
+  func.return %third : i32
+}
+
+func.def public @single_use_entry(%value: i32) -> (i32, i32) {
+  %selected = func.call @single_use_selected(%value) : (i32) -> (i32)
+  %retained = func.call @single_use_retained(%value) : (i32) -> (i32)
+  func.return %selected, %retained : i32, i32
+}
+
+// ----
+
+func.def @single_use_retained(%value: i32) -> (i32) {
+  %first = test.addi %value, %value : i32
+  %second = test.addi %first, %value : i32
+  %third = test.addi %second, %value : i32
+  func.return %third : i32
+}
+
+func.def public @single_use_entry(%value: i32) -> (i32, i32) {
+  %first = test.addi %value, %value : i32
+  %second = test.addi %first, %value : i32
+  %retained = func.call @single_use_retained(%value) : (i32) -> (i32)
+  func.return %second, %retained : i32, i32
+}
+
+// ====
+
+// A wide vector operation is one IR operation but occupies multiple payload
+// words and can expand into multiple target operations.
+// RUN: pass inline-callables{budget=16,hot-budget=0}
+
+func.def @wide_helper(%lhs: vector<8xi64>, %rhs: vector<8xi64>) -> (vector<8xi64>) {
+  %result = vector.addi %lhs, %rhs : vector<8xi64>
+  func.return %result : vector<8xi64>
+}
+
+func.def public @wide_entry(%lhs: vector<8xi64>, %rhs: vector<8xi64>) -> (vector<8xi64>) {
+  %result = func.call @wide_helper(%lhs, %rhs) : (vector<8xi64>, vector<8xi64>) -> (vector<8xi64>)
+  func.return %result : vector<8xi64>
+}
+
+// ----
+
+func.def @wide_helper(%lhs: vector<8xi64>, %rhs: vector<8xi64>) -> (vector<8xi64>) {
+  %result = vector.addi %lhs, %rhs : vector<8xi64>
+  func.return %result : vector<8xi64>
+}
+
+func.def public @wide_entry(%lhs: vector<8xi64>, %rhs: vector<8xi64>) -> (vector<8xi64>) {
+  %result = func.call @wide_helper(%lhs, %rhs) : (vector<8xi64>, vector<8xi64>) -> (vector<8xi64>)
+  func.return %result : vector<8xi64>
+}
+
+// ====
+
+// RUN: pass inline-callables
+
+func.def public @recursive_a(%value: i32) -> (i32) {
+  %result = func.call @recursive_b(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public @recursive_b(%value: i32) -> (i32) {
+  %result = func.call @recursive_a(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ----
+func.def public @recursive_a(%value: i32) -> (i32) {
+  %result = func.call @recursive_b(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+func.def public @recursive_b(%value: i32) -> (i32) {
+  %result = func.call @recursive_a(%value) : (i32) -> (i32)
+  func.return %result : i32
+}
+
+// ====
+
+// Calls in independent execution scopes remain available for outlining. The
+// outlined worker receives its own profitability decision.
+// RUN: pass inline-callables
+
+func.def @strand_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+pipeline.def public @strand_owner() run() {
+  pipeline.strand workers([0], [1], [1]) {
+    %value = scalar.constant 1 : i32
+    %result = func.call @strand_helper(%value) : (i32) -> (i32)
+  }
+}
+
+// ----
+func.def @strand_helper(%value: i32) -> (i32) {
+  %result = test.addi %value, %value : i32
+  func.return %result : i32
+}
+
+pipeline.def public @strand_owner() run() {
+  pipeline.strand workers([0], [1], [1]) {
+    %value = scalar.constant 1 : i32
+    %result = func.call @strand_helper(%value) : (i32) -> (i32)
+  }
+}

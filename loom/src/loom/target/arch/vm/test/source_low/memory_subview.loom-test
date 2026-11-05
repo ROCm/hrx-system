@@ -121,7 +121,7 @@ low.func.def target<vm.core> abi(vm_function) @subview_prefetch_strided(%input: 
 
 // ====
 
-func.def @make_storage_crop(%input: buffer, %origin: offset, %columns: index) -> (%result_storage: encoding<storage>, view<2x3xf32, %result_storage>) {
+func.def noinline @make_storage_crop(%input: buffer, %origin: offset, %columns: index) -> (%result_storage: encoding<storage>, view<2x3xf32, %result_storage>) {
   %layout = encoding.layout.strided [%columns, 1] : encoding<layout>
   %schema = encoding.define #encoding.f32 : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
@@ -131,7 +131,7 @@ func.def @make_storage_crop(%input: buffer, %origin: offset, %columns: index) ->
   func.return %crop_storage, %crop : encoding<storage>, view<2x3xf32, %crop_storage>
 }
 
-func.def @read_storage_crop(%storage: encoding<storage>, %crop: view<2x3xf32, %storage>) -> (f32) {
+func.def noinline @read_storage_crop(%storage: encoding<storage>, %crop: view<2x3xf32, %storage>) -> (f32) {
   %value = view.load %crop[1, 1] : view<2x3xf32, %storage> -> f32
   func.return %value : f32
 }
@@ -149,7 +149,7 @@ func.def public @subview_composed_helpers(%input: buffer, %output: buffer, %widt
 }
 
 // ----
-low.func.def target<vm.core> @make_storage_crop(%input_aligned: reg<vm.ref : buffer>, %columns: reg<vm.value : i64>) -> (%result_storage_stride_0: reg<vm.value : i64>, %result_storage_stride_1: reg<vm.value : i64>, reg<vm.ref : buffer>, reg<vm.value : i64>) asm {
+low.func.def noinline target<vm.core> @make_storage_crop(%input_aligned: reg<vm.ref : buffer>, %columns: reg<vm.value : i64>) -> (%result_storage_stride_0: reg<vm.value : i64>, %result_storage_stride_1: reg<vm.value : i64>, reg<vm.ref : buffer>, reg<vm.value : i64>) asm {
   %67 = constant.i64 16
   %68 = constant.i64 4
   %69 = integer.mul.i64 %columns, %68
@@ -158,7 +158,7 @@ low.func.def target<vm.core> @make_storage_crop(%input_aligned: reg<vm.ref : buf
   return %columns, %71, %input_aligned, %70
 }
 
-low.func.def target<vm.core> @read_storage_crop(%storage_stride_0: reg<vm.value : i64>, %storage_stride_1: reg<vm.value : i64>, %crop: reg<vm.ref : buffer>, %crop_offset: reg<vm.value : i64>) -> (reg<vm.value : f32>) asm {
+low.func.def noinline target<vm.core> @read_storage_crop(%storage_stride_0: reg<vm.value : i64>, %storage_stride_1: reg<vm.value : i64>, %crop: reg<vm.ref : buffer>, %crop_offset: reg<vm.value : i64>) -> (reg<vm.value : f32>) asm {
   %77 = constant.i64 2 : reg<vm.value>
   %78 = integer.shift.left.i64 %storage_stride_0, %77
   %79 = integer.add.i64 %crop_offset, %78

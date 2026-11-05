@@ -126,7 +126,7 @@ low.func.def target<wasm.core.simd128> abi(wasm_function) @subview_prefetch_stri
 // Ordinary helpers preserve exact caller facts without requiring source
 // inlining. The exact origin makes the initial view legal; the runtime-varying
 // row stride still prevents the nested offset from fitting Wasm's address type.
-func.def @make_storage_crop(%input: buffer, %origin: offset, %columns: index) -> (%result_storage: encoding<storage>, view<2x3xf32, %result_storage>) {
+func.def cold @make_storage_crop(%input: buffer, %origin: offset, %columns: index) -> (%result_storage: encoding<storage>, view<2x3xf32, %result_storage>) {
   %layout = encoding.layout.strided [%columns, 1] : encoding<layout>
   %schema = encoding.define #encoding.f32 : encoding<schema>
   %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
