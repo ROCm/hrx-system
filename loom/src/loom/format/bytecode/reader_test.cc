@@ -1654,6 +1654,67 @@ class ReaderTest : public ::testing::Test {
     return module;
   }
 
+  loom_module_t* CreateWideBodyOpModule() {
+    loom_module_t* module = CreateModule("reader_wide_body_op");
+    loom_type_t i32 = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+    IREE_CHECK_OK(loom_module_intern_type(module, i32, &i32));
+
+    loom_builder_t module_builder;
+    loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                            &module_builder);
+    loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
+    IREE_CHECK_OK(
+        loom_builder_intern_string(&module_builder, IREE_SV("wide"), &name_id));
+    uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
+    IREE_CHECK_OK(loom_module_add_symbol(module, name_id, &symbol_id));
+    const loom_symbol_ref_t symbol = {
+        .module_id = 0,
+        .symbol_id = symbol_id,
+    };
+    loom_type_t argument_types[17];
+    loom_type_t result_types[17];
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(argument_types); ++i) {
+      argument_types[i] = i32;
+      result_types[i] = i32;
+    }
+    loom_op_t* func_op = nullptr;
+    IREE_CHECK_OK(loom_test_func_build(
+        &module_builder, /*build_flags=*/0, /*visibility=*/0, /*cc=*/0, symbol,
+        argument_types, IREE_ARRAYSIZE(argument_types),
+        /*result_types=*/nullptr,
+        /*result_count=*/0, /*result_dims=*/nullptr, /*result_dim_count=*/0,
+        /*result_encodings=*/nullptr, /*result_encoding_count=*/0,
+        LOOM_LOCATION_UNKNOWN, &func_op));
+
+    loom_func_like_t function = loom_func_like_cast(module, func_op);
+    uint16_t argument_count = 0;
+    const loom_value_id_t* arguments =
+        loom_func_like_arg_ids(function, &argument_count);
+    if (argument_count != IREE_ARRAYSIZE(argument_types)) {
+      ADD_FAILURE() << "expected 17 wide function arguments";
+      return module;
+    }
+    loom_builder_t body_builder;
+    loom_builder_initialize(
+        module, &module->arena,
+        loom_region_entry_block(loom_func_like_body(function)), &body_builder);
+    loom_op_t* assume_op = nullptr;
+    IREE_CHECK_OK(loom_test_assume_build(
+        &body_builder, arguments, argument_count, /*predicates=*/nullptr,
+        /*predicates_count=*/0, result_types, IREE_ARRAYSIZE(result_types),
+        LOOM_LOCATION_UNKNOWN, &assume_op));
+    const loom_value_slice_t results = loom_test_assume_results(assume_op);
+    loom_op_t* use_op = nullptr;
+    IREE_CHECK_OK(loom_test_use_build(&body_builder, results.values,
+                                      results.count, LOOM_LOCATION_UNKNOWN,
+                                      &use_op));
+    loom_op_t* yield_op = nullptr;
+    IREE_CHECK_OK(loom_test_yield_build(&body_builder, /*values=*/nullptr,
+                                        /*value_count=*/0,
+                                        LOOM_LOCATION_UNKNOWN, &yield_op));
+    return module;
+  }
+
   std::vector<uint8_t> WriteModule(
       const loom_module_t* module,
       const loom_bytecode_write_options_t* options = nullptr) {
@@ -5115,6 +5176,10 @@ TEST_F(ReaderTest, CanonicalRoundTripPreservesBodyShapes) {
   loom_module_t* co_result_module = CreateCoResultDimFunctionModule();
   ExpectCanonicalBytecodeRoundTrip(co_result_module);
   loom_module_free(co_result_module);
+
+  loom_module_t* wide_module = CreateWideBodyOpModule();
+  ExpectCanonicalBytecodeRoundTrip(wide_module);
+  loom_module_free(wide_module);
 }
 
 TEST_F(ReaderTest, CanonicalRoundTripPreservesTypesAttrsAndPredicates) {
