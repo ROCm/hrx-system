@@ -217,6 +217,19 @@ iree-cmake-configure -DCMAKE_BUILD_TYPE=Release -DCMAKE_INTERPROCEDURAL_OPTIMIZA
 This enables interprocedural optimization for targets throughout the build,
 except components with explicit exclusions such as the mimalloc adapter.
 
+### Debug information
+
+Linux builds compress full DWARF debug information with zlib in both object
+files and linked binaries. Archives remain self-contained, and debuggers retain
+source lines, inline frames, types, and local variables. This reduces build
+artifact storage and transfer without adding a runtime library dependency or
+enabling debug information in optimized profiles that otherwise omit it.
+Windows PDB and macOS debug information are unchanged.
+
+For tools without compressed-DWARF support, disable this with Bazel's
+`--features=-compressed_debug_info --host_features=-compressed_debug_info`
+or CMake's `-DIREE_ENABLE_COMPRESSED_DEBUG_INFO=OFF`.
+
 ### Sanitizers
 
 Bazel selects sanitizer instrumentation with named configurations:

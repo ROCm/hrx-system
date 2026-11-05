@@ -1,0 +1,27 @@
+diff --git a/cc/private/toolchain/unix_cc_toolchain_config.bzl b/cc/private/toolchain/unix_cc_toolchain_config.bzl
+--- a/cc/private/toolchain/unix_cc_toolchain_config.bzl
++++ b/cc/private/toolchain/unix_cc_toolchain_config.bzl
+@@ -2022,6 +2022,23 @@
+
+     if symbol_check:
+         features.append(symbol_check)
++
++    if is_linux:
++        features.append(feature(
++            name = "compressed_debug_info",
++            flag_sets = [
++                flag_set(
++                    actions = all_compile_actions + [ACTION_NAMES.lto_backend],
++                    flag_groups = [flag_group(flags = ["-gz=zlib"])],
++                ),
++                flag_set(
++                    actions = all_link_actions,
++                    flag_groups = [flag_group(flags = [
++                        "-Wl,--compress-debug-sections=zlib",
++                    ])],
++                ),
++            ],
++        ))
+
+     extra_rules_based_features = depset(ctx.attr.extra_enabled_features + ctx.attr.extra_known_features)
+     features.extend([convert_feature(extra_feature[FeatureInfo], enabled = extra_feature in ctx.attr.extra_enabled_features) for extra_feature in extra_rules_based_features.to_list()])

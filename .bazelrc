@@ -52,6 +52,11 @@ build --guard_against_concurrent_changes
 # compiling dependencies separately for each linkage mode.
 build --host_features=prefer_pic_for_opt_binaries
 
+# ELF toolchains compress full debug information in objects and linked outputs.
+# This does not enable debug information in profiles that otherwise omit it.
+build --features=compressed_debug_info
+build --host_features=compressed_debug_info
+
 # Preserve runfiles trees on Windows and Unix-like hosts.
 startup --windows_enable_symlinks
 build --enable_runfiles

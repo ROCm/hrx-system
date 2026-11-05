@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
 include(CheckLinkerFlag)
 include(CheckSymbolExists)
@@ -233,6 +234,29 @@ macro(iree_setup_toolchain)
   #-----------------------------------------------------------------------------
   # Build performance optimizations
   #-----------------------------------------------------------------------------
+
+  # Keep debug data self-contained while reducing object/archive and link-output
+  # traffic. Compilation and linking both need compression: a linker otherwise
+  # expands compressed input sections into an uncompressed output.
+  if(IREE_ENABLE_COMPRESSED_DEBUG_INFO AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    check_c_compiler_flag(-gz=zlib IREE_C_SUPPORTS_COMPRESSED_DEBUG_INFO)
+    check_cxx_compiler_flag(-gz=zlib IREE_CXX_SUPPORTS_COMPRESSED_DEBUG_INFO)
+    check_linker_flag(C "-Wl,--compress-debug-sections=zlib"
+      IREE_C_LINKER_SUPPORTS_COMPRESSED_DEBUG_INFO)
+    check_linker_flag(CXX "-Wl,--compress-debug-sections=zlib"
+      IREE_CXX_LINKER_SUPPORTS_COMPRESSED_DEBUG_INFO)
+    if(NOT IREE_C_SUPPORTS_COMPRESSED_DEBUG_INFO OR
+       NOT IREE_CXX_SUPPORTS_COMPRESSED_DEBUG_INFO OR
+       NOT IREE_C_LINKER_SUPPORTS_COMPRESSED_DEBUG_INFO OR
+       NOT IREE_CXX_LINKER_SUPPORTS_COMPRESSED_DEBUG_INFO)
+      message(FATAL_ERROR
+        "Debug compression requires a compiler and linker with zlib support. "
+        "Use a supported Clang/GCC toolchain or set "
+        "IREE_ENABLE_COMPRESSED_DEBUG_INFO=OFF.")
+    endif()
+    add_compile_options(-gz=zlib)
+    add_link_options("LINKER:--compress-debug-sections=zlib")
+  endif()
 
   # Split DWARF breaks debug information out of object files and stores them in
   # separate .dwo files. This reduces a lot of needless I/O during normal build
