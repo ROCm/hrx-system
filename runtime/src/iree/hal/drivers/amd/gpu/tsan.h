@@ -10,6 +10,7 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/gpu/context.h"
+#include "iree/hal/resource.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -84,8 +85,9 @@ void iree_hal_amd_gpu_tsan_deinitialize(
 typedef struct iree_hal_amd_gpu_tsan_registry_t
     iree_hal_amd_gpu_tsan_registry_t;
 
-// Embedded in an instrumented image owner; callbacks run under the cold
-// registry lock. The registry borrows clients and never retains executables.
+// Embedded in an instrumented resource owner. Membership borrows the resource;
+// queue edits temporarily retain live clients while invoking their callbacks.
+// Final resource destruction unregisters before releasing any client storage.
 typedef struct iree_hal_amd_gpu_tsan_client_t {
   // Registry containing this client, or NULL before registration/after removal.
   iree_hal_amd_gpu_tsan_registry_t* registry;
@@ -93,8 +95,8 @@ typedef struct iree_hal_amd_gpu_tsan_client_t {
   struct iree_hal_amd_gpu_tsan_client_t* previous;
   // Next live image.
   struct iree_hal_amd_gpu_tsan_client_t* next;
-  // Borrowed image owner, valid through removal.
-  void* user_data;
+  // Borrowed image owner; final destruction unlinks under clients_mutex.
+  iree_hal_resource_t* resource;
   // Prepares the image's native placement before a queue can accept work.
   iree_status_t (*prepare)(void* user_data, uint32_t ordinal,
                            const iree_hal_amd_gpu_tsan_config_t* config);
@@ -102,7 +104,7 @@ typedef struct iree_hal_amd_gpu_tsan_client_t {
   void (*release)(void* user_data, uint32_t ordinal);
 } iree_hal_amd_gpu_tsan_client_t;
 
-// Optional device-owned cold membership, allocated only with shader TSAN.
+// Device-owned image membership, allocated only with shader TSAN.
 // Queue zero is provisioned for the device lifetime and supplies each image's
 // canonical placement. Additional shadows exist only while their queues live.
 struct iree_hal_amd_gpu_tsan_registry_t {
@@ -110,8 +112,10 @@ struct iree_hal_amd_gpu_tsan_registry_t {
   const iree_hal_amd_gpu_context_t* context;
   // Allocator for individual shadow owners.
   iree_allocator_t host_allocator;
-  // Serializes cold image and queue membership, never dispatch or retirement.
-  iree_slim_mutex_t mutex;
+  // Serializes queue changes and image preparation, not image destruction.
+  iree_slim_mutex_t queues_mutex;
+  // Protects client links and conditional retention; callbacks run outside it.
+  iree_slim_mutex_t clients_mutex;
   // Immutable shadow geometry shared by all queues.
   iree_hal_amd_gpu_tsan_options_t options;
   // Exact native family using these shadows.
@@ -152,7 +156,9 @@ iree_status_t iree_hal_amd_gpu_tsan_registry_register(
     iree_hal_amd_gpu_tsan_registry_t* registry,
     iree_hal_amd_gpu_tsan_client_t* client);
 
-// Unlinks a client before its owner releases placements. No native work occurs.
+// Unlinks a client during final destruction before its owner releases
+// placements. No native work occurs, and removal never waits for queue/image
+// preparation.
 void iree_hal_amd_gpu_tsan_registry_unregister(
     iree_hal_amd_gpu_tsan_client_t* client);
 

@@ -170,7 +170,8 @@ void iree_hal_amd_gpu_tsan_registry_initialize(
       .family_ordinal = family_ordinal,
       .provisioned_count = provisioned_count,
   };
-  iree_slim_mutex_initialize(&registry->mutex);
+  iree_slim_mutex_initialize(&registry->queues_mutex);
+  iree_slim_mutex_initialize(&registry->clients_mutex);
 }
 
 void iree_hal_amd_gpu_tsan_registry_deinitialize(
@@ -183,7 +184,50 @@ void iree_hal_amd_gpu_tsan_registry_deinitialize(
   for (uint32_t i = 0; i < registry->count; ++i) {
     iree_hal_amd_gpu_tsan_registry_remove_queue(registry, i);
   }
-  iree_slim_mutex_deinitialize(&registry->mutex);
+  iree_slim_mutex_deinitialize(&registry->clients_mutex);
+  iree_slim_mutex_deinitialize(&registry->queues_mutex);
+}
+
+// Returns the next retained live client, releasing |previous| after leaving
+// list exclusion. Queue edits hold queues_mutex so only final destruction can
+// change the list during this traversal. The retained previous node stays
+// linked until we release it, and removals update its next link under the lock.
+static iree_hal_amd_gpu_tsan_client_t*
+iree_hal_amd_gpu_tsan_registry_next_client(
+    iree_hal_amd_gpu_tsan_registry_t* registry,
+    iree_hal_amd_gpu_tsan_client_t* previous) {
+  iree_slim_mutex_lock(&registry->clients_mutex);
+  iree_hal_amd_gpu_tsan_client_t* client =
+      previous ? previous->next : registry->clients;
+  for (; client; client = client->next) {
+    // Final destruction must unlink before freeing this node. A zero count
+    // means destruction has already started: ordinary retain would resurrect
+    // that owner. List exclusion keeps its storage valid while we inspect it.
+    iree_atomic_ref_count_t* ref_count = &client->resource->ref_count;
+    int32_t count = iree_atomic_load(ref_count, iree_memory_order_relaxed);
+    while (count && !iree_atomic_compare_exchange_weak(
+                        ref_count, &count, count + 1, iree_memory_order_relaxed,
+                        iree_memory_order_relaxed)) {
+    }
+    if (count) {
+      break;
+    }
+  }
+  iree_slim_mutex_unlock(&registry->clients_mutex);
+  if (previous) {
+    iree_hal_resource_release(previous->resource);
+  }
+  return client;
+}
+
+static void iree_hal_amd_gpu_tsan_registry_release_queue(
+    iree_hal_amd_gpu_tsan_registry_t* registry, uint32_t ordinal) {
+  for (iree_hal_amd_gpu_tsan_client_t* client =
+           iree_hal_amd_gpu_tsan_registry_next_client(registry, NULL);
+       client;
+       client = iree_hal_amd_gpu_tsan_registry_next_client(registry, client)) {
+    client->release(client->resource, ordinal);
+  }
 }
 
 iree_status_t iree_hal_amd_gpu_tsan_registry_add_queue(
@@ -191,7 +235,7 @@ iree_status_t iree_hal_amd_gpu_tsan_registry_add_queue(
   if (!registry) {
     return iree_ok_status();
   }
-  iree_slim_mutex_lock(&registry->mutex);
+  iree_slim_mutex_lock(&registry->queues_mutex);
   iree_hal_amd_gpu_tsan_t* shadow = NULL;
   iree_status_t status = iree_allocator_malloc(
       registry->host_allocator, sizeof(*shadow), (void**)&shadow);
@@ -200,24 +244,26 @@ iree_status_t iree_hal_amd_gpu_tsan_registry_add_queue(
                                               registry->family_ordinal,
                                               &registry->options, shadow);
   }
-  for (iree_hal_amd_gpu_tsan_client_t* client = registry->clients;
-       client && iree_status_is_ok(status); client = client->next) {
-    status = client->prepare(client->user_data, ordinal, &shadow->config);
+  iree_hal_amd_gpu_tsan_client_t* client = NULL;
+  while (
+      iree_status_is_ok(status) &&
+      (client = iree_hal_amd_gpu_tsan_registry_next_client(registry, client))) {
+    status = client->prepare(client->resource, ordinal, &shadow->config);
+  }
+  if (client) {
+    iree_hal_resource_release(client->resource);
   }
   if (iree_status_is_ok(status)) {
     registry->queues[ordinal] = shadow;
     registry->count = iree_max(registry->count, ordinal + 1);
   } else {
-    for (iree_hal_amd_gpu_tsan_client_t* client = registry->clients; client;
-         client = client->next) {
-      client->release(client->user_data, ordinal);
-    }
+    iree_hal_amd_gpu_tsan_registry_release_queue(registry, ordinal);
     if (shadow) {
       iree_hal_amd_gpu_tsan_deinitialize(registry->context, shadow);
     }
     iree_allocator_free(registry->host_allocator, shadow);
   }
-  iree_slim_mutex_unlock(&registry->mutex);
+  iree_slim_mutex_unlock(&registry->queues_mutex);
   return status;
 }
 
@@ -226,44 +272,43 @@ void iree_hal_amd_gpu_tsan_registry_remove_queue(
   if (!registry) {
     return;
   }
-  iree_slim_mutex_lock(&registry->mutex);
+  iree_slim_mutex_lock(&registry->queues_mutex);
   iree_hal_amd_gpu_tsan_t* shadow = registry->queues[ordinal];
   if (shadow) {
-    for (iree_hal_amd_gpu_tsan_client_t* client = registry->clients; client;
-         client = client->next) {
-      client->release(client->user_data, ordinal);
-    }
+    iree_hal_amd_gpu_tsan_registry_release_queue(registry, ordinal);
     registry->queues[ordinal] = NULL;
     iree_hal_amd_gpu_tsan_deinitialize(registry->context, shadow);
     iree_allocator_free(registry->host_allocator, shadow);
   }
-  iree_slim_mutex_unlock(&registry->mutex);
+  iree_slim_mutex_unlock(&registry->queues_mutex);
 }
 
 iree_status_t iree_hal_amd_gpu_tsan_registry_register(
     iree_hal_amd_gpu_tsan_registry_t* registry,
     iree_hal_amd_gpu_tsan_client_t* client) {
-  iree_slim_mutex_lock(&registry->mutex);
+  iree_slim_mutex_lock(&registry->queues_mutex);
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; i < registry->count && iree_status_is_ok(status); ++i) {
     if (registry->queues[i]) {
       status =
-          client->prepare(client->user_data, i, &registry->queues[i]->config);
+          client->prepare(client->resource, i, &registry->queues[i]->config);
     }
   }
   if (iree_status_is_ok(status)) {
+    iree_slim_mutex_lock(&registry->clients_mutex);
     client->registry = registry;
     client->next = registry->clients;
     if (client->next) {
       client->next->previous = client;
     }
     registry->clients = client;
+    iree_slim_mutex_unlock(&registry->clients_mutex);
   } else {
     for (uint32_t i = 0; i < registry->count; ++i) {
-      client->release(client->user_data, i);
+      client->release(client->resource, i);
     }
   }
-  iree_slim_mutex_unlock(&registry->mutex);
+  iree_slim_mutex_unlock(&registry->queues_mutex);
   return status;
 }
 
@@ -273,7 +318,7 @@ void iree_hal_amd_gpu_tsan_registry_unregister(
   if (!registry) {
     return;
   }
-  iree_slim_mutex_lock(&registry->mutex);
+  iree_slim_mutex_lock(&registry->clients_mutex);
   if (client->previous) {
     client->previous->next = client->next;
   } else {
@@ -283,5 +328,5 @@ void iree_hal_amd_gpu_tsan_registry_unregister(
     client->next->previous = client->previous;
   }
   client->registry = NULL;
-  iree_slim_mutex_unlock(&registry->mutex);
+  iree_slim_mutex_unlock(&registry->clients_mutex);
 }

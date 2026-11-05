@@ -6,8 +6,13 @@
 
 #include "iree/hal/drivers/amd/gpu/tsan.h"
 
+#include <atomic>
+#include <functional>
+#include <semaphore>
+#include <thread>
 #include <vector>
 
+#include "iree/hal/resource.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -196,75 +201,240 @@ TEST_P(TsanPlacementTest, QualifiesPublicationBeforeAllocatingShadow) {
   EXPECT_EQ(tsan_.config.shadow_size, 256u);
 }
 
-TEST_P(TsanPlacementTest, FailedImagePreparationRollsBackOnlyNewMembership) {
-  if (!GetParam()) {
-    local_.publication_status =
-        amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+class TsanRegistryTest : public TsanPlacementTest {
+ protected:
+  void SetUp() override {
+    TsanPlacementTest::SetUp();
+    if (!GetParam()) {
+      local_.publication_status =
+          amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+    }
+    const iree_hal_amd_gpu_tsan_options_t options = {.shadow_size = 256};
+    iree_hal_amd_gpu_tsan_registry_initialize(
+        &context_, 5, 0, &options, iree_allocator_system(), &registry_);
   }
-  const iree_hal_amd_gpu_tsan_options_t options = {.shadow_size = 256};
-  iree_hal_amd_gpu_tsan_registry_t registry;
-  iree_hal_amd_gpu_tsan_registry_initialize(&context_, 5, 0, &options,
-                                            iree_allocator_system(), &registry);
+
+  void TearDown() override {
+    iree_hal_amd_gpu_tsan_registry_deinitialize(&registry_);
+    TsanPlacementTest::TearDown();
+  }
+
+  // Image preparation substitutes the native upload dependency. The production
+  // registry and HAL resource refcount own traversal and final release.
   struct Image {
+    // Resource prefix using the same final-reference boundary as an executable.
+    iree_hal_resource_t resource = {};
+    // Embedded registry node, removed only by the resource destructor.
+    iree_hal_amd_gpu_tsan_client_t client = {};
     // Dependency whose native placement can fail independently of shadow setup.
     bool fail = false;
     // Current placement ownership, removed during either rollback or release.
     bool placed = false;
-    // Embedded registration follows the same ownership as a native executable.
-    iree_hal_amd_gpu_tsan_client_t client = {};
+    // Calls made while the registry owns a live preparation reference.
+    uint32_t prepare_count = 0;
+    // Final destruction observation; test storage remains available for checks.
+    std::atomic<bool> destroyed = false;
+    // Controlled native-upload dependency invoked during placement.
+    std::function<void()> on_prepare;
+    // Controlled native-cleanup dependency invoked during queue removal.
+    std::function<void()> on_release;
+    // Scheduling boundary after zero references, before registry removal.
+    std::function<void()> on_destroy;
+
     Image() {
-      client.user_data = this;
+      static const iree_hal_resource_vtable_t vtable = {
+          .destroy =
+              [](iree_hal_resource_t* resource) {
+                auto& image = *reinterpret_cast<Image*>(resource);
+                if (image.on_destroy) {
+                  image.on_destroy();
+                }
+                iree_hal_amd_gpu_tsan_registry_unregister(&image.client);
+                image.client.release(&image, 3);
+                image.destroyed = true;
+              },
+      };
+      iree_hal_resource_initialize(&vtable, &resource);
+      client.resource = &resource;
       client.prepare = [](void* user_data, uint32_t ordinal,
                           const iree_hal_amd_gpu_tsan_config_t* config) {
         auto& image = *static_cast<Image*>(user_data);
         EXPECT_EQ(ordinal, 3u);
         EXPECT_EQ(config->shadow_base, 0x10000u);
+        ++image.prepare_count;
         image.placed = true;
+        if (image.on_prepare) {
+          image.on_prepare();
+        }
         return image.fail
                    ? iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED)
                    : iree_ok_status();
       };
       client.release = [](void* user_data, uint32_t ordinal) {
         if (ordinal == 3) {
-          static_cast<Image*>(user_data)->placed = false;
+          auto& image = *static_cast<Image*>(user_data);
+          image.placed = false;
+          if (image.on_release) {
+            image.on_release();
+          }
         }
       };
     }
-  } first, second, rejected;
+
+    ~Image() {
+      if (!destroyed) {
+        iree_hal_resource_release(&resource);
+      }
+      EXPECT_TRUE(destroyed);
+    }
+  };
+
+  // Actual registry outlives every stack-owned image's resource destruction.
+  iree_hal_amd_gpu_tsan_registry_t registry_ = {};
+};
+
+TEST_P(TsanRegistryTest, FailedImagePreparationRollsBackOnlyNewMembership) {
+  Image first, second, rejected;
   IREE_EXPECT_OK(
-      iree_hal_amd_gpu_tsan_registry_register(&registry, &first.client));
+      iree_hal_amd_gpu_tsan_registry_register(&registry_, &first.client));
   IREE_EXPECT_OK(
-      iree_hal_amd_gpu_tsan_registry_register(&registry, &second.client));
+      iree_hal_amd_gpu_tsan_registry_register(&registry_, &second.client));
   first.fail = true;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
-                        iree_hal_amd_gpu_tsan_registry_add_queue(&registry, 3));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_amd_gpu_tsan_registry_add_queue(&registry_, 3));
   EXPECT_FALSE(first.placed);
   EXPECT_FALSE(second.placed);
-  EXPECT_EQ(registry.queues[3], nullptr);
+  EXPECT_EQ(registry_.queues[3], nullptr);
   EXPECT_TRUE(local_.bytes.empty());
   EXPECT_TRUE(system_.bytes.empty());
   first.fail = false;
-  IREE_EXPECT_OK(iree_hal_amd_gpu_tsan_registry_add_queue(&registry, 3));
+  IREE_EXPECT_OK(iree_hal_amd_gpu_tsan_registry_add_queue(&registry_, 3));
   EXPECT_TRUE(first.placed);
   EXPECT_TRUE(second.placed);
   rejected.fail = true;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
-      iree_hal_amd_gpu_tsan_registry_register(&registry, &rejected.client));
+      iree_hal_amd_gpu_tsan_registry_register(&registry_, &rejected.client));
   EXPECT_EQ(rejected.client.registry, nullptr);
   EXPECT_FALSE(rejected.placed);
   EXPECT_TRUE(first.placed);
   EXPECT_TRUE(second.placed);
-  iree_hal_amd_gpu_tsan_registry_remove_queue(&registry, 3);
+  iree_hal_amd_gpu_tsan_registry_remove_queue(&registry_, 3);
   EXPECT_FALSE(first.placed);
   EXPECT_FALSE(second.placed);
-  iree_hal_amd_gpu_tsan_registry_unregister(&first.client);
-  iree_hal_amd_gpu_tsan_registry_unregister(&second.client);
-  iree_hal_amd_gpu_tsan_registry_deinitialize(&registry);
+}
+
+TEST_P(TsanRegistryTest, PreparationAllowsFinalReleaseBeforeUploadCompletion) {
+  Image retiring, preparing;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_tsan_registry_register(&registry_, &retiring.client));
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_tsan_registry_register(&registry_, &preparing.client));
+  std::binary_semaphore upload_started(0), upload_completed(0);
+  preparing.on_prepare = [&] {
+    upload_started.release();
+    upload_completed.acquire();
+  };
+  std::thread completion([&] {
+    upload_started.acquire();
+    iree_hal_resource_release(&retiring.resource);
+    upload_completed.release();
+  });
+  IREE_EXPECT_OK(iree_hal_amd_gpu_tsan_registry_add_queue(&registry_, 3));
+  completion.join();
+  EXPECT_TRUE(retiring.destroyed);
+  EXPECT_EQ(retiring.prepare_count, 0u);
+  EXPECT_TRUE(preparing.placed);
+}
+
+TEST_P(TsanRegistryTest, PreparationRetainsItsImageThroughSuccessAndFailure) {
+  for (bool fail : {false, true}) {
+    Image image;
+    IREE_ASSERT_OK(
+        iree_hal_amd_gpu_tsan_registry_register(&registry_, &image.client));
+    image.fail = fail;
+    image.on_prepare = [&] {
+      iree_hal_resource_release(&image.resource);
+      EXPECT_FALSE(image.destroyed);
+    };
+    iree_status_t status =
+        iree_hal_amd_gpu_tsan_registry_add_queue(&registry_, 3);
+    if (fail) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    } else {
+      IREE_EXPECT_OK(status);
+    }
+    EXPECT_TRUE(image.destroyed);
+    EXPECT_EQ(image.prepare_count, 1u);
+    EXPECT_EQ(registry_.clients, nullptr);
+    iree_hal_amd_gpu_tsan_registry_remove_queue(&registry_, 3);
+  }
+}
+
+TEST_P(TsanRegistryTest, TraversalDoesNotResurrectAnImageBeingDestroyed) {
+  Image retiring, live;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_tsan_registry_register(&registry_, &retiring.client));
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_tsan_registry_register(&registry_, &live.client));
+  std::binary_semaphore destroy_entered(0), resume_destroy(0);
+  retiring.on_destroy = [&] {
+    destroy_entered.release();
+    resume_destroy.acquire();
+  };
+  std::thread completion(
+      [&] { iree_hal_resource_release(&retiring.resource); });
+  destroy_entered.acquire();
+  IREE_EXPECT_OK(iree_hal_amd_gpu_tsan_registry_add_queue(&registry_, 3));
+  EXPECT_EQ(retiring.prepare_count, 0u);
+  EXPECT_EQ(iree_atomic_ref_count_load(&retiring.resource.ref_count), 0);
+  EXPECT_EQ(live.prepare_count, 1u);
+  resume_destroy.release();
+  completion.join();
+  EXPECT_TRUE(retiring.destroyed);
+}
+
+TEST_P(TsanRegistryTest, QueueRemovalAllowsAnotherImageToFinishDestruction) {
+  Image retiring, live;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_tsan_registry_register(&registry_, &retiring.client));
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_tsan_registry_register(&registry_, &live.client));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_tsan_registry_add_queue(&registry_, 3));
+  std::binary_semaphore release_started(0), release_completed(0);
+  live.on_release = [&] {
+    release_started.release();
+    release_completed.acquire();
+  };
+  std::thread completion([&] {
+    release_started.acquire();
+    iree_hal_resource_release(&retiring.resource);
+    release_completed.release();
+  });
+  iree_hal_amd_gpu_tsan_registry_remove_queue(&registry_, 3);
+  completion.join();
+  live.on_release = nullptr;
+  EXPECT_TRUE(retiring.destroyed);
+  EXPECT_FALSE(live.placed);
+}
+
+TEST_P(TsanRegistryTest, ImageRegistrationAllowsPriorImageDestruction) {
+  Image retiring, loading;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_tsan_registry_register(&registry_, &retiring.client));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_tsan_registry_add_queue(&registry_, 3));
+  loading.on_prepare = [&] { iree_hal_resource_release(&retiring.resource); };
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_tsan_registry_register(&registry_, &loading.client));
+  EXPECT_TRUE(retiring.destroyed);
+  EXPECT_EQ(loading.prepare_count, 1u);
+  EXPECT_TRUE(loading.placed);
 }
 
 INSTANTIATE_TEST_SUITE_P(LocalPublication, TsanPlacementTest,
                          ::testing::Bool());
+INSTANTIATE_TEST_SUITE_P(LocalPublication, TsanRegistryTest, ::testing::Bool());
 
 }  // namespace
 }  // namespace iree::hal::amd::gpu
