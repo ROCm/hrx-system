@@ -33,8 +33,10 @@ static iree_vm_signature_type_t iree_vm_module_resolve_signature_type(
       type.kind <= IREE_VM_SCALAR_TYPE_F64) {
     resolved_type.kind = IREE_VM_SIGNATURE_TYPE_KIND_SCALAR;
     resolved_type.value.scalar = (iree_vm_scalar_type_t)type.kind;
-  } else if (type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
-    resolved_type.kind = IREE_VM_SIGNATURE_TYPE_KIND_REF;
+  } else if (iree_vm_module_signature_type_kind_is_ref(type.kind)) {
+    resolved_type.kind = type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF
+                             ? IREE_VM_SIGNATURE_TYPE_KIND_REF
+                             : IREE_VM_SIGNATURE_TYPE_KIND_PTR;
     resolved_type.value.ref =
         module->descriptor->ref_types.data[type.type_ordinal];
   } else {

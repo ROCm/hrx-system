@@ -78,6 +78,20 @@ contract:
 - `_move` transfers an owner and clears the source. Moving a borrowed value
   first promotes it so the result may safely escape its original anchor.
 
+Callable signatures separately distinguish owning `REF` fields from borrowed
+`PTR` fields. Both name an exact runtime payload type and occupy the managed-ref
+bank. Ownership mode participates in callable identity, including nested
+function types: an import expecting `PTR` cannot bind an export declaring
+`REF`, or vice versa. Reflection preserves the mode, and bytecode assembly
+spells these fields `ref(@type)` and `ptr(@type)`.
+
+Declared mode and physical carrier ownership are independent. A `PTR` argument
+may carry an owner that protects it across suspension; a returned borrow is
+promoted before its original anchor can be released. A synchronous `REF`
+argument may use a borrowed carrier when its caller keeps the anchor live.
+The caller releases returned protection through the ordinary result-reset path.
+Neither mode is a raw address, and canonical null is valid for both.
+
 Function refs are non-owning program-bound values. Bound functions are
 non-owning process-bound values. The referenced program or process remains live
 for every use, including the complete duration of a suspended invocation.
@@ -98,12 +112,13 @@ used by C callers. The 16-byte ref, function, and variant layouts are native
 in-process ABI values; they are not stable serialized values or cross-process
 handles.
 
-A borrowed ref argument is accepted only when the bound function is declared
-non-yielding. A possibly yielding function rejects it before module entry so a
-host never discovers the lifetime restriction only on a rare suspend path. If
-incorrect module metadata allows execution to reach an actual yield with a
-borrowed root argument, the driver returns `FAILED_PRECONDITION` instead of
-letting the borrow escape. Retained or moved arguments have no such restriction.
+A dynamically borrowed root argument is accepted only when the bound function
+is declared non-yielding. A possibly yielding function rejects it before module
+entry so a host never discovers the lifetime restriction only on a rare suspend
+path. If incorrect module metadata allows execution to reach an actual yield
+with a borrowed root argument, the driver returns `FAILED_PRECONDITION` instead of
+letting the borrow escape. Retained or moved arguments have no such restriction,
+including arguments whose declared mode is `PTR`.
 
 ### Resolving Ref-Type Families
 

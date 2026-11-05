@@ -13,6 +13,7 @@
 #include "iree/vm/bytecode/disassembler.h"
 #include "iree/vm/bytecode/execution_testdata.h"
 #include "iree/vm/bytecode/launch_config_testdata.h"
+#include "iree/vm/bytecode/reference_signature_testdata.h"
 #include "iree/vm/bytecode/verifier_testdata.h"
 
 namespace {
@@ -72,6 +73,7 @@ TEST(AssemblerTest, CanonicalSourcesCloseByteForByte) {
   const iree_file_toc_t* sources[] = {
       iree_vm_bytecode_execution_testdata_create(),
       iree_vm_bytecode_launch_config_testdata_create(),
+      iree_vm_bytecode_reference_signature_testdata_create(),
       iree_vm_bytecode_verifier_testdata_create(),
   };
   for (const iree_file_toc_t* source : sources) {

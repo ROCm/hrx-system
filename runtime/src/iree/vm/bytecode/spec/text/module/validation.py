@@ -229,7 +229,7 @@ def _validate_grammar_element(
         scalar_values = {
             value.value
             for value in element.kind_table.values
-            if value.name not in {"invalid", "ref", "function"}
+            if value.name not in {"invalid", "ref", "ptr", "function"}
         }
         require(
             element.row_record == grammar.record
@@ -251,6 +251,7 @@ def _validate_grammar_element(
             and "i8" in kind_values
             and "f64" in kind_values
             and "ref" in kind_values
+            and "ptr" in kind_values
             and "function" in kind_values
             and scalar_values == set(range(scalar_minimum, scalar_maximum + 1)),
             f"{grammar.name}: signature kinds do not cover the verifier domain",

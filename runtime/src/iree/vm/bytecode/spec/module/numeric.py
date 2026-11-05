@@ -53,7 +53,8 @@ SIGNATURE_KIND = _table(
         ("bf16", 0x0008, "Low 16 bfloat16 bits."),
         ("f32", 0x0009, "Low 32 IEEE binary32 bits."),
         ("f64", 0x000A, "Complete 64 IEEE binary64 bits."),
-        ("ref", 0x0100, "Exact ref type in the descriptor's ordinal field."),
+        ("ref", 0x0100, "Owning handle to the exact ref type in the ordinal field."),
+        ("ptr", 0x0101, "Borrowed handle to the exact ref type in the ordinal field."),
         (
             "function",
             0x0200,

@@ -1,0 +1,79 @@
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "buffer"
+    string @string1 = "borrow"
+    string @string2 = "fail"
+    string @string3 = "indirect"
+    string @string4 = "local"
+    string @string5 = "owned"
+    string @string6 = "yield"
+    string @string7 = "vm"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string7) {
+      ref_type @ref_type0 name(@string0)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (ref(@ref_type0)) -> (ref(@ref_type0))
+    signature @signature1 (ptr(@ref_type0)) -> (ptr(@ref_type0))
+    signature @signature2 (function(@callable1), ptr(@ref_type0)) -> (ptr(@ref_type0))
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+    callable @callable2 flags([yieldable]) depth(0) : @signature1
+    callable @callable3 flags([]) depth(1) : @signature2
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string1) : @callable1 = @function1
+    export @export1 name(@string2) : @callable1 = @function5
+    export @export2 name(@string3) : @callable3 = @function3
+    export @export3 name(@string4) : @callable1 = @function2
+    export @export4 name(@string5) : @callable0 = @function0
+    export @export5 name(@string6) : @callable2 = @function4
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.return
+    }
+    func @function1 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.return
+    }
+    func @function2 : @callable1 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call @function1 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+    func @function3 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 1, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.call.indirect %f0, @callable1 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+    func @function4 : @callable2 flags([yieldable]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.yield.s32 ^bb1
+    ^bb1:
+      control.block
+      control.return
+    }
+    func @function5 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 1, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      control.fail cancelled, %r0
+    }
+  }
+
+}

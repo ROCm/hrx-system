@@ -13,6 +13,7 @@
 #include "iree/vm/bytecode/verifier.h"
 #include "iree/vm/bytecode/wire/core.h"
 #include "iree/vm/bytecode/wire/module.h"
+#include "iree/vm/module.h"
 
 enum {
   IREE_VM_BYTECODE_DISASSEMBLER_INLINE_BLOCK_COUNT = 16,
@@ -924,7 +925,7 @@ static iree_status_t iree_vm_bytecode_disassembler_signature_field(
       disassembler,
       iree_vm_bytecode_disassembler_text_at(spelling->name_offset)));
   uint8_t domain = 0;
-  if (kind == IREE_VM_BYTECODE_SIGNATURE_KIND_REF) {
+  if (iree_vm_module_signature_type_kind_is_ref(kind)) {
     domain = ref_domain;
   } else if (kind == IREE_VM_BYTECODE_SIGNATURE_KIND_FUNCTION) {
     domain = callable_domain;
