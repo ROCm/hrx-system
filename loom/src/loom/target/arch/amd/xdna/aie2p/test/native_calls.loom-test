@@ -50,7 +50,7 @@ low.func.def target<amd.xdna.aie2p.core>(@core_target) @add_pair(%lhs: reg<aie2p
 partition: 1 columns, 6 rows
 entries: 1
 entry 0: 0 bindings, 0 dynamic relocations
-  invocation 0: bytes=868 next=1
+  invocation 0: bytes=852 next=1
   invocation 1: bytes=16 next=1
 
 // ====

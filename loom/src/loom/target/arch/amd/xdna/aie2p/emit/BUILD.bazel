@@ -34,6 +34,15 @@ loom_check_test_suite(
     target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,
 )
 
+loom_check_test_suite(
+    name = "program_test",
+    srcs = [
+        "program_link_lifetime.loom-test",
+        "program_report.loom-test",
+    ],
+    target_compatible_with = _XDNA_IMAGE_COMPATIBLE_WITH,
+)
+
 loom_cc_library(
     name = "leaf_program",
     hdrs = ["leaf_program.h"],
@@ -227,6 +236,7 @@ loom_cc_library(
     deps = [
         ":leaf_object",
         ":relocation",
+        "//loom/src/loom/util:adaptive_sort",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],

@@ -412,7 +412,7 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
     }
     bool program_compiled = false;
     iree_status_t status = loom_aie2p_program_compile(
-        compiler, resident->function_op,
+        compiler, resident->function_op, /*may_return=*/false,
         (loom_aie2p_program_helper_list_t){
             .values = direct_helpers,
             .count = resident->direct_helper_count,

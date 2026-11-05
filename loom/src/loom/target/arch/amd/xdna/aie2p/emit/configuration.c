@@ -283,7 +283,7 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
     };
     bool compiled = false;
     iree_status_t status = loom_aie2p_program_compile(
-        compiler, function,
+        compiler, function, requirements->return_count != 0,
         (loom_aie2p_program_helper_list_t){
             .values = direct_helpers,
             .count = requirements->direct_callees.count,

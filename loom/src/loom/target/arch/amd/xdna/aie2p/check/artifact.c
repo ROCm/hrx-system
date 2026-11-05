@@ -141,6 +141,7 @@ static iree_status_t loom_aie2p_artifact_check_execute(
     OUTPUT_ARTIFACT,
     OUTPUT_SECTIONS,
     OUTPUT_PIPELINE_REPORT,
+    OUTPUT_COMPILE_REPORT,
   } output = OUTPUT_ARTIFACT;
   bool source_low = false;
   while (!iree_string_view_is_empty(options)) {
@@ -150,6 +151,10 @@ static iree_status_t loom_aie2p_artifact_check_execute(
     if (iree_string_view_equal(option, IREE_SV("output=sections")) &&
         output == OUTPUT_ARTIFACT) {
       output = OUTPUT_SECTIONS;
+    } else if (iree_string_view_equal(option,
+                                      IREE_SV("output=compile-report")) &&
+               output == OUTPUT_ARTIFACT) {
+      output = OUTPUT_COMPILE_REPORT;
     } else if (iree_string_view_equal(option,
                                       IREE_SV("output=pipeline-report")) &&
                output == OUTPUT_ARTIFACT) {
@@ -163,6 +168,8 @@ static iree_status_t loom_aie2p_artifact_check_execute(
                               (int)option.size, option.data);
     }
   }
+  const bool emit_report =
+      output == OUTPUT_PIPELINE_REPORT || output == OUTPUT_COMPILE_REPORT;
   const loomc_compile_report_options_t report_options = {
       .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
       .structure_size = sizeof(report_options),
@@ -172,20 +179,19 @@ static iree_status_t loom_aie2p_artifact_check_execute(
   const loom_check_compile_artifact_options_t compile_options = {
       .artifact_format = IREE_SV("xdna"),
       .lower_source_to_low = source_low,
-      .report = output == OUTPUT_PIPELINE_REPORT ? &report_options : NULL,
+      .report = emit_report ? &report_options : NULL,
   };
   loomc_result_t* compile_result = NULL;
   iree_status_t status =
       loom_check_compile_artifact(request, &compile_options, &compile_result);
   const loomc_artifact_t* artifact = NULL;
   if (iree_status_is_ok(status) && compile_result != NULL) {
-    const loomc_artifact_kind_t kind = output == OUTPUT_PIPELINE_REPORT
+    const loomc_artifact_kind_t kind = emit_report
                                            ? LOOMC_ARTIFACT_KIND_REPORT
                                            : LOOMC_ARTIFACT_KIND_EXECUTABLE;
     const iree_string_view_t format =
-        output == OUTPUT_PIPELINE_REPORT
-            ? IREE_SV(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_TEXT)
-            : compile_options.artifact_format;
+        emit_report ? IREE_SV(LOOMC_ARTIFACT_FORMAT_COMPILE_REPORT_TEXT)
+                    : compile_options.artifact_format;
     status = loom_check_compile_select_artifact(compile_result, kind, format,
                                                 &artifact);
   }
@@ -216,6 +222,11 @@ static iree_status_t loom_aie2p_artifact_check_execute(
             line.data);
       }
     }
+  } else if (iree_status_is_ok(status) && artifact_source != NULL &&
+             output == OUTPUT_COMPILE_REPORT) {
+    status = iree_string_builder_append_string(
+        &request->result->actual_output,
+        iree_make_string_view((const char*)bytes.data, bytes.data_length));
   } else if (iree_status_is_ok(status) && artifact_source != NULL &&
              output == OUTPUT_SECTIONS) {
     status = loom_aie2p_artifact_check_print_sections(
