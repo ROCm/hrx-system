@@ -34,6 +34,20 @@
 static iree_tokenizer_segmenter_t* g_segmenters[10] = {NULL};
 static size_t g_segmenter_count = 0;
 
+static void check_segments(iree_host_size_t input_size,
+                           iree_tokenizer_segment_output_t output,
+                           iree_host_size_t segment_count) {
+  if (segment_count > output.capacity) {
+    abort();
+  }
+  for (iree_host_size_t i = 0; i < segment_count; ++i) {
+    if (output.values[i].start > output.values[i].end ||
+        output.values[i].end > input_size) {
+      abort();
+    }
+  }
+}
+
 // Helper to compile a pattern and create a segmenter.
 static iree_tokenizer_segmenter_t* compile_segmenter(
     const char* pattern, iree_tokenizer_regex_split_behavior_t behavior,
@@ -159,6 +173,11 @@ static void process_with_chunk_size(iree_tokenizer_segmenter_t* segmenter,
       break;
     }
 
+    if (consumed > input_chunk.size) {
+      abort();
+    }
+    check_segments(input_chunk.size, output, segment_count);
+
     if (consumed == 0 && segment_count == 0) {
       if (current_chunk_size >= remaining) {
         break;
@@ -177,6 +196,9 @@ static void process_with_chunk_size(iree_tokenizer_segmenter_t* segmenter,
   iree_host_size_t final_segment_count = 0;
   status = iree_tokenizer_segmenter_state_finalize(
       state, remaining_input, output, &final_segment_count);
+  if (iree_status_is_ok(status)) {
+    check_segments(remaining_input.size, output, final_segment_count);
+  }
   iree_status_ignore(status);
 
   iree_tokenizer_segmenter_state_deinitialize(state);

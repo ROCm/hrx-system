@@ -167,7 +167,9 @@ static inline void iree_tokenizer_segmenter_state_deinitialize(
 // in the transform buffer.
 //
 // May consume less than the full input if the output segment array is full
-// or the input ends mid-segment (buffered for next call).
+// or the input ends mid-segment. The caller must retain every unconsumed byte
+// at the beginning of the next input view; newly available bytes follow that
+// retained prefix.
 static inline iree_status_t iree_tokenizer_segmenter_state_process(
     iree_tokenizer_segmenter_state_t* state, iree_string_view_t input,
     iree_tokenizer_segment_output_t output, iree_host_size_t* out_consumed,

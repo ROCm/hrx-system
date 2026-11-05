@@ -44,8 +44,8 @@
 //
 // Streaming Behavior:
 //   - Uses regex executor's streaming API for cross-chunk matching
-//   - Buffers partial matches that span chunk boundaries
-//   - process() returns relative offsets; finalize() returns absolute offsets
+//   - Retains uncommitted input while matcher state spans chunk boundaries
+//   - process() and finalize() return offsets relative to their input views
 
 #ifndef IREE_TOKENIZER_SEGMENTER_SPLIT_H_
 #define IREE_TOKENIZER_SEGMENTER_SPLIT_H_
