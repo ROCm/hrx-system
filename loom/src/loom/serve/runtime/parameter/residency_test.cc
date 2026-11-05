@@ -329,6 +329,93 @@ TEST_P(ResidencyTest, LateOwnerDenialStartsNoEarlierLoads) {
   }
 }
 
+TEST_P(ResidencyTest, InvocationDeniesTheCompleteSetBeforeLoading) {
+  if (GetParam()) {
+    ASSERT_NO_FATAL_FAILURE(AllocateState(0, 2, 2 * kSlabBytes));
+    IREE_ASSERT_OK(
+        loom_serve_virtual_buffer_commit(state_buffers_[0], 0, 2 * kSlabBytes));
+    bool admitted = true;
+    IREE_ASSERT_OK(loom_serve_residency_try_acquire(
+        residencies_.size(), residencies_.data(), &admitted));
+    EXPECT_FALSE(admitted);
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_RESOURCE_EXHAUSTED,
+        loom_serve_residency_acquire(residencies_.size(), residencies_.data()));
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          loom_serve_residency_acquire_wait(
+                              residencies_.size(), residencies_.data()));
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                          loom_serve_residency_activate(residencies_.size(),
+                                                        residencies_.data()));
+    ExpectUnactivated();
+    for (auto* residency : residencies_) {
+      EXPECT_FALSE(loom_serve_residency_snapshot(residency).admission.waiting);
+    }
+    ASSERT_NO_FATAL_FAILURE(AuxiliaryProgress());
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_free(state_buffers_[0]));
+    state_buffers_[0] = nullptr;
+    // The cold wrapper joins accepted returns before retrying the full set.
+  }
+  IREE_ASSERT_OK(
+      loom_serve_residency_activate(residencies_.size(), residencies_.data()));
+  for (auto* residency : residencies_) {
+    EXPECT_EQ(loom_serve_residency_snapshot(residency).pin_count, 0u);
+  }
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_.size(),
+                                                   residencies_.data()));
+  for (size_t i = 0; i < residencies_.size(); ++i) {
+    ASSERT_NO_FATAL_FAILURE(ReadOwner(i));
+    EXPECT_EQ(loom_serve_weights_activity(plans_[i]).activations, 1u);
+    loom_serve_residency_release(residencies_[i]);
+  }
+}
+
+TEST_P(ResidencyTest, NestedInvocationProgressesPastWaitingNewWork) {
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_.size(),
+                                                   residencies_.data()));
+  if (GetParam()) {
+    ASSERT_NO_FATAL_FAILURE(AllocateState(0, 1, kSlabBytes));
+    IREE_ASSERT_OK(
+        loom_serve_virtual_buffer_commit(state_buffers_[0], 0, kSlabBytes));
+    loom_serve_residency_t* waiting = nullptr;
+    IREE_ASSERT_OK(loom_serve_residency_allocate(Cache(1), owner_executions_[1],
+                                                 1, &parameter_groups_[1],
+                                                 host_allocator_, &waiting));
+    extra_residencies_.push_back(waiting);
+    IREE_ASSERT_OK(
+        loom_serve_residency_prepare_working_set(waiting, kSlabBytes, 0));
+    loom_serve_residency_admission_t admission;
+    IREE_ASSERT_OK(loom_serve_residency_try_admit(1, &waiting, &admission));
+    ASSERT_NE(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+    ASSERT_TRUE(loom_serve_residency_snapshot(waiting).admission.waiting);
+  }
+  IREE_ASSERT_OK(
+      loom_serve_residency_acquire(residencies_.size(), residencies_.data()));
+  for (size_t i = 0; i < residencies_.size(); ++i) {
+    EXPECT_EQ(loom_serve_residency_snapshot(residencies_[i]).pin_count, 2u);
+    ASSERT_NO_FATAL_FAILURE(ReadOwner(i));
+    EXPECT_EQ(loom_serve_weights_activity(plans_[i]).activations, 1u);
+    loom_serve_residency_release(residencies_[i]);
+    loom_serve_residency_release(residencies_[i]);
+  }
+}
+
+TEST_P(ResidencyTest, ParameterReadinessDoesNotWaitForHeldConsumers) {
+  ASSERT_NO_FATAL_FAILURE(HoldOwner(2));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_.size(),
+                                                   residencies_.data()));
+  const auto frontier = loom_serve_execution_frontier(owner_executions_[2]);
+  uint64_t completed = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(frontier.semaphores[0], &completed));
+  EXPECT_LT(completed, frontier.values[0]);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(activation_gate_, 1, nullptr));
+  for (size_t i = 0; i < residencies_.size(); ++i) {
+    ASSERT_NO_FATAL_FAILURE(ReadOwner(i));
+    EXPECT_EQ(loom_serve_weights_activity(plans_[i]).activations, 1u);
+    loom_serve_residency_release(residencies_[i]);
+  }
+}
+
 class ElasticResidencyTest : public ResidencyTest {};
 
 TEST_P(ElasticResidencyTest,
@@ -621,7 +708,7 @@ TEST_P(DeferredResidencyTest, LateNativeReturnUndoesAllTemporaryProtection) {
 TEST_P(DeferredResidencyTest, DeniedSetPreservesEarlierAcceptedPin) {
   IREE_ASSERT_OK(
       loom_serve_residency_prepare_working_set(residencies_[1], 0, 16));
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[1]));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residencies_[1]));
   ASSERT_NO_FATAL_FAILURE(ReadOwner(1));
   ASSERT_NO_FATAL_FAILURE(DeferReturn());
   loom_serve_residency_t* owners[] = {residencies_[1], residencies_[2],

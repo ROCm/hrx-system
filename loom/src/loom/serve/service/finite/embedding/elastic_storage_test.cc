@@ -343,7 +343,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
   auto* retained_residency = loom_serve_finite_model_residency(retained_);
   auto* residency = loom_serve_finite_model_residency(model_);
-  IREE_ASSERT_OK(loom_serve_residency_acquire(retained_residency));
+  IREE_ASSERT_OK(loom_serve_residency_acquire(1, &retained_residency));
   IREE_ASSERT_OK(loom_serve_residency_await(retained_residency));
   EXPECT_EQ(loom_serve_residency_statistics(retained_residency).committed_bytes,
             kSlabBytes);

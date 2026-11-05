@@ -37,7 +37,7 @@ TEST_F(SourceEmbeddingServiceTest,
   ASSERT_NO_FATAL_FAILURE(CreateModel(directory));
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
   auto* residency = loom_serve_finite_model_residency(model_);
-  IREE_ASSERT_OK(loom_serve_residency_activate(residency));
+  IREE_ASSERT_OK(loom_serve_residency_activate(1, &residency));
   const auto weights = loom_serve_residency_activity(residency);
   StartRouter();
   const auto inventory =

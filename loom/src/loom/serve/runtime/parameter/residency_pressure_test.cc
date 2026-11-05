@@ -349,7 +349,7 @@ TEST_P(ResidencyPressureTest, WarmAdmissionDoesNotQueryNativeCapacity) {
   const auto root = Root(0, 0);
   IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
   IREE_ASSERT_OK(Register(0, 0, 1));
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residencies_[0]));
   loom_serve_residency_release(residencies_[0]);
   uint32_t queries = 0;
   deferred_backing_->statistics_observer = [&queries] { ++queries; };
@@ -389,7 +389,7 @@ TEST_P(ResidencyPressureTest, WarmAdmissionDoesNotQueryNativeCapacity) {
 TEST_P(ResidencyPressureTest, WorkspaceGrowthCollectsFailureBeforeDenial) {
   ASSERT_NO_FATAL_FAILURE(UseDeferredBacking(2 * kSlabBytes));
   ASSERT_NO_FATAL_FAILURE(RegisterHistory());
-  IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
+  IREE_ASSERT_OK(loom_serve_residency_acquire(1, &residencies_[0]));
   const auto geometry = loom_serve_pool_state_geometry(storage_owner_);
   IREE_ASSERT_OK(loom_serve_virtual_buffer_allocate(
       pool_, geometry, 2 * kSlabBytes, 256, &state_statistics_, &state_));

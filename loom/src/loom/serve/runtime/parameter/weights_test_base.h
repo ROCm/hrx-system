@@ -135,7 +135,7 @@ struct loom_serve_test_weight_activation_t {
     auto* self =
         static_cast<loom_serve_test_weight_activation_t*>(process->user_data);
     auto status =
-        loom_serve_residency_try_acquire(self->residency, &self->admitted);
+        loom_serve_residency_try_acquire(1, &self->residency, &self->admitted);
     if (iree_status_is_ok(status) && !self->admitted) {
       status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                 "native invocation was not admitted");
@@ -629,7 +629,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   }
 
   void RunPinned(iree_host_size_t index, int32_t first) {
-    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[index]));
+    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residencies_[index]));
     ASSERT_NO_FATAL_FAILURE(Run(index, first));
     loom_serve_residency_release(residencies_[index]);
   }
@@ -641,7 +641,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   }
 
   void AdmitAfterRelease(iree_host_size_t index) {
-    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[index]));
+    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residencies_[index]));
   }
 
   void DrainNativeReturns() {

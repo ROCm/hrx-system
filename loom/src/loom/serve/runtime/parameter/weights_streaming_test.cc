@@ -160,7 +160,7 @@ TEST_P(WindowedWeightsTest, CapturedSourcesWaitForEveryDestinationSlab) {
                                    {{path_.path()}, {adapter_path_.path()}},
                                    "streaming_policy.loom"));
   IREE_ASSERT_OK(Register(0, 0, 1));
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residencies_[0]));
   ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage(true));
   loom_serve_residency_release(residencies_[0]);
   const auto activity = loom_serve_weights_activity(plans_[0]);
@@ -186,7 +186,7 @@ TEST_P(WindowedWeightsTest, DirectSourcesAndHostSnapshotsNeedNoStaging) {
   EXPECT_EQ(loom_serve_weights_activation_workspace(plans_[0]).allocation_size,
             0u);
   IREE_ASSERT_OK(Register(0, 0, 1));
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residencies_[0]));
   ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage(true));
   loom_serve_residency_release(residencies_[0]);
   const auto activity = loom_serve_weights_activity(plans_[0]);

@@ -857,8 +857,8 @@ TEST_P(SourceImageServiceTest, PreparedShapePinsCodeAcrossSelectionAndRemoval) {
                                    [&] { return compilation.wakes != before; });
       }
     }
-    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(
-        loom_serve_image_model_residency(model_)));
+    auto* residency = loom_serve_image_model_residency(model_);
+    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residency));
     bool finished = false;
     uint32_t parts = 0;
     while (!finished) {
@@ -1756,8 +1756,8 @@ class ImageSpecializationTest : public SourceImageServiceTest {
     IREE_ASSERT_OK(Resolve(false));
     EXPECT_EQ(compiler_allocations_.load() == before, reuse);
     const auto generator = loom_serve_image_model_generator(model_);
-    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(
-        loom_serve_image_model_residency(model_)));
+    auto* residency = loom_serve_image_model_residency(model_);
+    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residency));
     // From admission onward, teardown joins the model's accepted ownership.
     prepared_ = false;
     uint32_t parts = 0;
@@ -1850,8 +1850,8 @@ TEST_P(ImageSpecializationTest, PeerAdmissionRetainsWholeInvocationWorkingSet) {
   };
   ASSERT_NO_FATAL_FAILURE(CreateStandaloneModel());
   ASSERT_NO_FATAL_FAILURE(prepare());
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(
-      loom_serve_image_model_residency(model_)));
+  auto* residency = loom_serve_image_model_residency(model_);
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residency));
   prepared_ = false;
   const auto destroy = [](loom_serve_image_model_t* model) {
     IREE_EXPECT_OK(loom_serve_image_model_free(model));

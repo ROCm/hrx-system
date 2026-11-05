@@ -283,7 +283,7 @@ class ExecutablesTest : public WeightsTest {
 
   void Execute(int32_t first, int32_t stride = 3, int32_t stage = 1) {
     auto* residency = loom_serve_executables_residency(executables_);
-    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residency));
+    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residency));
     iree_vm_variant_t arguments[] = {
         iree_vm_variant_from_i32(stage),
         iree_hal_buffer_variant_from_ptr_borrowed(&hal_types_, output_buffer_)};
@@ -933,7 +933,7 @@ class ArenaExecutablesTest : public ExecutablesTest {
         iree_hal_make_pool_reservation_request(payload.size(), 8),
         iree_infinite_timeout(), &workspace_));
     auto* residency = loom_serve_executables_residency(executables_);
-    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residency));
+    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residency));
     const iree_hal_transfer_operation_t upload = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
         .upload =

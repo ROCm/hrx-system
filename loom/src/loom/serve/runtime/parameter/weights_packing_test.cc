@@ -164,7 +164,7 @@ TEST_P(WeightPackingTest,
   EXPECT_EQ(before.activity.read_bytes, 0u);
   EXPECT_EQ(loom_serve_execution_frontier(execution_).values[0], 0u);
   // A denied shape has not poisoned either the parameter plan or execution.
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residencies_[0]));
   ASSERT_NO_FATAL_FAILURE(CheckPackedOn(execution_));
   loom_serve_residency_release(residencies_[0]);
 }
@@ -269,7 +269,7 @@ TEST_P(WeightPackingTest, InvocationWorkingSetRetiresColdActivationCredit) {
   }
   // Keep the prepared weights while retiring and trimming only cold scratch.
   loom_serve_residency_set_pinned(residencies_[0], true);
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residencies_[0]));
   ASSERT_NO_FATAL_FAILURE(CheckPackedOn(execution_));
   loom_serve_residency_release(residencies_[0]);
   ASSERT_NO_FATAL_FAILURE(TrimWorkspace());
@@ -304,7 +304,7 @@ TEST_P(WeightPackingTest, InvocationWorkingSetRetiresColdActivationCredit) {
     loom_serve_residency_cancel_admission(residencies_[0]);
     IREE_ASSERT_OK(loom_serve_virtual_buffer_free(state_));
     state_ = nullptr;
-    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
+    IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residencies_[0]));
     ASSERT_NO_FATAL_FAILURE(CheckPackedOn(execution_));
     loom_serve_residency_release(residencies_[0]);
     EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations, 2u);
@@ -337,11 +337,11 @@ TEST_P(WeightPackingTest,
   }
   {
     ScopedNativeHold hold(device_owner_);
-    IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
+    IREE_ASSERT_OK(loom_serve_residency_acquire(1, &residencies_[0]));
     if (pool_) {
       hold.WaitEntered();
     }
-    IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[1]));
+    IREE_ASSERT_OK(loom_serve_residency_acquire(1, &residencies_[1]));
     if (pool_) {
       // Submission and an explicit policy unpin do not return staging credit.
       loom_serve_residency_set_pinned(residencies_[0], true);
@@ -394,7 +394,7 @@ TEST_P(WeightPackingTest,
   IREE_ASSERT_OK(
       loom_serve_residency_prepare_working_set(residencies_[0], 0, 1));
   loom_serve_residency_set_pinned(residencies_[0], true);
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residencies_[0]));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residencies_[0]));
   ASSERT_NO_FATAL_FAILURE(CheckPackedOn(execution_));
   iree_hal_buffer_t* escaping = output_buffer_;
   iree_hal_buffer_retain(escaping);
@@ -471,7 +471,7 @@ TEST_P(WeightPackingTest,
     ScopedNativeHold hold(device_owner_);
     NativeAllocator::ForDevice(device_owner_)
         .FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC, true);
-    IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
+    IREE_ASSERT_OK(loom_serve_residency_acquire(1, &residencies_[0]));
     hold.WaitEntered();
     EXPECT_TRUE(loom_serve_residency_cache_is_reclaiming(ResidencyCache()));
   }
@@ -586,7 +586,7 @@ TEST_P(WeightPackingTest,
       activation, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &phase));
   EXPECT_EQ(phase, LOOM_SERVE_ACTIVATION_COMPLETE);
   loom_serve_activation_free(activation);
-  IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
+  IREE_ASSERT_OK(loom_serve_residency_acquire(1, &residencies_[0]));
   CheckPackedOn(execution_);
   EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations, 1u);
   loom_serve_residency_release(residencies_[0]);
@@ -595,7 +595,7 @@ TEST_P(WeightPackingTest,
   EXPECT_EQ(
       loom_serve_pool_statistics(storage_owner_).workspace.bytes_committed, 0u);
   // Elastic eviction drops only the result backing, not indexes or commands.
-  IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
+  IREE_ASSERT_OK(loom_serve_residency_acquire(1, &residencies_[0]));
   CheckPackedOn(execution_);
   EXPECT_EQ(loom_serve_weights_activity(plans_[0]).activations,
             GetParam() ? 2u : 1u);

@@ -1076,7 +1076,7 @@ static iree_status_t loom_serve_image_model_submit_stage(
 }
 
 iree_status_t loom_serve_image_model_activate(loom_serve_image_model_t* model) {
-  return loom_serve_residency_activate(model->residency);
+  return loom_serve_residency_activate(1, &model->residency);
 }
 
 iree_status_t loom_serve_image_model_deactivate(loom_serve_image_model_t* model,
@@ -1364,8 +1364,9 @@ iree_status_t loom_serve_image_model_generate(
   loom_serve_image_model_set_observer(model, (loom_serve_wake_callback_t){0});
   iree_notification_deinitialize(&notification);
   if (iree_status_is_ok(status)) {
-    status = loom_serve_residency_acquire_wait(
-        loom_serve_executables_residency(model->executables));
+    loom_serve_residency_t* residency =
+        loom_serve_executables_residency(model->executables);
+    status = loom_serve_residency_acquire_wait(1, &residency);
   }
   if (!iree_status_is_ok(status)) {
     loom_serve_image_model_discard_batch(model);

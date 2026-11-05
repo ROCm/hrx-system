@@ -67,7 +67,7 @@ TEST_P(ParameterBankTest, RecordingsRetainPreparedRootsAfterBankRetirement) {
   // A recorded consumer and its bank no longer borrow compiler reflection.
   loom_serve_jit_stage_free(compiled_[0]);
   compiled_[0] = nullptr;
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(bank_residency_));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &bank_residency_));
   ASSERT_NO_FATAL_FAILURE(Run(0, 290));
   loom_serve_residency_release(bank_residency_);
   loom_serve_parameter_bank_retire(bank_, nullptr, nullptr);
@@ -124,7 +124,7 @@ TEST_P(ParameterBankTest, ChecksRetainedLayoutAfterCompilerProductRetires) {
       compiled_[1], iree_hal_queue_family(dispatch_),
       IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr,
       loom_serve_parameter_bank_buffers(bank_), &commands_[1]));
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(bank_residency_));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &bank_residency_));
   ASSERT_NO_FATAL_FAILURE(Run(1, 290));
   loom_serve_residency_release(bank_residency_);
 }
@@ -160,7 +160,7 @@ TEST_P(ParameterBankTest, SelectedDomainReusesBaseAtChangedBindingOrdinal) {
       compiled_[0], iree_hal_queue_family(dispatch_),
       IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr,
       loom_serve_parameter_bank_buffers(bank_), &commands_[0]));
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(bank_residency_));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &bank_residency_));
   ASSERT_NO_FATAL_FAILURE(Run(0, 90));
   loom_serve_residency_release(bank_residency_);
   loom_serve_residency_free(bank_residency_);
@@ -198,7 +198,7 @@ TEST_P(ParameterBankTest, SelectedDomainReusesBaseAtChangedBindingOrdinal) {
   IREE_ASSERT_OK(loom_serve_residency_allocate(
       loom_serve_pool_residency_cache(storage_owner_), execution_,
       IREE_ARRAYSIZE(groups), groups, host_allocator_, &bank_residency_));
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(bank_residency_));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &bank_residency_));
   ASSERT_NO_FATAL_FAILURE(Run(2, 290));
   loom_serve_residency_release(bank_residency_);
   EXPECT_EQ(loom_serve_parameter_bank_buffers(bank_)[0], base);

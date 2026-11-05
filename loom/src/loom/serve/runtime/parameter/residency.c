@@ -1524,10 +1524,11 @@ static iree_status_t loom_serve_residency_admit(
 }
 
 iree_status_t loom_serve_residency_try_acquire(
-    loom_serve_residency_t* residency, bool* out_admitted) {
+    iree_host_size_t residency_count,
+    loom_serve_residency_t* const* residencies, bool* out_admitted) {
   loom_serve_residency_admission_t admission;
-  iree_status_t status =
-      loom_serve_residency_admit(1, &residency, false, 0, NULL, &admission);
+  iree_status_t status = loom_serve_residency_admit(
+      residency_count, residencies, false, 0, NULL, &admission);
   *out_admitted = admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
   return status;
 }
@@ -1561,27 +1562,40 @@ iree_status_t loom_serve_residency_try_admit_state(
                                     state_owner, &state, out_admission);
 }
 
-iree_status_t loom_serve_residency_acquire(loom_serve_residency_t* residency) {
+iree_status_t loom_serve_residency_acquire(
+    iree_host_size_t residency_count,
+    loom_serve_residency_t* const* residencies) {
   bool admitted = false;
-  IREE_RETURN_IF_ERROR(loom_serve_residency_try_acquire(residency, &admitted));
+  IREE_RETURN_IF_ERROR(loom_serve_residency_try_acquire(
+      residency_count, residencies, &admitted));
   return admitted ? iree_ok_status()
                   : iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                      "model residency is waiting for capacity");
 }
 
 iree_status_t loom_serve_residency_acquire_wait(
-    loom_serve_residency_t* residency) {
+    iree_host_size_t residency_count,
+    loom_serve_residency_t* const* residencies) {
   bool admitted = false;
-  loom_serve_memory_pool_t* pool = residency->cache->pool;
-  iree_status_t status = loom_serve_residency_try_acquire(residency, &admitted);
-  while (iree_status_is_ok(status) && !admitted && pool) {
-    if (!loom_serve_memory_pool_is_pending(pool) &&
-        !residency->cache->releasing_count) {
+  iree_status_t status =
+      loom_serve_residency_try_acquire(residency_count, residencies, &admitted);
+  while (iree_status_is_ok(status) && !admitted) {
+    bool pending = false;
+    for (iree_host_size_t i = 0;
+         i < residency_count && iree_status_is_ok(status); ++i) {
+      loom_serve_residency_cache_t* cache = residencies[i]->cache;
+      if (cache->pool && (loom_serve_memory_pool_is_pending(cache->pool) ||
+                          cache->releasing_count)) {
+        pending = true;
+        status = loom_serve_memory_pool_await(cache->pool);
+      }
+    }
+    if (!pending) {
       break;
     }
-    status = loom_serve_memory_pool_await(pool);
     if (iree_status_is_ok(status)) {
-      status = loom_serve_residency_try_acquire(residency, &admitted);
+      status = loom_serve_residency_try_acquire(residency_count, residencies,
+                                                &admitted);
     }
   }
   IREE_RETURN_IF_ERROR(status);
@@ -1589,7 +1603,11 @@ iree_status_t loom_serve_residency_acquire_wait(
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "model residency is waiting for capacity");
   }
-  return loom_serve_residency_await(residency);
+  for (iree_host_size_t i = 0; i < residency_count; ++i) {
+    status =
+        iree_status_join(status, loom_serve_residency_await(residencies[i]));
+  }
+  return status;
 }
 
 iree_status_t loom_serve_residency_await(loom_serve_residency_t* residency) {
@@ -1640,8 +1658,13 @@ iree_status_t loom_serve_residency_finish(loom_serve_residency_t* residency,
   return iree_status_join(status, retirement);
 }
 
-iree_status_t loom_serve_residency_activate(loom_serve_residency_t* residency) {
-  IREE_RETURN_IF_ERROR(loom_serve_residency_acquire_wait(residency));
-  loom_serve_residency_release(residency);
+iree_status_t loom_serve_residency_activate(
+    iree_host_size_t residency_count,
+    loom_serve_residency_t* const* residencies) {
+  IREE_RETURN_IF_ERROR(
+      loom_serve_residency_acquire_wait(residency_count, residencies));
+  for (iree_host_size_t i = 0; i < residency_count; ++i) {
+    loom_serve_residency_release(residencies[i]);
+  }
   return iree_ok_status();
 }

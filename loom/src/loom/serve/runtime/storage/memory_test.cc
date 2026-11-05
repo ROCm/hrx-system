@@ -1354,7 +1354,7 @@ TEST_F(DeviceMemoryTest, AdmissionIncludesWorkspaceSlabGranularity) {
   IREE_ASSERT_OK(loom_serve_virtual_buffer_free(first));
   first = nullptr;
   IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residency));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residency));
   const auto request = iree_hal_make_pool_reservation_request(256, 256);
   IREE_ASSERT_OK(
       loom_serve_execution_alloca(execution, 1, &request, &workspace));
@@ -1415,7 +1415,7 @@ TEST_F(DeviceMemoryTest, PermanentStorageIsNotDiscountedAsWorkspace) {
   permanent.reset();
   IREE_ASSERT_OK(loom_serve_execution_drain(execution));
   IREE_ASSERT_OK(loom_serve_test_pool_trim_and_drain(storage_owner, 0));
-  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(residency));
+  IREE_ASSERT_OK(loom_serve_residency_acquire_wait(1, &residency));
   IREE_ASSERT_OK(
       loom_serve_execution_alloca(execution, 1, &request, &workspace));
   ASSERT_NO_FATAL_FAILURE(RoundTrip(workspace, kSlabSize, 0x87654321));

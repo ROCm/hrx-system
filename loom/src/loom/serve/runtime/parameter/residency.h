@@ -253,17 +253,18 @@ void loom_serve_residency_set_reclaimer(
 bool loom_serve_residency_cache_is_reclaiming(
     const loom_serve_residency_cache_t* cache);
 
-// Pins every group before admission/loading. Already active groups need no I/O;
-// each execution imports their readiness once per activation. Enqueues loading
-// before consumption without waiting on device or I/O completion.
-// On success admitted=true owns one pin,
-// released only after activation and consuming work retire (or after activation
-// if the caller relinquishes explicit retention). admitted=false owns no
-// pin and reports ordinary backpressure, with no partial parameter load. Real
-// loading failures are terminal and preserve protection until residency
-// destruction.
+// Acquires a nonempty span of distinct physical caches on one serialized owner.
+// Complete preflight precedes pinning and loading. Already active groups need
+// no I/O; each execution imports their readiness once per activation. Enqueues
+// loading before consumption without waiting on device or I/O completion.
+// On success admitted=true owns one pin per member, released only after
+// activation and consuming work retire (or after activation if the caller
+// relinquishes explicit retention). admitted=false owns no pin and reports
+// ordinary backpressure, with no partial parameter load. Real loading failures
+// are terminal and preserve all pins until residency destruction.
 iree_status_t loom_serve_residency_try_acquire(
-    loom_serve_residency_t* residency, bool* out_admitted);
+    iree_host_size_t residency_count,
+    loom_serve_residency_t* const* residencies, bool* out_admitted);
 
 typedef enum loom_serve_residency_admission_e {
   // Declared working set cannot fit. No pin or partial load is owned.
@@ -326,15 +327,20 @@ void loom_serve_residency_cancel_admission(loom_serve_residency_t* residency);
 // Invocation admission: capacity denial is an execution error. Like
 // try_acquire this only enqueues activation and does not wait for readiness.
 // New-work schedulers use try_admit; accepted consumers use acquire directly.
-iree_status_t loom_serve_residency_acquire(loom_serve_residency_t* residency);
+iree_status_t loom_serve_residency_acquire(
+    iree_host_size_t residency_count,
+    loom_serve_residency_t* const* residencies);
 
 // Synchronous outer-thread invocation admission and readiness join. Waits for
 // already-accepted native capacity operations before retrying admission. Live
 // pins and model-owned history needing scheduler progress still deny capacity.
-// Success owns one pin; activation failure preserves it until teardown. Shared
-// task schedulers use try_admit/acquire and never call this function.
+// Success owns one pin per member; activation failure preserves all pins until
+// teardown. Capacity denial starts no partial load. This joins parameter
+// readiness, not the consuming execution frontiers. Shared task schedulers use
+// try_admit/acquire and never call this function.
 iree_status_t loom_serve_residency_acquire_wait(
-    loom_serve_residency_t* residency);
+    iree_host_size_t residency_count,
+    loom_serve_residency_t* const* residencies);
 
 // Cold outer-thread activation join for a pinned working set. Task services
 // consume the model timeline asynchronously. Failure preserves the pin until
@@ -359,7 +365,9 @@ iree_status_t loom_serve_residency_finish(loom_serve_residency_t* residency,
 
 // Synchronous outer-thread warmup without retaining a pin across calls. The
 // next pressure event may evict it.
-iree_status_t loom_serve_residency_activate(loom_serve_residency_t* residency);
+iree_status_t loom_serve_residency_activate(
+    iree_host_size_t residency_count,
+    loom_serve_residency_t* const* residencies);
 
 // Starts/advances asynchronous release after consumers retire. New requests
 // cannot reactivate this residency until native release completes. Rejects
