@@ -64,15 +64,9 @@ static iree_status_t loom_serve_text_state_validate_resize(
   for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
        ++i) {
     iree_hal_buffer_t* root = *loom_serve_text_state_allocation(state, i);
-    const uint8_t* record =
-        storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + i * 24;
-    const uint64_t length = iree_unaligned_load_le_u64(record);
-    const uint64_t alignment = iree_unaligned_load_le_u64(record + 8);
-    const uint64_t clear_length = iree_unaligned_load_le_u64(record + 16);
+    const iree_device_size_t length = storage->allocations[i].length;
     const bool resizable = i == 1 || i == 3 || i == 6 || i >= 9;
-    if ((length != 0) != (root != NULL) || length > INT64_MAX ||
-        clear_length > length || !alignment ||
-        !iree_is_power_of_two_uint64(alignment) ||
+    if ((length != 0) != (root != NULL) ||
         (root && !resizable && length != iree_hal_buffer_byte_length(root)) ||
         (root && resizable && !state->memory.buffers[i] &&
          length < iree_hal_buffer_byte_length(root))) {
@@ -218,10 +212,8 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
   for (iree_host_size_t i = 0;
        i < IREE_ARRAYSIZE(previous) && iree_status_is_ok(status); ++i) {
     iree_hal_buffer_t** root = loom_serve_text_state_allocation(state, i);
-    const uint8_t* record =
-        state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + i * 24;
-    const uint64_t length = iree_unaligned_load_le_u64(record);
-    const uint64_t alignment = iree_unaligned_load_le_u64(record + 8);
+    const loom_serve_text_allocation_t* record = &state->storage.allocations[i];
+    const iree_device_size_t length = record->length;
     // Carry endpoints change index even when the source reserved spare bytes.
     // Give that bank a fresh target so overlapping old/new ranges never alias.
     if (!*root || (i != 6 && length <= iree_hal_buffer_byte_length(*root))) {
@@ -250,7 +242,7 @@ iree_status_t loom_serve_text_state_resize(loom_serve_text_state_t* state,
       }
     } else {
       const iree_hal_pool_reservation_request_t request =
-          iree_hal_make_pool_reservation_request(length, alignment);
+          iree_hal_make_pool_reservation_request(length, record->alignment);
       status = loom_serve_execution_alloca_from_pool(
           state->execution, loom_serve_pool_storage(state->pool), 1, &request,
           &replacement);
