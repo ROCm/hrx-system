@@ -959,6 +959,26 @@ ERR_XDNA_062 = ErrorDef(
     fix_hint="Select a device profile provided by the AIE2P target family.",
 )
 
+# ERR_XDNA_063: A retained AIE2P helper directly calls another function.
+ERR_XDNA_063 = ErrorDef(
+    domain=ErrorDomain.XDNA,
+    code=63,
+    severity=Severity.ERROR,
+    summary="Nested retained AIE2P helper calls are unsupported.",
+    message=(
+        "AIE2P retained helper '@{helper_name}' directly calls "
+        "'@{callee_name}', but the current native call contract requires "
+        "helpers to be leaves"
+    ),
+    params=(
+        ErrorParam("helper_name", ParamKind.STRING),
+        ErrorParam("callee_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Inline calls within the helper while retaining the entry-to-helper boundary."
+    ),
+)
+
 ALL_XDNA_ERRORS = (
     ERR_XDNA_001,
     ERR_XDNA_005,
@@ -1014,4 +1034,5 @@ ALL_XDNA_ERRORS = (
     ERR_XDNA_060,
     ERR_XDNA_061,
     ERR_XDNA_062,
+    ERR_XDNA_063,
 )

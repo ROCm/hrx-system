@@ -343,7 +343,8 @@ class Aie2pProgramCompileTest : public ::testing::Test {
       std::vector<loom_aie2p_program_helper_t> direct_helpers(
           requirements.direct_callees.count);
       for (iree_host_size_t i = 0; i < direct_helpers.size(); ++i) {
-        direct_helpers[i].function = requirements.direct_callees.values[i];
+        direct_helpers[i].function =
+            requirements.direct_callees.values[i].symbol;
       }
       status =
           loom_aie2p_program_compile(compiler, entry,

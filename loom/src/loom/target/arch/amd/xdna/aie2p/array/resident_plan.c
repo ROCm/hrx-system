@@ -89,7 +89,7 @@ static bool loom_aie2p_array_worker_program_equal(
       &plan->worker_plans[lhs_worker_index];
   const loom_aie2p_array_worker_plan_t* rhs_plan =
       &plan->worker_plans[rhs_worker_index];
-  if (lhs_worker->leaf != rhs_worker->leaf ||
+  if (lhs_worker->source != rhs_worker->source ||
       lhs_worker->fold_record_count != rhs_worker->fold_record_count ||
       lhs_worker->fold_output_port != rhs_worker->fold_output_port ||
       lhs_worker->fold_output_count != rhs_worker->fold_output_count ||
@@ -111,7 +111,7 @@ static bool loom_aie2p_array_worker_program_equal(
   }
 
   const iree_host_size_t resource_count =
-      lhs_worker->leaf->requirements.resource_count;
+      lhs_worker->source->requirements.resource_count;
   for (iree_host_size_t i = 0; i < resource_count; ++i) {
     const uint32_t lhs_port =
         plan->worker_resource_ports[lhs_plan->first_port + i];

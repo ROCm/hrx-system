@@ -15,16 +15,12 @@
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/combining.h"
+#include "loom/target/arch/amd/xdna/aie2p/program_source.h"
 #include "loom/target/arch/amd/xdna/array/facts.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-typedef struct loom_low_memory_access_map_t loom_low_memory_access_map_t;
-typedef struct loom_low_loop_execution_map_t loom_low_loop_execution_map_t;
-typedef struct loom_target_facts_t loom_target_facts_t;
-typedef struct loom_aie2p_array_leaf_t loom_aie2p_array_leaf_t;
 
 // Access permitted through one external array-program binding.
 typedef enum loom_aie2p_array_binding_access_e {
@@ -113,8 +109,8 @@ typedef struct loom_aie2p_array_worker_t {
   uint32_t lane;
   // Core function executed by the worker.
   loom_symbol_ref_t entry;
-  // Source leaf selected for the worker entry during topology extraction.
-  const loom_aie2p_array_leaf_t* leaf;
+  // Indexed source function selected during topology extraction.
+  const loom_aie2p_program_source_function_t* source;
   // Number of source records folded into one output, or zero when recordwise.
   uint32_t fold_record_count;
   // Callable output port carrying the folded result.
@@ -203,22 +199,6 @@ typedef struct loom_aie2p_array_channel_t {
   // Exact physical resources owned after transport and multicast selection.
   loom_aie2p_array_channel_resource_flags_t resource_flags;
 } loom_aie2p_array_channel_t;
-
-// Declared requirements associated with a worker entry symbol.
-struct loom_aie2p_array_leaf_t {
-  // Module-local core entry symbol.
-  loom_symbol_ref_t entry;
-  // Source core function selected by entry.
-  const loom_op_t* function_op;
-  // Immutable invocation target facts selected at the source boundary.
-  const loom_target_facts_t* function_target_facts;
-  // Optional source memory proofs translated with the resident clone.
-  const loom_low_memory_access_map_t* memory_accesses;
-  // Optional source loop execution facts translated with the resident clone.
-  const loom_low_loop_execution_map_t* loop_execution;
-  // Source imports and storage retained before resident worker construction.
-  loom_low_function_requirements_t requirements;
-};
 
 // Contiguous equal-width transfers between an output and private fold state.
 typedef struct loom_aie2p_array_fold_span_t {
@@ -470,7 +450,7 @@ typedef struct loom_aie2p_array_binding_plan_t {
 
 // Complete arena-owned logical topology and deterministic NPU2 physical plan.
 //
-// The plan borrows the immutable Loom module and detached leaf contributions.
+// The plan borrows the immutable Loom module and indexed source functions.
 // All arrays are allocated from the caller-provided arena and contain no
 // serialized compiler IR.
 typedef struct loom_aie2p_array_plan_t {
@@ -478,10 +458,8 @@ typedef struct loom_aie2p_array_plan_t {
   const loom_op_t* function_op;
   // Immutable physical family used by the plan.
   const loom_xdna_array_family_t* family;
-  // Source core inventory supplying worker and helper requirements.
-  const loom_aie2p_array_leaf_t* source_leaves;
-  // Number of entries in |source_leaves|.
-  iree_host_size_t source_leaf_count;
+  // Artifact-scoped source-function index supplying workers and helpers.
+  loom_aie2p_program_source_table_t* program_sources;
   // Logical worker groups in source order.
   const loom_aie2p_array_group_t* groups;
   // Number of logical worker groups.
@@ -564,18 +542,19 @@ typedef struct loom_aie2p_array_plan_t {
 // single-block topology vocabulary, typed tile payloads, and core worker
 // contracts. Entity lookups consume those producer invariants directly.
 // Extraction admits defined workers with empty register signatures before
-// publishing their entities and consuming the source inventory.
+// publishing their entities and consuming the source-function index.
 //
 // Exact SSA facts drive all resource cardinalities and placement coordinates.
-// Every worker entry must have one matching source inventory in |leaves|. The
-// planner maps external binding channels through shim DMA and compute endpoints
-// whose storage and locks are visible to the worker. The worker tile is
+// Every worker entry must resolve through |program_sources|, which must outlive
+// plan materialization. The planner maps external binding channels through shim
+// DMA and compute endpoints whose storage and locks are visible to the worker.
+// The worker tile is
 // preferred, with adjacent compute tiles providing additional physical DMA
 // channels without changing the logical port topology. Vertically adjacent
 // workers communicate through neighbor-visible memory; all other worker
 // channels use compute DMA and the stream network.
 // Final resident code size and allocation are checked after channel
-// realization; physical planning does not compile source leaves or allocate
+// realization; physical planning does not compile source functions or allocate
 // their registers.
 // Authored target admission failures are delivered through |diagnostic_emitter|
 // with |out_valid| false. Only a complete admitted plan is published in
@@ -583,7 +562,7 @@ typedef struct loom_aie2p_array_plan_t {
 // failures.
 iree_status_t loom_aie2p_array_plan_build(
     const loom_module_t* module, const loom_op_t* function_op,
-    const loom_aie2p_array_leaf_t* leaves, iree_host_size_t leaf_count,
+    loom_aie2p_program_source_table_t* program_sources,
     iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
     loom_aie2p_array_plan_t* out_plan, bool* out_valid);
 

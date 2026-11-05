@@ -175,7 +175,7 @@ static iree_status_t loom_aie2p_array_resident_clone_read_only_data(
     for (iree_host_size_t worker_index = 0; worker_index < plan->worker_count;
          ++worker_index) {
       const loom_low_function_requirements_t* requirements =
-          &plan->workers[worker_index].leaf->requirements;
+          &plan->workers[worker_index].source->requirements;
       for (iree_host_size_t i = 0; i < requirements->read_only_data_count;
            ++i) {
         const loom_low_read_only_data_requirement_t* requirement =
@@ -201,7 +201,7 @@ static iree_status_t loom_aie2p_array_resident_clone_read_only_data(
     for (iree_host_size_t worker_index = 0; worker_index < plan->worker_count;
          ++worker_index) {
       const loom_low_function_requirements_t* requirements =
-          &plan->workers[worker_index].leaf->requirements;
+          &plan->workers[worker_index].source->requirements;
       for (iree_host_size_t i = 0; i < requirements->read_only_data_count;
            ++i) {
         const loom_low_read_only_data_requirement_t* requirement =
@@ -262,17 +262,6 @@ static iree_status_t loom_aie2p_array_resident_clone_read_only_data(
   return iree_ok_status();
 }
 
-static const loom_aie2p_array_leaf_t*
-loom_aie2p_array_resident_find_source_leaf(const loom_aie2p_array_plan_t* plan,
-                                           loom_symbol_id_t symbol_id) {
-  for (iree_host_size_t i = 0; i < plan->source_leaf_count; ++i) {
-    if (plan->source_leaves[i].entry.symbol_id == symbol_id) {
-      return &plan->source_leaves[i];
-    }
-  }
-  return NULL;
-}
-
 typedef struct loom_aie2p_array_resident_product_clone_t {
   // Memory-summary identity translator, or NULL without captured summaries.
   loom_low_memory_access_clone_t* memory;
@@ -296,25 +285,25 @@ static iree_status_t loom_aie2p_array_resident_clone_products(
 
 static iree_status_t loom_aie2p_array_resident_prepare_product_clone(
     loom_aie2p_array_resident_builder_t* builder,
-    const loom_aie2p_array_leaf_t* leaf,
+    const loom_aie2p_program_source_function_t* source,
     loom_low_memory_access_map_t** out_memory_accesses,
     loom_low_loop_execution_map_t** out_loop_execution,
     loom_aie2p_array_resident_product_clone_t* out_clone) {
   *out_memory_accesses = NULL;
   *out_loop_execution = NULL;
   *out_clone = (loom_aie2p_array_resident_product_clone_t){0};
-  if (leaf->memory_accesses != NULL) {
+  if (source->memory_accesses != NULL) {
     IREE_RETURN_IF_ERROR(loom_low_memory_access_map_allocate(
         &builder->module->arena, out_memory_accesses));
     IREE_RETURN_IF_ERROR(loom_low_memory_access_clone_allocate(
-        leaf->memory_accesses, *out_memory_accesses, builder->arena,
+        source->memory_accesses, *out_memory_accesses, builder->arena,
         &out_clone->memory));
   }
-  if (leaf->loop_execution != NULL) {
+  if (source->loop_execution != NULL) {
     IREE_RETURN_IF_ERROR(loom_low_loop_execution_map_allocate(
         &builder->module->arena, out_loop_execution));
     IREE_RETURN_IF_ERROR(loom_low_loop_execution_clone_allocate(
-        leaf->loop_execution, *out_loop_execution, builder->arena,
+        source->loop_execution, *out_loop_execution, builder->arena,
         &out_clone->loop_execution));
   }
   return iree_ok_status();
@@ -325,64 +314,36 @@ static iree_status_t loom_aie2p_array_resident_clone_helpers(
     const loom_aie2p_array_plan_t* plans, iree_host_size_t plan_count) {
   const iree_host_size_t symbol_count = builder->source_module->symbols.count;
   bool* target_symbols = NULL;
-  const loom_aie2p_array_leaf_t** helper_leaves = NULL;
+  const loom_aie2p_program_source_function_t** helper_sources = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(builder->arena, symbol_count,
                                                  sizeof(*target_symbols),
                                                  (void**)&target_symbols));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(builder->arena, symbol_count,
-                                                 sizeof(*helper_leaves),
-                                                 (void**)&helper_leaves));
+                                                 sizeof(*helper_sources),
+                                                 (void**)&helper_sources));
   memset(target_symbols, 0, symbol_count * sizeof(*target_symbols));
-  memset(helper_leaves, 0, symbol_count * sizeof(*helper_leaves));
+  memset(helper_sources, 0, symbol_count * sizeof(*helper_sources));
 
   for (iree_host_size_t plan_index = 0; plan_index < plan_count; ++plan_index) {
     const loom_aie2p_array_plan_t* plan = &plans[plan_index];
     for (iree_host_size_t worker_index = 0; worker_index < plan->worker_count;
          ++worker_index) {
-      const loom_aie2p_array_leaf_t* worker_leaf =
-          plan->workers[worker_index].leaf;
-      const loom_symbol_ref_array_t direct_callees =
-          worker_leaf->requirements.direct_callees;
+      const loom_aie2p_program_source_function_t* worker_source =
+          plan->workers[worker_index].source;
+      const loom_low_direct_callee_requirement_list_t direct_callees =
+          worker_source->requirements.direct_callees;
       for (iree_host_size_t i = 0; i < direct_callees.count; ++i) {
-        const loom_symbol_ref_t helper_ref = direct_callees.values[i];
-        if (helper_ref.module_id != 0 || helper_ref.symbol_id >= symbol_count) {
-          return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "AIE2P resident native helper has an "
-                                  "invalid module-local symbol");
-        }
+        const loom_symbol_ref_t helper_ref = direct_callees.values[i].symbol;
         const loom_symbol_id_t helper_id = helper_ref.symbol_id;
-        const loom_aie2p_array_leaf_t* helper_leaf =
-            loom_aie2p_array_resident_find_source_leaf(plan, helper_id);
+        const loom_aie2p_program_source_function_t* helper_source =
+            loom_aie2p_program_source_table_lookup(plan->program_sources,
+                                                   helper_ref);
         const loom_symbol_t* helper_symbol =
             &builder->source_module->symbols.entries[helper_id];
-        if (helper_leaf == NULL ||
-            helper_leaf->requirements.direct_callees.count != 0 ||
-            helper_symbol->defining_op == NULL ||
-            !loom_low_func_def_isa(helper_symbol->defining_op) ||
-            !loom_func_like_is_module_internal(loom_func_like_const_cast(
-                builder->source_module, helper_symbol->defining_op))) {
-          return iree_make_status(
-              IREE_STATUS_UNIMPLEMENTED,
-              "AIE2P resident native helpers must be module-internal, "
-              "call-free Low definitions");
-        }
-        if (helper_leaves[helper_id] == NULL) {
-          helper_leaves[helper_id] = helper_leaf;
-        } else {
-          IREE_ASSERT(helper_leaves[helper_id]->function_op ==
-                      helper_leaf->function_op);
-        }
+        helper_sources[helper_id] = helper_source;
         const loom_symbol_ref_t target_ref =
             loom_low_func_def_target(helper_symbol->defining_op);
         if (loom_symbol_ref_is_valid(target_ref)) {
-          if (target_ref.module_id != 0 ||
-              target_ref.symbol_id >= symbol_count ||
-              builder->source_module->symbols.entries[target_ref.symbol_id]
-                      .defining_op == NULL) {
-            return iree_make_status(
-                IREE_STATUS_INVALID_ARGUMENT,
-                "AIE2P resident native helper has an invalid target");
-          }
           target_symbols[target_ref.symbol_id] = true;
         }
       }
@@ -390,7 +351,7 @@ static iree_status_t loom_aie2p_array_resident_clone_helpers(
   }
 
   for (loom_symbol_id_t i = 0; i < symbol_count; ++i) {
-    if (target_symbols[i] || helper_leaves[i] != NULL) {
+    if (target_symbols[i] || helper_sources[i] != NULL) {
       IREE_RETURN_IF_ERROR(
           loom_aie2p_array_resident_reserve_source_symbol(builder, i));
     }
@@ -418,15 +379,16 @@ static iree_status_t loom_aie2p_array_resident_clone_helpers(
   }
 
   for (loom_symbol_id_t i = 0; i < symbol_count; ++i) {
-    const loom_aie2p_array_leaf_t* helper_leaf = helper_leaves[i];
-    if (helper_leaf == NULL) {
+    const loom_aie2p_program_source_function_t* helper_source =
+        helper_sources[i];
+    if (helper_source == NULL) {
       continue;
     }
     loom_low_memory_access_map_t* memory_accesses = NULL;
     loom_low_loop_execution_map_t* loop_execution = NULL;
     loom_aie2p_array_resident_product_clone_t product_clone = {0};
     IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_prepare_product_clone(
-        builder, helper_leaf, &memory_accesses, &loop_execution,
+        builder, helper_source, &memory_accesses, &loop_execution,
         &product_clone));
     loom_ir_remap_options_t helper_remap_options = {
         .remap_symbol = loom_ir_remap_symbol_callback_make(
@@ -450,7 +412,7 @@ static iree_status_t loom_aie2p_array_resident_clone_helpers(
     builder->resident_helpers_by_source[i] =
         (loom_aie2p_array_resident_helper_t){
             .entry = target_ref,
-            .function_target_facts = helper_leaf->function_target_facts,
+            .function_target_facts = helper_source->target.target_facts,
             .memory_accesses = memory_accesses,
             .loop_execution = loop_execution,
         };
@@ -1258,7 +1220,7 @@ static iree_status_t loom_aie2p_array_resident_bind_resources(
     }
     op = next_op;
   }
-  IREE_ASSERT_EQ(resource_ordinal, worker->leaf->requirements.resource_count);
+  IREE_ASSERT_EQ(resource_ordinal, worker->source->requirements.resource_count);
   return iree_ok_status();
 }
 
@@ -1270,7 +1232,7 @@ static iree_status_t loom_aie2p_array_resident_initialize_generated_states(
       &builder->plan->worker_plans[worker_index];
   const uint32_t imported_port_count =
       (uint32_t)builder->plan->workers[worker_index]
-          .leaf->requirements.resource_count;
+          .source->requirements.resource_count;
   for (uint32_t i = 0; i < worker_plan->port_count; ++i) {
     const loom_aie2p_array_worker_port_plan_t* port =
         &builder->plan->worker_ports[worker_plan->first_port + i];
@@ -1996,8 +1958,8 @@ static iree_status_t loom_aie2p_array_resident_materialize_worker(
       &builder->plan->workers[worker_index];
   const loom_aie2p_array_worker_plan_t* worker_plan =
       &builder->plan->worker_plans[worker_index];
-  const loom_aie2p_array_leaf_t* leaf = worker->leaf;
-  const loom_op_t* source_function = leaf->function_op;
+  const loom_aie2p_program_source_function_t* source = worker->source;
+  const loom_op_t* source_function = source->function_op;
   const loom_region_t* source_body = loom_low_func_def_body(source_function);
 
   loom_symbol_ref_t resident_ref = loom_symbol_ref_null();
@@ -2011,7 +1973,7 @@ static iree_status_t loom_aie2p_array_resident_materialize_worker(
   };
   loom_aie2p_array_resident_product_clone_t product_clone = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_array_resident_prepare_product_clone(
-      builder, leaf, &memory_accesses, &loop_execution, &product_clone));
+      builder, source, &memory_accesses, &loop_execution, &product_clone));
   if (product_clone.memory != NULL || product_clone.loop_execution != NULL) {
     remap_options.clone_observer = (loom_ir_clone_observer_t){
         .fn = loom_aie2p_array_resident_clone_products,
@@ -2104,14 +2066,14 @@ static iree_status_t loom_aie2p_array_resident_materialize_worker(
       builder->module, resident_body, builder->arena->block_pool));
   loom_aie2p_array_resident_helper_t* direct_helpers = NULL;
   const iree_host_size_t direct_helper_count =
-      leaf->requirements.direct_callees.count;
+      source->requirements.direct_callees.count;
   if (direct_helper_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         builder->arena, direct_helper_count, sizeof(*direct_helpers),
         (void**)&direct_helpers));
     for (iree_host_size_t i = 0; i < direct_helper_count; ++i) {
       const loom_symbol_ref_t source_ref =
-          leaf->requirements.direct_callees.values[i];
+          source->requirements.direct_callees.values[i].symbol;
       IREE_ASSERT_EQ(source_ref.module_id, 0u);
       IREE_ASSERT_LT(source_ref.symbol_id,
                      builder->source_module->symbols.count);
@@ -2124,7 +2086,7 @@ static iree_status_t loom_aie2p_array_resident_materialize_worker(
       .representative_worker_index = worker_index,
       .entry = resident_ref,
       .function_op = resident_function,
-      .function_target_facts = leaf->function_target_facts,
+      .function_target_facts = source->target.target_facts,
       .memory_accesses = memory_accesses,
       .loop_execution = loop_execution,
       .direct_helpers = direct_helpers,

@@ -30,6 +30,22 @@ typedef struct loom_low_read_only_data_requirement_t {
   loom_symbol_ref_array_t bank_conflicts;
 } loom_low_read_only_data_requirement_t;
 
+// One unique direct Low callee retained in first-call order.
+typedef struct loom_low_direct_callee_requirement_t {
+  // Directly called symbol.
+  loom_symbol_ref_t symbol;
+  // First call operation naming |symbol|.
+  const loom_op_t* first_call_op;
+} loom_low_direct_callee_requirement_t;
+
+// Ordered unique direct Low callees of one function.
+typedef struct loom_low_direct_callee_requirement_list_t {
+  // Callee records in first-call order.
+  const loom_low_direct_callee_requirement_t* values;
+  // Number of entries in |values|.
+  iree_host_size_t count;
+} loom_low_direct_callee_requirement_list_t;
+
 // Requirements available before scheduling, allocation, or native emission.
 //
 // Resource operations borrow the source function. Storage records belong to
@@ -55,7 +71,7 @@ typedef struct loom_low_function_requirements_t {
   // Number of referenced read-only data records.
   iree_host_size_t read_only_data_count;
   // Direct Low callees in first-call order, with duplicate calls collapsed.
-  loom_symbol_ref_array_t direct_callees;
+  loom_low_direct_callee_requirement_list_t direct_callees;
   // Open-addressed read-only data ordinals plus one; zero marks an empty slot.
   // Kept NULL for at most four records, which use a bounded linear lookup.
   const uint16_t* read_only_data_ordinal_slots;

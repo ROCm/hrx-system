@@ -10,7 +10,6 @@
 #include "iree/schemas/xdna_executable.h"
 #include "loom/analysis/symbol_facts.h"
 #include "loom/codegen/low/diagnostics.h"
-#include "loom/codegen/low/function_requirements.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
@@ -24,6 +23,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/emit/tile_link.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/xdna_product.h"
 #include "loom/target/arch/amd/xdna/aie2p/profile.h"
+#include "loom/target/arch/amd/xdna/aie2p/program_source.h"
 #include "loom/target/arch/amd/xdna/aie2p/records/target_records.h"
 #include "loom/target/arch/amd/xdna/device/profile.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
@@ -268,77 +268,6 @@ static iree_status_t loom_aie2p_xdna_emit_product_issue(
   return iree_diagnostic_emit(request->diagnostic_emitter, &emission);
 }
 
-static iree_status_t loom_aie2p_xdna_collect_source_leaves(
-    const loom_aie2p_xdna_artifact_request_t* request,
-    loom_symbol_fact_table_t* symbol_facts,
-    const loom_target_function_version_snapshot_t* versions,
-    loom_aie2p_array_leaf_t** out_leaves, iree_host_size_t* out_leaf_count,
-    bool* out_valid) {
-  *out_leaves = NULL;
-  *out_leaf_count = 0;
-  *out_valid = false;
-  iree_host_size_t leaf_count = 0;
-  const loom_symbol_t* symbol = NULL;
-  loom_module_for_each_symbol(request->module, symbol) {
-    if (symbol->defining_op != NULL &&
-        loom_low_func_def_isa(symbol->defining_op) &&
-        loom_aie2p_xdna_has_contract(request->module, symbol->defining_op,
-                                     IREE_SV("amd.xdna.aie2p.core"))) {
-      ++leaf_count;
-    }
-  }
-  loom_aie2p_array_leaf_t* leaves = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      request->scratch_arena, leaf_count, sizeof(*leaves), (void**)&leaves));
-  iree_host_size_t leaf_index = 0;
-  loom_module_for_each_symbol(request->module, symbol) {
-    const loom_op_t* function_op = symbol->defining_op;
-    if (function_op == NULL || !loom_low_func_def_isa(function_op) ||
-        !loom_aie2p_xdna_has_contract(request->module, function_op,
-                                      IREE_SV("amd.xdna.aie2p.core"))) {
-      continue;
-    }
-    const loom_symbol_id_t symbol_id =
-        (loom_symbol_id_t)(symbol - request->module->symbols.entries);
-    const loom_target_function_version_t* version =
-        loom_target_function_version_snapshot_at(versions, symbol_id);
-    loom_low_resolved_target_t target = {0};
-    IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-        request->module, symbol_facts, function_op,
-        version != NULL ? version->function_target_facts : NULL,
-        request->low_descriptor_registry, request->diagnostic_emitter,
-        &target));
-    if (target.descriptor_set == NULL) {
-      return iree_ok_status();
-    }
-    // Array planning consumes declared interfaces and storage. Physical
-    // lifetimes belong to the resident program after imports are bound and
-    // protocol operations are inserted, not to this shared source body.
-    loom_low_function_requirements_t requirements = {0};
-    IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
-        request->module, target.descriptor_set,
-        loom_low_func_def_body(function_op), request->scratch_arena,
-        &requirements));
-    leaves[leaf_index] = (loom_aie2p_array_leaf_t){
-        .entry =
-            {
-                .module_id = 0,
-                .symbol_id = symbol_id,
-            },
-        .function_op = function_op,
-        .function_target_facts = target.target_facts,
-        .memory_accesses = version != NULL ? version->memory_accesses : NULL,
-        .loop_execution = version != NULL ? version->loop_execution : NULL,
-        .requirements = requirements,
-    };
-    ++leaf_index;
-  }
-  *out_leaves = leaves;
-  *out_leaf_count = leaf_count;
-  *out_valid = true;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_aie2p_xdna_plan_tile_link(
     const loom_aie2p_array_plan_t* plan, uint32_t worker_index,
     const loom_aie2p_leaf_realization_t* realization,
@@ -377,7 +306,7 @@ static iree_status_t loom_aie2p_xdna_plan_tile_link(
   }
 
   const iree_host_size_t expected_read_only_data_count =
-      plan->workers[worker_index].leaf->requirements.read_only_data_count;
+      plan->workers[worker_index].source->requirements.read_only_data_count;
   if (realization->read_only_data_count != expected_read_only_data_count) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -723,6 +652,11 @@ iree_status_t loom_aie2p_xdna_compile_artifact(
   IREE_RETURN_IF_ERROR(loom_target_function_version_snapshot_build(
       request->module, request->function_versions, request->scratch_arena,
       &versions));
+  loom_aie2p_program_source_table_t program_sources;
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_source_table_initialize(
+      request->module, &symbol_facts, &versions,
+      request->low_descriptor_registry, request->diagnostic_emitter,
+      request->scratch_arena, &program_sources));
 
   loom_aie2p_xdna_source_entry_t* source_entries = NULL;
   iree_host_size_t entry_count = 0;
@@ -762,9 +696,6 @@ iree_status_t loom_aie2p_xdna_compile_artifact(
     }
   }
 
-  loom_aie2p_array_leaf_t* source_leaves = NULL;
-  iree_host_size_t source_leaf_count = 0;
-  bool source_leaves_collected = false;
   loom_aie2p_array_plan_t* array_plans = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(request->scratch_arena, entry_count,
@@ -789,8 +720,9 @@ iree_status_t loom_aie2p_xdna_compile_artifact(
                                      IREE_SV("amd.xdna.aie2p.configuration"))) {
       bool valid = false;
       IREE_RETURN_IF_ERROR(loom_aie2p_configuration_plan_build(
-          request, &versions, source_entry->function_op, device_profile,
-          &configuration_plans[i], &product_entries[i], &valid));
+          request, &versions, &program_sources, source_entry->function_op,
+          device_profile, &configuration_plans[i], &product_entries[i],
+          &valid));
       if (!valid) {
         return iree_ok_status();
       }
@@ -800,21 +732,11 @@ iree_status_t loom_aie2p_xdna_compile_artifact(
       loom_target_compile_report_record_low_kernel_workload(
           request->compile_report, source_entry->function_op);
     }
-    if (!source_leaves_collected) {
-      bool source_leaves_valid = false;
-      IREE_RETURN_IF_ERROR(loom_aie2p_xdna_collect_source_leaves(
-          request, &symbol_facts, &versions, &source_leaves, &source_leaf_count,
-          &source_leaves_valid));
-      if (!source_leaves_valid) {
-        return iree_ok_status();
-      }
-      source_leaves_collected = true;
-    }
     bool valid = false;
     IREE_RETURN_IF_ERROR(loom_aie2p_array_plan_build(
-        request->module, source_entry->function_op, source_leaves,
-        source_leaf_count, request->diagnostic_emitter, request->scratch_arena,
-        &array_plans[i], &valid));
+        request->module, source_entry->function_op, &program_sources,
+        request->diagnostic_emitter, request->scratch_arena, &array_plans[i],
+        &valid));
     if (!valid) {
       return iree_ok_status();
     }

@@ -204,6 +204,30 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "program_source",
+    srcs = ["program_source.c"],
+    hdrs = ["program_source.h"],
+    visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
+    deps = [
+        "//loom/src/loom/analysis:symbol_facts",
+        "//loom/src/loom/codegen/low:diagnostics",
+        "//loom/src/loom/codegen/low:function_requirements",
+        "//loom/src/loom/codegen/low:loop_execution",
+        "//loom/src/loom/codegen/low:memory_access",
+        "//loom/src/loom/codegen/low:target_binding",
+        "//loom/src/loom/error:emitter",
+        "//loom/src/loom/error:parameter",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:function_version",
+        "//loom/src/loom/target/arch/amd/xdna:error_defs",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "ir_provider",
     srcs = ["ir_provider.c"],
     hdrs = ["ir_provider.h"],

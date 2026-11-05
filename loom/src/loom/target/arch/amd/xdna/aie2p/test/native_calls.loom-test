@@ -116,3 +116,78 @@ entries: 1
 entry 0: 0 bindings, 0 dynamic relocations
   invocation 0: bytes=212 next=1
   invocation 1: bytes=16 next=1
+
+// ====
+// RUN: emit aie2p-xdna
+
+// Array planning rejects a nested native call at the helper call site before
+// resident cloning or native allocation begins.
+aie2p.target<array> @nested_array_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @nested_array_core_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+low.func.def retain target<amd.xdna.aie2p.array>(@nested_array_target) abi(array_program) @nested_array() asm {
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @nested_array_entry
+  constrain.location %worker, %zero, %row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@nested_array_core_target) abi(object_function) @nested_array_entry() asm {
+  low.func.call @nested_array_helper() : ()
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@nested_array_core_target) @nested_array_helper() asm {
+  // ERROR@+1: XDNA/063 {helper_name="nested_array_helper", callee_name="nested_array_leaf"}
+  low.func.call @nested_array_leaf() : ()
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@nested_array_core_target) @nested_array_leaf() asm {
+  return
+}
+
+// ====
+// RUN: emit aie2p-xdna
+
+// Configuration planning applies the same admission contract while resolving
+// program.load, before it compiles or links the worker.
+aie2p.target<configuration> @nested_configuration_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @nested_configuration_core_target {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@nested_configuration_target) abi(array_program) @nested_configuration() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @nested_initialize, @nested_invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@nested_configuration_target) @nested_initialize() asm {
+  %column = constant 0 : reg<aie2p.config.scalar : i64>
+  %row = constant 2 : reg<aie2p.config.scalar : i64>
+  program.load %column, %row, @nested_configuration_entry
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@nested_configuration_target) @nested_invoke() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@nested_configuration_core_target) abi(object_function) @nested_configuration_entry() asm {
+  low.func.call @nested_configuration_helper() : ()
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@nested_configuration_core_target) @nested_configuration_helper() asm {
+  // ERROR@+1: XDNA/063 {helper_name="nested_configuration_helper", callee_name="nested_configuration_leaf"}
+  low.func.call @nested_configuration_leaf() : ()
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@nested_configuration_core_target) @nested_configuration_leaf() asm {
+  return
+}
