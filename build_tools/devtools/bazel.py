@@ -118,6 +118,7 @@ class BazelFuzzCommand(BazelTargetCommand):
     shard_count: int = 1
     result_path: Path | None = None
     ignored_directories: list[Path] = field(default_factory=list)
+    compile_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -315,8 +316,11 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
     shard_count = 1
     result_path = None
     ignored_directories = []
+    compile_only = False
     for arg in tool_args:
-        if arg.startswith("--workers="):
+        if arg in ("--compile-only", "--compile_only"):
+            compile_only = True
+        elif arg.startswith("--workers="):
             try:
                 worker_count = int(arg.split("=", 1)[1])
             except ValueError as exc:
@@ -341,6 +345,12 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
         raise ValueError("Target is required for bazel fuzz")
     if ignored_directories and "..." not in target:
         raise ValueError("--ignore-directory requires a recursive target pattern")
+    if compile_only and worker_count != 1:
+        raise ValueError("--workers cannot be used with --compile-only")
+    if compile_only and result_path is not None:
+        raise ValueError("--result cannot be used with --compile-only")
+    if compile_only and fuzzer_args:
+        raise ValueError("fuzzer arguments cannot be used with --compile-only")
     return BazelFuzzCommand(
         target=target,
         bazel_args=bazel_args,
@@ -350,6 +360,7 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
         shard_count=shard_count,
         result_path=result_path,
         ignored_directories=ignored_directories,
+        compile_only=compile_only,
     )
 
 
@@ -1556,7 +1567,12 @@ class BazelFuzzStep:
 
     @property
     def bazel_args(self) -> list[str]:
-        return ["--config=fuzzer", *self.command.bazel_args]
+        # Compile-only qualification needs a valid ASAN/libFuzzer binary, not
+        # campaign coverage throughout every dependency. Reuse the ordinary
+        # ASAN configuration so a preceding sanitizer build supplies the
+        # dependency objects; the fuzz target itself supplies libFuzzer's main.
+        config = "asan" if self.command.compile_only else "fuzzer"
+        return [f"--config={config}", *self.command.bazel_args]
 
     def describe(self) -> str:
         lines = [
@@ -1573,12 +1589,26 @@ class BazelFuzzStep:
             lines.append(
                 quote_command([self.bazel, "build", *self.bazel_args, "<fuzz targets>"])
             )
+            if self.command.compile_only:
+                return "\n".join(lines)
             lines.append("# generate one canonical Bazel launch script per fuzzer")
             lines.append(
                 f"run at most {self.command.worker_count} launch scripts concurrently "
                 "without the Bazel lock"
             )
         else:
+            if self.command.compile_only:
+                lines.append(
+                    quote_command(
+                        [
+                            self.bazel,
+                            "build",
+                            *self.bazel_args,
+                            self.command.target,
+                        ]
+                    )
+                )
+                return "\n".join(lines)
             lines.append("# build and generate canonical Bazel launch script")
             lines.append(
                 quote_command(
@@ -1607,7 +1637,21 @@ class BazelFuzzStep:
             fuzz.bazel_fuzz_target_shard(self.command.target, self.command.shard_count)
             != self.command.shard_index
         ):
+            if self.command.compile_only:
+                return 0
             return self.run_fuzzer_processes([], [])
+        if self.command.compile_only:
+            return run_quietly(
+                [
+                    self.bazel,
+                    "build",
+                    *self.bazel_args,
+                    self.command.target,
+                ],
+                cwd=REPO_ROOT,
+                env=self.env,
+                verbose=verbose,
+            )
         return self.run_target(self.command.target, verbose=verbose)
 
     def run_target_pattern(self, *, verbose: bool) -> int:
@@ -1651,6 +1695,8 @@ class BazelFuzzStep:
                 f"{len(discovered_targets)} targets"
             )
         if not targets:
+            if self.command.compile_only:
+                return 0
             return self.run_fuzzer_processes([], [])
         metadata_result, metadata_by_target = resolve_bazel_launch_metadata_for_targets(
             bazel=self.bazel,
@@ -1672,6 +1718,8 @@ class BazelFuzzStep:
                 "target(s) for this configuration"
             )
         if not targets:
+            if self.command.compile_only:
+                return 0
             return self.run_fuzzer_processes([], incompatible_targets)
         build_result = run_quietly(
             [self.bazel, "build", *self.bazel_args, *targets],
@@ -1681,6 +1729,9 @@ class BazelFuzzStep:
         )
         if build_result != 0:
             return build_result
+        if self.command.compile_only:
+            print(f"dev.py: built {len(targets)} compatible fuzz target(s)")
+            return 0
         fuzzer_launches = []
         for target in targets:
             launch_result, launch = self.generate_fuzzer_launch(

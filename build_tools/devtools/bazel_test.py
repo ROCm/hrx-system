@@ -51,6 +51,15 @@ class BazelTest(unittest.TestCase):
         self.assertEqual(command.bazel_args, ["--config=asan"])
         self.assertEqual(command.program_args, ["-max_total_time=60"])
 
+    def test_bazel_fuzz_parses_compile_only(self):
+        command = bazel_dev.parse_bazel_fuzz_args(
+            ["--compile-only", "--shard=1/3", "//..."]
+        )
+
+        self.assertTrue(command.compile_only)
+        self.assertEqual(command.shard_index, 1)
+        self.assertEqual(command.shard_count, 3)
+
     def test_bazel_fuzz_rejects_invalid_campaign_options(self):
         invalid_arguments = [
             ["--workers=0", "//..."],
@@ -62,6 +71,9 @@ class BazelTest(unittest.TestCase):
             ["--ignore-directory=/tmp", "//..."],
             ["--ignore-directory=../outside", "//..."],
             ["--ignore-directory=local-experiments", "//pkg:one_fuzz"],
+            ["--compile-only", "--workers=2", "//..."],
+            ["--compile-only", "--result=result.json", "//..."],
+            ["--compile-only", "//...", "--", "-runs=1"],
         ]
         for arguments in invalid_arguments:
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
@@ -1493,6 +1505,85 @@ class BazelTest(unittest.TestCase):
             self.assertEqual(
                 campaign["incompatible_targets"], ["//disabled:disabled_fuzz"]
             )
+
+    def test_bazel_fuzz_compile_only_builds_compatible_targets(self):
+        command = bazel_dev.BazelFuzzCommand(
+            target="//...",
+            bazel_args=["--keep_going"],
+            compile_only=True,
+        )
+        step = bazel_dev.BazelFuzzStep("bazel", command)
+        discovered = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="//z:z_fuzz\n//disabled:disabled_fuzz\n//a:a_fuzz\n",
+            stderr="",
+        )
+        metadata = {
+            "//a:a_fuzz": mock.sentinel.a,
+            "//z:z_fuzz": mock.sentinel.z,
+        }
+        with (
+            mock.patch.object(
+                bazel_dev, "run_captured", return_value=discovered
+            ) as query,
+            mock.patch.object(
+                bazel_dev,
+                "resolve_bazel_launch_metadata_for_targets",
+                return_value=(0, metadata),
+            ) as resolve_metadata,
+            mock.patch.object(bazel_dev, "run_quietly", return_value=0) as build,
+            mock.patch.object(
+                bazel_dev.BazelFuzzStep, "generate_fuzzer_launch"
+            ) as generate_fuzzer_launch,
+            mock.patch.object(bazel_dev, "run_fuzzers") as run_fuzzers,
+        ):
+            self.assertEqual(step.run(), 0)
+
+        query.assert_called_once_with(
+            ["bazel", "query", "//..."], cwd=bazel_dev.REPO_ROOT, env=None
+        )
+        resolve_metadata.assert_called_once_with(
+            bazel="bazel",
+            targets=["//a:a_fuzz", "//disabled:disabled_fuzz", "//z:z_fuzz"],
+            bazel_args=["--config=asan", "--keep_going"],
+            cwd=bazel_dev.REPO_ROOT,
+            env=None,
+            skip_incompatible=True,
+        )
+        build.assert_called_once_with(
+            [
+                "bazel",
+                "build",
+                "--config=asan",
+                "--keep_going",
+                "//a:a_fuzz",
+                "//z:z_fuzz",
+            ],
+            cwd=bazel_dev.REPO_ROOT,
+            env=None,
+            verbose=False,
+        )
+        generate_fuzzer_launch.assert_not_called()
+        run_fuzzers.assert_not_called()
+
+    def test_bazel_fuzz_compile_only_builds_exact_target(self):
+        step = bazel_dev.BazelFuzzStep(
+            "bazel",
+            bazel_dev.BazelFuzzCommand(
+                target="//pkg:parser_fuzz",
+                compile_only=True,
+            ),
+        )
+        with mock.patch.object(bazel_dev, "run_quietly", return_value=0) as build:
+            self.assertEqual(step.run(), 0)
+
+        build.assert_called_once_with(
+            ["bazel", "build", "--config=asan", "//pkg:parser_fuzz"],
+            cwd=bazel_dev.REPO_ROOT,
+            env=None,
+            verbose=False,
+        )
 
     def test_bazel_fuzz_stops_remaining_launches_after_a_failure(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
