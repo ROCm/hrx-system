@@ -267,7 +267,13 @@ loom_aie2p_native_reusable_descriptor(
        candidate; candidate = candidate->next) {
     const loom_aie2p_native_transfer_t* previous = candidate->last_transfer;
     bool address_differs;
-    if (candidate->shim != shim || candidate->path != task->path ||
+    // Shim descriptors belong to the tile's shared bank. Direction and
+    // completion routing belong to the issuing channel, so a retired sequence
+    // can serve another path on that shim. Local descriptors retain their
+    // path-specific completion semaphore and address aperture.
+    const bool same_bank = shim ? candidate->path->shim == task->path->shim
+                                : candidate->path == task->path;
+    if (candidate->shim != shim || !same_bank ||
         !loom_aie2p_native_transfer_retired(previous, issue) ||
         (candidate->completion &&
          !loom_aie2p_native_transfer_retired(
