@@ -145,6 +145,18 @@ class TextDeploymentTest : public SourceTextServiceTest {
     EXPECT_EQ(loom_serve_text_row_token(row), oracle.Predict());
   }
 
+  void StartFailedWarmup() {
+    IREE_ASSERT_OK(Load(ModelOptions()));
+    // Preparation indexes the real file without reading its payload. A later
+    // truncation fails deferred loading through the model's actual groups.
+    std::filesystem::resize_file(weights_, 0);
+    IREE_ASSERT_OK(loom_serve_text_warmup_allocate(
+        model_->residency.count, devices_.data(), pools_.data(),
+        model_->residency.groups, nullptr, nullptr, host_allocator_,
+        &model_->warmup));
+    loom_serve_text_warmup_poll(model_->warmup);
+  }
+
   // Ordered execution and storage spans remain alive through model retirement.
   std::array<loom_serve_device_t*, 3> devices_ = {};
   // Explicit pool membership permits aliases without merging executions.
@@ -192,6 +204,45 @@ TEST_F(TextDeploymentTest, CompleteOwnerSetProducesRetainedHttpOutput) {
               std::string::npos)
         << next;
   }
+}
+
+TEST_F(TextDeploymentTest, FailedWarmupStillReleasesTheRetiredModel) {
+  ASSERT_NO_FATAL_FAILURE(StartFailedWarmup());
+  loom_serve_text_warmup_await(model_->warmup);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_serve_text_warmup_status(model_->warmup));
+
+  iree_notification_t notification;
+  iree_notification_initialize(&notification);
+  loom_serve_text_model_retire(
+      model_,
+      [](void* payload) {
+        iree_notification_post(static_cast<iree_notification_t*>(payload),
+                               IREE_ALL_WAITERS);
+      },
+      &notification);
+  std::array<loom_serve_workspace_t*, 3> workspaces;
+  for (size_t i = 0; i < pools_.size(); ++i) {
+    workspaces[i] = loom_serve_pool_workspace(pools_[i]);
+  }
+  IREE_EXPECT_OK(loom_serve_workspace_await(
+      workspaces.size(), workspaces.data(), &notification,
+      [](void* payload) {
+        return loom_serve_text_model_is_retired(
+            static_cast<loom_serve_text_model_t*>(payload));
+      },
+      model_));
+  EXPECT_TRUE(loom_serve_text_model_is_retired(model_));
+  IREE_EXPECT_OK(
+      loom_serve_text_model_free_retired(std::exchange(model_, nullptr)));
+  iree_notification_deinitialize(&notification);
+}
+
+TEST_F(TextDeploymentTest, ColdShutdownReportsTheWarmupFailure) {
+  ASSERT_NO_FATAL_FAILURE(StartFailedWarmup());
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_OUT_OF_RANGE,
+      loom_serve_text_model_free(std::exchange(model_, nullptr)));
 }
 
 TEST_F(TextDeploymentTest, AliasedPoolsSumConcurrentExecutionPeaks) {

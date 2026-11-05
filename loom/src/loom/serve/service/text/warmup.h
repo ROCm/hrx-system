@@ -54,8 +54,9 @@ iree_status_t loom_serve_text_warmup_status(
 void loom_serve_text_warmup_await(loom_serve_text_warmup_t* warmup);
 
 // Releases terminal ownership after model consumers and weight I/O retire.
-// Returns the retained terminal outcome. NULL is accepted.
-iree_status_t loom_serve_text_warmup_free(loom_serve_text_warmup_t* warmup);
+// The owner collects the operation outcome with warmup_status before release;
+// destruction itself is infallible. NULL is accepted.
+void loom_serve_text_warmup_free(loom_serve_text_warmup_t* warmup);
 
 #ifdef __cplusplus
 }  // extern "C"

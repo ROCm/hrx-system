@@ -135,16 +135,15 @@ void loom_serve_text_warmup_await(loom_serve_text_warmup_t* warmup) {
   iree_notification_deinitialize(&notification);
 }
 
-iree_status_t loom_serve_text_warmup_free(loom_serve_text_warmup_t* warmup) {
+void loom_serve_text_warmup_free(loom_serve_text_warmup_t* warmup) {
   if (!warmup) {
-    return iree_ok_status();
+    return;
   }
   IREE_ASSERT(!warmup->activation);
   for (iree_host_size_t i = 0; i < warmup->count; ++i) {
     loom_serve_residency_free(warmup->residencies[i]);
     loom_serve_execution_release(warmup->executions[i]);
   }
-  iree_status_t status = warmup->status;
+  iree_status_free(warmup->status);
   iree_allocator_free(warmup->host_allocator, warmup);
-  return status;
 }

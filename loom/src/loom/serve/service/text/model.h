@@ -464,13 +464,16 @@ void loom_serve_text_model_retire(loom_serve_text_model_t* model,
 bool loom_serve_text_model_is_retired(loom_serve_text_model_t* model);
 
 // Consumes a retired model on success. A platform release failure preserves
-// remaining handles and metadata for owner-side retry. NULL is accepted.
+// remaining handles and metadata for owner-side retry. Load/service owners
+// collect warmup outcomes before retirement; those are not release failures.
+// NULL is accepted.
 iree_status_t loom_serve_text_model_free_retired(
     loom_serve_text_model_t* model);
 
 // Cold outer-owner teardown. Begins retirement and joins actual queue ownership
 // before final destruction; live removal uses the wake/query path. All borrowed
-// row/tokenizer pointers become invalid. NULL is accepted.
+// row/tokenizer pointers become invalid. Includes terminal warmup/execution
+// outcomes even when resource release succeeds. NULL is accepted.
 iree_status_t loom_serve_text_model_free(loom_serve_text_model_t* model);
 
 // Borrowed primary execution device, outliving model work and preparation.

@@ -142,7 +142,8 @@ class TextPlacementTest
     for (size_t i = 0; i < parameters_.count; ++i) {
       IREE_EXPECT_OK(loom_serve_weights_await_retirement(parameters_.plans[i]));
     }
-    IREE_EXPECT_OK(loom_serve_text_warmup_free(warmup_));
+    IREE_EXPECT_OK(loom_serve_text_warmup_status(warmup_));
+    loom_serve_text_warmup_free(warmup_);
     for (auto* residency : residencies_) {
       loom_serve_residency_free(residency);
     }
