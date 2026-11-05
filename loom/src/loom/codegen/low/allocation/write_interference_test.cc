@@ -169,7 +169,7 @@ class WriteInterferenceTest : public ::testing::Test {
     loom_symbol_id_t symbol;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name, &symbol));
     IREE_CHECK_OK(loom_low_func_def_build(
-        &builder, 0, 0, 0, 0, 0, 0, 0, 0, name, {}, 0, {}, {},
+        &builder, 0, 0, 0, 0, 0, 0, 0, 0, 0, name, {}, 0, {}, {},
         LOOM_STRING_ID_INVALID, {}, loom_symbol_ref_t{0, symbol}, &type, 1,
         nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function_));
     loom_region_t* body = loom_low_func_def_body(function_);

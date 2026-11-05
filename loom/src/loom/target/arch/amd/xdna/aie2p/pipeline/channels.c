@@ -77,7 +77,7 @@ static iree_status_t loom_aie2p_native_invoke(loom_builder_t* builder,
                                               loom_value_id_t* out_result) {
   loom_op_t* op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_invoke_build(
-      builder, 0, 0, 0, callee, arguments, argument_count, result_type,
+      builder, 0, 0, 0, 0, callee, arguments, argument_count, result_type,
       result_type ? 1 : 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &op));
   if (out_result) {
     *out_result = loom_op_results(op)[0];

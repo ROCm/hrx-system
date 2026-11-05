@@ -290,7 +290,7 @@ iree_status_t loom_low_task_materialize_kernel(
   loom_op_t* physical = NULL;
   IREE_RETURN_IF_ERROR(loom_low_func_def_build(
       &builder.ir, flags, LOOM_LOW_VISIBILITY_PUBLIC,
-      loom_low_kernel_def_retain(source), 0, 0, 0,
+      loom_low_kernel_def_retain(source), 0, 0, 0, 0,
       loom_low_kernel_def_allocation(source),
       loom_low_kernel_def_schedule(source),
       loom_low_kernel_def_descriptor_set(source), target_ref,
@@ -353,7 +353,7 @@ static iree_status_t loom_low_task_entry_build_query(
       LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_VISIBILITY |
           LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_RETAIN |
           LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_ABI,
-      LOOM_LOW_VISIBILITY_PUBLIC, LOOM_LOW_RETAIN_RETAIN, 0, 0, 0, 0, 0,
+      LOOM_LOW_VISIBILITY_PUBLIC, LOOM_LOW_RETAIN_RETAIN, 0, 0, 0, 0, 0, 0,
       descriptor_key, loom_symbol_ref_null(), LOOM_TARGET_ABI_OBJECT_FUNCTION,
       loom_named_attr_slice_empty(), loom_named_attr_slice_empty(),
       LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), query_symbol,

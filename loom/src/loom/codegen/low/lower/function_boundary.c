@@ -413,6 +413,7 @@ static iree_status_t loom_low_lower_create_func_op(
   uint8_t cc = loom_func_like_cc(context->source_function);
   loom_callable_effect_contract_t effect_contract =
       loom_func_like_effect_contract(context->source_function);
+  uint8_t temperature = loom_func_like_temperature(context->source_function);
   uint8_t inline_policy =
       loom_func_like_inline_policy(context->source_function);
   loom_target_abi_kind_t abi = loom_low_lower_function_abi(context);
@@ -431,6 +432,9 @@ static iree_status_t loom_low_lower_create_func_op(
   }
   if (effect_contract != 0) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_EFFECT_CONTRACT;
+  }
+  if (temperature != 0) {
+    build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_TEMPERATURE;
   }
   if (inline_policy != 0) {
     build_flags |= LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY;
@@ -471,10 +475,10 @@ static iree_status_t loom_low_lower_create_func_op(
       loom_low_lower_intern_descriptor_set_key(context, &descriptor_set_key));
   IREE_RETURN_IF_ERROR(loom_low_func_def_build(
       &context->builder, build_flags, visibility, retain, cc, effect_contract,
-      inline_policy, /*allocation=*/0, /*schedule=*/0, descriptor_set_key,
-      context->options->target_ref, abi, abi_attrs, abi_layout, export_symbol,
-      export_attrs, low_func_ref, arg_types, arg_count, result_types,
-      result_count, tied_results, tied_result_count,
+      temperature, inline_policy, /*allocation=*/0, /*schedule=*/0,
+      descriptor_set_key, context->options->target_ref, abi, abi_attrs,
+      abi_layout, export_symbol, export_attrs, low_func_ref, arg_types,
+      arg_count, result_types, result_count, tied_results, tied_result_count,
       /*predicates=*/NULL, /*predicates_count=*/0,
       context->source_function.op->location, &context->low_func_op));
 
@@ -1042,6 +1046,7 @@ static iree_status_t loom_low_lower_create_decl_op(
   const uint8_t cc = loom_func_like_cc(source_declaration);
   const loom_callable_effect_contract_t effect_contract =
       loom_func_like_effect_contract(source_declaration);
+  const uint8_t temperature = loom_func_like_temperature(source_declaration);
   const uint8_t inline_policy =
       loom_func_like_inline_policy(source_declaration);
   const bool has_abi = loom_low_lower_function_attr_present(
@@ -1064,6 +1069,9 @@ static iree_status_t loom_low_lower_create_decl_op(
   }
   if (effect_contract != 0) {
     build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_EFFECT_CONTRACT;
+  }
+  if (temperature != 0) {
+    build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_TEMPERATURE;
   }
   if (inline_policy != 0) {
     build_flags |= LOOM_LOW_FUNC_DECL_BUILD_FLAG_HAS_INLINE_POLICY;
@@ -1104,7 +1112,7 @@ static iree_status_t loom_low_lower_create_decl_op(
       loom_low_lower_intern_descriptor_set_key(context, &descriptor_set_key));
   return loom_low_func_decl_build(
       &context->builder, build_flags, visibility, retain, cc, effect_contract,
-      inline_policy, /*allocation=*/0, /*schedule=*/0,
+      temperature, inline_policy, /*allocation=*/0, /*schedule=*/0,
       (uint8_t)plan->import_kind, code_symbol, import_module,
       descriptor_set_key, plan->target_ref, abi, abi_attrs, abi_layout,
       export_symbol, export_attrs, low_func_ref, boundary->argument_types,

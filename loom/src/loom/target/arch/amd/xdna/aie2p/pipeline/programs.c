@@ -212,7 +212,7 @@ iree_status_t loom_aie2p_native_emit_programs(
                              projected->argument_count, NULL, 0, NULL, 0,
                              LOOM_LOCATION_UNKNOWN, &call));
     IREE_RETURN_IF_ERROR(
-        loom_low_invoke_build(&rewriter->builder, 0, 0, 0, complete, NULL, 0,
+        loom_low_invoke_build(&rewriter->builder, 0, 0, 0, 0, complete, NULL, 0,
                               NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &call));
     IREE_RETURN_IF_ERROR(loom_func_return_build(&rewriter->builder, NULL, 0,
                                                 LOOM_LOCATION_UNKNOWN, &call));

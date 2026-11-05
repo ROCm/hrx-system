@@ -25,19 +25,19 @@ low.func.def target<test.low.core>(@test_target) @schedule_fence() asm {
 
 test.target<low_core> @test_target
 
-low.func.decl inline target<test.low.core>(@test_target) @inline_decl(%value: reg<test.i32>) -> (reg<test.i32>)
+low.func.decl hot inline target<test.low.core>(@test_target) @inline_decl(%value: reg<test.i32>) -> (reg<test.i32>)
 
-low.func.def noinline target<test.low.core>(@test_target) @noinline_helper(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+low.func.def cold noinline target<test.low.core>(@test_target) @noinline_helper(%value: reg<test.i32>) -> (reg<test.i32>) asm {
   return %value
 }
 
 low.func.def target<test.low.core>(@test_target) @inline_call_policy(%value: reg<test.i32>) -> (reg<test.i32>) asm {
-  %result = low.func.call inline @inline_decl(%value) : (reg<test.i32>) -> (reg<test.i32>)
+  %result = low.func.call hot inline @inline_decl(%value) : (reg<test.i32>) -> (reg<test.i32>)
   return %result
 }
 
 func.def @invoke_call_policy(%value: i32) -> (i32) {
-  %result = low.invoke noinline @noinline_helper(%value) : (i32) -> (i32)
+  %result = low.invoke cold noinline @noinline_helper(%value) : (i32) -> (i32)
   func.return %result : i32
 }
 

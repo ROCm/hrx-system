@@ -125,7 +125,7 @@ TEST(LowPlacementTest, DefiningTransferPrecedesEarlierCollectedUses) {
                                  loom_low_register_type(1, 1, 1)};
     loom_op_t* function = nullptr;
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &builder, 0, 0, 0, 0, 0, 0, 0, 0, name, {}, 0, {}, {},
+        &builder, 0, 0, 0, 0, 0, 0, 0, 0, 0, name, {}, 0, {}, {},
         LOOM_STRING_ID_INVALID, {}, loom_symbol_ref_t{0, symbol}, types, 2,
         nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function));
     loom_region_t* body = loom_low_func_def_body(function);
@@ -396,7 +396,7 @@ TEST(LowPlacementTest, RetainsOperandConstraintsAcrossExactTiesOnly) {
     const loom_type_t type = loom_low_register_type(1, class_id, 1);
     loom_op_t* function = nullptr;
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &builder, 0, 0, 0, 0, 0, 0, 0, 0, name, {}, 0, {}, {},
+        &builder, 0, 0, 0, 0, 0, 0, 0, 0, 0, name, {}, 0, {}, {},
         LOOM_STRING_ID_INVALID, {}, loom_symbol_ref_t{0, symbol}, &type, 1,
         nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function));
     loom_region_t* body = loom_low_func_def_body(function);
@@ -615,7 +615,7 @@ class LowPlacementStorageTest : public ::testing::Test {
     const loom_type_t type = loom_low_register_type(1, 0, 1);
     loom_op_t* function = nullptr;
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &builder, 0, 0, 0, 0, 0, 0, 0, 0, name, {}, 0, {}, {},
+        &builder, 0, 0, 0, 0, 0, 0, 0, 0, 0, name, {}, 0, {}, {},
         LOOM_STRING_ID_INVALID, {}, loom_symbol_ref_t{0, symbol}, &type, 1,
         &type, 1, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function));
     function_ = function;

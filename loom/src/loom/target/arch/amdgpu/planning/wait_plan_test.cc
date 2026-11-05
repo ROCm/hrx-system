@@ -104,7 +104,7 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     loom_op_t* helper = nullptr;
     IREE_ASSERT_OK(loom_low_func_def_build(
         &builder_, LOOM_LOW_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY, 0, 0, 0, 0,
-        LOOM_INLINE_POLICY_NOINLINE, 0, 0, descriptor_set, {}, 0, {}, {},
+        0, LOOM_INLINE_POLICY_NOINLINE, 0, 0, descriptor_set, {}, 0, {}, {},
         LOOM_STRING_ID_INVALID, {}, {0, helper_symbol}, nullptr, 0, nullptr, 0,
         nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &helper));
     call_target_ = loom_low_func_def_callee(helper);
@@ -127,7 +127,7 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     }
     loom_op_t* function = nullptr;
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &builder_, 0, 0, 0, 0, 0, 0, 0, 0, descriptor_set, {}, 0, {}, {},
+        &builder_, 0, 0, 0, 0, 0, 0, 0, 0, 0, descriptor_set, {}, 0, {}, {},
         LOOM_STRING_ID_INVALID, {}, {0, symbol}, argument_types, 4, nullptr, 0,
         nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function));
     loom_block_t* block =
@@ -241,7 +241,7 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
             std::initializer_list<loom_low_move_t> results = {}) {
     const uint32_t node_index = static_cast<uint32_t>(nodes_.size());
     loom_op_t* call = nullptr;
-    IREE_ASSERT_OK(loom_low_func_call_build(&builder_, 0, 0, 0, call_target_,
+    IREE_ASSERT_OK(loom_low_func_call_build(&builder_, 0, 0, 0, 0, call_target_,
                                             nullptr, 0, nullptr, 0, nullptr, 0,
                                             LOOM_LOCATION_UNKNOWN, &call));
     loom_low_schedule_node_t node = {

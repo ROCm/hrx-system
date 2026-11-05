@@ -58,8 +58,8 @@ class LivenessSelectionTest : public ::testing::TestWithParam<
     const loom_type_t result_types[] = {register_type, register_type};
     loom_op_t* function = nullptr;
     IREE_ASSERT_OK(loom_low_func_def_build(
-        &builder, 0, 0, 0, 0, 0, 0, 0, 0, contract, loom_symbol_ref_null(), 0,
-        loom_named_attr_slice_empty(), loom_named_attr_slice_empty(),
+        &builder, 0, 0, 0, 0, 0, 0, 0, 0, 0, contract, loom_symbol_ref_null(),
+        0, loom_named_attr_slice_empty(), loom_named_attr_slice_empty(),
         LOOM_STRING_ID_INVALID, loom_named_attr_slice_empty(), {0, symbol},
         nullptr, 0, result_types, 2, nullptr, 0, nullptr, 0,
         LOOM_LOCATION_UNKNOWN, &function));

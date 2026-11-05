@@ -320,7 +320,7 @@ static iree_status_t loom_aie2p_native_dma_submit_adapter(
       code, &builder, (int32_t)shim_bits, &call_arguments[argument_count++]));
   loom_op_t* call;
   IREE_RETURN_IF_ERROR(loom_low_func_call_build(
-      &builder, 0, 0, 0, task->submit_group->function, call_arguments,
+      &builder, 0, 0, 0, 0, task->submit_group->function, call_arguments,
       argument_count, NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &call));
   return loom_aie2p_worker_return(&builder, NULL, 0);
 }
@@ -411,10 +411,10 @@ iree_status_t loom_aie2p_native_emit_transfers(
     loom_builder_set_before(builder, task->last_transfer->source->request.op);
     loom_op_t* invoke;
     IREE_RETURN_IF_ERROR(loom_low_invoke_build(
-        builder, 0, 0, 0, task->submit, arguments, argument_count, NULL, 0,
+        builder, 0, 0, 0, 0, task->submit, arguments, argument_count, NULL, 0,
         NULL, 0, LOOM_LOCATION_UNKNOWN, &invoke));
     loom_builder_set_before(builder, task->first_transfer->completion);
-    IREE_RETURN_IF_ERROR(loom_low_invoke_build(builder, 0, 0, 0, task->wait,
+    IREE_RETURN_IF_ERROR(loom_low_invoke_build(builder, 0, 0, 0, 0, task->wait,
                                                NULL, 0, NULL, 0, NULL, 0,
                                                LOOM_LOCATION_UNKNOWN, &invoke));
   }

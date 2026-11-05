@@ -69,7 +69,7 @@ iree_status_t loom_aie2p_worker_helper(
   loom_builder_initialize(context->module, &context->module->arena,
                           loom_module_block(context->module), builder);
   IREE_RETURN_IF_ERROR(loom_low_func_def_build(
-      builder, 0, 0, 0, 0, 0, 0, 0, 0, context->contract,
+      builder, 0, 0, 0, 0, 0, 0, 0, 0, 0, context->contract,
       loom_symbol_ref_null(), 0, loom_named_attr_slice_empty(),
       loom_named_attr_slice_empty(), LOOM_STRING_ID_INVALID,
       loom_named_attr_slice_empty(), *out_symbol, arguments, argument_count,

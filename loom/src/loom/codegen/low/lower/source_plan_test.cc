@@ -1151,8 +1151,9 @@ TEST_P(LowLowerHelperPlanTest, RejectsConstraintBeforeLowConstruction) {
   }
   loom_op_t* invoke = nullptr;
   IREE_ASSERT_OK(loom_low_invoke_build(
-      &builder, /*build_flags=*/0, /*effect_contract=*/0, /*inline_policy=*/0,
-      helper_ref, operands, IREE_ARRAYSIZE(operands), &i32_type, 1,
+      &builder, /*build_flags=*/0, /*effect_contract=*/0, /*temperature=*/0,
+      /*inline_policy=*/0, helper_ref, operands, IREE_ARRAYSIZE(operands),
+      &i32_type, 1,
       /*tied_results=*/nullptr, /*tied_result_count=*/0, LOOM_LOCATION_UNKNOWN,
       &invoke));
   IREE_ASSERT_OK(loom_value_fact_table_initialize(
