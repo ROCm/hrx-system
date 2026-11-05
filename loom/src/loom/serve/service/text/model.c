@@ -163,9 +163,9 @@ loom_runtime_storage_statistics_t loom_serve_text_model_memory_statistics(
 
 loom_runtime_storage_usage_t loom_serve_text_model_weight_statistics(
     const loom_serve_text_model_t* model) {
-  loom_serve_memory_usage_t usage = {0};
+  loom_runtime_storage_usage_t usage = {0};
   for (uint32_t i = 0; i < model->residency.count; ++i) {
-    const loom_serve_memory_usage_t owner =
+    const loom_runtime_storage_usage_t owner =
         loom_serve_residency_group_statistics(model->residency.groups[i]);
     usage.reserved_bytes += owner.reserved_bytes;
     usage.committed_bytes += owner.committed_bytes;
@@ -178,9 +178,9 @@ loom_runtime_storage_usage_t loom_serve_text_model_weight_statistics(
 
 loom_runtime_parameter_activity_t loom_serve_text_model_parameter_activity(
     const loom_serve_text_model_t* model) {
-  loom_serve_weight_activity_t activity = {0};
+  loom_runtime_parameter_activity_t activity = {0};
   for (uint32_t i = 0; i < model->residency.count; ++i) {
-    const loom_serve_weight_activity_t owner =
+    const loom_runtime_parameter_activity_t owner =
         loom_serve_residency_group_activity(model->residency.groups[i]);
     activity.activations += owner.activations;
     activity.deactivations += owner.deactivations;
@@ -226,7 +226,7 @@ loom_serve_residency_snapshot_t loom_serve_text_model_parameter_snapshot(
         iree_max(snapshot.admission.age_ns, owner.admission.age_ns);
   }
   snapshot.memory = loom_serve_text_model_weight_statistics(model);
-  snapshot.activity = loom_serve_text_model_weight_activity(model);
+  snapshot.activity = loom_serve_text_model_parameter_activity(model);
   return snapshot;
 }
 

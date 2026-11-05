@@ -258,7 +258,7 @@ class ResidencyTest : public WeightsTest {
   // Independent pressure and request state, retired before physical pools.
   std::array<loom_serve_virtual_buffer_t*, 4> state_buffers_ = {};
   // Stable accounting through each state reservation's native release.
-  std::array<loom_serve_memory_statistics_t, 4> state_usage_ = {};
+  std::array<loom_runtime_storage_statistics_t, 4> state_usage_ = {};
   // Accepted caller-owned state operations, retired independently of weights.
   std::array<loom_serve_memory_operation_t*, 2> state_operations_ = {};
   // State readiness timelines belonging to explicitly selected owners.
@@ -485,7 +485,7 @@ TEST_P(ElasticResidencyTest,
 TEST_P(ElasticResidencyTest, ImpossiblePeerPreservesEarlierReclaimableHistory) {
   struct History {
     // Stable native state accounting owned by the fixture.
-    const loom_serve_memory_statistics_t* memory;
+    const loom_runtime_storage_statistics_t* memory;
     // Accepted logical release requests, not feasibility queries.
     uint32_t requests = 0;
     // Owner maintenance has not yet retired the accepted history release.

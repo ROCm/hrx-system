@@ -195,7 +195,7 @@ class TextDeploymentTest : public SourceTextServiceTest {
   // Actual competing backing, not a fabricated accounting counter.
   loom_serve_virtual_buffer_t* held_ = nullptr;
   // Statistics outlive the competing reservation and its queued disposal.
-  loom_serve_memory_statistics_t held_usage_ = {};
+  loom_runtime_storage_statistics_t held_usage_ = {};
 };
 
 TEST_F(TextDeploymentTest, HttpRegistrationPreservesEveryPlacementMember) {
@@ -254,7 +254,7 @@ TEST_F(TextDeploymentTest, CompleteOwnerSetProducesRetainedHttpOutput) {
               loom_serve_pool_residency_cache(pools_[i]));
   }
   IREE_ASSERT_OK(loom_serve_text_model_activate(model_));
-  EXPECT_EQ(loom_serve_text_model_weight_activity(model_).activations, 3u);
+  EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).activations, 3u);
   Start();
   const std::array<std::string, 3> prompts = {"abxa", "xab", "bbax"};
   std::array<int, 3> clients;
@@ -436,7 +436,8 @@ TEST_F(TextDeploymentTest, FixedAndMixedBackingPreserveCompleteOwnership) {
                           loom_serve_text_model_deactivate(model_, &complete));
     EXPECT_FALSE(complete);
     // A fixed last owner must not leave the earlier elastic weights unloaded.
-    EXPECT_EQ(loom_serve_text_model_weight_activity(model_).deactivations, 0u);
+    EXPECT_EQ(loom_serve_text_model_parameter_activity(model_).deactivations,
+              0u);
     ASSERT_NO_FATAL_FAILURE(CheckToken(0, 12));
     IREE_ASSERT_OK(loom_serve_text_model_free(model_));
     model_ = nullptr;
@@ -464,7 +465,7 @@ TEST_F(TextDeploymentTest, FailedEpochRetiresAcceptedWorkOnEveryOwner) {
       loom_serve_execution_barrier(model_->executions[2], {1, &gate_, &value}));
   const int32_t token = 1;
   const loom_serve_text_span_t span = {0, 1, &token,
-                                       LOOM_SERVE_TEXT_SPAN_FLAG_SELECT};
+                                       LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT};
   loom_serve_execution_frontier_t frontier;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
