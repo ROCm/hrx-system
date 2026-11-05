@@ -1,0 +1,1 @@
+d{"model":"fixture","state":"ready","questions":{"q":{"type":"noul","instructions":"continue?"}}}

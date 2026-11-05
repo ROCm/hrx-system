@@ -4,7 +4,13 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load(
+    "//loom/build_tools/bazel:build_defs.bzl",
+    "loom_cc_fuzz",
+    "loom_cc_library",
+    "loom_cc_test",
+)
+load("//loom/build_tools/bazel:python.bzl", "loom_py_test")
 
 package(
     default_visibility = ["//loom/src/loom/serve:implementation"],
@@ -12,9 +18,57 @@ package(
     licenses = ["notice"],
 )
 
+REQUEST_SCHEMA_FUZZ_SEEDS = [
+    "//loom/src/loom/serve/service/testdata/request_fuzz:decision.txt",
+    "//loom/src/loom/serve/service/testdata/request_fuzz:embedding.txt",
+    "//loom/src/loom/serve/service/testdata/request_fuzz:image.txt",
+    "//loom/src/loom/serve/service/testdata/request_fuzz:speech.txt",
+    "//loom/src/loom/serve/service/testdata/request_fuzz:transcription.txt",
+    "//loom/src/loom/serve/service/testdata/request_fuzz:voice_remove.txt",
+    "//loom/src/loom/serve/service/testdata/request_fuzz:voice_upload.txt",
+]
+
 exports_files(
     ["executables_test.cc"],
     visibility = ["//loom/src/loom/serve:implementation"],
+)
+
+loom_cc_fuzz(
+    name = "request_schema_fuzz",
+    srcs = ["request_schema_fuzz.cc"],
+    args = [
+        "-seed_inputs=" + ",".join([
+            "$(rootpath %s)" % seed
+            for seed in REQUEST_SCHEMA_FUZZ_SEEDS
+        ]),
+    ],
+    data = REQUEST_SCHEMA_FUZZ_SEEDS,
+    deps = [
+        "//loom/src/loom/serve/service/finite/decision:protocol",
+        "//loom/src/loom/serve/service/finite/embedding:protocol",
+        "//loom/src/loom/serve/service/image:request",
+        "//loom/src/loom/serve/service/recognition:transcription",
+        "//loom/src/loom/serve/service/speech:request",
+        "//loom/src/loom/serve/service/speech:voice",
+        "//loom/src/loom/serve/service/speech:voice_http",
+        "//loom/src/loom/serve/transport/http:request",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_py_test(
+    name = "request_schema_fuzz_test",
+    size = "small",
+    srcs = ["request_schema_fuzz_test.py"],
+    args = ["$(rootpath :request_schema_fuzz)"] + [
+        "$(rootpath %s)" % seed
+        for seed in REQUEST_SCHEMA_FUZZ_SEEDS
+    ],
+    data = [":request_schema_fuzz"] + REQUEST_SCHEMA_FUZZ_SEEDS,
+    tags = [
+        "manual",
+        "skip-bazel_to_cmake",
+    ],
 )
 
 loom_cc_library(
