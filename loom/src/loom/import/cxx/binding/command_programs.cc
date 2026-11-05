@@ -126,8 +126,8 @@ void CommandPrograms::finish() {
         annotated(function, "check_case") ||
         annotated(function, "check_scenario") ||
         annotated(function, "check_benchmark") ||
-        annotated(function, "template_def") ||
-        annotated(function, "force_inline") || annotated(function, "import")) {
+        annotated(function, "template_def") || annotated(function, "inline") ||
+        annotated(function, "import")) {
       diagnostics_.reject(
           unit_, contract.source,
           "command_program cannot be combined with another callable kind");

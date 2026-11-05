@@ -2,7 +2,7 @@
 #include <loomcxx/kernel.h>
 using Float4 = float __attribute__((ext_vector_type(4)));
 
-[[loom::force_inline]] static Float4 first(Float4 value) {
+[[loom::inline]] static Float4 first(Float4 value) {
   return loom::kernel::subgroup::broadcast_first(value);
 }
 
@@ -62,7 +62,7 @@ void workgroup_memory() { synchronize<2, 2, 3>(); }
 // ====
 // Source transport retains a wide payload for the selected target to legalize.
 #include <loomcxx/kernel.h>
-[[loom::force_inline]] unsigned long long first(unsigned long long value) {
+[[loom::inline]] unsigned long long first(unsigned long long value) {
   return loom::kernel::subgroup::broadcast_first(value);
 }
 // ----

@@ -152,10 +152,20 @@ loom_inline_policy_t source_inline_policy(cxx::FunctionSymbol* function) {
   if (annotated(function, "noinline")) {
     return LOOM_INLINE_POLICY_NOINLINE;
   }
-  if (annotated(function, "force_inline")) {
+  if (annotated(function, "inline")) {
     return LOOM_INLINE_POLICY_INLINE;
   }
   return LOOM_INLINE_POLICY_UNSPECIFIED;
+}
+
+uint8_t source_temperature(cxx::FunctionSymbol* function) {
+  if (annotated(function, "hot")) {
+    return LOOM_FUNC_TEMPERATURE_HOT;
+  }
+  if (annotated(function, "cold")) {
+    return LOOM_FUNC_TEMPERATURE_COLD;
+  }
+  return 0;
 }
 
 }  // namespace
@@ -576,8 +586,7 @@ bool Functions::admit_declaration(
            annotated(function, "check_benchmark") ||
            annotated(function, "command_program") ||
            annotated(function, "template_def") ||
-           annotated(function, "priority") ||
-           annotated(function, "force_inline"))) {
+           annotated(function, "priority") || annotated(function, "inline"))) {
         diagnostics_.reject(
             unit_, import->source,
             "import bindings require ordinary non-inline functions");
@@ -599,6 +608,7 @@ bool Functions::admit_declaration(
   }
   if (function) {
     bool found_inline_policy = false;
+    bool found_temperature = false;
     bool found_retain = false;
     visit_loom_attributes(
         unit_, attributes,
@@ -608,7 +618,7 @@ bool Functions::admit_declaration(
                 unit_, attribute,
                 "function where contracts must follow the parameter list");
           }
-          if (name == "force_inline" || name == "noinline") {
+          if (name == "inline" || name == "noinline") {
             if (found_inline_policy) {
               diagnostics_.reject(
                   unit_, attribute,
@@ -619,11 +629,10 @@ bool Functions::admit_declaration(
               diagnostics_.reject(unit_, attribute,
                                   "inline policy takes no argument clause");
             }
-            if (annotated(function, "force_inline") &&
+            if (annotated(function, "inline") &&
                 annotated(function, "noinline")) {
-              diagnostics_.reject(
-                  unit_, attribute,
-                  "force_inline and noinline cannot be combined");
+              diagnostics_.reject(unit_, attribute,
+                                  "inline and noinline cannot be combined");
             }
             if (function->isConstructor() || function->isDestructor() ||
                 annotated(function, "kernel") || annotated(function, "op") ||
@@ -638,6 +647,36 @@ bool Functions::admit_declaration(
               diagnostics_.reject(
                   unit_, attribute,
                   "inline policy requires an ordinary source function");
+            }
+          }
+          if (name == "hot" || name == "cold") {
+            if (found_temperature) {
+              diagnostics_.reject(
+                  unit_, attribute,
+                  "one temperature hint is allowed per declaration");
+            }
+            found_temperature = true;
+            if (attribute->attributeArgumentClause) {
+              diagnostics_.reject(unit_, attribute,
+                                  "temperature hint takes no argument clause");
+            }
+            if (annotated(function, "hot") && annotated(function, "cold")) {
+              diagnostics_.reject(unit_, attribute,
+                                  "hot and cold cannot be combined");
+            }
+            if (function->isConstructor() || function->isDestructor() ||
+                annotated(function, "kernel") || annotated(function, "op") ||
+                annotated(function, "assume") ||
+                annotated(function, "check_case") ||
+                annotated(function, "check_scenario") ||
+                annotated(function, "check_benchmark") ||
+                annotated(function, "command_program") ||
+                annotated(function, "pipeline") ||
+                annotated(function, "template_def") ||
+                launches_.is_configuration(function)) {
+              diagnostics_.reject(
+                  unit_, attribute,
+                  "temperature hint requires an ordinary source function");
             }
           }
           if (name != "retain") {
@@ -670,10 +709,15 @@ bool Functions::admit_declaration(
     visit_loom_attributes(
         unit_, attributes,
         [&](std::string_view name, cxx::AttributeAST* attribute) {
-          if (name == "force_inline" || name == "noinline") {
+          if (name == "inline" || name == "noinline") {
             diagnostics_.reject(
                 unit_, attribute,
                 "inline policy requires an ordinary source function");
+          }
+          if (name == "hot" || name == "cold") {
+            diagnostics_.reject(
+                unit_, attribute,
+                "temperature hint requires an ordinary source function");
           }
           if (name == "retain") {
             diagnostics_.reject(
@@ -1504,6 +1548,10 @@ void Functions::build_declarations(Types& types, Locations& locations,
     if (inline_policy != LOOM_INLINE_POLICY_UNSPECIFIED) {
       flags |= LOOM_FUNC_DECL_BUILD_FLAG_HAS_INLINE_POLICY;
     }
+    const uint8_t temperature = source_temperature(symbol);
+    if (temperature != 0) {
+      flags |= LOOM_FUNC_DECL_BUILD_FLAG_HAS_TEMPERATURE;
+    }
     if (!predicates.empty()) {
       flags |= LOOM_FUNC_DECL_BUILD_FLAG_HAS_PREDICATES;
     }
@@ -1516,7 +1564,7 @@ void Functions::build_declarations(Types& types, Locations& locations,
         annotated(symbol, "retain") ? LOOM_FUNC_RETAIN_RETAIN : 0,
         import_module, import_symbol,
         annotated(symbol, "device") ? LOOM_FUNC_CC_DEVICE : 0,
-        /*effect_contract=*/0, /*temperature=*/0, inline_policy, target,
+        /*effect_contract=*/0, temperature, inline_policy, target,
         source_signature, /*abi=*/0, {}, LOOM_STRING_ID_INVALID, {},
         callees_.at({symbol->canonical(), ImplicitObjectABI::None}),
         arguments.data(), arguments.size(), results.data(), results.size(),
@@ -1829,6 +1877,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
         symbol->isConstructor() || symbol->isDestructor()
             ? LOOM_INLINE_POLICY_INLINE
             : source_inline_policy(symbol);
+    const uint8_t temperature = source_temperature(symbol);
     const loom_attribute_t source_signature =
         symbol->isConstructor() || symbol->isDestructor()
             ? loom_attr_absent()
@@ -1845,6 +1894,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
             (inline_policy != LOOM_INLINE_POLICY_UNSPECIFIED
                  ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_INLINE_POLICY
                  : 0) |
+            (temperature != 0 ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_TEMPERATURE : 0) |
             (link_once ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_LINKAGE : 0) |
             (loom_symbol_ref_is_valid(target)
                  ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_TARGET
@@ -1854,7 +1904,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
         link_once ? LOOM_SYMBOL_LINKAGE_LINK_ONCE : 0,
         annotated(symbol, "retain") ? LOOM_FUNC_RETAIN_RETAIN : 0,
         annotated(symbol, "device") ? LOOM_FUNC_CC_DEVICE : 0,
-        /*effect_contract=*/0, /*temperature=*/0, inline_policy, target,
+        /*effect_contract=*/0, temperature, inline_policy, target,
         source_signature, 0, {}, 0, {},
         callees_.at({symbol->canonical(), instance.receiver_abi}),
         arguments.data(), arguments.size(), results.data(), results.size(),

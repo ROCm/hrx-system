@@ -30,7 +30,7 @@ struct Resources {
   Stream stream;
 };
 
-[[loom::force_inline]] static Resources make_resources(loomt::pool pool, loomt::index storage_size, Slots slots) {
+[[loom::inline]] static Resources make_resources(loomt::pool pool, loomt::index storage_size, Slots slots) {
   auto* storage = loom::buffer::alloca<unsigned char, loom::memory_space::workgroup, 64>(storage_size, pool);
   auto stream = loom::channel::bind<loom::channel::discipline::fifo>(slots, loomt::index{2});
   return {.storage = storage, .stream = stream};

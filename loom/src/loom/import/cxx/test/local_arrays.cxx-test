@@ -1,7 +1,7 @@
 // RUN: with-checks pass inline-callables,canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
 // One allocation joins direct indexing and an interior helper alias. Shared
 // promotion carries the changed element through the branch in registers.
-[[loom::force_inline]] static void update(unsigned* value, unsigned enabled) {
+[[loom::inline]] static void update(unsigned* value, unsigned enabled) {
   if (enabled) *value += 4;
 }
 unsigned guarded(unsigned input, unsigned enabled) {

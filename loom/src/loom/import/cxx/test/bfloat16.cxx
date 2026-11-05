@@ -20,7 +20,7 @@ struct Packet {
   bfloat16_t gain;
 };
 
-[[loom::force_inline]] static BFloat4 scale(Packet value) {
+[[loom::inline]] static BFloat4 scale(Packet value) {
   return value.samples * loom::scalar::absf(value.gain);
 }
 

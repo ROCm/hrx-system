@@ -1,7 +1,7 @@
 // RUN: with-checks pass inline-callables,promote-private-fragments,canonicalize,cse,dce
 // The source owns the temporary; shared promotion, after ordinary inlining,
 // carries its mutated value out of the conditional without temporary memory.
-[[loom::force_inline]] static void increment(unsigned* value) { ++*value; }
+[[loom::inline]] static void increment(unsigned* value) { ++*value; }
 unsigned update(unsigned input, unsigned enabled) {
   unsigned value = input;
   if (enabled) increment(&value);
@@ -60,7 +60,7 @@ func.def public @copy(%input: vector<4xi32>) -> (vector<4xi32>) {
 // RUN: with-checks roundtrip
 // Byte layout and over-alignment belong to the declaration, not the pointer's
 // first use. The output-only helper supplies the initial stored value.
-[[loom::force_inline]] static void initialize(unsigned short* value) { *value = 7; }
+[[loom::inline]] static void initialize(unsigned short* value) { *value = 7; }
 unsigned output_parameter() {
   alignas(32) unsigned short value;
   initialize(&value);

@@ -82,7 +82,7 @@ __bf16 preserved_cosine(__bf16 value) {
   return loom::scalar::approximate::preserved::cosf(value);
 }
 
-[[loom::force_inline]] static float preserved_helper(float value) {
+[[loom::inline]] static float preserved_helper(float value) {
   return loom::scalar::approximate::preserved::sinturnsf(value);
 }
 

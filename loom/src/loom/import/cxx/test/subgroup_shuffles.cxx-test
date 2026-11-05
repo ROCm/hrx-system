@@ -9,19 +9,19 @@
 using namespace loom::kernel::subgroup;
 
 #define SHUFFLES(Name, Type)                                                  \
-  [[loom::force_inline]] shuffle_result<Type> Name##_xor(                       \
+  [[loom::inline]] shuffle_result<Type> Name##_xor(                       \
       Type value, unsigned offset, unsigned width) {                           \
     return shuffle_xor(value, offset, width);                                  \
   }                                                                           \
-  [[loom::force_inline]] shuffle_result<Type> Name##_up(                        \
+  [[loom::inline]] shuffle_result<Type> Name##_up(                        \
       Type value, unsigned offset, unsigned width) {                           \
     return shuffle_up(value, offset, width);                                   \
   }                                                                           \
-  [[loom::force_inline]] shuffle_result<Type> Name##_down(                      \
+  [[loom::inline]] shuffle_result<Type> Name##_down(                      \
       Type value, unsigned offset, unsigned width) {                           \
     return shuffle_down(value, offset, width);                                 \
   }                                                                           \
-  [[loom::force_inline]] shuffle_result<Type> Name##_index(                     \
+  [[loom::inline]] shuffle_result<Type> Name##_index(                     \
       Type value, unsigned offset, unsigned width) {                           \
     return shuffle_index(value, offset, width);                                \
   }
@@ -86,32 +86,32 @@ using Static = loom::type::vector<loom::type::shape<3>, unsigned>;
 using Predicate = loom::type::vector<loom::type::shape<4>, bool>;
 using Dynamic = loom::type::vector<loom::type::shape<loom::type::dynamic>, float>;
 
-[[loom::force_inline]] shuffle_result<bool> boolean_xor(
+[[loom::inline]] shuffle_result<bool> boolean_xor(
     bool value, unsigned offset, unsigned width) {
   return shuffle_xor(value, offset, width);
 }
 
-[[loom::force_inline]] shuffle_result<Encoded> encoded_up(
+[[loom::inline]] shuffle_result<Encoded> encoded_up(
     Encoded value, unsigned offset, unsigned width) {
   return shuffle_up(value, offset, width);
 }
 
-[[loom::force_inline]] shuffle_result<Native> native_down(
+[[loom::inline]] shuffle_result<Native> native_down(
     Native value, unsigned offset, unsigned width) {
   return shuffle_down(value, offset, width);
 }
 
-[[loom::force_inline]] shuffle_result<Static> static_index(
+[[loom::inline]] shuffle_result<Static> static_index(
     Static value, unsigned offset, unsigned width) {
   return shuffle_index(value, offset, width);
 }
 
-[[loom::force_inline]] shuffle_result<Predicate> predicate_xor(
+[[loom::inline]] shuffle_result<Predicate> predicate_xor(
     Predicate value, unsigned offset, unsigned width) {
   return shuffle_xor(value, offset, width);
 }
 
-[[loom::force_inline]] shuffle_result<Dynamic> dynamic_down(
+[[loom::inline]] shuffle_result<Dynamic> dynamic_down(
     Dynamic value, unsigned offset, unsigned width) {
   return shuffle_down(value, offset, width);
 }

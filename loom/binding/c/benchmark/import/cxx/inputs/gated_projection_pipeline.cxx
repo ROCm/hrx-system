@@ -37,8 +37,7 @@ using OutputView = loomt::view<loomt::shape<1>, float>;
               loom::predicate::multiple_of(32))]]
 extern const loomt::index input_size;
 
-static LOOM_FORCE_INLINE BFloat16x16 bf16_product(BFloat16x16 lhs,
-                                                  BFloat16x16 rhs) {
+static LOOM_INLINE BFloat16x16 bf16_product(BFloat16x16 lhs, BFloat16x16 rhs) {
   BFloat16x16 zeros{};
   Float32x16 initial{};
   auto left = loom::vector::interleave<0, BFloat16x32>(lhs, zeros);
@@ -46,8 +45,8 @@ static LOOM_FORCE_INLINE BFloat16x16 bf16_product(BFloat16x16 lhs,
   return loom::convert<BFloat16x16>(loom::vector::dot2f(left, right, initial));
 }
 
-static LOOM_FORCE_INLINE void gate_up_tile(InputView input, WeightView weights,
-                                           OutputView output) {
+static LOOM_INLINE void gate_up_tile(InputView input, WeightView weights,
+                                     OutputView output) {
   auto* scratch =
       loom::buffer::alloca<float, loom::memory_space::private_, 64>(16);
   auto scratch_view = loom::buffer::view<16>(scratch, {});
@@ -91,8 +90,8 @@ static LOOM_FORCE_INLINE void gate_up_tile(InputView input, WeightView weights,
   loom::view::store(static_cast<float>(result[0]), output, loomt::index{0});
 }
 
-static LOOM_FORCE_INLINE void fill_input(loomt::index record, Bytes input,
-                                         InputChannel inputs) {
+static LOOM_INLINE void fill_input(loomt::index record, Bytes input,
+                                   InputChannel inputs) {
   auto byte_offset = loom::offset::cast(record * input_size * loomt::index{2});
   auto source = loom::buffer::view<loomt::dynamic>(
       loom::buffer::cast<std::bfloat16_t>(input), byte_offset,
@@ -106,9 +105,8 @@ static LOOM_FORCE_INLINE void fill_input(loomt::index record, Bytes input,
   loom::channel::publish(reservation.write);
 }
 
-static LOOM_FORCE_INLINE void drain_output(loomt::index record,
-                                           OutputChannel outputs,
-                                           Bytes output) {
+static LOOM_INLINE void drain_output(loomt::index record, OutputChannel outputs,
+                                     Bytes output) {
   auto byte_offset = loom::offset::cast(record * loomt::index{4});
   auto destination =
       loom::buffer::view<1>(loom::buffer::cast<float>(output), byte_offset, {});

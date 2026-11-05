@@ -38,7 +38,7 @@ struct Pair {
 
   Pair(unsigned seed) : first(seed), second(seed + 1u) { adjust(); }
 
-  [[loom::force_inline]] void adjust() { first += 3u; }
+  [[loom::inline]] void adjust() { first += 3u; }
 };
 
 struct Outer {

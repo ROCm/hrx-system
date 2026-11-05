@@ -8,11 +8,9 @@
 #include <loomcxx/kernel.h>
 #include <loomcxx/target.h>
 
-LOOM_FORCE_INLINE unsigned launch_width() {
-  return loom::target::subgroup::size();
-}
+LOOM_INLINE unsigned launch_width() { return loom::target::subgroup::size(); }
 
-LOOM_FORCE_INLINE unsigned divide_up(unsigned value, unsigned divisor) {
+LOOM_INLINE unsigned divide_up(unsigned value, unsigned divisor) {
   return (value + divisor - 1) / divisor;
 }
 

@@ -6,11 +6,9 @@
 
 #include <loomcxx/check.h>
 
-[[loom::force_inline]] static void increment(unsigned* value) { ++*value; }
-[[loom::force_inline]] static unsigned* identity(unsigned* value) {
-  return value;
-}
-[[loom::force_inline]] static void initialize(unsigned* value, unsigned input) {
+[[loom::inline]] static void increment(unsigned* value) { ++*value; }
+[[loom::inline]] static unsigned* identity(unsigned* value) { return value; }
+[[loom::inline]] static void initialize(unsigned* value, unsigned input) {
   *value = input + 7;
 }
 
@@ -109,7 +107,7 @@ static unsigned atomic_local(unsigned input) {
 }
 
 using Words = unsigned __attribute__((vector_size(16)));
-[[loom::force_inline]] static void update_vector(Words* value) {
+[[loom::inline]] static void update_vector(Words* value) {
   *value += Words{1, 2, 3, 4};
 }
 static unsigned vector_local(unsigned input) {

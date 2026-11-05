@@ -12,19 +12,19 @@
 using Q8S32Float16 = float __attribute__((ext_vector_type(16)));
 using Q8S32Partial8 = float __attribute__((ext_vector_type(8)));
 
-LOOM_FORCE_INLINE Q8S32BFloat16 q8s32_scaled_weights(Q8S32Codes16 weights,
-                                                     std::bfloat16_t scale) {
+LOOM_INLINE Q8S32BFloat16 q8s32_scaled_weights(Q8S32Codes16 weights,
+                                               std::bfloat16_t scale) {
   auto wide = __builtin_convertvector(weights, Q8S32Float16);
   return __builtin_convertvector(wide * (float)scale, Q8S32BFloat16);
 }
 
 // Wave32 accumulates both halves into one vector bank before the horizontal
 // reduction. This minimizes independent accumulator state.
-LOOM_FORCE_INLINE float q8s32_lane_dot_combined(Q8S32Codes16 weights_low,
-                                                Q8S32Codes16 weights_high,
-                                                Q8S32BFloat16 activations_low,
-                                                Q8S32BFloat16 activations_high,
-                                                std::bfloat16_t scale) {
+LOOM_INLINE float q8s32_lane_dot_combined(Q8S32Codes16 weights_low,
+                                          Q8S32Codes16 weights_high,
+                                          Q8S32BFloat16 activations_low,
+                                          Q8S32BFloat16 activations_high,
+                                          std::bfloat16_t scale) {
   Q8S32Partial8 partial = {};
   partial = loom::vector::dot2f(q8s32_scaled_weights(weights_low, scale),
                                 activations_low, partial);
@@ -35,11 +35,11 @@ LOOM_FORCE_INLINE float q8s32_lane_dot_combined(Q8S32Codes16 weights_low,
 
 // Wave64 keeps the halves independent through their vector reductions. The
 // source expresses a different pressure/latency tradeoff with the same result.
-LOOM_FORCE_INLINE float q8s32_lane_dot_split(Q8S32Codes16 weights_low,
-                                             Q8S32Codes16 weights_high,
-                                             Q8S32BFloat16 activations_low,
-                                             Q8S32BFloat16 activations_high,
-                                             std::bfloat16_t scale) {
+LOOM_INLINE float q8s32_lane_dot_split(Q8S32Codes16 weights_low,
+                                       Q8S32Codes16 weights_high,
+                                       Q8S32BFloat16 activations_low,
+                                       Q8S32BFloat16 activations_high,
+                                       std::bfloat16_t scale) {
   Q8S32Partial8 low = {};
   Q8S32Partial8 high = {};
   low = loom::vector::dot2f(q8s32_scaled_weights(weights_low, scale),

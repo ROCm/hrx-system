@@ -369,9 +369,17 @@ class CxxFunctionRenderer(CxxConfigRenderer):
         target = resolved.attr("target")
         if target is not None:
             attributes.append(self._target_attribute(function, str(target)))
+        temperature = resolved.attr("temperature")
+        if temperature in {"hot", "cold"}:
+            attributes.append(f"loom::{temperature}")
+        elif temperature is not None:
+            raise CxxRenderError(
+                function,
+                f"function temperature {temperature!r} has no C++ projection",
+            )
         inline_policy = resolved.attr("inline_policy")
         if inline_policy == "inline":
-            attributes.append("loom::force_inline")
+            attributes.append("loom::inline")
         elif inline_policy == "noinline":
             attributes.append("loom::noinline")
         elif inline_policy is not None:
@@ -434,6 +442,7 @@ class CxxFunctionRenderer(CxxConfigRenderer):
                     "inline_policy",
                     "retain",
                     "target",
+                    "temperature",
                 ),
             )
         self._analyze_buffers(function)
@@ -473,7 +482,14 @@ class CxxFunctionRenderer(CxxConfigRenderer):
         self.rendered_assumptions_by_block.clear()
         self._validate_projected_attributes(
             function,
-            ("callee", "visibility", "inline_policy", "retain", "target"),
+            (
+                "callee",
+                "visibility",
+                "inline_policy",
+                "retain",
+                "target",
+                "temperature",
+            ),
         )
         self._analyze_buffers(function)
         body = self._resolved(function).region("body")

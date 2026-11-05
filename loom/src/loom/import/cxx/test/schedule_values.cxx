@@ -8,7 +8,7 @@
 #include <loomcxx/kernel.h>
 #include <loomcxx/view.h>
 
-LOOM_FORCE_INLINE static unsigned sum(unsigned count, unsigned factor) {
+LOOM_INLINE static unsigned sum(unsigned count, unsigned factor) {
   unsigned total = 0;
   [[loom::unroll(factor)]]
   for (unsigned index = 0; index < count; ++index) {

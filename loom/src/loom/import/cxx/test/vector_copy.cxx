@@ -8,8 +8,7 @@
 
 typedef unsigned U16 __attribute__((vector_size(64)));
 
-[[loom::force_inline]] void copy_blocks(const unsigned* input,
-                                        unsigned* output) {
+[[loom::inline]] void copy_blocks(const unsigned* input, unsigned* output) {
   unsigned count = input[0];
   unsigned source_stride = input[1];
   unsigned destination_stride = input[2];

@@ -12,8 +12,7 @@ using Float8E4 = __float8_e4m3fn __attribute__((ext_vector_type(4)));
 using Float8E5 = __float8_e5m2 __attribute__((ext_vector_type(4)));
 using Words2 = unsigned __attribute__((ext_vector_type(2)));
 
-[[loom::force_inline]] void bitcast_blocks(const unsigned* input,
-                                           unsigned* output) {
+[[loom::inline]] void bitcast_blocks(const unsigned* input, unsigned* output) {
   for (unsigned index = 0; index < 256; ++index) {
     unsigned word = input[index];
     Bytes4 bytes = __builtin_bit_cast(Bytes4, word);

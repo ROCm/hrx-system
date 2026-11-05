@@ -21,12 +21,11 @@ template <class Float>
 
 template <class Float>
   requires(__is_floating_point(Float))
-[[loom::device, loom::force_inline]] static inline Float reciprocal(
-    Float value) {
+[[loom::device, loom::inline]] static inline Float reciprocal(Float value) {
   return divide_reciprocal(Float(1.0), value);
 }
 
-[[loom::device, loom::force_inline]] static inline float infinity() {
+[[loom::device, loom::inline]] static inline float infinity() {
   return __builtin_bit_cast(float, 0x7f800000u);
 }
 

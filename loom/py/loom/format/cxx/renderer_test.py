@@ -1652,9 +1652,9 @@ func.def inline @math.double(%input: vector<4xf32>) -> (vector<4xf32>) {
     module = load_module(source.encode())
     result = render_module(module, roots=("math.copy_double",))
 
-    assert '[[loom::symbol("math.double"), loom::force_inline]]' in result
+    assert '[[loom::symbol("math.double"), loom::inline]]' in result
     assert "static Float32x4 math_double(Float32x4 input)" in result
-    assert '[[loom::symbol("math.copy_double"), loom::force_inline]]' in result
+    assert '[[loom::symbol("math.copy_double"), loom::inline]]' in result
     assert (
         "void math_copy_double("
         "loom::type::view<loom::type::shape<4>, const float> source, "
@@ -1676,6 +1676,25 @@ func.def public noinline @math.identity(%input: i32) -> (i32) {
     result = render_module(load_module(source.encode()))
 
     assert '[[loom::symbol("math.identity"), loom::noinline]]' in result
+
+
+def test_projects_function_temperature_hints() -> None:
+    source = """\
+func.def public hot inline @math.hot_identity(%input: i32) -> (i32) {
+  func.return %input : i32
+}
+
+func.def public cold noinline @math.cold_identity(%input: i32) -> (i32) {
+  func.return %input : i32
+}
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert '[[loom::symbol("math.hot_identity"), loom::hot, loom::inline]]' in result
+    assert (
+        '[[loom::symbol("math.cold_identity"), loom::cold, loom::noinline]]' in result
+    )
 
 
 def test_preserves_external_import_names() -> None:
