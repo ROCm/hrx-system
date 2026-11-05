@@ -146,6 +146,15 @@ class DescriptorAllowlist:
 
 
 @dataclass(frozen=True, slots=True)
+class DescriptorIdentityDomain:
+    """One ordered descriptor identity domain and its optional C owner."""
+
+    keys: tuple[str, ...]
+    table_symbol: str | None = None
+    public_header: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class GeneratedDescriptorSet:
     header: str
     source: str

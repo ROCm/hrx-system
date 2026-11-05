@@ -212,6 +212,12 @@ static iree_status_t loom_low_verify_tables_present(
                             "low descriptor set has no schedule models");
   }
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
+      descriptor_set->descriptor_identities,
+      descriptor_set->descriptor_identity_count, "descriptor_identities"));
+  IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
+      descriptor_set->descriptor_stable_ids,
+      descriptor_set->descriptor_ordinal_count, "descriptor_stable_ids"));
+  IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
       descriptor_set->descriptors, descriptor_set->descriptor_ordinal_count,
       "descriptors"));
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
@@ -325,6 +331,22 @@ static iree_status_t loom_low_verify_tables_present(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_verify_descriptor_identities(
+    const loom_low_descriptor_set_t* descriptor_set) {
+  for (uint32_t i = 0; i < descriptor_set->descriptor_identity_count; ++i) {
+    const loom_low_descriptor_identity_t* identity =
+        &descriptor_set->descriptor_identities[i];
+    iree_string_view_t key = iree_string_view_empty();
+    IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
+        descriptor_set, identity->key_string_ref, "descriptor_identity.key",
+        &key));
+    IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
+        descriptor_set, identity->semantic_tag_string_ref,
+        "descriptor_identity.semantic_tag"));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_verify_descriptor_refs(
     const loom_low_descriptor_set_t* descriptor_set) {
   if (descriptor_set->descriptor_ref_count < descriptor_set->descriptor_count) {
@@ -346,7 +368,8 @@ static iree_status_t loom_low_verify_descriptor_refs(
           "%" PRIu32 " but backing storage has only %" PRIu32 " descriptors",
           i, ordinal, descriptor_set->descriptor_ref_count);
     }
-    const uint64_t stable_id = descriptor_set->descriptors[ordinal].stable_id;
+    const uint64_t stable_id = loom_low_descriptor_stable_id(
+        descriptor_set, &descriptor_set->descriptors[ordinal]);
     if (stable_id <= previous_id) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
@@ -2490,32 +2513,34 @@ static iree_status_t loom_low_verify_descriptor(
           LOOM_LOW_DESCRIPTOR_FLAG_IDEMPOTENT_STATE_UPDATE |
           LOOM_LOW_DESCRIPTOR_FLAG_READ_ONLY_DATA_IMMEDIATES,
       "descriptor", descriptor_index));
-  iree_string_view_t descriptor_key = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
-      descriptor_set, descriptor->key_string_ref, "descriptor.key",
-      &descriptor_key));
-  if (descriptor->stable_id == LOOM_LOW_STABLE_ID_NONE) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+  const uint16_t identity_ordinal = descriptor->identity_ordinal;
+  if (identity_ordinal >= descriptor_set->descriptor_identity_count) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "low descriptor %" PRIu32
-                            " has no stable descriptor ID",
-                            descriptor_index);
+                            " identity ordinal %" PRIu16
+                            " is outside the %" PRIu32 "-row identity catalog",
+                            descriptor_index, identity_ordinal,
+                            descriptor_set->descriptor_identity_count);
   }
+  const loom_low_descriptor_identity_t* identity =
+      &descriptor_set->descriptor_identities[identity_ordinal];
+  const iree_string_view_t descriptor_key =
+      loom_low_descriptor_set_string(descriptor_set, identity->key_string_ref);
   const uint64_t expected_stable_id =
       loom_low_descriptor_stable_id_from_key(descriptor_key);
-  if (descriptor->stable_id != expected_stable_id) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "low descriptor %" PRIu32
-                            " key '%.*s' stable ID "
-                            "0x%016" PRIx64 " should be 0x%016" PRIx64,
-                            descriptor_index, (int)descriptor_key.size,
-                            descriptor_key.data, descriptor->stable_id,
-                            expected_stable_id);
+  const uint64_t stable_id =
+      loom_low_descriptor_stable_id_at(descriptor_set, descriptor_index);
+  if (stable_id == LOOM_LOW_STABLE_ID_NONE || stable_id != expected_stable_id) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low descriptor %" PRIu32
+        " key '%.*s' has absent or mismatched stable ID 0x%016" PRIx64
+        " (expected 0x%016" PRIx64 ")",
+        descriptor_index, (int)descriptor_key.size, descriptor_key.data,
+        stable_id, expected_stable_id);
   }
   IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
       descriptor_set, descriptor->mnemonic_string_ref, "descriptor.mnemonic"));
-  IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
-      descriptor_set, descriptor->semantic_tag_string_ref,
-      "descriptor.semantic_tag"));
   const loom_low_descriptor_layout_t* descriptor_layout =
       loom_low_descriptor_layout(descriptor_set, descriptor);
   IREE_RETURN_IF_ERROR(loom_low_verify_span(
@@ -3838,6 +3863,7 @@ iree_status_t loom_low_descriptor_set_verify(
       descriptor_set->target_stable_id, target_key, "target_stable_id"));
   IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
       descriptor_set, descriptor_set->feature_key_string_ref, "set.feature"));
+  IREE_RETURN_IF_ERROR(loom_low_verify_descriptor_identities(descriptor_set));
 
   // Operand forms can reference a later descriptor before its full validation.
   // Establish every selected layout index before following those references.

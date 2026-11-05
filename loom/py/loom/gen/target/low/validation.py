@@ -1428,7 +1428,7 @@ def validate_asm_layout_counts(
 
 
 def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLayout:
-    validate_u16(
+    validate_u8(
         len(descriptor.operands),
         f"descriptor '{descriptor.key}' operand count",
     )
@@ -1539,6 +1539,10 @@ def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLay
             raise ValueError(f"descriptor '{descriptor.key}' with variadic operands cannot declare storage leases")
         if descriptor.operand_forms:
             raise ValueError(f"descriptor '{descriptor.key}' with variadic operands cannot declare operand forms")
+    validate_u8(
+        result_count,
+        f"descriptor '{descriptor.key}' result count",
+    )
     return DescriptorOperandLayout(
         result_count=result_count,
         minimum_packet_operand_count=minimum_packet_operand_count,

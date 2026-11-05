@@ -38,7 +38,7 @@ TEST(RequiredPressureTest, ReplayKeepsSameDomainCapturesResident) {
     // Operand register classes; NONE denotes a non-register capture.
     uint16_t input_classes[2];
     // Number of captures in the recipe.
-    uint16_t input_count;
+    uint8_t input_count;
     // Whether replay can release the result's physical domain.
     bool replayable;
   } cases[] = {
@@ -55,12 +55,13 @@ TEST(RequiredPressureTest, ReplayKeepsSameDomainCapturesResident) {
     SCOPED_TRACE(test_case.name);
     for (bool rematerializable : {false, true}) {
       for (bool observable : {false, true}) {
-        for (uint16_t result_count : {0, 1, 2}) {
+        for (uint8_t result_count : {0, 1, 2}) {
           SCOPED_TRACE(::testing::Message()
                        << rematerializable << "," << observable << ","
                        << result_count);
           loom_low_descriptor_t descriptor = {
-              .operand_count = (uint16_t)(result_count + test_case.input_count),
+              .operand_count =
+                  static_cast<uint8_t>(result_count + test_case.input_count),
               .result_count = result_count,
           };
           for (uint16_t i = 0; i < descriptor.operand_count; ++i) {

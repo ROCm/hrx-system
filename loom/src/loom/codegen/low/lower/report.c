@@ -89,9 +89,12 @@ static void loom_low_lower_report_populate_descriptor(
     return;
   }
   row->descriptor_key = loom_low_lower_report_descriptor_string(
-      context, descriptor, descriptor->key_string_ref);
+      context, descriptor,
+      loom_low_descriptor_key_string_ref(context->descriptor_set, descriptor));
   row->descriptor_semantic_tag = loom_low_lower_report_descriptor_string(
-      context, descriptor, descriptor->semantic_tag_string_ref);
+      context, descriptor,
+      loom_low_descriptor_semantic_tag_string_ref(context->descriptor_set,
+                                                  descriptor));
 }
 
 void loom_low_lower_result_deinitialize(loom_low_lower_result_t* result) {

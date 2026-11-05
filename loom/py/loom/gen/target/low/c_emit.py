@@ -24,6 +24,7 @@ from loom.gen.target.low.compiled import (
     CompiledOperandForm,
     CompiledScheduleClassTable,
     CompiledScheduleModel,
+    DescriptorIdentityDomain,
     DescriptorSetView,
     append_interned_sequence,
 )
@@ -209,10 +210,31 @@ def _emit_array(
     c_arrays.append_struct_array(lines, c_type, f"k{table_prefix}{name}", row_lines)
 
 
+def _descriptor_identity_row_lines(
+    compiled: CompiledDescriptorSet,
+    identity_domain: DescriptorIdentityDomain,
+    descriptors_by_key: dict[str, Descriptor],
+) -> list[list[str]]:
+    pool = compiled.string_pool
+    rows = []
+    for key in identity_domain.keys:
+        descriptor = descriptors_by_key.get(key)
+        if descriptor is None:
+            raise ValueError(f"local descriptor identity domain contains unused key '{key}'")
+        rows.append(
+            [
+                f".key_string_ref = {pool.ref(f'descriptor_{key}')},",
+                f".semantic_tag_string_ref = {c_spelling.optional_string_expr(pool, f'semantic_{key}' if descriptor.semantic_tag is not None else None)},",
+            ]
+        )
+    return rows
+
+
 def _descriptor_row_lines(
     compiled: CompiledDescriptorSet,
     descriptors: Sequence[Descriptor],
     descriptor_rows: Sequence[dict[str, int]],
+    identity_ordinals: dict[str, int],
     layout_rows: list[tuple[str, ...]],
     layout_starts: dict[tuple[tuple[str, ...], ...], int],
 ) -> list[list[str]]:
@@ -234,10 +256,8 @@ def _descriptor_row_lines(
         layout_index, _ = append_interned_sequence((tuple(layout),), layout_rows, layout_starts)
         rows.append(
             [
-                f".key_string_ref = {pool.ref(f'descriptor_{descriptor.key}')},",
-                f".stable_id = {c_spelling.hex_u64_literal(descriptor_stable_id(descriptor.key))},",
                 f".mnemonic_string_ref = {c_spelling.optional_string_expr(pool, f'mnemonic_{descriptor.key}' if descriptor.mnemonic is not None else None)},",
-                f".semantic_tag_string_ref = {c_spelling.optional_string_expr(pool, f'semantic_{descriptor.key}' if descriptor.semantic_tag is not None else None)},",
+                f".identity_ordinal = {identity_ordinals[descriptor.key]},",
                 f".encoding_id = {c_spelling.encoding_id_expr(descriptor.encoding_id)},",
                 f".operand_start = {descriptor_row['operand_start']},",
                 f".operand_count = {descriptor_row['operand_count']},",
@@ -583,6 +603,7 @@ def emit_source_for_views(
     views: Sequence[DescriptorSetView],
     primary_strings: CStringBank | None = None,
     shared_strings: CStringBank | None = None,
+    identity_domain: DescriptorIdentityDomain,
 ) -> str:
     spec = compiled.spec
     pool = compiled.string_pool
@@ -601,6 +622,13 @@ def emit_source_for_views(
         "#include <stdint.h>",
         "",
     ]
+    if identity_domain.public_header is not None:
+        lines.extend(
+            [
+                f'#include "{identity_domain.public_header}"',
+                "",
+            ]
+        )
     for view in views:
         if view.spec is spec:
             continue
@@ -623,6 +651,28 @@ def emit_source_for_views(
     _emit_string_pool(compiled, lines, string_layout)
 
     view_array_emitter = c_arrays.StaticArrayEmitter(lines)
+    descriptors_by_key: dict[str, Descriptor] = {}
+    for descriptor in tuple(compiled.descriptors) + tuple(descriptor for view in views for descriptor in view.descriptors):
+        previous = descriptors_by_key.get(descriptor.key)
+        if previous is not None and previous.semantic_tag != descriptor.semantic_tag:
+            raise ValueError(f"descriptor identity '{descriptor.key}' has inconsistent semantic tags")
+        descriptors_by_key[descriptor.key] = descriptor
+    identity_ordinals = {key: identity_ordinal for identity_ordinal, key in enumerate(identity_domain.keys)}
+    missing_identity_keys = descriptors_by_key.keys() - identity_ordinals.keys()
+    if missing_identity_keys:
+        raise ValueError("descriptor identity domain is missing keys: " + ", ".join(sorted(missing_identity_keys)))
+    if identity_domain.table_symbol is None:
+        identity_table_symbol = view_array_emitter.append_struct_array(
+            "loom_low_descriptor_identity_t",
+            f"k{spec.c_table_prefix}DescriptorIdentities",
+            _descriptor_identity_row_lines(
+                compiled,
+                identity_domain,
+                descriptors_by_key,
+            ),
+        )
+    else:
+        identity_table_symbol = identity_domain.table_symbol
     if any(view.reg_classes == tuple(compiled.reg_classes) for view in views):
         view_array_emitter.append_struct_array(
             "loom_low_reg_class_t",
@@ -1123,9 +1173,15 @@ def emit_source_for_views(
             compiled,
             compiled.descriptors,
             compiled.descriptor_rows,
+            identity_ordinals,
             descriptor_layout_rows,
             descriptor_layout_starts,
         ),
+    )
+    storage_descriptor_stable_id_table_symbol = view_array_emitter.append_value_array(
+        "uint64_t",
+        f"k{spec.c_table_prefix}DescriptorStableIds",
+        [c_spelling.hex_u64_literal(descriptor_stable_id(descriptor.key)) for descriptor in compiled.descriptors],
     )
     storage_descriptor_view_table_symbol = view_array_emitter.append_struct_array(
         "loom_low_descriptor_view_t",
@@ -1149,6 +1205,7 @@ def emit_source_for_views(
         ],
     )
     descriptor_table_symbols: dict[str, str] = {}
+    descriptor_stable_id_table_symbols: dict[str, str] = {}
     descriptor_view_table_symbols: dict[str, str] = {}
     operand_form_table_symbols: dict[str, str] = {}
     schedule_alternative_table_symbols: dict[str, str] = {}
@@ -1156,6 +1213,7 @@ def emit_source_for_views(
         view_key = view.spec.key
         if view.uses_storage_descriptor_tables:
             descriptor_table_symbols[view_key] = storage_descriptor_table_symbol
+            descriptor_stable_id_table_symbols[view_key] = storage_descriptor_stable_id_table_symbol
         else:
             descriptor_table_symbols[view_key] = view_array_emitter.append_struct_array(
                 "loom_low_descriptor_t",
@@ -1164,9 +1222,15 @@ def emit_source_for_views(
                     compiled,
                     view.descriptors,
                     view.descriptor_rows,
+                    identity_ordinals,
                     descriptor_layout_rows,
                     descriptor_layout_starts,
                 ),
+            )
+            descriptor_stable_id_table_symbols[view_key] = view_array_emitter.append_value_array(
+                "uint64_t",
+                f"k{view.spec.c_table_prefix}DescriptorStableIds",
+                [c_spelling.hex_u64_literal(descriptor_stable_id(descriptor.key)) for descriptor in view.descriptors],
             )
         if view.uses_storage_descriptor_view_tables:
             descriptor_view_table_symbols[view_key] = storage_descriptor_view_table_symbol
@@ -1381,6 +1445,7 @@ def emit_source_for_views(
         if any(DescriptorFlag.IDEMPOTENT_STATE_UPDATE in descriptor.flags for descriptor in view.descriptors):
             view_flags.append("LOOM_LOW_DESCRIPTOR_SET_FLAG_IDEMPOTENT_STATE_UPDATES")
         descriptor_table_symbol = descriptor_table_symbols[view_spec.key]
+        descriptor_stable_id_table_symbol = descriptor_stable_id_table_symbols[view_spec.key]
         descriptor_view_table_symbol = descriptor_view_table_symbols[view_spec.key]
         descriptor_ref_table_symbol = descriptor_ref_table_symbols[view_spec.key]
         asm_form_table_symbol = asm_form_table_symbols[view_spec.key]
@@ -1405,8 +1470,11 @@ def emit_source_for_views(
             f"    .key_string_ref = {pool.ref(descriptor_set_view_metadata_string_label(spec, view_spec, 'set_key'))},",
             f"    .target_key_string_ref = {c_spelling.optional_string_expr(pool, descriptor_set_view_metadata_string_label(spec, view_spec, 'target_key') if view_spec.target_key is not None else None)},",
             f"    .feature_key_string_ref = {c_spelling.optional_string_expr(pool, descriptor_set_view_metadata_string_label(spec, view_spec, 'feature_key') if view_spec.feature_key is not None else None)},",
+            f"    .descriptor_identities = {identity_table_symbol},",
+            f"    .descriptor_stable_ids = {descriptor_stable_id_table_symbol},",
             f"    .descriptors = {descriptor_table_symbol},",
             f"    .descriptor_layouts = {descriptor_layout_table_symbol},",
+            f"    .descriptor_identity_count = {len(identity_domain.keys)},",
             f"    .descriptor_layout_count = {len(descriptor_layout_rows)},",
             f"    .descriptor_views = {descriptor_view_table_symbol},",
             *(
@@ -1586,11 +1654,13 @@ def emit_source(
     shared_strings: CStringBank | None = None,
     *,
     primary_strings: CStringBank | None = None,
+    identity_domain: DescriptorIdentityDomain,
 ) -> str:
     return emit_source_for_views(
         compiled,
         primary_strings=primary_strings,
         shared_strings=shared_strings,
+        identity_domain=identity_domain,
         views=[
             DescriptorSetView(
                 spec=compiled.spec,

@@ -80,10 +80,11 @@ TEST_F(LowLowerModuleStateTest, SharesDescriptorBindingsAcrossFunctions) {
         EXPECT_EQ(uncached_descriptor, descriptor);
         if (index == (list ^ set)) {
           ASSERT_NE(descriptor, nullptr);
-          EXPECT_TRUE(
-              iree_string_view_equal(loom_low_descriptor_set_string(
-                                         sets[set], descriptor->key_string_ref),
-                                     keys[set]));
+          EXPECT_TRUE(iree_string_view_equal(
+              loom_low_descriptor_set_string(
+                  sets[set],
+                  loom_low_descriptor_key_string_ref(sets[set], descriptor)),
+              keys[set]));
         } else {
           EXPECT_EQ(descriptor, nullptr);
         }

@@ -46,6 +46,10 @@ enum : loom_string_ref_t {
 #define REQUIREMENT_STRING_REF(field) REQUIREMENT_STRING_##field
 
 struct RequirementTables {
+  // Stable descriptor identities owned by the test descriptor set.
+  loom_low_descriptor_identity_t descriptor_identities[1];
+  // Stable IDs indexed by descriptor ordinal.
+  uint64_t descriptor_stable_ids[1];
   // Descriptor rows owned by the test descriptor set.
   loom_low_descriptor_t descriptors[1];
   // Structural layouts referenced by the test descriptors.
@@ -126,14 +130,14 @@ void InitializeRequirementTables(RequirementTables* tables) {
   tables->schedule_classes[0].minimum_issue_cycles = 1;
   tables->schedule_classes[0].model_quality = LOOM_LOW_MODEL_QUALITY_EXACT;
 
-  tables->descriptors[0].key_string_ref =
+  tables->descriptor_identities[0].key_string_ref =
       REQUIREMENT_STRING_REF(descriptor_add);
-  tables->descriptors[0].stable_id =
+  tables->descriptor_identities[0].semantic_tag_string_ref =
+      REQUIREMENT_STRING_REF(semantic_add);
+  tables->descriptor_stable_ids[0] =
       loom_low_descriptor_stable_id_from_key(IREE_SV("test.add.i32"));
   tables->descriptors[0].mnemonic_string_ref =
       REQUIREMENT_STRING_REF(mnemonic_add);
-  tables->descriptors[0].semantic_tag_string_ref =
-      REQUIREMENT_STRING_REF(semantic_add);
   tables->descriptor_views[0].canonical_asm_form_ordinal =
       LOOM_LOW_ASM_FORM_ORDINAL_NONE;
   tables->descriptors[0].encoding_id = 1;
@@ -157,6 +161,10 @@ void InitializeRequirementTables(RequirementTables* tables) {
   tables->set.feature_key_string_ref = REQUIREMENT_STRING_REF(feature_key);
   tables->set.string_pool.data[0] = kRequirementStrings;
   tables->set.string_pool.data_length[0] = sizeof(kRequirementStrings) - 1;
+  tables->set.descriptor_identities = tables->descriptor_identities;
+  tables->set.descriptor_stable_ids = tables->descriptor_stable_ids;
+  tables->set.descriptor_identity_count =
+      IREE_ARRAYSIZE(tables->descriptor_identities);
   tables->set.descriptors = tables->descriptors;
   tables->set.descriptor_layouts = tables->descriptor_layouts;
   tables->set.descriptor_layout_count =
@@ -240,7 +248,8 @@ TEST(LowDescriptorRequirementsTest, RejectsMissingMnemonic) {
 TEST(LowDescriptorRequirementsTest, RejectsMissingSemanticTag) {
   RequirementTables tables;
   InitializeRequirementTables(&tables);
-  tables.descriptors[0].semantic_tag_string_ref = LOOM_STRING_REF_NONE;
+  tables.descriptor_identities[0].semantic_tag_string_ref =
+      LOOM_STRING_REF_NONE;
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,

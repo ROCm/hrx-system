@@ -444,8 +444,9 @@ static iree_string_view_t loom_amdgpu_memory_access_descriptor_key(
     IREE_ASSERT_UNREACHABLE("selected AMDGPU memory access descriptor");
     IREE_BUILTIN_UNREACHABLE();
   }
-  return loom_low_descriptor_set_string(descriptor_set,
-                                        access->descriptor->key_string_ref);
+  return loom_low_descriptor_set_string(
+      descriptor_set,
+      loom_low_descriptor_key_string_ref(descriptor_set, access->descriptor));
 }
 
 iree_status_t loom_amdgpu_record_memory_access_diagnostic(

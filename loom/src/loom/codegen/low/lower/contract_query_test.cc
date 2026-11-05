@@ -48,15 +48,19 @@ const loom_string_pool_t kRuleStringPool = {
                     sizeof(kRuleStringData) - 1},
 };
 
-const loom_low_descriptor_t kDescriptor = {
-    .stable_id = kDescriptorId,
+const loom_low_descriptor_identity_t kDescriptorIdentity = {
     .key_string_ref = kRuleStringDescriptor,
 };
 
+const uint64_t kDescriptorStableId = kDescriptorId;
+const loom_low_descriptor_t kDescriptor = {};
 const loom_low_descriptor_layout_t kDescriptorLayout = {};
 const loom_low_descriptor_set_t kDescriptorSet = {
+    .descriptor_identities = &kDescriptorIdentity,
+    .descriptor_stable_ids = &kDescriptorStableId,
     .descriptors = &kDescriptor,
     .descriptor_layouts = &kDescriptorLayout,
+    .descriptor_identity_count = 1,
     .descriptor_layout_count = 1,
     .descriptor_count = 1,
     .descriptor_ordinal_count = 1,

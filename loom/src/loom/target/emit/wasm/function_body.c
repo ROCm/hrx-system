@@ -633,8 +633,11 @@ static iree_status_t loom_wasm_emit_descriptor_packet(
           !loom_low_descriptor_has_variadic_operands(descriptor)) {
         return loom_wasm_emit_stack_value_op(state, op, descriptor);
       }
+      const loom_low_descriptor_set_t* descriptor_set =
+          loom_wasm_core_simd128_descriptor_set();
       iree_string_view_t key = loom_low_descriptor_set_string(
-          loom_wasm_core_simd128_descriptor_set(), descriptor->key_string_ref);
+          descriptor_set,
+          loom_low_descriptor_key_string_ref(descriptor_set, descriptor));
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "Wasm descriptor '%.*s' is unsupported",
                               (int)key.size, key.data);

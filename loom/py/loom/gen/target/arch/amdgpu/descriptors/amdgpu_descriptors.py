@@ -30,8 +30,12 @@ from loom.gen.target.arch.amdgpu.amdgpu_target_table_family import (  # noqa: E4
     AmdgpuTargetTableFamily,
     amdgpu_target_table_family,
 )
-from loom.gen.target.low.compiled import GeneratedDescriptorSetFamily  # noqa: E402
+from loom.gen.target.low.compiled import (  # noqa: E402
+    DescriptorIdentityDomain,
+    GeneratedDescriptorSetFamily,
+)
 from loom.gen.target.low.low_descriptors import (  # noqa: E402
+    descriptor_identity_domain,
     descriptor_set_family_string_values,
     generate_descriptor_set_family,
     write_descriptor_set_to_paths,
@@ -39,6 +43,7 @@ from loom.gen.target.low.low_descriptors import (  # noqa: E402
 from loom.target.arch.amdgpu.descriptors import (  # noqa: E402
     AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS,
     amdgpu_core_descriptor_set_instruction_names_by_isa_key,
+    amdgpu_descriptor_ref_keys,
     build_amdgpu_core_descriptor_sets_from_specs,
 )
 from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
@@ -47,7 +52,28 @@ from loom.target.arch.amdgpu.isa_xml import (  # noqa: E402
 from loom.target.arch.amdgpu.names import (  # noqa: E402
     amdgpu_low_descriptor_storage_view_provider_symbol,
 )
-from loom.target.low_descriptors import DescriptorSet  # noqa: E402
+from loom.target.low_descriptors import (  # noqa: E402
+    Descriptor,
+    DescriptorSet,
+    descriptor_stable_id,
+)
+
+AMDGPU_DESCRIPTOR_IDENTITY_PUBLIC_HEADER = "loom/target/arch/amdgpu/descriptors/descriptor_identities.h"
+AMDGPU_DESCRIPTOR_IDENTITY_TABLE_SYMBOL = "loom_amdgpu_descriptor_identities"
+
+
+def amdgpu_descriptor_identity_domain(
+    descriptors: Sequence[Descriptor] = (),
+) -> DescriptorIdentityDomain:
+    """Returns the complete AMDGPU descriptor identity domain."""
+
+    keys = tuple(sorted(amdgpu_descriptor_ref_keys(), key=lambda key: descriptor_stable_id(key)))
+    return descriptor_identity_domain(
+        descriptors,
+        keys=keys,
+        table_symbol=AMDGPU_DESCRIPTOR_IDENTITY_TABLE_SYMBOL,
+        public_header=AMDGPU_DESCRIPTOR_IDENTITY_PUBLIC_HEADER,
+    )
 
 
 def _parse_view_headers(values: Sequence[str]) -> dict[str, Path]:
@@ -174,6 +200,7 @@ def generate_amdgpu_descriptor_table_family(
         view_specs,
         primary_strings=primary_strings,
         shared_strings=shared_strings,
+        identity_domain=amdgpu_descriptor_identity_domain(tuple(storage_spec.descriptors) + tuple(descriptor for view_spec in view_specs for descriptor in view_spec.descriptors)),
     )
 
 

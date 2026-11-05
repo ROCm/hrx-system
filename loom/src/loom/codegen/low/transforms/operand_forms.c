@@ -282,7 +282,8 @@ static bool loom_low_descriptor_is_select(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
   const iree_string_view_t semantic_tag = loom_low_descriptor_set_string(
-      descriptor_set, descriptor->semantic_tag_string_ref);
+      descriptor_set,
+      loom_low_descriptor_semantic_tag_string_ref(descriptor_set, descriptor));
   return loom_low_semantic_tag_has_token(semantic_tag, IREE_SV("select"));
 }
 
@@ -529,8 +530,9 @@ static void loom_low_select_operand_form_reset_destructive_info(
 static iree_string_view_t loom_low_descriptor_key(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_t* descriptor) {
-  return loom_low_descriptor_set_string(descriptor_set,
-                                        descriptor->key_string_ref);
+  return loom_low_descriptor_set_string(
+      descriptor_set,
+      loom_low_descriptor_key_string_ref(descriptor_set, descriptor));
 }
 
 static iree_string_view_t loom_low_descriptor_operand_name(

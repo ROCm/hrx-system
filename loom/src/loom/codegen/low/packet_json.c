@@ -789,7 +789,9 @@ static iree_status_t loom_low_packet_json_write_packet(
     IREE_RETURN_IF_ERROR(
         loom_json_object_begin_field(&object, IREE_SV("descriptor")));
     IREE_RETURN_IF_ERROR(loom_low_packet_json_write_descriptor_string_or_null(
-        descriptor_set, descriptor->key_string_ref, stream));
+        descriptor_set,
+        loom_low_descriptor_key_string_ref(descriptor_set, descriptor),
+        stream));
   } else {
     IREE_RETURN_IF_ERROR(
         loom_json_object_write_null_field(&object, IREE_SV("descriptor")));

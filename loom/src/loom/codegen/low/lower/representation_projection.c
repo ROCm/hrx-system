@@ -280,10 +280,14 @@ static iree_status_t loom_low_representation_plan_descriptor(
   }
   const uint32_t target_ordinal =
       loom_low_descriptor_set_lookup_descriptor_by_id(
-          projection->target_descriptor_set, source_descriptor->stable_id);
+          projection->target_descriptor_set,
+          loom_low_descriptor_stable_id_at(projection->source_descriptor_set,
+                                           source_ordinal));
   if (target_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
     const iree_string_view_t descriptor_key = loom_low_descriptor_set_string(
-        projection->source_descriptor_set, source_descriptor->key_string_ref);
+        projection->source_descriptor_set,
+        loom_low_descriptor_key_string_ref(projection->source_descriptor_set,
+                                           source_descriptor));
     const iree_string_view_t source_set_name = loom_low_descriptor_set_string(
         projection->source_descriptor_set,
         projection->source_descriptor_set->key_string_ref);

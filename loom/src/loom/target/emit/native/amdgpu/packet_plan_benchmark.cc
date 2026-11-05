@@ -269,9 +269,12 @@ static FrameAnalysis AnalyzeFrame(const loom_low_emission_frame_t& frame) {
     const uint32_t node_index = frame.schedule.scheduled_node_indices[i];
     const loom_low_schedule_node_t& node = frame.schedule.nodes[node_index];
     analysis.signature = HashValue(analysis.signature, node_index);
-    analysis.signature =
-        HashValue(analysis.signature,
-                  node.descriptor == nullptr ? 0 : node.descriptor->stable_id);
+    analysis.signature = HashValue(
+        analysis.signature,
+        node.descriptor == nullptr
+            ? 0
+            : loom_low_descriptor_stable_id(
+                  frame.schedule.target.descriptor_set, node.descriptor));
     if (node.descriptor != nullptr &&
         iree_any_bit_set(
             loom_low_descriptor_set_descriptor_view(

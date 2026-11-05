@@ -123,9 +123,9 @@ static void BM_StructuralFacts(benchmark::State& state,
             &descriptor_set->descriptors[descriptor_ordinal];
         const auto* layout =
             loom_low_descriptor_layout(descriptor_set, descriptor);
-        return descriptor->stable_id + descriptor->operand_start +
-               layout->immediate_start + layout->effect_start +
-               descriptor->flags;
+        return loom_low_descriptor_stable_id(descriptor_set, descriptor) +
+               descriptor->operand_start + layout->immediate_start +
+               layout->effect_start + descriptor->flags;
       });
 }
 
@@ -190,12 +190,13 @@ static void BM_MixedFacts(benchmark::State& state,
         const loom_low_schedule_class_t* schedule_class =
             loom_low_schedule_model_schedule_class(schedule_model,
                                                    descriptor_view);
-        uint64_t result = descriptor->stable_id + descriptor->operand_start +
-                          loom_low_descriptor_layout(descriptor_set, descriptor)
-                              ->effect_start +
-                          descriptor_view->instruction_class_flags +
-                          schedule_class->latency_cycles +
-                          schedule_class->flags;
+        uint64_t result =
+            loom_low_descriptor_stable_id(descriptor_set, descriptor) +
+            descriptor->operand_start +
+            loom_low_descriptor_layout(descriptor_set, descriptor)
+                ->effect_start +
+            descriptor_view->instruction_class_flags +
+            schedule_class->latency_cycles + schedule_class->flags;
         const uint32_t asm_form_ordinal =
             descriptor_view->canonical_asm_form_ordinal;
         if (asm_form_ordinal != LOOM_LOW_ASM_FORM_ORDINAL_NONE) {

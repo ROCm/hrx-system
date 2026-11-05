@@ -176,8 +176,9 @@ static inline uint16_t loom_low_descriptor_packet_attribute_index(
 static inline iree_string_view_t loom_low_descriptor_packet_diagnostic_key(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_descriptor_packet_t* packet) {
-  return loom_low_descriptor_set_string(descriptor_set,
-                                        packet->descriptor->key_string_ref);
+  return loom_low_descriptor_set_string(
+      descriptor_set,
+      loom_low_descriptor_key_string_ref(descriptor_set, packet->descriptor));
 }
 
 #ifdef __cplusplus

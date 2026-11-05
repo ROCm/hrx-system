@@ -180,8 +180,10 @@ static iree_status_t loom_low_schedule_json_descriptor_key(
   if (node->descriptor == NULL) {
     return iree_ok_status();
   }
-  *out_key = loom_low_descriptor_set_string(table->target.descriptor_set,
-                                            node->descriptor->key_string_ref);
+  *out_key = loom_low_descriptor_set_string(
+      table->target.descriptor_set,
+      loom_low_descriptor_key_string_ref(table->target.descriptor_set,
+                                         node->descriptor));
   return iree_ok_status();
 }
 
@@ -433,8 +435,10 @@ iree_status_t loom_low_schedule_format_json(
             : NULL;
     if (source_descriptor != NULL && source_descriptor != node->descriptor) {
       const iree_string_view_t source_descriptor_key =
-          loom_low_descriptor_set_string(table->target.descriptor_set,
-                                         source_descriptor->key_string_ref);
+          loom_low_descriptor_set_string(
+              table->target.descriptor_set,
+              loom_low_descriptor_key_string_ref(table->target.descriptor_set,
+                                                 source_descriptor));
       IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
           &node_object, IREE_SV("source_descriptor"), source_descriptor_key));
     }

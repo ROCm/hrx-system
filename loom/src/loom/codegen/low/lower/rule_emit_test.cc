@@ -296,7 +296,7 @@ TEST_P(LowLowerWideRuleEmitTest, PlansAndEmitsEveryOperandAndResult) {
     auto emit_ref = emit_refs[rule.action.emit_start];
     if (emit_ref.descriptor_ref == LOOM_LOW_LOWER_DESCRIPTOR_REF_NONE ||
         rule_set.descriptor_refs[emit_ref.descriptor_ref].stable_id !=
-            descriptor.stable_id) {
+            loom_low_descriptor_stable_id(&descriptor_set, &descriptor)) {
       continue;
     }
     auto emit = emits[emit_ref.emit_index];

@@ -624,12 +624,15 @@ static iree_status_t loom_amdgpu_read_immediate_u16(
 static bool loom_amdgpu_descriptor_semantic_tag_is(
     const loom_amdgpu_encode_state_t* state,
     const loom_low_descriptor_t* descriptor, iree_string_view_t expected_tag) {
-  if (descriptor->semantic_tag_string_ref == LOOM_STRING_REF_NONE) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->inputs.schedule->target.descriptor_set;
+  const loom_string_ref_t semantic_tag_string_ref =
+      loom_low_descriptor_semantic_tag_string_ref(descriptor_set, descriptor);
+  if (semantic_tag_string_ref == LOOM_STRING_REF_NONE) {
     return false;
   }
-  const iree_string_view_t semantic_tag = loom_low_descriptor_set_string(
-      state->inputs.schedule->target.descriptor_set,
-      descriptor->semantic_tag_string_ref);
+  const iree_string_view_t semantic_tag =
+      loom_low_descriptor_set_string(descriptor_set, semantic_tag_string_ref);
   return iree_string_view_equal(semantic_tag, expected_tag);
 }
 
@@ -1683,7 +1686,8 @@ static iree_status_t loom_amdgpu_encode_descriptor_packet(
                                              encoding_format)) {
     const iree_string_view_t key = loom_amdgpu_descriptor_string(
         state->inputs.schedule->target.descriptor_set,
-        packet->descriptor->key_string_ref);
+        loom_low_descriptor_key_string_ref(
+            state->inputs.schedule->target.descriptor_set, packet->descriptor));
     iree_string_view_t format_name =
         loom_amdgpu_encoding_format_name(encoding_format);
     return iree_make_status(

@@ -39,6 +39,8 @@ struct AddressabilityTestState {
   loom_low_reg_class_t reg_classes[1] = {};
   loom_low_reg_class_alt_t reg_class_alts[1] = {};
   loom_low_operand_t operands[2] = {};
+  loom_low_descriptor_identity_t descriptor_identities[1] = {};
+  uint64_t descriptor_stable_ids[1] = {};
   loom_low_descriptor_t descriptors[1] = {};
   // Structural metadata owned by this synthetic target.
   loom_low_descriptor_layout_t descriptor_layouts[1] = {};
@@ -99,6 +101,10 @@ void InitializeAddressabilityTestState(
   static const uint16_t operand_indices[] = {0, 1};
   state->descriptor_set.operand_indices = operand_indices;
   state->descriptor_set.operand_index_count = IREE_ARRAYSIZE(operand_indices);
+  state->descriptor_set.descriptor_identities = state->descriptor_identities;
+  state->descriptor_set.descriptor_stable_ids = state->descriptor_stable_ids;
+  state->descriptor_set.descriptor_identity_count =
+      IREE_ARRAYSIZE(state->descriptor_identities);
   state->descriptor_set.descriptors = state->descriptors;
   state->descriptor_set.descriptor_views = state->descriptor_views;
   state->descriptor_set.descriptor_count = IREE_ARRAYSIZE(state->descriptors);
@@ -155,8 +161,10 @@ void InitializeAddressabilityTestState(
       .address_state_slot = {},
       .data_format_id = {},
   };
-  state->descriptors[0].key_string_ref =
+  state->descriptor_identities[0].key_string_ref =
       ADDRESSABILITY_STRING_REF(descriptor_packet);
+  state->descriptor_stable_ids[0] =
+      loom_low_descriptor_stable_id_from_key(IREE_SV("test.packet"));
   state->descriptors[0].operand_start = 0;
   state->descriptors[0].operand_count = IREE_ARRAYSIZE(state->operands);
   state->descriptors[0].result_count = 1;

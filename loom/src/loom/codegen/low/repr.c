@@ -65,8 +65,9 @@ static iree_string_view_t loom_low_repr_descriptor_key_impl(
   if (!descriptor) {
     return iree_string_view_empty();
   }
-  return loom_low_descriptor_set_string(descriptor_set,
-                                        descriptor->key_string_ref);
+  return loom_low_descriptor_set_string(
+      descriptor_set,
+      loom_low_descriptor_key_string_ref(descriptor_set, descriptor));
 }
 
 static iree_status_t loom_low_repr_resolve_packet_attributes_impl(

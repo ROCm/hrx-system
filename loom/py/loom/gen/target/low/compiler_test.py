@@ -90,6 +90,24 @@ def test_descriptor_lookup_rejects_unrepresentable_storage_count() -> None:
         compiler.compile_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
 
 
+@pytest.mark.parametrize("count", [255, 256])
+def test_descriptor_operand_counts_fit_compact_rows(count: int) -> None:
+    result_operand = TEST_LOW_ADD_I32_DESCRIPTOR.operands[0]
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        operands=(result_operand,) * count,
+    )
+    if count == 256:
+        with pytest.raises(
+            ValueError,
+            match=re.escape("descriptor 'test.add.i32' operand count does not fit u8"),
+        ):
+            validation.validate_descriptor_operands(descriptor)
+    else:
+        operand_layout = validation.validate_descriptor_operands(descriptor)
+        assert operand_layout.result_count == count
+
+
 @pytest.mark.parametrize(
     ("field", "description"),
     [

@@ -19,26 +19,37 @@ TEST(LowDescriptorsTest, LookupRetainsIdentityAcrossSharedViews) {
       "test.alpha"
       "test.beta"
       "test.gamma";
+  std::array<loom_low_descriptor_identity_t, 3> identities = {{
+      {.key_string_ref = LOOM_STRING_REF(0, 0, 10)},
+      {.key_string_ref = LOOM_STRING_REF(0, 10, 9)},
+      {.key_string_ref = LOOM_STRING_REF(0, 19, 10)},
+  }};
   std::array<loom_low_descriptor_t, 3> descriptors = {};
-  descriptors[0].key_string_ref = LOOM_STRING_REF(0, 0, 10);
-  descriptors[1].key_string_ref = LOOM_STRING_REF(0, 10, 9);
-  descriptors[2].key_string_ref = LOOM_STRING_REF(0, 19, 10);
+  std::array<uint64_t, 3> stable_ids = {};
+  const std::array<uint16_t, 3> identity_ordinals = {2, 0, 1};
+  const std::array<iree_string_view_t, 3> identity_keys = {
+      IREE_SV("test.alpha"), IREE_SV("test.beta"), IREE_SV("test.gamma")};
+  for (uint16_t i = 0; i < descriptors.size(); ++i) {
+    descriptors[i].identity_ordinal = identity_ordinals[i];
+    stable_ids[i] = loom_low_descriptor_stable_id_from_key(
+        identity_keys[identity_ordinals[i]]);
+  }
   std::array<uint16_t, 3> references = {0, 1, 2};
   loom_low_descriptor_set_t set = {
+      .descriptor_identities = identities.data(),
+      .descriptor_stable_ids = stable_ids.data(),
       .descriptors = descriptors.data(),
+      .descriptor_identity_count = 3,
       .descriptor_count = 3,
       .descriptor_ordinal_count = 3,
       .descriptor_refs = references.data(),
       .descriptor_ref_count = 3,
       .string_pool = {{strings}, {sizeof(strings) - 1}},
   };
-  for (auto& descriptor : descriptors) {
-    descriptor.stable_id = loom_low_descriptor_stable_id_from_key(
-        loom_low_descriptor_set_string(&set, descriptor.key_string_ref));
-  }
   std::sort(references.begin(), references.end(),
             [&](uint32_t lhs, uint32_t rhs) {
-              return descriptors[lhs].stable_id < descriptors[rhs].stable_id;
+              return loom_low_descriptor_stable_id(&set, &descriptors[lhs]) <
+                     loom_low_descriptor_stable_id(&set, &descriptors[rhs]);
             });
 
   // A full view, prefix view and sparse view share the same immutable lookup
@@ -51,14 +62,14 @@ TEST(LowDescriptorsTest, LookupRetainsIdentityAcrossSharedViews) {
     set.descriptor_membership_words = view == 2 ? &sparse_membership : nullptr;
     for (uint32_t ordinal = 0; ordinal < descriptors.size(); ++ordinal) {
       const auto& descriptor = descriptors[ordinal];
-      const auto key =
-          loom_low_descriptor_set_string(&set, descriptor.key_string_ref);
+      const auto key = loom_low_descriptor_set_string(
+          &set, loom_low_descriptor_key_string_ref(&set, &descriptor));
       const bool visible =
           view == 0 || ordinal == 0 || (view == 2 && ordinal == 2);
       const uint32_t expected =
           visible ? ordinal : LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
       EXPECT_EQ(loom_low_descriptor_set_lookup_descriptor_by_id(
-                    &set, descriptor.stable_id),
+                    &set, loom_low_descriptor_stable_id(&set, &descriptor)),
                 expected);
       EXPECT_EQ(loom_low_descriptor_set_lookup_descriptor(&set, key), expected);
     }
