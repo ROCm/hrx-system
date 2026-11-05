@@ -125,6 +125,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Adjust git config
         run: git config --global --add safe.directory "$PWD"
@@ -236,6 +238,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Adjust git config
         run: |
@@ -324,6 +328,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Adjust git config
         run: git config --global --add safe.directory "$PWD"
@@ -423,6 +429,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Adjust git config
         run: git config --global --add safe.directory "$PWD"
@@ -438,7 +446,13 @@ jobs:
 
       - name: Build and run tests
         id: core_tests
-        run: python build_tools/ci/ci_core_windows.py test ${{ matrix.package && '--no-package-smoke' || '' }}
+        shell: pwsh
+        run: |
+          $testArgs = @()
+          if ($env:HRX_PACKAGE -eq 'true') {
+            $testArgs += '--no-package-smoke'
+          }
+          python build_tools/ci/ci_core_windows.py test @testArgs
 
       - name: Package
         if: ${{ matrix.package }}
@@ -449,7 +463,8 @@ jobs:
         if: ${{ matrix.package }}
         shell: pwsh
         run: |
-          $relocated = "${{ github.workspace }}/build/windows/${{ matrix.toolchain }}/relocated"
+          $toolchainRoot = Split-Path -Parent $env:HRX_ROCM_ROOT
+          $relocated = Join-Path $toolchainRoot 'relocated'
           Move-Item -LiteralPath "$env:HRX_BUILD_DIR" -Destination "${env:HRX_BUILD_DIR}.unavailable"
           Move-Item -LiteralPath "$env:HRX_PUBLIC_INSTALL_DIR" -Destination "${env:HRX_PUBLIC_INSTALL_DIR}.unavailable"
           python build_tools/ci/ci_core_windows.py extract-packages `
@@ -543,6 +558,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Adjust git config
         run: git config --global --add safe.directory "$PWD"

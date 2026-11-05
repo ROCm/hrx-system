@@ -213,6 +213,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
           fetch-depth: ${{ matrix.kind == 'amd_client' && '1' || '2' }}
 
       - name: Adjust git config
@@ -347,29 +348,35 @@ jobs:
         if: matrix.kind == 'cpu' || matrix.kind == 'vulkan' || matrix.kind == 'amdgpu'
         id: iree_bazel_ci
         shell: bash
+        env:
+          IREE_CI_COMMAND: ${{ matrix.command }}
+          IREE_CI_KIND: ${{ matrix.kind }}
+          IREE_CI_LOOM_IMPORTER: ${{ matrix.loom_importer }}
+          IREE_CI_LOOM_ONLY: ${{ steps.scope.outputs.loom_only }}
+          IREE_CI_TARGET_SELECTOR: ${{ matrix.target_selector }}
         run: |
           scope_args=()
-          if [[ "${{ steps.scope.outputs.loom_only }}" == true ]]; then
-            case "${{ matrix.command }}" in
+          if [[ "$IREE_CI_LOOM_ONLY" == true ]]; then
+            case "$IREE_CI_COMMAND" in
               iree-bazel-repository-build|iree-bazel-cpu-shared-tools-asan) ;;
               *) scope_args=(--target //loom/...) ;;
             esac
           fi
           target_args=()
-          if [[ -n "${{ matrix.target_selector }}" ]]; then
-            target_args=(--amdgpu-target "${{ matrix.target_selector }}")
+          if [[ -n "$IREE_CI_TARGET_SELECTOR" ]]; then
+            target_args=(--amdgpu-target "$IREE_CI_TARGET_SELECTOR")
           fi
           importer_args=()
-          if [[ -n "${{ matrix.loom_importer }}" ]]; then
-            importer_args=(--loom-importer "${{ matrix.loom_importer }}")
+          if [[ -n "$IREE_CI_LOOM_IMPORTER" ]]; then
+            importer_args=(--loom-importer "$IREE_CI_LOOM_IMPORTER")
           fi
           result_args=()
-          if [[ "${{ matrix.kind }}" == amdgpu ]]; then
+          if [[ "$IREE_CI_KIND" == amdgpu ]]; then
             result_args=(--bazel-test-results-dir "${RUNNER_TEMP}/native-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
-          elif [[ "${{ matrix.command }}" != iree-bazel-repository-build ]]; then
+          elif [[ "$IREE_CI_COMMAND" != iree-bazel-repository-build ]]; then
             result_args=(--bazel-test-results-dir "${RUNNER_TEMP}/repository-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
           fi
-          python3 build_tools/devtools/ci.py ${{ matrix.command }} \
+          python3 build_tools/devtools/ci.py "$IREE_CI_COMMAND" \
             "${target_args[@]}" "${importer_args[@]}" "${scope_args[@]}" "${result_args[@]}" \
             --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" --keep-going
 
@@ -433,7 +440,7 @@ jobs:
 
   sdk:
     name: SDK
-    uses: ./.github/workflows/build_loom_sdk.yml
+    uses: $/.github/workflows/build_loom_sdk.yml
     with:
       profile: Release
 
@@ -498,6 +505,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -831,6 +840,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Adjust git config
         run: |
@@ -908,6 +919,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0

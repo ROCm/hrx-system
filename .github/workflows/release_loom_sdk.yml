@@ -34,7 +34,7 @@ jobs:
   build_release:
     name: Release
     needs: identity
-    uses: ./.github/workflows/build_loom_sdk.yml
+    uses: $/.github/workflows/build_loom_sdk.yml
     with:
       profile: Release
     permissions:
@@ -44,7 +44,7 @@ jobs:
   build_tracy:
     name: Tracy
     needs: identity
-    uses: ./.github/workflows/build_loom_sdk.yml
+    uses: $/.github/workflows/build_loom_sdk.yml
     with:
       profile: Tracy
     permissions:
@@ -54,7 +54,7 @@ jobs:
   build_debug:
     name: Debug
     needs: identity
-    uses: ./.github/workflows/build_loom_sdk.yml
+    uses: $/.github/workflows/build_loom_sdk.yml
     with:
       profile: Debug
     permissions:
@@ -64,7 +64,7 @@ jobs:
   build_asan:
     name: ASAN
     needs: identity
-    uses: ./.github/workflows/build_loom_sdk.yml
+    uses: $/.github/workflows/build_loom_sdk.yml
     with:
       profile: ASAN
     permissions:
