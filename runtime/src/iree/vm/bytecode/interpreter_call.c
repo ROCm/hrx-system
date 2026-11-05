@@ -23,15 +23,6 @@ void iree_vm_bytecode_call_cleanup_completed(
   }
 }
 
-// Returns one additional packet state while preserving internal borrows.
-static iree_vm_ref_t iree_vm_bytecode_call_stage_ref(iree_vm_ref_t source) {
-  if (source.object && (source.type_and_state & IREE_VM_REF_STATE_MASK) ==
-                           IREE_VM_REF_STATE_OWNED) {
-    iree_vm_ref_object_retain(source.object);
-  }
-  return source;
-}
-
 static bool iree_vm_bytecode_call_ref_matches(iree_vm_ref_t ref,
                                               iree_vm_ref_type_t type) {
   if (!ref.object) {
@@ -210,11 +201,15 @@ static void iree_vm_bytecode_call_commit(
   if (plan->uses_direct_ref_scratch) {
     for (uint16_t i = 0; i < plan->direct_ref_argument_count; ++i) {
       const iree_vm_ref_t source = state->refs[i];
-      state->call_ref_scratch[i] =
-          (plan->direct_ref_move_mask & ((uint16_t)1u << i)) != 0
-              ? iree_vm_bytecode_call_stage_ref(source)
-              : iree_vm_ref_from_ptr_borrowed(source.object,
-                                              iree_vm_ref_type(source));
+      if ((plan->direct_ref_move_mask & ((uint16_t)1u << i)) != 0) {
+        // Transfer before the child starts so its final release is not held
+        // back by a hidden caller owner. Internal borrows remain borrowed.
+        state->call_ref_scratch[i] = source;
+        state->refs[i] = iree_vm_ref_null();
+      } else {
+        state->call_ref_scratch[i] = iree_vm_ref_from_ptr_borrowed(
+            source.object, iree_vm_ref_type(source));
+      }
     }
     cleanup.direct_scratch = state->call_ref_scratch;
     cleanup.direct_scratch_count = plan->direct_ref_argument_count;
@@ -225,7 +220,9 @@ static void iree_vm_bytecode_call_commit(
           ? UINT16_MAX
           : (uint16_t)((1u << plan->direct_ref_result_count) - 1u);
   cleanup.direct_source_move_mask =
-      plan->direct_ref_move_mask & ~result_prefix_mask;
+      plan->uses_direct_ref_scratch
+          ? 0
+          : plan->direct_ref_move_mask & ~result_prefix_mask;
   state->pending_call_cleanup = cleanup;
 }
 

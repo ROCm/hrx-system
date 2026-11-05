@@ -47,8 +47,11 @@ IREE_API_EXPORT void iree_vm_call_ref_result_store_move(
     const iree_vm_call_packet_t* call, uint16_t ordinal,
     iree_vm_ref_t* inout_ref) {
   iree_vm_ref_t* result = iree_vm_call_ref_result_slot(call, ordinal);
-  iree_vm_ref_reset(result);
+  // The prior result may be the incoming borrow's last anchor. Promote and
+  // install the replacement before releasing that anchor.
+  iree_vm_ref_t previous = *result;
   *result = iree_vm_ref_move(inout_ref);
+  iree_vm_ref_reset(&previous);
 }
 
 IREE_API_EXPORT iree_status_t iree_vm_module_function_resume_unreachable(
