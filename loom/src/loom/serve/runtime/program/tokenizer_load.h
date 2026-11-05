@@ -27,7 +27,8 @@ typedef struct loom_serve_tokenizer_load_t loom_serve_tokenizer_load_t;
 // inference accepts .json only. An empty directory means the path is already a
 // locator in the source namespace (including embedded packages).
 // The resolved locator is copied; source views, package, and wake payload
-// remain borrowed until take.
+// remain borrowed until take. host_allocator owns only this operation;
+// shared tokenizer construction uses the cache's allocation domain.
 // Successful submission owes one nonblocking wake, possibly before return.
 // Failure leaves out_load NULL and owes no wake. The owner serializes
 // submission and take; wake only schedules the owner and must not reenter this

@@ -56,6 +56,11 @@ void loom_serve_tokenizer_cache_free(loom_serve_tokenizer_cache_t* cache);
 // producers and live borrowers preserve their entries.
 void loom_serve_tokenizer_cache_trim(loom_serve_tokenizer_cache_t* cache);
 
+// Allocation domain for source and tokenizer storage retained by the cache,
+// independent of an individual load's temporary operation storage.
+iree_allocator_t loom_serve_tokenizer_cache_allocator(
+    const loom_serve_tokenizer_cache_t* cache);
+
 // Acquires one tokenizer identified by its exact source bytes. The cache
 // retains the first source so later acquisitions can compare immutable bytes
 // directly. A new identity selects the caller as producer; an in-flight
@@ -74,7 +79,8 @@ iree_status_t loom_serve_tokenizer_cache_acquire(
 // to the producer, and delivers one reference to every subscriber. Failure
 // consumes any partial tokenizer, broadcasts owned status copies, and removes
 // the identity so a later caller can retry. status remains owned by the caller;
-// a returned publication failure must be joined into its outcome.
+// a returned publication failure must be joined into its outcome. Producer
+// values use the cache allocator so retiring the load cannot invalidate them.
 iree_status_t loom_serve_tokenizer_cache_complete(
     loom_serve_tokenizer_cache_t* cache, const loomc_source_t* source,
     iree_status_t status, iree_tokenizer_t* tokenizer,

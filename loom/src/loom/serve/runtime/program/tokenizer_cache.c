@@ -140,6 +140,11 @@ void loom_serve_tokenizer_cache_trim(loom_serve_tokenizer_cache_t* cache) {
   iree_slim_mutex_unlock(&cache->mutex);
 }
 
+iree_allocator_t loom_serve_tokenizer_cache_allocator(
+    const loom_serve_tokenizer_cache_t* cache) {
+  return cache->host_allocator;
+}
+
 iree_status_t loom_serve_tokenizer_cache_acquire(
     loom_serve_tokenizer_cache_t* cache, loomc_source_t* source,
     loom_serve_tokenizer_subscription_t* subscription,
