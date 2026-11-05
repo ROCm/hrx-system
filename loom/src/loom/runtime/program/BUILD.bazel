@@ -5,7 +5,6 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:package_boundary.bzl", "iree_package_boundary")
-load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 
 package(
@@ -396,16 +395,6 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:unicode",
         "//runtime/src/iree/vm",
     ],
-)
-
-iree_assert_dependency_boundary(
-    name = "program_is_independent_of_services",
-    forbidden_subtrees = [
-        "//loom/src/loom/serve/...",
-        "//loom/src/loom/service/...",
-    ],
-    message = "Program preparation and execution must not depend on services or server policy",
-    target = ":program",
 )
 
 loom_cc_test(

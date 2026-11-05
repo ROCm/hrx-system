@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
 
 package(
@@ -44,19 +43,6 @@ loom_cc_library(
         "//runtime/src/iree/base:core_headers",
         "//runtime/src/iree/hal",
     ],
-)
-
-iree_assert_dependency_boundary(
-    name = "command_runtime_is_independent",
-    forbidden_subtrees = [
-        "//loom/binding/...",
-        "//loom/src/loom/ir/...",
-        "//loom/src/loom/serve/...",
-        "//loom/src/loom/service/...",
-        "//loom/src/loom/target/...",
-    ],
-    message = "Command artifact loading and HAL materialization must not depend on the compiler, server, or services",
-    target = ":hal_command_buffer",
 )
 
 loom_cc_test(

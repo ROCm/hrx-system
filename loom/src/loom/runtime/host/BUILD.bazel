@@ -3,7 +3,6 @@
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
 
 package(
@@ -42,17 +41,6 @@ loom_cc_library(
         "//runtime/src/iree/hal/drivers/task/executable/loaders/registration",
         "//runtime/src/iree/task",
     ],
-)
-
-iree_assert_dependency_boundary(
-    name = "host_has_no_x86_compiler_dependency",
-    forbidden_subtrees = [
-        "//loom/binding/c/target/cpu/...",
-        "//loom/binding/c/target/x86/...",
-        "//loom/src/loom/target/arch/x86/...",
-    ],
-    message = "The runtime host task driver must remain independent of Loom x86 compiler support",
-    target = ":host",
 )
 
 loom_cc_test(

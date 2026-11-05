@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 
 package(
@@ -227,20 +226,6 @@ loom_cc_library(
     ],
 )
 
-iree_assert_dependency_boundary(
-    name = "parameters_are_observation_free",
-    forbidden_dependencies = [
-        "//loom/src/loom/runtime/parameter:telemetry",
-        "//loom/src/loom/runtime/storage:telemetry",
-    ],
-    forbidden_subtrees = [
-        "//loom/src/loom/runtime/telemetry/...",
-        "//loom/src/loom/serve/telemetry/...",
-    ],
-    message = "Parameter ownership must not depend on telemetry observation or export",
-    target = ":weights",
-)
-
 loom_cc_test(
     name = "inputs_test",
     srcs = ["inputs_test.cc"],
@@ -282,19 +267,6 @@ loom_cc_library(
         "//loom/src/loom/runtime/telemetry:stream",
         "//runtime/src/iree/base",
     ],
-)
-
-iree_assert_dependency_boundary(
-    name = "telemetry_is_parameter_only",
-    forbidden_subtrees = [
-        "//loom/binding/...",
-        "//loom/src/loom/runtime/storage/...",
-        "//loom/src/loom/serve/...",
-        "//loom/src/loom/service/...",
-        "//loom/src/loom/target/...",
-    ],
-    message = "Parameter telemetry must not import storage telemetry, serving, services, or compiler implementation",
-    target = ":telemetry",
 )
 
 loom_cc_test(

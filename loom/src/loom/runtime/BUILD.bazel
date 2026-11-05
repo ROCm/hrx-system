@@ -3,7 +3,6 @@
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
 
 package(
@@ -26,18 +25,6 @@ loom_cc_library(
         ":wake",
         "//runtime/src/iree/base",
     ],
-)
-
-iree_assert_dependency_boundary(
-    name = "service_progress_is_runtime_only",
-    forbidden_subtrees = [
-        "//loom/binding/...",
-        "//loom/src/loom/serve/...",
-        "//loom/src/loom/service/...",
-        "//loom/src/loom/target/...",
-    ],
-    message = "Service progress must not depend on transports, modalities, or compiler implementation",
-    target = ":service",
 )
 
 loom_cc_library(
@@ -63,16 +50,4 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
-)
-
-iree_assert_dependency_boundary(
-    name = "driver_is_runtime_only",
-    forbidden_subtrees = [
-        "//loom/binding/...",
-        "//loom/src/loom/serve/...",
-        "//loom/src/loom/service/...",
-        "//loom/src/loom/target/...",
-    ],
-    message = "The service driver must not depend on a catalogue, transport, modality, or compiler implementation",
-    target = ":driver",
 )

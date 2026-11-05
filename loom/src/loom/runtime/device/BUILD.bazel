@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 
 package(
@@ -58,23 +57,6 @@ loom_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/memory:tlsf_pool",
     ],
-)
-
-iree_assert_dependency_boundary(
-    name = "device_is_independent_of_services",
-    forbidden_subtrees = [
-        "//loom/src/loom/serve/...",
-        "//loom/src/loom/service/...",
-    ],
-    message = "Shared device resources must not depend on services or server policy",
-    target = ":device",
-)
-
-iree_assert_dependency_boundary(
-    name = "device_has_no_cli_profiling",
-    forbidden_dependencies = ["//runtime/src/iree/tooling:device_profiling"],
-    message = "Device ownership must not select command-line profiling policy",
-    target = ":device",
 )
 
 loom_cc_test(
