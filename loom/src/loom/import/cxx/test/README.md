@@ -11,6 +11,8 @@ import options such as the language standard, data model, or exported roots.
 `// RUN: emit cxx` instead places canonical exported C++ after `//----`; these
 files declare `// REQUIRES: loom-export-cxx` and can grow through ordinary
 `//====` cases without adding process-level JSON fixtures.
+`// RUN: emit cxx roundtrip` additionally reimports and verifies that exported
+source while retaining the same canonical C++ golden.
 The [loom-check guide](../../../tools/loom-check/README.md) describes the format
 and `--update` workflow.
 

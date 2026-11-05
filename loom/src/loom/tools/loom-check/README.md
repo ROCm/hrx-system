@@ -251,7 +251,11 @@ projectable. A `.cxx-test` therefore places authored C++ before `// ----` and
 its canonical readable C++ projection after it; a `.loom-test` can use the same
 mode to check how authored or transformed High IR reads in the C++ API. Files
 using the mode declare `// REQUIRES: loom-export-cxx` so the external tool
-boundary remains explicit.
+boundary remains explicit. `emit cxx roundtrip` additionally imports and
+verifies the rendered C++ before comparing it with the expected projection.
+It checks that lowering a source feature does not leave High IR that is readable
+but no longer expressible through the C++ importer. The optional `@kernel` root
+may accompany `roundtrip`.
 
 ### Running Fixtures
 

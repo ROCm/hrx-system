@@ -1,0 +1,464 @@
+// RUN: pass canonicalize,cse,dce
+void observe(unsigned);
+
+struct Guard {
+  unsigned digit;
+  ~Guard() { observe(digit); }
+};
+
+unsigned lexical_exit(bool choose) {
+  Guard outer{1};
+  if (choose) {
+    Guard inner{2};
+    return inner.digit;
+  }
+  Guard tail{3};
+  return tail.digit;
+}
+
+// ----
+func.def public @lexical_exit(%choose: i1) -> (i32) {
+  %outer_digit = scalar.constant 1 : i32
+  %3 = scf.if %choose -> (i32) {
+    %inner_digit = scalar.constant 2 : i32
+    func.call @Guard___Guard_value(%inner_digit) : (i32)
+    func.call @Guard___Guard_value(%outer_digit) : (i32)
+    scf.yield %inner_digit : i32
+  } else {
+    %tail_digit = scalar.constant 3 : i32
+    func.call @Guard___Guard_value(%tail_digit) : (i32)
+    func.call @Guard___Guard_value(%outer_digit) : (i32)
+    scf.yield %tail_digit : i32
+  }
+  func.return %3 : i32
+}
+
+func.def inline @Guard___Guard_value(%this_digit: i32) {
+  func.call @observe(%this_digit) : (i32)
+  func.return
+}
+
+func.decl @observe(%7: i32)
+
+// ====
+void observe(unsigned);
+
+struct Guard {
+  unsigned digit;
+  ~Guard() { observe(digit); }
+};
+
+struct Pair {
+  Guard first;
+  Guard second;
+  ~Pair() = default;
+};
+
+void aggregate_destruction() {
+  Guard array[2]{{4}, {5}};
+  Pair pair{{6}, {7}};
+}
+
+// ----
+func.def public @aggregate_destruction() {
+  %0 = index.constant 8 : offset
+  %array_storage = buffer.alloca<private> align(4) %0 : buffer
+  %array_storage_byte_offset = index.constant 0 : offset
+  %6 = scalar.constant 4 : i32
+  %8 = buffer.view %array_storage[%array_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %6, %8[0] : i32, view<1xi32>
+  %13 = scalar.constant 5 : i32
+  %31 = index.constant 4 : offset
+  %15 = buffer.view %array_storage[%31] : buffer -> view<1xi32>
+  view.store %13, %15[0] : i32, view<1xi32>
+  %pair_first_digit = scalar.constant 6 : i32
+  %pair_second_digit = scalar.constant 7 : i32
+  func.call @Pair___Pair_value(%pair_first_digit, %pair_second_digit) : (i32, i32)
+  func.call @Guard___Guard_storage(%array_storage, %31) : (buffer, offset)
+  func.call @Guard___Guard_storage(%array_storage, %array_storage_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.def inline @Pair___Pair_value(%this_first_digit: i32, %this_second_digit: i32) {
+  func.call @Guard___Guard_value(%this_second_digit) : (i32)
+  func.call @Guard___Guard_value(%this_first_digit) : (i32)
+  func.return
+}
+
+func.def inline @Guard___Guard_storage(%this: buffer, %this_byte_offset: offset) {
+  %26 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  %digit = view.load %26[0] : view<1xi32> -> i32
+  func.call @observe(%digit) : (i32)
+  func.return
+}
+
+func.def inline @Guard___Guard_value(%this_digit: i32) {
+  func.call @observe(%this_digit) : (i32)
+  func.return
+}
+
+func.decl @observe(%29: i32)
+
+// ====
+void observe(unsigned);
+
+struct Decision {
+  unsigned value;
+  operator bool() const { return value != 0; }
+  ~Decision() { observe(value); }
+};
+
+void condition_lifetimes(unsigned count) {
+  while (Decision decision{count--}) {
+    if (decision.value == 3) continue;
+    if (decision.value == 2) break;
+    observe(decision.value);
+  }
+}
+
+// ----
+func.def public @condition_lifetimes(%count$0: i32) {
+  %49 = scalar.constant -1 : i32
+  %count$50 = scalar.addi %count$0, %49 : i32
+  %3 = scalar.constant 1 : i1
+  %count$9, %decision_value = scf.while(%count = %count$50 : i32, %decision_value = %count$0 : i32, %6 = %3 : i1) -> (i32, i32) {
+    %42 = scf.if %6 -> (i1) {
+      %13 = func.call pure @Decision__operator_bool_value(%decision_value) : (i32) -> (i1)
+      %15 = scalar.xori %13, %3 : i1
+      scf.if %15 {
+        func.call @Decision___Decision_value(%decision_value) : (i32)
+      }
+      scf.yield %13 : i1
+    } else {
+      %16 = scalar.constant 0 : i1
+      scf.yield %16 : i1
+    }
+    scf.condition %42, %count, %decision_value : i1, i32, i32
+  } do(%count$7: i32, %decision_value$8: i32) {
+    %17 = scalar.constant 3 : i32
+    %18 = scalar.cmpi eq, %decision_value$8, %17 : i32
+    %47 = scf.if %18 -> (i1) {
+      scf.yield %3 : i1
+    } else {
+      %39 = scalar.assume %decision_value$8 [ne(%decision_value$8, 3)] : i32
+      %23 = scalar.constant 2 : i32
+      %24 = scalar.cmpi eq, %39, %23 : i32
+      %48 = scf.if %24 -> (i1) {
+        %27 = scalar.constant 0 : i1
+        scf.yield %27 : i1
+      } else {
+        %40 = scalar.assume %39 [ne(%39, 2)] : i32
+        func.call @observe(%40) : (i32)
+        scf.yield %3 : i1
+      }
+      scf.yield %48 : i1
+    }
+    func.call @Decision___Decision_value(%decision_value$8) : (i32)
+    %count$44 = scalar.addi %count$7, %49 : i32
+    %count$45 = scf.select %47, %count$44, %count$7 : i32
+    %decision_value$46 = scf.select %47, %count$7, %decision_value$8 : i32
+    scf.yield %count$45, %decision_value$46, %47 : i32, i32, i1
+  }
+  func.return
+}
+
+func.def @Decision__operator_bool_value(%this_value: i32) -> (i1) {
+  %35 = scalar.constant 0 : i32
+  %36 = scalar.cmpi ne, %this_value, %35 : i32
+  func.return %36 : i1
+}
+
+func.def inline @Decision___Decision_value(%this_value: i32) {
+  func.call @observe(%this_value) : (i32)
+  func.return
+}
+
+func.decl @observe(%38: i32)
+
+// ====
+void observe(unsigned);
+
+struct Guard {
+  unsigned digit;
+  ~Guard() { observe(digit); }
+};
+
+void parameter_destruction(Guard first, Guard second) {
+  Guard local{3};
+  observe(first.digit + second.digit + local.digit);
+}
+
+// ----
+func.def public @parameter_destruction(%first_digit: i32, %second_digit: i32) {
+  %local_digit = scalar.constant 3 : i32
+  %3 = scalar.addi %first_digit, %second_digit : i32
+  %4 = scalar.addi %3, %local_digit : i32
+  func.call @observe(%4) : (i32)
+  func.call @Guard___Guard_value(%local_digit) : (i32)
+  func.call @Guard___Guard_value(%second_digit) : (i32)
+  func.call @Guard___Guard_value(%first_digit) : (i32)
+  func.return
+}
+
+func.def inline @Guard___Guard_value(%this_digit: i32) {
+  func.call @observe(%this_digit) : (i32)
+  func.return
+}
+
+func.decl @observe(%6: i32)
+
+// ====
+void observe(unsigned);
+
+struct Guard {
+  unsigned digit;
+  ~Guard() { observe(digit); }
+};
+
+struct Holder {
+  Guard member = Guard{18};
+  ~Holder() = default;
+};
+
+static void consume(const Guard& guard) { observe(guard.digit + 20); }
+
+static void consume_value(Guard guard) { observe(guard.digit + 30); }
+
+static Guard make(unsigned digit) { return Guard{digit}; }
+
+static Guard make_with_side(unsigned digit) { return (Guard{40}, Guard{digit}); }
+
+void full_expression_temporaries(bool choose) {
+  Guard{1};
+  consume(Guard{2});
+  consume_value(Guard{3});
+  Guard local = Guard{4};
+  const Guard& extended = Guard{5};
+  consume(choose ? Guard{6} : Guard{7});
+  consume((Guard{8}, Guard{9}));
+  consume(choose ? (Guard{10}, Guard{11}) : Guard{12});
+  consume(make(13));
+  consume(make_with_side(14));
+}
+
+void direct_result_ownership(bool choose) {
+  Guard nested{Guard{15}};
+  Holder holder;
+  const Guard& selected = choose ? Guard{16} : Guard{17};
+  observe(selected.digit + 20);
+  Guard source{19};
+  Guard copied = (Guard{source.digit}, source);
+  const Guard& copied_reference = copied;
+  observe(copied_reference.digit + 30);
+  const Guard& comma_extended = (Guard{21}, Guard{22});
+  observe(comma_extended.digit + 40);
+}
+
+// ----
+func.def public @full_expression_temporaries(%choose: i1) {
+  %1 = scalar.constant 1 : i32
+  func.call @Guard___Guard_value(%1) : (i32)
+  %2 = scalar.constant 2 : i32
+  func.call @consume(%2) : (i32)
+  func.call @Guard___Guard_value(%2) : (i32)
+  %3 = scalar.constant 3 : i32
+  func.call @consume_value(%3) : (i32)
+  %local_digit = scalar.constant 4 : i32
+  %5 = scalar.constant 5 : i32
+  %6 = index.constant 4 : offset
+  %7 = buffer.alloca<private> align(4) %6 : buffer
+  %8 = index.constant 0 : offset
+  %13 = buffer.view %7[%8] : buffer -> view<1xi32>
+  view.store %5, %13[0] : i32, view<1xi32>
+  %15 = scalar.constant 6 : i32
+  %16 = scalar.constant 7 : i32
+  %124 = scf.select %choose, %15, %16 : i32
+  func.call @consume(%124) : (i32)
+  func.call @Guard___Guard_value(%124) : (i32)
+  %17 = scalar.constant 8 : i32
+  %18 = scalar.constant 9 : i32
+  func.call @consume(%18) : (i32)
+  func.call @Guard___Guard_value(%18) : (i32)
+  func.call @Guard___Guard_value(%17) : (i32)
+  %23 = buffer.alloca<private> align(4) %6 : buffer
+  %26 = index.constant 1 : offset
+  %27 = buffer.alloca<private> align(1) %26 : buffer
+  %29 = buffer.view %27[%8] : buffer -> view<1xi8>
+  %122 = scalar.constant 0 : i8
+  view.store %122, %29[0] : i8, view<1xi8>
+  %19 = scf.if %choose -> (i32) {
+    %20 = scalar.constant 10 : i32
+    %21 = scalar.constant 11 : i32
+    %35 = buffer.view %23[%8] : buffer -> view<1xi32>
+    view.store %20, %35[0] : i32, view<1xi32>
+    %120 = scalar.constant 1 : i8
+    view.store %120, %29[0] : i8, view<1xi8>
+    scf.yield %21 : i32
+  } else {
+    %38 = scalar.constant 12 : i32
+    scf.yield %38 : i32
+  }
+  func.call @consume(%19) : (i32)
+  func.call @Guard___Guard_value(%19) : (i32)
+  %39 = view.load %29[0] : view<1xi8> -> i8
+  %41 = scalar.cmpi ne, %39, %122 : i8
+  scf.if %41 {
+    func.call @Guard___Guard_storage(%23, %8) : (buffer, offset)
+  }
+  %42 = scalar.constant 13 : i32
+  %43 = func.call pure @make(%42) : (i32) -> (i32)
+  func.call @consume(%43) : (i32)
+  func.call @Guard___Guard_value(%43) : (i32)
+  %44 = scalar.constant 14 : i32
+  %45 = func.call @make_with_side(%44) : (i32) -> (i32)
+  func.call @consume(%45) : (i32)
+  func.call @Guard___Guard_value(%45) : (i32)
+  func.call @Guard___Guard_storage(%7, %8) : (buffer, offset)
+  func.call @Guard___Guard_value(%local_digit) : (i32)
+  func.return
+}
+
+func.def public @direct_result_ownership(%choose: i1) {
+  %nested_digit = scalar.constant 15 : i32
+  %48 = index.constant 4 : offset
+  %holder_storage = buffer.alloca<private> align(4) %48 : buffer
+  %holder_storage_byte_offset = index.constant 0 : offset
+  %56 = scalar.constant 18 : i32
+  %58 = buffer.view %holder_storage[%holder_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %56, %58[0] : i32, view<1xi32>
+  %60 = scalar.constant 16 : i32
+  %61 = scalar.constant 17 : i32
+  %131 = scf.select %choose, %60, %61 : i32
+  %63 = buffer.alloca<private> align(4) %48 : buffer
+  %69 = buffer.view %63[%holder_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %131, %69[0] : i32, view<1xi32>
+  %selected_digit = view.load %69[0] : view<1xi32> -> i32
+  %75 = scalar.constant 20 : i32
+  %76 = scalar.addi %selected_digit, %75 : i32
+  func.call @observe(%76) : (i32)
+  %source_digit = scalar.constant 19 : i32
+  func.call @Guard___Guard_value(%source_digit) : (i32)
+  %127 = scalar.constant 49 : i32
+  func.call @observe(%127) : (i32)
+  %80 = scalar.constant 21 : i32
+  %81 = scalar.constant 22 : i32
+  %83 = buffer.alloca<private> align(4) %48 : buffer
+  %89 = buffer.view %83[%holder_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %81, %89[0] : i32, view<1xi32>
+  func.call @Guard___Guard_value(%80) : (i32)
+  %comma_extended_digit = view.load %89[0] : view<1xi32> -> i32
+  %95 = scalar.constant 40 : i32
+  %96 = scalar.addi %comma_extended_digit, %95 : i32
+  func.call @observe(%96) : (i32)
+  func.call @Guard___Guard_storage(%83, %holder_storage_byte_offset) : (buffer, offset)
+  func.call @Guard___Guard_value(%source_digit) : (i32)
+  func.call @Guard___Guard_value(%source_digit) : (i32)
+  func.call @Guard___Guard_storage(%63, %holder_storage_byte_offset) : (buffer, offset)
+  func.call @Holder___Holder_storage(%holder_storage, %holder_storage_byte_offset) : (buffer, offset)
+  func.call @Guard___Guard_value(%nested_digit) : (i32)
+  func.return
+}
+
+func.def inline @Guard___Guard_value(%this_digit: i32) {
+  func.call @observe(%this_digit) : (i32)
+  func.return
+}
+
+func.def @consume(%guard_digit: i32) {
+  %99 = scalar.constant 20 : i32
+  %100 = scalar.addi %guard_digit, %99 : i32
+  func.call @observe(%100) : (i32)
+  func.return
+}
+
+func.def @consume_value(%guard_digit: i32) {
+  %102 = scalar.constant 30 : i32
+  %103 = scalar.addi %guard_digit, %102 : i32
+  func.call @observe(%103) : (i32)
+  func.call @Guard___Guard_value(%guard_digit) : (i32)
+  func.return
+}
+
+func.def inline @Guard___Guard_storage(%this: buffer, %this_byte_offset: offset) {
+  %108 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  %digit = view.load %108[0] : view<1xi32> -> i32
+  func.call @observe(%digit) : (i32)
+  func.return
+}
+
+func.def @make(%digit: i32) -> (i32) {
+  func.return %digit : i32
+}
+
+func.def @make_with_side(%digit: i32) -> (i32) {
+  %114 = scalar.constant 40 : i32
+  func.call @Guard___Guard_value(%114) : (i32)
+  func.return %digit : i32
+}
+
+func.def inline @Holder___Holder_storage(%this: buffer, %this_byte_offset: offset) {
+  func.call @Guard___Guard_storage(%this, %this_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.decl @observe(%119: i32)
+
+// ====
+void observe(unsigned);
+
+struct Guard {
+  unsigned digit;
+  ~Guard() { observe(digit); }
+};
+
+struct Decision {
+  unsigned value;
+  operator bool() const {
+    observe(value + 100);
+    return value != 0;
+  }
+  ~Decision() { observe(value + 200); }
+};
+
+void condition_full_expression(unsigned value) {
+  if (Decision decision = (Guard{23}, Decision{value})) {
+    observe(decision.value + 300);
+  }
+}
+
+// ----
+func.def public @condition_full_expression(%value: i32) {
+  %1 = scalar.constant 23 : i32
+  func.call @Guard___Guard_value(%1) : (i32)
+  %2 = func.call @Decision__operator_bool_value(%value) : (i32) -> (i1)
+  scf.if %2 {
+    %3 = scalar.constant 300 : i32
+    %4 = scalar.addi %value, %3 : i32
+    func.call @observe(%4) : (i32)
+  }
+  func.call @Decision___Decision_value(%value) : (i32)
+  func.return
+}
+
+func.def inline @Guard___Guard_value(%this_digit: i32) {
+  func.call @observe(%this_digit) : (i32)
+  func.return
+}
+
+func.def @Decision__operator_bool_value(%this_value: i32) -> (i1) {
+  %8 = scalar.constant 100 : i32
+  %9 = scalar.addi %this_value, %8 : i32
+  func.call @observe(%9) : (i32)
+  %10 = scalar.constant 0 : i32
+  %11 = scalar.cmpi ne, %this_value, %10 : i32
+  func.return %11 : i1
+}
+
+func.def inline @Decision___Decision_value(%this_value: i32) {
+  %13 = scalar.constant 200 : i32
+  %14 = scalar.addi %this_value, %13 : i32
+  func.call @observe(%14) : (i32)
+  func.return
+}
+
+func.decl @observe(%15: i32)

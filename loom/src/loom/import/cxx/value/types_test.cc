@@ -307,8 +307,17 @@ TEST(TypesTest, ObjectPointersDoNotRequirePointeeStorage) {
     ASSERT_EQ(components.size(), 2u);
     EXPECT_EQ(loom_type_kind(components[0]), LOOM_TYPE_BUFFER);
     EXPECT_EQ(loom_type_element_type(components[1]), LOOM_SCALAR_TYPE_OFFSET);
-    EXPECT_THROW(types.storage_size(pointee, owner), SourceRejected);
   }
+  EXPECT_THROW(types.storage_size(control->getVoidType(), owner),
+               SourceRejected);
+  EXPECT_THROW(types.storage_size(source_type("Opaque"), owner),
+               SourceRejected);
+  EXPECT_THROW(types.storage_size(source_type("Payload"), owner),
+               SourceRejected);
+  EXPECT_EQ(types.storage_size(source_type("Owned"), owner), 1);
+  EXPECT_THROW(
+      types.storage_size(control->getPointerType(control->getIntType()), owner),
+      SourceRejected);
   EXPECT_THROW(types.get(source_type("Callback"), owner), SourceRejected);
 }
 

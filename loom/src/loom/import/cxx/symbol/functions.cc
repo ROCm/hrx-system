@@ -315,11 +315,14 @@ void Functions::prepare_analysis(cxx::FunctionSymbol* function, Types& types,
   auto* definition_ast = concrete->declaration();
   auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
       definition_ast->functionBody);
-  if (!body) {
+  const bool defaulted_destructor =
+      concrete->isDestructor() &&
+      cxx::ast_cast<cxx::DefaultFunctionBodyAST>(definition_ast->functionBody);
+  if (!body && !defaulted_destructor) {
     return;
   }
-  auto analysis = std::make_unique<ControlFlow>(unit_, diagnostics_, types,
-                                                body->statement, concrete);
+  auto analysis = std::make_unique<ControlFlow>(
+      unit_, diagnostics_, types, body ? body->statement : nullptr, concrete);
   auto* retained = analysis.get();
   control_flows_.emplace(canonical, std::move(analysis));
   functions.emplace_back(canonical, retained);
@@ -622,8 +625,9 @@ bool Functions::admit_declaration(
                   unit_, attribute,
                   "force_inline and noinline cannot be combined");
             }
-            if (function->isConstructor() || annotated(function, "kernel") ||
-                annotated(function, "op") || annotated(function, "assume") ||
+            if (function->isConstructor() || function->isDestructor() ||
+                annotated(function, "kernel") || annotated(function, "op") ||
+                annotated(function, "assume") ||
                 annotated(function, "check_case") ||
                 annotated(function, "check_scenario") ||
                 annotated(function, "check_benchmark") ||
@@ -1162,6 +1166,9 @@ std::optional<size_t> Functions::reference_return_parameter(
 
 std::span<cxx::FieldSymbol* const> Functions::receiver_writes(
     cxx::FunctionSymbol* symbol) const {
+  if (symbol->isDestructor()) {
+    return {};
+  }
   auto* analysis = control_flow(symbol);
   return analysis ? analysis->receiver_writes()
                   : std::span<cxx::FieldSymbol* const>{};
@@ -1191,7 +1198,8 @@ std::optional<ImplicitObjectParameter> Functions::implicit_object(
   }
   return ImplicitObjectParameter{
       instance.receiver_abi, object_type,
-      instance.receiver_abi == ImplicitObjectABI::Value
+      instance.receiver_abi == ImplicitObjectABI::Value &&
+              !symbol->isDestructor()
           ? analysis->receiver_writes()
           : std::span<cxx::FieldSymbol* const>{}};
 }
@@ -1524,7 +1532,10 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
   auto* definition = symbol->declaration();
   auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
       definition->functionBody);
-  if (!body) {
+  const bool defaulted_destructor =
+      symbol->isDestructor() &&
+      cxx::ast_cast<cxx::DefaultFunctionBodyAST>(definition->functionBody);
+  if (!body && !defaulted_destructor) {
     diagnostics_.reject(unit_, definition, "unsupported function body");
   }
   auto parameters = symbol->parameters();
@@ -1815,10 +1826,11 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
     const bool link_once =
         exported_.contains(symbol) && symbol->canonical()->isInline();
     const loom_inline_policy_t inline_policy =
-        symbol->isConstructor() ? LOOM_INLINE_POLICY_INLINE
-                                : source_inline_policy(symbol);
+        symbol->isConstructor() || symbol->isDestructor()
+            ? LOOM_INLINE_POLICY_INLINE
+            : source_inline_policy(symbol);
     const loom_attribute_t source_signature =
-        symbol->isConstructor()
+        symbol->isConstructor() || symbol->isDestructor()
             ? loom_attr_absent()
             : build_c_source_signature(unit_, diagnostics_, module_, symbol,
                                        definition, types);
@@ -1858,7 +1870,7 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
                                        : loom_func_def_body(op);
   FunctionBody function_body = {
       definition,
-      body->statement,
+      body ? body->statement : nullptr,
       op,
       region,
       signature->returnType(),

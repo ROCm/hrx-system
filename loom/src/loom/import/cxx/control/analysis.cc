@@ -21,12 +21,22 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/expressions.h"
 
 namespace loom::cxx_import {
+
+struct ControlFlow::TemporaryDestructionFacts {
+  // Unique anonymous result-object destructions in source encounter order.
+  std::vector<std::pair<Destruction, cxx::ExpressionAST*>> destructions;
+  // Canonical destructors already represented by an ordinary cleanup edge.
+  std::unordered_set<cxx::FunctionSymbol*> retained;
+  // Canonical destructors admitted once into |destructions|.
+  std::unordered_set<cxx::FunctionSymbol*> candidates;
+};
 
 struct ControlFlow::ValueUseFacts {
   // Final lexical source use for each automatic or current-field binding.
@@ -230,6 +240,11 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
       diagnostics_(diagnostics),
       types_(types),
       function_(function) {
+  if (function_) {
+    for (auto* parameter : function_->parameters()) {
+      retain_automatic_destruction(parameter, function_->declaration());
+    }
+  }
   if (function_ && function_->isConstructor() &&
       cxx::isUserProvided(function_)) {
     auto* definition = function_->declaration();
@@ -240,6 +255,16 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
     }
   }
   accept(body);
+  if (function_ && function_->isDestructor()) {
+    retain_subobject_destructions();
+  }
+  retain_temporary_destructions();
+}
+
+const Destruction* ControlFlow::automatic_destruction(
+    cxx::Symbol* binding) const {
+  auto found = automatic_destructions_.find(binding);
+  return found == automatic_destructions_.end() ? nullptr : &found->second;
 }
 
 ControlFlow::~ControlFlow() = default;
@@ -283,6 +308,9 @@ std::optional<Destination> ControlFlow::destination(
       return destination(unwrap_expression(found->second));
     }
     return Destination{id->symbol, 0, nullptr};
+  }
+  if (auto* decision = cxx::ast_cast<cxx::ConditionExpressionAST>(expression)) {
+    return Destination{decision->symbol, 0, nullptr};
   }
   auto found = destinations_.find(expression);
   return found == destinations_.end() ? std::nullopt
@@ -486,6 +514,7 @@ void ControlFlow::postVisit(cxx::AST* ast) {
     if (classify_storage(expression)) {
       storage_expressions_.insert(expression);
     }
+    retain_temporary_destruction(expression);
   }
   if (auto* statement = cxx::ast_cast<cxx::StatementAST>(ast)) {
     reject_misplaced_binding_statement(unit_, diagnostics_, statement,
@@ -1320,6 +1349,110 @@ void ControlFlow::retain_constructor(cxx::VariableSymbol* variable,
                           /*storage_receiver=*/false, owner);
 }
 
+void ControlFlow::retain_destructor_call(const Destruction& destruction,
+                                         std::optional<CallArgument> receiver,
+                                         bool current_receiver,
+                                         cxx::AST* owner) {
+  if (temporary_destruction_facts_) {
+    temporary_destruction_facts_->retained.insert(
+        destruction.function->canonical());
+  }
+  calls_.push_back({
+      .function = destruction.function,
+      .source = owner,
+      .arguments = {},
+      .receiver = std::move(receiver),
+      .current_receiver = current_receiver,
+      .storage_receiver = false,
+  });
+}
+
+void ControlFlow::retain_temporary_destruction(cxx::ExpressionAST* expression) {
+  if (!expression ||
+      expression->valueCategory != cxx::ValueCategory::kPrValue ||
+      !unit_.typeTraits().is_class(expression->type)) {
+    return;
+  }
+  auto selected = destruction_for(unit_, expression->type);
+  if (!selected) {
+    return;
+  }
+  if (!temporary_destruction_facts_) {
+    temporary_destruction_facts_ =
+        std::make_unique<TemporaryDestructionFacts>();
+    for (const auto& call : calls_) {
+      if (call.function && call.function->isDestructor()) {
+        temporary_destruction_facts_->retained.insert(
+            call.function->canonical());
+      }
+    }
+  }
+  auto* canonical = selected->function->canonical();
+  if (temporary_destruction_facts_->candidates.insert(canonical).second) {
+    temporary_destruction_facts_->destructions.emplace_back(*selected,
+                                                            expression);
+  }
+}
+
+void ControlFlow::retain_temporary_destructions() {
+  if (!temporary_destruction_facts_) {
+    return;
+  }
+  for (const auto& [destruction, expression] :
+       temporary_destruction_facts_->destructions) {
+    if (!temporary_destruction_facts_->retained.contains(
+            destruction.function->canonical())) {
+      retain_destructor_call(destruction, std::nullopt,
+                             /*current_receiver=*/false, expression);
+    }
+  }
+}
+
+void ControlFlow::retain_automatic_destruction(cxx::Symbol* binding,
+                                               cxx::AST* owner) {
+  if (!binding) {
+    return;
+  }
+  if (auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(binding);
+      variable && (variable->isStatic() || variable->isExtern() ||
+                   variable->isThreadLocal())) {
+    return;
+  }
+  auto selected = destruction_for(unit_, binding->type());
+  if (!selected) {
+    return;
+  }
+  automatic_destructions_.emplace(binding, *selected);
+  retain_destructor_call(*selected,
+                         CallArgument{
+                             .source = nullptr,
+                             .identity_bindings = {binding},
+                             .write_binding = binding,
+                         },
+                         /*current_receiver=*/false, owner);
+}
+
+void ControlFlow::retain_subobject_destructions() {
+  auto* record = cxx::symbol_cast<cxx::ClassSymbol>(function_->parent());
+  auto* owner = function_->declaration();
+  auto* partition =
+      record ? types_.record(types_.unqualified(record->type()), owner)
+             : nullptr;
+  if (!partition) {
+    diagnostics_.reject(unit_, owner,
+                        "destructor requires an admitted record object");
+  }
+  for (const auto& member : partition->members) {
+    auto selected = destruction_for(unit_, member.field->type());
+    if (!selected) {
+      continue;
+    }
+    subobject_destructions_.push_back({member.field, *selected});
+    retain_destructor_call(*selected, std::nullopt,
+                           /*current_receiver=*/true, owner);
+  }
+}
+
 void ControlFlow::retain_reference_initializers(cxx::VariableSymbol* variable,
                                                 cxx::ExpressionAST* initializer,
                                                 cxx::AST* owner) {
@@ -1400,6 +1533,9 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
       caller_changed = require_identity(*call.receiver) || caller_changed;
     }
   }
+  if (call.function->isDestructor()) {
+    return {caller_changed, callee_changed};
+  }
   if (callee.receiver_writes().empty()) {
     return {caller_changed, callee_changed};
   }
@@ -1465,11 +1601,29 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
     retain_reference_initializers(variable, ast->initializer, ast);
     retain_constructor(variable, ast->initializer, ast);
     analyze_default_constructor(variable->type(), variable->constructor(), ast);
+    retain_automatic_destruction(variable, ast);
   }
 }
 
 void ControlFlow::visit(cxx::ImplicitCastExpressionAST* ast) {
   cxx::ASTVisitor::visit(ast);
+  auto* conversion_object =
+      implicit_object_type(unit_, ast->conversionFunction);
+  if (ast->conversionFunction && !ast->conversionFunction->isConstructor() &&
+      types_.record(conversion_object, ast)) {
+    retain_call(
+        DirectOperatorCall{
+            .function = ast->conversionFunction,
+            .receiver = ast->expression,
+            .arguments = {},
+            .argument_count = 0,
+            .evaluation_order = OperatorEvaluationOrder::Forward,
+            .has_postfix_dummy = false,
+            .is_virtual_dispatch = ast->isVirtualDispatch,
+        },
+        ast);
+    return;
+  }
   if (bound_constructor_conversions_.contains(ast) ||
       !types_.is_user_record_constructor(ast->type, ast->conversionFunction,
                                          ast)) {
@@ -1509,8 +1663,11 @@ void ControlFlow::visit(cxx::BracedMemInitializerAST* ast) {
 void ControlFlow::visit(cxx::ConditionExpressionAST* ast) {
   cxx::ASTVisitor::visit(ast);
   if (ast->symbol) {
+    retain_reference_initializers(ast->symbol, ast->initializer, ast);
+    retain_constructor(ast->symbol, ast->initializer, ast);
     analyze_default_constructor(ast->symbol->type(), ast->symbol->constructor(),
                                 ast);
+    retain_automatic_destruction(ast->symbol, ast);
   }
 }
 

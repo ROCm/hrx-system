@@ -423,6 +423,9 @@ class Types {
                          cxx::AST* owner);
 
  private:
+  // Whether flattened value transport preserves every copy and move operation
+  // independently of this object's destruction semantics.
+  bool has_trivial_value_operations(const cxx::Type* input);
   void require_record_storage(const cxx::ClassType* input, cxx::AST* owner);
   const Partition* special(const cxx::Type* input, cxx::AST* owner);
   const BufferPartition* buffer(const cxx::ClassType* input, cxx::AST* owner);

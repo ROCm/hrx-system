@@ -105,7 +105,8 @@ struct ReferenceParameter {
 struct FunctionBody {
   // Definition whose source range diagnoses implicit-return admission.
   cxx::FunctionDefinitionAST* source;
-  // Source statements to translate, without a second function-body lookup.
+  // Source statements to translate, or null for an implicitly defaulted
+  // destructor whose complete body consists only of subobject destruction.
   cxx::CompoundStatementAST* body;
   // Native function, kernel, template, or check definition owning the region.
   loom_op_t* operation;

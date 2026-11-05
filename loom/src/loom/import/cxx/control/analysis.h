@@ -20,11 +20,22 @@
 #include <variant>
 #include <vector>
 
+#include "loom/import/cxx/lifetime/destruction.h"
 #include "loom/import/cxx/value/types.h"
 
 namespace loom::cxx_import {
 
 struct DirectOperatorCall;
+
+// One nontrivial direct member or member-array destroyed after a complete
+// destructor's written body. Entries retain declaration order; translation
+// emits them in reverse.
+struct SubobjectDestruction {
+  // Non-static member identity in the complete current object.
+  cxx::FieldSymbol* field;
+  // Frontend-selected complete destruction for the member object.
+  Destruction destruction;
+};
 
 // Retained ownership of a source assignment destination. A field or vector-lane
 // write replaces a slice of its owning automatic binding; it is not a
@@ -221,6 +232,14 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Calls retained by the same source walk for sparse interprocedural effect
   // propagation before callable signatures are frozen.
   std::span<const DirectCall> calls() const { return calls_; }
+  // Nontrivial complete-object destruction registered after this automatic
+  // binding's initialization succeeds, or null for trivial destruction.
+  const Destruction* automatic_destruction(cxx::Symbol* binding) const;
+  // Direct subobjects destroyed after the current destructor's written body.
+  // Entries are in declaration order and become reverse-order cleanup calls.
+  std::span<const SubobjectDestruction> subobject_destructions() const {
+    return subobject_destructions_;
+  }
   // Whether this source function invokes a synthesized default constructor
   // whose retained plan initializes at least one subobject.
   bool default_constructor_initializes(cxx::FunctionSymbol* constructor) const;
@@ -266,6 +285,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   void finalize_callable_effects();
 
  private:
+  struct TemporaryDestructionFacts;
   struct ValueUseFacts;
 
   enum class ReferenceReturn {
@@ -335,6 +355,13 @@ class ControlFlow final : private cxx::ASTVisitor {
   void retain_member_constructor(cxx::MemInitializerAST* initializer);
   void retain_constructor(cxx::VariableSymbol* variable,
                           cxx::ExpressionAST* initializer, cxx::AST* owner);
+  void retain_automatic_destruction(cxx::Symbol* binding, cxx::AST* owner);
+  void retain_subobject_destructions();
+  void retain_temporary_destruction(cxx::ExpressionAST* expression);
+  void retain_temporary_destructions();
+  void retain_destructor_call(const Destruction& destruction,
+                              std::optional<CallArgument> receiver,
+                              bool current_receiver, cxx::AST* owner);
   void retain_reference_initializers(cxx::VariableSymbol* variable,
                                      cxx::ExpressionAST* initializer,
                                      cxx::AST* owner);
@@ -385,6 +412,13 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::vector<cxx::FieldSymbol*> receiver_writes_;
   // Calls retained once for sparse fixed-point propagation.
   std::vector<DirectCall> calls_;
+  // Automatic variable identities mapped to their nontrivial cleanup action.
+  std::unordered_map<cxx::Symbol*, Destruction> automatic_destructions_;
+  // Current destructor's direct nontrivial members in declaration order.
+  std::vector<SubobjectDestruction> subobject_destructions_;
+  // Sparse anonymous-result cleanup facts. Most source functions allocate no
+  // temporary objects and retain only this null pointer.
+  std::unique_ptr<TemporaryDestructionFacts> temporary_destruction_facts_;
   // Constructor conversions whose destination is retained by the enclosing
   // declaration instead of an anonymous temporary.
   std::unordered_set<cxx::ImplicitCastExpressionAST*>

@@ -11,6 +11,7 @@
 #include <cxx/symbols_fwd.h>
 
 #include <array>
+#include <cstddef>
 #include <optional>
 #include <span>
 
@@ -32,9 +33,24 @@ class Initialization {
   // conversion semantics. This interface owns no source or output state.
   class Evaluation {
    public:
+    struct FullExpression {
+      // Temporary prefix retained by this full expression.
+      size_t mark;
+      // Enclosing full expression restored after this one completes.
+      std::optional<size_t> parent_mark;
+    };
+
     virtual Value expression(cxx::ExpressionAST* expression) = 0;
     virtual Value convert(cxx::ExpressionAST* expression, const cxx::Type* type,
                           cxx::AST* owner) = 0;
+    // Transfers a completed prvalue result into its destination object. Side
+    // temporaries evaluated while producing it remain owned by their enclosing
+    // full expression.
+    virtual void adopt(cxx::ExpressionAST* expression, Value value) = 0;
+    // Member initializer expressions are independent full expressions even
+    // though their destination subobjects share one constructor receiver.
+    virtual FullExpression begin_full_expression() = 0;
+    virtual void finish_full_expression(FullExpression expression) = 0;
     // Captures the durable storage identity selected by one reference
     // initializer as the existing buffer-plus-offset pointer value.
     virtual Value reference(cxx::ExpressionAST* expression,

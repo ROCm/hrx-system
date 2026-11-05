@@ -10,10 +10,56 @@
 #include <stdlib.h>
 
 #include "loom/target/tool/process.h"
+#include "loom/tools/loom-check/compile.h"
+#include "loom/tools/loom-check/compile_diagnostics.h"
 #include "loom/tools/loom-check/execute.h"
 #include "loom/tools/loom-check/requirements.h"
 #include "loomc/iree.h"
 #include "loomc/module.h"
+
+typedef struct loom_cxx_export_options_t {
+  // Optional callable root forwarded to loom-export-cxx.
+  iree_string_view_t root;
+  // Whether to import and verify the rendered C++ before comparison.
+  bool roundtrip;
+} loom_cxx_export_options_t;
+
+static iree_status_t loom_cxx_export_options_parse(
+    iree_string_view_t source, loom_cxx_export_options_t* out_options) {
+  *out_options = (loom_cxx_export_options_t){0};
+  iree_string_view_t remaining = iree_string_view_trim(source);
+  while (!iree_string_view_is_empty(remaining)) {
+    iree_string_view_t option = iree_string_view_empty();
+    iree_string_view_split(remaining, ' ', &option, &remaining);
+    option = iree_string_view_trim(option);
+    remaining = iree_string_view_trim(remaining);
+    if (iree_string_view_equal(option, IREE_SV("roundtrip"))) {
+      if (out_options->roundtrip) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "cxx export option 'roundtrip' is repeated");
+      }
+      out_options->roundtrip = true;
+      continue;
+    }
+    if (iree_string_view_starts_with(option, IREE_SV("@"))) {
+      if (!iree_string_view_is_empty(out_options->root)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "cxx export accepts at most one callable root");
+      }
+      if (option.size == 1) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "cxx export callable root cannot be empty");
+      }
+      out_options->root = option;
+      continue;
+    }
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "unknown cxx export option '%.*s'; expected 'roundtrip' or '@symbol'",
+        (int)option.size, option.data);
+  }
+  return iree_ok_status();
+}
 
 static iree_string_view_t loom_cxx_export_tool_path(bool* out_search_path) {
   const char* configured_path = getenv("LOOM_EXPORT_CXX");
@@ -72,25 +118,76 @@ static iree_status_t loom_cxx_export_emit_provider_check_requirements(
   if (!*out_continue_execution) {
     return iree_ok_status();
   }
-  if (!iree_string_view_is_empty(target_options)) {
-    iree_string_view_t root = iree_string_view_empty();
-    iree_string_view_t remaining = iree_string_view_empty();
-    iree_string_view_split(target_options, ' ', &root, &remaining);
-    if (!iree_string_view_consume_prefix(&root, IREE_SV("@")) ||
-        iree_string_view_is_empty(root) ||
-        !iree_string_view_is_empty(iree_string_view_trim(remaining))) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "cxx export accepts one optional kernel root "
-                              "in '@symbol' form");
-    }
+  loom_cxx_export_options_t options;
+  return loom_cxx_export_options_parse(target_options, &options);
+}
+
+static iree_status_t loom_cxx_export_validate_roundtrip(
+    const loom_check_emit_provider_request_t* request,
+    const loom_tool_output_t* output) {
+  loom_check_compile_session_t* session = request->environment->compile_session;
+  if (session == NULL || session->provider == NULL ||
+      session->provider->import == NULL) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "cxx export roundtrip requires a configured C++ importer");
   }
-  return iree_ok_status();
+  IREE_RETURN_IF_ERROR(loom_check_compile_session_prepare(session));
+
+  const loomc_allocator_t allocator =
+      loomc_allocator_from_iree(request->host_allocator);
+  const loomc_source_options_t source_options = {
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(source_options),
+      .format = LOOMC_SOURCE_FORMAT_UNKNOWN,
+      .identifier = loomc_make_cstring_view("<loom-export-cxx>.cxx"),
+      .contents = loomc_make_byte_span(output->data, output->length),
+      .storage = LOOMC_SOURCE_STORAGE_BORROWED,
+  };
+  loomc_source_t* source = NULL;
+  iree_status_t status = iree_status_from_loomc(
+      loomc_source_create(&source_options, allocator, &source));
+
+  loomc_module_t* module = NULL;
+  loomc_result_t* import_result = NULL;
+  if (iree_status_is_ok(status)) {
+    const loom_tooling_source_path_options_t source_path_options = {0};
+    status = session->provider->import(
+        session->provider->import_user_data, IREE_SV("cxx"),
+        iree_string_view_empty(), &source_path_options, session->context,
+        session->workspace, source, request->block_pool,
+        request->host_allocator, &module, &import_result);
+  }
+  bool imported = false;
+  if (iree_status_is_ok(status)) {
+    status = loom_check_compile_append_result(request->diagnostic_collector,
+                                              import_result, &imported);
+  }
+  loomc_result_release(import_result);
+  loomc_source_release(source);
+
+  loomc_result_t* verification_result = NULL;
+  if (iree_status_is_ok(status) && imported) {
+    status = iree_status_from_loomc(loomc_module_verify(
+        module, /*options=*/NULL, allocator, &verification_result));
+  }
+  bool verified = false;
+  if (iree_status_is_ok(status) && imported) {
+    status = loom_check_compile_append_result(request->diagnostic_collector,
+                                              verification_result, &verified);
+  }
+  loomc_result_release(verification_result);
+  loomc_module_release(module);
+  return status;
 }
 
 static iree_status_t loom_cxx_export_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request) {
   (void)provider;
+  loom_cxx_export_options_t options;
+  IREE_RETURN_IF_ERROR(
+      loom_cxx_export_options_parse(request->target_options, &options));
   loom_tool_temp_file_t input_file = {0};
   iree_status_t status =
       loom_tool_temp_file_initialize(IREE_SV("loom-export-cxx"), &input_file);
@@ -112,9 +209,9 @@ static iree_status_t loom_cxx_export_emit_provider_execute(
     iree_string_view_t arguments[4] = {loom_tool_temp_file_path(&input_file),
                                        IREE_SV("--output=-")};
     iree_host_size_t argument_count = 2;
-    if (!iree_string_view_is_empty(request->target_options)) {
+    if (!iree_string_view_is_empty(options.root)) {
       arguments[argument_count++] = IREE_SV("--root");
-      arguments[argument_count++] = request->target_options;
+      arguments[argument_count++] = options.root;
     }
     status = loom_cxx_export_run_tool(arguments, argument_count,
                                       request->host_allocator, &result);
@@ -126,6 +223,12 @@ static iree_status_t loom_cxx_export_emit_provider_execute(
   }
   if (iree_status_is_ok(status)) {
     loom_tool_output_normalize_newlines(&result.stdout_bytes);
+    if (options.roundtrip) {
+      status =
+          loom_cxx_export_validate_roundtrip(request, &result.stdout_bytes);
+    }
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_string(
         &request->result->actual_output,
         iree_make_string_view(result.stdout_bytes.data,
