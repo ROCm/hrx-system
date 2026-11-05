@@ -9,12 +9,14 @@
 #include <array>
 #include <atomic>
 #include <barrier>
+#include <string>
 #include <thread>
 #include <vector>
 
 #include "iree/async/frontier.h"
 #include "iree/async/proactor_platform.h"
 #include "iree/base/api.h"
+#include "iree/base/threading/mutex.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -1042,6 +1044,67 @@ TEST(MultiWaitTest, AlreadyFailedSemaphoreAbortsImmediately) {
   iree_status_free(status);
 
   iree_async_semaphore_release(sem);
+}
+
+TEST(MultiWaitTest, FailurePayloadOutlivesSemaphores) {
+  enum class FailureTiming { kBeforePoll, kBeforeWait, kDuringWait };
+  for (auto mode : {IREE_ASYNC_WAIT_MODE_ALL, IREE_ASYNC_WAIT_MODE_ANY}) {
+    // Single fast path, inline multi-wait, and heap-backed multi-wait.
+    for (size_t count : {1u, 2u, 9u}) {
+      for (auto timing :
+           {FailureTiming::kBeforePoll, FailureTiming::kBeforeWait,
+            FailureTiming::kDuringWait}) {
+        SCOPED_TRACE(mode);
+        SCOPED_TRACE(count);
+        SCOPED_TRACE(static_cast<int>(timing));
+        std::vector<iree_async_semaphore_t*> semaphores(count);
+        std::vector<uint64_t> values(count, 1);
+        for (auto& semaphore : semaphores) {
+          IREE_ASSERT_OK(iree_async_semaphore_create(
+              test_proactor(), 0, 0, iree_allocator_system(), &semaphore));
+        }
+        iree_status_t failure = iree_status_annotate(
+            iree_make_status(IREE_STATUS_UNAVAILABLE, "backing removal failed"),
+            IREE_SV("while retiring accepted work"));
+        const std::string expected = Status::ToString(failure);
+        std::thread failer;
+        if (timing == FailureTiming::kDuringWait) {
+          failer = std::thread([&] {
+            // Observe real registration so this exercises the callback path,
+            // independent of scheduling speed or arbitrary sleeps.
+            auto* semaphore = semaphores.back();
+            bool registered = false;
+            while (!registered) {
+              iree_slim_mutex_lock(&semaphore->mutex);
+              registered = semaphore->timepoints.count != 0;
+              iree_slim_mutex_unlock(&semaphore->mutex);
+              if (!registered) {
+                std::this_thread::yield();
+              }
+            }
+            iree_async_semaphore_fail(semaphore, failure);
+          });
+        } else {
+          iree_async_semaphore_fail(semaphores.back(), failure);
+        }
+        const auto timeout = timing == FailureTiming::kBeforePoll
+                                 ? iree_immediate_timeout()
+                                 : iree_infinite_timeout();
+        iree_status_t status = iree_async_semaphore_multi_wait(
+            mode, semaphores.data(), values.data(), count, timeout,
+            IREE_ASYNC_WAIT_FLAG_NONE, iree_allocator_system());
+        if (failer.joinable()) {
+          failer.join();
+        }
+        for (auto* semaphore : semaphores) {
+          iree_async_semaphore_release(semaphore);
+        }
+        EXPECT_EQ(iree_status_code(status), IREE_STATUS_UNAVAILABLE);
+        EXPECT_EQ(Status::ToString(status), expected);
+        iree_status_free(status);
+      }
+    }
+  }
 }
 
 TEST(MultiWaitTest, ImmediateTimeoutPollAnyOneSatisfied) {

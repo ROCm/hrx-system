@@ -382,8 +382,8 @@ IREE_API_EXPORT void iree_hal_semaphore_fail(iree_hal_semaphore_t* semaphore,
 //
 // Returns IREE_STATUS_DEADLINE_EXCEEDED if the |timeout| elapses without the
 // semaphore reaching the required value. If an asynchronous failure occurred
-// this will return the failure status code that was set on the semaphore.
-// Callers can use iree_hal_semaphore_query to get the full status with message.
+// this returns an owned clone of the complete failure status set on the
+// semaphore, including its diagnostic and attached payloads.
 IREE_API_EXPORT iree_status_t
 iree_hal_semaphore_wait(iree_hal_semaphore_t* semaphore, uint64_t value,
                         iree_timeout_t timeout, iree_async_wait_flags_t flags);
@@ -459,9 +459,8 @@ IREE_API_EXPORT void iree_hal_semaphore_list_fail(
 //
 // Returns IREE_STATUS_DEADLINE_EXCEEDED if the |timeout| elapses without all
 // timepoints being reached. If an asynchronous failure occurred on any timeline
-// this will return the failure status code from the first failed semaphore.
-// Callers can use iree_hal_semaphore_query on individual semaphores to get the
-// full status with message.
+// this returns an owned clone of the first observed failure, including its
+// diagnostic and attached payloads.
 //
 // NOTE: this is not the most optimal way to wait on semaphores; if at all
 // possible use a single wait on a single semaphore to avoid additional
