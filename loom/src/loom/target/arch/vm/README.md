@@ -126,6 +126,16 @@ signatures compare both field kinds and reference identities. Runtime image
 construction resolves those keys to the host's canonical descriptors. Calls
 then move ordinary VM references without name lookup or wrapper allocation.
 
+Managed Low carriers have explicit lifetime operations. `low.copy` creates an
+independent identity, `low.move` transfers the carrier and invalidates its
+source, and `low.release` ends a complete `ref<T>` or `ptr<T>` carrier. Release
+clears the carrier before releasing an owned payload; borrowed and null states
+need no reference-count decrement. A pointer carrier may hold acquired lifetime
+protection, which ends at its release without changing the pointer's source
+type. Native finalizers run at the last release, including when values have
+moved through local storage. Reusing a released identity or one of its required
+storage aliases is invalid.
+
 ## Native imports and captured source
 
 A runtime import states the providing module's namespace independently of the

@@ -58,7 +58,8 @@ enum {
   LOOM_OP_LOW_BR_IDENTITY = LOOM_OP_KIND(LOOM_DIALECT_LOW, 34),
   LOOM_OP_LOW_SPILL_MOVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 35),
   LOOM_OP_LOW_RELOAD_MOVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 36),
-  LOOM_OP_LOW_COUNT_ = 37,
+  LOOM_OP_LOW_RELEASE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 37),
+  LOOM_OP_LOW_COUNT_ = 38,
 };
 
 // Symbol visibility. Absent (0) means private (module-internal).
@@ -1020,6 +1021,19 @@ iree_status_t loom_low_reload_move_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_low_reload_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_RELEASE: End the lifetime of a complete typed managed-reference carrier. The source identity is invalid afterward. An owned carrier releases its reference; a borrowed or null carrier is only cleared. A ptr carrier may hold compiler-acquired protection, which is released here without changing its borrowed source type. Native finalization occurs at this operation when the carrier holds the last owner.
+// low.release %owner : reg<vm.ref : ref<@Object>>
+LOOM_DEFINE_ISA(loom_low_release_isa, LOOM_OP_LOW_RELEASE)
+LOOM_DEFINE_OPERAND(loom_low_release_value, 0)
+iree_status_t loom_low_release_build(
+    loom_builder_t* builder,
+    loom_value_id_t value,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_release_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

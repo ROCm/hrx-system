@@ -680,6 +680,21 @@ static iree_status_t loom_vm_function_storage(
       is_store);
 }
 
+static iree_status_t loom_vm_function_release(
+    const loom_low_emission_frame_t* frame,
+    const loom_low_schedule_node_t* node, iree_io_stream_t* stream) {
+  const loom_value_ordinal_t value_ordinal =
+      loom_low_schedule_node_const_operand_ordinals(node)[0];
+  const loom_low_allocation_assignment_t* assignment =
+      loom_low_allocation_assignment_for_value_ordinal(&frame->allocation,
+                                                       value_ordinal, NULL);
+  const iree_vm_bytecode_ref_discard_t instruction = {
+      .opcode = IREE_VM_BYTECODE_OPCODE_REF_DISCARD,
+      .source_r8 = (uint8_t)assignment->location_base,
+  };
+  return iree_io_stream_write(stream, sizeof(instruction), &instruction);
+}
+
 // Static register parameters occupy the entry prefix of the local value
 // domain. Unused overflow arguments have no assignment and need no load.
 static iree_status_t loom_vm_function_arguments(
@@ -997,6 +1012,8 @@ iree_status_t loom_vm_function_plan_write(
       } else if (loom_low_storage_store_isa(node->op) ||
                  loom_low_storage_load_isa(node->op)) {
         status = loom_vm_function_storage(&frame, node, &storage, stream);
+      } else if (loom_low_release_isa(node->op)) {
+        status = loom_vm_function_release(&frame, node, stream);
       } else if (loom_low_return_isa(node->op)) {
         status = loom_vm_function_return(&frame, node, &return_scratch,
                                          &storage, stream, signature, out_row);

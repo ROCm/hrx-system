@@ -798,13 +798,14 @@ class LowPlacementStorageBoundaryTest
     : public LowPlacementStorageTest,
       public ::testing::WithParamInterface<std::pair<uint32_t, uint32_t>> {};
 
-TEST_F(LowPlacementStorageTest, ReferenceCopiesDoNotJustifySharedStorage) {
+TEST_F(LowPlacementStorageTest, ReferenceForwardingPreservesCarrierLifetimes) {
   ASSERT_NO_FATAL_FAILURE(BuildChain(3, UINT32_MAX, /*reference=*/true));
   loom_low_placement_table_t table = {};
   IREE_ASSERT_OK(Analyze(&table));
   ASSERT_EQ(table.relation_count, 3u);
   for (const auto& range :
-       {table.ranges_by_result_ordinal[1], table.ranges_by_result_ordinal[2]}) {
+       {table.ranges_by_result_ordinal[1], table.ranges_by_result_ordinal[2],
+        table.ranges_by_result_ordinal[3]}) {
     ASSERT_EQ(range.count, 1u);
     const auto& relation = table.relations[range.start];
     EXPECT_FALSE(loom_low_placement_relation_can_alias(&relation));
@@ -814,8 +815,6 @@ TEST_F(LowPlacementStorageTest, ReferenceCopiesDoNotJustifySharedStorage) {
   }
   EXPECT_FALSE(iree_any_bit_set(
       table.storage.flags, LOOM_LOW_PLACEMENT_STORAGE_FLAG_OPTIONAL_ALIASES));
-  const auto& edge = table.relations[table.ranges_by_result_ordinal[3].start];
-  EXPECT_TRUE(loom_low_placement_relation_can_alias(&edge));
 }
 
 TEST_P(LowPlacementStorageBoundaryTest, PreservesRelationsAndReusesPoolBlocks) {

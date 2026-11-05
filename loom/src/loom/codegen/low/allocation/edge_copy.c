@@ -137,9 +137,9 @@ static void loom_low_allocation_edge_copy_record_segment(
           .unit_count = unit_count,
       };
 
-  if (kind == LOOM_LOW_ALLOCATION_COPY_COALESCED) {
-    return;
-  }
+  // A coalesced destination still observes its source carrier after the
+  // parallel group. Keep its identity row so another destination cannot move
+  // from that carrier and clear the coalesced value.
   const loom_low_allocation_move_plan_context_t* move_context =
       &context->move_plan->context;
   const bool consume_source =

@@ -73,6 +73,7 @@ from loom.dsl import (
     FACT_IDENTITY,
     HINT,
     ISOLATED_FROM_ABOVE,
+    OBSERVABLE_EFFECT,
     PURE,
     REGISTER,
     STORAGE,
@@ -1504,6 +1505,30 @@ low_move = Op(
 )
 
 # ============================================================================
+# low.release — end a managed carrier lifetime
+# ============================================================================
+
+low_release = Op(
+    "low.release",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "End the lifetime of a complete typed managed-reference carrier. The "
+        "source identity is invalid afterward. An owned carrier releases its "
+        "reference; a borrowed or null carrier is only cleared. A ptr carrier "
+        "may hold compiler-acquired protection, which is released here without "
+        "changing its borrowed source type. Native finalization occurs at this "
+        "operation when the carrier holds the last owner."
+    ),
+    operands=[Operand("value", REGISTER)],
+    traits=[OBSERVABLE_EFFECT],
+    ownership_effects=[Move("value")],
+    verify="loom_low_release_verify",
+    format=[Ref("value"), COLON, TypeOf("value")],
+    examples=["low.release %owner : reg<vm.ref : ref<@Object>>"],
+)
+
+# ============================================================================
 # low.slice — project a contiguous subrange from a register range
 # ============================================================================
 
@@ -2057,4 +2082,5 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_br_identity,
     low_spill_move,
     low_reload_move,
+    low_release,
 )

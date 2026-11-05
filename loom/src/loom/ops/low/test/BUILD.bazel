@@ -25,6 +25,7 @@ loom_check_test_suite(
         "facts.loom-test",
         "imports.loom-test",
         "memory_access_flags.loom-test",
+        "release.loom-test",
         "roundtrip.loom-test",
         "schedule_scopes.loom-test",
         "structured_control.loom-test",

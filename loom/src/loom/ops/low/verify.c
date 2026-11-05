@@ -1340,6 +1340,21 @@ iree_status_t loom_low_move_verify(const loom_module_t* module,
       module, op, loom_low_move_source(op), loom_low_move_result(op), emitter);
 }
 
+iree_status_t loom_low_release_verify(const loom_module_t* module,
+                                      const loom_op_t* op,
+                                      iree_diagnostic_emitter_t emitter) {
+  const loom_type_t type =
+      loom_module_value_type(module, loom_low_release_value(op));
+  const loom_type_t* value_type = loom_type_register_value_type(type);
+  if (value_type != NULL && loom_type_is_reference(*value_type) &&
+      loom_low_register_type_unit_count(type) == 1) {
+    return iree_ok_status();
+  }
+  return loom_low_emit_type_constraint_error(
+      op, LOOM_DIAGNOSTIC_FIELD_OPERAND, 0, IREE_SV("value"), type,
+      IREE_SV("one complete ref or ptr register"), emitter);
+}
+
 iree_status_t loom_low_slice_verify(const loom_module_t* module,
                                     const loom_op_t* op,
                                     iree_diagnostic_emitter_t emitter) {
