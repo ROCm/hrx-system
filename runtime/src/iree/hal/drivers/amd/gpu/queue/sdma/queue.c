@@ -432,8 +432,10 @@ void iree_hal_amd_gpu_sdma_queue_submit(iree_hal_amd_gpu_sdma_queue_t* queue,
 }
 
 static bool iree_hal_amd_gpu_sdma_queue_scan(
-    iree_hal_amd_gpu_sdma_queue_t* queue, amdf_status_t wait_status) {
+    iree_hal_amd_gpu_sdma_queue_t* queue, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_scope_t* scope) {
   if (!amdf_status_is_ok(wait_status)) {
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
     iree_hal_amd_gpu_sdma_queue_fail(queue, wait_status);
     return false;
   }
@@ -446,6 +448,7 @@ static bool iree_hal_amd_gpu_sdma_queue_scan(
   }
   uint64_t native_point = 0;
   if (queue->kernel.queue) {
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
     amdf_kernel_queue_status_t snapshot = {
         .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
         .structure_size = sizeof(snapshot)};
@@ -471,6 +474,7 @@ static bool iree_hal_amd_gpu_sdma_queue_scan(
             : (int32_t)(completed - (uint32_t)(retired + 1)) < 0) {
       break;
     }
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
     ++retired;
     // Detach metadata before its callback can immediately reuse the copy or
     // publish another slot. KERNEL point retirement also releases command
@@ -490,6 +494,7 @@ static bool iree_hal_amd_gpu_sdma_queue_scan(
 
 static bool iree_hal_amd_gpu_sdma_queue_poll(
     void* user_data, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_scope_t* scope,
     iree_hal_amd_gpu_completion_wait_t* out_wait,
     iree_hal_amd_gpu_completion_copy_t* out_copy) {
   iree_hal_amd_gpu_sdma_queue_t* queue = user_data;
@@ -513,7 +518,8 @@ static bool iree_hal_amd_gpu_sdma_queue_poll(
           iree_memory_order_acquire, iree_memory_order_relaxed)) {
     return false;
   }
-  const bool progress = iree_hal_amd_gpu_sdma_queue_scan(queue, wait_status);
+  const bool progress =
+      iree_hal_amd_gpu_sdma_queue_scan(queue, wait_status, scope);
   const int32_t previous = iree_atomic_fetch_and(
       &queue->observer, ~IREE_HAL_AMD_GPU_SDMA_OBSERVER_ACTIVE,
       iree_memory_order_acq_rel);

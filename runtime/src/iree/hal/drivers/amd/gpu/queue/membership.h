@@ -66,6 +66,7 @@ typedef struct iree_hal_amd_gpu_queue_lifecycle_t {
 typedef struct iree_hal_amd_gpu_queue_slot_t iree_hal_amd_gpu_queue_slot_t;
 typedef struct iree_hal_amd_gpu_queue_sources_t
     iree_hal_amd_gpu_queue_sources_t;
+typedef struct iree_hal_amd_gpu_queue_join_t iree_hal_amd_gpu_queue_join_t;
 
 // One cold construction request. Coordinates and backing belong to the device
 // and survive queue replacement; the returned queue borrows them without
@@ -115,7 +116,7 @@ typedef struct iree_hal_amd_gpu_queue_membership_t {
   uint32_t slot_count;
   // Installed geometric dependency-vector extent; never shrinks.
   uint32_t frontier_count;
-  // Device-owned callback-tail notification for serialized cold requests.
+  // Shared predicate notification for frontier growth and independent releases.
   iree_notification_t notification;
   // Prepared active/spare tables; spare storage makes release allocation-free.
   iree_hal_amd_gpu_queue_sources_t* sources;
@@ -138,15 +139,9 @@ typedef struct iree_hal_amd_gpu_queue_membership_t {
     // Successfully registered contiguous coordinate count.
     uint32_t count;
   } frontier;
-  // Only present in the completion table while a cold release is joining.
-  struct {
-    // Borrowed queue whose accepted work must finish before removal.
-    iree_hal_queue_t* queue;
-    // Release-published after status; callback tails use notification above.
-    iree_atomic_int32_t completed;
-    // Terminal native observation status, read after completed.
-    amdf_status_t status;
-  } join;
+  // Caller-stack release joins, protected by the completion drain mutex. The
+  // optional completion observer exists only while this list is nonempty.
+  iree_hal_amd_gpu_queue_join_t* joins;
   // Terminal ownership result, distinct from the failed execution result.
   struct {
     // Release-publishes the cleanup attempt's result, including failure.

@@ -7,6 +7,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/membership.h"
 
 #include <atomic>
+#include <functional>
 #include <semaphore>
 #include <thread>
 
@@ -93,9 +94,18 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
             [](iree_hal_queue_t* base) {
               return iree_hal_amd_gpu_completion_source_t{
                   .fn =
-                      [](void*, amdf_status_t,
+                      [](void* data, amdf_status_t,
+                         iree_hal_amd_gpu_completion_scope_t* scope,
                          iree_hal_amd_gpu_completion_wait_t*,
-                         iree_hal_amd_gpu_completion_copy_t*) { return false; },
+                         iree_hal_amd_gpu_completion_copy_t*) {
+                        auto* queue = static_cast<Queue*>(data);
+                        if (queue == &queue->owner->provisioned_ &&
+                            queue->owner->run_callout_.exchange(false)) {
+                          iree_hal_amd_gpu_completion_scope_unlock(scope);
+                          queue->owner->callout_();
+                        }
+                        return false;
+                      },
                   .user_data = base,
               };
             },
@@ -185,7 +195,39 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
   std::atomic<uint32_t> shutdowns_{0};
   // Final host queue destructor count.
   std::atomic<uint32_t> destroyed_{0};
+  // Publishes the dependency callout after its function has been initialized.
+  std::atomic<bool> run_callout_{false};
+  // Scripted queue callback; real membership and worker ownership surround it.
+  std::function<void()> callout_;
 };
+
+TEST_P(MembershipTest, CompletionCallbackCanAcquireAndReleaseAnIdleQueue) {
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* initial = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
+                                                           &params, &initial));
+  reinterpret_cast<Queue*>(initial)->idle = true;
+  iree_hal_queue_release(initial);
+  std::binary_semaphore completed{0};
+  callout_ = [&] {
+    iree_hal_queue_t* acquired = nullptr;
+    iree_status_t status = iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &params, &acquired);
+    IREE_EXPECT_OK(status);
+    if (acquired) {
+      reinterpret_cast<Queue*>(acquired)->idle = true;
+      iree_hal_queue_release(acquired);
+    }
+    completed.release();
+  };
+  run_callout_.store(true);
+  EXPECT_EQ(iree_hal_amd_gpu_context_signal(&context_), AMDF_STATUS_OK);
+  completed.acquire();
+  EXPECT_EQ(shutdowns_.load(), 2u);
+  EXPECT_EQ(destroyed_.load(), 2u);
+  EXPECT_TRUE(iree_hal_amd_gpu_queue_membership_is_empty(&membership_));
+}
 
 TEST_P(MembershipTest, FailedObservationWaitsForTerminalOwnership) {
   iree_hal_queue_params_t params;
@@ -204,24 +246,80 @@ TEST_P(MembershipTest, FailedObservationWaitsForTerminalOwnership) {
   EXPECT_EQ(iree_hal_amd_gpu_completion_request_stop(&completion_),
             AMDF_STATUS_OK);
   iree_notification_post(&membership_.notification, IREE_ALL_WAITERS);
-  // Holding the cold release mutex proves the final release is waiting for
-  // terminal ownership. It must not acquire the slots mutex needed by cleanup.
+  // Terminal ownership can take arbitrarily long. The waiting release retains
+  // its own queue, with neither membership nor terminal-traversal exclusion.
+  iree_slim_mutex_lock(&membership_.mutex);
   iree_slim_mutex_lock(&membership_.slots_mutex);
-  const bool acquired = iree_slim_mutex_try_lock(&membership_.mutex);
-  EXPECT_FALSE(acquired);
-  if (acquired) {
-    iree_slim_mutex_unlock(&membership_.mutex);
-  }
   EXPECT_EQ(shutdowns_.load(), 0u);
   EXPECT_EQ(destroyed_.load(), 0u);
   queue->idle = true;
   iree_slim_mutex_unlock(&membership_.slots_mutex);
+  iree_slim_mutex_unlock(&membership_.mutex);
   iree_hal_amd_gpu_queue_membership_finish_failure(&membership_,
                                                    AMDF_STATUS_OK);
   releaser.join();
   EXPECT_EQ(shutdowns_.load(), 1u);
   EXPECT_EQ(destroyed_.load(), 1u);
   EXPECT_TRUE(iree_hal_amd_gpu_queue_membership_is_empty(&membership_));
+}
+
+TEST_P(MembershipTest, WaitingReleaseDoesNotBlockCallbackAcquisition) {
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* pending = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
+                                                           &params, &pending));
+  std::jthread releaser([&] { iree_hal_queue_release(pending); });
+  closed_.acquire();
+  // Join enrollment before the independent callback begins. The pending queue
+  // is still not idle, so this is a progress check, not a scheduling delay.
+  iree_slim_mutex_lock(&membership_.mutex);
+  iree_slim_mutex_unlock(&membership_.mutex);
+  std::binary_semaphore completed{0};
+  callout_ = [&] {
+    iree_hal_queue_t* acquired = nullptr;
+    iree_status_t status = iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &params, &acquired);
+    IREE_EXPECT_OK(status);
+    if (acquired) {
+      reinterpret_cast<Queue*>(acquired)->idle = true;
+      iree_hal_queue_release(acquired);
+    }
+    completed.release();
+  };
+  run_callout_.store(true);
+  EXPECT_EQ(iree_hal_amd_gpu_context_signal(&context_), AMDF_STATUS_OK);
+  completed.acquire();
+  EXPECT_EQ(destroyed_.load(), 1u);
+  reinterpret_cast<Queue*>(pending)->idle = true;
+  EXPECT_EQ(iree_hal_amd_gpu_context_signal(&context_), AMDF_STATUS_OK);
+  releaser.join();
+  EXPECT_EQ(destroyed_.load(), 2u);
+}
+
+TEST_P(MembershipTest, PendingReleasesJoinIndependently) {
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* first = nullptr;
+  iree_hal_queue_t* second = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
+                                                           &params, &second));
+  std::jthread first_releaser([&] { iree_hal_queue_release(first); });
+  closed_.acquire();
+  std::jthread second_releaser([&] { iree_hal_queue_release(second); });
+  closed_.acquire();
+  iree_slim_mutex_lock(&membership_.mutex);
+  iree_slim_mutex_unlock(&membership_.mutex);
+  reinterpret_cast<Queue*>(second)->idle = true;
+  EXPECT_EQ(iree_hal_amd_gpu_context_signal(&context_), AMDF_STATUS_OK);
+  second_releaser.join();
+  EXPECT_EQ(destroyed_.load(), 1u);
+  reinterpret_cast<Queue*>(first)->idle = true;
+  EXPECT_EQ(iree_hal_amd_gpu_context_signal(&context_), AMDF_STATUS_OK);
+  first_releaser.join();
+  EXPECT_EQ(destroyed_.load(), 2u);
 }
 
 INSTANTIATE_TEST_SUITE_P(Deadline, MembershipTest,

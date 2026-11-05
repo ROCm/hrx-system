@@ -294,6 +294,7 @@ iree_runtime_cc_test(
     srcs = ["feedback_test.cc"],
     target_compatible_with = _NATIVE_DEVICE_COMPATIBLE_WITH,
     deps = [
+        ":completion",
         ":context",
         ":feedback",
         ":source_context",

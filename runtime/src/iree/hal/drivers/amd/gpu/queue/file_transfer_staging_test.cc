@@ -373,10 +373,26 @@ class FileTransferStagingTest : public MemoryBackendTest,
   }
 
   void PollCopies(amdf_status_t status = AMDF_STATUS_OK) {
-    const auto source = iree_hal_amd_gpu_sdma_queue_completion_source(sdma_);
+    auto source = iree_hal_amd_gpu_sdma_queue_completion_source(sdma_);
     iree_hal_amd_gpu_completion_wait_t wait = {};
-    while (source.fn(source.user_data, status, &wait, nullptr)) {
+    iree_hal_amd_gpu_completion_t completion = {};
+    iree_slim_mutex_initialize(&completion.drain_mutex);
+    auto poll = [&](amdf_status_t status) {
+      iree_slim_mutex_lock(&completion.drain_mutex);
+      iree_hal_amd_gpu_completion_scope_t scope = {
+          .completion = &completion,
+          .source = &source,
+          .fn = source.fn,
+      };
+      const bool ready =
+          source.fn(source.user_data, status, &scope, &wait, nullptr);
+      EXPECT_FALSE(iree_hal_amd_gpu_completion_scope_finish(&scope));
+      iree_slim_mutex_unlock(&completion.drain_mutex);
+      return ready;
+    };
+    while (poll(status)) {
     }
+    iree_slim_mutex_deinitialize(&completion.drain_mutex);
     // Completion failure wakes the distinct publication owner to deliver its
     // retained-copy notifications. Drive that owner before polling file I/O.
     const auto publication =

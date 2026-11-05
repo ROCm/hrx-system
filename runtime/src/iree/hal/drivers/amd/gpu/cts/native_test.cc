@@ -879,6 +879,109 @@ TEST_F(GpuNativeTest, FailedQueueConstructionReleasesItsOwners) {
 
 using iree::hal::amd::gpu::cts::CompletionPause;
 
+class GpuNativeCompletionTest
+    : public GpuNativeTest,
+      public ::testing::WithParamInterface<amdf_queue_command_type_t> {
+ protected:
+  amdf_queue_command_type_t command_type() const override { return GetParam(); }
+};
+
+TEST_P(GpuNativeCompletionTest, IndependentCompletionDuringHostCallback) {
+  const auto& family = context_->families[options_.queue_family_ordinal];
+  if (!(family.publication_modes & AMDF_QUEUE_PUBLICATION_MODE_USER) ||
+      !(family.user_queue_capabilities &
+        AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER)) {
+    GTEST_SKIP() << "Caller retirement assistance requires USER publication";
+  }
+  const void* native_domain = context_;
+  Create();
+  if (HasFatalFailure()) {
+    return;
+  }
+  using iree::hal::cts::Ref;
+  Ref<iree_hal_semaphore_t> callback, independent, marker;
+  CreateSemaphore(callback.out());
+  CreateSemaphore(independent.out());
+  CreateSemaphore(marker.out());
+  iree_hal_semaphore_t* callback_handle = callback;
+  iree_hal_semaphore_t* independent_handle = independent;
+  iree_hal_semaphore_t* marker_handle = marker;
+  uint64_t one = 1;
+  CompletionPause pause{
+      reinterpret_cast<iree_async_semaphore_t*>(callback_handle)};
+  IREE_ASSERT_OK(pause.Arm(one));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(
+      queues_[0], {}, {1, &callback_handle, &one}, nullptr, 0));
+  pause.entered.acquire();
+  IREE_ASSERT_OK(iree_hal_queue_barrier(
+      queues_[1], {}, {1, &independent_handle, &one}, nullptr, 0));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queues_[1],
+                                        {1, &independent_handle, &one},
+                                        {1, &marker_handle, &one}, nullptr, 0));
+  // The native semaphore point precedes the PM4 host retirement record. Join
+  // a later point on the same FIFO before testing the single retirement-assist
+  // attempt, so this tests source ownership rather than that publication gap.
+  iree_hal_amd_gpu_semaphore_wait_t producer = {};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_semaphore_acquire_wait(
+      marker, one, native_domain, &producer));
+  std::unique_ptr<iree_hal_amd_gpu_signal_t,
+                  decltype(&iree_hal_amd_gpu_signal_release)>
+      signal(producer.signal, iree_hal_amd_gpu_signal_release);
+  ASSERT_EQ(producer.state, IREE_HAL_AMD_GPU_SEMAPHORE_WAIT_NATIVE);
+  const int64_t pending = GetParam() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL ? 1 : 0;
+  while (iree_atomic_load(
+             reinterpret_cast<iree_atomic_int64_t*>(signal->host_value),
+             iree_memory_order_acquire) == pending) {
+    std::this_thread::yield();
+  }
+  // The active waiter retires its own independent native completion while
+  // the event worker is still inside the first queue's detached notification.
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(
+      independent, one, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_ACTIVE));
+  uint64_t value = 0;
+  IREE_EXPECT_OK(iree_hal_semaphore_query(independent, &value));
+  EXPECT_EQ(value, one);
+  pause.Join();
+}
+
+TEST_P(GpuNativeCompletionTest, HostCallbackCanAcquireAndReleaseAnIdleQueue) {
+  Create();
+  if (HasFatalFailure()) {
+    return;
+  }
+  using iree::hal::cts::Ref;
+  Ref<iree_hal_semaphore_t> done;
+  CreateSemaphore(done.out());
+  iree_hal_semaphore_t* done_handle = done;
+  uint64_t one = 1;
+  const auto call = iree_hal_make_host_call(
+      +[](void*, const uint64_t[4], iree_hal_host_call_context_t* context) {
+        iree_hal_queue_params_t params;
+        iree_hal_queue_params_initialize(&params);
+        iree_hal_queue_t* acquired = nullptr;
+        IREE_RETURN_IF_ERROR(iree_hal_queue_acquire(
+            iree_hal_queue_family(context->queue), &params, &acquired));
+        iree_hal_queue_release(acquired);
+        return iree_ok_status();
+      },
+      nullptr);
+  const uint64_t arguments[4] = {0};
+  IREE_ASSERT_OK(
+      iree_hal_queue_host_call(queues_[0], {}, {1, &done_handle, &one}, call,
+                               arguments, IREE_HAL_HOST_CALL_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(done, one, iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+}
+
+INSTANTIATE_TEST_SUITE_P(Protocol, GpuNativeCompletionTest,
+                         ::testing::Values(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                           AMDF_QUEUE_COMMAND_TYPE_GPU_AQL),
+                         [](const auto& info) {
+                           return info.param == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+                                      ? "Aql"
+                                      : "Pm4";
+                         });
+
 TEST_F(GpuNativeTest, NativeConsumerPreservesProducerRetirementFailure) {
   const void* native_domain = context_;
   Create();

@@ -529,6 +529,7 @@ static bool iree_hal_amd_gpu_feedback_drain_packets(
 
 bool iree_hal_amd_gpu_feedback_poll(
     void* user_data, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_scope_t* scope,
     iree_hal_amd_gpu_completion_wait_t* out_wait,
     iree_hal_amd_gpu_completion_copy_t* out_copy) {
   return amdf_status_is_ok(wait_status) &&

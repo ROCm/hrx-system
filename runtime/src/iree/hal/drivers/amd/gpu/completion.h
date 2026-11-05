@@ -16,6 +16,9 @@
 extern "C" {
 #endif  // __cplusplus
 
+typedef struct iree_hal_amd_gpu_completion_scope_t
+    iree_hal_amd_gpu_completion_scope_t;
+
 // Reports the outcome and lifetime of one native queue operation. A failure
 // may be reported before retirement: retired=false permits internal failure
 // handling but leaves every borrowed resource live. Exactly one retired=true
@@ -64,9 +67,10 @@ typedef struct iree_hal_amd_gpu_completion_copy_t {
 // Returns true when another batch is immediately ready or this batch retired
 // resources that may unblock another source. Outstanding GPU work alone does
 // not request another round. Native events are hints, never completion facts.
-// The completion worker and active host waiters share a serialized drain.
-// A callback may publish continuations, but cannot synchronously wait for
-// another source in this drain. Recursive try_drain calls return immediately.
+// The completion worker and active host waiters share short metadata exclusion.
+// A source releases that exclusion with scope_unlock before native calls,
+// resource destruction, or arbitrary callbacks. It remains exclusively owned
+// until return; recursive helpers can retire other sources.
 // out_wait starts empty; the source may provide its next coherent wake hint.
 // A non-NULL out_copy admits one worker-owned staging copy. NULL leaves that
 // copy pending: helpers never execute bulk copies, and each worker round admits
@@ -82,16 +86,17 @@ typedef struct iree_hal_amd_gpu_completion_copy_t {
 // Failure does not establish native quiescence or permit releasing GPU storage.
 typedef bool (*iree_hal_amd_gpu_completion_fn_t)(
     void* user_data, amdf_status_t wait_status,
+    iree_hal_amd_gpu_completion_scope_t* scope,
     iree_hal_amd_gpu_completion_wait_t* out_wait,
     iree_hal_amd_gpu_completion_copy_t* out_copy);
 
-// One completion source, such as queue retirement or shader reports. Callback
-// bindings are immutable and borrowed until source replacement or worker join.
-// The drain mutex serializes callbacks. Only the worker stores hints here;
-// helpers discard their hints. Replacement joins both callbacks and unlocked
-// observation and staging copies before returning the old table's ownership.
+// One completion source, such as queue retirement or shader reports. Only the
+// worker stores hints here; helpers discard their hints. The drain mutex
+// protects bindings, hints, and active invocation ownership. Replacement joins
+// removed sources and coherent observation, and relocates retained invocations
+// before returning the old table's ownership.
 typedef struct iree_hal_amd_gpu_completion_source_t {
-  // Bounded observation or terminal native-failure delivery.
+  // Bounded observation or terminal failure delivery; NULL while borrowed.
   iree_hal_amd_gpu_completion_fn_t fn;
   // Borrowed source state, live through the callback's final access.
   void* user_data;
@@ -108,9 +113,10 @@ typedef struct iree_hal_amd_gpu_completion_source_t {
 typedef struct iree_hal_amd_gpu_completion_t {
   // Borrowed context whose event and API table outlive the worker join.
   const iree_hal_amd_gpu_context_t* context;
-  // Number of sources, stable during callbacks and unlocked observation.
+  // Number of sources, stable under drain_mutex and coherent observation.
   iree_host_size_t source_count;
-  // Borrowed contiguous array, replaced after joining callbacks and observers.
+  // Borrowed contiguous array; active callbacks can outlive a table
+  // replacement.
   iree_hal_amd_gpu_completion_source_t* sources;
   // Maximum active observation after progress, in ns; zero parks immediately.
   iree_duration_t spin_ns;
@@ -118,15 +124,52 @@ typedef struct iree_hal_amd_gpu_completion_t {
   iree_thread_t* thread;
   // Stop/replacement requests and the worker's unlocked source borrow.
   iree_atomic_int32_t state;
-  // Serializes source callbacks and table swaps, never polling or waiting.
+  // Protects source metadata, table swaps, and shared shader report parsing.
+  // Individual sources retain ownership across unlocked callouts.
   iree_slim_mutex_t drain_mutex;
-  // Source excluded while the worker copies its staging outside drain_mutex.
-  // Changed only under drain_mutex; the unlocked borrow joins its lifetime.
-  iree_hal_amd_gpu_completion_source_t* active_source;
+  // Intrusive caller-stack ownership, linked and relocated under drain_mutex.
+  iree_hal_amd_gpu_completion_scope_t* active_scopes;
   // First native execution/observation failure. Cold membership can observe it
   // before the terminal worker joins, without taking the drain mutex.
   iree_atomic_int64_t failure;
 } iree_hal_amd_gpu_completion_t;
+
+// One source invocation, initially under drain_mutex. A callout can release
+// that mutex while retaining exclusive source ownership. The source binding is
+// absent until finish restores it, so another drainer skips this source.
+// This scope lives on the invoking thread's stack and owns no allocation.
+struct iree_hal_amd_gpu_completion_scope_t {
+  // Borrowed device completion owner.
+  iree_hal_amd_gpu_completion_t* completion;
+  // Borrowed table entry, retargeted under drain_mutex during replacement.
+  iree_hal_amd_gpu_completion_source_t* source;
+  // Original binding restored after the final source access.
+  iree_hal_amd_gpu_completion_fn_t fn;
+  // Next active invocation, or NULL at the end of the list.
+  iree_hal_amd_gpu_completion_scope_t* next;
+  // Link pointing at this invocation; NULL until its first unlocked callout.
+  iree_hal_amd_gpu_completion_scope_t** previous;
+  // Whether drain_mutex is currently released by this invocation.
+  bool unlocked;
+  // Whether replacement changed this round's table, including address reuse.
+  bool relocated;
+};
+
+// Leaves metadata exclusion before native work, releases, or callouts. Repeated
+// calls while unlocked do nothing. Source ownership lasts through finish.
+void iree_hal_amd_gpu_completion_scope_unlock(
+    iree_hal_amd_gpu_completion_scope_t* scope);
+
+// Temporarily rejoins metadata exclusion for shared report parsing. This does
+// not release the source's exclusive ownership.
+void iree_hal_amd_gpu_completion_scope_lock(
+    iree_hal_amd_gpu_completion_scope_t* scope);
+
+// Rejoins metadata exclusion and ends the source borrow. Returns whether a
+// parked worker enrolled for an active callout; the caller wakes it after
+// releasing drain_mutex and finishing all table access.
+bool iree_hal_amd_gpu_completion_scope_finish(
+    iree_hal_amd_gpu_completion_scope_t* scope);
 
 // Attempts one bounded source round without waiting for another observer.
 // Returns whether this round made progress; contention or a stopped observer
@@ -147,16 +190,20 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
     iree_thread_affinity_t affinity, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_completion_t* out_completion);
 
-// Replaces the borrowed source table after joining all callbacks, staging
-// copies, and coherent observations using the old table. Interrupts
+// Replaces the borrowed source table after joining removed callbacks, staging
+// copies, and coherent observations using the old table. Retained callbacks
+// continue with their ownership retargeted to the replacement. Interrupts
 // observation, including an infinite observation policy, without stopping the
 // worker or invoking a native API. The cold owner then signals the context's
 // native event to rebuild wake hints for remaining queues and handles any
 // native wake failure. The replacement remains live until the next replacement
-// or deinitialization; its wait hints start empty. The cold owner serializes
+// or deinitialization; it is a distinct array with initially empty wait hints.
+// Callback/user-data pairs uniquely identify sources, and retained sources keep
+// their relative order. The cold owner serializes
 // replacements with deinitialization and separately joins removed sources'
-// accepted work and external producers. Called outside source callbacks, with
-// no allocation or native operation inside the handoff.
+// accepted work and external producers. A retained callback may replace the
+// table after scope_unlock; removing its own active source would self-join.
+// No allocation or native operation occurs inside the handoff.
 void iree_hal_amd_gpu_completion_set_sources(
     iree_hal_amd_gpu_completion_t* completion, iree_host_size_t source_count,
     iree_hal_amd_gpu_completion_source_t* sources);
