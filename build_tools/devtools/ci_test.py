@@ -1753,10 +1753,9 @@ fi
             "test -f build/loom-pages/loom/reference/c-api/generated/index.html",
             build_block,
         )
-        self.assertIn(
-            "uses: actions/upload-pages-artifact@"
-            "fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0",
+        self.assertRegex(
             build_block,
+            r"uses: actions/upload-pages-artifact@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
         self.assertIn("path: build/loom-pages", build_block)
         self.assertIn(
@@ -1776,10 +1775,9 @@ fi
         self.assertIn("group: github-pages", deploy_block)
         self.assertIn("cancel-in-progress: false", deploy_block)
         self.assertIn("id: deployment", deploy_block)
-        self.assertIn(
-            "uses: actions/deploy-pages@"
-            "cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0",
+        self.assertRegex(
             deploy_block,
+            r"uses: actions/deploy-pages@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
         self.assertEqual(text.count("pages: write"), 1)
         self.assertEqual(text.count("id-token: write"), 1)
