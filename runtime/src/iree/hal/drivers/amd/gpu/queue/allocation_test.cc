@@ -15,6 +15,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/notification.h"
 #include "iree/async/proactor_platform.h"
+#include "iree/hal/drivers/amd/fabric/transient_buffer_pool.h"
 #include "iree/hal/memory/cpu_slab_provider.h"
 #include "iree/hal/memory/passthrough_pool.h"
 #include "iree/hal/testing/deferred_pool.h"
@@ -358,7 +359,7 @@ INSTANTIATE_TEST_SUITE_P(CaptureBoundaries, AllocationBatchTest,
                                            65536));
 
 TEST_F(AllocationTest, PartialCaptureFailurePreservesOutputsAndReferences) {
-  constexpr size_t kCount = 1660;
+  constexpr size_t kCount = 4096;
   const auto request = iree_hal_make_pool_reservation_request(16, 16);
   std::vector<iree_hal_pool_reservation_request_t> requests(kCount, request);
   iree_hal_amd_gpu_allocation_t* operation = nullptr;
@@ -373,11 +374,24 @@ TEST_F(AllocationTest, PartialCaptureFailurePreservesOutputsAndReferences) {
       reinterpret_cast<const iree_hal_resource_t*>(device_);
   const auto device_references =
       iree_atomic_ref_count_load(&device_resource->ref_count);
-  // Exercise failure before capture, in variable arrays, and after long
-  // initialized root prefixes, with no cached metadata masking allocation.
-  for (size_t limit : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u, 64u, 1024u, 1660u}) {
+  // Record the cold transaction's allocation boundaries, then fail each one.
+  // A live sentinel keeps one chunk partially occupied throughout the trial.
+  iree_arena_block_pool_trim(&context_.blocks);
+  iree_hal_amd_fabric_transient_buffer_pool_trim(&context_.buffers);
+  const auto initial_allocations = allocator_.allocations.load();
+  std::vector<iree_hal_buffer_t*> complete(kCount, nullptr);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_allocation_capture_alloca(
+      &context_, pool_, kCount, requests.data(), complete.data(), &operation));
+  const size_t allocation_count =
+      allocator_.allocations.load() - initial_allocations;
+  iree_hal_amd_gpu_allocation_destroy(operation);
+  for (auto* buffer : complete) {
+    iree_hal_buffer_release(buffer);
+  }
+  for (size_t limit = 0; limit < allocation_count; ++limit) {
     SCOPED_TRACE(limit);
     iree_arena_block_pool_trim(&context_.blocks);
+    iree_hal_amd_fabric_transient_buffer_pool_trim(&context_.buffers);
     const auto live = allocator_.live.load();
     allocator_.allocation_limit = allocator_.allocations.load() + limit;
     std::vector<iree_hal_buffer_t*> buffers(kCount, sentinel);
@@ -392,6 +406,7 @@ TEST_F(AllocationTest, PartialCaptureFailurePreservesOutputsAndReferences) {
     EXPECT_EQ(iree_atomic_ref_count_load(&device_resource->ref_count),
               device_references);
     iree_arena_block_pool_trim(&context_.blocks);
+    iree_hal_amd_fabric_transient_buffer_pool_trim(&context_.buffers);
     EXPECT_EQ(allocator_.live.load(), live);
   }
   allocator_.allocation_limit = SIZE_MAX;

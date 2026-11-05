@@ -28,11 +28,8 @@ struct iree_hal_amd_fabric_transient_buffer_t {
   // Base HAL buffer resource exposed to callers.
   iree_hal_buffer_t base;
 
-  // Borrowed reusable storage pool owned by |device|.
-  iree_arena_block_pool_t* block_pool;
-
-  // Whole reusable block, or NULL for an oversized native table allocation.
-  iree_arena_block_t* storage_block;
+  // Chunk containing this independently owned slot; dominated by |device|.
+  iree_hal_amd_fabric_transient_buffer_chunk_t* storage;
 
   // Stable nonzero id used to join profile rows for this wrapper lifetime.
   uint64_t profile_id;
@@ -100,54 +97,24 @@ static iree_status_t iree_hal_amd_fabric_transient_buffer_retain_host_backing(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_fabric_transient_buffer_create(
+static void iree_hal_amd_fabric_transient_buffer_initialize(
     iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
     iree_hal_memory_access_t allowed_access,
     iree_hal_buffer_usage_t allowed_usage, iree_device_size_t allocation_size,
-    iree_device_size_t byte_length, iree_hal_pool_t* source_pool,
-    iree_arena_block_pool_t* block_pool, iree_hal_buffer_t** out_buffer) {
-  IREE_ASSERT_ARGUMENT(source_pool);
-  IREE_ASSERT_ARGUMENT(block_pool);
-  IREE_ASSERT_ARGUMENT(out_buffer);
-  *out_buffer = NULL;
-  if (IREE_UNLIKELY(byte_length > allocation_size)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "transient buffer byte length (%" PRIu64
-                            ") exceeds allocation size (%" PRIu64 ")",
-                            (uint64_t)byte_length, (uint64_t)allocation_size);
-  }
-  IREE_TRACE_ZONE_BEGIN(z0);
-
-  const iree_hal_buffer_binding_layout_t* binding_layout =
-      iree_hal_amd_fabric_transient_buffer_binding_layout(source_pool);
-  iree_host_size_t storage_size = 0;
-  IREE_RETURN_AND_END_ZONE_IF_ERROR(
-      z0, IREE_STRUCT_LAYOUT(
-              sizeof(iree_hal_amd_fabric_transient_buffer_t), &storage_size,
-              IREE_STRUCT_FIELD_FAM(binding_layout->byte_length, uint8_t)));
-  iree_arena_block_t* storage_block = NULL;
-  iree_hal_amd_fabric_transient_buffer_t* buffer = NULL;
-  if (IREE_LIKELY(storage_size <= block_pool->usable_block_size)) {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_arena_block_pool_acquire(block_pool, &storage_block,
-                                          (void**)&buffer));
-  } else {
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_allocator_malloc(block_pool->block_allocator, storage_size,
-                                  (void**)&buffer));
-  }
-
+    iree_hal_pool_t* source_pool,
+    const iree_hal_buffer_binding_layout_t* binding_layout,
+    iree_hal_amd_fabric_transient_buffer_chunk_t* storage,
+    iree_hal_amd_fabric_transient_buffer_t* buffer) {
   iree_hal_buffer_initialize(
       placement, /*allocated_buffer=*/&buffer->base, allocation_size,
-      /*byte_offset=*/0, byte_length, memory_type, allowed_access,
+      /*byte_offset=*/0, allocation_size, memory_type, allowed_access,
       allowed_usage, &iree_hal_amd_fabric_transient_buffer_vtable,
       &buffer->base);
   buffer->base.memory.bindings = buffer->bindings;
   buffer->base.memory.contract = source_pool->memory_contract;
   buffer->base.host_binding_index = binding_layout->host_binding_index;
   memset(buffer->bindings, 0, binding_layout->byte_length);
-  buffer->block_pool = block_pool;
-  buffer->storage_block = storage_block;
+  buffer->storage = storage;
   buffer->profile_id = iree_hal_buffer_allocation_next_id();
   iree_slim_mutex_initialize(&buffer->mutex);
   memset(&buffer->backing, 0, sizeof(buffer->backing));
@@ -158,10 +125,46 @@ iree_status_t iree_hal_amd_fabric_transient_buffer_create(
   buffer->reservation_armed = false;
   buffer->deallocation_state =
       IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE;
+}
 
-  *out_buffer = &buffer->base;
+iree_status_t iree_hal_amd_fabric_transient_buffer_create_batch(
+    iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
+    iree_hal_memory_access_t allowed_access,
+    iree_hal_buffer_usage_t allowed_usage, iree_hal_pool_t* source_pool,
+    iree_hal_amd_fabric_transient_buffer_pool_t* buffer_pool,
+    iree_host_size_t count, const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t** out_buffers) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  const iree_hal_buffer_binding_layout_t* binding_layout =
+      iree_hal_amd_fabric_transient_buffer_binding_layout(source_pool);
+  // The slot's rounding slack holds copied queue history when it fits. Larger
+  // histories use independent slots without inflating every root's storage.
+  iree_host_size_t storage_size = 0;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, IREE_STRUCT_LAYOUT(
+              sizeof(iree_hal_amd_fabric_transient_buffer_t), &storage_size,
+              IREE_STRUCT_FIELD_FAM(binding_layout->byte_length, uint8_t)));
+  iree_status_t status = iree_ok_status();
+  iree_host_size_t created = 0;
+  while (created < count && iree_status_is_ok(status)) {
+    iree_hal_amd_fabric_transient_buffer_slots_t slots;
+    status = iree_hal_amd_fabric_transient_buffer_pool_acquire(
+        buffer_pool, storage_size, count - created, &slots);
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < slots.count; ++i) {
+        iree_hal_amd_fabric_transient_buffer_t* buffer =
+            (void*)(slots.data + i * slots.stride);
+        iree_hal_amd_fabric_transient_buffer_initialize(
+            placement, memory_type, allowed_access, allowed_usage,
+            requests[created + i].allocation_size, source_pool, binding_layout,
+            slots.chunk, buffer);
+        out_buffers[created + i] = &buffer->base;
+      }
+      created += slots.count;
+    }
+  }
   IREE_TRACE_ZONE_END(z0);
-  return iree_ok_status();
+  return status;
 }
 
 static iree_hal_buffer_allocation_profile_t
@@ -189,9 +192,8 @@ void iree_hal_amd_fabric_transient_buffer_attach_reservation(
   iree_slim_mutex_unlock(&buffer->mutex);
 }
 
-// Uses the unused tail of the ordinary cached wrapper block for history.
-// Large native binding tables can consume that tail; those roots use a
-// separately allocated history whose extent is the actual entry count.
+// Uses the slot's unused tail for history. Native table size and dependency
+// count are independent; overflow history owns a separate metadata slot.
 static uint8_t* iree_hal_amd_fabric_transient_buffer_history_storage(
     iree_hal_amd_fabric_transient_buffer_t* buffer,
     iree_host_size_t* out_capacity) {
@@ -201,11 +203,17 @@ static uint8_t* iree_hal_amd_fabric_transient_buffer_history_storage(
                             ->byte_length,
       iree_alignof(iree_async_frontier_t));
   *out_capacity =
-      buffer->storage_block && offset < buffer->block_pool->usable_block_size
-          ? buffer->block_pool->usable_block_size - offset
-          : 0;
+      iree_hal_amd_fabric_transient_buffer_slot_capacity(buffer->storage) -
+      offset;
   return *out_capacity ? (uint8_t*)buffer + offset : NULL;
 }
+
+typedef struct iree_hal_amd_fabric_transient_buffer_history_t {
+  // Chunk owning this history independently of the root's storage slot.
+  iree_hal_amd_fabric_transient_buffer_chunk_t* storage;
+  // Properly aligned frontier header followed by its exact entry count.
+  iree_alignas(IREE_ASYNC_FRONTIER_ALIGNMENT) uint8_t data[];
+} iree_hal_amd_fabric_transient_buffer_history_t;
 
 iree_status_t iree_hal_amd_fabric_transient_buffer_stage_backing(
     iree_hal_buffer_t* base_buffer,
@@ -221,8 +229,14 @@ iree_status_t iree_hal_amd_fabric_transient_buffer_stage_backing(
     history = (void*)iree_hal_amd_fabric_transient_buffer_history_storage(
         buffer, &capacity);
     if (length > capacity) {
-      IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-          buffer->block_pool->block_allocator, length, (void**)&history));
+      iree_hal_amd_fabric_transient_buffer_slots_t slots;
+      IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_pool_acquire(
+          iree_hal_amd_fabric_transient_buffer_slot_pool(buffer->storage),
+          sizeof(iree_hal_amd_fabric_transient_buffer_history_t) + length, 1,
+          &slots));
+      iree_hal_amd_fabric_transient_buffer_history_t* owner = (void*)slots.data;
+      owner->storage = slots.chunk;
+      history = (void*)owner->data;
     }
     memcpy(history, source, length);
   }
@@ -282,7 +296,10 @@ static void iree_hal_amd_fabric_transient_buffer_decommit(
   if (history && (const void*)history !=
                      iree_hal_amd_fabric_transient_buffer_history_storage(
                          buffer, &capacity)) {
-    iree_allocator_free(buffer->block_pool->block_allocator, (void*)history);
+    iree_hal_amd_fabric_transient_buffer_history_t* owner =
+        (void*)((uint8_t*)history -
+                offsetof(iree_hal_amd_fabric_transient_buffer_history_t, data));
+    iree_hal_amd_fabric_transient_buffer_pool_release(owner->storage, owner);
   }
   iree_hal_buffer_release(backing_buffer);
 }
@@ -371,8 +388,7 @@ static void iree_hal_amd_fabric_transient_buffer_destroy(
     iree_hal_buffer_t* base_buffer) {
   iree_hal_amd_fabric_transient_buffer_t* buffer =
       iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
-  iree_arena_block_pool_t* block_pool = buffer->block_pool;
-  iree_arena_block_t* storage_block = buffer->storage_block;
+  iree_hal_amd_fabric_transient_buffer_chunk_t* storage = buffer->storage;
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_hal_amd_fabric_transient_buffer_decommit(base_buffer);
@@ -381,11 +397,7 @@ static void iree_hal_amd_fabric_transient_buffer_destroy(
       /*death_frontier=*/NULL);
 
   iree_slim_mutex_deinitialize(&buffer->mutex);
-  if (storage_block) {
-    iree_arena_block_pool_release(block_pool, storage_block, storage_block);
-  } else {
-    iree_allocator_free(block_pool->block_allocator, buffer);
-  }
+  iree_hal_amd_fabric_transient_buffer_pool_release(storage, buffer);
   IREE_TRACE_ZONE_END(z0);
 }
 

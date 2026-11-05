@@ -95,11 +95,14 @@ void iree_hal_amd_gpu_allocation_context_initialize(
       .publication_ordinal = publication_ordinal};
   iree_atomic_slist_initialize(&out_context->ready);
   iree_arena_block_pool_initialize(1024, host_allocator, &out_context->blocks);
+  iree_hal_amd_fabric_transient_buffer_pool_initialize(host_allocator,
+                                                       &out_context->buffers);
 }
 
 void iree_hal_amd_gpu_allocation_context_deinitialize(
     iree_hal_amd_gpu_allocation_context_t* context) {
   iree_atomic_slist_deinitialize(&context->ready);
+  iree_hal_amd_fabric_transient_buffer_pool_deinitialize(&context->buffers);
   iree_arena_block_pool_deinitialize(&context->blocks);
 }
 
@@ -534,15 +537,14 @@ iree_status_t iree_hal_amd_gpu_allocation_capture_alloca(
       .queue_family_affinity = capabilities.queue_family_affinity,
       .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS,
   };
-  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
-    status = iree_hal_amd_fabric_transient_buffer_create(
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_fabric_transient_buffer_create_batch(
         placement, capabilities.memory_type,
         pool->memory_contract ? pool->memory_contract->allowed_access
                               : capabilities.allowed_access,
         pool->memory_contract ? pool->memory_contract->allowed_usage
                               : capabilities.supported_usage,
-        requests[i].allocation_size, requests[i].allocation_size, pool,
-        &context->blocks, &operation->buffers[i]);
+        pool, &context->buffers, count, requests, operation->buffers);
   }
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < count; ++i) {

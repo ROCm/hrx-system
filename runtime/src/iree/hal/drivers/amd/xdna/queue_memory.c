@@ -453,9 +453,8 @@ iree_status_t iree_hal_amd_xdna_queue_alloca(
     *request = requests[i];
     status =
         iree_hal_amd_xdna_validate_alloca_request(&capabilities, i, request);
-    if (!iree_status_is_ok(status)) {
-      break;
-    }
+  }
+  if (iree_status_is_ok(status)) {
     const iree_hal_buffer_placement_t placement = {
         .device = operation->device,
         .queue_family_affinity = capabilities.queue_family_affinity,
@@ -467,12 +466,13 @@ iree_status_t iree_hal_amd_xdna_queue_alloca(
     const iree_hal_buffer_usage_t allowed_usage =
         pool->memory_contract ? pool->memory_contract->allowed_usage
                               : capabilities.supported_usage;
-    status = iree_hal_amd_fabric_transient_buffer_create(
+    status = iree_hal_amd_fabric_transient_buffer_create_batch(
         placement, capabilities.memory_type, allowed_access, allowed_usage,
-        request->allocation_size, request->allocation_size, pool,
-        operation->metadata_block_pool,
-        &operation->alloca.transient_buffers[i]);
-    if (iree_status_is_ok(status)) {
+        pool, &operation->queue->buffers, request_count,
+        operation->alloca.requests, operation->alloca.transient_buffers);
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < request_count; ++i) {
       captured_outputs[i] = operation->alloca.transient_buffers[i];
       // One reference is returned to the caller and one keeps the wrapper live
       // until terminal operation completion.

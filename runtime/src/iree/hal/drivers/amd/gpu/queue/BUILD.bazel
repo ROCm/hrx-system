@@ -114,6 +114,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal:atomic_slist",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd/fabric:transient_buffer",
+        "//runtime/src/iree/hal/drivers/amd/fabric:transient_buffer_pool",
         "//runtime/src/iree/hal/drivers/amd/gpu:publication",
     ],
 )
@@ -199,6 +200,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async:platform",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd/fabric:transient_buffer_pool",
         "//runtime/src/iree/hal/drivers/amd/gpu:publication",
         "//runtime/src/iree/hal/memory:cpu_slab_provider",
         "//runtime/src/iree/hal/memory:passthrough_pool",

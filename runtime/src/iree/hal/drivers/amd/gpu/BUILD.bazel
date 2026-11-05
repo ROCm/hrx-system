@@ -85,6 +85,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/drivers/amd/fabric:memory",
         "//runtime/src/iree/hal/drivers/amd/fabric:memory_backend",
         "//runtime/src/iree/hal/drivers/amd/fabric:memory_spec",
+        "//runtime/src/iree/hal/drivers/amd/fabric:transient_buffer_pool",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:allocation",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:backing",
         "//runtime/src/iree/hal/drivers/amd/gpu/queue:file_staging",

@@ -16,6 +16,7 @@
 #include "iree/hal/drivers/amd/fabric/memory.h"
 #include "iree/hal/drivers/amd/fabric/memory_backend.h"
 #include "iree/hal/drivers/amd/fabric/memory_spec.h"
+#include "iree/hal/drivers/amd/fabric/transient_buffer_pool.h"
 #include "iree/hal/drivers/amd/gpu/code.h"
 #include "iree/hal/drivers/amd/gpu/device_failure.h"
 #include "iree/hal/drivers/amd/gpu/executable.h"
@@ -1586,6 +1587,8 @@ static iree_status_t iree_hal_amd_gpu_device_trim(iree_hal_device_t* base) {
       "GPU queue scratch trim"));
   iree_hal_amd_gpu_file_staging_trim(device->transfers.file_staging);
   iree_arena_block_pool_trim(&device->memory.allocations.blocks);
+  iree_hal_amd_fabric_transient_buffer_pool_trim(
+      &device->memory.allocations.buffers);
   iree_hal_amd_gpu_program_pool_trim(device->command_type ==
                                              AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
                                          ? &device->programs.aql.storage

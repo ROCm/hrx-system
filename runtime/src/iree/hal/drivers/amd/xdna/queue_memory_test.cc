@@ -280,8 +280,7 @@ TEST(XdnaQueueTest, AllocationFailureLeavesEveryOutputUntouched) {
   for (auto& request : requests) {
     request.allocation_size = 64;
   }
-  // The first row reaches wrapper creation before validation rejects the
-  // second row, exercising transaction rollback inside the driver.
+  // A later invalid row rejects the whole batch before roots are published.
   requests[1].min_alignment = 3;
 
   auto* const sentinel0 = reinterpret_cast<iree_hal_buffer_t*>(uintptr_t{1});
