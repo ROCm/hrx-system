@@ -130,6 +130,28 @@ TEST_F(BytecodeAttributeTest, NamedPredicatesValidateAndMaterialize) {
   EXPECT_EQ(error_count_, 0u);
 }
 
+TEST_F(BytecodeAttributeTest, RejectsCountBeforeRetainingPredicates) {
+  const uint8_t data[] = {0x02};  // Two predicates with no headers.
+  loom_bytecode_attribute_validator_t validator = MakeValidator();
+  loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
+  const loom_bytecode_attribute_ssa_validation_scope_t scope = {
+      .symbol_name = IREE_SV("test"),
+      .value_count = 0,
+  };
+  const loom_predicate_t* predicates = nullptr;
+  uint16_t predicate_count = 0;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
+                        loom_bytecode_attribute_retain_predicate_list_ssa(
+                            &validator, &cursor, &scope, &scratch_arena_,
+                            &predicates, &predicate_count));
+
+  EXPECT_EQ(error_count_, 1u);
+  EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
+  EXPECT_EQ(predicates, nullptr);
+  EXPECT_EQ(predicate_count, 0u);
+}
+
 TEST_F(BytecodeAttributeTest, ByteFormsValidateAndMaterializeExactPayloads) {
   for (const auto text : {IREE_SV(""), IREE_SV("a\0b\xEF\xBF\xBD")}) {
     std::vector<uint8_t> data = {static_cast<uint8_t>(text.size)};

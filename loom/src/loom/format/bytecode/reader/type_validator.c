@@ -104,6 +104,10 @@ static iree_status_t loom_bytecode_type_plan_validate_parameterized(
         decoder, IREE_SV("parameterized_type_parameters"), present_count,
         descriptor->parameter_count, present_count_offset);
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      decoder, cursor, IREE_SV("parameterized_type_parameters"), present_count,
+      /*minimum_entry_length=*/2,
+      /*minimum_trailing_length=*/0, present_count_offset));
 
   const iree_host_size_t parameters_position = cursor->cursor.position;
   loom_bytecode_parameterized_type_fact_t* fact = NULL;
@@ -510,6 +514,10 @@ static iree_status_t loom_bytecode_type_plan_decode_entry(
       }
       iree_host_size_t total_count =
           (iree_host_size_t)(arg_count + result_count);
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+          decoder, cursor, IREE_SV("function_type_children"), total_count,
+          /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0,
+          type_offset));
       loom_bytecode_structural_type_fact_t* fact = NULL;
       if (out_plan_entry) {
         iree_host_size_t allocation_size = 0;
@@ -573,6 +581,10 @@ static iree_status_t loom_bytecode_type_plan_decode_entry(
         direct_type = loom_type_dialect_opaque((loom_string_id_t)name_id);
         break;
       }
+      IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+          decoder, cursor, IREE_SV("dialect_type_params"), param_count,
+          /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0,
+          type_offset));
       loom_bytecode_structural_type_fact_t* fact = NULL;
       if (out_plan_entry) {
         iree_host_size_t allocation_size = 0;

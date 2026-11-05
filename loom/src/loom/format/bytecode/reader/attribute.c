@@ -203,6 +203,9 @@ iree_status_t loom_bytecode_attribute_read_predicate_count(
         decoder, IREE_SV("predicate_list"), predicate_count, UINT16_MAX,
         count_offset);
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      decoder, cursor, IREE_SV("predicate_list"), predicate_count,
+      /*minimum_entry_length=*/2, /*minimum_trailing_length=*/0, count_offset));
   *out_predicate_count = (uint16_t)predicate_count;
   return iree_ok_status();
 }

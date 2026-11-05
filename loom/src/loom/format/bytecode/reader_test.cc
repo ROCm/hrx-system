@@ -2783,6 +2783,36 @@ TEST_F(ReaderTest, RejectsImpossibleSectionCountBeforeScratchAllocation) {
   loom_module_free(module);
 }
 
+TEST_F(ReaderTest, RejectsLargeSymbolCountBeforeScratchAllocation) {
+  loom_module_t* module = CreateModule("empty");
+  auto bytes = WriteModule(module);
+  const SectionEntry symbols =
+      FindSection(bytes, LOOM_BYTECODE_SECTION_SYMBOLS);
+  ASSERT_GE(symbols.length, 4u);
+  const size_t symbols_offset =
+      (size_t)ModuleOffset(bytes) + (size_t)symbols.offset;
+  bytes[symbols_offset + 0] = 0xFF;
+  bytes[symbols_offset + 1] = 0xFF;
+  bytes[symbols_offset + 2] = 0x03;  // 65,535 symbols.
+  bytes[symbols_offset + 3] = 0x00;  // No imports; header ends here.
+
+  ObservedBytecodeArena storage(4096);
+  std::vector<std::string> error_ids;
+  loom_bytecode_read_result_t result = {0};
+  const loom_bytecode_index_options_t options = {
+      .diagnostic_sink = {CaptureDiagnostic, &error_ids},
+  };
+  IREE_ASSERT_OK(loom_bytecode_read_metadata(
+      iree_make_const_byte_span(bytes.data(), bytes.size()),
+      IREE_SV("test.loombc"), &context_, &storage.block_pool, &options,
+      &result));
+
+  EXPECT_EQ(result.error_count, 1u);
+  EXPECT_EQ(error_ids, (std::vector<std::string>{"ERR_BYTECODE_008"}));
+  EXPECT_LE(storage.largest_allocation, 4096u);
+  loom_module_free(module);
+}
+
 TEST_F(ReaderTest, RejectsNonPriorEncodingReferencesBeforeMaterialization) {
   const loom_attr_descriptor_t parameter = {
       .name = LOOM_BSTRING_REF(4, "base"),

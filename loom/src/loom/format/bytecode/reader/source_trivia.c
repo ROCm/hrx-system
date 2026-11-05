@@ -28,6 +28,10 @@ static iree_status_t loom_bytecode_source_trivia_read_header(
         IREE_SV("comment_count"), source_trivia_offset,
         IREE_SV("comment_count_exceeds_field_width"));
   }
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_count_bytes(
+      decoder, cursor, IREE_SV("comment_list"), comment_count,
+      /*minimum_entry_length=*/1, /*minimum_trailing_length=*/0,
+      source_trivia_offset));
   *out_leading_blank_line =
       (source_trivia & LOOM_BYTECODE_SOURCE_TRIVIA_LEADING_BLANK_LINE) != 0;
   *out_comment_count = (uint16_t)comment_count;
