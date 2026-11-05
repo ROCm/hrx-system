@@ -429,11 +429,14 @@ Value Initialization::default_record(const RecordPartition& record,
                                 "expression");
           }
         }
-        evaluation_.publish_receiver_member(
-            field, referent
-                       ? evaluation_.reference(referent, initializer)
-                       : value(field->type(), source, initializer->constructor,
-                               initializer, prior));
+        auto initialized =
+            referent ? evaluation_.reference(referent, initializer)
+                     : value(field->type(), source, initializer->constructor,
+                             initializer, prior);
+        if (!referent) {
+          evaluation_.adopt(source, initialized);
+        }
+        evaluation_.publish_receiver_member(field, initialized);
       });
   return finish_value_receiver(record, owner);
 }
@@ -454,12 +457,15 @@ Value Initialization::from_elements(const cxx::Type* type,
         prior = retained->project(*array->element,
                                   index * array->element->component_count);
       }
+      cxx::ExpressionAST* initializing_expression = nullptr;
       Value initialized;
       if (elements) {
+        initializing_expression = elements->value;
         initialized = evaluation_.convert(elements->value,
                                           array->source->elementType(), owner);
         elements = elements->next;
       } else if (implicit_element) {
+        initializing_expression = implicit_element->initializer();
         initialized =
             value(array->source->elementType(), implicit_element->initializer(),
                   implicit_element->constructor(), owner, prior);
@@ -471,6 +477,7 @@ Value Initialization::from_elements(const cxx::Type* type,
       } else {
         initialized = zero(array->source->elementType(), owner);
       }
+      evaluation_.adopt(initializing_expression, initialized);
       initialized.append_to(components);
     }
     return arena_.capture(*array, components);
@@ -480,10 +487,13 @@ Value Initialization::from_elements(const cxx::Type* type,
     // the first aggregate field. The normalized AST retains that distinction.
     if (elements && !elements->next &&
         types_.unqualified(elements->value->type) == types_.unqualified(type)) {
-      return evaluation_.expression(elements->value);
+      auto initialized = evaluation_.expression(elements->value);
+      evaluation_.adopt(elements->value, initialized);
+      return initialized;
     }
     ReceiverScope receiver(evaluation_, *record);
     for (const auto& member : record->members) {
+      auto* initializing_expression = elements ? elements->value : nullptr;
       Value initialized;
       if (unit_.typeTraits().is_lvalue_reference(member.field->type())) {
         if (!elements) {
@@ -497,6 +507,7 @@ Value Initialization::from_elements(const cxx::Type* type,
                                                 member.field->type(), owner)
                           : zero(member.field->type(), owner);
       }
+      evaluation_.adopt(initializing_expression, initialized);
       evaluation_.publish_receiver_member(member.field, initialized);
       if (elements) {
         elements = elements->next;
@@ -522,7 +533,9 @@ Value Initialization::from_elements(const cxx::Type* type,
       partition.kind == ValueKind::Tensor) {
     if (elements && !elements->next &&
         types_.unqualified(elements->value->type) == types_.unqualified(type)) {
-      return evaluation_.expression(elements->value);
+      auto initialized = evaluation_.expression(elements->value);
+      evaluation_.adopt(elements->value, initialized);
+      return initialized;
     }
     diagnostics_.reject(
         unit_, owner,
@@ -568,10 +581,12 @@ void Initialization::default_storage_record(StorageProjection destination,
       unit_, diagnostics_, constructor, owner,
       [&](cxx::FieldSymbol* field, cxx::ExpressionAST* source,
           cxx::MemInitializerAST* initializer) {
+        auto mark = evaluation_.begin_full_expression();
         auto field_type = objects_.member_type(object_type, field);
         object(storage_.member(destination, field, initializer), field_type,
                source, initializer->constructor, initializer,
                zero_initialize || retained);
+        evaluation_.finish_full_expression(mark);
         evaluation_.complete_storage_receiver_member(field);
       });
 }
@@ -738,6 +753,7 @@ void Initialization::object(StorageProjection destination,
   }
   auto initialized = value(shape, initializer, constructor, owner);
   objects_.store(destination, initialized, object_type, owner);
+  evaluation_.adopt(initializer, initialized);
 }
 
 void Initialization::constructor_receiver(StorageProjection destination,

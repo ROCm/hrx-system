@@ -21,12 +21,22 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/expressions.h"
 
 namespace loom::cxx_import {
+
+struct ControlFlow::TemporaryDestructionFacts {
+  // Unique anonymous result-object destructions in source encounter order.
+  std::vector<std::pair<Destruction, cxx::ExpressionAST*>> destructions;
+  // Canonical destructors already represented by an ordinary cleanup edge.
+  std::unordered_set<cxx::FunctionSymbol*> retained;
+  // Canonical destructors admitted once into |destructions|.
+  std::unordered_set<cxx::FunctionSymbol*> candidates;
+};
 
 struct ControlFlow::ValueUseFacts {
   // Final lexical source use for each automatic or current-field binding.
@@ -248,6 +258,7 @@ ControlFlow::ControlFlow(cxx::TranslationUnit& unit, Diagnostics& diagnostics,
   if (function_ && function_->isDestructor()) {
     retain_subobject_destructions();
   }
+  retain_temporary_destructions();
 }
 
 const Destruction* ControlFlow::automatic_destruction(
@@ -503,6 +514,7 @@ void ControlFlow::postVisit(cxx::AST* ast) {
     if (classify_storage(expression)) {
       storage_expressions_.insert(expression);
     }
+    retain_temporary_destruction(expression);
   }
   if (auto* statement = cxx::ast_cast<cxx::StatementAST>(ast)) {
     reject_misplaced_binding_statement(unit_, diagnostics_, statement,
@@ -1341,6 +1353,10 @@ void ControlFlow::retain_destructor_call(const Destruction& destruction,
                                          std::optional<CallArgument> receiver,
                                          bool current_receiver,
                                          cxx::AST* owner) {
+  if (temporary_destruction_facts_) {
+    temporary_destruction_facts_->retained.insert(
+        destruction.function->canonical());
+  }
   calls_.push_back({
       .function = destruction.function,
       .source = owner,
@@ -1349,6 +1365,47 @@ void ControlFlow::retain_destructor_call(const Destruction& destruction,
       .current_receiver = current_receiver,
       .storage_receiver = false,
   });
+}
+
+void ControlFlow::retain_temporary_destruction(cxx::ExpressionAST* expression) {
+  if (!expression ||
+      expression->valueCategory != cxx::ValueCategory::kPrValue ||
+      !unit_.typeTraits().is_class(expression->type)) {
+    return;
+  }
+  auto selected = destruction_for(unit_, expression->type);
+  if (!selected) {
+    return;
+  }
+  if (!temporary_destruction_facts_) {
+    temporary_destruction_facts_ =
+        std::make_unique<TemporaryDestructionFacts>();
+    for (const auto& call : calls_) {
+      if (call.function && call.function->isDestructor()) {
+        temporary_destruction_facts_->retained.insert(
+            call.function->canonical());
+      }
+    }
+  }
+  auto* canonical = selected->function->canonical();
+  if (temporary_destruction_facts_->candidates.insert(canonical).second) {
+    temporary_destruction_facts_->destructions.emplace_back(*selected,
+                                                            expression);
+  }
+}
+
+void ControlFlow::retain_temporary_destructions() {
+  if (!temporary_destruction_facts_) {
+    return;
+  }
+  for (const auto& [destruction, expression] :
+       temporary_destruction_facts_->destructions) {
+    if (!temporary_destruction_facts_->retained.contains(
+            destruction.function->canonical())) {
+      retain_destructor_call(destruction, std::nullopt,
+                             /*current_receiver=*/false, expression);
+    }
+  }
 }
 
 void ControlFlow::retain_automatic_destruction(cxx::Symbol* binding,

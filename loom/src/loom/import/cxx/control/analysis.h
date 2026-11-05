@@ -285,6 +285,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   void finalize_callable_effects();
 
  private:
+  struct TemporaryDestructionFacts;
   struct ValueUseFacts;
 
   enum class ReferenceReturn {
@@ -356,6 +357,8 @@ class ControlFlow final : private cxx::ASTVisitor {
                           cxx::ExpressionAST* initializer, cxx::AST* owner);
   void retain_automatic_destruction(cxx::Symbol* binding, cxx::AST* owner);
   void retain_subobject_destructions();
+  void retain_temporary_destruction(cxx::ExpressionAST* expression);
+  void retain_temporary_destructions();
   void retain_destructor_call(const Destruction& destruction,
                               std::optional<CallArgument> receiver,
                               bool current_receiver, cxx::AST* owner);
@@ -413,6 +416,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unordered_map<cxx::Symbol*, Destruction> automatic_destructions_;
   // Current destructor's direct nontrivial members in declaration order.
   std::vector<SubobjectDestruction> subobject_destructions_;
+  // Sparse anonymous-result cleanup facts. Most source functions allocate no
+  // temporary objects and retain only this null pointer.
+  std::unique_ptr<TemporaryDestructionFacts> temporary_destruction_facts_;
   // Constructor conversions whose destination is retained by the enclosing
   // declaration instead of an anonymous temporary.
   std::unordered_set<cxx::ImplicitCastExpressionAST*>
