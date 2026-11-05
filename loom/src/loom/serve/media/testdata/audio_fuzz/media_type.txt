@@ -1,0 +1,2 @@
+Taudio/pcm;format=s16le;rate=16000;channels=1
+samples

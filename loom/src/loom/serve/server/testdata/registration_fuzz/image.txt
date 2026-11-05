@@ -1,0 +1,1 @@
+j{"name":"image","definition":{"kind":"image","prepare":"//files/prepare.loom","control":"//files/control.loom","sources":["//files/source.loom"],"checkpoint":"//files/assets"}}

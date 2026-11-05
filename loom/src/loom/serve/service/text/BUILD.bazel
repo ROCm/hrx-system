@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_fuzz", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_fuzz", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:python.bzl", "loom_py_test")
 load("//loom/src/loom/serve/fixture/text:sources.bzl", TEXT_SOURCES = "SOURCES")
 
@@ -13,6 +13,15 @@ package(
     features = ["layering_check"],
     licenses = ["notice"],
 )
+
+CHAT_FUZZ_SEEDS = [
+    "//loom/src/loom/serve/service/text/testdata/chat_fuzz:history.json",
+    "//loom/src/loom/serve/service/text/testdata/chat_fuzz:image.txt",
+    "//loom/src/loom/serve/service/text/testdata/chat_fuzz:image_invalid.txt",
+    "//loom/src/loom/serve/service/text/testdata/chat_fuzz:parts.txt",
+    "//loom/src/loom/serve/service/text/testdata/chat_fuzz:tool.txt",
+    "//loom/src/loom/serve/service/text/testdata/chat_fuzz:user.txt",
+]
 
 exports_files(
     ["client_test.py"],
@@ -548,6 +557,35 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm:test_support",
+    ],
+)
+
+loom_cc_fuzz(
+    name = "chat_fuzz",
+    srcs = ["chat_fuzz.cc"],
+    args = [
+        "--loom_control=$(rootpath //loom/src/loom/serve/fixture/text:portable_chat.loom)",
+        "--loom_media_control=$(rootpath //loom/src/loom/serve/fixture/text:control.loom)",
+        "--loom_tokenizer=$(rootpath //loom/src/loom/serve/fixture/text:tokenizer.json)",
+        "-seed_inputs=" + ",".join([
+            "$(rootpath %s)" % seed
+            for seed in CHAT_FUZZ_SEEDS
+        ]),
+    ],
+    data = CHAT_FUZZ_SEEDS + [
+        "//loom/src/loom/serve/fixture/text:control.loom",
+        "//loom/src/loom/serve/fixture/text:portable_chat.loom",
+        "//loom/src/loom/serve/fixture/text:tokenizer.json",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/serve:image_input_enabled"]),
+    deps = [
+        ":chat",
+        "//loom/src/loom/serve/runtime/program:compilation",
+        "//loom/src/loom/serve/runtime/program:sources",
+        "//loom/src/loom/serve/testing:text_policy",
+        "//loom/src/loom/util:json",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:base64",
     ],
 )
 

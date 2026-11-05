@@ -1,0 +1,1 @@
+j{"name":"text","definition":{"kind":"text","prepare":"//files/prepare.loom","control":"//files/control.loom","sources":["//files/source.loom"],"weights":"//files/model.gguf","tokenizer":"//files/tokenizer.json"}}

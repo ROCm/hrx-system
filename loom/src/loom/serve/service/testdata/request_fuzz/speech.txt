@@ -1,0 +1,1 @@
+s{"model":"speech","input":"hello","voice":"alba","response_format":"pcm"}

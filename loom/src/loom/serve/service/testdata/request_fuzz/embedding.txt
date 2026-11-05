@@ -1,0 +1,1 @@
+e{"model":"fixture","input":["hello","world"],"dimensions":2}
