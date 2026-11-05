@@ -7,6 +7,11 @@
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
+# Tools install in bin/ alongside the distribution's other executables.
+function(amdf_cc_tool)
+  iree_cc_binary(${ARGN} INSTALL_COMPONENT AMDF)
+endfunction()
+
 function(amdf_finalize_project)
   if(NOT TARGET amdf)
     return()
@@ -14,11 +19,14 @@ function(amdf_finalize_project)
   set(_PACKAGE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/cmake/amdf")
   set(_PACKAGE_CONFIG "${CMAKE_CURRENT_BINARY_DIR}/amdf-config.cmake")
   set(_PACKAGE_VERSION "${CMAKE_CURRENT_BINARY_DIR}/amdf-config-version.cmake")
+  # amdf_cc_tool follows the shared executable rule's bin/ installation layout.
+  set(AMDF_TOOL_INSTALL_DIR "bin")
 
   configure_package_config_file(
     "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/amdf-config.cmake.in"
     "${_PACKAGE_CONFIG}"
     INSTALL_DESTINATION "${_PACKAGE_INSTALL_DIR}"
+    PATH_VARS AMDF_TOOL_INSTALL_DIR
   )
   write_basic_package_version_file(
     "${_PACKAGE_VERSION}"

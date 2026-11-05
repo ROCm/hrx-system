@@ -28,6 +28,9 @@ target_link_libraries(amdf_package_static_smoke PRIVATE amdf::amdf_static)
 enable_testing()
 add_test(NAME amdf_package_shared_smoke COMMAND amdf_package_shared_smoke)
 add_test(NAME amdf_package_static_smoke COMMAND amdf_package_static_smoke)
+find_program(AMDF_INFO_EXECUTABLE NAMES amdf-info
+  PATHS "${amdf_TOOL_DIR}" NO_DEFAULT_PATH REQUIRED)
+add_test(NAME amdf_package_tool_smoke COMMAND "${AMDF_INFO_EXECUTABLE}" --help)
 if(WIN32)
   set_tests_properties(amdf_package_shared_smoke PROPERTIES
     ENVIRONMENT_MODIFICATION

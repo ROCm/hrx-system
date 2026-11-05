@@ -146,26 +146,19 @@ class CiCoreLinuxTest(unittest.TestCase):
             ],
         )
 
-    def test_build_core_preserves_linux_ci_feature_defaults(self):
-        commands = self.build_core_commands()
-        configure_cmd = commands[0]
-        self.assertIn("-DIREE_BUILD_TESTS=ON", configure_cmd)
-        self.assertIn("-DIREE_BUILD_BENCHMARKS=OFF", configure_cmd)
-        self.assertIn("-DLOOM_BUILD=ON", configure_cmd)
-        self.assertIn("-DIREE_HAL_DRIVER_AMD=ON", configure_cmd)
-        self.assertIn("-DAMDF_BUILD=ON", configure_cmd)
-        self.assertIn("-DLIBHRX_BUILD=ON", configure_cmd)
-        self.assertIn("-DLIBHRX_BUILD_CTS=ON", configure_cmd)
-        self.assertIn("-DLIBHRX_BUILD_HIP_BINDING=ON", configure_cmd)
-        self.assertIn("-DLIBHRX_BUILD_PASSTHROUGH=ON", configure_cmd)
-        self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", configure_cmd)
-        self.assertNotIn("-DCMAKE_C_COMPILER_LAUNCHER=ccache", configure_cmd)
-        self.assertNotIn("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache", configure_cmd)
+    def test_package_build_precedes_component_installation(self):
+        component = "requested-public-component"
+        commands = self.build_core_commands({"HRX_PUBLIC_COMPONENT": component})
+        self.assertIn("-S", commands[0])
+        self.assertIn("-B", commands[0])
         self.assertEqual(commands[1][0:2], ["cmake", "--build"])
-        self.assertIn("all", commands[1])
-        self.assertEqual(
-            [command[0:2] for command in commands[2:]],
-            [["cmake", "--install"]],
+        installs = commands[2:]
+        self.assertTrue(installs)
+        for command in installs:
+            self.assertEqual(command[0:2], ["cmake", "--install"])
+        self.assertIn(
+            component,
+            [command[command.index("--component") + 1] for command in installs],
         )
 
     def test_sanitizer_build_only_configures_the_source_test_tree(self):

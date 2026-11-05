@@ -616,19 +616,20 @@ def build_core(args: argparse.Namespace) -> None:
 
     if public_install_dir.exists():
         remove_tree(public_install_dir)
-    run(
-        [
-            "cmake",
-            "--install",
-            build_dir,
-            "--prefix",
-            public_install_dir,
-            "--component",
-            args.public_component,
-        ],
-        cwd=REPO_ROOT,
-        env=env,
-    )
+    for component in dict.fromkeys((args.public_component, "AMDF")):
+        run(
+            [
+                "cmake",
+                "--install",
+                build_dir,
+                "--prefix",
+                public_install_dir,
+                "--component",
+                component,
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+        )
 
 
 def prepare_public_deps_root(args: argparse.Namespace) -> None:
@@ -697,7 +698,6 @@ def test_package(args: argparse.Namespace) -> None:
     toolchain = windows_toolchain(args, rocm_root, env)
     smoke_cmake_options = [
         "-GNinja",
-        f"-DCMAKE_PREFIX_PATH={cmake_path_list([install_root, rocm_root])}",
         f"-DCMAKE_C_COMPILER={cmake_path(toolchain.c_compiler)}",
         f"-DCMAKE_CXX_COMPILER={cmake_path(toolchain.cxx_compiler)}",
         f"-DCMAKE_ASM_COMPILER={cmake_path(toolchain.asm_compiler)}",
@@ -708,6 +708,38 @@ def test_package(args: argparse.Namespace) -> None:
         f"-DIREE_ROCM_DEPENDENCY_MODE={WINDOWS_ROCM_DEPENDENCY_MODE}",
     ]
 
+    # The libamdf consumer resolves only the public package. Its installed tool
+    # must find the adjacent DLL without the composed install root on PATH.
+    amdf_package_dir = args.public_install_dir.resolve() / "lib" / "cmake" / "amdf"
+    require_path(amdf_package_dir / "amdf-config.cmake", "installed libamdf config")
+    amdf_smoke_build_dir = smoke_build_dir / "amdf"
+    run(
+        [
+            "cmake",
+            "-S",
+            REPO_ROOT / "libamdf" / "build_tools" / "cmake" / "package_smoke",
+            "-B",
+            amdf_smoke_build_dir,
+            *smoke_cmake_options,
+            f"-DCMAKE_PREFIX_PATH={cmake_path(args.public_install_dir.resolve())}",
+            f"-Damdf_DIR={cmake_path(amdf_package_dir)}",
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+    )
+    run(["cmake", "--build", amdf_smoke_build_dir], cwd=REPO_ROOT, env=env)
+    run(
+        [
+            "ctest",
+            "--test-dir",
+            amdf_smoke_build_dir,
+            "--output-on-failure",
+            "--no-tests=error",
+        ],
+        cwd=REPO_ROOT,
+        env=base_env,
+    )
+
     run(
         [
             "cmake",
@@ -716,6 +748,7 @@ def test_package(args: argparse.Namespace) -> None:
             "-B",
             hrx_smoke_build_dir,
             *smoke_cmake_options,
+            f"-DCMAKE_PREFIX_PATH={cmake_path_list([install_root, rocm_root])}",
         ],
         cwd=REPO_ROOT,
         env=env,
@@ -744,6 +777,7 @@ def test_package(args: argparse.Namespace) -> None:
             "-B",
             loomc_smoke_build_dir,
             *smoke_cmake_options,
+            f"-DCMAKE_PREFIX_PATH={cmake_path_list([install_root, rocm_root])}",
         ],
         cwd=REPO_ROOT,
         env=env,

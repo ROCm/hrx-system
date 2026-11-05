@@ -196,6 +196,7 @@ def main(
                 runpath = run(elf_inspector, "--print-rpath", installed).strip()
                 assert runpath == "$ORIGIN", (name, runpath)
         for command in (
+            "amdf-info",
             "loom-benchmark",
             "loom-check",
             "loom-compile",

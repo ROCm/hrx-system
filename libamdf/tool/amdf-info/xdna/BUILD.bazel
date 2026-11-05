@@ -1,0 +1,23 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:python.bzl", "amdf_py_test")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],
+)
+
+amdf_py_test(
+    name = "native_test",
+    srcs = ["//libamdf/tool/amdf-info:native_test.py"],
+    args = [
+        "$(location //libamdf/tool/amdf-info:amdf-info)",
+        "xdna",
+    ],
+    data = ["//libamdf/tool/amdf-info"],
+    main = "native_test.py",
+)
