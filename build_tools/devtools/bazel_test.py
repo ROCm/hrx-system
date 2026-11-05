@@ -720,6 +720,45 @@ class BazelTest(unittest.TestCase):
             env=None,
         )
 
+    def test_bazel_launch_metadata_can_skip_incompatible_targets(self):
+        execution_root = bazel_dev.REPO_ROOT / ".tmp/test-execution-root"
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "label": "@@//pkg:disabled_fuzz",
+                    "incompatible": True,
+                    "executable": None,
+                    "argument_provider_count": 0,
+                    "arguments": [],
+                    "environment": {},
+                    "inherited_environment_names": [],
+                    "marked_arguments": [],
+                    "run_environment_names": [],
+                }
+            )
+            + "\n",
+            stderr="",
+        )
+        with (
+            mock.patch.object(bazel_dev, "run_captured", return_value=completed),
+            mock.patch.object(
+                bazel_dev, "bazel_execution_root", return_value=execution_root
+            ),
+        ):
+            result, metadata = bazel_dev.resolve_bazel_launch_metadata_for_targets(
+                bazel="bazel",
+                targets=["//pkg:disabled_fuzz"],
+                bazel_args=["--config=fuzzer"],
+                cwd=bazel_dev.REPO_ROOT,
+                env=None,
+                skip_incompatible=True,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(metadata, {})
+
     def test_bazel_launch_metadata_rejects_control_environment_collision(self):
         completed = subprocess.CompletedProcess(
             args=[],
@@ -1224,7 +1263,7 @@ class BazelTest(unittest.TestCase):
                     process.send_signal.assert_called_once_with(signum)
                 self.assertEqual({s: signal.getsignal(s) for s in handlers}, handlers)
 
-    def test_bazel_fuzz_builds_every_discovered_target_before_launching(self):
+    def test_bazel_fuzz_builds_compatible_targets_before_launching(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             temporary_path = Path(temporary_dir)
             targets = ["//a:a_fuzz", "//z:z_fuzz"]
@@ -1268,7 +1307,14 @@ class BazelTest(unittest.TestCase):
                 return 0
 
             def resolve_metadata(**kwargs):
-                events.append(("metadata", kwargs["targets"], kwargs["bazel_args"]))
+                events.append(
+                    (
+                        "metadata",
+                        kwargs["targets"],
+                        kwargs["bazel_args"],
+                        kwargs["skip_incompatible"],
+                    )
+                )
                 return 0, metadata_by_target
 
             def generate(**kwargs):
@@ -1310,7 +1356,10 @@ class BazelTest(unittest.TestCase):
             discovered = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
-                stdout="//z:z_fuzz\n//ignored:library\n//a:a_fuzz\n",
+                stdout=(
+                    "//z:z_fuzz\n//ignored:library\n//disabled:disabled_fuzz\n"
+                    "//a:a_fuzz\n"
+                ),
                 stderr="",
             )
             with (
@@ -1347,9 +1396,18 @@ class BazelTest(unittest.TestCase):
                 result = step.run(verbose=True)
 
             self.assertEqual(result, 23)
-            self.assertEqual(events[0][0], "build")
             self.assertEqual(
-                events[0][1],
+                events[0],
+                (
+                    "metadata",
+                    ["//a:a_fuzz", "//disabled:disabled_fuzz", "//z:z_fuzz"],
+                    ["--config=fuzzer", "--config=asan"],
+                    True,
+                ),
+            )
+            self.assertEqual(events[1][0], "build")
+            self.assertEqual(
+                events[1][1],
                 [
                     "bazel",
                     "build",
@@ -1357,10 +1415,6 @@ class BazelTest(unittest.TestCase):
                     "--config=asan",
                     *targets,
                 ],
-            )
-            self.assertEqual(
-                events[1],
-                ("metadata", targets, ["--config=fuzzer", "--config=asan"]),
             )
             self.assertEqual([event[1] for event in events[2:4]], targets)
             for event, target in zip(events[2:4], targets, strict=True):
@@ -1380,6 +1434,12 @@ class BazelTest(unittest.TestCase):
                 events[4:6], [("prepare", target, None) for target in targets]
             )
             self.assertEqual(events[6], ("run", targets, 2))
+            campaign = json.loads(
+                (temporary_path / "result.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                campaign["incompatible_targets"], ["//disabled:disabled_fuzz"]
+            )
 
     def test_bazel_fuzz_stops_remaining_launches_after_a_failure(self):
         with tempfile.TemporaryDirectory() as temporary_dir:

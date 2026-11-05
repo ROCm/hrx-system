@@ -892,8 +892,9 @@ disable inference and `-k/--keep` to inspect the generated scratch package."""
 Use `iree-bazel-fuzz` for libFuzzer sessions without holding the Bazel server
 lock. It builds with `--config=fuzzer`, resolves fuzzer binaries with cquery,
 and runs the binaries directly. `...` patterns discover labels ending in
-`_fuzz`, build the selected stable shard together, and launch at most the
-requested number of fuzzer processes at once. The default is one worker.
+`_fuzz`, discard targets incompatible with the configured platform, build the
+selected stable shard together, and launch at most the requested number of
+fuzzer processes at once. The default is one worker.
 
 ```bash
 iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz
@@ -906,9 +907,11 @@ Corpus and artifact directories live under
 `IREE_FUZZ_CACHE` when set, otherwise the platform user cache directory under
 `iree-fuzz-cache/`. Each run writes a compact JSON campaign result there;
 `--result=PATH` overrides its location. Shards use a stable hash of each target
-label, so adding a target does not move existing targets between machines.
-Fuzzer arguments go after `--`; libFuzzer `-jobs` multiplies work inside every
-selected target and is usually inappropriate for pattern campaigns."""
+label, so adding a target does not move existing targets between machines. The
+result lists incompatible targets skipped by a pattern; naming one directly
+fails with a configuration diagnostic. Fuzzer arguments go after `--`;
+libFuzzer `-jobs` multiplies work inside every selected target and is usually
+inappropriate for pattern campaigns."""
 
     return bazel_agent_markdown()
 

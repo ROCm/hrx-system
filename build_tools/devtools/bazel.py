@@ -57,7 +57,8 @@ CLANG_TIDY_REPO_ENV = "--repo_env=IREE_CLANG_TIDY_LLVM=auto"
 RUNFILES_ENVIRONMENT_PROVIDER_SUFFIX = "%IreeRunfilesEnvironmentInfo"
 RUNFILES_ARGUMENTS_PROVIDER_SUFFIX = "%IreeRunfilesArgumentsInfo"
 BAZEL_LAUNCH_METADATA_QUERY_EXPRESSION = (
-    'json.encode({"label": str(target.label), "executable": ('
+    'json.encode({"label": str(target.label), "incompatible": '
+    '"IncompatiblePlatformProvider" in providers(target), "executable": ('
     'providers(target)["DefaultInfo"].files_to_run.executable.path '
     'if providers(target)["DefaultInfo"].files_to_run != None '
     'and providers(target)["DefaultInfo"].files_to_run.executable != None '
@@ -607,6 +608,19 @@ def parse_bazel_launch_metadata(
     if not isinstance(payload, dict):
         print(f"dev.py: invalid Bazel launch metadata for {target}", file=sys.stderr)
         return None
+    incompatible = payload.get("incompatible", False)
+    if not isinstance(incompatible, bool):
+        print(
+            f"dev.py: invalid compatibility in Bazel launch metadata for {target}",
+            file=sys.stderr,
+        )
+        return None
+    if incompatible:
+        print(
+            f"dev.py: {target} is incompatible with the configured Bazel target",
+            file=sys.stderr,
+        )
+        return None
 
     argument_fields = ("arguments", "marked_arguments")
     for field_name in argument_fields:
@@ -715,6 +729,7 @@ def resolve_bazel_launch_metadata_for_targets(
     bazel_args: list[str],
     cwd: Path,
     env: dict[str, str] | None,
+    skip_incompatible: bool = False,
 ) -> tuple[int, dict[str, BazelLaunchMetadata] | None]:
     """Queries host-handoff metadata for configured executable targets."""
     if not targets:
@@ -743,16 +758,17 @@ def resolve_bazel_launch_metadata_for_targets(
         if len(targets) > 1:
             metadata_by_target = {}
             for target in targets:
-                result, metadata = resolve_bazel_launch_metadata(
+                result, single_metadata = resolve_bazel_launch_metadata_for_targets(
                     bazel=bazel,
-                    target=target,
+                    targets=[target],
                     bazel_args=bazel_args,
                     cwd=cwd,
                     env=env,
+                    skip_incompatible=skip_incompatible,
                 )
-                if result != 0 or metadata is None:
+                if result != 0 or single_metadata is None:
                     return result, None
-                metadata_by_target[target] = metadata
+                metadata_by_target.update(single_metadata)
             return 0, metadata_by_target
         print(
             f"dev.py: expected {len(targets)} configured launch targets, got "
@@ -788,6 +804,8 @@ def resolve_bazel_launch_metadata_for_targets(
         decoded_payloads.append(payload)
 
     if len(targets) == 1:
+        if skip_incompatible and decoded_payloads[0].get("incompatible") is True:
+            return 0, {}
         metadata = parse_bazel_launch_metadata(
             decoded_payloads[0],
             target=targets[0],
@@ -814,6 +832,8 @@ def resolve_bazel_launch_metadata_for_targets(
         if payload is None:
             unmatched_targets.append(target)
             continue
+        if skip_incompatible and payload.get("incompatible") is True:
+            continue
         metadata = parse_bazel_launch_metadata(
             payload,
             target=target,
@@ -823,16 +843,17 @@ def resolve_bazel_launch_metadata_for_targets(
             return 1, None
         metadata_by_target[target] = metadata
     for target in unmatched_targets:
-        result, metadata = resolve_bazel_launch_metadata(
+        result, single_metadata = resolve_bazel_launch_metadata_for_targets(
             bazel=bazel,
-            target=target,
+            targets=[target],
             bazel_args=bazel_args,
             cwd=cwd,
             env=env,
+            skip_incompatible=skip_incompatible,
         )
-        if result != 0 or metadata is None:
+        if result != 0 or single_metadata is None:
             return result, None
-        metadata_by_target[target] = metadata
+        metadata_by_target.update(single_metadata)
     return 0, metadata_by_target
 
 
@@ -1327,6 +1348,7 @@ def write_fuzz_campaign_result(
     path: Path,
     command: BazelFuzzCommand,
     run_result: BazelFuzzRunResult,
+    incompatible_targets: list[str],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     targets = []
@@ -1349,6 +1371,7 @@ def write_fuzz_campaign_result(
         "bazel_args": command.bazel_args,
         "fuzzer_args": command.program_args,
         "exit_code": run_result.exit_code,
+        "incompatible_targets": incompatible_targets,
         "targets": targets,
     }
     temporary_path = path.with_name(
@@ -1524,7 +1547,7 @@ class BazelFuzzStep:
             fuzz.bazel_fuzz_target_shard(self.command.target, self.command.shard_count)
             != self.command.shard_index
         ):
-            return self.run_fuzzer_processes([])
+            return self.run_fuzzer_processes([], [])
         return self.run_target(self.command.target, verbose=verbose)
 
     def run_target_pattern(self, *, verbose: bool) -> int:
@@ -1560,7 +1583,28 @@ class BazelFuzzStep:
                 f"{len(discovered_targets)} targets"
             )
         if not targets:
-            return self.run_fuzzer_processes([])
+            return self.run_fuzzer_processes([], [])
+        metadata_result, metadata_by_target = resolve_bazel_launch_metadata_for_targets(
+            bazel=self.bazel,
+            targets=targets,
+            bazel_args=self.bazel_args,
+            cwd=REPO_ROOT,
+            env=self.env,
+            skip_incompatible=True,
+        )
+        if metadata_result != 0 or metadata_by_target is None:
+            return metadata_result
+        incompatible_targets = [
+            target for target in targets if target not in metadata_by_target
+        ]
+        targets = [target for target in targets if target in metadata_by_target]
+        if incompatible_targets:
+            print(
+                f"dev.py: skipped {len(incompatible_targets)} incompatible fuzz "
+                "target(s) for this configuration"
+            )
+        if not targets:
+            return self.run_fuzzer_processes([], incompatible_targets)
         build_result = run_quietly(
             [self.bazel, "build", *self.bazel_args, *targets],
             cwd=REPO_ROOT,
@@ -1569,15 +1613,6 @@ class BazelFuzzStep:
         )
         if build_result != 0:
             return build_result
-        metadata_result, metadata_by_target = resolve_bazel_launch_metadata_for_targets(
-            bazel=self.bazel,
-            targets=targets,
-            bazel_args=self.bazel_args,
-            cwd=REPO_ROOT,
-            env=self.env,
-        )
-        if metadata_result != 0 or metadata_by_target is None:
-            return metadata_result
         fuzzer_launches = []
         for target in targets:
             launch_result, launch = self.generate_fuzzer_launch(
@@ -1601,7 +1636,7 @@ class BazelFuzzStep:
                     bazel_launcher.remove_launch_script(pending_launch.script_path)
                 return process_result
             fuzzer_processes.append(process_launch)
-        return self.run_fuzzer_processes(fuzzer_processes)
+        return self.run_fuzzer_processes(fuzzer_processes, incompatible_targets)
 
     def run_target(self, target: str, *, verbose: bool) -> int:
         launch_result, launch = self.generate_fuzzer_launch(
@@ -1613,9 +1648,11 @@ class BazelFuzzStep:
         process_result, process_launch = prepare_bazel_process(launch, env=self.env)
         if process_result != 0 or process_launch is None:
             return process_result
-        return self.run_fuzzer_processes([process_launch])
+        return self.run_fuzzer_processes([process_launch], [])
 
-    def run_fuzzer_processes(self, processes: list[BazelProcess]) -> int:
+    def run_fuzzer_processes(
+        self, processes: list[BazelProcess], incompatible_targets: list[str]
+    ) -> int:
         run_result = run_fuzzers(processes, self.command.worker_count)
         result_path = self.command.result_path
         if result_path is None:
@@ -1630,6 +1667,7 @@ class BazelFuzzStep:
             result_path,
             self.command,
             run_result,
+            incompatible_targets,
         )
         print(f"dev.py: fuzz campaign result: {result_path}")
         return run_result.exit_code
