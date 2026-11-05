@@ -180,6 +180,27 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "text_placement_test",
+    args = ["--placement_sources=$(rootpath //loom/src/loom/serve/service/text/testdata/placement:prepare.loom)"],
+    data = [
+        "//loom/src/loom/serve/service/text/testdata/placement:prepare.loom",
+        "//loom/src/loom/serve/service/text/testdata/placement:sources",
+    ],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = _GPU_TEST_TAGS,
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:amdgpu_hal",
+        "//loom/config/execute:vm_iree_vm",
+    ] + _GPU_REQUIREMENTS),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/serve/service/text:placement_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "device_group_test",
     srcs = ["//loom/src/loom/serve/runtime/device:device_group_test.cc"],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,

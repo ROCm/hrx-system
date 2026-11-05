@@ -42,13 +42,15 @@ typedef struct loom_serve_text_parameters_t {
 
 // Binds immutable command layouts without loading checkpoint payloads. Native
 // compilation may still be running. The shared prefix has identical target
-// placement; auxiliary roots are grouped by checkpoint path and preparation
-// policy. Equal keys in different domains never alias.
+// placement; auxiliary roots are grouped by physical owner, checkpoint path,
+// and preparation policy. devices and pools have preparation_execution_count
+// members in the same immutable deployment order. Equal keys in different
+// domains never alias.
 // Stages and parameters start zeroed except for their published program views.
 // On failure the caller still owns every populated plan and fixed-buffer slot.
 // Consumers retire before plans; declarations outlive the returned sources.
 iree_status_t loom_serve_text_stages_bind(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_serve_device_t* const* devices, loom_serve_pool_t* const* pools,
     const loom_serve_preparation_t* preparation, iree_host_size_t shared_count,
     iree_host_size_t stage_count, loom_serve_text_stage_t* stages,
     loom_serve_text_parameters_t* parameters, iree_allocator_t host_allocator);
@@ -88,7 +90,7 @@ iree_status_t loom_serve_text_stages_record_async(
 
 // Borrows the command and reflects its model-facing native submission ABI.
 loom_serve_stage_t loom_serve_text_stage_binding(
-    const loom_serve_text_stage_t* stage);
+    const loom_serve_text_stage_t* stage, uint32_t execution_index);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -2,7 +2,7 @@ func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) ->
 
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
@@ -122,6 +122,7 @@ func.def public @prepare_request(%state: buffer, %height: i64, %width: i64, %pro
 // Source requests have a fixed packet layout. A cohort shares the pixel count
 // but keeps independent request values and private palette slots.
 func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %payload: buffer) -> (i32, buffer) {
+  %primary_execution = scalar.constant 0 : i32
   %origin = index.constant 0 : offset
   %range = buffer.view %ranges[%origin] : buffer -> view<1x2xi64>
   %first = view.load %range[0, 0] : view<1x2xi64> -> i64
@@ -145,7 +146,7 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %
     scf.yield %c0 : i32
   } else {
     %root = buffer.constant utf8("generate_image") : buffer
-    %stage = func.call @stage(%root, %capacity) : (buffer, i64) -> (i32)
+    %stage = func.call @stage(%root, %primary_execution, %capacity) : (buffer, i32, i64) -> (i32)
     %workspace_limit = scalar.constant 8192 : i64
     func.call @workspace_limit(%stage, %workspace_limit) : (i32, i64)
     %key = buffer.constant utf8("fixture.pixels") : buffer

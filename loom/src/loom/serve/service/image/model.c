@@ -280,7 +280,7 @@ static iree_status_t loom_serve_image_prepare(
   if (iree_status_is_ok(status)) {
     status = loom_serve_preparation_allocate_cached(
         model->jit, model->control.environment, &options->sources,
-        options->sources.prepare, IREE_SV("prepare"),
+        options->sources.prepare, IREE_SV("prepare"), 1,
         LOOM_SERVE_PREPARATION_FLAG_PARAMETERS |
             LOOM_SERVE_PREPARATION_FLAG_PARAMETER_ARENAS,
         iree_vm_variant_span_from_array(arguments),
@@ -432,7 +432,7 @@ static iree_status_t loom_serve_image_create_control(
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_preparation_module_create(
-        model->control.environment,
+        model->control.environment, 1,
         loom_serve_preparation_card(model->preparation),
         loom_serve_preparation_component(model->preparation), host_allocator,
         &native_modules[3]);
@@ -783,7 +783,7 @@ iree_status_t loom_serve_image_load_advance(loom_serve_image_load_t* load,
         load->event.pending = true;
         iree_slim_mutex_unlock(&load->event.mutex);
         status = loom_serve_stage_set_compile_catalog_async(
-            model->jit, model->preparation, NULL,
+            &model->jit, model->preparation, NULL,
             loom_serve_image_load_compiled, load, load->host_allocator);
         submitted = iree_status_is_ok(status);
         break;

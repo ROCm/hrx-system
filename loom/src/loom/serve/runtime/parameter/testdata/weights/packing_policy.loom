@@ -6,7 +6,7 @@ func.decl import("weights") @input(%source: i32, %key: buffer, %key_offset: i64,
 
 func.decl import("weights") @input_buffer(%data: buffer, %alignment: i64) -> (i64)
 
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
@@ -106,6 +106,7 @@ func.def @capture_generated(%letter: i32, %alignment: i64) -> (i64) {
 }
 
 func.def public @prepare_weight(%key: buffer) -> (i64) {
+  %primary_execution = scalar.constant 0 : i32
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
   %c2 = scalar.constant 2 : i32
@@ -152,7 +153,7 @@ func.def public @prepare_weight(%key: buffer) -> (i64) {
     scf.yield %offset : i64
   }
   %root = buffer.constant utf8("pack") : buffer
-  %stage = func.call @stage(%root, %c0_i64) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %c0_i64) : (buffer, i32, i64) -> (i32)
   %layout = buffer.constant utf8("interleaved") : buffer
   %first_key = buffer.constant utf8("first_offset") : buffer
   %second_key = buffer.constant utf8("second_offset") : buffer

@@ -1,8 +1,8 @@
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %owner: i32, %input: i32, %source: i32, %policy: buffer)
 
 func.decl import("prepare") @workspace_limit(%stage: i32, %bytes: i64)
 
@@ -15,7 +15,8 @@ func.decl import("runner") @execute_1(%stage: i32, %output: hal.buffer) -> (i64)
 func.decl import("runner") @execute_2(%stage: i32, %request: hal.buffer, %output: hal.buffer) -> (i64)
 
 func.def public @declare(%root: buffer, %left: buffer, %right: buffer, %policy: buffer, %count: i32, %tag: i64, %limit: i64) {
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %primary_execution = scalar.constant 0 : i32
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %c0_i64 = scalar.constant 0 : i64
   %limited = scalar.cmpi ne, %limit, %c0_i64 : i64
   scf.if %limited {
@@ -27,12 +28,12 @@ func.def public @declare(%root: buffer, %left: buffer, %right: buffer, %policy: 
   %has_left = scalar.cmpi sgt, %count, %c0 : i32
   scf.if %has_left {
     %source = func.call @source(%empty, %left) : (buffer, buffer) -> (i32)
-    func.call @parameter(%stage, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
+    func.call @parameter(%stage, %c0, %primary_execution, %c0, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
   }
   %has_right = scalar.cmpi sgt, %count, %c1 : i32
   scf.if %has_right {
     %source = func.call @source(%empty, %right) : (buffer, buffer) -> (i32)
-    func.call @parameter(%stage, %c1, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
+    func.call @parameter(%stage, %c1, %primary_execution, %c0, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
   }
   func.return
 }
@@ -66,7 +67,8 @@ func.def public @declare_arena(%root: buffer, %left: buffer, %right: buffer, %po
 // Each length-prefixed path is one selection, including repeated selections of
 // the same checkpoint. Capture ordinals preserve this source-owned order.
 func.def public @banks(%root: buffer, %paths: buffer, %unused: buffer, %policy: buffer, %count: i32, %tag: i64, %limit: i64) {
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %primary_execution = scalar.constant 0 : i32
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %first_ordinal = scalar.constant 0 : i32
   %empty = buffer.constant utf8("") : buffer
   %origin = index.constant 0 : offset

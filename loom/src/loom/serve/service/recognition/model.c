@@ -358,7 +358,7 @@ static iree_status_t loom_serve_recognition_prepare(
   if (iree_status_is_ok(status)) {
     status = loom_serve_preparation_allocate_cached(
         model->jit, model->control.environment, &options->sources,
-        options->sources.prepare, IREE_SV("prepare"),
+        options->sources.prepare, IREE_SV("prepare"), 1,
         LOOM_SERVE_PREPARATION_FLAG_PARAMETERS,
         iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),
@@ -1036,7 +1036,7 @@ iree_status_t loom_serve_recognition_load_advance(
         load->event.pending = true;
         iree_slim_mutex_unlock(&load->event.mutex);
         status = loom_serve_stage_set_compile_catalog_async(
-            model->jit, model->preparation, NULL,
+            &model->jit, model->preparation, NULL,
             loom_serve_recognition_load_compiled, load, load->host_allocator);
         submitted = iree_status_is_ok(status);
         break;

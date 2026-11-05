@@ -270,7 +270,7 @@ static iree_status_t loom_serve_text_load_bind(loom_serve_text_model_t* model) {
   IREE_RETURN_IF_ERROR(loom_serve_device_create_execution(
       model->device_owner, model->pool, &model->execution));
   IREE_RETURN_IF_ERROR(loom_serve_text_stages_bind(
-      model->device_owner, model->pool, model->source.preparation,
+      &model->device_owner, &model->pool, model->source.preparation,
       model->source.shared_stage_count, model->stage_count, model->stages,
       &model->parameters, model->host_allocator));
   return loom_serve_residency_group_allocate(
@@ -336,7 +336,10 @@ static iree_status_t loom_serve_text_load_link(loom_serve_text_load_t* load) {
       model->host_allocator, model->stage_count, sizeof(*model->stage_bindings),
       (void**)&model->stage_bindings));
   for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
-    model->stage_bindings[i] = loom_serve_text_stage_binding(&model->stages[i]);
+    model->stage_bindings[i] = loom_serve_text_stage_binding(
+        &model->stages[i],
+        loom_serve_preparation_stage(model->source.preparation, i)
+            ->execution_index);
   }
   IREE_RETURN_IF_ERROR(loom_serve_text_control_initialize(
       &model->source, model->execution, model->transfer, &model->state,
@@ -528,7 +531,7 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
         load->event.stages_compiling = true;
         iree_slim_mutex_unlock(&load->event.mutex);
         status = loom_serve_stage_set_compile_catalog_async(
-            model->jit, model->source.preparation, loom_serve_text_load_layout,
+            &model->jit, model->source.preparation, loom_serve_text_load_layout,
             loom_serve_text_load_compiled, load, load->host_allocator);
         submitted = iree_status_is_ok(status);
         if (!submitted) {

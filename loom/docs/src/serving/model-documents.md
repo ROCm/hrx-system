@@ -172,9 +172,10 @@ rebase the declared file paths.
 
 Each `parameters` key names an independent parameter index. Source preparation
 uses `prepare.source_scope(scope)` to select that index; its ordered typed files
-populate one shared checkpoint source. `prepare.parameter(stage, binding, input,
-source, policy)` binds that source to a resident policy input. Several stages
-can share the same source, and demand reads can use it without a resident binding.
+populate one shared checkpoint source. `prepare.parameter(stage, binding, owner,
+input, source, policy)` binds that source to a resident policy input on the
+selected storage owner. Several stages can share the same source, and demand
+reads can use it without a resident binding.
 Text service uses the `text` tokenizer identity. Image, embedding, decision,
 speech, recognition, and activity preparation return a tokenizer identity;
 services supporting inputs without tokenization may return an empty string.

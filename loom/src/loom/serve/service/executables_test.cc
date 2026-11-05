@@ -100,7 +100,7 @@ class ExecutablesTest : public WeightsTest {
     loom_serve_program_t* program = nullptr;
     if (iree_status_is_ok(status)) {
       status = loom_serve_preparation_module_create(
-          environment_, nullptr, nullptr, host_allocator_, &capture);
+          environment_, 1, nullptr, nullptr, host_allocator_, &capture);
     }
     if (iree_status_is_ok(status)) {
       loom_serve_preparation_module_begin(

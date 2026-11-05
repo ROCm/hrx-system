@@ -1,13 +1,14 @@
 // Uploads produce device-resident conditioning used by ordinary speech requests.
 func.decl @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer)
 
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.def public @speech_prepare_v2(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer) {
+  %primary_execution = scalar.constant 0 : i32
   %rows, %units, %input, %conditioning, %stream, %batch, %output, %feedback, %frames, %rate, %channels, %tokenizer, %name, %state, %initial = func.call @prepare(%directory, %options) : (buffer, buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer)
   %tag = scalar.constant 2 : i64
   %root = buffer.constant utf8("prepare_voice_audio") : buffer
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %voices = scalar.constant 2 : i64
   %audio_bytes = scalar.constant 1048576 : i64
   func.return %rows, %units, %input, %conditioning, %stream, %batch, %output, %feedback, %frames, %rate, %channels, %voices, %audio_bytes, %tokenizer, %name, %state, %initial : i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer

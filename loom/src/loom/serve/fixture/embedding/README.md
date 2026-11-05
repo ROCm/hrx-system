@@ -78,7 +78,7 @@ vtable.
 
 The independent [direct variant](variants/direct.loom) performs the same pooling
 and compact output in one buffer-only native entry. Its source preparation uses
-`prepare.dispatch("resident_embed", tag)` instead of `prepare.stage`; the warm
+`prepare.dispatch("resident_embed", 0, tag)` instead of `prepare.stage`; the warm
 `control.loom`, request framing and result plan are unchanged. The HTTP tests
 construct this package from the ordinary fixture, exercise repeated ragged
 requests and cancellation, and verify retirement before reuse on CPU, AMDGPU

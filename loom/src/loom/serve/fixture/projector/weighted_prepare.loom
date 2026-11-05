@@ -1,24 +1,25 @@
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %owner: i32, %input: i32, %source: i32, %policy: buffer)
 
 func.decl import("prepare") @memory_forecast(%root: buffer)
 
 // The pixel protocol is unchanged; a real checkpoint conditions every row.
 func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
+  %primary_execution = scalar.constant 0 : i32
   %forecast = buffer.constant utf8("forecast_memory") : buffer
   func.call @memory_forecast(%forecast) : (buffer)
   %c0_source = scalar.constant 0 : i32
   %binding = scalar.constant 0 : i32
   %tag = scalar.constant 1 : i64
   %root = buffer.constant utf8("weighted_project") : buffer
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %checkpoint = buffer.constant utf8("weights.safetensors") : buffer
   %policy = buffer.constant utf8("weights.loom") : buffer
   %source = func.call @source(%directory, %checkpoint) : (buffer, buffer) -> (i32)
-  func.call @parameter(%stage, %binding, %c0_source, %source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%stage, %binding, %primary_execution, %c0_source, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
   %units = scalar.constant 64 : i64
   %input_capacity = scalar.constant 65536 : i64
   %output_capacity = scalar.constant 1024 : i64

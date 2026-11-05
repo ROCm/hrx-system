@@ -1,0 +1,32 @@
+func.decl import("runner") @execute_6(%stage: i32, %first: hal.buffer, %second: hal.buffer, %third: hal.buffer, %fourth: hal.buffer, %fifth: hal.buffer, %sixth: hal.buffer) -> (i64)
+
+func.decl import("runner") @execute_1(%stage: i32, %output: hal.buffer) -> (i64)
+
+func.decl import("runner") @fence(%execution: i32, %value: i64) -> (hal.fence)
+
+func.decl import("runner") @join(%execution: i32, %fence: hal.fence)
+
+func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+
+func.def public @step(%output: hal.buffer, %second_output: hal.buffer, %third_output: hal.buffer, %fourth_output: hal.buffer, %fifth_output: hal.buffer, %sixth_output: hal.buffer) -> (i64) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c3 = scalar.constant 3 : i32
+  %first = func.call @execute_6(%c0, %output, %second_output, %third_output, %fourth_output, %fifth_output, %sixth_output) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %first_done = func.call @fence(%c1, %first) : (i32, i64) -> (hal.fence)
+  func.call @join(%c2, %first_done) : (i32, hal.fence)
+  %second = func.call @execute_1(%c1, %output) : (i32, hal.buffer) -> (i64)
+  %second_done = func.call @fence(%c2, %second) : (i32, i64) -> (hal.fence)
+  func.call @join(%c0, %second_done) : (i32, hal.fence)
+  %third = func.call @execute_1(%c2, %output) : (i32, hal.buffer) -> (i64)
+  %third_done = func.call @fence(%c0, %third) : (i32, i64) -> (hal.fence)
+  func.call @join(%c2, %third_done) : (i32, hal.fence)
+  %fourth = func.call @execute_1(%c3, %output) : (i32, hal.buffer) -> (i64)
+  %fourth_done = func.call @fence(%c2, %fourth) : (i32, i64) -> (hal.fence)
+  func.call @join(%c0, %fourth_done) : (i32, hal.fence)
+  %offset = scalar.constant 0 : i64
+  %length = scalar.constant 32 : i64
+  %done = func.call @feedback(%c0, %output, %offset, %length) : (i32, hal.buffer, i64, i64) -> (i64)
+  func.return %done : i64
+}

@@ -2,7 +2,7 @@ func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
@@ -11,6 +11,7 @@ func.decl import("prepare") @workspace_limit(%stage: i32, %byte_length: i64)
 // A real source bootstrap with no immutable parameter roots. The two kernels
 // communicate through compiler-reflected private command workspace.
 func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer, %options: buffer) -> (i64, i64, buffer, buffer, buffer) {
+  %primary_execution = scalar.constant 0 : i32
   %c0 = scalar.constant 0 : i64
   %maximum = scalar.constant 64 : i64
   %text_maximum = scalar.constant 4096 : i64
@@ -40,7 +41,7 @@ func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buff
   %valid_options32 = scalar.extui %valid_options : i1 to i32
   func.call @require(%valid_options32, %error) : (i32, buffer)
   %root = buffer.constant utf8("generate_image") : buffer
-  %stage = func.call @stage(%root, %text) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %text) : (buffer, i32, i64) -> (i32)
   // Execution replacements may grow private workspace within this budget.
   %workspace_limit = scalar.constant 8192 : i64
   func.call @workspace_limit(%stage, %workspace_limit) : (i32, i64)

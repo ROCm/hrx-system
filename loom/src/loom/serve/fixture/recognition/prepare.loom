@@ -1,10 +1,11 @@
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i32, buffer, buffer, buffer, buffer) {
+  %primary_execution = scalar.constant 0 : i32
   %c0 = scalar.constant 0 : i64
   %c1 = scalar.constant 1 : i64
   %root = buffer.constant utf8("recognize") : buffer
-  %stage = func.call @stage(%root, %c0) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %c0) : (buffer, i32, i64) -> (i32)
   %rows = scalar.constant 4 : i64
   %stride = scalar.constant 16 : i64
   %batch_bytes = scalar.constant 208 : i64

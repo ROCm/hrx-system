@@ -1,0 +1,34 @@
+func.decl import("prepare") @execution_count() -> (i32)
+
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
+
+func.decl import("prepare") @dispatch(%root: buffer, %execution: i32, %tag: i64) -> (i32)
+
+func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
+
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %owner: i32, %input: i32, %source: i32, %policy: buffer)
+
+func.def public @prepare(%path: buffer, %fail: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %tag = scalar.constant 0 : i64
+  %directory = buffer.constant utf8("") : buffer
+  %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
+  %policy = buffer.constant utf8("weights.loom") : buffer
+  %target = buffer.constant utf8("target") : buffer
+  %first = func.call @stage(%target, %c1, %tag) : (buffer, i32, i64) -> (i32)
+  func.call @parameter(%first, %c0, %c2, %c0, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
+  %add = buffer.constant utf8("add_weights") : buffer
+  %absent = buffer.constant utf8("absent") : buffer
+  %reject = scalar.cmpi ne, %fail, %c0 : i32
+  %root = scf.select %reject, %absent, %add : buffer
+  %second = func.call @stage(%root, %c2, %tag) : (buffer, i32, i64) -> (i32)
+  func.call @parameter(%second, %c0, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
+  %third = func.call @stage(%add, %c0, %tag) : (buffer, i32, i64) -> (i32)
+  func.call @parameter(%third, %c0, %c1, %c0, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
+  %increment = buffer.constant utf8("increment") : buffer
+  %fourth = func.call @dispatch(%increment, %c2, %tag) : (buffer, i32, i64) -> (i32)
+  %count = func.call @execution_count() : () -> (i32)
+  func.return %count : i32
+}

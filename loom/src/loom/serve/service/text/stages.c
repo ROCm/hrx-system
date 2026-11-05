@@ -131,7 +131,7 @@ static iree_status_t loom_serve_text_stages_initialize(
 // Group roots once during binding. The original stage order preserves the
 // identical-layout target prefix in the first domain.
 iree_status_t loom_serve_text_stages_bind(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_serve_device_t* const* devices, loom_serve_pool_t* const* pools,
     const loom_serve_preparation_t* preparation, iree_host_size_t shared_count,
     iree_host_size_t stage_count, loom_serve_text_stage_t* stages,
     loom_serve_text_parameters_t* parameters, iree_allocator_t host_allocator) {
@@ -193,6 +193,9 @@ iree_status_t loom_serve_text_stages_bind(
           };
         }
       }
+      const uint32_t owner_index = parameters->sources[domain]->owner_index;
+      loom_serve_device_t* device = devices[owner_index];
+      loom_serve_pool_t* pool = pools[owner_index];
       status = loom_serve_weights_allocate(
           loom_serve_device_handle(device),
           loom_serve_device_transfer_queue(device),
@@ -373,10 +376,11 @@ iree_status_t loom_serve_text_stages_record_async(
 }
 
 loom_serve_stage_t loom_serve_text_stage_binding(
-    const loom_serve_text_stage_t* stage) {
+    const loom_serve_text_stage_t* stage, uint32_t execution_index) {
   const loom_cmd_program_requirements_t* requirements =
       &stage->program.requirements;
   return (loom_serve_stage_t){
+      .execution_index = execution_index,
       .command_buffer = stage->command,
       .binding_count = requirements->rebindable_binding_count -
                        (requirements->transient.required_byte_length != 0),

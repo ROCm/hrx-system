@@ -1,13 +1,14 @@
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
-func.decl import("prepare") @dispatch(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @dispatch(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %owner: i32, %input: i32, %source: i32, %policy: buffer)
 
 // The policy boundary rejects these declarations before native compilation.
 func.def public @prepare_weight(%key: buffer) -> (i64) {
+  %primary_execution = scalar.constant 0 : i32
   %c0_source = scalar.constant 0 : i32
   %origin = index.constant 0 : offset
   %letter = buffer.load.i8.u %key[%origin]
@@ -26,19 +27,19 @@ func.def public @prepare_weight(%key: buffer) -> (i64) {
   scf.if %undeclared {
   } else {
     %command = scf.if %direct -> (i32) {
-      %command = func.call @dispatch(%root, %c0) : (buffer, i64) -> (i32)
+      %command = func.call @dispatch(%root, %primary_execution, %c0) : (buffer, i32, i64) -> (i32)
       scf.yield %command : i32
     } else {
-      %command = func.call @stage(%root, %c0) : (buffer, i64) -> (i32)
+      %command = func.call @stage(%root, %primary_execution, %c0) : (buffer, i32, i64) -> (i32)
       scf.yield %command : i32
     }
     scf.if %multiple {
-      %second = func.call @stage(%root, %c0) : (buffer, i64) -> (i32)
+      %second = func.call @stage(%root, %primary_execution, %c0) : (buffer, i32, i64) -> (i32)
     }
     scf.if %checkpoint {
       %binding = scalar.constant 0 : i32
       %source = func.call @source(%root, %root) : (buffer, buffer) -> (i32)
-      func.call @parameter(%command, %binding, %c0_source, %source, %root) : (i32, i32, i32, i32, buffer)
+      func.call @parameter(%command, %binding, %primary_execution, %c0_source, %source, %root) : (i32, i32, i32, i32, i32, buffer)
     }
   }
   %bytes = scf.if %zero_length -> (i64) {

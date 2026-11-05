@@ -1,6 +1,7 @@
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.def public @prepare_weight(%key: buffer) -> (i64) {
+  %primary_execution = scalar.constant 0 : i32
   %length = buffer.length %key
   %key_length = index.constant 6 : offset
   %same_length = index.cmp eq, %length, %key_length : offset
@@ -28,7 +29,7 @@ func.def public @prepare_weight(%key: buffer) -> (i64) {
   %bytes = scf.if %matches -> (i64) {
     %root = buffer.constant utf8("prepare_factor") : buffer
     %tag = scalar.constant 0 : i64
-    %command = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+    %command = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
     %bytes = scalar.constant 4 : i64
     scf.yield %bytes : i64
   } else {

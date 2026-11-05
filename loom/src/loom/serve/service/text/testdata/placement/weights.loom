@@ -1,0 +1,4 @@
+func.def public @prepare_weight(%key: buffer) -> (i64) {
+  %bytes = scalar.constant 0 : i64
+  func.return %bytes : i64
+}

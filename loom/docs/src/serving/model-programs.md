@@ -115,8 +115,9 @@ configuration and checkpoint domains. Shared preparation capabilities include:
 
 | Import in module `prepare` | Meaning |
 | --- | --- |
-| `stage(root, tag)` | Declare a command-program root and a source-defined selection tag. |
-| `dispatch(root, tag)` | Declare a buffer-only native kernel root with its compiled launch configuration. |
+| `execution_count()` | Query the number of execution devices available to this preparation. |
+| `stage(root, execution, tag)` | Declare a command-program root on an execution device with a source-defined selection tag. |
+| `dispatch(root, execution, tag)` | Declare a buffer-only native kernel root on an execution device with its compiled launch configuration. |
 | `config(stage, key, value)` | Bind a public Loom configuration value in textual syntax. |
 | `config_i64(stage, key, value)` | Bind a signed integer configuration value. |
 | `workspace_limit(stage, bytes)` | Bound command workspace, including compatible live replacements. |
@@ -124,7 +125,15 @@ configuration and checkpoint domains. Shared preparation capabilities include:
 | `source(directory, path)` | Declare the first shard of a checkpoint and return its source ordinal. |
 | `source_append(source, directory, path)` | Append a shard to that checkpoint's ordered index. |
 | `source_scope(scope)` | Select a model card's named, typed parameter files as one shared checkpoint source. |
-| `parameter(stage, binding, input, source, policy)` | Bind a checkpoint to one policy-local input of a reflected fixed parameter binding. |
+| `parameter(stage, binding, owner, input, source, policy)` | Bind a checkpoint to one policy-local input of a reflected fixed parameter binding, selecting its storage owner independently of stage execution. |
+
+Execution and parameter-owner ordinals index the preparation's fixed deployment
+order. Single-device services use zero. Stage execution selects the native
+compiler target and submission queues; parameter ownership selects the device
+and pool used to prepare and retain its weights. A cross-owner binding requires
+a pool accessible to its consuming executions; placement alone creates no
+visibility or synchronization. Preparation rejects out-of-range ordinals and
+conflicting owners for one fixed binding before compilation or allocation.
 
 A split checkpoint uses `source` for its first file and `source_append` for
 each additional shard. The files populate one index in declaration order.
@@ -140,7 +149,7 @@ before its parameter placement or activation.
 Each fixed binding declares its policy inputs once, densely from zero. A policy
 can combine independent checkpoints containing the same keys: its `weights`
 imports use those local input ordinals, not model-wide source ordinals. Stages
-naming the same ordered file lists and policy share a resident domain. The
+naming the same owner, ordered file lists, and policy share a resident domain. The
 loader accepts explicit GGUF, safetensors, and other supported parameter files
 without inferring filenames.
 

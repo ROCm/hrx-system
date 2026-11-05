@@ -1,6 +1,8 @@
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
-func.decl import("prepare") @dispatch(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @dispatch(%root: buffer, %execution: i32, %tag: i64) -> (i32)
+
+func.decl import("prepare") @execution_count() -> (i32)
 
 func.decl import("prepare") @config(%stage: i32, %key: buffer, %value: buffer)
 
@@ -12,7 +14,7 @@ func.decl import("prepare") @source_append(%source: i32, %directory: buffer, %pa
 
 func.decl import("prepare") @source_scope(%scope: buffer) -> (i32)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %owner: i32, %input: i32, %source: i32, %policy: buffer)
 
 func.decl import("prepare") @workspace_limit(%stage: i32, %bytes: i64)
 
@@ -36,10 +38,11 @@ func.def public @declare_parameter_binding() {
 }
 
 func.def public @declare_banks(%arena: i32, %sources: buffer, %count: i32) -> (i32) {
+  %primary_execution = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %policy = buffer.constant utf8("weights.loom") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %binding = scalar.constant 0 : i32
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
@@ -55,6 +58,7 @@ func.def public @declare_banks(%arena: i32, %sources: buffer, %count: i32) -> (i
 // One entry exercises the cold declaration boundary without compiling a new
 // VM program for each capability, ownership, or malformed-string case.
 func.def public @declare_forecast(%mode: i32) {
+  %primary_execution = scalar.constant 0 : i32
   %empty_mode = scalar.constant 1 : i32
   %nul_mode = scalar.constant 2 : i32
   %duplicate_mode = scalar.constant 3 : i32
@@ -75,14 +79,52 @@ func.def public @declare_forecast(%mode: i32) {
     func.call @memory_forecast(%root) : (buffer)
   }
   %tag = scalar.constant 0 : i64
-  %stage = func.call @stage(%normal, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%normal, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
+  func.return
+}
+
+func.def public @placed_command(%execution: i32, %owner: i32) -> (i32) {
+  %root = buffer.constant utf8("stage_root") : buffer
+  %tag = scalar.constant 19 : i64
+  %stage = func.call @stage(%root, %execution, %tag) : (buffer, i32, i64) -> (i32)
+  %directory = buffer.constant utf8("/checkpoints") : buffer
+  %path = buffer.constant utf8("model.safetensors") : buffer
+  %policy = buffer.constant utf8("weights.loom") : buffer
+  %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
+  %c0 = scalar.constant 0 : i32
+  func.call @parameter(%stage, %c0, %owner, %c0, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
+  %count = func.call @execution_count() : () -> (i32)
+  func.return %count : i32
+}
+
+func.def public @placed_dispatch(%execution: i32) -> (i32) {
+  %root = buffer.constant utf8("stage_root") : buffer
+  %tag = scalar.constant 19 : i64
+  %stage = func.call @dispatch(%root, %execution, %tag) : (buffer, i32, i64) -> (i32)
+  %count = func.call @execution_count() : () -> (i32)
+  func.return %count : i32
+}
+
+func.def public @conflicting_parameter_owner() {
+  %root = buffer.constant utf8("stage_root") : buffer
+  %tag = scalar.constant 0 : i64
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %stage = func.call @stage(%root, %c0, %tag) : (buffer, i32, i64) -> (i32)
+  %directory = buffer.constant utf8("/checkpoints") : buffer
+  %path = buffer.constant utf8("model.safetensors") : buffer
+  %policy = buffer.constant utf8("weights.loom") : buffer
+  %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
+  func.call @parameter(%stage, %c0, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
+  func.call @parameter(%stage, %c0, %c1, %c1, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
   func.return
 }
 
 func.def public @text_config() {
+  %primary_execution = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %key = buffer.constant utf8("feature.enabled") : buffer
   %value = buffer.constant utf8("true") : buffer
   func.call @config(%stage, %key, %value) : (i32, buffer, buffer)
@@ -98,9 +140,10 @@ func.def public @missing_stage() {
 }
 
 func.def public @direct_config() {
+  %primary_execution = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %tag = scalar.constant 17 : i64
-  %stage = func.call @dispatch(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @dispatch(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %key = buffer.constant utf8("feature.enabled") : buffer
   %value = buffer.constant utf8("true") : buffer
   func.call @config(%stage, %key, %value) : (i32, buffer, buffer)
@@ -108,9 +151,10 @@ func.def public @direct_config() {
 }
 
 func.def public @workspace_constrained() {
+  %primary_execution = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %bytes = scalar.constant 1073741824 : i64
   func.call @workspace_limit(%stage, %bytes) : (i32, i64)
   func.return
@@ -124,9 +168,10 @@ func.def public @missing_workspace_stage() {
 }
 
 func.def public @duplicate_workspace_limit() {
+  %primary_execution = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %bytes = scalar.constant 1 : i64
   func.call @workspace_limit(%stage, %bytes) : (i32, i64)
   func.call @workspace_limit(%stage, %bytes) : (i32, i64)
@@ -134,58 +179,63 @@ func.def public @duplicate_workspace_limit() {
 }
 
 func.def public @direct_workspace_limit() {
+  %primary_execution = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @dispatch(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @dispatch(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %bytes = scalar.constant 1 : i64
   func.call @workspace_limit(%stage, %bytes) : (i32, i64)
   func.return
 }
 
 func.def public @zero_workspace_limit() {
+  %primary_execution = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %bytes = scalar.constant 0 : i64
   func.call @workspace_limit(%stage, %bytes) : (i32, i64)
   func.return
 }
 
 func.def public @negative_workspace_limit() {
+  %primary_execution = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %bytes = scalar.constant -1 : i64
   func.call @workspace_limit(%stage, %bytes) : (i32, i64)
   func.return
 }
 
 func.def public @direct_parameter() {
+  %primary_execution = scalar.constant 0 : i32
   %c0_source = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @dispatch(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @dispatch(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %c0 = scalar.constant 0 : i32
   %directory = buffer.constant utf8("/checkpoints") : buffer
   %path = buffer.constant utf8("model.safetensors") : buffer
   %policy = buffer.constant utf8("weights.loom") : buffer
   %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
-  func.call @parameter(%stage, %c0, %c0_source, %source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%stage, %c0, %primary_execution, %c0_source, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
   func.return
 }
 
 func.def public @conflicting_parameter_policy() {
+  %primary_execution = scalar.constant 0 : i32
   %c0_source = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %c0 = scalar.constant 0 : i32
   %directory = buffer.constant utf8("/checkpoints") : buffer
   %path = buffer.constant utf8("model.safetensors") : buffer
   %policy = buffer.constant utf8("weights.loom") : buffer
   %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
-  func.call @parameter(%stage, %c0, %c0_source, %source, %policy) : (i32, i32, i32, i32, buffer)
-  func.call @parameter(%stage, %c0, %c0_source, %source, %path) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%stage, %c0, %primary_execution, %c0_source, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
+  func.call @parameter(%stage, %c0, %primary_execution, %c0_source, %source, %path) : (i32, i32, i32, i32, i32, buffer)
   func.return
 }
 
@@ -194,9 +244,10 @@ func.def public @no_stages() {
 }
 
 func.def public @many_sources() {
+  %primary_execution = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %binding = scalar.constant 0 : i32
   %directory = buffer.constant utf8("/checkpoints") : buffer
   %path = buffer.constant utf8("model.safetensors") : buffer
@@ -207,22 +258,23 @@ func.def public @many_sources() {
   scf.for %i = [%c0 to %count step %c1] {
     %input = index.cast %i : index to i32
     %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
-    func.call @parameter(%stage, %binding, %input, %source, %policy) : (i32, i32, i32, i32, buffer)
+    func.call @parameter(%stage, %binding, %primary_execution, %input, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
     func.call @source_append(%source, %directory, %policy) : (i32, buffer, buffer)
   }
   func.return
 }
 
 func.def @invalid_input(%input: i32) {
+  %primary_execution = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %binding = scalar.constant 0 : i32
   %directory = buffer.constant utf8("/checkpoints") : buffer
   %path = buffer.constant utf8("model.safetensors") : buffer
   %policy = buffer.constant utf8("weights.loom") : buffer
   %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
-  func.call @parameter(%stage, %binding, %input, %source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%stage, %binding, %primary_execution, %input, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
   func.return
 }
 
@@ -239,10 +291,11 @@ func.def public @negative_input() {
 }
 
 func.def public @request_stages(%tag: i64) -> (i32, i32) {
+  %primary_execution = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %key = buffer.constant utf8("feature.enabled") : buffer
-  %command = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
-  %direct = func.call @dispatch(%root, %tag) : (buffer, i64) -> (i32)
+  %command = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
+  %direct = func.call @dispatch(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   func.call @config_i64(%command, %key, %tag) : (i32, buffer, i64)
   func.call @config_i64(%direct, %key, %tag) : (i32, buffer, i64)
   %workspace = scalar.constant 4096 : i64
@@ -251,9 +304,10 @@ func.def public @request_stages(%tag: i64) -> (i32, i32) {
 }
 
 func.def public @configure_cold_stage() {
+  %primary_execution = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   func.call @missing_stage() : ()
   func.return
 }
@@ -261,6 +315,7 @@ func.def public @configure_cold_stage() {
 // Crosses multiple growth boundaries on each independently owned array.
 // The key buffer is reused; every declaration must own its copied spelling.
 func.def public @large_catalog() {
+  %primary_execution = scalar.constant 0 : i32
   %c0_source = scalar.constant 0 : i32
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -279,7 +334,7 @@ func.def public @large_catalog() {
   %policy = buffer.constant utf8("weights.loom") : buffer
   scf.for %i = [%c0 to %count step %c1] {
     %tag = index.cast %i : index to i64
-    %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+    %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
     scf.for %j = [%c0 to %count step %c1] {
       %tens = index.div %j, %c10 : index
       %ones = index.rem %j, %c10 : index
@@ -294,7 +349,7 @@ func.def public @large_catalog() {
       func.call @config_i64(%stage, %key, %value) : (i32, buffer, i64)
       %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
       func.call @source_append(%source, %directory, %key) : (i32, buffer, buffer)
-      func.call @parameter(%stage, %binding, %c0_source, %source, %policy) : (i32, i32, i32, i32, buffer)
+      func.call @parameter(%stage, %binding, %primary_execution, %c0_source, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
       func.call @source_append(%source, %directory, %policy) : (i32, buffer, buffer)
     }
   }
@@ -303,6 +358,7 @@ func.def public @large_catalog() {
 
 // Each string position crosses the same native declaration boundary.
 func.def public @nul_string(%field: i32) {
+  %primary_execution = scalar.constant 0 : i32
   %c0_source = scalar.constant 0 : i32
   %nul = buffer.constant utf8("a\u0000b") : buffer
   %root = buffer.constant utf8("stage_root") : buffer
@@ -331,28 +387,29 @@ func.def public @nul_string(%field: i32) {
   %field_policy = scalar.constant 5 : i32
   %is_policy = scalar.cmpi eq, %field, %field_policy : i32
   %selected_policy = scf.select %is_policy, %nul, %policy : buffer
-  %stage = func.call @stage(%selected_root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%selected_root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   func.call @config(%stage, %selected_key, %selected_value) : (i32, buffer, buffer)
   %source = func.call @source(%selected_directory, %selected_path) : (buffer, buffer) -> (i32)
-  func.call @parameter(%stage, %c0, %c0_source, %source, %selected_policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%stage, %c0, %primary_execution, %c0_source, %source, %selected_policy) : (i32, i32, i32, i32, i32, buffer)
   func.return
 }
 
 // One checkpoint supplies several resident bindings and remains independently
 // addressable. Appending after binding must update every finalized shard view.
 func.def public @shared_source(%path: buffer) -> (i32) {
+  %primary_execution = scalar.constant 0 : i32
   %directory = buffer.constant utf8("/checkpoints") : buffer
   %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
   %root = buffer.constant utf8("stage_root") : buffer
   %policy = buffer.constant utf8("weights.loom") : buffer
   %tag = scalar.constant 0 : i64
-  %first = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
-  %second = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %first = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
+  %second = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %c0 = scalar.constant 0 : i32
   %c1 = scalar.constant 1 : i32
-  func.call @parameter(%first, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
-  func.call @parameter(%first, %c1, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
-  func.call @parameter(%second, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%first, %c0, %primary_execution, %c0, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
+  func.call @parameter(%first, %c1, %primary_execution, %c0, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
+  func.call @parameter(%second, %c0, %primary_execution, %c0, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
   func.call @source_append(%source, %directory, %policy) : (i32, buffer, buffer)
   func.return %source : i32
 }
@@ -364,21 +421,23 @@ func.def public @scoped_source(%scope: buffer) -> (i32) {
 
 // Runtime-only sources have no resident parameter root or preparation policy.
 func.def public @cold_source(%path: buffer) -> (i32) {
+  %primary_execution = scalar.constant 0 : i32
   %directory = buffer.constant utf8("/checkpoints") : buffer
   %source = func.call @source(%directory, %path) : (buffer, buffer) -> (i32)
   %root = buffer.constant utf8("stage_root") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @dispatch(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @dispatch(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   func.return %source : i32
 }
 
 func.def public @bind_source(%source: i32) {
+  %primary_execution = scalar.constant 0 : i32
   %root = buffer.constant utf8("stage_root") : buffer
   %policy = buffer.constant utf8("weights.loom") : buffer
   %tag = scalar.constant 0 : i64
-  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %c0 = scalar.constant 0 : i32
-  func.call @parameter(%stage, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%stage, %c0, %primary_execution, %c0, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
   func.return
 }
 
@@ -390,10 +449,11 @@ func.def public @append_source(%source: i32) {
 }
 
 func.def public @duplicate_input() {
+  %primary_execution = scalar.constant 0 : i32
   %path = buffer.constant utf8("model.safetensors") : buffer
   %source = func.call @shared_source(%path) : (buffer) -> (i32)
   %c0 = scalar.constant 0 : i32
   %policy = buffer.constant utf8("weights.loom") : buffer
-  func.call @parameter(%c0, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%c0, %c0, %primary_execution, %c0, %source, %policy) : (i32, i32, i32, i32, i32, buffer)
   func.return
 }

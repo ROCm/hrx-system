@@ -101,7 +101,9 @@ static void loom_serve_text_variant_recorded(void* user_data,
   loom_serve_text_variant_t* variant = job->variant;
   for (iree_host_size_t i = 0;
        i < variant->stage_count && iree_status_is_ok(status); ++i) {
-    variant->bindings[i] = loom_serve_text_stage_binding(&variant->stages[i]);
+    variant->bindings[i] = loom_serve_text_stage_binding(
+        &variant->stages[i],
+        loom_serve_preparation_stage(job->preparation, i)->execution_index);
     variant->workspace_bytes =
         iree_max(variant->workspace_bytes,
                  variant->bindings[i].transient.required_byte_length);
@@ -165,8 +167,8 @@ static void loom_serve_text_variant_release(loomc_task_t* task) {
   iree_status_t status = job->status;
   if (iree_status_is_ok(status)) {
     status = loom_serve_stage_set_compile_catalog_async(
-        job->jit, job->preparation, NULL, loom_serve_text_variant_compiled, job,
-        job->variant->host_allocator);
+        &job->jit, job->preparation, NULL, loom_serve_text_variant_compiled,
+        job, job->variant->host_allocator);
   }
   if (!iree_status_is_ok(status)) {
     loom_serve_text_variant_recorded(job, status);

@@ -638,11 +638,11 @@ void SourceEmbeddingServiceTest::WriteCheckpointPackage(
   %parameter_path = buffer.constant utf8("weights.safetensors") : buffer
   %parameter_policy = buffer.constant utf8("policy.loom") : buffer
   %parameter_source = func.call @source(%directory, %parameter_path) : (buffer, buffer) -> (i32)
-  func.call @parameter(%stage, %parameter_index, %parameter_input, %parameter_source, %parameter_policy) : (i32, i32, i32, i32, buffer) -> ()
+  func.call @parameter(%stage, %parameter_index, %primary_execution, %parameter_input, %parameter_source, %parameter_policy) : (i32, i32, i32, i32, i32, buffer) -> ()
 )");
   const std::string declarations = R"(
 func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %owner: i32, %input: i32, %source: i32, %policy: buffer)
 )";
   std::ofstream bootstrap(target + "/prepare.loom");
   bootstrap << declarations << prepare;

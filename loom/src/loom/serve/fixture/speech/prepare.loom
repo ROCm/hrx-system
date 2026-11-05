@@ -1,4 +1,4 @@
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 
@@ -8,6 +8,7 @@ func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 global.rodata.def @conditioning = bytes("0000003e000000be")
 
 func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer) {
+  %primary_execution = scalar.constant 0 : i32
   %c0 = scalar.constant 0 : i64
   %c1 = scalar.constant 1 : i64
   %object_kind = scalar.constant 2 : i32
@@ -19,9 +20,9 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %diagnostic = buffer.constant utf8("speech fixture expects empty options") : buffer
   func.call @require(%valid32, %diagnostic) : (i32, buffer)
   %initialize = buffer.constant utf8("initialize_audio") : buffer
-  %first = func.call @stage(%initialize, %c0) : (buffer, i64) -> (i32)
+  %first = func.call @stage(%initialize, %primary_execution, %c0) : (buffer, i32, i64) -> (i32)
   %step = buffer.constant utf8("step_audio") : buffer
-  %second = func.call @stage(%step, %c1) : (buffer, i64) -> (i32)
+  %second = func.call @stage(%step, %primary_execution, %c1) : (buffer, i32, i64) -> (i32)
   %rows = scalar.constant 4 : i64
   %work_bytes = scalar.constant 64 : i64
   %input = scalar.constant 16 : i64

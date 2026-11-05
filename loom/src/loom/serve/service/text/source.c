@@ -97,7 +97,7 @@ static iree_status_t loom_serve_text_prepare(
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_preparation_evaluate(
-        source->environment, module, &options->sources, IREE_SV("prepare"),
+        source->environment, module, &options->sources, IREE_SV("prepare"), 1,
         LOOM_SERVE_PREPARATION_FLAG_PARAMETERS,
         iree_vm_variant_span_from_array(arguments),
         iree_vm_variant_span_from_array(results),

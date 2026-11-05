@@ -1,0 +1,59 @@
+kernel.def @copy() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c8, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%weights: view<8xi32>, %output: buffer) {
+  %c0 = index.constant 0 : offset
+  %element = kernel.workgroup.id<x> : index
+  %value = view.load %weights[%element] : view<8xi32> -> i32
+  %destination = buffer.view %output[%c0] : buffer -> view<8xi32>
+  view.store %value, %destination[%element] : i32, view<8xi32>
+  kernel.return
+}
+
+command.def public @target() launch(%weights: buffer, %first: buffer, %second: buffer, %third: buffer, %fourth: buffer, %fifth: buffer, %sixth: buffer) {
+  %data = command.parameter %weights, "raw" : view<8xi32>
+  kernel.launch @copy(%data, %first) : (view<8xi32>, buffer)
+  kernel.launch @copy(%data, %second) : (view<8xi32>, buffer)
+  kernel.launch @copy(%data, %third) : (view<8xi32>, buffer)
+  kernel.launch @copy(%data, %fourth) : (view<8xi32>, buffer)
+  kernel.launch @copy(%data, %fifth) : (view<8xi32>, buffer)
+  kernel.launch @copy(%data, %sixth) : (view<8xi32>, buffer)
+  command.return
+}
+
+kernel.def @add() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c8, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%weights: view<8xi32>, %output: buffer) {
+  %c0 = index.constant 0 : offset
+  %element = kernel.workgroup.id<x> : index
+  %weight = view.load %weights[%element] : view<8xi32> -> i32
+  %destination = buffer.view %output[%c0] : buffer -> view<8xi32>
+  %previous = view.load %destination[%element] : view<8xi32> -> i32
+  %value = scalar.addi %previous, %weight : i32
+  view.store %value, %destination[%element] : i32, view<8xi32>
+  kernel.return
+}
+
+command.def public @add_weights() launch(%weights: buffer, %output: buffer) {
+  %data = command.parameter %weights, "raw" : view<8xi32>
+  kernel.launch @add(%data, %output) : (view<8xi32>, buffer)
+  command.return
+}
+
+kernel.def @increment() {
+  %c1 = index.constant 1 : index
+  %c8 = index.constant 8 : index
+  kernel.launch.config workgroups(%c8, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%output: buffer) {
+  %c0 = index.constant 0 : offset
+  %element = kernel.workgroup.id<x> : index
+  %destination = buffer.view %output[%c0] : buffer -> view<8xi32>
+  %previous = view.load %destination[%element] : view<8xi32> -> i32
+  %delta = scalar.constant 7 : i32
+  %value = scalar.addi %previous, %delta : i32
+  view.store %value, %destination[%element] : i32, view<8xi32>
+  kernel.return
+}

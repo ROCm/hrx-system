@@ -1,34 +1,36 @@
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
-func.decl import("prepare") @dispatch(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @dispatch(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.decl import("prepare") @workspace_limit(%stage: i32, %bytes: i64)
 
 func.def public @prepare(%fail: i32) {
+  %primary_execution = scalar.constant 0 : i32
   %tag = scalar.constant 0 : i64
   %advance = buffer.constant utf8("advance") : buffer
-  %first = func.call @stage(%advance, %tag) : (buffer, i64) -> (i32)
+  %first = func.call @stage(%advance, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %c0 = scalar.constant 0 : i32
   %reject = scalar.cmpi ne, %fail, %c0 : i32
   scf.if %reject {
     %root = buffer.constant utf8("invalid_argument") : buffer
-    %middle = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+    %middle = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   } else {
     %root = buffer.constant utf8("selected_pair") : buffer
-    %middle = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+    %middle = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   }
   %increment = buffer.constant utf8("increment_0") : buffer
-  %last = func.call @dispatch(%increment, %tag) : (buffer, i64) -> (i32)
+  %last = func.call @dispatch(%increment, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   func.return
 }
 
 func.def public @workspace_constrained() {
+  %primary_execution = scalar.constant 0 : i32
   %tag = scalar.constant 0 : i64
   %root = buffer.constant utf8("temporary_advance") : buffer
-  %first = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %first = func.call @stage(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %bytes = scalar.constant 1 : i64
   func.call @workspace_limit(%first, %bytes) : (i32, i64)
   %advance = buffer.constant utf8("advance") : buffer
-  %last = func.call @stage(%advance, %tag) : (buffer, i64) -> (i32)
+  %last = func.call @stage(%advance, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   func.return
 }

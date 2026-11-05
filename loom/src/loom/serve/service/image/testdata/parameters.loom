@@ -1,8 +1,8 @@
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %owner: i32, %input: i32, %source: i32, %policy: buffer)
 
 func.decl import("prepare") @parameter_arena(%bytes: i64) -> (i32)
 
@@ -39,6 +39,7 @@ func.def public @image_generate_v1(%first: i32, %count: i32, %cursor: i32, %outp
 }
 
 func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer, %options: buffer) -> (i64, i64, buffer, buffer, buffer) {
+  %primary_execution = scalar.constant 0 : i32
   %c0 = scalar.constant 0 : i32
   %zero64 = scalar.constant 0 : i64
   %first_path = buffer.constant utf8("first.safetensors") : buffer
@@ -46,9 +47,9 @@ func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buff
   %first = func.call @source(%directory, %first_path) : (buffer, buffer) -> (i32)
   %second = func.call @source(%directory, %second_path) : (buffer, buffer) -> (i32)
   %root = buffer.constant utf8("bank_image_base") : buffer
-  %stage = func.call @stage(%root, %zero64) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %zero64) : (buffer, i32, i64) -> (i32)
   %policy = buffer.constant utf8("loom/src/loom/serve/runtime/parameter/testdata/weights/policy.loom") : buffer
-  func.call @parameter(%stage, %c0, %c0, %first, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%stage, %c0, %primary_execution, %c0, %first, %policy) : (i32, i32, i32, i32, i32, buffer)
   %capacity = scalar.constant 1073741824 : i64
   %arena = func.call @parameter_arena(%capacity) : (i64) -> (i32)
   // The optional bind_parameters boolean controls the source declaration.
@@ -102,9 +103,10 @@ func.def public @prepare_request(%state: buffer, %height: i64, %width: i64, %pro
 }
 
 func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %payload: buffer) -> (i32, buffer) {
+  %primary_execution = scalar.constant 0 : i32
   %zero64 = scalar.constant 0 : i64
   %root = buffer.constant utf8("bank_image_adapted") : buffer
-  %stage = func.call @stage(%root, %zero64) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %zero64) : (buffer, i32, i64) -> (i32)
   %origin = index.constant 0 : offset
   %values = buffer.view %state[%origin] : buffer -> view<3xi32>
   %arena = view.load %values[0] : view<3xi32> -> i32

@@ -116,13 +116,14 @@ TEST_F(SourceTextServiceTest, IndependentParameterPreparationJoinsAllDomains) {
     }
     // The media stage has an independent preparation policy and parameter
     // domain while the ordinary text stage retains the fixture's oracle.
-    EditNativeProvider(directory_ + "/prepare.loom", package + "/prepare.loom",
-                       "func.call @parameter(%media_stage, %c0_i32, "
-                       "%c0_source, %checkpoint, %policy)",
-                       "%media_policy = buffer.constant "
-                       "utf8(\"media-weights.loom\") : buffer\n"
-                       "  func.call @parameter(%media_stage, %c0_i32, "
-                       "%c0_source, %checkpoint, %media_policy)");
+    EditNativeProvider(
+        directory_ + "/prepare.loom", package + "/prepare.loom",
+        "func.call @parameter(%media_stage, %c0_i32, "
+        "%primary_execution, %c0_source, %checkpoint, %policy)",
+        "%media_policy = buffer.constant "
+        "utf8(\"media-weights.loom\") : buffer\n"
+        "  func.call @parameter(%media_stage, %c0_i32, "
+        "%primary_execution, %c0_source, %checkpoint, %media_policy)");
     EditNativeProvider(package + "/prepare.loom", package + "/prepare.loom",
                        "func.return %effective, %c2_i32, %state",
                        "func.return %effective, %c1_i32, %state");

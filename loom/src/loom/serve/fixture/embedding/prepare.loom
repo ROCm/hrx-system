@@ -2,7 +2,7 @@ func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
@@ -14,6 +14,7 @@ func.def @check(%condition: i1) {
 }
 
 func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
+  %primary_execution = scalar.constant 0 : i32
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -87,7 +88,7 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %valid_units = scalar.andi %positive, %bounded : i1
   func.call @check(%valid_units) : (i1)
   %root = buffer.constant utf8("embed") : buffer
-  %stage = func.call @stage(%root, %units) : (buffer, i64) -> (i32)
+  %stage = func.call @stage(%root, %primary_execution, %units) : (buffer, i32, i64) -> (i32)
   %key = buffer.constant utf8("fixture.units") : buffer
   func.call @config_i64(%stage, %key, %units) : (i32, buffer, i64)
   %c8 = index.constant 8 : offset

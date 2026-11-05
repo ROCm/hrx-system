@@ -1,16 +1,17 @@
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.decl import("prepare") @source(%directory: buffer, %path: buffer) -> (i32)
 
 func.decl import("prepare") @source_append(%source: i32, %directory: buffer, %path: buffer)
 
-func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %input: i32, %source: i32, %policy: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %owner: i32, %input: i32, %source: i32, %policy: buffer)
 
 func.decl import("json") @members(%json: buffer) -> (buffer, i32, i64)
 
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, buffer, buffer, buffer, buffer) {
+  %primary_execution = scalar.constant 0 : i32
   %c0_source = scalar.constant 0 : i32
   %c0 = scalar.constant 0 : i64
   %c1 = scalar.constant 1 : i64
@@ -23,9 +24,9 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %diagnostic = buffer.constant utf8("speech fixture expects empty options") : buffer
   func.call @require(%valid32, %diagnostic) : (i32, buffer)
   %initialize = buffer.constant utf8("initialize_weighted_audio") : buffer
-  %first = func.call @stage(%initialize, %c0) : (buffer, i64) -> (i32)
+  %first = func.call @stage(%initialize, %primary_execution, %c0) : (buffer, i32, i64) -> (i32)
   %step = buffer.constant utf8("step_weighted_audio") : buffer
-  %second = func.call @stage(%step, %c1) : (buffer, i64) -> (i32)
+  %second = func.call @stage(%step, %primary_execution, %c1) : (buffer, i32, i64) -> (i32)
   %binding0 = scalar.constant 0 : i32
   %binding1 = scalar.constant 1 : i32
   %binding2 = scalar.constant 2 : i32
@@ -42,12 +43,12 @@ func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64
   %raw_source = func.call @source(%directory, %weights) : (buffer, buffer) -> (i32)
   %packed_source = func.call @source(%directory, %weights) : (buffer, buffer) -> (i32)
   func.call @source_append(%packed_source, %directory, %phases) : (i32, buffer, buffer)
-  func.call @parameter(%first, %binding2, %c0_source, %voice_source, %policy) : (i32, i32, i32, i32, buffer)
-  func.call @parameter(%first, %binding3, %c0_source, %raw_source, %identity) : (i32, i32, i32, i32, buffer)
-  func.call @parameter(%first, %binding1, %c0_source, %packed_source, %policy) : (i32, i32, i32, i32, buffer)
-  func.call @parameter(%first, %binding0, %c0_source, %packed_source, %policy) : (i32, i32, i32, i32, buffer)
-  func.call @parameter(%second, %binding1, %c0_source, %packed_source, %policy) : (i32, i32, i32, i32, buffer)
-  func.call @parameter(%second, %binding0, %c0_source, %packed_source, %policy) : (i32, i32, i32, i32, buffer)
+  func.call @parameter(%first, %binding2, %primary_execution, %c0_source, %voice_source, %policy) : (i32, i32, i32, i32, i32, buffer)
+  func.call @parameter(%first, %binding3, %primary_execution, %c0_source, %raw_source, %identity) : (i32, i32, i32, i32, i32, buffer)
+  func.call @parameter(%first, %binding1, %primary_execution, %c0_source, %packed_source, %policy) : (i32, i32, i32, i32, i32, buffer)
+  func.call @parameter(%first, %binding0, %primary_execution, %c0_source, %packed_source, %policy) : (i32, i32, i32, i32, i32, buffer)
+  func.call @parameter(%second, %binding1, %primary_execution, %c0_source, %packed_source, %policy) : (i32, i32, i32, i32, i32, buffer)
+  func.call @parameter(%second, %binding0, %primary_execution, %c0_source, %packed_source, %policy) : (i32, i32, i32, i32, i32, buffer)
   %rows = scalar.constant 4 : i64
   %work_bytes = scalar.constant 64 : i64
   %input = scalar.constant 16 : i64

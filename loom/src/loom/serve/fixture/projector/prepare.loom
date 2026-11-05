@@ -1,4 +1,4 @@
-func.decl import("prepare") @dispatch(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @dispatch(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.decl import("prepare") @memory_forecast(%root: buffer)
 
@@ -68,11 +68,12 @@ func.def @batch_units(%options: buffer) -> (i64) {
 
 // Up to 64 feature rows across arbitrary positive image request counts.
 func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
+  %primary_execution = scalar.constant 0 : i32
   %forecast = buffer.constant utf8("forecast_memory") : buffer
   func.call @memory_forecast(%forecast) : (buffer)
   %tag = scalar.constant 0 : i64
   %root = buffer.constant utf8("project") : buffer
-  %stage = func.call @dispatch(%root, %tag) : (buffer, i64) -> (i32)
+  %stage = func.call @dispatch(%root, %primary_execution, %tag) : (buffer, i32, i64) -> (i32)
   %units = func.call @batch_units(%options) : (buffer) -> (i64)
   %input_capacity = scalar.constant 65536 : i64
   %output_capacity = scalar.constant 1024 : i64

@@ -41,11 +41,13 @@ typedef struct loom_serve_preparation_parameter_t {
   // An arena binding has no sources or policy; selected banks name that same
   // arena and carry their own complete sources and policy.
   uint32_t arena;
+  // Physical storage owner in the preparation's ordered execution deployment.
+  uint32_t owner_index;
 } loom_serve_preparation_parameter_t;
 
 // Compares checkpoint domains by their ordered source file lists and
-// preparation policy. Binding ordinals are local to each command and do not
-// affect domain identity.
+// preparation policy and physical owner. Binding ordinals are local to each
+// command and do not affect domain identity.
 bool loom_serve_preparation_parameter_equal(
     const loom_serve_preparation_parameter_t* lhs,
     const loom_serve_preparation_parameter_t* rhs);
@@ -62,6 +64,8 @@ typedef struct loom_serve_preparation_stage_t {
   iree_string_view_t root;
   // Product contract selected explicitly by stage or dispatch registration.
   loom_serve_preparation_stage_kind_t kind;
+  // Validated ordinal selecting the exact device and queue-family compiler.
+  uint32_t execution_index;
   // Model-defined selection tag. The preparation service does not interpret it.
   int64_t tag;
   // Maximum reflected transient workspace in bytes, or zero if unrestricted.
@@ -88,14 +92,15 @@ const loom_model_component_t* loom_serve_preparation_component(
 
 // Creates the source-facing "prepare" declaration capability. The caller
 // serializes begin/take with VM invocation and retains the module while linked.
+// execution_count is the positive, signed-i32-representable deployment extent.
 // No declaration storage is allocated until the first source declaration.
 // An optional retained card supplies named parameter scopes and fixed
 // JIT configuration; captured declarations retain it and the selected component
 // independently of the module.
 iree_status_t loom_serve_preparation_module_create(
-    iree_vm_environment_t* environment, loom_model_card_t* card,
-    const loom_model_component_t* component, iree_allocator_t host_allocator,
-    iree_vm_module_t** out_module);
+    iree_vm_environment_t* environment, uint32_t execution_count,
+    loom_model_card_t* card, const loom_model_component_t* component,
+    iree_allocator_t host_allocator, iree_vm_module_t** out_module);
 
 enum loom_serve_preparation_flag_bits_e {
   // Allows checkpoint declarations when the caller owns parameter resolution.
@@ -138,15 +143,17 @@ void loom_serve_preparation_module_recycle(
 
 // Invokes |entry| from |source_path| in |sources| once with borrowed
 // |arguments|. The source imports runner-private "prepare" capabilities:
-//   stage(buffer root, i64 tag) -> i32 stage
-//   dispatch(buffer root, i64 tag) -> i32 stage
+//   execution_count() -> i32 count
+//   stage(buffer root, i32 execution, i64 tag) -> i32 stage
+//   dispatch(buffer root, i32 execution, i64 tag) -> i32 stage
 //   config(i32 stage, buffer key, buffer value)
 //   config_i64(i32 stage, buffer key, i64 value)
 //   workspace_limit(i32 stage, i64 bytes)
 //   source(buffer directory, buffer path) -> i32 source
 //   source_append(i32 source, buffer directory, buffer path)
 //   source_scope(buffer scope) -> i32 source
-//   parameter(i32 stage, i32 binding, i32 input, i32 source, buffer policy)
+//   parameter(i32 stage, i32 binding, i32 owner, i32 input, i32 source,
+//             buffer policy)
 //   parameter_arena(i64 capacity_bytes) -> i32 arena
 //   parameter_bank(i32 stage, i32 binding, i32 arena, buffer sources,
 //                  buffer policy) -> i32 bank
@@ -163,7 +170,9 @@ void loom_serve_preparation_module_recycle(
 // cold source can be extended. Sources need no resident binding and may contain
 // identical keys.
 // parameter maps a dense policy-local input ordinal to a declared source. Each
-// input is bound once; all inputs for a binding name one policy. Several stages
+// input is bound once; all inputs for a binding name one owner and policy.
+// Execution and storage-owner ordinals are below execution_count; storage may
+// belong to a different owner than its consuming stage. Several stages
 // and bindings may share a source. Policy paths resolve through the source
 // environment, under programs.directory for cards. A card supplies stage config
 // defaults; explicit declarations override individual keys. Declarations copy
@@ -172,7 +181,8 @@ void loom_serve_preparation_module_recycle(
 // parameter_arena declares a finite cold VA-byte budget, not physical storage
 // or an adapter-count specialization. parameter_bank is request-only: sources
 // is a nonempty little-endian i32 array in policy-local input order. It binds
-// the full arena at the command root and returns a capture-local bank ordinal.
+// the full arena on the consuming stage's owner and returns a capture-local
+// bank ordinal.
 // Repeated selections may resolve to one prepared bank while retaining distinct
 // ordinals. bind_parameters selects a host entry in the control program; its
 // caller owns the signature and publishes offsets only after complete capture.
@@ -194,9 +204,10 @@ iree_status_t loom_serve_preparation_allocate(
     loomc_target_environment_t* target_environment,
     iree_vm_environment_t* environment, const loom_serve_sources_t* sources,
     iree_string_view_t source_path, iree_string_view_t entry,
-    loom_serve_preparation_flags_t flags, iree_vm_variant_span_t arguments,
-    iree_vm_variant_span_t results, iree_vm_module_span_t libraries,
-    loom_serve_compilation_report_t* report, iree_allocator_t host_allocator,
+    uint32_t execution_count, loom_serve_preparation_flags_t flags,
+    iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,
+    iree_vm_module_span_t libraries, loom_serve_compilation_report_t* report,
+    iree_allocator_t host_allocator,
     loom_serve_preparation_t** out_preparation);
 
 // Catalog-backed counterpart. Compilation may reuse immutable bytecode, while
@@ -204,9 +215,10 @@ iree_status_t loom_serve_preparation_allocate(
 iree_status_t loom_serve_preparation_allocate_cached(
     loom_serve_jit_t* jit, iree_vm_environment_t* environment,
     const loom_serve_sources_t* sources, iree_string_view_t source_path,
-    iree_string_view_t entry, loom_serve_preparation_flags_t flags,
-    iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,
-    iree_vm_module_span_t libraries, iree_allocator_t host_allocator,
+    iree_string_view_t entry, uint32_t execution_count,
+    loom_serve_preparation_flags_t flags, iree_vm_variant_span_t arguments,
+    iree_vm_variant_span_t results, iree_vm_module_span_t libraries,
+    iree_allocator_t host_allocator,
     loom_serve_preparation_t** out_preparation);
 
 // Evaluates already compiled preparation bytecode in a fresh linked process.
@@ -217,12 +229,16 @@ iree_status_t loom_serve_preparation_allocate_cached(
 iree_status_t loom_serve_preparation_evaluate(
     iree_vm_environment_t* environment, iree_vm_module_t* module,
     const loom_serve_sources_t* sources, iree_string_view_t entry,
-    loom_serve_preparation_flags_t flags, iree_vm_variant_span_t arguments,
-    iree_vm_variant_span_t results, iree_vm_module_span_t libraries,
-    iree_allocator_t host_allocator,
+    uint32_t execution_count, loom_serve_preparation_flags_t flags,
+    iree_vm_variant_span_t arguments, iree_vm_variant_span_t results,
+    iree_vm_module_span_t libraries, iree_allocator_t host_allocator,
     loom_serve_preparation_t** out_preparation);
 
 void loom_serve_preparation_free(loom_serve_preparation_t* preparation);
+
+// Immutable deployment extent retained by the source capture; NULL has none.
+uint32_t loom_serve_preparation_execution_count(
+    const loom_serve_preparation_t* preparation);
 
 iree_host_size_t loom_serve_preparation_stage_count(
     const loom_serve_preparation_t* preparation);
@@ -276,10 +292,11 @@ iree_string_view_t loom_serve_preparation_bind_parameters(
 bool loom_serve_preparation_equal(const loom_serve_preparation_t* lhs,
                                   const loom_serve_preparation_t* rhs);
 
-// Exact compiler inputs in declaration order: product kind, root, and config
-// spelling. Checkpoint identity, selection tags, and workspace limits do not
-// specialize code. A consumer reusing these products still checks the new
-// declaration's workspace limit and binds its selected checkpoint storage.
+// Exact compiler inputs in declaration order: execution, product kind, root,
+// and config spelling. Checkpoint identity, selection tags, and workspace
+// limits do not specialize code. A consumer reusing these products still checks
+// the new declaration's workspace limit and binds its selected checkpoint
+// storage.
 bool loom_serve_preparation_code_equal(const loom_serve_preparation_t* lhs,
                                        const loom_serve_preparation_t* rhs);
 

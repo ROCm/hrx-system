@@ -2,9 +2,9 @@ func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl import("runner") @execute_2(%stage: i32, %input: hal.buffer, %output: hal.buffer) -> (i64)
 
-func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @stage(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
-func.decl import("prepare") @dispatch(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @dispatch(%root: buffer, %execution: i32, %tag: i64) -> (i32)
 
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 
@@ -78,6 +78,7 @@ func.def public @prepare_request(%state: buffer, %request: buffer) -> (buffer, i
 // One dispatch consumes the entire cohort. Each feature retains its image's
 // pixel offset and channel count; rows are not forced into separate batches.
 func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer) {
+  %primary_execution = scalar.constant 0 : i32
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -186,10 +187,10 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %
   %kind = view.load %stage_tags[0] : view<1xi64> -> i64
   %command = scalar.cmpi ne, %kind, %c0_i64 : i64
   %stage = scf.if %command -> (i32) {
-    %value = func.call @stage(%state, %rows64) : (buffer, i64) -> (i32)
+    %value = func.call @stage(%state, %primary_execution, %rows64) : (buffer, i32, i64) -> (i32)
     scf.yield %value : i32
   } else {
-    %value = func.call @dispatch(%state, %rows64) : (buffer, i64) -> (i32)
+    %value = func.call @dispatch(%state, %primary_execution, %rows64) : (buffer, i32, i64) -> (i32)
     scf.yield %value : i32
   }
   %key = buffer.constant utf8("fixture.projector_rows") : buffer
