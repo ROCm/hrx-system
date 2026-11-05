@@ -8,7 +8,7 @@
 #define LOOM_SERVE_RUNTIME_STORAGE_VIRTUAL_POOL_H_
 
 #include "iree/base/threading/notification.h"
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/runtime/storage/memory.h"
 
 #ifdef __cplusplus
@@ -72,8 +72,8 @@ uint64_t loom_serve_virtual_pool_source_protected_bytes(
 // Installs the owner's nonblocking wake. Detachment joins callback access.
 // A blocking outer caller may instead use wait below. Neither callback may
 // invoke advance, free, or another operation on the physical owner.
-void loom_serve_virtual_pool_set_observer(loom_serve_virtual_pool_t* pool,
-                                          loom_serve_wake_callback_t observer);
+void loom_serve_virtual_pool_set_observer(
+    loom_serve_virtual_pool_t* pool, loom_runtime_wake_callback_t observer);
 
 // Advances accepted cold allocations and physical trims without waiting.
 // Allocation errors complete their original HAL requests. An unowned trim

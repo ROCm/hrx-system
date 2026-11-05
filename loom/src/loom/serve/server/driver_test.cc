@@ -23,9 +23,9 @@ struct Service {
   // Borrowed trace of service and adapter visits.
   std::vector<size_t>* visits = nullptr;
   // Installed nonblocking owner wake.
-  loom_serve_wake_callback_t observer = {};
+  loom_runtime_wake_callback_t observer = {};
   // Received flags from the last service turn.
-  loom_serve_service_flags_t flags = 0;
+  loom_runtime_service_flags_t flags = 0;
   // Accepted callback storage, independent of capacity-releasing activity.
   bool pending = false;
   // Work that can release shared physical capacity.
@@ -35,18 +35,16 @@ struct Service {
 
   loom_serve_service_t Interface(iree_string_view_t name,
                                  const void* capacity_domain) {
-    return {
-        .name = name,
-        .self = this,
+    static const loom_runtime_service_vtable_t vtable = {
         .set_observer =
-            [](void* self, loom_serve_wake_callback_t value) {
+            [](void* self, loom_runtime_wake_callback_t value) {
               static_cast<Service*>(self)->observer = value;
             },
         .is_pending =
             [](void* self) { return static_cast<Service*>(self)->pending; },
         .is_active =
             [](void* self) { return static_cast<Service*>(self)->active; },
-        .advance = [](void* self, loom_serve_service_flags_t flags,
+        .advance = [](void* self, loom_runtime_service_flags_t flags,
                       bool* out_progress) -> iree_status_t {
           auto& service = *static_cast<Service*>(self);
           service.visits->push_back(2 * service.index);
@@ -58,7 +56,15 @@ struct Service {
           }
           return iree_ok_status();
         },
-        .capacity_domain = capacity_domain,
+    };
+    return {
+        .name = name,
+        .runtime =
+            {
+                .self = this,
+                .vtable = &vtable,
+                .capacity_domain = capacity_domain,
+            },
     };
   }
 };
@@ -133,19 +139,19 @@ TEST_F(DriverTest, CapacityWaitingRequiresActivityInTheSameNonnullDomain) {
   EXPECT_EQ(loom_serve_driver_shared_activity(&driver_, 0), 0u);
   services_[1].active = true;
   EXPECT_EQ(loom_serve_driver_shared_activity(&driver_, 0),
-            LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY);
+            LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY);
   EXPECT_EQ(loom_serve_driver_shared_activity(&driver_, 1), 0u);
   EXPECT_EQ(loom_serve_driver_shared_activity(&driver_, 2), 0u);
   auto* first = loom_serve_registry_at(driver_.registry, 0);
   auto* second = loom_serve_registry_at(driver_.registry, 1);
-  first->service.capacity_domain = nullptr;
-  second->service.capacity_domain = nullptr;
+  first->service.runtime.capacity_domain = nullptr;
+  second->service.runtime.capacity_domain = nullptr;
   EXPECT_EQ(loom_serve_driver_shared_activity(&driver_, 0), 0u);
   services_[1].pending = false;
 }
 
 TEST_F(DriverTest, ApplicationFailureStopsPeersButRetainsPendingOwnership) {
-  const loom_serve_wake_callback_t wake = {[](void*) {}, this};
+  const loom_runtime_wake_callback_t wake = {[](void*) {}, this};
   loom_serve_driver_set_observer(&driver_, wake);
   for (const auto& service : services_) {
     EXPECT_EQ(service.observer.user_data, this);
@@ -158,8 +164,8 @@ TEST_F(DriverTest, ApplicationFailureStopsPeersButRetainsPendingOwnership) {
   EXPECT_TRUE(progress);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
                         iree_status_clone(driver_.status));
-  EXPECT_TRUE(services_[1].flags & LOOM_SERVE_SERVICE_FLAG_STOPPING);
-  EXPECT_TRUE(services_[2].flags & LOOM_SERVE_SERVICE_FLAG_STOPPING);
+  EXPECT_TRUE(services_[1].flags & LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+  EXPECT_TRUE(services_[2].flags & LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
   EXPECT_TRUE(loom_serve_driver_collect(&driver_, &progress));
   services_[0].pending = false;
   progress = false;

@@ -97,7 +97,7 @@ struct loom_serve_recognition_service_t {
     // Serializes completion publication with the serving owner.
     iree_slim_mutex_t mutex;
     // Nonblocking owner wake installed before the first task.
-    loom_serve_wake_callback_t observer;
+    loom_runtime_wake_callback_t observer;
     // The accepted conversion task no longer borrows its row or process
     // storage.
     bool ready;
@@ -426,12 +426,12 @@ static void loom_serve_transcription_decode(
 static iree_status_t loom_serve_transcription_accept(
     void* self, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request,
-    loom_serve_service_flags_t flags) {
+    loom_runtime_service_flags_t flags) {
   loom_serve_recognition_service_t* service = self;
   loom_serve_recognition_job_t pending =
       loom_serve_recognition_request_begin(service);
   pending.connection = connection;
-  if (service->stopping || (flags & LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+  if (service->stopping || (flags & LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
     return loom_serve_transcription_reject(
         service, &pending, "503 Service Unavailable", iree_ok_status(),
         IREE_SV("transcription is stopping"));
@@ -509,10 +509,10 @@ static iree_status_t loom_serve_transcription_deliver(
 }
 
 static iree_status_t loom_serve_recognition_advance(
-    void* self, loom_serve_service_flags_t flags, bool* out_progress) {
+    void* self, loom_runtime_service_flags_t flags, bool* out_progress) {
   loom_serve_recognition_service_t* service = self;
   *out_progress = false;
-  service->stopping |= (flags & LOOM_SERVE_SERVICE_FLAG_STOPPING) != 0;
+  service->stopping |= (flags & LOOM_RUNTIME_SERVICE_FLAG_STOPPING) != 0;
   iree_slim_mutex_lock(&service->events.mutex);
   const bool ready = service->events.ready;
   iree_status_t cpu_status = iree_ok_status();
@@ -642,7 +642,7 @@ static iree_status_t loom_serve_recognition_advance(
     bool progress = false;
     status = loom_serve_recognition_stream_service_advance(
         service->streams, service->stopping,
-        (flags & LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY) != 0, &progress);
+        (flags & LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY) != 0, &progress);
     *out_progress |= progress;
   }
   if (iree_status_is_ok(status) && !service->stopping && !service->cpu.row) {
@@ -653,7 +653,7 @@ static iree_status_t loom_serve_recognition_advance(
 }
 
 static void loom_serve_recognition_set_observer(
-    void* self, loom_serve_wake_callback_t observer) {
+    void* self, loom_runtime_wake_callback_t observer) {
   loom_serve_recognition_service_t* service = self;
   iree_slim_mutex_lock(&service->events.mutex);
   service->events.observer = observer;
@@ -706,6 +706,12 @@ static loom_serve_service_snapshot_t loom_serve_recognition_snapshot(
 
 loom_serve_service_t loom_serve_recognition_service_interface(
     loom_serve_recognition_service_t* service) {
+  static const loom_runtime_service_vtable_t vtable = {
+      .set_observer = loom_serve_recognition_set_observer,
+      .is_pending = loom_serve_recognition_is_pending,
+      .is_active = loom_serve_recognition_is_active,
+      .advance = loom_serve_recognition_advance,
+  };
   static const iree_string_view_t input[] = {IREE_SVL("audio")};
   static const iree_string_view_t output[] = {IREE_SVL("text"),
                                               IREE_SVL("activity")};
@@ -716,15 +722,13 @@ loom_serve_service_t loom_serve_recognition_service_interface(
   };
   return (loom_serve_service_t){
       .name = service->options.name,
-      .self = service,
-      .set_observer = loom_serve_recognition_set_observer,
-      .is_pending = loom_serve_recognition_is_pending,
-      .is_active = loom_serve_recognition_is_active,
+      .runtime = {.self = service,
+                  .vtable = &vtable,
+                  .capacity_domain = service->generator.capacity_domain},
       .accept = service->options.kind == LOOM_SERVE_MODEL_KIND_RECOGNITION
                     ? loom_serve_transcription_accept
                     : NULL,
       .try_open_recognition = loom_serve_recognition_try_open,
-      .advance = loom_serve_recognition_advance,
       .tokenizer = service->generator.tokenizer,
       .kind = service->options.kind,
       .endpoint = loom_serve_model_kind_endpoint(service->options.kind),
@@ -732,7 +736,6 @@ loom_serve_service_t loom_serve_recognition_service_interface(
                        .output_modalities =
                            outputs[service->generator.outputs]},
       .snapshot = loom_serve_recognition_snapshot,
-      .capacity_domain = service->generator.capacity_domain,
       .telemetry = {.stream = service->telemetry,
                     .counters = &service->counters,
                     .latency = &service->latency}};

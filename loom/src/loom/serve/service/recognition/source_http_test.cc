@@ -143,13 +143,13 @@ class SourceRecognitionHttpTest : public ::testing::Test {
         host_, loom_serve_recognition_model_generator(model_), &service_options,
         nullptr, iree_allocator_system(), &service_));
     interface_ = loom_serve_recognition_service_interface(service_);
-    const loom_serve_wake_callback_t observer = {
+    const loom_runtime_wake_callback_t observer = {
         [](void* self) {
           iree_notification_post(static_cast<iree_notification_t*>(self),
                                  IREE_ALL_WAITERS);
         },
         loom_serve_http_server_notification(server_)};
-    interface_.set_observer(interface_.self, observer);
+    interface_.runtime.vtable->set_observer(interface_.runtime.self, observer);
     loom_serve_device_group_set_observer(group_, observer);
   }
   void TearDown() override {
@@ -157,11 +157,12 @@ class SourceRecognitionHttpTest : public ::testing::Test {
       Advance(true);
       AdvanceUntil(
           [&] {
-            return !interface_.is_pending(interface_.self) &&
+            return !interface_.runtime.vtable->is_pending(
+                       interface_.runtime.self) &&
                    !loom_serve_device_group_is_pending(group_);
           },
           true);
-      interface_.set_observer(interface_.self, {});
+      interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
       loom_serve_recognition_service_free(service_);
     }
     loom_serve_device_group_set_observer(group_, {});
@@ -172,9 +173,10 @@ class SourceRecognitionHttpTest : public ::testing::Test {
   iree_status_t AdvanceService(bool stopping, bool* progress) {
     auto status = loom_serve_device_group_advance(group_);
     return iree_status_join(
-        status, interface_.advance(
-                    interface_.self,
-                    stopping ? LOOM_SERVE_SERVICE_FLAG_STOPPING : 0, progress));
+        status,
+        interface_.runtime.vtable->advance(
+            interface_.runtime.self,
+            stopping ? LOOM_RUNTIME_SERVICE_FLAG_STOPPING : 0, progress));
   }
   void Advance(bool stopping) {
     bool progress = false;
@@ -200,7 +202,7 @@ class SourceRecognitionHttpTest : public ::testing::Test {
               const loom_serve_http_request_t** request) {
     IREE_ASSERT_OK(http_.TakeRequest(client, connection, request));
     IREE_ASSERT_OK(
-        interface_.accept(interface_.self, *connection, *request, 0));
+        interface_.accept(interface_.runtime.self, *connection, *request, 0));
   }
 
   // Shared application host; worker gates establish the pre-execution cut.
@@ -226,7 +228,7 @@ class SourceRecognitionHttpRetirementTest
       public ::testing::WithParamInterface<std::tuple<bool, bool, uint32_t>> {};
 
 TEST_F(SourceRecognitionHttpTest, DeploymentRoleRequiresItsDeclaredOutput) {
-  interface_.set_observer(interface_.self, {});
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
   loom_serve_recognition_service_free(service_);
   service_ = nullptr;
   interface_ = {};
@@ -302,9 +304,9 @@ TEST_P(SourceRecognitionHttpRetirementTest,
   const loom_serve_http_request_t* request = nullptr;
   ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection, &request));
   // A queued upload retains its claim but cannot release device capacity.
-  EXPECT_FALSE(interface_.is_active(interface_.self));
-  EXPECT_TRUE(interface_.is_pending(interface_.self));
-  EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 1u);
+  EXPECT_FALSE(interface_.runtime.vtable->is_active(interface_.runtime.self));
+  EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).queued_requests, 1u);
   const std::string body(request->body.data, request->body.size);
   std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
   for (int32_t i = 0; i < FLAG_test_workers; ++i) {
@@ -312,8 +314,8 @@ TEST_P(SourceRecognitionHttpRetirementTest,
         loom_serve_host_executor(host_)));
   }
   ASSERT_NO_FATAL_FAILURE(Advance(false));
-  EXPECT_TRUE(interface_.is_active(interface_.self));
-  ASSERT_TRUE(interface_.is_pending(interface_.self));
+  EXPECT_TRUE(interface_.runtime.vtable->is_active(interface_.runtime.self));
+  ASSERT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
   if (!stopping) {
     const linger reset = {1, 0};
     ASSERT_EQ(
@@ -330,18 +332,18 @@ TEST_P(SourceRecognitionHttpRetirementTest,
   }
   ASSERT_NO_FATAL_FAILURE(Advance(stopping));
   EXPECT_EQ(interface_.telemetry.counters->cancelled, 0u);
-  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 1u);
-  EXPECT_TRUE(interface_.is_pending(interface_.self));
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 1u);
+  EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
   EXPECT_EQ(std::string(request->body.data, request->body.size), body);
   gates.clear();
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
       [&] {
         return interface_.telemetry.counters->cancelled == 1 &&
-               !interface_.is_pending(interface_.self);
+               !interface_.runtime.vtable->is_pending(interface_.runtime.self);
       },
       stopping));
-  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 0u);
-  EXPECT_FALSE(interface_.is_active(interface_.self));
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 0u);
+  EXPECT_FALSE(interface_.runtime.vtable->is_active(interface_.runtime.self));
   if (!stopping) {
     IREE_ASSERT_OK(
         http_.Send(Request(sample_rate, 0, 8192, floating), client.put()));
@@ -379,8 +381,9 @@ TEST_F(SourceRecognitionHttpTest, FloatingPcmUsesTheSameStreamingConversion) {
       loom_serve_http_connection_t* connection = nullptr;
       const loom_serve_http_request_t* request = nullptr;
       ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection, &request));
-      ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-          [&] { return !interface_.is_pending(interface_.self); }));
+      ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+        return !interface_.runtime.vtable->is_pending(interface_.runtime.self);
+      }));
       std::string response;
       IREE_ASSERT_OK(http_.Read(client.release(), false, &response));
       if (invalid) {
@@ -405,8 +408,9 @@ TEST_F(SourceRecognitionHttpTest, RawPcmLimitsRejectOnlyTheAffectedRequest) {
     loom_serve_http_connection_t* connection = nullptr;
     const loom_serve_http_request_t* request = nullptr;
     ASSERT_NO_FATAL_FAILURE(Accept(client.get(), &connection, &request));
-    ASSERT_NO_FATAL_FAILURE(
-        AdvanceUntil([&] { return !interface_.is_pending(interface_.self); }));
+    ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+      return !interface_.runtime.vtable->is_pending(interface_.runtime.self);
+    }));
     std::string response;
     IREE_ASSERT_OK(http_.Read(client.release(), false, &response));
     EXPECT_NE(response.find("HTTP/1.1 400 Bad Request\r\n"), std::string::npos);
@@ -441,8 +445,9 @@ TEST_P(SourceRecognitionHttpFailureTest, SourceCompletionPreservesServing) {
     IREE_ASSERT_OK(http_.Send(Request(16000), peer.put()));
     ASSERT_NO_FATAL_FAILURE(Accept(peer.get(), &connection, &request));
   }
-  ASSERT_NO_FATAL_FAILURE(
-      AdvanceUntil([&] { return !interface_.is_pending(interface_.self); }));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return !interface_.runtime.vtable->is_pending(interface_.runtime.self);
+  }));
   std::string response;
   IREE_ASSERT_OK(http_.Read(rejected.release(), false, &response));
   EXPECT_EQ(response.find("HTTP/1.1 400 Bad Request\r\n"), 0u);
@@ -457,8 +462,9 @@ TEST_P(SourceRecognitionHttpFailureTest, SourceCompletionPreservesServing) {
   loom_serve::testing::HttpClient replacement;
   IREE_ASSERT_OK(http_.Send(Request(16000), replacement.put()));
   ASSERT_NO_FATAL_FAILURE(Accept(replacement.get(), &connection, &request));
-  ASSERT_NO_FATAL_FAILURE(
-      AdvanceUntil([&] { return !interface_.is_pending(interface_.self); }));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return !interface_.runtime.vtable->is_pending(interface_.runtime.self);
+  }));
   IREE_ASSERT_OK(http_.Read(replacement.release(), false, &response));
   EXPECT_EQ(response.find("HTTP/1.1 200 OK\r\n"), 0u);
   EXPECT_NE(response.find(R"({"text":"E"})"), std::string::npos);

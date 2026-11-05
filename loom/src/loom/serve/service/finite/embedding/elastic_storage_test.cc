@@ -288,7 +288,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   const std::string package =
       iree::testing::MakeTempFilePath("dynamic_pressure");
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
-  interface_.set_observer(interface_.self, {});
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
   loom_serve_finite_service_free(std::exchange(service_, nullptr));
   IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
   StartManagedRouter();
@@ -333,7 +333,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   const std::string package =
       iree::testing::MakeTempFilePath("checkpoint_embedding");
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
-  interface_.set_observer(interface_.self, {});
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
   loom_serve_finite_service_free(std::exchange(service_, nullptr));
   IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
   constexpr uint64_t kSlabBytes = 4096;
@@ -350,18 +350,18 @@ TEST_F(ElasticEmbeddingServiceTest,
   const int cancelled = Send(R"({"model":"fixture","input":["a","bbb"]})");
   loom_serve_http_connection_t* connection = nullptr;
   ASSERT_NO_FATAL_FAILURE(Accept(cancelled, &connection));
-  const auto queued = interface_.snapshot(interface_.self);
+  const auto queued = interface_.snapshot(interface_.runtime.self);
   EXPECT_EQ(queued.queued_requests, 1u);
   EXPECT_EQ(queued.active_requests, 0u);
   EXPECT_GE(queued.oldest_queued_age, 0);
   EXPECT_EQ(queued.oldest_active_age, 0);
   // The outer owner holds another model's pin and will release it. Queue the
   // cohort behind that activity instead of treating capacity as unreachable.
-  constexpr auto kShared = LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
+  constexpr auto kShared = LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY;
   EXPECT_TRUE(Step(kShared));  // Prepare requests.
   EXPECT_TRUE(Step(kShared));  // Prepare cohort.
   EXPECT_TRUE(Step(kShared));  // Consume preparation; admission denied.
-  const auto waiting = interface_.snapshot(interface_.self);
+  const auto waiting = interface_.snapshot(interface_.runtime.self);
   EXPECT_STREQ(waiting.phase, "waiting");
   EXPECT_EQ(waiting.queued_requests, 0u);
   EXPECT_EQ(waiting.oldest_queued_age, 0);
@@ -377,8 +377,8 @@ TEST_F(ElasticEmbeddingServiceTest,
   const uint64_t wakes = wakes_.load();
   for (int i = 0; i < 3; ++i) {
     EXPECT_FALSE(Step(kShared));
-    EXPECT_FALSE(interface_.is_active(interface_.self));
-    EXPECT_GE(interface_.snapshot(interface_.self).oldest_active_age,
+    EXPECT_FALSE(interface_.runtime.vtable->is_active(interface_.runtime.self));
+    EXPECT_GE(interface_.snapshot(interface_.runtime.self).oldest_active_age,
               waiting.oldest_active_age);
     const auto retry = loom_serve_residency_snapshot(residency);
     EXPECT_TRUE(retry.admission.waiting);
@@ -419,7 +419,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   loom_serve_residency_cancel_admission(retained_residency);
   loom_serve_residency_release(retained_residency);
-  const auto cancelled_state = interface_.snapshot(interface_.self);
+  const auto cancelled_state = interface_.snapshot(interface_.runtime.self);
   EXPECT_EQ(cancelled_state.oldest_queued_age, 0);
   EXPECT_EQ(cancelled_state.oldest_active_age, 0);
   EXPECT_EQ(loom_serve_residency_snapshot(residency).admission.duration_ns,
@@ -437,7 +437,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   loom_serve_residency_release(retained_residency);
   Drain();
   const std::string result = Read(request);
-  const auto idle = interface_.snapshot(interface_.self);
+  const auto idle = interface_.snapshot(interface_.runtime.self);
   EXPECT_EQ(idle.queued_requests, 0u);
   EXPECT_EQ(idle.active_requests, 0u);
   EXPECT_EQ(idle.oldest_queued_age, 0);
@@ -464,7 +464,7 @@ TEST_F(ElasticEmbeddingServiceTest,
       loom_serve_pool_statistics(storage_owner_).retained;
   // Retire the model with prepared parameters on the serialized owner that
   // must admit its peer. The one-slab budget cannot hold both parameter sets.
-  interface_.set_observer(interface_.self, {});
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
   loom_serve_finite_service_free(std::exchange(service_, nullptr));
   std::swap(model_, retained_);
   ASSERT_NO_FATAL_FAILURE(CreateService(0));

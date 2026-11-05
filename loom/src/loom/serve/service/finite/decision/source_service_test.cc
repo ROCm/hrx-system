@@ -73,16 +73,17 @@ class SourceDecisionServiceTest : public ::testing::Test {
         host_, models_[0], loom_serve_decision_protocol(), IREE_SV("decisions"),
         16, 16, 0, nullptr, host_allocator_, &services_[0]));
     interfaces_[0] = loom_serve_finite_service_interface(services_[0]);
-    EXPECT_EQ(interfaces_[0].capacity_domain,
+    EXPECT_EQ(interfaces_[0].runtime.capacity_domain,
               loom_serve_pool_residency_cache(storage_owner_));
-    const loom_serve_wake_callback_t observer = {
+    const loom_runtime_wake_callback_t observer = {
         [](void* self) {
           auto* test = static_cast<SourceDecisionServiceTest*>(self);
           test->wakes_.fetch_add(1);
           iree_notification_post(&test->notification_, IREE_ALL_WAITERS);
         },
         this};
-    interfaces_[0].set_observer(interfaces_[0].self, observer);
+    interfaces_[0].runtime.vtable->set_observer(interfaces_[0].runtime.self,
+                                                observer);
     loom_serve_device_group_set_observer(resources_.device_group, observer);
     auto http_options = loom_serve_http_server_options_default();
     IREE_ASSERT_OK(loom_serve_http_server_allocate(
@@ -101,7 +102,8 @@ class SourceDecisionServiceTest : public ::testing::Test {
     }
     for (size_t i = 0; i < 2; ++i) {
       if (services_[i]) {
-        interfaces_[i].set_observer(interfaces_[i].self, {});
+        interfaces_[i].runtime.vtable->set_observer(interfaces_[i].runtime.self,
+                                                    {});
         loom_serve_finite_service_free(services_[i]);
       }
     }
@@ -145,8 +147,8 @@ class SourceDecisionServiceTest : public ::testing::Test {
     const loom_serve_http_request_t* request = nullptr;
     loom_serve_http_connection_t* connection = nullptr;
     IREE_ASSERT_OK(http_.TakeRequest(client, &connection, &request));
-    IREE_ASSERT_OK(
-        interfaces_[0].accept(interfaces_[0].self, connection, request, 0));
+    IREE_ASSERT_OK(interfaces_[0].accept(interfaces_[0].runtime.self,
+                                         connection, request, 0));
     if (out_connection) {
       *out_connection = connection;
     }
@@ -155,8 +157,9 @@ class SourceDecisionServiceTest : public ::testing::Test {
     const uint64_t previous = wakes_.load();
     IREE_EXPECT_OK(loom_serve_device_group_advance(resources_.device_group));
     bool progress = false;
-    IREE_EXPECT_OK(interfaces_[0].advance(interfaces_[0].self, 0, &progress));
-    if (interfaces_[0].is_active(interfaces_[0].self) ||
+    IREE_EXPECT_OK(interfaces_[0].runtime.vtable->advance(
+        interfaces_[0].runtime.self, 0, &progress));
+    if (interfaces_[0].runtime.vtable->is_active(interfaces_[0].runtime.self) ||
         loom_serve_device_group_is_pending(resources_.device_group)) {
       struct loom_serve_test_decision_wait_t {
         // Shared release generation.
@@ -189,7 +192,8 @@ class SourceDecisionServiceTest : public ::testing::Test {
         host_, models_[1], loom_serve_embedding_protocol(), IREE_SV("vectors"),
         16, 16, 0, nullptr, host_allocator_, &services_[1]));
     interfaces_[1] = loom_serve_finite_service_interface(services_[1]);
-    interfaces_[0].set_observer(interfaces_[0].self, {});
+    interfaces_[0].runtime.vtable->set_observer(interfaces_[0].runtime.self,
+                                                {});
     loom_serve_device_group_set_observer(resources_.device_group, {});
     http_.Start([this]() -> iree_status_t {
       loom_serve_registry_t* registry = nullptr;

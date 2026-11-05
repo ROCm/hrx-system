@@ -29,7 +29,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "loom/runtime/telemetry/sample.h"
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/service/telemetry/record.h"
@@ -273,7 +273,7 @@ struct loom_serve_test_model_service_t {
   // Publishes explicit submission and stopping phases to the test.
   std::condition_variable condition;
   // Borrowed owner wake target, detached only after accepted work retires.
-  loom_serve_wake_callback_t observer = {};
+  loom_runtime_wake_callback_t observer = {};
   // An accepted completion retains this service until Advance consumes it.
   bool waiting = false;
   // The test has released the accepted completion.
@@ -293,7 +293,7 @@ struct loom_serve_test_model_service_t {
     // The owner has considered a request, not merely accepted its transport.
     bool observed = false;
     // Copied router inputs, independent of later service/registry lifetimes.
-    loom_serve_service_flags_t flags = 0;
+    loom_runtime_service_flags_t flags = 0;
   } admission;
   // Optional immutable historical work, published before owner startup.
   const loom_service_telemetry_counters_t* counters = nullptr;
@@ -302,7 +302,7 @@ struct loom_serve_test_model_service_t {
   // Immutable source facts configured before the service is published.
   loom_serve_reasoning_t reasoning = {};
 
-  static void SetObserver(void* self, loom_serve_wake_callback_t observer) {
+  static void SetObserver(void* self, loom_runtime_wake_callback_t observer) {
     auto* service = static_cast<loom_serve_test_model_service_t*>(self);
     std::lock_guard<std::mutex> lock(service->mutex);
     EXPECT_FALSE(service->waiting);
@@ -322,7 +322,7 @@ struct loom_serve_test_model_service_t {
     std::unique_lock<std::mutex> lock(mutex);
     condition.wait(lock, [this, count] { return accepted >= count; });
   }
-  loom_serve_service_flags_t WaitAdmission() {
+  loom_runtime_service_flags_t WaitAdmission() {
     std::unique_lock<std::mutex> lock(mutex);
     condition.wait(lock, [this] { return admission.observed; });
     return admission.flags;
@@ -358,7 +358,7 @@ struct loom_serve_test_model_service_t {
   static iree_status_t Accept(void* self,
                               loom_serve_http_connection_t* connection,
                               const loom_serve_http_request_t* request,
-                              loom_serve_service_flags_t flags) {
+                              loom_runtime_service_flags_t flags) {
     auto* service = static_cast<loom_serve_test_model_service_t*>(self);
     std::lock_guard<std::mutex> lock(service->mutex);
     service->pending.emplace_back(connection, request);
@@ -366,11 +366,11 @@ struct loom_serve_test_model_service_t {
     service->condition.notify_all();
     return iree_ok_status();
   }
-  static iree_status_t Advance(void* self, loom_serve_service_flags_t flags,
+  static iree_status_t Advance(void* self, loom_runtime_service_flags_t flags,
                                bool* progress) {
     auto* service = static_cast<loom_serve_test_model_service_t*>(self);
     *progress = false;
-    if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+    if (iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
       std::lock_guard<std::mutex> lock(service->mutex);
       service->stopping = true;
       service->condition.notify_all();
@@ -395,7 +395,7 @@ struct loom_serve_test_model_service_t {
         return iree_ok_status();
       }
       service->stopping =
-          iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING);
+          iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
       service->condition.notify_all();
       if (!service->ready) {
         if (service->advance_ready_work && !service->stopping) {
@@ -421,7 +421,7 @@ struct loom_serve_test_model_service_t {
       }
     }
     if (service->wait_for_shared_activity &&
-        iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY)) {
+        iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
       *progress = false;
       return iree_ok_status();
     }
@@ -459,19 +459,22 @@ struct loom_serve_test_model_service_t {
 
   loom_serve_service_t Interface(const iree_tokenizer_t* tokenizer,
                                  const void* capacity_domain) {
+    static const loom_runtime_service_vtable_t vtable = {
+        .set_observer = SetObserver,
+        .is_pending = IsPending,
+        .is_active = IsActive,
+        .advance = Advance,
+    };
     return {.name = iree_make_cstring_view(name),
-            .self = this,
-            .set_observer = SetObserver,
-            .is_pending = IsPending,
-            .is_active = IsActive,
+            .runtime = {.self = this,
+                        .vtable = &vtable,
+                        .capacity_domain = capacity_domain},
             .accept = Accept,
-            .advance = Advance,
             .tokenizer = tokenizer,
             .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING,
             .endpoint = "/v1/test",
             .capabilities = {.reasoning = reasoning},
             .snapshot = Snapshot,
-            .capacity_domain = capacity_domain,
             .telemetry = {.counters = counters,
                           .latency = latency,
                           .sample = counters ? Sample : nullptr}};

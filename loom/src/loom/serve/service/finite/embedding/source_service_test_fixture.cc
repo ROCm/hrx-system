@@ -84,11 +84,13 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::Drain(
   bool pending = loom_serve_workspace_is_pending(self->workspace);
   if (self->service) {
     const auto flags =
-        self->complete ? 0 : LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
+        self->complete ? 0 : LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY;
     self->status = iree_status_join(
         self->status,
-        self->service->advance(self->service->self, flags, &result->did_work));
-    pending |= self->service->is_pending(self->service->self);
+        self->service->runtime.vtable->advance(self->service->runtime.self,
+                                               flags, &result->did_work));
+    pending |=
+        self->service->runtime.vtable->is_pending(self->service->runtime.self);
   }
   if (self->pool) {
     pending |= loom_serve_memory_pool_is_pending(self->pool);
@@ -134,7 +136,7 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::RunOwner(
   process.user_data = this;
   process.release_fn = Release;
   if (service) {
-    service->set_observer(service->self, {Wake, this});
+    service->runtime.vtable->set_observer(service->runtime.self, {Wake, this});
   }
   pool = loom_serve_pool_memory(storage_owner);
   workspace = loom_serve_pool_workspace(storage_owner);
@@ -146,7 +148,7 @@ iree_status_t loom_serve_test_embedding_model_lifecycle_t::RunOwner(
   std::unique_lock<std::mutex> lock(mutex);
   condition.wait(lock, [&] { return released; });
   if (service) {
-    service->set_observer(service->self, {});
+    service->runtime.vtable->set_observer(service->runtime.self, {});
   }
   return status;
 }
@@ -231,16 +233,16 @@ void SourceEmbeddingServiceTest::CreateService(
       host_, model_, loom_serve_embedding_protocol(), IREE_SV("fixture"), 16,
       16, heartbeat_interval, nullptr, host_allocator_, &service_));
   interface_ = loom_serve_finite_service_interface(service_);
-  EXPECT_EQ(interface_.capacity_domain,
+  EXPECT_EQ(interface_.runtime.capacity_domain,
             loom_serve_pool_residency_cache(storage_owner_));
-  const loom_serve_wake_callback_t observer = {
+  const loom_runtime_wake_callback_t observer = {
       [](void* self) {
         auto* test = static_cast<SourceEmbeddingServiceTest*>(self);
         test->wakes_.fetch_add(1);
         iree_notification_post(&test->notification_, IREE_ALL_WAITERS);
       },
       this};
-  interface_.set_observer(interface_.self, observer);
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, observer);
   loom_serve_workspace_set_observer(loom_serve_pool_workspace(storage_owner_),
                                     observer);
   if (auto* pool = loom_serve_pool_memory(storage_owner_)) {
@@ -255,7 +257,7 @@ void SourceEmbeddingServiceTest::TearDown() {
     IREE_EXPECT_OK(http_.Join());
   }
   if (service_) {
-    interface_.set_observer(interface_.self, {});
+    interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
     loom_serve_finite_service_free(service_);
   }
   IREE_EXPECT_OK(loom_serve_http_listener_free(listener_));
@@ -304,20 +306,22 @@ void SourceEmbeddingServiceTest::Accept(
   const loom_serve_http_request_t* request = nullptr;
   loom_serve_http_connection_t* connection = nullptr;
   IREE_ASSERT_OK(http_.TakeRequest(client, &connection, &request));
-  IREE_ASSERT_OK(interface_.accept(interface_.self, connection, request, 0));
+  IREE_ASSERT_OK(
+      interface_.accept(interface_.runtime.self, connection, request, 0));
   if (out_connection) {
     *out_connection = connection;
   }
 }
 
-bool SourceEmbeddingServiceTest::Step(loom_serve_service_flags_t flags) {
+bool SourceEmbeddingServiceTest::Step(loom_runtime_service_flags_t flags) {
   const uint64_t previous = wakes_.load();
   auto* workspace = loom_serve_pool_workspace(storage_owner_);
   IREE_EXPECT_OK(loom_serve_workspace_advance(workspace));
   bool progress = false;
-  IREE_EXPECT_OK(interface_.advance(interface_.self, flags, &progress));
+  IREE_EXPECT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
+                                                    flags, &progress));
   auto* pool = loom_serve_pool_memory(storage_owner_);
-  if (interface_.is_active(interface_.self) ||
+  if (interface_.runtime.vtable->is_active(interface_.runtime.self) ||
       loom_serve_workspace_is_pending(workspace) ||
       (pool && loom_serve_memory_pool_is_pending(pool))) {
     struct loom_serve_test_embedding_wait_t {
@@ -347,7 +351,7 @@ void SourceEmbeddingServiceTest::Drain() {
 }
 
 void SourceEmbeddingServiceTest::CheckAbandonedCohort(
-    loom_serve_service_flags_t flags, const char* expected) {
+    loom_runtime_service_flags_t flags, const char* expected) {
   const char* bodies[] = {R"({"model":"fixture","input":"a"})",
                           R"({"model":"fixture","input":"bbb"})"};
   int clients[IREE_ARRAYSIZE(bodies)] = {};
@@ -359,9 +363,9 @@ void SourceEmbeddingServiceTest::CheckAbandonedCohort(
   ASSERT_TRUE(Step());  // CPU request preparation.
   ASSERT_TRUE(Step());  // Source batch preparation.
   ASSERT_TRUE(Step());  // Accepted device work; readiness may still be pending.
-  ASSERT_STREQ(interface_.snapshot(interface_.self).phase, "running");
+  ASSERT_STREQ(interface_.snapshot(interface_.runtime.self).phase, "running");
 
-  if (!iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+  if (!iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
     for (size_t i = 0; i < IREE_ARRAYSIZE(clients); ++i) {
       const linger reset = {1, 0};
       ASSERT_EQ(
@@ -380,21 +384,21 @@ void SourceEmbeddingServiceTest::CheckAbandonedCohort(
 
   // Successful completion still counts the whole device cohort. No response
   // consumer survives, so no CPU encoder should acquire these result views.
-  while (interface_.is_pending(interface_.self)) {
+  while (interface_.runtime.vtable->is_pending(interface_.runtime.self)) {
     ASSERT_TRUE(Step(flags));
   }
-  EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "idle");
-  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 0u);
-  EXPECT_FALSE(interface_.is_pending(interface_.self));
+  EXPECT_STREQ(interface_.snapshot(interface_.runtime.self).phase, "idle");
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 0u);
+  EXPECT_FALSE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
   EXPECT_EQ(interface_.telemetry.counters->cancelled, 2u);
   EXPECT_EQ(interface_.telemetry.counters->input_tokens, 4u);
   EXPECT_EQ(interface_.telemetry.counters->batches, 1u);
   Drain();
-  if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+  if (iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
     for (int client : clients) {
       EXPECT_TRUE(Read(client, /*allow_empty=*/true).empty());
     }
-    interface_.set_observer(interface_.self, {});
+    interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
     loom_serve_finite_service_free(std::exchange(service_, nullptr));
     ASSERT_NO_FATAL_FAILURE(CreateService(0));
   }
@@ -408,7 +412,7 @@ void SourceEmbeddingServiceTest::CheckAbandonedCohort(
 }
 
 void SourceEmbeddingServiceTest::StartRouter() {
-  interface_.set_observer(interface_.self, {});
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
   http_.Start([this]() -> iree_status_t {
     loom_serve_registry_t* registry = nullptr;
     IREE_RETURN_IF_ERROR(loom_serve_registry_allocate(
@@ -427,7 +431,7 @@ void SourceEmbeddingServiceTest::StartRouter() {
 
 void SourceEmbeddingServiceTest::StartManagedRouter(iree_host_size_t capacity) {
   if (service_) {
-    interface_.set_observer(interface_.self, {});
+    interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
   }
   http_.Start([this, capacity]() -> iree_status_t {
     const loom_serve_model_registration_options_t options = {
@@ -704,7 +708,7 @@ void SourceEmbeddingServiceTest::UseDirectPackage() {
   manifest.close();
   ASSERT_TRUE(manifest.good());
   if (service_) {
-    interface_.set_observer(interface_.self, {});
+    interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
     loom_serve_finite_service_free(std::exchange(service_, nullptr));
   }
   IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));

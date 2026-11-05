@@ -154,7 +154,7 @@ bool loom_serve_workspace_trim_idle(loom_serve_workspace_t* workspace,
 // backing has no serving-owned cold work. Queue callbacks only publish to this
 // owner and wake it; they never commit or reclaim physical slabs.
 void loom_serve_workspace_set_observer(loom_serve_workspace_t* workspace,
-                                       loom_serve_wake_callback_t observer);
+                                       loom_runtime_wake_callback_t observer);
 iree_status_t loom_serve_workspace_advance(loom_serve_workspace_t* workspace);
 bool loom_serve_workspace_is_pending(loom_serve_workspace_t* workspace);
 

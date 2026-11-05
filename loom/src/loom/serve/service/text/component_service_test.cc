@@ -93,7 +93,7 @@ class TextComponentServiceTest : public SourceTextServiceTest {
         .asset_directory = IREE_SV("missing-vision"),
         .options = IREE_SV("{}"),
     };
-    const loom_serve_wake_callback_t observer = {
+    const loom_runtime_wake_callback_t observer = {
         [](void* user_data) {
           iree_notification_post(static_cast<iree_notification_t*>(user_data),
                                  IREE_ALL_WAITERS);
@@ -112,9 +112,13 @@ class TextComponentServiceTest : public SourceTextServiceTest {
   void TearDown() override {
     if (service_) {
       AdvanceUntil(
-          interface_, [&] { return !interface_.is_pending(interface_.self); },
-          LOOM_SERVE_SERVICE_FLAG_STOPPING);
-      interface_.set_observer(interface_.self, {});
+          interface_,
+          [&] {
+            return !interface_.runtime.vtable->is_pending(
+                interface_.runtime.self);
+          },
+          LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+      interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
       loom_serve_text_service_free(service_, IREE_STATUS_OK);
     }
     if (image_) {
@@ -131,8 +135,8 @@ class TextComponentServiceTest : public SourceTextServiceTest {
     IREE_ASSERT_OK(loom_serve_finite_component_prepare(image_, &model));
     EXPECT_EQ(model, nullptr);
     EXPECT_TRUE(loom_serve_finite_component_is_pending(image_));
-    EXPECT_TRUE(interface_.is_pending(interface_.self));
-    EXPECT_FALSE(interface_.is_active(interface_.self));
+    EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
+    EXPECT_FALSE(interface_.runtime.vtable->is_active(interface_.runtime.self));
   }
 
   void CompleteTextRequest() {
@@ -140,9 +144,9 @@ class TextComponentServiceTest : public SourceTextServiceTest {
     loom_serve_http_connection_t* connection = nullptr;
     ASSERT_NO_FATAL_FAILURE(Accept(client, interface_, &connection));
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
-      return !interface_.is_pending(interface_.self) &&
-             !interface_.is_active(interface_.self) &&
-             !interface_.snapshot(interface_.self).queued_requests;
+      return !interface_.runtime.vtable->is_pending(interface_.runtime.self) &&
+             !interface_.runtime.vtable->is_active(interface_.runtime.self) &&
+             !interface_.snapshot(interface_.runtime.self).queued_requests;
     }));
     EXPECT_EQ(Content(Read(client)), Oracle::Complete("abxa", 2));
   }
@@ -180,8 +184,11 @@ TEST_F(TextComponentServiceTest, ImageFailureDoesNotFailConcurrentText) {
 TEST_F(TextComponentServiceTest, StoppingJoinsImagePreparation) {
   ASSERT_NO_FATAL_FAILURE(BeginImagePreparation());
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      interface_, [&] { return !interface_.is_pending(interface_.self); },
-      LOOM_SERVE_SERVICE_FLAG_STOPPING));
+      interface_,
+      [&] {
+        return !interface_.runtime.vtable->is_pending(interface_.runtime.self);
+      },
+      LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
   EXPECT_FALSE(loom_serve_finite_component_is_pending(image_));
   EXPECT_EQ(loom_serve_finite_component_report(image_)->commands, 0u);
 }

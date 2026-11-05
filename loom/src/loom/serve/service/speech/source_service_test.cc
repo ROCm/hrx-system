@@ -136,9 +136,13 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
       IREE_EXPECT_OK(http_.Join());
     }
     if (service_) {
-      AdvanceUntil([&] { return !interface_.is_pending(interface_.self); },
-                   LOOM_SERVE_SERVICE_FLAG_STOPPING);
-      interface_.set_observer(interface_.self, {});
+      AdvanceUntil(
+          [&] {
+            return !interface_.runtime.vtable->is_pending(
+                interface_.runtime.self);
+          },
+          LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+      interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
       loom_serve_speech_service_free(service_);
     }
     IREE_EXPECT_OK(loom_serve_http_listener_free(listener_));
@@ -191,22 +195,23 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
     IREE_ASSERT_OK(loom_serve_speech_service_allocate(
         host_, generator_, &options, nullptr, allocator_, &service_));
     interface_ = loom_serve_speech_service_interface(service_);
-    interface_.set_observer(interface_.self,
-                            {[](void* self) {
-                               iree_notification_post(
-                                   static_cast<iree_notification_t*>(self),
-                                   IREE_ALL_WAITERS);
-                             },
-                             loom_serve_http_server_notification(server_)});
+    interface_.runtime.vtable->set_observer(
+        interface_.runtime.self,
+        {[](void* self) {
+           iree_notification_post(static_cast<iree_notification_t*>(self),
+                                  IREE_ALL_WAITERS);
+         },
+         loom_serve_http_server_notification(server_)});
   }
 
   template <typename Predicate>
-  void AdvanceUntil(Predicate ready, loom_serve_service_flags_t flags = 0) {
+  void AdvanceUntil(Predicate ready, loom_runtime_service_flags_t flags = 0) {
     auto* notification = loom_serve_http_server_notification(server_);
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      auto status = interface_.advance(interface_.self, flags, &progress);
+      auto status = interface_.runtime.vtable->advance(interface_.runtime.self,
+                                                       flags, &progress);
       if (ready() || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);
       } else {
@@ -230,7 +235,8 @@ class SourceSpeechServiceTest : public ::testing::TestWithParam<bool> {
   void Accept(int client, loom_serve_http_connection_t** connection) {
     const loom_serve_http_request_t* request = nullptr;
     IREE_ASSERT_OK(http_.TakeRequest(client, connection, &request));
-    IREE_ASSERT_OK(interface_.accept(interface_.self, *connection, request, 0));
+    IREE_ASSERT_OK(
+        interface_.accept(interface_.runtime.self, *connection, request, 0));
   }
 
   int Send(const std::string& method, const std::string& target,
@@ -844,13 +850,15 @@ TEST_P(SourceSpeechServiceTest,
   ASSERT_NE(interface.telemetry.latency, nullptr);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
     return interface.telemetry.counters->batches == 1 &&
-           std::string(interface.snapshot(interface.self).phase) == "ready";
+           std::string(interface.snapshot(interface.runtime.self).phase) ==
+               "ready";
   }));
   // The first source block is empty and publishes neither headers nor audio.
   EXPECT_EQ(ObservationCount(interface.telemetry.latency->first_output), 0u);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
     return interface.telemetry.counters->batches == 2 &&
-           std::string(interface.snapshot(interface.self).phase) == "ready";
+           std::string(interface.snapshot(interface.runtime.self).phase) ==
+               "ready";
   }));
   // The real service has published one three-frame block; no later generation
   // has been submitted. Observe actual socket bytes before advancing it again.
@@ -887,7 +895,7 @@ TEST_P(SourceSpeechServiceTest,
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
       [&] { return interface.telemetry.counters->cancelled == 1; }));
   EXPECT_EQ(interface.telemetry.counters->batches, 2u);
-  EXPECT_FALSE(interface.is_pending(interface.self));
+  EXPECT_FALSE(interface.runtime.vtable->is_pending(interface.runtime.self));
   EXPECT_EQ(ObservationCount(interface.telemetry.latency
                                  ->outcomes[LOOM_SERVICE_TELEMETRY_CANCELLED]),
             1u);
@@ -921,12 +929,13 @@ TEST_P(SourceSpeechServiceTest,
   for (size_t i = 0; i < 4; ++i) {
     ASSERT_NO_FATAL_FAILURE(send(i));
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
-      if (std::string(interface_.snapshot(interface_.self).phase) != "ready") {
+      if (std::string(interface_.snapshot(interface_.runtime.self).phase) !=
+          "ready") {
         return false;
       }
       loom_serve_http_request_snapshot_t request;
-      for (size_t index = 0;
-           interface_.inspection.request_at(interface_.self, index, &request);
+      for (size_t index = 0; interface_.inspection.request_at(
+               interface_.runtime.self, index, &request);
            ++index) {
         if (request.id == i + 1) {
           return request.counters.batches >= 2;
@@ -939,7 +948,7 @@ TEST_P(SourceSpeechServiceTest,
       [&] { return interface_.telemetry.counters->completed == 1; }));
   CheckAudio(Read(clients[0].release()), lengths[0] * 8 + 1, 1, seeds[0]);
   EXPECT_EQ(largest_batch_, 4u);
-  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 3u);
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 3u);
 
   const linger reset = {1, 0};
   ASSERT_EQ(setsockopt(clients[1].get(), SOL_SOCKET, SO_LINGER, &reset,
@@ -964,7 +973,7 @@ TEST_P(SourceSpeechServiceTest,
   }
   EXPECT_EQ(interface_.telemetry.counters->requests, 5u);
   EXPECT_EQ(interface_.telemetry.counters->failed, 0u);
-  EXPECT_FALSE(interface_.is_pending(interface_.self));
+  EXPECT_FALSE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
 }
 
 TEST_P(SourceSpeechServiceTest,
@@ -979,11 +988,12 @@ TEST_P(SourceSpeechServiceTest,
   }
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
     return largest_batch_ == 2 &&
-           std::string(interface_.snapshot(interface_.self).phase) == "ready";
+           std::string(interface_.snapshot(interface_.runtime.self).phase) ==
+               "ready";
   }));
   const auto submitted = interface_.telemetry.counters->batches;
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
-    return std::string(interface_.snapshot(interface_.self).phase) ==
+    return std::string(interface_.snapshot(interface_.runtime.self).phase) ==
            "preparing_batch";
   }));
   // Packing can finish on its CPU worker, but no owner has submitted the plan.
@@ -1060,11 +1070,11 @@ TEST_P(SourceSpeechServiceTest,
   EXPECT_EQ(frames, 49u);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
       [&] { return interface_.telemetry.counters->completed == 3; }));
-  EXPECT_FALSE(interface_.is_pending(interface_.self));
+  EXPECT_FALSE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
   const auto* final = loom_serve_speech_stream_peek(stream.get());
   const std::vector<uint8_t> final_samples(
       final->samples.data, final->samples.data + final->samples.data_length);
-  interface_.set_observer(interface_.self, {});
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
   loom_serve_speech_service_free(service_);
   service_ = nullptr;
   IREE_ASSERT_OK(loom_serve_speech_model_free(model_));
@@ -1341,7 +1351,8 @@ TEST_P(SourceVoiceServiceTest,
     IREE_ASSERT_OK(Upload("voice", 0.125f, &upload));
     if (submitted) {
       ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
-        return std::string(interface_.snapshot(interface_.self).phase) ==
+        return std::string(
+                   interface_.snapshot(interface_.runtime.self).phase) ==
                "generating";
       }));
     }
@@ -1351,11 +1362,13 @@ TEST_P(SourceVoiceServiceTest,
           loom_serve_host_executor(host_)));
     }
     bool progress = false;
-    IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
-    EXPECT_TRUE(interface_.is_pending(interface_.self));
+    IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
+                                                      0, &progress));
+    EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
     const auto cancelled = interface_.telemetry.counters->cancelled;
     upload.reset();
-    IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+    IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self,
+                                                      0, &progress));
     VoiceUpload duplicate(nullptr, loom_serve_speech_voice_upload_close);
     IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
                           Upload("voice", 0.25f, &duplicate));
@@ -1385,16 +1398,17 @@ TEST_P(SourceVoiceServiceTest,
         loom_serve_host_executor(host_)));
   }
   bool progress = false;
-  IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
-  IREE_ASSERT_OK(interface_.advance(
-      interface_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
+  IREE_ASSERT_OK(interface_.runtime.vtable->advance(interface_.runtime.self, 0,
+                                                    &progress));
+  IREE_ASSERT_OK(interface_.runtime.vtable->advance(
+      interface_.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING, &progress));
   EXPECT_FALSE(loom_serve_speech_voice_upload_is_complete(upload.get()));
-  EXPECT_TRUE(interface_.is_pending(interface_.self));
+  EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
   gates.clear();
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
       [&] { return loom_serve_speech_voice_upload_is_complete(upload.get()); },
-      LOOM_SERVE_SERVICE_FLAG_STOPPING));
-  interface_.set_observer(interface_.self, {});
+      LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
   loom_serve_speech_service_free(service_);
   service_ = nullptr;
   IREE_ASSERT_OK(loom_serve_speech_model_free(model_));
@@ -1517,14 +1531,14 @@ TEST_P(SourceStockVoiceServiceTest, CancellationJoinsQueuedRecordingRead) {
   IREE_ASSERT_STATUS_IS(IREE_STATUS_CANCELLED,
                         PumpUntil([&] { return complete_; }));
   EXPECT_TRUE(complete_);
-  EXPECT_FALSE(interface_.is_pending(interface_.self));
+  EXPECT_FALSE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
   EXPECT_EQ(interface_.telemetry.counters->completed, 0u);
 }
 
 TEST_P(SourceStockVoiceServiceTest, CancellationJoinsAcceptedVoiceEncoding) {
   ASSERT_NO_FATAL_FAILURE(Allocate());
   IREE_ASSERT_OK(PumpUntil([&] {
-    return std::string(interface_.snapshot(interface_.self).phase) ==
+    return std::string(interface_.snapshot(interface_.runtime.self).phase) ==
            "generating";
   }));
   ASSERT_FALSE(complete_);
@@ -1539,7 +1553,7 @@ TEST_P(SourceStockVoiceServiceTest, CancellationJoinsAcceptedVoiceEncoding) {
   IREE_ASSERT_STATUS_IS(IREE_STATUS_CANCELLED,
                         PumpUntil([&] { return complete_; }));
   EXPECT_TRUE(complete_);
-  EXPECT_FALSE(interface_.is_pending(interface_.self));
+  EXPECT_FALSE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
   EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
 }
 
@@ -1548,7 +1562,7 @@ TEST_P(SourceStockVoiceServiceTest, MissingOriginalFailsBeforePublication) {
   IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND,
                         PumpUntil([&] { return complete_; }));
   EXPECT_TRUE(complete_);
-  EXPECT_FALSE(interface_.is_pending(interface_.self));
+  EXPECT_FALSE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
   EXPECT_EQ(interface_.telemetry.counters->completed, 0u);
 }
 

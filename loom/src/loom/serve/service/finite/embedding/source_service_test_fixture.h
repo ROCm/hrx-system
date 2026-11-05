@@ -114,11 +114,11 @@ class SourceEmbeddingServiceTest : public ::testing::Test {
   void Accept(int client,
               loom_serve_http_connection_t** out_connection = nullptr);
 
-  bool Step(loom_serve_service_flags_t flags = 0);
+  bool Step(loom_runtime_service_flags_t flags = 0);
 
   void Drain();
 
-  void CheckAbandonedCohort(loom_serve_service_flags_t flags,
+  void CheckAbandonedCohort(loom_runtime_service_flags_t flags,
                             const char* expected = R"("embedding":[1,1,1,1])");
 
   void StartRouter();

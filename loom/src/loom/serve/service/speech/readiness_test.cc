@@ -231,70 +231,80 @@ class SpeechReadinessTest : public ::testing::Test {
     // Observe completed owner turns without replacing any service behavior.
     wrapped_ = actual_;
     auto& wrapped = wrapped_;
-    wrapped.self = this;
-    wrapped.set_observer = [](void* self, loom_serve_wake_callback_t wake) {
-      auto* test = static_cast<SpeechReadinessTest*>(self);
-      test->actual_.set_observer(test->actual_.self, wake);
+    wrapped.runtime.self = this;
+    static const loom_runtime_service_vtable_t vtable = {
+        .set_observer =
+            [](void* self, loom_runtime_wake_callback_t wake) {
+              auto* test = static_cast<SpeechReadinessTest*>(self);
+              test->actual_.runtime.vtable->set_observer(
+                  test->actual_.runtime.self, wake);
+            },
+        .is_pending =
+            [](void* self) {
+              auto* test = static_cast<SpeechReadinessTest*>(self);
+              return test->actual_.runtime.vtable->is_pending(
+                  test->actual_.runtime.self);
+            },
+        .is_active =
+            [](void* self) {
+              auto* test = static_cast<SpeechReadinessTest*>(self);
+              return test->actual_.runtime.vtable->is_active(
+                  test->actual_.runtime.self);
+            },
+        .advance =
+            [](void* self, loom_runtime_service_flags_t flags, bool* progress) {
+              auto* test = static_cast<SpeechReadinessTest*>(self);
+              iree_status_t status = test->actual_.runtime.vtable->advance(
+                  test->actual_.runtime.self, flags, progress);
+              if (iree_status_is_ok(status) &&
+                  std::string(test->actual_.snapshot(test->actual_.runtime.self)
+                                  .phase) == "delivering") {
+                test->credit_wait_.store(true, std::memory_order_release);
+                test->http_.Notify();
+              }
+              return status;
+            },
     };
-    wrapped.is_pending = [](void* self) {
-      auto* test = static_cast<SpeechReadinessTest*>(self);
-      return test->actual_.is_pending(test->actual_.self);
-    };
-    wrapped.is_active = [](void* self) {
-      auto* test = static_cast<SpeechReadinessTest*>(self);
-      return test->actual_.is_active(test->actual_.self);
-    };
+    wrapped.runtime.vtable = &vtable;
     wrapped.accept = [](void* self, loom_serve_http_connection_t* connection,
                         const loom_serve_http_request_t* request,
-                        loom_serve_service_flags_t flags) {
+                        loom_runtime_service_flags_t flags) {
       auto* test = static_cast<SpeechReadinessTest*>(self);
-      return test->actual_.accept(test->actual_.self, connection, request,
-                                  flags);
-    };
-    wrapped.advance = [](void* self, loom_serve_service_flags_t flags,
-                         bool* progress) {
-      auto* test = static_cast<SpeechReadinessTest*>(self);
-      iree_status_t status =
-          test->actual_.advance(test->actual_.self, flags, progress);
-      if (iree_status_is_ok(status) &&
-          std::string(test->actual_.snapshot(test->actual_.self).phase) ==
-              "delivering") {
-        test->credit_wait_.store(true, std::memory_order_release);
-        test->http_.Notify();
-      }
-      return status;
+      return test->actual_.accept(test->actual_.runtime.self, connection,
+                                  request, flags);
     };
     wrapped.snapshot = [](void* self) {
       auto* test = static_cast<SpeechReadinessTest*>(self);
-      return test->actual_.snapshot(test->actual_.self);
+      return test->actual_.snapshot(test->actual_.runtime.self);
     };
     wrapped.inspection.request_at =
         [](void* self, iree_host_size_t index,
            loom_serve_http_request_snapshot_t* out) {
           auto* test = static_cast<SpeechReadinessTest*>(self);
-          return test->actual_.inspection.request_at(test->actual_.self, index,
-                                                     out);
+          return test->actual_.inspection.request_at(test->actual_.runtime.self,
+                                                     index, out);
         };
     if (start) {
       StartRouter();
     } else {
-      actual_.set_observer(actual_.self,
-                           {[](void* self) {
-                              iree_notification_post(
-                                  static_cast<iree_notification_t*>(self),
-                                  IREE_ALL_WAITERS);
-                            },
-                            loom_serve_http_server_notification(server_)});
+      actual_.runtime.vtable->set_observer(
+          actual_.runtime.self, {[](void* self) {
+                                   iree_notification_post(
+                                       static_cast<iree_notification_t*>(self),
+                                       IREE_ALL_WAITERS);
+                                 },
+                                 loom_serve_http_server_notification(server_)});
     }
   }
 
   template <typename Predicate>
-  void AdvanceUntil(Predicate ready, loom_serve_service_flags_t flags = 0) {
+  void AdvanceUntil(Predicate ready, loom_runtime_service_flags_t flags = 0) {
     auto* notification = loom_serve_http_server_notification(server_);
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      auto status = actual_.advance(actual_.self, flags, &progress);
+      auto status = actual_.runtime.vtable->advance(actual_.runtime.self, flags,
+                                                    &progress);
       if (ready() || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);
       } else {
@@ -421,11 +431,14 @@ class SpeechReadinessTest : public ::testing::Test {
     if (http_.joinable()) {
       CheckStatus(http_.Join());
     } else if (service_ && !failed_) {
-      AdvanceUntil([&] { return !actual_.is_pending(actual_.self); },
-                   LOOM_SERVE_SERVICE_FLAG_STOPPING);
+      AdvanceUntil(
+          [&] {
+            return !actual_.runtime.vtable->is_pending(actual_.runtime.self);
+          },
+          LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
     }
     if (service_) {
-      actual_.set_observer(actual_.self, {});
+      actual_.runtime.vtable->set_observer(actual_.runtime.self, {});
     }
     loom_serve_speech_service_free(service_);
     // Failed readiness transfers request ownership to the model. Release its
@@ -570,7 +583,8 @@ TEST_P(SpeechOutputFailureTest, RetiredFailurePreservesPeersAndRetirement) {
     const loom_serve_http_request_t* request = nullptr;
     IREE_ASSERT_OK(
         http_.TakeRequest(clients[i].get(), &connections[i], &request));
-    IREE_ASSERT_OK(actual_.accept(actual_.self, connections[i], request, 0));
+    IREE_ASSERT_OK(
+        actual_.accept(actual_.runtime.self, connections[i], request, 0));
   }
   ASSERT_NO_FATAL_FAILURE(
       AdvanceUntil([&] { return held_.load(std::memory_order_acquire); }));
@@ -595,11 +609,13 @@ TEST_P(SpeechOutputFailureTest, RetiredFailurePreservesPeersAndRetirement) {
       },
       connections[1], iree_infinite_timeout());
   bool progress = false;
-  IREE_ASSERT_OK(actual_.advance(actual_.self, 0, &progress));
+  IREE_ASSERT_OK(
+      actual_.runtime.vtable->advance(actual_.runtime.self, 0, &progress));
   EXPECT_EQ(released_.load(), 0u);
   ReleaseDependency();
-  ASSERT_NO_FATAL_FAILURE(
-      AdvanceUntil([&] { return !actual_.is_pending(actual_.self); }));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
+    return !actual_.runtime.vtable->is_pending(actual_.runtime.self);
+  }));
   EXPECT_EQ(actual_.telemetry.counters->failed, 1u);
   EXPECT_EQ(actual_.telemetry.counters->cancelled, 1u);
   EXPECT_EQ(actual_.telemetry.counters->completed, 2u);
@@ -657,14 +673,15 @@ TEST_F(SpeechReadinessTest,
   loom_serve_http_connection_t* connection = nullptr;
   const loom_serve_http_request_t* request = nullptr;
   IREE_ASSERT_OK(http_.TakeRequest(client.get(), &connection, &request));
-  IREE_ASSERT_OK(actual_.accept(actual_.self, connection, request, 0));
+  IREE_ASSERT_OK(actual_.accept(actual_.runtime.self, connection, request, 0));
 
   // Deferred admission retains preparation without accepting any activation
   // or waiting on a frontier. A retry waits for the capacity owner's wake.
   ASSERT_NO_FATAL_FAILURE(
       AdvanceUntil([&] { return admission_attempts_ != 0; }));
   bool progress = false;
-  IREE_ASSERT_OK(actual_.advance(actual_.self, 0, &progress));
+  IREE_ASSERT_OK(
+      actual_.runtime.vtable->advance(actual_.runtime.self, 0, &progress));
   EXPECT_FALSE(progress);
   EXPECT_EQ(admission_completions_, 0u);
   ASSERT_EQ(actual_.telemetry.counters->rejected, 0u);
@@ -702,7 +719,8 @@ TEST_F(SpeechReadinessTest, NativePressureMovesOnlyAcceptedInput) {
   EXPECT_EQ(requests[2].seed, 17u);
   streams[1].reset();
   bool progress = false;
-  IREE_ASSERT_OK(actual_.advance(actual_.self, 0, &progress));
+  IREE_ASSERT_OK(
+      actual_.runtime.vtable->advance(actual_.runtime.self, 0, &progress));
   loom_serve_speech_stream_t* stream = nullptr;
   IREE_ASSERT_OK(
       loom_serve_speech_service_try_open(service_, &requests[2], &stream));
@@ -737,11 +755,13 @@ TEST_F(SpeechReadinessTest, NativeCancellationRetainsOriginalDeviceCohort) {
   EXPECT_EQ(largest_batch_.load(), 2u);
   first.reset();
   bool progress = false;
-  IREE_ASSERT_OK(actual_.advance(actual_.self, 0, &progress));
+  IREE_ASSERT_OK(
+      actual_.runtime.vtable->advance(actual_.runtime.self, 0, &progress));
   EXPECT_TRUE(progress);
   EXPECT_EQ(released_.load(), 0u);
-  EXPECT_EQ(actual_.snapshot(actual_.self).active_requests, 2u);
-  IREE_ASSERT_OK(actual_.advance(actual_.self, 0, &progress));
+  EXPECT_EQ(actual_.snapshot(actual_.runtime.self).active_requests, 2u);
+  IREE_ASSERT_OK(
+      actual_.runtime.vtable->advance(actual_.runtime.self, 0, &progress));
   EXPECT_FALSE(progress);
   ReleaseDependency();
   while (!loom_serve_speech_stream_is_complete(second.get())) {
@@ -786,18 +806,19 @@ TEST_F(SpeechReadinessTest, ClosedNativeHandleRetainsAcceptedEncodingStorage) {
         loom_serve_host_executor(host_)));
   }
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
-    return std::string(actual_.snapshot(actual_.self).phase) == "encoding";
+    return std::string(actual_.snapshot(actual_.runtime.self).phase) ==
+           "encoding";
   }));
   stream.reset();
   bool progress = false;
-  IREE_ASSERT_OK(actual_.advance(actual_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING,
-                                 &progress));
-  EXPECT_TRUE(actual_.is_pending(actual_.self));
+  IREE_ASSERT_OK(actual_.runtime.vtable->advance(
+      actual_.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING, &progress));
+  EXPECT_TRUE(actual_.runtime.vtable->is_pending(actual_.runtime.self));
   EXPECT_EQ(released_.load(), 0u);
   workers.clear();
-  ASSERT_NO_FATAL_FAILURE(
-      AdvanceUntil([&] { return !actual_.is_pending(actual_.self); },
-                   LOOM_SERVE_SERVICE_FLAG_STOPPING));
+  ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
+      [&] { return !actual_.runtime.vtable->is_pending(actual_.runtime.self); },
+      LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
   EXPECT_EQ(submitted_.load(), 1u);
   EXPECT_EQ(released_.load(), 1u);
   EXPECT_EQ(actual_.telemetry.counters->cancelled, 1u);
@@ -811,18 +832,18 @@ TEST_F(SpeechReadinessTest,
       OpenSpeech(service_, IREE_SV("abcd"), IREE_SV("positive"), 0, &stream));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return held_.load(); }));
   bool progress = false;
-  IREE_ASSERT_OK(actual_.advance(actual_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING,
-                                 &progress));
+  IREE_ASSERT_OK(actual_.runtime.vtable->advance(
+      actual_.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING, &progress));
   EXPECT_FALSE(loom_serve_speech_stream_is_complete(stream.get()));
   ReleaseDependency(true);
   iree_status_t failure = iree_ok_status();
   auto* notification = loom_serve_http_server_notification(server_);
-  while (actual_.is_pending(actual_.self)) {
+  while (actual_.runtime.vtable->is_pending(actual_.runtime.self)) {
     const auto ticket = iree_notification_prepare_wait(notification);
-    auto status = actual_.advance(actual_.self,
-                                  LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress);
+    auto status = actual_.runtime.vtable->advance(
+        actual_.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING, &progress);
     if (progress || !iree_status_is_ok(status) ||
-        !actual_.is_pending(actual_.self)) {
+        !actual_.runtime.vtable->is_pending(actual_.runtime.self)) {
       iree_notification_cancel_wait(notification);
     } else {
       iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
@@ -834,7 +855,7 @@ TEST_F(SpeechReadinessTest,
   EXPECT_EQ(released_.load(), 0u);
   EXPECT_NE(invocations_[0], nullptr);
   EXPECT_EQ(actual_.telemetry.counters->failed, 1u);
-  actual_.set_observer(actual_.self, {});
+  actual_.runtime.vtable->set_observer(actual_.runtime.self, {});
   loom_serve_speech_service_free(service_);
   service_ = nullptr;
   EXPECT_TRUE(loom_serve_speech_stream_is_complete(stream.get()));
@@ -864,7 +885,7 @@ TEST_F(SpeechReadinessTest, NativeGeometryIsIndependentOfHttpPcm) {
   loom_serve_http_connection_t* connection = nullptr;
   const loom_serve_http_request_t* request = nullptr;
   IREE_ASSERT_OK(http_.TakeRequest(client.get(), &connection, &request));
-  IREE_ASSERT_OK(actual_.accept(actual_.self, connection, request, 0));
+  IREE_ASSERT_OK(actual_.accept(actual_.runtime.self, connection, request, 0));
   std::string response;
   IREE_ASSERT_OK(http_.Read(client.release(), false, &response));
   EXPECT_EQ(response.find("HTTP/1.1 400"), 0u);
@@ -972,7 +993,8 @@ TEST_F(SpeechReadinessTest, CancelledBatchMemberRetiresWithOriginalCohort) {
     const loom_serve_http_request_t* request = nullptr;
     IREE_ASSERT_OK(
         http_.TakeRequest(clients[i].get(), &connections[i], &request));
-    IREE_ASSERT_OK(actual_.accept(actual_.self, connections[i], request, 0));
+    IREE_ASSERT_OK(
+        actual_.accept(actual_.runtime.self, connections[i], request, 0));
   }
   ASSERT_NO_FATAL_FAILURE(
       AdvanceUntil([&] { return held_.load(std::memory_order_acquire); }));
@@ -991,10 +1013,11 @@ TEST_F(SpeechReadinessTest, CancelledBatchMemberRetiresWithOriginalCohort) {
       },
       connections[1], iree_infinite_timeout());
   bool progress = false;
-  IREE_ASSERT_OK(actual_.advance(actual_.self, 0, &progress));
+  IREE_ASSERT_OK(
+      actual_.runtime.vtable->advance(actual_.runtime.self, 0, &progress));
   EXPECT_TRUE(progress);
   EXPECT_EQ(released_.load(), 0u);
-  EXPECT_EQ(actual_.snapshot(actual_.self).active_requests, 4u);
+  EXPECT_EQ(actual_.snapshot(actual_.runtime.self).active_requests, 4u);
   EXPECT_EQ(submitted_.load(), submitted);
   ReleaseDependency();
   ASSERT_NO_FATAL_FAILURE(
@@ -1008,7 +1031,7 @@ TEST_F(SpeechReadinessTest, CancelledBatchMemberRetiresWithOriginalCohort) {
     CheckPcm(response, 3 * (16 + i), i % 2 ? -1 : 1);
   }
   EXPECT_EQ(released_.load(), 4u);
-  EXPECT_FALSE(actual_.is_pending(actual_.self));
+  EXPECT_FALSE(actual_.runtime.vtable->is_pending(actual_.runtime.self));
 }
 
 TEST_F(SpeechReadinessTest, StalledReaderDoesNotBlockOtherRequests) {

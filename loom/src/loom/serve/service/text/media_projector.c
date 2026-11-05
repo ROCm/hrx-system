@@ -250,7 +250,7 @@ struct loom_serve_text_media_projector_t {
 iree_status_t loom_serve_text_media_projector_allocate(
     loom_serve_finite_model_t* model, iree_host_size_t capacity,
     iree_task_executor_t* executor, iree_async_proactor_t* proactor,
-    loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
+    loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_serve_text_media_projector_t** out_projector) {
   *out_projector = NULL;
   capacity = (iree_host_size_t)iree_min(
@@ -674,7 +674,7 @@ bool loom_serve_text_media_projector_is_pending(
 
 void loom_serve_text_media_projector_set_observer(
     loom_serve_text_media_projector_t* projector,
-    loom_serve_wake_callback_t observer) {
+    loom_runtime_wake_callback_t observer) {
   if (projector) {
     loom_serve_text_readiness_set_observer(&projector->readiness, observer);
     loom_serve_finite_model_set_observer(projector->model, observer);
@@ -719,13 +719,13 @@ static iree_status_t loom_serve_text_media_projector_reject(
 
 iree_status_t loom_serve_text_media_projector_advance(
     loom_serve_text_media_projector_t* projector,
-    loom_serve_service_flags_t flags, bool* out_progress) {
+    loom_runtime_service_flags_t flags, bool* out_progress) {
   *out_progress = false;
   if (!projector || projector->phase == MEDIA_FAILED) {
     return iree_ok_status();
   }
   const bool stopping =
-      iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING);
+      iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
   iree_status_t status = iree_ok_status();
   if (projector->phase == MEDIA_PREPARING ||
       projector->phase == MEDIA_BATCHING) {
@@ -826,7 +826,7 @@ iree_status_t loom_serve_text_media_projector_advance(
       } else if (iree_status_is_ok(status) &&
                  admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY &&
                  !iree_any_bit_set(flags,
-                                   LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY)) {
+                                   LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
         for (iree_host_size_t i = 0; i < projector->cohort_count; ++i) {
           loom_serve_text_media_job_t* job = projector->cohort[i];
           if (job->request) {
@@ -865,7 +865,7 @@ void loom_serve_text_media_projector_free(
     return;
   }
   loom_serve_finite_model_set_observer(projector->model,
-                                       (loom_serve_wake_callback_t){0});
+                                       (loom_runtime_wake_callback_t){0});
   for (iree_host_size_t i = 0; i < projector->count; ++i) {
     loom_serve_text_media_job_release(&projector->jobs[i]);
   }

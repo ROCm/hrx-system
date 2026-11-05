@@ -24,7 +24,7 @@ typedef struct loom_serve_http_live_t loom_serve_http_live_t;
 iree_status_t loom_serve_http_live_allocate(
     loom_serve_http_server_t* server, loom_serve_registry_t* registry,
     const loom_serve_resources_t* resources,
-    loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
+    loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_serve_http_live_t** out_live);
 
 // Upgrades a validated route within the router's shared claim bound, consuming

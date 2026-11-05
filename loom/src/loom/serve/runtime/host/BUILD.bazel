@@ -70,16 +70,11 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "wake",
-    hdrs = ["wake.h"],
-)
-
-loom_cc_library(
     name = "timer",
     srcs = ["timer.c"],
     hdrs = ["timer.h"],
     deps = [
-        ":wake",
+        "//loom/src/loom/runtime:wake",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",

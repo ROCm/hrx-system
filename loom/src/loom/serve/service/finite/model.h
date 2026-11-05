@@ -245,8 +245,8 @@ iree_status_t loom_serve_finite_model_prepare_batch(
 
 // Observer used by request compilation only, installed before advance_batch.
 // Detachment follows terminal advance of every accepted compilation.
-void loom_serve_finite_model_set_observer(loom_serve_finite_model_t* model,
-                                          loom_serve_wake_callback_t observer);
+void loom_serve_finite_model_set_observer(
+    loom_serve_finite_model_t* model, loom_runtime_wake_callback_t observer);
 
 // Resolves and binds the prepared batch's captured executable choice before
 // parameter admission. A cache miss compiles asynchronously and wakes the

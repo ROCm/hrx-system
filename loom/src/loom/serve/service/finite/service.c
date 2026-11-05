@@ -10,8 +10,8 @@
 
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/threading/mutex.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/runtime/host/timer.h"
-#include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/finite/http.h"
 #include "loom/serve/service/finite/result.h"
@@ -108,7 +108,7 @@ struct loom_serve_finite_service_t {
     // Joins final callback accesses with owner collection/destruction.
     iree_slim_mutex_t mutex;
     // Borrowed common router wake interface.
-    loom_serve_wake_callback_t observer;
+    loom_runtime_wake_callback_t observer;
     // CPU release or device readiness awaiting collection.
     bool ready;
     // Owned terminal result, consumed once after publication.
@@ -682,12 +682,11 @@ static iree_status_t loom_serve_finite_collect(
   return status;
 }
 
-static iree_status_t loom_serve_finite_advance(void* self,
-                                               loom_serve_service_flags_t flags,
-                                               bool* out_progress) {
+static iree_status_t loom_serve_finite_advance(
+    void* self, loom_runtime_service_flags_t flags, bool* out_progress) {
   loom_serve_finite_service_t* service = self;
   *out_progress = false;
-  if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+  if (iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
     service->stopping = true;
   }
   loom_serve_finite_cancel_peers(service);
@@ -752,7 +751,7 @@ static iree_status_t loom_serve_finite_advance(void* self,
       } else if (iree_status_is_ok(status) &&
                  admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY &&
                  !iree_any_bit_set(flags,
-                                   LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY)) {
+                                   LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
         iree_status_t rejection =
             iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                              "model parameters exceed available capacity");
@@ -845,7 +844,7 @@ iree_status_t loom_serve_finite_service_try_open(
 static iree_status_t loom_serve_finite_accept(
     void* self, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request,
-    loom_serve_service_flags_t flags) {
+    loom_runtime_service_flags_t flags) {
   loom_serve_finite_service_t* service = self;
   const iree_time_t arrival_time = iree_time_now();
   const uint64_t id = loom_serve_finite_request_begin(service, arrival_time);
@@ -895,7 +894,7 @@ static iree_status_t loom_serve_finite_accept(
 }
 
 static void loom_serve_finite_set_observer(
-    void* self, loom_serve_wake_callback_t observer) {
+    void* self, loom_runtime_wake_callback_t observer) {
   loom_serve_finite_service_t* service = self;
   iree_slim_mutex_lock(&service->event.mutex);
   service->event.observer = observer;
@@ -908,15 +907,20 @@ static void loom_serve_finite_set_observer(
 
 loom_serve_service_t loom_serve_finite_service_interface(
     loom_serve_finite_service_t* service) {
-  static const iree_string_view_t input_modalities[] = {IREE_SVL("text")};
-  return (loom_serve_service_t){
-      .name = service->name,
-      .self = service,
+  static const loom_runtime_service_vtable_t vtable = {
       .set_observer = loom_serve_finite_set_observer,
       .is_pending = loom_serve_finite_is_pending,
       .is_active = loom_serve_finite_is_active,
-      .accept = loom_serve_finite_accept,
       .advance = loom_serve_finite_advance,
+  };
+  static const iree_string_view_t input_modalities[] = {IREE_SVL("text")};
+  return (loom_serve_service_t){
+      .name = service->name,
+      .runtime = {.self = service,
+                  .vtable = &vtable,
+                  .capacity_domain = loom_serve_residency_cache(
+                      loom_serve_finite_model_residency(service->model))},
+      .accept = loom_serve_finite_accept,
       .tokenizer = loom_serve_finite_model_tokenizer(service->model),
       .kind = service->protocol->kind,
       .endpoint = loom_serve_model_kind_endpoint(service->protocol->kind),
@@ -928,8 +932,6 @@ loom_serve_service_t loom_serve_finite_service_interface(
       .inspection = {.request_at = loom_serve_finite_request_at},
       .reconfiguration = loom_serve_execution_reconfiguration_interface(
           service->reconfiguration),
-      .capacity_domain = loom_serve_residency_cache(
-          loom_serve_finite_model_residency(service->model)),
       .telemetry = {.stream = service->telemetry.stream,
                     .counters = &service->telemetry.counters,
                     .latency = &service->telemetry.latency}};
@@ -941,7 +943,7 @@ void loom_serve_finite_service_free(loom_serve_finite_service_t* service) {
   }
   IREE_ASSERT(!loom_serve_finite_is_pending(service));
   loom_serve_finite_model_set_observer(service->model,
-                                       (loom_serve_wake_callback_t){0});
+                                       (loom_runtime_wake_callback_t){0});
   service->stopping = true;
   loom_serve_finite_cancel_peers(service);
   if (service->phase == FINITE_WAITING) {

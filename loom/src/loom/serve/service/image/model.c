@@ -153,7 +153,7 @@ void loom_serve_image_model_retire(loom_serve_image_model_t* model,
                                    void* user_data) {
   if (model->executables) {
     loom_serve_executables_set_observer(
-        model->executables, (loom_serve_wake_callback_t){wake, user_data});
+        model->executables, (loom_runtime_wake_callback_t){wake, user_data});
   }
   if (model->execution) {
     loom_serve_execution_set_retirement_observer(model->execution, wake,
@@ -1164,8 +1164,8 @@ void loom_serve_image_model_discard_batch(loom_serve_image_model_t* model) {
   model->invocation.payload = NULL;
 }
 
-void loom_serve_image_model_set_observer(loom_serve_image_model_t* model,
-                                         loom_serve_wake_callback_t observer) {
+void loom_serve_image_model_set_observer(
+    loom_serve_image_model_t* model, loom_runtime_wake_callback_t observer) {
   loom_serve_executables_set_observer(model->executables, observer);
 }
 
@@ -1347,8 +1347,8 @@ iree_status_t loom_serve_image_model_generate(
   iree_notification_t notification;
   iree_notification_initialize(&notification);
   loom_serve_image_model_set_observer(
-      model, (loom_serve_wake_callback_t){loom_serve_image_load_notify,
-                                          &notification});
+      model, (loom_runtime_wake_callback_t){loom_serve_image_load_notify,
+                                            &notification});
   bool resolved = false;
   while (iree_status_is_ok(status) && !resolved) {
     const uint32_t ticket = iree_notification_prepare_wait(&notification);
@@ -1360,7 +1360,7 @@ iree_status_t loom_serve_image_model_generate(
                                     IREE_TIME_INFINITE_FUTURE);
     }
   }
-  loom_serve_image_model_set_observer(model, (loom_serve_wake_callback_t){0});
+  loom_serve_image_model_set_observer(model, (loom_runtime_wake_callback_t){0});
   iree_notification_deinitialize(&notification);
   if (iree_status_is_ok(status)) {
     status = loom_serve_residency_acquire_wait(
@@ -1418,7 +1418,7 @@ static iree_status_t loom_serve_image_generator_prepare_batch(
 }
 
 static void loom_serve_image_generator_set_observer(
-    void* self, loom_serve_wake_callback_t observer) {
+    void* self, loom_runtime_wake_callback_t observer) {
   loom_serve_image_model_set_observer(self, observer);
 }
 

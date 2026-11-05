@@ -10,7 +10,7 @@
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "loom/runtime/storage/statistics.h"
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/runtime/storage/memory_geometry.h"
 
 #ifdef __cplusplus
@@ -107,7 +107,7 @@ iree_status_t loom_serve_memory_pool_query_status(
 // observes completion/failure independently of any individual model lifetime.
 // Returns the previous observer so an exclusive blocking outer owner can
 // temporarily route capacity wakes to its wait and restore them afterward.
-loom_serve_wake_callback_t loom_serve_memory_pool_set_observer(
+loom_runtime_wake_callback_t loom_serve_memory_pool_set_observer(
     loom_serve_memory_pool_t* pool, void (*wake)(void* user_data),
     void* user_data);
 

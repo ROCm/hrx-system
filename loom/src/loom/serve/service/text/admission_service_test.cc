@@ -47,13 +47,14 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     const auto interface = loom_serve_text_service_interface(value);
     Observe(interface);
     auto quiescent = [&] {
-      return !interface.is_pending(interface.self) &&
-             std::string(interface.snapshot(interface.self).phase) == "idle";
+      return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+             std::string(interface.snapshot(interface.runtime.self).phase) ==
+                 "idle";
     };
     auto idle = [&] {
-      return !interface.is_pending(interface.self) &&
-             !interface.is_active(interface.self) &&
-             !interface.snapshot(interface.self).queued_requests;
+      return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+             !interface.runtime.vtable->is_active(interface.runtime.self) &&
+             !interface.snapshot(interface.runtime.self).queued_requests;
     };
     loom_serve_http_connection_t* connection = nullptr;
     std::string head_prompt(32, 'a');
@@ -106,7 +107,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     loom_serve_http_connection_t* head_connection = nullptr;
     ASSERT_NO_FATAL_FAILURE(Accept(head, interface, &head_connection));
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
-    ASSERT_EQ(interface.snapshot(interface.self).queued_requests, 1u);
+    ASSERT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 1u);
     for (size_t i = 0; i < budget; ++i) {
       const int tail = Send(Request(Message("user", "a"), 4));
       ASSERT_NO_FATAL_FAILURE(Accept(tail, interface, &connection));
@@ -116,8 +117,8 @@ class AdmissionServiceTest : public SourceTextServiceTest {
                quiescent();
       }));
       EXPECT_EQ(Content(Read(tail)), Oracle::Complete("a", 4));
-      EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 1u);
-      EXPECT_EQ(interface.snapshot(interface.self).active_requests, 1u);
+      EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 1u);
+      EXPECT_EQ(interface.snapshot(interface.runtime.self).active_requests, 1u);
       EXPECT_FALSE(loom_serve_http_connection_can_send(active));
     }
 
@@ -126,10 +127,11 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     ASSERT_NO_FATAL_FAILURE(Accept(extra, interface, &connection));
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, quiescent));
     bool progress = false;
-    IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
+    IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self, 0,
+                                                     &progress));
     EXPECT_FALSE(progress);
     EXPECT_TRUE(quiescent());
-    EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 2u);
+    EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 2u);
     EXPECT_EQ(interface.telemetry.counters->completed,
               initial.completed + budget);
 
@@ -163,7 +165,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
 
     if (action == OverlapAction::kStop) {
       ASSERT_NO_FATAL_FAILURE(
-          AdvanceUntil(interface, idle, LOOM_SERVE_SERVICE_FLAG_STOPPING));
+          AdvanceUntil(interface, idle, LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
       EXPECT_EQ(interface.telemetry.counters->cancelled, 3u);
       EXPECT_TRUE(Read(head, /*allow_empty=*/true).empty());
       EXPECT_TRUE(Read(extra, /*allow_empty=*/true).empty());
@@ -215,7 +217,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     EXPECT_EQ(interface.telemetry.counters->failed, 0u);
     EXPECT_EQ(interface.telemetry.counters->rejected, 0u);
     EXPECT_EQ(loom_serve_text_model_pool_usage(model_).pending, 0u);
-    interface.set_observer(interface.self, {});
+    interface.runtime.vtable->set_observer(interface.runtime.self, {});
   }
 
   void CheckBorrowedProbeCancellation(OverlapAction action) {
@@ -233,8 +235,9 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     const auto interface = loom_serve_text_service_interface(value);
     Observe(interface);
     auto quiescent = [&] {
-      return !interface.is_pending(interface.self) &&
-             std::string(interface.snapshot(interface.self).phase) == "idle";
+      return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+             std::string(interface.snapshot(interface.runtime.self).phase) ==
+                 "idle";
     };
     StalledClient stalled;
     ASSERT_NO_FATAL_FAILURE(
@@ -274,41 +277,48 @@ class AdmissionServiceTest : public SourceTextServiceTest {
       // while the selected tail still owns an outstanding CPU borrow.
       loom_serve::testing::text::OwnerTurn::Run(
           loom_serve_host_executor(host_), [&] {
-            IREE_ASSERT_OK(interface.accept(interface.self, tail_connection,
-                                            tail_request, 0));
-            EXPECT_TRUE(interface.is_pending(interface.self));
-            EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 2u);
+            IREE_ASSERT_OK(interface.accept(interface.runtime.self,
+                                            tail_connection, tail_request, 0));
+            EXPECT_TRUE(
+                interface.runtime.vtable->is_pending(interface.runtime.self));
+            EXPECT_EQ(
+                interface.snapshot(interface.runtime.self).queued_requests, 2u);
             bool progress = false;
-            IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
+            IREE_ASSERT_OK(interface.runtime.vtable->advance(
+                interface.runtime.self, 0, &progress));
             EXPECT_TRUE(progress);
             EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
-            EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 1u);
-            EXPECT_TRUE(interface.is_pending(interface.self));
-            IREE_ASSERT_OK(interface.accept(interface.self,
+            EXPECT_EQ(
+                interface.snapshot(interface.runtime.self).queued_requests, 1u);
+            EXPECT_TRUE(
+                interface.runtime.vtable->is_pending(interface.runtime.self));
+            IREE_ASSERT_OK(interface.accept(interface.runtime.self,
                                             replacement_connection,
                                             replacement_request, 0));
-            EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 2u);
+            EXPECT_EQ(
+                interface.snapshot(interface.runtime.self).queued_requests, 2u);
             EXPECT_EQ(interface.telemetry.counters->rejected, 0u);
           });
       ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
-        return !interface.snapshot(interface.self).queued_requests &&
+        return !interface.snapshot(interface.runtime.self).queued_requests &&
                quiescent();
       }));
       EXPECT_EQ(Content(Read(tail)), Oracle::Complete("a", 4));
       EXPECT_EQ(Content(Read(replacement)), Oracle::Complete("bx", 4));
     } else {
       ASSERT_NO_FATAL_FAILURE(Accept(tail, interface, &connection));
-      ASSERT_TRUE(interface.is_pending(interface.self));
-      EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 2u);
+      ASSERT_TRUE(interface.runtime.vtable->is_pending(interface.runtime.self));
+      EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 2u);
     }
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
         interface,
         [&] {
-          return !interface.is_pending(interface.self) &&
-                 !interface.is_active(interface.self) &&
-                 !interface.snapshot(interface.self).queued_requests;
+          return !interface.runtime.vtable->is_pending(
+                     interface.runtime.self) &&
+                 !interface.runtime.vtable->is_active(interface.runtime.self) &&
+                 !interface.snapshot(interface.runtime.self).queued_requests;
         },
-        LOOM_SERVE_SERVICE_FLAG_STOPPING));
+        LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
     if (action == OverlapAction::kStop) {
       EXPECT_TRUE(Read(head, /*allow_empty=*/true).empty());
       EXPECT_TRUE(Read(tail, /*allow_empty=*/true).empty());
@@ -320,7 +330,7 @@ class AdmissionServiceTest : public SourceTextServiceTest {
     EXPECT_EQ(interface.telemetry.counters->failed, 0u);
     EXPECT_EQ(loom_serve_text_model_pool_usage(model_).pending, 0u);
     ASSERT_NO_FATAL_FAILURE(stalled.Close());
-    interface.set_observer(interface.self, {});
+    interface.runtime.vtable->set_observer(interface.runtime.self, {});
   }
 
  private:

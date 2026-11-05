@@ -8,9 +8,10 @@
 #define LOOM_SERVE_SERVICE_SERVICE_H_
 
 #include "iree/tokenizer/tokenizer.h"
+#include "loom/runtime/service.h"
 #include "loom/runtime/telemetry/sample.h"
 #include "loom/runtime/telemetry/stream.h"
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/service/inspection.h"
 #include "loom/serve/service/kind.h"
 #include "loom/serve/service/reasoning.h"
@@ -40,17 +41,6 @@ typedef struct loom_serve_text_checkpoint_control_t
     loom_serve_text_checkpoint_control_t;
 typedef struct loom_serve_text_stream_t loom_serve_text_stream_t;
 
-typedef enum loom_serve_service_flag_bits_e {
-  // Another service in the same capacity domain has accepted work or
-  // maintenance that may release capacity. Admission can queue instead of
-  // rejecting an idle-capacity stall.
-  LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY = 1u << 0,
-  // Admission has stopped. Consume only already accepted asynchronous work;
-  // new model submissions and queued request admission are forbidden.
-  LOOM_SERVE_SERVICE_FLAG_STOPPING = 1u << 1,
-} loom_serve_service_flag_bits_t;
-typedef uint32_t loom_serve_service_flags_t;
-
 // Copied scheduler ownership, not hardware utilization. Finite active requests
 // include preparation, capacity waiting and encoding; text active requests
 // hold admitted rows. No request content or borrowed mutable buffers escape.
@@ -76,18 +66,8 @@ typedef struct loom_serve_service_t {
   // Nonempty visible ASCII name, unique and borrowed through retirement. This
   // also fits the checkpoint selector's HTTP header representation.
   iree_string_view_t name;
-  // Borrowed service state, live through observer detachment and all requests.
-  void* self;
-  // Installs the owner's nonblocking wake target before the first turn. The
-  // owner clears it after all accepted asynchronous callbacks have retired.
-  void (*set_observer)(void* self, loom_serve_wake_callback_t observer);
-  // Whether an accepted asynchronous callback still borrows service storage.
-  // True requires an eventual wake even after transport admission stops.
-  bool (*is_pending)(void* self);
-  // Whether live requests or pending maintenance may release shared capacity.
-  // Queued requests alone are not activity: mutually blocked queues cannot
-  // make progress by waiting on one another. Called by the serialized owner.
-  bool (*is_active)(void* self);
+  // Common progress capability; all callbacks below share runtime.self.
+  loom_runtime_service_t runtime;
   // Optional HTTP inference; absent when endpoint is NULL. Takes the connection
   // claim on both success and failure. Invalid requests produce an HTTP
   // rejection and success; a terminal failure stops this service's admission
@@ -95,7 +75,7 @@ typedef struct loom_serve_service_t {
   // valid until this service finishes or aborts.
   iree_status_t (*accept)(void* self, loom_serve_http_connection_t* connection,
                           const loom_serve_http_request_t* request,
-                          loom_serve_service_flags_t flags);
+                          loom_runtime_service_flags_t flags);
   // Optional native speech admission on this same serialized owner. Success
   // with a stream moves the initialized request; NULL success is bounded
   // pressure. Both pressure and failure leave request untouched. The returned
@@ -129,15 +109,6 @@ typedef struct loom_serve_service_t {
   iree_status_t (*try_open_text_checkpoint)(
       void* self, const loom_serve_text_checkpoint_request_t* request,
       loom_serve_text_checkpoint_control_t** out_control);
-  // Advances at most one bounded model unit and reports actual progress. A
-  // turn can retry admission after another service released shared capacity.
-  // False means awaiting service readiness or a network event, never polling.
-  // STOPPING consumes accepted readiness without launching another model unit.
-  // Terminal failure belongs to this service; its shared resource owners report
-  // wider failure independently. Even after failure, is_pending governs
-  // release.
-  iree_status_t (*advance)(void* self, loom_serve_service_flags_t flags,
-                           bool* out_progress);
   // Optional immutable input tokenizer, live through utility task release. Raw
   // utilities use independent CPU states and never call this model's methods.
   const iree_tokenizer_t* tokenizer;
@@ -173,11 +144,6 @@ typedef struct loom_serve_service_t {
   // Optional service-owned executable pool and preferred-choice policy. Its
   // producers and queued selections participate in is_pending retirement.
   loom_serve_reconfiguration_t reconfiguration;
-  // Borrowed shared-capacity owner identity, never dereferenced by the router.
-  // Only equal non-NULL identities can provide SHARED_ACTIVITY to each other;
-  // NULL means this service has no shared-capacity relationship. The owner
-  // outlives the service and every accepted asynchronous obligation.
-  const void* capacity_domain;
   // Optional observation owned by the service and live through retirement.
   struct {
     // Bounded immutable-record history; NULL when this service has no stream.

@@ -581,7 +581,7 @@ TEST_F(VirtualPoolTest, VirtualBackingTrimWaitsForActualHistoryCompletion) {
   ASSERT_NO_FATAL_FAILURE(CheckRetained(view.buffer, 0, 0x23571113));
 
   std::atomic<size_t> wakes{0};
-  const loom_serve_wake_callback_t wake = {
+  const loom_runtime_wake_callback_t wake = {
       [](void* self) { static_cast<std::atomic<size_t>*>(self)->fetch_add(1); },
       &wakes};
   loom_serve_virtual_pool_set_observer(virtual_pool, wake);

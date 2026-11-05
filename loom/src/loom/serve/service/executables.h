@@ -116,7 +116,7 @@ void loom_serve_executables_declare(loom_serve_executables_t* executables,
 // Installs a nonblocking owner wake before accepting compilations. Detachment
 // follows terminal advance of every accepted request compilation.
 void loom_serve_executables_set_observer(loom_serve_executables_t* executables,
-                                         loom_serve_wake_callback_t observer);
+                                         loom_runtime_wake_callback_t observer);
 
 // Resolves request declarations and binds the captured table before parameter
 // admission. A miss submits compilation without waiting; completion schedules

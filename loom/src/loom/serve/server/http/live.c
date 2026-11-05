@@ -64,7 +64,7 @@ struct loom_serve_http_live_t {
 iree_status_t loom_serve_http_live_allocate(
     loom_serve_http_server_t* server, loom_serve_registry_t* registry,
     const loom_serve_resources_t* resources,
-    loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
+    loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_serve_http_live_t** out_live) {
   *out_live = NULL;
   const iree_host_size_t capacity =
@@ -349,7 +349,8 @@ void loom_serve_http_live_free(loom_serve_http_live_t* live) {
   if (!live) {
     return;
   }
-  loom_serve_timer_set_observer(&live->timer, (loom_serve_wake_callback_t){0});
+  loom_serve_timer_set_observer(&live->timer,
+                                (loom_runtime_wake_callback_t){0});
   loom_serve_timer_deinitialize(&live->timer);
   loom_serve_observation_free(live->observation);
   iree_allocator_free(live->host_allocator, live);

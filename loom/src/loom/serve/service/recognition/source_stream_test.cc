@@ -165,7 +165,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     };
     IREE_ASSERT_OK(loom_serve_recognition_stream_service_allocate(
         host_, observed, &service_options, allocator_, &service_));
-    const loom_serve_wake_callback_t observer = {
+    const loom_runtime_wake_callback_t observer = {
         [](void* self) {
           iree_notification_post(static_cast<iree_notification_t*>(self),
                                  IREE_ALL_WAITERS);

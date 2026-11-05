@@ -49,7 +49,7 @@ void loom_serve_execution_reconfiguration_free(
     loom_serve_execution_reconfiguration_t* reconfiguration);
 void loom_serve_execution_reconfiguration_set_observer(
     loom_serve_execution_reconfiguration_t* reconfiguration,
-    loom_serve_wake_callback_t observer);
+    loom_runtime_wake_callback_t observer);
 bool loom_serve_execution_reconfiguration_pending(
     const loom_serve_execution_reconfiguration_t* reconfiguration);
 

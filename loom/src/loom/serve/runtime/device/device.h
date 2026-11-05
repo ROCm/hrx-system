@@ -6,10 +6,10 @@
 #ifndef LOOM_SERVE_RUNTIME_DEVICE_DEVICE_H_
 #define LOOM_SERVE_RUNTIME_DEVICE_DEVICE_H_
 
+#include "loom/runtime/wake.h"
 #include "loom/serve/runtime/device/pool.h"
 #include "loom/serve/runtime/execution/execution.h"
 #include "loom/serve/runtime/host/host.h"
-#include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/runtime/program/jit.h"
 #include "loom/serve/runtime/storage/memory.h"
@@ -77,8 +77,8 @@ iree_status_t loom_serve_device_group_free(loom_serve_device_group_t* group);
 // call. An empty observer detaches and joins its final callback access. The
 // callback only schedules the owner; it cannot reenter the group. NULL group
 // is accepted for applications with externally owned execution resources.
-void loom_serve_device_group_set_observer(loom_serve_device_group_t* group,
-                                          loom_serve_wake_callback_t observer);
+void loom_serve_device_group_set_observer(
+    loom_serve_device_group_t* group, loom_runtime_wake_callback_t observer);
 
 // Advances accepted workspace and capacity work before services advance.
 // Every pool is collected even after a shared failure so independent releases

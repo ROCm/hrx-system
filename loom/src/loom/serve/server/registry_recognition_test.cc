@@ -169,7 +169,7 @@ class RegistryRecognitionTest : public ::testing::Test {
   template <typename Predicate>
   void AdvanceUntil(Predicate ready) {
     auto* notification = loom_serve_http_server_notification(server_);
-    const loom_serve_wake_callback_t wake = {
+    const loom_runtime_wake_callback_t wake = {
         [](void* self) {
           iree_notification_post(static_cast<iree_notification_t*>(self),
                                  IREE_ALL_WAITERS);
@@ -185,9 +185,9 @@ class RegistryRecognitionTest : public ::testing::Test {
       if (Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
         auto& service = Model()->service;
         status = iree_status_join(
-            status, service.advance(service.self,
-                                    loom_serve_registry_service_flags(Model()),
-                                    &progress));
+            status, service.runtime.vtable->advance(
+                        service.runtime.self,
+                        loom_serve_registry_service_flags(Model()), &progress));
       }
       bool registry_progress = false;
       if (iree_status_is_ok(status)) {
@@ -312,8 +312,8 @@ class RegistryRecognitionTest : public ::testing::Test {
     loom_serve_http_connection_t* connection = nullptr;
     const loom_serve_http_request_t* request = nullptr;
     IREE_ASSERT_OK(http_.TakeRequest(client.get(), &connection, &request));
-    IREE_ASSERT_OK(
-        Model()->service.accept(Model()->service.self, connection, request, 0));
+    IREE_ASSERT_OK(Model()->service.accept(Model()->service.runtime.self,
+                                           connection, request, 0));
     reader_ = std::thread([this, descriptor = client.release()] {
       read_status_ = http_.Read(descriptor, false, &response_);
     });

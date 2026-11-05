@@ -38,7 +38,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
     group_ = loom_serve_test_application_device_group(application);
     device_ = loom_serve_test_application_device_at(application, 0);
     pool_ = loom_serve_device_group_pool_at(group_, 0);
-    const loom_serve_wake_callback_t observer = {Wake, this};
+    const loom_runtime_wake_callback_t observer = {Wake, this};
     loom_serve_device_group_set_observer(group_, observer);
     const char* source = std::getenv("LOOM_SERVE_TEST_MODEL_SOURCE");
     ASSERT_NE(source, nullptr);
@@ -126,8 +126,8 @@ class NativeDecisionServiceTest : public ::testing::Test {
   }
 
   template <typename Predicate>
-  void DriveUntil(Predicate done, loom_serve_service_flags_t flags = 0) {
-    driver_.stopping |= (flags & LOOM_SERVE_SERVICE_FLAG_STOPPING) != 0;
+  void DriveUntil(Predicate done, loom_runtime_service_flags_t flags = 0) {
+    driver_.stopping |= (flags & LOOM_RUNTIME_SERVICE_FLAG_STOPPING) != 0;
     while (true) {
       const auto ticket = iree_notification_prepare_wait(&notification_);
       driver_.status = iree_status_join(
@@ -156,9 +156,12 @@ class NativeDecisionServiceTest : public ::testing::Test {
                             Prepare(LOOM_SERVE_FINITE_LOAD_FLAG_CANCEL));
     }
     if (driver_.registry) {
-      ASSERT_NO_FATAL_FAILURE(
-          DriveUntil([&] { return !interface_.is_pending(interface_.self); },
-                     LOOM_SERVE_SERVICE_FLAG_STOPPING));
+      ASSERT_NO_FATAL_FAILURE(DriveUntil(
+          [&] {
+            return !interface_.runtime.vtable->is_pending(
+                interface_.runtime.self);
+          },
+          LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
       loom_serve_driver_set_observer(&driver_, {});
       IREE_ASSERT_OK(
           loom_serve_registry_free(std::exchange(driver_.registry, nullptr)));
@@ -191,7 +194,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
           loom_serve_host_executor(loom_serve_device_host(fixture.device_)),
           Advance, this, &owner_);
       Call([&] {
-        const loom_serve_wake_callback_t observer = {Wake, this};
+        const loom_runtime_wake_callback_t observer = {Wake, this};
         loom_serve_driver_set_observer(&fixture_.driver_, observer);
         loom_serve_device_group_set_observer(fixture_.group_, observer);
       });
@@ -208,7 +211,7 @@ class NativeDecisionServiceTest : public ::testing::Test {
       });
       iree_task_owner_await(&owner_);
       iree_task_owner_deinitialize(&owner_);
-      const loom_serve_wake_callback_t observer = {
+      const loom_runtime_wake_callback_t observer = {
           NativeDecisionServiceTest::Wake, &fixture_};
       loom_serve_driver_set_observer(&fixture_.driver_, observer);
       loom_serve_device_group_set_observer(fixture_.group_, observer);
@@ -490,12 +493,12 @@ TEST_F(NativeDecisionServiceTest, PressurePreservesInputAndRejectionIsLocal) {
 TEST_F(NativeDecisionServiceTest, StopDuringPreparationJoinsInputBorrowers) {
   ASSERT_NO_FATAL_FAILURE(Open(0));
   ASSERT_NO_FATAL_FAILURE(DriveUntil([&] {
-    return std::string(interface_.snapshot(interface_.self).phase) ==
+    return std::string(interface_.snapshot(interface_.runtime.self).phase) ==
            "preparing";
   }));
   ASSERT_NO_FATAL_FAILURE(
       DriveUntil([&] { return loom_serve_finite_call_is_complete(calls_[0]); },
-                 LOOM_SERVE_SERVICE_FLAG_STOPPING));
+                 LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED,
                         loom_serve_finite_call_status(calls_[0]));
   EXPECT_EQ(loom_serve_finite_call_output(calls_[0]), nullptr);
@@ -623,7 +626,7 @@ TEST_F(NativeDecisionServiceTest, JsonCancellationJoinsEncodingBorrowers) {
   ASSERT_NO_FATAL_FAILURE(Open(0, kRequest, LOOM_SERVE_FINITE_OUTPUT_JSON));
   ASSERT_NO_FATAL_FAILURE(Open(1, kRequest, LOOM_SERVE_FINITE_OUTPUT_JSON));
   ASSERT_NO_FATAL_FAILURE(DriveUntil([&] {
-    return std::string(interface_.snapshot(interface_.self).phase) ==
+    return std::string(interface_.snapshot(interface_.runtime.self).phase) ==
            "encoding";
   }));
   loom_serve_finite_call_close(std::exchange(calls_[0], nullptr));

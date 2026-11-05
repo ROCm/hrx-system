@@ -26,7 +26,7 @@ typedef struct loom_serve_speech_voice_load_t loom_serve_speech_voice_load_t;
 // NULL.
 iree_status_t loom_serve_speech_voice_load_allocate(
     loom_serve_host_t* host, const loom_serve_sources_t* sources,
-    loom_serve_speech_service_t* service, loom_serve_wake_callback_t observer,
+    loom_serve_speech_service_t* service, loom_runtime_wake_callback_t observer,
     iree_allocator_t host_allocator, loom_serve_speech_voice_load_t** out_load);
 
 // Advances one bounded owner turn. Cancellation is irreversible and stops the

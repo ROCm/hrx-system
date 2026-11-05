@@ -11,9 +11,9 @@
 #include "iree/base/internal/json.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/task/owner.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/dashboard/assets.h"
 #include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/server/driver.h"
 #include "loom/serve/server/http/live.h"
 #include "loom/serve/server/http/logs.h"
@@ -47,7 +47,7 @@ typedef struct loom_serve_router_tokenization_t {
   // Allocator owning this job and independent tokenizer scratch.
   iree_allocator_t host_allocator;
   // Nonblocking router wake, valid until all accepted jobs retire.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // Joins release publication's final access before owner destruction.
   iree_slim_mutex_t mutex;
   // Owned outcome, transferred by completion and consumed after release.
@@ -214,7 +214,8 @@ static iree_status_t loom_serve_router_tokenization_accept(
   job->service_index = service_index;
   job->connection = connection;
   job->request = request;
-  job->observer = (loom_serve_wake_callback_t){loom_serve_router_wake, router};
+  job->observer =
+      (loom_runtime_wake_callback_t){loom_serve_router_wake, router};
   iree_slim_mutex_initialize(&job->mutex);
   iree_string_builder_initialize(router->host_allocator, &job->output);
   iree_task_process_initialize(loom_serve_router_tokenization_run, 0, 1,
@@ -964,7 +965,7 @@ static iree_status_t loom_serve_router_admit(
   const loom_serve_service_t* service =
       &loom_serve_router_model_at(router, service_index)->service;
   iree_status_t status = service->accept(
-      service->self, connection, request,
+      service->runtime.self, connection, request,
       loom_serve_driver_shared_activity(&router->driver, service_index));
   return iree_status_is_ok(status)
              ? status
@@ -1188,8 +1189,8 @@ static iree_status_t loom_serve_router_inspect(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_http_inspection_format(inspection, model->service.self,
-                                               kind, offset, now, output);
+    status = loom_serve_http_inspection_format(
+        inspection, model->service.runtime.self, kind, offset, now, output);
   }
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_cstring(output, "}");
@@ -1226,7 +1227,7 @@ static iree_status_t loom_serve_router_accept(
     if (!router->live) {
       iree_status_t status = loom_serve_http_live_allocate(
           router->server, router->driver.registry, &router->resources,
-          (loom_serve_wake_callback_t){loom_serve_router_wake, router},
+          (loom_runtime_wake_callback_t){loom_serve_router_wake, router},
           router->host_allocator, &router->live);
       if (!iree_status_is_ok(status)) {
         return loom_serve_http_response_error(router->server, connection,
@@ -1560,7 +1561,7 @@ static void loom_serve_router_advance(
   bool service_progress = false;
   loom_serve_driver_advance(
       &router->driver,
-      (loom_serve_wake_callback_t){loom_serve_router_wake, router},
+      (loom_runtime_wake_callback_t){loom_serve_router_wake, router},
       (loom_serve_driver_observer_t){
           .self = router,
           .observe = loom_serve_router_observe_model,
@@ -1596,20 +1597,21 @@ static void loom_serve_router_advance(
   if (router->driver.stopping && !pending &&
       !loom_serve_http_server_has_pending_responses(router->server)) {
     loom_serve_maintenance_set_observer(&router->maintenance,
-                                        (loom_serve_wake_callback_t){0});
+                                        (loom_runtime_wake_callback_t){0});
     loom_serve_device_group_set_observer(router->resources.device_group,
-                                         (loom_serve_wake_callback_t){0});
+                                         (loom_runtime_wake_callback_t){0});
     loom_serve_driver_set_observer(&router->driver,
-                                   (loom_serve_wake_callback_t){0});
+                                   (loom_runtime_wake_callback_t){0});
     loom_serve_http_server_set_observer(router->server,
-                                        (loom_serve_wake_callback_t){0});
+                                        (loom_runtime_wake_callback_t){0});
     result->completed = true;
   }
 }
 
 static void loom_serve_router_start(void* self) {
   loom_serve_router_t* router = self;
-  const loom_serve_wake_callback_t observer = {loom_serve_router_wake, router};
+  const loom_runtime_wake_callback_t observer = {loom_serve_router_wake,
+                                                 router};
   loom_serve_maintenance_set_observer(&router->maintenance, observer);
   loom_serve_device_group_set_observer(router->resources.device_group,
                                        observer);

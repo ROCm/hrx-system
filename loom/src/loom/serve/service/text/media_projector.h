@@ -70,7 +70,7 @@ void loom_serve_text_media_request_free(
 iree_status_t loom_serve_text_media_projector_allocate(
     loom_serve_finite_model_t* model, iree_host_size_t capacity,
     iree_task_executor_t* executor, iree_async_proactor_t* proactor,
-    loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
+    loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_serve_text_media_projector_t** out_projector);
 
 // Offers missing projections in request order. False means the current window
@@ -110,13 +110,13 @@ bool loom_serve_text_media_projector_is_pending(
 // Replaces/detaches the owner's observer after the usual callback join.
 void loom_serve_text_media_projector_set_observer(
     loom_serve_text_media_projector_t* projector,
-    loom_serve_wake_callback_t observer);
+    loom_runtime_wake_callback_t observer);
 // Owner-published activity for service inspection; NULL means no active window.
 const char* loom_serve_text_media_projector_phase(
     const loom_serve_text_media_projector_t* projector);
 iree_status_t loom_serve_text_media_projector_advance(
     loom_serve_text_media_projector_t* projector,
-    loom_serve_service_flags_t flags, bool* out_progress);
+    loom_runtime_service_flags_t flags, bool* out_progress);
 
 // All accepted callbacks have retired. Request owners have detached their jobs.
 // Failed device work remains component-owned until actual model retirement.

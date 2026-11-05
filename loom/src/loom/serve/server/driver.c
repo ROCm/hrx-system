@@ -15,45 +15,48 @@ void loom_serve_driver_initialize(loom_serve_registry_t* registry,
 }
 
 void loom_serve_driver_set_observer(loom_serve_driver_t* driver,
-                                    loom_serve_wake_callback_t observer) {
+                                    loom_runtime_wake_callback_t observer) {
   for (iree_host_size_t i = 0; i < driver->capacity; ++i) {
     const loom_serve_registered_model_t* model =
         loom_serve_registry_at(driver->registry, i);
     if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
-      model->service.set_observer(model->service.self, observer);
+      model->service.runtime.vtable->set_observer(model->service.runtime.self,
+                                                  observer);
     }
   }
 }
 
-loom_serve_service_flags_t loom_serve_driver_shared_activity(
+loom_runtime_service_flags_t loom_serve_driver_shared_activity(
     const loom_serve_driver_t* driver, iree_host_size_t selected) {
   const void* capacity_domain =
       loom_serve_registry_at(driver->registry, selected)
-          ->service.capacity_domain;
+          ->service.runtime.capacity_domain;
   if (!capacity_domain) {
     return 0;
   }
   for (iree_host_size_t i = 0; i < driver->capacity; ++i) {
     const loom_serve_registered_model_t* model =
         loom_serve_registry_at(driver->registry, i);
-    if (i == selected || model->service.capacity_domain != capacity_domain) {
+    if (i == selected ||
+        model->service.runtime.capacity_domain != capacity_domain) {
       continue;
     }
     // Retirement still owns backing after service callbacks are gone. Its
     // ownership wake may release capacity; a quiescent failed release cannot.
     if (model->phase == LOOM_SERVE_REGISTRATION_RETIRING ||
         (model->phase == LOOM_SERVE_REGISTRATION_READY &&
-         (model->service.is_active(model->service.self) ||
+         (model->service.runtime.vtable->is_active(
+              model->service.runtime.self) ||
           model->parameter_operation ==
               LOOM_SERVE_PARAMETER_OPERATION_ACTIVATING))) {
-      return LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
+      return LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY;
     }
   }
   return 0;
 }
 
 void loom_serve_driver_advance(loom_serve_driver_t* driver,
-                               loom_serve_wake_callback_t wake,
+                               loom_runtime_wake_callback_t wake,
                                loom_serve_driver_observer_t observer,
                                bool* out_progress) {
   *out_progress = false;
@@ -78,11 +81,12 @@ void loom_serve_driver_advance(loom_serve_driver_t* driver,
     if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
       const loom_serve_service_t* service = &model->service;
       bool progress = false;
-      const loom_serve_service_flags_t flags =
+      const loom_runtime_service_flags_t flags =
           loom_serve_driver_shared_activity(driver, index) |
           loom_serve_registry_service_flags(model) |
-          (driver->stopping ? LOOM_SERVE_SERVICE_FLAG_STOPPING : 0);
-      iree_status_t status = service->advance(service->self, flags, &progress);
+          (driver->stopping ? LOOM_RUNTIME_SERVICE_FLAG_STOPPING : 0);
+      iree_status_t status = service->runtime.vtable->advance(
+          service->runtime.self, flags, &progress);
       if (!iree_status_is_ok(status)) {
         // The first failure requires another turn to stop admission. Repeated
         // terminal status is not progress while accepted borrowers retire.

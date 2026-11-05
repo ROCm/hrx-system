@@ -206,8 +206,8 @@ static iree_status_t loom_serve_observation_model(
   if (model->phase == LOOM_SERVE_REGISTRATION_READY &&
       service->telemetry.sample) {
     IREE_RETURN_IF_ERROR(service->telemetry.sample(
-        service->self, (loom_runtime_telemetry_sample_sink_t){
-                           output, loom_serve_observation_topic}));
+        service->runtime.self, (loom_runtime_telemetry_sample_sink_t){
+                                   output, loom_serve_observation_topic}));
   }
   return iree_string_builder_append_cstring(output, "]}");
 }

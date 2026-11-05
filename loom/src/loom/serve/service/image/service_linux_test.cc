@@ -245,7 +245,7 @@ class ImageServiceFixture : public ::testing::Test {
         .batch_limit = 1,
         .prepare = loom_serve_test_image_gate_t::Prepare,
         .prepare_batch = loom_serve_test_image_gate_t::PrepareBatch,
-        .set_observer = [](void*, loom_serve_wake_callback_t) {},
+        .set_observer = [](void*, loom_runtime_wake_callback_t) {},
         .advance_batch =
             [](void*, bool, bool* out_complete) {
               *out_complete = true;

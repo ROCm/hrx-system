@@ -6,7 +6,7 @@
 
 #include "loom/serve/server/model_registration.h"
 
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/runtime/storage/memory.h"
 #include "loom/serve/service/finite/component.h"
 #include "loom/serve/service/finite/decision/protocol.h"
@@ -88,7 +88,7 @@ static iree_status_t loom_serve_model_finite_activate(
 
 static iree_status_t loom_serve_finite_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_serve_wake_callback_t observer,
+    loom_runtime_wake_callback_t observer,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
@@ -137,7 +137,7 @@ typedef struct loom_serve_image_registration_t {
   // Borrowed immutable declaration owned by the stable registration slot.
   const loom_serve_model_configuration_t* configuration;
   // Owner scheduling callback, never an inline model operation.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // Borrowed registration-wide history, published only by this shared owner.
   loom_runtime_telemetry_stream_t* stream;
   // Owned unstarted/live/terminal source load, consumed before publication.
@@ -265,7 +265,7 @@ static iree_status_t loom_serve_image_registration_activate(
 
 static iree_status_t loom_serve_image_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_serve_wake_callback_t observer,
+    loom_runtime_wake_callback_t observer,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
@@ -321,7 +321,7 @@ typedef struct loom_serve_speech_registration_t {
   // Borrowed immutable declaration owned by the stable registration slot.
   const loom_serve_model_configuration_t* configuration;
   // Owner scheduling callback, never an inline model operation.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // Borrowed registration-wide history, published only by this shared owner.
   loom_runtime_telemetry_stream_t* stream;
   // Owned unstarted/live/terminal source load, consumed before publication.
@@ -473,7 +473,7 @@ static iree_status_t loom_serve_speech_registration_activate(
 
 static iree_status_t loom_serve_speech_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_serve_wake_callback_t observer,
+    loom_runtime_wake_callback_t observer,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
@@ -521,7 +521,7 @@ typedef struct loom_serve_recognition_registration_t {
   // Borrowed immutable declaration owned by the stable registration slot.
   const loom_serve_model_configuration_t* configuration;
   // Owner scheduling callback, never an inline model operation.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // Borrowed registration-wide history, published only by this shared owner.
   loom_runtime_telemetry_stream_t* stream;
   // Owned unstarted/live/terminal source load, consumed before publication.
@@ -657,7 +657,7 @@ static iree_status_t loom_serve_recognition_registration_activate(
 
 static iree_status_t loom_serve_recognition_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_serve_wake_callback_t observer,
+    loom_runtime_wake_callback_t observer,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
@@ -706,7 +706,7 @@ typedef struct loom_serve_text_registration_t {
   // Immutable declaration retained by the stable registry slot.
   const loom_serve_model_configuration_t* configuration;
   // Owner scheduling callback; no destruction occurs on its calling thread.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // Registration-wide history retained beyond service retirement.
   loom_runtime_telemetry_stream_t* stream;
   // Shape inputs borrowed by asynchronous preparation until publication.
@@ -902,7 +902,7 @@ static iree_status_t loom_serve_text_registration_activate(
 
 static iree_status_t loom_serve_text_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_serve_wake_callback_t observer,
+    loom_runtime_wake_callback_t observer,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
   const loom_serve_model_registration_options_t* options = self;
@@ -998,12 +998,12 @@ static iree_status_t loom_serve_text_registration_create(
 
 static iree_status_t loom_serve_model_registration_create(
     void* self, const loom_serve_model_configuration_t* configuration,
-    loom_serve_wake_callback_t observer,
+    loom_runtime_wake_callback_t observer,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_registration_t* out_registration) {
   static iree_status_t (*const create[])(
       void*, const loom_serve_model_configuration_t*,
-      loom_serve_wake_callback_t, loom_runtime_telemetry_stream_t*,
+      loom_runtime_wake_callback_t, loom_runtime_telemetry_stream_t*,
       iree_allocator_t, loom_serve_registration_t*) = {
       [LOOM_SERVE_MODEL_KIND_TEXT] = loom_serve_text_registration_create,
       [LOOM_SERVE_MODEL_KIND_SEQUENCE] = loom_serve_text_registration_create,

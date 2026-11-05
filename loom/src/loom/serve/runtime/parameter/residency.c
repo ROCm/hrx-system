@@ -25,7 +25,7 @@ struct loom_serve_residency_cache_t {
   // Accepted output bounds, including independent downstream queue captures.
   uint64_t output_bytes;
   // Nonblocking owner wake after final output retirement, under output_mutex.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // Least recently used model history owner, independent of shared weights.
   loom_serve_residency_t* oldest;
   // Most recently used model history owner.
@@ -157,7 +157,8 @@ struct loom_serve_residency_t {
 };
 
 void loom_serve_residency_cache_set_observer(
-    loom_serve_residency_cache_t* cache, loom_serve_wake_callback_t observer) {
+    loom_serve_residency_cache_t* cache,
+    loom_runtime_wake_callback_t observer) {
   iree_slim_mutex_lock(&cache->output_mutex);
   cache->observer = observer;
   iree_slim_mutex_unlock(&cache->output_mutex);

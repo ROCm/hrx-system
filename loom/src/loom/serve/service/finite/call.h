@@ -6,7 +6,7 @@
 #ifndef LOOM_SERVE_SERVICE_FINITE_CALL_H_
 #define LOOM_SERVE_SERVICE_FINITE_CALL_H_
 
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/service/finite/consumer.h"
 
 #ifdef __cplusplus
@@ -53,7 +53,7 @@ iree_string_view_t loom_serve_finite_call_body(
 // Installation notices an already-published result or completed call. Clearing
 // the observer on the owner joins its last access without another semaphore.
 void loom_serve_finite_call_set_observer(loom_serve_finite_call_t* call,
-                                         loom_serve_wake_callback_t observer);
+                                         loom_runtime_wake_callback_t observer);
 
 // Available after submission, before host readiness. Successful device
 // dependencies authorize device access; is_complete separately reports the

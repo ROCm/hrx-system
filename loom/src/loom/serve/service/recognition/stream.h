@@ -7,8 +7,8 @@
 #ifndef LOOM_SERVE_SERVICE_RECOGNITION_STREAM_H_
 #define LOOM_SERVE_SERVICE_RECOGNITION_STREAM_H_
 
+#include "loom/runtime/wake.h"
 #include "loom/serve/runtime/host/host.h"
-#include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/service/recognition/document.h"
 #include "loom/serve/service/recognition/generator.h"
 #include "loom/service/telemetry/record.h"
@@ -59,7 +59,7 @@ iree_status_t loom_serve_recognition_stream_service_allocate(
 // is_pending becomes false. Final callback publication joins this registration.
 void loom_serve_recognition_stream_service_set_observer(
     loom_serve_recognition_stream_service_t* service,
-    loom_serve_wake_callback_t observer);
+    loom_runtime_wake_callback_t observer);
 
 // Opens a bounded host stream and copies its options. Success with NULL means
 // all source slots are occupied; the caller retains its own queue position.

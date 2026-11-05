@@ -14,7 +14,7 @@ struct loom_serve_execution_reconfiguration_t {
   // Owned immutable compiled choices; contains no service selection policy.
   loom_serve_variant_pool_t* pool;
   // Borrowed wake target, installed on the same serialized owner.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // Acquired choice currently used by subsequent service invocations.
   loom_serve_variant_entry_t* selected;
   // One accepted policy change, applied only at the service's quiescent
@@ -165,7 +165,7 @@ void loom_serve_execution_reconfiguration_free(
 
 void loom_serve_execution_reconfiguration_set_observer(
     loom_serve_execution_reconfiguration_t* reconfiguration,
-    loom_serve_wake_callback_t observer) {
+    loom_runtime_wake_callback_t observer) {
   if (!reconfiguration) {
     return;
   }

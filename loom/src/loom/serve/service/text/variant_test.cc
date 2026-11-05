@@ -311,8 +311,9 @@ class ReconfigurationTextServiceTest : public SourceTextServiceTest {
   void TearDown() override {
     if (service_) {
       AdvanceUntil(
-          interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING);
-      interface_.set_observer(interface_.self, {});
+          interface_, [&] { return Idle(); },
+          LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+      interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
       loom_serve_text_service_free(service_, IREE_STATUS_OK);
       IREE_EXPECT_OK(TakeSelectionStatus());
     }
@@ -320,9 +321,9 @@ class ReconfigurationTextServiceTest : public SourceTextServiceTest {
   }
 
   bool Idle() const {
-    return !interface_.is_pending(interface_.self) &&
-           !interface_.is_active(interface_.self) &&
-           !interface_.snapshot(interface_.self).queued_requests;
+    return !interface_.runtime.vtable->is_pending(interface_.runtime.self) &&
+           !interface_.runtime.vtable->is_active(interface_.runtime.self) &&
+           !interface_.snapshot(interface_.runtime.self).queued_requests;
   }
 
   void Stage(std::string path, loom_serve_variant_id_t base,
@@ -408,7 +409,8 @@ TEST_F(ReconfigurationTextServiceTest,
   loom_serve_http_connection_t* connection = nullptr;
   ASSERT_NO_FATAL_FAILURE(Accept(first, interface_, &connection));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
-    return std::string(interface_.snapshot(interface_.self).phase) == "execute";
+    return std::string(interface_.snapshot(interface_.runtime.self).phase) ==
+           "execute";
   }));
   EXPECT_EQ(interface_.telemetry.counters->batches, 0u);
   // First admission activates a demand-loaded model. Establish the resident
@@ -422,13 +424,15 @@ TEST_F(ReconfigurationTextServiceTest,
   loom_serve::testing::text::OwnerTurn::Run(
       loom_serve_host_executor(host_), [&] {
         IREE_ASSERT_OK(
-            interface_.accept(interface_.self, connection, request, 0));
-        EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 1u);
+            interface_.accept(interface_.runtime.self, connection, request, 0));
+        EXPECT_EQ(interface_.snapshot(interface_.runtime.self).queued_requests,
+                  1u);
         ASSERT_NO_FATAL_FAILURE(Select(id));
         EXPECT_FALSE(selection_.called);
         EXPECT_EQ(configuration_.selected(configuration_.self), original_);
         bool progress = false;
-        IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+        IREE_ASSERT_OK(interface_.runtime.vtable->advance(
+            interface_.runtime.self, 0, &progress));
         // The accepted CPU task cannot retire while its sole worker runs this
         // turn, even if the outstanding device epoch is already ready.
         EXPECT_FALSE(selection_.called);
@@ -550,10 +554,11 @@ TEST_F(ReconfigurationTextServiceTest,
   loom_serve::testing::text::OwnerTurn::Run(
       loom_serve_host_executor(host_), [&] {
         IREE_ASSERT_OK(
-            interface_.accept(interface_.self, connection, request, 0));
+            interface_.accept(interface_.runtime.self, connection, request, 0));
         ASSERT_NO_FATAL_FAILURE(Select(id));
         bool progress = false;
-        IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+        IREE_ASSERT_OK(interface_.runtime.vtable->advance(
+            interface_.runtime.self, 0, &progress));
         EXPECT_FALSE(selection_.called);
         EXPECT_EQ(configuration_.selected(configuration_.self), original_);
       });
@@ -574,19 +579,21 @@ TEST_F(ReconfigurationTextServiceTest,
             Stage(directory_ + "/advance.loom", original_, &id));
         ASSERT_NO_FATAL_FAILURE(Select(original_));
         bool progress = false;
-        IREE_ASSERT_OK(interface_.advance(
-            interface_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
+        IREE_ASSERT_OK(interface_.runtime.vtable->advance(
+            interface_.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING,
+            &progress));
         EXPECT_TRUE(selection_.called);
         EXPECT_EQ(selection_.id, original_);
         IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, TakeSelectionStatus());
-        EXPECT_TRUE(interface_.is_pending(interface_.self));
+        EXPECT_TRUE(
+            interface_.runtime.vtable->is_pending(interface_.runtime.self));
         loom_serve_variant_snapshot_t snapshot = {};
         ASSERT_TRUE(loom_serve_variant_pool_snapshot(configuration_.pool, id,
                                                      &snapshot));
         EXPECT_EQ(snapshot.phase, LOOM_SERVE_VARIANT_COMPILING);
       });
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING));
+      interface_, [&] { return Idle(); }, LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
   loom_serve_variant_snapshot_t snapshot = {};
   ASSERT_TRUE(
       loom_serve_variant_pool_snapshot(configuration_.pool, id, &snapshot));

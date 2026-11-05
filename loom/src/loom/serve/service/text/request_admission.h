@@ -46,16 +46,16 @@ void loom_serve_text_complete_retention(loom_serve_text_service_t* service);
 
 // Joins CPU input preparation; request errors remain local to its receipt.
 iree_status_t loom_serve_text_complete_preparation(
-    loom_serve_text_service_t* service, loom_serve_service_flags_t flags,
+    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags,
     iree_status_t status);
 
 // Completes native state admission and transfers the request into its row.
 iree_status_t loom_serve_text_complete_reservation(
-    loom_serve_text_service_t* service, loom_serve_service_flags_t flags);
+    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags);
 
 // Admits ready text work or protects media consumers without worker waits.
 iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
-                                            loom_serve_service_flags_t flags,
+                                            loom_runtime_service_flags_t flags,
                                             bool allow_preparation);
 
 // Transfers a validated receipt into a stable queue slot and offers

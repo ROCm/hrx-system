@@ -58,7 +58,7 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     return static_cast<loom_serve_test_variant_dependency_t*>(
         static_cast<loom_serve_test_model_service_t*>(self));
   }
-  static void SetObserver(void* self, loom_serve_wake_callback_t observer) {
+  static void SetObserver(void* self, loom_runtime_wake_callback_t observer) {
     loom_serve_test_model_service_t::SetObserver(self, observer);
     loom_serve_variant_pool_set_observer(From(self)->variants, observer);
   }
@@ -68,7 +68,7 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
            dependency->selection.entry ||
            loom_serve_variant_pool_pending(dependency->variants);
   }
-  static iree_status_t Advance(void* self, loom_serve_service_flags_t flags,
+  static iree_status_t Advance(void* self, loom_runtime_service_flags_t flags,
                                bool* out_progress) {
     IREE_RETURN_IF_ERROR(
         loom_serve_test_model_service_t::Advance(self, flags, out_progress));
@@ -145,9 +145,13 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
       return iree_make_status(IREE_STATUS_CANCELLED, "preparation cancelled");
     }
     *out_service = dependency->Interface(nullptr, nullptr);
-    out_service->set_observer = SetObserver;
-    out_service->is_pending = IsPending;
-    out_service->advance = Advance;
+    static const loom_runtime_service_vtable_t vtable = {
+        .set_observer = SetObserver,
+        .is_pending = IsPending,
+        .is_active = IsActive,
+        .advance = Advance,
+    };
+    out_service->runtime.vtable = &vtable;
     out_service->telemetry.stream = dependency->stream;
     out_service->reconfiguration = {dependency, dependency->variants, Stage,
                                     Select, Selected};
@@ -169,7 +173,7 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
   }
   static iree_status_t Create(
       void* self, const loom_serve_model_configuration_t* configuration,
-      loom_serve_wake_callback_t observer,
+      loom_runtime_wake_callback_t observer,
       loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
       loom_serve_registration_t* out_registration) {
     auto* dependency = static_cast<loom_serve_test_variant_dependency_t*>(self);

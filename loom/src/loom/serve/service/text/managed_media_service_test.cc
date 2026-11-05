@@ -211,7 +211,7 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest,
     IREE_ASSERT_OK(loom_serve_registry_activate(
         model, LOOM_SERVE_MODEL_COMPONENT_PRIMARY));
     auto* notification = loom_serve_http_server_notification(server_);
-    const loom_serve_wake_callback_t observer = {
+    const loom_runtime_wake_callback_t observer = {
         [](void* data) {
           iree_notification_post(static_cast<iree_notification_t*>(data),
                                  IREE_ALL_WAITERS);
@@ -224,9 +224,9 @@ class ManagedMediaServiceTest : public RegisteredSourceTextServiceTest,
       bool progress = false;
       OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
         if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
-          IREE_ASSERT_OK(model->service.advance(
-              model->service.self, loom_serve_registry_service_flags(model),
-              &progress));
+          IREE_ASSERT_OK(model->service.runtime.vtable->advance(
+              model->service.runtime.self,
+              loom_serve_registry_service_flags(model), &progress));
         }
         bool advanced = false;
         IREE_ASSERT_OK(

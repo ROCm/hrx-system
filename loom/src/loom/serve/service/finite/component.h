@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_FINITE_COMPONENT_H_
 #define LOOM_SERVE_SERVICE_FINITE_COMPONENT_H_
 
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/service/finite/model.h"
 
 #ifdef __cplusplus
@@ -36,7 +36,7 @@ typedef enum loom_serve_finite_component_phase_e {
 iree_status_t loom_serve_finite_component_allocate(
     loom_serve_device_t* device, loom_serve_pool_t* pool,
     const loom_serve_finite_model_options_t* options,
-    loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
+    loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_serve_finite_component_t** out_component);
 
 loom_serve_finite_component_phase_t loom_serve_finite_component_phase(

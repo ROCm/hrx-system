@@ -472,7 +472,7 @@ class MemoryTest : public ::testing::Test {
   void AwaitVirtualPool() {
     iree_notification_t notification;
     iree_notification_initialize(&notification);
-    const loom_serve_wake_callback_t wake = {
+    const loom_runtime_wake_callback_t wake = {
         [](void* user_data) {
           iree_notification_post(static_cast<iree_notification_t*>(user_data),
                                  IREE_ALL_WAITERS);

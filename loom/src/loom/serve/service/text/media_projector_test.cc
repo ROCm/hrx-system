@@ -92,7 +92,7 @@ class MediaProjectorTest : public ::testing::Test {
     iree_async_proactor_t* proactor = nullptr;
     IREE_ASSERT_OK(iree_async_proactor_pool_get(
         loom_serve_host_proactor_pool(host), 0, &proactor));
-    const loom_serve_wake_callback_t observer = {
+    const loom_runtime_wake_callback_t observer = {
         [](void* data) {
           iree_notification_post(static_cast<iree_notification_t*>(data),
                                  IREE_ALL_WAITERS);

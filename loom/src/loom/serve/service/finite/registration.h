@@ -42,7 +42,7 @@ iree_status_t loom_serve_finite_registration_allocate(
     loom_serve_device_t* device, loom_serve_pool_t* pool,
     const loom_serve_finite_model_options_t* model_options,
     const loom_serve_finite_registration_options_t* options,
-    loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
+    loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_serve_finite_registration_t** out_registration);
 
 // Advances preparation or irrevocable cancellation without waiting. A

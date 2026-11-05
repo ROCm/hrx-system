@@ -16,7 +16,7 @@ struct loom_serve_finite_component_t {
   // Borrowed definition and package, independent of any requesting connection.
   loom_serve_finite_model_options_t options;
   // Immutable owner wake target, live until all callbacks have retired.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // Owner-only lifecycle; only READY lends a model to an invocation.
   loom_serve_finite_component_phase_t phase;
   // Monotonic start of the current PREPARING interval; phase owns its validity.
@@ -56,7 +56,7 @@ static void loom_serve_finite_component_set_phase(
 iree_status_t loom_serve_finite_component_allocate(
     loom_serve_device_t* device, loom_serve_pool_t* pool,
     const loom_serve_finite_model_options_t* options,
-    loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
+    loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_serve_finite_component_t** out_component) {
   *out_component = NULL;
   loom_serve_finite_component_t* component = NULL;

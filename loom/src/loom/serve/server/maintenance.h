@@ -38,7 +38,7 @@ iree_status_t loom_serve_maintenance_initialize(
 // Installs the router wake before advancing; detach only after pending is
 // false.
 void loom_serve_maintenance_set_observer(loom_serve_maintenance_t* maintenance,
-                                         loom_serve_wake_callback_t observer);
+                                         loom_runtime_wake_callback_t observer);
 
 // Applies expiry on the serialized router owner and maintains its alarm.
 // Stopping is irreversible, joins accepted callbacks, and starts no

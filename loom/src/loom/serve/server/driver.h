@@ -50,18 +50,18 @@ void loom_serve_driver_initialize(loom_serve_registry_t* registry,
 // preparation receives the same wake through advance. Detachment follows final
 // collection, not merely an error or readiness signal.
 void loom_serve_driver_set_observer(loom_serve_driver_t* driver,
-                                    loom_serve_wake_callback_t observer);
+                                    loom_runtime_wake_callback_t observer);
 
 // Another member of the same nonnull capacity domain owns activity that can
 // release capacity. Queued requests alone never justify waiting on a peer.
-loom_serve_service_flags_t loom_serve_driver_shared_activity(
+loom_runtime_service_flags_t loom_serve_driver_shared_activity(
     const loom_serve_driver_t* driver, iree_host_size_t selected);
 
 // Advances each occupied slot once in rotating order, including after failure.
 // Shared failures latch stopping/status; accepted work still drains. The
 // observer is the sole boundary between service progress and model retirement.
 void loom_serve_driver_advance(loom_serve_driver_t* driver,
-                               loom_serve_wake_callback_t wake,
+                               loom_runtime_wake_callback_t wake,
                                loom_serve_driver_observer_t observer,
                                bool* out_progress);
 

@@ -51,8 +51,9 @@ iree_status_t loom_serve_maintenance_initialize(
   return iree_ok_status();
 }
 
-void loom_serve_maintenance_set_observer(loom_serve_maintenance_t* maintenance,
-                                         loom_serve_wake_callback_t observer) {
+void loom_serve_maintenance_set_observer(
+    loom_serve_maintenance_t* maintenance,
+    loom_runtime_wake_callback_t observer) {
   loom_serve_timer_set_observer(&maintenance->timer, observer);
 }
 

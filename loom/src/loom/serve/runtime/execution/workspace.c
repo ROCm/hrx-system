@@ -520,7 +520,7 @@ bool loom_serve_workspace_trim_idle(loom_serve_workspace_t* workspace,
 }
 
 void loom_serve_workspace_set_observer(loom_serve_workspace_t* workspace,
-                                       loom_serve_wake_callback_t observer) {
+                                       loom_runtime_wake_callback_t observer) {
   if (workspace->virtual_pool) {
     loom_serve_virtual_pool_set_observer(workspace->virtual_pool, observer);
   }

@@ -132,7 +132,7 @@ struct loom_serve_virtual_pool_t {
   // Notification for blocking outer callers driving the same owner.
   iree_notification_t notification;
   // Borrowed asynchronous scheduler wake, protected by mutex.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // FIFO of cold acquisitions captured by queue callbacks.
   loom_serve_virtual_pool_acquire_t* first;
   // Tail insertion link, avoiding a scan on off-owner cold submission.
@@ -183,8 +183,8 @@ static void loom_serve_virtual_pool_wake(void* user_data) {
   iree_slim_mutex_unlock(&pool->mutex);
 }
 
-void loom_serve_virtual_pool_set_observer(loom_serve_virtual_pool_t* pool,
-                                          loom_serve_wake_callback_t observer) {
+void loom_serve_virtual_pool_set_observer(
+    loom_serve_virtual_pool_t* pool, loom_runtime_wake_callback_t observer) {
   iree_slim_mutex_lock(&pool->mutex);
   pool->observer = observer;
   iree_slim_mutex_unlock(&pool->mutex);
@@ -1030,7 +1030,7 @@ iree_status_t loom_serve_virtual_pool_wait(loom_serve_virtual_pool_t* pool,
   // The exclusive outer owner waits on both execution and shared capacity
   // notifications. Joining all memory work would stall an independent warm
   // execution behind a cold acquisition whose native return is still pending.
-  const loom_serve_wake_callback_t previous =
+  const loom_runtime_wake_callback_t previous =
       loom_serve_memory_pool_set_observer(pool->memory_pool,
                                           loom_serve_virtual_pool_wake, pool);
   iree_status_t status = iree_ok_status();
@@ -1072,11 +1072,11 @@ iree_status_t loom_serve_virtual_pool_await(loom_serve_virtual_pool_t* pool,
                                             iree_condition_fn_t condition,
                                             void* user_data) {
   iree_slim_mutex_lock(&pool->mutex);
-  const loom_serve_wake_callback_t previous = pool->observer;
-  pool->observer = (loom_serve_wake_callback_t){
+  const loom_runtime_wake_callback_t previous = pool->observer;
+  pool->observer = (loom_runtime_wake_callback_t){
       loom_serve_virtual_pool_notify_waiter, notification};
   iree_slim_mutex_unlock(&pool->mutex);
-  const loom_serve_wake_callback_t previous_capacity =
+  const loom_runtime_wake_callback_t previous_capacity =
       loom_serve_memory_pool_set_observer(pool->memory_pool,
                                           loom_serve_virtual_pool_notify_waiter,
                                           notification);

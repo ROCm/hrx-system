@@ -59,7 +59,7 @@ loom_cc_library(
     hdrs = ["variant_pool.h"],
     deps = [
         ":compilation",
-        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/runtime:wake",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
     ],

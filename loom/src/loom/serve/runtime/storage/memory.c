@@ -496,12 +496,12 @@ iree_status_t loom_serve_memory_pool_query_status(
   return iree_status_clone(pool->failure);
 }
 
-loom_serve_wake_callback_t loom_serve_memory_pool_set_observer(
+loom_runtime_wake_callback_t loom_serve_memory_pool_set_observer(
     loom_serve_memory_pool_t* pool, void (*wake)(void* user_data),
     void* user_data) {
   iree_slim_mutex_lock(&pool->capacity_mutex);
-  const loom_serve_wake_callback_t previous = {pool->observer.wake,
-                                               pool->observer.user_data};
+  const loom_runtime_wake_callback_t previous = {pool->observer.wake,
+                                                 pool->observer.user_data};
   pool->observer.wake = wake;
   pool->observer.user_data = user_data;
   iree_slim_mutex_unlock(&pool->capacity_mutex);

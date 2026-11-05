@@ -116,7 +116,7 @@ class RegistrySpeechTest : public ::testing::Test {
   template <typename Predicate>
   void AdvanceUntil(Predicate ready) {
     auto* notification = loom_serve_http_server_notification(server_);
-    const loom_serve_wake_callback_t wake = {
+    const loom_runtime_wake_callback_t wake = {
         [](void* self) {
           iree_notification_post(static_cast<iree_notification_t*>(self),
                                  IREE_ALL_WAITERS);
@@ -132,9 +132,9 @@ class RegistrySpeechTest : public ::testing::Test {
       if (Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
         auto& service = Model()->service;
         status = iree_status_join(
-            status, service.advance(service.self,
-                                    loom_serve_registry_service_flags(Model()),
-                                    &progress));
+            status, service.runtime.vtable->advance(
+                        service.runtime.self,
+                        loom_serve_registry_service_flags(Model()), &progress));
         loom_runtime_telemetry_record_t record;
         loom_runtime_telemetry_read_t result;
         while ((result = loom_runtime_telemetry_stream_read(
@@ -244,8 +244,8 @@ class RegistrySpeechTest : public ::testing::Test {
     loom_serve_http_connection_t* connection = nullptr;
     const loom_serve_http_request_t* request = nullptr;
     IREE_ASSERT_OK(http_.TakeRequest(client.get(), &connection, &request));
-    IREE_ASSERT_OK(
-        Model()->service.accept(Model()->service.self, connection, request, 0));
+    IREE_ASSERT_OK(Model()->service.accept(Model()->service.runtime.self,
+                                           connection, request, 0));
     reader_ = std::thread([this, descriptor = client.release()] {
       read_status_ = http_.Read(descriptor, false, &response_);
     });
@@ -364,13 +364,13 @@ TEST_F(RegistrySpeechTest, AbortDetachesLiveStreamsBeforeModelRetirement) {
   IREE_ASSERT_OK(Open(FLAG_alternate_voice, &second));
   ASSERT_NE(second, nullptr);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
-    return std::string(
-               Model()->service.snapshot(Model()->service.self).phase) ==
-               "generating" ||
+    return std::string(Model()
+                           ->service.snapshot(Model()->service.runtime.self)
+                           .phase) == "generating" ||
            loom_serve_speech_stream_is_complete(second.get());
   }));
   IREE_ASSERT_OK(loom_serve_speech_stream_status(second.get()));
-  ASSERT_STREQ(Model()->service.snapshot(Model()->service.self).phase,
+  ASSERT_STREQ(Model()->service.snapshot(Model()->service.runtime.self).phase,
                "generating");
   IREE_ASSERT_OK(loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_ABORT));
   SpeechStream rejected(nullptr, loom_serve_speech_stream_close);
@@ -428,13 +428,13 @@ TEST_F(RegistrySpeechTest,
   IREE_ASSERT_OK(Open(voices[1], &streams[1], texts[1].c_str(), 74));
   ASSERT_NE(streams[1], nullptr);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
-    return std::string(
-               Model()->service.snapshot(Model()->service.self).phase) ==
-               "generating" ||
+    return std::string(Model()
+                           ->service.snapshot(Model()->service.runtime.self)
+                           .phase) == "generating" ||
            loom_serve_speech_stream_is_complete(streams[1].get());
   }));
   IREE_ASSERT_OK(loom_serve_speech_stream_status(streams[1].get()));
-  ASSERT_STREQ(Model()->service.snapshot(Model()->service.self).phase,
+  ASSERT_STREQ(Model()->service.snapshot(Model()->service.runtime.self).phase,
                "generating");
   for (size_t i = 2; i < streams.size(); ++i) {
     IREE_ASSERT_OK(Open(voices[i], &streams[i], texts[i].c_str(), 73 + i));
@@ -445,38 +445,42 @@ TEST_F(RegistrySpeechTest,
     ASSERT_FALSE(loom_serve_speech_stream_peek(stream.get())->complete);
   }
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
-    return std::string(
-               Model()->service.snapshot(Model()->service.self).phase) ==
-           "delivering";
+    return std::string(Model()
+                           ->service.snapshot(Model()->service.runtime.self)
+                           .phase) == "delivering";
   }));
-  ASSERT_EQ(Model()->service.snapshot(Model()->service.self).active_requests,
-            4u);
+  ASSERT_EQ(
+      Model()->service.snapshot(Model()->service.runtime.self).active_requests,
+      4u);
 
   // With every peer holding output, only this request can submit new work.
   // Closing before another owner turn leaves its accepted borrower retained.
   loom_serve_speech_stream_consume(streams[2].get());
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
-    return std::string(
-               Model()->service.snapshot(Model()->service.self).phase) ==
-               "generating" ||
+    return std::string(Model()
+                           ->service.snapshot(Model()->service.runtime.self)
+                           .phase) == "generating" ||
            loom_serve_speech_stream_is_complete(streams[2].get());
   }));
   IREE_ASSERT_OK(loom_serve_speech_stream_status(streams[2].get()));
-  ASSERT_STREQ(Model()->service.snapshot(Model()->service.self).phase,
+  ASSERT_STREQ(Model()->service.snapshot(Model()->service.runtime.self).phase,
                "generating");
   streams[2].reset();
-  EXPECT_EQ(Model()->service.snapshot(Model()->service.self).active_requests,
-            4u);
+  EXPECT_EQ(
+      Model()->service.snapshot(Model()->service.runtime.self).active_requests,
+      4u);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
       [&] { return Model()->service.telemetry.counters->cancelled == 1; }));
-  ASSERT_EQ(Model()->service.snapshot(Model()->service.self).active_requests,
-            3u);
+  ASSERT_EQ(
+      Model()->service.snapshot(Model()->service.runtime.self).active_requests,
+      3u);
   IREE_ASSERT_OK(Open(voices[2], &streams[2], texts[2].c_str(), 75));
   ASSERT_NE(streams[2], nullptr);
   ASSERT_NO_FATAL_FAILURE(AwaitOutput(streams[2].get()));
   ASSERT_FALSE(loom_serve_speech_stream_peek(streams[2].get())->complete);
-  EXPECT_EQ(Model()->service.snapshot(Model()->service.self).active_requests,
-            4u);
+  EXPECT_EQ(
+      Model()->service.snapshot(Model()->service.runtime.self).active_requests,
+      4u);
 
   // The short peer can finish while all other consumers withhold credit.
   std::array<std::string, 4> actual;

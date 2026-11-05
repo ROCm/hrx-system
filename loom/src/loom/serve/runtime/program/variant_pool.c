@@ -45,7 +45,7 @@ struct loom_serve_variant_pool_t {
   // Protects completion publication and wake lifetime, never model execution.
   iree_slim_mutex_t mutex;
   // Nonblocking owner scheduling target, protected by mutex.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // First retained entry in owner-selected traversal order.
   loom_serve_variant_entry_t* head;
   // Last cached entry; appending never moves existing producer payloads.
@@ -143,8 +143,8 @@ void loom_serve_variant_pool_free(loom_serve_variant_pool_t* pool) {
   iree_allocator_free(pool->host_allocator, pool);
 }
 
-void loom_serve_variant_pool_set_observer(loom_serve_variant_pool_t* pool,
-                                          loom_serve_wake_callback_t observer) {
+void loom_serve_variant_pool_set_observer(
+    loom_serve_variant_pool_t* pool, loom_runtime_wake_callback_t observer) {
   iree_slim_mutex_lock(&pool->mutex);
   pool->observer = observer;
   iree_slim_mutex_unlock(&pool->mutex);

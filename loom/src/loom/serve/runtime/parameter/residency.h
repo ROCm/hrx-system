@@ -47,7 +47,7 @@ bool loom_serve_residency_cache_is_empty(loom_serve_residency_cache_t* cache);
 // Final output retirement wakes the serialized admission owner. Detachment
 // joins callback access; observers never wait or reenter the cache.
 void loom_serve_residency_cache_set_observer(
-    loom_serve_residency_cache_t* cache, loom_serve_wake_callback_t observer);
+    loom_serve_residency_cache_t* cache, loom_runtime_wake_callback_t observer);
 
 // Accepted outputs still borrow this cache, independently of producer model
 // removal or failed readiness. Final credit retirement wakes the owner.

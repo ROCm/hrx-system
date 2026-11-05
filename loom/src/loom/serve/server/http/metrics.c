@@ -160,7 +160,7 @@ static iree_status_t loom_serve_http_metrics_extensions(
     }
     loom_serve_http_metrics_extension_t extension = {output, model};
     status = model->service.telemetry.sample(
-        model->service.self,
+        model->service.runtime.self,
         (loom_runtime_telemetry_sample_sink_t){
             &extension, loom_serve_http_metrics_extension_emit});
   }

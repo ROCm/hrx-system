@@ -8,7 +8,7 @@
 
 #include <string.h>
 
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 
 enum {
   TIMER_DEADLINE = 1u << 0,
@@ -86,7 +86,7 @@ void loom_serve_timer_configure(loom_serve_timer_t* timer,
 }
 
 void loom_serve_timer_set_observer(loom_serve_timer_t* timer,
-                                   loom_serve_wake_callback_t observer) {
+                                   loom_runtime_wake_callback_t observer) {
   iree_slim_mutex_lock(&timer->mutex);
   timer->observer = observer;
   iree_slim_mutex_unlock(&timer->mutex);

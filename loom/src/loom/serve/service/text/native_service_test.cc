@@ -144,7 +144,7 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
   template <typename Predicate>
   void AdvanceRegistryUntil(Predicate ready) {
     auto* notification = loom_serve_http_server_notification(server_);
-    const loom_serve_wake_callback_t wake = {
+    const loom_runtime_wake_callback_t wake = {
         [](void* self) {
           iree_notification_post(static_cast<iree_notification_t*>(self),
                                  IREE_ALL_WAITERS);
@@ -157,9 +157,9 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
       if (iree_status_is_ok(status) &&
           Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
         auto& service = Model()->service;
-        status = service.advance(service.self,
-                                 loom_serve_registry_service_flags(Model()),
-                                 &progress);
+        status = service.runtime.vtable->advance(
+            service.runtime.self, loom_serve_registry_service_flags(Model()),
+            &progress);
       }
       bool registry_progress = false;
       if (iree_status_is_ok(status)) {
@@ -186,9 +186,9 @@ class NativeTextRegistryTest : public RegisteredSourceTextServiceTest {
 
   bool Idle() {
     const auto& service = Model()->service;
-    return !service.is_pending(service.self) &&
-           !service.is_active(service.self) &&
-           !service.snapshot(service.self).queued_requests;
+    return !service.runtime.vtable->is_pending(service.runtime.self) &&
+           !service.runtime.vtable->is_active(service.runtime.self) &&
+           !service.snapshot(service.runtime.self).queued_requests;
   }
 
   iree_status_t Open(const std::string& body, const char* session,
@@ -587,8 +587,8 @@ TEST_F(NativeTextRegistryTest, StoppingSealsReadyServiceAdmission) {
   ASSERT_NO_FATAL_FAILURE(Prepare());
   bool progress = false;
   auto& service = Model()->service;
-  IREE_ASSERT_OK(service.advance(service.self, LOOM_SERVE_SERVICE_FLAG_STOPPING,
-                                 &progress));
+  IREE_ASSERT_OK(service.runtime.vtable->advance(
+      service.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING, &progress));
   NativeStream stream(nullptr, loom_serve_text_stream_close);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
                         Open(body_, "after-stop", &stream));
@@ -746,10 +746,11 @@ TEST_F(NativeTextRegistryTest,
   ASSERT_NE(submitted, nullptr);
   auto& service = Model()->service;
   bool progress = false;
-  IREE_ASSERT_OK(service.advance(service.self, 0, &progress));
+  IREE_ASSERT_OK(
+      service.runtime.vtable->advance(service.runtime.self, 0, &progress));
   ASSERT_TRUE(progress);
   ASSERT_FALSE(loom_serve_text_checkpoint_control_is_complete(submitted.get()));
-  ASSERT_EQ(service.snapshot(service.self).active_requests, 1u);
+  ASSERT_EQ(service.snapshot(service.runtime.self).active_requests, 1u);
   submitted.reset();
   ASSERT_NO_FATAL_FAILURE(AdvanceRegistryUntil([&] { return Idle(); }));
 

@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVER_REGISTRY_H_
 #define LOOM_SERVE_SERVER_REGISTRY_H_
 
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/runtime/parameter/activation.h"
 #include "loom/serve/runtime/parameter/residency.h"
 #include "loom/serve/runtime/program/compilation.h"
@@ -136,7 +136,7 @@ typedef struct loom_serve_registration_factory_t {
   // or explicit activation, never for metadata-only registration alone.
   iree_status_t (*create)(void* self,
                           const loom_serve_model_configuration_t* configuration,
-                          loom_serve_wake_callback_t observer,
+                          loom_runtime_wake_callback_t observer,
                           loom_runtime_telemetry_stream_t* stream,
                           iree_allocator_t host_allocator,
                           loom_serve_registration_t* out_registration);
@@ -386,7 +386,7 @@ bool loom_serve_registry_has_component(
 
 // Returns STOPPING for failure, abort, or completed graceful work.
 // The router still owns held claims and external tokenizer lifetimes.
-loom_serve_service_flags_t loom_serve_registry_service_flags(
+loom_runtime_service_flags_t loom_serve_registry_service_flags(
     const loom_serve_registered_model_t* model);
 
 // Consumes a terminal operation error and seals this managed model's admission.
@@ -404,7 +404,7 @@ iree_status_t loom_serve_registry_fail(loom_serve_registry_t* registry,
 // Reports actual progress; otherwise waits for an installed ownership wake.
 iree_status_t loom_serve_registry_advance(loom_serve_registry_t* registry,
                                           iree_host_size_t index,
-                                          loom_serve_wake_callback_t observer,
+                                          loom_runtime_wake_callback_t observer,
                                           bool* out_progress);
 bool loom_serve_registry_pending(const loom_serve_registered_model_t* model);
 const char* loom_serve_registry_phase(

@@ -31,7 +31,7 @@ TEST_F(SourceEmbeddingServiceTest,
   const std::string directory =
       iree::testing::MakeTempFilePath("variant_weights");
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(directory));
-  interface_.set_observer(interface_.self, {});
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
   loom_serve_finite_service_free(std::exchange(service_, nullptr));
   IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
   ASSERT_NO_FATAL_FAILURE(CreateModel(directory));

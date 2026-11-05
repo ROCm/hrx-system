@@ -25,7 +25,7 @@ class ObservationTest : public ::testing::Test {
         4, iree_allocator_system(), &stream_));
     const loom_serve_service_t service = {
         .name = IREE_SV("model"),
-        .self = this,
+        .runtime = {.self = this},
         .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING,
         .snapshot =
             [](void* self) {

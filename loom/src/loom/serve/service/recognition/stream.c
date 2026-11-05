@@ -127,7 +127,7 @@ struct loom_serve_recognition_stream_service_t {
     // Serializes worker/proactor publication with owner collection.
     iree_slim_mutex_t mutex;
     // Nonblocking wake installed before any asynchronous operation.
-    loom_serve_wake_callback_t observer;
+    loom_runtime_wake_callback_t observer;
     // Completed CPU/device operations awaiting owner consumption.
     uint32_t ready;
     // Owned readiness failure, independent of source input rejection.
@@ -671,7 +671,7 @@ iree_status_t loom_serve_recognition_stream_service_advance(
 
 void loom_serve_recognition_stream_service_set_observer(
     loom_serve_recognition_stream_service_t* service,
-    loom_serve_wake_callback_t observer) {
+    loom_runtime_wake_callback_t observer) {
   iree_slim_mutex_lock(&service->events.mutex);
   service->events.observer = observer;
   iree_slim_mutex_unlock(&service->events.mutex);

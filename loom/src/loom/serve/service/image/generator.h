@@ -54,7 +54,7 @@ typedef struct loom_serve_image_generator_t {
                                  loom_service_image_prepared_t* out_prepared);
   // Installs the serialized owner's nonblocking wake before preparation. The
   // owner detaches it only after every accepted compilation has retired.
-  void (*set_observer)(void* self, loom_serve_wake_callback_t observer);
+  void (*set_observer)(void* self, loom_runtime_wake_callback_t observer);
   // Resolves prepared code before residency admission. A miss progresses
   // asynchronously; cancellation joins accepted producers before completion.
   iree_status_t (*advance_batch)(void* self, bool cancel, bool* out_complete);

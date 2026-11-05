@@ -25,7 +25,7 @@ void loom_serve_text_readiness_deinitialize(
 
 void loom_serve_text_readiness_set_observer(
     loom_serve_text_readiness_t* readiness,
-    loom_serve_wake_callback_t observer) {
+    loom_runtime_wake_callback_t observer) {
   iree_slim_mutex_lock(&readiness->mutex);
   readiness->observer = observer;
   iree_slim_mutex_unlock(&readiness->mutex);

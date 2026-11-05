@@ -27,7 +27,7 @@ loom_cc_library(
     hdrs = ["virtual_pool.h"],
     deps = [
         ":memory",
-        "//loom/src/loom/serve/runtime/host:wake",
+        "//loom/src/loom/runtime:wake",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
@@ -76,8 +76,8 @@ loom_cc_library(
         ":backing_directory",
         ":backing_pages",
         ":memory_geometry",
+        "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/storage:statistics",
-        "//loom/src/loom/serve/runtime/host:wake",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:atomic_slist",

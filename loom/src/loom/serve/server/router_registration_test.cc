@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/server/router_test_fixture.h"
 #include "loom/service/telemetry/record.h"
 
@@ -44,7 +44,7 @@ struct loom_serve_test_registration_dependency_t {
   // Outer-test synchronization on actual retirement entry.
   std::condition_variable condition;
   // Final device-borrower wake, independent of the service observer.
-  loom_serve_wake_callback_t observer = {};
+  loom_runtime_wake_callback_t observer = {};
   // Registry-owned history borrowed by the prepared service.
   loom_runtime_telemetry_stream_t* stream = nullptr;
   // Retire has been called after all service and utility borrowers completed.
@@ -251,7 +251,7 @@ struct loom_serve_test_registration_dependency_t {
   }
   static iree_status_t Create(
       void* self, const loom_serve_model_configuration_t* configuration,
-      loom_serve_wake_callback_t observer,
+      loom_runtime_wake_callback_t observer,
       loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
       loom_serve_registration_t* out_registration) {
     auto* dependency =
@@ -1129,7 +1129,7 @@ TEST_P(HttpRouterRegistrationTest,
   managed_.WaitRetiring();
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
   EXPECT_TRUE(iree_any_bit_set(b_.WaitAdmission(),
-                               LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY));
+                               LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_NE(Control("drain", "b").find(R"("queued_requests":1)"),
             std::string::npos);
   EXPECT_EQ(managed_.destroyed.load(), 0u);
@@ -1156,7 +1156,7 @@ TEST_P(HttpRouterRegistrationTest,
   managed_.WaitRetiring();
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
   EXPECT_FALSE(iree_any_bit_set(b_.WaitAdmission(),
-                                LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY));
+                                LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(managed_.destroyed.load(), 0u);
   managed_.ReleaseRetirement();
@@ -1291,7 +1291,7 @@ TEST_P(HttpRouterRegistrationTest,
   // not park indefinitely waiting for an ownership wake that cannot arrive.
   const int peer = Send("POST", "/v1/test", R"({"model":"b"})");
   EXPECT_FALSE(iree_any_bit_set(b_.WaitAdmission(),
-                                LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY));
+                                LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY));
   EXPECT_EQ(Read(peer).find("HTTP/1.1 200"), 0u);
   EXPECT_EQ(Control("unregister", "dynamic").find("HTTP/1.1 202"), 0u);
   while (Read(Send("GET", "/v1/status")).find(R"("id":"dynamic")") !=

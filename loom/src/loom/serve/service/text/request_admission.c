@@ -504,13 +504,13 @@ static iree_status_t loom_serve_text_reject_prepared(
 }
 
 iree_status_t loom_serve_text_complete_preparation(
-    loom_serve_text_service_t* service, loom_serve_service_flags_t flags,
+    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags,
     iree_status_t status) {
   loom_serve_text_pending_request_t* pending =
       service->pending.prepared.request;
   const iree_host_size_t index = service->pending.prepared.index;
   const bool cancelled =
-      iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING) ||
+      iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING) ||
       !pending->consumer.vtable->is_open(pending->consumer.self);
   if (!iree_status_is_ok(status)) {
     switch (iree_status_code(status)) {
@@ -553,10 +553,10 @@ iree_status_t loom_serve_text_complete_preparation(
 }
 
 static iree_status_t loom_serve_text_admit_request(
-    loom_serve_text_service_t* service, loom_serve_service_flags_t flags) {
+    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags) {
   loom_serve_text_pending_request_t* pending =
       service->pending.prepared.request;
-  if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING) ||
+  if (iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING) ||
       !pending->consumer.vtable->is_open(pending->consumer.self)) {
     loom_serve_text_reset_session(service, service->pending.prepared.session);
     loom_serve_text_pending_cancel(service, service->pending.prepared.index);
@@ -575,13 +575,13 @@ static iree_status_t loom_serve_text_admit_request(
 }
 
 iree_status_t loom_serve_text_complete_reservation(
-    loom_serve_text_service_t* service, loom_serve_service_flags_t flags) {
+    loom_serve_text_service_t* service, loom_runtime_service_flags_t flags) {
   loom_serve_text_row_complete_reserve(service->pending.prepared.session->row);
   return loom_serve_text_admit_request(service, flags);
 }
 
 iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
-                                            loom_serve_service_flags_t flags,
+                                            loom_runtime_service_flags_t flags,
                                             bool allow_preparation) {
   // Cancellation can leave a completed full-cache exchange without its
   // incoming admission. Settle that excess here, never in terminal teardown's
@@ -716,7 +716,7 @@ iree_status_t loom_serve_text_admit_pending(loom_serve_text_service_t* service,
         loom_serve_text_media_projector_start(service->projector);
       }
       bool active =
-          iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY);
+          iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY);
       active |= loom_serve_text_media_projector_is_pending(service->projector);
       for (iree_host_size_t i = 0; i < service->pending.count; ++i) {
         active |= service->pending.values[i] != pending &&

@@ -167,7 +167,7 @@ struct loom_serve_executables_t {
     // Runner's independent consumer borrow, retained between invocations.
     loom_serve_variant_entry_t* bound;
     // Nonblocking scheduling callback installed before any producer starts.
-    loom_serve_wake_callback_t observer;
+    loom_runtime_wake_callback_t observer;
     // Fixed pool and provenance metadata, excluded from idle payload limits.
     iree_host_size_t fixed_bytes;
     // Sum of collected, independently owned request payloads.
@@ -443,8 +443,9 @@ void loom_serve_executables_declare(loom_serve_executables_t* executables,
   executables->invocation.declarations = preparation;
 }
 
-void loom_serve_executables_set_observer(loom_serve_executables_t* executables,
-                                         loom_serve_wake_callback_t observer) {
+void loom_serve_executables_set_observer(
+    loom_serve_executables_t* executables,
+    loom_runtime_wake_callback_t observer) {
   executables->cache.observer = observer;
   if (executables->cache.pool) {
     loom_serve_variant_pool_set_observer(executables->cache.pool, observer);
@@ -655,7 +656,7 @@ static void loom_serve_checkpoint_retire(loom_serve_executables_t* executables,
   if (checkpoint->arena) {
     ++checkpoint->arena->retiring_banks;
   }
-  const loom_serve_wake_callback_t observer = executables->cache.observer;
+  const loom_runtime_wake_callback_t observer = executables->cache.observer;
   loom_serve_parameter_bank_retire(checkpoint->bank, observer.wake,
                                    observer.user_data);
   if (observer.wake) {
@@ -730,7 +731,7 @@ iree_status_t loom_serve_executables_query_status(
           break;
         }
         if (!complete) {
-          const loom_serve_wake_callback_t observer =
+          const loom_runtime_wake_callback_t observer =
               executables->cache.observer;
           loom_serve_parameter_bank_retire(checkpoint->bank, observer.wake,
                                            observer.user_data);
@@ -1022,7 +1023,7 @@ static void loom_serve_choice_prepared(void* user_data, iree_status_t status) {
   iree_slim_mutex_lock(&job->mutex);
   job->status = status;
   job->pending = false;
-  const loom_serve_wake_callback_t observer =
+  const loom_runtime_wake_callback_t observer =
       job->choice->owner->cache.observer;
   if (observer.wake) {
     observer.wake(observer.user_data);

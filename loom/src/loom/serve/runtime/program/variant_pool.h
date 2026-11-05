@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_RUNTIME_PROGRAM_VARIANT_POOL_H_
 #define LOOM_SERVE_RUNTIME_PROGRAM_VARIANT_POOL_H_
 
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/runtime/program/compilation.h"
 
 #ifdef __cplusplus
@@ -90,8 +90,8 @@ void loom_serve_variant_pool_free(loom_serve_variant_pool_t* pool);
 
 // Installs the owner's scheduling wake. Only completion publication uses this
 // from another thread. Detachment follows collection of all accepted jobs.
-void loom_serve_variant_pool_set_observer(loom_serve_variant_pool_t* pool,
-                                          loom_serve_wake_callback_t observer);
+void loom_serve_variant_pool_set_observer(
+    loom_serve_variant_pool_t* pool, loom_runtime_wake_callback_t observer);
 
 iree_host_size_t loom_serve_variant_pool_count(
     const loom_serve_variant_pool_t* pool);

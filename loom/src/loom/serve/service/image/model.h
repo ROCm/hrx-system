@@ -248,7 +248,7 @@ iree_status_t loom_serve_image_model_prepare_batch(
 // Installs the serialized owner's nonblocking compilation wake. Detachment
 // follows terminal advance of all accepted preparation work.
 void loom_serve_image_model_set_observer(loom_serve_image_model_t* model,
-                                         loom_serve_wake_callback_t observer);
+                                         loom_runtime_wake_callback_t observer);
 
 // Resolves the prepared invocation's captured executables before admission.
 // Cancellation retires accepted compilation but submits no device work. The

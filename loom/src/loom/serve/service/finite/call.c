@@ -16,7 +16,7 @@ struct loom_serve_finite_call_t {
   // Execution ownership, consumed only after the final CPU/source borrower.
   bool service_open;
   // Optional nonblocking caller notification, invoked on the owner.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // Owned final status, independent of the model's lifetime.
   iree_status_t status;
   // Retained device output, independent of source and command storage.
@@ -132,8 +132,8 @@ iree_string_view_t loom_serve_finite_call_body(
   return iree_string_builder_view(&call->storage);
 }
 
-void loom_serve_finite_call_set_observer(loom_serve_finite_call_t* call,
-                                         loom_serve_wake_callback_t observer) {
+void loom_serve_finite_call_set_observer(
+    loom_serve_finite_call_t* call, loom_runtime_wake_callback_t observer) {
   call->observer = observer;
   if (observer.wake && (call->output.result || !call->service_open)) {
     observer.wake(observer.user_data);
@@ -165,7 +165,7 @@ void loom_serve_finite_call_close(loom_serve_finite_call_t* call) {
     return;
   }
   call->caller_open = false;
-  call->observer = (loom_serve_wake_callback_t){0};
+  call->observer = (loom_runtime_wake_callback_t){0};
   // No caller can borrow these views after close. Accepted device consumers
   // retain their own captures; only input must await the service's end.
   loom_serve_finite_result_release(call->output.result);

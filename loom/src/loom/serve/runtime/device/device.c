@@ -262,8 +262,8 @@ iree_status_t loom_serve_device_group_free(loom_serve_device_group_t* group) {
   return status;
 }
 
-void loom_serve_device_group_set_observer(loom_serve_device_group_t* group,
-                                          loom_serve_wake_callback_t observer) {
+void loom_serve_device_group_set_observer(
+    loom_serve_device_group_t* group, loom_runtime_wake_callback_t observer) {
   if (!group) {
     return;
   }

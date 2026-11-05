@@ -20,7 +20,7 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
 
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(SourceEmbeddingServiceTest::SetUp());
-    interface_.set_observer(interface_.self, {});
+    interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
     loom_serve_finite_service_free(std::exchange(service_, nullptr));
     IREE_ASSERT_OK(
         loom_serve_finite_model_free(std::exchange(model_, nullptr)));
@@ -37,7 +37,7 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
         host_, model_, loom_serve_embedding_protocol(), IREE_SV("fixture"), 16,
         16, 0, nullptr, host_allocator_, &service_));
     interface_ = loom_serve_finite_service_interface(service_);
-    EXPECT_EQ(interface_.capacity_domain,
+    EXPECT_EQ(interface_.runtime.capacity_domain,
               loom_serve_pool_residency_cache(isolated_));
   }
 

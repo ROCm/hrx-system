@@ -89,8 +89,8 @@ TEST_F(SourceEmbeddingServiceTest,
   ASSERT_NO_FATAL_FAILURE(Accept(bad));
   for (iree_host_size_t i = 0; i < 4; ++i) {
     loom_serve_http_request_snapshot_t snapshot = {};
-    ASSERT_TRUE(
-        interface_.inspection.request_at(interface_.self, i, &snapshot));
+    ASSERT_TRUE(interface_.inspection.request_at(interface_.runtime.self, i,
+                                                 &snapshot));
     EXPECT_EQ(snapshot.id, i + 1);
     EXPECT_STREQ(snapshot.phase, "queued");
     EXPECT_EQ(snapshot.counters.requests, 1u);
@@ -100,15 +100,16 @@ TEST_F(SourceEmbeddingServiceTest,
   // The executor may still own prepared packets; only immutable receipt and
   // owner-published progress are inspected before that release is consumed.
   loom_serve_http_request_snapshot_t preparing = {};
-  ASSERT_TRUE(interface_.inspection.request_at(interface_.self, 0, &preparing));
+  ASSERT_TRUE(
+      interface_.inspection.request_at(interface_.runtime.self, 0, &preparing));
   EXPECT_EQ(preparing.id, 1u);
   EXPECT_STREQ(preparing.phase, "preparing");
   EXPECT_TRUE(Step());  // Rejection collected; valid cohort constructed.
   EXPECT_TRUE(Step());  // One command submitted, with compact feedback.
   for (iree_host_size_t i = 0; i < 3; ++i) {
     loom_serve_http_request_snapshot_t snapshot = {};
-    ASSERT_TRUE(
-        interface_.inspection.request_at(interface_.self, i, &snapshot));
+    ASSERT_TRUE(interface_.inspection.request_at(interface_.runtime.self, i,
+                                                 &snapshot));
     EXPECT_EQ(snapshot.id, i + 1);
     EXPECT_STREQ(snapshot.phase, "running");
     EXPECT_EQ(snapshot.counters.input_tokens, 0u);
@@ -124,8 +125,8 @@ TEST_F(SourceEmbeddingServiceTest,
       },
       cancelled, iree_infinite_timeout());
   EXPECT_TRUE(Step());  // Capture only live result views for CPU encoding.
-  EXPECT_STREQ(interface_.snapshot(interface_.self).phase, "encoding");
-  EXPECT_EQ(interface_.snapshot(interface_.self).active_requests, 2u);
+  EXPECT_STREQ(interface_.snapshot(interface_.runtime.self).phase, "encoding");
+  EXPECT_EQ(interface_.snapshot(interface_.runtime.self).active_requests, 2u);
   EXPECT_EQ(interface_.telemetry.counters->cancelled, 1u);
   Drain();
   const std::string result_a = Read(a);
@@ -163,7 +164,7 @@ TEST_F(SourceEmbeddingServiceTest, CancelledDeviceCohortSkipsEncoding) {
 }
 
 TEST_F(SourceEmbeddingServiceTest, StoppingDeviceCohortSkipsEncoding) {
-  CheckAbandonedCohort(LOOM_SERVE_SERVICE_FLAG_STOPPING);
+  CheckAbandonedCohort(LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
 }
 
 TEST_F(SourceEmbeddingServiceTest,
@@ -228,7 +229,7 @@ TEST_F(SourceEmbeddingServiceTest,
             std::string::npos);
   EXPECT_NE(response.find(R"("prompt_tokens":62,"total_tokens":62)"),
             std::string::npos);
-  EXPECT_FALSE(interface_.is_pending(interface_.self));
+  EXPECT_FALSE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
 
   const int next = Send(R"({"model":"fixture","input":[0]})");
   ASSERT_NO_FATAL_FAILURE(Accept(next));
@@ -248,7 +249,7 @@ TEST_F(SourceEmbeddingServiceTest,
 
 TEST_F(SourceEmbeddingServiceTest,
        SharedRouterServesUtilitiesAndBothEncodings) {
-  interface_.set_observer(interface_.self, {});
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
   loom_serve_finite_service_free(std::exchange(service_, nullptr));
   // Exercise heartbeat cancellation during normal router shutdown. The test
   // waits for ownership, not the deadline, so even an hour-long timer retires.
@@ -609,7 +610,7 @@ class RequestChoiceTest : public GenerationSelectionTest {
   void Load(loom_serve_variant_cache_options_t cache,
             bool reject_two_units = false,
             std::array<uint32_t, 2> capacity_factors = {20, 16}) {
-    interface_.set_observer(interface_.self, {});
+    interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
     loom_serve_finite_service_free(std::exchange(service_, nullptr));
     IREE_ASSERT_OK(
         loom_serve_finite_model_free(std::exchange(model_, nullptr)));
@@ -954,7 +955,7 @@ INSTANTIATE_TEST_SUITE_P(CommandAndDirect, RequestChoiceTest,
                          ::testing::Values(false, true));
 
 TEST_F(DeviceResultTest, RaggedCohortsComposeBeforeProducerRetirement) {
-  interface_.set_observer(interface_.self, {});
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
   loom_serve_finite_service_free(std::exchange(service_, nullptr));
   ASSERT_NO_FATAL_FAILURE(
       Submit({R"({"model":"fixture","input":["a","bbb"]})",

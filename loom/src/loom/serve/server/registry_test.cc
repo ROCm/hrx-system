@@ -95,7 +95,7 @@ class RegistryTest : public ::testing::TestWithParam<bool> {
         .create =
             [](void* self,
                const loom_serve_model_configuration_t* configuration,
-               loom_serve_wake_callback_t observer,
+               loom_runtime_wake_callback_t observer,
                loom_runtime_telemetry_stream_t* stream,
                iree_allocator_t host_allocator,
                loom_serve_registration_t* out_registration) {

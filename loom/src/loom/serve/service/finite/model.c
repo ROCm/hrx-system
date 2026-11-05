@@ -144,7 +144,7 @@ void loom_serve_finite_model_retire(loom_serve_finite_model_t* model,
                                     void* user_data) {
   if (model->executables) {
     loom_serve_executables_set_observer(
-        model->executables, (loom_serve_wake_callback_t){wake, user_data});
+        model->executables, (loom_runtime_wake_callback_t){wake, user_data});
   }
   if (model->execution) {
     loom_serve_execution_set_retirement_observer(model->execution, wake,
@@ -1100,8 +1100,8 @@ iree_status_t loom_serve_finite_model_prepare_batch(
   return status;
 }
 
-void loom_serve_finite_model_set_observer(loom_serve_finite_model_t* model,
-                                          loom_serve_wake_callback_t observer) {
+void loom_serve_finite_model_set_observer(
+    loom_serve_finite_model_t* model, loom_runtime_wake_callback_t observer) {
   loom_serve_executables_set_observer(model->executables, observer);
 }
 

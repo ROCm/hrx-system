@@ -241,7 +241,7 @@ class NativeActivityTest : public ::testing::Test {
 
   template <typename Done, typename Pump>
   iree_status_t Until(Done done, Pump pump) {
-    const loom_serve_wake_callback_t wake = {
+    const loom_runtime_wake_callback_t wake = {
         [](void* self) {
           iree_notification_post(static_cast<iree_notification_t*>(self),
                                  IREE_ALL_WAITERS);
@@ -261,9 +261,9 @@ class NativeActivityTest : public ::testing::Test {
         bool advanced = false;
         if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
           auto& service = model->service;
-          status = service.advance(service.self,
-                                   loom_serve_registry_service_flags(model),
-                                   &advanced);
+          status = service.runtime.vtable->advance(
+              service.runtime.self, loom_serve_registry_service_flags(model),
+              &advanced);
           progress |= advanced;
         }
         if (iree_status_is_ok(status)) {
@@ -711,12 +711,14 @@ TEST_F(NativeActivityTest, AcceptedCancellationAndRetainedFinalEvent) {
     bool progress = false;
     IREE_ASSERT_OK(Feed(&interrupted, &progress, false));
     auto& service = Model()->service;
-    IREE_ASSERT_OK(service.advance(
-        service.self, loom_serve_registry_service_flags(Model()), &progress));
+    IREE_ASSERT_OK(service.runtime.vtable->advance(
+        service.runtime.self, loom_serve_registry_service_flags(Model()),
+        &progress));
     EXPECT_TRUE(progress);
     interrupted.stream.reset();
-    IREE_ASSERT_OK(service.advance(
-        service.self, loom_serve_registry_service_flags(Model()), &progress));
+    IREE_ASSERT_OK(service.runtime.vtable->advance(
+        service.runtime.self, loom_serve_registry_service_flags(Model()),
+        &progress));
     EXPECT_EQ(service.telemetry.counters->cancelled, 0u);
   }
   loom_serve_activity_test_stream_t peer;

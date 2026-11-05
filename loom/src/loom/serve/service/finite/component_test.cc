@@ -31,7 +31,7 @@ namespace {
 // test waits, and it waits for process release rather than merely completion.
 class ComponentOwner {
  public:
-  loom_serve_wake_callback_t observer() { return {Wake, this}; }
+  loom_runtime_wake_callback_t observer() { return {Wake, this}; }
 
   iree_status_t Run(loom_serve_device_t* device,
                     loom_serve_pool_t* storage_owner,

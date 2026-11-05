@@ -10,7 +10,7 @@
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/proactor.h"
 #include "iree/base/threading/mutex.h"
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,7 +25,7 @@ typedef struct loom_serve_timer_t {
   // Borrowed host I/O owner, outliving every accepted operation.
   iree_async_proactor_t* proactor;
   // Borrowed nonblocking service wake target, protected by mutex.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // Immutable reporting period in nanoseconds; zero disables ticks.
   iree_duration_t interval;
   // Owner has requested shutdown; no further timers are armed.
@@ -59,7 +59,7 @@ void loom_serve_timer_configure(loom_serve_timer_t* timer,
 // Installs the owner's wake before advancing; clear only after pending work
 // and callback outcomes have been consumed. Joins the last callback access.
 void loom_serve_timer_set_observer(loom_serve_timer_t* timer,
-                                   loom_serve_wake_callback_t observer);
+                                   loom_runtime_wake_callback_t observer);
 
 // Whether a callback or unconsumed outcome still borrows this timer.
 // Timer readiness alone cannot release model admission capacity.
