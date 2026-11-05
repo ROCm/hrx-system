@@ -1255,6 +1255,7 @@ def rule_set_row(
     storage_operand_schemas_name: str,
     guard_refs: tuple[int, ...],
     guard_refs_name: str,
+    guard_refs_use_fixed_width: bool,
     literal_data_name: str,
     attr_copies_name: str,
     tied_results_name: str,
@@ -1386,7 +1387,11 @@ def rule_set_row(
         storage_operand_schemas,
         storage_operand_schemas_name,
     )
-    _append_table_fields(fields, "guard_refs", guard_refs, guard_refs_name)
+    if guard_refs:
+        fields.append(f".guard_refs = {guard_refs_name}")
+        fields.append(f".guard_ref_count = IREE_ARRAYSIZE({guard_refs_name})")
+        if guard_refs_use_fixed_width:
+            fields.append(".guard_ref_encoding = LOOM_LOW_LOWER_GUARD_REF_ENCODING_FIXED_WIDTH")
     _append_table_fields(fields, "attr_copies", table.attr_copies, attr_copies_name)
     _append_table_fields(fields, "tied_results", table.tied_results, tied_results_name)
     _append_table_fields(fields, "emit_refs", emit_refs, emit_refs_name)

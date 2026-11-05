@@ -1686,26 +1686,40 @@ static bool loom_low_lower_rule_emission_source_node(
 static iree_status_t loom_low_lower_rule_guard_program_matches(
     const loom_low_lower_rule_match_context_t* match_context,
     const loom_low_lower_rule_set_t* rule_set, const loom_op_t* source_op,
-    uint16_t guard_start, uint16_t guard_count, bool* out_matches,
+    uint16_t guard_start, uint16_t guard_count,
+    const loom_low_lower_guard_t** out_failed_guard,
     uint16_t* out_diagnostic_index, uint16_t* out_matched_guard_count) {
-  *out_matches = false;
+  *out_failed_guard = NULL;
   *out_diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
   *out_matched_guard_count = 0;
+  if (guard_count == 0) {
+    return iree_ok_status();
+  }
+  uint32_t guard_storage_start = guard_start;
+  if (IREE_UNLIKELY(rule_set->guard_ref_encoding ==
+                    LOOM_LOW_LOWER_GUARD_REF_ENCODING_FIXED_WIDTH)) {
+    guard_storage_start *= 3u;
+  }
+  const loom_low_lower_guard_ref_t* guard_ref_cursor =
+      rule_set->guard_refs + guard_storage_start;
   for (uint16_t i = 0; i < guard_count; ++i) {
-    const uint16_t guard_ref_index = (uint16_t)(guard_start + i);
-    const loom_low_lower_guard_ref_t guard_index =
-        rule_set->guard_refs[guard_ref_index];
+    uint16_t guard_index = *guard_ref_cursor++;
+    if (IREE_UNLIKELY(guard_index == LOOM_LOW_LOWER_GUARD_REF_ESCAPE)) {
+      guard_index =
+          (uint16_t)(guard_ref_cursor[0] | (guard_ref_cursor[1] << 8));
+      guard_ref_cursor += 2;
+    }
     const loom_low_lower_guard_t* guard = &rule_set->guards[guard_index];
     bool guard_matches = false;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_guard_matches(
         match_context, rule_set, source_op, guard, &guard_matches));
     if (!guard_matches) {
+      *out_failed_guard = guard;
       *out_diagnostic_index = guard->diagnostic_index;
       *out_matched_guard_count = i;
       return iree_ok_status();
     }
   }
-  *out_matches = true;
   *out_matched_guard_count = guard_count;
   return iree_ok_status();
 }
@@ -1718,7 +1732,8 @@ static iree_status_t loom_low_lower_rule_matches(
     const loom_op_t** out_diagnostic_source_op,
     bool* out_source_memory_compatible, bool* out_uses_source_memory_access,
     const loom_op_t** out_source_nodes, uint8_t* out_source_node_count,
-    uint8_t* out_emission_source_node_index) {
+    uint8_t* out_emission_source_node_index,
+    const loom_low_lower_guard_t** out_failed_root_guard) {
   *out_matches = false;
   *out_diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
   *out_matched_guard_count = 0;
@@ -1727,24 +1742,19 @@ static iree_status_t loom_low_lower_rule_matches(
   *out_uses_source_memory_access = false;
   *out_source_node_count = 0;
   *out_emission_source_node_index = 0;
-  bool guards_match = false;
+  *out_failed_root_guard = NULL;
+  const loom_low_lower_guard_t* failed_guard = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_rule_guard_program_matches(
       match_context, rule_set, source_op, rule->guard_start, rule->guard_count,
-      &guards_match, out_diagnostic_index, out_matched_guard_count));
-  if (!guards_match) {
-    if (*out_matched_guard_count < rule->guard_count) {
-      const uint16_t guard_ref_index =
-          (uint16_t)(rule->guard_start + *out_matched_guard_count);
-      const loom_low_lower_guard_ref_t guard_index =
-          rule_set->guard_refs[guard_ref_index];
-      const loom_low_lower_guard_t* guard = &rule_set->guards[guard_index];
-      if (guard->kind == LOOM_LOW_LOWER_GUARD_DESCRIPTOR_AVAILABLE) {
-        loom_low_lower_rule_source_memory_match_t source_memory_match;
-        IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emits_match(
-            match_context, rule_set, source_op, rule, &source_memory_match));
-        *out_source_memory_compatible = source_memory_match.all_emits_match &&
-                                        source_memory_match.has_source_memory;
-      }
+      &failed_guard, out_diagnostic_index, out_matched_guard_count));
+  if (failed_guard != NULL) {
+    *out_failed_root_guard = failed_guard;
+    if (failed_guard->kind == LOOM_LOW_LOWER_GUARD_DESCRIPTOR_AVAILABLE) {
+      loom_low_lower_rule_source_memory_match_t source_memory_match;
+      IREE_RETURN_IF_ERROR(loom_low_lower_rule_source_memory_emits_match(
+          match_context, rule_set, source_op, rule, &source_memory_match));
+      *out_source_memory_compatible = source_memory_match.all_emits_match &&
+                                      source_memory_match.has_source_memory;
     }
     return iree_ok_status();
   }
@@ -1774,9 +1784,9 @@ static iree_status_t loom_low_lower_rule_matches(
     uint16_t node_matched_guard_count = 0;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_guard_program_matches(
         match_context, rule_set, out_source_nodes[source_node_index],
-        source_node->guard_start, source_node->guard_count, &guards_match,
+        source_node->guard_start, source_node->guard_count, &failed_guard,
         out_diagnostic_index, &node_matched_guard_count));
-    if (!guards_match) {
+    if (failed_guard != NULL) {
       *out_diagnostic_source_op = out_source_nodes[source_node_index];
       *out_matched_guard_count =
           (uint16_t)(matched_guard_count + node_matched_guard_count);
@@ -1903,11 +1913,12 @@ iree_status_t loom_low_lower_rule_set_select_rule_range_with_match_context(
     const loom_op_t* source_nodes[LOOM_LOW_LOWER_MAX_SOURCE_NODES];
     uint8_t source_node_count = 0;
     uint8_t emission_source_node_index = 0;
+    const loom_low_lower_guard_t* failed_root_guard = NULL;
     IREE_RETURN_IF_ERROR(loom_low_lower_rule_matches(
         match_context, rule_set, source_op, rule, &rule_matches,
         &diagnostic_index, &matched_guard_count, &diagnostic_source_op,
         &source_memory_compatible, &uses_source_memory_access, source_nodes,
-        &source_node_count, &emission_source_node_index));
+        &source_node_count, &emission_source_node_index, &failed_root_guard));
     if (rule_matches) {
       out_selection->rule = rule;
       out_selection->rule_index = rule_index;
@@ -1929,25 +1940,19 @@ iree_status_t loom_low_lower_rule_set_select_rule_range_with_match_context(
                                               best_failure)) {
       best_failure = candidate_failure;
     }
-    if (matched_guard_count < rule->guard_count) {
-      const uint16_t guard_ref_index =
-          (uint16_t)(rule->guard_start + matched_guard_count);
-      const loom_low_lower_guard_ref_t guard_index =
-          rule_set->guard_refs[guard_ref_index];
-      const loom_low_lower_guard_t* guard = &rule_set->guards[guard_index];
-      if (guard->kind != LOOM_LOW_LOWER_GUARD_DESCRIPTOR_AVAILABLE) {
-        // An interned root guard program has the same pure result for every
-        // adjacent rule that references it. Descriptor availability is the
-        // exception because its failure also ranks rule-specific memory forms.
-        while ((uint16_t)(i + 1) < rule_count) {
-          const loom_low_lower_rule_t* next_rule =
-              &rule_set->rules[rule_start + i + 1];
-          if (next_rule->guard_start != rule->guard_start ||
-              next_rule->guard_count != rule->guard_count) {
-            break;
-          }
-          ++i;
+    if (failed_root_guard != NULL &&
+        failed_root_guard->kind != LOOM_LOW_LOWER_GUARD_DESCRIPTOR_AVAILABLE) {
+      // An interned root guard program has the same pure result for every
+      // adjacent rule that references it. Descriptor availability is the
+      // exception because its failure also ranks rule-specific memory forms.
+      while ((uint16_t)(i + 1) < rule_count) {
+        const loom_low_lower_rule_t* next_rule =
+            &rule_set->rules[rule_start + i + 1];
+        if (next_rule->guard_start != rule->guard_start ||
+            next_rule->guard_count != rule->guard_count) {
+          break;
         }
+        ++i;
       }
     }
   }

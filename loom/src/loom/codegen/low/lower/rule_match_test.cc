@@ -728,6 +728,58 @@ TEST_F(LowLowerRuleMatchTest, SelectsFirstMatchAndResetsReusedSelection) {
   EXPECT_EQ(selection.failure.diagnostic_index, LOOM_LOW_LOWER_DIAGNOSTIC_NONE);
 }
 
+TEST_F(LowLowerRuleMatchTest,
+       DecodesCompactAndFixedWidthGuardReferenceStreams) {
+  loom_low_lower_guard_t guards[257] = {};
+  guards[256].kind = LOOM_LOW_LOWER_GUARD_ATTR_I64_RANGE;
+  guards[256].diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
+  guards[256].payload_ordinal = 1;
+  guards[256].selector.attribute.attr_index = 0;
+  const loom_low_lower_guard_payload_t guard_payload = {
+      .i64_range = {.minimum = 4, .maximum = 8},
+  };
+  const loom_low_lower_guard_ref_t compact_guard_refs[] = {
+      LOOM_LOW_LOWER_GUARD_REF_ESCAPE, 0x00, 0x01};
+  const loom_low_lower_guard_ref_t fixed_guard_refs[] = {
+      LOOM_LOW_LOWER_GUARD_REF_ESCAPE, 0x00, 0x00,
+      LOOM_LOW_LOWER_GUARD_REF_ESCAPE, 0x00, 0x01};
+  loom_low_lower_rule_t rule = {.guard_count = 1};
+  const loom_low_lower_rule_span_t span = {
+      .source_op_kind = LOOM_OP_INDEX_CONSTANT,
+      .rule_start = 0,
+      .rule_count = 1,
+  };
+  loom_low_lower_rule_set_t rule_set = {
+      .spans = &span,
+      .span_count = 1,
+      .rules = &rule,
+      .rule_count = 1,
+      .guard_payloads = &guard_payload,
+      .guard_payload_count = 1,
+      .guards = guards,
+      .guard_count = IREE_ARRAYSIZE(guards),
+      .guard_refs = compact_guard_refs,
+      .guard_ref_count = IREE_ARRAYSIZE(compact_guard_refs),
+  };
+  const loom_low_lower_rule_match_context_t match_context = {
+      .module = module_,
+  };
+  const loom_op_t* source_op = BuildConstant(5);
+
+  loom_low_lower_rule_selection_t selection = {};
+  IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+      &match_context, &rule_set, source_op, &selection));
+  EXPECT_EQ(selection.rule, &rule);
+
+  rule.guard_start = 1;
+  rule_set.guard_refs = fixed_guard_refs;
+  rule_set.guard_ref_count = IREE_ARRAYSIZE(fixed_guard_refs);
+  rule_set.guard_ref_encoding = LOOM_LOW_LOWER_GUARD_REF_ENCODING_FIXED_WIDTH;
+  IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
+      &match_context, &rule_set, source_op, &selection));
+  EXPECT_EQ(selection.rule, &rule);
+}
+
 TEST_F(LowLowerRuleMatchTest, MatchesExactScalarOperandSegments) {
   const loom_value_id_t elements[] = {
       loom_scalar_constant_result(BuildScalarConstant(3)),

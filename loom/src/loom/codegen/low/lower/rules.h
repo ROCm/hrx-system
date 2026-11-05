@@ -1012,8 +1012,20 @@ typedef struct loom_low_lower_guard_t {
 static_assert(sizeof(loom_low_lower_guard_t) == 12,
               "loom_low_lower_guard_t must be 12 bytes");
 
-// Ordinal into a rule set's interned guard table.
-typedef uint16_t loom_low_lower_guard_ref_t;
+// Byte in a compact guard-reference stream. Values below the escape marker are
+// direct guard ordinals; an escape is followed by one little-endian uint16_t.
+typedef uint8_t loom_low_lower_guard_ref_t;
+
+#define LOOM_LOW_LOWER_GUARD_REF_ESCAPE ((uint8_t)UINT8_MAX)
+
+typedef uint8_t loom_low_lower_guard_ref_encoding_t;
+
+enum loom_low_lower_guard_ref_encoding_e {
+  // Frequency-ranked byte ordinals with inline wide escapes.
+  LOOM_LOW_LOWER_GUARD_REF_ENCODING_COMPACT = 0,
+  // Fixed three-byte escape records retaining logical u16 guard starts.
+  LOOM_LOW_LOWER_GUARD_REF_ENCODING_FIXED_WIDTH = 1,
+};
 
 typedef uint8_t loom_low_lower_emit_kind_t;
 
@@ -1488,10 +1500,12 @@ typedef struct loom_low_lower_rule_set_t {
   const loom_encoding_operand_summary_t* storage_operand_schemas;
   // Number of rows in storage_operand_schemas.
   uint16_t storage_operand_schema_count;
-  // Guard refs addressed by rule guard spans.
+  // Encoded guard-reference bytes addressed by rule guard spans.
   const loom_low_lower_guard_ref_t* guard_refs;
-  // Number of rows in guard_refs.
-  uint16_t guard_ref_count;
+  // Number of bytes in guard_refs.
+  uint32_t guard_ref_count;
+  // Representation selected for guard_refs.
+  loom_low_lower_guard_ref_encoding_t guard_ref_encoding;
   // Attribute-copy rows referenced by emits.
   const loom_low_lower_attr_copy_t* attr_copies;
   // Number of rows in attr_copies.
