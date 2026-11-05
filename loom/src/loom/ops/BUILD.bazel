@@ -23,7 +23,6 @@ package(
 _OP_HEADERS = [
     "attribute_accessors.h",
     "builder.h",
-    "builder_macros.h",
     "mutation.h",
     "op_defs.h",
     "use_list.h",

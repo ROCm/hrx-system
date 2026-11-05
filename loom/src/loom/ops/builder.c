@@ -730,6 +730,67 @@ iree_status_t loom_builder_allocate_segmented_op_with_successors(
   return status;
 }
 
+iree_status_t loom_builder_build_nullary_op(
+    loom_builder_t* builder, loom_op_kind_t kind, uint8_t instance_flags,
+    loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op) {
+  IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
+      builder, kind, /*operand_count=*/0, /*result_count=*/1,
+      /*region_count=*/0, /*tied_result_count=*/0, /*attribute_count=*/0,
+      location, out_op));
+  (*out_op)->instance_flags = instance_flags;
+  IREE_RETURN_IF_ERROR(loom_builder_define_result(
+      builder, result_type, &loom_op_results(*out_op)[0]));
+  return loom_builder_finalize_op(builder, *out_op);
+}
+
+iree_status_t loom_builder_build_unary_op(
+    loom_builder_t* builder, loom_op_kind_t kind, uint8_t instance_flags,
+    loom_value_id_t input, loom_type_t result_type, loom_location_id_t location,
+    loom_op_t** out_op) {
+  IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
+      builder, kind, /*operand_count=*/1, /*result_count=*/1,
+      /*region_count=*/0, /*tied_result_count=*/0, /*attribute_count=*/0,
+      location, out_op));
+  (*out_op)->instance_flags = instance_flags;
+  loom_op_operands(*out_op)[0] = input;
+  IREE_RETURN_IF_ERROR(loom_builder_define_result(
+      builder, result_type, &loom_op_results(*out_op)[0]));
+  return loom_builder_finalize_op(builder, *out_op);
+}
+
+iree_status_t loom_builder_build_binary_op(
+    loom_builder_t* builder, loom_op_kind_t kind, uint8_t instance_flags,
+    loom_value_id_t lhs, loom_value_id_t rhs, loom_type_t result_type,
+    loom_location_id_t location, loom_op_t** out_op) {
+  IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
+      builder, kind, /*operand_count=*/2, /*result_count=*/1,
+      /*region_count=*/0, /*tied_result_count=*/0, /*attribute_count=*/0,
+      location, out_op));
+  (*out_op)->instance_flags = instance_flags;
+  loom_op_operands(*out_op)[0] = lhs;
+  loom_op_operands(*out_op)[1] = rhs;
+  IREE_RETURN_IF_ERROR(loom_builder_define_result(
+      builder, result_type, &loom_op_results(*out_op)[0]));
+  return loom_builder_finalize_op(builder, *out_op);
+}
+
+iree_status_t loom_builder_build_comparison_op(
+    loom_builder_t* builder, loom_op_kind_t kind, uint8_t instance_flags,
+    uint8_t predicate, loom_value_id_t lhs, loom_value_id_t rhs,
+    loom_type_t result_type, loom_location_id_t location, loom_op_t** out_op) {
+  IREE_RETURN_IF_ERROR(loom_builder_allocate_op(
+      builder, kind, /*operand_count=*/2, /*result_count=*/1,
+      /*region_count=*/0, /*tied_result_count=*/0, /*attribute_count=*/1,
+      location, out_op));
+  (*out_op)->instance_flags = instance_flags;
+  loom_op_operands(*out_op)[0] = lhs;
+  loom_op_operands(*out_op)[1] = rhs;
+  loom_op_attrs(*out_op)[0] = loom_attr_enum(predicate);
+  IREE_RETURN_IF_ERROR(loom_builder_define_result(
+      builder, result_type, &loom_op_results(*out_op)[0]));
+  return loom_builder_finalize_op(builder, *out_op);
+}
+
 //===----------------------------------------------------------------------===//
 // Use-def list maintenance
 //===----------------------------------------------------------------------===//

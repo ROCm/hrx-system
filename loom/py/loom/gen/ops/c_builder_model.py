@@ -57,11 +57,11 @@ from loom.gen.support.c import c_identifier as _c_identifier
 
 
 def detect_builder_pattern(op: Op) -> str | None:
-    """Detects if an op matches a standard builder macro pattern.
+    """Detects if an op uses an established compact builder signature.
 
-    Returns the macro name suffix or None for complex ops.
+    Returns the signature pattern name or None for general builders.
     """
-    # The shared macros accept caller-provided result types. Exact result
+    # The compact signatures accept caller-provided result types. Exact result
     # constraints instead use the general generator so the public builder
     # signature cannot contradict the op declaration.
     has_explicit_result_type = any(isinstance(element, ResultType | ResultTypeList) for element in flatten_format(op.format))
@@ -69,13 +69,15 @@ def detect_builder_pattern(op: Op) -> str | None:
         return None
 
     layout = compute_layout(op)
+    if layout.segmented_operands or op.successors or any(isinstance(result, TiedResult) for result in op.results) or any(isinstance(element, ResultTypeList) for element in flatten_format(op.format)):
+        return None
     non_flags = c_queries.non_flags_attrs(op)
     has_flags = c_queries.has_flags_attr(op)
     has_template_param = any(isinstance(e, AttrParams | TemplateParam | TemplateParamFlags) for e in flatten_format(op.format))
     operand_names = tuple(operand.name for operand in op.operands)
 
     # Binary: 2 fixed operands, 1 fixed result, no real attrs/regions.
-    # Only use the generic lhs/rhs builder macro when the op uses those exact
+    # Only use the compact lhs/rhs signature when the op uses those exact
     # field names; otherwise the generated C API should preserve the op's
     # semantic operand names.
     if (
@@ -114,12 +116,53 @@ def detect_builder_pattern(op: Op) -> str | None:
         and not layout.variadic_result
         and len(non_flags) == 1
         and non_flags[0].attr_type == "enum"
+        and non_flags[0].name == "predicate"
         and not has_template_param
         and len(op.regions) == 0
     ):
         return "COMPARISON_WITH_FLAGS" if has_flags else "COMPARISON"
 
     return None
+
+
+def build_pattern_c_param_list(pattern: str) -> list[str]:
+    """Builds the established C signature for a compact builder pattern."""
+    c_params = ["loom_builder_t* builder"]
+    if pattern.endswith("_WITH_FLAGS"):
+        c_params.append("uint8_t instance_flags")
+        pattern = pattern.removesuffix("_WITH_FLAGS")
+
+    if pattern == "BINARY":
+        c_params.extend(("loom_value_id_t lhs", "loom_value_id_t rhs"))
+    elif pattern == "UNARY":
+        c_params.append("loom_value_id_t input")
+    elif pattern == "CAST":
+        c_params.extend(
+            (
+                "loom_value_id_t input",
+                "loom_type_t input_type",
+            )
+        )
+    elif pattern == "COMPARISON":
+        c_params.extend(
+            (
+                "uint8_t predicate",
+                "loom_value_id_t lhs",
+                "loom_value_id_t rhs",
+                "loom_type_t operand_type",
+            )
+        )
+    else:
+        raise ValueError(f"unknown compact builder pattern '{pattern}'")
+
+    c_params.extend(
+        (
+            "loom_type_t result_type",
+            "loom_location_id_t location",
+            "loom_op_t** out_op",
+        )
+    )
+    return c_params
 
 
 # ============================================================================

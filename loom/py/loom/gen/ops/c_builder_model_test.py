@@ -38,6 +38,8 @@ from loom.dsl import (
     Operand,
     RegionDef,
     Result,
+    TiedResult,
+    TypeConstraint,
 )
 from loom.gen.ops.c_builder_model import build_flag_params, build_flags_storage_type, detect_builder_pattern, extract_c_params
 from loom.gen.ops.c_builder_source import generate_builders_c
@@ -170,6 +172,39 @@ def test_compact_builders_require_matching_parameter_names() -> None:
         assert [param["name"] for param in extract_c_params(op, {}) if param["kind"] == "operand"] == list(names)
 
 
+def test_compact_builders_require_an_exact_fixed_shape() -> None:
+    optional = Op(
+        "test.unary",
+        group=Dialect("test"),
+        operands=[Operand("input", ANY, optional=True)],
+        results=[Result("result", ANY)],
+        format=[
+            OptionalGroup([Ref("input")], anchor="input"),
+            ResultType("result"),
+        ],
+    )
+    tied = Op(
+        "test.unary",
+        group=Dialect("test"),
+        operands=[Operand("input", ANY)],
+        results=[TiedResult("result", "input", ANY)],
+        format=[Ref("input"), ResultType("result")],
+    )
+    predicate = EnumDef("Mode", [EnumCase("enabled", 0)])
+    differently_named_comparison = Op(
+        "test.compare",
+        group=Dialect("test"),
+        operands=[Operand("lhs", ANY), Operand("rhs", ANY)],
+        results=[Result("result", ANY)],
+        attrs=[AttrDef("mode", "enum", enum_def=predicate)],
+        format=[Attr("mode"), Ref("lhs"), Ref("rhs"), ResultType("result")],
+    )
+
+    assert detect_builder_pattern(optional) is None
+    assert detect_builder_pattern(tied) is None
+    assert detect_builder_pattern(differently_named_comparison) is None
+
+
 def test_flagged_cast_uses_a_flag_aware_compact_builder() -> None:
     flags = EnumDef("CastFlags", [EnumCase("relaxed", 1)])
     op = Op(
@@ -192,7 +227,34 @@ def test_flagged_cast_uses_a_flag_aware_compact_builder() -> None:
     header = generate_ops_h("test", 0, [op])
     assert "loom_builder_t* builder, uint8_t instance_flags," in header
     source = generate_builders_c("test", [op])
-    assert "LOOM_DEFINE_CAST_OP_WITH_FLAGS_BUILDER" in source
+    assert "iree_status_t loom_test_cast_build(" in source
+    assert "(void)input_type;" in source
+    assert "return loom_builder_build_unary_op(" in source
+
+
+def test_fixed_shape_builders_share_implementation_and_preserve_public_names() -> None:
+    binary = Op(
+        "test.lookup",
+        group=Dialect("test"),
+        operands=[Operand("table", ANY), Operand("indices", ANY)],
+        results=[Result("result", TypeConstraint.I32)],
+        format=[Ref("table"), Ref("indices")],
+    )
+    nullary = Op(
+        "test.source",
+        group=Dialect("test"),
+        results=[Result("result", ANY)],
+        format=[ResultType("result")],
+    )
+
+    header = generate_ops_h("test", 0, [binary, nullary])
+    assert "    loom_value_id_t table," in header
+    assert "    loom_value_id_t indices," in header
+    source = generate_builders_c("test", [binary, nullary])
+    assert "builder_macros.h" not in source
+    assert "LOOM_DEFINE_" not in source
+    assert ("builder, LOOM_OP_TEST_LOOKUP, 0, table, indices,\n      loom_type_scalar(LOOM_SCALAR_TYPE_I32), location, out_op);") in source
+    assert ("builder, LOOM_OP_TEST_SOURCE, 0, result_type, location, out_op);") in source
 
 
 @pytest.mark.parametrize("order", [("access", "view"), ("view", "access")])
