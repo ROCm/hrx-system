@@ -37,7 +37,7 @@ static iree_status_t loom_serve_registration_activate(
       return iree_ok_status();
     }
     IREE_RETURN_IF_ERROR(loom_serve_activation_allocate(
-        residency, loom_serve_host_proactor_pool(host), observer.wake,
+        1, &residency, loom_serve_host_proactor_pool(host), observer.wake,
         observer.user_data, host_allocator, operation));
   }
   iree_status_t status =

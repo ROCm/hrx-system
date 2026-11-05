@@ -20,6 +20,7 @@
 #include "loom/serve/runtime/program/program.h"
 #include "loom/serve/runtime/program/stage_set.h"
 #include "loom/serve/service/text/stages.h"
+#include "loom/serve/service/text/warmup.h"
 #include "loom/serve/testing/compiler.h"
 #include "loom/serve/testing/device.h"
 
@@ -95,6 +96,15 @@ class TextPlacementTest
       devices_[i] = loom_serve_device_group_at(group_, i);
       pools_[i] =
           loom_serve_device_group_pool_at(group_, std::get<0>(GetParam())[i]);
+      size_t owner = 0;
+      while (owner < pool_count_ &&
+             pools_[pool_executions_[owner]] != pools_[i]) {
+        ++owner;
+      }
+      if (owner == pool_count_) {
+        pool_executions_[pool_count_++] = i;
+      }
+      pool_indices_[i] = owner;
       IREE_ASSERT_OK(loom_serve_device_create_execution(devices_[i], pools_[i],
                                                         &executions_[i]));
       IREE_ASSERT_OK(loom_serve_device_create_jit(
@@ -128,6 +138,11 @@ class TextPlacementTest
     iree_vm_module_release(module_);
     ReleaseStages(stages_);
     loom_serve_stage_set_free(compiled_);
+    loom_serve_text_warmup_await(warmup_);
+    for (size_t i = 0; i < parameters_.count; ++i) {
+      IREE_EXPECT_OK(loom_serve_weights_await_retirement(parameters_.plans[i]));
+    }
+    IREE_EXPECT_OK(loom_serve_text_warmup_free(warmup_));
     for (auto* residency : residencies_) {
       loom_serve_residency_free(residency);
     }
@@ -135,7 +150,6 @@ class TextPlacementTest
       loom_serve_residency_group_free(group);
     }
     for (size_t i = 0; i < parameters_.count; ++i) {
-      IREE_EXPECT_OK(loom_serve_weights_await_retirement(parameters_.plans[i]));
       IREE_EXPECT_OK(loom_serve_weights_free(parameters_.plans[i]));
     }
     iree_allocator_free(allocator_, parameters_.plans);
@@ -290,13 +304,23 @@ class TextPlacementTest
           loom_serve_weights_prepare(parameters_.plans[i], host_, jits_[owner],
                                      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
                                      &sources_, declaration, indexed_));
-      auto* cache = loom_serve_pool_residency_cache(pools_[owner]);
+    }
+    for (size_t owner = 0; owner < pool_count_; ++owner) {
+      std::array<loom_serve_weights_t*, 3> plans = {};
+      size_t plan_count = 0;
+      for (size_t i = 0; i < parameters_.count; ++i) {
+        if (pool_indices_[parameters_.sources[i]->owner_index] == owner) {
+          plans[plan_count++] = parameters_.plans[i];
+        }
+      }
+      const size_t execution = pool_executions_[owner];
+      auto* cache = loom_serve_pool_residency_cache(pools_[execution]);
       IREE_ASSERT_OK(loom_serve_residency_group_allocate(
-          cache, 1, &parameters_.plans[i], allocator_,
+          cache, plan_count, plans.data(), allocator_,
           &parameter_groups_[owner]));
       IREE_ASSERT_OK(loom_serve_residency_allocate(
-          cache, executions_[owner], 1, &parameter_groups_[owner], allocator_,
-          &residencies_[owner]));
+          cache, executions_[execution], 1, &parameter_groups_[owner],
+          allocator_, &residencies_[owner]));
     }
     if (rebind) {
       auto baseline = stages_;
@@ -358,14 +382,35 @@ class TextPlacementTest
     compiled_ = nullptr;
   }
 
-  void Run() {
-    for (auto* residency : residencies_) {
-      loom_serve_residency_admission_t admission;
-      IREE_ASSERT_OK(loom_serve_residency_try_admit(1, &residency, &admission));
-      ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  void Warmup() {
+    std::array<loom_serve_device_t*, 3> devices;
+    std::array<loom_serve_pool_t*, 3> pools;
+    for (size_t i = 0; i < pool_count_; ++i) {
+      devices[i] = devices_[pool_executions_[i]];
+      pools[i] = pools_[pool_executions_[i]];
     }
-    for (auto* residency : residencies_) {
-      loom_serve_residency_cancel_admission(residency);
+    IREE_ASSERT_OK(loom_serve_text_warmup_allocate(
+        pool_count_, devices.data(), pools.data(), parameter_groups_.data(),
+        nullptr, nullptr, allocator_, &warmup_));
+    loom_serve_text_warmup_poll(warmup_);
+    loom_serve_text_warmup_await(warmup_);
+    IREE_ASSERT_OK(loom_serve_text_warmup_status(warmup_));
+    EXPECT_FALSE(loom_serve_text_warmup_is_pending(warmup_));
+    for (size_t i = 0; i < parameters_.count; ++i) {
+      EXPECT_EQ(loom_serve_weights_activity(parameters_.plans[i]).activations,
+                1u);
+      EXPECT_EQ(loom_serve_weights_activity(parameters_.plans[i]).read_bytes,
+                sizeof(output_));
+    }
+  }
+
+  void Run() {
+    loom_serve_residency_admission_t admission;
+    IREE_ASSERT_OK(loom_serve_residency_try_admit(
+        pool_count_, residencies_.data(), &admission));
+    ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+    for (size_t i = 0; i < pool_count_; ++i) {
+      loom_serve_residency_cancel_admission(residencies_[i]);
     }
     std::array<iree_hal_pool_reservation_request_t, 6> requests;
     requests.fill(iree_hal_make_pool_reservation_request(sizeof(output_), 0));
@@ -428,7 +473,8 @@ class TextPlacementTest
         EXPECT_GE(statistics.bytes_reserved, sizeof(output_));
       }
     }
-    for (auto* residency : residencies_) {
+    for (size_t i = 0; i < pool_count_; ++i) {
+      auto* residency = residencies_[i];
       loom_serve_residency_release(residency);
       // Only the admission pin was released; TearDown still owns the object.
       // NOLINTNEXTLINE(iree-refcount-lifecycle)
@@ -468,6 +514,12 @@ class TextPlacementTest
   std::array<loom_serve_device_t*, 3> devices_ = {};
   // Explicit storage owners, independently selected from the device records.
   std::array<loom_serve_pool_t*, 3> pools_ = {};
+  // Number of distinct actual pools in the source execution table.
+  size_t pool_count_ = 0;
+  // Canonical physical owner for each source execution ordinal.
+  std::array<size_t, 3> pool_indices_ = {};
+  // Representative execution ordinal for each physical owner.
+  std::array<size_t, 3> pool_executions_ = {};
   // Independent native lifetimes indexed by source execution ordinals.
   std::array<loom_serve_execution_t*, 3> executions_ = {};
   // Exact-family catalogs released before execution.
@@ -493,8 +545,10 @@ class TextPlacementTest
   loom_serve_text_parameters_t parameters_ = {};
   // Parameter protection in physical-owner order.
   std::array<loom_serve_residency_group_t*, 3> parameter_groups_ = {};
-  // Complete model admission set, indexed by the same deployment.
+  // Complete model admission set, indexed by distinct physical owner.
   std::array<loom_serve_residency_t*, 3> residencies_ = {};
+  // Actual model warmup spanning the complete physical parameter set.
+  loom_serve_text_warmup_t* warmup_ = nullptr;
   // Separate live target bindings accessible by all declared peers.
   std::array<iree_hal_buffer_t*, 6> outputs_ = {};
   // Feedback bytes survive all accepted downloads and native retirement.
@@ -541,6 +595,14 @@ TEST_P(TextPlacementTest, ReplacementRecordingPreservesEveryExecutionFamily) {
   IREE_ASSERT_OK(Prepare(false));
   IREE_ASSERT_OK(Compile());
   ASSERT_NO_FATAL_FAILURE(Bind(/*rebind=*/true));
+  ASSERT_NO_FATAL_FAILURE(Run());
+}
+
+TEST_P(TextPlacementTest, WarmupLoadsEveryOwnerBeforeSharedNativeConsumption) {
+  IREE_ASSERT_OK(Prepare(false));
+  IREE_ASSERT_OK(Compile());
+  ASSERT_NO_FATAL_FAILURE(Bind());
+  ASSERT_NO_FATAL_FAILURE(Warmup());
   ASSERT_NO_FATAL_FAILURE(Run());
 }
 

@@ -14,15 +14,18 @@
 extern "C" {
 #endif
 
-// Demand-driven parameter loading on an independent execution timeline. The
+// Demand-driven parameter loading on independent execution timelines. The
 // model owns this operation across preparation and service publication; its
-// parameter group outlives the operation, including failed native work.
+// parameter groups outlive the operation, including failed native work.
 typedef struct loom_serve_text_warmup_t loom_serve_text_warmup_t;
 
-// Allocates unstarted ownership. No parameter I/O or capacity admission occurs.
+// Allocates unstarted ownership for distinct physical pools on one host. Each
+// pool has one representative device and parameter group, including all source
+// owners aliased to it. No parameter I/O or capacity admission occurs.
 iree_status_t loom_serve_text_warmup_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
-    loom_serve_residency_group_t* group, void (*wake)(void* user_data),
+    iree_host_size_t pool_count, loom_serve_device_t* const* devices,
+    loom_serve_pool_t* const* pools,
+    loom_serve_residency_group_t* const* groups, void (*wake)(void* user_data),
     void* user_data, iree_allocator_t host_allocator,
     loom_serve_text_warmup_t** out_warmup);
 

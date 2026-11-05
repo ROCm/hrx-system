@@ -14,8 +14,9 @@ extern "C" {
 #endif
 
 // One explicit parameter warmup, independent of an inference request. Borrows
-// the residency through terminal advance. The shared residency owner serializes
-// every call; only completion publication runs on the proactor thread.
+// the complete residency set through terminal advance. The shared residency
+// owner serializes every call; only completion publication runs on the proactor
+// thread.
 typedef struct loom_serve_activation_t loom_serve_activation_t;
 
 typedef enum loom_serve_activation_phase_e {
@@ -37,12 +38,16 @@ typedef enum loom_serve_activation_flag_bits_e {
 typedef uint32_t loom_serve_activation_flags_t;
 
 // Allocates unstarted warmup storage and retains a shared proactor. Does not
-// load or pin parameters. Wake only schedules the owner, never consumes model
+// load or pin parameters. Copies the nonempty membership, whose distinct caches
+// share one serialized owner as required by residency_try_admit. Residencies
+// outlive terminal advance. Wake only schedules the owner, never consumes model
 // state inline. Failure returns no operation.
 iree_status_t loom_serve_activation_allocate(
-    loom_serve_residency_t* residency, iree_async_proactor_pool_t* pool,
-    void (*wake)(void* user_data), void* user_data,
-    iree_allocator_t host_allocator, loom_serve_activation_t** out_activation);
+    iree_host_size_t residency_count,
+    loom_serve_residency_t* const* residencies,
+    iree_async_proactor_pool_t* pool, void (*wake)(void* user_data),
+    void* user_data, iree_allocator_t host_allocator,
+    loom_serve_activation_t** out_activation);
 
 // Attempts FIFO admission or consumes readiness without waiting for device
 // completion. Accepted backing work runs on the native cold-memory executor;

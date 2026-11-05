@@ -272,7 +272,7 @@ static iree_status_t loom_serve_text_load_activate(
     loom_serve_text_load_t* load) {
   loom_serve_text_model_t* model = load->model;
   IREE_RETURN_IF_ERROR(loom_serve_text_warmup_allocate(
-      model->device_owner, model->pool, model->parameter_group,
+      1, &model->device_owner, &model->pool, &model->parameter_group,
       load->event.wake, load->event.user_data, load->host_allocator,
       &model->warmup));
   loom_serve_text_warmup_poll(model->warmup);

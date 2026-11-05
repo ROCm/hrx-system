@@ -739,7 +739,7 @@ TEST_P(WeightsTest, ExplicitActivationCancellationJoinsAcceptedReadiness) {
   loom_serve_test_weight_activation_wake_t wake;
   loom_serve_activation_t* activation = nullptr;
   IREE_ASSERT_OK(loom_serve_activation_allocate(
-      residencies_[0],
+      1, &residencies_[0],
       loom_serve_host_proactor_pool(loom_serve_device_host(device_owner_)),
       loom_serve_test_weight_activation_wake_t::Notify, &wake, host_allocator_,
       &activation));
@@ -787,7 +787,7 @@ TEST_P(WeightsTest, CancelledWarmupWithdrawsCapacityInterestWithoutLoading) {
   loom_serve_test_weight_activation_wake_t wake;
   loom_serve_activation_t* activation = nullptr;
   IREE_ASSERT_OK(loom_serve_activation_allocate(
-      residencies_[1],
+      1, &residencies_[1],
       loom_serve_host_proactor_pool(loom_serve_device_host(device_owner_)),
       loom_serve_test_weight_activation_wake_t::Notify, &wake, host_allocator_,
       &activation));
@@ -813,7 +813,7 @@ TEST_P(WeightsTest, CancelledWarmupWithdrawsCapacityInterestWithoutLoading) {
   loom_serve_memory_pool_set_observer(
       pool_, loom_serve_test_weight_activation_wake_t::Notify, &wake);
   IREE_ASSERT_OK(loom_serve_activation_allocate(
-      residencies_[1],
+      1, &residencies_[1],
       loom_serve_host_proactor_pool(loom_serve_device_host(device_owner_)),
       loom_serve_test_weight_activation_wake_t::Notify, &wake, host_allocator_,
       &activation));

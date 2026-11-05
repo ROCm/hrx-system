@@ -47,6 +47,26 @@ class ResidencyTest : public WeightsTest {
   }
 
   void TearDown() override {
+    if (activation_gate_) {
+      IREE_EXPECT_OK(iree_hal_semaphore_signal(activation_gate_, 2, nullptr));
+    }
+    if (activation_) {
+      if (activation_phase_ != LOOM_SERVE_ACTIVATION_COMPLETE) {
+        IREE_EXPECT_OK(loom_serve_activation_advance(
+            activation_, LOOM_SERVE_ACTIVATION_FLAG_CANCEL,
+            &activation_phase_));
+        if (activation_phase_ == LOOM_SERVE_ACTIVATION_LOADING) {
+          activation_wake_.Await();
+          IREE_EXPECT_STATUS_IS(
+              failed_owner_status_,
+              loom_serve_activation_advance(activation_,
+                                            LOOM_SERVE_ACTIVATION_FLAG_CANCEL,
+                                            &activation_phase_));
+        }
+      }
+      loom_serve_activation_free(activation_);
+    }
+    iree_hal_semaphore_release(activation_gate_);
     if (deferred_backing_) {
       deferred_backing_->CompleteReturns();
     }
@@ -122,6 +142,25 @@ class ResidencyTest : public WeightsTest {
     }
   }
 
+  void CreateActivation() {
+    // The caller's membership array need not outlive allocation.
+    const auto members = residencies_;
+    IREE_ASSERT_OK(loom_serve_activation_allocate(
+        members.size(), members.data(),
+        loom_serve_host_proactor_pool(loom_serve_device_host(device_owner_)),
+        loom_serve_test_weight_activation_wake_t::Notify, &activation_wake_,
+        host_allocator_, &activation_));
+  }
+
+  void HoldOwner(size_t owner) {
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &activation_gate_));
+    uint64_t value = 1;
+    IREE_ASSERT_OK(loom_serve_execution_barrier(
+        owner_executions_[owner], {1, &activation_gate_, &value}));
+  }
+
   void AuxiliaryProgress() {
     auto*& execution = auxiliary_execution_;
     IREE_ASSERT_OK(loom_serve_device_create_execution(
@@ -189,7 +228,77 @@ class ResidencyTest : public WeightsTest {
   iree_hal_semaphore_t* state_ready_ = nullptr;
   // Expected terminal readiness error on the last owner after file truncation.
   iree_status_code_t failed_owner_status_ = IREE_STATUS_OK;
+  // Actual asynchronous warmup retained through its final readiness callback.
+  loom_serve_activation_t* activation_ = nullptr;
+  // Last owner-observed phase, bounding cleanup after an assertion failure.
+  loom_serve_activation_phase_t activation_phase_ =
+      LOOM_SERVE_ACTIVATION_WAITING;
+  // Joins production callback publication with the outer owner thread.
+  loom_serve_test_weight_activation_wake_t activation_wake_;
+  // Explicit native predecessor released by the owner or terminal cleanup.
+  iree_hal_semaphore_t* activation_gate_ = nullptr;
 };
+
+TEST_P(ResidencyTest, WarmupKeepsAllPinsUntilTheLastOwnerIsReady) {
+  ASSERT_NO_FATAL_FAILURE(HoldOwner(2));
+  ASSERT_NO_FATAL_FAILURE(CreateActivation());
+  IREE_ASSERT_OK(
+      loom_serve_activation_advance(activation_, 0, &activation_phase_));
+  ASSERT_EQ(activation_phase_, LOOM_SERVE_ACTIVATION_LOADING);
+  ASSERT_NO_FATAL_FAILURE(ReadOwner(0));
+  ASSERT_NO_FATAL_FAILURE(ReadOwner(1));
+  IREE_ASSERT_OK(loom_serve_activation_advance(
+      activation_, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &activation_phase_));
+  EXPECT_EQ(activation_phase_, LOOM_SERVE_ACTIVATION_LOADING);
+  for (auto* residency : residencies_) {
+    EXPECT_EQ(loom_serve_residency_snapshot(residency).pin_count, 1u);
+  }
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(activation_gate_, 1, nullptr));
+  activation_wake_.Await();
+  IREE_ASSERT_OK(loom_serve_activation_advance(
+      activation_, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &activation_phase_));
+  EXPECT_EQ(activation_phase_, LOOM_SERVE_ACTIVATION_COMPLETE);
+  for (auto* residency : residencies_) {
+    EXPECT_EQ(loom_serve_residency_snapshot(residency).pin_count, 0u);
+  }
+  loom_serve_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(
+      residencies_.size(), residencies_.data(), &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  for (size_t i = 0; i < residencies_.size(); ++i) {
+    ASSERT_NO_FATAL_FAILURE(ReadOwner(i));
+    EXPECT_EQ(loom_serve_weights_activity(plans_[i]).activations, 1u);
+    loom_serve_residency_cancel_admission(residencies_[i]);
+    loom_serve_residency_release(residencies_[i]);
+  }
+}
+
+TEST_P(ResidencyTest, FailedWarmupKeepsAllPinsWhileAnEarlierOwnerIsHeld) {
+  ASSERT_NO_FATAL_FAILURE(HoldOwner(0));
+  std::filesystem::resize_file(adapter_path_.path(), 0);
+  ASSERT_NO_FATAL_FAILURE(CreateActivation());
+  auto status =
+      loom_serve_activation_advance(activation_, 0, &activation_phase_);
+  if (iree_status_is_ok(status)) {
+    ASSERT_EQ(activation_phase_, LOOM_SERVE_ACTIVATION_LOADING);
+    activation_wake_.Await();
+    status = loom_serve_activation_advance(activation_, 0, &activation_phase_);
+    failed_owner_status_ = iree_status_code(status);
+  }
+  EXPECT_NE(iree_status_code(status), IREE_STATUS_OK);
+  iree_status_free(status);
+  EXPECT_EQ(activation_phase_, LOOM_SERVE_ACTIVATION_COMPLETE);
+  for (auto* residency : residencies_) {
+    EXPECT_EQ(loom_serve_residency_snapshot(residency).pin_count, 1u);
+    EXPECT_FALSE(loom_serve_residency_snapshot(residency).admission.waiting);
+  }
+  loom_serve_activation_free(activation_);
+  activation_ = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(activation_gate_, 1, nullptr));
+  ASSERT_NO_FATAL_FAILURE(ReadOwner(0));
+  ASSERT_NO_FATAL_FAILURE(ReadOwner(1));
+  ASSERT_NO_FATAL_FAILURE(AuxiliaryProgress());
+}
 
 TEST_P(ResidencyTest, LateOwnerDenialStartsNoEarlierLoads) {
   if (GetParam()) {
@@ -221,6 +330,29 @@ TEST_P(ResidencyTest, LateOwnerDenialStartsNoEarlierLoads) {
 }
 
 class ElasticResidencyTest : public ResidencyTest {};
+
+TEST_P(ElasticResidencyTest,
+       WarmupDenialWithdrawsEveryOwnerWithoutStartingLoads) {
+  ASSERT_NO_FATAL_FAILURE(AllocateState(0, 2, 2 * kSlabBytes));
+  IREE_ASSERT_OK(
+      loom_serve_virtual_buffer_commit(state_buffers_[0], 0, 2 * kSlabBytes));
+  ASSERT_NO_FATAL_FAILURE(CreateActivation());
+  IREE_ASSERT_OK(
+      loom_serve_activation_advance(activation_, 0, &activation_phase_));
+  EXPECT_EQ(activation_phase_, LOOM_SERVE_ACTIVATION_WAITING);
+  ExpectUnactivated();
+  for (auto* residency : residencies_) {
+    EXPECT_TRUE(loom_serve_residency_snapshot(residency).admission.waiting);
+  }
+  IREE_ASSERT_OK(loom_serve_activation_advance(
+      activation_, LOOM_SERVE_ACTIVATION_FLAG_CANCEL, &activation_phase_));
+  EXPECT_EQ(activation_phase_, LOOM_SERVE_ACTIVATION_COMPLETE);
+  for (auto* residency : residencies_) {
+    EXPECT_FALSE(loom_serve_residency_snapshot(residency).admission.waiting);
+  }
+  ExpectUnactivated();
+  ASSERT_NO_FATAL_FAILURE(AuxiliaryProgress());
+}
 
 TEST_P(ElasticResidencyTest, ImpossiblePeerPreservesEarlierReclaimableHistory) {
   struct History {
