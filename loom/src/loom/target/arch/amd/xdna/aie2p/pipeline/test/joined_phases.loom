@@ -12,13 +12,20 @@ pipeline.def @initialize() run(%storage: buffer) {
   }
 }
 
+// Calls from distinct phases must inherit their shared physical entry's
+// context, including when the phases are nested inside a concurrent group.
+func.def noinline @increment(%value: i32, %amount: i32) -> (i32) {
+  %result = scalar.addi %value, %amount : i32
+  func.return %result : i32
+}
+
 pipeline.def @add() run(%storage: buffer, %amount: index) {
   %origin = index.constant 0 : offset
   pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
     %local = buffer.view %storage[%origin] : buffer -> view<1xi32>
     %value = view.load %local[0] : view<1xi32> -> i32
     %increment = index.cast %amount : index to i32
-    %result = scalar.addi %value, %increment : i32
+    %result = func.call @increment(%value, %increment) : (i32, i32) -> (i32)
     view.store %result, %local[0] : i32, view<1xi32>
   }
 }

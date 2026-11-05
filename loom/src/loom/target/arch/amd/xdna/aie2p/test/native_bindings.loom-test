@@ -182,11 +182,6 @@ pipeline.def<kernel> public retain target(@device) @copy_records() run(%input: b
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_0() -> (reg<aie2p.ep>) asm {
-  %61 = mov.local-address 458752
-  return %61
-}
-
 low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_11() asm {
   %196 = mov.short 1
   %100 = mov.short -1

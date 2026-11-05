@@ -711,8 +711,6 @@ static iree_status_t loom_target_pipeline_build_lexical_workers(
 
 static iree_status_t loom_target_pipeline_build_execution_cleanup(
     loom_builder_t* builder, void* user_data) {
-  IREE_RETURN_IF_ERROR(
-      loom_target_pipeline_build_run(builder, IREE_SV("symbol-dce")));
   // Execution realization introduces ordinary helper boundaries after the
   // initial source inlining pass. Consume required source calls before private
   // storage promotion and target resource legalization make those boundaries
@@ -722,7 +720,15 @@ static iree_status_t loom_target_pipeline_build_execution_cleanup(
   // Realized channel endpoints introduce ordinary source expressions and CFG
   // forwarding edges after initial normalization. Normalize them under their
   // worker target contexts before target legalization selects native packets.
-  return loom_target_pipeline_build_inlined_source_cleanup(builder, user_data);
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_inlined_source_cleanup(builder, user_data));
+  // Ordered workers can share a physical entry whose context differs from
+  // their outlined contexts. Reproject the retained calls after their bodies
+  // move into that entry, then retire obsolete helper versions before
+  // legalization requires facts from their now-absent callers.
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("specialize-target-callgraph")));
+  return loom_target_pipeline_build_run(builder, IREE_SV("symbol-dce"));
 }
 
 static iree_status_t loom_target_pipeline_build_finalize_refined_callgraph(

@@ -43,11 +43,6 @@ pipeline.def<kernel> public retain target(@npu) @reordered_publication() run(%ou
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_4() -> (reg<aie2p.ep>) asm {
-  %80 = mov.local-address 458752
-  return %80
-}
-
 low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_13() asm {
   %56 = mov.short -1
   %53 = mov.local-address 393216
@@ -279,11 +274,6 @@ pipeline.def<kernel> public retain target(@npu) @reordered_retirement() run(%out
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_4() -> (reg<aie2p.ep>) asm {
-  %77 = mov.local-address 458752
-  return %77
-}
-
 low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_12() asm {
   %219 = mov.short 1
   %61 = mov.short -1
@@ -512,11 +502,6 @@ pipeline.def<kernel> public retain target(@npu) @rotating_retirement() run(%outp
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_4() -> (reg<aie2p.ep>) asm {
-  %115 = mov.local-address 458752
-  return %115
-}
-
 low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_14() asm {
   %306 = mov.short 1
   %99 = mov.short -1
@@ -1107,16 +1092,6 @@ pipeline.def<kernel> public retain target(@device) @consumed_distribution() run(
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_0() -> (reg<aie2p.ep>) asm {
-  %69 = mov.local-address 458752
-  return %69
-}
-
-low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_4() -> (reg<aie2p.ep>) asm {
-  %81 = mov.local-address 458752
-  return %81
-}
-
 low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_9() asm {
   %204 = mov.short 1
   %72 = mov.short -1

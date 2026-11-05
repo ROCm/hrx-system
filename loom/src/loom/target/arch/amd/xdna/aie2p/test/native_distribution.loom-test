@@ -63,11 +63,6 @@ pipeline.def<kernel> public retain target(@device) @finite_stream() run(%output_
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_4() -> (reg<aie2p.ep>) asm {
-  %166 = mov.local-address 458752
-  return %166
-}
-
 low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_11() asm {
   %361 = mov.short 1
   %150 = mov.short -1
@@ -400,11 +395,6 @@ pipeline.def<kernel> public retain target(@device) @finite_stream() run(%output_
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_4() -> (reg<aie2p.ep>) asm {
-  %166 = mov.local-address 458752
-  return %166
-}
-
 low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_11() asm {
   %361 = mov.short 1
   %150 = mov.short -1
@@ -745,11 +735,6 @@ pipeline.def<kernel> public retain target(@device) @finite_stream() run(%output_
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_4() -> (reg<aie2p.ep>) asm {
-  %159 = mov.local-address 458752
-  return %159
-}
-
 low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_11() asm {
   %330 = mov.short 1
   %150 = mov.short -1
@@ -1067,11 +1052,6 @@ pipeline.def<kernel> public retain target(@device) @finite_stream() run(%output_
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_4() -> (reg<aie2p.ep>) asm {
-  %166 = mov.local-address 458752
-  return %166
-}
-
 low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_11() asm {
   %378 = mov.short 1
   %150 = mov.short -1
