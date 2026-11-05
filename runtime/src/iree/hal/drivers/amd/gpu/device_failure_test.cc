@@ -365,7 +365,9 @@ TEST_F(DeviceFailureTest, PublisherJoinExpiryRetainsUnprovenCaptures) {
   EXPECT_EQ(iree_atomic_load(&membership_.terminal.completed,
                              iree_memory_order_acquire),
             0);
-  EXPECT_EQ(stopped_.load(), 0u);
+  // The borrowed publisher prevents its own stop, not the other queue's.
+  // Capture retirement still requires every native owner to have stopped.
+  EXPECT_EQ(stopped_.load(), 1u);
   EXPECT_EQ(released_.load(), 0u);
   EXPECT_EQ(deadlines_.load(), 1u);
   // The caller ends its explicit publisher borrow only after the timeout.
@@ -378,7 +380,7 @@ TEST_F(DeviceFailureTest, PublisherJoinExpiryRetainsUnprovenCaptures) {
   Join();
   EXPECT_EQ(membership_.terminal.status,
             amdf_make_api_status(AMDF_STATUS_CODE_DEADLINE_EXCEEDED));
-  EXPECT_EQ(stopped_.load(), 0u);
+  EXPECT_EQ(stopped_.load(), 1u);
   EXPECT_EQ(released_.load(), 0u);
 }
 

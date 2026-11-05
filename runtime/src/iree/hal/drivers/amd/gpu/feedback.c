@@ -239,7 +239,8 @@ bool iree_hal_amd_gpu_feedback_deinitialize(
         context->api->memory_reservation_destroy(feedback->reservation);
     feedback->reservation = NULL;
     if (!amdf_status_is_ok(status)) {
-      context->cleanup_blocked = true;
+      iree_atomic_store(&context->cleanup_blocked, 1,
+                        iree_memory_order_relaxed);
       iree_hal_amd_gpu_context_report(context, status,
                                       "feedback alias removal");
       return false;

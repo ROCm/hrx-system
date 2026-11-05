@@ -223,7 +223,8 @@ amdf_status_t iree_hal_amd_gpu_context_deinitialize_completion(
 }
 
 void iree_hal_amd_gpu_context_free(iree_hal_amd_gpu_context_t* context) {
-  if (!context || context->cleanup_blocked) {
+  if (!context ||
+      iree_atomic_load(&context->cleanup_blocked, iree_memory_order_relaxed)) {
     return;
   }
   iree_hal_amd_gpu_context_deinitialize_memory(context);

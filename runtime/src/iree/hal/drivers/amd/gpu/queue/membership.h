@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-// Cold protocol ownership operations. Submission and retirement remain in the
+// Protocol lifetime operations. Submission and retirement remain in the
 // concrete queue; no operation passes through this table on the execution path.
 typedef struct iree_hal_amd_gpu_queue_lifecycle_t {
   // Closes acceptance while preserving accepted dependencies and work.
@@ -98,7 +98,7 @@ typedef struct iree_hal_amd_gpu_queue_membership_t {
   iree_hal_amd_gpu_program_pool_t* programs;
   // Immutable exact protocol ownership contract.
   const iree_hal_amd_gpu_queue_lifecycle_t* lifecycle;
-  // Cold native construction supplied by the device's placement policies.
+  // Native construction supplied by the device's placement policies.
   iree_hal_amd_gpu_queue_create_fn_t create;
   // Borrowed device passed to create.
   void* user_data;
@@ -106,9 +106,11 @@ typedef struct iree_hal_amd_gpu_queue_membership_t {
   uint32_t provisioned_count;
   // Borrowed immutable provisioned queue array, populated during construction.
   iree_hal_queue_t** provisioned;
-  // Serializes acquisition, release, and cold changes without execution locks.
+  // Serializes coordinate/source installation. Native queue construction and
+  // destruction run outside this mutex.
   iree_slim_mutex_t mutex;
-  // Serializes native construction/destruction with terminal traversal.
+  // Protects stable slot ownership and lifecycle borrows. Never held across
+  // native work, trim/terminal callouts, or borrower joins.
   iree_slim_mutex_t slots_mutex;
   // Stable slots retained until final device cleanup, newest first.
   iree_hal_amd_gpu_queue_slot_t* slots;
