@@ -189,6 +189,7 @@ iree_status_t iree_hal_amd_fabric_asan_initialize(
       .quarantine_limit = options->quarantine_size,
   };
   iree_slim_mutex_initialize(&out_state->shadow_mutex);
+  iree_slim_mutex_initialize(&out_state->growth_mutex);
   iree_slim_mutex_initialize(&out_state->application_mutex);
   iree_slim_mutex_initialize(&out_state->quarantine_mutex);
   IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_asan_validate_options(options));
@@ -557,21 +558,28 @@ static void iree_hal_amd_fabric_asan_release_application_range(
   iree_slim_mutex_unlock(&state->application_mutex);
 }
 
-static void iree_hal_amd_fabric_asan_fail(iree_hal_amd_fabric_asan_t* state,
-                                          amdf_status_t status,
-                                          const char* operation) {
+// Latch under the operation's owning lock, then notify after releasing it.
+static bool iree_hal_amd_fabric_asan_latch_failure(
+    iree_hal_amd_fabric_asan_t* state, amdf_status_t status) {
+  if (amdf_status_is_ok(status)) {
+    return false;
+  }
   int64_t expected = 0;
-  if (iree_atomic_compare_exchange_strong(
-          &state->failure, &expected, (int64_t)status,
-          iree_memory_order_acq_rel, iree_memory_order_acquire)) {
-    iree_hal_amd_report_failure(state->event_sink, IREE_SV("amd"), status,
-                                operation);
-    if (state->failure_callback) {
-      iree_status_t failure = IREE_HAL_AMD_STATUS_FROM_AMDF(status, operation);
-      state->failure_callback(state->failure_user_data,
-                              iree_status_code(failure));
-      iree_status_free(failure);
-    }
+  return iree_atomic_compare_exchange_strong(
+      &state->failure, &expected, (int64_t)status, iree_memory_order_acq_rel,
+      iree_memory_order_acquire);
+}
+
+static void iree_hal_amd_fabric_asan_notify_failure(
+    iree_hal_amd_fabric_asan_t* state, amdf_status_t status,
+    const char* operation) {
+  iree_hal_amd_report_failure(state->event_sink, IREE_SV("amd"), status,
+                              operation);
+  if (state->failure_callback) {
+    iree_status_t failure = IREE_HAL_AMD_STATUS_FROM_AMDF(status, operation);
+    state->failure_callback(state->failure_user_data,
+                            iree_status_code(failure));
+    iree_status_free(failure);
   }
 }
 
@@ -586,46 +594,72 @@ iree_hal_amd_fabric_asan_find_slab(iree_hal_amd_fabric_asan_t* state,
   return NULL;
 }
 
-static iree_status_t iree_hal_amd_fabric_asan_commit_slab(
-    iree_hal_amd_fabric_asan_t* state, uint64_t index) {
-  if (iree_hal_amd_fabric_asan_find_slab(state, index)) {
-    return iree_ok_status();
-  }
+// Growth ownership excludes other directory writers. Published slab records
+// are immutable; readers borrow the directory under shadow_mutex. Allocate and
+// copy before the pointer swap, then release the retired directory outside it.
+static iree_status_t iree_hal_amd_fabric_asan_reserve_slab(
+    iree_hal_amd_fabric_asan_t* state) {
   if (state->slab_count == state->slab_capacity) {
     const iree_host_size_t capacity =
         state->slab_capacity ? state->slab_capacity * 2 : 8;
-    IREE_RETURN_IF_ERROR(iree_allocator_realloc(
-        state->host_allocator, capacity * sizeof(*state->slabs),
-        (void**)&state->slabs));
+    iree_hal_amd_fabric_asan_shadow_slab_t* slabs = NULL;
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_uninitialized(
+        state->host_allocator, capacity * sizeof(*slabs), (void**)&slabs));
+    iree_hal_amd_fabric_asan_shadow_slab_t* old_slabs = state->slabs;
+    if (state->slab_count) {
+      memcpy(slabs, old_slabs, state->slab_count * sizeof(*slabs));
+    }
+    iree_slim_mutex_lock(&state->shadow_mutex);
+    state->slabs = slabs;
     state->slab_capacity = capacity;
+    iree_slim_mutex_unlock(&state->shadow_mutex);
+    iree_allocator_free(state->host_allocator, old_slabs);
   }
-  iree_hal_amd_fabric_asan_shadow_slab_t* slab =
-      &state->slabs[state->slab_count];
-  *slab = (iree_hal_amd_fabric_asan_shadow_slab_t){.index = index};
+  return iree_ok_status();
+}
+
+// The caller owns growth_mutex and has checked that this slab is missing.
+// Reserve retention metadata before any possibly partial native map acceptance.
+static iree_status_t iree_hal_amd_fabric_asan_commit_slab(
+    iree_hal_amd_fabric_asan_t* state, uint64_t index,
+    amdf_status_t* out_failure) {
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_asan_reserve_slab(state));
+  iree_hal_amd_fabric_asan_shadow_slab_t slab = {.index = index};
   iree_status_t status =
-      iree_hal_amd_fabric_asan_allocate_shadow(state, &slab->memory);
-  if (!iree_status_is_ok(status)) {
+      iree_hal_amd_fabric_asan_allocate_shadow(state, &slab.memory);
+  if (iree_status_is_ok(status)) {
+    // Advice on existing backing can fail while this private slab is prepared.
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+        (amdf_status_t)iree_atomic_load(&state->failure,
+                                        iree_memory_order_acquire),
+        "ASAN shadow publication");
+  }
+  if (iree_status_is_ok(status)) {
+    const amdf_memory_mapping_update_t update = {
+        .target_byte_offset = index * state->config.shadow_slab_size,
+        .byte_length = state->config.shadow_slab_size,
+        .memory = slab.memory.handle,
+        .access = state->access.requirements.access,
+    };
+    const amdf_status_t native_status = state->api->memory_reservation_update(
+        state->shadow_reservation, 0, 1, &update);
+    if (iree_hal_amd_fabric_asan_latch_failure(state, native_status)) {
+      *out_failure = native_status;
+    }
+    // A failed update may partially install backing. Retain this owner until
+    // complete reservation removal proves that it is safe to free.
+    iree_slim_mutex_lock(&state->shadow_mutex);
+    state->slabs[state->slab_count++] = slab;
+    iree_slim_mutex_unlock(&state->shadow_mutex);
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+        (amdf_status_t)iree_atomic_load(&state->failure,
+                                        iree_memory_order_acquire),
+        "ASAN precise shadow mapping");
+  } else {
     iree_hal_amd_fabric_memory_deinitialize(state->api, state->event_sink,
-                                            &slab->memory);
-    return status;
+                                            &slab.memory);
   }
-  // The update may partially install backing on a native failure. Retain this
-  // owner until complete reservation removal proves that it is safe to free.
-  ++state->slab_count;
-  const amdf_memory_mapping_update_t update = {
-      .target_byte_offset = index * state->config.shadow_slab_size,
-      .byte_length = state->config.shadow_slab_size,
-      .memory = slab->memory.handle,
-      .access = state->access.requirements.access,
-  };
-  const amdf_status_t native_status = state->api->memory_reservation_update(
-      state->shadow_reservation, 0, 1, &update);
-  if (!amdf_status_is_ok(native_status)) {
-    iree_hal_amd_fabric_asan_fail(state, native_status,
-                                  "ASAN precise shadow mapping");
-  }
-  return IREE_HAL_AMD_STATUS_FROM_AMDF(native_status,
-                                       "ASAN precise shadow mapping");
+  return status;
 }
 
 iree_status_t iree_hal_amd_fabric_asan_map_range(
@@ -643,15 +677,36 @@ iree_status_t iree_hal_amd_fabric_asan_map_range(
   const uint64_t first = (address >> shift) / state->config.shadow_slab_size;
   const uint64_t last =
       ((address + length - 1) >> shift) / state->config.shadow_slab_size;
+  amdf_status_t failure = AMDF_STATUS_OK;
   iree_slim_mutex_lock(&state->shadow_mutex);
   iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
       (amdf_status_t)iree_atomic_load(&state->failure,
                                       iree_memory_order_acquire),
       "ASAN shadow publication");
   for (uint64_t i = first; i <= last && iree_status_is_ok(status); ++i) {
-    status = iree_hal_amd_fabric_asan_commit_slab(state, i);
+    if (iree_hal_amd_fabric_asan_find_slab(state, i)) {
+      continue;
+    }
+    iree_slim_mutex_unlock(&state->shadow_mutex);
+    iree_slim_mutex_lock(&state->growth_mutex);
+    iree_slim_mutex_lock(&state->shadow_mutex);
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+        (amdf_status_t)iree_atomic_load(&state->failure,
+                                        iree_memory_order_acquire),
+        "ASAN shadow publication");
+    if (iree_status_is_ok(status) &&
+        !iree_hal_amd_fabric_asan_find_slab(state, i)) {
+      iree_slim_mutex_unlock(&state->shadow_mutex);
+      status = iree_hal_amd_fabric_asan_commit_slab(state, i, &failure);
+      iree_slim_mutex_lock(&state->shadow_mutex);
+    }
+    iree_slim_mutex_unlock(&state->growth_mutex);
   }
   iree_slim_mutex_unlock(&state->shadow_mutex);
+  if (!amdf_status_is_ok(failure)) {
+    iree_hal_amd_fabric_asan_notify_failure(state, failure,
+                                            "ASAN precise shadow mapping");
+  }
   return status;
 }
 
@@ -676,10 +731,6 @@ static amdf_status_t iree_hal_amd_fabric_asan_write_shadow(
         count);
     offset += count;
     length -= count;
-  }
-  if (!amdf_status_is_ok(status)) {
-    iree_hal_amd_fabric_asan_fail(state, status,
-                                  "ASAN shadow write publication");
   }
   return status;
 }
@@ -712,7 +763,12 @@ iree_status_t iree_hal_amd_fabric_asan_publish_imported_range(
           iree_hal_amd_fabric_asan_write_shadow(state, end_shadow, 1, tail);
     }
   }
+  const bool notify = iree_hal_amd_fabric_asan_latch_failure(state, status);
   iree_slim_mutex_unlock(&state->shadow_mutex);
+  if (notify) {
+    iree_hal_amd_fabric_asan_notify_failure(state, status,
+                                            "ASAN imported shadow publication");
+  }
   return IREE_HAL_AMD_STATUS_FROM_AMDF(status,
                                        "ASAN imported shadow publication");
 }
@@ -737,11 +793,16 @@ void iree_hal_amd_fabric_asan_advise_range(iree_hal_amd_fabric_asan_t* state,
     status = iree_hal_amd_fabric_asan_write_shadow(
         state, accessible, accessible_length >> shift, 0);
     if (tail && amdf_status_is_ok(status)) {
-      iree_hal_amd_fabric_asan_write_shadow(
+      status = iree_hal_amd_fabric_asan_write_shadow(
           state, accessible + (accessible_length >> shift), 1, tail);
     }
   }
+  const bool notify = iree_hal_amd_fabric_asan_latch_failure(state, status);
   iree_slim_mutex_unlock(&state->shadow_mutex);
+  if (notify) {
+    iree_hal_amd_fabric_asan_notify_failure(state, status,
+                                            "ASAN shadow write publication");
+  }
 }
 
 iree_status_t iree_hal_amd_fabric_asan_map_application(
@@ -768,9 +829,13 @@ iree_status_t iree_hal_amd_fabric_asan_map_application(
     // Keep proposed backing and native parents alive; no individual-range
     // detach can establish safety for a partially applied failed group.
     state->cleanup_blocked = true;
-    iree_hal_amd_fabric_asan_fail(state, status, "ASAN application mapping");
   }
+  const bool notify = iree_hal_amd_fabric_asan_latch_failure(state, status);
   iree_slim_mutex_unlock(&state->application_mutex);
+  if (notify) {
+    iree_hal_amd_fabric_asan_notify_failure(state, status,
+                                            "ASAN application mapping");
+  }
   return iree_status_annotate_f(
       IREE_HAL_AMD_STATUS_FROM_AMDF(status, "ASAN application mapping"),
       "offset=%" PRIu64 " length=%" PRIu64 " granularity=%" PRIu64,
@@ -789,6 +854,7 @@ bool iree_hal_amd_fabric_asan_unmap_application(
   };
   iree_slim_mutex_lock(&state->application_mutex);
   amdf_status_t status = 0;
+  bool notify = false;
   if (state->cleanup_blocked) {
     status = amdf_make_api_status(AMDF_STATUS_CODE_FAILED_PRECONDITION);
   } else {
@@ -796,10 +862,14 @@ bool iree_hal_amd_fabric_asan_unmap_application(
         state->application_reservation, 0, 1, &update);
     if (!amdf_status_is_ok(status)) {
       state->cleanup_blocked = true;
-      iree_hal_amd_fabric_asan_fail(state, status, "ASAN application removal");
+      notify = iree_hal_amd_fabric_asan_latch_failure(state, status);
     }
   }
   iree_slim_mutex_unlock(&state->application_mutex);
+  if (notify) {
+    iree_hal_amd_fabric_asan_notify_failure(state, status,
+                                            "ASAN application removal");
+  }
   if (!amdf_status_is_ok(status)) {
     return false;
   }
@@ -846,7 +916,10 @@ bool iree_hal_amd_fabric_asan_deinitialize(iree_hal_amd_fabric_asan_t* state) {
     *reservations[i] = NULL;
     if (!amdf_status_is_ok(status)) {
       state->cleanup_blocked = true;
-      iree_hal_amd_fabric_asan_fail(state, status, "ASAN reservation removal");
+      if (iree_hal_amd_fabric_asan_latch_failure(state, status)) {
+        iree_hal_amd_fabric_asan_notify_failure(state, status,
+                                                "ASAN reservation removal");
+      }
       return false;
     }
   }
@@ -861,6 +934,7 @@ bool iree_hal_amd_fabric_asan_deinitialize(iree_hal_amd_fabric_asan_t* state) {
       state, state->application_free_ranges);
   iree_slim_mutex_deinitialize(&state->quarantine_mutex);
   iree_slim_mutex_deinitialize(&state->application_mutex);
+  iree_slim_mutex_deinitialize(&state->growth_mutex);
   iree_slim_mutex_deinitialize(&state->shadow_mutex);
   *state = (iree_hal_amd_fabric_asan_t){0};
   return true;

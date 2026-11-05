@@ -6,8 +6,11 @@
 
 #include "iree/hal/drivers/amd/fabric/asan.h"
 
+#include <atomic>
+#include <barrier>
 #include <map>
 #include <semaphore>
+#include <thread>
 #include <vector>
 
 #include "iree/hal/drivers/amd/fabric/allocation_queue.h"
@@ -23,6 +26,7 @@ constexpr uint32_t kQueueFamilyOrdinal = 3;
 // Only the native reservation/backing boundary is simulated. The production
 // owner performs commitment, publication, range allocation, and quarantine.
 struct Native {
+  enum class Step { kNone, kAllocate, kFlush, kMap };
   struct Scope {
     // Native dependency accepting physical allocations from this scope.
     Native* owner;
@@ -59,6 +63,23 @@ struct Native {
   uint32_t live_memory = 0;
   // Injected native host publication failure.
   bool fail_flush = false;
+  // Injected allocation failure before any native backing exists.
+  bool fail_allocate = false;
+  // Injected update failure after native backing has been installed.
+  bool fail_update = false;
+  // Exactly one native operation pauses at this boundary.
+  std::atomic<Step> pause_step{Step::kNone};
+  // Readiness witness before the selected native operation completes.
+  std::binary_semaphore entered{0};
+  // Allows the selected operation to complete after independent work.
+  std::binary_semaphore resume{0};
+
+  void Pause(Step step) {
+    if (pause_step.compare_exchange_strong(step, Step::kNone)) {
+      entered.release();
+      resume.acquire();
+    }
+  }
 
   Native() {
     api.device_query_memory_reservation_capabilities =
@@ -127,6 +148,7 @@ struct Native {
         [](amdf_memory_reservation_t* handle, uint32_t, uint32_t count,
            const amdf_memory_mapping_update_t* updates) {
           auto* reservation = reinterpret_cast<Reservation*>(handle);
+          reservation->owner->Pause(Step::kMap);
           for (uint32_t i = 0; i < count; ++i) {
             const auto& update = updates[i];
             EXPECT_EQ(update.byte_length % 4096, 0u);
@@ -143,7 +165,9 @@ struct Native {
               }
             }
           }
-          return AMDF_STATUS_OK;
+          return reservation->owner->fail_update
+                     ? amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL)
+                     : AMDF_STATUS_OK;
         };
     api.memory_reservation_destroy = [](amdf_memory_reservation_t* handle) {
       auto* reservation = reinterpret_cast<Reservation*>(handle);
@@ -158,12 +182,17 @@ struct Native {
     api.memory_create =
         [](amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
            amdf_memory_t** out, amdf_memory_release_info_t* out_release_info) {
+          *out = nullptr;
           if (out_release_info) {
             *out_release_info = {};
           }
           auto* selected_scope = reinterpret_cast<Scope*>(scope);
-          ++selected_scope->allocation_count;
           auto* self = selected_scope->owner;
+          self->Pause(Step::kAllocate);
+          if (self->fail_allocate) {
+            return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+          }
+          ++selected_scope->allocation_count;
           ++self->live_memory;
           *out = reinterpret_cast<amdf_memory_t*>(
               new Memory{self, std::vector<uint8_t>(info->byte_length, 0xcc)});
@@ -191,9 +220,10 @@ struct Native {
     api.host_mapping_cache_control = [](amdf_host_mapping_t* handle,
                                         amdf_host_cache_operation_t, uint64_t,
                                         uint64_t) {
-      return reinterpret_cast<Memory*>(handle)->owner->fail_flush
-                 ? amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL)
-                 : AMDF_STATUS_OK;
+      auto* self = reinterpret_cast<Memory*>(handle)->owner;
+      self->Pause(Step::kFlush);
+      return self->fail_flush ? amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL)
+                              : AMDF_STATUS_OK;
     };
     api.host_mapping_destroy = [](amdf_host_mapping_t*) {
       return AMDF_STATUS_OK;
@@ -457,6 +487,131 @@ TEST_F(AsanTest, PreciseShadowPreservesRedzonesAndPartialTailAcrossSlabs) {
   EXPECT_EQ(observation.shadow_committed_size, 8192u);
 }
 
+class AsanGrowthTest : public AsanTest,
+                       public ::testing::WithParamInterface<Native::Step> {};
+
+TEST_P(AsanGrowthTest, ExistingAdviceAndImportsProgressDuringGrowth) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  // Fill the initial directory so preparing the next slab also expands it.
+  constexpr uint64_t kExistingLength = 8 * 4096 * 8;
+  IREE_ASSERT_OK(
+      iree_hal_amd_fabric_asan_map_range(&state_, 0, kExistingLength));
+  native_.pause_step = GetParam();
+  std::thread grower([&] {
+    IREE_EXPECT_OK(
+        iree_hal_amd_fabric_asan_map_range(&state_, kExistingLength, 4096 * 8));
+  });
+  native_.entered.acquire();
+
+  iree_hal_amd_fabric_asan_advise_range(&state_, 64, 64, 8, 19);
+  EXPECT_EQ(native_.Shadow(64), 0xfau);
+  EXPECT_EQ(native_.Shadow(72), 0u);
+  EXPECT_EQ(native_.Shadow(88), 3u);
+  // Cached map admission must not wait for the growth owner either.
+  IREE_EXPECT_OK(
+      iree_hal_amd_fabric_asan_publish_imported_range(&state_, 89, 5));
+  EXPECT_EQ(native_.Shadow(88), 6u);
+  iree_hal_device_asan_observation_t observation;
+  iree_hal_amd_fabric_asan_query_statistics(&state_, &observation);
+  EXPECT_EQ(observation.shadow_mapped_slab_count, 8u);
+
+  native_.resume.release();
+  grower.join();
+  EXPECT_EQ(native_.live_memory, 9u);
+  EXPECT_EQ(native_.Shadow(kExistingLength), 0xfau);
+}
+
+INSTANTIATE_TEST_SUITE_P(NativeBoundary, AsanGrowthTest,
+                         ::testing::Values(Native::Step::kAllocate,
+                                           Native::Step::kFlush,
+                                           Native::Step::kMap));
+
+TEST_F(AsanTest, ConcurrentCommitAndAdvicePreserveSlabOwnership) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_range(&state_, 0, 4096 * 8));
+  std::barrier<> ready(3);
+  auto commit = [&] {
+    ready.arrive_and_wait();
+    for (uint64_t i = 1; i < 16; ++i) {
+      IREE_EXPECT_OK(
+          iree_hal_amd_fabric_asan_map_range(&state_, i * 4096 * 8, 4096 * 8));
+    }
+  };
+  std::thread first(commit);
+  std::thread second(commit);
+  ready.arrive_and_wait();
+  for (size_t i = 0; i < 128; ++i) {
+    iree_hal_amd_fabric_asan_advise_range(&state_, 64, 64, 8, 19);
+    iree_hal_device_asan_observation_t observation;
+    iree_hal_amd_fabric_asan_query_statistics(&state_, &observation);
+    EXPECT_GE(observation.shadow_mapped_slab_count, 1u);
+    EXPECT_LE(observation.shadow_mapped_slab_count, 16u);
+  }
+  first.join();
+  second.join();
+  EXPECT_EQ(native_.local_scope.allocation_count, 16u);
+  EXPECT_EQ(native_.live_memory, 16u);
+  EXPECT_EQ(native_.Shadow(88), 3u);
+}
+
+TEST_F(AsanTest, FailedGrowthPreservesCommittedBackingAndCanRetry) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_range(&state_, 0, 4096 * 8));
+  native_.fail_allocate = true;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_amd_fabric_asan_map_range(&state_, 4096 * 8, 8));
+  iree_hal_amd_fabric_asan_advise_range(&state_, 64, 64, 8, 19);
+  EXPECT_EQ(native_.Shadow(88), 3u);
+  EXPECT_EQ(native_.live_memory, 1u);
+  native_.fail_allocate = false;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_range(&state_, 4096 * 8, 8));
+  EXPECT_EQ(native_.live_memory, 2u);
+}
+
+TEST_F(AsanTest, PartiallyAcceptedMappingRetainsBackingAndNotifiesAfterUnlock) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  native_.fail_update = true;
+  state_.failure_user_data = &state_;
+  state_.failure_callback = [](void* user_data, iree_status_code_t code) {
+    EXPECT_EQ(code, IREE_STATUS_INTERNAL);
+    auto* state = static_cast<iree_hal_amd_fabric_asan_t*>(user_data);
+    iree_hal_device_asan_observation_t observation;
+    iree_hal_amd_fabric_asan_query_statistics(state, &observation);
+    EXPECT_EQ(observation.shadow_mapped_slab_count, 1u);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
+                          iree_hal_amd_fabric_asan_map_range(state, 0, 8));
+  };
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
+                        iree_hal_amd_fabric_asan_map_range(&state_, 0, 8));
+  EXPECT_EQ(native_.live_memory, 1u);
+  EXPECT_EQ(native_.reservations[1]->pages.size(), 1u);
+  // Teardown verifies backing is released only after reservation removal.
+}
+
+TEST_F(AsanTest, AdviceFailureStopsConcurrentGrowthAdmission) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_range(&state_, 0, 4096 * 8));
+  native_.pause_step = Native::Step::kMap;
+  std::thread grower([&] {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INTERNAL,
+        iree_hal_amd_fabric_asan_map_range(&state_, 4096 * 8, 8));
+  });
+  native_.entered.acquire();
+  native_.fail_flush = true;
+  iree_hal_amd_fabric_asan_advise_range(&state_, 64, 64, 0, 8);
+  native_.resume.release();
+  grower.join();
+  EXPECT_EQ(native_.live_memory, 2u);
+  EXPECT_EQ(native_.reservations[1]->pages.size(), 2u);
+}
+
 TEST_F(AsanTest, ImportedBoundariesWidenWithoutShrinkingAnotherLiveImport) {
   Initialize();
   ASSERT_FALSE(HasFatalFailure());
@@ -574,16 +729,25 @@ TEST_F(AsanTest, FailedPoisonPublicationLatchesOnceAndStopsAdmission) {
   Initialize();
   ASSERT_FALSE(HasFatalFailure());
   IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_range(&state_, 64, 64));
-  uint32_t notifications = 0;
-  state_.failure_user_data = &notifications;
+  struct Failure {
+    // State remains usable for accounting during the internal notification.
+    iree_hal_amd_fabric_asan_t* state;
+    // First failure is notified exactly once.
+    uint32_t count = 0;
+  } failure{&state_};
+  state_.failure_user_data = &failure;
   state_.failure_callback = [](void* user_data, iree_status_code_t code) {
     EXPECT_EQ(code, IREE_STATUS_INTERNAL);
-    ++*static_cast<uint32_t*>(user_data);
+    auto* failure = static_cast<Failure*>(user_data);
+    ++failure->count;
+    iree_hal_device_asan_observation_t observation;
+    iree_hal_amd_fabric_asan_query_statistics(failure->state, &observation);
+    EXPECT_EQ(observation.shadow_mapped_slab_count, 1u);
   };
   native_.fail_flush = true;
   iree_hal_amd_fabric_asan_advise_range(&state_, 64, 64, 0, 8);
   iree_hal_amd_fabric_asan_advise_range(&state_, 64, 64, 0, 0);
-  EXPECT_EQ(notifications, 1u);
+  EXPECT_EQ(failure.count, 1u);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
                         iree_hal_amd_fabric_asan_map_range(&state_, 128, 64));
 }
