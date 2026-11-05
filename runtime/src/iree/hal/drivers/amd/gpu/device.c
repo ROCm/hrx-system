@@ -886,7 +886,8 @@ static bool iree_hal_amd_gpu_device_release_children(
 
 static bool iree_hal_amd_gpu_device_poll_shutdown(
     void* user_data, amdf_status_t wait_status,
-    iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    iree_hal_amd_gpu_completion_wait_t* out_wait,
+    iree_hal_amd_gpu_completion_copy_t* out_copy) {
   iree_hal_amd_gpu_device_t* device = user_data;
   if (amdf_status_is_ok(wait_status) &&
       iree_hal_amd_gpu_device_is_closing(device) &&

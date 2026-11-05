@@ -1894,9 +1894,18 @@ static void iree_hal_amd_gpu_pm4_fail_native(
                                       queue->options.source_ordinal);
 }
 
+static void iree_hal_amd_gpu_pm4_complete_download(void* user_data) {
+  iree_hal_amd_gpu_download_t* download = user_data;
+  IREE_TRACE_ZONE_BEGIN_NAMED(z0, "iree_hal_amd_gpu_download_complete");
+  iree_hal_amd_gpu_download_complete(download);
+  download->length = 0;
+  IREE_TRACE_ZONE_END(z0);
+}
+
 static bool iree_hal_amd_gpu_pm4_retire(
     void* user_data, amdf_status_t wait_status,
-    iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    iree_hal_amd_gpu_completion_wait_t* out_wait,
+    iree_hal_amd_gpu_completion_copy_t* out_copy) {
   iree_hal_amd_gpu_pm4_queue_t* queue = user_data;
   if (!amdf_status_is_ok((amdf_status_t)iree_atomic_load(
           &queue->native_failure, iree_memory_order_relaxed)) ||
@@ -1947,7 +1956,7 @@ static bool iree_hal_amd_gpu_pm4_retire(
       return false;
     }
   }
-  uint64_t limit = iree_min(published, position + 64);
+  const uint64_t limit = iree_min(published, position + 64);
   const uint64_t initial = position;
   bool waiting_for_producer = false;
   for (; position != limit; ++position) {
@@ -1977,7 +1986,6 @@ static bool iree_hal_amd_gpu_pm4_retire(
       waiting_for_producer = true;
       break;
     }
-    IREE_TRACE_ZONE_BEGIN_NAMED(z0, "iree_hal_amd_gpu_pm4_retire");
     if (queue->options.feedback) {
       // Native retirement makes this dispatch's reports observable. Drain the
       // ready shared prefix before waking host completion consumers.
@@ -1992,11 +2000,16 @@ static bool iree_hal_amd_gpu_pm4_retire(
     const uint64_t consumed_arguments = action->consumed_arguments;
     if (action->download.length && feedback_failure == IREE_STATUS_OK &&
         completion_code == IREE_STATUS_OK) {
-      iree_hal_amd_gpu_download_complete(&action->download);
-      // Return staging credit before the next window so publication and other
-      // queues' retirement can progress between bulk downloads.
-      limit = position + 1;
+      if (out_copy) {
+        *out_copy = (iree_hal_amd_gpu_completion_copy_t){
+            .fn = iree_hal_amd_gpu_pm4_complete_download,
+            .user_data = &action->download};
+      }
+      // The source keeps its complete FIFO ownership until the worker's CPU
+      // copy returns. Helpers can retire other sources without touching it.
+      break;
     }
+    IREE_TRACE_ZONE_BEGIN_NAMED(z0, "iree_hal_amd_gpu_pm4_retire");
     if (terminal) {
       if (submission->profiled) {
         const iree_hal_amd_gpu_profile_operation_t* operation =
