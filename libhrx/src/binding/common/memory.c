@@ -1062,8 +1062,8 @@ static iree_status_t iree_hal_streaming_memory_lookup_ranges_in_context(
     iree_hal_streaming_context_t* owner_context, iree_host_size_t request_count,
     const iree_hal_streaming_memory_range_request_t* requests,
     iree_hal_streaming_memory_range_workspace_t* workspace,
-    iree_hal_streaming_retained_buffer_ref_t* out_refs,
     iree_host_size_t* inout_ref_count,
+    iree_hal_streaming_retained_buffer_ref_t* out_refs,
     iree_hal_streaming_memory_range_match_t* out_matches) {
   iree_host_size_t unresolved_count = 0;
   for (iree_host_size_t i = 0; i < request_count; ++i) {
@@ -1178,7 +1178,7 @@ iree_status_t iree_hal_streaming_memory_lookup_ranges_retain_for_context(
 
   iree_status_t status = iree_hal_streaming_memory_lookup_ranges_in_context(
       execution_context, execution_context, request_count, requests, &workspace,
-      out_refs, out_ref_count, out_matches);
+      out_ref_count, out_refs, out_matches);
 
   enum { IREE_HAL_STREAMING_INLINE_CONTEXT_COUNT = 8 };
   iree_hal_streaming_context_t*
@@ -1245,7 +1245,7 @@ iree_status_t iree_hal_streaming_memory_lookup_ranges_retain_for_context(
        ++i) {
     status = iree_hal_streaming_memory_lookup_ranges_in_context(
         execution_context, contexts[i], request_count, requests, &workspace,
-        out_refs, out_ref_count, out_matches);
+        out_ref_count, out_refs, out_matches);
   }
   for (iree_host_size_t i = 0; i < context_count; ++i) {
     iree_hal_streaming_context_release(contexts[i]);

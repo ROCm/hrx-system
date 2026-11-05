@@ -44,8 +44,8 @@ typedef void(IREE_API_PTR* iree_hal_streaming_tls_destructor_t)(void* value);
 // and must obey the loader-lock restrictions that implies.
 IREE_API_EXPORT IREE_MUST_USE_RESULT iree_status_t
 iree_hal_streaming_tls_key_create(
-    iree_hal_streaming_tls_key_t* out_key,
-    iree_hal_streaming_tls_destructor_t destructor);
+    iree_hal_streaming_tls_destructor_t destructor,
+    iree_hal_streaming_tls_key_t* out_key);
 
 // Deletes a key previously created with iree_hal_streaming_tls_key_create.
 IREE_API_EXPORT void iree_hal_streaming_tls_key_delete(

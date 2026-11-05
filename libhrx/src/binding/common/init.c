@@ -523,7 +523,7 @@ iree_status_t iree_hal_streaming_init_global(
   // a device failure preserves its cause and releases the initialized prefix.
   int gpu_count = 0;
   status = iree_hal_streaming_tls_key_create(
-      &device_registry->context_key, iree_hal_streaming_context_cleanup_thread);
+      iree_hal_streaming_context_cleanup_thread, &device_registry->context_key);
   if (iree_status_is_ok(status)) {
     status = HRX_CALL(hrx_gpu_device_count(&gpu_count));
   }

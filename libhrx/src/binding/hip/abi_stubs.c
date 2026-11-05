@@ -205,8 +205,8 @@ static void hrx_hip_mipmapped_array_release(
     hipMipmappedArray_t mipmapped_array);
 
 static hipError_t hrx_hip_mipmapped_array_level(
-    hipArray_t* out_level_array, hipMipmappedArray_const_t mipmapped_array,
-    unsigned int level) {
+    hipMipmappedArray_const_t mipmapped_array, unsigned int level,
+    hipArray_t* out_level_array) {
   if (out_level_array) {
     *out_level_array = NULL;
   }
@@ -933,7 +933,7 @@ HIPAPI hipError_t hipGetMipmappedArrayLevel(
     unsigned int level) {
   HIP_API_BEGIN();
   HIP_RETURN_ERROR(
-      hrx_hip_mipmapped_array_level(levelArray, mipmappedArray, level));
+      hrx_hip_mipmapped_array_level(mipmappedArray, level, levelArray));
 }
 
 HIPAPI hipError_t hipGetTextureAlignmentOffset(size_t* offset,

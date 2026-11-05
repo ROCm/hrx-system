@@ -842,7 +842,7 @@ hipError_t iree_hip_execution_resource_split_sm_by_count(
     iree_hal_streaming_device_t* device,
     const iree_hal_streaming_execution_resource_set_t* input_set,
     const hipDevResource* input, unsigned int flags, unsigned int minimum_count,
-    hipDevResource* out_resources, unsigned int* inout_group_count,
+    unsigned int* inout_group_count, hipDevResource* out_resources,
     hipDevResource* out_remainder) {
   const unsigned int known_flags = hipDevSmResourceSplitIgnoreSmCoscheduling |
                                    hipDevSmResourceSplitMaxPotentialClusterSize;
