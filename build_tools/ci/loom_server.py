@@ -38,7 +38,8 @@ class ServerPlatform:
 
 PLATFORMS = {
     release.LINUX_X86_64_PLATFORM: ServerPlatform(
-        release.SERVER_BINARIES[release.LINUX_X86_64_PLATFORM], ()
+        release.SERVER_BINARIES[release.LINUX_X86_64_PLATFORM],
+        ("--copt=-U_FORTIFY_SOURCE", "--copt=-D_FORTIFY_SOURCE=2"),
     ),
     release.WINDOWS_X86_64_PLATFORM: ServerPlatform(
         release.SERVER_BINARIES[release.WINDOWS_X86_64_PLATFORM],

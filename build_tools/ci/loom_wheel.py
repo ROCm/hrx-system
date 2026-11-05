@@ -26,6 +26,10 @@ PROFILE_FLAGS = {
     "debug": ["--compilation_mode=dbg"],
     "asan": ["--config=asan"],
 }
+LINUX_OPTIMIZED_COPTS = [
+    "--copt=-U_FORTIFY_SOURCE",
+    "--copt=-D_FORTIFY_SOURCE=2",
+]
 WHEEL = "//loom/packaging/python:release_wheel"
 ASSOCIATED_WHEEL = "//loom/packaging/python/test:associated_wheel"
 MODEL = "//loom/src/loom/serve/fixture/text:card_model_mixed"
@@ -33,9 +37,19 @@ TEST_DIRECTORY = "loom/src/loom/tooling/target/cpu/serve"
 
 
 def build_wheel(
-    root: Path, output: Path, profile: str, bazel: str, options: list[str]
+    root: Path,
+    output: Path,
+    profile: str,
+    platform_name: str,
+    bazel: str,
+    options: list[str],
 ) -> release.Wheel:
     flags = ["--config=loom-sdk", *PROFILE_FLAGS[profile], *options]
+    if platform_name == release.LINUX_X86_64_PLATFORM and profile in {
+        "release",
+        "tracy",
+    }:
+        flags.extend(LINUX_OPTIMIZED_COPTS)
     targets = [WHEEL, ASSOCIATED_WHEEL, MODEL]
     subprocess.run(
         [bazel, "build", *flags, *targets],
@@ -81,6 +95,8 @@ def build_wheel(
     )
     if wheel.profile != profile:
         raise ValueError(f"Requested {profile} wheel, built {wheel.profile}")
+    if wheel.platform != platform_name:
+        raise ValueError(f"Requested {platform_name} wheel, built {wheel.platform}")
     output.mkdir(parents=True, exist_ok=False)
     destination = output / wheel.path.name
     shutil.copyfile(wheel.path, destination)
@@ -151,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         "build", help="Build wheels and their small test fixture"
     )
     build.add_argument("--profile", required=True, choices=release.PROFILES)
+    build.add_argument("--platform", required=True, choices=release.PLATFORMS)
     build.add_argument("--output", required=True, type=Path)
     build.add_argument("--bazel", default="bazelisk")
     build.add_argument("options", nargs=argparse.REMAINDER, help="Bazel flags after --")
@@ -166,7 +183,14 @@ def main(argv: list[str] | None = None) -> int:
             bazel = shutil.which(args.bazel)
             if bazel is None:
                 raise ValueError(f"Bazel executable not found: {args.bazel}")
-            build_wheel(Path.cwd(), args.output, args.profile, bazel, options)
+            build_wheel(
+                Path.cwd(),
+                args.output,
+                args.profile,
+                args.platform,
+                bazel,
+                options,
+            )
         else:
             test_wheel(Path.cwd(), args.inputs, args.output, args.elf_inspector)
     except (ValueError, OSError, BadZipFile, subprocess.CalledProcessError) as error:

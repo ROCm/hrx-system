@@ -87,6 +87,8 @@ class LoomServerTest(unittest.TestCase):
         for required in (
             "--config=loom-sdk",
             "--config=opt",
+            "--copt=-U_FORTIFY_SOURCE",
+            "--copt=-D_FORTIFY_SOURCE=2",
             "--stamp",
             f"--embed_label=1.2.3@{self.commit}",
             "--//loom/config:shared_tools=false",
