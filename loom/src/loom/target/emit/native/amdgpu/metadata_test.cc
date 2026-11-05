@@ -430,8 +430,8 @@ TEST(AmdgpuMetadataTest, BuildsElfNoteMetadata) {
 
   TestArena arena;
   iree_const_byte_span_t note_span = iree_const_byte_span_empty();
-  IREE_ASSERT_OK(loom_amdgpu_metadata_build_elf_note(&metadata, &note_span,
-                                                     arena.arena()));
+  IREE_ASSERT_OK(loom_amdgpu_metadata_build_elf_note(&metadata, arena.arena(),
+                                                     &note_span));
   std::string note((const char*)note_span.data, note_span.data_length);
 
   const char note_name[] = {'A', 'M', 'D', 'G', 'P', 'U', '\0'};
@@ -462,8 +462,8 @@ TEST(AmdgpuMetadataTest, WritesElfEnvelopeContainingMetadataNote) {
 
   TestArena note_arena;
   iree_const_byte_span_t note_span = iree_const_byte_span_empty();
-  IREE_ASSERT_OK(loom_amdgpu_metadata_build_elf_note(&metadata, &note_span,
-                                                     note_arena.arena()));
+  IREE_ASSERT_OK(loom_amdgpu_metadata_build_elf_note(
+      &metadata, note_arena.arena(), &note_span));
   std::string note((const char*)note_span.data, note_span.data_length);
 
   const loom_native_elf_section_t sections[] = {{
@@ -506,7 +506,7 @@ TEST(AmdgpuMetadataTest, WritesElfEnvelopeContainingMetadataNote) {
   TestArena arena;
   loom_native_elf_layout_t layout = {};
   IREE_ASSERT_OK(
-      loom_native_elf64le_build_layout(&file, &layout, arena.arena()));
+      loom_native_elf64le_build_layout(&file, arena.arena(), &layout));
   IREE_ASSERT_OK(loom_native_elf64le_write_file(&file, &layout, stream.get()));
   std::string bytes = StreamBytes(stream.get());
 

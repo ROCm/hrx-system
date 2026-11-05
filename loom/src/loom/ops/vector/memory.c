@@ -363,8 +363,8 @@ bool loom_vector_memory_footprint_describe(
 }
 
 bool loom_vector_memory_footprint_static_extents(
-    const loom_vector_memory_footprint_t* footprint, int64_t* out_extents,
-    iree_host_size_t capacity) {
+    const loom_vector_memory_footprint_t* footprint, iree_host_size_t capacity,
+    int64_t* out_extents) {
   if (!footprint || !out_extents ||
       footprint->kind == LOOM_VECTOR_MEMORY_FOOTPRINT_NONE ||
       footprint->kind == LOOM_VECTOR_MEMORY_FOOTPRINT_FRAGMENT ||

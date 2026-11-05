@@ -121,9 +121,8 @@ typedef struct loom_native_section_contribution_assembly_t {
 // transient allocations that will be reclaimed by the next arena reset.
 iree_status_t loom_native_assemble_section_contributions(
     const loom_native_section_contribution_t* contributions,
-    iree_host_size_t contribution_count,
-    loom_native_section_contribution_assembly_t* out_assembly,
-    iree_arena_allocator_t* arena);
+    iree_host_size_t contribution_count, iree_arena_allocator_t* arena,
+    loom_native_section_contribution_assembly_t* out_assembly);
 
 #ifdef __cplusplus
 }  // extern "C"

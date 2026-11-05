@@ -191,9 +191,9 @@ TEST_P(MixedTablesTest, FullAndSelectedOutputSurviveSourceTeardown) {
         .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr},
     };
     loom_bytecode_read_result_t result = {};
-    IREE_ASSERT_OK(loom_bytecode_read_module(span, filename, &context_,
-                                             &output_pool_, &options, &result,
-                                             &full_, iree_allocator_system()));
+    IREE_ASSERT_OK(loom_bytecode_read_module(
+        span, filename, &context_, &output_pool_, &options,
+        iree_allocator_system(), &result, &full_));
     ASSERT_EQ(result.error_count, 0u);
     ASSERT_NE(full_, nullptr);
     const loom_bytecode_index_options_t index_options = {
@@ -207,7 +207,7 @@ TEST_P(MixedTablesTest, FullAndSelectedOutputSurviveSourceTeardown) {
     const iree_host_size_t ordinal = 0;
     IREE_ASSERT_OK(loom_bytecode_materialize_module_symbols_into(
         span, filename, &source_pool_, &metadata, 0, {1, &ordinal}, {},
-        &options, &result, selected_, iree_allocator_system()));
+        &options, selected_, iree_allocator_system(), &result));
     ASSERT_EQ(result.error_count, 0u);
   }
   loom_module_free(source_);

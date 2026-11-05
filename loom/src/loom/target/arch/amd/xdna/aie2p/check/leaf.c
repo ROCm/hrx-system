@@ -230,7 +230,7 @@ static iree_status_t loom_aie2p_leaf_check_execute(
       .diagnostic_emitter = emitter,
   };
   loom_target_compile_report_t report;
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   options.compile_report =
       report_kind == LOOM_AIE2P_LEAF_CHECK_REPORT_EMISSION ? &report : NULL;
   loom_aie2p_leaf_contribution_t contribution = {0};

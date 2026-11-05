@@ -82,8 +82,8 @@ static iree_status_t loom_aie2p_configuration_check_run(loom_pass_t* pass,
   }
 
   loom_target_compile_report_t configuration_report;
-  loom_target_compile_report_initialize(&configuration_report,
-                                        iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(),
+                                        &configuration_report);
   const loom_aie2p_xdna_artifact_request_t request = {
       .module = module,
       .function_versions = function_versions,
@@ -115,8 +115,8 @@ static iree_status_t loom_aie2p_configuration_check_run(loom_pass_t* pass,
   }
 
   loom_target_compile_report_t worker_report;
-  loom_target_compile_report_initialize(&worker_report,
-                                        iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(),
+                                        &worker_report);
   const loom_aie2p_leaf_compile_options_t worker_options = {
       .descriptor_registry = &registry.registry,
       .function_target_facts = worker_version->function_target_facts,

@@ -99,7 +99,7 @@ class ImageInput {
     const auto destination = iree_make_byte_span(pixels.data(), pixels.size());
     iree_status_t status;
     IREE_RETURN_IF_ERROR(loom_serve_media_image_decode_batch(
-        1, &input, &destination, &status, iree_allocator_system()));
+        1, &input, &destination, iree_allocator_system(), &status));
     return status;
   }
 
@@ -378,8 +378,8 @@ TEST(ImageTest, MixedBatchPreservesOrdinalsAndIsolatesDestinationErrors) {
   }
   std::vector<iree_status_t> statuses(inputs.size());
   IREE_ASSERT_OK(loom_serve_media_image_decode_batch(
-      inputs.size(), inputs.data(), destinations.data(), statuses.data(),
-      iree_allocator_system()));
+      inputs.size(), inputs.data(), destinations.data(),
+      iree_allocator_system(), statuses.data()));
   const std::vector<uint8_t> lossless = {255, 0, 0,   0,   255, 0,
                                          0,   0, 255, 255, 255, 255};
   for (size_t i = 0; i < inputs.size(); ++i) {
@@ -418,8 +418,8 @@ TEST(ImageTest, BatchAllocationFailureDoesNotStartAnyImage) {
   iree_status_t status;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_media_image_decode_batch(1, inputs, &destination, &status,
-                                          iree_allocator_null()));
+      loom_serve_media_image_decode_batch(1, inputs, &destination,
+                                          iree_allocator_null(), &status));
   IREE_EXPECT_OK(status);
   EXPECT_EQ(pixels, std::vector<uint8_t>(12, 0x5a));
   loom_serve_media_image_input_deinitialize(&input);

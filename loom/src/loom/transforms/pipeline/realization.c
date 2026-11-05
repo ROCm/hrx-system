@@ -166,7 +166,7 @@ static iree_status_t loom_pipeline_realization_clone_workers(
         &rewriter->builder,
         loom_func_like_cast(
             module, module->symbols.entries[source.symbol_id].defining_op),
-        target, NULL, &instance, pass->arena));
+        target, NULL, pass->arena, &instance));
     functions[i] = instance;
     if (owner && source_version) {
       loom_target_function_version_t* version = NULL;

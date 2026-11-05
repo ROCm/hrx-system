@@ -77,8 +77,8 @@ iree_status_t loom_channel_materialization_clone(
   };
   loom_func_like_t function = {0};
   IREE_RETURN_IF_ERROR(loom_callable_clone_definition(
-      &rewriter->builder, source_function, target_symbol, &options, &function,
-      rewriter->arena));
+      &rewriter->builder, source_function, target_symbol, &options,
+      rewriter->arena, &function));
   // A change to clone visitation must not silently leave selected source sites
   // pointing at the shared definition that this instance must not rewrite.
   IREE_ASSERT_EQ(state.action_index, source_plan->action_count);

@@ -36,8 +36,8 @@ static const loom_low_schedule_structural_model_t kStructuralScheduleModels[] =
 void loom_aie2p_low_descriptor_registry_initialize(
     loom_target_low_descriptor_registry_t* out_registry) {
   loom_target_low_descriptor_registry_initialize_from_tables(
-      out_registry, kLowDescriptorSetProviders,
-      IREE_ARRAYSIZE(kLowDescriptorSetProviders));
+      kLowDescriptorSetProviders, IREE_ARRAYSIZE(kLowDescriptorSetProviders),
+      out_registry);
 }
 
 loom_low_schedule_structural_model_list_t

@@ -106,7 +106,7 @@ kernel.def target(@target) @report_kernel() {
   auto module = DeserializeModule(context.get(), workspace.get(), source.get());
   auto program = CreatePreparedLowPassProgram(context.get());
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.requested_detail_flags =
       loom_target_compile_report_requested_detail_flags(
           LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS);

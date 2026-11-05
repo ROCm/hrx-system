@@ -13,8 +13,8 @@
 iree_status_t loom_tooling_input_admit_loomc_module(
     const loom_tooling_loomc_input_options_t* options, loomc_context_t* context,
     loomc_workspace_t* workspace, iree_arena_block_pool_t* block_pool,
-    loomc_module_t** out_module, loomc_result_t** out_result,
-    iree_allocator_t host_allocator) {
+    iree_allocator_t host_allocator, loomc_module_t** out_module,
+    loomc_result_t** out_result) {
   *out_module = NULL;
   *out_result = NULL;
   const iree_string_view_t physical_identifier =

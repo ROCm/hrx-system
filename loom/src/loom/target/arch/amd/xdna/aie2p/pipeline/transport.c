@@ -500,8 +500,8 @@ iree_status_t loom_aie2p_native_select_sequence(
       &tile->facts->dma, tile->memory_layout,
       descriptor_base + *next_descriptor, descriptor_count - *next_descriptor,
       direction, repetitions, capacity, byte_offset, byte_stride,
-      credit_interval, template_words, out_sequence, out_reason, out_valid,
-      context->pass->arena));
+      credit_interval, template_words, context->pass->arena, out_sequence,
+      out_reason, out_valid));
   if (*out_valid) {
     *next_descriptor += out_sequence->descriptor_count;
   }

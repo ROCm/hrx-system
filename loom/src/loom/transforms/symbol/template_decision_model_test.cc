@@ -265,15 +265,15 @@ class TemplateDecisionModelTest : public ::testing::Test {
       loom_decision_program_result_t actual = {};
       loom_template_decision_evidence_summary_t actual_summary = {};
       loom_template_decision_model_evaluate_all(
-          model, &site, policy, evidence.data(), &actual_summary,
-          live_actions.data(), &live_action_count, &actual);
+          model, &site, policy, evidence.data(), live_actions.data(),
+          &actual_summary, &live_action_count, &actual);
 
       std::array<uint32_t, 8> minimal_live_actions = {};
       uint32_t minimal_live_action_count = 0;
       loom_decision_program_result_t minimal_result = {};
       loom_template_decision_evidence_summary_t minimal_summary = {};
       loom_template_decision_model_evaluate(
-          model, &site, policy, &minimal_summary, minimal_live_actions.data(),
+          model, &site, policy, minimal_live_actions.data(), &minimal_summary,
           &minimal_live_action_count, &minimal_result);
       EXPECT_EQ(minimal_result.kind, actual.kind);
       EXPECT_EQ(minimal_result.action_ordinal, actual.action_ordinal);
@@ -675,7 +675,7 @@ func.def public target(@application_target) @entry(%value: i32) -> (i32, i32) {
     loom_template_decision_evidence_summary_t summary = {};
     loom_template_decision_model_evaluate_all(
         model, &site, LOOM_DECISION_PROGRAM_DEFER_UNRESOLVED, evidence.data(),
-        &summary, live_actions.data(), &live_action_count, &result);
+        live_actions.data(), &summary, &live_action_count, &result);
 
     if (model->family.symbol_id ==
         FindSymbol(module.get(), IREE_SV("select_target"))) {

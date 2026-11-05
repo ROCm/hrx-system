@@ -36,7 +36,7 @@ extern "C" {
 // them with |host_allocator|.
 iree_status_t loom_cmd_program_plan_serialize_root(
     const loom_cmd_program_plan_t* plan, iree_host_size_t root_index,
-    iree_byte_span_t* out_data, iree_allocator_t host_allocator);
+    iree_allocator_t host_allocator, iree_byte_span_t* out_data);
 
 #ifdef __cplusplus
 }  // extern "C"

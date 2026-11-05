@@ -1142,7 +1142,7 @@ static iree_status_t loom_callable_clone_remap_symbol(
 iree_status_t loom_callable_clone_definition(
     loom_builder_t* builder, loom_func_like_t source,
     loom_symbol_ref_t target_ref, const loom_callable_clone_options_t* options,
-    loom_func_like_t* out_cloned, iree_arena_allocator_t* scratch_arena) {
+    iree_arena_allocator_t* scratch_arena, loom_func_like_t* out_cloned) {
   *out_cloned = (loom_func_like_t){0};
   IREE_RETURN_IF_ERROR(
       loom_callable_validate_same_module_callee(builder->module, source));

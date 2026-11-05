@@ -5575,8 +5575,8 @@ static void loom_vector_reduce_axes_source_indices(
 static iree_status_t loom_vector_reduce_axes_static_lane_facts(
     loom_fact_context_t* context, loom_type_t input_type,
     loom_type_t result_type, loom_attribute_t axes, loom_combining_kind_t kind,
-    const loom_value_facts_t* operand_facts, loom_value_facts_t* out_facts,
-    uint8_t fast_math_flags, bool* out_handled) {
+    const loom_value_facts_t* operand_facts, uint8_t fast_math_flags,
+    loom_value_facts_t* out_facts, bool* out_handled) {
   *out_handled = false;
   if (!loom_type_is_vector(result_type) ||
       !loom_type_is_all_static(input_type) ||
@@ -5773,7 +5773,7 @@ iree_status_t loom_vector_reduce_axes_facts(
   bool handled = false;
   IREE_RETURN_IF_ERROR(loom_vector_reduce_axes_static_lane_facts(
       context, input_type, result_type, axes, kind, operand_facts,
-      &result_facts[0], fast_math_flags, &handled));
+      fast_math_flags, &result_facts[0], &handled));
   if (handled) {
     if (result_facts[0].extension_id == LOOM_VALUE_FACT_EXTENSION_ID_NONE) {
       loom_vector_assume_fast_math_facts(fast_math_flags, &result_facts[0]);

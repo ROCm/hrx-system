@@ -62,8 +62,8 @@ iree_status_t loom_bytecode_materialize_module_symbols(
     const loom_bytecode_file_metadata_t* metadata, uint16_t module_ordinal,
     loom_bytecode_symbol_ordinal_list_t selection,
     const loom_bytecode_read_options_t* options,
-    loom_bytecode_read_result_t* out_result, loom_module_t** out_module,
-    iree_allocator_t host_allocator) {
+    iree_allocator_t host_allocator, loom_bytecode_read_result_t* out_result,
+    loom_module_t** out_module) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(block_pool);
   IREE_ASSERT_ARGUMENT(metadata);
@@ -113,9 +113,8 @@ iree_status_t loom_bytecode_materialize_module_symbols_into(
     const loom_bytecode_file_metadata_t* metadata, uint16_t module_ordinal,
     loom_bytecode_symbol_ordinal_list_t selection,
     loom_bytecode_source_symbol_resolver_t symbol_resolver,
-    const loom_bytecode_read_options_t* options,
-    loom_bytecode_read_result_t* out_result, loom_module_t* output_module,
-    iree_allocator_t host_allocator) {
+    const loom_bytecode_read_options_t* options, loom_module_t* output_module,
+    iree_allocator_t host_allocator, loom_bytecode_read_result_t* out_result) {
   IREE_ASSERT_ARGUMENT(block_pool);
   IREE_ASSERT_ARGUMENT(metadata);
   IREE_ASSERT_ARGUMENT(out_result);

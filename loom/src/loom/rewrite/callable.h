@@ -154,7 +154,7 @@ typedef struct loom_callable_clone_options_t {
 iree_status_t loom_callable_clone_definition(
     loom_builder_t* builder, loom_func_like_t source,
     loom_symbol_ref_t target_ref, const loom_callable_clone_options_t* options,
-    loom_func_like_t* out_cloned, iree_arena_allocator_t* scratch_arena);
+    iree_arena_allocator_t* scratch_arena, loom_func_like_t* out_cloned);
 
 #ifdef __cplusplus
 }

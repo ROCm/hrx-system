@@ -55,7 +55,7 @@ static iree_string_view_t LookupArrayElement(iree_string_view_t array,
 
 TEST(CompileReportFormatTest, FormatsCoreReport) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.artifact_kind = LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
   report.backend_name = IREE_SVL("amdgpu-hal");
   report.function_name = IREE_SVL("branchy");
@@ -298,7 +298,7 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
 
 TEST(CompileReportFormatTest, EmitsOnlyValidResidencyEvidence) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   loom_target_compile_report_target_resources_t resources = {};
   resources.residency_summary.flags =
       LOOM_TARGET_RESIDENCY_SUMMARY_FLAG_VALID |
@@ -328,7 +328,7 @@ TEST(CompileReportFormatTest, EmitsOnlyValidResidencyEvidence) {
   iree_string_builder_deinitialize(&builder);
   loom_target_compile_report_deinitialize(&report);
 
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   loom_target_compile_report_record_target_resources(&report, &resources);
   report.target_resources.residency_summary = {};
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -344,7 +344,7 @@ TEST(CompileReportFormatTest, EmitsOnlyValidResidencyEvidence) {
 
 TEST(CompileReportFormatTest, OwnsResidencyConstraintsAcrossEntryMerge) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   for (const auto* function_name : {"attention", "projection"}) {
     iree_arena_block_pool_t pool;
     iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool);
@@ -379,7 +379,7 @@ TEST(CompileReportFormatTest, OwnsResidencyConstraintsAcrossEntryMerge) {
     rows[1].tier = 16;
     const loom_target_residency_constraint_list_t constraints = {rows, 2};
     loom_target_compile_report_t entry = {};
-    loom_target_compile_report_initialize(&entry, iree_allocator_system());
+    loom_target_compile_report_initialize(iree_allocator_system(), &entry);
     entry.function_name = iree_make_cstring_view(function_name);
     IREE_ASSERT_OK(loom_target_compile_report_record_residency_constraints(
         &entry, &constraints));
@@ -453,7 +453,7 @@ TEST(CompileReportFormatTest, OwnsResidencyConstraintsAcrossEntryMerge) {
 TEST(CompileReportFormatTest,
      ExplainsUnavailableResidencyWithoutInventingFacts) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.function_name = IREE_SVL("attention");
   loom_target_compile_report_target_resources_t resources = {};
   resources.residency_summary.flags =
@@ -530,11 +530,11 @@ TEST(CompileReportFormatTest, KeepsResidencyTransitionsOnTheirOwnEntries) {
   for (int missing_entry = -1; missing_entry < 2; ++missing_entry) {
     SCOPED_TRACE(missing_entry);
     loom_target_compile_report_t report = {};
-    loom_target_compile_report_initialize(&report, iree_allocator_system());
+    loom_target_compile_report_initialize(iree_allocator_system(), &report);
     for (int entry_index = 0; entry_index < 2; ++entry_index) {
       const auto& test_case = cases[entry_index];
       loom_target_compile_report_t entry = {};
-      loom_target_compile_report_initialize(&entry, iree_allocator_system());
+      loom_target_compile_report_initialize(iree_allocator_system(), &entry);
       entry.function_name = iree_make_cstring_view(test_case.function_name);
       if (entry_index != missing_entry) {
         loom_target_compile_report_target_resources_t resources = {
@@ -613,12 +613,12 @@ TEST(CompileReportFormatTest, KeepsResidencyTransitionsOnTheirOwnEntries) {
 
 TEST(CompileReportFormatTest, FormatsEntryReportsAndTargetCapabilities) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_CAPABILITY_ROWS;
 
   loom_target_compile_report_t entry = {};
-  loom_target_compile_report_initialize(&entry, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &entry);
   entry.requested_detail_flags = report.requested_detail_flags;
   entry.function_name = IREE_SVL("branchy_export");
   entry.lowered_symbol = IREE_SVL("branchy");
@@ -721,12 +721,12 @@ TEST(CompileReportFormatTest, FormatsEntryReportsAndTargetCapabilities) {
 
 TEST(CompileReportFormatTest, FormatsTargetInsertedPacketEconomics) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS;
 
   loom_target_compile_report_t entry = {};
-  loom_target_compile_report_initialize(&entry, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &entry);
   entry.requested_detail_flags = report.requested_detail_flags;
   entry.function_name = IREE_SVL("extended_vgpr_loop");
   loom_target_compile_report_target_insertion_row_t insertion = {
@@ -750,7 +750,7 @@ TEST(CompileReportFormatTest, FormatsTargetInsertedPacketEconomics) {
       loom_target_compile_report_record_entry_report(&report, &entry));
   loom_target_compile_report_deinitialize(&entry);
 
-  loom_target_compile_report_initialize(&entry, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &entry);
   entry.requested_detail_flags = report.requested_detail_flags;
   entry.function_name = IREE_SVL("uncountable_loop");
   insertion.flags = LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_NONE;
@@ -846,7 +846,7 @@ TEST(CompileReportFormatTest, FormatsTargetInsertedPacketEconomics) {
 
 TEST(CompileReportFormatTest, SummarizesTargetInsertionsWithoutDetailRows) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   const loom_target_compile_report_target_insertion_row_t insertion = {
       .flags =
           LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT,

@@ -352,6 +352,6 @@ static const loom_target_math_policy_registry_entry_t
 void loom_aie2p_math_policy_registry_initialize(
     loom_target_math_policy_registry_t* out_registry) {
   loom_target_math_policy_registry_initialize_from_entries(
-      out_registry, kAie2pMathPolicyEntries,
-      IREE_ARRAYSIZE(kAie2pMathPolicyEntries));
+      kAie2pMathPolicyEntries, IREE_ARRAYSIZE(kAie2pMathPolicyEntries),
+      out_registry);
 }

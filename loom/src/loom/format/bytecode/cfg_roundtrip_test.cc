@@ -123,8 +123,8 @@ TEST_F(CfgRoundtripTest, LoopDefinitionsPrecedeUsesWithoutReorderingSource) {
   loom_bytecode_read_result_t result = {};
   IREE_ASSERT_OK(loom_bytecode_read_module(
       iree_make_const_byte_span(bytes.data(), bytes.size()),
-      IREE_SV("cfg.loombc"), &context_, &pool_, nullptr, &result, &decoded_,
-      iree_allocator_system()));
+      IREE_SV("cfg.loombc"), &context_, &pool_, nullptr,
+      iree_allocator_system(), &result, &decoded_));
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_NE(decoded_, nullptr);
   loom_op_t* decoded_function = loom_module_block(decoded_)->first_op;
@@ -189,8 +189,8 @@ TEST_F(CfgRoundtripTest, PreservesBlockOperationCountsAbove16Bits) {
   loom_bytecode_read_result_t result = {};
   IREE_ASSERT_OK(loom_bytecode_read_module(
       iree_make_const_byte_span(bytes.data(), bytes.size()),
-      IREE_SV("chain.loombc"), &context_, &pool_, nullptr, &result, &decoded_,
-      iree_allocator_system()));
+      IREE_SV("chain.loombc"), &context_, &pool_, nullptr,
+      iree_allocator_system(), &result, &decoded_));
   ASSERT_EQ(result.error_count, 0u);
   ASSERT_NE(decoded_, nullptr);
   loom_op_t* decoded_function = loom_module_block(decoded_)->first_op;

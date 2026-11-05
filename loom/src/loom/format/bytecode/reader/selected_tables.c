@@ -442,8 +442,8 @@ static iree_status_t loom_bytecode_selected_table_prepare_encoding(
         materializer->decoder, &cursor, &value_kind));
     IREE_RETURN_IF_ERROR(loom_bytecode_selected_attribute_decode_named(
         materializer, &cursor, /*descriptor=*/NULL, value_kind,
-        &parameters[parameter_index].value,
-        materializer->metadata->types.count));
+        materializer->metadata->types.count,
+        &parameters[parameter_index].value));
   }
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_expect_empty(
       materializer->decoder, &cursor, IREE_SV("encoding_entry")));

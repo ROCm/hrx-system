@@ -44,7 +44,7 @@ static iree_status_t loom_benchmark_initialize_sequence_compile_context(
     loom_benchmark_configure_reference_oracles(
         &options->hal_context->execution,
         context->execution_options.materializer.host_allocator,
-        &context->reference_oracles, &context->execution_options);
+        &context->execution_options, &context->reference_oracles);
     context->benchmark_execution_options = context->execution_options;
     context->benchmark_execution_options.materializer.target_pool =
         options->hal_context->execution.runtime.device_pool;
@@ -92,7 +92,7 @@ static iree_status_t loom_benchmark_initialize_single_compile_context(
     loom_benchmark_configure_reference_oracles(
         &options->hal_context->execution,
         context->execution_options.materializer.host_allocator,
-        &context->reference_oracles, &context->execution_options);
+        &context->execution_options, &context->reference_oracles);
     context->benchmark_execution_options = context->execution_options;
     context->benchmark_execution_options.materializer.target_pool =
         options->hal_context->execution.runtime.device_pool;

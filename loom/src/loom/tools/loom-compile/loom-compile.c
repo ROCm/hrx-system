@@ -681,7 +681,7 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status) && exit_code == 0) {
     status = loom_tooling_cli_prepare_loomc_pass_program(
         context, module, iree_make_cstring_view(FLAG_pipeline),
-        IREE_SV("loom-compile pipeline"), &pass_program, &result, allocator);
+        IREE_SV("loom-compile pipeline"), allocator, &pass_program, &result);
   }
   if (iree_status_is_ok(status) && result) {
     bool preparation_succeeded = false;

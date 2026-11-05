@@ -172,8 +172,8 @@ static iree_status_t loom_amdgpu_program_artifact_discover_roots(
     const loom_amdgpu_program_artifact_options_t* options,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     uint8_t* helper_symbols, const loom_op_t** first_call_ops,
-    const loom_op_t** first_root_ops, bool* out_accepted,
-    loom_amdgpu_program_artifact_t* artifact) {
+    const loom_op_t** first_root_ops, loom_amdgpu_program_artifact_t* artifact,
+    bool* out_accepted) {
   *out_accepted = false;
   const iree_host_size_t symbol_count = module->symbols.count;
   iree_host_size_t* root_marks = NULL;
@@ -329,8 +329,8 @@ static iree_status_t loom_amdgpu_program_artifact_resolve_helpers(
     loom_module_t* module,
     const loom_amdgpu_program_artifact_options_t* options,
     const uint8_t* helper_symbols, iree_arena_allocator_t* arena,
-    loom_amdgpu_program_callable_t** callables_by_symbol, bool* out_accepted,
-    loom_amdgpu_program_artifact_t* artifact) {
+    loom_amdgpu_program_callable_t** callables_by_symbol,
+    loom_amdgpu_program_artifact_t* artifact, bool* out_accepted) {
   *out_accepted = false;
   if (artifact->helper_count == 0) {
     *out_accepted = true;
@@ -380,8 +380,8 @@ static iree_status_t loom_amdgpu_program_artifact_validate_root_targets(
     loom_module_t* module,
     const loom_amdgpu_program_artifact_options_t* options,
     loom_amdgpu_program_callable_t* const* callables_by_symbol,
-    iree_arena_allocator_t* scratch_arena, bool* out_accepted,
-    const loom_amdgpu_program_artifact_t* artifact) {
+    iree_arena_allocator_t* scratch_arena,
+    const loom_amdgpu_program_artifact_t* artifact, bool* out_accepted) {
   *out_accepted = false;
   for (iree_host_size_t i = 0; i < artifact->root_count; ++i) {
     const loom_amdgpu_program_artifact_root_t* root = &artifact->roots[i];
@@ -411,8 +411,8 @@ static iree_status_t loom_amdgpu_program_artifact_compile_helpers(
     const loom_amdgpu_program_artifact_options_t* options,
     const loom_op_t* const* first_call_ops,
     const loom_op_t* const* first_root_ops, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* scratch_arena, bool* out_compiled,
-    loom_amdgpu_program_artifact_t* artifact) {
+    iree_arena_allocator_t* scratch_arena,
+    loom_amdgpu_program_artifact_t* artifact, bool* out_compiled) {
   *out_compiled = false;
   const loom_low_allocation_reserved_range_t call_control_reservation = {
       .register_class = IREE_SV("amdgpu.sgpr"),
@@ -432,15 +432,15 @@ static iree_status_t loom_amdgpu_program_artifact_compile_helpers(
     bool abi_prepared = false;
     IREE_RETURN_IF_ERROR(loom_amdgpu_program_callable_prepare_abi(
         module, helper_op, callable->target.descriptor_set, options->emitter,
-        arena, &abi_prepared, callable));
+        arena, callable, &abi_prepared));
     if (!abi_prepared) {
       return iree_ok_status();
     }
     if (options->report_template != NULL) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, sizeof(*callable->report),
                                                (void**)&callable->report));
-      loom_target_compile_report_initialize(callable->report,
-                                            iree_arena_allocator(arena));
+      loom_target_compile_report_initialize(iree_arena_allocator(arena),
+                                            callable->report);
       callable->report->requested_detail_flags =
           options->report_template->requested_detail_flags;
       callable->report->artifact_kind = options->report_template->artifact_kind;
@@ -542,7 +542,7 @@ static iree_status_t loom_amdgpu_program_artifact_build_internal(
   bool accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_program_artifact_discover_roots(
       module, root_inputs, root_count, options, arena, scratch_arena,
-      helper_symbols, first_call_ops, first_root_ops, &accepted, out_artifact));
+      helper_symbols, first_call_ops, first_root_ops, out_artifact, &accepted));
   if (!accepted) {
     return iree_ok_status();
   }
@@ -554,20 +554,20 @@ static iree_status_t loom_amdgpu_program_artifact_build_internal(
   IREE_RETURN_IF_ERROR(loom_amdgpu_program_artifact_initialize_call_tables(
       module, arena, scratch_arena, out_artifact));
   IREE_RETURN_IF_ERROR(loom_amdgpu_program_artifact_resolve_helpers(
-      module, options, helper_symbols, arena, callables_by_symbol, &accepted,
-      out_artifact));
+      module, options, helper_symbols, arena, callables_by_symbol, out_artifact,
+      &accepted));
   if (!accepted) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_program_artifact_validate_root_targets(
-      module, options, callables_by_symbol, scratch_arena, &accepted,
-      out_artifact));
+      module, options, callables_by_symbol, scratch_arena, out_artifact,
+      &accepted));
   if (!accepted) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_program_artifact_compile_helpers(
       module, options, first_call_ops, first_root_ops, arena, scratch_arena,
-      &accepted, out_artifact));
+      out_artifact, &accepted));
   if (!accepted) {
     return iree_ok_status();
   }

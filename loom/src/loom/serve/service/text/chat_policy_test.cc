@@ -493,7 +493,7 @@ TEST_F(SourceChatPolicyTest, TimestampedFramesReachSourceAsOneOrderedPart) {
   const loom_serve_media_image_input_t* inputs[] = {&decoded};
   iree_status_t result = iree_ok_status();
   IREE_ASSERT_OK(loom_serve_media_image_decode_batch(1, inputs, &destination,
-                                                     &result, host_allocator_));
+                                                     host_allocator_, &result));
   IREE_ASSERT_OK(result);
   EXPECT_GE(pixels[0], 250u);
   EXPECT_LE(pixels[1], 5u);

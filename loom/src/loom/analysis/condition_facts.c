@@ -979,9 +979,8 @@ static iree_status_t loom_condition_facts_derive_result_preimage(
 
 static iree_status_t loom_condition_facts_query_integer_compare(
     const loom_module_t* module, const loom_op_t* op,
-    loom_condition_fact_set_t* facts,
-    loom_condition_derivation_t* out_derivation,
-    const loom_value_fact_table_t* fact_table, bool assumed_truth,
+    loom_condition_fact_set_t* facts, const loom_value_fact_table_t* fact_table,
+    bool assumed_truth, loom_condition_derivation_t* out_derivation,
     bool* out_complete) {
   const loom_condition_integer_comparison_t comparison =
       loom_condition_integer_comparison_from_op(module, op);
@@ -1176,8 +1175,8 @@ static iree_status_t loom_condition_facts_process_derivation(
     case LOOM_OP_INDEX_CMP:
     case LOOM_OP_SCALAR_CMPI:
       return loom_condition_facts_query_integer_compare(
-          module, defining_op, out_facts, out_derivation, fact_table,
-          frame->assumed_truth, out_complete);
+          module, defining_op, out_facts, fact_table, frame->assumed_truth,
+          out_derivation, out_complete);
     case LOOM_OP_SCALAR_ANDI: {
       const loom_value_id_t lhs = loom_scalar_andi_lhs(defining_op);
       const loom_value_id_t rhs = loom_scalar_andi_rhs(defining_op);

@@ -2503,8 +2503,8 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_encode_instruction_stream_options_t* options,
-    loom_amdgpu_encoded_instruction_stream_t* out_stream,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena,
+    loom_amdgpu_encoded_instruction_stream_t* out_stream) {
   *out_stream = (loom_amdgpu_encoded_instruction_stream_t){0};
   const loom_amdgpu_packet_plan_t* packet_plan =
       options ? options->packet_plan : NULL;
@@ -2777,11 +2777,11 @@ static iree_status_t loom_amdgpu_encode_instruction_stream_internal(
 iree_status_t loom_amdgpu_encode_instruction_stream(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
-    iree_const_byte_span_t* out_text, iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena, iree_const_byte_span_t* out_text) {
   *out_text = iree_const_byte_span_empty();
   loom_amdgpu_encoded_instruction_stream_t stream = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_encode_instruction_stream_internal(
-      schedule, allocation, NULL, &stream, arena));
+      schedule, allocation, NULL, arena, &stream));
   *out_text = stream.text;
   return iree_ok_status();
 }
@@ -2790,11 +2790,11 @@ iree_status_t loom_amdgpu_encode_instruction_stream_with_options(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_encode_instruction_stream_options_t* options,
-    iree_const_byte_span_t* out_text, iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena, iree_const_byte_span_t* out_text) {
   *out_text = iree_const_byte_span_empty();
   loom_amdgpu_encoded_instruction_stream_t stream = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_encode_instruction_stream_internal(
-      schedule, allocation, options, &stream, arena));
+      schedule, allocation, options, arena, &stream));
   *out_text = stream.text;
   return iree_ok_status();
 }
@@ -2802,18 +2802,18 @@ iree_status_t loom_amdgpu_encode_instruction_stream_with_options(
 iree_status_t loom_amdgpu_encode_instruction_stream_result(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
-    loom_amdgpu_encoded_instruction_stream_t* out_stream,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena,
+    loom_amdgpu_encoded_instruction_stream_t* out_stream) {
   return loom_amdgpu_encode_instruction_stream_internal(
-      schedule, allocation, NULL, out_stream, arena);
+      schedule, allocation, NULL, arena, out_stream);
 }
 
 iree_status_t loom_amdgpu_encode_instruction_stream_result_with_options(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_encode_instruction_stream_options_t* options,
-    loom_amdgpu_encoded_instruction_stream_t* out_stream,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena,
+    loom_amdgpu_encoded_instruction_stream_t* out_stream) {
   return loom_amdgpu_encode_instruction_stream_internal(
-      schedule, allocation, options, out_stream, arena);
+      schedule, allocation, options, arena, out_stream);
 }

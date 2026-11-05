@@ -110,9 +110,8 @@ class NativeArtifactTest : public ::testing::Test {
     return status;
   }
 
-  static iree_status_t Image(iree_allocator_t allocator,
-                             iree_byte_sequence_t** out_image,
-                             uint8_t identity = 1) {
+  static iree_status_t Image(iree_allocator_t allocator, uint8_t identity,
+                             iree_byte_sequence_t** out_image) {
     const uint8_t bytes[] = {identity, 2, 3, 4};
     iree_byte_span_t owned = iree_byte_span_empty();
     IREE_RETURN_IF_ERROR(iree_allocator_clone(
@@ -125,6 +124,11 @@ class NativeArtifactTest : public ::testing::Test {
     return status;
   }
 
+  static iree_status_t Image(iree_allocator_t allocator,
+                             iree_byte_sequence_t** out_image) {
+    return Image(allocator, /*identity=*/1, out_image);
+  }
+
   iree_status_t Populate(loom_runtime_native_artifact_t* artifact,
                          uint8_t identity = 1) {
     auto* result = loom_runtime_native_artifact_result(artifact);
@@ -133,7 +137,7 @@ class NativeArtifactTest : public ::testing::Test {
         loomc_make_cstring_view("entry"),
         loomc_allocator_from_iree(storage_.allocator()), &root)));
     result->roots[0] = iree_string_view_from_loomc(root);
-    return Image(storage_.allocator(), &result->image, identity);
+    return Image(storage_.allocator(), identity, &result->image);
   }
 
   static void Ready(void* payload, const loom_runtime_native_result_t* result) {

@@ -434,6 +434,6 @@ static const loom_target_math_policy_registry_entry_t
 void loom_spirv_math_policy_registry_initialize(
     loom_target_math_policy_registry_t* out_registry) {
   loom_target_math_policy_registry_initialize_from_entries(
-      out_registry, kSpirvMathPolicyEntries,
-      IREE_ARRAYSIZE(kSpirvMathPolicyEntries));
+      kSpirvMathPolicyEntries, IREE_ARRAYSIZE(kSpirvMathPolicyEntries),
+      out_registry);
 }

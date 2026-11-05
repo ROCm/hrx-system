@@ -28,8 +28,8 @@ static iree_status_t loom_amdgpu_function_compile_lower_spill_traffic(
   const loom_amdgpu_function_compile_spill_context_t* context = user_data;
   loom_amdgpu_spill_lowering_result_t result = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_lower_spill_traffic(
-      module, low_function_op, context->descriptor_set, emitter, &result,
-      arena));
+      module, low_function_op, context->descriptor_set, emitter, arena,
+      &result));
   out_result->error_count = result.error_count;
   out_result->lowered_traffic = result.lowered_traffic;
   out_result->required_register_value_ids = result.required_register_value_ids;

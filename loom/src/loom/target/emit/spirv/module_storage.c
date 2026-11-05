@@ -33,8 +33,8 @@ struct loom_spirv_module_workgroup_storage_entry_t {
 
 iree_status_t loom_spirv_module_workgroup_storage_initialize(
     const loom_local_value_domain_t* value_domain,
-    loom_spirv_module_workgroup_storage_state_t* out_state,
-    iree_arena_allocator_t* scratch_arena) {
+    iree_arena_allocator_t* scratch_arena,
+    loom_spirv_module_workgroup_storage_state_t* out_state) {
   IREE_ASSERT_ARGUMENT(value_domain);
   IREE_ASSERT_ARGUMENT(out_state);
   IREE_ASSERT_ARGUMENT(scratch_arena);

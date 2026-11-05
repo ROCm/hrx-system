@@ -86,7 +86,7 @@ TEST_F(CfgConditionRelationTableTest, InternsEqualPagesAcrossViews) {
   };
   loom_cfg_condition_relation_table_t table = {};
   IREE_ASSERT_OK(loom_cfg_condition_relation_table_publish(
-      &builder, &table, &publication_arena_, &retained_arena_));
+      &builder, &publication_arena_, &retained_arena_, &table));
 
   ASSERT_EQ(table.view_count, 2u);
   const MatrixView& first = table.views[0].integer_relations;

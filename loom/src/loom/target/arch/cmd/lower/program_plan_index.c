@@ -198,8 +198,8 @@ iree_status_t loom_cmd_program_plan_build_from_index(
             ? &options->live_kernel_entry_validator
             : NULL,
         pass_registry, cleanup_pattern_provider_set, diagnostic_emitter,
-        materialization_environment->block_pool, out_valid, out_plan,
-        materialization_environment->allocator);
+        materialization_environment->block_pool,
+        materialization_environment->allocator, out_valid, out_plan);
   }
 
   loom_kernel_request_producer_free(kernel_request_producer);

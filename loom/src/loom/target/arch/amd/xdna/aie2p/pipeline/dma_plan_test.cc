@@ -312,8 +312,8 @@ TEST_P(Aie2pDmaSequenceTest, QueueAndRingBoundariesPreserveEveryRecord) {
         const auto words = descriptor_template();
         IREE_ASSERT_OK(loom_aie2p_native_build_sequence(
             dma(), layout(), first_descriptor(), bank_size() - 2, direction,
-            count, capacity, 128, 64, 1, words.data(), &sequence, &reason,
-            &valid, &arena_));
+            count, capacity, 128, 64, 1, words.data(), &arena_, &sequence,
+            &reason, &valid));
         ASSERT_TRUE(valid);
         ExpectExecution(sequence, direction, count, capacity);
       }
@@ -338,8 +338,8 @@ TEST_P(Aie2pDmaSequenceTest, RetainedRingCreditsBracketEveryCompleteReplay) {
           GetParam() == LOOM_XDNA_TILE_KIND_MEMORY ? bank_size() : 0;
       IREE_ASSERT_OK(loom_aie2p_native_build_sequence(
           dma(), layout(), first, bank_size(), direction, capacity * replays,
-          capacity, 128, 64, capacity, words.data(), &sequence, &reason, &valid,
-          &arena_));
+          capacity, 128, 64, capacity, words.data(), &arena_, &sequence,
+          &reason, &valid));
       ASSERT_TRUE(valid);
       ExpectExecution(sequence, direction, capacity * replays, capacity,
                       capacity);
@@ -366,8 +366,8 @@ TEST_P(Aie2pDmaSequenceTest, OneCreditBracketsTheEntireRetainedLifetime) {
         const uint32_t records = capacity * replays;
         IREE_ASSERT_OK(loom_aie2p_native_build_sequence(
             dma(), layout(), first_descriptor(), bank_size() - 2, direction,
-            records, capacity, 128, 64, records, words.data(), &sequence,
-            &reason, &valid, &arena_));
+            records, capacity, 128, 64, records, words.data(), &arena_,
+            &sequence, &reason, &valid));
         ASSERT_TRUE(valid);
         ExpectExecution(sequence, direction, records, capacity, records);
       }
@@ -386,7 +386,7 @@ TEST_P(Aie2pDmaSequenceTest, LifetimeBoundariesCannotExceedTheDescriptorBank) {
   bool valid = false;
   IREE_ASSERT_OK(loom_aie2p_native_build_sequence(
       dma(), layout(), first_descriptor(), 2, direction, 64, 1, 128, 64, 64,
-      words.data(), &sequence, &reason, &valid, &arena_));
+      words.data(), &arena_, &sequence, &reason, &valid));
   EXPECT_FALSE(valid);
   EXPECT_TRUE(iree_string_view_equal(
       reason,
@@ -401,7 +401,7 @@ TEST_P(Aie2pDmaSequenceTest, RepeatedAlignedSuffixUsesTheSmallerChain) {
   bool valid = false;
   IREE_ASSERT_OK(loom_aie2p_native_build_sequence(
       dma(), layout(), first_descriptor(), bank_size() - 2, direction, 5632, 1,
-      128, 64, 1, words.data(), &sequence, &reason, &valid, &arena_));
+      128, 64, 1, words.data(), &arena_, &sequence, &reason, &valid));
   ASSERT_TRUE(valid);
   ASSERT_EQ(sequence.descriptor_count, 6);
   ASSERT_EQ(sequence.task_count, 4);
@@ -431,7 +431,7 @@ TEST_P(Aie2pDmaSequenceTest, FiniteChainRetainsExactTailAndTaskEncodings) {
   bool valid = false;
   IREE_ASSERT_OK(loom_aie2p_native_build_sequence(
       dma(), layout(), first_descriptor(), bank_size() - 2, direction, 3361,
-      capacity, 128, 64, 1, words.data(), &sequence, &reason, &valid, &arena_));
+      capacity, 128, 64, 1, words.data(), &arena_, &sequence, &reason, &valid));
   ASSERT_TRUE(valid);
   ASSERT_EQ(sequence.descriptor_count, chain_length + (layout() ? 1 : 0));
   ASSERT_EQ(sequence.task_count, 4);
@@ -489,8 +489,8 @@ TEST_P(Aie2pDmaSequenceTest, AlignedTailFitsWithoutDuplicatingRingSlots) {
       bool valid = false;
       IREE_ASSERT_OK(loom_aie2p_native_build_sequence(
           dma(), layout(), first_descriptor(), 2 * capacity, direction, count,
-          capacity, 128, 64, 1, words.data(), &sequence, &reason, &valid,
-          &arena_));
+          capacity, 128, 64, 1, words.data(), &arena_, &sequence, &reason,
+          &valid));
       ASSERT_TRUE(valid);
       ASSERT_EQ(sequence.descriptor_count, 2 * capacity);
       ASSERT_EQ(sequence.task_count, 3);
@@ -517,7 +517,7 @@ TEST_P(Aie2pDmaSequenceTest, DescriptorBudgetRejectsWithoutPartialProgram) {
     IREE_ASSERT_OK(loom_aie2p_native_build_sequence(
         dma(), layout(), first_descriptor(), available,
         LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY, 1025, 1, 128, 64, 1,
-        words.data(), &sequence, &reason, &valid, &arena_));
+        words.data(), &arena_, &sequence, &reason, &valid));
     EXPECT_FALSE(valid);
     EXPECT_EQ(sequence.words, nullptr);
     EXPECT_EQ(sequence.tasks, nullptr);

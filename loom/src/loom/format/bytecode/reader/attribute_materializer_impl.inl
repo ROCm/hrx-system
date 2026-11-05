@@ -97,8 +97,9 @@ static iree_status_t loom_bytecode_attribute_impl_decode_at_depth(
     loom_bytecode_attribute_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
-    loom_attribute_t* out_attr, iree_host_size_t available_type_count,
-    const loom_bytecode_attribute_impl_scope_t* scope, uint8_t aggregate_depth);
+    iree_host_size_t available_type_count,
+    const loom_bytecode_attribute_impl_scope_t* scope, uint8_t aggregate_depth,
+    loom_attribute_t* out_attr);
 
 static iree_status_t loom_bytecode_attribute_impl_decode_predicate_list(
     loom_bytecode_attribute_policy_materializer_t* materializer,
@@ -152,9 +153,9 @@ static iree_status_t loom_bytecode_attribute_impl_decode_parameterized(
     loom_bytecode_attribute_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     loom_parameterized_attr_kind_t expected_family_kind,
-    loom_attribute_t* out_attr, iree_host_size_t available_type_count,
-    const loom_bytecode_attribute_impl_scope_t* scope,
-    uint8_t aggregate_depth) {
+    iree_host_size_t available_type_count,
+    const loom_bytecode_attribute_impl_scope_t* scope, uint8_t aggregate_depth,
+    loom_attribute_t* out_attr) {
   if (aggregate_depth >= LOOM_ATTR_AGGREGATE_MAX_NESTING_DEPTH) {
     return loom_bytecode_reader_emit_invalid_field(
         materializer->decoder, cursor->range_name, IREE_SV("attribute"), 0,
@@ -246,8 +247,8 @@ static iree_status_t loom_bytecode_attribute_impl_decode_parameterized(
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_impl_decode_at_depth(
         materializer, cursor,
         &family_descriptor->parameter_descriptors[parameter_index], value_kind,
-        &slots[parameter_index], available_type_count, scope,
-        aggregate_depth + 1));
+        available_type_count, scope, aggregate_depth + 1,
+        &slots[parameter_index]));
   }
 
   *out_attr = loom_make_parameterized_attr(family_descriptor->kind, slots,
@@ -259,9 +260,9 @@ static iree_status_t loom_bytecode_attribute_impl_decode_at_depth(
     loom_bytecode_attribute_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
-    loom_attribute_t* out_attr, iree_host_size_t available_type_count,
-    const loom_bytecode_attribute_impl_scope_t* scope,
-    uint8_t aggregate_depth) {
+    iree_host_size_t available_type_count,
+    const loom_bytecode_attribute_impl_scope_t* scope, uint8_t aggregate_depth,
+    loom_attribute_t* out_attr) {
   switch (kind) {
     case LOOM_BYTECODE_ATTR_I64: {
       int64_t value = 0;
@@ -655,8 +656,8 @@ static iree_status_t loom_bytecode_attribute_impl_decode_at_depth(
             materializer->decoder, cursor, &value_kind));
         IREE_RETURN_IF_ERROR(loom_bytecode_attribute_impl_decode_at_depth(
             materializer, cursor, /*descriptor=*/NULL, value_kind,
-            &entries[i].value, available_type_count, scope,
-            aggregate_depth + 1));
+            available_type_count, scope, aggregate_depth + 1,
+            &entries[i].value));
       }
       *out_attr = loom_make_canonical_attr_dict(entries, entry_count);
       return iree_ok_status();
@@ -705,8 +706,8 @@ static iree_status_t loom_bytecode_attribute_impl_decode_at_depth(
           descriptor != NULL ? descriptor->reference.parameterized_attr_kind
                              : LOOM_PARAMETERIZED_ATTR_KIND_ANY;
       return loom_bytecode_attribute_impl_decode_parameterized(
-          materializer, cursor, expected_family_kind, out_attr,
-          available_type_count, scope, aggregate_depth);
+          materializer, cursor, expected_family_kind, available_type_count,
+          scope, aggregate_depth, out_attr);
     }
     case LOOM_BYTECODE_ATTR_PARAMETERIZED_ARRAY: {
       const uint64_t count_offset =
@@ -747,7 +748,7 @@ static iree_status_t loom_bytecode_attribute_impl_decode_at_depth(
       for (uint64_t i = 0; i < element_count; ++i) {
         IREE_RETURN_IF_ERROR(loom_bytecode_attribute_impl_decode_parameterized(
             materializer, cursor, descriptor->reference.parameterized_attr_kind,
-            &attributes[i], available_type_count, scope, aggregate_depth + 1));
+            available_type_count, scope, aggregate_depth + 1, &attributes[i]));
       }
       *out_attr = loom_attr_parameterized_array(attributes, element_count);
       return iree_ok_status();
@@ -817,7 +818,7 @@ static iree_status_t loom_bytecode_attribute_impl_decode_type_slots(
         materializer->decoder, cursor, &kind));
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_impl_decode_at_depth(
         materializer, cursor, &descriptor->parameter_descriptors[slot], kind,
-        &parameters[slot], available_type_count, scope, 0));
+        available_type_count, scope, 0, &parameters[slot]));
   }
   *out_descriptor = descriptor;
   *out_parameters = parameters;
@@ -868,30 +869,31 @@ iree_status_t LOOM_BYTECODE_ATTRIBUTE_DECODE_NAMED(
     loom_bytecode_attribute_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
-    loom_attribute_t* out_attr, iree_host_size_t available_type_count) {
+    iree_host_size_t available_type_count, loom_attribute_t* out_attr) {
   *out_attr = loom_attr_absent();
   const loom_bytecode_attribute_impl_scope_t scope = {
       .value_domain = LOOM_BYTECODE_ATTRIBUTE_IMPL_VALUE_DOMAIN_NAMED,
       .reference_mode = LOOM_BYTECODE_ATTRIBUTE_IMPL_REFERENCE_MODE_SCHEDULE,
   };
   return loom_bytecode_attribute_impl_decode_at_depth(
-      materializer, cursor, descriptor, kind, out_attr, available_type_count,
-      &scope, /*aggregate_depth=*/0);
+      materializer, cursor, descriptor, kind, available_type_count, &scope,
+      /*aggregate_depth=*/0, out_attr);
 }
 
 static iree_status_t loom_bytecode_attribute_impl_materialize(
     loom_bytecode_attribute_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
-    loom_attribute_t* out_attr, iree_host_size_t available_type_count,
-    const loom_bytecode_attribute_impl_scope_t* scope) {
+    iree_host_size_t available_type_count,
+    const loom_bytecode_attribute_impl_scope_t* scope,
+    loom_attribute_t* out_attr) {
   *out_attr = loom_attr_absent();
   const iree_arena_checkpoint_t checkpoint =
       iree_arena_checkpoint_save(materializer->scratch_arena);
   loom_attribute_t scratch_attr = loom_attr_absent();
   iree_status_t status = loom_bytecode_attribute_impl_decode_at_depth(
-      materializer, cursor, descriptor, kind, &scratch_attr,
-      available_type_count, scope, /*aggregate_depth=*/0);
+      materializer, cursor, descriptor, kind, available_type_count, scope,
+      /*aggregate_depth=*/0, &scratch_attr);
   if (iree_status_is_ok(status)) {
     status = loom_module_make_canonical_attribute(
         materializer->output_module, descriptor, scratch_attr, out_attr);
@@ -904,28 +906,29 @@ iree_status_t LOOM_BYTECODE_ATTRIBUTE_MATERIALIZE_NAMED(
     loom_bytecode_attribute_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
-    loom_attribute_t* out_attr, iree_host_size_t available_type_count) {
+    iree_host_size_t available_type_count, loom_attribute_t* out_attr) {
   const loom_bytecode_attribute_impl_scope_t scope = {
       .value_domain = LOOM_BYTECODE_ATTRIBUTE_IMPL_VALUE_DOMAIN_NAMED,
       .reference_mode = LOOM_BYTECODE_ATTRIBUTE_IMPL_REFERENCE_MODE_MATERIALIZE,
   };
-  return loom_bytecode_attribute_impl_materialize(materializer, cursor,
-                                                  descriptor, kind, out_attr,
-                                                  available_type_count, &scope);
+  return loom_bytecode_attribute_impl_materialize(
+      materializer, cursor, descriptor, kind, available_type_count, &scope,
+      out_attr);
 }
 
 iree_status_t LOOM_BYTECODE_ATTRIBUTE_MATERIALIZE_SSA(
     loom_bytecode_attribute_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
-    loom_attribute_t* out_attr, iree_host_size_t available_type_count,
-    const loom_bytecode_attribute_ssa_materialization_scope_t* ssa_scope) {
+    iree_host_size_t available_type_count,
+    const loom_bytecode_attribute_ssa_materialization_scope_t* ssa_scope,
+    loom_attribute_t* out_attr) {
   const loom_bytecode_attribute_impl_scope_t scope = {
       .value_domain = LOOM_BYTECODE_ATTRIBUTE_IMPL_VALUE_DOMAIN_SSA,
       .reference_mode = LOOM_BYTECODE_ATTRIBUTE_IMPL_REFERENCE_MODE_MATERIALIZE,
       .ssa = *ssa_scope,
   };
-  return loom_bytecode_attribute_impl_materialize(materializer, cursor,
-                                                  descriptor, kind, out_attr,
-                                                  available_type_count, &scope);
+  return loom_bytecode_attribute_impl_materialize(
+      materializer, cursor, descriptor, kind, available_type_count, &scope,
+      out_attr);
 }

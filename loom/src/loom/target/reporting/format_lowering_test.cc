@@ -144,7 +144,7 @@ static iree_string_view_t LookupArrayElement(iree_string_view_t array,
 
 TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   testing::MemoryReportBatch report_memory(&report);
   report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS;
@@ -435,13 +435,13 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
 TEST(CompileReportFormatTest,
      SelectionSummariesRetainPeakExpansionAcrossEntries) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.requested_detail_flags =
       loom_target_compile_report_requested_detail_flags(
           LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY);
   for (uint32_t entry_index = 0; entry_index < 2; ++entry_index) {
     loom_target_compile_report_t entry = {};
-    loom_target_compile_report_initialize(&entry, iree_allocator_system());
+    loom_target_compile_report_initialize(iree_allocator_system(), &entry);
     entry.requested_detail_flags =
         loom_target_compile_report_requested_detail_flags(
             entry_index == 0 ? LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY
@@ -505,7 +505,7 @@ TEST(CompileReportFormatTest,
 
 TEST(CompileReportFormatTest, LegalizationPeaksDoNotRequireDetailedRows) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   for (uint64_t created_op_count : {40, 2}) {
     loom_target_compile_report_math_row_t math = {
         .action = LOOM_TARGET_COMPILE_REPORT_MATH_ACTION_REWRITTEN,
@@ -519,8 +519,8 @@ TEST(CompileReportFormatTest, LegalizationPeaksDoNotRequireDetailedRows) {
           loom_target_compile_report_record_math_row(&report, &math));
     } else {
       loom_target_compile_report_t entry_report = {};
-      loom_target_compile_report_initialize(&entry_report,
-                                            iree_allocator_system());
+      loom_target_compile_report_initialize(iree_allocator_system(),
+                                            &entry_report);
       IREE_ASSERT_OK(
           loom_target_compile_report_record_math_row(&entry_report, &math));
       IREE_ASSERT_OK(loom_target_compile_report_record_entry_report(
@@ -559,7 +559,7 @@ TEST(CompileReportFormatTest, LegalizationPeaksDoNotRequireDetailedRows) {
 
 TEST(CompileReportFormatTest, KeepsUnmodeledBankCoverageWithoutAModel) {
   loom_target_compile_report_t entry_report = {};
-  loom_target_compile_report_initialize(&entry_report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &entry_report);
   testing::MemoryReportBatch entry_report_memory(&entry_report);
   entry_report.function_name = IREE_SVL("kernel");
   loom_target_compile_report_source_low_memory_row_t memory = {
@@ -580,7 +580,7 @@ TEST(CompileReportFormatTest, KeepsUnmodeledBankCoverageWithoutAModel) {
   IREE_ASSERT_OK(entry_report_memory.Append(&memory));
   IREE_ASSERT_OK(entry_report_memory.Finish());
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   IREE_ASSERT_OK(
       loom_target_compile_report_record_entry_report(&report, &entry_report));
   loom_target_compile_report_deinitialize(&entry_report);
@@ -613,7 +613,7 @@ TEST(CompileReportFormatTest, KeepsUnmodeledBankCoverageWithoutAModel) {
 
 TEST(CompileReportFormatTest, FormatsMathAndTargetLegalization) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_MATH_LEGALIZATION_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_LEGALIZATION_ROWS;

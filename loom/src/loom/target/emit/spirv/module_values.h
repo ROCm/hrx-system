@@ -45,8 +45,8 @@ typedef struct loom_spirv_module_value_table_t {
 // Initializes a zeroed value-ref table covering every value in |value_domain|.
 iree_status_t loom_spirv_module_value_table_initialize(
     const loom_local_value_domain_t* value_domain,
-    loom_spirv_module_value_table_t* out_table,
-    iree_arena_allocator_t* scratch_arena);
+    iree_arena_allocator_t* scratch_arena,
+    loom_spirv_module_value_table_t* out_table);
 
 // Defines |value_id| as |value_ref|.
 //

@@ -153,7 +153,7 @@ TEST_F(AmdgpuProgramCallTest, PublishesCarrierAndClobberContracts) {
   bool prepared = false;
   IREE_ASSERT_OK(loom_amdgpu_program_callable_prepare_abi(
       module_, function_op_, &descriptor_set_, iree_diagnostic_emitter_t{},
-      &arena_, &prepared, &callable));
+      &arena_, &callable, &prepared));
   ASSERT_TRUE(prepared);
   ASSERT_EQ(callable.argument_count, 2u);
   ASSERT_EQ(callable.result_count, 2u);
@@ -245,7 +245,7 @@ TEST_F(AmdgpuProgramCallTest, EmptySignatureHasNoCarrierPointers) {
   bool prepared = false;
   IREE_ASSERT_OK(loom_amdgpu_program_callable_prepare_abi(
       module_, void_op, &descriptor_set_, iree_diagnostic_emitter_t{}, &arena_,
-      &prepared, &callable));
+      &callable, &prepared));
   ASSERT_TRUE(prepared);
   EXPECT_EQ(callable.locations, nullptr);
   EXPECT_EQ(callable.call_contract.arguments, nullptr);

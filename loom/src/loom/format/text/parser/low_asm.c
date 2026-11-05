@@ -405,8 +405,8 @@ static iree_status_t loom_low_asm_append_immediate_attr(
 static iree_status_t loom_parse_low_asm_named_immediates(
     loom_parser_t* parser, const loom_text_low_asm_packet_descriptor_t* packet,
     loom_token_t mnemonic_token, uint16_t immediate_start,
-    uint16_t immediate_end, loom_named_attr_t* attrs, uint16_t* out_attr_count,
-    loom_parsed_op_t* parsed_spans) {
+    uint16_t immediate_end, loom_named_attr_t* attrs,
+    loom_parsed_op_t* parsed_spans, uint16_t* out_attr_count) {
   loom_token_t dict_token = loom_tokenizer_peek(&parser->tokenizer);
   if (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_LBRACE)) {
     return loom_parser_emit_low_asm_error(
@@ -474,7 +474,7 @@ static iree_status_t loom_parse_low_asm_named_immediates(
 static iree_status_t loom_parse_low_asm_positional_immediates(
     loom_parser_t* parser, const loom_text_low_asm_packet_descriptor_t* packet,
     loom_token_t mnemonic_token, loom_named_attr_t* attrs,
-    uint16_t* out_attr_count, loom_parsed_op_t* parsed_spans) {
+    loom_parsed_op_t* parsed_spans, uint16_t* out_attr_count) {
   for (uint16_t i = 0; i < packet->asm_immediate_count; ++i) {
     if ((i > 0 || packet->minimum_operand_count > 0 ||
          packet->operand_segment_count > 0) &&
@@ -514,7 +514,7 @@ static iree_status_t loom_parse_low_asm_positional_immediates(
 static iree_status_t loom_parse_low_asm_immediates(
     loom_parser_t* parser, const loom_text_low_asm_packet_descriptor_t* packet,
     loom_token_t mnemonic_token, loom_named_attr_t* attrs,
-    uint16_t* out_attr_count, loom_parsed_op_t* parsed_spans) {
+    loom_parsed_op_t* parsed_spans, uint16_t* out_attr_count) {
   *out_attr_count = 0;
   if (packet->immediate_count == 0) {
     loom_token_t peek = loom_tokenizer_peek(&parser->tokenizer);
@@ -533,10 +533,10 @@ static iree_status_t loom_parse_low_asm_immediates(
     }
     return loom_parse_low_asm_named_immediates(
         parser, packet, mnemonic_token, /*immediate_start=*/0,
-        packet->immediate_count, attrs, out_attr_count, parsed_spans);
+        packet->immediate_count, attrs, parsed_spans, out_attr_count);
   }
   IREE_RETURN_IF_ERROR(loom_parse_low_asm_positional_immediates(
-      parser, packet, mnemonic_token, attrs, out_attr_count, parsed_spans));
+      parser, packet, mnemonic_token, attrs, parsed_spans, out_attr_count));
   if (packet->asm_immediate_count >= packet->immediate_count) {
     return iree_ok_status();
   }
@@ -546,7 +546,7 @@ static iree_status_t loom_parse_low_asm_immediates(
       peek.kind == LOOM_TOKEN_LBRACE) {
     return loom_parse_low_asm_named_immediates(
         parser, packet, mnemonic_token, packet->asm_immediate_count,
-        packet->immediate_count, attrs, out_attr_count, parsed_spans);
+        packet->immediate_count, attrs, parsed_spans, out_attr_count);
   }
 
   if (packet->requires_named_immediates) {
@@ -685,7 +685,7 @@ static iree_status_t loom_parse_low_asm_instruction(
   }
   uint16_t attr_count = 0;
   IREE_RETURN_IF_ERROR(loom_parse_low_asm_immediates(
-      parser, &packet, mnemonic_token, attrs, &attr_count, parsed));
+      parser, &packet, mnemonic_token, attrs, parsed, &attr_count));
   if (parser->error_count > errors_before) {
     return iree_ok_status();
   }

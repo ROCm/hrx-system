@@ -152,8 +152,8 @@ static iree_status_t loom_bytecode_type_materialize_parameterized(
     IREE_RETURN_IF_ERROR(loom_bytecode_attribute_decode_named(
         &attribute_materializer, &cursor,
         &descriptor->parameter_descriptors[parameter_index],
-        (loom_bytecode_attr_kind_t)encoded_value_kind,
-        &parameters[parameter_index], fact->base.type_id));
+        (loom_bytecode_attr_kind_t)encoded_value_kind, fact->base.type_id,
+        &parameters[parameter_index]));
   }
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_expect_empty(
       materializer->decoder, &cursor,

@@ -88,7 +88,7 @@ static bool loom_print_low_asm_is_required(loom_print_context_t* ctx,
 }
 
 static void loom_print_low_asm_record_entry_args_failure(
-    loom_print_low_asm_preflight_failure_t* out_failure, uint16_t block_index) {
+    uint16_t block_index, loom_print_low_asm_preflight_failure_t* out_failure) {
   if (out_failure->kind != LOOM_PRINT_LOW_ASM_PREFLIGHT_FAILURE_NONE) {
     return;
   }
@@ -100,8 +100,8 @@ static void loom_print_low_asm_record_entry_args_failure(
 
 static void loom_print_low_asm_record_operation_failure(
     loom_print_context_t* ctx, iree_string_view_t descriptor_key,
-    loom_print_low_asm_preflight_failure_t* out_failure, uint16_t block_index,
-    const loom_op_t* op) {
+    uint16_t block_index, const loom_op_t* op,
+    loom_print_low_asm_preflight_failure_t* out_failure) {
   if (out_failure->kind != LOOM_PRINT_LOW_ASM_PREFLIGHT_FAILURE_NONE) {
     return;
   }
@@ -234,7 +234,7 @@ static iree_status_t loom_print_low_asm_region_preflight(
     if (block_index == 0 && block->arg_count != 0 &&
         !entry_args_declared_by_parent) {
       *out_available = false;
-      loom_print_low_asm_record_entry_args_failure(out_failure, block_index);
+      loom_print_low_asm_record_entry_args_failure(block_index, out_failure);
       return iree_ok_status();
     }
     const loom_op_t* current_op = NULL;
@@ -245,8 +245,8 @@ static iree_status_t loom_print_low_asm_region_preflight(
       if (statement.kind == LOOM_TEXT_LOW_ASM_STATEMENT_UNAVAILABLE) {
         *out_available = false;
         loom_print_low_asm_record_operation_failure(
-            ctx, statement.packet.descriptor_key, out_failure, block_index,
-            current_op);
+            ctx, statement.packet.descriptor_key, block_index, current_op,
+            out_failure);
         return iree_ok_status();
       }
       const loom_op_vtable_t* vtable = loom_op_vtable(ctx->module, current_op);

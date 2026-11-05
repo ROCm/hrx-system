@@ -279,7 +279,8 @@ TEST(RegistrationOwnershipTest, DrainDoesNotRequireAnObservationSnapshot) {
                 .prepare =
                     [](void* self, loom_serve_registration_prepare_flags_t,
                        bool* out_complete, loom_serve_service_t* out_service,
-                       loom_runtime_compilation_report_t*) {
+                       loom_runtime_compilation_report_t* out_report) {
+                      (void)out_report;
                       static const loom_service_telemetry_counters_t counters =
                           {};
                       static const loom_service_telemetry_latency_t latency =

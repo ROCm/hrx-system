@@ -463,7 +463,7 @@ static loom_module_t* MaterializeIndexedBytecodeModule(
   CheckStatus(loom_bytecode_read_module_ordinal(
       provider->bytecode.contents, provider->bytecode.filename, context,
       block_pool, (uint16_t)indexed_module->provider_module_ordinal,
-      /*options=*/nullptr, &read_result, &module, iree_allocator_system()));
+      /*options=*/nullptr, iree_allocator_system(), &read_result, &module));
   if (read_result.error_count != 0 || module == nullptr) {
     std::abort();
   }
@@ -659,8 +659,8 @@ static void BenchmarkLinkMaterializeAndLink(
             .count = source_symbol_ordinals.size(),
             .ordinals = source_symbol_ordinals.data(),
         },
-        &read_options, &read_result, &selected_module,
-        iree_allocator_system()));
+        &read_options, iree_allocator_system(), &read_result,
+        &selected_module));
     if (read_result.error_count != 0 || selected_module == nullptr ||
         selected_module->symbols.count != expected_symbol_count) {
       std::abort();

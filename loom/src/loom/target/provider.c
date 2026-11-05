@@ -550,8 +550,8 @@ loom_target_environment_low_descriptor_registry(
   IREE_ASSERT_ARGUMENT(environment);
   loom_target_low_descriptor_registry_t registry;
   loom_target_low_descriptor_registry_initialize_from_tables(
-      &registry, environment->descriptor_set_providers,
-      environment->descriptor_set_provider_count);
+      environment->descriptor_set_providers,
+      environment->descriptor_set_provider_count, &registry);
   return registry;
 }
 
@@ -561,8 +561,8 @@ loom_target_environment_low_lower_policy_registry(
   IREE_ASSERT_ARGUMENT(environment);
   loom_low_lower_policy_registry_t registry;
   loom_low_lower_policy_registry_initialize_from_entries(
-      &registry, environment->low_lower_policy_entries,
-      environment->low_lower_policy_entry_count);
+      environment->low_lower_policy_entries,
+      environment->low_lower_policy_entry_count, &registry);
   return registry;
 }
 
@@ -571,8 +571,8 @@ loom_target_math_policy_registry_t loom_target_environment_math_policy_registry(
   IREE_ASSERT_ARGUMENT(environment);
   loom_target_math_policy_registry_t registry;
   loom_target_math_policy_registry_initialize_from_entries(
-      &registry, environment->math_policy_entries,
-      environment->math_policy_entry_count);
+      environment->math_policy_entries, environment->math_policy_entry_count,
+      &registry);
   return registry;
 }
 

@@ -761,8 +761,8 @@ int loom_run_main(int argc, char** argv,
     if (iree_status_is_ok(status)) {
       admission_options.input.format = format->name;
       status = loom_tooling_input_admit_loomc_module(
-          &admission_options, context, workspace, &block_pool, &module, &result,
-          allocator);
+          &admission_options, context, workspace, &block_pool, allocator,
+          &module, &result);
     }
   }
   if (iree_status_is_ok(status)) {
@@ -781,7 +781,7 @@ int loom_run_main(int argc, char** argv,
   if (iree_status_is_ok(status) && exit_code == 0) {
     status = loom_tooling_cli_prepare_loomc_pass_program(
         context, module, iree_make_cstring_view(FLAG_pipeline),
-        IREE_SV("loom-run pipeline"), &pass_program, &result, allocator);
+        IREE_SV("loom-run pipeline"), allocator, &pass_program, &result);
   }
   if (iree_status_is_ok(status) && result != NULL) {
     bool prepared = false;

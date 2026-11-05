@@ -85,10 +85,9 @@ class LowVerifyTest : public ::testing::Test {
     return symbol_id;
   }
 
-  void VerifyModule(
-      loom_module_t* module, DiagnosticEmissionCapture* capture,
-      loom_low_verify_result_t* out_result,
-      const loom_function_version_list_t* function_versions = nullptr) {
+  void VerifyModule(loom_module_t* module, DiagnosticEmissionCapture* capture,
+                    const loom_function_version_list_t* function_versions,
+                    loom_low_verify_result_t* out_result) {
     loom_low_verify_options_t options = {
         .descriptor_registry = &registry_.registry,
         .function_versions = function_versions,
@@ -100,6 +99,11 @@ class LowVerifyTest : public ::testing::Test {
         loom_low_verify_scratch_for_module(module);
     IREE_EXPECT_OK(
         loom_low_verify_module(module, &options, &scratch, out_result));
+  }
+
+  void VerifyModule(loom_module_t* module, DiagnosticEmissionCapture* capture,
+                    loom_low_verify_result_t* out_result) {
+    VerifyModule(module, capture, /*function_versions=*/nullptr, out_result);
   }
 
   iree_arena_block_pool_t block_pool_;
@@ -203,7 +207,7 @@ low.func.def target<test.low.core> @uses_workgroup_storage() {
 
   DiagnosticEmissionCapture capture;
   loom_low_verify_result_t result = {};
-  VerifyModule(module.get(), &capture, &result, &function_versions);
+  VerifyModule(module.get(), &capture, &function_versions, &result);
   EXPECT_EQ(result.error_count, 1u);
   ASSERT_EQ(capture.emissions.size(), 1u);
 

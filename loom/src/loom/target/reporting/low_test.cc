@@ -424,8 +424,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   loom_target_compile_report_t report = {};
   iree_arena_allocator_t report_arena;
   iree_arena_initialize(&block_pool, &report_arena);
-  loom_target_compile_report_initialize(&report,
-                                        iree_arena_allocator(&report_arena));
+  loom_target_compile_report_initialize(iree_arena_allocator(&report_arena),
+                                        &report);
   report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ORIGIN_ROWS |
@@ -1288,8 +1288,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       0u);
 
   loom_target_compile_report_t bounded_report = {};
-  loom_target_compile_report_initialize(&bounded_report,
-                                        iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(),
+                                        &bounded_report);
   bounded_report.requested_detail_flags =
       loom_target_compile_report_requested_detail_flags(
           LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY);
@@ -1307,8 +1307,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   loom_target_compile_report_deinitialize(&bounded_report);
 
   loom_target_compile_report_t summary_report = {};
-  loom_target_compile_report_initialize(&summary_report,
-                                        iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(),
+                                        &summary_report);
   summary_report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS;
   IREE_ASSERT_OK(loom_target_compile_report_record_low_emission_frame(
@@ -1339,8 +1339,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   loom_low_emission_frame_t split_frame = frame;
   split_frame.schedule.blocks = split_blocks;
   split_frame.schedule.block_count = IREE_ARRAYSIZE(split_blocks);
-  loom_target_compile_report_initialize(&summary_report,
-                                        iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(),
+                                        &summary_report);
   summary_report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SCHEDULE_BAND_SUMMARY_ROWS;
   IREE_ASSERT_OK(loom_target_compile_report_record_low_emission_frame(
@@ -1362,8 +1362,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   loom_target_compile_report_deinitialize(&summary_report);
 
   loom_target_compile_report_t allocation_report = {};
-  loom_target_compile_report_initialize(&allocation_report,
-                                        iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(),
+                                        &allocation_report);
   allocation_report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ORIGIN_ROWS;
   IREE_ASSERT_OK(loom_target_compile_report_record_low_allocation(

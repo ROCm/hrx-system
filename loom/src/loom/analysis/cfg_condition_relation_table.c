@@ -166,9 +166,8 @@ static uint32_t loom_cfg_condition_relation_matrix_page_count(
 
 static void loom_cfg_condition_relation_plan_view_pages(
     loom_cfg_condition_relation_table_builder_t* builder, uint32_t view,
-    uint32_t first_page,
-    loom_cfg_condition_relation_publication_view_t* out_view,
-    loom_cfg_condition_relation_publication_page_t* pages) {
+    uint32_t first_page, loom_cfg_condition_relation_publication_page_t* pages,
+    loom_cfg_condition_relation_publication_view_t* out_view) {
   loom_condition_relation_matrix_t* matrix =
       &builder->views[view].integer_relations;
   *out_view = (loom_cfg_condition_relation_publication_view_t){
@@ -231,7 +230,7 @@ static iree_status_t loom_cfg_condition_relation_plan_pages(
   uint32_t page_count = 0;
   for (uint32_t view = 0; view < builder->view_count; ++view) {
     loom_cfg_condition_relation_plan_view_pages(builder, view, page_count,
-                                                &views[view], pages);
+                                                pages, &views[view]);
     page_count += views[view].page_count;
   }
   IREE_ASSERT_EQ(page_count, total_page_count);
@@ -294,8 +293,8 @@ static iree_status_t loom_cfg_condition_relation_plan_pages(
 static iree_status_t loom_cfg_condition_relation_table_publish_domain(
     const loom_cfg_condition_operand_domain_t* source,
     const loom_cfg_condition_relation_anchor_builder_t* derived_anchors,
-    loom_cfg_condition_operand_domain_t** out_domain,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena,
+    loom_cfg_condition_operand_domain_t** out_domain) {
   *out_domain = NULL;
   const uint32_t derived_anchor_count =
       loom_cfg_condition_relation_anchor_builder_count(derived_anchors);
@@ -340,8 +339,8 @@ __attribute__((minsize))
 #endif
 iree_status_t loom_cfg_condition_relation_table_publish(
     loom_cfg_condition_relation_table_builder_t* builder,
-    loom_cfg_condition_relation_table_t* out_table,
-    iree_arena_allocator_t* scratch_arena, iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* scratch_arena, iree_arena_allocator_t* arena,
+    loom_cfg_condition_relation_table_t* out_table) {
   loom_cfg_condition_relation_publication_view_t* publication_views = NULL;
   loom_cfg_condition_relation_publication_page_t* publication_pages = NULL;
   uint32_t page_count = 0;
@@ -524,8 +523,8 @@ iree_status_t loom_cfg_condition_relation_table_publish(
   }
   loom_cfg_condition_operand_domain_t* operand_domain = NULL;
   IREE_RETURN_IF_ERROR(loom_cfg_condition_relation_table_publish_domain(
-      builder->operand_domain, builder->derived_anchors, &operand_domain,
-      arena));
+      builder->operand_domain, builder->derived_anchors, arena,
+      &operand_domain));
   *out_table = (loom_cfg_condition_relation_table_t){
       .operand_domain = operand_domain,
       .set_index = set_index,

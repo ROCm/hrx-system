@@ -366,8 +366,8 @@ static iree_status_t loom_link_cli_add_input(
     if (iree_status_is_ok(status)) {
       admission_options.input.format = selected_format->name;
       status = loom_tooling_input_admit_loomc_module(
-          &admission_options, context, workspace, block_pool, &module, &result,
-          allocator);
+          &admission_options, context, workspace, block_pool, allocator,
+          &module, &result);
     }
     if (iree_status_is_ok(status)) {
       status = loom_link_cli_check_result(result, "input has source errors");

@@ -14,7 +14,7 @@
 #include "loom/target/reporting/row_list.h"
 
 void loom_target_compile_report_initialize(
-    loom_target_compile_report_t* out_report, iree_allocator_t allocator) {
+    iree_allocator_t allocator, loom_target_compile_report_t* out_report) {
   *out_report = (loom_target_compile_report_t){
       .allocator = allocator,
       .status_code = IREE_STATUS_OK,
@@ -158,7 +158,7 @@ void loom_target_compile_report_initialize_if_empty(
   }
   const loom_target_compile_report_detail_flags_t requested_detail_flags =
       report->requested_detail_flags;
-  loom_target_compile_report_initialize(report, allocator);
+  loom_target_compile_report_initialize(allocator, report);
   report->requested_detail_flags = requested_detail_flags;
 }
 

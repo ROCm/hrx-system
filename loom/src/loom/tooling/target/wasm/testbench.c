@@ -310,8 +310,8 @@ static iree_status_t loom_wasm_testbench_compile_product(
   if (iree_status_is_ok(status)) {
     status = loom_wasm_host_module_load(
         iree_make_const_byte_span(contents.data, contents.data_length),
-        export_name, product->parameter_count, product->parameter_types,
-        product->result_count, product->result_types, &product->host_module);
+        export_name, product->parameter_count, product->result_count,
+        product->parameter_types, product->result_types, &product->host_module);
   }
   if (iree_status_is_ok(status)) {
     *out_product = product;

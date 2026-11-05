@@ -220,9 +220,9 @@ iree_status_t loom_amdgpu_wait_plan_build(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_wait_plan_options_t* options,
     const loom_amdgpu_address_state_plan_t* address_state,
-    iree_arena_allocator_t* matrix_arena,
+    iree_arena_allocator_t* matrix_arena, iree_arena_allocator_t* arena,
+    iree_arena_allocator_t* transient_arena,
     struct loom_amdgpu_matrix_result_wait_t** out_matrix_results,
-    iree_arena_allocator_t* arena, iree_arena_allocator_t* transient_arena,
     loom_amdgpu_wait_plan_t* out_plan);
 
 // Appends the common packet hazard JSON representation of |plan| to |builder|.

@@ -336,8 +336,8 @@ static void RunProgramPlanBenchmark(benchmark::State& state,
         /*kernel_source=*/nullptr, /*live_kernel_entry_validator=*/nullptr,
         loom_pass_builtin_registry(),
         loom_cleanup_configured_pattern_provider_set(),
-        /*diagnostic_emitter=*/{}, fixture.block_pool(), &valid, &program_plan,
-        iree_allocator_system()));
+        /*diagnostic_emitter=*/{}, fixture.block_pool(),
+        iree_allocator_system(), &valid, &program_plan));
     if (!valid) {
       std::abort();
     }

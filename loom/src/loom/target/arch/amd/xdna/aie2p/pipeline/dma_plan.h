@@ -155,10 +155,9 @@ iree_status_t loom_aie2p_native_build_sequence(
     uint16_t available_descriptors, loom_xdna_dma_direction_t direction,
     uint32_t repetitions, uint32_t capacity, uint32_t byte_offset,
     uint32_t byte_stride, uint32_t credit_interval,
-    const uint32_t template_words[8],
+    const uint32_t template_words[8], iree_arena_allocator_t* arena,
     loom_aie2p_native_dma_sequence_t* out_sequence,
-    iree_string_view_t* out_reason, bool* out_valid,
-    iree_arena_allocator_t* arena);
+    iree_string_view_t* out_reason, bool* out_valid);
 
 #ifdef __cplusplus
 }  // extern "C"

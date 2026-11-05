@@ -88,15 +88,15 @@ static iree_status_t loom_link_plan_materialize_bytecode_module(
     status = loom_bytecode_read_module_ordinal(
         provider->bytecode.contents, provider->bytecode.filename,
         environment->context, environment->block_pool,
-        (uint16_t)module->provider_module_ordinal, &read_options, &read_result,
-        &materialized_module, environment->allocator);
+        (uint16_t)module->provider_module_ordinal, &read_options,
+        environment->allocator, &read_result, &materialized_module);
   } else {
     status = loom_bytecode_materialize_module_symbols(
         provider->bytecode.contents, provider->bytecode.filename,
         environment->context, environment->block_pool,
         &provider->bytecode.metadata, (uint16_t)module->provider_module_ordinal,
-        selection, &read_options, &read_result, &materialized_module,
-        environment->allocator);
+        selection, &read_options, environment->allocator, &read_result,
+        &materialized_module);
   }
   if (iree_status_is_ok(status) &&
       (read_result.error_count != 0 || materialized_module == NULL)) {

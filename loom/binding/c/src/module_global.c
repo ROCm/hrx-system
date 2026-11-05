@@ -266,8 +266,8 @@ static loomc_host_size_t loomc_module_global_fill_matching_symbols(
 static loomc_status_t loomc_module_global_query_named(
     const loom_module_t* module,
     const loomc_module_global_resolved_query_options_t* options,
-    loomc_host_size_t global_capacity, loomc_module_global_t* out_globals,
-    loomc_host_size_t* out_global_count, loomc_result_t* result) {
+    loomc_host_size_t global_capacity, loomc_result_t* result,
+    loomc_module_global_t* out_globals, loomc_host_size_t* out_global_count) {
   const loom_symbol_t* symbol =
       loomc_module_global_find_named_symbol(module, options->global_symbol);
   if (symbol == NULL) {
@@ -350,8 +350,8 @@ loomc_status_t loomc_module_query_globals(
                                            out_global_count);
   } else {
     status = loomc_module_global_query_named(internal_module, &resolved_options,
-                                             global_capacity, out_globals,
-                                             out_global_count, result);
+                                             global_capacity, result,
+                                             out_globals, out_global_count);
   }
   if (loomc_status_is_ok(status)) {
     *out_result = result;

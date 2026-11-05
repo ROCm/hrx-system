@@ -1024,7 +1024,7 @@ TEST_F(LowLowerPassTest,
   };
   loom_low_lower_policy_registry_t policy_registry = {};
   loom_low_lower_policy_registry_initialize_from_entries(
-      &policy_registry, entries, IREE_ARRAYSIZE(entries));
+      entries, IREE_ARRAYSIZE(entries), &policy_registry);
 
   DiagnosticEmissionCollector collector;
   iree_status_t status =
@@ -1100,7 +1100,7 @@ TEST_F(LowLowerPassTest,
   };
   loom_low_lower_policy_registry_t policy_registry = {};
   loom_low_lower_policy_registry_initialize_from_entries(
-      &policy_registry, entries, IREE_ARRAYSIZE(entries));
+      entries, IREE_ARRAYSIZE(entries), &policy_registry);
   IREE_ASSERT_OK(RunSourceToLow(&policy_registry, module.get()));
 
   const loom_symbol_ref_t swap_ref =
@@ -1427,8 +1427,9 @@ TEST_F(LowLowerPassTest,
 
   loom_target_low_descriptor_registry_t projection_registry = {};
   loom_target_low_descriptor_registry_initialize_from_tables(
-      &projection_registry, kRepresentationProjectionDescriptorSetProviders,
-      IREE_ARRAYSIZE(kRepresentationProjectionDescriptorSetProviders));
+      kRepresentationProjectionDescriptorSetProviders,
+      IREE_ARRAYSIZE(kRepresentationProjectionDescriptorSetProviders),
+      &projection_registry);
 
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);

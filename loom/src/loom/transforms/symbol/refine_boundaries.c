@@ -996,9 +996,10 @@ static iree_status_t loom_refine_boundaries_apply_function_boundary_values(
     const loom_refine_boundaries_replacement_table_t* replacements,
     const loom_value_fact_table_t* boundary_facts,
     loom_refine_boundaries_function_t* function_info,
-    iree_arena_allocator_t* scratch_arena, int64_t* out_applied_count,
-    int64_t* out_materialized_count, bool mutate_values,
-    bool materialize_arguments, loom_value_fact_table_view_t* out_seed_facts) {
+    iree_arena_allocator_t* scratch_arena, bool mutate_values,
+    bool materialize_arguments, int64_t* out_applied_count,
+    int64_t* out_materialized_count,
+    loom_value_fact_table_view_t* out_seed_facts) {
   *out_applied_count = 0;
   *out_materialized_count = 0;
   *out_seed_facts = (loom_value_fact_table_view_t){0};
@@ -1542,8 +1543,8 @@ static iree_status_t loom_refine_boundaries_run_function(
   };
   IREE_RETURN_IF_ERROR(loom_refine_boundaries_apply_function_boundary_values(
       graph->module, seed_replacements, seed_facts, function_info,
-      graph->scratch_arena, &replacements_applied, &constants_materialized,
-      !encodings_only, /*materialize_arguments=*/true, &options.seed_facts));
+      graph->scratch_arena, !encodings_only, /*materialize_arguments=*/true,
+      &replacements_applied, &constants_materialized, &options.seed_facts));
   if (encodings_only) {
     loom_pass_value_fact_scope_t scope =
         loom_pass_value_fact_scope_function(function_info->function);

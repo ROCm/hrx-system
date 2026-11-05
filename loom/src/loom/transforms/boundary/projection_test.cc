@@ -450,15 +450,19 @@ class BoundaryProjectionTest : public ::testing::Test {
         LOOM_LOCATION_UNKNOWN, &out_diamond->return_op));
   }
 
-  void Project(
-      const loom_boundary_projection_rule_t* rule,
-      loom_boundary_projection_statistics_t* out_statistics,
-      const loom_boundary_projection_plan_sink_t* plan_sink = nullptr) {
+  void Project(const loom_boundary_projection_rule_t* rule,
+               const loom_boundary_projection_plan_sink_t* plan_sink,
+               loom_boundary_projection_statistics_t* out_statistics) {
     const loom_boundary_projection_rule_t* rules[] = {rule};
     IREE_ASSERT_OK(loom_boundary_projection_run(
         &pass_, module_, /*version_list=*/nullptr,
         {.values = rules, .count = IREE_ARRAYSIZE(rules)}, plan_sink,
         out_statistics));
+  }
+
+  void Project(const loom_boundary_projection_rule_t* rule,
+               loom_boundary_projection_statistics_t* out_statistics) {
+    Project(rule, /*plan_sink=*/nullptr, out_statistics);
   }
 
   void Verify(loom_module_t* module) {
@@ -515,7 +519,7 @@ TEST_F(BoundaryProjectionTest, ObservesFinalPlanBeforeMutation) {
       .user_data = &observation,
   };
   loom_boundary_projection_statistics_t statistics = {};
-  Project(&kZeroComponentRule, &statistics, &plan_sink);
+  Project(&kZeroComponentRule, &plan_sink, &statistics);
 
   EXPECT_TRUE(observation.invoked);
   EXPECT_TRUE(observation.observation_requested);

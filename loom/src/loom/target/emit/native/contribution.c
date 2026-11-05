@@ -61,8 +61,8 @@ static iree_status_t loom_native_contribution_plan_layout(
     const loom_native_section_contribution_t* contributions,
     iree_host_size_t contribution_count,
     loom_native_section_accumulator_t* accumulators,
-    iree_host_size_t* out_section_count,
-    loom_native_section_contribution_layout_t* contribution_layouts) {
+    loom_native_section_contribution_layout_t* contribution_layouts,
+    iree_host_size_t* out_section_count) {
   *out_section_count = 0;
   for (iree_host_size_t i = 0; i < contribution_count; ++i) {
     const loom_native_section_contribution_t* contribution = &contributions[i];
@@ -102,8 +102,8 @@ static iree_status_t loom_native_contribution_plan_layout(
 
 static iree_status_t loom_native_contribution_allocate_output(
     const loom_native_section_accumulator_t* accumulators,
-    iree_host_size_t section_count, loom_native_section_t** out_sections,
-    uint8_t*** out_section_contents, iree_arena_allocator_t* arena) {
+    iree_host_size_t section_count, iree_arena_allocator_t* arena,
+    loom_native_section_t** out_sections, uint8_t*** out_section_contents) {
   *out_sections = NULL;
   *out_section_contents = NULL;
   if (section_count == 0) {
@@ -196,9 +196,8 @@ static void loom_native_contribution_copy_contents(
 
 iree_status_t loom_native_assemble_section_contributions(
     const loom_native_section_contribution_t* contributions,
-    iree_host_size_t contribution_count,
-    loom_native_section_contribution_assembly_t* out_assembly,
-    iree_arena_allocator_t* arena) {
+    iree_host_size_t contribution_count, iree_arena_allocator_t* arena,
+    loom_native_section_contribution_assembly_t* out_assembly) {
   *out_assembly = (loom_native_section_contribution_assembly_t){0};
   if (contribution_count == 0) {
     return iree_ok_status();
@@ -217,14 +216,14 @@ iree_status_t loom_native_assemble_section_contributions(
   iree_host_size_t section_count = 0;
   if (iree_status_is_ok(status)) {
     status = loom_native_contribution_plan_layout(
-        contributions, contribution_count, accumulators, &section_count,
-        contribution_layouts);
+        contributions, contribution_count, accumulators, contribution_layouts,
+        &section_count);
   }
   loom_native_section_t* sections = NULL;
   uint8_t** section_contents = NULL;
   if (iree_status_is_ok(status)) {
     status = loom_native_contribution_allocate_output(
-        accumulators, section_count, &sections, &section_contents, arena);
+        accumulators, section_count, arena, &sections, &section_contents);
   }
   if (iree_status_is_ok(status)) {
     loom_native_contribution_copy_contents(contributions, contribution_count,

@@ -1204,8 +1204,8 @@ static iree_status_t loom_template_selection_analyze_exact_call(
   };
   loom_template_application_result_t result = {0};
   loom_template_provider_classification_t provider_classification = {0};
-  loom_template_application_check_call(state->module, &call, &site,
-                                       &provider_classification, &result);
+  loom_template_application_check_call(state->module, &call, &site, &result,
+                                       &provider_classification);
   if (result.blocker == LOOM_TEMPLATE_APPLICATION_BLOCKER_NONE) {
     *out_eligible = true;
     return iree_ok_status();

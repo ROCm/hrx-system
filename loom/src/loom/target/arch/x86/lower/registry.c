@@ -1194,5 +1194,5 @@ void loom_x86_low_lower_policy_registry_initialize(
       },
   };
   loom_low_lower_policy_registry_initialize_from_entries(
-      out_registry, kEntries, IREE_ARRAYSIZE(kEntries));
+      kEntries, IREE_ARRAYSIZE(kEntries), out_registry);
 }

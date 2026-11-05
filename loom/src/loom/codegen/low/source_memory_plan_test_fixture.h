@@ -324,11 +324,10 @@ class SourceMemoryPlanTest : public ::testing::Test {
         loom_value_fact_table_compute(out_facts, module_, function_));
   }
 
-  bool BuildPlan(
-      loom_value_fact_table_t* facts, const loom_op_t* op,
-      loom_low_source_memory_access_plan_t* out_plan,
-      loom_low_source_memory_access_diagnostic_t* out_diagnostic,
-      loom_low_source_memory_axis_byte_stride_t* axis_byte_strides = nullptr) {
+  bool BuildPlan(loom_value_fact_table_t* facts, const loom_op_t* op,
+                 loom_low_source_memory_axis_byte_stride_t* axis_byte_strides,
+                 loom_low_source_memory_access_plan_t* out_plan,
+                 loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
     loom_local_value_domain_t value_domain = {};
     IREE_EXPECT_OK(loom_local_value_domain_acquire_for_region(
         module_, loom_func_like_body(function_), &analysis_arena_,
@@ -344,6 +343,13 @@ class SourceMemoryPlanTest : public ::testing::Test {
         &view_regions, op, axis_byte_strides, out_plan, out_diagnostic);
     loom_local_value_domain_release(&value_domain);
     return built;
+  }
+
+  bool BuildPlan(loom_value_fact_table_t* facts, const loom_op_t* op,
+                 loom_low_source_memory_access_plan_t* out_plan,
+                 loom_low_source_memory_access_diagnostic_t* out_diagnostic) {
+    return BuildPlan(facts, op, /*axis_byte_strides=*/nullptr, out_plan,
+                     out_diagnostic);
   }
 
   bool BuildViewPlan(

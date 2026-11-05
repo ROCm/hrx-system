@@ -119,7 +119,7 @@ TEST_F(AmdgpuMoveEmissionTest, HighBankExchangeMatchesAssemblyAndEncoding) {
 
   iree_const_byte_span_t text = iree_const_byte_span_empty();
   IREE_ASSERT_OK(loom_amdgpu_encode_instruction_stream(&schedule_, &allocation_,
-                                                       &text, &arena_));
+                                                       &arena_, &text));
   ASSERT_EQ(text.data_length, 3 * sizeof(uint32_t));
   EXPECT_EQ(iree_unaligned_load_le_u32(text.data), UINT32_C(0xBF860003));
   EXPECT_EQ(iree_unaligned_load_le_u32(text.data + 4), UINT32_C(0x7FFECB00));

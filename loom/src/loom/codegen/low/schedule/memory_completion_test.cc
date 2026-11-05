@@ -44,7 +44,7 @@ class MemoryCompletionTest : public ::testing::Test {
 
   void AddEffect(uint32_t block_index, loom_low_effect_kind_t kind,
                  const loom_low_memory_access_summary_t& access,
-                 uint32_t* out_index, loom_low_effect_flags_t extra_flags = 0) {
+                 loom_low_effect_flags_t extra_flags, uint32_t* out_index) {
     const uint32_t index = effect_count_++;
     IREE_ASSERT_LT(index, effects_.size());
     nodes_[index].op = &ops_[index];
@@ -59,6 +59,12 @@ class MemoryCompletionTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_low_memory_access_map_insert(
         memory_accesses_, &ops_[index], /*effect_ordinal=*/0, &access));
     *out_index = index;
+  }
+
+  void AddEffect(uint32_t block_index, loom_low_effect_kind_t kind,
+                 const loom_low_memory_access_summary_t& access,
+                 uint32_t* out_index) {
+    AddEffect(block_index, kind, access, /*extra_flags=*/0, out_index);
   }
 
   void Analyze(const loom_cfg_graph_t* graph) {
@@ -217,8 +223,8 @@ TEST_F(MemoryCompletionTest, OrderedEffectsRemainConservative) {
   testing::CfgGraph graph({{1}, {}});
   uint32_t producer = 0;
   uint32_t consumer = 0;
-  AddEffect(0, LOOM_LOW_EFFECT_KIND_WRITE, Access(1), &producer,
-            LOOM_LOW_EFFECT_FLAG_ORDERED);
+  AddEffect(0, LOOM_LOW_EFFECT_KIND_WRITE, Access(1),
+            LOOM_LOW_EFFECT_FLAG_ORDERED, &producer);
   AddEffect(1, LOOM_LOW_EFFECT_KIND_READ, Access(1), &consumer);
 
   Analyze(graph.get());

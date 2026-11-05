@@ -61,8 +61,8 @@ static loomc_status_t loomc_module_decode_bytecode_source(
       iree_make_const_byte_span(contents.data, contents.data_length),
       iree_string_view_from_loomc(options->identifier),
       loomc_context_loom_context(context), loomc_module_block_pool(module),
-      &read_options, &read_result, out_internal_module,
-      iree_allocator_from_loomc(allocator)));
+      &read_options, iree_allocator_from_loomc(allocator), &read_result,
+      out_internal_module));
   if (loomc_status_is_ok(status) && read_result.error_count != 0) {
     loom_module_free(*out_internal_module);
     *out_internal_module = NULL;

@@ -93,8 +93,8 @@ TEST(ConfiguredCompilerProviderSetTest, NativeCpuSelectionUsesDeviceFacts) {
   };
   loom_target_profile_selection_t selected = {};
   IREE_ASSERT_OK(loom_target_environment_select_cpu_profile(
-      &environment, &cpu_data, nullptr, nullptr, &selected,
-      iree_allocator_system()));
+      &environment, &cpu_data, nullptr, nullptr, iree_allocator_system(),
+      &selected));
   ASSERT_NE(selected.profile, nullptr);
   EXPECT_NE(selected.profile, scalar_profile);
   EXPECT_NE(selected.destroy, nullptr);
@@ -106,8 +106,8 @@ TEST(ConfiguredCompilerProviderSetTest, NativeCpuSelectionUsesDeviceFacts) {
                              IREE_SV("x86.scalar.core")));
   loom_target_profile_selection_release(&selected, iree_allocator_system());
   IREE_ASSERT_OK(loom_target_environment_select_cpu_profile(
-      &environment, &cpu_data, nullptr, scalar_profile, &selected,
-      iree_allocator_system()));
+      &environment, &cpu_data, nullptr, scalar_profile, iree_allocator_system(),
+      &selected));
   ASSERT_NE(selected.profile, nullptr);
   EXPECT_NE(selected.profile, scalar_profile);
   EXPECT_NE(selected.destroy, nullptr);
@@ -123,7 +123,7 @@ TEST(ConfiguredCompilerProviderSetTest, NativeCpuSelectionUsesDeviceFacts) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
                         loom_target_environment_select_cpu_profile(
                             &environment, &cpu_data, nullptr, scalar_profile,
-                            &selected, iree_allocator_system()));
+                            iree_allocator_system(), &selected));
   EXPECT_EQ(selected.profile, nullptr);
   loom_target_environment_deinitialize(&environment);
 }

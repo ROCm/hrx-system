@@ -124,8 +124,8 @@ TEST_F(CheckOpsTest, NamedBenchmarkBytecodeRoundTrip) {
   loom_module_t* loaded = nullptr;
   IREE_ASSERT_OK(loom_bytecode_read_module(
       iree_make_const_byte_span(bytes.data(), bytes.size()),
-      IREE_SV("checks.loombc"), &context_, &pool_, nullptr, &result, &loaded,
-      iree_allocator_system()));
+      IREE_SV("checks.loombc"), &context_, &pool_, nullptr,
+      iree_allocator_system(), &result, &loaded));
   ASSERT_NE(loaded, nullptr);
   EXPECT_EQ(result.error_count, 0u);
   EXPECT_EQ(Verify(loaded), 0u);

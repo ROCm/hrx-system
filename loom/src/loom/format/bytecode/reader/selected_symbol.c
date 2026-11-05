@@ -160,19 +160,19 @@ static iree_status_t loom_bytecode_symbol_policy_materialize_attribute_named(
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
     loom_attribute_t* out_attr) {
   return loom_bytecode_selected_attribute_materialize_named(
-      materializer->tables, cursor, descriptor, kind, out_attr,
-      materializer->tables->metadata->types.count);
+      materializer->tables, cursor, descriptor, kind,
+      materializer->tables->metadata->types.count, out_attr);
 }
 
 static iree_status_t loom_bytecode_symbol_policy_materialize_attribute_ssa(
     loom_bytecode_symbol_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
-    loom_attribute_t* out_attr,
-    const loom_bytecode_attribute_ssa_materialization_scope_t* ssa_scope) {
+    const loom_bytecode_attribute_ssa_materialization_scope_t* ssa_scope,
+    loom_attribute_t* out_attr) {
   return loom_bytecode_selected_attribute_materialize_ssa(
-      materializer->tables, cursor, descriptor, kind, out_attr,
-      materializer->tables->metadata->types.count, ssa_scope);
+      materializer->tables, cursor, descriptor, kind,
+      materializer->tables->metadata->types.count, ssa_scope, out_attr);
 }
 
 static iree_status_t loom_bytecode_symbol_policy_materialize_region(

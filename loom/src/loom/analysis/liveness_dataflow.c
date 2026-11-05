@@ -149,8 +149,8 @@ static iree_status_t loom_liveness_dataflow_solver_initialize(
     const loom_cfg_graph_t* cfg_graph, const loom_value_id_t* value_ids,
     loom_value_ordinal_t value_count,
     const loom_liveness_block_transfer_t* block_transfers, uint16_t block_count,
-    loom_liveness_dataflow_solver_t* out_solver,
-    iree_arena_allocator_t* scratch_arena) {
+    iree_arena_allocator_t* scratch_arena,
+    loom_liveness_dataflow_solver_t* out_solver) {
   loom_liveness_dataflow_solver_t solver = {
       .cfg_graph = cfg_graph,
       .value_ids = value_ids,
@@ -270,8 +270,8 @@ static void loom_liveness_dataflow_solver_run(
 
 static iree_status_t loom_liveness_dataflow_allocate_results(
     loom_liveness_dataflow_solver_t* solver,
-    loom_liveness_block_relation_t* out_block_relations,
-    iree_arena_allocator_t* result_arena) {
+    iree_arena_allocator_t* result_arena,
+    loom_liveness_block_relation_t* out_block_relations) {
   iree_host_size_t total_live_in_count = 0;
   iree_host_size_t total_live_out_count = 0;
   for (uint16_t block_index = 0; block_index < solver->block_count;
@@ -350,16 +350,15 @@ iree_status_t loom_liveness_dataflow_solve(
     const loom_cfg_graph_t* cfg_graph, const loom_value_id_t* value_ids,
     loom_value_ordinal_t value_count,
     const loom_liveness_block_transfer_t* block_transfers, uint16_t block_count,
-    loom_liveness_block_relation_t* out_block_relations,
-    iree_arena_allocator_t* result_arena,
-    iree_arena_allocator_t* scratch_arena) {
+    iree_arena_allocator_t* result_arena, iree_arena_allocator_t* scratch_arena,
+    loom_liveness_block_relation_t* out_block_relations) {
   loom_liveness_dataflow_solver_t solver = {0};
   IREE_RETURN_IF_ERROR(loom_liveness_dataflow_solver_initialize(
-      cfg_graph, value_ids, value_count, block_transfers, block_count, &solver,
-      scratch_arena));
+      cfg_graph, value_ids, value_count, block_transfers, block_count,
+      scratch_arena, &solver));
   loom_liveness_dataflow_solver_run(&solver, LOOM_LIVENESS_DATAFLOW_PASS_COUNT);
   IREE_RETURN_IF_ERROR(loom_liveness_dataflow_allocate_results(
-      &solver, out_block_relations, result_arena));
+      &solver, result_arena, out_block_relations));
   loom_liveness_dataflow_solver_run(&solver,
                                     LOOM_LIVENESS_DATAFLOW_PASS_PUBLISH);
   for (uint16_t block_index = 0; block_index < block_count; ++block_index) {
@@ -605,8 +604,8 @@ iree_status_t loom_liveness_dataflow_analyze(
     }
     status = loom_liveness_dataflow_solve(
         is_cfg ? cfg_graph : NULL, value_domain->value_ids, state.value_count,
-        block_transfers, region->block_count, block_relations, result_arena,
-        scratch_arena);
+        block_transfers, region->block_count, result_arena, scratch_arena,
+        block_relations);
   }
 
   if (iree_status_is_ok(status)) {

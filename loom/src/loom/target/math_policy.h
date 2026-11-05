@@ -450,9 +450,9 @@ typedef struct loom_target_math_pass_capability_t {
 // Initializes |out_registry| from a target-owned entry table. The table is
 // borrowed and must outlive |out_registry|.
 void loom_target_math_policy_registry_initialize_from_entries(
-    loom_target_math_policy_registry_t* out_registry,
     const loom_target_math_policy_registry_entry_t* entries,
-    iree_host_size_t entry_count);
+    iree_host_size_t entry_count,
+    loom_target_math_policy_registry_t* out_registry);
 
 // Looks up the math policy for |contract_set_stable_id|, or returns NULL when
 // no row matches.

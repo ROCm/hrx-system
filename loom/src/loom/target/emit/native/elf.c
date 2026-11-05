@@ -262,8 +262,8 @@ static iree_status_t loom_native_elf_append_name(iree_byte_span_t string_table,
 static iree_status_t loom_native_elf_build_layout(
     const loom_native_elf_file_view_t* file,
     const loom_native_elf_format_t* format,
-    loom_native_elf_layout_t* out_layout,
-    iree_arena_allocator_t* scratch_arena) {
+    iree_arena_allocator_t* scratch_arena,
+    loom_native_elf_layout_t* out_layout) {
   *out_layout = (loom_native_elf_layout_t){0};
   IREE_RETURN_IF_ERROR(loom_native_elf_validate_file(file));
 
@@ -832,11 +832,11 @@ static loom_native_elf_file_view_t loom_native_elf32le_file_view(
 }
 
 iree_status_t loom_native_elf32le_build_layout(
-    const loom_native_elf32le_file_t* file,
-    loom_native_elf_layout_t* out_layout, iree_arena_allocator_t* arena) {
+    const loom_native_elf32le_file_t* file, iree_arena_allocator_t* arena,
+    loom_native_elf_layout_t* out_layout) {
   const loom_native_elf_file_view_t view = loom_native_elf32le_file_view(file);
-  return loom_native_elf_build_layout(&view, &kLoomNativeElf32LeFormat,
-                                      out_layout, arena);
+  return loom_native_elf_build_layout(&view, &kLoomNativeElf32LeFormat, arena,
+                                      out_layout);
 }
 
 iree_status_t loom_native_elf32le_write_file(
@@ -864,11 +864,11 @@ static loom_native_elf_file_view_t loom_native_elf64le_file_view(
 }
 
 iree_status_t loom_native_elf64le_build_layout(
-    const loom_native_elf64le_file_t* file,
-    loom_native_elf_layout_t* out_layout, iree_arena_allocator_t* arena) {
+    const loom_native_elf64le_file_t* file, iree_arena_allocator_t* arena,
+    loom_native_elf_layout_t* out_layout) {
   const loom_native_elf_file_view_t view = loom_native_elf64le_file_view(file);
-  return loom_native_elf_build_layout(&view, &kLoomNativeElf64LeFormat,
-                                      out_layout, arena);
+  return loom_native_elf_build_layout(&view, &kLoomNativeElf64LeFormat, arena,
+                                      out_layout);
 }
 
 iree_status_t loom_native_elf64le_write_file(

@@ -326,9 +326,9 @@ class Aie2pProgramCompileTest : public ::testing::Test {
 
   iree_status_t CompileProgram(
       loom_module_t* module, loom_op_t* entry,
-      const loom_aie2p_leaf_compile_options_t* options, bool* out_compiled,
-      loom_aie2p_leaf_contribution_t* out_contribution,
-      loom_aie2p_program_compiler_t* compiler = nullptr) {
+      const loom_aie2p_leaf_compile_options_t* options,
+      loom_aie2p_program_compiler_t* compiler, bool* out_compiled,
+      loom_aie2p_leaf_contribution_t* out_contribution) {
     if (compiler == nullptr) {
       IREE_RETURN_IF_ERROR(loom_aie2p_program_compiler_allocate(
           module, &program_arena_, options->compile_report, &compiler));
@@ -356,6 +356,14 @@ class Aie2pProgramCompileTest : public ::testing::Test {
     }
     iree_arena_deinitialize(&requirements_arena);
     return status;
+  }
+
+  iree_status_t CompileProgram(
+      loom_module_t* module, loom_op_t* entry,
+      const loom_aie2p_leaf_compile_options_t* options, bool* out_compiled,
+      loom_aie2p_leaf_contribution_t* out_contribution) {
+    return CompileProgram(module, entry, options, /*compiler=*/nullptr,
+                          out_compiled, out_contribution);
   }
 
   iree_arena_block_pool_t module_block_pool_;
@@ -386,8 +394,8 @@ TEST_F(Aie2pProgramCompileTest, RetainsHelperObjectsAcrossProgramCompilations) {
     for (int program_index = 0; program_index < 3; ++program_index) {
       bool compiled = false;
       loom_aie2p_leaf_contribution_t contribution = {};
-      IREE_ASSERT_OK(CompileProgram(module.get(), entry, &options, &compiled,
-                                    &contribution, compiler));
+      IREE_ASSERT_OK(CompileProgram(module.get(), entry, &options, compiler,
+                                    &compiled, &contribution));
       ASSERT_TRUE(compiled);
       ASSERT_EQ(contribution.object.section_count, 2u);
       // Each caller is allocated independently. Its native call still borrows
@@ -428,8 +436,8 @@ TEST_F(Aie2pProgramCompileTest, ReportsCompleteProgramIncludingRetainedHelper) {
   ASSERT_NE(helper, nullptr);
 
   loom_target_compile_report_t report_template;
-  loom_target_compile_report_initialize(&report_template,
-                                        iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(),
+                                        &report_template);
   loom_aie2p_program_compiler_t* compiler = nullptr;
   IREE_ASSERT_OK(loom_aie2p_program_compiler_allocate(
       module.get(), &program_arena_, &report_template, &compiler));
@@ -437,15 +445,15 @@ TEST_F(Aie2pProgramCompileTest, ReportsCompleteProgramIncludingRetainedHelper) {
 
   for (int program_index = 0; program_index < 2; ++program_index) {
     loom_target_compile_report_t report;
-    loom_target_compile_report_initialize(&report, iree_allocator_system());
+    loom_target_compile_report_initialize(iree_allocator_system(), &report);
     const loom_aie2p_leaf_compile_options_t options = {
         .descriptor_registry = &low_registry_.registry,
         .compile_report = &report,
     };
     bool compiled = false;
     loom_aie2p_leaf_contribution_t contribution = {};
-    IREE_ASSERT_OK(CompileProgram(module.get(), entry, &options, &compiled,
-                                  &contribution, compiler));
+    IREE_ASSERT_OK(CompileProgram(module.get(), entry, &options, compiler,
+                                  &compiled, &contribution));
     ASSERT_TRUE(compiled);
     ASSERT_EQ(contribution.object.section_count, 2u);
 

@@ -85,7 +85,7 @@ class SelectionSummaryTest : public ::testing::Test {
     iree_arena_block_pool_initialize(64 * 1024, iree_allocator_system(),
                                      &pool_);
     iree_arena_initialize(&pool_, &arena_);
-    loom_target_compile_report_initialize(&report_, iree_allocator_system());
+    loom_target_compile_report_initialize(iree_allocator_system(), &report_);
   }
   void TearDown() override {
     loom_target_compile_report_deinitialize(&report_);
@@ -247,7 +247,7 @@ TEST_F(SelectionSummaryTest, BalancesOrderedAndPermutedKeysAcrossBlocks) {
       EXPECT_EQ(summaries[i]->selected_op_count, 2u);
     }
     loom_target_compile_report_deinitialize(&report_);
-    loom_target_compile_report_initialize(&report_, iree_allocator_system());
+    loom_target_compile_report_initialize(iree_allocator_system(), &report_);
   }
 }
 
@@ -263,7 +263,7 @@ TEST_F(SelectionSummaryTest, BalancesEveryThreeKeyInsertionOrder) {
     }
     EXPECT_EQ(report_.source_low_selection_root->source_op_kind, 2u);
     loom_target_compile_report_deinitialize(&report_);
-    loom_target_compile_report_initialize(&report_, iree_allocator_system());
+    loom_target_compile_report_initialize(iree_allocator_system(), &report_);
   } while (std::next_permutation(order.begin(), order.end()));
 }
 
@@ -271,7 +271,7 @@ TEST_F(SelectionSummaryTest, MergingOwnsIndexAfterEntryStorageIsReleased) {
   auto row = MakeSelection();
   for (uint32_t entry_index = 0; entry_index < 3; ++entry_index) {
     loom_target_compile_report_t entry;
-    loom_target_compile_report_initialize(&entry, iree_allocator_system());
+    loom_target_compile_report_initialize(iree_allocator_system(), &entry);
     for (uint32_t i = 0; i < 256; ++i) {
       row.source_op_kind = entry_index * 128 + i;
       IREE_ASSERT_OK(
@@ -297,7 +297,7 @@ TEST_F(SelectionSummaryTest, MergingOwnsIndexAfterEntryStorageIsReleased) {
 
 TEST_F(SelectionSummaryTest, EvidenceMergeDoesNotRecordAnArtifactEntry) {
   loom_target_compile_report_t source;
-  loom_target_compile_report_initialize(&source, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &source);
   source.function_name = IREE_SVL("failed_helper");
   auto selection = MakeSelection();
   selection.source_op_name = IREE_SVL("scalar.mulf");
@@ -332,8 +332,8 @@ TEST_F(SelectionSummaryTest, EvidenceMergeDoesNotRecordAnArtifactEntry) {
 TEST_F(SelectionSummaryTest, ArenaResetAndDisabledStorage) {
   auto row = MakeSelection();
   for (int repetition = 0; repetition < 2; ++repetition) {
-    loom_target_compile_report_initialize(&report_,
-                                          iree_arena_allocator(&arena_));
+    loom_target_compile_report_initialize(iree_arena_allocator(&arena_),
+                                          &report_);
     for (uint32_t i = 0; i < 100; ++i) {
       row.source_op_kind = i;
       IREE_ASSERT_OK(
@@ -344,7 +344,7 @@ TEST_F(SelectionSummaryTest, ArenaResetAndDisabledStorage) {
     EXPECT_EQ(report_.source_low_selection_root, nullptr);
     iree_arena_reset(&arena_);
   }
-  loom_target_compile_report_initialize(&report_, iree_allocator_null());
+  loom_target_compile_report_initialize(iree_allocator_null(), &report_);
   IREE_ASSERT_OK(
       loom_target_compile_report_record_source_low_row(&report_, &row));
   EXPECT_EQ(report_.source_low_rows.count, 0u);
@@ -357,7 +357,7 @@ TEST_F(SelectionSummaryTest, FailedAppendLeavesIndexUsableAndReleasesBlocks) {
     SCOPED_TRACE(allowance);
     allocator_ = LimitedAllocator{allowance};
     loom_target_compile_report_initialize(
-        &report_, {&allocator_, LimitedAllocator::Control});
+        {&allocator_, LimitedAllocator::Control}, &report_);
     auto row = MakeSelection();
     iree_status_t status = iree_ok_status();
     uint32_t recorded = 0;

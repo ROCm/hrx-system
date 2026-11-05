@@ -104,8 +104,8 @@ static iree_status_t loom_spirv_emit_module_state_finalize(
 
 iree_status_t loom_spirv_program_emit_binary(
     const loom_spirv_program_plan_t* program,
-    iree_arena_allocator_t* scratch_arena,
-    loom_spirv_module_binary_t* out_module, iree_allocator_t allocator) {
+    iree_arena_allocator_t* scratch_arena, iree_allocator_t allocator,
+    loom_spirv_module_binary_t* out_module) {
   IREE_ASSERT_ARGUMENT(program);
   IREE_ASSERT_ARGUMENT(program->module);
   IREE_ASSERT_ARGUMENT(program->functions);

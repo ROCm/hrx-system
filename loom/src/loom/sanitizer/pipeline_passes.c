@@ -1109,8 +1109,8 @@ static iree_status_t loom_sanitizer_try_instrument_access_op(
     int64_t* extents = NULL;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         pass->arena, view_rank, sizeof(*extents), (void**)&extents));
-    if (!loom_vector_memory_footprint_static_extents(&footprint, extents,
-                                                     view_rank)) {
+    if (!loom_vector_memory_footprint_static_extents(&footprint, view_rank,
+                                                     extents)) {
       return loom_sanitizer_emit_vector_access_dynamic(pass, module, op);
     }
     static_extents = loom_attr_i64_array(extents, view_rank);

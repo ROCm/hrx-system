@@ -729,8 +729,8 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_emit_direct_arg_type_error(
 }
 
 static iree_status_t loom_amdgpu_hal_kernel_abi_format_resource_name(
-    uint32_t binding_index, iree_string_view_t* out_name,
-    iree_arena_allocator_t* arena) {
+    uint32_t binding_index, iree_arena_allocator_t* arena,
+    iree_string_view_t* out_name) {
   char scratch[32];
   int length =
       iree_snprintf(scratch, sizeof(scratch), "binding%" PRIu32, binding_index);
@@ -1091,14 +1091,14 @@ iree_status_t loom_amdgpu_hal_kernel_abi_make_layout_attr(
 
 static iree_status_t loom_amdgpu_hal_kernel_abi_resource_from_import(
     const loom_module_t* module, const loom_op_t* resource_op,
-    loom_amdgpu_hal_kernarg_resource_t* out_resource,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena,
+    loom_amdgpu_hal_kernarg_resource_t* out_resource) {
   *out_resource = (loom_amdgpu_hal_kernarg_resource_t){0};
 
   iree_string_view_t resource_name = iree_string_view_empty();
   int64_t binding_index = loom_low_resource_index(resource_op);
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_format_resource_name(
-      (uint32_t)binding_index, &resource_name, arena));
+      (uint32_t)binding_index, arena, &resource_name));
 
   uint64_t kernarg_offset =
       (uint64_t)binding_index *
@@ -1591,9 +1591,8 @@ iree_status_t loom_amdgpu_hal_kernel_abi_verify_low(
     const loom_module_t* module, const loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_amdgpu_processor_properties_t* properties, uint32_t max_errors,
-    iree_diagnostic_emitter_t emitter,
-    loom_amdgpu_hal_kernel_abi_verify_result_t* out_result,
-    iree_arena_allocator_t* arena) {
+    iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
+    loom_amdgpu_hal_kernel_abi_verify_result_t* out_result) {
   *out_result = (loom_amdgpu_hal_kernel_abi_verify_result_t){
       .kernarg_segment_ptr = LOOM_VALUE_ID_INVALID,
   };
@@ -1718,8 +1717,8 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_attach_low_artifacts_to_layout(
 
 iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_low(
     const loom_module_t* module, const loom_op_t* function_op,
-    loom_amdgpu_hal_kernel_abi_layout_t* out_layout,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena,
+    loom_amdgpu_hal_kernel_abi_layout_t* out_layout) {
   *out_layout = (loom_amdgpu_hal_kernel_abi_layout_t){0};
   if (module == NULL || function_op == NULL || arena == NULL) {
     return iree_make_status(
@@ -1734,7 +1733,7 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_low(
   }
   if (loom_amdgpu_hal_kernel_abi_has_layout_attr(function_op)) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_layout_from_attr(
-        module, function_op, out_layout, arena));
+        module, function_op, arena, out_layout));
     return loom_amdgpu_hal_kernel_abi_attach_low_artifacts_to_layout(
         module, function_op, out_layout);
   }
@@ -1820,7 +1819,7 @@ iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_low(
 
         loom_amdgpu_hal_kernarg_resource_t resource = {0};
         IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_resource_from_import(
-            module, resource_op, &resource, arena));
+            module, resource_op, arena, &resource));
         resources[slot_index] = resource;
       }
     }
@@ -2081,7 +2080,7 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_decode_resource_from_layout(
     loom_amdgpu_hal_kernarg_resource_t* out_resource) {
   iree_string_view_t name = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_format_resource_name(
-      binding_index, &name, arena));
+      binding_index, arena, &name));
   if ((kernarg_offset %
        LOOM_AMDGPU_HAL_KERNEL_ABI_GLOBAL_BUFFER_KERNARG_ALIGNMENT) != 0) {
     return iree_make_status(
@@ -2105,8 +2104,8 @@ static iree_status_t loom_amdgpu_hal_kernel_abi_decode_resource_from_layout(
 
 iree_status_t loom_amdgpu_hal_kernel_abi_layout_from_attr(
     const loom_module_t* module, const loom_op_t* function_op,
-    loom_amdgpu_hal_kernel_abi_layout_t* out_layout,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena,
+    loom_amdgpu_hal_kernel_abi_layout_t* out_layout) {
   *out_layout = (loom_amdgpu_hal_kernel_abi_layout_t){0};
   if (module == NULL || function_op == NULL || arena == NULL) {
     return iree_make_status(

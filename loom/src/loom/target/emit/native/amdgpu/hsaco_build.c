@@ -368,8 +368,8 @@ static iree_status_t loom_amdgpu_hsaco_copy_metadata_kernels(
 
 static iree_status_t loom_amdgpu_hsaco_build_note(
     const loom_amdgpu_hsaco_input_t* input,
-    const loom_amdgpu_hsaco_payloads_t* payloads,
-    iree_const_byte_span_t* out_note, iree_arena_allocator_t* arena) {
+    const loom_amdgpu_hsaco_payloads_t* payloads, iree_arena_allocator_t* arena,
+    iree_const_byte_span_t* out_note) {
   *out_note = iree_make_const_byte_span(NULL, 0);
 
   const loom_amdgpu_code_object_metadata_t metadata = {
@@ -377,15 +377,14 @@ static iree_status_t loom_amdgpu_hsaco_build_note(
       .kernels = payloads->metadata_kernels,
       .kernel_count = payloads->metadata_kernel_count,
   };
-  return loom_amdgpu_metadata_build_elf_note(&metadata, out_note, arena);
+  return loom_amdgpu_metadata_build_elf_note(&metadata, arena, out_note);
 }
 
 static iree_status_t loom_amdgpu_hsaco_build_string_tables(
     const loom_amdgpu_hsaco_input_t* input,
-    loom_amdgpu_hsaco_payloads_t* payloads,
+    loom_amdgpu_hsaco_payloads_t* payloads, iree_arena_allocator_t* arena,
     iree_const_byte_span_t* out_dynamic_string_table,
-    iree_const_byte_span_t* out_static_string_table,
-    iree_arena_allocator_t* arena) {
+    iree_const_byte_span_t* out_static_string_table) {
   *out_dynamic_string_table = iree_const_byte_span_empty();
   *out_static_string_table = iree_const_byte_span_empty();
 
@@ -477,8 +476,8 @@ static iree_status_t loom_amdgpu_hsaco_build_string_tables(
 
 static iree_status_t loom_amdgpu_hsaco_build_text(
     const loom_amdgpu_hsaco_input_t* input,
-    loom_amdgpu_hsaco_payloads_t* payloads, iree_byte_span_t* out_text,
-    iree_arena_allocator_t* arena) {
+    loom_amdgpu_hsaco_payloads_t* payloads, iree_arena_allocator_t* arena,
+    iree_byte_span_t* out_text) {
   *out_text = iree_make_byte_span(NULL, 0);
 
   uint64_t text_size_u64 = 0;
@@ -664,7 +663,7 @@ static iree_status_t loom_amdgpu_hsaco_build_rodata(
     const loom_amdgpu_processor_info_t* processor,
     loom_amdgpu_hsaco_payloads_t* payloads, uint64_t rodata_address,
     uint64_t text_address, iree_host_size_t rodata_size,
-    iree_const_byte_span_t* out_rodata, iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena, iree_const_byte_span_t* out_rodata) {
   *out_rodata = iree_make_const_byte_span(NULL, 0);
 
   iree_byte_span_t rodata = iree_make_byte_span(NULL, 0);
@@ -798,8 +797,8 @@ static iree_status_t loom_amdgpu_hsaco_plan_writable_data(
 
 static iree_status_t loom_amdgpu_hsaco_build_writable_data(
     const loom_amdgpu_hsaco_input_t* input,
-    const loom_amdgpu_hsaco_payloads_t* payloads,
-    iree_const_byte_span_t* out_data, iree_arena_allocator_t* arena) {
+    const loom_amdgpu_hsaco_payloads_t* payloads, iree_arena_allocator_t* arena,
+    iree_const_byte_span_t* out_data) {
   *out_data = iree_make_const_byte_span(NULL, 0);
   if (payloads->writable_data_size == 0) {
     return iree_ok_status();
@@ -830,8 +829,8 @@ static iree_status_t loom_amdgpu_hsaco_build_writable_data(
 static iree_status_t loom_amdgpu_hsaco_build_dynamic_symbol_table(
     const loom_amdgpu_hsaco_input_t* input,
     const loom_amdgpu_hsaco_payloads_t* payloads, uint64_t rodata_address,
-    uint64_t text_address, uint64_t data_address,
-    iree_const_byte_span_t* out_symbol_table, iree_arena_allocator_t* arena) {
+    uint64_t text_address, uint64_t data_address, iree_arena_allocator_t* arena,
+    iree_const_byte_span_t* out_symbol_table) {
   *out_symbol_table = iree_make_const_byte_span(NULL, 0);
 
   iree_host_size_t symbol_count = 0;
@@ -915,8 +914,8 @@ static iree_status_t loom_amdgpu_hsaco_build_dynamic_symbol_table(
 static iree_status_t loom_amdgpu_hsaco_build_static_symbol_table(
     const loom_amdgpu_hsaco_input_t* input,
     const loom_amdgpu_hsaco_payloads_t* payloads, uint64_t text_address,
-    iree_const_byte_span_t dynamic_symbol_table,
-    iree_const_byte_span_t* out_symbol_table, iree_arena_allocator_t* arena) {
+    iree_const_byte_span_t dynamic_symbol_table, iree_arena_allocator_t* arena,
+    iree_const_byte_span_t* out_symbol_table) {
   *out_symbol_table = iree_const_byte_span_empty();
   iree_host_size_t local_symbol_bytes = 0;
   if (!iree_host_size_checked_mul(input->function_count,
@@ -969,11 +968,11 @@ static iree_status_t loom_amdgpu_hsaco_build_static_symbol_table(
 
 static iree_status_t loom_amdgpu_hsaco_build_sysv_hash(
     const loom_amdgpu_hsaco_input_t* input, iree_host_size_t symbol_count,
-    iree_const_byte_span_t* out_hash, iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena, iree_const_byte_span_t* out_hash) {
   *out_hash = iree_const_byte_span_empty();
   loom_native_elf_hash_t hash;
   IREE_RETURN_IF_ERROR(
-      loom_native_elf_hash_initialize(symbol_count, &hash, arena));
+      loom_native_elf_hash_initialize(symbol_count, arena, &hash));
   uint32_t symbol_index = 1;
   for (iree_host_size_t i = 0; i < input->kernel_count; ++i) {
     loom_native_elf_hash_insert(&hash, input->kernels[i].metadata.name,
@@ -991,8 +990,8 @@ static iree_status_t loom_amdgpu_hsaco_build_sysv_hash(
 }
 
 static iree_status_t loom_amdgpu_hsaco_build_dynamic_table(
-    const loom_amdgpu_hsaco_payloads_t* payloads,
-    iree_const_byte_span_t* out_dynamic_table, iree_arena_allocator_t* arena) {
+    const loom_amdgpu_hsaco_payloads_t* payloads, iree_arena_allocator_t* arena,
+    iree_const_byte_span_t* out_dynamic_table) {
   *out_dynamic_table = iree_make_const_byte_span(NULL, 0);
   const loom_native_elf_section_t* hash =
       loom_amdgpu_hsaco_section(payloads, LOOM_AMDGPU_HSACO_SECTION_HASH);
@@ -1065,7 +1064,7 @@ static iree_status_t loom_amdgpu_hsaco_build_sections(
     loom_amdgpu_hsaco_payloads_t* payloads, iree_arena_allocator_t* arena) {
   iree_const_byte_span_t note = iree_make_const_byte_span(NULL, 0);
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_hsaco_build_note(input, payloads, &note, arena));
+      loom_amdgpu_hsaco_build_note(input, payloads, arena, &note));
 
   iree_host_size_t dynamic_symbol_count = 0;
   if (!iree_host_size_checked_mul(input->kernel_count, 2u,
@@ -1088,11 +1087,11 @@ static iree_status_t loom_amdgpu_hsaco_build_sections(
   iree_const_byte_span_t dynamic_string_table = iree_const_byte_span_empty();
   iree_const_byte_span_t static_string_table = iree_const_byte_span_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_build_string_tables(
-      input, payloads, &dynamic_string_table, &static_string_table, arena));
+      input, payloads, arena, &dynamic_string_table, &static_string_table));
 
   iree_byte_span_t text = iree_make_byte_span(NULL, 0);
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_hsaco_build_text(input, payloads, &text, arena));
+      loom_amdgpu_hsaco_build_text(input, payloads, arena, &text));
 
   iree_const_byte_span_t rodata_placeholder =
       iree_make_const_byte_span(NULL, 0);
@@ -1124,7 +1123,7 @@ static iree_status_t loom_amdgpu_hsaco_build_sections(
 
   iree_const_byte_span_t hash = iree_make_const_byte_span(NULL, 0);
   IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_build_sysv_hash(
-      input, dynamic_symbol_count, &hash, arena));
+      input, dynamic_symbol_count, arena, &hash));
 
   iree_const_byte_span_t dynamic_table_placeholder =
       iree_make_const_byte_span(NULL, LOOM_AMDGPU_HSACO_DYNAMIC_ENTRY_COUNT *
@@ -1288,7 +1287,7 @@ static iree_status_t loom_amdgpu_hsaco_build_sections(
 
   iree_const_byte_span_t data = iree_make_const_byte_span(NULL, 0);
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_hsaco_build_writable_data(input, payloads, &data, arena));
+      loom_amdgpu_hsaco_build_writable_data(input, payloads, arena, &data));
   if (payloads->writable_data_size != 0) {
     loom_amdgpu_hsaco_mutable_section(payloads, LOOM_AMDGPU_HSACO_SECTION_DATA)
         ->contents = data;
@@ -1299,7 +1298,7 @@ static iree_status_t loom_amdgpu_hsaco_build_sections(
       payloads, LOOM_AMDGPU_HSACO_SECTION_RODATA);
   IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_build_rodata(
       input, processor, payloads, rodata_section->address, text_address,
-      rodata_section->contents.data_length, &rodata, arena));
+      rodata_section->contents.data_length, arena, &rodata));
   rodata_section->contents = rodata;
 
   IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_apply_text_fixups(
@@ -1309,11 +1308,11 @@ static iree_status_t loom_amdgpu_hsaco_build_sections(
   iree_const_byte_span_t dynamic_symbol_table = iree_const_byte_span_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_build_dynamic_symbol_table(
       input, payloads, rodata_section->address, text_address, data_address,
-      &dynamic_symbol_table, arena));
+      arena, &dynamic_symbol_table));
   iree_const_byte_span_t static_symbol_table = iree_const_byte_span_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_build_static_symbol_table(
-      input, payloads, text_address, dynamic_symbol_table, &static_symbol_table,
-      arena));
+      input, payloads, text_address, dynamic_symbol_table, arena,
+      &static_symbol_table));
   loom_amdgpu_hsaco_mutable_section(payloads, LOOM_AMDGPU_HSACO_SECTION_DYNSYM)
       ->contents = dynamic_symbol_table;
   loom_amdgpu_hsaco_mutable_section(payloads, LOOM_AMDGPU_HSACO_SECTION_SYMTAB)
@@ -1321,7 +1320,7 @@ static iree_status_t loom_amdgpu_hsaco_build_sections(
 
   iree_const_byte_span_t dynamic_table = iree_make_const_byte_span(NULL, 0);
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_hsaco_build_dynamic_table(payloads, &dynamic_table, arena));
+      loom_amdgpu_hsaco_build_dynamic_table(payloads, arena, &dynamic_table));
   loom_amdgpu_hsaco_mutable_section(payloads, LOOM_AMDGPU_HSACO_SECTION_DYNAMIC)
       ->contents = dynamic_table;
   return iree_ok_status();
@@ -1423,8 +1422,8 @@ static void loom_amdgpu_hsaco_build_segments(
 }
 
 iree_status_t loom_amdgpu_hsaco_plan_build(
-    const loom_amdgpu_hsaco_input_t* input, loom_amdgpu_hsaco_plan_t* out_plan,
-    iree_arena_allocator_t* arena) {
+    const loom_amdgpu_hsaco_input_t* input, iree_arena_allocator_t* arena,
+    loom_amdgpu_hsaco_plan_t* out_plan) {
   *out_plan = (loom_amdgpu_hsaco_plan_t){0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_validate_input(input));
   const loom_amdgpu_processor_info_t* processor =

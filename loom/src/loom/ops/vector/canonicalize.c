@@ -309,7 +309,7 @@ static iree_status_t loom_vector_replace_single_result_with_scalar_i64(
 static iree_status_t loom_vector_build_iota_lane_symbolic(
     loom_op_t* op, loom_rewriter_t* rewriter, loom_value_id_t base,
     loom_value_id_t step, iree_host_size_t lane, loom_type_t result_type,
-    loom_value_id_t* out_value, loom_value_id_t value_checkpoint) {
+    loom_value_id_t value_checkpoint, loom_value_id_t* out_value) {
   *out_value = LOOM_VALUE_ID_INVALID;
   if (lane == 0) {
     *out_value = base;
@@ -862,8 +862,8 @@ static iree_status_t loom_vector_canonicalize_extract_from_iota(
   loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_vector_build_iota_lane_symbolic(
       op, rewriter, loom_vector_iota_base(source_def_op),
-      loom_vector_iota_step(source_def_op), lane, result_type, &replacement,
-      value_checkpoint));
+      loom_vector_iota_step(source_def_op), lane, result_type, value_checkpoint,
+      &replacement));
   if (replacement == LOOM_VALUE_ID_INVALID) {
     return iree_ok_status();
   }

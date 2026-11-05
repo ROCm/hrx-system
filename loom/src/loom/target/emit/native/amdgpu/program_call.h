@@ -84,7 +84,7 @@ iree_status_t loom_amdgpu_program_callable_prepare_abi(
     const loom_module_t* module, loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set,
     iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
-    bool* out_prepared, loom_amdgpu_program_callable_t* callable);
+    loom_amdgpu_program_callable_t* callable, bool* out_prepared);
 
 // Derives the complete helper-body and ABI-transport clobber contract after
 // |callable->compilation| has been accepted.

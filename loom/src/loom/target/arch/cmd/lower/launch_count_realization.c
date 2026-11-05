@@ -1489,8 +1489,8 @@ static iree_status_t loom_cmd_launch_count_plan_root(
     const loom_value_fact_table_t* facts,
     iree_diagnostic_emitter_t diagnostic_emitter,
     iree_arena_block_pool_t* block_pool, iree_arena_allocator_t* scratch_arena,
-    iree_arena_allocator_t* plan_arena, bool* out_valid,
-    loom_cmd_launch_count_plan_t*** plan_tail) {
+    iree_arena_allocator_t* plan_arena,
+    loom_cmd_launch_count_plan_t*** plan_tail, bool* out_valid) {
   iree_arena_allocator_t analysis_arena;
   iree_arena_initialize(block_pool, &analysis_arena);
   loom_cmd_launch_count_root_t root = {
@@ -1684,7 +1684,7 @@ iree_status_t loom_cmd_launch_count_realize(
         iree_arena_checkpoint_save(scratch_arena);
     status = loom_cmd_launch_count_plan_root(
         module, root_ops[i], facts, diagnostic_emitter, block_pool,
-        scratch_arena, &plan_arena, &valid, &plan_tail);
+        scratch_arena, &plan_arena, &plan_tail, &valid);
     iree_arena_checkpoint_restore(&checkpoint);
   }
 

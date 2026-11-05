@@ -56,8 +56,8 @@ iree_status_t loom_benchmark_evaluate_requirements(
 // Configures generic host reference oracles used by check.oracle.call.
 void loom_benchmark_configure_reference_oracles(
     loom_run_hal_testbench_context_t* context, iree_allocator_t host_allocator,
-    loom_benchmark_reference_oracles_t* out_oracles,
-    loom_testbench_case_execution_options_t* inout_execution_options);
+    loom_testbench_case_execution_options_t* inout_execution_options,
+    loom_benchmark_reference_oracles_t* out_oracles);
 
 #ifdef __cplusplus
 }  // extern "C"

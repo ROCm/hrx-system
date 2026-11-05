@@ -183,7 +183,7 @@ TEST(LivenessDataflowTest, MatchesDenseFixedPointAcrossGeneratedCfgs) {
     iree_arena_initialize(&block_pool, &scratch_arena);
     IREE_ASSERT_OK(loom_liveness_dataflow_solve(
         &graph, value_ids.data(), value_count, transfers.data(), block_count,
-        relations.data(), &result_arena, &scratch_arena));
+        &result_arena, &scratch_arena, relations.data()));
     iree_arena_deinitialize(&scratch_arena);
 
     const DenseLivenessResult expected =
@@ -264,7 +264,7 @@ TEST(LivenessDataflowTest, SharesCompleteSuccessorSetsAcrossBranchesAndLoops) {
   iree_arena_initialize(&block_pool, &scratch_arena);
   IREE_ASSERT_OK(loom_liveness_dataflow_solve(
       &graph, value_ids, IREE_ARRAYSIZE(value_ids), transfers,
-      IREE_ARRAYSIZE(transfers), relations, &result_arena, &scratch_arena));
+      IREE_ARRAYSIZE(transfers), &result_arena, &scratch_arena, relations));
   iree_arena_deinitialize(&scratch_arena);
 
   EXPECT_EQ(
@@ -309,7 +309,7 @@ TEST(LivenessDataflowTest, LocalBlocksPublishOnlyUpwardExposedUses) {
   iree_arena_initialize(&block_pool, &scratch_arena);
   IREE_ASSERT_OK(loom_liveness_dataflow_solve(
       nullptr, value_ids, IREE_ARRAYSIZE(value_ids), transfers,
-      IREE_ARRAYSIZE(transfers), relations, &result_arena, &scratch_arena));
+      IREE_ARRAYSIZE(transfers), &result_arena, &scratch_arena, relations));
 
   ASSERT_EQ(relations[0].live_in_count, 2u);
   EXPECT_EQ(relations[0].live_in_values[0], value_ids[0]);

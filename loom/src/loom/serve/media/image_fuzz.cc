@@ -34,7 +34,7 @@ static void Exercise(iree_string_view_t input) {
         iree_make_byte_span(pixels.data() + size, size)};
     iree_status_t results[2];
     status = loom_serve_media_image_decode_batch(
-        2, images, destinations, results, iree_allocator_system());
+        2, images, destinations, iree_allocator_system(), results);
     for (auto result : results) {
       iree_status_free(result);
     }

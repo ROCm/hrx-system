@@ -119,8 +119,8 @@ iree_status_t loom_template_application_load_call(
 void loom_template_application_check_call(
     const loom_module_t* module, const loom_template_application_call_t* call,
     const loom_template_decision_site_t* site,
-    loom_template_provider_classification_t* out_provider_classification,
-    loom_template_application_result_t* out_result);
+    loom_template_application_result_t* out_result,
+    loom_template_provider_classification_t* out_provider_classification);
 
 // Returns the stable diagnostic code for a blocked application.
 iree_string_view_t loom_template_application_blocker_code(

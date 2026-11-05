@@ -73,9 +73,8 @@ iree_status_t loom_amdgpu_plan_spill_materialization_traffic(
 iree_status_t loom_amdgpu_lower_spill_traffic(
     loom_module_t* module, loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set,
-    iree_diagnostic_emitter_t emitter,
-    loom_amdgpu_spill_lowering_result_t* out_result,
-    iree_arena_allocator_t* scratch_arena);
+    iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* scratch_arena,
+    loom_amdgpu_spill_lowering_result_t* out_result);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -97,10 +97,8 @@ class LowAllocationStorageLeaseIndexTest : public ::testing::Test {
       const loom_low_allocation_storage_lease_unit_index_t& index,
       uint32_t candidate_end_point,
       loom_low_allocation_storage_lease_conflict_class_t conflict_class,
-      uint32_t minimum_base, uint32_t maximum_base, uint32_t* out_base,
-      uint16_t reg_class = 0,
-      loom_low_allocation_location_kind_t kind =
-          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+      uint32_t minimum_base, uint32_t maximum_base, uint16_t reg_class,
+      loom_low_allocation_location_kind_t kind, uint32_t* out_base) {
     return loom_low_allocation_storage_lease_unit_index_find_next_available_location(
         &index, &descriptors_, reg_class, kind, candidate_end_point,
         conflict_class, minimum_base, maximum_base, out_base);
@@ -110,13 +108,44 @@ class LowAllocationStorageLeaseIndexTest : public ::testing::Test {
       const loom_low_allocation_storage_lease_unit_index_t& index,
       uint32_t candidate_end_point,
       loom_low_allocation_storage_lease_conflict_class_t conflict_class,
-      uint32_t minimum_base, uint32_t maximum_base, uint32_t* out_base,
-      uint16_t reg_class = 0,
-      loom_low_allocation_location_kind_t kind =
-          LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+      uint32_t minimum_base, uint32_t maximum_base, uint16_t reg_class,
+      loom_low_allocation_location_kind_t kind, uint32_t* out_base) {
     return loom_low_allocation_storage_lease_unit_index_find_previous_available_location(
         &index, &descriptors_, reg_class, kind, candidate_end_point,
         conflict_class, minimum_base, maximum_base, out_base);
+  }
+
+  bool FindNextAvailable(
+      const loom_low_allocation_storage_lease_unit_index_t& index,
+      uint32_t candidate_end_point,
+      loom_low_allocation_storage_lease_conflict_class_t conflict_class,
+      uint32_t minimum_base, uint32_t maximum_base, uint32_t* out_base) {
+    return FindNextAvailable(
+        index, candidate_end_point, conflict_class, minimum_base, maximum_base,
+        /*reg_class=*/0, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+        out_base);
+  }
+
+  bool FindNextAvailable(
+      const loom_low_allocation_storage_lease_unit_index_t& index,
+      uint32_t candidate_end_point,
+      loom_low_allocation_storage_lease_conflict_class_t conflict_class,
+      uint32_t minimum_base, uint32_t maximum_base, uint16_t reg_class,
+      uint32_t* out_base) {
+    return FindNextAvailable(
+        index, candidate_end_point, conflict_class, minimum_base, maximum_base,
+        reg_class, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, out_base);
+  }
+
+  bool FindPreviousAvailable(
+      const loom_low_allocation_storage_lease_unit_index_t& index,
+      uint32_t candidate_end_point,
+      loom_low_allocation_storage_lease_conflict_class_t conflict_class,
+      uint32_t minimum_base, uint32_t maximum_base, uint32_t* out_base) {
+    return FindPreviousAvailable(
+        index, candidate_end_point, conflict_class, minimum_base, maximum_base,
+        /*reg_class=*/0, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+        out_base);
   }
 
   // Arena backing retained for the duration of each API test.
@@ -249,18 +278,16 @@ TEST_F(LowAllocationStorageLeaseIndexTest,
   uint32_t base = UINT32_MAX;
   EXPECT_TRUE(FindNextAvailable(index, /*candidate_end_point=*/3,
                                 LOOM_LOW_ALLOCATION_STORAGE_LEASE_CONFLICT_ALL,
-                                7, 9, &base,
-                                /*reg_class=*/1));
+                                7, 9, /*reg_class=*/1, &base));
   EXPECT_EQ(base, 8u);
   EXPECT_TRUE(FindNextAvailable(index, /*candidate_end_point=*/3,
                                 LOOM_LOW_ALLOCATION_STORAGE_LEASE_CONFLICT_ALL,
-                                7, 9, &base,
-                                /*reg_class=*/2));
+                                7, 9, /*reg_class=*/2, &base));
   EXPECT_EQ(base, 7u);
   EXPECT_TRUE(FindNextAvailable(
       index, /*candidate_end_point=*/3,
-      LOOM_LOW_ALLOCATION_STORAGE_LEASE_CONFLICT_ALL, 8, 10, &base,
-      /*reg_class=*/1, LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID));
+      LOOM_LOW_ALLOCATION_STORAGE_LEASE_CONFLICT_ALL, 8, 10,
+      /*reg_class=*/1, LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID, &base));
   EXPECT_EQ(base, 8u);
 }
 
@@ -362,8 +389,8 @@ TEST_F(LowAllocationStorageLeaseIndexTest,
               uint32_t actual_base = UINT32_MAX;
               EXPECT_EQ(expected_found,
                         FindNextAvailable(index, end_point, conflict_class,
-                                          minimum_base, maximum_base,
-                                          &actual_base, reg_class, kind));
+                                          minimum_base, maximum_base, reg_class,
+                                          kind, &actual_base));
               if (expected_found) {
                 EXPECT_EQ(expected_base, actual_base);
               }
@@ -385,7 +412,7 @@ TEST_F(LowAllocationStorageLeaseIndexTest,
               EXPECT_EQ(expected_found,
                         FindPreviousAvailable(index, end_point, conflict_class,
                                               minimum_base, maximum_base,
-                                              &actual_base, reg_class, kind));
+                                              reg_class, kind, &actual_base));
               if (expected_found) {
                 EXPECT_EQ(expected_base, actual_base);
               }
