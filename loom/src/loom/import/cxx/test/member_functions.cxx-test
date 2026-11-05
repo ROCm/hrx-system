@@ -70,6 +70,33 @@ func.def noinline @Pair__add_6_value(%this_x: i32, %this_y: i32) -> (i32) {
 }
 
 // ====
+struct CopiedCounter {
+  unsigned value;
+
+  void bump() { ++value; }
+};
+
+unsigned copied_receiver(CopiedCounter counter) {
+  const CopiedCounter snapshot = counter;
+  counter.bump();
+  return snapshot.value + counter.value;
+}
+
+// ----
+func.def public @copied_receiver(%counter_value$0: i32) -> (i32) {
+  %2 = scalar.duplicate %counter_value$0 : i32
+  %counter_value$3 = func.call pure @CopiedCounter__bump_value(%2) : (i32) -> (%2 as i32)
+  %4 = scalar.addi %counter_value$0, %counter_value$3 : i32
+  func.return %4 : i32
+}
+
+func.def @CopiedCounter__bump_value(%this_value: i32) -> (%this_value as i32) {
+  %7 = scalar.constant 1 : i32
+  %value = scalar.addi %this_value, %7 : i32
+  func.return %value : i32
+}
+
+// ====
 struct Counter {
   unsigned value;
   unsigned other;

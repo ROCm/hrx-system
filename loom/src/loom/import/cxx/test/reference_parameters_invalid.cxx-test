@@ -46,3 +46,29 @@ UInt4 overlapping_vector_lanes(UInt4 values) {
   update_lanes(values[0], values[1]);
   return values;
 }
+
+// ====
+class [[loom::type("check.entropy")]] Entropy {};
+static void replace_entropy(Entropy& value, Entropy replacement) {
+  value = replacement;
+}
+Entropy opaque_copy(Entropy value, Entropy replacement) {
+  const Entropy snapshot = value;
+  // ERROR@+1: LOWERING/059 "copying an opaque dialect value across a mutable call requires a dialect-owned duplication operation"
+  replace_entropy(value, replacement);
+  return snapshot;
+}
+
+// ====
+#include <loomcxx/pipeline.h>
+using Payload = loom::type::tile<loom::type::shape<4>, unsigned>;
+using Stream = loom::type::channel<Payload>;
+static void replace_stream(Stream& stream, Stream replacement) {
+  stream = replacement;
+}
+Stream channel_copy(Stream stream, Stream replacement) {
+  const Stream snapshot = stream;
+  // ERROR@+1: LOWERING/059 "channel capabilities cannot be structurally copied across a mutable call; use an explicit channel fanout or split operation"
+  replace_stream(stream, replacement);
+  return snapshot;
+}
