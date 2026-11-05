@@ -13,6 +13,17 @@ from unittest import mock
 
 from build_tools.ci import native_artifact_security
 
+BUNDLED_RUNPATH = native_artifact_security.ElfRunpathPolicy.BUNDLED_ORIGIN
+NO_RUNPATH = native_artifact_security.ElfRunpathPolicy.ABSENT
+
+
+def parse_elf(document, *, executable=True, runpath_policy=BUNDLED_RUNPATH):
+    return native_artifact_security._parse_elf(
+        document,
+        executable=executable,
+        runpath_policy=runpath_policy,
+    )
+
 
 def elf_document():
     return [
@@ -90,7 +101,7 @@ Sections [
 
 class NativeArtifactSecurityTest(unittest.TestCase):
     def test_elf_requires_complete_position_independent_hardening(self):
-        report = native_artifact_security._parse_elf(elf_document(), executable=True)
+        report = parse_elf(elf_document())
         self.assertEqual(report.format, "ELF")
         self.assertIn("pie", report.properties)
         self.assertIn("eager-binding", report.properties)
@@ -103,16 +114,37 @@ class NativeArtifactSecurityTest(unittest.TestCase):
             native_artifact_security.NativeArtifactSecurityError,
             "non-executable-stack",
         ):
-            native_artifact_security._parse_elf(executable_stack, executable=True)
+            parse_elf(executable_stack)
 
         no_pie = copy.deepcopy(elf_document())
         no_pie[0]["DynamicSection"][2]["Flags"].remove("PIE")
         with self.assertRaisesRegex(
             native_artifact_security.NativeArtifactSecurityError, "pie"
         ):
-            native_artifact_security._parse_elf(no_pie, executable=True)
-        library_report = native_artifact_security._parse_elf(no_pie, executable=False)
+            parse_elf(no_pie)
+        library_report = parse_elf(no_pie, executable=False)
         self.assertNotIn("pie", library_report.properties)
+
+    def test_elf_standalone_artifact_requires_no_runpath(self):
+        document = elf_document()
+        document[0]["DynamicSection"] = [
+            entry
+            for entry in document[0]["DynamicSection"]
+            if entry["Type"] != "RUNPATH"
+        ]
+        report = parse_elf(document, runpath_policy=NO_RUNPATH)
+        self.assertIn("no-runpath", report.properties)
+
+        with self.assertRaisesRegex(
+            native_artifact_security.NativeArtifactSecurityError,
+            "origin-runpath",
+        ):
+            parse_elf(document)
+        with self.assertRaisesRegex(
+            native_artifact_security.NativeArtifactSecurityError,
+            "no-runpath",
+        ):
+            parse_elf(elf_document(), runpath_policy=NO_RUNPATH)
 
     def test_elf_rejects_writable_executable_loads(self):
         document = elf_document()
@@ -123,7 +155,7 @@ class NativeArtifactSecurityTest(unittest.TestCase):
             native_artifact_security.NativeArtifactSecurityError,
             "writable-xor-executable",
         ):
-            native_artifact_security._parse_elf(document, executable=True)
+            parse_elf(document)
 
     def test_pe_requires_aslr_dep_stack_cookie_and_writable_xor_executable(self):
         report = native_artifact_security._parse_pe(PE_OUTPUT)
@@ -188,6 +220,12 @@ class NativeArtifactSecurityTest(unittest.TestCase):
         self.assertEqual(
             [call.kwargs["executable"] for call in inspect_file.call_args_list],
             [False, True, False],
+        )
+        self.assertTrue(
+            all(
+                call.kwargs["runpath_policy"] is BUNDLED_RUNPATH
+                for call in inspect_file.call_args_list
+            )
         )
 
     def test_wheel_rejects_unrecognized_script_payloads(self):

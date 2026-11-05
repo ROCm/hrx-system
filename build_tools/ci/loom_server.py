@@ -39,7 +39,14 @@ class ServerPlatform:
 PLATFORMS = {
     release.LINUX_X86_64_PLATFORM: ServerPlatform(
         release.SERVER_BINARIES[release.LINUX_X86_64_PLATFORM],
-        ("--copt=-U_FORTIFY_SOURCE", "--copt=-D_FORTIFY_SOURCE=2"),
+        # ThinLTO replays preprocessor options during backend compilation.
+        # Scope the intentional undefinition to suppress that one false warning.
+        (
+            "--copt=--start-no-unused-arguments",
+            "--copt=-U_FORTIFY_SOURCE",
+            "--copt=--end-no-unused-arguments",
+            "--copt=-D_FORTIFY_SOURCE=2",
+        ),
     ),
     release.WINDOWS_X86_64_PLATFORM: ServerPlatform(
         release.SERVER_BINARIES[release.WINDOWS_X86_64_PLATFORM],
@@ -219,6 +226,7 @@ def build_server(
             readobj,
             candidate,
             executable=True,
+            runpath_policy=native_artifact_security.ElfRunpathPolicy.ABSENT,
         )
         output.mkdir(parents=True, exist_ok=False)
         destination = output / platform.binary_name

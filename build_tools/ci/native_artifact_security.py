@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import enum
 import json
 import os
 import re
@@ -23,6 +24,13 @@ from typing import Any
 
 class NativeArtifactSecurityError(ValueError):
     """Raised when a native artifact violates the release security contract."""
+
+
+class ElfRunpathPolicy(enum.Enum):
+    """Expected dynamic-library lookup policy for an ELF release artifact."""
+
+    BUNDLED_ORIGIN = "bundled-origin"
+    ABSENT = "absent"
 
 
 @dataclass(frozen=True)
@@ -42,7 +50,12 @@ def _property_names(record: dict[str, Any], key: str) -> set[str]:
         ) from error
 
 
-def _parse_elf(document: Any, *, executable: bool) -> NativeArtifactSecurity:
+def _parse_elf(
+    document: Any,
+    *,
+    executable: bool,
+    runpath_policy: ElfRunpathPolicy,
+) -> NativeArtifactSecurity:
     """Parses the JSON form emitted by llvm-readobj for one ELF file."""
     if not isinstance(document, list) or len(document) != 1:
         raise NativeArtifactSecurityError(
@@ -119,8 +132,14 @@ def _parse_elf(document: Any, *, executable: bool) -> NativeArtifactSecurity:
             has_rpath = True
     if bind_now:
         properties.add("eager-binding")
-    if not has_rpath and runpaths == [["$ORIGIN"]]:
+    if (
+        runpath_policy is ElfRunpathPolicy.BUNDLED_ORIGIN
+        and not has_rpath
+        and runpaths == [["$ORIGIN"]]
+    ):
         properties.add("origin-runpath")
+    elif runpath_policy is ElfRunpathPolicy.ABSENT and not has_rpath and not runpaths:
+        properties.add("no-runpath")
     if executable and pie:
         properties.add("pie")
 
@@ -130,8 +149,12 @@ def _parse_elf(document: Any, *, executable: bool) -> NativeArtifactSecurity:
         "relro",
         "eager-binding",
         "writable-xor-executable",
-        "origin-runpath",
     }
+    required.add(
+        "origin-runpath"
+        if runpath_policy is ElfRunpathPolicy.BUNDLED_ORIGIN
+        else "no-runpath"
+    )
     if executable:
         required.add("pie")
     missing = sorted(required - properties)
@@ -195,7 +218,11 @@ def _parse_pe(output: str) -> NativeArtifactSecurity:
 
 
 def inspect_file(
-    llvm_readobj: Path, path: Path, *, executable: bool = True
+    llvm_readobj: Path,
+    path: Path,
+    *,
+    executable: bool,
+    runpath_policy: ElfRunpathPolicy,
 ) -> NativeArtifactSecurity:
     """Inspects one final ELF or PE artifact with llvm-readobj."""
     with path.open("rb") as stream:
@@ -220,7 +247,11 @@ def inspect_file(
             raise NativeArtifactSecurityError(
                 "llvm-readobj returned invalid ELF JSON"
             ) from error
-        return _parse_elf(document, executable=executable)
+        return _parse_elf(
+            document,
+            executable=executable,
+            runpath_policy=runpath_policy,
+        )
     if signature[:2] == b"MZ":
         result = subprocess.run(
             [
@@ -257,7 +288,12 @@ def qualify_wheel(
                 path.write_bytes(contents)
                 library = lower_name.endswith((".so", ".dll")) or ".so." in lower_name
                 try:
-                    report = inspect_file(llvm_readobj, path, executable=not library)
+                    report = inspect_file(
+                        llvm_readobj,
+                        path,
+                        executable=not library,
+                        runpath_policy=ElfRunpathPolicy.BUNDLED_ORIGIN,
+                    )
                 except (
                     NativeArtifactSecurityError,
                     OSError,

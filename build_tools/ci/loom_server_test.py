@@ -80,6 +80,9 @@ class LoomServerTest(unittest.TestCase):
             self.llvm_bin / "llvm-readobj",
             mock.ANY,
             executable=True,
+            runpath_policy=(
+                loom_server.native_artifact_security.ElfRunpathPolicy.ABSENT
+            ),
         )
         self.assertEqual(path.read_bytes(), b"executable")
         build = next(arguments for arguments, _ in calls if arguments[1] == "build")
@@ -87,7 +90,9 @@ class LoomServerTest(unittest.TestCase):
         for required in (
             "--config=loom-sdk",
             "--config=opt",
+            "--copt=--start-no-unused-arguments",
             "--copt=-U_FORTIFY_SOURCE",
+            "--copt=--end-no-unused-arguments",
             "--copt=-D_FORTIFY_SOURCE=2",
             "--stamp",
             f"--embed_label=1.2.3@{self.commit}",

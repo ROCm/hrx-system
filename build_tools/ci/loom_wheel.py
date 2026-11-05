@@ -26,8 +26,12 @@ PROFILE_FLAGS = {
     "debug": ["--compilation_mode=dbg"],
     "asan": ["--config=asan"],
 }
+# ThinLTO replays preprocessor options during backend compilation. Scope the
+# intentional undefinition so Clang does not report it as unused there.
 LINUX_OPTIMIZED_COPTS = [
+    "--copt=--start-no-unused-arguments",
     "--copt=-U_FORTIFY_SOURCE",
+    "--copt=--end-no-unused-arguments",
     "--copt=-D_FORTIFY_SOURCE=2",
 ]
 WHEEL = "//loom/packaging/python:release_wheel"
