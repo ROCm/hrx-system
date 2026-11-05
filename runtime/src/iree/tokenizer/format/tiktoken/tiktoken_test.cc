@@ -248,6 +248,49 @@ static const char kTestPattern[] =
     "'s|'t|'re|'ve|'m|'ll|'d| ?\\p{L}+| ?\\p{N}+| "
     "?[^\\s\\p{L}\\p{N}]+|\\s+(?!\\S)|\\s+";
 
+struct BoundedAllocationState {
+  // Number of allocation or reallocation requests observed.
+  iree_host_size_t request_count = 0;
+  // One-based request ordinal to fail, or zero to apply only the size ceiling.
+  iree_host_size_t failure_request = 0;
+  // Largest byte length requested from the allocator.
+  iree_host_size_t largest_request = 0;
+  // Number of allocations currently owned by the wrapped system allocator.
+  iree_host_size_t live_allocation_count = 0;
+};
+
+static iree_status_t BoundedAllocate(void* self,
+                                     iree_allocator_command_t command,
+                                     const void* params, void** inout_pointer) {
+  auto* state = static_cast<BoundedAllocationState*>(self);
+  void* old_pointer = *inout_pointer;
+  if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+    const auto* allocation =
+        static_cast<const iree_allocator_alloc_params_t*>(params);
+    ++state->request_count;
+    state->largest_request =
+        iree_max(state->largest_request, allocation->byte_length);
+    if (state->request_count == state->failure_request ||
+        allocation->byte_length > 64 * 1024) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "test allocation ceiling");
+    }
+  }
+  iree_allocator_t allocator = iree_allocator_system();
+  iree_status_t status =
+      allocator.ctl(allocator.self, command, params, inout_pointer);
+  if (iree_status_is_ok(status)) {
+    if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+      if (old_pointer) {
+        --state->live_allocation_count;
+      }
+    } else if (!old_pointer) {
+      ++state->live_allocation_count;
+    }
+  }
+  return status;
+}
+
 class TiktokenTest : public ::testing::Test {
  protected:
   void SetUp() override { allocator_ = iree_allocator_system(); }
@@ -319,6 +362,59 @@ TEST_F(TiktokenTest, ParseBackwardRanks) {
                             iree_make_cstring_view(data), &config, &builder));
 
   iree_tokenizer_builder_deinitialize(&builder);
+}
+
+TEST_F(TiktokenTest, RejectsUnreservedRankGapBeforeAllocation) {
+  const char* data = "QQ== 2147483647\n";
+  iree_tokenizer_tiktoken_config_t config = {
+      .pattern = {kTestPattern, strlen(kTestPattern)},
+      .special_token_count = 0,
+      .special_token_strings = nullptr,
+      .special_token_ids = nullptr,
+  };
+  BoundedAllocationState allocation_state;
+  const iree_allocator_t allocator = {
+      .self = &allocation_state,
+      .ctl = BoundedAllocate,
+  };
+
+  iree_tokenizer_t* tokenizer = nullptr;
+  iree_status_t status = iree_tokenizer_from_tiktoken(
+      iree_make_cstring_view(data), &config, allocator, &tokenizer);
+
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(tokenizer, nullptr);
+  EXPECT_EQ(allocation_state.request_count, 0u);
+  EXPECT_EQ(allocation_state.largest_request, 0u);
+  iree_status_free(status);
+}
+
+TEST_F(TiktokenTest, ReleasesPartialParserAllocationOnGrowthFailure) {
+  std::string data = GenerateMinimalTiktokenData();
+  iree_tokenizer_tiktoken_config_t config = {
+      .pattern = {kTestPattern, strlen(kTestPattern)},
+      .special_token_count = 0,
+      .special_token_strings = nullptr,
+      .special_token_ids = nullptr,
+  };
+  BoundedAllocationState allocation_state = {
+      .failure_request = 2,
+  };
+  const iree_allocator_t allocator = {
+      .self = &allocation_state,
+      .ctl = BoundedAllocate,
+  };
+
+  iree_tokenizer_t* tokenizer = nullptr;
+  iree_status_t status = iree_tokenizer_from_tiktoken(
+      iree_make_string_view(data.data(), data.size()), &config, allocator,
+      &tokenizer);
+
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_RESOURCE_EXHAUSTED);
+  EXPECT_EQ(tokenizer, nullptr);
+  EXPECT_EQ(allocation_state.request_count, 2u);
+  EXPECT_EQ(allocation_state.live_allocation_count, 0u);
+  iree_status_free(status);
 }
 
 TEST_F(TiktokenTest, ParseMissingRank) {
@@ -469,6 +565,29 @@ TEST_F(TiktokenTest, ConstructWithRankGap) {
   EXPECT_EQ(token_ids[1], 101);
 
   iree_tokenizer_free(tokenizer);
+}
+
+TEST_F(TiktokenTest, RejectsRankGapNotReservedByConfig) {
+  std::string data = GenerateGappedTiktokenData();
+  static const iree_string_view_t special_strings[] = {
+      IREE_SVL("<|wrong_rank|>"),
+  };
+  static const int32_t special_ids[] = {257};
+  iree_tokenizer_tiktoken_config_t config = {
+      .pattern = {kTestPattern, strlen(kTestPattern)},
+      .special_token_count = 1,
+      .special_token_strings = special_strings,
+      .special_token_ids = special_ids,
+  };
+
+  iree_tokenizer_t* tokenizer = nullptr;
+  iree_status_t status = iree_tokenizer_from_tiktoken(
+      iree_make_string_view(data.data(), data.size()), &config, allocator_,
+      &tokenizer);
+
+  EXPECT_EQ(iree_status_code(status), IREE_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(tokenizer, nullptr);
+  iree_status_free(status);
 }
 
 //===----------------------------------------------------------------------===//

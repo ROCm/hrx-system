@@ -157,7 +157,7 @@ const iree_tokenizer_tiktoken_config_t* iree_tokenizer_tiktoken_config_by_name(
 // Returns:
 //   IREE_STATUS_OK on success.
 //   IREE_STATUS_INVALID_ARGUMENT for malformed tiktoken data, invalid base64,
-//     non-contiguous ranks, or empty input.
+//     unreserved rank gaps, or empty input.
 //   IREE_STATUS_FAILED_PRECONDITION for regex compilation failure.
 //   IREE_STATUS_OUT_OF_RANGE for allocation failures.
 iree_status_t iree_tokenizer_from_tiktoken(

@@ -239,33 +239,40 @@ static void iree_tokenizer_tiktoken_parsed_free(
   parsed->bytes_size = 0;
 }
 
-// Ensures capacity for at least one more entry and |additional_bytes| in the
-// byte buffer.
+// Ensures capacity for |minimum_entry_count| entries and |additional_bytes| in
+// the byte buffer.
 static iree_status_t iree_tokenizer_tiktoken_parsed_ensure_capacity(
     iree_tokenizer_tiktoken_parsed_t* parsed,
-    iree_host_size_t additional_bytes) {
-  if (parsed->entry_count >= parsed->entry_capacity) {
-    iree_host_size_t new_capacity =
-        parsed->entry_capacity == 0 ? 1024 : parsed->entry_capacity * 2;
-    IREE_RETURN_IF_ERROR(iree_allocator_realloc(
-        parsed->allocator, new_capacity * sizeof(*parsed->entries),
+    iree_host_size_t minimum_entry_count, iree_host_size_t additional_bytes) {
+  iree_host_size_t needed_bytes = 0;
+  if (!iree_host_size_checked_add(parsed->bytes_size, additional_bytes,
+                                  &needed_bytes)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "tiktoken decoded byte storage overflows");
+  }
+  if (minimum_entry_count > parsed->entry_capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        parsed->allocator, iree_max(1024, minimum_entry_count),
+        sizeof(*parsed->entries), &parsed->entry_capacity,
         (void**)&parsed->entries));
-    parsed->entry_capacity = new_capacity;
   }
-
-  iree_host_size_t needed = parsed->bytes_size + additional_bytes;
-  if (needed > parsed->bytes_capacity) {
-    iree_host_size_t new_capacity =
-        parsed->bytes_capacity == 0 ? 4096 : parsed->bytes_capacity;
-    while (new_capacity < needed) {
-      new_capacity *= 2;
-    }
-    IREE_RETURN_IF_ERROR(iree_allocator_realloc(parsed->allocator, new_capacity,
-                                                (void**)&parsed->bytes));
-    parsed->bytes_capacity = new_capacity;
+  if (needed_bytes > parsed->bytes_capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        parsed->allocator, iree_max(4096, needed_bytes),
+        /*element_size=*/1, &parsed->bytes_capacity, (void**)&parsed->bytes));
   }
-
   return iree_ok_status();
+}
+
+static bool iree_tokenizer_tiktoken_config_has_special_id(
+    const iree_tokenizer_tiktoken_config_t* config, uint32_t token_id) {
+  for (iree_host_size_t i = 0; i < config->special_token_count; ++i) {
+    if (config->special_token_ids[i] >= 0 &&
+        (uint32_t)config->special_token_ids[i] == token_id) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Parses a uint32 from a decimal string view.
@@ -293,11 +300,11 @@ static bool iree_tokenizer_tiktoken_parse_uint32(iree_string_view_t string,
 //
 // Format: one line per token, "<base64-encoded-bytes> <rank>\n".
 // Ranks must be monotonically increasing starting from 0. Gaps are permitted
-// (filled with zero-length placeholder entries) to accommodate special tokens
-// that reserve IDs within the BPE rank range.
+// only at token IDs reserved by |config| and are represented by zero-length
+// placeholder entries until the configured special token is installed.
 static iree_status_t iree_tokenizer_tiktoken_parse_file(
-    iree_string_view_t data, iree_allocator_t allocator,
-    iree_tokenizer_tiktoken_parsed_t* out_parsed) {
+    iree_string_view_t data, const iree_tokenizer_tiktoken_config_t* config,
+    iree_allocator_t allocator, iree_tokenizer_tiktoken_parsed_t* out_parsed) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   memset(out_parsed, 0, sizeof(*out_parsed));
@@ -359,11 +366,18 @@ static iree_status_t iree_tokenizer_tiktoken_parse_file(
       break;
     }
 
-    // Validate rank ordering and handle gaps.
-    // Ranks must be monotonically increasing but may have gaps where special
-    // tokens reserve IDs within the BPE range (e.g., p50k_base reserves rank
-    // 50256 for <|endoftext|> — the BPE file skips it and the config's
-    // special_token_ids fills it later).
+    // Validate the token ID domain before using the rank as an array extent.
+    if (rank > (uint32_t)INT32_MAX) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "line %" PRIhsz ": rank %" PRIu32
+                                " exceeds maximum token ID",
+                                line_number, rank);
+      break;
+    }
+
+    // Ranks must increase from the current dense extent. Missing ranks are
+    // valid only when the configuration explicitly reserves every ID for a
+    // special token (for example p50k_base's <|endoftext|> rank).
     if (rank < (uint32_t)out_parsed->entry_count) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "line %" PRIhsz ": rank %" PRIu32
@@ -373,33 +387,30 @@ static iree_status_t iree_tokenizer_tiktoken_parse_file(
       break;
     }
     if (rank > (uint32_t)out_parsed->entry_count) {
-      // Fill gap positions with zero-length placeholder entries. These slots
-      // are reserved for special tokens and will be populated by
-      // ensure_token() during vocab construction.
+      const iree_host_size_t gap_count =
+          (iree_host_size_t)rank - out_parsed->entry_count;
+      if (gap_count > config->special_token_count) {
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "line %" PRIhsz ": rank gap of %" PRIhsz " exceeds the %" PRIhsz
+            " configured special tokens",
+            line_number, gap_count, config->special_token_count);
+        break;
+      }
       for (uint32_t gap_rank = (uint32_t)out_parsed->entry_count;
-           gap_rank < rank && iree_status_is_ok(status); ++gap_rank) {
-        status = iree_tokenizer_tiktoken_parsed_ensure_capacity(out_parsed, 0);
-        if (!iree_status_is_ok(status)) {
+           gap_rank < rank; ++gap_rank) {
+        if (!iree_tokenizer_tiktoken_config_has_special_id(config, gap_rank)) {
+          status =
+              iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                               "line %" PRIhsz ": rank gap at token ID %" PRIu32
+                               " is not reserved by the tiktoken config",
+                               line_number, gap_rank);
           break;
         }
-        iree_tokenizer_tiktoken_entry_t* gap_entry =
-            &out_parsed->entries[out_parsed->entry_count];
-        gap_entry->byte_offset = 0;
-        gap_entry->byte_length = 0;
-        ++out_parsed->entry_count;
       }
       if (!iree_status_is_ok(status)) {
         break;
       }
-    }
-
-    // Validate rank fits in int32_t (token IDs are int32_t).
-    if (rank > (uint32_t)INT32_MAX) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "line %" PRIhsz ": rank %" PRIu32
-                                " exceeds maximum token ID",
-                                line_number, rank);
-      break;
     }
 
     // Base64 decode into a stack buffer. The decode function validates buffer
@@ -421,11 +432,27 @@ static iree_status_t iree_tokenizer_tiktoken_parse_file(
       break;
     }
 
-    // Store entry.
-    status = iree_tokenizer_tiktoken_parsed_ensure_capacity(out_parsed,
-                                                            decoded_length);
+    if (decoded_length > UINT32_MAX - out_parsed->bytes_size) {
+      status = iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "tiktoken decoded byte storage exceeds 4 GiB");
+      break;
+    }
+
+    // Reserve once after the complete line has been validated. Any gap is
+    // bounded by configured special-token records rather than by the numeric
+    // rank alone.
+    const iree_host_size_t next_entry_count = (iree_host_size_t)rank + 1;
+    status = iree_tokenizer_tiktoken_parsed_ensure_capacity(
+        out_parsed, next_entry_count, decoded_length);
     if (!iree_status_is_ok(status)) {
       break;
+    }
+    const iree_host_size_t gap_count =
+        (iree_host_size_t)rank - out_parsed->entry_count;
+    if (gap_count > 0) {
+      memset(out_parsed->entries + out_parsed->entry_count, 0,
+             gap_count * sizeof(*out_parsed->entries));
+      out_parsed->entry_count = rank;
     }
 
     iree_tokenizer_tiktoken_entry_t* entry =
@@ -744,7 +771,7 @@ iree_status_t iree_tokenizer_parse_tiktoken(
 
   // Phase 1: Parse the tiktoken file into entries + raw bytes.
   iree_tokenizer_tiktoken_parsed_t parsed = {0};
-  status = iree_tokenizer_tiktoken_parse_file(data, allocator, &parsed);
+  status = iree_tokenizer_tiktoken_parse_file(data, config, allocator, &parsed);
 
   // Build byte-to-rank mapping from the first 256 entries. In real tiktoken
   // files, rank 0 is byte 0x21 ('!'), not 0x00 — the mapping is not identity.
