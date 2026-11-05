@@ -1082,19 +1082,13 @@ void Functions::admit_reference_parameters(cxx::FunctionSymbol* symbol,
                         "value references require a function type");
   }
   auto traits = unit_.typeTraits();
-  if (traits.is_rvalue_reference(signature->returnType())) {
-    diagnostics_.reject(unit_, source,
-                        "rvalue-reference returns require consuming object "
-                        "identity");
-  }
-  if (traits.is_lvalue_reference(signature->returnType()) &&
+  if (traits.is_reference(signature->returnType()) &&
       traits.is_function(traits.remove_reference(signature->returnType()))) {
     diagnostics_.reject(unit_, source,
                         "function reference returns require callable values");
   }
 
-  bool has_runtime_reference =
-      traits.is_lvalue_reference(signature->returnType());
+  bool has_runtime_reference = traits.is_reference(signature->returnType());
   auto parameters = symbol->parameters();
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
     auto* parameter_type = parameters[ordinal]->type();
@@ -1158,6 +1152,12 @@ bool Functions::returns_current_receiver_reference(
     cxx::FunctionSymbol* symbol) const {
   auto* analysis = control_flow(symbol);
   return analysis && analysis->returns_current_receiver_reference();
+}
+
+std::optional<size_t> Functions::reference_return_parameter(
+    cxx::FunctionSymbol* symbol) const {
+  auto* analysis = control_flow(symbol);
+  return analysis ? analysis->reference_return_parameter() : std::nullopt;
 }
 
 std::span<cxx::FieldSymbol* const> Functions::receiver_writes(
@@ -1227,13 +1227,17 @@ BoundSignature Functions::bind_callable_signature(
   auto receiver = implicit_object(instance, source);
   const bool returns_void = unit_.typeTraits().is_void(signature->returnType());
   const bool returns_reference =
-      unit_.typeTraits().is_lvalue_reference(signature->returnType());
+      unit_.typeTraits().is_reference(signature->returnType());
+  const bool returns_parameter_alias =
+      returns_reference && reference_return_parameter(symbol).has_value();
   const bool returns_receiver_alias =
       returns_reference && receiver &&
       receiver->abi == ImplicitObjectABI::Value &&
       returns_current_receiver_reference(symbol);
-  sources.reserve(receiver.has_value() + parameters.size() + !returns_void +
-                  references.size() +
+  const bool has_ordinary_result =
+      !returns_void && !returns_receiver_alias && !returns_parameter_alias;
+  sources.reserve(receiver.has_value() + parameters.size() +
+                  has_ordinary_result + references.size() +
                   (receiver ? receiver->written_fields.size() : 0));
   size_t argument_count = 0;
   size_t receiver_argument_count = 0;
@@ -1270,7 +1274,7 @@ BoundSignature Functions::bind_callable_signature(
     reference_index += is_reference;
   }
   size_t ordinary_result_count = 0;
-  if (!returns_void && !returns_receiver_alias) {
+  if (has_ordinary_result) {
     auto* result_type =
         returns_reference
             ? unit_.typeTraits().add_pointer(

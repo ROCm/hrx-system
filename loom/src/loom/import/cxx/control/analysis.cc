@@ -715,23 +715,66 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
   auto* signature = function_
                         ? cxx::type_cast<cxx::FunctionType>(function_->type())
                         : nullptr;
-  if (signature &&
-      unit_.typeTraits().is_lvalue_reference(signature->returnType()) &&
-      ast->expression) {
-    if (is_current_object(ast->expression)) {
-      if (reference_return_ == ReferenceReturn::Storage) {
-        receiver_requires_storage_ = true;
-      } else {
-        reference_return_ = ReferenceReturn::CurrentReceiver;
-      }
-    } else {
-      if (reference_return_ == ReferenceReturn::CurrentReceiver) {
-        receiver_requires_storage_ = true;
-      }
-      reference_return_ = ReferenceReturn::Storage;
-      require_identity(ast->expression);
+  if (!signature || !unit_.typeTraits().is_reference(signature->returnType()) ||
+      !ast->expression) {
+    return;
+  }
+
+  auto parameters = function_->parameters();
+  std::optional<size_t> parameter_ordinal;
+  auto returned =
+      classify_destination(unwrap_object_identity(unit_, ast->expression));
+  if (returned && !returned->member && returned->component_offset == 0) {
+    auto found = std::ranges::find(parameters, returned->binding);
+    if (found != parameters.end() &&
+        unit_.typeTraits().is_lvalue_reference((*found)->type())) {
+      parameter_ordinal = static_cast<size_t>(found - parameters.begin());
     }
   }
+
+  ReferenceReturn incoming = ReferenceReturn::Storage;
+  if (is_current_object(unit_, ast->expression)) {
+    incoming = ReferenceReturn::CurrentReceiver;
+  } else if (parameter_ordinal) {
+    incoming = ReferenceReturn::Parameter;
+  }
+  auto require_storage = [&](ReferenceReturn origin,
+                             std::optional<size_t> ordinal,
+                             cxx::ExpressionAST* expression) {
+    if (origin == ReferenceReturn::CurrentReceiver) {
+      receiver_requires_storage_ = true;
+    } else if (origin == ReferenceReturn::Parameter) {
+      require_reference_storage(parameters[*ordinal]);
+    } else if (origin == ReferenceReturn::Storage && expression) {
+      require_identity(expression);
+    }
+  };
+
+  if (reference_return_ == ReferenceReturn::None) {
+    reference_return_ = incoming;
+    if (parameter_ordinal) {
+      reference_return_parameter_ = *parameter_ordinal;
+    }
+    if (incoming == ReferenceReturn::Storage) {
+      require_storage(incoming, std::nullopt, ast->expression);
+    }
+    return;
+  }
+  const bool same_origin = reference_return_ == incoming &&
+                           (incoming != ReferenceReturn::Parameter ||
+                            reference_return_parameter_ == *parameter_ordinal);
+  if (same_origin) {
+    if (incoming == ReferenceReturn::Storage) {
+      require_storage(incoming, std::nullopt, ast->expression);
+    }
+    return;
+  }
+  auto previous_ordinal = reference_return_ == ReferenceReturn::Parameter
+                              ? std::optional(reference_return_parameter_)
+                              : std::nullopt;
+  require_storage(reference_return_, previous_ordinal, nullptr);
+  require_storage(incoming, parameter_ordinal, ast->expression);
+  reference_return_ = ReferenceReturn::Storage;
 }
 
 void ControlFlow::visit(cxx::CallExpressionAST* ast) {
@@ -842,7 +885,8 @@ void ControlFlow::retain_call(cxx::CallExpressionAST* call,
   if (function->isImplicitObjectMemberFunction()) {
     auto* base = unwrap_expression(call->baseExpression);
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(base)) {
-      retained.current_receiver = is_current_object(member->baseExpression);
+      retained.current_receiver =
+          is_current_object(unit_, member->baseExpression);
       retained.storage_receiver =
           member->accessOp == cxx::TokenKind::T_MINUS_GREATER;
       if (!retained.current_receiver) {
@@ -860,7 +904,7 @@ void ControlFlow::retain_call(cxx::SubscriptExpressionAST* call,
   DirectCall retained = {function, call, {}, std::nullopt, false, false};
   retained.arguments.push_back(retain_call_argument(call->indexExpression));
   if (function->isImplicitObjectMemberFunction()) {
-    retained.current_receiver = is_current_object(call->baseExpression);
+    retained.current_receiver = is_current_object(unit_, call->baseExpression);
     if (!retained.current_receiver) {
       retained.receiver = retain_call_argument(call->baseExpression);
     }
@@ -879,7 +923,7 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
     retained.arguments.push_back({nullptr, {}, nullptr, false, false, {}});
   }
   if (call.receiver) {
-    retained.current_receiver = is_current_object(call.receiver);
+    retained.current_receiver = is_current_object(unit_, call.receiver);
     if (!retained.current_receiver) {
       retained.receiver = retain_call_argument(call.receiver);
       retained.storage_receiver = retained.receiver->inherent_storage;
@@ -905,7 +949,7 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
   if (!call.receiver || !call.function->isImplicitObjectMemberFunction()) {
     return;
   }
-  if (!is_current_object(call.receiver)) {
+  if (!is_current_object(unit_, call.receiver)) {
     if (call.receiver->valueCategory == cxx::ValueCategory::kLValue ||
         explicit_xvalue_operand(unit_, unwrap_expression(call.receiver))) {
       if (implicit_object_may_mutate(call.function)) {
@@ -982,7 +1026,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       argument.inherent_storage = true;
       return;
     }
-    if (is_current_object(member->baseExpression)) {
+    if (is_current_object(unit_, member->baseExpression)) {
       argument.current_receiver = true;
       return;
     }
@@ -1023,7 +1067,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   }
   if (auto call = direct_operator_call(expression)) {
     auto* signature = cxx::type_cast<cxx::FunctionType>(call->function->type());
-    if (signature && traits.is_lvalue_reference(signature->returnType())) {
+    if (signature && traits.is_reference(signature->returnType())) {
       argument.reference_calls.push_back(expression);
       return;
     }
@@ -1038,7 +1082,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     auto* callee = direct_callee(call);
     auto* signature =
         callee ? cxx::type_cast<cxx::FunctionType>(callee->type()) : nullptr;
-    if (signature && traits.is_lvalue_reference(signature->returnType())) {
+    if (signature && traits.is_reference(signature->returnType())) {
       argument.reference_calls.push_back(expression);
       return;
     }
@@ -1215,6 +1259,14 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
     if (callee.reference_written(parameter)) {
       caller_changed =
           record_callable_write(argument.write_binding) || caller_changed;
+    }
+  }
+  if (identity_call_results_.contains(call.source)) {
+    if (auto ordinal = callee.reference_return_parameter()) {
+      callee_changed = callee.require_reference_storage(parameters[*ordinal]) ||
+                       callee_changed;
+      caller_changed =
+          require_identity(call.arguments[*ordinal]) || caller_changed;
     }
   }
   if (!call.function->isImplicitObjectMemberFunction()) {
@@ -1437,7 +1489,7 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
   auto* base = unwrap_expression(call->baseExpression);
   if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(base)) {
     auto* receiver = member->baseExpression;
-    if (!is_current_object(receiver)) {
+    if (!is_current_object(unit_, receiver)) {
       if (member->accessOp == cxx::TokenKind::T_DOT &&
           (receiver->valueCategory == cxx::ValueCategory::kLValue ||
            explicit_xvalue_operand(unit_, unwrap_expression(receiver)))) {
@@ -1504,7 +1556,7 @@ std::optional<Destination> ControlFlow::classify_destination(
   if (!field || field->isStatic()) {
     return std::nullopt;
   }
-  if (is_current_object(member->baseExpression)) {
+  if (is_current_object(unit_, member->baseExpression)) {
     return Destination{field, 0, nullptr};
   }
   if (member->accessOp != cxx::TokenKind::T_DOT) {

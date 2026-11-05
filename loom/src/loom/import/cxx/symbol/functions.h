@@ -212,8 +212,11 @@ class Functions {
       cxx::FunctionSymbol* symbol) const;
   // Whether calls must transport the implicit object as durable storage.
   bool receiver_requires_storage(cxx::FunctionSymbol* symbol) const;
-  // Whether an lvalue-reference result is exactly the current object.
+  // Whether a reference result is exactly the current object.
   bool returns_current_receiver_reference(cxx::FunctionSymbol* symbol) const;
+  // Exact source parameter aliased by every reference result, when one exists.
+  std::optional<size_t> reference_return_parameter(
+      cxx::FunctionSymbol* symbol) const;
   // Exact top-level implicit-object fields replaced by the definition.
   std::span<cxx::FieldSymbol* const> receiver_writes(
       cxx::FunctionSymbol* symbol) const;

@@ -52,8 +52,10 @@ bool same_function(cxx::FunctionSymbol* left, cxx::FunctionSymbol* right);
 const cxx::StringLiteral* string_initializer(cxx::ExpressionAST* initializer);
 
 // Whether an expression denotes the implicit object parameter, including
-// transparent parentheses, conversions, and an explicit dereference of this.
-bool is_current_object(cxx::ExpressionAST* expression);
+// transparent parentheses, identity-preserving category projections, and an
+// explicit dereference of this.
+bool is_current_object(cxx::TranslationUnit& unit,
+                       cxx::ExpressionAST* expression);
 
 // Returns the directly named function called by |call|, or null for indirect
 // calls and other callable expressions.

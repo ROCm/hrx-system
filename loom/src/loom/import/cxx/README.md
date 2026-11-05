@@ -2160,7 +2160,9 @@ Binary and unary operators, compound assignments, and prefix and postfix
 increment or decrement support member and free definitions. Mutable reference
 arguments and receivers use tied callable results, so `value += bias` updates
 the caller's SSA value. A reference result that aliases `*this` reuses that tied
-result; using any reference result as an object identity materializes storage
+result. When every return aliases one reference parameter, the result reuses the
+once-evaluated argument; this includes move-shaped templates instantiated from
+lvalue arguments. Using either form as an object identity materializes storage
 only where the source semantics require it. Source evaluation order, including
 the distinct compound-assignment and postfix rules, is retained.
 

@@ -103,14 +103,15 @@ bool same_function(cxx::FunctionSymbol* left, cxx::FunctionSymbol* right) {
   return left && right && left->canonical() == right->canonical();
 }
 
-bool is_current_object(cxx::ExpressionAST* expression) {
-  expression = unwrap_expression(expression);
+bool is_current_object(cxx::TranslationUnit& unit,
+                       cxx::ExpressionAST* expression) {
+  expression = unwrap_object_identity(unit, expression);
   if (cxx::ast_cast<cxx::ThisExpressionAST>(expression)) {
     return true;
   }
   auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(expression);
   return unary && !unary->symbol && unary->op == cxx::TokenKind::T_STAR &&
-         is_current_object(unary->expression);
+         is_current_object(unit, unary->expression);
 }
 
 const cxx::StringLiteral* string_initializer(cxx::ExpressionAST* initializer) {
