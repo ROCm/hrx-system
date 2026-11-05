@@ -1108,16 +1108,18 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
           continue;
         }
       }
-      // Spill materialization places required temporaries near their uses.
-      // If scored scheduling makes those lifetimes unallocatable, retain
-      // that placement priority for the remaining repair rounds. Dependency
-      // and physical issue constraints still govern every scheduled node.
+      // Scored scheduling can fragment physical aliases even when class-local
+      // pressure fits. After value repair is exhausted, try source placement
+      // for those failures and for spill temporaries placed near their uses.
+      // Dependency and physical issue constraints still govern every node.
       if (repair_options.schedule_strategy !=
               LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY &&
           loom_low_function_schedule(low_func_op) != LOOM_LOW_SCHEDULE_LOCKED &&
           frame.allocation.failure.blocking_kind !=
               LOOM_LOW_ALLOCATION_FAILURE_BLOCKING_INTERVAL_EXCEEDS_BUDGET &&
-          frame.allocation.failure.is_spill_traffic) {
+          (frame.allocation.failure.is_spill_traffic ||
+           frame.allocation.failure.peak_live_units <=
+               frame.allocation.failure.budget_units)) {
         repair_options.schedule_strategy =
             LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
         loom_low_emission_frame_advance_repair_iteration(statistics);
