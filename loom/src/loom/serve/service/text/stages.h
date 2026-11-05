@@ -22,6 +22,8 @@ typedef struct loom_serve_text_stage_t {
   loom_serve_jit_stage_t* compiled;
   // Immutable layout borrowing compiled (or its still-running producer).
   loom_cmd_program_t program;
+  // Exact execution family resolved at binding; the deployment outlives stages.
+  const iree_hal_queue_family_t* queue_family;
   // Reusable command retaining its executable and fixed weight resources.
   iree_hal_command_buffer_t* command;
   // Number of owned fixed-root slots, including partial initialization.
@@ -74,15 +76,14 @@ typedef void (*loom_serve_text_stages_completion_fn_t)(void* user_data,
 
 // Records bound stages concurrently on an existing scheduling domain. The
 // positive concurrency bounds tasks and temporary job storage, independently
-// of stage_count. The queue family, compiled stages, fixed buffers, and
-// user_data remain borrowed through completion; command slots start NULL and
-// have disjoint writers. No commands are submitted for device execution.
+// of stage_count. Each stage's queue family, compiled inputs, fixed buffers,
+// and user_data remain borrowed through completion; command slots start NULL
+// and have disjoint writers. No commands are submitted for device execution.
 // Success owes one completion, possibly inline, after every accepted task
 // retires, even if a later submission or recording fails. Allocation rejection
 // owes no callback. The caller may discard the result only after completion.
 iree_status_t loom_serve_text_stages_record_async(
     loomc_task_sink_t sink, iree_host_size_t concurrency,
-    const iree_hal_queue_family_t* queue_family,
     iree_hal_command_buffer_mode_t mode, iree_host_size_t stage_count,
     loom_serve_text_stage_t* stages,
     loom_serve_text_stages_completion_fn_t completion, void* user_data,

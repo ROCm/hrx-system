@@ -145,7 +145,6 @@ static void loom_serve_text_variant_compiled(void* user_data,
     status = loom_serve_text_stages_record_async(
         loom_serve_host_preparation_sink(host),
         loomc_task_pool_worker_count(loom_serve_host_task_pool(host)),
-        iree_hal_queue_family(loom_serve_device_dispatch_queue(job->device)),
         job->command_mode, variant->stage_count, variant->stages,
         loom_serve_text_variant_recorded, job, variant->host_allocator);
   }

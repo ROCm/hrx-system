@@ -84,6 +84,7 @@ class TextStagesTest : public loom_serve::testing::JitTest {
           loom_serve_host_executor(loom_serve_device_host(device_owner_)));
       IREE_ASSERT_OK(compilation.Await(&stages_[i].compiled));
       stages_[i].program = *loom_serve_jit_stage_program(stages_[i].compiled);
+      stages_[i].queue_family = iree_hal_queue_family(dispatch_);
     }
     // Prepared products, not their source catalog, own the executable inputs.
     loom_serve_jit_release(jit_);
@@ -103,8 +104,8 @@ class TextStagesTest : public loom_serve::testing::JitTest {
                                iree_allocator_t allocator) {
     complete_ = false;
     return loom_serve_text_stages_record_async(
-        sink, concurrency, iree_hal_queue_family(dispatch_),
-        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, stages_.size(), stages_.data(),
+        sink, concurrency, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, stages_.size(),
+        stages_.data(),
         [](void* user_data, iree_status_t status) {
           auto* self = static_cast<TextStagesTest*>(user_data);
           std::lock_guard<std::mutex> lock(self->mutex_);

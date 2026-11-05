@@ -157,6 +157,9 @@ iree_status_t loom_serve_text_stages_bind(
     for (iree_host_size_t i = 0; i < stage_count; ++i) {
       const loom_serve_preparation_stage_t* declaration =
           loom_serve_preparation_stage(preparation, i);
+      stages[i].queue_family =
+          iree_hal_queue_family(loom_serve_device_dispatch_queue(
+              devices[declaration->execution_index]));
       for (uint32_t r = 0; r < declaration->parameter_count; ++r) {
         const loom_serve_preparation_parameter_t* source =
             &declaration->parameters[r];
@@ -238,6 +241,7 @@ iree_status_t loom_serve_text_stages_rebind(
     }
     IREE_RETURN_IF_ERROR(loom_serve_text_check_parameters(&baseline[i].program,
                                                           &stages[i].program));
+    stages[i].queue_family = baseline[i].queue_family;
     for (uint32_t j = 0; j < stages[i].fixed_buffer_count; ++j) {
       stages[i].fixed_buffers[j] = baseline[i].fixed_buffers[j];
       iree_hal_buffer_retain(stages[i].fixed_buffers[j]);
@@ -264,8 +268,6 @@ struct loom_serve_text_record_job_t {
   iree_atomic_int64_t next_index;
   // Allocator owning this job and its bounded inline task array.
   iree_allocator_t host_allocator;
-  // Borrowed queue family shared by every stage in the model.
-  const iree_hal_queue_family_t* queue_family;
   // Command retention policy selected by the model owner.
   iree_hal_command_buffer_mode_t mode;
   // Number of command slots, independent of the number of tasks.
@@ -313,7 +315,7 @@ static void loom_serve_text_record_execute(loomc_task_t* base,
     }
     loom_serve_text_stage_t* stage = &job->stages[index];
     task->status = loom_serve_jit_stage_record(
-        stage->compiled, job->queue_family, job->mode, NULL,
+        stage->compiled, stage->queue_family, job->mode, NULL,
         stage->fixed_buffers, &stage->command);
   }
   if (!iree_status_is_ok(task->status)) {
@@ -335,7 +337,6 @@ static const loomc_task_vtable_t loom_serve_text_record_vtable = {
 
 iree_status_t loom_serve_text_stages_record_async(
     loomc_task_sink_t sink, iree_host_size_t concurrency,
-    const iree_hal_queue_family_t* queue_family,
     iree_hal_command_buffer_mode_t mode, iree_host_size_t stage_count,
     loom_serve_text_stage_t* stages,
     loom_serve_text_stages_completion_fn_t completion, void* user_data,
@@ -347,7 +348,6 @@ iree_status_t loom_serve_text_stages_record_async(
       (void**)&job));
   iree_atomic_ref_count_init(&job->ref_count);
   job->host_allocator = host_allocator;
-  job->queue_family = queue_family;
   job->mode = mode;
   job->stage_count = stage_count;
   job->stages = stages;

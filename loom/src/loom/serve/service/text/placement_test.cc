@@ -126,13 +126,7 @@ class TextPlacementTest
         loom_serve_execution_drain_all(executions_.size(), executions_.data()));
     loom_serve_program_free(program_);
     iree_vm_module_release(module_);
-    for (auto& stage : stages_) {
-      iree_hal_command_buffer_release(stage.command);
-      for (uint32_t i = 0; i < stage.fixed_buffer_count; ++i) {
-        iree_hal_buffer_release(stage.fixed_buffers[i]);
-      }
-      iree_allocator_free(allocator_, stage.fixed_buffers);
-    }
+    ReleaseStages(stages_);
     loom_serve_stage_set_free(compiled_);
     for (auto* residency : residencies_) {
       loom_serve_residency_free(residency);
@@ -229,18 +223,52 @@ class TextPlacementTest
     if (release_catalogs) {
       ReleaseCatalogs();
     }
+    return AwaitCompletion();
+  }
+
+  iree_status_t AwaitCompletion() {
     std::unique_lock<std::mutex> lock(mutex_);
     condition_.wait(lock, [this] { return complete_; });
-    status = status_;
+    const auto status = status_;
     status_ = iree_ok_status();
     return status;
   }
 
-  void Bind() {
+  void ReleaseStages(const std::array<loom_serve_text_stage_t, 3>& stages) {
+    for (const auto& stage : stages) {
+      iree_hal_command_buffer_release(stage.command);
+      for (uint32_t i = 0; i < stage.fixed_buffer_count; ++i) {
+        iree_hal_buffer_release(stage.fixed_buffers[i]);
+      }
+      iree_allocator_free(allocator_, stage.fixed_buffers);
+      loom_serve_jit_stage_free(stage.compiled);
+    }
+  }
+
+  iree_status_t Record() {
+    complete_ = false;
+    IREE_RETURN_IF_ERROR(loom_serve_text_stages_record_async(
+        loom_serve_host_preparation_sink(host_),
+        loomc_task_pool_worker_count(loom_serve_host_task_pool(host_)),
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, stages_.size(), stages_.data(),
+        [](void* user_data, iree_status_t status) {
+          auto* self = static_cast<TextPlacementTest*>(user_data);
+          std::lock_guard<std::mutex> lock(self->mutex_);
+          self->status_ = status;
+          self->complete_ = true;
+          self->condition_.notify_one();
+        },
+        this, allocator_));
+    return AwaitCompletion();
+  }
+
+  void Bind(bool rebind = false) {
     ASSERT_EQ(compiled_->count, 4u);
     for (size_t i = 0; i < stages_.size(); ++i) {
       ASSERT_NE(compiled_->values[i], nullptr);
       stages_[i].program = *loom_serve_jit_stage_program(compiled_->values[i]);
+      stages_[i].compiled = compiled_->values[i];
+      compiled_->values[i] = nullptr;
     }
     // The target prefix uses the production six-buffer text ABI; auxiliary
     // commands use its ordinary one-buffer form. Direct stages have no roots.
@@ -270,16 +298,28 @@ class TextPlacementTest
           cache, executions_[owner], 1, &parameter_groups_[owner], allocator_,
           &residencies_[owner]));
     }
+    if (rebind) {
+      auto baseline = stages_;
+      stages_ = {};
+      for (size_t i = 0; i < stages_.size(); ++i) {
+        stages_[i].program = baseline[i].program;
+        stages_[i].compiled = baseline[i].compiled;
+        baseline[i].compiled = nullptr;
+      }
+      auto status = loom_serve_text_stages_rebind(
+          preparation_, 1, stages_.size(), baseline.data(), stages_.data(),
+          allocator_);
+      ReleaseStages(baseline);
+      IREE_ASSERT_OK(status);
+    }
+    IREE_ASSERT_OK(Record());
     std::array<loom_serve_stage_t, 4> bindings = {};
     for (size_t i = 0; i < stages_.size(); ++i) {
       const uint32_t execution =
           loom_serve_preparation_stage(preparation_, i)->execution_index;
-      IREE_ASSERT_OK(loom_serve_jit_stage_record(
-          compiled_->values[i],
-          iree_hal_queue_family(
-              loom_serve_device_dispatch_queue(devices_[execution])),
-          IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr,
-          stages_[i].fixed_buffers, &stages_[i].command));
+      EXPECT_EQ(iree_hal_command_buffer_queue_family(stages_[i].command),
+                iree_hal_queue_family(
+                    loom_serve_device_dispatch_queue(devices_[execution])));
       bindings[i] = loom_serve_text_stage_binding(&stages_[i], execution);
     }
     bindings[3] = {
@@ -473,9 +513,9 @@ class TextPlacementTest
   std::mutex mutex_;
   // Test-thread notification; no compiler worker waits on a child.
   std::condition_variable condition_;
-  // Final callback has relinquished all borrowed compilation inputs.
+  // Final compilation or recording callback has relinquished its inputs.
   bool complete_ = false;
-  // Owned final compilation status, transferred by Compile().
+  // Owned final outcome, transferred by AwaitCompletion().
   iree_status_t status_ = iree_ok_status();
 };
 
@@ -495,6 +535,13 @@ TEST_P(TextPlacementTest, FailedOwnerCompilationJoinsOtherNativeProducts) {
   EXPECT_EQ(compiled_->values[1], nullptr);
   EXPECT_NE(compiled_->values[2], nullptr);
   EXPECT_NE(compiled_->values[3], nullptr);
+}
+
+TEST_P(TextPlacementTest, ReplacementRecordingPreservesEveryExecutionFamily) {
+  IREE_ASSERT_OK(Prepare(false));
+  IREE_ASSERT_OK(Compile());
+  ASSERT_NO_FATAL_FAILURE(Bind(/*rebind=*/true));
+  ASSERT_NO_FATAL_FAILURE(Run());
 }
 
 INSTANTIATE_TEST_SUITE_P(

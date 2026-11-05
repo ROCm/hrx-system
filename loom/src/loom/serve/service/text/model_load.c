@@ -568,9 +568,8 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
         status = loom_serve_text_stages_record_async(
             loom_serve_host_preparation_sink(host),
             loomc_task_pool_worker_count(loom_serve_host_task_pool(host)),
-            iree_hal_queue_family(model->dispatch), model->command_mode,
-            model->stage_count, model->stages, loom_serve_text_load_complete,
-            load, load->host_allocator);
+            model->command_mode, model->stage_count, model->stages,
+            loom_serve_text_load_complete, load, load->host_allocator);
         submitted = iree_status_is_ok(status);
         break;
       case TEXT_LOAD_LINK:
