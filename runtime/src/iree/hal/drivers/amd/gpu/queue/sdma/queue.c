@@ -490,7 +490,8 @@ static bool iree_hal_amd_gpu_sdma_queue_scan(
 
 static bool iree_hal_amd_gpu_sdma_queue_poll(
     void* user_data, amdf_status_t wait_status,
-    iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    iree_hal_amd_gpu_completion_wait_t* out_wait,
+    iree_hal_amd_gpu_completion_copy_t* out_copy) {
   iree_hal_amd_gpu_sdma_queue_t* queue = user_data;
   // Other engines share the observer. An idle copy source performs no RMW and
   // supplies no active-wait hint merely because a PM4 queue woke up. A later

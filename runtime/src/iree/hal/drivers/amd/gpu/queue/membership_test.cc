@@ -94,7 +94,8 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
               return iree_hal_amd_gpu_completion_source_t{
                   .fn =
                       [](void*, amdf_status_t,
-                         iree_hal_amd_gpu_completion_wait_t*) { return false; },
+                         iree_hal_amd_gpu_completion_wait_t*,
+                         iree_hal_amd_gpu_completion_copy_t*) { return false; },
                   .user_data = base,
               };
             },

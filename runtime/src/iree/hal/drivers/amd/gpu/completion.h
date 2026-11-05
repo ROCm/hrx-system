@@ -49,6 +49,17 @@ typedef struct iree_hal_amd_gpu_completion_wait_t {
   struct iree_hal_amd_gpu_signal_t* signal;
 } iree_hal_amd_gpu_completion_wait_t;
 
+// One bounded CPU copy of already-retired staging bytes. Only the completion
+// worker executes this outside the drain lock. Its source retains the staging
+// and destination until return; helpers may retire other sources meanwhile.
+// This callback cannot allocate, perform I/O, or invoke application code.
+typedef struct iree_hal_amd_gpu_completion_copy_t {
+  // Copies already-visible bytes and marks the source's copy consumed.
+  void (*fn)(void* user_data);
+  // Borrowed source-owned copy state, joined before replacement or teardown.
+  void* user_data;
+} iree_hal_amd_gpu_completion_copy_t;
+
 // On success, consumes a bounded batch of authoritative completion records.
 // Returns true when another batch is immediately ready or this batch retired
 // resources that may unblock another source. Outstanding GPU work alone does
@@ -57,6 +68,10 @@ typedef struct iree_hal_amd_gpu_completion_wait_t {
 // A callback may publish continuations, but cannot synchronously wait for
 // another source in this drain. Recursive try_drain calls return immediately.
 // out_wait starts empty; the source may provide its next coherent wake hint.
+// A non-NULL out_copy admits one worker-owned staging copy. NULL leaves that
+// copy pending: helpers never execute bulk copies, and each worker round admits
+// at most one. The source is excluded until its copy returns; ordinary source
+// retirement then releases the capture and publishes completion.
 // An already-ready record blocked on another source's retirement supplies no
 // hint until that dependency progresses. KERNEL status queries remain
 // event-only.
@@ -67,13 +82,14 @@ typedef struct iree_hal_amd_gpu_completion_wait_t {
 // Failure does not establish native quiescence or permit releasing GPU storage.
 typedef bool (*iree_hal_amd_gpu_completion_fn_t)(
     void* user_data, amdf_status_t wait_status,
-    iree_hal_amd_gpu_completion_wait_t* out_wait);
+    iree_hal_amd_gpu_completion_wait_t* out_wait,
+    iree_hal_amd_gpu_completion_copy_t* out_copy);
 
 // One completion source, such as queue retirement or shader reports. Callback
 // bindings are immutable and borrowed until source replacement or worker join.
 // The drain mutex serializes callbacks. Only the worker stores hints here;
 // helpers discard their hints. Replacement joins both callbacks and unlocked
-// observation before returning the old table's ownership.
+// observation and staging copies before returning the old table's ownership.
 typedef struct iree_hal_amd_gpu_completion_source_t {
   // Bounded observation or terminal native-failure delivery.
   iree_hal_amd_gpu_completion_fn_t fn;
@@ -100,10 +116,13 @@ typedef struct iree_hal_amd_gpu_completion_t {
   iree_duration_t spin_ns;
   // Owned thread, or NULL after failed initialization or a successful join.
   iree_thread_t* thread;
-  // Stop/replacement requests and the worker's active observation lifetime.
+  // Stop/replacement requests and the worker's unlocked source borrow.
   iree_atomic_int32_t state;
   // Serializes source callbacks and table swaps, never polling or waiting.
   iree_slim_mutex_t drain_mutex;
+  // Source excluded while the worker copies its staging outside drain_mutex.
+  // Changed only under drain_mutex; the unlocked borrow joins its lifetime.
+  iree_hal_amd_gpu_completion_source_t* active_source;
   // First native execution/observation failure. Cold membership can observe it
   // before the terminal worker joins, without taking the drain mutex.
   iree_atomic_int64_t failure;
@@ -128,16 +147,16 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
     iree_thread_affinity_t affinity, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_completion_t* out_completion);
 
-// Replaces the borrowed source table after joining all callbacks and coherent
-// observations using the old table. Interrupts active observation, including
-// an infinite observation policy, without stopping the worker or invoking a
-// native API. The cold owner then signals the context's native event to rebuild
-// wake hints for remaining queues and handles any native wake failure. The
-// replacement remains live until the next replacement or deinitialization; its
-// wait hints start empty. The cold owner serializes replacements with
-// deinitialization and separately joins removed sources' accepted work and
-// external producers. Called outside source callbacks, with no allocation or
-// native operation inside the handoff.
+// Replaces the borrowed source table after joining all callbacks, staging
+// copies, and coherent observations using the old table. Interrupts
+// observation, including an infinite observation policy, without stopping the
+// worker or invoking a native API. The cold owner then signals the context's
+// native event to rebuild wake hints for remaining queues and handles any
+// native wake failure. The replacement remains live until the next replacement
+// or deinitialization; its wait hints start empty. The cold owner serializes
+// replacements with deinitialization and separately joins removed sources'
+// accepted work and external producers. Called outside source callbacks, with
+// no allocation or native operation inside the handoff.
 void iree_hal_amd_gpu_completion_set_sources(
     iree_hal_amd_gpu_completion_t* completion, iree_host_size_t source_count,
     iree_hal_amd_gpu_completion_source_t* sources);

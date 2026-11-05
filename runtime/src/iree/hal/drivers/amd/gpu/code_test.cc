@@ -257,7 +257,7 @@ class CodeTest : public ::testing::Test {
     const amdf_status_t error =
         amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
     iree_hal_amd_gpu_context_fail_execution(&context_, error, "native wait");
-    source.fn(source.user_data, error, &wait);
+    source.fn(source.user_data, error, &wait, nullptr);
     context_.execution_failure.join(context_.execution_failure.user_data,
                                     error);
     EXPECT_EQ(membership_.terminal.status, AMDF_STATUS_OK);
@@ -346,7 +346,7 @@ TEST_F(CodeTest, StagingIsReleasedOnlyAfterCopyRetires) {
     retired_ = submitted_;
     const auto source = iree_hal_amd_gpu_sdma_queue_completion_source(queue_);
     iree_hal_amd_gpu_completion_wait_t wait = {};
-    while (source.fn(source.user_data, AMDF_STATUS_OK, &wait)) {
+    while (source.fn(source.user_data, AMDF_STATUS_OK, &wait, nullptr)) {
     }
   });
   iree_status_t status = Publish(queue_);

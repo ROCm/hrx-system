@@ -130,7 +130,8 @@ class CompletionTest : public ::testing::Test {
     return {
         .fn =
             [](void* user_data, amdf_status_t status,
-               iree_hal_amd_gpu_completion_wait_t* out_wait) {
+               iree_hal_amd_gpu_completion_wait_t* out_wait,
+               iree_hal_amd_gpu_completion_copy_t* out_copy) {
               return (*static_cast<Callback*>(user_data))(status);
             },
         .user_data = &callback,
@@ -143,7 +144,8 @@ class CompletionTest : public ::testing::Test {
     return {
         .fn =
             [](void* user_data, amdf_status_t status,
-               iree_hal_amd_gpu_completion_wait_t* out_wait) {
+               iree_hal_amd_gpu_completion_wait_t* out_wait,
+               iree_hal_amd_gpu_completion_copy_t* out_copy) {
               return (*static_cast<WaitCallback*>(user_data))(status, out_wait);
             },
         .user_data = &callback,
@@ -209,6 +211,268 @@ TEST_F(CompletionTest, CoherentChangeProgressesWithoutNativeWake) {
   EXPECT_EQ(calls, 3u);
   EXPECT_EQ(other_calls, 3u);
   EXPECT_EQ(event_.signal_count(), 1u);  // Only the callback's final stop.
+}
+
+// Models preemption inside a bounded CPU copy. The worker, helper, source-table
+// handoff, and final join are real; only the CPU transform dependency is gated.
+struct StagingCopy {
+  // Enables the next copy after the source's initial idle observation.
+  std::atomic<bool> ready{true};
+  // Observes entry into the transform before changing any owner state.
+  std::binary_semaphore entered{0};
+  // Holds the transform's borrowed storage across a simulated preemption.
+  std::binary_semaphore resume{0};
+  // Published only after the transform's final storage access.
+  std::atomic<bool> copied{false};
+  // Counts source observations independently of transform executions.
+  std::atomic<uint32_t> calls{0};
+  // Counts actual CPU transforms; helper drains must not increment it.
+  std::atomic<uint32_t> copies{0};
+  // Counts terminal notifications after the worker joins the transform.
+  std::atomic<uint32_t> failures{0};
+  // Written before entered is released and immutable through resume.
+  std::thread::id copy_thread;
+
+  iree_hal_amd_gpu_completion_source_t source() {
+    return {
+        .fn =
+            [](void* user_data, amdf_status_t status,
+               iree_hal_amd_gpu_completion_wait_t*,
+               iree_hal_amd_gpu_completion_copy_t* out_copy) {
+              auto& copy = *static_cast<StagingCopy*>(user_data);
+              ++copy.calls;
+              if (!amdf_status_is_ok(status)) {
+                EXPECT_TRUE(copy.copied.load());
+                ++copy.failures;
+              } else if (copy.ready.load() && !copy.copied.load() && out_copy) {
+                *out_copy = {
+                    .fn =
+                        [](void* user_data) {
+                          auto& copy = *static_cast<StagingCopy*>(user_data);
+                          copy.copy_thread = std::this_thread::get_id();
+                          ++copy.copies;
+                          copy.entered.release();
+                          copy.resume.acquire();
+                          copy.copied.store(true);
+                        },
+                    .user_data = &copy,
+                };
+              }
+              return false;
+            },
+        .user_data = this,
+    };
+  }
+};
+
+TEST_F(CompletionTest, CpuCopyExcludesOnlyItsOwnSource) {
+  StagingCopy copy;
+  std::atomic<uint32_t> other_calls{0};
+  Callback other = [&](amdf_status_t status) {
+    ++other_calls;
+    return false;
+  };
+  iree_hal_amd_gpu_completion_source_t sources[] = {copy.source(),
+                                                    Source(other)};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, IREE_ARRAYSIZE(sources), sources, 0, {},
+      iree_allocator_system(), &completion_));
+  copy.entered.acquire();
+  EXPECT_EQ(copy.calls.load(), 1u);
+  EXPECT_EQ(other_calls.load(), 1u);
+  EXPECT_NE(copy.copy_thread, std::this_thread::get_id());
+  EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
+  EXPECT_EQ(copy.calls.load(), 1u);
+  EXPECT_EQ(other_calls.load(), 2u);
+  EXPECT_EQ(copy.copies.load(), 1u);
+  copy.resume.release();
+  event_.AwaitWaitCount(1);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_TRUE(copy.copied.load());
+  EXPECT_EQ(copy.calls.load(), 2u);
+}
+
+TEST_F(CompletionTest, ContinuousDownloadsTakeTurnsAcrossSources) {
+  struct Copies {
+    // Worker stopped by the final bounded transform.
+    iree_hal_amd_gpu_completion_t* completion;
+    // Copy-source order, written only by the worker before done is released.
+    std::array<uint32_t, 6> order = {};
+    // Number of completed transforms in order.
+    size_t count = 0;
+    // Joins all writes to order before caller inspection.
+    std::binary_semaphore done{0};
+  } copies{&completion_};
+  struct SourceState {
+    // Shared bounded execution trace, live through worker shutdown.
+    Copies* copies;
+    // Source identity recorded for each transform.
+    uint32_t ordinal;
+  } states[] = {{&copies, 0}, {&copies, 1}, {&copies, 2}};
+  iree_hal_amd_gpu_completion_source_t sources[IREE_ARRAYSIZE(states)] = {};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(states); ++i) {
+    sources[i] = {
+        .fn =
+            [](void* user_data, amdf_status_t,
+               iree_hal_amd_gpu_completion_wait_t*,
+               iree_hal_amd_gpu_completion_copy_t* out_copy) {
+              if (out_copy) {
+                *out_copy = {
+                    .fn =
+                        [](void* user_data) {
+                          auto& source = *static_cast<SourceState*>(user_data);
+                          auto& copies = *source.copies;
+                          copies.order[copies.count++] = source.ordinal;
+                          if (copies.count == copies.order.size()) {
+                            EXPECT_TRUE(amdf_status_is_ok(
+                                iree_hal_amd_gpu_completion_request_stop(
+                                    copies.completion)));
+                            copies.done.release();
+                          }
+                        },
+                    .user_data = user_data,
+                };
+              }
+              return false;
+            },
+        .user_data = &states[i],
+    };
+  }
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, IREE_ARRAYSIZE(sources), sources, 0, {},
+      iree_allocator_system(), &completion_));
+  copies.done.acquire();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(copies.order, (std::array<uint32_t, 6>{0, 1, 2, 0, 1, 2}));
+}
+
+TEST_F(CompletionTest, HostHelperLeavesCpuCopyForWorker) {
+  StagingCopy copy;
+  copy.ready.store(false);
+  auto source = copy.source();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, &source, 0, {}, iree_allocator_system(), &completion_));
+  event_.AwaitWaitCount(1);
+  copy.ready.store(true);
+  EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
+  EXPECT_EQ(copy.calls.load(), 2u);
+  EXPECT_EQ(copy.copies.load(), 0u);
+  EXPECT_TRUE(amdf_status_is_ok(NativeEvent::Signal(event_.handle())));
+  copy.entered.acquire();
+  EXPECT_NE(copy.copy_thread, std::this_thread::get_id());
+  copy.resume.release();
+  event_.AwaitWaitCount(2);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(copy.copies.load(), 1u);
+}
+
+TEST_F(CompletionTest, SourceReplacementJoinsCpuCopyBorrow) {
+  StagingCopy copy;
+  auto original =
+      std::make_unique<iree_hal_amd_gpu_completion_source_t>(copy.source());
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, original.get(), 0, {}, iree_allocator_system(),
+      &completion_));
+  copy.entered.acquire();
+  auto replacement = copy.source();
+  const int32_t copying_state =
+      iree_atomic_load(&completion_.state, iree_memory_order_acquire);
+  std::binary_semaphore replacing{0};
+  std::atomic<bool> replaced{false};
+  std::thread owner([&] {
+    replacing.release();
+    iree_hal_amd_gpu_completion_set_sources(&completion_, 1, &replacement);
+    EXPECT_TRUE(copy.copied.load());
+    original.reset();
+    replaced.store(true);
+  });
+  replacing.acquire();
+  while (iree_atomic_load(&completion_.state, iree_memory_order_acquire) ==
+         copying_state) {
+    std::this_thread::yield();
+  }
+  EXPECT_FALSE(replaced.load());
+  copy.resume.release();
+  owner.join();
+  EXPECT_TRUE(replaced.load());
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(copy.copies.load(), 1u);
+}
+
+TEST_F(CompletionTest, TerminalFailureJoinsCpuCopyBeforeSourceNotification) {
+  StagingCopy copy;
+  auto source = copy.source();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, &source, 0, {}, iree_allocator_system(), &completion_));
+  copy.entered.acquire();
+  iree_hal_amd_gpu_completion_request_failure(
+      &completion_, amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST));
+  EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
+  EXPECT_EQ(copy.failures.load(), 0u);
+  copy.resume.release();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_TRUE(copy.copied.load());
+  EXPECT_EQ(copy.failures.load(), 1u);
+}
+
+TEST_F(CompletionTest, StopJoinsCpuCopyBorrow) {
+  StagingCopy copy;
+  auto source = copy.source();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, &source, 0, {}, iree_allocator_system(), &completion_));
+  copy.entered.acquire();
+  const int32_t copying_state =
+      iree_atomic_load(&completion_.state, iree_memory_order_acquire);
+  std::atomic<bool> joined{false};
+  std::thread owner([&] {
+    IREE_EXPECT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+    EXPECT_TRUE(copy.copied.load());
+    joined.store(true);
+  });
+  while (iree_atomic_load(&completion_.state, iree_memory_order_acquire) ==
+         copying_state) {
+    std::this_thread::yield();
+  }
+  EXPECT_FALSE(joined.load());
+  copy.resume.release();
+  owner.join();
+  EXPECT_TRUE(joined.load());
+  EXPECT_EQ(copy.copies.load(), 1u);
+}
+
+TEST_F(CompletionTest, SourceReplacementExcludesNewCpuCopyBorrows) {
+  std::binary_semaphore draining{0};
+  std::binary_semaphore resume{0};
+  uint32_t gate_calls = 0;
+  Callback gate = [&](amdf_status_t) {
+    if (++gate_calls == 1) {
+      draining.release();
+      resume.acquire();
+    }
+    return false;
+  };
+  StagingCopy copy;
+  iree_hal_amd_gpu_completion_source_t sources[] = {Source(gate),
+                                                    copy.source()};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, IREE_ARRAYSIZE(sources), sources, 0, {},
+      iree_allocator_system(), &completion_));
+  draining.acquire();
+  const int32_t draining_state =
+      iree_atomic_load(&completion_.state, iree_memory_order_acquire);
+  Callback idle = [](amdf_status_t) { return false; };
+  auto replacement = Source(idle);
+  std::thread owner([&] {
+    iree_hal_amd_gpu_completion_set_sources(&completion_, 1, &replacement);
+  });
+  while (iree_atomic_load(&completion_.state, iree_memory_order_acquire) ==
+         draining_state) {
+    std::this_thread::yield();
+  }
+  resume.release();
+  owner.join();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(copy.copies.load(), 0u);
 }
 
 TEST_F(CompletionTest, EventOnlySourcesParkAfterProgress) {
@@ -981,7 +1245,8 @@ TEST(CompletionNativeEventTest, KernelWakeSharesOneWorkerAndJoinsShutdown) {
   iree_hal_amd_gpu_completion_source_t source = {
       .fn =
           [](void* user_data, amdf_status_t status,
-             iree_hal_amd_gpu_completion_wait_t* out_wait) {
+             iree_hal_amd_gpu_completion_wait_t* out_wait,
+             iree_hal_amd_gpu_completion_copy_t* out_copy) {
             auto* state = static_cast<State*>(user_data);
             EXPECT_TRUE(amdf_status_is_ok(status));
             if (state->ready.exchange(false)) {

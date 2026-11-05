@@ -421,8 +421,8 @@ TEST_F(FeedbackTest, DrainsOnlyReadyPrefixWithoutWaitingForReservedHole) {
   Packet(128);
   control_.reservation_head = 256;
   iree_hal_amd_gpu_completion_wait_t wait = {};
-  EXPECT_FALSE(
-      iree_hal_amd_gpu_feedback_poll(&feedback_, AMDF_STATUS_OK, &wait));
+  EXPECT_FALSE(iree_hal_amd_gpu_feedback_poll(&feedback_, AMDF_STATUS_OK, &wait,
+                                              nullptr));
   EXPECT_EQ(control_.read_tail, 0u);
   EXPECT_TRUE(reports_.empty());
   Packet(0);
@@ -443,8 +443,8 @@ TEST_F(FeedbackTest, LiveDrainIsBoundedAndRetirementDrainsObservedPrefix) {
   }
   control_.reservation_head = 12800;
   iree_hal_amd_gpu_completion_wait_t wait = {};
-  EXPECT_TRUE(
-      iree_hal_amd_gpu_feedback_poll(&feedback_, AMDF_STATUS_OK, &wait));
+  EXPECT_TRUE(iree_hal_amd_gpu_feedback_poll(&feedback_, AMDF_STATUS_OK, &wait,
+                                             nullptr));
   EXPECT_EQ(reports_.size(), 64u);
   EXPECT_EQ(control_.read_tail, 8192u);
   iree_hal_amd_gpu_feedback_drain(&feedback_);

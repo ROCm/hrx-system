@@ -375,7 +375,7 @@ class FileTransferStagingTest : public MemoryBackendTest,
   void PollCopies(amdf_status_t status = AMDF_STATUS_OK) {
     const auto source = iree_hal_amd_gpu_sdma_queue_completion_source(sdma_);
     iree_hal_amd_gpu_completion_wait_t wait = {};
-    while (source.fn(source.user_data, status, &wait)) {
+    while (source.fn(source.user_data, status, &wait, nullptr)) {
     }
     // Completion failure wakes the distinct publication owner to deliver its
     // retained-copy notifications. Drive that owner before polling file I/O.

@@ -1764,9 +1764,18 @@ static bool iree_hal_amd_gpu_aql_progress(void* user_data) {
   return more;
 }
 
+static void iree_hal_amd_gpu_aql_complete_download(void* user_data) {
+  iree_hal_amd_gpu_download_t* download = user_data;
+  IREE_TRACE_ZONE_BEGIN_NAMED(z0, "iree_hal_amd_gpu_download_complete");
+  iree_hal_amd_gpu_download_complete(download);
+  download->length = 0;
+  IREE_TRACE_ZONE_END(z0);
+}
+
 static bool iree_hal_amd_gpu_aql_retire(
     void* user_data, amdf_status_t wait_status,
-    iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    iree_hal_amd_gpu_completion_wait_t* out_wait,
+    iree_hal_amd_gpu_completion_copy_t* out_copy) {
   iree_hal_amd_gpu_aql_queue_t* queue = user_data;
   uint64_t position = (uint64_t)iree_atomic_load(&queue->completed.count,
                                                  iree_memory_order_relaxed);
@@ -1808,7 +1817,7 @@ static bool iree_hal_amd_gpu_aql_retire(
     queue->feedback_failure_delivered = true;
   }
   const uint64_t initial = position;
-  uint64_t limit = iree_min(published, position + 64);
+  const uint64_t limit = iree_min(published, position + 64);
   for (; position < limit; ++position) {
     iree_hal_amd_gpu_aql_retirement_t* action =
         &queue->issued[position & (queue->options.retirement_capacity - 1)];
@@ -1824,7 +1833,6 @@ static bool iree_hal_amd_gpu_aql_retire(
     if (!iree_hal_amd_gpu_aql_submission_retirement_ready(submission, &code)) {
       break;
     }
-    IREE_TRACE_ZONE_BEGIN_NAMED(z0, "iree_hal_amd_gpu_aql_retire");
     if (queue->options.feedback) {
       // Native completion makes this work's reports observable before its
       // public completion can wake a host consumer.
@@ -1836,11 +1844,14 @@ static bool iree_hal_amd_gpu_aql_retire(
     const uint64_t arguments = action->arguments;
     if (submission->entry.kind == IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER &&
         code == IREE_STATUS_OK && action->download.length) {
-      iree_hal_amd_gpu_download_complete(&action->download);
-      // Return staging credit before the next window so publication and other
-      // queues' retirement can progress between bulk downloads.
-      limit = position + 1;
+      if (out_copy) {
+        *out_copy = (iree_hal_amd_gpu_completion_copy_t){
+            .fn = iree_hal_amd_gpu_aql_complete_download,
+            .user_data = &action->download};
+      }
+      break;
     }
+    IREE_TRACE_ZONE_BEGIN_NAMED(z0, "iree_hal_amd_gpu_aql_retire");
     if (submission->profiled) {
       const iree_hal_amd_gpu_profile_operation_t* operation =
           iree_hal_amd_gpu_aql_submission_profile(submission);
