@@ -21,4 +21,9 @@ iree_status_t loom_verify_tied_results(loom_verify_state_t* state,
 iree_status_t loom_verify_moved_results(loom_verify_state_t* state,
                                         const loom_op_t* op);
 
+// Records owning managed handles transferred into runtime calls or returned
+// from a callable. Borrowed handle fields preserve their source ownership.
+iree_status_t loom_verify_callable_ownership(loom_verify_state_t* state,
+                                             const loom_op_t* op);
+
 #endif  // LOOM_VERIFY_VERIFY_OWNERSHIP_H_

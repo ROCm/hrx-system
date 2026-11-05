@@ -314,6 +314,24 @@ ERR_DOMINANCE_018 = ErrorDef(
     ),
 )
 
+ERR_DOMINANCE_019 = ErrorDef(
+    domain=ErrorDomain.DOMINANCE,
+    code=19,
+    severity=Severity.ERROR,
+    summary="Multiple consuming operands name the same owner.",
+    message=(
+        "operands {first_index} and {second_index} of '{op_name}' consume "
+        "the same owner '%{value_name}'"
+    ),
+    params=(
+        ErrorParam("first_index", ParamKind.U32),
+        ErrorParam("second_index", ParamKind.U32),
+        ErrorParam("op_name", ParamKind.STRING),
+        ErrorParam("value_name", ParamKind.STRING),
+    ),
+    fix_hint="Create an independent owner for each consuming operand.",
+)
+
 ALL_DOMINANCE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_DOMINANCE_001,
     ERR_DOMINANCE_002,
@@ -333,4 +351,5 @@ ALL_DOMINANCE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_DOMINANCE_016,
     ERR_DOMINANCE_017,
     ERR_DOMINANCE_018,
+    ERR_DOMINANCE_019,
 )

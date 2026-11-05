@@ -984,7 +984,7 @@ static iree_status_t loom_ownership_lifetime_transfer_op(
   }
   loom_call_like_t call = loom_call_like_cast(state->module, (loom_op_t*)op);
   if (loom_call_like_isa(call) &&
-      loom_ownership_lifetime_call_kind_is_runtime(loom_call_like_kind(call))) {
+      loom_call_like_kind_is_runtime(loom_call_like_kind(call))) {
     return loom_ownership_lifetime_transfer_call(state, bits, op, call);
   }
   for (uint16_t i = 0; i < op->operand_count && !state->failed; ++i) {

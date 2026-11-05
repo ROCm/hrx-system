@@ -1,0 +1,63 @@
+// Typed Low arguments retain the same consuming callable contract as High IR.
+// RUN: verify
+vm.target<core> @vm
+type.decl import("provider", "object") @Object
+low.func.decl import(native, "take", module = "provider") target<vm.core>(@vm) abi(vm_function) @take(%owner: reg<vm.ref : ref<@Object>>)
+low.func.def public target<vm.core>(@vm) abi(vm_function) @reuse(%owner: reg<vm.ref : ref<@Object>>) {
+  low.func.call @take(%owner) : (reg<vm.ref : ref<@Object>>)
+  // ERROR@+1: DOMINANCE/002 {value_name="owner", consuming_op="low.func.call"}
+  low.func.call @take(%owner) : (reg<vm.ref : ref<@Object>>)
+  low.return
+}
+
+// ====
+// A required storage alias cannot provide a second consuming owner.
+// RUN: verify
+vm.target<core> @vm
+type.decl import("provider", "object") @Object
+low.func.decl import(native, "take_two", module = "provider") target<vm.core>(@vm) abi(vm_function) @take_two(%left: reg<vm.ref : ref<@Object>>, %right: reg<vm.ref : ref<@Object>>)
+low.func.def public target<vm.core>(@vm) abi(vm_function) @alias_pair(%owner: reg<vm.ref : ref<@Object>>) {
+  %alias = low.assume %owner [] : reg<vm.ref : ref<@Object>>
+  // ERROR@+1: DOMINANCE/019 {value_name="owner", op_name="low.func.call"}
+  low.func.call @take_two(%owner, %alias) : (reg<vm.ref : ref<@Object>>, reg<vm.ref : ref<@Object>>)
+  low.return
+}
+
+// ====
+// Ownership ends through every required storage spelling after a call.
+// RUN: verify
+vm.target<core> @vm
+type.decl import("provider", "object") @Object
+low.func.decl import(native, "take", module = "provider") target<vm.core>(@vm) abi(vm_function) @take(%owner: reg<vm.ref : ref<@Object>>)
+low.func.def public target<vm.core>(@vm) abi(vm_function) @alias_reuse(%owner: reg<vm.ref : ref<@Object>>) {
+  %alias = low.assume %owner [] : reg<vm.ref : ref<@Object>>
+  low.func.call @take(%owner) : (reg<vm.ref : ref<@Object>>)
+  // ERROR@+1: DOMINANCE/002 {value_name="alias"}
+  low.func.call @take(%alias) : (reg<vm.ref : ref<@Object>>)
+  low.return
+}
+
+// ====
+// Returning one carrier in two owning fields cannot manufacture ownership.
+// RUN: verify
+vm.target<core> @vm
+type.decl import("provider", "object") @Object
+low.func.def public target<vm.core>(@vm) abi(vm_function) @return_pair(%owner: reg<vm.ref : ref<@Object>>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ref<@Object>>) {
+  // ERROR@+1: DOMINANCE/019 {value_name="owner", op_name="low.return"}
+  low.return %owner, %owner : reg<vm.ref : ref<@Object>>, reg<vm.ref : ref<@Object>>
+}
+
+// ====
+// Borrowed calls and returns may observe the same handle more than once.
+// RUN: verify
+vm.target<core> @vm
+
+type.decl import("provider", "object") @Object
+
+low.func.decl import(native, "inspect", module = "provider") target<vm.core>(@vm) abi(vm_function) @inspect(%pointer: reg<vm.ref : ptr<@Object>>)
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @borrow_twice(%pointer: reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>) asm {
+  low.func.call @inspect(%pointer) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @inspect(%pointer) : (reg<vm.ref : ptr<@Object>>)
+  return %pointer, %pointer
+}

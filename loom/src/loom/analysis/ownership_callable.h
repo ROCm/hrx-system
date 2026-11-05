@@ -98,13 +98,6 @@ typedef struct loom_ownership_lifetime_graph_t {
   iree_host_size_t symbol_to_node_count;
 } loom_ownership_lifetime_graph_t;
 
-static inline bool loom_ownership_lifetime_call_kind_is_runtime(
-    loom_call_like_kind_t kind) {
-  return kind == LOOM_CALL_LIKE_KIND_SEMANTIC ||
-         kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL ||
-         kind == LOOM_CALL_LIKE_KIND_LOW_INVOKE;
-}
-
 // Initializes callable summaries once, indexed by the module symbol table.
 iree_status_t loom_ownership_lifetime_initialize_module_summaries(
     loom_ownership_lifetime_module_state_t* module_state);

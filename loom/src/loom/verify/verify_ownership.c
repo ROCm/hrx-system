@@ -433,3 +433,42 @@ iree_status_t loom_verify_moved_results(loom_verify_state_t* state,
   }
   return iree_ok_status();
 }
+
+iree_status_t loom_verify_callable_ownership(loom_verify_state_t* state,
+                                             const loom_op_t* op) {
+  const loom_value_id_t* values = NULL;
+  uint16_t value_count = 0;
+  uint16_t operand_offset = 0;
+  const loom_call_like_t call = loom_call_like_const_cast(state->module, op);
+  if (loom_call_like_isa(call) &&
+      loom_call_like_kind_is_runtime(loom_call_like_kind(call))) {
+    const loom_value_slice_t arguments = loom_call_like_operands(call);
+    values = arguments.values;
+    value_count = arguments.count;
+    operand_offset = loom_call_like_operand_offset(call);
+  } else if (iree_any_bit_set(op->traits, LOOM_TRAIT_TERMINATOR) &&
+             loom_func_like_op_is_body_exit(
+                 state->module,
+                 loom_func_like_const_cast(state->module, op->parent_op), op)) {
+    values = loom_op_const_operands(op);
+    value_count = op->operand_count;
+  }
+  for (uint16_t i = 0; i < value_count; ++i) {
+    const loom_value_id_t value_id = values[i];
+    if (value_id == LOOM_VALUE_ID_INVALID ||
+        value_id >= state->module->values.count) {
+      continue;
+    }
+    loom_type_t type = loom_module_value_type(state->module, value_id);
+    const loom_type_t* register_type = loom_type_register_value_type(type);
+    if (register_type) {
+      type = *register_type;
+    }
+    if (loom_type_is_reference(type) &&
+        loom_type_reference_ownership(type) == LOOM_REFERENCE_OWNERSHIP_OWNED) {
+      IREE_RETURN_IF_ERROR(loom_verify_consumption_record(
+          state, op, (uint16_t)(operand_offset + i)));
+    }
+  }
+  return iree_ok_status();
+}

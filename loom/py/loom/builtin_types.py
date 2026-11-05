@@ -343,7 +343,11 @@ ref_type = TypeDef(
         )
     ],
     format=[Param("declaration")],
-    doc="Nullable owning handle to a declared opaque managed payload.",
+    doc=(
+        "Nullable owning handle to a declared opaque managed payload. "
+        "Passing or returning a ref transfers its ownership; subsequent uses "
+        "require an independently acquired owner."
+    ),
 )
 
 ptr_type = TypeDef(
@@ -360,7 +364,8 @@ ptr_type = TypeDef(
     format=[Param("declaration")],
     doc=(
         "Nullable borrowed handle to a declared opaque managed payload; "
-        "not a numerical address."
+        "not a numerical address. Passing or returning a ptr preserves "
+        "the source ownership."
     ),
 )
 

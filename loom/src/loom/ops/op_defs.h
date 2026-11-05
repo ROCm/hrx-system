@@ -1017,6 +1017,14 @@ loom_inline_policy_t loom_call_like_inline_policy(loom_call_like_t call);
 // Returns the semantic class of the call-like op.
 loom_call_like_kind_t loom_call_like_kind(loom_call_like_t call);
 
+// Returns true for calls that transfer runtime arguments and results, rather
+// than requests for compile-time expansion.
+static inline bool loom_call_like_kind_is_runtime(loom_call_like_kind_t kind) {
+  return kind == LOOM_CALL_LIKE_KIND_SEMANTIC ||
+         kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL ||
+         kind == LOOM_CALL_LIKE_KIND_LOW_INVOKE;
+}
+
 //===----------------------------------------------------------------------===//
 // FuncLike interface helpers
 //===----------------------------------------------------------------------===//

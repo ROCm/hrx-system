@@ -210,8 +210,7 @@ static iree_status_t loom_ownership_lifetime_visit_successor_call(
   }
   loom_call_like_t call = loom_call_like_cast(state->module, op);
   if (!loom_call_like_isa(call) ||
-      !loom_ownership_lifetime_call_kind_is_runtime(
-          loom_call_like_kind(call))) {
+      !loom_call_like_kind_is_runtime(loom_call_like_kind(call))) {
     return iree_ok_status();
   }
   loom_symbol_ref_t callee = loom_call_like_callee(call);

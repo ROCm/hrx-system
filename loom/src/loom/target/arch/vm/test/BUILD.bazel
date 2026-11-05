@@ -38,6 +38,7 @@ loom_check_test_suite(
         "calls.loom-test",
         "emission.loom-test",
         "imports.loom-test",
+        "managed_consumption.loom-test",
         "managed_types.loom-test",
         "native_references.loom-test",
         "reference_transfers.loom-test",
