@@ -7,6 +7,7 @@
 #include "loom/codegen/low/allocation/edge_copy.h"
 
 #include "loom/codegen/low/allocation/storage.h"
+#include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/ops/low/ops.h"
 
 typedef struct loom_low_allocation_edge_copy_builder_t {
@@ -90,7 +91,7 @@ static void loom_low_allocation_edge_copy_record_segment(
     loom_low_allocation_edge_copy_builder_t* builder, uint16_t payload_index,
     loom_value_ordinal_t source_ordinal,
     loom_value_ordinal_t destination_ordinal, uint32_t source_unit_offset,
-    uint32_t destination_unit_offset, uint32_t unit_count) {
+    uint32_t destination_unit_offset, uint32_t unit_count, uint32_t end_point) {
   const loom_low_allocation_edge_copy_context_t* context = builder->context;
   uint32_t source_assignment_index = 0;
   const loom_low_allocation_assignment_t* source_assignment =
@@ -139,15 +140,28 @@ static void loom_low_allocation_edge_copy_record_segment(
   if (kind == LOOM_LOW_ALLOCATION_COPY_COALESCED) {
     return;
   }
+  const loom_low_allocation_move_plan_context_t* move_context =
+      &context->move_plan->context;
+  const bool consume_source =
+      iree_any_bit_set(
+          move_context->descriptor_set
+              ->reg_classes[source_assignment->descriptor_reg_class_id]
+              .flags,
+          LOOM_LOW_REG_CLASS_FLAG_REFERENCE) &&
+      !loom_low_allocation_unit_liveness_storage_component_live_at_point(
+          move_context->unit_liveness, move_context->assignment_map.liveness,
+          context->placement, source_ordinal, source_unit_offset, unit_count,
+          end_point);
   loom_low_allocation_move_plan_append_assignment(
       context->move_plan, source_assignment, source_unit_offset,
       destination_assignment, destination_unit_offset, unit_count,
-      /*consume_source=*/false, &builder->raw_move_count);
+      consume_source, &builder->raw_move_count);
 }
 
 static void loom_low_allocation_edge_copy_record_branch_payload_segments(
     loom_low_allocation_edge_copy_builder_t* builder, uint16_t payload_index,
-    loom_value_id_t payload_value_id, loom_value_id_t destination_value_id) {
+    loom_value_id_t payload_value_id, loom_value_id_t destination_value_id,
+    uint32_t end_point) {
   const loom_low_allocation_edge_copy_context_t* context = builder->context;
   const loom_value_ordinal_t destination_ordinal =
       loom_low_allocation_edge_copy_value_ordinal(context,
@@ -179,7 +193,7 @@ static void loom_low_allocation_edge_copy_record_branch_payload_segments(
         builder, payload_index, source.value_ordinal,
         branch_relation->result_ordinal, source.unit_offset,
         branch_relation->result_unit_offset + branch_source_delta,
-        relation->unit_count);
+        relation->unit_count, end_point);
     covered_unit_count += relation->unit_count;
   }
   if (covered_unit_count != 0) {
@@ -190,7 +204,8 @@ static void loom_low_allocation_edge_copy_record_branch_payload_segments(
   loom_low_allocation_edge_copy_record_segment(
       builder, payload_index, branch_relation->source_ordinal,
       branch_relation->result_ordinal, branch_relation->source_unit_offset,
-      branch_relation->result_unit_offset, branch_relation->unit_count);
+      branch_relation->result_unit_offset, branch_relation->unit_count,
+      end_point);
 }
 
 static iree_status_t loom_low_allocation_edge_copy_record_group(
@@ -218,7 +233,8 @@ static iree_status_t loom_low_allocation_edge_copy_record_group(
   builder->raw_move_count = 0;
   for (uint16_t i = 0; i < destination_block->arg_count; ++i) {
     loom_low_allocation_edge_copy_record_branch_payload_segments(
-        builder, i, args.values[i], destination_block->arg_ids[i]);
+        builder, i, args.values[i], destination_block->arg_ids[i],
+        operation_point->end_point);
   }
   group->copy_count = builder->plan.copy_count - copy_start;
 
