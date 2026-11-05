@@ -187,6 +187,20 @@ iree_py_binary(
 )
 
 iree_py_binary(
+    name = "c_tables_tile_generator",
+    main_module = "loom.gen.ops.c_tables",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/tile"],
+)
+
+iree_py_binary(
+    name = "c_tables_tensor_generator",
+    main_module = "loom.gen.ops.c_tables",
+    visibility = GENERATOR_VISIBILITY,
+    deps = C_TABLES_BASE_DEPS + ["//loom/py/loom/dialect/tensor"],
+)
+
+iree_py_binary(
     name = "c_tables_index_generator",
     main_module = "loom.gen.ops.c_tables",
     visibility = GENERATOR_VISIBILITY,

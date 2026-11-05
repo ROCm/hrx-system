@@ -867,7 +867,9 @@ def default_ops() -> tuple[Op, ...]:
     from loom.dialect.scalar import ALL_SCALAR_OPS
     from loom.dialect.scf import ALL_SCF_OPS
     from loom.dialect.target import ALL_TARGET_OPS
+    from loom.dialect.tensor import ALL_TENSOR_OPS
     from loom.dialect.test import ALL_TEST_OPS
+    from loom.dialect.tile import ALL_TILE_OPS
     from loom.dialect.vector import ALL_VECTOR_OPS
     from loom.dialect.view import ALL_VIEW_OPS
 
@@ -891,7 +893,9 @@ def default_ops() -> tuple[Op, ...]:
         *ALL_SCALAR_OPS,
         *ALL_SCF_OPS,
         *ALL_TARGET_OPS,
+        *ALL_TENSOR_OPS,
         *ALL_TEST_OPS,
+        *ALL_TILE_OPS,
         *ALL_VECTOR_OPS,
         *ALL_VIEW_OPS,
     )

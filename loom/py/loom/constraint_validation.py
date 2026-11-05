@@ -228,6 +228,47 @@ def block_args_satisfy(
     return validate
 
 
+def closed_value_tuple(
+    field: str,
+    carrier_constraint: Any,
+    type_satisfies: TypeSatisfiesFn,
+) -> ValidateFn:
+    """Builds a predicate for an exact dependency tuple plus its carrier."""
+
+    def validate(values: dict[str, Any]) -> tuple[bool, str]:
+        items = _flatten_field(field, values.get(field))
+        if not items:
+            return False, f"'{field}' must contain a trailing carrier value"
+
+        carrier_name, carrier = items[-1]
+        carrier_type = _field_value_type(carrier)
+        if not type_satisfies(carrier_type, carrier_constraint):
+            return (
+                False,
+                f"'{carrier_name}' type {carrier_type} does not satisfy "
+                f"{carrier_constraint.value}",
+            )
+
+        from loom.type_binding import iter_value_binding_occurrences
+
+        expected_dependencies = [
+            getattr(binding, "value_id", getattr(binding, "value", None))
+            for binding in iter_value_binding_occurrences(carrier_type)
+        ]
+        actual_dependencies = [
+            getattr(item, "value_id", None) for _, item in items[:-1]
+        ]
+        if actual_dependencies == expected_dependencies:
+            return True, ""
+        return (
+            False,
+            f"'{field}' dependency identities {actual_dependencies} do not "
+            f"match carrier references {expected_dependencies}",
+        )
+
+    return validate
+
+
 def block_args_match(
     region: str, inputs: str, *, element_types: bool = False
 ) -> ValidateFn:

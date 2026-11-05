@@ -25,6 +25,7 @@ from loom.dsl import (
     AttrDef,
     CachePolicyInterface,
     CallLikeInterface,
+    ClosedValueTuple,
     ConditionForwardedCountMatchesBlockArgs,
     ConditionForwardedTypesMatchBlockArgs,
     Constraint,
@@ -124,9 +125,24 @@ def _value_duplication_test_op(
         group=Dialect("test"),
         operands=([Operand("sources", PAYLOAD_SCALAR, variadic=True)] if operands is None else operands),
         results=([Result("duplicates", PAYLOAD_SCALAR, variadic=True)] if results is None else results),
-        constraints=([VariadicValuesMatch("duplicates", "sources")] if constraints is None else constraints),
+        constraints=(
+            [
+                ClosedValueTuple("sources", PAYLOAD_SCALAR),
+                ClosedValueTuple("duplicates", PAYLOAD_SCALAR),
+                VariadicValuesMatch("duplicates", "sources"),
+            ]
+            if constraints is None
+            else constraints
+        ),
         traits=[UNIQUE_IDENTITY, STORAGE_RELATION] if traits is None else traits,
-        interfaces=[interface or ValueDuplicationInterface(sources="sources", duplicates="duplicates")],
+        interfaces=[
+            interface
+            or ValueDuplicationInterface(
+                sources="sources",
+                duplicates="duplicates",
+                carrier=PAYLOAD_SCALAR,
+            )
+        ],
         facts=facts,
     )
 
@@ -158,6 +174,18 @@ def test_generate_tables_rejects_value_duplication_without_positional_remap() ->
             "test",
             0,
             [_value_duplication_test_op(constraints=[])],
+        )
+
+
+def test_generate_tables_rejects_value_duplication_without_closed_tuple() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"operation must declare ClosedValueTuple",
+    ):
+        generate_tables_c(
+            "test",
+            0,
+            [_value_duplication_test_op(constraints=[VariadicValuesMatch("duplicates", "sources")])],
         )
 
 

@@ -253,6 +253,13 @@ enum loom_constraint_relation_e {
   // structural verification, before the ordinary relation interpreter.
   LOOM_RELATION_OPERAND_DICTIONARY,
 
+  // A value field contains the exact SSA-reference closure of its trailing
+  // carrier value. Values before the carrier match references embedded in the
+  // carrier type in structural order, including repeated references. The
+  // property slot stores the carrier's loom_type_constraint_t. Args: (value
+  // field). Used by ClosedValueTuple.
+  LOOM_RELATION_CLOSED_VALUE_TUPLE,
+
   LOOM_RELATION_COUNT_,
 };
 typedef uint8_t loom_constraint_relation_t;

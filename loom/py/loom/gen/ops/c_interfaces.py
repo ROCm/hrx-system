@@ -744,6 +744,9 @@ def op_implements_value_duplication(op: Op) -> bool:
     expected_constraint = (iface.duplicates, iface.sources)
     if not any(constraint.name == "VariadicValuesMatch" and constraint.args == expected_constraint for constraint in op.constraints):
         raise ValueError(f"{interface_name} on {op.name!r}: operation must declare VariadicValuesMatch{expected_constraint!r}")
+    for field in (iface.sources, iface.duplicates):
+        if not any(constraint.name == "ClosedValueTuple" and constraint.args == (field,) and constraint.data == iface.carrier for constraint in op.constraints):
+            raise ValueError(f"{interface_name} on {op.name!r}: operation must declare ClosedValueTuple({field!r}, {iface.carrier!r})")
     if op.facts is None:
         raise ValueError(f"{interface_name} on {op.name!r}: operation must provide fact inference")
     return True

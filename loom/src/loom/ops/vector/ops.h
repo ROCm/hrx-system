@@ -182,7 +182,8 @@ enum {
   LOOM_OP_VECTOR_SPLATF = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 157),
   LOOM_OP_VECTOR_CONSTANTI = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 158),
   LOOM_OP_VECTOR_CONSTANTF = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 159),
-  LOOM_OP_VECTOR_COUNT_ = 160,
+  LOOM_OP_VECTOR_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 160),
+  LOOM_OP_VECTOR_COUNT_ = 161,
 };
 
 // IEEE 754 fast-math relaxation flags for float operations. nnan and ninf are independent author promises, not runtime checks or requests to clamp results. Together they guarantee finite floating-point results, but do not imply exact representability in a narrower type or absence of subnormals. Behavior outside an authored promise is not constrained by the operation's ordinary special-value contract. Flags do not refine unrelated uses of an operand.
@@ -3614,6 +3615,25 @@ iree_status_t loom_vector_constantf_facts(
 iree_status_t loom_vector_constantf_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_VECTOR_DUPLICATE: Create another local owner of a vector and its dependent shape values. Each result preserves the logical lanes and facts while receiving a distinct SSA ownership identity.
+// %copy = vector.duplicate %source : vector<4xf32>
+LOOM_DEFINE_ISA(loom_vector_duplicate_isa, LOOM_OP_VECTOR_DUPLICATE)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_vector_duplicate_sources, 0)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_vector_duplicate_duplicates, 0)
+iree_status_t loom_vector_duplicate_build(
+    loom_builder_t* builder,
+    const loom_value_id_t* sources,
+    iree_host_size_t sources_count,
+    const loom_type_t* result_types,
+    iree_host_size_t result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_value_duplication_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the vector dialect.
 const loom_op_vtable_t* const* loom_vector_dialect_vtables(

@@ -123,3 +123,29 @@ test.target<low_core> @test_target
 low.func.def target<test.low.core>(@test_target) abi(object_function) @elided_scalar_duplicate(%value: reg<test.i32>) -> (reg<test.i32>) asm {
   return %value
 }
+
+// ====
+// RUN: pass source-to-low
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @duplicated_dynamic_view(%storage: buffer, %m: index) -> (index, vector<4xf32>) {
+  %base = index.constant 0 : offset
+  %bounded_m = index.assume %m [range(%m, 4, 1024)] : index
+  %layout = encoding.layout.dense : encoding<layout>
+  %source = buffer.view %storage[%base] : buffer -> view<[%bounded_m]xf32, %layout>
+  %copy_m, %copy_layout, %copy = view.duplicate %bounded_m, %layout, %source : index, encoding<layout>, view<[%copy_m]xf32, %copy_layout>
+  %value = vector.load %copy[0] : view<[%copy_m]xf32, %copy_layout> -> vector<4xf32>
+  func.return %copy_m, %value : index, vector<4xf32>
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) abi(object_function) @duplicated_dynamic_view(%bounded_m: reg<test.i32>) -> (reg<test.i32>, reg<test.f32 x4>) asm {
+  %source = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %copy_m = copy %bounded_m : reg<test.i32> -> reg<test.i32>
+  %copy = copy %source : reg<test.ptr> -> reg<test.ptr>
+  %value = test.load.v4f32 %copy
+  return %copy_m, %value
+}

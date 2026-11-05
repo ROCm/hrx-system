@@ -2024,6 +2024,122 @@ static void loom_verify_relation_register_unit_count_sum(
       iree_make_cstring_view(expected_buffer));
 }
 
+typedef struct loom_verify_closed_value_tuple_t {
+  const loom_value_id_t* dependencies;
+  uint16_t dependency_count;
+  uint16_t next_dependency;
+  bool matches;
+} loom_verify_closed_value_tuple_t;
+
+static iree_status_t loom_verify_closed_value_tuple_reference(
+    loom_value_id_t value_id, void* user_data) {
+  loom_verify_closed_value_tuple_t* tuple = user_data;
+  if (tuple->next_dependency >= tuple->dependency_count ||
+      tuple->dependencies[tuple->next_dependency] != value_id) {
+    tuple->matches = false;
+  }
+  ++tuple->next_dependency;
+  return iree_ok_status();
+}
+
+static void loom_verify_emit_closed_value_tuple_error(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_op_vtable_t* vtable, const loom_constraint_t* constraint,
+    uint8_t field_ref) {
+  char field_name_buffer[32];
+  const iree_string_view_t field_name = loom_verify_field_name(
+      vtable, field_ref, field_name_buffer, sizeof(field_name_buffer));
+  const loom_error_def_t* error =
+      loom_verify_constraint_error_or(constraint, LOOM_ERR_STRUCTURE_065);
+  const loom_diagnostic_param_t params[] = {
+      loom_verify_param_string_for_field(field_name, field_ref),
+      loom_param_string(iree_make_cstring_view(loom_type_constraint_name(
+          (loom_type_constraint_t)constraint->property))),
+  };
+  loom_verify_emit_structured(state, op, error, params,
+                              error->param_count < IREE_ARRAYSIZE(params)
+                                  ? error->param_count
+                                  : IREE_ARRAYSIZE(params));
+}
+
+// CLOSED_VALUE_TUPLE: a value field contains every SSA reference embedded in
+// its trailing carrier type, in structural order, and no other values. The
+// carrier satisfies the type constraint stored in the property slot. Args:
+// (value field).
+static void loom_verify_relation_closed_value_tuple(
+    loom_verify_state_t* state, const loom_op_t* op,
+    const loom_op_vtable_t* vtable, const loom_constraint_t* constraint) {
+  if (constraint->arg_count < 1 ||
+      constraint->property >= LOOM_TYPE_CONSTRAINT_COUNT_) {
+    return;
+  }
+  const uint8_t field_ref = constraint->args[0];
+  loom_value_id_t fixed_value = LOOM_VALUE_ID_INVALID;
+  const loom_value_id_t* values = &fixed_value;
+  uint16_t count = 1;
+  if (loom_verify_is_variadic_field(vtable, field_ref)) {
+    values = loom_verify_resolve_variadic_field(op, vtable, field_ref, &count);
+  } else {
+    fixed_value = loom_verify_resolve_value_field(op, vtable, field_ref);
+    if (fixed_value == LOOM_VALUE_ID_INVALID) {
+      count = 0;
+    }
+  }
+  if (count == 0 || values == NULL) {
+    loom_verify_emit_closed_value_tuple_error(state, op, vtable, constraint,
+                                              field_ref);
+    return;
+  }
+
+  const loom_value_id_t carrier = values[count - 1];
+  const loom_type_t carrier_type = loom_verify_value_type(state, carrier);
+  const loom_type_constraint_t carrier_constraint =
+      (loom_type_constraint_t)constraint->property;
+  if (!loom_type_satisfies_constraint(carrier_type, carrier_constraint)) {
+    char field_name_buffer[32];
+    const bool indexed = loom_verify_is_variadic_field(vtable, field_ref);
+    const iree_string_view_t field_name =
+        indexed ? loom_verify_indexed_field_name(vtable, field_ref, count - 1,
+                                                 field_name_buffer,
+                                                 sizeof(field_name_buffer))
+                : loom_verify_field_name(vtable, field_ref, field_name_buffer,
+                                         sizeof(field_name_buffer));
+    const loom_error_def_t* error =
+        LOOM_FIELD_REF_CATEGORY(field_ref) == LOOM_FIELD_RESULT
+            ? LOOM_ERR_TYPE_004
+            : LOOM_ERR_TYPE_003;
+    const loom_diagnostic_param_t params[] = {
+        indexed ? loom_verify_param_string_for_indexed_field(
+                      field_name, field_ref, count - 1)
+                : loom_verify_param_string_for_field(field_name, field_ref),
+        loom_param_type(carrier_type),
+        loom_param_string(iree_make_cstring_view(
+            loom_type_constraint_name(carrier_constraint))),
+    };
+    loom_verify_emit_structured(state, op, error, params,
+                                error->param_count < IREE_ARRAYSIZE(params)
+                                    ? error->param_count
+                                    : IREE_ARRAYSIZE(params));
+    return;
+  }
+
+  loom_verify_closed_value_tuple_t tuple = {
+      .dependencies = values,
+      .dependency_count = count - 1,
+      .matches = true,
+  };
+  iree_status_t status = loom_type_walk_value_refs(
+      state->module, carrier_type, loom_verify_closed_value_tuple_reference,
+      &tuple);
+  IREE_ASSERT(iree_status_is_ok(status),
+              "verified type reference traversal must be infallible");
+  iree_status_ignore(status);
+  if (!tuple.matches || tuple.next_dependency != tuple.dependency_count) {
+    loom_verify_emit_closed_value_tuple_error(state, op, vtable, constraint,
+                                              field_ref);
+  }
+}
+
 // Dispatch table for semantic constraint relations. Indexed by the
 // loom_constraint_relation_t enum value. Adding a relation requires
 // (a) updating the enum in op_defs.h, (b) adding a handler above, and
@@ -2075,6 +2191,8 @@ static const loom_verify_relation_fn_t kVerifyRelationFns[] = {
         loom_verify_relation_register_unit_count_sum,
     // Generated dictionary prefixes are consumed by structural verification.
     [LOOM_RELATION_OPERAND_DICTIONARY] = NULL,
+    [LOOM_RELATION_CLOSED_VALUE_TUPLE] =
+        loom_verify_relation_closed_value_tuple,
 };
 static_assert(IREE_ARRAYSIZE(kVerifyRelationFns) == LOOM_RELATION_COUNT_,
               "verify relation dispatch table out of sync with enum");

@@ -128,6 +128,18 @@ def _load_group_generation() -> DialectGeneration:
     return DialectGeneration(group_ops, list(ALL_GROUP_OPS), None)
 
 
+def _load_tile_generation() -> DialectGeneration:
+    from loom.dialect.tile import ALL_TILE_OPS, tile_ops
+
+    return DialectGeneration(tile_ops, list(ALL_TILE_OPS), None)
+
+
+def _load_tensor_generation() -> DialectGeneration:
+    from loom.dialect.tensor import ALL_TENSOR_OPS, tensor_ops
+
+    return DialectGeneration(tensor_ops, list(ALL_TENSOR_OPS), None)
+
+
 def _load_pipeline_generation() -> DialectGeneration:
     from loom.dialect.pipeline import ALL_PIPELINE_OPS, pipeline_ops
 
@@ -276,6 +288,8 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("check", _load_check_generation),
     ("command", _load_command_generation),
     ("group", _load_group_generation),
+    ("tile", _load_tile_generation),
+    ("tensor", _load_tensor_generation),
     ("pipeline", _load_pipeline_generation),
     ("channel", _load_channel_generation),
     ("buffer", _load_buffer_generation),

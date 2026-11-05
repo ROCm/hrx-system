@@ -55,6 +55,7 @@ from loom.dsl import (
     SameType,
     TotalBitCountEqual,
     Writes,
+    value_duplication_op,
 )
 
 # ============================================================================
@@ -680,6 +681,21 @@ view_bitcast = Op(
 # Registry
 # ============================================================================
 
+view_duplicate = value_duplication_op(
+    "view.duplicate",
+    group=view_ops,
+    carrier=VIEW,
+    doc=(
+        "Create another local owner of a view and the dynamic dimensions and "
+        "encoding referenced by its type. The duplicate addresses the same "
+        "storage while retaining a distinct SSA ownership identity."
+    ),
+    examples=[
+        "%copy = view.duplicate %source : view<4xf32>",
+        "%copy_n, %copy_layout, %copy = view.duplicate %n, %layout, %source : index, encoding<layout>, view<[%copy_n]xf32, %copy_layout>",
+    ],
+)
+
 ALL_VIEW_OPS: tuple[Op, ...] = (
     view_subview,
     view_refine,
@@ -692,4 +708,5 @@ ALL_VIEW_OPS: tuple[Op, ...] = (
     view_atomic_load,
     view_atomic_store,
     view_bitcast,
+    view_duplicate,
 )

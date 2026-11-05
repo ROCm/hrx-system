@@ -207,17 +207,18 @@ def test_index_contract_accounts_for_every_target_lowered_index_operation() -> N
         if rule.source_op is not scf.scf_select
     }
 
-    # Shared reference legalization splits combined quotient/remainder before
-    # SPIR-V contract selection. Keep that ownership explicit so this test
-    # still rejects every unaccounted executable index operation.
-    reference_legalized_ops = {index.index_divrem}
+    # Shared source legalization splits combined quotient/remainder and lowers
+    # structural ownership duplication before SPIR-V contract selection. Keep
+    # that ownership explicit so this test still rejects every unaccounted
+    # executable index operation.
+    source_legalized_ops = {index.index_divrem, index.index_duplicate}
     executable_ops = {
         operation
         for operation in index.ALL_INDEX_OPS
         if operation.effective_phase is not OpPhase.COMPILE_TIME_QUERY
     }
-    assert covered_ops.isdisjoint(reference_legalized_ops)
-    assert covered_ops | reference_legalized_ops == executable_ops
+    assert covered_ops.isdisjoint(source_legalized_ops)
+    assert covered_ops | source_legalized_ops == executable_ops
 
 
 def test_index_numeric_range_guards_have_spirv_diagnostics() -> None:

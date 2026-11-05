@@ -65,6 +65,7 @@ from loom.dsl import (
     SameType,
     VariadicValuesMatch,
     Writes,
+    value_duplication_op,
 )
 
 # ============================================================================
@@ -762,6 +763,14 @@ buffer_fence = Op(
 # Registry
 # ============================================================================
 
+buffer_duplicate = value_duplication_op(
+    "buffer.duplicate",
+    group=buffer_ops,
+    carrier=BUFFER,
+    doc=("Create another local owner of a buffer root. The duplicate identifies the same opaque storage and may lower to the same physical carrier, but remains a distinct SSA ownership identity."),
+    examples=["%copy = buffer.duplicate %source : buffer"],
+)
+
 ALL_BUFFER_OPS: tuple[Op, ...] = (
     buffer_alloca,
     buffer_assume_alignment,
@@ -779,4 +788,5 @@ ALL_BUFFER_OPS: tuple[Op, ...] = (
     buffer_fence,
     buffer_constant,
     buffer_alloca_init,
+    buffer_duplicate,
 )

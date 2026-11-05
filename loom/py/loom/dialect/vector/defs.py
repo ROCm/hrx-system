@@ -133,6 +133,7 @@ from loom.dsl import (
     UnpackedPayloadBitCountMatchesStorage,
     ValueCountMatchesStaticElementCount,
     Writes,
+    value_duplication_op,
 )
 
 # ============================================================================
@@ -651,6 +652,18 @@ vector_refine = Op(
     ],
     examples=[
         "%refined = vector.refine %source : vector<[%m]xf32> -> vector<[%n]xf32>",
+    ],
+)
+
+vector_duplicate = value_duplication_op(
+    "vector.duplicate",
+    group=vector_ops,
+    carrier=VECTOR,
+    category=VECTOR_REFINEMENT_CATEGORY,
+    doc=("Create another local owner of a vector and its dependent shape values. Each result preserves the logical lanes and facts while receiving a distinct SSA ownership identity."),
+    examples=[
+        "%copy = vector.duplicate %source : vector<4xf32>",
+        "%copy_n, %copy = vector.duplicate %n, %source : index, vector<[%copy_n]xf32>",
     ],
 )
 
@@ -5019,7 +5032,7 @@ VECTOR_ENCODING_OPS: tuple[Op, ...] = (
     vector_fragment_repack,
 )
 
-VECTOR_REFINEMENT_OPS: tuple[Op, ...] = (vector_refine,)
+VECTOR_REFINEMENT_OPS: tuple[Op, ...] = (vector_refine, vector_duplicate)
 
 VECTOR_OP_CATEGORY_GROUPS: tuple[tuple[OpCategory, tuple[Op, ...]], ...] = (
     (VECTOR_CONSTRUCTION_CATEGORY, VECTOR_CONSTRUCTION_OPS),
@@ -5054,9 +5067,11 @@ ALL_VECTOR_OPS: tuple[Op, ...] = (
             vector_splatf,
             vector_constanti,
             vector_constantf,
+            vector_duplicate,
         )
     ),
     vector_splatf,
     vector_constanti,
     vector_constantf,
+    vector_duplicate,
 )

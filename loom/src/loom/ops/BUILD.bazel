@@ -373,6 +373,8 @@ loom_cc_library(
         "//loom/src/loom/ops/scf",
         "//loom/src/loom/ops/target",
         "//loom/src/loom/ops/template",
+        "//loom/src/loom/ops/tensor",
+        "//loom/src/loom/ops/tile",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/ops/view",
         "//runtime/src/iree/base",

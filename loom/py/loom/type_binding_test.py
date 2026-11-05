@@ -25,7 +25,11 @@ from loom.ir import (
     StaticDim,
     TypeKind,
 )
-from loom.type_binding import iter_value_bindings, remap_value_bindings
+from loom.type_binding import (
+    iter_value_binding_occurrences,
+    iter_value_bindings,
+    remap_value_bindings,
+)
 
 
 def test_nested_type_and_attribute_bindings_translate_together() -> None:
@@ -118,3 +122,35 @@ def test_empty_predicate_lists_preserve_their_attribute_kind() -> None:
     metadata = CanonicalAttrDict((("predicates", empty), ("integers", ())))
     assert metadata["predicates"] is empty
     assert metadata["integers"] == ()
+
+
+def test_occurrence_traversal_preserves_structure_and_repeated_references() -> None:
+    repeated = ShapedType(TypeKind.VECTOR, F32, (DynamicDim(2), DynamicDim(2)))
+    root = FunctionType(
+        (repeated,),
+        (
+            ShapedType(
+                TypeKind.VIEW,
+                F32,
+                (DynamicDim(3),),
+                DynamicEncoding(4),
+            ),
+            DialectType(
+                "test.predicated",
+                (
+                    Predicate(
+                        "eq",
+                        (PredicateArg("value", 5), PredicateArg("const", 0)),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert list(iter_value_binding_occurrences(root)) == [
+        DynamicDim(2),
+        DynamicDim(2),
+        DynamicDim(3),
+        DynamicEncoding(4),
+        PredicateArg("value", 5),
+    ]

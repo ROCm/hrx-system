@@ -315,7 +315,8 @@ enum {
   LOOM_OP_ENCODING_ASSUME_SPEC = LOOM_OP_KIND(LOOM_DIALECT_ENCODING, 6),
   LOOM_OP_ENCODING_MATCHES = LOOM_OP_KIND(LOOM_DIALECT_ENCODING, 7),
   LOOM_OP_ENCODING_ASSUME_MATCH = LOOM_OP_KIND(LOOM_DIALECT_ENCODING, 8),
-  LOOM_OP_ENCODING_COUNT_ = 9,
+  LOOM_OP_ENCODING_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_ENCODING, 9),
+  LOOM_OP_ENCODING_COUNT_ = 10,
 };
 
 // LOOM_OP_ENCODING_LAYOUT_DENSE: Construct a dense row-major address layout. The consuming view type provides the rank and logical extents.
@@ -513,6 +514,25 @@ iree_status_t loom_encoding_assume_match_facts(
 iree_status_t loom_encoding_assume_match_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_ENCODING_DUPLICATE: Create another local owner of an encoding value. The duplicate preserves the encoding role and facts while receiving a distinct SSA identity for dependent types.
+// %copy = encoding.duplicate %layout : encoding<layout>
+LOOM_DEFINE_ISA(loom_encoding_duplicate_isa, LOOM_OP_ENCODING_DUPLICATE)
+LOOM_DEFINE_VARIADIC_OPERANDS(loom_encoding_duplicate_sources, 0)
+LOOM_DEFINE_VARIADIC_RESULTS(loom_encoding_duplicate_duplicates, 0)
+iree_status_t loom_encoding_duplicate_build(
+    loom_builder_t* builder,
+    const loom_value_id_t* sources,
+    iree_host_size_t sources_count,
+    const loom_type_t* result_types,
+    iree_host_size_t result_count,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_value_duplication_facts(
+    loom_fact_context_t* context,
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts);
 
 // Returns the vtable array for the encoding dialect.
 const loom_op_vtable_t* const* loom_encoding_dialect_vtables(

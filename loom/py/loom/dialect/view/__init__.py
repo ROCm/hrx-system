@@ -15,6 +15,7 @@ from loom.dialect.view.defs import (
     view_atomic_rmw,
     view_atomic_store,
     view_bitcast,
+    view_duplicate,
     view_load,
     view_ops,
     view_prefetch,
@@ -40,4 +41,5 @@ __all__ = [
     "view_atomic_store",
     "view_prefetch",
     "view_bitcast",
+    "view_duplicate",
 ]

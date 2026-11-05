@@ -27,7 +27,9 @@ from loom.dialect.sanitizer.builders import SanitizerBuilder
 from loom.dialect.scalar.builders import ScalarBuilder
 from loom.dialect.scf.builders import ScfBuilder
 from loom.dialect.target.builders import TargetBuilder
+from loom.dialect.tensor.builders import TensorBuilder
 from loom.dialect.test.builders import TestBuilder
+from loom.dialect.tile.builders import TileBuilder
 from loom.dialect.vector.builders import VectorBuilder
 from loom.dialect.view.builders import ViewBuilder
 from loom.dsl import Op, TypeDef
@@ -91,7 +93,11 @@ class LoomBuilder:
     @property
     def target(self) -> TargetBuilder: ...
     @property
+    def tensor(self) -> TensorBuilder: ...
+    @property
     def test(self) -> TestBuilder: ...
+    @property
+    def tile(self) -> TileBuilder: ...
     @property
     def vector(self) -> VectorBuilder: ...
     @property

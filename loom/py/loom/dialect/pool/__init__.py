@@ -33,6 +33,7 @@ encoding-agnostic byte stores.
 from loom.dialect.pool.defs import (
     ALL_POOL_OPS,
     pool_buffer,
+    pool_duplicate,
     pool_load,
     pool_ops,
     pool_pin,
@@ -48,4 +49,5 @@ __all__ = [
     "pool_pin",
     "pool_unpin",
     "pool_buffer",
+    "pool_duplicate",
 ]

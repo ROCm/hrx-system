@@ -2030,7 +2030,7 @@ iree_status_t loom_scalar_constexpr_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_DUPLICATE: Create another local owner of a scalar value tuple. Each result has the same logical value as its positional source and a distinct SSA ownership identity. Allocation may coalesce non-overlapping source and result storage; the operation does not promise disjoint storage.
+// LOOM_OP_SCALAR_DUPLICATE: Create another local owner of a scalar value. The result has the same logical value as its source and a distinct SSA ownership identity. Allocation may coalesce non-overlapping source and result storage; the operation does not promise disjoint storage.
 // %copy = scalar.duplicate %value : i32
 LOOM_DEFINE_ISA(loom_scalar_duplicate_isa, LOOM_OP_SCALAR_DUPLICATE)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_scalar_duplicate_sources, 0)

@@ -17,16 +17,14 @@ from loom.dsl import (
     FACT_IDENTITY,
     PAYLOAD_SCALAR,
     PURE,
-    STORAGE_RELATION,
-    UNIQUE_IDENTITY,
     AttrDef,
     Op,
     Operand,
     OpPhase,
     Result,
     SameType,
-    ValueDuplicationInterface,
     VariadicValuesMatch,
+    value_duplication_op,
 )
 
 __all__ = [
@@ -40,26 +38,18 @@ __all__ = [
 # scalar.duplicate — distinct ownership identity
 # ============================================================================
 
-scalar_duplicate = Op(
+scalar_duplicate = value_duplication_op(
     "scalar.duplicate",
     group=scalar_ops,
-    phase=OpPhase.EXECUTABLE,
+    carrier=PAYLOAD_SCALAR,
     doc=(
-        "Create another local owner of a scalar value tuple. Each result has "
-        "the same logical value as its positional source and a distinct SSA "
+        "Create another local owner of a scalar value. The result has the "
+        "same logical value as its source and a distinct SSA "
         "ownership identity. Allocation may coalesce non-overlapping source "
         "and result storage; the operation does not promise disjoint storage."
     ),
-    operands=[Operand("sources", PAYLOAD_SCALAR, variadic=True)],
-    results=[Result("duplicates", PAYLOAD_SCALAR, variadic=True)],
-    constraints=[VariadicValuesMatch("duplicates", "sources")],
-    traits=[UNIQUE_IDENTITY, STORAGE_RELATION],
-    interfaces=[ValueDuplicationInterface(sources="sources", duplicates="duplicates")],
-    facts="loom_value_duplication_facts",
-    format=[Refs("sources"), COLON, TypesOf("duplicates")],
     examples=[
         "%copy = scalar.duplicate %value : i32",
-        "%copy_x, %copy_y = scalar.duplicate %x, %y : f32, f32",
     ],
 )
 

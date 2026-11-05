@@ -49,6 +49,7 @@ from loom.dsl import (
     cast_op,
     comparison_op,
     unary_op,
+    value_duplication_op,
 )
 
 __all__ = [
@@ -582,6 +583,17 @@ index_cmp = comparison_op(
 # Registry
 # ============================================================================
 
+index_duplicate = value_duplication_op(
+    "index.duplicate",
+    group=index_ops,
+    carrier=ADDRESS,
+    doc=("Create another local owner of an index or offset value. The result preserves the address domain and facts while receiving a distinct SSA ownership identity."),
+    examples=[
+        "%copy = index.duplicate %coordinate : index",
+        "%copy = index.duplicate %byte_offset : offset",
+    ],
+)
+
 ALL_INDEX_OPS: tuple[Op, ...] = (
     index_constant,
     index_cast,
@@ -609,4 +621,5 @@ ALL_INDEX_OPS: tuple[Op, ...] = (
     index_ctpopi,
     index_cmp,
     index_constexpr,
+    index_duplicate,
 )

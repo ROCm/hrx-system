@@ -57,6 +57,7 @@ from loom.dsl import (
     ParameterizedAttrDef,
     Result,
     SameType,
+    value_duplication_op,
 )
 
 # ============================================================================
@@ -1147,6 +1148,17 @@ encoding_assume_match = Op(
 # Registry: all encoding ops in declaration order
 # ============================================================================
 
+encoding_duplicate = value_duplication_op(
+    "encoding.duplicate",
+    group=encoding_ops,
+    carrier=ANY_ENCODING,
+    doc=("Create another local owner of an encoding value. The duplicate preserves the encoding role and facts while receiving a distinct SSA identity for dependent types."),
+    examples=[
+        "%copy = encoding.duplicate %layout : encoding<layout>",
+        "%copy = encoding.duplicate %schema : encoding<schema>",
+    ],
+)
+
 ALL_ENCODING_OPS: tuple[Op, ...] = (
     encoding_layout_dense,
     encoding_layout_strided,
@@ -1157,4 +1169,5 @@ ALL_ENCODING_OPS: tuple[Op, ...] = (
     encoding_assume_spec,
     encoding_matches,
     encoding_assume_match,
+    encoding_duplicate,
 )

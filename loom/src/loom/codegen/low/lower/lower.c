@@ -283,6 +283,13 @@ static iree_status_t loom_low_lower_emit_value_duplication(
   const loom_value_slice_t duplicates =
       loom_value_duplication_duplicates(context->module, source_op);
   for (uint16_t i = 0; i < duplicates.count; ++i) {
+    // Type-only dependencies have no target-Low carrier. Their duplicated
+    // identities are consumed while source types are remapped.
+    if (!loom_low_lower_source_value_has_low_mapping(context,
+                                                     sources.values[i])) {
+      loom_low_lower_elide_value(context, duplicates.values[i]);
+      continue;
+    }
     if (!loom_low_lower_source_value_storage_result_required(
             context, duplicates.values[i])) {
       loom_low_lower_elide_value(context, duplicates.values[i]);
