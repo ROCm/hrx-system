@@ -7,6 +7,7 @@
 #include "iree/hal/memory_budget.h"
 
 #include <barrier>
+#include <string>
 #include <thread>
 
 #include "iree/testing/gtest.h"
@@ -43,24 +44,19 @@ TEST(MemoryBudgetTest, LossPreservesCapacityAndCompleteDiagnostic) {
       8192, nullptr, iree_allocator_system(), &budget));
   iree_hal_memory_credit_t credit = {};
   ASSERT_TRUE(iree_hal_memory_budget_try_reserve(budget, 8192, &credit));
-  iree_hal_memory_credit_settle(
-      &credit, 4096,
-      iree_make_status(IREE_STATUS_UNAVAILABLE,
-                       "native mapping still owns pages"));
+  const std::string native_message =
+      "native mapping still owns pages: " + std::string(4096, 'x');
+  iree_status_t loss =
+      iree_make_status(IREE_STATUS_UNAVAILABLE, "%s", native_message.c_str());
+  const std::string original = iree::Status::ToString(loss);
+  iree_hal_memory_credit_settle(&credit, 4096, loss);
   EXPECT_EQ(iree_hal_memory_budget_charged(budget), 4096u);
   EXPECT_EQ(iree_hal_memory_budget_abandoned(budget), 4096u);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
                         iree_hal_memory_budget_query_loss(budget));
-  iree_status_t diagnostic = iree_hal_memory_budget_query_loss(budget);
-  char message[2048];
-  iree_host_size_t length = 0;
-  const bool formatted =
-      iree_status_format(diagnostic, sizeof(message), message, &length);
-  iree_status_free(diagnostic);
-  ASSERT_TRUE(formatted);
-  EXPECT_NE(
-      std::string(message, length).find("native mapping still owns pages"),
-      std::string::npos);
+  const iree::Status diagnostic(iree_hal_memory_budget_query_loss(budget));
+  EXPECT_EQ(diagnostic.ToString(), original);
+  EXPECT_NE(original.find(native_message), std::string::npos);
   ASSERT_TRUE(iree_hal_memory_budget_try_reserve(budget, 4096, &credit));
   iree_hal_memory_credit_return(&credit);
   EXPECT_EQ(iree_hal_memory_budget_charged(budget), 4096u);
