@@ -421,6 +421,26 @@ jobs:
     with:
       profile: Release
 
+  docs_deploy:
+    name: Documentation / GitHub
+    if: github.ref == 'refs/heads/main' && needs.sdk.outputs.documentation == 'true'
+    needs: sdk
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
   bazel_windows:
     name: Bazel / Windows x86-64 / ${{ matrix.name }}
     strategy:

@@ -9,6 +9,10 @@ on:
       profile:
         type: string
         default: Release
+    outputs:
+      documentation:
+        description: Whether this build produced the GitHub Pages artifact.
+        value: ${{ jobs.build.outputs.documentation }}
 
 permissions:
   actions: read
@@ -18,6 +22,8 @@ jobs:
   build:
     name: Linux + Windows x86-64 / Clang
     runs-on: azure-linux-scale-rocm
+    outputs:
+      documentation: ${{ inputs.profile == 'Release' && steps.scope.outputs.loom_docs || 'false' }}
     # Two complete SDK builds normally take 5-9 minutes on this pool. Retain a
     # finite hang bound without treating ordinary fleet variance as a failure.
     timeout-minutes: 15
@@ -46,6 +52,11 @@ jobs:
             echo "WINSDK_ROOT=$PWD/build/loom-sdk/toolchain/sdk"
             echo "WINDOWS_COMPILER_RT_ROOT=$PWD/build/loom-sdk/toolchain/compiler-rt"
           } >> "$GITHUB_ENV"
+      - name: Select documentation build
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 build_tools/ci/change_scope.py --base "$BASE_SHA" >> "$GITHUB_OUTPUT"
       - name: Install compiler and host tools
         run: |
           case "$PROFILE" in Release|Tracy|Debug|ASAN) ;; *) exit 2 ;; esac
@@ -95,6 +106,36 @@ jobs:
           # installed-product test clears to verify the wheel's own linkage.
           /usr/bin/python3 -m build_tools.ci.loom_wheel test \
             --inputs=build/loom-sdk/linux --output=wheel-artifact
+      - name: Build documentation C examples
+        if: inputs.profile == 'Release' && steps.scope.outputs.loom_docs == 'true'
+        run: |
+          bazel build --config=loom-sdk --config=opt \
+            --cxxopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 \
+            --linkopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 \
+            //loom/binding/c/example:jit_task_pool \
+            //loom/binding/c/example:link_modules \
+            //loom/binding/c/example:product_frontier
+      - name: Build documentation from the qualified SDK
+        if: inputs.profile == 'Release' && steps.scope.outputs.loom_docs == 'true'
+        env:
+          LOOM_DOCS_C_EXAMPLE_DIR: ${{ github.workspace }}/bazel-bin/loom/binding/c/example
+          LOOM_DOCS_TOOL_DIR: ${{ github.workspace }}/.venv/bin
+        run: |
+          /usr/bin/python3 dev.py setup --docs
+          .venv/bin/python -m pip install --no-deps wheel-artifact/*.whl
+          PYTHONPATH=loom/docs .venv/bin/python -m unittest \
+            loom_docs.highlight_test
+          .venv/bin/python loom/docs/build.py build \
+            --site-dir build/loom-pages/loom
+          test -f build/loom-pages/loom/index.html
+          test -f build/loom-pages/loom/reference/dialects/index.html
+          test -f build/loom-pages/loom/reference/c-api/generated/index.html
+      - name: Upload Pages artifact
+        if: inputs.profile == 'Release' && steps.scope.outputs.loom_docs == 'true'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: build/loom-pages
+          retention-days: 7
       - name: Build and qualify standalone Linux server
         if: inputs.profile == 'Release'
         run: |

@@ -1719,27 +1719,28 @@ fi
                 str(versioned_rocm_root / "lib/libhsa-runtime64.so.1"),
             )
 
-    def test_loom_docs_workflow_reviews_every_change_and_deploys_only_main(self):
-        text = Path(".github/workflows/docs.yml").read_text()
+    def test_loom_docs_use_the_qualified_sdk_and_deploy_only_main(self):
+        build_text = Path(".github/workflows/build_loom_sdk_artifacts.yml").read_text()
+        sdk_text = Path(".github/workflows/build_loom_sdk.yml").read_text()
+        ci_text = Path(".github/workflows/ci_iree.yml").read_text()
         build_block = self.workflow_job_block(
-            ".github/workflows/docs.yml", "build_docs"
+            ".github/workflows/build_loom_sdk_artifacts.yml", "build"
         )
         deploy_block = self.workflow_job_block(
-            ".github/workflows/docs.yml", "deploy_docs"
+            ".github/workflows/ci_iree.yml", "docs_deploy"
         )
 
-        for path in (
-            '"requirements-analysis.lock.txt"',
-            '"requirements-dev.lock.txt"',
-            '"build_tools/devtools/**"',
-            '"loom/binding/c/**"',
-            '"loom/docs/**"',
-            '"loom/py/loom/**"',
-            '"loom/src/loom/editor/textmate/**"',
+        for target in (
+            "//loom/binding/c/example:jit_task_pool",
+            "//loom/binding/c/example:link_modules",
+            "//loom/binding/c/example:product_frontier",
         ):
-            self.assertIn(f"- {path}", text)
-        self.assertIn("runs-on: ubuntu-24.04", build_block)
+            self.assertIn(target, build_block)
+        self.assertIn("build_tools/ci/change_scope.py", build_block)
         self.assertIn("python3 dev.py setup --docs", build_block)
+        self.assertIn("pip install --no-deps wheel-artifact/*.whl", build_block)
+        self.assertIn("LOOM_DOCS_C_EXAMPLE_DIR", build_block)
+        self.assertIn("LOOM_DOCS_TOOL_DIR", build_block)
         self.assertIn("loom_docs.highlight_test", build_block)
         self.assertIn(
             "--site-dir build/loom-pages/loom",
@@ -1758,16 +1759,15 @@ fi
             r"uses: actions/upload-pages-artifact@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
         self.assertIn("path: build/loom-pages", build_block)
-        self.assertIn(
-            "group: ${{ github.workflow }}-build-${{ github.ref }}", build_block
-        )
-        self.assertIn("cancel-in-progress: true", build_block)
         self.assertNotIn("pages: write", build_block)
         self.assertNotIn("id-token: write", build_block)
         self.assertNotIn("actions/deploy-pages", build_block)
+        self.assertIn("value: ${{ jobs.build.outputs.documentation }}", build_text)
+        self.assertIn("value: ${{ jobs.build.outputs.documentation }}", sdk_text)
 
-        self.assertIn("if: github.ref == 'refs/heads/main'", deploy_block)
-        self.assertIn("needs: build_docs", deploy_block)
+        self.assertIn("github.ref == 'refs/heads/main'", deploy_block)
+        self.assertIn("needs.sdk.outputs.documentation == 'true'", deploy_block)
+        self.assertIn("needs: sdk", deploy_block)
         self.assertIn("pages: write", deploy_block)
         self.assertIn("id-token: write", deploy_block)
         self.assertIn("name: github-pages", deploy_block)
@@ -1779,12 +1779,9 @@ fi
             deploy_block,
             r"uses: actions/deploy-pages@[0-9a-f]{40} # v\d+\.\d+\.\d+",
         )
-        self.assertEqual(text.count("pages: write"), 1)
-        self.assertEqual(text.count("id-token: write"), 1)
-        self.assertEqual(text.count("actions/deploy-pages@"), 1)
-        self.assertNotIn("apt-get", text)
-        self.assertNotIn("pip install", text)
-        self.assertNotIn("sudo", text)
+        self.assertEqual(ci_text.count("pages: write"), 1)
+        self.assertEqual(ci_text.count("id-token: write"), 1)
+        self.assertEqual(ci_text.count("actions/deploy-pages@"), 1)
 
     def test_cmake_cpu_sanitizer_command_uses_cmake_build_dir_and_xfails(self):
         args = ci.parse_arguments(["iree-cmake-cpu-ubsan"])

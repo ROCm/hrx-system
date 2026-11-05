@@ -12,29 +12,19 @@
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=loom/docs/examples/example.shlib
+source "${script_dir}/../../example.shlib"
+repo_root="${LOOM_EXAMPLE_REPO_ROOT}"
 
 if [[ "$#" -gt 1 ]]; then
   printf 'usage: %s [output-directory]\n' "$0" >&2
   exit 64
 fi
 
-if [[ -n "${RUNFILES_DIR:-}" ]]; then
-  workspace="${TEST_WORKSPACE:-_main}"
-  repo_root="${RUNFILES_DIR}/${workspace}"
-  export LOOM_FORMAT="${repo_root}/loom/src/loom/tools/loom-format/loom-format"
-  export LOOM_COMPILE="${repo_root}/loom/src/loom/tools/loom-compile/loom-compile"
-  export LOOM_BENCHMARK="${repo_root}/loom/src/loom/tools/loom-benchmark/loom-benchmark"
-else
-  repo_root="$(cd -- "${script_dir}/../../../../.." && pwd -P)"
-  "${repo_root}/build_tools/bin/iree-bazel-build" \
-    --config=asan \
-    //loom/src/loom/tools/loom-format:loom-format \
-    //loom/src/loom/tools/loom-compile:loom-compile \
-    //loom/src/loom/tools/loom-benchmark:loom-benchmark
-  export LOOM_FORMAT="${repo_root}/bazel-bin/loom/src/loom/tools/loom-format/loom-format"
-  export LOOM_COMPILE="${repo_root}/bazel-bin/loom/src/loom/tools/loom-compile/loom-compile"
-  export LOOM_BENCHMARK="${repo_root}/bazel-bin/loom/src/loom/tools/loom-benchmark/loom-benchmark"
-fi
+loom_example_configure_inputs \
+  tool:loom-format \
+  tool:loom-compile \
+  tool:loom-benchmark
 
 source_file="${script_dir}/saxpy.loom"
 build_file="${script_dir}/BUILD.bazel"

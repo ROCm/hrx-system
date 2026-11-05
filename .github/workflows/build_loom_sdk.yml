@@ -9,6 +9,10 @@ on:
       profile:
         type: string
         default: Release
+    outputs:
+      documentation:
+        description: Whether this build produced the GitHub Pages artifact.
+        value: ${{ jobs.build.outputs.documentation }}
   workflow_dispatch:
     inputs:
       profile:

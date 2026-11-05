@@ -2235,7 +2235,9 @@ class PresubmitTest(unittest.TestCase):
 
     def test_workflows_and_requirements_trigger_checkout_checks(self):
         self.assertTrue(
-            presubmit.is_devtools_checkout_trigger(".github/workflows/docs.yml")
+            presubmit.is_devtools_checkout_trigger(
+                ".github/workflows/build_loom_sdk_artifacts.yml"
+            )
         )
         self.assertTrue(
             presubmit.is_devtools_checkout_trigger("requirements-analysis.in")
