@@ -29,7 +29,9 @@ void iree_hal_amd_gpu_frontier_request_complete(
   iree_notification_t* notification = request->notification;
   request->status = status;
   iree_atomic_store(&request->completed, 1, iree_memory_order_release);
-  iree_notification_post(notification, 1);
+  // Queue release and frontier growth can share this notification. Wake every
+  // enrolled predicate; an arbitrary waiter may belong to a different queue.
+  iree_notification_post(notification, IREE_ALL_WAITERS);
 }
 
 static bool iree_hal_amd_gpu_frontier_request_completed(void* user_data) {

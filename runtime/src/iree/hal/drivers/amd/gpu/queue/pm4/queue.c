@@ -1905,11 +1905,13 @@ static void iree_hal_amd_gpu_pm4_complete_download(void* user_data) {
 static bool iree_hal_amd_gpu_pm4_retire(
     void* user_data, amdf_status_t wait_status,
     iree_hal_amd_gpu_completion_wait_t* out_wait,
-    iree_hal_amd_gpu_completion_copy_t* out_copy) {
+    iree_hal_amd_gpu_completion_copy_t* out_copy,
+    iree_hal_amd_gpu_completion_scope_t* scope) {
   iree_hal_amd_gpu_pm4_queue_t* queue = user_data;
   if (!amdf_status_is_ok((amdf_status_t)iree_atomic_load(
           &queue->native_failure, iree_memory_order_relaxed)) ||
       !amdf_status_is_ok(wait_status)) {
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
     if (!amdf_status_is_ok(wait_status)) {
       iree_hal_amd_gpu_pm4_fail_native(queue, wait_status,
                                        "GPU completion wait");
@@ -1929,6 +1931,7 @@ static bool iree_hal_amd_gpu_pm4_retire(
       iree_hal_amd_gpu_pm4_feedback_failure(queue);
   if (feedback_failure != IREE_STATUS_OK &&
       !queue->feedback_failure_delivered) {
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
     // Only this consumer releases published captures. Service cannot inspect
     // them during a logical failure because native retirement keeps running.
     for (uint64_t i = position; i != published; ++i) {
@@ -1948,6 +1951,7 @@ static bool iree_hal_amd_gpu_pm4_retire(
   }
   uint64_t native_retired = 0;
   if (queue->kernel && position != published) {
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
     const amdf_status_t status = iree_hal_amd_gpu_pm4_kmq_storage_refresh(
         queue->kernel, &native_retired);
     if (!amdf_status_is_ok(status)) {
@@ -1989,11 +1993,13 @@ static bool iree_hal_amd_gpu_pm4_retire(
     if (queue->options.feedback) {
       // Native retirement makes this dispatch's reports observable. Drain the
       // ready shared prefix before waking host completion consumers.
+      iree_hal_amd_gpu_completion_scope_lock(scope);
       iree_hal_amd_gpu_feedback_drain(queue->options.feedback);
       if (completion_code == IREE_STATUS_OK) {
         completion_code = iree_hal_amd_gpu_pm4_feedback_failure(queue);
       }
     }
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
     iree_hal_amd_gpu_pm4_scratch_storage_free(queue->context, action->scratch);
     action->scratch = NULL;
     const uint64_t consumed_words = action->consumed_words;

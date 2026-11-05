@@ -1775,22 +1775,26 @@ static void iree_hal_amd_gpu_aql_complete_download(void* user_data) {
 static bool iree_hal_amd_gpu_aql_retire(
     void* user_data, amdf_status_t wait_status,
     iree_hal_amd_gpu_completion_wait_t* out_wait,
-    iree_hal_amd_gpu_completion_copy_t* out_copy) {
+    iree_hal_amd_gpu_completion_copy_t* out_copy,
+    iree_hal_amd_gpu_completion_scope_t* scope) {
   iree_hal_amd_gpu_aql_queue_t* queue = user_data;
   uint64_t position = (uint64_t)iree_atomic_load(&queue->completed.count,
                                                  iree_memory_order_relaxed);
   const uint64_t published = (uint64_t)iree_atomic_load(
       &queue->producer.count, iree_memory_order_acquire);
   if (amdf_status_is_ok(wait_status) && position != published) {
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
     wait_status = iree_hal_amd_gpu_aql_scratch_poll(&queue->scratch);
   }
   if (!amdf_status_is_ok(wait_status)) {
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
     iree_hal_amd_gpu_aql_fail_native(queue, wait_status,
                                      "AQL completion/scratch");
   }
   const iree_status_code_t failure = (iree_status_code_t)iree_atomic_load(
       &queue->failure, iree_memory_order_acquire);
   if (failure != IREE_STATUS_OK) {
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
     if (iree_hal_amd_gpu_publisher_is_idle(&queue->publisher)) {
       iree_hal_amd_gpu_aql_queue_fail_issued(queue, failure);
     }
@@ -1800,6 +1804,7 @@ static bool iree_hal_amd_gpu_aql_retire(
       iree_hal_amd_gpu_aql_feedback_failure(queue);
   if (feedback_failure != IREE_STATUS_OK &&
       !queue->feedback_failure_delivered) {
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
     // This consumer owns published captures until native completion, even
     // after their public timelines fail from a shader report.
     for (uint64_t i = position; i < published; ++i) {
@@ -1836,6 +1841,7 @@ static bool iree_hal_amd_gpu_aql_retire(
     if (queue->options.feedback) {
       // Native completion makes this work's reports observable before its
       // public completion can wake a host consumer.
+      iree_hal_amd_gpu_completion_scope_lock(scope);
       iree_hal_amd_gpu_feedback_drain(queue->options.feedback);
       if (code == IREE_STATUS_OK) {
         code = iree_hal_amd_gpu_aql_feedback_failure(queue);
@@ -1852,6 +1858,7 @@ static bool iree_hal_amd_gpu_aql_retire(
       break;
     }
     IREE_TRACE_ZONE_BEGIN_NAMED(z0, "iree_hal_amd_gpu_aql_retire");
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
     if (submission->profiled) {
       const iree_hal_amd_gpu_profile_operation_t* operation =
           iree_hal_amd_gpu_aql_submission_profile(submission);

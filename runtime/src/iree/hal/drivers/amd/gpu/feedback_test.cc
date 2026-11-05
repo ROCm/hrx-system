@@ -10,6 +10,7 @@
 #include <cstring>
 #include <vector>
 
+#include "iree/hal/drivers/amd/gpu/completion.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -33,6 +34,21 @@ class FeedbackTest : public ::testing::Test {
   void TearDown() override {
     iree_status_free(feedback_.failure);
     iree_hal_amd_gpu_source_context_registry_deinitialize(&feedback_.sources);
+  }
+  bool Poll() {
+    iree_hal_amd_gpu_completion_source_t source = {
+        .fn = iree_hal_amd_gpu_feedback_poll,
+        .user_data = &feedback_,
+    };
+    iree_hal_amd_gpu_completion_t completion = {
+        .context = &context_,
+        .source_count = 1,
+        .sources = &source,
+    };
+    iree_slim_mutex_initialize(&completion.drain_mutex);
+    const bool ready = iree_hal_amd_gpu_completion_try_drain(&completion);
+    iree_slim_mutex_deinitialize(&completion.drain_mutex);
+    return ready;
   }
   static void Publish(void* user_data, const iree_hal_device_event_t* event) {
     auto& self = *static_cast<FeedbackTest*>(user_data);
@@ -420,9 +436,7 @@ TEST_F(FeedbackTest, DrainsOnlyReadyPrefixWithoutWaitingForReservedHole) {
   Packet(0)->state = 0;
   Packet(128);
   control_.reservation_head = 256;
-  iree_hal_amd_gpu_completion_wait_t wait = {};
-  EXPECT_FALSE(iree_hal_amd_gpu_feedback_poll(&feedback_, AMDF_STATUS_OK, &wait,
-                                              nullptr));
+  EXPECT_FALSE(Poll());
   EXPECT_EQ(control_.read_tail, 0u);
   EXPECT_TRUE(reports_.empty());
   Packet(0);
@@ -442,9 +456,7 @@ TEST_F(FeedbackTest, LiveDrainIsBoundedAndRetirementDrainsObservedPrefix) {
     Packet(i * 128);
   }
   control_.reservation_head = 12800;
-  iree_hal_amd_gpu_completion_wait_t wait = {};
-  EXPECT_TRUE(iree_hal_amd_gpu_feedback_poll(&feedback_, AMDF_STATUS_OK, &wait,
-                                             nullptr));
+  EXPECT_TRUE(Poll());
   EXPECT_EQ(reports_.size(), 64u);
   EXPECT_EQ(control_.read_tail, 8192u);
   iree_hal_amd_gpu_feedback_drain(&feedback_);

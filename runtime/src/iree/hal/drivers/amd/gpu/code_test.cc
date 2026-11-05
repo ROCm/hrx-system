@@ -252,12 +252,28 @@ class CodeTest : public ::testing::Test {
   void JoinFailure() {
     // This fixture has no healthy observer. Deliver the same final source
     // failure and terminal callback used by the real completion worker.
-    const auto source = iree_hal_amd_gpu_sdma_queue_completion_source(queue_);
+    auto source = iree_hal_amd_gpu_sdma_queue_completion_source(queue_);
     iree_hal_amd_gpu_completion_wait_t wait = {};
+    iree_hal_amd_gpu_completion_t completion = {};
+    iree_slim_mutex_initialize(&completion.drain_mutex);
+    auto poll = [&](amdf_status_t status) {
+      iree_slim_mutex_lock(&completion.drain_mutex);
+      iree_hal_amd_gpu_completion_scope_t scope = {
+          .completion = &completion,
+          .source = &source,
+          .fn = source.fn,
+      };
+      const bool ready =
+          source.fn(source.user_data, status, &wait, nullptr, &scope);
+      EXPECT_FALSE(iree_hal_amd_gpu_completion_scope_finish(&scope));
+      iree_slim_mutex_unlock(&completion.drain_mutex);
+      return ready;
+    };
     const amdf_status_t error =
         amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
     iree_hal_amd_gpu_context_fail_execution(&context_, error, "native wait");
-    source.fn(source.user_data, error, &wait, nullptr);
+    poll(error);
+    iree_slim_mutex_deinitialize(&completion.drain_mutex);
     context_.execution_failure.join(context_.execution_failure.user_data,
                                     error);
     EXPECT_EQ(membership_.terminal.status, AMDF_STATUS_OK);
@@ -344,10 +360,26 @@ TEST_F(CodeTest, StagingIsReleasedOnlyAfterCopyRetires) {
     EXPECT_TRUE(memories_[2].allocated);
     EXPECT_TRUE(memories_[2].mapped);
     retired_ = submitted_;
-    const auto source = iree_hal_amd_gpu_sdma_queue_completion_source(queue_);
+    auto source = iree_hal_amd_gpu_sdma_queue_completion_source(queue_);
     iree_hal_amd_gpu_completion_wait_t wait = {};
-    while (source.fn(source.user_data, AMDF_STATUS_OK, &wait, nullptr)) {
+    iree_hal_amd_gpu_completion_t completion = {};
+    iree_slim_mutex_initialize(&completion.drain_mutex);
+    auto poll = [&](amdf_status_t status) {
+      iree_slim_mutex_lock(&completion.drain_mutex);
+      iree_hal_amd_gpu_completion_scope_t scope = {
+          .completion = &completion,
+          .source = &source,
+          .fn = source.fn,
+      };
+      const bool ready =
+          source.fn(source.user_data, status, &wait, nullptr, &scope);
+      EXPECT_FALSE(iree_hal_amd_gpu_completion_scope_finish(&scope));
+      iree_slim_mutex_unlock(&completion.drain_mutex);
+      return ready;
+    };
+    while (poll(AMDF_STATUS_OK)) {
     }
+    iree_slim_mutex_deinitialize(&completion.drain_mutex);
   });
   iree_status_t status = Publish(queue_);
   observer.join();

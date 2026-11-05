@@ -546,10 +546,13 @@ void GpuNativeTest::SetUp() {
   }
   iree_hal_amd_gpu_device_options_initialize(&options_);
   options_.queue_count = 2;
-  if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+  if (command_type() != AMDF_QUEUE_COMMAND_TYPE_UNKNOWN) {
     for (uint32_t i = 0; i < context_->endpoint_info.queue_family_count; ++i) {
-      if (iree_hal_amd_gpu_aql_queue_publication_modes(
-              &context_->families[i])) {
+      const auto& family = context_->families[i];
+      if (family.command_type == command_type() &&
+          (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+               ? iree_hal_amd_gpu_aql_queue_publication_modes(&family)
+               : iree_hal_amd_gpu_pm4_queue_publication_modes(&family))) {
         options_.queue_family_ordinal = i;
         break;
       }
