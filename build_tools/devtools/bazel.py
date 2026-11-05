@@ -117,6 +117,7 @@ class BazelFuzzCommand(BazelTargetCommand):
     shard_index: int = 0
     shard_count: int = 1
     result_path: Path | None = None
+    ignored_directories: list[Path] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -259,6 +260,52 @@ def parse_bazel_fuzz_shard(value: str) -> tuple[int, int]:
     return shard_index, shard_count
 
 
+def parse_bazel_fuzz_ignored_directory(value: str) -> Path:
+    directory = Path(value)
+    normalized_parts = [part for part in directory.parts if part not in ("", os.curdir)]
+    if (
+        not value
+        or directory.is_absolute()
+        or os.pardir in directory.parts
+        or not normalized_parts
+    ):
+        raise ValueError("--ignore-directory requires a repository-relative directory")
+    return Path(*normalized_parts)
+
+
+def bazel_packages_under_directories(
+    repository_root: Path, directories: list[Path]
+) -> list[str]:
+    repository_root = repository_root.resolve()
+    packages = set()
+
+    def raise_walk_error(error: OSError) -> None:
+        raise error
+
+    for relative_directory in directories:
+        directory = repository_root / relative_directory
+        try:
+            directory.resolve().relative_to(repository_root)
+        except ValueError as exc:
+            raise ValueError(
+                f"ignored directory escapes the repository: {relative_directory}"
+            ) from exc
+        if not directory.is_dir():
+            raise ValueError(f"ignored directory does not exist: {relative_directory}")
+        for current_root, child_directories, filenames in os.walk(
+            directory, followlinks=False, onerror=raise_walk_error
+        ):
+            current_path = Path(current_root)
+            child_directories[:] = [
+                child_directory
+                for child_directory in child_directories
+                if not (current_path / child_directory).is_symlink()
+            ]
+            if "BUILD" in filenames or "BUILD.bazel" in filenames:
+                packages.add(current_path.relative_to(repository_root).as_posix())
+    return sorted(packages)
+
+
 def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
     tool_args, fuzzer_args = split_program_args(arguments)
     target = ""
@@ -267,6 +314,7 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
     shard_index = 0
     shard_count = 1
     result_path = None
+    ignored_directories = []
     for arg in tool_args:
         if arg.startswith("--workers="):
             try:
@@ -279,6 +327,10 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
             shard_index, shard_count = parse_bazel_fuzz_shard(arg.split("=", 1)[1])
         elif arg.startswith("--result="):
             result_path = Path(arg.split("=", 1)[1])
+        elif arg.startswith("--ignore-directory="):
+            ignored_directories.append(
+                parse_bazel_fuzz_ignored_directory(arg.split("=", 1)[1])
+            )
         elif arg.startswith("-"):
             bazel_args.append(arg)
         elif not target:
@@ -287,6 +339,8 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
             bazel_args.append(arg)
     if not target:
         raise ValueError("Target is required for bazel fuzz")
+    if ignored_directories and "..." not in target:
+        raise ValueError("--ignore-directory requires a recursive target pattern")
     return BazelFuzzCommand(
         target=target,
         bazel_args=bazel_args,
@@ -295,6 +349,7 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
         shard_index=shard_index,
         shard_count=shard_count,
         result_path=result_path,
+        ignored_directories=ignored_directories,
     )
 
 
@@ -1509,7 +1564,12 @@ class BazelFuzzStep:
             f"# select stable shard {self.command.shard_index}/{self.command.shard_count}",
         ]
         if "..." in self.command.target:
-            lines.append(quote_command([self.bazel, "query", self.command.target]))
+            query_args = []
+            if self.command.ignored_directories:
+                query_args.append("--deleted_packages=<ignored local packages>")
+            lines.append(
+                quote_command([self.bazel, "query", *query_args, self.command.target])
+            )
             lines.append(
                 quote_command([self.bazel, "build", *self.bazel_args, "<fuzz targets>"])
             )
@@ -1551,8 +1611,16 @@ class BazelFuzzStep:
         return self.run_target(self.command.target, verbose=verbose)
 
     def run_target_pattern(self, *, verbose: bool) -> int:
+        try:
+            ignored_packages = bazel_packages_under_directories(
+                REPO_ROOT, self.command.ignored_directories
+            )
+        except (OSError, ValueError) as exc:
+            print(f"dev.py: {exc}", file=sys.stderr)
+            return 1
+        query_args = [f"--deleted_packages={package}" for package in ignored_packages]
         discovered = run_captured(
-            [self.bazel, "query", self.command.target],
+            [self.bazel, "query", *query_args, self.command.target],
             cwd=REPO_ROOT,
             env=self.env,
         )

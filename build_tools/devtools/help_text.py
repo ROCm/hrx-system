@@ -525,13 +525,15 @@ deps; add --dep TARGET for anything inference misses.""",
             epilog="""Examples:
   python dev.py bazel fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz
   python dev.py bazel fuzz //runtime/src/iree/tokenizer/... -- -max_total_time=60
-  python dev.py bazel fuzz --workers=4 --shard=0/3 //... -- -max_total_time=3600
+  python dev.py bazel fuzz --workers=4 --shard=0/4 //runtime/... -- -max_total_time=3600
+  python dev.py bazel fuzz --workers=2 //loom/... -- -max_total_time=3600
 
 This builds with --config=fuzzer, resolves executable paths with cquery, then
 runs each fuzzer in a fresh child process with independent peak-memory accounting.
 --workers bounds host concurrency, --shard=INDEX/COUNT assigns zero-based stable
 target shards across machines, and --result=PATH overrides the default JSON result
-path.""",
+path. Keep runtime and Loom campaigns separate so their process cost, duration,
+and host requirements can be scheduled independently.""",
         )
     if command == "fuzz" and lane == "cmake":
         return CommandHelp(
@@ -899,9 +901,16 @@ fuzzer processes at once. The default is one worker.
 ```bash
 iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz
 iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz -- -max_total_time=60
-iree-bazel-fuzz --workers=4 //runtime/src/iree/tokenizer/... -- -max_total_time=60
-iree-bazel-fuzz --workers=4 --shard=0/3 //... -- -max_total_time=3600
+iree-bazel-fuzz --workers=4 --shard=0/4 //runtime/... -- -max_total_time=3600
+iree-bazel-fuzz --workers=2 //loom/... -- -max_total_time=3600
 ```
+
+The recursive pattern is the campaign boundary. Run runtime and Loom campaigns
+independently so each can use an appropriate process count, shard layout,
+duration, and host. `//...` remains available for a deliberate whole-tree
+sweep. A caller with local Bazel packages outside that sweep can repeat
+`--ignore-directory=PATH`; the exclusion applies only to recursive target
+discovery and does not change ordinary Bazel build, run, or query behavior.
 
 Corpus and artifact directories live under
 `IREE_FUZZ_CACHE` when set, otherwise the platform user cache directory under
