@@ -989,6 +989,10 @@ iree_status_t loom_low_lower_plan_declaration(
       *out_plan = plan;
     }
   }
+  // Type mapping may lazily acquire declaration-local value ordinals. The
+  // completed plan owns only its mapped signature and must return the module
+  // scratch borrow before another function is planned.
+  loom_local_value_domain_release(&context.lowering->value_domain);
   iree_arena_deinitialize(&context.analysis_arena);
   iree_arena_deinitialize(&function_arena);
   return status;

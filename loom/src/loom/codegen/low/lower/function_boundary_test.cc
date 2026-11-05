@@ -355,6 +355,7 @@ TEST_F(LowLowerFunctionBoundaryTest,
   ASSERT_EQ(result_.error_count, 0u);
   ASSERT_NE(plan, nullptr);
   EXPECT_EQ(result_.low_func_op, nullptr);
+  EXPECT_FALSE(loom_module_value_ordinal_scratch_is_active(module_));
   EXPECT_EQ(module_->values.count, value_count);
   EXPECT_EQ(module_->symbols.entries[symbol.symbol_id].defining_op, source_op);
   EXPECT_TRUE(loom_type_equal(
