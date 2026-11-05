@@ -1817,6 +1817,7 @@ static bool iree_hal_amd_gpu_aql_retire(
                          iree_memory_order_acquire) != 0) {
       out_wait->address = (iree_atomic_int32_t*)action->signal->host_value;
       out_wait->value = 1;
+      out_wait->signal = action->signal;
       break;
     }
     iree_status_code_t code;

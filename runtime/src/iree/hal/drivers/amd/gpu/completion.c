@@ -7,6 +7,8 @@
 #include "iree/hal/drivers/amd/gpu/completion.h"
 
 #include "iree/base/threading/processor.h"
+#include "iree/base/threading/wait_address.h"
+#include "iree/hal/drivers/amd/gpu/queue/signal.h"
 #include "iree/hal/drivers/amd/status.h"
 
 enum {
@@ -14,6 +16,7 @@ enum {
   IREE_HAL_AMD_GPU_COMPLETION_STOP_REQUESTED = 1 << 0,
   IREE_HAL_AMD_GPU_COMPLETION_STOPPED = 1 << 1,
   IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES = 1 << 2,
+  IREE_HAL_AMD_GPU_COMPLETION_OBSERVING = 1 << 3,
 };
 
 static bool iree_hal_amd_gpu_completion_stop_requested(
@@ -25,12 +28,19 @@ static bool iree_hal_amd_gpu_completion_stop_requested(
 }
 
 static bool iree_hal_amd_gpu_completion_drain(
-    iree_hal_amd_gpu_completion_t* completion, amdf_status_t status) {
+    iree_hal_amd_gpu_completion_t* completion, amdf_status_t status,
+    bool* out_has_wait) {
   bool ready = false;
   for (iree_host_size_t i = 0; i < completion->source_count; ++i) {
     iree_hal_amd_gpu_completion_source_t* source = &completion->sources[i];
-    source->wait = (iree_hal_amd_gpu_completion_wait_t){0};
-    ready |= source->fn(source->user_data, status, &source->wait);
+    iree_hal_amd_gpu_completion_wait_t ignored_wait;
+    iree_hal_amd_gpu_completion_wait_t* wait =
+        out_has_wait ? &source->wait : &ignored_wait;
+    *wait = (iree_hal_amd_gpu_completion_wait_t){0};
+    ready |= source->fn(source->user_data, status, wait);
+    if (out_has_wait) {
+      *out_has_wait |= wait->address != NULL;
+    }
   }
   return ready;
 }
@@ -41,12 +51,49 @@ bool iree_hal_amd_gpu_completion_try_drain(
     return false;
   }
   bool ready = false;
-  if (iree_atomic_load(&completion->state, iree_memory_order_acquire) ==
-      IREE_HAL_AMD_GPU_COMPLETION_RUNNING) {
-    ready = iree_hal_amd_gpu_completion_drain(completion, AMDF_STATUS_OK);
+  if (!iree_any_bit_set(
+          iree_atomic_load(&completion->state, iree_memory_order_acquire),
+          IREE_HAL_AMD_GPU_COMPLETION_STOP_REQUESTED |
+              IREE_HAL_AMD_GPU_COMPLETION_STOPPED |
+              IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES)) {
+    ready = iree_hal_amd_gpu_completion_drain(completion, AMDF_STATUS_OK, NULL);
   }
   iree_slim_mutex_unlock(&completion->drain_mutex);
   return ready;
+}
+
+// Called under the drain mutex while every hint still has its source's borrow.
+// Atomic admission excludes a setter that has requested replacement but has not
+// acquired the mutex yet. OBSERVING joins memory reads, not helper retirement.
+static bool iree_hal_amd_gpu_completion_begin_observation(
+    iree_hal_amd_gpu_completion_t* completion) {
+  int32_t expected = IREE_HAL_AMD_GPU_COMPLETION_RUNNING;
+  if (!iree_atomic_compare_exchange_strong(
+          &completion->state, &expected, IREE_HAL_AMD_GPU_COMPLETION_OBSERVING,
+          iree_memory_order_acq_rel, iree_memory_order_relaxed)) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < completion->source_count; ++i) {
+    iree_hal_amd_gpu_signal_retain(completion->sources[i].wait.signal);
+  }
+  return true;
+}
+
+static void iree_hal_amd_gpu_completion_end_observation(
+    iree_hal_amd_gpu_completion_t* completion) {
+  for (iree_host_size_t i = 0; i < completion->source_count; ++i) {
+    iree_hal_amd_gpu_signal_release(completion->sources[i].wait.signal);
+  }
+  // No further table or signal access after returning the observation borrow.
+  // Only cold source replacement waits here; steady-state retirement never
+  // makes an address-wake syscall.
+  const int32_t previous = iree_atomic_fetch_and(
+      &completion->state, ~IREE_HAL_AMD_GPU_COMPLETION_OBSERVING,
+      iree_memory_order_release);
+  if (iree_any_bit_set(previous,
+                       IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES)) {
+    iree_wait_address_wake_all(&completion->state);
+  }
 }
 
 // The source drain establishes these addresses once. Unchanged native work
@@ -54,22 +101,17 @@ bool iree_hal_amd_gpu_completion_try_drain(
 static bool iree_hal_amd_gpu_completion_observe(
     iree_hal_amd_gpu_completion_t* completion, iree_time_t deadline) {
   while (iree_atomic_load(&completion->state, iree_memory_order_relaxed) ==
-             IREE_HAL_AMD_GPU_COMPLETION_RUNNING &&
+             IREE_HAL_AMD_GPU_COMPLETION_OBSERVING &&
          iree_time_now() < deadline) {
-    bool has_address = false;
     for (iree_host_size_t i = 0; i < completion->source_count; ++i) {
       const iree_hal_amd_gpu_completion_wait_t* wait =
           &completion->sources[i].wait;
       if (wait->address) {
-        has_address = true;
         if (iree_atomic_load(wait->address, iree_memory_order_acquire) !=
             wait->value) {
           return true;
         }
       }
-    }
-    if (!has_address) {
-      break;
     }
     iree_processor_yield();
   }
@@ -86,7 +128,9 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
       iree_slim_mutex_unlock(&completion->drain_mutex);
       break;
     }
-    bool ready = iree_hal_amd_gpu_completion_drain(completion, AMDF_STATUS_OK);
+    bool has_wait = false;
+    bool ready = iree_hal_amd_gpu_completion_drain(completion, AMDF_STATUS_OK,
+                                                   &has_wait);
     if (ready) {
       if (completion->spin_ns) {
         const iree_time_t now = iree_time_now();
@@ -97,12 +141,18 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
       iree_slim_mutex_unlock(&completion->drain_mutex);
       continue;
     }
-    if (completion->spin_ns &&
-        iree_hal_amd_gpu_completion_observe(completion, spin_deadline)) {
-      iree_slim_mutex_unlock(&completion->drain_mutex);
-      continue;
-    }
+    const bool observe =
+        has_wait && completion->spin_ns && iree_time_now() < spin_deadline &&
+        iree_hal_amd_gpu_completion_begin_observation(completion);
     iree_slim_mutex_unlock(&completion->drain_mutex);
+    if (observe) {
+      const bool changed =
+          iree_hal_amd_gpu_completion_observe(completion, spin_deadline);
+      iree_hal_amd_gpu_completion_end_observation(completion);
+      if (changed) {
+        continue;
+      }
+    }
     if (iree_hal_amd_gpu_completion_stop_requested(completion)) {
       break;
     }
@@ -143,7 +193,7 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
   if (!amdf_status_is_ok(failure)) {
     // Join active helpers before the one terminal notification round. Native
     // inactivation runs outside this mutex so CPU publishers can hand off.
-    iree_hal_amd_gpu_completion_drain(completion, failure);
+    iree_hal_amd_gpu_completion_drain(completion, failure, NULL);
   }
   iree_slim_mutex_unlock(&completion->drain_mutex);
   if (!amdf_status_is_ok(failure) && context->execution_failure.join) {
@@ -193,11 +243,18 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
 void iree_hal_amd_gpu_completion_set_sources(
     iree_hal_amd_gpu_completion_t* completion, iree_host_size_t source_count,
     iree_hal_amd_gpu_completion_source_t* sources) {
-  // The existing observation-state load also carries this cold handoff. A
-  // setter can acquire the drain even when its owner observes indefinitely.
+  // Stop new observation, join the last reads without the drain mutex, then
+  // join callbacks and swap the table. Helpers can finish while we join reads.
   iree_atomic_fetch_or(&completion->state,
                        IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES,
                        iree_memory_order_release);
+  int32_t state =
+      iree_atomic_load(&completion->state, iree_memory_order_acquire);
+  while (iree_any_bit_set(state, IREE_HAL_AMD_GPU_COMPLETION_OBSERVING)) {
+    iree_wait_address_wait_int32(&completion->state, state,
+                                 IREE_TIME_INFINITE_FUTURE);
+    state = iree_atomic_load(&completion->state, iree_memory_order_acquire);
+  }
   iree_slim_mutex_lock(&completion->drain_mutex);
   completion->sources = sources;
   completion->source_count = source_count;
