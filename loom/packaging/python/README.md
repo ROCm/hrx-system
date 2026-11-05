@@ -33,7 +33,7 @@ newer. For Linux x86-64:
 
 ```sh
 iree-bazel-build --config=loom-sdk --config=opt //loom/packaging/python:wheel
-python -m pip install bazel-bin/loom/packaging/python/hrx_loom-0.0.0.dev0-py3-none-linux_x86_64.whl
+python -m pip install bazel-bin/loom/packaging/python/hrx_loom-0.2.0.dev0-py3-none-linux_x86_64.whl
 loom-serve --help
 loom-benchmark --help
 loom-fetch model.json --list --json
@@ -44,7 +44,7 @@ python -m loom.model.documentation --card model.json --output=model.md
 To include the optional provider when installing a local wheel:
 
 ```sh
-python -m pip install 'bazel-bin/loom/packaging/python/hrx_loom-0.0.0.dev0-py3-none-linux_x86_64.whl[hf]'
+python -m pip install 'bazel-bin/loom/packaging/python/hrx_loom-0.2.0.dev0-py3-none-linux_x86_64.whl[hf]'
 ```
 
 The wheel filename describes the selected target platform: `linux_x86_64`,
@@ -170,7 +170,7 @@ with:
 ```sh
 iree-bazel-build --config=loom-sdk --config=opt \
   --//runtime/config/base/tracing:provider=tracy //loom/packaging/python:wheel
-python -m pip install bazel-bin/loom/packaging/python/hrx_loom-0.0.0.dev0+tracy-py3-none-linux_x86_64.whl
+python -m pip install bazel-bin/loom/packaging/python/hrx_loom-0.2.0.dev0+tracy-py3-none-linux_x86_64.whl
 ```
 
 Tracy records startup events before a collector attaches. The

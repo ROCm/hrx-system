@@ -58,7 +58,7 @@ the `.whl` inside it instead of the package name. For example, the Linux
 development release profile uses:
 
 ```sh
-python -m pip install './hrx_loom-0.0.0.dev0-py3-none-manylinux_2_39_x86_64.whl[hf]'
+python -m pip install './hrx_loom-0.2.0.dev0-py3-none-manylinux_2_39_x86_64.whl[hf]'
 ```
 
 Windows uses the corresponding `win_amd64.whl`. Use the exact filename in the
