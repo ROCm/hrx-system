@@ -87,7 +87,8 @@ jobs:
       - name: Build and qualify Linux SDK
         run: |
           /usr/bin/python3 -m build_tools.ci.loom_wheel build \
-            --profile="${PROFILE,,}" --output=build/loom-sdk/linux --bazel=bazel -- \
+            --profile="${PROFILE,,}" --platform=manylinux_2_39_x86_64 \
+            --output=build/loom-sdk/linux --bazel=bazel -- \
             --cxxopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13 \
             --linkopt=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/13
           # Distribution Python works without loader overrides, which the
@@ -109,7 +110,8 @@ jobs:
       - name: Cross-build Windows SDK
         run: |
           /usr/bin/python3 -m build_tools.ci.loom_wheel build \
-            --profile="${PROFILE,,}" --output="build/loom-sdk/windows/$PROFILE" --bazel=bazel -- \
+            --profile="${PROFILE,,}" --platform=win_amd64 \
+            --output="build/loom-sdk/windows/$PROFILE" --bazel=bazel -- \
             --config=windows-x86_64
       - name: Cross-build standalone Windows server
         if: inputs.profile == 'Release'
@@ -118,6 +120,14 @@ jobs:
             --platform=win_amd64 --commit="$GITHUB_SHA" \
             --output=build/loom-sdk/server/windows --llvm-bin="$LLVM_ROOT/bin" \
             --bazel=bazel
+      - name: Qualify native artifact security
+        run: |
+          wheels=()
+          for wheel in wheel-artifact/*.whl build/loom-sdk/windows/"$PROFILE"/*.whl; do
+            wheels+=(--wheel "$wheel")
+          done
+          /usr/bin/python3 -m build_tools.ci.native_artifact_security \
+            --llvm-readobj "$LLVM_ROOT/bin/llvm-readobj" "${wheels[@]}"
       - name: Measure release artifacts
         if: inputs.profile == 'Release'
         env:

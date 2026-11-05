@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
+from build_tools.ci import native_artifact_security
 from loom.packaging.python import release
 
 SERVER = "//loom/src/loom/tools/loom-serve"
@@ -37,7 +38,15 @@ class ServerPlatform:
 
 PLATFORMS = {
     release.LINUX_X86_64_PLATFORM: ServerPlatform(
-        release.SERVER_BINARIES[release.LINUX_X86_64_PLATFORM], ()
+        release.SERVER_BINARIES[release.LINUX_X86_64_PLATFORM],
+        # ThinLTO replays preprocessor options during backend compilation.
+        # Scope the intentional undefinition to suppress that one false warning.
+        (
+            "--copt=--start-no-unused-arguments",
+            "--copt=-U_FORTIFY_SOURCE",
+            "--copt=--end-no-unused-arguments",
+            "--copt=-D_FORTIFY_SOURCE=2",
+        ),
     ),
     release.WINDOWS_X86_64_PLATFORM: ServerPlatform(
         release.SERVER_BINARIES[release.WINDOWS_X86_64_PLATFORM],
@@ -212,6 +221,12 @@ def build_server(
             _windows_dependencies(readobj, candidate)
             if platform_name == release.WINDOWS_X86_64_PLATFORM
             else _linux_dependencies(readobj, candidate)
+        )
+        native_artifact_security.inspect_file(
+            readobj,
+            candidate,
+            executable=True,
+            runpath_policy=native_artifact_security.ElfRunpathPolicy.ABSENT,
         )
         output.mkdir(parents=True, exist_ok=False)
         destination = output / platform.binary_name

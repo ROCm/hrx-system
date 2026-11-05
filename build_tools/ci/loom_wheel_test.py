@@ -20,6 +20,7 @@ from unittest.mock import patch
 from zipfile import ZipFile
 
 from build_tools.ci import loom_wheel
+from loom.packaging.python import release
 
 
 class LoomWheelTest(unittest.TestCase):
@@ -28,6 +29,7 @@ class LoomWheelTest(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.output = self.root / "export"
+        self.bazel_log = self.root / "bazel_calls.jsonl"
         package = self.root / "loom" / "packaging" / "python"
         package.mkdir(parents=True)
         (package / "version.json").write_text(
@@ -86,11 +88,16 @@ class LoomWheelTest(unittest.TestCase):
 
     def bazel(self, query="", build_status=0):
         """Creates a process-compatible Bazel substitute for orchestration tests."""
+        self.bazel_log.unlink(missing_ok=True)
         script = self.root / "fake_bazel.py"
         script.write_text(
+            "import json\n"
             "import sys\n"
             f"query = {query!r}\n"
             f"build_status = {build_status}\n"
+            f"log = {os.fspath(self.bazel_log)!r}\n"
+            "with open(log, 'a', encoding='utf-8') as stream:\n"
+            "    stream.write(json.dumps(sys.argv[1:]) + '\\n')\n"
             "command = sys.argv[1] if len(sys.argv) > 1 else None\n"
             "if command == 'build':\n"
             "    raise SystemExit(build_status)\n"
@@ -115,6 +122,12 @@ class LoomWheelTest(unittest.TestCase):
             launcher.chmod(0o755)
         return launcher
 
+    def bazel_calls(self):
+        return [
+            json.loads(line)
+            for line in self.bazel_log.read_text(encoding="utf-8").splitlines()
+        ]
+
     def qualifier(self, status=0):
         script = self.root / loom_wheel.TEST_DIRECTORY / "wheel_model_card_test.py"
         script.parent.mkdir(parents=True, exist_ok=True)
@@ -129,6 +142,7 @@ class LoomWheelTest(unittest.TestCase):
                     self.root,
                     output,
                     profile,
+                    release.WINDOWS_X86_64_PLATFORM,
                     os.fspath(self.bazel(self.query(path))),
                     [],
                 )
@@ -144,12 +158,48 @@ class LoomWheelTest(unittest.TestCase):
                 )
                 self.assertFalse((output / "model/stale.data").exists())
 
+    def test_fortify2_is_scoped_to_optimized_linux_artifacts(self):
+        cases = (
+            ("release", release.LINUX_X86_64_PLATFORM, True),
+            ("tracy", release.LINUX_X86_64_PLATFORM, True),
+            ("debug", release.LINUX_X86_64_PLATFORM, False),
+            ("asan", release.LINUX_X86_64_PLATFORM, False),
+            ("release", release.WINDOWS_X86_64_PLATFORM, False),
+        )
+        override = "--copt=-D_FORTIFY_SOURCE=0"
+        for profile, platform, fortified in cases:
+            with self.subTest(profile=profile, platform=platform):
+                path = self.wheel(profile, platform)
+                loom_wheel.build_wheel(
+                    self.root,
+                    self.output / f"{platform}-{profile}",
+                    profile,
+                    platform,
+                    os.fspath(self.bazel(self.query(path))),
+                    [override],
+                )
+                calls = self.bazel_calls()
+                self.assertEqual([call[0] for call in calls], ["build", "cquery"])
+                for call in calls:
+                    for option in loom_wheel.LINUX_OPTIMIZED_COPTS:
+                        self.assertEqual(option in call, fortified)
+                    if fortified:
+                        self.assertLess(
+                            call.index(override),
+                            call.index(loom_wheel.LINUX_OPTIMIZED_COPTS[0]),
+                        )
+
     def test_failed_build_cannot_export_existing_output(self):
         path = self.wheel()
         bazel = self.bazel(self.query(path), build_status=1)
         with self.assertRaises(subprocess.CalledProcessError):
             loom_wheel.build_wheel(
-                self.root, self.output, "release", os.fspath(bazel), []
+                self.root,
+                self.output,
+                "release",
+                release.WINDOWS_X86_64_PLATFORM,
+                os.fspath(bazel),
+                [],
             )
         self.assertFalse(self.output.exists())
 
@@ -163,22 +213,37 @@ class LoomWheelTest(unittest.TestCase):
                         self.root,
                         self.output,
                         "release",
+                        release.WINDOWS_X86_64_PLATFORM,
                         os.fspath(self.bazel(document)),
                         [],
                     )
                 self.assertFalse(self.output.exists())
 
-    def test_profile_mismatch_cannot_export(self):
+    def test_profile_or_platform_mismatch_cannot_export(self):
         path = self.wheel("debug")
-        with self.assertRaises(ValueError):
-            loom_wheel.build_wheel(
-                self.root,
-                self.output,
+        cases = (
+            (path, "release", release.WINDOWS_X86_64_PLATFORM, "Requested release"),
+            (
+                self.wheel(),
                 "release",
-                os.fspath(self.bazel(self.query(path))),
-                [],
-            )
-        self.assertFalse(self.output.exists())
+                release.LINUX_X86_64_PLATFORM,
+                "Requested manylinux_2_39_x86_64",
+            ),
+        )
+        for path, profile, platform, message in cases:
+            with (
+                self.subTest(message=message),
+                self.assertRaisesRegex(ValueError, message),
+            ):
+                loom_wheel.build_wheel(
+                    self.root,
+                    self.output,
+                    profile,
+                    platform,
+                    os.fspath(self.bazel(self.query(path))),
+                    [],
+                )
+            self.assertFalse(self.output.exists())
 
     def test_build_does_not_overlay_old_inputs(self):
         path = self.wheel()
@@ -190,6 +255,7 @@ class LoomWheelTest(unittest.TestCase):
                 self.root,
                 self.output,
                 "release",
+                release.WINDOWS_X86_64_PLATFORM,
                 os.fspath(self.bazel(self.query(path))),
                 [],
             )
@@ -204,6 +270,7 @@ class LoomWheelTest(unittest.TestCase):
             self.root,
             self.output,
             "release",
+            platform,
             os.fspath(self.bazel(self.query(path))),
             [],
         )
@@ -247,6 +314,7 @@ class LoomWheelTest(unittest.TestCase):
                     [
                         "build",
                         "--profile=release",
+                        "--platform=win_amd64",
                         "--output=" + str(self.output),
                         "--bazel=test-bazel",
                     ]

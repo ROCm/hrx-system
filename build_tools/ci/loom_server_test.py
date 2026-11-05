@@ -61,7 +61,12 @@ class LoomServerTest(unittest.TestCase):
         source.write_bytes(b"executable")
         calls, run = self.build_calls(source, ["libc.so.6", "libm.so.6"])
         output = self.root / "output"
-        with mock.patch("subprocess.run", side_effect=run):
+        with (
+            mock.patch("subprocess.run", side_effect=run),
+            mock.patch.object(
+                loom_server.native_artifact_security, "inspect_file"
+            ) as inspect_file,
+        ):
             path = loom_server.build_server(
                 self.root,
                 output,
@@ -71,12 +76,24 @@ class LoomServerTest(unittest.TestCase):
                 self.llvm_bin,
                 ["--cxxopt=fixture"],
             )
+        inspect_file.assert_called_once_with(
+            self.llvm_bin / "llvm-readobj",
+            mock.ANY,
+            executable=True,
+            runpath_policy=(
+                loom_server.native_artifact_security.ElfRunpathPolicy.ABSENT
+            ),
+        )
         self.assertEqual(path.read_bytes(), b"executable")
         build = next(arguments for arguments, _ in calls if arguments[1] == "build")
         query = next(arguments for arguments, _ in calls if arguments[1] == "cquery")
         for required in (
             "--config=loom-sdk",
             "--config=opt",
+            "--copt=--start-no-unused-arguments",
+            "--copt=-U_FORTIFY_SOURCE",
+            "--copt=--end-no-unused-arguments",
+            "--copt=-D_FORTIFY_SOURCE=2",
             "--stamp",
             f"--embed_label=1.2.3@{self.commit}",
             "--//loom/config:shared_tools=false",
