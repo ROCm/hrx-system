@@ -171,7 +171,7 @@ static bool iree_hal_amd_gpu_queue_membership_poll_join(
 // old table after its handoff returns.
 static amdf_status_t iree_hal_amd_gpu_queue_membership_rebind(
     iree_hal_amd_gpu_queue_membership_t* membership,
-    iree_hal_queue_t* excluded_queue, bool wake) {
+    iree_hal_queue_t* excluded_queue) {
   iree_hal_amd_gpu_queue_sources_t* sources = membership->sources;
   const uint32_t next = sources->active ^ 1;
   iree_hal_amd_gpu_publication_source_t* publication =
@@ -214,11 +214,9 @@ static amdf_status_t iree_hal_amd_gpu_queue_membership_rebind(
   iree_hal_amd_gpu_completion_set_sources(membership->completion,
                                           completion_count, completion);
   sources->active = next;
-  // Removing the joined observer introduces no work. The table handoffs
-  // already exclude every host reader before release reuses its join record.
-  if (!wake) {
-    return AMDF_STATUS_OK;
-  }
+  // Every replacement interrupts observation, including removal of an idle
+  // queue. The worker may have consumed the last native event while replacement
+  // excluded a retained source's ready copy. Rearm that work after the swap.
   // A terminal observer has stopped using the native event. Table handoffs
   // still join their host readers, without reentering the failed device.
   return amdf_status_is_ok(
@@ -254,7 +252,7 @@ static iree_status_t iree_hal_amd_gpu_queue_membership_reserve_sources(
   sources->completion[1] = sources->completion[0] + capacity;
   membership->sources = sources;
   const amdf_status_t status =
-      iree_hal_amd_gpu_queue_membership_rebind(membership, NULL, true);
+      iree_hal_amd_gpu_queue_membership_rebind(membership, NULL);
   iree_allocator_free(membership->host_allocator, previous);
   return IREE_HAL_AMD_STATUS_FROM_AMDF(status, "GPU source installation wake");
 }
@@ -310,7 +308,7 @@ static bool iree_hal_amd_gpu_queue_membership_release(void* user_data,
     }
     *join.previous = &join;
     iree_slim_mutex_unlock(&membership->completion->drain_mutex);
-    status = iree_hal_amd_gpu_queue_membership_rebind(membership, NULL, true);
+    status = iree_hal_amd_gpu_queue_membership_rebind(membership, NULL);
   }
   iree_slim_mutex_unlock(&membership->mutex);
   if (amdf_status_is_ok(status) && joining) {
@@ -355,7 +353,7 @@ static bool iree_hal_amd_gpu_queue_membership_release(void* user_data,
     iree_slim_mutex_unlock(&membership->completion->drain_mutex);
   }
   const amdf_status_t removal_status = iree_hal_amd_gpu_queue_membership_rebind(
-      membership, amdf_status_is_ok(status) ? queue : NULL, false);
+      membership, amdf_status_is_ok(status) ? queue : NULL);
   if (amdf_status_is_ok(status)) {
     status = removal_status;
   }
@@ -389,9 +387,14 @@ static bool iree_hal_amd_gpu_queue_membership_release(void* user_data,
   if (!amdf_status_is_ok(status)) {
     iree_atomic_store(&membership->context->cleanup_blocked, 1,
                       iree_memory_order_relaxed);
-    iree_hal_amd_gpu_context_report(
-        membership->context, status,
-        "GPU acquired queue release could not prove native quiescence");
+    if (!amdf_status_is_ok(removal_status)) {
+      iree_hal_amd_gpu_context_fail_execution(
+          membership->context, removal_status, "GPU source removal wake");
+    } else {
+      iree_hal_amd_gpu_context_report(
+          membership->context, status,
+          "GPU acquired queue release could not prove native quiescence");
+    }
   }
   iree_hal_amd_gpu_context_wake_failure(membership->context);
   return amdf_status_is_ok(status);
@@ -518,7 +521,7 @@ iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
     membership->lifecycle->set_release(
         queue, iree_hal_amd_gpu_queue_membership_release, slot);
     status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-        iree_hal_amd_gpu_queue_membership_rebind(membership, NULL, true),
+        iree_hal_amd_gpu_queue_membership_rebind(membership, NULL),
         "GPU acquired queue source wake");
     // A concurrent acquisition may have widened the coordinate space while
     // native construction ran. The unexposed queue catches up through its
