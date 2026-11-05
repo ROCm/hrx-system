@@ -16,8 +16,10 @@ TEST(RequiredPressureTest, ReplayKeepsSameDomainCapturesResident) {
       {.alias_set_id = 1},
       {.alias_set_id = 2},
       {.alias_set_id = 1},
-      {.flags = LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
-       .storage = {.explicit_registers = {.pressure_set_id = 1}}},
+      {
+          .flags = LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
+          .storage = {.explicit_registers = {.pressure_set_id = 1}},
+      },
       {},
   };
   const uint16_t operand_indices[] = {0, 1, 2, 3};
@@ -71,7 +73,7 @@ TEST(RequiredPressureTest, ReplayKeepsSameDomainCapturesResident) {
           loom_low_schedule_value_record_t values[4] = {};
           loom_low_schedule_node_t node = {
               .descriptor = &descriptor,
-              .traits = observable ? LOOM_TRAIT_OBSERVABLE_EFFECT : 0,
+              .traits = observable ? LOOM_TRAIT_OBSERVABLE_EFFECT : 0u,
               .operand_count = test_case.input_count,
               .result_count = result_count,
           };
