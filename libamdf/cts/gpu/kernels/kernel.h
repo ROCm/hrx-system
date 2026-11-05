@@ -20,7 +20,7 @@ namespace kernels {
 // Immutable compiler product and its launch contract. The generated definition
 // owns all borrowed storage for the lifetime of the test executable.
 struct Kernel {
-  // Physical compiler selector, including instruction-encoding overlays.
+  // Exact physical compiler selector.
   const char* target;
   // SHA-256 of the complete compiler code object before extraction.
   const char* hsaco_sha256;
@@ -90,8 +90,8 @@ struct KernelSet {
   // Compiler products generated from the same source and entry point.
   std::span<const Kernel> variants;
 
-  // Returns the exact physical product, or null when absent. Physical overlays
-  // never fall back to a base product with a different instruction encoding.
+  // Returns the exact physical product, or null when absent. Revision-specific
+  // instruction sets never fall back to an incompatible base product.
   const Kernel* Find(const amdf_gpu_endpoint_info_t& endpoint) const;
 };
 

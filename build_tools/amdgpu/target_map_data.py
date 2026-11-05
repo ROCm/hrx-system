@@ -9,8 +9,8 @@ LLVM generic code objects carry a version in the high byte of ELF ``e_flags``.
 Each exact processor in a generic family records the first generic version that
 can execute on it. A generic code object is compatible with that processor when
 its emitted version is greater than or equal to the processor's introduction
-version. Target-ID feature support, target overlays, and physical
-target resolution are shared by build tools, HAL, and compilers.
+version. Target-ID feature support and physical target resolution are shared by
+build tools, HAL, and compilers.
 
 This module is deliberately independent of Loom and the runtime generators so
 all consumers share the same identity facts without an import cycle.
@@ -42,16 +42,6 @@ class AmdgpuExactTargetInfo:
 
 
 @dataclass(frozen=True, slots=True)
-class AmdgpuTargetOverlayInfo:
-    """One canonical target that overlays a backend processor."""
-
-    target: str
-    processor: str
-    compile_options: tuple[str, ...] = ()
-    link_options: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class AmdgpuPhysicalTargetInfo:
     """Maps one physical processor revision to its canonical target."""
 
@@ -66,8 +56,6 @@ class AmdgpuDeviceBinaryTarget:
 
     name: str
     processor: str
-    compile_options: tuple[str, ...] = ()
-    link_options: tuple[str, ...] = ()
 
 
 TARGET_ID_FEATURE_SRAMECC = "sramecc"
@@ -178,20 +166,8 @@ AMDGPU_EXACT_TARGET_INFOS = (
     AmdgpuExactTargetInfo("gfx1200", "gfx12-generic", 1),
     AmdgpuExactTargetInfo("gfx1201", "gfx12-generic", 1),
     AmdgpuExactTargetInfo("gfx1250", "gfx12-5-generic", 1),
+    AmdgpuExactTargetInfo("gfx1250-strict", "gfx1250-strict", 0),
     AmdgpuExactTargetInfo("gfx1251", "gfx12-5-generic", 1),
-)
-
-
-# Target overlays bind a canonical target identity to one exact backend
-# processor and any final backend-invocation options it requires. Compiler
-# semantics remain structured facts on the canonical target row.
-AMDGPU_TARGET_OVERLAY_INFOS = (
-    AmdgpuTargetOverlayInfo(
-        target="gfx1250-a0",
-        processor="gfx1250",
-        compile_options=("-mllvm", "-amdgpu-gfx1250-b0-specific=false"),
-        link_options=("-plugin-opt=-amdgpu-gfx1250-b0-specific=false",),
-    ),
 )
 
 # Physical discovery resolves directly to a canonical target. Processors absent
@@ -201,7 +177,7 @@ AMDGPU_PHYSICAL_TARGET_INFOS = (
     AmdgpuPhysicalTargetInfo(
         processor="gfx1250",
         asic_revision=0,
-        target="gfx1250-a0",
+        target="gfx1250-strict",
     ),
     AmdgpuPhysicalTargetInfo(
         processor="gfx1250",
@@ -225,18 +201,8 @@ def exact_target_info(processor: str) -> AmdgpuExactTargetInfo | None:
     return None
 
 
-def target_overlay_info(target: str) -> AmdgpuTargetOverlayInfo | None:
-    for info in AMDGPU_TARGET_OVERLAY_INFOS:
-        if info.target == target:
-            return info
-    return None
-
-
 def target_processor(target: str) -> str | None:
     """Returns the backend processor selected by a canonical target."""
-    overlay = target_overlay_info(target)
-    if overlay is not None:
-        return overlay.processor
     if exact_target_info(target) is not None or generic_code_object_info(target):
         return target
     return None
@@ -304,7 +270,6 @@ def validate_target_map_data(
         AMDGPU_GENERIC_CODE_OBJECT_INFOS
     ),
     exact_infos: Sequence[AmdgpuExactTargetInfo] = AMDGPU_EXACT_TARGET_INFOS,
-    target_overlays: Sequence[AmdgpuTargetOverlayInfo] = AMDGPU_TARGET_OVERLAY_INFOS,
     physical_targets: Sequence[AmdgpuPhysicalTargetInfo] = (
         AMDGPU_PHYSICAL_TARGET_INFOS
     ),
@@ -381,42 +346,6 @@ def validate_target_map_data(
             + ", ".join(unreferenced_generic_processors)
         )
 
-    base_targets = exact_processors | generic_processors
-    overlay_targets: set[str] = set()
-    for overlay in target_overlays:
-        if overlay.target in base_targets or overlay.target in overlay_targets:
-            raise ValueError(f"duplicate AMDGPU target overlay: {overlay.target}")
-        if (
-            not overlay.target
-            or not overlay.target[0].isalnum()
-            or any(
-                not (
-                    "a" <= character <= "z"
-                    or "0" <= character <= "9"
-                    or character in "-._"
-                )
-                for character in overlay.target
-            )
-        ):
-            raise ValueError(
-                f"AMDGPU target overlay {overlay.target!r} is not a canonical "
-                "target coordinate"
-            )
-        overlay_targets.add(overlay.target)
-
-    canonical_targets = base_targets | overlay_targets
-
-    for overlay in target_overlays:
-        if overlay.processor not in exact_processors:
-            raise ValueError(
-                f"AMDGPU target overlay {overlay.target} references unknown "
-                f"exact processor {overlay.processor}"
-            )
-
-    target_processors = {
-        **{target: target for target in base_targets},
-        **{overlay.target: overlay.processor for overlay in target_overlays},
-    }
     previous_physical_key: tuple[str, int] | None = None
     physical_keys: set[tuple[str, int]] = set()
     physical_processors: set[str] = set()
@@ -446,17 +375,20 @@ def validate_target_map_data(
                 f"AMDGPU processor {physical_target.processor} repeats ASIC "
                 f"revision {physical_target.asic_revision}"
             )
-        if physical_target.target not in canonical_targets:
+        if physical_target.target not in exact_processors:
             raise ValueError(
                 f"AMDGPU physical target {physical_target.processor} ASIC "
                 f"revision {physical_target.asic_revision} selects unknown "
-                f"target {physical_target.target}"
+                f"exact target {physical_target.target}"
             )
-        if target_processors[physical_target.target] != physical_target.processor:
+        if (
+            physical_target.target != physical_target.processor
+            and not physical_target.target.startswith(physical_target.processor + "-")
+        ):
             raise ValueError(
                 f"AMDGPU physical target {physical_target.processor} ASIC "
-                f"revision {physical_target.asic_revision} selects target "
-                f"{physical_target.target} from another processor"
+                f"revision {physical_target.asic_revision} selects exact "
+                f"target {physical_target.target} from another processor"
             )
         physical_keys.add(key)
         physical_processors.add(physical_target.processor)

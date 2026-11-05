@@ -417,13 +417,13 @@ independent [host oracle](lds_exchange.h). Repeated dispatches change the seed
 on the same image and queue. Completion-visible payloads are captured before
 queue retirement.
 
-The LDS product set covers every exact physical target and encoding overlay
-available in the configured compiler. Each variant retains its compiled wave
-size, 512 fixed LDS bytes and zero private bytes. [Kernel metadata](kernel.h) travels with the
+The LDS product set covers every exact physical target available in the
+configured compiler. Each variant retains its compiled wave size, 512 fixed LDS
+bytes and zero private bytes. [Kernel metadata](kernel.h) travels with the
 selected image; the [host product test](kernel_test.cc) checks every variant
-against the typed ABI. Physical selection preserves the gfx1250 A0 overlay
-instead of treating its base code-object name as a sufficient identity. The
-source uses ordinary
+against the typed ABI. Physical selection preserves the strict gfx1250 A0
+instruction set instead of treating the B0-qualified family target as a
+sufficient identity. The source uses ordinary
 `buffer.alloca<workgroup>` storage. Native callers supply the compiler-declared
 capacity through the AQL packet or PM4 binding, while compiler descriptors
 remain immutable. These cases qualify fixed storage; changing per-dispatch LDS

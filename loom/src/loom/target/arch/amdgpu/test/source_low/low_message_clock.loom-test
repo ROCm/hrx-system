@@ -301,7 +301,7 @@ low.func.def target<amdgpu.rdna4.gfx1251.core>(@gpu) @clock_words() -> (reg<amdg
 // RUN: emit amdgpu-assembly @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
-amdgpu.target<gfx1250-a0> @gpu
+amdgpu.target<gfx1250-strict> @gpu
 
 low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@gpu) @clock_words() -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %narrow = s_sendmsg_rtn_b32 {message = 131}
@@ -326,7 +326,7 @@ low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@gpu) @clock_words() -> (reg<a
 // RUN: emit amdgpu-native-words @clock_words
 
 // Both halves of the wide asynchronous result must be complete before use.
-amdgpu.target<gfx1250-a0> @gpu
+amdgpu.target<gfx1250-strict> @gpu
 
 low.func.def target<amdgpu.rdna4.gfx1250_a0.core>(@gpu) @clock_words() -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
   %narrow = s_sendmsg_rtn_b32 {message = 131}

@@ -22,7 +22,6 @@ from loom.target.arch.amdgpu.target_catalog import (
     AMDGPU_EXACT_TARGET_INFOS,
     AMDGPU_GENERIC_CODE_OBJECT_INFOS,
     AMDGPU_PHYSICAL_TARGET_INFOS,
-    AMDGPU_TARGET_OVERLAY_INFOS,
 )
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_ATOMIC_F32_ADD_DENORMALS,
@@ -267,7 +266,7 @@ def test_mask_write_hazard_covers_gfx11_processors() -> None:
 def test_vmem_replay_clauses_cover_cdna_and_exclude_always_on_gfx125x() -> None:
     # LLVM checks SMEM before the NoDataDepHazard early return, and VMEM
     # afterward. Always-on XNACK on gfx125x therefore does not imply VMEM
-    # software clauses. Stepping overlays inherit their processor's policy.
+    # software clauses.
     assert {
         info.processor
         for info in AMDGPU_PROCESSOR_INFOS
@@ -342,9 +341,8 @@ def test_tensor_issue_drain_covers_exact_and_generic_gfx125x() -> None:
         info.processor
         for info in AMDGPU_PROCESSOR_INFOS
         if info.features.scheduling & AMDGPU_PROCESSOR_SCHEDULING_TENSOR_ISSUE_DRAIN
-    } == {"gfx1250", "gfx1251", "gfx12-5-generic"}
-    # Stepping overlays inherit their processor's scheduling contract.
-    assert amdgpu_target_info_by_name("gfx1250-a0").processor == "gfx1250"
+    } == {"gfx1250", "gfx1250-strict", "gfx1251", "gfx12-5-generic"}
+    assert amdgpu_target_info_by_name("gfx1250-strict").processor == "gfx1250-strict"
 
 
 def test_wave64_valu_mask_write_hazard_covers_gfx11_processors() -> None:
@@ -389,7 +387,7 @@ def test_occupancy_local_memory_granularity_matches_physical_families() -> None:
             "gfx12-generic",
         },
         1280: {"gfx950"},
-        2048: {"gfx1250", "gfx1251", "gfx12-5-generic"},
+        2048: {"gfx1250", "gfx1250-strict", "gfx1251", "gfx12-5-generic"},
     }
     actual_processors_by_granularity: dict[int, set[str]] = {}
     for processor in AMDGPU_PROCESSOR_INFOS:
@@ -465,6 +463,7 @@ def test_occupancy_register_classes_match_physical_families() -> None:
         "gfx1200",
         "gfx1201",
         "gfx1250",
+        "gfx1250-strict",
         "gfx1251",
         "gfx11-generic",
         "gfx12-generic",
@@ -526,7 +525,6 @@ def test_generic_descriptor_sets_derive_supported_target_contracts() -> None:
         ),
         "gfx12_generic": ("amdgpu.rdna4.core",),
         "gfx12_5_generic": (
-            "amdgpu.rdna4.gfx1250_a0.core",
             "amdgpu.rdna4.gfx1251.core",
             "amdgpu.rdna4.gfx125x.core",
         ),
@@ -699,9 +697,10 @@ def test_occupancy_validation_checks_member_capacity_change_points() -> None:
 def test_instruction_constraints_are_attached_to_canonical_targets() -> None:
     processors = {info.processor: info for info in AMDGPU_PROCESSOR_INFOS}
     gfx1250 = processors["gfx1250"]
+    gfx1250_strict = processors["gfx1250-strict"]
     gfx12_5_generic = processors["gfx12-5-generic"]
     gfx1250_target = amdgpu_target_info_by_name("gfx1250")
-    gfx1250_a0_target = amdgpu_target_info_by_name("gfx1250-a0")
+    gfx1250_a0_target = amdgpu_target_info_by_name("gfx1250-strict")
     gfx12_5_generic_target = amdgpu_target_info_by_name("gfx12-5-generic")
     assert gfx1250_target is not None
     assert gfx1250_a0_target is not None
@@ -711,21 +710,21 @@ def test_instruction_constraints_are_attached_to_canonical_targets() -> None:
     assert gfx1250.instructions.base_constraints == 0
     assert amdgpu_target_instruction_constraints(gfx1250_target, gfx1250) == 0
     assert (
-        amdgpu_target_instruction_constraints(gfx1250_a0_target, gfx1250)
+        amdgpu_target_instruction_constraints(gfx1250_a0_target, gfx1250_strict)
         == a0_constraints
     )
     assert a0_constraints != 0
     assert a0_constraints & ~AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS == 0
     assert (
         amdgpu_target_instruction_constraints(gfx12_5_generic_target, gfx12_5_generic)
-        == a0_constraints
+        == 0
     )
 
 
 def test_lds_bank_service_models_are_structural_target_data() -> None:
     processors = {info.processor: info for info in AMDGPU_PROCESSOR_INFOS}
     gfx1250 = processors["gfx1250"]
-    gfx1250_a0 = amdgpu_target_info_by_name("gfx1250-a0")
+    gfx1250_a0 = amdgpu_target_info_by_name("gfx1250-strict")
     assert gfx1250_a0 is not None
 
     assert (
@@ -774,17 +773,18 @@ def test_physical_targets_resolve_to_canonical_target_rows() -> None:
     }
 
     assert mappings == {
-        ("gfx1250", 0): "gfx1250-a0",
+        ("gfx1250", 0): "gfx1250-strict",
         ("gfx1250", 1): "gfx1250",
     }
     for physical in AMDGPU_PHYSICAL_TARGET_INFOS:
-        assert targets[physical.target].processor == physical.processor
+        assert physical.processor in targets
+        assert physical.target in targets
 
 
 def test_target_semantics_are_keyed_by_canonical_target() -> None:
     processors = {info.processor: info for info in AMDGPU_PROCESSOR_INFOS}
     gfx1250 = amdgpu_target_info_by_name("gfx1250")
-    gfx1250_a0 = amdgpu_target_info_by_name("gfx1250-a0")
+    gfx1250_a0 = amdgpu_target_info_by_name("gfx1250-strict")
     assert gfx1250 is not None
     assert gfx1250_a0 is not None
 
@@ -799,22 +799,22 @@ def test_target_semantics_are_keyed_by_canonical_target() -> None:
         == "amdgpu.rdna4.gfx125x.core"
     )
     assert (
-        amdgpu_target_descriptor_set_key(gfx1250_a0, processors["gfx1250"])
+        amdgpu_target_descriptor_set_key(gfx1250_a0, processors["gfx1250-strict"])
         == "amdgpu.rdna4.gfx1250_a0.core"
     )
 
 
-def test_target_rows_reject_noncanonical_overlay_identity() -> None:
+def test_target_rows_reject_noncanonical_target_identity() -> None:
     targets = list(AMDGPU_TARGET_INFOS)
-    overlay_index = next(
-        index for index, target in enumerate(targets) if target.target == "gfx1250-a0"
+    target_index = next(
+        index for index, target in enumerate(targets) if target.target == "gfx1100"
     )
-    targets[overlay_index] = replace(
-        targets[overlay_index],
-        target="gfx1250-experimental",
+    targets[target_index] = replace(
+        targets[target_index],
+        target="gfx1100-experimental",
     )
 
-    with _raises_value_error("omit canonical overlays"):
+    with _raises_value_error("not in the canonical target map"):
         validate_amdgpu_target_rows(
             AMDGPU_PROCESSOR_INFOS,
             targets,
@@ -823,14 +823,16 @@ def test_target_rows_reject_noncanonical_overlay_identity() -> None:
 
 def test_target_rows_reject_unrelated_descriptor_override() -> None:
     targets = list(AMDGPU_TARGET_INFOS)
-    overlay_index = next(
-        index for index, target in enumerate(targets) if target.target == "gfx1250-a0"
+    target_index = next(
+        index
+        for index, target in enumerate(targets)
+        if target.target == "gfx1250-strict"
     )
-    overlay = targets[overlay_index]
-    targets[overlay_index] = replace(
-        overlay,
+    target = targets[target_index]
+    targets[target_index] = replace(
+        target,
         semantics=replace(
-            overlay.semantics,
+            target.semantics,
             descriptor_set_key="amdgpu.rdna4.core",
         ),
     )
@@ -869,7 +871,7 @@ def test_generic_contracts_reject_duplicated_member_constraints() -> None:
 def test_physical_target_models_reject_nonportable_processor_base() -> None:
     targets = list(AMDGPU_TARGET_INFOS)
     target_index = next(
-        index for index, info in enumerate(targets) if info.target == "gfx1250-a0"
+        index for index, info in enumerate(targets) if info.target == "gfx1250-strict"
     )
     target = targets[target_index]
     targets[target_index] = replace(
@@ -986,6 +988,10 @@ def test_processor_rows_cover_canonical_target_id_qualification() -> None:
         == AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE
     )
     assert (
+        processors["gfx1250-strict"].target_id.supported_features
+        == AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE
+    )
+    assert (
         processors["gfx1251"].target_id.supported_features
         == AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE
     )
@@ -994,19 +1000,13 @@ def test_processor_rows_cover_canonical_target_id_qualification() -> None:
 def test_target_rows_cover_canonical_target_map() -> None:
     validate_amdgpu_target_rows(AMDGPU_PROCESSOR_INFOS, AMDGPU_TARGET_INFOS)
     processor_names = {processor.processor for processor in AMDGPU_PROCESSOR_INFOS}
-    target_names = {target.target for target in AMDGPU_TARGET_INFOS}
     assert all(target.processor in processor_names for target in AMDGPU_TARGET_INFOS)
-    assert {
-        info.target
-        for info in AMDGPU_TARGET_OVERLAY_INFOS
-        if info.processor in target_names
-    }.issubset(target_names)
 
 
 def test_target_rows_reject_non_dense_enum_values() -> None:
     targets = list(AMDGPU_TARGET_INFOS)
     target_index = next(
-        index for index, info in enumerate(targets) if info.target == "gfx1250-a0"
+        index for index, info in enumerate(targets) if info.target == "gfx1250-strict"
     )
     targets[target_index] = replace(
         targets[target_index],
@@ -1036,7 +1036,7 @@ def test_target_id_qualification_rejects_missing_canonical_processor() -> None:
 def test_target_kernel_metadata_extensions_reject_invalid_rows() -> None:
     targets = list(AMDGPU_TARGET_INFOS)
     target_index = next(
-        index for index, info in enumerate(targets) if info.target == "gfx1250-a0"
+        index for index, info in enumerate(targets) if info.target == "gfx1250-strict"
     )
     target = targets[target_index]
     targets[target_index] = replace(
@@ -1057,7 +1057,7 @@ def test_target_kernel_metadata_extensions_reject_invalid_rows() -> None:
 def test_target_kernel_metadata_extensions_reject_standard_field_collision() -> None:
     targets = list(AMDGPU_TARGET_INFOS)
     target_index = next(
-        index for index, info in enumerate(targets) if info.target == "gfx1250-a0"
+        index for index, info in enumerate(targets) if info.target == "gfx1250-strict"
     )
     target = targets[target_index]
     targets[target_index] = replace(

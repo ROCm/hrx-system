@@ -15,7 +15,7 @@ low.func.def target<amdgpu.rdna4.gfx1250_a0.core> @shader_event_gfx1250_a0(%cont
   return
 }
 
-amdgpu.target<gfx1250-a0> @shader_event_gfx1250_a0_target
+amdgpu.target<gfx1250-strict> @shader_event_gfx1250_a0_target
 template.def<@shader_event_interrupt> target(@shader_event_gfx1250_a0_target) @shader_event_gfx1250_a0_impl(%context: i32) {
   low.invoke @shader_event_gfx1250_a0(%context) : (i32) -> ()
   template.return

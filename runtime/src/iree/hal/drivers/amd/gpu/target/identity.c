@@ -14,7 +14,7 @@ typedef enum iree_hal_amd_gpu_target_feature_support_bit_e {
 typedef uint32_t iree_hal_amd_gpu_target_feature_support_flags_t;
 
 typedef struct iree_hal_amd_gpu_target_mapping_t {
-  // Canonical exact, generic, or overlay target selector.
+  // Canonical exact or generic target selector.
   iree_string_view_t target;
   // Backend processor selected by |target|.
   iree_string_view_t processor;
@@ -107,6 +107,8 @@ static bool iree_hal_amd_gpu_parse_exact_processor(
     iree_string_view_t processor,
     iree_hal_amd_gpu_gfxip_version_t* out_version) {
   memset(out_version, 0, sizeof(*out_version));
+  // Exact processor qualifiers preserve the underlying numeric gfx IP.
+  iree_string_view_consume_suffix(&processor, IREE_SV("-strict"));
   if (!iree_string_view_consume_prefix(&processor, IREE_SV("gfx"))) {
     return false;
   }
@@ -417,6 +419,7 @@ iree_hal_amd_gpu_target_identity_parse_artifact_key(
 static bool iree_hal_amd_gpu_target_processor_matches_architecture(
     iree_string_view_t processor, iree_string_view_t architecture) {
   processor = iree_string_view_remove_prefix(processor, 3);
+  iree_string_view_consume_suffix(&processor, IREE_SV("-strict"));
   iree_string_view_t major = iree_string_view_empty();
   iree_string_view_t suffix = iree_string_view_empty();
   if (iree_string_view_consume_suffix(&processor, IREE_SV("-generic"))) {
@@ -512,7 +515,19 @@ iree_hal_amd_gpu_target_identity_resolve_physical_target(
         (int)identity->target.size, identity->target.data,
         (int)mapping->target.size, mapping->target.data);
   }
-  identity->target = mapping->target;
+  const iree_hal_amd_gpu_target_mapping_t* target_mapping =
+      iree_hal_amd_gpu_target_lookup_mapping(mapping->target);
+  IREE_ASSERT(target_mapping != NULL);
+  iree_hal_amd_gpu_gfxip_version_t version;
+  const bool parsed_processor = iree_hal_amd_gpu_parse_exact_processor(
+      target_mapping->processor, &version);
+  IREE_ASSERT(parsed_processor);
+  identity->kind = IREE_HAL_AMD_GPU_TARGET_KIND_EXACT;
+  identity->version = version;
+  identity->generic_version = 0;
+  identity->target = target_mapping->target;
+  identity->processor = target_mapping->processor;
+  iree_hal_amd_gpu_target_identity_apply_known_feature_support(identity);
   return iree_ok_status();
 }
 

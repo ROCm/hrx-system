@@ -58,7 +58,7 @@ loom_target_set(
                target not in [
                    "gfx1250",
                    "gfx1251",
-                   "gfx1250-a0",
+                   "gfx1250-strict",
                    "gfx12-5-generic",
                ]
         ]

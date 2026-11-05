@@ -41,12 +41,11 @@ reports the unsupported architecture names.
 
 `gfx1250` revision A0 is the first qualified artifact. Selecting exact
 `gfx1250`, `gfx12-5-generic`, or a family containing `gfx1250` builds
-`gfx1250-a0` before `gfx12-5-generic`. The A0 artifact uses `gfx1250` as its
-LLVM architecture and enforces the A0 override during both source compilation
-and LTO code generation. At runtime an A0 physical identity selects only that
-artifact; it cannot fall through to the B0-qualified generic binary. A
-toolchain that recognizes the `gfx1250` processor but predates the A0 override
-fails during option parsing instead of silently producing B0 code.
+`gfx1250-strict` before `gfx12-5-generic`. The A0 artifact uses LLVM's native
+`gfx1250-strict` processor and ELF identity. At runtime an A0 physical identity
+selects only that artifact; it cannot fall through to the B0-qualified generic
+binary. A toolchain that predates the strict processor fails during target
+selection instead of silently producing B0 code.
 
 Tool discovery is intentionally compatible with both in-tree and out-of-tree
 LLVM flows. Explicit `--clang`, `--llvm-link`, `--lld`, and `--llvm-objcopy`

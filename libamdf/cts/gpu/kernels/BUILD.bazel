@@ -81,6 +81,7 @@ _COMPLETED_TICK_CONFIGS = [
     "//loom/config/arch/amdgpu:descriptor_set_gfx11_generic_core",
     "//loom/config/arch/amdgpu:descriptor_set_gfx12_generic_core",
     "//loom/config/arch/amdgpu:descriptor_set_gfx12_5_generic_core",
+    "//loom/config/arch/amdgpu:descriptor_set_rdna4_gfx1250_a0_core",
     "//loom/config/arch/amdgpu:descriptor_set_rdna4m_core",
 ]
 

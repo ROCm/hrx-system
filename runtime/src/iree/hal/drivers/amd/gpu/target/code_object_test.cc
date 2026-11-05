@@ -29,6 +29,7 @@ static constexpr uint32_t kElfMachineGfx906 = 0x02f;
 static constexpr uint32_t kElfMachineGfx1100 = 0x041;
 static constexpr uint32_t kElfMachineGfx942 = 0x04c;
 static constexpr uint32_t kElfMachineGfx11Generic = 0x054;
+static constexpr uint32_t kElfMachineGfx1250Strict = 0x0eb;
 static constexpr uint32_t kElfFeatureXnackUnsupportedV4 = 0x000;
 static constexpr uint32_t kElfFeatureXnackOffV4 = 0x200;
 static constexpr uint32_t kElfFeatureSrameccAnyV4 = 0x400;
@@ -106,6 +107,15 @@ TEST(CodeObjectTest, ParsesV6GenericVersion) {
   EXPECT_EQ(identity.kind, IREE_HAL_AMD_GPU_TARGET_KIND_GENERIC);
   EXPECT_EQ(identity.generic_version, 1u);
   EXPECT_EQ(FormatIdentity(&identity), "gfx11-generic");
+}
+
+TEST(CodeObjectTest, ParsesStrictExactMachine) {
+  const auto elf = MakeElf64AmdgpuHsa(kElfAbiVersionV6, kElfMachineAmdgpu,
+                                      kElfMachineGfx1250Strict);
+  auto identity = ParseCodeObjectIdentity(elf);
+  EXPECT_EQ(identity.kind, IREE_HAL_AMD_GPU_TARGET_KIND_EXACT);
+  EXPECT_EQ(identity.generic_version, 0u);
+  EXPECT_EQ(FormatIdentity(&identity), "gfx1250-strict");
 }
 
 TEST(CodeObjectTest, ParsesV3SupportedAbsentFeaturesAsOff) {

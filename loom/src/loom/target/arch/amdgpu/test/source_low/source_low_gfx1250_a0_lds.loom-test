@@ -1,6 +1,6 @@
 // RUN: emit source-low output=low
 
-amdgpu.target<gfx1250-a0> @target
+amdgpu.target<gfx1250-strict> @target
 
 kernel.def target(@target) @a0_legalizes_constrained_lds_packets() {
   %unit = index.constant 1 : index

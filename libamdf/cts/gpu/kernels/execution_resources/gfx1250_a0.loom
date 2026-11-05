@@ -14,7 +14,7 @@ low.func.def target<amdgpu.rdna4.gfx1250_a0.core> @execution_resource_gfx1250_a0
   return %hardware, %domain
 }
 
-amdgpu.target<gfx1250-a0> @resource_gfx1250_a0_target
+amdgpu.target<gfx1250-strict> @resource_gfx1250_a0_target
 template.def<@execution_resource_id> target(@resource_gfx1250_a0_target) @resource_gfx1250_a0() -> (i32) {
   %hardware, %domain = low.invoke @execution_resource_gfx1250_a0() : () -> (i32, i32)
   %mask = scalar.constant 80896 : i32

@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Generator: AMDGPU target-info overlay -> compact C tables."""
+"""Generator: AMDGPU target-info catalog -> compact C tables."""
 
 from __future__ import annotations
 
@@ -1638,7 +1638,7 @@ def _write_target_info_to_paths(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate AMDGPU target-info C tables from Loom overlay data.")
+    parser = argparse.ArgumentParser(description="Generate AMDGPU target-info C tables from the Loom catalog.")
     parser.add_argument(
         "--header",
         type=Path,

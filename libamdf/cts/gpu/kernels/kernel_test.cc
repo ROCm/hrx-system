@@ -512,9 +512,9 @@ TEST(KernelTest, EveryLdsProductPreservesTheCallerContract) {
   }
 }
 
-TEST(KernelTest, PhysicalRevisionSelectsTheInstructionEncodingOverlay) {
+TEST(KernelTest, PhysicalRevisionSelectsTheStrictInstructionSet) {
   constexpr kernels::Kernel kVariants[] = {{.target = "gfx1250"},
-                                           {.target = "gfx1250-a0"}};
+                                           {.target = "gfx1250-strict"}};
   const kernels::KernelSet products = {kVariants};
   amdf_gpu_endpoint_info_t endpoint = {
       .gfx_ip = {12, 5, 0},
@@ -522,7 +522,7 @@ TEST(KernelTest, PhysicalRevisionSelectsTheInstructionEncodingOverlay) {
   };
   const auto* a0 = products.Find(endpoint);
   ASSERT_NE(a0, nullptr);
-  EXPECT_STREQ(a0->target, "gfx1250-a0");
+  EXPECT_STREQ(a0->target, "gfx1250-strict");
   endpoint.asic_revision = 1;
   const auto* b0 = products.Find(endpoint);
   ASSERT_NE(b0, nullptr);

@@ -115,7 +115,7 @@ TEST(AgentTargetTest, ResolvesPhysicalTargets) {
   IREE_ASSERT_OK(InitializeSingleTarget(hsa_agent_t{42}, hsa_isa_t{7},
                                         IREE_SV("amdgcn-amd-amdhsa--gfx1250"),
                                         /*asic_revision=*/0, &a0_target));
-  EXPECT_EQ(FormatTargetId(a0_target.primary_isa), "gfx1250-a0");
+  EXPECT_EQ(FormatTargetId(a0_target.primary_isa), "gfx1250-strict");
   iree_hal_amdgpu_agent_target_deinitialize(&a0_target);
 
   iree_hal_amdgpu_agent_target_t b0_target;

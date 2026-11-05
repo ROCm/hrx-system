@@ -161,9 +161,8 @@ iree_status_t iree_hal_amdgpu_target_identity_format_artifact_key(
 // Projects an exact target identity into its AMDHSA code-object identity.
 //
 // The code-object processor mapping and AMDHSA feature modes are preserved.
-// Target-overlay identity is deliberately projected away. If no generic
-// code-object mapping is known, the backend processor is retained as the
-// code-object target.
+// If no generic code-object mapping is known, the backend processor is
+// retained as the code-object target.
 iree_status_t iree_hal_amdgpu_target_identity_project_code_object(
     const iree_hal_amdgpu_target_identity_t* exact_identity,
     iree_hal_amdgpu_target_identity_t* out_code_object_identity);

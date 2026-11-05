@@ -635,7 +635,7 @@ def build_target(
                 repo_root=repo_root,
                 binary_root=binary_root,
                 toolchain=toolchain,
-                extra_copts=[*extra_copts, *target.compile_options],
+                extra_copts=extra_copts,
                 verbose=verbose,
                 dry_run=dry_run,
             )
@@ -673,7 +673,7 @@ def build_target(
             arch=target.processor,
             version_script=version_script,
             toolchain=toolchain,
-            linkopts=[*linkopts, *target.link_options],
+            linkopts=linkopts,
             verbose=verbose,
             dry_run=dry_run,
         )

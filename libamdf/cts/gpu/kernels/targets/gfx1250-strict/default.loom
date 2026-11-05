@@ -1,0 +1,1 @@
+amdgpu.target<gfx1250-strict> @cts_kernel_target

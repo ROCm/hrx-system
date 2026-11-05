@@ -31,18 +31,18 @@ def _test_amdgpu_profile_is_family_typed_impl(env, target):
     if hasattr(profile, "artifact_extension"):
         env.fail("target profile must not select an artifact extension")
 
-def _test_builtin_profile_preserves_overlay_identity(name, **kwargs):
+def _test_builtin_profile_preserves_strict_identity(name, **kwargs):
     analysis_test(
         name = name,
-        impl = _test_builtin_profile_preserves_overlay_identity_impl,
-        target = "//loom/target/amdgpu:gfx1250-a0",
+        impl = _test_builtin_profile_preserves_strict_identity_impl,
+        target = "//loom/target/amdgpu:gfx1250-strict",
         **kwargs
     )
 
-def _test_builtin_profile_preserves_overlay_identity_impl(env, target):
+def _test_builtin_profile_preserves_strict_identity_impl(env, target):
     profile = target[LoomTargetProfileInfo]
     env.expect.that_str(profile.family).equals("amdgpu")
-    env.expect.that_str(profile.selector).equals("gfx1250-a0")
+    env.expect.that_str(profile.selector).equals("gfx1250-strict")
 
 def _test_amdgpu_family_set_selects_compatible_profiles(name, **kwargs):
     analysis_test(
@@ -118,7 +118,7 @@ def loom_target_profile_rules_test_suite(name):
         tests = [
             _test_amdgpu_family_set_selects_compatible_profiles,
             _test_amdgpu_profile_is_family_typed,
-            _test_builtin_profile_preserves_overlay_identity,
+            _test_builtin_profile_preserves_strict_identity,
             _test_generic_profile_preserves_family_identity,
             _test_target_set_may_be_configuration_empty,
             _test_target_set_flattens_profiles_in_order,

@@ -676,13 +676,11 @@ def render_set(variants, namespace, header_name):
     ]
     for selector, kernel in variants:
         require(
-            re.fullmatch(r"gfx[0-9a-f]+(?:-a0)?", selector), "invalid target selector"
+            re.fullmatch(r"gfx[0-9a-f]+(?:-strict)?", selector),
+            "invalid target selector",
         )
-        # The physical selector is supplied by the build. An ELF target can
-        # omit the overlay, but cannot name a different base processor.
-        processor = selector.split("-", 1)[0]
         require(
-            kernel.target.split(":", 1)[0] == f"amdgcn-amd-amdhsa--{processor}",
+            kernel.target.split(":", 1)[0] == f"amdgcn-amd-amdhsa--{selector}",
             f"compiler target {kernel.target!r} does not match {selector!r}",
         )
         source += [

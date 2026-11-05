@@ -161,7 +161,7 @@ def test_target_info_headers_keep_address_stable_target_rows_public() -> None:
     assert "loom_amdgpu_target_info_target_info_count" in private_header
 
 
-def test_overlay_and_physical_targets_generate_data_rows_only() -> None:
+def test_strict_and_physical_targets_generate_data_rows_only() -> None:
     descriptor_set_info = amdgpu_target_info.sorted_descriptor_set_infos()[0]
     descriptor_row = amdgpu_target_info._AmdgpuDescriptorSetRow(
         info=descriptor_set_info,
@@ -174,8 +174,8 @@ def test_overlay_and_physical_targets_generate_data_rows_only() -> None:
         descriptor_set_rows=(descriptor_row,),
     )
 
-    assert "loom_amdgpu_target_info_gfx1250_a0_kernel_metadata_extensions[]" in source
-    assert '.name = IREE_SVL("gfx1250-a0"),' in source
+    assert "loom_amdgpu_target_info_gfx1250_strict_kernel_metadata_extensions[]" in source
+    assert '.name = IREE_SVL("gfx1250-strict"),' in source
     assert '.key = IREE_SVL(".gfx1250_revision"),' in source
     assert ".asic_revision = UINT32_C(0)," in source
     assert ".target_kind = UINT32_C(24)," in source
@@ -314,7 +314,7 @@ def test_target_info_flag_expressions_cover_every_known_bit() -> None:
 
 
 def test_cluster_launch_state_is_scoped_to_gfx1250() -> None:
-    assert {info.processor for info in amdgpu_target_info_data.AMDGPU_PROCESSOR_INFOS if info.flags & AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE} == {"gfx1250"}
+    assert {info.processor for info in amdgpu_target_info_data.AMDGPU_PROCESSOR_INFOS if info.flags & AMDGPU_PROCESSOR_INFO_FLAG_CLUSTER_LAUNCH_STATE} == {"gfx1250", "gfx1250-strict"}
 
 
 def test_dgemm_memory_interlock_defect_is_scoped_to_gfx90a() -> None:
@@ -326,7 +326,12 @@ def test_dgemm_memory_interlock_defect_is_scoped_to_gfx90a() -> None:
 def test_initial_vmem_replay_entry_profile_covers_required_processors() -> None:
     processors = {info.processor: info for info in amdgpu_target_info_data.AMDGPU_PROCESSOR_INFOS}
 
-    for processor_name in ("gfx1250", "gfx1251", "gfx12-5-generic"):
+    for processor_name in (
+        "gfx1250",
+        "gfx1250-strict",
+        "gfx1251",
+        "gfx12-5-generic",
+    ):
         assert processors[processor_name].kernel_entry.profile == AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY
     assert processors["gfx1200"].kernel_entry.profile != AMDGPU_KERNEL_ENTRY_PROFILE_INITIAL_VMEM_REPLAY
 
