@@ -90,8 +90,8 @@ typedef struct iree_hal_amd_fabric_asan_quarantine_entry_t {
 typedef struct iree_hal_amd_fabric_asan_shadow_slab_t
     iree_hal_amd_fabric_asan_shadow_slab_t;
 
-// Device-owned address shadow namespace. Native allocation/mapping is cold;
-// pool advice only writes already committed shadow bytes. The sealed device
+// Device-owned address shadow namespace. Pool advice writes already committed
+// shadow bytes independently of native allocation/mapping. The sealed device
 // group dominates this state and every provider borrowing it.
 typedef struct iree_hal_amd_fabric_asan_t {
   // Borrowed native API table, or NULL before initialization.
@@ -120,8 +120,10 @@ typedef struct iree_hal_amd_fabric_asan_t {
   amdf_memory_flags_t application_source_flags;
   // Optional shared poison backing used by PREMAPPED mode.
   iree_hal_amd_fabric_memory_t alias_memory;
-  // Serializes physical shadow commitment and host poison updates.
+  // Serializes directory publication and host poison updates.
   iree_slim_mutex_t shadow_mutex;
+  // Serializes missing-slab preparation without excluding committed advice.
+  iree_slim_mutex_t growth_mutex;
   // Dense table of independently host-mapped precise shadow slabs.
   iree_hal_amd_fabric_asan_shadow_slab_t* slabs;
   // Number of initialized entries in slabs.
