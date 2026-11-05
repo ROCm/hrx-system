@@ -11,6 +11,7 @@
 
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/tooling/device_profiling.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
@@ -329,6 +330,7 @@ int loom_serve_main(int argc, char** argv,
     status = iree_async_signal_ignore_broken_pipe();
   }
   loom_serve_device_group_t* group = NULL;
+  iree_hal_profiling_from_flags_t* profiling = NULL;
   loom_serve_device_configuration_t devices = {0};
   loom_serve_host_t* host = NULL;
   loom_serve_http_server_t* server = NULL;
@@ -346,7 +348,8 @@ int loom_serve_main(int argc, char** argv,
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_device_group_allocate_from_flags(
-        host, configuration->driver_registry, host_allocator, &devices, &group);
+        host, configuration->driver_registry, host_allocator, &devices, &group,
+        &profiling);
   }
   if (iree_status_is_ok(status)) {
     registration_options.device_group = group;
@@ -421,6 +424,8 @@ int loom_serve_main(int argc, char** argv,
   // A failed platform release retains its parents until process exit. It does
   // not authorize destroying a shared device or invalidating borrowed names.
   if (!retained_resources) {
+    status =
+        iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
     iree_status_t group_status = loom_serve_device_group_free(group);
     retained_resources = !iree_status_is_ok(group_status);
     status = iree_status_join(status, group_status);

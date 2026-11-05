@@ -19,6 +19,7 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/tooling/device_profiling.h"
 #include "loom/serve/runtime/host/host.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
@@ -106,10 +107,12 @@ class ActivityEnvironment : public ::testing::Environment {
     IREE_ASSERT_OK(loom_serve_host_create_from_flags(
         compiler_options_, iree_allocator_system(), &host_));
     IREE_ASSERT_OK(loom_serve_device_group_allocate_from_flags(
-        host_, driver_registry_, iree_allocator_system(), &devices_, &group_));
+        host_, driver_registry_, iree_allocator_system(), &devices_, &group_,
+        &profiling_));
   }
 
   void TearDown() override {
+    IREE_EXPECT_OK(iree_hal_end_profiling_from_flags(profiling_));
     IREE_EXPECT_OK(loom_serve_device_group_free(group_));
     loom_serve_device_configuration_deinitialize(&devices_);
     loom_serve_host_release(host_);
@@ -127,6 +130,8 @@ class ActivityEnvironment : public ::testing::Environment {
   loom_serve_host_t* host_ = nullptr;
   // Ordered explicit device records, retained through all model retirement.
   loom_serve_device_group_t* group_ = nullptr;
+  // CLI-selected profiling encloses all models and ends before group release.
+  iree_hal_profiling_from_flags_t* profiling_ = nullptr;
   // Decoded device URIs, pool policies, and consumer bindings.
   loom_serve_device_configuration_t devices_ = {};
 };

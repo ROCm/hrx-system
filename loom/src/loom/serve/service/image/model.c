@@ -6,7 +6,6 @@
 
 #include "loom/serve/service/image/model.h"
 
-#include "iree/tooling/device_profiling.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
 #include "loom/serve/runtime/device/device.h"
@@ -710,19 +709,12 @@ iree_status_t loom_serve_image_load_allocate(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "output RGB geometry must fit host storage");
   }
-  bool retain_profile_metadata = false;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_profiling_from_flags_requires_retained_command_buffer_metadata(
-          &retain_profile_metadata));
   loom_serve_image_load_t* load = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*load), (void**)&load));
   load->host_allocator = host_allocator;
   load->options = *options;
-  load->command_mode =
-      retain_profile_metadata
-          ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA
-          : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
+  load->command_mode = loom_serve_device_command_mode(device);
   load->event.wake = wake;
   load->event.user_data = user_data;
   iree_slim_mutex_initialize(&load->event.mutex);

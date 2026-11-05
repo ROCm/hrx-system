@@ -54,6 +54,42 @@ class ServerTest(unittest.TestCase):
         self.assertIn("must be active or blocking", result.stderr)
         self.assertNotIn('"event":"ready"', result.stderr)
 
+    def test_profiling_policy_is_validated_before_opening_a_device(self):
+        result = subprocess.run(
+            [
+                str(SERVER),
+                "--device=not-opened",
+                "--device_profiling_mode=not-a-family",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unsupported profiling data family 'not-a-family'", result.stderr)
+        self.assertNotIn('"event":"ready"', result.stderr)
+
+    def test_profiling_session_encloses_server_lifetime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            log = Path(temporary) / "server.log"
+            profile = Path(temporary) / "server.profile"
+            with running_server(
+                [
+                    str(SERVER),
+                    "--device=task",
+                    "--pool_backing=fixed",
+                    "--workers=1",
+                    "--listen=127.0.0.1:0",
+                    "--device_profiling_mode=queue-events",
+                    f"--device_profiling_output={profile}",
+                ],
+                log,
+            ) as (process, bound_address):
+                self.assertIsNotNone(bound_address, log.read_text())
+                address = urlsplit(f"http://{bound_address}")
+                control(address, "GET", "/v1/status", 200)
+            self.assertEqual(process.returncode, 0, log.read_text())
+            self.assertGreater(profile.stat().st_size, 0)
+
     def test_byte_size_flags_publish_exact_limits(self):
         with tempfile.TemporaryDirectory() as temporary:
             log = Path(temporary) / "server.log"

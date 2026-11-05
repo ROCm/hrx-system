@@ -151,8 +151,10 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
     loom_serve_host_t* host, iree_hal_driver_registry_t* driver_registry,
     iree_allocator_t host_allocator,
     loom_serve_device_configuration_t* out_configuration,
-    loom_serve_device_group_t** out_group) {
+    loom_serve_device_group_t** out_group,
+    iree_hal_profiling_from_flags_t** out_profiling) {
   *out_group = NULL;
+  *out_profiling = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_device_configuration_from_flags(
       host_allocator, out_configuration));
   if (FLAG_wait_mode[0]) {
@@ -161,6 +163,10 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
             out_configuration, iree_make_cstring_view(FLAG_wait_mode)),
         "--wait_mode");
   }
+  bool retain_profile_metadata = false;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_profiling_from_flags_requires_retained_command_buffer_metadata(
+          &retain_profile_metadata));
   iree_status_t status = iree_ok_status();
   struct {
     // URI scheme borrowed from decoded configuration through this function.
@@ -196,10 +202,17 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
       }
     }
     options[i].driver = drivers[driver_index].handle;
+    options[i].event_sink = iree_hal_device_event_sink_stderr();
+    options[i].retain_profile_metadata = retain_profile_metadata;
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_device_group_allocate(
         host, out_configuration->count, options, host_allocator, out_group);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_begin_device_group_profiling_from_flags(
+        loom_serve_device_group_handle(*out_group), host_allocator,
+        out_profiling);
   }
   for (iree_host_size_t i = 0;
        i < out_configuration->pool_count && iree_status_is_ok(status); ++i) {
@@ -216,6 +229,9 @@ iree_status_t loom_serve_device_group_allocate_from_flags(
     options[i].driver = NULL;
   }
   if (!iree_status_is_ok(status)) {
+    status = iree_status_join(
+        status, iree_hal_end_profiling_from_flags(*out_profiling));
+    *out_profiling = NULL;
     status = iree_status_join(status, loom_serve_device_group_free(*out_group));
     *out_group = NULL;
   }

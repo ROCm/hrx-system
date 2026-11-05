@@ -167,6 +167,7 @@ TEST_P(CpuDeviceTest, DevicesUseApplicationWorkerBudgetAndOneGroup) {
           .uri = IREE_SV("task"),
           .name = IREE_SV("second"),
           .completion_wait_flags = IREE_ASYNC_WAIT_FLAG_NONE,
+          .retain_profile_metadata = true,
       }};
   IREE_ASSERT_OK(
       loom_serve_device_group_allocate(host_, IREE_ARRAYSIZE(options), options,
@@ -185,6 +186,12 @@ TEST_P(CpuDeviceTest, DevicesUseApplicationWorkerBudgetAndOneGroup) {
   EXPECT_TRUE(
       iree_string_view_equal(loom_serve_device_name(second), names.values[1]));
   EXPECT_EQ(loom_serve_device_group(first), loom_serve_device_group(second));
+  EXPECT_EQ(loom_serve_device_group(first),
+            loom_serve_device_group_handle(group_));
+  EXPECT_EQ(loom_serve_device_command_mode(first),
+            IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT);
+  EXPECT_EQ(loom_serve_device_command_mode(second),
+            IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA);
   EXPECT_NE(loom_serve_device_handle(first), loom_serve_device_handle(second));
   EXPECT_NE(loom_serve_device_dispatch_queue(first),
             loom_serve_device_dispatch_queue(second));

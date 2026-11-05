@@ -8,6 +8,7 @@
 #define LOOM_TOOLS_LOOM_SERVE_OPTIONS_H_
 
 #include "iree/hal/driver_registry.h"
+#include "iree/tooling/device_profiling.h"
 #include "loom/serve/runtime/device/device.h"
 #include "loom/serve/server/device_configuration.h"
 
@@ -31,12 +32,15 @@ iree_status_t loom_serve_host_create_from_flags(
 // every model retires. URI interpretation belongs to the HAL driver, with no
 // implicit local device or backend fallback. The caller deinitializes
 // out_configuration on every path, after any router borrowing its idle policies
-// has joined.
+// has joined. The CLI installs stderr diagnostics and begins flag-selected HAL
+// profiling. On success the caller owns out_profiling and ends it after model
+// retirement, before freeing the group. On failure both outputs are NULL.
 iree_status_t loom_serve_device_group_allocate_from_flags(
     loom_serve_host_t* host, iree_hal_driver_registry_t* driver_registry,
     iree_allocator_t host_allocator,
     loom_serve_device_configuration_t* out_configuration,
-    loom_serve_device_group_t** out_group);
+    loom_serve_device_group_t** out_group,
+    iree_hal_profiling_from_flags_t** out_profiling);
 
 #ifdef __cplusplus
 }  // extern "C"

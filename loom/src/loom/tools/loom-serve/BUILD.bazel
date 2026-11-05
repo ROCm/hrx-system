@@ -34,6 +34,7 @@ loom_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/tooling:device_flags",
+        "//runtime/src/iree/tooling:device_profiling",
     ],
 )
 
@@ -89,6 +90,7 @@ loom_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/task",
         "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/tooling:device_profiling",
     ],
 )
 
@@ -114,6 +116,7 @@ loom_cc_library(
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/tooling:device_profiling",
     ],
 )
 

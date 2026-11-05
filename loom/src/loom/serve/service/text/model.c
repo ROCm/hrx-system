@@ -12,7 +12,6 @@
 #include <string.h>
 
 #include "iree/async/operations/semaphore.h"
-#include "iree/tooling/device_profiling.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
 #include "loom/serve/runtime/device/device.h"
@@ -434,10 +433,6 @@ iree_status_t loom_serve_text_load_allocate(
                               "epoch %zu has invalid token/span capacities", i);
     }
   }
-  bool retain_profile_metadata = false;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_profiling_from_flags_requires_retained_command_buffer_metadata(
-          &retain_profile_metadata));
   loom_serve_text_load_t* load = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*load), (void**)&load));
@@ -461,10 +456,7 @@ iree_status_t loom_serve_text_load_allocate(
     model->transfer = loom_serve_device_transfer_queue(device);
     model->row_count = options->row_count;
     model->draft_depth = options->draft_depth;
-    model->command_mode =
-        retain_profile_metadata
-            ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA
-            : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
+    model->command_mode = loom_serve_device_command_mode(device);
     loom_serve_text_state_initialize(options, host_allocator, &model->state);
     *out_load = load;
   } else {

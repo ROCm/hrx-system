@@ -7,7 +7,6 @@
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
-#include "iree/tooling/device_profiling.h"
 #include "loom/serve/runtime/execution/queues.h"
 #include "loom/serve/runtime/program/jit_cache.h"
 #include "loom/serve/runtime/program/tokenizer_cache.h"
@@ -27,6 +26,8 @@ struct loom_serve_device_t {
   loom_serve_execution_queues_t* execution_queues;
   // Exact immutable source products shared by independent model instances.
   loom_serve_jit_cache_t* jit_cache;
+  // Application-selected recording policy, fixed before any model is prepared.
+  iree_hal_command_buffer_mode_t command_mode;
 };
 
 struct loom_serve_device_group_t {
@@ -40,8 +41,6 @@ struct loom_serve_device_group_t {
   iree_async_frontier_tracker_t* frontier_tracker;
   // Owned immutable topology and semaphore/memory namespace.
   iree_hal_device_group_t* handle;
-  // One profiling session and sink enclosing every model on all devices.
-  iree_hal_profiling_from_flags_t* profiling;
   // Number of initialized records, including nullable partial resources.
   iree_host_size_t device_count;
   // Application key views into trailing string storage in this allocation.
@@ -78,8 +77,10 @@ static iree_status_t loom_serve_device_group_initialize(
     iree_hal_device_create_params_t params =
         iree_hal_device_create_params_default();
     params.proactor_pool = loom_serve_host_proactor_pool(group->host);
-    params.event_sink = iree_hal_device_event_sink_stderr();
     params.completion_wait_flags = options[i].completion_wait_flags;
+    if (options[i].event_sink.fn) {
+      params.event_sink = options[i].event_sink;
+    }
     status = iree_hal_driver_create_device_by_uri(
         options[i].driver, options[i].uri, &params, group->host_allocator,
         &group->devices[i].handle);
@@ -184,6 +185,10 @@ iree_status_t loom_serve_device_group_allocate(
   char* name_storage = (char*)group + names_offset;
   for (iree_host_size_t i = 0; i < device_count; ++i) {
     group->devices[i].owner = group;
+    group->devices[i].command_mode =
+        options[i].retain_profile_metadata
+            ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA
+            : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
     memcpy(name_storage, names[i].data, names[i].size);
     group->names[i] = iree_make_string_view(name_storage, names[i].size);
     group->devices[i].name = group->names[i];
@@ -204,10 +209,6 @@ iree_status_t loom_serve_device_group_allocate(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_begin_device_group_profiling_from_flags(
-        group->handle, host_allocator, &group->profiling);
-  }
-  if (iree_status_is_ok(status)) {
     *out_group = group;
   } else {
     status = iree_status_join(status, loom_serve_device_group_free(group));
@@ -226,20 +227,18 @@ iree_status_t loom_serve_device_group_free(loom_serve_device_group_t* group) {
           "serving pool %" PRIhsz " still has live consumers", i);
     }
   }
-  iree_status_t status = iree_hal_end_profiling_from_flags(group->profiling);
-  group->profiling = NULL;
   loom_serve_tokenizer_cache_free(group->tokenizer_cache);
   group->tokenizer_cache = NULL;
-  iree_status_t cleanup_status = iree_ok_status();
+  iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
-       i < group->pool_count && iree_status_is_ok(cleanup_status); ++i) {
-    cleanup_status = loom_serve_pool_free(group->pools[i]);
-    if (iree_status_is_ok(cleanup_status)) {
+       i < group->pool_count && iree_status_is_ok(status); ++i) {
+    status = loom_serve_pool_free(group->pools[i]);
+    if (iree_status_is_ok(status)) {
       group->pools[i] = NULL;
     }
   }
-  if (!iree_status_is_ok(cleanup_status)) {
-    return iree_status_join(status, cleanup_status);
+  if (!iree_status_is_ok(status)) {
+    return status;
   }
   for (iree_host_size_t i = 0; i < group->pool_count; ++i) {
     iree_allocator_free(group->host_allocator,
@@ -444,6 +443,11 @@ iree_string_view_list_t loom_serve_device_group_names(
   return (iree_string_view_list_t){group->device_count, group->names};
 }
 
+iree_hal_device_group_t* loom_serve_device_group_handle(
+    const loom_serve_device_group_t* group) {
+  return group->handle;
+}
+
 iree_string_view_t loom_serve_device_name(const loom_serve_device_t* device) {
   return device->name;
 }
@@ -460,6 +464,11 @@ void loom_serve_device_trim_programs(loom_serve_device_t* device) {
 
 iree_hal_device_t* loom_serve_device_handle(const loom_serve_device_t* device) {
   return device->handle;
+}
+
+iree_hal_command_buffer_mode_t loom_serve_device_command_mode(
+    const loom_serve_device_t* device) {
+  return device->command_mode;
 }
 
 loom_serve_host_t* loom_serve_device_host(const loom_serve_device_t* device) {

@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 
 package(
@@ -39,7 +40,6 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/tooling:device_profiling",
     ],
 )
 
@@ -56,6 +56,13 @@ loom_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/memory:tlsf_pool",
     ],
+)
+
+iree_assert_dependency_boundary(
+    name = "device_has_no_cli_profiling",
+    forbidden_dependencies = ["//runtime/src/iree/tooling:device_profiling"],
+    message = "Device ownership must not select command-line profiling policy",
+    target = ":device",
 )
 
 loom_cc_test(

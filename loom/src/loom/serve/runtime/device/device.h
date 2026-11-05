@@ -19,8 +19,8 @@ extern "C" {
 #endif
 
 // Application owner of all cooperating devices, one immutable HAL topology and
-// frontier namespace, profiling session and retained host services. Models
-// drain before this owner is destroyed. Group membership creates no execution
+// frontier namespace and retained host services. Models drain before this owner
+// is destroyed. Group membership creates no execution
 // edges and implies no cross-device buffer visibility.
 typedef struct loom_serve_device_group_t loom_serve_device_group_t;
 
@@ -41,6 +41,14 @@ typedef struct loom_serve_device_options_t {
   // Policy for device-owned completion waits, passed to HAL creation. NONE
   // disables optional active observation. The server selects ACTIVE by default.
   iree_async_wait_flags_t completion_wait_flags;
+  // Device-originated diagnostics, copied into the HAL device. An empty sink
+  // discards events. Callback data outlives the group; callbacks follow the HAL
+  // event-sink concurrency and reentrancy contract.
+  iree_hal_device_event_sink_t event_sink;
+  // Retain command metadata for application-managed profiling sessions. Set
+  // before models are prepared; changing a profiling session cannot recover
+  // metadata omitted when commands were recorded.
+  bool retain_profile_metadata;
 } loom_serve_device_options_t;
 
 // Creates every requested HAL device from its application-selected driver,
@@ -123,6 +131,11 @@ iree_host_size_t loom_serve_device_group_count(
 iree_string_view_list_t loom_serve_device_group_names(
     const loom_serve_device_group_t* group);
 
+// Borrowed immutable HAL topology, live through group destruction. Applications
+// can use it with the HAL profiling API without transferring session ownership.
+iree_hal_device_group_t* loom_serve_device_group_handle(
+    const loom_serve_device_group_t* group);
+
 // Application key, distinct from the HAL identity or hardware display name.
 iree_string_view_t loom_serve_device_name(const loom_serve_device_t* device);
 
@@ -140,6 +153,9 @@ void loom_serve_device_trim_programs(loom_serve_device_t* device);
 // Borrowed handles valid through group destruction. Every device record returns
 // the same HAL group; execution bindings retain their shared queue inventory.
 iree_hal_device_t* loom_serve_device_handle(const loom_serve_device_t* device);
+// Immutable application recording policy shared by every model on this device.
+iree_hal_command_buffer_mode_t loom_serve_device_command_mode(
+    const loom_serve_device_t* device);
 // Borrowed application host, which outlives this device and its models.
 loom_serve_host_t* loom_serve_device_host(const loom_serve_device_t* device);
 // Exact immutable tokenizers shared by every model in the application group.
