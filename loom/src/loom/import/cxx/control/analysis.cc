@@ -79,6 +79,12 @@ class ValueUseAnalysis final : private cxx::ASTVisitor {
   }
 
  private:
+  void visit(cxx::LambdaExpressionAST* ast) override {
+    for (auto* capture : cxx::ListView{ast->captureList}) {
+      accept(capture);
+    }
+  }
+
   bool preVisit(cxx::AST* ast) override {
     switch (ast->kind()) {
       case cxx::ASTKind::ConstExpression:
@@ -969,6 +975,15 @@ void ControlFlow::visit(cxx::CallExpressionAST* ast) {
     } else {
       record(argument->value);
     }
+  }
+}
+
+void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
+  // Constructing a closure evaluates its captures, not its deferred callable
+  // body. The synthesized operator() definition owns analysis of that body
+  // when ordinary reachable-call discovery admits it.
+  for (auto* capture : cxx::ListView{ast->captureList}) {
+    accept(capture);
   }
 }
 

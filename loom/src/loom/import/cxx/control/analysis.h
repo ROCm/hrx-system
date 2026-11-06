@@ -350,6 +350,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   void visit(cxx::UnaryExpressionAST* ast) override;
   void visit(cxx::ReturnStatementAST* ast) override;
   void visit(cxx::CallExpressionAST* ast) override;
+  void visit(cxx::LambdaExpressionAST* ast) override;
   void visit(cxx::SubscriptExpressionAST* ast) override;
   void visit(cxx::ImplicitCastExpressionAST* ast) override;
   void visit(cxx::InitDeclaratorAST* ast) override;
