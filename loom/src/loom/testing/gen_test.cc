@@ -33,6 +33,15 @@
 namespace loom {
 namespace {
 
+iree_status_t CountSkippedHook(const loom_test_gen_hook_context_t* context,
+                               void* user_data,
+                               loom_test_gen_hook_result_t* out_result) {
+  (void)context;
+  ++*static_cast<uint32_t*>(user_data);
+  *out_result = LOOM_TEST_GEN_HOOK_SKIPPED;
+  return iree_ok_status();
+}
+
 class GenTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -229,6 +238,28 @@ TEST_F(GenTest, ZeroOpCount) {
 
   loom_module_t* module = nullptr;
   IREE_ASSERT_OK(generate_and_verify(600, config, &module));
+  loom_module_free(module);
+}
+
+TEST_F(GenTest, SkippedHookRetriesWithoutConsumingBudget) {
+  uint32_t hook_call_count = 0;
+  loom_test_gen_module_config_t config =
+      loom_test_gen_module_config_representative(1);
+  config.function_count = 1;
+  config.declaration_count = 0;
+  config.calls_per_function = 0;
+  config.body_config.op_count = 2;
+  config.body_config.block_arg_count = 0;
+  config.body_config.hook_count = 1;
+  config.body_config.hooks[0] = {
+      .weight = 1,
+      .generate = CountSkippedHook,
+      .user_data = &hook_call_count,
+  };
+
+  loom_module_t* module = nullptr;
+  IREE_ASSERT_OK(generate_and_verify(601, config, &module));
+  EXPECT_EQ(hook_call_count, 6u);
   loom_module_free(module);
 }
 
