@@ -735,7 +735,7 @@ static iree_status_t loom_vm_function_storage(
   // Low verification establishes the byte offset. The descriptor cell size
   // includes padding in narrow scalar values and the owned reference cells.
   const uint32_t cell_bytes = register_class->alloc_unit_bits / 8;
-  if (assignment->location_count * cell_bytes >
+  if ((uint64_t)assignment->location_count * cell_bytes >
       reference.byte_length - relative_offset) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "VM register transfer exceeds its storage span");

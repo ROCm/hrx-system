@@ -129,7 +129,8 @@ iree_status_t loom_aie2p_native_select_control_route(
       &context->workers[context->execution
                             .workers[context->core_engines[worker_index]]];
   const iree_host_size_t tile_count =
-      context->family->column_count * context->family->row_count;
+      (iree_host_size_t)context->family->column_count *
+      context->family->row_count;
   if (!owner->control_packets) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate(
         context->pass->arena, tile_count * 2, (void**)&owner->control_packets));
@@ -602,8 +603,12 @@ static uint32_t loom_aie2p_native_ingress_records(
       }
       continue;
     }
+    const uint64_t copy_byte_offset = (uint64_t)copies * channel->byte_stride;
+    if (copy_byte_offset > UINT32_MAX) {
+      return 1;
+    }
     const int64_t offset =
-        first->begin_byte_offset.facts.range_lo + copies * channel->byte_stride;
+        first->begin_byte_offset.facts.range_lo + (int64_t)copy_byte_offset;
     if (copies == count ||
         request->source.root_value_id != first->root_value_id ||
         request->transferred_byte_count != channel->record_byte_length ||
@@ -624,7 +629,7 @@ static uint32_t loom_aie2p_native_ingress_records(
         loom_channel_plan_admission(&source->channels, record.value_id);
     if (worker->configuration_records[loom_local_value_domain_ordinal(
             &source->value_domain, reservation)] !=
-        copies * channel->byte_stride) {
+        (uint32_t)copy_byte_offset) {
       return 1;
     }
     const loom_type_t endpoints[] = {request->source.type, request->dest.type};
@@ -651,7 +656,8 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
   iree_arena_allocator_t* arena = context->pass->arena;
   loom_module_t* module = context->code.module;
   const iree_host_size_t tile_count =
-      context->family->column_count * context->family->row_count;
+      (iree_host_size_t)context->family->column_count *
+      context->family->row_count;
   const loom_block_t* entry =
       loom_region_entry_block(loom_func_like_body(realization->function));
   const loom_pipeline_worker_t* source = &realization->workers[i];
@@ -1070,10 +1076,10 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
       }
       loom_aie2p_native_binding_t* binding =
           &context->bindings[selected->binding];
-      binding->byte_length =
-          iree_max(binding->byte_length,
-                   (uint64_t)external->end_byte_offset.facts.range_hi +
-                       (source_count - 1) * local_channel->byte_stride);
+      binding->byte_length = iree_max(
+          binding->byte_length,
+          (uint64_t)external->end_byte_offset.facts.range_hi +
+              (uint64_t)(source_count - 1) * local_channel->byte_stride);
       binding->byte_alignment =
           iree_max(binding->byte_alignment, external->root_minimum_alignment);
       binding->access |= ingress ? LOOM_AIE2P_ARRAY_BINDING_ACCESS_READ
@@ -1273,7 +1279,8 @@ iree_status_t loom_aie2p_native_select_transfers(
                                                  sizeof(*context->routes),
                                                  (void**)&context->routes));
   const iree_host_size_t control_source_count =
-      context->family->column_count * context->family->row_count * 2;
+      (iree_host_size_t)context->family->column_count *
+      context->family->row_count * 2;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, control_source_count, sizeof(*context->control_sources),
       (void**)&context->control_sources));

@@ -717,8 +717,8 @@ static iree_status_t loom_low_lower_rule_slice_operand(
   loom_op_t* slice_op = NULL;
   IREE_RETURN_IF_ERROR(loom_low_slice_build(
       loom_low_lower_context_builder(context), low_value_id,
-      lane_index * loom_low_register_type_unit_count(slice_type), slice_type,
-      source_op->location, &slice_op));
+      (int64_t)lane_index * loom_low_register_type_unit_count(slice_type),
+      slice_type, source_op->location, &slice_op));
   *out_slice_value_id = loom_low_slice_result(slice_op);
   return iree_ok_status();
 }
@@ -831,9 +831,15 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane(
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
       context, emit->operand_ref_count, sizeof(*lane_operands),
       (void**)&lane_operands));
+  iree_host_size_t lane_result_count = 0;
+  if (!iree_host_size_checked_mul(emit->result_ref_count, lane_count,
+                                  &lane_result_count)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "low rule lane result count exceeds host size");
+  }
   loom_value_id_t* lane_results = NULL;
   IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
-      context, emit->result_ref_count * lane_count, sizeof(*lane_results),
+      context, lane_result_count, sizeof(*lane_results),
       (void**)&lane_results));
   for (uint32_t lane_index = 0; lane_index < lane_count; ++lane_index) {
     for (uint16_t i = 0; i < emit->operand_ref_count; ++i) {
@@ -853,7 +859,7 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane(
     const loom_value_slice_t low_results = loom_low_op_results(lane_op);
     for (uint16_t result_index = 0; result_index < emit->result_ref_count;
          ++result_index) {
-      lane_results[result_index * lane_count + lane_index] =
+      lane_results[(iree_host_size_t)result_index * lane_count + lane_index] =
           loom_value_slice_get(low_results, result_index);
     }
   }
@@ -867,7 +873,7 @@ static iree_status_t loom_low_lower_rule_emit_descriptor_op_per_lane(
     loom_op_t* concat_op = NULL;
     IREE_RETURN_IF_ERROR(loom_low_concat_build(
         loom_low_lower_context_builder(context),
-        &lane_results[result_index * lane_count], lane_count,
+        &lane_results[(iree_host_size_t)result_index * lane_count], lane_count,
         result_types[result_index], source_op->location, &concat_op));
     low_results[result_index] = loom_low_concat_result(concat_op);
   }

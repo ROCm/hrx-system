@@ -526,6 +526,9 @@ TEST_P(SourceSpeechServiceTest,
                      device)
                : nullptr;
   };
+  auto* memory_pool = loom_runtime_pool_memory(storage_owner);
+  const uint64_t warm_live_bytes =
+      memory_pool ? loom_runtime_memory_pool_live_bytes(memory_pool) : 0;
   loom_runtime_execution_frontier_t frontier;
   {
     const auto gate = hold_native();
@@ -534,9 +537,10 @@ TEST_P(SourceSpeechServiceTest,
         cold.try_admit(cold.self, invocation, &admission, &frontier));
     ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
     if (SpeechElasticBacking()) {
-      EXPECT_EQ(
-          loom_runtime_pool_statistics(storage_owner).retained.pending_bytes,
-          3 * kSpeechSlabSize);
+      // Cached physical slots may publish before this owner turn observes
+      // them. Accepted demand is stable across pending and committed phases.
+      EXPECT_EQ(loom_runtime_memory_pool_live_bytes(memory_pool),
+                warm_live_bytes + 3 * kSpeechSlabSize);
     }
     IREE_ASSERT_OK(Generate(warm, 6, &warm_samples, &warm_blocks));
     ASSERT_EQ(warm_samples.size(), 6u);
@@ -565,14 +569,22 @@ TEST_P(SourceSpeechServiceTest,
   for (size_t i = 0; i < cold_samples.size(); ++i) {
     EXPECT_EQ(cold_samples[i], -static_cast<float>((i + 5) % 8) * 0.125f);
   }
+  const uint64_t cold_live_bytes =
+      memory_pool ? loom_runtime_memory_pool_live_bytes(memory_pool) : 0;
   {
     const auto gate = hold_native();
     IREE_ASSERT_OK(cold.release(cold.self, invocation, &complete, &frontier));
     EXPECT_EQ(complete, !SpeechElasticBacking());
     if (SpeechElasticBacking()) {
-      EXPECT_EQ(
-          loom_runtime_pool_statistics(storage_owner).retained.releasing_bytes,
-          2 * kSpeechSlabSize);
+      // Collection may publish a cached unmap before this observation. Count
+      // both the remaining release and its already-retired live demand.
+      const auto retained =
+          loom_runtime_pool_statistics(storage_owner).retained;
+      const uint64_t live_bytes =
+          loom_runtime_memory_pool_live_bytes(memory_pool);
+      ASSERT_LE(live_bytes, cold_live_bytes);
+      EXPECT_EQ(retained.releasing_bytes + cold_live_bytes - live_bytes,
+                2 * kSpeechSlabSize);
     }
     IREE_ASSERT_OK(Generate(warm, SIZE_MAX, &warm_samples, &warm_blocks));
   }

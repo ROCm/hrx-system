@@ -418,7 +418,8 @@ static iree_status_t loom_aie2p_configuration_phase_emit(
                                                    sizeof(*emitter->loads),
                                                    (void**)&emitter->loads));
     const iree_host_size_t memory_count =
-        emitter->entry->column_count * emitter->family->row_count;
+        (iree_host_size_t)emitter->entry->column_count *
+        emitter->family->row_count;
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, memory_count,
                                                    sizeof(*emitter->memories),
                                                    (void**)&emitter->memories));

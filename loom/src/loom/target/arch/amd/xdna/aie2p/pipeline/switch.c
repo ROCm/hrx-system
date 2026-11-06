@@ -199,7 +199,8 @@ iree_status_t loom_aie2p_native_switches_build(
     loom_aie2p_native_context_t* context, const loom_op_t* entry,
     bool* out_valid) {
   const iree_host_size_t tile_count =
-      context->family->column_count * context->family->row_count;
+      (iree_host_size_t)context->family->column_count *
+      context->family->row_count;
   loom_aie2p_native_switch_admission_t* switches;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       context->pass->arena, tile_count, sizeof(*switches), (void**)&switches));

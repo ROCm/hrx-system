@@ -1604,7 +1604,7 @@ static iree_status_t loom_vector_legalize_workgroup_reduce(
     }
     for (uint32_t j = 0; j < shape.chunk_count && iree_status_is_ok(status);
          ++j) {
-      const int64_t offset = j * shape.chunk_lane_count;
+      const int64_t offset = (int64_t)j * shape.chunk_lane_count;
       const uint32_t lane_count =
           iree_min(shape.chunk_lane_count, shape.lane_count - offset);
       result_types[packet_index] =

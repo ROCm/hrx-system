@@ -167,9 +167,9 @@ static iree_status_t loom_serve_media_pam_decode(
   IREE_RETURN_IF_ERROR(loom_serve_media_pam_header(image->data, &header));
   const iree_host_size_t pixel_count =
       image->pixels.data_length / image->info->pixel_format;
-  const uint32_t sample_bytes = header.maximum < 256 ? 1 : 2;
+  const iree_host_size_t sample_byte_count = header.maximum < 256 ? 1 : 2;
   iree_host_size_t raster_bytes = 0;
-  if (!iree_host_size_checked_mul(pixel_count, header.depth * sample_bytes,
+  if (!iree_host_size_checked_mul(pixel_count, header.depth * sample_byte_count,
                                   &raster_bytes) ||
       header.raster.data_length != raster_bytes) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -188,7 +188,7 @@ static iree_status_t loom_serve_media_pam_decode(
     for (uint32_t channel = 0;
          channel < header.depth && iree_status_is_ok(status); ++channel) {
       uint32_t value = *source++;
-      if (sample_bytes == 2) {
+      if (sample_byte_count == 2) {
         value = (value << 8) | *source++;
       }
       if (value > header.maximum) {

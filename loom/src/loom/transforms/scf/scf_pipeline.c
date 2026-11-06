@@ -1120,7 +1120,8 @@ static iree_status_t loom_scf_pipeline_emit_long_path(
   if (record_count > 1 && record_width != 0) {
     memcpy(next_state + carried_count,
            main_block->arg_ids + 1 + carried_count + record_width,
-           (record_count - 1) * record_width * sizeof(*next_state));
+           (iree_host_size_t)(record_count - 1) * record_width *
+               sizeof(*next_state));
   }
   loom_op_t* yield = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_yield_build(builder, next_state, state_count,

@@ -1049,7 +1049,7 @@ static iree_status_t loom_x86_function_storage(
         is_store ? LOOM_X86_STORAGE_TRANSFER_STORE
                  : LOOM_X86_STORAGE_TRANSFER_LOAD,
         location.descriptor_reg_class_id, location.location, 4,
-        (int32_t)(byte_offset + unit * unit_bytes), &instruction);
+        (int32_t)(byte_offset + (uint64_t)unit * unit_bytes), &instruction);
     loom_x86_function_append_transport(builder->function, &instruction);
   }
   return iree_ok_status();
