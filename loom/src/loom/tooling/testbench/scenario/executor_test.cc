@@ -1245,7 +1245,7 @@ TEST_F(ScenarioExecutorTest, ConsumesExpectedDeviceErrorsPerTrial) {
     EXPECT_EQ(absent.expectation_report->passed_count, 1u);
     ASSERT_EQ(absent.expectation_report->failure_count, 1u);
     EXPECT_EQ(absent.expectation_report->failures[0].kind,
-              LOOM_TESTBENCH_EXPECTATION_EVENT);
+              LOOM_CHECK_EXPECTATION_EVENT);
     EXPECT_EQ(absent.expectation_report->failures[0].expectation,
               &scenario.trials[0].action.expectations[1]);
     EXPECT_EQ(absent.expectation_report->failures[0].expectation->op->location,

@@ -172,11 +172,7 @@ bool loom_testbench_plan_value_source(
 }
 
 bool loom_testbench_is_expectation_op(const loom_op_t* op) {
-  return loom_check_expect_equal_isa(op) || loom_check_expect_bitwise_isa(op) ||
-         loom_check_expect_approximate_isa(op) ||
-         loom_check_expect_close_signed_isa(op) ||
-         loom_check_expect_close_unsigned_isa(op) ||
-         loom_check_expect_shape_isa(op) || loom_check_expect_event_isa(op);
+  return loom_check_expectation_classify(op) != LOOM_CHECK_EXPECTATION_NONE;
 }
 
 bool loom_testbench_plan_expectation(
@@ -185,81 +181,73 @@ bool loom_testbench_plan_expectation(
   memset(out_expectation, 0, sizeof(*out_expectation));
   out_expectation->op = op;
   out_expectation->expected_value_id = LOOM_VALUE_ID_INVALID;
-
-  if (loom_check_expect_equal_isa(op)) {
-    out_expectation->kind = LOOM_TESTBENCH_EXPECTATION_EQUAL;
-    out_expectation->actual_value_id = loom_check_expect_equal_actual(op);
-    out_expectation->expected_value_id = loom_check_expect_equal_expected(op);
-  } else if (loom_check_expect_bitwise_isa(op)) {
-    out_expectation->kind = LOOM_TESTBENCH_EXPECTATION_BITWISE;
-    out_expectation->actual_value_id = loom_check_expect_bitwise_actual(op);
-    out_expectation->expected_value_id = loom_check_expect_bitwise_expected(op);
-  } else if (loom_check_expect_approximate_isa(op)) {
-    out_expectation->kind = LOOM_TESTBENCH_EXPECTATION_APPROXIMATE;
-    out_expectation->actual_value_id = loom_check_expect_approximate_actual(op);
-    out_expectation->expected_value_id =
-        loom_check_expect_approximate_expected(op);
-    out_expectation->approximate.absolute_tolerance =
-        loom_check_expect_approximate_atol(op);
-    out_expectation->approximate.relative_tolerance =
-        loom_check_expect_approximate_rtol(op);
-    out_expectation->approximate.nan_policy =
-        loom_check_expect_approximate_nan(op);
-  } else if (loom_check_expect_close_signed_isa(op) ||
-             loom_check_expect_close_unsigned_isa(op)) {
-    const bool is_signed = loom_check_expect_close_signed_isa(op);
-    out_expectation->kind = is_signed
-                                ? LOOM_TESTBENCH_EXPECTATION_CLOSE_SIGNED
-                                : LOOM_TESTBENCH_EXPECTATION_CLOSE_UNSIGNED;
-    out_expectation->actual_value_id =
-        is_signed ? loom_check_expect_close_signed_actual(op)
-                  : loom_check_expect_close_unsigned_actual(op);
-    out_expectation->expected_value_id =
-        is_signed ? loom_check_expect_close_signed_expected(op)
-                  : loom_check_expect_close_unsigned_expected(op);
-    const int64_t maximum_distance =
-        is_signed ? loom_check_expect_close_signed_max_distance(op)
-                  : loom_check_expect_close_unsigned_max_distance(op);
-    if (maximum_distance < 0) {
-      return false;
-    }
-    out_expectation->integer_close.maximum_distance =
-        (uint64_t)maximum_distance;
-  } else if (loom_check_expect_shape_isa(op)) {
-    out_expectation->kind = LOOM_TESTBENCH_EXPECTATION_SHAPE;
-    out_expectation->actual_value_id = loom_check_expect_shape_value(op);
-    loom_value_slice_t dimensions = loom_check_expect_shape_dims(op);
-    loom_attribute_t static_dimensions =
-        loom_check_expect_shape_static_dims(op);
-    out_expectation->shape.dimension_value_ids = dimensions.values;
-    out_expectation->shape.dimension_value_count = dimensions.count;
-    out_expectation->shape.static_dimensions = static_dimensions.i64_array;
-    out_expectation->shape.static_dimension_count = static_dimensions.count;
-  } else if (loom_check_expect_event_isa(op)) {
-    out_expectation->kind = LOOM_TESTBENCH_EXPECTATION_EVENT;
-    out_expectation->actual_value_id = LOOM_VALUE_ID_INVALID;
-    out_expectation->event.provider_id = loom_check_expect_event_provider(op);
-    out_expectation->event.provider = loom_testbench_string_from_id(
-        module, out_expectation->event.provider_id);
-    out_expectation->event.attrs = loom_check_expect_event_attrs(op);
-  } else {
-    return false;
+  out_expectation->kind = loom_check_expectation_classify(op);
+  if (loom_check_expectation_kind_is_pair(out_expectation->kind)) {
+    out_expectation->actual_value_id = loom_op_const_operands(op)[0];
+    out_expectation->expected_value_id = loom_op_const_operands(op)[1];
   }
 
-  if (out_expectation->kind != LOOM_TESTBENCH_EXPECTATION_EVENT &&
+  switch (out_expectation->kind) {
+    case LOOM_CHECK_EXPECTATION_EQUAL:
+    case LOOM_CHECK_EXPECTATION_BITWISE:
+      break;
+    case LOOM_CHECK_EXPECTATION_APPROXIMATE:
+      out_expectation->approximate.absolute_tolerance =
+          loom_check_expect_approximate_atol(op);
+      out_expectation->approximate.relative_tolerance =
+          loom_check_expect_approximate_rtol(op);
+      out_expectation->approximate.nan_policy =
+          loom_check_expect_approximate_nan(op);
+      break;
+    case LOOM_CHECK_EXPECTATION_CLOSE_SIGNED:
+    case LOOM_CHECK_EXPECTATION_CLOSE_UNSIGNED: {
+      const int64_t maximum_distance =
+          out_expectation->kind == LOOM_CHECK_EXPECTATION_CLOSE_SIGNED
+              ? loom_check_expect_close_signed_max_distance(op)
+              : loom_check_expect_close_unsigned_max_distance(op);
+      if (maximum_distance < 0) {
+        return false;
+      }
+      out_expectation->integer_close.maximum_distance =
+          (uint64_t)maximum_distance;
+      break;
+    }
+    case LOOM_CHECK_EXPECTATION_SHAPE: {
+      out_expectation->actual_value_id = loom_check_expect_shape_value(op);
+      const loom_value_slice_t dimensions = loom_check_expect_shape_dims(op);
+      const loom_attribute_t static_dimensions =
+          loom_check_expect_shape_static_dims(op);
+      out_expectation->shape.dimension_value_ids = dimensions.values;
+      out_expectation->shape.dimension_value_count = dimensions.count;
+      out_expectation->shape.static_dimensions = static_dimensions.i64_array;
+      out_expectation->shape.static_dimension_count = static_dimensions.count;
+      break;
+    }
+    case LOOM_CHECK_EXPECTATION_EVENT:
+      out_expectation->actual_value_id = LOOM_VALUE_ID_INVALID;
+      out_expectation->event.provider_id = loom_check_expect_event_provider(op);
+      out_expectation->event.provider = loom_testbench_string_from_id(
+          module, out_expectation->event.provider_id);
+      out_expectation->event.attrs = loom_check_expect_event_attrs(op);
+      break;
+    default:
+      return false;
+  }
+
+  if (out_expectation->kind != LOOM_CHECK_EXPECTATION_EVENT &&
       out_expectation->actual_value_id >= module->values.count) {
     return false;
   }
   out_expectation->type =
-      out_expectation->kind == LOOM_TESTBENCH_EXPECTATION_EVENT
+      out_expectation->kind == LOOM_CHECK_EXPECTATION_EVENT
           ? (loom_type_t){0}
           : loom_testbench_value_type(module, out_expectation->actual_value_id);
 
   switch (out_expectation->kind) {
-    case LOOM_TESTBENCH_EXPECTATION_EQUAL:
-    case LOOM_TESTBENCH_EXPECTATION_BITWISE:
+    case LOOM_CHECK_EXPECTATION_EQUAL:
+    case LOOM_CHECK_EXPECTATION_BITWISE:
       return out_expectation->expected_value_id < module->values.count;
-    case LOOM_TESTBENCH_EXPECTATION_APPROXIMATE: {
+    case LOOM_CHECK_EXPECTATION_APPROXIMATE: {
       if (out_expectation->expected_value_id >= module->values.count) {
         return false;
       }
@@ -282,13 +270,13 @@ bool loom_testbench_plan_expectation(
           (uint8_t)expected_numeric_type->kind;
       return true;
     }
-    case LOOM_TESTBENCH_EXPECTATION_CLOSE_SIGNED:
-    case LOOM_TESTBENCH_EXPECTATION_CLOSE_UNSIGNED: {
+    case LOOM_CHECK_EXPECTATION_CLOSE_SIGNED:
+    case LOOM_CHECK_EXPECTATION_CLOSE_UNSIGNED: {
       if (out_expectation->expected_value_id >= module->values.count) {
         return false;
       }
       const bool is_signed =
-          out_expectation->kind == LOOM_TESTBENCH_EXPECTATION_CLOSE_SIGNED;
+          out_expectation->kind == LOOM_CHECK_EXPECTATION_CLOSE_SIGNED;
       const loom_type_t expected_type =
           loom_testbench_value_type(module, out_expectation->expected_value_id);
       const loom_scalar_type_t actual_element_type =
@@ -314,7 +302,7 @@ bool loom_testbench_plan_expectation(
           (uint8_t)expected_numeric_type->kind;
       return true;
     }
-    case LOOM_TESTBENCH_EXPECTATION_SHAPE: {
+    case LOOM_CHECK_EXPECTATION_SHAPE: {
       if (out_expectation->shape.static_dimension_count >
           LOOM_TESTBENCH_MAX_SHAPE_RANK) {
         return false;
@@ -332,7 +320,7 @@ bool loom_testbench_plan_expectation(
                  module, out_expectation->shape.dimension_value_ids,
                  out_expectation->shape.dimension_value_count);
     }
-    case LOOM_TESTBENCH_EXPECTATION_EVENT:
+    case LOOM_CHECK_EXPECTATION_EVENT:
       return out_expectation->event.provider_id < module->strings.count &&
              !iree_string_view_is_empty(out_expectation->event.provider);
     default:

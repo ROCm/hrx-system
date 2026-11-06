@@ -41,7 +41,7 @@ loom_testbench_sample_observations_empty(void) {
 
 // Returns the stable lowercase name for |kind|.
 const char* loom_testbench_expectation_kind_name(
-    loom_testbench_expectation_kind_t kind);
+    loom_check_expectation_kind_t kind);
 
 typedef struct loom_testbench_expectation_failure_t {
   // Source-order expectation ordinal.
@@ -49,7 +49,7 @@ typedef struct loom_testbench_expectation_failure_t {
   // Static expectation plan that failed.
   const loom_testbench_expectation_plan_t* expectation;
   // Kind copied from |expectation| for report consumers.
-  loom_testbench_expectation_kind_t kind;
+  loom_check_expectation_kind_t kind;
   // Stable EXPECT-domain diagnostic identity for this mismatch kind.
   loom_error_ref_t diagnostic_ref;
   // Actual value ID compared by the expectation.

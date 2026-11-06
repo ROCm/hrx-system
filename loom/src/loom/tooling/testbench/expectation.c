@@ -15,46 +15,46 @@
 #include "loom/util/json.h"
 
 const char* loom_testbench_expectation_kind_name(
-    loom_testbench_expectation_kind_t kind) {
+    loom_check_expectation_kind_t kind) {
   switch (kind) {
-    case LOOM_TESTBENCH_EXPECTATION_NONE:
+    case LOOM_CHECK_EXPECTATION_NONE:
       return "none";
-    case LOOM_TESTBENCH_EXPECTATION_EQUAL:
+    case LOOM_CHECK_EXPECTATION_EQUAL:
       return "equal";
-    case LOOM_TESTBENCH_EXPECTATION_BITWISE:
+    case LOOM_CHECK_EXPECTATION_BITWISE:
       return "bitwise";
-    case LOOM_TESTBENCH_EXPECTATION_APPROXIMATE:
+    case LOOM_CHECK_EXPECTATION_APPROXIMATE:
       return "approximate";
-    case LOOM_TESTBENCH_EXPECTATION_CLOSE_SIGNED:
+    case LOOM_CHECK_EXPECTATION_CLOSE_SIGNED:
       return "close.signed";
-    case LOOM_TESTBENCH_EXPECTATION_CLOSE_UNSIGNED:
+    case LOOM_CHECK_EXPECTATION_CLOSE_UNSIGNED:
       return "close.unsigned";
-    case LOOM_TESTBENCH_EXPECTATION_SHAPE:
+    case LOOM_CHECK_EXPECTATION_SHAPE:
       return "shape";
-    case LOOM_TESTBENCH_EXPECTATION_EVENT:
+    case LOOM_CHECK_EXPECTATION_EVENT:
       return "event";
   }
   return "unknown";
 }
 
 static loom_error_ref_t loom_testbench_expectation_diagnostic_ref(
-    loom_testbench_expectation_kind_t kind) {
+    loom_check_expectation_kind_t kind) {
   switch (kind) {
-    case LOOM_TESTBENCH_EXPECTATION_EQUAL:
+    case LOOM_CHECK_EXPECTATION_EQUAL:
       return LOOM_ERROR_REF(LOOM_ERROR_DOMAIN_EXPECT, 1);
-    case LOOM_TESTBENCH_EXPECTATION_BITWISE:
+    case LOOM_CHECK_EXPECTATION_BITWISE:
       return LOOM_ERROR_REF(LOOM_ERROR_DOMAIN_EXPECT, 2);
-    case LOOM_TESTBENCH_EXPECTATION_APPROXIMATE:
+    case LOOM_CHECK_EXPECTATION_APPROXIMATE:
       return LOOM_ERROR_REF(LOOM_ERROR_DOMAIN_EXPECT, 6);
-    case LOOM_TESTBENCH_EXPECTATION_SHAPE:
+    case LOOM_CHECK_EXPECTATION_SHAPE:
       return LOOM_ERROR_REF(LOOM_ERROR_DOMAIN_EXPECT, 4);
-    case LOOM_TESTBENCH_EXPECTATION_EVENT:
+    case LOOM_CHECK_EXPECTATION_EVENT:
       return LOOM_ERROR_REF(LOOM_ERROR_DOMAIN_EXPECT, 5);
-    case LOOM_TESTBENCH_EXPECTATION_CLOSE_SIGNED:
+    case LOOM_CHECK_EXPECTATION_CLOSE_SIGNED:
       return LOOM_ERROR_REF(LOOM_ERROR_DOMAIN_EXPECT, 7);
-    case LOOM_TESTBENCH_EXPECTATION_CLOSE_UNSIGNED:
+    case LOOM_CHECK_EXPECTATION_CLOSE_UNSIGNED:
       return LOOM_ERROR_REF(LOOM_ERROR_DOMAIN_EXPECT, 8);
-    case LOOM_TESTBENCH_EXPECTATION_NONE:
+    case LOOM_CHECK_EXPECTATION_NONE:
       return LOOM_ERROR_REF_NONE;
   }
   return LOOM_ERROR_REF_NONE;
@@ -841,7 +841,7 @@ static iree_status_t loom_testbench_compare_integer_close(
           (loom_testbench_numeric_kind_t)close_plan->expected_numeric_kind);
   IREE_ASSERT(actual_numeric_type && expected_numeric_type);
   const bool is_signed =
-      expectation->kind == LOOM_TESTBENCH_EXPECTATION_CLOSE_SIGNED;
+      expectation->kind == LOOM_CHECK_EXPECTATION_CLOSE_SIGNED;
   if (loom_testbench_value_is_scalar(actual) &&
       loom_testbench_value_is_scalar(expected)) {
     return is_signed
@@ -1824,7 +1824,7 @@ static iree_status_t loom_testbench_evaluate_single_expectation(
     const loom_testbench_value_table_t* expected_table,
     const loom_testbench_sample_observations_t* observations,
     iree_string_builder_t* detail_builder, bool* out_matched) {
-  if (expectation->kind == LOOM_TESTBENCH_EXPECTATION_EVENT) {
+  if (expectation->kind == LOOM_CHECK_EXPECTATION_EVENT) {
     return loom_testbench_evaluate_event_expectation(
         expectation, actual_table->module, observations, detail_builder,
         out_matched);
@@ -1836,23 +1836,23 @@ static iree_status_t loom_testbench_evaluate_single_expectation(
       expectation, actual_table, expected_table, &actual, &expected));
 
   switch (expectation->kind) {
-    case LOOM_TESTBENCH_EXPECTATION_EQUAL:
+    case LOOM_CHECK_EXPECTATION_EQUAL:
       return loom_testbench_compare_equal(expectation, actual, expected,
                                           detail_builder, out_matched);
-    case LOOM_TESTBENCH_EXPECTATION_BITWISE:
+    case LOOM_CHECK_EXPECTATION_BITWISE:
       return loom_testbench_compare_bitwise(actual, expected, detail_builder,
                                             out_matched);
-    case LOOM_TESTBENCH_EXPECTATION_APPROXIMATE:
+    case LOOM_CHECK_EXPECTATION_APPROXIMATE:
       return loom_testbench_compare_approximate(expectation, actual, expected,
                                                 detail_builder, out_matched);
-    case LOOM_TESTBENCH_EXPECTATION_CLOSE_SIGNED:
-    case LOOM_TESTBENCH_EXPECTATION_CLOSE_UNSIGNED:
+    case LOOM_CHECK_EXPECTATION_CLOSE_SIGNED:
+    case LOOM_CHECK_EXPECTATION_CLOSE_UNSIGNED:
       return loom_testbench_compare_integer_close(expectation, actual, expected,
                                                   detail_builder, out_matched);
-    case LOOM_TESTBENCH_EXPECTATION_SHAPE:
+    case LOOM_CHECK_EXPECTATION_SHAPE:
       return loom_testbench_compare_shape(expectation, actual_table, actual,
                                           detail_builder, out_matched);
-    case LOOM_TESTBENCH_EXPECTATION_EVENT:
+    case LOOM_CHECK_EXPECTATION_EVENT:
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "event expectation should not reach value "
                               "comparison path");
