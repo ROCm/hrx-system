@@ -395,9 +395,16 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
     *root = loom_aie2p_array_create_route_node(builder, source, source_port,
                                                source_channel);
   }
+  // Memory tiles have only north/south stream links. Reach the receiver's
+  // compute row before branching horizontally across its multicast cohort.
+  const bool vertical_first =
+      loom_xdna_array_tile_facts(builder->family, source)->kind ==
+          LOOM_XDNA_TILE_KIND_MEMORY &&
+      loom_xdna_array_tile_facts(builder->family, destination)->kind ==
+          LOOM_XDNA_TILE_KIND_COMPUTE;
   return loom_aie2p_array_plan_route(builder, channel_index, *root, destination,
                                      destination_port, destination_channel,
-                                     false, packet);
+                                     vertical_first, packet);
 }
 
 bool loom_aie2p_array_route_workers(

@@ -130,8 +130,7 @@ static iree_status_t loom_aie2p_native_select_channels(
           context, source->binding,
           IREE_SV("specialized byte-addressable channel slot geometry"));
     }
-    if (source->capacity > (uint64_t)owner->facts->lock_value_maximum ||
-        owner->next_lock + 2 > owner->facts->lock_count) {
+    if (owner->next_lock + 2 > owner->facts->lock_count) {
       return loom_aie2p_native_reject(
           context, source->binding,
           IREE_SV("a hardware semaphore pair with enough slot credits"));
@@ -803,14 +802,20 @@ static iree_status_t loom_aie2p_native_select(
                  realization->invocations.workers[i].invocation->ordinal != 0)};
       }
     }
-    for (iree_host_size_t j = 0; j < source->channels.action_count; ++j) {
-      const loom_channel_plan_action_t* action = &source->channels.actions[j];
-      if (source->completion.actions[j].credits >
-          (uint32_t)tile->facts->lock_value_maximum) {
-        return loom_aie2p_native_reject(
-            context, action->op,
-            IREE_SV("a completed FIFO prefix within semaphore credit range"));
-      }
+  }
+  // Retained batches use replay-lifetime credits rather than one per storage
+  // slot. All distribution facts are available before credit admission.
+  for (iree_host_size_t i = 0; i < realization->invocations.channel_count;
+       ++i) {
+    const loom_aie2p_native_channel_t* channel = &context->channels[i];
+    const loom_aie2p_native_tile_t* owner =
+        context->pool_tiles[channel->pool_index];
+    if (!channel->replay.record_count &&
+        channel->source->capacity >
+            (uint64_t)owner->facts->lock_value_maximum) {
+      return loom_aie2p_native_reject(
+          context, channel->source->binding,
+          IREE_SV("a hardware semaphore pair with enough slot credits"));
     }
   }
   // The invocation command stream is one sequential engine. Selecting at most
@@ -829,6 +834,20 @@ static iree_status_t loom_aie2p_native_select(
     if (source->transport.cohort_count) {
       worker->execution = LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION;
       continue;
+    }
+    for (iree_host_size_t j = 0; j < source->channels.action_count; ++j) {
+      const loom_channel_plan_action_t* action = &source->channels.actions[j];
+      const loom_aie2p_native_channel_t* channel =
+          loom_aie2p_native_channel(context, realization, action->channel);
+      const loom_aie2p_native_tile_t* owner =
+          context->pool_tiles[channel->pool_index];
+      if (!channel->replay.record_count &&
+          source->completion.actions[j].credits >
+              (uint32_t)owner->facts->lock_value_maximum) {
+        return loom_aie2p_native_reject(
+            context, action->op,
+            IREE_SV("a completed FIFO prefix within semaphore credit range"));
+      }
     }
     bool configure = false;
     bool repeat = false;
