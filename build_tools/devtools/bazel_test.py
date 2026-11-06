@@ -1417,6 +1417,12 @@ class BazelTest(unittest.TestCase):
                 campaign["targets"][0]["libfuzzer"]["coverage_points_added"], 3
             )
             self.assertLess(result_path.stat().st_size, 16 * 1024)
+            summary = bazel_dev.format_fuzz_campaign_summary(run_result)
+            self.assertIn("2 target(s) (2 passed)", summary)
+            self.assertIn("90 executions", summary)
+            self.assertIn("corpus +2 input(s)", summary)
+            self.assertIn("coverage +6 point(s)", summary)
+            self.assertIn("31 MiB max target RSS", summary)
 
     def test_bazel_fuzz_retains_only_a_bounded_failure_tail(self):
         with tempfile.TemporaryDirectory() as temporary:
