@@ -1,4 +1,26 @@
 // RUN: pass inline-callables,promote-private-fragments,canonicalize,cse,dce
+// Delegation constructs the same destination through the selected target
+// before executing each delegating body in the chain.
+struct State {
+  unsigned value;
+
+  State(unsigned seed, unsigned bias) : value(seed + bias) {}
+  State(unsigned seed) : State(seed, 2u) { value *= 3u; }
+  State() : State(4u) { value += 1u; }
+};
+
+unsigned delegated_value() {
+  State state;
+  return state.value;
+}
+
+// ----
+func.def public @delegated_value() -> (i32) {
+  %37 = scalar.constant 19 : i32
+  func.return %37 : i32
+}
+
+// ====
 // Constructor member initializers precede structured body mutations, and a
 // local with no address demand returns to ordinary SSA after inlining.
 struct Pair {

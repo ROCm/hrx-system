@@ -2184,12 +2184,17 @@ float coefficient(float scale, unsigned lane) {
 
 Constructors are private inline callables with a storage receiver rather than
 exported C ABI functions. Ordinary inlining and private-fragment promotion
-return statically addressed objects to SSA values. Delegating constructors,
-base subobjects, unions, and nontrivial destruction remain rejected because
-they require lifecycle semantics beyond one destination initialization. The
-receiver must also have a source-layout object representation: records that
-store pointers, references, or semantic Loom values remain SSA aggregates and
-cannot use this constructor form.
+return statically addressed objects to SSA values. A delegating constructor
+invokes the frontend-selected target on that same storage receiver, completes
+the target's initialization and body, and then executes its own body. Chained,
+parenthesized, and braced delegation retain converted and default arguments
+from the frontend's initialization plan.
+
+Base subobjects, unions, and nontrivial destruction remain rejected because
+they require lifecycle semantics beyond the admitted record representation.
+The receiver must also have a source-layout object representation: records
+that store pointers, references, or semantic Loom values remain SSA aggregates
+and cannot use this constructor form.
 
 Automatic record objects become private storage when their identity is required.
 Their field and array-element addresses share that storage, while unaddressed

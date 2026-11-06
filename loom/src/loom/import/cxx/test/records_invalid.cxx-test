@@ -18,16 +18,6 @@ struct Value : Base { unsigned member; };
 Value entry(Value value) { return value; }
 
 // ====
-// Delegation requires lifecycle state beyond one destination initialization.
-struct Value {
-  unsigned member;
-  // ERROR@+1: LOWERING/059 "record value constructors cannot initialize bases or delegate"
-  Value() : Value(1u) {}
-  Value(unsigned value) : member(value) {}
-};
-unsigned entry() { Value value; return value.member; }
-
-// ====
 // An aggregate with user-defined assignment is not a trivial value.
 struct Value { unsigned member; Value& operator=(const Value& rhs) { member=rhs.member+1; return *this; } };
 // ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate, closure, or user-provided construction and trivial copy and move operations"
