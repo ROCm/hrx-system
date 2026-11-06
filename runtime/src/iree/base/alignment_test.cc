@@ -10,6 +10,52 @@
 
 namespace {
 
+TEST(AlignmentTest, HostSizeDivision) {
+  EXPECT_EQ(iree_host_size_ceil_div(0, 1), 0u);
+  EXPECT_EQ(iree_host_size_ceil_div(1, 1), 1u);
+  EXPECT_EQ(iree_host_size_ceil_div(1, 2), 1u);
+  EXPECT_EQ(iree_host_size_ceil_div(2, 2), 1u);
+  EXPECT_EQ(iree_host_size_ceil_div(3, 2), 2u);
+  EXPECT_EQ(iree_host_size_ceil_div(IREE_HOST_SIZE_MAX, 1), IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(iree_host_size_ceil_div(IREE_HOST_SIZE_MAX, IREE_HOST_SIZE_MAX),
+            1u);
+  EXPECT_EQ(iree_host_size_ceil_div(IREE_HOST_SIZE_MAX, IREE_HOST_SIZE_MAX - 1),
+            2u);
+
+  EXPECT_EQ(iree_host_size_floor_div(0, 1), 0u);
+  EXPECT_EQ(iree_host_size_floor_div(1, 2), 0u);
+  EXPECT_EQ(iree_host_size_floor_div(3, 2), 1u);
+  EXPECT_EQ(iree_host_size_floor_div(IREE_HOST_SIZE_MAX, 1),
+            IREE_HOST_SIZE_MAX);
+  EXPECT_EQ(iree_host_size_floor_div(IREE_HOST_SIZE_MAX, IREE_HOST_SIZE_MAX),
+            1u);
+}
+
+TEST(AlignmentTest, DeviceSizeDivision) {
+  EXPECT_EQ(iree_device_size_ceil_div(0, 1), 0u);
+  EXPECT_EQ(iree_device_size_ceil_div(1, 1), 1u);
+  EXPECT_EQ(iree_device_size_ceil_div(1, 2), 1u);
+  EXPECT_EQ(iree_device_size_ceil_div(2, 2), 1u);
+  EXPECT_EQ(iree_device_size_ceil_div(3, 2), 2u);
+  EXPECT_EQ(iree_device_size_ceil_div(IREE_DEVICE_SIZE_MAX, 1),
+            IREE_DEVICE_SIZE_MAX);
+  EXPECT_EQ(
+      iree_device_size_ceil_div(IREE_DEVICE_SIZE_MAX, IREE_DEVICE_SIZE_MAX),
+      1u);
+  EXPECT_EQ(
+      iree_device_size_ceil_div(IREE_DEVICE_SIZE_MAX, IREE_DEVICE_SIZE_MAX - 1),
+      2u);
+
+  EXPECT_EQ(iree_device_size_floor_div(0, 1), 0u);
+  EXPECT_EQ(iree_device_size_floor_div(1, 2), 0u);
+  EXPECT_EQ(iree_device_size_floor_div(3, 2), 1u);
+  EXPECT_EQ(iree_device_size_floor_div(IREE_DEVICE_SIZE_MAX, 1),
+            IREE_DEVICE_SIZE_MAX);
+  EXPECT_EQ(
+      iree_device_size_floor_div(IREE_DEVICE_SIZE_MAX, IREE_DEVICE_SIZE_MAX),
+      1u);
+}
+
 TEST(AlignmentTest, GenericLittleEndianRoundTrip) {
   int8_t i8 = 0;
   uint8_t u8 = 0;
