@@ -13,7 +13,7 @@ layout through verified IR. They use the ordinary `// ====` container and
 | Numeric conversion and packed representations | `vector_conversion`, `vector_decode`, `packed_slices` |
 | Lane updates and memory projections | `vector_lane_updates`, `vector_memory`, `padded_vectors` |
 | Vector blocks, scalar tails, and independent strides | `vector_spans` |
-| Lookup, reductions, and seeded products | `vector_lookup`, `vector_math` |
+| Lookup, reductions, and seeded products | `vector_lookup`, `vector_math`, `shaped_intrinsics`, `shaped_composition` |
 
 For example, the effectful list-assignment case checks four element calls in
 source order, followed by the destination call and a store through the returned
