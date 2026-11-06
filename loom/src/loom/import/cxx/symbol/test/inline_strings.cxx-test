@@ -364,3 +364,131 @@ func.def public @character_arrays(%position: i32) -> (i32) {
   %64 = scalar.addi %57, %63 : i32
   func.return %64 : i32
 }
+
+// ====
+// A literal pointer returned by a helper carries its storage and origin to the
+// caller. Loads of ordinary, UTF-8, and UTF-16 code units use their own widths.
+#include <loomcxx/kernel.h>
+static const char* text() { return "a\0b"; }
+unsigned code_units(unsigned position) {
+  loom::assume(position < 3u);
+  return static_cast<unsigned char>(text()[position]) + u8"é"[position] +
+         u"\U0001F9F5"[position];
+}
+// ----
+func.def public @code_units(%position$0: i32) -> (i32) {
+  %position$2 = scalar.assume %position$0 [range(%position$0, 0, 2)] : i32
+  %3, %4 = func.call pure @text() : () -> (buffer, offset)
+  %5 = scalar.extui %position$2 : i32 to i64
+  %8 = index.cast %4 : offset to i64
+  %9 = scalar.addi %8, %5 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %12 = buffer.view %3[%11] : buffer -> view<1xi8>
+  %13 = view.load %12[0] : view<1xi8> -> i8
+  %14 = scalar.extui %13 : i8 to i32
+  %15 = buffer.constant align(1) utf8("é\u0000") : buffer
+  %16 = index.constant 0 : offset
+  %17 = buffer.view %15[%16] : buffer -> view<3xi8>
+  %19 = scalar.assume %5 [range(%5, 0, 2)] : i64
+  %20 = index.cast %19 : i64 to index
+  %21 = view.load %17[%20] : view<3xi8> -> i8
+  %22 = scalar.extui %21 : i8 to i32
+  %23 = scalar.addi %14, %22 : i32
+  %24 = buffer.constant align(2) bytes("3ed8f5dd0000") : buffer
+  %26 = buffer.view %24[%16] : buffer -> view<3xi16>
+  %30 = view.load %26[%20] : view<3xi16> -> i16
+  %31 = scalar.extui %30 : i16 to i32
+  %32 = scalar.addi %23, %31 : i32
+  func.return %32 : i32
+}
+
+func.def @text() -> (buffer, offset) {
+  %35 = buffer.constant align(1) utf8("a\u0000b\u0000") : buffer
+  %36 = index.constant 0 : offset
+  func.return %35, %36 : buffer, offset
+}
+
+// ====
+// Volatile wide initialization emits element observations, including both
+// surrogate code units and the explicit terminator and trailing zero.
+unsigned volatile_wide(unsigned position) {
+  volatile char16_t observed[4] = u"\U0001F9F5";
+  return observed[position & 3u];
+}
+// ----
+func.def public @volatile_wide(%position: i32) -> (i32) {
+  %2 = index.constant 8 : offset
+  %observed_storage = buffer.alloca<private> align(2) %2 : buffer
+  %observed_storage_byte_offset = index.constant 0 : offset
+  %observed_view = buffer.view %observed_storage[%observed_storage_byte_offset] : buffer -> view<4xi16>
+  %6 = scalar.constant -10178 : i16
+  %8 = buffer.view %observed_storage[%observed_storage_byte_offset] : buffer -> view<1xi16>
+  view.store<volatile> %6, %8[0] : i16, view<1xi16>
+  %9 = scalar.constant -8715 : i16
+  %33 = index.constant 2 : offset
+  %13 = buffer.view %observed_storage[%33] : buffer -> view<1xi16>
+  view.store<volatile> %9, %13[0] : i16, view<1xi16>
+  %14 = scalar.constant 0 : i16
+  %32 = index.constant 4 : offset
+  %18 = buffer.view %observed_storage[%32] : buffer -> view<1xi16>
+  view.store<volatile> %14, %18[0] : i16, view<1xi16>
+  %31 = index.constant 6 : offset
+  %23 = buffer.view %observed_storage[%31] : buffer -> view<1xi16>
+  view.store<volatile> %14, %23[0] : i16, view<1xi16>
+  %24 = scalar.constant 3 : i32
+  %25 = scalar.andi %position, %24 : i32
+  %26 = scalar.extui %25 : i32 to i64
+  %27 = scalar.assume %26 [range(%26, 0, 3)] : i64
+  %28 = index.cast %27 : i64 to index
+  %29 = view.load<volatile> %observed_view[%28] : view<4xi16> -> i16
+  %30 = scalar.extui %29 : i16 to i32
+  func.return %30 : i32
+}
+
+// ====
+// Literal references, whole-array pointers, empty literals, and a pointer
+// returned by a helper retain the selected byte and terminator observations.
+static const char* text() { return "a\0b"; }
+unsigned literal_aliases() {
+  const auto* escaped = text();
+  const auto& reference = "xyz";
+  auto* whole = &"xyz";
+  return escaped[2] + reference[1] + (*whole)[3] + ""[0];
+}
+// ----
+func.def public @literal_aliases() -> (i32) {
+  %escaped, %escaped_byte_offset = func.call pure @text() : () -> (buffer, offset)
+  %3 = buffer.constant align(1) utf8("xyz\u0000") : buffer
+  %4 = index.constant 0 : offset
+  %5 = buffer.view %3[%4] : buffer -> view<4xi8>
+  %52 = scalar.constant 2 : i64
+  %13 = index.cast %escaped_byte_offset : offset to i64
+  %14 = scalar.addi %13, %52 : i64
+  %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
+  %16 = index.cast %15 : i64 to offset
+  %17 = buffer.view %escaped[%16] : buffer -> view<1xi8>
+  %18 = view.load %17[0] : view<1xi8> -> i8
+  %19 = scalar.extsi %18 : i8 to i32
+  %51 = index.constant 1 : index
+  %24 = view.load %5[%51] : view<4xi8> -> i8
+  %25 = scalar.extsi %24 : i8 to i32
+  %26 = scalar.addi %19, %25 : i32
+  %50 = index.constant 3 : index
+  %31 = view.load %5[%50] : view<4xi8> -> i8
+  %32 = scalar.extsi %31 : i8 to i32
+  %33 = scalar.addi %26, %32 : i32
+  %34 = buffer.constant align(1) utf8("\u0000") : buffer
+  %36 = buffer.view %34[%4] : buffer -> view<1xi8>
+  %49 = index.constant 0 : index
+  %41 = view.load %36[%49] : view<1xi8> -> i8
+  %42 = scalar.extsi %41 : i8 to i32
+  %43 = scalar.addi %33, %42 : i32
+  func.return %43 : i32
+}
+
+func.def @text() -> (buffer, offset) {
+  %46 = buffer.constant align(1) utf8("a\u0000b\u0000") : buffer
+  %47 = index.constant 0 : offset
+  func.return %46, %47 : buffer, offset
+}

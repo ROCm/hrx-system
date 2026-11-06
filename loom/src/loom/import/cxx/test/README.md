@@ -55,6 +55,14 @@ iree-bazel-test --config=asan --config=loom-importer-cxx \
 Its fixtures cover logical expressions, condition declarations, loops,
 iteration exits, switches, and returns with exact, updateable IR expectations.
 
+[Callable and immutable symbols](../symbol/test/README.md) cover declarations,
+linkage, call signatures and effects, template selection, and named data:
+
+```sh
+iree-bazel-test --config=asan --config=loom-importer-cxx \
+  //loom/src/loom/import/cxx/symbol/test:all
+```
+
 [Numeric source semantics](../value/test/numeric/README.md) cover promotions,
 conversions, bit representations, updates, and scalar math:
 

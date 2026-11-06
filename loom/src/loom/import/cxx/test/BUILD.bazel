@@ -104,9 +104,6 @@ loom_check_test_suite(
         "buffer_alloca_invalid.cxx-test",
         "buffer_memory_space.cxx-test",
         "buffer_memory_space_invalid.cxx-test",
-        "c_abi.cxx-test",
-        "c_abi_invalid.cxx-test",
-        "callable_effects.cxx-test",
         "check.cxx-test",
         "check_approximate.cxx-test",
         "check_approximate_invalid.cxx-test",
@@ -128,20 +125,12 @@ loom_check_test_suite(
         "constexpr_contract.cxx-test",
         "constexpr_contract_invalid.cxx-test",
         "dependent_view_loops.cxx-test",
-        "enable_if.cxx-test",
         "encoding_schemas.cxx-test",
         "encoding_schemas_invalid.cxx-test",
-        "function_declarations.cxx-test",
-        "function_declarations_invalid.cxx-test",
-        "functions.cxx-test",
         "group_dot.cxx-test",
         "hip_vector_types.cxx-test",
-        "immutable_objects.cxx-test",
-        "immutable_objects_invalid.cxx-test",
-        "immutable_strings.cxx-test",
         "index_views.cxx-test",
         "inline_buffer_payloads.cxx-test",
-        "inline_strings.cxx-test",
         "intrinsics_invalid.cxx-test",
         "kernel_arguments.cxx-test",
         "kernel_arguments_invalid.cxx-test",
@@ -203,15 +192,12 @@ loom_check_test_suite(
         "subgroup_shuffles_invalid.cxx-test",
         "subgroups.cxx-test",
         "subgroups_invalid.cxx-test",
-        "symbols.cxx-test",
-        "symbols_invalid.cxx-test",
         "targets.cxx-test",
         "targets_invalid.cxx-test",
         "template_addresses.cxx-test",
         "template_addresses_invalid.cxx-test",
         "template_apply.cxx-test",
         "template_apply_invalid.cxx-test",
-        "template_calls.cxx-test",
         "template_conversions.cxx-test",
         "template_conversions_invalid.cxx-test",
         "template_definitions.cxx-test",
@@ -255,28 +241,6 @@ loom_check_test(
     },
     # CMake exercises the Python tool through its execution-suite smoke; this
     # exact golden requires Bazel's executable runfile for the emit provider.
-    tags = ["skip-bazel_to_cmake"],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_check_test(
-    name = "function_buffers_roundtrip_test",
-    src = "function_buffers_roundtrip.cxx-test",
-    data = ["//loom/py/loom/tools:loom-export-cxx"],
-    env = {
-        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
-    },
-    tags = ["skip-bazel_to_cmake"],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_check_test(
-    name = "function_ties_roundtrip_test",
-    src = "function_ties_roundtrip.cxx-test",
-    data = ["//loom/py/loom/tools:loom-export-cxx"],
-    env = {
-        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
-    },
     tags = ["skip-bazel_to_cmake"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )

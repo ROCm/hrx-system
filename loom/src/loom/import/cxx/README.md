@@ -680,6 +680,7 @@ The importer-owned integration suite is
 run through `//loom/src/loom/import/cxx/test:compiler_test` and focused
 [source-language](source/test/README.md),
 [control-flow](control/test/README.md),
+[symbol](symbol/test/README.md),
 [numeric](value/test/numeric/README.md), and
 [vector](value/test/vector/README.md) packages. Native API tests
 cover ownership, source providers, and failure propagation. The

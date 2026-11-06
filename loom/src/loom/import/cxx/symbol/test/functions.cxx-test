@@ -162,3 +162,66 @@ float entry(float value) { return value; }
 // RUN: verify
 // ERROR: LOWERING/059 "root has no concrete definition: absent"
 // A translation unit with no user declarations still has its own location.
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A retained helper reads through the incoming pointer origin and returns two
+// independent values. Both calls keep their result ordering at separate stores.
+struct Pair {
+  // Arithmetic result carried in the first call-result slot.
+  unsigned sum;
+  // Bitwise result carried independently in the second call-result slot.
+  unsigned mixed;
+};
+[[loom::noinline]]
+static Pair update(const unsigned* input, unsigned index, unsigned bias) {
+  const unsigned value = input[index];
+  return {value + bias, value ^ bias};
+}
+void retained_calls(const unsigned* input, unsigned* sums, unsigned* mixed,
+                    unsigned index) {
+  const Pair first = update(input, index, 7u);
+  const Pair second = update(input, index, 13u);
+  sums[index] = first.sum + second.sum;
+  mixed[index] = first.mixed + second.mixed;
+}
+// ----
+func.def public @retained_calls(%input: buffer, %input_byte_offset: offset, %sums: buffer, %sums_byte_offset: offset, %mixed: buffer, %mixed_byte_offset: offset, %index: i32) {
+  %7 = scalar.constant 7 : i32
+  %first_sum, %first_mixed = func.call readonly @update(%input, %input_byte_offset, %index, %7) : (buffer, offset, i32, i32) -> (i32, i32)
+  %10 = scalar.constant 13 : i32
+  %second_sum, %second_mixed = func.call readonly @update(%input, %input_byte_offset, %index, %10) : (buffer, offset, i32, i32) -> (i32, i32)
+  %13 = scalar.addi %first_sum, %second_sum : i32
+  %14 = scalar.extui %index : i32 to i64
+  %50 = scalar.constant 2 : i64
+  %51 = scalar.shli %14, %50 : i64
+  %17 = index.cast %sums_byte_offset : offset to i64
+  %18 = scalar.addi %17, %51 : i64
+  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+  %20 = index.cast %19 : i64 to offset
+  %21 = buffer.view %sums[%20] : buffer -> view<1xi32>
+  view.store %13, %21[0] : i32, view<1xi32>
+  %22 = scalar.addi %first_mixed, %second_mixed : i32
+  %26 = index.cast %mixed_byte_offset : offset to i64
+  %27 = scalar.addi %26, %51 : i64
+  %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
+  %29 = index.cast %28 : i64 to offset
+  %30 = buffer.view %mixed[%29] : buffer -> view<1xi32>
+  view.store %22, %30[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def noinline @update(%input: buffer, %input_byte_offset: offset, %index: i32, %bias: i32) -> (i32, i32) {
+  %37 = scalar.extui %index : i32 to i64
+  %52 = scalar.constant 2 : i64
+  %53 = scalar.shli %37, %52 : i64
+  %40 = index.cast %input_byte_offset : offset to i64
+  %41 = scalar.addi %40, %53 : i64
+  %42 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
+  %43 = index.cast %42 : i64 to offset
+  %44 = buffer.view %input[%43] : buffer -> view<1xi32>
+  %value = view.load %44[0] : view<1xi32> -> i32
+  %46 = scalar.addi %value, %bias : i32
+  %47 = scalar.xori %value, %bias : i32
+  func.return %46, %47 : i32, i32
+}
