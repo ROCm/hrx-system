@@ -129,14 +129,31 @@ Concrete `*_isa` calls in C and `isa<T>` calls in C++ are bounded across each
 maximal `if`/`else if` chain. Compound conditions count each predicate, so
 grouping a concrete allowlist into one branch does not hide a growing family.
 The `MaximumIsaPredicates` option defaults to three and diagnoses the fourth
-predicate. The check is registered but excluded from repository policy while
-the initial findings are converted.
+predicate. Repository analysis enables the check for every analyzed C and C++
+source.
 
 A binary or ternary distinction can remain direct when it expresses local
 control flow more clearly than another abstraction. A fourth case usually
 means that the code is answering a semantic question through concrete
 operation identity. The replacement follows the owner of that answer rather
-than translating the same list into a switch or hiding it in a helper.
+than hiding the same list in a helper.
+
+The replacement shape follows this decision ladder:
+
+1. An exact, finite policy consumed immediately by its owner uses one
+   exhaustive `switch` on the operation kind. Target legality and diagnostic
+   admission are ordinary examples. The switch stays at the policy boundary;
+   callers do not duplicate it.
+2. An extensible semantic role shared across dialects uses an existing trait
+   or interface. A missing shared role is an interface-design problem, not a
+   reason to keep extending the identity list.
+3. A planning or collection stage that has already selected behavior retains a
+   compact semantic kind with its plan or candidate. Later stages consume that
+   result without reclassifying the source operation.
+4. A finite family carrying per-kind data uses one owner-local classifier and
+   a compact immutable descriptor or action kind. Dense dialect-local indexing
+   is the ordinary representation; a sparse cross-dialect family uses a
+   measured bounded lookup.
 
 An existing interface or trait owns extensible cross-dialect semantics:
 
@@ -157,10 +174,8 @@ if (loom_memory_access_isa(access)) {
 }
 ```
 
-A planning or collection stage that has already selected behavior retains a
-small semantic kind with its plan or candidate. Later analysis, reporting, and
-emission consume that kind directly instead of reconstructing it from the
-source operation:
+A retained planning kind keeps later analysis, reporting, and emission from
+reconstructing the decision from the source operation:
 
 ```c
 switch ((target_plan_kind_t)plan.id) {
@@ -174,13 +189,10 @@ switch ((target_plan_kind_t)plan.id) {
 }
 ```
 
-A finite transform- or target-local family uses one owning operation-kind
-classifier and a compact immutable descriptor or action kind. Dense
-dialect-local indexing is the ordinary representation; a sparse cross-dialect
-family uses a measured bounded lookup. Static tables carry data, not callback
-programs, and do not allocate. One exhaustive switch can be the classifier
-when it is smaller and faster than a table, but downstream consumers still use
-the retained semantic result rather than copying the switch.
+Static tables carry data, not callback programs, and do not allocate. One
+exhaustive switch can classify a finite local family when it is smaller and
+faster than a table, but downstream consumers still use the retained semantic
+result rather than copying the switch.
 
 Independent rewrites rooted at concrete operations belong in
 `loom_rewrite_pattern_registry_t`, which composes providers once and dispatches
