@@ -16,6 +16,12 @@ _FUZZ_TAGS = [
     "manual",
 ]
 
+def _fuzzing_engine_linkopts():
+    return select({
+        "//build_tools/bazel:external_fuzzing_engine_enabled": [],
+        "//conditions:default": [_FUZZ_LINKOPT],
+    })
+
 def _append(values, appended_values):
     if values == None:
         values = []
@@ -53,7 +59,7 @@ def _iree_cc_fuzz_impl(
         local_defines = local_defines,
         includes = includes,
         system_includes = system_includes,
-        linkopts = _append(linkopts, [_FUZZ_LINKOPT]),
+        linkopts = _append(linkopts, _fuzzing_engine_linkopts()),
         linkstatic = linkstatic,
         args = args,
         tags = _append(tags, _FUZZ_TAGS),
@@ -65,8 +71,10 @@ iree_cc_fuzz = macro(
     doc = """Defines a libFuzzer C/C++ binary target.
 
     Fuzz targets are ordinary binaries whose `main` comes from libFuzzer via
-    `-fsanitize=fuzzer`. They are tagged `manual` so wildcard builds do not
-    require a libFuzzer-capable C/C++ toolchain; build them explicitly with an
+    `-fsanitize=fuzzer` by default. An enclosing fuzz service may select
+    `//build_tools/bazel:external_fuzzing_engine` and supply its engine through
+    the build link options. Targets are tagged `manual` so wildcard builds do
+    not require a fuzz-capable C/C++ toolchain; build them explicitly with an
     appropriate compiler configuration.
     """,
     implementation = _iree_cc_fuzz_impl,

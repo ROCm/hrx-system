@@ -129,6 +129,12 @@ bool_flag(
     build_setting_default = False,
 )
 
+# Lets an enclosing fuzz service supply the engine selected for the build.
+bool_flag(
+    name = "external_fuzzing_engine",
+    build_setting_default = False,
+)
+
 # Native interpreter symbols are independent of project code instrumentation.
 bool_flag(
     name = "python_runtime_debug",
@@ -155,6 +161,13 @@ config_setting(
     name = "sanitizer_disabled",
     flag_values = {
         ":sanitizer": "false",
+    },
+)
+
+config_setting(
+    name = "external_fuzzing_engine_enabled",
+    flag_values = {
+        ":external_fuzzing_engine": "true",
     },
 )
 
