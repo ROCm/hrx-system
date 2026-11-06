@@ -708,32 +708,39 @@ typedef struct loom_vector_literal_view_t {
 
 static loom_vector_literal_view_t loom_vector_literal_view(
     const loom_op_t* op, iree_host_size_t expected_count) {
-  if (loom_vector_constanti_isa(op)) {
-    const loom_attribute_t values = loom_vector_constanti_values(op);
-    if (values.count == expected_count) {
+  switch (op->kind) {
+    case LOOM_OP_VECTOR_CONSTANTI: {
+      const loom_attribute_t values = loom_vector_constanti_values(op);
+      if (values.count != expected_count) {
+        break;
+      }
       return (loom_vector_literal_view_t){
           .kind = LOOM_VECTOR_LITERAL_INTEGER_ARRAY,
           .values.integer_array = values.i64_array,
       };
     }
-  } else if (loom_vector_splati_isa(op)) {
-    return (loom_vector_literal_view_t){
-        .kind = LOOM_VECTOR_LITERAL_INTEGER_SPLAT,
-        .values.integer_splat = loom_vector_splati_value(op),
-    };
-  } else if (loom_vector_constantf_isa(op)) {
-    const loom_f64_array_t values = loom_vector_constantf_values(op);
-    if (values.count == expected_count) {
+    case LOOM_OP_VECTOR_SPLATI:
+      return (loom_vector_literal_view_t){
+          .kind = LOOM_VECTOR_LITERAL_INTEGER_SPLAT,
+          .values.integer_splat = loom_vector_splati_value(op),
+      };
+    case LOOM_OP_VECTOR_CONSTANTF: {
+      const loom_f64_array_t values = loom_vector_constantf_values(op);
+      if (values.count != expected_count) {
+        break;
+      }
       return (loom_vector_literal_view_t){
           .kind = LOOM_VECTOR_LITERAL_FLOATING_ARRAY,
           .values.floating_array = values.values,
       };
     }
-  } else if (loom_vector_splatf_isa(op)) {
-    return (loom_vector_literal_view_t){
-        .kind = LOOM_VECTOR_LITERAL_FLOATING_SPLAT,
-        .values.floating_splat = loom_vector_splatf_value(op),
-    };
+    case LOOM_OP_VECTOR_SPLATF:
+      return (loom_vector_literal_view_t){
+          .kind = LOOM_VECTOR_LITERAL_FLOATING_SPLAT,
+          .values.floating_splat = loom_vector_splatf_value(op),
+      };
+    default:
+      break;
   }
   return (loom_vector_literal_view_t){0};
 }
