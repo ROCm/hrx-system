@@ -162,6 +162,41 @@ MODULAR_BINARY_FACTS(loom_scalar_addi_facts, loom_value_facts_addi,
                      loom_value_facts_addi_modular)
 MODULAR_BINARY_FACTS(loom_scalar_subi_facts, loom_value_facts_subi,
                      loom_value_facts_subi_modular)
+
+static iree_status_t loom_scalar_extended_unsigned_arithmetic_facts(
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_facts_t* operand_facts, bool is_subtraction,
+    loom_value_facts_t* result_facts) {
+  const int32_t bit_count =
+      loom_scalar_type_bitwidth(loom_scalar_result_element_type(module, op));
+  if (is_subtraction) {
+    loom_value_facts_subui_extended(&operand_facts[0], &operand_facts[1],
+                                    bit_count, &result_facts[0],
+                                    &result_facts[1]);
+  } else {
+    loom_value_facts_addui_extended(&operand_facts[0], &operand_facts[1],
+                                    bit_count, &result_facts[0],
+                                    &result_facts[1]);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_scalar_addui_extended_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  return loom_scalar_extended_unsigned_arithmetic_facts(
+      module, op, operand_facts, /*is_subtraction=*/false, result_facts);
+}
+
+iree_status_t loom_scalar_subui_extended_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  return loom_scalar_extended_unsigned_arithmetic_facts(
+      module, op, operand_facts, /*is_subtraction=*/true, result_facts);
+}
+
 MODULAR_BINARY_FACTS(loom_scalar_muli_facts, loom_value_facts_muli,
                      loom_value_facts_muli_modular)
 BINARY_FACTS(loom_scalar_divsi_facts, loom_value_facts_divsi)

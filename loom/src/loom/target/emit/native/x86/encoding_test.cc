@@ -300,7 +300,7 @@ TEST(EncodingTest, EvexNdsMemoryBroadcastAndMaskModifiers) {
   operands.inputs[1] = 8;
   operands.inputs[2] = 9;
   operands.immediate = 64;
-  operands.secondary_immediate = 2;
+  operands.secondary = 2;
   operands.has_index = true;
   ExpectVectorEncoding(kBinaryLoad, kBinaryEncoding, operands,
                        {0x62, 0x82, 0x6f, 0x00, 0x72, 0x4c, 0x88, 0x04});
@@ -314,7 +314,7 @@ TEST(EncodingTest, EvexNdsMemoryBroadcastAndMaskModifiers) {
   operands.inputs[2] = 9;
   operands.inputs[3] = 19;
   operands.immediate = 64;
-  operands.secondary_immediate = 2;
+  operands.secondary = 2;
   operands.has_index = true;
   ExpectVectorEncoding(kMaskedUnaryLoad, kUnaryEncoding, operands,
                        {0x62, 0x82, 0x7e, 0x8a, 0x72, 0x4c, 0x88, 0x04});
@@ -370,7 +370,7 @@ TEST(EncodingTest, AvxNeConvertFamilyHasExactReferenceBytes) {
   operands.inputs[0] = 8;
   operands.inputs[1] = 9;
   operands.immediate = 0x1234;
-  operands.secondary_immediate = 2;
+  operands.secondary = 2;
   operands.has_index = true;
 
   ExpectVectorEncoding(0xc1c0, 0x0ab1, operands,
@@ -447,7 +447,7 @@ TEST(EncodingTest, ScalarFloatMemoryWidthsAndAddressForms) {
       .immediate = -4,
       .result = 10,
       .inputs = {3, 1},
-      .secondary_immediate = 3,
+      .secondary = 3,
       .has_index = true,
   };
   // LLVM MC reference: vmovss/vmovsd -4(%rbx,%rcx,8),%xmm10.
@@ -812,7 +812,7 @@ TEST(EncodingTest, DestructiveBinaryMemorySource) {
   operands.inputs[1] = 12;
   operands.inputs[2] = 10;
   operands.immediate = -128;
-  operands.secondary_immediate = 2;
+  operands.secondary = 2;
   operands.has_index = true;
   // ADD r9,[r12+r10*4-128] exercises all three REX roles and a disp8.
   ExpectEncoding(LOOM_X86_ENCODING_FORM_BINARY_R_MEMORY,
@@ -821,7 +821,7 @@ TEST(EncodingTest, DestructiveBinaryMemorySource) {
 
   operands.has_index = false;
   operands.immediate = 128;
-  operands.secondary_immediate = 0;
+  operands.secondary = 0;
   // IMUL r9d,[r12+128] covers a two-byte opcode and disp32.
   ExpectEncoding(LOOM_X86_ENCODING_FORM_BINARY_R_MEMORY,
                  LOOM_X86_ENCODING_OPCODE_0F | 0xaf, operands,
@@ -849,7 +849,7 @@ TEST(EncodingTest, IndexedByteStoreAndNoBaseAddress) {
   operands.inputs[0] = 7;
   operands.inputs[1] = 13;
   operands.inputs[2] = 12;
-  operands.secondary_immediate = 2;
+  operands.secondary = 2;
   // MOV byte ptr [r13+r12*4],dil exercises all three REX roles.
   ExpectEncoding(LOOM_X86_ENCODING_FORM_STORE,
                  0x88 | LOOM_X86_ENCODING_BYTE | LOOM_X86_ENCODING_INDEXED,
@@ -878,6 +878,40 @@ TEST(EncodingTest, PredicateSequenceAndImplicitWrites) {
   ExpectEncoding(LOOM_X86_ENCODING_FORM_MULTIPLY_HIGH,
                  0xf7 | (4u << 9) | LOOM_X86_ENCODING_REX_W, operands,
                  {0x49, 0xf7, 0xe1}, (1u << 0) | (1u << 2));
+}
+
+TEST(EncodingTest, ExtendedUnsignedArithmeticWidths) {
+  loom_x86_encoding_operands_t operands = {
+      .result = 8,
+      .secondary = 10,
+  };
+  operands.inputs[0] = 8;
+  operands.inputs[1] = 9;
+  constexpr uint16_t kWrites = (1u << 8) | (1u << 10);
+
+  ExpectEncoding(
+      LOOM_X86_ENCODING_FORM_BINARY_CARRY_OUT, 0x00 | LOOM_X86_ENCODING_BYTE,
+      operands,
+      {0x45, 0x00, 0xc8, 0x41, 0x0f, 0x92, 0xc2, 0x45, 0x0f, 0xb6, 0xd2},
+      kWrites, 3);
+  ExpectEncoding(
+      LOOM_X86_ENCODING_FORM_BINARY_CARRY_OUT,
+      0x01 | LOOM_X86_ENCODING_OPERAND_16, operands,
+      {0x66, 0x45, 0x01, 0xc8, 0x41, 0x0f, 0x92, 0xc2, 0x45, 0x0f, 0xb6, 0xd2},
+      kWrites, 3);
+  ExpectEncoding(
+      LOOM_X86_ENCODING_FORM_BINARY_CARRY_OUT, 0x01, operands,
+      {0x45, 0x01, 0xc8, 0x41, 0x0f, 0x92, 0xc2, 0x45, 0x0f, 0xb6, 0xd2},
+      kWrites, 3);
+  ExpectEncoding(
+      LOOM_X86_ENCODING_FORM_BINARY_CARRY_OUT, 0x01 | LOOM_X86_ENCODING_REX_W,
+      operands,
+      {0x4d, 0x01, 0xc8, 0x41, 0x0f, 0x92, 0xc2, 0x45, 0x0f, 0xb6, 0xd2},
+      kWrites, 3);
+  ExpectEncoding(
+      LOOM_X86_ENCODING_FORM_BINARY_CARRY_OUT, 0x29, operands,
+      {0x45, 0x29, 0xc8, 0x41, 0x0f, 0x92, 0xc2, 0x45, 0x0f, 0xb6, 0xd2},
+      kWrites, 3);
 }
 
 TEST(EncodingTest, CompareSelectPredicateFamily) {
@@ -937,7 +971,7 @@ TEST(EncodingTest, CompareBranchPredicateFamily) {
   operands.inputs[0] = 8;
   operands.inputs[1] = 9;
   for (uint8_t condition_code : kConditionCodes) {
-    operands.secondary_immediate = condition_code;
+    operands.secondary = condition_code;
     loom_x86_encoded_instruction_t instruction;
     loom_x86_encode_instruction(LOOM_X86_ENCODING_FORM_COMPARE_BRANCH, 0x39,
                                 &operands, &instruction);
@@ -956,7 +990,7 @@ TEST(EncodingTest, CompareBranchPredicateFamily) {
 
 TEST(EncodingTest, CompareBranchWidthsAndImmediate) {
   loom_x86_encoding_operands_t operands = {
-      .secondary_immediate = 0x2,  // ult
+      .secondary = 0x2,  // ult
   };
   operands.inputs[0] = 8;
   operands.inputs[1] = 9;
@@ -972,7 +1006,7 @@ TEST(EncodingTest, CompareBranchWidthsAndImmediate) {
                  0x39 | LOOM_X86_ENCODING_REX_W, operands,
                  {0x4d, 0x39, 0xc8, 0x0f, 0x82, 0, 0, 0, 0}, 0, 2);
 
-  operands.secondary_immediate = 0x5;  // ne
+  operands.secondary = 0x5;  // ne
   operands.immediate = -17;
   ExpectEncoding(LOOM_X86_ENCODING_FORM_COMPARE_IMMEDIATE_BRANCH,
                  0x80 | (7u << 9) | LOOM_X86_ENCODING_BYTE, operands,
@@ -1015,7 +1049,7 @@ TEST(EncodingTest, CompareSelectWidthsAndImmediate) {
   operands.immediate = 17;
   operands.inputs[1] = 11;
   operands.inputs[2] = 10;
-  operands.secondary_immediate = 0x6;  // ule
+  operands.secondary = 0x6;  // ule
   ExpectEncoding(LOOM_X86_ENCODING_FORM_COMPARE_IMMEDIATE_SELECT,
                  0x81 | (7u << 9) | LOOM_X86_ENCODING_REX_W, operands,
                  {0x49, 0x83, 0xf8, 0x11, 0x45, 0x0f, 0x46, 0xd3}, 1u << 10, 2);
@@ -1050,7 +1084,7 @@ TEST(EncodingTest, NarrowComparePredicates) {
 
   operands.inputs[0] = 4;
   operands.immediate = -128;
-  operands.secondary_immediate = 0xc;  // slt
+  operands.secondary = 0xc;  // slt
   ExpectEncoding(
       LOOM_X86_ENCODING_FORM_COMPARE_IMMEDIATE_PREDICATE,
       0x80 | (7u << 9) | LOOM_X86_ENCODING_BYTE, operands,
@@ -1059,7 +1093,7 @@ TEST(EncodingTest, NarrowComparePredicates) {
 
   operands.inputs[0] = 8;
   operands.immediate = -129;
-  operands.secondary_immediate = 0x6;  // ule
+  operands.secondary = 0x6;  // ule
   ExpectEncoding(LOOM_X86_ENCODING_FORM_COMPARE_IMMEDIATE_PREDICATE,
                  0x81 | (7u << 9) | LOOM_X86_ENCODING_OPERAND_16, operands,
                  {0x66, 0x41, 0x81, 0xf8, 0x7f, 0xff, 0x40, 0x0f, 0x96, 0xc7,
@@ -1085,7 +1119,7 @@ TEST(EncodingTest, NarrowCompareSelectWidths) {
   operands.inputs[1] = 11;
   operands.inputs[2] = 10;
   operands.immediate = -129;
-  operands.secondary_immediate = 0xc;  // slt
+  operands.secondary = 0xc;  // slt
   ExpectEncoding(LOOM_X86_ENCODING_FORM_COMPARE_IMMEDIATE_SELECT,
                  0x81 | (7u << 9) | LOOM_X86_ENCODING_OPERAND_16 |
                      LOOM_X86_ENCODING_RESULT_REX_W,

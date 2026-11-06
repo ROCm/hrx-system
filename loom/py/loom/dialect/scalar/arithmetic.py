@@ -27,6 +27,7 @@ from loom.dsl import (
     ATTR_TYPE_FLAGS,
     DISTRIBUTION_TRANSFER,
     FLOAT,
+    I1,
     IDEMPOTENT,
     INTEGER,
     INVOLUTION,
@@ -84,6 +85,38 @@ scalar_subi = binary_op(
     effective_traits="loom_scalar_integer_arithmetic_effective_traits",
     canonicalize="loom_scalar_subi_canonicalize",
     examples=["%result = scalar.subi %lhs, %rhs : i32"],
+    eager_execution_cost=1,
+)
+
+scalar_addui_extended = Op(
+    "scalar.addui_extended",
+    group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Unsigned integer addition returning the wrapped sum and an i1 carry that is set exactly when the mathematical sum exceeds the result width."),
+    operands=[Operand("lhs", INTEGER), Operand("rhs", INTEGER)],
+    results=[Result("sum", INTEGER), Result("carry", I1)],
+    constraints=[SameType("lhs", "rhs", "sum")],
+    facts="loom_scalar_addui_extended_facts",
+    facts_from_operands=True,
+    traits=[PURE, DISTRIBUTION_TRANSFER, SAFE_TO_SPECULATE],
+    format=[Ref("lhs"), COMMA, Ref("rhs"), COLON, TypeOf("sum")],
+    examples=["%sum, %carry = scalar.addui_extended %lhs, %rhs : i32"],
+    eager_execution_cost=1,
+)
+
+scalar_subui_extended = Op(
+    "scalar.subui_extended",
+    group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Unsigned integer subtraction returning the wrapped difference and an i1 borrow that is set exactly when lhs is less than rhs."),
+    operands=[Operand("lhs", INTEGER), Operand("rhs", INTEGER)],
+    results=[Result("difference", INTEGER), Result("borrow", I1)],
+    constraints=[SameType("lhs", "rhs", "difference")],
+    facts="loom_scalar_subui_extended_facts",
+    facts_from_operands=True,
+    traits=[PURE, DISTRIBUTION_TRANSFER, SAFE_TO_SPECULATE],
+    format=[Ref("lhs"), COMMA, Ref("rhs"), COLON, TypeOf("difference")],
+    examples=["%difference, %borrow = scalar.subui_extended %lhs, %rhs : i32"],
     eager_execution_cost=1,
 )
 
@@ -584,6 +617,8 @@ scalar_copysignf = binary_op(
 ALL_ARITHMETIC_OPS: tuple[Op, ...] = (
     scalar_addi,
     scalar_subi,
+    scalar_addui_extended,
+    scalar_subui_extended,
     scalar_muli,
     scalar_divsi,
     scalar_divui,

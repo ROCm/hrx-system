@@ -174,6 +174,57 @@ static iree_status_t loom_vector_legalize_descriptor(
   return iree_ok_status();
 }
 
+// Native extended-arithmetic contracts retain first claim. The reference form
+// remains vector-shaped so targets can select their ordinary add/sub and
+// comparison instructions without scalarizing profitable packet carriers.
+static iree_status_t loom_vector_legalize_extended_unsigned_arithmetic(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  const bool is_subtraction = loom_vector_subui_extended_isa(op);
+  const loom_value_id_t lhs = loom_op_const_operands(op)[0];
+  const loom_value_id_t rhs = loom_op_const_operands(op)[1];
+  const loom_type_t value_type =
+      loom_module_value_type(context->module, loom_op_const_results(op)[0]);
+  const loom_type_t predicate_type =
+      loom_module_value_type(context->module, loom_op_const_results(op)[1]);
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+
+  loom_op_t* arithmetic = NULL;
+  loom_value_id_t value = LOOM_VALUE_ID_INVALID;
+  if (is_subtraction) {
+    IREE_RETURN_IF_ERROR(loom_vector_subi_build(builder, /*instance_flags=*/0,
+                                                lhs, rhs, value_type,
+                                                op->location, &arithmetic));
+    value = loom_vector_subi_result(arithmetic);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_vector_addi_build(builder, /*instance_flags=*/0,
+                                                lhs, rhs, value_type,
+                                                op->location, &arithmetic));
+    value = loom_vector_addi_result(arithmetic);
+  }
+
+  loom_op_t* comparison = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
+      builder, LOOM_VECTOR_CMPI_PREDICATE_ULT, is_subtraction ? lhs : value,
+      is_subtraction ? rhs : lhs, value_type, predicate_type, op->location,
+      &comparison));
+  loom_value_id_t replacements[2] = {
+      value,
+      loom_vector_cmpi_result(comparison),
+  };
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, replacements, IREE_ARRAYSIZE(replacements), checkpoint));
+  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+      rewriter, op, replacements, IREE_ARRAYSIZE(replacements)));
+  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vector_legalize_bitstream(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -1728,6 +1779,16 @@ static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
         .root_kind = LOOM_OP_VECTOR_SUBI,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .legalize = loom_vector_legalize_descriptor,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_ADDUI_EXTENDED,
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_UNHANDLED,
+        .legalize = loom_vector_legalize_extended_unsigned_arithmetic,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_SUBUI_EXTENDED,
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_UNHANDLED,
+        .legalize = loom_vector_legalize_extended_unsigned_arithmetic,
     },
     // Integral rounding keeps native packets when available and otherwise
     // applies the same operation to each scalar lane.

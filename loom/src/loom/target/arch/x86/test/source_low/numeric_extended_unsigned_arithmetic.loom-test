@@ -1,0 +1,36 @@
+// RUN: emit source-low output=low
+
+x86.target<scalar> @target
+
+func.def target(@target) @extended_unsigned_arithmetic(%lhs8: i8, %rhs8: i8, %lhs16: i16, %rhs16: i16, %lhs32: i32, %rhs32: i32, %lhs64: i64, %rhs64: i64) -> (i8, i1, i8, i1, i16, i1, i16, i1, i32, i1, i32, i1, i64, i1, i64, i1) {
+  %sum8, %carry8 = scalar.addui_extended %lhs8, %rhs8 : i8
+  %difference8, %borrow8 = scalar.subui_extended %lhs8, %rhs8 : i8
+  %sum16, %carry16 = scalar.addui_extended %lhs16, %rhs16 : i16
+  %difference16, %borrow16 = scalar.subui_extended %lhs16, %rhs16 : i16
+  %sum32, %carry32 = scalar.addui_extended %lhs32, %rhs32 : i32
+  %difference32, %borrow32 = scalar.subui_extended %lhs32, %rhs32 : i32
+  %sum64, %carry64 = scalar.addui_extended %lhs64, %rhs64 : i64
+  %difference64, %borrow64 = scalar.subui_extended %lhs64, %rhs64 : i64
+  func.return %sum8, %carry8, %difference8, %borrow8, %sum16, %carry16, %difference16, %borrow16, %sum32, %carry32, %difference32, %borrow32, %sum64, %carry64, %difference64, %borrow64 : i8, i1, i8, i1, i16, i1, i16, i1, i32, i1, i32, i1, i64, i1, i64, i1
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({signature = (i8, i8, i16, i16, i32, i32, i64, i64) -> (i8, i1, i8, i1, i16, i1, i16, i1, i32, i1, i32, i1, i64, i1, i64, i1)}) @extended_unsigned_arithmetic(%lhs8: reg<x86.gpr32>, %rhs8: reg<x86.gpr32>, %lhs16: reg<x86.gpr32>, %rhs16: reg<x86.gpr32>, %lhs32: reg<x86.gpr32>, %rhs32: reg<x86.gpr32>, %lhs64: reg<x86.gpr64>, %rhs64: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.gpr32>) asm {
+  %64 = copy %lhs8 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %sum8, %carry8 = add.carry.gpr8 %64, %rhs8
+  %67 = copy %lhs8 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %difference8, %borrow8 = sub.borrow.gpr8 %67, %rhs8
+  %70 = copy %lhs16 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %sum16, %carry16 = add.carry.gpr16 %70, %rhs16
+  %73 = copy %lhs16 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %difference16, %borrow16 = sub.borrow.gpr16 %73, %rhs16
+  %76 = copy %lhs32 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %sum32, %carry32 = add.carry.gpr32 %76, %rhs32
+  %79 = copy %lhs32 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %difference32, %borrow32 = sub.borrow.gpr32 %79, %rhs32
+  %82 = copy %lhs64 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %sum64, %carry64 = add.carry.gpr64 %82, %rhs64
+  %85 = copy %lhs64 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %difference64, %borrow64 = sub.borrow.gpr64 %85, %rhs64
+  return %sum8, %carry8, %difference8, %borrow8, %sum16, %carry16, %difference16, %borrow16, %sum32, %carry32, %difference32, %borrow32, %sum64, %carry64, %difference64, %borrow64
+}

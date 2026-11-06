@@ -81,6 +81,36 @@ TEST(ModularIntegerFacts, ExactUnaryAndShiftAcrossWidths) {
   }
 }
 
+TEST(ModularIntegerFacts, ExactExtendedUnsignedArithmeticAcrossWidths) {
+  for (int32_t bit_count : {1, 8, 16, 32, 64}) {
+    SCOPED_TRACE(bit_count);
+    const loom_value_facts_t all_bits =
+        loom_value_facts_exact_i64(bit_count == 1 ? 1 : -1);
+    const loom_value_facts_t zero = loom_value_facts_exact_i64(0);
+    const loom_value_facts_t one = loom_value_facts_exact_i64(1);
+    loom_value_facts_t value;
+    loom_value_facts_t overflow;
+
+    loom_value_facts_addui_extended(&all_bits, &one, bit_count, &value,
+                                    &overflow);
+    ExpectExact(value, 0);
+    ExpectExact(overflow, 1);
+
+    loom_value_facts_subui_extended(&zero, &all_bits, bit_count, &value,
+                                    &overflow);
+    ExpectExact(value, 1);
+    ExpectExact(overflow, 1);
+
+    loom_value_facts_addui_extended(&zero, &zero, bit_count, &value, &overflow);
+    ExpectExact(value, 0);
+    ExpectExact(overflow, 0);
+    loom_value_facts_subui_extended(&all_bits, &zero, bit_count, &value,
+                                    &overflow);
+    ExpectExact(value, bit_count == 1 ? 1 : -1);
+    ExpectExact(overflow, 0);
+  }
+}
+
 TEST(ModularIntegerFacts, RangesRemainSoundAcrossWrap) {
   loom_value_facts_t lhs = loom_value_facts_make(120, 127, 1);
   loom_value_facts_mark_lane_varying(&lhs);

@@ -54,6 +54,14 @@ def test_multi_result_vector_ops_share_scalar_semantics() -> None:
     assert unsigned.scalar_op.name == "scalar.divremui"
     assert unsigned.seed_operand_index == 0xFF
 
+    extended_add = rows["vector.addui_extended"]
+    assert extended_add.scalar_op.name == "scalar.addui_extended"
+    assert extended_add.seed_operand_index == 0xFF
+
+    extended_subtract = rows["vector.subui_extended"]
+    assert extended_subtract.scalar_op.name == "scalar.subui_extended"
+    assert extended_subtract.seed_operand_index == 0xFF
+
     decomposition = rows["vector.frexpf"]
     assert decomposition.scalar_op is scalar_frexpf
     assert decomposition.seed_operand_index == 0xFF

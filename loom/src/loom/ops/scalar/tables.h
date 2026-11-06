@@ -22,6 +22,8 @@ extern "C" {
 
 extern const loom_op_vtable_t loom_scalar_addi_vtable;
 extern const loom_op_vtable_t loom_scalar_subi_vtable;
+extern const loom_op_vtable_t loom_scalar_addui_extended_vtable;
+extern const loom_op_vtable_t loom_scalar_subui_extended_vtable;
 extern const loom_op_vtable_t loom_scalar_muli_vtable;
 extern const loom_op_vtable_t loom_scalar_divsi_vtable;
 extern const loom_op_vtable_t loom_scalar_divui_vtable;

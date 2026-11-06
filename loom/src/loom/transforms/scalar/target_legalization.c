@@ -1139,6 +1139,54 @@ static iree_status_t loom_scalar_legalize_divrem(
   return iree_ok_status();
 }
 
+// Native carry/borrow contracts take precedence. The reference form preserves
+// the source width through the comparison so narrow overflow is not confused
+// with overflow of a widened target carrier.
+static iree_status_t loom_scalar_legalize_extended_unsigned_arithmetic(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  const bool is_subtraction = loom_scalar_subui_extended_isa(op);
+  const loom_value_id_t lhs = loom_op_const_operands(op)[0];
+  const loom_value_id_t rhs = loom_op_const_operands(op)[1];
+  const loom_type_t result_type =
+      loom_module_value_type(context->module, loom_op_const_results(op)[0]);
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+
+  loom_op_t* arithmetic = NULL;
+  loom_value_id_t value = LOOM_VALUE_ID_INVALID;
+  if (is_subtraction) {
+    IREE_RETURN_IF_ERROR(loom_scalar_subi_build(builder, /*instance_flags=*/0,
+                                                lhs, rhs, result_type,
+                                                op->location, &arithmetic));
+    value = loom_scalar_subi_result(arithmetic);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_scalar_addi_build(builder, /*instance_flags=*/0,
+                                                lhs, rhs, result_type,
+                                                op->location, &arithmetic));
+    value = loom_scalar_addi_result(arithmetic);
+  }
+
+  loom_op_t* comparison = NULL;
+  IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
+      builder, LOOM_SCALAR_CMPI_PREDICATE_ULT, is_subtraction ? lhs : value,
+      is_subtraction ? rhs : lhs, op->location, &comparison));
+  loom_value_id_t replacements[2] = {
+      value,
+      loom_scalar_cmpi_result(comparison),
+  };
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, replacements, IREE_ARRAYSIZE(replacements), checkpoint));
+  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+      rewriter, op, replacements, IREE_ARRAYSIZE(replacements)));
+  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+  return iree_ok_status();
+}
+
 // Count the source bits, not the carrier bits. The CTZ sentinel both supplies
 // the narrow zero result and proves that the widened count input is nonzero.
 static iree_status_t loom_scalar_legalize_narrow_bit_count(
@@ -1874,6 +1922,18 @@ static const loom_target_legalizer_rule_t kScalarLegalizerRules[] = {
         .first_operand_element_types =
             LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
         .legalize = loom_scalar_legalize_narrow_cmpi,
+    },
+    {
+        .root_kind = LOOM_OP_SCALAR_ADDUI_EXTENDED,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_INTEGER,
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_UNHANDLED,
+        .legalize = loom_scalar_legalize_extended_unsigned_arithmetic,
+    },
+    {
+        .root_kind = LOOM_OP_SCALAR_SUBUI_EXTENDED,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_INTEGER,
+        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_UNHANDLED,
+        .legalize = loom_scalar_legalize_extended_unsigned_arithmetic,
     },
     {
         .root_kind = LOOM_OP_SCALAR_ADDI,
