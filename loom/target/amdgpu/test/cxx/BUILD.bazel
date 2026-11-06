@@ -65,6 +65,7 @@ _MODULES = [
     "early_returns",
     "enum_values",
     "flash_attention",
+    "function_specializations",
     "increment_values",
     "integer_increment",
     "mxfp_group_dot",
