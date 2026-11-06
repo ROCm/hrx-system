@@ -361,8 +361,10 @@ static bool loom_amdgpu_source_buffer_value_register_shape(
               : LOOM_AMDGPU_REG_CLASS_ID_SGPR,
           2);
       return true;
-    case LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP:
     case LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE:
+      *out_shape = loom_amdgpu_register_shape(LOOM_AMDGPU_REG_CLASS_ID_VGPR, 1);
+      return true;
+    case LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP:
     case LOOM_VALUE_FACT_MEMORY_SPACE_HOST:
     case LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC:
       return false;

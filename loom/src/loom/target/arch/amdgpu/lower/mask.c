@@ -881,7 +881,8 @@ iree_status_t loom_amdgpu_select_scf_select_plan(
   if (!loom_low_type_is_register(result_low_type)) {
     return iree_ok_status();
   }
-  if (loom_amdgpu_type_is_address_scalar(result_type)) {
+  if (loom_type_is_buffer(result_type) ||
+      loom_amdgpu_type_is_address_scalar(result_type)) {
     register_count = loom_low_register_type_unit_count(result_low_type);
     allows_lane_immediates = register_count == 1;
   }

@@ -1,0 +1,40 @@
+// RUN: emit source-low @select_local_reference target=amdgpu:gfx1100 output=low
+
+#include <loomcxx/kernel.h>
+
+template <class T>
+constexpr const T& maximum(const T& lhs, const T& rhs) {
+  return lhs < rhs ? rhs : lhs;
+}
+
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void select_local_reference(const double* input, double* output) {
+  unsigned lane = loom::kernel::workitem::id.x;
+  double lhs = input[lane];
+  double rhs = 1.0;
+  output[lane] = maximum(lhs, rhs);
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna3.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @select_local_reference() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %70 = storage {byte_alignment = 8, byte_length = 16} : low.storage<private>
+  %lhs_view = storage_address %70 : low.storage<private> -> reg<amdgpu.vgpr>
+  %76 = v_lshlrev_b32_src0_inline %lane, 3
+  %77 = global_load_b64_saddr %76, %input
+  %78 = v_mov_b32 0
+  scratch_store_b64_vaddr %78, %77
+  %rhs_view = storage_address %70 {offset = 8} : low.storage<private> -> reg<amdgpu.vgpr>
+  %81 = v_mov_b32 1072693248
+  %82 = concat(%78, %81) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  scratch_store_b64_vaddr %78, %82 {offset = 8}
+  %lhs = scratch_load_b64_vaddr %78
+  %rhs = scratch_load_b64_vaddr %78 {offset = 8}
+  %88 = v_cmp_lt_f64 %lhs, %rhs
+  %89 = v_cndmask_b32 %lhs_view, %rhs_view, %88
+  %90 = scratch_load_b64_vaddr %89
+  global_store_b64_saddr %76, %90, %output
+  return
+}

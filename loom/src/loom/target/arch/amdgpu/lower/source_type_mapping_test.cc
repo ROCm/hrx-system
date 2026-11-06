@@ -322,7 +322,7 @@ struct BufferCase {
   loom_value_fact_memory_space_t memory_space;
   // Whether the source preserves the unqualified entry-buffer ABI.
   bool entry_origin;
-  // Two for raw pointers, zero for non-register references.
+  // Two for raw pointers, one for private scratch offsets, and zero otherwise.
   uint32_t unit_count;
 };
 
@@ -369,7 +369,7 @@ INSTANTIATE_TEST_SUITE_P(
         BufferCase{LOOM_VALUE_FACT_MEMORY_SPACE_CONSTANT, false, 2},
         BufferCase{LOOM_VALUE_FACT_MEMORY_SPACE_DESCRIPTOR, false, 2},
         BufferCase{LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP, false, 0},
-        BufferCase{LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, false, 0},
+        BufferCase{LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, false, 1},
         BufferCase{LOOM_VALUE_FACT_MEMORY_SPACE_HOST, false, 0},
         BufferCase{LOOM_VALUE_FACT_MEMORY_SPACE_GENERIC, false, 0}));
 
