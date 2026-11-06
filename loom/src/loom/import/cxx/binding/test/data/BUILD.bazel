@@ -23,6 +23,8 @@ loom_check_test_suite(
         "index_views.cxx-test",
         "observations.cxx-test",
         "typed_view_composition.cxx-test",
+        "view_generators.cxx-test",
+        "view_reference_loops.cxx-test",
         "view_values.cxx-test",
         "view_values_invalid.cxx-test",
     ],

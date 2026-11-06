@@ -29,6 +29,7 @@ loom_check_test_suite(
         "barrier_helpers.cxx-test",
         "collective_scans.cxx-test",
         "configured_workgroup_storage.cxx-test",
+        "initialization_kernels.cxx-test",
         "kernel_arguments.cxx-test",
         "kernel_arguments_invalid.cxx-test",
         "kernel_callers.cxx-test",
