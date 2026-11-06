@@ -122,9 +122,9 @@ instance and its discovery snapshot; engine contexts own their native children.
 
 ## Native GPU execution
 
-PM4 and AQL own their packet encodings and publication rules under `gpu/queue/`.
-They share dependency admission, captured input ownership, resident program
-instances, transfers, and semaphore frontiers. A native FIFO provides the
+PM4, AQL, and SDMA own their packet encodings and publication rules under
+`gpu/queue/`. They share dependency admission, captured input ownership, resident
+program instances, transfers, and semaphore frontiers. A native FIFO provides the
 execution order used to prove reuse; HAL submissions still express their
 dependencies with semaphores. Unresolved host dependencies park their captured
 operation without blocking independent ready work.
@@ -137,8 +137,8 @@ index returns packet credit; separate native completion signals establish when
 arguments, bindings, executable references, and other payload ownership can be
 retired.
 
-Large recordings keep packet templates, fixups, and private data in device-local
-storage. Submission uploads invocation inputs, reserves bounded ring ranges,
+Large PM4 and AQL recordings keep packet templates, fixups, and private data in
+device-local storage. Submission uploads invocation inputs, reserves bounded ring ranges,
 and issues GPU fixup and materialization kernels. Materialization copies packets
 into the reserved slots and publishes the first header after all packet writes
 are visible. Host work scales with the number of chunks and supplied inputs,
@@ -186,6 +186,49 @@ native publication resources. A failed public semaphore is not a native
 retirement proof: already-published work retains its resources until the native
 completion or teardown boundary. Queue and device destruction join their native
 users before returning.
+
+### Dedicated transfer queues
+
+Usable native SDMA families appear alongside the selected compute family in the
+device queue specification. They advertise TRANSFER and HOST_CALL roles and
+dynamic acquisition, with no provisioned queues. `iree_hal_queue_acquire` creates
+one exact native queue when requested. Compute initialization and executable
+loading do not acquire an SDMA queue; native acquisition failure is returned to
+the caller.
+
+An SDMA queue supports ordinary transfer operations, file reads and writes,
+pool allocation and mapping, host calls, barriers, and timestamps when its native
+clock is available. `iree_hal_queue_execute` accepts TRANSFER command buffers
+recorded for that exact family, including late buffer bindings and concurrent
+invocations. Private data belongs to separately leased resident instances when
+causal reuse cannot be proved. Dispatch and public atomics are absent from the
+family's capabilities and are rejected at the HAL boundary.
+
+The queue passed to a file operation determines its copy engine. Compute queues
+use their compute-family transfer path; SDMA queues use native copy packets.
+Both use the same file, staging, mapping, and pool owners. PM4 and SDMA also share
+the bounded DMA traversal that splits transfers, stages host data, and retains
+download destinations. Only the packet writer differs. A pool used by both
+engines includes both exact families in its access scope before backing is
+acquired.
+
+Semaphores connect transfers to compute without a device-wide join. USER
+publication carries supported native waits and cache actions in the command
+stream. A KERNEL carrier that provides submission-scoped cache transitions
+instead waits for incoming producer completion before submission and publishes
+outgoing readiness after checked native retirement. Neither case adds a polling
+thread per queue.
+
+Native command capacity is separate from host metadata progress. When command
+slots are full, queue membership, trim, and completed backing acquisitions still
+run under the same publisher. A prepared KERNEL command retains its bytes and
+pending causal frontier until accepted or rejected; later native work cannot
+overwrite it while metadata grows.
+
+Loom's device execution inventory selects a transfer-only family when one is
+available and retains its acquired queue across model activation and reload.
+Devices with only a combined compute/transfer family use that family. Models
+borrow the inventory, and pools are qualified against those same queue identities.
 
 ## Shader diagnostics and sanitizers
 
