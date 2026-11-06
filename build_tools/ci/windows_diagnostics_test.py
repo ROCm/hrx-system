@@ -23,7 +23,162 @@ from xml.sax.saxutils import escape
 from build_tools.ci import windows_diagnostics as diagnostics
 
 
+class FakeRegistry:
+    KEY_READ = 1
+    KEY_WRITE = 2
+    KEY_WOW64_64KEY = 4
+    HKEY_LOCAL_MACHINE = object()
+    REG_EXPAND_SZ = 10
+    REG_DWORD = 11
+
+    def __init__(self, keys=None):
+        self.keys = {} if keys is None else keys
+
+    def OpenKey(self, _root, path, _reserved=0, _access=0):
+        if path not in self.keys:
+            raise FileNotFoundError(path)
+        return path
+
+    def CreateKeyEx(self, _root, path, _reserved=0, _access=0):
+        parent = path.rpartition("\\")[0]
+        self.keys.setdefault(parent, {})
+        self.keys.setdefault(path, {})
+        return path
+
+    def QueryValueEx(self, key, name):
+        try:
+            return self.keys[key][name]
+        except KeyError:
+            raise FileNotFoundError(name) from None
+
+    def SetValueEx(self, key, name, _reserved, value_type, value):
+        self.keys[key][name] = (value, value_type)
+
+    def DeleteValue(self, key, name):
+        try:
+            del self.keys[key][name]
+        except KeyError:
+            raise FileNotFoundError(name) from None
+
+    def QueryInfoKey(self, key):
+        prefix = key + "\\"
+        child_count = sum(
+            path.startswith(prefix) and "\\" not in path[len(prefix) :]
+            for path in self.keys
+        )
+        return child_count, len(self.keys[key]), 0
+
+    def CloseKey(self, _key):
+        pass
+
+    def DeleteKeyEx(self, _root, path, _access=0, _reserved=0):
+        if any(key.startswith(path + "\\") for key in self.keys):
+            raise OSError(f"registry key has children: {path}")
+        del self.keys[path]
+
+
 class WindowsDiagnosticsTest(unittest.TestCase):
+    def test_local_dump_registry_is_bounded_and_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = FakeRegistry()
+            dump_directory = Path(directory) / "dumps"
+
+            with mock.patch.object(diagnostics, "winreg", registry):
+                with diagnostics.local_dump_collection(dump_directory) as state:
+                    self.assertTrue(state["enabled"])
+                    self.assertTrue(dump_directory.is_dir())
+                    for executable in diagnostics.LOCAL_DUMP_EXECUTABLES:
+                        values = registry.keys[
+                            diagnostics.LOCAL_DUMPS_REGISTRY_PATH + "\\" + executable
+                        ]
+                        self.assertEqual(
+                            values,
+                            {
+                                "DumpFolder": (
+                                    str(dump_directory),
+                                    registry.REG_EXPAND_SZ,
+                                ),
+                                "DumpCount": (
+                                    diagnostics.LOCAL_DUMP_COUNT,
+                                    registry.REG_DWORD,
+                                ),
+                                "DumpType": (1, registry.REG_DWORD),
+                            },
+                        )
+
+            self.assertTrue(state["restored"])
+            self.assertEqual(registry.keys, {})
+
+    def test_local_dump_registry_restores_existing_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            executable = "compile_artifact.exe"
+            application_key = diagnostics.LOCAL_DUMPS_REGISTRY_PATH + "\\" + executable
+            prior_values = {
+                "DumpFolder": (r"C:\existing", 20),
+                "DumpCount": (7, 21),
+                "DumpType": (2, 21),
+            }
+            registry = FakeRegistry(
+                {
+                    diagnostics.LOCAL_DUMPS_REGISTRY_PATH: {},
+                    application_key: prior_values.copy(),
+                }
+            )
+
+            with (
+                mock.patch.object(diagnostics, "winreg", registry),
+                mock.patch.object(diagnostics, "LOCAL_DUMP_EXECUTABLES", (executable,)),
+            ):
+                with diagnostics.local_dump_collection(Path(directory) / "dumps"):
+                    pass
+
+            self.assertEqual(registry.keys[application_key], prior_values)
+
+    def test_local_dump_setup_failure_fails_a_successful_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry = FakeRegistry()
+            registry.OpenKey = mock.Mock(
+                side_effect=PermissionError("registry write denied")
+            )
+
+            with (
+                mock.patch.object(diagnostics, "winreg", registry),
+                contextlib.redirect_stderr(io.StringIO()) as stderr,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                result = diagnostics.run(
+                    [sys.executable, "-c", "pass"],
+                    cwd=root,
+                    env=None,
+                    artifact_dir=root / "artifacts",
+                    label="successful command",
+                )
+
+            self.assertEqual(result, 1)
+            self.assertIn("Local dump setup failed", stderr.getvalue())
+            phase = next((root / "artifacts").iterdir())
+            command = json.loads((phase / "command.json").read_text())
+            self.assertIn(
+                "registry write denied", command["local_dumps"]["setup_error"]
+            )
+
+    def test_local_dumps_are_inventoried_in_place(self):
+        with tempfile.TemporaryDirectory() as directory:
+            artifacts = Path(directory)
+            dump = artifacts / "crash-dumps" / "tool.exe.123.dmp"
+            dump.parent.mkdir()
+            dump.write_bytes(b"minidump")
+            capture = diagnostics.Capture(artifacts, {})
+
+            self.assertEqual(diagnostics.capture_local_dumps(capture), [str(dump)])
+            record = capture.files[str(dump)]
+            self.assertEqual(
+                record["artifact"], str(Path("crash-dumps") / "tool.exe.123.dmp")
+            )
+            self.assertEqual(record["sha256"], hashlib.sha256(b"minidump").hexdigest())
+            self.assertNotIn("copy", record)
+
     def test_process_output_and_status_survive_capture(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -290,13 +445,21 @@ class WindowsDiagnosticsTest(unittest.TestCase):
             executable = root / "bazel-out/bin/tool & \N{GREEK SMALL LETTER LAMDA}.exe"
             module = root / "bazel-out/bin/runtime/library.dll"
             installed = root / "bazel-outside/system.dll"
+            program_data = root / "ProgramData"
+            wer_dump = program_data / "Microsoft/Windows/WER/Temp/WER.tmp.dmp"
+            unrelated_dump = wer_dump.with_name("unrelated.tmp.dmp")
             original = {
                 executable: b"executable image",
                 module: b"runtime image",
                 executable.with_suffix(".pdb"): b"executable symbols",
                 module.with_suffix(".pdb"): b"runtime symbols",
+                wer_dump: b"minidump",
             }
-            for path, contents in {**original, installed: b"installed image"}.items():
+            for path, contents in {
+                **original,
+                installed: b"installed image",
+                unrelated_dump: b"unrelated minidump",
+            }.items():
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(contents)
             event = (
@@ -308,12 +471,26 @@ class WindowsDiagnosticsTest(unittest.TestCase):
                 f'<Data Name="ModulePath">{escape(str(module))}</Data>'
                 "</EventData></Event>"
             )
+            wer_fields = [""] * 15
+            wer_fields[5] = "compile_artifact.exe"
+            wer_event = (
+                '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+                '<System><Provider Name="Windows Error Reporting"/>'
+                "<EventID>1001</EventID><Version>0</Version></System><EventData>"
+                + "".join(f"<Data>{value}</Data>" for value in wer_fields)
+                + f"<Data>\n{escape(str(wer_dump))}\n</Data>"
+                + "</EventData></Event>"
+            )
             # Repeated failures share images; installed modules must remain
             # identified in the raw events without being copied into artifacts.
             events = (
                 "<Events>"
                 + event
                 + event.replace(escape(str(module)), escape(str(installed)))
+                + wer_event
+                + wer_event.replace("compile_artifact.exe", "python.exe").replace(
+                    escape(str(wer_dump)), escape(str(unrelated_dump))
+                )
                 + "</Events>"
             ).encode("utf-16")
 
@@ -331,10 +508,12 @@ class WindowsDiagnosticsTest(unittest.TestCase):
                 mock.patch.object(subprocess, "run", side_effect=native_tool),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
+                environment = os.environ.copy()
+                environment["PROGRAMDATA"] = str(program_data)
                 result = diagnostics.run(
                     [sys.executable, "-c", "raise SystemExit(3)"],
                     cwd=root,
-                    env=None,
+                    env=environment,
                     artifact_dir=root / "artifacts",
                     label="silent test failure",
                 )

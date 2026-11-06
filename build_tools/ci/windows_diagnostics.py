@@ -6,17 +6,19 @@
 
 """Snapshots failed Windows CI builds before a later phase can rebuild them.
 
-The caller owns the build command and its exit status. Collection is read-only:
-Ninja's input query enumerates the failed link's objects and archives without
-running actions, and symbol tools inspect copies of those inputs. Application
-Control launch failures capture native block events and policy identities.
-Silent process failures capture native crash events and build-owned images.
-Failed Bazel tests retain their launchers and declared runfiles.
+The caller owns the build command and its exit status. Each command temporarily
+routes bounded per-application WER minidumps into its artifact directory. The
+post-failure collectors do not rerun build actions: Ninja queries enumerate a
+failed link's inputs, and symbol tools inspect copies of those inputs.
+Application Control launch failures capture native block events and policy
+identities. Silent process failures capture native crash events and build-owned
+images. Failed Bazel tests retain their launchers and declared runfiles.
 Missing files, access errors, and capture limits appear in the manifest.
 """
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -31,8 +33,24 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Mapping, Sequence
 
+try:
+    import winreg
+except ImportError:
+    # The module is imported by Linux presubmit tests as well as Windows CI.
+    winreg = None
+
 ARTIFACT_DIR_ENV = "IREE_CI_FAILURE_ARTIFACT_DIR"
 MAX_CAPTURE_BYTES = 512 * 1024 * 1024
+LOCAL_DUMP_COUNT = 16
+LOCAL_DUMP_EXECUTABLES = (
+    "compile_artifact.exe",
+    "loom-compile.exe",
+    "loom-link.exe",
+)
+LOCAL_DUMPS_REGISTRY_PATH = (
+    r"SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
+)
+LOCAL_DUMPS_REGISTRY_VALUES = ("DumpFolder", "DumpCount", "DumpType")
 BINARY_SUFFIXES = {".obj", ".lib", ".o", ".a"}
 ENVIRONMENT_KEYS = {
     "CC",
@@ -54,6 +72,8 @@ ENVIRONMENT_KEYS = {
     "RUNNER_NAME",
     "RUNNER_OS",
 }
+
+_MISSING_REGISTRY_VALUE = object()
 
 
 def environment_value(environment: Mapping[str, str], name: str) -> str | None:
@@ -142,6 +162,140 @@ class Capture:
             record["error"] = str(error)
             return None
         return output_path if result.returncode == 0 else None
+
+
+@contextlib.contextmanager
+def local_dump_collection(directory: Path):
+    """Routes bounded WER minidumps into one diagnostic phase directory."""
+    state = {
+        "directory": str(directory),
+        "enabled": False,
+    }
+    if winreg is None:
+        state["unavailable"] = "Windows registry APIs are unavailable"
+        yield state
+        return
+
+    leases = []
+    root_existed = True
+    access = winreg.KEY_READ | winreg.KEY_WRITE | winreg.KEY_WOW64_64KEY
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        try:
+            root_key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                LOCAL_DUMPS_REGISTRY_PATH,
+                0,
+                access,
+            )
+            winreg.CloseKey(root_key)
+        except FileNotFoundError:
+            root_existed = False
+        for executable in LOCAL_DUMP_EXECUTABLES:
+            path = LOCAL_DUMPS_REGISTRY_PATH + "\\" + executable
+            try:
+                key = winreg.OpenKey(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    path,
+                    0,
+                    access,
+                )
+                key_existed = True
+            except FileNotFoundError:
+                key = winreg.CreateKeyEx(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    path,
+                    0,
+                    access,
+                )
+                key_existed = False
+            previous_values = {}
+            leases.append((path, key, key_existed, previous_values))
+            for name in LOCAL_DUMPS_REGISTRY_VALUES:
+                try:
+                    previous_values[name] = winreg.QueryValueEx(key, name)
+                except FileNotFoundError:
+                    previous_values[name] = _MISSING_REGISTRY_VALUE
+            winreg.SetValueEx(
+                key, "DumpFolder", 0, winreg.REG_EXPAND_SZ, str(directory)
+            )
+            winreg.SetValueEx(key, "DumpCount", 0, winreg.REG_DWORD, LOCAL_DUMP_COUNT)
+            # A minidump has thread stacks and loaded modules without the
+            # unbounded address-space cost of a compiler's full dump.
+            winreg.SetValueEx(key, "DumpType", 0, winreg.REG_DWORD, 1)
+        state.update(
+            enabled=True,
+            dump_count=LOCAL_DUMP_COUNT,
+            dump_type="mini",
+            executables=list(LOCAL_DUMP_EXECUTABLES),
+        )
+    except OSError:
+        state["setup_error"] = traceback.format_exc()
+
+    try:
+        yield state
+    finally:
+        restore_errors = []
+        for path, key, key_existed, previous_values in reversed(leases):
+            try:
+                for name, previous in previous_values.items():
+                    if previous is _MISSING_REGISTRY_VALUE:
+                        try:
+                            winreg.DeleteValue(key, name)
+                        except FileNotFoundError:
+                            pass
+                    else:
+                        value, value_type = previous
+                        winreg.SetValueEx(key, name, 0, value_type, value)
+                subkey_count, value_count, _ = winreg.QueryInfoKey(key)
+                winreg.CloseKey(key)
+                key = None
+                if not key_existed and subkey_count == 0 and value_count == 0:
+                    winreg.DeleteKeyEx(
+                        winreg.HKEY_LOCAL_MACHINE,
+                        path,
+                        winreg.KEY_WOW64_64KEY,
+                        0,
+                    )
+            except OSError:
+                restore_errors.append(traceback.format_exc())
+            finally:
+                if key is not None:
+                    winreg.CloseKey(key)
+        if not root_existed:
+            try:
+                root_key = winreg.OpenKey(
+                    winreg.HKEY_LOCAL_MACHINE,
+                    LOCAL_DUMPS_REGISTRY_PATH,
+                    0,
+                    access,
+                )
+                subkey_count, value_count, _ = winreg.QueryInfoKey(root_key)
+                winreg.CloseKey(root_key)
+                if subkey_count == 0 and value_count == 0:
+                    winreg.DeleteKeyEx(
+                        winreg.HKEY_LOCAL_MACHINE,
+                        LOCAL_DUMPS_REGISTRY_PATH,
+                        winreg.KEY_WOW64_64KEY,
+                        0,
+                    )
+            except OSError:
+                restore_errors.append(traceback.format_exc())
+        if restore_errors:
+            state["restore_error"] = "\n".join(restore_errors)
+        else:
+            state["restored"] = True
+
+
+def capture_local_dumps(capture: Capture) -> list[str]:
+    """Inventories dumps already resident in the uploaded artifact tree."""
+    dump_directory = capture.directory / "crash-dumps"
+    dumps = []
+    for path in sorted(dump_directory.glob("*.dmp")):
+        record = capture.file(path, copy=False)
+        record["artifact"] = str(path.relative_to(capture.directory))
+        dumps.append(record["path"])
+    return dumps
 
 
 def cmake_cache(build_dir: Path) -> dict[str, str]:
@@ -520,6 +674,13 @@ def capture_application_crashes(
         if build_dir is not None:
             output_roots.append(build_dir.resolve())
         images = {}
+        dumps = {}
+        program_data = environment_value(capture.environment, "PROGRAMDATA")
+        wer_root = (
+            (Path(program_data) / "Microsoft/Windows/WER").resolve()
+            if program_data
+            else None
+        )
         for event in root.findall("{*}Event"):
             fields = event.findall("{*}EventData/{*}Data")
             paths = [
@@ -548,6 +709,59 @@ def capture_application_crashes(
                     for output_root in output_roots
                 ):
                     images[path] = None
+            is_wer_event = (
+                provider is not None
+                and provider.get("Name") == "Windows Error Reporting"
+                and event.findtext("{*}System/{*}EventID") == "1001"
+            )
+            application_names = [
+                data.text for data in fields if data.get("Name") == "P1"
+            ]
+            if (
+                is_wer_event
+                and event.findtext("{*}System/{*}Version") == "0"
+                and len(fields) >= 6
+                and all(data.get("Name") is None for data in fields)
+            ):
+                application_names.append(fields[5].text)
+            allowed_dump = any(
+                name and Path(name).name.lower() in LOCAL_DUMP_EXECUTABLES
+                for name in application_names
+            )
+            dump_fields = (
+                [data.text for data in fields if data.get("Name") == "AttachedFiles"]
+                if is_wer_event and allowed_dump
+                else []
+            )
+            if (
+                allowed_dump
+                and event.findtext("{*}System/{*}Version") == "0"
+                and len(fields) >= 16
+                and all(data.get("Name") is None for data in fields)
+            ):
+                # Version-zero WER events place the attached-file list in the
+                # sixteenth insertion string. The list may include its
+                # short-lived minidump and several metadata files.
+                dump_fields.append(fields[15].text)
+            for attached_files in dump_fields:
+                if not attached_files:
+                    continue
+                for value in attached_files.splitlines():
+                    value = value.strip()
+                    if value.startswith("\\\\?\\"):
+                        value = value[4:]
+                    path = Path(value)
+                    if (
+                        path.is_absolute()
+                        and path.suffix.lower() == ".dmp"
+                        and wer_root is not None
+                        and path.resolve().is_relative_to(wer_root)
+                    ):
+                        dumps[path] = None
+        # WER's temporary dump may survive long enough to collect even when
+        # LocalDumps was unavailable on the runner.
+        for path in dumps:
+            capture.file(path, copy=True)
         # Preserve each reported image before PDBs consume the remaining budget.
         for path in images:
             capture.file(path, copy=True)
@@ -579,6 +793,7 @@ def capture_failure(
     output = (directory / "output.log").read_text(encoding="utf-8", errors="replace")
     output = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", output)
     try:
+        metadata["local_dumps"] = capture_local_dumps(capture)
         metadata["bazel_tests"] = capture_bazel_tests(capture, cwd, output)
         capture_application_crashes(capture, cwd, build_dir, started_at)
         capture_application_control(capture, cwd, output, started_at)
@@ -637,32 +852,34 @@ def run(
     log_error = None
     output = (directory / "output.log").open("wb", buffering=0)
     try:
-        with subprocess.Popen(
-            argv,
-            cwd=cwd,
-            env=environment,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        ) as process:
-            while chunk := process.stdout.read1(65536):
-                if log_error is None:
-                    try:
-                        output.write(chunk)
-                        output.flush()
-                    except OSError as error:
-                        # Keep draining the pipe even if the worker filesystem
-                        # fails; waiting with a full child pipe would deadlock.
-                        log_error = str(error)
-                        print(
-                            f"[diagnostics] Log write failed: {error}", file=sys.stderr
-                        )
-                if hasattr(sys.stdout, "buffer"):
-                    sys.stdout.buffer.write(chunk)
-                    sys.stdout.buffer.flush()
-                else:
-                    sys.stdout.write(chunk.decode("utf-8", errors="replace"))
-                    sys.stdout.flush()
-            returncode = process.wait()
+        with local_dump_collection(directory / "crash-dumps") as local_dumps:
+            with subprocess.Popen(
+                argv,
+                cwd=cwd,
+                env=environment,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            ) as process:
+                while chunk := process.stdout.read1(65536):
+                    if log_error is None:
+                        try:
+                            output.write(chunk)
+                            output.flush()
+                        except OSError as error:
+                            # Keep draining the pipe even if the worker filesystem
+                            # fails; waiting with a full child pipe would deadlock.
+                            log_error = str(error)
+                            print(
+                                f"[diagnostics] Log write failed: {error}",
+                                file=sys.stderr,
+                            )
+                    if hasattr(sys.stdout, "buffer"):
+                        sys.stdout.buffer.write(chunk)
+                        sys.stdout.buffer.flush()
+                    else:
+                        sys.stdout.write(chunk.decode("utf-8", errors="replace"))
+                        sys.stdout.flush()
+                returncode = process.wait()
     finally:
         try:
             output.close()
@@ -670,8 +887,20 @@ def run(
             log_error = str(error)
             print(f"[diagnostics] Log close failed: {error}", file=sys.stderr)
     command.update(
-        returncode=returncode, completed_at=dt.datetime.now(dt.UTC).isoformat()
+        returncode=returncode,
+        completed_at=dt.datetime.now(dt.UTC).isoformat(),
+        local_dumps=local_dumps,
     )
+    diagnostic_errors = [
+        (name, local_dumps[name])
+        for name in ("setup_error", "restore_error")
+        if name in local_dumps
+    ]
+    for name, error in diagnostic_errors:
+        print(
+            f"[diagnostics] Local dump {name.removesuffix('_error')} failed:\n{error}",
+            file=sys.stderr,
+        )
     if log_error is not None:
         command["log_error"] = log_error
     try:
@@ -689,4 +918,4 @@ def run(
         traceback.print_exc()
         if returncode == 0:
             return 1
-    return returncode or int(log_error is not None)
+    return returncode or int(log_error is not None or bool(diagnostic_errors))
