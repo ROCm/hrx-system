@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/vulkan/device_spec.h"
+#include "iree/hal/driver/vulkan/device_spec.h"
 #include "iree/hal/utils/device_spec_builder.h"
 #include "iree/testing/gtest.h"
 #include "loomc/diagnostic.h"

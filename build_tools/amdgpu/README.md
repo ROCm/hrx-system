@@ -69,9 +69,9 @@ Running `target_map.py` emits generated fragments consumed by multiple layers:
 | `build_tools/amdgpu/target_map.cmake` | CMake selector helpers. |
 | `build_tools/amdgpu/elf_machine_map.inl` | C/C++ ELF machine decode tables for runtime, libhrx, and Loom. |
 | `build_tools/amdgpu/target_map.h` | C/C++ tests that need exact-to-code-object lookup. |
-| `runtime/src/iree/hal/drivers/amdgpu/target/identity_catalog.inl` | ROCr HAL target-ID mappings and processor facts. |
-| `runtime/src/iree/hal/drivers/amd/gpu/target/identity_catalog.inl` | Independent AMD GPU HAL target-ID mappings and processor facts. |
-| `runtime/src/iree/hal/drivers/amdgpu/util/device_library_target_map.inl` | Runtime qualified device-library artifact lookup. |
+| `runtime/src/iree/hal/driver/amdgpu/target/identity_catalog.inl` | ROCr HAL target-ID mappings and processor facts. |
+| `runtime/src/iree/hal/driver/amd/gpu/target/identity_catalog.inl` | Independent AMD GPU HAL target-ID mappings and processor facts. |
+| `runtime/src/iree/hal/driver/amdgpu/util/device_library_target_map.inl` | Runtime qualified device-library artifact lookup. |
 
 The generated files are checked in. The presubmit check runs:
 
@@ -128,7 +128,7 @@ The runtime build owns the shared AMDGPU support selector:
 
 | Bazel flag | Consumer |
 | --- | --- |
-| `//runtime/src/iree/hal/drivers/amdgpu:targets` | Runtime AMDGPU support: embedded device libraries, AMDGPU HAL CTS, source-built util test/benchmark assets, and libhrx CTS native executable assets. |
+| `//runtime/src/iree/hal/driver/amdgpu:targets` | Runtime AMDGPU support: embedded device libraries, AMDGPU HAL CTS, source-built util test/benchmark assets, and libhrx CTS native executable assets. |
 
 Source-built binaries use the optional `@iree_amdgpu_device_toolchain`
 repository. It is inert by default. A real producer is selected with:

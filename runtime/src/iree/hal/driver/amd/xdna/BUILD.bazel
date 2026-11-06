@@ -1,0 +1,449 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+load("//runtime/src/iree/hal/driver/amd/xdna/testing:defs.bzl", "NATIVE_QUEUE_TEST_PLATFORMS")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+iree_runtime_cc_library(
+    name = "barrier",
+    srcs = ["barrier.c"],
+    hdrs = ["barrier.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "barrier_test",
+    srcs = ["barrier_test.cc"],
+    deps = [
+        ":barrier",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "context",
+    srcs = ["context.c"],
+    hdrs = ["context.h"],
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/driver/amd/fabric",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/aie2p:npu2",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/aie2p:target",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "memory",
+    srcs = ["memory.c"],
+    hdrs = ["memory.h"],
+    deps = [
+        ":context",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "command_arena",
+    srcs = ["command_arena.c"],
+    hdrs = ["command_arena.h"],
+    deps = [
+        ":memory",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal/memory:tlsf",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "semaphore",
+    srcs = ["semaphore.c"],
+    hdrs = ["semaphore.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:submitted_signal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "semaphore_test",
+    srcs = ["semaphore_test.cc"],
+    deps = [
+        ":semaphore",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:submitted_signal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "queue_frontier",
+    srcs = ["queue_frontier.c"],
+    hdrs = ["queue_frontier.h"],
+    deps = [
+        ":semaphore",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "queue_frontier_test",
+    srcs = ["queue_frontier_test.cc"],
+    deps = [
+        ":queue_frontier",
+        ":semaphore",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "queue_storage",
+    srcs = ["queue_storage.c"],
+    hdrs = ["queue_storage.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "queue_service",
+    srcs = ["queue_service.c"],
+    hdrs = ["queue_service.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "queue_producer_index",
+    srcs = ["queue_producer_index.c"],
+    hdrs = ["queue_producer_index.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "queue_producer_index_test",
+    srcs = ["queue_producer_index_test.cc"],
+    deps = [
+        ":queue_producer_index",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "queue_storage_test",
+    srcs = ["queue_storage_test.cc"],
+    deps = [
+        ":queue_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "command_buffer",
+    srcs = ["command_buffer.c"],
+    hdrs = ["command_buffer.h"],
+    deps = [
+        ":barrier",
+        ":executable",
+        ":queue_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:resource_set",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "profile_counters",
+    srcs = ["profile_counters.c"],
+    hdrs = ["profile_counters.h"],
+    deps = [
+        ":command_arena",
+        ":context",
+        ":executable",
+        ":executable_measurement",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "profile",
+    srcs = ["profile.c"],
+    hdrs = ["profile.h"],
+    deps = [
+        ":command_arena",
+        ":context",
+        ":profile_counters",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:profile_event_ring",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "queue",
+    srcs = [
+        "queue.c",
+        "queue_admission.c",
+        "queue_memory.c",
+        "queue_operation.c",
+        "queue_profile.c",
+    ],
+    hdrs = [
+        "queue.h",
+        "queue_admission.h",
+        "queue_operation.h",
+        "queue_state.h",
+    ],
+    deps = [
+        ":barrier",
+        ":command_arena",
+        ":command_buffer",
+        ":context",
+        ":executable",
+        ":profile",
+        ":profile_counters",
+        ":queue_frontier",
+        ":queue_producer_index",
+        ":queue_service",
+        ":queue_storage",
+        ":semaphore",
+        "//libamdf:headers",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/driver/amd/fabric:buffer",
+        "//runtime/src/iree/hal/driver/amd/fabric:event",
+        "//runtime/src/iree/hal/driver/amd/fabric:file_transfer",
+        "//runtime/src/iree/hal/driver/amd/fabric:transient_buffer",
+        "//runtime/src/iree/hal/driver/amd/fabric:transient_buffer_pool",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "executable_measurement",
+    srcs = ["executable_measurement.c"],
+    hdrs = ["executable_measurement.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/xdna/image:tables",
+        "//runtime/src/iree/schemas:xdna_executable",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "executable_measurement_test",
+    srcs = ["executable_measurement_test.cc"],
+    deps = [
+        ":executable_measurement",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/xdna/image",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testing:image_fixture",
+        "//runtime/src/iree/schemas:xdna_executable",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "executable",
+    srcs = ["executable.c"],
+    hdrs = ["executable.h"],
+    deps = [
+        ":command_arena",
+        ":context",
+        ":executable_measurement",
+        ":executable_storage",
+        ":memory",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/driver/amd/xdna/image",
+        "//runtime/src/iree/schemas:xdna_executable",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "executable_storage",
+    srcs = ["executable_storage.c"],
+    hdrs = ["executable_storage.h"],
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/xdna/image",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "executable_storage_test",
+    srcs = ["executable_storage_test.cc"],
+    deps = [
+        ":executable_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testing:image_fixture",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "device",
+    srcs = ["device.c"],
+    hdrs = ["device.h"],
+    deps = [
+        ":command_arena",
+        ":command_buffer",
+        ":context",
+        ":executable",
+        ":memory",
+        ":queue",
+        ":semaphore",
+        "//libamdf:headers",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/fabric",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory_backend",
+        "//runtime/src/iree/hal/driver/amd/fabric:slab_provider",
+        "//runtime/src/iree/hal/utils:device_spec_builder",
+        "//runtime/src/iree/hal/utils:files",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "queue_test",
+    srcs = ["queue_test.cc"],
+    target_compatible_with = NATIVE_QUEUE_TEST_PLATFORMS,
+    deps = [
+        ":device",
+        ":memory",
+        ":queue",
+        ":queue_frontier",
+        ":semaphore",
+        "//libamdf:headers",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/fabric:buffer",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory_backend",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testing:image_fixture",
+        "//runtime/src/iree/hal/driver/amd/xdna/testing:queue_test_util",
+        "//runtime/src/iree/hal/memory:slab_cache",
+        "//runtime/src/iree/hal/memory:tlsf_pool",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "queue_memory_test",
+    srcs = ["queue_memory_test.cc"],
+    target_compatible_with = NATIVE_QUEUE_TEST_PLATFORMS,
+    deps = [
+        ":queue",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testing:image_fixture",
+        "//runtime/src/iree/hal/driver/amd/xdna/testing:queue_test_util",
+        "//runtime/src/iree/hal/memory:fixed_block_pool",
+        "//runtime/src/iree/hal/memory:tlsf_pool",
+        "//runtime/src/iree/hal/testing:deferred_pool",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "command_buffer_test",
+    srcs = ["command_buffer_test.cc"],
+    target_compatible_with = NATIVE_QUEUE_TEST_PLATFORMS,
+    deps = [
+        ":semaphore",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testing:image_fixture",
+        "//runtime/src/iree/hal/driver/amd/xdna/testing:queue_test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "profile_test",
+    srcs = ["profile_test.cc"],
+    target_compatible_with = NATIVE_QUEUE_TEST_PLATFORMS,
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/xdna/testing:queue_test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

@@ -1,0 +1,49 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:msvc.bzl", "iree_msvc_masm_library")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+config_setting(
+    name = "windows_x86_64",
+    constraint_values = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+)
+
+iree_msvc_masm_library(
+    name = "x86_64_msvc_abi_bridge",
+    src = "x86_64_msvc.asm",
+    target_compatible_with = [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:windows",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "arch",
+    srcs = [
+        "arm_32.c",
+        "arm_64.c",
+        "riscv.c",
+        "x86_32.c",
+        "x86_64.c",
+    ],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/task/executable/elf:headers",
+    ] + select({
+        ":windows_x86_64": [":x86_64_msvc_abi_bridge"],
+        "//conditions:default": [],
+    }),
+)

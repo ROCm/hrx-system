@@ -195,7 +195,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/x86/ops",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/hal/drivers/task/executable/library:abi",
+        "//runtime/src/iree/hal/driver/task/executable/library:abi",
     ],
 )
 

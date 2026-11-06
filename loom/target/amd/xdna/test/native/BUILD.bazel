@@ -124,7 +124,7 @@ loom_cc_binary(
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/cts/util:test_main",
-        "//runtime/src/iree/hal/drivers/amd:driver",
+        "//runtime/src/iree/hal/driver/amd:driver",
         "//runtime/src/iree/testing:gtest",
     ],
 )

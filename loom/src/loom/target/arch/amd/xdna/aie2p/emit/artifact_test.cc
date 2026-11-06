@@ -10,8 +10,8 @@
 #include <cstring>
 #include <vector>
 
-#include "iree/hal/drivers/amd/xdna/image/aie2p/npu2.h"
-#include "iree/hal/drivers/amd/xdna/image/image.h"
+#include "iree/hal/driver/amd/xdna/image/aie2p/npu2.h"
+#include "iree/hal/driver/amd/xdna/image/image.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/text_asm.h"

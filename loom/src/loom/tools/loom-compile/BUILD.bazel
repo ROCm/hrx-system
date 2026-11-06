@@ -40,7 +40,7 @@ iree_assert_dependency_boundary(
     name = "loom_compile_no_hal_runtime_dependencies",
     # The versioned, standalone library schema is a compiler interface. Runtime
     # implementations, including the task device and ELF loader, remain excluded.
-    allowed_dependencies = ["//runtime/src/iree/hal/drivers/task/executable/library:abi"],
+    allowed_dependencies = ["//runtime/src/iree/hal/driver/task/executable/library:abi"],
     forbidden_subtrees = ["//runtime/src/iree/hal/..."],
     message = "The compiler may consume the standalone executable ABI schema, but not HAL runtime implementations",
     target = ":loom-compile",

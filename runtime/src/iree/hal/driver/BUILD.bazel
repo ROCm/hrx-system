@@ -1,0 +1,79 @@
+# Copyright 2020 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
+load("//build_tools/bazel:select.bzl", "iree_select")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:hal_driver.bzl", "iree_hal_driver_registry")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "external_registry_api",
+    hdrs = ["external_registry.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_hal_driver_registry(
+    name = "empty_external_driver_registry",
+    modules = [],
+)
+
+iree_runtime_cc_library(
+    name = "driver",
+    srcs = ["init.c"],
+    hdrs = ["init.h"],
+    deps = (
+        [
+            "//runtime/src/iree/base",
+            "//runtime/src/iree/hal",
+            "//runtime/config/hal:external_driver_registry",
+            ":external_registry_api",
+        ] + iree_select({
+            "//runtime/config/hal:driver_amd": [
+                "//runtime/src/iree/hal/driver/amd/registration",
+            ],
+            "//conditions:default": [],
+        }) +
+        iree_select({
+            "//runtime/config/hal:driver_task": [
+                "//runtime/src/iree/hal/driver/task/registration",
+            ],
+            "//conditions:default": [],
+        }) +
+        iree_select({
+            "//runtime/config/hal:driver_vulkan": [
+                "//runtime/src/iree/hal/driver/vulkan/registration",
+            ],
+            "//conditions:default": [],
+        }) +
+        iree_select({
+            "//runtime/config/hal:driver_webgpu": [
+                "//runtime/src/iree/hal/driver/webgpu/registration",
+            ],
+            "//conditions:default": [],
+        })
+    ),
+)
+
+iree_cmake_extra_content(
+    content = "iree_configure_external_hal_drivers()",
+    inline = True,
+)
+
+iree_assert_dependency_boundary(
+    name = "no_legacy_amdgpu_dependencies",
+    forbidden_subtrees = ["//runtime/src/iree/hal/driver/amdgpu/..."],
+    target = ":driver",
+)

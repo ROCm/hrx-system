@@ -319,7 +319,7 @@ class CliTest(unittest.TestCase):
                 "build",
                 "--",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amdgpu/...",
             ]
         )
 
@@ -329,7 +329,7 @@ class CliTest(unittest.TestCase):
                 "build",
                 "--",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amdgpu/...",
             ],
         )
 
@@ -340,7 +340,7 @@ class CliTest(unittest.TestCase):
                 "test",
                 "--test_tag_filters=-requires-gpu",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amdgpu/...",
             ]
         )
 
@@ -352,7 +352,7 @@ class CliTest(unittest.TestCase):
                 "--test_tag_filters=-requires-gpu",
                 "--",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amdgpu/...",
             ],
         )
 
@@ -393,7 +393,7 @@ class CliTest(unittest.TestCase):
                 "bazel",
                 "query",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amdgpu/...",
             ]
         )
 
@@ -403,7 +403,7 @@ class CliTest(unittest.TestCase):
                 "query",
                 "--",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/amdgpu/...",
+                "-//runtime/src/iree/hal/driver/amdgpu/...",
             ],
         )
 
@@ -786,7 +786,7 @@ class CliTest(unittest.TestCase):
                 "-o",
                 "out/compile_commands.json",
                 "//runtime/...",
-                "-//runtime/src/iree/hal/drivers/cuda/...",
+                "-//runtime/src/iree/hal/driver/cuda/...",
             ]
         )
 
@@ -796,7 +796,7 @@ class CliTest(unittest.TestCase):
         self.assertIn("--config=asan", description)
         self.assertIn("out/compile_commands.json", description)
         self.assertIn("//runtime/...", description)
-        self.assertIn("-//runtime/src/iree/hal/drivers/cuda/...", description)
+        self.assertIn("-//runtime/src/iree/hal/driver/cuda/...", description)
 
     def test_bazel_clang_tidy_target_runs_aspect_directly(self):
         args = cli.parse_arguments(
@@ -899,7 +899,7 @@ class CliTest(unittest.TestCase):
 
     def test_bazel_clang_tidy_scopes_complete_runtime_driver_configuration(self):
         cases = (
-            (["//runtime/src/iree/hal/drivers/amd/gpu/cts:driver_test"], True),
+            (["//runtime/src/iree/hal/driver/amd/gpu/cts:driver_test"], True),
             (["//runtime/..."], True),
             (["//..."], True),
             (["//runtime/...", "-//runtime/..."], False),

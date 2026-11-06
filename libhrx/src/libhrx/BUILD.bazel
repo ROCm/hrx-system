@@ -75,22 +75,22 @@ HRX_DEPS = [
     "//runtime/src/iree/hal/memory:slab_provider",
     "//runtime/src/iree/hal/memory:slab_cache",
     "//runtime/src/iree/hal/memory:tlsf_pool",
-    "//runtime/src/iree/hal/drivers/task:driver",
-    "//runtime/src/iree/hal/drivers/task/executable/loaders/registration",
+    "//runtime/src/iree/hal/driver/task:driver",
+    "//runtime/src/iree/hal/driver/task/executable/loaders/registration",
     "//runtime/src/iree/hal/utils:profile_file",
     "//runtime/src/iree/hal/utils:resource_set",
     "//runtime/src/iree/io:file_handle",
     "//runtime/src/iree/task:api",
 ] + iree_select({
     "//runtime/config/hal:driver_amd_gpu": [
-        "//runtime/src/iree/hal/drivers/amd/registration",
-        "//runtime/src/iree/hal/drivers/amd/gpu/target:selection",
+        "//runtime/src/iree/hal/driver/amd/registration",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:selection",
     ],
     "//conditions:default": [],
 }) + iree_select({
     "//runtime/config/hal:driver_amdgpu": [
-        "//runtime/src/iree/hal/drivers/amdgpu/registration",
-        "//runtime/src/iree/hal/drivers/amdgpu/target:selection",
+        "//runtime/src/iree/hal/driver/amdgpu/registration",
+        "//runtime/src/iree/hal/driver/amdgpu/target:selection",
     ],
     "//conditions:default": [],
 })

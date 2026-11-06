@@ -100,7 +100,7 @@ iree_runtime_cc_test(
 
 iree_cmake_extra_content(
     content = """
-if(TARGET iree::hal::drivers::task::registration)
+if(TARGET iree::hal::driver::task::registration)
 """,
     inline = True,
 )
@@ -117,7 +117,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/task/registration",
+        "//runtime/src/iree/hal/driver/task/registration",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

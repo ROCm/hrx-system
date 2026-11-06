@@ -11,8 +11,8 @@
 
 #include "iree/base/byte_sequence.h"
 #include "iree/base/internal/arena.h"
-#include "iree/hal/drivers/amd/gpu/image/hsaco.h"
-#include "iree/hal/drivers/amd/gpu/image/image.h"
+#include "iree/hal/driver/amd/gpu/image/hsaco.h"
+#include "iree/hal/driver/amd/gpu/image/image.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/symbol_facts.h"

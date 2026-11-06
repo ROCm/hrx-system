@@ -6,7 +6,7 @@
 
 #include <stdio.h>
 
-#include "iree/hal/drivers/amd/registration/driver_module.h"
+#include "iree/hal/driver/amd/registration/driver_module.h"
 #include "loom/tools/loom-serve/activity_test.h"
 #include "loomc/target/amdgpu/base.h"
 #include "loomc/target/amdgpu/iree_hal.h"

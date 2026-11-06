@@ -66,7 +66,7 @@ The benchmark executable is not part of the installed libamdf distribution.
 
 ## XDNA execution through the HAL
 
-The [XDNA HAL queue benchmark](../../runtime/src/iree/hal/drivers/amd/xdna/README.md#queue-benchmarks)
+The [XDNA HAL queue benchmark](../../runtime/src/iree/hal/driver/amd/xdna/README.md#queue-benchmarks)
 measures ready dispatch, unresolved dependencies, streaming and executable
 switching through the production HAL. It separates submit-only intervals from
 checked completion. Its timings include HAL operation capture, dependency

@@ -3,7 +3,7 @@
 Loom compiles tile programs and their array transport into a native `.xdna`
 executable. The product contains AIE2P instructions, initialized data, array
 configuration, explicit storage and binding requirements, and native invocation
-ranges. The [XDNA HAL](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/README.md)
+ranges. The [XDNA HAL](../../../../../../../runtime/src/iree/hal/driver/amd/xdna/README.md)
 loads and executes it through
 [libamdf](../../../../../../../libamdf/docs/xdna.md); compilation does not invoke
 the AIE SDK, LLVM, Python, or an external linker.
@@ -21,8 +21,8 @@ worker coordinates and memory pools select placement before native emission.
 | --- | --- |
 | Write a streamed program or author AIE2P Low | [Source lowering examples](aie2p/test/source_low/) and [Low descriptor fixtures](aie2p/test/descriptors/) |
 | Embed the compiler | [Public XDNA C binding](../../../../../../binding/c/include/loomc/target/amd/xdna.h) |
-| Understand the executable contract | [Native image format and lifecycle](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/image/README.md) |
-| Load and execute a compiled image | [XDNA HAL and normal Loom test workflow](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/README.md) |
+| Understand the executable contract | [Native image format and lifecycle](../../../../../../../runtime/src/iree/hal/driver/amd/xdna/image/README.md) |
+| Load and execute a compiled image | [XDNA HAL and normal Loom test workflow](../../../../../../../runtime/src/iree/hal/driver/amd/xdna/README.md) |
 | Compare compiler work across targets | [Shared benchmark workloads](../../../../../../binding/c/benchmark/kernels/README.md) |
 
 ## Target identity
@@ -219,7 +219,7 @@ mandatory host dispatch per tile function.
 The format has no fixed ARRAY/CONTROL split, XRT argument-patching contract, or
 precompiled PDI dependency. libamdf owns device/context establishment and family
 bootstrap. Loom owns the executable protocol, and the caller owns its completion
-frontier and backing lifetime. The [image specification](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/image/README.md)
+frontier and backing lifetime. The [image specification](../../../../../../../runtime/src/iree/hal/driver/amd/xdna/image/README.md)
 defines this boundary precisely.
 
 ## Support and evidence
@@ -240,7 +240,7 @@ unsupported cases instead of silently changing floating-point behavior.
 
 Compiler transformations and diagnostics are exercised through `.loom-test`
 fixtures. C tests cover API and representation contracts. The
-[native HAL CTS](../../../../../../../runtime/src/iree/hal/drivers/amd/xdna/cts/)
+[native HAL CTS](../../../../../../../runtime/src/iree/hal/driver/amd/xdna/cts/)
 verifies loading, binding, repeated execution, numerical outputs, and resource
 lifetimes through libamdf on matching hardware. The
 [normal Loom HAL scenario](../../../../../../target/amd/xdna/test/native/hal_execution.loom)

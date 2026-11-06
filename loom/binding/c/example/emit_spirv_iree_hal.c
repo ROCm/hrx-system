@@ -14,7 +14,7 @@
 #include "iree/base/api.h"
 #include "iree/base/threading/numa.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/init.h"
+#include "iree/hal/driver/init.h"
 #include "loomc/iree.h"
 #include "loomc/loomc.h"
 #include "loomc/target/iree_hal.h"

@@ -55,7 +55,7 @@ _DEPS = [
     "//runtime/src/iree/base",
     "//runtime/src/iree/base/threading",
     "//runtime/src/iree/hal",
-    "//runtime/src/iree/hal/drivers",
+    "//runtime/src/iree/hal/driver",
 ]
 
 loom_cc_binary(

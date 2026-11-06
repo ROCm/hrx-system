@@ -228,7 +228,7 @@ iree_runtime_cc_test(
 
 iree_cmake_extra_content(
     content = """
-if(TARGET iree::hal::drivers::task::registration)
+if(TARGET iree::hal::driver::task::registration)
 """,
     inline = True,
 )
@@ -245,7 +245,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/task/registration",
+        "//runtime/src/iree/hal/driver/task/registration",
         "//runtime/src/iree/hal/memory:tlsf_pool",
         "//runtime/src/iree/hal/testing:mock_device",
         "//runtime/src/iree/io:file_handle",
@@ -268,7 +268,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/task/registration",
+        "//runtime/src/iree/hal/driver/task/registration",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -290,7 +290,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/task/registration",
+        "//runtime/src/iree/hal/driver/task/registration",
         "//runtime/src/iree/hal/memory:passthrough_pool",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",
@@ -310,8 +310,8 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/task/executable/elf/testdata:elementwise_mul_native",
-        "//runtime/src/iree/hal/drivers/task/registration",
+        "//runtime/src/iree/hal/driver/task/executable/elf/testdata:elementwise_mul_native",
+        "//runtime/src/iree/hal/driver/task/registration",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -375,7 +375,7 @@ iree_runtime_cc_test(
 
 iree_cmake_extra_content(
     content = """
-if(TARGET iree::hal::drivers::task::registration)
+if(TARGET iree::hal::driver::task::registration)
 """,
     inline = True,
 )
@@ -397,7 +397,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/task/registration",
+        "//runtime/src/iree/hal/driver/task/registration",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -421,7 +421,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/task/registration",
+        "//runtime/src/iree/hal/driver/task/registration",
         "//runtime/src/iree/hal/memory:fixed_block_pool",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",
@@ -447,7 +447,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/task/registration",
+        "//runtime/src/iree/hal/driver/task/registration",
         "//runtime/src/iree/hal/testing:mock_device",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/testing:gtest",

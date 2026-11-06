@@ -233,14 +233,14 @@ cc_library(
                 functions = bazel_to_cmake_converter.BuildFileFunctions(
                     converter=converter,
                     targets=bazel_to_cmake_targets.TargetConverter(repo_map={}),
-                    build_dir=f"/repo/runtime/src/iree/hal/drivers/{driver}/image",
+                    build_dir=f"/repo/runtime/src/iree/hal/driver/{driver}/image",
                     repo_root="/repo",
                 )
                 functions._iree_amdgpu_binary_variants_embed_data(
                     name="hip_images",
                     target="amdgcn-amd-amdhsa",
                     srcs=["image.hip"],
-                    target_selectors_flag=f"//runtime/src/iree/hal/drivers/{driver}:targets",
+                    target_selectors_flag=f"//runtime/src/iree/hal/driver/{driver}:targets",
                     source_format="hip",
                     testonly=True,
                 )
@@ -338,7 +338,7 @@ cc_library(
             """
 package_group(
     name = "implementation_consumers",
-    packages = ["//runtime/src/iree/hal/drivers/task/..."],
+    packages = ["//runtime/src/iree/hal/driver/task/..."],
     includes = ["//runtime:other_consumers"],
 )
 """,
@@ -773,13 +773,13 @@ cc_library(
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
             targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-            build_dir="runtime/src/iree/hal/drivers/task/executable/elf/testdata",
+            build_dir="runtime/src/iree/hal/driver/task/executable/elf/testdata",
         )
 
         functions.cc_binary(
             name="elementwise_mul_library.so",
             srcs=["elementwise_mul_library.c"],
-            deps=["//runtime/src/iree/hal/drivers/task/executable/library:abi"],
+            deps=["//runtime/src/iree/hal/driver/task/executable/library:abi"],
             testonly=True,
             linkshared=True,
         )
@@ -789,7 +789,7 @@ cc_library(
         self.assertIn("  SHARED\n", converter.body)
         self.assertIn("  TESTONLY\n", converter.body)
         self.assertIn(
-            "iree::hal::drivers::task::executable::library::abi", converter.body
+            "iree::hal::driver::task::executable::library::abi", converter.body
         )
 
     def test_cc_library_linkopts_expand_location_make_variables(self):
@@ -827,14 +827,14 @@ cc_library(
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
             targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-            build_dir="runtime/src/iree/hal/drivers/task/executable/elf/testdata",
+            build_dir="runtime/src/iree/hal/driver/task/executable/elf/testdata",
             repo_root=str(repo_root),
         )
 
         functions.cc_binary(
             name="elementwise_mul_library.so",
             srcs=["elementwise_mul_library.c"],
-            deps=["//runtime/src/iree/hal/drivers/task/executable/library:abi"],
+            deps=["//runtime/src/iree/hal/driver/task/executable/library:abi"],
             testonly=True,
             linkshared=True,
         )
@@ -850,7 +850,7 @@ cc_library(
         )
 
         self.assertIn(
-            "$<TARGET_FILE:iree::hal::drivers::task::executable::elf::testdata::elementwise_mul_library.so>",
+            "$<TARGET_FILE:iree::hal::driver::task::executable::elf::testdata::elementwise_mul_library.so>",
             converter.body,
         )
         self.assertNotIn('"elementwise_mul_library.so"', converter.body)
@@ -861,7 +861,7 @@ cc_library(
         functions = bazel_to_cmake_converter.BuildFileFunctions(
             converter=converter,
             targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-            build_dir=("runtime/src/iree/hal/drivers/task/executable/elf/testdata"),
+            build_dir=("runtime/src/iree/hal/driver/task/executable/elf/testdata"),
             repo_root=str(repo_root),
         )
 
@@ -902,7 +902,7 @@ cc_library(
     def test_c_embed_data_srcs_preserve_source_file_labels(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             repo_root = Path(temporary_directory)
-            package = "runtime/src/iree/hal/drivers/task/executable/elf/testdata"
+            package = "runtime/src/iree/hal/driver/task/executable/elf/testdata"
             source_directory = repo_root / package
             source_directory.mkdir(parents=True)
             (source_directory / "elementwise_mul_library.c").touch()
@@ -924,7 +924,7 @@ cc_library(
             )
 
         self.assertIn(
-            '"${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/drivers/task/executable/elf/testdata/'
+            '"${PROJECT_SOURCE_DIR}/runtime/src/iree/hal/driver/task/executable/elf/testdata/'
             'elementwise_mul_library.c"',
             converter.body,
         )

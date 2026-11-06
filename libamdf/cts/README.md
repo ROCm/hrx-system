@@ -21,7 +21,7 @@ Resident cases exercise both dataflow initiators, one/two credits, independently
 progressing workers and explicit startup/drain, with no intermediate host relay.
 Finite cases join native phases on the host without accessing shared payloads
 between those phases. The
-[XDNA HAL native suite](../../runtime/src/iree/hal/drivers/amd/xdna/README.md#verification)
+[XDNA HAL native suite](../../runtime/src/iree/hal/driver/amd/xdna/README.md#verification)
 separately exercises the production image loader, pools, dispatch and completion.
 The XDNA API
 [queue cases](xdna/kernel_queue_test.cc) cover immutable ranges, capacity,
@@ -125,7 +125,7 @@ python build_tools/devtools/ci.py iree-cmake-xdna-asan
 The client configurations compile RDNA and XDNA together, including both Loom
 emitters for authored fixtures. Linux selects host and XDNA execution; Windows
 also admits native GPU, Vulkan and D3D12 resources. The jobs cover
-`//libamdf/...` and `//runtime/src/iree/hal/drivers/amd/...` without enabling the
+`//libamdf/...` and `//runtime/src/iree/hal/driver/amd/...` without enabling the
 legacy AMDGPU HAL:
 
 ```sh
@@ -204,6 +204,6 @@ publication-only and completed-operation intervals. Generated memory benchmark
 smoke tests use the shared hardware resource group and a single iteration;
 capability absence is a skip, while native or byte-check failures terminate the
 run. The XDNA HAL queue benchmark's smoke invocation is documented in the
-[HAL benchmark guide](../../runtime/src/iree/hal/drivers/amd/xdna/README.md#queue-benchmarks). Instrumented and smoke
+[HAL benchmark guide](../../runtime/src/iree/hal/driver/amd/xdna/README.md#queue-benchmarks). Instrumented and smoke
 runs do not supply performance numbers. Optimized measurements retain their
 exact timed boundary, raw repetitions, build identity and machine policy.

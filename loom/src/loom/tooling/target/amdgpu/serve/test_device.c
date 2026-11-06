@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/amd/registration/driver_module.h"
+#include "iree/hal/driver/amd/registration/driver_module.h"
 #include "loom/runtime/testing/device.h"
 
 const loom_runtime_test_device_t* loom_runtime_test_device(void) {

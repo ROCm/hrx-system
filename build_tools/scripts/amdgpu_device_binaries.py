@@ -32,7 +32,7 @@ import target_map as amdgpu_target_map
 TARGET_TRIPLE = "amdgcn-amd-amdhsa"
 DEFAULT_TARGET_SELECTIONS = amdgpu_target_map.DEFAULT_TARGET_SELECTIONS
 AMDGPU_TARGET_ENV = "IREE_HAL_AMDGPU_TARGETS"
-DEVICE_PACKAGE_PATH = Path("runtime/src/iree/hal/drivers/amdgpu/device")
+DEVICE_PACKAGE_PATH = Path("runtime/src/iree/hal/driver/amdgpu/device")
 DEVICE_SOURCE_LIST_PATH = DEVICE_PACKAGE_PATH / "device_bitcode_sources.bzl"
 DEVICE_SOURCE_LIST_VARIABLE = "IREE_HAL_AMDGPU_DEVICE_BITCODE_SRCS"
 

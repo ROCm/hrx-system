@@ -48,7 +48,7 @@ iree_string_list_flag(
 # containing the driver modules they explicitly compose into their binary.
 label_flag(
     name = "external_driver_registry",
-    build_setting_default = "//runtime/src/iree/hal/drivers:empty_external_driver_registry",
+    build_setting_default = "//runtime/src/iree/hal/driver:empty_external_driver_registry",
 )
 
 [

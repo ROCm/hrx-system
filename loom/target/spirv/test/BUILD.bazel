@@ -251,7 +251,7 @@ loom_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/hal/drivers/vulkan/cts:backends",
+        "//runtime/src/iree/hal/driver/vulkan/cts:backends",
         "//runtime/src/iree/testing:gtest",
     ],
 )
@@ -299,7 +299,7 @@ loom_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:registry",
         "//runtime/src/iree/hal/cts/util:test_base",
-        "//runtime/src/iree/hal/drivers/vulkan/cts:backends",
+        "//runtime/src/iree/hal/driver/vulkan/cts:backends",
         "//runtime/src/iree/testing:gtest",
     ],
 )

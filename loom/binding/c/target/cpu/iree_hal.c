@@ -7,7 +7,7 @@
 #include "loomc/target/cpu/iree_hal.h"
 
 #include "diagnostic.h"
-#include "iree/hal/drivers/task/device_spec.h"
+#include "iree/hal/driver/task/device_spec.h"
 #include "loom/target/selection.h"
 #include "loomc/iree.h"
 #include "result.h"

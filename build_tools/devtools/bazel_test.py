@@ -245,7 +245,7 @@ class BazelTest(unittest.TestCase):
         output = (
             "//runtime/src/iree/hal:device_spec_fuzz\n"
             "//runtime/src/iree/base:base\n"
-            "//runtime/src/iree/hal/drivers/amd/xdna/cts:native_replay_stress\n"
+            "//runtime/src/iree/hal/driver/amd/xdna/cts:native_replay_stress\n"
         )
         with mock.patch.object(
             bazel_dev,
@@ -263,7 +263,7 @@ class BazelTest(unittest.TestCase):
             targets,
             [
                 "//runtime/src/iree/base:base",
-                "//runtime/src/iree/hal/drivers/amd/xdna/cts:native_replay_stress",
+                "//runtime/src/iree/hal/driver/amd/xdna/cts:native_replay_stress",
                 "//runtime/src/iree/hal:device_spec_fuzz",
             ],
         )

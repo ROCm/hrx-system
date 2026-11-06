@@ -66,7 +66,7 @@ class RuntimeBuildFileFunctions(
         kwargs = self._apply_runtime_cmake_policy(kwargs)
         if (
             self._package_name()
-            == "runtime/src/iree/hal/drivers/task/executable/loaders/registration"
+            == "runtime/src/iree/hal/driver/task/executable/loaders/registration"
         ):
             deps = deps + ["${IREE_HAL_EXECUTABLE_LOADER_EXTRA_DEPS}"]
         self.cc_library(deps=deps + ["//runtime/src:defines"], **kwargs)
@@ -264,7 +264,7 @@ class RuntimeBuildFileFunctions(
 
     def iree_hal_amdgpu_source_device_binaries(self, name):
         module = (
-            "//runtime/src/iree/hal/drivers/amdgpu/device/binaries/source:targets.bzl"
+            "//runtime/src/iree/hal/driver/amdgpu/device/binaries/source:targets.bzl"
         )
         inputs = list(
             self._loaded_modules.symbol(module, "_GENERATOR_INPUTS", self._build_dir)
@@ -282,7 +282,7 @@ class RuntimeBuildFileFunctions(
     def iree_hal_amdgpu_device_binaries(
         self,
         name,
-        target_selectors_flag="//runtime/src/iree/hal/drivers/amdgpu:targets",
+        target_selectors_flag="//runtime/src/iree/hal/driver/amdgpu:targets",
         target="amdgcn-amd-amdhsa",
     ):
         self._converter.body += (
@@ -305,7 +305,7 @@ PROJECT_CONFIG = bazel_to_cmake_config.ProjectConfig(
     target_mappings={
         "//runtime/src:defines": ["iree::defines"],
         "//runtime/config/hal:external_driver_registry": [
-            "iree::hal::drivers::configured_external_driver_registry"
+            "iree::hal::driver::configured_external_driver_registry"
         ],
         "@iree_macos_toolchain//:Foundation": ['"-framework Foundation"'],
     },

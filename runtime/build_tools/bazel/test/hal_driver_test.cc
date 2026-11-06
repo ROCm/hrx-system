@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/drivers/external_registry.h"
+#include "iree/hal/driver/external_registry.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "runtime/build_tools/bazel/test/hal_driver_registration_fixture.h"

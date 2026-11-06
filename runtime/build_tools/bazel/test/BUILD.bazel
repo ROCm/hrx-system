@@ -73,7 +73,7 @@ iree_runtime_cc_test(
         ":hal_driver_registration_fixture",
         ":selected_hal_driver_registry_fixture",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers:external_registry_api",
+        "//runtime/src/iree/hal/driver:external_registry_api",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

@@ -14,7 +14,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/base/tracing.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/task/executable/loaders/registration/init.h"
+#include "iree/hal/driver/task/executable/loaders/registration/init.h"
 #include "iree/hal/utils/resource_set.h"
 #include "iree_hal_compat.h"
 #include "mem_pool_backing.h"
