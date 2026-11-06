@@ -578,6 +578,8 @@ _SPIRV_EXECUTION_XFAILS = {
     "numeric/float/trigonometry.loom:@ordinary_trigonometry": "LOWERING/036",
     "numeric/float/turns.loom:@turn_values": "LOWERING/036",
     "numeric/integer/bitfield.loom:@bitfield_values": "TARGET/003",
+    # SPIR-V indices have a 32-bit carrier even when i64 arithmetic is enabled.
+    "numeric/integer/division.loom:@wide_index_division_values": "SPIRV/026,SPIRV/027,TARGET/005",
     "numeric/integer/wide/address_comparison.loom:@mixed_width_index_comparison_values": "SPIRV/026",
     "numeric/matrix/nvfp4.loom:@nvfp4_matrix_values": "TARGET/002",
     # BF16-capable profiles reach the missing FMA contract; other devices reject
