@@ -1136,6 +1136,10 @@ class CliTest(unittest.TestCase):
         self.assertEqual(bazel_dev.process_exit_code(7), 7)
 
     def test_bazel_aliases_include_query_cquery_info(self):
+        self.assertEqual(
+            aliases.BAZEL_ALIASES["iree-bazel-coverage"],
+            ["bazel", "coverage"],
+        )
         self.assertEqual(aliases.BAZEL_ALIASES["iree-bazel-query"], ["bazel", "query"])
         self.assertEqual(
             aliases.BAZEL_ALIASES["iree-bazel-cquery"], ["bazel", "cquery"]
@@ -1335,6 +1339,26 @@ class CliTest(unittest.TestCase):
         self.assertIn("Wrapper flags", output)
         self.assertNotIn("python dev.py", output)
         self.assertNotIn("### CMake", output)
+
+    def test_bazel_coverage_uses_native_llvm_profile(self):
+        args = cli.parse_arguments(
+            ["bazel", "coverage", "//runtime/src/iree/base:string_view_test"]
+        )
+
+        description = normalized_plan_description(args.handler(args))
+
+        self.assertIn("bazel coverage --config=llvm-coverage", description)
+        self.assertIn("//runtime/src/iree/base:string_view_test", description)
+
+    def test_bazel_coverage_agents_md_explains_scope(self):
+        output = self.parse_agents_md(["bazel", "coverage", "--agents_md"])
+
+        self.assertIn("## iree-bazel-coverage", output)
+        self.assertIn("native LLVM source", output)
+        self.assertIn("combined LCOV report", output)
+        self.assertIn("_coverage_report.dat", output)
+        self.assertIn("different denominators", output)
+        self.assertIn("//loom/src/loom[/:]", output)
 
     def test_bazel_run_agents_md_explains_process_contract(self):
         output = self.parse_agents_md(["bazel", "run", "--agents_md"])

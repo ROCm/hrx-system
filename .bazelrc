@@ -169,6 +169,29 @@ test:presubmit-keep-going --config=presubmit
 test:presubmit-keep-going --keep_going
 
 # -----------------------------------------------------------------------------
+# Source coverage.
+# -----------------------------------------------------------------------------
+
+# Bazel's generic coverage feature is toolchain-defined and some Clang
+# toolchains still spell it as GCC's --coverage. Disable that feature and own
+# the native LLVM instrumentation explicitly so local and remote Clang actions
+# produce the same profile format. Atomic counter updates preserve coverage
+# counts for the multithreaded runtime tests.
+build:llvm-coverage --features=-coverage
+build:llvm-coverage --copt=-fprofile-instr-generate
+build:llvm-coverage --copt=-fcoverage-mapping
+build:llvm-coverage --copt=-fprofile-update=atomic
+build:llvm-coverage --linkopt=-fprofile-instr-generate
+build:llvm-coverage --cc_output_directory_tag=llvm-coverage
+
+# LLVM covmap collection initially produces indexed profile data. Request the
+# LCOV conversion explicitly so Bazel's combined report does not silently
+# contain only zero-count baseline records.
+coverage:llvm-coverage --experimental_use_llvm_covmap
+coverage:llvm-coverage --experimental_generate_llvm_lcov
+coverage:llvm-coverage --combined_report=lcov
+
+# -----------------------------------------------------------------------------
 # Sanitizers.
 # -----------------------------------------------------------------------------
 

@@ -41,6 +41,7 @@ PASSTHROUGH_COMMANDS = {
             "configure",
             "build",
             "test",
+            "coverage",
             "query",
             "cquery",
             "aquery",
@@ -744,7 +745,14 @@ def add_lane_commands(subparsers: argparse._SubParsersAction, lane: str) -> None
     test_parser.set_defaults(handler=handle_test, lane=lane)
 
     if lane == "bazel":
-        for command_name in ("query", "cquery", "aquery", "info", "shutdown"):
+        for command_name in (
+            "coverage",
+            "query",
+            "cquery",
+            "aquery",
+            "info",
+            "shutdown",
+        ):
             command_help = help_text.lane_command_help(lane, command_name)
             command_parser = add_subparser(
                 lane_subparsers,
@@ -1276,6 +1284,8 @@ def handle_test(args: argparse.Namespace) -> CommandPlan:
 def handle_bazel_direct_command(args: argparse.Namespace) -> CommandPlan:
     tool_env = existing_or_system_environment(args)
     backend_args = bazel_args_with_target_separator(forwarded_args(args.args))
+    if args.backend_command == "coverage":
+        backend_args = ["--config=llvm-coverage", *backend_args]
     return CommandPlan(
         [
             ExecCommandStep(
