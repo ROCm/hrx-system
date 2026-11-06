@@ -37,6 +37,7 @@ class ExportedDependenciesTest(unittest.TestCase):
         self.assertEqual(
             backtrace.patches,
             (
+                "//build_tools/third_party/libbacktrace:explicit_integer_conversions.patch",
                 "//build_tools/third_party/libbacktrace:threaded_cache_reads.patch",
                 "//build_tools/third_party/libbacktrace:ignore_nonruntime_symbols.patch",
                 "//build_tools/third_party/libbacktrace:zero_size_vectors.patch",
