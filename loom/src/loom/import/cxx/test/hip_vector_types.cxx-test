@@ -1,0 +1,97 @@
+// RUN: roundtrip
+#include <hip/hip_vector_types.h>
+
+#define CHECK_HIP_VECTOR_FAMILY(Name, Scalar, MakeScalar)                     \
+  static_assert(sizeof(Name##1) == sizeof(Scalar));                           \
+  static_assert(alignof(Name##1) == alignof(Scalar));                         \
+  static_assert(__builtin_offsetof(Name##1, x) == 0);                         \
+  static_assert(sizeof(Name##2) == 2 * sizeof(Scalar));                       \
+  static_assert(alignof(Name##2) == 2 * sizeof(Scalar));                      \
+  static_assert(sizeof(Name##3) == 3 * sizeof(Scalar));                       \
+  static_assert(alignof(Name##3) == alignof(Scalar));                         \
+  static_assert(__builtin_offsetof(Name##3, x) == 0);                         \
+  static_assert(__builtin_offsetof(Name##3, y) == sizeof(Scalar));            \
+  static_assert(__builtin_offsetof(Name##3, z) == 2 * sizeof(Scalar));        \
+  static_assert(sizeof(Name##4) == 4 * sizeof(Scalar));                       \
+  static_assert(alignof(Name##4) == 4 * sizeof(Scalar));                      \
+  static_assert(__is_same(decltype(&make_##Name##1),                          \
+                          Name##1 (*)(MakeScalar)));                          \
+  static_assert(__is_same(decltype(&make_##Name##2),                          \
+                          Name##2 (*)(MakeScalar, MakeScalar)));              \
+  static_assert(__is_same(                                                    \
+      decltype(&make_##Name##3),                                              \
+      Name##3 (*)(MakeScalar, MakeScalar, MakeScalar)));                      \
+  static_assert(__is_same(                                                    \
+      decltype(&make_##Name##4),                                              \
+      Name##4 (*)(MakeScalar, MakeScalar, MakeScalar, MakeScalar)));          \
+  static_assert(                                                              \
+      __is_same(decltype(make_##Name##1(static_cast<Scalar>(0))), Name##1));  \
+  static_assert(__is_same(decltype(make_##Name##2(static_cast<Scalar>(0),     \
+                                                  static_cast<Scalar>(0))),   \
+                          Name##2));                                          \
+  static_assert(__is_same(                                                    \
+      decltype(make_##Name##3(static_cast<Scalar>(0), static_cast<Scalar>(0), \
+                              static_cast<Scalar>(0))),                       \
+      Name##3));                                                              \
+  static_assert(__is_same(                                                    \
+      decltype(make_##Name##4(static_cast<Scalar>(0), static_cast<Scalar>(0), \
+                              static_cast<Scalar>(0),                         \
+                              static_cast<Scalar>(0))),                       \
+      Name##4))
+
+CHECK_HIP_VECTOR_FAMILY(char, char, signed char);
+CHECK_HIP_VECTOR_FAMILY(uchar, unsigned char, unsigned char);
+CHECK_HIP_VECTOR_FAMILY(short, short, short);
+CHECK_HIP_VECTOR_FAMILY(ushort, unsigned short, unsigned short);
+CHECK_HIP_VECTOR_FAMILY(int, int, int);
+CHECK_HIP_VECTOR_FAMILY(uint, unsigned int, unsigned int);
+CHECK_HIP_VECTOR_FAMILY(long, long, long);
+CHECK_HIP_VECTOR_FAMILY(ulong, unsigned long, unsigned long);
+CHECK_HIP_VECTOR_FAMILY(longlong, long long, long long);
+CHECK_HIP_VECTOR_FAMILY(ulonglong, unsigned long long, unsigned long long);
+CHECK_HIP_VECTOR_FAMILY(float, float, float);
+CHECK_HIP_VECTOR_FAMILY(double, double, double);
+
+#undef CHECK_HIP_VECTOR_FAMILY
+
+unsigned transport(const uint4* source, uint4* destination,
+                   unsigned replacement) {
+  uint4 value = *source;
+  value.x = replacement;
+  value.w += value.y;
+  *destination = value;
+  return value.z;
+}
+
+unsigned construct(unsigned input) {
+  uint4 value{input, 2u, 3u, 4u};
+  return value.x + value.y + value.z + value.w;
+}
+
+// ----
+func.def public @transport(%source: buffer, %source_byte_offset: offset, %destination: buffer, %destination_byte_offset: offset, %replacement: i32) -> (i32) {
+  %6 = buffer.view %source[%source_byte_offset] : buffer -> view<4xi32>
+  %value$7 = vector.load %6[0] : view<4xi32> -> vector<4xi32>
+  %value$8 = vector.insert %replacement into %value$7[0] : i32, vector<4xi32>
+  %9 = vector.extract %value$8[1] : vector<4xi32> -> i32
+  %10 = vector.extract %value$8[3] : vector<4xi32> -> i32
+  %11 = scalar.addi %10, %9 : i32
+  %value$12 = vector.insert %11 into %value$8[3] : i32, vector<4xi32>
+  %13 = buffer.view %destination[%destination_byte_offset] : buffer -> view<4xi32>
+  vector.store %value$12, %13[0] : vector<4xi32>, view<4xi32>
+  %14 = vector.extract %value$12[2] : vector<4xi32> -> i32
+  func.return %14 : i32
+}
+
+func.def public @construct(%input: i32) -> (i32) {
+  %17 = vector.constanti [0, 2, 3, 4] : vector<4xi32>
+  %value = vector.insert %input into %17[0] : i32, vector<4xi32>
+  %19 = vector.extract %value[0] : vector<4xi32> -> i32
+  %20 = vector.extract %value[1] : vector<4xi32> -> i32
+  %21 = scalar.addi %19, %20 : i32
+  %22 = vector.extract %value[2] : vector<4xi32> -> i32
+  %23 = scalar.addi %21, %22 : i32
+  %24 = vector.extract %value[3] : vector<4xi32> -> i32
+  %25 = scalar.addi %23, %24 : i32
+  func.return %25 : i32
+}

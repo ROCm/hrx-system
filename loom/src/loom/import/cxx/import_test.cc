@@ -554,7 +554,8 @@ TEST_F(ImportTest, RejectsUnknownLanguageStandard) {
 
 TEST_F(ImportTest, EmbeddedFacadeAndExternalProviderAgree) {
   const auto source = IREE_SV(
-      "#include <hip/hip_runtime.h>\n#include <hip/hip_fp16.h>\n"
+      "#include <hip/hip_runtime.h>\n#include <hip/hip_vector_types.h>\n"
+      "#include <hip/hip_fp16.h>\n"
       "#include <loomcxx/atomic.h>\n"
       "__global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(2, "
       "1, 1)]] "
@@ -582,12 +583,12 @@ TEST_F(ImportTest, EmbeddedFacadeAndExternalProviderAgree) {
   // The provider borrows the same immutable source bytes under an external
   // include root; preprocessing and binding resolution remain identical.
   for (const char* name :
-       {"type_traits", "hip/hip_runtime.h", "hip/hip_fp16.h",
-        "loomcxx/kernel.h", "loomcxx/atomic.h", "loomcxx/buffer.h",
-        "loomcxx/cache.h", "loomcxx/math.h", "loomcxx/predicate.h",
-        "loomcxx/scalar.h", "loomcxx/view.h", "loomcxx/encoding_type.h",
-        "loomcxx/index.h", "loomcxx/shape.h", "loomcxx/target.h",
-        "loomcxx/target/amdgpu.h"}) {
+       {"type_traits", "hip/hip_runtime.h", "hip/hip_vector_types.h",
+        "hip/hip_fp16.h", "loomcxx/kernel.h", "loomcxx/atomic.h",
+        "loomcxx/buffer.h", "loomcxx/cache.h", "loomcxx/math.h",
+        "loomcxx/predicate.h", "loomcxx/scalar.h", "loomcxx/view.h",
+        "loomcxx/encoding_type.h", "loomcxx/index.h", "loomcxx/shape.h",
+        "loomcxx/target.h", "loomcxx/target/amdgpu.h"}) {
     auto contents = loom::cxx_import::builtin_include(name);
     ASSERT_TRUE(contents.has_value());
     headers_[std::string("/edited/") + name] = *contents;

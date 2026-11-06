@@ -23,6 +23,7 @@ iree_package_boundary(
 exports_files([
     "include/hip/hip_fp16.h",
     "include/hip/hip_runtime.h",
+    "include/hip/hip_vector_types.h",
     "include/loomcxx/atomic.h",
     "include/loomcxx/buffer.h",
     "include/loomcxx/cache.h",

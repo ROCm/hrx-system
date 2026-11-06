@@ -169,6 +169,7 @@ loom_check_test_suite(
         "function_declarations_invalid.cxx-test",
         "functions.cxx-test",
         "group_dot.cxx-test",
+        "hip_vector_types.cxx-test",
         "immutable_objects.cxx-test",
         "immutable_objects_invalid.cxx-test",
         "immutable_strings.cxx-test",
@@ -960,6 +961,7 @@ loom_test(
 )
 
 _AUTHORED_CXX_KERNEL_SOURCES = [
+    "hip_vector_types",
     "padded_vectors",
     "scheduled_sum",
     "vector_initializers",

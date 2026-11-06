@@ -47,6 +47,7 @@ _X86_HOST_COMPATIBLE_WITH = ["@platforms//cpu:x86_64"]
     for name in [
         "array_records",
         "call_lifetimes",
+        "hip_vector_types",
         "integer_intrinsics",
         "padded_vectors",
     ]
