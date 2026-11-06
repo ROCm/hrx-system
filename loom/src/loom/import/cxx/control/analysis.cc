@@ -1745,6 +1745,9 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
                             "expression");
       }
       reference_aliases_[variable] = referent;
+      if (!retain_destination(referent)) {
+        require_identity(referent);
+      }
     }
     retain_reference_initializers(variable, ast->initializer, ast);
     const bool user_record_constructor =

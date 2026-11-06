@@ -42,6 +42,80 @@ func.def public @local_alias(%value$0: i32, %values$1: vector<4xi32>, %lane: i32
 }
 
 // ====
+// Lexical references retain exact nested SSA destinations and observe later
+// whole-object replacements. An identity escape makes the same owner physical.
+struct Pair {
+  unsigned first;
+  unsigned second;
+};
+struct Outer {
+  unsigned prefix;
+  Pair pair;
+};
+unsigned member_references(unsigned first, unsigned second) {
+  Outer value{1u, {first, second}};
+  Pair& pair = value.pair;
+  unsigned& scalar = pair.first;
+  const unsigned& observed = pair.second;
+  pair = Pair{second, first + second};
+  scalar += 3u;
+  pair.second += scalar;
+  return scalar * 100u + observed;
+}
+unsigned escaped_member_reference(unsigned input) {
+  Pair value{input, 2u};
+  unsigned& alias = value.first;
+  unsigned* pointer = &alias;
+  ++*pointer;
+  return value.first;
+}
+
+// ----
+func.def public @member_references(%first: i32, %second: i32) -> (i32) {
+  %value_prefix = scalar.constant 1 : i32
+  %value_pair_second$4 = scalar.addi %first, %second : i32
+  %5 = scalar.constant 3 : i32
+  %value_pair_first = scalar.addi %second, %5 : i32
+  %value_pair_second$7 = scalar.addi %value_pair_second$4, %value_pair_first : i32
+  %8 = scalar.constant 100 : i32
+  %9 = scalar.muli %value_pair_first, %8 : i32
+  %10 = scalar.addi %9, %value_pair_second$7 : i32
+  func.return %10 : i32
+}
+
+func.def public @escaped_member_reference(%input: i32) -> (i32) {
+  %13 = index.constant 8 : offset
+  %value_storage = buffer.alloca<private> align(4) %13 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<8xi8>
+  %17 = index.constant 0 : offset
+  %18 = index.add %value_storage_byte_offset, %17 : offset
+  %19 = index.assume %18 [range(%18, 0, 4)] : offset
+  %20 = buffer.view %value_storage[%19] : buffer -> view<1xi32>
+  view.store %input, %20[0] : i32, view<1xi32>
+  %21 = index.constant 4 : offset
+  %22 = index.add %value_storage_byte_offset, %21 : offset
+  %23 = scalar.constant 2 : i32
+  %24 = index.assume %22 [range(%22, 0, 4)] : offset
+  %25 = buffer.view %value_storage[%24] : buffer -> view<1xi32>
+  view.store %23, %25[0] : i32, view<1xi32>
+  %26 = index.constant 0 : offset
+  %pointer_byte_offset = index.add %value_storage_byte_offset, %26 : offset
+  %28 = index.assume %pointer_byte_offset [range(%pointer_byte_offset, 0, 4)] : offset
+  %29 = buffer.view %value_storage[%28] : buffer -> view<1xi32>
+  %30 = view.load %29[0] : view<1xi32> -> i32
+  %31 = scalar.constant 1 : i32
+  %32 = scalar.addi %30, %31 : i32
+  view.store %32, %29[0] : i32, view<1xi32>
+  %33 = index.constant 0 : offset
+  %34 = index.add %value_storage_byte_offset, %33 : offset
+  %35 = index.assume %34 [range(%34, 0, 4)] : offset
+  %36 = buffer.view %value_storage[%35] : buffer -> view<1xi32>
+  %first = view.load %36[0] : view<1xi32> -> i32
+  func.return %first : i32
+}
+
+// ====
 // A reference result that always aliases one parameter reuses the evaluated
 // argument. Mutable value-reference writeback becomes the same result value;
 // multiple return statements may retain one common origin. Mixed origins keep
