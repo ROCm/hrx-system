@@ -85,8 +85,6 @@ loom_library(
 loom_check_test_suite(
     name = "compiler_test",
     srcs = [
-        "address_values.cxx-test",
-        "address_values_invalid.cxx-test",
         "assembly.cxx-test",
         "assembly_invalid.cxx-test",
         "check.cxx-test",
@@ -100,12 +98,8 @@ loom_check_test_suite(
         "check_typed_expectations_invalid.cxx-test",
         "command_programs.cxx-test",
         "command_programs_invalid.cxx-test",
-        "dependent_view_loops.cxx-test",
-        "encoding_schemas.cxx-test",
-        "encoding_schemas_invalid.cxx-test",
         "group_dot.cxx-test",
         "hip_vector_types.cxx-test",
-        "index_views.cxx-test",
         "inline_buffer_payloads.cxx-test",
         "intrinsics_invalid.cxx-test",
         "matrix_fragments.cxx-test",
@@ -131,8 +125,6 @@ loom_check_test_suite(
         "template_values_roundtrip.cxx-test",
         "vector_tensors.cxx-test",
         "vector_tensors_invalid.cxx-test",
-        "view_values.cxx-test",
-        "view_values_invalid.cxx-test",
     ],
     data = [
         "check_approximate.cxx",
@@ -179,19 +171,6 @@ loom_check_test(
     env = {
         "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
     },
-    tags = ["skip-bazel_to_cmake"],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_check_test(
-    name = "dependent_view_loops_roundtrip_test",
-    src = "dependent_view_loops_roundtrip.cxx-test",
-    data = ["//loom/py/loom/tools:loom-export-cxx"],
-    env = {
-        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
-    },
-    # CMake exercises the Python tool through its execution-suite smoke; this
-    # exact golden requires Bazel's executable runfile for the emit provider.
     tags = ["skip-bazel_to_cmake"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )

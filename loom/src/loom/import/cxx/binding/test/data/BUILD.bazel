@@ -1,0 +1,42 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test", "loom_check_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],
+)
+
+loom_check_test_suite(
+    name = "compiler_test",
+    srcs = [
+        "address_values.cxx-test",
+        "address_values_invalid.cxx-test",
+        "dependent_view_loops.cxx-test",
+        "encoding_schemas.cxx-test",
+        "encoding_schemas_invalid.cxx-test",
+        "index_views.cxx-test",
+        "typed_view_composition.cxx-test",
+        "view_values.cxx-test",
+        "view_values_invalid.cxx-test",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
+    name = "dependent_view_loops_roundtrip_test",
+    src = "dependent_view_loops_roundtrip.cxx-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    # CMake exercises the Python tool through its execution-suite smoke; this
+    # exact golden requires Bazel's executable runfile for the emit provider.
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
