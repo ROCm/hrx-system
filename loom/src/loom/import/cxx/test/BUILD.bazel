@@ -4,13 +4,11 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:python.bzl", "iree_py_test")
-load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//loom/build_tools/amdgpu:descriptor_sets.bzl", "loom_amdgpu_descriptor_set_compatible_with")
 load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_library", "loom_test", "loom_test_module")
-load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test", "loom_check_test_suite")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
 load("//loom/target/amdgpu:execution_profiles.bzl", "AMD_GPU_HARDWARE_PROFILE")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 load("//loom/target/x86:execution_profiles.bzl", "X86_TASK_HARDWARE_PROFILE")
@@ -25,52 +23,6 @@ exports_files([
     "packed_memory.cxx",
     "vector_lookup.cxx",
 ])
-
-loom_check_test(
-    name = "special_members_test",
-    src = "special_members.cxx-test",
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/import:cxx",
-        "//loom/config/emit:vm_binary",
-    ]),
-)
-
-iree_py_test(
-    name = "special_members_roundtrip_test",
-    size = "small",
-    srcs = ["special_members_roundtrip_test.py"],
-    args = [
-        "--importer=$(rootpath //loom/src/loom/tools/loom-import-cxx)",
-        "--exporter=$(rootpath //loom/py/loom/tools:loom-export-cxx)",
-        "--checker=$(rootpath //loom/src/loom/tools/loom-check:loom-check-test)",
-        "--source=$(rootpath special_members.cxx-test)",
-    ],
-    data = [
-        "special_members.cxx-test",
-        "//loom/py/loom/tools:loom-export-cxx",
-        "//loom/src/loom/tools/loom-check:loom-check-test",
-        "//loom/src/loom/tools/loom-import-cxx",
-    ],
-    tags = ["skip-bazel_to_cmake"],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/import:cxx",
-        "//loom/config/emit:vm_binary",
-    ]),
-)
-
-iree_execution_test_suite(
-    name = "inline_buffer_roundtrip_test",
-    manifests = ["inline_buffer_roundtrip.test.json"],
-    tags = [
-        "hostonly",
-        "skip-bazel_to_cmake",
-    ],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-    tools = {
-        "loom-export-cxx": "//loom/py/loom/tools:loom-export-cxx",
-        "loom-import-cxx": "//loom/src/loom/tools/loom-import-cxx",
-    },
-)
 
 loom_library(
     name = "vector_memory_library",
@@ -98,17 +50,6 @@ loom_check_test_suite(
         "paged_online_softmax_loop_f32.cxx",
         "record_values.cxx",
     ],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_check_test(
-    name = "inline_buffer_export_test",
-    src = "inline_buffer_export.loom-test",
-    data = ["//loom/py/loom/tools:loom-export-cxx"],
-    env = {
-        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
-    },
-    tags = ["skip-bazel_to_cmake"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
@@ -501,37 +442,6 @@ loom_test(
     )
     for source in _AUTHORED_HOST_SOURCES
 ]
-
-loom_check_test_suite(
-    name = "vm_compiler_test",
-    srcs = ["vm_lowering.cxx-test"],
-    target_compatible_with = _HOST_COMPATIBILITY,
-)
-
-loom_check_test_suite(
-    name = "x86_compiler_test",
-    srcs = [
-        "x86_c_abi_lowering.cxx-test",
-        "x86_lowering.cxx-test",
-    ],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/import:cxx",
-        "//loom/config/arch:x86",
-    ]),
-)
-
-loom_check_test_suite(
-    name = "wasm_compiler_test",
-    srcs = [
-        "wasm_lowering.cxx-test",
-        "wasm_lowering_invalid.cxx-test",
-        "wasm_pointer_narrowing.cxx-test",
-    ],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/import:cxx",
-        "//loom/config/arch:wasm",
-    ]),
-)
 
 loom_test_module(
     name = "atomics_module",

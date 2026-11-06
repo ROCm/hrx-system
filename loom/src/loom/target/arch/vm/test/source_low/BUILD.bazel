@@ -28,3 +28,14 @@ loom_check_test(
         "//loom/config/emit:vm_binary",
     ]),
 )
+
+loom_check_test_suite(
+    name = "cxx_test",
+    srcs = [
+        "vm_lowering.cxx-test",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/arch:vm",
+    ]),
+)
