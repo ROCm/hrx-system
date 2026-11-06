@@ -57,6 +57,7 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.s_cmp_lg_i32.src1_inline",
     "amdgpu.s_cmp_ge_u32",
     "amdgpu.s_add_u32",
+    "amdgpu.s_add_co_u32",
     "amdgpu.s_sub_u32",
     "amdgpu.s_sub_co_u32",
     "amdgpu.s_mul_i32",
@@ -109,6 +110,7 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_cmp_uge_u32",
     "amdgpu.v_cndmask_b32",
     "amdgpu.v_add_u32",
+    "amdgpu.v_add_co_u32",
     "amdgpu.v_sub_u32",
     "amdgpu.v_sub_co_u32",
     "amdgpu.v_mul_lo_u32",
@@ -668,6 +670,175 @@ def _i32_sgpr_vgpr_rules(
             _I32,
             vgpr_descriptor,
             I32_VGPR_MATERIALIZER,
+        ),
+    )
+
+
+def _extended_typed_guards(
+    value_type: TypePattern,
+    value_result: str,
+    predicate_result: str,
+) -> tuple[Guard, ...]:
+    return (
+        Guard.value_type("lhs", value_type),
+        Guard.value_type("rhs", value_type),
+        Guard.value_type(value_result, value_type),
+        Guard.value_type(predicate_result, _I1),
+    )
+
+
+def _i32_extended_sgpr_rule(
+    source_op: Op,
+    descriptor_key: str,
+    *,
+    value_result: str,
+    predicate_result: str,
+    descriptor_predicate_result: str,
+    predicate_register_class: str,
+) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
+    guards = (
+        *_extended_typed_guards(_I32, value_result, predicate_result),
+        Guard.low_value_register_class("lhs", "amdgpu.sgpr"),
+        Guard.low_value_register_class("rhs", "amdgpu.sgpr"),
+        Guard.low_value_register_class(value_result, "amdgpu.sgpr"),
+        Guard.low_value_register_unit_count("lhs", 1),
+        Guard.low_value_register_unit_count("rhs", 1),
+        Guard.low_value_register_unit_count(value_result, 1),
+        Guard.low_value_register_class(predicate_result, predicate_register_class),
+        Guard.low_value_register_unit_count(predicate_result, 1),
+        Guard.descriptor_available(descriptor),
+    )
+    if predicate_register_class == "amdgpu.scc":
+        emit = (
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={"lhs": _DIRECT_LHS, "rhs": _DIRECT_RHS},
+                results={
+                    "dst": ValueRef.result(value_result),
+                    descriptor_predicate_result: ValueRef.result(predicate_result),
+                },
+            ),
+        )
+    else:
+        move = _descriptor("amdgpu.s_mov_b32")
+        select = _descriptor("amdgpu.s_cselect_b32")
+        guards += (
+            Guard.descriptor_available(move),
+            Guard.descriptor_available(select),
+        )
+        emit = (
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={"lhs": _DIRECT_LHS, "rhs": _DIRECT_RHS},
+                results={
+                    "dst": ValueRef.result(value_result),
+                    descriptor_predicate_result: ValueRef.temporary("predicate"),
+                },
+                result_types={"dst": _I32, descriptor_predicate_result: _I1},
+            ),
+            EmitDescriptorOp(
+                descriptor=move,
+                results={"dst": ValueRef.temporary("false_value")},
+                result_types={"dst": _I32},
+                immediates={"imm32": 0},
+            ),
+            EmitDescriptorOp(
+                descriptor=move,
+                results={"dst": ValueRef.temporary("true_value")},
+                result_types={"dst": _I32},
+                immediates={"imm32": 1},
+            ),
+            EmitDescriptorOp(
+                descriptor=select,
+                operands={
+                    "true_value": ValueRef.temporary("true_value"),
+                    "false_value": ValueRef.temporary("false_value"),
+                    "condition": ValueRef.temporary("predicate"),
+                },
+                results={"dst": ValueRef.result(predicate_result)},
+            ),
+        )
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=guards,
+        emit=emit,
+    )
+
+
+def _i32_extended_vgpr_rule(
+    source_op: Op,
+    descriptor_key: str,
+    *,
+    value_result: str,
+    predicate_result: str,
+    descriptor_value_result: str,
+    descriptor_predicate_result: str,
+) -> DescriptorRule:
+    descriptor = _descriptor(descriptor_key)
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=descriptor,
+        guards=(
+            *_extended_typed_guards(_I32, value_result, predicate_result),
+            Guard.low_value_register_class(value_result, "amdgpu.vgpr"),
+            Guard.low_value_register_unit_count(value_result, 1),
+            Guard.low_value_register_class(predicate_result, "amdgpu.sgpr"),
+            Guard.low_value_register_unit_count(predicate_result, 2),
+            Guard.value_materializable("lhs", I32_VGPR_MATERIALIZER.name),
+            Guard.value_materializable("rhs", I32_VGPR_MATERIALIZER.name),
+            Guard.descriptor_available(descriptor),
+        ),
+        emit=(
+            EmitDescriptorOp(
+                descriptor=descriptor,
+                operands={
+                    "lhs": _materialized_operand("lhs", I32_VGPR_MATERIALIZER),
+                    "rhs": _materialized_operand("rhs", I32_VGPR_MATERIALIZER),
+                },
+                results={
+                    descriptor_value_result: ValueRef.result(value_result),
+                    descriptor_predicate_result: ValueRef.result(predicate_result),
+                },
+            ),
+        ),
+    )
+
+
+def _extended_unsigned_arithmetic_rules(
+    source_op: Op,
+    *,
+    value_result: str,
+    predicate_result: str,
+    descriptor_predicate_result: str,
+    sgpr_descriptor_key: str,
+    vgpr_descriptor_key: str,
+    vgpr_value_result: str,
+) -> tuple[DescriptorRule | RecipeRule, ...]:
+    return (
+        *(
+            _i32_extended_sgpr_rule(
+                source_op,
+                sgpr_descriptor_key,
+                value_result=value_result,
+                predicate_result=predicate_result,
+                descriptor_predicate_result=descriptor_predicate_result,
+                predicate_register_class=predicate_register_class,
+            )
+            for predicate_register_class in ("amdgpu.scc", "amdgpu.sgpr")
+        ),
+        _i32_extended_vgpr_rule(
+            source_op,
+            vgpr_descriptor_key,
+            value_result=value_result,
+            predicate_result=predicate_result,
+            descriptor_value_result=vgpr_value_result,
+            descriptor_predicate_result=descriptor_predicate_result,
+        ),
+        RecipeRule(
+            source_op=source_op,
+            guards=_extended_typed_guards(_I64, value_result, predicate_result),
         ),
     )
 
@@ -1867,6 +2038,28 @@ def _rules() -> tuple[DescriptorRule, ...]:
         (scalar_arithmetic.scalar_maxui, "max_u32"),
     ):
         rules.extend(_i32_encoded_binary_rules(source_op, suffix))
+    rules.extend(
+        _extended_unsigned_arithmetic_rules(
+            scalar_arithmetic.scalar_addui_extended,
+            value_result="sum",
+            predicate_result="carry",
+            descriptor_predicate_result="carry",
+            sgpr_descriptor_key="amdgpu.s_add_co_u32",
+            vgpr_descriptor_key="amdgpu.v_add_co_u32",
+            vgpr_value_result="sum",
+        )
+    )
+    rules.extend(
+        _extended_unsigned_arithmetic_rules(
+            scalar_arithmetic.scalar_subui_extended,
+            value_result="difference",
+            predicate_result="borrow",
+            descriptor_predicate_result="borrow",
+            sgpr_descriptor_key="amdgpu.s_sub_co_u32",
+            vgpr_descriptor_key="amdgpu.v_sub_co_u32",
+            vgpr_value_result="difference",
+        )
+    )
     rules.extend(
         _i32_sgpr_vgpr_rules(
             scalar_arithmetic.scalar_addi,

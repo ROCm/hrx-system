@@ -990,6 +990,23 @@ static const loom_amdgpu_descriptor_ref_t kAmdgpuScalarI64ShiftDescriptors[] = {
         LOOM_AMDGPU_DESCRIPTOR_REF_V_ASHRREV_I64,
 };
 
+static iree_status_t loom_amdgpu_bind_scalar_i64_extended_results(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_amdgpu_scalar_i64_alu_plan_t* plan, loom_value_id_t low_result,
+    loom_value_id_t low_predicate) {
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_bind_value(context, plan->result, low_result));
+  const loom_type_t predicate_type =
+      loom_low_lower_value_binding_type(context, plan->predicate_result);
+  if (loom_amdgpu_low_type_is_register_class_count(
+          context, predicate_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1)) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_scc_word(
+        context, source_op, low_predicate, &low_predicate));
+  }
+  return loom_low_lower_bind_value(context, plan->predicate_result,
+                                   low_predicate);
+}
+
 iree_status_t loom_amdgpu_lower_scalar_i64_alu(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_scalar_i64_alu_plan_t* plan) {
@@ -1049,6 +1066,46 @@ iree_status_t loom_amdgpu_lower_scalar_i64_alu(
       IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr64_sub(
           context, source_op, low_lhs, low_rhs, &low_result));
       return loom_low_lower_bind_value(context, plan->result, low_result);
+    }
+    case LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ADD_EXTENDED:
+    case LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_SUB_EXTENDED: {
+      const loom_value_id_t low_lhs =
+          loom_low_lower_lookup_value(context, plan->lhs);
+      const loom_value_id_t low_rhs =
+          loom_low_lower_lookup_value(context, plan->rhs);
+      const bool is_add =
+          plan->kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ADD_EXTENDED;
+      loom_value_id_t low_result = LOOM_VALUE_ID_INVALID;
+      loom_value_id_t low_predicate = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_binary_carry_result(
+          context, source_op,
+          is_add ? LOOM_AMDGPU_DESCRIPTOR_REF_S_ADD_CO_U32
+                 : LOOM_AMDGPU_DESCRIPTOR_REF_S_SUB_CO_U32,
+          is_add ? LOOM_AMDGPU_DESCRIPTOR_REF_S_ADDC_U32
+                 : LOOM_AMDGPU_DESCRIPTOR_REF_S_SUBB_U32,
+          low_lhs, low_rhs, &low_result, &low_predicate));
+      return loom_amdgpu_bind_scalar_i64_extended_results(
+          context, source_op, plan, low_result, low_predicate);
+    }
+    case LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADD_EXTENDED:
+    case LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUB_EXTENDED: {
+      loom_value_id_t low_lhs = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_or_materialize_vgpr_i64(
+          context, source_op, plan->lhs, &low_lhs));
+      loom_value_id_t low_rhs = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_or_materialize_vgpr_i64(
+          context, source_op, plan->rhs, &low_rhs));
+      loom_value_id_t low_result = LOOM_VALUE_ID_INVALID;
+      loom_value_id_t low_predicate = LOOM_VALUE_ID_INVALID;
+      if (plan->kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADD_EXTENDED) {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr64_add_extended(
+            context, source_op, low_lhs, low_rhs, &low_result, &low_predicate));
+      } else {
+        IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr64_sub_extended(
+            context, source_op, low_lhs, low_rhs, &low_result, &low_predicate));
+      }
+      return loom_amdgpu_bind_scalar_i64_extended_results(
+          context, source_op, plan, low_result, low_predicate);
     }
     case LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_MUL_LO:
     case LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_MUL_LO: {

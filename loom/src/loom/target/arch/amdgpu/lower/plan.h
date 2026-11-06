@@ -510,6 +510,10 @@ typedef enum loom_amdgpu_scalar_i64_alu_kind_e {
   LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ASHR = 11,
   LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_LSHR = 12,
   LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ASHR = 13,
+  LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADD_EXTENDED = 14,
+  LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUB_EXTENDED = 15,
+  LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ADD_EXTENDED = 16,
+  LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_SUB_EXTENDED = 17,
 } loom_amdgpu_scalar_i64_alu_kind_t;
 
 typedef struct loom_amdgpu_scalar_i64_alu_plan_t {
@@ -519,6 +523,8 @@ typedef struct loom_amdgpu_scalar_i64_alu_plan_t {
   loom_value_id_t rhs;
   // Source result value receiving the emitted low result.
   loom_value_id_t result;
+  // Optional carry or borrow result, or invalid for single-result operations.
+  loom_value_id_t predicate_result;
   // Lowering strategy selected for the scalar i64 ALU op.
   loom_amdgpu_scalar_i64_alu_kind_t kind;
   // Exact shift amount used by literal-shift lowering strategies.
