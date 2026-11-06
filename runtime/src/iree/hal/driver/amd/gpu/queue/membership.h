@@ -109,7 +109,7 @@ typedef struct iree_hal_amd_gpu_queue_membership_t {
   // Borrowed immutable provisioned queue array, populated during construction.
   iree_hal_queue_t** provisioned;
   // Serializes coordinate/source installation and frontier reservation.
-  // Protocol frontier growth and native queue lifetime run outside this mutex.
+  // Metadata preparation, frontier growth, and native lifetime run outside it.
   iree_slim_mutex_t mutex;
   // Protects stable slot ownership and lifecycle borrows. Never held across
   // native work, trim/terminal callouts, or borrower joins.
@@ -124,7 +124,15 @@ typedef struct iree_hal_amd_gpu_queue_membership_t {
     // One serialized expansion target, or zero when no caller is growing it.
     uint32_t pending_count;
   } frontiers;
-  // Shared predicate notification for frontier growth and independent releases.
+  // Caller-owned metadata preparation; only installation needs exclusion.
+  struct {
+    // Source-table capacity being prepared, or zero; protected by mutex.
+    uint32_t source_capacity;
+    // Admitted slot allocations not yet linked. Mutation holds both mutexes;
+    // terminal traversal reads this under slots_mutex.
+    uint32_t slot_count;
+  } pending_allocations;
+  // Predicate notification for metadata/frontier growth and exact releases.
   iree_notification_t notification;
   // Prepared active/spare tables; spare storage makes release allocation-free.
   iree_hal_amd_gpu_queue_sources_t* sources;

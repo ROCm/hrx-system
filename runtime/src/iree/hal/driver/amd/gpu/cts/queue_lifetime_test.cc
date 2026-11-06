@@ -25,18 +25,22 @@ using iree::hal::cts::Ref;
 
 // Holds one exact host allocation while every other allocation continues to
 // the system allocator. Only the allocator dependency is controlled here.
-class FrontierAllocationGate {
+class HostAllocationGate {
  public:
+  static constexpr size_t kNext = SIZE_MAX;
+
   iree_allocator_t allocator() {
     return {this, [](void* self, iree_allocator_command_t command,
                      const void* params, void** inout_pointer) {
-              auto* gate = static_cast<FrontierAllocationGate*>(self);
+              auto* gate = static_cast<HostAllocationGate*>(self);
               bool held = false;
               if (command != IREE_ALLOCATOR_COMMAND_FREE) {
                 size_t size =
                     static_cast<const iree_allocator_alloc_params_t*>(params)
                         ->byte_length;
-                held = size && gate->size_.compare_exchange_strong(size, 0);
+                size_t expected = gate->size_.load();
+                held = expected && (expected == kNext || expected == size) &&
+                       gate->size_.compare_exchange_strong(expected, 0);
                 if (held) {
                   gate->allocation_thread = std::this_thread::get_id();
                   gate->entered_.release();
@@ -47,7 +51,7 @@ class FrontierAllocationGate {
               auto status =
                   held && gate->fail_
                       ? iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                         "frontier allocation unavailable")
+                                         "host allocation unavailable")
                       : system.ctl(system.self, command, params, inout_pointer);
               if (held) {
                 gate->returned_.release();
@@ -58,7 +62,7 @@ class FrontierAllocationGate {
 
   class Hold {
    public:
-    Hold(FrontierAllocationGate* gate, size_t size, bool fail) : gate_(gate) {
+    Hold(HostAllocationGate* gate, size_t size, bool fail) : gate_(gate) {
       gate_->fail_ = fail;
       gate_->size_ = size;
     }
@@ -72,14 +76,14 @@ class FrontierAllocationGate {
 
    private:
     // Gate outliving the allocation and its caller's queue-construction join.
-    FrontierAllocationGate* gate_;
+    HostAllocationGate* gate_;
   };
 
   // Read only after the allocation-entry semaphore publishes this value.
   std::thread::id allocation_thread;
 
  private:
-  // Zero when disarmed; otherwise the exact frontier replacement size.
+  // Zero when disarmed; otherwise an exact size or kNext for any allocation.
   std::atomic<size_t> size_{0};
   // Hold policy, published before the constructor thread enters the allocator.
   bool fail_ = false;
@@ -98,7 +102,7 @@ class GpuNativeQueueLifetimeTest
   amdf_queue_command_type_t command_type() const override { return GetParam(); }
 
   void SetUp() override {
-    allocator_.backing = frontier_gate_.allocator();
+    allocator_.backing = host_allocation_gate_.allocator();
     IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_));
     GpuNativeTest::SetUp();
     if (HasFatalFailure() || IsSkipped()) {
@@ -130,12 +134,12 @@ class GpuNativeQueueLifetimeTest
   }
 
   void FrontierAllocationProgress(bool fail);
-  void FrontierReleaseProgress(bool fail);
+  void AllocationReleaseProgress(size_t allocation_size, bool fail);
 
   // Native dependency gate, joined by base teardown before its table expires.
   NativeMemoryGate memory_gate_;
   // Host allocator dependency, alive through the base's device teardown.
-  FrontierAllocationGate frontier_gate_;
+  HostAllocationGate host_allocation_gate_;
   // Explicit physical backing for recording and independent allocation work.
   iree_hal_pool_t* pool_ = nullptr;
   // Device's stable native signal domain, borrowed through device teardown.
@@ -164,7 +168,7 @@ void GpuNativeQueueLifetimeTest::FrontierAllocationProgress(bool fail) {
     const size_t table_size =
         sizeof(iree_hal_amd_gpu_signal_frontiers_t) +
         options_.queue.retirement_capacity * 4 * sizeof(uint64_t);
-    FrontierAllocationGate::Hold hold(&frontier_gate_, table_size, fail);
+    HostAllocationGate::Hold hold(&host_allocation_gate_, table_size, fail);
     constructor = std::jthread([&] {
       auto status = AcquireQueue(acquired.out());
       if (fail) {
@@ -174,7 +178,7 @@ void GpuNativeQueueLifetimeTest::FrontierAllocationProgress(bool fail) {
       }
     });
     hold.WaitEntered();
-    EXPECT_EQ(frontier_gate_.allocation_thread, constructor.get_id());
+    EXPECT_EQ(host_allocation_gate_.allocation_thread, constructor.get_id());
     // The host wait forces deferred publication, proving the device service
     // thread can progress as well as caller-inline submission.
     IREE_ASSERT_OK(iree_hal_queue_fill(
@@ -223,7 +227,8 @@ TEST_P(GpuNativeQueueLifetimeTest,
   FrontierAllocationProgress(true);
 }
 
-void GpuNativeQueueLifetimeTest::FrontierReleaseProgress(bool fail) {
+void GpuNativeQueueLifetimeTest::AllocationReleaseProgress(
+    size_t allocation_size, bool fail) {
   Ref<iree_hal_queue_t> first, second, growing;
   IREE_ASSERT_OK(AcquireQueue(first.out()));
   IREE_ASSERT_OK(AcquireQueue(second.out()));
@@ -243,12 +248,8 @@ void GpuNativeQueueLifetimeTest::FrontierReleaseProgress(bool fail) {
                                         nullptr, 0));
   std::jthread constructor;
   {
-    // Four existing coordinates expand to eight. The provisioned queue's
-    // exact allocation is held before either acquired queue is visited.
-    const size_t table_size =
-        sizeof(iree_hal_amd_gpu_signal_frontiers_t) +
-        options_.queue.retirement_capacity * 8 * sizeof(uint64_t);
-    FrontierAllocationGate::Hold hold(&frontier_gate_, table_size, fail);
+    HostAllocationGate::Hold hold(&host_allocation_gate_, allocation_size,
+                                  fail);
     constructor = std::jthread([&] {
       auto status = AcquireQueue(growing.out());
       if (fail) {
@@ -258,7 +259,7 @@ void GpuNativeQueueLifetimeTest::FrontierReleaseProgress(bool fail) {
       }
     });
     hold.WaitEntered();
-    EXPECT_EQ(frontier_gate_.allocation_thread, constructor.get_id());
+    EXPECT_EQ(host_allocation_gate_.allocation_thread, constructor.get_id());
     // Release joins accepted native work itself. The blocked allocation
     // belongs to another queue and cannot be part of this lifetime join.
     first.reset();
@@ -314,12 +315,31 @@ void GpuNativeQueueLifetimeTest::FrontierReleaseProgress(bool fail) {
 
 TEST_P(GpuNativeQueueLifetimeTest,
        AcquiredQueueReleasesAndReusesDuringFrontierGrowth) {
-  FrontierReleaseProgress(false);
+  // Four coordinates expand to eight; hold the provisioned signal table.
+  AllocationReleaseProgress(
+      sizeof(iree_hal_amd_gpu_signal_frontiers_t) +
+          options_.queue.retirement_capacity * 8 * sizeof(uint64_t),
+      false);
 }
 
 TEST_P(GpuNativeQueueLifetimeTest,
        AcquiredQueueReleaseSurvivesFailedFrontierGrowthAndRetry) {
-  FrontierReleaseProgress(true);
+  AllocationReleaseProgress(
+      sizeof(iree_hal_amd_gpu_signal_frontiers_t) +
+          options_.queue.retirement_capacity * 8 * sizeof(uint64_t),
+      true);
+}
+
+TEST_P(GpuNativeQueueLifetimeTest,
+       AcquiredQueueReleasesAndReusesDuringSlotAllocation) {
+  // The first host allocation prepares the stable coordinate before any
+  // protocol/native construction or source-table expansion can begin.
+  AllocationReleaseProgress(HostAllocationGate::kNext, false);
+}
+
+TEST_P(GpuNativeQueueLifetimeTest,
+       AcquiredQueueReleaseSurvivesFailedSlotAllocationAndRetry) {
+  AllocationReleaseProgress(HostAllocationGate::kNext, true);
 }
 
 TEST_P(GpuNativeQueueLifetimeTest, FinalReleaseContinuesEpochsAcrossSlotReuse) {
