@@ -1,0 +1,169 @@
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx roundtrip
+// Automatic destruction projects back to ordinary explicit calls. The source
+// RAII spelling is presentation that High IR no longer carries; cleanup order,
+// receiver values, addressed objects, and structured control remain semantic.
+void observe(unsigned);
+
+struct Guard {
+  unsigned digit;
+  ~Guard() { observe(digit); }
+};
+
+struct Pair {
+  Guard first;
+  Guard second;
+  ~Pair() = default;
+};
+
+static void consume(const Guard& guard) { observe(guard.digit + 10); }
+
+unsigned cleanup_return(bool choose) {
+  Guard outer{1};
+  if (choose) {
+    Guard inner{2};
+    return inner.digit;
+  }
+  Guard tail{3};
+  return tail.digit;
+}
+
+void cleanup_aggregates() {
+  Guard array[2]{{4}, {5}};
+  Pair pair{{6}, {7}};
+}
+
+void cleanup_expressions(bool choose) {
+  consume(choose ? (Guard{8}, Guard{9}) : Guard{10});
+  const Guard& extended = Guard{11};
+  observe(extended.digit + 10);
+}
+
+// ----
+#include <loomcxx/numeric.h>
+#include <loomcxx/predicate.h>
+#include <loomcxx/view.h>
+
+[[loom::symbol("cleanup_return")]]
+unsigned cleanup_return(bool choose);
+
+[[loom::symbol("cleanup_aggregates")]]
+void cleanup_aggregates();
+
+[[loom::symbol("cleanup_expressions")]]
+void cleanup_expressions(bool choose);
+
+[[loom::symbol("Guard___Guard_value"), loom::inline]]
+static void Guard___Guard_value(unsigned this_digit);
+
+[[loom::symbol("Pair___Pair_value"), loom::inline]]
+static void Pair___Pair_value(unsigned this_first_digit, unsigned this_second_digit);
+
+[[loom::symbol("Guard___Guard_storage"), loom::inline]]
+static void Guard___Guard_storage(loom::type::buffer<unsigned> this_value, loom::type::offset this_byte_offset);
+
+[[loom::symbol("consume")]]
+static void consume(unsigned guard_digit);
+
+[[loom::symbol("observe")]]
+void observe(unsigned v78);
+
+[[loom::symbol("cleanup_return")]]
+unsigned cleanup_return(bool choose) {
+  unsigned v3 = unsigned{};
+  if (choose) {
+    Guard___Guard_value(2u);
+    Guard___Guard_value(1u);
+    v3 = 2u;
+  } else {
+    Guard___Guard_value(3u);
+    Guard___Guard_value(1u);
+    v3 = 3u;
+  }
+  return v3;
+}
+
+[[loom::symbol("cleanup_aggregates")]]
+void cleanup_aggregates() {
+  auto* array_storage = loom::buffer::alloca<loom::memory_space::private_, 4>(loom::type::offset{8});
+  auto array_view = loom::buffer::view<8>(reinterpret_cast<const unsigned char*>(array_storage), {});
+  loom::type::offset array_storage_byte_offset_1 = loom::type::offset{0} + loom::type::offset{0};
+  loom::assume(loom::predicate::range(array_storage_byte_offset_1, 0, 4));
+  auto array_storage_view = loom::buffer::view<1>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(array_storage) + static_cast<unsigned long long>(array_storage_byte_offset_1)), {});
+  loom::view::store(4u, array_storage_view, 0);
+  loom::type::offset array_storage_byte_offset_2 = (loom::type::offset{0} + loom::type::offset{4}) + loom::type::offset{0};
+  loom::assume(loom::predicate::range(array_storage_byte_offset_2, 0, 4));
+  auto array_storage_view_1 = loom::buffer::view<1>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(array_storage) + static_cast<unsigned long long>(array_storage_byte_offset_2)), {});
+  loom::view::store(5u, array_storage_view_1, 0);
+  Pair___Pair_value(6u, 7u);
+  Guard___Guard_storage(loom::buffer::cast<unsigned>(loom::buffer::root(array_storage)), (loom::type::offset{0} + loom::type::offset{4}));
+  Guard___Guard_storage(loom::buffer::cast<unsigned>(loom::buffer::root(array_storage)), loom::type::offset{0});
+  return;
+}
+
+[[loom::symbol("cleanup_expressions")]]
+void cleanup_expressions(bool choose) {
+  auto* v28 = loom::buffer::alloca<loom::memory_space::private_, 4>(loom::type::offset{4});
+  auto v30 = loom::buffer::view<4>(reinterpret_cast<const unsigned char*>(v28), {});
+  auto* v32 = loom::buffer::alloca<loom::memory_space::private_, 1>(loom::type::offset{1});
+  auto v34 = loom::buffer::view<1>(v32, {});
+  loom::view::store(loom::convert<unsigned char>(0), v34, 0);
+  unsigned v37 = unsigned{};
+  if (choose) {
+    loom::type::offset v41 = loom::type::offset{0} + loom::type::offset{0};
+    loom::assume(loom::predicate::range(v41, 0, 0));
+    auto v43 = loom::buffer::view<1>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(v28) + static_cast<unsigned long long>(v41)), {});
+    loom::view::store(8u, v43, 0);
+    loom::view::store(loom::convert<unsigned char>(1), v34, 0);
+    v37 = 9u;
+  } else {
+    v37 = 10u;
+  }
+  consume(v37);
+  Guard___Guard_value(v37);
+  unsigned char v47 = loom::view::load(v34, 0);
+  if (v47 != 0u) {
+    Guard___Guard_storage(loom::buffer::cast<unsigned>(loom::buffer::root(v28)), loom::type::offset{0});
+  }
+  auto* v52 = loom::buffer::alloca<loom::memory_space::private_, 4>(loom::type::offset{4});
+  auto v54 = loom::buffer::view<4>(reinterpret_cast<const unsigned char*>(v52), {});
+  loom::type::offset v56 = loom::type::offset{0} + loom::type::offset{0};
+  loom::assume(loom::predicate::range(v56, 0, 0));
+  auto v58 = loom::buffer::view<1>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(v52) + static_cast<unsigned long long>(v56)), {});
+  loom::view::store(11u, v58, 0);
+  loom::type::offset extended_digit_byte_offset = loom::type::offset{0} + loom::type::offset{0};
+  loom::assume(loom::predicate::range(extended_digit_byte_offset, 0, 0));
+  auto extended_digit_view = loom::buffer::view<1>(reinterpret_cast<const unsigned*>(reinterpret_cast<const unsigned char*>(v52) + static_cast<unsigned long long>(extended_digit_byte_offset)), {});
+  unsigned extended_digit = loom::view::load(extended_digit_view, 0);
+  observe((extended_digit + 10u));
+  Guard___Guard_storage(loom::buffer::cast<unsigned>(loom::buffer::root(v52)), loom::type::offset{0});
+  return;
+}
+
+[[loom::symbol("Guard___Guard_value"), loom::inline]]
+static void Guard___Guard_value(unsigned this_digit) {
+  observe(this_digit);
+  return;
+}
+
+[[loom::symbol("Pair___Pair_value"), loom::inline]]
+static void Pair___Pair_value(unsigned this_first_digit, unsigned this_second_digit) {
+  Guard___Guard_value(this_second_digit);
+  Guard___Guard_value(this_first_digit);
+  return;
+}
+
+[[loom::symbol("Guard___Guard_storage"), loom::inline]]
+static void Guard___Guard_storage(loom::type::buffer<unsigned> this_value, loom::type::offset this_byte_offset) {
+  loom::type::offset digit_byte_offset = this_byte_offset + loom::type::offset{0};
+  auto digit_view = loom::buffer::view<1>(loom::buffer::cast<const unsigned>(this_value), digit_byte_offset, {});
+  unsigned digit = loom::view::load(digit_view, 0);
+  observe(digit);
+  return;
+}
+
+[[loom::symbol("consume")]]
+static void consume(unsigned guard_digit) {
+  observe((guard_digit + 10u));
+  return;
+}

@@ -1,0 +1,170 @@
+// RUN: emit cxx
+// REQUIRES: loom-export-cxx
+#include <loomcxx/atomic.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/predicate.h>
+#include <loomcxx/vector.h>
+
+using Half8 = _Float16 __attribute__((ext_vector_type(8)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+
+using loom::atomic::kind;
+using loom::atomic::ordering;
+using loom::atomic::scope;
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void topology_identity(unsigned* output) {
+  auto output_view = loom::buffer::view<64>(output, {}, loom::encoding::layout::dense<1>());
+  auto coordinate = loom::kernel::workitem::id.x;
+  loom::assume(loom::predicate::range(coordinate, 0, 62));
+  auto shifted = static_cast<loom::type::index>(coordinate) + loom::type::index{1};
+  unsigned lane = coordinate;
+  auto wide = loom::index::cast<unsigned long long>(static_cast<loom::type::index>(coordinate));
+  loom::view::store(lane, output_view, coordinate);
+  loom::view::store(lane, output_view, shifted);
+}
+// ----
+#include <loomcxx/kernel.h>
+#include <loomcxx/predicate.h>
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void topology_identity(unsigned* output) {
+  auto output_view = loom::buffer::view<64>(output, {}, loom::encoding::layout::dense<1>());
+  auto coordinate = loom::kernel::workitem::id.x;
+  loom::assume(loom::predicate::range(coordinate, 0, 62));
+  loom::type::index shifted = static_cast<loom::type::index>(coordinate) + loom::type::index{1};
+  unsigned lane = static_cast<unsigned>(coordinate);
+  unsigned long long wide = loom::index::cast<unsigned long long>(static_cast<loom::type::index>(coordinate));
+  loom::view::store(lane, output_view, coordinate);
+  loom::view::store(lane, output_view, shifted);
+}
+
+// ====
+// RUN: emit cxx
+// REQUIRES: loom-export-cxx
+#include <loomcxx/atomic.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/predicate.h>
+#include <loomcxx/vector.h>
+
+using Half8 = _Float16 __attribute__((ext_vector_type(8)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+
+using loom::atomic::kind;
+using loom::atomic::ordering;
+using loom::atomic::scope;
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(64, 1, 1)]]
+void async_transfers(const unsigned char* input, unsigned char* output, unsigned participants, bool enabled) {
+  auto source = loom::buffer::view<4>(input, {}, loom::encoding::layout::dense<1>());
+  auto output_view = loom::buffer::view<4>(output, {}, loom::encoding::layout::dense<1>());
+  auto* storage = loom::buffer::alloca<unsigned char, loom::memory_space::workgroup, 64>(256);
+  auto lane_destination = loom::buffer::view<4>(storage, {}, loom::encoding::layout::dense<1>());
+  auto tile_destination = loom::buffer::view<64, 4>(storage, {}, loom::encoding::layout::dense<2>());
+  auto load = loom::kernel::async::copy<loom::kernel::async::direction::global_to_workgroup, loom::cache::scope::workgroup, loom::cache::temporal::regular>(source, lane_destination);
+  auto store = loom::kernel::async::copy_mask<loom::kernel::async::direction::workgroup_to_global, loom::cache::scope::device, loom::cache::temporal::non_temporal_writeback>(lane_destination, output_view, enabled);
+  auto gather = loom::kernel::async::gather<loom::cache::scope::workgroup, loom::cache::temporal::regular>(source, tile_destination);
+  auto gather_tail = loom::kernel::async::gather_mask<loom::cache::scope::cluster, loom::cache::temporal::last_use>(source, tile_destination, enabled);
+  auto cluster = loom::kernel::async::cluster::gather<loom::cache::scope::cluster, loom::cache::temporal::high_temporal>(source, lane_destination, participants);
+  auto cluster_tail = loom::kernel::async::cluster::gather_mask<loom::cache::scope::system, loom::cache::temporal::bypass>(source, lane_destination, participants, enabled);
+  auto stage = loom::kernel::async::group(load, store, gather, gather_tail, cluster, cluster_tail);
+  loom::kernel::async::wait<0>(stage);
+}
+// ----
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(64, 1, 1)]]
+void async_transfers(const unsigned char* input, unsigned char* output, unsigned participants, bool enabled) {
+  auto source = loom::buffer::view<4>(input, {}, loom::encoding::layout::dense<1>());
+  auto output_view = loom::buffer::view<4>(output, {}, loom::encoding::layout::dense<1>());
+  auto* storage = loom::buffer::alloca<unsigned char, loom::memory_space::workgroup, 64>(loom::type::index{256});
+  auto lane_destination = loom::buffer::view<4>(storage, {}, loom::encoding::layout::dense<1>());
+  auto tile_destination = loom::buffer::view<64, 4>(storage, {}, loom::encoding::layout::dense<2>());
+  auto load = loom::kernel::async::copy<loom::kernel::async::direction::global_to_workgroup, loom::cache::scope::workgroup, loom::cache::temporal::regular>(source, lane_destination);
+  auto store = loom::kernel::async::copy_mask<loom::kernel::async::direction::workgroup_to_global, loom::cache::scope::device, loom::cache::temporal::non_temporal_writeback>(lane_destination, output_view, enabled);
+  auto gather = loom::kernel::async::gather<loom::cache::scope::workgroup, loom::cache::temporal::regular>(source, tile_destination);
+  auto gather_tail = loom::kernel::async::gather_mask<loom::cache::scope::cluster, loom::cache::temporal::last_use>(source, tile_destination, enabled);
+  auto cluster = loom::kernel::async::cluster::gather<loom::cache::scope::cluster, loom::cache::temporal::high_temporal>(source, lane_destination, participants);
+  auto cluster_tail = loom::kernel::async::cluster::gather_mask<loom::cache::scope::system, loom::cache::temporal::bypass>(source, lane_destination, participants, enabled);
+  auto load_group = loom::kernel::async::group(load, store, gather, gather_tail, cluster, cluster_tail);
+  loom::kernel::async::wait<0>(load_group);
+}
+
+// ====
+// RUN: emit cxx
+// REQUIRES: loom-export-cxx
+#include <loomcxx/atomic.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/predicate.h>
+#include <loomcxx/vector.h>
+
+using Half8 = _Float16 __attribute__((ext_vector_type(8)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+
+using loom::atomic::kind;
+using loom::atomic::ordering;
+using loom::atomic::scope;
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void atomic_grid(unsigned* storage, unsigned row) {
+  auto values = loom::buffer::view<4, 8>(storage, {}, loom::encoding::layout::dense<2>());
+  unsigned observed = loom::view::atomic::load<ordering::acquire, scope::device>(values, row, 0);
+  loom::view::atomic::store<ordering::release, scope::device>(observed, values, row, 1);
+  unsigned old = loom::view::atomic::rmw<kind::addi, ordering::acq_rel, scope::device>(1u, values, row, 2);
+  loom::view::atomic::reduce<kind::maxui, ordering::relaxed, scope::device>(old, values, row, 3);
+  (void)loom::view::atomic::cmpxchg<ordering::acq_rel, ordering::acquire, scope::device>(observed, old, values, row, 4);
+}
+// ----
+#include <loomcxx/atomic.h>
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void atomic_grid(unsigned* storage, unsigned row) {
+  auto values = loom::buffer::view<4, 8>(storage, {}, loom::encoding::layout::dense<2>());
+  unsigned observed = loom::view::atomic::load<loom::atomic::ordering::acquire, loom::atomic::scope::device>(values, loom::index::cast(row), loom::type::index{0});
+  loom::view::atomic::store<loom::atomic::ordering::release, loom::atomic::scope::device>(observed, values, loom::index::cast(row), loom::type::index{1});
+  unsigned old = loom::view::atomic::rmw<loom::atomic::kind::addi, loom::atomic::ordering::acq_rel, loom::atomic::scope::device>(1u, values, loom::index::cast(row), loom::type::index{2});
+  loom::view::atomic::reduce<loom::atomic::kind::maxui, loom::atomic::ordering::relaxed, loom::atomic::scope::device>(old, values, loom::index::cast(row), loom::type::index{3});
+  (void)loom::view::atomic::cmpxchg<loom::atomic::ordering::acq_rel, loom::atomic::ordering::acquire, loom::atomic::scope::device>(observed, old, values, loom::index::cast(row), loom::type::index{4});
+}
+
+// ====
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx roundtrip @bounded
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::workgroup_size_range(32, 128, 1, 1, 1, 1)]]
+void bounded() {}
+
+[[loom::kernel]]
+void ignored() {}
+
+// ----
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::workgroup_size_range(32, 128, 1, 1, 1, 1)]]
+void bounded() {
+}
+
+// ====
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx
+#include <loomcxx/kernel.h>
+
+static loom::kernel::clustered_configuration configure_clustered(unsigned groups, unsigned cluster) {
+  return {{groups * cluster, 1, 1}, {64, 1, 1}, {cluster, 1, 1}};
+}
+
+[[loom::kernel(configure_clustered)]]
+void clustered() {}
+
+// ----
+#include <loomcxx/kernel.h>
+
+static loom::kernel::clustered_configuration clustered_configuration(unsigned groups, unsigned cluster) {
+  return {{(groups * cluster), 1u, 1u}, {64u, 1u, 1u}, {cluster, 1u, 1u}};
+}
+
+[[loom::kernel(clustered_configuration)]]
+void clustered() {
+}
