@@ -70,6 +70,11 @@ class Vectors {
   loom_value_id_t extract(loom_value_id_t value, loom_value_id_t index,
                           const cxx::Type* source_type,
                           const cxx::Type* index_type, cxx::AST* owner);
+  // Reads one statically selected logical lane without manufacturing an index
+  // SSA value. A selector may name the one tail-padding lane exposed by Clang
+  // for an odd-width extended vector; that observation produces poison.
+  loom_value_id_t extract_static(loom_value_id_t value, int64_t index,
+                                 const cxx::Type* source_type, cxx::AST* owner);
   // Replaces one lane and returns the updated vector. Source-defined indices
   // are nonnegative and below the lane count; the index carrier does not
   // change that source bounds contract.

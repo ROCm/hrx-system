@@ -2105,6 +2105,9 @@ class Translator final : private Initialization::Evaluation {
       }
     }
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast)) {
+      if (member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+        fail(member, "extended-vector components are not addressable");
+      }
       auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
       if (!field || field->isStatic()) {
         fail(ast, "record storage access requires a non-static data member");
@@ -2225,12 +2228,26 @@ class Translator final : private Initialization::Evaluation {
     const cxx::Type* index_type;
   };
 
+  // One frontend-validated named component projected from its complete vector
+  // lvalue. The selector is static and retains its canonical family on the
+  // member expression; no index value or selector table is allocated.
+  struct VectorComponentLvalue {
+    // Complete vector destination receiving functional lane updates.
+    ObjectLvalue destination;
+    // Vector snapshot used by one immediate compound operation.
+    std::optional<Value> value;
+    // Resolved static selector and source member spelling.
+    cxx::MemberExpressionAST* selection;
+  };
+
   // Resolving a source lvalue executes every address and index expression once.
-  // An immediate lane operation may retain the complete vector snapshot;
-  // durable references instead reload their destination on each later use.
+  // An immediate lane or component operation may retain the complete vector
+  // snapshot; durable references instead reload their destination on each
+  // later use.
   struct Lvalue {
-    // Complete object or one evaluated lane within a complete vector object.
-    std::variant<ObjectLvalue, VectorLaneLvalue> projection;
+    // Complete object or one evaluated projection of a complete vector object.
+    std::variant<ObjectLvalue, VectorLaneLvalue, VectorComponentLvalue>
+        projection;
   };
 
   // Result of one ordinary source call. Exact reference aliases retain the
@@ -2387,6 +2404,112 @@ class Translator final : private Initialization::Evaluation {
                              index_value.ssa(), index_expression->type}};
   }
 
+  const cxx::Identifier* vector_component_identifier(
+      cxx::MemberExpressionAST* selection) const {
+    auto* name = cxx::ast_cast<cxx::NameIdAST>(selection->unqualifiedId);
+    IREE_ASSERT(selection->vectorComponentKind !=
+                cxx::VectorComponentKind::kNone);
+    IREE_ASSERT(name && name->identifier);
+    return name->identifier;
+  }
+
+  const cxx::Type* vector_component_source_type(
+      cxx::MemberExpressionAST* selection) const {
+    if (selection->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
+      return unit_.typeTraits().get_element_type(
+          selection->baseExpression->type);
+    }
+    return selection->baseExpression->type;
+  }
+
+  size_t vector_component_index(cxx::MemberExpressionAST* selection,
+                                size_t result_position) {
+    auto* source =
+        types_.native_vector(vector_component_source_type(selection));
+    IREE_ASSERT(source);
+    return cxx::vector_component_index(selection->vectorComponentKind,
+                                       vector_component_identifier(selection),
+                                       source->elementCount(), result_position);
+  }
+
+  Value read_vector_component(Value source,
+                              cxx::MemberExpressionAST* selection) {
+    auto* result = types_.native_vector(selection->type);
+    if (!result) {
+      return Value(vectors_.extract_static(
+          source.ssa(),
+          static_cast<int64_t>(vector_component_index(selection, 0)),
+          vector_component_source_type(selection), selection));
+    }
+    std::vector<loom_value_id_t> lanes;
+    lanes.reserve(result->elementCount());
+    for (size_t position = 0; position < result->elementCount(); ++position) {
+      lanes.push_back(vectors_.extract_static(
+          source.ssa(),
+          static_cast<int64_t>(vector_component_index(selection, position)),
+          vector_component_source_type(selection), selection));
+    }
+    return Value(vectors_.construct(lanes, selection->type, selection));
+  }
+
+  Value update_vector_component(Value destination, Value replacement,
+                                cxx::MemberExpressionAST* selection) {
+    auto* source =
+        types_.native_vector(vector_component_source_type(selection));
+    auto* result = types_.native_vector(selection->type);
+    const size_t result_count = result ? result->elementCount() : 1;
+    auto updated = destination.ssa();
+    for (size_t position = 0; position < result_count; ++position) {
+      const size_t index = vector_component_index(selection, position);
+      if (index == source->elementCount()) {
+        continue;
+      }
+      auto lane = result
+                      ? vectors_.extract_static(replacement.ssa(),
+                                                static_cast<int64_t>(position),
+                                                selection->type, selection)
+                      : replacement.ssa();
+      updated = vectors_.insert_static(
+          updated, lane, static_cast<int64_t>(index),
+          vector_component_source_type(selection), selection);
+    }
+    return Value(updated);
+  }
+
+  Lvalue vector_component_destination(
+      cxx::MemberExpressionAST* selection, cxx::AST* owner,
+      std::optional<Destination> retained_destination,
+      LvalueAccess access = LvalueAccess::Write, bool retain_value = true) {
+    ObjectLvalue vector_destination;
+    if (selection->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
+      auto* source_type = vector_component_source_type(selection);
+      if (access == LvalueAccess::Write) {
+        types_.require_mutable(source_type, selection);
+      }
+      vector_destination = {source_type,
+                            pointer_expression(selection->baseExpression)};
+    } else {
+      vector_destination = object_destination(selection->baseExpression, owner,
+                                              access, retained_destination);
+    }
+    std::optional<Value> vector_value;
+    if (retain_value) {
+      vector_value = read(vector_destination, selection);
+    }
+    return {VectorComponentLvalue{vector_destination, std::move(vector_value),
+                                  selection}};
+  }
+
+  Value vector_component_value(cxx::MemberExpressionAST* selection) {
+    if (selection->accessOp == cxx::TokenKind::T_MINUS_GREATER) {
+      ObjectLvalue source = {vector_component_source_type(selection),
+                             pointer_expression(selection->baseExpression)};
+      return read_vector_component(read(source, selection), selection);
+    }
+    return read_vector_component(expression(selection->baseExpression),
+                                 selection);
+  }
+
   StorageProjection vector_lane_address(cxx::SubscriptExpressionAST* subscript,
                                         cxx::AST* owner) {
     auto* left_type = subscript->baseExpression->type;
@@ -2463,6 +2586,15 @@ class Translator final : private Initialization::Evaluation {
       }
       return {ObjectLvalue{projected->type, object_address(projected)}};
     }
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected);
+        member &&
+        member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+      auto retained = control_->destination(expression);
+      if (!retained && projected != expression) {
+        retained = control_->destination(projected);
+      }
+      return vector_component_destination(member, owner, retained, access);
+    }
     if (auto* subscript = cxx::ast_cast<cxx::SubscriptExpressionAST>(projected);
         subscript && (types_.native_vector(subscript->baseExpression->type) ||
                       types_.native_vector(subscript->indexExpression->type))) {
@@ -2480,6 +2612,11 @@ class Translator final : private Initialization::Evaluation {
   Lvalue reference_lvalue(cxx::ExpressionAST* expression, cxx::AST* owner,
                           LvalueAccess access) {
     auto* projected = unwrap_object_identity(unit_, expression);
+    if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(projected);
+        member &&
+        member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+      fail(member, "extended-vector components are not addressable");
+    }
     if (auto* conditional =
             cxx::ast_cast<cxx::ConditionalExpressionAST>(projected)) {
       if (projected->valueCategory == cxx::ValueCategory::kPrValue) {
@@ -2568,11 +2705,16 @@ class Translator final : private Initialization::Evaluation {
     if (auto* object = std::get_if<ObjectLvalue>(&target.projection)) {
       return read(*object, owner);
     }
-    const auto& lane = std::get<VectorLaneLvalue>(target.projection);
-    auto vector = lane.value ? *lane.value : read(lane.destination, owner);
-    return Value(vectors_.extract(vector.ssa(), lane.index,
-                                  lane.destination.type, lane.index_type,
-                                  owner));
+    if (auto* lane = std::get_if<VectorLaneLvalue>(&target.projection)) {
+      auto vector = lane->value ? *lane->value : read(lane->destination, owner);
+      return Value(vectors_.extract(vector.ssa(), lane->index,
+                                    lane->destination.type, lane->index_type,
+                                    owner));
+    }
+    const auto& component = std::get<VectorComponentLvalue>(target.projection);
+    auto vector =
+        component.value ? *component.value : read(component.destination, owner);
+    return read_vector_component(vector, component.selection);
   }
 
   void write(const Lvalue& target, Value value, cxx::AST* owner) {
@@ -2580,12 +2722,19 @@ class Translator final : private Initialization::Evaluation {
       write(*object, value, owner);
       return;
     }
-    const auto& lane = std::get<VectorLaneLvalue>(target.projection);
-    auto vector = lane.value ? *lane.value : read(lane.destination, owner);
-    auto updated =
-        vectors_.insert(vector.ssa(), value.ssa(), lane.index,
-                        lane.destination.type, lane.index_type, owner);
-    write(lane.destination, Value(updated), owner);
+    if (auto* lane = std::get_if<VectorLaneLvalue>(&target.projection)) {
+      auto vector = lane->value ? *lane->value : read(lane->destination, owner);
+      auto updated =
+          vectors_.insert(vector.ssa(), value.ssa(), lane->index,
+                          lane->destination.type, lane->index_type, owner);
+      write(lane->destination, Value(updated), owner);
+      return;
+    }
+    const auto& component = std::get<VectorComponentLvalue>(target.projection);
+    auto vector =
+        component.value ? *component.value : read(component.destination, owner);
+    write(component.destination,
+          update_vector_component(vector, value, component.selection), owner);
   }
 
   struct ReferenceOrigin {
@@ -2649,10 +2798,13 @@ class Translator final : private Initialization::Evaluation {
     const ObjectLvalue* object = std::get_if<ObjectLvalue>(&target.projection);
     size_t component_count = value.partition().component_count;
     if (!object) {
-      const auto& lane = std::get<VectorLaneLvalue>(target.projection);
-      object = &lane.destination;
+      auto* lane = std::get_if<VectorLaneLvalue>(&target.projection);
+      if (!lane) {
+        fail(owner, "extended-vector components are not addressable");
+      }
+      object = &lane->destination;
       component_count =
-          types_.partition(lane.destination.type, owner).component_count;
+          types_.partition(lane->destination.type, owner).component_count;
     }
     auto* destination = std::get_if<Destination>(&object->location);
     if (!destination) {
@@ -4793,6 +4945,9 @@ class Translator final : private Initialization::Evaluation {
       return scalars_.constant(*value, ast->type, ast);
     }
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast)) {
+      if (member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+        return vector_component_value(member);
+      }
       if (auto* field = current_receiver_field(member)) {
         if (unit_.typeTraits().is_lvalue_reference(field->type()) &&
             !types_.pointer_reference_is_snapshot(field)) {

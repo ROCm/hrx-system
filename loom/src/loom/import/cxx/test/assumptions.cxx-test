@@ -49,6 +49,25 @@ func.def public @entry(%tokens$0: i32, %capacity$1: i32, %hidden$2: i32) -> (i32
 }
 
 // ====
+// RUN: roundtrip
+// Named vector components are materialized as scalar assumption operands.
+[[loom::assume]] void assume(bool);
+using Lanes = unsigned __attribute__((ext_vector_type(4)));
+unsigned bounded_components(Lanes values, unsigned limit) {
+  assume(values.x <= limit && values.y > 0u);
+  return values.z;
+}
+// ----
+func.def public @bounded_components(%values: vector<4xi32>, %limit$1: i32) -> (i32) {
+  %3 = vector.extract %values[0] : vector<4xi32> -> i32
+  %4, %limit$5 = scalar.assume %3, %limit$1 [ule(%3, %limit$1)] : i32, i32
+  %6 = vector.extract %values[1] : vector<4xi32> -> i32
+  %7 = scalar.assume %6 [ne(%6, 0)] : i32
+  %8 = vector.extract %values[2] : vector<4xi32> -> i32
+  func.return %8 : i32
+}
+
+// ====
 // RUN: verify
 // Unsupported conjuncts reject the complete assumption.
 [[loom::assume]] void assume(bool);
