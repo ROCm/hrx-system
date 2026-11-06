@@ -17,6 +17,7 @@
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
+#include "loom/target/arch/amdgpu/lower/buffer_descriptor.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/memory_ordering.h"
@@ -409,6 +410,8 @@ void loom_amdgpu_mark_memory_access_plan_storage_demands(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_memory_access_plan_t* plan) {
   IREE_ASSERT_GT(plan->packet_count, 0u);
+  loom_amdgpu_mark_buffer_extent_storage_demands(
+      context, &plan->source, plan->packets[0].access.buffer_extent);
   const loom_amdgpu_memory_mask_plan_t* mask =
       loom_amdgpu_memory_access_mask_plan(plan);
   if (mask) {

@@ -389,8 +389,8 @@ iree_status_t loom_amdgpu_select_memory_store_plan(
 
 // Completes descriptor bounds once all operand producers have selected their
 // actual carriers. Packet splits share one retained extent recipe.
-iree_status_t loom_amdgpu_finalize_memory_plan(
-    loom_low_lower_context_t* context, loom_amdgpu_memory_access_plan_t* plan);
+void loom_amdgpu_finalize_memory_plan(loom_low_lower_context_t* context,
+                                      loom_amdgpu_memory_access_plan_t* plan);
 
 // Lowers a source memory-load op to an AMDGPU memory packet.
 iree_status_t loom_amdgpu_lower_memory_load(

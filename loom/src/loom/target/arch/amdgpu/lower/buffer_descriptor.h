@@ -19,14 +19,27 @@ extern "C" {
 typedef struct loom_amdgpu_buffer_extent_plan_t
     loom_amdgpu_buffer_extent_plan_t;
 
-// Selects a source-view extent using canonical facts and actual producer
-// carriers. The retained recipe belongs to the function plan. NULL selects the
+// Retains a source-view extent from canonical facts before storage demand is
+// computed. The recipe belongs to the function plan. NULL selects the
 // full U32 descriptor range when the view has no tighter representable bound.
 // Explicit resource extents take precedence over this view-derived recipe.
 iree_status_t loom_amdgpu_plan_buffer_extent(
     loom_low_lower_context_t* context,
     const loom_low_source_memory_access_plan_t* source,
-    const loom_amdgpu_buffer_extent_plan_t** out_plan);
+    loom_amdgpu_buffer_extent_plan_t** out_plan);
+
+// Completes carrier-dependent extent decisions after selected producers publish
+// their types. Unsupported native carriers select the full descriptor range.
+void loom_amdgpu_finalize_buffer_extent(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source,
+    loom_amdgpu_buffer_extent_plan_t** inout_plan);
+
+// Publishes the retained extent's runtime inputs to shared demand analysis.
+void loom_amdgpu_mark_buffer_extent_storage_demands(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source,
+    const loom_amdgpu_buffer_extent_plan_t* plan);
 
 // Selects an exactly representable root-relative source-view end and makes it
 // the descriptor range even when the ABI resource carries a broader extent.
@@ -34,7 +47,7 @@ iree_status_t loom_amdgpu_plan_buffer_extent(
 iree_status_t loom_amdgpu_plan_buffer_view_extent(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_source_memory_access_plan_t* source,
-    const loom_amdgpu_buffer_extent_plan_t** out_plan);
+    loom_amdgpu_buffer_extent_plan_t** out_plan);
 
 // Returns whether |plan| consumes the source access's materialized dynamic
 // view-base value while constructing its descriptor bound.
