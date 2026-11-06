@@ -243,9 +243,17 @@ class FileReads {
     IREE_RETURN_IF_ERROR(
         iree_hal_driver_registry_allocate(allocator, &registry_));
     IREE_RETURN_IF_ERROR(iree_hal_register_all_available_drivers(registry_));
+    const iree_bitmap_t online_nodes = iree_numa_online_nodes();
+    uint32_t node_ids[IREE_NUMA_MAX_NODES];
+    iree_host_size_t node_count = 0;
+    for (uint32_t node_id = 0; node_id < online_nodes.bit_count; ++node_id) {
+      if (iree_bitmap_test(online_nodes, node_id)) {
+        node_ids[node_count++] = node_id;
+      }
+    }
     IREE_RETURN_IF_ERROR(iree_async_proactor_pool_create(
-        iree_numa_node_count(), nullptr,
-        iree_async_proactor_pool_options_default(), allocator, &proactors_));
+        node_count, node_ids, iree_async_proactor_pool_options_default(),
+        allocator, &proactors_));
     IREE_RETURN_IF_ERROR(iree_async_frontier_tracker_create(
         iree_async_frontier_tracker_options_default(), allocator, &tracker_));
     auto params = iree_hal_device_create_params_default();
