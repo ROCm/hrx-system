@@ -116,7 +116,9 @@ iree_status_t loom_runtime_test_pool_trim_and_drain(loom_runtime_pool_t* owner,
           workspace);
     }
     iree_notification_deinitialize(&notification);
-    return iree_status_join(status, loom_runtime_memory_pool_await(memory));
+    status = iree_status_join(status, loom_runtime_memory_pool_await(memory));
+    loom_runtime_pool_advance(owner);
+    return status;
   }
   // A retained admission failure does not prevent already-accepted returns
   // from retiring. Join the native source before returning either diagnosis.
@@ -152,5 +154,7 @@ iree_status_t loom_runtime_test_pool_trim_and_drain(loom_runtime_pool_t* owner,
   iree_notification_deinitialize(&wait.notification);
   iree_slim_mutex_deinitialize(&wait.mutex);
   iree_hal_pool_wait_free(capacity);
-  return iree_status_join(status, wait.status);
+  status = iree_status_join(status, wait.status);
+  loom_runtime_pool_advance(owner);
+  return status;
 }

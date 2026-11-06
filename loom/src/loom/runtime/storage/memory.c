@@ -460,6 +460,11 @@ loom_runtime_storage_statistics_t loom_runtime_memory_pool_snapshot(
   return pool->statistics;
 }
 
+uint64_t loom_runtime_memory_pool_retained_bytes(
+    const loom_runtime_memory_pool_t* pool) {
+  return iree_hal_memory_budget_charged(pool->budget);
+}
+
 static void loom_runtime_memory_pool_trim_cache(
     loom_runtime_memory_pool_t* pool, uint64_t target_bytes,
     loom_runtime_memory_demand_t additional) {

@@ -116,11 +116,21 @@ loom_runtime_pool_statistics_t loom_runtime_pool_statistics(
 // idle workspace first, then unpinned parameters in LRU order. Live workspace,
 // pinned parameters, and mutable model state survive. An unreachable target
 // is not an error; statistics expose the reached extent. Native returns can
-// remain visible until their queued sweep retires. Does not wait for live
-// work, destroy queues, or trim any execution device's compiled products.
-// Fixed parameter and state allocations remain until their model releases them.
+// remain visible until their queued sweep retires. Raw queue roots from already
+// retired executions preserve the target through their final physical-owner
+// pass. Does not wait for live work, destroy queues, or trim any execution
+// device's compiled products. Fixed parameter and state allocations remain
+// until their model releases them.
 iree_status_t loom_runtime_pool_trim(loom_runtime_pool_t* pool,
                                      uint64_t target_bytes);
+
+// Reapplies an explicit trim after accepted logical retirement progresses.
+// Called by the serialized device-group owner after advancing workspace and
+// residency work. Infallible; platform failures remain on their owning work.
+void loom_runtime_pool_advance(loom_runtime_pool_t* pool);
+
+// True while an explicit trim awaits its final physical-owner pass.
+bool loom_runtime_pool_is_pending(const loom_runtime_pool_t* pool);
 
 // Independent idle policies applied by the serialized serving owner. Zero
 // disables a policy; both durations must be nonnegative. Mutable model state,

@@ -47,6 +47,8 @@ struct loom_runtime_workspace_scope_t {
   bool released;
   // Whether this scope's roots contribute to transient workspace activity.
   bool tracks_workspace;
+  // This released scope must replay an explicit trim after its roots retire.
+  bool trim_pending;
   // Shared-owner scope chain, including active and released execution domains.
   struct loom_runtime_workspace_scope_t* next;
 };
@@ -83,6 +85,13 @@ struct loom_runtime_workspace_t {
     // An idle trim has already been scheduled since the last retirement.
     bool trimmed;
   } idle;
+  // Explicit trim state spanning raw roots already retiring when requested.
+  struct {
+    // Number of marked released scopes that still retain raw roots.
+    iree_host_size_t pending_scope_count;
+    // A final trim pass is required after every marked scope retires.
+    bool replay_requested;
+  } trim;
 };
 
 typedef enum loom_runtime_workspace_collection_mode_e {
@@ -129,6 +138,11 @@ static void loom_runtime_workspace_scope_collect(
   if (scope->tracks_workspace && scope->count != previous_count) {
     scope->workspace->idle.since = iree_time_now();
     scope->workspace->idle.trimmed = false;
+  }
+  if (scope->trim_pending && !scope->count) {
+    IREE_ASSERT(scope->workspace->trim.pending_scope_count);
+    --scope->workspace->trim.pending_scope_count;
+    scope->trim_pending = false;
   }
 }
 
@@ -484,12 +498,38 @@ static iree_device_size_t loom_runtime_workspace_trim_locked(
   return retained_bytes;
 }
 
+static bool loom_runtime_workspace_request_trim_replay_locked(
+    loom_runtime_workspace_t* workspace) {
+  for (loom_runtime_workspace_scope_t* scope = workspace->scopes; scope;
+       scope = scope->next) {
+    if (scope->released && scope->tracks_workspace && scope->count &&
+        !scope->trim_pending) {
+      scope->trim_pending = true;
+      ++workspace->trim.pending_scope_count;
+    }
+  }
+  workspace->trim.replay_requested |= workspace->trim.pending_scope_count != 0;
+  return workspace->trim.replay_requested;
+}
+
+bool loom_runtime_workspace_request_trim_replay(
+    loom_runtime_workspace_t* workspace) {
+  iree_slim_mutex_lock(&workspace->mutex);
+  loom_runtime_workspace_collect(workspace, WORKSPACE_COLLECTION_COMPLETE);
+  const bool replay =
+      loom_runtime_workspace_request_trim_replay_locked(workspace);
+  iree_slim_mutex_unlock(&workspace->mutex);
+  return replay;
+}
+
 iree_status_t loom_runtime_workspace_trim(
     loom_runtime_workspace_t* workspace,
     iree_device_size_t* out_retained_bytes) {
   iree_slim_mutex_lock(&workspace->mutex);
   loom_runtime_workspace_collect(workspace, WORKSPACE_COLLECTION_COMPLETE);
+  loom_runtime_workspace_request_trim_replay_locked(workspace);
   *out_retained_bytes = loom_runtime_workspace_trim_locked(workspace);
+  workspace->trim.replay_requested = workspace->trim.pending_scope_count != 0;
   iree_slim_mutex_unlock(&workspace->mutex);
   return workspace->virtual_pool
              ? loom_runtime_virtual_pool_reclaim(workspace->virtual_pool)
@@ -497,8 +537,12 @@ iree_status_t loom_runtime_workspace_trim(
 }
 
 bool loom_runtime_workspace_is_reclaiming(loom_runtime_workspace_t* workspace) {
-  return workspace->virtual_pool &&
-         loom_runtime_virtual_pool_is_reclaiming(workspace->virtual_pool);
+  iree_slim_mutex_lock(&workspace->mutex);
+  const bool replay_requested = workspace->trim.replay_requested;
+  iree_slim_mutex_unlock(&workspace->mutex);
+  return replay_requested ||
+         (workspace->virtual_pool &&
+          loom_runtime_virtual_pool_is_reclaiming(workspace->virtual_pool));
 }
 
 bool loom_runtime_workspace_trim_idle(loom_runtime_workspace_t* workspace,
@@ -555,17 +599,33 @@ uint64_t loom_runtime_workspace_round_size(
 
 iree_status_t loom_runtime_workspace_advance(
     loom_runtime_workspace_t* workspace) {
+  bool replay_trim = false;
   iree_slim_mutex_lock(&workspace->mutex);
   loom_runtime_workspace_collect(workspace, WORKSPACE_COLLECTION_COMPLETE);
+  if (workspace->trim.replay_requested &&
+      !workspace->trim.pending_scope_count) {
+    loom_runtime_workspace_trim_locked(workspace);
+    workspace->trim.replay_requested = false;
+    replay_trim = true;
+  }
   iree_slim_mutex_unlock(&workspace->mutex);
-  return workspace->virtual_pool
-             ? loom_runtime_virtual_pool_advance(workspace->virtual_pool)
-             : iree_ok_status();
+  if (!workspace->virtual_pool) {
+    return iree_ok_status();
+  }
+  iree_status_t status =
+      replay_trim ? loom_runtime_virtual_pool_reclaim(workspace->virtual_pool)
+                  : iree_ok_status();
+  return iree_status_join(
+      status, loom_runtime_virtual_pool_advance(workspace->virtual_pool));
 }
 
 bool loom_runtime_workspace_is_pending(loom_runtime_workspace_t* workspace) {
-  return workspace->virtual_pool &&
-         loom_runtime_virtual_pool_is_pending(workspace->virtual_pool);
+  iree_slim_mutex_lock(&workspace->mutex);
+  const bool replay_requested = workspace->trim.replay_requested;
+  iree_slim_mutex_unlock(&workspace->mutex);
+  return replay_requested ||
+         (workspace->virtual_pool &&
+          loom_runtime_virtual_pool_is_pending(workspace->virtual_pool));
 }
 
 iree_status_t loom_runtime_workspace_wait(loom_runtime_workspace_t* workspace,

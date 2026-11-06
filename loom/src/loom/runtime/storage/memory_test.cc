@@ -838,6 +838,52 @@ TEST_F(DedicatedNativeWorkerMemoryTest,
             0x55667788);
 }
 
+TEST_F(DedicatedNativeWorkerMemoryTest,
+       DevicePoolTrimIncludesAdmittedNativeBacking) {
+  auto* const shared_memory = loom_runtime_pool_memory(storage_owner);
+  const auto bulk = loom_runtime_pool_weight_geometry(storage_owner);
+  const auto state = loom_runtime_pool_state_geometry(storage_owner);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      shared_memory, bulk, bulk.mapping_size, 256, &statistics[0], &first));
+  IREE_ASSERT_OK(
+      loom_runtime_virtual_buffer_commit(first, 0, bulk.mapping_size));
+  loom_runtime_virtual_buffer_begin_trim(first);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(first));
+  ASSERT_EQ(loom_runtime_memory_pool_statistics(shared_memory).cached_bytes,
+            bulk.backing_size);
+
+  loom_runtime_memory_operation_t* operation = nullptr;
+  {
+    loom_runtime::testing::ScopedNativeHold hold(native,
+                                                 IREE_ALLOCATOR_COMMAND_CALLOC);
+    IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+        shared_memory, state, state.mapping_size, 256, &statistics[1],
+        &second));
+    const loom_runtime_memory_range_t growth = {second, 0, state.mapping_size};
+    loom_runtime_memory_admission_t admission;
+    IREE_ASSERT_OK(loom_runtime_memory_pool_commit_async(
+        shared_memory, 1, &growth, nullptr, 0, &admission, &operation));
+    ASSERT_EQ(admission, LOOM_RUNTIME_MEMORY_ADMISSION_AVAILABLE);
+    hold.WaitEntered();
+
+    // Native statistics still expose only the cached parent, but the physical
+    // budget already owns the admitted state parent. Trimming to the observed
+    // commitment must retire the cache before the new parent publishes.
+    const auto observed = loom_runtime_pool_statistics(storage_owner);
+    ASSERT_EQ(observed.retained.committed_bytes, bulk.backing_size);
+    IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner,
+                                          observed.retained.committed_bytes));
+    EXPECT_EQ(loom_runtime_memory_pool_statistics(shared_memory).cached_bytes,
+              0u);
+  }
+  loom_runtime_memory_operation_await(operation);
+  IREE_ASSERT_OK(loom_runtime_memory_operation_query_status(operation));
+  loom_runtime_memory_operation_free(operation);
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(shared_memory));
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(shared_memory).committed_bytes,
+            state.backing_size);
+}
+
 TEST_F(MemoryTest, WeightTailAndStateMappingsShareOnePhysicalParent) {
   const auto bulk = loom_runtime_pool_weight_geometry(storage_owner);
   const auto state = loom_runtime_pool_state_geometry(storage_owner);
@@ -1613,6 +1659,52 @@ TEST_F(DeviceMemoryTest, PoolTrimPreservesLiveWorkspaceAndMutableState) {
     EXPECT_EQ(idle.workspace.reservation_count, 0u);
     CheckRetained(loom_runtime_virtual_buffer_handle(first), 0, 0xABCDEF01);
   }
+}
+
+TEST_F(DeviceMemoryTest, PoolTrimSurvivesLateWorkspaceRootRetirement) {
+  IREE_ASSERT_OK(
+      loom_runtime_execution_reserve_workspace(execution, kSlabSize, 256));
+  iree_hal_semaphore_t* gate = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      loom_runtime_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate));
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_barrier(execution, {1, &gate, &gate_value}));
+  const auto request = iree_hal_make_pool_reservation_request(kSlabSize, 256);
+  IREE_ASSERT_OK(
+      loom_runtime_execution_alloca(execution, 1, &request, &workspace));
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_dealloca(execution, workspace, &completion));
+  iree_hal_buffer_release(workspace);
+  workspace = nullptr;
+  EXPECT_TRUE(loom_runtime_execution_is_retired(execution));
+  const auto frontier = loom_runtime_execution_frontier(execution);
+  iree_hal_semaphore_t* completion_semaphore = frontier.semaphores[0];
+  const uint64_t completion_value = frontier.values[0];
+  iree_hal_semaphore_retain(completion_semaphore);
+  loom_runtime_execution_release(execution);
+  execution = nullptr;
+
+  IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner, 0));
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, gate_value, nullptr));
+  iree_status_t completion_status =
+      loom_runtime_workspace_wait(loom_runtime_pool_workspace(storage_owner),
+                                  completion_semaphore, completion_value);
+  iree_hal_semaphore_release(completion_semaphore);
+  IREE_ASSERT_OK(completion_status);
+  while (loom_runtime_device_group_is_pending(group)) {
+    IREE_ASSERT_OK(loom_runtime_device_group_advance(group));
+    std::this_thread::yield();
+  }
+  iree_hal_semaphore_release(gate);
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
+  IREE_ASSERT_OK(loom_runtime_device_group_advance(group));
+  const auto retired = loom_runtime_pool_statistics(storage_owner);
+  EXPECT_EQ(retired.workspace.reservation_count, 0u);
+  EXPECT_EQ(retired.workspace.bytes_committed, 0u);
+  EXPECT_EQ(retired.retained.committed_bytes, 0u);
 }
 
 TEST_F(DeviceMemoryTest, WorkspaceIdleWaitsForRawCapturesAfterModelRetirement) {
