@@ -242,19 +242,19 @@ def _integer_binary_rules(
     )
 
 
-def _extended_unsigned_arithmetic_rules(
+def _unsigned_carry_borrow_rules(
     descriptor_lookup: _DescriptorLookup,
 ) -> Iterable[DescriptorRule]:
     for source_op, operation, value_result, overflow_result, overflow_name in (
         (
-            scalar_arithmetic.scalar_addui_extended,
+            scalar_arithmetic.scalar_addcarryui,
             "add",
             "sum",
             "carry",
             "carry",
         ),
         (
-            scalar_arithmetic.scalar_subui_extended,
+            scalar_arithmetic.scalar_subborrowui,
             "sub",
             "difference",
             "borrow",
@@ -1240,7 +1240,7 @@ def _cases() -> Sequence[ContractCase]:
         *_view_alias_rules(),
         _buffer_load_i8_u_rule(descriptor_lookup),
         _buffer_store_i8_rule(descriptor_lookup),
-        *_extended_unsigned_arithmetic_rules(descriptor_lookup),
+        *_unsigned_carry_borrow_rules(descriptor_lookup),
         *(
             rule
             for type_pattern, register_width in ((_I32, 32), (_I64, 64))

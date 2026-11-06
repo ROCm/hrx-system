@@ -4388,8 +4388,8 @@ class Translator final : private Initialization::Evaluation {
 
     const loom_type_t type = types_.get(call->type, call);
     const loom_location_id_t location = locations_.get(call);
-    auto build = addition ? loom_scalar_addui_extended_build
-                          : loom_scalar_subui_extended_build;
+    auto build =
+        addition ? loom_scalar_addcarryui_build : loom_scalar_subborrowui_build;
     loom_op_t* first_op = nullptr;
     check(build(&builder_, arguments[0].ssa(), arguments[1].ssa(), type,
                 location, &first_op));

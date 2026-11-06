@@ -3010,11 +3010,11 @@ vector_subi = _lanewise_binary(
     eager_execution_cost=1,
 )
 
-vector_addui_extended = Op(
-    "vector.addui_extended",
+vector_addcarryui = Op(
+    "vector.addcarryui",
     group=vector_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=("Lanewise unsigned integer addition returning the wrapped sums and an i1 carry vector. Each carry lane is set exactly when its mathematical sum exceeds the source element width."),
+    doc=("Lanewise unsigned integer addition returning width-wrapped sums and an i1 carry vector. Each carry lane is set exactly when its mathematical sum does not fit in the source element width."),
     operands=[Operand("lhs", VECTOR), Operand("rhs", VECTOR)],
     results=[Result("sum", VECTOR), Result("carry", VECTOR)],
     constraints=[
@@ -3024,7 +3024,7 @@ vector_addui_extended = Op(
         SameShape("lhs", "rhs", "sum", "carry"),
         SameType("lhs", "rhs", "sum"),
     ],
-    facts="loom_vector_addui_extended_facts",
+    facts="loom_vector_addcarryui_facts",
     facts_from_operands=True,
     traits=[PURE, ELEMENTWISE, DISTRIBUTION_TRANSFER, SAFE_TO_SPECULATE],
     format=[
@@ -3036,15 +3036,15 @@ vector_addui_extended = Op(
         ARROW,
         ResultType("carry"),
     ],
-    examples=["%sum, %carry = vector.addui_extended %lhs, %rhs : vector<8xi32> -> vector<8xi1>"],
+    examples=["%sum, %carry = vector.addcarryui %lhs, %rhs : vector<8xi32> -> vector<8xi1>"],
     eager_execution_cost=1,
 )
 
-vector_subui_extended = Op(
-    "vector.subui_extended",
+vector_subborrowui = Op(
+    "vector.subborrowui",
     group=vector_ops,
     phase=OpPhase.EXECUTABLE,
-    doc=("Lanewise unsigned integer subtraction returning the wrapped differences and an i1 borrow vector. Each borrow lane is set exactly when its unsigned lhs is less than its unsigned rhs."),
+    doc=("Lanewise unsigned integer subtraction returning width-wrapped differences and an i1 borrow vector. Each borrow lane is set exactly when its unsigned lhs is less than its unsigned rhs."),
     operands=[Operand("lhs", VECTOR), Operand("rhs", VECTOR)],
     results=[Result("difference", VECTOR), Result("borrow", VECTOR)],
     constraints=[
@@ -3054,7 +3054,7 @@ vector_subui_extended = Op(
         SameShape("lhs", "rhs", "difference", "borrow"),
         SameType("lhs", "rhs", "difference"),
     ],
-    facts="loom_vector_subui_extended_facts",
+    facts="loom_vector_subborrowui_facts",
     facts_from_operands=True,
     traits=[PURE, ELEMENTWISE, DISTRIBUTION_TRANSFER, SAFE_TO_SPECULATE],
     format=[
@@ -3066,7 +3066,7 @@ vector_subui_extended = Op(
         ARROW,
         ResultType("borrow"),
     ],
-    examples=["%difference, %borrow = vector.subui_extended %lhs, %rhs : vector<8xi32> -> vector<8xi1>"],
+    examples=["%difference, %borrow = vector.subborrowui %lhs, %rhs : vector<8xi32> -> vector<8xi1>"],
     eager_execution_cost=1,
 )
 
@@ -4974,8 +4974,8 @@ VECTOR_FLOAT_ARITHMETIC_OPS: tuple[Op, ...] = (
 VECTOR_INTEGER_ARITHMETIC_OPS: tuple[Op, ...] = (
     vector_addi,
     vector_subi,
-    vector_addui_extended,
-    vector_subui_extended,
+    vector_addcarryui,
+    vector_subborrowui,
     vector_muli,
     vector_divsi,
     vector_divui,

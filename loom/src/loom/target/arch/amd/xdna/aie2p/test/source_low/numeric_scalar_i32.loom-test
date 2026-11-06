@@ -154,14 +154,14 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_i1_bitwise
 
 // ====
 
-func.def @scalar_i32_extended_arithmetic(%lhs: i32, %rhs: i32) -> (i32, i1, i32, i1) {
-  %sum, %carry = scalar.addui_extended %lhs, %rhs : i32
-  %difference, %borrow = scalar.subui_extended %lhs, %rhs : i32
+func.def @scalar_i32_carry_borrow(%lhs: i32, %rhs: i32) -> (i32, i1, i32, i1) {
+  %sum, %carry = scalar.addcarryui %lhs, %rhs : i32
+  %difference, %borrow = scalar.subborrowui %lhs, %rhs : i32
   func.return %sum, %carry, %difference, %borrow : i32, i1, i32, i1
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_i32_extended_arithmetic(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_i32_carry_borrow(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
   %sum = add.nc %lhs, %rhs
   %carry = ltu %sum, %lhs
   %difference = sub %lhs, %rhs

@@ -81,7 +81,7 @@ TEST(ModularIntegerFacts, ExactUnaryAndShiftAcrossWidths) {
   }
 }
 
-TEST(ModularIntegerFacts, ExactExtendedUnsignedArithmeticAcrossWidths) {
+TEST(ModularIntegerFacts, ExactCarryAndBorrowAcrossWidths) {
   for (int32_t bit_count : {1, 8, 16, 32, 64}) {
     SCOPED_TRACE(bit_count);
     const loom_value_facts_t all_bits =
@@ -89,44 +89,45 @@ TEST(ModularIntegerFacts, ExactExtendedUnsignedArithmeticAcrossWidths) {
     const loom_value_facts_t zero = loom_value_facts_exact_i64(0);
     const loom_value_facts_t one = loom_value_facts_exact_i64(1);
     loom_value_facts_t value;
-    loom_value_facts_t overflow;
+    loom_value_facts_t carry_or_borrow;
 
-    loom_value_facts_addui_extended(&all_bits, &one, bit_count, &value,
-                                    &overflow);
+    loom_value_facts_addcarryui(&all_bits, &one, bit_count, &value,
+                                &carry_or_borrow);
     ExpectExact(value, 0);
-    ExpectExact(overflow, 1);
+    ExpectExact(carry_or_borrow, 1);
 
-    loom_value_facts_subui_extended(&zero, &all_bits, bit_count, &value,
-                                    &overflow);
+    loom_value_facts_subborrowui(&zero, &all_bits, bit_count, &value,
+                                 &carry_or_borrow);
     ExpectExact(value, 1);
-    ExpectExact(overflow, 1);
+    ExpectExact(carry_or_borrow, 1);
 
-    loom_value_facts_addui_extended(&zero, &zero, bit_count, &value, &overflow);
+    loom_value_facts_addcarryui(&zero, &zero, bit_count, &value,
+                                &carry_or_borrow);
     ExpectExact(value, 0);
-    ExpectExact(overflow, 0);
-    loom_value_facts_subui_extended(&all_bits, &zero, bit_count, &value,
-                                    &overflow);
+    ExpectExact(carry_or_borrow, 0);
+    loom_value_facts_subborrowui(&all_bits, &zero, bit_count, &value,
+                                 &carry_or_borrow);
     ExpectExact(value, bit_count == 1 ? 1 : -1);
-    ExpectExact(overflow, 0);
+    ExpectExact(carry_or_borrow, 0);
   }
 }
 
-TEST(ModularIntegerFacts, ExtendedUnsignedOverflowPreservesLanePredicates) {
+TEST(ModularIntegerFacts, CarryAndBorrowPreserveLanePredicates) {
   loom_value_facts_t lhs = loom_value_facts_make(INT8_MIN, INT8_MAX, 1);
   loom_value_facts_mark_lane_varying(&lhs);
   const loom_value_facts_t rhs = loom_value_facts_make(INT8_MIN, INT8_MAX, 1);
   loom_value_facts_t value;
-  loom_value_facts_t overflow;
+  loom_value_facts_t carry_or_borrow;
 
-  loom_value_facts_addui_extended(&lhs, &rhs, 8, &value, &overflow);
+  loom_value_facts_addcarryui(&lhs, &rhs, 8, &value, &carry_or_borrow);
   EXPECT_TRUE(loom_value_facts_is_lane_varying(value));
   EXPECT_FALSE(loom_value_facts_is_lane_predicate(value));
-  EXPECT_TRUE(loom_value_facts_is_lane_predicate(overflow));
+  EXPECT_TRUE(loom_value_facts_is_lane_predicate(carry_or_borrow));
 
-  loom_value_facts_subui_extended(&lhs, &rhs, 8, &value, &overflow);
+  loom_value_facts_subborrowui(&lhs, &rhs, 8, &value, &carry_or_borrow);
   EXPECT_TRUE(loom_value_facts_is_lane_varying(value));
   EXPECT_FALSE(loom_value_facts_is_lane_predicate(value));
-  EXPECT_TRUE(loom_value_facts_is_lane_predicate(overflow));
+  EXPECT_TRUE(loom_value_facts_is_lane_predicate(carry_or_borrow));
 }
 
 TEST(ModularIntegerFacts, RangesRemainSoundAcrossWrap) {

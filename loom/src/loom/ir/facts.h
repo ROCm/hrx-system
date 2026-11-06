@@ -1058,18 +1058,17 @@ void loom_value_facts_subi_modular(const loom_value_facts_t* lhs,
 // Unsigned addition modulo 2^bit_count with an i1 carry result. The wrapped
 // value uses the declared signed fact representation; carry is exactly one
 // when the mathematical unsigned sum exceeds the declared width.
-void loom_value_facts_addui_extended(const loom_value_facts_t* lhs,
-                                     const loom_value_facts_t* rhs,
-                                     int32_t bit_count,
-                                     loom_value_facts_t* out_sum,
-                                     loom_value_facts_t* out_carry);
+void loom_value_facts_addcarryui(const loom_value_facts_t* lhs,
+                                 const loom_value_facts_t* rhs,
+                                 int32_t bit_count, loom_value_facts_t* out_sum,
+                                 loom_value_facts_t* out_carry);
 // Unsigned subtraction modulo 2^bit_count with an i1 borrow result. Borrow is
 // exactly one when the unsigned lhs is less than the unsigned rhs.
-void loom_value_facts_subui_extended(const loom_value_facts_t* lhs,
-                                     const loom_value_facts_t* rhs,
-                                     int32_t bit_count,
-                                     loom_value_facts_t* out_difference,
-                                     loom_value_facts_t* out_borrow);
+void loom_value_facts_subborrowui(const loom_value_facts_t* lhs,
+                                  const loom_value_facts_t* rhs,
+                                  int32_t bit_count,
+                                  loom_value_facts_t* out_difference,
+                                  loom_value_facts_t* out_borrow);
 void loom_value_facts_muli_modular(const loom_value_facts_t* lhs,
                                    const loom_value_facts_t* rhs,
                                    int32_t bit_count, loom_value_facts_t* out);

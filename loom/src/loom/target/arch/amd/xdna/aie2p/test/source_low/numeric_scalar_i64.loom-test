@@ -486,14 +486,14 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_f64_select
 
 // ====
 
-func.def @scalar_i64_extended_arithmetic(%lhs: i64, %rhs: i64) -> (i64, i1, i64, i1) {
-  %sum, %carry = scalar.addui_extended %lhs, %rhs : i64
-  %difference, %borrow = scalar.subui_extended %lhs, %rhs : i64
+func.def @scalar_i64_carry_borrow(%lhs: i64, %rhs: i64) -> (i64, i1, i64, i1) {
+  %sum, %carry = scalar.addcarryui %lhs, %rhs : i64
+  %difference, %borrow = scalar.subborrowui %lhs, %rhs : i64
   func.return %sum, %carry, %difference, %borrow : i64, i1, i64, i1
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_i64_extended_arithmetic(%lhs: reg<aie2p.er x2>, %rhs: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er>, reg<aie2p.er x2>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_i64_carry_borrow(%lhs: reg<aie2p.er x2>, %rhs: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er>, reg<aie2p.er x2>, reg<aie2p.er>) asm {
   %16 = slice %lhs[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %17 = slice %lhs[1] : reg<aie2p.er x2> -> reg<aie2p.er>
   %18 = slice %rhs[0] : reg<aie2p.er x2> -> reg<aie2p.er>
@@ -511,18 +511,18 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_i64_extend
 
 // ====
 
-func.def @scalar_i64_extended_arithmetic_composition(%lhs: i64, %rhs: i64, %carry_input: i64) -> (i64, i1, i64, i1) {
-  %partial_sum, %initial_carry = scalar.addui_extended %lhs, %rhs : i64
-  %sum, %input_carry = scalar.addui_extended %partial_sum, %carry_input : i64
+func.def @scalar_i64_carry_borrow_composition(%lhs: i64, %rhs: i64, %carry_input: i64) -> (i64, i1, i64, i1) {
+  %partial_sum, %initial_carry = scalar.addcarryui %lhs, %rhs : i64
+  %sum, %input_carry = scalar.addcarryui %partial_sum, %carry_input : i64
   %carry = scalar.ori %initial_carry, %input_carry : i1
-  %partial_difference, %initial_borrow = scalar.subui_extended %lhs, %rhs : i64
-  %difference, %input_borrow = scalar.subui_extended %partial_difference, %carry_input : i64
+  %partial_difference, %initial_borrow = scalar.subborrowui %lhs, %rhs : i64
+  %difference, %input_borrow = scalar.subborrowui %partial_difference, %carry_input : i64
   %borrow = scalar.ori %initial_borrow, %input_borrow : i1
   func.return %sum, %carry, %difference, %borrow : i64, i1, i64, i1
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_i64_extended_arithmetic_composition(%lhs: reg<aie2p.er x2>, %rhs: reg<aie2p.er x2>, %carry_input: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er>, reg<aie2p.er x2>, reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_i64_carry_borrow_composition(%lhs: reg<aie2p.er x2>, %rhs: reg<aie2p.er x2>, %carry_input: reg<aie2p.er x2>) -> (reg<aie2p.er x2>, reg<aie2p.er>, reg<aie2p.er x2>, reg<aie2p.er>) asm {
   %24 = slice %lhs[0] : reg<aie2p.er x2> -> reg<aie2p.er>
   %25 = slice %lhs[1] : reg<aie2p.er x2> -> reg<aie2p.er>
   %26 = slice %rhs[0] : reg<aie2p.er x2> -> reg<aie2p.er>

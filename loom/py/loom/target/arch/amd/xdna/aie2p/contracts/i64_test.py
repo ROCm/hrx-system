@@ -403,13 +403,13 @@ def test_i64_binary_recipes_are_exact() -> None:
 def test_i64_carry_and_borrow_recipes_are_exact() -> None:
     carry_and_borrow_rules = (
         (
-            _rule(scalar_arithmetic.scalar_addui_extended),
+            _rule(scalar_arithmetic.scalar_addcarryui),
             "sum",
             "carry",
             lambda lhs, rhs: lhs + rhs,
         ),
         (
-            _rule(scalar_arithmetic.scalar_subui_extended),
+            _rule(scalar_arithmetic.scalar_subborrowui),
             "difference",
             "borrow",
             lambda lhs, rhs: lhs - rhs,

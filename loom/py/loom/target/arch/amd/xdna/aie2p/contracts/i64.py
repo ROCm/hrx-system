@@ -1304,7 +1304,7 @@ AIE2P_I64_RULES = (
         "add.carry.i32",
     ),
     _pair_add_sub_rule(
-        scalar_arithmetic.scalar_addui_extended,
+        scalar_arithmetic.scalar_addcarryui,
         "add.carry_out.i32",
         "add.carry.i32",
         value_result="sum",
@@ -1336,7 +1336,7 @@ AIE2P_I64_RULES = (
         "sub.borrow.i32",
     ),
     _pair_add_sub_rule(
-        scalar_arithmetic.scalar_subui_extended,
+        scalar_arithmetic.scalar_subborrowui,
         "sub.borrow_out.i32",
         "sub.borrow.i32",
         value_result="difference",

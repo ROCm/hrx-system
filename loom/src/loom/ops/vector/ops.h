@@ -77,8 +77,8 @@ enum {
   LOOM_OP_VECTOR_FMAF = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 52),
   LOOM_OP_VECTOR_ADDI = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 53),
   LOOM_OP_VECTOR_SUBI = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 54),
-  LOOM_OP_VECTOR_ADDUI_EXTENDED = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 55),
-  LOOM_OP_VECTOR_SUBUI_EXTENDED = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 56),
+  LOOM_OP_VECTOR_ADDCARRYUI = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 55),
+  LOOM_OP_VECTOR_SUBBORROWUI = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 56),
   LOOM_OP_VECTOR_MULI = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 57),
   LOOM_OP_VECTOR_DIVSI = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 58),
   LOOM_OP_VECTOR_DIVUI = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 59),
@@ -1756,41 +1756,41 @@ iree_status_t loom_vector_subi_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_ADDUI_EXTENDED: Lanewise unsigned integer addition returning the wrapped sums and an i1 carry vector. Each carry lane is set exactly when its mathematical sum exceeds the source element width.
-// %sum, %carry = vector.addui_extended %lhs, %rhs : vector<8xi32> -> vector<8xi1>
-LOOM_DEFINE_ISA(loom_vector_addui_extended_isa, LOOM_OP_VECTOR_ADDUI_EXTENDED)
-LOOM_DEFINE_OPERAND(loom_vector_addui_extended_lhs, 0)
-LOOM_DEFINE_OPERAND(loom_vector_addui_extended_rhs, 1)
-LOOM_DEFINE_RESULT(loom_vector_addui_extended_sum, 0)
-LOOM_DEFINE_RESULT(loom_vector_addui_extended_carry, 1)
-iree_status_t loom_vector_addui_extended_build(
+// LOOM_OP_VECTOR_ADDCARRYUI: Lanewise unsigned integer addition returning width-wrapped sums and an i1 carry vector. Each carry lane is set exactly when its mathematical sum does not fit in the source element width.
+// %sum, %carry = vector.addcarryui %lhs, %rhs : vector<8xi32> -> vector<8xi1>
+LOOM_DEFINE_ISA(loom_vector_addcarryui_isa, LOOM_OP_VECTOR_ADDCARRYUI)
+LOOM_DEFINE_OPERAND(loom_vector_addcarryui_lhs, 0)
+LOOM_DEFINE_OPERAND(loom_vector_addcarryui_rhs, 1)
+LOOM_DEFINE_RESULT(loom_vector_addcarryui_sum, 0)
+LOOM_DEFINE_RESULT(loom_vector_addcarryui_carry, 1)
+iree_status_t loom_vector_addcarryui_build(
     loom_builder_t* builder,
     loom_may_consume loom_value_id_t lhs,
     loom_may_consume loom_value_id_t rhs,
     loom_type_t carry_type,
     loom_location_id_t location,
     loom_op_t** out_op);
-iree_status_t loom_vector_addui_extended_facts(
+iree_status_t loom_vector_addcarryui_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_SUBUI_EXTENDED: Lanewise unsigned integer subtraction returning the wrapped differences and an i1 borrow vector. Each borrow lane is set exactly when its unsigned lhs is less than its unsigned rhs.
-// %difference, %borrow = vector.subui_extended %lhs, %rhs : vector<8xi32> -> vector<8xi1>
-LOOM_DEFINE_ISA(loom_vector_subui_extended_isa, LOOM_OP_VECTOR_SUBUI_EXTENDED)
-LOOM_DEFINE_OPERAND(loom_vector_subui_extended_lhs, 0)
-LOOM_DEFINE_OPERAND(loom_vector_subui_extended_rhs, 1)
-LOOM_DEFINE_RESULT(loom_vector_subui_extended_difference, 0)
-LOOM_DEFINE_RESULT(loom_vector_subui_extended_borrow, 1)
-iree_status_t loom_vector_subui_extended_build(
+// LOOM_OP_VECTOR_SUBBORROWUI: Lanewise unsigned integer subtraction returning width-wrapped differences and an i1 borrow vector. Each borrow lane is set exactly when its unsigned lhs is less than its unsigned rhs.
+// %difference, %borrow = vector.subborrowui %lhs, %rhs : vector<8xi32> -> vector<8xi1>
+LOOM_DEFINE_ISA(loom_vector_subborrowui_isa, LOOM_OP_VECTOR_SUBBORROWUI)
+LOOM_DEFINE_OPERAND(loom_vector_subborrowui_lhs, 0)
+LOOM_DEFINE_OPERAND(loom_vector_subborrowui_rhs, 1)
+LOOM_DEFINE_RESULT(loom_vector_subborrowui_difference, 0)
+LOOM_DEFINE_RESULT(loom_vector_subborrowui_borrow, 1)
+iree_status_t loom_vector_subborrowui_build(
     loom_builder_t* builder,
     loom_may_consume loom_value_id_t lhs,
     loom_may_consume loom_value_id_t rhs,
     loom_type_t borrow_type,
     loom_location_id_t location,
     loom_op_t** out_op);
-iree_status_t loom_vector_subui_extended_facts(
+iree_status_t loom_vector_subborrowui_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,

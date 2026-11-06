@@ -75,53 +75,53 @@ void loom_value_facts_subi_modular(const loom_value_facts_t* lhs,
   *out = loom_value_facts_wrap_integer(*out, bit_count);
 }
 
-static void loom_value_facts_extended_unsigned_overflow(
+static void loom_value_facts_unsigned_carry_or_borrow(
     const loom_value_facts_t* lhs, const loom_value_facts_t* rhs,
-    int32_t bit_count, bool is_subtraction, loom_value_facts_t* out_overflow) {
+    int32_t bit_count, bool is_subtraction,
+    loom_value_facts_t* out_carry_or_borrow) {
   const loom_value_facts_t lhs_facts = *lhs;
   const loom_value_facts_t rhs_facts = *rhs;
   uint64_t lhs_bits = 0;
   uint64_t rhs_bits = 0;
   if (loom_value_facts_as_exact_raw_bits(lhs_facts, bit_count, &lhs_bits) &&
       loom_value_facts_as_exact_raw_bits(rhs_facts, bit_count, &rhs_bits)) {
-    const bool overflow =
+    const bool carry_or_borrow =
         is_subtraction
             ? lhs_bits < rhs_bits
             : (bit_count == 64 ? lhs_bits + rhs_bits < lhs_bits
                                : ((lhs_bits + rhs_bits) >> bit_count) != 0);
-    *out_overflow = loom_value_facts_exact_i64(overflow ? 1 : 0);
+    *out_carry_or_borrow = loom_value_facts_exact_i64(carry_or_borrow ? 1 : 0);
   } else {
-    *out_overflow = loom_value_facts_make(0, 1, 1);
+    *out_carry_or_borrow = loom_value_facts_make(0, 1, 1);
   }
   loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts,
-                                                 out_overflow);
-  if (loom_value_facts_is_lane_varying(*out_overflow)) {
-    loom_value_facts_mark_lane_predicate(out_overflow);
+                                                 out_carry_or_borrow);
+  if (loom_value_facts_is_lane_varying(*out_carry_or_borrow)) {
+    loom_value_facts_mark_lane_predicate(out_carry_or_borrow);
   }
 }
 
-void loom_value_facts_addui_extended(const loom_value_facts_t* lhs,
-                                     const loom_value_facts_t* rhs,
-                                     int32_t bit_count,
-                                     loom_value_facts_t* out_sum,
-                                     loom_value_facts_t* out_carry) {
+void loom_value_facts_addcarryui(const loom_value_facts_t* lhs,
+                                 const loom_value_facts_t* rhs,
+                                 int32_t bit_count, loom_value_facts_t* out_sum,
+                                 loom_value_facts_t* out_carry) {
   const loom_value_facts_t lhs_facts = *lhs;
   const loom_value_facts_t rhs_facts = *rhs;
   loom_value_facts_addi_modular(&lhs_facts, &rhs_facts, bit_count, out_sum);
-  loom_value_facts_extended_unsigned_overflow(
+  loom_value_facts_unsigned_carry_or_borrow(
       &lhs_facts, &rhs_facts, bit_count, /*is_subtraction=*/false, out_carry);
 }
 
-void loom_value_facts_subui_extended(const loom_value_facts_t* lhs,
-                                     const loom_value_facts_t* rhs,
-                                     int32_t bit_count,
-                                     loom_value_facts_t* out_difference,
-                                     loom_value_facts_t* out_borrow) {
+void loom_value_facts_subborrowui(const loom_value_facts_t* lhs,
+                                  const loom_value_facts_t* rhs,
+                                  int32_t bit_count,
+                                  loom_value_facts_t* out_difference,
+                                  loom_value_facts_t* out_borrow) {
   const loom_value_facts_t lhs_facts = *lhs;
   const loom_value_facts_t rhs_facts = *rhs;
   loom_value_facts_subi_modular(&lhs_facts, &rhs_facts, bit_count,
                                 out_difference);
-  loom_value_facts_extended_unsigned_overflow(
+  loom_value_facts_unsigned_carry_or_borrow(
       &lhs_facts, &rhs_facts, bit_count, /*is_subtraction=*/true, out_borrow);
 }
 

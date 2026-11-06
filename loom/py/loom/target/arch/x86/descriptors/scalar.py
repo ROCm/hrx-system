@@ -479,9 +479,7 @@ def _gpr_destructive_binary_descriptor(
     )
 
 
-def _gpr_extended_unsigned_arithmetic_descriptor(
-    operation: str, bit_count: int
-) -> Descriptor:
+def _gpr_unsigned_carry_borrow_descriptor(operation: str, bit_count: int) -> Descriptor:
     """Returns an add/sub descriptor that materializes carry or borrow."""
     is_subtraction = operation == "sub"
     value_result = _gpr64_result("value") if bit_count == 64 else _gpr32_result("value")
@@ -1069,7 +1067,7 @@ _X86_SCALAR_SUFFIX_DESCRIPTORS = (
         semantic_tag="integer.sub.i32",
     ),
     *(
-        _gpr_extended_unsigned_arithmetic_descriptor(operation, bit_count)
+        _gpr_unsigned_carry_borrow_descriptor(operation, bit_count)
         for operation in ("add", "sub")
         for bit_count in (8, 16, 32, 64)
     ),

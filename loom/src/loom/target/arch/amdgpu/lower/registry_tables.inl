@@ -109,9 +109,9 @@ static const loom_amdgpu_lower_dispatch_row_t
                 loom_amdgpu_emit_scalar_i64_alu_dispatch,
                 loom_amdgpu_low_legality_verify_scalar_i64_alu, 2,
                 LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
-        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_ADDUI_EXTENDED)] =
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_ADDCARRYUI)] =
             LOOM_AMDGPU_GENERATED_PRESELECT_DATA_SOURCE_POLICY_ROW(
-                LOOM_OP_SCALAR_ADDUI_EXTENDED,
+                LOOM_OP_SCALAR_ADDCARRYUI,
                 loom_amdgpu_scalar_i64_alu_plan_t,
                 loom_amdgpu_select_scalar_i64_alu_dispatch,
                 loom_amdgpu_emit_scalar_i64_alu_dispatch,
@@ -205,9 +205,9 @@ static const loom_amdgpu_lower_dispatch_row_t
                 loom_amdgpu_emit_scalar_i64_alu_dispatch,
                 loom_amdgpu_low_legality_verify_scalar_i64_alu, 2,
                 LOOM_AMDGPU_PRESELECT_TARGET_PLAN),
-        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_SUBUI_EXTENDED)] =
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_SUBBORROWUI)] =
             LOOM_AMDGPU_GENERATED_PRESELECT_DATA_SOURCE_POLICY_ROW(
-                LOOM_OP_SCALAR_SUBUI_EXTENDED,
+                LOOM_OP_SCALAR_SUBBORROWUI,
                 loom_amdgpu_scalar_i64_alu_plan_t,
                 loom_amdgpu_select_scalar_i64_alu_dispatch,
                 loom_amdgpu_emit_scalar_i64_alu_dispatch,

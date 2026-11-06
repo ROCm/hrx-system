@@ -34,7 +34,7 @@ class ScalarArithmeticMixin:
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
-    def addui_extended(
+    def addcarryui(
         self,
         *,
         lhs: ValueRef,
@@ -45,7 +45,7 @@ class ScalarArithmeticMixin:
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> list[ValueRef]: ...
-    def subui_extended(
+    def subborrowui(
         self,
         *,
         lhs: ValueRef,

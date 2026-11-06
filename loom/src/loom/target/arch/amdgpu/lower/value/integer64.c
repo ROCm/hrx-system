@@ -387,24 +387,24 @@ static const loom_amdgpu_i64_alu_descriptor_requirement_row_t
                 .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
                     kAmdgpuScalarI64ShlVgprDescriptorRequirements),
             },
-        [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADD_EXTENDED] =
+        [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADDCARRY] =
             {
                 .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
                     kAmdgpuOffsetAddVgprDescriptorRequirements),
             },
-        [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUB_EXTENDED] =
+        [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUBBORROW] =
             {
                 .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
                     kAmdgpuScalarI64SubVgprDescriptorRequirements),
             },
-        [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ADD_EXTENDED] =
+        [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ADDCARRY] =
             {
                 .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
                     kAmdgpuOffsetAddSgprDescriptorRequirements),
                 .second = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
                     kAmdgpuSccWordDescriptorRequirements),
             },
-        [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_SUB_EXTENDED] =
+        [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_SUBBORROW] =
             {
                 .first = LOOM_AMDGPU_DESCRIPTOR_REQUIREMENT_SPAN(
                     kAmdgpuScalarI64SubSgprDescriptorRequirements),
@@ -1508,10 +1508,10 @@ static const loom_amdgpu_scalar_i64_alu_kind_t
             LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADD,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_SUBI)] =
             LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUB,
-        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_ADDUI_EXTENDED)] =
-            LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADD_EXTENDED,
-        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_SUBUI_EXTENDED)] =
-            LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUB_EXTENDED,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_ADDCARRYUI)] =
+            LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADDCARRY,
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_SUBBORROWUI)] =
+            LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUBBORROW,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_MULI)] =
             LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_MUL_LO,
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_SCALAR_SHLI)] =
@@ -1788,8 +1788,8 @@ static bool loom_amdgpu_scalar_i64_alu_op(
   *out_lhs = operands[0];
   *out_rhs = operands[1];
   *out_result = loom_op_const_results(source_op)[0];
-  if (kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADD_EXTENDED ||
-      kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUB_EXTENDED) {
+  if (kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADDCARRY ||
+      kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUBBORROW) {
     *out_predicate_result = loom_op_const_results(source_op)[1];
   }
   return true;
@@ -1812,24 +1812,24 @@ static loom_amdgpu_scalar_i64_alu_kind_t loom_amdgpu_scalar_i64_alu_sgpr_kind(
           LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_LSHR,
       [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ASHR] =
           LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ASHR,
-      [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADD_EXTENDED] =
-          LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ADD_EXTENDED,
-      [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUB_EXTENDED] =
-          LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_SUB_EXTENDED,
-      [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ADD_EXTENDED] =
-          LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ADD_EXTENDED,
-      [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_SUB_EXTENDED] =
-          LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_SUB_EXTENDED,
+      [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADDCARRY] =
+          LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ADDCARRY,
+      [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUBBORROW] =
+          LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_SUBBORROW,
+      [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ADDCARRY] =
+          LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ADDCARRY,
+      [LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_SUBBORROW] =
+          LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_SUBBORROW,
   };
   return kinds[kind];
 }
 
-static bool loom_amdgpu_scalar_i64_alu_kind_is_extended(
+static bool loom_amdgpu_scalar_i64_alu_kind_is_carry_borrow(
     loom_amdgpu_scalar_i64_alu_kind_t kind) {
-  return kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADD_EXTENDED ||
-         kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUB_EXTENDED ||
-         kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ADD_EXTENDED ||
-         kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_SUB_EXTENDED;
+  return kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADDCARRY ||
+         kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUBBORROW ||
+         kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_ADDCARRY ||
+         kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_SGPR_SUBBORROW;
 }
 
 static bool loom_amdgpu_scalar_i64_alu_kind_uses_vgpr(
@@ -1841,8 +1841,8 @@ static bool loom_amdgpu_scalar_i64_alu_kind_uses_vgpr(
          kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_LSHR_LITERAL ||
          kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_LSHR ||
          kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ASHR ||
-         kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADD_EXTENDED ||
-         kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUB_EXTENDED;
+         kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_ADDCARRY ||
+         kind == LOOM_AMDGPU_SCALAR_I64_ALU_KIND_VGPR_SUBBORROW;
 }
 
 static iree_status_t loom_amdgpu_scalar_i64_operand_can_materialize(
@@ -1921,7 +1921,7 @@ iree_status_t loom_amdgpu_select_scalar_i64_alu_plan(
       loom_low_register_type_class_id(result_low_type);
 
   loom_type_t predicate_result_low_type = loom_type_none();
-  if (loom_amdgpu_scalar_i64_alu_kind_is_extended(kind)) {
+  if (loom_amdgpu_scalar_i64_alu_kind_is_carry_borrow(kind)) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_low_result_type(
         context, source_op, predicate_result, &predicate_result_low_type));
     const bool predicate_type_supported =

@@ -674,17 +674,17 @@ def test_integer_extrema_rules_prefer_encoded_constants() -> None:
         )
 
 
-def test_extended_i32_rules_cover_uniform_and_divergent_predicates() -> None:
+def test_i32_carry_borrow_rules_cover_uniform_and_divergent_predicates() -> None:
     compiled = _COMPILED_INTEGER_RULES
 
     for source_op, scalar_descriptor, vector_descriptor in (
         (
-            scalar_arithmetic.scalar_addui_extended,
+            scalar_arithmetic.scalar_addcarryui,
             "amdgpu.s_add_co_u32",
             "amdgpu.v_add_co_u32",
         ),
         (
-            scalar_arithmetic.scalar_subui_extended,
+            scalar_arithmetic.scalar_subborrowui,
             "amdgpu.s_sub_co_u32",
             "amdgpu.v_sub_co_u32",
         ),

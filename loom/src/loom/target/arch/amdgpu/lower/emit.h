@@ -422,7 +422,7 @@ iree_status_t loom_amdgpu_emit_vgpr64_add(loom_low_lower_context_t* context,
                                           loom_value_id_t* out_low_sum);
 
 // Emits a VGPR x2 add and retains the final lane-mask carry output.
-iree_status_t loom_amdgpu_emit_vgpr64_add_extended(
+iree_status_t loom_amdgpu_emit_vgpr64_addcarry(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_lhs, loom_value_id_t low_rhs,
     loom_value_id_t* out_low_sum, loom_value_id_t* out_low_carry);
@@ -435,7 +435,7 @@ iree_status_t loom_amdgpu_emit_vgpr64_sub(loom_low_lower_context_t* context,
                                           loom_value_id_t* out_low_difference);
 
 // Emits a VGPR x2 subtract and retains the final lane-mask borrow output.
-iree_status_t loom_amdgpu_emit_vgpr64_sub_extended(
+iree_status_t loom_amdgpu_emit_vgpr64_subborrow(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t low_lhs, loom_value_id_t low_rhs,
     loom_value_id_t* out_low_difference, loom_value_id_t* out_low_borrow);

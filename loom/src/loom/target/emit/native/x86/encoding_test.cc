@@ -880,7 +880,7 @@ TEST(EncodingTest, PredicateSequenceAndImplicitWrites) {
                  {0x49, 0xf7, 0xe1}, (1u << 0) | (1u << 2));
 }
 
-TEST(EncodingTest, ExtendedUnsignedArithmeticWidths) {
+TEST(EncodingTest, CarryAndBorrowWidths) {
   loom_x86_encoding_operands_t operands = {
       .result = 8,
       .secondary = 10,

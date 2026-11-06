@@ -1,13 +1,13 @@
-// RUN: emit source-low @extended_i1 target=amdgpu:gfx1151 output=low
+// RUN: emit source-low @carry_borrow_i1 target=amdgpu:gfx1151 output=low
 
-func.def @extended_i1(%lhs: i1, %rhs: i1) -> (i1, i1, i1, i1) {
-  %sum, %carry = scalar.addui_extended %lhs, %rhs : i1
-  %difference, %borrow = scalar.subui_extended %lhs, %rhs : i1
+func.def @carry_borrow_i1(%lhs: i1, %rhs: i1) -> (i1, i1, i1, i1) {
+  %sum, %carry = scalar.addcarryui %lhs, %rhs : i1
+  %difference, %borrow = scalar.subborrowui %lhs, %rhs : i1
   func.return %sum, %carry, %difference, %borrow : i1, i1, i1, i1
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @extended_i1(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.scc>, reg<amdgpu.scc>, reg<amdgpu.scc>, reg<amdgpu.scc>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @carry_borrow_i1(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.scc>, reg<amdgpu.scc>, reg<amdgpu.scc>, reg<amdgpu.scc>) asm {
   %20 = s_mov_b32 0
   %21 = s_xor_b32 %lhs, %rhs
   %sum = s_cmp_lg_i32 %21, %20
@@ -22,16 +22,16 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @extended_i1(%lhs: reg<
 
 // ====
 
-// RUN: emit source-low @extended_vector_i1 target=amdgpu:gfx1151 output=low
+// RUN: emit source-low @vector_carry_borrow_i1 target=amdgpu:gfx1151 output=low
 
-func.def @extended_vector_i1(%lhs: vector<2xi1>, %rhs: vector<2xi1>) -> (vector<2xi1>, vector<2xi1>, vector<2xi1>, vector<2xi1>) {
-  %sum, %carry = vector.addui_extended %lhs, %rhs : vector<2xi1> -> vector<2xi1>
-  %difference, %borrow = vector.subui_extended %lhs, %rhs : vector<2xi1> -> vector<2xi1>
+func.def @vector_carry_borrow_i1(%lhs: vector<2xi1>, %rhs: vector<2xi1>) -> (vector<2xi1>, vector<2xi1>, vector<2xi1>, vector<2xi1>) {
+  %sum, %carry = vector.addcarryui %lhs, %rhs : vector<2xi1> -> vector<2xi1>
+  %difference, %borrow = vector.subborrowui %lhs, %rhs : vector<2xi1> -> vector<2xi1>
   func.return %sum, %carry, %difference, %borrow : vector<2xi1>, vector<2xi1>, vector<2xi1>, vector<2xi1>
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @extended_vector_i1(%lhs: reg<amdgpu.sgpr x4>, %rhs: reg<amdgpu.sgpr x4>) -> (reg<amdgpu.sgpr x4>, reg<amdgpu.sgpr x4>, reg<amdgpu.sgpr x4>, reg<amdgpu.sgpr x4>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @vector_carry_borrow_i1(%lhs: reg<amdgpu.sgpr x4>, %rhs: reg<amdgpu.sgpr x4>) -> (reg<amdgpu.sgpr x4>, reg<amdgpu.sgpr x4>, reg<amdgpu.sgpr x4>, reg<amdgpu.sgpr x4>) asm {
   %20 = slice %lhs[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x2>
   %21 = slice %rhs[0] : reg<amdgpu.sgpr x4> -> reg<amdgpu.sgpr x2>
   %22 = s_xor_b64 %20, %21
@@ -50,16 +50,16 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @extended_vector_i1(%lh
 
 // ====
 
-// RUN: emit source-low @extended_i32 target=amdgpu:gfx1151 output=low
+// RUN: emit source-low @carry_borrow_i32 target=amdgpu:gfx1151 output=low
 
-func.def @extended_i32(%lhs: i32, %rhs: i32) -> (i32, i1, i32, i1) {
-  %sum, %carry = scalar.addui_extended %lhs, %rhs : i32
-  %difference, %borrow = scalar.subui_extended %lhs, %rhs : i32
+func.def @carry_borrow_i32(%lhs: i32, %rhs: i32) -> (i32, i1, i32, i1) {
+  %sum, %carry = scalar.addcarryui %lhs, %rhs : i32
+  %difference, %borrow = scalar.subborrowui %lhs, %rhs : i32
   func.return %sum, %carry, %difference, %borrow : i32, i1, i32, i1
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @extended_i32(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.scc>, reg<amdgpu.sgpr>, reg<amdgpu.scc>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @carry_borrow_i32(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.scc>, reg<amdgpu.sgpr>, reg<amdgpu.scc>) asm {
   %sum, %carry = s_add_co_u32 %lhs, %rhs
   %difference, %borrow = s_sub_co_u32 %lhs, %rhs
   return %sum, %carry, %difference, %borrow
@@ -67,16 +67,16 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @extended_i32(%lhs: reg
 
 // ====
 
-// RUN: emit source-low @extended_i64 target=amdgpu:gfx1151 output=low
+// RUN: emit source-low @carry_borrow_i64 target=amdgpu:gfx1151 output=low
 
-func.def @extended_i64(%lhs: i64, %rhs: i64) -> (i64, i1, i64, i1) {
-  %sum, %carry = scalar.addui_extended %lhs, %rhs : i64
-  %difference, %borrow = scalar.subui_extended %lhs, %rhs : i64
+func.def @carry_borrow_i64(%lhs: i64, %rhs: i64) -> (i64, i1, i64, i1) {
+  %sum, %carry = scalar.addcarryui %lhs, %rhs : i64
+  %difference, %borrow = scalar.subborrowui %lhs, %rhs : i64
   func.return %sum, %carry, %difference, %borrow : i64, i1, i64, i1
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @extended_i64(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.scc>, reg<amdgpu.sgpr x2>, reg<amdgpu.scc>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @carry_borrow_i64(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.scc>, reg<amdgpu.sgpr x2>, reg<amdgpu.scc>) asm {
   %16 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %17 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %18 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -92,18 +92,18 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @extended_i64(%lhs: reg
 
 // ====
 
-// RUN: emit source-low @varying_extended_i32 target=amdgpu:gfx1151 output=low
+// RUN: emit source-low @varying_carry_borrow_i32 target=amdgpu:gfx1151 output=low
 
-func.def @varying_extended_i32(%values: vector<2xi32>) -> (i32, i1, i32, i1) {
+func.def @varying_carry_borrow_i32(%values: vector<2xi32>) -> (i32, i1, i32, i1) {
   %lhs = vector.extract %values[0] : vector<2xi32> -> i32
   %rhs = vector.extract %values[1] : vector<2xi32> -> i32
-  %sum, %carry = scalar.addui_extended %lhs, %rhs : i32
-  %difference, %borrow = scalar.subui_extended %lhs, %rhs : i32
+  %sum, %carry = scalar.addcarryui %lhs, %rhs : i32
+  %difference, %borrow = scalar.subborrowui %lhs, %rhs : i32
   func.return %sum, %carry, %difference, %borrow : i32, i1, i32, i1
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @varying_extended_i32(%values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @varying_carry_borrow_i32(%values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
   %lhs = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %rhs = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %sum, %carry = v_add_co_u32 %lhs, %rhs
@@ -113,18 +113,18 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @varying_extended_i32(%
 
 // ====
 
-// RUN: emit source-low @varying_extended_i64 target=amdgpu:gfx1151 output=low
+// RUN: emit source-low @varying_carry_borrow_i64 target=amdgpu:gfx1151 output=low
 
-func.def @varying_extended_i64(%values: vector<2xi64>) -> (i64, i1, i64, i1) {
+func.def @varying_carry_borrow_i64(%values: vector<2xi64>) -> (i64, i1, i64, i1) {
   %lhs = vector.extract %values[0] : vector<2xi64> -> i64
   %rhs = vector.extract %values[1] : vector<2xi64> -> i64
-  %sum, %carry = scalar.addui_extended %lhs, %rhs : i64
-  %difference, %borrow = scalar.subui_extended %lhs, %rhs : i64
+  %sum, %carry = scalar.addcarryui %lhs, %rhs : i64
+  %difference, %borrow = scalar.subborrowui %lhs, %rhs : i64
   func.return %sum, %carry, %difference, %borrow : i64, i1, i64, i1
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @varying_extended_i64(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @varying_carry_borrow_i64(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %43 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %42 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
   %41 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
@@ -146,8 +146,8 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @varying_extended_i64(%
 // results. The first carry remains live across the second addition and must be
 // preserved by physical register allocation.
 func.def @add_with_input_carry_i32(%lhs: i32, %rhs: i32, %carry_input: i32) -> (i32, i32) {
-  %partial, %lhs_rhs_carry = scalar.addui_extended %lhs, %rhs : i32
-  %sum, %input_carry = scalar.addui_extended %partial, %carry_input : i32
+  %partial, %lhs_rhs_carry = scalar.addcarryui %lhs, %rhs : i32
+  %sum, %input_carry = scalar.addcarryui %partial, %carry_input : i32
   %carry = scalar.ori %lhs_rhs_carry, %input_carry : i1
   %carry_word = scalar.extui %carry : i1 to i32
   func.return %sum, %carry_word : i32, i32

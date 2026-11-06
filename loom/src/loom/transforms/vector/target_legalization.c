@@ -174,15 +174,15 @@ static iree_status_t loom_vector_legalize_descriptor(
   return iree_ok_status();
 }
 
-// Native extended-arithmetic contracts retain first claim. The reference form
+// Native carry/borrow contracts retain first claim. The reference form
 // remains vector-shaped so targets can select their ordinary add/sub and
 // comparison instructions without scalarizing profitable packet carriers.
-static iree_status_t loom_vector_legalize_extended_unsigned_arithmetic(
+static iree_status_t loom_vector_legalize_unsigned_carry_borrow(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
   (void)entry;
-  const bool is_subtraction = loom_vector_subui_extended_isa(op);
+  const bool is_subtraction = loom_vector_subborrowui_isa(op);
   const loom_value_id_t lhs = loom_op_const_operands(op)[0];
   const loom_value_id_t rhs = loom_op_const_operands(op)[1];
   const loom_type_t value_type =
@@ -1844,12 +1844,12 @@ static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
         .legalize = loom_vector_legalize_descriptor,
     },
     {
-        .root_kind = LOOM_OP_VECTOR_ADDUI_EXTENDED,
-        .legalize = loom_vector_legalize_extended_unsigned_arithmetic,
+        .root_kind = LOOM_OP_VECTOR_ADDCARRYUI,
+        .legalize = loom_vector_legalize_unsigned_carry_borrow,
     },
     {
-        .root_kind = LOOM_OP_VECTOR_SUBUI_EXTENDED,
-        .legalize = loom_vector_legalize_extended_unsigned_arithmetic,
+        .root_kind = LOOM_OP_VECTOR_SUBBORROWUI,
+        .legalize = loom_vector_legalize_unsigned_carry_borrow,
     },
     // Integral rounding keeps native packets when available and otherwise
     // applies the same operation to each scalar lane.

@@ -3969,22 +3969,23 @@ LOOM_VECTOR_MODULAR_BINARY_FACTS(loom_vector_addi_facts, loom_value_facts_addi,
 LOOM_VECTOR_MODULAR_BINARY_FACTS(loom_vector_subi_facts, loom_value_facts_subi,
                                  loom_value_facts_subi_modular)
 
-static void loom_vector_addui_extended_sum_facts(const loom_value_facts_t* lhs,
-                                                 const loom_value_facts_t* rhs,
-                                                 int32_t bit_count,
-                                                 loom_value_facts_t* out) {
+static void loom_vector_addcarryui_sum_facts(const loom_value_facts_t* lhs,
+                                             const loom_value_facts_t* rhs,
+                                             int32_t bit_count,
+                                             loom_value_facts_t* out) {
   loom_value_facts_t carry;
-  loom_value_facts_addui_extended(lhs, rhs, bit_count, out, &carry);
+  loom_value_facts_addcarryui(lhs, rhs, bit_count, out, &carry);
 }
 
-static void loom_vector_addui_extended_carry_facts(
-    const loom_value_facts_t* lhs, const loom_value_facts_t* rhs,
-    int32_t bit_count, loom_value_facts_t* out) {
+static void loom_vector_addcarryui_carry_facts(const loom_value_facts_t* lhs,
+                                               const loom_value_facts_t* rhs,
+                                               int32_t bit_count,
+                                               loom_value_facts_t* out) {
   loom_value_facts_t sum;
-  loom_value_facts_addui_extended(lhs, rhs, bit_count, &sum, out);
+  loom_value_facts_addcarryui(lhs, rhs, bit_count, &sum, out);
 }
 
-iree_status_t loom_vector_addui_extended_facts(
+iree_status_t loom_vector_addcarryui_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
@@ -3992,27 +3993,28 @@ iree_status_t loom_vector_addui_extended_facts(
       loom_scalar_type_bitwidth(loom_vector_result_element_type(module, op));
   IREE_RETURN_IF_ERROR(loom_vector_integer_binary_summary_facts(
       context, bit_count, operand_facts, &result_facts[0],
-      loom_vector_addui_extended_sum_facts));
+      loom_vector_addcarryui_sum_facts));
   return loom_vector_plain_integer_binary_summary_facts(
       context, bit_count, operand_facts, &result_facts[1],
-      loom_vector_addui_extended_carry_facts);
+      loom_vector_addcarryui_carry_facts);
 }
 
-static void loom_vector_subui_extended_difference_facts(
+static void loom_vector_subborrowui_difference_facts(
     const loom_value_facts_t* lhs, const loom_value_facts_t* rhs,
     int32_t bit_count, loom_value_facts_t* out) {
   loom_value_facts_t borrow;
-  loom_value_facts_subui_extended(lhs, rhs, bit_count, out, &borrow);
+  loom_value_facts_subborrowui(lhs, rhs, bit_count, out, &borrow);
 }
 
-static void loom_vector_subui_extended_borrow_facts(
-    const loom_value_facts_t* lhs, const loom_value_facts_t* rhs,
-    int32_t bit_count, loom_value_facts_t* out) {
+static void loom_vector_subborrowui_borrow_facts(const loom_value_facts_t* lhs,
+                                                 const loom_value_facts_t* rhs,
+                                                 int32_t bit_count,
+                                                 loom_value_facts_t* out) {
   loom_value_facts_t difference;
-  loom_value_facts_subui_extended(lhs, rhs, bit_count, &difference, out);
+  loom_value_facts_subborrowui(lhs, rhs, bit_count, &difference, out);
 }
 
-iree_status_t loom_vector_subui_extended_facts(
+iree_status_t loom_vector_subborrowui_facts(
     loom_fact_context_t* context, const loom_module_t* module,
     const loom_op_t* op, const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts) {
@@ -4020,10 +4022,10 @@ iree_status_t loom_vector_subui_extended_facts(
       loom_scalar_type_bitwidth(loom_vector_result_element_type(module, op));
   IREE_RETURN_IF_ERROR(loom_vector_integer_binary_summary_facts(
       context, bit_count, operand_facts, &result_facts[0],
-      loom_vector_subui_extended_difference_facts));
+      loom_vector_subborrowui_difference_facts));
   return loom_vector_plain_integer_binary_summary_facts(
       context, bit_count, operand_facts, &result_facts[1],
-      loom_vector_subui_extended_borrow_facts);
+      loom_vector_subborrowui_borrow_facts);
 }
 
 LOOM_VECTOR_MODULAR_BINARY_FACTS(loom_vector_muli_facts, loom_value_facts_muli,

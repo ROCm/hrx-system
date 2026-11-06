@@ -674,7 +674,7 @@ def _i32_sgpr_vgpr_rules(
     )
 
 
-def _extended_typed_guards(
+def _carry_borrow_typed_guards(
     value_type: TypePattern,
     value_result: str,
     predicate_result: str,
@@ -687,7 +687,7 @@ def _extended_typed_guards(
     )
 
 
-def _i32_extended_sgpr_rule(
+def _i32_carry_borrow_sgpr_rule(
     source_op: Op,
     descriptor_key: str,
     *,
@@ -698,7 +698,7 @@ def _i32_extended_sgpr_rule(
 ) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     guards = (
-        *_extended_typed_guards(_I32, value_result, predicate_result),
+        *_carry_borrow_typed_guards(_I32, value_result, predicate_result),
         Guard.low_value_register_class("lhs", "amdgpu.sgpr"),
         Guard.low_value_register_class("rhs", "amdgpu.sgpr"),
         Guard.low_value_register_class(value_result, "amdgpu.sgpr"),
@@ -767,7 +767,7 @@ def _i32_extended_sgpr_rule(
     )
 
 
-def _i32_extended_vgpr_rule(
+def _i32_carry_borrow_vgpr_rule(
     source_op: Op,
     descriptor_key: str,
     *,
@@ -781,7 +781,7 @@ def _i32_extended_vgpr_rule(
         source_op=source_op,
         descriptor=descriptor,
         guards=(
-            *_extended_typed_guards(_I32, value_result, predicate_result),
+            *_carry_borrow_typed_guards(_I32, value_result, predicate_result),
             Guard.low_value_register_class(value_result, "amdgpu.vgpr"),
             Guard.low_value_register_unit_count(value_result, 1),
             Guard.low_value_register_class(predicate_result, "amdgpu.sgpr"),
@@ -806,7 +806,7 @@ def _i32_extended_vgpr_rule(
     )
 
 
-def _extended_unsigned_arithmetic_rules(
+def _unsigned_carry_borrow_rules(
     source_op: Op,
     *,
     value_result: str,
@@ -818,7 +818,7 @@ def _extended_unsigned_arithmetic_rules(
 ) -> tuple[DescriptorRule | RecipeRule, ...]:
     return (
         *(
-            _i32_extended_sgpr_rule(
+            _i32_carry_borrow_sgpr_rule(
                 source_op,
                 sgpr_descriptor_key,
                 value_result=value_result,
@@ -828,7 +828,7 @@ def _extended_unsigned_arithmetic_rules(
             )
             for predicate_register_class in ("amdgpu.scc", "amdgpu.sgpr")
         ),
-        _i32_extended_vgpr_rule(
+        _i32_carry_borrow_vgpr_rule(
             source_op,
             vgpr_descriptor_key,
             value_result=value_result,
@@ -838,7 +838,7 @@ def _extended_unsigned_arithmetic_rules(
         ),
         RecipeRule(
             source_op=source_op,
-            guards=_extended_typed_guards(_I64, value_result, predicate_result),
+            guards=_carry_borrow_typed_guards(_I64, value_result, predicate_result),
         ),
     )
 
@@ -2039,8 +2039,8 @@ def _rules() -> tuple[DescriptorRule, ...]:
     ):
         rules.extend(_i32_encoded_binary_rules(source_op, suffix))
     rules.extend(
-        _extended_unsigned_arithmetic_rules(
-            scalar_arithmetic.scalar_addui_extended,
+        _unsigned_carry_borrow_rules(
+            scalar_arithmetic.scalar_addcarryui,
             value_result="sum",
             predicate_result="carry",
             descriptor_predicate_result="carry",
@@ -2050,8 +2050,8 @@ def _rules() -> tuple[DescriptorRule, ...]:
         )
     )
     rules.extend(
-        _extended_unsigned_arithmetic_rules(
-            scalar_arithmetic.scalar_subui_extended,
+        _unsigned_carry_borrow_rules(
+            scalar_arithmetic.scalar_subborrowui,
             value_result="difference",
             predicate_result="borrow",
             descriptor_predicate_result="borrow",

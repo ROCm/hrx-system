@@ -21,8 +21,8 @@ extern "C" {
 enum {
   LOOM_OP_SCALAR_ADDI = LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 0),
   LOOM_OP_SCALAR_SUBI = LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 1),
-  LOOM_OP_SCALAR_ADDUI_EXTENDED = LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 2),
-  LOOM_OP_SCALAR_SUBUI_EXTENDED = LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 3),
+  LOOM_OP_SCALAR_ADDCARRYUI = LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 2),
+  LOOM_OP_SCALAR_SUBBORROWUI = LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 3),
   LOOM_OP_SCALAR_MULI = LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 4),
   LOOM_OP_SCALAR_DIVSI = LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 5),
   LOOM_OP_SCALAR_DIVUI = LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 6),
@@ -248,41 +248,41 @@ iree_status_t loom_scalar_subi_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_ADDUI_EXTENDED: Unsigned integer addition returning the wrapped sum and an i1 carry that is set exactly when the mathematical sum exceeds the result width.
-// %sum, %carry = scalar.addui_extended %lhs, %rhs : i32
-LOOM_DEFINE_ISA(loom_scalar_addui_extended_isa, LOOM_OP_SCALAR_ADDUI_EXTENDED)
-LOOM_DEFINE_OPERAND(loom_scalar_addui_extended_lhs, 0)
-LOOM_DEFINE_OPERAND(loom_scalar_addui_extended_rhs, 1)
-LOOM_DEFINE_RESULT(loom_scalar_addui_extended_sum, 0)
-LOOM_DEFINE_RESULT(loom_scalar_addui_extended_carry, 1)
-iree_status_t loom_scalar_addui_extended_build(
+// LOOM_OP_SCALAR_ADDCARRYUI: Unsigned integer addition returning the width-wrapped sum and an i1 carry that is set exactly when the mathematical sum does not fit in the result width.
+// %sum, %carry = scalar.addcarryui %lhs, %rhs : i32
+LOOM_DEFINE_ISA(loom_scalar_addcarryui_isa, LOOM_OP_SCALAR_ADDCARRYUI)
+LOOM_DEFINE_OPERAND(loom_scalar_addcarryui_lhs, 0)
+LOOM_DEFINE_OPERAND(loom_scalar_addcarryui_rhs, 1)
+LOOM_DEFINE_RESULT(loom_scalar_addcarryui_sum, 0)
+LOOM_DEFINE_RESULT(loom_scalar_addcarryui_carry, 1)
+iree_status_t loom_scalar_addcarryui_build(
     loom_builder_t* builder,
     loom_value_id_t lhs,
     loom_value_id_t rhs,
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
-iree_status_t loom_scalar_addui_extended_facts(
+iree_status_t loom_scalar_addcarryui_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_SUBUI_EXTENDED: Unsigned integer subtraction returning the wrapped difference and an i1 borrow that is set exactly when lhs is less than rhs.
-// %difference, %borrow = scalar.subui_extended %lhs, %rhs : i32
-LOOM_DEFINE_ISA(loom_scalar_subui_extended_isa, LOOM_OP_SCALAR_SUBUI_EXTENDED)
-LOOM_DEFINE_OPERAND(loom_scalar_subui_extended_lhs, 0)
-LOOM_DEFINE_OPERAND(loom_scalar_subui_extended_rhs, 1)
-LOOM_DEFINE_RESULT(loom_scalar_subui_extended_difference, 0)
-LOOM_DEFINE_RESULT(loom_scalar_subui_extended_borrow, 1)
-iree_status_t loom_scalar_subui_extended_build(
+// LOOM_OP_SCALAR_SUBBORROWUI: Unsigned integer subtraction returning the width-wrapped difference and an i1 borrow that is set exactly when lhs is less than rhs.
+// %difference, %borrow = scalar.subborrowui %lhs, %rhs : i32
+LOOM_DEFINE_ISA(loom_scalar_subborrowui_isa, LOOM_OP_SCALAR_SUBBORROWUI)
+LOOM_DEFINE_OPERAND(loom_scalar_subborrowui_lhs, 0)
+LOOM_DEFINE_OPERAND(loom_scalar_subborrowui_rhs, 1)
+LOOM_DEFINE_RESULT(loom_scalar_subborrowui_difference, 0)
+LOOM_DEFINE_RESULT(loom_scalar_subborrowui_borrow, 1)
+iree_status_t loom_scalar_subborrowui_build(
     loom_builder_t* builder,
     loom_value_id_t lhs,
     loom_value_id_t rhs,
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
-iree_status_t loom_scalar_subui_extended_facts(
+iree_status_t loom_scalar_subborrowui_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,

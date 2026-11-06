@@ -1142,12 +1142,12 @@ static iree_status_t loom_scalar_legalize_divrem(
 // Native carry/borrow contracts take precedence. The reference form preserves
 // the source width through the comparison so narrow overflow is not confused
 // with overflow of a widened target carrier.
-static iree_status_t loom_scalar_legalize_extended_unsigned_arithmetic(
+static iree_status_t loom_scalar_legalize_unsigned_carry_borrow(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
   (void)entry;
-  const bool is_subtraction = loom_scalar_subui_extended_isa(op);
+  const bool is_subtraction = loom_scalar_subborrowui_isa(op);
   const loom_value_id_t lhs = loom_op_const_operands(op)[0];
   const loom_value_id_t rhs = loom_op_const_operands(op)[1];
   const loom_type_t result_type =
@@ -1939,14 +1939,14 @@ static const loom_target_legalizer_rule_t kScalarLegalizerRules[] = {
         .legalize = loom_scalar_legalize_narrow_cmpi,
     },
     {
-        .root_kind = LOOM_OP_SCALAR_ADDUI_EXTENDED,
+        .root_kind = LOOM_OP_SCALAR_ADDCARRYUI,
         .first_operand_element_types = LOOM_SCALAR_TYPE_SET_INTEGER,
-        .legalize = loom_scalar_legalize_extended_unsigned_arithmetic,
+        .legalize = loom_scalar_legalize_unsigned_carry_borrow,
     },
     {
-        .root_kind = LOOM_OP_SCALAR_SUBUI_EXTENDED,
+        .root_kind = LOOM_OP_SCALAR_SUBBORROWUI,
         .first_operand_element_types = LOOM_SCALAR_TYPE_SET_INTEGER,
-        .legalize = loom_scalar_legalize_extended_unsigned_arithmetic,
+        .legalize = loom_scalar_legalize_unsigned_carry_borrow,
     },
     {
         .root_kind = LOOM_OP_SCALAR_ADDI,

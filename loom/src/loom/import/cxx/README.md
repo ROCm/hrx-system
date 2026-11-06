@@ -1386,10 +1386,10 @@ i64 under LP64 and i32 under LLP64.
 
 The carry or borrow input has the same full-width unsigned type as the other
 operands; it is not restricted to zero or one. Loom preserves the builtin
-contract by performing the operation in two extended-arithmetic steps and
-combining their flags. The result wraps to the source width, and the output
-pointer receives zero or one in that same unsigned type. Each argument is
-evaluated once before the arithmetic and output store.
+contract by composing two `scalar.addcarryui` or `scalar.subborrowui`
+operations and combining their flags. The result wraps to the source width,
+and the output pointer receives zero or one in that same unsigned type. Each
+argument is evaluated once before the arithmetic and output store.
 
 ## Integer atomics
 
