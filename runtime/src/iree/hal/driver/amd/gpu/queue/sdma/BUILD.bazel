@@ -13,6 +13,34 @@ package(
     licenses = ["notice"],
 )
 
+iree_runtime_cc_test(
+    name = "transfer_test",
+    srcs = ["transfer_test.cc"],
+    deps = [
+        ":commands",
+        ":transfer",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:buffer",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:dma_transfer",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:transfer",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "transfer",
+    srcs = ["transfer.c"],
+    hdrs = ["transfer.h"],
+    deps = [
+        ":commands",
+        "//libamdf:headers",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:dma_transfer",
+    ],
+)
+
 iree_runtime_cc_library(
     name = "barrier",
     srcs = ["barrier.c"],

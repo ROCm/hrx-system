@@ -78,6 +78,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:blit",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:buffer",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:dma_transfer",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:transfer",
     ],
 )
@@ -109,6 +110,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd/gpu/image",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:blit",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:dma_transfer",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:transfer",
         "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
         "//runtime/src/iree/testing:gtest",
@@ -564,6 +566,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/driver/amd/gpu/queue:capture_pool",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:control",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:control_program",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:dma_transfer",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:file_staging",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:file_transfer",
         "//runtime/src/iree/hal/driver/amd/gpu/queue:host_call",

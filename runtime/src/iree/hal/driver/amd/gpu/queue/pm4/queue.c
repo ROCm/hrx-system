@@ -16,6 +16,7 @@
 #include "iree/hal/driver/amd/gpu/queue/buffer.h"
 #include "iree/hal/driver/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/control_program.h"
+#include "iree/hal/driver/amd/gpu/queue/dma_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/host_call.h"
 #include "iree/hal/driver/amd/gpu/queue/host_wait.h"
@@ -449,19 +450,20 @@ iree_hal_amd_gpu_pm4_publish_transfer(
   const uint32_t word_budget =
       iree_min(queue->producer.ring.capacity / 2, 16384u);
   const uint32_t wait_words = first ? submission->native_wait_count * 7 : 0;
-  iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
+  iree_hal_amd_gpu_dma_transfer_chunk_t chunk;
   const uint32_t word_capacity = iree_min(
-      IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS, word_budget - wait_words - 96);
+      IREE_HAL_AMD_GPU_DMA_TRANSFER_MAX_WORDS, word_budget - wait_words - 96);
   const iree_byte_span_t staging =
       iree_make_byte_span(arguments->memory.contents.data + offset,
                           iree_min(available, staging_window_length));
   iree_status_t status =
-      program ? iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
-                    transfer, &queue->options.programs->blit, word_capacity,
-                    staging, arguments->address + offset, &chunk)
-              : iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
-                    transfer, word_capacity, staging,
-                    arguments->address + offset, &chunk);
+      program
+          ? iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
+                transfer, &queue->options.programs->blit, word_capacity,
+                staging, arguments->address + offset, &chunk)
+          : iree_hal_amd_gpu_dma_transfer_prepare_chunk(
+                &iree_hal_amd_gpu_pm4_transfer_encoding, transfer,
+                word_capacity, staging, arguments->address + offset, &chunk);
   if (!iree_status_is_ok(status)) {
     iree_hal_amd_gpu_pm4_abandon(queue, submission, status);
     return IREE_HAL_AMD_GPU_PM4_PUBLICATION_FINISHED;

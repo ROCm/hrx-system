@@ -7,6 +7,7 @@
 #ifndef IREE_HAL_DRIVER_AMD_GPU_QUEUE_PM4_TRANSFER_H_
 #define IREE_HAL_DRIVER_AMD_GPU_QUEUE_PM4_TRANSFER_H_
 
+#include "iree/hal/driver/amd/gpu/queue/dma_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/launch.h"
 #include "iree/hal/driver/amd/gpu/queue/transfer.h"
 
@@ -19,74 +20,11 @@ enum {
   IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_DOWNLOAD_LENGTH = 1024 * 1024,
   // Upload preparation overlaps native reads with two bounded regions.
   IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_UPLOAD_LENGTH = 16 * 1024 * 1024,
-  // Bounded command preparation, independent of payload or staging byte size.
-  IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS = 32 * 7,
 };
 
-// Admitted native DMA span, independent of direct or recorded ownership.
-// Addresses already name the logical beginning of each device range. Host
-// source bytes are immutable for this emission, and downloads use the caller's
-// staging window as their native target.
-typedef struct iree_hal_amd_gpu_pm4_transfer_span_t {
-  // Device source for copies and downloads.
-  uint64_t source_address;
-  // Device target for copies, fills, updates, and uploads.
-  uint64_t target_address;
-  // Borrowed source bytes for updates and uploads.
-  const uint8_t* source_bytes;
-  // Complete logical extent, before applying the publication cursor.
-  uint64_t length;
-  // Fill value expanded to four repeating bytes.
-  uint32_t pattern;
-  // Admitted DMA family; no public HAL operation is replayed.
-  iree_hal_transfer_operation_type_t type;
-} iree_hal_amd_gpu_pm4_transfer_span_t;
-
-typedef struct iree_hal_amd_gpu_pm4_transfer_packet_t {
-  // Bytes covered by the emitted seven-DWORD packet; zero means no capacity.
-  uint32_t length;
-  // Staging bytes owned through this packet's DMA completion.
-  uint32_t staging_length;
-} iree_hal_amd_gpu_pm4_transfer_packet_t;
-
-// Emits one native packet from a nonempty remaining span. Applies the qualified
-// byte-count policy and stages unaligned fill edges or host bytes when needed.
-// The caller supplies seven writable DWORDs and retains both ranges and staging
-// through DMA completion. Capacity exhaustion emits nothing. This trusted
-// transform performs no allocation, buffer lookup, or failure construction.
-iree_hal_amd_gpu_pm4_transfer_packet_t
-iree_hal_amd_gpu_pm4_transfer_emit_packet(
-    const iree_hal_amd_gpu_pm4_transfer_span_t* span, uint64_t offset,
-    iree_byte_span_t staging, uint64_t staging_address, uint32_t* words);
-
-// One bounded candidate publication. Consecutive downloads share contiguous
-// staging and one retirement action; the next different operation ends the run.
-// No owner changes until the enclosing queue commits this candidate and its
-// staging prefix.
-typedef struct iree_hal_amd_gpu_pm4_transfer_chunk_t {
-  // Native commands, with all addresses already resolved.
-  uint32_t words[IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS];
-  // Initialized command extent in DWORDs; zero means staging capacity is full.
-  uint32_t word_count;
-  // Contiguous staging bytes used by this candidate.
-  uint32_t staging_length;
-  // Cursor transferred to the publisher when the candidate is committed.
-  iree_hal_amd_gpu_transfer_cursor_t next;
-  // Optional retirement copy dominated by the candidate's staging prefix.
-  iree_hal_amd_gpu_download_t download;
-} iree_hal_amd_gpu_pm4_transfer_chunk_t;
-
-// Plans at most word_capacity DWORDs and writes only into available staging.
-// The transaction has an unpublished suffix and its required dependencies have
-// been satisfied. Staging capacity is bounded by the queue and at most
-// one bulk window; no native allocation occurs. The caller alone owns staging
-// writes. Packet boundaries do not require independent retirement.
-// Capacity exhaustion is represented by an empty chunk, not an error status.
-// Failure means a captured buffer still lacks its queue-ordered native address.
-iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
-    const iree_hal_amd_gpu_transfer_t* transfer, uint32_t word_capacity,
-    iree_byte_span_t staging, uint64_t staging_address,
-    iree_hal_amd_gpu_pm4_transfer_chunk_t* out_chunk);
+// PM4 packet selection for the shared capture and staging traversal.
+extern const iree_hal_amd_gpu_dma_transfer_encoding_t
+    iree_hal_amd_gpu_pm4_transfer_encoding;
 
 // Emits consecutive COPY operations with the resident blit kernel. Capture
 // has proved that every native slot also admits PROGRAM transfer access.
@@ -97,7 +35,7 @@ iree_status_t iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
     const iree_hal_amd_gpu_transfer_t* transfer,
     const iree_hal_amd_gpu_pm4_launch_t* launch, uint32_t word_capacity,
     iree_byte_span_t staging, uint64_t staging_address,
-    iree_hal_amd_gpu_pm4_transfer_chunk_t* out_chunk);
+    iree_hal_amd_gpu_dma_transfer_chunk_t* out_chunk);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -77,6 +77,18 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "dma_transfer",
+    srcs = ["dma_transfer.c"],
+    hdrs = ["dma_transfer.h"],
+    deps = [
+        ":buffer",
+        ":transfer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "transfer",
     srcs = ["transfer.c"],
     hdrs = ["transfer.h"],
