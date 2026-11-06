@@ -18,12 +18,13 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from build_tools.bazel import compile_commands_merge
-from build_tools.devtools import bazel_launcher, fuzz
+from build_tools.devtools import bazel_launcher, fuzz, fuzz_campaign
 from build_tools.devtools.command_plan import quote_command
 from build_tools.devtools.environment import (
     BAZEL_SH_ENV,
@@ -122,6 +123,7 @@ class BazelFuzzCommand:
     result_path: Path | None = None
     ignored_directories: list[Path] = field(default_factory=list)
     compile_only: bool = False
+    stream_output: bool = True
 
 
 @dataclass(frozen=True)
@@ -205,16 +207,51 @@ class BazelProcess:
 
 
 @dataclass(frozen=True)
+class BazelFuzzerProcess:
+    process: BazelProcess
+    executable: fuzz_campaign.ExecutableIdentity
+    corpus_dir: Path
+    artifact_dir: Path
+
+    @property
+    def target(self) -> str:
+        return self.process.target
+
+
+@dataclass(frozen=True)
 class BazelFuzzProcessResult:
     target: str
     state: str
     exit_code: int | None
+    duration_ns: int
+    statistics: fuzz_campaign.LibFuzzerStatistics
+    executable: fuzz_campaign.ExecutableIdentity
+    corpus_dir: Path
+    corpus_before: fuzz_campaign.DirectorySnapshot
+    corpus_after: fuzz_campaign.DirectorySnapshot
+    artifact_dir: Path
+    artifacts_before: fuzz_campaign.DirectorySnapshot
+    artifacts_after: fuzz_campaign.DirectorySnapshot
+    output_bytes: int
+    failure_output_path: Path | None
 
 
 @dataclass(frozen=True)
 class BazelFuzzRunResult:
     exit_code: int
     targets: tuple[BazelFuzzProcessResult, ...]
+    start_unix_ns: int
+    duration_ns: int
+
+
+@dataclass
+class ActiveBazelFuzzer:
+    fuzzer: BazelFuzzerProcess
+    process: subprocess.Popen
+    observer: fuzz_campaign.FuzzerOutputObserver
+    output_thread: threading.Thread
+    output_errors: list[Exception]
+    start_ns: int
 
 
 def split_program_args(arguments: list[str]) -> tuple[list[str], list[str]]:
@@ -320,9 +357,12 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
     result_path = None
     ignored_directories = []
     compile_only = False
+    stream_output = True
     for arg in tool_args:
         if arg in ("--compile-only", "--compile_only"):
             compile_only = True
+        elif arg in ("--quiet-output", "--quiet_output"):
+            stream_output = False
         elif arg.startswith("--workers="):
             try:
                 worker_count = int(arg.split("=", 1)[1])
@@ -359,6 +399,8 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
         raise ValueError("--result cannot be used with --compile-only")
     if compile_only and fuzzer_args:
         raise ValueError("fuzzer arguments cannot be used with --compile-only")
+    if compile_only and not stream_output:
+        raise ValueError("--quiet-output cannot be used with --compile-only")
     return BazelFuzzCommand(
         targets=sorted(targets),
         bazel_args=bazel_args,
@@ -369,6 +411,7 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
         result_path=result_path,
         ignored_directories=ignored_directories,
         compile_only=compile_only,
+        stream_output=stream_output,
     )
 
 
@@ -1276,31 +1319,81 @@ def cleanup_compile_commands_scratch(scratch_dir: Path) -> None:
 
 
 def run_fuzzers(
-    fuzzer_processes: list[BazelProcess], worker_count: int
+    fuzzer_processes: list[BazelFuzzerProcess],
+    worker_count: int,
+    *,
+    stream_output: bool = True,
 ) -> BazelFuzzRunResult:
     if worker_count <= 0:
         raise ValueError("Fuzzer worker count must be positive")
-    order = {process.target: index for index, process in enumerate(fuzzer_processes)}
+    order = {fuzzer.target: index for index, fuzzer in enumerate(fuzzer_processes)}
     pending = list(fuzzer_processes)
-    active: list[tuple[BazelProcess, subprocess.Popen]] = []
+    active: list[ActiveBazelFuzzer] = []
     results: list[BazelFuzzProcessResult] = []
+    initial_snapshots: dict[
+        str, tuple[fuzz_campaign.DirectorySnapshot, fuzz_campaign.DirectorySnapshot]
+    ] = {}
     result_code = 0
     received_signal = None
+    campaign_start_unix_ns = time.time_ns()
+    campaign_start_ns = time.monotonic_ns()
 
-    def remove_launch_script(process_launch: BazelProcess) -> None:
+    def remove_launch_script(fuzzer: BazelFuzzerProcess) -> None:
+        process_launch = fuzzer.process
         if process_launch.script_path is not None:
             bazel_launcher.remove_launch_script(process_launch.script_path)
 
     def stop_active_processes(signum: int) -> None:
-        for _, process in active:
-            if process.poll() is None:
+        for active_fuzzer in active:
+            if active_fuzzer.process.poll() is None:
                 if os.name == "nt":
                     if received_signal == signal.SIGINT:
                         # Console Ctrl-C already reaches child processes on Windows.
                         continue
-                    process.terminate()
+                    active_fuzzer.process.terminate()
                 else:
-                    process.send_signal(signum)
+                    active_fuzzer.process.send_signal(signum)
+
+    def snapshot_before(fuzzer: BazelFuzzerProcess) -> None:
+        initial_snapshots[fuzzer.target] = (
+            fuzz_campaign.snapshot_directory(fuzzer.corpus_dir),
+            fuzz_campaign.snapshot_directory(fuzzer.artifact_dir),
+        )
+
+    def make_result(
+        fuzzer: BazelFuzzerProcess,
+        *,
+        state: str,
+        exit_code: int | None,
+        duration_ns: int,
+        observer: fuzz_campaign.FuzzerOutputObserver | None = None,
+    ) -> BazelFuzzProcessResult:
+        if observer is None:
+            observer = fuzz_campaign.FuzzerOutputObserver()
+            observer.finalize()
+        corpus_before, artifacts_before = initial_snapshots[fuzzer.target]
+        corpus_after = fuzz_campaign.snapshot_directory(fuzzer.corpus_dir)
+        artifacts_after = fuzz_campaign.snapshot_directory(fuzzer.artifact_dir)
+        failure_output_path = None
+        if state == "failed" and observer.total_bytes:
+            failure_output_path = fuzzer.corpus_dir.parent / "last-failure.log"
+            fuzz_campaign.write_failure_output(failure_output_path, observer)
+        return BazelFuzzProcessResult(
+            target=fuzzer.target,
+            state=state,
+            exit_code=exit_code,
+            duration_ns=duration_ns,
+            statistics=observer.statistics,
+            executable=fuzzer.executable,
+            corpus_dir=fuzzer.corpus_dir,
+            corpus_before=corpus_before,
+            corpus_after=corpus_after,
+            artifact_dir=fuzzer.artifact_dir,
+            artifacts_before=artifacts_before,
+            artifacts_after=artifacts_after,
+            output_bytes=observer.total_bytes,
+            failure_output_path=failure_output_path,
+        )
 
     def forward_signal(signum, frame) -> None:
         del frame
@@ -1320,12 +1413,20 @@ def run_fuzzers(
                 and result_code == 0
                 and received_signal is None
             ):
-                process_launch = pending.pop(0)
+                fuzzer = pending.pop(0)
+                process_launch = fuzzer.process
+                try:
+                    snapshot_before(fuzzer)
+                except OSError:
+                    remove_launch_script(fuzzer)
+                    raise
+                start_ns = time.monotonic_ns()
                 try:
                     process = subprocess.Popen(
                         process_launch.argv,
                         cwd=process_launch.cwd,
                         env=process_launch.env,
+                        stderr=subprocess.PIPE,
                     )
                 except (OSError, ValueError) as exc:
                     print(
@@ -1333,30 +1434,76 @@ def run_fuzzers(
                         f"{exc}",
                         file=sys.stderr,
                     )
-                    remove_launch_script(process_launch)
+                    remove_launch_script(fuzzer)
                     results.append(
-                        BazelFuzzProcessResult(
-                            target=process_launch.target,
+                        make_result(
+                            fuzzer,
                             state="failed",
                             exit_code=127,
+                            duration_ns=time.monotonic_ns() - start_ns,
                         )
                     )
                     result_code = 127
                     stop_active_processes(signal.SIGINT)
                     break
-                active.append((process_launch, process))
+                observer = fuzz_campaign.FuzzerOutputObserver()
+                output_errors: list[Exception] = []
+                destination = sys.stderr if stream_output else None
+
+                def observe_output(
+                    process=process,
+                    observer=observer,
+                    destination=destination,
+                    output_errors=output_errors,
+                ) -> None:
+                    try:
+                        if process.stderr is None:
+                            raise RuntimeError("Fuzzer stderr pipe was not created")
+                        fuzz_campaign.observe_stream(
+                            process.stderr, observer, destination
+                        )
+                    except Exception as exc:  # Propagated on the owner thread below.
+                        output_errors.append(exc)
+
+                output_thread = threading.Thread(
+                    target=observe_output,
+                    name=f"fuzz-output-{process_launch.target}",
+                )
+                output_thread.start()
+                active.append(
+                    ActiveBazelFuzzer(
+                        fuzzer=fuzzer,
+                        process=process,
+                        observer=observer,
+                        output_thread=output_thread,
+                        output_errors=output_errors,
+                        start_ns=start_ns,
+                    )
+                )
 
             made_progress = False
-            for process_launch, process in list(active):
-                process_result = process.poll()
+            for active_fuzzer in list(active):
+                process_result = active_fuzzer.process.poll()
                 if process_result is None:
                     continue
                 made_progress = True
-                active.remove((process_launch, process))
-                remove_launch_script(process_launch)
+                active.remove(active_fuzzer)
+                active_fuzzer.output_thread.join()
+                remove_launch_script(active_fuzzer.fuzzer)
                 exit_code = process_exit_code(process_result)
                 if received_signal is not None:
                     state = "cancelled"
+                elif active_fuzzer.output_errors:
+                    state = "failed"
+                    exit_code = 1
+                    result_code = 1
+                    print(
+                        f"dev.py: failed to observe fuzzer "
+                        f"{active_fuzzer.fuzzer.target}: "
+                        f"{active_fuzzer.output_errors[0]}",
+                        file=sys.stderr,
+                    )
+                    stop_active_processes(signal.SIGINT)
                 elif exit_code == 0:
                     state = "passed"
                 elif result_code != 0:
@@ -1365,28 +1512,32 @@ def run_fuzzers(
                     state = "failed"
                     result_code = exit_code
                     print(
-                        f"dev.py: fuzzer failed: {process_launch.target} exited "
+                        f"dev.py: fuzzer failed: {active_fuzzer.fuzzer.target} exited "
                         f"{process_result}",
                         file=sys.stderr,
                     )
                     stop_active_processes(signal.SIGINT)
                 results.append(
-                    BazelFuzzProcessResult(
-                        target=process_launch.target,
+                    make_result(
+                        active_fuzzer.fuzzer,
                         state=state,
                         exit_code=exit_code,
+                        duration_ns=time.monotonic_ns() - active_fuzzer.start_ns,
+                        observer=active_fuzzer.observer,
                     )
                 )
 
             if result_code != 0 or received_signal is not None:
                 while pending:
-                    process_launch = pending.pop(0)
-                    remove_launch_script(process_launch)
+                    fuzzer = pending.pop(0)
+                    snapshot_before(fuzzer)
+                    remove_launch_script(fuzzer)
                     results.append(
-                        BazelFuzzProcessResult(
-                            target=process_launch.target,
+                        make_result(
+                            fuzzer,
                             state="not_started",
                             exit_code=None,
+                            duration_ns=0,
                         )
                     )
             if active and not made_progress:
@@ -1395,21 +1546,31 @@ def run_fuzzers(
         for signum, handler in previous_handlers.items():
             signal.signal(signum, handler)
         stop_active_processes(received_signal or signal.SIGINT)
-        for process_launch, process in active:
-            process_result = process.wait()
-            remove_launch_script(process_launch)
+        for active_fuzzer in active:
+            process_result = active_fuzzer.process.wait()
+            active_fuzzer.output_thread.join()
+            remove_launch_script(active_fuzzer.fuzzer)
             results.append(
-                BazelFuzzProcessResult(
-                    target=process_launch.target,
+                make_result(
+                    active_fuzzer.fuzzer,
                     state="cancelled",
                     exit_code=process_exit_code(process_result),
+                    duration_ns=time.monotonic_ns() - active_fuzzer.start_ns,
+                    observer=active_fuzzer.observer,
                 )
             )
+        for fuzzer in pending:
+            remove_launch_script(fuzzer)
 
     if received_signal is not None:
         result_code = 128 + received_signal
     results.sort(key=lambda result: order[result.target])
-    return BazelFuzzRunResult(exit_code=result_code, targets=tuple(results))
+    return BazelFuzzRunResult(
+        exit_code=result_code,
+        targets=tuple(results),
+        start_unix_ns=campaign_start_unix_ns,
+        duration_ns=time.monotonic_ns() - campaign_start_ns,
+    )
 
 
 def process_exit_code(process_result: int) -> int:
@@ -1423,28 +1584,52 @@ def write_fuzz_campaign_result(
     command: BazelFuzzCommand,
     run_result: BazelFuzzRunResult,
     incompatible_targets: list[str],
+    source: fuzz_campaign.SourceIdentity,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     targets = []
     for result in run_result.targets:
-        target_dir = fuzz.bazel_fuzz_target_dir(result.target)
         targets.append(
             {
                 "label": result.target,
                 "state": result.state,
                 "exit_code": result.exit_code,
-                "corpus_dir": str(target_dir / "corpus"),
-                "artifact_dir": str(target_dir / "artifacts"),
+                "duration_ns": result.duration_ns,
+                "build": result.executable.json(),
+                "libfuzzer": result.statistics.json(),
+                "corpus": {
+                    "path": str(result.corpus_dir),
+                    **fuzz_campaign.directory_change(
+                        result.corpus_before, result.corpus_after
+                    ),
+                },
+                "artifacts": {
+                    "path": str(result.artifact_dir),
+                    **fuzz_campaign.directory_change(
+                        result.artifacts_before, result.artifacts_after
+                    ),
+                },
+                "output_bytes": result.output_bytes,
+                "failure_output_path": (
+                    str(result.failure_output_path)
+                    if result.failure_output_path is not None
+                    else None
+                ),
             }
         )
     payload = {
-        "format": "iree.fuzz.campaign.v1",
+        "format": "iree.fuzz.campaign.v2",
+        "source": source.json(),
         "target_patterns": command.targets,
+        "selected_targets": [result.target for result in run_result.targets],
         "shard": {"index": command.shard_index, "count": command.shard_count},
         "worker_count": command.worker_count,
+        "stream_output": command.stream_output,
         "bazel_args": command.bazel_args,
-        "fuzzer_args": command.program_args,
+        "fuzzer_args": fuzz_campaign.telemetry_arguments(command.program_args),
         "exit_code": run_result.exit_code,
+        "start_unix_ns": run_result.start_unix_ns,
+        "duration_ns": run_result.duration_ns,
         "incompatible_targets": incompatible_targets,
         "targets": targets,
     }
@@ -1615,6 +1800,8 @@ class BazelFuzzStep:
             f"run at most {self.command.worker_count} launch scripts concurrently "
             "without the Bazel lock"
         )
+        if not self.command.stream_output:
+            lines.append("discard successful output after collecting bounded telemetry")
         return "\n".join(lines)
 
     def run(self, verbose: bool = False) -> int:
@@ -1713,6 +1900,18 @@ class BazelFuzzStep:
             return build_result
         if self.command.compile_only:
             return 0
+        executable_identities = {}
+        for target in targets:
+            try:
+                executable_identities[target] = fuzz_campaign.executable_identity(
+                    metadata_by_target[target].executable_path
+                )
+            except OSError as exc:
+                print(
+                    f"dev.py: could not identify fuzzer executable for {target}: {exc}",
+                    file=sys.stderr,
+                )
+                return 1
         fuzzer_launches = []
         for target in targets:
             launch_result, launch = self.generate_fuzzer_launch(
@@ -1735,7 +1934,15 @@ class BazelFuzzStep:
                 for pending_launch in fuzzer_launches:
                     bazel_launcher.remove_launch_script(pending_launch.script_path)
                 return process_result
-            fuzzer_processes.append(process_launch)
+            target_dir = fuzz.bazel_fuzz_target_dir(launch.target)
+            fuzzer_processes.append(
+                BazelFuzzerProcess(
+                    process=process_launch,
+                    executable=executable_identities[launch.target],
+                    corpus_dir=target_dir / "corpus",
+                    artifact_dir=target_dir / "artifacts",
+                )
+            )
         return self.run_fuzzer_processes(fuzzer_processes, incompatible_targets)
 
     def build_targets(self, targets: list[str], *, verbose: bool) -> int:
@@ -1750,9 +1957,27 @@ class BazelFuzzStep:
         return build_result
 
     def run_fuzzer_processes(
-        self, processes: list[BazelProcess], incompatible_targets: list[str]
+        self, processes: list[BazelFuzzerProcess], incompatible_targets: list[str]
     ) -> int:
-        run_result = run_fuzzers(processes, self.command.worker_count)
+        try:
+            source = fuzz_campaign.source_identity(REPO_ROOT)
+        except (OSError, RuntimeError) as exc:
+            for fuzzer in processes:
+                if fuzzer.process.script_path is not None:
+                    bazel_launcher.remove_launch_script(fuzzer.process.script_path)
+            print(f"dev.py: could not identify campaign source: {exc}", file=sys.stderr)
+            return 1
+        try:
+            run_result = run_fuzzers(
+                processes,
+                self.command.worker_count,
+                stream_output=self.command.stream_output,
+            )
+        except OSError as exc:
+            print(
+                f"dev.py: could not inspect fuzz campaign state: {exc}", file=sys.stderr
+            )
+            return 1
         result_path = self.command.result_path
         if result_path is None:
             result_path = fuzz.bazel_fuzz_campaign_result_path(
@@ -1767,6 +1992,7 @@ class BazelFuzzStep:
             self.command,
             run_result,
             incompatible_targets,
+            source,
         )
         print(f"dev.py: fuzz campaign result: {result_path}")
         return run_result.exit_code
@@ -1798,7 +2024,7 @@ class BazelFuzzStep:
         return [
             str(corpus_dir),
             f"-artifact_prefix={artifact_dir}/",
-            *self.command.program_args,
+            *fuzz_campaign.telemetry_arguments(self.command.program_args),
         ]
 
 

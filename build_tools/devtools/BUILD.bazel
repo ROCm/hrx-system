@@ -93,6 +93,7 @@ py_library(
         "doctor.py",
         "environment.py",
         "fuzz.py",
+        "fuzz_campaign.py",
         "help_text.py",
         "hooks.py",
         "importers.py",
@@ -184,6 +185,7 @@ py_test(
         "command_plan.py",
         "environment.py",
         "fuzz.py",
+        "fuzz_campaign.py",
     ],
     main = "bazel_test.py",
     tags = _PRESUBMIT_TEST_TAGS,
@@ -193,6 +195,17 @@ py_test(
         "//loom/py/loom/build_tools/bazel:configure",
         "//runtime/build_tools/bazel:configure",
     ],
+)
+
+py_test(
+    name = "fuzz_campaign_test",
+    size = _PRESUBMIT_TEST_SIZE,
+    srcs = [
+        "fuzz_campaign.py",
+        "fuzz_campaign_test.py",
+    ],
+    main = "fuzz_campaign_test.py",
+    tags = _PRESUBMIT_TEST_TAGS,
 )
 
 py_test(
@@ -259,6 +272,7 @@ py_test(
         "doctor.py",
         "environment.py",
         "fuzz.py",
+        "fuzz_campaign.py",
         "help_text.py",
         "hooks.py",
         "importers.py",

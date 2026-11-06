@@ -934,7 +934,7 @@ iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz
 iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz -- -max_total_time=60
 iree-bazel-fuzz --workers=2 //path:parser_fuzz //path:schema_fuzz -- -max_total_time=60
 iree-bazel-fuzz --workers=4 --shard=0/4 //runtime/... -- -max_total_time=3600
-iree-bazel-fuzz --workers=2 //loom/... -- -max_total_time=3600
+iree-bazel-fuzz --workers=2 --quiet-output //loom/... -- -max_total_time=3600
 iree-bazel-fuzz --compile-only //...
 ```
 
@@ -942,6 +942,11 @@ Several exact labels form one target set. The launcher analyzes and builds the
 set in one Bazel invocation, generates every launch script, then starts fuzzer
 processes under the shared worker bound. This keeps Bazel work serialized while
 the binaries fuzz concurrently with independent corpus and artifact directories.
+
+Interactive campaigns stream each fuzzer's output directly. Scheduled campaigns
+use `--quiet-output`: the runner still parses the stream and retains a bounded
+tail for the first failure, but successful output is discarded instead of
+growing a service log.
 
 A recursive pattern is an exclusive campaign boundary. Run runtime and Loom
 campaigns independently so each can use an appropriate process count, shard
@@ -963,10 +968,14 @@ Corpus and artifact directories live under
 `iree-fuzz-cache/`. Each run writes a compact JSON campaign result there;
 `--result=PATH` overrides its location. Shards use a stable hash of each target
 label, so adding a target does not move existing targets between machines. The
-result lists incompatible targets skipped by a pattern; naming one directly
-fails with a configuration diagnostic. Fuzzer arguments go after `--`;
-libFuzzer `-jobs` multiplies work inside every selected target and is usually
-inappropriate for pattern campaigns.
+result records source and executable identities, monotonic durations,
+libFuzzer coverage and feature growth, final execution and memory statistics,
+corpus and artifact deltas, and incompatible targets skipped by a pattern. A
+failed target also retains a 64 KiB output tail beside its local corpus and
+records that path. Naming one incompatible target directly fails with a
+configuration diagnostic. Fuzzer arguments go after `--`; libFuzzer `-jobs`
+multiplies work inside every selected target and is usually inappropriate for
+pattern campaigns.
 
 Merge an external corpus into the target's persistent corpus with libFuzzer's
 normal merge mode:
