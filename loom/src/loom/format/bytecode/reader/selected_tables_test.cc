@@ -6,6 +6,7 @@
 
 #include "loom/format/bytecode/reader/selected_tables.h"
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -245,6 +246,116 @@ TEST_F(BytecodeSelectedTablesTest, MaterializesOnlyReachedMixedTableFacts) {
   EXPECT_EQ(target_element_id, 0u);
   EXPECT_EQ(module_->types.count, 2u);
   EXPECT_EQ(materializer.projection.buckets.count, 6u);
+  EXPECT_EQ(error_count_, 0u);
+  loom_bytecode_selected_table_materializer_deinitialize(&materializer);
+}
+
+TEST_F(BytecodeSelectedTablesTest, MaterializesCanonicalLocationVariants) {
+  iree_string_view_t sources[] = {IREE_SV("model.loom")};
+  std::vector<uint8_t> bytecode;
+  loom_bytecode_table_entry_metadata_t locations[5] = {};
+
+  locations[0].entry_offset = bytecode.size();
+  bytecode.insert(bytecode.end(), {LOOM_LOCATION_NONE, 0x00});
+  locations[0].entry_length = bytecode.size() - locations[0].entry_offset;
+
+  locations[1].entry_offset = bytecode.size();
+  bytecode.insert(bytecode.end(), {
+                                      LOOM_LOCATION_FILE,
+                                      LOOM_LOCATION_FLAG_SYNTHETIC,
+                                      0x00,  // Source ordinal.
+                                      0x01,
+                                      0x02,
+                                      0x03,
+                                      0x04,  // Coordinates.
+                                  });
+  locations[1].entry_length = bytecode.size() - locations[1].entry_offset;
+
+  locations[2].entry_offset = bytecode.size();
+  bytecode.insert(bytecode.end(), {
+                                      LOOM_LOCATION_FUSED,
+                                      LOOM_LOCATION_FLAG_SYNTHETIC,
+                                      0x01,  // Child count.
+                                      0x01,  // File child.
+                                  });
+  locations[2].entry_length = bytecode.size() - locations[2].entry_offset;
+
+  locations[3].entry_offset = bytecode.size();
+  bytecode.insert(bytecode.end(), {
+                                      LOOM_LOCATION_OPAQUE,
+                                      LOOM_LOCATION_FLAG_SYNTHETIC,
+                                      0x00,  // Source ordinal.
+                                      0x03,
+                                      'a',
+                                      'b',
+                                      'c',  // Payload.
+                                  });
+  locations[3].entry_length = bytecode.size() - locations[3].entry_offset;
+
+  locations[4].entry_offset = bytecode.size();
+  bytecode.insert(bytecode.end(), {
+                                      LOOM_LOCATION_TAGGED,
+                                      LOOM_LOCATION_FLAG_SYNTHETIC,
+                                      LOOM_LOCATION_TAG_SANITIZER_SITE,
+                                      0x02,  // Fused child.
+                                      0x02,
+                                      'd',
+                                      'e',  // Payload.
+                                  });
+  locations[4].entry_length = bytecode.size() - locations[4].entry_offset;
+
+  loom_bytecode_module_metadata_t metadata = {
+      .sources = {IREE_ARRAYSIZE(sources), sources},
+      .locations = {IREE_ARRAYSIZE(locations), locations},
+  };
+  loom_bytecode_selected_table_materializer_t materializer;
+  InitializeMaterializer(bytecode, &metadata, &materializer);
+
+  loom_location_id_t tagged_id = LOOM_LOCATION_UNKNOWN;
+  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_location(
+      &materializer, /*source_location_id=*/4, &tagged_id));
+  loom_location_id_t opaque_id = LOOM_LOCATION_UNKNOWN;
+  IREE_ASSERT_OK(loom_bytecode_selected_table_materialize_location(
+      &materializer, /*source_location_id=*/3, &opaque_id));
+
+  ASSERT_EQ(module_->locations.count, 5u);
+  const auto& file = *loom_location_table_const_entry(&module_->locations, 1);
+  EXPECT_EQ(file.kind, LOOM_LOCATION_FILE);
+  EXPECT_EQ(file.flags, LOOM_LOCATION_FLAG_SYNTHETIC);
+  EXPECT_EQ(file.file.source_id, 0u);
+  EXPECT_EQ(file.file.field_span_count, 0u);
+  EXPECT_EQ(file.file.field_span_format, LOOM_LOCATION_FIELD_SPAN_FORMAT_NONE);
+  EXPECT_EQ(file.file.reserved, 0u);
+  EXPECT_EQ(file.file.start_line, 1u);
+  EXPECT_EQ(file.file.start_col, 2u);
+  EXPECT_EQ(file.file.end_line, 3u);
+  EXPECT_EQ(file.file.end_col, 4u);
+  EXPECT_EQ(file.file.field_span_data, nullptr);
+
+  const auto& fused = *loom_location_table_const_entry(&module_->locations, 2);
+  EXPECT_EQ(fused.kind, LOOM_LOCATION_FUSED);
+  EXPECT_EQ(fused.flags, LOOM_LOCATION_FLAG_SYNTHETIC);
+  EXPECT_EQ(fused.fused.reserved, 0u);
+  ASSERT_EQ(fused.fused.count, 1u);
+  EXPECT_EQ(fused.fused.children[0], 1u);
+
+  const auto& tagged =
+      *loom_location_table_const_entry(&module_->locations, tagged_id);
+  EXPECT_EQ(tagged.kind, LOOM_LOCATION_TAGGED);
+  EXPECT_EQ(tagged.flags, LOOM_LOCATION_FLAG_SYNTHETIC);
+  EXPECT_EQ(tagged.tagged.tag, LOOM_LOCATION_TAG_SANITIZER_SITE);
+  EXPECT_EQ(tagged.tagged.child, 2u);
+  ASSERT_EQ(tagged.tagged.data_length, 2u);
+  EXPECT_EQ(std::memcmp(tagged.tagged.data, "de", 2), 0);
+
+  const auto& opaque =
+      *loom_location_table_const_entry(&module_->locations, opaque_id);
+  EXPECT_EQ(opaque.kind, LOOM_LOCATION_OPAQUE);
+  EXPECT_EQ(opaque.flags, LOOM_LOCATION_FLAG_SYNTHETIC);
+  EXPECT_EQ(opaque.opaque.source_id, 0u);
+  ASSERT_EQ(opaque.opaque.data_length, 3u);
+  EXPECT_EQ(std::memcmp(opaque.opaque.data, "abc", 3), 0);
+
   EXPECT_EQ(error_count_, 0u);
   loom_bytecode_selected_table_materializer_deinitialize(&materializer);
 }

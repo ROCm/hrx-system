@@ -740,33 +740,47 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
         source_ordinal, IREE_SV("flags"), kind_offset + 1,
         IREE_SV("location_has_unsupported_flag_bits"));
   }
-  *entry = (loom_location_entry_t){
-      .kind = (loom_location_kind_t)kind,
-      .flags = flags,
-  };
   switch ((loom_location_kind_t)kind) {
     case LOOM_LOCATION_NONE:
       IREE_ASSERT(source_ordinal == 0 && flags == 0);
       return iree_ok_status();
     case LOOM_LOCATION_FILE: {
+      loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_read_source(
-          materializer, &cursor, &entry->file.source_id));
+          materializer, &cursor, &source_id));
+      uint32_t coordinates[4];
       IREE_RETURN_IF_ERROR(
           loom_bytecode_selected_table_read_location_coordinate(
               materializer, &cursor, source_ordinal, IREE_SV("start_line"),
-              &entry->file.start_line));
+              &coordinates[0]));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_selected_table_read_location_coordinate(
               materializer, &cursor, source_ordinal, IREE_SV("start_col"),
-              &entry->file.start_col));
+              &coordinates[1]));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_selected_table_read_location_coordinate(
               materializer, &cursor, source_ordinal, IREE_SV("end_line"),
-              &entry->file.end_line));
+              &coordinates[2]));
       IREE_RETURN_IF_ERROR(
           loom_bytecode_selected_table_read_location_coordinate(
               materializer, &cursor, source_ordinal, IREE_SV("end_col"),
-              &entry->file.end_col));
+              &coordinates[3]));
+      *entry = (loom_location_entry_t){
+          .file =
+              {
+                  .kind = LOOM_LOCATION_FILE,
+                  .flags = flags,
+                  .source_id = source_id,
+                  .field_span_count = 0,
+                  .field_span_format = LOOM_LOCATION_FIELD_SPAN_FORMAT_NONE,
+                  .reserved = 0,
+                  .start_line = coordinates[0],
+                  .start_col = coordinates[1],
+                  .end_line = coordinates[2],
+                  .end_col = coordinates[3],
+                  .field_span_data = NULL,
+              },
+      };
       break;
     }
     case LOOM_LOCATION_FUSED: {
@@ -802,13 +816,22 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
             materializer, (loom_location_id_t)source_child,
             &children[child_index]));
       }
-      entry->fused.count = (uint32_t)child_count;
-      entry->fused.children = children;
+      *entry = (loom_location_entry_t){
+          .fused =
+              {
+                  .kind = LOOM_LOCATION_FUSED,
+                  .flags = flags,
+                  .reserved = 0,
+                  .count = (uint32_t)child_count,
+                  .children = children,
+              },
+      };
       break;
     }
     case LOOM_LOCATION_OPAQUE: {
+      loom_source_id_t source_id = LOOM_SOURCE_ID_INVALID;
       IREE_RETURN_IF_ERROR(loom_bytecode_selected_table_read_source(
-          materializer, &cursor, &entry->opaque.source_id));
+          materializer, &cursor, &source_id));
       uint64_t data_length = 0;
       const uint64_t data_length_offset =
           loom_bytecode_reader_cursor_absolute_position(&cursor);
@@ -823,8 +846,16 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
       iree_const_byte_span_t span = iree_const_byte_span_empty();
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_span(
           materializer->decoder, &cursor, data_length, &span));
-      entry->opaque.data_length = (uint32_t)span.data_length;
-      entry->opaque.data = span.data;
+      *entry = (loom_location_entry_t){
+          .opaque =
+              {
+                  .kind = LOOM_LOCATION_OPAQUE,
+                  .flags = flags,
+                  .source_id = source_id,
+                  .data_length = (uint32_t)span.data_length,
+                  .data = span.data,
+              },
+      };
       break;
     }
     case LOOM_LOCATION_TAGGED: {
@@ -869,9 +900,17 @@ static iree_status_t loom_bytecode_selected_table_prepare_location(
       iree_const_byte_span_t span = iree_const_byte_span_empty();
       IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_span(
           materializer->decoder, &cursor, data_length, &span));
-      entry->tagged.tag = (loom_location_tag_t)tag;
-      entry->tagged.data_length = (uint32_t)span.data_length;
-      entry->tagged.data = span.data;
+      *entry = (loom_location_entry_t){
+          .tagged =
+              {
+                  .kind = LOOM_LOCATION_TAGGED,
+                  .flags = flags,
+                  .tag = (loom_location_tag_t)tag,
+                  .data_length = (uint32_t)span.data_length,
+                  .child = LOOM_LOCATION_UNKNOWN,
+                  .data = span.data,
+              },
+      };
       break;
     }
     default:

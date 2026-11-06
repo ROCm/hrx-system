@@ -71,25 +71,25 @@ class BytecodeLocationTest : public ::testing::Test {
       LOOM_LOCATION_NONE,  // Location 0: unknown sentinel.
       0x00,                // Flags.
       LOOM_LOCATION_FILE,  // Location 1: source range.
-      0x00,                // Flags.
-      0x00,                // Source ordinal.
+      LOOM_LOCATION_FLAG_SYNTHETIC,
+      0x00,  // Source ordinal.
       0x01,
       0x02,
       0x03,
       0x04,                 // Source coordinates.
       LOOM_LOCATION_FUSED,  // Location 2: one prior child.
-      0x00,                 // Flags.
+      LOOM_LOCATION_FLAG_SYNTHETIC,
       0x01,
       0x01,                  // Child count and location 1.
       LOOM_LOCATION_OPAQUE,  // Location 3: source-owned bytes.
-      0x00,                  // Flags.
-      0x00,                  // Source ordinal.
+      LOOM_LOCATION_FLAG_SYNTHETIC,
+      0x00,  // Source ordinal.
       0x03,
       'a',
       'b',
       'c',                   // Payload.
       LOOM_LOCATION_TAGGED,  // Location 4: tagged prior child.
-      0x00,                  // Flags.
+      LOOM_LOCATION_FLAG_SYNTHETIC,
       0x01,
       0x02,  // Tag and location 2.
       0x02,
@@ -262,21 +262,29 @@ TEST_F(BytecodeLocationTest, MaterializesCanonicalTable) {
   const loom_location_entry_t& file =
       *loom_location_table_const_entry(&module_->locations, 1);
   EXPECT_EQ(file.kind, LOOM_LOCATION_FILE);
+  EXPECT_EQ(file.flags, LOOM_LOCATION_FLAG_SYNTHETIC);
   EXPECT_EQ(file.file.source_id, 0u);
+  EXPECT_EQ(file.file.field_span_count, 0u);
+  EXPECT_EQ(file.file.field_span_format, LOOM_LOCATION_FIELD_SPAN_FORMAT_NONE);
+  EXPECT_EQ(file.file.reserved, 0u);
   EXPECT_EQ(file.file.start_line, 1u);
   EXPECT_EQ(file.file.start_col, 2u);
   EXPECT_EQ(file.file.end_line, 3u);
   EXPECT_EQ(file.file.end_col, 4u);
+  EXPECT_EQ(file.file.field_span_data, nullptr);
 
   const loom_location_entry_t& fused =
       *loom_location_table_const_entry(&module_->locations, 2);
   EXPECT_EQ(fused.kind, LOOM_LOCATION_FUSED);
+  EXPECT_EQ(fused.flags, LOOM_LOCATION_FLAG_SYNTHETIC);
+  EXPECT_EQ(fused.fused.reserved, 0u);
   ASSERT_EQ(fused.fused.count, 1u);
   EXPECT_EQ(fused.fused.children[0], 1u);
 
   const loom_location_entry_t& opaque =
       *loom_location_table_const_entry(&module_->locations, 3);
   EXPECT_EQ(opaque.kind, LOOM_LOCATION_OPAQUE);
+  EXPECT_EQ(opaque.flags, LOOM_LOCATION_FLAG_SYNTHETIC);
   EXPECT_EQ(opaque.opaque.source_id, 0u);
   ASSERT_EQ(opaque.opaque.data_length, 3u);
   EXPECT_EQ(std::memcmp(opaque.opaque.data, "abc", 3), 0);
@@ -284,6 +292,7 @@ TEST_F(BytecodeLocationTest, MaterializesCanonicalTable) {
   const loom_location_entry_t& tagged =
       *loom_location_table_const_entry(&module_->locations, 4);
   EXPECT_EQ(tagged.kind, LOOM_LOCATION_TAGGED);
+  EXPECT_EQ(tagged.flags, LOOM_LOCATION_FLAG_SYNTHETIC);
   EXPECT_EQ(tagged.tagged.tag, 1u);
   EXPECT_EQ(tagged.tagged.child, 2u);
   ASSERT_EQ(tagged.tagged.data_length, 2u);

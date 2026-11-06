@@ -248,11 +248,8 @@ static iree_status_t loom_parse_fused_location_body(
            child_count * sizeof(*module_children));
   }
 
-  loom_location_entry_t entry = {
-      .kind = LOOM_LOCATION_FUSED,
-  };
-  entry.fused.count = (uint32_t)child_count;
-  entry.fused.children = module_children;
+  loom_location_entry_t entry =
+      loom_location_fused(module_children, (uint32_t)child_count);
   return loom_module_add_location(parser->module, entry, out_location);
 }
 
@@ -285,12 +282,8 @@ static iree_status_t loom_parse_opaque_location_body(
     memcpy(module_data, data_token.text.data, data_token.text.size);
   }
 
-  loom_location_entry_t entry = {
-      .kind = LOOM_LOCATION_OPAQUE,
-  };
-  entry.opaque.source_id = source_id;
-  entry.opaque.data_length = (uint32_t)data_token.text.size;
-  entry.opaque.data = module_data;
+  loom_location_entry_t entry = loom_location_opaque(
+      source_id, module_data, (uint32_t)data_token.text.size);
   return loom_module_add_location(parser->module, entry, out_location);
 }
 

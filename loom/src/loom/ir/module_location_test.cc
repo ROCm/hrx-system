@@ -107,8 +107,14 @@ TEST_P(ModuleLocationTest, EmptyAndFirstLocationAllocation) {
             LOOM_LOCATION_NONE);
   const auto* entry = loom_location_table_const_entry(&module_->locations, id);
   EXPECT_EQ(entry->kind, LOOM_LOCATION_FILE);
+  EXPECT_EQ(entry->flags, 0u);
   EXPECT_EQ(entry->file.source_id, source_id_);
+  EXPECT_EQ(entry->file.field_span_count, 0u);
+  EXPECT_EQ(entry->file.field_span_format,
+            LOOM_LOCATION_FIELD_SPAN_FORMAT_NONE);
+  EXPECT_EQ(entry->file.reserved, 0u);
   EXPECT_EQ(entry->file.start_line, 7u);
+  EXPECT_EQ(entry->file.field_span_data, nullptr);
 }
 
 TEST_P(ModuleLocationTest, GrowthPreservesRowsWithoutAbandonedArrays) {
@@ -250,17 +256,13 @@ TEST_P(ModuleLocationTest, CompactionPreservesReachableLocationGraphs) {
                                 reinterpret_cast<void**>(&fused_children)));
   fused_children[0] = live_file_a;
   fused_children[1] = live_file_b;
-  loom_location_entry_t fused_entry = {.kind = LOOM_LOCATION_FUSED};
-  fused_entry.fused.count = 2;
-  fused_entry.fused.children = fused_children;
+  loom_location_entry_t fused_entry = loom_location_fused(fused_children, 2);
   loom_location_id_t fused = LOOM_LOCATION_UNKNOWN;
   IREE_ASSERT_OK(loom_module_add_location(module_, fused_entry, &fused));
 
   const uint8_t opaque_data[] = {1, 2, 3};
-  loom_location_entry_t dead_opaque = {.kind = LOOM_LOCATION_OPAQUE};
-  dead_opaque.opaque.source_id = source_id_;
-  dead_opaque.opaque.data_length = IREE_ARRAYSIZE(opaque_data);
-  dead_opaque.opaque.data = opaque_data;
+  loom_location_entry_t dead_opaque = loom_location_opaque(
+      source_id_, opaque_data, IREE_ARRAYSIZE(opaque_data));
   loom_location_id_t dead_opaque_id = LOOM_LOCATION_UNKNOWN;
   IREE_ASSERT_OK(
       loom_module_add_location(module_, dead_opaque, &dead_opaque_id));
