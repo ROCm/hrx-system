@@ -1,0 +1,116 @@
+// RUN: with-locations roundtrip
+#line 100 "presumed.cc"
+int line_value() { return __LINE__; }
+int first_counter() { return __COUNTER__; }
+int second_counter() { return __COUNTER__; }
+int feature() { return __has_attribute(unused); }
+
+// ----
+func.def public @line_value() -> (i32) {
+  %1 = scalar.constant 100 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":2:27 to 2:35)
+  func.return %1 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":2:20 to 2:36)
+} loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":2:1 to 2:38)
+
+func.def public @first_counter() -> (i32) {
+  %3 = scalar.constant 0 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":3:30 to 3:41)
+  func.return %3 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":3:23 to 3:42)
+} loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":3:1 to 3:44)
+
+func.def public @second_counter() -> (i32) {
+  %5 = scalar.constant 1 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":4:31 to 4:42)
+  func.return %5 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":4:24 to 4:43)
+} loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":4:1 to 4:45)
+
+func.def public @feature() -> (i32) {
+  %7 = scalar.constant 1 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":5:24 to 5:39)
+  func.return %7 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":5:17 to 5:48)
+} loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":5:1 to 5:50)
+
+// ====
+// RUN: with-locations pass canonicalize,cse,dce
+#define CURRENT_LINE __LINE__
+#define FORWARD(value) value
+#define INDIRECT CURRENT_LINE
+int nested() { return FORWARD(INDIRECT); }
+int body() { return INDIRECT; }
+int argument() { return FORWARD(__LINE__); }
+
+// ----
+func.def public @nested() -> (i32) {
+  %1 = scalar.constant 4 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":4:31 to 4:39)
+  func.return %1 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":4:16 to 4:41)
+} loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":4:1 to 4:43)
+
+func.def public @body() -> (i32) {
+  %3 = scalar.constant 5 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":5:21 to 5:29)
+  func.return %3 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":5:14 to 5:30)
+} loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":5:1 to 5:32)
+
+func.def public @argument() -> (i32) {
+  %5 = scalar.constant 6 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":6:33 to 6:41)
+  func.return %5 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":6:18 to 6:43)
+} loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":6:1 to 6:45)
+
+// ====
+// RUN: with-locations pass canonicalize,cse,dce
+#include "locations.h"
+int entry() { return header_line() + HEADER_LINE; }
+
+// ----
+func.def public @entry() -> (i32) {
+  %1 = func.call pure @header_line() : () -> (i32) loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":2:22 to 2:35)
+  %2 = scalar.constant 2 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":2:38 to 2:49)
+  %3 = scalar.addi %1, %2 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":2:22 to 2:49)
+  func.return %3 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":2:15 to 2:50)
+} loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":2:1 to 2:52)
+
+func.def @header_line() -> (i32) {
+  %5 = scalar.constant 600 : i32 loc("loom/src/loom/import/cxx/source/test/locations.h":11:35 to 11:43)
+  func.return %5 : i32 loc("loom/src/loom/import/cxx/source/test/locations.h":11:28 to 11:44)
+} loc("loom/src/loom/import/cxx/source/test/locations.h":11:1 to 11:46)
+
+// ====
+// RUN: with-locations pass canonicalize,cse,dce
+#line 500 "presumed.cc"
+const char* filename() {
+  return __FILE__;
+}
+
+// ----
+func.def public @filename() -> (buffer, offset) {
+  %2 = buffer.constant align(1) utf8("presumed.cc\u0000") : buffer loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":3:10 to 3:18)
+  %3 = index.constant 0 : offset loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":3:10 to 3:18)
+  func.return %2, %3 : buffer, offset loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":3:3 to 3:19)
+} loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":2:1 to 4:2)
+
+// ====
+// RUN: with-locations pass canonicalize,cse,dce
+unsigned date_length() {
+  return sizeof(__DATE__);
+}
+
+// ----
+func.def public @date_length() -> (i32) {
+  %3 = scalar.constant 12 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":2:10 to 2:26)
+  func.return %3 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":2:3 to 2:27)
+} loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":1:1 to 3:2)
+
+// ====
+// RUN: with-locations pass canonicalize,cse,dce
+#define CURRENT_TIME __TIME__
+unsigned time_length() {
+  return sizeof(CURRENT_TIME);
+}
+
+// ----
+func.def public @time_length() -> (i32) {
+  %3 = scalar.constant 9 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":3:10 to 3:30)
+  func.return %3 : i32 loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":3:3 to 3:31)
+} loc("loom/src/loom/import/cxx/source/test/locations.cxx-test":2:1 to 4:2)
+
+// ====
+// RUN: pass unroll-scf-for
+void unresolved_schedule(unsigned factor) {
+  // ERROR@+1: STRUCTURE/014 {attr_name="unroll_factor", expected_constraint="compile-time exact i64 value"}
+  [[loom::unroll(factor)]] for (unsigned index = 0; index < 8u; ++index) {}
+}

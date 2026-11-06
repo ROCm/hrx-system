@@ -25,6 +25,14 @@ Program lowering and source rejection cases belong in these files. Native C++
 tests exercise API contracts such as callback failures, source lifetimes,
 binding identity, and retained analysis facts.
 
+[Source language and constant evaluation](../source/test/README.md) cover
+frontend admission, lexical names, enums, data models, and source constants:
+
+```sh
+iree-bazel-test --config=asan --config=loom-importer-cxx \
+  //loom/src/loom/import/cxx/source/test:compiler_test
+```
+
 `special_members.cxx-test` executes ordinary copy/move construction and
 assignment through the VM lifecycle observer. Its exact event traces cover
 source clearing, self-assignment, nested/defaulted members, array defaults,

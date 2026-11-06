@@ -1,0 +1,116 @@
+// RUN: pass canonicalize,cse,dce
+// An inner typedef shadows the template alias only within its lexical scope.
+template <class T>
+static unsigned aliases(unsigned input) {
+  using Word = T;
+  Word value = input;
+  unsigned total = sizeof(Word) * 100 + value;
+  {
+    typedef unsigned char Word;
+    Word narrowed = input;
+    total += sizeof(Word) * 10 + narrowed;
+  }
+  return total + sizeof(Word);
+}
+unsigned narrow(unsigned input) { return aliases<unsigned short>(input); }
+unsigned wide(unsigned input) { return aliases<unsigned>(input); }
+
+// ----
+func.def public @narrow(%input: i32) -> (i32) {
+  %2 = func.call pure @aliases_unsigned_short(%input) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def public @wide(%input: i32) -> (i32) {
+  %5 = func.call pure @aliases_unsigned_int(%input) : (i32) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @aliases_unsigned_short(%input: i32) -> (i32) {
+  %value = scalar.trunci %input : i32 to i16
+  %57 = scalar.constant 200 : i64
+  %13 = scalar.extui %value : i16 to i64
+  %56 = scalar.addi %13, %57 : i64
+  %total$15 = scalar.trunci %56 : i64 to i32
+  %narrowed = scalar.trunci %input : i32 to i8
+  %55 = scalar.constant 10 : i64
+  %21 = scalar.extui %narrowed : i8 to i64
+  %23 = scalar.extui %total$15 : i32 to i64
+  %53 = scalar.addi %21, %23 : i64
+  %54 = scalar.addi %53, %55 : i64
+  %total$25 = scalar.trunci %54 : i64 to i32
+  %26 = scalar.extui %total$25 : i32 to i64
+  %27 = scalar.constant 2 : i64
+  %28 = scalar.addi %26, %27 : i64
+  %29 = scalar.trunci %28 : i64 to i32
+  func.return %29 : i32
+}
+
+func.def @aliases_unsigned_int(%input: i32) -> (i32) {
+  %62 = scalar.constant 400 : i64
+  %36 = scalar.extui %input : i32 to i64
+  %61 = scalar.addi %36, %62 : i64
+  %total$38 = scalar.trunci %61 : i64 to i32
+  %narrowed = scalar.trunci %input : i32 to i8
+  %60 = scalar.constant 10 : i64
+  %44 = scalar.extui %narrowed : i8 to i64
+  %46 = scalar.extui %total$38 : i32 to i64
+  %58 = scalar.addi %44, %46 : i64
+  %59 = scalar.addi %58, %60 : i64
+  %total$48 = scalar.trunci %59 : i64 to i32
+  %49 = scalar.extui %total$48 : i32 to i64
+  %50 = scalar.constant 4 : i64
+  %51 = scalar.addi %49, %50 : i64
+  %52 = scalar.trunci %51 : i64 to i32
+  func.return %52 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A block-local binding shadows the using directive only inside that block.
+namespace offsets {
+constexpr unsigned increment = 7;
+}
+unsigned directive(unsigned input) {
+  using namespace offsets;
+  unsigned value = input + increment;
+  {
+    unsigned increment = 2;
+    value += increment;
+  }
+  return value + increment;
+}
+
+// ----
+func.def public @directive(%input: i32) -> (i32) {
+  %10 = scalar.constant 16 : i32
+  %11 = scalar.addi %input, %10 : i32
+  func.return %11 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Using declarations resolve the namespace function and constant independently.
+namespace offsets {
+constexpr unsigned increment = 7;
+static unsigned advance(unsigned value) { return value + increment; }
+}
+unsigned declaration(unsigned input) {
+  using offsets::advance;
+  using offsets::increment;
+  return advance(input) + increment;
+}
+
+// ----
+func.def public @declaration(%input: i32) -> (i32) {
+  %2 = func.call pure @offsets__advance(%input) : (i32) -> (i32)
+  %increment = scalar.constant 7 : i32
+  %4 = scalar.addi %2, %increment : i32
+  func.return %4 : i32
+}
+
+func.def @offsets__advance(%value: i32) -> (i32) {
+  %increment = scalar.constant 7 : i32
+  %8 = scalar.addi %value, %increment : i32
+  func.return %8 : i32
+}

@@ -678,8 +678,9 @@ remain untouched.
 The importer-owned integration suite is
 `//loom/src/loom/import/cxx/tooling/test:test`. Authored source lowering goldens
 run through `//loom/src/loom/import/cxx/test:compiler_test` and focused
+[source-language](source/test/README.md),
 [control-flow](control/test/README.md),
-[numeric](value/test/numeric/README.md) and
+[numeric](value/test/numeric/README.md), and
 [vector](value/test/vector/README.md) packages. Native API tests
 cover ownership, source providers, and failure propagation. The
 [execution corpus](test/README.md) uses ordinary `loom_test` targets with
