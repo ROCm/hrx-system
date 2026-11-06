@@ -88,37 +88,50 @@ iree_status_t loom_low_write_flow_build(
         loom_liveness_operation_at(liveness, i);
     const loom_op_t* op = point->op;
     const uint32_t entry = point->start_point + 1;
-    if (loom_low_scf_if_isa(op) || loom_low_scf_for_isa(op) ||
-        loom_low_scf_while_isa(op)) {
-      exits[entry] = 1;
-      edges[edge_count++] =
-          (loom_low_write_flow_edge_t){entry, regions[i].first};
-      if (!loom_low_scf_while_isa(op)) {
-        edges[edge_count++] = (loom_low_write_flow_edge_t){
-            entry,
-            regions[i].second != 0 ? regions[i].second : point->end_point};
-      }
-    } else if (loom_low_scf_yield_isa(op) || loom_low_scf_condition_isa(op)) {
-      const uint32_t parent = point->parent_operation_index;
-      const loom_liveness_operation_point_t* parent_point =
-          loom_liveness_operation_at(liveness, parent);
-      exits[point->end_point] = 1;
-      if (loom_low_scf_condition_isa(op)) {
+    switch (op->kind) {
+      case LOOM_OP_LOW_SCF_IF:
+      case LOOM_OP_LOW_SCF_FOR:
+      case LOOM_OP_LOW_SCF_WHILE:
+        exits[entry] = 1;
+        edges[edge_count++] =
+            (loom_low_write_flow_edge_t){entry, regions[i].first};
+        if (op->kind != LOOM_OP_LOW_SCF_WHILE) {
+          edges[edge_count++] = (loom_low_write_flow_edge_t){
+              entry,
+              regions[i].second != 0 ? regions[i].second : point->end_point};
+        }
+        break;
+      case LOOM_OP_LOW_SCF_CONDITION: {
+        const uint32_t parent = point->parent_operation_index;
+        const loom_liveness_operation_point_t* parent_point =
+            loom_liveness_operation_at(liveness, parent);
+        exits[point->end_point] = 1;
         edges[edge_count++] = (loom_low_write_flow_edge_t){
             point->end_point, regions[parent].second};
         edges[edge_count++] = (loom_low_write_flow_edge_t){
             point->end_point, parent_point->end_point};
-      } else if (loom_low_scf_while_isa(parent_point->op)) {
-        edges[edge_count++] = (loom_low_write_flow_edge_t){
-            point->end_point, regions[parent].first};
-      } else {
-        edges[edge_count++] = (loom_low_write_flow_edge_t){
-            point->end_point, parent_point->end_point};
-        if (loom_low_scf_for_isa(parent_point->op)) {
+        break;
+      }
+      case LOOM_OP_LOW_SCF_YIELD: {
+        const uint32_t parent = point->parent_operation_index;
+        const loom_liveness_operation_point_t* parent_point =
+            loom_liveness_operation_at(liveness, parent);
+        exits[point->end_point] = 1;
+        if (parent_point->op->kind == LOOM_OP_LOW_SCF_WHILE) {
           edges[edge_count++] = (loom_low_write_flow_edge_t){
               point->end_point, regions[parent].first};
+        } else {
+          edges[edge_count++] = (loom_low_write_flow_edge_t){
+              point->end_point, parent_point->end_point};
+          if (parent_point->op->kind == LOOM_OP_LOW_SCF_FOR) {
+            edges[edge_count++] = (loom_low_write_flow_edge_t){
+                point->end_point, regions[parent].first};
+          }
         }
+        break;
       }
+      default:
+        break;
     }
   }
   leaders[1] = 1;
