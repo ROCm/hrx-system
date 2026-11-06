@@ -20,6 +20,20 @@ enum {
   LOOM_CMD_SCHEDULE_INITIAL_CAPACITY = 32,
 };
 
+typedef uint8_t loom_cmd_schedule_source_action_t;
+enum loom_cmd_schedule_source_action_e {
+  // Operation does not directly contribute a command-schedule row.
+  LOOM_CMD_SCHEDULE_SOURCE_ACTION_NONE = 0,
+  // Capture a device timestamp.
+  LOOM_CMD_SCHEDULE_SOURCE_ACTION_TIMESTAMP = 1,
+  // Issue a configured kernel or pipeline.
+  LOOM_CMD_SCHEDULE_SOURCE_ACTION_PIPELINE_LAUNCH = 2,
+  // Dispatch a resolved kernel entry.
+  LOOM_CMD_SCHEDULE_SOURCE_ACTION_KERNEL_DISPATCH = 3,
+  // Define schedule-owned scratch storage.
+  LOOM_CMD_SCHEDULE_SOURCE_ACTION_ALLOCATION = 4,
+};
+
 typedef struct loom_cmd_schedule_frame_t {
   // Next operation awaiting traversal in this region.
   loom_op_t* next_op;
@@ -144,43 +158,69 @@ static loom_cmd_schedule_value_slice_t loom_cmd_schedule_value_slice(
   };
 }
 
+static loom_cmd_schedule_source_action_t loom_cmd_schedule_source_action(
+    const loom_op_t* op) {
+  switch (op->kind) {
+    case LOOM_OP_COMMAND_TIMESTAMP:
+      return LOOM_CMD_SCHEDULE_SOURCE_ACTION_TIMESTAMP;
+    case LOOM_OP_KERNEL_LAUNCH:
+      return LOOM_CMD_SCHEDULE_SOURCE_ACTION_PIPELINE_LAUNCH;
+    case LOOM_OP_KERNEL_DISPATCH:
+      return LOOM_CMD_SCHEDULE_SOURCE_ACTION_KERNEL_DISPATCH;
+    case LOOM_OP_BUFFER_ALLOCA:
+      return LOOM_CMD_SCHEDULE_SOURCE_ACTION_ALLOCATION;
+    default:
+      return LOOM_CMD_SCHEDULE_SOURCE_ACTION_NONE;
+  }
+}
+
 static iree_status_t loom_cmd_schedule_append_command(
     loom_cmd_schedule_build_t* build, loom_cmd_schedule_frame_t* frame,
-    const loom_op_t* op) {
+    const loom_op_t* op, loom_cmd_schedule_source_action_t action) {
   loom_cmd_schedule_command_t command = {
       .source_op = op,
   };
-  if (loom_command_timestamp_isa(op)) {
-    command.callee = loom_symbol_ref_null();
-    command.kind = LOOM_CMD_SCHEDULE_COMMAND_KIND_TIMESTAMP;
-    command.arguments = (loom_cmd_schedule_value_slice_t){
-        .values = loom_op_const_operands(op),
-        .count = 1,
-    };
-    command.source_arguments = command.arguments;
-  } else if (loom_kernel_launch_isa(op)) {
-    command.callee = loom_kernel_launch_callee(op);
-    command.arguments =
-        loom_cmd_schedule_value_slice(loom_kernel_launch_arguments(op));
-    command.source_arguments = (loom_cmd_schedule_value_slice_t){
-        .values = loom_op_operands((loom_op_t*)op),
-        .count = op->operand_count,
-    };
-    command.kind = LOOM_CMD_SCHEDULE_COMMAND_KIND_PIPELINE_LAUNCH;
-  } else {
-    IREE_ASSERT(loom_kernel_dispatch_isa(op));
-    command.callee = loom_kernel_dispatch_callee(op);
-    command.arguments =
-        loom_cmd_schedule_value_slice(loom_kernel_dispatch_arguments(op));
-    command.workgroup_counts = loom_cmd_schedule_value_slice(
-        loom_kernel_dispatch_workgroup_counts(op));
-    IREE_ASSERT_GT(command.workgroup_counts.count, 0u);
-    const loom_type_t first_count_type = loom_module_value_type(
-        build->module, command.workgroup_counts.values[0]);
-    command.kind = loom_type_is_view(first_count_type)
-                       ? LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT
-                       : LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT;
-    command.source_arguments = command.arguments;
+  switch (action) {
+    case LOOM_CMD_SCHEDULE_SOURCE_ACTION_TIMESTAMP:
+      command.callee = loom_symbol_ref_null();
+      command.kind = LOOM_CMD_SCHEDULE_COMMAND_KIND_TIMESTAMP;
+      command.arguments = (loom_cmd_schedule_value_slice_t){
+          .values = loom_op_const_operands(op),
+          .count = 1,
+      };
+      command.source_arguments = command.arguments;
+      break;
+    case LOOM_CMD_SCHEDULE_SOURCE_ACTION_PIPELINE_LAUNCH:
+      command.callee = loom_kernel_launch_callee(op);
+      command.arguments =
+          loom_cmd_schedule_value_slice(loom_kernel_launch_arguments(op));
+      command.source_arguments = (loom_cmd_schedule_value_slice_t){
+          .values = loom_op_operands((loom_op_t*)op),
+          .count = op->operand_count,
+      };
+      command.kind = LOOM_CMD_SCHEDULE_COMMAND_KIND_PIPELINE_LAUNCH;
+      break;
+    case LOOM_CMD_SCHEDULE_SOURCE_ACTION_KERNEL_DISPATCH: {
+      command.callee = loom_kernel_dispatch_callee(op);
+      command.arguments =
+          loom_cmd_schedule_value_slice(loom_kernel_dispatch_arguments(op));
+      command.workgroup_counts = loom_cmd_schedule_value_slice(
+          loom_kernel_dispatch_workgroup_counts(op));
+      IREE_ASSERT_GT(command.workgroup_counts.count, 0u);
+      const loom_type_t first_count_type = loom_module_value_type(
+          build->module, command.workgroup_counts.values[0]);
+      command.kind =
+          loom_type_is_view(first_count_type)
+              ? LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_INDIRECT
+              : LOOM_CMD_SCHEDULE_COMMAND_KIND_KERNEL_DISPATCH_DIRECT;
+      command.source_arguments = command.arguments;
+      break;
+    }
+    case LOOM_CMD_SCHEDULE_SOURCE_ACTION_NONE:
+    case LOOM_CMD_SCHEDULE_SOURCE_ACTION_ALLOCATION:
+      IREE_ASSERT_UNREACHABLE(
+          "non-command action reached command schedule construction");
+      IREE_BUILTIN_UNREACHABLE();
   }
   if (command.kind != LOOM_CMD_SCHEDULE_COMMAND_KIND_TIMESTAMP &&
       !iree_host_size_checked_add(build->argument_value_count,
@@ -268,23 +308,34 @@ static iree_status_t loom_cmd_schedule_build_commands(
     } else if (loom_command_composition_is_concurrent_schedule(op)) {
       child_region = loom_op_regions(op)[0];
       child_mode = LOOM_COMMAND_COMPOSITION_MODE_CONCURRENT;
-    } else if (loom_kernel_dispatch_isa(op) || loom_kernel_launch_isa(op) ||
-               loom_command_timestamp_isa(op)) {
-      IREE_RETURN_IF_ERROR(loom_cmd_schedule_append_command(build, frame, op));
-      continue;
-    } else if (loom_buffer_alloca_isa(op)) {
-      IREE_RETURN_IF_ERROR(
-          loom_cmd_schedule_append_allocation(build, frame, op));
-      continue;
-    } else if (op->region_count == 0 &&
-               iree_any_bit_set(loom_op_effective_traits(build->module, op),
-                                LOOM_TRAIT_PURE | LOOM_TRAIT_TERMINATOR)) {
-      // Pure leaf dataflow may feed dispatch metadata but does not itself emit
-      // a command. Later placement consumes its resolved SSA facts directly.
-      // The terminator bit admits regionless target extension terminators not
-      // covered by the common source fast path above.
-      continue;
     } else {
+      const loom_cmd_schedule_source_action_t action =
+          loom_cmd_schedule_source_action(op);
+      switch (action) {
+        case LOOM_CMD_SCHEDULE_SOURCE_ACTION_TIMESTAMP:
+        case LOOM_CMD_SCHEDULE_SOURCE_ACTION_PIPELINE_LAUNCH:
+        case LOOM_CMD_SCHEDULE_SOURCE_ACTION_KERNEL_DISPATCH: {
+          IREE_RETURN_IF_ERROR(
+              loom_cmd_schedule_append_command(build, frame, op, action));
+          continue;
+        }
+        case LOOM_CMD_SCHEDULE_SOURCE_ACTION_ALLOCATION: {
+          IREE_RETURN_IF_ERROR(
+              loom_cmd_schedule_append_allocation(build, frame, op));
+          continue;
+        }
+        case LOOM_CMD_SCHEDULE_SOURCE_ACTION_NONE:
+          break;
+      }
+      if (op->region_count == 0 &&
+          iree_any_bit_set(op->traits,
+                           LOOM_TRAIT_PURE | LOOM_TRAIT_TERMINATOR)) {
+        // Pure leaf dataflow may feed dispatch metadata but does not itself
+        // emit a command. Later placement consumes its resolved SSA facts
+        // directly. The terminator bit admits regionless target extensions
+        // not covered by the common source fast path above.
+        continue;
+      }
       const iree_string_view_t op_name = loom_op_name(build->module, op);
       return iree_make_status(
           IREE_STATUS_UNIMPLEMENTED,
