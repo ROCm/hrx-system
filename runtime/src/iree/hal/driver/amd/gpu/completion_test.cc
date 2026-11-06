@@ -529,6 +529,32 @@ TEST_F(CompletionTest, TerminalRoundSurvivesRetainedSourceReplacement) {
   EXPECT_EQ(last_failures, 1u);
 }
 
+TEST_F(CompletionTest, UnjoinedCalloutDoesNotPostJoinNotification) {
+  std::binary_semaphore entered{0}, resume{0};
+  Callout callout = [&](iree_hal_amd_gpu_completion_scope_t* scope) {
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
+    entered.release();
+    resume.acquire();
+    return false;
+  };
+  auto source = Source(callout);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, 1, &source, 0, {}, iree_allocator_system(), &completion_));
+  entered.acquire();
+  // Observe the epoch without requesting a join. Ordinary callout retirement
+  // must not write the notification, even with an observer enrolled on it.
+  const auto before =
+      iree_notification_prepare_wait(&completion_.callout_joined);
+  resume.release();
+  event_.AwaitWaitCount(1);
+  const auto after =
+      iree_notification_prepare_wait(&completion_.callout_joined);
+  EXPECT_EQ(after, before);
+  iree_notification_cancel_wait(&completion_.callout_joined);
+  iree_notification_cancel_wait(&completion_.callout_joined);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+}
+
 TEST_F(CompletionTest, DisabledCalloutsJoinIndependentlyAcrossReplacement) {
   std::binary_semaphore first_entered{0}, first_resume{0};
   std::binary_semaphore second_entered{0}, second_resume{0};

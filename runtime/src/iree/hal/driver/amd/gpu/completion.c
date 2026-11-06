@@ -73,15 +73,17 @@ bool iree_hal_amd_gpu_completion_scope_finish(
   }
   scope->previous = NULL;
   iree_hal_amd_gpu_completion_t* completion = scope->completion;
-  const int32_t state =
+  int32_t state =
       iree_atomic_load(&completion->state, iree_memory_order_acquire);
   const int32_t waiting = IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT |
                           IREE_HAL_AMD_GPU_COMPLETION_WAITING_FOR_CALLOUT;
   if (state & waiting) {
-    iree_atomic_fetch_and(&completion->state, ~waiting,
-                          iree_memory_order_release);
+    // Ending observation may clear BORROWING after the load above. Decide
+    // whether to wake from this atomic handoff, not that earlier snapshot.
+    state = iree_atomic_fetch_and(&completion->state, ~waiting,
+                                  iree_memory_order_release);
     if (state & IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT) {
-      iree_wait_address_wake_all(&completion->state);
+      iree_notification_post(&completion->callout_joined, IREE_ALL_WAITERS);
     }
   }
   // An active observer sees the cleared enrollment in its existing state
@@ -130,18 +132,19 @@ static bool iree_hal_amd_gpu_completion_has_removed_scope(
   return false;
 }
 
-// Enters and returns under drain_mutex. Callback return owns clearing the hint
-// and waking all joiners; one completed join cannot disarm another waiter.
+// Enters and returns under drain_mutex, which protects the caller's predicate
+// through enrollment. A different joiner may rearm the hint before this thread
+// sleeps; the notification epoch preserves the intervening callback return.
 static void iree_hal_amd_gpu_completion_wait_callout(
     iree_hal_amd_gpu_completion_t* completion) {
-  const int32_t state =
-      iree_atomic_fetch_or(&completion->state,
-                           IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT,
-                           iree_memory_order_acq_rel) |
-      IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT;
+  const iree_wait_token_t token =
+      iree_notification_prepare_wait(&completion->callout_joined);
+  iree_atomic_fetch_or(&completion->state,
+                       IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT,
+                       iree_memory_order_acq_rel);
   iree_slim_mutex_unlock(&completion->drain_mutex);
-  iree_wait_address_wait_int32(&completion->state, state,
-                               IREE_TIME_INFINITE_FUTURE);
+  iree_notification_commit_wait(&completion->callout_joined, token,
+                                IREE_DURATION_ZERO, IREE_TIME_INFINITE_FUTURE);
   iree_slim_mutex_lock(&completion->drain_mutex);
 }
 
@@ -495,6 +498,7 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
   out_completion->context = context;
   out_completion->spin_ns = spin_ns;
   iree_slim_mutex_initialize(&out_completion->drain_mutex);
+  iree_notification_initialize(&out_completion->callout_joined);
   iree_hal_amd_gpu_completion_set_sources(out_completion, source_count,
                                           sources);
   const iree_thread_create_params_t params = {
@@ -507,6 +511,7 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
       iree_thread_create(iree_hal_amd_gpu_completion_main, out_completion,
                          params, host_allocator, &out_completion->thread);
   if (!iree_status_is_ok(status)) {
+    iree_notification_deinitialize(&out_completion->callout_joined);
     iree_slim_mutex_deinitialize(&out_completion->drain_mutex);
     IREE_TRACE_ZONE_END(z0);
     return status;
@@ -632,6 +637,7 @@ iree_status_t iree_hal_amd_gpu_completion_deinitialize(
               "gpu.event_signal"));
   iree_thread_release(completion->thread);
   completion->thread = NULL;
+  iree_notification_deinitialize(&completion->callout_joined);
   iree_slim_mutex_deinitialize(&completion->drain_mutex);
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();

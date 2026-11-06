@@ -313,12 +313,22 @@ TEST(NotificationTest, PrepareCommitWaitAlreadySignaled) {
   // Post before commit - should cause commit to return quickly.
   iree_notification_post(&notification, IREE_ALL_WAITERS);
 
+  // Another waiter may enroll before the first thread reaches commit_wait.
+  // That enrollment must not erase the post observed by the earlier token.
+  const iree_wait_token_t next_token =
+      iree_notification_prepare_wait(&notification);
+  EXPECT_NE(next_token, token);
+
   // Commit should return true (already signaled since epoch changed).
   bool result =
       iree_notification_commit_wait(&notification, token,
                                     /*spin_ns=*/0, IREE_TIME_INFINITE_FUTURE);
   EXPECT_TRUE(result);
 
+  iree_notification_post(&notification, IREE_ALL_WAITERS);
+  EXPECT_TRUE(iree_notification_commit_wait(&notification, next_token,
+                                            IREE_DURATION_ZERO,
+                                            IREE_TIME_INFINITE_FUTURE));
   iree_notification_deinitialize(&notification);
 }
 

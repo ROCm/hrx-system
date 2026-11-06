@@ -9,6 +9,7 @@
 
 #include "iree/async/frontier.h"
 #include "iree/base/internal/atomics.h"
+#include "iree/base/threading/notification.h"
 #include "iree/base/threading/thread.h"
 #include "iree/hal/driver/amd/gpu/context.h"
 
@@ -132,6 +133,9 @@ typedef struct iree_hal_amd_gpu_completion_t {
   // First native execution/observation failure. Cold membership can observe it
   // before the terminal worker joins, without taking the drain mutex.
   iree_atomic_int64_t failure;
+  // Callback join progress, posted only while a callback join is waiting.
+  // Its epoch survives another joiner's enrollment after a callback returns.
+  iree_notification_t callout_joined;
 } iree_hal_amd_gpu_completion_t;
 
 // One source invocation, initially under drain_mutex. A callout can release
