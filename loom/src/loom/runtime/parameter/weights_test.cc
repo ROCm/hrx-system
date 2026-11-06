@@ -1574,9 +1574,7 @@ TEST_P(WeightsTest,
   // The shared workspace keeps its registered slab geometry after a trim.
   // Earlier streaming cases may have registered a larger geometry.
   EXPECT_GE(before.workspace.bytes_committed, kSlabBytes);
-  IREE_ASSERT_OK(
-      loom_runtime_pool_trim(storage_owner_, GetParam() ? kSlabBytes : 0));
-  DrainNativeReturns();
+  DrainNativeReturns(GetParam() ? kSlabBytes : 0);
   EXPECT_EQ(
       loom_runtime_pool_statistics(storage_owner_).workspace.bytes_committed,
       0u);
@@ -1586,8 +1584,7 @@ TEST_P(WeightsTest,
       loom_runtime_execution_alloca(execution_, 1, &request, &workspace_));
   // The model's real command completion follows allocation on the work chain.
   ASSERT_NO_FATAL_FAILURE(Run(0, 70));
-  IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner_, kSlabBytes - 1));
-  DrainNativeReturns();
+  DrainNativeReturns(kSlabBytes - 1);
   const auto pinned = loom_runtime_pool_statistics(storage_owner_);
   EXPECT_EQ(pinned.workspace.bytes_committed, before.workspace.bytes_committed);
   EXPECT_EQ(pinned.workspace.reservation_count, 1u);
@@ -1602,8 +1599,7 @@ TEST_P(WeightsTest,
   iree_hal_buffer_release(workspace_);
   workspace_ = nullptr;
   IREE_ASSERT_OK(loom_runtime_execution_drain(execution_));
-  IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner_, 0));
-  DrainNativeReturns();
+  DrainNativeReturns(0);
   const auto cold = loom_runtime_pool_statistics(storage_owner_);
   EXPECT_EQ(cold.retained.committed_bytes, 0u);
   EXPECT_EQ(cold.workspace.bytes_committed, 0u);

@@ -443,8 +443,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     iree_hal_semaphore_release(consumer_gate_);
     IREE_EXPECT_OK(loom_runtime_test_workspace_await_idle(
         loom_runtime_pool_workspace(storage_owner_)));
-    IREE_EXPECT_OK(loom_runtime_pool_trim(storage_owner_, 0));
-    DrainNativeReturns();
+    DrainNativeReturns(0);
     const auto memory = loom_runtime_pool_statistics(storage_owner_);
     EXPECT_FALSE(loom_runtime_pool_is_in_use(storage_owner_));
     EXPECT_EQ(memory.retained.committed_bytes, 0u);
@@ -646,13 +645,17 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(residencies_[index]));
   }
 
-  void DrainNativeReturns() {
-    if (pool_) {
+  // Keep the trim request and its physical-owner join in one operation. A
+  // separate wait on that same pool can finish before cold workspace
+  // reclamation returns its slab, leaving the late return outside the target.
+  void DrainNativeReturns(uint64_t target_bytes = UINT64_MAX) {
+    if (pool_ && pool_ != loom_runtime_pool_memory(storage_owner_)) {
       IREE_ASSERT_STATUS_IS(retirement_code_,
                             loom_runtime_memory_pool_await(pool_));
     }
-    IREE_ASSERT_OK(
-        loom_runtime_test_pool_trim_and_drain(storage_owner_, UINT64_MAX));
+    IREE_ASSERT_STATUS_IS(
+        retirement_code_,
+        loom_runtime_test_pool_trim_and_drain(storage_owner_, target_bytes));
   }
 
   iree_status_t Load(iree_host_size_t shared_count, iree_host_size_t count) {

@@ -93,17 +93,30 @@ iree_status_t loom_runtime_test_pool_trim_and_drain(loom_runtime_pool_t* owner,
   loom_runtime_memory_pool_t* memory = loom_runtime_pool_memory(owner);
   if (memory) {
     // Elastic allocators pack live buffers into partially occupied slabs.
-    // Their unused bytes are not pending returns: join the physical owner's
-    // actual trim operations, including history waits that still need progress.
+    // Join accepted memory work and advance its cold-owner publication before
+    // taking the final accounting snapshot. The first trim may observe zero
+    // committed bytes while an accepted workspace acquisition has not
+    // published its physical slab yet. Unrelated capacity-blocked acquisitions
+    // remain pending and cannot prevent reclamation from completing.
     loom_runtime_workspace_t* workspace = loom_runtime_pool_workspace(owner);
     iree_notification_t notification;
     iree_notification_initialize(&notification);
     iree_status_t status = loom_runtime_workspace_await(
         workspace, &notification, loom_runtime_test_pool_trim_complete,
         workspace);
-    iree_notification_deinitialize(&notification);
     status = iree_status_join(status, loom_runtime_memory_pool_await(memory));
-    return iree_status_join(status, loom_runtime_workspace_advance(workspace));
+    status =
+        iree_status_join(status, loom_runtime_workspace_advance(workspace));
+    if (iree_status_is_ok(status)) {
+      status = loom_runtime_pool_trim(owner, target_bytes);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_runtime_workspace_await(
+          workspace, &notification, loom_runtime_test_pool_trim_complete,
+          workspace);
+    }
+    iree_notification_deinitialize(&notification);
+    return iree_status_join(status, loom_runtime_memory_pool_await(memory));
   }
   // A retained admission failure does not prevent already-accepted returns
   // from retiring. Join the native source before returning either diagnosis.

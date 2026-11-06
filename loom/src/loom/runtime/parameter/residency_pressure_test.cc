@@ -142,8 +142,7 @@ TEST_P(ResidencyPressureTest, LiveWorkspaceDefersFutileHistoryEviction) {
       loom_runtime_pool_workspace(storage_owner_)));
   // Workspace retirement makes history eviction useful. The regular policy
   // requests one logical release; only its owner's trim grants physical space.
-  IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner_, kSlabBytes));
-  DrainNativeReturns();
+  DrainNativeReturns(kSlabBytes);
   IREE_ASSERT_OK(
       loom_runtime_memory_pool_try_commit(pool_, 1, &growth, &admitted));
   EXPECT_FALSE(admitted);

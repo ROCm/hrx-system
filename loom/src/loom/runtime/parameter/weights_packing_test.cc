@@ -592,8 +592,7 @@ TEST_P(WeightPackingTest,
   CheckPackedOn(execution_);
   EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 1u);
   loom_runtime_residency_release(residencies_[0]);
-  IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner_, 0));
-  DrainNativeReturns();
+  DrainNativeReturns(0);
   EXPECT_EQ(
       loom_runtime_pool_statistics(storage_owner_).workspace.bytes_committed,
       0u);
