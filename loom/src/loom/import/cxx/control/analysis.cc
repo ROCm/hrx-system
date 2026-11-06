@@ -1759,6 +1759,17 @@ void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
   }
 }
 
+void ControlFlow::visit(cxx::StructuredBindingDeclarationAST* ast) {
+  // Raggi retains both the source initializer and the synthesized hidden
+  // variable that owns it. The latter is the semantic declaration: visiting
+  // both would count every initializer effect twice. Analyze the lowered
+  // declaration sequence in its C++ initialization order instead.
+  accept(ast->hiddenVariable);
+  for (auto* binding : cxx::ListView{ast->bindingDeclaratorList}) {
+    accept(binding);
+  }
+}
+
 void ControlFlow::visit(cxx::ImplicitCastExpressionAST* ast) {
   cxx::ASTVisitor::visit(ast);
   auto* conversion_object =

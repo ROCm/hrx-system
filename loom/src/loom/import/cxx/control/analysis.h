@@ -332,6 +332,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   void visit(cxx::SubscriptExpressionAST* ast) override;
   void visit(cxx::ImplicitCastExpressionAST* ast) override;
   void visit(cxx::InitDeclaratorAST* ast) override;
+  void visit(cxx::StructuredBindingDeclarationAST* ast) override;
   void visit(cxx::ParenMemInitializerAST* ast) override;
   void visit(cxx::BracedMemInitializerAST* ast) override;
   void visit(cxx::ConditionExpressionAST* ast) override;

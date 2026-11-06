@@ -802,6 +802,19 @@ void Initialization::storage(StorageAllocation allocation,
       return;
     }
     cxx::Initializer source(initializer);
+    auto* source_expression = source.singleExpression();
+    if (source_expression &&
+        unit_.typeTraits().is_array(source_expression->type) &&
+        types_.unqualified(source_expression->type) ==
+            types_.unqualified(type)) {
+      auto source_pointer = evaluation_.reference(source_expression, owner);
+      auto source_object = storage_.project(source_pointer.pointer(),
+                                            source_expression->type, owner);
+      auto value = objects_.load(source_object, source_expression->type, owner);
+      objects_.store(storage_.project(allocation.pointer, type, owner), value,
+                     type, owner);
+      return;
+    }
     if (!constructor && source.form() != cxx::InitializerForm::kList &&
         source.form() != cxx::InitializerForm::kParen) {
       diagnostics_.reject(

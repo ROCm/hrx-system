@@ -1563,6 +1563,57 @@ class Translator final : private Initialization::Evaluation {
     activate_automatic_destruction(variable, owner);
   }
 
+  void initialize_local_declarator(
+      cxx::InitDeclaratorAST* declaration,
+      cxx::List<cxx::AttributeSpecifierAST*>* attributes, cxx::AST* owner) {
+    reject_misplaced_binding_declarator(unit_, diagnostics_,
+                                        declaration->declarator);
+    auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(declaration->symbol);
+    auto constexpr_contract = admit_constexpr_contract(
+        unit_, diagnostics_, types_, attributes, variable,
+        variable && control_->addressed(variable), declaration);
+    if (cxx::symbol_cast<cxx::TypeAliasSymbol>(declaration->symbol)) {
+      return;
+    }
+    if (!variable || variable->isStatic() || variable->isExtern() ||
+        variable->isThreadLocal()) {
+      fail(owner, "local storage duration must be automatic or __shared__");
+    }
+    if (annotated(declaration->symbol, "workgroup")) {
+      if (current_function_.kind != FunctionKind::Kernel &&
+          current_function_.kind != FunctionKind::TemplateDefinition) {
+        fail(declaration,
+             "workgroup storage requires a kernel or template definition "
+             "body");
+      }
+      if (declaration->initializer) {
+        fail(declaration, "workgroup storage cannot have an initializer");
+      }
+      if (control_->automatic_destruction(variable)) {
+        fail(declaration, "workgroup storage requires trivial destruction");
+      }
+      auto* source_type = types_.unqualified(declaration->symbol->type());
+      auto* array = cxx::type_cast<cxx::BoundedArrayType>(source_type);
+      auto allocation =
+          storage_.allocate(source_type, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
+                            variable->explicitAlignment(), declaration);
+      auto spelling = cxx::to_string(declaration->symbol->name());
+      if (array) {
+        values_.set(declaration->symbol,
+                    name(Value(allocation.pointer), spelling));
+      } else {
+        name(Value(allocation.pointer), spelling + "_storage");
+        locals_[declaration->symbol] = allocation;
+      }
+      name(allocation.view, spelling + "_view");
+      return;
+    }
+    auto mark = begin_full_expression();
+    initialize_variable(variable, declaration->initializer, constexpr_contract,
+                        declaration);
+    finish_full_expression(mark);
+  }
+
   ConstexprContract initialize_condition(cxx::ExpressionAST* expression) {
     auto* declaration = condition_declaration(expression);
     if (!declaration) {
@@ -5772,6 +5823,29 @@ class Translator final : private Initialization::Evaluation {
       if (cxx::ast_cast<cxx::UsingDeclarationAST>(declaration->declaration)) {
         return;
       }
+      if (auto* structured =
+              cxx::ast_cast<cxx::StructuredBindingDeclarationAST>(
+                  declaration->declaration)) {
+        reject_misplaced_binding_attributes(
+            unit_, diagnostics_, structured->attributeList,
+            BindingAttributeScope::LocalDeclaration);
+        if (!structured->hiddenVariable || !structured->bindingDeclaratorList) {
+          fail(structured,
+               "structured binding decomposition must be resolved before "
+               "import");
+        }
+        initialize_local_declarator(structured->hiddenVariable,
+                                    structured->attributeList, structured);
+        for (auto* binding : cxx::ListView{structured->bindingDeclaratorList}) {
+          if (!binding->initializer) {
+            fail(structured,
+                 "structured binding decomposition must be resolved before "
+                 "import");
+          }
+          initialize_local_declarator(binding, nullptr, structured);
+        }
+        return;
+      }
       auto* simple =
           cxx::ast_cast<cxx::SimpleDeclarationAST>(declaration->declaration);
       if (!simple) {
@@ -5784,54 +5858,8 @@ class Translator final : private Initialization::Evaluation {
         admit_constexpr_contract(unit_, diagnostics_, types_,
                                  simple->attributeList, nullptr, false, simple);
       }
-      for (auto* variable : cxx::ListView{simple->initDeclaratorList}) {
-        reject_misplaced_binding_declarator(unit_, diagnostics_,
-                                            variable->declarator);
-        auto* source_variable =
-            cxx::symbol_cast<cxx::VariableSymbol>(variable->symbol);
-        auto constexpr_contract = admit_constexpr_contract(
-            unit_, diagnostics_, types_, simple->attributeList, source_variable,
-            source_variable && control_->addressed(source_variable), variable);
-        if (cxx::symbol_cast<cxx::TypeAliasSymbol>(variable->symbol)) {
-          continue;
-        }
-        if (!source_variable || source_variable->isStatic() ||
-            source_variable->isExtern() || source_variable->isThreadLocal()) {
-          fail(ast, "local storage duration must be automatic or __shared__");
-        }
-        if (variable->symbol && annotated(variable->symbol, "workgroup")) {
-          if (current_function_.kind != FunctionKind::Kernel &&
-              current_function_.kind != FunctionKind::TemplateDefinition) {
-            fail(variable,
-                 "workgroup storage requires a kernel or template definition "
-                 "body");
-          }
-          if (variable->initializer) {
-            fail(variable, "workgroup storage cannot have an initializer");
-          }
-          if (control_->automatic_destruction(source_variable)) {
-            fail(variable, "workgroup storage requires trivial destruction");
-          }
-          auto* source_type = types_.unqualified(variable->symbol->type());
-          auto* array = cxx::type_cast<cxx::BoundedArrayType>(source_type);
-          auto allocation = storage_.allocate(
-              source_type, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
-              source_variable->explicitAlignment(), variable);
-          auto spelling = cxx::to_string(variable->symbol->name());
-          if (array) {
-            values_.set(variable->symbol,
-                        name(Value(allocation.pointer), spelling));
-          } else {
-            name(Value(allocation.pointer), spelling + "_storage");
-            locals_[variable->symbol] = allocation;
-          }
-          name(allocation.view, spelling + "_view");
-          continue;
-        }
-        auto mark = begin_full_expression();
-        initialize_variable(source_variable, variable->initializer,
-                            constexpr_contract, variable);
-        finish_full_expression(mark);
+      for (auto* declarator : cxx::ListView{simple->initDeclaratorList}) {
+        initialize_local_declarator(declarator, simple->attributeList, simple);
       }
       return;
     }

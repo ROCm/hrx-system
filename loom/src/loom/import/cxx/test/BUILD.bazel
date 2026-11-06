@@ -211,6 +211,7 @@ loom_check_test_suite(
         "standards.cxx-test",
         "static_assert.cxx-test",
         "storage_updates.cxx-test",
+        "structured_bindings.cxx-test",
         "structured_returns.cxx-test",
         "subgroup_reductions.cxx-test",
         "subgroup_reductions_invalid.cxx-test",
