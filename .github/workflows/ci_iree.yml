@@ -509,12 +509,12 @@ jobs:
             host_toolchain: clang-cl
             runner: windows-gfx1151-gpu-rocm
             xdna: true
-          - name: Clang CL / ASAN / AMD gfx1201
+          - name: Clang CL / ASAN / AMD gfx120x
             kind: amdgpu
             command: iree-bazel-amdgpu-native-asan
             host_toolchain: clang-cl
             runner: windows-gfx1201-gpu-rocm
-            target_selector: gfx1201
+            target_selector: gfx120X-all
     concurrency:
       group: iree-bazel-windows-${{ matrix.command }}-${{ matrix.host_toolchain }}-${{ matrix.target_selector }}-${{ (github.event_name == 'push' && github.ref) || github.run_id }}
       cancel-in-progress: true

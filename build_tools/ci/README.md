@@ -72,13 +72,16 @@ select their tests through CTest names and labels. `--verbose` prints the
 underlying commands; `--keep-going` runs independent phases after a failure and
 reports the failed phases at the end.
 
-The native Windows GPU profile requires an exact GPU target:
+The native Windows GPU profile accepts an explicit GPU target or family selector:
 
 ```powershell
-python build_tools/devtools/ci.py iree-bazel-amdgpu-native-asan --amdgpu-target gfx1201
+python build_tools/devtools/ci.py iree-bazel-amdgpu-native-asan --amdgpu-target gfx120X-all
 ```
 
 This profile uses native libamdf GPU queues without requiring ROCr or an NPU.
+The same selector controls compiled targets and native qualification. A family
+admits any of its physical targets; required execution cases still fail when no
+matching GPU can run them.
 The `iree-bazel-amd-client[-asan]` profiles cover the GPU/NPU client configuration;
 their admitted resources depend on the host platform. The Linux
 `iree-bazel-amdgpu[-<sanitizer>]` and `iree-cmake-amdgpu[-<sanitizer>]` profiles

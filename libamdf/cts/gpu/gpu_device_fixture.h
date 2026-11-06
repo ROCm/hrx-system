@@ -7,6 +7,7 @@
 #ifndef AMDF_CTS_GPU_GPU_DEVICE_FIXTURE_H_
 #define AMDF_CTS_GPU_GPU_DEVICE_FIXTURE_H_
 
+#include <algorithm>
 #include <cinttypes>
 #include <cstdio>
 #include <string>
@@ -195,8 +196,10 @@ class GpuDeviceFixture : public ::testing::Test {
       char target[32];
       std::snprintf(target, sizeof(target), "gfx%u%x%x", gpu_info.gfx_ip.major,
                     gpu_info.gfx_ip.minor, gpu_info.gfx_ip.stepping);
-      const auto& requested_target = GetCtsDeviceCache().gpu_target();
-      if (!requested_target.empty() && requested_target != target) {
+      const auto& requested_targets = GetCtsDeviceCache().gpu_targets();
+      if (!requested_targets.empty() &&
+          std::find(requested_targets.begin(), requested_targets.end(),
+                    target) == requested_targets.end()) {
         endpoint_ = nullptr;
         continue;
       }

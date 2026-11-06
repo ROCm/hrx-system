@@ -165,7 +165,7 @@ int main(int argument_count, char** argument_values) {
                      "--amdf_gpu_target needs a canonical gfx target\n");
         return EXIT_FAILURE;
       }
-      GetCtsDeviceCache().SetGpuTarget(target);
+      GetCtsDeviceCache().AddGpuTarget(target);
     } else {
       continue;
     }

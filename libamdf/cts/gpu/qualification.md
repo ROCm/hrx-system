@@ -99,6 +99,11 @@ build_tools/bin/iree-bazel-test --config=asan \
   --test_arg=--amdf_require_test=MemoryPairRecipeTest.ProfileCoherentHostAndTwoQueueHandoff
 ```
 
+Repeated `--amdf_gpu_target` arguments admit any listed target, allowing one
+qualification invocation to run on heterogeneous members of a GPU family. CI
+expands build-family selectors through the shared target catalog before passing
+these exact targets to CTS.
+
 Both selectors run before native activation. An explicit endpoint absent from
 GPU discovery fails the case; it never selects another device. A present
 endpoint that lacks the case's target or native service remains a skip, which

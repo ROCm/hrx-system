@@ -777,7 +777,7 @@ class CiTest(unittest.TestCase):
     def test_native_gpu_ci_requires_explicit_windows_target(self):
         with mock.patch.object(ci.sys, "platform", "win32"):
             args = ci.parse_arguments(["iree-bazel-amdgpu-native"])
-            with self.assertRaisesRegex(ValueError, "exact --amdgpu-target"):
+            with self.assertRaisesRegex(ValueError, "explicit --amdgpu-target"):
                 ci.steps_from_args(args)
         with mock.patch.object(ci.sys, "platform", "linux"):
             args = ci.parse_arguments(
@@ -803,33 +803,45 @@ class CiTest(unittest.TestCase):
             ci.steps_from_args(args)
         plan.assert_called_once_with(("//example:custom",), "gfx1201", "asan")
 
-    def test_native_gpu_ci_admits_only_gpu_resource_tests(self):
-        args = ci.parse_arguments(
-            ["iree-bazel-amdgpu-native-asan", "--amdgpu-target", "gfx1201"]
-        )
+    def test_native_gpu_ci_expands_family_and_exact_target_selections(self):
         with (
-            mock.patch.object(ci.sys, "platform", "win32"),
+            mock.patch.object(
+                ci.target_map,
+                "exact_targets_for_selection",
+                side_effect=[["TARGET_A", "TARGET_B"], ["TARGET_C"]],
+            ) as expand,
             mock.patch.object(ci.shutil, "which", return_value=None),
         ):
-            steps = ci.steps_from_args(args)
-
-        test_step = next(
-            step for step in steps if step.name == "Test IREE / Windows AMDGPU / ASAN"
-        )
-        tag_filter = next(
-            argument
-            for argument in test_step.argv
-            if argument.startswith("--test_tag_filters=")
-        )
-        positive_tags = [
-            tag
-            for tag in tag_filter.split("=", 1)[1].split(",")
-            if not tag.startswith("-")
-        ]
+            steps = ci.amdgpu_windows_steps(
+                ("//example:custom",), "FAMILY_A,TARGET_C", "asan"
+            )
         self.assertEqual(
-            positive_tags,
-            [ci_config.AMD_GPU_RUN_REQUIREMENT_TAG],
+            expand.call_args_list, [mock.call("FAMILY_A"), mock.call("TARGET_C")]
         )
+        prefix = "--test_arg=--amdf_gpu_target="
+        qualification = []
+        for step in steps:
+            targets = [
+                arg.removeprefix(prefix) for arg in step.argv if arg.startswith(prefix)
+            ]
+            if targets:
+                qualification.append(targets)
+        self.assertTrue(qualification)
+        for targets in qualification:
+            self.assertEqual(targets, ["TARGET_A", "TARGET_B", "TARGET_C"])
+
+    def test_native_gpu_ci_rejects_unknown_target_before_configuring(self):
+        with (
+            mock.patch.object(
+                ci.target_map,
+                "exact_targets_for_selection",
+                side_effect=ValueError("unknown target selector"),
+            ),
+            mock.patch.object(ci, "bazel_configure_step") as configure,
+        ):
+            with self.assertRaisesRegex(ValueError, "unknown target selector"):
+                ci.amdgpu_windows_steps((), "UNKNOWN_FAMILY", "asan")
+        configure.assert_not_called()
 
     def test_bazel_profile_names_must_be_unique(self):
         duplicate_steps = [
@@ -1130,6 +1142,11 @@ class CiTest(unittest.TestCase):
             with (
                 self.subTest(platform=platform),
                 mock.patch.object(ci.sys, "platform", platform),
+                mock.patch.object(
+                    ci.target_map,
+                    "exact_targets_for_selection",
+                    return_value=["TARGET_A", "TARGET_B"],
+                ),
             ):
                 steps = ci.steps_from_args(
                     ci.parse_arguments(

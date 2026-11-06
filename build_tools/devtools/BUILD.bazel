@@ -243,6 +243,7 @@ py_test(
         ":bazel_profile_summary",
         ":bazel_test_results",
         ":run_requirements",
+        "//build_tools/amdgpu:target_map",
         "//build_tools/bazel:configure",
         "//build_tools/ci:windows_diagnostics",
         "//loom/py/loom/build_tools:target_presets",
