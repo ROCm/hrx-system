@@ -7,6 +7,7 @@
 #include "clang-tidy/ClangTidyModule.h"
 #include "iree/DesignatedInitializerCheck.h"
 #include "iree/ExtentChecks.h"
+#include "iree/IsaDispatchChainCheck.h"
 #include "iree/LifecycleChecks.h"
 #include "iree/RecursionCheck.h"
 #include "iree/RefCountChecks.h"
@@ -48,6 +49,8 @@ class IreeTidyModule final : public ClangTidyModule {
     CheckFactories.registerCheck<ExtentEmptyPredicateCheck>(
         "iree-extent-empty-predicate");
     CheckFactories.registerCheck<GuardedReleaseCheck>("iree-guarded-release");
+    CheckFactories.registerCheck<IsaDispatchChainCheck>(
+        "iree-isa-dispatch-chain");
     CheckFactories.registerCheck<LifecycleNamingCheck>("iree-lifecycle-naming");
     CheckFactories.registerCheck<RefCountLifecycleCheck>(
         "iree-refcount-lifecycle");

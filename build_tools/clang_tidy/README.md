@@ -123,6 +123,77 @@ step in build actions.
 Header diagnostics cover first-party source and generated code. External and
 vendored third-party headers retain their own style policy.
 
+### `iree-isa-dispatch-chain`
+
+Concrete `*_isa` calls in C and `isa<T>` calls in C++ are bounded across each
+maximal `if`/`else if` chain. Compound conditions count each predicate, so
+grouping a concrete allowlist into one branch does not hide a growing family.
+The `MaximumIsaPredicates` option defaults to three and diagnoses the fourth
+predicate. The check is registered but excluded from repository policy while
+the initial findings are converted.
+
+A binary or ternary distinction can remain direct when it expresses local
+control flow more clearly than another abstraction. A fourth case usually
+means that the code is answering a semantic question through concrete
+operation identity. The replacement follows the owner of that answer rather
+than translating the same list into a switch or hiding it in a helper.
+
+An existing interface or trait owns extensible cross-dialect semantics:
+
+```c
+if (loom_op_has_trait(module, op, LOOM_TRAIT_TERMINATOR)) {
+  // Handle the semantic role without naming every terminator spelling.
+}
+
+const loom_memory_access_t access = loom_memory_access_cast(module, op);
+if (loom_memory_access_isa(access)) {
+  switch (loom_memory_access_operation_kind(access)) {
+    case LOOM_MEMORY_ACCESS_OPERATION_LOAD:
+      // Query operand and attribute roles through |access|.
+      break;
+    case LOOM_MEMORY_ACCESS_OPERATION_STORE:
+      break;
+  }
+}
+```
+
+A planning or collection stage that has already selected behavior retains a
+small semantic kind with its plan or candidate. Later analysis, reporting, and
+emission consume that kind directly instead of reconstructing it from the
+source operation:
+
+```c
+switch ((target_plan_kind_t)plan.id) {
+  case TARGET_PLAN_GATHER:
+    return target_emit_gather(context, source_op, plan);
+  case TARGET_PLAN_SHUFFLE:
+    return target_emit_shuffle(context, source_op, plan);
+  default:
+    IREE_ASSERT_UNREACHABLE("unknown target plan kind");
+    IREE_BUILTIN_UNREACHABLE();
+}
+```
+
+A finite transform- or target-local family uses one owning operation-kind
+classifier and a compact immutable descriptor or action kind. Dense
+dialect-local indexing is the ordinary representation; a sparse cross-dialect
+family uses a measured bounded lookup. Static tables carry data, not callback
+programs, and do not allocate. One exhaustive switch can be the classifier
+when it is smaller and faster than a table, but downstream consumers still use
+the retained semantic result rather than copying the switch.
+
+Independent rewrites rooted at concrete operations belong in
+`loom_rewrite_pattern_registry_t`, which composes providers once and dispatches
+directly by `loom_op_kind_t`. A private list of concrete roots is not another
+rewrite registry.
+
+The warning has no automatic fix because syntax cannot identify the semantic
+owner. A rare intentional exception uses the ordinary narrow
+`NOLINT(iree-isa-dispatch-chain)` spelling on the chain root; there is no path
+allowlist. Review of a replacement accounts for lookup complexity, retained
+and vtable bytes, allocation, JIT cost, compiler size, and exact output or
+diagnostic behavior.
+
 ### `iree-output-parameter-order`
 
 Parameters named `out_*` form the final contiguous group of parameters in a
