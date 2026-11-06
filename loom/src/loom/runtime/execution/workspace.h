@@ -125,6 +125,12 @@ uint64_t loom_runtime_workspace_protected_bytes(
 uint64_t loom_runtime_workspace_round_size(
     const loom_runtime_workspace_t* workspace, uint64_t byte_length);
 
+// Records released scopes whose accepted raw roots can publish backing after
+// current trim accounting. Returns true when their final retirement must replay
+// an explicit trim. Does not trim current logical or physical backing.
+bool loom_runtime_workspace_request_trim_replay(
+    loom_runtime_workspace_t* workspace);
+
 // Returns idle backing without waiting on device work. Logical returns
 // propagate directly through the backing cache; native
 // freeing follows the source driver's allocation mechanism. Live roots and
@@ -132,7 +138,9 @@ uint64_t loom_runtime_workspace_round_size(
 // logical pools after trim for budgeting further reclamation. Detached native
 // returns are excluded from workspace accounting.
 // Starts virtual detaches on the serialized physical owner, without advancing
-// acquisitions. Platform failure propagates while retaining cleanup ownership.
+// acquisitions. Released scopes whose raw queue roots are still retiring keep
+// the request active and replay it after those roots return. Active scopes are
+// unaffected. Platform failure propagates while retaining cleanup ownership.
 iree_status_t loom_runtime_workspace_trim(
     loom_runtime_workspace_t* workspace,
     iree_device_size_t* out_retained_bytes);

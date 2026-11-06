@@ -468,6 +468,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             body=json.dumps({"model": "beta", "mode": "drain"}),
             headers={"Content-Type": "application/json"},
         )
+        report_phase("final_removal_accepted")
         while True:
             final = control(address, "GET", "/v1/status", 200)
             pool = final["server"]["resources"]["pools"][0]
@@ -479,6 +480,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             ):
                 break
             assert all(not model["loom"].get("error") for model in final["data"]), final
+        report_phase("models_retired")
         assert memory["pending_bytes"] == 0, memory
         # Model removal can leave reusable allocator mappings. These remain
         # part of the physical total until explicit trim, without any model
@@ -501,6 +503,7 @@ def check(server, source, directory, device, workers, memory_bytes, retention):
             body=json.dumps({"pool": "pool", "target_bytes": 0}),
             headers={"Content-Type": "application/json"},
         )
+        report_phase("trim_accepted")
         while memory["committed_bytes"]:
             final = control(address, "GET", "/v1/status", 200)
             memory = final["server"]["resources"]["pools"][0]["memory"]["retained"]

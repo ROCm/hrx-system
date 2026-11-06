@@ -74,6 +74,12 @@ loom_runtime_storage_statistics_t loom_runtime_memory_pool_statistics(
 loom_runtime_storage_statistics_t loom_runtime_memory_pool_snapshot(
     const loom_runtime_memory_pool_t* pool);
 
+// Returns the authoritative physical charge, including retained parents,
+// admitted native acquisitions, and native returns that have not completed.
+// This reads the existing budget without collecting owner work.
+uint64_t loom_runtime_memory_pool_retained_bytes(
+    const loom_runtime_memory_pool_t* pool);
+
 // Returns idle physical slabs toward target_bytes of total native commitment.
 // Live mappings remain intact. Accepted detachments retain this trim policy
 // through completion; native disposal remains charged until it finishes.

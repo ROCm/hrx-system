@@ -300,6 +300,7 @@ iree_status_t loom_runtime_device_group_advance(
                                 loom_runtime_residency_cache_query_status(
                                     loom_runtime_pool_residency_cache(owner)));
     }
+    loom_runtime_pool_advance(owner);
   }
   return status;
 }
@@ -315,6 +316,7 @@ bool loom_runtime_device_group_is_pending(loom_runtime_device_group_t* group) {
         loom_runtime_pool_residency_cache(owner));
     pending |=
         loom_runtime_workspace_is_pending(loom_runtime_pool_workspace(owner));
+    pending |= loom_runtime_pool_is_pending(owner);
     loom_runtime_memory_pool_t* pool = loom_runtime_pool_memory(owner);
     if (pool) {
       pending |= loom_runtime_memory_pool_is_pending(pool);

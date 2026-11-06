@@ -29,6 +29,13 @@ struct loom_runtime_pool_t {
   loom_runtime_memory_geometry_t state_geometry;
   // Owned parameter admission and eviction policy borrowing memory/workspace.
   loom_runtime_residency_cache_t* residency_cache;
+  // Explicit physical trim spanning accepted logical retirement.
+  struct {
+    // Latest requested total physical commitment ceiling in bytes.
+    uint64_t target_bytes;
+    // Logical retirement must complete before the final physical trim pass.
+    bool pending;
+  } trim;
 };
 
 static iree_status_t loom_runtime_pool_resolve_placement(
@@ -224,22 +231,49 @@ loom_runtime_pool_statistics_t loom_runtime_pool_statistics(
 
 iree_status_t loom_runtime_pool_trim(loom_runtime_pool_t* pool,
                                      uint64_t target_bytes) {
-  const loom_runtime_pool_statistics_t memory =
-      loom_runtime_pool_statistics(pool);
-  const uint64_t committed = pool->memory ? memory.retained.committed_bytes
-                                          : memory.workspace.bytes_committed;
-  if (committed <= target_bytes) {
+  pool->trim.target_bytes = target_bytes;
+  const bool replay_workspace_trim =
+      loom_runtime_workspace_request_trim_replay(pool->workspace);
+  const uint64_t retained =
+      pool->memory
+          ? loom_runtime_memory_pool_retained_bytes(pool->memory)
+          : loom_runtime_workspace_statistics(pool->workspace).bytes_committed;
+  if (retained <= target_bytes && !replay_workspace_trim &&
+      !pool->trim.pending) {
     return iree_ok_status();
   }
   iree_device_size_t workspace_bytes = 0;
-  IREE_RETURN_IF_ERROR(
-      loom_runtime_workspace_trim(pool->workspace, &workspace_bytes));
+  iree_status_t status =
+      loom_runtime_workspace_trim(pool->workspace, &workspace_bytes);
+  if (pool->memory && iree_status_is_ok(status)) {
+    status =
+        loom_runtime_residency_cache_trim(pool->residency_cache, target_bytes);
+  }
   if (pool->memory) {
-    IREE_RETURN_IF_ERROR(
-        loom_runtime_residency_cache_trim(pool->residency_cache, target_bytes));
     loom_runtime_memory_pool_trim(pool->memory, target_bytes);
   }
-  return iree_ok_status();
+  pool->trim.pending =
+      loom_runtime_workspace_is_reclaiming(pool->workspace) ||
+      (pool->memory &&
+       loom_runtime_residency_cache_is_reclaiming(pool->residency_cache));
+  return status;
+}
+
+void loom_runtime_pool_advance(loom_runtime_pool_t* pool) {
+  if (!pool->trim.pending) {
+    return;
+  }
+  if (pool->memory) {
+    loom_runtime_memory_pool_trim(pool->memory, pool->trim.target_bytes);
+  }
+  pool->trim.pending =
+      loom_runtime_workspace_is_reclaiming(pool->workspace) ||
+      (pool->memory &&
+       loom_runtime_residency_cache_is_reclaiming(pool->residency_cache));
+}
+
+bool loom_runtime_pool_is_pending(const loom_runtime_pool_t* pool) {
+  return pool->trim.pending;
 }
 
 iree_status_t loom_runtime_pool_trim_idle(
