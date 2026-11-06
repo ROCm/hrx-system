@@ -118,3 +118,51 @@ void divergent() {
     auto* shared = loom::buffer::alloca_init<loom::memory_space::workgroup>("abc");
   }
 }
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A write to one initialized buffer must not change the other two payload identities.
+#include <loomcxx/buffer.h>
+#include <loomcxx/predicate.h>
+
+unsigned payloads(unsigned position, unsigned replacement) {
+  loom::assume(position < 16u);
+  auto* original = loom::buffer::constant<16>("a\0\xffZ");
+  auto* first =
+      loom::buffer::alloca_init<loom::memory_space::private_, 16>("a\0\xffZ");
+  auto* second =
+      loom::buffer::alloca_init<loom::memory_space::private_, 16>("a\0\xffZ");
+  first[position] = replacement;
+  return first[position] + 256u * second[position] +
+         65536u * original[position];
+}
+
+// ----
+func.def public @payloads(%position$0: i32, %replacement: i32) -> (i32) {
+  %position$3 = scalar.assume %position$0 [range(%position$0, 0, 15)] : i32
+  %original = buffer.constant align(16) bytes("6100ff5a") : buffer
+  %first = buffer.alloca.init<private> align(16) bytes("6100ff5a") : buffer
+  %second = buffer.alloca.init<private> align(16) bytes("6100ff5a") : buffer
+  %10 = scalar.trunci %replacement : i32 to i8
+  %11 = scalar.extui %position$3 : i32 to i64
+  %16 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
+  %17 = index.cast %16 : i64 to offset
+  %18 = index.assume %17 [range(%17, 0, 3)] : offset
+  %19 = buffer.view %first[%18] : buffer -> view<1xi8>
+  view.store %10, %19[0] : i8, view<1xi8>
+  %29 = view.load %19[0] : view<1xi8> -> i8
+  %30 = scalar.extui %29 : i8 to i32
+  %40 = buffer.view %second[%18] : buffer -> view<1xi8>
+  %41 = view.load %40[0] : view<1xi8> -> i8
+  %42 = scalar.extui %41 : i8 to i32
+  %61 = scalar.constant 8 : i32
+  %62 = scalar.shli %42, %61 : i32
+  %44 = scalar.addi %30, %62 : i32
+  %54 = buffer.view %original[%18] : buffer -> view<1xi8>
+  %55 = view.load %54[0] : view<1xi8> -> i8
+  %56 = scalar.extui %55 : i8 to i32
+  %59 = scalar.constant 16 : i32
+  %60 = scalar.shli %56, %59 : i32
+  %58 = scalar.addi %44, %60 : i32
+  func.return %58 : i32
+}

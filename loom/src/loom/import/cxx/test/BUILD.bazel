@@ -91,7 +91,6 @@ loom_check_test_suite(
         "command_programs_invalid.cxx-test",
         "group_dot.cxx-test",
         "hip_vector_types.cxx-test",
-        "inline_buffer_payloads.cxx-test",
         "intrinsics_invalid.cxx-test",
         "matrix_fragments.cxx-test",
         "matrix_fragments_invalid.cxx-test",

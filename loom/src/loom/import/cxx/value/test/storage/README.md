@@ -14,6 +14,7 @@ checks operands and order as well as the operations emitted.
 | Selected roots and simultaneous pointer permutations | `buffer_selection` |
 | Opaque transport, type recovery, and access qualification | `opaque_pointers*` |
 | Typed allocation and borrowed memory-space refinement | `buffer_alloca*`, `buffer_memory_space*` |
+| Literal payloads and independent initialized allocations | `inline_buffer_payloads` |
 | Boolean value/byte representation, arrays, fields, and aliases | `boolean_storage*` |
 | Packed class/member layout and unaligned typed accesses | `packed_memory` |
 | Compound assignment, sequencing, and converted expression results | `storage_updates`, `storage_composition` |

@@ -235,3 +235,110 @@ func.def @rounds___State_unsigned_int_21(%state_first$133: i32, %state_second: i
   %state_first$149 = scalar.addi %state_first$133, %148 : i32
   func.return %state_first$149, %state_second : i32, i32
 }
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Local keys and record values reach both overloads before the caller projects one field.
+#include <hip/hip_runtime.h>
+
+struct State {
+  // Accumulator updated by the selected round implementation.
+  unsigned first;
+  // Unchanged state carried through aggregate arguments and results.
+  unsigned second;
+};
+
+template <class StateType, class Word, unsigned Rounds>
+auto rounds(StateType state, Word keys[3])
+    -> std::enable_if_t<Rounds % 4 != 0, StateType> {
+  state.first += keys[0];
+  return state;
+}
+
+template <class StateType, class Word, unsigned Rounds>
+auto rounds(StateType state, Word keys[3])
+    -> std::enable_if_t<Rounds % 4 == 0, StateType> {
+  state.first += keys[1];
+  return state;
+}
+
+template <unsigned Rounds>
+static unsigned selected_round(unsigned value) {
+  State state{value, 2};
+  unsigned keys[3] = {3, 7, 11};
+  return rounds<State, unsigned, Rounds>(state, keys).first;
+}
+
+unsigned complete(unsigned value) { return selected_round<20>(value); }
+unsigned partial(unsigned value) { return selected_round<21>(value); }
+
+// ----
+func.def public @complete(%value: i32) -> (i32) {
+  %2 = func.call @selected_round_20(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def public @partial(%value: i32) -> (i32) {
+  %5 = func.call @selected_round_21(%value) : (i32) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @selected_round_20(%value: i32) -> (i32) {
+  %state_second = scalar.constant 2 : i32
+  %9 = index.constant 12 : offset
+  %keys_storage = buffer.alloca<private> align(4) %9 : buffer
+  %keys_storage_byte_offset = index.constant 0 : offset
+  %keys_view = buffer.view %keys_storage[%keys_storage_byte_offset] : buffer -> view<3xi32>
+  %13 = scalar.constant 3 : i32
+  %14 = index.constant 0 : index
+  view.store %13, %keys_view[%14] : i32, view<3xi32>
+  %15 = scalar.constant 7 : i32
+  %16 = index.constant 1 : index
+  view.store %15, %keys_view[%16] : i32, view<3xi32>
+  %17 = scalar.constant 11 : i32
+  %18 = index.constant 2 : index
+  view.store %17, %keys_view[%18] : i32, view<3xi32>
+  %19, %20 = func.call readonly @rounds___State_unsigned_int_20(%value, %state_second, %keys_storage, %keys_storage_byte_offset) : (i32, i32, buffer, offset) -> (i32, i32)
+  func.return %19 : i32
+}
+
+func.def @selected_round_21(%value: i32) -> (i32) {
+  %state_second = scalar.constant 2 : i32
+  %24 = index.constant 12 : offset
+  %keys_storage = buffer.alloca<private> align(4) %24 : buffer
+  %keys_storage_byte_offset = index.constant 0 : offset
+  %keys_view = buffer.view %keys_storage[%keys_storage_byte_offset] : buffer -> view<3xi32>
+  %28 = scalar.constant 3 : i32
+  %29 = index.constant 0 : index
+  view.store %28, %keys_view[%29] : i32, view<3xi32>
+  %30 = scalar.constant 7 : i32
+  %31 = index.constant 1 : index
+  view.store %30, %keys_view[%31] : i32, view<3xi32>
+  %32 = scalar.constant 11 : i32
+  %33 = index.constant 2 : index
+  view.store %32, %keys_view[%33] : i32, view<3xi32>
+  %34, %35 = func.call readonly @rounds___State_unsigned_int_21(%value, %state_second, %keys_storage, %keys_storage_byte_offset) : (i32, i32, buffer, offset) -> (i32, i32)
+  func.return %34 : i32
+}
+
+func.def @rounds___State_unsigned_int_20(%state_first$36: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %70 = scalar.constant 4 : i64
+  %46 = index.cast %keys_byte_offset : offset to i64
+  %47 = scalar.addi %46, %70 : i64
+  %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
+  %49 = index.cast %48 : i64 to offset
+  %50 = buffer.view %keys[%49] : buffer -> view<1xi32>
+  %51 = view.load %50[0] : view<1xi32> -> i32
+  %state_first$52 = scalar.addi %state_first$36, %51 : i32
+  func.return %state_first$52, %state_second : i32, i32
+}
+
+func.def @rounds___State_unsigned_int_21(%state_first$53: i32, %state_second: i32, %keys: buffer, %keys_byte_offset: offset) -> (i32, i32) {
+  %63 = index.cast %keys_byte_offset : offset to i64
+  %65 = scalar.assume %63 [range(%63, 0, 9223372036854775807)] : i64
+  %66 = index.cast %65 : i64 to offset
+  %67 = buffer.view %keys[%66] : buffer -> view<1xi32>
+  %68 = view.load %67[0] : view<1xi32> -> i32
+  %state_first$69 = scalar.addi %state_first$53, %68 : i32
+  func.return %state_first$69, %state_second : i32, i32
+}
