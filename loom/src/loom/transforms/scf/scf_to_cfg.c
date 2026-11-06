@@ -1428,21 +1428,29 @@ static iree_status_t loom_scf_to_cfg_lower_switch(
 static bool loom_scf_to_cfg_classify_op(
     const loom_scf_to_cfg_state_t* state, loom_op_t* op,
     loom_scf_to_cfg_lowering_kind_t* out_lowering_kind) {
-  if (loom_func_exit_isa(op) &&
-      op->parent_block->parent_region == loom_func_like_body(state->function)) {
-    *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_EXIT;
-  } else if (loom_scf_if_isa(op)) {
-    *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_IF;
-  } else if (loom_scf_for_isa(op)) {
-    *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_FOR;
-  } else if (loom_scf_while_isa(op)) {
-    *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_WHILE;
-  } else if (loom_scf_switch_isa(op)) {
-    *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_SWITCH;
-  } else {
-    return false;
+  switch (op->kind) {
+    case LOOM_OP_FUNC_EXIT:
+      if (op->parent_block->parent_region !=
+          loom_func_like_body(state->function)) {
+        return false;
+      }
+      *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_EXIT;
+      return true;
+    case LOOM_OP_SCF_IF:
+      *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_IF;
+      return true;
+    case LOOM_OP_SCF_FOR:
+      *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_FOR;
+      return true;
+    case LOOM_OP_SCF_WHILE:
+      *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_WHILE;
+      return true;
+    case LOOM_OP_SCF_SWITCH:
+      *out_lowering_kind = LOOM_SCF_TO_CFG_LOWERING_SWITCH;
+      return true;
+    default:
+      return false;
   }
-  return true;
 }
 
 static iree_status_t loom_scf_to_cfg_collect_child_regions(
