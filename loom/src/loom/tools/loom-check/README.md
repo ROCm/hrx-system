@@ -57,6 +57,10 @@ spelling. The native provider and its event capture are test-only; compilation,
 linking, calls, and cleanup use the production APIs. The fixtures live beside
 the VM target's other artifact tests.
 
+The provider also exposes `event(i32)` to record guest observations. C++
+lifecycle fixtures use it to compare constructor, assignment, and destructor
+effects against native C++ without depending on the emitted register layout.
+
 `emit vm-object-lifetime borrowed-argument` supplies one native-owned object to
 `@run(ptr<@Object>)`, keeping the host owner live through the synchronous call.
 The provider's `count` method observes the actual intrusive reference count.

@@ -49,11 +49,6 @@ const cxx::Attribute* type_binding(cxx::ClassSymbol* source) {
   return primary == source ? nullptr : find(primary);
 }
 
-bool has_user_provided_constructor(cxx::ClassSymbol* source) {
-  return source &&
-         std::ranges::any_of(source->constructors(), cxx::isUserProvided);
-}
-
 const cxx::ParameterPackSymbol* template_argument_pack(
     cxx::ClassSymbol* source) {
   auto arguments = source->templateArguments();
@@ -1128,15 +1123,11 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
     source = type->definition();
   }
   if (!source || !source->isComplete() || source->isUnion() ||
-      !source->baseClasses().empty() ||
-      (!traits.is_aggregate(input) && !source->isClosureType() &&
-       !has_user_provided_constructor(source)) ||
-      !has_trivial_value_operations(input)) {
+      !source->baseClasses().empty() || source->isPolymorphic()) {
     diagnostics_.reject(
         unit_, owner,
-        "record values require a complete baseless non-union type with "
-        "aggregate, closure, or user-provided construction and trivial copy "
-        "and move operations");
+        "record values require a complete baseless non-union type without "
+        "virtual members");
   }
   auto result = std::make_unique<RecordPartition>();
   result->kind = ValueKind::Record;
@@ -1174,18 +1165,46 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
   return admitted;
 }
 
-bool Types::is_user_record_constructor(const cxx::Type* type,
-                                       cxx::FunctionSymbol* constructor,
-                                       cxx::AST* owner) {
-  if (!constructor || !constructor->isConstructor() ||
-      !cxx::isUserProvided(constructor)) {
+bool Types::record_constructor_requires_call(const cxx::Type* type,
+                                             cxx::FunctionSymbol* constructor,
+                                             cxx::AST* owner) {
+  if (!constructor || !constructor->isConstructor()) {
     return false;
   }
   type = unqualified(type);
   while (auto* array = cxx::type_cast<cxx::BoundedArrayType>(type)) {
     type = unqualified(array->elementType());
   }
-  return record(type, owner) != nullptr;
+  auto* admitted = record(type, owner);
+  return admitted && (cxx::isUserProvided(constructor) ||
+                      (!same_function(constructor,
+                                      admitted->source->defaultConstructor()) &&
+                       !is_trivial_value_operation(constructor)));
+}
+
+bool Types::is_trivial_value_operation(cxx::FunctionSymbol* function) {
+  if (!function || cxx::isUserProvided(function)) {
+    return false;
+  }
+  auto* source = cxx::symbol_cast<cxx::ClassSymbol>(function->parent());
+  if (!source || !(source->isCopyConstructor(function) ||
+                   source->isMoveConstructor(function) ||
+                   source->isCopyAssignmentOperator(function) ||
+                   source->isMoveAssignmentOperator(function))) {
+    return false;
+  }
+  source = source->resolvedDefinition();
+  auto [entry, inserted] =
+      trivial_record_operations_.try_emplace(source, false);
+  if (inserted) {
+    // The class-wide fact covers every eligible cv-qualified overload and
+    // nested member. A single canonical copy/move trait cannot establish the
+    // behavior of the overload selected at this callsite. Mixed families use
+    // their synthesized bodies, including the individually trivial members.
+    entry->second =
+        unit_.typeTraits().has_trivial_value_operations(source->type());
+  }
+  return entry->second;
 }
 
 void Types::append_component_names(const Partition& partition,
@@ -1437,10 +1456,6 @@ loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
   }
 }
 
-bool Types::has_trivial_value_operations(const cxx::Type* input) {
-  return unit_.typeTraits().has_trivial_value_operations(input);
-}
-
 void Types::require_record_storage(const cxx::ClassType* input,
                                    cxx::AST* owner) {
   auto* source = input->definition();
@@ -1457,14 +1472,11 @@ void Types::require_record_storage(const cxx::ClassType* input,
                         "Loom source types require SSA value transport");
   }
   if (!source || !source->isComplete() || source->isUnion() ||
-      !source->baseClasses().empty() ||
-      (!traits.is_aggregate(input) && !has_user_provided_constructor(source)) ||
-      !has_trivial_value_operations(input)) {
+      !source->baseClasses().empty() || source->isPolymorphic()) {
     diagnostics_.reject(
         unit_, owner,
-        "record storage requires a complete baseless non-union type with "
-        "aggregate or user-provided construction and trivial copy and move "
-        "operations");
+        "record storage requires a complete baseless non-union type without "
+        "virtual members");
   }
   for (auto* symbol : source->members()) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
@@ -1532,69 +1544,22 @@ bool Types::is_opaque_dialect(const cxx::Type* type, std::string_view name,
 }
 
 // The frontend has selected the special member and checked accessibility,
-// deletion, cv and overload resolution. Source admission establishes trivial
-// lifecycle semantics before an implicit copy becomes an SSA value copy.
-// Synthesized record constructors contribute their canonical member
-// initialization plans. User-provided record constructors retain ordinary
-// callable bodies over the exact destination storage.
+// deletion, cv and overload resolution. Ordinary records execute selected
+// nontrivial bodies; intrinsic source wrappers admit only trivial transport.
 void Types::admit_construction(cxx::FunctionSymbol* constructor,
                                const cxx::Type* type, cxx::AST* owner) {
-  if (!constructor) {
-    return;
-  }
-  // Array initialization retains an element constructor on the array entity.
-  // Initialization admits and executes it independently for every element.
-  if (unit_.typeTraits().is_array(type)) {
+  if (!constructor || unit_.typeTraits().is_array(type)) {
     return;
   }
   const auto& admitted = partition(unqualified(type), owner);
-  cxx::ClassSymbol* source = nullptr;
-  bool is_record = admitted.kind == ValueKind::Record;
-  if (admitted.kind == ValueKind::Record) {
-    source = static_cast<const RecordPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Buffer) {
-    source = static_cast<const BufferPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Address) {
-    source = static_cast<const AddressPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Encoding) {
-    source = static_cast<const EncodingPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Pool) {
-    source = static_cast<const PoolPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Tile) {
-    source = static_cast<const TilePartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Channel) {
-    source = static_cast<const ChannelPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::OpaqueDialect) {
-    source = static_cast<const OpaqueDialectPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Vector) {
-    source = static_cast<const VectorPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::View) {
-    source = static_cast<const ViewPartition&>(admitted).source;
-  } else if (admitted.kind == ValueKind::Tensor) {
-    source = static_cast<const TensorPartition&>(admitted).source;
-  }
-  if (source && same_function(constructor, source->defaultConstructor())) {
-    if (is_record) {
-      return;
-    }
-    diagnostics_.reject(
-        unit_, owner,
-        "default Loom source type construction requires source object "
-        "initialization semantics");
-  }
-  if (is_record && cxx::isUserProvided(constructor)) {
+  if (admitted.kind == ValueKind::Record ||
+      is_trivial_value_operation(constructor)) {
     return;
   }
-  if (!source || (!same_function(constructor, source->copyConstructor()) &&
-                  !same_function(constructor, source->moveConstructor()))) {
-    diagnostics_.reject(
-        unit_, owner,
-        is_record
-            ? "record construction requires aggregate initialization "
-              "or a trivial copy"
-            : "Loom source type construction requires an operation result or "
-              "a trivial copy");
-  }
+  diagnostics_.reject(
+      unit_, owner,
+      "Loom source type construction requires an operation result or "
+      "a trivial copy");
 }
 
 void Types::require_mutable(const cxx::Type* input, cxx::AST* owner) {

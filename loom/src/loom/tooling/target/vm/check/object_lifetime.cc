@@ -138,6 +138,13 @@ iree_status_t Observe(Trace* trace, const NativeCall*) {
   return iree_ok_status();
 }
 
+iree_status_t RecordEvent(Trace* trace, const NativeCall* params) {
+  trace->events.push_back(
+      {"event", static_cast<int32_t>(
+                    iree_vm_call_value_argument_load(&params->call, 0))});
+  return iree_ok_status();
+}
+
 iree_status_t Read(Trace* trace, const NativeCall* params) {
   iree_vm_ref_t borrow = iree_vm_ref_null();
   iree_vm_call_ref_argument_load_borrow(&params->call, 0, &borrow);
@@ -181,21 +188,23 @@ const iree_vm_module_signature_type_t kIdentityFields[] = {
 const iree_vm_module_callable_type_declaration_t kCallableTypes[] = {
     {{{}, {}}, 0, 0, 0},
     {{{}, {kFactoryFields, 2, 0, 2, 0}}, 0, 0, 0},
+    {{{kIdentityFields, 1, 1, 0, 0}, {}}, 0, 0, 0},
     {{{kIdentityFields, 1, 1, 0, 0}, {kFactoryFields, 2, 0, 2, 0}}, 0, 0, 0},
     {{{kOwnedFields, 1, 0, 1, 0}, {}}, 0, 0, 0},
     {{{kBorrowedFields, 1, 0, 1, 0}, {}}, 0, 0, 0},
     {{{kFactoryFields, 2, 0, 2, 0}, {}}, 0, 0, 0},
     {{{kPairFields, 2, 0, 2, 0}, {}}, 0, 0, 0}};
 const iree_vm_module_export_declaration_t kExports[] = {
-    {IREE_SV("consume"), 3, 0, 0},     {IREE_SV("consume_read"), 5, 9, 0},
-    {IREE_SV("count"), 4, 8, 0},       {IREE_SV("create"), 2, 1, 0},
-    {IREE_SV("create_fail"), 2, 2, 0}, {IREE_SV("create_null"), 1, 3, 0},
-    {IREE_SV("fail"), 0, 4, 0},        {IREE_SV("observe"), 0, 5, 0},
-    {IREE_SV("read"), 4, 6, 0},        {IREE_SV("read_pair"), 6, 7, 0}};
+    {IREE_SV("consume"), 4, 0, 0},     {IREE_SV("consume_read"), 6, 9, 0},
+    {IREE_SV("count"), 5, 8, 0},       {IREE_SV("create"), 3, 1, 0},
+    {IREE_SV("create_fail"), 3, 2, 0}, {IREE_SV("create_null"), 1, 3, 0},
+    {IREE_SV("event"), 2, 10, 0},      {IREE_SV("fail"), 0, 4, 0},
+    {IREE_SV("observe"), 0, 5, 0},     {IREE_SV("read"), 5, 6, 0},
+    {IREE_SV("read_pair"), 7, 7, 0}};
 using NativeFunction = iree_status_t (*)(Trace*, const NativeCall*);
 constexpr NativeFunction kFunctions[] = {
-    Consume, Create, CreateFail, CreateNull, Fail,
-    Observe, Read,   ReadPair,   Count,      ConsumeRead};
+    Consume, Create,   CreateFail, CreateNull,  Fail,       Observe,
+    Read,    ReadPair, Count,      ConsumeRead, RecordEvent};
 
 struct ObjectModule {
   // TableModule and its contained VM module both occupy offset zero.

@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "loom/import/cxx/lifetime/destruction.h"
+#include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/value/types.h"
 
 namespace loom::cxx_import {
@@ -272,6 +273,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Whether this source function invokes a synthesized default constructor
   // whose retained plan initializes at least one subobject.
   bool default_constructor_initializes(cxx::FunctionSymbol* constructor) const;
+  // Frontend-completed array-member copy, retained before call propagation.
+  const ArrayCopyInitialization* array_copy(cxx::AST* initializer) const;
   // Whether a reference parameter must carry durable storage identity.
   bool reference_requires_storage(cxx::Symbol* parameter) const;
   // Whether execution may modify the object named by a reference parameter.
@@ -416,10 +419,13 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool require_address(cxx::Symbol* binding);
   void retain_automatic_storage(cxx::VariableSymbol* variable,
                                 cxx::ExpressionAST* initializer,
-                                bool user_record_constructor);
+                                bool record_constructor_call);
   bool add_receiver_write(cxx::FieldSymbol* field);
   void retain_reference_receiver_write(const DirectCall& call);
   CallArgument retain_call_argument(cxx::ExpressionAST* expression);
+  // Reference operands retain their source destinations and write effects
+  // regardless of whether call syntax is ordinary, operator, or constructor.
+  void retain_reference_arguments(const DirectCall& call);
   void collect_identity(cxx::ExpressionAST* expression, CallArgument& argument);
   void append_identity(Destination destination, CallArgument& argument);
   void retain_call(cxx::CallExpressionAST* call, cxx::FunctionSymbol* function);
@@ -431,6 +437,8 @@ class ControlFlow final : private cxx::ASTVisitor {
                                CallArgument receiver, bool storage_receiver,
                                cxx::AST* owner);
   void retain_member_constructor(cxx::MemInitializerAST* initializer);
+  bool retain_array_copy(const cxx::Type* type, cxx::ExpressionAST* initializer,
+                         cxx::FunctionSymbol* constructor, cxx::AST* owner);
   bool retain_constructor(cxx::VariableSymbol* variable,
                           cxx::ExpressionAST* initializer, cxx::AST* owner);
   void retain_automatic_destruction(cxx::Symbol* binding, cxx::AST* owner);
@@ -507,6 +515,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unique_ptr<PointerReferenceFacts> pointer_reference_facts_;
   // Calls retained once for sparse fixed-point propagation.
   std::vector<DirectCall> calls_;
+  // Array copy plans own normalized default arguments and source identity.
+  std::unordered_map<cxx::AST*, ArrayCopyInitialization> array_copies_;
   // Automatic variable identities mapped to their nontrivial cleanup action.
   std::unordered_map<cxx::Symbol*, Destruction> automatic_destructions_;
   // Current destructor's direct nontrivial members in declaration order.

@@ -2199,13 +2199,14 @@ while transporting zero values; a two-scalar record remains distinct from a
 pointer. Kernel parameters continue to use the ordinary launch binding ABI and
 reject record parameters.
 
-Admitted records are complete, baseless, non-union types with trivial copying
-and destruction. Fields recursively admit scalar, vector, pointer, record, and
-fixed-array values. Braced and parenthesized aggregate construction preserve
-positional, designated, and omitted-field initialization. Implicit default
+Admitted records are complete, baseless, non-union types without virtual
+members. Copy, move, and destruction may execute ordinary source bodies. Fields
+recursively admit scalar, vector, pointer, record, and fixed-array values. Braced
+and parenthesized aggregate construction preserve positional, designated, and
+omitted-field initialization. Implicit default
 construction such as `Result()` executes the frontend's declaration-order
-member-initialization plan, including nested records and arrays. Bitfields and
-nontrivial lifecycle operations remain outside the SSA record contract.
+member-initialization plan, including nested records and arrays. Bitfields
+require an additional object representation and receive source diagnostics.
 
 A record can also define its own constructors. The selected constructor runs
 its declaration-ordered member initializers and then its ordinary C++ body
@@ -2236,8 +2237,8 @@ the target's initialization and body, and then executes its own body. Chained,
 parenthesized, and braced delegation retain converted and default arguments
 from the frontend's initialization plan.
 
-Base subobjects, unions, and nontrivial destruction remain rejected because
-they require lifecycle semantics beyond the admitted record representation.
+Base subobjects, unions, and virtual dispatch require additional object
+representations and receive source diagnostics.
 The receiver must also have a source-layout object representation: records
 that store pointers, references, or semantic Loom values remain SSA aggregates
 and cannot use this constructor form.
@@ -2247,6 +2248,53 @@ Their field and array-element addresses share that storage, while unaddressed
 records remain partitioned SSA values. Aggregate copies preserve value semantics
 in either representation, and shared private-storage promotion can remove the
 allocation after inlining.
+
+### Copy, move, and destruction
+
+Copying and moving execute the constructor or assignment operator selected by
+C++ overload resolution. Mutable, const, and rvalue sources retain their
+selected overloads. An xvalue cast changes the source category; the move body
+owns any transfer and source clearing:
+
+```cpp
+struct State {
+  // Moving transfers this state and clears the source.
+  unsigned value;
+
+  explicit State(unsigned value) : value(value) {}
+  State(const State&) = default;
+  State(State&& other) : value(other.value) { other.value = 0; }
+  State& operator=(const State&) = default;
+  State& operator=(State&& other) {
+    unsigned incoming = other.value;
+    other.value = 0;
+    value = incoming;
+    return *this;
+  }
+};
+```
+
+Defaulted special members execute their frontend-selected member operations
+in declaration order, including multidimensional arrays and captured objects.
+Each array element evaluates its constructor's default arguments and retires
+those temporaries before constructing the next element. Deleted or inaccessible
+members remain source errors. Trivial record families keep direct component
+transport; other records use ordinary callable bodies and the same reference
+identity and alias handling as member functions.
+
+Assignment notation evaluates the right operand before the destination. A
+returned reference still names that destination, so `(left = right).value`
+observes and can mutate the assigned object. Copy and move constructors use the
+exact destination storage; ordinary inlining and promotion can eliminate that
+storage when no identity escapes.
+
+Automatic objects and by-value parameters run their destructors at normal
+source lifetime boundaries. Full-expression temporaries retire after the
+expression, and copied or moved closure captures belong to the resulting
+closure. Guaranteed copy elision transfers the completed object into its
+result without another constructor or destructor. Exported C++ retains the
+resulting calls, effects, and cleanup, independently of the original class
+spelling.
 
 ### Ordinary overloaded operators
 
@@ -2364,11 +2412,13 @@ Memory records admit scalar, enum, vector and nested named fields,
 including fixed arrays of those types and multidimensional arrays. Array
 members decay to borrowed pointers, so ordinary helpers can consume them.
 Indexing and pointer-to-array arithmetic preserve each source extent's stride.
-The admitted object must be a complete aggregate with trivial copying and
-destruction, without bases, unions, bitfields or `no_unique_address`. Stored
+The admitted object must be complete, without bases, unions, virtual members,
+bitfields, or `no_unique_address`. Selected copy/move bodies and source cleanup
+apply to these objects as they do to other admitted records. Stored
 pointers, references and Loom view/encoding objects require additional
-memory representations and receive source diagnostics. Whole-record loads and
-stores also diagnose: the by-value SSA partition is not an object-copy operation.
+memory representations and receive source diagnostics. Object copies execute
+their selected special members; trivial component transport copies represented
+fields, independently of padding bytes.
 Volatile record pointers and volatile fields retain observable accesses through
 nested members and array elements.
 
@@ -2956,9 +3006,8 @@ additional type projections and produces a source diagnostic. Pointer
 differences, comparisons, and truth conversions also produce source diagnostics.
 Distinct-root choices import as ordinary buffer values; executing them requires
 the selected Loom target to support buffer transport through those control-flow
-edges. Nonaggregate construction, nontrivial destruction, exceptions, and
-indirect calls need additional storage and control-flow projections before they
-can be imported.
+edges. Exceptions and indirect calls require additional control-flow
+projections and receive source diagnostics.
 
 Volatile scalar and vector accesses through pointers, automatic objects, and
 workgroup objects become `view.load/store<volatile>` and

@@ -244,6 +244,8 @@ def render_preamble(
             headers.add("loomcxx/view.h")
         elif uses_buffers:
             headers.add("loomcxx/buffer.h")
+            if scalar_names & {"index", "offset"}:
+                headers.add("loomcxx/index.h")
         elif scalar_names & {"index", "offset"}:
             headers.add("loomcxx/index.h")
     if uses_encodings and headers.isdisjoint(

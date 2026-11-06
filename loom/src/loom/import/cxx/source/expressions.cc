@@ -11,9 +11,57 @@
 #include <cxx/initialization.h>
 #include <cxx/symbols.h>
 #include <cxx/translation_unit.h>
+#include <cxx/type_checker.h>
 #include <cxx/types.h>
 
 namespace loom::cxx_import {
+
+std::vector<cxx::ExpressionAST*> constructor_arguments(
+    cxx::ExpressionAST* initializer) {
+  cxx::List<cxx::ExpressionAST*>* arguments = nullptr;
+  if (auto* construction =
+          cxx::ast_cast<cxx::TypeConstructionAST>(initializer)) {
+    arguments = construction->expressionList;
+  } else if (auto* construction =
+                 cxx::ast_cast<cxx::BracedTypeConstructionAST>(initializer)) {
+    arguments = construction->bracedInitList->expressionList;
+  } else {
+    return cxx::Initializer(initializer).arguments();
+  }
+  std::vector<cxx::ExpressionAST*> result;
+  for (auto* argument : cxx::ListView{arguments}) {
+    result.push_back(argument);
+  }
+  return result;
+}
+
+std::optional<ArrayCopyInitialization> array_copy_initialization(
+    cxx::TranslationUnit& unit, cxx::ScopeSymbol* scope, const cxx::Type* type,
+    cxx::ExpressionAST* initializer, cxx::FunctionSymbol* constructor,
+    cxx::AST* owner) {
+  if (!unit.typeTraits().is_array(type)) {
+    return std::nullopt;
+  }
+  cxx::Initializer source(initializer);
+  auto* expression = source.singleExpression();
+  if (!cxx::isWholeArrayCopy(unit.typeTraits(), expression, type)) {
+    return std::nullopt;
+  }
+  ArrayCopyInitialization result{expression, constructor, {}};
+  if (result.constructor->parameters().size() > 1) {
+    // Selection belongs to array initialization in the frontend. Complete
+    // only its omitted arguments, without repeating overload resolution.
+    auto* arguments = cxx::make_list_node(unit.arena(), expression);
+    cxx::TypeChecker checker(&unit);
+    checker.setScope(scope);
+    checker.append_default_arguments(result.constructor, &arguments,
+                                     owner->firstSourceLocation());
+    for (auto* argument : cxx::ListView{arguments->next}) {
+      result.default_arguments.push_back(argument);
+    }
+  }
+  return result;
+}
 
 cxx::ExpressionAST* strip_implicit_casts(cxx::ExpressionAST* expression) {
   while (auto* cast =
@@ -163,78 +211,77 @@ cxx::FunctionSymbol* direct_callee(cxx::CallExpressionAST* call) {
 
 std::optional<DirectOperatorCall> direct_operator_call(
     cxx::ExpressionAST* expression) {
-  if (auto* binary = cxx::ast_cast<cxx::BinaryExpressionAST>(expression);
-      binary && binary->symbol) {
-    const bool member = binary->symbol->isImplicitObjectMemberFunction();
+  auto binary =
+      [](cxx::FunctionSymbol* function, cxx::ExpressionAST* left,
+         cxx::ExpressionAST* right, bool right_first,
+         bool is_virtual_dispatch) -> std::optional<DirectOperatorCall> {
+    if (!function) {
+      return std::nullopt;
+    }
+    const bool member = function->isImplicitObjectMemberFunction();
     return DirectOperatorCall{
-        .function = binary->symbol,
-        .receiver = member ? binary->leftExpression : nullptr,
-        .arguments =
-            member
-                ? std::array<cxx::ExpressionAST*, 2>{binary->rightExpression,
-                                                     nullptr}
-                : std::array<cxx::ExpressionAST*, 2>{binary->leftExpression,
-                                                     binary->rightExpression},
+        .function = function,
+        .receiver = member ? left : nullptr,
+        .arguments = member ? std::array<cxx::ExpressionAST*, 2>{right, nullptr}
+                            : std::array<cxx::ExpressionAST*, 2>{left, right},
         .argument_count = member ? 1u : 2u,
-        .evaluation_order = OperatorEvaluationOrder::Forward,
-        .has_postfix_dummy = false,
-        .is_virtual_dispatch = binary->isVirtualDispatch,
-    };
-  }
-  if (auto* assignment =
-          cxx::ast_cast<cxx::CompoundAssignmentExpressionAST>(expression);
-      assignment && assignment->symbol) {
-    const bool member = assignment->symbol->isImplicitObjectMemberFunction();
-    return DirectOperatorCall{
-        .function = assignment->symbol,
-        .receiver = member ? assignment->targetExpression : nullptr,
-        .arguments = member
-                         ? std::array<cxx::ExpressionAST*,
-                                      2>{assignment->rightExpression, nullptr}
-                         : std::array<cxx::ExpressionAST*,
-                                      2>{assignment->targetExpression,
-                                         assignment->rightExpression},
-        .argument_count = member ? 1u : 2u,
-        .evaluation_order = member
+        .evaluation_order = !right_first ? OperatorEvaluationOrder::Forward
+                            : member
                                 ? OperatorEvaluationOrder::ArgumentsThenReceiver
                                 : OperatorEvaluationOrder::ReverseArguments,
         .has_postfix_dummy = false,
-        .is_virtual_dispatch = assignment->isVirtualDispatch,
+        .is_virtual_dispatch = is_virtual_dispatch,
     };
-  }
-  if (auto* postfix = cxx::ast_cast<cxx::PostIncrExpressionAST>(expression);
-      postfix && postfix->symbol) {
-    const bool member = postfix->symbol->isImplicitObjectMemberFunction();
+  };
+  auto unary =
+      [](cxx::FunctionSymbol* function, cxx::ExpressionAST* operand,
+         bool postfix,
+         bool is_virtual_dispatch) -> std::optional<DirectOperatorCall> {
+    if (!function) {
+      return std::nullopt;
+    }
+    const bool member = function->isImplicitObjectMemberFunction();
     return DirectOperatorCall{
-        .function = postfix->symbol,
-        .receiver = member ? postfix->baseExpression : nullptr,
-        .arguments =
-            member ? std::array<cxx::ExpressionAST*, 2>{nullptr, nullptr}
-                   : std::array<cxx::ExpressionAST*, 2>{postfix->baseExpression,
-                                                        nullptr},
-        .argument_count = member ? 0u : 1u,
-        .evaluation_order = OperatorEvaluationOrder::Forward,
-        .has_postfix_dummy = true,
-        .is_virtual_dispatch = postfix->isVirtualDispatch,
-    };
-  }
-  if (auto* unary = cxx::ast_cast<cxx::UnaryExpressionAST>(expression);
-      unary && unary->symbol) {
-    const bool member = unary->symbol->isImplicitObjectMemberFunction();
-    return DirectOperatorCall{
-        .function = unary->symbol,
-        .receiver = member ? unary->expression : nullptr,
+        .function = function,
+        .receiver = member ? operand : nullptr,
         .arguments = member
                          ? std::array<cxx::ExpressionAST*, 2>{nullptr, nullptr}
-                         : std::array<cxx::ExpressionAST*, 2>{unary->expression,
-                                                              nullptr},
+                         : std::array<cxx::ExpressionAST*, 2>{operand, nullptr},
         .argument_count = member ? 0u : 1u,
         .evaluation_order = OperatorEvaluationOrder::Forward,
-        .has_postfix_dummy = false,
-        .is_virtual_dispatch = unary->isVirtualDispatch,
+        .has_postfix_dummy = postfix,
+        .is_virtual_dispatch = is_virtual_dispatch,
     };
+  };
+  switch (expression->kind()) {
+    case cxx::ASTKind::BinaryExpression: {
+      auto* ast = static_cast<cxx::BinaryExpressionAST*>(expression);
+      return binary(ast->symbol, ast->leftExpression, ast->rightExpression,
+                    false, ast->isVirtualDispatch);
+    }
+    case cxx::ASTKind::AssignmentExpression: {
+      auto* ast = static_cast<cxx::AssignmentExpressionAST*>(expression);
+      return binary(ast->symbol, ast->leftExpression, ast->rightExpression,
+                    true, ast->isVirtualDispatch);
+    }
+    case cxx::ASTKind::CompoundAssignmentExpression: {
+      auto* ast =
+          static_cast<cxx::CompoundAssignmentExpressionAST*>(expression);
+      return binary(ast->symbol, ast->targetExpression, ast->rightExpression,
+                    true, ast->isVirtualDispatch);
+    }
+    case cxx::ASTKind::PostIncrExpression: {
+      auto* ast = static_cast<cxx::PostIncrExpressionAST*>(expression);
+      return unary(ast->symbol, ast->baseExpression, true,
+                   ast->isVirtualDispatch);
+    }
+    case cxx::ASTKind::UnaryExpression: {
+      auto* ast = static_cast<cxx::UnaryExpressionAST*>(expression);
+      return unary(ast->symbol, ast->expression, false, ast->isVirtualDispatch);
+    }
+    default:
+      return std::nullopt;
   }
-  return std::nullopt;
 }
 
 const cxx::Type* implicit_object_type(cxx::TranslationUnit& unit,
