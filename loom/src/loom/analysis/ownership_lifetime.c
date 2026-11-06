@@ -1019,7 +1019,8 @@ static iree_status_t loom_ownership_lifetime_transfer_op(
   }
   for (uint16_t i = 0; i < op->operand_count && !state->failed; ++i) {
     loom_ownership_operand_effect_t effect = {0};
-    if (!loom_ownership_operand_effect_at(state->module, op, i, &effect)) {
+    if (!loom_ownership_operand_effect_at(
+            state->module, &state->summary->effects, op, i, &effect)) {
       continue;
     }
     IREE_RETURN_IF_ERROR(
@@ -1027,7 +1028,8 @@ static iree_status_t loom_ownership_lifetime_transfer_op(
   }
   for (uint16_t i = 0; i < op->result_count && !state->failed; ++i) {
     loom_ownership_result_effect_t effect = {0};
-    if (!loom_ownership_result_effect_at(state->module, op, i, &effect)) {
+    if (!loom_ownership_result_effect_at(
+            state->module, &state->summary->effects, op, i, &effect)) {
       continue;
     }
     IREE_RETURN_IF_ERROR(

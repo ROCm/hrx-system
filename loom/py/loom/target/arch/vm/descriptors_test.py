@@ -28,7 +28,12 @@ from iree.vm.bytecode.spec.isa.core.integer import (
     IntegerDivisionSemantics,
     IntegerUnarySemantics,
 )
-from iree.vm.bytecode.spec.isa.core.rules import FieldRule, RecordRuleKind, StateAccess
+from iree.vm.bytecode.spec.isa.core.rules import (
+    FieldRule,
+    RecordRuleKind,
+    RefOwnership,
+    StateAccess,
+)
 from iree.vm.bytecode.spec.isa.core.stack import MEMORY_FORMAT_SELECTOR
 from iree.vm.bytecode.spec.specification import SPECIFICATION
 
@@ -52,6 +57,7 @@ from loom.target.low_descriptors import (
     ImmediateFlag,
     ImmediateKind,
     OperandRole,
+    OwnershipEffect,
 )
 
 
@@ -154,6 +160,19 @@ def test_register_fields_preserve_the_wire_bank_and_position():
             )
             (alternative,) = operand.reg_alts
             assert alternative.reg_class == banks[field.rule.kind]
+            expected_ownership = {
+                RefOwnership.BORROW: OwnershipEffect.BORROW,
+                RefOwnership.INSPECT: OwnershipEffect.BORROW,
+                RefOwnership.RETAIN: OwnershipEffect.RETAIN,
+                RefOwnership.REPLACE_OWNER: OwnershipEffect.OWNED,
+                RefOwnership.REPLACE_RETAIN: OwnershipEffect.OWNED,
+                RefOwnership.REPLACE_BORROW: OwnershipEffect.BORROWED,
+            }
+            assert operand.ownership is (
+                expected_ownership[field.ref_policy.ownership]
+                if field.ref_policy
+                else OwnershipEffect.NONE
+            )
 
 
 def test_effects_preserve_state_access_not_runtime_aborts():
@@ -172,7 +191,13 @@ def test_effects_preserve_state_access_not_runtime_aborts():
                 for effect in instruction.state_effects
             )
         )
-        if expected:
+        creates_owner = any(
+            field.ref_policy
+            and field.ref_policy.ownership
+            in (RefOwnership.REPLACE_OWNER, RefOwnership.REPLACE_RETAIN)
+            for field in instruction.fields
+        )
+        if expected or creates_owner:
             assert DescriptorFlag.SIDE_EFFECTING in descriptor.flags
             assert DescriptorFlag.DEAD_REMOVABLE not in descriptor.flags
             assert tuple(effect.kind for effect in descriptor.effects) == expected

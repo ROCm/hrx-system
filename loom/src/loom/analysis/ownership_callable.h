@@ -35,6 +35,8 @@ typedef struct loom_ownership_lifetime_alias_t loom_ownership_lifetime_alias_t;
 typedef struct loom_ownership_lifetime_function_summary_t {
   // Function-like op this summary describes.
   loom_func_like_t function;
+  // Instruction semantics resolved once from this function's representation.
+  loom_ownership_effect_provider_t effects;
   // Body region analyzed for this summary, or NULL for conservative callees.
   loom_region_t* body;
   // Declared body exit kind, or UNKNOWN for bodyless callables.

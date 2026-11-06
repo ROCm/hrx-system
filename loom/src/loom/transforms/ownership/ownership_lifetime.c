@@ -7,8 +7,11 @@
 #include "loom/transforms/ownership/ownership_lifetime.h"
 
 #include "loom/analysis/ownership_lifetime.h"
+#include "loom/codegen/low/ownership.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/type_registry.h"
+#include "loom/target/pass_environment.h"
+#include "loom/target/provider.h"
 
 #define LOOM_OWNERSHIP_LIFETIME_STATISTICS(V, statistics_type) \
   V(statistics_type, blocks_checked, "blocks-checked",         \
@@ -74,12 +77,17 @@ iree_status_t loom_ownership_lifetime_run(loom_pass_t* pass,
                    LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_BODYLESS_RESULTS,
       },
   };
+  const loom_target_low_descriptor_registry_t registry =
+      loom_target_environment_low_descriptor_registry(
+          loom_target_pass_capability_target_environment(
+              loom_target_pass_capability_from_pass(pass)));
   loom_ownership_lifetime_options_t options = {
       .arena = pass->arena,
       .emitter = pass->diagnostic_emitter,
       .phase_name = pass->info->name,
       .policies = policies,
       .policy_count = IREE_ARRAYSIZE(policies),
+      .effect_resolver = loom_low_ownership_effect_resolver(&registry.registry),
   };
   loom_ownership_lifetime_result_t result = {0};
   IREE_RETURN_IF_ERROR(

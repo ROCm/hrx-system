@@ -73,6 +73,9 @@ typedef struct loom_ownership_lifetime_options_t {
   const loom_ownership_lifetime_policy_t* policies;
   // Number of entries in |policies|.
   iree_host_size_t policy_count;
+  // Instruction effects bound once per function, in addition to source-op
+  // descriptors. Required when the module contains target instruction packets.
+  loom_ownership_effect_resolver_t effect_resolver;
 } loom_ownership_lifetime_options_t;
 
 typedef struct loom_ownership_lifetime_result_t {

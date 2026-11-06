@@ -27,7 +27,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 73u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 74u
 
 // Sentinel for absent target-family or descriptor-set stable IDs.
 #define LOOM_LOW_STABLE_ID_NONE UINT64_C(0)
@@ -67,6 +67,17 @@ extern "C" {
 #define LOOM_LOW_TIMING_EVENT_NONE UINT16_MAX
 
 typedef uint8_t loom_low_operand_role_t;
+
+// Logical handle effects of target instructions. Consuming transfers and
+// releases use structural Low operations with ordinary ownership descriptors.
+typedef uint8_t loom_low_ownership_effect_t;
+enum loom_low_ownership_effect_e {
+  LOOM_LOW_OWNERSHIP_NONE = 0,
+  LOOM_LOW_OWNERSHIP_BORROW = 1,
+  LOOM_LOW_OWNERSHIP_RETAIN = 2,
+  LOOM_LOW_OWNERSHIP_OWNED = 3,
+  LOOM_LOW_OWNERSHIP_BORROWED = 4,
+};
 
 enum loom_low_operand_role_e {
   // Unknown or uninitialized operand role.
@@ -1740,6 +1751,12 @@ typedef struct loom_low_descriptor_set_t {
   uint32_t native_asm_value_count;
   // Shared operand/result rows referenced by operand_indices.
   const loom_low_operand_t* operands;
+  // Optional descriptor-indexed ownership span starts plus one. Zero denotes
+  // no handle effects; absent for sets with no handle instructions.
+  const uint16_t* ownership_offsets;
+  // Effect bytes in SSA result order followed by SSA operand order. Spans are
+  // interned and omit implicit machine operands; no per-operation allocation.
+  const loom_low_ownership_effect_t* ownership_effects;
   // Number of operand/result rows owned by this set.
   uint32_t operand_count;
   // Maximum operand count of one native descriptor, including implicit state.

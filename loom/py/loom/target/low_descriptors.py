@@ -57,6 +57,14 @@ class OperandRole(CEnum):
     IMPLICIT = "LOOM_LOW_OPERAND_ROLE_IMPLICIT"
 
 
+class OwnershipEffect(CEnum):
+    NONE = "LOOM_LOW_OWNERSHIP_NONE"
+    BORROW = "LOOM_LOW_OWNERSHIP_BORROW"
+    RETAIN = "LOOM_LOW_OWNERSHIP_RETAIN"
+    OWNED = "LOOM_LOW_OWNERSHIP_OWNED"
+    BORROWED = "LOOM_LOW_OWNERSHIP_BORROWED"
+
+
 class OperandSourceBinding(CEnum):
     NONE = "LOOM_LOW_OPERAND_SOURCE_BINDING_NONE"
     LHS = "LOOM_LOW_OPERAND_SOURCE_BINDING_LHS"
@@ -511,6 +519,8 @@ class Operand:
     ready_stage: int = 0
     read_event: str | None = None
     write_event: str | None = None
+    # Logical handle effect; consuming transport uses structural Low operations.
+    ownership: OwnershipEffect = OwnershipEffect.NONE
 
 
 @dataclass(frozen=True, slots=True)

@@ -1412,3 +1412,16 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+loom_cc_library(
+    name = "ownership",
+    srcs = ["ownership.c"],
+    hdrs = ["ownership.h"],
+    deps = [
+        ":descriptors",
+        ":representation_binding",
+        "//loom/src/loom/analysis:ownership",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)

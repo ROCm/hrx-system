@@ -65,6 +65,12 @@ static iree_status_t loom_ownership_lifetime_initialize_summary(
       .arg_count = arg_count,
       .result_count = function.op->result_count,
   };
+  const loom_ownership_effect_resolver_t* resolver =
+      &module_state->options->effect_resolver;
+  if (resolver->bind) {
+    summary->effects =
+        resolver->bind(module_state->module, function, resolver->user_data);
+  }
   if (summary->arg_count > 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
         module_state->options->arena, summary->arg_count,
@@ -168,10 +174,12 @@ static bool loom_ownership_lifetime_effect_is_in_domain(
 }
 
 static bool loom_ownership_lifetime_op_has_owned_effects(
-    const loom_ownership_lifetime_module_state_t* state, const loom_op_t* op) {
+    const loom_ownership_lifetime_module_state_t* state,
+    const loom_ownership_effect_provider_t* provider, const loom_op_t* op) {
   for (uint16_t i = 0; i < op->operand_count; ++i) {
     loom_ownership_operand_effect_t effect = {0};
-    if (loom_ownership_operand_effect_at(state->module, op, i, &effect) &&
+    if (loom_ownership_operand_effect_at(state->module, provider, op, i,
+                                         &effect) &&
         effect.effect != LOOM_OPERAND_OWNERSHIP_BORROW &&
         loom_ownership_lifetime_effect_is_in_domain(state, effect.value_id)) {
       return true;
@@ -179,7 +187,8 @@ static bool loom_ownership_lifetime_op_has_owned_effects(
   }
   for (uint16_t i = 0; i < op->result_count; ++i) {
     loom_ownership_result_effect_t effect = {0};
-    if (loom_ownership_result_effect_at(state->module, op, i, &effect) &&
+    if (loom_ownership_result_effect_at(state->module, provider, op, i,
+                                        &effect) &&
         (effect.effect == LOOM_RESULT_OWNERSHIP_FRESH ||
          effect.effect == LOOM_RESULT_OWNERSHIP_RETAINED) &&
         loom_ownership_lifetime_effect_is_in_domain(state, effect.value_id)) {
@@ -283,7 +292,8 @@ static iree_status_t loom_ownership_lifetime_visit_successor_call(
   }
   if (!walk->summary->has_owned_effects) {
     walk->summary->has_owned_effects =
-        loom_ownership_lifetime_op_has_owned_effects(state, op);
+        loom_ownership_lifetime_op_has_owned_effects(
+            state, &walk->summary->effects, op);
   }
   if (context->region == walk->summary->body) {
     IREE_RETURN_IF_ERROR(
