@@ -20,6 +20,9 @@ extern "C" {
 // Format features come from the native family, independently of the shader ISA.
 
 enum {
+  // Prepared command extent admitted by the bounded native publisher. Its
+  // private completion and event tail has separate storage.
+  IREE_HAL_AMD_GPU_SDMA_MAX_COMMAND_WORDS = 224u,
   // Common byte-count bound, including the narrowest admitted COPY encoding.
   // Logical transfers use as many packets as needed; this bounds one packet.
   IREE_HAL_AMD_GPU_SDMA_MAX_PACKET_LENGTH = 0x3fff00u,
@@ -44,6 +47,21 @@ uint32_t* iree_hal_amd_gpu_sdma_emit_fence(
 // requires the family feature; KERNEL SUBMISSION_GCR is a retirement boundary
 // instead of an in-stream encoding. Dependency waits precede an acquire.
 uint32_t* iree_hal_amd_gpu_sdma_emit_cache(uint32_t* words, uint32_t control);
+
+// Emits five DWORDs filling a nonempty DWORD-aligned range. byte_length is a
+// multiple of four and at most MAX_PACKET_LENGTH; pattern is a four-byte
+// period.
+uint32_t* iree_hal_amd_gpu_sdma_emit_fill(uint32_t* words,
+                                          amdf_queue_format_features_t features,
+                                          uint64_t address,
+                                          uint32_t byte_length,
+                                          uint32_t pattern);
+
+// Emits three DWORDs sampling the raw global clock into a private, 32-byte-
+// aligned target. Sampling joins earlier commands; a subsequent NOP completes
+// this posted write before a transfer reads the sample.
+uint32_t* iree_hal_amd_gpu_sdma_emit_timestamp(
+    uint32_t* words, amdf_queue_format_features_t features, uint64_t address);
 
 #ifdef __cplusplus
 }  // extern "C"

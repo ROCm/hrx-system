@@ -10,6 +10,7 @@
 #include "iree/hal/driver/amd/gpu/completion.h"
 #include "iree/hal/driver/amd/gpu/publication.h"
 #include "iree/hal/driver/amd/gpu/queue/publisher.h"
+#include "iree/hal/driver/amd/gpu/queue/sdma/commands.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,7 +35,6 @@ amdf_queue_publication_modes_t iree_hal_amd_gpu_sdma_queue_publication_modes(
 // through retirement. This bound applies to native publication storage, not a
 // public transfer or recording: larger executions retain their unpublished
 // suffix and submit bounded spans as capacity returns.
-#define IREE_HAL_AMD_GPU_SDMA_MAX_COMMAND_WORDS 224u
 typedef struct iree_hal_amd_gpu_sdma_submission_t {
   // Intrusive publication ownership, reusable only after completion.
   iree_hal_amd_gpu_publication_entry_t entry;

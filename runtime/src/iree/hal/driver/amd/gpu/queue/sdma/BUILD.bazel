@@ -14,6 +14,92 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "barrier",
+    srcs = ["barrier.c"],
+    hdrs = ["barrier.h"],
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "program",
+    srcs = ["program.c"],
+    hdrs = ["program.h"],
+    deps = [
+        ":commands",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:fixup",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "barrier_test",
+    srcs = ["barrier_test.cc"],
+    deps = [
+        ":barrier",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "recording",
+    srcs = ["recording.c"],
+    hdrs = ["recording.h"],
+    deps = [
+        ":barrier",
+        ":commands",
+        ":program",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:fixup",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:recording",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "command_buffer",
+    srcs = ["command_buffer.c"],
+    hdrs = ["command_buffer.h"],
+    deps = [
+        ":barrier",
+        ":commands",
+        ":program",
+        ":recording",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:inputs",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:recording",
+        "//runtime/src/iree/hal/utils:resource_set",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "command_buffer_test",
+    srcs = ["command_buffer_test.cc"],
+    deps = [
+        ":barrier",
+        ":command_buffer",
+        ":commands",
+        ":program",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "commands",
     srcs = ["commands.c"],
     hdrs = ["commands.h"],
