@@ -117,47 +117,61 @@ iree_status_t loom_pipeline_schedule_build(
       for (loom_op_t* operation = block->first_op; operation;
            operation = operation->next_op) {
         loom_pipeline_schedule_step_t step = {.operation = operation};
-        if (loom_pipeline_compose_isa(operation)) {
-          step.kind = LOOM_PIPELINE_SCHEDULE_STEP_COMPOSITION;
-        } else if (loom_pipeline_serial_isa(operation)) {
-          loom_pipeline_schedule_pending_t* nested = NULL;
-          IREE_RETURN_IF_ERROR(
-              iree_arena_allocate(arena, sizeof(*nested), (void**)&nested));
-          *nested = (loom_pipeline_schedule_pending_t){
-              .schedule = {.declaration = operation},
-          };
-          last->next = nested;
-          last = nested;
-          step.kind = LOOM_PIPELINE_SCHEDULE_STEP_SERIAL;
-          step.nested = &nested->schedule;
-        } else if (operation->region_count) {
-          return loom_pipeline_schedule_reject(
-              operation, IREE_SV("resident schedule control lowered to CFG"),
-              diagnostic_emitter);
-        } else if (loom_pipeline_memory_isa(operation)) {
-          step.kind = LOOM_PIPELINE_SCHEDULE_STEP_MEMORY;
-        } else if (loom_buffer_alloca_isa(operation)) {
-          step.kind = LOOM_PIPELINE_SCHEDULE_STEP_ALLOCATION;
-        } else if (loom_channel_bind_isa(operation)) {
-          step.kind = LOOM_PIPELINE_SCHEDULE_STEP_CHANNEL;
-        } else if (loom_pipeline_yield_isa(operation)) {
-          step.kind = LOOM_PIPELINE_SCHEDULE_STEP_YIELD;
-        } else if (operation->successor_count != 0 &&
-                   iree_any_bit_set(operation->traits, LOOM_TRAIT_TERMINATOR)) {
-          step.kind = LOOM_PIPELINE_SCHEDULE_STEP_BRANCH;
-        } else {
-          const loom_trait_flags_t traits =
-              loom_op_effective_traits(module, operation);
-          if (!iree_any_bit_set(traits, LOOM_TRAIT_PURE) ||
-              loom_traits_may_read(traits) || loom_traits_may_write(traits) ||
-              iree_any_bit_set(traits, LOOM_TRAIT_OBSERVABLE_EFFECT |
-                                           LOOM_TRAIT_CONVERGENT)) {
-            return loom_pipeline_schedule_reject(
-                operation,
-                IREE_SV("an execution placement for construction effects"),
-                diagnostic_emitter);
+        switch (operation->kind) {
+          case LOOM_OP_PIPELINE_COMPOSE:
+            step.kind = LOOM_PIPELINE_SCHEDULE_STEP_COMPOSITION;
+            break;
+          case LOOM_OP_PIPELINE_SERIAL: {
+            loom_pipeline_schedule_pending_t* nested = NULL;
+            IREE_RETURN_IF_ERROR(
+                iree_arena_allocate(arena, sizeof(*nested), (void**)&nested));
+            *nested = (loom_pipeline_schedule_pending_t){
+                .schedule = {.declaration = operation},
+            };
+            last->next = nested;
+            last = nested;
+            step.kind = LOOM_PIPELINE_SCHEDULE_STEP_SERIAL;
+            step.nested = &nested->schedule;
+            break;
           }
-          step.kind = LOOM_PIPELINE_SCHEDULE_STEP_DATAFLOW;
+          case LOOM_OP_PIPELINE_MEMORY:
+            step.kind = LOOM_PIPELINE_SCHEDULE_STEP_MEMORY;
+            break;
+          case LOOM_OP_BUFFER_ALLOCA:
+            step.kind = LOOM_PIPELINE_SCHEDULE_STEP_ALLOCATION;
+            break;
+          case LOOM_OP_CHANNEL_BIND:
+            step.kind = LOOM_PIPELINE_SCHEDULE_STEP_CHANNEL;
+            break;
+          case LOOM_OP_PIPELINE_YIELD:
+            step.kind = LOOM_PIPELINE_SCHEDULE_STEP_YIELD;
+            break;
+          default: {
+            if (operation->region_count) {
+              return loom_pipeline_schedule_reject(
+                  operation,
+                  IREE_SV("resident schedule control lowered to CFG"),
+                  diagnostic_emitter);
+            }
+            if (operation->successor_count != 0 &&
+                iree_any_bit_set(operation->traits, LOOM_TRAIT_TERMINATOR)) {
+              step.kind = LOOM_PIPELINE_SCHEDULE_STEP_BRANCH;
+              break;
+            }
+            const loom_trait_flags_t traits =
+                loom_op_effective_traits(module, operation);
+            if (!iree_any_bit_set(traits, LOOM_TRAIT_PURE) ||
+                loom_traits_may_read(traits) || loom_traits_may_write(traits) ||
+                iree_any_bit_set(traits, LOOM_TRAIT_OBSERVABLE_EFFECT |
+                                             LOOM_TRAIT_CONVERGENT)) {
+              return loom_pipeline_schedule_reject(
+                  operation,
+                  IREE_SV("an execution placement for construction effects"),
+                  diagnostic_emitter);
+            }
+            step.kind = LOOM_PIPELINE_SCHEDULE_STEP_DATAFLOW;
+            break;
+          }
         }
         steps[step_index++] = step;
       }
