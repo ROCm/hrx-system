@@ -1,0 +1,335 @@
+// RUN: pass canonicalize,cse,dce
+// HIP launch dimensions and local arithmetic supply unroll and pipeline
+// values to the row-reduction helper without changing row/column addressing.
+#include <hip/hip_runtime.h>
+__device__ __forceinline__ int sum(const int* input, unsigned row,
+                                   unsigned columns, unsigned factor,
+                                   unsigned depth) {
+  int total = 0;
+  [[loom::unroll(factor), loom::pipeline(depth), loom::schedule("linear")]]
+  for (unsigned column = 0; column < columns; ++column) {
+    total += input[row * columns + column];
+  }
+  return total;
+}
+
+#define SCHEDULED_SUM(unroll, pipeline_depth)                               \
+  __global__                                                                \
+      [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]    \
+      void scheduled_sum_unroll_##unroll##_depth_##pipeline_depth(          \
+          const int* input, int* output, unsigned rows, unsigned columns) { \
+    unsigned row = threadIdx.x;                                             \
+    if (row < rows) {                                                       \
+      unsigned factor = unroll + 1u;                                        \
+      --factor;                                                             \
+      unsigned depth = blockDim.x / 64u * pipeline_depth;                   \
+      output[row] = sum(input, row, columns, factor, depth);                \
+    }                                                                       \
+  }
+
+SCHEDULED_SUM(1, 1)
+#undef SCHEDULED_SUM
+// ----
+func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: offset, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
+  %total$7 = scalar.constant 0 : i32
+  %67 = index.constant 0 : offset
+  %10 = index.cast %columns : i32 to offset
+  %11 = index.constant 1 : offset
+  %12 = scalar.extui %depth : i32 to i64
+  %13 = index.cast %12 : i64 to index
+  %14 = scalar.extui %factor : i32 to i64
+  %15 = index.cast %14 : i64 to index
+  %total$18 = scf.for %column = [%67 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
+    %19 = index.cast %column : offset to i32
+    %20 = scalar.muli %row, %columns : i32
+    %21 = scalar.addi %20, %19 : i32
+    %22 = scalar.extui %21 : i32 to i64
+    %68 = scalar.constant 2 : i64
+    %69 = scalar.shli %22, %68 : i64
+    %25 = index.cast %input_byte_offset : offset to i64
+    %26 = scalar.addi %25, %69 : i64
+    %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
+    %28 = index.cast %27 : i64 to offset
+    %29 = buffer.view %input[%28] : buffer -> view<1xi32>
+    %30 = view.load %29[0] : view<1xi32> -> i32
+    %total$31 = scalar.addi %total$17, %30 : i32
+    scf.yield %total$31 : i32
+  }
+  func.return %total$18 : i32
+}
+
+kernel.def @scheduled_sum_unroll_1_depth_1() {
+  %36 = index.constant 1 : index
+  %39 = index.constant 64 : index
+  kernel.launch.config workgroups(%36, %36, %36) workgroup_size(%39, %36, %36) : index
+} launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32) {
+  %input_byte_offset = index.constant 0 : offset
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %row = index.cast %workitem_id_x : index to i32
+  %46 = scalar.cmpi ult, %row, %rows : i32
+  scf.if %46 {
+    %factor = scalar.constant 1 : i32
+    %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %factor) : (buffer, offset, i32, i32, i32, i32) -> (i32)
+    %75 = scalar.constant 2 : i32
+    %76 = scalar.shli %row, %75 : i32
+    %77 = scalar.extui %76 : i32 to i64
+    %64 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
+    %65 = index.cast %64 : i64 to offset
+    %66 = buffer.view %output[%65] : buffer -> view<1xi32>
+    view.store %58, %66[0] : i32, view<1xi32>
+  }
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// HIP launch dimensions and local arithmetic supply unroll and pipeline
+// values to the row-reduction helper without changing row/column addressing.
+#include <hip/hip_runtime.h>
+__device__ __forceinline__ int sum(const int* input, unsigned row,
+                                   unsigned columns, unsigned factor,
+                                   unsigned depth) {
+  int total = 0;
+  [[loom::unroll(factor), loom::pipeline(depth), loom::schedule("linear")]]
+  for (unsigned column = 0; column < columns; ++column) {
+    total += input[row * columns + column];
+  }
+  return total;
+}
+
+#define SCHEDULED_SUM(unroll, pipeline_depth)                               \
+  __global__                                                                \
+      [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]    \
+      void scheduled_sum_unroll_##unroll##_depth_##pipeline_depth(          \
+          const int* input, int* output, unsigned rows, unsigned columns) { \
+    unsigned row = threadIdx.x;                                             \
+    if (row < rows) {                                                       \
+      unsigned factor = unroll + 1u;                                        \
+      --factor;                                                             \
+      unsigned depth = blockDim.x / 64u * pipeline_depth;                   \
+      output[row] = sum(input, row, columns, factor, depth);                \
+    }                                                                       \
+  }
+
+SCHEDULED_SUM(1, 2)
+#undef SCHEDULED_SUM
+// ----
+func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: offset, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
+  %total$7 = scalar.constant 0 : i32
+  %67 = index.constant 0 : offset
+  %10 = index.cast %columns : i32 to offset
+  %11 = index.constant 1 : offset
+  %12 = scalar.extui %depth : i32 to i64
+  %13 = index.cast %12 : i64 to index
+  %14 = scalar.extui %factor : i32 to i64
+  %15 = index.cast %14 : i64 to index
+  %total$18 = scf.for %column = [%67 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
+    %19 = index.cast %column : offset to i32
+    %20 = scalar.muli %row, %columns : i32
+    %21 = scalar.addi %20, %19 : i32
+    %22 = scalar.extui %21 : i32 to i64
+    %68 = scalar.constant 2 : i64
+    %69 = scalar.shli %22, %68 : i64
+    %25 = index.cast %input_byte_offset : offset to i64
+    %26 = scalar.addi %25, %69 : i64
+    %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
+    %28 = index.cast %27 : i64 to offset
+    %29 = buffer.view %input[%28] : buffer -> view<1xi32>
+    %30 = view.load %29[0] : view<1xi32> -> i32
+    %total$31 = scalar.addi %total$17, %30 : i32
+    scf.yield %total$31 : i32
+  }
+  func.return %total$18 : i32
+}
+
+kernel.def @scheduled_sum_unroll_1_depth_2() {
+  %36 = index.constant 1 : index
+  %39 = index.constant 64 : index
+  kernel.launch.config workgroups(%36, %36, %36) workgroup_size(%39, %36, %36) : index
+} launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32) {
+  %input_byte_offset = index.constant 0 : offset
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %row = index.cast %workitem_id_x : index to i32
+  %46 = scalar.cmpi ult, %row, %rows : i32
+  scf.if %46 {
+    %factor = scalar.constant 1 : i32
+    %depth = scalar.constant 2 : i32
+    %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, offset, i32, i32, i32, i32) -> (i32)
+    %76 = scalar.shli %row, %depth : i32
+    %77 = scalar.extui %76 : i32 to i64
+    %64 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
+    %65 = index.cast %64 : i64 to offset
+    %66 = buffer.view %output[%65] : buffer -> view<1xi32>
+    view.store %58, %66[0] : i32, view<1xi32>
+  }
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// HIP launch dimensions and local arithmetic supply unroll and pipeline
+// values to the row-reduction helper without changing row/column addressing.
+#include <hip/hip_runtime.h>
+__device__ __forceinline__ int sum(const int* input, unsigned row,
+                                   unsigned columns, unsigned factor,
+                                   unsigned depth) {
+  int total = 0;
+  [[loom::unroll(factor), loom::pipeline(depth), loom::schedule("linear")]]
+  for (unsigned column = 0; column < columns; ++column) {
+    total += input[row * columns + column];
+  }
+  return total;
+}
+
+#define SCHEDULED_SUM(unroll, pipeline_depth)                               \
+  __global__                                                                \
+      [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]    \
+      void scheduled_sum_unroll_##unroll##_depth_##pipeline_depth(          \
+          const int* input, int* output, unsigned rows, unsigned columns) { \
+    unsigned row = threadIdx.x;                                             \
+    if (row < rows) {                                                       \
+      unsigned factor = unroll + 1u;                                        \
+      --factor;                                                             \
+      unsigned depth = blockDim.x / 64u * pipeline_depth;                   \
+      output[row] = sum(input, row, columns, factor, depth);                \
+    }                                                                       \
+  }
+
+SCHEDULED_SUM(3, 1)
+#undef SCHEDULED_SUM
+// ----
+func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: offset, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
+  %total$7 = scalar.constant 0 : i32
+  %67 = index.constant 0 : offset
+  %10 = index.cast %columns : i32 to offset
+  %11 = index.constant 1 : offset
+  %12 = scalar.extui %depth : i32 to i64
+  %13 = index.cast %12 : i64 to index
+  %14 = scalar.extui %factor : i32 to i64
+  %15 = index.cast %14 : i64 to index
+  %total$18 = scf.for %column = [%67 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
+    %19 = index.cast %column : offset to i32
+    %20 = scalar.muli %row, %columns : i32
+    %21 = scalar.addi %20, %19 : i32
+    %22 = scalar.extui %21 : i32 to i64
+    %68 = scalar.constant 2 : i64
+    %69 = scalar.shli %22, %68 : i64
+    %25 = index.cast %input_byte_offset : offset to i64
+    %26 = scalar.addi %25, %69 : i64
+    %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
+    %28 = index.cast %27 : i64 to offset
+    %29 = buffer.view %input[%28] : buffer -> view<1xi32>
+    %30 = view.load %29[0] : view<1xi32> -> i32
+    %total$31 = scalar.addi %total$17, %30 : i32
+    scf.yield %total$31 : i32
+  }
+  func.return %total$18 : i32
+}
+
+kernel.def @scheduled_sum_unroll_3_depth_1() {
+  %36 = index.constant 1 : index
+  %39 = index.constant 64 : index
+  kernel.launch.config workgroups(%36, %36, %36) workgroup_size(%39, %36, %36) : index
+} launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32) {
+  %input_byte_offset = index.constant 0 : offset
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %row = index.cast %workitem_id_x : index to i32
+  %46 = scalar.cmpi ult, %row, %rows : i32
+  scf.if %46 {
+    %factor = scalar.constant 3 : i32
+    %depth = scalar.constant 1 : i32
+    %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, offset, i32, i32, i32, i32) -> (i32)
+    %75 = scalar.constant 2 : i32
+    %76 = scalar.shli %row, %75 : i32
+    %77 = scalar.extui %76 : i32 to i64
+    %64 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
+    %65 = index.cast %64 : i64 to offset
+    %66 = buffer.view %output[%65] : buffer -> view<1xi32>
+    view.store %58, %66[0] : i32, view<1xi32>
+  }
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// HIP launch dimensions and local arithmetic supply unroll and pipeline
+// values to the row-reduction helper without changing row/column addressing.
+#include <hip/hip_runtime.h>
+__device__ __forceinline__ int sum(const int* input, unsigned row,
+                                   unsigned columns, unsigned factor,
+                                   unsigned depth) {
+  int total = 0;
+  [[loom::unroll(factor), loom::pipeline(depth), loom::schedule("linear")]]
+  for (unsigned column = 0; column < columns; ++column) {
+    total += input[row * columns + column];
+  }
+  return total;
+}
+
+#define SCHEDULED_SUM(unroll, pipeline_depth)                               \
+  __global__                                                                \
+      [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]    \
+      void scheduled_sum_unroll_##unroll##_depth_##pipeline_depth(          \
+          const int* input, int* output, unsigned rows, unsigned columns) { \
+    unsigned row = threadIdx.x;                                             \
+    if (row < rows) {                                                       \
+      unsigned factor = unroll + 1u;                                        \
+      --factor;                                                             \
+      unsigned depth = blockDim.x / 64u * pipeline_depth;                   \
+      output[row] = sum(input, row, columns, factor, depth);                \
+    }                                                                       \
+  }
+
+SCHEDULED_SUM(3, 2)
+#undef SCHEDULED_SUM
+// ----
+func.def public linkonce device inline @sum(%input: buffer, %input_byte_offset: offset, %row: i32, %columns: i32, %factor: i32, %depth: i32) -> (i32) {
+  %total$7 = scalar.constant 0 : i32
+  %67 = index.constant 0 : offset
+  %10 = index.cast %columns : i32 to offset
+  %11 = index.constant 1 : offset
+  %12 = scalar.extui %depth : i32 to i64
+  %13 = index.cast %12 : i64 to index
+  %14 = scalar.extui %factor : i32 to i64
+  %15 = index.cast %14 : i64 to index
+  %total$18 = scf.for %column = [%67 to %10 step %11](%total$17 = %total$7 : i32) -> (i32) pipeline(%13) unroll(%15) schedule(linear) {
+    %19 = index.cast %column : offset to i32
+    %20 = scalar.muli %row, %columns : i32
+    %21 = scalar.addi %20, %19 : i32
+    %22 = scalar.extui %21 : i32 to i64
+    %68 = scalar.constant 2 : i64
+    %69 = scalar.shli %22, %68 : i64
+    %25 = index.cast %input_byte_offset : offset to i64
+    %26 = scalar.addi %25, %69 : i64
+    %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
+    %28 = index.cast %27 : i64 to offset
+    %29 = buffer.view %input[%28] : buffer -> view<1xi32>
+    %30 = view.load %29[0] : view<1xi32> -> i32
+    %total$31 = scalar.addi %total$17, %30 : i32
+    scf.yield %total$31 : i32
+  }
+  func.return %total$18 : i32
+}
+
+kernel.def @scheduled_sum_unroll_3_depth_2() {
+  %36 = index.constant 1 : index
+  %39 = index.constant 64 : index
+  kernel.launch.config workgroups(%36, %36, %36) workgroup_size(%39, %36, %36) : index
+} launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32) {
+  %input_byte_offset = index.constant 0 : offset
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %row = index.cast %workitem_id_x : index to i32
+  %46 = scalar.cmpi ult, %row, %rows : i32
+  scf.if %46 {
+    %factor = scalar.constant 3 : i32
+    %depth = scalar.constant 2 : i32
+    %58 = func.call readonly @sum(%input, %input_byte_offset, %row, %columns, %factor, %depth) : (buffer, offset, i32, i32, i32, i32) -> (i32)
+    %76 = scalar.shli %row, %depth : i32
+    %77 = scalar.extui %76 : i32 to i64
+    %64 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
+    %65 = index.cast %64 : i64 to offset
+    %66 = buffer.view %output[%65] : buffer -> view<1xi32>
+    view.store %58, %66[0] : i32, view<1xi32>
+  }
+  kernel.return
+}

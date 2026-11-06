@@ -9,7 +9,11 @@ execution target. Related cases use `// ====` separators and exact output.
 | Contract | Fixtures |
 | --- | --- |
 | Named configuration, aliases, definitions, and typed reads | `config*` |
+| Required specialization of scalar and index bindings | `constexpr_contract*` |
+| Callable predicates and registered target definitions | `predicate_contracts*`, `targets*` |
 | Predicate identity, source arithmetic, scope, and bounded indexing | `assumption*` |
+| Loop scheduling values, source sequencing, and policy validation | `schedule*` |
+| Workload-derived launch geometry and helper composition | `workload_config*` |
 | Entry alignment, redeclarations, and pointer replacement | `parameter_alignment*` |
 | Independent roots, scoped promises, and possible aliases | `parameter_noalias*` |
 

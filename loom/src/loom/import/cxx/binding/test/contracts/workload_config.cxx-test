@@ -624,3 +624,98 @@ kernel.def @helper_composed(%use_left: i1, %left: buffer, %left_byte_offset: off
 } launch() {
   kernel.return
 }
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Target queries and arithmetic helpers compose the workload configuration;
+// launch arguments remain separate from the workload that determines geometry.
+#include <loomcxx/check.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/target.h>
+
+LOOM_INLINE unsigned launch_width() { return loom::target::subgroup::size(); }
+
+LOOM_INLINE unsigned divide_up(unsigned value, unsigned divisor) {
+  return (value + divisor - 1) / divisor;
+}
+
+static loom::kernel::configuration configure_copy(unsigned item_count) {
+  unsigned width = launch_width();
+  return {{divide_up(item_count, width), 1, 1}, {width, 1, 1}};
+}
+
+[[loom::kernel(configure_copy)]] void configured_copy(unsigned item_count,
+                                                      const float* input,
+                                                      float* output) {
+  unsigned item =
+      loom::kernel::workgroup::id.x * loom::kernel::workgroup::size.x +
+      loom::kernel::workitem::id.x;
+  if (item < item_count) {
+    output[item] = input[item];
+  }
+}
+
+LOOM_CHECK_CASE(configured_copy_case) {
+  const auto input = loom::check::iota<67, float>(-1.0f, 0.25f, 8);
+  const auto output = loom::check::fill<67, float>(0.0f);
+  loom::check::launch<configured_copy>(loom::kernel::workload(67u), 67u, input,
+                                       output);
+  loom::check::expect_bitwise(output, input);
+}
+// ----
+func.def public linkonce inline @launch_width() -> (i32) {
+  %1 = target.subgroup.size : index
+  %2 = index.cast %1 : index to i32
+  func.return %2 : i32
+}
+
+func.def public linkonce inline @divide_up(%value: i32, %divisor: i32) -> (i32) {
+  %6 = scalar.addi %value, %divisor : i32
+  %64 = scalar.constant -1 : i32
+  %65 = scalar.addi %6, %64 : i32
+  %9 = scalar.divui %65, %divisor : i32
+  func.return %9 : i32
+}
+
+kernel.def @configured_copy(%item_count: i32) {
+  %width = func.call pure @launch_width() : () -> (i32)
+  %15 = func.call pure @divide_up(%item_count, %width) : (i32, i32) -> (i32)
+  %20 = scalar.extui %15 : i32 to i64
+  %21 = index.cast %20 : i64 to index
+  %69 = index.constant 1 : index
+  %26 = scalar.extui %width : i32 to i64
+  %27 = index.cast %26 : i64 to index
+  kernel.launch.config workgroups(%21, %69, %69) workgroup_size(%27, %69, %69) : index
+} launch(%item_count: i32, %input: buffer, %output: buffer) {
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %35 = index.cast %workgroup_id_x : index to i32
+  %workgroup_size_x = kernel.workgroup.size<x> : index
+  %37 = index.cast %workgroup_size_x : index to i32
+  %38 = scalar.muli %35, %37 : i32
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %40 = index.cast %workitem_id_x : index to i32
+  %item = scalar.addi %38, %40 : i32
+  %42 = scalar.cmpi ult, %item, %item_count : i32
+  scf.if %42 {
+    %43 = scalar.extui %item : i32 to i64
+    %74 = scalar.constant 2 : i64
+    %75 = scalar.shli %43, %74 : i64
+    %48 = scalar.assume %75 [range(%75, 0, 9223372036854775807)] : i64
+    %49 = index.cast %48 : i64 to offset
+    %50 = buffer.view %input[%49] : buffer -> view<1xf32>
+    %51 = view.load %50[0] : view<1xf32> -> f32
+    %59 = buffer.view %output[%49] : buffer -> view<1xf32>
+    view.store %51, %59[0] : f32, view<1xf32>
+  }
+  kernel.return
+}
+
+check.case public @configured_copy_case {
+  %input = check.generate.iota offset(-1.0) step(0.25) period(8) : tensor<67xf32>
+  %output = check.generate.fill value(0.0) : tensor<67xf32>
+  %62 = check.literal value(67) : i32
+  %63 = check.literal value(67) : i32
+  kernel.launch @configured_copy[%62](%63, %input, %output) : [i32](i32, tensor<67xf32>, tensor<67xf32>)
+  check.expect.bitwise actual(%output) expected(%input) : tensor<67xf32>
+  check.return
+}
