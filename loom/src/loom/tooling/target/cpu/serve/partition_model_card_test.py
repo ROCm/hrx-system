@@ -18,7 +18,7 @@ import threading
 from pathlib import Path
 
 from loom.model import ModelCard
-from model_card_test import check_model
+from model_card_test import check_models
 
 
 def main(fetch, serve, fixture, *built):
@@ -92,7 +92,7 @@ def main(fetch, serve, fixture, *built):
                     deployment.write_text(
                         json.dumps(
                             {
-                                "name": "fixture-text",
+                                "name": f"fixture-text-fetched-{index}",
                                 "model": {
                                     "path": "model.json",
                                     "preset": "check",
@@ -112,10 +112,18 @@ def main(fetch, serve, fixture, *built):
         assert not os.path.samefile(
             outputs[0][0] / "bias.data", outputs[1][0] / "bias.data"
         )
-        for _, deployment, expected in outputs:
-            check_model(serve, deployment, expected)
-        for deployment in built:
-            check_model(serve, Path(deployment).absolute(), "xbbx")
+        checks = [(deployment, expected) for _, deployment, expected in outputs]
+        for index, deployment in enumerate(built):
+            source = Path(deployment).absolute()
+            document = json.loads(source.read_text())
+            document["name"] = f"fixture-text-built-{index}"
+            model_path = Path(document["model"]["path"])
+            if not model_path.is_absolute():
+                document["model"]["path"] = str(source.parent / model_path)
+            renamed = root / f"built-{index}.json"
+            renamed.write_text(json.dumps(document))
+            checks.append((renamed, "xbbx"))
+        check_models(serve, checks)
 
 
 if __name__ == "__main__":

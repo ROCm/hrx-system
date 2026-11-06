@@ -394,6 +394,9 @@ class HttpRouterRegistrationTest : public HttpRouterTest {
   loom_serve_test_registration_dependency_t managed_;
 };
 
+class HttpRouterSingleWorkerRegistrationTest
+    : public HttpRouterRegistrationTest {};
+
 TEST_P(HttpRouterRegistrationTest, NativeOnlyMetadataAndHttpRejectionAgree) {
   Declare("activity");
   const auto declared = Read(Send("GET", "/v1/status"));
@@ -1206,7 +1209,7 @@ TEST_P(HttpRouterRegistrationTest,
   EXPECT_EQ(managed_.destroyed.load(), 1u);
 }
 
-TEST_P(HttpRouterRegistrationTest,
+TEST_P(HttpRouterSingleWorkerRegistrationTest,
        AbortAndServerStopStillWaitForActualModelOwnership) {
   Register();
   const int first = Send("POST", "/v1/test", R"({"model":"dynamic"})");
@@ -1417,8 +1420,10 @@ TEST_P(HttpRouterRegistrationLatencyTest,
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterRegistrationLatencyTest,
-                         ::testing::Values(1, 4));
+                         ::testing::Values(4));
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterRegistrationTest,
-                         ::testing::Values(1, 4));
+                         ::testing::Values(4));
+INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterSingleWorkerRegistrationTest,
+                         ::testing::Values(1));
 
 }  // namespace

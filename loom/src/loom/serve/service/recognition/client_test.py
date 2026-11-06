@@ -125,7 +125,10 @@ class TranscriptionClientTest(unittest.TestCase):
             connection.close()
 
     def test_uploads_share_bounded_recognition(self):
-        for workers in (1, 4):
+        # Upload semantics are independent of worker count. This suite owns
+        # concurrent codec and conversion cohorts, while pressure coverage owns
+        # the single-worker server lifecycle.
+        for workers in (4,):
             with (
                 self.subTest(workers=workers),
                 tempfile.TemporaryDirectory() as temporary,

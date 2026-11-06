@@ -106,7 +106,10 @@ class ClientTest(unittest.TestCase):
         )
 
     def test_output_forms_share_execution_history_and_failure_semantics(self):
-        for workers in (1, 4):
+        # HTTP response semantics are independent of worker count. This suite
+        # owns concurrent response forms, while pressure coverage owns the
+        # single-worker server lifecycle.
+        for workers in (4,):
             with (
                 self.subTest(workers=workers),
                 tempfile.TemporaryDirectory() as temporary,

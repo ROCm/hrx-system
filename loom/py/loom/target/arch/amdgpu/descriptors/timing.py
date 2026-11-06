@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from functools import cache
 
 from loom.target.low_descriptors import (
     Descriptor,
@@ -110,64 +111,91 @@ def _with_valu_sgpr_timing(
     # Model their availability at operand endpoints so independent instructions
     # can fill the dependency gap. Class latency also controls completion and
     # critical-path priority, which have different scheduling consequences.
-    read_event = "amdgpu.sgpr.read"
-    write_event = "amdgpu.valu.sgpr.write"
-    descriptors: list[Descriptor] = []
-    for descriptor in descriptor_set.descriptors:
-        operands: list[Operand] = []
-        for operand in descriptor.operands:
-            has_sgpr = any(
-                alternative.reg_class == _REG_SGPR for alternative in operand.reg_alts
-            )
-            reads_sgpr = has_sgpr and (
-                operand.role
-                in (
-                    OperandRole.OPERAND,
-                    OperandRole.OPERAND_RESULT,
-                    OperandRole.PREDICATE,
-                    OperandRole.RESOURCE,
-                )
-                or OperandFlag.STATE_READ in operand.flags
-            )
-            writes_sgpr = (
-                has_sgpr
-                and descriptor.schedule_class == _SCHEDULE_VALU
-                and (
-                    operand.role in (OperandRole.RESULT, OperandRole.OPERAND_RESULT)
-                    or OperandFlag.STATE_WRITE in operand.flags
-                )
-            )
-            if writes_sgpr and any(
-                alternative.reg_class != _REG_SGPR for alternative in operand.reg_alts
-            ):
-                raise ValueError(
-                    f"AMDGPU descriptor '{descriptor.key}' result "
-                    f"'{operand.field_name}' requires distinct SGPR and VGPR forms "
-                    "to model VALU write timing"
-                )
-            operands.append(
-                replace(
-                    operand,
-                    read_event=read_event if reads_sgpr else operand.read_event,
-                    write_event=write_event if writes_sgpr else operand.write_event,
-                )
-            )
-        descriptors.append(replace(descriptor, operands=tuple(operands)))
+    descriptors = tuple(
+        _with_valu_sgpr_timing_descriptor(descriptor)
+        for descriptor in descriptor_set.descriptors
+    )
     return replace(
         descriptor_set,
-        descriptors=tuple(descriptors),
+        descriptors=descriptors,
         timing_events=(
             *descriptor_set.timing_events,
-            TimingEvent(read_event),
-            TimingEvent(write_event),
+            TimingEvent(_SGPR_READ_EVENT),
+            TimingEvent(_VALU_SGPR_WRITE_EVENT),
         ),
         event_separations=(
             *descriptor_set.event_separations,
             EventSeparation(
-                write_event, read_event, separation_cycles, ModelQuality.ESTIMATED
+                _VALU_SGPR_WRITE_EVENT,
+                _SGPR_READ_EVENT,
+                separation_cycles,
+                ModelQuality.ESTIMATED,
             ),
         ),
     )
+
+
+_SGPR_READ_EVENT = "amdgpu.sgpr.read"
+_VALU_SGPR_WRITE_EVENT = "amdgpu.valu.sgpr.write"
+
+
+@cache
+def _with_valu_sgpr_timing_operand(
+    descriptor_key: str,
+    schedule_class: str,
+    operand: Operand,
+) -> Operand:
+    has_sgpr = any(
+        alternative.reg_class == _REG_SGPR for alternative in operand.reg_alts
+    )
+    reads_sgpr = has_sgpr and (
+        operand.role
+        in (
+            OperandRole.OPERAND,
+            OperandRole.OPERAND_RESULT,
+            OperandRole.PREDICATE,
+            OperandRole.RESOURCE,
+        )
+        or OperandFlag.STATE_READ in operand.flags
+    )
+    writes_sgpr = (
+        has_sgpr
+        and schedule_class == _SCHEDULE_VALU
+        and (
+            operand.role in (OperandRole.RESULT, OperandRole.OPERAND_RESULT)
+            or OperandFlag.STATE_WRITE in operand.flags
+        )
+    )
+    if writes_sgpr and any(
+        alternative.reg_class != _REG_SGPR for alternative in operand.reg_alts
+    ):
+        raise ValueError(
+            f"AMDGPU descriptor '{descriptor_key}' result "
+            f"'{operand.field_name}' requires distinct SGPR and VGPR forms "
+            "to model VALU write timing"
+        )
+    read_event = _SGPR_READ_EVENT if reads_sgpr else operand.read_event
+    write_event = _VALU_SGPR_WRITE_EVENT if writes_sgpr else operand.write_event
+    if read_event == operand.read_event and write_event == operand.write_event:
+        return operand
+    return replace(operand, read_event=read_event, write_event=write_event)
+
+
+def _with_valu_sgpr_timing_descriptor(descriptor: Descriptor) -> Descriptor:
+    operands = tuple(
+        _with_valu_sgpr_timing_operand(
+            descriptor.key,
+            descriptor.schedule_class,
+            operand,
+        )
+        for operand in descriptor.operands
+    )
+    if all(
+        operand is existing
+        for operand, existing in zip(operands, descriptor.operands, strict=True)
+    ):
+        return descriptor
+    return replace(descriptor, operands=operands)
 
 
 def _with_state_read_before_clobber_timing(
@@ -179,39 +207,61 @@ def _with_state_read_before_clobber_timing(
     issue slots. A following packet may therefore overwrite architectural state
     without waiting for the reader's unrelated result latency.
     """
-    read_event = "amdgpu.state.read"
-    write_event = "amdgpu.state.write"
-    descriptors: list[Descriptor] = []
-    for descriptor in descriptor_set.descriptors:
-        operands = tuple(
-            replace(
-                operand,
-                read_event=(
-                    read_event
-                    if OperandFlag.STATE_READ in operand.flags
-                    and operand.read_event is None
-                    else operand.read_event
-                ),
-                write_event=(
-                    write_event
-                    if OperandFlag.STATE_WRITE in operand.flags
-                    and operand.write_event is None
-                    else operand.write_event
-                ),
-            )
-            for operand in descriptor.operands
-        )
-        descriptors.append(replace(descriptor, operands=operands))
+    descriptors = tuple(
+        _with_state_read_before_clobber_timing_descriptor(descriptor)
+        for descriptor in descriptor_set.descriptors
+    )
     return replace(
         descriptor_set,
-        descriptors=tuple(descriptors),
+        descriptors=descriptors,
         timing_events=(
             *descriptor_set.timing_events,
-            TimingEvent(read_event),
-            TimingEvent(write_event),
+            TimingEvent(_STATE_READ_EVENT),
+            TimingEvent(_STATE_WRITE_EVENT),
         ),
         event_separations=(
             *descriptor_set.event_separations,
-            EventSeparation(read_event, write_event, 0, ModelQuality.EXACT),
+            EventSeparation(
+                _STATE_READ_EVENT,
+                _STATE_WRITE_EVENT,
+                0,
+                ModelQuality.EXACT,
+            ),
         ),
     )
+
+
+_STATE_READ_EVENT = "amdgpu.state.read"
+_STATE_WRITE_EVENT = "amdgpu.state.write"
+
+
+@cache
+def _with_state_read_before_clobber_timing_operand(operand: Operand) -> Operand:
+    read_event = (
+        _STATE_READ_EVENT
+        if OperandFlag.STATE_READ in operand.flags and operand.read_event is None
+        else operand.read_event
+    )
+    write_event = (
+        _STATE_WRITE_EVENT
+        if OperandFlag.STATE_WRITE in operand.flags and operand.write_event is None
+        else operand.write_event
+    )
+    if read_event == operand.read_event and write_event == operand.write_event:
+        return operand
+    return replace(operand, read_event=read_event, write_event=write_event)
+
+
+def _with_state_read_before_clobber_timing_descriptor(
+    descriptor: Descriptor,
+) -> Descriptor:
+    operands = tuple(
+        _with_state_read_before_clobber_timing_operand(operand)
+        for operand in descriptor.operands
+    )
+    if all(
+        operand is existing
+        for operand, existing in zip(operands, descriptor.operands, strict=True)
+    ):
+        return descriptor
+    return replace(descriptor, operands=operands)

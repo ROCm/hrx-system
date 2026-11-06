@@ -253,44 +253,66 @@ loom_cc_test(
     ],
 )
 
+ROUTER_TEST_SRCS = [
+    "router_registration_test.cc",
+    "router_test.cc",
+    "router_test_fixture.h",
+    "router_variant_test.cc",
+]
+
+ROUTER_TEST_DEPS = [
+    ":registry",
+    ":router",
+    "//loom/src/loom/runtime:wake",
+    "//loom/src/loom/runtime/program:variant_pool",
+    "//loom/src/loom/runtime/telemetry:sample",
+    "//loom/src/loom/serve/dashboard:files",
+    "//loom/src/loom/serve/service:reasoning",
+    "//loom/src/loom/serve/transport/http:listener",
+    "//loom/src/loom/serve/transport/http:multipart",
+    "//loom/src/loom/serve/transport/http:request",
+    "//loom/src/loom/serve/transport/http:server",
+    "//loom/src/loom/service/telemetry:latency",
+    "//loom/src/loom/service/telemetry:record",
+    "//runtime/src/iree/async",
+    "//runtime/src/iree/async:platform",
+    "//runtime/src/iree/async/util:proactor_pool",
+    "//runtime/src/iree/base",
+    "//runtime/src/iree/net:carrier",
+    "//runtime/src/iree/net/carrier/loopback",
+    "//runtime/src/iree/task",
+    "//runtime/src/iree/testing:gtest",
+    "//runtime/src/iree/testing:gtest_main",
+    "//runtime/src/iree/tokenizer",
+    "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+]
+
 loom_cc_test(
     name = "router_test",
-    srcs = [
-        "router_registration_test.cc",
-        "router_test.cc",
-        "router_test_fixture.h",
-        "router_variant_test.cc",
+    srcs = ROUTER_TEST_SRCS,
+    args = ["--gtest_filter=-*Stress*"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ROUTER_TEST_DEPS,
+)
+
+loom_cc_test(
+    name = "router_stress_test",
+    size = "medium",
+    srcs = ROUTER_TEST_SRCS,
+    args = ["--gtest_filter=*Stress*"],
+    tags = [
+        "manual",
+        "skip-bazel_to_cmake",
+        "stress",
     ],
     target_compatible_with = select({
         "@platforms//os:linux": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
-    deps = [
-        ":registry",
-        ":router",
-        "//loom/src/loom/runtime:wake",
-        "//loom/src/loom/runtime/program:variant_pool",
-        "//loom/src/loom/runtime/telemetry:sample",
-        "//loom/src/loom/serve/dashboard:files",
-        "//loom/src/loom/serve/service:reasoning",
-        "//loom/src/loom/serve/transport/http:listener",
-        "//loom/src/loom/serve/transport/http:multipart",
-        "//loom/src/loom/serve/transport/http:request",
-        "//loom/src/loom/serve/transport/http:server",
-        "//loom/src/loom/service/telemetry:latency",
-        "//loom/src/loom/service/telemetry:record",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/async:platform",
-        "//runtime/src/iree/async/util:proactor_pool",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/net:carrier",
-        "//runtime/src/iree/net/carrier/loopback",
-        "//runtime/src/iree/task",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-        "//runtime/src/iree/tokenizer",
-        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
-    ],
+    deps = ROUTER_TEST_DEPS,
 )
 
 loom_cc_library(

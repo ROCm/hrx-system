@@ -317,6 +317,14 @@ class _LowerRuleSetCompiler:
         self._value_refs: list[LowerValueRef] = []
         self._source_nodes: list[LowerSourceNode] = []
         self._source_memories: list[LowerSourceMemory] = []
+        self._source_memory_ordinals: dict[
+            tuple[
+                SourceMemoryConstraint,
+                SourceMemoryByteOffsetMaterializer | None,
+                SourceMemoryAddressMaterializer | None,
+            ],
+            int,
+        ] = {}
         self._guards: list[LowerGuard] = []
         self._attr_copies: list[LowerAttrCopy] = []
         self._tied_results: list[LowerTiedResult] = []
@@ -2245,6 +2253,10 @@ class _LowerRuleSetCompiler:
         byte_offset_materializer: SourceMemoryByteOffsetMaterializer | None,
         address_materializer: SourceMemoryAddressMaterializer | None,
     ) -> int:
+        key = (constraint, byte_offset_materializer, address_materializer)
+        ordinal = self._source_memory_ordinals.get(key)
+        if ordinal is not None:
+            return ordinal
         row = LowerSourceMemory(
             constraint,
             rejection_diagnostic_indices=tuple(
@@ -2257,11 +2269,10 @@ class _LowerRuleSetCompiler:
             byte_offset_materializer=byte_offset_materializer,
             address_materializer=address_materializer,
         )
-        for index, existing in enumerate(self._source_memories):
-            if existing == row:
-                return index + 1
         self._source_memories.append(row)
-        return len(self._source_memories)
+        ordinal = len(self._source_memories)
+        self._source_memory_ordinals[key] = ordinal
+        return ordinal
 
     def _append_type_pattern(self, type_pattern: TypePattern) -> int:
         ordinal = self._type_pattern_ordinals.get(type_pattern)

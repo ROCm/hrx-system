@@ -9,10 +9,13 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from functools import cache
 from itertools import combinations, product
 from math import gcd
 from pathlib import Path
+from types import MappingProxyType
 
 from loom.target.arch.amd.xdna.aie.encoding import EncodingTable
 from loom.target.arch.amd.xdna.aie.machine import (
@@ -193,11 +196,12 @@ _IMMEDIATE_IDS = {
 }
 
 
+@cache
 def _operand_override_map(
     spec: descriptor_specs._DescriptorSpec,
     rows: tuple[tuple[str, str], ...],
     description: str,
-) -> dict[str, str]:
+) -> Mapping[str, str]:
     names = [name for name, _ in rows]
     if len(names) != len(set(names)):
         raise ValueError(f"{spec.form_name}: {description} names must be unique")
@@ -209,7 +213,7 @@ def _operand_override_map(
             f"{spec.form_name}: {description} name unknown operands "
             f"{sorted(unknown_names)}"
         )
-    return dict(rows)
+    return MappingProxyType(dict(rows))
 
 
 def _operand_machine_class(operand: MachineOperand) -> str:
@@ -220,6 +224,7 @@ def _operand_machine_class(operand: MachineOperand) -> str:
     raise ValueError(f"{operand.name}: immediate is not a register operand")
 
 
+@cache
 def _operand_encoding_machine_class(
     spec: descriptor_specs._DescriptorSpec, operand: MachineOperand
 ) -> str:
@@ -261,6 +266,7 @@ def _operand_encoding_machine_class(
     return adapter.register_class
 
 
+@cache
 def _storage_unit_count(source: str, target: str) -> int:
     source_bits = _MACHINE_CLASSES[source].layout.register_size_bits
     target_bits = _MACHINE_CLASSES[target].layout.register_size_bits
@@ -272,6 +278,7 @@ def _storage_unit_count(source: str, target: str) -> int:
     return source_bits // target_bits
 
 
+@cache
 def _is_ordered_candidate_subset(source: str, target: str) -> bool:
     source_candidates = _MACHINE_CLASSES[source].candidates
     target_candidates = _MACHINE_CLASSES[target].candidates
@@ -283,6 +290,7 @@ def _is_ordered_candidate_subset(source: str, target: str) -> bool:
     return selected_candidates == target_candidates
 
 
+@cache
 def _aggregate_register_units(
     source_class_name: str,
     target_class_name: str,
@@ -347,6 +355,7 @@ def _aggregate_register_units(
     return units
 
 
+@cache
 def _validate_aggregate_storage_domain(source: str, target: str) -> None:
     source_class = _MACHINE_CLASSES[source]
     target_class = _MACHINE_CLASSES[target]
@@ -363,6 +372,7 @@ def _validate_aggregate_storage_domain(source: str, target: str) -> None:
         )
 
 
+@cache
 def _operand_storage_machine_class(
     spec: descriptor_specs._DescriptorSpec,
     operand: MachineOperand,
@@ -480,6 +490,7 @@ def _operand_storage_machine_class(
     return low_class
 
 
+@cache
 def _operand_unit_count(
     spec: descriptor_specs._DescriptorSpec, operand: MachineOperand
 ) -> int:
@@ -504,6 +515,7 @@ def _low_register_class_name(machine_class: str) -> str:
     return f"aie2p.{machine_class.lower()}"
 
 
+@cache
 def _operand_register_class(
     spec: descriptor_specs._DescriptorSpec, operand: MachineOperand
 ) -> str:

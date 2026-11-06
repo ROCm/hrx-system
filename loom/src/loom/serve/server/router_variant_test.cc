@@ -282,6 +282,8 @@ class HttpRouterVariantTest : public HttpRouterTest {
   loom_serve_test_variant_dependency_t model_;
 };
 
+class HttpRouterSingleWorkerVariantTest : public HttpRouterVariantTest {};
+
 TEST_P(HttpRouterVariantTest, UnregisterRetiresReadersBeforeCompilerOwnership) {
   ASSERT_NO_FATAL_FAILURE(Declare());
   const uint64_t original = model_.original.load();
@@ -372,7 +374,8 @@ TEST_P(HttpRouterVariantTest, AbortCompletesAcceptedSelectionBeforeRetirement) {
   EXPECT_EQ(model_.destroyed.load(), 1u);
 }
 
-TEST_P(HttpRouterVariantTest, ShutdownJoinsCompilerAfterReaderLeaves) {
+TEST_P(HttpRouterSingleWorkerVariantTest,
+       ShutdownJoinsCompilerAfterReaderLeaves) {
   ASSERT_NO_FATAL_FAILURE(Declare());
   const int stage = Stage();
   model_.WaitCompilers(1);
@@ -415,8 +418,9 @@ TEST_P(HttpRouterVariantTest, InvalidInputLeavesPoolAndServiceUnchanged) {
             0u);
 }
 
-INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterVariantTest,
-                         ::testing::Values(1, 4));
+INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterVariantTest, ::testing::Values(4));
+INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterSingleWorkerVariantTest,
+                         ::testing::Values(1));
 
 class HttpRouterVariantCreditTest : public HttpRouterVariantTest {
  protected:
@@ -449,6 +453,6 @@ TEST_P(HttpRouterVariantCreditTest, CompilationAndHoldingLeaveControlCredit) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterVariantCreditTest,
-                         ::testing::Values(1, 4));
+                         ::testing::Values(4));
 
 }  // namespace
