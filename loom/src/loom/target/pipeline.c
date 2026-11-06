@@ -739,8 +739,12 @@ static iree_status_t loom_target_pipeline_build_finalize_refined_callgraph(
   // reconcile its function version before registering the new specializations.
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_run(builder, IREE_SV("symbol-dce")));
-  return loom_target_pipeline_build_run(builder,
-                                        IREE_SV("specialize-target-callgraph"));
+  IREE_RETURN_IF_ERROR(loom_target_pipeline_build_run(
+      builder, IREE_SV("specialize-target-callgraph")));
+  // Exact boundary facts become body constants. Remove newly unreachable
+  // branches and their edge assumptions before target legalization checks
+  // those assumptions against the refined facts.
+  return loom_target_pipeline_build_cleanup_target_functions(builder, NULL);
 }
 
 static iree_status_t loom_target_pipeline_build_refine_boundaries(

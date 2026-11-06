@@ -1,0 +1,74 @@
+// RUN: emit source-low output=low
+
+// Boundary refinement supplies the zero operands after source cleanup. The
+// guarded assumption belongs to an unreachable branch and must disappear
+// before target verification. Keep the call boundary through source inlining.
+test.target<low_core> @target
+
+func.def noinline @optional_count(%enabled: i1, %head: i32, %tail: i32) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %selected = scf.select %enabled, %tail, %c0 : i32
+  %count = scalar.addi %head, %selected : i32
+  %present = scalar.cmpi ne, %count, %c0 : i32
+  %result = scf.if %present -> (i32) {
+    %bounded = scalar.assume %count [ne(%count, 0)] : i32
+    scf.yield %bounded : i32
+  } else {
+    scf.yield %c0 : i32
+  }
+  func.return %result : i32
+}
+
+func.def public target(@target) @empty_count(%enabled: i1) -> (i32) {
+  %c0 = scalar.constant 0 : i32
+  %count = func.call @optional_count(%enabled, %c0, %c0) : (i1, i32, i32) -> (i32)
+  func.return %count : i32
+}
+
+// ----
+low.func.def noinline target<test.low.core> @optional_count(%enabled: reg<test.i32>) -> (reg<test.i32>) asm {
+  %c0 = test.const.i32 0
+  return %c0
+}
+
+low.func.def public target<test.low.core>(@target) abi(object_function) @empty_count(%enabled: reg<test.i32>) -> (reg<test.i32>) asm {
+  %count = low.func.call pure @optional_count(%enabled) : (reg<test.i32>) -> (reg<test.i32>)
+  return %count
+}
+
+// ====
+// RUN: emit source-low output=low control-flow=structured-low
+
+// Structured consumers need the same cleanup for index-valued bounds.
+test.target<low_core> @target
+
+func.def noinline @optional_extent(%enabled: i1, %head: index, %tail: index) -> (index) {
+  %c0 = index.constant 0 : index
+  %selected = scf.select %enabled, %tail, %c0 : index
+  %extent = index.add %head, %selected : index
+  %present = index.cmp ne, %extent, %c0 : index
+  %result = scf.if %present -> (index) {
+    %bounded = index.assume %extent [ne(%extent, 0)] : index
+    scf.yield %bounded : index
+  } else {
+    scf.yield %c0 : index
+  }
+  func.return %result : index
+}
+
+func.def public target(@target) @empty_extent(%enabled: i1) -> (index) {
+  %c0 = index.constant 0 : index
+  %extent = func.call @optional_extent(%enabled, %c0, %c0) : (i1, index, index) -> (index)
+  func.return %extent : index
+}
+
+// ----
+low.func.def noinline target<test.low.core> @optional_extent(%enabled: reg<test.i32>) -> (reg<test.i32>) asm {
+  %c0 = test.const.i32 0
+  return %c0
+}
+
+low.func.def public target<test.low.core>(@target) abi(object_function) @empty_extent(%enabled: reg<test.i32>) -> (reg<test.i32>) asm {
+  %extent = low.func.call pure @optional_extent(%enabled) : (reg<test.i32>) -> (reg<test.i32>)
+  return %extent
+}
