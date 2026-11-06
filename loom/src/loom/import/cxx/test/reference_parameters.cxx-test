@@ -1161,3 +1161,247 @@ func.def @update_nested_alias(%output: buffer, %output_byte_offset: offset, %inp
 func.def @exact_alias(%value: buffer, %value_byte_offset: offset) {
   func.return
 }
+
+// ====
+// Rvalue references share the analysis-selected value/storage ABI with lvalue
+// references. Named xvalues update their automatic owner, mutable prvalues
+// carry a tied result with no external destination, exact returned aliases stay
+// in SSA, and runtime-selected conditional identities use durable storage.
+struct RvalueState {
+  int value;
+};
+
+static void increment_rvalue(RvalueState&& state) { state.value += 1; }
+
+int mutate_named_xvalue(int input) {
+  RvalueState state{input};
+  increment_rvalue(static_cast<RvalueState&&>(state));
+  return state.value;
+}
+
+template <class Function>
+static int invoke_rvalue(Function&& function) {
+  return function();
+}
+
+int mutate_prvalue_closure() {
+  return invoke_rvalue([value = 4]() mutable { return ++value; });
+}
+
+static int address_rvalue(RvalueState&& state) {
+  RvalueState* pointer = &state;
+  return pointer->value;
+}
+
+int storage_prvalue() { return address_rvalue(RvalueState{7}); }
+
+static RvalueState&& identity_rvalue(RvalueState&& state) {
+  return static_cast<RvalueState&&>(state);
+}
+
+int mutate_returned_xvalue(int input) {
+  RvalueState state{input};
+  RvalueState&& alias = identity_rvalue(static_cast<RvalueState&&>(state));
+  alias.value += 2;
+  return state.value;
+}
+
+static int read_const_rvalue(const RvalueState&& state) {
+  return state.value;
+}
+
+int read_const_prvalue() { return read_const_rvalue(RvalueState{8}); }
+
+static RvalueState&& identity_value_rvalue(RvalueState&& state) {
+  return static_cast<RvalueState&&>(state);
+}
+
+int read_returned_prvalue() {
+  return identity_value_rvalue(RvalueState{9}).value;
+}
+
+static void increment_chained_rvalue(RvalueState&& state) {
+  state.value += 2;
+}
+
+int mutate_chained_xvalue(int input) {
+  RvalueState state{input};
+  increment_chained_rvalue(identity_value_rvalue(static_cast<RvalueState&&>(state)));
+  return state.value;
+}
+
+static void increment_conditional_rvalue(RvalueState&& state) {
+  state.value += 3;
+}
+
+int mutate_conditional_xvalue(bool choose, int left_value, int right_value) {
+  RvalueState left{left_value};
+  RvalueState right{right_value};
+  increment_conditional_rvalue(choose ? static_cast<RvalueState&&>(left) : static_cast<RvalueState&&>(right));
+  return left.value + right.value;
+}
+
+// ----
+func.def public @mutate_named_xvalue(%input: i32) -> (i32) {
+  %state_value = func.call pure @increment_rvalue(%input) : (i32) -> (%input as i32)
+  func.return %state_value : i32
+}
+
+func.def public @mutate_prvalue_closure() -> (i32) {
+  %4 = scalar.constant 4 : i32
+  %5, %6 = func.call pure @invoke_rvalue__lambda_int____(%4) : (i32) -> (i32, %4 as i32)
+  func.return %5 : i32
+}
+
+func.def public @storage_prvalue() -> (i32) {
+  %8 = scalar.constant 7 : i32
+  %9 = index.constant 4 : offset
+  %10 = buffer.alloca<private> align(4) %9 : buffer
+  %11 = index.constant 0 : offset
+  %12 = buffer.view %10[%11] : buffer -> view<4xi8>
+  %13 = index.constant 0 : offset
+  %14 = index.add %11, %13 : offset
+  %15 = index.assume %14 [range(%14, 0, 0)] : offset
+  %16 = buffer.view %10[%15] : buffer -> view<1xi32>
+  view.store %8, %16[0] : i32, view<1xi32>
+  %17 = func.call readonly @address_rvalue(%10, %11) : (buffer, offset) -> (i32)
+  func.return %17 : i32
+}
+
+func.def public @mutate_returned_xvalue(%input: i32) -> (i32) {
+  %20 = index.constant 4 : offset
+  %state_storage = buffer.alloca<private> align(4) %20 : buffer
+  %state_storage_byte_offset = index.constant 0 : offset
+  %state_view = buffer.view %state_storage[%state_storage_byte_offset] : buffer -> view<4xi8>
+  %24 = index.constant 0 : offset
+  %25 = index.add %state_storage_byte_offset, %24 : offset
+  %26 = index.assume %25 [range(%25, 0, 0)] : offset
+  %27 = buffer.view %state_storage[%26] : buffer -> view<1xi32>
+  view.store %input, %27[0] : i32, view<1xi32>
+  func.call pure @identity_rvalue(%state_storage, %state_storage_byte_offset) : (buffer, offset)
+  %28 = scalar.constant 2 : i32
+  %29 = index.constant 0 : offset
+  %30 = index.add %state_storage_byte_offset, %29 : offset
+  %31 = index.assume %30 [range(%30, 0, 0)] : offset
+  %32 = buffer.view %state_storage[%31] : buffer -> view<1xi32>
+  %33 = view.load %32[0] : view<1xi32> -> i32
+  %34 = scalar.addi %33, %28 : i32
+  view.store %34, %32[0] : i32, view<1xi32>
+  %35 = index.constant 0 : offset
+  %36 = index.add %state_storage_byte_offset, %35 : offset
+  %37 = index.assume %36 [range(%36, 0, 0)] : offset
+  %38 = buffer.view %state_storage[%37] : buffer -> view<1xi32>
+  %value = view.load %38[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+func.def public @read_const_prvalue() -> (i32) {
+  %41 = scalar.constant 8 : i32
+  %42 = func.call pure @read_const_rvalue(%41) : (i32) -> (i32)
+  func.return %42 : i32
+}
+
+func.def public @read_returned_prvalue() -> (i32) {
+  %44 = scalar.constant 9 : i32
+  func.call pure @identity_value_rvalue(%44) : (i32)
+  func.return %44 : i32
+}
+
+func.def public @mutate_chained_xvalue(%input: i32) -> (i32) {
+  func.call pure @identity_value_rvalue(%input) : (i32)
+  %state_value = func.call pure @increment_chained_rvalue(%input) : (i32) -> (%input as i32)
+  func.return %state_value : i32
+}
+
+func.def public @mutate_conditional_xvalue(%choose: i1, %left_value: i32, %right_value: i32) -> (i32) {
+  %52 = index.constant 4 : offset
+  %left_storage = buffer.alloca<private> align(4) %52 : buffer
+  %left_storage_byte_offset = index.constant 0 : offset
+  %left_view = buffer.view %left_storage[%left_storage_byte_offset] : buffer -> view<4xi8>
+  %56 = index.constant 0 : offset
+  %57 = index.add %left_storage_byte_offset, %56 : offset
+  %58 = index.assume %57 [range(%57, 0, 0)] : offset
+  %59 = buffer.view %left_storage[%58] : buffer -> view<1xi32>
+  view.store %left_value, %59[0] : i32, view<1xi32>
+  %60 = index.constant 4 : offset
+  %right_storage = buffer.alloca<private> align(4) %60 : buffer
+  %right_storage_byte_offset = index.constant 0 : offset
+  %right_view = buffer.view %right_storage[%right_storage_byte_offset] : buffer -> view<4xi8>
+  %64 = index.constant 0 : offset
+  %65 = index.add %right_storage_byte_offset, %64 : offset
+  %66 = index.assume %65 [range(%65, 0, 0)] : offset
+  %67 = buffer.view %right_storage[%66] : buffer -> view<1xi32>
+  view.store %right_value, %67[0] : i32, view<1xi32>
+  %68, %69 = scf.if %choose -> (buffer, offset) {
+    scf.yield %left_storage, %left_storage_byte_offset : buffer, offset
+  } else {
+    scf.yield %right_storage, %right_storage_byte_offset : buffer, offset
+  }
+  func.call @increment_conditional_rvalue(%68, %69) : (buffer, offset)
+  %70 = index.constant 0 : offset
+  %71 = index.add %left_storage_byte_offset, %70 : offset
+  %72 = index.assume %71 [range(%71, 0, 0)] : offset
+  %73 = buffer.view %left_storage[%72] : buffer -> view<1xi32>
+  %value$74 = view.load %73[0] : view<1xi32> -> i32
+  %75 = index.constant 0 : offset
+  %76 = index.add %right_storage_byte_offset, %75 : offset
+  %77 = index.assume %76 [range(%76, 0, 0)] : offset
+  %78 = buffer.view %right_storage[%77] : buffer -> view<1xi32>
+  %value$79 = view.load %78[0] : view<1xi32> -> i32
+  %80 = scalar.addi %value$74, %value$79 : i32
+  func.return %80 : i32
+}
+
+func.def @increment_rvalue(%state_value$81: i32) -> (%state_value$81 as i32) {
+  %83 = scalar.constant 1 : i32
+  %state_value$84 = scalar.addi %state_value$81, %83 : i32
+  func.return %state_value$84 : i32
+}
+
+func.def @invoke_rvalue__lambda_int____(%function_value$85: i32) -> (i32, %function_value$85 as i32) {
+  %88, %function_value$89 = func.call pure @operator_call_value(%function_value$85) : (i32) -> (i32, %function_value$85 as i32)
+  func.return %88, %function_value$89 : i32, i32
+}
+
+func.def @address_rvalue(%state: buffer, %state_byte_offset: offset) -> (i32) {
+  %93 = index.constant 0 : offset
+  %94 = index.add %state_byte_offset, %93 : offset
+  %95 = buffer.view %state[%94] : buffer -> view<1xi32>
+  %value = view.load %95[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+func.def @identity_rvalue(%state: buffer, %state_byte_offset: offset) {
+  func.return
+}
+
+func.def @read_const_rvalue(%state_value: i32) -> (i32) {
+  func.return %state_value : i32
+}
+
+func.def @identity_value_rvalue(%state_value: i32) {
+  func.return
+}
+
+func.def @increment_chained_rvalue(%state_value$102: i32) -> (%state_value$102 as i32) {
+  %104 = scalar.constant 2 : i32
+  %state_value$105 = scalar.addi %state_value$102, %104 : i32
+  func.return %state_value$105 : i32
+}
+
+func.def @increment_conditional_rvalue(%state: buffer, %state_byte_offset: offset) {
+  %108 = scalar.constant 3 : i32
+  %109 = index.constant 0 : offset
+  %110 = index.add %state_byte_offset, %109 : offset
+  %111 = buffer.view %state[%110] : buffer -> view<1xi32>
+  %112 = view.load %111[0] : view<1xi32> -> i32
+  %113 = scalar.addi %112, %108 : i32
+  view.store %113, %111[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @operator_call_value(%this_value: i32) -> (i32, %this_value as i32) {
+  %117 = scalar.constant 1 : i32
+  %value = scalar.addi %this_value, %117 : i32
+  func.return %value, %value : i32, i32
+}

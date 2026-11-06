@@ -264,3 +264,62 @@ func.def @operator_call_value(%this_left: i32, %this_right: i32, %input: i32) ->
   %16 = scalar.addi %15, %input : i32
   func.return %16 : i32
 }
+
+// ====
+// A forwarding-reference specialization transports the closure value into the
+// first helper. Recursive calls reference-collapse the named parameter to an
+// lvalue reference while preserving the same captured owner identity.
+template <int Index, class Function>
+static void apply(Function&& function) {
+  function(Index);
+  if constexpr (Index < 2) {
+    apply<Index + 1>(function);
+  }
+}
+
+int forwarding_recursive(int initial) {
+  int sum = initial;
+  apply<0>([&](auto value) { sum += value; });
+  return sum;
+}
+
+// ----
+func.def public @forwarding_recursive(%initial: i32) -> (i32) {
+  %2 = index.constant 4 : offset
+  %sum_storage = buffer.alloca<private> align(4) %2 : buffer
+  %sum_storage_byte_offset = index.constant 0 : offset
+  %sum_view = buffer.view %sum_storage[%sum_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %initial, %sum_view[0] : i32, view<1xi32>
+  func.call @apply_0__lambda_auto__type_param_0__0___const_(%sum_storage, %sum_storage_byte_offset) : (buffer, offset)
+  %sum = view.load %sum_view[0] : view<1xi32> -> i32
+  func.return %sum : i32
+}
+
+func.def @apply_0__lambda_auto__type_param_0__0___const_(%function_sum: buffer, %function_sum_byte_offset: offset) {
+  %9 = scalar.constant 0 : i32
+  func.call @operator_call_int_value(%function_sum, %function_sum_byte_offset, %9) : (buffer, offset, i32)
+  func.call @apply_1__lambda_auto__type_param_0__0___const__(%function_sum, %function_sum_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.def @operator_call_int_value(%this_sum: buffer, %this_sum_byte_offset: offset, %value: i32) {
+  %13 = buffer.view %this_sum[%this_sum_byte_offset] : buffer -> view<1xi32>
+  %14 = view.load %13[0] : view<1xi32> -> i32
+  %15 = scalar.addi %14, %value : i32
+  %16 = buffer.view %this_sum[%this_sum_byte_offset] : buffer -> view<1xi32>
+  view.store %15, %16[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @apply_1__lambda_auto__type_param_0__0___const__(%function_sum: buffer, %function_sum_byte_offset: offset) {
+  %19 = scalar.constant 1 : i32
+  func.call @operator_call_int_value(%function_sum, %function_sum_byte_offset, %19) : (buffer, offset, i32)
+  func.call @apply_2__lambda_auto__type_param_0__0___const__(%function_sum, %function_sum_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.def @apply_2__lambda_auto__type_param_0__0___const__(%function_sum: buffer, %function_sum_byte_offset: offset) {
+  %22 = scalar.constant 2 : i32
+  func.call @operator_call_int_value(%function_sum, %function_sum_byte_offset, %22) : (buffer, offset, i32)
+  func.return
+}

@@ -11,14 +11,6 @@ static void external_reference(unsigned& value);
 void caller(unsigned& value) { external_reference(value); }
 
 // ====
-static void consume(unsigned&& value) { ++value; }
-unsigned rvalue_reference(unsigned value) {
-  // ERROR@+1: LOWERING/059 "rvalue-reference parameters require consuming object identity"
-  consume(static_cast<unsigned&&>(value));
-  return value;
-}
-
-// ====
 class [[loom::type("check.entropy")]] Entropy {};
 static void replace_entropy(Entropy& value, Entropy replacement) {
   value = replacement;

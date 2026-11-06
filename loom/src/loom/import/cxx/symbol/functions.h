@@ -88,9 +88,9 @@ enum class ReferenceABI {
   Storage,
 };
 
-// One source lvalue-reference parameter projected through its selected ABI.
-// Parameters remain in source order and are indexed by semantic ordinal so
-// redeclarations need not share parameter symbol identities.
+// One source reference parameter projected through its selected ABI. Parameters
+// remain in source order and are indexed by semantic ordinal so redeclarations
+// need not share parameter symbol identities.
 struct ReferenceParameter {
   // Ordinal in the source function parameter list.
   size_t ordinal;

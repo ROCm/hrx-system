@@ -2421,7 +2421,7 @@ class Translator final : private Initialization::Evaluation {
     if (cxx::symbol_cast<cxx::FieldSymbol>(binding)) {
       return control_->receiver_requires_storage();
     }
-    if (unit_.typeTraits().is_lvalue_reference(binding->type())) {
+    if (unit_.typeTraits().is_reference(binding->type())) {
       return control_->reference_requires_storage(binding);
     }
     return control_->storage_backed(binding);
@@ -2590,12 +2590,14 @@ class Translator final : private Initialization::Evaluation {
   };
 
   struct ReferenceWriteback {
-    // Once-evaluated lvalue receiving the mutable result.
-    Lvalue target;
+    // Once-evaluated lvalue receiving the mutable result, absent for a prvalue
+    // temporary whose current value is retained by |source|.
+    std::optional<Lvalue> target;
     // Source value transported through the tied call operand.
     Value source;
-    // Exact automatic owner slice replaced by the tied result.
-    ReferenceOrigin origin;
+    // Exact automatic owner slice replaced by the tied result, absent for a
+    // prvalue temporary with no external alias.
+    std::optional<ReferenceOrigin> origin;
     // Admitted value representation transported through the call.
     const Partition* partition;
     // Unqualified source value type used to bind the tied result.
@@ -2676,18 +2678,22 @@ class Translator final : private Initialization::Evaluation {
     std::optional<Lvalue> target;
     Value value;
     std::optional<ReferenceOrigin> origin;
-    if (argument->valueCategory == cxx::ValueCategory::kLValue) {
-      target = destination(
-          argument, owner,
-          reference->mutable_access ? LvalueAccess::Write : LvalueAccess::Read);
-      value = read(*target, argument);
-      if (reference->mutable_access) {
+    if (argument->valueCategory != cxx::ValueCategory::kPrValue) {
+      if (auto called = reference_call(argument)) {
+        IREE_ASSERT(called->value && !called->value->is_pointer());
+        IREE_ASSERT(!called->current_receiver);
+        value = *called->value;
+        target = std::move(called->reference_target);
+      } else {
+        target = destination(argument, owner,
+                             reference->mutable_access ? LvalueAccess::Write
+                                                       : LvalueAccess::Read);
+        value = read(*target, argument);
+      }
+      if (reference->mutable_access && target) {
         origin = reference_origin(*target, value, argument);
       }
     } else {
-      if (reference->mutable_access) {
-        fail(argument, "mutable value references require an lvalue argument");
-      }
       value = expression(argument);
     }
     if (&value.partition() != &expected_partition) {
@@ -2712,12 +2718,10 @@ class Translator final : private Initialization::Evaluation {
     const size_t argument_offset = receiver_argument_count + arguments.size();
     argument.value.append_to(arguments);
     if (argument.writeback_partition) {
-      IREE_ASSERT(argument.target);
-      IREE_ASSERT(argument.origin);
       writebacks.push_back({
-          .target = std::move(*argument.target),
+          .target = std::move(argument.target),
           .source = argument.value,
-          .origin = *argument.origin,
+          .origin = argument.origin,
           .partition = argument.writeback_partition,
           .value_type = argument.writeback_type,
           .argument_offset = argument_offset,
@@ -2771,9 +2775,9 @@ class Translator final : private Initialization::Evaluation {
             {}};
   }
 
-  std::optional<EvaluatedCallResult> reference_receiver_call(
+  std::optional<EvaluatedCallResult> reference_call(
       cxx::ExpressionAST* expression) {
-    expression = unwrap_expression(expression);
+    expression = unwrap_object_identity(unit_, expression);
     if (auto call = direct_operator_call(expression)) {
       auto* signature =
           cxx::type_cast<cxx::FunctionType>(call->function->type());
@@ -2865,7 +2869,7 @@ class Translator final : private Initialization::Evaluation {
       fail(owner, "member call requires a dot or arrow receiver");
     }
 
-    if (auto called = reference_receiver_call(receiver)) {
+    if (auto called = reference_call(receiver)) {
       if (!called->value) {
         fail(receiver, "void function cannot supply an implicit object");
       }
@@ -3747,7 +3751,11 @@ class Translator final : private Initialization::Evaluation {
       auto updated = value_arena_.capture(
           *writeback.partition,
           {loom_op_results(op) + result_offset, component_count});
-      write(writeback.target, updated, call);
+      if (writeback.target) {
+        write(*writeback.target, updated, call);
+      } else {
+        update_temporary(writeback.source, updated);
+      }
       if (reference_result_alias && reference_result_alias->argument_offset ==
                                         writeback.argument_offset) {
         reference_result_alias->value = updated;

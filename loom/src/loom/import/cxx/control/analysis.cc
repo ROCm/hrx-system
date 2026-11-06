@@ -49,6 +49,8 @@ struct ControlFlow::ReferenceIdentityFacts {
   std::vector<std::unique_ptr<std::vector<ObjectInterval>>> argument_slices;
   // Exact automatic-object intervals supplied by a reference-returning call.
   std::unordered_map<cxx::AST*, std::vector<ObjectInterval>> results;
+  // Calls whose selected callable ABI produces durable storage.
+  std::unordered_set<cxx::AST*> storage_results;
 };
 
 struct ControlFlow::ReferenceWriteFacts {
@@ -380,9 +382,15 @@ bool ControlFlow::argument_requires_storage(
       (argument.current_receiver && receiver_requires_storage_)) {
     return true;
   }
+  if (reference_identity_facts_ &&
+      std::ranges::any_of(argument.reference_calls, [&](cxx::AST* call) {
+        return reference_identity_facts_->storage_results.contains(call);
+      })) {
+    return true;
+  }
   auto traits = unit_.typeTraits();
   auto requires_storage = [&](cxx::Symbol* binding) {
-    if (traits.is_lvalue_reference(binding->type())) {
+    if (traits.is_reference(binding->type())) {
       return cxx::symbol_cast<cxx::FieldSymbol>(binding) ||
              storage_references_.contains(binding);
     }
@@ -907,7 +915,7 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
   if (returned && !returned->member && returned->component_offset == 0) {
     auto found = std::ranges::find(parameters, returned->binding);
     if (found != parameters.end() &&
-        unit_.typeTraits().is_lvalue_reference((*found)->type())) {
+        unit_.typeTraits().is_reference((*found)->type())) {
       parameter_ordinal = static_cast<size_t>(found - parameters.begin());
     }
   }
@@ -971,8 +979,8 @@ void ControlFlow::visit(cxx::CallExpressionAST* ast) {
   for (size_t ordinal = 0; ordinal < parameters.size() && argument;
        ++ordinal, argument = argument->next) {
     auto* parameter_type = parameters[ordinal]->type();
-    if (!traits.is_lvalue_reference(parameter_type) ||
-        argument->value->valueCategory != cxx::ValueCategory::kLValue) {
+    if (!traits.is_reference(parameter_type) ||
+        argument->value->valueCategory == cxx::ValueCategory::kPrValue) {
       continue;
     }
     if (traits.is_const(traits.remove_reference(parameter_type))) {
@@ -1152,8 +1160,8 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
   for (size_t ordinal = 0; ordinal < call.argument_count; ++ordinal) {
     auto* argument = call.arguments[ordinal];
     auto* parameter_type = parameters[ordinal]->type();
-    if (!traits.is_lvalue_reference(parameter_type) ||
-        argument->valueCategory != cxx::ValueCategory::kLValue) {
+    if (!traits.is_reference(parameter_type) ||
+        argument->valueCategory == cxx::ValueCategory::kPrValue) {
       continue;
     }
     if (traits.is_const(traits.remove_reference(parameter_type))) {
@@ -1166,8 +1174,7 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
     return;
   }
   if (!is_current_object(unit_, call.receiver)) {
-    if (call.receiver->valueCategory == cxx::ValueCategory::kLValue ||
-        explicit_xvalue_operand(unit_, unwrap_expression(call.receiver))) {
+    if (call.receiver->valueCategory != cxx::ValueCategory::kPrValue) {
       if (implicit_object_may_mutate(call.function)) {
         record(call.receiver);
       } else {
@@ -1231,6 +1238,10 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   if (!expression) {
     return;
   }
+  if (is_current_object(unit_, expression)) {
+    argument.current_receiver = true;
+    return;
+  }
   expression = unwrap_object_identity(unit_, expression);
   auto traits = unit_.typeTraits();
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
@@ -1291,9 +1302,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   if (auto* subscript =
           cxx::ast_cast<cxx::SubscriptExpressionAST>(expression)) {
     if (subscript->symbol) {
-      if (expression->valueCategory == cxx::ValueCategory::kLValue) {
-        argument.reference_calls.push_back(expression);
-      }
+      argument.reference_calls.push_back(expression);
       return;
     }
     auto* base_type = subscript->baseExpression->type;
@@ -1326,6 +1335,12 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   }
   if (auto* conditional =
           cxx::ast_cast<cxx::ConditionalExpressionAST>(expression)) {
+    // A glvalue conditional has a runtime-selected identity. The existing
+    // storage projection selects that identity once and preserves mutations;
+    // independent tied SSA writebacks cannot name only the selected arm.
+    if (expression->valueCategory != cxx::ValueCategory::kPrValue) {
+      argument.inherent_storage = true;
+    }
     collect_identity(conditional->iftrueExpression, argument);
     collect_identity(conditional->iffalseExpression, argument);
     return;
@@ -1394,7 +1409,7 @@ bool ControlFlow::require_identity(const CallArgument& argument) {
   }
   auto traits = unit_.typeTraits();
   auto require_binding = [&](cxx::Symbol* binding) {
-    if (traits.is_lvalue_reference(binding->type())) {
+    if (traits.is_reference(binding->type())) {
       if (function_) {
         auto parameters = function_->parameters();
         if (std::ranges::find(parameters, binding) != parameters.end()) {
@@ -1441,7 +1456,7 @@ bool ControlFlow::record_callable_write(cxx::Symbol* binding) {
     return false;
   }
   auto traits = unit_.typeTraits();
-  if (traits.is_lvalue_reference(binding->type()) && function_) {
+  if (traits.is_reference(binding->type()) && function_) {
     auto parameters = function_->parameters();
     if (std::ranges::find(parameters, binding) != parameters.end()) {
       return written_references_.insert(binding).second;
@@ -1838,13 +1853,21 @@ bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
                                                    const ControlFlow& callee) {
   // Retain an exact automatic origin whenever every return aliases one
   // parameter or its receiver. Outer call edges can compare nested aliases
-  // without traversing either function body again. Storage and mixed-origin
-  // returns remain unresolved and conservatively alias another lvalue.
+  // without traversing either function body again. The selected storage ABI is
+  // retained separately so another reference call can transport it directly.
+  bool result_storage = callee.reference_return_ == ReferenceReturn::Storage;
   std::vector<ObjectInterval> result_intervals;
   if (auto ordinal = callee.reference_return_parameter();
       ordinal && *ordinal < call.arguments.size()) {
+    auto parameters = callee.function_->parameters();
+    result_storage = callee.reference_requires_storage(parameters[*ordinal]) ||
+                     call.arguments[*ordinal].current_receiver;
     append_intervals(call.arguments[*ordinal], result_intervals);
   } else if (callee.returns_current_receiver_reference()) {
+    result_storage =
+        call.current_receiver || callee.receiver_requires_storage_ ||
+        call.storage_receiver ||
+        (call.receiver && argument_requires_storage(*call.receiver));
     if (call.current_receiver) {
       auto* object_type = implicit_object_type(unit_, function_);
       auto* record =
@@ -1861,14 +1884,21 @@ bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
       append_intervals(*call.receiver, result_intervals);
     }
   }
+  bool changed = false;
+  if (result_storage) {
+    if (!reference_identity_facts_) {
+      reference_identity_facts_ = std::make_unique<ReferenceIdentityFacts>();
+    }
+    changed =
+        reference_identity_facts_->storage_results.insert(call.source).second;
+  }
   if (result_intervals.empty()) {
-    return false;
+    return changed;
   }
 
   if (!reference_identity_facts_) {
     reference_identity_facts_ = std::make_unique<ReferenceIdentityFacts>();
   }
-  bool changed = false;
   auto& retained = reference_identity_facts_->results[call.source];
   for (const auto& interval : result_intervals) {
     changed = append_interval(retained, interval) || changed;
@@ -1895,11 +1925,11 @@ CallPropagation ControlFlow::propagate_overlapping_references(
   const size_t parameter_count =
       std::min(parameters.size(), call.arguments.size());
   for (size_t first = 0; first < parameter_count; ++first) {
-    if (!unit_.typeTraits().is_lvalue_reference(parameters[first]->type())) {
+    if (!unit_.typeTraits().is_reference(parameters[first]->type())) {
       continue;
     }
     for (size_t second = first + 1; second < parameter_count; ++second) {
-      if (!unit_.typeTraits().is_lvalue_reference(parameters[second]->type()) ||
+      if (!unit_.typeTraits().is_reference(parameters[second]->type()) ||
           (!callee.reference_written(parameters[first]) &&
            !callee.reference_written(parameters[second])) ||
           !identities_overlap(call.arguments[first], call.arguments[second])) {
@@ -1917,7 +1947,7 @@ CallPropagation ControlFlow::propagate_overlapping_references(
   for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
     auto* parameter = parameters[ordinal];
     const auto& argument = call.arguments[ordinal];
-    if (!unit_.typeTraits().is_lvalue_reference(parameter->type()) ||
+    if (!unit_.typeTraits().is_reference(parameter->type()) ||
         (!receiver_mutable && !callee.reference_written(parameter))) {
       continue;
     }
@@ -1953,7 +1983,7 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
   auto parameters = callee.function_->parameters();
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
     auto* parameter = parameters[ordinal];
-    if (!unit_.typeTraits().is_lvalue_reference(parameter->type()) ||
+    if (!unit_.typeTraits().is_reference(parameter->type()) ||
         ordinal >= call.arguments.size()) {
       continue;
     }
@@ -2280,8 +2310,7 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
     auto* receiver = member->baseExpression;
     if (!is_current_object(unit_, receiver)) {
       if (member->accessOp == cxx::TokenKind::T_DOT &&
-          (receiver->valueCategory == cxx::ValueCategory::kLValue ||
-           explicit_xvalue_operand(unit_, unwrap_expression(receiver)))) {
+          receiver->valueCategory != cxx::ValueCategory::kPrValue) {
         if (implicit_object_may_mutate(callee)) {
           record(receiver);
         } else {

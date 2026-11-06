@@ -398,7 +398,7 @@ void Functions::analyze(Types& types) {
     auto parameters = function->parameters();
     for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
       auto* parameter = parameters[ordinal];
-      if (!unit_.typeTraits().is_lvalue_reference(parameter->type())) {
+      if (!unit_.typeTraits().is_reference(parameter->type())) {
         continue;
       }
       references.push_back(
@@ -1140,12 +1140,7 @@ void Functions::admit_reference_parameters(cxx::FunctionSymbol* symbol,
   auto parameters = symbol->parameters();
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
     auto* parameter_type = parameters[ordinal]->type();
-    if (traits.is_rvalue_reference(parameter_type)) {
-      diagnostics_.reject(
-          unit_, source,
-          "rvalue-reference parameters require consuming object identity");
-    }
-    if (!traits.is_lvalue_reference(parameter_type)) {
+    if (!traits.is_reference(parameter_type)) {
       continue;
     }
     auto* value_type = traits.remove_reference(parameter_type);
