@@ -120,7 +120,7 @@ loom_runtime_pool_statistics_t loom_runtime_pool_statistics(
 // retired executions preserve the target through their final physical-owner
 // pass. Does not wait for live work, destroy queues, or trim any execution
 // device's compiled products. Fixed parameter and state allocations remain
-// until their model releases them.
+// until their model releases them. Called on the serialized host owner.
 iree_status_t loom_runtime_pool_trim(loom_runtime_pool_t* pool,
                                      uint64_t target_bytes);
 
