@@ -112,22 +112,22 @@ def check_text(address, model_name, expected):
     assert response["usage"]["completion_tokens"] == 4, response
 
 
-def check_model(
-    server, model, expected, *provider_encodings, environment=None, image=False
-):
+def _check_models(server, checks, environment):
     server = str(Path(server).absolute())
-    # Preserve the runfiles namespace: resolving its symlinks would discard the
-    # declared relative relationship between the deployment and its assets.
-    model = str(Path(model).absolute())
-    document = json.loads(Path(model).read_text())
-    model_name = (
-        document["model"]["id"] if "schema_version" in document else document["name"]
-    )
-    for binding in provider_encodings:
-        relative, encoding = binding.split("=", 1)
-        assert encoding in ("text", "bc"), binding
-        with (Path(model).parent / relative).open("rb") as stream:
-            assert (stream.read(4) == b"LOOM") == (encoding == "bc"), binding
+    models = []
+    for model, expected, image in checks:
+        # Preserve the runfiles namespace: resolving its symlinks would discard
+        # the declared relative relationship between a deployment and its assets.
+        model = str(Path(model).absolute())
+        document = json.loads(Path(model).read_text())
+        model_name = (
+            document["model"]["id"]
+            if "schema_version" in document
+            else document["name"]
+        )
+        models.append((model, model_name, expected, image))
+    model_names = [model_name for _, model_name, _, _ in models]
+    assert len(model_names) == len(set(model_names)), model_names
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
         log = directory / "server.log"
@@ -138,7 +138,7 @@ def check_model(
                 "--workers=4",
                 "--pool_backing=fixed",
                 "--listen=127.0.0.1:0",
-                "--model=" + model,
+                *("--model=" + model for model, _, _, _ in models),
             ],
             log,
             cwd=directory,
@@ -146,10 +146,31 @@ def check_model(
         ) as (process, bound_address):
             assert bound_address is not None, log.read_text()
             address = urlsplit("http://" + bound_address)
-            check_text(address, model_name, expected)
-            if image:
-                check_image(address, model_name)
+            for _, model_name, expected, image in models:
+                check_text(address, model_name, expected)
+                if image:
+                    check_image(address, model_name)
         assert process.returncode == 0, log.read_text()
+
+
+def check_models(server, checks, environment=None):
+    _check_models(
+        server,
+        tuple((model, expected, False) for model, expected in checks),
+        environment,
+    )
+
+
+def check_model(
+    server, model, expected, *provider_encodings, environment=None, image=False
+):
+    model_path = Path(model).absolute()
+    for binding in provider_encodings:
+        relative, encoding = binding.split("=", 1)
+        assert encoding in ("text", "bc"), binding
+        with (model_path.parent / relative).open("rb") as stream:
+            assert (stream.read(4) == b"LOOM") == (encoding == "bc"), binding
+    _check_models(server, ((model_path, expected, image),), environment)
 
 
 if __name__ == "__main__":

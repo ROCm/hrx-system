@@ -20,7 +20,7 @@ import threading
 from pathlib import Path
 
 from loom.model import ModelCard
-from model_card_test import check_model
+from model_card_test import check_models
 
 
 def archive(excluded):
@@ -93,7 +93,20 @@ def main(fetch, serve, fixture):
                 assert result.returncode == 0, result.stderr
                 return json.loads(result.stdout)
 
-            def install(name, variant="swatch", origin=base, *extra):
+            def write_deployment(output, name):
+                deployment = output / "serve.json"
+                deployment.write_text(
+                    json.dumps(
+                        {
+                            "name": f"fixture-text-{name}",
+                            "model": {"path": "model.json", "preset": "check"},
+                            "definition": {"kind": "text"},
+                        }
+                    )
+                )
+                return deployment
+
+            def install(name, variant="swatch", origin=base, *extra, execute=True):
                 output = root / name
                 run(
                     "--preset=check",
@@ -103,17 +116,9 @@ def main(fetch, serve, fixture):
                     "--output=" + str(output),
                     *extra,
                 )
-                deployment = output / "serve.json"
-                deployment.write_text(
-                    json.dumps(
-                        {
-                            "name": "fixture-text",
-                            "model": {"path": "model.json", "preset": "check"},
-                            "definition": {"kind": "text"},
-                        }
-                    )
-                )
-                deployments.append((deployment, "abab"))
+                deployment = write_deployment(output, name)
+                if execute:
+                    deployments.append((deployment, "abab"))
                 return output
 
             try:
@@ -134,7 +139,13 @@ def main(fetch, serve, fixture):
                     subset / "control.loom", full / "control.loom"
                 )
                 assert not os.path.samefile(subset / "bias.data", full / "bias.data")
-                install("subset", "swatch", base, "--preserve-sources")
+                install(
+                    "subset",
+                    "swatch",
+                    base,
+                    "--preserve-sources",
+                    execute=False,
+                )
                 receipt = json.loads(
                     next((root / "client-cache/preserved").iterdir()).read_text()
                 )
@@ -157,8 +168,9 @@ def main(fetch, serve, fixture):
                 assert (root / "compact/bias.data").read_bytes() == (
                     subset / "bias.data"
                 ).read_bytes()
-                shutil.copyfile(subset / "serve.json", root / "compact/serve.json")
-                deployments.append((root / "compact/serve.json", "abab"))
+                deployments.append(
+                    (write_deployment(root / "compact", "compact"), "abab")
+                )
                 # A developer mirror can change parameter values while code and
                 # other inputs retain the publisher's expectations.
                 changed = archive(0)[:-4] + struct.pack("<i", 3)
@@ -176,15 +188,13 @@ def main(fetch, serve, fixture):
                     "bias.data",
                     "metadata.safetensors",
                 ]
-                shutil.copyfile(subset / "serve.json", developer / "serve.json")
-                deployments.append((developer / "serve.json", "xbbx"))
+                deployments.append((write_deployment(developer, "developer"), "xbbx"))
             finally:
                 server.shutdown()
                 thread.join()
         install("offline", "swatch", base, "--offline", "--preserve-sources")
         assert os.path.samefile(subset / "bias.data", root / "offline/bias.data")
-        for deployment, expected in deployments:
-            check_model(serve, deployment, expected)
+        check_models(serve, deployments)
 
 
 if __name__ == "__main__":
