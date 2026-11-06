@@ -363,6 +363,80 @@ class WindowsDiagnosticsTest(unittest.TestCase):
                 self.assertEqual((phase / record["copy"]).read_bytes(), contents)
                 self.assertEqual(record["sha256"], hashlib.sha256(contents).hexdigest())
 
+    def test_classic_application_error_retains_build_owned_images(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executable = root / "bazel-out/bin/compiler.exe"
+            module = root / "bazel-out/bin/compiler.dll"
+            installed = root / "system.dll"
+            other_provider = root / "bazel-out/bin/other.exe"
+            original = {
+                executable: b"compiler image",
+                module: b"compiler runtime",
+                executable.with_suffix(".pdb"): b"compiler symbols",
+            }
+            for path, contents in {
+                **original,
+                installed: b"system image",
+                other_provider: b"not an application error image",
+            }.items():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(contents)
+            # Version-zero Application Error events on Windows CI contain
+            # unnamed insertion strings, including the two paths at 10 and 11.
+            fields = [
+                "compiler.exe",
+                "0.0.0.0",
+                "5bf93434",
+                "compiler.dll",
+                "0.0.0.0",
+                "5bf93434",
+                "c0000005",
+                "00000000002a7001",
+                "5b1c",
+                "01dd6dafec3f143a",
+                str(executable),
+                str(module),
+                "report-id",
+                "",
+                "",
+            ]
+            event = (
+                '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">'
+                '<System><Provider Name="Application Error"/>'
+                '<EventID Qualifiers="0">1000</EventID><Version>0</Version>'
+                "</System><EventData>"
+                + "".join(f"<Data>{escape(value)}</Data>" for value in fields)
+                + "</EventData></Event>"
+            )
+            events = (
+                "<Events>"
+                + event
+                + event.replace(escape(str(module)), escape(str(installed)))
+                + event.replace("Application Error", "Windows Error Reporting")
+                .replace(">1000<", ">1001<")
+                .replace(escape(str(executable)), escape(str(other_provider)))
+                + "</Events>"
+            ).encode("utf-16")
+
+            def native_tool(argv, **kwargs):
+                kwargs["stdout"].write(events)
+                return subprocess.CompletedProcess(argv, 0)
+
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            capture = diagnostics.Capture(artifacts, {})
+            with mock.patch.object(subprocess, "run", side_effect=native_tool):
+                diagnostics.capture_application_crashes(
+                    capture, root, None, dt.datetime.now(dt.UTC)
+                )
+            self.assertEqual(set(capture.files), {str(path) for path in original})
+            for path, contents in original.items():
+                self.assertEqual(
+                    (artifacts / capture.files[str(path)]["copy"]).read_bytes(),
+                    contents,
+                )
+
     def test_crash_images_precede_symbols_in_the_capture_budget(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
