@@ -566,8 +566,7 @@ loom_amdgpu_distribution_transfer_binary_result_follows_operand_vgpr(
     loom_value_id_t* out_rhs) {
   *out_lhs = LOOM_VALUE_ID_INVALID;
   *out_rhs = LOOM_VALUE_ID_INVALID;
-  if (loom_value_def_index(loom_module_value(module, source_value_id)) != 0 ||
-      defining_op->operand_count != 2 || defining_op->result_count != 1 ||
+  if (defining_op->operand_count != 2 ||
       !loom_traits_have_distribution_transfer(
           loom_op_effective_traits(module, defining_op)) ||
       (!loom_amdgpu_type_is_i32(
@@ -792,7 +791,7 @@ static bool loom_amdgpu_branch_payload_has_vgpr_select_dependency(
     return false;
   }
   const loom_op_t* defining_op = loom_value_def_op(value);
-  if (defining_op == NULL || loom_value_def_index(value) != 0) {
+  if (defining_op == NULL) {
     return false;
   }
   if (loom_scf_select_isa(defining_op)) {
@@ -1063,8 +1062,10 @@ static bool loom_amdgpu_source_value_prefers_vgpr_impl(
     return true;
   }
 
-  if (loom_value_def_index(value) == 0 &&
-      loom_traits_have_distribution_transfer(defining_op_traits)) {
+  // Every result carries the operand placement dependency, including a
+  // quotient's paired remainder. Uniform values can still require VGPRs when
+  // their producer has no scalar instruction form.
+  if (loom_traits_have_distribution_transfer(defining_op_traits)) {
     return loom_amdgpu_distribution_transfer_result_prefers_vgpr(
         module, fact_table, view_regions, analysis, source_value_id,
         defining_op);
