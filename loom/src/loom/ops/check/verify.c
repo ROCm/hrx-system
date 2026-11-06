@@ -207,8 +207,8 @@ static bool loom_check_i64_type_isa(loom_type_t type) {
 
 static iree_status_t loom_check_verify_domain_arguments(
     const loom_module_t* module, const loom_op_t* op, const loom_region_t* body,
-    iree_string_view_t field_name, bool* out_valid,
-    iree_diagnostic_emitter_t emitter) {
+    iree_string_view_t field_name, iree_diagnostic_emitter_t emitter,
+    bool* out_valid) {
   *out_valid = false;
   const uint16_t argument_count = loom_region_entry_arg_count(body);
   if (argument_count != 2) {
@@ -270,8 +270,8 @@ iree_status_t loom_check_scenario_verify(const loom_module_t* module,
   }
   bool arguments_valid = false;
   IREE_RETURN_IF_ERROR(loom_check_verify_domain_arguments(
-      module, op, body, IREE_SV("configuration arguments"), &arguments_valid,
-      emitter));
+      module, op, body, IREE_SV("configuration arguments"), emitter,
+      &arguments_valid));
   if (!arguments_valid) {
     return iree_ok_status();
   }
@@ -289,7 +289,7 @@ iree_status_t loom_check_trial_verify(const loom_module_t* module,
   const loom_region_t* body = loom_check_trial_body(op);
   bool arguments_valid = false;
   IREE_RETURN_IF_ERROR(loom_check_verify_domain_arguments(
-      module, op, body, IREE_SV("trial arguments"), &arguments_valid, emitter));
+      module, op, body, IREE_SV("trial arguments"), emitter, &arguments_valid));
   if (!arguments_valid) {
     return iree_ok_status();
   }
@@ -324,8 +324,8 @@ static const loom_symbol_t* loom_check_lookup_subject(
 
 static iree_status_t loom_check_verify_configuration_values(
     const loom_module_t* module, const loom_op_t* action,
-    loom_value_slice_t parameters, bool* out_valid,
-    iree_diagnostic_emitter_t emitter) {
+    loom_value_slice_t parameters, iree_diagnostic_emitter_t emitter,
+    bool* out_valid) {
   *out_valid = false;
   const loom_op_t* trial = action->parent_op;
   for (uint16_t i = 0; i < parameters.count; ++i) {
@@ -352,7 +352,7 @@ static iree_status_t loom_check_verify_argument_group(
     uint16_t expected_count, const loom_type_value_remap_t* value_remap,
     loom_function_call_argument_match_flags_t match_flags,
     iree_string_view_t actual_field, iree_string_view_t expected_field,
-    bool* out_valid, iree_diagnostic_emitter_t emitter) {
+    iree_diagnostic_emitter_t emitter, bool* out_valid) {
   *out_valid = false;
   if (actual_values.count != expected_count) {
     return loom_check_emit_count_mismatch(emitter, action, actual_field,
@@ -388,8 +388,8 @@ static iree_status_t loom_check_verify_argument_group(
 static iree_status_t loom_check_verify_subject_operands(
     const loom_module_t* module, const loom_op_t* action,
     const loom_symbol_t* symbol, loom_value_slice_t parameters,
-    loom_value_slice_t arguments, bool* out_valid,
-    iree_diagnostic_emitter_t emitter) {
+    loom_value_slice_t arguments, iree_diagnostic_emitter_t emitter,
+    bool* out_valid) {
   *out_valid = false;
   if (loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_CALLABLE)) {
     if (parameters.count != 0) {
@@ -433,15 +433,15 @@ static iree_status_t loom_check_verify_subject_operands(
         module, action, parameters, workload_arguments.values,
         workload_arguments.count, value_remap, /*match_flags=*/0,
         IREE_SV("call parameters"), IREE_SV("kernel workload arguments"),
-        &group_valid, emitter));
+        emitter, &group_valid));
     if (!group_valid) {
       return iree_ok_status();
     }
     return loom_check_verify_argument_group(
         module, action, arguments, argument_ids, argument_count, value_remap,
         LOOM_FUNCTION_CALL_ARGUMENT_MATCH_FLAG_ALLOW_BUFFER_MATERIALIZATION,
-        IREE_SV("arguments"), IREE_SV("kernel ABI arguments"), out_valid,
-        emitter);
+        IREE_SV("arguments"), IREE_SV("kernel ABI arguments"), emitter,
+        out_valid);
   }
 
   if (loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_COMMAND_PROGRAM |
@@ -460,7 +460,7 @@ static iree_status_t loom_check_verify_subject_operands(
     if (parameters.count == staged_count) {
       bool configurations_valid = false;
       IREE_RETURN_IF_ERROR(loom_check_verify_configuration_values(
-          module, action, parameters, &configurations_valid, emitter));
+          module, action, parameters, emitter, &configurations_valid));
       if (!configurations_valid) {
         return iree_ok_status();
       }
@@ -480,7 +480,7 @@ static iree_status_t loom_check_verify_subject_operands(
     IREE_RETURN_IF_ERROR(loom_check_verify_argument_group(
         module, action, parameters, argument_ids, staged_count, &value_remap,
         /*match_flags=*/0, IREE_SV("call parameters"),
-        IREE_SV("subject specialization arguments"), &group_valid, emitter));
+        IREE_SV("subject specialization arguments"), emitter, &group_valid));
     if (!group_valid) {
       return iree_ok_status();
     }
@@ -488,8 +488,8 @@ static iree_status_t loom_check_verify_subject_operands(
         module, action, arguments, argument_ids + staged_count,
         argument_count - staged_count, &value_remap,
         LOOM_FUNCTION_CALL_ARGUMENT_MATCH_FLAG_ALLOW_BUFFER_MATERIALIZATION,
-        IREE_SV("arguments"), IREE_SV("subject launch bindings"), out_valid,
-        emitter);
+        IREE_SV("arguments"), IREE_SV("subject launch bindings"), emitter,
+        out_valid);
   }
 
   return iree_ok_status();
@@ -736,9 +736,8 @@ static iree_status_t loom_check_verify_result_pair_observation(
 
 static iree_status_t loom_check_verify_compare_body(
     const loom_module_t* module, const loom_op_t* op,
-    loom_value_slice_t* out_actual_results,
-    loom_value_slice_t* out_expected_results, bool* out_valid,
-    iree_diagnostic_emitter_t emitter) {
+    iree_diagnostic_emitter_t emitter, loom_value_slice_t* out_actual_results,
+    loom_value_slice_t* out_expected_results, bool* out_valid) {
   *out_valid = false;
   const loom_attribute_t count_attribute = loom_op_const_attrs(op)[1];
   const loom_region_t* comparison = loom_check_compare_comparison(op);
@@ -831,7 +830,7 @@ static iree_status_t loom_check_verify_compare_subject(
   }
   bool operands_valid = false;
   IREE_RETURN_IF_ERROR(loom_check_verify_subject_operands(
-      module, op, symbol, parameters, arguments, &operands_valid, emitter));
+      module, op, symbol, parameters, arguments, emitter, &operands_valid));
   if (!operands_valid) {
     return iree_ok_status();
   }
@@ -854,9 +853,9 @@ iree_status_t loom_check_compare_verify(const loom_module_t* module,
   loom_value_slice_t actual_results = {0};
   loom_value_slice_t expected_results = {0};
   bool comparison_valid = false;
-  IREE_RETURN_IF_ERROR(loom_check_verify_compare_body(
-      module, op, &actual_results, &expected_results, &comparison_valid,
-      emitter));
+  IREE_RETURN_IF_ERROR(
+      loom_check_verify_compare_body(module, op, emitter, &actual_results,
+                                     &expected_results, &comparison_valid));
   if (!comparison_valid) {
     return iree_ok_status();
   }
@@ -898,7 +897,7 @@ iree_status_t loom_check_invoke_verify(const loom_module_t* module,
   const loom_value_slice_t arguments = loom_check_invoke_arguments(op);
   bool operands_valid = false;
   IREE_RETURN_IF_ERROR(loom_check_verify_subject_operands(
-      module, op, symbol, parameters, arguments, &operands_valid, emitter));
+      module, op, symbol, parameters, arguments, emitter, &operands_valid));
   if (!operands_valid) {
     return iree_ok_status();
   }

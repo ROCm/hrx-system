@@ -21,7 +21,7 @@
 static iree_status_t loom_kernel_specialization_capture(
     const loom_module_t* module, const loom_kernel_class_site_t* site,
     uint16_t argument_ordinal, iree_arena_allocator_t* arena,
-    loom_kernel_specialization_value_t* out_value, uint32_t* inout_hash) {
+    uint32_t* inout_hash, loom_kernel_specialization_value_t* out_value) {
   const loom_value_id_t value_id = site->argument_values[argument_ordinal];
   loom_type_t type = loom_module_value_type(module, value_id);
   loom_type_refinement_result_t refinement;
@@ -127,7 +127,7 @@ iree_status_t loom_kernel_specializations_collect(
     for (uint16_t j = 0; j < specialization_count && iree_status_is_ok(status);
          ++j) {
       status = loom_kernel_specialization_capture(site_module, &sites[i], j,
-                                                  arena, &candidate[j], &hash);
+                                                  arena, &hash, &candidate[j]);
     }
     if (!iree_status_is_ok(status)) {
       break;

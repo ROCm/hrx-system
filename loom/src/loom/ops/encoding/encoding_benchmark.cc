@@ -412,7 +412,7 @@ static loom_module_t* ReadModule(EncodingBenchmarkFixture& fixture,
   IREE_CHECK_OK(loom_bytecode_read_module(
       iree_make_const_byte_span(bytes.data(), bytes.size()),
       IREE_SV("static_encoding_benchmark.loombc"), fixture.context(),
-      block_pool, &options, &result, &module, iree_allocator_system()));
+      block_pool, &options, iree_allocator_system(), &result, &module));
   IREE_ASSERT(module != nullptr);
   return module;
 }

@@ -783,8 +783,8 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
     const loom_pass_registry_t* pass_registry,
     const loom_cleanup_pattern_provider_set_t* cleanup_pattern_provider_set,
     iree_diagnostic_emitter_t diagnostic_emitter,
-    iree_arena_block_pool_t* block_pool, bool* out_valid,
-    loom_cmd_program_plan_t* out_plan, iree_allocator_t host_allocator) {
+    iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
+    bool* out_valid, loom_cmd_program_plan_t* out_plan) {
   IREE_ASSERT_ARGUMENT(materialization);
   IREE_ASSERT_ARGUMENT(materialization->module);
   IREE_ASSERT_ARGUMENT(program_refs);

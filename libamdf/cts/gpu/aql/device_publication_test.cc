@@ -101,11 +101,14 @@ TEST_P(AqlDevicePublicationTest,
   std::memset(arguments->host.pointer, 0, 4096);
 
   GpuUserQueue* consumer = nullptr;
-  ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(family_, &consumer, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-                      AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
-                  4096));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(
+      family_,
+      GpuUserQueueOptions{
+          .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                                   AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
+          .ring_byte_length = 4096,
+      },
+      &consumer));
   GpuUserQueue* producer = consumer;
   if (device_doorbell) {
     ASSERT_NO_FATAL_FAILURE(CreateQueue(&producer));

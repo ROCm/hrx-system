@@ -1918,7 +1918,7 @@ loom_cfg_condition_relation_publish(
       .edge_count = (uint32_t)graph->edge_count,
   };
   return loom_cfg_condition_relation_table_publish(
-      &builder, out_table, solver->scratch_arena, solver->arena);
+      &builder, solver->scratch_arena, solver->arena, out_table);
 }
 
 static iree_status_t loom_cfg_condition_relation_solve(

@@ -142,8 +142,8 @@ class KernelConfigMaterializerTest : public ::testing::Test {
     loom_module_t* roundtrip_module = nullptr;
     IREE_ASSERT_OK(loom_bytecode_read_module(
         iree_make_const_byte_span(bytecode.data(), bytecode.size()),
-        IREE_SV("roundtrip.loombc"), &context_, &block_pool_, &options, &result,
-        &roundtrip_module, iree_allocator_system()));
+        IREE_SV("roundtrip.loombc"), &context_, &block_pool_, &options,
+        iree_allocator_system(), &result, &roundtrip_module));
     ASSERT_EQ(result.error_count, 0u);
     ASSERT_NE(roundtrip_module, nullptr);
     Verify(roundtrip_module);
@@ -1158,7 +1158,7 @@ kernel.def target(@dispatch_target) @dispatch_rows(%count_source: buffer) {
       iree_make_const_byte_span(projected_bytecode.data(),
                                 projected_bytecode.size()),
       IREE_SV("projected.loombc"), &context_, &block_pool_, &read_options,
-      &read_result, &roundtrip_module, iree_allocator_system()));
+      iree_allocator_system(), &read_result, &roundtrip_module));
   ASSERT_EQ(read_result.error_count, 0u);
   ASSERT_NE(roundtrip_module, nullptr);
   EXPECT_EQ(roundtrip_module->symbols.count, 5u);

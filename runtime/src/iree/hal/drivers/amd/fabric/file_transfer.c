@@ -60,8 +60,8 @@ static bool iree_hal_amd_fabric_file_transfer_host_effect(
 
 static iree_status_t iree_hal_amd_fabric_file_transfer_query_pair(
     const amdf_api_t* api, const amdf_memory_site_t* producer,
-    const amdf_memory_site_t* consumer, iree_hal_memory_pair_info_t* out_pair,
-    bool* available) {
+    const amdf_memory_site_t* consumer, bool* inout_available,
+    iree_hal_memory_pair_info_t* out_pair) {
   amdf_memory_pair_info_t pair = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
       .structure_size = sizeof(pair),
@@ -69,7 +69,7 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_query_pair(
   const amdf_status_t status =
       api->memory_query_pair_info(producer, consumer, &pair);
   if (amdf_status_code(status) == AMDF_STATUS_CODE_UNSUPPORTED) {
-    *available = false;
+    *inout_available = false;
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(
@@ -132,7 +132,7 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_prepare_source(
   iree_hal_memory_pair_info_t pair;
   if (queue_access & IREE_HAL_MEMORY_ACCESS_WRITE) {
     IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_file_transfer_query_pair(
-        api, &device, &host, &pair, &available));
+        api, &device, &host, &available, &pair));
     if (available) {
       available = iree_hal_amd_fabric_file_transfer_queue_effect(
                       &pair.release, true, &before) &&
@@ -142,7 +142,7 @@ static iree_status_t iree_hal_amd_fabric_file_transfer_prepare_source(
   }
   if (available && transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ) {
     IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_file_transfer_query_pair(
-        api, &host, &device, &pair, &available));
+        api, &host, &device, &available, &pair));
     if (available) {
       available = iree_hal_amd_fabric_file_transfer_host_effect(&pair.release,
                                                                 &flush) &&

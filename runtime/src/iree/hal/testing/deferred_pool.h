@@ -100,10 +100,10 @@ struct DeferredBackingPool : iree_hal_pool_t {
             [](iree_hal_pool_t* base, iree_host_size_t count,
                const iree_hal_pool_reservation_request_t* requests,
                const iree_async_frontier_t* frontier,
-               iree_hal_pool_reservation_t* reservations,
-               iree_hal_pool_acquire_info_t* infos,
                iree_hal_pool_acquire_callback_t completion,
-               iree_hal_pool_reserve_flags_t flags) -> iree_status_t {
+               iree_hal_pool_reserve_flags_t flags,
+               iree_hal_pool_reservation_t* reservations,
+               iree_hal_pool_acquire_info_t* infos) -> iree_status_t {
           auto* self = static_cast<DeferredBackingPool*>(base);
           Pending pending = {
               .count = count,
@@ -179,9 +179,9 @@ struct DeferredBackingPool : iree_hal_pool_t {
             [](iree_hal_pool_t* base, iree_host_size_t count,
                const iree_hal_pool_reservation_request_t* requests,
                iree_hal_memory_credit_t* credit,
+               iree_hal_pool_acquire_callback_t completion,
                iree_hal_pool_reservation_t* reservations,
-               iree_hal_pool_acquire_info_t* infos,
-               iree_hal_pool_acquire_callback_t completion) {
+               iree_hal_pool_acquire_info_t* infos) {
               auto* self = static_cast<DeferredBackingPool*>(base);
               Pending call = {.count = count,
                               .requests = requests,
@@ -231,10 +231,10 @@ struct DeferredBackingPool : iree_hal_pool_t {
         call.credit.budget
             ? iree_hal_slab_pool_acquire_with_credit(
                   backing, call.count, call.requests, &call.credit,
-                  call.reservations, call.infos, call.completion)
+                  call.completion, call.reservations, call.infos)
             : iree_hal_pool_acquire_reservations(
                   backing, call.count, call.requests, call.frontier,
-                  call.reservations, call.infos, call.completion, call.flags);
+                  call.completion, call.flags, call.reservations, call.infos);
     depth.fetch_sub(1, std::memory_order_relaxed);
     return status;
   }

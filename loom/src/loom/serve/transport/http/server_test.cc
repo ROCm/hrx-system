@@ -60,13 +60,18 @@ class HttpServerTest : public ::testing::Test {
   }
 
   iree_status_t Listen(iree_string_view_t address,
-                       loom_serve_http_listener_t** out_listener,
-                       iree_host_size_t proactor_index = 0) {
+                       iree_host_size_t proactor_index,
+                       loom_serve_http_listener_t** out_listener) {
     auto options = loom_serve_http_listener_options_default();
     options.address = address;
     options.proactor_index = proactor_index;
     return loom_serve_http_listener_allocate(
         server_, &options, iree_allocator_system(), out_listener);
+  }
+
+  iree_status_t Listen(iree_string_view_t address,
+                       loom_serve_http_listener_t** out_listener) {
+    return Listen(address, /*proactor_index=*/0, out_listener);
   }
 
   int Connect(loom_serve_http_listener_t* listener = nullptr) {
@@ -378,7 +383,7 @@ TEST_F(HttpServerTest, ServerStopWakesCapacityWaitWithoutRevokingClaims) {
 TEST_F(HttpServerTest, TcpAndUnixPollOwnersShareReclaimedCapacity) {
   const std::string address = "unix:" + socket_directory_ + "/socket";
   loom_serve_http_listener_t* other = nullptr;
-  IREE_ASSERT_OK(Listen(iree_make_cstring_view(address.c_str()), &other, 1));
+  IREE_ASSERT_OK(Listen(iree_make_cstring_view(address.c_str()), 1, &other));
   additional_listeners_.push_back(other);
   ASSERT_NO_FATAL_FAILURE(HoldCapacity());
   const int clients[] = {Connect(), Connect(other)};
@@ -545,7 +550,7 @@ TEST_F(HttpServerTest, PendingReceiveOutlivesListenerAndOtherPoolReuse) {
   listener_ = nullptr;
 
   loom_serve_http_listener_t* other = nullptr;
-  IREE_ASSERT_OK(Listen(IREE_SV("127.0.0.1:0"), &other, 1));
+  IREE_ASSERT_OK(Listen(IREE_SV("127.0.0.1:0"), 1, &other));
   additional_listeners_.push_back(other);
   for (int i = 0; i < 32; ++i) {
     const int peer = Connect(other);

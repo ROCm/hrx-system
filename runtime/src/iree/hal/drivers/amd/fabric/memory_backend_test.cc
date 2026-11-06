@@ -58,9 +58,9 @@ TEST_F(MemoryBackendTest, ProgramVisibilityUsesTheNativeMemoryIssuer) {
     return status;
   };
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                            /*interfaces=*/0, IREE_HAL_MEMORY_ACCESS_NONE,
-                            IREE_HAL_BUFFER_USAGE_STORAGE));
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0,
+                            IREE_HAL_MEMORY_ACCESS_NONE,
+                            IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
   const iree_hal_memory_scope_t programs[] = {
       ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[0]),
       ResolveScope(IREE_HAL_MEMORY_SITE_PROGRAM, families_[1]),
@@ -263,7 +263,7 @@ TEST_F(MemoryBackendTest, RegisteredIoRequiresBothFileOwnerAndNativeAdmission) {
   native_.file_io_enabled = true;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
-      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool, interfaces, 0));
+      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, interfaces, 0, &pool));
   EXPECT_EQ(pool, nullptr);
   for (auto& backend : backends_) {
     backend.native.io_proactor = test_proactor();
@@ -271,7 +271,7 @@ TEST_F(MemoryBackendTest, RegisteredIoRequiresBothFileOwnerAndNativeAdmission) {
   native_.file_io_enabled = false;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
-      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool, interfaces, 0));
+      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, interfaces, 0, &pool));
   EXPECT_EQ(pool, nullptr);
   EXPECT_EQ(native_.create_count, 0);
 }
@@ -296,7 +296,7 @@ TEST_F(MemoryBackendTest, PhysicalSlabsRetainSharedFileRegistrations) {
   native_.required_flags |= AMDF_MEMORY_FLAG_HOST_FILE_IO;
   iree_hal_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool, interfaces, 0));
+      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, interfaces, 0, &pool));
   EXPECT_EQ(iree_hal_pool_query_host_access(pool).access, 0u);
   native_.fail_after_bindings = true;
   iree_hal_buffer_t* rejected = nullptr;
@@ -371,8 +371,9 @@ TEST_F(MemoryBackendTest, RegisteredIoRequiresConcurrentRegistration) {
   iree_hal_pool_t* pool = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
-      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool,
-                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO, 0));
+      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER,
+                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_REGISTERED_IO, 0,
+                 &pool));
   EXPECT_EQ(pool, nullptr);
   EXPECT_EQ(native_.create_count, 0);
   IREE_EXPECT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool));
@@ -671,8 +672,8 @@ TEST_F(MemoryBackendTest, RejectsProfileWithoutPrivateReadWriteMapping) {
   native_.supports_private_mapping = false;
   iree_hal_pool_t* pool = nullptr;
   iree_status_t status =
-      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool, /*interfaces=*/0,
-                 IREE_HAL_MEMORY_ACCESS_NONE);
+      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, /*interfaces=*/0,
+                 IREE_HAL_MEMORY_ACCESS_NONE, &pool);
   EXPECT_THAT(status, StatusIs(iree::StatusCode::kUnavailable));
   iree_status_free(status);
   EXPECT_EQ(pool, nullptr);
@@ -794,8 +795,8 @@ TEST_F(MemoryBackendTest, NativeImportsQualifyExactTransportAndPrivateCpuUses) {
   pool_options_.imports.class_count = 1;
   pool_options_.imports.classes = &import_class;
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                            /*interfaces=*/0, IREE_HAL_MEMORY_ACCESS_NONE));
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0,
+                            IREE_HAL_MEMORY_ACCESS_NONE, &pool));
   iree_hal_pool_import_requirements_t requirements;
   ASSERT_TRUE(iree_hal_pool_query_import_requirements(
       pool, import_class.storage_class, &requirements));
@@ -810,13 +811,14 @@ TEST_F(MemoryBackendTest, NativeImportsQualifyExactTransportAndPrivateCpuUses) {
   EXPECT_EQ(pool, nullptr);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
-      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool, /*interfaces=*/0,
-                 IREE_HAL_MEMORY_ACCESS_NONE));
+      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, /*interfaces=*/0,
+                 IREE_HAL_MEMORY_ACCESS_NONE, &pool));
   EXPECT_EQ(pool, nullptr);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, /*interfaces=*/0,
-                 IREE_HAL_MEMORY_ACCESS_NONE, IREE_HAL_BUFFER_USAGE_STORAGE));
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0,
+                 IREE_HAL_MEMORY_ACCESS_NONE, IREE_HAL_BUFFER_USAGE_STORAGE,
+                 &pool));
   EXPECT_EQ(pool, nullptr);
   EXPECT_EQ(native_.create_count, 0);
 
@@ -824,8 +826,8 @@ TEST_F(MemoryBackendTest, NativeImportsQualifyExactTransportAndPrivateCpuUses) {
   import_class.storage_class.provenance[0] = 1;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, /*interfaces=*/0,
-                 IREE_HAL_MEMORY_ACCESS_NONE));
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0,
+                 IREE_HAL_MEMORY_ACCESS_NONE, &pool));
   EXPECT_EQ(pool, nullptr);
 }
 
@@ -836,8 +838,8 @@ TEST_F(MemoryBackendTest, NativeExportsCaptureShareableConstructionAndExtent) {
       IREE_HAL_EXTERNAL_STORAGE_TYPE_DMA_BUF_FD, {0, 0}};
   pool_options_.owned.exports = {1, &storage_class};
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                            /*interfaces=*/0, IREE_HAL_MEMORY_ACCESS_NONE));
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0,
+                            IREE_HAL_MEMORY_ACCESS_NONE, &pool));
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool, iree_hal_make_pool_reservation_request(64, 1),
@@ -878,9 +880,9 @@ TEST_F(MemoryBackendTest, HostExportDoesNotGrantPublicMapping) {
   pool_options_.owned.exports = {1, &storage_class};
   iree_hal_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE,
                  UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA,
-                 IREE_HAL_MEMORY_ACCESS_NONE));
+                 IREE_HAL_MEMORY_ACCESS_NONE, &pool));
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool, iree_hal_make_pool_reservation_request(128, 64),
@@ -1019,9 +1021,9 @@ TEST_F(MemoryBackendTest, RejectsLogicalRangeOutsideRegistrationEnvelope) {
 
 TEST_F(MemoryBackendTest, RejectsUnsupportedDeviceAddressInterface) {
   iree_hal_pool_t* pool = nullptr;
-  iree_status_t status =
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS);
+  iree_status_t status = CreatePool(
+      IREE_HAL_BUFFER_USAGE_STORAGE,
+      UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS, &pool);
   EXPECT_THAT(status, StatusIs(iree::StatusCode::kUnavailable));
   iree_status_free(status);
   EXPECT_EQ(pool, nullptr);
@@ -1035,7 +1037,7 @@ TEST_F(MemoryBackendTest, MixedEnginesAllocateOneBackingWithExactBindings) {
   storage_[0][0].memory_type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   iree_hal_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, /*interfaces=*/0));
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0, &pool));
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(pool, &capabilities);
   EXPECT_FALSE(iree_all_bits_set(capabilities.memory_type,
@@ -1078,8 +1080,9 @@ TEST_F(MemoryBackendTest, DeviceOnlyContractOmitsHostBindingAndHostQueries) {
   native_.supports_private_mapping = false;
   native_.device_access = AMDF_MEMORY_ACCESS_READ;
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE_READ, &pool,
-                            /*interfaces=*/0, IREE_HAL_MEMORY_ACCESS_NONE));
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE_READ,
+                            /*interfaces=*/0, IREE_HAL_MEMORY_ACCESS_NONE,
+                            &pool));
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool, iree_hal_make_pool_reservation_request(64, 64),
@@ -1137,8 +1140,8 @@ TEST_F(MemoryBackendTest, PrivateTransferViewsFollowEachStorageRoute) {
         file_capable ? AMDF_HOST_MAPPING_FEATURE_FILE_IO : 0;
     const int map_count = native_.map_count;
     iree_hal_pool_t* pool = nullptr;
-    IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool,
-                              /*interfaces=*/0, IREE_HAL_MEMORY_ACCESS_NONE));
+    IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, /*interfaces=*/0,
+                              IREE_HAL_MEMORY_ACCESS_NONE, &pool));
     EXPECT_EQ(iree_hal_pool_query_host_access(pool).access, 0u);
     iree_hal_buffer_t* owned = nullptr;
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
@@ -1309,9 +1312,9 @@ TEST_F(MemoryBackendTest, HostNumaPlacementPreservesAllConsumerBindings) {
     SCOPED_TRACE(mode);
     pool_options_.placement = {mode, HostNode()};
     iree_hal_pool_t* pool = nullptr;
-    IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                              /*interfaces=*/0, IREE_HAL_MEMORY_ACCESS_ALL,
-                              IREE_HAL_BUFFER_USAGE_TRANSFER));
+    IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0,
+                              IREE_HAL_MEMORY_ACCESS_ALL,
+                              IREE_HAL_BUFFER_USAGE_TRANSFER, &pool));
     iree_hal_pool_capabilities_t capabilities;
     iree_hal_pool_query_capabilities(pool, &capabilities);
     EXPECT_EQ(capabilities.placement.mode, IREE_HAL_POOL_PLACEMENT_REQUIRED);
@@ -1805,7 +1808,7 @@ TEST_F(MemoryBackendTest, OneDeviceCanPublishSeveralAddressInterfaces) {
   native_.address_kinds[0] |= UINT64_C(1) << AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE;
   iree_hal_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, /*interfaces=*/0));
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0, &pool));
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool, iree_hal_make_pool_reservation_request(64, 64),
@@ -1832,9 +1835,9 @@ TEST_F(MemoryBackendTest, OneDeviceCanPublishSeveralAddressInterfaces) {
 
 TEST_F(MemoryBackendTest, CpuExecutionUsesNativeHostViewWithoutPublicMapping) {
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                            /*interfaces=*/0, IREE_HAL_MEMORY_ACCESS_NONE,
-                            IREE_HAL_BUFFER_USAGE_STORAGE));
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0,
+                            IREE_HAL_MEMORY_ACCESS_NONE,
+                            IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
   EXPECT_EQ(iree_hal_pool_query_host_access(pool).access,
             IREE_HAL_MEMORY_ACCESS_NONE);
   const auto* cpu_family = iree_hal_device_queue_family(cpu_device_, 0);
@@ -1888,9 +1891,9 @@ TEST_F(MemoryBackendTest, CpuReadOnlyAccessDoesNotRequirePrivateWrites) {
   }
   native_.supports_private_mapping = false;
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                            /*interfaces=*/0, IREE_HAL_MEMORY_ACCESS_NONE,
-                            IREE_HAL_BUFFER_USAGE_STORAGE_READ));
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0,
+                            IREE_HAL_MEMORY_ACCESS_NONE,
+                            IREE_HAL_BUFFER_USAGE_STORAGE_READ, &pool));
   const auto cpu = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE,
                                 iree_hal_device_queue_family(cpu_device_, 0));
   const auto npu = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
@@ -1899,17 +1902,18 @@ TEST_F(MemoryBackendTest, CpuReadOnlyAccessDoesNotRequirePrivateWrites) {
   iree_hal_pool_release(pool);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, /*interfaces=*/0,
-                 IREE_HAL_MEMORY_ACCESS_NONE, IREE_HAL_BUFFER_USAGE_STORAGE));
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0,
+                 IREE_HAL_MEMORY_ACCESS_NONE, IREE_HAL_BUFFER_USAGE_STORAGE,
+                 &pool));
   EXPECT_EQ(pool, nullptr);
 }
 
 TEST_F(MemoryBackendTest, CoherentCpuTransitionsHaveNoCacheRecipe) {
   native_.host_coherent = true;
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                            /*interfaces=*/0, IREE_HAL_MEMORY_ACCESS_NONE,
-                            IREE_HAL_BUFFER_USAGE_STORAGE));
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, /*interfaces=*/0,
+                            IREE_HAL_MEMORY_ACCESS_NONE,
+                            IREE_HAL_BUFFER_USAGE_STORAGE, &pool));
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(pool, &capabilities);
   EXPECT_TRUE(iree_any_bit_set(capabilities.memory_type,

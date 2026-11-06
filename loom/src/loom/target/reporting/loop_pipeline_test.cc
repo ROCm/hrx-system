@@ -89,7 +89,7 @@ TEST(LoopPipelineReportTest, EntryMergeOwnsScheduleRows) {
   const loom_function_version_list_t versions = {handles, 1};
 
   loom_target_compile_report_t source;
-  loom_target_compile_report_initialize(&source, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &source);
   source.function_name = IREE_SV("stream");
   source.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS;
@@ -97,7 +97,7 @@ TEST(LoopPipelineReportTest, EntryMergeOwnsScheduleRows) {
       &source, module, &versions));
 
   loom_target_compile_report_t summary;
-  loom_target_compile_report_initialize(&summary, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &summary);
   summary.requested_detail_flags =
       loom_target_compile_report_requested_detail_flags(
           LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_SUMMARY);
@@ -112,7 +112,7 @@ TEST(LoopPipelineReportTest, EntryMergeOwnsScheduleRows) {
   loom_target_compile_report_deinitialize(&summary);
 
   loom_target_compile_report_t merged;
-  loom_target_compile_report_initialize(&merged, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &merged);
   merged.requested_detail_flags = source.requested_detail_flags;
   IREE_ASSERT_OK(
       loom_target_compile_report_record_entry_report(&merged, &source));

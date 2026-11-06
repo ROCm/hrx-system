@@ -136,8 +136,8 @@ struct TransferTrialMeasurement {
 iree_status_t RunTransferTrial(
     const TransportBackend& transport,
     const iree::async::cts::ProactorFactory& create_proactor,
-    const TransferTrialOptions& options, TransferTrialResult* out_result,
-    TransferTrialMeasurement measurement = {});
+    const TransferTrialOptions& options, TransferTrialMeasurement measurement,
+    TransferTrialResult* out_result);
 
 }  // namespace iree::net::cts
 

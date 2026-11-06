@@ -323,7 +323,7 @@ iree_status_t loom_aie2p_tile_link(
 
   loom_native_section_contribution_assembly_t assembly = {0};
   IREE_RETURN_IF_ERROR(loom_native_assemble_section_contributions(
-      object->sections, object->section_count, &assembly, arena));
+      object->sections, object->section_count, arena, &assembly));
   loom_aie2p_linked_section_placement_t* section_placements = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, assembly.section_count,
                                                  sizeof(*section_placements),

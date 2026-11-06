@@ -75,8 +75,8 @@ struct CollectiveTrialResult : CollectiveTransportResult {
 iree_status_t RunCollectiveTrial(
     const TransportBackend& transport,
     const iree::async::cts::ProactorFactory& create_proactor,
-    const CollectiveTrialOptions& options, CollectiveTrialResult* out_result,
-    TransferTrialMeasurement measurement = {});
+    const CollectiveTrialOptions& options, TransferTrialMeasurement measurement,
+    CollectiveTrialResult* out_result);
 
 }  // namespace iree::net::cts
 

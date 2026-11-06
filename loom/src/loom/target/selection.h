@@ -48,8 +48,8 @@ iree_status_t loom_target_environment_select_profile(
 iree_status_t loom_target_environment_select_cpu_profile(
     const loom_target_environment_t* environment,
     const iree_cpu_data_t* cpu_data, const loom_target_facts_t* requirement,
-    const loom_target_profile_t* profile,
-    loom_target_profile_selection_t* out_selection, iree_allocator_t allocator);
+    const loom_target_profile_t* profile, iree_allocator_t allocator,
+    loom_target_profile_selection_t* out_selection);
 
 #ifdef __cplusplus
 }  // extern "C"

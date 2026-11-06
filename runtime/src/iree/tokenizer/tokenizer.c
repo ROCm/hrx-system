@@ -1361,7 +1361,7 @@ iree_tokenizer_encode_state_match_post_norm_special_tokens(
           &tokenizer->special_tokens_post_norm,
           iree_string_view_substr(normalized_text, safe + already_matched,
                                   IREE_HOST_SIZE_MAX),
-          &match_length, &match_id, &match_state);
+          &match_state, &match_length, &match_id);
     }
     if (result != IREE_TOKENIZER_SPECIAL_TOKENS_NO_MATCH &&
         !(result == IREE_TOKENIZER_SPECIAL_TOKENS_NEED_MORE &&
@@ -1758,8 +1758,8 @@ static iree_status_t iree_tokenizer_encode_state_pump(
           iree_tokenizer_special_tokens_encode_state_t check_state = {0};
           iree_tokenizer_special_tokens_match_result_t check_result =
               iree_tokenizer_special_tokens_match(&tokenizer->special_tokens,
-                                                  check_view, &check_length,
-                                                  &check_id, &check_state);
+                                                  check_view, &check_state,
+                                                  &check_length, &check_id);
           if (check_result != IREE_TOKENIZER_SPECIAL_TOKENS_NO_MATCH) {
             iree_host_size_t original_safe = safe;
             safe = iree_tokenizer_strip_lstrip_whitespace(
@@ -1796,8 +1796,8 @@ static iree_status_t iree_tokenizer_encode_state_pump(
       iree_tokenizer_special_tokens_match_result_t result =
           iree_tokenizer_special_tokens_match(
               &tokenizer->special_tokens,
-              iree_make_string_view(chunk->data, chunk->size), &match_length,
-              &match_id, &state->special_token_match);
+              iree_make_string_view(chunk->data, chunk->size),
+              &state->special_token_match, &match_length, &match_id);
 
       if (result == IREE_TOKENIZER_SPECIAL_TOKENS_MATCHED) {
         // Track if this special token matched at position 0 of the original

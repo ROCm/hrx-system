@@ -994,8 +994,8 @@ TEST_F(CallableInlineTest, CloneDefinitionRemapsOnlySelfReferences) {
   };
   loom_func_like_t cloned = {};
   IREE_ASSERT_OK(loom_callable_clone_definition(&module_builder_, source,
-                                                target_ref, &options, &cloned,
-                                                &rewriter_arena_));
+                                                target_ref, &options,
+                                                &rewriter_arena_, &cloned));
 
   ASSERT_EQ(source_block->op_count, 3u);
   EXPECT_EQ(loom_func_call_callee(source_self_call).symbol_id,

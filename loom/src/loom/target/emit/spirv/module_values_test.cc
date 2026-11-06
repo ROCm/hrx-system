@@ -99,8 +99,8 @@ TEST_F(SpirvModuleValueTableTest, ReservesDefinesAndLooksUpValueRefs) {
       module_, body_, &scratch_arena_, &value_domain));
 
   loom_spirv_module_value_table_t table = {};
-  IREE_ASSERT_OK(loom_spirv_module_value_table_initialize(&value_domain, &table,
-                                                          &scratch_arena_));
+  IREE_ASSERT_OK(loom_spirv_module_value_table_initialize(
+      &value_domain, &scratch_arena_, &table));
 
   uint32_t first_result_id = 0;
   first_result_id = loom_spirv_module_value_table_reserve(

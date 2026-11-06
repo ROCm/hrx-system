@@ -53,8 +53,8 @@ amdf_status_t amdf_windows_endpoint_metadata_api_deinitialize(
 amdf_status_t amdf_windows_query_endpoint_metadata(
     const amdf_windows_endpoint_metadata_api_t* api, const amdf_kmt_api_t* kmt,
     D3DKMT_HANDLE adapter, uint32_t physical_adapter_index,
-    amdf_windows_endpoint_metadata_t* out_metadata,
-    amdf_allocator_t host_allocator);
+    amdf_allocator_t host_allocator,
+    amdf_windows_endpoint_metadata_t* out_metadata);
 
 #ifdef __cplusplus
 }  // extern "C"

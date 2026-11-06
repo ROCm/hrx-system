@@ -381,8 +381,8 @@ iree_status_t loom_bytecode_encoding_table_materialize(
       parameters[parameter_index].reserved = 0;
       IREE_RETURN_IF_ERROR(loom_bytecode_attribute_decode_named(
           &attribute_materializer, &cursor, /*descriptor=*/NULL, value_kind,
-          &parameters[parameter_index].value,
-          (iree_host_size_t)type_prefix_count));
+          (iree_host_size_t)type_prefix_count,
+          &parameters[parameter_index].value));
     }
 
     const loom_encoding_t encoding = {

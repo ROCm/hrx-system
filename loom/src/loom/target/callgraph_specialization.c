@@ -1317,7 +1317,7 @@ static iree_status_t loom_target_callgraph_materialize_clones(
     loom_func_like_t cloned = {0};
     IREE_RETURN_IF_ERROR(
         loom_callable_clone_definition(&builder, info->function, clone_ref,
-                                       &options, &cloned, state->pass->arena));
+                                       &options, state->pass->arena, &cloned));
     for (iree_host_size_t i = 0; i < row->calls.count; ++i) {
       state->calls.values[row->calls.offset + row->calls.count - 1 - i].op =
           projection[i].target_op;

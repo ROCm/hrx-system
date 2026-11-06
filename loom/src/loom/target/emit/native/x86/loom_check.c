@@ -57,7 +57,7 @@ static iree_status_t loom_x86_loom_check_emit_native_bytes(
   }
   if (iree_status_is_ok(status)) {
     status = loom_x86_function_write(function, symbol_indices, 0, fixups,
-                                     stream, NULL, arena);
+                                     stream, arena, NULL);
   }
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_cstring(builder, "code:");

@@ -16,6 +16,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/Stmt.h"
+#include "clang/AST/TypeLoc.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Basic/Diagnostic.h"
@@ -446,6 +447,47 @@ std::optional<std::string> GuardedReleaseReplacementText(
 }
 
 }  // namespace
+
+OutputParameterOrderCheck::OutputParameterOrderCheck(StringRef Name,
+                                                     ClangTidyContext* Context)
+    : ClangTidyCheck(Name, Context) {}
+
+void OutputParameterOrderCheck::registerMatchers(
+    ast_matchers::MatchFinder* Finder) {
+  // Function types also cover callback typedefs, fields, and parameters. A
+  // FunctionDecl-only matcher would miss the interface those callbacks share.
+  Finder->addMatcher(ast_matchers::functionTypeLoc().bind("function_type"),
+                     this);
+}
+
+void OutputParameterOrderCheck::check(
+    const ast_matchers::MatchFinder::MatchResult& Result) {
+  const auto* Function =
+      Result.Nodes.getNodeAs<FunctionTypeLoc>("function_type");
+  const SourceManager& SourceManager = *Result.SourceManager;
+  if (SourceManager.isInSystemHeader(Function->getBeginLoc()) ||
+      IsExternalMacroBody(Function->getBeginLoc(), SourceManager)) {
+    return;
+  }
+  const ParmVarDecl* FirstOutput = nullptr;
+  for (const ParmVarDecl* Parameter : Function->getParams()) {
+    if (!Parameter) {
+      continue;
+    }
+    if (Parameter->getName().starts_with("out_")) {
+      if (!FirstOutput) {
+        FirstOutput = Parameter;
+      }
+    } else if (FirstOutput) {
+      diag(FirstOutput->getLocation(),
+           "output parameter %0 must follow all non-output parameters")
+          << FirstOutput;
+      diag(Parameter->getLocation(), "non-output parameter follows here",
+           DiagnosticIDs::Note);
+      return;
+    }
+  }
+}
 
 AssertOutputCallCheck::AssertOutputCallCheck(StringRef Name,
                                              ClangTidyContext* Context)

@@ -54,7 +54,7 @@ static iree_string_view_t LookupArrayElement(iree_string_view_t array,
 
 TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ORIGIN_ROWS |
@@ -312,7 +312,7 @@ TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
 
 TEST(CompileReportFormatTest, FormatsWaitPlanningRows) {
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.requested_detail_flags = LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN;
 
   loom_target_compile_report_wait_plan_t wait_plan = {

@@ -1914,9 +1914,9 @@ static void iree_hal_task_queue_execute_recording_inline(
     // Context on the stack — no heap allocation.
     iree_hal_cmd_block_processor_context_t processor_context;
     iree_hal_cmd_block_processor_context_initialize(
-        &processor_context, recording, /*binding_table=*/NULL,
-        /*binding_table_length=*/0, (iree_hal_cmd_block_state_t*)state_storage,
-        state_size);
+        recording, /*binding_table=*/NULL, /*binding_table_length=*/0,
+        (iree_hal_cmd_block_state_t*)state_storage, state_size,
+        &processor_context);
 
     iree_hal_cmd_block_processor_worker_state_t worker_state = {0};
     iree_hal_cmd_block_processor_drain_result_t result;

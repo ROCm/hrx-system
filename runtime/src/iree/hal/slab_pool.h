@@ -107,9 +107,9 @@ IREE_API_EXPORT iree_status_t iree_hal_slab_pool_acquire_with_credit(
     iree_hal_pool_t* pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     iree_hal_memory_credit_t* credit,
+    iree_hal_pool_acquire_callback_t completion,
     iree_hal_pool_reservation_t* out_reservations,
-    iree_hal_pool_acquire_info_t* out_infos,
-    iree_hal_pool_acquire_callback_t completion);
+    iree_hal_pool_acquire_info_t* out_infos);
 
 #ifdef __cplusplus
 }  // extern "C"

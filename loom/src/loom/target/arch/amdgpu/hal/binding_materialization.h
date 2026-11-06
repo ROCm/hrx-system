@@ -67,9 +67,8 @@ typedef struct loom_amdgpu_hal_binding_materialization_result_t {
 iree_status_t loom_amdgpu_hal_binding_materialize(
     loom_module_t* module, loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set,
-    loom_value_id_t kernarg_ptr,
-    loom_amdgpu_hal_binding_materialization_result_t* out_result,
-    iree_arena_allocator_t* scratch_arena);
+    loom_value_id_t kernarg_ptr, iree_arena_allocator_t* scratch_arena,
+    loom_amdgpu_hal_binding_materialization_result_t* out_result);
 
 // Expands only amdgpu.hal.buffer_descriptor pseudos in |function_op|.
 //
@@ -81,8 +80,8 @@ iree_status_t loom_amdgpu_hal_binding_materialize(
 iree_status_t loom_amdgpu_hal_binding_materialize_buffer_descriptors(
     loom_module_t* module, loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set,
-    iree_host_size_t* out_materialized_count,
-    iree_arena_allocator_t* scratch_arena);
+    iree_arena_allocator_t* scratch_arena,
+    iree_host_size_t* out_materialized_count);
 
 #ifdef __cplusplus
 }  // extern "C"

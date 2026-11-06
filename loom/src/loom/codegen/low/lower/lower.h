@@ -1114,9 +1114,9 @@ typedef struct loom_low_lower_policy_registry_t {
 // Initializes |out_registry| from a target-owned entry table. The table is
 // borrowed and must outlive |out_registry|.
 void loom_low_lower_policy_registry_initialize_from_entries(
-    loom_low_lower_policy_registry_t* out_registry,
     const loom_low_lower_policy_registry_entry_t* entries,
-    iree_host_size_t entry_count);
+    iree_host_size_t entry_count,
+    loom_low_lower_policy_registry_t* out_registry);
 
 // Looks up the lowering policy for |contract_set_stable_id|, or returns NULL
 // when no row matches. The registry table is target-owned static data;

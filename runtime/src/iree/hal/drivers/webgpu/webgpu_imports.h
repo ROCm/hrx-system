@@ -44,23 +44,24 @@ extern "C" {
 
 // Requests a GPU adapter. Async: completion delivered via proactor ring with
 // |token|. On success (status_code == 0), the adapter handle is written to
-// |out_adapter_handle_ptr| in wasm linear memory before the completion is
-// posted. |options_flags| is reserved for future use (power preference, etc.).
+// |adapter_handle_output_address| in wasm linear memory before the completion
+// is posted. |options_flags| is reserved for future use (power preference,
+// etc.).
 __attribute__((import_module("iree_webgpu"),
                import_name("request_adapter"))) extern void
 iree_hal_webgpu_import_request_adapter(uint32_t options_flags,
-                                       uint32_t out_adapter_handle_ptr,
+                                       uint32_t adapter_handle_output_address,
                                        uint32_t token);
 
 // Requests a device from an adapter. Async: completion delivered via proactor
 // ring with |token|. On success (status_code == 0), the device handle is
-// written to |out_device_handle_ptr| in wasm linear memory before the
+// written to |device_handle_output_address| in wasm linear memory before the
 // completion is posted.
 __attribute__((import_module("iree_webgpu"),
                import_name("adapter_request_device"))) extern void
-iree_hal_webgpu_import_adapter_request_device(uint32_t adapter_handle,
-                                              uint32_t out_device_handle_ptr,
-                                              uint32_t token);
+iree_hal_webgpu_import_adapter_request_device(
+    uint32_t adapter_handle, uint32_t device_handle_output_address,
+    uint32_t token);
 
 // Destroys a device and releases its handle.
 __attribute__((import_module("iree_webgpu"),
@@ -428,15 +429,17 @@ iree_hal_webgpu_import_get_preconfigured_device(void);
 #else  // !IREE_PLATFORM_WASM — native stubs
 
 static inline void iree_hal_webgpu_import_request_adapter(
-    uint32_t options_flags, uint32_t out_adapter_handle_ptr, uint32_t token) {
+    uint32_t options_flags, uint32_t adapter_handle_output_address,
+    uint32_t token) {
   (void)options_flags;
-  (void)out_adapter_handle_ptr;
+  (void)adapter_handle_output_address;
   (void)token;
 }
 static inline void iree_hal_webgpu_import_adapter_request_device(
-    uint32_t adapter_handle, uint32_t out_device_handle_ptr, uint32_t token) {
+    uint32_t adapter_handle, uint32_t device_handle_output_address,
+    uint32_t token) {
   (void)adapter_handle;
-  (void)out_device_handle_ptr;
+  (void)device_handle_output_address;
   (void)token;
 }
 static inline void iree_hal_webgpu_import_device_destroy(

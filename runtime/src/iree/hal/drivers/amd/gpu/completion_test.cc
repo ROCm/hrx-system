@@ -176,7 +176,8 @@ class CompletionTest : public ::testing::Test {
             [](void* user_data, amdf_status_t,
                iree_hal_amd_gpu_completion_scope_t* scope,
                iree_hal_amd_gpu_completion_wait_t* out_wait,
-               iree_hal_amd_gpu_completion_copy_t*) {
+               iree_hal_amd_gpu_completion_copy_t* out_copy) {
+              (void)out_copy;
               return (*static_cast<WaitCallout*>(user_data))(scope, out_wait);
             },
         .user_data = &callback,

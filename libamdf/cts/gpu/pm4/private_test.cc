@@ -81,7 +81,7 @@ TEST_F(Pm4DispatchTest, PrivateStorageReplacementAndReuseAcrossQueues) {
       ASSERT_NO_FATAL_FAILURE(
           CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
                        scratch_byte_length + 2 * kGuardWords * sizeof(uint32_t),
-                       &scratch, AMDF_MEMORY_FLAG_HOST_COHERENT));
+                       AMDF_MEMORY_FLAG_HOST_COHERENT, &scratch));
       ASSERT_EQ(scratch->device_address % 256, 0u);
       auto* words = static_cast<uint32_t*>(scratch->host.pointer);
       std::fill_n(words, scratch->info.byte_length / sizeof(uint32_t), kGuard);

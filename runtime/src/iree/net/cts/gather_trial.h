@@ -53,8 +53,8 @@ struct GatherTrialResult : CollectiveTransportResult {
 iree_status_t RunGatherTrial(
     const TransportBackend& transport,
     const iree::async::cts::ProactorFactory& create_proactor,
-    const GatherTrialOptions& options, GatherTrialResult* out_result,
-    TransferTrialMeasurement measurement = {});
+    const GatherTrialOptions& options, TransferTrialMeasurement measurement,
+    GatherTrialResult* out_result);
 
 }  // namespace iree::net::cts
 

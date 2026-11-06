@@ -108,7 +108,7 @@ iree_status_t loom_bytecode_attribute_decode_named(
     loom_bytecode_attribute_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
-    loom_attribute_t* out_attr, iree_host_size_t available_type_count);
+    iree_host_size_t available_type_count, loom_attribute_t* out_attr);
 
 // Skips a bounded scoped-type payload during symbol indexing. The full or
 // selected materializer owns validation and construction of reached records.
@@ -232,15 +232,16 @@ iree_status_t loom_bytecode_attribute_materialize_named(
     loom_bytecode_attribute_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
-    loom_attribute_t* out_attr, iree_host_size_t available_type_count);
+    iree_host_size_t available_type_count, loom_attribute_t* out_attr);
 
 // Materializes an attribute whose predicate VALUE arguments are SSA numbers.
 iree_status_t loom_bytecode_attribute_materialize_ssa(
     loom_bytecode_attribute_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
-    loom_attribute_t* out_attr, iree_host_size_t available_type_count,
-    const loom_bytecode_attribute_ssa_materialization_scope_t* ssa_scope);
+    iree_host_size_t available_type_count,
+    const loom_bytecode_attribute_ssa_materialization_scope_t* ssa_scope,
+    loom_attribute_t* out_attr);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -18,7 +18,7 @@ class DirectTransferTrialTest
   void Run(const DirectTransferTrialOptions& options) {
     DirectTransferTrialResult result;
     iree_status_t status = RunDirectTransferTrial(
-        GetTransportBackend(), GetParam().factory, options, &result);
+        GetTransportBackend(), GetParam().factory, options, {}, &result);
     if (!result.available && iree_status_is_unavailable(status)) {
       std::string reason = iree::Status::ToString(status);
       iree_status_free(status);

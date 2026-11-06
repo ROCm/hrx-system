@@ -224,8 +224,8 @@ TEST_P(SemaphoreNativeWaitTest, RetainsNativeBackingThroughPublicRetirement) {
   ExpectAvailableSignals(8);
   iree_async_single_frontier_t frontier;
   EXPECT_EQ(iree_async_semaphore_query_frontier(
-                reinterpret_cast<iree_async_semaphore_t*>(semaphore),
-                iree_async_single_frontier_as_frontier(&frontier), 1),
+                reinterpret_cast<iree_async_semaphore_t*>(semaphore), 1,
+                iree_async_single_frontier_as_frontier(&frontier)),
             1u);
   EXPECT_EQ(frontier.entries[0].axis, 7u);
   EXPECT_EQ(frontier.entries[0].epoch, 10u);
@@ -489,8 +489,8 @@ TEST_F(SemaphoreTest, SubmittedProducerDoesNotBecomeCompletedHistory) {
   EXPECT_EQ(consumer_frontier[1], 0u);
   EXPECT_EQ(consumer_frontier[2], 0u);
   EXPECT_EQ(iree_async_semaphore_query_frontier(
-                reinterpret_cast<iree_async_semaphore_t*>(semaphore),
-                iree_async_single_frontier_as_frontier(&frontier), 1),
+                reinterpret_cast<iree_async_semaphore_t*>(semaphore), 1,
+                iree_async_single_frontier_as_frontier(&frontier)),
             1u);
   EXPECT_EQ(frontier.entries[0].axis, 7u);
   EXPECT_EQ(frontier.entries[0].epoch, 10u);

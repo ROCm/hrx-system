@@ -259,14 +259,14 @@ typedef struct loom_native_elf_layout_t {
 // and remains live through writing. Failed construction leaves allocations for
 // the arena reset.
 iree_status_t loom_native_elf32le_build_layout(
-    const loom_native_elf32le_file_t* file,
-    loom_native_elf_layout_t* out_layout, iree_arena_allocator_t* arena);
+    const loom_native_elf32le_file_t* file, iree_arena_allocator_t* arena,
+    loom_native_elf_layout_t* out_layout);
 
 // ELF64 variant of loom_native_elf32le_build_layout with the same shape and
 // arena ownership contract.
 iree_status_t loom_native_elf64le_build_layout(
-    const loom_native_elf64le_file_t* file,
-    loom_native_elf_layout_t* out_layout, iree_arena_allocator_t* arena);
+    const loom_native_elf64le_file_t* file, iree_arena_allocator_t* arena,
+    loom_native_elf_layout_t* out_layout);
 
 // Writes a complete ELF file using its retained |layout|. The file must satisfy
 // the build_layout shape contract. Writing allocates no layout storage, emits

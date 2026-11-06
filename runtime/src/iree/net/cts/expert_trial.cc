@@ -635,8 +635,8 @@ struct Rank : CollectiveRank {
 iree_status_t RunExpertTrial(
     const TransportBackend& transport,
     const iree::async::cts::ProactorFactory& create_proactor,
-    const ExpertTrialOptions& options, ExpertTrialResult* out_result,
-    TransferTrialMeasurement measurement) {
+    const ExpertTrialOptions& options, TransferTrialMeasurement measurement,
+    ExpertTrialResult* out_result) {
   *out_result = {};
   if (options.rank_count < 2 || options.rank_count > 8 ||
       !options.expert_count || options.expert_count % options.rank_count ||
@@ -699,7 +699,7 @@ iree_status_t RunExpertTrial(
     ranks.push_back(std::make_unique<Rank>(control, index, options, layout));
   }
   iree_status_t status = RunCollectiveGroup(transport, create_proactor, control,
-                                            ranks, out_result, measurement);
+                                            ranks, measurement, out_result);
   if (iree_status_is_ok(status)) {
     out_result->rounds = options.measured_rounds;
     for (auto& rank : ranks) {

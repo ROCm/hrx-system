@@ -54,14 +54,14 @@ TEST_P(AqlSystemPayloadTest,
   GpuMemory* arguments = nullptr;
   GpuMemory* completion = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(AMDF_MEMORY_ACCESS_READ,
-                                       kWordCount * sizeof(uint32_t), &input,
-                                       GetParam()));
+                                       kWordCount * sizeof(uint32_t),
+                                       GetParam(), &input));
   ASSERT_NO_FATAL_FAILURE(
       CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-                   kWordCount * sizeof(uint32_t), &intermediate, GetParam()));
+                   kWordCount * sizeof(uint32_t), GetParam(), &intermediate));
   ASSERT_NO_FATAL_FAILURE(
       CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
-                   kWordCount * sizeof(uint32_t), &output, GetParam()));
+                   kWordCount * sizeof(uint32_t), GetParam(), &output));
   ASSERT_NO_FATAL_FAILURE(
       CreateMemory(AMDF_MEMORY_ACCESS_READ, kPageByteLength, &arguments));
   ASSERT_NO_FATAL_FAILURE(

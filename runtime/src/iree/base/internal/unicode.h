@@ -597,8 +597,8 @@ uint32_t iree_unicode_compose_pair(uint32_t base, uint32_t combining);
 //   Stream-Safe Text Format (30 characters) and handles all real-world text.
 //
 // Requires valid UTF-8 input. Behavior is undefined for invalid sequences.
-iree_status_t iree_unicode_compose(iree_string_view_t input, char* out_buffer,
-                                   iree_host_size_t capacity,
+iree_status_t iree_unicode_compose(iree_string_view_t input,
+                                   iree_host_size_t capacity, char* out_buffer,
                                    iree_host_size_t* out_length);
 
 // Applies full NFC (Canonical Composition) normalization to UTF-8 input.

@@ -405,8 +405,8 @@ TEST_P(GpuNativeDispatchTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
         timeline, kSteps, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
     CompletedFrontier frontier;
     const uint8_t count = iree_async_semaphore_query_frontier(
-        reinterpret_cast<iree_async_semaphore_t*>(timeline),
-        iree_async_fixed_frontier_as_frontier(&frontier), 2);
+        reinterpret_cast<iree_async_semaphore_t*>(timeline), 2,
+        iree_async_fixed_frontier_as_frontier(&frontier));
     ASSERT_EQ(count, queue_count);
     for (uint8_t i = 0; i < count; ++i) {
       EXPECT_TRUE(iree_async_frontier_tracker_query_epoch(

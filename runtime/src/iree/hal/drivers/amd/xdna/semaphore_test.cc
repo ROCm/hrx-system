@@ -126,7 +126,7 @@ TEST_F(SemaphoreTest, RetainsSixtyFourEntryFrontier) {
       /*producer_value=*/1));
 
   const uint8_t actual_count = iree_async_semaphore_query_frontier(
-      reinterpret_cast<iree_async_semaphore_t*>(semaphore_), nullptr, 0);
+      reinterpret_cast<iree_async_semaphore_t*>(semaphore_), 0, nullptr);
   EXPECT_EQ(actual_count, IREE_HAL_AMD_XDNA_FRONTIER_CAPACITY);
 }
 
@@ -147,7 +147,7 @@ TEST_F(SemaphoreTest, OverflowPreservesLowerBoundAndClearsMetadata) {
       /*producer_value=*/2));
   EXPECT_EQ(
       iree_async_semaphore_query_frontier(
-          reinterpret_cast<iree_async_semaphore_t*>(semaphore_), nullptr, 0),
+          reinterpret_cast<iree_async_semaphore_t*>(semaphore_), 0, nullptr),
       1u);
 
   iree_hal_submitted_signal_flags_t flags = IREE_HAL_SUBMITTED_SIGNAL_FLAG_NONE;

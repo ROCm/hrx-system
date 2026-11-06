@@ -148,12 +148,15 @@ void DeviceGeneratedSdmaStagedTest::Run(const DeviceSdmaStagedCase& test_case) {
   GpuUserQueue* compute = nullptr;
   GpuUserQueue* transfer = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateQueue(
-      family_, &compute, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-      AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, kComputeRingByteLength));
-  ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(sdma_family_, &transfer, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-                      AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER));
+      family_, GpuUserQueueOptions{.ring_byte_length = kComputeRingByteLength},
+      &compute));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(
+      sdma_family_,
+      GpuUserQueueOptions{
+          .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                                   AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
+      },
+      &transfer));
   const auto& mapping = transfer->producer.info;
   uint64_t packet_index = 0;
   uint64_t transfer_descriptor = 0;

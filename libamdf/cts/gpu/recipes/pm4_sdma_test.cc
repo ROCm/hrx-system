@@ -96,7 +96,7 @@ class Pm4SdmaRecipeTest : public Pm4SdmaTest {
     std::array<amdf_cache_operations_t, kTransferPhaseCount> sdma_operations = {
         required_sdma_operations, required_sdma_operations};
     ASSERT_NO_FATAL_FAILURE(PrepareCoherentHandoff(
-        kernel, query_kind, kEdges, backings, &program, &sdma_operations));
+        kernel, query_kind, kEdges, backings, &sdma_operations, &program));
     auto& source = *backings[kSource].memory;
     auto& input = *backings[kInput].memory;
     auto& output = *backings[kOutput].memory;

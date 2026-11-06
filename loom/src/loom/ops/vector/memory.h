@@ -216,8 +216,8 @@ loom_vector_memory_footprint_kind_t loom_vector_memory_op_footprint_kind(
 // Returns false when any footprint axis is dynamic or when |capacity| is
 // smaller than the view rank.
 bool loom_vector_memory_footprint_static_extents(
-    const loom_vector_memory_footprint_t* footprint, int64_t* out_extents,
-    iree_host_size_t capacity);
+    const loom_vector_memory_footprint_t* footprint, iree_host_size_t capacity,
+    int64_t* out_extents);
 
 // Extracts the optional cache policy through the operation's CachePolicy
 // interface, including scalar/vector accesses and asynchronous transfers.

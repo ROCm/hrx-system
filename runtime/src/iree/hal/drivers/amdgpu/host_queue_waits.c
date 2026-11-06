@@ -202,9 +202,8 @@ static bool iree_hal_amdgpu_host_queue_resolve_wait(
   // axes that our queue doesn't dominate.
   iree_hal_amdgpu_fixed_frontier_t semaphore_frontier;
   iree_async_semaphore_query_frontier(
-      async_semaphore,
-      iree_hal_amdgpu_fixed_frontier_as_frontier(&semaphore_frontier),
-      IREE_HAL_AMDGPU_QUEUE_FRONTIER_CAPACITY);
+      async_semaphore, IREE_HAL_AMDGPU_QUEUE_FRONTIER_CAPACITY,
+      iree_hal_amdgpu_fixed_frontier_as_frontier(&semaphore_frontier));
 
   // Publication updates the frontier and cache under the same mutex used by
   // the copy above. Recheck afterward so a newer frontier cannot silently

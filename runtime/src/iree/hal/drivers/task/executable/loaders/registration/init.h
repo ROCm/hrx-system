@@ -29,8 +29,7 @@ extern "C" {
 //  iree_host_size_t count = 0;
 //  iree_hal_executable_loader_t* loaders[8] = {NULL};
 //  IREE_RETURN_IF_ERROR(iree_hal_create_all_available_executable_loaders(
-//      IREE_ARRAYSIZE(loaders), &count, loaders,
-//      host_allocator));
+//      IREE_ARRAYSIZE(loaders), host_allocator, &count, loaders));
 //  ...
 //  // use up to count loaders
 //  ...
@@ -38,8 +37,8 @@ extern "C" {
 //    iree_hal_executable_loader_release(loaders[i]);
 //  }
 IREE_API_EXPORT iree_status_t iree_hal_create_all_available_executable_loaders(
-    iree_host_size_t capacity, iree_host_size_t* out_count,
-    iree_hal_executable_loader_t** loaders, iree_allocator_t host_allocator);
+    iree_host_size_t capacity, iree_allocator_t host_allocator,
+    iree_host_size_t* out_count, iree_hal_executable_loader_t** out_loaders);
 
 // Creates an executable loader with the given |name|.
 // |out_executable_loader| must be released by the caller.

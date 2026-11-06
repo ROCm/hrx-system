@@ -586,7 +586,7 @@ static iree_status_t loom_spirv_program_compile(
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(loom_spirv_program_emit_binary(out_program, arena,
-                                                      out_module, allocator));
+                                                      allocator, out_module));
   *out_emitted = true;
   return iree_ok_status();
 }

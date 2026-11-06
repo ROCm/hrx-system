@@ -122,7 +122,7 @@ static iree_status_t loom_native_elf_image_measure_fixups(
 static iree_status_t loom_native_elf_image_allocate_payload(
     iree_string_view_t name, uint32_t type, uint64_t alignment,
     iree_host_size_t count, iree_host_size_t entry_size,
-    loom_native_elf_section_t* out_section, iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* arena, loom_native_elf_section_t* out_section) {
   uint8_t* contents = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(arena, count, entry_size, (void**)&contents));
@@ -285,19 +285,19 @@ static iree_status_t loom_native_elf_image_prepare_symbols(
   }
   IREE_RETURN_IF_ERROR(loom_native_elf_image_allocate_payload(
       IREE_SV(".dynsym"), LOOM_NATIVE_ELF_SECTION_TYPE_DYNSYM, 8, export_count,
-      LOOM_NATIVE_IMAGE_SYMBOL_SIZE, &image->sections[LOOM_NATIVE_IMAGE_DYNSYM],
-      arena));
+      LOOM_NATIVE_IMAGE_SYMBOL_SIZE, arena,
+      &image->sections[LOOM_NATIVE_IMAGE_DYNSYM]));
   image->sections[LOOM_NATIVE_IMAGE_DYNSYM].link = LOOM_NATIVE_IMAGE_DYNSTR + 1;
   image->sections[LOOM_NATIVE_IMAGE_DYNSYM].info = 1;
   memset((void*)image->sections[LOOM_NATIVE_IMAGE_DYNSYM].contents.data, 0,
          LOOM_NATIVE_IMAGE_SYMBOL_SIZE);
   IREE_RETURN_IF_ERROR(loom_native_elf_image_allocate_payload(
       IREE_SV(".dynstr"), LOOM_NATIVE_ELF_SECTION_TYPE_STRTAB, 1, string_length,
-      1, &image->sections[LOOM_NATIVE_IMAGE_DYNSTR], arena));
+      1, arena, &image->sections[LOOM_NATIVE_IMAGE_DYNSTR]));
   image->sections[LOOM_NATIVE_IMAGE_DYNSTR].entry_size = 0;
   loom_native_elf_hash_t hash;
   IREE_RETURN_IF_ERROR(
-      loom_native_elf_hash_initialize(export_count, &hash, arena));
+      loom_native_elf_hash_initialize(export_count, arena, &hash));
   for (iree_host_size_t i = 0; i < contribution->symbol_count; ++i) {
     if (image->symbols[i].dynamic_index) {
       loom_native_elf_hash_insert(&hash, contribution->symbols[i].name,
@@ -456,7 +456,7 @@ iree_status_t loom_native_image_write_elf64le(
       contribution, options, &pointer_count));
   loom_native_section_contribution_assembly_t assembly = {0};
   IREE_RETURN_IF_ERROR(loom_native_assemble_section_contributions(
-      contribution->sections, contribution->section_count, &assembly, arena));
+      contribution->sections, contribution->section_count, arena, &assembly));
   loom_native_elf_segment_t segments[6] = {0};
   loom_native_elf_image_t image = {0};
   image.file.type = LOOM_NATIVE_ELF_FILE_TYPE_DYN;
@@ -468,14 +468,14 @@ iree_status_t loom_native_image_write_elf64le(
       contribution, &assembly, &image, arena));
   IREE_RETURN_IF_ERROR(loom_native_elf_image_allocate_payload(
       IREE_SV(".dynamic"), LOOM_NATIVE_ELF_SECTION_TYPE_DYNAMIC, 8,
-      pointer_count ? 9 : 6, LOOM_NATIVE_IMAGE_DYNAMIC_SIZE,
-      &image.sections[LOOM_NATIVE_IMAGE_DYNAMIC], arena));
+      pointer_count ? 9 : 6, LOOM_NATIVE_IMAGE_DYNAMIC_SIZE, arena,
+      &image.sections[LOOM_NATIVE_IMAGE_DYNAMIC]));
   image.sections[LOOM_NATIVE_IMAGE_DYNAMIC].link = LOOM_NATIVE_IMAGE_DYNSTR + 1;
   if (pointer_count) {
     IREE_RETURN_IF_ERROR(loom_native_elf_image_allocate_payload(
         IREE_SV(".rela.dyn"), LOOM_NATIVE_ELF_SECTION_TYPE_RELA, 8,
-        pointer_count, LOOM_NATIVE_IMAGE_RELA_SIZE,
-        &image.sections[LOOM_NATIVE_IMAGE_RELA], arena));
+        pointer_count, LOOM_NATIVE_IMAGE_RELA_SIZE, arena,
+        &image.sections[LOOM_NATIVE_IMAGE_RELA]));
     image.sections[LOOM_NATIVE_IMAGE_RELA].link = LOOM_NATIVE_IMAGE_DYNSYM + 1;
     image.relocations = iree_make_byte_span(
         (void*)image.sections[LOOM_NATIVE_IMAGE_RELA].contents.data,
@@ -489,7 +489,7 @@ iree_status_t loom_native_image_write_elf64le(
     }
   }
   IREE_RETURN_IF_ERROR(
-      loom_native_elf64le_build_layout(&image.file, &image.layout, arena));
+      loom_native_elf64le_build_layout(&image.file, arena, &image.layout));
   uint64_t memory_end = 0;
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0;

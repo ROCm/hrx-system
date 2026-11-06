@@ -284,9 +284,9 @@ static iree_status_t loom_x86_source_signature_allocate_physical_arrays(
 static void loom_x86_source_signature_projection_target_initialize(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_x86_entry_descriptors_t* entry,
-    loom_low_c_abi_move_descriptor_t moves[4], uint16_t* out_move_count,
+    loom_low_c_abi_move_descriptor_t moves[4],
     loom_low_c_abi_vector_memory_descriptor_t vector_memory[3],
-    uint16_t* out_vector_memory_count,
+    uint16_t* out_move_count, uint16_t* out_vector_memory_count,
     loom_low_c_abi_projection_target_t* out_target) {
   *out_move_count = 0;
   if (entry->maximum_simd_byte_length >= 16) {
@@ -513,7 +513,7 @@ iree_status_t loom_x86_plan_source_signature(
   uint16_t vector_memory_count = 0;
   loom_low_c_abi_projection_target_t projection_target;
   loom_x86_source_signature_projection_target_initialize(
-      descriptor_set, entry, moves, &move_count, vector_memory,
+      descriptor_set, entry, moves, vector_memory, &move_count,
       &vector_memory_count, &projection_target);
   iree_string_view_t unsupported_reason;
   if (!loom_low_c_abi_projection_plan_finalize(

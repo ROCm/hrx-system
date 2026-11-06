@@ -600,8 +600,8 @@ TEST(XdnaQueueMemoryTest, CapacityReturnedBeforeDeferredResultIsObserved) {
   auto call = deferred->TakeFirstAcquisition();
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      pool, call.count, call.requests, call.frontier, call.reservations,
-      call.infos, &result, call.flags));
+      pool, call.count, call.requests, call.frontier, call.flags,
+      call.reservations, call.infos, &result));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OVER_BUDGET);
 
   // Native acquisition already produced an unavailable result, but its
@@ -646,8 +646,8 @@ TEST(XdnaQueueMemoryTest, SharedPrerequisiteDoesNotOverflowLargeBatch) {
   std::array<iree_hal_pool_acquire_info_t, kCount> infos = {};
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      pool, kCount, requests.data(), nullptr, reservations.data(), infos.data(),
-      &result, IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      pool, kCount, requests.data(), nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      reservations.data(), infos.data(), &result));
   ASSERT_NE(result, IREE_HAL_POOL_ACQUIRE_EXHAUSTED);
   const auto axis = iree_async_axis_make_queue(1, 2, 3, 4, 5);
   IREE_ASSERT_OK(iree_async_frontier_tracker_register_axis(

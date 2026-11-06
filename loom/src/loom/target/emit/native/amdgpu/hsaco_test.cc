@@ -102,7 +102,7 @@ iree_status_t WriteHsaco(const loom_amdgpu_hsaco_input_t* input,
                          iree_io_stream_t* stream,
                          iree_arena_allocator_t* arena) {
   loom_amdgpu_hsaco_plan_t plan = {};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_plan_build(input, &plan, arena));
+  IREE_RETURN_IF_ERROR(loom_amdgpu_hsaco_plan_build(input, arena, &plan));
   return loom_amdgpu_hsaco_write_plan(&plan, stream, arena);
 }
 

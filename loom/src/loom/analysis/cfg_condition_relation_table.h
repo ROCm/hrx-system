@@ -57,8 +57,8 @@ typedef struct loom_cfg_condition_relation_table_builder_t {
 // |arena|. All transient root and serialization storage uses |scratch_arena|.
 iree_status_t loom_cfg_condition_relation_table_publish(
     loom_cfg_condition_relation_table_builder_t* builder,
-    loom_cfg_condition_relation_table_t* out_table,
-    iree_arena_allocator_t* scratch_arena, iree_arena_allocator_t* arena);
+    iree_arena_allocator_t* scratch_arena, iree_arena_allocator_t* arena,
+    loom_cfg_condition_relation_table_t* out_table);
 
 #ifdef __cplusplus
 }  // extern "C"

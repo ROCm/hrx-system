@@ -1613,13 +1613,13 @@ static iree_status_t loom_spirv_emit_function_state_initialize(
       context->module, body, context->scratch_arena, &out_state->value_domain);
   if (iree_status_is_ok(status)) {
     status = loom_spirv_module_workgroup_storage_initialize(
-        &out_state->value_domain, &out_state->workgroup_storage,
-        context->scratch_arena);
+        &out_state->value_domain, context->scratch_arena,
+        &out_state->workgroup_storage);
   }
   if (iree_status_is_ok(status)) {
     status = loom_spirv_module_value_table_initialize(&out_state->value_domain,
-                                                      &out_state->value_table,
-                                                      context->scratch_arena);
+                                                      context->scratch_arena,
+                                                      &out_state->value_table);
   }
   if (!iree_status_is_ok(status)) {
     loom_spirv_emit_function_state_deinitialize(out_state);

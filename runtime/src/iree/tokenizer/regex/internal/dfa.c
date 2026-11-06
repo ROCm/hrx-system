@@ -140,13 +140,14 @@ typedef struct iree_tokenizer_regex_epsilon_work_item_t {
 //   - false: we're computing a target after consuming input (position > 0)
 // |worklist| is pre-allocated workspace of size >= nfa->state_count.
 // |out_set| receives the epsilon closure (states reachable via epsilon).
-// |anchor_info| optionally tracks which accepts were reached via ANCHOR_END.
+// |inout_anchor_info| optionally tracks which accepts were reached via
+// ANCHOR_END.
 static void iree_tokenizer_regex_epsilon_closure_single_with_anchors(
     const iree_tokenizer_regex_nfa_t* nfa,
     const iree_tokenizer_regex_nfa_state_t* initial_state, bool at_start,
     iree_tokenizer_regex_epsilon_work_item_t* worklist,
-    iree_tokenizer_regex_nfa_state_set_t* out_set,
-    iree_tokenizer_regex_anchor_info_t* anchor_info) {
+    iree_tokenizer_regex_anchor_info_t* inout_anchor_info,
+    iree_tokenizer_regex_nfa_state_set_t* out_set) {
   if (!initial_state) {
     return;
   }
@@ -176,9 +177,10 @@ static void iree_tokenizer_regex_epsilon_closure_single_with_anchors(
 
     // Track accept states reached via end anchor.
     if (state->type == IREE_TOKENIZER_UTIL_REGEX_NFA_ACCEPT &&
-        through_end_anchor && anchor_info && anchor_info->end_anchor_accepts) {
-      iree_tokenizer_regex_nfa_state_set_add(anchor_info->end_anchor_accepts,
-                                             state->id);
+        through_end_anchor && inout_anchor_info &&
+        inout_anchor_info->end_anchor_accepts) {
+      iree_tokenizer_regex_nfa_state_set_add(
+          inout_anchor_info->end_anchor_accepts, state->id);
     }
 
     // Follow epsilon-like transitions by pushing to worklist.
@@ -238,16 +240,17 @@ static void iree_tokenizer_regex_epsilon_closure_set_with_anchors(
     const iree_tokenizer_regex_nfa_t* nfa,
     const iree_tokenizer_regex_nfa_state_set_t* input_set, bool at_start,
     iree_tokenizer_regex_epsilon_work_item_t* worklist,
-    iree_tokenizer_regex_nfa_state_set_t* out_set,
-    iree_tokenizer_regex_anchor_info_t* anchor_info) {
+    iree_tokenizer_regex_anchor_info_t* inout_anchor_info,
+    iree_tokenizer_regex_nfa_state_set_t* out_set) {
   iree_tokenizer_regex_nfa_state_set_clear(out_set);
-  if (anchor_info && anchor_info->end_anchor_accepts) {
-    iree_tokenizer_regex_nfa_state_set_clear(anchor_info->end_anchor_accepts);
+  if (inout_anchor_info && inout_anchor_info->end_anchor_accepts) {
+    iree_tokenizer_regex_nfa_state_set_clear(
+        inout_anchor_info->end_anchor_accepts);
   }
   for (uint32_t i = 0; i < nfa->state_count; ++i) {
     if (iree_tokenizer_regex_nfa_state_set_contains(input_set, i)) {
       iree_tokenizer_regex_epsilon_closure_single_with_anchors(
-          nfa, nfa->states[i], at_start, worklist, out_set, anchor_info);
+          nfa, nfa->states[i], at_start, worklist, inout_anchor_info, out_set);
     }
   }
 }
@@ -904,7 +907,7 @@ iree_status_t iree_tokenizer_regex_dfa_build(
   // at_start=true because we're at position 0, so ANCHOR_START is valid.
   iree_tokenizer_regex_nfa_state_set_clear(&current_set);
   iree_tokenizer_regex_epsilon_closure_single_with_anchors(
-      nfa, nfa->start, /*at_start=*/true, epsilon_worklist, &current_set, NULL);
+      nfa, nfa->start, /*at_start=*/true, epsilon_worklist, NULL, &current_set);
 
   // For anchors, use two-pass algorithm to compute end_anchor_accepts.
   // Pass 1: Full closure (done above).
@@ -947,8 +950,8 @@ iree_status_t iree_tokenizer_regex_dfa_build(
   IREE_RETURN_IF_ERROR(iree_tokenizer_regex_nfa_state_set_init(
       arena, nfa->state_count, &unanchored_set));
   iree_tokenizer_regex_epsilon_closure_single_with_anchors(
-      nfa, nfa->start, /*at_start=*/false, epsilon_worklist, &unanchored_set,
-      NULL);
+      nfa, nfa->start, /*at_start=*/false, epsilon_worklist, NULL,
+      &unanchored_set);
 
   // Determine if pattern requires start anchor. This is true when:
   // 1. NFA starts directly with ANCHOR_START, OR
@@ -1050,8 +1053,8 @@ iree_status_t iree_tokenizer_regex_dfa_build(
       // invalid. This makes patterns like `a^b` correctly produce dead-end
       // transitions.
       iree_tokenizer_regex_epsilon_closure_set_with_anchors(
-          nfa, &move_set, /*at_start=*/false, epsilon_worklist, &closure_set,
-          NULL);
+          nfa, &move_set, /*at_start=*/false, epsilon_worklist, NULL,
+          &closure_set);
 
       // Look up or create DFA state for this closure.
       iree_tokenizer_regex_dfa_state_t* target_state =
@@ -1138,8 +1141,8 @@ iree_status_t iree_tokenizer_regex_dfa_build(
           &move_set, nfa_state->data.match_class.out->id);
 
       iree_tokenizer_regex_epsilon_closure_set_with_anchors(
-          nfa, &move_set, /*at_start=*/false, epsilon_worklist, &closure_set,
-          NULL);
+          nfa, &move_set, /*at_start=*/false, epsilon_worklist, NULL,
+          &closure_set);
 
       // Look up or create target DFA state.
       iree_tokenizer_regex_dfa_state_t* range_target =

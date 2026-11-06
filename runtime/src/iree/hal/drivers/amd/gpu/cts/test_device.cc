@@ -154,9 +154,9 @@ NativeMemoryGate::~NativeMemoryGate() {
   active_.compare_exchange_strong(expected, nullptr);
 }
 
-iree_status_t NativeMemoryGate::CreateFabric(iree_hal_amd_fabric_t** out_fabric,
-                                             uint64_t maximum_byte_length,
-                                             amdf_native_lifetime_t lifetime) {
+iree_status_t NativeMemoryGate::CreateFabric(
+    uint64_t maximum_byte_length, amdf_native_lifetime_t lifetime,
+    iree_hal_amd_fabric_t** out_fabric) {
   const amdf_api_t* native_api = nullptr;
   IREE_RETURN_IF_ERROR(QueryNativeApi(&native_api));
   forwarding_api_ = *native_api;

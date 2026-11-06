@@ -105,9 +105,12 @@ void DeviceGeneratedSdmaSerialTest<DispatchTest>::RunDependentCopies() {
   GpuUserQueue* transfer = nullptr;
   ASSERT_NO_FATAL_FAILURE(this->CreateQueue(&producer.queue));
   ASSERT_NO_FATAL_FAILURE(this->CreateQueue(
-      this->sdma_family_, &transfer, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-      AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
-          AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER));
+      this->sdma_family_,
+      GpuUserQueueOptions{
+          .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER |
+                                   AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
+      },
+      &transfer));
   const auto& mapping = transfer->producer.info;
   ASSERT_GE(mapping.ring_byte_length, 4096u);
   ASSERT_LE(mapping.ring_byte_length, UINT64_C(1) << 32);

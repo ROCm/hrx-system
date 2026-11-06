@@ -57,9 +57,9 @@ class VirtualBufferContractTest : public MemoryBackendTest {
   iree_status_t CreateSource(iree_hal_pool_t** out_pool) {
     const uint64_t mapping = UINT64_C(1)
                              << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
-    return CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, out_pool, mapping,
+    return CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, mapping,
                       IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_STORAGE,
-                      {}, mapping);
+                      {}, mapping, out_pool);
   }
 
   // CPU, GPU, and NPU consumers of each replaceable physical extent.
@@ -464,9 +464,9 @@ TEST_F(MemoryBackendTest, SourceCapturesReservationAliasProtocolBeforePayload) {
   const uint64_t mapping_source = UINT64_C(1)
                                   << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                            mapping_source, IREE_HAL_MEMORY_ACCESS_ALL,
-                            IREE_HAL_BUFFER_USAGE_STORAGE, {}, mapping_source));
+  IREE_ASSERT_OK(CreatePool(
+      IREE_HAL_BUFFER_USAGE_STORAGE, mapping_source, IREE_HAL_MEMORY_ACCESS_ALL,
+      IREE_HAL_BUFFER_USAGE_STORAGE, {}, mapping_source, &pool));
   const auto* alias =
       iree_hal_memory_contract_mapping_alias(pool->memory_contract);
   ASSERT_NE(alias, pool->memory_contract);
@@ -690,16 +690,16 @@ TEST_F(MemoryBackendTest, FileTransfersQualifySourcesAfterDeviceOnlyPrefix) {
   }
   iree_hal_pool_t* pool = nullptr;
   IREE_ASSERT_OK(
-      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER, &pool,
+      CreatePool(IREE_HAL_BUFFER_USAGE_TRANSFER,
                  UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
-                 IREE_HAL_MEMORY_ACCESS_NONE));
+                 IREE_HAL_MEMORY_ACCESS_NONE, &pool));
   iree_hal_buffer_t* backing = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool, iree_hal_make_pool_reservation_request(16384, 4096),
       iree_infinite_timeout(), &backing));
   iree_hal_buffer_t* target = nullptr;
   IREE_ASSERT_OK(
-      CreateReservation(&target, pool, IREE_HAL_BUFFER_USAGE_TRANSFER));
+      CreateReservation(pool, IREE_HAL_BUFFER_USAGE_TRANSFER, &target));
   iree_hal_semaphore_t* done = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       cpu_device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0, 0, &done));
@@ -814,9 +814,9 @@ TEST_P(ReservationBackendTest, MapsExactConsumersThroughNativeProjections) {
     native_families_[i].host_usage = 0;
   }
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE));
+  IREE_ASSERT_OK(CreatePool(
+      IREE_HAL_BUFFER_USAGE_STORAGE,
+      UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE, &pool));
   iree_hal_buffer_t* backing = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool, iree_hal_make_pool_reservation_request(32768, 4096),
@@ -1058,9 +1058,9 @@ class MappingPublicationTest : public MemoryBackendTest {
       native_.address_kinds[i] = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU;
       native_families_[i].host_usage = 0;
     }
-    IREE_ASSERT_OK(
-        CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool_,
-                   UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE));
+    IREE_ASSERT_OK(CreatePool(
+        IREE_HAL_BUFFER_USAGE_STORAGE,
+        UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE, &pool_));
     IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
         pool_, iree_hal_make_pool_reservation_request(32768, 4096),
         iree_infinite_timeout(), &backing_));
@@ -1623,8 +1623,9 @@ TEST_F(MemoryBackendTest,
   iree_hal_pool_t* pool = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE));
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE,
+                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
+                 &pool));
   EXPECT_EQ(pool, nullptr);
   iree_hal_pool_release(ordinary);
 }
@@ -1644,9 +1645,9 @@ TEST_P(MappingPriorityTest, MappingOvertakesRemainingNativeSteps) {
     native_families_[i].host_usage = 0;
   }
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE));
+  IREE_ASSERT_OK(CreatePool(
+      IREE_HAL_BUFFER_USAGE_STORAGE,
+      UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE, &pool));
   iree_hal_buffer_t* backing = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       pool, iree_hal_make_pool_reservation_request(8192, 4096),

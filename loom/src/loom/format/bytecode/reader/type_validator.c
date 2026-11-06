@@ -216,7 +216,7 @@ static iree_status_t loom_bytecode_type_plan_build_shaped(
     iree_arena_allocator_t* scratch_arena, loom_type_kind_t kind,
     loom_scalar_type_t element_type, uint8_t rank, uint8_t attachment,
     uint64_t encoding_instance, uint8_t alignment, const uint64_t* dims,
-    loom_type_t* out_type, uint64_t offset) {
+    uint64_t offset, loom_type_t* out_type) {
   if (!loom_scalar_type_is_valid(element_type)) {
     return loom_bytecode_reader_emit_enum_value(
         decoder, IREE_SV("element_type"), element_type, LOOM_SCALAR_TYPE_COUNT_,
@@ -318,7 +318,7 @@ static iree_status_t loom_bytecode_type_plan_build_shaped(
 static iree_status_t loom_bytecode_type_plan_build_group(
     loom_bytecode_reader_decoder_t* decoder,
     iree_arena_allocator_t* scratch_arena, uint8_t rank,
-    const uint64_t* dimensions, loom_type_t* out_type, uint64_t offset) {
+    const uint64_t* dimensions, uint64_t offset, loom_type_t* out_type) {
   if (rank == 0 || rank > LOOM_TYPE_MAX_RANK) {
     return loom_bytecode_reader_emit_invalid_field(
         decoder, IREE_SV("TYPES"), IREE_SV("type"), 0, IREE_SV("rank"), offset,
@@ -454,8 +454,8 @@ static iree_status_t loom_bytecode_type_plan_decode_entry(
       IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_build_shaped(
           decoder, module_view, scratch_arena, kind,
           (loom_scalar_type_t)element_type, rank, attachment, encoding_instance,
-          alignment, dims, out_plan_entry ? &direct_type : NULL,
-          attachment_offset));
+          alignment, dims, attachment_offset,
+          out_plan_entry ? &direct_type : NULL));
       break;
     }
     case LOOM_TYPE_GROUP: {
@@ -494,8 +494,8 @@ static iree_status_t loom_bytecode_type_plan_decode_entry(
         }
       }
       IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_build_group(
-          decoder, scratch_arena, rank, dimensions,
-          out_plan_entry ? &direct_type : NULL, type_offset));
+          decoder, scratch_arena, rank, dimensions, type_offset,
+          out_plan_entry ? &direct_type : NULL));
       break;
     }
     case LOOM_TYPE_FUNCTION: {

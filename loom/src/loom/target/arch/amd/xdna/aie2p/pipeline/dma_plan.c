@@ -345,9 +345,9 @@ static iree_status_t loom_aie2p_native_build_lifetime(
     uint16_t available_descriptors, loom_xdna_dma_direction_t direction,
     uint32_t repetitions, uint32_t capacity, uint32_t byte_offset,
     uint32_t byte_stride, const uint32_t template_words[8],
+    iree_arena_allocator_t* arena,
     loom_aie2p_native_dma_sequence_t* out_sequence,
-    iree_string_view_t* out_reason, bool* out_valid,
-    iree_arena_allocator_t* arena) {
+    iree_string_view_t* out_reason, bool* out_valid) {
   const uint32_t middle_repetitions = repetitions - 2 * capacity;
   if (available_descriptors < 2 * capacity + (middle_repetitions != 0)) {
     *out_reason =
@@ -366,8 +366,8 @@ static iree_status_t loom_aie2p_native_build_lifetime(
   // Each boundary is one ring turn in an exactly sized descriptor range.
   IREE_RETURN_IF_ERROR(loom_aie2p_native_build_sequence(
       dma, layout, first_descriptor, capacity, direction, capacity, capacity,
-      byte_offset, byte_stride, capacity, words, &parts[0], out_reason, &valid,
-      arena));
+      byte_offset, byte_stride, capacity, words, arena, &parts[0], out_reason,
+      &valid));
   if (middle_repetitions) {
     loom_xdna_dma_facts_t middle_dma = *dma;
     middle_dma.task_queue_depth -= 2;
@@ -375,8 +375,8 @@ static iree_status_t loom_aie2p_native_build_lifetime(
     IREE_RETURN_IF_ERROR(loom_aie2p_native_build_sequence(
         &middle_dma, layout, first_descriptor + capacity,
         available_descriptors - 2 * capacity, direction, middle_repetitions,
-        capacity, byte_offset, byte_stride, 1, words, &parts[1], out_reason,
-        &valid, arena));
+        capacity, byte_offset, byte_stride, 1, words, arena, &parts[1],
+        out_reason, &valid));
     if (!valid) {
       return iree_ok_status();
     }
@@ -386,7 +386,7 @@ static iree_status_t loom_aie2p_native_build_lifetime(
   IREE_RETURN_IF_ERROR(loom_aie2p_native_build_sequence(
       dma, layout, first_descriptor + capacity + parts[1].descriptor_count,
       capacity, direction, capacity, capacity, byte_offset, byte_stride,
-      capacity, words, &parts[2], out_reason, &valid, arena));
+      capacity, words, arena, &parts[2], out_reason, &valid));
   *out_sequence = (loom_aie2p_native_dma_sequence_t){
       .descriptor = first_descriptor,
       .descriptor_count = (uint16_t)(2 * capacity + parts[1].descriptor_count),
@@ -425,16 +425,15 @@ iree_status_t loom_aie2p_native_build_sequence(
     uint16_t available_descriptors, loom_xdna_dma_direction_t direction,
     uint32_t repetitions, uint32_t capacity, uint32_t byte_offset,
     uint32_t byte_stride, uint32_t credit_interval,
-    const uint32_t template_words[8],
+    const uint32_t template_words[8], iree_arena_allocator_t* arena,
     loom_aie2p_native_dma_sequence_t* out_sequence,
-    iree_string_view_t* out_reason, bool* out_valid,
-    iree_arena_allocator_t* arena) {
+    iree_string_view_t* out_reason, bool* out_valid) {
   *out_valid = false;
   if (credit_interval == repetitions && credit_interval > capacity) {
     return loom_aie2p_native_build_lifetime(
         dma, layout, first_descriptor, available_descriptors, direction,
-        repetitions, capacity, byte_offset, byte_stride, template_words,
-        out_sequence, out_reason, out_valid, arena);
+        repetitions, capacity, byte_offset, byte_stride, template_words, arena,
+        out_sequence, out_reason, out_valid);
   }
   if (!available_descriptors) {
     *out_reason = IREE_SV("an available descriptor in the DMA channel's bank");

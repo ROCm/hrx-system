@@ -198,8 +198,8 @@ static iree_status_t loom_test_admit_module(
     if (iree_status_is_ok(status)) {
       admission_options.input.format = format->name;
       status = loom_tooling_input_admit_loomc_module(
-          &admission_options, context, workspace, block_pool, out_module,
-          &result, host_allocator);
+          &admission_options, context, workspace, block_pool, host_allocator,
+          out_module, &result);
     }
   }
   if (iree_status_is_ok(status)) {
@@ -1192,7 +1192,7 @@ int loom_test_main(int argc, char** argv,
     loomc_result_t* result = NULL;
     status = loom_tooling_cli_prepare_loomc_pass_program(
         compiler_context, module, pipeline, IREE_SV("loom-test pipeline"),
-        &pass_program, &result, allocator);
+        allocator, &pass_program, &result);
     if (iree_status_is_ok(status) && result != NULL) {
       status = loom_test_require_loomc_result(
           result, IREE_SV("pass program preparation"));

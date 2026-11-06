@@ -72,13 +72,12 @@ void loom_template_application_select(
   if (scratch->provider_evidence != NULL) {
     loom_template_decision_model_evaluate_all(
         model, site, resolution_policy, scratch->provider_evidence,
-        &scratch->summary, scratch->live_provider_ordinals,
+        scratch->live_provider_ordinals, &scratch->summary,
         &scratch->live_provider_count, &result);
   } else {
     loom_template_decision_model_evaluate(
-        model, site, resolution_policy, &scratch->summary,
-        scratch->live_provider_ordinals, &scratch->live_provider_count,
-        &result);
+        model, site, resolution_policy, scratch->live_provider_ordinals,
+        &scratch->summary, &scratch->live_provider_count, &result);
   }
   const bool family_unresolved =
       result.kind == LOOM_DECISION_PROGRAM_RESULT_UNRESOLVED &&
@@ -237,8 +236,8 @@ iree_status_t loom_template_application_load_call(
 void loom_template_application_check_call(
     const loom_module_t* module, const loom_template_application_call_t* call,
     const loom_template_decision_site_t* site,
-    loom_template_provider_classification_t* out_provider_classification,
-    loom_template_application_result_t* entry) {
+    loom_template_application_result_t* entry,
+    loom_template_provider_classification_t* out_provider_classification) {
   loom_template_application_initialize(module, site->application_op,
                                        call->provider_facts->template_family,
                                        entry);

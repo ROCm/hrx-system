@@ -361,10 +361,8 @@ static iree_status_t AppendTwoDispatchOperations(
 }
 
 static iree_status_t CreateTwoDispatchCommandBuffer(
-    TestLogicalDevice* test_device, TwoDispatchCommandBuffer* out_fixture,
-    iree_hal_command_buffer_mode_t mode =
-        IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
-        IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA) {
+    TestLogicalDevice* test_device, iree_hal_command_buffer_mode_t mode,
+    TwoDispatchCommandBuffer* out_fixture) {
   IREE_RETURN_IF_ERROR(
       InitializeTwoDispatchCommandBufferResources(test_device, out_fixture));
   IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
@@ -375,6 +373,15 @@ static iree_status_t CreateTwoDispatchCommandBuffer(
       iree_hal_command_buffer_begin(out_fixture->command_buffer));
   IREE_RETURN_IF_ERROR(AppendTwoDispatchOperations(out_fixture));
   return iree_hal_command_buffer_end(out_fixture->command_buffer);
+}
+
+static iree_status_t CreateTwoDispatchCommandBuffer(
+    TestLogicalDevice* test_device, TwoDispatchCommandBuffer* out_fixture) {
+  return CreateTwoDispatchCommandBuffer(
+      test_device,
+      IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
+          IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
+      out_fixture);
 }
 
 static void ExpectTwoDispatchOutputs(const TwoDispatchCommandBuffer& fixture,

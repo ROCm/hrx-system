@@ -109,8 +109,9 @@ static iree_status_t loom_wasm_host_copy_error(
 
 iree_status_t loom_wasm_host_module_load(
     iree_const_byte_span_t module_data, iree_string_view_t function_export_name,
-    uint32_t parameter_count, loom_wasm_host_value_type_t* out_parameter_types,
-    uint32_t result_count, loom_wasm_host_value_type_t* out_result_types,
+    uint32_t parameter_count, uint32_t result_count,
+    loom_wasm_host_value_type_t* out_parameter_types,
+    loom_wasm_host_value_type_t* out_result_types,
     loom_wasm_host_module_t* out_module) {
   IREE_ASSERT_ARGUMENT(out_module);
   *out_module = (loom_wasm_host_module_t){0};
@@ -243,8 +244,9 @@ iree_status_t loom_wasm_host_module_call(
 
 iree_status_t loom_wasm_host_module_load(
     iree_const_byte_span_t module_data, iree_string_view_t function_export_name,
-    uint32_t parameter_count, loom_wasm_host_value_type_t* out_parameter_types,
-    uint32_t result_count, loom_wasm_host_value_type_t* out_result_types,
+    uint32_t parameter_count, uint32_t result_count,
+    loom_wasm_host_value_type_t* out_parameter_types,
+    loom_wasm_host_value_type_t* out_result_types,
     loom_wasm_host_module_t* out_module) {
   IREE_ASSERT_ARGUMENT(out_module);
   *out_module = (loom_wasm_host_module_t){0};

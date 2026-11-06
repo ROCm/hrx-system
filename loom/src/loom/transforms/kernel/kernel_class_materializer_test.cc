@@ -135,7 +135,7 @@ class KernelClassMaterializerTest : public ::testing::Test {
     IREE_EXPECT_OK(loom_bytecode_read_module(
         iree_make_const_byte_span(bytecode.data(), bytecode.size()),
         IREE_SV("kernel_class.loombc"), &context_, &block_pool_, &read_options,
-        &read_result, &round_tripped_module, iree_allocator_system()));
+        iree_allocator_system(), &read_result, &round_tripped_module));
     EXPECT_EQ(read_result.error_count, 0u);
     Verify(round_tripped_module);
     return ModulePtr(round_tripped_module);

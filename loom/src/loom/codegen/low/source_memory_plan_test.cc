@@ -552,7 +552,7 @@ TEST_F(SourceMemoryPlanTest, RetainsRuntimeStrideAtFoldedZeroOrigin) {
   loom_low_source_memory_axis_byte_stride_t strides[2];
   loom_low_source_memory_access_plan_t plan = {};
   loom_low_source_memory_access_diagnostic_t diagnostic = {};
-  ASSERT_TRUE(BuildPlan(&facts, load_op, &plan, &diagnostic, strides));
+  ASSERT_TRUE(BuildPlan(&facts, load_op, strides, &plan, &diagnostic));
   EXPECT_EQ(plan.dynamic_term_count, 0u);
   EXPECT_EQ(plan.static_byte_offset, 0);
   ASSERT_EQ(plan.view_rank, 2u);

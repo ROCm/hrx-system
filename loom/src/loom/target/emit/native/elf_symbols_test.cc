@@ -18,7 +18,7 @@ TEST(NativeElfSymbolsTest, SerializedHashRetainsCollisionsAndNullSymbol) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&pool, &arena);
   loom_native_elf_hash_t hash;
-  IREE_ASSERT_OK(loom_native_elf_hash_initialize(5, &hash, &arena));
+  IREE_ASSERT_OK(loom_native_elf_hash_initialize(5, &arena, &hash));
   loom_native_elf_hash_insert(&hash, IREE_SV("A"), 1);
   loom_native_elf_hash_insert(&hash, IREE_SV("F"), 2);
   loom_native_elf_hash_insert(&hash, IREE_SV("K"), 3);

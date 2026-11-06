@@ -18,9 +18,8 @@ namespace loom {
 namespace {
 
 static iree_status_t EmitJsonStatus(const loom_diagnostic_t* diagnostic,
-                                    std::string* out_json,
-                                    loom_type_formatter_t type_formatter = {
-                                        nullptr, nullptr}) {
+                                    loom_type_formatter_t type_formatter,
+                                    std::string* out_json) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   loom_output_stream_t stream;
@@ -44,7 +43,7 @@ std::string EmitJson(const loom_diagnostic_t* diagnostic,
                      loom_type_formatter_t type_formatter = {nullptr,
                                                              nullptr}) {
   std::string result;
-  IREE_EXPECT_OK(EmitJsonStatus(diagnostic, &result, type_formatter));
+  IREE_EXPECT_OK(EmitJsonStatus(diagnostic, type_formatter, &result));
   return result;
 }
 

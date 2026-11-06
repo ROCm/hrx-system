@@ -19,10 +19,10 @@
 #endif  // IREE_HAVE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF
 
 IREE_API_EXPORT iree_status_t iree_hal_create_all_available_executable_loaders(
-    iree_host_size_t capacity, iree_host_size_t* out_count,
-    iree_hal_executable_loader_t** loaders, iree_allocator_t host_allocator) {
+    iree_host_size_t capacity, iree_allocator_t host_allocator,
+    iree_host_size_t* out_count, iree_hal_executable_loader_t** out_loaders) {
   IREE_ASSERT_ARGUMENT(out_count);
-  IREE_ASSERT(!capacity || loaders);
+  IREE_ASSERT(!capacity || out_loaders);
   *out_count = 0;
 
   iree_host_size_t required_capacity = 0;
@@ -36,7 +36,7 @@ IREE_API_EXPORT iree_status_t iree_hal_create_all_available_executable_loaders(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE);
   }
 
-  memset(loaders, 0, sizeof(*loaders) * required_capacity);
+  memset(out_loaders, 0, sizeof(*out_loaders) * required_capacity);
 
   iree_host_size_t count = 0;
   iree_status_t status = iree_ok_status();
@@ -44,14 +44,14 @@ IREE_API_EXPORT iree_status_t iree_hal_create_all_available_executable_loaders(
 #if defined(IREE_HAVE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY)
   if (iree_status_is_ok(status)) {
     status = iree_hal_system_library_loader_create(host_allocator,
-                                                   &loaders[count++]);
+                                                   &out_loaders[count++]);
   }
 #endif  // IREE_HAVE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY
 
 #if defined(IREE_HAVE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF)
   if (iree_status_is_ok(status)) {
-    status =
-        iree_hal_embedded_elf_loader_create(host_allocator, &loaders[count++]);
+    status = iree_hal_embedded_elf_loader_create(host_allocator,
+                                                 &out_loaders[count++]);
   }
 #endif  // IREE_HAVE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF
 
@@ -59,7 +59,7 @@ IREE_API_EXPORT iree_status_t iree_hal_create_all_available_executable_loaders(
     *out_count = count;
   } else {
     for (iree_host_size_t i = 0; i < count; ++i) {
-      iree_hal_executable_loader_release(loaders[i]);
+      iree_hal_executable_loader_release(out_loaders[i]);
     }
   }
   return status;

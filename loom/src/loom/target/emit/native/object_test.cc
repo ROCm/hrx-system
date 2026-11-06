@@ -71,7 +71,7 @@ TEST(NativeObjectTest, ResolvesSymbolsAndFixupsThroughContributionLayout) {
   TestArena arena;
   loom_native_section_contribution_assembly_t assembly = {0};
   IREE_ASSERT_OK(loom_native_assemble_section_contributions(
-      sections, IREE_ARRAYSIZE(sections), &assembly, arena.arena()));
+      sections, IREE_ARRAYSIZE(sections), arena.arena(), &assembly));
 
   const loom_native_object_symbol_t symbols[] = {
       {

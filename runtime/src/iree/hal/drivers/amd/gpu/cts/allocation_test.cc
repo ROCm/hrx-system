@@ -646,8 +646,8 @@ TEST_F(GpuNativeAllocationTest, RecycledBatchJoinsIndependentOwnerFrontiers) {
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
       finite_pool, requests.size(), requests.data(), nullptr,
-      reservations.data(), infos.data(), &result,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, reservations.data(), infos.data(),
+      &result));
   ASSERT_EQ(result, IREE_HAL_POOL_ACQUIRE_OK_FRESH);
   // Independent host participants return logical ownership before their
   // outstanding accesses complete. The next queue acquisition must join both.

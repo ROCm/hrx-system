@@ -85,7 +85,7 @@ static iree_status_t loom_runtime_host_create_task_driver(
   iree_hal_executable_loader_t* loaders[8] = {NULL};
   iree_host_size_t loader_count = 0;
   IREE_RETURN_IF_ERROR(iree_hal_create_all_available_executable_loaders(
-      IREE_ARRAYSIZE(loaders), &loader_count, loaders, host->host_allocator));
+      IREE_ARRAYSIZE(loaders), host->host_allocator, &loader_count, loaders));
   iree_hal_allocator_t* device_allocator = NULL;
   iree_status_t status =
       iree_hal_allocator_create_heap(host->host_allocator, &device_allocator);

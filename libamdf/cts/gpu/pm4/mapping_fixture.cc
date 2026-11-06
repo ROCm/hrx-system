@@ -148,12 +148,12 @@ void Pm4MappingFixture::Prepare(amdf_memory_scope_t* scope,
   };
   ASSERT_NO_FATAL_FAILURE(PrepareProgram(
       kernel->executable, kernel->entry_byte_offset, &program_, "mapping"));
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue_, command_byte_length));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(command_byte_length, &queue_));
 }
 
 void Pm4MappingFixture::CreateBacking(uint64_t byte_length,
-                                      GpuMemory** out_memory,
-                                      amdf_device_t* consumer) {
+                                      amdf_device_t* consumer,
+                                      GpuMemory** out_memory) {
   if (consumer == nullptr) {
     consumer = device_;
   }

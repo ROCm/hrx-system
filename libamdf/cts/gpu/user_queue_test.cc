@@ -33,7 +33,7 @@ TEST_P(GpuCooperativeQueueTest, EstablishesNativeAdmissionBeforePublication) {
                         AMDF_USER_QUEUE_CAPABILITY_COOPERATIVE_DISPATCH;
   GpuUserQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateQueue(
-      family_, &queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {}, required));
+      family_, GpuUserQueueOptions{.required_capabilities = required}, &queue));
   EXPECT_EQ(queue->info.capabilities & required, required);
   // No packet is published. Fixture teardown releases native admission with
   // the empty queue before the next protocol borrows the same cached device.
@@ -126,10 +126,12 @@ TEST_P(GpuUserQueueCapacityTest, CopiesAcrossWrapAndRetiredReuse) {
     GTEST_SKIP() << "family does not admit requested ring capacity";
   }
   GpuUserQueue* queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(family_, &queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, test.byte_length, 0,
-                  nullptr, test.placement));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(family_,
+                                      GpuUserQueueOptions{
+                                          .ring_byte_length = test.byte_length,
+                                          .placement = test.placement,
+                                      },
+                                      &queue));
   const uint64_t capacity = queue->info.ring_byte_length;
   if (test.byte_length != 0) {
     ASSERT_EQ(capacity, test.byte_length);
@@ -279,10 +281,12 @@ TEST_P(GpuUserQueuePublicationTest, IncrementalStoresAcrossRingWrap) {
   }
   const bool pm4 = test.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4;
   GpuUserQueue* queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(family_, &queue,
-                                      AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                                      AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
-                                      4096, 0, nullptr, test.placement));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(family_,
+                                      GpuUserQueueOptions{
+                                          .ring_byte_length = 4096,
+                                          .placement = test.placement,
+                                      },
+                                      &queue));
   GpuMemory* payload = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &payload));

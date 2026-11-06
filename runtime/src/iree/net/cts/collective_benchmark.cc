@@ -41,7 +41,7 @@ void RunBenchmark(::benchmark::State& state,
     state.PauseTiming();
     CollectiveTrialResult result;
     iree::Status status(RunCollectiveTrial(
-        GetTransportBackend(), create_proactor, options, &result, measurement));
+        GetTransportBackend(), create_proactor, options, measurement, &result));
     state.ResumeTiming();
     if (!status.ok()) {
       if (!result.available && iree_status_is_unavailable(status.get())) {

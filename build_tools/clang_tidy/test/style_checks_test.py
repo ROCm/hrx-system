@@ -17,6 +17,63 @@ _ARGS = clang_tidy_test.parse_arguments()
 
 
 class StyleChecksTest(clang_tidy_test.ClangTidyAssertions):
+    def test_output_parameters_are_last_in_c_function_types(self):
+        output = clang_tidy_test.run_clang_tidy(
+            clang_tidy=_ARGS.clang_tidy,
+            plugin=_ARGS.plugin,
+            checks="-*,iree-output-parameter-order",
+            source=clang_tidy_test.source_path(__file__, "style_checks.c"),
+            compiler_args=["-std=gnu11"],
+        )
+        names = [
+            "out_declaration",
+            "out_definition",
+            "out_callback",
+            "out_function_type",
+            "out_field",
+            "out_nested",
+            "out_variable",
+            "out_array",
+            "out_unnamed",
+            "out_first",
+            "out_macro",
+        ]
+        for name in names:
+            with self.subTest(parameter=name):
+                self.assertIn(
+                    f"output parameter '{name}' must follow all non-output parameters",
+                    output,
+                )
+        self.assertEqual(output.count("[iree-output-parameter-order]"), len(names))
+        self.assertNotIn("output_order_valid", output)
+
+    def test_output_parameters_are_last_in_cpp_function_types(self):
+        output = clang_tidy_test.run_clang_tidy(
+            clang_tidy=_ARGS.clang_tidy,
+            plugin=_ARGS.plugin,
+            checks="-*,iree-output-parameter-order",
+            source=clang_tidy_test.source_path(__file__, "style_checks.cc"),
+            compiler_args=["-std=c++20"],
+        )
+        names = [
+            "out_constructor",
+            "out_method",
+            "out_member",
+            "out_alias",
+            "out_lambda",
+            "out_generic",
+            "out_template",
+        ]
+        for name in names:
+            with self.subTest(parameter=name):
+                self.assertIn(
+                    f"output parameter '{name}' must follow all non-output parameters",
+                    output,
+                )
+        self.assertEqual(output.count("[iree-output-parameter-order]"), len(names))
+        self.assertNotIn("OutputOrderValid", output)
+        self.assertNotIn("output_order_valid_lambda", output)
+
     def test_assert_output_calls_are_diagnosed(self):
         output = clang_tidy_test.run_clang_tidy(
             clang_tidy=_ARGS.clang_tidy,

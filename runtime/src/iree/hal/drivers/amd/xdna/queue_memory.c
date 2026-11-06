@@ -297,12 +297,12 @@ void iree_hal_amd_xdna_operation_issue_memory(
       operation->alloca.pool, operation->alloca.request_count,
       operation->alloca.requests,
       iree_hal_amd_xdna_frontier_state_as_frontier(&operation->frontier),
-      operation->alloca.reservations, operation->alloca.acquire_infos,
       (iree_hal_pool_acquire_callback_t){
           .fn = iree_hal_amd_xdna_memory_acquire_complete,
           .user_data = operation,
       },
-      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER);
+      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER,
+      operation->alloca.reservations, operation->alloca.acquire_infos);
   if (!iree_status_is_ok(status)) {
     iree_hal_pool_wait_abort(wait->capacity_wait);
     wait->kind = IREE_HAL_AMD_XDNA_MEMORY_WAIT_NONE;

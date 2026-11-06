@@ -63,9 +63,8 @@ class ExecutablesTest : public loom_runtime::testing::WeightsTest {
   }
 
   iree_status_t Declare(const char* root, bool swapped, int32_t count,
-                        int64_t tag, uint64_t limit,
-                        loom_runtime_preparation_t** out_preparation,
-                        const char* entry = "declare") {
+                        int64_t tag, uint64_t limit, const char* entry,
+                        loom_runtime_preparation_t** out_preparation) {
     const std::string policy = directory_ + "/policy.loom";
     const std::string strings[] = {
         root,
@@ -139,6 +138,13 @@ class ExecutablesTest : public loom_runtime::testing::WeightsTest {
     return status;
   }
 
+  iree_status_t Declare(const char* root, bool swapped, int32_t count,
+                        int64_t tag, uint64_t limit,
+                        loom_runtime_preparation_t** out_preparation) {
+    return Declare(root, swapped, count, tag, limit, "declare",
+                   out_preparation);
+  }
+
   iree_status_t Create(iree_host_size_t capacity = 4,
                        iree_host_size_t max_bytes = 16 * 1024 * 1024,
                        iree_host_size_t parameter_capacity = 4,
@@ -156,9 +162,9 @@ class ExecutablesTest : public loom_runtime::testing::WeightsTest {
     IREE_RETURN_IF_ERROR(iree_hal_module_types_resolve(types, &hal_types_));
     const char* root_name =
         arena_bytes ? "bank_cold" : (single_domain ? "raw" : "domains");
-    IREE_RETURN_IF_ERROR(Declare(root_name, false, single_domain ? 1 : 2, 0,
-                                 arena_bytes, &preparation_,
-                                 arena_bytes ? "declare_arena" : "declare"));
+    IREE_RETURN_IF_ERROR(
+        Declare(root_name, false, single_domain ? 1 : 2, 0, arena_bytes,
+                arena_bytes ? "declare_arena" : "declare", &preparation_));
     const loom_model_file_list_t* paths = nullptr;
     const uint32_t source_count =
         loom_runtime_preparation_local_sources(preparation_, &paths);
@@ -257,7 +263,7 @@ class ExecutablesTest : public loom_runtime::testing::WeightsTest {
                       const char* entry = "declare") {
     loom_runtime_preparation_t* declaration = nullptr;
     IREE_RETURN_IF_ERROR(
-        Declare(root, swapped, count, tag, limit, &declaration, entry));
+        Declare(root, swapped, count, tag, limit, entry, &declaration));
     loom_service_executables_capture(executables_);
     loom_service_executables_declare(executables_, declaration);
     return iree_ok_status();

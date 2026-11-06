@@ -17,10 +17,10 @@ TEST_F(MemoryBackendTest, PreparesOneHostSourceForCpuAndPublicHostScopes) {
   const uint64_t source_interface = UINT64_C(1)
                                     << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                            source_interface, IREE_HAL_MEMORY_ACCESS_ALL,
-                            IREE_HAL_BUFFER_USAGE_STORAGE, {},
-                            source_interface));
+  IREE_ASSERT_OK(CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, source_interface,
+                            IREE_HAL_MEMORY_ACCESS_ALL,
+                            IREE_HAL_BUFFER_USAGE_STORAGE, {}, source_interface,
+                            &pool));
   const auto requirements = iree_hal_pool_query_mapping_requirements(pool);
   EXPECT_EQ(requirements.minimum_granularity, 4096u);
   iree_hal_buffer_t* backing = nullptr;
@@ -73,9 +73,10 @@ TEST_F(MemoryBackendTest, HostVisibilityDoesNotImplyHostMappingSource) {
   iree_hal_pool_t* pool = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool, 0,
-                 IREE_HAL_MEMORY_ACCESS_ALL, IREE_HAL_BUFFER_USAGE_STORAGE, {},
-                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE));
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, 0, IREE_HAL_MEMORY_ACCESS_ALL,
+                 IREE_HAL_BUFFER_USAGE_STORAGE, {},
+                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
+                 &pool));
   EXPECT_EQ(pool, nullptr);
   EXPECT_EQ(native_.create_count, 0);
   EXPECT_GT(native_.profile_query_count, 0);
@@ -90,9 +91,9 @@ TEST_F(MemoryBackendTest, MappingSourcesHonorRequiredBackingPreparation) {
   native_.reservation_source_flags[1] = AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE;
   iree_hal_pool_t* pool = nullptr;
   // No CPU family or public mapping requests the host backing property.
-  IREE_ASSERT_OK(
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE, 0));
+  IREE_ASSERT_OK(CreatePool(
+      IREE_HAL_BUFFER_USAGE_STORAGE,
+      UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE, 0, &pool));
   EXPECT_EQ(iree_hal_pool_query_host_access(pool).access, 0u);
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
@@ -109,8 +110,9 @@ TEST_F(MemoryBackendTest, MappingSourcesHonorRequiredBackingPreparation) {
   pool = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_UNAVAILABLE,
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE, 0));
+      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE,
+                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE, 0,
+                 &pool));
   EXPECT_EQ(pool, nullptr);
   EXPECT_EQ(native_.create_count, 1);
 }
@@ -122,9 +124,9 @@ TEST_F(MemoryBackendTest, IndependentNpuMappingsNeedNoRemappableHostBacking) {
   // The same XDNA address kind may use independent device translations. Its
   // source profile has no remappable host route. An optional file view does
   // not turn host remapping into a physical backing requirement.
-  IREE_ASSERT_OK(
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE, 0));
+  IREE_ASSERT_OK(CreatePool(
+      IREE_HAL_BUFFER_USAGE_STORAGE,
+      UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE, 0, &pool));
   EXPECT_EQ(iree_hal_pool_query_host_access(pool).access, 0u);
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
@@ -143,10 +145,9 @@ TEST_F(MemoryBackendTest,
   native_.host_source_enabled = true;
   native_.required_flags |= AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE;
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
-                 IREE_HAL_MEMORY_ACCESS_ALL));
+  IREE_ASSERT_OK(CreatePool(
+      IREE_HAL_BUFFER_USAGE_STORAGE,
+      UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE, &pool));
   iree_hal_buffer_native_binding_slot_t host_slot;
   IREE_ASSERT_OK(iree_hal_pool_resolve_binding(
       pool, ResolveScope(IREE_HAL_MEMORY_SITE_HOST),
@@ -170,10 +171,9 @@ TEST_F(MemoryBackendTest, HostSourceRequiresQualifiedNativeBacking) {
   native_.mapping_enabled = true;
   native_.host_reservation_enabled = true;
   iree_hal_pool_t* pool = nullptr;
-  IREE_ASSERT_OK(
-      CreatePool(IREE_HAL_BUFFER_USAGE_STORAGE, &pool,
-                 UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE,
-                 IREE_HAL_MEMORY_ACCESS_ALL));
+  IREE_ASSERT_OK(CreatePool(
+      IREE_HAL_BUFFER_USAGE_STORAGE,
+      UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE, &pool));
   iree_hal_buffer_native_binding_slot_t slot;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
                         iree_hal_pool_resolve_binding(

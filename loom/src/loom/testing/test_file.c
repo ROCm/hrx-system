@@ -928,8 +928,8 @@ static iree_status_t loom_test_file_extract_annotations(
 // without it, expected equals input (round-trip identity).
 static iree_status_t loom_test_file_parse_case_sections(
     const char* source_start, iree_string_view_t case_text,
-    loom_test_source_range_t separator_range, loom_test_case_t* out_case,
-    iree_arena_allocator_t* arena) {
+    loom_test_source_range_t separator_range, iree_arena_allocator_t* arena,
+    loom_test_case_t* out_case) {
   memset(out_case, 0, sizeof(*out_case));
   out_case->mode = LOOM_TEST_MODE_ROUNDTRIP;
 
@@ -1281,8 +1281,8 @@ iree_status_t loom_test_file_parse(iree_string_view_t source,
     };
     loom_test_case_t first_boundary_case;
     IREE_RETURN_IF_ERROR(loom_test_file_parse_case_sections(
-        source.data, first_boundary_text, boundaries[0].separator_range,
-        &first_boundary_case, arena));
+        source.data, first_boundary_text, boundaries[0].separator_range, arena,
+        &first_boundary_case));
 
     if (iree_string_view_is_empty(
             iree_string_view_trim(first_boundary_case.input))) {
@@ -1305,7 +1305,7 @@ iree_status_t loom_test_file_parse(iree_string_view_t source,
     };
     IREE_RETURN_IF_ERROR(loom_test_file_parse_case_sections(
         source.data, case_text, boundaries[boundary_index].separator_range,
-        &out_file->cases[i], arena));
+        arena, &out_file->cases[i]));
   }
 
   // The first case's RUN directive becomes the file default for inheritance by

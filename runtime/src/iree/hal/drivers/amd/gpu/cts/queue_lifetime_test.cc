@@ -86,8 +86,8 @@ TEST_P(GpuNativeQueueLifetimeTest, FinalReleaseContinuesEpochsAcrossSlotReuse) {
         iree_hal_semaphore_wait(done, one, iree_infinite_timeout(), 0));
     iree_async_single_frontier_t completed = {};
     ASSERT_EQ(iree_async_semaphore_query_frontier(
-                  reinterpret_cast<iree_async_semaphore_t*>(handle),
-                  iree_async_single_frontier_as_frontier(&completed), 1),
+                  reinterpret_cast<iree_async_semaphore_t*>(handle), 1,
+                  iree_async_single_frontier_as_frontier(&completed)),
               1);
     if (iteration) {
       EXPECT_EQ(completed.entries[0].axis, previous.entries[0].axis);

@@ -396,8 +396,8 @@ static iree_status_t loom_aie2p_program_compile_impl(
     if (compiler->retains_compile_reports) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate(
           arena, sizeof(*helper_report_ptr), (void**)&helper_report_ptr));
-      loom_target_compile_report_initialize(helper_report_ptr,
-                                            iree_arena_allocator(arena));
+      loom_target_compile_report_initialize(iree_arena_allocator(arena),
+                                            helper_report_ptr);
       helper_report_ptr->requested_detail_flags =
           compiler->requested_detail_flags;
     }

@@ -46,9 +46,8 @@ static iree_status_t loom_encoding_facts_merge_address_layout(
     const loom_value_fact_table_t* lhs_table,
     loom_value_fact_address_layout_t lhs,
     const loom_value_fact_table_t* rhs_table,
-    loom_value_fact_address_layout_t rhs,
-    loom_value_fact_address_layout_t* out_layout,
-    loom_value_facts_t* stride_storage) {
+    loom_value_fact_address_layout_t rhs, loom_value_facts_t* stride_storage,
+    loom_value_fact_address_layout_t* out_layout) {
   *out_layout = (loom_value_fact_address_layout_t){0};
   if (lhs.kind != rhs.kind) {
     return iree_ok_status();
@@ -130,7 +129,7 @@ static iree_status_t loom_encoding_facts_merge_extension(
   IREE_RETURN_IF_ERROR(loom_encoding_facts_merge_address_layout(
       merge_kind, iteration, module, target, lhs_table,
       lhs_summary.address_layout, rhs_table, rhs_summary.address_layout,
-      &result.address_layout, stride_storage));
+      stride_storage, &result.address_layout));
   return loom_value_facts_make_encoding_summary(&target->context, result,
                                                 inout_facts);
 }

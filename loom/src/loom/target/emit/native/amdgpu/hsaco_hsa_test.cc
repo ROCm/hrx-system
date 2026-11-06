@@ -723,9 +723,9 @@ class LowKernelEmitter {
   }
 
   iree_status_t EmitKernel(const loom_amdgpu_target_profile_t* target_profile,
-                           const std::string& kernel_source, bool* out_emitted,
-                           std::string* out_hsaco,
-                           iree_arena_allocator_t* arena) {
+                           const std::string& kernel_source,
+                           iree_arena_allocator_t* arena, bool* out_emitted,
+                           std::string* out_hsaco) {
     IREE_ASSERT_ARGUMENT(out_emitted);
     IREE_ASSERT_ARGUMENT(out_hsaco);
     IREE_ASSERT_ARGUMENT(arena);
@@ -799,7 +799,7 @@ class LowKernelEmitter {
             .fn = PrintCompilerDiagnostic,
             .user_data = nullptr,
         },
-        &source_abi, arena));
+        arena, &source_abi));
     if (source_abi.error_count != 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "AMDGPU HSA source failed HAL ABI verification");
@@ -807,7 +807,7 @@ class LowKernelEmitter {
     loom_amdgpu_hal_binding_materialization_result_t materialization = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_binding_materialize(
         module_, low_function, descriptor_set, source_abi.kernarg_segment_ptr,
-        &materialization, arena));
+        arena, &materialization));
 
     loom_amdgpu_hal_kernel_abi_verify_result_t abi_verify_result = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_hal_kernel_abi_verify_low(
@@ -818,7 +818,7 @@ class LowKernelEmitter {
             .fn = PrintCompilerDiagnostic,
             .user_data = nullptr,
         },
-        &abi_verify_result, arena));
+        arena, &abi_verify_result));
     if (abi_verify_result.error_count != 0) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
@@ -892,7 +892,7 @@ class LowKernelEmitter {
     loom_amdgpu_kernel_emission_result_t emission_result = {};
     IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_emission_build(
         &frame, &plan, &data_symbols, LOOM_AMDGPU_KERNEL_EMISSION_FLAG_NONE,
-        /*target_listing=*/nullptr, &emission_result, arena));
+        /*target_listing=*/nullptr, arena, &emission_result));
     const loom_amdgpu_hsaco_input_t hsaco_input = {
         .target_identity = target_profile->identity,
         .kernels = &emission_result.kernel,
@@ -903,7 +903,7 @@ class LowKernelEmitter {
     };
     loom_amdgpu_hsaco_plan_t hsaco_plan = {};
     IREE_RETURN_IF_ERROR(
-        loom_amdgpu_hsaco_plan_build(&hsaco_input, &hsaco_plan, arena));
+        loom_amdgpu_hsaco_plan_build(&hsaco_input, arena, &hsaco_plan));
     IREE_RETURN_IF_ERROR(
         loom_amdgpu_hsaco_write_plan(&hsaco_plan, stream.get(), arena));
     *out_hsaco = StreamBytes(stream.get());
@@ -1012,8 +1012,8 @@ iree_status_t EmitWorkitemStoreKernelForAmdgpu(const AmdgpuHsaTarget& target,
       "reg<amdgpu.vgpr>, reg<amdgpu.sgpr>)\n"
       "  low.return\n"
       "}\n");
-  return emitter.EmitKernel(&target_profile, source, out_emitted, out_hsaco,
-                            arena.arena());
+  return emitter.EmitKernel(&target_profile, source, arena.arena(), out_emitted,
+                            out_hsaco);
 }
 
 iree_status_t EmitB128CopyKernelForAmdgpu(const AmdgpuHsaTarget& target,
@@ -1050,8 +1050,8 @@ iree_status_t EmitB128CopyKernelForAmdgpu(const AmdgpuHsaTarget& target,
       "}\n");
   TestArena arena;
   LowKernelEmitter emitter;
-  return emitter.EmitKernel(&target_profile, source, out_emitted, out_hsaco,
-                            arena.arena());
+  return emitter.EmitKernel(&target_profile, source, arena.arena(), out_emitted,
+                            out_hsaco);
 }
 
 loom_amdgpu_metadata_kernel_t MinimalKernel(iree_string_view_t name,
@@ -1128,7 +1128,7 @@ iree_status_t EmitRuntimeGlobalKernelForAmdgpu(const AmdgpuHsaTarget& target,
   TestArena arena;
   loom_amdgpu_hsaco_plan_t plan = {};
   IREE_RETURN_IF_ERROR(
-      loom_amdgpu_hsaco_plan_build(&input, &plan, arena.arena()));
+      loom_amdgpu_hsaco_plan_build(&input, arena.arena(), &plan));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_hsaco_write_plan(&plan, stream.get(), arena.arena()));
   *out_hsaco = StreamBytes(stream.get());

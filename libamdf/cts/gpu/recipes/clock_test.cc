@@ -71,7 +71,7 @@ TEST_P(QueueClockRecipeTest, NominalDurationsAndHostBounds) {
   auto* samples = static_cast<uint64_t*>(observations->host.pointer);
   GpuCommandQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(&queue, kIterationCount * 256u * sizeof(uint32_t)));
+      CreateQueue(kIterationCount * 256u * sizeof(uint32_t), &queue));
   ASSERT_GE(queue->words().size(), kIterationCount * 256u);
   size_t published_words = 0;
   uint64_t first_ticks = 0;

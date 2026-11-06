@@ -27,8 +27,8 @@ void loom_config_text_materialize_options_initialize(
 
 static iree_status_t loom_config_text_parse_encoding_value(
     loom_module_t* module, loom_type_t type, iree_string_view_t value_text,
-    iree_arena_block_pool_t* block_pool, loom_attribute_t* out_attr,
-    iree_allocator_t host_allocator) {
+    iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
+    loom_attribute_t* out_attr) {
   iree_string_builder_t builder;
   iree_string_builder_initialize(host_allocator, &builder);
   loom_output_stream_t stream;
@@ -188,8 +188,8 @@ static iree_status_t loom_config_text_parse_value(
   }
   if (loom_type_is_encoding(type)) {
     IREE_RETURN_IF_ERROR(loom_config_text_parse_encoding_value(
-        module, type, value_text, block_pool, out_attr,
-        iree_allocator_system()));
+        module, type, value_text, block_pool, iree_allocator_system(),
+        out_attr));
     return loom_config_text_check_encoding_role(module, key, type, *out_attr);
   }
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

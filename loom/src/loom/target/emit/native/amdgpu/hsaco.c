@@ -31,7 +31,7 @@ iree_status_t loom_amdgpu_hsaco_write_plan(
   const loom_native_elf64le_file_t elf_file = loom_amdgpu_hsaco_plan_file(plan);
   loom_native_elf_layout_t layout = {0};
   IREE_RETURN_IF_ERROR(
-      loom_native_elf64le_build_layout(&elf_file, &layout, scratch_arena));
+      loom_native_elf64le_build_layout(&elf_file, scratch_arena, &layout));
   return loom_native_elf64le_write_file(&elf_file, &layout, stream);
 }
 
@@ -43,7 +43,7 @@ iree_status_t loom_amdgpu_hsaco_serialize_plan(
   const loom_native_elf64le_file_t elf_file = loom_amdgpu_hsaco_plan_file(plan);
   loom_native_elf_layout_t layout = {0};
   IREE_RETURN_IF_ERROR(
-      loom_native_elf64le_build_layout(&elf_file, &layout, scratch_arena));
+      loom_native_elf64le_build_layout(&elf_file, scratch_arena, &layout));
   if (layout.file_size > IREE_HOST_SIZE_MAX) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "HSACO file size exceeds host limits");

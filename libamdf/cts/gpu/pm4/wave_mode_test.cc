@@ -286,7 +286,7 @@ TEST_F(Pm4WaveModeTest, PrivateStorageSpansWave32AndWave64) {
   ASSERT_NO_FATAL_FAILURE(
       CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
                    uint64_t{engine_count} * waves_per_engine * wave_byte_length,
-                   &scratch, AMDF_MEMORY_FLAG_HOST_COHERENT));
+                   AMDF_MEMORY_FLAG_HOST_COHERENT, &scratch));
   ASSERT_NO_FATAL_FAILURE(
       CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
                    kEpochs * kWords * sizeof(uint32_t), &output));

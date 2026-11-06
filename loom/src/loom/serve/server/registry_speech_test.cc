@@ -165,8 +165,8 @@ class RegistrySpeechTest : public ::testing::Test {
     }
   }
 
-  iree_status_t Open(const char* voice, SpeechStream* out_stream,
-                     const char* text = FLAG_text, uint64_t seed = 73) {
+  iree_status_t Open(const char* voice, const char* text, uint64_t seed,
+                     SpeechStream* out_stream) {
     loom_serve_speech_request_t request;
     IREE_RETURN_IF_ERROR(loom_serve_speech_request_initialize_text(
         iree_make_cstring_view(text), iree_make_cstring_view(voice), {}, seed,
@@ -177,6 +177,10 @@ class RegistrySpeechTest : public ::testing::Test {
     loom_serve_speech_request_deinitialize(&request);
     out_stream->reset(stream);
     return status;
+  }
+
+  iree_status_t Open(const char* voice, SpeechStream* out_stream) {
+    return Open(voice, FLAG_text, /*seed=*/73, out_stream);
   }
 
   void AppendPcm(const loom_serve_speech_block_t* block, std::string* output) {
@@ -402,7 +406,7 @@ TEST_F(RegistrySpeechTest,
   for (size_t i = 0; i < voices.size(); ++i) {
     SCOPED_TRACE(i);
     SpeechStream stream(nullptr, loom_serve_speech_stream_close);
-    IREE_ASSERT_OK(Open(voices[i], &stream, texts[i].c_str(), 73 + i));
+    IREE_ASSERT_OK(Open(voices[i], texts[i].c_str(), 73 + i, &stream));
     ASSERT_NE(stream, nullptr);
     ASSERT_NO_FATAL_FAILURE(ReadPcm(stream.get(), &expected[i]));
     loom_serve_speech_stream_consume(stream.get());
@@ -416,7 +420,7 @@ TEST_F(RegistrySpeechTest,
       SpeechStream(nullptr, loom_serve_speech_stream_close),
       SpeechStream(nullptr, loom_serve_speech_stream_close),
       SpeechStream(nullptr, loom_serve_speech_stream_close)};
-  IREE_ASSERT_OK(Open(voices[0], &streams[0], texts[0].c_str(), 73));
+  IREE_ASSERT_OK(Open(voices[0], texts[0].c_str(), 73, &streams[0]));
   ASSERT_NE(streams[0], nullptr);
   ASSERT_NO_FATAL_FAILURE(AwaitOutput(streams[0].get()));
   const auto* held_block = loom_serve_speech_stream_peek(streams[0].get());
@@ -425,7 +429,7 @@ TEST_F(RegistrySpeechTest,
       held_block->samples.data,
       held_block->samples.data + held_block->samples.data_length);
 
-  IREE_ASSERT_OK(Open(voices[1], &streams[1], texts[1].c_str(), 74));
+  IREE_ASSERT_OK(Open(voices[1], texts[1].c_str(), 74, &streams[1]));
   ASSERT_NE(streams[1], nullptr);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
     return std::string(Model()
@@ -437,7 +441,7 @@ TEST_F(RegistrySpeechTest,
   ASSERT_STREQ(Model()->service.snapshot(Model()->service.runtime.self).phase,
                "generating");
   for (size_t i = 2; i < streams.size(); ++i) {
-    IREE_ASSERT_OK(Open(voices[i], &streams[i], texts[i].c_str(), 73 + i));
+    IREE_ASSERT_OK(Open(voices[i], texts[i].c_str(), 73 + i, &streams[i]));
     ASSERT_NE(streams[i], nullptr);
   }
   for (auto& stream : streams) {
@@ -474,7 +478,7 @@ TEST_F(RegistrySpeechTest,
   ASSERT_EQ(
       Model()->service.snapshot(Model()->service.runtime.self).active_requests,
       3u);
-  IREE_ASSERT_OK(Open(voices[2], &streams[2], texts[2].c_str(), 75));
+  IREE_ASSERT_OK(Open(voices[2], texts[2].c_str(), 75, &streams[2]));
   ASSERT_NE(streams[2], nullptr);
   ASSERT_NO_FATAL_FAILURE(AwaitOutput(streams[2].get()));
   ASSERT_FALSE(loom_serve_speech_stream_peek(streams[2].get())->complete);

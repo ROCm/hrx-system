@@ -121,8 +121,8 @@ TEST_F(BytecodeAttributeTest, NamedPredicatesValidateAndMaterialize) {
   loom_attribute_t attr = loom_attr_absent();
   IREE_ASSERT_OK(loom_bytecode_attribute_materialize_named(
       &materializer, &materialization_cursor, /*descriptor=*/nullptr,
-      LOOM_BYTECODE_ATTR_PREDICATE_LIST, &attr,
-      /*available_type_count=*/0));
+      LOOM_BYTECODE_ATTR_PREDICATE_LIST,
+      /*available_type_count=*/0, &attr));
 
   ASSERT_EQ(attr.kind, LOOM_ATTR_PREDICATE_LIST);
   ASSERT_EQ(attr.count, 1u);
@@ -196,8 +196,8 @@ TEST_F(BytecodeAttributeTest, RejectsAggregateCountsBeforeScratchAllocation) {
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_DEFERRED,
         loom_bytecode_attribute_decode_named(
-            &materializer, &cursor, test_case.descriptor, test_case.kind, &attr,
-            /*available_type_count=*/0));
+            &materializer, &cursor, test_case.descriptor, test_case.kind,
+            /*available_type_count=*/0, &attr));
 
     EXPECT_EQ(error_count_, previous_error_count + 1);
     EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
@@ -220,7 +220,7 @@ TEST_F(BytecodeAttributeTest, ByteFormsValidateAndMaterializeExactPayloads) {
       cursor = MakeCursor(data.data(), data.size());
       loom_attribute_t attribute;
       IREE_ASSERT_OK(loom_bytecode_attribute_materialize_named(
-          &materializer, &cursor, nullptr, kind, &attribute, 0));
+          &materializer, &cursor, nullptr, kind, 0, &attribute));
       EXPECT_EQ(loom_attr_is_utf8(attribute), kind == LOOM_BYTECODE_ATTR_UTF8);
       EXPECT_EQ(attribute.reserved_1, text.size);
       EXPECT_TRUE(iree_string_view_equal(
@@ -251,12 +251,12 @@ TEST_F(BytecodeAttributeTest, MalformedUtf8IsDiagnosedAtBothReaderBoundaries) {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_DEFERRED,
                           loom_bytecode_attribute_materialize_named(
                               &materializer, &cursor, nullptr,
-                              LOOM_BYTECODE_ATTR_UTF8, &attribute, 0));
+                              LOOM_BYTECODE_ATTR_UTF8, 0, &attribute));
     EXPECT_EQ(error_count_, previous_errors + 2);
     cursor = MakeCursor(data.data(), data.size());
     IREE_ASSERT_OK(loom_bytecode_attribute_materialize_named(
-        &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_BYTES, &attribute,
-        0));
+        &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_BYTES, 0,
+        &attribute));
     EXPECT_EQ(error_count_, previous_errors + 2);
   }
 }
@@ -306,8 +306,8 @@ TEST_F(BytecodeAttributeTest, SsaPredicatesResolveThroughConcreteValueMap) {
   loom_attribute_t attr = loom_attr_absent();
   IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
       &materializer, &cursor, /*descriptor=*/nullptr,
-      LOOM_BYTECODE_ATTR_PREDICATE_LIST, &attr,
-      /*available_type_count=*/0, &scope));
+      LOOM_BYTECODE_ATTR_PREDICATE_LIST,
+      /*available_type_count=*/0, &scope, &attr));
 
   ASSERT_EQ(attr.count, 1u);
   EXPECT_EQ(attr.predicate_list[0].args[0], value_id);
@@ -334,8 +334,8 @@ TEST_F(BytecodeAttributeTest, CompleteBindingsSurviveAttributeScratchReset) {
   loom_bytecode_reader_cursor_t first_cursor = MakeCursor(first, sizeof(first));
   loom_attribute_t first_attr = loom_attr_absent();
   IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
-      &materializer, &first_cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE,
-      &first_attr, 0, &scope));
+      &materializer, &first_cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
+      &first_attr));
   EXPECT_EQ(scratch_arena_.used_allocation_size, 0u);
   ASSERT_EQ(bindings.count, 1u);
   EXPECT_EQ(bindings.entries[0].type, first_attr.type_id);
@@ -346,8 +346,8 @@ TEST_F(BytecodeAttributeTest, CompleteBindingsSurviveAttributeScratchReset) {
       MakeCursor(second, sizeof(second));
   loom_attribute_t second_attr = loom_attr_absent();
   IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
-      &materializer, &second_cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE,
-      &second_attr, 0, &scope));
+      &materializer, &second_cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0,
+      &scope, &second_attr));
   EXPECT_EQ(first_attr.type_id, second_attr.type_id);
   EXPECT_EQ(bindings.count, 1u);
   iree_arena_deinitialize(&scope_arena);
@@ -395,7 +395,7 @@ TEST_F(BytecodeAttributeTest,
       IREE_STATUS_DEFERRED,
       loom_bytecode_attribute_materialize_ssa(
           &materializer, &cursor, /*descriptor=*/nullptr,
-          LOOM_BYTECODE_ATTR_TYPE, &attr, /*available_type_count=*/0, &scope));
+          LOOM_BYTECODE_ATTR_TYPE, /*available_type_count=*/0, &scope, &attr));
 
   EXPECT_EQ(error_count, 1u);
   EXPECT_STREQ(error_id, "ERR_BYTECODE_009");
@@ -443,8 +443,8 @@ TEST_F(BytecodeAttributeTest, ScopedRegisterRetainsCarrierAndBoundValueType) {
   loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
   loom_attribute_t attr = loom_attr_absent();
   IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
-      &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, &attr, 0,
-      &scope));
+      &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
+      &attr));
   EXPECT_EQ(cursor.cursor.position, sizeof(data));
   EXPECT_EQ(bindings.count, 2u);
 
@@ -494,8 +494,8 @@ TEST_F(BytecodeAttributeTest, ScopedViewAlignmentValidatesBeforeNarrowing) {
     loom_attribute_t attr = loom_attr_absent();
     error_count_ = 0;
     iree_status_t status = loom_bytecode_attribute_materialize_ssa(
-        &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, &attr, 0,
-        &scope);
+        &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
+        &attr);
     if (alignment == 0 ||
         loom_type_view_alignment_is_valid(LOOM_SCALAR_TYPE_I64, alignment)) {
       IREE_EXPECT_OK(status);
@@ -557,8 +557,8 @@ TEST_F(BytecodeAttributeTest, ScopedDialectNameUsesFullStringOrdinal) {
   loom_bytecode_reader_cursor_t cursor = MakeCursor(data, sizeof(data));
   loom_attribute_t attr = loom_attr_absent();
   IREE_ASSERT_OK(loom_bytecode_attribute_materialize_ssa(
-      &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, &attr, 0,
-      &scope));
+      &materializer, &cursor, nullptr, LOOM_BYTECODE_ATTR_TYPE, 0, &scope,
+      &attr));
   iree_arena_deinitialize(&scope_arena);
   iree_arena_reset(&scratch_arena_);
   iree_arena_block_pool_trim(&block_pool_);

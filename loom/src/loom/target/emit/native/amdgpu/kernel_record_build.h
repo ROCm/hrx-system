@@ -48,8 +48,8 @@ iree_status_t loom_amdgpu_kernel_record_build(
     const loom_low_allocation_table_t* allocation,
     const loom_amdgpu_storage_layout_t* storage_layout,
     const loom_amdgpu_kernel_record_options_t* options,
-    loom_amdgpu_kernel_record_t* out_record,
-    iree_arena_allocator_t* scratch_arena);
+    iree_arena_allocator_t* scratch_arena,
+    loom_amdgpu_kernel_record_t* out_record);
 
 #ifdef __cplusplus
 }  // extern "C"

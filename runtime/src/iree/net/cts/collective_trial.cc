@@ -293,8 +293,8 @@ struct Rank : CollectiveRank {
 iree_status_t RunCollectiveTrial(
     const TransportBackend& transport,
     const iree::async::cts::ProactorFactory& create_proactor,
-    const CollectiveTrialOptions& options, CollectiveTrialResult* out_result,
-    TransferTrialMeasurement measurement) {
+    const CollectiveTrialOptions& options, TransferTrialMeasurement measurement,
+    CollectiveTrialResult* out_result) {
   *out_result = {};
   if (options.delivery == CollectiveDelivery::kRegistered &&
       !transport.create_registered_factory) {
@@ -353,7 +353,7 @@ iree_status_t RunCollectiveTrial(
     ranks.push_back(std::make_unique<Rank>(options, layout, control, i));
   }
   iree_status_t status = RunCollectiveGroup(transport, create_proactor, control,
-                                            ranks, out_result, measurement);
+                                            ranks, measurement, out_result);
   if (iree_status_is_ok(status)) {
     if (pipeline) {
       const auto& result = static_cast<Rank&>(*ranks[0]).results[1];

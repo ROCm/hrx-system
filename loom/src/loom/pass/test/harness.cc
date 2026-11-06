@@ -232,17 +232,24 @@ void PassTestHarness::ExpectVerifyStatus(
                         Verify(source, environment, predicate_provider));
 }
 
-iree_status_t PassTestHarness::Compile(
-    loom_module_t* module, const loom_op_t* pipeline_op,
-    loom_pass_program_t* out_program,
-    loom_pass_predicate_provider_t predicate_provider) {
-  return Compile(module, pipeline_op, out_program, {}, predicate_provider);
+iree_status_t PassTestHarness::Compile(loom_module_t* module,
+                                       const loom_op_t* pipeline_op,
+                                       loom_pass_program_t* out_program) {
+  return Compile(module, pipeline_op, {}, {}, out_program);
 }
 
 iree_status_t PassTestHarness::Compile(
     loom_module_t* module, const loom_op_t* pipeline_op,
-    loom_pass_program_t* out_program, loom_pass_environment_t environment,
-    loom_pass_predicate_provider_t predicate_provider) {
+    loom_pass_predicate_provider_t predicate_provider,
+    loom_pass_program_t* out_program) {
+  return Compile(module, pipeline_op, {}, predicate_provider, out_program);
+}
+
+iree_status_t PassTestHarness::Compile(
+    loom_module_t* module, const loom_op_t* pipeline_op,
+    loom_pass_environment_t environment,
+    loom_pass_predicate_provider_t predicate_provider,
+    loom_pass_program_t* out_program) {
   loom_pass_program_compile_options_t options = {
       .registry = loom_test_pass_registry(),
       .environment = environment,
@@ -303,7 +310,7 @@ iree_status_t PassTestHarness::RunModulePipeline(
     loom_pass_predicate_provider_t predicate_provider) {
   PassProgramStorage storage;
   IREE_RETURN_IF_ERROR(Compile(module, Pipeline(module, pipeline_index),
-                               &storage.program, predicate_provider));
+                               predicate_provider, &storage.program));
   loom_pass_interpreter_options_t options =
       InterpreterOptions(trace, {}, nullptr, predicate_provider);
   loom_pass_run_result_t result = {0};
@@ -317,7 +324,7 @@ iree_status_t PassTestHarness::RunFunctionPipeline(
     loom_pass_predicate_provider_t predicate_provider) {
   PassProgramStorage storage;
   IREE_RETURN_IF_ERROR(Compile(module, Pipeline(module, pipeline_index),
-                               &storage.program, predicate_provider));
+                               predicate_provider, &storage.program));
   loom_pass_interpreter_options_t options =
       InterpreterOptions(trace, {}, nullptr, predicate_provider);
   loom_pass_run_result_t result = {0};

@@ -730,12 +730,12 @@ static void iree_hal_amdgpu_pending_op_enqueue_alloca_acquisition(
           ? NULL
           : iree_hal_amdgpu_fixed_frontier_as_frontier(
                 &wait->acquisition.requester_frontier),
-      transaction->reservations, transaction->acquire_infos,
       (iree_hal_pool_acquire_callback_t){
           .fn = iree_hal_amdgpu_pending_op_alloca_acquired,
           .user_data = op,
       },
-      op->alloca_op.reserve_flags);
+      op->alloca_op.reserve_flags, transaction->reservations,
+      transaction->acquire_infos);
   if (!iree_status_is_ok(status)) {
     iree_hal_amdgpu_alloca_memory_wait_resolved(op, status);
   }

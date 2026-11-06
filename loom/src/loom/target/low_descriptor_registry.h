@@ -44,9 +44,9 @@ typedef struct loom_target_low_source_binding_t {
 // Initializes |out_registry| from linked package tables. The provider and
 // bundle tables are borrowed and must outlive |out_registry|.
 void loom_target_low_descriptor_registry_initialize_from_tables(
-    loom_target_low_descriptor_registry_t* out_registry,
     const loom_low_descriptor_set_provider_t* descriptor_set_providers,
-    iree_host_size_t descriptor_set_provider_count);
+    iree_host_size_t descriptor_set_provider_count,
+    loom_target_low_descriptor_registry_t* out_registry);
 
 // Appends the borrowed package tables in |source| into caller-owned table
 // storage. The inout counts must point at initialized counts already present in

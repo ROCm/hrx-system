@@ -133,7 +133,7 @@ static void iree_net_shm_handshake_advance(void* user_data,
           stream,
           iree_make_byte_span(handshake->record,
                               IREE_NET_SHM_BOOTSTRAP_HEADER_SIZE),
-          0, NULL, callback);
+          0, callback, NULL);
       break;
     case IREE_NET_SHM_HANDSHAKE_PHASE_SERVER_SEND_READY:
       status = iree_net_shm_bootstrap_decode_ack(
@@ -157,7 +157,7 @@ static void iree_net_shm_handshake_advance(void* user_data,
           stream,
           iree_make_byte_span(handshake->record,
                               IREE_NET_SHM_BOOTSTRAP_OFFER_SIZE),
-          IREE_NET_SHM_STORAGE_HANDLE_COUNT, handshake->handles, callback);
+          IREE_NET_SHM_STORAGE_HANDLE_COUNT, callback, handshake->handles);
       break;
     case IREE_NET_SHM_HANDSHAKE_PHASE_CLIENT_SEND_ACCEPT:
       status = iree_net_shm_handshake_validate_offer(handshake);
@@ -178,7 +178,7 @@ static void iree_net_shm_handshake_advance(void* user_data,
           stream,
           iree_make_byte_span(handshake->record,
                               IREE_NET_SHM_BOOTSTRAP_HEADER_SIZE),
-          0, NULL, callback);
+          0, callback, NULL);
       break;
     case IREE_NET_SHM_HANDSHAKE_PHASE_CLIENT_VALIDATE_READY:
       status = iree_net_shm_bootstrap_decode_ack(

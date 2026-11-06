@@ -24,11 +24,12 @@ TEST_P(Pm4ProgramAtomicTest, ContendedShaderUpdatesRespectSelectedScope) {
                                          "program_atomic"));
   GpuMemory* completion = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
-      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &completion,
-      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE));
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096,
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE,
+      &completion));
   std::memset(completion->host.pointer, 0, completion->info.byte_length);
   GpuCommandQueue* queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, 65536));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(65536, &queue));
   Pm4CommandWriter commands(queue->words().data(), *pm4_profile_);
   for (uint32_t epoch = 0; epoch < kEpochCount; ++epoch) {
     SCOPED_TRACE(epoch);

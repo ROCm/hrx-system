@@ -55,9 +55,9 @@ class VulkanFileTest : public CtsTestBase<> {
  protected:
   iree_status_t ImportNativeFile(const std::vector<uint8_t>& file_contents,
                                  const char* temp_file_stem,
+                                 iree_io_file_mode_t extra_mode,
                                  Ref<iree_hal_file_t>* out_file,
-                                 iree_io_file_mode_t extra_mode = 0,
-                                 FileHandlePtr* out_handle = nullptr) {
+                                 FileHandlePtr* out_handle) {
     iree::testing::TempFilePath path(temp_file_stem);
     IREE_RETURN_IF_ERROR(iree_io_file_contents_write(
         path.path_view(),
@@ -92,7 +92,8 @@ class VulkanFileTest : public CtsTestBase<> {
         MakeDeterministicBytes(file_length);
 
     Ref<iree_hal_file_t> file;
-    IREE_ASSERT_OK(ImportNativeFile(file_contents, temp_file_stem, &file));
+    IREE_ASSERT_OK(
+        ImportNativeFile(file_contents, temp_file_stem, 0, &file, nullptr));
 
     Ref<iree_hal_buffer_t> source_buffer;
     IREE_ASSERT_OK(CreateDeviceBufferWithData(
@@ -274,15 +275,15 @@ class VulkanImportedFileTest : public VulkanFileTest {
     Ref<iree_hal_file_t> input;
     Ref<iree_hal_file_t> output;
     const auto mode = direct ? IREE_IO_FILE_MODE_DIRECT : 0;
-    iree::Status import_status =
-        ImportNativeFile(expected, "iree_vulkan_imported_input", &input, mode);
+    iree::Status import_status = ImportNativeFile(
+        expected, "iree_vulkan_imported_input", mode, &input, nullptr);
     if (direct && (import_status.code() == iree::StatusCode::kUnavailable ||
                    import_status.code() == iree::StatusCode::kUnimplemented)) {
       GTEST_SKIP() << import_status.ToString();
     }
     IREE_ASSERT_OK(import_status);
     IREE_ASSERT_OK(ImportNativeFile(
-        expected_file, "iree_vulkan_imported_output", &output, mode));
+        expected_file, "iree_vulkan_imported_output", mode, &output, nullptr));
     const auto& read = iree_hal_file_requirements(input)->read;
     const auto& write = iree_hal_file_requirements(output)->write;
     const uint64_t alignment =
@@ -434,7 +435,7 @@ class VulkanImportedFileTest : public VulkanFileTest {
     Ref<iree_hal_file_t> file;
     FileHandlePtr handle;
     IREE_ASSERT_OK(ImportNativeFile(std::vector<uint8_t>(length, 0xAB),
-                                    "iree_vulkan_imported_failure", &file, 0,
+                                    "iree_vulkan_imported_failure", 0, &file,
                                     &handle));
     if (!fail_dependency) {
       // The imported extent is still valid, but native I/O must report EOF

@@ -269,9 +269,10 @@ TEST_F(HostQueueCommandBufferTest, DispatchSummariesRetainPacketOrdinals) {
 
   TwoDispatchCommandBuffer fixture;
   IREE_ASSERT_OK(CreateTwoDispatchCommandBuffer(
-      &test_device, &fixture,
+      &test_device,
       IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT |
-          IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA));
+          IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA,
+      &fixture));
   EXPECT_EQ(
       iree_hal_amdgpu_aql_command_buffer_profile_id(fixture.command_buffer),
       0u);
@@ -942,7 +943,7 @@ TEST_F(HostQueueCommandBufferTest,
 
   TwoDispatchCommandBuffer fixture;
   IREE_ASSERT_OK(CreateTwoDispatchCommandBuffer(
-      &test_device, &fixture, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT));
+      &test_device, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, &fixture));
   ASSERT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(fixture.command_buffer));
   const iree_hal_amdgpu_pm4_program_t* pm4_program =
       iree_hal_amdgpu_pm4_command_buffer_program(fixture.command_buffer);

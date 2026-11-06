@@ -104,8 +104,8 @@ class PassOpsTest : public ::testing::Test {
     loom_module_t* module = NULL;
     IREE_EXPECT_OK(loom_bytecode_read_module(
         iree_make_const_byte_span(bytes.data(), bytes.size()),
-        IREE_SV("passes.loombc"), &context_, &block_pool_, &options, &result,
-        &module, iree_allocator_system()));
+        IREE_SV("passes.loombc"), &context_, &block_pool_, &options,
+        iree_allocator_system(), &result, &module));
     EXPECT_NE(module, nullptr);
     EXPECT_EQ(result.error_count, 0u);
     VerifyOk(module);

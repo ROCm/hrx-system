@@ -267,8 +267,8 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
     loom_target_compile_report_t report;
     loom_target_compile_report_t* report_ptr = NULL;
     if (request->compile_report) {
-      loom_target_compile_report_initialize(&report,
-                                            request->compile_report->allocator);
+      loom_target_compile_report_initialize(request->compile_report->allocator,
+                                            &report);
       report.requested_detail_flags =
           request->compile_report->requested_detail_flags;
       report_ptr = &report;

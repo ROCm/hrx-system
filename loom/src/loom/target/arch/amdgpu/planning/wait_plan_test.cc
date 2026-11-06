@@ -333,9 +333,9 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     uint32_t consumer_effect;
   };
 
-  void ConfigureRefinedAcyclicMemory(
-      const testing::CfgGraph& graph, CrossBlockMemoryFixture* out_fixture,
-      loom_memory_access_flags_t access_flags = 0) {
+  void ConfigureRefinedAcyclicMemory(const testing::CfgGraph& graph,
+                                     loom_memory_access_flags_t access_flags,
+                                     CrossBlockMemoryFixture* out_fixture) {
     const uint32_t producer_effect = static_cast<uint32_t>(effects_.size());
     AppendImmediate(LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B32,
                     IREE_SV("scope"), LOOM_CACHE_SCOPE_DEVICE);
@@ -402,6 +402,11 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
                     consumer_effect};
   }
 
+  void ConfigureRefinedAcyclicMemory(const testing::CfgGraph& graph,
+                                     CrossBlockMemoryFixture* out_fixture) {
+    ConfigureRefinedAcyclicMemory(graph, /*access_flags=*/0, out_fixture);
+  }
+
   void FinalizeSchedule() {
     loom_op_t* return_op = nullptr;
     IREE_ASSERT_OK(loom_low_return_build(&builder_, nullptr, 0,
@@ -442,8 +447,8 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     const loom_amdgpu_address_state_plan_t address_state = {};
     return loom_amdgpu_wait_plan_build(&schedule_, &allocation_, options,
                                        &address_state, /*matrix_arena=*/nullptr,
-                                       /*out_matrix_results=*/nullptr, &arena_,
-                                       &transient_arena_, &plan_);
+                                       &arena_, &transient_arena_,
+                                       /*out_matrix_results=*/nullptr, &plan_);
   }
 
   void Build(const loom_amdgpu_wait_plan_options_t* options = nullptr) {
@@ -941,8 +946,8 @@ TEST_F(AmdgpuWaitPlanTest, VolatileConsumerOrdersRefinedIncomingMemory) {
   CrossBlockMemoryFixture fixture = {};
   // Scheduling excludes volatile accesses from source alias refinement. The
   // ordinary producer still occupies the separate refined incoming frontier.
-  ConfigureRefinedAcyclicMemory(graph, &fixture,
-                                LOOM_MEMORY_ACCESS_FLAG_VOLATILE);
+  ConfigureRefinedAcyclicMemory(graph, LOOM_MEMORY_ACCESS_FLAG_VOLATILE,
+                                &fixture);
 
   IREE_ASSERT_OK(BuildPlan());
   ASSERT_EQ(plan_.action_count, 1u);

@@ -230,6 +230,6 @@ static const loom_target_math_policy_registry_entry_t kWasmMathPolicyEntries[] =
 void loom_wasm_math_policy_registry_initialize(
     loom_target_math_policy_registry_t* out_registry) {
   loom_target_math_policy_registry_initialize_from_entries(
-      out_registry, kWasmMathPolicyEntries,
-      IREE_ARRAYSIZE(kWasmMathPolicyEntries));
+      kWasmMathPolicyEntries, IREE_ARRAYSIZE(kWasmMathPolicyEntries),
+      out_registry);
 }

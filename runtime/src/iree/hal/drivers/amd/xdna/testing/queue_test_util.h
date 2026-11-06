@@ -1052,12 +1052,10 @@ class QueueHarness {
         *out_executable, IREE_SV("main"), out_function));
   }
 
-  void MakeBuffer(
-      iree_hal_buffer_t** out_buffer,
-      iree_hal_memory_access_t allowed_access = IREE_HAL_MEMORY_ACCESS_ALL,
-      iree_hal_buffer_usage_t allowed_usage = IREE_HAL_BUFFER_USAGE_DEFAULT |
-                                              IREE_HAL_BUFFER_USAGE_MAPPING,
-      iree_device_size_t allocation_size = 64) {
+  void MakeBuffer(iree_hal_memory_access_t allowed_access,
+                  iree_hal_buffer_usage_t allowed_usage,
+                  iree_device_size_t allocation_size,
+                  iree_hal_buffer_t** out_buffer) {
     *out_buffer = nullptr;
     // Supply the memory namespace independently of queue completion topology.
     // Tests that exercise group construction supply the real group namespace;
@@ -1143,6 +1141,25 @@ class QueueHarness {
       iree_allocator_free(host_allocator, storage);
     }
     IREE_ASSERT_OK(status);
+  }
+
+  void MakeBuffer(iree_hal_buffer_t** out_buffer) {
+    MakeBuffer(IREE_HAL_MEMORY_ACCESS_ALL,
+               IREE_HAL_BUFFER_USAGE_DEFAULT | IREE_HAL_BUFFER_USAGE_MAPPING,
+               64, out_buffer);
+  }
+
+  void MakeBuffer(iree_hal_memory_access_t allowed_access,
+                  iree_hal_buffer_t** out_buffer) {
+    MakeBuffer(allowed_access,
+               IREE_HAL_BUFFER_USAGE_DEFAULT | IREE_HAL_BUFFER_USAGE_MAPPING,
+               64, out_buffer);
+  }
+
+  void MakeBuffer(iree_hal_memory_access_t allowed_access,
+                  iree_hal_buffer_usage_t allowed_usage,
+                  iree_hal_buffer_t** out_buffer) {
+    MakeBuffer(allowed_access, allowed_usage, 64, out_buffer);
   }
 
   iree_status_t CreateSlabPool(iree_hal_buffer_usage_t usage,

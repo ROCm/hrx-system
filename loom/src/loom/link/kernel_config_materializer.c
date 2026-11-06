@@ -1146,8 +1146,8 @@ iree_status_t loom_link_plan_project_kernel_config_module(
         provider->bytecode.contents, provider->bytecode.filename,
         environment->block_pool, &provider->bytecode.metadata,
         (uint16_t)selection->source_module->provider_module_ordinal,
-        complete_symbols, symbol_resolver, &read_options, &read_result, module,
-        environment->allocator);
+        complete_symbols, symbol_resolver, &read_options, module,
+        environment->allocator, &read_result);
   }
   if (iree_status_is_ok(status) && read_result.error_count != 0) {
     status = iree_make_status(

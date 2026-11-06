@@ -875,8 +875,9 @@ static iree_host_size_t iree_unicode_compose_codepoints(
 // then encodes to output. Returns the number of bytes written on success, or
 // IREE_HOST_SIZE_MAX if the output buffer would overflow.
 static iree_host_size_t iree_unicode_flush_sequence(
-    uint32_t* sequence, iree_host_size_t sequence_count, char* out_buffer,
-    iree_host_size_t capacity, iree_host_size_t output_position) {
+    uint32_t* sequence, iree_host_size_t sequence_count,
+    iree_host_size_t capacity, iree_host_size_t output_position,
+    char* out_buffer) {
   if (sequence_count == 0) {
     return 0;
   }
@@ -900,8 +901,8 @@ static iree_host_size_t iree_unicode_flush_sequence(
   return bytes_written;
 }
 
-iree_status_t iree_unicode_compose(iree_string_view_t input, char* out_buffer,
-                                   iree_host_size_t capacity,
+iree_status_t iree_unicode_compose(iree_string_view_t input,
+                                   iree_host_size_t capacity, char* out_buffer,
                                    iree_host_size_t* out_length) {
   // Fast path: ASCII-only input needs no composition.
   bool all_ascii = true;
@@ -939,7 +940,7 @@ iree_status_t iree_unicode_compose(iree_string_view_t input, char* out_buffer,
     if (ccc == 0 && sequence_count > 0) {
       // New starter: flush the previous sequence.
       iree_host_size_t bytes_written = iree_unicode_flush_sequence(
-          sequence, sequence_count, out_buffer, capacity, output_position);
+          sequence, sequence_count, capacity, output_position, out_buffer);
       if (bytes_written == IREE_HOST_SIZE_MAX) {
         return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
       }
@@ -957,7 +958,7 @@ iree_status_t iree_unicode_compose(iree_string_view_t input, char* out_buffer,
   // Flush any remaining sequence.
   if (sequence_count > 0) {
     iree_host_size_t bytes_written = iree_unicode_flush_sequence(
-        sequence, sequence_count, out_buffer, capacity, output_position);
+        sequence, sequence_count, capacity, output_position, out_buffer);
     if (bytes_written == IREE_HOST_SIZE_MAX) {
       return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
     }
@@ -1144,8 +1145,8 @@ iree_status_t iree_unicode_nfc(iree_string_view_t input,
 
         // Composition failed - flush the previous sequence and start fresh.
         iree_host_size_t bytes_written =
-            iree_unicode_flush_sequence(sequence, sequence_count, out_buffer,
-                                        out_capacity, output_position);
+            iree_unicode_flush_sequence(sequence, sequence_count, out_capacity,
+                                        output_position, out_buffer);
         if (bytes_written == IREE_HOST_SIZE_MAX) {
           return iree_make_status(
               IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -1172,7 +1173,7 @@ iree_status_t iree_unicode_nfc(iree_string_view_t input,
   // Flush any remaining sequence.
   if (sequence_count > 0) {
     iree_host_size_t bytes_written = iree_unicode_flush_sequence(
-        sequence, sequence_count, out_buffer, out_capacity, output_position);
+        sequence, sequence_count, out_capacity, output_position, out_buffer);
     if (bytes_written == IREE_HOST_SIZE_MAX) {
       return iree_make_status(
           IREE_STATUS_RESOURCE_EXHAUSTED,

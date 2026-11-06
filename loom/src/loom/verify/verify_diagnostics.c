@@ -190,8 +190,8 @@ static iree_host_size_t loom_collect_source_backed_highlights(
     const loom_module_t* module, const loom_op_t* op,
     const loom_source_range_t* source_location,
     const loom_verify_highlight_target_t* wanted_targets,
-    iree_host_size_t wanted_count, loom_highlight_range_t* out_highlights,
-    iree_host_size_t max_highlight_count) {
+    iree_host_size_t wanted_count, iree_host_size_t max_highlight_count,
+    loom_highlight_range_t* out_highlights) {
   if (!op || wanted_count == 0 ||
       source_location->provenance != LOOM_SOURCE_PROVENANCE_EXACT_SOURCE ||
       source_location->source.size == 0 ||
@@ -348,8 +348,8 @@ static iree_host_size_t loom_verify_collect_related_locations(
                 module, related_ops[i].op, &related_location->source_location,
                 &highlight_target,
                 /*wanted_count=*/1,
-                &out_related_highlights[related_location_count],
-                /*max_highlight_count=*/1);
+                /*max_highlight_count=*/1,
+                &out_related_highlights[related_location_count]);
         if (related_location->highlight_count > 0) {
           related_location->highlights =
               &out_related_highlights[related_location_count];
@@ -427,7 +427,7 @@ void loom_verify_emit_diagnostic(loom_verify_state_t* state,
     diagnostic.origin = diagnostic.source_location;
     diagnostic.highlight_count = loom_collect_source_backed_highlights(
         module, emission->op, &diagnostic.source_location, highlight_targets,
-        highlight_target_count, highlights, IREE_ARRAYSIZE(highlights));
+        highlight_target_count, IREE_ARRAYSIZE(highlights), highlights);
     if (diagnostic.highlight_count > 0) {
       diagnostic.highlights = highlights;
     }

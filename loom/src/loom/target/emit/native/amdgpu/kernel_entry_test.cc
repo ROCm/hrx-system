@@ -54,7 +54,7 @@ TEST(AmdgpuKernelEntryTest, SelectsInitialVmemReplayEnvelope) {
   const loom_amdgpu_hal_kernel_abi_verify_result_t abi = {};
   const loom_amdgpu_kernel_entry_envelope_t* envelope = nullptr;
   IREE_ASSERT_OK(loom_amdgpu_kernel_entry_envelope_build(
-      &properties, &abi, 0, &envelope, arena.arena()));
+      &properties, &abi, 0, arena.arena(), &envelope));
   EXPECT_EQ(std::string(envelope->assembly.data, envelope->assembly.size),
             kExpectedAssembly);
   ASSERT_EQ(envelope->text.data_length, sizeof(kExpectedText));
@@ -78,7 +78,7 @@ TEST(AmdgpuKernelEntryTest, InitializesAbsoluteFlatScratchFromRetainedLaunch) {
   };
   const loom_amdgpu_kernel_entry_envelope_t* envelope = nullptr;
   IREE_ASSERT_OK(loom_amdgpu_kernel_entry_envelope_build(
-      &properties, &abi, 32, &envelope, arena.arena()));
+      &properties, &abi, 32, arena.arena(), &envelope));
   // Independently assembled by LLVM for gfx90a in both feature modes.
   const uint8_t expected[] = {0x04, 0x09, 0x66, 0x80, 0x05, 0x80, 0x67, 0x82};
   EXPECT_EQ(
@@ -93,7 +93,7 @@ TEST(AmdgpuKernelEntryTest, InitializesAbsoluteFlatScratchFromRetainedLaunch) {
   EXPECT_EQ(envelope->minimum_vgpr_count, 0u);
 
   IREE_ASSERT_OK(loom_amdgpu_kernel_entry_envelope_build(
-      &properties, &abi, 0, &envelope, arena.arena()));
+      &properties, &abi, 0, arena.arena(), &envelope));
   EXPECT_EQ(envelope->instruction_count, 0u);
   EXPECT_EQ(envelope->text.data_length, 0u);
   EXPECT_EQ(envelope->assembly.size, 0u);
@@ -108,7 +108,7 @@ TEST(AmdgpuKernelEntryTest, PrependsTextAndDisplacesBodyFixups) {
   const loom_amdgpu_hal_kernel_abi_verify_result_t abi = {};
   const loom_amdgpu_kernel_entry_envelope_t* envelope = nullptr;
   IREE_ASSERT_OK(loom_amdgpu_kernel_entry_envelope_build(
-      &properties, &abi, 0, &envelope, arena.arena()));
+      &properties, &abi, 0, arena.arena(), &envelope));
   const uint8_t body[] = {0xaa, 0xbb, 0xcc, 0xdd, 0x00, 0x00, 0x00, 0x00};
   const loom_amdgpu_hsaco_text_fixup_t body_fixup = {
       .kind = LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,
@@ -122,7 +122,7 @@ TEST(AmdgpuKernelEntryTest, PrependsTextAndDisplacesBodyFixups) {
   const loom_amdgpu_hsaco_text_fixup_t* fixups = nullptr;
   IREE_ASSERT_OK(loom_amdgpu_kernel_entry_prepend_text(
       envelope, iree_make_const_byte_span(body, sizeof(body)), &body_fixup, 1,
-      &text, &fixups, arena.arena()));
+      arena.arena(), &text, &fixups));
 
   ASSERT_EQ(text.data_length, envelope->text.data_length + sizeof(body));
   EXPECT_EQ(std::string(reinterpret_cast<const char*>(text.data),
@@ -147,7 +147,7 @@ TEST(AmdgpuKernelEntryTest, EmptyEnvelopePreservesBodyStorage) {
   const loom_amdgpu_hal_kernel_abi_verify_result_t abi = {};
   const loom_amdgpu_kernel_entry_envelope_t* envelope = nullptr;
   IREE_ASSERT_OK(loom_amdgpu_kernel_entry_envelope_build(
-      &properties, &abi, 0, &envelope, arena.arena()));
+      &properties, &abi, 0, arena.arena(), &envelope));
   const uint8_t body[] = {0x00, 0x00, 0xb0, 0xbf};
   const loom_amdgpu_hsaco_text_fixup_t body_fixup = {
       .kind = LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,
@@ -157,7 +157,7 @@ TEST(AmdgpuKernelEntryTest, EmptyEnvelopePreservesBodyStorage) {
   const loom_amdgpu_hsaco_text_fixup_t* fixups = nullptr;
   IREE_ASSERT_OK(loom_amdgpu_kernel_entry_prepend_text(
       envelope, iree_make_const_byte_span(body, sizeof(body)), &body_fixup, 1,
-      &text, &fixups, arena.arena()));
+      arena.arena(), &text, &fixups));
 
   EXPECT_EQ(text.data, body);
   EXPECT_EQ(text.data_length, sizeof(body));

@@ -89,7 +89,7 @@ void AqlDispatchTest::CreateFixedScratchQueue(
       .maximum_wave_count = static_cast<uint32_t>(wave_count),
   };
   ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(out_queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, scratch));
+      CreateQueue(GpuUserQueueOptions{.scratch = scratch}, out_queue));
 }
 
 void AqlDispatchTest::PublishKernel(GpuUserQueue& queue,

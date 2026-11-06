@@ -81,7 +81,7 @@ class X86ProviderTest : public ::testing::Test {
       const loom_target_profile_t* profile = nullptr) {
     loom_target_profile_selection_t selection = {};
     IREE_EXPECT_OK(loom_x86_target_provider.select_cpu_profile(
-        cpu_data, requirement, profile, &selection, iree_allocator_system()));
+        cpu_data, requirement, profile, iree_allocator_system(), &selection));
     return selection;
   }
 

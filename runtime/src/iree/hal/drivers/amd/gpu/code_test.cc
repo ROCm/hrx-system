@@ -43,24 +43,25 @@ class CodeTest : public ::testing::Test {
   }
 
   void SetUp() override {
-    api_.memory_create =
-        [](amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
-           amdf_memory_t** out_memory, amdf_memory_release_info_t* release) {
-          if (release) {
-            *release = {};
-          }
-          auto* self = reinterpret_cast<CodeTest*>(scope);
-          if (++self->acquisitions_ == self->failed_acquisition_) {
-            return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
-          }
-          auto& memory = self->memories_[self->acquisitions_ - 1];
-          memory.bytes.assign(info->byte_length, 0xa5);
-          memory.flags = info->required_flags;
-          memory.allocated = true;
-          memory.allocation_thread = std::this_thread::get_id();
-          *out_memory = reinterpret_cast<amdf_memory_t*>(&memory);
-          return AMDF_STATUS_OK;
-        };
+    api_.memory_create = [](amdf_memory_scope_t* scope,
+                            const amdf_memory_create_info_t* info,
+                            amdf_memory_t** out_memory,
+                            amdf_memory_release_info_t* out_release_info) {
+      if (out_release_info) {
+        *out_release_info = {};
+      }
+      auto* self = reinterpret_cast<CodeTest*>(scope);
+      if (++self->acquisitions_ == self->failed_acquisition_) {
+        return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+      }
+      auto& memory = self->memories_[self->acquisitions_ - 1];
+      memory.bytes.assign(info->byte_length, 0xa5);
+      memory.flags = info->required_flags;
+      memory.allocated = true;
+      memory.allocation_thread = std::this_thread::get_id();
+      *out_memory = reinterpret_cast<amdf_memory_t*>(&memory);
+      return AMDF_STATUS_OK;
+    };
     api_.memory_query_info = [](amdf_memory_t* memory,
                                 amdf_memory_info_t* info) {
       info->byte_length = GetMemory(memory).bytes.size();

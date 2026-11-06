@@ -180,8 +180,8 @@ static iree_status_t loom_amdgpu_loom_check_emit_assembly(
   loom_amdgpu_encoded_instruction_stream_t stream = {0};
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_encode_instruction_stream_result_with_options(
-          &frame->schedule, &frame->allocation, &encoding_options, &stream,
-          arena));
+          &frame->schedule, &frame->allocation, &encoding_options, arena,
+          &stream));
   const loom_amdgpu_assembly_fragment_options_t assembly_options = {
       .packet_plan = &packet_plan,
       .instruction_layout = &stream.layout,
@@ -201,7 +201,7 @@ static iree_status_t loom_amdgpu_loom_check_encode_native(
       .packet_plan = &packet_plan,
   };
   return loom_amdgpu_encode_instruction_stream_with_options(
-      &frame->schedule, &frame->allocation, &encoding_options, out_text, arena);
+      &frame->schedule, &frame->allocation, &encoding_options, arena, out_text);
 }
 
 static iree_status_t loom_amdgpu_loom_check_format_native_words(
@@ -276,7 +276,7 @@ static iree_status_t loom_amdgpu_loom_check_lower_spill_traffic(
   }
   loom_amdgpu_spill_lowering_result_t result = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_lower_spill_traffic(
-      module, low_function_op, target.descriptor_set, emitter, &result, arena));
+      module, low_function_op, target.descriptor_set, emitter, arena, &result));
   out_result->error_count = result.error_count;
   out_result->lowered_traffic = result.lowered_traffic;
   out_result->required_register_value_ids = result.required_register_value_ids;

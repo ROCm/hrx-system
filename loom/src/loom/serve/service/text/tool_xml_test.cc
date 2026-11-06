@@ -48,19 +48,19 @@ class ToolXmlTest : public ::testing::Test {
     return iree_vm_buffer_variant_from_ptr_move(&types_, &buffer);
   }
 
-  iree_status_t Parse(iree_string_view_t text, std::string* out_calls,
-                      bool truncated = false) {
+  iree_status_t Parse(iree_string_view_t text, bool truncated,
+                      std::string* out_calls) {
     return Parse(text,
                  IREE_SV(
                      R"([{"type":"function","function":{"name":"search",
           "parameters":{"type":"object","properties":{
             "query":{"type":"string"},"limit":{"type":"integer"}},
             "required":["query"]}}}])"),
-                 out_calls, truncated);
+                 truncated, out_calls);
   }
 
   iree_status_t Parse(iree_string_view_t text, iree_string_view_t schemas,
-                      std::string* out_calls, bool truncated = false) {
+                      bool truncated, std::string* out_calls) {
     out_calls->clear();
     iree_vm_variant_t arguments[] = {
         Text(schemas),
@@ -91,6 +91,15 @@ class ToolXmlTest : public ::testing::Test {
     iree_vm_variant_reset(&result);
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
     return status;
+  }
+
+  iree_status_t Parse(iree_string_view_t text, std::string* out_calls) {
+    return Parse(text, /*truncated=*/false, out_calls);
+  }
+
+  iree_status_t Parse(iree_string_view_t text, iree_string_view_t schemas,
+                      std::string* out_calls) {
+    return Parse(text, schemas, /*truncated=*/false, out_calls);
   }
 
   // Allocation policy for the real native module and its invocation.
@@ -174,13 +183,13 @@ TEST_F(ToolXmlTest, TokenLimitAtEveryBytePublishesOnlyCompleteCalls) {
     SCOPED_TRACE(length);
     std::string calls;
     IREE_ASSERT_OK(
-        Parse(iree_make_string_view(call.data(), length), &calls, true));
+        Parse(iree_make_string_view(call.data(), length), true, &calls));
     EXPECT_EQ(calls, length == call.size() ? "[" + expected + "]" : "[]");
     // A complete prefix survives a later truncated call, without repairing or
     // publishing any of that last call's name or arguments.
     const std::string text = call + "\n" + call.substr(0, length);
     IREE_ASSERT_OK(
-        Parse(iree_make_string_view(text.data(), text.size()), &calls, true));
+        Parse(iree_make_string_view(text.data(), text.size()), true, &calls));
     EXPECT_EQ(calls, "[" + expected +
                          (length == call.size() ? "," + expected : "") + "]");
   }
@@ -201,11 +210,11 @@ TEST_F(ToolXmlTest, TokenLimitDoesNotHideMalformedFraming) {
       std::string calls;
       IREE_EXPECT_STATUS_IS(
           IREE_STATUS_INVALID_ARGUMENT,
-          Parse(iree_make_string_view(text.data(), text.size()), &calls,
-                truncated));
+          Parse(iree_make_string_view(text.data(), text.size()), truncated,
+                &calls));
       EXPECT_TRUE(calls.empty());
       IREE_ASSERT_OK(
-          Parse(iree_make_cstring_view(valid.c_str()), &calls, truncated));
+          Parse(iree_make_cstring_view(valid.c_str()), truncated, &calls));
       EXPECT_EQ(
           calls,
           R"([{"type":"function","function":{"name":"search","arguments":"{}"}}])");

@@ -317,7 +317,7 @@ static void BenchmarkReadModule(benchmark::State& state, uint8_t preset,
         iree_make_const_byte_span(fixture.bytes().data(),
                                   fixture.bytes().size()),
         IREE_SV("benchmark.loombc"), fixture.context(), &block_pool, &options,
-        &result, &module, iree_allocator_system()));
+        iree_allocator_system(), &result, &module));
     if (verify_module) {
       const loom_verify_options_t verify_options = {
           .sink = options.diagnostic_sink,
@@ -449,7 +449,7 @@ static void BM_ReadModule_Catalog(benchmark::State& state) {
         iree_make_const_byte_span(fixture.bytes().data(),
                                   fixture.bytes().size()),
         IREE_SV("catalog_benchmark.loombc"), fixture.context(), &block_pool,
-        &options, &result, &module, iree_allocator_system()));
+        &options, iree_allocator_system(), &result, &module));
     if (result.error_count != 0 || module == nullptr ||
         module->symbols.count != symbol_count) {
       abort();
@@ -577,7 +577,7 @@ static void BenchmarkMaterializeSelectedCatalog(benchmark::State& state) {
             .count = ordinals.size(),
             .ordinals = ordinals.data(),
         },
-        &options, &result, &module, iree_allocator_system()));
+        &options, iree_allocator_system(), &result, &module));
     if (result.error_count != 0 || module == nullptr ||
         module->symbols.count != selected_symbol_count) {
       abort();
@@ -726,7 +726,7 @@ static void BM_ReadModule_TypePlan(benchmark::State& state) {
         iree_make_const_byte_span(fixture.bytes().data(),
                                   fixture.bytes().size()),
         IREE_SV("type_plan_benchmark.loombc"), fixture.context(), &block_pool,
-        &options, &result, &module, iree_allocator_system()));
+        &options, iree_allocator_system(), &result, &module));
     if (result.error_count != 0 || module == nullptr ||
         module->types.count != fixture.type_count()) {
       abort();

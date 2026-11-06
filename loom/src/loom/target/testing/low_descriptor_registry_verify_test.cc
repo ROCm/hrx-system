@@ -60,8 +60,8 @@ TEST(LowDescriptorRegistryTest, AppendToTablesBuildsBorrowedSubset) {
 
   loom_target_low_descriptor_registry_t joined_registry = {};
   loom_target_low_descriptor_registry_initialize_from_tables(
-      &joined_registry, descriptor_set_providers,
-      descriptor_set_provider_count);
+      descriptor_set_providers, descriptor_set_provider_count,
+      &joined_registry);
   IREE_EXPECT_OK(loom_target_low_descriptor_registry_verify(
       &joined_registry, LOOM_LOW_DESCRIPTOR_REQUIREMENT_TARGET_LOW_FOUNDATION));
 }

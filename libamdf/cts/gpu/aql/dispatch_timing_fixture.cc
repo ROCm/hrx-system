@@ -100,8 +100,7 @@ void AqlDispatchTimingTest::Exercise(std::initializer_list<bool> phases,
           ? AMDF_GPU_USER_QUEUE_FLAG_DISPATCH_TIMESTAMPS
           : 0u;
   ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(family_, &queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, 0, flags));
+      CreateQueue(family_, GpuUserQueueOptions{.flags = flags}, &queue));
   if (phases.size() > 1) {
     ASSERT_GE(gpu_api_->extension_version, AMDF_GPU_EXTENSION_VERSION_5);
     ASSERT_EQ(gpu_api_->user_queue_set_dispatch_timestamps(queue->queue,

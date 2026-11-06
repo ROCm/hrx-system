@@ -337,7 +337,7 @@ TEST(SpirvTest, RejectsTruncatedInstruction) {
       IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
                             iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
                                 words, IREE_ARRAYSIZE(words), 0, nullptr,
-                                &metadata, iree_allocator_system()));
+                                iree_allocator_system(), &metadata));
       iree_hal_vulkan_spirv_bda_dispatch_metadata_deinitialize(
           &metadata, iree_allocator_system());
     }
@@ -943,8 +943,8 @@ TEST(SpirvTest, ParsesBdaDispatchMetadata) {
       module.data(), module.size(), 1, &entry_point));
   iree_hal_vulkan_spirv_bda_dispatch_metadata_t metadata = {};
   IREE_ASSERT_OK(iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
-      module.data(), module.size(), 1, &entry_point, &metadata,
-      iree_allocator_system()));
+      module.data(), module.size(), 1, &entry_point, iree_allocator_system(),
+      &metadata));
   EXPECT_TRUE(metadata.is_present);
   EXPECT_EQ(0u, metadata.root_push_constant_offset);
   EXPECT_EQ(32u, metadata.root_push_constant_length);
@@ -999,8 +999,8 @@ TEST(SpirvTest, ParsesPerEntrySubgroupSizes) {
         module.data(), module.size(), 2, entries));
     iree_hal_vulkan_spirv_bda_dispatch_metadata_t metadata[2] = {};
     IREE_ASSERT_OK(iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
-        module.data(), module.size(), 2, entries, metadata,
-        iree_allocator_system()));
+        module.data(), module.size(), 2, entries, iree_allocator_system(),
+        metadata));
     EXPECT_EQ(metadata[0].subgroup_size, 0u);
     EXPECT_EQ(metadata[1].subgroup_size, size);
     for (auto& entry : metadata) {
@@ -1023,7 +1023,7 @@ TEST(SpirvTest, RejectsMalformedSubgroupSizeMetadata) {
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                           iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
                               module.data(), module.size(), 1, &entry,
-                              &metadata, iree_allocator_system()));
+                              iree_allocator_system(), &metadata));
     EXPECT_EQ(metadata.subgroup_size, 0u);
   }
   const auto module = MakeBdaMetadataModule({
@@ -1036,8 +1036,8 @@ TEST(SpirvTest, RejectsMalformedSubgroupSizeMetadata) {
   iree_hal_vulkan_spirv_bda_dispatch_metadata_t metadata = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
-                            module.data(), module.size(), 1, &entry, &metadata,
-                            iree_allocator_system()));
+                            module.data(), module.size(), 1, &entry,
+                            iree_allocator_system(), &metadata));
   EXPECT_EQ(metadata.subgroup_size, 0u);
 }
 
@@ -1053,8 +1053,8 @@ TEST(SpirvTest, IgnoresUnknownBdaDispatchMetadataVersions) {
       module.data(), module.size(), 1, &entry_point));
   iree_hal_vulkan_spirv_bda_dispatch_metadata_t metadata = {};
   IREE_ASSERT_OK(iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
-      module.data(), module.size(), 1, &entry_point, &metadata,
-      iree_allocator_system()));
+      module.data(), module.size(), 1, &entry_point, iree_allocator_system(),
+      &metadata));
   EXPECT_FALSE(metadata.is_present);
   iree_hal_vulkan_spirv_bda_dispatch_metadata_deinitialize(
       &metadata, iree_allocator_system());
@@ -1072,7 +1072,7 @@ TEST(SpirvTest, RejectsMalformedBdaDispatchMetadata) {
       StatusCode::kInvalidArgument,
       iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
           unknown_field_module.data(), unknown_field_module.size(), 1,
-          &entry_point, &metadata, iree_allocator_system()));
+          &entry_point, iree_allocator_system(), &metadata));
   iree_hal_vulkan_spirv_bda_dispatch_metadata_deinitialize(
       &metadata, iree_allocator_system());
 
@@ -1082,7 +1082,7 @@ TEST(SpirvTest, RejectsMalformedBdaDispatchMetadata) {
                         iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
                             missing_binding_count_module.data(),
                             missing_binding_count_module.size(), 1,
-                            &entry_point, &metadata, iree_allocator_system()));
+                            &entry_point, iree_allocator_system(), &metadata));
   iree_hal_vulkan_spirv_bda_dispatch_metadata_deinitialize(
       &metadata, iree_allocator_system());
 }
@@ -1106,8 +1106,8 @@ TEST(SpirvTest, JoinsBdaMetadataByEntryName) {
       module.data(), module.size(), IREE_ARRAYSIZE(entries), entries));
   iree_hal_vulkan_spirv_bda_dispatch_metadata_t metadata[4] = {};
   IREE_ASSERT_OK(iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
-      module.data(), module.size(), IREE_ARRAYSIZE(entries), entries, metadata,
-      iree_allocator_system()));
+      module.data(), module.size(), IREE_ARRAYSIZE(entries), entries,
+      iree_allocator_system(), metadata));
   EXPECT_TRUE(metadata[0].is_present);
   EXPECT_EQ(metadata[0].binding_count, 2u);
   EXPECT_EQ(metadata[0].constant_byte_length, 4u);
@@ -1162,7 +1162,7 @@ TEST(SpirvTest, RejectsMalformedBdaParameterMetadata) {
     IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
                           iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
                               module.data(), module.size(), 1, &entry_point,
-                              &metadata, iree_allocator_system()));
+                              iree_allocator_system(), &metadata));
     EXPECT_EQ(nullptr, metadata.parameters);
     EXPECT_EQ(0u, metadata.parameter_count);
     iree_hal_vulkan_spirv_bda_dispatch_metadata_deinitialize(
@@ -1190,7 +1190,7 @@ TEST(SpirvTest, RejectsMalformedBdaParameterMetadata) {
     IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
                           iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
                               module.data(), module.size(), 1, &entry_point,
-                              &metadata, iree_allocator_system()));
+                              iree_allocator_system(), &metadata));
     EXPECT_EQ(nullptr, metadata.parameters);
     EXPECT_EQ(0u, metadata.parameter_count);
     iree_hal_vulkan_spirv_bda_dispatch_metadata_deinitialize(
@@ -1208,7 +1208,7 @@ TEST(SpirvTest, RejectsMalformedBdaParameterMetadata) {
       StatusCode::kInvalidArgument,
       iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
           incomplete_module.data(), incomplete_module.size(), 1, &entry_point,
-          &metadata, iree_allocator_system()));
+          iree_allocator_system(), &metadata));
   iree_hal_vulkan_spirv_bda_dispatch_metadata_deinitialize(
       &metadata, iree_allocator_system());
 
@@ -1223,7 +1223,7 @@ TEST(SpirvTest, RejectsMalformedBdaParameterMetadata) {
   IREE_EXPECT_STATUS_IS(StatusCode::kInvalidArgument,
                         iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
                             duplicate_module.data(), duplicate_module.size(), 1,
-                            &entry_point, &metadata, iree_allocator_system()));
+                            &entry_point, iree_allocator_system(), &metadata));
   iree_hal_vulkan_spirv_bda_dispatch_metadata_deinitialize(
       &metadata, iree_allocator_system());
 }
@@ -1263,7 +1263,7 @@ TEST(SpirvTest, RejectsInvalidEntryMetadataAndReleasesAllEntries) {
         StatusCode::kInvalidArgument,
         iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
             module.data(), module.size(), IREE_ARRAYSIZE(entries), entries,
-            metadata, iree_allocator_system()));
+            iree_allocator_system(), metadata));
     for (const auto& entry : metadata) {
       EXPECT_FALSE(entry.is_present);
       EXPECT_EQ(entry.binding_requirements, nullptr);

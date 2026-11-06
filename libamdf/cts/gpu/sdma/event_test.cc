@@ -76,8 +76,9 @@ TEST_F(SdmaEventTest, CopyCompletionAndRingReuseWithEarlyHostHints) {
   }
   GpuMemory* payload = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
-      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 8192, &payload,
-      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE));
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 8192,
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE,
+      &payload));
   const auto host = payload->HostSite();
   const auto engine = payload->DeviceSite(family_.ordinal);
   amdf_memory_pair_info_t upload = {
@@ -110,9 +111,8 @@ TEST_F(SdmaEventTest, CopyCompletionAndRingReuseWithEarlyHostHints) {
               0u);
   }
   GpuUserQueue* queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(
-      CreateQueue(family_, &queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-                  AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, kRingBytes));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(
+      family_, GpuUserQueueOptions{.ring_byte_length = kRingBytes}, &queue));
   auto* ring = reinterpret_cast<uint32_t*>(queue->host.ring_address);
   auto* input = static_cast<uint32_t*>(payload->host.pointer);
   auto* output = input + kOutputOffset / sizeof(uint32_t);
@@ -179,8 +179,9 @@ TEST_F(SdmaEventTest, IndependentQueuesShareOneNativeWake) {
   constexpr uint32_t kRounds = 64;
   GpuMemory* completion = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
-      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &completion,
-      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE));
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096,
+      AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_QUEUE_STORAGE,
+      &completion));
   std::array<GpuUserQueue*, 2> queues;
   for (auto& queue : queues) {
     ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue));

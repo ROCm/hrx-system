@@ -168,9 +168,9 @@ class GpuFileIoTest
   }
 
   void CreatePayload(Backing backing, uint64_t byte_length, uint64_t alignment,
-                     GpuMemory** out_memory,
-                     amdf_memory_flags_t flags = AMDF_MEMORY_FLAG_HOST_COHERENT,
-                     amdf_memory_access_t required_access = 0) {
+                     amdf_memory_flags_t flags,
+                     amdf_memory_access_t required_access,
+                     GpuMemory** out_memory) {
     const bool registered = backing == Backing::kRegistered;
     const amdf_memory_flags_t backing_flags =
         AMDF_MEMORY_FLAG_HOST_VISIBLE |
@@ -245,6 +245,12 @@ class GpuFileIoTest
     ASSERT_EQ(reinterpret_cast<uintptr_t>((*out_memory)->host.pointer) %
                   buffer_alignment_,
               0u);
+  }
+
+  void CreatePayload(Backing backing, uint64_t byte_length, uint64_t alignment,
+                     GpuMemory** out_memory) {
+    CreatePayload(backing, byte_length, alignment,
+                  AMDF_MEMORY_FLAG_HOST_COHERENT, 0, out_memory);
   }
 
   void BeginTransfer(bool write, void* buffer, DWORD byte_length,
@@ -605,9 +611,9 @@ TEST_P(GpuFilePoolTest,
   GpuMemory* pool = nullptr;
   GpuMemory* arguments = nullptr;
   GpuMemory* code = nullptr;
-  ASSERT_NO_FATAL_FAILURE(CreatePayload(backing, 8 * unit, unit, &pool,
+  ASSERT_NO_FATAL_FAILURE(CreatePayload(backing, 8 * unit, unit,
                                         AMDF_MEMORY_FLAG_MAPPING_SOURCE,
-                                        capabilities.required_access));
+                                        capabilities.required_access, &pool));
   ASSERT_EQ(pool->host.properties, (AMDF_HOST_MEMORY_PROPERTY_READ_CACHED |
                                     AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK));
   ASSERT_EQ(pool->access_info.flags & AMDF_MEMORY_FLAG_HOST_COHERENT, 0u);

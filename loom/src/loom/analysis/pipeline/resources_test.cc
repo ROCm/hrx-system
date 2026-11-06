@@ -512,7 +512,7 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
   for (size_t i = 0; i < IREE_ARRAYSIZE(instances); ++i) {
     IREE_ASSERT_OK(loom_callable_clone_definition(
         &builder_, loom_func_like_cast(module_, worker),
-        Symbol(instance_names[i]), nullptr, &instances[i], &arena_));
+        Symbol(instance_names[i]), nullptr, &arena_, &instances[i]));
   }
   loom_pipeline_worker_t* instance_workers = nullptr;
   IREE_ASSERT_OK(loom_pipeline_invocations_analyze_workers(

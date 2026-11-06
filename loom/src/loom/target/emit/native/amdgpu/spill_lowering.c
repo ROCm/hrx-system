@@ -1024,8 +1024,8 @@ static iree_status_t loom_amdgpu_spill_lowering_initialize_context(
     const loom_low_descriptor_set_t* descriptor_set,
     iree_diagnostic_emitter_t emitter,
     loom_amdgpu_spill_lowering_result_t* result,
-    loom_amdgpu_spill_lowering_context_t* out_context,
-    iree_arena_allocator_t* scratch_arena) {
+    iree_arena_allocator_t* scratch_arena,
+    loom_amdgpu_spill_lowering_context_t* out_context) {
   *out_context = (loom_amdgpu_spill_lowering_context_t){
       .function_op = function_op,
       .emitter = emitter,
@@ -1041,9 +1041,8 @@ static iree_status_t loom_amdgpu_spill_lowering_initialize_context(
 iree_status_t loom_amdgpu_lower_spill_traffic(
     loom_module_t* module, loom_op_t* function_op,
     const loom_low_descriptor_set_t* descriptor_set,
-    iree_diagnostic_emitter_t emitter,
-    loom_amdgpu_spill_lowering_result_t* out_result,
-    iree_arena_allocator_t* scratch_arena) {
+    iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* scratch_arena,
+    loom_amdgpu_spill_lowering_result_t* out_result) {
   if (module == NULL || function_op == NULL || descriptor_set == NULL ||
       out_result == NULL || scratch_arena == NULL) {
     return iree_make_status(
@@ -1069,8 +1068,8 @@ iree_status_t loom_amdgpu_lower_spill_traffic(
 
   loom_amdgpu_spill_lowering_context_t context = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_initialize_context(
-      module, function_op, body, descriptor_set, emitter, out_result, &context,
-      scratch_arena));
+      module, function_op, body, descriptor_set, emitter, out_result,
+      scratch_arena, &context));
 
   loom_rewriter_t rewriter = {0};
   loom_rewriter_initialize(&rewriter, module, scratch_arena);

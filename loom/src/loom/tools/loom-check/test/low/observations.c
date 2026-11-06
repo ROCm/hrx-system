@@ -669,7 +669,7 @@ static iree_status_t loom_check_test_low_observe_compile_report(
 
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(
-      &report, iree_arena_allocator(request->case_arena));
+      iree_arena_allocator(request->case_arena), &report);
   iree_status_t status =
       loom_target_compile_report_record_low_emission_frame(&report, &frame);
   if (iree_status_is_ok(status)) {

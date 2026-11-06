@@ -246,7 +246,7 @@ static iree_status_t loom_runtime_source_index_add_provider(
       };
       status = loom_tooling_input_admit_loomc_module(
           &admission_options, context, import->workspace, &import->block_pool,
-          &module, &result, host_allocator);
+          host_allocator, &module, &result);
       status = loom_runtime_compilation_result(loomc_status_from_iree(status),
                                                result, report);
     }

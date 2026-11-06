@@ -442,12 +442,12 @@ static void iree_hal_slab_cache_refill_progress(iree_hal_slab_cache_t* cache) {
                       iree_memory_order_relaxed);
     iree_status_t status = iree_hal_pool_acquire_reservations(
         cache->backing_pool, 1, &cache->refill.parent.request, NULL,
-        &cache->refill.parent.reservation, &cache->refill.parent.info,
         (iree_hal_pool_acquire_callback_t){
             .fn = iree_hal_slab_cache_refill_complete,
             .user_data = cache,
         },
-        IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER);
+        IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER,
+        &cache->refill.parent.reservation, &cache->refill.parent.info);
     if (!iree_status_is_ok(status)) {
       iree_hal_slab_cache_refill_complete(cache, status,
                                           IREE_HAL_POOL_ACQUIRE_NONE);
@@ -876,13 +876,13 @@ static void iree_hal_slab_cache_acquire_progress(
     iree_atomic_store(&acquire->parent.pending, 2, iree_memory_order_relaxed);
     iree_status_t status = iree_hal_pool_acquire_reservations(
         cache->backing_pool, 1, &acquire->parent.request,
-        acquire->call.frontier, &acquire->parent.reservation,
-        &acquire->parent.info,
+        acquire->call.frontier,
         (iree_hal_pool_acquire_callback_t){
             .fn = iree_hal_slab_cache_acquire_parent_complete,
             .user_data = acquire,
         },
-        acquire->call.flags);
+        acquire->call.flags, &acquire->parent.reservation,
+        &acquire->parent.info);
     if (!iree_status_is_ok(status)) {
       iree_hal_slab_cache_acquire_parent_complete(acquire, status,
                                                   IREE_HAL_POOL_ACQUIRE_NONE);
@@ -899,10 +899,10 @@ static iree_status_t iree_hal_slab_cache_acquire_reservations(
     iree_hal_pool_t* base_pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester,
-    iree_hal_pool_reservation_t* out_reservations,
-    iree_hal_pool_acquire_info_t* out_infos,
     iree_hal_pool_acquire_callback_t completion,
-    iree_hal_pool_reserve_flags_t flags) {
+    iree_hal_pool_reserve_flags_t flags,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos) {
   iree_hal_slab_cache_t* cache = (iree_hal_slab_cache_t*)base_pool;
   for (iree_host_size_t i = 0; i < request_count; ++i) {
     IREE_RETURN_IF_ERROR(

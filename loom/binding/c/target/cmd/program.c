@@ -715,7 +715,7 @@ static loomc_status_t loomc_cmd_program_product_build_indexed(
       materialization_environment, scratch_arena, &plan_valid, &plan);
   if (iree_status_is_ok(plan_status) && plan_valid) {
     plan_status = loom_cmd_program_artifact_set_build(
-        &plan, &artifact_set, iree_allocator_from_loomc(allocator));
+        &plan, iree_allocator_from_loomc(allocator), &artifact_set);
   }
   loomc_status_t status = loomc_cmd_program_product_translate_plan_status(
       &invocation, diagnostic_count_before, plan_status);

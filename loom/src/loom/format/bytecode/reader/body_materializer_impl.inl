@@ -288,8 +288,7 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t
 loom_bytecode_body_reader_read_op_record(
     loom_bytecode_body_reader_t* body_reader,
     loom_bytecode_reader_cursor_t* cursor, loom_builder_t* builder,
-    uint32_t depth,
-    loom_bytecode_body_op_record_t* out_record) {
+    uint32_t depth, loom_bytecode_body_op_record_t* out_record) {
   uint64_t op_offset = loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t op_table_index_plus1 = 0;
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint(
@@ -529,7 +528,7 @@ loom_bytecode_body_reader_read_op_record(
           .values = body_reader->values.value_map,
           .value_count = body_reader->values.next_value_number,
           .bindings = &body_reader->values.bindings,
-  };
+      };
   for (uint64_t i = 0; i < present_attr_count; ++i) {
     uint64_t key_offset = loom_bytecode_reader_cursor_absolute_position(cursor);
     uint64_t key_id = 0;
@@ -601,7 +600,7 @@ loom_bytecode_body_reader_read_op_record(
     } else {
       IREE_RETURN_IF_ERROR(loom_bytecode_body_policy_materialize_attribute_ssa(
           body_reader->materializer, cursor, descriptor, value_kind,
-          &attrs[attr_index], &attribute_ssa_scope));
+          &attribute_ssa_scope, &attrs[attr_index]));
     }
   }
 

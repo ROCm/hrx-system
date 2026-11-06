@@ -1076,7 +1076,7 @@ iree_status_t loom_aie2p_xdna_product_finalize(
       .segment_count = emitted_segment_count,
   };
   IREE_RETURN_IF_ERROR(
-      loom_native_elf32le_build_layout(&image->file, &image->layout, arena));
+      loom_native_elf32le_build_layout(&image->file, arena, &image->layout));
   if (image->layout.file_size > UINT32_MAX) {
     loom_aie2p_xdna_set_issue(LOOM_AIE2P_XDNA_PRODUCT_ISSUE_FILE_BYTE_LENGTH,
                               UINT32_MAX, image->layout.file_size, 0,

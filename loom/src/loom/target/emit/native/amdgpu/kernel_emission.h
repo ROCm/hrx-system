@@ -53,9 +53,8 @@ iree_status_t loom_amdgpu_kernel_emission_build(
     const loom_amdgpu_kernel_plan_t* plan,
     const loom_amdgpu_data_symbol_directory_t* data_symbols,
     loom_amdgpu_kernel_emission_flags_t flags,
-    iree_string_builder_t* target_listing,
-    loom_amdgpu_kernel_emission_result_t* out_result,
-    iree_arena_allocator_t* table_arena);
+    iree_string_builder_t* target_listing, iree_arena_allocator_t* table_arena,
+    loom_amdgpu_kernel_emission_result_t* out_result);
 
 #ifdef __cplusplus
 }  // extern "C"

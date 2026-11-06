@@ -132,7 +132,7 @@ iree_status_t loom_amdgpu_metadata_append_msgpack(
 // note type is NT_AMDGPU_METADATA.
 iree_status_t loom_amdgpu_metadata_build_elf_note(
     const loom_amdgpu_code_object_metadata_t* metadata,
-    iree_const_byte_span_t* out_note, iree_arena_allocator_t* arena);
+    iree_arena_allocator_t* arena, iree_const_byte_span_t* out_note);
 
 #ifdef __cplusplus
 }  // extern "C"

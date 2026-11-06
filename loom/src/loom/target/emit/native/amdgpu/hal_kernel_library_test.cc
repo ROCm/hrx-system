@@ -806,9 +806,9 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
         ParseSource(iree_make_cstring_view(kSource), out_module));
   }
 
-  void ParseKernelForTarget(
-      const loom_amdgpu_target_info_t* target, loom_module_t** out_module,
-      iree_string_view_t target_attrs = iree_string_view_empty()) {
+  void ParseKernelForTarget(const loom_amdgpu_target_info_t* target,
+                            iree_string_view_t target_attrs,
+                            loom_module_t** out_module) {
     ASSERT_NE(target, nullptr);
 
     std::string source = "amdgpu.target<";
@@ -833,6 +833,11 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(ParseSource(
         iree_make_string_view(source.data(), source.size()), out_module))
         << StringViewToString(target->name);
+  }
+
+  void ParseKernelForTarget(const loom_amdgpu_target_info_t* target,
+                            loom_module_t** out_module) {
+    ParseKernelForTarget(target, iree_string_view_empty(), out_module);
   }
 
   bool IsDescriptorSetLinked(iree_string_view_t descriptor_set_key) const {
@@ -886,7 +891,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, SharesLeafFunctionAcrossKernelEntries) {
   ASSERT_NO_FATAL_FAILURE(ParseGfx11KernelsWithSharedLeafCall(&module));
 
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_options_t options = {
       .diagnostic_sink = capture.sink(),
@@ -1010,7 +1015,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, RetainsRequestedArtifactMetadata) {
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(&block_pool_, &scratch_arena);
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS |
@@ -1144,7 +1149,7 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   };
 
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_options_t options = {
       .function_versions = &function_versions,
@@ -1254,7 +1259,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx1250HardwareEntryEnvelope) {
   ASSERT_NO_FATAL_FAILURE(ParseKernelForTarget(target, &module));
 
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {
@@ -1513,9 +1518,10 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 
     loom_module_t* module = nullptr;
     ASSERT_NO_FATAL_FAILURE(ParseKernelForTarget(
-        test_case.target, &module,
+        test_case.target,
         iree_make_string_view(test_case.target_attrs.data(),
-                              test_case.target_attrs.size())));
+                              test_case.target_attrs.size()),
+        &module));
     loom_target_artifact_manifest_collect_options_t manifest_options = {};
     loom_target_artifact_manifest_collect_options_initialize(&manifest_options);
     manifest_options.mode = LOOM_TARGET_ARTIFACT_MANIFEST_MODE_SUMMARY;
@@ -1615,7 +1621,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
     ASSERT_NO_FATAL_FAILURE(ParseKernelForTarget(target, &module));
 
     loom_target_compile_report_t report = {};
-    loom_target_compile_report_initialize(&report, iree_allocator_system());
+    loom_target_compile_report_initialize(iree_allocator_system(), &report);
     DiagnosticCapture capture;
     loom_amdgpu_hal_kernel_library_t library = {};
     loom_amdgpu_hal_kernel_library_options_t options = {
@@ -1681,7 +1687,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsTensorWaitCounter) {
   DiagnosticCapture capture;
 
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   report.requested_detail_flags =
       LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS;
@@ -1846,7 +1852,7 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsAllCompatibleKernels) {
   ASSERT_NO_FATAL_FAILURE(ParseGfx11MultiKernel(&module));
 
   loom_target_compile_report_t report = {};
-  loom_target_compile_report_initialize(&report, iree_allocator_system());
+  loom_target_compile_report_initialize(iree_allocator_system(), &report);
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
   loom_amdgpu_hal_kernel_library_options_t options = {

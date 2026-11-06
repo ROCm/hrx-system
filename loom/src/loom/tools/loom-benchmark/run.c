@@ -403,7 +403,7 @@ iree_status_t loom_benchmark_run_file(
       admission_options.input.format = format->name;
       status = loom_tooling_input_admit_loomc_module(
           &admission_options, compiler_context, compiler_workspace, &block_pool,
-          &module, &result, allocator);
+          allocator, &module, &result);
     }
     if (iree_status_is_ok(status)) {
       status = loom_benchmark_diagnostic_capture_loomc_result(
@@ -463,7 +463,7 @@ iree_status_t loom_benchmark_run_file(
     loomc_result_t* result = NULL;
     status = loom_tooling_cli_prepare_loomc_pass_program(
         compiler_context, module, benchmark_options->pipeline,
-        IREE_SV("loom-benchmark pipeline"), &pass_program, &result, allocator);
+        IREE_SV("loom-benchmark pipeline"), allocator, &pass_program, &result);
     if (iree_status_is_ok(status) && pass_program == NULL &&
         benchmark_options->compile_only) {
       const loomc_target_pipeline_options_t target_pipeline_options = {

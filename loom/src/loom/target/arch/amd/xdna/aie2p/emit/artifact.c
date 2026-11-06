@@ -379,8 +379,8 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
     loom_target_compile_report_t worker_report;
     loom_target_compile_report_t* worker_report_ptr = NULL;
     if (request->compile_report != NULL) {
-      loom_target_compile_report_initialize(&worker_report,
-                                            request->compile_report->allocator);
+      loom_target_compile_report_initialize(request->compile_report->allocator,
+                                            &worker_report);
       worker_report.requested_detail_flags =
           request->compile_report->requested_detail_flags;
       worker_report_ptr = &worker_report;

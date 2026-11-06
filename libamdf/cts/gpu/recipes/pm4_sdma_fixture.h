@@ -80,12 +80,12 @@ class Pm4SdmaTest : public Pm4DispatchTest {
   // initializes transfer operations with any explicitly required cache work;
   // queries add the minimum operations for each phase. Packet emission and cold
   // instruction-cache publication remain the caller's responsibility.
-  void PrepareCoherentHandoff(
-      const kernels::Kernel& kernel, PairQuery query_kind,
-      std::span<const Edge> edges, std::array<Backing, kBackingCount>& backings,
-      Pm4ComputeProgram* out_program,
-      std::array<amdf_cache_operations_t, kTransferPhaseCount>*
-          inout_operations);
+  void PrepareCoherentHandoff(const kernels::Kernel& kernel,
+                              PairQuery query_kind, std::span<const Edge> edges,
+                              std::array<Backing, kBackingCount>& backings,
+                              std::array<amdf_cache_operations_t,
+                                         kTransferPhaseCount>* inout_operations,
+                              Pm4ComputeProgram* out_program);
 
   // Checks a queried actor's exact cache contract and accumulates SDMA work.
   // The derived recipe emits PM4 work and owns the ordering separately.

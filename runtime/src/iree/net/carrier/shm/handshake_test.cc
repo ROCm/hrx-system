@@ -132,7 +132,7 @@ class ShmHandshakeTest : public ::testing::TestWithParam<bool> {
     std::array<uint8_t, IREE_NET_SHM_BOOTSTRAP_HEADER_SIZE> accept;
     IREE_ASSERT_OK(iree_async_local_stream_receive(
         channels_[0].stream, iree_make_byte_span(accept.data(), accept.size()),
-        0, nullptr, {Transferred, this}));
+        0, {Transferred, this}, nullptr));
     ASSERT_NO_FATAL_FAILURE(AwaitTransfer());
     IREE_ASSERT_OK(iree_net_shm_bootstrap_decode_ack(
         iree_make_const_byte_span(accept.data(), accept.size()),
@@ -286,8 +286,8 @@ TEST_P(ShmHandshakeTest, ConstructionFailureAfterConfirmationClosesChannel) {
   ExpectReleasedImports();
   uint8_t byte = 0;
   IREE_ASSERT_OK(iree_async_local_stream_receive(
-      channels_[0].stream, iree_make_byte_span(&byte, sizeof(byte)), 0, nullptr,
-      {Transferred, this}));
+      channels_[0].stream, iree_make_byte_span(&byte, sizeof(byte)), 0,
+      {Transferred, this}, nullptr));
   ASSERT_NO_FATAL_FAILURE(PollUntil([&] { return transfer_done_; }));
   EXPECT_NE(transfer_code_, IREE_STATUS_OK);
 }

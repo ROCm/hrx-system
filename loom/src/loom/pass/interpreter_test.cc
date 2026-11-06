@@ -696,8 +696,8 @@ TEST_F(PassInterpreterTest, AppliesProviderPredicateToCurrentFunction) {
   };
 
   PassProgramStorage storage;
-  IREE_ASSERT_OK(Compile(module, Pipeline(module, 0), &storage.program,
-                         predicate_provider));
+  IREE_ASSERT_OK(Compile(module, Pipeline(module, 0), predicate_provider,
+                         &storage.program));
   loom_test_pass_trace_t trace = {};
   loom_pass_interpreter_options_t options =
       InterpreterOptions(&trace, {}, nullptr, predicate_provider);

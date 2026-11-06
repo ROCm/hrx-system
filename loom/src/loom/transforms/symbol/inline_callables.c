@@ -754,7 +754,7 @@ static iree_status_t loom_inline_visit_active_successors(
 static iree_status_t loom_inline_compute_sccs(
     loom_inline_callables_plan_t* state,
     loom_scc_visit_successors_fn_t visit_successors, loom_scc_list_t* out_sccs,
-    iree_host_size_t* component_by_symbol) {
+    iree_host_size_t* out_component_by_symbol) {
   loom_scc_graph_t graph = {
       .node_count = state->module->symbols.count,
       .visit_successors =
@@ -766,7 +766,7 @@ static iree_status_t loom_inline_compute_sccs(
        ++component_index) {
     const loom_scc_t* component = &out_sccs->values[component_index];
     for (iree_host_size_t i = 0; i < component->node_count; ++i) {
-      component_by_symbol[component->nodes[i]] = component_index;
+      out_component_by_symbol[component->nodes[i]] = component_index;
     }
   }
   return iree_ok_status();

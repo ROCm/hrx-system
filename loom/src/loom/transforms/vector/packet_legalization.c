@@ -135,9 +135,10 @@ static uint32_t loom_vector_packet_select_dynamic_window_consumers(
     const loom_target_legalization_context_t* context,
     const loom_op_t* slice_op,
     const loom_vector_packet_consumer_materializer_t* materializer,
-    loom_op_t** out_consumers, uint32_t consumer_capacity,
+    uint32_t consumer_capacity, uint32_t branch_capacity,
+    loom_op_t** out_consumers,
     loom_vector_packet_consumer_branch_t* out_branches,
-    uint32_t branch_capacity, uint32_t* out_consumer_count) {
+    uint32_t* out_consumer_count) {
   *out_consumer_count = 0;
   const loom_value_id_t root = loom_vector_slice_result(slice_op);
   const loom_value_t* root_value = loom_module_value(context->module, root);
@@ -865,9 +866,9 @@ iree_status_t loom_vector_packet_legalize_dynamic_slice(
   uint32_t consumer_count = 0;
   const uint32_t consumer_branch_count =
       loom_vector_packet_select_dynamic_window_consumers(
-          context, op, consumer_materializer, consumers,
-          IREE_ARRAYSIZE(consumers), consumer_branches,
-          IREE_ARRAYSIZE(consumer_branches), &consumer_count);
+          context, op, consumer_materializer, IREE_ARRAYSIZE(consumers),
+          IREE_ARRAYSIZE(consumer_branches), consumers, consumer_branches,
+          &consumer_count);
   if (!loom_vector_packet_dynamic_window_constrain_chunk_lane_count(
           context, source_type, result_lane_count, consumers, consumer_count,
           consumer_materializer, &chunk_lane_count)) {

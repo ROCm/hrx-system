@@ -68,9 +68,8 @@ class VulkanSparseBindingTest : public CtsTestBase<> {
     return {.family_count = 1, .families = &family_};
   }
 
-  iree_status_t Reserve(iree_device_size_t length,
-                        iree_hal_buffer_t** out_buffer,
-                        iree_device_size_t alignment = 0) {
+  iree_status_t Reserve(iree_device_size_t length, iree_device_size_t alignment,
+                        iree_hal_buffer_t** out_buffer) {
     const iree_hal_virtual_buffer_options_t options = {
         .byte_length = length,
         .min_alignment = alignment,
@@ -84,6 +83,11 @@ class VulkanSparseBindingTest : public CtsTestBase<> {
     reservations_.push_back(reservation);
     *out_buffer = reservation;
     return iree_ok_status();
+  }
+
+  iree_status_t Reserve(iree_device_size_t length,
+                        iree_hal_buffer_t** out_buffer) {
+    return Reserve(length, 0, out_buffer);
   }
 
   void ExpectPage(iree_hal_buffer_t* buffer, iree_device_size_t offset,
@@ -465,8 +469,8 @@ TEST_P(VulkanSparseBindingTest, QueueMapCapturesPendingAllocations) {
                                     source_geometry.minimum_granularity);
   const auto alignment = iree_min(4 * granularity, capabilities_.max_alignment);
   std::array<iree_hal_buffer_t*, 2> targets = {};
-  IREE_ASSERT_OK(Reserve(3 * granularity, &targets[0], alignment));
-  IREE_ASSERT_OK(Reserve(2 * granularity, &targets[1], alignment));
+  IREE_ASSERT_OK(Reserve(3 * granularity, alignment, &targets[0]));
+  IREE_ASSERT_OK(Reserve(2 * granularity, alignment, &targets[1]));
   for (auto* target : targets) {
     const auto address =
         iree_hal_vulkan_buffer_native(target)

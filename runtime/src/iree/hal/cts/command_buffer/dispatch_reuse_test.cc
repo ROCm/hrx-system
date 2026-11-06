@@ -118,10 +118,9 @@ class DispatchReuseTest : public CtsTestBase<> {
   // Records a reusable command buffer that dispatches the workgroup-ID kernel
   // with the given workgroup count. Uses a single indirect binding (slot 0)
   // for the output buffer.
-  void RecordWorkgroupIdDispatch(iree_host_size_t workgroup_count,
-                                 iree_hal_command_buffer_t** out_command_buffer,
-                                 iree_hal_command_buffer_mode_t mode =
-                                     IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT) {
+  void RecordWorkgroupIdDispatch(
+      iree_host_size_t workgroup_count, iree_hal_command_buffer_mode_t mode,
+      iree_hal_command_buffer_t** out_command_buffer) {
     iree_hal_command_buffer_t* command_buffer = nullptr;
     IREE_ASSERT_OK(CreateCommandBuffer(mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
                                        /*binding_capacity=*/1,
@@ -158,10 +157,8 @@ class DispatchReuseTest : public CtsTestBase<> {
   // command indexes of the dispatch operations are 0 and 2 because each
   // dispatch is followed by a barrier.
   void RecordTwoWorkgroupIdDispatches(
-      iree_host_size_t workgroup_count,
-      iree_hal_command_buffer_t** out_command_buffer,
-      iree_hal_command_buffer_mode_t mode =
-          IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT) {
+      iree_host_size_t workgroup_count, iree_hal_command_buffer_mode_t mode,
+      iree_hal_command_buffer_t** out_command_buffer) {
     iree_hal_command_buffer_t* command_buffer = nullptr;
     IREE_ASSERT_OK(CreateCommandBuffer(mode, IREE_HAL_COMMAND_CATEGORY_DISPATCH,
                                        /*binding_capacity=*/2,
@@ -218,7 +215,9 @@ TEST_P(DispatchReuseTest, ResubmitWithDifferentBindings) {
   const iree_device_size_t buffer_size = kWorkgroupCount * sizeof(uint32_t);
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  RecordWorkgroupIdDispatch(kWorkgroupCount, command_buffer.out());
+  RecordWorkgroupIdDispatch(kWorkgroupCount,
+                            IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                            command_buffer.out());
 
   for (int iteration = 0; iteration < 3; ++iteration) {
     Ref<iree_hal_buffer_t> output;
@@ -393,8 +392,8 @@ TEST_P(DispatchReuseTest, DispatchProfilingRecordsCommandBufferDispatch) {
 
   Ref<iree_hal_command_buffer_t> command_buffer;
   RecordWorkgroupIdDispatch(
-      kWorkgroupCount, command_buffer.out(),
-      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA);
+      kWorkgroupCount, IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
+      command_buffer.out());
 
   Ref<iree_hal_buffer_t> output;
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(buffer_size, output.out()));
@@ -472,7 +471,9 @@ TEST_P(DispatchReuseTest, LargeWorkgroupCount) {
   const iree_device_size_t buffer_size = kWorkgroupCount * sizeof(uint32_t);
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  RecordWorkgroupIdDispatch(kWorkgroupCount, command_buffer.out());
+  RecordWorkgroupIdDispatch(kWorkgroupCount,
+                            IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                            command_buffer.out());
 
   Ref<iree_hal_buffer_t> output;
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(buffer_size, output.out()));
@@ -751,7 +752,9 @@ TEST_P(DispatchReuseTest, AllocaExecuteDeallocaCycle) {
 
   // Record the reusable command buffer.
   Ref<iree_hal_command_buffer_t> command_buffer;
-  RecordWorkgroupIdDispatch(kWorkgroupCount, command_buffer.out());
+  RecordWorkgroupIdDispatch(kWorkgroupCount,
+                            IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                            command_buffer.out());
 
   // Run the alloca → execute → verify → dealloca cycle 3 times.
   // The dealloca must be deferred until AFTER host readback because the
@@ -801,7 +804,9 @@ TEST_P(DispatchReuseTest, PipelinedAllocaExecuteDealloca) {
   const iree_device_size_t buffer_size = kWorkgroupCount * sizeof(uint32_t);
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  RecordWorkgroupIdDispatch(kWorkgroupCount, command_buffer.out());
+  RecordWorkgroupIdDispatch(kWorkgroupCount,
+                            IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                            command_buffer.out());
 
   SemaphoreList empty_wait;
 
@@ -869,7 +874,9 @@ TEST_P(DispatchReuseTest, MultipleDispatchesInSingleCommandBuffer) {
   const iree_device_size_t buffer_size = kWorkgroupCount * sizeof(uint32_t);
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  RecordTwoWorkgroupIdDispatches(kWorkgroupCount, command_buffer.out());
+  RecordTwoWorkgroupIdDispatches(kWorkgroupCount,
+                                 IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                 command_buffer.out());
 
   // Submit with two different output buffers in the binding table.
   Ref<iree_hal_buffer_t> output_a;
@@ -902,8 +909,8 @@ TEST_P(DispatchReuseTest, MultiDispatchProfilingFiltersCommandIndex) {
 
   Ref<iree_hal_command_buffer_t> command_buffer;
   RecordTwoWorkgroupIdDispatches(
-      kWorkgroupCount, command_buffer.out(),
-      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA);
+      kWorkgroupCount, IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
+      command_buffer.out());
 
   Ref<iree_hal_buffer_t> output_a;
   IREE_ASSERT_OK(CreateZeroedDeviceBuffer(buffer_size, output_a.out()));
@@ -984,7 +991,9 @@ TEST_P(DispatchReuseTest, MultiDispatchMultiResubmit) {
   const iree_device_size_t buffer_size = kWorkgroupCount * sizeof(uint32_t);
 
   Ref<iree_hal_command_buffer_t> command_buffer;
-  RecordTwoWorkgroupIdDispatches(kWorkgroupCount, command_buffer.out());
+  RecordTwoWorkgroupIdDispatches(kWorkgroupCount,
+                                 IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                                 command_buffer.out());
 
   std::vector<uint32_t> expected(kWorkgroupCount);
   std::iota(expected.begin(), expected.end(), 0u);

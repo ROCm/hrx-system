@@ -569,6 +569,6 @@ static const loom_target_math_policy_registry_entry_t kX86MathPolicyEntries[] =
 void loom_x86_math_policy_registry_initialize(
     loom_target_math_policy_registry_t* out_registry) {
   loom_target_math_policy_registry_initialize_from_entries(
-      out_registry, kX86MathPolicyEntries,
-      IREE_ARRAYSIZE(kX86MathPolicyEntries));
+      kX86MathPolicyEntries, IREE_ARRAYSIZE(kX86MathPolicyEntries),
+      out_registry);
 }

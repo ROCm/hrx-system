@@ -16,7 +16,7 @@ static void loom_vm_ir_descriptor_registry_initialize(
       loom_vm_core_descriptor_set,
   };
   loom_target_low_descriptor_registry_initialize_from_tables(
-      out_registry, kProviders, IREE_ARRAYSIZE(kProviders));
+      kProviders, IREE_ARRAYSIZE(kProviders), out_registry);
 }
 
 const loom_target_provider_t loom_vm_ir_target_provider = {

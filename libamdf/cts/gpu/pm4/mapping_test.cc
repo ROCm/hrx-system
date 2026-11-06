@@ -458,7 +458,7 @@ class Pm4MappingTest : public Pm4MappingFixture {
     GpuMemory* secondary_backing = nullptr;
     ASSERT_NO_FATAL_FAILURE(CreateBacking(kSlabByteLength, &primary_backing));
     ASSERT_NO_FATAL_FAILURE(
-        CreateBacking(kSlabByteLength, &secondary_backing, second_device_));
+        CreateBacking(kSlabByteLength, second_device_, &secondary_backing));
     const uint64_t offset = (UINT64_C(4) << 30) + kSlabByteLength;
     amdf_memory_mapping_update_t update = {
         .target_byte_offset = offset,

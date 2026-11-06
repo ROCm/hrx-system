@@ -140,19 +140,19 @@ class SourceRecognitionStreamTest : public ::testing::Test {
       test->actual_.release_batch(test->actual_.self);
     };
     observed.release = [](void* self, void* invocation, bool* out_complete,
-                          loom_runtime_execution_frontier_t* frontier) {
+                          loom_runtime_execution_frontier_t* out_frontier) {
       auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       const auto row = test->Row(invocation);
       IREE_RETURN_IF_ERROR(test->actual_.release(test->actual_.self, invocation,
-                                                 out_complete, frontier));
+                                                 out_complete, out_frontier));
       if (*out_complete) {
         test->invocations_[row] = nullptr;
         ++test->released_[row];
       } else {
         ++test->pending_releases_;
         if (test->fail_release_readiness_) {
-          frontier->semaphores[0] = test->failed_readiness_;
-          frontier->values[0] = 1;
+          out_frontier->semaphores[0] = test->failed_readiness_;
+          out_frontier->values[0] = 1;
         }
       }
       return iree_ok_status();

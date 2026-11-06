@@ -33,8 +33,20 @@ _ARGS = parse_arguments()
 
 class ActionRunnerTest(unittest.TestCase):
     def run_analysis(
-        self, compiler_args: list[str], *, compiler: str = "clang"
+        self,
+        compiler_args: list[str],
+        *,
+        compiler: str = "clang",
+        source: str | None = None,
+        checks: str | None = "-*,iree-smoke",
+        warnings_as_errors: str | None = None,
     ) -> tuple[int, str]:
+        source = source or _ARGS.source
+        options = []
+        if checks is not None:
+            options.append(f"--checks={checks}")
+        if warnings_as_errors is not None:
+            options.append(f"--warnings-as-errors={warnings_as_errors}")
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory) / "diagnostics.txt"
             result = run_clang_tidy_action.main(
@@ -50,16 +62,34 @@ class ActionRunnerTest(unittest.TestCase):
                     "--vfsoverlay",
                     _ARGS.vfsoverlay,
                     "--source",
-                    _ARGS.source,
+                    source,
                     "--output",
                     str(report),
-                    "--checks=-*,iree-smoke",
+                    *options,
                     "--",
                     *compiler_args,
-                    _ARGS.source,
+                    source,
                 ]
             )
             return result, report.read_text(encoding="utf-8")
+
+    def test_default_policy_rejects_callback_outputs_before_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "completion.c"
+            source.write_text(
+                "typedef void (*completion_fn_t)(void* user_data, "
+                "int* out_copy, void* scope);\n",
+                encoding="utf-8",
+            )
+            result, output = self.run_analysis(
+                ["-x", "c", "-std=c11"],
+                source=str(source),
+                checks=None,
+                warnings_as_errors="*",
+            )
+            self.assertNotEqual(result, 0, output)
+            self.assertIn("[iree-output-parameter-order,-warnings-as-errors]", output)
+            self.assertIn("output parameter 'out_copy'", output)
 
     def test_native_compiler_inputs_reach_analysis(self):
         # The input is the build action's relative path. Analysis must preserve

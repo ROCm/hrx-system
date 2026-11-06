@@ -527,8 +527,9 @@ TEST_P(TaskQueueAllocaTest, CompletedDeallocationIsImmediatelyReusable) {
   std::array<iree_hal_pool_acquire_info_t, 2> infos;
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      pool_, requests.size(), requests.data(), nullptr, reservations.data(),
-      infos.data(), &result, IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      pool_, requests.size(), requests.data(), nullptr,
+      IREE_HAL_POOL_RESERVE_FLAG_NONE, reservations.data(), infos.data(),
+      &result));
   ASSERT_EQ(IREE_HAL_POOL_ACQUIRE_OK_FRESH, result);
   for (const auto& info : infos) {
     EXPECT_EQ(info.reuse_frontier, nullptr);
@@ -1218,8 +1219,8 @@ TEST_P(TaskQueueNativeRetirementTest,
   iree_hal_pool_acquire_info_t info;
   iree_hal_pool_acquire_result_t result;
   IREE_ASSERT_OK(iree_hal_pool_acquire_reservations_sync(
-      pool_, 1, &request, nullptr, &reservation, &info, &result,
-      IREE_HAL_POOL_RESERVE_FLAG_NONE));
+      pool_, 1, &request, nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE,
+      &reservation, &info, &result));
   IREE_ASSERT_OK(iree_hal_pool_materialize_reservations(
       pool_, 1, &request, &reservation, IREE_HAL_POOL_MATERIALIZE_FLAG_NONE,
       &initial_buffers_[0]));

@@ -280,7 +280,7 @@ iree_status_t RunPipelineRoundTrip(
     const TransportBackend& transport,
     const iree::async::cts::ProactorFactory& create_proactor,
     const PipelineRoundTripOptions& options,
-    PipelineRoundTripResult* out_result, TransferTrialMeasurement measurement) {
+    TransferTrialMeasurement measurement, PipelineRoundTripResult* out_result) {
   *out_result = {};
   if (options.rank_count < 2 || options.rank_count > 16 ||
       !options.activation_size || options.activation_size % 4 ||
@@ -319,7 +319,7 @@ iree_status_t RunPipelineRoundTrip(
         std::make_unique<Rank>(control, index, options, total_size));
   }
   iree_status_t status = RunCollectiveGroup(transport, create_proactor, control,
-                                            ranks, out_result, measurement);
+                                            ranks, measurement, out_result);
   if (iree_status_is_ok(status)) {
     const auto& result = static_cast<Rank&>(*ranks[0]).results[1];
     out_result->microbatches = options.measured_rounds;

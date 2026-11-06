@@ -12,7 +12,7 @@
 
 static iree_status_t loom_target_compile_report_pipeline_plan_copy_rows(
     const void* source, iree_host_size_t count, iree_host_size_t row_size,
-    void** out_rows, iree_allocator_t host_allocator) {
+    iree_allocator_t host_allocator, void** out_rows) {
   *out_rows = NULL;
   if (count == 0 || iree_allocator_is_null(host_allocator)) {
     return iree_ok_status();
@@ -42,15 +42,15 @@ static void loom_target_compile_report_pipeline_plan_deinitialize(
 
 static iree_status_t loom_target_compile_report_pipeline_plan_clone(
     const loom_target_compile_report_pipeline_plan_t* source,
-    loom_target_compile_report_pipeline_plan_t* out_target,
-    iree_allocator_t host_allocator) {
+    iree_allocator_t host_allocator,
+    loom_target_compile_report_pipeline_plan_t* out_target) {
   *out_target = (loom_target_compile_report_pipeline_plan_t){
       .summary = source->summary,
   };
   void* worker_rows = NULL;
   iree_status_t status = loom_target_compile_report_pipeline_plan_copy_rows(
       source->worker_rows, source->worker_row_count,
-      sizeof(*source->worker_rows), &worker_rows, host_allocator);
+      sizeof(*source->worker_rows), host_allocator, &worker_rows);
   if (iree_status_is_ok(status)) {
     out_target->worker_rows = worker_rows;
     out_target->worker_row_count =
@@ -58,7 +58,7 @@ static iree_status_t loom_target_compile_report_pipeline_plan_clone(
     void* channel_rows = NULL;
     status = loom_target_compile_report_pipeline_plan_copy_rows(
         source->channel_rows, source->channel_row_count,
-        sizeof(*source->channel_rows), &channel_rows, host_allocator);
+        sizeof(*source->channel_rows), host_allocator, &channel_rows);
     if (iree_status_is_ok(status)) {
       out_target->channel_rows = channel_rows;
       out_target->channel_row_count =
@@ -69,7 +69,7 @@ static iree_status_t loom_target_compile_report_pipeline_plan_clone(
     void* memory_rows = NULL;
     status = loom_target_compile_report_pipeline_plan_copy_rows(
         source->memory_rows, source->memory_row_count,
-        sizeof(*source->memory_rows), &memory_rows, host_allocator);
+        sizeof(*source->memory_rows), host_allocator, &memory_rows);
     if (iree_status_is_ok(status)) {
       out_target->memory_rows = memory_rows;
       out_target->memory_row_count = memory_rows ? source->memory_row_count : 0;
@@ -110,7 +110,7 @@ iree_status_t loom_target_compile_report_record_pipeline_plan(
   if (loom_target_compile_report_wants_details(
           report, LOOM_TARGET_COMPILE_REPORT_DETAIL_PIPELINE_PLAN_ROWS)) {
     IREE_RETURN_IF_ERROR(loom_target_compile_report_pipeline_plan_clone(
-        plan, &copied_plan, report->allocator));
+        plan, report->allocator, &copied_plan));
   }
   iree_status_t status = loom_target_compile_report_row_list_append(
       &report->pipeline_plans, sizeof(copied_plan), report->allocator,

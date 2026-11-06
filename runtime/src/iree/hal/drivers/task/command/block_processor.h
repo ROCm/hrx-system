@@ -374,11 +374,11 @@ typedef struct iree_hal_cmd_block_processor_drain_result_t {
 //
 // For multi-worker execution, use context_allocate instead.
 void iree_hal_cmd_block_processor_context_initialize(
-    iree_hal_cmd_block_processor_context_t* out_context,
     const iree_hal_cmd_block_recording_t* recording,
     const iree_hal_cmd_binding_entry_t* binding_table,
     iree_host_size_t binding_table_length, iree_hal_cmd_block_state_t* state,
-    iree_host_size_t state_size);
+    iree_host_size_t state_size,
+    iree_hal_cmd_block_processor_context_t* out_context);
 
 // Attaches an optional local profiling recorder to a processor context.
 //

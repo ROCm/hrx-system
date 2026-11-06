@@ -80,8 +80,10 @@ NTSTATUS APIENTRY QueryAdapter(const D3DKMT_QUERYADAPTERINFO* arguments) {
   return 0;
 }
 
-CONFIGRET WINAPI LocateDevice(PDEVINST out_device, DEVINSTID_W instance,
-                              ULONG flags) {
+// Parameter order is fixed by the CM_Locate_DevNodeW callback ABI.
+CONFIGRET WINAPI
+LocateDevice(PDEVINST out_device,  // NOLINT(iree-output-parameter-order)
+             DEVINSTID_W instance, ULONG flags) {
   EXPECT_STREQ(instance, L"PCI\\VEN_1002&DEV_1234\\physical-device-5");
   EXPECT_EQ(flags, CM_LOCATE_DEVNODE_NORMAL);
   if (current->locate_result == CR_SUCCESS) {
@@ -158,8 +160,8 @@ class WindowsEndpointMetadataTest : public ::testing::Test {
     native_.query_count = 0;
     native_.topology_count = 0;
     return amdf_windows_query_endpoint_metadata(
-        &api_, &kmt_, 123, native_.physical_index, out_metadata,
-        amdf_allocator_system());
+        &api_, &kmt_, 123, native_.physical_index, amdf_allocator_system(),
+        out_metadata);
   }
 
   // Fixture supplying only native OS dependencies of the production query.

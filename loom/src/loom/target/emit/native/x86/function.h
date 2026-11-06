@@ -190,8 +190,8 @@ iree_status_t loom_x86_function_write(const loom_x86_function_t* function,
                                       iree_host_size_t section_index,
                                       loom_native_object_fixup_t* fixups,
                                       iree_io_stream_t* stream,
-                                      uint64_t* out_instruction_count,
-                                      iree_arena_allocator_t* arena);
+                                      iree_arena_allocator_t* arena,
+                                      uint64_t* out_instruction_count);
 
 #ifdef __cplusplus
 }  // extern "C"

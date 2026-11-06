@@ -785,8 +785,8 @@ static iree_status_t loom_boundary_projection_set_function_result_types(
 
 static iree_status_t loom_boundary_projection_prepare_body_arguments(
     loom_boundary_projection_plan_t* plan,
-    const loom_boundary_projection_function_t* function,
-    loom_value_id_t** out_arguments, loom_ir_remap_t* remap) {
+    const loom_boundary_projection_function_t* function, loom_ir_remap_t* remap,
+    loom_value_id_t** out_arguments) {
   loom_region_t* source_body = loom_func_like_body(function->function);
   loom_block_t* source_entry = loom_region_entry_block(source_body);
   IREE_ASSERT_EQ(source_entry->arg_count, function->final_argument_count);
@@ -811,7 +811,7 @@ static iree_status_t loom_boundary_projection_prepare_declaration_operands(
     loom_boundary_projection_plan_t* plan,
     const loom_boundary_projection_function_t* function,
     const loom_boundary_projection_function_operand_layout_t* layout,
-    loom_value_id_t** out_operands, loom_ir_remap_t* remap) {
+    loom_ir_remap_t* remap, loom_value_id_t** out_operands) {
   loom_op_t* source = function->function.op;
   IREE_RETURN_IF_ERROR(loom_boundary_projection_define_values(
       plan, layout->operand_count, out_operands));
@@ -1013,10 +1013,10 @@ static iree_status_t loom_boundary_projection_replace_function(
   loom_value_id_t* target_operands = NULL;
   if (source_body) {
     IREE_RETURN_IF_ERROR(loom_boundary_projection_prepare_body_arguments(
-        plan, function, &target_arguments, &remap));
+        plan, function, &remap, &target_arguments));
   } else {
     IREE_RETURN_IF_ERROR(loom_boundary_projection_prepare_declaration_operands(
-        plan, function, &layout, &target_operands, &remap));
+        plan, function, &layout, &remap, &target_operands));
     if (function->final_argument_count != 0) {
       target_arguments = target_operands + layout.argument_offset;
     }

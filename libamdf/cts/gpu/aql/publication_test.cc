@@ -29,8 +29,9 @@ TEST_P(AqlQueuePlacementTest, CompletesBarriersAndReusesRetiredSlots) {
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &storage));
   ASSERT_NO_FATAL_FAILURE(CreateQueue(
-      family_, &queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, {},
-      AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER, 4096, 0, nullptr, GetParam()));
+      family_,
+      GpuUserQueueOptions{.ring_byte_length = 4096, .placement = GetParam()},
+      &queue));
   std::memset(storage->host.pointer, 0, storage->info.byte_length);
   auto* signals = static_cast<aql::Signal*>(storage->host.pointer);
   signals[0] = aql::UserSignal();
@@ -68,7 +69,9 @@ TEST_F(AqlQueueTest, MultipleProducersReserveAndPublishIndependently) {
   GpuUserQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &storage));
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, AMDF_QUEUE_PRODUCER_MODE_MULTI));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(
+      GpuUserQueueOptions{.producer_mode = AMDF_QUEUE_PRODUCER_MODE_MULTI},
+      &queue));
   std::memset(storage->host.pointer, 0, storage->info.byte_length);
   auto* completion = static_cast<aql::Signal*>(storage->host.pointer);
   *completion = aql::UserSignal(64);
@@ -100,7 +103,9 @@ TEST_F(AqlQueueTest, PublishesReservedPacketsOutOfOrder) {
   GpuUserQueue* queue = nullptr;
   ASSERT_NO_FATAL_FAILURE(CreateMemory(
       AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &storage));
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, AMDF_QUEUE_PRODUCER_MODE_MULTI));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(
+      GpuUserQueueOptions{.producer_mode = AMDF_QUEUE_PRODUCER_MODE_MULTI},
+      &queue));
   std::memset(storage->host.pointer, 0, storage->info.byte_length);
   auto* signals = static_cast<aql::Signal*>(storage->host.pointer);
   signals[0] = aql::UserSignal(1);

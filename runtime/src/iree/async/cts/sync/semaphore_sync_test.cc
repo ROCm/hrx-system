@@ -140,7 +140,7 @@ TEST_P(SemaphoreSyncTest, SignalWithFrontier) {
                          4 * sizeof(iree_async_frontier_entry_t)];
   iree_async_frontier_t* result = (iree_async_frontier_t*)result_storage;
   uint8_t count =
-      iree_async_semaphore_query_frontier(semaphore, result, /*capacity=*/4);
+      iree_async_semaphore_query_frontier(semaphore, /*capacity=*/4, result);
 
   EXPECT_EQ(count, 2u);
   EXPECT_EQ(result->entry_count, 2u);
@@ -192,7 +192,7 @@ TEST_P(SemaphoreSyncTest, FrontierCapacityOverflow) {
   uint8_t result_storage[sizeof(iree_async_frontier_t) +
                          4 * sizeof(iree_async_frontier_entry_t)];
   iree_async_frontier_t* result = (iree_async_frontier_t*)result_storage;
-  uint8_t count = iree_async_semaphore_query_frontier(semaphore, result, 4);
+  uint8_t count = iree_async_semaphore_query_frontier(semaphore, 4, result);
   EXPECT_EQ(count, 2);
   EXPECT_EQ(result->entries[0].axis, 0x1u);
   EXPECT_EQ(result->entries[0].epoch, 1u);

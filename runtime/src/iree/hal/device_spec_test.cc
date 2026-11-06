@@ -45,6 +45,7 @@ static void ExpectStringViewEq(iree_string_view_t actual,
 }
 
 static iree_hal_device_spec_params_t MakeTestSpecParams(
+    iree_const_byte_span_t facet_payload,
     iree_hal_device_identity_spec_t* out_identity,
     iree_hal_physical_device_spec_t* out_physical_devices,
     iree_hal_device_memory_spec_t* out_memory,
@@ -57,8 +58,7 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
     iree_hal_device_executable_spec_t* out_executables,
     iree_hal_executable_target_t* out_executable_targets,
     iree_hal_device_sanitizer_spec_t* out_sanitizer,
-    iree_hal_device_spec_facet_t* out_facets,
-    iree_const_byte_span_t facet_payload) {
+    iree_hal_device_spec_facet_t* out_facets) {
   out_physical_devices[0] = {
       .identity =
           {
@@ -294,11 +294,11 @@ TEST(DeviceSpecTest, CreateSerializeParseAndSelect) {
   iree_hal_device_sanitizer_spec_t sanitizer;
   iree_hal_device_spec_facet_t facets[1];
   iree_hal_device_spec_params_t params = MakeTestSpecParams(
+      iree_make_const_byte_span(facet_payload_storage,
+                                sizeof(facet_payload_storage)),
       &identity, physical_devices, &memory, memory_heaps, memory_types, &queues,
       queue_families, &dispatch, &timing, &executables, executable_targets,
-      &sanitizer, facets,
-      iree_make_const_byte_span(facet_payload_storage,
-                                sizeof(facet_payload_storage)));
+      &sanitizer, facets);
 
   iree_hal_device_spec_t* spec = NULL;
   IREE_ASSERT_OK(
@@ -835,11 +835,11 @@ TEST(DeviceObservationTest, MemoryTotalFromSpecSumsKnownHeaps) {
   iree_hal_device_sanitizer_spec_t sanitizer;
   iree_hal_device_spec_facet_t facets[1];
   iree_hal_device_spec_params_t params = MakeTestSpecParams(
+      iree_make_const_byte_span(facet_payload_storage,
+                                sizeof(facet_payload_storage)),
       &identity, physical_devices, &memory, memory_heaps, memory_types, &queues,
       queue_families, &dispatch, &timing, &executables, executable_targets,
-      &sanitizer, facets,
-      iree_make_const_byte_span(facet_payload_storage,
-                                sizeof(facet_payload_storage)));
+      &sanitizer, facets);
 
   iree_hal_device_spec_t* spec = NULL;
   IREE_ASSERT_OK(
@@ -876,11 +876,11 @@ TEST(DeviceObservationTest, MemoryTotalFromSpecSkipsUnknownCapacity) {
   iree_hal_device_sanitizer_spec_t sanitizer;
   iree_hal_device_spec_facet_t facets[1];
   iree_hal_device_spec_params_t params = MakeTestSpecParams(
+      iree_make_const_byte_span(facet_payload_storage,
+                                sizeof(facet_payload_storage)),
       &identity, physical_devices, &memory, memory_heaps, memory_types, &queues,
       queue_families, &dispatch, &timing, &executables, executable_targets,
-      &sanitizer, facets,
-      iree_make_const_byte_span(facet_payload_storage,
-                                sizeof(facet_payload_storage)));
+      &sanitizer, facets);
   memory_heaps[0].flags = IREE_HAL_MEMORY_HEAP_SPEC_FLAG_CAPACITY_UNKNOWN;
 
   iree_hal_device_spec_t* spec = NULL;

@@ -380,7 +380,7 @@ static iree_status_t iree_hal_vulkan_create_bda_executable(
   if (iree_status_is_ok(status)) {
     status = iree_hal_vulkan_spirv_parse_bda_dispatch_metadata(
         spirv_words, spirv_word_count, entry_point_count, entry_points,
-        bda_metadata, host_allocator);
+        host_allocator, bda_metadata);
   }
   uint32_t push_constant_range_end = 0;
   iree_host_size_t parameter_count = 0;

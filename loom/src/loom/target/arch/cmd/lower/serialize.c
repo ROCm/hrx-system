@@ -1182,7 +1182,7 @@ static void loom_cmd_serialize_write_program(
 
 iree_status_t loom_cmd_program_plan_serialize_root(
     const loom_cmd_program_plan_t* plan, iree_host_size_t root_index,
-    iree_byte_span_t* out_data, iree_allocator_t host_allocator) {
+    iree_allocator_t host_allocator, iree_byte_span_t* out_data) {
   IREE_ASSERT_ARGUMENT(plan);
   IREE_ASSERT_LT(root_index, plan->root_count);
   IREE_ASSERT_ARGUMENT(out_data);

@@ -91,8 +91,8 @@ static void iree_hal_amd_xdna_frontier_merge_reached_wait(
 
   iree_hal_amd_xdna_frontier_t wait_frontier;
   const uint8_t actual_count = iree_async_semaphore_query_frontier(
-      async_semaphore, iree_async_fixed_frontier_as_frontier(&wait_frontier),
-      IREE_HAL_AMD_XDNA_FRONTIER_CAPACITY);
+      async_semaphore, IREE_HAL_AMD_XDNA_FRONTIER_CAPACITY,
+      iree_async_fixed_frontier_as_frontier(&wait_frontier));
   if (actual_count == 0) {
     return;
   }

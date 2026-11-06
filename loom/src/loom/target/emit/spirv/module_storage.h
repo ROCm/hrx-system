@@ -40,8 +40,8 @@ typedef struct loom_spirv_module_workgroup_storage_state_t {
 // Initializes function-local Workgroup storage state over |value_domain|.
 iree_status_t loom_spirv_module_workgroup_storage_initialize(
     const loom_local_value_domain_t* value_domain,
-    loom_spirv_module_workgroup_storage_state_t* out_state,
-    iree_arena_allocator_t* scratch_arena);
+    iree_arena_allocator_t* scratch_arena,
+    loom_spirv_module_workgroup_storage_state_t* out_state);
 
 // Records a low.storage.reserve Workgroup storage declaration.
 void loom_spirv_module_workgroup_storage_emit_reserve(

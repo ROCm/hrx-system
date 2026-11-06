@@ -295,7 +295,7 @@ iree_status_t loom_amdgpu_kernel_plan_build_from_function(
   };
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_record_build(
       &frame->schedule, &frame->allocation, storage_layout, &record_options,
-      &out_plan->record, arena));
+      arena, &out_plan->record));
 
   bool residency_accepted = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_kernel_plan_admit_residency(

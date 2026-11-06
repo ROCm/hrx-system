@@ -87,10 +87,10 @@ IREE_API_EXPORT iree_status_t iree_hal_pool_acquire_reservations(
     iree_hal_pool_t* pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester_frontier,
-    iree_hal_pool_reservation_t* out_reservations,
-    iree_hal_pool_acquire_info_t* out_infos,
     iree_hal_pool_acquire_callback_t completion,
-    iree_hal_pool_reserve_flags_t flags) {
+    iree_hal_pool_reserve_flags_t flags,
+    iree_hal_pool_reservation_t* out_reservations,
+    iree_hal_pool_acquire_info_t* out_infos) {
   IREE_ASSERT_ARGUMENT(pool);
   IREE_ASSERT_ARGUMENT(request_count);
   IREE_ASSERT_ARGUMENT(requests);
@@ -100,8 +100,8 @@ IREE_API_EXPORT iree_status_t iree_hal_pool_acquire_reservations(
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, (int64_t)request_count);
   iree_status_t status = _VTABLE_DISPATCH(pool, acquire_reservations)(
-      pool, request_count, requests, requester_frontier, out_reservations,
-      out_infos, completion, flags);
+      pool, request_count, requests, requester_frontier, completion, flags,
+      out_reservations, out_infos);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -143,21 +143,20 @@ IREE_API_EXPORT iree_status_t iree_hal_pool_acquire_reservations_sync(
     iree_hal_pool_t* pool, iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     const iree_async_frontier_t* requester_frontier,
+    iree_hal_pool_reserve_flags_t flags,
     iree_hal_pool_reservation_t* out_reservations,
     iree_hal_pool_acquire_info_t* out_infos,
-    iree_hal_pool_acquire_result_t* out_result,
-    iree_hal_pool_reserve_flags_t flags) {
+    iree_hal_pool_acquire_result_t* out_result) {
   iree_hal_pool_sync_acquire_t call = {0};
   iree_slim_mutex_initialize(&call.mutex);
   iree_notification_initialize(&call.notification);
   iree_status_t status = iree_hal_pool_acquire_reservations(
-      pool, request_count, requests, requester_frontier, out_reservations,
-      out_infos,
+      pool, request_count, requests, requester_frontier,
       (iree_hal_pool_acquire_callback_t){
           .fn = iree_hal_pool_sync_acquire_complete,
           .user_data = &call,
       },
-      flags);
+      flags, out_reservations, out_infos);
   if (iree_status_is_ok(status)) {
     iree_notification_await(&call.notification,
                             iree_hal_pool_sync_acquire_is_complete, &call,
@@ -493,9 +492,9 @@ static iree_status_t iree_hal_pool_allocate_buffer_direct(
     iree_hal_pool_acquire_info_t acquire_info;
     iree_hal_pool_acquire_result_t result;
     status = iree_hal_pool_acquire_reservations_sync(
-        pool, 1, &request,
-        /*requester_frontier=*/NULL, &reservation, &acquire_info, &result,
-        IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER);
+        pool, 1, &request, /*requester_frontier=*/NULL,
+        IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER, &reservation,
+        &acquire_info, &result);
     if (capacity_wait && (!iree_status_is_ok(status) ||
                           (result != IREE_HAL_POOL_ACQUIRE_EXHAUSTED &&
                            result != IREE_HAL_POOL_ACQUIRE_OVER_BUDGET))) {

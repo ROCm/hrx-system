@@ -216,9 +216,8 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
   void PrepareMemory(const amdf_memory_native_profile_t& profile,
                      amdf_memory_flags_t required_flags,
                      void* registered_host_pointer,
-                     amdf_gpu_umd_memory_result_t* out_result,
-                     amdf_memory_access_t device_access =
-                         AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE) {
+                     amdf_memory_access_t device_access,
+                     amdf_gpu_umd_memory_result_t* out_result) {
     const amdf_memory_native_create_info_t create_info = {
         .device_access = device_access,
         .required_flags = required_flags,
@@ -236,6 +235,15 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
     EXPECT_EQ(out_result->byte_length, kByteLength);
     EXPECT_EQ(out_result->flags & required_flags, required_flags);
     EXPECT_NE(out_result->device_address, 0u);
+  }
+
+  void PrepareMemory(const amdf_memory_native_profile_t& profile,
+                     amdf_memory_flags_t required_flags,
+                     void* registered_host_pointer,
+                     amdf_gpu_umd_memory_result_t* out_result) {
+    PrepareMemory(profile, required_flags, registered_host_pointer,
+                  AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+                  out_result);
   }
 
   void MapMemory(const amdf_memory_native_profile_t& profile,
@@ -305,9 +313,10 @@ class LinuxDxgMemorySystemTest : public ::testing::Test {
         profile,
         AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
             AMDF_MEMORY_FLAG_QUEUE_STORAGE,
-        nullptr, &memory_result,
+        nullptr,
         AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
-            AMDF_MEMORY_ACCESS_EXECUTE));
+            AMDF_MEMORY_ACCESS_EXECUTE,
+        &memory_result));
     amdf_gpu_umd_host_mapping_result_t mapping_result = {};
     ASSERT_NO_FATAL_FAILURE(MapMemory(profile, &mapping_result));
 
@@ -505,7 +514,7 @@ TEST_F(LinuxDxgMemorySystemTest, OwnsSparseVirtualMemory) {
   amdf_gpu_umd_memory_result_t memory_result = {};
   ASSERT_NO_FATAL_FAILURE(PrepareMemory(profile,
                                         AMDF_MEMORY_FLAG_MAPPING_SOURCE,
-                                        nullptr, &memory_result, access));
+                                        nullptr, access, &memory_result));
 
   amdf_gpu_umd_device_t* devices[] = {device_};
   ASSERT_EQ(InvokeSilently([&] {

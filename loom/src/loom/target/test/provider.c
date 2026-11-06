@@ -330,7 +330,7 @@ static void loom_test_math_policy_registry_initialize(
       },
   };
   loom_target_math_policy_registry_initialize_from_entries(
-      out_registry, kEntries, IREE_ARRAYSIZE(kEntries));
+      kEntries, IREE_ARRAYSIZE(kEntries), out_registry);
 }
 
 const loom_target_provider_t loom_test_target_provider = {

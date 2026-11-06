@@ -948,8 +948,8 @@ loom_amdgpu_fragment_memory_evaluate_layout(
     loom_amdgpu_matrix_numeric_type_t numeric_type,
     loom_scalar_type_t expected_element_type,
     loom_amdgpu_matrix_result_representation_flags_t representation_flags,
-    loom_amdgpu_fragment_memory_payload_form_t* out_payload_form,
     loom_amdgpu_fragment_memory_layout_rejection_flags_t* rejection_flags,
+    loom_amdgpu_fragment_memory_payload_form_t* out_payload_form,
     loom_amdgpu_fragment_memory_narrowed_result_sources_t*
         out_narrowed_result_sources) {
   *out_payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
@@ -1126,7 +1126,7 @@ static bool loom_amdgpu_fragment_memory_target_layout(
               environment, role, operation_kind, payload, payload_type,
               view_type, blocks, rows, columns, view_storage_schema,
               view_numeric, layout, numerics[i], expected_element,
-              representation->flags, out_payload_form, &rejection_flags,
+              representation->flags, &rejection_flags, out_payload_form,
               out_narrowed_result_sources) ==
           LOOM_AMDGPU_FRAGMENT_MEMORY_LAYOUT_MATCH_NONE) {
         continue;
@@ -1181,7 +1181,7 @@ static bool loom_amdgpu_fragment_memory_target_layout(
             environment, role, operation_kind, payload, payload_type, view_type,
             blocks, rows, columns, view_storage_schema, view_numeric, layout,
             role_storage.payload.numeric_type, expected_element_type,
-            /*representation_flags=*/0, &payload_form, &rejection_flags,
+            /*representation_flags=*/0, &rejection_flags, &payload_form,
             &narrowed_result_sources);
     if (layout_match <= best_match) {
       continue;

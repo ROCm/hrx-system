@@ -125,11 +125,11 @@ static iree_status_t loom_bytecode_body_policy_materialize_attribute_ssa(
     loom_bytecode_body_policy_materializer_t* materializer,
     loom_bytecode_reader_cursor_t* cursor,
     const loom_attr_descriptor_t* descriptor, loom_bytecode_attr_kind_t kind,
-    loom_attribute_t* out_attr,
-    const loom_bytecode_attribute_ssa_materialization_scope_t* ssa_scope) {
+    const loom_bytecode_attribute_ssa_materialization_scope_t* ssa_scope,
+    loom_attribute_t* out_attr) {
   return loom_bytecode_attribute_materialize_ssa(
-      &materializer->attributes, cursor, descriptor, kind, out_attr,
-      materializer->attributes.module_view->types.count, ssa_scope);
+      &materializer->attributes, cursor, descriptor, kind,
+      materializer->attributes.module_view->types.count, ssa_scope, out_attr);
 }
 
 #define LOOM_BYTECODE_BODY_VALUE_SCOPE_INITIALIZE_FRESH \

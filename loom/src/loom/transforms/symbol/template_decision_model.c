@@ -495,8 +495,8 @@ static void loom_template_decision_build_family(
     loom_template_decision_ranked_choice_t* ranked_choices,
     loom_decision_program_choice_t* choices,
     loom_decision_program_priority_group_t* priority_groups,
-    uint32_t* out_priority_group_count,
-    loom_template_decision_build_cursor_t* cursor) {
+    loom_template_decision_build_cursor_t* cursor,
+    uint32_t* out_priority_group_count) {
   loom_template_decision_model_t* model = build_family->model;
 
   const uint32_t first_feature = cursor->feature_ordinal;
@@ -815,7 +815,7 @@ iree_status_t loom_template_decision_model_catalog_build(
       loom_template_decision_build_family(
           &build_families[i], operand_map, ranked_choices,
           choices + choice_ordinal, priority_groups + priority_group_ordinal,
-          &family_priority_group_count, &cursor);
+          &cursor, &family_priority_group_count);
       choice_ordinal += build_families[i].model->program.choice_count;
       priority_group_ordinal += family_priority_group_count;
     }
@@ -1007,8 +1007,9 @@ void loom_template_decision_model_evaluate(
     const loom_template_decision_model_t* model,
     const loom_template_decision_site_t* site,
     loom_decision_program_resolution_policy_t resolution_policy,
+    uint32_t* live_provider_ordinals,
     loom_template_decision_evidence_summary_t* out_summary,
-    uint32_t* live_provider_ordinals, uint32_t* out_live_provider_count,
+    uint32_t* out_live_provider_count,
     loom_decision_program_result_t* out_result) {
   *out_summary = (loom_template_decision_evidence_summary_t){
       .family_target_identity = LOOM_TEMPLATE_PROVIDER_MATCH,
@@ -1041,8 +1042,9 @@ void loom_template_decision_model_evaluate_all(
     const loom_template_decision_site_t* site,
     loom_decision_program_resolution_policy_t resolution_policy,
     loom_decision_program_choice_evidence_t* provider_evidence,
+    uint32_t* live_provider_ordinals,
     loom_template_decision_evidence_summary_t* out_summary,
-    uint32_t* live_provider_ordinals, uint32_t* out_live_provider_count,
+    uint32_t* out_live_provider_count,
     loom_decision_program_result_t* out_result) {
   *out_summary = (loom_template_decision_evidence_summary_t){
       .family_target_identity = LOOM_TEMPLATE_PROVIDER_MATCH,

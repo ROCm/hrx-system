@@ -379,12 +379,12 @@ static iree_status_t iree_hal_task_queue_drain_alloca_acquire(
   iree_status_t status = iree_hal_pool_acquire_reservations(
       operation->alloca.pool, operation->alloca.request_count,
       operation->alloca.requests, /*requester_frontier=*/NULL,
-      operation->alloca.reservations, operation->alloca.acquire_infos,
       (iree_hal_pool_acquire_callback_t){
           .fn = iree_hal_task_queue_alloca_acquire_completed,
           .user_data = operation,
       },
-      operation->alloca.reserve_flags);
+      operation->alloca.reserve_flags, operation->alloca.reservations,
+      operation->alloca.acquire_infos);
   if (!iree_status_is_ok(status)) {
     // Rejected capture did not invoke completion. Consume the result locally
     // so a prepared capacity probe is aborted before the operation is retired.

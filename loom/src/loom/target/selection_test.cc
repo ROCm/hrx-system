@@ -93,9 +93,8 @@ static void DestroyCpuProfile(loom_target_profile_t* profile,
 }
 
 static iree_status_t SelectOwnedCpuProfile(
-    const loom_target_profile_type_t* profile_type,
-    loom_target_profile_selection_t* out_selection,
-    iree_allocator_t allocator) {
+    const loom_target_profile_type_t* profile_type, iree_allocator_t allocator,
+    loom_target_profile_selection_t* out_selection) {
   loom_target_profile_t* profile = nullptr;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(allocator, sizeof(*profile), (void**)&profile));
@@ -112,32 +111,29 @@ static iree_status_t SelectOwnedCpuProfile(
 
 static iree_status_t SelectOwnedFakeCpuProfile(
     const iree_cpu_data_t* cpu_data, const loom_target_facts_t* requirement,
-    const loom_target_profile_t* profile,
-    loom_target_profile_selection_t* out_selection,
-    iree_allocator_t allocator) {
+    const loom_target_profile_t* profile, iree_allocator_t allocator,
+    loom_target_profile_selection_t* out_selection) {
   (void)cpu_data;
   (void)requirement;
   (void)profile;
-  return SelectOwnedCpuProfile(&kTargetProfileType, out_selection, allocator);
+  return SelectOwnedCpuProfile(&kTargetProfileType, allocator, out_selection);
 }
 
 static iree_status_t SelectOwnedOtherCpuProfile(
     const iree_cpu_data_t* cpu_data, const loom_target_facts_t* requirement,
-    const loom_target_profile_t* profile,
-    loom_target_profile_selection_t* out_selection,
-    iree_allocator_t allocator) {
+    const loom_target_profile_t* profile, iree_allocator_t allocator,
+    loom_target_profile_selection_t* out_selection) {
   (void)cpu_data;
   (void)requirement;
   (void)profile;
-  return SelectOwnedCpuProfile(&kOtherTargetProfileType, out_selection,
-                               allocator);
+  return SelectOwnedCpuProfile(&kOtherTargetProfileType, allocator,
+                               out_selection);
 }
 
 static iree_status_t FailCpuProfileSelection(
     const iree_cpu_data_t* cpu_data, const loom_target_facts_t* requirement,
-    const loom_target_profile_t* profile,
-    loom_target_profile_selection_t* out_selection,
-    iree_allocator_t allocator) {
+    const loom_target_profile_t* profile, iree_allocator_t allocator,
+    loom_target_profile_selection_t* out_selection) {
   (void)cpu_data;
   (void)requirement;
   (void)profile;
@@ -300,8 +296,8 @@ TEST(TargetSelectionTest, TransfersOwnedCpuProfile) {
   };
   loom_target_profile_selection_t selection = {};
   IREE_ASSERT_OK(loom_target_environment_select_cpu_profile(
-      &environment, &cpu_data, nullptr, nullptr, &selection,
-      iree_allocator_system()));
+      &environment, &cpu_data, nullptr, nullptr, iree_allocator_system(),
+      &selection));
   ASSERT_NE(selection.profile, nullptr);
   EXPECT_EQ(selection.profile->type, &kTargetProfileType);
   EXPECT_EQ(gDestroyedCpuProfileCount, 0);
@@ -339,7 +335,7 @@ TEST(TargetSelectionTest, ReleasesOwnedCpuProfilesOnAmbiguity) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_target_environment_select_cpu_profile(
                             &environment, &cpu_data, nullptr, nullptr,
-                            &selection, iree_allocator_system()));
+                            iree_allocator_system(), &selection));
   EXPECT_EQ(selection.profile, nullptr);
   EXPECT_EQ(gDestroyedCpuProfileCount, 2);
   loom_target_environment_deinitialize(&environment);
@@ -372,7 +368,7 @@ TEST(TargetSelectionTest, ReleasesOwnedCpuProfileOnLaterProviderFailure) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         loom_target_environment_select_cpu_profile(
                             &environment, &cpu_data, nullptr, nullptr,
-                            &selection, iree_allocator_system()));
+                            iree_allocator_system(), &selection));
   EXPECT_EQ(selection.profile, nullptr);
   EXPECT_EQ(gDestroyedCpuProfileCount, 1);
   loom_target_environment_deinitialize(&environment);

@@ -529,9 +529,9 @@ void loom_runtime_backing_pages_submit(loom_runtime_backing_growth_t* growth) {
     ++parent->pages->pending_count;
     iree_status_t status = iree_hal_slab_pool_acquire_with_credit(
         parent->pages->source, 1, &parent->request, &parent->credit,
-        &parent->reservation, &parent->info,
         (iree_hal_pool_acquire_callback_t){loom_runtime_backing_acquired,
-                                           parent});
+                                           parent},
+        &parent->reservation, &parent->info);
     if (!iree_status_is_ok(status)) {
       iree_hal_memory_credit_return(&parent->credit);
       loom_runtime_backing_acquired(parent, status, IREE_HAL_POOL_ACQUIRE_NONE);

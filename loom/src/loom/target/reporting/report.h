@@ -2186,7 +2186,7 @@ typedef struct loom_target_compile_report_t {
 
 // Initializes an empty compile report using |allocator| for row storage.
 void loom_target_compile_report_initialize(
-    loom_target_compile_report_t* out_report, iree_allocator_t allocator);
+    iree_allocator_t allocator, loom_target_compile_report_t* out_report);
 
 // Transfers |storage| ownership to |report|.
 //

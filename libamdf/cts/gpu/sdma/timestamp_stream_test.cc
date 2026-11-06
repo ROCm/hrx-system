@@ -121,7 +121,7 @@ TEST_P(SdmaTimestampStreamTest,
   }
 
   GpuCommandQueue* queue = nullptr;
-  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue, 4 * 1024 * 1024));
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(4 * 1024 * 1024, &queue));
   // The longest form is 38 DWORDs per record, plus the final wait/fence.
   ASSERT_GT(queue->words().size(), kRecordCount * 38u + 10u);
   SdmaCommandWriter commands(queue->words().data(), family_.format_features);
