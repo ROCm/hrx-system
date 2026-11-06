@@ -6,7 +6,7 @@
 
 #include "loom/format/bytecode/reader/selected_body.h"
 
-#include <vector>
+#include <array>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -61,22 +61,25 @@ class BytecodeSelectedBodyTest : public ::testing::Test {
 
 TEST_F(BytecodeSelectedBodyTest, ProjectsHighValueReferencesToCompactIds) {
   constexpr uint32_t kSourceOrdinal = 63;
-  std::vector<iree_string_view_t> strings(kSourceOrdinal + 1,
-                                          IREE_SV("rejected"));
+  std::array<iree_string_view_t, kSourceOrdinal + 1> strings;
+  strings.fill(IREE_SV("rejected"));
   strings[kSourceOrdinal] = IREE_SV("selected_value");
 
-  std::vector<uint8_t> bytecode(kSourceOrdinal, 0xFF);
-  std::vector<loom_bytecode_table_entry_metadata_t> types(kSourceOrdinal + 1);
+  std::array<uint8_t, kSourceOrdinal + 2> bytecode;
+  bytecode.fill(0xFF);
+  bytecode[kSourceOrdinal] = LOOM_BYTECODE_TYPE_SCALAR;
+  bytecode[kSourceOrdinal + 1] = LOOM_SCALAR_TYPE_F32;
+  std::array<loom_bytecode_table_entry_metadata_t, kSourceOrdinal + 1> types;
   for (uint32_t i = 0; i < kSourceOrdinal; ++i) {
     types[i] = {
         .entry_offset = i,
         .entry_length = 1,
     };
   }
-  types[kSourceOrdinal].entry_offset = bytecode.size();
-  bytecode.push_back(LOOM_BYTECODE_TYPE_SCALAR);
-  bytecode.push_back(LOOM_SCALAR_TYPE_F32);
-  types[kSourceOrdinal].entry_length = 2;
+  types[kSourceOrdinal] = {
+      .entry_offset = kSourceOrdinal,
+      .entry_length = 2,
+  };
 
   loom_bytecode_module_metadata_t metadata = {
       .strings = {strings.size(), strings.data()},

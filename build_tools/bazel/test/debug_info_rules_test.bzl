@@ -15,7 +15,9 @@ def _compression_impl(env, target):
         ("CppLink", "-Wl,--compress-debug-sections=zlib"),
     ]:
         selected = [action for action in actions if action.mnemonic == mnemonic]
-        env.expect.that_int(len(selected)).equals(1)
+
+        # Toolchains may compile both PIC and non-PIC objects for the fixture.
+        env.expect.that_int(len(selected)).is_greater_than(0)
         for action in selected:
             env.expect.that_bool(flag in action.argv).equals(enabled)
 

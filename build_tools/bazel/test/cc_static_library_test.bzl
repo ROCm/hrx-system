@@ -48,7 +48,9 @@ def _archive_metadata_impl(env, target):
 def _archive_lto_metadata_impl(env, target):
     _archive_metadata_impl(env, target)
     archive = target[CcInfo].linking_context.linker_inputs.to_list()[0].libraries[0]
-    env.expect.that_bool(bool(archive.pic_lto_bitcode_files)).equals(True)
+
+    # GCC preserves native objects without LLVM split-bitcode/backend metadata.
+    env.expect.that_bool(bool(archive.pic_lto_bitcode_files)).equals(env.ctx.attr.expect_llvm_bitcode)
 
 def _shared_metadata_impl(env, target):
     exported = target[CcSharedLibraryInfo].linker_input
@@ -129,7 +131,14 @@ def cc_static_library_test_suite(name):
             target = ":" + fixture,
             impl = implementation,
             config_settings = {"//command_line_option:features": features},
-            attr_values = {"target_compatible_with": ["@platforms//os:linux"]},
+            attrs = {"expect_llvm_bitcode": attr.bool()},
+            attr_values = {
+                "expect_llvm_bitcode": select({
+                    "//build_tools/bazel:cc_compiler_clang": True,
+                    "//conditions:default": False,
+                }),
+                "target_compatible_with": ["@platforms//os:linux"],
+            },
         )
         tests.append(":" + test_name)
     for linkage in ["static", "shared", "direct_shared"]:
