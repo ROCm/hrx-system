@@ -26,6 +26,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ir:symbol_map",
         "//loom/src/loom/ops/cfg",
+        "//loom/src/loom/ops/channel",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/ops/pipeline",
         "//loom/src/loom/rewrite:materialize",

@@ -29,11 +29,35 @@ typedef enum loom_pipeline_schedule_step_kind_e {
   LOOM_PIPELINE_SCHEDULE_STEP_ALLOCATION,
   // Fresh protocol identity, independent of its backing storage identity.
   LOOM_PIPELINE_SCHEDULE_STEP_CHANNEL,
+  // One immutable record read whose results are shared by this scope.
+  LOOM_PIPELINE_SCHEDULE_STEP_COLLECTIVE,
+  // An operation owned by the preceding collective read in this block.
+  LOOM_PIPELINE_SCHEDULE_STEP_COLLECTIVE_MEMBER,
   // Control transfer whose successors and arguments belong to the retained CFG.
   LOOM_PIPELINE_SCHEDULE_STEP_BRANCH,
   // Completion of this serial scope, including its final child.
   LOOM_PIPELINE_SCHEDULE_STEP_YIELD,
 } loom_pipeline_schedule_step_kind_t;
+
+typedef struct loom_pipeline_collective_result_t {
+  // Position in the collective's retained operation list.
+  uint32_t operation;
+  // Result position on that operation.
+  uint16_t result;
+} loom_pipeline_collective_result_t;
+
+typedef struct loom_pipeline_collective_t {
+  // Record-dependent operations, including acquire and final release. Pure
+  // independent dataflow interleaved in the source remains ordinary schedule
+  // dataflow and does not become a transported result.
+  loom_op_t* const* operations;
+  // Number of operations in this closed immutable borrow.
+  iree_host_size_t operation_count;
+  // Values used outside the borrow, in source definition order.
+  const loom_pipeline_collective_result_t* results;
+  // Number of values all participants must observe identically.
+  iree_host_size_t result_count;
+} loom_pipeline_collective_t;
 
 // A static source site. A loop visits the same site repeatedly; it does not
 // manufacture another plan row or another copy of the child's program.
@@ -42,6 +66,8 @@ typedef struct loom_pipeline_schedule_step_t {
   loom_op_t* operation;
   // Complete nested scope for SERIAL; NULL for every other step kind.
   const loom_pipeline_schedule_t* nested;
+  // Closed immutable borrow for COLLECTIVE; NULL for other steps.
+  const loom_pipeline_collective_t* collective;
   // Semantics classified once by the construction owner.
   loom_pipeline_schedule_step_kind_t kind;
 } loom_pipeline_schedule_step_t;

@@ -93,11 +93,13 @@ void loom_aie2p_native_route_label(loom_aie2p_native_context_t* context,
   }
 }
 
-static bool loom_aie2p_native_packet_route(
-    loom_aie2p_native_context_t* context, uint32_t* next_source,
-    loom_xdna_tile_coordinate_t source, loom_xdna_stream_port_t source_port,
-    loom_xdna_tile_coordinate_t destination,
-    loom_xdna_stream_port_t destination_port, uint8_t packet) {
+bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
+                                    uint32_t* next_source,
+                                    loom_xdna_tile_coordinate_t source,
+                                    loom_xdna_stream_port_t source_port,
+                                    loom_xdna_tile_coordinate_t destination,
+                                    loom_xdna_stream_port_t destination_port,
+                                    uint8_t packet) {
   const iree_host_size_t first = context->routing.route_count;
   const uint32_t index = (*next_source)++;
   const iree_host_size_t tile =
@@ -1273,8 +1275,10 @@ iree_status_t loom_aie2p_native_select_transfers(
       }
     }
   }
-  const iree_host_size_t source_count = transfer_count * 4 + cohort_count +
-                                        destination_count + child_control_count;
+  const iree_host_size_t source_count =
+      transfer_count * 4 + cohort_count + destination_count +
+      child_control_count +
+      context->collective_count * context->execution.engine_count;
   const iree_host_size_t route_capacity =
       source_count *
       (context->family->column_count + context->family->row_count + 2);
@@ -1417,6 +1421,9 @@ iree_status_t loom_aie2p_native_select_transfers(
   if (iree_status_is_ok(status) && valid) {
     status = loom_aie2p_native_group_submissions(
         context, realization->invocations.worker_count);
+  }
+  if (iree_status_is_ok(status) && valid) {
+    status = loom_aie2p_native_route_collectives(context, &next_source, &valid);
   }
   if (iree_status_is_ok(status) && valid) {
     status = loom_aie2p_native_switches_build(context, realization->function.op,

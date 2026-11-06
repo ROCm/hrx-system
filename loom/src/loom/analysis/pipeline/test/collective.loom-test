@@ -1,0 +1,149 @@
+// RUN: emit pipeline-transport @test
+
+// A subview preserves record provenance. Only the escaped derived value is
+// transported; interleaved independent dataflow remains local to each worker.
+pipeline.decl @work() run(%value: i32, %base: index)
+
+pipeline.def public @test() run(%records: channel<tile<4xi32>>, %start: index) {
+  pipeline.serial {
+    %read, %payload = channel.acquire %records : channel<tile<4xi32>> -> (read<tile<4xi32>>, view<4xi32>)
+    %tail = view.subview %payload[2] : view<4xi32> -> view<2xi32>
+    %value = view.load %tail[0] : view<2xi32> -> i32
+    %c1 = scalar.constant 1 : i32
+    %next = scalar.addi %value, %c1 : i32
+    %step = index.constant 4 : index
+    %base = index.add %start, %step : index
+    channel.release %read : read<tile<4xi32>>
+    pipeline.compose @work(%next, %base) : (i32, index)
+  }
+}
+
+// ----
+concurrent serial scopes=1
+schedule: blocks=1 loops=0 single_child_choice=no
+  block 0: successors=
+    collective operations=5 results=%next
+    collective-member
+    collective-member
+    dataflow
+    collective-member
+    dataflow
+    dataflow
+    collective-member
+    compose @work arguments=%next,%base
+    yield
+
+// ====
+
+// Successive borrows own separate dependency sets. The earlier scalar is a
+// stable input to the later read; its channel credit has already been returned.
+pipeline.decl @work() run(%value: i32)
+
+pipeline.def public @test() run(%records: channel<tile<1xi32>>) {
+  pipeline.serial {
+    %first_read, %first_payload = channel.acquire %records : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+    %first = view.load %first_payload[0] : view<1xi32> -> i32
+    channel.release %first_read : read<tile<1xi32>>
+    %second_read, %second_payload = channel.acquire %records : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+    %second = view.load %second_payload[0] : view<1xi32> -> i32
+    %sum = scalar.addi %first, %second : i32
+    channel.release %second_read : read<tile<1xi32>>
+    pipeline.compose @work(%sum) : (i32)
+  }
+}
+
+// ----
+concurrent serial scopes=1
+schedule: blocks=1 loops=0 single_child_choice=no
+  block 0: successors=
+    collective operations=3 results=%first
+    collective-member
+    collective-member
+    collective operations=4 results=%sum
+    collective-member
+    collective-member
+    collective-member
+    compose @work arguments=%sum
+    yield
+
+// ====
+
+// A collective shares values, not writable ownership of its payload.
+pipeline.def public @test() run(%records: channel<tile<1xi32>>) {
+  pipeline.serial {
+    // ERROR@+1: LOWERING/066 {requirement="immutable collective channel consumption"}
+    %read, %payload = channel.acquire<mutable> %records : channel<tile<1xi32>> -> (read<tile<1xi32>, mutable>, view<1xi32>)
+    channel.release %read : read<tile<1xi32>, mutable>
+  }
+}
+
+// ====
+
+// An unrelated memory read has no collective record supplying its ownership.
+pipeline.decl @work() run(%value: i32)
+
+pipeline.def public @test() run(%records: channel<tile<1xi32>>, %external: view<1xi32>) {
+  pipeline.serial {
+    %read, %payload = channel.acquire %records : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+    // ERROR@+1: LOWERING/066 {requirement="a load from this immutable channel record"}
+    %value = view.load %external[0] : view<1xi32> -> i32
+    channel.release %read : read<tile<1xi32>>
+    pipeline.compose @work(%value) : (i32)
+  }
+}
+
+// ====
+
+// Returning the FIFO credit cannot leave a payload address in the child.
+pipeline.decl @work() run(%value: view<1xi32>)
+
+pipeline.def public @test() run(%records: channel<tile<2xi32>>) {
+  pipeline.serial {
+    %read, %payload = channel.acquire %records : channel<tile<2xi32>> -> (read<tile<2xi32>>, view<2xi32>)
+    // ERROR@+1: LOWERING/066 {requirement="values independent of the released collective payload"}
+    %tail = view.subview %payload[1] : view<2xi32> -> view<1xi32>
+    channel.release %read : read<tile<2xi32>>
+    pipeline.compose @work(%tail) : (view<1xi32>)
+  }
+}
+
+// ====
+
+// A child cannot start inside a collective's closed record-read span.
+pipeline.decl @work() run(%value: i32)
+
+pipeline.def public @test() run(%records: channel<tile<1xi32>>) {
+  pipeline.serial {
+    %read, %payload = channel.acquire %records : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+    %value = view.load %payload[0] : view<1xi32> -> i32
+    // ERROR@+1: LOWERING/066 {requirement="a closed immutable borrow before child or control transfer"}
+    pipeline.compose @work(%value) : (i32)
+    channel.release %read : read<tile<1xi32>>
+  }
+}
+
+// ====
+
+// A branch cannot separate acquisition from its matching release.
+pipeline.def public @test() run(%records: channel<tile<1xi32>>) {
+  pipeline.serial {
+    %read, %payload = channel.acquire %records : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+    // ERROR@+1: LOWERING/066 {requirement="a closed immutable borrow before child or control transfer"}
+    cfg.br ^release
+  ^release:
+    channel.release %read : read<tile<1xi32>>
+  }
+}
+
+// ====
+
+// A bare construction-time load has no selected execution placement.
+pipeline.decl @work() run(%value: i32)
+
+pipeline.def public @test() run(%external: view<1xi32>) {
+  pipeline.serial {
+    // ERROR@+1: LOWERING/066 {requirement="an immutable collective borrow owning this access"}
+    %value = view.load %external[0] : view<1xi32> -> i32
+    pipeline.compose @work(%value) : (i32)
+  }
+}

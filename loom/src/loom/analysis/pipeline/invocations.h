@@ -34,6 +34,8 @@ typedef union loom_pipeline_invocation_step_t {
   const loom_pipeline_invocation_t* child;
   // Bound control selected by a nested SERIAL step.
   const loom_pipeline_invocation_schedule_t* nested;
+  // Canonical protocol consumed by a COLLECTIVE step.
+  const loom_pipeline_resource_channel_t* channel;
 } loom_pipeline_invocation_step_t;
 
 struct loom_pipeline_invocation_schedule_t {

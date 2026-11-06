@@ -514,6 +514,31 @@ typedef struct loom_aie2p_native_join_t {
   struct loom_aie2p_native_join_t* next;
 } loom_aie2p_native_join_t;
 
+typedef struct loom_aie2p_native_collective_t {
+  // Bound serial scope owning the collective's participant set.
+  const loom_pipeline_invocation_schedule_t* scope;
+  // Closed source borrow and its escaping value tuple.
+  const loom_pipeline_collective_t* source;
+  // Canonical FIFO whose existing reader supplies the record.
+  const loom_aie2p_native_channel_t* channel;
+  // Physical engine retaining the FIFO read cursor.
+  iree_host_size_t reader;
+  // Broadcast relay; equals reader when the reader broadcasts directly.
+  iree_host_size_t relay;
+  // Other participating cores receiving the reader's values.
+  iree_host_size_t peer_count;
+  // Reader-visible base address of the FIFO's record storage.
+  uint32_t address;
+  // Reader-visible readiness semaphore selector.
+  uint16_t ready_lock;
+  // Reader-visible reclamation semaphore selector.
+  uint16_t free_lock;
+  // Packet class on the reader's scalar stream.
+  uint8_t reader_packet;
+  // Packet class on the relay's scalar stream.
+  uint8_t relay_packet;
+} loom_aie2p_native_collective_t;
+
 typedef struct loom_aie2p_native_context_t {
   // Common compiler lifecycle and diagnostic owner.
   loom_pass_t* pass;
@@ -533,9 +558,13 @@ typedef struct loom_aie2p_native_context_t {
   loom_aie2p_native_worker_t* workers;
   // Admitted core sharing and transitive participants at each phase boundary.
   loom_pipeline_execution_t execution;
+  // Collective selections indexed by source scope and borrow address.
+  loom_aie2p_native_collective_t* collectives;
+  // Number of closed immutable source borrows.
+  iree_host_size_t collective_count;
   // Invocation-major core controllers of finite distribution boundaries, or
-  // NULL when there are no ordered distributions. A child borrowing its direct
-  // parent's controller retains that identity.
+  // NULL when there are no ordered distributions. Each row retains the
+  // invocation's complete transitive execution participants.
   iree_host_size_t* distribution_controllers;
   // Physical join selected for each canonical execution schedule row.
   loom_aie2p_native_join_t** joins;
@@ -621,6 +650,13 @@ iree_status_t loom_aie2p_native_cursor_view(loom_builder_t* builder,
                                             bool writer,
                                             loom_value_id_t* out_view);
 
+// Advances an admitted FIFO byte offset by one record, wrapping at capacity.
+// Retains the ring's range and alignment on the returned current record.
+iree_status_t loom_aie2p_native_cursor_advance(
+    loom_builder_t* builder, const loom_aie2p_native_channel_t* channel,
+    loom_value_id_t origin, loom_value_id_t cursor, loom_location_id_t location,
+    loom_value_id_t* out_record, loom_value_id_t* out_next);
+
 // Selects descriptor, engine, route, completion, and relocated-address storage
 // from the canonical movement streams before either executable is rewritten.
 iree_status_t loom_aie2p_native_select_transfers(
@@ -664,6 +700,15 @@ iree_status_t loom_aie2p_native_select_sequence(
 void loom_aie2p_native_route_label(loom_aie2p_native_context_t* context,
                                    iree_host_size_t first, uint8_t packet);
 
+// Adds a packet route between admitted endpoints and labels its new edges.
+bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
+                                    uint32_t* next_source,
+                                    loom_xdna_tile_coordinate_t source,
+                                    loom_xdna_stream_port_t source_port,
+                                    loom_xdna_tile_coordinate_t destination,
+                                    loom_xdna_stream_port_t destination_port,
+                                    uint8_t packet);
+
 // Selects and retains a regular ingress stream's external descriptor geometry.
 // Stable-source and exact consumer-completion admission precede this query.
 bool loom_aie2p_native_select_ingress_descriptor(
@@ -682,5 +727,26 @@ iree_status_t loom_aie2p_native_emit_transfers(
 iree_status_t loom_aie2p_pipeline_realize(loom_pass_t* pass,
                                           loom_module_t* module,
                                           loom_func_like_t function);
+
+// Selects the FIFO reader, relay, scalar carriers, and shared cursor ownership.
+iree_status_t loom_aie2p_native_select_collectives(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization, bool* out_valid);
+// Routes the selected value tuples alongside model and phase-control packets.
+iree_status_t loom_aie2p_native_route_collectives(
+    loom_aie2p_native_context_t* context, uint32_t* next_source,
+    bool* out_valid);
+// Acquires the record on its selected reader; peers receive no payload view.
+iree_status_t loom_aie2p_native_collective_begin(
+    void* user_data, loom_builder_t* builder, iree_host_size_t engine,
+    const loom_pipeline_invocation_schedule_t* scope,
+    const loom_pipeline_collective_t* collective,
+    const loom_value_id_t* state_arguments, loom_type_t payload_type,
+    loom_value_id_t* out_payload);
+// Broadcasts values, joins the participants, and returns the reader's credit.
+iree_status_t loom_aie2p_native_collective_end(
+    void* user_data, loom_builder_t* builder, iree_host_size_t engine,
+    const loom_pipeline_invocation_schedule_t* scope,
+    const loom_pipeline_collective_t* collective, loom_value_id_t* values);
 
 #endif  // LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_NATIVE_H_

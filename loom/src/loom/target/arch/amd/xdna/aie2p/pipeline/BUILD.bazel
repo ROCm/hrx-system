@@ -114,6 +114,7 @@ loom_cc_library(
     name = "native",
     srcs = [
         "channels.c",
+        "collective.c",
         "configuration.c",
         "distribution.c",
         "dma.c",
@@ -134,6 +135,7 @@ loom_cc_library(
         "//loom/src/loom/analysis:source_storage_packing",
         "//loom/src/loom/analysis:storage_geometry",
         "//loom/src/loom/analysis/pipeline:execution",
+        "//loom/src/loom/analysis/pipeline:schedule",
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low:launch_config_program",
         "//loom/src/loom/error:parameter",
@@ -165,6 +167,7 @@ loom_cc_library(
         "//loom/src/loom/transforms/pipeline:control",
         "//loom/src/loom/transforms/pipeline:realization",
         "//loom/src/loom/transforms/view:offset_expression",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",

@@ -556,10 +556,10 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
         ordered ? owner->distributions : NULL;
     if (ordered) {
       const uint32_t producer = source_channel->cursor.writer.worker;
-      if (!cohort->release || cohort->admissions != 1 ||
-          producer == UINT32_MAX ||
+      if (producer == UINT32_MAX ||
           (!child &&
-           ((path && producer != path->sender.channel->cursor.writer.worker) ||
+           (!cohort->release || cohort->admissions != 1 ||
+            (path && producer != path->sender.channel->cursor.writer.worker) ||
             context->workers[producer].execution !=
                 LOOM_AIE2P_NATIVE_EXECUTION_CONFIGURATION))) {
         return loom_aie2p_native_reject(
@@ -777,9 +777,15 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
           sender ? &distribution->sender : &distribution->receivers[j - 1];
       const uint32_t cursor = sender ? endpoint->channel->cursor.writer.worker
                                      : endpoint->channel->cursor.reader.worker;
-      const iree_host_size_t engine = cursor == UINT32_MAX
-                                          ? IREE_HOST_SIZE_MAX
-                                          : context->core_engines[cursor];
+      iree_host_size_t engine = cursor == UINT32_MAX
+                                    ? IREE_HOST_SIZE_MAX
+                                    : context->core_engines[cursor];
+      // An autonomous distributor has no instruction cursor owner. Its
+      // compute-memory endpoint can instead be controlled by that tile's core.
+      if (engine == IREE_HOST_SIZE_MAX &&
+          endpoint->tile->facts->kind == LOOM_XDNA_TILE_KIND_COMPUTE) {
+        engine = (iree_host_size_t)(endpoint->tile - context->tiles);
+      }
       iree_host_size_t controller =
           engine == IREE_HOST_SIZE_MAX
               ? IREE_HOST_SIZE_MAX
@@ -798,11 +804,9 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
           controller = IREE_HOST_SIZE_MAX;
         }
       }
-      if (controller == IREE_HOST_SIZE_MAX ||
-          (realization->invocations.workers[controller].invocation !=
-               invocation &&
-           realization->invocations.workers[controller].invocation !=
-               invocation->parent)) {
+      // The execution row includes every nested phase of this child. Those
+      // controllers execute its outer start/retirement boundary as well.
+      if (controller == IREE_HOST_SIZE_MAX) {
         return loom_aie2p_native_reject(
             context, phase->source->records->admission->op,
             IREE_SV("a producer and each receiver controlled by the complete "

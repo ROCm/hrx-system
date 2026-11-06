@@ -8,6 +8,7 @@
 
 #include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
+#include "loom/ops/channel/ops.h"
 #include "loom/ops/pipeline/ops.h"
 #include "loom/util/adaptive_sort.h"
 
@@ -208,7 +209,9 @@ static iree_status_t loom_pipeline_invocations_append(
 
 static iree_status_t loom_pipeline_invocations_collect(
     loom_module_t* module, loom_pipeline_invocation_frame_t* frame,
-    iree_arena_allocator_t* arena) {
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    bool* out_valid) {
+  *out_valid = false;
   loom_pipeline_invocation_t* invocation = &frame->invocation;
   const loom_pipeline_resources_t* resources = invocation->resources;
   const loom_pipeline_invocation_t** compositions = NULL;
@@ -277,10 +280,31 @@ static iree_status_t loom_pipeline_invocations_collect(
           *pending = (loom_pipeline_invocation_scope_t){.schedule = nested};
           last->next = pending;
           last = pending;
+        } else if (step->kind == LOOM_PIPELINE_SCHEDULE_STEP_COLLECTIVE) {
+          const loom_value_id_t channel =
+              loom_channel_acquire_channel(step->operation);
+          bindings[i].channel =
+              loom_pipeline_resources_lookup_channel(resources, channel);
+          if (!bindings[i].channel) {
+            const loom_pipeline_channel_binding_t* incoming =
+                loom_pipeline_arguments_lookup_channel(
+                    invocation->arguments.channels,
+                    invocation->arguments.channel_count, channel);
+            if (incoming) {
+              bindings[i].channel = incoming->channel;
+            }
+          }
+          if (!bindings[i].channel) {
+            return loom_pipeline_invocations_reject(
+                step->operation,
+                IREE_SV("an invocation-owned collective channel binding"),
+                diagnostic_emitter);
+          }
         }
       }
     }
   }
+  *out_valid = true;
   return iree_ok_status();
 }
 
@@ -319,7 +343,12 @@ iree_status_t loom_pipeline_invocations_build(
       arena, module->symbols.count, sizeof(*active), (void**)&active));
   memset(active, 0, module->symbols.count * sizeof(*active));
   active[loom_func_like_callee(root_function).symbol_id] = true;
-  IREE_RETURN_IF_ERROR(loom_pipeline_invocations_collect(module, root, arena));
+  bool collected = false;
+  IREE_RETURN_IF_ERROR(loom_pipeline_invocations_collect(
+      module, root, diagnostic_emitter, arena, &collected));
+  if (!collected) {
+    return iree_ok_status();
+  }
   loom_pipeline_invocation_frame_t* frame = root;
   loom_pipeline_invocation_frame_t* last = root;
   while (frame) {
@@ -393,8 +422,11 @@ iree_status_t loom_pipeline_invocations_build(
     out_invocations->channel_count += resources->channel_count;
     last->ordered_next = child;
     last = child;
-    IREE_RETURN_IF_ERROR(
-        loom_pipeline_invocations_collect(module, child, arena));
+    IREE_RETURN_IF_ERROR(loom_pipeline_invocations_collect(
+        module, child, diagnostic_emitter, arena, &collected));
+    if (!collected) {
+      return iree_ok_status();
+    }
     frame = child;
   }
   IREE_RETURN_IF_ERROR(

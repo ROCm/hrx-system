@@ -83,6 +83,10 @@ iree_status_t loom_aie2p_worker_lock(loom_aie2p_worker_builder_t* context,
                                      loom_builder_t* builder,
                                      uint32_t descriptor, uint16_t selector,
                                      int32_t delta);
+// Emits a routed data packet, including odd-parity header and final TLAST.
+iree_status_t loom_aie2p_worker_packet_write(
+    loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
+    uint8_t packet_id, const loom_value_id_t* words, iree_host_size_t count);
 // Emits a native control packet. The admitted register offset fits 20 bits;
 // count is 1..4 words and the payload's last word carries TLAST.
 iree_status_t loom_aie2p_worker_control_write(

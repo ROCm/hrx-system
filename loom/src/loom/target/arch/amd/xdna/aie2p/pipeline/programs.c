@@ -152,6 +152,8 @@ iree_status_t loom_aie2p_native_emit_programs(
       .worker_state_arguments = state_arguments,
       .emit = {.function = loom_aie2p_native_program_register,
                .boundary = loom_aie2p_native_program_boundary,
+               .collective_begin = loom_aie2p_native_collective_begin,
+               .collective_end = loom_aie2p_native_collective_end,
                .user_data = context}};
   loom_pipeline_control_function_t* functions = NULL;
   IREE_RETURN_IF_ERROR(loom_pipeline_control_materialize(
