@@ -85,32 +85,11 @@ loom_library(
 loom_check_test_suite(
     name = "compiler_test",
     srcs = [
-        "assembly.cxx-test",
-        "assembly_invalid.cxx-test",
-        "command_programs.cxx-test",
-        "command_programs_invalid.cxx-test",
         "group_dot.cxx-test",
-        "hip_vector_types.cxx-test",
-        "intrinsics_invalid.cxx-test",
-        "matrix_fragments.cxx-test",
-        "matrix_fragments_invalid.cxx-test",
         "operators.cxx-test",
         "paged_online_softmax_loop_f32.cxx-test",
-        "pipeline.cxx-test",
-        "pipeline_invalid.cxx-test",
-        "pipeline_phases.cxx-test",
         "records.cxx-test",
         "special_members_invalid.cxx-test",
-        "template_addresses.cxx-test",
-        "template_addresses_invalid.cxx-test",
-        "template_apply.cxx-test",
-        "template_apply_invalid.cxx-test",
-        "template_conversions.cxx-test",
-        "template_conversions_invalid.cxx-test",
-        "template_definitions.cxx-test",
-        "template_definitions_invalid.cxx-test",
-        "template_values.cxx-test",
-        "template_values_roundtrip.cxx-test",
     ],
     data = [
         "mxfp_group_dot.cxx",
@@ -144,17 +123,6 @@ loom_check_test(
     },
     # CMake exercises the Python tool through its execution-suite smoke; this
     # exact golden requires Bazel's executable runfile for the emit provider.
-    tags = ["skip-bazel_to_cmake"],
-    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
-)
-
-loom_check_test(
-    name = "matrix_fragments_roundtrip_test",
-    src = "matrix_fragments_roundtrip.cxx-test",
-    data = ["//loom/py/loom/tools:loom-export-cxx"],
-    env = {
-        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
-    },
     tags = ["skip-bazel_to_cmake"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )

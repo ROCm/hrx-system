@@ -24,6 +24,7 @@ loom_check_test_suite(
         "config_invalid.cxx-test",
         "constexpr_contract.cxx-test",
         "constexpr_contract_invalid.cxx-test",
+        "intrinsics_invalid.cxx-test",
         "parameter_alignment.cxx-test",
         "parameter_alignment_invalid.cxx-test",
         "parameter_noalias.cxx-test",

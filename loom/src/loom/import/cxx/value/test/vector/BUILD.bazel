@@ -16,6 +16,9 @@ loom_check_test_suite(
     name = "compiler_test",
     srcs = [
         "constructors.cxx-test",
+        "hip_vector_types.cxx-test",
+        "matrix_fragments.cxx-test",
+        "matrix_fragments_invalid.cxx-test",
         "native_arithmetic.cxx-test",
         "packed_arithmetic.cxx-test",
         "packed_slices.cxx-test",
@@ -58,6 +61,17 @@ loom_check_test(
     },
     # CMake exercises the Python tool through its execution-suite smoke; this
     # exact golden requires Bazel's executable runfile for the emit provider.
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
+    name = "matrix_fragments_roundtrip_test",
+    src = "matrix_fragments_roundtrip.cxx-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
     tags = ["skip-bazel_to_cmake"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
