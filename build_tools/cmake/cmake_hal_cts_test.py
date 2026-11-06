@@ -37,7 +37,7 @@ class CMakeHalCtsTest(unittest.TestCase):
                     "-DCTS_COMPILED_CORPUS=ON",
                     f"-DCTS_EXTRA_TARGET={extra_target}",
                 )
-                build_project(build, "iree_hal_drivers_amd_gpu_cts_probe")
+                build_project(build, "iree_hal_driver_amd_gpu_cts_probe")
                 probe = (build / f"probe-{CONFIGURATION}.txt").read_text().strip()
                 run_command(probe, str(target_count))
                 products = build / "cts"
@@ -50,7 +50,7 @@ class CMakeHalCtsTest(unittest.TestCase):
                     .stat()
                     .st_mtime_ns
                 )
-                build_project(build, "iree_hal_drivers_amd_gpu_cts_probe")
+                build_project(build, "iree_hal_driver_amd_gpu_cts_probe")
                 self.assertEqual(
                     (products / "primary_corpus_first-exact/one.kernel.bin")
                     .stat()
@@ -66,7 +66,7 @@ class CMakeHalCtsTest(unittest.TestCase):
             root = Path(temporary)
             build = root / ("b" * max(1, 120 - len(str(root)) - 1))
             configure_project(FIXTURE, build)
-            build_project(build, "iree_hal_drivers_amd_gpu_cts_probe")
+            build_project(build, "iree_hal_driver_amd_gpu_cts_probe")
             probe = (build / f"probe-{CONFIGURATION}.txt").read_text().strip()
             run_command(probe)
 

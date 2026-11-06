@@ -6,7 +6,7 @@
 
 #include "loom/tooling/target/spirv/testbench_requirements.h"
 
-#include "iree/hal/drivers/vulkan/device_spec.h"
+#include "iree/hal/driver/vulkan/device_spec.h"
 #include "loom/tooling/execution/hal/testbench_actual.h"
 #include "loomc/iree.h"
 #include "loomc/target/spirv/profile.h"

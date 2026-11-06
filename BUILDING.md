@@ -947,7 +947,7 @@ one GPU processor uses:
 ```bash
 python dev.py bazel configure \
   --config=loom-target-amd-gpu \
-  --//runtime/src/iree/hal/drivers/amd/gpu:targets=gfx942 \
+  --//runtime/src/iree/hal/driver/amd/gpu:targets=gfx942 \
   --//loom/config/arch/amdgpu:targets=gfx942
 ```
 

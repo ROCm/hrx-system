@@ -1,0 +1,758 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "iree/hal/driver/amd/fabric/asan.h"
+
+#include <atomic>
+#include <barrier>
+#include <map>
+#include <semaphore>
+#include <thread>
+#include <vector>
+
+#include "iree/hal/driver/amd/fabric/allocation_queue.h"
+#include "iree/hal/driver/amd/fabric/slab_provider.h"
+#include "iree/hal/testing/mock_device.h"
+#include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
+
+namespace {
+
+constexpr uint32_t kQueueFamilyOrdinal = 3;
+
+// Only the native reservation/backing boundary is simulated. The production
+// owner performs commitment, publication, range allocation, and quarantine.
+struct Native {
+  enum class Step { kNone, kAllocate, kFlush, kMap };
+  struct Scope {
+    // Native dependency accepting physical allocations from this scope.
+    Native* owner;
+    // Result of qualifying CPU writes before physical allocation.
+    amdf_status_t publication_status = AMDF_STATUS_OK;
+    // Total allocations, including allocations already released.
+    uint32_t allocation_count = 0;
+  };
+  struct Memory {
+    // Native dependency owner tracking release order.
+    Native* owner;
+    // Physical bytes shared by every installed alias.
+    std::vector<uint8_t> bytes;
+    // Optional release witness whose lifetime includes native destruction.
+    bool* released = nullptr;
+  };
+  struct Reservation {
+    // Native dependency owner.
+    Native* owner;
+    // Stable address and extent supplied by the native API.
+    amdf_memory_reservation_access_info_t info;
+    // Installed granule mappings, borrowed until checked removal.
+    std::map<uint64_t, Memory*> pages;
+  };
+  // Native API dependency, independent of the ASAN implementation.
+  amdf_api_t api = {};
+  // Preferred local backing, independently qualified from its host view.
+  Scope local_scope{this};
+  // Host backing available when the caller includes this scope.
+  Scope system_scope{this};
+  // Observed reservation owners in construction order.
+  std::vector<Reservation*> reservations;
+  // Number of live physical allocations.
+  uint32_t live_memory = 0;
+  // Injected native host publication failure.
+  bool fail_flush = false;
+  // Injected allocation failure before any native backing exists.
+  bool fail_allocate = false;
+  // Injected update failure after native backing has been installed.
+  bool fail_update = false;
+  // Exactly one native operation pauses at this boundary.
+  std::atomic<Step> pause_step{Step::kNone};
+  // Readiness witness before the selected native operation completes.
+  std::binary_semaphore entered{0};
+  // Allows the selected operation to complete after independent work.
+  std::binary_semaphore resume{0};
+
+  void Pause(Step step) {
+    if (pause_step.compare_exchange_strong(step, Step::kNone)) {
+      entered.release();
+      resume.acquire();
+    }
+  }
+
+  Native() {
+    api.device_query_memory_reservation_capabilities =
+        [](amdf_device_t*, uint32_t,
+           amdf_memory_reservation_capabilities_t* out) {
+          out->mapping_granularity = 4096;
+          return AMDF_STATUS_OK;
+        };
+    api.memory_scope_query_pair_info =
+        [](amdf_memory_scope_t* scope,
+           const amdf_memory_profile_pair_query_t* query,
+           amdf_memory_pair_info_t*) {
+          EXPECT_EQ(query->memory_profile_ordinal, 0u);
+          EXPECT_EQ(query->access_count, 1u);
+          EXPECT_EQ(query->producer.kind, AMDF_MEMORY_SITE_KIND_HOST);
+          EXPECT_EQ(query->producer.value.host_access,
+                    AMDF_MEMORY_MAP_FLAG_WRITE);
+          EXPECT_EQ(query->consumer.kind, AMDF_MEMORY_SITE_KIND_DEVICE);
+          EXPECT_EQ(query->consumer.value.device.access_ordinal, 0u);
+          EXPECT_EQ(query->consumer.value.device.queue_family_ordinal,
+                    kQueueFamilyOrdinal);
+          return reinterpret_cast<Scope*>(scope)->publication_status;
+        };
+    api.memory_scope_query_info = [](amdf_memory_scope_t*,
+                                     amdf_memory_scope_info_t* out) {
+      out->memory_profile_count = 1;
+      return AMDF_STATUS_OK;
+    };
+    api.memory_scope_query_device_profile =
+        [](amdf_memory_scope_t*, uint32_t, uint32_t,
+           const amdf_memory_device_access_t*, amdf_memory_profile_t* out,
+           amdf_memory_access_capabilities_t*) {
+          out->roles = AMDF_MEMORY_PROFILE_ROLE_CREATE |
+                       AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
+          out->supported_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
+          out->host_mapping.supported_access =
+              AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+          out->allocation.byte_length_granularity = 4096;
+          out->allocation.native_byte_length_granularity = 4096;
+          out->allocation.minimum_alignment = 4096;
+          out->allocation.maximum_alignment = 4096;
+          out->allocation.maximum_byte_length = UINT64_MAX;
+          return AMDF_STATUS_OK;
+        };
+    api.memory_reservation_create =
+        [](amdf_instance_t* instance,
+           const amdf_memory_reservation_create_info_t* info,
+           amdf_memory_reservation_t** out) {
+          auto* self = reinterpret_cast<Native*>(instance);
+          auto* reservation = new Reservation{self, {}, {}};
+          reservation->info.address =
+              self->reservations.empty() ? 0x10000 : 0x100000;
+          reservation->info.byte_length = info->byte_length;
+          reservation->info.mapping_granularity = 4096;
+          reservation->info.access = info->accesses[0].access;
+          self->reservations.push_back(reservation);
+          *out = reinterpret_cast<amdf_memory_reservation_t*>(reservation);
+          return AMDF_STATUS_OK;
+        };
+    api.memory_reservation_query_access_info =
+        [](amdf_memory_reservation_t* handle, uint32_t,
+           amdf_memory_reservation_access_info_t* out) {
+          *out = reinterpret_cast<Reservation*>(handle)->info;
+          return AMDF_STATUS_OK;
+        };
+    api.memory_reservation_update =
+        [](amdf_memory_reservation_t* handle, uint32_t, uint32_t count,
+           const amdf_memory_mapping_update_t* updates) {
+          auto* reservation = reinterpret_cast<Reservation*>(handle);
+          reservation->owner->Pause(Step::kMap);
+          for (uint32_t i = 0; i < count; ++i) {
+            const auto& update = updates[i];
+            EXPECT_EQ(update.byte_length % 4096, 0u);
+            EXPECT_LE(update.target_byte_offset + update.byte_length,
+                      reservation->info.byte_length);
+            for (uint64_t offset = update.target_byte_offset;
+                 offset < update.target_byte_offset + update.byte_length;
+                 offset += 4096) {
+              if (update.memory) {
+                reservation->pages[offset] =
+                    reinterpret_cast<Memory*>(update.memory);
+              } else {
+                reservation->pages.erase(offset);
+              }
+            }
+          }
+          return reservation->owner->fail_update
+                     ? amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL)
+                     : AMDF_STATUS_OK;
+        };
+    api.memory_reservation_destroy = [](amdf_memory_reservation_t* handle) {
+      auto* reservation = reinterpret_cast<Reservation*>(handle);
+      for (auto*& entry : reservation->owner->reservations) {
+        if (entry == reservation) {
+          entry = nullptr;
+        }
+      }
+      delete reservation;
+      return AMDF_STATUS_OK;
+    };
+    api.memory_create =
+        [](amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
+           amdf_memory_t** out, amdf_memory_release_info_t* out_release_info) {
+          *out = nullptr;
+          if (out_release_info) {
+            *out_release_info = {};
+          }
+          auto* selected_scope = reinterpret_cast<Scope*>(scope);
+          auto* self = selected_scope->owner;
+          self->Pause(Step::kAllocate);
+          if (self->fail_allocate) {
+            return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+          }
+          ++selected_scope->allocation_count;
+          ++self->live_memory;
+          *out = reinterpret_cast<amdf_memory_t*>(
+              new Memory{self, std::vector<uint8_t>(info->byte_length, 0xcc)});
+          return AMDF_STATUS_OK;
+        };
+    api.memory_query_info = [](amdf_memory_t* handle, amdf_memory_info_t* out) {
+      out->byte_length = reinterpret_cast<Memory*>(handle)->bytes.size();
+      out->native_allocation_byte_length = out->byte_length;
+      out->native_allocation_granularity = 4096;
+      out->alignment = 4096;
+      return AMDF_STATUS_OK;
+    };
+    api.memory_map = [](amdf_memory_t* handle, const amdf_memory_map_info_t*,
+                        amdf_host_mapping_t** out) {
+      *out = reinterpret_cast<amdf_host_mapping_t*>(handle);
+      return AMDF_STATUS_OK;
+    };
+    api.host_mapping_query_info = [](amdf_host_mapping_t* handle,
+                                     amdf_host_mapping_info_t* out) {
+      auto* memory = reinterpret_cast<Memory*>(handle);
+      out->pointer = memory->bytes.data();
+      out->byte_length = memory->bytes.size();
+      out->properties = (AMDF_HOST_MEMORY_PROPERTY_READ_CACHED |
+                         AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK);
+      return AMDF_STATUS_OK;
+    };
+    api.host_mapping_cache_control = [](amdf_host_mapping_t* handle,
+                                        amdf_host_cache_operation_t, uint64_t,
+                                        uint64_t) {
+      auto* self = reinterpret_cast<Memory*>(handle)->owner;
+      self->Pause(Step::kFlush);
+      return self->fail_flush ? amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL)
+                              : AMDF_STATUS_OK;
+    };
+    api.host_mapping_destroy = [](amdf_host_mapping_t*) {
+      return AMDF_STATUS_OK;
+    };
+    api.memory_destroy = [](amdf_memory_t* handle,
+                            amdf_memory_release_info_t* out_release_info) {
+      if (out_release_info) {
+        *out_release_info = {};
+      }
+      auto* memory = reinterpret_cast<Memory*>(handle);
+      for (auto* reservation : memory->owner->reservations) {
+        if (!reservation) {
+          continue;
+        }
+        for (const auto& [offset, installed] : reservation->pages) {
+          EXPECT_NE(installed, memory)
+              << "backing released before alias removal";
+        }
+      }
+      --memory->owner->live_memory;
+      if (memory->released) {
+        *memory->released = true;
+      }
+      delete memory;
+      return AMDF_STATUS_OK;
+    };
+  }
+
+  uint8_t Shadow(uint64_t address) {
+    const uint64_t offset = address >> 3;
+    auto* memory = reservations[1]->pages.at(offset & ~UINT64_C(4095));
+    return memory->bytes[offset & 4095];
+  }
+};
+
+class AsanTest : public ::testing::Test {
+ protected:
+  void Initialize(bool premapped = false) {
+    amdf_memory_scope_t* scopes[] = {
+        reinterpret_cast<amdf_memory_scope_t*>(&native_.local_scope),
+    };
+    IREE_ASSERT_OK(InitializeScopes(premapped, IREE_ARRAYSIZE(scopes), scopes));
+  }
+  iree_status_t InitializeScopes(bool premapped, uint32_t scope_count,
+                                 amdf_memory_scope_t* const* scopes) {
+    iree_hal_amd_fabric_asan_options_t options;
+    iree_hal_amd_fabric_asan_options_initialize(&options);
+    options.shadow_size = 65536;
+    options.shadow_slab_size = 4096;
+    options.owned_application_size = 32768;
+    options.quarantine_size = 8192;
+    if (premapped) {
+      options.shadow_mode = IREE_HAL_AMD_FABRIC_ASAN_SHADOW_MODE_PREMAPPED;
+    }
+    return iree_hal_amd_fabric_asan_initialize(
+        &native_.api, reinterpret_cast<amdf_instance_t*>(&native_),
+        reinterpret_cast<amdf_device_t*>(&native_), kQueueFamilyOrdinal, 0,
+        scope_count, scopes, &options, iree_hal_device_event_sink_stderr(),
+        iree_allocator_system(), &state_);
+  }
+  void TearDown() override {
+    EXPECT_TRUE(iree_hal_amd_fabric_asan_deinitialize(&state_));
+    if (application_backing_) {
+      native_.api.memory_destroy(application_backing_, nullptr);
+    }
+    EXPECT_EQ(native_.live_memory, 0u);
+    for (auto* reservation : native_.reservations) {
+      EXPECT_EQ(reservation, nullptr);
+    }
+  }
+  // Controlled native API dependencies and their backing.
+  Native native_;
+  // Production device-owned sanitizer namespace.
+  iree_hal_amd_fabric_asan_t state_ = {};
+  // Physical test backing, released after all application aliases are removed.
+  amdf_memory_t* application_backing_ = nullptr;
+};
+
+TEST_F(AsanTest, PrefersFirstHostPublishableScope) {
+  amdf_memory_scope_t* scopes[] = {
+      reinterpret_cast<amdf_memory_scope_t*>(&native_.local_scope),
+      reinterpret_cast<amdf_memory_scope_t*>(&native_.system_scope),
+  };
+  IREE_ASSERT_OK(InitializeScopes(true, IREE_ARRAYSIZE(scopes), scopes));
+  EXPECT_EQ(native_.local_scope.allocation_count, 1u);
+  EXPECT_EQ(native_.system_scope.allocation_count, 0u);
+  EXPECT_EQ(native_.Shadow(16), 0xfau);
+}
+
+TEST_F(AsanTest, UnpublishableHostApertureSelectsNextScopeBeforeAllocation) {
+  native_.local_scope.publication_status =
+      amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  amdf_memory_scope_t* scopes[] = {
+      reinterpret_cast<amdf_memory_scope_t*>(&native_.local_scope),
+      reinterpret_cast<amdf_memory_scope_t*>(&native_.system_scope),
+  };
+  IREE_ASSERT_OK(InitializeScopes(true, IREE_ARRAYSIZE(scopes), scopes));
+  EXPECT_EQ(native_.local_scope.allocation_count, 0u);
+  EXPECT_EQ(native_.system_scope.allocation_count, 1u);
+  IREE_ASSERT_OK(
+      iree_hal_amd_fabric_asan_publish_imported_range(&state_, 16, 8));
+  EXPECT_EQ(native_.local_scope.allocation_count, 0u);
+  EXPECT_EQ(native_.system_scope.allocation_count, 2u);
+  EXPECT_EQ(native_.Shadow(16), 0u);
+  EXPECT_EQ(native_.Shadow(8 * 4096 + 16), 0xfau);
+}
+
+TEST_F(AsanTest, DoesNotAllocateOutsideRequestedScopes) {
+  native_.local_scope.publication_status =
+      amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
+  amdf_memory_scope_t* scopes[] = {
+      reinterpret_cast<amdf_memory_scope_t*>(&native_.local_scope),
+  };
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        InitializeScopes(true, IREE_ARRAYSIZE(scopes), scopes));
+  EXPECT_EQ(native_.local_scope.allocation_count, 0u);
+  EXPECT_EQ(native_.system_scope.allocation_count, 0u);
+}
+
+TEST_F(AsanTest, NativeQueryFailureIsNotAnUnsupportedPlacement) {
+  native_.local_scope.publication_status =
+      amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
+  amdf_memory_scope_t* scopes[] = {
+      reinterpret_cast<amdf_memory_scope_t*>(&native_.local_scope),
+      reinterpret_cast<amdf_memory_scope_t*>(&native_.system_scope),
+  };
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
+                        InitializeScopes(true, IREE_ARRAYSIZE(scopes), scopes));
+  EXPECT_EQ(native_.local_scope.allocation_count, 0u);
+  EXPECT_EQ(native_.system_scope.allocation_count, 0u);
+}
+
+// The mock devices own real sanitizer teardown and native backing lifetime.
+// Provider cleanup must finish before either application-held device is freed.
+struct DeviceLifetime {
+  // Resource retained by the mock device until its final release.
+  iree_hal_resource_t resource;
+  // Optional sanitizer namespace owned by this device.
+  iree_hal_amd_fabric_asan_t* asan = nullptr;
+  // Native backing shared by the sanitizer device and its peer.
+  Native* native = nullptr;
+  // Optional shared physical backing that must be released before this device.
+  bool* backing_released = nullptr;
+  // Synchronous final-release witness.
+  uint32_t destruction_count = 0;
+
+  DeviceLifetime(iree_hal_amd_fabric_asan_t* asan, Native* native)
+      : asan(asan), native(native) {
+    static const iree_hal_resource_vtable_t vtable = {
+        .destroy =
+            [](iree_hal_resource_t* resource) {
+              auto* self = reinterpret_cast<DeviceLifetime*>(resource);
+              if (self->asan) {
+                EXPECT_TRUE(iree_hal_amd_fabric_asan_deinitialize(self->asan));
+                EXPECT_EQ(self->native->live_memory, 0u);
+              }
+              if (self->backing_released) {
+                EXPECT_TRUE(*self->backing_released);
+              }
+              ++self->destruction_count;
+            },
+    };
+    iree_hal_resource_initialize(&vtable, &resource);
+  }
+};
+
+class QuarantineLifetimeTest : public AsanTest,
+                               public ::testing::WithParamInterface<uint32_t> {
+};
+
+TEST_P(QuarantineLifetimeTest, ProviderCleanupPrecedesBothBorrowedDevices) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  DeviceLifetime owners[] = {{&state_, &native_}, {nullptr, &native_}};
+  bool backing_released = false;
+  owners[1].backing_released = &backing_released;
+  iree_hal_device_t* devices[2] = {};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(devices); ++i) {
+    iree_hal_mock_device_options_t options;
+    iree_hal_mock_device_options_initialize(&options);
+    options.lifetime_owner = &owners[i].resource;
+    IREE_ASSERT_OK(iree_hal_mock_device_create(
+        &options, iree_allocator_system(), &devices[i]));
+    iree_hal_resource_release(&owners[i].resource);
+  }
+  iree_hal_amd_fabric_allocation_queue_t* queue = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_allocation_queue_create(
+      UINT32_MAX, iree_allocator_system(), &queue));
+  amdf_memory_device_access_t accesses[] = {
+      state_.access,
+      {.device = reinterpret_cast<amdf_device_t*>(uintptr_t{1})},
+  };
+  iree_hal_amd_fabric_slab_provider_options_t options = {
+      .memory = state_.memory,
+      .host_binding_index = IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE,
+      .asan = &state_,
+      .asan_application_mapping = true,
+  };
+  options.memory.access_count = IREE_ARRAYSIZE(accesses);
+  options.memory.accesses = accesses;
+  iree_hal_slab_provider_t* provider = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_slab_provider_create(
+      devices[GetParam() % 2], &native_.api,
+      iree_hal_device_event_sink_stderr(), queue, &options,
+      iree_allocator_system(), &provider));
+
+  iree_hal_slab_t slab = {};
+  IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab_sync(provider, 4096, 4096,
+                                                          &slab, nullptr));
+  native_.reservations[0]->pages.begin()->second->released = &backing_released;
+  const iree_hal_asan_allocation_layout_t layout = {
+      .backing_offset_alignment = 4096,
+      .backing_length_alignment = 4096,
+      .backing_length = 4096,
+  };
+  iree_hal_slab_provider_advise_asan_range(
+      provider, &slab, 0, IREE_HAL_ASAN_RANGE_ADVICE_FLAG_RELEASED, &layout);
+  iree_hal_slab_provider_release_slab_sync(provider, &slab, nullptr);
+  iree_hal_device_asan_observation_t observation;
+  iree_hal_amd_fabric_asan_query_statistics(&state_, &observation);
+  EXPECT_EQ(observation.quarantine_size, 4096u);
+  EXPECT_FALSE(native_.reservations[0]->pages.empty());
+
+  for (auto* device : devices) {
+    EXPECT_EQ(iree_atomic_ref_count_load(
+                  &reinterpret_cast<iree_hal_resource_t*>(device)->ref_count),
+              1);
+  }
+  iree_hal_slab_provider_release(provider);
+  iree_hal_amd_fabric_allocation_queue_drain(queue);
+  EXPECT_TRUE(backing_released);
+  // Either device may be released first once its borrowed backing is gone.
+  iree_hal_device_release(devices[GetParam() / 2]);
+  iree_hal_device_release(devices[1 - GetParam() / 2]);
+  for (auto& owner : owners) {
+    EXPECT_EQ(owner.destruction_count, 1u);
+  }
+  iree_hal_amd_fabric_allocation_queue_release(queue);
+}
+
+INSTANTIATE_TEST_SUITE_P(Placement, QuarantineLifetimeTest,
+                         ::testing::Values(0u, 1u, 2u, 3u));
+
+TEST_F(AsanTest, PreciseShadowPreservesRedzonesAndPartialTailAcrossSlabs) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  constexpr uint64_t kAddress = 32768 - 16;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_range(&state_, kAddress, 64));
+  iree_hal_amd_fabric_asan_advise_range(&state_, kAddress, 64, 8, 19);
+  const uint8_t expected[] = {0xfa, 0, 0, 3, 0xfa, 0xfa, 0xfa, 0xfa};
+  for (size_t i = 0; i < sizeof(expected); ++i) {
+    EXPECT_EQ(native_.Shadow(kAddress + i * 8), expected[i]);
+  }
+  iree_hal_amd_fabric_asan_advise_range(&state_, kAddress, 64, 0, 0);
+  for (uint64_t i = 0; i < 64; i += 8) {
+    EXPECT_EQ(native_.Shadow(kAddress + i), 0xfa);
+  }
+  iree_hal_device_asan_observation_t observation;
+  iree_hal_amd_fabric_asan_query_statistics(&state_, &observation);
+  EXPECT_EQ(observation.shadow_mapped_slab_count, 2u);
+  EXPECT_EQ(observation.shadow_committed_size, 8192u);
+}
+
+class AsanGrowthTest : public AsanTest,
+                       public ::testing::WithParamInterface<Native::Step> {};
+
+TEST_P(AsanGrowthTest, ExistingAdviceAndImportsProgressDuringGrowth) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  // Fill the initial directory so preparing the next slab also expands it.
+  constexpr uint64_t kExistingLength = 8 * 4096 * 8;
+  IREE_ASSERT_OK(
+      iree_hal_amd_fabric_asan_map_range(&state_, 0, kExistingLength));
+  native_.pause_step = GetParam();
+  std::thread grower([&] {
+    IREE_EXPECT_OK(
+        iree_hal_amd_fabric_asan_map_range(&state_, kExistingLength, 4096 * 8));
+  });
+  native_.entered.acquire();
+
+  iree_hal_amd_fabric_asan_advise_range(&state_, 64, 64, 8, 19);
+  EXPECT_EQ(native_.Shadow(64), 0xfau);
+  EXPECT_EQ(native_.Shadow(72), 0u);
+  EXPECT_EQ(native_.Shadow(88), 3u);
+  // Cached map admission must not wait for the growth owner either.
+  IREE_EXPECT_OK(
+      iree_hal_amd_fabric_asan_publish_imported_range(&state_, 89, 5));
+  EXPECT_EQ(native_.Shadow(88), 6u);
+  iree_hal_device_asan_observation_t observation;
+  iree_hal_amd_fabric_asan_query_statistics(&state_, &observation);
+  EXPECT_EQ(observation.shadow_mapped_slab_count, 8u);
+
+  native_.resume.release();
+  grower.join();
+  EXPECT_EQ(native_.live_memory, 9u);
+  EXPECT_EQ(native_.Shadow(kExistingLength), 0xfau);
+}
+
+INSTANTIATE_TEST_SUITE_P(NativeBoundary, AsanGrowthTest,
+                         ::testing::Values(Native::Step::kAllocate,
+                                           Native::Step::kFlush,
+                                           Native::Step::kMap));
+
+TEST_F(AsanTest, ConcurrentCommitAndAdvicePreserveSlabOwnership) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_range(&state_, 0, 4096 * 8));
+  std::barrier<> ready(3);
+  auto commit = [&] {
+    ready.arrive_and_wait();
+    for (uint64_t i = 1; i < 16; ++i) {
+      IREE_EXPECT_OK(
+          iree_hal_amd_fabric_asan_map_range(&state_, i * 4096 * 8, 4096 * 8));
+    }
+  };
+  std::thread first(commit);
+  std::thread second(commit);
+  ready.arrive_and_wait();
+  for (size_t i = 0; i < 128; ++i) {
+    iree_hal_amd_fabric_asan_advise_range(&state_, 64, 64, 8, 19);
+    iree_hal_device_asan_observation_t observation;
+    iree_hal_amd_fabric_asan_query_statistics(&state_, &observation);
+    EXPECT_GE(observation.shadow_mapped_slab_count, 1u);
+    EXPECT_LE(observation.shadow_mapped_slab_count, 16u);
+  }
+  first.join();
+  second.join();
+  EXPECT_EQ(native_.local_scope.allocation_count, 16u);
+  EXPECT_EQ(native_.live_memory, 16u);
+  EXPECT_EQ(native_.Shadow(88), 3u);
+}
+
+TEST_F(AsanTest, FailedGrowthPreservesCommittedBackingAndCanRetry) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_range(&state_, 0, 4096 * 8));
+  native_.fail_allocate = true;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_amd_fabric_asan_map_range(&state_, 4096 * 8, 8));
+  iree_hal_amd_fabric_asan_advise_range(&state_, 64, 64, 8, 19);
+  EXPECT_EQ(native_.Shadow(88), 3u);
+  EXPECT_EQ(native_.live_memory, 1u);
+  native_.fail_allocate = false;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_range(&state_, 4096 * 8, 8));
+  EXPECT_EQ(native_.live_memory, 2u);
+}
+
+TEST_F(AsanTest, PartiallyAcceptedMappingRetainsBackingAndNotifiesAfterUnlock) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  native_.fail_update = true;
+  state_.failure_user_data = &state_;
+  state_.failure_callback = [](void* user_data, iree_status_code_t code) {
+    EXPECT_EQ(code, IREE_STATUS_INTERNAL);
+    auto* state = static_cast<iree_hal_amd_fabric_asan_t*>(user_data);
+    iree_hal_device_asan_observation_t observation;
+    iree_hal_amd_fabric_asan_query_statistics(state, &observation);
+    EXPECT_EQ(observation.shadow_mapped_slab_count, 1u);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
+                          iree_hal_amd_fabric_asan_map_range(state, 0, 8));
+  };
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
+                        iree_hal_amd_fabric_asan_map_range(&state_, 0, 8));
+  EXPECT_EQ(native_.live_memory, 1u);
+  EXPECT_EQ(native_.reservations[1]->pages.size(), 1u);
+  // Teardown verifies backing is released only after reservation removal.
+}
+
+TEST_F(AsanTest, AdviceFailureStopsConcurrentGrowthAdmission) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_range(&state_, 0, 4096 * 8));
+  native_.pause_step = Native::Step::kMap;
+  std::thread grower([&] {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INTERNAL,
+        iree_hal_amd_fabric_asan_map_range(&state_, 4096 * 8, 8));
+  });
+  native_.entered.acquire();
+  native_.fail_flush = true;
+  iree_hal_amd_fabric_asan_advise_range(&state_, 64, 64, 0, 8);
+  native_.resume.release();
+  grower.join();
+  EXPECT_EQ(native_.live_memory, 2u);
+  EXPECT_EQ(native_.reservations[1]->pages.size(), 2u);
+}
+
+TEST_F(AsanTest, ImportedBoundariesWidenWithoutShrinkingAnotherLiveImport) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  IREE_ASSERT_OK(
+      iree_hal_amd_fabric_asan_publish_imported_range(&state_, 67, 11));
+  EXPECT_EQ(native_.Shadow(64), 0u);
+  EXPECT_EQ(native_.Shadow(72), 6u);
+  EXPECT_EQ(native_.Shadow(80), 0xfau);
+  IREE_ASSERT_OK(
+      iree_hal_amd_fabric_asan_publish_imported_range(&state_, 73, 1));
+  EXPECT_EQ(native_.Shadow(72), 6u);
+  IREE_ASSERT_OK(
+      iree_hal_amd_fabric_asan_publish_imported_range(&state_, 77, 3));
+  EXPECT_EQ(native_.Shadow(72), 0u);
+  IREE_ASSERT_OK(
+      iree_hal_amd_fabric_asan_publish_imported_range(&state_, 74, 1));
+  EXPECT_EQ(native_.Shadow(72), 0u);
+}
+
+TEST_F(AsanTest, SparseImportCommitsOnlyCoveredShadowSlab) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  // Both application boundaries coincide with shadow slab boundaries. An
+  // adjacent shadow byte has no backing, rather than a readable poison value.
+  constexpr uint64_t kAddress = 8 * 4096;
+  constexpr uint64_t kLength = 8 * 4096;
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_publish_imported_range(
+      &state_, kAddress, kLength));
+  const auto& pages = native_.reservations[1]->pages;
+  ASSERT_EQ(pages.size(), 1u);
+  EXPECT_EQ(pages.count(0), 0u);
+  EXPECT_EQ(pages.count(4096), 1u);
+  EXPECT_EQ(pages.count(8192), 0u);
+  EXPECT_EQ(native_.Shadow(kAddress), 0u);
+  EXPECT_EQ(native_.Shadow(kAddress + kLength - 1), 0u);
+}
+
+TEST_F(AsanTest, PremappedPoisonAliasesAreReplacedOnlyForCommittedSlabs) {
+  Initialize(true);
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_EQ(native_.live_memory, 1u);
+  EXPECT_EQ(native_.Shadow(0), 0xfau);
+  EXPECT_EQ(native_.Shadow(8 * 65536 - 1), 0xfau);
+  IREE_ASSERT_OK(
+      iree_hal_amd_fabric_asan_publish_imported_range(&state_, 16, 8));
+  EXPECT_EQ(native_.live_memory, 2u);
+  EXPECT_EQ(native_.Shadow(16), 0u);
+  EXPECT_EQ(native_.Shadow(8 * 4096 + 16), 0xfau);
+}
+
+TEST_F(AsanTest, ApplicationAliasesRespectAlignmentAndCoalesceAfterRelease) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  const amdf_memory_create_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(info),
+      .byte_length = 32768,
+  };
+  ASSERT_EQ(native_.api.memory_create(
+                reinterpret_cast<amdf_memory_scope_t*>(&native_.local_scope),
+                &info, &application_backing_, nullptr),
+            AMDF_STATUS_OK);
+  iree_hal_amd_fabric_asan_application_range_t* ranges[3] = {};
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_application(
+      &state_, application_backing_, 0, 4096, 4096, &ranges[0]));
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_application(
+      &state_, application_backing_, 0, 4096, 16384, &ranges[1]));
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_application(
+      &state_, application_backing_, 0, 8192, 4096, &ranges[2]));
+  EXPECT_EQ(ranges[0]->address, 0x10000u);
+  EXPECT_EQ(ranges[1]->address, 0x14000u);
+  EXPECT_EQ(ranges[2]->address, 0x11000u);
+  EXPECT_EQ(native_.reservations[0]->pages.size(), 4u);
+  for (size_t i : {size_t{1}, size_t{0}, size_t{2}}) {
+    EXPECT_TRUE(iree_hal_amd_fabric_asan_unmap_application(&state_, ranges[i]));
+  }
+  EXPECT_TRUE(native_.reservations[0]->pages.empty());
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_application(
+      &state_, application_backing_, 0, 32768, 32768, &ranges[0]));
+  EXPECT_EQ(ranges[0]->address, 0x10000u);
+  EXPECT_EQ(ranges[0]->length, 32768u);
+  EXPECT_TRUE(iree_hal_amd_fabric_asan_unmap_application(&state_, ranges[0]));
+}
+
+TEST_F(AsanTest, QuarantineRetainsFifoUntilPressureAndFinalTeardown) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  iree_hal_amd_fabric_asan_quarantine_entry_t entries[3] = {};
+  std::vector<int> releases;
+  struct Release {
+    // Callback output whose lifetime spans quarantine draining.
+    std::vector<int>* values;
+    // FIFO sequence used to distinguish release callbacks.
+    int value;
+  } contexts[] = {{&releases, 0}, {&releases, 1}, {&releases, 2}};
+  for (size_t i = 0; i < 3; ++i) {
+    iree_hal_amd_fabric_asan_quarantine(
+        &state_, &entries[i], 4096,
+        [](void* user_data) {
+          auto* release = static_cast<Release*>(user_data);
+          release->values->push_back(release->value);
+        },
+        &contexts[i]);
+  }
+  EXPECT_EQ(releases, (std::vector<int>{0}));
+  iree_hal_device_asan_observation_t observation;
+  iree_hal_amd_fabric_asan_query_statistics(&state_, &observation);
+  EXPECT_EQ(observation.quarantine_size, 8192u);
+  EXPECT_EQ(observation.quarantine_eviction_count, 1u);
+  EXPECT_TRUE(iree_hal_amd_fabric_asan_deinitialize(&state_));
+  EXPECT_EQ(releases, (std::vector<int>{0, 1, 2}));
+}
+
+TEST_F(AsanTest, FailedPoisonPublicationLatchesOnceAndStopsAdmission) {
+  Initialize();
+  ASSERT_FALSE(HasFatalFailure());
+  IREE_ASSERT_OK(iree_hal_amd_fabric_asan_map_range(&state_, 64, 64));
+  struct Failure {
+    // State remains usable for accounting during the internal notification.
+    iree_hal_amd_fabric_asan_t* state;
+    // First failure is notified exactly once.
+    uint32_t count = 0;
+  } failure{&state_};
+  state_.failure_user_data = &failure;
+  state_.failure_callback = [](void* user_data, iree_status_code_t code) {
+    EXPECT_EQ(code, IREE_STATUS_INTERNAL);
+    auto* failure = static_cast<Failure*>(user_data);
+    ++failure->count;
+    iree_hal_device_asan_observation_t observation;
+    iree_hal_amd_fabric_asan_query_statistics(failure->state, &observation);
+    EXPECT_EQ(observation.shadow_mapped_slab_count, 1u);
+  };
+  native_.fail_flush = true;
+  iree_hal_amd_fabric_asan_advise_range(&state_, 64, 64, 0, 8);
+  iree_hal_amd_fabric_asan_advise_range(&state_, 64, 64, 0, 0);
+  EXPECT_EQ(failure.count, 1u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
+                        iree_hal_amd_fabric_asan_map_range(&state_, 128, 64));
+}
+
+}  // namespace

@@ -6,7 +6,7 @@
 
 #include "loom/target/abi/task/state_layout.h"
 
-#include "iree/hal/drivers/task/executable/library/abi.h"
+#include "iree/hal/driver/task/executable/library/abi.h"
 
 const loom_task_builtin_info_t loom_task_builtins[LOOM_TASK_BUILTIN_COUNT_] = {
     {IREE_SVL("task.workgroup_id_x"), 2, 0, 4},

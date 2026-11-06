@@ -38,7 +38,7 @@ SUPPORTED_ENABLED_DRIVERS = frozenset(ALL_DRIVERS).difference(("amd",))
 ROCM_DRIVERS = frozenset(("amdgpu",))
 
 NATIVE_DRIVER_FLAG = "--//runtime/config/hal:drivers"
-NATIVE_AMDGPU_TARGETS_FLAG = "--//runtime/src/iree/hal/drivers/amdgpu:targets"
+NATIVE_AMDGPU_TARGETS_FLAG = "--//runtime/src/iree/hal/driver/amdgpu:targets"
 NATIVE_RDMA_FLAG = "--//runtime/config/net:rdma"
 
 _REMOVED_OPTIONS = (

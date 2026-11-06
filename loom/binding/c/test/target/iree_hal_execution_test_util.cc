@@ -13,7 +13,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/numa.h"
-#include "iree/hal/drivers/init.h"
+#include "iree/hal/driver/init.h"
 #include "iree/testing/gtest.h"
 #include "test/util.h"
 

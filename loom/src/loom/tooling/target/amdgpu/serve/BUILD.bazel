@@ -68,7 +68,7 @@ loom_cc_test(
         "//loom/src/loom/tools/loom-serve:activity_tests",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amd/registration",
+        "//runtime/src/iree/hal/driver/amd/registration",
     ],
 )
 
@@ -109,7 +109,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/testing:device",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amd/registration",
+        "//runtime/src/iree/hal/driver/amd/registration",
     ],
     alwayslink = True,
 )

@@ -1,0 +1,52 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load(":defs.bzl", "NATIVE_QUEUE_TEST_PLATFORMS")
+
+package(
+    default_visibility = ["//runtime/src/iree/hal/driver/amd/xdna:__subpackages__"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+iree_runtime_cc_library(
+    name = "allocation_tracker",
+    testonly = True,
+    hdrs = ["allocation_tracker.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "queue_test_util",
+    testonly = True,
+    hdrs = ["queue_test_util.h"],
+    target_compatible_with = NATIVE_QUEUE_TEST_PLATFORMS,
+    deps = [
+        ":allocation_tracker",
+        "//libamdf:headers",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/fabric",
+        "//runtime/src/iree/hal/driver/amd/fabric:buffer",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory_backend",
+        "//runtime/src/iree/hal/driver/amd/xdna:device",
+        "//runtime/src/iree/hal/driver/amd/xdna:memory",
+        "//runtime/src/iree/hal/driver/amd/xdna:queue",
+        "//runtime/src/iree/hal/driver/amd/xdna:queue_frontier",
+        "//runtime/src/iree/hal/driver/amd/xdna:semaphore",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testing:image_fixture",
+        "//runtime/src/iree/hal/memory:slab_cache",
+        "//runtime/src/iree/hal/memory:tlsf_pool",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

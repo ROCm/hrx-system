@@ -2165,8 +2165,8 @@ class BuildFileFunctions(
 
     def _convert_amdgpu_target_selectors_block(self, target_selectors_flag):
         variables = {
-            "//runtime/src/iree/hal/drivers/amdgpu:targets": "IREE_HAL_AMDGPU_TARGETS",
-            "//runtime/src/iree/hal/drivers/amd/gpu:targets": "IREE_HAL_AMD_GPU_TARGETS",
+            "//runtime/src/iree/hal/driver/amdgpu:targets": "IREE_HAL_AMDGPU_TARGETS",
+            "//runtime/src/iree/hal/driver/amd/gpu:targets": "IREE_HAL_AMD_GPU_TARGETS",
         }
         if target_selectors_flag not in variables:
             raise NotImplementedError(

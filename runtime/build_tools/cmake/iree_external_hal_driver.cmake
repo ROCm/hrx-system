@@ -154,7 +154,7 @@ function(iree_hal_driver_registry)
 
   # Generate the external registry implementation even when it is empty. This
   # gives init.c one invariant across build systems and configurations.
-  set(_INIT_EXTERNAL_C_TPL "${IREE_SOURCE_DIR}/runtime/src/iree/hal/drivers/init_external.c.in")
+  set(_INIT_EXTERNAL_C_TPL "${IREE_SOURCE_DIR}/runtime/src/iree/hal/driver/init_external.c.in")
   set(_INIT_EXTERNAL_C_SRC "${_PACKAGE_BINARY_DIR}/${_RULE_NAME}.c")
   set(_INIT_EXTERNAL_DEPS)
   set(_INIT_EXTERNAL_REGISTER_INCLUDES)
@@ -178,7 +178,7 @@ function(iree_hal_driver_registry)
   configure_file("${_INIT_EXTERNAL_C_TPL}" "${_INIT_EXTERNAL_C_SRC}")
 
   iree_cc_library(NAME "${_RULE_NAME}" SRCS "${_INIT_EXTERNAL_C_SRC}"
-    DEPS iree::hal::drivers::external_registry_api ${_INIT_EXTERNAL_DEPS} PUBLIC)
+    DEPS iree::hal::driver::external_registry_api ${_INIT_EXTERNAL_DEPS} PUBLIC)
 endfunction()
 
 function(iree_configure_external_hal_drivers)
@@ -186,7 +186,7 @@ function(iree_configure_external_hal_drivers)
     iree_hal_driver_registry(NAME configured_external_driver_registry
       DRIVERS ${IREE_EXTERNAL_HAL_DRIVERS})
   else()
-    iree_add_alias_library(iree::hal::drivers::configured_external_driver_registry
-      iree_hal_drivers_empty_external_driver_registry)
+    iree_add_alias_library(iree::hal::driver::configured_external_driver_registry
+      iree_hal_driver_empty_external_driver_registry)
   endif()
 endfunction()

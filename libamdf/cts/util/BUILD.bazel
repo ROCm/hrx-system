@@ -43,7 +43,7 @@ amdf_cc_library(
     hdrs = ["native_identity.h"],
     visibility = [
         "//libamdf/cts:__subpackages__",
-        "//runtime/src/iree/hal/drivers/amd/gpu/cts:__pkg__",
+        "//runtime/src/iree/hal/driver/amd/gpu/cts:__pkg__",
     ],
 )
 

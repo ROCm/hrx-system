@@ -543,8 +543,8 @@ class CiTest(unittest.TestCase):
         self.assertNotIn("dev.py bazel build ", text)
         self.assertIn("dev.py bazel test ", text)
         self.assertIn(" -- //runtime/...", text)
-        self.assertIn("-//runtime/src/iree/hal/drivers/amdgpu/...", text)
-        self.assertIn("-//runtime/src/iree/hal/drivers/vulkan/...", text)
+        self.assertIn("-//runtime/src/iree/hal/driver/amdgpu/...", text)
+        self.assertIn("-//runtime/src/iree/hal/driver/vulkan/...", text)
         self.assertIn(
             "--test_tag_filters=" + ",".join(ci_config.CPU_RESOURCE_TAG_EXCLUDES),
             text,
@@ -959,7 +959,7 @@ class CiTest(unittest.TestCase):
         self.assertEqual(build.argv[2:4], ("bazel", "build"))
         self.assertIn("//...", build.argv)
         self.assertIn(
-            "--//runtime/src/iree/hal/drivers/amdgpu:targets=gfx11-generic",
+            "--//runtime/src/iree/hal/driver/amdgpu:targets=gfx11-generic",
             build.argv,
         )
 
@@ -1113,7 +1113,7 @@ class CiTest(unittest.TestCase):
                 )
                 test_step = next(step for step in steps if "test" in step.argv)
                 self.assertIn(
-                    "--//runtime/src/iree/hal/drivers/amd/gpu:targets=selected-hardware",
+                    "--//runtime/src/iree/hal/driver/amd/gpu:targets=selected-hardware",
                     test_step.argv,
                 )
                 self.assertIn(
@@ -1547,7 +1547,7 @@ class CiTest(unittest.TestCase):
             self.assertIn(target, test_step.argv)
         self.assertFalse(
             any(
-                arg.startswith("-//runtime/src/iree/hal/drivers/vulkan")
+                arg.startswith("-//runtime/src/iree/hal/driver/vulkan")
                 for arg in test_step.argv
             )
         )

@@ -1,0 +1,90 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef IREE_HAL_DRIVER_VULKAN_SLAB_PROVIDER_H_
+#define IREE_HAL_DRIVER_VULKAN_SLAB_PROVIDER_H_
+
+#include "iree/base/api.h"
+#include "iree/hal/atomic.h"
+#include "iree/hal/driver/vulkan/allocator.h"
+#include "iree/hal/memory/slab_provider.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
+
+//===----------------------------------------------------------------------===//
+// iree_hal_vulkan_slab_provider_t
+//===----------------------------------------------------------------------===//
+
+// Creation options for a Vulkan slab provider bound to one VkMemoryType.
+typedef struct iree_hal_vulkan_slab_provider_options_t {
+  // Parent HAL device, borrowed through public pool use and native teardown.
+  iree_hal_device_t* parent_device;
+
+  // Native allocation domain, retained independently of the parent device.
+  iree_hal_vulkan_allocation_queue_t* allocation_queue;
+
+  // Device-level Vulkan dispatch table copied from the logical device.
+  const iree_hal_vulkan_device_syms_t* syms;
+
+  // Vulkan logical device that owns slabs from this provider.
+  VkDevice logical_device;
+
+  // Vulkan memory type index used for whole-slab allocations.
+  uint32_t memory_type_index;
+
+  // Physical capacity of the selected Vulkan heap in bytes; zero if unknown.
+  uint64_t physical_capacity;
+
+  // Prequalified Vulkan memory types usable for external host attachments.
+  // Zero when the provider does not admit host-pointer imports.
+  uint32_t import_memory_type_bits;
+
+  // HAL memory type exposed by slabs from this provider.
+  iree_hal_memory_type_t memory_type;
+
+  // HAL buffer usage bits supported by slabs from this provider.
+  iree_hal_buffer_usage_t supported_usage;
+
+  // Atomic operations supported by naturally aligned slab locations.
+  iree_hal_atomic_operation_capabilities_t atomic_operations;
+
+  // Queue families that may access buffers materialized from this provider.
+  iree_hal_queue_family_affinity_t queue_family_affinity_mask;
+
+  // Required whole-allocation alignment captured from native requirements.
+  iree_device_size_t min_alignment;
+
+  // Sparse source alignment, or zero when the pool does not prepare mappings.
+  iree_device_size_t mapping_granularity;
+
+  // Physical-device nonCoherentAtomSize used for mapped-memory ranges.
+  VkDeviceSize non_coherent_atom_size;
+} iree_hal_vulkan_slab_provider_options_t;
+
+// Creates a slab provider that acquires whole Vulkan buffers.
+//
+// The provider retains its allocation queue. The parent device outlives public
+// pool use and joins all native batches during teardown before releasing the
+// borrowed |allocator| and Vulkan context. Buffers borrow their source pool
+// throughout their caller-owned allocation epoch.
+iree_status_t iree_hal_vulkan_slab_provider_create(
+    iree_hal_vulkan_allocator_t* allocator,
+    iree_hal_vulkan_slab_provider_options_t options,
+    iree_allocator_t host_allocator, iree_hal_slab_provider_t** out_provider);
+
+// Executes a ready batch on the owning native allocation queue. No dependency
+// wait or application work enters this boundary; completion may release the
+// caller-owned descriptor and the source pool.
+void iree_hal_vulkan_slab_provider_execute(
+    iree_hal_slab_operation_t* operation);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif  // __cplusplus
+
+#endif  // IREE_HAL_DRIVER_VULKAN_SLAB_PROVIDER_H_

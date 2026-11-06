@@ -12,7 +12,7 @@
 #include <string>
 
 #include "iree/base/internal/arena.h"
-#include "iree/hal/drivers/amd/gpu/image/hsaco_metadata.h"
+#include "iree/hal/driver/amd/gpu/image/hsaco_metadata.h"
 #include "iree/io/vec_stream.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"

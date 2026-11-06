@@ -18,7 +18,7 @@
 #include "iree/hal/api.h"
 #include "iree/hal/cts/util/registry.h"
 #include "iree/hal/cts/util/test_base.h"
-#include "iree/hal/drivers/amd/driver.h"
+#include "iree/hal/driver/amd/driver.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 

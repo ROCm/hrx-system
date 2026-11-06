@@ -385,7 +385,7 @@ loom_library(
             functions = runtime_project.build_file_functions(
                 converter=converter,
                 targets=bazel_to_cmake_targets.TargetConverter(repo_map={"@hrx": ""}),
-                build_dir=str(REPO_ROOT / "runtime/src/iree/hal/drivers/amd/gpu/cts"),
+                build_dir=str(REPO_ROOT / "runtime/src/iree/hal/driver/amd/gpu/cts"),
                 repo_root=str(REPO_ROOT),
                 condition_mappings=self.project.condition_mappings,
             )

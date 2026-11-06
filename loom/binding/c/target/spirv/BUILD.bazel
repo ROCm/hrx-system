@@ -93,7 +93,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/spirv:features",
         "//loom/src/loom/target/arch/spirv:profile",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/vulkan:device_spec",
+        "//runtime/src/iree/hal/driver/vulkan:device_spec",
     ],
     alwayslink = True,
 )

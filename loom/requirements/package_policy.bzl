@@ -40,7 +40,7 @@ load(
 PACKAGE_POLICIES = [
     package_policy(
         packages = ["loom/..."],
-        forbidden_deps = ["//runtime/src/iree/hal/drivers/amdgpu/..."],
+        forbidden_deps = ["//runtime/src/iree/hal/driver/amdgpu/..."],
     ),
     package_policy(
         packages = ["loom/src/loom/runtime/..."],

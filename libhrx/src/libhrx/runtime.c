@@ -15,16 +15,16 @@
 #include "hrx_internal.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
-#include "iree/hal/drivers/task/driver.h"
+#include "iree/hal/driver/task/driver.h"
 #include "iree/hal/utils/profile_file.h"
 #include "iree/io/file_handle.h"
 #include "iree/task/api.h"
 
 #ifdef HRX_HAS_IREE_AMD_GPU_DRIVER
-#include "iree/hal/drivers/amd/registration/driver_module.h"
+#include "iree/hal/driver/amd/registration/driver_module.h"
 #endif
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
-#include "iree/hal/drivers/amdgpu/registration/driver_module.h"
+#include "iree/hal/driver/amdgpu/registration/driver_module.h"
 #endif
 
 //===----------------------------------------------------------------------===//

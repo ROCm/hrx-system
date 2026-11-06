@@ -4,7 +4,7 @@
 #ifndef HRX_CTS_CORE_AMDGPU_HIP_COOPERATIVE_TEST_DATA_HPP_
 #define HRX_CTS_CORE_AMDGPU_HIP_COOPERATIVE_TEST_DATA_HPP_
 
-#include "iree/hal/drivers/amd/gpu/image/cooperative_images.h"
+#include "iree/hal/driver/amd/gpu/image/cooperative_images.h"
 #include "libhrx/cts/core/amdgpu_test_data.hpp"
 
 namespace hrx_cts {

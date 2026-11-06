@@ -1,0 +1,576 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "iree/hal/driver/amd/fabric/transient_buffer.h"
+
+#include "iree/base/threading/mutex.h"
+
+typedef enum iree_hal_amd_fabric_transient_buffer_deallocation_state_e {
+  IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE = 0,
+  IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING = 1,
+  IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_COMPLETE = 2,
+} iree_hal_amd_fabric_transient_buffer_deallocation_state_t;
+
+// Vtable dispatch for forwarding to the committed buffer's implementation.
+// Equivalent to IREE_HAL_VTABLE_DISPATCH from detail.h but accessible from
+// this driver-private implementation (detail.h is module-private to HAL core).
+static inline const iree_hal_buffer_vtable_t*
+iree_hal_amd_fabric_transient_buffer_committed_vtable(
+    iree_hal_buffer_t* buffer) {
+  return (const iree_hal_buffer_vtable_t*)((const iree_hal_resource_t*)buffer)
+      ->vtable;
+}
+
+struct iree_hal_amd_fabric_transient_buffer_t {
+  // Base HAL buffer resource exposed to callers.
+  iree_hal_buffer_t base;
+
+  // Chunk containing this independently owned slot; dominated by |device|.
+  iree_hal_amd_fabric_transient_buffer_chunk_t* storage;
+
+  // Stable nonzero id used to join profile rows for this wrapper lifetime.
+  uint64_t profile_id;
+
+  // Guards all backing commitment and reservation state.
+  iree_slim_mutex_t mutex;
+
+  // Prepared view staged for commitment. Owns its buffer reference and reuse
+  // history until decommit, independently of logical reservation return.
+  iree_hal_pool_reservation_view_t backing;
+
+  // True after |backing| has been staged and until decommit.
+  bool backing_staged;
+
+  // True after commitment publishes |backing| to accessors.
+  bool backing_committed;
+
+  // Borrowed pool selected for this logical allocation epoch.
+  iree_hal_pool_t* source_pool;
+
+  // Optional queue-allocation reservation owned by this wrapper while armed.
+  iree_hal_pool_reservation_t reservation;
+
+  // True while the wrapper owns |reservation|.
+  bool reservation_armed;
+
+  // State controlling exclusive queue deallocation capture.
+  iree_hal_amd_fabric_transient_buffer_deallocation_state_t deallocation_state;
+
+  // Source-sized native table shared by subspans made before commitment. The
+  // caller orders native reads after commit and before decommit. Trailing
+  // native facts borrow the retained backing's allocation epoch.
+  iree_hal_buffer_native_binding_t bindings[];
+};
+
+static const iree_hal_buffer_vtable_t
+    iree_hal_amd_fabric_transient_buffer_vtable;
+
+static iree_hal_amd_fabric_transient_buffer_t*
+iree_hal_amd_fabric_transient_buffer_cast(iree_hal_buffer_t* buffer) {
+  return (iree_hal_amd_fabric_transient_buffer_t*)buffer;
+}
+
+static const iree_hal_buffer_binding_layout_t*
+iree_hal_amd_fabric_transient_buffer_binding_layout(
+    const iree_hal_pool_t* pool) {
+  return pool->memory_contract ? &pool->memory_contract->binding_layout
+                               : iree_hal_heap_buffer_binding_layout();
+}
+
+static iree_status_t iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+    iree_hal_amd_fabric_transient_buffer_t* buffer,
+    iree_hal_pool_reservation_view_t* out_backing) {
+  iree_slim_mutex_lock(&buffer->mutex);
+  if (IREE_UNLIKELY(!buffer->backing_committed)) {
+    iree_slim_mutex_unlock(&buffer->mutex);
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "transient buffer has not been committed; ensure the alloca signal "
+        "semaphores are satisfied before accessing it");
+  }
+  *out_backing = buffer->backing;
+  iree_hal_buffer_retain(out_backing->buffer);
+  iree_slim_mutex_unlock(&buffer->mutex);
+  return iree_ok_status();
+}
+
+static void iree_hal_amd_fabric_transient_buffer_initialize(
+    iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
+    iree_hal_memory_access_t allowed_access,
+    iree_hal_buffer_usage_t allowed_usage, iree_device_size_t allocation_size,
+    iree_hal_pool_t* source_pool,
+    const iree_hal_buffer_binding_layout_t* binding_layout,
+    iree_hal_amd_fabric_transient_buffer_chunk_t* storage,
+    iree_hal_amd_fabric_transient_buffer_t* buffer) {
+  iree_hal_buffer_initialize(
+      placement, /*allocated_buffer=*/&buffer->base, allocation_size,
+      /*byte_offset=*/0, allocation_size, memory_type, allowed_access,
+      allowed_usage, &iree_hal_amd_fabric_transient_buffer_vtable,
+      &buffer->base);
+  buffer->base.memory.bindings = buffer->bindings;
+  buffer->base.memory.contract = source_pool->memory_contract;
+  buffer->base.host_binding_index = binding_layout->host_binding_index;
+  memset(buffer->bindings, 0, binding_layout->byte_length);
+  buffer->storage = storage;
+  buffer->profile_id = iree_hal_buffer_allocation_next_id();
+  iree_slim_mutex_initialize(&buffer->mutex);
+  memset(&buffer->backing, 0, sizeof(buffer->backing));
+  buffer->backing_staged = false;
+  buffer->backing_committed = false;
+  buffer->source_pool = source_pool;
+  memset(&buffer->reservation, 0, sizeof(buffer->reservation));
+  buffer->reservation_armed = false;
+  buffer->deallocation_state =
+      IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE;
+}
+
+iree_status_t iree_hal_amd_fabric_transient_buffer_create_batch(
+    iree_hal_buffer_placement_t placement, iree_hal_memory_type_t memory_type,
+    iree_hal_memory_access_t allowed_access,
+    iree_hal_buffer_usage_t allowed_usage, iree_hal_pool_t* source_pool,
+    iree_hal_amd_fabric_transient_buffer_pool_t* buffer_pool,
+    iree_host_size_t count, const iree_hal_pool_reservation_request_t* requests,
+    iree_hal_buffer_t** out_buffers) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  const iree_hal_buffer_binding_layout_t* binding_layout =
+      iree_hal_amd_fabric_transient_buffer_binding_layout(source_pool);
+  // The slot's rounding slack holds copied queue history when it fits. Larger
+  // histories use independent slots without inflating every root's storage.
+  iree_host_size_t storage_size = 0;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, IREE_STRUCT_LAYOUT(
+              sizeof(iree_hal_amd_fabric_transient_buffer_t), &storage_size,
+              IREE_STRUCT_FIELD_FAM(binding_layout->byte_length, uint8_t)));
+  iree_status_t status = iree_ok_status();
+  iree_host_size_t created = 0;
+  while (created < count && iree_status_is_ok(status)) {
+    iree_hal_amd_fabric_transient_buffer_slots_t slots;
+    status = iree_hal_amd_fabric_transient_buffer_pool_acquire(
+        buffer_pool, storage_size, count - created, &slots);
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < slots.count; ++i) {
+        iree_hal_amd_fabric_transient_buffer_t* buffer =
+            (void*)(slots.data + i * slots.stride);
+        iree_hal_amd_fabric_transient_buffer_initialize(
+            placement, memory_type, allowed_access, allowed_usage,
+            requests[created + i].allocation_size, source_pool, binding_layout,
+            slots.chunk, buffer);
+        out_buffers[created + i] = &buffer->base;
+      }
+      created += slots.count;
+    }
+  }
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static iree_hal_buffer_allocation_profile_t
+iree_hal_amd_fabric_transient_buffer_allocation_profile(
+    iree_hal_buffer_t* base_buffer) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  return (iree_hal_buffer_allocation_profile_t){
+      .id = buffer->profile_id,
+  };
+}
+
+void iree_hal_amd_fabric_transient_buffer_attach_reservation(
+    iree_hal_buffer_t* base_buffer, iree_hal_pool_t* pool,
+    const iree_hal_pool_reservation_t* reservation) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  IREE_ASSERT_ARGUMENT(pool);
+  IREE_ASSERT_ARGUMENT(reservation);
+  iree_slim_mutex_lock(&buffer->mutex);
+  IREE_ASSERT_TRUE(buffer->source_pool == pool);
+  IREE_ASSERT_FALSE(buffer->reservation_armed);
+  buffer->reservation = *reservation;
+  buffer->reservation_armed = true;
+  iree_slim_mutex_unlock(&buffer->mutex);
+}
+
+// Uses the slot's unused tail for history. Native table size and dependency
+// count are independent; overflow history owns a separate metadata slot.
+static uint8_t* iree_hal_amd_fabric_transient_buffer_history_storage(
+    iree_hal_amd_fabric_transient_buffer_t* buffer,
+    iree_host_size_t* out_capacity) {
+  const iree_host_size_t offset = iree_host_align(
+      sizeof(*buffer) + iree_hal_amd_fabric_transient_buffer_binding_layout(
+                            buffer->source_pool)
+                            ->byte_length,
+      iree_alignof(iree_async_frontier_t));
+  *out_capacity =
+      iree_hal_amd_fabric_transient_buffer_slot_capacity(buffer->storage) -
+      offset;
+  return *out_capacity ? (uint8_t*)buffer + offset : NULL;
+}
+
+typedef struct iree_hal_amd_fabric_transient_buffer_history_t {
+  // Chunk owning this history independently of the root's storage slot.
+  iree_hal_amd_fabric_transient_buffer_chunk_t* storage;
+  // Properly aligned frontier header followed by its exact entry count.
+  iree_alignas(IREE_ASYNC_FRONTIER_ALIGNMENT) uint8_t data[];
+} iree_hal_amd_fabric_transient_buffer_history_t;
+
+iree_status_t iree_hal_amd_fabric_transient_buffer_stage_backing(
+    iree_hal_buffer_t* base_buffer,
+    const iree_hal_pool_reservation_view_t* backing) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  iree_async_frontier_t* history = NULL;
+  if (backing->memory.reuse_frontier) {
+    const iree_async_frontier_t* source = backing->memory.reuse_frontier;
+    const iree_host_size_t length =
+        sizeof(*source) + source->entry_count * sizeof(source->entries[0]);
+    iree_host_size_t capacity = 0;
+    history = (void*)iree_hal_amd_fabric_transient_buffer_history_storage(
+        buffer, &capacity);
+    if (length > capacity) {
+      iree_hal_amd_fabric_transient_buffer_slots_t slots;
+      IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_pool_acquire(
+          iree_hal_amd_fabric_transient_buffer_slot_pool(buffer->storage),
+          sizeof(iree_hal_amd_fabric_transient_buffer_history_t) + length, 1,
+          &slots));
+      iree_hal_amd_fabric_transient_buffer_history_t* owner = (void*)slots.data;
+      owner->storage = slots.chunk;
+      history = (void*)owner->data;
+    }
+    memcpy(history, source, length);
+  }
+  iree_slim_mutex_lock(&buffer->mutex);
+  IREE_ASSERT_FALSE(buffer->backing_staged);
+  IREE_ASSERT_FALSE(buffer->backing_committed);
+  iree_hal_buffer_retain(backing->buffer);
+  buffer->backing = *backing;
+  buffer->backing.memory.reuse_frontier = history;
+  buffer->backing_staged = true;
+  iree_slim_mutex_unlock(&buffer->mutex);
+  return iree_ok_status();
+}
+
+void iree_hal_amd_fabric_transient_buffer_commit(
+    iree_hal_buffer_t* base_buffer) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  iree_slim_mutex_lock(&buffer->mutex);
+  IREE_ASSERT_TRUE(buffer->backing_staged);
+  IREE_ASSERT_FALSE(buffer->backing_committed);
+  if (buffer->source_pool->memory_contract) {
+    iree_hal_buffer_memory_copy_bindings(
+        &buffer->backing.memory,
+        &buffer->source_pool->memory_contract->binding_layout,
+        buffer->bindings);
+  } else {
+    // Unscoped materialization qualifies only host access, whose slot may
+    // differ from the transient wrapper's single host representation.
+    buffer->bindings[0] = iree_hal_buffer_memory_native_binding(
+        &buffer->backing.memory,
+        (iree_hal_buffer_native_binding_slot_t){
+            .index = buffer->backing.buffer->host_binding_index,
+            .type = IREE_HAL_BUFFER_INTERFACE_HOST,
+        });
+  }
+  buffer->backing_committed = true;
+  iree_slim_mutex_unlock(&buffer->mutex);
+}
+
+static void iree_hal_amd_fabric_transient_buffer_decommit(
+    iree_hal_buffer_t* base_buffer) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  iree_slim_mutex_lock(&buffer->mutex);
+  iree_hal_buffer_t* backing_buffer = buffer->backing.buffer;
+  const iree_async_frontier_t* history = buffer->backing.memory.reuse_frontier;
+  memset(&buffer->backing, 0, sizeof(buffer->backing));
+  buffer->backing_staged = false;
+  buffer->backing_committed = false;
+  memset(
+      buffer->bindings, 0,
+      iree_hal_amd_fabric_transient_buffer_binding_layout(buffer->source_pool)
+          ->byte_length);
+  iree_slim_mutex_unlock(&buffer->mutex);
+  iree_host_size_t capacity = 0;
+  if (history && (const void*)history !=
+                     iree_hal_amd_fabric_transient_buffer_history_storage(
+                         buffer, &capacity)) {
+    iree_hal_amd_fabric_transient_buffer_history_t* owner =
+        (void*)((uint8_t*)history -
+                offsetof(iree_hal_amd_fabric_transient_buffer_history_t, data));
+    iree_hal_amd_fabric_transient_buffer_pool_release(owner->storage, owner);
+  }
+  iree_hal_buffer_release(backing_buffer);
+}
+
+static iree_status_t iree_hal_amd_fabric_transient_buffer_begin_dealloca(
+    iree_hal_buffer_t* base_buffer, iree_hal_pool_t** out_pool) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  iree_slim_mutex_lock(&buffer->mutex);
+  iree_status_t status = iree_ok_status();
+  if (buffer->deallocation_state !=
+      IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "transient buffer has already been queued for deallocation");
+  } else {
+    buffer->deallocation_state =
+        IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING;
+    *out_pool = buffer->source_pool;
+  }
+  iree_slim_mutex_unlock(&buffer->mutex);
+  return status;
+}
+
+static void iree_hal_amd_fabric_transient_buffer_abort_dealloca(
+    iree_hal_buffer_t* base_buffer) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  iree_slim_mutex_lock(&buffer->mutex);
+  if (buffer->deallocation_state ==
+      IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING) {
+    buffer->deallocation_state =
+        IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_IDLE;
+  }
+  iree_slim_mutex_unlock(&buffer->mutex);
+}
+
+static void iree_hal_amd_fabric_transient_buffer_take_dealloca_reservation(
+    iree_hal_buffer_t* base_buffer, iree_hal_pool_t** out_pool,
+    iree_hal_pool_reservation_t* out_reservation) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  iree_slim_mutex_lock(&buffer->mutex);
+  IREE_ASSERT_TRUE(
+      buffer->deallocation_state ==
+      IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_PENDING);
+  IREE_ASSERT_TRUE(buffer->reservation_armed);
+  *out_pool = buffer->source_pool;
+  *out_reservation = buffer->reservation;
+  memset(&buffer->reservation, 0, sizeof(buffer->reservation));
+  buffer->reservation_armed = false;
+  buffer->deallocation_state =
+      IREE_HAL_AMD_FABRIC_TRANSIENT_BUFFER_DEALLOCATION_STATE_COMPLETE;
+  iree_slim_mutex_unlock(&buffer->mutex);
+}
+
+// Releases an attached reservation exactly once. A wrapper destroyed before
+// explicit queue deallocation has no later device use because every submitted
+// operation retains it through terminal completion.
+static void iree_hal_amd_fabric_transient_buffer_release_reservation(
+    iree_hal_buffer_t* base_buffer,
+    const iree_async_frontier_t* death_frontier) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  iree_hal_pool_t* pool = NULL;
+  iree_hal_pool_reservation_t reservation;
+  iree_slim_mutex_lock(&buffer->mutex);
+  const bool had_reservation = buffer->reservation_armed;
+  if (had_reservation) {
+    pool = buffer->source_pool;
+    reservation = buffer->reservation;
+    memset(&buffer->reservation, 0, sizeof(buffer->reservation));
+    buffer->reservation_armed = false;
+  }
+  iree_slim_mutex_unlock(&buffer->mutex);
+  if (had_reservation) {
+    if (!death_frontier || death_frontier->entry_count == 0) {
+      iree_hal_pool_advise_asan_reservations(
+          pool, 1, &reservation, IREE_HAL_ASAN_RANGE_ADVICE_FLAG_RELEASED);
+    }
+    iree_hal_pool_release_reservations(pool, 1, &reservation, death_frontier);
+  }
+}
+
+static void iree_hal_amd_fabric_transient_buffer_destroy(
+    iree_hal_buffer_t* base_buffer) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_chunk_t* storage = buffer->storage;
+  IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_hal_amd_fabric_transient_buffer_decommit(base_buffer);
+  iree_hal_amd_fabric_transient_buffer_release_reservation(
+      base_buffer,
+      /*death_frontier=*/NULL);
+
+  iree_slim_mutex_deinitialize(&buffer->mutex);
+  iree_hal_amd_fabric_transient_buffer_pool_release(storage, buffer);
+  IREE_TRACE_ZONE_END(z0);
+}
+
+static iree_status_t iree_hal_amd_fabric_transient_buffer_export_range(
+    iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
+    iree_device_size_t local_byte_length,
+    iree_hal_external_storage_class_t requested_class,
+    iree_hal_external_storage_t* out_storage,
+    iree_hal_buffer_range_t* out_logical_range) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  iree_hal_pool_reservation_view_t backing;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+      buffer, &backing));
+  iree_status_t status =
+      iree_hal_amd_fabric_transient_buffer_committed_vtable(backing.buffer)
+          ->export_range(backing.buffer,
+                         backing.byte_offset + local_byte_offset,
+                         local_byte_length, requested_class, out_storage,
+                         out_logical_range);
+  iree_hal_buffer_release(backing.buffer);
+  return status;
+}
+
+static iree_status_t iree_hal_amd_fabric_transient_buffer_map_range(
+    iree_hal_buffer_t* base_buffer, iree_hal_mapping_mode_t mapping_mode,
+    iree_hal_memory_access_t memory_access, iree_hal_buffer_map_flags_t flags,
+    iree_device_size_t local_byte_offset, iree_device_size_t local_byte_length,
+    iree_hal_buffer_mapping_t* mapping) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  iree_hal_pool_reservation_view_t backing;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+      buffer, &backing));
+  iree_status_t status =
+      iree_hal_amd_fabric_transient_buffer_committed_vtable(backing.buffer)
+          ->map_range(backing.buffer, mapping_mode, memory_access, flags,
+                      backing.byte_offset + local_byte_offset,
+                      local_byte_length, mapping);
+  if (iree_status_is_ok(status)) {
+    if (mapping->impl.is_persistent) {
+      iree_hal_buffer_release(backing.buffer);
+    } else {
+      iree_hal_buffer_t* mapped_buffer = mapping->buffer;
+      // Scoped maps own their mapped storage until unmap. Transfer that mapping
+      // ownership from the transient wrapper to the committed backing buffer so
+      // a queue-ordered decommit cannot invalidate the unmap path.
+      mapping->buffer = backing.buffer;
+      mapping->impl.byte_offset = backing.byte_offset + local_byte_offset;
+      iree_hal_buffer_release(mapped_buffer);
+    }
+  } else {
+    iree_hal_buffer_release(backing.buffer);
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_amd_fabric_transient_buffer_unmap_range(
+    iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
+    iree_device_size_t local_byte_length, iree_hal_buffer_mapping_t* mapping) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  iree_hal_pool_reservation_view_t backing;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+      buffer, &backing));
+  iree_status_t status =
+      iree_hal_amd_fabric_transient_buffer_committed_vtable(backing.buffer)
+          ->unmap_range(backing.buffer, backing.byte_offset + local_byte_offset,
+                        local_byte_length, mapping);
+  iree_hal_buffer_release(backing.buffer);
+  return status;
+}
+
+static iree_status_t iree_hal_amd_fabric_transient_buffer_invalidate_range(
+    iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
+    iree_device_size_t local_byte_length) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  iree_hal_pool_reservation_view_t backing;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+      buffer, &backing));
+  iree_status_t status =
+      iree_hal_amd_fabric_transient_buffer_committed_vtable(backing.buffer)
+          ->invalidate_range(backing.buffer,
+                             backing.byte_offset + local_byte_offset,
+                             local_byte_length);
+  iree_hal_buffer_release(backing.buffer);
+  return status;
+}
+
+static iree_status_t iree_hal_amd_fabric_transient_buffer_flush_range(
+    iree_hal_buffer_t* base_buffer, iree_device_size_t local_byte_offset,
+    iree_device_size_t local_byte_length) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      iree_hal_amd_fabric_transient_buffer_cast(base_buffer);
+  iree_hal_pool_reservation_view_t backing;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+      buffer, &backing));
+  iree_status_t status =
+      iree_hal_amd_fabric_transient_buffer_committed_vtable(backing.buffer)
+          ->flush_range(backing.buffer, backing.byte_offset + local_byte_offset,
+                        local_byte_length);
+  iree_hal_buffer_release(backing.buffer);
+  return status;
+}
+
+static iree_hal_buffer_memory_view_t
+iree_hal_amd_fabric_transient_buffer_query_memory(
+    const iree_hal_buffer_t* base_buffer) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      (iree_hal_amd_fabric_transient_buffer_t*)base_buffer;
+  iree_hal_buffer_memory_view_t view = buffer->base.memory;
+  iree_slim_mutex_lock(&buffer->mutex);
+  if (buffer->backing_committed) {
+    view = buffer->backing.memory;
+    view.bindings = buffer->base.memory.bindings;
+    view.binding_offset = 0;
+  }
+  iree_slim_mutex_unlock(&buffer->mutex);
+  return view;
+}
+
+static iree_hal_virtual_buffer_view_t
+iree_hal_amd_fabric_transient_buffer_query_virtual(
+    const iree_hal_buffer_t* base_buffer) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      (iree_hal_amd_fabric_transient_buffer_t*)base_buffer;
+  iree_hal_virtual_buffer_view_t view = {0};
+  iree_slim_mutex_lock(&buffer->mutex);
+  if (buffer->backing_committed) {
+    view = iree_hal_buffer_virtual_view(buffer->backing.buffer);
+    view.byte_offset += buffer->backing.byte_offset -
+                        iree_hal_buffer_byte_offset(buffer->backing.buffer);
+  }
+  iree_slim_mutex_unlock(&buffer->mutex);
+  return view;
+}
+
+static iree_status_t iree_hal_amd_fabric_transient_buffer_detach_mappings(
+    iree_hal_buffer_t* base_buffer, uint32_t scope_id) {
+  iree_hal_amd_fabric_transient_buffer_t* buffer =
+      (iree_hal_amd_fabric_transient_buffer_t*)base_buffer;
+  iree_hal_pool_reservation_view_t backing;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_transient_buffer_retain_host_backing(
+      buffer, &backing));
+  const iree_hal_memory_scope_t scope = {
+      .domain = base_buffer->memory.contract->domain, .id = scope_id};
+  iree_status_t status = iree_hal_virtual_buffer_detach(backing.buffer, scope);
+  iree_hal_buffer_release(backing.buffer);
+  return status;
+}
+
+static const iree_hal_buffer_allocation_vtable_t
+    iree_hal_amd_fabric_transient_buffer_allocation_vtable = {
+        .profile = iree_hal_amd_fabric_transient_buffer_allocation_profile,
+        .begin_dealloca = iree_hal_amd_fabric_transient_buffer_begin_dealloca,
+        .abort_dealloca = iree_hal_amd_fabric_transient_buffer_abort_dealloca,
+        .take_dealloca_reservation =
+            iree_hal_amd_fabric_transient_buffer_take_dealloca_reservation,
+        .decommit = iree_hal_amd_fabric_transient_buffer_decommit,
+};
+
+static const iree_hal_buffer_vtable_t
+    iree_hal_amd_fabric_transient_buffer_vtable = {
+        .destroy = iree_hal_amd_fabric_transient_buffer_destroy,
+        .export_range = iree_hal_amd_fabric_transient_buffer_export_range,
+        .map_range = iree_hal_amd_fabric_transient_buffer_map_range,
+        .unmap_range = iree_hal_amd_fabric_transient_buffer_unmap_range,
+        .invalidate_range =
+            iree_hal_amd_fabric_transient_buffer_invalidate_range,
+        .flush_range = iree_hal_amd_fabric_transient_buffer_flush_range,
+        .query_memory = iree_hal_amd_fabric_transient_buffer_query_memory,
+        .query_virtual = iree_hal_amd_fabric_transient_buffer_query_virtual,
+        .detach_mappings = iree_hal_amd_fabric_transient_buffer_detach_mappings,
+        .allocation = &iree_hal_amd_fabric_transient_buffer_allocation_vtable,
+};

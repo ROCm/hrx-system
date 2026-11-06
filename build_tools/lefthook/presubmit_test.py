@@ -70,8 +70,8 @@ class PresubmitTest(unittest.TestCase):
             "build_tools/clang_tidy/iree/IreeTidyModule.cc",
             "runtime/src/iree/base/BUILD.bazel",
             "runtime/src/iree/base/status.c",
-            "runtime/src/iree/hal/drivers/amd/gpu/cts/BUILD.bazel",
-            "runtime/src/iree/hal/drivers/amd/gpu/cts/driver_test.cc",
+            "runtime/src/iree/hal/driver/amd/gpu/cts/BUILD.bazel",
+            "runtime/src/iree/hal/driver/amd/gpu/cts/driver_test.cc",
         }
         for relative_path in fixture_paths:
             path = repository_root / relative_path
@@ -1539,7 +1539,7 @@ class PresubmitTest(unittest.TestCase):
         self.assertNotIn("//build_tools/bazel/test:all", command)
 
     def test_clang_tidy_enables_every_driver_for_resolved_runtime_owner(self):
-        source_path = "runtime/src/iree/hal/drivers/amd/gpu/cts/driver_test.cc"
+        source_path = "runtime/src/iree/hal/driver/amd/gpu/cts/driver_test.cc"
         with (
             mock.patch.object(presubmit.sys, "platform", "linux"),
             mock.patch.object(
@@ -1548,7 +1548,7 @@ class PresubmitTest(unittest.TestCase):
             mock.patch.object(
                 presubmit,
                 "query_compiling_targets_for_sources",
-                return_value=["//runtime/src/iree/hal/drivers/amd/gpu/cts:driver_test"],
+                return_value=["//runtime/src/iree/hal/driver/amd/gpu/cts:driver_test"],
             ),
             mock.patch.object(
                 presubmit, "run_command", return_value=True
@@ -1577,7 +1577,7 @@ class PresubmitTest(unittest.TestCase):
         )
         self.assertTrue(command[-1].startswith("--target_pattern_file="))
         self.assertNotIn(
-            "//runtime/src/iree/hal/drivers/amd/gpu/cts:driver_test", command
+            "//runtime/src/iree/hal/driver/amd/gpu/cts:driver_test", command
         )
 
     def test_libamdf_clang_tidy_routes_and_enables_optional_package(self):
@@ -1726,12 +1726,12 @@ class PresubmitTest(unittest.TestCase):
     ):
         paths = [
             "runtime/src/iree/base/status.c",
-            "runtime/src/iree/hal/drivers/amd/gpu/cts/driver_test.cc",
+            "runtime/src/iree/hal/driver/amd/gpu/cts/driver_test.cc",
         ]
         explicit_targets = [
             "//runtime/src/iree/base:base",
             "//runtime/src/iree/hal:device_spec_fuzz",
-            "//runtime/src/iree/hal/drivers/amd/xdna/cts:native_replay_stress",
+            "//runtime/src/iree/hal/driver/amd/xdna/cts:native_replay_stress",
         ]
         with (
             mock.patch.object(presubmit.sys, "platform", "linux"),

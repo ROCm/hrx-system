@@ -168,14 +168,14 @@ class ConfigureBazelTest(unittest.TestCase):
         config = self.configure_bazel.generate_config(
             self.configure_bazel.parse_arguments(
                 [
-                    "--//runtime/src/iree/hal/drivers/amdgpu:targets=gfx942,gfx125X-all",
+                    "--//runtime/src/iree/hal/driver/amdgpu:targets=gfx942,gfx125X-all",
                     "--//loom/config/arch/amdgpu:targets=gfx942,gfx125X-all",
                 ]
             )
         )
 
         self.assertIn(
-            "build --//runtime/src/iree/hal/drivers/amdgpu:targets=gfx125X-all,gfx942\n",
+            "build --//runtime/src/iree/hal/driver/amdgpu:targets=gfx125X-all,gfx942\n",
             config,
         )
         self.assertIn(

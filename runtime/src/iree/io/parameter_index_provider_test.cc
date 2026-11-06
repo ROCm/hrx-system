@@ -20,7 +20,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/task/registration/driver_module.h"
+#include "iree/hal/driver/task/registration/driver_module.h"
 #include "iree/io/file_handle.h"
 #include "iree/io/parameter_index.h"
 #include "iree/io/parameter_provider.h"

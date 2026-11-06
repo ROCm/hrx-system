@@ -1,0 +1,238 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef IREE_HAL_DRIVER_AMD_GPU_QUEUE_AQL_SUBMISSION_H_
+#define IREE_HAL_DRIVER_AMD_GPU_QUEUE_AQL_SUBMISSION_H_
+
+#include "iree/hal/driver/amd/gpu/completion.h"
+#include "iree/hal/driver/amd/gpu/profile.h"
+#include "iree/hal/driver/amd/gpu/queue/allocation.h"
+#include "iree/hal/driver/amd/gpu/queue/aql/barrier.h"
+#include "iree/hal/driver/amd/gpu/queue/aql/command_buffer.h"
+#include "iree/hal/driver/amd/gpu/queue/aql/transfer.h"
+#include "iree/hal/driver/amd/gpu/queue/capture_pool.h"
+#include "iree/hal/driver/amd/gpu/queue/control.h"
+#include "iree/hal/driver/amd/gpu/queue/publisher.h"
+#include "iree/hal/driver/amd/gpu/queue/semaphore.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct iree_hal_amd_gpu_aql_wait_t {
+  // Borrowed during inline admission; retained by a deferred capture.
+  iree_hal_semaphore_t* semaphore;
+  // Required HAL timeline value.
+  uint64_t value;
+  // Independent native reader acquired during admission, or NULL.
+  iree_hal_amd_gpu_signal_t* signal;
+} iree_hal_amd_gpu_aql_wait_t;
+
+// Borrowed call arguments; native packing consumes these directly when ready.
+typedef struct iree_hal_amd_gpu_aql_dispatch_request_t {
+  // Executable dominating the immutable function, or NULL for a barrier.
+  iree_hal_executable_t* executable;
+  // Prepared native descriptor and shared argument layout.
+  const iree_hal_amd_gpu_aql_function_t* function;
+  // Admitted launch dimensions and local storage.
+  iree_hal_amd_gpu_dispatch_geometry_t geometry;
+  // Device-time arguments/geometry as selected by flags.
+  iree_hal_buffer_ref_t parameters;
+  // Dense or native host argument bytes.
+  iree_const_byte_span_t constants;
+  // Shader buffer references; addresses resolve after dependencies.
+  iree_hal_buffer_ref_list_t bindings;
+  // Argument representation and optional resource-lifetime borrow.
+  iree_hal_dispatch_flags_t flags;
+} iree_hal_amd_gpu_aql_dispatch_request_t;
+
+typedef enum iree_hal_amd_gpu_aql_entry_kind_e {
+  IREE_HAL_AMD_GPU_AQL_ENTRY_SUBMISSION,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_EXECUTE,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_TRANSFER,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_CONTROL,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_ALLOCATION,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_PROGRAM,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_REUSE_PROGRAM,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_ARGUMENTS,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_SIGNALS,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_REUSE_SIGNALS,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_CAPACITY,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_SCRATCH,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_TRIM,
+  IREE_HAL_AMD_GPU_AQL_ENTRY_FRONTIERS,
+} iree_hal_amd_gpu_aql_entry_kind_t;
+
+typedef struct iree_hal_amd_gpu_aql_entry_t {
+  // Single-publisher FIFO membership.
+  iree_hal_amd_gpu_publication_entry_t publication;
+  // Exact enclosing owner, immutable through FIFO membership.
+  iree_hal_amd_gpu_aql_entry_kind_t kind;
+} iree_hal_amd_gpu_aql_entry_t;
+
+// One operation's asynchronous ownership. Ready direct calls use a reserved
+// retirement slot; deferred calls and recorded invocations use pooled storage.
+typedef struct iree_hal_amd_gpu_aql_submission_t {
+  // Typed pending-publication record.
+  iree_hal_amd_gpu_aql_entry_t entry;
+  // Capture storage owner, or NULL for an embedded retirement capture.
+  iree_hal_amd_gpu_capture_pool_t* pool;
+  // Complete provided block extent in bytes.
+  iree_host_size_t allocation_size;
+  // Initialized capture extent; unused tail can hold a deferred-wait sidecar.
+  iree_host_size_t capture_size;
+  // Number of captured dependency records.
+  iree_host_size_t wait_count;
+  // Inline dependency records, including independently retained native readers.
+  iree_hal_amd_gpu_aql_wait_t* waits;
+  // Native reader count, or UINT32_MAX before dependency admission.
+  uint32_t native_wait_count;
+  // First rejection or execution error, preserved through all native pieces.
+  iree_atomic_int32_t failure_code;
+  // Native ordering and cache effects before the payload.
+  uint16_t before;
+  // Native ordering and cache effects after the payload.
+  uint16_t after;
+  // Queue acceptance owns a host count until publication or rejection.
+  bool has_host_owner;
+  // Optional profile operation occupies the immediately trailing storage.
+  bool profiled;
+  // Retained HAL signal timelines and copied values in inline storage.
+  iree_hal_semaphore_list_t signals;
+  union {
+    // Pool transaction whose native ordering belongs to this submission.
+    struct {
+      // Owned through rejection or terminal native retirement.
+      iree_hal_amd_gpu_allocation_t* operation;
+      // Exact publication owner, borrowed through callback-tail admission.
+      iree_hal_queue_t* queue;
+    } allocation;
+    // Scalar operation and target retained through terminal native retirement.
+    struct {
+      // Prepared address slot, resolved only after allocation dependencies.
+      iree_hal_amd_gpu_buffer_reference_t target;
+      // Immutable validated scalar operation.
+      iree_hal_amd_gpu_control_t command;
+    } control;
+    // Captured direct launch and retained payload resources.
+    iree_hal_amd_gpu_aql_dispatch_request_t dispatch;
+    // Shared ownership across independently retiring native packet chunks.
+    iree_hal_amd_gpu_aql_command_invocation_t execute;
+    // Shared transfer capture and its independently retiring native pieces.
+    struct {
+      // Pending suffix and nonterminal native pieces independently own capture.
+      iree_atomic_ref_count_t ref_count;
+      // Captured addresses/bytes and publisher-owned unpublished suffix.
+      iree_hal_amd_gpu_transfer_t capture;
+      // Optional native observer, notified early on failure and finally at
+      // retirement.
+      iree_hal_amd_gpu_retirement_callback_t callback;
+      // Last retired native piece, written only by the completion owner.
+      iree_async_single_frontier_t frontier;
+    } transfer;
+  };
+} iree_hal_amd_gpu_aql_submission_t;
+
+// Optional instrumentation shares capture ownership and consumes no storage
+// when disabled. The publisher alone updates readiness before native issue.
+static inline iree_hal_amd_gpu_profile_operation_t*
+iree_hal_amd_gpu_aql_submission_profile(
+    iree_hal_amd_gpu_aql_submission_t* submission) {
+  return submission->profiled
+             ? (iree_hal_amd_gpu_profile_operation_t*)(submission + 1)
+             : NULL;
+}
+
+// Captures a deferred call in one reusable block. Retains all external owners
+// unless flags explicitly borrow payload lifetimes. Failure retains nothing.
+iree_status_t iree_hal_amd_gpu_aql_submission_capture(
+    iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_amd_gpu_profile_operation_t* profile,
+    const iree_hal_amd_gpu_aql_dispatch_request_t* request,
+    iree_hal_semaphore_list_t waits, iree_hal_semaphore_list_t signals,
+    uint32_t before, uint32_t after,
+    iree_hal_amd_gpu_aql_submission_t** out_submission);
+
+// Captures one recorded invocation and its dependencies in reusable storage.
+// The pending suffix initially owns the sole invocation reference. Each
+// nonterminal native piece borrows a reference; the terminal piece takes it.
+iree_status_t iree_hal_amd_gpu_aql_submission_execute(
+    iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_amd_gpu_profile_operation_t* profile,
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t bindings, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_queue_execute_flags_t flags,
+    iree_hal_amd_gpu_aql_submission_t** out_submission);
+
+// Captures a qualified scalar control target and its dependency edges. Native
+// address resolution waits for admission; the buffer is retained through
+// terminal retirement. Failure retains nothing.
+iree_status_t iree_hal_amd_gpu_aql_submission_control(
+    iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_amd_gpu_profile_operation_t* profile,
+    const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_hal_buffer_t* target,
+    iree_device_size_t offset, iree_hal_amd_gpu_control_t command,
+    uint32_t before, uint32_t after,
+    iree_hal_amd_gpu_aql_submission_t** out_submission);
+
+// Captures the entire transfer transaction before any native operation runs.
+// Empty transactions retain only their barrier and semaphore ownership.
+iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
+    iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_amd_gpu_profile_operation_t* profile,
+    const iree_hal_queue_family_t* family, iree_hal_semaphore_list_t waits,
+    iree_hal_semaphore_list_t signals, iree_host_size_t count,
+    const iree_hal_transfer_operation_t* operations, uint32_t before,
+    uint32_t after, iree_hal_amd_gpu_aql_submission_t** out_submission);
+
+// Records rejection without reporting completion. Accepted native pieces keep
+// their references; the last release drops payloads before failing signals.
+void iree_hal_amd_gpu_aql_submission_reject(
+    iree_hal_amd_gpu_aql_submission_t* submission, iree_status_code_t code);
+
+// Records the first execution failure and notifies its optional observer.
+// Borrows status. Notification does not end captured native or host uses.
+void iree_hal_amd_gpu_aql_submission_fail(
+    iree_hal_amd_gpu_aql_submission_t* submission, iree_status_t status);
+
+// Preserves each retired transfer piece's epoch before releasing its reference.
+void iree_hal_amd_gpu_aql_submission_set_frontier(
+    iree_hal_amd_gpu_aql_submission_t* submission,
+    const iree_async_single_frontier_t* frontier);
+
+// Captures only retirement ownership for an already prepared direct call.
+// Transfers native readers on success, retains signal timelines and payloads,
+// and does not copy constants or retain completed wait semaphores. Failure
+// transfers nothing. Prefers inline_storage, falling back to a pool block.
+iree_status_t iree_hal_amd_gpu_aql_submission_retirement(
+    iree_hal_amd_gpu_capture_pool_t* pool, iree_byte_span_t inline_storage,
+    const iree_hal_amd_gpu_profile_operation_t* profile,
+    const iree_hal_amd_gpu_aql_dispatch_request_t* request,
+    iree_host_size_t wait_count, const iree_hal_amd_gpu_aql_wait_t* waits,
+    uint32_t native_wait_count, iree_hal_semaphore_list_t signals,
+    iree_hal_amd_gpu_aql_submission_t** out_submission);
+
+// Native completion is necessary but producer payload retirement is separate.
+// True joins every retained dependency and returns the first failure, if any.
+bool iree_hal_amd_gpu_aql_submission_retirement_ready(
+    const iree_hal_amd_gpu_aql_submission_t* submission,
+    iree_status_code_t* out_status_code);
+
+// Returns payload resources before publishing public completion. Idempotent.
+void iree_hal_amd_gpu_aql_submission_release_payload(
+    iree_hal_amd_gpu_aql_submission_t* submission);
+
+// Returns all retained ownership after native users join or before publication.
+// Embedded storage is left to its retirement owner; pooled storage is returned.
+void iree_hal_amd_gpu_aql_submission_release(
+    iree_hal_amd_gpu_aql_submission_t* submission);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif  // IREE_HAL_DRIVER_AMD_GPU_QUEUE_AQL_SUBMISSION_H_

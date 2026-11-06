@@ -6,7 +6,7 @@
 
 #include "loom/target/abi/task/state_layout.h"
 
-#include "iree/hal/drivers/task/executable/library/abi.h"
+#include "iree/hal/driver/task/executable/library/abi.h"
 #include "iree/testing/gtest.h"
 
 namespace loom {

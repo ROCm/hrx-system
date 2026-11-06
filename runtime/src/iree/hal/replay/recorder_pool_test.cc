@@ -11,7 +11,7 @@
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
-#include "iree/hal/drivers/task/registration/driver_module.h"
+#include "iree/hal/driver/task/registration/driver_module.h"
 #include "iree/hal/replay/execute_pool.h"
 #include "iree/hal/replay/recorder.h"
 #include "iree/hal/slab_pool.h"

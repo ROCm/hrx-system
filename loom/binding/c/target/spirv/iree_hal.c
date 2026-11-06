@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 #include "diagnostic.h"
-#include "iree/hal/drivers/vulkan/device_spec.h"
+#include "iree/hal/driver/vulkan/device_spec.h"
 #include "loom/target/arch/spirv/cooperative_properties.h"
 #include "loom/target/arch/spirv/features.h"
 #include "loom/target/arch/spirv/profile.h"

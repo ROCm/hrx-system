@@ -6,10 +6,10 @@
 
 #include "hrx_internal.h"
 #ifdef HRX_HAS_IREE_AMD_GPU_DRIVER
-#include "iree/hal/drivers/amd/gpu/target/selection.h"
+#include "iree/hal/driver/amd/gpu/target/selection.h"
 #endif  // HRX_HAS_IREE_AMD_GPU_DRIVER
 #ifdef HRX_HAS_IREE_AMDGPU_DRIVER
-#include "iree/hal/drivers/amdgpu/target/selection.h"
+#include "iree/hal/driver/amdgpu/target/selection.h"
 #endif  // HRX_HAS_IREE_AMDGPU_DRIVER
 
 static iree_status_t hrx_executable_select_target(

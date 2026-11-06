@@ -58,7 +58,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/testing:device",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/vulkan/registration",
+        "//runtime/src/iree/hal/driver/vulkan/registration",
     ],
     alwayslink = True,
 )

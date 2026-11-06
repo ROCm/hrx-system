@@ -22,7 +22,7 @@
 #include "iree/base/threading/numa.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/hal/api.h"
-#include "iree/hal/drivers/init.h"
+#include "iree/hal/driver/init.h"
 #include "iree/hal/utils/fd_file.h"
 #include "iree/io/file_handle.h"
 #include "iree/testing/benchmark.h"

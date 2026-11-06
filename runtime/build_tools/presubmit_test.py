@@ -40,7 +40,7 @@ class RuntimePresubmitTest(unittest.TestCase):
 
         self.assertIn("--test_tag_filters=-manual", command)
         self.assertIn(
-            "-//runtime/src/iree/hal/drivers/task/executable/elf:elf_module_test",
+            "-//runtime/src/iree/hal/driver/task/executable/elf:elf_module_test",
             command,
         )
 

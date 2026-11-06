@@ -916,7 +916,7 @@ def amdgpu_test_steps(
             # Compiler compatibility and hardware execution share one target
             # selector so other architectures are rejected during analysis.
             "--//loom/config/arch/amdgpu:targets=" + target_selector,
-            "--//runtime/src/iree/hal/drivers/amd/gpu:targets=" + target_selector,
+            "--//runtime/src/iree/hal/driver/amd/gpu:targets=" + target_selector,
             "--//runtime/config/hal:drivers=task,amd-gpu",
         )
     )
@@ -954,7 +954,7 @@ def amdgpu_windows_steps(
         + amd_gpu_device_compiler_options()
         + (
             "--//loom/config/arch/amdgpu:targets=" + target_selector,
-            "--//runtime/src/iree/hal/drivers/amd/gpu:targets=" + target_selector,
+            "--//runtime/src/iree/hal/driver/amd/gpu:targets=" + target_selector,
         )
     )
     config_name = f" / {config.upper()}" if config is not None else ""

@@ -1,0 +1,192 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_target_profile")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+load("//runtime/src/iree/hal/driver/amd/gpu/cts:testdata.bzl", "iree_hal_amd_gpu_cts_testdata")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+_X86_COMPATIBLE_WITH = ["@platforms//cpu:x86_64"] + loom_config_compatible_with([
+    "//loom/config/arch:x86",
+])
+
+_CPU_EXECUTION_COMPATIBLE_WITH = _X86_COMPATIBLE_WITH + loom_config_compatible_with([
+    "//runtime/config/hal:executable_loader_embedded_elf",
+]) + select({
+    "//runtime/config/hal:driver_task": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+loom_target_profile(
+    name = "x86_avx2",
+    testonly = True,
+    family = "x86",
+    selector = "avx2",
+    target_compatible_with = _X86_COMPATIBLE_WITH,
+)
+
+loom_kernel_binary(
+    name = "cpu_add_x86_avx2",
+    testonly = True,
+    srcs = ["cpu_add.loom"],
+    out = "cpu_add_x86_avx2.so",
+    roots = ["@add_u32"],
+    target = ":x86_avx2",
+    target_compatible_with = _X86_COMPATIBLE_WITH,
+)
+
+iree_c_embed_data(
+    name = "cpu_add",
+    testonly = True,
+    srcs = [":cpu_add_x86_avx2"],
+    c_file_output = "cpu_add.c",
+    flatten = True,
+    h_file_output = "cpu_add.h",
+    identifier = "iree_hal_amd_cts_cpu_add",
+    target_compatible_with = _X86_COMPATIBLE_WITH,
+)
+
+# Each composition declares its participants: CPU/XDNA coverage also runs on
+# machines without a GPU, while shared address replacement needs both engines.
+iree_runtime_cc_test(
+    name = "cpu_xdna_test",
+    srcs = ["cpu_xdna_test.cc"],
+    tags = [
+        "iree-build-requirement=libamdf.xdna",
+        "iree-run-requirement=libamdf.resource.xdna",
+        "runtime-resource=amd-xdna",
+    ],
+    target_compatible_with = _CPU_EXECUTION_COMPATIBLE_WITH + select({
+        "//runtime/config/hal:driver_amd_xdna": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "//libamdf/config/family:xdna": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":cpu_add",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:shm",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/registration",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:mul_i32",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:mul_i32_npu4",
+        "//runtime/src/iree/hal/driver/task:device",
+        "//runtime/src/iree/hal/driver/task/executable/loaders:embedded_elf_loader",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+_EXECUTION_COMPATIBLE_WITH = _CPU_EXECUTION_COMPATIBLE_WITH + loom_config_compatible_with([
+    "//loom/config/emit:amdgpu_elf",
+]) + select(dict([
+    (
+        "//loom/config/arch/amdgpu:" + capability,
+        [],
+    )
+    for capability in LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
+] + [(
+    "//conditions:default",
+    ["@platforms//:incompatible"],
+)])) + select({
+    "//runtime/config/hal:driver_amd_gpu": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+}) + select({
+    "//runtime/config/hal:driver_amd_xdna": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+}) + select({
+    "//libamdf/config/family:gpu": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+}) + select({
+    "//libamdf/config/family:xdna": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
+iree_hal_amd_gpu_cts_testdata(
+    name = "affine_testdata",
+    srcs = ["affine_i32.loom"],
+    backend_names = ["amd_cts_affine"],
+    target_compatible_with = _EXECUTION_COMPATIBLE_WITH,
+)
+
+iree_runtime_cc_test(
+    name = "execution_test",
+    srcs = ["execution_test.cc"],
+    tags = [
+        "iree-build-requirement=libamdf.gpu",
+        "iree-build-requirement=libamdf.xdna",
+        "iree-run-requirement=libamdf.resource.amd_gpu",
+        "iree-run-requirement=libamdf.resource.xdna",
+        "runtime-resource=amd-gpu",
+        "runtime-resource=amd-xdna",
+    ],
+    target_compatible_with = _EXECUTION_COMPATIBLE_WITH,
+    deps = [
+        ":affine_testdata",
+        ":cpu_add",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:registry",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/driver/amd/gpu/cts:testdata",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+        "//runtime/src/iree/hal/driver/amd/registration",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:mul_i32",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:mul_i32_npu4",
+        "//runtime/src/iree/hal/driver/task:device",
+        "//runtime/src/iree/hal/driver/task/executable/loaders:embedded_elf_loader",
+        "//runtime/src/iree/hal/memory:fixed_block_pool",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "virtual_buffer_test",
+    srcs = ["virtual_buffer_test.cc"],
+    tags = [
+        "iree-build-requirement=libamdf.gpu",
+        "iree-build-requirement=libamdf.xdna",
+        "iree-run-requirement=libamdf.resource.amd_gpu",
+        "iree-run-requirement=libamdf.resource.xdna",
+        "runtime-resource=amd-gpu",
+        "runtime-resource=amd-xdna",
+    ],
+    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
+        "//runtime/config/hal:driver_amd_xdna": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "//runtime/config/hal:driver_task": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "//libamdf/config/family:gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "//libamdf/config/family:xdna": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//runtime/src/iree/hal/driver/amd/fabric/cts:virtual_buffer_test_base",
+        "//runtime/src/iree/hal/driver/amd/xdna:context",
+        "//runtime/src/iree/hal/driver/amd/xdna:device",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:mul_i32",
+        "//runtime/src/iree/hal/driver/amd/xdna/image/testdata:mul_i32_npu4",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

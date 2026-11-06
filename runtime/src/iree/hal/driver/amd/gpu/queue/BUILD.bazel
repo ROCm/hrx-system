@@ -1,0 +1,892 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/amdgpu:binary.bzl", "iree_amdgpu_binary_variants_embed_data")
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:defs.bzl", "loom_kernel_binary", "loom_target_profile")
+load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
+load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+iree_runtime_cc_library(
+    name = "buffer",
+    srcs = ["buffer.c"],
+    hdrs = ["buffer.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "control",
+    srcs = ["control.c"],
+    hdrs = ["control.h"],
+    deps = [
+        ":buffer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/pm4:commands",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "control_test",
+    srcs = ["control_test.cc"],
+    deps = [
+        ":control",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "timestamp",
+    srcs = ["timestamp.c"],
+    hdrs = ["timestamp.h"],
+    deps = [
+        ":recording",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "timestamp_test",
+    srcs = ["timestamp_test.cc"],
+    deps = [
+        ":recording",
+        ":timestamp",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "transfer",
+    srcs = ["transfer.c"],
+    hdrs = ["transfer.h"],
+    deps = [
+        ":buffer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "transfer_test",
+    srcs = ["transfer_test.cc"],
+    deps = [
+        ":transfer",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "allocation",
+    srcs = ["allocation.c"],
+    hdrs = ["allocation.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:atomic_slist",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/fabric:transient_buffer",
+        "//runtime/src/iree/hal/driver/amd/fabric:transient_buffer_pool",
+        "//runtime/src/iree/hal/driver/amd/gpu:publication",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "memory_mapping",
+    srcs = ["memory_mapping.c"],
+    hdrs = ["memory_mapping.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":host_wait",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:semaphore_wait",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:atomic_slist",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+        "//runtime/src/iree/hal/driver/amd/gpu:profile",
+        "//runtime/src/iree/hal/driver/amd/gpu:publication",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "file_transfer",
+    srcs = ["file_transfer.c"],
+    hdrs = ["file_transfer.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":capture_pool",
+        ":file_staging",
+        ":host_wait",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:semaphore_wait",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/fabric:buffer",
+        "//runtime/src/iree/hal/driver/amd/fabric:file_transfer",
+        "//runtime/src/iree/hal/driver/amd/gpu:completion",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+        "//runtime/src/iree/hal/driver/amd/gpu:profile",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "file_staging",
+    srcs = ["file_staging.c"],
+    hdrs = ["file_staging.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":file_completion",
+        "//libamdf:headers",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/driver/amd/fabric:file_transfer",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory_transition",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/sdma:queue",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "allocation_test",
+    srcs = ["allocation_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":allocation",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/fabric:transient_buffer_pool",
+        "//runtime/src/iree/hal/driver/amd/gpu:publication",
+        "//runtime/src/iree/hal/memory:cpu_slab_provider",
+        "//runtime/src/iree/hal/memory:passthrough_pool",
+        "//runtime/src/iree/hal/memory:slab_provider",
+        "//runtime/src/iree/hal/testing:deferred_pool",
+        "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "host_call",
+    srcs = ["host_call.c"],
+    hdrs = ["host_call.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":capture_pool",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/gpu:completion",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "host_call_test",
+    srcs = ["host_call_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":capture_pool",
+        ":host_call",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+        "//runtime/src/iree/hal/utils:host_semaphore",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "file_transfer_test",
+    srcs = ["file_transfer_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":capture_pool",
+        ":file_transfer",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/async/util:semaphore_wait",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:semaphore",
+        "//runtime/src/iree/hal/testing:mapped_transfer_buffer",
+        "//runtime/src/iree/hal/utils:files",
+        "//runtime/src/iree/hal/utils:host_semaphore",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "file_transfer_staging_test",
+    srcs = ["file_transfer_staging_test.cc"],
+    tags = ["requires-filesystem"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }) + select({
+        "//runtime/config/hal:driver_task": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":capture_pool",
+        ":file_staging",
+        ":file_transfer",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/async/util:semaphore_wait",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/driver/amd/fabric",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory_backend_test_base",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/sdma:queue",
+        "//runtime/src/iree/hal/utils:files",
+        "//runtime/src/iree/hal/utils:host_semaphore",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "host_wait",
+    srcs = ["host_wait.c"],
+    hdrs = ["host_wait.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:semaphore_wait",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "host_wait_test",
+    srcs = ["host_wait_test.cc"],
+    deps = [
+        ":host_wait",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/async/util:semaphore_wait",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:host_semaphore",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "host_wait_benchmark",
+    srcs = ["host_wait_benchmark.cc"],
+    deps = [
+        ":host_wait",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/async/util:semaphore_wait",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:host_semaphore",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "publisher",
+    srcs = ["publisher.c"],
+    hdrs = ["publisher.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "publisher_test",
+    srcs = ["publisher_test.cc"],
+    deps = [
+        ":publisher",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "publisher_benchmark",
+    srcs = ["publisher_benchmark.cc"],
+    deps = [
+        ":publisher",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "capture_pool",
+    srcs = ["capture_pool.c"],
+    hdrs = ["capture_pool.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "capture_pool_test",
+    srcs = ["capture_pool_test.cc"],
+    deps = [
+        ":capture_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "capture_pool_benchmark",
+    srcs = ["capture_pool_benchmark.cc"],
+    deps = [
+        ":capture_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "signal",
+    srcs = ["signal.c"],
+    hdrs = ["signal.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "semaphore",
+    srcs = ["semaphore.c"],
+    hdrs = ["semaphore.h"],
+    deps = [
+        ":signal",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "signal_test",
+    srcs = ["signal_test.cc"],
+    deps = [
+        ":signal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "semaphore_test",
+    srcs = ["semaphore_test.cc"],
+    deps = [
+        ":semaphore",
+        ":signal",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/async/util:semaphore_wait",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue:host_wait",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "signal_benchmark",
+    srcs = ["signal_benchmark.cc"],
+    deps = [
+        ":signal",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "semaphore_benchmark",
+    srcs = ["semaphore_benchmark.cc"],
+    deps = [
+        ":semaphore",
+        ":signal",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "user_queue",
+    srcs = ["user_queue.c"],
+    hdrs = ["user_queue.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory_transition",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "user_queue_test",
+    srcs = ["user_queue_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":user_queue",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "membership",
+    srcs = ["membership.c"],
+    hdrs = ["membership.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":backing",
+        ":program",
+        "//libamdf:headers",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/driver/amd/gpu:completion",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+        "//runtime/src/iree/hal/driver/amd/gpu:failure",
+        "//runtime/src/iree/hal/driver/amd/gpu:profile",
+        "//runtime/src/iree/hal/driver/amd/gpu:publication",
+        "//runtime/src/iree/hal/driver/amd/gpu:tsan",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "backing",
+    srcs = ["backing.c"],
+    hdrs = ["backing.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":signal",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+        "//runtime/src/iree/hal/driver/amd/gpu:publication",
+    ],
+)
+
+_PROGRAM_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/emit:amdgpu_elf",
+    "//loom/config/arch/amdgpu:descriptor_set_cdna2_core",
+    "//loom/config/arch/amdgpu:descriptor_set_gfx9_4_generic_core",
+    "//loom/config/arch/amdgpu:descriptor_set_gfx11_generic_core",
+    "//loom/config/arch/amdgpu:descriptor_set_rdna3_5_core",
+    "//loom/config/arch/amdgpu:descriptor_set_rdna4m_core",
+    "//loom/config/arch/amdgpu:descriptor_set_gfx12_generic_core",
+    "//loom/config/arch/amdgpu:descriptor_set_gfx12_5_generic_core",
+])
+
+_PROGRAM_TARGETS = [
+    "gfx90a",
+    "gfx9-4-generic",
+    "gfx11-generic",
+    "gfx1151",
+    "gfx1170",
+    "gfx12-generic",
+    "gfx12-5-generic",
+]
+
+[
+    loom_target_profile(
+        name = "fixup_program_profile_" + target,
+        family = "amdgpu",
+        selector = target,
+        target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+        visibility = ["//visibility:private"],
+    )
+    for target in _PROGRAM_TARGETS
+]
+
+[
+    loom_kernel_binary(
+        name = "fixup_program_" + target,
+        testonly = True,
+        srcs = ["fixup.loom"],
+        out = "fixup_program_" + target + ".hsaco",
+        target = ":fixup_program_profile_" + target,
+        target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    )
+    for target in _PROGRAM_TARGETS
+]
+
+iree_c_embed_data(
+    name = "fixup_programs",
+    testonly = True,
+    srcs = [":fixup_program_" + target for target in _PROGRAM_TARGETS],
+    c_file_output = "fixup_programs.c",
+    h_file_output = "fixup_programs.h",
+    identifier = "iree_hal_amd_gpu_fixup_programs",
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+)
+
+iree_runtime_cc_library(
+    name = "fixup",
+    srcs = ["fixup.c"],
+    hdrs = ["fixup.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/gpu/image",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "fixup_test",
+    srcs = ["fixup_test.cc"],
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    deps = [
+        ":fixup",
+        ":fixup_programs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/gpu/image",
+        "//runtime/src/iree/hal/driver/amd/gpu/image:hsaco",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "program",
+    srcs = ["program.c"],
+    hdrs = ["program.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":fixup",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "program_test",
+    srcs = ["program_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":program",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal/driver/amd/fabric",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+[
+    loom_kernel_binary(
+        name = "blit_program_" + target,
+        testonly = True,
+        srcs = ["blit.loom"],
+        out = "blit_program_" + target + ".hsaco",
+        target = ":fixup_program_profile_" + target,
+        target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    )
+    for target in _PROGRAM_TARGETS
+]
+
+iree_c_embed_data(
+    name = "blit_programs",
+    testonly = True,
+    srcs = [":blit_program_" + target for target in _PROGRAM_TARGETS],
+    c_file_output = "blit_programs.c",
+    h_file_output = "blit_programs.h",
+    identifier = "iree_hal_amd_gpu_blit_programs",
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+)
+
+iree_runtime_cc_test(
+    name = "blit_test",
+    srcs = ["blit_test.cc"],
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    deps = [
+        ":blit",
+        ":blit_programs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/gpu/image",
+        "//runtime/src/iree/hal/driver/amd/gpu/image:hsaco",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "blit",
+    srcs = ["blit.c"],
+    hdrs = ["blit.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/gpu/image",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "recording",
+    srcs = ["recording.c"],
+    hdrs = ["recording.h"],
+    deps = [
+        ":fixup",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "inputs",
+    srcs = ["inputs.c"],
+    hdrs = ["inputs.h"],
+    deps = [
+        ":control",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:resource_set",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "inputs_test",
+    srcs = ["inputs_test.cc"],
+    deps = [
+        ":control",
+        ":inputs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
+    name = "file_completion",
+    srcs = ["file_completion.c"],
+    hdrs = ["file_completion.h"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:private"],
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd:status",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "file_completion_test",
+    srcs = ["file_completion_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":file_completion",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "membership_test",
+    srcs = ["membership_test.cc"],
+    target_compatible_with = select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":membership",
+        ":program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/gpu:completion",
+        "//runtime/src/iree/hal/driver/amd/gpu:failure",
+        "//runtime/src/iree/hal/driver/amd/gpu:publication",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_amdgpu_binary_variants_embed_data(
+    name = "grid_sync_programs",
+    testonly = True,
+    srcs = ["grid_sync.c"],
+    identifier = "iree_hal_amd_gpu_grid_sync_programs",
+    tags = ["manual"],
+    target = "amdgcn-amd-amdhsa",
+    target_selectors_flag = "//runtime/src/iree/hal/driver/amd/gpu:targets",
+)
+
+[
+    loom_kernel_binary(
+        name = "control_program_" + target,
+        testonly = True,
+        srcs = ["control_program.loom"],
+        out = "control_program_" + target + ".hsaco",
+        target = ":fixup_program_profile_" + target,
+        target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    )
+    for target in _PROGRAM_TARGETS
+]
+
+iree_c_embed_data(
+    name = "control_programs",
+    testonly = True,
+    srcs = [":control_program_" + target for target in _PROGRAM_TARGETS],
+    c_file_output = "control_programs.c",
+    h_file_output = "control_programs.h",
+    identifier = "iree_hal_amd_gpu_control_programs",
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+)
+
+iree_runtime_cc_library(
+    name = "control_program",
+    srcs = ["control_program.c"],
+    hdrs = ["control_program.h"],
+    deps = [
+        ":control",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/gpu/image",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "control_program_test",
+    srcs = ["control_program_test.cc"],
+    target_compatible_with = _PROGRAM_COMPATIBLE_WITH,
+    deps = [
+        ":control_program",
+        ":control_programs",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/driver/amd/gpu/image",
+        "//runtime/src/iree/hal/driver/amd/gpu/image:hsaco",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

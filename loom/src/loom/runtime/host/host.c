@@ -9,8 +9,8 @@
 
 #include "iree/async/util/proactor_thread.h"
 #include "iree/base/threading/numa.h"
-#include "iree/hal/drivers/task/driver.h"
-#include "iree/hal/drivers/task/executable/loaders/registration/init.h"
+#include "iree/hal/driver/task/driver.h"
+#include "iree/hal/driver/task/executable/loaders/registration/init.h"
 #include "iree/task/topology.h"
 #include "loom/runtime/program/native_artifact.h"
 #include "loomc/iree.h"

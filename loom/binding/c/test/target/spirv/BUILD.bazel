@@ -79,7 +79,7 @@ loom_cc_test(
         "//loom/binding/c/target/spirv:iree_hal",
         "//loom/binding/c/test:test_util",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/vulkan:device_spec",
+        "//runtime/src/iree/hal/driver/vulkan:device_spec",
         "//runtime/src/iree/hal/utils:device_spec_builder",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

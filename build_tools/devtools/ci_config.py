@@ -52,7 +52,7 @@ CMAKE_REPOSITORY_SMOKE_CTEST_REGEXES = (
     "^libamdf/cts/core/query_dynamic$",
 )
 BAZEL_REPOSITORY_DEVICE_TARGETS = (
-    "//runtime/src/iree/hal/drivers/amdgpu/util:pm4_dispatch_test_kernels",
+    "//runtime/src/iree/hal/driver/amdgpu/util:pm4_dispatch_test_kernels",
 )
 BAZEL_REPOSITORY_TEST_TARGETS = ("//...",)
 IMPORTER_TILELANG_BAZEL_TEST_TARGETS = (
@@ -122,12 +122,12 @@ def ctest_exclude_regex(xfails: tuple[TestXfail, ...]) -> str:
 
 
 CPU_XFAILS = (
-    bazel_xfail("//runtime/src/iree/hal/drivers/task/executable/elf:elf_module_test"),
+    bazel_xfail("//runtime/src/iree/hal/driver/task/executable/elf:elf_module_test"),
 )
 CPU_SANITIZERS_XFAILS = (
     bazel_xfail("//runtime/src/iree/async/platform/io_uring/cts/..."),
     bazel_xfail("//runtime/src/iree/hal:string_util_test"),
-    bazel_xfail("//runtime/src/iree/hal/drivers/task/executable/elf/..."),
+    bazel_xfail("//runtime/src/iree/hal/driver/task/executable/elf/..."),
     bazel_xfail("//runtime/src/iree/hal/replay:execute_test"),
     bazel_xfail("//runtime/src/iree/tokenizer/..."),
     bazel_xfail("//runtime/src/iree/tooling/profile:cli_test"),
@@ -137,9 +137,9 @@ CPU_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(CPU_XFAILS)
 CPU_SANITIZERS_XFAIL_TARGETS = bazel_xfail_targets(CPU_SANITIZERS_XFAILS)
 CPU_SANITIZERS_CTEST_EXCLUDE_REGEX = ctest_exclude_regex(CPU_SANITIZERS_XFAILS)
 CPU_BAZEL_TARGET_EXCLUDES = (
-    "-//runtime/src/iree/hal/drivers/amdgpu/...",
-    "-//runtime/src/iree/hal/drivers/vulkan/...",
-    "-//runtime/src/iree/hal/drivers/webgpu/...",
+    "-//runtime/src/iree/hal/driver/amdgpu/...",
+    "-//runtime/src/iree/hal/driver/vulkan/...",
+    "-//runtime/src/iree/hal/driver/webgpu/...",
 )
 CPU_RESOURCE_TAG_EXCLUDES = run_requirements.bazel_exclusions(())
 # GPU jobs admit native endpoints. XDNA-only jobs retain their separate device
@@ -159,7 +159,7 @@ REPOSITORY_BAZEL_OPTIONS = (
     "--//build_tools/vulkan/config:enabled=true",
     "--//build_tools/d3d12/config:enabled=true",
 )
-NON_CPU_HAL_DRIVER_CTEST_REGEX = r"^iree/hal/drivers/(amdgpu|vulkan|webgpu)/"
+NON_CPU_HAL_DRIVER_CTEST_REGEX = r"^iree/hal/driver/(amdgpu|vulkan|webgpu)/"
 
 AMDF_BAZEL_TARGETS = ("//libamdf/...",)
 AMDF_BUILD_REQUIREMENT_TAG = "iree-build-requirement=libamdf"
@@ -167,19 +167,19 @@ XDNA_RUN_REQUIREMENT_TAG = "iree-run-requirement=libamdf.resource.xdna"
 XDNA_CTEST_RESOURCE_LABEL = "runtime-resource=amd-xdna"
 AMDF_CTEST_REGEX = r"^libamdf/"
 XDNA_BAZEL_TARGETS = AMDF_BAZEL_TARGETS + (
-    "//runtime/src/iree/hal/drivers/amd/...",
+    "//runtime/src/iree/hal/driver/amd/...",
     "//loom/target/amd/xdna/...",
     "//loom/src/loom/tooling/target/amd/xdna/...",
 )
 XDNA_BAZEL_TEST_TAG_FILTERS = (AMDF_BUILD_REQUIREMENT_TAG, XDNA_RUN_REQUIREMENT_TAG)
 XDNA_CMAKE_BUILD_TARGETS = (
     "libamdf/all",
-    "runtime/src/iree/hal/drivers/amd/all",
+    "runtime/src/iree/hal/driver/amd/all",
     "loom/target/amd/xdna/all",
     "loom/src/loom/tooling/target/amd/xdna/all",
 )
 XDNA_CTEST_PACKAGE_REGEX = (
-    r"^(iree/hal/drivers/amd|loom/(target|tooling/target)/amd/xdna)/"
+    r"^(iree/hal/driver/amd|loom/(target|tooling/target)/amd/xdna)/"
 )
 # Compile both client families; Linux admits only XDNA hardware execution.
 # Common runtime components enter through the ELF consumers' dependencies.
@@ -194,7 +194,7 @@ AMD_CLIENT_BAZEL_OPTIONS = (
 )
 AMD_CLIENT_BAZEL_TARGETS = (
     *AMDF_BAZEL_TARGETS,
-    "//runtime/src/iree/hal/drivers/amd/...",
+    "//runtime/src/iree/hal/driver/amd/...",
     "//loom/target/amd/xdna/...",
     "//loom/src/loom/tooling/target/amd/xdna/...",
 )
@@ -206,7 +206,7 @@ AMD_CLIENT_WINDOWS_BAZEL_OPTIONS = AMD_CLIENT_BAZEL_OPTIONS + (
     "--//loom/config/emit:enable=elf,spirv,vm",
 )
 AMD_GPU_BAZEL_TARGETS = (
-    "//runtime/src/iree/hal/drivers/amd/...",
+    "//runtime/src/iree/hal/driver/amd/...",
     "//loom/src/loom/tooling/target/amdgpu/serve/...",
     "//loom/src/loom/tooling/target/amdgpu/test/...",
     "//loom/src/loom/target/emit/native/amdgpu/...",
@@ -241,7 +241,7 @@ AMD_CLIENT_GPU_BAZEL_OPTIONS = (
 AMD_CLIENT_WINDOWS_BAZEL_TARGETS = (
     AMD_CLIENT_BAZEL_TARGETS
     + (
-        "//runtime/src/iree/hal/drivers/vulkan/...",
+        "//runtime/src/iree/hal/driver/vulkan/...",
         "//loom/binding/c/test/target/spirv/...",
         "//loom/src/loom/tooling/target/spirv/...",
         "//loom/target/spirv/test/...",
@@ -256,9 +256,9 @@ AMD_CLIENT_WINDOWS_RESOURCES = (
         "d3d12.resource.device",
     )
 )
-AMDGPU_CMAKE_PACKAGE_REGEX = r"^iree/hal/drivers/amd/"
+AMDGPU_CMAKE_PACKAGE_REGEX = r"^iree/hal/driver/amd/"
 AMDGPU_CMAKE_BUILD_TARGETS = (
-    "runtime/src/iree/hal/drivers/amd/all",
+    "runtime/src/iree/hal/driver/amd/all",
     "libamdf/all",
 )
 AMDGPU_BAZEL_OPTIONS = (
@@ -298,9 +298,9 @@ AMDGPU_BAZEL_TEST_TAG_FILTERS = (
     AMD_GPU_RUN_REQUIREMENT_TAG,
 )
 AMDGPU_BAZEL_TARGET_EXCLUDES = (
-    "-//runtime/src/iree/hal/drivers/amdgpu/...",
-    "-//runtime/src/iree/hal/drivers/vulkan/...",
-    "-//runtime/src/iree/hal/drivers/webgpu/...",
+    "-//runtime/src/iree/hal/driver/amdgpu/...",
+    "-//runtime/src/iree/hal/driver/vulkan/...",
+    "-//runtime/src/iree/hal/driver/webgpu/...",
 )
 RUNTIME_CTEST_RESOURCE_LABEL_PREFIX = "runtime-resource="
 CTEST_RESOURCE_LABEL_EXCLUDE_REGEX = RUNTIME_CTEST_RESOURCE_LABEL_PREFIX
@@ -352,7 +352,7 @@ AMDGPU_BAZEL_XFAILS_BY_TARGET_SELECTOR = {
     # feedback. Keep the remaining gfx1151 coverage active.
     "gfx1151": (
         bazel_xfail(
-            "//runtime/src/iree/hal/drivers/amdgpu/cts:manual_asan_executable_tests"
+            "//runtime/src/iree/hal/driver/amdgpu/cts:manual_asan_executable_tests"
         ),
     ),
     # gfx120X currently hangs while initializing or executing device-side TSAN.
@@ -386,11 +386,11 @@ VULKAN_BAZEL_TEST_TAG_FILTERS = (
     VULKAN_RUN_REQUIREMENT_TAG,
 )
 VULKAN_BAZEL_TARGET_EXCLUDES = (
-    "-//runtime/src/iree/hal/drivers/amdgpu/...",
-    "-//runtime/src/iree/hal/drivers/webgpu/...",
+    "-//runtime/src/iree/hal/driver/amdgpu/...",
+    "-//runtime/src/iree/hal/driver/webgpu/...",
 )
-VULKAN_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/drivers/vulkan/all",)
-VULKAN_CTEST_REGEX = r"^iree/hal/drivers/vulkan/"
+VULKAN_CMAKE_DRIVER_TARGETS = ("runtime/src/iree/hal/driver/vulkan/all",)
+VULKAN_CTEST_REGEX = r"^iree/hal/driver/vulkan/"
 VULKAN_CTEST_RESOURCE_LABEL_REGEX = "runtime-resource=vulkan-device"
 VULKAN_XFAILS = ()
 VULKAN_XFAIL_TARGETS = bazel_xfail_targets(VULKAN_XFAILS)

@@ -411,7 +411,7 @@ jobs:
           path: |
             bazel-bin/loom/target/spirv/test/corpus/numeric_vector_packed_selection_test_execute_spirv_vulkan_hardware_test
             bazel-bin/loom/target/spirv/test/corpus/numeric_vector_packed_selection_test_execute_spirv_vulkan_hardware_test.runfiles/
-            bazel-bin/runtime/src/iree/hal/drivers/vulkan/cts/slab_pool_tests
+            bazel-bin/runtime/src/iree/hal/driver/vulkan/cts/slab_pool_tests
           if-no-files-found: warn
           retention-days: 7
 

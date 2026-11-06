@@ -21,11 +21,11 @@ if(IREE_HAL_AMDGPU_LIBHSA_STATIC)
       "ROCm discovery is enough for dynamic loading but cannot satisfy static "
       "libhsa linking.")
   endif()
-  target_compile_options(iree_hal_drivers_amdgpu_util_libhsa
+  target_compile_options(iree_hal_driver_amdgpu_util_libhsa
     PUBLIC
       "-DIREE_HAL_AMDGPU_LIBHSA_STATIC=1"
   )
-  target_link_libraries(iree_hal_drivers_amdgpu_util_libhsa
+  target_link_libraries(iree_hal_driver_amdgpu_util_libhsa
     PRIVATE
       iree::third_party::hsa_runtime
   )
