@@ -43,7 +43,6 @@ ARTIFACT_DIR_ENV = "IREE_CI_FAILURE_ARTIFACT_DIR"
 MAX_CAPTURE_BYTES = 512 * 1024 * 1024
 LOCAL_DUMP_COUNT = 16
 LOCAL_DUMP_EXECUTABLES = (
-    "c_tables_index_generator.exe",
     "compile_artifact.exe",
     "loom-compile.exe",
     "loom-link.exe",
