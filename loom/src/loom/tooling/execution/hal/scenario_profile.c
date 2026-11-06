@@ -662,11 +662,6 @@ iree_status_t loom_run_hal_testbench_benchmark_scenario_product(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "prepared scenario product is not a HAL product");
   }
-  if (invocation != prepared_product->invocation) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "HAL scenario benchmark invocation does not match prepared product");
-  }
   loom_run_hal_testbench_scenario_product_t* product =
       (loom_run_hal_testbench_scenario_product_t*)prepared_product->user_data;
   return loom_run_hal_testbench_scenario_benchmark_calls(
@@ -687,11 +682,6 @@ iree_status_t loom_run_hal_testbench_query_scenario_product_input_layout(
       NULL) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "prepared scenario product is not a HAL product");
-  }
-  if (invocation != prepared_product->invocation) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "HAL scenario layout invocation does not match prepared product");
   }
   loom_run_hal_testbench_scenario_product_t* product =
       (loom_run_hal_testbench_scenario_product_t*)prepared_product->user_data;

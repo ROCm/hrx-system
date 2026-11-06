@@ -108,6 +108,8 @@ loom_run_hal_testbench_scenario_execution_profile(
 // trial. The logical batch size comes from |options| and may differ from
 // |call_count|. Target-local staging and replay preparation occur outside the
 // measured timing window.
+// |invocation| describes the current trial; the prepared product may have been
+// shared from an earlier trial calling the same subject.
 iree_status_t loom_run_hal_testbench_benchmark_scenario_product(
     const loom_testbench_prepared_product_t* prepared_product,
     const loom_testbench_invocation_plan_t* invocation,
