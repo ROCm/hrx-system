@@ -651,6 +651,29 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "hip_initialization_api_test",
+    srcs = [
+        "api.h",
+        "hip_initialization_api_test.cc",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "CUDA_VISIBLE_DEVICES": "0",
+        "HIP_VISIBLE_DEVICES": "0",
+        "HRX_GPU_DEBUG": "0",
+        "HRX_GPU_DRIVER": "invalid-initial-driver",
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+        "ROCR_VISIBLE_DEVICES": "0",
+    },
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    deps = [
+        ":hip_dso_test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "hip_array_validation_api_test",
     srcs = [
         "api.h",

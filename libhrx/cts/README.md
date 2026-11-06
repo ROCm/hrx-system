@@ -60,6 +60,33 @@ under test. A manually staged HIP executable needs `HRX_TEST_LIBAMDHIP64` set to
 that same build's frontend DSO; an ambient system HIP library is a different
 implementation.
 
+## Initialization diagnostics and process concurrency
+
+Failed `hipInit` calls and implicit initialization through APIs such as
+`hipGetDeviceCount` print the underlying runtime status to stderr, including the
+failing operation and native error when available. `hipGetErrorString` continues
+to describe the HIP error enum, so `hipErrorNotInitialized` still maps to
+`initialization error`. Detailed failures do not require `HRX_GPU_DEBUG`.
+Successful initialization and queries with all devices explicitly hidden remain
+quiet.
+
+Initialization creates execution resources for every selected GPU, even when the
+caller only requests a device count. On the native AMD GPU backend this includes
+an SDMA transfer queue where the device exposes that queue family. These queues
+come from a finite pool shared with other processes, with some slots reserved by
+the kernel. Consequently there is no portable fixed process-concurrency limit:
+the selected devices, driver, and other users determine available capacity.
+CPU thread and file-descriptor limits do not establish GPU queue capacity.
+
+For example, `gpu.user_queue_create(SDMA)` with an ERRNO status of `0x0000000C`
+is `ENOMEM`. A matching kernel message about having no more SDMA queues identifies
+queue-slot exhaustion; the errno alone does not establish system RAM exhaustion.
+Releasing initialized processes makes their queue slots available again. Retrying
+inside a failed process also depends on the native connection lifetime: KFD's
+process-lifetime VM binding can survive destruction of the runtime's driver,
+causing a new connection to report `EBUSY`. The native lifetime contract is
+documented in [libamdf's memory fabric guide](../../libamdf/docs/memory.md#fabric-discovery).
+
 ## Running focused checks
 
 From a configured repository root:
