@@ -80,6 +80,7 @@ loom_check_test_suite(
         "numeric_scalar_i64_shift_counts.loom-test",
         "numeric_scalar_i64_subtract.loom-test",
         "numeric_signed_unary.loom-test",
+        "numeric_unsigned_carry_borrow.loom-test",
         "numeric_unsigned_constant_division.loom-test",
         "numeric_unsigned_word_offsets.loom-test",
         "numeric_vector_bitfield.loom-test",

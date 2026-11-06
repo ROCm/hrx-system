@@ -81,6 +81,8 @@ typedef enum loom_x86_encoding_form_e {
   LOOM_X86_ENCODING_FORM_COMPARE_IMMEDIATE_BRANCH = 38,
   // F3-prefixed unary input in ModRM.r/m and result in ModRM.reg.
   LOOM_X86_ENCODING_FORM_UNARY_F3_R_RM = 39,
+  // Destructive add/sub followed by materialized carry or borrow.
+  LOOM_X86_ENCODING_FORM_BINARY_CARRY_OUT = 40,
 } loom_x86_encoding_form_t;
 
 // Native fixup identities. Object adapters supply their format's mapping.
@@ -154,8 +156,8 @@ typedef struct loom_x86_encoding_operands_t {
   uint8_t result;
   // Architectural input registers in descriptor operand order.
   uint8_t inputs[5];
-  // Form-specific second immediate: a SIB scale exponent or condition code.
-  uint8_t secondary_immediate;
+  // Form-specific second immediate or architectural second result register.
+  uint8_t secondary;
   // True when the input immediately after a selected memory base is an index.
   bool has_index;
 } loom_x86_encoding_operands_t;

@@ -174,6 +174,71 @@ static iree_status_t loom_vector_legalize_descriptor(
   return iree_ok_status();
 }
 
+// Native carry/borrow contracts retain first claim. The reference form
+// remains vector-shaped so targets can select their ordinary add/sub and
+// comparison instructions without scalarizing profitable packet carriers.
+static iree_status_t loom_vector_legalize_unsigned_carry_borrow(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  const bool is_subtraction = loom_vector_subborrowui_isa(op);
+  const loom_value_id_t lhs = loom_op_const_operands(op)[0];
+  const loom_value_id_t rhs = loom_op_const_operands(op)[1];
+  const loom_type_t value_type =
+      loom_module_value_type(context->module, loom_op_const_results(op)[0]);
+  const loom_type_t predicate_type =
+      loom_module_value_type(context->module, loom_op_const_results(op)[1]);
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+
+  loom_value_id_t replacements[2] = {
+      LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID,
+  };
+  if (loom_type_element_type(value_type) == LOOM_SCALAR_TYPE_I1) {
+    // One-bit modular addition and subtraction both produce XOR. Their carry
+    // and borrow are respectively lhs AND rhs and rhs AND (lhs XOR rhs).
+    loom_op_t* value_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_xori_build(builder, lhs, rhs, value_type,
+                                                op->location, &value_op));
+    replacements[0] = loom_vector_xori_result(value_op);
+    loom_op_t* predicate_op = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_vector_andi_build(builder, is_subtraction ? rhs : lhs,
+                               is_subtraction ? replacements[0] : rhs,
+                               predicate_type, op->location, &predicate_op));
+    replacements[1] = loom_vector_andi_result(predicate_op);
+  } else {
+    loom_op_t* arithmetic = NULL;
+    if (is_subtraction) {
+      IREE_RETURN_IF_ERROR(loom_vector_subi_build(builder, /*instance_flags=*/0,
+                                                  lhs, rhs, value_type,
+                                                  op->location, &arithmetic));
+      replacements[0] = loom_vector_subi_result(arithmetic);
+    } else {
+      IREE_RETURN_IF_ERROR(loom_vector_addi_build(builder, /*instance_flags=*/0,
+                                                  lhs, rhs, value_type,
+                                                  op->location, &arithmetic));
+      replacements[0] = loom_vector_addi_result(arithmetic);
+    }
+    loom_op_t* comparison = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
+        builder, LOOM_VECTOR_CMPI_PREDICATE_ULT,
+        is_subtraction ? lhs : replacements[0], is_subtraction ? rhs : lhs,
+        value_type, predicate_type, op->location, &comparison));
+    replacements[1] = loom_vector_cmpi_result(comparison);
+  }
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, replacements, IREE_ARRAYSIZE(replacements), checkpoint));
+  IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+      rewriter, op, replacements, IREE_ARRAYSIZE(replacements)));
+  out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vector_legalize_bitstream(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -256,6 +321,47 @@ iree_status_t loom_vector_legalize_index_cast(
   return iree_ok_status();
 }
 
+// Keeps integer-to-predicate truncation in packet form. The low-bit mask is
+// semantically distinct from a nonzero test and leaves ordinary vector
+// bitwise/comparison selection to the target.
+static iree_status_t loom_vector_legalize_predicate_truncation(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  const loom_value_id_t input = loom_vector_trunci_input(op);
+  const loom_type_t input_type = loom_module_value_type(context->module, input);
+  const loom_type_t result_type =
+      loom_module_value_type(context->module, loom_vector_trunci_result(op));
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+
+  loom_op_t* low_bit_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_splati_build(builder, 1, input_type,
+                                                op->location, &low_bit_op));
+  loom_op_t* masked_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_andi_build(
+      builder, input, loom_vector_splati_result(low_bit_op), input_type,
+      op->location, &masked_op));
+  loom_op_t* zero_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_splati_build(builder, 0, input_type, op->location, &zero_op));
+  loom_op_t* comparison_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
+      builder, LOOM_VECTOR_CMPI_PREDICATE_ULT,
+      loom_vector_splati_result(zero_op), loom_vector_andi_result(masked_op),
+      input_type, result_type, op->location, &comparison_op));
+  loom_value_id_t replacement = loom_vector_cmpi_result(comparison_op);
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
+  };
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vector_legalize_cast(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -270,6 +376,14 @@ static iree_status_t loom_vector_legalize_cast(
           .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
       };
       return iree_ok_status();
+    }
+    if (loom_vector_trunci_isa(op)) {
+      const loom_type_t result_type = loom_module_value_type(
+          context->module, loom_vector_trunci_result(op));
+      if (loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_I1) {
+        return loom_vector_legalize_predicate_truncation(context, op,
+                                                         out_result);
+      }
     }
     // Scalarization would split a cast boundary into unrelated lane programs.
     // Preserve it while eager producers expose composable carrier casts.
@@ -1728,6 +1842,14 @@ static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
         .root_kind = LOOM_OP_VECTOR_SUBI,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .legalize = loom_vector_legalize_descriptor,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_ADDCARRYUI,
+        .legalize = loom_vector_legalize_unsigned_carry_borrow,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_SUBBORROWUI,
+        .legalize = loom_vector_legalize_unsigned_carry_borrow,
     },
     // Integral rounding keeps native packets when available and otherwise
     // applies the same operation to each scalar lane.

@@ -674,6 +674,44 @@ def test_integer_extrema_rules_prefer_encoded_constants() -> None:
         )
 
 
+def test_i32_carry_borrow_rules_cover_uniform_and_divergent_predicates() -> None:
+    compiled = _COMPILED_INTEGER_RULES
+
+    for source_op, scalar_descriptor, vector_descriptor in (
+        (
+            scalar_arithmetic.scalar_addcarryui,
+            "amdgpu.s_add_co_u32",
+            "amdgpu.v_add_co_u32",
+        ),
+        (
+            scalar_arithmetic.scalar_subborrowui,
+            "amdgpu.s_sub_co_u32",
+            "amdgpu.v_sub_co_u32",
+        ),
+    ):
+        rules = _rules_for_source_op(compiled, source_op)
+        assert tuple(_rule_descriptor_keys(compiled, rule) for rule in rules) == (
+            (scalar_descriptor,),
+            (
+                scalar_descriptor,
+                "amdgpu.s_mov_b32",
+                "amdgpu.s_mov_b32",
+                "amdgpu.s_cselect_b32",
+            ),
+            (vector_descriptor,),
+            (),
+        )
+        assert all(
+            set(_rule_type_patterns(compiled, rule)) == {Scalar("i1"), Scalar("i32")}
+            for rule in rules[:-1]
+        )
+        assert set(_rule_type_patterns(compiled, rules[-1])) == {
+            Scalar("i1"),
+            Scalar("i64"),
+        }
+        assert rules[-1].flags & LOWER_RULE_FLAG_CONTRACT_ONLY
+
+
 def test_scalar_i32_bitwise_rules_prefer_encoded_constants() -> None:
     compiled = _COMPILED_INTEGER_RULES
 

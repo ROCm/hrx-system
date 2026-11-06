@@ -27,6 +27,7 @@ from loom.dsl import (
     ATTR_TYPE_FLAGS,
     DISTRIBUTION_TRANSFER,
     FLOAT,
+    I1,
     IDEMPOTENT,
     INTEGER,
     INVOLUTION,
@@ -84,6 +85,38 @@ scalar_subi = binary_op(
     effective_traits="loom_scalar_integer_arithmetic_effective_traits",
     canonicalize="loom_scalar_subi_canonicalize",
     examples=["%result = scalar.subi %lhs, %rhs : i32"],
+    eager_execution_cost=1,
+)
+
+scalar_addcarryui = Op(
+    "scalar.addcarryui",
+    group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Unsigned integer addition returning the width-wrapped sum and an i1 carry that is set exactly when the mathematical sum does not fit in the result width."),
+    operands=[Operand("lhs", INTEGER), Operand("rhs", INTEGER)],
+    results=[Result("sum", INTEGER), Result("carry", I1)],
+    constraints=[SameType("lhs", "rhs", "sum")],
+    facts="loom_scalar_addcarryui_facts",
+    facts_from_operands=True,
+    traits=[PURE, DISTRIBUTION_TRANSFER, SAFE_TO_SPECULATE],
+    format=[Ref("lhs"), COMMA, Ref("rhs"), COLON, TypeOf("sum")],
+    examples=["%sum, %carry = scalar.addcarryui %lhs, %rhs : i32"],
+    eager_execution_cost=1,
+)
+
+scalar_subborrowui = Op(
+    "scalar.subborrowui",
+    group=scalar_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Unsigned integer subtraction returning the width-wrapped difference and an i1 borrow that is set exactly when lhs is less than rhs."),
+    operands=[Operand("lhs", INTEGER), Operand("rhs", INTEGER)],
+    results=[Result("difference", INTEGER), Result("borrow", I1)],
+    constraints=[SameType("lhs", "rhs", "difference")],
+    facts="loom_scalar_subborrowui_facts",
+    facts_from_operands=True,
+    traits=[PURE, DISTRIBUTION_TRANSFER, SAFE_TO_SPECULATE],
+    format=[Ref("lhs"), COMMA, Ref("rhs"), COLON, TypeOf("difference")],
+    examples=["%difference, %borrow = scalar.subborrowui %lhs, %rhs : i32"],
     eager_execution_cost=1,
 )
 
@@ -584,6 +617,8 @@ scalar_copysignf = binary_op(
 ALL_ARITHMETIC_OPS: tuple[Op, ...] = (
     scalar_addi,
     scalar_subi,
+    scalar_addcarryui,
+    scalar_subborrowui,
     scalar_muli,
     scalar_divsi,
     scalar_divui,

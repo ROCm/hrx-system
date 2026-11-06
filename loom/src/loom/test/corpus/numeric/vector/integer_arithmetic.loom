@@ -5,9 +5,11 @@
 
 func.def @vector_i8_arithmetic(%lhs_input: buffer, %rhs_input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
+  %i1_base = index.constant 256 : offset
   %lhs_view = buffer.view %lhs_input[%base] : buffer -> view<32xi8>
   %rhs_view = buffer.view %rhs_input[%base] : buffer -> view<32xi8>
-  %results = buffer.view %output[%base] : buffer -> view<4x32xi8>
+  %results = buffer.view %output[%base] : buffer -> view<8x32xi8>
+  %i1_results = buffer.view %output[%i1_base] : buffer -> view<4x32xi8>
   %lhs = vector.load %lhs_view[0] : view<32xi8> -> vector<31xi8>
   %rhs = vector.load %rhs_view[0] : view<32xi8> -> vector<31xi8>
   %shift_amount = vector.splati 1 : vector<31xi8>
@@ -15,22 +17,44 @@ func.def @vector_i8_arithmetic(%lhs_input: buffer, %rhs_input: buffer, %output: 
   %difference = vector.subi %lhs, %rhs : vector<31xi8>
   %product = vector.muli %lhs, %rhs : vector<31xi8>
   %shifted = vector.shli %lhs, %shift_amount : vector<31xi8>
-  vector.store %sum, %results[0, 0] : vector<31xi8>, view<4x32xi8>
-  vector.store %difference, %results[1, 0] : vector<31xi8>, view<4x32xi8>
-  vector.store %product, %results[2, 0] : vector<31xi8>, view<4x32xi8>
-  vector.store %shifted, %results[3, 0] : vector<31xi8>, view<4x32xi8>
+  %wrapped_sum, %carry = vector.addcarryui %lhs, %rhs : vector<31xi8> -> vector<31xi1>
+  %wrapped_difference, %borrow = vector.subborrowui %lhs, %rhs : vector<31xi8> -> vector<31xi1>
+  %carry_bytes = vector.extui %carry : vector<31xi1> to vector<31xi8>
+  %borrow_bytes = vector.extui %borrow : vector<31xi1> to vector<31xi8>
+  %lhs1 = vector.trunci %lhs : vector<31xi8> to vector<31xi1>
+  %rhs1 = vector.trunci %rhs : vector<31xi8> to vector<31xi1>
+  %sum1, %carry1 = vector.addcarryui %lhs1, %rhs1 : vector<31xi1> -> vector<31xi1>
+  %difference1, %borrow1 = vector.subborrowui %lhs1, %rhs1 : vector<31xi1> -> vector<31xi1>
+  %sum1_bytes = vector.extui %sum1 : vector<31xi1> to vector<31xi8>
+  %carry1_bytes = vector.extui %carry1 : vector<31xi1> to vector<31xi8>
+  %difference1_bytes = vector.extui %difference1 : vector<31xi1> to vector<31xi8>
+  %borrow1_bytes = vector.extui %borrow1 : vector<31xi1> to vector<31xi8>
+  vector.store %sum, %results[0, 0] : vector<31xi8>, view<8x32xi8>
+  vector.store %difference, %results[1, 0] : vector<31xi8>, view<8x32xi8>
+  vector.store %product, %results[2, 0] : vector<31xi8>, view<8x32xi8>
+  vector.store %shifted, %results[3, 0] : vector<31xi8>, view<8x32xi8>
+  vector.store %wrapped_sum, %results[4, 0] : vector<31xi8>, view<8x32xi8>
+  vector.store %carry_bytes, %results[5, 0] : vector<31xi8>, view<8x32xi8>
+  vector.store %wrapped_difference, %results[6, 0] : vector<31xi8>, view<8x32xi8>
+  vector.store %borrow_bytes, %results[7, 0] : vector<31xi8>, view<8x32xi8>
+  vector.store %sum1_bytes, %i1_results[0, 0] : vector<31xi8>, view<4x32xi8>
+  vector.store %carry1_bytes, %i1_results[1, 0] : vector<31xi8>, view<4x32xi8>
+  vector.store %difference1_bytes, %i1_results[2, 0] : vector<31xi8>, view<4x32xi8>
+  vector.store %borrow1_bytes, %i1_results[3, 0] : vector<31xi8>, view<4x32xi8>
   func.return
 }
 
 func.def @vector_i8_arithmetic_oracle(%lhs_input: buffer, %rhs_input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
+  %i1_base = index.constant 256 : offset
   %begin = index.constant 0 : index
   %end = index.constant 31 : index
   %step = index.constant 1 : index
   %shift_amount = scalar.constant 1 : i8
   %lhs_view = buffer.view %lhs_input[%base] : buffer -> view<32xi8>
   %rhs_view = buffer.view %rhs_input[%base] : buffer -> view<32xi8>
-  %results = buffer.view %output[%base] : buffer -> view<4x32xi8>
+  %results = buffer.view %output[%base] : buffer -> view<8x32xi8>
+  %i1_results = buffer.view %output[%i1_base] : buffer -> view<4x32xi8>
   scf.for %i = [%begin to %end step %step] {
     %lhs = view.load %lhs_view[%i] : view<32xi8> -> i8
     %rhs = view.load %rhs_view[%i] : view<32xi8> -> i8
@@ -38,10 +62,30 @@ func.def @vector_i8_arithmetic_oracle(%lhs_input: buffer, %rhs_input: buffer, %o
     %difference = scalar.subi %lhs, %rhs : i8
     %product = scalar.muli %lhs, %rhs : i8
     %shifted = scalar.shli %lhs, %shift_amount : i8
-    view.store %sum, %results[0, %i] : i8, view<4x32xi8>
-    view.store %difference, %results[1, %i] : i8, view<4x32xi8>
-    view.store %product, %results[2, %i] : i8, view<4x32xi8>
-    view.store %shifted, %results[3, %i] : i8, view<4x32xi8>
+    %carry = scalar.cmpi ult, %sum, %lhs : i8
+    %borrow = scalar.cmpi ult, %lhs, %rhs : i8
+    %carry_byte = scalar.extui %carry : i1 to i8
+    %borrow_byte = scalar.extui %borrow : i1 to i8
+    %lhs1 = scalar.trunci %lhs : i8 to i1
+    %rhs1 = scalar.trunci %rhs : i8 to i1
+    %sum1 = scalar.xori %lhs1, %rhs1 : i1
+    %carry1 = scalar.andi %lhs1, %rhs1 : i1
+    %borrow1 = scalar.andi %rhs1, %sum1 : i1
+    %sum1_byte = scalar.extui %sum1 : i1 to i8
+    %carry1_byte = scalar.extui %carry1 : i1 to i8
+    %borrow1_byte = scalar.extui %borrow1 : i1 to i8
+    view.store %sum, %results[0, %i] : i8, view<8x32xi8>
+    view.store %difference, %results[1, %i] : i8, view<8x32xi8>
+    view.store %product, %results[2, %i] : i8, view<8x32xi8>
+    view.store %shifted, %results[3, %i] : i8, view<8x32xi8>
+    view.store %sum, %results[4, %i] : i8, view<8x32xi8>
+    view.store %carry_byte, %results[5, %i] : i8, view<8x32xi8>
+    view.store %difference, %results[6, %i] : i8, view<8x32xi8>
+    view.store %borrow_byte, %results[7, %i] : i8, view<8x32xi8>
+    view.store %sum1_byte, %i1_results[0, %i] : i8, view<4x32xi8>
+    view.store %carry1_byte, %i1_results[1, %i] : i8, view<4x32xi8>
+    view.store %sum1_byte, %i1_results[2, %i] : i8, view<4x32xi8>
+    view.store %borrow1_byte, %i1_results[3, %i] : i8, view<4x32xi8>
   }
   func.return
 }
@@ -50,9 +94,9 @@ check.scenario @vector_i8_arithmetic_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.generate.iota offset(-128) step(85) period(4) : tensor<32xi8>
     %rhs = check.generate.iota offset(127) step(-85) period(4) : tensor<32xi8>
-    %output = check.generate.fill value(91) : tensor<128xi8>
-    check.compare<@vector_i8_arithmetic, @vector_i8_arithmetic_oracle>(%lhs, %rhs, %output) : (tensor<32xi8>, tensor<32xi8>, tensor<128xi8>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<128xi8>
+    %output = check.generate.fill value(91) : tensor<384xi8>
+    check.compare<@vector_i8_arithmetic, @vector_i8_arithmetic_oracle>(%lhs, %rhs, %output) : (tensor<32xi8>, tensor<32xi8>, tensor<384xi8>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<384xi8>
     }
   }
   check.return
@@ -62,17 +106,25 @@ func.def @vector_i64_arithmetic(%lhs_input: buffer, %rhs_input: buffer, %output:
   %base = index.constant 0 : offset
   %lhs_view = buffer.view %lhs_input[%base] : buffer -> view<3xi64>
   %rhs_view = buffer.view %rhs_input[%base] : buffer -> view<3xi64>
-  %results = buffer.view %output[%base] : buffer -> view<4x3xi64>
+  %results = buffer.view %output[%base] : buffer -> view<8x3xi64>
   %lhs = vector.load %lhs_view[0] : view<3xi64> -> vector<3xi64>
   %rhs = vector.load %rhs_view[0] : view<3xi64> -> vector<3xi64>
   %min_signed = vector.minsi %lhs, %rhs : vector<3xi64>
+  vector.store %min_signed, %results[0, 0] : vector<3xi64>, view<8x3xi64>
   %max_signed = vector.maxsi %lhs, %rhs : vector<3xi64>
+  vector.store %max_signed, %results[1, 0] : vector<3xi64>, view<8x3xi64>
   %min_unsigned = vector.minui %lhs, %rhs : vector<3xi64>
+  vector.store %min_unsigned, %results[2, 0] : vector<3xi64>, view<8x3xi64>
   %max_unsigned = vector.maxui %lhs, %rhs : vector<3xi64>
-  vector.store %min_signed, %results[0, 0] : vector<3xi64>, view<4x3xi64>
-  vector.store %max_signed, %results[1, 0] : vector<3xi64>, view<4x3xi64>
-  vector.store %min_unsigned, %results[2, 0] : vector<3xi64>, view<4x3xi64>
-  vector.store %max_unsigned, %results[3, 0] : vector<3xi64>, view<4x3xi64>
+  vector.store %max_unsigned, %results[3, 0] : vector<3xi64>, view<8x3xi64>
+  %sum, %carry = vector.addcarryui %lhs, %rhs : vector<3xi64> -> vector<3xi1>
+  vector.store %sum, %results[4, 0] : vector<3xi64>, view<8x3xi64>
+  %carry_values = vector.extui %carry : vector<3xi1> to vector<3xi64>
+  vector.store %carry_values, %results[5, 0] : vector<3xi64>, view<8x3xi64>
+  %difference, %borrow = vector.subborrowui %lhs, %rhs : vector<3xi64> -> vector<3xi1>
+  vector.store %difference, %results[6, 0] : vector<3xi64>, view<8x3xi64>
+  %borrow_values = vector.extui %borrow : vector<3xi1> to vector<3xi64>
+  vector.store %borrow_values, %results[7, 0] : vector<3xi64>, view<8x3xi64>
   func.return
 }
 
@@ -83,7 +135,7 @@ func.def @vector_i64_arithmetic_oracle(%lhs_input: buffer, %rhs_input: buffer, %
   %step = index.constant 1 : index
   %lhs_view = buffer.view %lhs_input[%base] : buffer -> view<3xi64>
   %rhs_view = buffer.view %rhs_input[%base] : buffer -> view<3xi64>
-  %results = buffer.view %output[%base] : buffer -> view<4x3xi64>
+  %results = buffer.view %output[%base] : buffer -> view<8x3xi64>
   scf.for %i = [%begin to %end step %step] {
     %lhs = view.load %lhs_view[%i] : view<3xi64> -> i64
     %rhs = view.load %rhs_view[%i] : view<3xi64> -> i64
@@ -91,10 +143,20 @@ func.def @vector_i64_arithmetic_oracle(%lhs_input: buffer, %rhs_input: buffer, %
     %max_signed = scalar.maxsi %lhs, %rhs : i64
     %min_unsigned = scalar.minui %lhs, %rhs : i64
     %max_unsigned = scalar.maxui %lhs, %rhs : i64
-    view.store %min_signed, %results[0, %i] : i64, view<4x3xi64>
-    view.store %max_signed, %results[1, %i] : i64, view<4x3xi64>
-    view.store %min_unsigned, %results[2, %i] : i64, view<4x3xi64>
-    view.store %max_unsigned, %results[3, %i] : i64, view<4x3xi64>
+    %sum = scalar.addi %lhs, %rhs : i64
+    %carry = scalar.cmpi ult, %sum, %lhs : i64
+    %difference = scalar.subi %lhs, %rhs : i64
+    %borrow = scalar.cmpi ult, %lhs, %rhs : i64
+    %carry_value = scalar.extui %carry : i1 to i64
+    %borrow_value = scalar.extui %borrow : i1 to i64
+    view.store %min_signed, %results[0, %i] : i64, view<8x3xi64>
+    view.store %max_signed, %results[1, %i] : i64, view<8x3xi64>
+    view.store %min_unsigned, %results[2, %i] : i64, view<8x3xi64>
+    view.store %max_unsigned, %results[3, %i] : i64, view<8x3xi64>
+    view.store %sum, %results[4, %i] : i64, view<8x3xi64>
+    view.store %carry_value, %results[5, %i] : i64, view<8x3xi64>
+    view.store %difference, %results[6, %i] : i64, view<8x3xi64>
+    view.store %borrow_value, %results[7, %i] : i64, view<8x3xi64>
   }
   func.return
 }
@@ -103,9 +165,9 @@ check.scenario @vector_i64_arithmetic_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.generate.iota offset(-9223372036854775808) step(9223372036854775807) period(3) : tensor<3xi64>
     %rhs = check.generate.iota offset(9223372036854775807) step(-9223372036854775807) period(3) : tensor<3xi64>
-    %output = check.generate.fill value(-81985529216486896) : tensor<12xi64>
-    check.compare<@vector_i64_arithmetic, @vector_i64_arithmetic_oracle>(%lhs, %rhs, %output) : (tensor<3xi64>, tensor<3xi64>, tensor<12xi64>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<12xi64>
+    %output = check.generate.fill value(-81985529216486896) : tensor<24xi64>
+    check.compare<@vector_i64_arithmetic, @vector_i64_arithmetic_oracle>(%lhs, %rhs, %output) : (tensor<3xi64>, tensor<3xi64>, tensor<24xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<24xi64>
     }
   }
   check.return

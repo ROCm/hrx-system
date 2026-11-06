@@ -2141,7 +2141,7 @@ def test_implicit_registers_and_machine_ties_reach_low() -> None:
             OperandFlag.IMPLICIT,
             OperandFlag.STATE_WRITE,
         }
-        assert carry.reg_alts[0].reg_class == "aie2p.state.srcarry"
+        assert carry.reg_alts[0].reg_class == "aie2p.msrcarry"
         assert carry.reg_alts[0].flags == (RegClassAltFlag.PHYSICAL_ONLY,)
         assert carry.ready_stage == 1
 
@@ -2186,9 +2186,24 @@ def test_implicit_registers_and_machine_ties_reach_low() -> None:
             OperandFlag.STATE_READ,
         }
         assert carry_definition.reg_alts == carry_use.reg_alts
-        assert carry_definition.reg_alts[0].reg_class == "aie2p.state.srcarry"
+        assert carry_definition.reg_alts[0].reg_class == "aie2p.msrcarry"
         assert carry_definition.ready_stage == 1
         assert carry_use.read_stage == 1
+
+    carry_move = descriptors["amd.xdna.aie2p.move.carry-to-scalar"]
+    assert [operand.field_name for operand in carry_move.operands] == [
+        "dst",
+        "implicit_input_src",
+    ]
+    assert [operand.reg_alts[0].reg_class for operand in carry_move.operands] == [
+        "aie2p.er",
+        "aie2p.msrcarry",
+    ]
+    assert carry_move.operands[1].flags == (
+        OperandFlag.IMPLICIT,
+        OperandFlag.STATE_READ,
+    )
+    assert carry_move.asm_forms[0].mnemonic == "mov.carry"
 
     link_register = descriptors["amd.xdna.aie2p.return"].operands[0]
     assert link_register.field_name == "implicit_use_lr"

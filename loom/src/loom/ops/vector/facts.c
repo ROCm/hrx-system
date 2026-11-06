@@ -3102,15 +3102,18 @@ iree_status_t loom_vector_transform_facts(
 // Lanewise summary propagation
 //===----------------------------------------------------------------------===//
 
-static iree_status_t loom_vector_integer_binary_summary_facts(
+static iree_status_t loom_vector_integer_binary_summary_facts_impl(
     loom_fact_context_t* context, int32_t bit_count,
     const loom_value_facts_t* operand_facts, loom_value_facts_t* result_facts,
-    loom_vector_integer_binary_transfer_fn_t transfer_fn) {
-  bool fragment_handled = false;
-  IREE_RETURN_IF_ERROR(loom_vector_try_preserve_lanewise_fragment_facts(
-      context, bit_count, operand_facts, 2, result_facts, &fragment_handled));
-  if (fragment_handled) {
-    return iree_ok_status();
+    loom_vector_integer_binary_transfer_fn_t transfer_fn,
+    bool preserve_fragment) {
+  if (preserve_fragment) {
+    bool fragment_handled = false;
+    IREE_RETURN_IF_ERROR(loom_vector_try_preserve_lanewise_fragment_facts(
+        context, bit_count, operand_facts, 2, result_facts, &fragment_handled));
+    if (fragment_handled) {
+      return iree_ok_status();
+    }
   }
   // A missing summary is top, not a reason to skip scalar transfer: a known
   // mask can bound an otherwise unknown lane. Uniform summaries describe facts
@@ -3156,6 +3159,24 @@ static iree_status_t loom_vector_integer_binary_summary_facts(
   };
   return loom_value_facts_make_small_static_lanes(context, lane_slice,
                                                   &result_facts[0]);
+}
+
+static iree_status_t loom_vector_integer_binary_summary_facts(
+    loom_fact_context_t* context, int32_t bit_count,
+    const loom_value_facts_t* operand_facts, loom_value_facts_t* result_facts,
+    loom_vector_integer_binary_transfer_fn_t transfer_fn) {
+  return loom_vector_integer_binary_summary_facts_impl(
+      context, bit_count, operand_facts, result_facts, transfer_fn,
+      /*preserve_fragment=*/true);
+}
+
+static iree_status_t loom_vector_plain_integer_binary_summary_facts(
+    loom_fact_context_t* context, int32_t bit_count,
+    const loom_value_facts_t* operand_facts, loom_value_facts_t* result_facts,
+    loom_vector_integer_binary_transfer_fn_t transfer_fn) {
+  return loom_vector_integer_binary_summary_facts_impl(
+      context, bit_count, operand_facts, result_facts, transfer_fn,
+      /*preserve_fragment=*/false);
 }
 
 static iree_status_t loom_vector_integer_unary_summary_facts(
@@ -3947,6 +3968,66 @@ LOOM_VECTOR_MODULAR_BINARY_FACTS(loom_vector_addi_facts, loom_value_facts_addi,
                                  loom_value_facts_addi_modular)
 LOOM_VECTOR_MODULAR_BINARY_FACTS(loom_vector_subi_facts, loom_value_facts_subi,
                                  loom_value_facts_subi_modular)
+
+static void loom_vector_addcarryui_sum_facts(const loom_value_facts_t* lhs,
+                                             const loom_value_facts_t* rhs,
+                                             int32_t bit_count,
+                                             loom_value_facts_t* out) {
+  loom_value_facts_t carry;
+  loom_value_facts_addcarryui(lhs, rhs, bit_count, out, &carry);
+}
+
+static void loom_vector_addcarryui_carry_facts(const loom_value_facts_t* lhs,
+                                               const loom_value_facts_t* rhs,
+                                               int32_t bit_count,
+                                               loom_value_facts_t* out) {
+  loom_value_facts_t sum;
+  loom_value_facts_addcarryui(lhs, rhs, bit_count, &sum, out);
+}
+
+iree_status_t loom_vector_addcarryui_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  const int32_t bit_count =
+      loom_scalar_type_bitwidth(loom_vector_result_element_type(module, op));
+  IREE_RETURN_IF_ERROR(loom_vector_integer_binary_summary_facts(
+      context, bit_count, operand_facts, &result_facts[0],
+      loom_vector_addcarryui_sum_facts));
+  return loom_vector_plain_integer_binary_summary_facts(
+      context, bit_count, operand_facts, &result_facts[1],
+      loom_vector_addcarryui_carry_facts);
+}
+
+static void loom_vector_subborrowui_difference_facts(
+    const loom_value_facts_t* lhs, const loom_value_facts_t* rhs,
+    int32_t bit_count, loom_value_facts_t* out) {
+  loom_value_facts_t borrow;
+  loom_value_facts_subborrowui(lhs, rhs, bit_count, out, &borrow);
+}
+
+static void loom_vector_subborrowui_borrow_facts(const loom_value_facts_t* lhs,
+                                                 const loom_value_facts_t* rhs,
+                                                 int32_t bit_count,
+                                                 loom_value_facts_t* out) {
+  loom_value_facts_t difference;
+  loom_value_facts_subborrowui(lhs, rhs, bit_count, &difference, out);
+}
+
+iree_status_t loom_vector_subborrowui_facts(
+    loom_fact_context_t* context, const loom_module_t* module,
+    const loom_op_t* op, const loom_value_facts_t* operand_facts,
+    loom_value_facts_t* result_facts) {
+  const int32_t bit_count =
+      loom_scalar_type_bitwidth(loom_vector_result_element_type(module, op));
+  IREE_RETURN_IF_ERROR(loom_vector_integer_binary_summary_facts(
+      context, bit_count, operand_facts, &result_facts[0],
+      loom_vector_subborrowui_difference_facts));
+  return loom_vector_plain_integer_binary_summary_facts(
+      context, bit_count, operand_facts, &result_facts[1],
+      loom_vector_subborrowui_borrow_facts);
+}
+
 LOOM_VECTOR_MODULAR_BINARY_FACTS(loom_vector_muli_facts, loom_value_facts_muli,
                                  loom_value_facts_muli_modular)
 LOOM_VECTOR_INTEGER_BINARY_FACTS(loom_vector_divsi_facts,

@@ -167,6 +167,7 @@ loom_check_test_suite(
         "member_functions.cxx-test",
         "member_functions_cleanup.cxx-test",
         "member_functions_invalid.cxx-test",
+        "multiprecision_arithmetic.cxx-test",
         "nan_payloads.cxx-test",
         "narrow_float_subtraction.cxx-test",
         "numeric_conversion.cxx-test",

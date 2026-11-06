@@ -888,20 +888,25 @@ static iree_status_t loom_x86_function_packet(
     }
     operands.inputs[i] = loom_x86_function_register(input);
   }
-  if (packet->node->result_count) {
+  for (uint16_t i = 0; i < packet->node->result_count; ++i) {
     const loom_low_allocation_assignment_t* result =
-        loom_low_packet_result_assignment(&frame->allocation, packet, 0);
+        loom_low_packet_result_assignment(&frame->allocation, packet, i);
     if (may_dirty_upper_vector_state) {
       loom_x86_function_note_upper_vector_state(
           function, result->descriptor_reg_class_id, result->location_base);
     }
-    operands.result = loom_x86_function_register(result);
+    const uint8_t result_register = loom_x86_function_register(result);
+    if (i == 0) {
+      operands.result = result_register;
+    } else {
+      operands.secondary = result_register;
+    }
     const loom_x86_register_class_t result_class =
         loom_x86_logical_register_class(result->descriptor_reg_class_id);
     if (result_class == LOOM_X86_REGISTER_CLASS_GPR32 ||
         result_class == LOOM_X86_REGISTER_CLASS_GPR64) {
       const uint16_t preserved = (1u << 3) | (1u << 5) | (0xfu << 12);
-      function->saved_registers |= (1u << operands.result) & preserved;
+      function->saved_registers |= (1u << result_register) & preserved;
     }
   }
   uint32_t reference = UINT32_MAX;
@@ -917,7 +922,7 @@ static iree_status_t loom_x86_function_packet(
       reference = loom_attr_as_symbol(immediate).symbol_id;
       ++function->symbol_fixup_count;
     } else if (is_compare_branch && descriptor_layout->immediate_count == 1) {
-      operands.secondary_immediate = (uint8_t)immediate.i64;
+      operands.secondary = (uint8_t)immediate.i64;
     } else {
       operands.immediate = immediate.i64;
     }
@@ -931,11 +936,10 @@ static iree_status_t loom_x86_function_packet(
             LOOM_X86_ENCODING_FORM_COMPARE_IMMEDIATE_PREDICATE ||
         descriptor_layout->encoding_format_id ==
             LOOM_X86_ENCODING_FORM_COMPARE_IMMEDIATE_BRANCH) {
-      operands.secondary_immediate = (uint8_t)second_immediate;
+      operands.secondary = (uint8_t)second_immediate;
     } else {
-      operands.secondary_immediate =
-          (uint8_t)iree_math_count_trailing_zeros_u32(
-              (uint32_t)second_immediate);
+      operands.secondary = (uint8_t)iree_math_count_trailing_zeros_u32(
+          (uint32_t)second_immediate);
       operands.has_index = true;
     }
   }
@@ -952,7 +956,7 @@ static iree_status_t loom_x86_function_packet(
     // Every x86 condition code is adjacent to its logical inverse, with the
     // low bit selecting between them. Invert when the true edge falls through
     // so the encoded branch always targets the non-fallthrough successor.
-    operands.secondary_immediate ^= true_falls_through;
+    operands.secondary ^= true_falls_through;
     reference = targets[true_falls_through ? 1 : 0];
     loom_x86_function_append(function, descriptor_layout->encoding_format_id,
                              descriptor->encoding_id, operands, reference);

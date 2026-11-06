@@ -106,10 +106,12 @@ def _split_pair(
     )
 
 
-def _concat_pair(low: ValueRef, high: ValueRef) -> EmitRegisterConcat:
+def _concat_pair(
+    low: ValueRef, high: ValueRef, result_name: str = "result"
+) -> EmitRegisterConcat:
     return EmitRegisterConcat(
         sources=(low, high),
-        result=ValueRef.result("result"),
+        result=ValueRef.result(result_name),
     )
 
 
@@ -198,6 +200,9 @@ def _pair_add_sub_rule(
     source_op: Op,
     low_operation: str,
     high_operation: str,
+    *,
+    value_result: str = "result",
+    flag_result: str | None = None,
 ) -> DescriptorRule:
     lhs_emits, lhs_low, lhs_high = _split_pair(ValueRef.operand("lhs"), "lhs")
     rhs_emits, rhs_low, rhs_high = _split_pair(ValueRef.operand("rhs"), "rhs")
@@ -207,10 +212,25 @@ def _pair_add_sub_rule(
     result_high = ValueRef.temporary("result_high")
     carry_low = ValueRef.temporary("carry_low")
     carry_high = ValueRef.temporary("carry_high")
+    flag_guard: tuple[Guard, ...] = ()
+    flag_materialization: tuple[EmitDescriptorOp, ...] = ()
+    if flag_result is not None:
+        carry_to_scalar = _descriptor("amd.xdna.aie2p.move.carry-to-scalar")
+        flag_guard = (Guard.value_type(flag_result, _I1),)
+        flag_materialization = (
+            EmitDescriptorOp(
+                descriptor=carry_to_scalar,
+                results={"dst": ValueRef.result(flag_result)},
+                form=DescriptorEmitForm.OP,
+            ),
+        )
     return DescriptorRule(
         source_op=source_op,
         descriptor=high_descriptor,
-        guards=_typed_guards(("lhs", "rhs", "result"), _I64),
+        guards=(
+            *_typed_guards(("lhs", "rhs", value_result), _I64),
+            *flag_guard,
+        ),
         emit=(
             *lhs_emits,
             *rhs_emits,
@@ -232,7 +252,8 @@ def _pair_add_sub_rule(
                     "carry_out": DescriptorResultType(),
                 },
             ),
-            _concat_pair(result_low, result_high),
+            _concat_pair(result_low, result_high, value_result),
+            *flag_materialization,
         ),
     )
 
@@ -1282,6 +1303,13 @@ AIE2P_I64_RULES = (
         "add.carry_out.i32",
         "add.carry.i32",
     ),
+    _pair_add_sub_rule(
+        scalar_arithmetic.scalar_addcarryui,
+        "add.carry_out.i32",
+        "add.carry.i32",
+        value_result="sum",
+        flag_result="carry",
+    ),
     *(
         _pair_unsigned_division_by_word_rule(source_op, divisor_maximum=divisor_maximum)
         for source_op in (
@@ -1306,6 +1334,13 @@ AIE2P_I64_RULES = (
         scalar_arithmetic.scalar_subi,
         "sub.borrow_out.i32",
         "sub.borrow.i32",
+    ),
+    _pair_add_sub_rule(
+        scalar_arithmetic.scalar_subborrowui,
+        "sub.borrow_out.i32",
+        "sub.borrow.i32",
+        value_result="difference",
+        flag_result="borrow",
     ),
     *(
         _pair_compare_rule(predicate)

@@ -75,6 +75,8 @@ extern const loom_op_vtable_t loom_vector_copysignf_vtable;
 extern const loom_op_vtable_t loom_vector_fmaf_vtable;
 extern const loom_op_vtable_t loom_vector_addi_vtable;
 extern const loom_op_vtable_t loom_vector_subi_vtable;
+extern const loom_op_vtable_t loom_vector_addcarryui_vtable;
+extern const loom_op_vtable_t loom_vector_subborrowui_vtable;
 extern const loom_op_vtable_t loom_vector_muli_vtable;
 extern const loom_op_vtable_t loom_vector_divsi_vtable;
 extern const loom_op_vtable_t loom_vector_divui_vtable;

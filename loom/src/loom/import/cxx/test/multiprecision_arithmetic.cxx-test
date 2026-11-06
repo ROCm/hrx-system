@@ -1,0 +1,245 @@
+// RUN: roundtrip
+// INPUT: cxx data-model=lp64
+
+unsigned char add_byte(unsigned char lhs, unsigned char rhs,
+                       unsigned char carry_in, unsigned char* carry_out) {
+  return __builtin_addcb(lhs, rhs, carry_in, carry_out);
+}
+
+unsigned short add_short(unsigned short lhs, unsigned short rhs,
+                         unsigned short carry_in, unsigned short* carry_out) {
+  return __builtin_addcs(lhs, rhs, carry_in, carry_out);
+}
+
+unsigned add_int(unsigned lhs, unsigned rhs, unsigned carry_in,
+                 unsigned* carry_out) {
+  return __builtin_addc(lhs, rhs, carry_in, carry_out);
+}
+
+unsigned long add_long(unsigned long lhs, unsigned long rhs,
+                       unsigned long carry_in, unsigned long* carry_out) {
+  return __builtin_addcl(lhs, rhs, carry_in, carry_out);
+}
+
+unsigned long long add_long_long(unsigned long long lhs,
+                                 unsigned long long rhs,
+                                 unsigned long long carry_in,
+                                 unsigned long long* carry_out) {
+  return __builtin_addcll(lhs, rhs, carry_in, carry_out);
+}
+
+unsigned char subtract_byte(unsigned char lhs, unsigned char rhs,
+                            unsigned char borrow_in,
+                            unsigned char* borrow_out) {
+  return __builtin_subcb(lhs, rhs, borrow_in, borrow_out);
+}
+
+unsigned short subtract_short(unsigned short lhs, unsigned short rhs,
+                              unsigned short borrow_in,
+                              unsigned short* borrow_out) {
+  return __builtin_subcs(lhs, rhs, borrow_in, borrow_out);
+}
+
+unsigned subtract_int(unsigned lhs, unsigned rhs, unsigned borrow_in,
+                      unsigned* borrow_out) {
+  return __builtin_subc(lhs, rhs, borrow_in, borrow_out);
+}
+
+unsigned long subtract_long(unsigned long lhs, unsigned long rhs,
+                            unsigned long borrow_in,
+                            unsigned long* borrow_out) {
+  return __builtin_subcl(lhs, rhs, borrow_in, borrow_out);
+}
+
+unsigned long long subtract_long_long(unsigned long long lhs,
+                                      unsigned long long rhs,
+                                      unsigned long long borrow_in,
+                                      unsigned long long* borrow_out) {
+  return __builtin_subcll(lhs, rhs, borrow_in, borrow_out);
+}
+
+unsigned observe(unsigned value, unsigned* count) {
+  ++*count;
+  return value;
+}
+
+unsigned* observe_output(unsigned* output, unsigned* count) {
+  ++*count;
+  return output;
+}
+
+unsigned add_observed(unsigned lhs, unsigned rhs, unsigned carry_in,
+                      unsigned* count, unsigned* carry_out) {
+  return __builtin_addc(observe(lhs, count), observe(rhs, count),
+                        observe(carry_in, count),
+                        observe_output(carry_out, count));
+}
+
+// ----
+func.def public @add_byte(%lhs: i8, %rhs: i8, %carry_in: i8, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i8) {
+  %6, %7 = scalar.addcarryui %lhs, %rhs : i8
+  %8, %9 = scalar.addcarryui %6, %carry_in : i8
+  %10 = scalar.ori %7, %9 : i1
+  %11 = scalar.extui %10 : i1 to i8
+  %12 = buffer.view %carry_out[%carry_out_byte_offset] : buffer -> view<1xi8>
+  view.store %11, %12[0] : i8, view<1xi8>
+  func.return %8 : i8
+}
+
+func.def public @add_short(%lhs: i16, %rhs: i16, %carry_in: i16, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i16) {
+  %19, %20 = scalar.addcarryui %lhs, %rhs : i16
+  %21, %22 = scalar.addcarryui %19, %carry_in : i16
+  %23 = scalar.ori %20, %22 : i1
+  %24 = scalar.extui %23 : i1 to i16
+  %25 = buffer.view %carry_out[%carry_out_byte_offset] : buffer -> view<1xi16>
+  view.store %24, %25[0] : i16, view<1xi16>
+  func.return %21 : i16
+}
+
+func.def public @add_int(%lhs: i32, %rhs: i32, %carry_in: i32, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i32) {
+  %32, %33 = scalar.addcarryui %lhs, %rhs : i32
+  %34, %35 = scalar.addcarryui %32, %carry_in : i32
+  %36 = scalar.ori %33, %35 : i1
+  %37 = scalar.extui %36 : i1 to i32
+  %38 = buffer.view %carry_out[%carry_out_byte_offset] : buffer -> view<1xi32>
+  view.store %37, %38[0] : i32, view<1xi32>
+  func.return %34 : i32
+}
+
+func.def public @add_long(%lhs: i64, %rhs: i64, %carry_in: i64, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i64) {
+  %45, %46 = scalar.addcarryui %lhs, %rhs : i64
+  %47, %48 = scalar.addcarryui %45, %carry_in : i64
+  %49 = scalar.ori %46, %48 : i1
+  %50 = scalar.extui %49 : i1 to i64
+  %51 = buffer.view %carry_out[%carry_out_byte_offset] : buffer -> view<1xi64>
+  view.store %50, %51[0] : i64, view<1xi64>
+  func.return %47 : i64
+}
+
+func.def public @add_long_long(%lhs: i64, %rhs: i64, %carry_in: i64, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i64) {
+  %58, %59 = scalar.addcarryui %lhs, %rhs : i64
+  %60, %61 = scalar.addcarryui %58, %carry_in : i64
+  %62 = scalar.ori %59, %61 : i1
+  %63 = scalar.extui %62 : i1 to i64
+  %64 = buffer.view %carry_out[%carry_out_byte_offset] : buffer -> view<1xi64>
+  view.store %63, %64[0] : i64, view<1xi64>
+  func.return %60 : i64
+}
+
+func.def public @subtract_byte(%lhs: i8, %rhs: i8, %borrow_in: i8, %borrow_out: buffer, %borrow_out_byte_offset: offset) -> (i8) {
+  %71, %72 = scalar.subborrowui %lhs, %rhs : i8
+  %73, %74 = scalar.subborrowui %71, %borrow_in : i8
+  %75 = scalar.ori %72, %74 : i1
+  %76 = scalar.extui %75 : i1 to i8
+  %77 = buffer.view %borrow_out[%borrow_out_byte_offset] : buffer -> view<1xi8>
+  view.store %76, %77[0] : i8, view<1xi8>
+  func.return %73 : i8
+}
+
+func.def public @subtract_short(%lhs: i16, %rhs: i16, %borrow_in: i16, %borrow_out: buffer, %borrow_out_byte_offset: offset) -> (i16) {
+  %84, %85 = scalar.subborrowui %lhs, %rhs : i16
+  %86, %87 = scalar.subborrowui %84, %borrow_in : i16
+  %88 = scalar.ori %85, %87 : i1
+  %89 = scalar.extui %88 : i1 to i16
+  %90 = buffer.view %borrow_out[%borrow_out_byte_offset] : buffer -> view<1xi16>
+  view.store %89, %90[0] : i16, view<1xi16>
+  func.return %86 : i16
+}
+
+func.def public @subtract_int(%lhs: i32, %rhs: i32, %borrow_in: i32, %borrow_out: buffer, %borrow_out_byte_offset: offset) -> (i32) {
+  %97, %98 = scalar.subborrowui %lhs, %rhs : i32
+  %99, %100 = scalar.subborrowui %97, %borrow_in : i32
+  %101 = scalar.ori %98, %100 : i1
+  %102 = scalar.extui %101 : i1 to i32
+  %103 = buffer.view %borrow_out[%borrow_out_byte_offset] : buffer -> view<1xi32>
+  view.store %102, %103[0] : i32, view<1xi32>
+  func.return %99 : i32
+}
+
+func.def public @subtract_long(%lhs: i64, %rhs: i64, %borrow_in: i64, %borrow_out: buffer, %borrow_out_byte_offset: offset) -> (i64) {
+  %110, %111 = scalar.subborrowui %lhs, %rhs : i64
+  %112, %113 = scalar.subborrowui %110, %borrow_in : i64
+  %114 = scalar.ori %111, %113 : i1
+  %115 = scalar.extui %114 : i1 to i64
+  %116 = buffer.view %borrow_out[%borrow_out_byte_offset] : buffer -> view<1xi64>
+  view.store %115, %116[0] : i64, view<1xi64>
+  func.return %112 : i64
+}
+
+func.def public @subtract_long_long(%lhs: i64, %rhs: i64, %borrow_in: i64, %borrow_out: buffer, %borrow_out_byte_offset: offset) -> (i64) {
+  %123, %124 = scalar.subborrowui %lhs, %rhs : i64
+  %125, %126 = scalar.subborrowui %123, %borrow_in : i64
+  %127 = scalar.ori %124, %126 : i1
+  %128 = scalar.extui %127 : i1 to i64
+  %129 = buffer.view %borrow_out[%borrow_out_byte_offset] : buffer -> view<1xi64>
+  view.store %128, %129[0] : i64, view<1xi64>
+  func.return %125 : i64
+}
+
+func.def public @observe(%value: i32, %count: buffer, %count_byte_offset: offset) -> (i32) {
+  %134 = buffer.view %count[%count_byte_offset] : buffer -> view<1xi32>
+  %135 = view.load %134[0] : view<1xi32> -> i32
+  %136 = scalar.constant 1 : i32
+  %137 = scalar.addi %135, %136 : i32
+  view.store %137, %134[0] : i32, view<1xi32>
+  func.return %value : i32
+}
+
+func.def public @observe_output(%output: buffer, %output_byte_offset: offset, %count: buffer, %count_byte_offset: offset) -> (buffer, offset) {
+  %144 = buffer.view %count[%count_byte_offset] : buffer -> view<1xi32>
+  %145 = view.load %144[0] : view<1xi32> -> i32
+  %146 = scalar.constant 1 : i32
+  %147 = scalar.addi %145, %146 : i32
+  view.store %147, %144[0] : i32, view<1xi32>
+  func.return %output, %output_byte_offset : buffer, offset
+}
+
+func.def public @add_observed(%lhs: i32, %rhs: i32, %carry_in: i32, %count: buffer, %count_byte_offset: offset, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i32) {
+  %156 = func.call @observe(%lhs, %count, %count_byte_offset) : (i32, buffer, offset) -> (i32)
+  %157 = func.call @observe(%rhs, %count, %count_byte_offset) : (i32, buffer, offset) -> (i32)
+  %158 = func.call @observe(%carry_in, %count, %count_byte_offset) : (i32, buffer, offset) -> (i32)
+  %159, %160 = func.call @observe_output(%carry_out, %carry_out_byte_offset, %count, %count_byte_offset) : (buffer, offset, buffer, offset) -> (buffer, offset)
+  %161, %162 = scalar.addcarryui %156, %157 : i32
+  %163, %164 = scalar.addcarryui %161, %158 : i32
+  %165 = scalar.ori %162, %164 : i1
+  %166 = scalar.extui %165 : i1 to i32
+  %167 = buffer.view %159[%160] : buffer -> view<1xi32>
+  view.store %166, %167[0] : i32, view<1xi32>
+  func.return %163 : i32
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx data-model=llp64
+
+unsigned long add_long(unsigned long lhs, unsigned long rhs,
+                       unsigned long carry_in, unsigned long* carry_out) {
+  return __builtin_addcl(lhs, rhs, carry_in, carry_out);
+}
+
+unsigned long subtract_long(unsigned long lhs, unsigned long rhs,
+                            unsigned long borrow_in,
+                            unsigned long* borrow_out) {
+  return __builtin_subcl(lhs, rhs, borrow_in, borrow_out);
+}
+
+// ----
+func.def public @add_long(%lhs: i32, %rhs: i32, %carry_in: i32, %carry_out: buffer, %carry_out_byte_offset: offset) -> (i32) {
+  %6, %7 = scalar.addcarryui %lhs, %rhs : i32
+  %8, %9 = scalar.addcarryui %6, %carry_in : i32
+  %10 = scalar.ori %7, %9 : i1
+  %11 = scalar.extui %10 : i1 to i32
+  %12 = buffer.view %carry_out[%carry_out_byte_offset] : buffer -> view<1xi32>
+  view.store %11, %12[0] : i32, view<1xi32>
+  func.return %8 : i32
+}
+
+func.def public @subtract_long(%lhs: i32, %rhs: i32, %borrow_in: i32, %borrow_out: buffer, %borrow_out_byte_offset: offset) -> (i32) {
+  %19, %20 = scalar.subborrowui %lhs, %rhs : i32
+  %21, %22 = scalar.subborrowui %19, %borrow_in : i32
+  %23 = scalar.ori %20, %22 : i1
+  %24 = scalar.extui %23 : i1 to i32
+  %25 = buffer.view %borrow_out[%borrow_out_byte_offset] : buffer -> view<1xi32>
+  view.store %24, %25[0] : i32, view<1xi32>
+  func.return %21 : i32
+}

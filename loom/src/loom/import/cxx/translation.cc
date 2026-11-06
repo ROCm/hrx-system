@@ -4355,6 +4355,71 @@ class Translator final : private Initialization::Evaluation {
         });
   }
 
+  std::optional<IntrinsicCallResult> multiprecision_arithmetic_builtin(
+      cxx::CallExpressionAST* call) {
+    auto* callee = cxx::ast_cast<cxx::IdExpressionAST>(call->baseExpression);
+    using Builtin = cxx::BuiltinFunctionKind;
+    bool addition;
+    switch (cxx::resolveBuiltinFunctionKind(callee)) {
+      case Builtin::T___BUILTIN_ADDCB:
+      case Builtin::T___BUILTIN_ADDCS:
+      case Builtin::T___BUILTIN_ADDC:
+      case Builtin::T___BUILTIN_ADDCL:
+      case Builtin::T___BUILTIN_ADDCLL:
+        addition = true;
+        break;
+      case Builtin::T___BUILTIN_SUBCB:
+      case Builtin::T___BUILTIN_SUBCS:
+      case Builtin::T___BUILTIN_SUBC:
+      case Builtin::T___BUILTIN_SUBCL:
+      case Builtin::T___BUILTIN_SUBCLL:
+        addition = false;
+        break;
+      default:
+        return std::nullopt;
+    }
+
+    std::array<Value, 4> arguments;
+    auto* argument = call->expressionList;
+    for (auto& value : arguments) {
+      value = expression(argument->value);
+      argument = argument->next;
+    }
+
+    const loom_type_t type = types_.get(call->type, call);
+    const loom_location_id_t location = locations_.get(call);
+    auto build =
+        addition ? loom_scalar_addcarryui_build : loom_scalar_subborrowui_build;
+    loom_op_t* first_op = nullptr;
+    check(build(&builder_, arguments[0].ssa(), arguments[1].ssa(), type,
+                location, &first_op));
+    loom_op_t* second_op = nullptr;
+    // Carry/borrow input is a full-width value rather than an i1. Each
+    // addition or subtraction can independently contribute to the output bit.
+    check(build(&builder_, loom_op_results(first_op)[0], arguments[2].ssa(),
+                type, location, &second_op));
+
+    const loom_type_t i1_type = loom_type_scalar(LOOM_SCALAR_TYPE_I1);
+    loom_op_t* flag_op = nullptr;
+    check(loom_scalar_ori_build(&builder_, loom_op_results(first_op)[1],
+                                loom_op_results(second_op)[1], i1_type,
+                                location, &flag_op));
+    loom_op_t* extended_flag_op = nullptr;
+    check(loom_scalar_extui_build(&builder_, loom_op_results(flag_op)[0],
+                                  i1_type, type, location, &extended_flag_op));
+
+    auto* output_expression = call->expressionList->next->next->next->value;
+    auto* output_type =
+        cxx::type_cast<cxx::PointerType>(output_expression->type)
+            ->elementType();
+    auto output = storage_.dereference(
+        storage_.project(arguments[3].pointer(), output_type, call),
+        output_type, call);
+    storage_.store(output, loom_op_results(extended_flag_op)[0], output_type,
+                   call);
+    return IntrinsicCallResult{Value(loom_op_results(second_op)[0])};
+  }
+
   std::optional<IntrinsicCallResult> builtin(cxx::CallExpressionAST* call) {
     if (auto atomic =
             AtomicBuiltin::resolve(unit_, diagnostics_, types_, call)) {
@@ -4384,6 +4449,9 @@ class Translator final : private Initialization::Evaluation {
       }
       return IntrinsicCallResult{exponent->call(
           arguments, storage_, call, &builder_, locations_.get(call))};
+    }
+    if (auto arithmetic = multiprecision_arithmetic_builtin(call)) {
+      return arithmetic;
     }
     return std::nullopt;
   }

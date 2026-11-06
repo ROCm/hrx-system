@@ -59,6 +59,7 @@ def _evaluate_rule(
         ValueRef.operand("lhs"): _split_i64(lhs),
         ValueRef.operand("rhs"): _split_i64(rhs),
     }
+    carry_state = 0
     for emit in rule.emit:
         if isinstance(emit, EmitRegisterSlice):
             source = values[emit.source]
@@ -102,16 +103,18 @@ def _evaluate_rule(
             )
             assert isinstance(rhs_value, int)
             result = operands["s0"] + rhs_value + operands.get("carry_in", 0)
+            carry_state = int(result > _U32_MASK)
             if "carry_out" in emit.results:
-                values[emit.results["carry_out"]] = int(result > _U32_MASK)
+                values[emit.results["carry_out"]] = carry_state
         elif semantic_tag in (
             "integer.sub.i32",
             "integer.sub.borrow_out.i32",
             "integer.sub.borrow_in_out.i32",
         ):
             result = operands["s0"] - operands["s1"] - operands.get("carry_in", 0)
+            carry_state = int(result < 0)
             if "carry_out" in emit.results:
-                values[emit.results["carry_out"]] = int(result < 0)
+                values[emit.results["carry_out"]] = carry_state
         elif semantic_tag == "integer.lshl.i32":
             result = _logical_shift(operands["s0"], operands["s1"])
         elif semantic_tag == "integer.ashl.i32":
@@ -131,6 +134,8 @@ def _evaluate_rule(
             "register.move.from.division-state",
         ):
             result = operands["src"]
+        elif semantic_tag == "register.move.carry-to-scalar":
+            result = carry_state
         elif semantic_tag == "integer.divide.step.unsigned.i32":
             state = operands["sd"]
             remainder = _u32((operands["s0"] << 1) | (state >> 31))
@@ -393,6 +398,32 @@ def test_i64_binary_recipes_are_exact() -> None:
     for lhs, rhs in _i64_samples():
         for rule, reference in binary_rules:
             assert _evaluate_rule(rule, lhs, rhs) == reference(lhs, rhs) & _U64_MASK
+
+
+def test_i64_carry_and_borrow_recipes_are_exact() -> None:
+    carry_and_borrow_rules = (
+        (
+            _rule(scalar_arithmetic.scalar_addcarryui),
+            "sum",
+            "carry",
+            lambda lhs, rhs: lhs + rhs,
+        ),
+        (
+            _rule(scalar_arithmetic.scalar_subborrowui),
+            "difference",
+            "borrow",
+            lambda lhs, rhs: lhs - rhs,
+        ),
+    )
+    for lhs, rhs in _i64_samples():
+        for rule, value_name, flag_name, reference in carry_and_borrow_rules:
+            mathematical_result = reference(lhs, rhs)
+            assert _evaluate_rule(rule, lhs, rhs, value_name) == (
+                mathematical_result & _U64_MASK
+            )
+            assert _evaluate_rule(rule, lhs, rhs, flag_name) == int(
+                mathematical_result < 0 or mathematical_result > _U64_MASK
+            )
 
 
 def test_i64_unsigned_division_by_word_recipes_are_exact() -> None:

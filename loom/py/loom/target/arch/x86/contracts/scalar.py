@@ -242,6 +242,57 @@ def _integer_binary_rules(
     )
 
 
+def _unsigned_carry_borrow_rules(
+    descriptor_lookup: _DescriptorLookup,
+) -> Iterable[DescriptorRule]:
+    for source_op, operation, value_result, overflow_result, overflow_name in (
+        (
+            scalar_arithmetic.scalar_addcarryui,
+            "add",
+            "sum",
+            "carry",
+            "carry",
+        ),
+        (
+            scalar_arithmetic.scalar_subborrowui,
+            "sub",
+            "difference",
+            "borrow",
+            "borrow",
+        ),
+    ):
+        for type_pattern, bit_count in (
+            (_I8, 8),
+            (_I16, 16),
+            (_I32, 32),
+            (_I64, 64),
+        ):
+            descriptor = descriptor_lookup(
+                f"x86.scalar.{operation}.{overflow_name}.gpr{bit_count}"
+            )
+            yield DescriptorRule(
+                source_op=source_op,
+                descriptor=descriptor,
+                guards=(
+                    *_typed_guards(("lhs", "rhs", value_result), type_pattern),
+                    Guard.value_type(overflow_result, _I1),
+                ),
+                emit=(
+                    _op_emit(
+                        descriptor=descriptor,
+                        operands={
+                            "lhs": ValueRef.operand("lhs"),
+                            "rhs": ValueRef.operand("rhs"),
+                        },
+                        results={
+                            "value": ValueRef.result(value_result),
+                            "overflow": ValueRef.result(overflow_result),
+                        },
+                    ),
+                ),
+            )
+
+
 def _select_rule(
     type_pattern: TypePattern,
     descriptor_key: str,
@@ -1189,6 +1240,7 @@ def _cases() -> Sequence[ContractCase]:
         *_view_alias_rules(),
         _buffer_load_i8_u_rule(descriptor_lookup),
         _buffer_store_i8_rule(descriptor_lookup),
+        *_unsigned_carry_borrow_rules(descriptor_lookup),
         *(
             rule
             for type_pattern, register_width in ((_I32, 32), (_I64, 64))
