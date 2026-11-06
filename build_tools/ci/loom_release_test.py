@@ -59,27 +59,30 @@ class LoomReleaseTest(unittest.TestCase):
                         prefix + "loom.json",
                         json.dumps({"catalog": self.identity.catalog}),
                     )
-        for platform in release.PLATFORMS:
-            path = self.directory / release.server_archive_name(self.identity, platform)
-            binary_name = release.SERVER_BINARIES[platform]
-            information = ZipInfo(binary_name, (1980, 1, 1, 0, 0, 0))
-            information.create_system = 3
-            information.external_attr = (stat.S_IFREG | 0o755) << 16
-            information.compress_type = ZIP_DEFLATED
-            with ZipFile(
-                path, "w", compression=ZIP_DEFLATED, compresslevel=9
-            ) as archive:
-                archive.writestr(information, b"native executable")
+        for tool in release.STANDALONE_TOOLS:
+            for platform in release.PLATFORMS:
+                path = self.directory / release.standalone_archive_name(
+                    self.identity, tool, platform
+                )
+                binary_name = release.standalone_binary_name(tool, platform)
+                information = ZipInfo(binary_name, (1980, 1, 1, 0, 0, 0))
+                information.create_system = 3
+                information.external_attr = (stat.S_IFREG | 0o755) << 16
+                information.compress_type = ZIP_DEFLATED
+                with ZipFile(
+                    path, "w", compression=ZIP_DEFLATED, compresslevel=9
+                ) as archive:
+                    archive.writestr(information, b"native executable")
         self.wheels = release.release_wheels(
             self.directory, self.identity, self.description
         )
         self.artifacts = release.release_artifacts(
             self.directory, self.identity, self.description
         )
-        self.servers = [
+        self.standalones = [
             artifact
             for artifact in self.artifacts
-            if isinstance(artifact, release.ServerArchive)
+            if isinstance(artifact, release.StandaloneArchive)
         ]
         release.write_checksums(self.directory, self.artifacts)
         self.assets = {artifact.path.name: artifact.path for artifact in self.artifacts}
@@ -155,8 +158,8 @@ class LoomReleaseTest(unittest.TestCase):
                         )
                 else:
                     self.assertIn(f"hrx-loom=={version}", body)
-                for server in self.servers:
-                    self.assertIn(server.path.name, body)
+                for standalone in self.standalones:
+                    self.assertIn(standalone.path.name, body)
                 self.assertIn("./loom-serve --version", body)
                 self.assertIn("Release, Tracy, Debug, and ASAN", body)
                 self.assertIn("SHA256SUMS", body)
@@ -178,7 +181,7 @@ class LoomReleaseTest(unittest.TestCase):
     def test_partial_retry_checks_all_overlaps_before_upload(self):
         present = {
             self.wheels[0].path.name,
-            self.servers[0].path.name,
+            self.standalones[0].path.name,
             "SHA256SUMS",
         }
         events = []
@@ -215,7 +218,7 @@ class LoomReleaseTest(unittest.TestCase):
         self.assertNotIn("--clobber", upload)
 
     def test_conflicting_overlap_prevents_all_uploads(self):
-        present = {self.wheels[0].path.name, self.servers[0].path.name}
+        present = {self.wheels[0].path.name, self.standalones[0].path.name}
         conflicting_name = max(present)
         downloads = []
 
@@ -276,12 +279,14 @@ class LoomReleaseTest(unittest.TestCase):
 
     def test_asset_inventory_is_complete_and_rejects_invalid_records(self):
         name = self.wheels[0].path.name
-        server = self.servers[0]
-        unexpected_server = server.path.name.replace(self.identity.version, "0.0.1", 1)
+        unexpected_archives = [
+            archive.path.name.replace(self.identity.version, "0.0.1", 1)
+            for archive in self.standalones
+        ]
         for records in (
             self.records([name, name]),
             self.records(["unexpected.whl"]),
-            self.records([unexpected_server]),
+            *(self.records([name]) for name in unexpected_archives),
             [{"name": name, "state": "starter"}],
         ):
             with (

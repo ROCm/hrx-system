@@ -15,7 +15,7 @@ import re
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
+from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile, ZipInfo
 
 _NUMBER = r"(?:0|[1-9][0-9]*)"
 _RELEASE = rf"{_NUMBER}\.{_NUMBER}\.{_NUMBER}(?:(?:a|b|rc){_NUMBER})?"
@@ -25,10 +25,7 @@ PROFILES = ("release", "tracy", "debug", "asan")
 LINUX_X86_64_PLATFORM = "manylinux_2_39_x86_64"
 WINDOWS_X86_64_PLATFORM = "win_amd64"
 PLATFORMS = (LINUX_X86_64_PLATFORM, WINDOWS_X86_64_PLATFORM)
-SERVER_BINARIES = {
-    LINUX_X86_64_PLATFORM: "loom-serve",
-    WINDOWS_X86_64_PLATFORM: "loom-serve.exe",
-}
+STANDALONE_TOOLS = ("loom-serve", "amdf-info")
 
 
 class ReleaseChannel(enum.StrEnum):
@@ -93,10 +90,15 @@ def read_identity(path: Path) -> Identity:
     return parse_identity(json.loads(path.read_text(encoding="utf-8")))
 
 
-def server_archive_name(identity: Identity, platform: str) -> str:
-    if platform not in SERVER_BINARIES:
-        raise ValueError(f"Unsupported standalone server platform: {platform}")
-    return f"loom-serve-{identity.version}-{platform}.zip"
+def standalone_binary_name(tool: str, platform: str) -> str:
+    if tool not in STANDALONE_TOOLS or platform not in PLATFORMS:
+        raise ValueError(f"Unsupported standalone executable: {tool}/{platform}")
+    return tool + (".exe" if platform == WINDOWS_X86_64_PLATFORM else "")
+
+
+def standalone_archive_name(identity: Identity, tool: str, platform: str) -> str:
+    standalone_binary_name(tool, platform)
+    return f"{tool}-{identity.version}-{platform}.zip"
 
 
 @dataclass(frozen=True)
@@ -112,16 +114,18 @@ class Wheel:
 
 
 @dataclass(frozen=True)
-class ServerArchive:
+class StandaloneArchive:
     # Exact standalone archive inspected; publishers retain these bytes.
     path: Path
+    # Public executable packaged without SDK companions.
+    tool: str
     # Audited Linux or native Windows platform tag.
     platform: str
     # SHA-256 of the complete ZIP archive.
     digest: str
 
 
-ReleaseArtifact = Wheel | ServerArchive
+ReleaseArtifact = Wheel | StandaloneArchive
 
 
 def inspect_wheel(path: Path, identity: Identity, description: str) -> Wheel:
@@ -205,19 +209,31 @@ def release_wheels(
     return wheels
 
 
-def inspect_server_archive(path: Path, identity: Identity) -> ServerArchive:
+def write_standalone_archive(binary: Path, path: Path) -> None:
+    """Archives the qualified executable bytes with canonical ZIP metadata."""
+    information = ZipInfo(binary.name, (1980, 1, 1, 0, 0, 0))
+    information.create_system = 3
+    information.external_attr = (stat.S_IFREG | 0o755) << 16
+    information.compress_type = ZIP_DEFLATED
+    with ZipFile(path, "x") as archive:
+        archive.writestr(information, binary.read_bytes(), compresslevel=9)
+
+
+def inspect_standalone_archive(path: Path, identity: Identity) -> StandaloneArchive:
     filenames = {
-        server_archive_name(identity, platform): platform for platform in PLATFORMS
+        standalone_archive_name(identity, tool, platform): (tool, platform)
+        for tool in STANDALONE_TOOLS
+        for platform in PLATFORMS
     }
     if path.name not in filenames:
-        raise ValueError(f"Unexpected standalone server release: {path.name}")
-    platform = filenames[path.name]
-    binary_name = SERVER_BINARIES[platform]
+        raise ValueError(f"Unexpected standalone executable release: {path.name}")
+    tool, platform = filenames[path.name]
+    binary_name = standalone_binary_name(tool, platform)
     with ZipFile(path) as archive:
         members = archive.infolist()
         if len(members) != 1 or members[0].filename != binary_name:
             raise ValueError(
-                f"Standalone server archive {path.name} must contain only {binary_name}"
+                f"Standalone archive {path.name} must contain only {binary_name}"
             )
         member = members[0]
         if (
@@ -230,28 +246,29 @@ def inspect_server_archive(path: Path, identity: Identity) -> ServerArchive:
             or archive.comment
         ):
             raise ValueError(
-                f"Standalone server archive {path.name} has noncanonical ZIP metadata"
+                f"Standalone archive {path.name} has noncanonical ZIP metadata"
             )
         if not archive.read(member):
-            raise ValueError(f"Standalone server archive {path.name} is empty")
+            raise ValueError(f"Standalone archive {path.name} is empty")
     with path.open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    return ServerArchive(path, platform, digest)
+    return StandaloneArchive(path, tool, platform, digest)
 
 
-def release_servers(directory: Path, identity: Identity) -> list[ServerArchive]:
-    servers = [
-        inspect_server_archive(path, identity)
-        for path in sorted(directory.glob("loom-serve-*.zip"))
+def release_standalones(directory: Path, identity: Identity) -> list[StandaloneArchive]:
+    archives = [
+        inspect_standalone_archive(path, identity)
+        for path in sorted(directory.glob("*.zip"))
     ]
-    actual = {server.platform for server in servers}
-    missing = set(PLATFORMS) - actual
+    actual = {(archive.tool, archive.platform) for archive in archives}
+    expected = {(tool, platform) for tool in STANDALONE_TOOLS for platform in PLATFORMS}
+    missing = expected - actual
     if missing:
         raise ValueError(
-            "Release requires one standalone server per platform; "
+            "Release requires each standalone executable for each platform; "
             f"missing={sorted(missing)}"
         )
-    return servers
+    return archives
 
 
 def release_artifacts(
@@ -259,7 +276,7 @@ def release_artifacts(
 ) -> list[ReleaseArtifact]:
     return [
         *release_wheels(directory, identity, description),
-        *release_servers(directory, identity),
+        *release_standalones(directory, identity),
     ]
 
 
