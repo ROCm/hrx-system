@@ -222,7 +222,11 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
            void** inout_pointer) {
           auto* test = static_cast<MembershipTest*>(self);
           if (command != IREE_ALLOCATOR_COMMAND_FREE && test->allocate_) {
-            test->allocate_();
+            IREE_RETURN_IF_ERROR(test->allocate_(
+                static_cast<const iree_allocator_alloc_params_t*>(params)
+                    ->byte_length));
+          } else if (command == IREE_ALLOCATOR_COMMAND_FREE && test->free_) {
+            test->free_(*inout_pointer);
           }
           const auto system = iree_allocator_system();
           return system.ctl(system.self, command, params, inout_pointer);
@@ -280,6 +284,20 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
     iree_hal_amd_gpu_program_pool_deinitialize(&programs_);
   }
 
+  void AwaitSlotCount(uint32_t count) {
+    bool ready = false;
+    while (!ready) {
+      iree_slim_mutex_lock(&membership_.mutex);
+      ready = membership_.slot_count == count;
+      iree_slim_mutex_unlock(&membership_.mutex);
+      if (!ready) {
+        std::this_thread::yield();
+      }
+    }
+  }
+
+  void SourceAllocationProgress(bool fail);
+
   // Native wake dependency; no GPU is accessed.
   amdf_gpu_api_t gpu_ = {};
   // Borrowed native owner and diagnostic destination.
@@ -333,7 +351,9 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
   // Protocol metadata growth, including caller allocation and publisher join.
   std::function<iree_status_t(Queue*, uint32_t)> reserve_;
   // Host allocation dependency for stable coordinate and source-table storage.
-  std::function<void()> allocate_;
+  std::function<iree_status_t(iree_host_size_t)> allocate_;
+  // Host storage retirement, including displaced worker source tables.
+  std::function<void(void*)> free_;
 };
 
 TEST_P(MembershipTest, IdleQueueReleaseRearmsRetainedDownload) {
@@ -612,6 +632,306 @@ TEST_P(MembershipTest, NativeConstructionAllowsIndependentGrowthAndRelease) {
   EXPECT_EQ(destroyed_.load(), 4u);
 }
 
+TEST_P(MembershipTest, SlotAllocationAllowsIndependentConstructionAndReuse) {
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* first = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  std::binary_semaphore entered{0}, resume{0};
+  std::atomic<bool> hold{true};
+  allocate_ = [&](iree_host_size_t) {
+    if (hold.exchange(false)) {
+      entered.release();
+      resume.acquire();
+    }
+    return iree_ok_status();
+  };
+  iree_hal_queue_t* pending = nullptr;
+  std::jthread constructor([&] {
+    IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &params, &pending));
+  });
+  entered.acquire();
+  EXPECT_EQ(membership_.pending_allocations.slot_count, 1u);
+  iree_hal_queue_t* independent = nullptr;
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &params, &independent));
+  EXPECT_EQ(reinterpret_cast<Queue*>(independent)->ordinal, 2u);
+  iree_hal_queue_release(first);
+  iree_hal_queue_t* reused = nullptr;
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
+                                                           &params, &reused));
+  EXPECT_EQ(reinterpret_cast<Queue*>(reused)->ordinal, 1u);
+  EXPECT_EQ(reinterpret_cast<Queue*>(reused)->initial_epoch, 1u);
+  iree_hal_queue_release(reused);
+  iree_hal_queue_release(independent);
+  EXPECT_EQ(destroyed_.load(), 3u);
+  resume.release();
+  constructor.join();
+  EXPECT_EQ(reinterpret_cast<Queue*>(pending)->ordinal, 3u);
+  EXPECT_EQ(membership_.pending_allocations.slot_count, 0u);
+  EXPECT_EQ(membership_.slot_count, 3u);
+  iree_hal_queue_release(pending);
+  allocate_ = {};
+}
+
+void MembershipTest::SourceAllocationProgress(bool fail) {
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* existing[3] = {};
+  for (auto& queue : existing) {
+    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
+                                                             &params, &queue));
+  }
+  std::binary_semaphore entered{0}, resume{0};
+  std::atomic<uint32_t> allocations{0};
+  std::atomic<iree_host_size_t> source_size{0};
+  allocate_ = [&](iree_host_size_t size) {
+    if (!source_size.load()) {
+      iree_slim_mutex_lock(&membership_.mutex);
+      if (membership_.pending_allocations.source_capacity) {
+        source_size = size;
+      }
+      iree_slim_mutex_unlock(&membership_.mutex);
+    }
+    const bool source = size == source_size.load();
+    if (source && allocations.fetch_add(1) == 0) {
+      entered.release();
+      resume.acquire();
+      if (fail) {
+        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "source storage unavailable");
+      }
+    }
+    return iree_ok_status();
+  };
+  iree_hal_queue_t* growing = nullptr;
+  std::jthread constructor([&] {
+    auto status = iree_hal_amd_gpu_queue_membership_acquire(&membership_,
+                                                            &params, &growing);
+    if (fail) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    } else {
+      IREE_EXPECT_OK(status);
+    }
+  });
+  entered.acquire();
+  iree_hal_queue_t* dependent = nullptr;
+  std::jthread other([&] {
+    IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &params, &dependent));
+  });
+  AwaitSlotCount(5);
+  // Two reserved constructors now extend beyond the old table. Removing and
+  // reusing an installed source must neither advertise that unprepared extent
+  // nor join its allocator. The dependent caller shares the one preparation.
+  iree_hal_queue_release(existing[0]);
+  existing[0] = nullptr;
+  iree_hal_queue_t* reused = nullptr;
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
+                                                           &params, &reused));
+  EXPECT_EQ(reinterpret_cast<Queue*>(reused)->ordinal, 1u);
+  iree_hal_queue_release(reused);
+  EXPECT_EQ(destroyed_.load(), 2u);
+  EXPECT_EQ(allocations.load(), 1u);
+  resume.release();
+  constructor.join();
+  other.join();
+  EXPECT_EQ(membership_.pending_allocations.source_capacity, 0u);
+  EXPECT_EQ(allocations.load(), fail ? 2u : 1u);
+  allocate_ = {};
+  EXPECT_EQ(reinterpret_cast<Queue*>(dependent)->ordinal, 5u);
+  if (fail) {
+    EXPECT_EQ(growing, nullptr);
+    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &params, &growing));
+    EXPECT_EQ(reinterpret_cast<Queue*>(growing)->ordinal, 4u);
+  }
+  for (auto* queue : existing) {
+    iree_hal_queue_release(queue);
+  }
+  iree_hal_queue_release(dependent);
+  iree_hal_queue_release(growing);
+}
+
+TEST_P(MembershipTest, SourceGrowthAllowsIndependentReleaseAndReuse) {
+  SourceAllocationProgress(false);
+}
+
+TEST_P(MembershipTest, FailedSourceGrowthWakesDependentAcquisition) {
+  SourceAllocationProgress(true);
+}
+
+TEST_P(MembershipTest, SourceStorageFreeAllowsIndependentMembership) {
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* existing[3] = {};
+  for (auto& queue : existing) {
+    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
+                                                             &params, &queue));
+  }
+  const void* previous = membership_.sources;
+  std::binary_semaphore entered{0}, resume{0};
+  free_ = [&](void* pointer) {
+    if (pointer == previous) {
+      entered.release();
+      resume.acquire();
+    }
+  };
+  iree_hal_queue_t* growing = nullptr;
+  std::jthread constructor([&] {
+    IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &params, &growing));
+  });
+  entered.acquire();
+  EXPECT_NE(membership_.sources, previous);
+  iree_hal_queue_release(existing[0]);
+  existing[0] = nullptr;
+  iree_hal_queue_t* independent = nullptr;
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &params, &independent));
+  EXPECT_EQ(reinterpret_cast<Queue*>(independent)->ordinal, 1u);
+  iree_hal_queue_release(independent);
+  EXPECT_EQ(destroyed_.load(), 2u);
+  resume.release();
+  constructor.join();
+  free_ = {};
+  for (auto* queue : existing) {
+    iree_hal_queue_release(queue);
+  }
+  iree_hal_queue_release(growing);
+}
+
+TEST_P(MembershipTest, FailedSlotAllocationReturnsAdmission) {
+  allocate_ = [](iree_host_size_t) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "coordinate storage unavailable");
+  };
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* queue = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &queue));
+  EXPECT_EQ(queue, nullptr);
+  EXPECT_EQ(membership_.pending_allocations.slot_count, 0u);
+  EXPECT_EQ(membership_.slot_count, 0u);
+  EXPECT_TRUE(iree_hal_amd_gpu_queue_membership_is_empty(&membership_));
+  allocate_ = {};
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &queue));
+  EXPECT_EQ(reinterpret_cast<Queue*>(queue)->ordinal, 1u);
+  iree_hal_queue_release(queue);
+}
+
+TEST_P(MembershipTest, PendingSlotAllocationReservesFiniteCapacity) {
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  // One provisioned coordinate plus these slots leaves exactly one admission.
+  iree_hal_queue_t* existing[254] = {};
+  for (auto& queue : existing) {
+    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
+                                                             &params, &queue));
+  }
+  std::binary_semaphore entered{0}, resume{0};
+  std::atomic<bool> hold{true};
+  allocate_ = [&](iree_host_size_t) {
+    if (hold.exchange(false)) {
+      entered.release();
+      resume.acquire();
+    }
+    return iree_ok_status();
+  };
+  iree_hal_queue_t* pending = nullptr;
+  std::jthread constructor([&] {
+    IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &params, &pending));
+  });
+  entered.acquire();
+  iree_hal_queue_t* excess = nullptr;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_hal_amd_gpu_queue_membership_acquire(
+                            &membership_, &params, &excess));
+  EXPECT_EQ(excess, nullptr);
+  iree_hal_queue_release(existing[0]);
+  existing[0] = nullptr;
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &params, &existing[0]));
+  EXPECT_EQ(reinterpret_cast<Queue*>(existing[0])->ordinal, 1u);
+  resume.release();
+  constructor.join();
+  EXPECT_EQ(reinterpret_cast<Queue*>(pending)->ordinal, 255u);
+  EXPECT_EQ(membership_.slot_count, 255u);
+  EXPECT_EQ(membership_.pending_allocations.slot_count, 0u);
+  allocate_ = {};
+  for (auto* queue : existing) {
+    iree_hal_queue_release(queue);
+  }
+  iree_hal_queue_release(pending);
+}
+
+TEST_P(MembershipTest, TerminalTraversalJoinsHostSlotAllocation) {
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* first = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  std::binary_semaphore entered{0}, resume{0};
+  std::atomic<bool> hold{true};
+  allocate_ = [&](iree_host_size_t) {
+    if (hold.exchange(false)) {
+      entered.release();
+      resume.acquire();
+    }
+    return iree_ok_status();
+  };
+  construct_ = [](uint32_t) {
+    ADD_FAILURE() << "failed allocation must not begin native construction";
+    return iree_ok_status();
+  };
+  std::jthread constructor([&] {
+    iree_hal_queue_t* queue = nullptr;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
+                          iree_hal_amd_gpu_queue_membership_acquire(
+                              &membership_, &params, &queue));
+    EXPECT_EQ(queue, nullptr);
+  });
+  entered.acquire();
+  const amdf_status_t error =
+      amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
+  EXPECT_TRUE(iree_hal_amd_gpu_failure_begin(&failure_, error, "native wait",
+                                             iree_time_now()));
+  iree_hal_amd_gpu_completion_request_failure(&completion_, error);
+  EXPECT_EQ(iree_hal_amd_gpu_completion_request_stop(&completion_),
+            AMDF_STATUS_OK);
+  amdf_status_t status = AMDF_STATUS_OK;
+  EXPECT_FALSE(iree_hal_amd_gpu_queue_membership_try_failure(
+      &membership_, IREE_HAL_AMD_GPU_FAILURE_CLOSING, IREE_STATUS_DATA_LOSS,
+      &status));
+  // The pending allocation keeps terminal ownership open while both existing
+  // queues are closed and the acquired one can still release independently.
+  closed_.acquire();
+  closed_.acquire();
+  iree_hal_queue_release(first);
+  EXPECT_FALSE(iree_hal_amd_gpu_queue_membership_is_empty(&membership_));
+  resume.release();
+  constructor.join();
+  allocate_ = {};
+  EXPECT_EQ(membership_.pending_allocations.slot_count, 0u);
+  EXPECT_TRUE(iree_hal_amd_gpu_queue_membership_is_empty(&membership_));
+  for (auto phase :
+       {IREE_HAL_AMD_GPU_FAILURE_CLOSING, IREE_HAL_AMD_GPU_FAILURE_INACTIVATING,
+        IREE_HAL_AMD_GPU_FAILURE_RETIRING, IREE_HAL_AMD_GPU_FAILURE_JOINING}) {
+    EXPECT_TRUE(iree_hal_amd_gpu_queue_membership_try_failure(
+        &membership_, phase, IREE_STATUS_DATA_LOSS, &status));
+    EXPECT_EQ(status, AMDF_STATUS_OK);
+  }
+  iree_hal_amd_gpu_queue_membership_finish_failure(&membership_,
+                                                   AMDF_STATUS_OK);
+  EXPECT_EQ(destroyed_.load(), 1u);
+}
+
 TEST_P(MembershipTest, FrontierGrowthAllowsIndependentReleaseAndReuse) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
@@ -747,9 +1067,8 @@ TEST_P(MembershipTest, FailedFrontierGrowthWakesDependentAcquisition) {
   iree_hal_queue_t* first = nullptr;
   IREE_ASSERT_OK(
       iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
-  std::binary_semaphore entered{0}, resume{0}, allocated{0};
+  std::binary_semaphore entered{0}, resume{0};
   std::atomic<bool> fail{true};
-  std::atomic<bool> observe_allocation{false};
   std::atomic<uint32_t> constructed{0};
   reserve_ = [&](Queue* queue, uint32_t count) {
     if (queue == &provisioned_ && count == 4 && fail.exchange(false)) {
@@ -759,11 +1078,6 @@ TEST_P(MembershipTest, FailedFrontierGrowthWakesDependentAcquisition) {
                               "frontier storage unavailable");
     }
     return iree_ok_status();
-  };
-  allocate_ = [&] {
-    if (observe_allocation.exchange(false)) {
-      allocated.release();
-    }
   };
   construct_ = [&](uint32_t ordinal) {
     constructed.fetch_add(ordinal >= 2);
@@ -777,15 +1091,14 @@ TEST_P(MembershipTest, FailedFrontierGrowthWakesDependentAcquisition) {
     EXPECT_EQ(queue, nullptr);
   });
   entered.acquire();
-  observe_allocation = true;
   iree_hal_queue_t* second = nullptr;
   std::jthread dependent([&] {
     IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
                                                              &params, &second));
   });
-  allocated.acquire();
-  // Slot allocation holds membership exclusion. Acquiring it here joins the
-  // dependent caller's reservation before it waits for the unfinished extent.
+  AwaitSlotCount(3);
+  // The dependent caller owns its installed slot while the first expansion
+  // is pending. Neither that dependency nor slot allocation excludes release.
   iree_slim_mutex_lock(&membership_.mutex);
   EXPECT_EQ(membership_.slot_count, 3u);
   EXPECT_EQ(membership_.frontiers.count, 2u);
@@ -807,7 +1120,6 @@ TEST_P(MembershipTest, FailedFrontierGrowthWakesDependentAcquisition) {
   EXPECT_EQ(membership_.frontiers.pending_count, 0u);
   EXPECT_EQ(reinterpret_cast<Queue*>(second)->ordinal, 3u);
   iree_hal_queue_release(second);
-  allocate_ = {};
 }
 
 TEST_P(MembershipTest, PrivateFrontierCatchupAllowsIndependentMembership) {

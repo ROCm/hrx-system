@@ -113,6 +113,9 @@ static void iree_hal_amd_gpu_queue_membership_clear_frontier(
 
 bool iree_hal_amd_gpu_queue_membership_is_empty(
     iree_hal_amd_gpu_queue_membership_t* membership) {
+  if (membership->pending_allocations.slot_count) {
+    return false;
+  }
   for (iree_hal_amd_gpu_queue_slot_t* slot = membership->slots; slot;
        slot = slot->next) {
     if (slot->state != IREE_HAL_AMD_GPU_QUEUE_SLOT_VACANT) {
@@ -210,7 +213,9 @@ static amdf_status_t iree_hal_amd_gpu_queue_membership_rebind(
   }
   iree_hal_amd_gpu_publication_set_sources(
       membership->publication,
-      membership->provisioned_count + membership->slot_count + 3, publication);
+      iree_min(membership->provisioned_count + membership->slot_count + 3,
+               sources->capacity),
+      publication);
   iree_hal_amd_gpu_completion_set_sources(membership->completion,
                                           completion_count, completion);
   sources->active = next;
@@ -225,36 +230,85 @@ static amdf_status_t iree_hal_amd_gpu_queue_membership_rebind(
              : AMDF_STATUS_OK;
 }
 
-// Acquisitions secure both source tables, including the release observer's
-// entry. Removing a queue cannot fail because host scratch is unavailable.
+static bool iree_hal_amd_gpu_queue_membership_sources_ready(void* user_data) {
+  iree_hal_amd_gpu_queue_slot_t* slot = user_data;
+  iree_hal_amd_gpu_queue_membership_t* membership = slot->membership;
+  iree_slim_mutex_lock(&membership->mutex);
+  const bool ready =
+      (membership->sources &&
+       membership->sources->capacity >= slot->ordinal + 5) ||
+      !membership->pending_allocations.source_capacity ||
+      !amdf_status_is_ok(
+          iree_hal_amd_gpu_completion_query_status(membership->completion));
+  iree_slim_mutex_unlock(&membership->mutex);
+  return ready;
+}
+
+// Called with membership exclusion, returning with it held. The reserved slot
+// has no native queue until its source capacity is installed. Other
+// constructors may reserve beyond the installed extent; rebind advertises only
+// valid storage. Release always uses secured scratch and never waits for
+// another allocation.
 static iree_status_t iree_hal_amd_gpu_queue_membership_reserve_sources(
-    iree_hal_amd_gpu_queue_membership_t* membership, uint32_t required) {
-  iree_hal_amd_gpu_queue_sources_t* previous = membership->sources;
-  if (previous && previous->capacity >= required) {
-    return iree_ok_status();
+    iree_hal_amd_gpu_queue_slot_t* slot) {
+  iree_hal_amd_gpu_queue_membership_t* membership = slot->membership;
+  const uint32_t required = slot->ordinal + 5;
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) &&
+         (!membership->sources || membership->sources->capacity < required)) {
+    if (membership->pending_allocations.source_capacity) {
+      iree_slim_mutex_unlock(&membership->mutex);
+      iree_notification_await(&membership->notification,
+                              iree_hal_amd_gpu_queue_membership_sources_ready,
+                              slot, iree_infinite_timeout());
+      iree_slim_mutex_lock(&membership->mutex);
+      status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+          iree_hal_amd_gpu_completion_query_status(membership->completion),
+          "GPU source preparation after observer failure");
+      continue;
+    }
+    iree_hal_amd_gpu_queue_sources_t* previous = membership->sources;
+    uint32_t capacity = previous ? previous->capacity * 2 : 8;
+    while (capacity < required) {
+      capacity *= 2;
+    }
+    membership->pending_allocations.source_capacity = capacity;
+    iree_slim_mutex_unlock(&membership->mutex);
+
+    const iree_host_size_t total_size =
+        sizeof(iree_hal_amd_gpu_queue_sources_t) +
+        2 * capacity *
+            (sizeof(iree_hal_amd_gpu_publication_source_t) +
+             sizeof(iree_hal_amd_gpu_completion_source_t));
+    iree_hal_amd_gpu_queue_sources_t* sources = NULL;
+    status = iree_allocator_malloc(membership->host_allocator, total_size,
+                                   (void**)&sources);
+    if (iree_status_is_ok(status)) {
+      sources->capacity = capacity;
+      sources->publication[0] = (void*)(sources + 1);
+      sources->publication[1] = sources->publication[0] + capacity;
+      sources->completion[0] = (void*)(sources->publication[1] + capacity);
+      sources->completion[1] = sources->completion[0] + capacity;
+    }
+
+    iree_slim_mutex_lock(&membership->mutex);
+    if (iree_status_is_ok(status)) {
+      membership->sources = sources;
+      status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+          iree_hal_amd_gpu_queue_membership_rebind(membership, NULL),
+          "GPU source installation wake");
+    }
+    membership->pending_allocations.source_capacity = 0;
+    iree_notification_post(&membership->notification, IREE_ALL_WAITERS);
+    if (sources && previous) {
+      // Both source handoffs relinquished the displaced storage. Its free
+      // cannot delay another installation or a ready coordinate's reuse.
+      iree_slim_mutex_unlock(&membership->mutex);
+      iree_allocator_free(membership->host_allocator, previous);
+      iree_slim_mutex_lock(&membership->mutex);
+    }
   }
-  uint32_t capacity = previous ? previous->capacity * 2 : 8;
-  while (capacity < required) {
-    capacity *= 2;
-  }
-  const iree_host_size_t total_size =
-      sizeof(iree_hal_amd_gpu_queue_sources_t) +
-      2 * capacity *
-          (sizeof(iree_hal_amd_gpu_publication_source_t) +
-           sizeof(iree_hal_amd_gpu_completion_source_t));
-  iree_hal_amd_gpu_queue_sources_t* sources = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(membership->host_allocator,
-                                             total_size, (void**)&sources));
-  sources->capacity = capacity;
-  sources->publication[0] = (void*)(sources + 1);
-  sources->publication[1] = sources->publication[0] + capacity;
-  sources->completion[0] = (void*)(sources->publication[1] + capacity);
-  sources->completion[1] = sources->completion[0] + capacity;
-  membership->sources = sources;
-  const amdf_status_t status =
-      iree_hal_amd_gpu_queue_membership_rebind(membership, NULL);
-  iree_allocator_free(membership->host_allocator, previous);
-  return IREE_HAL_AMD_STATUS_FROM_AMDF(status, "GPU source installation wake");
+  return status;
 }
 
 static bool iree_hal_amd_gpu_queue_membership_joined(void* user_data) {
@@ -478,11 +532,14 @@ static iree_status_t iree_hal_amd_gpu_queue_membership_reserve_frontiers(
   return status;
 }
 
-iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
+// Reserves one stable coordinate, with membership exclusion held on entry and
+// return. Pending host allocations reserve capacity without excluding existing
+// coordinates or consuming an ordinal before the actual slot can be installed.
+static iree_status_t iree_hal_amd_gpu_queue_membership_reserve_slot(
     iree_hal_amd_gpu_queue_membership_t* membership,
-    const iree_hal_queue_params_t* params, iree_hal_queue_t** out_queue) {
-  *out_queue = NULL;
-  iree_slim_mutex_lock(&membership->mutex);
+    iree_hal_amd_gpu_queue_slot_t** out_slot) {
+  *out_slot = NULL;
+  iree_slim_mutex_lock(&membership->slots_mutex);
   iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
       iree_hal_amd_gpu_completion_query_status(membership->completion),
       "GPU queue acquisition after observer failure");
@@ -490,33 +547,53 @@ iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
   while (slot && slot->state != IREE_HAL_AMD_GPU_QUEUE_SLOT_VACANT) {
     slot = slot->next;
   }
-  const uint32_t ordinal =
-      slot ? slot->ordinal
-           : membership->provisioned_count + membership->slot_count;
-  if (iree_status_is_ok(status) && ordinal >= 256) {
+  if (iree_status_is_ok(status) && !slot &&
+      membership->provisioned_count + membership->slot_count +
+              membership->pending_allocations.slot_count >=
+          256) {
     status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "GPU device has 256 live queue coordinates");
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_queue_membership_reserve_sources(membership,
-                                                               ordinal + 5);
-  }
   if (iree_status_is_ok(status) && !slot) {
+    ++membership->pending_allocations.slot_count;
+    iree_slim_mutex_unlock(&membership->slots_mutex);
+    iree_slim_mutex_unlock(&membership->mutex);
     status = iree_allocator_malloc_aligned(
         membership->host_allocator, sizeof(*slot),
         iree_alignof(iree_hal_amd_gpu_queue_slot_t), 0, (void**)&slot);
+    iree_slim_mutex_lock(&membership->mutex);
+    iree_slim_mutex_lock(&membership->slots_mutex);
+    --membership->pending_allocations.slot_count;
     if (iree_status_is_ok(status)) {
       slot->membership = membership;
-      slot->ordinal = ordinal;
-      iree_hal_amd_gpu_signal_cache_initialize(membership->publication,
-                                               ordinal + 3, &slot->signals);
-      iree_slim_mutex_lock(&membership->slots_mutex);
+      slot->ordinal = membership->provisioned_count + membership->slot_count;
+      iree_hal_amd_gpu_signal_cache_initialize(
+          membership->publication, slot->ordinal + 3, &slot->signals);
       slot->next = membership->slots;
       membership->slots = slot;
       ++membership->slot_count;
-      iree_slim_mutex_unlock(&membership->slots_mutex);
+      status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+          iree_hal_amd_gpu_completion_query_status(membership->completion),
+          "GPU queue allocation after observer failure");
     }
   }
+  if (iree_status_is_ok(status)) {
+    slot->state = IREE_HAL_AMD_GPU_QUEUE_SLOT_CONSTRUCTING;
+    *out_slot = slot;
+  }
+  iree_slim_mutex_unlock(&membership->slots_mutex);
+  return status;
+}
+
+iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
+    iree_hal_amd_gpu_queue_membership_t* membership,
+    const iree_hal_queue_params_t* params, iree_hal_queue_t** out_queue) {
+  *out_queue = NULL;
+  iree_slim_mutex_lock(&membership->mutex);
+  iree_hal_amd_gpu_queue_slot_t* slot = NULL;
+  iree_status_t status =
+      iree_hal_amd_gpu_queue_membership_reserve_slot(membership, &slot);
+  const uint32_t ordinal = slot ? slot->ordinal : 0;
   if (iree_status_is_ok(status) && membership->frontier.tracker &&
       ordinal >= membership->frontier.count) {
     status = iree_async_frontier_tracker_register_axis(
@@ -527,19 +604,8 @@ iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
     }
   }
   iree_hal_queue_t* queue = NULL;
-  bool constructing = false;
   if (iree_status_is_ok(status)) {
-    // Reserve the coordinate before releasing membership exclusion. Terminal
-    // traversal cannot finish while this native owner is under construction.
-    iree_slim_mutex_lock(&membership->slots_mutex);
-    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-        iree_hal_amd_gpu_completion_query_status(membership->completion),
-        "GPU queue acquisition after native failure");
-    if (iree_status_is_ok(status)) {
-      slot->state = IREE_HAL_AMD_GPU_QUEUE_SLOT_CONSTRUCTING;
-      constructing = true;
-    }
-    iree_slim_mutex_unlock(&membership->slots_mutex);
+    status = iree_hal_amd_gpu_queue_membership_reserve_sources(slot);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_queue_membership_reserve_frontiers(slot);
@@ -598,7 +664,7 @@ iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
           "GPU acquired queue after native failure");
     }
   }
-  if (constructing) {
+  if (slot) {
     iree_slim_mutex_lock(&membership->slots_mutex);
     slot->state = queue ? IREE_HAL_AMD_GPU_QUEUE_SLOT_LIVE
                         : IREE_HAL_AMD_GPU_QUEUE_SLOT_VACANT;
@@ -743,13 +809,16 @@ bool iree_hal_amd_gpu_queue_membership_try_failure(
     return false;
   }
   // Once failure is published, no new construction can reserve a coordinate.
-  // The stable list includes every constructor already admitted; its slot
-  // remains pending until native initialization or rollback returns.
+  // Pending allocations and the stable list cover every admitted constructor;
+  // each remains pending until host/native initialization or rollback returns.
   iree_hal_amd_gpu_queue_slot_t* head = membership->slots;
-  const uint32_t total = membership->provisioned_count + membership->slot_count;
+  const uint32_t pending_allocations =
+      membership->pending_allocations.slot_count;
+  const uint32_t total = membership->provisioned_count +
+                         membership->slot_count + pending_allocations;
   iree_slim_mutex_unlock(&membership->slots_mutex);
   amdf_status_t status = AMDF_STATUS_OK;
-  bool ready = true;
+  bool ready = pending_allocations == 0;
   uint32_t completed = 0;
   for (uint32_t i = 0;
        i < membership->provisioned_count && amdf_status_is_ok(status); ++i) {
