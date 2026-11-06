@@ -548,6 +548,14 @@ def _git_distance(repo_root: Path, ancestor: str, anchor: str) -> int | None:
     if ancestry.returncode == 1:
         return None
     if ancestry.returncode != 0:
+        availability = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ancestor}^{{commit}}"],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+        )
+        if availability.returncode == 1:
+            return None
         raise BinarySizeError(
             f"git could not test ancestry for {ancestor} and {anchor}: "
             f"{ancestry.stderr.decode(errors='replace')}"
