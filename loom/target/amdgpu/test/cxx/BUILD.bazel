@@ -66,6 +66,8 @@ _MODULES = [
     "enum_values",
     "flash_attention",
     "function_specializations",
+    "immutable_object_link",
+    "immutable_objects",
     "increment_values",
     "integer_increment",
     "mxfp_group_dot",

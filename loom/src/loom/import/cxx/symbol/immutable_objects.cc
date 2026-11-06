@@ -9,6 +9,7 @@
 #include <cxx/ast.h>
 #include <cxx/binder.h>
 #include <cxx/control.h>
+#include <cxx/external_name_encoder.h>
 #include <cxx/memory_layout.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
@@ -149,21 +150,82 @@ ImmutableObject ImmutableObjects::reference(cxx::VariableSymbol* variable,
   if (auto found = variables_.find(canonical); found != variables_.end()) {
     return emissions_[found->second].object;
   }
+  if (auto found = locals_.find(canonical); found != locals_.end()) {
+    return materialize(canonical, std::move(found->second));
+  }
+  if (!cxx::symbol_cast<cxx::NamespaceSymbol>(canonical->parent())) {
+    diagnostics_.reject(unit_, owner,
+                        "immutable storage requires static storage duration");
+  }
+  const bool has_internal_linkage = cxx::has_internal_linkage(canonical);
+  auto* definition = canonical->definition();
+  if (!definition && cxx::Binder::declaresVariableDefinition(canonical)) {
+    definition = canonical;
+  }
+  const auto kind = !definition            ? EmissionKind::Declaration
+                    : has_internal_linkage ? EmissionKind::PrivateDefinition
+                    : is_inline(canonical) ? EmissionKind::LinkOnceDefinition
+                                           : EmissionKind::PublicDefinition;
+  auto spelling =
+      has_internal_linkage
+          ? private_object_name(canonical)
+          : external_object_name(unit_, diagnostics_, canonical, owner);
+  return materialize(canonical,
+                     declare(canonical, owner, kind, std::move(spelling)));
+}
+
+void ImmutableObjects::retain_locals(
+    cxx::FunctionSymbol* function,
+    std::span<cxx::InitDeclaratorAST* const> declarations) {
+  if (declarations.empty()) {
+    return;
+  }
+  bool shared = true;
+  for (auto* enclosing = function; enclosing;
+       enclosing = enclosing->enclosingFunction()) {
+    if (!cxx::is_inline_or_templated(enclosing) ||
+        cxx::has_internal_linkage(enclosing) ||
+        cxx::is_declared_with_internal_type(enclosing) ||
+        cxx::has_internal_template_argument(enclosing)) {
+      shared = false;
+      break;
+    }
+  }
+  std::string prefix;
+  if (shared) {
+    prefix = "__loom_cxx_static." +
+             cxx::ExternalNameEncoder(&unit_).encode(function) + ".";
+    diagnostics_.finish();
+  }
+  for (size_t ordinal = 0; ordinal < declarations.size(); ++ordinal) {
+    auto* declaration = declarations[ordinal];
+    auto* variable =
+        cxx::symbol_cast<cxx::VariableSymbol>(declaration->symbol)->canonical();
+    if (locals_.contains(variable)) {
+      continue;
+    }
+    locals_.emplace(variable, declare(variable, declaration,
+                                      shared ? EmissionKind::LinkOnceDefinition
+                                             : EmissionKind::PrivateDefinition,
+                                      shared ? prefix + std::to_string(ordinal)
+                                             : private_object_name(variable)));
+  }
+}
+
+ImmutableObjects::Declaration ImmutableObjects::declare(
+    cxx::VariableSymbol* canonical, cxx::AST* owner, EmissionKind kind,
+    std::string spelling) {
   auto* definition = canonical->definition();
   if (!definition && cxx::Binder::declaresVariableDefinition(canonical)) {
     definition = canonical;
   }
   auto traits = unit_.typeTraits();
   auto* source_type = definition ? definition->type() : canonical->type();
-  if (!cxx::symbol_cast<cxx::NamespaceSymbol>(canonical->parent()) ||
-      is_thread_local(canonical)) {
-    diagnostics_.reject(
-        unit_, owner,
-        "immutable storage requires a namespace-scope object without "
-        "thread-local storage");
+  if (is_thread_local(canonical)) {
+    diagnostics_.reject(unit_, owner,
+                        "immutable storage cannot have thread-local storage");
   }
-  const bool has_internal_linkage = cxx::has_internal_linkage(canonical);
-  if (!definition && has_internal_linkage) {
+  if (!definition && cxx::has_internal_linkage(canonical)) {
     diagnostics_.reject(
         unit_, owner,
         "immutable storage with internal linkage requires an object "
@@ -180,39 +242,49 @@ ImmutableObject ImmutableObjects::reference(cxx::VariableSymbol* variable,
   if (!natural_alignment) {
     diagnostics_.reject(unit_, owner, "unknown immutable object alignment");
   }
-  EmissionKind kind;
+  if (definition && !definition->constValue()) {
+    diagnostics_.reject(unit_, owner,
+                        "immutable storage requires constant initialization");
+  }
+  if (definition && !traits.is_trivially_copyable(source_type)) {
+    diagnostics_.reject(
+        unit_, owner,
+        "immutable storage requires a fully initialized, trivially "
+        "copyable, address-free object representation");
+  }
+  return {
+      .definition = definition,
+      .type = source_type,
+      .alignment =
+          std::max<int64_t>(*natural_alignment, explicit_alignment(canonical)),
+      .kind = kind,
+      .spelling = std::move(spelling),
+      .source = owner,
+  };
+}
+
+ImmutableObject ImmutableObjects::materialize(cxx::VariableSymbol* canonical,
+                                              Declaration declaration) {
   bool is_utf8 = false;
   std::vector<uint8_t> contents;
-  std::string spelling;
-  if (!definition) {
-    kind = EmissionKind::Declaration;
-    spelling = external_object_name(unit_, diagnostics_, canonical, owner);
-    names_.reserve(spelling, owner);
-  } else {
-    if (!definition->constValue()) {
-      diagnostics_.reject(unit_, owner,
-                          "immutable storage requires constant initialization");
-    }
-    auto representation =
-        object_representation(unit_, source_type, *definition->constValue(),
-                              string_initializer(definition->initializer()));
+  if (auto* definition = declaration.definition) {
+    auto representation = object_representation(
+        unit_, declaration.type, *definition->constValue(),
+        string_initializer(definition->initializer()));
     if (!representation) {
       diagnostics_.reject(
-          unit_, owner,
+          unit_, declaration.source,
           "immutable storage requires a fully initialized, trivially "
           "copyable, address-free object representation");
     }
     contents = std::move(representation->bytes);
     is_utf8 = representation->is_utf8;
-    if (has_internal_linkage) {
-      kind = EmissionKind::PrivateDefinition;
-      spelling = names_.unique(private_object_name(definition));
-    } else {
-      kind = is_inline(canonical) ? EmissionKind::LinkOnceDefinition
-                                  : EmissionKind::PublicDefinition;
-      spelling = external_object_name(unit_, diagnostics_, canonical, owner);
-      names_.reserve(spelling, owner);
-    }
+  }
+  auto spelling = std::move(declaration.spelling);
+  if (declaration.kind == EmissionKind::PrivateDefinition) {
+    spelling = names_.unique(std::move(spelling));
+  } else {
+    names_.reserve(spelling, declaration.source);
   }
   loom_string_id_t name;
   check(loom_module_intern_string(module_, view(spelling), &name));
@@ -225,17 +297,16 @@ ImmutableObject ImmutableObjects::reference(cxx::VariableSymbol* variable,
   ImmutableObject object = {
       .symbol = {0, symbol},
       .value_name = loom_string_table_get(&module_->strings, value_name_id),
-      .type = source_type,
-      .alignment =
-          std::max<int64_t>(*natural_alignment, explicit_alignment(canonical)),
+      .type = declaration.type,
+      .alignment = declaration.alignment,
   };
   variables_.emplace(canonical, emissions_.size());
   emissions_.push_back({
       .object = object,
-      .kind = kind,
+      .kind = declaration.kind,
       .is_utf8 = is_utf8,
       .contents = std::move(contents),
-      .source = owner,
+      .source = declaration.source,
   });
   return object;
 }

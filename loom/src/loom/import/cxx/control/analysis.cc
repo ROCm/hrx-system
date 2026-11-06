@@ -2263,6 +2263,9 @@ void ControlFlow::finalize_callable_effects() {
 
 void ControlFlow::visit(cxx::InitDeclaratorAST* ast) {
   auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(ast->symbol);
+  if (variable && variable->isStatic()) {
+    static_locals_.push_back(ast);
+  }
   if (variable) {
     if (auto* conversion = constructor_conversion(ast->initializer);
         conversion &&

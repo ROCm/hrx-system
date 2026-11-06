@@ -89,6 +89,8 @@ JSON fixtures under
 
 | Source | Numerical coverage | Provenance |
 | --- | --- | --- |
+| `immutable_objects.cxx` | Namespace and function-local constants, explicit alignment, nested arrays, records, repeated calls, and template instances execute on VM, x86, and AMDGPU. Runtime indices cover every element and unsigned wrap; independent arithmetic oracles check all results and both output guards. | Original immutable-storage witness. |
+| `immutable_object_link_left.cxx`, `immutable_object_link_right.cxx` | Independently imported modules share inline/template constants while retaining separate scoped and module-private tables. Address template arguments select distinct private inputs with identical source names. VM, x86, and AMDGPU execute the linked values and check output guards. | Original cross-module source-identity witness. |
 | `constant_loops.cxx` | Constant-expression bounds, unsigned edge conditions, wrapped constants, mutable bounds and scheduled loop templates execute in 29 function trials with 55 exact observations on VM and AMDGPU. Thirteen native trials check all 64 lanes, complete guarded outputs and unchanged inputs under normal and access-instrumented execution. | Original source constant-loop witness. |
 | `control_flow.cxx` | Pre-test, post-test, and nested loops; final scalar values and effectful helper calls in conditions. Seven trip counts including zero are checked bitwise. | Original source-language semantics witness. |
 | `scheduled_sum.cxx` | Unroll factors 1/3 and pipeline depths 1/2 with linear ordering. Exact integer sums for 0, 1, 2, 5, 17, and 33 columns cover startup, tails, and drain under all four schedules. | Original scheduling-contract witness. |

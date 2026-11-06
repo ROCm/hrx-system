@@ -1340,6 +1340,8 @@ class Translator final : private Initialization::Evaluation {
                              defined.source->symbol);
       control_ = &*owned_control_;
     }
+    immutable_objects_.retain_locals(defined.source->symbol,
+                                     control_->static_locals());
     auto saved = loom_builder_enter_region(&builder_, op, region);
     values_.clear();
     locals_.clear();
@@ -1702,8 +1704,13 @@ class Translator final : private Initialization::Evaluation {
     if (cxx::symbol_cast<cxx::TypeAliasSymbol>(declaration->symbol)) {
       return;
     }
-    if (!variable || variable->isStatic() || variable->isExtern() ||
-        variable->isThreadLocal()) {
+    if (variable && variable->isStatic() && !variable->isThreadLocal()) {
+      if (annotated(variable, "workgroup")) {
+        fail(owner, "static immutable storage cannot have workgroup scope");
+      }
+      return;
+    }
+    if (!variable || variable->isExtern() || variable->isThreadLocal()) {
       fail(owner, "local storage duration must be automatic or __shared__");
     }
     if (annotated(declaration->symbol, "workgroup")) {
@@ -2087,8 +2094,8 @@ class Translator final : private Initialization::Evaluation {
       }
       if (auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(id->symbol);
           variable &&
-          cxx::symbol_cast<cxx::NamespaceSymbol>(
-              variable->canonical()->parent()) &&
+          (variable->isStatic() || cxx::symbol_cast<cxx::NamespaceSymbol>(
+                                       variable->canonical()->parent())) &&
           !configs_.contains(variable)) {
         return immutable_object(variable, id);
       }

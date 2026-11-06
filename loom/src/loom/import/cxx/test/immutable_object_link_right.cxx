@@ -16,3 +16,20 @@ unsigned immutable_right_lookup(unsigned index) {
   const unsigned lane = index & 1u;
   return local_table[lane] + immutable_link::bias[lane];
 }
+
+const unsigned* immutable_right_inline(bool first) {
+  return immutable_link::inline_table(first);
+}
+
+const unsigned* immutable_right_template(unsigned variant) {
+  return variant == 3 ? immutable_link::template_table<3>()
+                      : immutable_link::template_table<7>();
+}
+
+const unsigned* immutable_right_private() {
+  return immutable_link::private_table();
+}
+
+unsigned immutable_right_address(unsigned index) {
+  return immutable_link::address_table<local_table>()[index & 1u];
+}

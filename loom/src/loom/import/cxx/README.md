@@ -864,6 +864,30 @@ payload bodies while linking. Linkable object template specializations remain
 unsupported because their readable source name does not identify a concrete
 specialization.
 
+Function-local `static constexpr` and constant-initialized `static const`
+objects use the same immutable storage:
+
+```cpp
+template <unsigned Bias>
+unsigned coefficient(unsigned index) {
+  alignas(64) static constexpr unsigned table[4] = {
+      Bias, Bias + 1, Bias + 2, Bias + 3};
+  return table[index & 3u];
+}
+```
+
+Each specialization owns one table, with no per-call allocation or copying.
+Matching inline/template definitions share their local objects across linked
+modules. Internal functions and specializations on translation-unit-local
+objects keep their storage private. Separate lexical scopes retain separate
+objects even when their declarations use the same name. Folded scalar constants
+and unused tables do not emit storage.
+
+Local static storage must be nonvolatile, deeply const, constant-initialized,
+and trivially copyable. Thread-local storage, dynamic initialization,
+destructor registration, and embedded object addresses are rejected; a static
+immutable object also cannot have workgroup scope.
+
 Character arrays initialized by narrow or `u8` string literals retain readable
 UTF-8 payloads when their bytes form valid UTF-8:
 

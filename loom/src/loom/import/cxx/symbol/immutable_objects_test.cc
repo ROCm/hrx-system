@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 
+#include "loom/import/cxx/control/analysis.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/value/builder_test.h"
 #include "loom/ops/global/ops.h"
@@ -194,6 +195,83 @@ TEST_F(ImmutableObjectsTest, RejectsUnsupportedIdentityAndRepresentation) {
                SourceRejected);
   EXPECT_THROW(objects.reference(address_object, address_object->initializer()),
                SourceRejected);
+}
+
+TEST_F(ImmutableObjectsTest, RetainsLocalIdentityAndSourceLinkage) {
+  Source source(IREE_SV(R"(
+    inline const unsigned* shared(bool first) {
+      if (first) {
+        alignas(64) static constexpr unsigned table[2] = {7, 11};
+        return table;
+      } else {
+        static constexpr unsigned table[2] = {13, 17};
+        return table;
+      }
+    }
+    static inline const unsigned* private_table() {
+      static constexpr unsigned table[2] = {19, 23};
+      return table;
+    }
+  )"),
+                IREE_SV("local_immutable_objects.cxx"), options());
+  Types types(source.unit(), source.diagnostics());
+  Locations locations(source.unit(), source.diagnostics(), module_);
+  SymbolNames names(source.unit(), source.diagnostics());
+  ImmutableObjects objects(source.unit(), source.diagnostics(), locations,
+                           names, module_);
+  auto* root = cxx::ast_cast<cxx::TranslationUnitAST>(source.unit().ast());
+  std::vector<ImmutableObject> retained;
+  for (auto* declaration : cxx::ListView{root->declarationList}) {
+    auto* definition = cxx::ast_cast<cxx::FunctionDefinitionAST>(declaration);
+    if (!definition) {
+      continue;
+    }
+    auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+        definition->functionBody);
+    ASSERT_NE(body, nullptr);
+    ControlFlow control(source.unit(), source.diagnostics(), types,
+                        body->statement, definition->symbol);
+    objects.retain_locals(definition->symbol, control.static_locals());
+    objects.retain_locals(definition->symbol, control.static_locals());
+    for (auto* local : control.static_locals()) {
+      auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(local->symbol);
+      ASSERT_NE(variable, nullptr);
+      auto first = objects.reference(variable, local);
+      auto second = objects.reference(variable, local);
+      EXPECT_EQ(first.symbol.symbol_id, second.symbol.symbol_id);
+      retained.push_back(first);
+    }
+  }
+  ASSERT_EQ(retained.size(), 3u);
+  EXPECT_NE(retained[0].symbol.symbol_id, retained[1].symbol.symbol_id);
+  EXPECT_NE(retained[1].symbol.symbol_id, retained[2].symbol.symbol_id);
+  EXPECT_EQ(retained[0].alignment, 64);
+  EXPECT_EQ(retained[1].alignment, 4);
+  EXPECT_EQ(retained[2].alignment, 4);
+  EXPECT_TRUE(
+      iree_string_view_equal(symbol_name(module_, retained[0].symbol),
+                             IREE_SV("__loom_cxx_static._Z6sharedb.0")));
+  EXPECT_TRUE(
+      iree_string_view_equal(symbol_name(module_, retained[1].symbol),
+                             IREE_SV("__loom_cxx_static._Z6sharedb.1")));
+  objects.build(&builder_);
+  size_t ordinal = 0;
+  constexpr std::array<uint8_t, 3> first_values = {7, 13, 19};
+  for (auto* definition = loom_module_block(module_)->first_op; definition;
+       definition = definition->next_op, ++ordinal) {
+    ASSERT_LT(ordinal, retained.size());
+    ASSERT_TRUE(loom_global_rodata_def_isa(definition));
+    EXPECT_EQ(loom_global_rodata_def_symbol(definition).symbol_id,
+              retained[ordinal].symbol.symbol_id);
+    EXPECT_EQ(loom_global_rodata_def_linkage(definition),
+              ordinal < 2 ? LOOM_SYMBOL_LINKAGE_LINK_ONCE : 0);
+    EXPECT_EQ(loom_global_rodata_def_visibility(definition),
+              ordinal < 2 ? LOOM_GLOBAL_RODATA_DEF_VISIBILITY_PUBLIC : 0);
+    auto contents = loom_global_rodata_def_contents(definition);
+    ASSERT_EQ(contents.data_length, 8u);
+    EXPECT_EQ(contents.data[0], first_values[ordinal]);
+  }
+  EXPECT_EQ(ordinal, retained.size());
 }
 
 }  // namespace

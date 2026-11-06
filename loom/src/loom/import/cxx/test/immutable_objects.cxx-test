@@ -260,3 +260,204 @@ global.rodata.decl @shared.declaration
 global.rodata.def public linkonce @shared.inline_definition = align(4) bytes("070000000b000000")
 
 global.rodata.def @shared_private_definition = align(4) bytes("0d00000011000000")
+
+// ====
+// Repeated indexed reads share one aligned static payload. Constant-only and
+// unused locals need no automatic storage or per-call initialization.
+unsigned local_table(unsigned index) {
+  alignas(64) static constexpr unsigned values[4] = {11, 22, 33, 44};
+  return values[index & 3u] + values[(index + 1u) & 3u];
+}
+unsigned folded_local() {
+  static constexpr unsigned scalar = 7;
+  static constexpr unsigned unused[2] = {98, 99};
+  return scalar;
+}
+
+// ----
+func.def public @local_table(%index: i32) -> (i32) {
+  %values_storage = global.load @values : buffer
+  %values_storage_byte_offset = index.constant 0 : offset
+  %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<4xi32>
+  %5 = scalar.constant 3 : i32
+  %6 = scalar.andi %index, %5 : i32
+  %7 = scalar.extui %6 : i32 to i64
+  %8 = scalar.assume %7 [range(%7, 0, 3)] : i64
+  %9 = index.cast %8 : i64 to index
+  %10 = view.load %values_view[%9] : view<4xi32> -> i32
+  %11 = scalar.constant 1 : i32
+  %12 = scalar.addi %index, %11 : i32
+  %14 = scalar.andi %12, %5 : i32
+  %15 = scalar.extui %14 : i32 to i64
+  %16 = scalar.assume %15 [range(%15, 0, 3)] : i64
+  %17 = index.cast %16 : i64 to index
+  %18 = view.load %values_view[%17] : view<4xi32> -> i32
+  %19 = scalar.addi %10, %18 : i32
+  func.return %19 : i32
+}
+
+func.def public @folded_local() -> (i32) {
+  %scalar = scalar.constant 7 : i32
+  func.return %scalar : i32
+}
+
+global.rodata.def @values = align(64) bytes("0b00000016000000210000002c000000")
+
+// ====
+// The same source name in disjoint scopes denotes distinct objects.
+inline const unsigned* scoped_table(bool first) {
+  if (first) {
+    static constexpr unsigned table[2] = {7, 11};
+    return table;
+  } else {
+    static constexpr unsigned table[2] = {13, 17};
+    return table;
+  }
+}
+unsigned local_scopes(bool first, unsigned index) {
+  return scoped_table(first)[index & 1u];
+}
+
+// ----
+func.def public linkonce @scoped_table(%first: i1) -> (buffer, offset) {
+  %__loom_cxx_static__Z12scoped_tableb_0_storage = global.load @__loom_cxx_static._Z12scoped_tableb.0 : buffer
+  %__loom_cxx_static__Z12scoped_tableb_1_storage = global.load @__loom_cxx_static._Z12scoped_tableb.1 : buffer
+  %27 = scf.select %first, %__loom_cxx_static__Z12scoped_tableb_0_storage, %__loom_cxx_static__Z12scoped_tableb_1_storage : buffer
+  %29 = index.constant 0 : offset
+  func.return %27, %29 : buffer, offset
+}
+
+func.def public @local_scopes(%first: i1, %index: i32) -> (i32) {
+  %14, %15 = func.call readonly @scoped_table(%first) : (i1) -> (buffer, offset)
+  %16 = scalar.constant 1 : i32
+  %17 = scalar.andi %index, %16 : i32
+  %32 = scalar.constant 2 : i32
+  %33 = scalar.shli %17, %32 : i32
+  %34 = scalar.extui %33 : i32 to i64
+  %21 = index.cast %15 : offset to i64
+  %22 = scalar.addi %21, %34 : i64
+  %23 = scalar.assume %22 [range(%22, 0, 9223372036854775807)] : i64
+  %24 = index.cast %23 : i64 to offset
+  %25 = buffer.view %14[%24] : buffer -> view<1xi32>
+  %26 = view.load %25[0] : view<1xi32> -> i32
+  func.return %26 : i32
+}
+
+global.rodata.def public linkonce @__loom_cxx_static._Z12scoped_tableb.0 = align(4) bytes("070000000b000000")
+
+global.rodata.def public linkonce @__loom_cxx_static._Z12scoped_tableb.1 = align(4) bytes("0d00000011000000")
+
+// ====
+// Each function specialization owns its own immutable payload, while repeated
+// calls to one specialization retain the same object.
+template <unsigned Bias>
+const unsigned* specialized_table() {
+  static constexpr unsigned table[2] = {Bias, Bias + 1};
+  return table;
+}
+unsigned local_templates(unsigned index) {
+  return specialized_table<3>()[index & 1u] +
+         specialized_table<7>()[index & 1u] +
+         specialized_table<3>()[(index + 1u) & 1u];
+}
+
+// ----
+func.def public @local_templates(%index: i32) -> (i32) {
+  %2, %3 = func.call readonly @specialized_table_3() : () -> (buffer, offset)
+  %4 = scalar.constant 1 : i32
+  %5 = scalar.andi %index, %4 : i32
+  %67 = scalar.constant 2 : i32
+  %68 = scalar.shli %5, %67 : i32
+  %69 = scalar.extui %68 : i32 to i64
+  %9 = index.cast %3 : offset to i64
+  %10 = scalar.addi %9, %69 : i64
+  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %12 = index.cast %11 : i64 to offset
+  %13 = buffer.view %2[%12] : buffer -> view<1xi32>
+  %14 = view.load %13[0] : view<1xi32> -> i32
+  %15, %16 = func.call readonly @specialized_table_7() : () -> (buffer, offset)
+  %22 = index.cast %16 : offset to i64
+  %23 = scalar.addi %22, %69 : i64
+  %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
+  %25 = index.cast %24 : i64 to offset
+  %26 = buffer.view %15[%25] : buffer -> view<1xi32>
+  %27 = view.load %26[0] : view<1xi32> -> i32
+  %28 = scalar.addi %14, %27 : i32
+  %32 = scalar.addi %index, %4 : i32
+  %34 = scalar.andi %32, %4 : i32
+  %58 = scalar.shli %34, %67 : i32
+  %59 = scalar.extui %58 : i32 to i64
+  %39 = scalar.addi %9, %59 : i64
+  %40 = scalar.assume %39 [range(%39, 0, 9223372036854775807)] : i64
+  %41 = index.cast %40 : i64 to offset
+  %42 = buffer.view %2[%41] : buffer -> view<1xi32>
+  %43 = view.load %42[0] : view<1xi32> -> i32
+  %44 = scalar.addi %28, %43 : i32
+  func.return %44 : i32
+}
+
+func.def @specialized_table_3() -> (buffer, offset) {
+  %__loom_cxx_static__Z17specialized_tableILj3EEPKjv_0_storage = global.load @__loom_cxx_static._Z17specialized_tableILj3EEPKjv.0 : buffer
+  %__loom_cxx_static__Z17specialized_tableILj3EEPKjv_0_storage_byte_offset = index.constant 0 : offset
+  func.return %__loom_cxx_static__Z17specialized_tableILj3EEPKjv_0_storage, %__loom_cxx_static__Z17specialized_tableILj3EEPKjv_0_storage_byte_offset : buffer, offset
+}
+
+func.def @specialized_table_7() -> (buffer, offset) {
+  %__loom_cxx_static__Z17specialized_tableILj7EEPKjv_0_storage = global.load @__loom_cxx_static._Z17specialized_tableILj7EEPKjv.0 : buffer
+  %__loom_cxx_static__Z17specialized_tableILj7EEPKjv_0_storage_byte_offset = index.constant 0 : offset
+  func.return %__loom_cxx_static__Z17specialized_tableILj7EEPKjv_0_storage, %__loom_cxx_static__Z17specialized_tableILj7EEPKjv_0_storage_byte_offset : buffer, offset
+}
+
+global.rodata.def public linkonce @__loom_cxx_static._Z17specialized_tableILj3EEPKjv.0 = align(4) bytes("0300000004000000")
+
+global.rodata.def public linkonce @__loom_cxx_static._Z17specialized_tableILj7EEPKjv.0 = align(4) bytes("0700000008000000")
+
+// ====
+// Nested arrays and records use the same constant object representation as
+// namespace storage, including selected-source-ABI field offsets.
+struct Pair { unsigned first; unsigned second; };
+unsigned local_aggregates(unsigned index) {
+  static constexpr Pair pairs[2] = {{10, 20}, {30, 40}};
+  static const unsigned nested[2][3] = {{1, 2, 3}, {4, 5, 6}};
+  return pairs[index & 1u].second + nested[index & 1u][index % 3u];
+}
+
+// ----
+func.def public @local_aggregates(%index: i32) -> (i32) {
+  %pairs_storage = global.load @pairs : buffer
+  %nested_storage = global.load @nested : buffer
+  %5 = scalar.constant 1 : i32
+  %6 = scalar.andi %index, %5 : i32
+  %51 = scalar.constant 3 : i32
+  %52 = scalar.shli %6, %51 : i32
+  %53 = scalar.extui %52 : i32 to i64
+  %12 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
+  %13 = index.cast %12 : i64 to offset
+  %14 = index.constant 4 : offset
+  %15 = index.add %13, %14 : offset
+  %16 = index.assume %15 [range(%15, 0, 12)] : offset
+  %17 = buffer.view %pairs_storage[%16] : buffer -> view<1xi32>
+  %second = view.load %17[0] : view<1xi32> -> i32
+  %24 = scalar.extui %6 : i32 to i64
+  %25 = scalar.constant 12 : i64
+  %26 = scalar.muli %24, %25 : i64
+  %29 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
+  %30 = index.cast %29 : i64 to offset
+  %32 = scalar.remui %index, %51 : i32
+  %46 = scalar.constant 2 : i32
+  %47 = scalar.shli %32, %46 : i32
+  %48 = scalar.extui %47 : i32 to i64
+  %36 = index.cast %30 : offset to i64
+  %37 = scalar.addi %36, %48 : i64
+  %38 = scalar.assume %37 [range(%37, 0, 9223372036854775807)] : i64
+  %39 = index.cast %38 : i64 to offset
+  %40 = index.assume %39 [range(%39, 0, 20)] : offset
+  %41 = buffer.view %nested_storage[%40] : buffer -> view<1xi32>
+  %42 = view.load %41[0] : view<1xi32> -> i32
+  %43 = scalar.addi %second, %42 : i32
+  func.return %43 : i32
+}
+
+global.rodata.def @pairs = align(4) bytes("0a000000140000001e00000028000000")
+
+global.rodata.def @nested = align(4) bytes("010000000200000003000000040000000500000006000000")
