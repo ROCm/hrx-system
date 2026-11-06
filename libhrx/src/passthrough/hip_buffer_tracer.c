@@ -340,15 +340,31 @@ static void dump_buffer_hex(const void* data, size_t size, size_t max_bytes) {
   fprintf(g_trace_file, "\n");
 }
 
-static void dump_all_buffers_ex(const char* label, bool force_full_dump) {
+// A NULL result identifies the pre-launch dump; otherwise it is the launch's
+// returned status. Format directly to the stream so labels retain the full
+// registered kernel name without another fixed-capacity intermediate buffer.
+static void dump_kernel_buffers(const char* kernel_name,
+                                const hipError_t* result,
+                                bool force_full_dump) {
   if (g_trace_dump == 0) {
     return;
   }
 
   pthread_mutex_lock(&g_buffer_table.mutex);
 
-  trace_msg(3, "=== Buffer Dump: %s (%zu buffers)%s ===", label,
-            g_buffer_table.count, force_full_dump ? " [FULL DUMP]" : "");
+  if (!kernel_name) {
+    kernel_name = "(unknown)";
+  }
+  if (result) {
+    trace_msg(
+        3, "=== Buffer Dump: AFTER kernel #%d: %s (ret=%d) (%zu buffers)%s ===",
+        g_kernel_count, kernel_name, *result, g_buffer_table.count,
+        force_full_dump ? " [FULL DUMP]" : "");
+  } else {
+    trace_msg(3, "=== Buffer Dump: BEFORE kernel #%d: %s (%zu buffers)%s ===",
+              g_kernel_count, kernel_name, g_buffer_table.count,
+              force_full_dump ? " [FULL DUMP]" : "");
+  }
 
   // Allocate host staging buffer for device memory reads
   void* host_staging = NULL;
@@ -425,10 +441,6 @@ static void dump_all_buffers_ex(const char* label, bool force_full_dump) {
   pthread_mutex_unlock(&g_buffer_table.mutex);
 
   fflush(g_trace_file);
-}
-
-static void dump_all_buffers(const char* label) {
-  dump_all_buffers_ex(label, false);
 }
 
 //===----------------------------------------------------------------------===//
@@ -682,10 +694,7 @@ static hipError_t wrap_hipModuleLaunchKernel(
     // Sync before launch
     g_real->hipDeviceSynchronize();
 
-    char before_label[256];
-    snprintf(before_label, sizeof(before_label), "BEFORE kernel #%d: %s",
-             g_kernel_count, kernel_name ? kernel_name : "(unknown)");
-    dump_all_buffers_ex(before_label, do_full_dump);
+    dump_kernel_buffers(kernel_name, NULL, do_full_dump);
   }
 
   trace_msg(
@@ -704,10 +713,7 @@ static hipError_t wrap_hipModuleLaunchKernel(
     // Sync after launch
     g_real->hipDeviceSynchronize();
 
-    char after_label[256];
-    snprintf(after_label, sizeof(after_label), "AFTER kernel #%d: %s (ret=%d)",
-             g_kernel_count, kernel_name ? kernel_name : "(unknown)", err);
-    dump_all_buffers_ex(after_label, do_full_dump);
+    dump_kernel_buffers(kernel_name, &err, do_full_dump);
   }
 
   if (do_trace) {
@@ -732,10 +738,7 @@ static hipError_t wrap_hipLaunchKernel(const void* function_address,
     // Sync before launch
     g_real->hipDeviceSynchronize();
 
-    char before_label[256];
-    snprintf(before_label, sizeof(before_label), "BEFORE kernel #%d: %s",
-             g_kernel_count, kernel_name ? kernel_name : "(unknown)");
-    dump_all_buffers_ex(before_label, do_full_dump);
+    dump_kernel_buffers(kernel_name, NULL, do_full_dump);
   }
 
   trace_msg(2,
@@ -752,10 +755,7 @@ static hipError_t wrap_hipLaunchKernel(const void* function_address,
     // Sync after launch
     g_real->hipDeviceSynchronize();
 
-    char after_label[256];
-    snprintf(after_label, sizeof(after_label), "AFTER kernel #%d: %s (ret=%d)",
-             g_kernel_count, kernel_name ? kernel_name : "(unknown)", err);
-    dump_all_buffers_ex(after_label, do_full_dump);
+    dump_kernel_buffers(kernel_name, &err, do_full_dump);
   }
 
   if (do_trace) {
@@ -827,10 +827,7 @@ static hipError_t wrap_hipExtModuleLaunchKernel(
 
   if (do_trace && g_trace_sync) {
     g_real->hipDeviceSynchronize();
-    char before_label[256];
-    snprintf(before_label, sizeof(before_label), "BEFORE kernel #%d: %s",
-             g_kernel_count, kernel_name ? kernel_name : "(unknown)");
-    dump_all_buffers_ex(before_label, do_full_dump);
+    dump_kernel_buffers(kernel_name, NULL, do_full_dump);
   }
 
   trace_msg(2,
@@ -848,10 +845,7 @@ static hipError_t wrap_hipExtModuleLaunchKernel(
 
   if (do_trace && g_trace_sync) {
     g_real->hipDeviceSynchronize();
-    char after_label[256];
-    snprintf(after_label, sizeof(after_label), "AFTER kernel #%d: %s (ret=%d)",
-             g_kernel_count, kernel_name ? kernel_name : "(unknown)", err);
-    dump_all_buffers_ex(after_label, do_full_dump);
+    dump_kernel_buffers(kernel_name, &err, do_full_dump);
   }
 
   if (do_trace) {
