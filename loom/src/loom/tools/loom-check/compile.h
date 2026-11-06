@@ -134,9 +134,10 @@ iree_status_t loom_check_compile_select_source_function(
 // Compiles the request's admitted public module to target artifacts. Public
 // diagnostics are appended to |request->diagnostic_collector|. On success,
 // |out_result| owns the artifacts until loomc_result_release. Compiler
-// rejection with error diagnostics leaves it NULL for annotation matching;
-// rejection without an error diagnostic fails. Consumers select and map only
-// the artifacts they inspect.
+// rejection with error diagnostics retains the result when it carries artifacts
+// such as a failure report; otherwise it leaves NULL for annotation matching.
+// Rejection without an error diagnostic fails. Consumers select and map only
+// the artifacts they inspect, independently of diagnostic matching.
 iree_status_t loom_check_compile_artifact(
     const loom_check_emit_provider_request_t* request,
     const loom_check_compile_artifact_options_t* options,
@@ -149,7 +150,7 @@ iree_status_t loom_check_emit_artifact(
     const loom_check_emit_provider_request_t* request,
     const loomc_emit_options_t* options, loomc_result_t** out_result);
 
-// Selects a required output from a successful compiler result by kind and
+// Selects a required output from a compiler result by kind and
 // format. The returned artifact borrows |result|. Missing requested output is
 // a check failure, including optional outputs unsupported by an emitter.
 iree_status_t loom_check_compile_select_artifact(
@@ -158,8 +159,10 @@ iree_status_t loom_check_compile_select_artifact(
 
 // Lowers the request's admitted public module through LoomC. User diagnostics
 // leave |out_compiled| false and return OK for normal annotation matching.
-// When non-NULL, |out_result| receives the successful result and owns it until
-// released; otherwise the result is discarded after diagnostics are copied.
+// When non-NULL, |out_result| receives a successful result or a diagnosed
+// rejection carrying artifacts and owns it until released; otherwise the result
+// is discarded after diagnostics are copied. A retained report does not imply
+// successful lowering: |out_compiled| remains false for rejected programs.
 iree_status_t loom_check_compile_source_low(
     const loom_check_emit_provider_request_t* request,
     const loom_check_compile_source_low_options_t* options, bool* out_compiled,

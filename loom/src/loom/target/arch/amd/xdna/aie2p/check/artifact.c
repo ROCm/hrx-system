@@ -248,6 +248,7 @@ static iree_status_t loom_aie2p_artifact_check_append_names(
 
 const loom_check_emit_provider_t loom_aie2p_artifact_check_emit_provider = {
     .name = IREE_SVL("aie2p-xdna"),
+    .flags = LOOM_CHECK_EMIT_PROVIDER_FLAG_COMPARE_ERROR_OUTPUT,
     .match = loom_aie2p_artifact_check_matches,
     .execute = loom_aie2p_artifact_check_execute,
     .append_names = loom_aie2p_artifact_check_append_names,
