@@ -8,6 +8,7 @@ files through `// ====` sections and retain exact expectations maintained with
 | Contract | Fixtures |
 | --- | --- |
 | Record copies, returned values, and member aliases | `array_records` |
+| Mixed record loop state, nested selections, and output component origins | `record_values`, `records_invalid` |
 | Nested arrays, narrow fields, booleans, and vector components | `array_records`, `record_arrays` |
 | References, selected aliases, and mutation across calls | `reference_accessors`, `reference_parameters*` |
 | Value/storage receivers, member effects, and receiver aliases | `member_functions*` |

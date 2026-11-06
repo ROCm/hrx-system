@@ -28,6 +28,8 @@ loom_check_test_suite(
         "record_initialization.cxx-test",
         "record_memory.cxx-test",
         "record_memory_invalid.cxx-test",
+        "record_values.cxx-test",
+        "records_invalid.cxx-test",
         "reference_accessors.cxx-test",
         "reference_parameters.cxx-test",
         "reference_parameters_invalid.cxx-test",

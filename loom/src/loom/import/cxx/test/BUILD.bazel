@@ -159,7 +159,6 @@ loom_check_test_suite(
         "predicate_contracts.cxx-test",
         "predicate_contracts_invalid.cxx-test",
         "records.cxx-test",
-        "records_invalid.cxx-test",
         "scans.cxx-test",
         "scans_invalid.cxx-test",
         "schedule_lowering.cxx-test",
