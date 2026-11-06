@@ -117,6 +117,28 @@ func.def cold noinline @cold_identity(%value: i32) -> (i32) {
 
 // ====
 // RUN: verify
+struct NoInlineConstructor {
+  // ERROR@+1: LOWERING/059 "constructor and destructor calls require inline expansion"
+  [[loom::noinline]] NoInlineConstructor() {}
+};
+unsigned construct_noinline() {
+  NoInlineConstructor value;
+  return 0u;
+}
+
+// ====
+// RUN: verify
+struct NoInlineDestructor {
+  // ERROR@+1: LOWERING/059 "constructor and destructor calls require inline expansion"
+  [[loom::noinline]] ~NoInlineDestructor() {}
+};
+unsigned destroy_noinline() {
+  NoInlineDestructor value;
+  return 0u;
+}
+
+// ====
+// RUN: verify
 // ERROR@+1: LOWERING/059 "temperature hint requires an ordinary source function"
 [[loom::cold]] constexpr unsigned cold_global_value = 1u;
 

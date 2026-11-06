@@ -462,10 +462,11 @@ func.def inline @Direct__Direct_storage(%this: buffer, %this_byte_offset: offset
 struct Coefficients {
   double values[2];
 
-  __device__ Coefficients() {
+  __forceinline__ __device__ Coefficients() {
     values[0] = 1.0;
     values[1] = 2.0;
   }
+  __forceinline__ __device__ ~Coefficients() = default;
 };
 
 __global__ [[loom::workgroup_size(64, 1, 1)]] void scale(double* output, const double* input) {
