@@ -47,6 +47,13 @@ build:rocm-ci-cache --remote_cache_compression
 # execute against the hardware and process environment assigned to that job.
 test:rocm-ci-cache --cache_test_results=no
 
+# Bazel's top-level download policy can otherwise leave cached executables
+# behind local Windows executable-wrapper actions and current-invocation test
+# evidence behind CI result staging. Materialize those local consumer inputs
+# without downloading cached object and archive intermediates.
+test:rocm-ci-cache --remote_download_regex=.*[.]exe$
+test:rocm-ci-cache --remote_download_regex=.*test[.](log|xml)$
+
 # -----------------------------------------------------------------------------
 # Local build defaults.
 # -----------------------------------------------------------------------------
