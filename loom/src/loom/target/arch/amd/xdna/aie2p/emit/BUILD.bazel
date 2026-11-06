@@ -87,7 +87,7 @@ loom_cc_library(
         "//loom/src/loom/error:diagnostic",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops:type_builders",
+        "//loom/src/loom/ops:core_type_builders",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amd/xdna:error_defs",
         "//loom/src/loom/target/arch/amd/xdna/aie2p:core_structure",

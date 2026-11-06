@@ -397,7 +397,7 @@ loom_cc_library(
 )
 
 loom_cc_instance_library(
-    name = "type_builders",
+    name = "core_type_builders",
     srcs = ["type_builders.c"],
     hdrs = ["type_builders.h"],
     deps = [
@@ -430,9 +430,9 @@ loom_cc_library(
         "type_registry_tables.h",
     ],
     deps = [
+        ":core_type_builders",
         ":op_defs",
         ":storage_facts",
-        ":type_builders",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/encoding",
@@ -447,8 +447,8 @@ loom_cc_test(
     name = "reference_type_test",
     srcs = ["reference_type_test.cc"],
     deps = [
+        ":core_type_builders",
         ":reference_type",
-        ":type_builders",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/type",
@@ -463,7 +463,7 @@ loom_cc_test(
     name = "type_builders_test",
     srcs = ["type_builders_test.cc"],
     deps = [
-        ":type_builders",
+        ":core_type_builders",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -599,7 +599,7 @@ loom_cc_library_group(
     testonly = True,
     visibility = ["//visibility:private"],
     deps = [
-        ":type_builders",
+        ":core_type_builders",
         "//loom/src/loom/pass:builder",
     ] + [
         "//loom/src/loom/ops/%s:builders" % dialect
