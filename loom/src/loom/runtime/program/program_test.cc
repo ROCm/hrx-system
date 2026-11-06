@@ -357,8 +357,9 @@ TEST(ProgramBindingTest, PreservesDeclaredReferenceMode) {
   for (const auto name : {IREE_SV("owned"), IREE_SV("borrow")}) {
     const bool owning = iree_string_view_equal(name, IREE_SV("owned"));
     const iree_vm_signature_type_t exact = {
-        .kind = owning ? IREE_VM_SIGNATURE_TYPE_KIND_REF
-                       : IREE_VM_SIGNATURE_TYPE_KIND_PTR,
+        .kind = static_cast<iree_vm_signature_type_kind_t>(
+            owning ? IREE_VM_SIGNATURE_TYPE_KIND_REF
+                   : IREE_VM_SIGNATURE_TYPE_KIND_PTR),
         .value = {.ref = types.buffer},
     };
     iree_vm_signature_type_t other = exact;
