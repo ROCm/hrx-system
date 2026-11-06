@@ -9,8 +9,6 @@
 #include <string.h>
 
 #include "loom/ir/value_refs.h"
-#include "loom/ops/cfg/ops.h"
-#include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 
 enum {
@@ -31,8 +29,8 @@ typedef struct loom_cfg_dead_state_t {
   iree_host_size_t worklist_count;
 } loom_cfg_dead_state_t;
 
-static bool loom_cfg_dead_state_direct_branch(const loom_op_t* op) {
-  return loom_cfg_br_isa(op) || loom_low_br_isa(op);
+static bool loom_cfg_dead_state_prunable_branch(const loom_op_t* op) {
+  return loom_direct_branch_can_rebuild_payload(op);
 }
 
 static void loom_cfg_dead_state_mark(loom_cfg_dead_state_t* state,
@@ -87,7 +85,7 @@ static iree_status_t loom_cfg_dead_state_seed(loom_cfg_dead_state_t* state) {
     const loom_cfg_edge_index_span_t incoming =
         loom_cfg_graph_predecessor_edges(graph, i);
     for (iree_host_size_t j = 0; j < incoming.count; ++j) {
-      preserve_arguments |= !loom_cfg_dead_state_direct_branch(
+      preserve_arguments |= !loom_cfg_dead_state_prunable_branch(
           graph->edges[incoming.values[j]].terminator);
     }
     for (uint16_t j = 0; j < block->arg_count; ++j) {
@@ -101,7 +99,7 @@ static iree_status_t loom_cfg_dead_state_seed(loom_cfg_dead_state_t* state) {
     }
     const loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
-      if (loom_cfg_dead_state_direct_branch(op)) {
+      if (loom_cfg_dead_state_prunable_branch(op)) {
         continue;
       }
       if (op->region_count != 0 ||
@@ -130,9 +128,9 @@ static iree_status_t loom_cfg_dead_state_trace(loom_cfg_dead_state_t* state) {
           loom_cfg_graph_predecessor_edges(graph, block->region_index);
       for (iree_host_size_t i = 0; i < incoming.count; ++i) {
         const loom_op_t* branch = graph->edges[incoming.values[i]].terminator;
-        if (loom_cfg_dead_state_direct_branch(branch)) {
-          loom_cfg_dead_state_mark(state,
-                                   loom_op_const_operands(branch)[argument]);
+        if (loom_cfg_dead_state_prunable_branch(branch)) {
+          const loom_value_slice_t args = loom_direct_branch_args(branch);
+          loom_cfg_dead_state_mark(state, args.values[argument]);
         }
       }
       continue;
@@ -157,29 +155,19 @@ static iree_status_t loom_cfg_dead_state_trace(loom_cfg_dead_state_t* state) {
 static iree_status_t loom_cfg_dead_state_prune_branch(
     loom_rewriter_t* rewriter, const loom_cfg_dead_state_t* state,
     loom_op_t* branch, loom_value_id_t* arguments) {
-  loom_block_t* destination = loom_op_successors(branch)[0];
-  const loom_value_id_t* incoming = loom_op_const_operands(branch);
+  loom_block_t* destination = loom_direct_branch_dest(branch);
+  const loom_value_slice_t incoming = loom_direct_branch_args(branch);
   uint16_t count = 0;
   for (uint16_t i = 0; i < destination->arg_count; ++i) {
     if (loom_cfg_dead_state_live(state, destination->arg_ids[i])) {
-      arguments[count++] = incoming[i];
+      arguments[count++] = incoming.values[i];
     }
   }
   if (count == branch->operand_count) {
     return iree_ok_status();
   }
-  const loom_builder_ip_t saved_ip = loom_builder_save(&rewriter->builder);
-  loom_builder_set_before(&rewriter->builder, branch);
-  loom_op_t* replacement = NULL;
-  const iree_status_t status =
-      loom_cfg_br_isa(branch)
-          ? loom_cfg_br_build(&rewriter->builder, destination, arguments, count,
-                              branch->location, &replacement)
-          : loom_low_br_build(&rewriter->builder, destination, arguments, count,
-                              branch->location, &replacement);
-  loom_builder_restore(&rewriter->builder, saved_ip);
-  IREE_RETURN_IF_ERROR(status);
-  return loom_rewriter_erase(rewriter, branch);
+  return loom_rewriter_rebuild_direct_branch(rewriter, branch, destination,
+                                             arguments, count);
 }
 
 static iree_status_t loom_cfg_dead_state_apply(
@@ -224,7 +212,7 @@ static iree_status_t loom_cfg_dead_state_apply(
   // it then releases every operand/attribute use of the dead block arguments.
   for (uint16_t i = 0; i < graph->block_count; ++i) {
     loom_op_t* branch = graph->blocks[i].block->last_op;
-    if (loom_cfg_dead_state_direct_branch(branch)) {
+    if (loom_cfg_dead_state_prunable_branch(branch)) {
       IREE_RETURN_IF_ERROR(
           loom_cfg_dead_state_prune_branch(rewriter, state, branch, arguments));
     }

@@ -65,8 +65,6 @@ loom_cc_library(
     deps = [
         ":block_arguments",
         "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/cfg",
-        "//loom/src/loom/ops/low",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/util:cfg_graph",
         "//loom/src/loom/util:dominance",
@@ -135,8 +133,6 @@ loom_cc_library(
     deps = [
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/ops/cfg",
-        "//loom/src/loom/ops/low",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/util:cfg_graph",
     ],
@@ -160,7 +156,6 @@ loom_cc_library(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:special_values",
         "//loom/src/loom/ops/cfg",
-        "//loom/src/loom/ops/low",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/rewrite:materialize",

@@ -427,6 +427,15 @@ iree_status_t loom_rewriter_replace_results_with_materialized_values_and_erase(
     loom_rewriter_t* rewriter, loom_op_t* op,
     loom_materialize_value_fn_t materialize_value);
 
+// Rebuilds an attribute-free variadic DirectBranch operation with a new
+// destination and complete payload, preserving its kind, instance semantics,
+// source location, and comments. The source operation is erased after the
+// replacement is finalized. The caller establishes
+// loom_direct_branch_can_rebuild_payload and successor argument compatibility.
+iree_status_t loom_rewriter_rebuild_direct_branch(
+    loom_rewriter_t* rewriter, loom_op_t* source, loom_block_t* destination,
+    const loom_value_id_t* arguments, uint16_t argument_count);
+
 // Erases an op that has no remaining uses.
 iree_status_t loom_rewriter_erase(loom_rewriter_t* rewriter, loom_op_t* op);
 

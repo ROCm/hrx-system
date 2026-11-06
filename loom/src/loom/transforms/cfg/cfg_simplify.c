@@ -17,7 +17,6 @@
 #include "loom/ir/module.h"
 #include "loom/ir/type_refs.h"
 #include "loom/ops/cfg/ops.h"
-#include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/special_values.h"
 #include "loom/pass/value_facts.h"
@@ -237,70 +236,6 @@ static iree_status_t loom_cfg_simplify_prepare_regions(
 }
 
 //===----------------------------------------------------------------------===//
-// Branch rewriting
-//===----------------------------------------------------------------------===//
-
-static iree_status_t loom_cfg_simplify_replace_br(
-    loom_cfg_simplify_state_t* state, loom_op_t* old_br, loom_block_t* dest,
-    const loom_value_id_t* args, iree_host_size_t arg_count) {
-  loom_builder_ip_t saved_ip = loom_builder_save(&state->rewriter->builder);
-  loom_builder_set_before(&state->rewriter->builder, old_br);
-  loom_op_t* new_br = NULL;
-  iree_status_t status =
-      loom_cfg_br_build(&state->rewriter->builder, dest, args, arg_count,
-                        old_br->location, &new_br);
-  loom_builder_restore(&state->rewriter->builder, saved_ip);
-  IREE_RETURN_IF_ERROR(status);
-  return loom_rewriter_erase(state->rewriter, old_br);
-}
-
-static iree_status_t loom_cfg_simplify_replace_direct_br(
-    loom_cfg_simplify_state_t* state, loom_op_t* old_br, loom_block_t* dest,
-    const loom_value_id_t* args, iree_host_size_t arg_count) {
-  if (loom_cfg_br_isa(old_br)) {
-    return loom_cfg_simplify_replace_br(state, old_br, dest, args, arg_count);
-  }
-
-  if (!loom_low_br_isa(old_br)) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "cfg-simplify direct branch rewrite expected a "
-                            "cfg.br or low.br");
-  }
-
-  loom_builder_ip_t saved_ip = loom_builder_save(&state->rewriter->builder);
-  loom_builder_set_before(&state->rewriter->builder, old_br);
-  loom_op_t* new_br = NULL;
-  iree_status_t status =
-      loom_low_br_build(&state->rewriter->builder, dest, args, arg_count,
-                        old_br->location, &new_br);
-  loom_builder_restore(&state->rewriter->builder, saved_ip);
-  IREE_RETURN_IF_ERROR(status);
-  return loom_rewriter_erase(state->rewriter, old_br);
-}
-
-//===----------------------------------------------------------------------===//
-// Direct branch access
-//===----------------------------------------------------------------------===//
-
-static bool loom_cfg_simplify_direct_branch(const loom_op_t* op,
-                                            loom_block_t** out_dest,
-                                            loom_value_slice_t* out_args) {
-  if (loom_cfg_br_isa(op)) {
-    *out_dest = loom_cfg_br_dest(op);
-    *out_args = loom_cfg_br_args(op);
-    return true;
-  }
-  if (loom_low_br_isa(op)) {
-    *out_dest = loom_low_br_dest(op);
-    *out_args = loom_low_br_args(op);
-    return true;
-  }
-  *out_dest = NULL;
-  *out_args = (loom_value_slice_t){0};
-  return false;
-}
-
-//===----------------------------------------------------------------------===//
 // Unreachable block removal
 //===----------------------------------------------------------------------===//
 
@@ -447,9 +382,14 @@ static iree_status_t loom_cfg_simplify_thread_fact_known_branches(
       const loom_cfg_edge_info_t* predecessor_edge =
           loom_cfg_graph_edge(graph, edge_index);
       const loom_op_t* predecessor_terminator = predecessor_edge->terminator;
-      if (!loom_cfg_br_isa(predecessor_terminator) &&
-          (!loom_cfg_cond_br_isa(predecessor_terminator) ||
-           block->arg_count != 0)) {
+      const bool is_direct_branch =
+          loom_direct_branch_isa(predecessor_terminator);
+      if (is_direct_branch && block->arg_count != 0 &&
+          !loom_direct_branch_can_rebuild_payload(predecessor_terminator)) {
+        continue;
+      }
+      if (!is_direct_branch && (!loom_cfg_cond_br_isa(predecessor_terminator) ||
+                                block->arg_count != 0)) {
         continue;
       }
       const uint16_t predecessor_index = predecessor_edge->source_block_index;
@@ -527,9 +467,10 @@ static iree_status_t loom_cfg_simplify_thread_fact_known_branches(
     loom_op_t* terminator = (loom_op_t*)edge->terminator;
     loom_block_t* destination =
         (loom_block_t*)graph->blocks[destinations[i]].block;
-    if (loom_cfg_br_isa(terminator) && terminator->operand_count != 0) {
-      IREE_RETURN_IF_ERROR(loom_cfg_simplify_replace_br(state, terminator,
-                                                        destination, NULL, 0));
+    if (loom_direct_branch_can_rebuild_payload(terminator) &&
+        terminator->operand_count != 0) {
+      IREE_RETURN_IF_ERROR(loom_rewriter_rebuild_direct_branch(
+          state->rewriter, terminator, destination, NULL, 0));
     } else {
       loom_op_successors(terminator)[edge->successor_index] = destination;
       IREE_RETURN_IF_ERROR(
@@ -810,11 +751,8 @@ static bool loom_cfg_simplify_is_alpha_merge_candidate(
       !loom_cfg_simplify_block_values_stay_in_block(state, block)) {
     return false;
   }
-  loom_block_t* branch_dest = NULL;
-  loom_value_slice_t branch_args = {0};
   if (block->first_op == block->last_op &&
-      loom_cfg_simplify_direct_branch(block->first_op, &branch_dest,
-                                      &branch_args)) {
+      loom_direct_branch_isa(block->first_op)) {
     return false;
   }
   const loom_op_t* op = NULL;
@@ -1072,9 +1010,9 @@ static bool loom_cfg_simplify_can_redirect_successor(
   if (!new_dest) {
     return false;
   }
-  if (loom_cfg_br_isa(terminator)) {
-    loom_value_slice_t args = loom_cfg_br_args((loom_op_t*)terminator);
-    return loom_cfg_br_dest(terminator) == old_dest &&
+  if (loom_direct_branch_isa(terminator)) {
+    loom_value_slice_t args = loom_direct_branch_args(terminator);
+    return loom_direct_branch_dest(terminator) == old_dest &&
            args.count == old_dest->arg_count &&
            args.count == new_dest->arg_count &&
            loom_cfg_block_arguments_can_bind(state->module, state->dominance,
@@ -1286,13 +1224,11 @@ static bool loom_cfg_simplify_pred_branches_to_block(
     const loom_block_t* predecessor =
         graph->blocks[predecessors.values[i]].block;
     loom_op_t* terminator = ((loom_block_t*)predecessor)->last_op;
-    loom_block_t* dest = NULL;
-    loom_value_slice_t args = {0};
-    if (!terminator ||
-        !loom_cfg_simplify_direct_branch(terminator, &dest, &args) ||
-        dest != block) {
+    if (!loom_direct_branch_can_rebuild_payload(terminator) ||
+        loom_direct_branch_dest(terminator) != block) {
       return false;
     }
+    const loom_value_slice_t args = loom_direct_branch_args(terminator);
     if (args.count != block->arg_count) {
       return false;
     }
@@ -1304,7 +1240,7 @@ static bool loom_cfg_simplify_pred_branches_to_block(
 // Returns the argument payload of a direct branch already qualified by
 // loom_cfg_simplify_pred_branches_to_block.
 static loom_value_slice_t loom_cfg_simplify_pred_branch_args(loom_op_t* br) {
-  return loom_cfg_br_isa(br) ? loom_cfg_br_args(br) : loom_low_br_args(br);
+  return loom_direct_branch_args(br);
 }
 
 static bool loom_cfg_simplify_incoming_slots_match(
@@ -1441,8 +1377,8 @@ static iree_status_t loom_cfg_simplify_rebuild_br_for_block_args(
     IREE_ASSERT_LT(retained_slots[arg_index], args.count);
     rebuilt_args[arg_index] = args.values[retained_slots[arg_index]];
   }
-  return loom_cfg_simplify_replace_direct_br(state, br, dest, rebuilt_args,
-                                             retained_count);
+  return loom_rewriter_rebuild_direct_branch(state->rewriter, br, dest,
+                                             rebuilt_args, retained_count);
 }
 
 static iree_status_t loom_cfg_simplify_materialize_constant_arg(

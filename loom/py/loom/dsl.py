@@ -5667,6 +5667,11 @@ class DirectBranchInterface(NamedTuple):
     positional payload forwarded to one successor block. The generator proves
     the fixed structural shape, allowing C consumers to use one cached marker
     bit and the generic operation storage instead of an interface vtable.
+
+    Attribute-free implementations with a variadic payload additionally admit
+    generic payload rebuilding. Attributes may qualify individual payload
+    positions, as with a physical-storage identity range, so attributed
+    branches remain owned by their dialect-specific mutation logic.
     """
 
     # Variadic operand field holding the complete successor payload. None is

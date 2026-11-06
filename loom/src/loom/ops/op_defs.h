@@ -1324,6 +1324,15 @@ static inline loom_value_slice_t loom_direct_branch_args(const loom_op_t* op) {
   };
 }
 
+// Returns whether the complete payload may be rebuilt without remapping
+// operation-specific metadata. DirectBranch guarantees positional forwarding;
+// the variadic shape permits cardinality changes. Attributed branches may
+// qualify payload positions and therefore retain dialect-owned mutation.
+static inline bool loom_direct_branch_can_rebuild_payload(const loom_op_t* op) {
+  return op &&
+         iree_any_bit_set(op->flags, LOOM_OP_FLAG_REBUILDABLE_DIRECT_BRANCH);
+}
+
 //===----------------------------------------------------------------------===//
 // ValueDuplication interface
 //===----------------------------------------------------------------------===//
