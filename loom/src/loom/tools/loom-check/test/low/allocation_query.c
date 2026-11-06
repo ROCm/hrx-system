@@ -9,6 +9,7 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation_materialization.h"
+#include "loom/codegen/low/storage_lease.h"
 #include "loom/codegen/low/text_asm.h"
 #include "loom/format/text/printer.h"
 #include "loom/tools/loom-check/diagnostics.h"
@@ -616,9 +617,13 @@ static iree_status_t loom_check_test_low_allocation_execute(
   IREE_RETURN_IF_ERROR(
       loom_check_test_low_allocation_parse_options(request, &options));
 
+  const loom_low_storage_lease_provider_t storage_lease_provider = {
+      .query = loom_low_storage_lease_query_descriptor_rows,
+  };
   const loom_low_emission_frame_options_t frame_options = {
       .schedule_strategy = options.schedule_strategy,
       .allocation_diagnostic_flags = options.allocation_diagnostic_flags,
+      .storage_lease_provider = &storage_lease_provider,
   };
   loom_low_emission_frame_t frame = {0};
   const bool spill_free = iree_any_bit_set(

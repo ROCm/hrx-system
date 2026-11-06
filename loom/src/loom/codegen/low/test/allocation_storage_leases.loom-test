@@ -1,0 +1,107 @@
+// A later whole-bank clobber prevents a lifetime-wide physical assignment.
+// Spill repair must store the asynchronous result before that clobber and
+// reload it afterward, while materialized traffic remains register-backed.
+// RUN: emit low-allocation-query @leased_load_32 strategy=source spill-count materialize-spills
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @leased_load_32(%address: reg<test.ptr>) -> (reg<test.i32>) asm {
+  %loaded = test.leased.load.i32 %address
+  test.pressure.clobber
+  %result = copy %loaded : reg<test.alias32> -> reg<test.i32>
+  return %result
+}
+
+// ----
+spills: 1
+storage: 1 reservations, 4 bytes
+traffic: 1 stores, 1 reloads
+errors: 0
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @leased_load_32(%address: reg<test.ptr>) -> (reg<test.i32>) asm {
+  %leased_load_32_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %loaded = test.leased.load.i32 %address
+  low.spill %loaded, %leased_load_32_spill_storage_0 : reg<test.alias32>, low.storage<stack>
+  test.pressure.clobber
+  %5 = low.reload %leased_load_32_spill_storage_0 : low.storage<stack> -> reg<test.alias32>
+  %result = copy %5 : reg<test.alias32> -> reg<test.i32>
+  return %result
+}
+
+// ====
+
+// A later whole-bank clobber prevents a lifetime-wide physical assignment.
+// Spill repair must store the asynchronous result before that clobber and
+// reload it afterward, while materialized traffic remains register-backed.
+// RUN: emit low-allocation-query @leased_load_64 strategy=source spill-count materialize-spills
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @leased_load_64(%address: reg<test.ptr>) -> (reg<test.i64>) asm {
+  %loaded = test.leased.load.i64 %address
+  test.pressure.clobber
+  %result = copy %loaded : reg<test.alias64> -> reg<test.i64>
+  return %result
+}
+
+// ----
+spills: 1
+storage: 1 reservations, 8 bytes
+traffic: 1 stores, 1 reloads
+errors: 0
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @leased_load_64(%address: reg<test.ptr>) -> (reg<test.i64>) asm {
+  %leased_load_64_spill_storage_0 = storage {byte_alignment = 8, byte_length = 8} : low.storage<stack>
+  %loaded = test.leased.load.i64 %address
+  low.spill %loaded, %leased_load_64_spill_storage_0 : reg<test.alias64>, low.storage<stack>
+  test.pressure.clobber
+  %5 = low.reload %leased_load_64_spill_storage_0 : low.storage<stack> -> reg<test.alias64>
+  %result = copy %5 : reg<test.alias64> -> reg<test.i64>
+  return %result
+}
+
+// ====
+
+// The rebuilt frame assigns physical registers to both the original load
+// and its reload, and leaves no provisional spill locations.
+// RUN: emit low-allocation-query @repaired_load_32 strategy=source spill-free spill-count values=%loaded,%result
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @repaired_load_32(%address: reg<test.ptr>) -> (reg<test.i32>) asm {
+  %loaded = test.leased.load.i32 %address
+  test.pressure.clobber
+  %result = copy %loaded : reg<test.alias32> -> reg<test.i32>
+  return %result
+}
+
+// ----
+spills: 0
+materialized traffic: stores=1 reloads=1
+value %loaded: test.alias32 -> physical_register[0:1]
+value %result: test.i32 -> target_id[0:1]
+
+// ====
+
+// The rebuilt frame assigns physical registers to both the original load
+// and its reload, and leaves no provisional spill locations.
+// RUN: emit low-allocation-query @repaired_load_64 strategy=source spill-free spill-count values=%loaded,%result
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @repaired_load_64(%address: reg<test.ptr>) -> (reg<test.i64>) asm {
+  %loaded = test.leased.load.i64 %address
+  test.pressure.clobber
+  %result = copy %loaded : reg<test.alias64> -> reg<test.i64>
+  return %result
+}
+
+// ----
+spills: 0
+materialized traffic: stores=1 reloads=1
+value %loaded: test.alias64 -> physical_register[0:1]
+value %result: test.i64 -> target_id[0:1]

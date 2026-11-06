@@ -78,6 +78,7 @@ _REG_SPECIAL = "test.special"
 _REG_SCHEDULE_STATE = "test.schedule_state"
 _REG_ALIAS32 = "test.alias32"
 _REG_ALIAS64 = "test.alias64"
+_REG_ALIAS_STATE = "test.alias.state"
 _REG_PRESSURE_ALIAS32 = "test.pressure.alias32"
 _REG_PRESSURE_ALIAS64 = "test.pressure.alias64"
 _REG_EXPLICIT32 = "test.explicit32"
@@ -2183,6 +2184,58 @@ TEST_LOW_LEASED_CONSUME_I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.SIDE_EFFECTING,),
 )
 
+# One aliased physical register makes asynchronous producer lifetimes and
+# whole-bank clobbers observable without any hardware target dependency.
+TEST_LOW_LEASED_LOAD_DESCRIPTORS = tuple(
+    replace(
+        TEST_LOW_LOAD_V4I32_DESCRIPTOR,
+        key=f"test.leased.load.i{width}",
+        mnemonic=f"test.leased.load.i{width}",
+        semantic_tag=f"memory.leased_load.i{width}",
+        operands=(
+            Operand(
+                "dst", OperandRole.RESULT, (RegClassAlt(register_class),), unit_count=1
+            ),
+            _ptr_resource("address"),
+        ),
+        storage_leases=(
+            replace(
+                TEST_LOW_LEASED_CONSUME_I32_DESCRIPTOR.storage_leases[0],
+                kind=StorageLeaseKind.RESULT_WRITE,
+                attachment=StorageLeaseAttachment.RESULT,
+                unit_count=1,
+                flags=(
+                    StorageLeaseFlag.STARTS_AT_ISSUE,
+                    StorageLeaseFlag.RELEASE_BEFORE_BOUNDARY,
+                    StorageLeaseFlag.RELEASE_FOR_PRESSURE,
+                ),
+            ),
+        ),
+    )
+    for width, register_class in (
+        (32, _REG_ALIAS32),
+        (64, _REG_ALIAS64),
+    )
+)
+
+TEST_LOW_PRESSURE_CLOBBER_DESCRIPTOR = Descriptor(
+    key="test.pressure.clobber",
+    mnemonic="test.pressure.clobber",
+    semantic_tag="test.pressure.clobber",
+    operands=(
+        Operand(
+            "state",
+            OperandRole.IMPLICIT,
+            (RegClassAlt(_REG_ALIAS_STATE),),
+            unit_count=1,
+            flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_WRITE),
+        ),
+    ),
+    asm_forms=_asm(),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
 TEST_LOW_SCHEDULE_ALTERNATIVE_STORE_B_V4I32_DESCRIPTOR = Descriptor(
     key="test.schedule.alternative.store.b.v4i32",
     mnemonic="test.schedule.alternative.store.b.v4i32",
@@ -2443,6 +2496,14 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             64,
             SpillSlotSpace.STACK,
             flags=(RegClassFlag.PHYSICAL,),
+            allocatable_count=1,
+            alias_set_id=1,
+        ),
+        RegClass(
+            _REG_ALIAS_STATE,
+            32,
+            SpillSlotSpace.STACK,
+            flags=(RegClassFlag.PHYSICAL, RegClassFlag.UNSPILLABLE),
             allocatable_count=1,
             alias_set_id=1,
         ),
@@ -3024,6 +3085,8 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_LOAD_INDEX_V4F32_DESCRIPTOR,
         TEST_LOW_STORE_V4I32_DESCRIPTOR,
         TEST_LOW_LEASED_CONSUME_I32_DESCRIPTOR,
+        *TEST_LOW_LEASED_LOAD_DESCRIPTORS,
+        TEST_LOW_PRESSURE_CLOBBER_DESCRIPTOR,
         TEST_LOW_SCHEDULE_ALTERNATIVE_STORE_A_V4I32_DESCRIPTOR,
         TEST_LOW_SCHEDULE_ALTERNATIVE_STORE_B_V4I32_DESCRIPTOR,
         TEST_LOW_STORE_V4F32_DESCRIPTOR,
