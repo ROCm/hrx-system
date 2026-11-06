@@ -17,7 +17,6 @@
 
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
-#include "loom/runtime/testing/device.h"
 #include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/service/finite/embedding/source_service_test_fixture.h"
 #include "loom/serve/testing/model.h"
@@ -122,7 +121,9 @@ TEST_F(GroupEmbeddingServiceTest, EmbeddingsCompleteBeforeOtherDeviceRetires) {
   uint64_t observed = 0;
   IREE_ASSERT_OK(iree_hal_semaphore_query(frontier.semaphores[1], &observed));
   EXPECT_LT(observed, frontier.values[1]);
-  IREE_ASSERT_OK(loom_runtime_pool_trim(first_pool, 0));
+  ASSERT_EQ(Read(Send(R"({"pool":"pool0","target_bytes":0})", "/v1/pools/trim"))
+                .find("HTTP/1.1 200"),
+            0u);
   EXPECT_EQ(
       loom_runtime_pool_statistics(first_pool).workspace.reservation_count, 1u);
   const auto held = loom_runtime_pool_statistics(first_pool);
@@ -138,7 +139,9 @@ TEST_F(GroupEmbeddingServiceTest, EmbeddingsCompleteBeforeOtherDeviceRetires) {
   for (uint32_t word : output_) {
     EXPECT_EQ(word, pattern);
   }
-  IREE_ASSERT_OK(loom_runtime_test_pool_trim_and_drain(first_pool, 0));
+  ASSERT_EQ(Read(Send(R"({"pool":"pool0","target_bytes":0})", "/v1/pools/trim"))
+                .find("HTTP/1.1 200"),
+            0u);
   EXPECT_EQ(loom_runtime_pool_statistics(first_pool).workspace.bytes_committed,
             0u);
   EXPECT_EQ(loom_runtime_pool_statistics(first_pool).storage.bytes_committed,
