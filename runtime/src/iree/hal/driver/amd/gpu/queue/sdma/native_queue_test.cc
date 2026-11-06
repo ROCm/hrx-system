@@ -211,6 +211,11 @@ class QueueTest : public ::testing::Test {
       *mapping = reinterpret_cast<amdf_user_queue_mapping_t*>(queue);
       return AMDF_STATUS_OK;
     };
+    api_.user_queue_query_info = [](amdf_user_queue_t*,
+                                    amdf_user_queue_info_t* info) {
+      info->placement = AMDF_QUEUE_PLACEMENT_HOST_LOCAL;
+      return AMDF_STATUS_OK;
+    };
     api_.user_queue_mapping_query_info =
         [](amdf_user_queue_mapping_t* mapping,
            amdf_user_queue_mapping_info_t* info) {
@@ -290,8 +295,9 @@ class QueueTest : public ::testing::Test {
         .host_access = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
     };
     IREE_ASSERT_OK(iree_hal_amd_gpu_sdma_native_queue_allocate(
-        &context_, 0, mode, &control, &publication_, 0, iree_allocator_system(),
-        &queue_));
+        &context_, 0, mode, &control, &publication_, 0,
+        AMDF_QUEUE_PRIORITY_NORMAL, AMDF_QUEUE_PLACEMENT_DEFAULT,
+        iree_allocator_system(), &queue_));
   }
 
   void Publish() {

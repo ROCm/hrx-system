@@ -97,15 +97,16 @@ typedef enum iree_hal_amd_gpu_sdma_program_progress_e {
   IREE_HAL_AMD_GPU_SDMA_PROGRAM_END,
 } iree_hal_amd_gpu_sdma_program_progress_t;
 
-// Emits at most MAX_COMMAND_WORDS without allocation or native calls. All input
-// and extent validity was established by recording and invocation capture.
+// Emits at most word_capacity (up to MAX_COMMAND_WORDS) without allocation or
+// native calls. Input and extent validity were established by recording and
+// invocation capture.
 // BOUNDARY requires this invocation's checked native retirement before emitting
 // its successor; unrelated ready invocations remain eligible. END still needs
 // the queue's native completion tail, including for an empty span.
 iree_hal_amd_gpu_sdma_program_progress_t iree_hal_amd_gpu_sdma_program_emit(
     const iree_hal_amd_gpu_sdma_program_t* program, const uint64_t* values,
-    iree_hal_amd_gpu_sdma_program_cursor_t* cursor, uint32_t* words,
-    uint32_t* out_word_count);
+    iree_hal_amd_gpu_sdma_program_cursor_t* cursor, uint32_t word_capacity,
+    uint32_t* words, uint32_t* out_word_count);
 
 #ifdef __cplusplus
 }  // extern "C"

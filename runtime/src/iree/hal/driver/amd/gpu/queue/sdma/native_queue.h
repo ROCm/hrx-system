@@ -98,8 +98,23 @@ iree_status_t iree_hal_amd_gpu_sdma_native_queue_allocate(
     amdf_queue_publication_modes_t publication_mode,
     const iree_hal_amd_fabric_memory_options_t* control,
     iree_hal_amd_gpu_publication_t* publication, uint32_t publication_ordinal,
+    amdf_queue_priority_t priority, amdf_queue_placement_t placement,
     iree_allocator_t host_allocator,
     iree_hal_amd_gpu_sdma_native_queue_t** out_queue);
+
+// Current native execution status, including failures awaiting parent shutdown.
+amdf_status_t iree_hal_amd_gpu_sdma_native_queue_query_status(
+    const iree_hal_amd_gpu_sdma_native_queue_t* queue);
+
+// Actual primary-ring placement captured by cold native construction.
+iree_hal_queue_placement_t iree_hal_amd_gpu_sdma_native_queue_placement(
+    const iree_hal_amd_gpu_sdma_native_queue_t* queue);
+
+// Latches a parent execution fault without returning accepted operand
+// ownership. The ordinary parent stop/retirement phases still establish
+// reclamation safety.
+void iree_hal_amd_gpu_sdma_native_queue_fail(
+    iree_hal_amd_gpu_sdma_native_queue_t* queue, amdf_status_t status);
 
 // Publishes one admitted command span without allocation. An idle caller
 // publishes one entry immediately; native capacity parks the prepared span on

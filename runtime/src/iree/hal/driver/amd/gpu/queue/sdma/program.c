@@ -15,10 +15,10 @@ static uint64_t iree_hal_amd_gpu_sdma_program_length(
 
 iree_hal_amd_gpu_sdma_program_progress_t iree_hal_amd_gpu_sdma_program_emit(
     const iree_hal_amd_gpu_sdma_program_t* program, const uint64_t* values,
-    iree_hal_amd_gpu_sdma_program_cursor_t* cursor, uint32_t* words,
-    uint32_t* out_word_count) {
+    iree_hal_amd_gpu_sdma_program_cursor_t* cursor, uint32_t word_capacity,
+    uint32_t* words, uint32_t* out_word_count) {
   uint32_t* output = words;
-  uint32_t* const end = words + IREE_HAL_AMD_GPU_SDMA_MAX_COMMAND_WORDS;
+  uint32_t* const end = words + word_capacity;
   while (cursor->segment < program->segment_count) {
     const iree_hal_amd_gpu_sdma_program_segment_t* segment =
         &program->segments[cursor->segment];

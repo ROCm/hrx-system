@@ -135,7 +135,8 @@ class FileTransferStagingTest : public MemoryBackendTest,
     };
     IREE_ASSERT_OK(iree_hal_amd_gpu_sdma_native_queue_allocate(
         &context_, 0, AMDF_QUEUE_PUBLICATION_MODE_KERNEL, &control,
-        &publication_, 0, allocator_, &sdma_));
+        &publication_, 0, AMDF_QUEUE_PRIORITY_NORMAL,
+        AMDF_QUEUE_PLACEMENT_DEFAULT, allocator_, &sdma_));
     native_.required_flags =
         AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_HOST_FILE_IO;
     IREE_ASSERT_OK(iree_hal_amd_gpu_file_staging_allocate(

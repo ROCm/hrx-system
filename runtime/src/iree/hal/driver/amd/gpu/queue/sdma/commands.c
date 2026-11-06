@@ -53,6 +53,20 @@ uint32_t* iree_hal_amd_gpu_sdma_emit_cache(uint32_t* words, uint32_t control) {
   return words;
 }
 
+uint32_t* iree_hal_amd_gpu_sdma_emit_wait(uint32_t* words,
+                                          amdf_queue_format_features_t features,
+                                          uint64_t address, uint32_t value) {
+  *words++ = 8u | (3u << 28) | (1u << 31);
+  *words++ = (uint32_t)address;
+  *words++ = (uint32_t)(address >> 32);
+  *words++ = value;
+  *words++ = UINT32_MAX;
+  *words++ =
+      (0xfffu << 16) | 4u |
+      ((features & AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE) ? 3u << 28 : 0);
+  return words;
+}
+
 uint32_t* iree_hal_amd_gpu_sdma_emit_fill(uint32_t* words,
                                           amdf_queue_format_features_t features,
                                           uint64_t address,

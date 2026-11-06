@@ -43,6 +43,12 @@ uint32_t* iree_hal_amd_gpu_sdma_emit_fence(
     uint32_t* words, amdf_queue_format_features_t features, uint64_t address,
     uint32_t value);
 
+// Emits six DWORDs waiting for an exact binary producer value. The address and
+// memory scope belong to the device's qualified shared native signal domain.
+uint32_t* iree_hal_amd_gpu_sdma_emit_wait(uint32_t* words,
+                                          amdf_queue_format_features_t features,
+                                          uint64_t address, uint32_t value);
+
 // Emits five DWORDs of USER_GCR with admitted native control bits. This
 // requires the family feature; KERNEL SUBMISSION_GCR is a retirement boundary
 // instead of an in-stream encoding. Dependency waits precede an acquire.

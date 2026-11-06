@@ -81,6 +81,16 @@ TEST_F(CommandsTest, AcquireAndReleasePreserveDistinctCacheControls) {
   Expect(end, {0x111, 0, 0xc3c00000, 0, 0, 0x111, 0, 0x80400000, 0, 0});
 }
 
+TEST_F(CommandsTest, WaitUsesExactBinaryValueAndAdmittedScope) {
+  auto* end =
+      iree_hal_amd_gpu_sdma_emit_wait(words(), 0, UINT64_C(0x1234fffffffc), 1);
+  end = iree_hal_amd_gpu_sdma_emit_wait(
+      end, AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE, UINT64_C(0x567800000008),
+      0);
+  Expect(end, {0xb0000008, 0xfffffffc, 0x1234, 1, 0xffffffff, 0x0fff0004,
+               0xb0000008, 8, 0x5678, 0, 0xffffffff, 0x3fff0004});
+}
+
 TEST_F(CommandsTest, FillKeepsDwordSizeCountAndScopeIndependent) {
   auto* end = iree_hal_amd_gpu_sdma_emit_fill(
       words(), 0, UINT64_C(0x1234fffffffc), 4, 0x59e2c17a);

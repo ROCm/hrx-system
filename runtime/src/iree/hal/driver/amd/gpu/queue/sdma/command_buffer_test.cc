@@ -287,7 +287,8 @@ class CommandBufferTest : public ::testing::Test {
     *progress = iree_hal_amd_gpu_sdma_program_emit(
         iree_hal_amd_gpu_sdma_command_buffer_program(
             invocation.value.command_buffer),
-        invocation.value.values, &invocation.cursor, words.data() + 1, &count);
+        invocation.value.values, &invocation.cursor,
+        IREE_HAL_AMD_GPU_SDMA_MAX_COMMAND_WORDS, words.data() + 1, &count);
     EXPECT_LE(count, IREE_HAL_AMD_GPU_SDMA_MAX_COMMAND_WORDS);
     EXPECT_EQ(words.front(), 0x95d3c7a1u);
     for (size_t i = count + 1; i < words.size(); ++i) {
