@@ -1,6 +1,6 @@
 // RUN: verify
-// Every supported payload admits all four modes. Executable scenarios check
-// payload bits and participation; the cases below pin distinct binding shapes.
+// Every supported payload admits all four modes; exact cases below retain
+// payload/result identities for each distinct source binding shape.
 #include <loomcxx/kernel.h>
 #include <loomcxx/numeric.h>
 #include <loomcxx/vector.h>
@@ -58,6 +58,8 @@ VECTOR_SHUFFLES(Float8E4M3x4, loom::type::float8_e4m3fn_t, 4)
 VECTOR_SHUFFLES(Float8E5M2x4, loom::type::float8_e5m2_t, 4)
 VECTOR_SHUFFLES(Float16x4, std::float16_t, 4)
 VECTOR_SHUFFLES(BFloat16x4, std::bfloat16_t, 4)
+VECTOR_SHUFFLES(Bytes32, unsigned char, 32)
+VECTOR_SHUFFLES(BFloats16, std::bfloat16_t, 16)
 VECTOR_SHUFFLES(Float32x4, float, 4)
 VECTOR_SHUFFLES(Float64x2, double, 2)
 
@@ -144,4 +146,66 @@ func.def public inline @predicate_xor(%value: vector<4xi1>, %offset: i32, %width
 func.def public inline @dynamic_down(%value_dim0: index, %value: vector<[%value_dim0]xf32>, %offset: i32, %width: i32) -> (%39: index, vector<[%39]xf32>, i1) {
   %42, %43 = kernel.subgroup.shuffle<down> %value, %offset, %width : vector<[%value_dim0]xf32>, i32, i32
   func.return %value_dim0, %42, %43 : index, vector<[%value_dim0]xf32>, i1
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Wide vector exchanges preserve every component and a separate validity bit
+// for each shuffle mode.
+#include <loomcxx/kernel.h>
+using Payload = unsigned char __attribute__((ext_vector_type(32)));
+using Result = loom::kernel::subgroup::shuffle_result<Payload>;
+struct Exchanges {
+  // Source selected by absolute position.
+  Result index;
+  // Source selected by lane XOR.
+  Result xor_value;
+  // Source at a lower relative position.
+  Result up;
+  // Source at a higher relative position.
+  Result down;
+};
+LOOM_INLINE Exchanges exchange(Payload value, unsigned distance, unsigned width) {
+  using namespace loom::kernel::subgroup;
+  return {shuffle_index(value, distance, width), shuffle_xor(value, distance, width),
+          shuffle_up(value, distance, width), shuffle_down(value, distance, width)};
+}
+// ----
+func.def public linkonce inline @exchange(%value: vector<32xi8>, %distance: i32, %width: i32) -> (vector<32xi8>, i1, vector<32xi8>, i1, vector<32xi8>, i1, vector<32xi8>, i1) {
+  %11, %12 = kernel.subgroup.shuffle<index> %value, %distance, %width : vector<32xi8>, i32, i32
+  %13, %14 = kernel.subgroup.shuffle<xor> %value, %distance, %width : vector<32xi8>, i32, i32
+  %15, %16 = kernel.subgroup.shuffle<up> %value, %distance, %width : vector<32xi8>, i32, i32
+  %17, %18 = kernel.subgroup.shuffle<down> %value, %distance, %width : vector<32xi8>, i32, i32
+  func.return %11, %12, %13, %14, %15, %16, %17, %18 : vector<32xi8>, i1, vector<32xi8>, i1, vector<32xi8>, i1, vector<32xi8>, i1
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Wide vector exchanges preserve every component and a separate validity bit
+// for each shuffle mode.
+#include <loomcxx/kernel.h>
+using Payload = __bf16 __attribute__((ext_vector_type(16)));
+using Result = loom::kernel::subgroup::shuffle_result<Payload>;
+struct Exchanges {
+  // Source selected by absolute position.
+  Result index;
+  // Source selected by lane XOR.
+  Result xor_value;
+  // Source at a lower relative position.
+  Result up;
+  // Source at a higher relative position.
+  Result down;
+};
+LOOM_INLINE Exchanges exchange(Payload value, unsigned distance, unsigned width) {
+  using namespace loom::kernel::subgroup;
+  return {shuffle_index(value, distance, width), shuffle_xor(value, distance, width),
+          shuffle_up(value, distance, width), shuffle_down(value, distance, width)};
+}
+// ----
+func.def public linkonce inline @exchange(%value: vector<16xbf16>, %distance: i32, %width: i32) -> (vector<16xbf16>, i1, vector<16xbf16>, i1, vector<16xbf16>, i1, vector<16xbf16>, i1) {
+  %11, %12 = kernel.subgroup.shuffle<index> %value, %distance, %width : vector<16xbf16>, i32, i32
+  %13, %14 = kernel.subgroup.shuffle<xor> %value, %distance, %width : vector<16xbf16>, i32, i32
+  %15, %16 = kernel.subgroup.shuffle<up> %value, %distance, %width : vector<16xbf16>, i32, i32
+  %17, %18 = kernel.subgroup.shuffle<down> %value, %distance, %width : vector<16xbf16>, i32, i32
+  func.return %11, %12, %13, %14, %15, %16, %17, %18 : vector<16xbf16>, i1, vector<16xbf16>, i1, vector<16xbf16>, i1, vector<16xbf16>, i1
 }

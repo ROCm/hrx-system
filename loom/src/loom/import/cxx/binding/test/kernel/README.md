@@ -7,6 +7,12 @@ a device or executing a kernel.
 Atomic cases distinguish returned-old and returned-new values, pointer origins,
 source widths, signed selectors, memory order, and scope. Compare-exchange cases
 also retain argument effects and the conditional update of the expected value.
+
+Topology, scans, shuffles, and async transfers retain their logical operands,
+result identities, and participation contracts. Kernel argument and launch
+cases retain the source ABI independently of later device placement. Shared
+storage cases retain allocation space and synchronization across helper calls.
+
 Related source cases use `// ====` and complete output from the ordinary updater.
 
 ```sh

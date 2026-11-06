@@ -1,0 +1,287 @@
+// RUN: pass canonicalize,cse,dce
+// Topology is published before divergent return. All four shuffle modes
+// retain validity and payload checks against the same topology search.
+#include <loomcxx/kernel.h>
+#include "shuffle_payloads.h"
+
+// The oracle searches actual topology metadata. It assumes neither workitem
+// order within a subgroup nor that the final physical subgroup is full.
+template <class T>
+LOOM_INLINE unsigned mismatch(loom::kernel::subgroup::shuffle_result<T> actual,
+                              unsigned source_lane, bool in_range,
+                              unsigned subgroup, const unsigned* lanes,
+                              const unsigned* subgroups,
+                              const unsigned long long* input) {
+  bool found = false;
+  T expected = payload<T>(0);
+  for (unsigned other = 0; other < 83; ++other) {
+    if (in_range && other % 4 != 3 && lanes[other] == source_lane &&
+        subgroups[other] == subgroup) {
+      found = true;
+      expected = payload<T>(input[other + 1]);
+    }
+  }
+  unsigned difference = actual.valid != found;
+  if (actual.valid && found && !same_bits(actual.value, expected)) {
+    difference |= 2;
+  }
+  return difference;
+}
+
+template <class T>
+LOOM_INLINE void exchange_values(const unsigned long long* input,
+                                 unsigned* output) {
+  const unsigned item = loom::kernel::workitem::id.x;
+  const unsigned lane = loom::kernel::subgroup::lane_id();
+  const unsigned subgroup = loom::kernel::subgroup::id();
+  auto* lanes =
+      loom::buffer::alloca<unsigned, loom::memory_space::workgroup>(83);
+  auto* subgroups =
+      loom::buffer::alloca<unsigned, loom::memory_space::workgroup>(83);
+  lanes[item] = lane;
+  subgroups[item] = subgroup;
+  loom::kernel::barrier<loom::memory_space::workgroup,
+                        loom::atomic::scope::workgroup,
+                        loom::atomic::ordering::acq_rel>();
+  if (item % 4 == 3) {
+    return;
+  }
+  const unsigned base = (lane / 16) * 16;
+  const unsigned relative = lane % 16;
+  T value = payload<T>(input[item + 1]);
+  for (unsigned distance = 0; distance < 18; ++distance) {
+    const unsigned position = 1 + (distance * 83 + item) * 4;
+    output[position] = mismatch(
+        loom::kernel::subgroup::shuffle_index(value, distance, 16),
+        base + distance, distance < 16, subgroup, lanes, subgroups, input);
+    output[position + 1] =
+        mismatch(loom::kernel::subgroup::shuffle_xor(value, distance, 16),
+                 base + (relative ^ distance), (relative ^ distance) < 16,
+                 subgroup, lanes, subgroups, input);
+    output[position + 2] =
+        mismatch(loom::kernel::subgroup::shuffle_up(value, distance, 16),
+                 lane - distance, distance <= relative, subgroup, lanes,
+                 subgroups, input);
+    output[position + 3] =
+        mismatch(loom::kernel::subgroup::shuffle_down(value, distance, 16),
+                 lane + distance, relative + distance < 16, subgroup, lanes,
+                 subgroups, input);
+  }
+}
+
+[[loom::kernel, loom::workgroup_size(83, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void exchange_u64(const unsigned long long* input, unsigned* output) {
+  exchange_values<unsigned long long>(input, output);
+}
+// ----
+kernel.def @exchange_u64() {
+  %2 = index.constant 1 : index
+  %5 = index.constant 83 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%5, %2, %2) : index
+} launch(%input: buffer, %output: buffer) {
+  %input_byte_offset = index.constant 0 : offset
+  func.call @exchange_values_unsigned_long_long(%input, %input_byte_offset, %output, %input_byte_offset) : (buffer, offset, buffer, offset)
+  kernel.return
+}
+
+func.def inline @exchange_values_unsigned_long_long(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) {
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %item = index.cast %workitem_id_x : index to i32
+  %16 = kernel.subgroup.lane.id : index
+  %lane = index.cast %16 : index to i32
+  %18 = kernel.subgroup.id : index
+  %subgroup = index.cast %18 : index to i32
+  %246 = index.constant 332 : offset
+  %lanes = buffer.alloca<workgroup> align(4) %246 : buffer
+  %lanes_byte_offset = index.constant 0 : offset
+  %subgroups = buffer.alloca<workgroup> align(4) %246 : buffer
+  %34 = scalar.extui %item : i32 to i64
+  %278 = scalar.constant 2 : i64
+  %279 = scalar.shli %34, %278 : i64
+  %39 = scalar.assume %279 [range(%279, 0, 9223372036854775807)] : i64
+  %40 = index.cast %39 : i64 to offset
+  %41 = buffer.view %lanes[%40] : buffer -> view<1xi32>
+  view.store %lane, %41[0] : i32, view<1xi32>
+  %49 = buffer.view %subgroups[%40] : buffer -> view<1xi32>
+  view.store %subgroup, %49[0] : i32, view<1xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %274 = scalar.constant 3 : i32
+  %275 = scalar.andi %item, %274 : i32
+  %53 = scalar.cmpi eq, %275, %274 : i32
+  %272 = scalar.constant true : i1
+  %273 = scalar.xori %53, %272 : i1
+  scf.if %273 {
+    %270 = scalar.constant 4 : i32
+    %271 = scalar.shrui %lane, %270 : i32
+    %base = scalar.shli %271, %270 : i32
+    %266 = scalar.constant 15 : i32
+    %relative = scalar.andi %lane, %266 : i32
+    %60 = scalar.constant 1 : i32
+    %61 = scalar.addi %item, %60 : i32
+    %62 = scalar.extui %61 : i32 to i64
+    %264 = scalar.constant 3 : i64
+    %265 = scalar.shli %62, %264 : i64
+    %65 = index.cast %input_byte_offset : offset to i64
+    %66 = scalar.addi %65, %265 : i64
+    %67 = scalar.assume %66 [range(%66, 0, 9223372036854775807)] : i64
+    %68 = index.cast %67 : i64 to offset
+    %69 = buffer.view %input[%68] : buffer -> view<1xi64>
+    %70 = view.load %69[0] : view<1xi64> -> i64
+    %value = func.call pure @payload_unsigned_long_long(%70) : (i64) -> (i64)
+    %241 = index.constant 18 : offset
+    %76 = index.constant 1 : offset
+    scf.for %distance = [%lanes_byte_offset to %241 step %76] {
+      %78 = index.cast %distance : offset to i32
+      %80 = scalar.constant 83 : i32
+      %81 = scalar.muli %78, %80 : i32
+      %82 = scalar.addi %81, %item : i32
+      %262 = scalar.constant 2 : i32
+      %263 = scalar.shli %82, %262 : i32
+      %position = scalar.addi %263, %60 : i32
+      %86 = scalar.constant 16 : i32
+      %87, %88 = kernel.subgroup.shuffle<index> %value, %78, %86 : i64, i32, i32
+      %89 = scalar.addi %base, %78 : i32
+      %91 = scalar.cmpi ult, %78, %86 : i32
+      %92 = func.call readonly @mismatch_unsigned_long_long(%87, %88, %89, %91, %subgroup, %lanes, %lanes_byte_offset, %subgroups, %lanes_byte_offset, %input, %input_byte_offset) : (i64, i1, i32, i1, i32, buffer, offset, buffer, offset, buffer, offset) -> (i32)
+      %93 = scalar.extui %position : i32 to i64
+      %260 = scalar.shli %93, %278 : i64
+      %96 = index.cast %output_byte_offset : offset to i64
+      %97 = scalar.addi %96, %260 : i64
+      %98 = scalar.assume %97 [range(%97, 0, 9223372036854775807)] : i64
+      %99 = index.cast %98 : i64 to offset
+      %100 = buffer.view %output[%99] : buffer -> view<1xi32>
+      view.store %92, %100[0] : i32, view<1xi32>
+      %102, %103 = kernel.subgroup.shuffle<xor> %value, %78, %86 : i64, i32, i32
+      %104 = scalar.xori %relative, %78 : i32
+      %105 = scalar.addi %base, %104 : i32
+      %108 = scalar.cmpi ult, %104, %86 : i32
+      %109 = func.call readonly @mismatch_unsigned_long_long(%102, %103, %105, %108, %subgroup, %lanes, %lanes_byte_offset, %subgroups, %lanes_byte_offset, %input, %input_byte_offset) : (i64, i1, i32, i1, i32, buffer, offset, buffer, offset, buffer, offset) -> (i32)
+      %258 = scalar.addi %263, %262 : i32
+      %112 = scalar.extui %258 : i32 to i64
+      %256 = scalar.shli %112, %278 : i64
+      %116 = scalar.addi %96, %256 : i64
+      %117 = scalar.assume %116 [range(%116, 0, 9223372036854775807)] : i64
+      %118 = index.cast %117 : i64 to offset
+      %119 = buffer.view %output[%118] : buffer -> view<1xi32>
+      view.store %109, %119[0] : i32, view<1xi32>
+      %121, %122 = kernel.subgroup.shuffle<up> %value, %78, %86 : i64, i32, i32
+      %123 = scalar.subi %lane, %78 : i32
+      %124 = scalar.cmpi ule, %78, %relative : i32
+      %125 = func.call readonly @mismatch_unsigned_long_long(%121, %122, %123, %124, %subgroup, %lanes, %lanes_byte_offset, %subgroups, %lanes_byte_offset, %input, %input_byte_offset) : (i64, i1, i32, i1, i32, buffer, offset, buffer, offset, buffer, offset) -> (i32)
+      %254 = scalar.addi %263, %274 : i32
+      %128 = scalar.extui %254 : i32 to i64
+      %252 = scalar.shli %128, %278 : i64
+      %132 = scalar.addi %96, %252 : i64
+      %133 = scalar.assume %132 [range(%132, 0, 9223372036854775807)] : i64
+      %134 = index.cast %133 : i64 to offset
+      %135 = buffer.view %output[%134] : buffer -> view<1xi32>
+      view.store %125, %135[0] : i32, view<1xi32>
+      %137, %138 = kernel.subgroup.shuffle<down> %value, %78, %86 : i64, i32, i32
+      %139 = scalar.addi %lane, %78 : i32
+      %140 = scalar.addi %relative, %78 : i32
+      %142 = scalar.cmpi ult, %140, %86 : i32
+      %143 = func.call readonly @mismatch_unsigned_long_long(%137, %138, %139, %142, %subgroup, %lanes, %lanes_byte_offset, %subgroups, %lanes_byte_offset, %input, %input_byte_offset) : (i64, i1, i32, i1, i32, buffer, offset, buffer, offset, buffer, offset) -> (i32)
+      %250 = scalar.addi %263, %270 : i32
+      %146 = scalar.extui %250 : i32 to i64
+      %248 = scalar.shli %146, %278 : i64
+      %150 = scalar.addi %96, %248 : i64
+      %151 = scalar.assume %150 [range(%150, 0, 9223372036854775807)] : i64
+      %152 = index.cast %151 : i64 to offset
+      %153 = buffer.view %output[%152] : buffer -> view<1xi32>
+      view.store %143, %153[0] : i32, view<1xi32>
+    }
+  }
+  func.return
+}
+
+func.def inline @payload_unsigned_long_long(%bits: i64) -> (i64) {
+  func.return %bits : i64
+}
+
+func.def inline @mismatch_unsigned_long_long(%actual_value: i64, %actual_valid: i1, %source_lane: i32, %in_range: i1, %subgroup: i32, %lanes: buffer, %lanes_byte_offset: offset, %subgroups: buffer, %subgroups_byte_offset: offset, %input: buffer, %input_byte_offset: offset) -> (i32) {
+  %found$168 = scalar.constant 0 : i1
+  %292 = scalar.constant 0 : i64
+  %expected$171 = func.call pure @payload_unsigned_long_long(%292) : (i64) -> (i64)
+  %291 = index.constant 0 : offset
+  %290 = index.constant 83 : offset
+  %176 = index.constant 1 : offset
+  %found$180, %expected$181 = scf.for %other = [%291 to %290 step %176](%found$178 = %found$168 : i1, %expected$179 = %expected$171 : i64) -> (i1, i64) {
+    %182 = index.cast %other : offset to i32
+    %293 = scalar.constant 3 : i32
+    %294 = scalar.andi %182, %293 : i32
+    %187 = scalar.cmpi ne, %294, %293 : i32
+    %289 = scalar.constant false : i1
+    %310 = scf.select %in_range, %187, %289 : i1
+    %188 = scf.if %310 -> (i1) {
+      %297 = scalar.constant 2 : i32
+      %298 = scalar.shli %182, %297 : i32
+      %299 = scalar.extui %298 : i32 to i64
+      %192 = index.cast %lanes_byte_offset : offset to i64
+      %193 = scalar.addi %192, %299 : i64
+      %194 = scalar.assume %193 [range(%193, 0, 9223372036854775807)] : i64
+      %195 = index.cast %194 : i64 to offset
+      %196 = buffer.view %lanes[%195] : buffer -> view<1xi32>
+      %197 = view.load %196[0] : view<1xi32> -> i32
+      %198 = scalar.cmpi eq, %197, %source_lane : i32
+      scf.yield %198 : i1
+    } else {
+      scf.yield %289 : i1
+    }
+    %199 = scf.if %188 -> (i1) {
+      %302 = scalar.constant 2 : i32
+      %303 = scalar.shli %182, %302 : i32
+      %304 = scalar.extui %303 : i32 to i64
+      %203 = index.cast %subgroups_byte_offset : offset to i64
+      %204 = scalar.addi %203, %304 : i64
+      %205 = scalar.assume %204 [range(%204, 0, 9223372036854775807)] : i64
+      %206 = index.cast %205 : i64 to offset
+      %207 = buffer.view %subgroups[%206] : buffer -> view<1xi32>
+      %208 = view.load %207[0] : view<1xi32> -> i32
+      %209 = scalar.cmpi eq, %208, %subgroup : i32
+      scf.yield %209 : i1
+    } else {
+      scf.yield %289 : i1
+    }
+    %found$210, %expected$211 = scf.if %199 -> (i1, i64) {
+      %found = scalar.constant 1 : i1
+      %213 = scalar.constant 1 : i32
+      %214 = scalar.addi %182, %213 : i32
+      %308 = scalar.shli %214, %293 : i32
+      %309 = scalar.extui %308 : i32 to i64
+      %218 = index.cast %input_byte_offset : offset to i64
+      %219 = scalar.addi %218, %309 : i64
+      %220 = scalar.assume %219 [range(%219, 0, 9223372036854775807)] : i64
+      %221 = index.cast %220 : i64 to offset
+      %222 = buffer.view %input[%221] : buffer -> view<1xi64>
+      %223 = view.load %222[0] : view<1xi64> -> i64
+      %expected = func.call pure @payload_unsigned_long_long(%223) : (i64) -> (i64)
+      scf.yield %found, %expected : i1, i64
+    } else {
+      scf.yield %found$178, %expected$179 : i1, i64
+    }
+    scf.yield %found$210, %expected$211 : i1, i64
+  }
+  %225 = scalar.extui %actual_valid : i1 to i32
+  %226 = scalar.extui %found$180 : i1 to i32
+  %227 = scalar.cmpi ne, %225, %226 : i32
+  %difference$228 = scalar.extui %227 : i1 to i32
+  %286 = scalar.constant false : i1
+  %312 = scf.select %actual_valid, %found$180, %286 : i1
+  %230 = scf.if %312 -> (i1) {
+    %231 = func.call pure @same_bits_unsigned_long_long(%actual_value, %expected$181) : (i64, i64) -> (i1)
+    %232 = scalar.constant 1 : i1
+    %233 = scalar.xori %231, %232 : i1
+    scf.yield %233 : i1
+  } else {
+    scf.yield %286 : i1
+  }
+  %235 = scalar.constant 2 : i32
+  %difference$236 = scalar.ori %difference$228, %235 : i32
+  %difference$311 = scf.select %230, %difference$236, %difference$228 : i32
+  func.return %difference$311 : i32
+}
+
+func.def inline @same_bits_unsigned_long_long(%left: i64, %right: i64) -> (i1) {
+  %240 = scalar.cmpi eq, %left, %right : i64
+  func.return %240 : i1
+}

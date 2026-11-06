@@ -1,0 +1,354 @@
+// RUN: pass canonicalize,cse,dce
+// Wide payloads preserve per-component fingerprints and bitwise comparisons
+// through source vector insertion and extraction, including floating NaNs.
+#include "shuffle_payloads.h"
+Bytes32 make_payload(unsigned long long bits) {
+  return payload<Bytes32>(bits);
+}
+bool compare_payload(Bytes32 left, Bytes32 right) {
+  return same_bits(left, right);
+}
+// ----
+func.def public @make_payload(%bits: i64) -> (vector<32xi8>) {
+  %2 = func.call pure @payload_unsigned_char___attribute____ext_vector_type_32___(%bits) : (i64) -> (vector<32xi8>)
+  func.return %2 : vector<32xi8>
+}
+
+func.def public @compare_payload(%left: vector<32xi8>, %right: vector<32xi8>) -> (i1) {
+  %6 = func.call pure @same_bits_unsigned_char___attribute____ext_vector_type_32___(%left, %right) : (vector<32xi8>, vector<32xi8>) -> (i1)
+  func.return %6 : i1
+}
+
+func.def inline @payload_unsigned_char___attribute____ext_vector_type_32___(%bits: i64) -> (vector<32xi8>) {
+  %values$60 = vector.splati 0 : vector<32xi8>
+  %59 = index.constant 0 : offset
+  %58 = index.constant 32 : offset
+  %14 = index.constant 1 : offset
+  %values$17 = scf.for %component = [%59 to %58 step %14](%values$16 = %values$60 : vector<32xi8>) -> (vector<32xi8>) {
+    %18 = index.cast %component : offset to i32
+    %19 = scalar.constant 37669 : i64
+    %20 = scalar.extui %18 : i32 to i64
+    %21 = scalar.muli %19, %20 : i64
+    %22 = scalar.xori %bits, %21 : i64
+    %23 = func.call pure @payload_unsigned_char(%22) : (i64) -> (i8)
+    %24 = index.cast %18 : i32 to index
+    %values$25 = vector.insert %23 into %values$16[%24] : i8, vector<32xi8>
+    scf.yield %values$25 : vector<32xi8>
+  }
+  func.return %values$17 : vector<32xi8>
+}
+
+func.def inline @same_bits_unsigned_char___attribute____ext_vector_type_32___(%left: vector<32xi8>, %right: vector<32xi8>) -> (i1) {
+  %equal$29 = scalar.constant 1 : i1
+  %62 = index.constant 0 : offset
+  %61 = index.constant 32 : offset
+  %34 = index.constant 1 : offset
+  %equal$37 = scf.for %component = [%62 to %61 step %34](%equal$36 = %equal$29 : i1) -> (i1) {
+    %38 = index.cast %component : offset to i32
+    %39 = index.cast %38 : i32 to index
+    %40 = vector.extract %left[%39] : vector<32xi8> -> i8
+    %42 = vector.extract %right[%39] : vector<32xi8> -> i8
+    %43 = func.call pure @same_bits_unsigned_char(%40, %42) : (i8, i8) -> (i1)
+    %44 = scalar.extui %43 : i1 to i32
+    %45 = scalar.extui %equal$36 : i1 to i32
+    %46 = scalar.andi %45, %44 : i32
+    %47 = scalar.constant 0 : i32
+    %equal$48 = scalar.cmpi ne, %46, %47 : i32
+    scf.yield %equal$48 : i1
+  }
+  func.return %equal$37 : i1
+}
+
+func.def inline @payload_unsigned_char(%bits: i64) -> (i8) {
+  %51 = scalar.trunci %bits : i64 to i8
+  func.return %51 : i8
+}
+
+func.def inline @same_bits_unsigned_char(%left: i8, %right: i8) -> (i1) {
+  %55 = scalar.extui %left : i8 to i32
+  %56 = scalar.extui %right : i8 to i32
+  %57 = scalar.cmpi eq, %55, %56 : i32
+  func.return %57 : i1
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Wide payloads preserve per-component fingerprints and bitwise comparisons
+// through source vector insertion and extraction, including floating NaNs.
+#include "shuffle_payloads.h"
+BFloats16 make_payload(unsigned long long bits) {
+  return payload<BFloats16>(bits);
+}
+bool compare_payload(BFloats16 left, BFloats16 right) {
+  return same_bits(left, right);
+}
+// ----
+func.def public @make_payload(%bits: i64) -> (vector<16xbf16>) {
+  %2 = func.call pure @payload___bf16___attribute____ext_vector_type_16___(%bits) : (i64) -> (vector<16xbf16>)
+  func.return %2 : vector<16xbf16>
+}
+
+func.def public @compare_payload(%left: vector<16xbf16>, %right: vector<16xbf16>) -> (i1) {
+  %6 = func.call pure @same_bits___bf16___attribute____ext_vector_type_16___(%left, %right) : (vector<16xbf16>, vector<16xbf16>) -> (i1)
+  func.return %6 : i1
+}
+
+func.def inline @payload___bf16___attribute____ext_vector_type_16___(%bits: i64) -> (vector<16xbf16>) {
+  %values$63 = vector.splatf 0.0 : vector<16xbf16>
+  %62 = index.constant 0 : offset
+  %61 = index.constant 16 : offset
+  %14 = index.constant 1 : offset
+  %values$17 = scf.for %component = [%62 to %61 step %14](%values$16 = %values$63 : vector<16xbf16>) -> (vector<16xbf16>) {
+    %18 = index.cast %component : offset to i32
+    %19 = scalar.constant 37669 : i64
+    %20 = scalar.extui %18 : i32 to i64
+    %21 = scalar.muli %19, %20 : i64
+    %22 = scalar.xori %bits, %21 : i64
+    %23 = func.call pure @payload___bf16(%22) : (i64) -> (bf16)
+    %24 = index.cast %18 : i32 to index
+    %values$25 = vector.insert %23 into %values$16[%24] : bf16, vector<16xbf16>
+    scf.yield %values$25 : vector<16xbf16>
+  }
+  func.return %values$17 : vector<16xbf16>
+}
+
+func.def inline @same_bits___bf16___attribute____ext_vector_type_16___(%left: vector<16xbf16>, %right: vector<16xbf16>) -> (i1) {
+  %equal$29 = scalar.constant 1 : i1
+  %65 = index.constant 0 : offset
+  %64 = index.constant 16 : offset
+  %34 = index.constant 1 : offset
+  %equal$37 = scf.for %component = [%65 to %64 step %34](%equal$36 = %equal$29 : i1) -> (i1) {
+    %38 = index.cast %component : offset to i32
+    %39 = index.cast %38 : i32 to index
+    %40 = vector.extract %left[%39] : vector<16xbf16> -> bf16
+    %42 = vector.extract %right[%39] : vector<16xbf16> -> bf16
+    %43 = func.call pure @same_bits___bf16(%40, %42) : (bf16, bf16) -> (i1)
+    %44 = scalar.extui %43 : i1 to i32
+    %45 = scalar.extui %equal$36 : i1 to i32
+    %46 = scalar.andi %45, %44 : i32
+    %47 = scalar.constant 0 : i32
+    %equal$48 = scalar.cmpi ne, %46, %47 : i32
+    scf.yield %equal$48 : i1
+  }
+  func.return %equal$37 : i1
+}
+
+func.def inline @payload___bf16(%bits: i64) -> (bf16) {
+  %51 = scalar.trunci %bits : i64 to i16
+  %52 = scalar.bitcast %51 : i16 to bf16
+  func.return %52 : bf16
+}
+
+func.def inline @same_bits___bf16(%left: bf16, %right: bf16) -> (i1) {
+  %56 = scalar.bitcast %left : bf16 to i16
+  %57 = scalar.extui %56 : i16 to i32
+  %58 = scalar.bitcast %right : bf16 to i16
+  %59 = scalar.extui %58 : i16 to i32
+  %60 = scalar.cmpi eq, %57, %59 : i32
+  func.return %60 : i1
+}
+// ====
+// RUN: pass canonicalize,cse,dce
+// Boolean payloads compare truth values and use only the source low bit.
+#include "shuffle_payloads.h"
+
+bool make_payload(unsigned long long bits) {
+  return payload<bool>(bits);
+}
+bool compare_payload(bool left, bool right) {
+  return same_bits(left, right);
+}
+// ----
+func.def public @make_payload(%bits: i64) -> (i1) {
+  %2 = func.call pure @payload_bool(%bits) : (i64) -> (i1)
+  func.return %2 : i1
+}
+
+func.def public @compare_payload(%left: i1, %right: i1) -> (i1) {
+  %6 = func.call pure @same_bits_bool(%left, %right) : (i1, i1) -> (i1)
+  func.return %6 : i1
+}
+
+func.def inline @payload_bool(%bits: i64) -> (i1) {
+  %22 = scalar.constant 1 : i64
+  %11 = scalar.andi %bits, %22 : i64
+  %21 = scalar.constant 0 : i64
+  %14 = scalar.cmpi ne, %11, %21 : i64
+  func.return %14 : i1
+}
+
+func.def inline @same_bits_bool(%left: i1, %right: i1) -> (i1) {
+  %18 = scalar.extui %left : i1 to i32
+  %19 = scalar.extui %right : i1 to i32
+  %20 = scalar.cmpi eq, %18, %19 : i32
+  func.return %20 : i1
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Encoded floating payloads retain their object bits rather than converting.
+#include "shuffle_payloads.h"
+
+loom::type::float8_e4m3fn_t make_payload(unsigned long long bits) {
+  return payload<loom::type::float8_e4m3fn_t>(bits);
+}
+bool compare_payload(loom::type::float8_e4m3fn_t left,
+                     loom::type::float8_e4m3fn_t right) {
+  return same_bits(left, right);
+}
+// ----
+func.def public @make_payload(%bits: i64) -> (f8E4M3) {
+  %2 = func.call pure @payload___float8_e4m3fn(%bits) : (i64) -> (f8E4M3)
+  func.return %2 : f8E4M3
+}
+
+func.def public @compare_payload(%left: f8E4M3, %right: f8E4M3) -> (i1) {
+  %6 = func.call pure @same_bits___float8_e4m3fn(%left, %right) : (f8E4M3, f8E4M3) -> (i1)
+  func.return %6 : i1
+}
+
+func.def inline @payload___float8_e4m3fn(%bits: i64) -> (f8E4M3) {
+  %9 = scalar.trunci %bits : i64 to i8
+  %10 = scalar.bitcast %9 : i8 to f8E4M3
+  func.return %10 : f8E4M3
+}
+
+func.def inline @same_bits___float8_e4m3fn(%left: f8E4M3, %right: f8E4M3) -> (i1) {
+  %14 = scalar.bitcast %left : f8E4M3 to i8
+  %15 = scalar.extui %14 : i8 to i32
+  %16 = scalar.bitcast %right : f8E4M3 to i8
+  %17 = scalar.extui %16 : i8 to i32
+  %18 = scalar.cmpi eq, %15, %17 : i32
+  func.return %18 : i1
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Four-byte floating payloads compare integer object representations.
+#include "shuffle_payloads.h"
+
+float make_payload(unsigned long long bits) {
+  return payload<float>(bits);
+}
+bool compare_payload(float left, float right) {
+  return same_bits(left, right);
+}
+// ----
+func.def public @make_payload(%bits: i64) -> (f32) {
+  %2 = func.call pure @payload_float(%bits) : (i64) -> (f32)
+  func.return %2 : f32
+}
+
+func.def public @compare_payload(%left: f32, %right: f32) -> (i1) {
+  %6 = func.call pure @same_bits_float(%left, %right) : (f32, f32) -> (i1)
+  func.return %6 : i1
+}
+
+func.def inline @payload_float(%bits: i64) -> (f32) {
+  %9 = scalar.trunci %bits : i64 to i32
+  %10 = scalar.bitcast %9 : i32 to f32
+  func.return %10 : f32
+}
+
+func.def inline @same_bits_float(%left: f32, %right: f32) -> (i1) {
+  %14 = scalar.bitcast %left : f32 to i32
+  %15 = scalar.bitcast %right : f32 to i32
+  %16 = scalar.cmpi eq, %14, %15 : i32
+  func.return %16 : i1
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Eight-byte floating payloads preserve the entire source fingerprint.
+#include "shuffle_payloads.h"
+
+double make_payload(unsigned long long bits) {
+  return payload<double>(bits);
+}
+bool compare_payload(double left, double right) {
+  return same_bits(left, right);
+}
+// ----
+func.def public @make_payload(%bits: i64) -> (f64) {
+  %2 = func.call pure @payload_double(%bits) : (i64) -> (f64)
+  func.return %2 : f64
+}
+
+func.def public @compare_payload(%left: f64, %right: f64) -> (i1) {
+  %6 = func.call pure @same_bits_double(%left, %right) : (f64, f64) -> (i1)
+  func.return %6 : i1
+}
+
+func.def inline @payload_double(%bits: i64) -> (f64) {
+  %9 = scalar.bitcast %bits : i64 to f64
+  func.return %9 : f64
+}
+
+func.def inline @same_bits_double(%left: f64, %right: f64) -> (i1) {
+  %13 = scalar.bitcast %left : f64 to i64
+  %14 = scalar.bitcast %right : f64 to i64
+  %15 = scalar.cmpi eq, %13, %14 : i64
+  func.return %15 : i1
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Sixteen-byte payloads retain all four fingerprint words and
+// short-circuit comparisons.
+#include "shuffle_payloads.h"
+
+using Floats4 = float __attribute__((ext_vector_type(4)));
+Floats4 make_payload(unsigned long long bits) {
+  return payload<Floats4>(bits);
+}
+bool compare_payload(Floats4 left, Floats4 right) {
+  return same_bits(left, right);
+}
+// ----
+func.def public @make_payload(%bits: i64) -> (vector<4xf32>) {
+  %2 = func.call pure @payload_float___attribute____ext_vector_type_4___(%bits) : (i64) -> (vector<4xf32>)
+  func.return %2 : vector<4xf32>
+}
+
+func.def public @compare_payload(%left: vector<4xf32>, %right: vector<4xf32>) -> (i1) {
+  %6 = func.call pure @same_bits_float___attribute____ext_vector_type_4___(%left, %right) : (vector<4xf32>, vector<4xf32>) -> (i1)
+  func.return %6 : i1
+}
+
+func.def inline @payload_float___attribute____ext_vector_type_4___(%bits: i64) -> (vector<4xf32>) {
+  %9 = scalar.trunci %bits : i64 to i32
+  %66 = scalar.constant 32 : i64
+  %12 = scalar.shrui %bits, %66 : i64
+  %13 = scalar.trunci %12 : i64 to i32
+  %65 = scalar.constant 1933650197 : i64
+  %16 = scalar.xori %bits, %65 : i64
+  %17 = scalar.trunci %16 : i64 to i32
+  %63 = scalar.constant 3560564659 : i64
+  %23 = scalar.xori %12, %63 : i64
+  %24 = scalar.trunci %23 : i64 to i32
+  %words = vector.from_elements %9, %13, %17, %24 : vector<4xi32>
+  %26 = vector.bitcast %words : vector<4xi32> to vector<4xf32>
+  func.return %26 : vector<4xf32>
+}
+
+func.def inline @same_bits_float___attribute____ext_vector_type_4___(%left: vector<4xf32>, %right: vector<4xf32>) -> (i1) {
+  %a = vector.bitcast %left : vector<4xf32> to vector<4xi32>
+  %b = vector.bitcast %right : vector<4xf32> to vector<4xi32>
+  %74 = vector.extract %a[0] : vector<4xi32> -> i32
+  %73 = vector.extract %b[0] : vector<4xi32> -> i32
+  %38 = scalar.cmpi eq, %74, %73 : i32
+  %72 = vector.extract %a[1] : vector<4xi32> -> i32
+  %71 = vector.extract %b[1] : vector<4xi32> -> i32
+  %46 = scalar.cmpi eq, %72, %71 : i32
+  %81 = scf.select %38, %46, %38 : i1
+  %70 = vector.extract %a[2] : vector<4xi32> -> i32
+  %69 = vector.extract %b[2] : vector<4xi32> -> i32
+  %54 = scalar.cmpi eq, %70, %69 : i32
+  %78 = scalar.constant false : i1
+  %80 = scf.select %81, %54, %78 : i1
+  %68 = vector.extract %a[3] : vector<4xi32> -> i32
+  %67 = vector.extract %b[3] : vector<4xi32> -> i32
+  %62 = scalar.cmpi eq, %68, %67 : i32
+  %79 = scf.select %80, %62, %78 : i1
+  func.return %79 : i1
+}
