@@ -38,6 +38,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "iree/base/assert.h"
+
 //===----------------------------------------------------------------------===//
 // Portable math (no libm dependency)
 //===----------------------------------------------------------------------===//
@@ -745,12 +747,15 @@ typedef struct iree_printf_decimal_digits_t {
 
 static void iree_printf_bigint_initialize(uint64_t value,
                                           iree_printf_bigint_t* out_value) {
-  memset(out_value, 0, sizeof(*out_value));
-  do {
+  out_value->limbs[0] = (uint32_t)(value % IREE_PRINTF_BIGINT_BASE);
+  out_value->limb_count = 1;
+  value /= IREE_PRINTF_BIGINT_BASE;
+  while (value != 0) {
+    IREE_ASSERT_LT(out_value->limb_count, IREE_PRINTF_BIGINT_MAX_LIMBS);
     out_value->limbs[out_value->limb_count++] =
         (uint32_t)(value % IREE_PRINTF_BIGINT_BASE);
     value /= IREE_PRINTF_BIGINT_BASE;
-  } while (value != 0);
+  }
 }
 
 static void iree_printf_bigint_multiply_small(iree_printf_bigint_t* value,
@@ -762,6 +767,7 @@ static void iree_printf_bigint_multiply_small(iree_printf_bigint_t* value,
     carry = product / IREE_PRINTF_BIGINT_BASE;
   }
   if (carry != 0) {
+    IREE_ASSERT_LT(value->limb_count, IREE_PRINTF_BIGINT_MAX_LIMBS);
     value->limbs[value->limb_count++] = (uint32_t)carry;
   }
 }
@@ -782,6 +788,8 @@ static uint32_t iree_printf_bigint_divide_by_10(iree_printf_bigint_t* value) {
 
 static int iree_printf_bigint_decimal_digit_count(
     const iree_printf_bigint_t* value) {
+  IREE_ASSERT_GT(value->limb_count, 0);
+  IREE_ASSERT_LE(value->limb_count, IREE_PRINTF_BIGINT_MAX_LIMBS);
   uint32_t leading_limb = value->limbs[value->limb_count - 1];
   int leading_digit_count = 1;
   while (leading_limb >= 10) {
