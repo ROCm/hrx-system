@@ -45,6 +45,10 @@ IREE_FLAG(int64_t, file_proactors, 0,
 IREE_FLAG(bool, direct, false, "Open the source for native uncached I/O.");
 IREE_FLAG(bool, registered_io, false,
           "Require retained REGISTERED_IO bindings from the buffer pool.");
+IREE_FLAG(int64_t, queue_family, -1,
+          "Transfer-capable queue family ordinal; -1 selects the first "
+          "available family. Dynamically acquired queues are retained for "
+          "the complete run.");
 
 namespace {
 
@@ -115,6 +119,7 @@ class FileReads {
     }
     iree_io_file_mapping_release(oracle_);
     iree_io_file_handle_release(handle_);
+    iree_hal_queue_release(queue_);
     iree_hal_device_group_release(group_);
     iree_hal_device_release(device_);
     iree_async_frontier_tracker_release(tracker_);
@@ -133,6 +138,9 @@ class FileReads {
   uint64_t extent() const { return extent_; }
   size_t depth() const { return lanes_.size(); }
   uint64_t retained_bytes() const { return retained_bytes_; }
+  uint32_t queue_family() const {
+    return iree_hal_queue_family_ordinal(iree_hal_queue_family(queue_));
+  }
   uint64_t allocation_calls() const {
     return device_allocator_.allocation_calls() +
            file_allocator_.allocation_calls();
@@ -248,18 +256,38 @@ class FileReads {
         device_, tracker_, allocator, &group_));
     const auto* queues =
         iree_hal_device_spec_queues(iree_hal_device_spec(device_));
+    if (FLAG_queue_family < -1 ||
+        (FLAG_queue_family >= 0 &&
+         (uint64_t)FLAG_queue_family >= queues->family_count)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "queue_family must be -1 or less than %" PRIhsz,
+                              queues->family_count);
+    }
     uint32_t family_ordinal = 0;
     for (; family_ordinal < queues->family_count; ++family_ordinal) {
       const auto& family = queues->families[family_ordinal];
-      if (family.provisioned_queue_count &&
-          (family.role_flags & IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)) {
+      if ((FLAG_queue_family >= 0 && family_ordinal != FLAG_queue_family) ||
+          !(family.role_flags & IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)) {
+        continue;
+      }
+      if (family.provisioned_queue_count) {
         queue_ = iree_hal_device_queue(device_, family_ordinal, 0);
+        iree_hal_queue_retain(queue_);
+        break;
+      }
+      if (family.flags & IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION) {
+        iree_hal_queue_params_t params;
+        iree_hal_queue_params_initialize(&params);
+        IREE_RETURN_IF_ERROR(iree_hal_queue_acquire(
+            iree_hal_device_queue_family(device_, family_ordinal), &params,
+            &queue_));
         break;
       }
     }
     if (!queue_) {
       return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                              "device has no provisioned transfer queue");
+                              "no available transfer queue in the selected "
+                              "queue families");
     }
     const uint64_t affinity = UINT64_C(1) << family_ordinal;
     const auto mode = IREE_IO_FILE_MODE_READ | IREE_IO_FILE_MODE_SHARE_READ |
@@ -405,7 +433,7 @@ class FileReads {
   iree_hal_device_t* device_ = nullptr;
   // Owned sealed group providing the pool's memory contract.
   iree_hal_device_group_t* group_ = nullptr;
-  // Borrowed provisioned transfer queue, valid through device retirement.
+  // Retained provisioned or dynamically acquired queue, released before device.
   iree_hal_queue_t* queue_ = nullptr;
   // Owned source handle, shared with the HAL import and byte oracle.
   iree_io_file_handle_t* handle_ = nullptr;
@@ -487,6 +515,7 @@ void Read(benchmark::State& state, bool stream, int64_t idle_ns = 0) {
   state.counters["retained_bytes"] = reads->retained_bytes();
   state.counters["direct"] = FLAG_direct;
   state.counters["registered_io"] = FLAG_registered_io;
+  state.counters["queue_family"] = reads->queue_family();
   state.counters["idle_ns"] = idle_ns;
 }
 
