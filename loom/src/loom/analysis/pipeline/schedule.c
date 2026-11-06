@@ -11,7 +11,6 @@
 #include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
 #include "loom/ops/buffer/ops.h"
-#include "loom/ops/cfg/ops.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/pipeline/ops.h"
 
@@ -141,11 +140,11 @@ iree_status_t loom_pipeline_schedule_build(
           step.kind = LOOM_PIPELINE_SCHEDULE_STEP_ALLOCATION;
         } else if (loom_channel_bind_isa(operation)) {
           step.kind = LOOM_PIPELINE_SCHEDULE_STEP_CHANNEL;
-        } else if (loom_cfg_br_isa(operation) ||
-                   loom_cfg_cond_br_isa(operation)) {
-          step.kind = LOOM_PIPELINE_SCHEDULE_STEP_BRANCH;
         } else if (loom_pipeline_yield_isa(operation)) {
           step.kind = LOOM_PIPELINE_SCHEDULE_STEP_YIELD;
+        } else if (operation->successor_count != 0 &&
+                   iree_any_bit_set(operation->traits, LOOM_TRAIT_TERMINATOR)) {
+          step.kind = LOOM_PIPELINE_SCHEDULE_STEP_BRANCH;
         } else {
           const loom_trait_flags_t traits =
               loom_op_effective_traits(module, operation);
