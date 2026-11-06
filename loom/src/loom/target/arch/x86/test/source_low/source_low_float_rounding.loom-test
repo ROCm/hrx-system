@@ -1,0 +1,181 @@
+// RUN: emit source-low output=low
+
+// Fixed immediates select all four modes independently of MXCSR.
+x86.target<avx2> @target
+
+func.def target(@target) @avx2_scalar_rounding(%single: f32, %double: f64) -> (f32, f32, f64, f64) {
+  %ceil = scalar.ceilf %single : f32
+  %floor = scalar.floorf %single : f32
+  %even = scalar.roundevenf %double : f64
+  %trunc = scalar.truncf %double : f64
+  func.return %ceil, %floor, %even, %trunc : f32, f32, f64, f64
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (f32, f64) -> (f32, f32, f64, f64)}) @avx2_scalar_rounding(%single: reg<x86.xmm>, %double: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
+  %ceil = vroundss.xmm %single, %single, 10
+  %floor = vroundss.xmm %single, %single, 9
+  %even = vroundsd.xmm %double, %double, 8
+  %trunc = vroundsd.xmm %double, %double, 11
+  return %ceil, %floor, %even, %trunc
+}
+
+// ====
+
+x86.target<avx2> @target
+
+func.def target(@target) @avx2_packed_rounding(%low: vector<2xf32>, %single: vector<8xf32>, %double: vector<4xf64>) -> (vector<2xf32>, vector<8xf32>, vector<4xf64>) {
+  %ceil = vector.ceilf %low : vector<2xf32>
+  %floor = vector.floorf %single : vector<8xf32>
+  %even = vector.roundevenf %double : vector<4xf64>
+  func.return %ceil, %floor, %even : vector<2xf32>, vector<8xf32>, vector<4xf64>
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<2xf32>, vector<8xf32>, vector<4xf64>) -> (vector<2xf32>, vector<8xf32>, vector<4xf64>)}) @avx2_packed_rounding(%low: reg<x86.xmm>, %single: reg<x86.ymm>, %double: reg<x86.ymm>) -> (reg<x86.xmm>, reg<x86.ymm>, reg<x86.ymm>) asm {
+  %ceil = vroundps.xmm %low, 10
+  %floor = vroundps.ymm %single, 9
+  %even = vroundpd.ymm %double, 8
+  return %ceil, %floor, %even
+}
+
+// ====
+
+x86.target<avx512> @target
+
+func.def target(@target) @avx512_rounding(%single: f32, %double: f64, %short: vector<4xf32>, %wide_single: vector<16xf32>, %wide_double: vector<8xf64>) -> (f32, f64, vector<4xf32>, vector<16xf32>, vector<8xf64>) {
+  %ceil = scalar.ceilf %single : f32
+  %floor = scalar.floorf %double : f64
+  %even = vector.roundevenf %short : vector<4xf32>
+  %wide_ceil = vector.ceilf %wide_single : vector<16xf32>
+  %wide_trunc = vector.truncf %wide_double : vector<8xf64>
+  func.return %ceil, %floor, %even, %wide_ceil, %wide_trunc : f32, f64, vector<4xf32>, vector<16xf32>, vector<8xf64>
+}
+
+// ----
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (f32, f64, vector<4xf32>, vector<16xf32>, vector<8xf64>) -> (f32, f64, vector<4xf32>, vector<16xf32>, vector<8xf64>)}) @avx512_rounding(%single: reg<x86.xmm>, %double: reg<x86.xmm>, %short: reg<x86.xmm>, %wide_single: reg<x86.zmm>, %wide_double: reg<x86.zmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.zmm>, reg<x86.zmm>) asm {
+  %ceil = vrndscaless.xmm %single, %single, 10
+  %floor = vrndscalesd.xmm %double, %double, 9
+  %even = vrndscaleps.xmm %short, 8
+  %wide_ceil = vrndscaleps %wide_single, 10
+  %wide_trunc = vrndscalepd %wide_double, 11
+  return %ceil, %floor, %even, %wide_ceil, %wide_trunc
+}
+
+// ====
+
+x86.target<avx512> @target {features = [avx512fp16]}
+
+func.def target(@target) @native_half_rounding(%scalar: f16, %low: vector<2xf16>, %wide: vector<32xf16>) -> (f16, vector<2xf16>, vector<32xf16>) {
+  %ceil = scalar.ceilf %scalar : f16
+  %floor = vector.floorf %low : vector<2xf16>
+  %even = vector.roundevenf %wide : vector<32xf16>
+  func.return %ceil, %floor, %even : f16, vector<2xf16>, vector<32xf16>
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (f16, vector<2xf16>, vector<32xf16>) -> (f16, vector<2xf16>, vector<32xf16>)}) @native_half_rounding(%scalar: reg<x86.xmm>, %low: reg<x86.xmm>, %wide: reg<x86.zmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.zmm>) asm {
+  %ceil = vrndscalesh.xmm %scalar, %scalar, 10
+  %floor = vrndscaleph.xmm %low, 9
+  %even = vrndscaleph %wide, 8
+  return %ceil, %floor, %even
+}
+
+// ====
+
+// Short vectors cannot select EVEX packed forms without VL.
+x86.target<avx512> @target {features = [-avx512vl, avx512fp16]}
+
+func.def target(@target) @without_vector_length(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<2xf16>
+  %destination = buffer.view %output[%origin] : buffer -> view<2xf16>
+  %half = vector.load %source[0] : view<2xf16> -> vector<2xf16>
+  %floor_half = vector.floorf %half : vector<2xf16>
+  vector.store %floor_half, %destination[0] : vector<2xf16>, view<2xf16>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) @without_vector_length(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %half = vmovss.load.xmm %input {disp32 = 0}
+  %15 = vpextrw.xmm %half, 0
+  %16 = vmovd.xmm.gpr32 %15
+  %17 = vrndscalesh.xmm %16, %16, 9
+  %18 = vpextrw.xmm %half, 1
+  %19 = vmovd.xmm.gpr32 %18
+  %20 = vrndscalesh.xmm %19, %19, 9
+  %21 = vmovd.gpr32.xmm %20
+  %floor_half = vpinsrw.xmm %17, %21, 1
+  vmovss.store.xmm %floor_half, %output {disp32 = 0}
+  return
+}
+
+// ====
+
+// Ties-away composes truncation and the exact fractional remainder, avoiding
+// the extra rounding introduced by adding one half before truncation.
+x86.target<avx2> @target
+
+func.def target(@target) @ties_away(%value: f64) -> (f64) {
+  %rounded = scalar.roundf %value : f64
+  func.return %rounded : f64
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (f64) -> (f64)}) @ties_away(%value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %27 = mov.imm64 4602678819172646912
+  %28 = vmovq.xmm.gpr64 %27
+  %29 = vroundsd.xmm %value, %value, 11
+  %30 = vsubsd.xmm %value, %29
+  %31 = vmovq.gpr64.xmm %30
+  %32 = mov.imm64 9223372036854775807
+  %33 = copy %31 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %34 = and.gpr64 %33, %32
+  %35 = vmovq.xmm.gpr64 %34
+  %36 = vmovq.gpr64.xmm %value
+  %37 = mov.imm64 4607182418800017408
+  %38 = mov.imm64 -9223372036854775808
+  %39 = copy %36 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %40 = and.gpr64 %39, %38
+  %41 = copy %37 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %42 = or.gpr64 %41, %40
+  %43 = vmovq.xmm.gpr64 %42
+  %44 = vaddsd.xmm %29, %43
+  %45 = avx2.vcmppd.xmm %35, %28, 29
+  %rounded = vpblendvb.xmm %29, %44, %45
+  return %rounded
+}
+
+// ====
+
+// Legalization splits wide vectors and scalarizes their tails.
+x86.target<avx2> @target
+
+func.def target(@target) @wide_tail(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<19xf32>
+  %destination = buffer.view %output[%origin] : buffer -> view<19xf32>
+  %values = vector.load %source[0] : view<19xf32> -> vector<19xf32>
+  %rounded = vector.floorf %values : vector<19xf32>
+  vector.store %rounded, %destination[0] : vector<19xf32>, view<19xf32>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx2.core>(@target) abi(object_function) @wide_tail(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
+  %22 = vmovsd.load.xmm %input {disp32 = 64}
+  %23 = vmovss.load.xmm %input {disp32 = 72}
+  %24 = vmovdqu32.load.ymm %input {disp32 = 0}
+  %25 = vroundps.ymm %24, 9
+  %26 = vmovdqu32.load.ymm %input {disp32 = 32}
+  %27 = vroundps.ymm %26, 9
+  vmovdqu32.store.ymm %25, %output {disp32 = 0}
+  vmovdqu32.store.ymm %27, %output {disp32 = 32}
+  %28 = vroundps.xmm %22, 9
+  vmovsd.store.xmm %28, %output {disp32 = 64}
+  %29 = vroundss.xmm %23, %23, 9
+  %30 = vpermilps.xmm %29, 0
+  vmovss.store.xmm %30, %output {disp32 = 72}
+  return
+}

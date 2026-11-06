@@ -28,6 +28,7 @@ iree_py_library(
         "float_integer.py",
         "float_narrowing.py",
         "float_roots.py",
+        "float_rounding.py",
         "floating_extrema.py",
         "floating_reduction.py",
         "half_conversion.py",
@@ -370,6 +371,21 @@ iree_py_test(
         ":contracts",
         "//loom/py/loom/dialect/scalar",
         "//loom/py/loom/dialect/vector",
+        "//loom/py/loom/target/contracts",
+    ],
+)
+
+iree_py_test(
+    name = "float_rounding_test",
+    srcs = [
+        "float_rounding_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = ["loom.target.arch.x86.contracts.float_rounding_test"],
+    main = "pytest_style_runner.py",
+    deps = [
+        ":contracts",
+        "//loom/py/loom/target/arch/x86:target_info",
         "//loom/py/loom/target/contracts",
     ],
 )

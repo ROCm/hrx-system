@@ -54,6 +54,12 @@ def test_avx512_fp16_rows_cover_the_native_scalar_and_vector_family() -> None:
             add(f"{mnemonic}.{suffix}", opcode | length_bits, feature_bits)
     add("vsqrtsh.xmm", 0x0851, FEATURE_AVX512_FP16)
     add("vrsqrtsh.xmm", 0x244F, FEATURE_AVX512_FP16)
+    for suffix, length_bits in (("xmm", 0), ("ymm", 0x4000), ("zmm", 0x8000)):
+        feature_bits = FEATURE_AVX512_FP16
+        if suffix != "zmm":
+            feature_bits |= FEATURE_AVX512_VL
+        add(f"vrndscaleph.{suffix}", 0x2308 | length_bits, feature_bits)
+    add("vrndscalesh.xmm", 0x230A, FEATURE_AVX512_FP16)
 
     for suffix, length_bits in (("xmm", 0), ("ymm", 0x4000), ("zmm", 0x8000)):
         feature_bits = FEATURE_AVX512_FP16

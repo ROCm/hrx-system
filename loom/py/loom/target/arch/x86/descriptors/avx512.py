@@ -21,6 +21,7 @@ from loom.target.arch.x86.vector_families import (
     AVX512_FLOAT_INTEGER_I32_FORMS,
     AVX512_FLOAT_INTEGER_I64_FORMS,
     AVX512_FLOAT_ROOT_FAMILIES,
+    AVX512_FLOAT_ROUNDING_FAMILIES,
     AVX512_INTEGER_BINARY_FAMILIES,
     AVX512_INTEGER_COMPARE_MNEMONICS,
     AVX512_INTEGER_FLOAT_I32_FORMS,
@@ -125,6 +126,7 @@ from .float_integer import (
     scalar_float_integer_descriptors,
     vector_float_integer_descriptors,
 )
+from .float_rounding import float_rounding_descriptors
 from .half_conversion import half_conversion_descriptors
 from .integer_float import (
     integer_float_descriptors,
@@ -1060,6 +1062,12 @@ X86_AVX512_CORE_DESCRIPTOR_SET = DescriptorSet(
                 native.AVX2_FLOAT_BINARY,
                 strict=True,
             )
+        ),
+        *float_rounding_descriptors(
+            key_prefix="x86.avx512",
+            families=AVX512_FLOAT_ROUNDING_FAMILIES,
+            vector_bit_widths=(128, 256, 512),
+            evex=True,
         ),
         *(
             _avx512_descriptor(

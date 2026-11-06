@@ -33,6 +33,7 @@ from loom.target.arch.x86.contracts.float_roots import (
     scalar_float_root_rules,
     vector_float_root_rules,
 )
+from loom.target.arch.x86.contracts.float_rounding import float_rounding_rules
 from loom.target.arch.x86.contracts.floating_extrema import (
     avx512_fp16_float_extrema_rules,
 )
@@ -65,9 +66,11 @@ from loom.target.arch.x86.contracts.vector_construction import (
 from loom.target.arch.x86.descriptors import X86_AVX512_FEATURES_DESCRIPTOR_SET
 from loom.target.arch.x86.feature_bits import FEATURE_AVX512_FP16
 from loom.target.arch.x86.vector_families import (
+    AVX512_CARRIER_VECTOR_BIT_WIDTHS,
     AVX512_FP16_FLOAT_BINARY_FAMILIES,
     AVX512_FP16_FLOAT_FMA_MNEMONIC,
     AVX512_FP16_FLOAT_ROOT_FAMILIES,
+    AVX512_FP16_FLOAT_ROUNDING_FAMILIES,
     AVX512_FP16_SCALAR_FLOAT_BINARY_FAMILIES,
     AVX512_FP16_SCALAR_FLOAT_FMA_MNEMONIC,
     AVX512_FP16_SCALAR_FLOAT_ROOT_FAMILIES,
@@ -261,7 +264,12 @@ def _vector_conversion_rules() -> tuple[DescriptorRule, ...]:
                 priority=1,
             )
         )
-    return unary_descriptor_rules(cases, form=DescriptorEmitForm.OP)
+    return tuple(
+        replace(
+            rule, guards=(*rule.guards, Guard.descriptor_available(rule.descriptor))
+        )
+        for rule in unary_descriptor_rules(cases, form=DescriptorEmitForm.OP)
+    )
 
 
 def _vector_rules() -> tuple[DescriptorRule, ...]:
@@ -321,6 +329,13 @@ def _cases() -> Sequence[ContractCase]:
     cases = (
         *_scalar_rules(),
         *_vector_rules(),
+        *float_rounding_rules(
+            _descriptor,
+            descriptor_key_prefix="x86.avx512_fp16",
+            families=AVX512_FP16_FLOAT_ROUNDING_FAMILIES,
+            vector_bit_widths=AVX512_CARRIER_VECTOR_BIT_WIDTHS,
+            priority=1,
+        ),
         *avx512_fp16_float_extrema_rules(_descriptor),
         *avx512_fp16_float_reduction_rules(_descriptor),
         *avx512_fp16_float_dot_rules(_descriptor),

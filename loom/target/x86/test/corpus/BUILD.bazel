@@ -39,6 +39,7 @@ loom_corpus_test(
             "numeric/float/logarithm.loom",
             "numeric/float/reciprocal.loom",
             "numeric/float/roots.loom",
+            "numeric/float/rounding.loom",
             "numeric/float/turns.loom",
             "numeric/integer/bit_count.loom",
             "numeric/integer/bitfield.loom",

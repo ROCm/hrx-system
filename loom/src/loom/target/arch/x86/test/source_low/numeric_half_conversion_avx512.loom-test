@@ -186,3 +186,48 @@ low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature 
   %result = avx512.vcvtps2pd.zmm.ymm %5
   return %result
 }
+
+// ====
+
+// RUN: emit source-low output=low
+
+// Disabling VL retains scalar FP16 conversions. Packet legalization must use
+// those scalar forms instead of retaining an unavailable packed conversion.
+x86.target<avx512> @target {features = [-avx512vl, avx512fp16]}
+
+func.def target(@target) @without_vector_length(%input_half: buffer, %input_float: buffer, %output_half: buffer, %output_float: buffer) {
+  %origin = index.constant 0 : offset
+  %half_source = buffer.view %input_half[%origin] : buffer -> view<2xf16>
+  %float_source = buffer.view %input_float[%origin] : buffer -> view<2xf32>
+  %half_destination = buffer.view %output_half[%origin] : buffer -> view<2xf16>
+  %float_destination = buffer.view %output_float[%origin] : buffer -> view<2xf32>
+  %half = vector.load %half_source[0] : view<2xf16> -> vector<2xf16>
+  %float = vector.load %float_source[0] : view<2xf32> -> vector<2xf32>
+  %wide = vector.extf %half : vector<2xf16> to vector<2xf32>
+  %narrow = vector.fptrunc %float : vector<2xf32> to vector<2xf16>
+  vector.store %wide, %float_destination[0] : vector<2xf32>, view<2xf32>
+  vector.store %narrow, %half_destination[0] : vector<2xf16>, view<2xf16>
+  func.return
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) @without_vector_length(%input_half: reg<x86.gpr64>, %input_float: reg<x86.gpr64>, %output_half: reg<x86.gpr64>, %output_float: reg<x86.gpr64>) asm {
+  %half = vmovss.load.xmm %input_half {disp32 = 0}
+  %float = vmovsd.load.xmm %input_float {disp32 = 0}
+  %29 = vpextrw.xmm %half, 0
+  %30 = vmovd.xmm.gpr32 %29
+  %31 = vcvtsh2ss.xmm %30, %30
+  %32 = vpextrw.xmm %half, 1
+  %33 = vmovd.xmm.gpr32 %32
+  %34 = vcvtsh2ss.xmm %33, %33
+  %wide = vinsertps.xmm %31, %34, 16
+  %36 = vpermilps.xmm %float, 0
+  %37 = vcvtss2sh.xmm %36, %36
+  %38 = vpermilps.xmm %float, 1
+  %39 = vcvtss2sh.xmm %38, %38
+  %40 = vmovd.gpr32.xmm %39
+  %narrow = vpinsrw.xmm %37, %40, 1
+  vmovsd.store.xmm %wide, %output_float {disp32 = 0}
+  vmovss.store.xmm %narrow, %output_half {disp32 = 0}
+  return
+}

@@ -960,6 +960,76 @@ VMULSH = _instruction(
     _IMMEDIATES_0,
     _encoding(_EVEX, _MAP_5, 2, 0, 0x59, (128,)),
 )
+VROUNDPS = _instruction(
+    "vroundps",
+    _UNARY_IMMEDIATE,
+    _OPERANDS_13,
+    _IMMEDIATES_5,
+    _encoding(_VEX, _MAP_3, 1, 0, 0x08, (128, 256)),
+)
+VROUNDPD = _instruction(
+    "vroundpd",
+    _UNARY_IMMEDIATE,
+    _OPERANDS_13,
+    _IMMEDIATES_5,
+    _encoding(_VEX, _MAP_3, 1, 0, 0x09, (128, 256)),
+)
+VROUNDSS = _instruction(
+    "vroundss",
+    _NDS_IMMEDIATE,
+    _OPERANDS_16,
+    _IMMEDIATES_5,
+    _encoding(_VEX, _MAP_3, 1, 0, 0x0A, (128,)),
+)
+VROUNDSD = _instruction(
+    "vroundsd",
+    _NDS_IMMEDIATE,
+    _OPERANDS_16,
+    _IMMEDIATES_5,
+    _encoding(_VEX, _MAP_3, 1, 0, 0x0B, (128,)),
+)
+VRNDSCALEPS = _instruction(
+    "vrndscaleps",
+    _UNARY_IMMEDIATE,
+    _OPERANDS_13,
+    _IMMEDIATES_5,
+    _encoding(_EVEX, _MAP_3, 1, 0, 0x08, (128, 256, 512)),
+)
+VRNDSCALEPD = _instruction(
+    "vrndscalepd",
+    _UNARY_IMMEDIATE,
+    _OPERANDS_13,
+    _IMMEDIATES_5,
+    _encoding(_EVEX, _MAP_3, 1, 1, 0x09, (128, 256, 512)),
+)
+VRNDSCALESS = _instruction(
+    "vrndscaless",
+    _NDS_IMMEDIATE,
+    _OPERANDS_16,
+    _IMMEDIATES_5,
+    _encoding(_EVEX, _MAP_3, 1, 0, 0x0A, (128,)),
+)
+VRNDSCALESD = _instruction(
+    "vrndscalesd",
+    _NDS_IMMEDIATE,
+    _OPERANDS_16,
+    _IMMEDIATES_5,
+    _encoding(_EVEX, _MAP_3, 1, 1, 0x0B, (128,)),
+)
+VRNDSCALEPH = _instruction(
+    "vrndscaleph",
+    _UNARY_IMMEDIATE,
+    _OPERANDS_13,
+    _IMMEDIATES_5,
+    _encoding(_EVEX, _MAP_3, 0, 0, 0x08, (128, 256, 512)),
+)
+VRNDSCALESH = _instruction(
+    "vrndscalesh",
+    _NDS_IMMEDIATE,
+    _OPERANDS_16,
+    _IMMEDIATES_5,
+    _encoding(_EVEX, _MAP_3, 0, 0, 0x0A, (128,)),
+)
 VPACKSSDW = _instruction(
     "vpackssdw",
     _NDS,
