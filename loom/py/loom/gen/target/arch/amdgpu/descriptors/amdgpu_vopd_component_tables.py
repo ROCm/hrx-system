@@ -50,6 +50,7 @@ from loom.target.low_descriptors import ConstraintKind, Descriptor  # noqa: E402
 
 _UINT16_MAX = 0xFFFF
 _VOPD_COMPONENT_REGISTER_UNIT_COUNT = 1
+_VOPD_INSTRUCTION_ENCODING_NAMES = ("VOPDXY", "VOPDXY_INST_LITERAL")
 
 _DESCRIPTOR_SET_GROUP_RDNA_VOPD = "rdna_vopd"
 _DESCRIPTOR_SET_GROUP_GFX11_GFX12 = "gfx11_gfx12"
@@ -243,7 +244,7 @@ def _xml_instruction_name(
 def _vopd_instruction_opcodes(
     instruction: AmdgpuIsaInstruction,
 ) -> tuple[int, ...]:
-    return tuple(encoding.opcode for encoding in instruction.encodings if encoding.encoding_name in ("VOPDXY", "VOPDXY_INST_LITERAL"))
+    return tuple(encoding.opcode for encoding in instruction.encodings if encoding.encoding_name in _VOPD_INSTRUCTION_ENCODING_NAMES)
 
 
 def _lane_mask_from_instruction_encoding(
@@ -267,7 +268,7 @@ def _lane_mask_from_instruction_encoding(
 def _lane_mask_from_instruction(instruction: AmdgpuIsaInstruction) -> str:
     lanes: set[str] = set()
     for encoding in instruction.encodings:
-        if encoding.encoding_name not in ("VOPDXY", "VOPDXY_INST_LITERAL"):
+        if encoding.encoding_name not in _VOPD_INSTRUCTION_ENCODING_NAMES:
             continue
         lane_mask = _lane_mask_from_instruction_encoding(encoding)
         if lane_mask == "LOOM_AMDGPU_VOPD_COMPONENT_LANE_X":
@@ -494,13 +495,17 @@ def _component_definitions() -> tuple[_VopdComponentDefinition, ...]:
     )
 
 
-def amdgpu_vopd_instruction_names_by_isa_key() -> dict[str, tuple[str, ...]]:
-    """Returns XML instruction facts consumed by VOPD table validation."""
+def amdgpu_vopd_instruction_encoding_names_by_isa_key() -> dict[
+    str,
+    dict[str, tuple[str, ...]],
+]:
+    """Returns exact XML instruction encoding facts consumed by VOPD."""
 
     descriptor_set_infos = sorted_descriptor_set_infos()
     descriptor_set_infos_by_key = _descriptor_set_infos_by_key(descriptor_set_infos)
-    names_by_isa_key: dict[str, set[str]] = {}
+    demands_by_isa_key: dict[str, dict[str, set[str]]] = {}
     for component in _component_definitions():
+        encoding_names = ("VOPDXY_INST_LITERAL",) if component.form in (_FORM_FMAAK_LITERAL, _FORM_FMAMK_LITERAL) else ("VOPDXY",)
         descriptor_set_keys = _descriptor_set_keys_for_group(
             component.descriptor_set_group,
             descriptor_set_infos,
@@ -513,8 +518,12 @@ def amdgpu_vopd_instruction_names_by_isa_key() -> dict[str, tuple[str, ...]]:
                     isa_info.isa_xml_key,
                 )
                 if instruction_name is not None:
-                    names_by_isa_key.setdefault(isa_info.isa_xml_key, set()).add(instruction_name)
-    return {isa_key: tuple(sorted(instruction_names)) for isa_key, instruction_names in sorted(names_by_isa_key.items())}
+                    instruction_demands = demands_by_isa_key.setdefault(
+                        isa_info.isa_xml_key,
+                        {},
+                    )
+                    instruction_demands.setdefault(instruction_name, set()).update(encoding_names)
+    return {isa_key: {instruction_name: tuple(sorted(encoding_names)) for instruction_name, encoding_names in sorted(demands.items())} for isa_key, demands in sorted(demands_by_isa_key.items())}
 
 
 def _descriptor_set_infos_by_key(
@@ -1552,7 +1561,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     generate_vopd_component_table_outputs(
         load_amdgpu_planning_table_inputs(
             args.isa_xml,
-            amdgpu_vopd_instruction_names_by_isa_key(),
+            amdgpu_vopd_instruction_encoding_names_by_isa_key(),
         ),
         source_path=args.source,
     )

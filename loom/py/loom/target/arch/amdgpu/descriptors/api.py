@@ -47,6 +47,7 @@ from loom.target.arch.amdgpu.target_info import (
 )
 from loom.target.low_descriptors import InstructionClass
 
+from .atomic import _GFX125X_ATOMIC_SOURCE_INSTRUCTION_NAMES
 from .cluster import _gfx125x_cluster_descriptors
 from .common import *
 from .control import _s_delay_alu_descriptor, _s_wait_xcnt_descriptor
@@ -1317,13 +1318,13 @@ def _with_storage_lease_rows(
 
 _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X = 1 << 0
 
-_AMDGPU_CORE_INSTRUCTION_FACT_NAMES = (
-    "S_ANDN2_B64",
-    "S_GETPC_B64",
-    "S_MOV_B32",
-    "S_MOV_B64",
-    "S_XOR_B64",
-)
+_AMDGPU_CORE_INSTRUCTION_FACT_ENCODING_NAMES = {
+    "S_ANDN2_B64": ("ENC_SOP2",),
+    "S_GETPC_B64": ("ENC_SOP1",),
+    "S_MOV_B32": ("ENC_SOP1",),
+    "S_MOV_B64": ("ENC_SOP1",),
+    "S_XOR_B64": ("ENC_SOP2",),
+}
 
 
 def _preserve_overlay_descriptors(
@@ -1420,6 +1421,7 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
         base=_AMDGPU_GFX12_5_GENERIC_CORE_DESCRIPTOR_SET_BASE,
         overlay_rows=_gfx12_5_generic_core_overlays,
         overlay_descriptors=_gfx12_5_generic_core_overlay_descriptors,
+        source_instruction_names=_GFX125X_ATOMIC_SOURCE_INSTRUCTION_NAMES,
         extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
         flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     ),
@@ -1461,6 +1463,7 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
         base=_AMDGPU_RDNA4_GFX125X_CORE_DESCRIPTOR_SET_BASE,
         overlay_rows=_gfx125x_core_overlays,
         overlay_descriptors=_gfx125x_core_overlay_descriptors,
+        source_instruction_names=_GFX125X_ATOMIC_SOURCE_INSTRUCTION_NAMES,
         extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
         flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     ),
@@ -1470,6 +1473,7 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
         overlay_rows=_gfx125x_core_overlays,
         overlay_descriptors=_gfx125x_core_overlay_descriptors,
         project_overlay_descriptors=_gfx1250_a0_core_overlay_projection,
+        source_instruction_names=_GFX125X_ATOMIC_SOURCE_INSTRUCTION_NAMES,
         extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
         flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     ),
@@ -1479,6 +1483,7 @@ _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS = {
         overlay_rows=_gfx125x_core_overlays,
         overlay_descriptors=_gfx125x_core_overlay_descriptors,
         project_overlay_descriptors=_gfx1251_core_overlay_projection,
+        source_instruction_names=_GFX125X_ATOMIC_SOURCE_INSTRUCTION_NAMES,
         extra_descriptors=_GFX125X_EXTRA_DESCRIPTORS,
         flags=_AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     ),
@@ -1489,22 +1494,71 @@ AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS = tuple(
 )
 
 
+def _merge_instruction_encoding_name_demand(
+    demands: dict[str, set[str] | None],
+    instruction_name: str,
+    encoding_names: Iterable[str] | None,
+) -> None:
+    if instruction_name not in demands:
+        demands[instruction_name] = (
+            None if encoding_names is None else set(encoding_names)
+        )
+        return
+    existing_encoding_names = demands[instruction_name]
+    if existing_encoding_names is None:
+        return
+    if encoding_names is None:
+        demands[instruction_name] = None
+        return
+    existing_encoding_names.update(encoding_names)
+
+
+@cache
+def _amdgpu_core_descriptor_set_instruction_encoding_name_rows(
+    target: str,
+) -> tuple[tuple[str, tuple[str, ...] | None], ...]:
+    builder = _amdgpu_core_descriptor_set_builder(target)
+    demands: dict[str, set[str] | None] = {}
+    for (
+        instruction_name,
+        encoding_names,
+    ) in _AMDGPU_CORE_INSTRUCTION_FACT_ENCODING_NAMES.items():
+        _merge_instruction_encoding_name_demand(
+            demands,
+            instruction_name,
+            encoding_names,
+        )
+    for overlay in builder.overlay_rows():
+        _merge_instruction_encoding_name_demand(
+            demands,
+            overlay.instruction_name,
+            (overlay.encoding_name,),
+        )
+    for instruction_name in builder.source_instruction_names:
+        _merge_instruction_encoding_name_demand(
+            demands,
+            instruction_name,
+            None,
+        )
+    return tuple(
+        (
+            instruction_name,
+            None if encoding_names is None else tuple(sorted(encoding_names)),
+        )
+        for instruction_name, encoding_names in sorted(demands.items())
+    )
+
+
 @cache
 def amdgpu_core_descriptor_set_instruction_names(target: str) -> tuple[str, ...]:
     """Returns the imported instruction facts needed by one target contract."""
 
-    try:
-        builder = _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target]
-    except KeyError as exc:
-        supported = ", ".join(AMDGPU_DESCRIPTOR_SET_GENERATOR_TARGETS)
-        raise ValueError(
-            f"unsupported AMDGPU descriptor target '{target}'; "
-            f"expected one of: {supported}"
-        ) from exc
-    names = set(_AMDGPU_CORE_INSTRUCTION_FACT_NAMES)
-    names.update(overlay.instruction_name for overlay in builder.overlay_rows())
-    names.update(builder.source_instruction_names)
-    return tuple(sorted(names))
+    return tuple(
+        instruction_name
+        for instruction_name, _ in (
+            _amdgpu_core_descriptor_set_instruction_encoding_name_rows(target)
+        )
+    )
 
 
 def amdgpu_core_descriptor_set_instruction_names_by_isa_key(
@@ -1524,6 +1578,35 @@ def amdgpu_core_descriptor_set_instruction_names_by_isa_key(
     return {
         isa_key: tuple(sorted(instruction_names))
         for isa_key, instruction_names in sorted(names_by_isa_key.items())
+    }
+
+
+def amdgpu_core_descriptor_set_instruction_encoding_names_by_isa_key(
+    descriptor_set_infos: Iterable[AmdgpuDescriptorSetInfo],
+) -> dict[str, dict[str, tuple[str, ...] | None]]:
+    """Returns exact imported instruction encoding demands per ISA XML."""
+
+    demands_by_isa_key: dict[str, dict[str, set[str] | None]] = {}
+    for info in descriptor_set_infos:
+        rows = _amdgpu_core_descriptor_set_instruction_encoding_name_rows(
+            info.generator_target
+        )
+        for isa_info in info.isa_infos:
+            demands = demands_by_isa_key.setdefault(isa_info.isa_xml_key, {})
+            for instruction_name, encoding_names in rows:
+                _merge_instruction_encoding_name_demand(
+                    demands,
+                    instruction_name,
+                    encoding_names,
+                )
+    return {
+        isa_key: {
+            instruction_name: (
+                None if encoding_names is None else tuple(sorted(encoding_names))
+            )
+            for instruction_name, encoding_names in sorted(demands.items())
+        }
+        for isa_key, demands in sorted(demands_by_isa_key.items())
     }
 
 
@@ -1862,6 +1945,7 @@ __all__ = (
     "_validate_dpp_control_fields",
     "_with_overlay_descriptors",
     "amdgpu_common_reg_class_ids",
+    "amdgpu_core_descriptor_set_instruction_encoding_names_by_isa_key",
     "amdgpu_core_descriptor_set_instruction_names",
     "amdgpu_core_descriptor_set_instruction_names_by_isa_key",
     "amdgpu_core_descriptor_set_overlay_rows",

@@ -14,6 +14,7 @@ from loom.target.arch.amdgpu.isa_xml import (
     AmdgpuIsaXmlError,
     parse_amdgpu_isa_xml_instructions_path,
     parse_amdgpu_isa_xml_path,
+    parse_amdgpu_isa_xml_path_for_instruction_encodings,
     parse_amdgpu_isa_xml_path_for_instructions,
     parse_amdgpu_isa_xml_text,
 )
@@ -533,6 +534,85 @@ def test_parse_amdgpu_isa_xml_path_for_instructions_preserves_shared_facts(
     assert selected_spec.instructions == full_spec.select_instructions(
         ("S_ADD_U32", "S_WAIT_IDLE")
     )
+
+
+def test_parse_amdgpu_isa_xml_path_for_instruction_encodings_is_exact(
+    tmp_path: Path,
+) -> None:
+    partitioned_xml = SAMPLE_XML.replace(
+        '<OperandType IsPartitioned="false">\n'
+        "        <OperandTypeName>OPR_SRC</OperandTypeName>",
+        '<OperandType IsPartitioned="true">\n'
+        "        <OperandTypeName>OPR_SRC</OperandTypeName>\n"
+        "        <MicrocodeFormat>\n"
+        "          <BitMap>\n"
+        '            <Field IsConditional="false">\n'
+        "              <FieldName>VALUE</FieldName>\n"
+        '              <BitLayout RangeCount="1">\n'
+        '                <Range Order="0">\n'
+        "                  <BitCount>8</BitCount>\n"
+        "                  <BitOffset>0</BitOffset>\n"
+        "                </Range>\n"
+        "              </BitLayout>\n"
+        "            </Field>\n"
+        "          </BitMap>\n"
+        "        </MicrocodeFormat>",
+        1,
+    )
+    xml_path = tmp_path / "amdgpu_isa.xml"
+    xml_path.write_text(partitioned_xml)
+
+    full_spec = parse_amdgpu_isa_xml_path(xml_path)
+    selected_spec = parse_amdgpu_isa_xml_path_for_instruction_encodings(
+        xml_path,
+        {
+            "S_ADD_U32": ("ENC_SOP2",),
+            "V_ADD_NC_U32": ("VOP2_INST_LITERAL",),
+        },
+    )
+
+    assert selected_spec.architecture_name == full_spec.architecture_name
+    assert selected_spec.architecture_id == full_spec.architecture_id
+    assert selected_spec.encodings == full_spec.encodings
+    assert selected_spec.operand_types == full_spec.operand_types
+    assert selected_spec.partitioned_operand_uses
+    assert selected_spec.partitioned_operand_uses == full_spec.partitioned_operand_uses
+    assert [instruction.name for instruction in selected_spec.instructions] == [
+        "S_ADD_CO_U32",
+        "V_ADD_NC_U32",
+    ]
+    assert [
+        encoding.encoding_name
+        for instruction in selected_spec.instructions
+        for encoding in instruction.encodings
+    ] == ["ENC_SOP2", "VOP2_INST_LITERAL"]
+
+    all_encoding_spec = parse_amdgpu_isa_xml_path_for_instruction_encodings(
+        xml_path,
+        {"V_ADD_NC_U32": None},
+    )
+    assert all_encoding_spec.instructions == full_spec.select_instructions(
+        ("V_ADD_NC_U32",)
+    )
+
+
+def test_parse_amdgpu_isa_xml_path_for_instruction_encodings_rejects_missing_encoding(
+    tmp_path: Path,
+) -> None:
+    xml_path = tmp_path / "amdgpu_isa.xml"
+    xml_path.write_text(SAMPLE_XML)
+
+    with pytest.raises(
+        AmdgpuIsaXmlError,
+        match=(
+            r"Instruction\(V_ADD_NC_U32\) is missing requested encoding\(s\): "
+            r"MISSING"
+        ),
+    ):
+        parse_amdgpu_isa_xml_path_for_instruction_encodings(
+            xml_path,
+            {"V_ADD_NC_U32": ("MISSING",)},
+        )
 
 
 def test_select_instructions_accepts_aliases_and_fails_loudly() -> None:

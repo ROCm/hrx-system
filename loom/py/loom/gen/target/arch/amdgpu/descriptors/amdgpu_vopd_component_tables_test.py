@@ -98,6 +98,13 @@ def test_vopd_descriptor_set_groups_follow_target_info() -> None:
     )
 
 
+def test_vopd_instruction_demands_select_authored_encoding_forms() -> None:
+    demands_by_isa_key = amdgpu_vopd_component_tables.amdgpu_vopd_instruction_encoding_names_by_isa_key()
+
+    assert demands_by_isa_key["rdna3"]["V_DUAL_ADD_F32"] == ("VOPDXY",)
+    assert demands_by_isa_key["rdna3"]["V_DUAL_FMAAK_F32"] == ("VOPDXY_INST_LITERAL",)
+
+
 def test_vopd_component_rows_have_unique_descriptor_keys() -> None:
     components = amdgpu_vopd_component_tables._component_definitions()
     descriptor_keys = [component.descriptor_key for component in components]
