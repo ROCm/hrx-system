@@ -138,4 +138,84 @@ TEST_F(SdmaTimestampTest, GlobalTimestampsOrderDependentCopies) {
   ASSERT_NO_FATAL_FAILURE(queue->WaitRetired(api_));
 }
 
+TEST_F(SdmaTimestampTest, CopiesSamplesToEightByteAlignedDestinations) {
+  constexpr amdf_memory_access_t kReadWrite =
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
+  constexpr uint64_t kGuard = UINT64_C(0xa79d3e516b28c4f0);
+  constexpr size_t kSampleIndex = 16;
+  constexpr std::array<size_t, 4> kTargetIndices = {1, 2, 3, 4};
+  constexpr size_t kEpochCount = 2;
+  GpuMemory* observations = nullptr;
+  GpuMemory* completion = nullptr;
+  ASSERT_NO_FATAL_FAILURE(CreateMemory(kReadWrite, 4096, &observations));
+  ASSERT_NO_FATAL_FAILURE(CreateMemory(kReadWrite, 4096, &completion));
+  GpuCommandQueue* queue = nullptr;
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(&queue));
+  ASSERT_GE(queue->words().size(), kEpochCount * 64);
+  SdmaCommandWriter commands(queue->words().data(), family_.format_features);
+  const bool user_gcr =
+      (family_.format_features & AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR) != 0;
+  std::array<uint64_t, 512> initial;
+  std::array<uint64_t, 512> observed;
+  uint64_t previous = 0;
+  RecordProperty("completed_epochs", 0);
+  for (size_t epoch = 0; epoch < kEpochCount; ++epoch) {
+    SCOPED_TRACE(epoch);
+    initial.fill(kGuard);
+    for (size_t i : kTargetIndices) {
+      initial[i] = (i + epoch) % 2 ? 0 : UINT64_MAX;
+      initial[kSampleIndex + i * 4] = UINT64_MAX;
+    }
+    std::memcpy(observations->host.pointer, initial.data(), sizeof(initial));
+    *static_cast<uint32_t*>(completion->host.pointer) = 0;
+    if (user_gcr) {
+      commands.AcquireFromSystem();
+    }
+    for (size_t i : kTargetIndices) {
+      // Each private aligned sample survives until its delivered copy is
+      // checked. The timestamp orders preceding commands; NOP delivers this
+      // sample before its dependent copy to an ordinary HAL destination.
+      commands.WriteGlobalTimestamp(observations->device_address +
+                                    (kSampleIndex + i * 4) * sizeof(uint64_t));
+      commands.Noop();
+      commands.CopyLinear(observations->device_address +
+                              (kSampleIndex + i * 4) * sizeof(uint64_t),
+                          observations->device_address + i * sizeof(uint64_t),
+                          sizeof(uint64_t));
+    }
+    if (user_gcr) {
+      commands.ReleaseToSystem();
+    }
+    commands.Fence32(completion->device_address,
+                     static_cast<uint32_t>(epoch + 1));
+    commands.PadToEightWords();
+    ASSERT_NO_FATAL_FAILURE(
+        queue->Publish(api_, gpu_api_, commands.word_count()));
+    ASSERT_TRUE(GpuWaitEqual<uint32_t>(
+        reinterpret_cast<uintptr_t>(completion->host.pointer), epoch + 1));
+    ASSERT_NO_FATAL_FAILURE(queue->WaitRetired(api_));
+    std::memcpy(observed.data(), observations->host.pointer, sizeof(observed));
+    for (size_t i = 0; i < observed.size(); ++i) {
+      if (i >= kTargetIndices.front() && i <= kTargetIndices.back()) {
+        // Compare each delivery with its own native sample, so duplicated or
+        // stale copies cannot pass solely because they remain monotonic.
+        // Zero is a valid tick and is never used as a completion condition.
+        EXPECT_EQ(observed[i], observed[kSampleIndex + i * 4]);
+        EXPECT_NE(observed[i], UINT64_MAX);
+        EXPECT_LE(previous, observed[i]);
+        previous = observed[i];
+      } else if (i >= kSampleIndex + kTargetIndices.front() * 4 &&
+                 i <= kSampleIndex + kTargetIndices.back() * 4 && !(i % 4)) {
+        EXPECT_NE(observed[i], UINT64_MAX);
+      } else {
+        EXPECT_EQ(observed[i], kGuard) << i;
+      }
+    }
+    if (HasFailure()) {
+      return;
+    }
+    RecordProperty("completed_epochs", epoch + 1);
+  }
+}
+
 }  // namespace
