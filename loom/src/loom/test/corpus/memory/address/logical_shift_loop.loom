@@ -1,0 +1,74 @@
+// Preserve the pointer root and dynamic byte offset while a logical-shift
+// recurrence bounds the independently carried row index in a helper.
+func.def @logical_shift_row_last(%initial: i64, %rows: buffer, %rows_byte_offset: offset) -> (i32) {
+  %c0_i32 = scalar.constant 0 : i32
+  %last, %terminal_row, %terminal_value = scf.while(%last_before = %c0_i32 : i32, %row_before = %c0_i32 : i32, %value_before = %initial : i64) -> (i32, i32, i64) {
+    %c0_i64 = scalar.constant 0 : i64
+    %active = scalar.cmpi ne, %value_before, %c0_i64 : i64
+    scf.condition %active, %last_before, %row_before, %value_before : i1, i32, i32, i64
+  } do(%previous: i32, %row: i32, %value: i64) {
+    %row_wide = scalar.extui %row : i32 to i64
+    %row_shift = scalar.constant 3 : i64
+    %row_byte_delta = scalar.shli %row_wide, %row_shift : i64
+    %base_wide = index.cast %rows_byte_offset : offset to i64
+    %row_byte_offset_raw = scalar.addi %base_wide, %row_byte_delta : i64
+    %row_byte_offset_nonnegative = scalar.assume %row_byte_offset_raw [range(%row_byte_offset_raw, 0, 9223372036854775807)] : i64
+    %row_byte_offset = index.cast %row_byte_offset_nonnegative : i64 to offset
+    %value_word = scalar.trunci %value : i64 to i32
+    %c1_i32 = scalar.constant 1 : i32
+    %column = scalar.andi %value_word, %c1_i32 : i32
+    %column_wide = scalar.extui %column : i32 to i64
+    %element_shift = scalar.constant 2 : i64
+    %column_byte_delta = scalar.shli %column_wide, %element_shift : i64
+    %row_byte_offset_wide = index.cast %row_byte_offset : offset to i64
+    %element_byte_offset_raw = scalar.addi %row_byte_offset_wide, %column_byte_delta : i64
+    %element_byte_offset_nonnegative = scalar.assume %element_byte_offset_raw [range(%element_byte_offset_raw, 0, 9223372036854775807)] : i64
+    %element_byte_offset = index.cast %element_byte_offset_nonnegative : i64 to offset
+    %element_view = buffer.view %rows[%element_byte_offset] : buffer -> view<1xi32>
+    %element = view.load %element_view[0] : view<1xi32> -> i32
+    %next_row = scalar.addi %row, %c1_i32 : i32
+    %shift = scalar.constant 2 : i64
+    %next_value = scalar.shrui %value, %shift : i64
+    scf.yield %element, %next_row, %next_value : i32, i32, i64
+  }
+  func.return %last : i32
+}
+
+func.def @logical_shift_row_observations(%rows: buffer, %initial: i64, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %result = buffer.view %output[%origin] : buffer -> view<1xi32>
+  %last = func.call readonly @logical_shift_row_last(%initial, %rows, %origin) : (i64, buffer, offset) -> (i32)
+  view.store %last, %result[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @logical_shift_row_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %rows = check.generate.iota offset(1) step(1) : tensor<64xi32>
+    %initial = check.literal value(0) : i64
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@logical_shift_row_observations>(%rows, %initial, %output) : (tensor<64xi32>, i64, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%rows) expected(%rows) : tensor<64xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %rows = check.generate.iota offset(1) step(1) : tensor<64xi32>
+    %initial = check.literal value(4611686018427387904) : i64
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@logical_shift_row_observations>(%rows, %initial, %output) : (tensor<64xi32>, i64, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%rows) expected(%rows) : tensor<64xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %rows = check.generate.iota offset(1) step(1) : tensor<64xi32>
+    %initial = check.literal value(-1) : i64
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@logical_shift_row_observations>(%rows, %initial, %output) : (tensor<64xi32>, i64, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%rows) expected(%rows) : tensor<64xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}

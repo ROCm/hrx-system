@@ -748,6 +748,9 @@ IREE_ATTRIBUTE_NOINLINE static bool loom_scf_match_counted_while(
     loom_op_t* op, loom_rewriter_t* rewriter,
     const loom_value_fact_induction_t* induction,
     loom_scf_counted_while_plan_t* out_plan) {
+  if (induction->update != LOOM_VALUE_FACT_INDUCTION_UPDATE_ADDITIVE) {
+    return false;
+  }
   loom_region_t* before = loom_scf_while_before(op);
   loom_region_t* after = loom_scf_while_after(op);
   loom_block_t* before_block = loom_region_entry_block(before);

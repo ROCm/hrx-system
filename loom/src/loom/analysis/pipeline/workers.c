@@ -547,6 +547,9 @@ static iree_status_t loom_pipeline_worker_transport(
       return iree_ok_status();
     }
     induction = &structure->inductions[0];
+    if (induction->update != LOOM_VALUE_FACT_INDUCTION_UPDATE_ADDITIVE) {
+      return iree_ok_status();
+    }
     for (iree_host_size_t i = 0; i < count; ++i) {
       const uint16_t block = steps[i].op->parent_block->region_index;
       if (!loom_cfg_loop_nest_contains(&structure->loops, 0, block) ||

@@ -169,7 +169,8 @@ static bool loom_low_lower_realization_loop_domain(
   const loom_cfg_natural_loop_t* loop = &cfg->loops.loops[loop_index];
   const loom_value_fact_induction_t* induction = &cfg->inductions[loop_index];
   if (loop->entries.count != 1 || loop->backedges.count != 1 ||
-      loop->exits.count != 1 || induction->value == LOOM_VALUE_ID_INVALID) {
+      loop->exits.count != 1 || induction->value == LOOM_VALUE_ID_INVALID ||
+      induction->update != LOOM_VALUE_FACT_INDUCTION_UPDATE_ADDITIVE) {
     return false;
   }
   const loom_cfg_edge_info_t* entry =
