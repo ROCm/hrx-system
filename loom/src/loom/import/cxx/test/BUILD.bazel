@@ -119,6 +119,7 @@ loom_check_test_suite(
         "data_models.cxx-test",
         "deep_conditionals.cxx-test",
         "dependent_view_loops.cxx-test",
+        "enable_if.cxx-test",
         "encoding_schemas.cxx-test",
         "encoding_schemas_invalid.cxx-test",
         "enum_semantics.cxx-test",
@@ -483,6 +484,13 @@ loom_test(
     name = "integer_intrinsics_test",
     execution_profiles = [VM_REFERENCE_PROFILE],
     module = ":integer_intrinsics_module",
+    target_compatible_with = _HOST_COMPATIBILITY,
+)
+
+loom_test(
+    name = "enable_if_test",
+    srcs = ["enable_if.cxx"],
+    execution_profiles = [VM_REFERENCE_PROFILE],
     target_compatible_with = _HOST_COMPATIBILITY,
 )
 
