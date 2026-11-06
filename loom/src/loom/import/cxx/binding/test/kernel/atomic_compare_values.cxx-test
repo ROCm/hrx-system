@@ -1,0 +1,140 @@
+// RUN: pass canonicalize,cse,dce
+// Every non-order argument is evaluated once before expected is loaded.
+// Only a failed exchange writes expected, including when expected aliases state.
+template <class T>
+static T once(T value, unsigned* evaluations) {
+  ++*evaluations;
+  return value;
+}
+
+unsigned builtin_compare_values(unsigned* storage, unsigned* evaluations) {
+  auto* word = storage + 1;
+  auto* expected = storage + 2;
+  unsigned failures = 0;
+  failures += !__atomic_compare_exchange_n(
+      once(word, evaluations + 1), once(expected, evaluations + 2),
+      once(7u, evaluations + 3), once(true, evaluations + 4), __ATOMIC_ACQ_REL,
+      __ATOMIC_ACQUIRE);
+  failures += *expected != 37u;
+  failures += __atomic_compare_exchange_n(
+      once(word, evaluations + 1), once(expected, evaluations + 2),
+      once(11u, evaluations + 3), once(false, evaluations + 4),
+      __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+  failures += *expected != 7u;
+  // Aliasing makes an erroneous store on success observable: it would undo 13.
+  failures += !__atomic_compare_exchange_n(word, word, 13u, false,
+                                           __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+  return failures;
+}
+// ----
+func.def public @builtin_compare_values(%storage: buffer, %storage_byte_offset: offset, %evaluations: buffer, %evaluations_byte_offset: offset) -> (i32) {
+  %185 = scalar.constant 4 : i64
+  %9 = index.cast %storage_byte_offset : offset to i64
+  %10 = scalar.addi %9, %185 : i64
+  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %word_byte_offset = index.cast %11 : i64 to offset
+  %184 = scalar.constant 8 : i64
+  %18 = scalar.addi %9, %184 : i64
+  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+  %expected_byte_offset = index.cast %19 : i64 to offset
+  %26 = index.cast %evaluations_byte_offset : offset to i64
+  %27 = scalar.addi %26, %185 : i64
+  %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
+  %29 = index.cast %28 : i64 to offset
+  %30, %31 = func.call @once_unsigned_int_(%storage, %word_byte_offset, %evaluations, %29) : (buffer, offset, buffer, offset) -> (buffer, offset)
+  %37 = scalar.addi %26, %184 : i64
+  %38 = scalar.assume %37 [range(%37, 0, 9223372036854775807)] : i64
+  %39 = index.cast %38 : i64 to offset
+  %40, %41 = func.call @once_unsigned_int_(%storage, %expected_byte_offset, %evaluations, %39) : (buffer, offset, buffer, offset) -> (buffer, offset)
+  %42 = scalar.constant 7 : i32
+  %181 = scalar.constant 12 : i64
+  %48 = scalar.addi %26, %181 : i64
+  %49 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
+  %50 = index.cast %49 : i64 to offset
+  %51 = func.call @once_unsigned_int(%42, %evaluations, %50) : (i32, buffer, offset) -> (i32)
+  %52 = scalar.constant 1 : i1
+  %180 = scalar.constant 16 : i64
+  %58 = scalar.addi %26, %180 : i64
+  %59 = scalar.assume %58 [range(%58, 0, 9223372036854775807)] : i64
+  %60 = index.cast %59 : i64 to offset
+  %61 = func.call @once_bool(%52, %evaluations, %60) : (i1, buffer, offset) -> (i1)
+  %62 = buffer.view %40[%41] : buffer -> view<1xi32>
+  %63 = view.load %62[0] : view<1xi32> -> i32
+  %64 = buffer.view %30[%31] : buffer -> view<1xi32>
+  %65 = view.atomic.cmpxchg %63, %51, %64[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i32, view<1xi32> -> i32
+  %66 = scalar.cmpi eq, %65, %63 : i32
+  %68 = scalar.xori %66, %52 : i1
+  scf.if %68 {
+    %173 = scalar.assume %65 [ne(%65, %63)] : i32
+    view.store %173, %62[0] : i32, view<1xi32>
+  }
+  %71 = scalar.extui %68 : i1 to i32
+  %73 = buffer.view %storage[%expected_byte_offset] : buffer -> view<1xi32>
+  %74 = view.load %73[0] : view<1xi32> -> i32
+  %75 = scalar.constant 37 : i32
+  %76 = scalar.cmpi ne, %74, %75 : i32
+  %77 = scalar.extui %76 : i1 to i32
+  %186 = scalar.addi %71, %77 : i32
+  %87, %88 = func.call @once_unsigned_int_(%storage, %word_byte_offset, %evaluations, %29) : (buffer, offset, buffer, offset) -> (buffer, offset)
+  %97, %98 = func.call @once_unsigned_int_(%storage, %expected_byte_offset, %evaluations, %39) : (buffer, offset, buffer, offset) -> (buffer, offset)
+  %99 = scalar.constant 11 : i32
+  %108 = func.call @once_unsigned_int(%99, %evaluations, %50) : (i32, buffer, offset) -> (i32)
+  %109 = scalar.constant 0 : i1
+  %118 = func.call @once_bool(%109, %evaluations, %60) : (i1, buffer, offset) -> (i1)
+  %119 = buffer.view %97[%98] : buffer -> view<1xi32>
+  %120 = view.load %119[0] : view<1xi32> -> i32
+  %121 = buffer.view %87[%88] : buffer -> view<1xi32>
+  %122 = view.atomic.cmpxchg %120, %108, %121[0] {failure_ordering = seq_cst, scope = system, success_ordering = seq_cst} : i32, view<1xi32> -> i32
+  %123 = scalar.cmpi eq, %122, %120 : i32
+  %125 = scalar.xori %123, %52 : i1
+  scf.if %125 {
+    %174 = scalar.assume %122 [ne(%122, %120)] : i32
+    view.store %174, %119[0] : i32, view<1xi32>
+  }
+  %126 = scalar.extui %123 : i1 to i32
+  %188 = scalar.addi %186, %126 : i32
+  %129 = view.load %73[0] : view<1xi32> -> i32
+  %131 = scalar.cmpi ne, %129, %42 : i32
+  %132 = scalar.extui %131 : i1 to i32
+  %failures$133 = scalar.addi %188, %132 : i32
+  %134 = scalar.constant 13 : i32
+  %136 = buffer.view %storage[%word_byte_offset] : buffer -> view<1xi32>
+  %137 = view.load %136[0] : view<1xi32> -> i32
+  %139 = view.atomic.cmpxchg %137, %134, %136[0] {failure_ordering = relaxed, scope = system, success_ordering = relaxed} : i32, view<1xi32> -> i32
+  %140 = scalar.cmpi eq, %139, %137 : i32
+  %142 = scalar.xori %140, %52 : i1
+  scf.if %142 {
+    %175 = scalar.assume %139 [ne(%139, %137)] : i32
+    view.store %175, %136[0] : i32, view<1xi32>
+  }
+  %145 = scalar.extui %142 : i1 to i32
+  %failures$146 = scalar.addi %failures$133, %145 : i32
+  func.return %failures$146 : i32
+}
+
+func.def @once_unsigned_int_(%value: buffer, %value_byte_offset: offset, %evaluations: buffer, %evaluations_byte_offset: offset) -> (buffer, offset) {
+  %153 = buffer.view %evaluations[%evaluations_byte_offset] : buffer -> view<1xi32>
+  %154 = view.load %153[0] : view<1xi32> -> i32
+  %155 = scalar.constant 1 : i32
+  %156 = scalar.addi %154, %155 : i32
+  view.store %156, %153[0] : i32, view<1xi32>
+  func.return %value, %value_byte_offset : buffer, offset
+}
+
+func.def @once_unsigned_int(%value: i32, %evaluations: buffer, %evaluations_byte_offset: offset) -> (i32) {
+  %161 = buffer.view %evaluations[%evaluations_byte_offset] : buffer -> view<1xi32>
+  %162 = view.load %161[0] : view<1xi32> -> i32
+  %163 = scalar.constant 1 : i32
+  %164 = scalar.addi %162, %163 : i32
+  view.store %164, %161[0] : i32, view<1xi32>
+  func.return %value : i32
+}
+
+func.def @once_bool(%value: i1, %evaluations: buffer, %evaluations_byte_offset: offset) -> (i1) {
+  %169 = buffer.view %evaluations[%evaluations_byte_offset] : buffer -> view<1xi32>
+  %170 = view.load %169[0] : view<1xi32> -> i32
+  %171 = scalar.constant 1 : i32
+  %172 = scalar.addi %170, %171 : i32
+  view.store %172, %169[0] : i32, view<1xi32>
+  func.return %value : i1
+}

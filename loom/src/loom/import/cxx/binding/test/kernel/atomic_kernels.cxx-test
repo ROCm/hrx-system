@@ -1,0 +1,261 @@
+// RUN: pass canonicalize,cse,dce
+// A device-scope ticket determines its destination slot.
+#include <loomcxx/atomic.h>
+#include <loomcxx/kernel.h>
+using loom::atomic::kind;
+using loom::atomic::ordering;
+using loom::atomic::scope;
+using loom::view::atomic::cmpxchg;
+using loom::view::atomic::reduce;
+using loom::view::atomic::rmw;
+
+[[loom::kernel, loom::workgroup_size(32, 1, 1), loom::workgroup_count(8, 1, 1)]]
+void atomic_tickets(unsigned* counter, unsigned* slots) {
+  unsigned ticket =
+      rmw<kind::addi, ordering::relaxed, scope::device>(1u, counter + 1) - 37u;
+  slots[ticket + 1] = 1;
+}
+// ----
+kernel.def @atomic_tickets() {
+  %2 = index.constant 8 : index
+  %3 = index.constant 1 : index
+  %5 = index.constant 32 : index
+  kernel.launch.config workgroups(%2, %3, %3) workgroup_size(%5, %3, %3) : index
+} launch(%counter: buffer, %slots: buffer) {
+  %10 = scalar.constant 1 : i32
+  %40 = index.constant 4 : offset
+  %19 = buffer.view %counter[%40] : buffer -> view<1xi32>
+  %20 = view.atomic.rmw<addi> %10, %19[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %38 = scalar.constant -36 : i32
+  %39 = scalar.addi %20, %38 : i32
+  %26 = scalar.extui %39 : i32 to i64
+  %34 = scalar.constant 2 : i64
+  %35 = scalar.shli %26, %34 : i64
+  %31 = scalar.assume %35 [range(%35, 0, 9223372036854775807)] : i64
+  %32 = index.cast %31 : i64 to offset
+  %33 = buffer.view %slots[%32] : buffer -> view<1xi32>
+  view.store %10, %33[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Unsigned high-bit min/max and both compare outcomes feed distinct outputs.
+#include <loomcxx/atomic.h>
+#include <loomcxx/kernel.h>
+using loom::atomic::kind;
+using loom::atomic::ordering;
+using loom::atomic::scope;
+using loom::view::atomic::cmpxchg;
+using loom::view::atomic::reduce;
+using loom::view::atomic::rmw;
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void atomic_unsigned(unsigned* storage, unsigned* output) {
+  unsigned* destination = storage + 1;
+  output[1] = rmw<kind::minui, ordering::relaxed, scope::device>(0x80000001u,
+                                                                 destination);
+  output[2] = rmw<kind::maxui, ordering::relaxed, scope::device>(0x80000001u,
+                                                                 destination);
+  output[3] = cmpxchg<ordering::acq_rel, ordering::acquire, scope::device>(
+      0x80000001u, 13u, destination);
+  output[4] = cmpxchg<ordering::acquire, ordering::relaxed, scope::device>(
+      0x80000001u, 19u, destination);
+}
+// ----
+kernel.def @atomic_unsigned() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%storage: buffer, %output: buffer) {
+  %destination_byte_offset = index.constant 4 : offset
+  %18 = scalar.constant -2147483647 : i32
+  %19 = buffer.view %storage[%destination_byte_offset] : buffer -> view<1xi32>
+  %20 = view.atomic.rmw<minui> %18, %19[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %29 = buffer.view %output[%destination_byte_offset] : buffer -> view<1xi32>
+  view.store %20, %29[0] : i32, view<1xi32>
+  %32 = view.atomic.rmw<maxui> %18, %19[0] {ordering = relaxed, scope = device} : i32, view<1xi32> -> i32
+  %70 = index.constant 8 : offset
+  %41 = buffer.view %output[%70] : buffer -> view<1xi32>
+  view.store %32, %41[0] : i32, view<1xi32>
+  %43 = scalar.constant 13 : i32
+  %45 = view.atomic.cmpxchg %18, %43, %19[0] {failure_ordering = acquire, scope = device, success_ordering = acq_rel} : i32, view<1xi32> -> i32
+  %69 = index.constant 12 : offset
+  %54 = buffer.view %output[%69] : buffer -> view<1xi32>
+  view.store %45, %54[0] : i32, view<1xi32>
+  %56 = scalar.constant 19 : i32
+  %58 = view.atomic.cmpxchg %18, %56, %19[0] {failure_ordering = relaxed, scope = device, success_ordering = acquire} : i32, view<1xi32> -> i32
+  %68 = index.constant 16 : offset
+  %67 = buffer.view %output[%68] : buffer -> view<1xi32>
+  view.store %58, %67[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Workgroup-local tickets retain initialization and both barriers around the counter.
+#include <loomcxx/atomic.h>
+#include <loomcxx/kernel.h>
+using loom::atomic::kind;
+using loom::atomic::ordering;
+using loom::atomic::scope;
+using loom::view::atomic::cmpxchg;
+using loom::view::atomic::reduce;
+using loom::view::atomic::rmw;
+
+[[loom::kernel, loom::workgroup_size(32, 1, 1), loom::workgroup_count(8, 1, 1)]]
+void atomic_workgroup_tickets(unsigned* counts, unsigned* slots) {
+  [[loom::workgroup]] unsigned counter[1];
+  unsigned lane = loom::kernel::workitem::id.x;
+  unsigned group = loom::kernel::workgroup::id.x;
+  if (lane == 0) {
+    counter[0] = 0;
+  }
+  loom::kernel::workgroup::barrier();
+  unsigned ticket =
+      rmw<kind::addi, ordering::relaxed, scope::workgroup>(1u, &counter[0]);
+  slots[group * 32 + ticket + 1] = 1;
+  loom::kernel::workgroup::barrier();
+  if (lane == 0) {
+    counts[group + 1] = counter[0];
+  }
+}
+// ----
+kernel.def @atomic_workgroup_tickets() {
+  %2 = index.constant 8 : index
+  %3 = index.constant 1 : index
+  %5 = index.constant 32 : index
+  kernel.launch.config workgroups(%2, %3, %3) workgroup_size(%5, %3, %3) : index
+} launch(%counts: buffer, %slots: buffer) {
+  %10 = index.constant 4 : offset
+  %counter = buffer.alloca<workgroup> align(4) %10 : buffer
+  %counter_byte_offset = index.constant 0 : offset
+  %counter_view = buffer.view %counter[%counter_byte_offset] : buffer -> view<1xi32>
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %lane = index.cast %workitem_id_x : index to i32
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %group = index.cast %workgroup_id_x : index to i32
+  %18 = scalar.constant 0 : i32
+  %19 = scalar.cmpi eq, %lane, %18 : i32
+  scf.if %19 {
+    %72 = index.constant 0 : index
+    view.store %18, %counter_view[%72] : i32, view<1xi32>
+  }
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %25 = scalar.constant 1 : i32
+  %ticket = view.atomic.rmw<addi> %25, %counter_view[0] {ordering = relaxed, scope = workgroup} : i32, view<1xi32> -> i32
+  %80 = scalar.constant 5 : i32
+  %81 = scalar.shli %group, %80 : i32
+  %40 = scalar.addi %81, %ticket : i32
+  %42 = scalar.addi %40, %25 : i32
+  %43 = scalar.extui %42 : i32 to i64
+  %78 = scalar.constant 2 : i64
+  %79 = scalar.shli %43, %78 : i64
+  %48 = scalar.assume %79 [range(%79, 0, 9223372036854775807)] : i64
+  %49 = index.cast %48 : i64 to offset
+  %50 = buffer.view %slots[%49] : buffer -> view<1xi32>
+  view.store %25, %50[0] : i32, view<1xi32>
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  scf.if %19 {
+    %69 = index.constant 0 : index
+    %57 = view.load %counter_view[%69] : view<1xi32> -> i32
+    %59 = scalar.addi %group, %25 : i32
+    %75 = scalar.constant 2 : i32
+    %76 = scalar.shli %59, %75 : i32
+    %77 = scalar.extui %76 : i32 to i64
+    %65 = scalar.assume %77 [range(%77, 0, 9223372036854775807)] : i64
+    %66 = index.cast %65 : i64 to offset
+    %67 = buffer.view %counts[%66] : buffer -> view<1xi32>
+    view.store %57, %67[0] : i32, view<1xi32>
+  }
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Distinct helper roots and output slots survive the kernel ABI boundary.
+unsigned builtin_fetch_values(volatile unsigned*);
+unsigned builtin_signed_wrap(int*);
+unsigned builtin_compare_values(unsigned*, unsigned*);
+unsigned builtin_wide_values(unsigned long long*);
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void builtin_updates(unsigned* storage, unsigned long long* wide,
+                     unsigned* evaluations, unsigned* output) {
+  output[0] = builtin_fetch_values(storage);
+  output[1] = builtin_signed_wrap(reinterpret_cast<int*>(storage + 3));
+  output[2] = builtin_compare_values(storage + 6, evaluations);
+  output[3] = builtin_wide_values(wide);
+}
+// ----
+kernel.def @builtin_updates() {
+  %4 = index.constant 1 : index
+  kernel.launch.config workgroups(%4, %4, %4) workgroup_size(%4, %4, %4) : index
+} launch(%storage: buffer, %wide: buffer, %evaluations: buffer, %output: buffer) {
+  %storage_byte_offset = index.constant 0 : offset
+  %14 = func.call @builtin_fetch_values(%storage, %storage_byte_offset) : (buffer, offset) -> (i32)
+  %23 = buffer.view %output[%storage_byte_offset] : buffer -> view<1xi32>
+  view.store %14, %23[0] : i32, view<1xi32>
+  %88 = index.constant 12 : offset
+  %32 = func.call @builtin_signed_wrap(%storage, %88) : (buffer, offset) -> (i32)
+  %87 = index.constant 4 : offset
+  %41 = buffer.view %output[%87] : buffer -> view<1xi32>
+  view.store %32, %41[0] : i32, view<1xi32>
+  %86 = index.constant 24 : offset
+  %50 = func.call @builtin_compare_values(%storage, %86, %evaluations, %storage_byte_offset) : (buffer, offset, buffer, offset) -> (i32)
+  %85 = index.constant 8 : offset
+  %59 = buffer.view %output[%85] : buffer -> view<1xi32>
+  view.store %50, %59[0] : i32, view<1xi32>
+  %60 = func.call @builtin_wide_values(%wide, %storage_byte_offset) : (buffer, offset) -> (i32)
+  %69 = buffer.view %output[%88] : buffer -> view<1xi32>
+  view.store %60, %69[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.decl @builtin_fetch_values(%70: buffer, %71: offset) -> (i32)
+
+func.decl @builtin_signed_wrap(%73: buffer, %74: offset) -> (i32)
+
+func.decl @builtin_compare_values(%76: buffer, %77: offset, %78: buffer, %79: offset) -> (i32)
+
+func.decl @builtin_wide_values(%81: buffer, %82: offset) -> (i32)
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Distinct helper roots and output slots survive the kernel ABI boundary.
+unsigned atomic_i32(int*);
+unsigned atomic_i64(long long*);
+unsigned atomic_u64(unsigned long long*);
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void atomic_sequences(int* signed_words, long long* signed_wide,
+                      unsigned long long* unsigned_wide, unsigned* output) {
+  output[1] = atomic_i32(signed_words);
+  output[2] = atomic_i64(signed_wide);
+  output[3] = atomic_u64(unsigned_wide);
+}
+// ----
+kernel.def @atomic_sequences() {
+  %4 = index.constant 1 : index
+  kernel.launch.config workgroups(%4, %4, %4) workgroup_size(%4, %4, %4) : index
+} launch(%signed_words: buffer, %signed_wide: buffer, %unsigned_wide: buffer, %output: buffer) {
+  %signed_words_byte_offset = index.constant 0 : offset
+  %14 = func.call @atomic_i32(%signed_words, %signed_words_byte_offset) : (buffer, offset) -> (i32)
+  %55 = index.constant 4 : offset
+  %23 = buffer.view %output[%55] : buffer -> view<1xi32>
+  view.store %14, %23[0] : i32, view<1xi32>
+  %24 = func.call @atomic_i64(%signed_wide, %signed_words_byte_offset) : (buffer, offset) -> (i32)
+  %54 = index.constant 8 : offset
+  %33 = buffer.view %output[%54] : buffer -> view<1xi32>
+  view.store %24, %33[0] : i32, view<1xi32>
+  %34 = func.call @atomic_u64(%unsigned_wide, %signed_words_byte_offset) : (buffer, offset) -> (i32)
+  %53 = index.constant 12 : offset
+  %43 = buffer.view %output[%53] : buffer -> view<1xi32>
+  view.store %34, %43[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.decl @atomic_i32(%44: buffer, %45: offset) -> (i32)
+
+func.decl @atomic_i64(%47: buffer, %48: offset) -> (i32)
+
+func.decl @atomic_u64(%50: buffer, %51: offset) -> (i32)
