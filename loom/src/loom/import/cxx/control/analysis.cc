@@ -43,6 +43,13 @@ struct ControlFlow::ValueUseFacts {
   std::unordered_map<cxx::Symbol*, size_t> last_uses;
 };
 
+struct ControlFlow::ReferenceIdentityFacts {
+  // Sparse member-slice vectors referenced directly by retained call edges.
+  std::vector<std::unique_ptr<std::vector<ObjectInterval>>> argument_slices;
+  // Exact automatic-object intervals supplied by a reference-returning call.
+  std::unordered_map<cxx::AST*, std::vector<ObjectInterval>> results;
+};
+
 struct ControlFlow::ReferenceWriteFacts {
   struct Result {
     // Structured source constructs whose carried binding must be updated.
@@ -363,17 +370,22 @@ bool ControlFlow::argument_requires_storage(
     return true;
   }
   auto traits = unit_.typeTraits();
-  for (auto* binding : argument.identity_bindings) {
+  auto requires_storage = [&](cxx::Symbol* binding) {
     if (traits.is_lvalue_reference(binding->type())) {
-      if (cxx::symbol_cast<cxx::FieldSymbol>(binding) ||
-          storage_references_.contains(binding)) {
-        return true;
-      }
-      continue;
+      return cxx::symbol_cast<cxx::FieldSymbol>(binding) ||
+             storage_references_.contains(binding);
     }
-    if (storage_backed(binding)) {
-      return true;
-    }
+    return storage_backed(binding);
+  };
+  if (std::ranges::any_of(argument.identity_bindings, requires_storage)) {
+    return true;
+  }
+  if (argument.identity_intervals &&
+      std::ranges::any_of(*argument.identity_intervals,
+                          [&](const ObjectInterval& interval) {
+                            return requires_storage(interval.binding);
+                          })) {
+    return true;
   }
   return false;
 }
@@ -1079,7 +1091,7 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
     retained.arguments.push_back(retain_call_argument(call.arguments[index]));
   }
   if (call.has_postfix_dummy) {
-    retained.arguments.push_back({nullptr, {}, nullptr, false, false, {}});
+    retained.arguments.push_back({});
   }
   if (call.receiver) {
     retained.current_receiver = is_current_object(unit_, call.receiver);
@@ -1138,11 +1150,36 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
 }
 
 CallArgument ControlFlow::retain_call_argument(cxx::ExpressionAST* expression) {
-  CallArgument argument = {expression, {}, nullptr, false, false, {}};
+  CallArgument argument = {.source = expression};
   collect_identity(expression, argument);
   auto target = classify_destination(unwrap_object_identity(unit_, expression));
   argument.write_binding = target ? target->binding : nullptr;
   return argument;
+}
+
+void ControlFlow::append_identity(Destination destination,
+                                  CallArgument& argument) {
+  if (!destination.member) {
+    if (std::ranges::find(argument.identity_bindings, destination.binding) ==
+        argument.identity_bindings.end()) {
+      argument.identity_bindings.push_back(destination.binding);
+    }
+    return;
+  }
+  if (!argument.identity_intervals) {
+    if (!reference_identity_facts_) {
+      reference_identity_facts_ = std::make_unique<ReferenceIdentityFacts>();
+    }
+    auto intervals = std::make_unique<std::vector<ObjectInterval>>();
+    argument.identity_intervals = intervals.get();
+    reference_identity_facts_->argument_slices.push_back(std::move(intervals));
+  }
+  ObjectInterval interval = {
+      destination.binding,
+      destination.component_offset,
+      destination.component_offset + destination.member->component_count,
+  };
+  append_interval(*argument.identity_intervals, interval);
 }
 
 void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
@@ -1152,12 +1189,6 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   }
   expression = unwrap_object_identity(unit_, expression);
   auto traits = unit_.typeTraits();
-  auto append_binding = [&](cxx::Symbol* binding) {
-    if (std::ranges::find(argument.identity_bindings, binding) ==
-        argument.identity_bindings.end()) {
-      argument.identity_bindings.push_back(binding);
-    }
-  };
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
     if (auto found = reference_aliases_.find(id->symbol);
         found != reference_aliases_.end()) {
@@ -1169,10 +1200,11 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
         argument.inherent_storage = true;
       } else {
         argument.current_receiver = true;
+        append_identity({field, 0, nullptr}, argument);
       }
       return;
     }
-    append_binding(id->symbol);
+    append_identity({id->symbol, 0, nullptr}, argument);
     return;
   }
   if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression)) {
@@ -1188,9 +1220,19 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     }
     if (is_current_object(unit_, member->baseExpression)) {
       argument.current_receiver = true;
+      if (field) {
+        append_identity({field, 0, nullptr}, argument);
+      }
       return;
     }
-    collect_identity(member->baseExpression, argument);
+    if (auto destination = classify_destination(expression)) {
+      if (cxx::symbol_cast<cxx::FieldSymbol>(destination->binding)) {
+        argument.current_receiver = true;
+      }
+      append_identity(*destination, argument);
+    } else {
+      collect_identity(member->baseExpression, argument);
+    }
     return;
   }
   if (auto* subscript =
@@ -1204,11 +1246,21 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     auto* base_type = subscript->baseExpression->type;
     auto* index_type = subscript->indexExpression->type;
     if (types_.native_vector(base_type)) {
-      collect_identity(subscript->baseExpression, argument);
+      if (auto destination = classify_destination(expression)) {
+        if (cxx::symbol_cast<cxx::FieldSymbol>(destination->binding)) {
+          argument.current_receiver = true;
+        }
+        append_identity(*destination, argument);
+      }
       return;
     }
     if (types_.native_vector(index_type)) {
-      collect_identity(subscript->indexExpression, argument);
+      if (auto destination = classify_destination(expression)) {
+        if (cxx::symbol_cast<cxx::FieldSymbol>(destination->binding)) {
+          argument.current_receiver = true;
+        }
+        append_identity(*destination, argument);
+      }
       return;
     }
     argument.inherent_storage = true;
@@ -1248,7 +1300,10 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     }
   }
   if (auto* owner = object_owner(expression)) {
-    append_binding(owner);
+    if (cxx::symbol_cast<cxx::FieldSymbol>(owner)) {
+      argument.current_receiver = true;
+    }
+    append_identity({owner, 0, nullptr}, argument);
   }
 }
 
@@ -1285,7 +1340,7 @@ bool ControlFlow::require_identity(const CallArgument& argument) {
     receiver_requires_storage_ = true;
   }
   auto traits = unit_.typeTraits();
-  for (auto* binding : argument.identity_bindings) {
+  auto require_binding = [&](cxx::Symbol* binding) {
     if (traits.is_lvalue_reference(binding->type())) {
       if (function_) {
         auto parameters = function_->parameters();
@@ -1293,14 +1348,22 @@ bool ControlFlow::require_identity(const CallArgument& argument) {
           changed = require_reference_storage(binding) || changed;
         }
       }
-      continue;
+      return;
     }
     if (cxx::symbol_cast<cxx::FieldSymbol>(binding)) {
       changed = !receiver_requires_storage_ || changed;
       receiver_requires_storage_ = true;
-      continue;
+      return;
     }
     changed = require_address(binding) || changed;
+  };
+  for (auto* binding : argument.identity_bindings) {
+    require_binding(binding);
+  }
+  if (argument.identity_intervals) {
+    for (const auto& interval : *argument.identity_intervals) {
+      require_binding(interval.binding);
+    }
   }
   return changed;
 }
@@ -1452,12 +1515,13 @@ bool ControlFlow::retain_constructor(cxx::VariableSymbol* variable,
       same_function(conversion->conversionFunction, variable->constructor())) {
     initializer = conversion->expression;
   }
+  CallArgument receiver = {
+      .source = nullptr,
+      .write_binding = variable,
+  };
+  append_identity({variable, 0, nullptr}, receiver);
   retain_constructor_call(variable->constructor(), initializer,
-                          CallArgument{
-                              .source = nullptr,
-                              .identity_bindings = {variable},
-                              .write_binding = variable,
-                          },
+                          std::move(receiver),
                           /*storage_receiver=*/false, owner);
   return true;
 }
@@ -1536,12 +1600,12 @@ void ControlFlow::retain_automatic_destruction(cxx::Symbol* binding,
     return;
   }
   automatic_destructions_.emplace(binding, *selected);
-  retain_destructor_call(*selected,
-                         CallArgument{
-                             .source = nullptr,
-                             .identity_bindings = {binding},
-                             .write_binding = binding,
-                         },
+  CallArgument receiver = {
+      .source = nullptr,
+      .write_binding = binding,
+  };
+  append_identity({binding, 0, nullptr}, receiver);
+  retain_destructor_call(*selected, std::move(receiver),
                          /*current_receiver=*/false, owner);
 }
 
@@ -1592,6 +1656,243 @@ void ControlFlow::retain_reference_initializers(cxx::VariableSymbol* variable,
   }
 }
 
+bool ControlFlow::append_interval(std::vector<ObjectInterval>& intervals,
+                                  ObjectInterval interval) {
+  if ((interval.begin == interval.end &&
+       interval.end != ObjectInterval::kWholeObjectEnd) ||
+      std::ranges::find_if(intervals, [&](const ObjectInterval& retained) {
+        return retained.binding == interval.binding &&
+               retained.begin == interval.begin && retained.end == interval.end;
+      }) != intervals.end()) {
+    return false;
+  }
+  intervals.push_back(interval);
+  return true;
+}
+
+void ControlFlow::append_intervals(
+    const CallArgument& argument,
+    std::vector<ObjectInterval>& intervals) const {
+  for (auto* binding : argument.identity_bindings) {
+    append_interval(intervals, {binding, 0, ObjectInterval::kWholeObjectEnd});
+  }
+  if (argument.identity_intervals) {
+    for (const auto& interval : *argument.identity_intervals) {
+      append_interval(intervals, interval);
+    }
+  }
+  if (!reference_identity_facts_) {
+    return;
+  }
+  for (auto* reference_call : argument.reference_calls) {
+    auto found = reference_identity_facts_->results.find(reference_call);
+    if (found == reference_identity_facts_->results.end()) {
+      continue;
+    }
+    for (const auto& interval : found->second) {
+      append_interval(intervals, interval);
+    }
+  }
+}
+
+bool ControlFlow::identities_overlap(const CallArgument& left,
+                                     const CallArgument& right) const {
+  auto for_each_interval = [&](const CallArgument& argument, auto&& visitor) {
+    for (auto* binding : argument.identity_bindings) {
+      visitor(ObjectInterval{binding, 0, ObjectInterval::kWholeObjectEnd});
+    }
+    if (argument.identity_intervals) {
+      for (const auto& interval : *argument.identity_intervals) {
+        visitor(interval);
+      }
+    }
+    if (!reference_identity_facts_) {
+      return;
+    }
+    for (auto* reference_call : argument.reference_calls) {
+      auto found = reference_identity_facts_->results.find(reference_call);
+      if (found == reference_identity_facts_->results.end()) {
+        continue;
+      }
+      for (const auto& interval : found->second) {
+        visitor(interval);
+      }
+    }
+  };
+  bool overlaps = false;
+  for_each_interval(left, [&](const ObjectInterval& left_interval) {
+    for_each_interval(right, [&](const ObjectInterval& right_interval) {
+      overlaps =
+          overlaps || (left_interval.binding == right_interval.binding &&
+                       (left_interval.end == ObjectInterval::kWholeObjectEnd ||
+                        right_interval.end == ObjectInterval::kWholeObjectEnd ||
+                        (left_interval.begin < right_interval.end &&
+                         right_interval.begin < left_interval.end)));
+    });
+  });
+  if (overlaps) {
+    return true;
+  }
+
+  auto has_unresolved_identity = [&](const CallArgument& argument) {
+    return std::ranges::any_of(
+        argument.reference_calls, [&](cxx::AST* reference_call) {
+          return !reference_identity_facts_ ||
+                 !reference_identity_facts_->results.contains(reference_call);
+        });
+  };
+  const bool left_has_identity =
+      left.inherent_storage || left.current_receiver ||
+      !left.identity_bindings.empty() || left.identity_intervals ||
+      !left.reference_calls.empty();
+  const bool right_has_identity =
+      right.inherent_storage || right.current_receiver ||
+      !right.identity_bindings.empty() || right.identity_intervals ||
+      !right.reference_calls.empty();
+  return (has_unresolved_identity(left) && right_has_identity) ||
+         (has_unresolved_identity(right) && left_has_identity);
+}
+
+bool ControlFlow::references_current_receiver_field(
+    const CallArgument& argument) const {
+  if (std::ranges::any_of(argument.identity_bindings,
+                          [](cxx::Symbol* binding) {
+                            return cxx::symbol_cast<cxx::FieldSymbol>(binding);
+                          }) ||
+      (argument.identity_intervals &&
+       std::ranges::any_of(
+           *argument.identity_intervals, [](const ObjectInterval& interval) {
+             return cxx::symbol_cast<cxx::FieldSymbol>(interval.binding);
+           }))) {
+    return true;
+  }
+  if (!reference_identity_facts_) {
+    return false;
+  }
+  for (auto* reference_call : argument.reference_calls) {
+    auto found = reference_identity_facts_->results.find(reference_call);
+    if (found != reference_identity_facts_->results.end() &&
+        std::ranges::any_of(found->second, [](const ObjectInterval& interval) {
+          return cxx::symbol_cast<cxx::FieldSymbol>(interval.binding);
+        })) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
+                                                   const ControlFlow& callee) {
+  // Retain an exact automatic origin whenever every return aliases one
+  // parameter or its receiver. Outer call edges can compare nested aliases
+  // without traversing either function body again. Storage and mixed-origin
+  // returns remain unresolved and conservatively alias another lvalue.
+  std::vector<ObjectInterval> result_intervals;
+  if (auto ordinal = callee.reference_return_parameter();
+      ordinal && *ordinal < call.arguments.size()) {
+    append_intervals(call.arguments[*ordinal], result_intervals);
+  } else if (callee.returns_current_receiver_reference()) {
+    if (call.current_receiver) {
+      auto* object_type = implicit_object_type(unit_, function_);
+      auto* record =
+          object_type
+              ? types_.record(types_.unqualified(object_type), call.source)
+              : nullptr;
+      if (record) {
+        for (const auto& member : record->members) {
+          append_interval(result_intervals,
+                          {member.field, 0, ObjectInterval::kWholeObjectEnd});
+        }
+      }
+    } else if (call.receiver) {
+      append_intervals(*call.receiver, result_intervals);
+    }
+  }
+  if (result_intervals.empty()) {
+    return false;
+  }
+
+  if (!reference_identity_facts_) {
+    reference_identity_facts_ = std::make_unique<ReferenceIdentityFacts>();
+  }
+  bool changed = false;
+  auto& retained = reference_identity_facts_->results[call.source];
+  for (const auto& interval : result_intervals) {
+    changed = append_interval(retained, interval) || changed;
+  }
+  return changed;
+}
+
+CallPropagation ControlFlow::propagate_overlapping_references(
+    const DirectCall& call, ControlFlow& callee) {
+  bool caller_changed = false;
+  bool callee_changed = false;
+  auto parameters = callee.function_->parameters();
+  auto select_storage = [&](size_t ordinal) {
+    auto* parameter = parameters[ordinal];
+    callee_changed =
+        callee.require_reference_storage(parameter) || callee_changed;
+    caller_changed =
+        require_identity(call.arguments[ordinal]) || caller_changed;
+  };
+
+  // A value-reference call represents each mutable parameter as an independent
+  // tied writeback. Overlapping source intervals require one shared storage
+  // identity so reads and writes observe the source language's aliasing order.
+  const size_t parameter_count =
+      std::min(parameters.size(), call.arguments.size());
+  for (size_t first = 0; first < parameter_count; ++first) {
+    if (!unit_.typeTraits().is_lvalue_reference(parameters[first]->type())) {
+      continue;
+    }
+    for (size_t second = first + 1; second < parameter_count; ++second) {
+      if (!unit_.typeTraits().is_lvalue_reference(parameters[second]->type()) ||
+          (!callee.reference_written(parameters[first]) &&
+           !callee.reference_written(parameters[second])) ||
+          !identities_overlap(call.arguments[first], call.arguments[second])) {
+        continue;
+      }
+      select_storage(first);
+      select_storage(second);
+    }
+  }
+
+  if (!call.function->isImplicitObjectMemberFunction()) {
+    return {caller_changed, callee_changed};
+  }
+  const bool receiver_mutable = !callee.receiver_writes().empty();
+  for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
+    auto* parameter = parameters[ordinal];
+    const auto& argument = call.arguments[ordinal];
+    if (!unit_.typeTraits().is_lvalue_reference(parameter->type()) ||
+        (!receiver_mutable && !callee.reference_written(parameter))) {
+      continue;
+    }
+    bool receiver_overlap = false;
+    if (call.current_receiver) {
+      receiver_overlap = argument.current_receiver ||
+                         references_current_receiver_field(argument);
+    } else if (call.receiver) {
+      receiver_overlap = identities_overlap(*call.receiver, argument);
+    }
+    if (!receiver_overlap) {
+      continue;
+    }
+
+    select_storage(ordinal);
+    const bool receiver_already_storage =
+        call.storage_receiver ||
+        (call.current_receiver
+             ? receiver_requires_storage_
+             : call.receiver && argument_requires_storage(*call.receiver));
+    if (!receiver_already_storage && !callee.receiver_requires_storage_) {
+      callee.receiver_requires_storage_ = true;
+      callee_changed = true;
+    }
+  }
+  return {caller_changed, callee_changed};
+}
+
 CallPropagation ControlFlow::propagate_call(const DirectCall& call,
                                             ControlFlow& callee) {
   bool caller_changed = false;
@@ -1616,6 +1917,12 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
           record_callable_write(argument.write_binding) || caller_changed;
     }
   }
+  caller_changed =
+      retain_reference_result_identity(call, callee) || caller_changed;
+  auto overlap_changes = propagate_overlapping_references(call, callee);
+  caller_changed = overlap_changes.caller_changed || caller_changed;
+  callee_changed = overlap_changes.callee_changed || callee_changed;
+
   if (identity_call_results_.contains(call.source)) {
     if (auto ordinal = callee.reference_return_parameter()) {
       callee_changed = callee.require_reference_storage(parameters[*ordinal]) ||

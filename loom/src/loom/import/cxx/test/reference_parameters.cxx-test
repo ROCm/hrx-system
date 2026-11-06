@@ -906,3 +906,258 @@ func.def @sum_members(%values: buffer, %values_byte_offset: offset) -> (i32) {
   %126 = scalar.addi %115, %125 : i32
   func.return %126 : i32
 }
+
+// ====
+static void sequence_alias(unsigned& output, const unsigned& input) {
+  ++output;
+  output += input;
+}
+
+unsigned overlapping_scalar_reference(unsigned value) {
+  sequence_alias(value, value);
+  return value;
+}
+
+// ----
+func.def public @overlapping_scalar_reference(%value$0: i32) -> (i32) {
+  %2 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %2 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %value$0, %value_view[0] : i32, view<1xi32>
+  func.call @sequence_alias(%value_storage, %value_storage_byte_offset, %value_storage, %value_storage_byte_offset) : (buffer, offset, buffer, offset)
+  %value$6 = view.load %value_view[0] : view<1xi32> -> i32
+  func.return %value$6 : i32
+}
+
+func.def @sequence_alias(%output: buffer, %output_byte_offset: offset, %input$9: buffer, %input_byte_offset: offset) {
+  %11 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  %12 = view.load %11[0] : view<1xi32> -> i32
+  %13 = scalar.constant 1 : i32
+  %14 = scalar.addi %12, %13 : i32
+  %15 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store %14, %15[0] : i32, view<1xi32>
+  %16 = buffer.view %input$9[%input_byte_offset] : buffer -> view<1xi32>
+  %input$17 = view.load %16[0] : view<1xi32> -> i32
+  %18 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  %19 = view.load %18[0] : view<1xi32> -> i32
+  %20 = scalar.addi %19, %input$17 : i32
+  %21 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store %20, %21[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+struct AliasedPair {
+  unsigned first;
+  unsigned second;
+};
+
+static void update_alias(AliasedPair& whole, unsigned& selected) {
+  ++selected;
+  whole.first += selected;
+  selected += whole.first;
+}
+
+AliasedPair overlapping_member_reference(AliasedPair value) {
+  update_alias(value, value.second);
+  return value;
+}
+
+// ----
+func.def public @overlapping_member_reference(%value_first$0: i32, %value_second$1: i32) -> (i32, i32) {
+  %4 = index.constant 8 : offset
+  %value_storage = buffer.alloca<private> align(4) %4 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<8xi8>
+  %8 = index.constant 0 : offset
+  %9 = index.add %value_storage_byte_offset, %8 : offset
+  %10 = index.assume %9 [range(%9, 0, 4)] : offset
+  %11 = buffer.view %value_storage[%10] : buffer -> view<1xi32>
+  view.store %value_first$0, %11[0] : i32, view<1xi32>
+  %12 = index.constant 4 : offset
+  %13 = index.add %value_storage_byte_offset, %12 : offset
+  %14 = index.assume %13 [range(%13, 0, 4)] : offset
+  %15 = buffer.view %value_storage[%14] : buffer -> view<1xi32>
+  view.store %value_second$1, %15[0] : i32, view<1xi32>
+  %16 = index.constant 4 : offset
+  %17 = index.add %value_storage_byte_offset, %16 : offset
+  func.call @update_alias(%value_storage, %value_storage_byte_offset, %value_storage, %17) : (buffer, offset, buffer, offset)
+  %18 = index.constant 0 : offset
+  %19 = index.add %value_storage_byte_offset, %18 : offset
+  %20 = index.assume %19 [range(%19, 0, 4)] : offset
+  %21 = buffer.view %value_storage[%20] : buffer -> view<1xi32>
+  %value_first$22 = view.load %21[0] : view<1xi32> -> i32
+  %23 = index.constant 4 : offset
+  %24 = index.add %value_storage_byte_offset, %23 : offset
+  %25 = index.assume %24 [range(%24, 0, 4)] : offset
+  %26 = buffer.view %value_storage[%25] : buffer -> view<1xi32>
+  %value_second$27 = view.load %26[0] : view<1xi32> -> i32
+  func.return %value_first$22, %value_second$27 : i32, i32
+}
+
+func.def @update_alias(%whole: buffer, %whole_byte_offset: offset, %selected$30: buffer, %selected_byte_offset: offset) {
+  %32 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
+  %33 = view.load %32[0] : view<1xi32> -> i32
+  %34 = scalar.constant 1 : i32
+  %35 = scalar.addi %33, %34 : i32
+  %36 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
+  view.store %35, %36[0] : i32, view<1xi32>
+  %37 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
+  %selected$38 = view.load %37[0] : view<1xi32> -> i32
+  %39 = index.constant 0 : offset
+  %40 = index.add %whole_byte_offset, %39 : offset
+  %41 = buffer.view %whole[%40] : buffer -> view<1xi32>
+  %42 = view.load %41[0] : view<1xi32> -> i32
+  %43 = scalar.addi %42, %selected$38 : i32
+  view.store %43, %41[0] : i32, view<1xi32>
+  %44 = index.constant 0 : offset
+  %45 = index.add %whole_byte_offset, %44 : offset
+  %46 = buffer.view %whole[%45] : buffer -> view<1xi32>
+  %whole_first = view.load %46[0] : view<1xi32> -> i32
+  %48 = index.constant 4 : offset
+  %49 = index.add %whole_byte_offset, %48 : offset
+  %50 = buffer.view %whole[%49] : buffer -> view<1xi32>
+  %whole_second = view.load %50[0] : view<1xi32> -> i32
+  %52 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
+  %53 = view.load %52[0] : view<1xi32> -> i32
+  %54 = scalar.addi %53, %whole_first : i32
+  %55 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
+  view.store %54, %55[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+struct SeparatePair {
+  unsigned first;
+  unsigned second;
+};
+
+static void update_separate(unsigned& first, unsigned& second) {
+  ++first;
+  second += 2u;
+}
+
+SeparatePair nonoverlapping_member_references(SeparatePair value) {
+  update_separate(value.first, value.second);
+  return value;
+}
+
+// ----
+func.def public @nonoverlapping_member_references(%value_first$0: i32, %value_second$1: i32) -> (i32, i32) {
+  %value_first$4, %value_second$5 = func.call pure @update_separate(%value_first$0, %value_second$1) : (i32, i32) -> (%value_first$0 as i32, %value_second$1 as i32)
+  func.return %value_first$4, %value_second$5 : i32, i32
+}
+
+func.def @update_separate(%first$6: i32, %second$7: i32) -> (%first$6 as i32, %second$7 as i32) {
+  %10 = scalar.constant 1 : i32
+  %first$11 = scalar.addi %first$6, %10 : i32
+  %12 = scalar.constant 2 : i32
+  %second$13 = scalar.addi %second$7, %12 : i32
+  func.return %first$11, %second$13 : i32, i32
+}
+
+// ====
+using AliasedUInt4 = unsigned __attribute__((vector_size(16)));
+
+static void update_alias_lanes(unsigned& first, unsigned& second) {
+  ++first;
+  second += first;
+}
+
+AliasedUInt4 overlapping_vector_lanes(AliasedUInt4 values) {
+  update_alias_lanes(values[0], values[1]);
+  return values;
+}
+
+// ----
+func.def public @overlapping_vector_lanes(%values$0: vector<4xi32>) -> (vector<4xi32>) {
+  %2 = index.constant 16 : offset
+  %values_storage = buffer.alloca<private> align(16) %2 : buffer
+  %values_storage_byte_offset = index.constant 0 : offset
+  %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<4xi32>
+  vector.store %values$0, %values_view[0] : vector<4xi32>, view<4xi32>
+  %6 = scalar.constant 0 : i32
+  %7 = scalar.extsi %6 : i32 to i64
+  %8 = scalar.constant 4 : i64
+  %9 = scalar.muli %7, %8 : i64
+  %10 = index.cast %values_storage_byte_offset : offset to i64
+  %11 = scalar.addi %10, %9 : i64
+  %12 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
+  %13 = index.cast %12 : i64 to offset
+  %14 = scalar.constant 1 : i32
+  %15 = scalar.extsi %14 : i32 to i64
+  %16 = scalar.constant 4 : i64
+  %17 = scalar.muli %15, %16 : i64
+  %18 = index.cast %values_storage_byte_offset : offset to i64
+  %19 = scalar.addi %18, %17 : i64
+  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+  %21 = index.cast %20 : i64 to offset
+  func.call @update_alias_lanes(%values_storage, %13, %values_storage, %21) : (buffer, offset, buffer, offset)
+  %values$22 = vector.load %values_view[0] : view<4xi32> -> vector<4xi32>
+  func.return %values$22 : vector<4xi32>
+}
+
+func.def @update_alias_lanes(%first$23: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) {
+  %27 = buffer.view %first$23[%first_byte_offset] : buffer -> view<1xi32>
+  %28 = view.load %27[0] : view<1xi32> -> i32
+  %29 = scalar.constant 1 : i32
+  %30 = scalar.addi %28, %29 : i32
+  %31 = buffer.view %first$23[%first_byte_offset] : buffer -> view<1xi32>
+  view.store %30, %31[0] : i32, view<1xi32>
+  %32 = buffer.view %first$23[%first_byte_offset] : buffer -> view<1xi32>
+  %first$33 = view.load %32[0] : view<1xi32> -> i32
+  %34 = buffer.view %second[%second_byte_offset] : buffer -> view<1xi32>
+  %35 = view.load %34[0] : view<1xi32> -> i32
+  %36 = scalar.addi %35, %first$33 : i32
+  %37 = buffer.view %second[%second_byte_offset] : buffer -> view<1xi32>
+  view.store %36, %37[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+static unsigned& exact_alias(unsigned& value) { return value; }
+
+static void update_nested_alias(unsigned& output, const unsigned& input) {
+  ++output;
+  output += input;
+}
+
+unsigned overlapping_reference_result(unsigned value) {
+  update_nested_alias(exact_alias(value), value);
+  return value;
+}
+
+// ----
+func.def public @overlapping_reference_result(%value$0: i32) -> (i32) {
+  %2 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %2 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %value$0, %value_view[0] : i32, view<1xi32>
+  func.call pure @exact_alias(%value_storage, %value_storage_byte_offset) : (buffer, offset)
+  func.call @update_nested_alias(%value_storage, %value_storage_byte_offset, %value_storage, %value_storage_byte_offset) : (buffer, offset, buffer, offset)
+  %value$6 = view.load %value_view[0] : view<1xi32> -> i32
+  func.return %value$6 : i32
+}
+
+func.def @update_nested_alias(%output: buffer, %output_byte_offset: offset, %input$9: buffer, %input_byte_offset: offset) {
+  %11 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  %12 = view.load %11[0] : view<1xi32> -> i32
+  %13 = scalar.constant 1 : i32
+  %14 = scalar.addi %12, %13 : i32
+  %15 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store %14, %15[0] : i32, view<1xi32>
+  %16 = buffer.view %input$9[%input_byte_offset] : buffer -> view<1xi32>
+  %input$17 = view.load %16[0] : view<1xi32> -> i32
+  %18 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  %19 = view.load %18[0] : view<1xi32> -> i32
+  %20 = scalar.addi %19, %input$17 : i32
+  %21 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store %20, %21[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @exact_alias(%value: buffer, %value_byte_offset: offset) {
+  func.return
+}

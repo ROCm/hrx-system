@@ -2237,6 +2237,54 @@ class Translator final : private Initialization::Evaluation {
                              index_value.ssa(), index_expression->type}};
   }
 
+  StorageProjection vector_lane_address(cxx::SubscriptExpressionAST* subscript,
+                                        cxx::AST* owner) {
+    auto* left_type = subscript->baseExpression->type;
+    auto* right_type = subscript->indexExpression->type;
+    const bool left_vector = types_.native_vector(left_type);
+    const bool right_vector = types_.native_vector(right_type);
+    IREE_ASSERT(left_vector != right_vector);
+
+    cxx::ExpressionAST* vector_expression =
+        left_vector ? subscript->baseExpression : subscript->indexExpression;
+    cxx::ExpressionAST* index_expression =
+        left_vector ? subscript->indexExpression : subscript->baseExpression;
+    StorageProjection base;
+    Value index;
+    if (left_vector) {
+      base = object_address(vector_expression);
+      index = expression(index_expression);
+    } else {
+      // Commuted i[v] syntax still evaluates its left operand first.
+      index = expression(index_expression);
+      base = object_address(vector_expression);
+    }
+    auto* vector = types_.native_vector(vector_expression->type);
+    IREE_ASSERT(vector);
+    auto* pointer_type = unit_.typeTraits().add_pointer(vector->elementType());
+    return storage_.advance(base, index.ssa(), pointer_type,
+                            index_expression->type, cxx::TokenKind::T_PLUS,
+                            owner);
+  }
+
+  bool vector_lane_is_storage_backed(
+      cxx::SubscriptExpressionAST* subscript) const {
+    auto destination = control_->destination(subscript);
+    if (!destination) {
+      // A builtin vector lane without an automatic destination is reached
+      // through storage, such as a dereferenced vector pointer.
+      return true;
+    }
+    auto* binding = destination->binding;
+    if (cxx::symbol_cast<cxx::FieldSymbol>(binding)) {
+      return control_->receiver_requires_storage();
+    }
+    if (unit_.typeTraits().is_lvalue_reference(binding->type())) {
+      return control_->reference_requires_storage(binding);
+    }
+    return control_->storage_backed(binding);
+  }
+
   Lvalue destination(cxx::ExpressionAST* expression, cxx::AST* owner,
                      LvalueAccess access = LvalueAccess::Write,
                      bool preserve_identity = false) {
@@ -2297,11 +2345,17 @@ class Translator final : private Initialization::Evaluation {
     const bool vector_lane =
         subscript && (types_.native_vector(subscript->baseExpression->type) ||
                       types_.native_vector(subscript->indexExpression->type));
+    if (vector_lane) {
+      if (vector_lane_is_storage_backed(subscript)) {
+        return {ObjectLvalue{projected->type,
+                             vector_lane_address(subscript, owner)}};
+      }
+      return vector_lane_destination(subscript, owner,
+                                     control_->destination(projected), access,
+                                     /*retain_value=*/false);
+    }
     auto target =
-        vector_lane ? vector_lane_destination(subscript, owner,
-                                              control_->destination(projected),
-                                              access, false)
-                    : destination(projected, owner, access, true);
+        destination(projected, owner, access, /*preserve_identity=*/true);
     return target;
   }
 
@@ -2391,8 +2445,6 @@ class Translator final : private Initialization::Evaluation {
     size_t begin;
     // Exclusive end of the flattened component interval.
     size_t end;
-    // Whether the callee may replace this interval.
-    bool mutable_access;
   };
 
   struct ReferenceWriteback {
@@ -2441,7 +2493,7 @@ class Translator final : private Initialization::Evaluation {
   };
 
   ReferenceOrigin reference_origin(const Lvalue& target, const Value& value,
-                                   bool mutable_access, cxx::AST* owner) {
+                                   cxx::AST* owner) {
     const ObjectLvalue* object = std::get_if<ObjectLvalue>(&target.projection);
     size_t component_count = value.partition().component_count;
     if (!object) {
@@ -2460,44 +2512,7 @@ class Translator final : private Initialization::Evaluation {
         destination->binding,
         destination->component_offset,
         destination->component_offset + component_count,
-        mutable_access,
     };
-  }
-
-  void require_nonoverlapping_references(std::vector<ReferenceOrigin> origins,
-                                         cxx::AST* owner) {
-    if (std::ranges::none_of(origins, [](const ReferenceOrigin& origin) {
-          return origin.mutable_access;
-        })) {
-      return;
-    }
-    std::ranges::sort(
-        origins, [](const ReferenceOrigin& left, const ReferenceOrigin& right) {
-          if (left.binding != right.binding) {
-            return std::less<cxx::Symbol*>{}(left.binding, right.binding);
-          }
-          return left.begin < right.begin;
-        });
-    cxx::Symbol* binding = nullptr;
-    size_t active_end = 0;
-    bool active_mutable = false;
-    for (const auto& origin : origins) {
-      if (origin.begin == origin.end) {
-        continue;
-      }
-      if (origin.binding != binding || origin.begin >= active_end) {
-        binding = origin.binding;
-        active_end = origin.end;
-        active_mutable = origin.mutable_access;
-        continue;
-      }
-      if (origin.mutable_access || active_mutable) {
-        fail(owner,
-             "mutable value-reference arguments must select nonoverlapping "
-             "automatic objects or member slices");
-      }
-      active_end = std::max(active_end, origin.end);
-    }
   }
 
   EvaluatedCallArgument evaluate_call_argument(
@@ -2524,8 +2539,9 @@ class Translator final : private Initialization::Evaluation {
           argument, owner,
           reference->mutable_access ? LvalueAccess::Write : LvalueAccess::Read);
       value = read(*target, argument);
-      origin =
-          reference_origin(*target, value, reference->mutable_access, argument);
+      if (reference->mutable_access) {
+        origin = reference_origin(*target, value, argument);
+      }
     } else {
       if (reference->mutable_access) {
         fail(argument, "mutable value references require an lvalue argument");
@@ -2550,13 +2566,9 @@ class Translator final : private Initialization::Evaluation {
   void append_call_argument(EvaluatedCallArgument argument,
                             size_t receiver_argument_count,
                             std::vector<loom_value_id_t>& arguments,
-                            std::vector<ReferenceWriteback>& writebacks,
-                            std::vector<ReferenceOrigin>& origins) {
+                            std::vector<ReferenceWriteback>& writebacks) {
     const size_t argument_offset = receiver_argument_count + arguments.size();
     argument.value.append_to(arguments);
-    if (argument.origin) {
-      origins.push_back(*argument.origin);
-    }
     if (argument.writeback_partition) {
       IREE_ASSERT(argument.target);
       IREE_ASSERT(argument.origin);
@@ -2821,11 +2833,11 @@ class Translator final : private Initialization::Evaluation {
       for (auto* field : receiver.written_fields) {
         const auto& member = types_.member(field, owner);
         receiver.origins.push_back(
-            {field, 0, member.partition->component_count, true});
+            {field, 0, member.partition->component_count});
       }
     } else if (receiver.target) {
-      receiver.origins.push_back(reference_origin(
-          *receiver.target, value, !receiver.written_fields.empty(), owner));
+      receiver.origins.push_back(
+          reference_origin(*receiver.target, value, owner));
     }
     return value;
   }
@@ -2880,15 +2892,14 @@ class Translator final : private Initialization::Evaluation {
         if (prvalue) {
           consumption_origins.push_back(std::nullopt);
         } else if (receiver->current) {
-          consumption_origins.push_back(ReferenceOrigin{
-              field, 0, member.partition->component_count, true});
+          consumption_origins.push_back(
+              ReferenceOrigin{field, 0, member.partition->component_count});
         } else {
           consumption_origins.push_back(
               ReferenceOrigin{receiver_origin->binding,
                               receiver_origin->begin + member.component_offset,
                               receiver_origin->begin + member.component_offset +
-                                  member.partition->component_count,
-                              true});
+                                  member.partition->component_count});
         }
       }
     }
@@ -3454,7 +3465,6 @@ class Translator final : private Initialization::Evaluation {
       std::optional<ReceiverArgument> receiver,
       std::vector<loom_value_id_t> arguments,
       std::vector<ReferenceWriteback> writebacks,
-      std::vector<ReferenceOrigin> origins,
       std::optional<ReferenceResultAlias> reference_result_alias,
       loom_location_id_t source) {
     auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
@@ -3464,10 +3474,7 @@ class Translator final : private Initialization::Evaluation {
       auto receiver_components = receiver_value.components();
       arguments.insert(arguments.begin(), receiver_components.begin(),
                        receiver_components.end());
-      origins.insert(origins.end(), receiver->origins.begin(),
-                     receiver->origins.end());
     }
-    require_nonoverlapping_references(std::move(origins), call);
     preserve_call_value_owners(receiver, writebacks, arguments, call);
 
     const bool returns_void =
@@ -3642,17 +3649,12 @@ class Translator final : private Initialization::Evaluation {
     }
     std::vector<loom_value_id_t> arguments;
     std::vector<ReferenceWriteback> writebacks;
-    std::vector<ReferenceOrigin> origins;
     std::optional<ReferenceResultAlias> reference_result_alias;
     auto return_parameter =
         unit_.typeTraits().is_reference(signature->returnType())
             ? functions_.reference_return_parameter(function)
             : std::nullopt;
     writebacks.reserve(references.size());
-    origins.reserve(references.size() +
-                    (receiver && receiver->abi == ImplicitObjectABI::Value
-                         ? receiver->record->members.size()
-                         : 0));
     const size_t receiver_argument_count =
         !receiver ? 0
         : receiver->abi == ImplicitObjectABI::Value
@@ -3675,14 +3677,13 @@ class Translator final : private Initialization::Evaluation {
                                   receiver_argument_count + arguments.size()};
       }
       append_call_argument(std::move(evaluated), receiver_argument_count,
-                           arguments, writebacks, origins);
+                           arguments, writebacks);
     }
     while (auto* argument = source_arguments.next()) {
       expression(argument).append_to(arguments);
     }
     return emit_evaluated_call(call, function, callee, std::move(receiver),
                                std::move(arguments), std::move(writebacks),
-                               std::move(origins),
                                std::move(reference_result_alias), source);
   }
 
@@ -3775,17 +3776,12 @@ class Translator final : private Initialization::Evaluation {
             : kPointerPartition.component_count;
     std::vector<loom_value_id_t> arguments;
     std::vector<ReferenceWriteback> writebacks;
-    std::vector<ReferenceOrigin> origins;
     std::optional<ReferenceResultAlias> reference_result_alias;
     auto return_parameter =
         unit_.typeTraits().is_reference(signature->returnType())
             ? functions_.reference_return_parameter(function)
             : std::nullopt;
     writebacks.reserve(references.size());
-    origins.reserve(references.size() +
-                    (receiver && receiver->abi == ImplicitObjectABI::Value
-                         ? receiver->record->members.size()
-                         : 0));
     for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
       IREE_ASSERT(evaluated_arguments[ordinal]);
       auto evaluated = std::move(*evaluated_arguments[ordinal]);
@@ -3794,12 +3790,12 @@ class Translator final : private Initialization::Evaluation {
                                   receiver_argument_count + arguments.size()};
       }
       append_call_argument(std::move(evaluated), receiver_argument_count,
-                           arguments, writebacks, origins);
+                           arguments, writebacks);
     }
     return emit_evaluated_call(
         expression, function, callee, std::move(receiver), std::move(arguments),
-        std::move(writebacks), std::move(origins),
-        std::move(reference_result_alias), locations_.get(expression));
+        std::move(writebacks), std::move(reference_result_alias),
+        locations_.get(expression));
   }
 
   EvaluatedCallResult ordinary_operator_call(cxx::ExpressionAST* expression) {

@@ -11,6 +11,7 @@
 #include <cxx/cxx_fwd.h>
 #include <cxx/symbols_fwd.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -50,15 +51,34 @@ struct Destination {
   const Partition* member;
 };
 
+// Exact flattened component interval owned by one automatic source object.
+// Intervals make alias relationships directly queryable without revisiting the
+// expression tree that established them.
+struct ObjectInterval {
+  // Sentinel end identifying the complete owning binding without requiring
+  // eager source-type partitioning on every ordinary call argument.
+  static constexpr size_t kWholeObjectEnd = SIZE_MAX;
+
+  // Owning local, parameter, or current-object field identity.
+  cxx::Symbol* binding;
+  // Inclusive first flattened component within the owning object.
+  size_t begin;
+  // Exclusive end of the flattened component interval, or kWholeObjectEnd.
+  size_t end;
+};
+
 // One source lvalue's retained identity and write provenance at a call edge.
 // The producer classifies the expression once; fixed-point propagation uses
 // only these indexed facts.
 struct CallArgument {
   // Source expression retained for diagnostics and parameter correspondence.
   cxx::ExpressionAST* source;
-  // Automatic or reference bindings that become addressable when durable
-  // identity is required. Conditional lvalues may contribute several.
+  // Complete automatic or reference objects that become addressable when
+  // durable identity is required. Conditional lvalues may contribute several.
   std::vector<cxx::Symbol*> identity_bindings;
+  // Sparse exact member slices owned by this analysis, or null when every
+  // retained identity is a complete object.
+  std::vector<ObjectInterval>* identity_intervals;
   // Binding whose callable write effect reaches the enclosing function.
   cxx::Symbol* write_binding;
   // Whether the expression's identity is the current implicit object.
@@ -291,6 +311,7 @@ class ControlFlow final : private cxx::ASTVisitor {
  private:
   struct TemporaryDestructionFacts;
   struct ValueUseFacts;
+  struct ReferenceIdentityFacts;
   struct ReferenceWriteFacts;
 
   struct BindingStorageFacts {
@@ -370,6 +391,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   void retain_reference_receiver_write(const DirectCall& call);
   CallArgument retain_call_argument(cxx::ExpressionAST* expression);
   void collect_identity(cxx::ExpressionAST* expression, CallArgument& argument);
+  void append_identity(Destination destination, CallArgument& argument);
   void retain_call(cxx::CallExpressionAST* call, cxx::FunctionSymbol* function);
   void retain_call(cxx::SubscriptExpressionAST* call,
                    cxx::FunctionSymbol* function);
@@ -391,6 +413,17 @@ class ControlFlow final : private cxx::ASTVisitor {
   void retain_reference_initializers(cxx::VariableSymbol* variable,
                                      cxx::ExpressionAST* initializer,
                                      cxx::AST* owner);
+  static bool append_interval(std::vector<ObjectInterval>& intervals,
+                              ObjectInterval interval);
+  void append_intervals(const CallArgument& argument,
+                        std::vector<ObjectInterval>& intervals) const;
+  bool identities_overlap(const CallArgument& left,
+                          const CallArgument& right) const;
+  bool references_current_receiver_field(const CallArgument& argument) const;
+  bool retain_reference_result_identity(const DirectCall& call,
+                                        const ControlFlow& callee);
+  CallPropagation propagate_overlapping_references(const DirectCall& call,
+                                                   ControlFlow& callee);
   std::optional<Destination> classify_destination(
       cxx::ExpressionAST* expression);
   bool classify_storage(cxx::ExpressionAST* expression) const;
@@ -452,6 +485,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Reference-returning call results whose callers require durable identity.
   // Their retained edges map that demand back to the actual source referent.
   std::unordered_set<cxx::AST*> identity_call_results_;
+  // Sparse exact origins for reference-returning call results. Ordinary
+  // functions without nested reference aliases retain only this null pointer.
+  std::unique_ptr<ReferenceIdentityFacts> reference_identity_facts_;
   // Identity-demanded results proven to alias their implicit object. This is
   // consumed directly when choosing the call site's receiver transport.
   std::unordered_set<cxx::AST*> storage_call_results_;

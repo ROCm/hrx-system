@@ -19,35 +19,6 @@ unsigned rvalue_reference(unsigned value) {
 }
 
 // ====
-static void combine(unsigned& output, const unsigned& input) { output += input; }
-unsigned overlapping_references(unsigned value) {
-  // ERROR@+1: LOWERING/059 "mutable value-reference arguments must select nonoverlapping automatic objects or member slices"
-  combine(value, value);
-  return value;
-}
-
-// ====
-struct Pair { unsigned first, second; };
-static void combine(Pair& output, const unsigned& input) { output.first += input; }
-Pair overlapping_member_reference(Pair value) {
-  // ERROR@+1: LOWERING/059 "mutable value-reference arguments must select nonoverlapping automatic objects or member slices"
-  combine(value, value.first);
-  return value;
-}
-
-// ====
-using UInt4 = unsigned __attribute__((vector_size(16)));
-static void update_lanes(unsigned& first, unsigned& second) {
-  ++first;
-  ++second;
-}
-UInt4 overlapping_vector_lanes(UInt4 values) {
-  // ERROR@+1: LOWERING/059 "mutable value-reference arguments must select nonoverlapping automatic objects or member slices"
-  update_lanes(values[0], values[1]);
-  return values;
-}
-
-// ====
 class [[loom::type("check.entropy")]] Entropy {};
 static void replace_entropy(Entropy& value, Entropy replacement) {
   value = replacement;

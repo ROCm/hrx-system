@@ -428,3 +428,79 @@ func.def @StaticMember__twice(%input: i32) -> (i32) {
   %15 = scalar.muli %input, %14 : i32
   func.return %15 : i32
 }
+
+// ====
+struct AliasedReceiver {
+  unsigned first;
+  unsigned second;
+
+  void mix(unsigned& selected) {
+    ++selected;
+    first += selected;
+    selected += first;
+  }
+};
+
+AliasedReceiver overlapping_receiver(AliasedReceiver value) {
+  value.mix(value.second);
+  return value;
+}
+
+// ----
+func.def public @overlapping_receiver(%value_first$0: i32, %value_second$1: i32) -> (i32, i32) {
+  %4 = index.constant 8 : offset
+  %value_storage = buffer.alloca<private> align(4) %4 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<8xi8>
+  %8 = index.constant 0 : offset
+  %9 = index.add %value_storage_byte_offset, %8 : offset
+  %10 = index.assume %9 [range(%9, 0, 4)] : offset
+  %11 = buffer.view %value_storage[%10] : buffer -> view<1xi32>
+  view.store %value_first$0, %11[0] : i32, view<1xi32>
+  %12 = index.constant 4 : offset
+  %13 = index.add %value_storage_byte_offset, %12 : offset
+  %14 = index.assume %13 [range(%13, 0, 4)] : offset
+  %15 = buffer.view %value_storage[%14] : buffer -> view<1xi32>
+  view.store %value_second$1, %15[0] : i32, view<1xi32>
+  %16 = index.constant 4 : offset
+  %17 = index.add %value_storage_byte_offset, %16 : offset
+  func.call @AliasedReceiver__mix_storage(%value_storage, %value_storage_byte_offset, %value_storage, %17) : (buffer, offset, buffer, offset)
+  %18 = index.constant 0 : offset
+  %19 = index.add %value_storage_byte_offset, %18 : offset
+  %20 = index.assume %19 [range(%19, 0, 4)] : offset
+  %21 = buffer.view %value_storage[%20] : buffer -> view<1xi32>
+  %value_first$22 = view.load %21[0] : view<1xi32> -> i32
+  %23 = index.constant 4 : offset
+  %24 = index.add %value_storage_byte_offset, %23 : offset
+  %25 = index.assume %24 [range(%24, 0, 4)] : offset
+  %26 = buffer.view %value_storage[%25] : buffer -> view<1xi32>
+  %value_second$27 = view.load %26[0] : view<1xi32> -> i32
+  func.return %value_first$22, %value_second$27 : i32, i32
+}
+
+func.def @AliasedReceiver__mix_storage(%this: buffer, %this_byte_offset: offset, %selected$30: buffer, %selected_byte_offset: offset) {
+  %32 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
+  %33 = view.load %32[0] : view<1xi32> -> i32
+  %34 = scalar.constant 1 : i32
+  %35 = scalar.addi %33, %34 : i32
+  %36 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
+  view.store %35, %36[0] : i32, view<1xi32>
+  %37 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
+  %selected$38 = view.load %37[0] : view<1xi32> -> i32
+  %39 = index.constant 0 : offset
+  %40 = index.add %this_byte_offset, %39 : offset
+  %41 = buffer.view %this[%40] : buffer -> view<1xi32>
+  %42 = view.load %41[0] : view<1xi32> -> i32
+  %43 = scalar.addi %42, %selected$38 : i32
+  view.store %43, %41[0] : i32, view<1xi32>
+  %44 = index.constant 0 : offset
+  %45 = index.add %this_byte_offset, %44 : offset
+  %46 = buffer.view %this[%45] : buffer -> view<1xi32>
+  %first = view.load %46[0] : view<1xi32> -> i32
+  %48 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
+  %49 = view.load %48[0] : view<1xi32> -> i32
+  %50 = scalar.addi %49, %first : i32
+  %51 = buffer.view %selected$30[%selected_byte_offset] : buffer -> view<1xi32>
+  view.store %50, %51[0] : i32, view<1xi32>
+  func.return
+}

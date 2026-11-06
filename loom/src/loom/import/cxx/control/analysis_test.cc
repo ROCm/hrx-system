@@ -559,6 +559,55 @@ TEST(ControlFlowTest, StructuredBindingsAnalyzeTheSynthesizedDeclarationOnce) {
   }
 }
 
+TEST(ControlFlowTest, CallArgumentsRetainExactAutomaticObjectIntervals) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Pair { unsigned first; unsigned second; };
+    static void update(Pair& whole, unsigned& second, const unsigned& first);
+    void entry(Pair value) { update(value, value.second, value.first); }
+    static void update(Pair& whole, unsigned& second, const unsigned& first) {
+      whole.first += first;
+      ++second;
+    }
+  )"),
+                IREE_SV("call_intervals.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+
+  auto calls = analysis.calls();
+  ASSERT_EQ(calls.size(), 1u);
+  ASSERT_EQ(calls.front().arguments.size(), 3u);
+  auto* value = function->symbol->parameters().front();
+  const ObjectInterval expected[] = {
+      {value, 0, ObjectInterval::kWholeObjectEnd},
+      {value, 1, 2},
+      {value, 0, 1},
+  };
+  for (size_t ordinal = 0; ordinal < std::size(expected); ++ordinal) {
+    const auto& argument = calls.front().arguments[ordinal];
+    if (expected[ordinal].end == ObjectInterval::kWholeObjectEnd) {
+      ASSERT_EQ(argument.identity_bindings.size(), 1u);
+      EXPECT_EQ(argument.identity_bindings.front(), expected[ordinal].binding);
+      EXPECT_EQ(argument.identity_intervals, nullptr);
+      continue;
+    }
+    ASSERT_NE(argument.identity_intervals, nullptr);
+    ASSERT_EQ(argument.identity_intervals->size(), 1u);
+    EXPECT_EQ(argument.identity_intervals->front().binding,
+              expected[ordinal].binding);
+    EXPECT_EQ(argument.identity_intervals->front().begin,
+              expected[ordinal].begin);
+    EXPECT_EQ(argument.identity_intervals->front().end, expected[ordinal].end);
+  }
+}
+
 TEST(ControlFlowTest, DecisionSyntaxAndInitializerWritesStayWithTheBinding) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);

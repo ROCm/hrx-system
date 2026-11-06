@@ -243,6 +243,111 @@ static unsigned storage_reference_receiver(unsigned input) {
   return value.member;
 }
 
+static void sequence_overlapping_alias(unsigned& output,
+                                       const unsigned& input) {
+  ++output;
+  output += input;
+}
+
+static unsigned overlapping_scalar_alias(unsigned value) {
+  sequence_overlapping_alias(value, value);
+  return value;
+}
+
+static unsigned& overlapping_identity(unsigned& value) { return value; }
+
+static unsigned overlapping_reference_result(unsigned value) {
+  sequence_overlapping_alias(overlapping_identity(value), value);
+  return value;
+}
+
+static unsigned& choose_overlapping_alias(bool condition, unsigned& first,
+                                          unsigned& second) {
+  return condition ? first : second;
+}
+
+static unsigned overlapping_conditional_result(bool condition) {
+  unsigned first = 5u;
+  unsigned second = 7u;
+  sequence_overlapping_alias(choose_overlapping_alias(condition, first, second),
+                             first);
+  return first * 100u + second;
+}
+
+static unsigned overlapping_storage_result(bool condition, unsigned value) {
+  unsigned* pointer = &value;
+  sequence_overlapping_alias(
+      choose_overlapping_alias(condition, *pointer, *pointer), *pointer);
+  return value;
+}
+
+struct OverlappingAliasPair {
+  unsigned first;
+  unsigned second;
+};
+
+static void update_overlapping_alias(OverlappingAliasPair& whole,
+                                     unsigned& selected) {
+  ++selected;
+  whole.first += selected;
+  selected += whole.first;
+}
+
+static unsigned overlapping_record_alias() {
+  OverlappingAliasPair value{3u, 5u};
+  update_overlapping_alias(value, value.second);
+  return value.first * 100u + value.second;
+}
+
+struct OverlappingAliasReceiver {
+  unsigned first;
+  unsigned second;
+
+  void update(unsigned& selected) {
+    ++selected;
+    first += selected;
+    selected += first;
+  }
+};
+
+static unsigned overlapping_receiver_alias() {
+  OverlappingAliasReceiver value{3u, 5u};
+  value.update(value.second);
+  return value.first * 100u + value.second;
+}
+
+struct CurrentReceiverAlias {
+  unsigned first;
+  unsigned second;
+
+  void update(unsigned& selected) {
+    ++selected;
+    first += selected;
+    selected += first;
+  }
+  CurrentReceiverAlias& self() { return *this; }
+  void apply() { self().update(second); }
+};
+
+static unsigned current_receiver_alias() {
+  CurrentReceiverAlias value{3u, 5u};
+  value.apply();
+  return value.first * 100u + value.second;
+}
+
+using OverlappingUInt4 = unsigned __attribute__((vector_size(16)));
+
+static void update_overlapping_lanes(unsigned& first, unsigned& second) {
+  ++first;
+  second += first;
+}
+
+static unsigned overlapping_vector_alias() {
+  OverlappingUInt4 values = {2u, 3u, 5u, 7u};
+  update_overlapping_lanes(values[0], values[0]);
+  return values[0] * 1000u + values[1] * 100u + values[2] * 10u + values[3];
+}
+
 LOOM_CHECK_CASE(reference_accessors) {
   const auto local = local_alias_value(4u);
   const auto value_results = value_reference_results(true, 5u);
@@ -261,6 +366,15 @@ LOOM_CHECK_CASE(reference_accessors) {
   const auto receiver_true = reference_receiver(true, 5u);
   const auto receiver_parameter = reference_parameter_receiver(9u);
   const auto receiver_storage = storage_reference_receiver(11u);
+  const auto scalar_alias = overlapping_scalar_alias(5u);
+  const auto reference_result_alias = overlapping_reference_result(5u);
+  const auto conditional_first_alias = overlapping_conditional_result(true);
+  const auto conditional_second_alias = overlapping_conditional_result(false);
+  const auto conditional_storage_alias = overlapping_storage_result(true, 5u);
+  const auto record_alias = overlapping_record_alias();
+  const auto receiver_alias = overlapping_receiver_alias();
+  const auto current_alias = current_receiver_alias();
+  const auto vector_alias = overlapping_vector_alias();
   loom::check::expect_equal(local, 28u);
   loom::check::expect_equal(value_results, 40u);
   loom::check::expect_equal(mutable_result, 6u);
@@ -278,4 +392,13 @@ LOOM_CHECK_CASE(reference_accessors) {
   loom::check::expect_equal(receiver_true, 30u);
   loom::check::expect_equal(receiver_parameter, 10u);
   loom::check::expect_equal(receiver_storage, 12u);
+  loom::check::expect_equal(scalar_alias, 12u);
+  loom::check::expect_equal(reference_result_alias, 12u);
+  loom::check::expect_equal(conditional_first_alias, 1207u);
+  loom::check::expect_equal(conditional_second_alias, 513u);
+  loom::check::expect_equal(conditional_storage_alias, 12u);
+  loom::check::expect_equal(record_alias, 915u);
+  loom::check::expect_equal(receiver_alias, 915u);
+  loom::check::expect_equal(current_alias, 915u);
+  loom::check::expect_equal(vector_alias, 6357u);
 }
