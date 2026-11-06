@@ -192,7 +192,8 @@ class Status final {
   }
 
   ~Status() {
-    if (IREE_UNLIKELY((uintptr_t)(value_) & ~IREE_STATUS_CODE_MASK)) {
+    if (IREE_UNLIKELY((uintptr_t)(value_) &
+                      ~(uintptr_t)IREE_STATUS_CODE_MASK)) {
       iree_status_free(value_);
     }
   }
