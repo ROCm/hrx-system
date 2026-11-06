@@ -14,6 +14,7 @@
 #include "loom/ir/types.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/vector/fragment.h"
+#include "loom/target/arch/amdgpu/lower/buffer_descriptor.h"
 #include "loom/target/arch/amdgpu/lower/candidates/compare_candidates.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
@@ -824,6 +825,8 @@ iree_status_t loom_amdgpu_lower_vector_fragment_store(
 void loom_amdgpu_mark_fragment_memory_address_storage_demands(
     loom_low_lower_context_t* context,
     const loom_amdgpu_fragment_memory_plan_t* plan) {
+  loom_amdgpu_mark_buffer_extent_storage_demands(context, &plan->source,
+                                                 plan->buffer_extent);
   if (plan->address_realization) {
     // The shared realization owner demands initializer inputs; canonical
     // periodic expressions remain analysis facts, not emitted arithmetic.

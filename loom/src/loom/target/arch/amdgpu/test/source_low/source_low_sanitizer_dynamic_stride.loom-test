@@ -18,7 +18,7 @@ func.def target(@target) @sanitizer_bounded_dynamic_stride_write(%output: buffer
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @sanitizer_bounded_dynamic_stride_write(%row_count: reg<amdgpu.sgpr>, %row_size: reg<amdgpu.sgpr>, %row: reg<amdgpu.sgpr>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @sanitizer_bounded_dynamic_stride_write(%row_count_i32: reg<amdgpu.sgpr>, %row_size: reg<amdgpu.sgpr>, %row: reg<amdgpu.sgpr>) asm {
   %output_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %18 = s_getpc_b64
   %19 = slice %18[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>

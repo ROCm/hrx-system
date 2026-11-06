@@ -29,6 +29,7 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
+#include "loom/target/arch/amdgpu/lower/buffer_descriptor.h"
 #include "loom/target/arch/amdgpu/lower/candidates/compare_candidates.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
@@ -2025,6 +2026,13 @@ static iree_status_t loom_amdgpu_fragment_memory_select(
   if (*out_selected && out_plan->scalar_base.dynamic_term_mask != 0) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_plan_memory_dynamic_terms(
         context, &out_plan->source, &out_plan->dynamic_term_plans));
+  }
+  if (*out_selected &&
+      source_op->kind != LOOM_OP_SANITIZER_RACE_FRAGMENT_ACCESS &&
+      out_plan->source.memory_space ==
+          LOOM_VALUE_FACT_MEMORY_SPACE_DESCRIPTOR) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_plan_buffer_extent(
+        context, &out_plan->source, &out_plan->buffer_extent));
   }
   return iree_ok_status();
 }

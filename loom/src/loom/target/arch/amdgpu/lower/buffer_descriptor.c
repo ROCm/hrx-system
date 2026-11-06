@@ -12,6 +12,7 @@
 #include "loom/ops/encoding/storage.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
+#include "loom/target/arch/amdgpu/lower/memory.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
@@ -39,7 +40,7 @@ struct loom_amdgpu_buffer_extent_plan_t {
   uint8_t dimension_count;
   // Descriptor-range ownership selected during target planning.
   loom_amdgpu_buffer_extent_plan_flags_t flags;
-  // Source values with retained one-word SGPR carriers.
+  // Source dimensions whose one-word SGPR carriers are checked at finalization.
   loom_value_id_t dimensions[];
 };
 
@@ -99,10 +100,10 @@ static bool loom_amdgpu_buffer_extent_term_fits(
 }
 
 static iree_status_t loom_amdgpu_plan_buffer_extent_with_flags(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_context_t* context,
     const loom_low_source_memory_access_plan_t* source,
     loom_amdgpu_buffer_extent_plan_flags_t flags,
-    const loom_amdgpu_buffer_extent_plan_t** out_plan) {
+    loom_amdgpu_buffer_extent_plan_t** out_plan) {
   *out_plan = NULL;
   const uint16_t root_argument =
       loom_low_lower_source_memory_root_argument_index(context, source);
@@ -170,12 +171,6 @@ static iree_status_t loom_amdgpu_plan_buffer_extent_with_flags(
       if (loom_type_dim_is_dynamic_at(view_type, axis)) {
         const loom_value_id_t dimension =
             loom_type_dim_value_id_at(view_type, axis);
-        bool supported = false;
-        IREE_RETURN_IF_ERROR(loom_amdgpu_buffer_extent_prepare_sgpr_u32(
-            context, source_op, dimension, &supported));
-        if (!supported) {
-          return iree_ok_status();
-        }
         dimensions[selected.dimension_count++] = dimension;
       } else {
         const int64_t dimension = loom_type_dim_static_size_at(view_type, axis);
@@ -188,33 +183,17 @@ static iree_status_t loom_amdgpu_plan_buffer_extent_with_flags(
     selected.byte_scale = (uint32_t)scale;
     if (source->dynamic_view_base_term_count != 0) {
       static_base = source->static_view_base_byte_offset;
-      bool dynamic_base_supported = false;
-      if (source->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID) {
-        IREE_RETURN_IF_ERROR(loom_amdgpu_buffer_extent_prepare_sgpr_u32(
-            context, source_op, source->dynamic_view_base_value_id,
-            &dynamic_base_supported));
-      }
-      if (dynamic_base_supported) {
-        selected.base = LOOM_AMDGPU_BUFFER_EXTENT_BASE_VALUE;
-        // A retained SSA base may be the complete authored expression or its
-        // constant-free prefix. Charge only the static bytes it does not carry.
-        static_base -= source->dynamic_view_base_value_static_byte_offset;
-      } else {
-        for (uint8_t i = 0; i < source->dynamic_view_base_term_count; ++i) {
-          if (!loom_amdgpu_buffer_extent_term_fits(context,
-                                                   &source->dynamic_terms[i])) {
-            return iree_ok_status();
-          }
-        }
-        selected.base = LOOM_AMDGPU_BUFFER_EXTENT_BASE_TERMS;
-      }
+      selected.base = LOOM_AMDGPU_BUFFER_EXTENT_BASE_TERMS;
     }
-    if (static_base < 0 || static_base > UINT32_MAX ||
+    if ((selected.base == LOOM_AMDGPU_BUFFER_EXTENT_BASE_NONE &&
+         (static_base < 0 || static_base > UINT32_MAX)) ||
         (selected.dimension_count == 0 &&
          selected.base == LOOM_AMDGPU_BUFFER_EXTENT_BASE_NONE)) {
       return iree_ok_status();
     }
-    selected.byte_offset = (uint32_t)static_base;
+    if (selected.base == LOOM_AMDGPU_BUFFER_EXTENT_BASE_NONE) {
+      selected.byte_offset = (uint32_t)static_base;
+    }
   }
 
   loom_amdgpu_buffer_extent_plan_t* retained = NULL;
@@ -229,21 +208,107 @@ static iree_status_t loom_amdgpu_plan_buffer_extent_with_flags(
   return iree_ok_status();
 }
 
+void loom_amdgpu_finalize_buffer_extent(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source,
+    loom_amdgpu_buffer_extent_plan_t** inout_plan) {
+  loom_amdgpu_buffer_extent_plan_t* plan = *inout_plan;
+  if (plan == NULL) {
+    return;
+  }
+  bool supported = true;
+  for (uint8_t i = 0; i < plan->dimension_count && supported; ++i) {
+    supported = loom_amdgpu_buffer_extent_is_planned_sgpr_u32(
+        context, plan->dimensions[i]);
+  }
+  if (supported && plan->base == LOOM_AMDGPU_BUFFER_EXTENT_BASE_TERMS) {
+    int64_t static_base = source->static_view_base_byte_offset;
+    const bool dynamic_base_supported =
+        source->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID &&
+        loom_amdgpu_buffer_extent_is_planned_sgpr_u32(
+            context, source->dynamic_view_base_value_id);
+    if (dynamic_base_supported) {
+      plan->base = LOOM_AMDGPU_BUFFER_EXTENT_BASE_VALUE;
+      // The retained base may already carry part of the static contribution.
+      static_base -= source->dynamic_view_base_value_static_byte_offset;
+    } else {
+      for (uint8_t i = 0; i < source->dynamic_view_base_term_count && supported;
+           ++i) {
+        supported = loom_amdgpu_buffer_extent_term_fits(
+            context, &source->dynamic_terms[i]);
+      }
+    }
+    supported &= static_base >= 0 && static_base <= UINT32_MAX;
+    plan->byte_offset = (uint32_t)static_base;
+  }
+  if (!supported) {
+    *inout_plan = NULL;
+  }
+}
+
 iree_status_t loom_amdgpu_plan_buffer_extent(
     loom_low_lower_context_t* context,
     const loom_low_source_memory_access_plan_t* source,
-    const loom_amdgpu_buffer_extent_plan_t** out_plan) {
-  return loom_amdgpu_plan_buffer_extent_with_flags(context, NULL, source, 0,
+    loom_amdgpu_buffer_extent_plan_t** out_plan) {
+  return loom_amdgpu_plan_buffer_extent_with_flags(context, source, 0,
                                                    out_plan);
+}
+
+void loom_amdgpu_mark_buffer_extent_storage_demands(
+    loom_low_lower_context_t* context,
+    const loom_low_source_memory_access_plan_t* source,
+    const loom_amdgpu_buffer_extent_plan_t* plan) {
+  if (plan == NULL) {
+    return;
+  }
+  for (uint8_t i = 0; i < plan->dimension_count; ++i) {
+    loom_low_lower_require_source_value_storage(context, plan->dimensions[i]);
+  }
+  if (plan->base != LOOM_AMDGPU_BUFFER_EXTENT_BASE_NONE) {
+    if (source->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID) {
+      loom_low_lower_require_source_value_storage(
+          context, source->dynamic_view_base_value_id);
+    }
+    loom_amdgpu_mark_source_memory_dynamic_terms_storage_demands(
+        context, source->dynamic_terms, source->dynamic_view_base_term_count);
+  }
 }
 
 iree_status_t loom_amdgpu_plan_buffer_view_extent(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_low_source_memory_access_plan_t* source,
-    const loom_amdgpu_buffer_extent_plan_t** out_plan) {
-  return loom_amdgpu_plan_buffer_extent_with_flags(
-      context, source_op, source,
-      LOOM_AMDGPU_BUFFER_EXTENT_PLAN_FLAG_OVERRIDE_RESOURCE, out_plan);
+    loom_amdgpu_buffer_extent_plan_t** out_plan) {
+  IREE_RETURN_IF_ERROR(loom_amdgpu_plan_buffer_extent_with_flags(
+      context, source, LOOM_AMDGPU_BUFFER_EXTENT_PLAN_FLAG_OVERRIDE_RESOURCE,
+      out_plan));
+  loom_amdgpu_buffer_extent_plan_t* plan = *out_plan;
+  if (plan == NULL) {
+    return iree_ok_status();
+  }
+  // Mask removal needs an exact descriptor bound during selection, before
+  // ordinary producer finalization. Publish those carriers now.
+  bool supported = true;
+  iree_status_t status = iree_ok_status();
+  for (uint8_t i = 0;
+       i < plan->dimension_count && supported && iree_status_is_ok(status);
+       ++i) {
+    status = loom_amdgpu_buffer_extent_prepare_sgpr_u32(
+        context, source_op, plan->dimensions[i], &supported);
+  }
+  if (iree_status_is_ok(status) && supported &&
+      plan->base != LOOM_AMDGPU_BUFFER_EXTENT_BASE_NONE &&
+      source->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID) {
+    bool dynamic_base_supported = false;
+    status = loom_amdgpu_buffer_extent_prepare_sgpr_u32(
+        context, source_op, source->dynamic_view_base_value_id,
+        &dynamic_base_supported);
+  }
+  if (iree_status_is_ok(status) && supported) {
+    loom_amdgpu_finalize_buffer_extent(context, source, out_plan);
+  } else {
+    *out_plan = NULL;
+  }
+  return status;
 }
 
 bool loom_amdgpu_buffer_extent_uses_dynamic_view_base(

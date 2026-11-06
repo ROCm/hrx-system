@@ -1817,8 +1817,9 @@ static iree_status_t loom_amdgpu_finalize_plan(
     case LOOM_OP_VECTOR_LOAD:
     case LOOM_OP_VECTOR_LOAD_MASK:
     case LOOM_OP_VECTOR_STORE:
-      return loom_amdgpu_finalize_memory_plan(
+      loom_amdgpu_finalize_memory_plan(
           context, (loom_amdgpu_memory_access_plan_t*)plan.target_data);
+      return iree_ok_status();
     case LOOM_OP_VIEW_ATOMIC_REDUCE:
     case LOOM_OP_VIEW_ATOMIC_RMW:
     case LOOM_OP_VIEW_ATOMIC_CMPXCHG:
@@ -1828,8 +1829,8 @@ static iree_status_t loom_amdgpu_finalize_plan(
           (loom_amdgpu_atomic_plan_t*)plan.target_data;
       if (atomic->source.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL &&
           atomic->address_form == LOOM_AMDGPU_MEMORY_ADDRESS_FORM_DEFAULT) {
-        return loom_amdgpu_plan_buffer_extent(context, &atomic->source,
-                                              &atomic->buffer_extent);
+        loom_amdgpu_finalize_buffer_extent(context, &atomic->source,
+                                           &atomic->buffer_extent);
       }
       return iree_ok_status();
     }
@@ -1839,8 +1840,8 @@ static iree_status_t loom_amdgpu_finalize_plan(
           (loom_amdgpu_fragment_memory_plan_t*)plan.target_data;
       if (fragment->source.memory_space ==
           LOOM_VALUE_FACT_MEMORY_SPACE_DESCRIPTOR) {
-        return loom_amdgpu_plan_buffer_extent(context, &fragment->source,
-                                              &fragment->buffer_extent);
+        loom_amdgpu_finalize_buffer_extent(context, &fragment->source,
+                                           &fragment->buffer_extent);
       }
       return iree_ok_status();
     }

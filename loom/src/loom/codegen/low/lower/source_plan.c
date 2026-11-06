@@ -561,6 +561,23 @@ static void loom_low_lower_record_elided_hint_plan(
                });
 }
 
+static iree_status_t loom_low_lower_record_unavailable_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op) {
+  if (loom_low_lower_source_value_storage_op_requires_emission(
+          source_op, loom_op_effective_traits(context->module, source_op))) {
+    return loom_low_lower_emit_no_target_contract(context, source_op);
+  }
+  context->lowering->source_plan.has_unavailable_plans = true;
+  loom_low_lower_record_selected_plan(
+      context, (loom_low_lower_selected_plan_t){
+                   .source_op = source_op,
+                   .kind = LOOM_LOW_LOWER_SELECTED_PLAN_UNAVAILABLE,
+                   .rule_set_index = UINT16_MAX,
+                   .rule_index = UINT16_MAX,
+               });
+  return iree_ok_status();
+}
+
 static bool loom_low_lower_selected_plan_preserves_volatile_memory(
     const loom_module_t* module,
     const loom_low_lower_selected_plan_t* selected_plan) {
@@ -714,6 +731,25 @@ static iree_status_t loom_low_lower_finalize_selected_plans(
         /*skip_elided_rules=*/prepare_rule_recurrences);
   }
   iree_arena_deinitialize(&construction_arena);
+  return status;
+}
+
+static iree_status_t loom_low_lower_reject_unavailable_plans(
+    loom_low_lower_context_t* context) {
+  const loom_low_lower_source_plan_t* source_plan =
+      &context->lowering->source_plan;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < source_plan->selected_plan_count && iree_status_is_ok(status) &&
+       !loom_low_lower_context_diagnostic_limit_reached(context);
+       ++i) {
+    const loom_low_lower_selected_plan_t* plan =
+        &source_plan->selected_plans[i];
+    if (plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_UNAVAILABLE &&
+        !iree_any_bit_set(plan->flags, LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED)) {
+      status = loom_low_lower_emit_no_target_contract(context, plan->source_op);
+    }
+  }
   return status;
 }
 
@@ -1816,7 +1852,7 @@ static iree_status_t loom_low_lower_plan_op(
     loom_low_lower_record_elided_hint_plan(context, source_op);
     return iree_ok_status();
   }
-  return loom_low_lower_emit_no_target_contract(context, source_op);
+  return loom_low_lower_record_unavailable_plan(context, source_op);
 }
 
 static iree_status_t loom_low_lower_source_graph_collect_region(
@@ -2024,7 +2060,7 @@ static iree_status_t loom_low_lower_source_candidate_emit_rejection(
         context, rejection->failed_rule_set, candidate_node->source_op,
         rejection->rule_failure, &source_memory_state);
   }
-  return loom_low_lower_emit_no_target_contract(context,
+  return loom_low_lower_record_unavailable_plan(context,
                                                 candidate_node->source_op);
 }
 
@@ -2507,6 +2543,10 @@ iree_status_t loom_low_lower_source_plan_build(
   }
   if (candidate_plan_initialized) {
     iree_arena_deinitialize(&candidate_plan.arena);
+  }
+  if (iree_status_is_ok(status) && context->result->error_count == 0 &&
+      source_plan->has_unavailable_plans) {
+    status = loom_low_lower_reject_unavailable_plans(context);
   }
   if (iree_status_is_ok(status) && context->result->error_count == 0) {
     status = loom_low_lower_finalize_selected_plans(context);

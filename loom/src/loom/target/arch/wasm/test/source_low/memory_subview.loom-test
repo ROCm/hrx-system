@@ -155,11 +155,11 @@ func.def public @subview_composed_helpers(%input: buffer, %output: buffer, %widt
 
 // ----
 low.func.def public target<wasm.core.simd128> abi(wasm_function) @subview_composed_helpers(%input_aligned: reg<wasm.i32>, %output_aligned: reg<wasm.i32>, %columns: reg<wasm.i32>) asm {
-  %35 = i32.const 4
-  %36 = i32.mul %columns, %35
-  %39 = i32.add %36, %36
-  %40 = i32.add %input_aligned, %39
-  %value = f32.load %40 {offset = 20}
+  %30 = i32.const 4
+  %31 = i32.mul %columns, %30
+  %34 = i32.add %31, %31
+  %35 = i32.add %input_aligned, %34
+  %value = f32.load %35 {offset = 20}
   f32.store %output_aligned, %value {offset = 4}
   return
 }
@@ -188,16 +188,16 @@ func.def public @subview_composed_refined_nested(%input: buffer, %output: buffer
 
 // ----
 low.func.def public target<wasm.core.simd128> abi(wasm_function) @subview_composed_refined_nested(%input_aligned: reg<wasm.i32>, %output_aligned: reg<wasm.i32>, %origin: reg<wasm.i32>, %row_stride: reg<wasm.i32>, %column_stride: reg<wasm.i32>) asm {
-  %45 = i32.const 8
-  %46 = i32.mul %row_stride, %45
-  %47 = i32.add %origin, %46
-  %49 = i32.mul %column_stride, %45
-  %50 = i32.add %47, %49
-  %51 = i32.const 4
-  %52 = i32.mul %row_stride, %51
-  %53 = i32.add %50, %52
-  %54 = i32.add %input_aligned, %53
-  %value = f32.load %54
+  %27 = i32.const 8
+  %28 = i32.mul %row_stride, %27
+  %29 = i32.add %origin, %28
+  %31 = i32.mul %column_stride, %27
+  %32 = i32.add %29, %31
+  %33 = i32.const 4
+  %34 = i32.mul %row_stride, %33
+  %35 = i32.add %32, %34
+  %36 = i32.add %input_aligned, %35
+  %value = f32.load %36
   f32.store %output_aligned, %value {offset = 4}
   return
 }

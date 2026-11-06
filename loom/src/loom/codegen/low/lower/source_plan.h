@@ -82,6 +82,9 @@ typedef enum loom_low_lower_selected_plan_kind_e {
   LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL = 5,
   // Shared structural lowering retained as an exact-cover alternative.
   LOOM_LOW_LOWER_SELECTED_PLAN_STRUCTURAL = 6,
+  // No target recipe exists. Demand analysis must elide this pure operation;
+  // a retained runtime demand is rejected before any Low IR is constructed.
+  LOOM_LOW_LOWER_SELECTED_PLAN_UNAVAILABLE = 7,
 } loom_low_lower_selected_plan_kind_t;
 
 // Canonical source-memory data retained with a selected table rule.
@@ -191,6 +194,9 @@ typedef struct loom_low_lower_source_plan_t {
   // True when selected rule finalization produces canonical-term offers that
   // must be recorded before realization selection closes.
   bool has_source_memory_rule_term_recurrences;
+  // Selection encountered a pure operation without a target recipe. Only
+  // those functions need the post-demand check before consumer finalization.
+  bool has_unavailable_plans;
   // Canonical accesses joined across observation and selection without an op
   // lookup table or a second address-analysis walk.
   struct {

@@ -1347,6 +1347,16 @@ static iree_status_t loom_low_lower_record_static_launch_config(
   return iree_ok_status();
 }
 
+static bool loom_low_lower_can_defer_missing_contract(void* user_data,
+                                                      const loom_op_t* op) {
+  const loom_low_lower_context_t* context =
+      (const loom_low_lower_context_t*)user_data;
+  return loom_op_semantics(context->module, op).phase ==
+             LOOM_OP_PHASE_EXECUTABLE &&
+         !loom_low_lower_source_value_storage_op_requires_emission(
+             op, loom_op_effective_traits(context->module, op));
+}
+
 // Plans borrow stable storage from the caller owning the lowering transaction.
 // The context and every construction analysis remain phase-local stack state.
 struct loom_low_lower_function_plan_t {
@@ -1506,6 +1516,11 @@ static iree_status_t loom_low_lower_function_plan_build(
         .error_catalog = options->policy->error_catalog,
         .provider_list = options->legality_provider_list,
         .contract_query = loom_low_lower_source_query_callback(context),
+        .defer_missing_contract =
+            {
+                .fn = loom_low_lower_can_defer_missing_contract,
+                .user_data = context,
+            },
         .type_supported = context->policy->source_type_supported,
         .source_vector_carrier_supported =
             context->policy->source_vector_carrier_supported,

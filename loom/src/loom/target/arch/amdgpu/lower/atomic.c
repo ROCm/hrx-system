@@ -1230,6 +1230,11 @@ iree_status_t loom_amdgpu_select_atomic_plan(
       loom_amdgpu_atomic_resolve_selection(context, &selection, out_plan));
   IREE_RETURN_IF_ERROR(loom_amdgpu_plan_atomic_constant_payloads(
       context, &atomic_source, &out_plan->constant_payloads));
+  if (out_plan->source.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL &&
+      out_plan->address_form == LOOM_AMDGPU_MEMORY_ADDRESS_FORM_DEFAULT) {
+    IREE_RETURN_IF_ERROR(loom_amdgpu_plan_buffer_extent(
+        context, &out_plan->source, &out_plan->buffer_extent));
+  }
   *out_selected = true;
   if (atomic_source.result != LOOM_VALUE_ID_INVALID) {
     return loom_low_lower_plan_value_type(
@@ -1669,5 +1674,7 @@ void loom_amdgpu_mark_atomic_plan_storage_demands(
     IREE_BUILTIN_UNREACHABLE();
   }
   loom_amdgpu_mark_source_memory_plan_storage_demands(context, &plan->source);
+  loom_amdgpu_mark_buffer_extent_storage_demands(context, &plan->source,
+                                                 plan->buffer_extent);
   loom_amdgpu_require_atomic_payload_storage(context, &atomic_source);
 }
