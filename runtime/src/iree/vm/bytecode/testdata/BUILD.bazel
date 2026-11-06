@@ -13,5 +13,6 @@ exports_files([
     "core_execution.vmasm",
     "launch_config.vmasm",
     "reference_signatures.vmasm",
+    "reference_transport.vmasm",
     "structural.vmasm",
 ])

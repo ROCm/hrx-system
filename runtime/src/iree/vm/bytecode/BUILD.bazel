@@ -119,6 +119,16 @@ iree_c_embed_data(
 )
 
 iree_c_embed_data(
+    name = "reference_transport_testdata",
+    testonly = True,
+    srcs = ["//runtime/src/iree/vm/bytecode/testdata:reference_transport.vmasm"],
+    c_file_output = "reference_transport_testdata.c",
+    flatten = True,
+    h_file_output = "reference_transport_testdata.h",
+    identifier = "iree_vm_bytecode_reference_transport_testdata",
+)
+
+iree_c_embed_data(
     name = "verifier_testdata",
     testonly = True,
     srcs = ["//runtime/src/iree/vm/bytecode/testdata:structural.vmasm"],
@@ -232,6 +242,7 @@ iree_runtime_cc_test(
         ":execution_testdata",
         ":launch_config_testdata",
         ":reference_signature_testdata",
+        ":reference_transport_testdata",
         ":verifier_testdata",
         ":wire",
         "//runtime/src/iree/base",
@@ -337,6 +348,21 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "interpreter_reference_test",
+    srcs = ["interpreter_reference_test.cc"],
+    deps = [
+        ":module",
+        ":module_fixture",
+        ":reference_transport_testdata",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm:test_support",
     ],
 )
 
@@ -607,6 +633,7 @@ test_suite(
         ":interpreter_float_test",
         ":interpreter_integer_test",
         ":interpreter_memory_test",
+        ":interpreter_reference_test",
         ":interpreter_test",
         ":module_test",
         ":process_test",

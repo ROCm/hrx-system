@@ -57,6 +57,12 @@ spelling. The native provider and its event capture are test-only; compilation,
 linking, calls, and cleanup use the production APIs. The fixtures live beside
 the VM target's other artifact tests.
 
+`emit vm-object-lifetime borrowed-argument` supplies one native-owned object to
+`@run(ptr<@Object>)`, keeping the host owner live through the synchronous call.
+The provider's `count` method observes the actual intrusive reference count.
+This distinguishes borrowed transport from additional protection through the
+same compiled calls, storage operations, and native payload access.
+
 Combining an IR program with injected register assignments, rewritten internal
 tables, or a resource inventory invented by the runner crosses those boundaries.
 Such a fixture depends on both program semantics and private compiler state.

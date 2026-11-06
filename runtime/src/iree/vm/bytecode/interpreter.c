@@ -124,6 +124,16 @@ static inline void iree_vm_bytecode_ref_retain(iree_vm_ref_t* target,
   iree_vm_bytecode_ref_replace(target, iree_vm_ref_retain(source));
 }
 
+// Internal copies preserve the source lifetime contract. Owners acquire an
+// independent release obligation; borrows keep their existing live anchor.
+static inline void iree_vm_bytecode_ref_copy(iree_vm_ref_t* target,
+                                             iree_vm_ref_t source) {
+  if (!(source.type_and_state & IREE_VM_REF_STATE_BORROWED)) {
+    source = iree_vm_ref_retain(source);
+  }
+  iree_vm_bytecode_ref_replace(target, source);
+}
+
 // Transfers one internal null, borrowed, or owned state exactly. Unlike a
 // public escaping move, an internal borrowed state stays borrowed.
 static inline void iree_vm_bytecode_ref_move(iree_vm_ref_t* target,
@@ -1200,6 +1210,13 @@ iree_vm_bytecode_dispatch_ref_move: {
                             &refs[record->source_r8]);
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_move_t);
 }
+iree_vm_bytecode_dispatch_ref_copy: {
+  const iree_vm_bytecode_ref_copy_t* record =
+      (const iree_vm_bytecode_ref_copy_t*)record_data;
+  iree_vm_bytecode_ref_copy(&refs[record->destination_r8],
+                            refs[record->source_r8]);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_copy_t);
+}
 iree_vm_bytecode_dispatch_ref_select: {
   const iree_vm_bytecode_ref_select_t* record =
       (const iree_vm_bytecode_ref_select_t*)record_data;
@@ -1229,6 +1246,13 @@ iree_vm_bytecode_dispatch_ref_stack_load_move: {
                             &local_refs[record->slot_u16]);
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_stack_load_move_t);
 }
+iree_vm_bytecode_dispatch_ref_stack_load_copy: {
+  const iree_vm_bytecode_ref_stack_load_copy_t* record =
+      (const iree_vm_bytecode_ref_stack_load_copy_t*)record_data;
+  iree_vm_bytecode_ref_copy(&refs[record->destination_r8],
+                            local_refs[record->slot_u16]);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_stack_load_copy_t);
+}
 iree_vm_bytecode_dispatch_ref_stack_store_retain: {
   const iree_vm_bytecode_ref_stack_store_retain_t* record =
       (const iree_vm_bytecode_ref_stack_store_retain_t*)record_data;
@@ -1242,6 +1266,13 @@ iree_vm_bytecode_dispatch_ref_stack_store_move: {
   iree_vm_bytecode_ref_move(&local_refs[record->slot_u16],
                             &refs[record->source_r8]);
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_stack_store_move_t);
+}
+iree_vm_bytecode_dispatch_ref_stack_store_copy: {
+  const iree_vm_bytecode_ref_stack_store_copy_t* record =
+      (const iree_vm_bytecode_ref_stack_store_copy_t*)record_data;
+  iree_vm_bytecode_ref_copy(&local_refs[record->slot_u16],
+                            refs[record->source_r8]);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_stack_store_copy_t);
 }
 iree_vm_bytecode_dispatch_ref_stack_discard: {
   const iree_vm_bytecode_ref_stack_discard_t* record =

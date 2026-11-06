@@ -94,8 +94,8 @@ vm.module core(0.0) {
       %r0 = ref.move %r2
       control.call @import2 {direct_ref_move_mask = 0x0001}
       control.call @function0 {direct_ref_move_mask = 0x0001}
-      %r2 = ref.retain %r0
-      %r0 = ref.retain %r3
+      %r2 = ref.copy %r0
+      %r0 = ref.copy %r3
       control.return
     }
   }
@@ -148,10 +148,10 @@ vm.module core(0.0) {
       %r16 = ref.abi.argument.load.move 0
     ^bb1:
       control.block
-      ref.stack.store.retain %r0, #r0
+      ref.stack.store.copy %r0, #r0
       ref.abi.result.store.move %r0, 0
       %r0 = ref.stack.load.move #r0
-      %r0 = ref.retain %r16
+      %r0 = ref.copy %r16
       %r17 = ref.move %r15
       %r15 = ref.move %r1
       %r1 = ref.move %r17

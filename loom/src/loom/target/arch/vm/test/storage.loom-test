@@ -104,11 +104,11 @@ vm.module core(0.0) {
     func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 3, function_registers = 0, local_refs = 2, local_functions = 0) {
     ^bb0:
       control.block
-      ref.stack.store.retain %r0, #r1
-      %r0 = ref.stack.load.retain #r1
-      ref.stack.store.retain %r1, #r1
-      %r1 = ref.stack.load.retain #r1
-      %r2 = ref.stack.load.retain #r1
+      ref.stack.store.copy %r0, #r1
+      %r0 = ref.stack.load.copy #r1
+      ref.stack.store.copy %r1, #r1
+      %r1 = ref.stack.load.copy #r1
+      %r2 = ref.stack.load.copy #r1
       control.return
     }
   }

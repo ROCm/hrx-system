@@ -92,6 +92,14 @@ argument may use a borrowed carrier when its caller keeps the anchor live.
 The caller releases returned protection through the ordinary result-reset path.
 Neither mode is a raw address, and canonical null is valid for both.
 
+Bytecode `ref.copy`, `ref.stack.load.copy`, and `ref.stack.store.copy`
+preserve that physical state: a borrowed source stays borrowed, an owned source
+acquires an independent owner, and null stays null. The borrow's anchor covers
+both copies, including replacement of the destination. Explicit `ref.retain`
+and the retaining stack instructions always acquire ownership for a non-null
+source. Internal copies and moves preserve anchors; public result publication
+promotes escaping borrows before any caller anchor can be replaced.
+
 Function refs are non-owning program-bound values. Bound functions are
 non-owning process-bound values. The referenced program or process remains live
 for every use, including the complete duration of a suspended invocation.

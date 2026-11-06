@@ -40,7 +40,7 @@ typedef struct loom_vm_function_storage_t {
   uint16_t* binding_locations;
   // Disjoint byte cell preserving a temporarily borrowed value register.
   uint16_t borrowed_value;
-  // Disjoint owned slot preserving a temporarily borrowed reference register.
+  // Disjoint carrier slot preserving a temporarily borrowed reference register.
   uint16_t borrowed_ref;
 } loom_vm_function_storage_t;
 
@@ -79,7 +79,7 @@ static iree_status_t loom_vm_function_transfer_stack(iree_io_stream_t* stream,
 }
 
 // Ref-slot transfers share a register/slot encoding. The selected opcode states
-// whether a transfer retains an owner or moves and clears its source.
+// whether a transfer copies its complete state or moves and clears its source.
 static iree_status_t loom_vm_function_transfer_refs(iree_io_stream_t* stream,
                                                     uint8_t opcode,
                                                     uint16_t slot_base,
@@ -87,7 +87,7 @@ static iree_status_t loom_vm_function_transfer_refs(iree_io_stream_t* stream,
                                                     uint16_t count) {
   iree_status_t status = iree_ok_status();
   for (uint16_t i = 0; i < count && iree_status_is_ok(status); ++i) {
-    const iree_vm_bytecode_ref_stack_load_retain_t instruction = {
+    const iree_vm_bytecode_ref_stack_load_copy_t instruction = {
         .opcode = opcode,
         .destination_r8 = (uint8_t)(register_base + i),
         .slot_u16 = slot_base + i,
@@ -97,14 +97,15 @@ static iree_status_t loom_vm_function_transfer_refs(iree_io_stream_t* stream,
   return status;
 }
 
-// A local reference slot is an owner, not a byte range. Borrow one register
-// for the transfer and restore its previous owner before any other value can
-// observe the register. The saved owner is disjoint from packets and homes.
+// A local reference slot holds a complete carrier, not a byte range. Borrow
+// one register for the transfer and restore its previous state before any
+// other value can observe it. The saved cell is disjoint from packets and
+// homes.
 static iree_status_t loom_vm_function_copy_ref(
     iree_io_stream_t* stream, const loom_vm_function_storage_t* storage,
     uint16_t destination, uint16_t source, uint8_t load_opcode,
     uint8_t store_opcode) {
-  const iree_vm_bytecode_ref_stack_load_retain_t instructions[] = {
+  const iree_vm_bytecode_ref_stack_load_copy_t instructions[] = {
       {.opcode = IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE,
        .destination_r8 = 0,
        .slot_u16 = storage->borrowed_ref},
@@ -175,13 +176,13 @@ static iree_status_t loom_vm_function_moves(
           loom_vm_move_storage_location(storage, &move->source);
       const uint16_t destination =
           loom_vm_move_storage_location(storage, &move->destination);
-      status =
-          is_ref ? loom_vm_function_copy_ref(
-                       stream, storage, destination, source,
-                       transfer ? IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_MOVE
-                                : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_RETAIN,
-                       IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE)
-                 : loom_vm_function_copy_value(stream, destination, source);
+      status = is_ref
+                   ? loom_vm_function_copy_ref(
+                         stream, storage, destination, source,
+                         transfer ? IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_MOVE
+                                  : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_COPY,
+                         IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE)
+                   : loom_vm_function_copy_value(stream, destination, source);
     } else if (is_store || is_load) {
       const loom_low_move_location_t* cell =
           is_store ? &move->destination : &move->source;
@@ -191,11 +192,10 @@ static iree_status_t loom_vm_function_moves(
       if (is_ref) {
         status = loom_vm_function_transfer_refs(
             stream,
-            is_store
-                ? (transfer ? IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE
-                            : IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_RETAIN)
-                : (transfer ? IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_MOVE
-                            : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_RETAIN),
+            is_store ? (transfer ? IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE
+                                 : IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_COPY)
+                     : (transfer ? IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_MOVE
+                                 : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_COPY),
             location, (uint16_t)reg->location, 1);
       } else {
         status = loom_vm_function_transfer_stack(
@@ -206,7 +206,7 @@ static iree_status_t loom_vm_function_moves(
       // whether a source survives or transfers its complete reference carrier.
       const iree_vm_bytecode_value_copy_t instruction = {
           .opcode = is_ref ? (transfer ? IREE_VM_BYTECODE_OPCODE_REF_MOVE
-                                       : IREE_VM_BYTECODE_OPCODE_REF_RETAIN)
+                                       : IREE_VM_BYTECODE_OPCODE_REF_COPY)
                            : IREE_VM_BYTECODE_OPCODE_VALUE_COPY,
           .destination_v8 = (uint8_t)move->destination.location,
           .source_v8 = (uint8_t)move->source.location,
@@ -302,7 +302,7 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_return(
         if (source.descriptor_reg_class_id == VM_CORE_REG_CLASS_ID_REF) {
           status = loom_vm_function_copy_ref(
               stream, storage, ordinal - 16, location,
-              IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_RETAIN,
+              IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_COPY,
               IREE_VM_BYTECODE_OPCODE_REF_ABI_RESULT_STORE_MOVE);
         } else {
           status = loom_vm_function_transfer_stack(
@@ -329,10 +329,10 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_vm_function_return(
       }
       if (assignment->descriptor_reg_class_id == VM_CORE_REG_CLASS_ID_REF) {
         // Overflow publication consumes its source, which may also appear in
-        // another result. A disjoint slot preserves its owner without
+        // another result. A disjoint slot preserves its carrier without
         // overwriting a stored result that remains live at this return.
-        const iree_vm_bytecode_ref_stack_load_retain_t transfers[] = {
-            {.opcode = IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_RETAIN,
+        const iree_vm_bytecode_ref_stack_load_copy_t transfers[] = {
+            {.opcode = IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_COPY,
              .destination_r8 = (uint8_t)source.location,
              .slot_u16 = storage->borrowed_ref},
             {.opcode = IREE_VM_BYTECODE_OPCODE_REF_ABI_RESULT_STORE_MOVE,
@@ -639,7 +639,7 @@ static iree_status_t loom_vm_function_storage(
       &frame->target.descriptor_set
            ->reg_classes[assignment->descriptor_reg_class_id];
   // Low verification establishes the byte offset. The descriptor cell size
-  // includes padding in narrow scalar values and the owned reference cells.
+  // includes padding in narrow scalar values and the managed reference cells.
   const uint32_t cell_bytes = register_class->alloc_unit_bits / 8;
   if ((uint64_t)assignment->location_count * cell_bytes >
       reference.byte_length - relative_offset) {
@@ -667,9 +667,9 @@ static iree_status_t loom_vm_function_storage(
     return loom_vm_function_transfer_refs(
         stream,
         is_store ? (moves ? IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_MOVE
-                          : IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_RETAIN)
+                          : IREE_VM_BYTECODE_OPCODE_REF_STACK_STORE_COPY)
                  : (moves ? IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_MOVE
-                          : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_RETAIN),
+                          : IREE_VM_BYTECODE_OPCODE_REF_STACK_LOAD_COPY),
         (uint16_t)(storage->packet_ref_count + byte_offset / cell_bytes),
         (uint16_t)assignment->location_base,
         (uint16_t)assignment->location_count);

@@ -46,11 +46,13 @@ class RefNullPolicy(enum.Enum):
 class RefOwnership(enum.Enum):
     BORROW = "borrow"
     CLEAR = "clear"
+    COPY = "copy"
     DIAGNOSTIC_BORROW = "diagnostic_borrow"
     INSPECT = "inspect"
     MOVE = "move"
     PUBLISH_MOVE = "publish_move"
     REPLACE_BORROW = "replace_borrow"
+    REPLACE_COPY = "replace_copy"
     REPLACE_MOVE = "replace_move"
     REPLACE_OWNER = "replace_owner"
     REPLACE_RETAIN = "replace_retain"

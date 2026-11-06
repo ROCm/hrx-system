@@ -111,6 +111,13 @@ Each pointer's protection ends at its own final use; duplication does not change
 its public signature to `ref`. An unused owning duplicate is still an explicit
 ownership obligation and is diagnosed if it reaches a normal exit unconsumed.
 
+When a native caller lends an object for a synchronous invocation, its owner
+anchors the borrowed argument for that invocation. Duplicating that argument
+keeps it borrowed through register copies, local storage, and internal argument
+transport, without acquiring extra owners. A pointer that already carries
+protection duplicates that protection instead. Returning either kind of pointer
+acquires or transfers an owner so the result can outlive the invocation.
+
 ## Supply the native implementation
 
 The runtime provider publishes an `iree_vm_ref_type_table_t` for its namespace.

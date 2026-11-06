@@ -40,8 +40,9 @@ REF_FAMILY = InstructionFamily(
         "installs an already-safe state before releasing a prior owner. Retaining null "
         "produces null; retaining a live object creates an owner through its actual "
         "descriptor without querying the refcount. Retains acquire before replacement; "
-        "moves snapshot and clear their distinct source before replacement. Moving an "
-        "internal borrow preserves its dominating lifetime. Frame unwind releases every "
+        "copies acquire only for owned sources and preserve borrowed sources; moves "
+        "snapshot and clear their distinct source before replacement. Copying or moving "
+        "an internal borrow preserves its dominating lifetime. Frame unwind releases every "
         "owner and clears every borrow in the exact declared register and local-slot "
         "extents. These operations are infallible after verification and never suspend."
     ),
@@ -529,6 +530,96 @@ REF_SELECT = Instruction(
     ),
 )
 
+REF_COPY = Instruction(
+    opcode=0xD4,
+    mnemonic="ref.copy",
+    since=CORE_0,
+    family=REF_FAMILY,
+    summary="Copies a ref register while preserving its ownership state.",
+    fields=(
+        _ref_register(
+            "destination_r8",
+            FieldRole.RESULT,
+            RefOwnership.REPLACE_COPY,
+            "Ref-register ordinal replaced by the copied state.",
+        ),
+        _ref_register(
+            "source_r8",
+            FieldRole.OPERAND,
+            RefOwnership.COPY,
+            "Ref-register ordinal copied without mutation.",
+        ),
+        _padding(),
+    ),
+    semantics=None,
+    behavior=(
+        "Copies source_r8 into destination_r8 without changing the source. Null "
+        "stays null, a borrow stays borrowed, and an owner acquires one new owner. "
+        "Both ordinals may alias."
+    ),
+    success=(
+        "The destination carries the same object, exact descriptor, and ownership "
+        "state as the source.",
+    ),
+    assembly="%r<destination> = ref.copy %r<source>",
+    pseudocode=(
+        "source = refs[source_r8];\n"
+        "copy = is_owned_ref(source) ? retain_ref(source) : source;\n"
+        "replace_ref(&refs[destination_r8], copy);\n"
+        "pc = pc + 4;"
+    ),
+    ownership=(
+        "An owned source is retained before releasing the previous destination. "
+        "A borrowed source requires its anchor to cover both copies, including "
+        "destination replacement. Self-copy preserves state with no net refcount "
+        "change; a borrowed self-copy performs no retain or release.",
+    ),
+)
+
+REF_STACK_LOAD_COPY = _stack_transfer(
+    0xD5,
+    "ref.stack.load.copy",
+    "Copies a local ref slot into a register, preserving ownership state.",
+    "destination_r8",
+    FieldRole.RESULT,
+    RefOwnership.REPLACE_COPY,
+    "Ref-register ordinal replaced by the copied state.",
+    "Copies one complete local-slot state into destination_r8 without changing the slot.",
+    "The destination carries the same object, exact descriptor, and ownership state "
+    "as the source slot.",
+    "An owned slot acquires one owner before destination replacement. A borrowed slot "
+    "performs no acquisition and requires its anchor to cover both copies, including "
+    "destination replacement. Null copies null.",
+    (StateEffect(StateAccess.READ, StateResource.FRAME_LOCALS, ("slot_u16",)),),
+    "%r<destination> = ref.stack.load.copy #r<slot>",
+    "source = local_refs[slot_u16];\n"
+    "copy = is_owned_ref(source) ? retain_ref(source) : source;\n"
+    "replace_ref(&refs[destination_r8], copy);\n"
+    "pc = pc + 4;",
+)
+
+REF_STACK_STORE_COPY = _stack_transfer(
+    0xD6,
+    "ref.stack.store.copy",
+    "Copies a ref register into a local slot, preserving ownership state.",
+    "source_r8",
+    FieldRole.OPERAND,
+    RefOwnership.COPY,
+    "Ref-register ordinal copied without mutation.",
+    "Copies one complete ref-register state into slot_u16 without changing the register.",
+    "The destination slot carries the same object, exact descriptor, and ownership "
+    "state as the source register.",
+    "An owned register acquires one owner before slot replacement. A borrowed register "
+    "performs no acquisition and requires its anchor to cover both copies, including "
+    "slot replacement. Null copies null.",
+    (StateEffect(StateAccess.WRITE, StateResource.FRAME_LOCALS, ("slot_u16",)),),
+    "ref.stack.store.copy %r<source>, #r<slot>",
+    "source = refs[source_r8];\n"
+    "copy = is_owned_ref(source) ? retain_ref(source) : source;\n"
+    "replace_ref(&local_refs[slot_u16], copy);\n"
+    "pc = pc + 4;",
+)
+
 REF_INSTRUCTIONS = (
     REF_NULL,
     REF_COMPARE_NULL,
@@ -542,4 +633,7 @@ REF_INSTRUCTIONS = (
     REF_STACK_STORE_MOVE,
     REF_STACK_DISCARD,
     REF_SELECT,
+    REF_COPY,
+    REF_STACK_LOAD_COPY,
+    REF_STACK_STORE_COPY,
 )

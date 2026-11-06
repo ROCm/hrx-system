@@ -1,0 +1,132 @@
+// A native owner anchors the argument throughout this synchronous call.
+// Duplication and non-inlined calls preserve borrowing without acquiring owners.
+// RUN: emit vm-object-lifetime borrowed-argument
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "count") @count(%value: ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.def noinline @use(%value: ptr<@Object>) {
+  func.call @count(%value) : (ptr<@Object>)
+  func.call @read(%value) : (ptr<@Object>)
+  func.return
+}
+
+func.def public @run(%value: ptr<@Object>) {
+  %copy = ref.duplicate %value : ptr<@Object>
+  func.call @use(%copy) : (ptr<@Object>)
+  func.call @use(%value) : (ptr<@Object>)
+  func.return
+}
+
+// ----
+create 1
+references 1
+read 1
+references 1
+read 1
+OK 1
+destroy 1
+retired 0
+
+// ====
+
+// Copying to and from a local slot preserves the external anchor. Each live
+// loaded value also crosses the real native-call register placement boundary.
+// RUN: emit vm-object-lifetime borrowed-argument
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "count", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @count(%value: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "read", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%value: reg<vm.ref : ptr<@Object>>)
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run(%value: reg<vm.ref : ptr<@Object>>) asm {
+  %slot = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  low.spill %value, %slot : reg<vm.ref : ptr<@Object>>, low.storage<private>
+  %loaded = low.reload %slot : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  %copy = copy %loaded {detached = true} : reg<vm.ref : ptr<@Object>> -> reg<vm.ref : ptr<@Object>>
+  low.func.call @count(%value) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @count(%loaded) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @count(%copy) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @read(%copy) : (reg<vm.ref : ptr<@Object>>)
+  return
+}
+
+// ----
+create 1
+references 1
+references 1
+references 1
+read 1
+OK 1
+destroy 1
+retired 0
+
+// ====
+
+// A repeated argument crosses the sixteen-register ABI boundary into overflow
+// storage. Both direct and overflow arguments stay borrowed in the callee.
+// RUN: emit vm-object-lifetime borrowed-argument
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "count") @count(%value: ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.def noinline @overflow(%first: ptr<@Object>, %unused1: ptr<@Object>, %unused2: ptr<@Object>, %unused3: ptr<@Object>, %unused4: ptr<@Object>, %unused5: ptr<@Object>, %unused6: ptr<@Object>, %unused7: ptr<@Object>, %unused8: ptr<@Object>, %unused9: ptr<@Object>, %unused10: ptr<@Object>, %unused11: ptr<@Object>, %unused12: ptr<@Object>, %unused13: ptr<@Object>, %unused14: ptr<@Object>, %unused15: ptr<@Object>, %last: ptr<@Object>) {
+  func.call @count(%first) : (ptr<@Object>)
+  func.call @count(%last) : (ptr<@Object>)
+  func.call @read(%last) : (ptr<@Object>)
+  func.return
+}
+
+func.def public @run(%value: ptr<@Object>) {
+  func.call @overflow(%value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value, %value) : (ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>)
+  func.return
+}
+
+// ----
+create 1
+references 1
+references 1
+read 1
+OK 1
+destroy 1
+retired 0
+
+// ====
+
+// Returning a borrowed copy acquires protection at the escaping boundary.
+// A further live copy protects the native call independently. Both temporary
+// owners retire before the final observation of the host-anchored argument.
+// RUN: emit vm-object-lifetime borrowed-argument
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "count") @count(%value: ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.def noinline @identity(%value: ptr<@Object>) -> (ptr<@Object>) {
+  %copy = ref.duplicate %value : ptr<@Object>
+  func.return %copy : ptr<@Object>
+}
+
+func.def public @run(%value: ptr<@Object>) {
+  %returned = func.call @identity(%value) : (ptr<@Object>) -> (ptr<@Object>)
+  func.call @count(%returned) : (ptr<@Object>)
+  func.call @read(%returned) : (ptr<@Object>)
+  func.call @count(%value) : (ptr<@Object>)
+  func.return
+}
+
+// ----
+create 1
+references 3
+read 1
+references 1
+OK 1
+destroy 1
+retired 0

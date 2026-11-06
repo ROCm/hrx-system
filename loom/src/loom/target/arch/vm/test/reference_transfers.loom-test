@@ -135,7 +135,7 @@ vm.module core(0.0) {
       control.block
       control.call @import0 {direct_ref_move_mask = 0x0000}
       %r1 = ref.move %r0
-      %r0 = ref.retain %r1
+      %r0 = ref.copy %r1
       control.call @import1 {direct_ref_move_mask = 0x0001}
       %r0 = ref.move %r1
       control.call @import1 {direct_ref_move_mask = 0x0001}
@@ -215,11 +215,11 @@ vm.module core(0.0) {
     ^bb0:
       control.block
       control.call @import0 {direct_ref_move_mask = 0x0000}
-      ref.stack.store.retain %r0, #r0
+      ref.stack.store.copy %r0, #r0
       ref.discard %r0
-      %r0 = ref.stack.load.retain #r0
+      %r0 = ref.stack.load.copy #r0
       control.call @import1 {direct_ref_move_mask = 0x0001}
-      %r0 = ref.stack.load.retain #r0
+      %r0 = ref.stack.load.copy #r0
       control.call @import1 {direct_ref_move_mask = 0x0001}
       control.return
     }
