@@ -1929,6 +1929,7 @@ _BASE_DESCRIPTOR_SPECS = (
         "register.move.carry-to-scalar",
         "II_MOV_alu_mv_mv_mv_scl",
         (("dst", "eR"), ("src", "mSRCarry")),
+        implicit_inputs=("src",),
         asm_mnemonic="mov.carry",
     ),
     _DescriptorSpec(

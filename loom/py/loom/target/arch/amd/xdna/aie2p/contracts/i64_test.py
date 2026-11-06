@@ -59,6 +59,7 @@ def _evaluate_rule(
         ValueRef.operand("lhs"): _split_i64(lhs),
         ValueRef.operand("rhs"): _split_i64(rhs),
     }
+    carry_state = 0
     for emit in rule.emit:
         if isinstance(emit, EmitRegisterSlice):
             source = values[emit.source]
@@ -102,16 +103,18 @@ def _evaluate_rule(
             )
             assert isinstance(rhs_value, int)
             result = operands["s0"] + rhs_value + operands.get("carry_in", 0)
+            carry_state = int(result > _U32_MASK)
             if "carry_out" in emit.results:
-                values[emit.results["carry_out"]] = int(result > _U32_MASK)
+                values[emit.results["carry_out"]] = carry_state
         elif semantic_tag in (
             "integer.sub.i32",
             "integer.sub.borrow_out.i32",
             "integer.sub.borrow_in_out.i32",
         ):
             result = operands["s0"] - operands["s1"] - operands.get("carry_in", 0)
+            carry_state = int(result < 0)
             if "carry_out" in emit.results:
-                values[emit.results["carry_out"]] = int(result < 0)
+                values[emit.results["carry_out"]] = carry_state
         elif semantic_tag == "integer.lshl.i32":
             result = _logical_shift(operands["s0"], operands["s1"])
         elif semantic_tag == "integer.ashl.i32":
@@ -129,9 +132,10 @@ def _evaluate_rule(
         elif semantic_tag in (
             "register.move.to.division-state",
             "register.move.from.division-state",
-            "register.move.carry-to-scalar",
         ):
             result = operands["src"]
+        elif semantic_tag == "register.move.carry-to-scalar":
+            result = carry_state
         elif semantic_tag == "integer.divide.step.unsigned.i32":
             state = operands["sd"]
             remainder = _u32((operands["s0"] << 1) | (state >> 31))

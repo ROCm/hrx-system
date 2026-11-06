@@ -220,7 +220,6 @@ def _pair_add_sub_rule(
         flag_materialization = (
             EmitDescriptorOp(
                 descriptor=carry_to_scalar,
-                operands={"src": carry_high},
                 results={"dst": ValueRef.result(flag_result)},
                 form=DescriptorEmitForm.OP,
             ),

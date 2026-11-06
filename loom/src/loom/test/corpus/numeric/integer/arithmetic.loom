@@ -155,22 +155,30 @@ check.scenario @integer_arithmetic_i64_values {
   check.return
 }
 
-// Exercises every fixed integer width through one runtime input pair. Results
-// are widened only after the operation so carry and borrow retain the source
-// width's unsigned boundary.
+// Exercises every multiprecision builtin width through one runtime input
+// triple and retains direct i1 extended-operation coverage. The third operand
+// is deliberately full-width rather than restricted to zero or one, matching
+// the builtin contract. Results are widened only after the operation so carry
+// and borrow retain the source width's unsigned boundary.
 func.def @extended_unsigned_arithmetic_observations(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %i1_base = index.constant 128 : offset
-  %inputs = buffer.view %input[%base] : buffer -> view<2xi64>
+  %inputs = buffer.view %input[%base] : buffer -> view<3xi64>
   %results = buffer.view %output[%base] : buffer -> view<16xi64>
   %i1_results = buffer.view %output[%i1_base] : buffer -> view<4xi64>
-  %lhs_bits = view.load %inputs[0] : view<2xi64> -> i64
-  %rhs_bits = view.load %inputs[1] : view<2xi64> -> i64
+  %lhs_bits = view.load %inputs[0] : view<3xi64> -> i64
+  %rhs_bits = view.load %inputs[1] : view<3xi64> -> i64
+  %carry_input_bits = view.load %inputs[2] : view<3xi64> -> i64
 
   %lhs8 = scalar.trunci %lhs_bits : i64 to i8
   %rhs8 = scalar.trunci %rhs_bits : i64 to i8
-  %sum8, %carry8 = scalar.addui_extended %lhs8, %rhs8 : i8
-  %difference8, %borrow8 = scalar.subui_extended %lhs8, %rhs8 : i8
+  %carry_input8 = scalar.trunci %carry_input_bits : i64 to i8
+  %partial_sum8, %initial_carry8 = scalar.addui_extended %lhs8, %rhs8 : i8
+  %sum8, %input_carry8 = scalar.addui_extended %partial_sum8, %carry_input8 : i8
+  %carry8 = scalar.ori %initial_carry8, %input_carry8 : i1
+  %partial_difference8, %initial_borrow8 = scalar.subui_extended %lhs8, %rhs8 : i8
+  %difference8, %input_borrow8 = scalar.subui_extended %partial_difference8, %carry_input8 : i8
+  %borrow8 = scalar.ori %initial_borrow8, %input_borrow8 : i1
   %sum8_wide = scalar.extui %sum8 : i8 to i64
   %carry8_wide = scalar.extui %carry8 : i1 to i64
   %difference8_wide = scalar.extui %difference8 : i8 to i64
@@ -182,8 +190,13 @@ func.def @extended_unsigned_arithmetic_observations(%input: buffer, %output: buf
 
   %lhs16 = scalar.trunci %lhs_bits : i64 to i16
   %rhs16 = scalar.trunci %rhs_bits : i64 to i16
-  %sum16, %carry16 = scalar.addui_extended %lhs16, %rhs16 : i16
-  %difference16, %borrow16 = scalar.subui_extended %lhs16, %rhs16 : i16
+  %carry_input16 = scalar.trunci %carry_input_bits : i64 to i16
+  %partial_sum16, %initial_carry16 = scalar.addui_extended %lhs16, %rhs16 : i16
+  %sum16, %input_carry16 = scalar.addui_extended %partial_sum16, %carry_input16 : i16
+  %carry16 = scalar.ori %initial_carry16, %input_carry16 : i1
+  %partial_difference16, %initial_borrow16 = scalar.subui_extended %lhs16, %rhs16 : i16
+  %difference16, %input_borrow16 = scalar.subui_extended %partial_difference16, %carry_input16 : i16
+  %borrow16 = scalar.ori %initial_borrow16, %input_borrow16 : i1
   %sum16_wide = scalar.extui %sum16 : i16 to i64
   %carry16_wide = scalar.extui %carry16 : i1 to i64
   %difference16_wide = scalar.extui %difference16 : i16 to i64
@@ -195,8 +208,13 @@ func.def @extended_unsigned_arithmetic_observations(%input: buffer, %output: buf
 
   %lhs32 = scalar.trunci %lhs_bits : i64 to i32
   %rhs32 = scalar.trunci %rhs_bits : i64 to i32
-  %sum32, %carry32 = scalar.addui_extended %lhs32, %rhs32 : i32
-  %difference32, %borrow32 = scalar.subui_extended %lhs32, %rhs32 : i32
+  %carry_input32 = scalar.trunci %carry_input_bits : i64 to i32
+  %partial_sum32, %initial_carry32 = scalar.addui_extended %lhs32, %rhs32 : i32
+  %sum32, %input_carry32 = scalar.addui_extended %partial_sum32, %carry_input32 : i32
+  %carry32 = scalar.ori %initial_carry32, %input_carry32 : i1
+  %partial_difference32, %initial_borrow32 = scalar.subui_extended %lhs32, %rhs32 : i32
+  %difference32, %input_borrow32 = scalar.subui_extended %partial_difference32, %carry_input32 : i32
+  %borrow32 = scalar.ori %initial_borrow32, %input_borrow32 : i1
   %sum32_wide = scalar.extui %sum32 : i32 to i64
   %carry32_wide = scalar.extui %carry32 : i1 to i64
   %difference32_wide = scalar.extui %difference32 : i32 to i64
@@ -206,8 +224,12 @@ func.def @extended_unsigned_arithmetic_observations(%input: buffer, %output: buf
   view.store %difference32_wide, %results[10] : i64, view<16xi64>
   view.store %borrow32_wide, %results[11] : i64, view<16xi64>
 
-  %sum64, %carry64 = scalar.addui_extended %lhs_bits, %rhs_bits : i64
-  %difference64, %borrow64 = scalar.subui_extended %lhs_bits, %rhs_bits : i64
+  %partial_sum64, %initial_carry64 = scalar.addui_extended %lhs_bits, %rhs_bits : i64
+  %sum64, %input_carry64 = scalar.addui_extended %partial_sum64, %carry_input_bits : i64
+  %carry64 = scalar.ori %initial_carry64, %input_carry64 : i1
+  %partial_difference64, %initial_borrow64 = scalar.subui_extended %lhs_bits, %rhs_bits : i64
+  %difference64, %input_borrow64 = scalar.subui_extended %partial_difference64, %carry_input_bits : i64
+  %borrow64 = scalar.ori %initial_borrow64, %input_borrow64 : i1
   %carry64_wide = scalar.extui %carry64 : i1 to i64
   %borrow64_wide = scalar.extui %borrow64 : i1 to i64
   view.store %sum64, %results[12] : i64, view<16xi64>
@@ -235,18 +257,26 @@ func.def @extended_unsigned_arithmetic_observations(%input: buffer, %output: buf
 func.def @extended_unsigned_arithmetic_oracle(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %i1_base = index.constant 128 : offset
-  %inputs = buffer.view %input[%base] : buffer -> view<2xi64>
+  %inputs = buffer.view %input[%base] : buffer -> view<3xi64>
   %results = buffer.view %output[%base] : buffer -> view<16xi64>
   %i1_results = buffer.view %output[%i1_base] : buffer -> view<4xi64>
-  %lhs_bits = view.load %inputs[0] : view<2xi64> -> i64
-  %rhs_bits = view.load %inputs[1] : view<2xi64> -> i64
+  %lhs_bits = view.load %inputs[0] : view<3xi64> -> i64
+  %rhs_bits = view.load %inputs[1] : view<3xi64> -> i64
+  %carry_input_bits = view.load %inputs[2] : view<3xi64> -> i64
 
   %lhs8 = scalar.trunci %lhs_bits : i64 to i8
   %rhs8 = scalar.trunci %rhs_bits : i64 to i8
-  %sum8 = scalar.addi %lhs8, %rhs8 : i8
-  %carry8 = scalar.cmpi ult, %sum8, %lhs8 : i8
-  %difference8 = scalar.subi %lhs8, %rhs8 : i8
-  %borrow8 = scalar.cmpi ult, %lhs8, %rhs8 : i8
+  %carry_input8 = scalar.trunci %carry_input_bits : i64 to i8
+  %partial_sum8 = scalar.addi %lhs8, %rhs8 : i8
+  %initial_carry8 = scalar.cmpi ult, %partial_sum8, %lhs8 : i8
+  %sum8 = scalar.addi %partial_sum8, %carry_input8 : i8
+  %input_carry8 = scalar.cmpi ult, %sum8, %partial_sum8 : i8
+  %carry8 = scalar.ori %initial_carry8, %input_carry8 : i1
+  %partial_difference8 = scalar.subi %lhs8, %rhs8 : i8
+  %initial_borrow8 = scalar.cmpi ult, %lhs8, %rhs8 : i8
+  %difference8 = scalar.subi %partial_difference8, %carry_input8 : i8
+  %input_borrow8 = scalar.cmpi ult, %partial_difference8, %carry_input8 : i8
+  %borrow8 = scalar.ori %initial_borrow8, %input_borrow8 : i1
   %sum8_wide = scalar.extui %sum8 : i8 to i64
   %carry8_wide = scalar.extui %carry8 : i1 to i64
   %difference8_wide = scalar.extui %difference8 : i8 to i64
@@ -258,10 +288,17 @@ func.def @extended_unsigned_arithmetic_oracle(%input: buffer, %output: buffer) {
 
   %lhs16 = scalar.trunci %lhs_bits : i64 to i16
   %rhs16 = scalar.trunci %rhs_bits : i64 to i16
-  %sum16 = scalar.addi %lhs16, %rhs16 : i16
-  %carry16 = scalar.cmpi ult, %sum16, %lhs16 : i16
-  %difference16 = scalar.subi %lhs16, %rhs16 : i16
-  %borrow16 = scalar.cmpi ult, %lhs16, %rhs16 : i16
+  %carry_input16 = scalar.trunci %carry_input_bits : i64 to i16
+  %partial_sum16 = scalar.addi %lhs16, %rhs16 : i16
+  %initial_carry16 = scalar.cmpi ult, %partial_sum16, %lhs16 : i16
+  %sum16 = scalar.addi %partial_sum16, %carry_input16 : i16
+  %input_carry16 = scalar.cmpi ult, %sum16, %partial_sum16 : i16
+  %carry16 = scalar.ori %initial_carry16, %input_carry16 : i1
+  %partial_difference16 = scalar.subi %lhs16, %rhs16 : i16
+  %initial_borrow16 = scalar.cmpi ult, %lhs16, %rhs16 : i16
+  %difference16 = scalar.subi %partial_difference16, %carry_input16 : i16
+  %input_borrow16 = scalar.cmpi ult, %partial_difference16, %carry_input16 : i16
+  %borrow16 = scalar.ori %initial_borrow16, %input_borrow16 : i1
   %sum16_wide = scalar.extui %sum16 : i16 to i64
   %carry16_wide = scalar.extui %carry16 : i1 to i64
   %difference16_wide = scalar.extui %difference16 : i16 to i64
@@ -273,10 +310,17 @@ func.def @extended_unsigned_arithmetic_oracle(%input: buffer, %output: buffer) {
 
   %lhs32 = scalar.trunci %lhs_bits : i64 to i32
   %rhs32 = scalar.trunci %rhs_bits : i64 to i32
-  %sum32 = scalar.addi %lhs32, %rhs32 : i32
-  %carry32 = scalar.cmpi ult, %sum32, %lhs32 : i32
-  %difference32 = scalar.subi %lhs32, %rhs32 : i32
-  %borrow32 = scalar.cmpi ult, %lhs32, %rhs32 : i32
+  %carry_input32 = scalar.trunci %carry_input_bits : i64 to i32
+  %partial_sum32 = scalar.addi %lhs32, %rhs32 : i32
+  %initial_carry32 = scalar.cmpi ult, %partial_sum32, %lhs32 : i32
+  %sum32 = scalar.addi %partial_sum32, %carry_input32 : i32
+  %input_carry32 = scalar.cmpi ult, %sum32, %partial_sum32 : i32
+  %carry32 = scalar.ori %initial_carry32, %input_carry32 : i1
+  %partial_difference32 = scalar.subi %lhs32, %rhs32 : i32
+  %initial_borrow32 = scalar.cmpi ult, %lhs32, %rhs32 : i32
+  %difference32 = scalar.subi %partial_difference32, %carry_input32 : i32
+  %input_borrow32 = scalar.cmpi ult, %partial_difference32, %carry_input32 : i32
+  %borrow32 = scalar.ori %initial_borrow32, %input_borrow32 : i1
   %sum32_wide = scalar.extui %sum32 : i32 to i64
   %carry32_wide = scalar.extui %carry32 : i1 to i64
   %difference32_wide = scalar.extui %difference32 : i32 to i64
@@ -286,10 +330,16 @@ func.def @extended_unsigned_arithmetic_oracle(%input: buffer, %output: buffer) {
   view.store %difference32_wide, %results[10] : i64, view<16xi64>
   view.store %borrow32_wide, %results[11] : i64, view<16xi64>
 
-  %sum64 = scalar.addi %lhs_bits, %rhs_bits : i64
-  %carry64 = scalar.cmpi ult, %sum64, %lhs_bits : i64
-  %difference64 = scalar.subi %lhs_bits, %rhs_bits : i64
-  %borrow64 = scalar.cmpi ult, %lhs_bits, %rhs_bits : i64
+  %partial_sum64 = scalar.addi %lhs_bits, %rhs_bits : i64
+  %initial_carry64 = scalar.cmpi ult, %partial_sum64, %lhs_bits : i64
+  %sum64 = scalar.addi %partial_sum64, %carry_input_bits : i64
+  %input_carry64 = scalar.cmpi ult, %sum64, %partial_sum64 : i64
+  %carry64 = scalar.ori %initial_carry64, %input_carry64 : i1
+  %partial_difference64 = scalar.subi %lhs_bits, %rhs_bits : i64
+  %initial_borrow64 = scalar.cmpi ult, %lhs_bits, %rhs_bits : i64
+  %difference64 = scalar.subi %partial_difference64, %carry_input_bits : i64
+  %input_borrow64 = scalar.cmpi ult, %partial_difference64, %carry_input_bits : i64
+  %borrow64 = scalar.ori %initial_borrow64, %input_borrow64 : i1
   %carry64_wide = scalar.extui %carry64 : i1 to i64
   %borrow64_wide = scalar.extui %borrow64 : i1 to i64
   view.store %sum64, %results[12] : i64, view<16xi64>
@@ -312,7 +362,7 @@ func.def @extended_unsigned_arithmetic_oracle(%input: buffer, %output: buffer) {
   func.return
 }
 
-func.def @extended_unsigned_arithmetic_boundary_input(%trial: index) -> (i64, i64) {
+func.def @extended_unsigned_arithmetic_boundary_input(%trial: index) -> (i64, i64, i64) {
   %first = index.constant 0 : index
   %is_first = index.cmp eq, %trial, %first : index
   %c0 = scalar.constant 0 : i64
@@ -320,36 +370,40 @@ func.def @extended_unsigned_arithmetic_boundary_input(%trial: index) -> (i64, i6
   %maximum = scalar.constant -1 : i64
   %lhs = scf.select %is_first, %maximum, %c0 : i64
   %rhs = scf.select %is_first, %c1, %maximum : i64
-  func.return %lhs, %rhs : i64, i64
+  %carry_input = scf.select %is_first, %maximum, %c1 : i64
+  func.return %lhs, %rhs, %carry_input : i64, i64, i64
 }
 
-func.def @extended_unsigned_arithmetic_input(%lhs: i64, %rhs: i64, %input: buffer) {
+func.def @extended_unsigned_arithmetic_input(%lhs: i64, %rhs: i64, %carry_input: i64, %input: buffer) {
   %base = index.constant 0 : offset
-  %values = buffer.view %input[%base] : buffer -> view<2xi64>
-  view.store %lhs, %values[0] : i64, view<2xi64>
-  view.store %rhs, %values[1] : i64, view<2xi64>
+  %values = buffer.view %input[%base] : buffer -> view<3xi64>
+  view.store %lhs, %values[0] : i64, view<3xi64>
+  view.store %rhs, %values[1] : i64, view<3xi64>
+  view.store %carry_input, %values[2] : i64, view<3xi64>
   func.return
 }
 
 check.scenario @extended_unsigned_arithmetic_values {
   check.trial[2](%trial: index, %entropy: check.entropy) {
-    %lhs, %rhs = check.generate<@extended_unsigned_arithmetic_boundary_input>(%trial) : (index) -> (i64, i64)
-    %input = check.generate.fill value(0) : tensor<2xi64>
-    check.generate<@extended_unsigned_arithmetic_input>(%lhs, %rhs, %input) : (i64, i64, tensor<2xi64>) -> ()
+    %lhs, %rhs, %carry_input = check.generate<@extended_unsigned_arithmetic_boundary_input>(%trial) : (index) -> (i64, i64, i64)
+    %input = check.generate.fill value(0) : tensor<3xi64>
+    check.generate<@extended_unsigned_arithmetic_input>(%lhs, %rhs, %carry_input, %input) : (i64, i64, i64, tensor<3xi64>) -> ()
     %output = check.generate.fill value(0) : tensor<20xi64>
-    check.compare<@extended_unsigned_arithmetic_observations, @extended_unsigned_arithmetic_oracle>(%input, %output) : (tensor<2xi64>, tensor<20xi64>) -> () {
+    check.compare<@extended_unsigned_arithmetic_observations, @extended_unsigned_arithmetic_oracle>(%input, %output) : (tensor<3xi64>, tensor<20xi64>) -> () {
       check.expect.bitwise actual(%output) expected(%output) : tensor<20xi64>
     }
   }
   check.trial[256](%trial: index, %entropy: check.entropy) {
     %lhs_entropy = check.entropy.fork %entropy name("lhs") : check.entropy
     %rhs_entropy = check.entropy.fork %entropy name("rhs") : check.entropy
+    %carry_entropy = check.entropy.fork %entropy name("carry") : check.entropy
     %lhs = check.entropy.read %lhs_entropy[%trial] : check.entropy -> i64
     %rhs = check.entropy.read %rhs_entropy[%trial] : check.entropy -> i64
-    %input = check.generate.fill value(0) : tensor<2xi64>
-    check.generate<@extended_unsigned_arithmetic_input>(%lhs, %rhs, %input) : (i64, i64, tensor<2xi64>) -> ()
+    %carry_input = check.entropy.read %carry_entropy[%trial] : check.entropy -> i64
+    %input = check.generate.fill value(0) : tensor<3xi64>
+    check.generate<@extended_unsigned_arithmetic_input>(%lhs, %rhs, %carry_input, %input) : (i64, i64, i64, tensor<3xi64>) -> ()
     %output = check.generate.fill value(0) : tensor<20xi64>
-    check.compare<@extended_unsigned_arithmetic_observations, @extended_unsigned_arithmetic_oracle>(%input, %output) : (tensor<2xi64>, tensor<20xi64>) -> () {
+    check.compare<@extended_unsigned_arithmetic_observations, @extended_unsigned_arithmetic_oracle>(%input, %output) : (tensor<3xi64>, tensor<20xi64>) -> () {
       check.expect.bitwise actual(%output) expected(%output) : tensor<20xi64>
     }
   }

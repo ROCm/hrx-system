@@ -2191,11 +2191,18 @@ def test_implicit_registers_and_machine_ties_reach_low() -> None:
         assert carry_use.read_stage == 1
 
     carry_move = descriptors["amd.xdna.aie2p.move.carry-to-scalar"]
-    assert [operand.field_name for operand in carry_move.operands] == ["dst", "src"]
+    assert [operand.field_name for operand in carry_move.operands] == [
+        "dst",
+        "implicit_input_src",
+    ]
     assert [operand.reg_alts[0].reg_class for operand in carry_move.operands] == [
         "aie2p.er",
         "aie2p.msrcarry",
     ]
+    assert carry_move.operands[1].flags == (
+        OperandFlag.IMPLICIT,
+        OperandFlag.STATE_READ,
+    )
     assert carry_move.asm_forms[0].mnemonic == "mov.carry"
 
     link_register = descriptors["amd.xdna.aie2p.return"].operands[0]
