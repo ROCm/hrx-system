@@ -39,6 +39,7 @@ iree_status_t iree_hal_amd_gpu_profile_executable_create(
 
 // Appends a newly placed queue variant to the retained host history. Flush
 // serializes the resulting load records independently of native image lifetime.
+// The executable serializes additions; flush may run concurrently with them.
 // NULL metadata requires no work; failure leaves the prior history unchanged.
 iree_status_t iree_hal_amd_gpu_profile_executable_add_load(
     iree_hal_amd_gpu_profile_executable_t* metadata, uint64_t virtual_base,
@@ -133,9 +134,10 @@ iree_status_t iree_hal_amd_gpu_profile_begin(
 
 // Prepares one device-assigned coordinate before the queue accepts work.
 // Existing streams and their completed records remain stable through queue
-// replacement. Serializes native stream metadata with explicit flush, without
-// stopping other producers. NULL is a no-op; failure leaves the coordinate
-// unregistered.
+// replacement. The caller serializes registration per coordinate; registration
+// may overlap flush and other producers. Metadata is emitted by explicit flush
+// before any events from the new stream. No sink callback runs during
+// registration. NULL is a no-op; failure leaves the coordinate unregistered.
 iree_status_t iree_hal_amd_gpu_profile_register_queue(
     iree_hal_amd_gpu_profile_t* profile, uint32_t queue_ordinal);
 
