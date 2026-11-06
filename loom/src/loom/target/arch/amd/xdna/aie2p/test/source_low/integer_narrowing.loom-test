@@ -131,3 +131,24 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @trunci_i8x31_i1x3
   %result = vlt.u8x64 %13, %11
   return %result
 }
+
+// ====
+
+func.def @scalar_trunci_predicate(%input8: i8, %input16: i16, %input32: i32, %input64: i64) -> (i1, i1, i1, i1) {
+  %result8 = scalar.trunci %input8 : i8 to i1
+  %result16 = scalar.trunci %input16 : i16 to i1
+  %result32 = scalar.trunci %input32 : i32 to i1
+  %result64 = scalar.trunci %input64 : i64 to i1
+  func.return %result8, %result16, %result32, %result64 : i1, i1, i1, i1
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_trunci_predicate(%input8: reg<aie2p.er>, %input16: reg<aie2p.er>, %input32: reg<aie2p.er>, %input64: reg<aie2p.er x2>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %20 = mov.short 1
+  %result8 = and %input8, %20
+  %result16 = and %input16, %20
+  %result32 = and %input32, %20
+  %26 = slice %input64[0] : reg<aie2p.er x2> -> reg<aie2p.er>
+  %result64 = and %26, %20
+  return %result8, %result16, %result32, %result64
+}

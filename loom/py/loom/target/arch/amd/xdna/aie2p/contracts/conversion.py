@@ -36,6 +36,7 @@ from loom.target.contracts import (
 )
 from loom.target.low_descriptors import Descriptor
 
+_I1 = Scalar("i1")
 _I8 = Scalar("i8")
 _I16 = Scalar("i16")
 _I32 = Scalar("i32")
@@ -1353,6 +1354,33 @@ def _integer_truncate_alias_rule(
     )
 
 
+def _integer_to_predicate_rule(input_type: Scalar) -> DescriptorRule:
+    source = ValueRef.operand("input")
+    prefix: tuple[EmitRegisterSlice, ...] = ()
+    if input_type == _I64:
+        source = ValueRef.temporary("low_word")
+        prefix = (
+            EmitRegisterSlice(
+                source=ValueRef.operand("input"),
+                result=source,
+                unit_count=1,
+            ),
+        )
+
+    program = ScalarProgram()
+    low_bit = program.constant("low_bit", 1)
+    program.binary(None, "and.i32", source, low_bit)
+    return DescriptorRule(
+        source_op=scalar_conversion.scalar_trunci,
+        descriptor=program.emits[-1].descriptor,
+        guards=(
+            Guard.value_type("input", input_type),
+            Guard.value_type("result", _I1),
+        ),
+        emit=(*prefix, *program.emits),
+    )
+
+
 def _integer_to_i64_rule(
     source_op: Op,
     input_type: Scalar,
@@ -1453,6 +1481,7 @@ AIE2P_CONVERSION_RULES = (
             (_I32, _I16),
         )
     ),
+    *(_integer_to_predicate_rule(input_type) for input_type in (_I8, _I16, _I32, _I64)),
     *(
         _integer_to_i64_rule(
             source_op,
