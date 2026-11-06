@@ -496,6 +496,16 @@ loom_test(
 )
 
 loom_test(
+    name = "function_specializations_test",
+    execution_profiles = [
+        VM_REFERENCE_PROFILE,
+        X86_TASK_HARDWARE_PROFILE,
+    ],
+    module = ":function_specializations_module",
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_test(
     name = "immutable_objects_test",
     srcs = ["immutable_objects.cxx"],
     execution_profiles = [VM_REFERENCE_PROFILE],
@@ -837,6 +847,7 @@ loom_test_module(
         "control_flow",
         "early_returns",
         "enum_values",
+        "function_specializations",
         "integer_increment",
         "mxfp_group_dot",
         "opaque_pointers",

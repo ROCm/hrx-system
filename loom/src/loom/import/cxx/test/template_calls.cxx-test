@@ -32,3 +32,78 @@ constexpr int offset(T value) { return geometry::offset<3>(value); }
 static_assert(offset(7) == 10);
 constexpr int value = 7;
 static_assert(offset(&value) == 13);
+
+// ====
+// Explicit specializations retain their primary overload when another arity
+// is introduced after the first specialization.
+namespace {
+template <class Word>
+constexpr unsigned rotation(unsigned round) = delete;
+template <>
+constexpr unsigned rotation<unsigned>(unsigned round) { return round + 3; }
+template <>
+constexpr unsigned rotation<unsigned long long>(unsigned round) {
+  return round + 7;
+}
+template <class Word>
+constexpr unsigned rotation(unsigned round, unsigned lane) = delete;
+template <>
+constexpr unsigned rotation<unsigned>(unsigned round, unsigned lane) {
+  return round + lane + 11;
+}
+template <>
+constexpr unsigned rotation<unsigned long long>(unsigned round, unsigned lane) {
+  return round + lane + 19;
+}
+static_assert(rotation<unsigned>(5) == 8);
+static_assert(rotation<unsigned long long>(5) == 12);
+static_assert(rotation<unsigned>(5, 2) == 18);
+static_assert(rotation<unsigned long long>(5, 2) == 26);
+}
+
+// ====
+// Same-arity primaries remain distinct by parameter type. Explicit and
+// deduced specializations/calls must select the same corresponding bodies.
+namespace {
+namespace algorithm {
+template <class Type>
+constexpr unsigned select(Type value) = delete;
+template <class Type>
+constexpr unsigned select(const Type* value) = delete;
+template <>
+constexpr unsigned select<unsigned>(const unsigned* value) { return *value + 17; }
+template <>
+constexpr unsigned select(unsigned value) { return value + 5; }
+}
+constexpr unsigned value = 23;
+static_assert(algorithm::select(value) == 28);
+static_assert(algorithm::select<unsigned>(value) == 28);
+static_assert(algorithm::select(&value) == 40);
+static_assert(algorithm::select<unsigned>(&value) == 40);
+}
+
+// ====
+// A declaration and its out-of-namespace definition name the same selected
+// primary, even when every overload is declared before any specialization.
+namespace {
+namespace algorithm {
+template <class Type>
+constexpr unsigned combine(Type) = delete;
+template <class Type>
+constexpr unsigned combine(Type, unsigned) = delete;
+template <>
+constexpr unsigned combine<unsigned>(unsigned, unsigned);
+template <>
+constexpr unsigned combine<unsigned>(unsigned);
+}
+template <>
+constexpr unsigned algorithm::combine<unsigned>(unsigned value) {
+  return value + 7;
+}
+template <>
+constexpr unsigned algorithm::combine<unsigned>(unsigned value, unsigned bias) {
+  return value + bias + 13;
+}
+static_assert(algorithm::combine(11u) == 18);
+static_assert(algorithm::combine(11u, 3u) == 27);
+}
