@@ -463,6 +463,7 @@ jobs:
             command: iree-bazel-repository-build
             host_toolchain: clang-cl
             platform_coverage: true
+            remote_cache: true
             runner: azure-windows-scale-rocm
             target_selector: gfx11-generic
           - name: Clang CL / Fastbuild / Shared Tools
@@ -490,6 +491,10 @@ jobs:
     timeout-minutes: ${{ matrix.kind == 'amd_client' && 45 || 60 }}
     env:
       BAZEL_LLVM: ${{ github.workspace }}\build\${{ matrix.kind == 'amd_client' && 'iree-bazel-client' || 'iree-bazel-windows' }}\rocm-root\lib\llvm
+      IREE_CI_BAZEL_REMOTE_CACHE: ${{ matrix.remote_cache && '1' || '0' }}
+      # Pull requests consume shared entries but never publish branch-specific
+      # action results; HRX only populates the cache from main pushes.
+      IREE_CI_BAZEL_REMOTE_UPLOAD: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       IREE_CI_PLATFORM_COVERAGE: ${{ matrix.platform_coverage && '1' || '0' }}
       HRX_ARTIFACT_SET: core
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}\build\${{ matrix.kind == 'amd_client' && 'iree-bazel-client' || 'iree-bazel-windows' }}\downloads
@@ -636,6 +641,18 @@ jobs:
           # their native processor count.
           "build --jobs=$env:IREE_CI_BAZEL_JOBS" |
             Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+          if ($env:IREE_CI_BAZEL_REMOTE_CACHE -eq '1') {
+            $cacheStatus = Invoke-RestMethod `
+              -Uri 'http://bazelremote-svc.bazelremote-ns.svc.cluster.local:8080/status' `
+              -Method Get -TimeoutSec 10
+            Write-Output "ROCm CI Bazel cache: $($cacheStatus | ConvertTo-Json -Compress)"
+            "build --config=rocm-ci-cache" |
+              Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+            if ($env:IREE_CI_BAZEL_REMOTE_UPLOAD -ne 'true') {
+              "build --remote_upload_local_results=false" |
+                Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+            }
+          }
           if ("${{ matrix.kind }}" -eq "repository") {
             if ("${{ matrix.host_toolchain }}" -eq "clang-cl") {
               # The platform lane's Python and shell tests materialize large
