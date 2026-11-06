@@ -50,9 +50,11 @@ test:rocm-ci-cache --cache_test_results=no
 # Bazel's top-level download policy can otherwise leave cached executables
 # behind local Windows executable-wrapper actions and current-invocation test
 # evidence behind CI result staging. Materialize those local consumer inputs
-# without downloading cached object and archive intermediates.
+# without downloading cached object and archive intermediates, and keep the
+# build-event references local so result staging can consume that evidence.
 test:rocm-ci-cache --remote_download_regex=.*[.]exe$
 test:rocm-ci-cache --remote_download_regex=.*test[.](log|xml)$
+test:rocm-ci-cache --nobuild_event_json_file_path_conversion
 
 # -----------------------------------------------------------------------------
 # Local build defaults.
