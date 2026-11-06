@@ -44,7 +44,10 @@ http_archive(
     name = "libbacktrace",
     build_file = "//build_tools/third_party/libbacktrace:libbacktrace.BUILD.bazel",
     patch_args = ["-p1"],
-    patches = ["//build_tools/third_party/libbacktrace:threaded_cache_reads.patch"],
+    patches = [
+        "//build_tools/third_party/libbacktrace:threaded_cache_reads.patch",
+        "//build_tools/third_party/libbacktrace:ignore_nonruntime_symbols.patch",
+    ],
     sha256 = "858b1225351052234f7e71f0f36622fc9ad33aac947db7816d0b443ae0dd33ce",
     strip_prefix = "libbacktrace-793921876c981ce49759114d7bb89bb89b2d3a2d",
     url = "https://github.com/ianlancetaylor/libbacktrace/archive/793921876c981ce49759114d7bb89bb89b2d3a2d.tar.gz",

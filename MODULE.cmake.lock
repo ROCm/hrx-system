@@ -176,6 +176,7 @@ set(IREE_DEP_LIBBACKTRACE_STRIP_PREFIX "libbacktrace-793921876c981ce49759114d7bb
 set(IREE_DEP_LIBBACKTRACE_BUILD_FILE "//build_tools/third_party/libbacktrace:libbacktrace.BUILD.bazel")
 set(IREE_DEP_LIBBACKTRACE_PATCHES
   "//build_tools/third_party/libbacktrace:threaded_cache_reads.patch"
+  "//build_tools/third_party/libbacktrace:ignore_nonruntime_symbols.patch"
 )
 set(IREE_DEP_LIBBACKTRACE_PATCH_ARGS
   "-p1"
