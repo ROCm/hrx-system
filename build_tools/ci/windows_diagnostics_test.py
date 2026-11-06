@@ -343,6 +343,78 @@ class WindowsDiagnosticsTest(unittest.TestCase):
             self.assertNotIn("A_SECRET", manifest_text)
             self.assertNotIn("not captured", manifest_text)
 
+    def test_generator_output_ebadf_preserves_only_bazel_output_boundary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output_root = root / "bazel-out"
+            generated = output_root / "x64_windows-opt-exec/bin/pkg/generated"
+            generated.mkdir(parents=True)
+            (generated / "sibling.h").write_text("retained output\n")
+            failed_output = generated / "catalog.c"
+            outside = root / "host-secret"
+            outside.write_text("must not be inspected\n")
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            relative_output = str(failed_output.relative_to(root))
+            (artifacts / "output.log").write_text(
+                "path.write_text(contents, encoding='utf-8')\n"
+                "return io.open(self, mode, buffering, encoding, errors, newline)\n"
+                f"OSError: [Errno 9] Bad file descriptor: {relative_output!r}\n"
+                f"OSError: [Errno 9] Bad file descriptor: {str(outside)!r}\n"
+            )
+
+            diagnostics.capture_failure(
+                artifacts,
+                root,
+                {"PATH": ""},
+                None,
+                started_at=dt.datetime.now(dt.UTC),
+            )
+
+            manifest = json.loads((artifacts / "manifest.json").read_text())
+            files = {record["path"]: record for record in manifest["files"]}
+            self.assertIn(str(failed_output), files)
+            self.assertEqual(files[str(failed_output)]["errno"], 2)
+            self.assertNotIn(str(outside), files)
+            directories = {record["path"]: record for record in manifest["directories"]}
+            self.assertEqual(directories[str(generated)]["entries"], ["sibling.h"])
+            self.assertEqual(
+                directories[str(generated)]["resolved_path"], str(generated)
+            )
+            self.assertIn(str(output_root), directories)
+            self.assertNotIn(str(root), directories)
+            if os.name == "nt":
+                tools = {entry["output"]: entry for entry in manifest["tools"]}
+                for name in (
+                    "windows-file-access",
+                    "windows-volume-info",
+                    "windows-filter-instances",
+                ):
+                    output_name, tool = next(
+                        (output_name, tool)
+                        for output_name, tool in tools.items()
+                        if name in output_name
+                    )
+                    self.assertEqual(
+                        tool.get("returncode"),
+                        0,
+                        (tool, (artifacts / output_name).read_text(errors="replace")),
+                    )
+                access_output = next(
+                    artifacts / name for name in tools if "windows-file-access" in name
+                )
+                observations = [
+                    json.loads(line) for line in access_output.read_text().splitlines()
+                ]
+                file_access = [entry["file_access"] for entry in observations]
+                self.assertEqual(file_access[0]["read"]["winerror"], 2)
+                self.assertTrue(
+                    all(
+                        entry["read_directory"]["winerror"] == 0
+                        for entry in file_access[1:]
+                    )
+                )
+
     def test_failed_process_image_survives_rebuild_and_resource_query_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

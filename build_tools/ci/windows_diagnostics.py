@@ -18,6 +18,7 @@ Missing files, access errors, and capture limits appear in the manifest.
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import datetime as dt
 import hashlib
@@ -52,6 +53,7 @@ LOCAL_DUMPS_REGISTRY_PATH = (
 )
 LOCAL_DUMPS_REGISTRY_VALUES = ("DumpFolder", "DumpCount", "DumpType")
 BINARY_SUFFIXES = {".obj", ".lib", ".o", ".a"}
+MAX_DIRECTORY_ENTRIES = 256
 ENVIRONMENT_KEYS = {
     "CC",
     "CXX",
@@ -91,6 +93,8 @@ class Capture:
         self.environment = environment
         # Original absolute paths identify copied bytes and unsuccessful reads.
         self.files: dict[str, dict] = {}
+        # Directory observations preserve the path boundary around failed I/O.
+        self.directories: dict[str, dict] = {}
         # Tool invocations retain their exit code and output, including failures.
         self.tools: list[dict] = []
         # The byte budget bounds binary snapshots from large failed links.
@@ -162,6 +166,51 @@ class Capture:
             record["error"] = str(error)
             return None
         return output_path if result.returncode == 0 else None
+
+    def record_directory(self, path: Path, *, list_entries: bool) -> dict:
+        """Records directory and reparse-point state without reading contents."""
+        path = path.absolute()
+        key = str(path)
+        if key in self.directories:
+            return self.directories[key]
+        record = {"path": key, "observed_at": dt.datetime.now(dt.UTC).isoformat()}
+        self.directories[key] = record
+        try:
+            metadata = path.lstat()
+            record.update(
+                lstat_mode=metadata.st_mode,
+                lstat_file_attributes=getattr(metadata, "st_file_attributes", None),
+            )
+        except OSError as error:
+            record["lstat_error"] = str(error)
+            record["lstat_errno"] = error.errno
+            record["lstat_winerror"] = getattr(error, "winerror", None)
+        try:
+            metadata = path.stat()
+            record.update(
+                mode=metadata.st_mode,
+                file_attributes=getattr(metadata, "st_file_attributes", None),
+                resolved_path=str(path.resolve()),
+            )
+        except OSError as error:
+            record["stat_error"] = str(error)
+            record["stat_errno"] = error.errno
+            record["stat_winerror"] = getattr(error, "winerror", None)
+        if list_entries:
+            entries = []
+            try:
+                with os.scandir(path) as iterator:
+                    for entry in iterator:
+                        if len(entries) == MAX_DIRECTORY_ENTRIES:
+                            record["entries_truncated"] = True
+                            break
+                        entries.append(entry.name)
+                record["entries"] = sorted(entries)
+            except OSError as error:
+                record["entries_error"] = str(error)
+                record["entries_errno"] = error.errno
+                record["entries_winerror"] = getattr(error, "winerror", None)
+        return record
 
 
 @contextlib.contextmanager
@@ -464,6 +513,7 @@ def capture_bazel_tests(capture: Capture, cwd: Path, output: str) -> list[dict]:
 
 def capture_access_failures(capture: Capture, cwd: Path, output: str) -> None:
     read_paths = []
+    read_directories = []
     delete_paths = []
     include_paths = [
         Path(value)
@@ -507,18 +557,68 @@ def capture_access_failures(capture: Capture, cwd: Path, output: str) -> None:
     delete_trees = re.findall(
         r"^Error removing directory ([^\r\n]+)", output, re.MULTILINE
     )
-    if os.name == "nt" and (read_paths or delete_paths or delete_trees):
+    # CPython's Windows CRT path can report EBADF without retaining the native
+    # file-create error. Preserve the exact output boundary for the next
+    # occurrence instead of retrying the action and erasing the failure.
+    output_root = (cwd / "bazel-out").absolute()
+    output_open_paths = []
+    for line in output.splitlines():
+        match = re.search(r"OSError: \[Errno 9\] Bad file descriptor: (.+)$", line)
+        if not match:
+            continue
+        try:
+            value = ast.literal_eval(match.group(1))
+        except (SyntaxError, ValueError):
+            continue
+        if not isinstance(value, str):
+            continue
+        path = Path(value)
+        if not path.is_absolute():
+            path = cwd / path
+        path = path.absolute()
+        # A pull request can print arbitrary text. Diagnostics may inspect only
+        # declared Bazel outputs, never another host path named by the log.
+        if not path.is_relative_to(output_root):
+            continue
+        output_open_paths.append(path)
+        read_paths.append(capture.file(path, copy=False)["path"])
+        parent = path.parent
+        while parent.is_relative_to(output_root):
+            capture.record_directory(parent, list_entries=parent == path.parent)
+            read_directories.append(str(parent))
+            if parent == output_root:
+                break
+            parent = parent.parent
+
+    if os.name == "nt" and (
+        read_paths or read_directories or delete_paths or delete_trees
+    ):
         arguments = [
             sys.executable,
             str(Path(__file__).with_name("windows_file_access.py")),
         ]
         for path in dict.fromkeys(read_paths):
             arguments.extend(["--read", path])
+        for path in dict.fromkeys(read_directories):
+            arguments.extend(["--read-directory", path])
         for path in dict.fromkeys(delete_paths):
             arguments.extend(["--delete", path])
         for path in dict.fromkeys(delete_trees):
             arguments.extend(["--delete-tree", path])
         capture.tool(arguments, cwd, "windows-file-access")
+        for volume in dict.fromkeys(
+            path.anchor.rstrip("\\/") for path in output_open_paths
+        ):
+            capture.tool(
+                ["fsutil.exe", "fsinfo", "volumeinfo", volume],
+                cwd,
+                "windows-volume-info",
+            )
+            capture.tool(
+                ["fltmc.exe", "instances", "-v", volume],
+                cwd,
+                "windows-filter-instances",
+            )
 
 
 def symbol_tool(environment: Mapping[str, str], cache: Mapping[str, str]) -> str | None:
@@ -823,7 +923,11 @@ def capture_failure(
         metadata["capture_error"] = traceback.format_exc()
         print(metadata["capture_error"], file=sys.stderr)
     finally:
-        metadata.update(files=list(capture.files.values()), tools=capture.tools)
+        metadata.update(
+            files=list(capture.files.values()),
+            directories=list(capture.directories.values()),
+            tools=capture.tools,
+        )
         (directory / "manifest.json").write_text(
             json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
         )
