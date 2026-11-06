@@ -276,6 +276,24 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
+    name = "transfer_queue_test",
+    srcs = ["transfer_queue_test.cc"],
+    deps = [
+        ":test_device",
+        ":testdata",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/driver/amd/gpu/image:hip_images",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
+iree_runtime_cc_test(
     name = "file_transfer_test",
     size = "medium",
     srcs = ["file_transfer_test.cc"],

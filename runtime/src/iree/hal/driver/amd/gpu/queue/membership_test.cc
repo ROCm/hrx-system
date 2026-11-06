@@ -213,13 +213,15 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
     };
     // This dependency has no resident recordings. Membership still uses the
     // real program registry's ordinary coordinate-growth operation.
-    programs_.host_allocator = iree_allocator_system();
-    programs_.context = &context_;
-    programs_.registry.queue_count = 1;
-    iree_slim_mutex_initialize(&programs_.registry.mutex);
-    iree_notification_initialize(&programs_.registry.notification);
-    iree_slim_mutex_initialize(&programs_.constants.growth_mutex);
-    iree_slim_mutex_initialize(&programs_.constants.mutex);
+    for (auto* programs : program_pools_) {
+      programs->host_allocator = iree_allocator_system();
+      programs->context = &context_;
+      programs->registry.queue_count = 1;
+      iree_slim_mutex_initialize(&programs->registry.mutex);
+      iree_notification_initialize(&programs->registry.notification);
+      iree_slim_mutex_initialize(&programs->constants.growth_mutex);
+      iree_slim_mutex_initialize(&programs->constants.mutex);
+    }
     membership_.context = &context_;
     membership_.host_allocator = {
         this,
@@ -240,7 +242,8 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
     membership_.publication = &publication_;
     membership_.completion = &completion_;
     family_.lifecycle = &lifecycle_;
-    membership_.programs = &programs_;
+    membership_.program_pool_count = IREE_ARRAYSIZE(program_pools_);
+    membership_.program_pools = program_pools_;
     family_.create = [](const iree_hal_amd_gpu_queue_family_t* family,
                         uint32_t ordinal, uint32_t, uint32_t frontier_count,
                         uint64_t initial_epoch,
@@ -289,7 +292,9 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
     iree_hal_amd_gpu_publication_deinitialize(&publication_);
     EXPECT_TRUE(iree_hal_amd_gpu_queue_membership_deinitialize(&membership_));
     iree_hal_amd_gpu_failure_deinitialize(&failure_);
-    iree_hal_amd_gpu_program_pool_deinitialize(&programs_);
+    for (auto* programs : program_pools_) {
+      iree_hal_amd_gpu_program_pool_deinitialize(programs);
+    }
   }
 
   void AwaitSlotCount(uint32_t count) {
@@ -321,6 +326,11 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
   iree_hal_amd_gpu_failure_t failure_ = {};
   // Empty resident-program registry used during coordinate expansion.
   iree_hal_amd_gpu_program_pool_t programs_ = {};
+  // Stable catalog of recording registries sharing membership coordinates.
+  iree_hal_amd_gpu_program_pool_t transfer_programs_ = {};
+  // All public families participate in one stable dependency coordinate space.
+  iree_hal_amd_gpu_program_pool_t* program_pools_[2] = {&programs_,
+                                                        &transfer_programs_};
   // Exact mocked protocol lifecycle; native behavior is tested separately.
   iree_hal_amd_gpu_queue_lifecycle_t lifecycle_ = {};
   // Refcounted queue's ordinary public destructor dispatch.
@@ -1559,6 +1569,7 @@ TEST_P(MembershipTest, MixedFamiliesShareWorkersGrowthAndTerminalOwnership) {
   EXPECT_EQ(reinterpret_cast<Queue*>(other)->frontier_count, 4u);
   EXPECT_EQ(reinterpret_cast<Queue*>(first)->frontier_count, 4u);
   EXPECT_EQ(programs_.registry.queue_count, 4u);
+  EXPECT_EQ(transfer_programs_.registry.queue_count, 4u);
   EXPECT_EQ(iree_hal_amd_gpu_queue_membership_trim(&membership_),
             AMDF_STATUS_OK);
   EXPECT_EQ(protocol.trims, 1u);

@@ -110,8 +110,10 @@ typedef struct iree_hal_amd_gpu_queue_membership_t {
   iree_hal_amd_gpu_completion_t* completion;
   // Borrowed first-fault deadline and host ownership notification.
   iree_hal_amd_gpu_failure_t* failure;
-  // Borrowed registry of resident recordings requiring publisher coordinates.
-  iree_hal_amd_gpu_program_pool_t* programs;
+  // Number of family-owned recording registries sharing publisher coordinates.
+  uint32_t program_pool_count;
+  // Borrowed immutable array of resident recording registries.
+  iree_hal_amd_gpu_program_pool_t* const* program_pools;
   // Fixed device-owned provisioned queue count.
   uint32_t provisioned_count;
   // Number of allocated dynamic coordinates, including currently vacant slots.

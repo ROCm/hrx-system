@@ -19,6 +19,36 @@ package(
 )
 
 iree_runtime_cc_library(
+    name = "family_spec",
+    srcs = ["family_spec.c"],
+    hdrs = ["family_spec.h"],
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd:status",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+        "//runtime/src/iree/hal/driver/amd/gpu:dispatch",
+        "//runtime/src/iree/hal/driver/amd/gpu/target:identity",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "family_spec_test",
+    srcs = ["family_spec_test.cc"],
+    deps = [
+        ":family_spec",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/driver/amd/gpu:context",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "buffer",
     srcs = ["buffer.c"],
     hdrs = ["buffer.h"],

@@ -22,7 +22,9 @@ class GpuNativeTransferTest : public GpuNativeTest,
                                   std::pair<amdf_queue_command_type_t, bool>> {
  protected:
   amdf_queue_command_type_t command_type() const override {
-    return GetParam().first;
+    return GetParam().first == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
+               ? AMDF_QUEUE_COMMAND_TYPE_UNKNOWN
+               : GetParam().first;
   }
 
   void SetUp() override {
@@ -39,6 +41,28 @@ class GpuNativeTransferTest : public GpuNativeTest,
     Create();
     if (HasFatalFailure()) {
       return;
+    }
+    if (GetParam().first == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA) {
+      const auto* families =
+          iree_hal_device_spec_queues(iree_hal_device_spec(device_));
+      const iree_hal_queue_family_t* family = nullptr;
+      for (uint32_t i = 0; i < families->family_count; ++i) {
+        const auto roles = families->families[i].role_flags;
+        if ((roles & IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER) &&
+            !(roles & IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH)) {
+          family = iree_hal_device_queue_family(device_, i);
+          break;
+        }
+      }
+      if (!family) {
+        GTEST_SKIP() << "Native SDMA transfer family is unavailable";
+      }
+      iree_hal_queue_params_t params;
+      iree_hal_queue_params_initialize(&params);
+      for (auto& queue : acquired_queues_) {
+        IREE_ASSERT_OK(iree_hal_queue_acquire(family, &params, &queue));
+      }
+      queues_ = acquired_queues_;
     }
     const iree_hal_pool_family_access_t access = {
         .family = iree_hal_queue_family(queues_[0]),
@@ -80,6 +104,9 @@ class GpuNativeTransferTest : public GpuNativeTest,
     iree_hal_semaphore_release(timeline_);
     ReleaseBuffers();
     iree_hal_pool_release(pool_);
+    for (auto* queue : acquired_queues_) {
+      iree_hal_queue_release(queue);
+    }
     GpuNativeTest::TearDown();
   }
 
@@ -104,6 +131,8 @@ class GpuNativeTransferTest : public GpuNativeTest,
   // capacity return to wake publication without relying on a later submit.
   void RunConcurrentTransfers(size_t lane_count, size_t iterations);
 
+  // Dynamically acquired copy queues; provisioned compute queues stay borrowed.
+  std::array<iree_hal_queue_t*, 2> acquired_queues_ = {};
   // Odd extent exercises byte copies and staged fill tails.
   static constexpr size_t kLength = 32781;
   // Explicit source of buffers usable by the device's transfer family.

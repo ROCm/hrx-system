@@ -556,8 +556,11 @@ static iree_status_t iree_hal_amd_gpu_queue_membership_reserve_frontiers(
     iree_hal_amd_gpu_queue_slot_t* head = membership->slots;
     iree_slim_mutex_unlock(&membership->mutex);
 
-    status = iree_hal_amd_gpu_program_pool_reserve_queues(membership->programs,
-                                                          count);
+    for (uint32_t i = 0;
+         i < membership->program_pool_count && iree_status_is_ok(status); ++i) {
+      status = iree_hal_amd_gpu_program_pool_reserve_queues(
+          membership->program_pools[i], count);
+    }
     for (uint32_t i = 0;
          i < membership->provisioned_count && iree_status_is_ok(status); ++i) {
       status = iree_hal_amd_gpu_queue_lifecycle(membership->provisioned[i])
