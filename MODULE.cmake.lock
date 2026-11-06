@@ -177,6 +177,7 @@ set(IREE_DEP_LIBBACKTRACE_BUILD_FILE "//build_tools/third_party/libbacktrace:lib
 set(IREE_DEP_LIBBACKTRACE_PATCHES
   "//build_tools/third_party/libbacktrace:threaded_cache_reads.patch"
   "//build_tools/third_party/libbacktrace:ignore_nonruntime_symbols.patch"
+  "//build_tools/third_party/libbacktrace:zero_size_vectors.patch"
 )
 set(IREE_DEP_LIBBACKTRACE_PATCH_ARGS
   "-p1"

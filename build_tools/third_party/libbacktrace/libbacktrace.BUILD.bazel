@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -33,4 +34,24 @@ cc_library(
     linkstatic = True,
     target_compatible_with = ["@platforms//os:linux"],
     deps = ["@hrx//build_tools/third_party/libbacktrace:configuration"],
+)
+
+cc_test(
+    name = "unittest",
+    srcs = [
+        "filenames.h",
+        "internal.h",
+        "testlib.c",
+        "testlib.h",
+        "unittest.c",
+    ],
+    copts = [
+        "-include",
+        "config.h",
+    ],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":libbacktrace",
+        "@hrx//build_tools/third_party/libbacktrace:configuration",
+    ],
 )

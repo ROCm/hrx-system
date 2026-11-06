@@ -39,6 +39,7 @@ class ExportedDependenciesTest(unittest.TestCase):
             (
                 "//build_tools/third_party/libbacktrace:threaded_cache_reads.patch",
                 "//build_tools/third_party/libbacktrace:ignore_nonruntime_symbols.patch",
+                "//build_tools/third_party/libbacktrace:zero_size_vectors.patch",
             ),
         )
         self.assertEqual(backtrace.patch_args, ("-p1",))

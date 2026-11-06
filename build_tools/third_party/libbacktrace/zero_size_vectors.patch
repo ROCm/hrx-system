@@ -1,0 +1,87 @@
+diff --git a/mmap.c b/mmap.c
+index 9f6d98f..42a33f5 100644
+--- a/mmap.c
++++ b/mmap.c
+@@ -280,7 +280,9 @@ backtrace_vector_grow (struct backtrace_state *state,size_t size,
+       vec->alc = alc - vec->size;
+     }
+
+-  ret = (char *) vec->base + vec->size;
++  ret = vec->base;
++  if (vec->size != 0)
++    ret = (char *) vec->base + vec->size;
+   vec->size += size;
+   vec->alc -= size;
+   return ret;
+@@ -298,7 +300,8 @@ backtrace_vector_finish (
+   void *ret;
+
+   ret = vec->base;
+-  vec->base = (char *) vec->base + vec->size;
++  if (vec->size != 0)
++    vec->base = (char *) vec->base + vec->size;
+   vec->size = 0;
+   return ret;
+ }
+@@ -322,8 +325,9 @@ backtrace_vector_release (struct backtrace_state *state,
+   aligned = (size + 7) & ~ (size_t) 7;
+   alc -= aligned - size;
+
+-  backtrace_free (state, (char *) vec->base + aligned, alc,
+-		  error_callback, data);
++  if (alc != 0)
++    backtrace_free (state, (char *) vec->base + aligned, alc,
++		    error_callback, data);
+   vec->alc = 0;
+   if (vec->size == 0)
+     vec->base = NULL;
+diff --git a/unittest.c b/unittest.c
+index ee104f8..f61e593 100644
+--- a/unittest.c
++++ b/unittest.c
+@@ -47,6 +47,43 @@ error_callback (void *vdata ATTRIBUTE_UNUSED, const char *msg ATTRIBUTE_UNUSED,
+   ++count;
+ }
+
++static int
++test_empty (void)
++{
++  void *grown;
++  void *finished;
++  int res;
++  int failed;
++
++  struct backtrace_vector vec;
++
++  memset (&vec, 0, sizeof vec);
++
++  count = 0;
++  grown = backtrace_vector_grow (state, 0, error_callback, NULL, &vec);
++  finished = backtrace_vector_finish (state, &vec, error_callback, NULL);
++  res = backtrace_vector_release (state, &vec, error_callback, NULL);
++  failed = (grown != NULL
++	    || finished != NULL
++	    || res != 1
++	    || count != 0
++	    || vec.base != NULL
++	    || vec.size != 0
++	    || vec.alc != 0);
++
++  printf ("%s: unittest empty vector operations\n",
++	  failed ? "FAIL": "PASS");
++
++  if (failed)
++    ++failures;
++
++  return failures;
++}
++
+ static int
+ test1 (void)
+ {
+@@ -88,4 +125,5 @@ main (int argc ATTRIBUTE_UNUSED, char **argv)
+
++  test_empty ();
+   test1 ();
+
+   exit (failures ? EXIT_FAILURE : EXIT_SUCCESS);
