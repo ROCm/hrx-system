@@ -239,6 +239,10 @@ class GpuNativeTest : public ::testing::Test {
   // Acquires another queue through the same public contract as applications.
   iree_status_t AcquireQueue(iree_hal_queue_t** out_queue);
 
+  // Replaces the borrowed compute lanes with owned transfer-only queues.
+  // Skips when the device exposes no dedicated transfer family.
+  void AcquireTransferQueues();
+
   // Native ring/control backing is separate from device-local program storage.
   void SelectControlMemory(amdf_memory_device_access_t* access,
                            iree_hal_amd_fabric_memory_options_t* policy);
@@ -268,8 +272,12 @@ class GpuNativeTest : public ::testing::Test {
   iree_hal_device_t* device_ = nullptr;
   // Immutable group assigning real memory scopes and queue axes.
   iree_hal_device_group_t* group_ = nullptr;
-  // Borrowed provisioned queues, never separately retained by this fixture.
+  // Borrowed active lanes, from device provisioning or acquired_queues_.
   std::array<iree_hal_queue_t*, 2> queues_ = {};
+
+ private:
+  // Dynamically acquired lanes, released before their parent device.
+  std::array<iree_hal_queue_t*, 2> acquired_queues_ = {};
 };
 
 }  // namespace iree::hal::amd::gpu::cts

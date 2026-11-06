@@ -25,7 +25,9 @@ class GpuNativeTimestampTest : public GpuNativeTest,
                                    std::pair<amdf_queue_command_type_t, bool>> {
  protected:
   amdf_queue_command_type_t command_type() const override {
-    return GetParam().first;
+    return GetParam().first == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
+               ? AMDF_QUEUE_COMMAND_TYPE_UNKNOWN
+               : GetParam().first;
   }
 
   void SetUp() override {
@@ -39,6 +41,12 @@ class GpuNativeTimestampTest : public GpuNativeTest,
     Create();
     if (HasFatalFailure()) {
       return;
+    }
+    if (GetParam().first == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA) {
+      AcquireTransferQueues();
+      if (HasFatalFailure() || IsSkipped()) {
+        return;
+      }
     }
     const auto* family = iree_hal_queue_family(queues_[0]);
     ASSERT_GT(family->spec->timestamp_frequency_hz, 0u);
@@ -237,9 +245,13 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, false),
                       std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, true),
                       std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, false),
-                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, true)),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, true),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA, false),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA, true)),
     [](const auto& info) {
-      return std::string(info.param.first == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+      return std::string(info.param.first == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
+                             ? "Sdma"
+                         : info.param.first == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
                              ? "Aql"
                              : "Pm4") +
              (info.param.second ? "Empty" : "Default");

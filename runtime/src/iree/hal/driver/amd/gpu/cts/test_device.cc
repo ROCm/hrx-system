@@ -542,6 +542,9 @@ void GpuNativeTest::SetUp() {
 }
 
 void GpuNativeTest::TearDown() {
+  for (auto* queue : acquired_queues_) {
+    iree_hal_queue_release(queue);
+  }
   iree_hal_device_release(device_);
   iree_hal_device_group_release(group_);
   EXPECT_EQ(allocator_.live_count.load(), 0u);
@@ -580,6 +583,29 @@ iree_status_t GpuNativeTest::AcquireQueue(iree_hal_queue_t** out_queue) {
   iree_hal_queue_params_initialize(&params);
   return iree_hal_queue_acquire(iree_hal_queue_family(queues_[0]), &params,
                                 out_queue);
+}
+
+void GpuNativeTest::AcquireTransferQueues() {
+  const auto* families =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device_));
+  const iree_hal_queue_family_t* family = nullptr;
+  for (uint32_t i = 0; i < families->family_count; ++i) {
+    const auto roles = families->families[i].role_flags;
+    if ((roles & IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER) &&
+        !(roles & IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH)) {
+      family = iree_hal_device_queue_family(device_, i);
+      break;
+    }
+  }
+  if (!family) {
+    GTEST_SKIP() << "Native SDMA transfer family is unavailable";
+  }
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  for (auto& queue : acquired_queues_) {
+    IREE_ASSERT_OK(iree_hal_queue_acquire(family, &params, &queue));
+  }
+  queues_ = acquired_queues_;
 }
 
 void GpuNativeTest::CreateSemaphore(iree_hal_semaphore_t** out_semaphore) {
