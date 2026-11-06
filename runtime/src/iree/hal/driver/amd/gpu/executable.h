@@ -10,10 +10,10 @@
 #include "iree/hal/driver/amd/fabric/asan.h"
 #include "iree/hal/driver/amd/fabric/memory.h"
 #include "iree/hal/driver/amd/gpu/code.h"
+#include "iree/hal/driver/amd/gpu/code_queue.h"
 #include "iree/hal/driver/amd/gpu/feedback.h"
 #include "iree/hal/driver/amd/gpu/kernarg.h"
 #include "iree/hal/driver/amd/gpu/profile.h"
-#include "iree/hal/driver/amd/gpu/queue/aql/code.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/dispatch.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/dispatch.h"
 #include "iree/hal/driver/amd/gpu/tsan.h"
@@ -33,17 +33,8 @@ typedef struct iree_hal_amd_gpu_executable_options_t {
   // at native access ordinal zero. Host visibility is optional; placement is
   // always device-local. The loader never substitutes host backing.
   const iree_hal_amd_fabric_memory_options_t* memory;
-  // Device-owned instruction publication used by AQL, absent for PM4.
-  iree_hal_amd_gpu_aql_code_t* aql_code;
-  // Device-owned upload resources for initial and later queue placements.
-  struct {
-    // Host-visible initialization backing, used only without a local host view.
-    const iree_hal_amd_fabric_memory_options_t* memory;
-    // Existing transfer owner with live publication and completion sources.
-    iree_hal_amd_gpu_sdma_queue_t* queue;
-    // Native family accepting the upload copies.
-    uint32_t family_ordinal;
-  } upload;
+  // Device-owned code publisher, present for unmapped code or AQL caches.
+  iree_hal_amd_gpu_code_queue_t* code_queue;
   // Group-local placement guarantee established with the native memory policy.
   iree_hal_pool_placement_t placement;
   // Borrowed device capacity notification, live through global buffer uses.

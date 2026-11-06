@@ -11,9 +11,9 @@
 
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/device_group.h"
+#include "iree/hal/driver/amd/gpu/code_queue.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/queue.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/queue.h"
-#include "iree/hal/driver/amd/gpu/queue/sdma/queue.h"
 #include "iree/hal/driver/amd/status.h"
 #include "iree/testing/status_matchers.h"
 #include "libamdf/cts/util/native_identity.h"
@@ -82,46 +82,23 @@ void GpuNativeTest::PublishCode(uint32_t compute_family_ordinal,
   if (!*upload) {
     return;
   }
-  uint32_t family = UINT32_MAX;
-  amdf_queue_publication_modes_t mode = 0;
-  for (uint32_t i = 0; i < context_->endpoint_info.queue_family_count; ++i) {
-    const auto modes =
-        iree_hal_amd_gpu_sdma_queue_publication_modes(&context_->families[i]);
-    if (modes) {
-      family = i;
-      mode = modes & AMDF_QUEUE_PUBLICATION_MODE_USER
-                 ? AMDF_QUEUE_PUBLICATION_MODE_USER
-                 : AMDF_QUEUE_PUBLICATION_MODE_KERNEL;
-      break;
-    }
-  }
-  ASSERT_NE(family, UINT32_MAX);
+  const auto modes =
+      context_->families[compute_family_ordinal].publication_modes;
+  const auto mode = modes & AMDF_QUEUE_PUBLICATION_MODE_USER
+                        ? AMDF_QUEUE_PUBLICATION_MODE_USER
+                        : AMDF_QUEUE_PUBLICATION_MODE_KERNEL;
   amdf_memory_device_access_t access;
   iree_hal_amd_fabric_memory_options_t control;
   ASSERT_NO_FATAL_FAILURE(SelectControlMemory(&access, &control));
-  iree_hal_amd_gpu_publication_t publication = {};
-  iree_hal_amd_gpu_sdma_queue_t* queue = nullptr;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_sdma_queue_allocate(
-      context_, family, mode, &control, &publication, 0,
-      iree_allocator_system(), &queue));
-  auto publish_source = iree_hal_amd_gpu_sdma_queue_publication_source(queue);
-  auto completion_source = iree_hal_amd_gpu_sdma_queue_completion_source(queue);
-  iree_hal_amd_gpu_completion_t completion = {};
-  iree_status_t status = iree_hal_amd_gpu_publication_initialize(
-      1, &publish_source, {}, iree_allocator_system(), &publication);
+  iree_hal_amd_gpu_code_queue_t* queue = nullptr;
+  iree_status_t status = iree_hal_amd_gpu_code_queue_allocate(
+      context_, compute_family_ordinal, mode, &control, iree_allocator_system(),
+      &queue);
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_completion_initialize(
-        context_, 1, &completion_source, 0, {}, iree_allocator_system(),
-        &completion);
+    status = iree_hal_amd_gpu_code_publish(context_, queue, memory, upload);
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_code_publish(
-        context_, queue, family, compute_family_ordinal, memory, upload);
-  }
-  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion));
-  iree_hal_amd_gpu_publication_deinitialize(&publication);
   IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
-      iree_hal_amd_gpu_sdma_queue_free(queue), "join code upload queue"));
+      iree_hal_amd_gpu_code_queue_free(queue), "join code upload queue"));
   IREE_ASSERT_OK(status);
 }
 

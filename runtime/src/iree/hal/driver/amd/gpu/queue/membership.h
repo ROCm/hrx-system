@@ -140,12 +140,12 @@ typedef struct iree_hal_amd_gpu_queue_membership_t {
   iree_hal_amd_gpu_profile_t* profile;
   // Optional queue-local shader state, borrowed from the parent device.
   iree_hal_amd_gpu_tsan_registry_t* tsan;
-  // Immutable non-compute publisher sources at provisioned_count + [0, 3).
-  iree_hal_amd_gpu_publication_source_t publication_tail[3];
+  // Allocation and mapping publishers following provisioned queue sources.
+  iree_hal_amd_gpu_publication_source_t publication_tail[2];
   // Number of non-compute completion callbacks following all queue callbacks.
   uint32_t completion_tail_count;
-  // Immutable transfer/feedback/shutdown callbacks; waits are never borrowed.
-  iree_hal_amd_gpu_completion_source_t completion_tail[3];
+  // Immutable feedback/shutdown callbacks; waits are never borrowed.
+  iree_hal_amd_gpu_completion_source_t completion_tail[2];
   // Device-owned group namespace, retained once for all allocated coordinates.
   struct {
     // Retained tracker, or NULL outside a group.

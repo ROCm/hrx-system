@@ -164,6 +164,22 @@ fabric allocation service. Explicit trim releases idle scratch and cached
 storage. Synchronous executable and command-buffer construction allocate on the
 calling thread.
 
+Executable loading writes directly to qualified host-mapped code when possible.
+Unmapped code uses an independent cold queue in the selected compute family:
+bounded confirmed `WRITE_DATA` commands upload the bytes, and instruction-cache
+publication completes before loading returns. This bootstraps the resident blit
+shaders without an SDMA queue or a shader that must already be resident. AQL
+always uses this owner for instruction-cache publication; mapped PM4 code uses
+its ordinary before-dispatch cache action. Application queue dependencies cannot
+block the loader. Accepted uploads retain their target until checked retirement
+or native stop, including when shutdown wakes a blocked loading caller.
+
+File reads and writes preserve the selected queue for any GPU copy. Directly
+file-accessible backing needs no staging copy. Other ranges use bounded shared
+staging storage, with copies submitted through the originating queue's transfer
+path and slots retained until that queue retires the copy. The staging owner
+manages asynchronous file I/O and storage, and owns no execution queue.
+
 The existing device workers own deferred admission, native completion, host
 actions, and feedback. Dynamic queues join those owners and receive their own
 native publication resources. A failed public semaphore is not a native

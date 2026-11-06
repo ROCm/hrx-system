@@ -18,12 +18,12 @@
 #include "iree/hal/driver/amd/fabric/memory_spec.h"
 #include "iree/hal/driver/amd/fabric/transient_buffer_pool.h"
 #include "iree/hal/driver/amd/gpu/code.h"
+#include "iree/hal/driver/amd/gpu/code_queue.h"
 #include "iree/hal/driver/amd/gpu/device_failure.h"
 #include "iree/hal/driver/amd/gpu/executable.h"
 #include "iree/hal/driver/amd/gpu/profile.h"
 #include "iree/hal/driver/amd/gpu/publication.h"
 #include "iree/hal/driver/amd/gpu/queue/allocation.h"
-#include "iree/hal/driver/amd/gpu/queue/aql/code.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/command_buffer.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/program.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/queue.h"
@@ -36,7 +36,6 @@
 #include "iree/hal/driver/amd/gpu/queue/pm4/queue.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/scratch.h"
 #include "iree/hal/driver/amd/gpu/queue/program.h"
-#include "iree/hal/driver/amd/gpu/queue/sdma/queue.h"
 #include "iree/hal/driver/amd/gpu/queue/semaphore.h"
 #include "iree/hal/driver/amd/gpu/target/selection.h"
 #include "iree/hal/driver/amd/status.h"
@@ -139,8 +138,8 @@ typedef struct iree_hal_amd_gpu_device_t {
     // Register launches and native indirect-buffer execution.
     iree_hal_amd_gpu_pm4_program_pool_t pm4;
   } programs;
-  // AQL's cold instruction-cache publication owner; PM4 publishes at use.
-  iree_hal_amd_gpu_aql_code_t* aql_code;
+  // Independent compute-native upload and instruction publication owner.
+  iree_hal_amd_gpu_code_queue_t* code_queue;
   // Lazy queue-local private storage shares immutable placement/geometry facts.
   struct {
     // Native scratch slot capacity and register layout.
@@ -150,15 +149,8 @@ typedef struct iree_hal_amd_gpu_device_t {
     // Resident placement without an unnecessary host mapping or execute access.
     iree_hal_amd_fabric_memory_options_t memory;
   } scratch;
-  // Code uploads and file copies share one native transfer owner.
-  struct {
-    // Native publication/retirement source, absent without an admitted family.
-    iree_hal_amd_gpu_sdma_queue_t* queue;
-    // Exact native family used to qualify copy visibility.
-    uint32_t family_ordinal;
-    // Device-wide physical staging, shared by independent file proactors.
-    iree_hal_amd_gpu_file_staging_t* file_staging;
-  } transfers;
+  // Family-owned physical staging, shared by independent file proactors.
+  iree_hal_amd_gpu_file_staging_t* file_staging;
   // Sole native-event completion/retirement worker.
   iree_hal_amd_gpu_completion_t completion;
   // Completion-owned terminal join and independent publication-worker report.
@@ -783,7 +775,7 @@ static bool iree_hal_amd_gpu_device_is_idle(iree_hal_amd_gpu_device_t* device) {
       return false;
     }
   }
-  return iree_hal_amd_gpu_sdma_queue_is_idle(device->transfers.queue);
+  return true;
 }
 
 // Native callbacks can still make a final queue/source access after returning
@@ -802,27 +794,18 @@ static bool iree_hal_amd_gpu_device_release_children(
   iree_hal_amd_gpu_context_join_memory(device->context);
   iree_hal_amd_fabric_allocation_queue_drain(device->context->memory.queue);
   iree_hal_amd_gpu_publication_deinitialize(&device->publication);
-  if (!iree_hal_amd_gpu_file_staging_free(device->transfers.file_staging)) {
+  if (!iree_hal_amd_gpu_file_staging_free(device->file_staging)) {
     return false;
   }
-  device->transfers.file_staging = NULL;
-  const amdf_status_t transfer_status =
-      iree_hal_amd_gpu_sdma_queue_free(device->transfers.queue);
-  if (!amdf_status_is_ok(transfer_status)) {
-    iree_hal_amd_gpu_context_report(
-        device->context, transfer_status,
-        "SDMA transfer queue native ownership join");
-    return false;
-  }
-  device->transfers.queue = NULL;
+  device->file_staging = NULL;
   const amdf_status_t code_status =
-      iree_hal_amd_gpu_aql_code_free(device->aql_code);
+      iree_hal_amd_gpu_code_queue_free(device->code_queue);
   if (!amdf_status_is_ok(code_status)) {
     iree_hal_amd_gpu_context_report(device->context, code_status,
-                                    "AQL code publication ownership join");
+                                    "compute code publication ownership join");
     return false;
   }
-  device->aql_code = NULL;
+  device->code_queue = NULL;
   for (uint32_t i = 0; i < device->queue_count; ++i) {
     if (!device->queues[i]) {
       continue;
@@ -1216,26 +1199,13 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "GPU family has no supported compute publication");
   }
-  uint32_t transfer_family = UINT32_MAX;
-  amdf_queue_publication_modes_t transfer_publication_mode = 0;
-  for (uint32_t i = 0; i < context->endpoint_info.queue_family_count; ++i) {
-    transfer_publication_mode = iree_hal_amd_gpu_device_select_publication(
-        iree_hal_amd_gpu_sdma_queue_publication_modes(&context->families[i]));
-    if (transfer_publication_mode) {
-      transfer_family = i;
-      break;
-    }
-  }
   bool has_file_staging = false;
   amdf_memory_profile_t file_profile;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_file_staging_query_profile(
       context, &file_profile, &has_file_staging));
-  const bool has_transfer_queue = transfer_family != UINT32_MAX;
   iree_host_size_t total_size = sizeof(iree_hal_amd_gpu_device_t);
-  const uint32_t source_count =
-      options->queue_count + 1 + feedback_enabled + has_transfer_queue;
-  const uint32_t publication_count =
-      options->queue_count + 2 + has_transfer_queue;
+  const uint32_t source_count = options->queue_count + 1 + feedback_enabled;
+  const uint32_t publication_count = options->queue_count + 2;
   if (!iree_host_size_checked_mul_add(total_size, options->queue_count,
                                       sizeof(iree_hal_queue_t*), &total_size) ||
       !iree_host_size_checked_mul_add(
@@ -1332,11 +1302,6 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_device_prepare_control(device);
   }
-  if (iree_status_is_ok(status) && aql) {
-    status = iree_hal_amd_gpu_aql_code_allocate(
-        context, family_ordinal, &device->memory.control, host_allocator,
-        &device->aql_code);
-  }
   if (iree_status_is_ok(status)) {
     status = iree_async_proactor_pool_acquire_for_node(
         create_params->proactor_pool, options->host_numa_node,
@@ -1352,20 +1317,13 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
         iree_async_proactor_pool_entry_proactor(device->proactor_entry),
         IREE_ASYNC_NOTIFICATION_FLAG_NONE, &device->memory.notification);
   }
-  if (iree_status_is_ok(status) && has_transfer_queue) {
-    device->transfers.family_ordinal = transfer_family;
-    status = iree_hal_amd_gpu_sdma_queue_allocate(
-        context, transfer_family, transfer_publication_mode,
-        &device->memory.control, &device->publication, options->queue_count + 2,
-        host_allocator, &device->transfers.queue);
-  }
   if (iree_status_is_ok(status) && has_file_staging) {
     status = iree_hal_amd_gpu_file_staging_allocate(
         (iree_hal_device_t*)device, context, family_ordinal, &file_profile,
         true, iree_async_proactor_pool_entry_proactor(device->proactor_entry),
         8, 2 * 1024 * 1024,
         iree_async_proactor_pool_entry_node_id(device->proactor_entry),
-        host_allocator, &device->transfers.file_staging);
+        host_allocator, &device->file_staging);
   }
   iree_thread_affinity_t affinity = {0};
   if (device->proactor_entry) {
@@ -1397,6 +1355,11 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
     iree_hal_amd_gpu_device_prepare_feedback(&prepare);
     status = prepare.status;
     device->memory.mappings.failure = &device->feedback.failure_code;
+  }
+  if (iree_status_is_ok(status) && (aql || device->programs.pm4.code_upload)) {
+    status = iree_hal_amd_gpu_code_queue_allocate(
+        context, family_ordinal, publication_mode, &device->memory.control,
+        host_allocator, &device->code_queue);
   }
   if (iree_status_is_ok(status)) {
     if (!aql) {
@@ -1430,7 +1393,7 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
       .publication = &device->publication,
       .allocations = &device->memory.allocations,
       .mappings = &device->memory.mappings,
-      .file_staging = device->transfers.file_staging,
+      .file_staging = device->file_staging,
       .feedback = feedback_enabled ? &device->feedback : NULL,
       .retirement_capacity = options->queue.retirement_capacity,
       .argument_capacity = options->queue.argument_capacity,
@@ -1473,11 +1436,6 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
     device->publication_sources[options->queue_count + 1] =
         iree_hal_amd_gpu_memory_mapping_context_publication_source(
             &device->memory.mappings);
-    if (has_transfer_queue) {
-      device->publication_sources[options->queue_count + 2] =
-          iree_hal_amd_gpu_sdma_queue_publication_source(
-              device->transfers.queue);
-    }
     memcpy(device->membership.publication_tail,
            device->publication_sources + options->queue_count,
            (publication_count - options->queue_count) *
@@ -1485,22 +1443,17 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
     iree_hal_amd_gpu_device_failure_initialize(
         context, (iree_hal_device_t*)device, options->failure_timeout_ms,
         &device->publication, &device->completion, &device->membership,
-        device->transfers.queue, device->aql_code, &device->failure);
+        device->code_queue, &device->failure);
     status = iree_hal_amd_gpu_publication_initialize(
         publication_count, device->publication_sources, affinity,
         host_allocator, &device->publication);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_amd_gpu_device_initialize_memory(device, family_ordinal);
-    if (has_transfer_queue) {
-      device->sources[device->queue_count] =
-          iree_hal_amd_gpu_sdma_queue_completion_source(
-              device->transfers.queue);
-    }
     // Queue retirement is observed before the final feedback drain so shutdown
     // cannot pass a report published between a drain and native completion.
     if (feedback_enabled) {
-      device->sources[device->queue_count + has_transfer_queue] =
+      device->sources[device->queue_count] =
           (iree_hal_amd_gpu_completion_source_t){iree_hal_amd_gpu_feedback_poll,
                                                  &device->feedback};
     }
@@ -1552,12 +1505,11 @@ iree_status_t iree_hal_amd_gpu_device_create(
       aql ? &device->programs.aql.code_upload
           : &device->programs.pm4.code_upload;
   if (*upload) {
-    status = iree_hal_amd_gpu_code_publish(
-        context, device->transfers.queue, device->transfers.family_ordinal,
-        device->memory.family.queue_family_ordinal, code, upload);
-  }
-  if (iree_status_is_ok(status) && aql) {
-    status = iree_hal_amd_gpu_aql_code_publish(device->aql_code, code);
+    status = iree_hal_amd_gpu_code_publish(context, device->code_queue, code,
+                                           upload);
+  } else if (device->code_queue) {
+    status = iree_hal_amd_gpu_code_queue_publish(device->code_queue, code,
+                                                 iree_const_byte_span_empty());
   }
   if (iree_status_is_ok(status)) {
     *out_device = base;
@@ -1596,7 +1548,7 @@ static iree_status_t iree_hal_amd_gpu_device_trim(iree_hal_device_t* base) {
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       iree_hal_amd_gpu_queue_membership_trim(&device->membership),
       "GPU queue scratch trim"));
-  iree_hal_amd_gpu_file_staging_trim(device->transfers.file_staging);
+  iree_hal_amd_gpu_file_staging_trim(device->file_staging);
   iree_arena_block_pool_trim(&device->memory.allocations.blocks);
   iree_hal_amd_fabric_transient_buffer_pool_trim(
       &device->memory.allocations.buffers);
@@ -1674,10 +1626,7 @@ static iree_status_t iree_hal_amd_gpu_device_load_executable(
       .target = &device->target,
       .native_family_ordinal = device->memory.family.queue_family_ordinal,
       .memory = &memory,
-      .aql_code = device->aql_code,
-      .upload = {.memory = &storage->upload,
-                 .queue = device->transfers.queue,
-                 .family_ordinal = device->transfers.family_ordinal},
+      .code_queue = device->code_queue,
       .notification = device->memory.notification,
       .frontier_tracker = device->topology.frontier.tracker,
       .feedback = device->feedback.context ? &device->feedback : NULL,

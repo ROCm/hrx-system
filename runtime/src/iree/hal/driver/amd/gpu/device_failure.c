@@ -55,33 +55,15 @@ static bool iree_hal_amd_gpu_device_failure_step(
     return true;
   }
   if (phase == IREE_HAL_AMD_GPU_FAILURE_INACTIVATING) {
-    iree_hal_amd_gpu_failure_set_phase(&failure->state, phase, UINT32_MAX - 1,
-                                       0, 1);
-    if (!iree_hal_amd_gpu_sdma_queue_try_inactivate(failure->transfers,
-                                                    out_status)) {
-      return false;
-    }
-    if (!amdf_status_is_ok(*out_status)) {
-      return true;
-    }
     iree_hal_amd_gpu_failure_set_phase(&failure->state, phase, UINT32_MAX, 0,
                                        1);
-    return iree_hal_amd_gpu_aql_code_try_inactivate(failure->code, out_status);
-  }
-  if (phase == IREE_HAL_AMD_GPU_FAILURE_RETIRING) {
-    iree_hal_amd_gpu_failure_set_phase(&failure->state, phase, UINT32_MAX - 1,
-                                       0, 1);
-    return iree_hal_amd_gpu_sdma_queue_retire_failed(failure->transfers);
+    return iree_hal_amd_gpu_code_queue_try_inactivate(failure->code,
+                                                      out_status);
   }
   if (phase == IREE_HAL_AMD_GPU_FAILURE_JOINING) {
-    iree_hal_amd_gpu_failure_set_phase(&failure->state, phase, UINT32_MAX - 1,
-                                       0, 1);
-    if (!iree_hal_amd_gpu_sdma_queue_is_host_idle(failure->transfers)) {
-      return false;
-    }
     iree_hal_amd_gpu_failure_set_phase(&failure->state, phase, UINT32_MAX, 0,
                                        1);
-    return iree_hal_amd_gpu_aql_code_is_host_idle(failure->code);
+    return iree_hal_amd_gpu_code_queue_is_host_idle(failure->code);
   }
   return true;
 }
@@ -97,7 +79,7 @@ static void iree_hal_amd_gpu_device_failure_join(void* user_data,
   const iree_status_code_t code = iree_status_code(status);
   iree_status_free(status);
   const amdf_status_t close_status =
-      iree_hal_amd_gpu_aql_code_close(failure->code, native_error);
+      iree_hal_amd_gpu_code_queue_close(failure->code, native_error);
   if (!amdf_status_is_ok(close_status)) {
     iree_hal_amd_gpu_context_report(failure->context, close_status,
                                     "GPU code loader terminal wake");
@@ -168,14 +150,13 @@ void iree_hal_amd_gpu_device_failure_initialize(
     uint32_t timeout_ms, iree_hal_amd_gpu_publication_t* publication,
     iree_hal_amd_gpu_completion_t* completion,
     iree_hal_amd_gpu_queue_membership_t* membership,
-    iree_hal_amd_gpu_sdma_queue_t* transfers, iree_hal_amd_gpu_aql_code_t* code,
+    iree_hal_amd_gpu_code_queue_t* code,
     iree_hal_amd_gpu_device_failure_t* failure) {
   *failure = (iree_hal_amd_gpu_device_failure_t){
       .context = context,
       .publication = publication,
       .completion = completion,
       .membership = membership,
-      .transfers = transfers,
       .code = code,
   };
   iree_hal_amd_gpu_failure_initialize(&context->endpoint_info, device,

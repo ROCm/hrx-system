@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/hal/driver/amd/gpu/queue/aql/code.h"
-
 #include <algorithm>
 #include <array>
 #include <cstring>
@@ -13,6 +11,7 @@
 
 #include "iree/base/byte_sequence.h"
 #include "iree/base/internal/atomics.h"
+#include "iree/hal/driver/amd/gpu/code_queue.h"
 #include "iree/hal/driver/amd/gpu/cts/test_device.h"
 #include "iree/hal/driver/amd/gpu/cts/testdata.h"
 #include "iree/hal/driver/amd/gpu/image/hsaco.h"
@@ -23,7 +22,17 @@
 
 namespace {
 
-class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
+struct CodePublication {
+  // Native compute carrier used by the code loader.
+  amdf_queue_command_type_t command_type;
+  // Native producer contract, independent of the AQL consumer queue.
+  amdf_queue_publication_modes_t publication_mode;
+  // Use native writes into unmapped device-local code.
+  bool upload;
+};
+
+class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest,
+                    public ::testing::WithParamInterface<CodePublication> {
  protected:
   amdf_queue_command_type_t command_type() const override {
     return AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
@@ -34,12 +43,30 @@ class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
     if (HasFatalFailure() || IsSkipped()) {
       return;
     }
+    uint32_t publisher_family = UINT32_MAX;
+    for (uint32_t i = 0; i < context_->endpoint_info.queue_family_count; ++i) {
+      const auto& family = context_->families[i];
+      if (family.command_type == GetParam().command_type &&
+          (family.publication_modes & GetParam().publication_mode)) {
+        publisher_family = i;
+        break;
+      }
+    }
+    if (publisher_family == UINT32_MAX) {
+      GTEST_SKIP() << "Native compute publication mode is not advertised";
+    }
+    IREE_ASSERT_OK(
+        iree_hal_amd_gpu_context_prepare_memory(context_, UINT32_MAX));
     IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_completion(
         context_, AMDF_QUEUE_PUBLICATION_MODE_USER));
+    if (GetParam().publication_mode == AMDF_QUEUE_PUBLICATION_MODE_KERNEL) {
+      IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_completion(
+          context_, AMDF_QUEUE_PUBLICATION_MODE_KERNEL));
+    }
     ASSERT_NO_FATAL_FAILURE(SelectControlMemory(&access_, &control_policy_));
-    IREE_ASSERT_OK(iree_hal_amd_gpu_aql_code_allocate(
-        context_, options_.queue_family_ordinal, &control_policy_,
-        iree_allocator_system(), &publisher_));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_code_queue_allocate(
+        context_, publisher_family, GetParam().publication_mode,
+        &control_policy_, iree_allocator_system(), &publisher_));
     IREE_ASSERT_OK(iree_hal_amd_fabric_memory_allocate(
         context_->api, &control_policy_, 4096, 64, context_->event_sink,
         &control_, nullptr));
@@ -87,7 +114,7 @@ class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
           "join code test queue"));
     }
     IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
-        iree_hal_amd_gpu_aql_code_free(publisher_), "join code publication"));
+        iree_hal_amd_gpu_code_queue_free(publisher_), "join code publication"));
     if (context_) {
       iree_hal_amd_fabric_memory_deinitialize(context_->api,
                                               context_->event_sink, &memory_);
@@ -144,7 +171,7 @@ class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
   // A single native code allocation retained across all completed generations.
   iree_hal_amd_fabric_memory_t memory_ = {};
   // Device-owned cold loader machinery under test.
-  iree_hal_amd_gpu_aql_code_t* publisher_ = nullptr;
+  iree_hal_amd_gpu_code_queue_t* publisher_ = nullptr;
   // Independent consumer queue: publication cannot rely on a same-queue fence.
   iree_hal_amd_gpu_user_queue_t queue_ = {};
   // Consumer ring operands retained until its native consumption joins.
@@ -163,13 +190,14 @@ class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest {
   bool pending_ = false;
 };
 
-TEST_F(AqlCodeTest, ReplacesCompletedInstructionsAtSameAddress) {
+TEST_P(AqlCodeTest, ReplacesCompletedInstructionsAtSameAddress) {
   ASSERT_NO_FATAL_FAILURE(ReadImages());
   const amdf_memory_device_access_t access = {
       .device = context_->device,
       .requirements =
           {
-              .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_EXECUTE,
+              .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
+                        AMDF_MEMORY_ACCESS_EXECUTE,
               .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
               .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
           },
@@ -177,17 +205,28 @@ TEST_F(AqlCodeTest, ReplacesCompletedInstructionsAtSameAddress) {
   iree_hal_amd_fabric_memory_options_t staging, resident;
   IREE_ASSERT_OK(iree_hal_amd_gpu_context_query_program_memory(
       context_, options_.queue_family_ordinal, &access, &staging, &resident));
-  if (!resident.host_access) {
+  const bool upload = GetParam().upload;
+  if (upload) {
+    resident.host_access = 0;
+    resident.required_flags &= ~AMDF_MEMORY_FLAG_HOST_VISIBLE;
+  } else if (!resident.host_access) {
     GTEST_SKIP()
         << "Retained-address host publication requires a local CPU view";
   }
-  const uint64_t length =
-      std::max(images_[0].byte_length, images_[1].byte_length) + 256;
+  // The initialized image crosses the bounded publisher's command capacity.
+  // Its trailing bytes remain part of the same executable allocation.
+  const uint64_t length = iree_align_uint64(
+      std::max(images_[0].byte_length, images_[1].byte_length) + 65536, 256);
   IREE_ASSERT_OK(iree_hal_amd_fabric_memory_allocate(
       context_->api, &resident, length,
       std::max(images_[0].alignment, images_[1].alignment),
       context_->event_sink, &memory_, nullptr));
   EXPECT_NE(memory_.info.flags & AMDF_MEMORY_FLAG_DEVICE_LOCAL, 0u);
+  if (upload) {
+    EXPECT_EQ(memory_.contents.data, nullptr);
+  }
+  std::vector<uint8_t> upload_bytes(upload ? length : 0);
+  uint8_t* contents = upload ? upload_bytes.data() : memory_.contents.data;
   uint64_t address = 0;
   IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
       context_->api->memory_query_address(memory_.handle, 0,
@@ -210,20 +249,24 @@ TEST_F(AqlCodeTest, ReplacesCompletedInstructionsAtSameAddress) {
   for (uint32_t generation = 0; generation < 65; ++generation) {
     SCOPED_TRACE(generation);
     const auto& image = images_[generation % 2];
-    std::memset(memory_.contents.data, 0, memory_.contents.data_length);
+    std::memset(contents, 0, length);
     std::vector<iree_byte_span_t> mappings;
     for (size_t i = 0; i < image.segment_count; ++i) {
-      mappings.push_back(
-          iree_make_byte_span(memory_.contents.data + image.segments[i].offset,
-                              image.segments[i].length));
+      mappings.push_back(iree_make_byte_span(
+          contents + image.segments[i].offset, image.segments[i].length));
     }
     IREE_ASSERT_OK(iree_hal_amd_gpu_image_load(
         &image, address, 0, nullptr, mappings.size(), mappings.data()));
-    iree_hal_amd_gpu_code_upload_t* upload = nullptr;
-    IREE_ASSERT_OK(iree_hal_amd_gpu_code_publish(context_, nullptr, 0,
-                                                 options_.queue_family_ordinal,
-                                                 &memory_, &upload));
-    IREE_ASSERT_OK(iree_hal_amd_gpu_aql_code_publish(publisher_, &memory_));
+    if (!upload) {
+      IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
+          context_->api->host_mapping_cache_control(
+              memory_.mapping, AMDF_HOST_CACHE_OPERATION_FLUSH, 0, length),
+          "publish mapped code writes"));
+    }
+    IREE_ASSERT_OK(iree_hal_amd_gpu_code_queue_publish(
+        publisher_, &memory_,
+        upload ? iree_make_const_byte_span(contents, length)
+               : iree_const_byte_span_empty()));
     std::fill_n(output, kCount + 1, 0xDEADBEEFu);
     iree_atomic_store(reinterpret_cast<iree_atomic_int64_t*>(&signal_->value),
                       1, iree_memory_order_release);
@@ -259,5 +302,22 @@ TEST_F(AqlCodeTest, ReplacesCompletedInstructionsAtSameAddress) {
     ASSERT_EQ(output[kCount], 0xDEADBEEFu);
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    LocalCode, AqlCodeTest,
+    ::testing::Values(CodePublication{AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+                                      AMDF_QUEUE_PUBLICATION_MODE_USER, false},
+                      CodePublication{AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+                                      AMDF_QUEUE_PUBLICATION_MODE_USER, true},
+                      CodePublication{AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                      AMDF_QUEUE_PUBLICATION_MODE_USER, false},
+                      CodePublication{AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                      AMDF_QUEUE_PUBLICATION_MODE_USER, true},
+                      CodePublication{AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                      AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
+                                      false},
+                      CodePublication{AMDF_QUEUE_COMMAND_TYPE_GPU_PM4,
+                                      AMDF_QUEUE_PUBLICATION_MODE_KERNEL,
+                                      true}));
 
 }  // namespace

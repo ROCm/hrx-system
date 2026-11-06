@@ -41,9 +41,8 @@ iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
   }
   iree_byte_span_t contents;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_code_allocate(
-      context, &out_pool->storage.resident, &out_pool->storage.upload,
-      byte_length, 256, host_allocator, &out_pool->code, &out_pool->code_upload,
-      &contents));
+      context, &out_pool->storage.resident, byte_length, 256, host_allocator,
+      &out_pool->code, &out_pool->code_upload, &contents));
   uint64_t address = 0;
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       context->api->memory_query_address(out_pool->code.handle, 0,
@@ -66,10 +65,10 @@ iree_status_t iree_hal_amd_gpu_pm4_program_pool_initialize(
     offset += iree_align_uint64(code[i].data_length, 256);
   }
   IREE_RETURN_IF_ERROR(status);
-  return out_pool->code_upload ? iree_ok_status()
-                               : iree_hal_amd_gpu_code_publish(
-                                     context, NULL, 0, native_family_ordinal,
-                                     &out_pool->code, &out_pool->code_upload);
+  return out_pool->code_upload
+             ? iree_ok_status()
+             : iree_hal_amd_gpu_code_publish(context, NULL, &out_pool->code,
+                                             &out_pool->code_upload);
 }
 
 void iree_hal_amd_gpu_pm4_program_pool_deinitialize(
@@ -77,7 +76,7 @@ void iree_hal_amd_gpu_pm4_program_pool_deinitialize(
   if (!pool->storage.context) {
     return;
   }
-  iree_hal_amd_gpu_code_upload_free(pool->storage.context, pool->code_upload);
+  iree_hal_amd_gpu_code_upload_free(pool->code_upload);
   iree_hal_amd_fabric_memory_deinitialize(pool->storage.context->api,
                                           pool->storage.context->event_sink,
                                           &pool->code);

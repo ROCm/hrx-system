@@ -201,7 +201,7 @@ class DeviceFailureTest : public ::testing::Test {
     }
     iree_hal_amd_gpu_device_failure_initialize(
         &context_, nullptr, timeout_ms, &publication_, &completion_,
-        &membership_, nullptr, nullptr, &failure_);
+        &membership_, nullptr, &failure_);
     IREE_ASSERT_OK(iree_hal_amd_gpu_publication_initialize(
         publication_sources_.size(), publication_sources_.data(), {},
         iree_allocator_system(), &publication_));
