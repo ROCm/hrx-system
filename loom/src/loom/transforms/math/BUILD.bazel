@@ -24,6 +24,8 @@ loom_cc_library(
         "inverse_hyperbolic.c",
         "inverse_hyperbolic.h",
         "legalize.c",
+        "logarithm.c",
+        "logarithm.h",
         "patterns.c",
         "patterns.h",
         "patterns_elementwise.c",

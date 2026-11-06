@@ -24,6 +24,14 @@ loom_check_test_suite(
 )
 
 loom_check_test(
+    name = "logarithm",
+    src = "logarithm.loom-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/arch:x86",
+    ]),
+)
+
+loom_check_test(
     name = "trigonometry",
     src = "trigonometry.loom-test",
     target_compatible_with = loom_config_compatible_with([
@@ -44,6 +52,7 @@ test_suite(
     name = "test",
     tests = [
         ":generic_test",
+        ":logarithm",
         ":trigonometry",
         ":trigonometry_narrow",
     ],

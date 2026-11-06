@@ -14,6 +14,7 @@
 #include "loom/transforms/math/approximate_f32.h"
 #include "loom/transforms/math/evaluation.h"
 #include "loom/transforms/math/inverse_hyperbolic.h"
+#include "loom/transforms/math/logarithm.h"
 #include "loom/transforms/math/patterns.h"
 #include "loom/transforms/math/trigonometry.h"
 #include "loom/util/fact_extensions.h"
@@ -928,6 +929,9 @@ static iree_status_t loom_math_legalize_build_evaluated_recipe(
     loom_rewriter_t* rewriter, loom_math_legalize_source_t* source,
     loom_math_legalize_value_t* out_value) {
   switch (context->decision.recipe) {
+    case LOOM_TARGET_MATH_RECIPE_APPROXIMATE_LOGARITHM:
+      return loom_math_build_logarithm(context->query.math_op, source,
+                                       out_value);
     case LOOM_TARGET_MATH_RECIPE_PRESERVE_TRIGONOMETRIC_ZEROS:
       return loom_math_build_preserved_trigonometric(context->query.math_op,
                                                      source, out_value);
@@ -1048,6 +1052,7 @@ static iree_status_t loom_math_legalize_rewrite_math_op(
 static bool loom_math_legalize_elementwise_recipe_is_supported(
     loom_target_math_recipe_t recipe) {
   switch (recipe) {
+    case LOOM_TARGET_MATH_RECIPE_APPROXIMATE_LOGARITHM:
     case LOOM_TARGET_MATH_RECIPE_PRESERVE_TRIGONOMETRIC_ZEROS:
     case LOOM_TARGET_MATH_RECIPE_INVERSE_HYPERBOLIC_F32:
     case LOOM_TARGET_MATH_RECIPE_TRIGONOMETRIC_F32:

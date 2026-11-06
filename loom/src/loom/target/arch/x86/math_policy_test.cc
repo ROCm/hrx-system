@@ -14,6 +14,71 @@
 
 namespace {
 
+TEST(MathPolicyTest, ApproximateLogarithmFamily) {
+  loom_target_math_policy_registry_t registry = {};
+  loom_x86_math_policy_registry_initialize(&registry);
+  const uint64_t contracts[] = {
+      UINT64_C(0x34e8f11d46a8a495), UINT64_C(0x4a4769fa07a2ddeb),
+      UINT64_C(0x6ebbd729aef5811e), UINT64_C(0x06092b7cdc8ed7f3),
+      UINT64_C(0x7ddea86e8df4a0d5),
+  };
+  const loom_target_math_op_t operations[] = {
+      LOOM_TARGET_MATH_OP_LOGF,
+      LOOM_TARGET_MATH_OP_LOG2F,
+      LOOM_TARGET_MATH_OP_LOG10F,
+      LOOM_TARGET_MATH_OP_LOG1PF,
+  };
+  const loom_scalar_type_t elements[] = {
+      LOOM_SCALAR_TYPE_F8E4M3, LOOM_SCALAR_TYPE_F8E5M2, LOOM_SCALAR_TYPE_F16,
+      LOOM_SCALAR_TYPE_BF16,   LOOM_SCALAR_TYPE_F32,    LOOM_SCALAR_TYPE_F64,
+  };
+  for (uint64_t contract : contracts) {
+    SCOPED_TRACE(contract);
+    const auto* policy =
+        loom_target_math_policy_registry_lookup(&registry, contract);
+    ASSERT_NE(policy, nullptr);
+    for (loom_target_math_op_t operation : operations) {
+      SCOPED_TRACE(operation);
+      for (loom_scalar_type_t element : elements) {
+        SCOPED_TRACE(element);
+        // Zero denotes a scalar; every other shape exercises vector policy,
+        // including tails and values wider than any physical packet.
+        for (int lanes : {0, 1, 2, 3, 4, 8, 16, 32, 65}) {
+          SCOPED_TRACE(lanes);
+          for (uint8_t flags :
+               {uint8_t(0), uint8_t(LOOM_TARGET_MATH_FASTMATH_FLAG_AFN),
+                uint8_t(LOOM_TARGET_MATH_FASTMATH_FLAG_FAST)}) {
+            SCOPED_TRACE(flags);
+            const loom_target_math_query_t query = {
+                .math_op = operation,
+                .lane_domain = lanes ? LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR
+                                     : LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+                .value_type =
+                    lanes ? loom_type_shaped_1d(LOOM_TYPE_VECTOR, element,
+                                                loom_dim_pack_static(lanes), 0)
+                          : loom_type_scalar(element),
+                .element_type = element,
+                .fastmath_flags = flags,
+            };
+            loom_target_math_policy_decision_t decision = {};
+            loom_target_math_policy_query(policy, &query, &decision);
+            if (flags == 0) {
+              EXPECT_EQ(decision.action, LOOM_TARGET_MATH_POLICY_ACTION_REJECT);
+            } else {
+              EXPECT_EQ(decision.action,
+                        LOOM_TARGET_MATH_POLICY_ACTION_REWRITE);
+              EXPECT_EQ(decision.recipe,
+                        loom_scalar_type_bitwidth(element) < 32
+                            ? LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND
+                            : LOOM_TARGET_MATH_RECIPE_APPROXIMATE_LOGARITHM);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(MathPolicyTest, NativeFmaFamily) {
   loom_target_math_policy_registry_t registry = {};
   loom_x86_math_policy_registry_initialize(&registry);
