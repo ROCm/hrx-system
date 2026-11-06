@@ -294,7 +294,7 @@ static iree_status_t iree_hal_amd_gpu_sdma_queue_alloca(
     iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_hal_pool_t* pool,
     iree_host_size_t count, const iree_hal_pool_reservation_request_t* requests,
-    iree_hal_buffer_t** out_buffers) {
+    iree_hal_buffer_t** IREE_RESTRICT out_buffers) {
   iree_hal_amd_gpu_sdma_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_sdma_check_acceptance(queue));
   const iree_hal_barrier_list_t empty = {0};

@@ -588,7 +588,6 @@ TEST_P(QueueTest, MembershipGrowthDoesNotWaitForFullNativeSlots) {
   IREE_EXPECT_OK(lifecycle().reserve_frontiers(queue_, 4, &notification));
   iree_notification_deinitialize(&notification);
   iree_hal_amd_gpu_publication_deinitialize(&publication_);
-  publication_ = {};
   iree_notification_initialize(&publication_.notification);
   EXPECT_EQ(commands_.size(), 64u);
   EXPECT_EQ(retired_, 0u);
