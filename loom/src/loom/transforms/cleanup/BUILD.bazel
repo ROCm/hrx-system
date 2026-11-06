@@ -207,6 +207,7 @@ loom_cc_test(
     deps = [
         ":canonicalizer",
         ":configured",
+        ":fact_refinement",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:special_values",
@@ -216,6 +217,7 @@ loom_cc_test(
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass:value_facts",
+        "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:facts",
         "//loom/src/loom/target:types",
         "//runtime/src/iree/base/internal:arena",
