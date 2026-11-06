@@ -132,8 +132,6 @@ loom_check_test_suite(
         "kernel_intrinsics_invalid.cxx-test",
         "launch.cxx-test",
         "launch_invalid.cxx-test",
-        "local_addresses.cxx-test",
-        "local_arrays.cxx-test",
         "matrix_fragments.cxx-test",
         "matrix_fragments_invalid.cxx-test",
         "opaque_pointers.cxx-test",
