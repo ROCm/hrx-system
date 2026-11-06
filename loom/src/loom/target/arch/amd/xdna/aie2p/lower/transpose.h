@@ -9,7 +9,7 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_LOWER_TRANSPOSE_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_LOWER_TRANSPOSE_H_
 
-#include "loom/codegen/low/lower/lower.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,9 +22,6 @@ iree_status_t loom_aie2p_query_transpose_contract(
     const loom_target_contract_query_environment_t* environment,
     const loom_op_t* source_op,
     loom_target_contract_query_result_t* out_result);
-
-// Returns true when |plan| is an AIE2P static transpose plan.
-bool loom_aie2p_transpose_plan_isa(loom_low_lower_plan_t plan);
 
 // Selects one retained native or bounded permutation-network plan. Other
 // operations leave |out_plan| empty.

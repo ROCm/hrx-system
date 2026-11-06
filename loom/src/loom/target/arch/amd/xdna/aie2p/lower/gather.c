@@ -21,10 +21,6 @@
 #include "loom/target/arch/amd/xdna/aie2p/gather.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/rodata.h"
 
-typedef enum loom_aie2p_gather_plan_kind_e {
-  LOOM_AIE2P_GATHER_PLAN_IMMUTABLE = 0x300,
-} loom_aie2p_gather_plan_kind_t;
-
 typedef struct loom_aie2p_gather_table_state_t {
   // True once this original symbol has one planned derived pair.
   bool initialized;
@@ -55,10 +51,6 @@ typedef struct loom_aie2p_gather_module_state_t {
 } loom_aie2p_gather_module_state_t;
 
 static int loom_aie2p_gather_module_state_key;
-
-bool loom_aie2p_gather_plan_isa(loom_low_lower_plan_t plan) {
-  return plan.id == LOOM_AIE2P_GATHER_PLAN_IMMUTABLE;
-}
 
 static iree_status_t loom_aie2p_gather_module_state_from_context(
     loom_low_lower_context_t* context,
@@ -227,7 +219,7 @@ iree_status_t loom_aie2p_select_gather_plan(loom_low_lower_context_t* context,
       context, AIE2P_CORE_REG_CLASS_ID_AIE2P_VEC256, 2, &result_type));
   IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
       context, loom_vector_gather_result(source_op), result_type));
-  *out_plan = loom_low_lower_plan_make(LOOM_AIE2P_GATHER_PLAN_IMMUTABLE, plan);
+  *out_plan = loom_low_lower_plan_make(LOOM_AIE2P_PLAN_GATHER_IMMUTABLE, plan);
   return iree_ok_status();
 }
 

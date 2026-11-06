@@ -9,14 +9,11 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_LOWER_GATHER_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_LOWER_GATHER_H_
 
-#include "loom/codegen/low/lower/lower.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Returns true when |plan| is owned by immutable gather lowering.
-bool loom_aie2p_gather_plan_isa(loom_low_lower_plan_t plan);
 
 // Selects an immutable gather plan for one source operation.
 iree_status_t loom_aie2p_select_gather_plan(loom_low_lower_context_t* context,

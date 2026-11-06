@@ -9,10 +9,6 @@
 #include "loom/ops/global/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 
-typedef enum loom_aie2p_rodata_plan_kind_e {
-  LOOM_AIE2P_RODATA_PLAN_ADDRESS = 0x200,
-} loom_aie2p_rodata_plan_kind_t;
-
 iree_status_t loom_aie2p_emit_rodata_address(loom_low_lower_context_t* context,
                                              loom_symbol_ref_t symbol,
                                              loom_location_id_t location,
@@ -43,10 +39,6 @@ iree_status_t loom_aie2p_emit_rodata_address(loom_low_lower_context_t* context,
   return iree_ok_status();
 }
 
-bool loom_aie2p_rodata_plan_isa(loom_low_lower_plan_t plan) {
-  return plan.id == LOOM_AIE2P_RODATA_PLAN_ADDRESS;
-}
-
 iree_status_t loom_aie2p_select_rodata_plan(loom_low_lower_context_t* context,
                                             const loom_op_t* source_op,
                                             loom_low_lower_plan_t* out_plan) {
@@ -64,7 +56,7 @@ iree_status_t loom_aie2p_select_rodata_plan(loom_low_lower_context_t* context,
         context, AIE2P_CORE_REG_CLASS_ID_AIE2P_EP, 1, &result_type));
     IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
         context, loom_global_load_result(source_op).values[0], result_type));
-    *out_plan = loom_low_lower_plan_make(LOOM_AIE2P_RODATA_PLAN_ADDRESS, NULL);
+    *out_plan = loom_low_lower_plan_make(LOOM_AIE2P_PLAN_RODATA_ADDRESS, NULL);
   }
   return iree_ok_status();
 }
