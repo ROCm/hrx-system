@@ -12,6 +12,7 @@
 
 #include "iree/base/internal/math.h"
 #include "loom/ir/float_facts.h"
+#include "loom/ops/combining.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/target/types.h"

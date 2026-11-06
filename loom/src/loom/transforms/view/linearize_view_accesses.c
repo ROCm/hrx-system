@@ -97,6 +97,34 @@ typedef struct loom_linearize_view_accesses_collect_context_t {
   loom_linearize_view_accesses_op_list_t* accesses;
 } loom_linearize_view_accesses_collect_context_t;
 
+typedef uint8_t loom_linearize_view_accesses_access_kind_t;
+enum loom_linearize_view_accesses_access_kind_e {
+  LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_NONE = 0,
+  LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_VIEW_LOAD = 1,
+  LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_VIEW_STORE = 2,
+  LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_VECTOR_LOAD = 3,
+  LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_VECTOR_STORE = 4,
+};
+
+// Classifies the exact generated operation schemas this pass can rebuild.
+// Collection and rewriting share this one allowlist so admitting a new schema
+// requires defining its rewrite behavior at the same ownership boundary.
+static loom_linearize_view_accesses_access_kind_t
+loom_linearize_view_accesses_access_kind(const loom_op_t* op) {
+  switch (op->kind) {
+    case LOOM_OP_VIEW_LOAD:
+      return LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_VIEW_LOAD;
+    case LOOM_OP_VIEW_STORE:
+      return LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_VIEW_STORE;
+    case LOOM_OP_VECTOR_LOAD:
+      return LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_VECTOR_LOAD;
+    case LOOM_OP_VECTOR_STORE:
+      return LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_VECTOR_STORE;
+    default:
+      return LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_NONE;
+  }
+}
+
 typedef struct loom_linearize_view_accesses_context_t {
   // Owning pass instance.
   loom_pass_t* pass;
@@ -211,8 +239,8 @@ static iree_status_t loom_linearize_view_accesses_collect_access(
   loom_linearize_view_accesses_collect_context_t* collect_context =
       (loom_linearize_view_accesses_collect_context_t*)user_data;
   *out_result = LOOM_WALK_CONTINUE;
-  if (!loom_view_load_isa(op) && !loom_view_store_isa(op) &&
-      !loom_vector_load_isa(op) && !loom_vector_store_isa(op)) {
+  if (loom_linearize_view_accesses_access_kind(op) ==
+      LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_NONE) {
     return iree_ok_status();
   }
   return loom_linearize_view_accesses_op_list_push(
@@ -1230,19 +1258,21 @@ static iree_status_t loom_linearize_view_accesses_rewrite_access(
   if (iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {
     return iree_ok_status();
   }
-  if (loom_view_load_isa(op)) {
-    return loom_linearize_view_accesses_rewrite_load(context, op, out_changed);
-  }
-  if (loom_view_store_isa(op)) {
-    return loom_linearize_view_accesses_rewrite_store(context, op, out_changed);
-  }
-  if (loom_vector_load_isa(op)) {
-    return loom_linearize_view_accesses_rewrite_vector_load(context, op,
-                                                            out_changed);
-  }
-  if (loom_vector_store_isa(op)) {
-    return loom_linearize_view_accesses_rewrite_vector_store(context, op,
-                                                             out_changed);
+  switch (loom_linearize_view_accesses_access_kind(op)) {
+    case LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_VIEW_LOAD:
+      return loom_linearize_view_accesses_rewrite_load(context, op,
+                                                       out_changed);
+    case LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_VIEW_STORE:
+      return loom_linearize_view_accesses_rewrite_store(context, op,
+                                                        out_changed);
+    case LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_VECTOR_LOAD:
+      return loom_linearize_view_accesses_rewrite_vector_load(context, op,
+                                                              out_changed);
+    case LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_VECTOR_STORE:
+      return loom_linearize_view_accesses_rewrite_vector_store(context, op,
+                                                               out_changed);
+    case LOOM_LINEARIZE_VIEW_ACCESSES_ACCESS_NONE:
+      return iree_ok_status();
   }
   return iree_ok_status();
 }

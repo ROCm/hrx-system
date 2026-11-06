@@ -102,14 +102,16 @@ loom_target_compile_report_pressure_origin_from_low_op(const loom_op_t* op) {
   if (loom_low_const_isa(op)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONSTANT;
   }
-  if (loom_low_copy_isa(op) || loom_low_move_isa(op)) {
-    return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_COPY;
-  }
-  if (loom_low_slice_isa(op)) {
-    return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_SLICE;
-  }
-  if (loom_low_concat_isa(op)) {
-    return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONCAT;
+  switch (loom_low_register_transfer_kind(op)) {
+    case LOOM_LOW_REGISTER_TRANSFER_COPY:
+    case LOOM_LOW_REGISTER_TRANSFER_MOVE:
+      return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_COPY;
+    case LOOM_LOW_REGISTER_TRANSFER_SLICE:
+      return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_SLICE;
+    case LOOM_LOW_REGISTER_TRANSFER_CONCAT:
+      return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONCAT;
+    case LOOM_LOW_REGISTER_TRANSFER_NONE:
+      break;
   }
   if (loom_low_storage_reserve_isa(op) || loom_low_storage_view_isa(op) ||
       loom_low_storage_address_isa(op)) {
@@ -118,8 +120,7 @@ loom_target_compile_report_pressure_origin_from_low_op(const loom_op_t* op) {
   if (loom_low_storage_store_isa(op) || loom_low_storage_load_isa(op)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_SPILL_RELOAD;
   }
-  if (loom_direct_branch_isa(op) || loom_low_cond_br_isa(op) ||
-      loom_low_return_isa(op) || loom_low_unreachable_isa(op)) {
+  if (iree_any_bit_set(op->traits, LOOM_TRAIT_TERMINATOR)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_CONTROL;
   }
   return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_OPERATION;

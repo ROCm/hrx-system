@@ -694,7 +694,6 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/allocation:live_range",
         "//loom/src/loom/codegen/low/allocation:loop_edge_relocation",
         "//loom/src/loom/codegen/low/allocation:move_plan",
-        "//loom/src/loom/codegen/low/allocation:move_topology",
         "//loom/src/loom/codegen/low/allocation:numbering",
         "//loom/src/loom/codegen/low/allocation:packet_move",
         "//loom/src/loom/codegen/low/allocation:placement",

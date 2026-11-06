@@ -1005,19 +1005,32 @@ iree_status_t loom_vector_atomic_to_scalar_rewrite_op(loom_pass_t* pass,
                                                       loom_op_t* op,
                                                       bool* out_rewritten) {
   *out_rewritten = false;
+  if (loom_op_dialect_id(op->kind) != LOOM_DIALECT_VECTOR) {
+    return iree_ok_status();
+  }
+
+  const loom_memory_access_t access =
+      loom_memory_access_cast(rewriter->module, op);
   loom_builder_set_before(&rewriter->builder, op);
   bool handled = false;
-  if (loom_vector_atomic_reduce_isa(op) ||
-      loom_vector_atomic_reduce_mask_isa(op)) {
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_atomic_reduce_op(
-        pass, rewriter, op, &handled));
-  } else if (loom_vector_atomic_rmw_isa(op) ||
-             loom_vector_atomic_rmw_mask_isa(op)) {
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_atomic_rmw_op(
-        pass, rewriter, op, &handled));
-  } else if (loom_vector_atomic_cmpxchg_isa(op)) {
-    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_atomic_cmpxchg_op(
-        pass, rewriter, op, &handled));
+  switch (loom_memory_access_operation_kind(access)) {
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE: {
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_atomic_reduce_op(
+          pass, rewriter, op, &handled));
+      break;
+    }
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW: {
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_atomic_rmw_op(
+          pass, rewriter, op, &handled));
+      break;
+    }
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG: {
+      IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_atomic_cmpxchg_op(
+          pass, rewriter, op, &handled));
+      break;
+    }
+    default:
+      break;
   }
   if (handled && !loom_pass_has_error_diagnostics(pass) &&
       iree_any_bit_set(op->flags, LOOM_OP_FLAG_DEAD)) {

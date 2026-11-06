@@ -1126,8 +1126,8 @@ static iree_status_t loom_x86_function_structural(
     }
     return iree_ok_status();
   }
-  if (loom_low_copy_isa(node->op) || loom_low_move_isa(node->op) ||
-      loom_low_slice_isa(node->op) || loom_low_concat_isa(node->op)) {
+  if (loom_low_register_transfer_kind(node->op) !=
+      LOOM_LOW_REGISTER_TRANSFER_NONE) {
     const loom_low_allocation_packet_move_group_t* group =
         loom_low_allocation_find_packet_move_group_by_source_ordinal(
             &frame->allocation, packet->node_index);

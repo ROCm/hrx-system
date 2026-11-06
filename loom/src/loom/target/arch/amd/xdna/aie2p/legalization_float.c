@@ -7,6 +7,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/legalization_float.h"
 
 #include "loom/ir/module.h"
+#include "loom/ops/vector/combining.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/util/numeric_format.h"
@@ -33,15 +34,6 @@ typedef enum loom_aie2p_float_zero_ordering_e {
   // Orders negative zero immediately below positive zero.
   LOOM_AIE2P_FLOAT_ZERO_ORDERING_DISTINCT,
 } loom_aie2p_float_zero_ordering_t;
-
-typedef enum loom_aie2p_float_extremum_kind_e {
-  LOOM_AIE2P_FLOAT_EXTREMUM_MINIMUM = 0,
-  LOOM_AIE2P_FLOAT_EXTREMUM_MAXIMUM,
-  LOOM_AIE2P_FLOAT_EXTREMUM_MINNUM,
-  LOOM_AIE2P_FLOAT_EXTREMUM_MAXNUM,
-  LOOM_AIE2P_FLOAT_EXTREMUM_ORDERED_MINIMUM,
-  LOOM_AIE2P_FLOAT_EXTREMUM_ORDERED_MAXIMUM,
-} loom_aie2p_float_extremum_kind_t;
 
 typedef enum loom_aie2p_float_extremum_result_e {
   // Materializes only the selected floating-point encoding.
@@ -380,29 +372,17 @@ static iree_status_t loom_aie2p_float_ordering_select_value(
 }
 
 static iree_status_t loom_aie2p_float_ordering_select_extremum(
-    loom_aie2p_float_ordering_context_t* ordering,
-    loom_aie2p_float_extremum_kind_t kind,
-    const loom_aie2p_float_ordering_value_t* lhs,
+    loom_aie2p_float_ordering_context_t* ordering, loom_combining_kind_t kind,
+    bool is_ordered_clamp, const loom_aie2p_float_ordering_value_t* lhs,
     const loom_aie2p_float_ordering_value_t* rhs, bool is_relaxed,
     loom_aie2p_float_extremum_result_t result_kind,
     loom_aie2p_float_ordering_value_t* out_value) {
-  loom_vector_cmpi_predicate_t comparison_predicate =
-      LOOM_VECTOR_CMPI_PREDICATE_ULT;
-  switch (kind) {
-    case LOOM_AIE2P_FLOAT_EXTREMUM_MAXIMUM:
-    case LOOM_AIE2P_FLOAT_EXTREMUM_MAXNUM:
-      comparison_predicate = LOOM_VECTOR_CMPI_PREDICATE_UGT;
-      break;
-    case LOOM_AIE2P_FLOAT_EXTREMUM_ORDERED_MINIMUM:
-      comparison_predicate = LOOM_VECTOR_CMPI_PREDICATE_ULE;
-      break;
-    case LOOM_AIE2P_FLOAT_EXTREMUM_ORDERED_MAXIMUM:
-      comparison_predicate = LOOM_VECTOR_CMPI_PREDICATE_UGE;
-      break;
-    case LOOM_AIE2P_FLOAT_EXTREMUM_MINIMUM:
-    case LOOM_AIE2P_FLOAT_EXTREMUM_MINNUM:
-      break;
-  }
+  const bool is_minimum = loom_combining_kind_is_minimum_float_extremum(kind);
+  const loom_vector_cmpi_predicate_t comparison_predicate =
+      is_ordered_clamp ? (is_minimum ? LOOM_VECTOR_CMPI_PREDICATE_ULE
+                                     : LOOM_VECTOR_CMPI_PREDICATE_UGE)
+                       : (is_minimum ? LOOM_VECTOR_CMPI_PREDICATE_ULT
+                                     : LOOM_VECTOR_CMPI_PREDICATE_UGT);
   loom_value_id_t ordered_predicate = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_build_compare(
       ordering, comparison_predicate, lhs->key, rhs->key, &ordered_predicate));
@@ -416,8 +396,14 @@ static iree_status_t loom_aie2p_float_ordering_select_extremum(
 
   const loom_aie2p_float_ordering_value_t* rhs_nan_value = NULL;
   const loom_aie2p_float_ordering_value_t* lhs_nan_value = NULL;
-  if (kind == LOOM_AIE2P_FLOAT_EXTREMUM_MINNUM ||
-      kind == LOOM_AIE2P_FLOAT_EXTREMUM_MAXNUM) {
+  if (is_ordered_clamp) {
+    // Ordered clamp uses strict compare/select: a NaN bound is ignored and a
+    // NaN value stays in the value position.
+    rhs_nan_value = lhs;
+    lhs_nan_value = lhs;
+    out_value->is_nan = lhs->is_nan;
+  } else if (kind == LOOM_COMBINING_KIND_MINNUMF ||
+             kind == LOOM_COMBINING_KIND_MAXNUMF) {
     rhs_nan_value = lhs;
     lhs_nan_value = rhs;
     loom_op_t* is_nan_op = NULL;
@@ -425,8 +411,7 @@ static iree_status_t loom_aie2p_float_ordering_select_extremum(
         ordering->builder, lhs->is_nan, rhs->is_nan, ordering->predicate_type,
         ordering->location, &is_nan_op));
     out_value->is_nan = loom_vector_andi_result(is_nan_op);
-  } else if (kind == LOOM_AIE2P_FLOAT_EXTREMUM_MINIMUM ||
-             kind == LOOM_AIE2P_FLOAT_EXTREMUM_MAXIMUM) {
+  } else {
     rhs_nan_value = rhs;
     lhs_nan_value = lhs;
     loom_op_t* is_nan_op = NULL;
@@ -434,12 +419,6 @@ static iree_status_t loom_aie2p_float_ordering_select_extremum(
         ordering->builder, lhs->is_nan, rhs->is_nan, ordering->predicate_type,
         ordering->location, &is_nan_op));
     out_value->is_nan = loom_vector_ori_result(is_nan_op);
-  } else {
-    // Ordered clamp uses strict compare/select: a NaN bound is ignored and a
-    // NaN value stays in the value position.
-    rhs_nan_value = lhs;
-    lhs_nan_value = lhs;
-    out_value->is_nan = lhs->is_nan;
   }
 
   loom_aie2p_float_ordering_value_t rhs_selected = {0};
@@ -645,12 +624,12 @@ static iree_status_t loom_aie2p_float_extrema_build_packet(
 
   loom_aie2p_float_ordering_value_t result = {0};
   if (op_kind == LOOM_OP_VECTOR_CLAMPF) {
-    loom_aie2p_float_extremum_kind_t lower_kind =
-        LOOM_AIE2P_FLOAT_EXTREMUM_ORDERED_MAXIMUM;
-    loom_aie2p_float_extremum_kind_t upper_kind =
-        LOOM_AIE2P_FLOAT_EXTREMUM_ORDERED_MINIMUM;
+    loom_combining_kind_t lower_kind = LOOM_COMBINING_KIND_MAXIMUMF;
+    loom_combining_kind_t upper_kind = LOOM_COMBINING_KIND_MINIMUMF;
+    bool is_ordered_clamp = false;
     switch (clamp_mode) {
       case LOOM_VECTOR_CLAMPF_MODE_ORDERED:
+        is_ordered_clamp = true;
         // Strict comparisons consider signed zeros equal and retain the value
         // operand on a tie.
         if (!is_relaxed) {
@@ -661,12 +640,10 @@ static iree_status_t loom_aie2p_float_extrema_build_packet(
         }
         break;
       case LOOM_VECTOR_CLAMPF_MODE_NUMBER:
-        lower_kind = LOOM_AIE2P_FLOAT_EXTREMUM_MAXNUM;
-        upper_kind = LOOM_AIE2P_FLOAT_EXTREMUM_MINNUM;
+        lower_kind = LOOM_COMBINING_KIND_MAXNUMF;
+        upper_kind = LOOM_COMBINING_KIND_MINNUMF;
         break;
       case LOOM_VECTOR_CLAMPF_MODE_IEEE:
-        lower_kind = LOOM_AIE2P_FLOAT_EXTREMUM_MAXIMUM;
-        upper_kind = LOOM_AIE2P_FLOAT_EXTREMUM_MINIMUM;
         break;
       case LOOM_VECTOR_CLAMPF_MODE_COUNT_:
         IREE_ASSERT_UNREACHABLE("invalid vector floating clamp mode");
@@ -674,32 +651,18 @@ static iree_status_t loom_aie2p_float_extrema_build_packet(
     }
     loom_aie2p_float_ordering_value_t lower_bounded = {0};
     IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_select_extremum(
-        &ordering, lower_kind, &values[0], &values[1], is_relaxed,
-        LOOM_AIE2P_FLOAT_EXTREMUM_RESULT_BITS_AND_KEY, &lower_bounded));
+        &ordering, lower_kind, is_ordered_clamp, &values[0], &values[1],
+        is_relaxed, LOOM_AIE2P_FLOAT_EXTREMUM_RESULT_BITS_AND_KEY,
+        &lower_bounded));
     IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_select_extremum(
-        &ordering, upper_kind, &lower_bounded, &values[2], is_relaxed,
-        LOOM_AIE2P_FLOAT_EXTREMUM_RESULT_BITS, &result));
+        &ordering, upper_kind, is_ordered_clamp, &lower_bounded, &values[2],
+        is_relaxed, LOOM_AIE2P_FLOAT_EXTREMUM_RESULT_BITS, &result));
   } else {
-    loom_aie2p_float_extremum_kind_t kind = LOOM_AIE2P_FLOAT_EXTREMUM_MINIMUM;
-    switch (op_kind) {
-      case LOOM_OP_VECTOR_MINIMUMF:
-        break;
-      case LOOM_OP_VECTOR_MAXIMUMF:
-        kind = LOOM_AIE2P_FLOAT_EXTREMUM_MAXIMUM;
-        break;
-      case LOOM_OP_VECTOR_MINNUMF:
-        kind = LOOM_AIE2P_FLOAT_EXTREMUM_MINNUM;
-        break;
-      case LOOM_OP_VECTOR_MAXNUMF:
-        kind = LOOM_AIE2P_FLOAT_EXTREMUM_MAXNUM;
-        break;
-      default:
-        IREE_ASSERT_UNREACHABLE("unexpected vector floating extremum");
-        IREE_BUILTIN_UNREACHABLE();
-    }
+    const loom_combining_kind_t kind =
+        loom_vector_float_extremum_combining_kind(op_kind);
     IREE_RETURN_IF_ERROR(loom_aie2p_float_ordering_select_extremum(
-        &ordering, kind, &values[0], &values[1], is_relaxed,
-        LOOM_AIE2P_FLOAT_EXTREMUM_RESULT_BITS, &result));
+        &ordering, kind, /*is_ordered_clamp=*/false, &values[0], &values[1],
+        is_relaxed, LOOM_AIE2P_FLOAT_EXTREMUM_RESULT_BITS, &result));
   }
 
   if (!is_relaxed && (op_kind != LOOM_OP_VECTOR_CLAMPF ||

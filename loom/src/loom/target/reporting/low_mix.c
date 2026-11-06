@@ -17,6 +17,7 @@
 #include "loom/ir/types.h"
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/target/registers.h"
 #include "loom/target/reporting/low_names.h"
 #include "loom/util/cfg_execution.h"
@@ -84,8 +85,8 @@ static uint64_t loom_target_compile_report_low_structural_move_count(
             allocation, source_ordinal);
     return group != NULL ? group->move_group.moves.count : 0;
   }
-  if (!loom_low_copy_isa(node->op) && !loom_low_move_isa(node->op) &&
-      !loom_low_slice_isa(node->op) && !loom_low_concat_isa(node->op)) {
+  if (loom_low_register_transfer_kind(node->op) ==
+      LOOM_LOW_REGISTER_TRANSFER_NONE) {
     return 0;
   }
   const loom_low_allocation_packet_move_group_t* group =

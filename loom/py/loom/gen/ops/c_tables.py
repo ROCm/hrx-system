@@ -43,6 +43,7 @@ from loom.gen.ops.c_dialect import (
     generate_tables_c,
     generate_tables_h,
 )
+from loom.gen.ops.c_enum_attrs import generate_enum_header
 from loom.gen.ops.c_location_tags import generate_location_tag_table_inc
 from loom.gen.ops.c_names import (
     c_dialect_path as _c_dialect_path,
@@ -174,6 +175,18 @@ def checked_in_file_set(model: GenerationModel | None = None) -> GeneratedFileSe
             checked_in_outputs[path] = contents
         else:
             build_output_paths.append(path)
+
+    for enum_def in model.generated_enums:
+        if enum_def.c_include is None:
+            raise ValueError(f"generated enum '{enum_def.name}' requires c_include")
+        include_path = Path(enum_def.c_include)
+        if include_path.parts[:1] != ("loom",):
+            raise ValueError(f"generated enum '{enum_def.name}' include must be rooted under loom/")
+        path = Path("loom/src") / include_path
+        path_string = path.as_posix()
+        if path_string in checked_in_outputs:
+            raise ValueError(f"duplicate generated output path '{path_string}'")
+        checked_in_outputs[path_string] = generate_enum_header(enum_def)
 
     checked_in_outputs[(output_root / "ir" / "scalar_type_table.inc").as_posix()] = generate_scalar_type_table_inc()
     checked_in_outputs[(output_root / "ir" / "location_tag_table.inc").as_posix()] = generate_location_tag_table_inc()

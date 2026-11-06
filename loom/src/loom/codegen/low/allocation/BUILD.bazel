@@ -228,7 +228,6 @@ loom_cc_library(
     deps = [
         ":assignment",
         ":assignment_map",
-        ":move_topology",
         ":storage",
         ":table",
         "//loom/src/loom/analysis:liveness",
@@ -1367,17 +1366,6 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "move_topology",
-    srcs = ["move_topology.c"],
-    hdrs = ["move_topology.h"],
-    deps = [
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/low",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
     name = "packet_move",
     srcs = ["packet_move.c"],
     hdrs = ["packet_move.h"],
@@ -1385,7 +1373,6 @@ loom_cc_library(
         ":assignment_map",
         ":live_range",
         ":move_plan",
-        ":move_topology",
         ":storage",
         ":table",
         "//loom/src/loom/analysis:liveness",

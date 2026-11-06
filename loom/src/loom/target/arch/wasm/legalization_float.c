@@ -7,8 +7,10 @@
 #include "loom/target/arch/wasm/legalization_float.h"
 
 #include "loom/ir/module.h"
+#include "loom/ops/scalar/combining.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/vector/combining.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/wasm/descriptors/descriptors.h"
 #include "loom/transforms/vector/target_legalization.h"
@@ -20,12 +22,6 @@ static bool loom_wasm_float_legalizer_supports_descriptor_set(
          descriptor_set->target_stable_id ==
              loom_wasm_core_simd128_descriptor_set()->target_stable_id;
 }
-
-typedef uint8_t loom_wasm_float_extremum_kind_t;
-enum loom_wasm_float_extremum_kind_e {
-  LOOM_WASM_FLOAT_EXTREMUM_MINIMUM = 0,
-  LOOM_WASM_FLOAT_EXTREMUM_MAXIMUM = 1,
-};
 
 static bool loom_wasm_scalar_extremum_is_relaxed(const loom_op_t* op) {
   const uint8_t required_flags =
@@ -73,9 +69,9 @@ static iree_status_t loom_wasm_build_scalar_float_order_key(
 
 static iree_status_t loom_wasm_build_scalar_relaxed_extremum(
     loom_builder_t* builder, loom_location_id_t location,
-    loom_wasm_float_extremum_kind_t kind, uint8_t fastmath, loom_value_id_t lhs,
+    loom_combining_kind_t kind, uint8_t fastmath, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_type_t type, loom_value_id_t* out_result) {
-  const bool is_minimum = kind == LOOM_WASM_FLOAT_EXTREMUM_MINIMUM;
+  const bool is_minimum = loom_combining_kind_is_minimum_float_extremum(kind);
   loom_value_id_t predicate = LOOM_VALUE_ID_INVALID;
   const loom_scalar_type_t element_type = loom_type_element_type(type);
   if (loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_FLOAT_LE16,
@@ -130,9 +126,10 @@ static iree_status_t loom_wasm_build_scalar_relaxed_extremum(
 static iree_status_t loom_wasm_rewrite_scalar_relaxed_extremum(
     loom_rewriter_t* rewriter, loom_op_t* op, bool* out_rewritten) {
   *out_rewritten = false;
-  if ((!loom_scalar_minnumf_isa(op) && !loom_scalar_maxnumf_isa(op) &&
-       !loom_scalar_minimumf_isa(op) && !loom_scalar_maximumf_isa(op) &&
-       !loom_scalar_clampf_isa(op)) ||
+  const loom_combining_kind_t kind =
+      loom_scalar_float_extremum_combining_kind(op->kind);
+  const bool is_binary_extremum = kind != LOOM_COMBINING_KIND_COUNT_;
+  if ((!is_binary_extremum && !loom_scalar_clampf_isa(op)) ||
       !loom_wasm_scalar_extremum_is_relaxed(op)) {
     return iree_ok_status();
   }
@@ -146,22 +143,16 @@ static iree_status_t loom_wasm_rewrite_scalar_relaxed_extremum(
   if (loom_scalar_clampf_isa(op)) {
     loom_value_id_t lower_bounded = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_wasm_build_scalar_relaxed_extremum(
-        builder, op->location, LOOM_WASM_FLOAT_EXTREMUM_MAXIMUM,
-        op->instance_flags, loom_scalar_clampf_value(op),
-        loom_scalar_clampf_lower(op), type, &lower_bounded));
+        builder, op->location, LOOM_COMBINING_KIND_MAXNUMF, op->instance_flags,
+        loom_scalar_clampf_value(op), loom_scalar_clampf_lower(op), type,
+        &lower_bounded));
     IREE_RETURN_IF_ERROR(loom_wasm_build_scalar_relaxed_extremum(
-        builder, op->location, LOOM_WASM_FLOAT_EXTREMUM_MINIMUM,
-        op->instance_flags, lower_bounded, loom_scalar_clampf_upper(op), type,
-        &replacement));
+        builder, op->location, LOOM_COMBINING_KIND_MINNUMF, op->instance_flags,
+        lower_bounded, loom_scalar_clampf_upper(op), type, &replacement));
   } else {
-    const bool is_minimum =
-        loom_scalar_minnumf_isa(op) || loom_scalar_minimumf_isa(op);
     IREE_RETURN_IF_ERROR(loom_wasm_build_scalar_relaxed_extremum(
-        builder, op->location,
-        is_minimum ? LOOM_WASM_FLOAT_EXTREMUM_MINIMUM
-                   : LOOM_WASM_FLOAT_EXTREMUM_MAXIMUM,
-        op->instance_flags, loom_op_operands(op)[0], loom_op_operands(op)[1],
-        type, &replacement));
+        builder, op->location, kind, op->instance_flags,
+        loom_op_operands(op)[0], loom_op_operands(op)[1], type, &replacement));
   }
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, checkpoint));
@@ -199,13 +190,13 @@ static iree_status_t loom_wasm_build_vector_float_order_key(
 
 static iree_status_t loom_wasm_build_vector_relaxed_extremum(
     loom_builder_t* builder, loom_location_id_t location,
-    loom_wasm_float_extremum_kind_t kind, uint8_t fastmath, loom_value_id_t lhs,
+    loom_combining_kind_t kind, uint8_t fastmath, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_type_t type, loom_value_id_t* out_result) {
+  const bool is_minimum = loom_combining_kind_is_minimum_float_extremum(kind);
   loom_type_t predicate_type = type;
   predicate_type.header =
       loom_type_make_header(loom_type_kind(type), LOOM_SCALAR_TYPE_I1,
                             loom_type_rank(type), loom_type_flags(type));
-  const bool is_minimum = kind == LOOM_WASM_FLOAT_EXTREMUM_MINIMUM;
   loom_value_id_t predicate = LOOM_VALUE_ID_INVALID;
   const loom_scalar_type_t element_type = loom_type_element_type(type);
   if (loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_FLOAT_LE16,
@@ -264,9 +255,10 @@ static iree_status_t loom_wasm_build_vector_relaxed_extremum(
 static iree_status_t loom_wasm_rewrite_vector_relaxed_extremum(
     loom_rewriter_t* rewriter, loom_op_t* op, bool* out_rewritten) {
   *out_rewritten = false;
-  if ((!loom_vector_minnumf_isa(op) && !loom_vector_maxnumf_isa(op) &&
-       !loom_vector_minimumf_isa(op) && !loom_vector_maximumf_isa(op) &&
-       !loom_vector_clampf_isa(op)) ||
+  const loom_combining_kind_t kind =
+      loom_vector_float_extremum_combining_kind(op->kind);
+  const bool is_binary_extremum = kind != LOOM_COMBINING_KIND_COUNT_;
+  if ((!is_binary_extremum && !loom_vector_clampf_isa(op)) ||
       !loom_wasm_vector_extremum_is_relaxed(op)) {
     return iree_ok_status();
   }
@@ -280,22 +272,16 @@ static iree_status_t loom_wasm_rewrite_vector_relaxed_extremum(
   if (loom_vector_clampf_isa(op)) {
     loom_value_id_t lower_bounded = LOOM_VALUE_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_wasm_build_vector_relaxed_extremum(
-        builder, op->location, LOOM_WASM_FLOAT_EXTREMUM_MAXIMUM,
-        op->instance_flags, loom_vector_clampf_value(op),
-        loom_vector_clampf_lower(op), type, &lower_bounded));
+        builder, op->location, LOOM_COMBINING_KIND_MAXNUMF, op->instance_flags,
+        loom_vector_clampf_value(op), loom_vector_clampf_lower(op), type,
+        &lower_bounded));
     IREE_RETURN_IF_ERROR(loom_wasm_build_vector_relaxed_extremum(
-        builder, op->location, LOOM_WASM_FLOAT_EXTREMUM_MINIMUM,
-        op->instance_flags, lower_bounded, loom_vector_clampf_upper(op), type,
-        &replacement));
+        builder, op->location, LOOM_COMBINING_KIND_MINNUMF, op->instance_flags,
+        lower_bounded, loom_vector_clampf_upper(op), type, &replacement));
   } else {
-    const bool is_minimum =
-        loom_vector_minnumf_isa(op) || loom_vector_minimumf_isa(op);
     IREE_RETURN_IF_ERROR(loom_wasm_build_vector_relaxed_extremum(
-        builder, op->location,
-        is_minimum ? LOOM_WASM_FLOAT_EXTREMUM_MINIMUM
-                   : LOOM_WASM_FLOAT_EXTREMUM_MAXIMUM,
-        op->instance_flags, loom_op_operands(op)[0], loom_op_operands(op)[1],
-        type, &replacement));
+        builder, op->location, kind, op->instance_flags,
+        loom_op_operands(op)[0], loom_op_operands(op)[1], type, &replacement));
   }
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, checkpoint));

@@ -36,14 +36,18 @@ def run_clang_tidy(
     checks: str,
     source: Path,
     compiler_args: list[str] | None = None,
+    clang_tidy_args: list[str] | None = None,
 ) -> str:
     if compiler_args is None:
         compiler_args = ["-std=c11"]
+    if clang_tidy_args is None:
+        clang_tidy_args = []
     completed = subprocess.run(
         [
             str(clang_tidy),
             f"--load={plugin}",
             f"--checks={checks}",
+            *clang_tidy_args,
             str(source),
             "--",
             *compiler_args,

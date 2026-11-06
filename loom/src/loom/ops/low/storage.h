@@ -10,6 +10,42 @@
 
 #include "loom/ops/low/ops.h"
 
+typedef enum loom_low_register_transfer_kind_e {
+  // Operation does not structurally transfer register storage.
+  LOOM_LOW_REGISTER_TRANSFER_NONE = 0,
+  // Copy into a fresh register identity.
+  LOOM_LOW_REGISTER_TRANSFER_COPY = 1,
+  // Move into a fresh register identity.
+  LOOM_LOW_REGISTER_TRANSFER_MOVE = 2,
+  // Project a contiguous register subrange.
+  LOOM_LOW_REGISTER_TRANSFER_SLICE = 3,
+  // Compose ordered register subranges.
+  LOOM_LOW_REGISTER_TRANSFER_CONCAT = 4,
+} loom_low_register_transfer_kind_t;
+
+static_assert(LOOM_OP_LOW_MOVE - LOOM_OP_LOW_COPY ==
+                  LOOM_LOW_REGISTER_TRANSFER_MOVE -
+                      LOOM_LOW_REGISTER_TRANSFER_COPY,
+              "low register transfers must follow semantic kind order");
+static_assert(LOOM_OP_LOW_SLICE - LOOM_OP_LOW_COPY ==
+                  LOOM_LOW_REGISTER_TRANSFER_SLICE -
+                      LOOM_LOW_REGISTER_TRANSFER_COPY,
+              "low register transfers must follow semantic kind order");
+static_assert(LOOM_OP_LOW_CONCAT - LOOM_OP_LOW_COPY ==
+                  LOOM_LOW_REGISTER_TRANSFER_CONCAT -
+                      LOOM_LOW_REGISTER_TRANSFER_COPY,
+              "low register transfers must follow semantic kind order");
+
+// Classifies the structural register transfer represented by |op|.
+static inline loom_low_register_transfer_kind_t loom_low_register_transfer_kind(
+    const loom_op_t* op) {
+  if (op->kind < LOOM_OP_LOW_COPY || op->kind > LOOM_OP_LOW_CONCAT) {
+    return LOOM_LOW_REGISTER_TRANSFER_NONE;
+  }
+  return (loom_low_register_transfer_kind_t)(LOOM_LOW_REGISTER_TRANSFER_COPY +
+                                             op->kind - LOOM_OP_LOW_COPY);
+}
+
 static inline bool loom_low_storage_store_isa(const loom_op_t* op) {
   return loom_low_spill_isa(op) || loom_low_spill_move_isa(op);
 }

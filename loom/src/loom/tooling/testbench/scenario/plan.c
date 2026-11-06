@@ -28,6 +28,34 @@ static iree_string_view_t loom_testbench_scenario_symbol_name(
   return loom_string_table_get(&module->strings, symbol->name_id);
 }
 
+typedef enum loom_testbench_scenario_body_op_kind_e {
+  LOOM_TESTBENCH_SCENARIO_BODY_OP_UNSUPPORTED = 0,
+  LOOM_TESTBENCH_SCENARIO_BODY_OP_CONTROL = 1,
+  LOOM_TESTBENCH_SCENARIO_BODY_OP_CONFIGURATION_SOURCE = 2,
+  LOOM_TESTBENCH_SCENARIO_BODY_OP_TRIAL = 3,
+} loom_testbench_scenario_body_op_kind_t;
+
+static loom_testbench_scenario_body_op_kind_t
+loom_testbench_scenario_body_op_kind(const loom_op_t* op) {
+  switch (op->kind) {
+    case LOOM_OP_CHECK_RETURN:
+    case LOOM_OP_CHECK_REQUIRES:
+    case LOOM_OP_CHECK_SKIP_IF:
+      return LOOM_TESTBENCH_SCENARIO_BODY_OP_CONTROL;
+    case LOOM_OP_CHECK_LITERAL:
+    case LOOM_OP_CHECK_ENTROPY_FORK:
+    case LOOM_OP_CHECK_ENTROPY_READ:
+      // Configuration scope owns immutable scalar values and entropy
+      // identities. Mutable shaped storage remains trial-local so target and
+      // oracle realizations can never share it.
+      return LOOM_TESTBENCH_SCENARIO_BODY_OP_CONFIGURATION_SOURCE;
+    case LOOM_OP_CHECK_TRIAL:
+      return LOOM_TESTBENCH_SCENARIO_BODY_OP_TRIAL;
+    default:
+      return LOOM_TESTBENCH_SCENARIO_BODY_OP_UNSUPPORTED;
+  }
+}
+
 static void loom_testbench_count_comparison_plan(
     const loom_op_t* compare_op,
     loom_testbench_scenario_plan_counts_t* counts) {
@@ -89,10 +117,16 @@ void loom_testbench_count_scenario_plans(
     const loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
       ++out_counts->issue_capacity;
-      if (loom_check_trial_isa(op)) {
-        loom_testbench_count_trial_plan(op, out_counts);
-      } else if (loom_testbench_is_value_source_op(op)) {
-        ++out_counts->value_source_count;
+      switch (loom_testbench_scenario_body_op_kind(op)) {
+        case LOOM_TESTBENCH_SCENARIO_BODY_OP_TRIAL:
+          loom_testbench_count_trial_plan(op, out_counts);
+          break;
+        case LOOM_TESTBENCH_SCENARIO_BODY_OP_CONFIGURATION_SOURCE:
+          ++out_counts->value_source_count;
+          break;
+        case LOOM_TESTBENCH_SCENARIO_BODY_OP_CONTROL:
+        case LOOM_TESTBENCH_SCENARIO_BODY_OP_UNSUPPORTED:
+          break;
       }
     }
   }
@@ -125,15 +159,6 @@ static void loom_testbench_append_scenario_issue(
       .op = op,
       .record_ref = scenario_ref,
   };
-}
-
-static bool loom_testbench_scenario_configuration_source_isa(
-    const loom_op_t* op) {
-  // Configuration scope owns immutable scalar values and entropy identities.
-  // Mutable shaped storage remains trial-local so target and oracle
-  // realizations can never share it.
-  return loom_check_literal_isa(op) || loom_check_entropy_fork_isa(op) ||
-         loom_check_entropy_read_isa(op);
 }
 
 static loom_testbench_invocation_kind_t
@@ -490,7 +515,8 @@ static void loom_testbench_plan_scenario(
     // Planning them first keeps their shared arena slice independent of nested
     // trial value sources even when the source interleaves declarations.
     loom_block_for_each_op(block, op) {
-      if (loom_testbench_scenario_configuration_source_isa(op)) {
+      if (loom_testbench_scenario_body_op_kind(op) ==
+          LOOM_TESTBENCH_SCENARIO_BODY_OP_CONFIGURATION_SOURCE) {
         loom_testbench_value_source_plan_t* source =
             &value_sources[(*inout_value_source_count)++];
         if (!loom_testbench_plan_value_source(module, op, source)) {
@@ -508,18 +534,20 @@ static void loom_testbench_plan_scenario(
             : 0;
 
     loom_block_for_each_op(block, op) {
-      if (loom_check_return_isa(op) || loom_check_requires_isa(op) ||
-          loom_check_skip_if_isa(op) ||
-          loom_testbench_scenario_configuration_source_isa(op)) {
-        continue;
-      }
-      if (loom_check_trial_isa(op)) {
-        loom_testbench_trial_plan_t* trial = &trials[(*inout_trial_count)++];
-        loom_testbench_plan_trial(module, scenario_index, out_scenario->ref, op,
-                                  recipe_steps, inout_recipe_step_count,
-                                  expectations, inout_expectation_count, issues,
-                                  issue_capacity, inout_issue_count, trial);
-        continue;
+      switch (loom_testbench_scenario_body_op_kind(op)) {
+        case LOOM_TESTBENCH_SCENARIO_BODY_OP_CONTROL:
+        case LOOM_TESTBENCH_SCENARIO_BODY_OP_CONFIGURATION_SOURCE:
+          continue;
+        case LOOM_TESTBENCH_SCENARIO_BODY_OP_TRIAL: {
+          loom_testbench_trial_plan_t* trial = &trials[(*inout_trial_count)++];
+          loom_testbench_plan_trial(
+              module, scenario_index, out_scenario->ref, op, recipe_steps,
+              inout_recipe_step_count, expectations, inout_expectation_count,
+              issues, issue_capacity, inout_issue_count, trial);
+          continue;
+        }
+        case LOOM_TESTBENCH_SCENARIO_BODY_OP_UNSUPPORTED:
+          break;
       }
       loom_testbench_append_scenario_issue(
           issues, issue_capacity, inout_issue_count,

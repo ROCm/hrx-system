@@ -21,6 +21,11 @@ extern "C" {
 bool loom_vector_combining_kind_op(loom_combining_kind_t kind,
                                    loom_op_kind_t* out_op_kind);
 
+// Returns the shared combining kind for a vector floating-point extremum op,
+// or COUNT_ for another operation kind.
+loom_combining_kind_t loom_vector_float_extremum_combining_kind(
+    loom_op_kind_t op_kind);
+
 // Builds the lanewise vector operation for one verified combining step.
 // Floating-point operations retain |fastmath_flags|; integer operations have
 // exact semantics and ignore them. Returns the single operation result.

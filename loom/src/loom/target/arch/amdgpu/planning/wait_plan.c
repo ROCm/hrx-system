@@ -18,6 +18,7 @@
 #include "loom/codegen/low/packet_hazard_plan_json.h"
 #include "loom/ir/ir.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/target/arch/amdgpu/facts.h"
 #include "loom/target/arch/amdgpu/planning/matrix_result_wait.h"
 #include "loom/target/arch/amdgpu/planning/matrix_wait_states.h"
@@ -465,8 +466,8 @@ loom_amdgpu_wait_plan_edge_copy_group(
 }
 
 static bool loom_amdgpu_wait_plan_op_has_packet_transfers(const loom_op_t* op) {
-  return op != NULL && (loom_low_copy_isa(op) || loom_low_move_isa(op) ||
-                        loom_low_slice_isa(op) || loom_low_concat_isa(op));
+  return op != NULL &&
+         loom_low_register_transfer_kind(op) != LOOM_LOW_REGISTER_TRANSFER_NONE;
 }
 
 static const loom_low_allocation_packet_move_group_t*

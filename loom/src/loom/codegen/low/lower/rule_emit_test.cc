@@ -17,6 +17,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/target/test/descriptors.h"
 #include "loom/target/test/low_registry.h"
@@ -169,13 +170,23 @@ TEST_F(LowLowerRuleEmitTest, EmitsDescriptorAndRegisterTransferPrograms) {
                                    TEST_LOW_CORE_DESCRIPTOR_REF_TEST_ADD_I32) {
       ASSERT_EQ(emitted_add, nullptr);
       emitted_add = op;
-    } else if (loom_low_copy_isa(op)) {
-      ASSERT_EQ(emitted_copy, nullptr);
-      emitted_copy = op;
-    } else if (loom_low_move_isa(op)) {
-      ASSERT_LT(emitted_move_count, IREE_ARRAYSIZE(emitted_moves));
-      emitted_moves[emitted_move_count++] = op;
-    } else if (loom_low_return_isa(op)) {
+      continue;
+    }
+    switch (loom_low_register_transfer_kind(op)) {
+      case LOOM_LOW_REGISTER_TRANSFER_COPY:
+        ASSERT_EQ(emitted_copy, nullptr);
+        emitted_copy = op;
+        continue;
+      case LOOM_LOW_REGISTER_TRANSFER_MOVE:
+        ASSERT_LT(emitted_move_count, IREE_ARRAYSIZE(emitted_moves));
+        emitted_moves[emitted_move_count++] = op;
+        continue;
+      case LOOM_LOW_REGISTER_TRANSFER_SLICE:
+      case LOOM_LOW_REGISTER_TRANSFER_CONCAT:
+      case LOOM_LOW_REGISTER_TRANSFER_NONE:
+        break;
+    }
+    if (loom_low_return_isa(op)) {
       emitted_return = op;
     }
   }

@@ -7,7 +7,7 @@
 #include "loom/target/arch/amdgpu/planning/structural_packet.h"
 
 #include "iree/base/bitfield.h"
-#include "loom/codegen/low/allocation/move_topology.h"
+#include "loom/ops/low/storage.h"
 #include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
@@ -115,9 +115,9 @@ loom_amdgpu_structural_packet_info_t loom_amdgpu_structural_packet_analyze(
   if (loom_traits_are_compile_time_only(node->traits)) {
     return info;
   }
-  const loom_low_allocation_packet_move_op_kind_t packet_move_kind =
-      loom_low_allocation_move_topology_packet_move_op_kind(op);
-  if (packet_move_kind != LOOM_LOW_ALLOCATION_PACKET_MOVE_OP_NONE) {
+  const loom_low_register_transfer_kind_t packet_move_kind =
+      loom_low_register_transfer_kind(op);
+  if (packet_move_kind != LOOM_LOW_REGISTER_TRANSFER_NONE) {
     loom_amdgpu_structural_packet_analyze_packet_moves(allocation, node_index,
                                                        analysis_flags, &info);
     return info;

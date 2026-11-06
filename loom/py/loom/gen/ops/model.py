@@ -12,7 +12,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from loom.dsl import EncodingFamilyDef, Op, ParameterizedAttrDef
+from loom.dsl import EncodingFamilyDef, EnumDef, Op, ParameterizedAttrDef
 
 
 @dataclass(frozen=True)
@@ -35,6 +35,8 @@ class GenerationModel:
 
     dialects: list[DialectGeneration]
     types: list[Any]
+    # Model-owned enums emitted into standalone public C headers.
+    generated_enums: tuple[EnumDef, ...] = ()
 
 
 DialectGenerationLoader = Callable[[], DialectGeneration]
@@ -351,9 +353,12 @@ def _load_core_types() -> list[Any]:
 
 def load_generation_model() -> GenerationModel:
     """Loads all canonical Python DSL declarations."""
+    from loom.dialect.combining import CombiningKind
+
     return GenerationModel(
         dialects=[loader() for _, loader in _DIALECT_GENERATION_LOADERS],
         types=_load_core_types(),
+        generated_enums=(CombiningKind,),
     )
 
 
