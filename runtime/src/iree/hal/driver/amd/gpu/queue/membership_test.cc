@@ -75,6 +75,8 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
     uint32_t frontier_count = 0;
     // Starting epoch inherited from the preceding coordinate owner.
     uint64_t initial_epoch = 0;
+    // Native completion backing retained by the coordinate, not the queue.
+    iree_hal_amd_gpu_signal_cache_t* signals = nullptr;
   };
 
   void SetUp() override {
@@ -237,14 +239,15 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
     };
     membership_.publication = &publication_;
     membership_.completion = &completion_;
-    membership_.lifecycle = &lifecycle_;
+    family_.lifecycle = &lifecycle_;
     membership_.programs = &programs_;
-    membership_.create = [](void* data, uint32_t ordinal, uint32_t,
-                            uint32_t frontier_count, uint64_t initial_epoch,
-                            iree_hal_amd_gpu_signal_cache_t*,
-                            const iree_hal_queue_params_t* params,
-                            iree_hal_queue_t** out_queue) {
-      auto* self = static_cast<MembershipTest*>(data);
+    family_.create = [](const iree_hal_amd_gpu_queue_family_t* family,
+                        uint32_t ordinal, uint32_t, uint32_t frontier_count,
+                        uint64_t initial_epoch,
+                        iree_hal_amd_gpu_signal_cache_t* signals,
+                        const iree_hal_queue_params_t* params,
+                        iree_hal_queue_t** out_queue) {
+      auto* self = static_cast<MembershipTest*>(family->user_data);
       if (self->construct_) {
         IREE_RETURN_IF_ERROR(self->construct_(ordinal));
       }
@@ -253,18 +256,20 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
       queue->ordinal = ordinal;
       queue->frontier_count = frontier_count;
       queue->initial_epoch = initial_epoch;
-      iree_hal_queue_initialize(&self->family_, params, &self->vtable_,
+      queue->signals = signals;
+      iree_hal_queue_initialize(&family->base, params, &self->vtable_,
                                 &queue->base);
       *out_queue = &queue->base;
       return iree_ok_status();
     };
-    membership_.user_data = this;
+    family_.user_data = this;
     // One provisioned source establishes the device's initial coordinate.
     provisioned_.owner = this;
     provisioned_.idle = true;
     iree_hal_queue_params_t params;
     iree_hal_queue_params_initialize(&params);
-    iree_hal_queue_initialize(&family_, &params, &vtable_, &provisioned_.base);
+    iree_hal_queue_initialize(&family_.base, &params, &vtable_,
+                              &provisioned_.base);
     provisioned_ptr_ = &provisioned_.base;
     membership_.provisioned_count = 1;
     membership_.provisioned = &provisioned_ptr_;
@@ -321,7 +326,7 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
   // Refcounted queue's ordinary public destructor dispatch.
   iree_hal_queue_vtable_t vtable_ = {};
   // Borrowed public queue-family identity.
-  iree_hal_queue_family_t family_ = {};
+  iree_hal_amd_gpu_queue_family_t family_ = {};
   // One idle provisioned dependency, never publicly released.
   Queue provisioned_;
   // Borrowed provisioned array entry.
@@ -367,10 +372,10 @@ void MembershipTest::CallbackRemovalProgress(bool publication) {
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* pending = nullptr;
   iree_hal_queue_t* independent = nullptr;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &pending));
   IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-      &membership_, &params, &independent));
+      &membership_, &family_, &params, &pending));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &independent));
   auto* queue = reinterpret_cast<Queue*>(pending);
   const uint32_t ordinal = queue->ordinal;
   const uint32_t reusable = reinterpret_cast<Queue*>(independent)->ordinal;
@@ -424,13 +429,13 @@ void MembershipTest::CallbackRemovalProgress(bool publication) {
   EXPECT_EQ(destroyed_.load(), 1u);
   iree_hal_queue_t* replacement = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-      &membership_, &params, &replacement));
+      &membership_, &family_, &params, &replacement));
   EXPECT_EQ(reinterpret_cast<Queue*>(replacement)->ordinal, reusable);
   // Repeated swaps and table growth must preserve the held callback's owner.
   std::array<iree_hal_queue_t*, 6> added = {};
   for (auto& next : added) {
-    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                             &params, &next));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &family_, &params, &next));
   }
   for (auto* next : added) {
     iree_hal_queue_release(next);
@@ -497,8 +502,8 @@ TEST_P(MembershipTest, IdleQueueReleaseRearmsRetainedDownload) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* queue = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &queue));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &queue));
   event_.AwaitIdle();
   download.pause.store(true);
   EXPECT_EQ(iree_hal_amd_gpu_context_signal(&context_), AMDF_STATUS_OK);
@@ -529,15 +534,15 @@ TEST_P(MembershipTest, CompletionCallbackCanAcquireAndReleaseAnIdleQueue) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* initial = nullptr;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &initial));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &initial));
   reinterpret_cast<Queue*>(initial)->idle = true;
   iree_hal_queue_release(initial);
   std::binary_semaphore completed{0};
   callout_ = [&] {
     iree_hal_queue_t* acquired = nullptr;
     iree_status_t status = iree_hal_amd_gpu_queue_membership_acquire(
-        &membership_, &params, &acquired);
+        &membership_, &family_, &params, &acquired);
     IREE_EXPECT_OK(status);
     if (acquired) {
       reinterpret_cast<Queue*>(acquired)->idle = true;
@@ -557,8 +562,8 @@ TEST_P(MembershipTest, FailedObservationWaitsForTerminalOwnership) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* base = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &base));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &base));
   auto* queue = reinterpret_cast<Queue*>(base);
   queue->idle = false;
   std::jthread releaser([&] { iree_hal_queue_release(base); });
@@ -592,8 +597,8 @@ TEST_P(MembershipTest, WaitingReleaseDoesNotBlockCallbackAcquisition) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* pending = nullptr;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &pending));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &pending));
   reinterpret_cast<Queue*>(pending)->idle = false;
   std::jthread releaser([&] { iree_hal_queue_release(pending); });
   closed_.acquire();
@@ -605,7 +610,7 @@ TEST_P(MembershipTest, WaitingReleaseDoesNotBlockCallbackAcquisition) {
   callout_ = [&] {
     iree_hal_queue_t* acquired = nullptr;
     iree_status_t status = iree_hal_amd_gpu_queue_membership_acquire(
-        &membership_, &params, &acquired);
+        &membership_, &family_, &params, &acquired);
     IREE_EXPECT_OK(status);
     if (acquired) {
       reinterpret_cast<Queue*>(acquired)->idle = true;
@@ -628,10 +633,10 @@ TEST_P(MembershipTest, PendingReleasesJoinIndependently) {
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
   iree_hal_queue_t* second = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
-  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &second));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &second));
   reinterpret_cast<Queue*>(first)->idle = false;
   reinterpret_cast<Queue*>(second)->idle = false;
   std::jthread first_releaser([&] { iree_hal_queue_release(first); });
@@ -654,8 +659,8 @@ TEST_P(MembershipTest, RetainedPublisherDoesNotBlockIndependentMembership) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
   auto* queue = reinterpret_cast<Queue*>(first);
   std::binary_semaphore entered{0};
   std::binary_semaphore resume{0};
@@ -678,7 +683,7 @@ TEST_P(MembershipTest, RetainedPublisherDoesNotBlockIndependentMembership) {
   iree_hal_queue_t* independent[4] = {};
   for (auto& acquired : independent) {
     IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-        &membership_, &params, &acquired));
+        &membership_, &family_, &params, &acquired));
   }
   for (auto* acquired : independent) {
     iree_hal_queue_release(acquired);
@@ -695,8 +700,8 @@ TEST_P(MembershipTest, NativeConstructionAllowsIndependentGrowthAndRelease) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
   std::binary_semaphore entered{0};
   std::binary_semaphore resume{0};
   construct_ = [&](uint32_t ordinal) {
@@ -708,8 +713,8 @@ TEST_P(MembershipTest, NativeConstructionAllowsIndependentGrowthAndRelease) {
   };
   iree_hal_queue_t* second = nullptr;
   std::jthread constructor([&] {
-    IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                             &params, &second));
+    IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &family_, &params, &second));
   });
   entered.acquire();
   // The fourth dynamic coordinate widens the vector while the second queue
@@ -717,10 +722,10 @@ TEST_P(MembershipTest, NativeConstructionAllowsIndependentGrowthAndRelease) {
   // final release may wait for the constructor.
   iree_hal_queue_t* third = nullptr;
   iree_hal_queue_t* fourth = nullptr;
-  IREE_EXPECT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &third));
-  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &fourth));
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &third));
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &fourth));
   EXPECT_EQ(reinterpret_cast<Queue*>(third)->ordinal, 3u);
   EXPECT_EQ(reinterpret_cast<Queue*>(fourth)->ordinal, 4u);
   EXPECT_EQ(membership_.frontiers.count, 8u);
@@ -739,8 +744,8 @@ TEST_P(MembershipTest, SlotAllocationAllowsIndependentConstructionAndReuse) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
   std::binary_semaphore entered{0}, resume{0};
   std::atomic<bool> hold{true};
   allocate_ = [&](iree_host_size_t) {
@@ -753,18 +758,18 @@ TEST_P(MembershipTest, SlotAllocationAllowsIndependentConstructionAndReuse) {
   iree_hal_queue_t* pending = nullptr;
   std::jthread constructor([&] {
     IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-        &membership_, &params, &pending));
+        &membership_, &family_, &params, &pending));
   });
   entered.acquire();
   EXPECT_EQ(membership_.pending_allocations.slot_count, 1u);
   iree_hal_queue_t* independent = nullptr;
   IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-      &membership_, &params, &independent));
+      &membership_, &family_, &params, &independent));
   EXPECT_EQ(reinterpret_cast<Queue*>(independent)->ordinal, 2u);
   iree_hal_queue_release(first);
   iree_hal_queue_t* reused = nullptr;
-  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &reused));
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &reused));
   EXPECT_EQ(reinterpret_cast<Queue*>(reused)->ordinal, 1u);
   EXPECT_EQ(reinterpret_cast<Queue*>(reused)->initial_epoch, 1u);
   iree_hal_queue_release(reused);
@@ -784,8 +789,8 @@ void MembershipTest::SourceAllocationProgress(bool fail) {
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* existing[3] = {};
   for (auto& queue : existing) {
-    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                             &params, &queue));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &family_, &params, &queue));
   }
   std::binary_semaphore entered{0}, resume{0};
   std::atomic<uint32_t> allocations{0};
@@ -811,8 +816,8 @@ void MembershipTest::SourceAllocationProgress(bool fail) {
   };
   iree_hal_queue_t* growing = nullptr;
   std::jthread constructor([&] {
-    auto status = iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                            &params, &growing);
+    auto status = iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &family_, &params, &growing);
     if (fail) {
       IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
     } else {
@@ -823,7 +828,7 @@ void MembershipTest::SourceAllocationProgress(bool fail) {
   iree_hal_queue_t* dependent = nullptr;
   std::jthread other([&] {
     IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-        &membership_, &params, &dependent));
+        &membership_, &family_, &params, &dependent));
   });
   AwaitSlotCount(5);
   // Two reserved constructors now extend beyond the old table. Removing and
@@ -832,8 +837,8 @@ void MembershipTest::SourceAllocationProgress(bool fail) {
   iree_hal_queue_release(existing[0]);
   existing[0] = nullptr;
   iree_hal_queue_t* reused = nullptr;
-  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &reused));
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &reused));
   EXPECT_EQ(reinterpret_cast<Queue*>(reused)->ordinal, 1u);
   iree_hal_queue_release(reused);
   EXPECT_EQ(destroyed_.load(), 2u);
@@ -848,7 +853,7 @@ void MembershipTest::SourceAllocationProgress(bool fail) {
   if (fail) {
     EXPECT_EQ(growing, nullptr);
     IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-        &membership_, &params, &growing));
+        &membership_, &family_, &params, &growing));
     EXPECT_EQ(reinterpret_cast<Queue*>(growing)->ordinal, 4u);
   }
   for (auto* queue : existing) {
@@ -871,8 +876,8 @@ TEST_P(MembershipTest, SourceStorageFreeAllowsIndependentMembership) {
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* existing[3] = {};
   for (auto& queue : existing) {
-    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                             &params, &queue));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &family_, &params, &queue));
   }
   const void* previous = membership_.sources;
   std::binary_semaphore entered{0}, resume{0};
@@ -885,7 +890,7 @@ TEST_P(MembershipTest, SourceStorageFreeAllowsIndependentMembership) {
   iree_hal_queue_t* growing = nullptr;
   std::jthread constructor([&] {
     IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-        &membership_, &params, &growing));
+        &membership_, &family_, &params, &growing));
   });
   entered.acquire();
   EXPECT_NE(membership_.sources, previous);
@@ -893,7 +898,7 @@ TEST_P(MembershipTest, SourceStorageFreeAllowsIndependentMembership) {
   existing[0] = nullptr;
   iree_hal_queue_t* independent = nullptr;
   IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-      &membership_, &params, &independent));
+      &membership_, &family_, &params, &independent));
   EXPECT_EQ(reinterpret_cast<Queue*>(independent)->ordinal, 1u);
   iree_hal_queue_release(independent);
   EXPECT_EQ(destroyed_.load(), 2u);
@@ -914,16 +919,16 @@ TEST_P(MembershipTest, FailedSlotAllocationReturnsAdmission) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* queue = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_RESOURCE_EXHAUSTED,
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &queue));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_hal_amd_gpu_queue_membership_acquire(
+                            &membership_, &family_, &params, &queue));
   EXPECT_EQ(queue, nullptr);
   EXPECT_EQ(membership_.pending_allocations.slot_count, 0u);
   EXPECT_EQ(membership_.slot_count, 0u);
   EXPECT_TRUE(iree_hal_amd_gpu_queue_membership_is_empty(&membership_));
   allocate_ = {};
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &queue));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &queue));
   EXPECT_EQ(reinterpret_cast<Queue*>(queue)->ordinal, 1u);
   iree_hal_queue_release(queue);
 }
@@ -934,8 +939,8 @@ TEST_P(MembershipTest, PendingSlotAllocationReservesFiniteCapacity) {
   // One provisioned coordinate plus these slots leaves exactly one admission.
   iree_hal_queue_t* existing[254] = {};
   for (auto& queue : existing) {
-    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                             &params, &queue));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &family_, &params, &queue));
   }
   std::binary_semaphore entered{0}, resume{0};
   std::atomic<bool> hold{true};
@@ -949,18 +954,18 @@ TEST_P(MembershipTest, PendingSlotAllocationReservesFiniteCapacity) {
   iree_hal_queue_t* pending = nullptr;
   std::jthread constructor([&] {
     IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-        &membership_, &params, &pending));
+        &membership_, &family_, &params, &pending));
   });
   entered.acquire();
   iree_hal_queue_t* excess = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_hal_amd_gpu_queue_membership_acquire(
-                            &membership_, &params, &excess));
+                            &membership_, &family_, &params, &excess));
   EXPECT_EQ(excess, nullptr);
   iree_hal_queue_release(existing[0]);
   existing[0] = nullptr;
   IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-      &membership_, &params, &existing[0]));
+      &membership_, &family_, &params, &existing[0]));
   EXPECT_EQ(reinterpret_cast<Queue*>(existing[0])->ordinal, 1u);
   resume.release();
   constructor.join();
@@ -978,8 +983,8 @@ TEST_P(MembershipTest, TerminalTraversalJoinsHostSlotAllocation) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
   std::binary_semaphore entered{0}, resume{0};
   std::atomic<bool> hold{true};
   allocate_ = [&](iree_host_size_t) {
@@ -997,7 +1002,7 @@ TEST_P(MembershipTest, TerminalTraversalJoinsHostSlotAllocation) {
     iree_hal_queue_t* queue = nullptr;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
                           iree_hal_amd_gpu_queue_membership_acquire(
-                              &membership_, &params, &queue));
+                              &membership_, &family_, &params, &queue));
     EXPECT_EQ(queue, nullptr);
   });
   entered.acquire();
@@ -1040,8 +1045,8 @@ TEST_P(MembershipTest, FrontierGrowthAllowsIndependentReleaseAndReuse) {
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* existing[3] = {};
   for (auto& queue : existing) {
-    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                             &params, &queue));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &family_, &params, &queue));
   }
   const auto* released = reinterpret_cast<Queue*>(existing[0]);
   const uint32_t ordinal = released->ordinal;
@@ -1058,7 +1063,7 @@ TEST_P(MembershipTest, FrontierGrowthAllowsIndependentReleaseAndReuse) {
   iree_hal_queue_t* growing = nullptr;
   std::jthread constructor([&] {
     IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-        &membership_, &params, &growing));
+        &membership_, &family_, &params, &growing));
   });
   entered.acquire();
 
@@ -1066,8 +1071,8 @@ TEST_P(MembershipTest, FrontierGrowthAllowsIndependentReleaseAndReuse) {
   existing[0] = nullptr;
   EXPECT_EQ(destroyed_.load(), 1u);
   iree_hal_queue_t* reused = nullptr;
-  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &reused));
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &reused));
   if (reused) {
     const auto* queue = reinterpret_cast<Queue*>(reused);
     EXPECT_EQ(queue->ordinal, ordinal);
@@ -1097,8 +1102,8 @@ TEST_P(MembershipTest, ReleaseJoinsOnlyItsOwnFrontierVisitor) {
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* existing[3] = {};
   for (auto& queue : existing) {
-    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                             &params, &queue));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &family_, &params, &queue));
   }
   auto* visited = reinterpret_cast<Queue*>(existing[2]);
   std::binary_semaphore entered{0};
@@ -1113,7 +1118,7 @@ TEST_P(MembershipTest, ReleaseJoinsOnlyItsOwnFrontierVisitor) {
   iree_hal_queue_t* growing = nullptr;
   std::jthread constructor([&] {
     IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-        &membership_, &params, &growing));
+        &membership_, &family_, &params, &growing));
   });
   entered.acquire();
   std::jthread releaser([&] { iree_hal_queue_release(existing[2]); });
@@ -1136,8 +1141,8 @@ TEST_P(MembershipTest, FailedFrontierGrowthReturnsReservedCoordinate) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
   reserve_ = [&](Queue* queue, uint32_t count) {
     if (queue == reinterpret_cast<Queue*>(first) && count == 4) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -1148,14 +1153,14 @@ TEST_P(MembershipTest, FailedFrontierGrowthReturnsReservedCoordinate) {
   iree_hal_queue_t* second = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_hal_amd_gpu_queue_membership_acquire(
-                            &membership_, &params, &second));
+                            &membership_, &family_, &params, &second));
   EXPECT_EQ(second, nullptr);
   EXPECT_EQ(provisioned_.frontier_count, 4u);
   EXPECT_EQ(membership_.frontiers.count, 2u);
   EXPECT_EQ(membership_.frontiers.pending_count, 0u);
   reserve_ = {};
-  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &second));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &second));
   EXPECT_EQ(reinterpret_cast<Queue*>(second)->ordinal, 2u);
   EXPECT_EQ(reinterpret_cast<Queue*>(second)->frontier_count, 4u);
   EXPECT_EQ(reinterpret_cast<Queue*>(first)->frontier_count, 4u);
@@ -1168,8 +1173,8 @@ TEST_P(MembershipTest, FailedFrontierGrowthWakesDependentAcquisition) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
   std::binary_semaphore entered{0}, resume{0};
   std::atomic<bool> fail{true};
   std::atomic<uint32_t> constructed{0};
@@ -1190,14 +1195,14 @@ TEST_P(MembershipTest, FailedFrontierGrowthWakesDependentAcquisition) {
     iree_hal_queue_t* queue = nullptr;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                           iree_hal_amd_gpu_queue_membership_acquire(
-                              &membership_, &params, &queue));
+                              &membership_, &family_, &params, &queue));
     EXPECT_EQ(queue, nullptr);
   });
   entered.acquire();
   iree_hal_queue_t* second = nullptr;
   std::jthread dependent([&] {
-    IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                             &params, &second));
+    IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &family_, &params, &second));
   });
   AwaitSlotCount(3);
   // The dependent caller owns its installed slot while the first expansion
@@ -1210,8 +1215,8 @@ TEST_P(MembershipTest, FailedFrontierGrowthWakesDependentAcquisition) {
   EXPECT_EQ(constructed.load(), 0u);
   iree_hal_queue_release(first);
   iree_hal_queue_t* reused = nullptr;
-  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &reused));
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &reused));
   iree_hal_queue_release(reused);
   EXPECT_EQ(destroyed_.load(), 2u);
 
@@ -1229,8 +1234,8 @@ TEST_P(MembershipTest, PrivateFrontierCatchupAllowsIndependentMembership) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
   std::binary_semaphore native_entered{0}, native_resume{0};
   std::binary_semaphore catchup_entered{0}, catchup_resume{0};
   construct_ = [&](uint32_t ordinal) {
@@ -1249,16 +1254,16 @@ TEST_P(MembershipTest, PrivateFrontierCatchupAllowsIndependentMembership) {
   };
   iree_hal_queue_t* second = nullptr;
   std::jthread constructor([&] {
-    IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                             &params, &second));
+    IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+        &membership_, &family_, &params, &second));
   });
   native_entered.acquire();
   iree_hal_queue_t* third = nullptr;
   iree_hal_queue_t* fourth = nullptr;
-  IREE_EXPECT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &third));
-  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &fourth));
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &third));
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &fourth));
   native_resume.release();
   catchup_entered.acquire();
   iree_hal_queue_release(first);
@@ -1266,8 +1271,8 @@ TEST_P(MembershipTest, PrivateFrontierCatchupAllowsIndependentMembership) {
   iree_hal_queue_release(fourth);
   EXPECT_EQ(destroyed_.load(), 3u);
   iree_hal_queue_t* reused = nullptr;
-  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &reused));
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &reused));
   iree_hal_queue_release(reused);
   EXPECT_EQ(destroyed_.load(), 4u);
   catchup_resume.release();
@@ -1281,8 +1286,8 @@ TEST_P(MembershipTest, TerminalTraversalJoinsFrontierExpansion) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
   std::binary_semaphore entered{0};
   std::binary_semaphore resume{0};
   reserve_ = [&](Queue* queue, uint32_t count) {
@@ -1300,7 +1305,7 @@ TEST_P(MembershipTest, TerminalTraversalJoinsFrontierExpansion) {
     iree_hal_queue_t* failed = nullptr;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
                           iree_hal_amd_gpu_queue_membership_acquire(
-                              &membership_, &params, &failed));
+                              &membership_, &family_, &params, &failed));
     EXPECT_EQ(failed, nullptr);
   });
   entered.acquire();
@@ -1338,10 +1343,10 @@ TEST_P(MembershipTest, NativeShutdownDoesNotReserveOtherCoordinates) {
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
   iree_hal_queue_t* second = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
-  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &second));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &second));
   std::binary_semaphore entered{0};
   std::binary_semaphore resume{0};
   shutdown_ = [&](Queue* queue) {
@@ -1353,8 +1358,8 @@ TEST_P(MembershipTest, NativeShutdownDoesNotReserveOtherCoordinates) {
   std::jthread releaser([&] { iree_hal_queue_release(first); });
   entered.acquire();
   iree_hal_queue_t* third = nullptr;
-  IREE_EXPECT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &third));
+  IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &third));
   EXPECT_EQ(reinterpret_cast<Queue*>(third)->ordinal, 3u);
   iree_hal_queue_release(second);
   iree_hal_queue_release(third);
@@ -1368,7 +1373,7 @@ TEST_P(MembershipTest, NativeShutdownDoesNotReserveOtherCoordinates) {
   iree_hal_queue_t* reused[3] = {};
   for (uint32_t i = 0; i < 3; ++i) {
     IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-        &membership_, &params, &reused[i]));
+        &membership_, &family_, &params, &reused[i]));
     EXPECT_EQ(reinterpret_cast<Queue*>(reused[i])->ordinal, 3u - i);
     EXPECT_EQ(reinterpret_cast<Queue*>(reused[i])->initial_epoch, 1u);
   }
@@ -1387,24 +1392,214 @@ TEST_P(MembershipTest, NativeConstructorFailureReturnsItsCoordinate) {
   iree_hal_queue_t* failed = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_hal_amd_gpu_queue_membership_acquire(
-                            &membership_, &params, &failed));
+                            &membership_, &family_, &params, &failed));
   EXPECT_EQ(failed, nullptr);
   EXPECT_TRUE(iree_hal_amd_gpu_queue_membership_is_empty(&membership_));
   construct_ = {};
   iree_hal_queue_t* recovered = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-      &membership_, &params, &recovered));
+      &membership_, &family_, &params, &recovered));
   EXPECT_EQ(reinterpret_cast<Queue*>(recovered)->ordinal, 1u);
   EXPECT_EQ(reinterpret_cast<Queue*>(recovered)->initial_epoch, 0u);
   iree_hal_queue_release(recovered);
+}
+
+TEST_P(MembershipTest, ReusesSignalBackingOnlyWithinItsNativeFamily) {
+  auto other_lifecycle = lifecycle_;
+  other_lifecycle.completed_epoch = [](iree_hal_queue_t* base) -> uint64_t {
+    return reinterpret_cast<Queue*>(base)->initial_epoch + 7;
+  };
+  auto other_family = family_;
+  other_family.lifecycle = &other_lifecycle;
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* first = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
+  auto* first_signals = reinterpret_cast<Queue*>(first)->signals;
+  EXPECT_EQ(first->queue_family, &family_.base);
+  EXPECT_EQ(reinterpret_cast<Queue*>(first)->ordinal, 1u);
+  iree_hal_queue_release(first);
+
+  // A vacant coordinate still owns protocol-qualified native cells. The other
+  // family must receive another coordinate even though no queue is live.
+  iree_hal_queue_t* other = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &other_family, &params, &other));
+  auto* other_signals = reinterpret_cast<Queue*>(other)->signals;
+  EXPECT_EQ(other->queue_family, &other_family.base);
+  EXPECT_EQ(reinterpret_cast<Queue*>(other)->ordinal, 2u);
+  EXPECT_EQ(reinterpret_cast<Queue*>(other)->initial_epoch, 0u);
+  EXPECT_NE(other_signals, first_signals);
+  iree_hal_queue_release(other);
+
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &other_family, &params, &other));
+  EXPECT_EQ(reinterpret_cast<Queue*>(first)->ordinal, 1u);
+  EXPECT_EQ(reinterpret_cast<Queue*>(first)->initial_epoch, 1u);
+  EXPECT_EQ(reinterpret_cast<Queue*>(first)->signals, first_signals);
+  EXPECT_EQ(reinterpret_cast<Queue*>(other)->ordinal, 2u);
+  EXPECT_EQ(reinterpret_cast<Queue*>(other)->initial_epoch, 7u);
+  EXPECT_EQ(reinterpret_cast<Queue*>(other)->signals, other_signals);
+  EXPECT_EQ(membership_.slot_count, 2u);
+  iree_hal_queue_release(first);
+  iree_hal_queue_release(other);
+}
+
+TEST_P(MembershipTest, MixedFamiliesShareWorkersGrowthAndTerminalOwnership) {
+  struct Protocol {
+    // Public family identity also selects this mocked native dependency.
+    iree_hal_amd_gpu_queue_family_t family;
+    // Distinct native lifecycle, retaining the fixture's release contract.
+    iree_hal_amd_gpu_queue_lifecycle_t lifecycle;
+    // Receipt from the actual shared publication worker.
+    std::binary_semaphore published{0};
+    // Receipt from the actual shared completion worker.
+    std::atomic<bool> observed{false};
+    // Number of native scratch trims through this family's contract.
+    uint32_t trims = 0;
+    // Number of dependency-width changes through this family's contract.
+    uint32_t growths = 0;
+    // Number of admission closures through this family's contract.
+    uint32_t closures = 0;
+    // Number of terminal native stop attempts.
+    uint32_t stops = 0;
+    // Number of failed-capture retirement visits after native stop.
+    uint32_t retirements = 0;
+    // Number of final host-borrow joins.
+    uint32_t joins = 0;
+    // Number of final native ownership releases.
+    uint32_t shutdowns = 0;
+
+    static Protocol* FromQueue(iree_hal_queue_t* queue) {
+      return const_cast<Protocol*>(
+          reinterpret_cast<const Protocol*>(queue->queue_family));
+    }
+  } protocol{family_, lifecycle_};
+  protocol.family.lifecycle = &protocol.lifecycle;
+  protocol.lifecycle.publication_source = [](iree_hal_queue_t* base) {
+    return iree_hal_amd_gpu_publication_source_t{
+        .publish =
+            [](void* data) {
+              Protocol::FromQueue(static_cast<iree_hal_queue_t*>(data))
+                  ->published.release();
+              return false;
+            },
+        .user_data = base,
+    };
+  };
+  protocol.lifecycle.completion_source = [](iree_hal_queue_t* base) {
+    return iree_hal_amd_gpu_completion_source_t{
+        .fn =
+            [](void* data, amdf_status_t, iree_hal_amd_gpu_completion_scope_t*,
+               iree_hal_amd_gpu_completion_wait_t*,
+               iree_hal_amd_gpu_completion_copy_t*) {
+              Protocol::FromQueue(static_cast<iree_hal_queue_t*>(data))
+                  ->observed.store(true);
+              return false;
+            },
+        .user_data = base,
+    };
+  };
+  protocol.lifecycle.trim_scratch = nullptr;
+  protocol.lifecycle.trim = [](iree_hal_queue_t* base) {
+    ++Protocol::FromQueue(base)->trims;
+  };
+  protocol.lifecycle.reserve_frontiers =
+      [](iree_hal_queue_t* base, uint32_t count, iree_notification_t*) {
+        ++Protocol::FromQueue(base)->growths;
+        reinterpret_cast<Queue*>(base)->frontier_count = count;
+        return iree_ok_status();
+      };
+  protocol.lifecycle.close = [](iree_hal_queue_t* base) {
+    ++Protocol::FromQueue(base)->closures;
+  };
+  protocol.lifecycle.try_inactivate = [](iree_hal_queue_t* base,
+                                         amdf_status_t* out_status) {
+    ++Protocol::FromQueue(base)->stops;
+    *out_status = AMDF_STATUS_OK;
+    return true;
+  };
+  protocol.lifecycle.retire_failed = [](iree_hal_queue_t* base,
+                                        iree_status_code_t) {
+    auto* protocol = Protocol::FromQueue(base);
+    EXPECT_EQ(protocol->stops, 1u);
+    ++protocol->retirements;
+    reinterpret_cast<Queue*>(base)->idle = true;
+    return true;
+  };
+  protocol.lifecycle.is_host_idle = [](iree_hal_queue_t* base) {
+    ++Protocol::FromQueue(base)->joins;
+    return true;
+  };
+  protocol.lifecycle.shutdown = [](iree_hal_queue_t* base) {
+    EXPECT_TRUE(reinterpret_cast<Queue*>(base)->idle.load());
+    ++Protocol::FromQueue(base)->shutdowns;
+    return AMDF_STATUS_OK;
+  };
+
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* other = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &protocol.family, &params, &other));
+  event_.AwaitIdle();
+  EXPECT_TRUE(protocol.observed.load());
+  iree_hal_amd_gpu_publication_notify(
+      &publication_, reinterpret_cast<Queue*>(other)->ordinal +
+                         IREE_ARRAYSIZE(membership_.publication_tail));
+  protocol.published.acquire();
+
+  iree_hal_queue_t* first = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
+  EXPECT_EQ(protocol.growths, 1u);
+  EXPECT_EQ(reinterpret_cast<Queue*>(other)->frontier_count, 4u);
+  EXPECT_EQ(reinterpret_cast<Queue*>(first)->frontier_count, 4u);
+  EXPECT_EQ(programs_.registry.queue_count, 4u);
+  EXPECT_EQ(iree_hal_amd_gpu_queue_membership_trim(&membership_),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(protocol.trims, 1u);
+
+  reinterpret_cast<Queue*>(other)->idle = false;
+  reinterpret_cast<Queue*>(first)->idle = false;
+  const amdf_status_t error =
+      amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
+  ASSERT_TRUE(iree_hal_amd_gpu_failure_begin(&failure_, error, "native wait",
+                                             iree_time_now()));
+  iree_hal_amd_gpu_completion_request_failure(&completion_, error);
+  EXPECT_EQ(iree_hal_amd_gpu_completion_request_stop(&completion_),
+            AMDF_STATUS_OK);
+  amdf_status_t status = AMDF_STATUS_OK;
+  for (auto phase :
+       {IREE_HAL_AMD_GPU_FAILURE_CLOSING, IREE_HAL_AMD_GPU_FAILURE_INACTIVATING,
+        IREE_HAL_AMD_GPU_FAILURE_RETIRING, IREE_HAL_AMD_GPU_FAILURE_JOINING}) {
+    EXPECT_TRUE(iree_hal_amd_gpu_queue_membership_try_failure(
+        &membership_, phase, IREE_STATUS_DATA_LOSS, &status));
+    EXPECT_EQ(status, AMDF_STATUS_OK);
+  }
+  EXPECT_EQ(protocol.closures, 1u);
+  EXPECT_EQ(protocol.stops, 1u);
+  EXPECT_EQ(protocol.retirements, 1u);
+  EXPECT_EQ(protocol.joins, 1u);
+  iree_hal_amd_gpu_queue_membership_finish_failure(&membership_,
+                                                   AMDF_STATUS_OK);
+  iree_hal_queue_release(first);
+  iree_hal_queue_release(other);
+  EXPECT_EQ(protocol.closures, 2u);
+  EXPECT_EQ(protocol.shutdowns, 1u);
+  EXPECT_EQ(shutdowns_.load(), 1u);
+  EXPECT_EQ(destroyed_.load(), 2u);
 }
 
 TEST_P(MembershipTest, ReleaseJoinsOnlyItsOwnLifecycleBorrower) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
   std::binary_semaphore entered{0};
   std::binary_semaphore resume{0};
   notify_ = [&](Queue* queue) {
@@ -1420,7 +1615,7 @@ TEST_P(MembershipTest, ReleaseJoinsOnlyItsOwnLifecycleBorrower) {
   closed_.acquire();
   iree_hal_queue_t* independent = nullptr;
   IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-      &membership_, &params, &independent));
+      &membership_, &family_, &params, &independent));
   iree_hal_queue_release(independent);
   EXPECT_EQ(destroyed_.load(), 1u);
   EXPECT_EQ(shutdowns_.load(), 1u);
@@ -1434,8 +1629,8 @@ TEST_P(MembershipTest, ScratchTrimAllowsIndependentAcquisitionAndRelease) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
   std::binary_semaphore entered{0};
   std::binary_semaphore resume{0};
   trim_ = [&](Queue* queue) {
@@ -1457,7 +1652,7 @@ TEST_P(MembershipTest, ScratchTrimAllowsIndependentAcquisitionAndRelease) {
   closed_.acquire();
   iree_hal_queue_t* independent = nullptr;
   IREE_EXPECT_OK(iree_hal_amd_gpu_queue_membership_acquire(
-      &membership_, &params, &independent));
+      &membership_, &family_, &params, &independent));
   iree_hal_queue_release(independent);
   EXPECT_EQ(destroyed_.load(), 1u);
   resume.release();
@@ -1474,8 +1669,8 @@ TEST_P(MembershipTest, TerminalTraversalJoinsAConcurrentConstructor) {
   iree_hal_queue_params_t params;
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
   std::binary_semaphore entered{0};
   std::binary_semaphore resume{0};
   construct_ = [&](uint32_t) {
@@ -1487,7 +1682,7 @@ TEST_P(MembershipTest, TerminalTraversalJoinsAConcurrentConstructor) {
     iree_hal_queue_t* failed = nullptr;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_DATA_LOSS,
                           iree_hal_amd_gpu_queue_membership_acquire(
-                              &membership_, &params, &failed));
+                              &membership_, &family_, &params, &failed));
     EXPECT_EQ(failed, nullptr);
   });
   entered.acquire();
@@ -1537,10 +1732,10 @@ TEST_P(MembershipTest, TerminalCalloutCanReleaseAnIndependentIdleQueue) {
   iree_hal_queue_params_initialize(&params);
   iree_hal_queue_t* first = nullptr;
   iree_hal_queue_t* second = nullptr;
-  IREE_ASSERT_OK(
-      iree_hal_amd_gpu_queue_membership_acquire(&membership_, &params, &first));
-  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
-                                                           &params, &second));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &first));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &family_, &params, &second));
   const amdf_status_t error =
       amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
   ASSERT_TRUE(iree_hal_amd_gpu_failure_begin(&failure_, error, "native wait",

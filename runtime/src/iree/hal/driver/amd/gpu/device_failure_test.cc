@@ -93,7 +93,7 @@ class DeviceFailureTest : public ::testing::Test {
     };
     membership_.context = &context_;
     membership_.host_allocator = iree_allocator_system();
-    membership_.lifecycle = &lifecycle_;
+    family_.lifecycle = &lifecycle_;
     membership_.provisioned_count = queues_.size();
     membership_.provisioned = provisioned_.data();
     iree_hal_amd_gpu_queue_membership_initialize(&membership_);
@@ -107,6 +107,7 @@ class DeviceFailureTest : public ::testing::Test {
           proactor_, nullptr, 0, 2, iree_allocator_system(), &outputs_[i]));
       auto& queue = queues_[i];
       native_[i] = {.owner = this, .ordinal = i};
+      queue.base.queue_family = &family_.base;
       queue.context = &context_;
       queue.options.publication = &publication_;
       queue.options.source_ordinal = i;
@@ -230,6 +231,8 @@ class DeviceFailureTest : public ::testing::Test {
   iree_hal_amd_gpu_context_t context_ = {};
   // Exact cold protocol contract also used by device construction.
   iree_hal_amd_gpu_queue_lifecycle_t lifecycle_ = {};
+  // Immutable family contract selected by every provisioned queue.
+  iree_hal_amd_gpu_queue_family_t family_ = {};
   // Actual registry and native ownership result seen by final releases.
   iree_hal_amd_gpu_queue_membership_t membership_ = {};
   // Actual production coordinator and its diagnostic state.

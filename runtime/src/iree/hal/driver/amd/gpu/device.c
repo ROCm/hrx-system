@@ -94,7 +94,7 @@ typedef struct iree_hal_amd_gpu_device_t {
   // Qualified physical compiler identity borrowing owned or static strings.
   iree_hal_amd_gpu_target_identity_t target;
   // Canonical exact identity for the explicitly provisioned native family.
-  iree_hal_queue_family_t family;
+  iree_hal_amd_gpu_queue_family_t family;
   // Number of fully constructed queues in the inline array.
   uint32_t queue_count;
   // Owned provisioned queue references; the parent joins native ownership.
@@ -129,8 +129,6 @@ typedef struct iree_hal_amd_gpu_device_t {
   iree_hal_amd_gpu_publication_t publication;
   // Selected packet protocol, used only during cold family/lifecycle dispatch.
   amdf_queue_command_type_t command_type;
-  // Selected ownership contract, shared by every queue in this family.
-  const iree_hal_amd_gpu_queue_lifecycle_t* queue_lifecycle;
   // Resident placement and builtins for the selected native packet protocol.
   union {
     // Native descriptor kernels and write-only ring materialization.
@@ -771,7 +769,7 @@ static bool iree_hal_amd_gpu_device_is_closing(void* user_data) {
 
 static bool iree_hal_amd_gpu_device_is_idle(iree_hal_amd_gpu_device_t* device) {
   for (uint32_t i = 0; i < device->queue_count; ++i) {
-    if (!device->queue_lifecycle->is_idle(device->queues[i])) {
+    if (!device->family.lifecycle->is_idle(device->queues[i])) {
       return false;
     }
   }
@@ -810,7 +808,8 @@ static bool iree_hal_amd_gpu_device_release_children(
     if (!device->queues[i]) {
       continue;
     }
-    amdf_status_t status = device->queue_lifecycle->shutdown(device->queues[i]);
+    amdf_status_t status =
+        device->family.lifecycle->shutdown(device->queues[i]);
     if (!amdf_status_is_ok(status)) {
       iree_hal_amd_gpu_context_report(device->context, status,
                                       "GPU queue native ownership join");
@@ -933,7 +932,7 @@ static void iree_hal_amd_gpu_device_destroy(iree_hal_device_t* base) {
     }
   }
   for (uint32_t i = 0; i < device->queue_count; ++i) {
-    device->queue_lifecycle->close(device->queues[i]);
+    device->family.lifecycle->close(device->queues[i]);
   }
   iree_atomic_store(&device->closing, 1, iree_memory_order_release);
   amdf_status_t status =
@@ -1005,7 +1004,7 @@ static void iree_hal_amd_gpu_device_notify_failure(void* user_data) {
   iree_hal_amd_gpu_queue_membership_notify_failure(&device->membership);
   for (uint32_t i = 0; i < device->queue_count; ++i) {
     if (device->queues[i]) {
-      device->queue_lifecycle->notify_failure(device->queues[i]);
+      device->family.lifecycle->notify_failure(device->queues[i]);
     }
   }
   const amdf_status_t status = iree_hal_amd_gpu_context_signal(device->context);
@@ -1071,12 +1070,12 @@ static void iree_hal_amd_gpu_device_prepare_feedback(void* user_data) {
   }
 }
 
-static iree_status_t iree_hal_amd_gpu_device_create_queue(
-    void* user_data, uint32_t ordinal, uint32_t source_ordinal,
-    uint32_t frontier_count, uint64_t initial_epoch,
+static iree_status_t iree_hal_amd_gpu_device_create_compute_queue(
+    const iree_hal_amd_gpu_queue_family_t* family, uint32_t ordinal,
+    uint32_t source_ordinal, uint32_t frontier_count, uint64_t initial_epoch,
     iree_hal_amd_gpu_signal_cache_t* signals,
     const iree_hal_queue_params_t* params, iree_hal_queue_t** out_queue) {
-  iree_hal_amd_gpu_device_t* device = user_data;
+  iree_hal_amd_gpu_device_t* device = family->user_data;
   iree_hal_amd_gpu_pm4_queue_options_t options = device->queue_options;
   options.queue_ordinal = ordinal;
   options.source_ordinal = source_ordinal;
@@ -1104,11 +1103,11 @@ static iree_status_t iree_hal_amd_gpu_device_create_queue(
         .argument_capacity = options.argument_capacity,
         .capture_block_size = options.capture_block_size,
         .capture_block_count = options.capture_block_count};
-    return iree_hal_amd_gpu_aql_queue_create(&device->family, device->context,
+    return iree_hal_amd_gpu_aql_queue_create(&family->base, device->context,
                                              &aql_options, params,
                                              device->host_allocator, out_queue);
   }
-  return iree_hal_amd_gpu_pm4_queue_create(&device->family, device->context,
+  return iree_hal_amd_gpu_pm4_queue_create(&family->base, device->context,
                                            &options, params,
                                            device->host_allocator, out_queue);
 }
@@ -1230,8 +1229,10 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   device->context = context;
   iree_slim_mutex_initialize(&device->cooperative.mutex);
   device->command_type = context->families[family_ordinal].command_type;
-  device->queue_lifecycle = aql ? &iree_hal_amd_gpu_aql_queue_lifecycle
-                                : &iree_hal_amd_gpu_pm4_queue_lifecycle;
+  device->family.lifecycle = aql ? &iree_hal_amd_gpu_aql_queue_lifecycle
+                                 : &iree_hal_amd_gpu_pm4_queue_lifecycle;
+  device->family.create = iree_hal_amd_gpu_device_create_compute_queue;
+  device->family.user_data = device;
   if (publication_mode == AMDF_QUEUE_PUBLICATION_MODE_USER) {
     device->semaphore_wait = (iree_hal_amd_gpu_semaphore_wait_context_t){
         .domain = context,
@@ -1248,9 +1249,6 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
       .completion = &device->completion,
       .programs =
           aql ? &device->programs.aql.storage : &device->programs.pm4.storage,
-      .lifecycle = device->queue_lifecycle,
-      .create = iree_hal_amd_gpu_device_create_queue,
-      .user_data = device,
       .provisioned_count = options->queue_count,
       .provisioned = device->queues};
   iree_hal_amd_gpu_queue_membership_initialize(&device->membership);
@@ -1408,16 +1406,16 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
     iree_hal_queue_family_initialize(
         (void*)device, 0,
         &iree_hal_device_spec_queues(device->spec)->families[0],
-        &device->family);
+        &device->family.base);
   }
   device->queue_options = queue_options;
   iree_hal_queue_params_t queue_params;
   iree_hal_queue_params_initialize(&queue_params);
   for (uint32_t i = 0; i < options->queue_count && iree_status_is_ok(status);
        ++i) {
-    status = iree_hal_amd_gpu_device_create_queue(
-        device, i, i, options->queue_count, 0, &device->signals.values[i],
-        &queue_params, &device->queues[i]);
+    status = iree_hal_amd_gpu_device_create_compute_queue(
+        &device->family, i, i, options->queue_count, 0,
+        &device->signals.values[i], &queue_params, &device->queues[i]);
     if (iree_status_is_ok(status)) {
       device->queue_count = i + 1;
       device->sources[i] = (aql ? iree_hal_amd_gpu_aql_queue_completion_source
@@ -1537,7 +1535,7 @@ static iree_status_t iree_hal_amd_gpu_device_trim(iree_hal_device_t* base) {
   iree_slim_mutex_lock(&device->cooperative.mutex);
   iree_hal_queue_t* queue = device->cooperative.queue;
   if (queue && iree_atomic_ref_count_load(&queue->resource.ref_count) == 1 &&
-      device->queue_lifecycle->is_idle(queue)) {
+      device->family.lifecycle->is_idle(queue)) {
     device->cooperative.queue = NULL;
   } else {
     queue = NULL;
@@ -1566,7 +1564,7 @@ static const iree_hal_device_spec_t* iree_hal_amd_gpu_device_device_spec(
 
 static const iree_hal_queue_family_t* iree_hal_amd_gpu_device_queue_family(
     iree_hal_device_t* base, iree_hal_queue_family_ordinal_t ordinal) {
-  return ordinal == 0 ? &((iree_hal_amd_gpu_device_t*)base)->family : NULL;
+  return ordinal == 0 ? &((iree_hal_amd_gpu_device_t*)base)->family.base : NULL;
 }
 
 static iree_hal_queue_t* iree_hal_amd_gpu_device_queue(
@@ -1680,7 +1678,8 @@ static iree_status_t iree_hal_amd_gpu_device_acquire_queue(
           "the shared cooperative queue has a different placement");
     } else if (!queue) {
       status = iree_hal_amd_gpu_queue_membership_acquire(
-          &device->membership, params, &device->cooperative.queue);
+          &device->membership, (const void*)family, params,
+          &device->cooperative.queue);
       queue = device->cooperative.queue;
     }
     if (iree_status_is_ok(status)) {
@@ -1690,8 +1689,8 @@ static iree_status_t iree_hal_amd_gpu_device_acquire_queue(
     iree_slim_mutex_unlock(&device->cooperative.mutex);
     return status;
   }
-  return iree_hal_amd_gpu_queue_membership_acquire(&device->membership, params,
-                                                   out_queue);
+  return iree_hal_amd_gpu_queue_membership_acquire(
+      &device->membership, (const void*)family, params, out_queue);
 }
 
 static iree_status_t iree_hal_amd_gpu_device_sample_observation(
