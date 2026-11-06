@@ -766,7 +766,7 @@ def shared_tool_bazel_step(
             "//loom/src/loom/tools/loom-format:execution_test",
             "//loom/src/loom/tools/loom-link:execution_test",
             "//loom/src/loom/tools/loom-run:execution_test",
-            "//loom/src/loom/tools/loom-run:run_cxx_input_test",
+            "//loom/src/loom/tooling/target/cpu/test:run_cxx_input_test",
             "//loom/src/loom/import/cxx/binding/test/contracts:contracts_export_test",
             "//loom/src/loom/import/cxx/binding/test/data:views_export_test",
             "//loom/src/loom/import/cxx/binding/test/kernel:kernel_export_test",
@@ -1225,7 +1225,7 @@ def cmake_shared_tool_steps(command_name: str) -> list[CiStep]:
                 r"|loom/tools/loom-check/test/.*"
                 r"|loom/tooling/execution/hal/command_scenario_(execution|specialization)_test"
                 r"|loom/tools/loom-benchmark/test/benchmark_scenario_correctness_test"
-                r"|loom/tools/loom-run/run_cxx_input_test"
+                r"|loom/tooling/target/cpu/test/run_cxx_input_test"
                 r"|loom/tooling/target/cpu/serve/serve_command_test)$"
             ),
         ),

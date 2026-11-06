@@ -50,6 +50,7 @@ loom_check_test_suite(
         "vectors.cxx-test",
         "vectors_invalid.cxx-test",
     ],
+    data = ["hip_vector_types.cxx"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 

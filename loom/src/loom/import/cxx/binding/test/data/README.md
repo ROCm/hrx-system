@@ -10,6 +10,11 @@ source callers. The remaining fixtures isolate individual facade operations,
 invalid declarations, and dependent signatures. Export/reimport coverage keeps
 the same dependent shape and layout identities through the source round trip.
 
+`view_reference_loops` and `view_generators` preserve independently authored
+reference computations and their input construction. The paged online softmax
+fixture joins nested guarded loops, physical offsets, loop-carried vector state,
+and scalar normalization in one exact source projection.
+
 Related cases use `// ====` and exact output maintained by the ordinary updater:
 
 ```sh

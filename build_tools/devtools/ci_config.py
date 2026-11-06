@@ -335,14 +335,6 @@ AMDGPU_XFAILS = tuple(
         # the CXX import path does not provide before lowering.
         "assembly_invalid",
         "assembly_lowering",
-        # These CXX modules exercise scalar or vector FP narrowing forms for
-        # which the AMDGPU target has no legalization.
-        "bfloat16_test_execute_amdgpu_access_test",
-        "bfloat16_test_execute_amdgpu_test",
-        "float8_test_execute_amdgpu_access_test",
-        "float8_test_execute_amdgpu_test",
-        "vector_conversion_test_execute_amdgpu_access_test",
-        "vector_conversion_test_execute_amdgpu_test",
     )
 )
 AMDGPU_SANITIZERS_XFAILS = ()

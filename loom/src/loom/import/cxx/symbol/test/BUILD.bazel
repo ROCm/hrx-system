@@ -22,6 +22,7 @@ loom_check_test_suite(
         "function_declarations.cxx-test",
         "function_declarations_invalid.cxx-test",
         "functions.cxx-test",
+        "immutable_local_calls.cxx-test",
         "immutable_objects.cxx-test",
         "immutable_objects_invalid.cxx-test",
         "immutable_strings.cxx-test",
@@ -37,6 +38,13 @@ loom_check_test_suite(
         "template_values.cxx-test",
         "template_values_roundtrip.cxx-test",
         "view_calls.cxx-test",
+    ],
+    data = [
+        "function_specializations.cxx",
+        "immutable_object_link_left.cxx",
+        "immutable_object_link_right.cxx",
+        "immutable_object_link_tables.h",
+        "immutable_objects.cxx",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )

@@ -675,18 +675,13 @@ directives are reserved by the shared envelope, including inside multiline
 source constructs. Other C++ comments, macro continuations, and raw strings
 remain untouched.
 
-The importer-owned integration suite is
-`//loom/src/loom/import/cxx/tooling/test:test`. Authored source lowering goldens
-run through `//loom/src/loom/import/cxx/test:compiler_test` and focused
-[source-language](source/test/README.md),
-[control-flow](control/test/README.md),
-[symbol](symbol/test/README.md),
-[numeric](value/test/numeric/README.md),
-[vector](value/test/vector/README.md), and
-[object](value/test/object/README.md) packages. Native API tests
-cover ownership, source providers, and failure propagation. The
-[execution corpus](test/README.md) uses ordinary `loom_test` targets with
-independent numerical oracles.
+The importer-owned tooling suite is
+`//loom/src/loom/import/cxx/tooling/test:test`. Source semantics, diagnostics,
+and source projections live in focused packages beside their owning components;
+the [test guide](test/README.md) indexes those packages and their updater
+workflow. Native API tests cover ownership, source providers, and failure
+propagation. Backend lowering, numerical execution, and target qualification
+have separate owners and do not add runtime dependencies to importer tests.
 
 ## Callable symbol names
 
@@ -2537,7 +2532,7 @@ u32x16 replace_depth(u32x16 previous, u32x16 depth) {
 This imports as `vector<16xi32>` arguments, vector constants, `vector.andi` and
 `vector.ori`. Vector pointers use contiguous `vector.load` and `vector.store`,
 with source object sizes determining pointer strides. The
-`test/vector_depth.cxx` example combines a vector depth recurrence with a scalar
+`value/test/vector/vector_spans.cxx-test` fixture combines a vector depth recurrence with a scalar
 tail and ordinary pointer reinterpretation.
 
 GNU `vector_size` and Clang `ext_vector_type` forms admit arithmetic, bitwise
@@ -3072,17 +3067,14 @@ after an earlier return would change its effects. An authored incompatible
 schedule therefore receives a diagnostic instead of being silently discarded.
 
 Logical operators preserve contextual boolean conversions and evaluate their
-right operand only in the selected `scf.if` region. Guarded loads and effectful
-helpers are checked by native execution and device access sanitization. Some
-compositions still reach core AMDGPU control-flow restrictions: a guarded
-`while` condition can produce multiple loop exit edges, and `(a && b) || c`
-can produce a shared continuation that the current masked-branch planner
-rejects. Import preserves those source semantics; target compilation reports
-the unsupported control-flow shape.
+right operand only in the selected `scf.if` region. Exact source goldens check
+guarded loads, effectful helper ordering, discarded logical expressions, and
+shared continuations. Target legalization independently enforces the backend's
+control-flow requirements.
 
 ## Implementation boundaries
 
-The importer composes five native packages. Each owns declared library targets,
+The importer composes six native packages. Each owns declared library targets,
 header APIs, and direct API tests that do not link the aggregate importer.
 
 | Package | Contract |
@@ -3092,6 +3084,7 @@ header APIs, and direct API tests that do not link the aggregate importer.
 | `control/` | An immutable analysis of ordered source writes, function/iteration exits and fallthrough, and nonwrapping counted-loop eligibility. This package has no IR dependency. |
 | `binding/` | Admission and construction for generated operation bindings, runtime imports, named scalar configs, kernel launch contracts, and explicit loop schedules. |
 | `symbol/` | Root selection, reachable function identities, deterministic linkage names, and native function declarations or definitions with explicit contracts. |
+| `lifetime/` | Cleanup scopes, temporary lifetimes, and destructor obligations across source control flow. |
 
 `import.cc` owns the native API's validation, exception boundary, module
 ownership, and final verification. `translation.cc` composes the packages: it

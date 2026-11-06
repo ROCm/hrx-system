@@ -8,9 +8,10 @@ layout through verified IR. They use the ordinary `// ====` container and
 | Contract | Fixtures |
 | --- | --- |
 | Construction, omitted lanes, and scalar broadcasts | `constructors`, `vector_constants`, `vector_list_assignment` |
+| HIP vector ABI, named lanes, and mixed-width kernel composition | `hip_vector_types` |
 | Native promotions, comparisons, and narrow lane arithmetic | `native_arithmetic`, `packed_arithmetic`, `vectors` |
 | Shaped arithmetic and value dimensions | `vector_arithmetic`, `vector_slices`, `vector_slices_family` |
-| Numeric conversion and packed representations | `vector_conversion`, `vector_decode`, `packed_slices` |
+| Numeric conversion and packed representations | `vector_conversion`, `vector_decode`, `group_dot`, `packed_slices` |
 | Lane updates and memory projections | `vector_lane_updates`, `vector_memory`, `padded_vectors` |
 | Vector blocks, scalar tails, and independent strides | `vector_spans` |
 | Lookup, reductions, and seeded products | `vector_lookup`, `vector_math`, `shaped_intrinsics`, `shaped_composition` |

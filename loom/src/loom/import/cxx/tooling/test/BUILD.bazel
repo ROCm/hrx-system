@@ -12,8 +12,8 @@ loom_check_test_suite(
     name = "test",
     srcs = [
         "import.cxx-test",
+        "opaque_import.cxx-test",
         "source_capture.cxx-test",
-        "vm_import.cxx-test",
     ],
     data = [
         "helper.h",

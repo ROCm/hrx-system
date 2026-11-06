@@ -22,12 +22,14 @@ loom_check_test_suite(
         "encoding_schemas_invalid.cxx-test",
         "index_views.cxx-test",
         "observations.cxx-test",
+        "paged_online_softmax_loop_f32.cxx-test",
         "typed_view_composition.cxx-test",
         "view_generators.cxx-test",
         "view_reference_loops.cxx-test",
         "view_values.cxx-test",
         "view_values_invalid.cxx-test",
     ],
+    data = ["paged_online_softmax_loop_f32.cxx"],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 

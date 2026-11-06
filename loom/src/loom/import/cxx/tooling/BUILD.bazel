@@ -1,7 +1,5 @@
 load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:defs.bzl", "loom_test")
-load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -101,16 +99,4 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
-)
-
-loom_test(
-    name = "source_test",
-    srcs = ["check_cases.cxx"],
-    data = ["check_cases.h"],
-    execution_profiles = [VM_REFERENCE_PROFILE],
-    inputopts = ["cxx:D=CHECK_EXPECTED=0u"],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/import:cxx",
-        "//loom/config/arch:vm",
-    ]),
 )

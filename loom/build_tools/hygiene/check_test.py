@@ -289,6 +289,11 @@ class CheckTest(unittest.TestCase):
                 "execution mechanism",
             ),
             (
+                "loom/src/loom/import/cxx/test/BUILD.bazel",
+                'loom_test(name = "execute", srcs = ["input.cxx"])\n',
+                "importer tests must stop at verified IR",
+            ),
+            (
                 "loom/src/loom/test/corpus/authoring/example.loom",
                 "%nb0 : index\n",
                 "byte strides",
