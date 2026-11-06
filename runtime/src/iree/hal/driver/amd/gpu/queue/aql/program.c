@@ -40,8 +40,10 @@ iree_status_t iree_hal_amd_gpu_aql_program_pool_initialize(
     iree_hal_amd_gpu_aql_program_pool_t* out_pool) {
   *out_pool = (iree_hal_amd_gpu_aql_program_pool_t){0};
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_pool_initialize(
-      context, native_family_ordinal, queue_count, host_allocator,
-      &out_pool->storage));
+      context, native_family_ordinal, queue_count,
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
+          AMDF_MEMORY_ACCESS_EXECUTE,
+      host_allocator, &out_pool->storage));
   const iree_hal_amd_gpu_gfxip_version_t gfxip = {
       context->target_info.gfx_ip.major, context->target_info.gfx_ip.minor,
       context->target_info.gfx_ip.stepping};

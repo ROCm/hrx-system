@@ -7,20 +7,171 @@
 #include "iree/hal/driver/amd/gpu/queue/sdma/command_buffer.h"
 
 #include <array>
+#include <atomic>
+#include <future>
 #include <memory>
 #include <vector>
 
 #include "iree/hal/device_spec.h"
+#include "iree/hal/driver/amd/gpu/context.h"
+#include "iree/hal/driver/amd/gpu/queue/program.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
 
 // Real public recording, binding validation/capture, and native projection.
-// Only buffer backing is supplied by the fixture. Native carrier CTS separately
-// qualifies packet execution and visibility on physical hardware.
+// Only native memory and buffer backing are supplied by the fixture. Native
+// carrier CTS separately qualifies packet execution and physical visibility.
 class CommandBufferTest : public ::testing::Test {
  protected:
+  struct Memory {
+    // Native provider whose allocation/failure evidence this backing updates.
+    CommandBufferTest* owner;
+    // Host bytes with room for the requested native alignment.
+    std::vector<uint8_t> bytes;
+    // Aligned native extent exposed to the production memory owner.
+    uint8_t* data;
+    // Size of the exposed native extent, excluding alignment padding.
+    uint64_t length;
+    // Alignment admitted from the requested allocation geometry.
+    uint64_t alignment;
+    // Allocation flags reported independently from the requested host view.
+    amdf_memory_flags_t flags;
+  };
+
+  void InitializeNativeMemory() {
+    api_.memory_scope_query_info = [](amdf_memory_scope_t*,
+                                      amdf_memory_scope_info_t* info) {
+      info->kind = AMDF_MEMORY_SCOPE_KIND_SYSTEM;
+      info->memory_profile_count = 1;
+      return AMDF_STATUS_OK;
+    };
+    api_.memory_scope_query_device_profile =
+        [](amdf_memory_scope_t*, uint32_t, uint32_t count,
+           const amdf_memory_device_access_t* accesses,
+           amdf_memory_profile_t* profile, amdf_memory_access_capabilities_t*) {
+          EXPECT_EQ(count, 1u);
+          EXPECT_EQ(accesses[0].requirements.access,
+                    AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+          profile->roles = AMDF_MEMORY_PROFILE_ROLE_CREATE |
+                           AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
+          profile->supported_flags =
+              AMDF_MEMORY_FLAG_DEVICE_LOCAL | AMDF_MEMORY_FLAG_HOST_VISIBLE;
+          profile->host_mapping.supported_access =
+              AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+          profile->allocation.minimum_alignment = 64;
+          profile->allocation.byte_length_granularity = 64;
+          profile->allocation.native_byte_length_granularity = 64;
+          profile->allocation.maximum_byte_length = UINT32_MAX;
+          return AMDF_STATUS_OK;
+        };
+    api_.memory_scope_query_pair_info =
+        [](amdf_memory_scope_t*, const amdf_memory_profile_pair_query_t* query,
+           amdf_memory_pair_info_t* pair) {
+          EXPECT_EQ(query->producer.kind, AMDF_MEMORY_SITE_KIND_HOST);
+          EXPECT_EQ(query->consumer.kind, AMDF_MEMORY_SITE_KIND_DEVICE);
+          EXPECT_EQ(query->consumer.value.device.queue_family_ordinal, 1u);
+          pair->release.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
+          pair->acquire.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
+          return AMDF_STATUS_OK;
+        };
+    api_.memory_create = [](amdf_memory_scope_t* scope,
+                            const amdf_memory_create_info_t* info,
+                            amdf_memory_t** out_memory,
+                            amdf_memory_release_info_t* out_release_info) {
+      auto* self = reinterpret_cast<CommandBufferTest*>(scope);
+      if (out_release_info) {
+        *out_release_info = {};
+      }
+      if (self->fail_allocate_) {
+        return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
+      }
+      auto* memory = new Memory;
+      memory->owner = self;
+      memory->bytes.resize(info->byte_length + info->minimum_alignment);
+      memory->data = reinterpret_cast<uint8_t*>(
+          iree_align_uint64(reinterpret_cast<uintptr_t>(memory->bytes.data()),
+                            info->minimum_alignment));
+      memory->length = info->byte_length;
+      memory->alignment = info->minimum_alignment;
+      memory->flags = info->required_flags;
+      ++self->allocations_;
+      ++self->live_memory_;
+      *out_memory = reinterpret_cast<amdf_memory_t*>(memory);
+      return AMDF_STATUS_OK;
+    };
+    api_.memory_query_info = [](amdf_memory_t* handle,
+                                amdf_memory_info_t* info) {
+      auto* memory = reinterpret_cast<Memory*>(handle);
+      info->byte_length = info->native_allocation_byte_length = memory->length;
+      info->alignment = memory->alignment;
+      info->native_allocation_granularity = 64;
+      info->flags = memory->flags;
+      return AMDF_STATUS_OK;
+    };
+    api_.memory_query_address = [](amdf_memory_t* handle, uint32_t,
+                                   amdf_memory_address_kind_t,
+                                   uint64_t* out_address) {
+      *out_address =
+          reinterpret_cast<uintptr_t>(reinterpret_cast<Memory*>(handle)->data);
+      return AMDF_STATUS_OK;
+    };
+    api_.memory_map = [](amdf_memory_t* handle, const amdf_memory_map_info_t*,
+                         amdf_host_mapping_t** out_mapping) {
+      EXPECT_NE(reinterpret_cast<Memory*>(handle)->flags &
+                    AMDF_MEMORY_FLAG_HOST_VISIBLE,
+                0u);
+      *out_mapping = reinterpret_cast<amdf_host_mapping_t*>(handle);
+      return AMDF_STATUS_OK;
+    };
+    api_.host_mapping_query_info = [](amdf_host_mapping_t* handle,
+                                      amdf_host_mapping_info_t* info) {
+      auto* memory = reinterpret_cast<Memory*>(handle);
+      info->pointer = memory->data;
+      info->byte_length = memory->length;
+      info->properties = AMDF_HOST_MEMORY_PROPERTY_READ_CACHED |
+                         AMDF_HOST_MEMORY_PROPERTY_WRITE_BACK;
+      return AMDF_STATUS_OK;
+    };
+    api_.host_mapping_cache_control = [](amdf_host_mapping_t* handle,
+                                         amdf_host_cache_operation_t operation,
+                                         uint64_t offset, uint64_t length) {
+      auto* memory = reinterpret_cast<Memory*>(handle);
+      EXPECT_LE(offset + length, memory->length);
+      EXPECT_EQ(operation, AMDF_HOST_CACHE_OPERATION_FLUSH);
+      return memory->owner->publish_status_;
+    };
+    api_.host_mapping_destroy = [](amdf_host_mapping_t*) {
+      return AMDF_STATUS_OK;
+    };
+    api_.memory_destroy = [](amdf_memory_t* handle,
+                             amdf_memory_release_info_t* out_release_info) {
+      if (out_release_info) {
+        *out_release_info = {};
+      }
+      auto* memory = reinterpret_cast<Memory*>(handle);
+      --memory->owner->live_memory_;
+      delete memory;
+      return AMDF_STATUS_OK;
+    };
+    api_.instance_destroy = [](amdf_instance_t*) { return AMDF_STATUS_OK; };
+    IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(),
+                                         sizeof(*fabric_),
+                                         reinterpret_cast<void**>(&fabric_)));
+    iree_atomic_ref_count_init(&fabric_->ref_count);
+    iree_slim_mutex_initialize(&fabric_->allocation_mutex);
+    fabric_->host_allocator = iree_allocator_system();
+    fabric_->api = &api_;
+    fabric_->system_scope = reinterpret_cast<amdf_memory_scope_t*>(this);
+    context_.api = &api_;
+    context_.fabric = fabric_;
+    IREE_ASSERT_OK(
+        iree_hal_amd_gpu_context_prepare_memory(&context_, UINT32_MAX));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_program_pool_initialize(
+        &context_, 1, 2, AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+        iree_allocator_system(), &pool_));
+  }
   struct Buffer {
     // Public identity used by the production resource set and binding capture.
     iree_hal_buffer_t base = {};
@@ -60,6 +211,7 @@ class CommandBufferTest : public ::testing::Test {
   };
 
   void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(InitializeNativeMemory());
     const uint16_t types[] = {IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS};
     const iree_hal_buffer_binding_layout_t layout = {
         sizeof(iree_hal_buffer_native_binding_t), 1, 0, types};
@@ -78,6 +230,10 @@ class CommandBufferTest : public ::testing::Test {
 
   void TearDown() override {
     iree_hal_command_buffer_release(recording_);
+    iree_hal_amd_gpu_program_pool_deinitialize(&pool_);
+    iree_hal_amd_gpu_context_deinitialize_memory(&context_);
+    EXPECT_EQ(live_memory_, 0u);
+    iree_hal_amd_fabric_release(fabric_);
     for (auto& buffer : buffers_) {
       EXPECT_EQ(iree_atomic_ref_count_load(&buffer->base.resource.ref_count),
                 1);
@@ -106,7 +262,7 @@ class CommandBufferTest : public ::testing::Test {
       uint32_t binding_capacity = 0, amdf_queue_format_features_t features = 0,
       amdf_queue_publication_modes_t mode = AMDF_QUEUE_PUBLICATION_MODE_USER) {
     IREE_ASSERT_OK(iree_hal_amd_gpu_sdma_command_buffer_create(
-        &family_, features,
+        &family_, &pool_, features,
         iree_hal_amd_gpu_sdma_barrier_profile(features, mode), 0,
         IREE_HAL_COMMAND_CATEGORY_TRANSFER, binding_capacity,
         iree_allocator_system(), &recording_));
@@ -178,6 +334,22 @@ class CommandBufferTest : public ::testing::Test {
 
   // Sealed queue-site guarantees shared by test backing allocations.
   iree_hal_memory_contract_t* contract_ = nullptr;
+  // Native dependency supplying qualified memory and publication failures.
+  amdf_api_t api_ = {};
+  // Shared native allocation domain, joined before fixture teardown.
+  iree_hal_amd_fabric_t* fabric_ = nullptr;
+  // Device-owned memory callbacks used by the real program owner.
+  iree_hal_amd_gpu_context_t context_ = {};
+  // Qualified data-only program placement and independent invocation leases.
+  iree_hal_amd_gpu_program_pool_t pool_ = {};
+  // Native allocations observed on the recorder or allocation worker.
+  std::atomic<uint32_t> allocations_ = 0;
+  // Outstanding native allocations, including deferred releases.
+  std::atomic<uint32_t> live_memory_ = 0;
+  // Injected native allocation failure before a recording can be sealed.
+  bool fail_allocate_ = false;
+  // Native publication result returned while sealing captured data.
+  amdf_status_t publish_status_ = AMDF_STATUS_OK;
   // Exact transfer family, with no compute or public atomic capability.
   iree_hal_queue_family_spec_t spec_ = {};
   // Borrowed family owner of each recording.
@@ -238,12 +410,19 @@ TEST_F(CommandBufferTest, CapturedUpdatesAndNaturalFillEdgesPreserveAllBytes) {
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording_));
   const auto* program =
       iree_hal_amd_gpu_sdma_command_buffer_program(recording_);
-  alignas(64) std::array<uint8_t, 512> data;
-  ASSERT_LE(program->data.data_length, data.size());
-  memcpy(data.data(), program->data.data, program->data.data_length);
+  auto* storage = iree_hal_amd_gpu_sdma_command_buffer_storage(recording_);
+  ASSERT_NE(storage, nullptr);
+  EXPECT_EQ(storage->byte_length, program->data.data_length);
+  EXPECT_EQ(memcmp(storage->contents.data, program->data.data,
+                   program->data.data_length),
+            0);
+  const uint64_t frontier[2] = {};
+  auto* instance = iree_hal_amd_gpu_program_try_acquire(storage, 0, frontier);
+  ASSERT_NE(instance, nullptr);
+  EXPECT_TRUE(instance->initialized);
   Invocation invocation;
   IREE_ASSERT_OK(invocation.Initialize(recording_));
-  IREE_ASSERT_OK(invocation.Resolve(reinterpret_cast<uintptr_t>(data.data())));
+  IREE_ASSERT_OK(invocation.Resolve(instance->address));
   iree_hal_amd_gpu_sdma_program_progress_t progress;
   size_t spans = 0;
   do {
@@ -254,6 +433,7 @@ TEST_F(CommandBufferTest, CapturedUpdatesAndNaturalFillEdgesPreserveAllBytes) {
   EXPECT_GT(spans, 1u);
   EXPECT_EQ(payload, expected);
   EXPECT_EQ(output, expected);
+  iree_hal_amd_gpu_program_cancel(storage, instance);
 }
 
 TEST_F(CommandBufferTest,
@@ -267,6 +447,8 @@ TEST_F(CommandBufferTest,
       iree_hal_make_indirect_buffer_ref(0, 11, IREE_HAL_WHOLE_BUFFER),
       iree_hal_make_indirect_buffer_ref(1, 13, IREE_HAL_WHOLE_BUFFER), 0));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording_));
+  EXPECT_EQ(iree_hal_amd_gpu_sdma_command_buffer_storage(recording_), nullptr);
+  EXPECT_EQ(allocations_, 0u);
   std::array<iree_hal_buffer_binding_t, 2> large = {
       {{&source->base, 7, kLength + 11}, {&target->base, 9, kLength + 13}}};
   std::array<iree_hal_buffer_binding_t, 2> empty = {
@@ -482,6 +664,125 @@ TEST_F(CommandBufferTest,
   EXPECT_EQ(second[7], 0xc000u);
   EXPECT_EQ(second[12], 0xc000u);
   EXPECT_EQ(second[18], 0xc000u);
+}
+
+TEST_F(CommandBufferTest, PartialRecordingKeepsItsReservedPlacement) {
+  auto* target = MakeBuffer(0x1000, 32);
+  ASSERT_NO_FATAL_FAILURE(Begin(0, AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR,
+                                AMDF_QUEUE_PUBLICATION_MODE_KERNEL));
+  IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+      recording_, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      iree_hal_make_buffer_ref(&target->base, 8, 8), 0));
+  ASSERT_NO_FATAL_FAILURE(Barrier(IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE));
+  IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+      recording_, IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      iree_hal_make_buffer_ref(&target->base, 16, 8), 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording_));
+  auto* storage = iree_hal_amd_gpu_sdma_command_buffer_storage(recording_);
+  ASSERT_NE(storage, nullptr);
+  uint64_t frontier[2] = {};
+  auto* first = iree_hal_amd_gpu_program_try_acquire(storage, 0, frontier);
+  ASSERT_NE(first, nullptr);
+  Invocation invocation;
+  IREE_ASSERT_OK(invocation.Initialize(recording_));
+  IREE_ASSERT_OK(invocation.Resolve(first->address));
+  iree_hal_amd_gpu_sdma_program_progress_t progress;
+  ASSERT_EQ(Emit(invocation, &progress).size(), 11u);
+  ASSERT_EQ(progress, IREE_HAL_AMD_GPU_SDMA_PROGRAM_BOUNDARY);
+  // Even a later queue frontier cannot cover the unpublished suffix. Other
+  // ready work needs a different placement while this invocation is parked.
+  frontier[0] = UINT64_MAX;
+  EXPECT_EQ(iree_hal_amd_gpu_program_try_acquire(storage, 0, frontier),
+            nullptr);
+  EXPECT_EQ(iree_hal_amd_gpu_program_try_acquire(storage, 1, frontier),
+            nullptr);
+  iree_hal_amd_gpu_program_growth_t growth = {};
+  std::promise<iree::Status> completed;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_grow_begin(
+      storage, 1,
+      {[](void* data, iree_status_t status) {
+         static_cast<std::promise<iree::Status>*>(data)->set_value(
+             iree::Status(std::move(status)));
+       },
+       &completed},
+      &growth));
+  auto result = completed.get_future().get();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_grow_end(&growth, result.release()));
+  auto* independent =
+      iree_hal_amd_gpu_program_try_acquire(storage, 1, frontier);
+  ASSERT_NE(independent, nullptr);
+  EXPECT_NE(independent->address, first->address);
+  EXPECT_FALSE(independent->initialized);
+  iree_hal_amd_gpu_program_cancel(storage, independent);
+  ASSERT_EQ(Emit(invocation, &progress).size(), 11u);
+  ASSERT_EQ(progress, IREE_HAL_AMD_GPU_SDMA_PROGRAM_END);
+  iree_hal_amd_gpu_program_publish(storage, first, 0, 7);
+  frontier[0] = 7;
+  auto* successor = iree_hal_amd_gpu_program_try_acquire(storage, 0, frontier);
+  EXPECT_EQ(successor, first);
+  EXPECT_TRUE(successor->join_previous);
+  iree_hal_amd_gpu_program_cancel(storage, successor);
+  iree_hal_amd_gpu_program_release(storage, first);
+}
+
+TEST_F(CommandBufferTest, UnmappedCapturedDataKeepsAnOrderedUploadSource) {
+  pool_.resident.host_access = 0;
+  pool_.resident.required_flags &= ~AMDF_MEMORY_FLAG_HOST_VISIBLE;
+  auto* target = MakeBuffer(0x1000, 32);
+  ASSERT_NO_FATAL_FAILURE(Begin());
+  const std::array<uint8_t, 8> bytes = {0x39, 0x72, 0xa1, 0x8d,
+                                        0x16, 0xca, 0x57, 0xe3};
+  IREE_ASSERT_OK(iree_hal_command_buffer_update_buffer(
+      recording_, bytes.data(), 0,
+      iree_hal_make_buffer_ref(&target->base, 0, bytes.size()), 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording_));
+  auto* storage = iree_hal_amd_gpu_sdma_command_buffer_storage(recording_);
+  ASSERT_NE(storage, nullptr);
+  EXPECT_NE(storage->upload, nullptr);
+  EXPECT_FALSE(storage->initial->initialized);
+  EXPECT_EQ(allocations_, 2u);
+  const auto source = iree_hal_amd_gpu_program_source(storage);
+  EXPECT_NE(source.address, storage->initial->address);
+  EXPECT_EQ(memcmp(reinterpret_cast<void*>(source.address), bytes.data(),
+                   bytes.size()),
+            0);
+}
+
+TEST_F(CommandBufferTest, FailedNativeAllocationLeavesRecordingUnexecutable) {
+  auto* target = MakeBuffer(0x1000, 32);
+  ASSERT_NO_FATAL_FAILURE(Begin());
+  const uint32_t pattern = 0x73d92ca1;
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      recording_, iree_hal_make_buffer_ref(&target->base, 0, 32), &pattern, 4,
+      0));
+  fail_allocate_ = true;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        iree_hal_command_buffer_end(recording_));
+  EXPECT_EQ(live_memory_, 0u);
+  EXPECT_EQ(pool_.registry.head, nullptr);
+  Invocation invocation;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        invocation.Initialize(recording_));
+}
+
+TEST_F(CommandBufferTest, FailedNativePublicationRetainsAndReleasesItsBacking) {
+  auto* target = MakeBuffer(0x1000, 32);
+  ASSERT_NO_FATAL_FAILURE(Begin());
+  const uint32_t pattern = 0x73d92ca1;
+  IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+      recording_, iree_hal_make_buffer_ref(&target->base, 0, 32), &pattern, 4,
+      0));
+  publish_status_ = amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,
+                        iree_hal_command_buffer_end(recording_));
+  EXPECT_EQ(live_memory_, 1u);
+  EXPECT_EQ(pool_.registry.head, nullptr);
+  iree_hal_command_buffer_release(recording_);
+  recording_ = nullptr;
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  EXPECT_EQ(live_memory_, 0u);
 }
 
 }  // namespace

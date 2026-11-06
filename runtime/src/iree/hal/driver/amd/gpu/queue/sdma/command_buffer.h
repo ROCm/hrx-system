@@ -8,6 +8,7 @@
 #define IREE_HAL_DRIVER_AMD_GPU_QUEUE_SDMA_COMMAND_BUFFER_H_
 
 #include "iree/hal/driver/amd/gpu/queue/inputs.h"
+#include "iree/hal/driver/amd/gpu/queue/program.h"
 #include "iree/hal/driver/amd/gpu/queue/sdma/barrier.h"
 #include "iree/hal/driver/amd/gpu/queue/sdma/program.h"
 
@@ -16,11 +17,14 @@ extern "C" {
 #endif
 
 // Creates a TRANSFER recorder for the family's selected native carrier. It
-// owns immutable host templates and captured update bytes; invocation-private
-// native command/control storage belongs to the executing queue. No compute
-// program, device allocation, or queue acquisition occurs while recording.
+// owns immutable host templates and seals captured data into the shared native
+// program owner. Invocations lease private placements through native
+// retirement. No compute builtin or queue acquisition is required. The
+// device-owned pool and its native memory policies remain live beyond every
+// recording.
 iree_status_t iree_hal_amd_gpu_sdma_command_buffer_create(
     const iree_hal_queue_family_t* family,
+    iree_hal_amd_gpu_program_pool_t* pool,
     amdf_queue_format_features_t features,
     iree_hal_amd_gpu_sdma_barrier_profile_t barriers,
     iree_hal_command_buffer_mode_t mode, iree_hal_command_category_t categories,
@@ -30,6 +34,12 @@ iree_status_t iree_hal_amd_gpu_sdma_command_buffer_create(
 // Sealed facts borrowed through the recording's retained lifetime.
 const iree_hal_amd_gpu_sdma_program_t*
 iree_hal_amd_gpu_sdma_command_buffer_program(iree_hal_command_buffer_t* buffer);
+// Sealed data owner, or NULL for a recording with no native private data.
+// Keep an invocation's placement reserved across partial native spans; publish
+// its reuse coordinate only after terminal acceptance. Rejection may cancel a
+// lease only after all already-accepted readers/writers have retired.
+iree_hal_amd_gpu_program_t* iree_hal_amd_gpu_sdma_command_buffer_storage(
+    iree_hal_command_buffer_t* buffer);
 iree_host_size_t iree_hal_amd_gpu_sdma_command_buffer_invocation_size(
     iree_hal_command_buffer_t* buffer);
 iree_host_size_t iree_hal_amd_gpu_sdma_command_buffer_operation_count(

@@ -241,7 +241,10 @@ class ProgramLifetimeTest : public ::testing::TestWithParam<LocalHostView> {
     IREE_ASSERT_OK(
         iree_hal_amd_gpu_context_prepare_memory(&context_, UINT32_MAX));
     IREE_ASSERT_OK(iree_hal_amd_gpu_program_pool_initialize(
-        &context_, 0, 3, iree_allocator_system(), &pool_));
+        &context_, 0, 3,
+        AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
+            AMDF_MEMORY_ACCESS_EXECUTE,
+        iree_allocator_system(), &pool_));
   }
 
   void TearDown() override {

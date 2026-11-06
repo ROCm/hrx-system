@@ -24,6 +24,11 @@ typedef struct iree_hal_amd_gpu_sdma_command_buffer_t {
   iree_hal_amd_gpu_sdma_recording_t recording;
   // Immutable native program shared by every invocation.
   iree_hal_amd_gpu_sdma_program_t program;
+  // Device-owned placement policy borrowed by sealing and invocation growth.
+  iree_hal_amd_gpu_program_pool_t* pool;
+  // Captured update/pattern bytes and private timestamp storage. Empty when
+  // the recording needs no native data. Leases outlive every partial span.
+  iree_hal_amd_gpu_program_t storage;
   // Deduplicated input values and aggregate indirect binding requirements.
   iree_hal_amd_gpu_command_inputs_t inputs;
   // Selected native visibility carrier, captured during family construction.
@@ -55,6 +60,7 @@ static void iree_hal_amd_gpu_sdma_command_buffer_destroy(
   const iree_allocator_t allocator = buffer->host_allocator;
   iree_status_free(buffer->recording_status);
   iree_hal_amd_gpu_sdma_recording_deinitialize(&buffer->recording);
+  iree_hal_amd_gpu_program_deinitialize(&buffer->storage);
   iree_allocator_free(allocator, buffer->program.storage);
   iree_hal_resource_set_free(buffer->resources);
   iree_arena_block_pool_deinitialize(&buffer->resource_blocks);
@@ -64,6 +70,7 @@ static void iree_hal_amd_gpu_sdma_command_buffer_destroy(
 
 iree_status_t iree_hal_amd_gpu_sdma_command_buffer_create(
     const iree_hal_queue_family_t* family,
+    iree_hal_amd_gpu_program_pool_t* pool,
     amdf_queue_format_features_t features,
     iree_hal_amd_gpu_sdma_barrier_profile_t barriers,
     iree_hal_command_buffer_mode_t mode, iree_hal_command_category_t categories,
@@ -91,6 +98,7 @@ iree_status_t iree_hal_amd_gpu_sdma_command_buffer_create(
       (uint8_t*)buffer + validation_offset,
       &iree_hal_amd_gpu_sdma_command_buffer_vtable, &buffer->base);
   buffer->host_allocator = host_allocator;
+  buffer->pool = pool;
   buffer->barriers = barriers;
   buffer->timestamp_offset = UINT32_MAX;
   iree_hal_amd_gpu_sdma_recording_initialize(features, host_allocator,
@@ -118,6 +126,12 @@ iree_status_t iree_hal_amd_gpu_sdma_command_buffer_create(
 const iree_hal_amd_gpu_sdma_program_t*
 iree_hal_amd_gpu_sdma_command_buffer_program(iree_hal_command_buffer_t* base) {
   return &((iree_hal_amd_gpu_sdma_command_buffer_t*)base)->program;
+}
+
+iree_hal_amd_gpu_program_t* iree_hal_amd_gpu_sdma_command_buffer_storage(
+    iree_hal_command_buffer_t* base) {
+  iree_hal_amd_gpu_sdma_command_buffer_t* buffer = (void*)base;
+  return buffer->program.data.data_length ? &buffer->storage : NULL;
 }
 
 iree_host_size_t iree_hal_amd_gpu_sdma_command_buffer_invocation_size(
@@ -165,6 +179,14 @@ static iree_status_t iree_hal_amd_gpu_sdma_command_seal(
   iree_hal_amd_gpu_command_inputs_seal(&buffer->inputs);
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_sdma_recording_seal(&buffer->recording,
                                                             &buffer->program));
+  if (buffer->program.data.data_length) {
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_initialize(
+        buffer->pool, 64, (uint32_t)buffer->program.data.data_length, 0,
+        &buffer->storage));
+    memcpy(buffer->storage.contents.data, buffer->program.data.data,
+           buffer->program.data.data_length);
+    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_program_seal(&buffer->storage));
+  }
   if (buffer->resources) {
     iree_hal_resource_set_freeze(buffer->resources);
   }
