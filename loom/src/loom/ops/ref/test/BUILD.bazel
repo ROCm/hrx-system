@@ -10,6 +10,7 @@ loom_check_test_suite(
     srcs = [
         "borrow.loom-test",
         "duplicate.loom-test",
+        "release.loom-test",
         "roundtrip.loom-test",
     ],
 )

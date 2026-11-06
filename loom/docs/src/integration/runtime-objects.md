@@ -50,29 +50,31 @@ same payload without consuming the owner:
 type.decl import("images", "frame") @Frame
 
 func.decl import("images", "capture") @capture() -> (ref<@Frame>)
-func.decl import("images", "consume") @consume(%frame: ref<@Frame>)
 func.decl import("images", "width") @width(%frame: ptr<@Frame>) -> (i32)
 
 func.def public @capture_width() -> (i32) {
   %owner = func.call @capture() : () -> (ref<@Frame>)
   %frame = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>
   %width = func.call @width(%frame) : (ptr<@Frame>) -> (i32)
-  func.call @consume(%owner) : (ref<@Frame>)
+  ref.release %owner : ref<@Frame>
   func.return %width : i32
 }
 ```
 
 The owner covers the pointer's lifetime in this function. The compiler proves
 that coverage across the pointer's copies and emits a borrowed carrier without
-another reference-count acquisition. Consuming the source owner remains the
-explicit destruction boundary.
+another reference-count acquisition.
+[`ref.release`](../reference/dialects/ref/ops/release.md) ends this source owner's
+lifetime and runs the native finalizer if it holds the last reference. The
+released SSA value cannot be used again; independent handles remain valid.
+Releasing null has no payload effect.
 
 A saved pointer also remains valid when its owner ends first:
 
 ```loom
 func.def public @saved_width(%owner: ref<@Frame>) -> (i32) {
   %saved = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>
-  func.call @consume(%owner) : (ref<@Frame>)
+  ref.release %owner : ref<@Frame>
   %width = func.call @width(%saved) : (ptr<@Frame>) -> (i32)
   func.return %width : i32
 }
@@ -106,6 +108,10 @@ read. Compiler-added pointer protection ends after the final reachable use,
 including branch-local deaths and unused results. Register allocation and spill
 storage preserve those boundaries rather than keeping accidental owners until
 frame teardown.
+
+`ref.release` also accepts a `ptr` to end that handle's lifetime explicitly,
+retiring any protection it holds. Ordinary pointers need no explicit release:
+the compiler already retires them after their final reachable use.
 
 Authored Low exposes `low.borrow`, `low.copy`, `low.move`, and `low.release`
 for explicit carrier operations. `low.borrow` has the same safe projection

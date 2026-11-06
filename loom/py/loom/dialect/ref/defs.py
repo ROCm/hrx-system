@@ -14,6 +14,7 @@ from loom.dsl import (
     AliasResult,
     Borrow,
     Dialect,
+    Move,
     Op,
     Operand,
     OpPhase,
@@ -66,4 +67,22 @@ ref_borrow = Op(
     examples=["%pointer = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>"],
 )
 
-ALL_REF_OPS: tuple[Op, ...] = (ref_duplicate, ref_borrow)
+ref_release = Op(
+    "ref.release",
+    group=ref_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "End this managed handle's lifetime. The source identity is invalid "
+        "afterward. An owning ref releases its owner and runs the native "
+        "finalizer when it holds the last reference. A ptr retires any "
+        "compiler-acquired protection; an unprotected borrow or null has no "
+        "payload effect. Independent handles remain valid."
+    ),
+    operands=[Operand("value", MANAGED_REFERENCE)],
+    traits=[OBSERVABLE_EFFECT],
+    ownership_effects=[Move("value")],
+    format=[Ref("value"), COLON, TypeOf("value")],
+    examples=["ref.release %owner : ref<@Frame>"],
+)
+
+ALL_REF_OPS: tuple[Op, ...] = (ref_duplicate, ref_borrow, ref_release)

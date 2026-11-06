@@ -645,6 +645,14 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_lower_structural_op(
     return loom_low_lower_source_call(context, source_op);
   }
   switch (source_op->kind) {
+    case LOOM_OP_REF_RELEASE: {
+      loom_op_t* release_op = NULL;
+      return loom_low_release_build(
+          &context->builder,
+          loom_low_lower_lookup_value(context,
+                                      loom_ref_release_value(source_op)),
+          source_op->location, &release_op);
+    }
     case LOOM_OP_BUFFER_ASSUME_SAME_ROOT: {
       return loom_low_lower_bind_or_elide_alias(
           context, loom_buffer_assume_same_root_buffer(source_op),

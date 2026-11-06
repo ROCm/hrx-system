@@ -31,3 +31,9 @@ class RefBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> ValueRef: ...
+    def release(
+        self,
+        *,
+        value: ValueRef,
+        location_id: int | None = ...,
+    ) -> None: ...

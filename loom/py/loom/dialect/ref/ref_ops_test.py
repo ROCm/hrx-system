@@ -1,7 +1,7 @@
 # Copyright 2026 The IREE Authors
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Default Python authoring and serialization of managed handle copies."""
+"""Default Python authoring and serialization of managed handle lifetimes."""
 
 import pytest
 
@@ -70,3 +70,27 @@ def test_author_and_serialize_borrowed_projection() -> None:
     assert printer.print_module(restored) == text
     assert owner.type == owned and pointer.type == borrowed
     assert owner.id != pointer.id
+
+
+@pytest.mark.parametrize("handle_builder", [ref_type, ptr_type])
+def test_author_and_serialize_release(handle_builder) -> None:
+    module, builder = module_builder()
+    builder.type.decl(namespace="media", type_name="frame", name="Frame")
+    handle_type = handle_builder(module=module, declaration="Frame")
+    source = builder.value("source", handle_type)
+    body = builder.region()
+    builder.func.def_(callee="release", args=[source], results=[], body=body)
+    with builder.insertion_block(body.blocks[0]):
+        builder.ref.release(value=source)
+        builder.func.return_()
+
+    ops = default_ops()
+    assert not verify_module(module, ops=ops).has_errors
+    restored = read_module(write_module(module, op_decls=ops), op_decls=ops)
+    assert not verify_module(restored, ops=ops).has_errors
+    printer = Printer()
+    printer.register_ops(ops)
+    printer.register_types(default_types())
+    text = printer.print_module(module)
+    assert "ref.release %source" in text
+    assert printer.print_module(restored) == text
