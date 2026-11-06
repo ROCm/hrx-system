@@ -320,7 +320,7 @@ loom_py_test(
 
 loom_py_test(
     name = "pressure_stress_test",
-    size = "large",
+    size = "medium",
     srcs = ["//loom/src/loom/serve/server:pressure_test.py"],
     args = [
         "--server=$(rootpath :loom-serve-test-tool)",
