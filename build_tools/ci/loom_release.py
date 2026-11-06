@@ -19,6 +19,7 @@ import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 from zipfile import BadZipFile
 
@@ -27,11 +28,86 @@ from loom.packaging.python import release
 
 GITHUB_RELEASE_BODY_MAXIMUM = 125_000
 GITHUB_ASSET_PAGE_SIZE = 100
+GITHUB_PULL_REQUEST_PAGE_SIZE = 100
 _CATALOG_TAG = re.compile(r"github:([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([^\s]+)")
+_PULL_REQUEST_RELEASE_NOTES = re.compile(
+    r"^<!-- loom-release-notes:begin version=([^\s]+) -->\n"
+    r"(.*?)\n"
+    r"<!-- loom-release-notes:end -->$",
+    re.MULTILINE | re.DOTALL,
+)
+_RELEASE_NOTES_PLACEHOLDER = re.compile(r"{{[A-Z][A-Z0-9_]*}}")
+_RELEASE_SOURCE = re.compile(
+    r"\A<!-- loom-release-source: pr=([1-9][0-9]*) "
+    r"merge=([0-9a-f]{40}) version=([^\s]+) "
+    r"editorial-sha256=([0-9a-f]{64}) -->\n\n"
+)
+_RELEASE_APPENDIX_SEPARATOR = "\n\n---\n\n"
 
 
-def github_release_body(identity: release.Identity, repository: str) -> str:
-    """Builds the bounded product description used for GitHub releases."""
+@dataclass(frozen=True)
+class ReleaseEditorial:
+    pull_request: int
+    revision: str
+    text: str
+
+
+def _release_editorial_from_pull_request(
+    repository: str,
+    revision: str,
+    identity: release.Identity,
+    token: str,
+) -> ReleaseEditorial:
+    """Reads reviewed notes from the PR merged as the release revision."""
+    api = f"https://api.github.com/repos/{repository}"
+    records = github_api.get_json(
+        f"{api}/commits/{revision}/pulls?per_page={GITHUB_PULL_REQUEST_PAGE_SIZE}",
+        token,
+    )
+    if not isinstance(records, list):
+        raise ValueError("GitHub returned an invalid associated pull request list")
+    if len(records) == GITHUB_PULL_REQUEST_PAGE_SIZE:
+        raise ValueError("SDK release revision has too many associated pull requests")
+    merged = [
+        record
+        for record in records
+        if isinstance(record, dict)
+        and record.get("state") == "closed"
+        and isinstance(record.get("merged_at"), str)
+        and record.get("merge_commit_sha") == revision
+    ]
+    if len(merged) != 1:
+        raise ValueError(
+            "SDK release revision must be the merge commit of one pull request"
+        )
+    record = merged[0]
+    pull_request = record.get("number")
+    body = record.get("body")
+    if type(pull_request) is not int or pull_request <= 0 or not isinstance(body, str):
+        raise ValueError("GitHub returned an invalid release pull request")
+    matches = list(_PULL_REQUEST_RELEASE_NOTES.finditer(body))
+    if len(matches) != 1:
+        raise ValueError(
+            "Release pull request must contain one marked release notes section"
+        )
+    version, editorial = matches[0].groups()
+    if version != identity.version:
+        raise ValueError(
+            f"Release notes version {version!r} does not match {identity.version!r}"
+        )
+    editorial = editorial.strip()
+    if not editorial:
+        raise ValueError("Release pull request notes are empty")
+    placeholder = _RELEASE_NOTES_PLACEHOLDER.search(editorial)
+    if placeholder is not None:
+        raise ValueError(
+            f"Release pull request notes contain placeholder {placeholder.group()}"
+        )
+    return ReleaseEditorial(pull_request, revision, editorial)
+
+
+def _github_release_appendix(identity: release.Identity, repository: str) -> str:
+    """Builds mechanically derived installation and qualification guidance."""
     server_archives = "".join(
         f"- `{release.standalone_archive_name(identity, 'loom-serve', platform)}`\n"
         for platform in release.PLATFORMS
@@ -68,7 +144,8 @@ def github_release_body(identity: release.Identity, repository: str) -> str:
             f"{identity.tag}/{wheels[release.WINDOWS_X86_64_PLATFORM]}\n"
             "```\n"
         )
-    body = (
+    return (
+        "## Install and artifacts\n\n"
         f"Loom SDK {identity.version} contains the compiler, runtime, command-line "
         "tools, and Python APIs for Linux x86-64 and Windows x86-64.\n\n"
         f"{installation}\n"
@@ -85,15 +162,52 @@ def github_release_body(identity: release.Identity, repository: str) -> str:
         f"{info_archives}\n"
         "Each contains one executable with libamdf embedded and requires neither "
         "ROCr nor XRT. `amdf-info --format=json` reports the native inventory; "
-        "`amdf-info --device=rdna --activate` checks device acquisition and release.\n\n"
-        "The attached wheels include Release, Tracy, Debug, and ASAN profiles. "
-        "`SHA256SUMS` records the exact qualified wheels and standalone archives."
+        "`amdf-info --device=rdna --activate` checks device acquisition and release."
+        "\n\n## Qualification\n\n"
+        "The attached wheels are the exact Release, Tracy, Debug, and ASAN "
+        "profile artifacts qualified on Linux x86-64 and Windows x86-64. "
+        "`SHA256SUMS` records the qualified wheels and standalone archives."
+    )
+
+
+def github_release_body(
+    identity: release.Identity, repository: str, editorial: ReleaseEditorial
+) -> str:
+    """Composes reviewed notes with the generated release artifact appendix."""
+    text = editorial.text.strip()
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    body = (
+        f"<!-- loom-release-source: pr={editorial.pull_request} "
+        f"merge={editorial.revision} version={identity.version} "
+        f"editorial-sha256={digest} -->\n\n"
+        f"{text}{_RELEASE_APPENDIX_SEPARATOR}"
+        f"{_github_release_appendix(identity, repository)}"
     )
     if len(body) > GITHUB_RELEASE_BODY_MAXIMUM:
         raise ValueError(
             "GitHub release body exceeds the 125000-character service limit"
         )
     return body
+
+
+def _validate_published_release_body(
+    identity: release.Identity, repository: str, revision: str, body: str
+) -> None:
+    """Validates a self-contained immutable release body without its source PR."""
+    match = _RELEASE_SOURCE.match(body)
+    if match is None:
+        raise ValueError("Published GitHub release has invalid source provenance")
+    _, source_revision, version, digest = match.groups()
+    if source_revision != revision or version != identity.version:
+        raise ValueError("Published GitHub release has conflicting source provenance")
+    appendix = _RELEASE_APPENDIX_SEPARATOR + _github_release_appendix(
+        identity, repository
+    )
+    if not body.endswith(appendix):
+        raise ValueError("Published GitHub release has a conflicting artifact appendix")
+    editorial = body[match.end() : -len(appendix)]
+    if not editorial or hashlib.sha256(editorial.encode("utf-8")).hexdigest() != digest:
+        raise ValueError("Published GitHub release has conflicting editorial notes")
 
 
 def verified_release(
@@ -216,13 +330,12 @@ def _release_state(
     *,
     tag: str,
     title: str,
-    body: str,
+    body: str | None,
     prerelease: bool,
-) -> tuple[int, bool]:
+) -> tuple[int, bool, str]:
     expected = {
         "tag_name": tag,
         "name": title,
-        "body": body,
         "prerelease": prerelease,
     }
     if not isinstance(document, dict) or any(
@@ -231,14 +344,22 @@ def _release_state(
         raise ValueError("Existing GitHub release has conflicting metadata")
     release_id = document.get("id")
     draft = document.get("draft")
-    if type(release_id) is not int or release_id <= 0 or type(draft) is not bool:
+    actual_body = document.get("body")
+    if (
+        type(release_id) is not int
+        or release_id <= 0
+        or type(draft) is not bool
+        or not isinstance(actual_body, str)
+    ):
         raise ValueError("GitHub returned an invalid release state")
+    if body is not None and actual_body != body:
+        raise ValueError("Existing GitHub release has conflicting metadata")
     if not draft and document.get("immutable") is not True:
         raise ValueError(
             "Published GitHub release is mutable; use a new version after enabling "
             "repository release immutability"
         )
-    return release_id, draft
+    return release_id, draft, actual_body
 
 
 def _missing_release_assets(
@@ -295,9 +416,12 @@ def publish_github(
         part in (".", "..") for part in repository.split("/")
     ):
         raise ValueError("GitHub repository must be OWNER/REPOSITORY")
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise ValueError("SDK release revision must be a full Git commit")
+    prerelease = identity.release_channel is release.ReleaseChannel.PRERELEASE
+    title = f"Loom {tag}"
     api = f"https://api.github.com/repos/{repository}"
     token = os.environ.get("GH_TOKEN", "")
-    _require_catalog_release(repository, revision, identity, artifacts, token)
     try:
         existing = github_api.get_json(
             f"{api}/releases/tags/{urllib.parse.quote(tag, safe='')}", token
@@ -311,9 +435,28 @@ def publish_github(
         artifact.path.name: (artifact.path, artifact.digest) for artifact in artifacts
     }
     assets[checksums.name] = (checksums, _digest(checksums))
-    prerelease = identity.release_channel is release.ReleaseChannel.PRERELEASE
-    title = f"Loom {tag}"
-    body = github_release_body(identity, repository)
+    _require_catalog_release(repository, revision, identity, artifacts, token)
+
+    if existing is not None:
+        release_id, draft, existing_body = _release_state(
+            existing, tag=tag, title=title, body=None, prerelease=prerelease
+        )
+        if not draft:
+            _validate_published_release_body(
+                identity, repository, revision, existing_body
+            )
+            if _missing_release_assets(api, release_id, token, assets):
+                raise ValueError(
+                    "Published GitHub release has an incomplete asset set; "
+                    "use a new version"
+                )
+            print("GitHub release already contains identical immutable assets.")
+            return
+
+    editorial = _release_editorial_from_pull_request(
+        repository, revision, identity, token
+    )
+    body = github_release_body(identity, repository, editorial)
     created = existing is None
     if existing is None:
         options = ["--prerelease", "--latest=false"] if prerelease else []
@@ -335,19 +478,12 @@ def publish_github(
         existing = github_api.get_json(
             f"{api}/releases/tags/{urllib.parse.quote(tag, safe='')}", token
         )
-    release_id, draft = _release_state(
+    release_id, draft, _ = _release_state(
         existing, tag=tag, title=title, body=body, prerelease=prerelease
     )
     if created and not draft:
         raise ValueError("New GitHub release did not remain a draft")
     missing = _missing_release_assets(api, release_id, token, assets)
-    if not draft:
-        if missing:
-            raise ValueError(
-                "Published GitHub release has an incomplete asset set; use a new version"
-            )
-        print("GitHub release already contains identical immutable assets.")
-        return
     if missing:
         _gh("release", "upload", tag, *missing, "--repo", repository)
         if _missing_release_assets(api, release_id, token, assets):
@@ -356,7 +492,7 @@ def publish_github(
     published = github_api.get_json(
         f"{api}/releases/tags/{urllib.parse.quote(tag, safe='')}", token
     )
-    published_id, published_draft = _release_state(
+    published_id, published_draft, _ = _release_state(
         published, tag=tag, title=title, body=body, prerelease=prerelease
     )
     if published_id != release_id or published_draft:

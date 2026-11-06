@@ -37,6 +37,13 @@ class LoomReleaseTest(unittest.TestCase):
 
     def bundle(self, version):
         self.identity = release.Identity(version, f"github:fixture/library@v{version}")
+        self.editorial = loom_release.ReleaseEditorial(
+            321,
+            self.revision,
+            f"Fixture release notes for {version}.\n\n"
+            "## Highlights\n\n"
+            "- Exercises the reviewed editorial boundary.",
+        )
         self.tag = "v" + version
         self.directory = self.root / version
         self.directory.mkdir()
@@ -92,6 +99,25 @@ class LoomReleaseTest(unittest.TestCase):
             name: loom_release._digest(path) for name, path in self.assets.items()
         }
 
+    def release_pull_request(self, **changes):
+        version = changes.pop("version", self.identity.version)
+        editorial = changes.pop("editorial", self.editorial.text)
+        body = (
+            f"Prepares Loom SDK {version}.\n\n"
+            "## Release notes\n\n"
+            f"<!-- loom-release-notes:begin version={version} -->\n"
+            f"{editorial}\n"
+            "<!-- loom-release-notes:end -->\n\n"
+            "## Reviewer Notes\n\nReview the release boundary."
+        )
+        return {
+            "number": self.editorial.pull_request,
+            "state": "closed",
+            "merged_at": "2026-11-06T00:00:00Z",
+            "merge_commit_sha": self.revision,
+            "body": body,
+        } | changes
+
     def publish(self):
         with patch.object(loom_release, "_require_catalog_release"):
             loom_release.publish_github(
@@ -110,7 +136,9 @@ class LoomReleaseTest(unittest.TestCase):
             id=123,
             tag_name=self.tag,
             name=f"Loom {self.tag}",
-            body=loom_release.github_release_body(self.identity, "fixture/sdk"),
+            body=loom_release.github_release_body(
+                self.identity, "fixture/sdk", self.editorial
+            ),
             draft=draft,
             prerelease=(
                 self.identity.release_channel is release.ReleaseChannel.PRERELEASE
@@ -172,6 +200,47 @@ class LoomReleaseTest(unittest.TestCase):
             loom_release.verified_release(
                 self.directory, self.identity, self.description, self.tag
             )
+
+    def test_release_notes_come_from_the_exact_merged_pull_request(self):
+        with patch.object(
+            github_api, "get_json", return_value=[self.release_pull_request()]
+        ) as get:
+            actual = loom_release._release_editorial_from_pull_request(
+                "fixture/sdk", self.revision, self.identity, "token"
+            )
+        self.assertEqual(actual, self.editorial)
+        self.assertIn(f"commits/{self.revision}/pulls", get.call_args.args[0])
+
+        invalid = (
+            ([], "merge commit of one"),
+            (
+                [
+                    self.release_pull_request(),
+                    self.release_pull_request(number=322),
+                ],
+                "merge commit of one",
+            ),
+            ([self.release_pull_request(version="2.0.0")], "does not match"),
+            ([self.release_pull_request(editorial="")], "notes are empty"),
+            (
+                [self.release_pull_request(editorial="Replace {{OUTCOME}}")],
+                "contain placeholder",
+            ),
+            ([self.release_pull_request(body="No marked notes")], "one marked"),
+            (
+                [self.release_pull_request(merge_commit_sha="b" * 40)],
+                "merge commit of one",
+            ),
+        )
+        for records, message in invalid:
+            with (
+                self.subTest(message=message),
+                patch.object(github_api, "get_json", return_value=records),
+                self.assertRaisesRegex(ValueError, message),
+            ):
+                loom_release._release_editorial_from_pull_request(
+                    "fixture/sdk", self.revision, self.identity, "token"
+                )
 
     def test_catalog_tag_requires_a_matching_immutable_public_release(self):
         with (
@@ -294,7 +363,7 @@ class LoomReleaseTest(unittest.TestCase):
                     self.artifacts,
                     self.assets["SHA256SUMS"],
                 )
-        get.assert_not_called()
+        self.assertEqual(get.call_count, 1)
         run.assert_not_called()
 
     def test_new_github_release_uses_existing_tag_and_complete_assets(self):
@@ -310,6 +379,7 @@ class LoomReleaseTest(unittest.TestCase):
                         urllib.error.HTTPError(
                             "https://api.github.com", 404, "Not Found", {}, None
                         ),
+                        [self.release_pull_request()],
                         self.existing_release(draft=True),
                         self.records(self.assets),
                         self.existing_release(),
@@ -331,6 +401,13 @@ class LoomReleaseTest(unittest.TestCase):
                 self.assertEqual("--prerelease" in command, prerelease)
                 self.assertEqual("--latest=false" in command, prerelease)
                 body = command[command.index("--notes") + 1]
+                self.assertIn(
+                    f"loom-release-source: pr={self.editorial.pull_request}", body
+                )
+                self.assertLess(
+                    body.index(self.editorial.text),
+                    body.index("## Install and artifacts"),
+                )
                 if prerelease:
                     self.assertIn("not published to PyPI", body)
                     self.assertNotIn(f"hrx-loom=={version}", body)
@@ -371,9 +448,12 @@ class LoomReleaseTest(unittest.TestCase):
 
     def test_github_release_body_rejects_service_limit_overflow(self):
         limit = loom_release.GITHUB_RELEASE_BODY_MAXIMUM
-        identity = release.Identity("1" * limit, self.identity.catalog)
         with self.assertRaisesRegex(ValueError, f"{limit}-character service limit"):
-            loom_release.github_release_body(identity, "fixture/sdk")
+            loom_release.github_release_body(
+                self.identity,
+                "fixture/sdk",
+                loom_release.ReleaseEditorial(321, self.revision, "x" * limit),
+            )
 
     def test_partial_retry_checks_all_overlaps_before_upload(self):
         present = {
@@ -387,6 +467,7 @@ class LoomReleaseTest(unittest.TestCase):
                 "get_json",
                 side_effect=[
                     self.existing_release(draft=True),
+                    [self.release_pull_request()],
                     self.records(sorted(present)),
                     self.records(self.assets),
                     self.existing_release(),
@@ -417,7 +498,11 @@ class LoomReleaseTest(unittest.TestCase):
             patch.object(
                 github_api,
                 "get_json",
-                side_effect=[self.existing_release(draft=True), records],
+                side_effect=[
+                    self.existing_release(draft=True),
+                    [self.release_pull_request()],
+                    records,
+                ],
             ),
             patch("subprocess.run") as run,
         ):
@@ -431,10 +516,13 @@ class LoomReleaseTest(unittest.TestCase):
                 github_api,
                 "get_json",
                 side_effect=[self.existing_release(), self.records(self.assets)],
-            ),
+            ) as get_json,
             patch("subprocess.run") as run,
         ):
             self.publish()
+        self.assertNotIn(
+            "/pulls", " ".join(call.args[0] for call in get_json.call_args_list)
+        )
         run.assert_not_called()
 
     def test_complete_published_retry_reads_every_asset_page(self):
@@ -460,6 +548,7 @@ class LoomReleaseTest(unittest.TestCase):
                 "get_json",
                 side_effect=[
                     self.existing_release(draft=True),
+                    [self.release_pull_request()],
                     self.records(self.assets),
                     self.existing_release(),
                 ],
@@ -469,6 +558,22 @@ class LoomReleaseTest(unittest.TestCase):
             self.publish()
         self.assertEqual(run.call_count, 1)
         self.assertEqual(run.call_args.args[0][2], "edit")
+
+    def test_draft_retry_rejects_release_notes_edited_after_snapshot(self):
+        with (
+            patch.object(
+                github_api,
+                "get_json",
+                side_effect=[
+                    self.existing_release(draft=True),
+                    [self.release_pull_request(editorial="Edited after snapshot")],
+                ],
+            ),
+            patch("subprocess.run") as run,
+            self.assertRaisesRegex(ValueError, "conflicting metadata"),
+        ):
+            self.publish()
+        run.assert_not_called()
 
     def test_incomplete_published_release_cannot_be_modified(self):
         records = self.records(list(self.assets)[:-1])
@@ -509,6 +614,7 @@ class LoomReleaseTest(unittest.TestCase):
                 "get_json",
                 side_effect=[
                     self.existing_release(draft=True),
+                    [self.release_pull_request()],
                     self.records(self.assets),
                     self.existing_release(immutable=False),
                 ],
@@ -671,6 +777,31 @@ class LoomReleaseTest(unittest.TestCase):
             ]
         )
 
+    def test_cli_rejects_a_release_pull_request_without_notes_before_commands(self):
+        with (
+            patch.object(loom_release, "_require_catalog_release"),
+            patch.object(
+                github_api,
+                "get_json",
+                side_effect=[
+                    urllib.error.HTTPError(
+                        "https://api.github.com", 404, "Not Found", {}, None
+                    ),
+                    [self.release_pull_request(body="No marked release notes")],
+                ],
+            ) as github,
+            patch("subprocess.run") as commands,
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit),
+        ):
+            self.command(
+                "github",
+                "--repository=fixture/sdk",
+                "--revision=" + self.revision,
+            )
+        self.assertTrue(any("/pulls" in call.args[0] for call in github.call_args_list))
+        commands.assert_not_called()
+
     def test_cli_verifies_bundle_before_any_remote_operation(self):
         self.assets["SHA256SUMS"].write_text("conflict")
         with (
@@ -680,7 +811,10 @@ class LoomReleaseTest(unittest.TestCase):
             contextlib.redirect_stderr(io.StringIO()),
         ):
             for operation, arguments in (
-                ("github", ["--repository=fixture/sdk"]),
+                (
+                    "github",
+                    ["--repository=fixture/sdk", "--revision=" + self.revision],
+                ),
                 ("pypi-stage", ["--output", str(self.output)]),
             ):
                 with self.subTest(operation=operation), self.assertRaises(SystemExit):
