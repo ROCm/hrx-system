@@ -7,7 +7,13 @@
 """Analysis tests for loom-check Bazel rules."""
 
 load("@rules_testing//lib:analysis_test.bzl", "analysis_test", "test_suite")
-load("@rules_testing//lib:util.bzl", "TestingAspectInfo")
+load("//build_tools/bazel:executable.bzl", "IreeExecutableInfo")
+load(
+    "//build_tools/bazel:runfiles.bzl",
+    "IreeRunfilesArgumentsInfo",
+    "RUNFILES_PATH_BEGIN",
+    "RUNFILES_PATH_END",
+)
 load(
     "//loom/build_tools/bazel:loom_check.bzl",
     "LoomCheckTestInfo",
@@ -16,21 +22,12 @@ load(
 load("//loom/build_tools/bazel:loom_library.bzl", "loom_test")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
-def _find_action_with_output(env, actions, expected_basename):
-    for action in actions:
-        for output in action.outputs.to_list():
-            if output.basename == expected_basename:
-                return action
-    env.fail("expected action output basename %r in %r" % (expected_basename, actions))
-    return None
-
-def _test_loom_check_wrapper_declares_fixture(name, **kwargs):
+def _test_loom_check_test_declares_fixture(name, **kwargs):
     loom_check_test(
         name = name + "_subject",
         env = {
             "LOOM_CHECK_FIXTURE": "$(location :roundtrip.loom-test)",
         },
-        runner = "loom_check_fixture_runner.sh",
         src = "roundtrip.loom-test",
         tags = ["manual"],
     )
@@ -39,43 +36,29 @@ def _test_loom_check_wrapper_declares_fixture(name, **kwargs):
         attr_values = {
             "timeout": "short",
         },
-        impl = _test_loom_check_wrapper_declares_fixture_impl,
-        target = name + "_subject_launcher",
+        impl = _test_loom_check_test_declares_fixture_impl,
+        target = name + "_subject",
         **kwargs
     )
 
-def _test_loom_check_wrapper_declares_fixture_impl(env, target):
-    info = target[LoomCheckTestInfo]
-    if not str(info.runner).endswith("//loom/build_tools/bazel/test:loom_check_fixture_runner.sh"):
-        env.fail("unexpected runner %s" % info.runner)
-    env.expect.that_str(info.fixture.basename).equals("roundtrip.loom-test")
-    env.expect.that_str(info.output.basename).equals(target.label.name + ".sh")
+def _test_loom_check_test_declares_fixture_impl(env, target):
+    info = target[IreeExecutableInfo]
+    if not str(info.src).endswith("//loom/src/loom/tools/loom-check:loom-check-test"):
+        env.fail("unexpected runner %s" % info.src)
+    env.expect.that_str(info.output.basename).equals(target.label.name)
     env.expect.that_str(info.env["LOOM_CHECK_FIXTURE"]).contains("roundtrip.loom-test")
-
-    action = _find_action_with_output(
-        env,
-        target[TestingAspectInfo].actions,
-        target.label.name + ".sh",
+    env.expect.that_collection([file.basename for file in info.data.to_list()]).contains(
+        "roundtrip.loom-test",
     )
-    env.expect.that_str(action.mnemonic).equals("FileWrite")
-
-def _test_loom_check_wrapper_uses_test_runner(name, **kwargs):
-    loom_check_test(
-        name = name + "_subject",
-        src = "roundtrip.loom-test",
-        tags = ["manual"],
-    )
-    analysis_test(
-        name = name,
-        impl = _test_loom_check_wrapper_uses_test_runner_impl,
-        target = name + "_subject_launcher",
-        **kwargs
-    )
-
-def _test_loom_check_wrapper_uses_test_runner_impl(env, target):
-    info = target[LoomCheckTestInfo]
-    if not str(info.runner).endswith("//loom/src/loom/tools/loom-check:loom-check-test"):
-        env.fail("unexpected default runner %s" % info.runner)
+    runfiles_arguments = target[IreeRunfilesArgumentsInfo]
+    env.expect.that_collection(runfiles_arguments.arguments).contains_exactly([
+        "loom/build_tools/bazel/test/roundtrip.loom-test",
+    ]).in_order()
+    env.expect.that_collection(runfiles_arguments.marked_arguments).contains_exactly([
+        RUNFILES_PATH_BEGIN +
+        "loom/build_tools/bazel/test/roundtrip.loom-test" +
+        RUNFILES_PATH_END,
+    ]).in_order()
 
 def _test_execution_and_compiler_share_module(name, **kwargs):
     loom_test(
@@ -130,8 +113,7 @@ def loom_check_rules_test_suite(name):
     test_suite(
         name = name,
         tests = [
-            _test_loom_check_wrapper_declares_fixture,
-            _test_loom_check_wrapper_uses_test_runner,
+            _test_loom_check_test_declares_fixture,
             _test_wasm_disassembler_has_runtime_closure,
             _test_execution_and_compiler_share_module,
         ],
