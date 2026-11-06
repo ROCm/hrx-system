@@ -23,6 +23,7 @@ from build_tools.bazel.configure_api import (
 from runtime.build_tools.bazel import configure as runtime_configure
 
 DEPENDENCY_MODES = frozenset(("pinned", "package", "auto"))
+DEVICE_TOOLCHAIN_DRIVERS = frozenset(("amdgpu", "amd-gpu"))
 
 _NAME = "dependencies"
 
@@ -91,10 +92,7 @@ def _apply_option(request: ConfigRequest, name: str, value: str) -> None:
 def _finalize(request: ConfigRequest) -> None:
     state = configuration(request)
     runtime = runtime_configure.configuration(request)
-    if (
-        runtime.drivers.intersection(runtime_configure.ROCM_DRIVERS)
-        and not state.rocm_path
-    ):
+    if runtime.drivers.intersection(DEVICE_TOOLCHAIN_DRIVERS) and not state.rocm_path:
         environment_path = os.environ.get("IREE_ROCM_PATH")
         if environment_path:
             _set_rocm_path(state, environment_path)
@@ -138,7 +136,8 @@ def _sections(request: ConfigRequest) -> tuple[BazelrcSection, ...]:
         )
     device_toolchain = (
         "rocm"
-        if "amdgpu" in runtime.drivers and state.rocm_path is not None
+        if runtime.drivers.intersection(DEVICE_TOOLCHAIN_DRIVERS)
+        and state.rocm_path is not None
         else "none"
     )
     dependency_lines.append(

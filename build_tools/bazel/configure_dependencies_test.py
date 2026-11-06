@@ -67,7 +67,24 @@ class ConfigureDependenciesTest(unittest.TestCase):
         self.assertIn("common --repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned\n", config)
         self.assert_rocm_path(config, root)
 
-    def test_legacy_amdgpu_uses_a_valid_environment_root(self):
+    def test_native_amdgpu_uses_an_explicit_device_toolchain(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = self.make_rocm_root(temporary_directory)
+            config = self.generate(
+                [
+                    "--//runtime/config/hal:drivers=amd-gpu,task",
+                    "--repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned",
+                    f"--repo_env=IREE_ROCM_PATH={root}",
+                ]
+            )
+
+        self.assertIn("common --repo_env=IREE_ROCM_DEPENDENCY_MODE=pinned\n", config)
+        self.assertIn(
+            "common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm\n", config
+        )
+        self.assert_rocm_path(config, root)
+
+    def test_amdgpu_drivers_use_a_valid_environment_root(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = self.make_rocm_root(temporary_directory)
             with mock.patch.dict(
@@ -75,12 +92,16 @@ class ConfigureDependenciesTest(unittest.TestCase):
                 {"IREE_ROCM_PATH": str(root)},
                 clear=True,
             ):
-                config = self.generate(["-DIREE_HAL_DRIVER_AMDGPU=ON"])
-
-        self.assertIn(
-            "common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm\n", config
-        )
-        self.assert_rocm_path(config, root)
+                for driver in ("amdgpu", "amd-gpu"):
+                    with self.subTest(driver=driver):
+                        config = self.generate(
+                            [f"--//runtime/config/hal:drivers={driver},task"]
+                        )
+                        self.assertIn(
+                            "common --repo_env=IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm\n",
+                            config,
+                        )
+                        self.assert_rocm_path(config, root)
 
     def test_pinned_legacy_amdgpu_needs_no_rocm_root(self):
         with mock.patch.dict(configure_dependencies.os.environ, {}, clear=True):
