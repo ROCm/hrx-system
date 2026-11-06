@@ -783,3 +783,177 @@ func.def @mutate_forwarded_receiver(%value: buffer, %value_byte_offset: offset) 
 func.def @ReceiverValue__self_storage(%this: buffer, %this_byte_offset: offset) -> (buffer, offset) {
   func.return %this, %this_byte_offset : buffer, offset
 }
+
+// ====
+// RUN: pass inline-callables,promote-private-fragments,canonicalize,cse,dce
+// Local volatile storage and returned array-element references retain their
+// independent identities across reads, mutation, and address escape.
+#include <loomcxx/predicate.h>
+static unsigned& at(unsigned* values, unsigned index) { return values[index]; }
+static unsigned observe(volatile unsigned& value) { return value; }
+static unsigned first(const unsigned (&values)[4]) { return values[0]; }
+static void escape(unsigned& value) {
+  unsigned* pointer = &value;
+  ++*pointer;
+}
+unsigned storage_alias(unsigned sample, unsigned input, unsigned index) {
+  loom::assume(index < 4u);
+  volatile unsigned observed = sample;
+  unsigned values[4] = {input, 3u, 5u, 7u};
+  unsigned& element = at(values, index);
+  element += first(values);
+  escape(element);
+  return observe(observed) + element;
+}
+// ----
+func.def public @storage_alias(%sample: i32, %input: i32, %index$2: i32) -> (i32) {
+  %index$4 = scalar.assume %index$2 [range(%index$2, 0, 3)] : i32
+  %5 = index.constant 4 : offset
+  %observed_storage = buffer.alloca<private> align(4) %5 : buffer
+  %observed_storage_byte_offset = index.constant 0 : offset
+  %observed_view = buffer.view %observed_storage[%observed_storage_byte_offset] : buffer -> view<1xi32>
+  view.store<volatile> %sample, %observed_view[0] : i32, view<1xi32>
+  %9 = index.constant 16 : offset
+  %values_storage = buffer.alloca<private> align(4) %9 : buffer
+  %values_view = buffer.view %values_storage[%observed_storage_byte_offset] : buffer -> view<4xi32>
+  %13 = index.constant 0 : index
+  view.store %input, %values_view[%13] : i32, view<4xi32>
+  %14 = scalar.constant 3 : i32
+  %15 = index.constant 1 : index
+  view.store %14, %values_view[%15] : i32, view<4xi32>
+  %16 = scalar.constant 5 : i32
+  %17 = index.constant 2 : index
+  view.store %16, %values_view[%17] : i32, view<4xi32>
+  %18 = scalar.constant 7 : i32
+  %19 = index.constant 3 : index
+  view.store %18, %values_view[%19] : i32, view<4xi32>
+  %70 = scalar.constant 2 : i32
+  %71 = scalar.shli %index$4, %70 : i32
+  %72 = scalar.extui %71 : i32 to i64
+  %41 = scalar.assume %72 [range(%72, 0, 9223372036854775807)] : i64
+  %42 = index.cast %41 : i64 to offset
+  %54 = buffer.view %values_storage[%observed_storage_byte_offset] : buffer -> view<1xi32>
+  %55 = view.load %54[0] : view<1xi32> -> i32
+  %23 = buffer.view %values_storage[%42] : buffer -> view<1xi32>
+  %24 = view.load %23[0] : view<1xi32> -> i32
+  %25 = scalar.addi %24, %55 : i32
+  view.store %25, %23[0] : i32, view<1xi32>
+  %59 = view.load %23[0] : view<1xi32> -> i32
+  %60 = scalar.constant 1 : i32
+  %61 = scalar.addi %59, %60 : i32
+  view.store %61, %23[0] : i32, view<1xi32>
+  %value = view.load<volatile> %observed_view[0] : view<1xi32> -> i32
+  %element = view.load %23[0] : view<1xi32> -> i32
+  %30 = scalar.addi %value, %element : i32
+  func.return %30 : i32
+}
+
+// ====
+// RUN: pass inline-callables,promote-private-fragments,canonicalize,cse,dce
+// A default reference member borrows caller-owned local storage. The returned
+// snapshot and the caller reload both observe the helper mutation.
+struct DefaultReference {
+  // Address used by the default reference initializer.
+  unsigned* pointer;
+  // Reference to the pointee, retaining its original identity.
+  unsigned& alias = *pointer;
+};
+
+static unsigned default_reference(unsigned* values, unsigned amount) {
+  DefaultReference reference{values};
+  reference.alias += amount;
+  return *reference.pointer;
+}
+
+unsigned default_reference_value(unsigned input, unsigned amount) {
+  unsigned value = input;
+  const unsigned result = default_reference(&value, amount);
+  return result * 100u + value;
+}
+// ----
+func.def public @default_reference_value(%input: i32, %amount: i32) -> (i32) {
+  %18 = scalar.addi %input, %amount : i32
+  %8 = scalar.constant 100 : i32
+  %9 = scalar.muli %18, %8 : i32
+  %11 = scalar.addi %9, %18 : i32
+  func.return %11 : i32
+}
+
+// ====
+// RUN: pass inline-callables,promote-private-fragments,canonicalize,cse,dce
+// Local record storage exposes scalar, array, and nested-member references to
+// helpers; observations before mutation remain independent snapshots.
+struct ReferenceNestedState {
+  // Nested scalar observed through a member reference.
+  unsigned value;
+};
+
+struct ReferenceMemberState {
+  // Scalar updated before the selected array element.
+  unsigned scalar;
+  // Array members passed through const and mutable reference helpers.
+  unsigned lanes[3];
+  // Nested record whose member participates in reference updates.
+  ReferenceNestedState nested;
+};
+
+static unsigned observe_member(const unsigned& value) { return value; }
+
+static unsigned sum_members(const unsigned (&values)[3]) {
+  return values[0] + values[1] + values[2];
+}
+
+static unsigned inspect_members(const ReferenceMemberState& state) {
+  return observe_member(state.scalar) + sum_members(state.lanes) +
+         observe_member(state.nested.value);
+}
+
+static void update_members(ReferenceMemberState& state) {
+  state.scalar += observe_member(state.nested.value);
+  state.lanes[1] = observe_member(state.scalar);
+  state.nested.value = observe_member(state.lanes[2]);
+}
+
+unsigned reference_member_access(unsigned input) {
+  ReferenceMemberState state{input, {2u, 3u, 4u}, {7u}};
+  unsigned before = inspect_members(state);
+  update_members(state);
+  return before * 1000u + state.scalar * 100u + state.lanes[1] * 10u +
+         state.nested.value;
+}
+// ----
+func.def public @reference_member_access(%input: i32) -> (i32) {
+  %29 = scalar.constant 7 : i32
+  %94 = scalar.addi %input, %29 : i32
+  %33 = scalar.constant 1000 : i32
+  %184 = scalar.muli %input, %33 : i32
+  %40 = scalar.constant 100 : i32
+  %41 = scalar.muli %94, %40 : i32
+  %186 = scalar.addi %184, %41 : i32
+  %56 = scalar.constant 10 : i32
+  %57 = scalar.muli %94, %56 : i32
+  %188 = scalar.addi %186, %57 : i32
+  %190 = scalar.constant 16004 : i32
+  %191 = scalar.addi %188, %190 : i32
+  func.return %191 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Reading both a lexical alias and its owner observes the same mutations.
+unsigned local_alias_value(unsigned value) {
+  unsigned& alias = value;
+  alias += 3u;
+  alias *= 2u;
+  return alias + value;
+}
+
+// ----
+func.def public @local_alias_value(%value$0: i32) -> (i32) {
+  %7 = scalar.constant 6 : i32
+  %10 = scalar.constant 1 : i32
+  %11 = scalar.shli %value$0, %10 : i32
+  %value$9 = scalar.addi %11, %7 : i32
+  %6 = scalar.addi %value$9, %value$9 : i32
+  func.return %6 : i32
+}

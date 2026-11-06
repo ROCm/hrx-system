@@ -1405,3 +1405,172 @@ func.def @operator_call_value(%this_value: i32) -> (i32, %this_value as i32) {
   %value = scalar.addi %this_value, %117 : i32
   func.return %value, %value : i32, i32
 }
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A selected reference can alias the other argument. A conditional with two
+// identical storage origins must retain that same identity across the call.
+static void sequence_overlapping_alias(unsigned& output,
+                                       const unsigned& input) {
+  ++output;
+  output += input;
+}
+
+static unsigned& choose_overlapping_alias(bool condition, unsigned& first,
+                                          unsigned& second) {
+  return condition ? first : second;
+}
+
+unsigned overlapping_conditional_result(bool condition) {
+  unsigned first = 5u;
+  unsigned second = 7u;
+  sequence_overlapping_alias(choose_overlapping_alias(condition, first, second),
+                             first);
+  return first * 100u + second;
+}
+
+unsigned overlapping_storage_result(bool condition, unsigned value) {
+  unsigned* pointer = &value;
+  sequence_overlapping_alias(
+      choose_overlapping_alias(condition, *pointer, *pointer), *pointer);
+  return value;
+}
+// ----
+func.def public @overlapping_conditional_result(%condition: i1) -> (i32) {
+  %2 = index.constant 4 : offset
+  %first_storage = buffer.alloca<private> align(4) %2 : buffer
+  %first_storage_byte_offset = index.constant 0 : offset
+  %first_view = buffer.view %first_storage[%first_storage_byte_offset] : buffer -> view<1xi32>
+  %6 = scalar.constant 5 : i32
+  view.store %6, %first_view[0] : i32, view<1xi32>
+  %second_storage = buffer.alloca<private> align(4) %2 : buffer
+  %second_view = buffer.view %second_storage[%first_storage_byte_offset] : buffer -> view<1xi32>
+  %11 = scalar.constant 7 : i32
+  view.store %11, %second_view[0] : i32, view<1xi32>
+  %12, %13 = func.call pure @choose_overlapping_alias(%condition, %first_storage, %first_storage_byte_offset, %second_storage, %first_storage_byte_offset) : (i1, buffer, offset, buffer, offset) -> (buffer, offset)
+  func.call @sequence_overlapping_alias(%12, %13, %first_storage, %first_storage_byte_offset) : (buffer, offset, buffer, offset)
+  %first = view.load %first_view[0] : view<1xi32> -> i32
+  %15 = scalar.constant 100 : i32
+  %16 = scalar.muli %first, %15 : i32
+  %second = view.load %second_view[0] : view<1xi32> -> i32
+  %18 = scalar.addi %16, %second : i32
+  func.return %18 : i32
+}
+
+func.def public @overlapping_storage_result(%condition: i1, %value$20: i32) -> (i32) {
+  %22 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %22 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %value$20, %value_view[0] : i32, view<1xi32>
+  %26, %27 = func.call pure @choose_overlapping_alias(%condition, %value_storage, %value_storage_byte_offset, %value_storage, %value_storage_byte_offset) : (i1, buffer, offset, buffer, offset) -> (buffer, offset)
+  func.call @sequence_overlapping_alias(%26, %27, %value_storage, %value_storage_byte_offset) : (buffer, offset, buffer, offset)
+  %value$28 = view.load %value_view[0] : view<1xi32> -> i32
+  func.return %value$28 : i32
+}
+
+func.def @sequence_overlapping_alias(%output: buffer, %output_byte_offset: offset, %input$31: buffer, %input_byte_offset: offset) {
+  %33 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  %34 = view.load %33[0] : view<1xi32> -> i32
+  %35 = scalar.constant 1 : i32
+  %36 = scalar.addi %34, %35 : i32
+  view.store %36, %33[0] : i32, view<1xi32>
+  %38 = buffer.view %input$31[%input_byte_offset] : buffer -> view<1xi32>
+  %input$39 = view.load %38[0] : view<1xi32> -> i32
+  %41 = view.load %33[0] : view<1xi32> -> i32
+  %42 = scalar.addi %41, %input$39 : i32
+  view.store %42, %33[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @choose_overlapping_alias(%condition: i1, %first: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) -> (buffer, offset) {
+  %53 = scf.select %condition, %first, %second : buffer
+  %54 = scf.select %condition, %first_byte_offset, %second_byte_offset : offset
+  func.return %53, %54 : buffer, offset
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Two references to the same vector lane must observe the first mutation in
+// the second update; the remaining lanes retain their original values.
+using OverlappingUInt4 = unsigned __attribute__((vector_size(16)));
+
+static void update_overlapping_lanes(unsigned& first, unsigned& second) {
+  ++first;
+  second += first;
+}
+
+unsigned overlapping_vector_alias() {
+  OverlappingUInt4 values = {2u, 3u, 5u, 7u};
+  update_overlapping_lanes(values[0], values[0]);
+  return values[0] * 1000u + values[1] * 100u + values[2] * 10u + values[3];
+}
+// ----
+func.def public @overlapping_vector_alias() -> (i32) {
+  %1 = index.constant 16 : offset
+  %values_storage = buffer.alloca<private> align(16) %1 : buffer
+  %values_storage_byte_offset = index.constant 0 : offset
+  %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<4xi32>
+  %5 = vector.constanti [2, 3, 5, 7] : vector<4xi32>
+  vector.store %5, %values_view[0] : vector<4xi32>, view<4xi32>
+  func.call @update_overlapping_lanes(%values_storage, %values_storage_byte_offset, %values_storage, %values_storage_byte_offset) : (buffer, offset, buffer, offset)
+  %69 = view.load %values_view[0] : view<4xi32> -> i32
+  %26 = scalar.constant 1000 : i32
+  %27 = scalar.muli %69, %26 : i32
+  %68 = view.load %values_view[1] : view<4xi32> -> i32
+  %32 = scalar.constant 100 : i32
+  %33 = scalar.muli %68, %32 : i32
+  %34 = scalar.addi %27, %33 : i32
+  %67 = view.load %values_view[2] : view<4xi32> -> i32
+  %39 = scalar.constant 10 : i32
+  %40 = scalar.muli %67, %39 : i32
+  %41 = scalar.addi %34, %40 : i32
+  %66 = view.load %values_view[3] : view<4xi32> -> i32
+  %46 = scalar.addi %41, %66 : i32
+  func.return %46 : i32
+}
+
+func.def @update_overlapping_lanes(%first$47: buffer, %first_byte_offset: offset, %second: buffer, %second_byte_offset: offset) {
+  %51 = buffer.view %first$47[%first_byte_offset] : buffer -> view<1xi32>
+  %52 = view.load %51[0] : view<1xi32> -> i32
+  %53 = scalar.constant 1 : i32
+  %54 = scalar.addi %52, %53 : i32
+  view.store %54, %51[0] : i32, view<1xi32>
+  %first$57 = view.load %51[0] : view<1xi32> -> i32
+  %58 = buffer.view %second[%second_byte_offset] : buffer -> view<1xi32>
+  %59 = view.load %58[0] : view<1xi32> -> i32
+  %60 = scalar.addi %59, %first$57 : i32
+  view.store %60, %58[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// The weighted original snapshot cannot be exchanged with the current owner
+// after a helper mutates the owner through a returned reference.
+static unsigned& increment_alias(unsigned& value) {
+  ++value;
+  return value;
+}
+
+unsigned stale_value_copy(unsigned value) {
+  const unsigned snapshot = value;
+  increment_alias(value);
+  return snapshot * 100u + value;
+}
+
+// ----
+func.def public @stale_value_copy(%value$0: i32) -> (i32) {
+  %2 = scalar.duplicate %value$0 : i32
+  %value$3 = func.call pure @increment_alias(%2) : (i32) -> (%2 as i32)
+  %4 = scalar.constant 100 : i32
+  %5 = scalar.muli %value$0, %4 : i32
+  %6 = scalar.addi %5, %value$3 : i32
+  func.return %6 : i32
+}
+
+func.def @increment_alias(%value$7: i32) -> (%value$7 as i32) {
+  %9 = scalar.constant 1 : i32
+  %value$10 = scalar.addi %value$7, %9 : i32
+  func.return %value$10 : i32
+}

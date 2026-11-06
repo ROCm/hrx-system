@@ -504,3 +504,110 @@ func.def @AliasedReceiver__mix_storage(%this: buffer, %this_byte_offset: offset,
   view.store %50, %51[0] : i32, view<1xi32>
   func.return
 }
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Returning the current receiver through self() preserves the overlap between
+// that receiver and its member passed to the next method call.
+struct CurrentReceiverAlias {
+  // Receiver member updated from the aliased selected argument.
+  unsigned first;
+  // Member also passed as the selected reference argument.
+  unsigned second;
+
+  void update(unsigned& selected) {
+    ++selected;
+    first += selected;
+    selected += first;
+  }
+  CurrentReceiverAlias& self() { return *this; }
+  void apply() { self().update(second); }
+};
+
+unsigned current_receiver_alias() {
+  CurrentReceiverAlias value{3u, 5u};
+  value.apply();
+  return value.first * 100u + value.second;
+}
+// ----
+func.def public @current_receiver_alias() -> (i32) {
+  %1 = index.constant 8 : offset
+  %value_storage = buffer.alloca<private> align(4) %1 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %7 = scalar.constant 3 : i32
+  %9 = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %7, %9[0] : i32, view<1xi32>
+  %12 = scalar.constant 5 : i32
+  %64 = index.constant 4 : offset
+  %14 = buffer.view %value_storage[%64] : buffer -> view<1xi32>
+  view.store %12, %14[0] : i32, view<1xi32>
+  func.call @CurrentReceiverAlias__apply_storage(%value_storage, %value_storage_byte_offset) : (buffer, offset)
+  %first = view.load %9[0] : view<1xi32> -> i32
+  %20 = scalar.constant 100 : i32
+  %21 = scalar.muli %first, %20 : i32
+  %second = view.load %14[0] : view<1xi32> -> i32
+  %27 = scalar.addi %21, %second : i32
+  func.return %27 : i32
+}
+
+func.def @CurrentReceiverAlias__apply_storage(%this: buffer, %this_byte_offset: offset) {
+  %30, %31 = func.call pure @CurrentReceiverAlias__self_storage(%this, %this_byte_offset) : (buffer, offset) -> (buffer, offset)
+  %32 = index.constant 4 : offset
+  %33 = index.add %this_byte_offset, %32 : offset
+  func.call @CurrentReceiverAlias__update_storage(%30, %31, %this, %33) : (buffer, offset, buffer, offset)
+  func.return
+}
+
+func.def @CurrentReceiverAlias__self_storage(%this: buffer, %this_byte_offset: offset) -> (buffer, offset) {
+  func.return %this, %this_byte_offset : buffer, offset
+}
+
+func.def @CurrentReceiverAlias__update_storage(%this: buffer, %this_byte_offset: offset, %selected$40: buffer, %selected_byte_offset: offset) {
+  %42 = buffer.view %selected$40[%selected_byte_offset] : buffer -> view<1xi32>
+  %43 = view.load %42[0] : view<1xi32> -> i32
+  %44 = scalar.constant 1 : i32
+  %45 = scalar.addi %43, %44 : i32
+  view.store %45, %42[0] : i32, view<1xi32>
+  %selected$48 = view.load %42[0] : view<1xi32> -> i32
+  %51 = buffer.view %this[%this_byte_offset] : buffer -> view<1xi32>
+  %52 = view.load %51[0] : view<1xi32> -> i32
+  %53 = scalar.addi %52, %selected$48 : i32
+  view.store %53, %51[0] : i32, view<1xi32>
+  %first = view.load %51[0] : view<1xi32> -> i32
+  %59 = view.load %42[0] : view<1xi32> -> i32
+  %60 = scalar.addi %59, %first : i32
+  view.store %60, %42[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A receiver mutation preserves a weighted by-value snapshot of that object.
+struct CopiedCounter {
+  // Scalar mutated by the receiver method after a distinct copy is taken.
+  unsigned value;
+  void bump() { ++value; }
+};
+
+unsigned stale_receiver_copy(unsigned input) {
+  CopiedCounter counter{input};
+  const CopiedCounter snapshot = counter;
+  counter.bump();
+  return snapshot.value * 100u + counter.value;
+}
+
+// ----
+func.def public @stale_receiver_copy(%input: i32) -> (i32) {
+  %2 = scalar.duplicate %input : i32
+  %counter_value = func.call pure @CopiedCounter__bump_value(%2) : (i32) -> (%2 as i32)
+  %4 = scalar.constant 100 : i32
+  %5 = scalar.muli %input, %4 : i32
+  %6 = scalar.addi %5, %counter_value : i32
+  func.return %6 : i32
+}
+
+func.def @CopiedCounter__bump_value(%this_value: i32) -> (%this_value as i32) {
+  %9 = scalar.constant 1 : i32
+  %value = scalar.addi %this_value, %9 : i32
+  func.return %value : i32
+}
