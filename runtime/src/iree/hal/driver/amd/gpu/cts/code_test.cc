@@ -16,8 +16,13 @@
 #include "iree/hal/driver/amd/gpu/cts/testdata.h"
 #include "iree/hal/driver/amd/gpu/image/hsaco.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/ring.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/barrier.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/kmq/storage.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/launch.h"
 #include "iree/hal/driver/amd/gpu/queue/user_queue.h"
 #include "iree/hal/driver/amd/status.h"
+#include "iree/hal/memory_scope.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
@@ -25,17 +30,17 @@ namespace {
 struct CodePublication {
   // Native compute carrier used by the code loader.
   amdf_queue_command_type_t command_type;
-  // Native producer contract, independent of the AQL consumer queue.
+  // Native producer contract, also used by the independent consumer queue.
   amdf_queue_publication_modes_t publication_mode;
   // Use native writes into unmapped device-local code.
   bool upload;
 };
 
-class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest,
-                    public ::testing::WithParamInterface<CodePublication> {
+class CodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest,
+                 public ::testing::WithParamInterface<CodePublication> {
  protected:
   amdf_queue_command_type_t command_type() const override {
-    return AMDF_QUEUE_COMMAND_TYPE_GPU_AQL;
+    return GetParam().command_type;
   }
 
   void SetUp() override {
@@ -55,14 +60,11 @@ class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest,
     if (publisher_family == UINT32_MAX) {
       GTEST_SKIP() << "Native compute publication mode is not advertised";
     }
+    options_.queue_family_ordinal = publisher_family;
     IREE_ASSERT_OK(
         iree_hal_amd_gpu_context_prepare_memory(context_, UINT32_MAX));
     IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_completion(
-        context_, AMDF_QUEUE_PUBLICATION_MODE_USER));
-    if (GetParam().publication_mode == AMDF_QUEUE_PUBLICATION_MODE_KERNEL) {
-      IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_completion(
-          context_, AMDF_QUEUE_PUBLICATION_MODE_KERNEL));
-    }
+        context_, GetParam().publication_mode));
     ASSERT_NO_FATAL_FAILURE(SelectControlMemory(&access_, &control_policy_));
     IREE_ASSERT_OK(iree_hal_amd_gpu_code_queue_allocate(
         context_, publisher_family, GetParam().publication_mode,
@@ -75,13 +77,32 @@ class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest,
             control_.handle, 0, AMDF_MEMORY_ADDRESS_GPU, &control_address_),
         "query code test control address"));
     std::memset(control_.contents.data, 0, control_.contents.data_length);
-    signal_ = reinterpret_cast<iree_hal_amd_gpu_aql_signal_t*>(
-        control_.contents.data);
-    *signal_ = {
-        .kind = 1,
-        .event_mailbox = context_->event_info.mailbox_address,
-        .event_id = context_->event_info.interrupt_context,
-    };
+    completion_ =
+        reinterpret_cast<iree_atomic_int64_t*>(control_.contents.data);
+    if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+      auto* signal = reinterpret_cast<iree_hal_amd_gpu_aql_signal_t*>(
+          control_.contents.data);
+      *signal = {
+          .kind = 1,
+          .event_mailbox = context_->event_info.mailbox_address,
+          .event_id = context_->event_info.interrupt_context,
+      };
+      completion_ = reinterpret_cast<iree_atomic_int64_t*>(&signal->value);
+    } else {
+      const iree_hal_amd_gpu_gfxip_version_t gfxip = {
+          context_->target_info.gfx_ip.major,
+          context_->target_info.gfx_ip.minor,
+          context_->target_info.gfx_ip.stepping,
+      };
+      IREE_ASSERT_OK(
+          iree_hal_amd_gpu_pm4_barrier_profile_initialize(gfxip, &barriers_));
+    }
+    if (GetParam().publication_mode == AMDF_QUEUE_PUBLICATION_MODE_KERNEL) {
+      IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_kmq_storage_allocate(
+          context_, publisher_family, 4096, 1, &control_policy_,
+          iree_allocator_system(), &kernel_, &pm4_ring_));
+      return;
+    }
     const amdf_gpu_user_queue_create_info_t queue_info = {
         .type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
         .structure_size = sizeof(queue_info),
@@ -91,26 +112,45 @@ class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest,
         .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
         .ring_byte_length = 4096,
     };
-    amdf_user_queue_mapping_info_t mapping;
     IREE_ASSERT_OK(iree_hal_amd_gpu_user_queue_initialize(
-        context_, &queue_info, &queue_, &mapping, nullptr));
-    iree_hal_amd_gpu_aql_ring_initialize(
-        reinterpret_cast<iree_hal_amd_gpu_aql_packet_t*>(mapping.ring_address),
-        0, static_cast<uint32_t>(mapping.ring_byte_length / 64),
-        reinterpret_cast<const iree_atomic_int64_t*>(
-            mapping.read_index_address),
-        reinterpret_cast<iree_atomic_int64_t*>(mapping.write_index_address),
-        reinterpret_cast<volatile uint64_t*>(mapping.doorbell_address),
-        queue_.host_publish_executor, &ring_);
+        context_, &queue_info, &user_, &mapping_, nullptr));
+    if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+      iree_hal_amd_gpu_aql_ring_initialize(
+          reinterpret_cast<iree_hal_amd_gpu_aql_packet_t*>(
+              mapping_.ring_address),
+          0, static_cast<uint32_t>(mapping_.ring_byte_length / 64),
+          reinterpret_cast<const iree_atomic_int64_t*>(
+              mapping_.read_index_address),
+          reinterpret_cast<iree_atomic_int64_t*>(mapping_.write_index_address),
+          reinterpret_cast<volatile uint64_t*>(mapping_.doorbell_address),
+          user_.host_publish_executor, &aql_ring_);
+    } else {
+      iree_hal_amd_gpu_pm4_ring_initialize(
+          reinterpret_cast<uint32_t*>(mapping_.ring_address),
+          static_cast<uint32_t>(mapping_.ring_byte_length / 4),
+          user_.host_publish_executor, &pm4_ring_);
+    }
   }
 
   void TearDown() override {
-    if (pending_) {
+    if (pending_ && HasFatalFailure()) {
+      // A failed execution wait supplies no completion proof. Stop this
+      // consumer before releasing its borrowed code and control storage.
+      IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
+          kernel_ ? iree_hal_amd_gpu_pm4_kmq_storage_inactivate(kernel_)
+                  : iree_hal_amd_gpu_user_queue_inactivate(&user_),
+          "stop failed code consumer"));
+      pending_ = false;
+    } else if (pending_) {
       ASSERT_NO_FATAL_FAILURE(Wait());
     }
-    if (queue_.context) {
+    if (kernel_) {
       IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
-          iree_hal_amd_gpu_user_queue_deinitialize(&queue_, ring_.reserved),
+          iree_hal_amd_gpu_pm4_kmq_storage_free(kernel_),
+          "join KERNEL code test queue"));
+    } else if (user_.context) {
+      IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
+          iree_hal_amd_gpu_user_queue_deinitialize(&user_, Published()),
           "join code test queue"));
     }
     IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
@@ -155,13 +195,130 @@ class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest,
     }
   }
 
+  void Dispatch(const iree_hal_amd_gpu_image_t& image, uint64_t address) {
+    iree_atomic_store(completion_, 1, iree_memory_order_release);
+    if (command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
+      const iree_hal_amd_gpu_aql_dispatch_t dispatch = {
+          .header = IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (1u << 16) |
+                    IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
+                    IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM,
+          .workgroup_size = {64, 1, 1},
+          .grid_size = {320, 1, 1},
+          .kernel_object = address + image.kernels[0].descriptor_offset,
+          .kernarg_address = control_address_ + 64,
+          .completion_signal = control_address_,
+      };
+      const auto packet = iree_hal_amd_gpu_aql_packet_dispatch(&dispatch);
+      uint64_t position = 0;
+      ASSERT_TRUE(
+          iree_hal_amd_gpu_aql_ring_try_reserve(&aql_ring_, 1, &position));
+      iree_hal_amd_gpu_aql_ring_write_body(&aql_ring_, position, &packet);
+      ASSERT_EQ(iree_hal_amd_gpu_aql_ring_publish_header(
+                    &aql_ring_, &user_, position, packet.words[0]),
+                AMDF_STATUS_OK);
+      iree_hal_amd_gpu_aql_ring_notify(&aql_ring_);
+    } else {
+      ASSERT_NO_FATAL_FAILURE(DispatchPm4(image, address));
+    }
+    pending_ = true;
+  }
+
+  void DispatchPm4(const iree_hal_amd_gpu_image_t& image, uint64_t address) {
+    const iree_hal_amd_gpu_gfxip_version_t gfxip = {
+        context_->target_info.gfx_ip.major,
+        context_->target_info.gfx_ip.minor,
+        context_->target_info.gfx_ip.stepping,
+    };
+    iree_hal_amd_gpu_pm4_launch_t launch;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_launch_initialize(
+        gfxip,
+        context_->families[options_.queue_family_ordinal].format_features,
+        &image.kernels[0], address, &launch));
+    ASSERT_EQ(launch.requirements, 0u);
+    const uint32_t workgroup_size[] = {64, 1, 1};
+    const uint32_t workgroup_count[] = {5, 1, 1};
+    const uint32_t partial_size[] = {0, 0, 0};
+    const iree_hal_amd_gpu_pm4_launch_inputs_t inputs = {
+        .kernarg_pointer = control_address_ + 64,
+    };
+    // Wait joins complete native consumption before another dispatch reuses
+    // the ring. Publication must invalidate instructions; the consumer only
+    // acquires data and must not hide a missing loader cache action.
+    constexpr uint32_t kWords = 128;
+    iree_hal_amd_gpu_pm4_ring_reservation_t reservation;
+    ASSERT_TRUE(iree_hal_amd_gpu_pm4_ring_try_reserve(
+        &pm4_ring_, pm4_ring_.reserved_words, kWords, &reservation));
+    uint32_t* words =
+        iree_hal_amd_gpu_pm4_emit_acquire(reservation.words, barriers_.acquire);
+    words = iree_hal_amd_gpu_pm4_launch_emit(words, &launch, workgroup_size,
+                                             partial_size, 0, &inputs);
+    words = iree_hal_amd_gpu_pm4_emit_dispatch_direct(
+        words, workgroup_count, launch.dispatch_initiator);
+    const iree_hal_amd_gpu_pm4_barrier_t release = {
+        .cache_control = barriers_.release,
+    };
+    words = iree_hal_amd_gpu_pm4_barrier_emit_tail(words, release);
+    words = iree_hal_amd_gpu_pm4_emit_release64(words, 0, control_address_, 0);
+    if (!kernel_) {
+      words = iree_hal_amd_gpu_pm4_emit_notify32(
+          words, 0, context_->event_info.mailbox_address,
+          context_->event_info.trigger_data,
+          context_->event_info.interrupt_context);
+    }
+    ASSERT_LT(words, reservation.words + kWords - 1);
+    iree_hal_amd_gpu_pm4_emit_nop(
+        words, static_cast<uint32_t>(reservation.words + kWords - words));
+    if (kernel_) {
+      kernel_->pending = {
+          .memory = kernel_->memory.handle,
+          .byte_offset = (reservation.position & (pm4_ring_.capacity - 1)) * 4,
+          .byte_length = kWords * 4,
+      };
+      IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
+          iree_hal_amd_gpu_pm4_kmq_storage_submit(kernel_, 0),
+          "submit replaced code dispatch"));
+    } else {
+      IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
+          iree_hal_amd_gpu_user_queue_flush(&user_),
+          "publish code consumer commands"));
+      iree_atomic_store(
+          reinterpret_cast<iree_atomic_int64_t*>(mapping_.write_index_address),
+          pm4_ring_.reserved_words, iree_memory_order_release);
+      const iree_hal_memory_transition_recipe_info_t fence = {
+          .host = {.fence_after = IREE_HAL_HOST_CACHE_FENCE_X86_SFENCE},
+      };
+      iree_hal_memory_transition_execute_host_direct(&fence, nullptr, 1);
+      *reinterpret_cast<volatile uint64_t*>(mapping_.doorbell_address) =
+          pm4_ring_.reserved_words;
+    }
+  }
+
+  uint64_t Published() const {
+    return command_type() == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+               ? aql_ring_.reserved
+               : pm4_ring_.reserved_words;
+  }
+
   void Wait() {
-    while (iree_atomic_load(
-               reinterpret_cast<iree_atomic_int64_t*>(&signal_->value),
-               iree_memory_order_acquire) != 0) {
+    if (kernel_) {
+      IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
+          context_->api->kernel_queue_wait(kernel_->queue,
+                                           kernel_->last_submission,
+                                           AMDF_TIMEOUT_INFINITE, 0),
+          "join KERNEL replaced code dispatch"));
+    }
+    while (iree_atomic_load(completion_, iree_memory_order_acquire) != 0) {
+      ASSERT_EQ(kernel_, nullptr)
+          << "Native retirement must cover shader writes and completion";
       IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
           context_->gpu->event_wait(context_->event, AMDF_TIMEOUT_INFINITE),
           "wait replaced code"));
+    }
+    if (!kernel_) {
+      IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
+          context_->api->user_queue_wait_consumed(user_.queue, Published(),
+                                                  AMDF_TIMEOUT_INFINITE, 0),
+          "join USER replaced code dispatch"));
     }
     pending_ = false;
   }
@@ -173,9 +330,17 @@ class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest,
   // Device-owned cold loader machinery under test.
   iree_hal_amd_gpu_code_queue_t* publisher_ = nullptr;
   // Independent consumer queue: publication cannot rely on a same-queue fence.
-  iree_hal_amd_gpu_user_queue_t queue_ = {};
-  // Consumer ring operands retained until its native consumption joins.
-  iree_hal_amd_gpu_aql_ring_t ring_ = {};
+  iree_hal_amd_gpu_user_queue_t user_ = {};
+  // Native publication operands for a USER consumer.
+  amdf_user_queue_mapping_info_t mapping_ = {};
+  // Finite command storage and checked KERNEL consumer retirement.
+  iree_hal_amd_gpu_pm4_kmq_storage_t* kernel_ = nullptr;
+  // AQL consumer ring operands retained through native consumption.
+  iree_hal_amd_gpu_aql_ring_t aql_ring_ = {};
+  // PM4 consumer command storage, independently of its native carrier.
+  iree_hal_amd_gpu_pm4_ring_t pm4_ring_ = {};
+  // PM4 data-cache actions; instruction publication belongs to the loader.
+  iree_hal_amd_gpu_pm4_barrier_profile_t barriers_ = {};
   // Borrowed scope requirements for coherent control storage.
   amdf_memory_device_access_t access_ = {};
   // Native control allocation policy.
@@ -184,13 +349,13 @@ class AqlCodeTest : public iree::hal::amd::gpu::cts::GpuNativeTest,
   iree_hal_amd_fabric_memory_t control_ = {};
   // GPU address of control byte zero.
   uint64_t control_address_ = 0;
-  // Completion signal borrowed from control_.
-  iree_hal_amd_gpu_aql_signal_t* signal_ = nullptr;
+  // Completion value borrowed from the native signal/marker in control_.
+  iree_atomic_int64_t* completion_ = nullptr;
   // Accepted work must complete before teardown releases code or arguments.
   bool pending_ = false;
 };
 
-TEST_P(AqlCodeTest, ReplacesCompletedInstructionsAtSameAddress) {
+TEST_P(CodeTest, ReplacesCompletedInstructionsAtSameAddress) {
   ASSERT_NO_FATAL_FAILURE(ReadImages());
   const amdf_memory_device_access_t access = {
       .device = context_->device,
@@ -268,32 +433,8 @@ TEST_P(AqlCodeTest, ReplacesCompletedInstructionsAtSameAddress) {
         upload ? iree_make_const_byte_span(contents, length)
                : iree_const_byte_span_empty()));
     std::fill_n(output, kCount + 1, 0xDEADBEEFu);
-    iree_atomic_store(reinterpret_cast<iree_atomic_int64_t*>(&signal_->value),
-                      1, iree_memory_order_release);
-    const iree_hal_amd_gpu_aql_dispatch_t dispatch = {
-        .header = IREE_HAL_AMD_GPU_AQL_HEADER_DISPATCH | (1u << 16) |
-                  IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
-                  IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM,
-        .workgroup_size = {64, 1, 1},
-        .grid_size = {320, 1, 1},
-        .kernel_object = address + image.kernels[0].descriptor_offset,
-        .kernarg_address = control_address_ + 64,
-        .completion_signal = control_address_,
-    };
-    const auto packet = iree_hal_amd_gpu_aql_packet_dispatch(&dispatch);
-    uint64_t position = 0;
-    ASSERT_TRUE(iree_hal_amd_gpu_aql_ring_try_reserve(&ring_, 1, &position));
-    iree_hal_amd_gpu_aql_ring_write_body(&ring_, position, &packet);
-    ASSERT_EQ(iree_hal_amd_gpu_aql_ring_publish_header(
-                  &ring_, &queue_, position, packet.words[0]),
-              AMDF_STATUS_OK);
-    iree_hal_amd_gpu_aql_ring_notify(&ring_);
-    pending_ = true;
+    ASSERT_NO_FATAL_FAILURE(Dispatch(image, address));
     ASSERT_NO_FATAL_FAILURE(Wait());
-    IREE_ASSERT_OK(IREE_HAL_AMD_STATUS_FROM_AMDF(
-        context_->api->user_queue_wait_consumed(queue_.queue, ring_.reserved,
-                                                AMDF_TIMEOUT_INFINITE, 0),
-        "join replaced code dispatch"));
     const uint32_t multiplier = generation % 2 ? 5 : 3;
     for (uint32_t i = 0; i < kCount; ++i) {
       ASSERT_EQ(output[i], input[i] * multiplier + 7) << "element=" << i;
@@ -304,7 +445,7 @@ TEST_P(AqlCodeTest, ReplacesCompletedInstructionsAtSameAddress) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    LocalCode, AqlCodeTest,
+    LocalCode, CodeTest,
     ::testing::Values(CodePublication{AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
                                       AMDF_QUEUE_PUBLICATION_MODE_USER, false},
                       CodePublication{AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
