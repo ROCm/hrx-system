@@ -104,20 +104,26 @@ typedef struct iree_hal_amd_gpu_queue_membership_t {
   void* user_data;
   // Fixed device-owned provisioned queue count.
   uint32_t provisioned_count;
+  // Number of allocated dynamic coordinates, including currently vacant slots.
+  uint32_t slot_count;
   // Borrowed immutable provisioned queue array, populated during construction.
   iree_hal_queue_t** provisioned;
-  // Serializes coordinate/source installation. Native queue construction and
-  // destruction run outside this mutex.
+  // Serializes coordinate/source installation and frontier reservation.
+  // Protocol frontier growth and native queue lifetime run outside this mutex.
   iree_slim_mutex_t mutex;
   // Protects stable slot ownership and lifecycle borrows. Never held across
   // native work, trim/terminal callouts, or borrower joins.
   iree_slim_mutex_t slots_mutex;
   // Stable slots retained until final device cleanup, newest first.
   iree_hal_amd_gpu_queue_slot_t* slots;
-  // Number of allocated dynamic coordinates, including currently vacant slots.
-  uint32_t slot_count;
-  // Installed geometric dependency-vector extent; never shrinks.
-  uint32_t frontier_count;
+  // Geometric dependency-vector growth, protected by mutex. Only acquisitions
+  // needing unfinished coordinates wait; existing coordinates remain usable.
+  struct {
+    // Extent installed in every live queue and resident recording.
+    uint32_t count;
+    // One serialized expansion target, or zero when no caller is growing it.
+    uint32_t pending_count;
+  } frontiers;
   // Shared predicate notification for frontier growth and independent releases.
   iree_notification_t notification;
   // Prepared active/spare tables; spare storage makes release allocation-free.
