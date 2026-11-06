@@ -4,6 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:package_boundary.bzl", "iree_package_boundary")
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
@@ -15,6 +17,11 @@ package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
+)
+
+iree_package_boundary(
+    allowed_descendant_paths = ["testdata/**"],
+    reason = "These sources are the embedded inputs for the public artifact-admission API test in this package. They have no independent program-test runner or library consumer.",
 )
 
 LOOMC_TARGET_SPIRV_COMPATIBLE_WITH = loom_config_compatible_with([
@@ -98,6 +105,40 @@ loom_cc_test(
     deps = [
         "//loom/binding/c:loomc",
         "//loom/binding/c/target/wasm",
+        "//loom/binding/c/test:test_util",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_c_embed_data(
+    name = "object_admission_testdata",
+    testonly = True,
+    srcs = [
+        "testdata/object_library_leak.loom",
+        "testdata/object_library_prepared.loom",
+        "testdata/object_link_root.loom",
+        "testdata/object_owner_leak.loom",
+        "testdata/object_pointer_cleanup.loom",
+        "testdata/object_prepared.loom",
+        "testdata/object_selection_leak.loom",
+        "testdata/object_storage_leak.loom",
+        "testdata/object_storage_prepared.loom",
+    ],
+    c_file_output = "object_admission_testdata.c",
+    flatten = True,
+    h_file_output = "object_admission_testdata.h",
+    identifier = "loomc_object_admission_testdata",
+)
+
+loom_cc_test(
+    name = "object_admission_test",
+    srcs = ["object_admission_test.cc"],
+    target_compatible_with = LOOMC_TARGET_VM_COMPATIBLE_WITH,
+    deps = [
+        ":object_admission_testdata",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/vm",
         "//loom/binding/c/test:test_util",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

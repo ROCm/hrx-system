@@ -22,6 +22,15 @@
 extern "C" {
 #endif
 
+// The all-resource analyzer checks descriptor effects. The selected-family
+// modes additionally plan final-use cleanup, either requiring prepared IR or
+// materializing releases allowed by the policy's builder.
+typedef enum loom_ownership_lifetime_mode_e {
+  LOOM_OWNERSHIP_LIFETIME_ANALYZE,
+  LOOM_OWNERSHIP_LIFETIME_VERIFY_PREPARED,
+  LOOM_OWNERSHIP_LIFETIME_MATERIALIZE,
+} loom_ownership_lifetime_mode_t;
+
 typedef enum loom_ownership_lifetime_value_state_e {
   LOOM_OWNERSHIP_LIFETIME_VALUE_UNKNOWN = 0,
   LOOM_OWNERSHIP_LIFETIME_VALUE_BORROWED = 1,
@@ -82,8 +91,8 @@ typedef struct loom_ownership_lifetime_module_state_t {
   loom_module_t* module;
   // Caller-owned analysis options.
   const loom_ownership_lifetime_options_t* options;
-  // Caller-owned materialization options, or NULL for analysis-only mode.
-  const loom_ownership_lifetime_options_t* materialize_options;
+  // Domain and cleanup behavior for this invocation.
+  loom_ownership_lifetime_mode_t mode;
   // Result object receiving final diagnostic and traversal counters.
   loom_ownership_lifetime_result_t* result;
   // Dense summaries indexed by module symbol ID.

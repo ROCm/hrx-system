@@ -1,0 +1,13 @@
+vm.target<core> @vm
+
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @run(%owner: reg<vm.ref : ref<@Object>>) asm {
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  return
+}
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @entry(%owner: reg<vm.ref : ref<@Object>>) asm {
+  low.func.call @run(%owner) : (reg<vm.ref : ref<@Object>>)
+  return
+}

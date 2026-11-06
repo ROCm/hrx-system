@@ -11,6 +11,7 @@
 #include "context.h"
 #include "diagnostic.h"
 #include "iree/base/internal/arena.h"
+#include "loom/codegen/low/object_lifetime.h"
 #include "loom/target/provider.h"
 #include "loomc/compile_report.h"
 #include "loomc/iree.h"
@@ -698,7 +699,26 @@ loomc_status_t loomc_emit_transaction_emit(
       pass_environment ? &pass_environment->diagnostic_type_print_options
                        : NULL,
       &capture);
-  if (options->artifact_manifest_mode != LOOMC_ARTIFACT_MANIFEST_MODE_NONE) {
+  if (loomc_status_is_ok(status)) {
+    loom_ownership_lifetime_result_t ownership = {0};
+    status = loomc_status_from_iree(loom_low_object_lifetime_verify(
+        internal_module, &pass_environment->low_descriptor_registry.registry,
+        &scratch_arena,
+        (iree_diagnostic_emitter_t){loomc_diagnostic_capture_emission,
+                                    &capture},
+        &ownership));
+    if (ownership.error_count) {
+      loomc_result_set_status_code(result, LOOMC_STATUS_FAILED_PRECONDITION);
+    }
+  }
+  if (loomc_status_is_ok(status) && !loomc_result_succeeded(result)) {
+    loomc_emit_transaction_record_status(transaction,
+                                         IREE_STATUS_FAILED_PRECONDITION);
+    iree_arena_deinitialize(&scratch_arena);
+    return status;
+  }
+  if (loomc_status_is_ok(status) &&
+      options->artifact_manifest_mode != LOOMC_ARTIFACT_MANIFEST_MODE_NONE) {
     status = loomc_emit_make_manifest_identifier(
         options, emitter, loomc_result_allocator(result), &manifest_identifier);
   }

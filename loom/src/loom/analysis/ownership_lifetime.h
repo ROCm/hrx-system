@@ -36,8 +36,9 @@ typedef enum loom_ownership_lifetime_policy_flag_bits_e {
   // Matching function-like arguments transfer ownership at calls and enter
   // analyzed bodies as owned values, including declaration-only call contracts.
   LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_ARGUMENTS = 1u << 0,
-  // Matching results from bodyless callees enter callers as owned values.
-  LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_BODYLESS_RESULTS = 1u << 1,
+  // Matching results carry an owner when no operation effect overrides it,
+  // including bodyless callees and loads from managed storage.
+  LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_RESULTS = 1u << 1,
   // End local carriers after their final use, including borrowed carriers
   // that may hold acquired protection. This does not change callable ownership.
   LOOM_OWNERSHIP_LIFETIME_POLICY_LAST_USE = 1u << 2,
@@ -62,8 +63,8 @@ typedef struct loom_ownership_lifetime_policy_t {
   loom_ownership_resource_family_t family;
   // Callable ownership behavior for values matched by |family|.
   loom_ownership_lifetime_policy_flags_t flags;
-  // Optional cleanup builder, required only by materialize_module. Analysis
-  // never invokes this callback or inserts lifetime operations.
+  // Optional cleanup builder. A NULL builder requires explicit consumption
+  // even when other policies materialize cleanup. Analysis never invokes it.
   loom_ownership_lifetime_build_release_op_fn_t build_release;
   // Opaque payload passed to the builder callbacks.
   void* user_data;
@@ -117,6 +118,13 @@ typedef struct loom_ownership_lifetime_result_t {
 // Infrastructure failures such as arena allocation failures are returned as
 // status failures.
 iree_status_t loom_ownership_lifetime_analyze_module(
+    loom_module_t* module, const loom_ownership_lifetime_options_t* options,
+    loom_ownership_lifetime_result_t* out_result);
+
+// Checks only the policy families, including prepared final-use cleanup.
+// This never mutates IR. A release that materialize_module would still need to
+// insert is a diagnostic. Explicit source owners must already be consumed.
+iree_status_t loom_ownership_lifetime_verify_prepared_module(
     loom_module_t* module, const loom_ownership_lifetime_options_t* options,
     loom_ownership_lifetime_result_t* out_result);
 

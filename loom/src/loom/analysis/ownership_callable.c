@@ -102,7 +102,7 @@ static iree_status_t loom_ownership_lifetime_initialize_summary(
       for (uint16_t i = 0; i < summary->result_count; ++i) {
         bool owned = loom_ownership_lifetime_value_has_policy_flags(
             module_state, result_ids[i],
-            LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_BODYLESS_RESULTS);
+            LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_RESULTS);
         summary->result_states[i] =
             owned ? LOOM_OWNERSHIP_LIFETIME_VALUE_OWNED
                   : LOOM_OWNERSHIP_LIFETIME_VALUE_BORROWED;
@@ -163,14 +163,13 @@ typedef struct loom_ownership_lifetime_successor_walk_t {
 static bool loom_ownership_lifetime_effect_is_in_domain(
     const loom_ownership_lifetime_module_state_t* state,
     loom_value_id_t value_id) {
-  if (!state->materialize_options) {
+  if (state->mode == LOOM_OWNERSHIP_LIFETIME_ANALYZE) {
     return true;
   }
   loom_type_t type = loom_module_value_type(state->module, value_id);
-  for (iree_host_size_t i = 0; i < state->materialize_options->policy_count;
-       ++i) {
+  for (iree_host_size_t i = 0; i < state->options->policy_count; ++i) {
     if (loom_ownership_lifetime_policy_type_matches(
-            &state->materialize_options->policies[i], type)) {
+            &state->options->policies[i], type)) {
       return true;
     }
   }

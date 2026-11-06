@@ -65,7 +65,7 @@ iree_status_t loom_ownership_lifetime_run(loom_pass_t* pass,
                   .type_matches = loom_channel_access_type_matches,
               },
           .flags = LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_ARGUMENTS |
-                   LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_BODYLESS_RESULTS,
+                   LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_RESULTS,
       },
       {
           .family =
@@ -74,7 +74,7 @@ iree_status_t loom_ownership_lifetime_run(loom_pass_t* pass,
                   .type_matches = loom_owned_reference_type_matches,
               },
           .flags = LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_ARGUMENTS |
-                   LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_BODYLESS_RESULTS,
+                   LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_RESULTS,
       },
   };
   const loom_target_low_descriptor_registry_t registry =

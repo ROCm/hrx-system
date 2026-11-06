@@ -332,6 +332,25 @@ ERR_DOMINANCE_019 = ErrorDef(
     fix_hint="Create an independent owner for each consuming operand.",
 )
 
+ERR_DOMINANCE_020 = ErrorDef(
+    domain=ErrorDomain.DOMINANCE,
+    code=20,
+    severity=Severity.ERROR,
+    summary="Pointer protection still requires final-use cleanup.",
+    message=(
+        "{phase_name} pointer '%{value_name}' requires cleanup "
+        "before executable emission"
+    ),
+    params=(
+        ErrorParam("phase_name", ParamKind.STRING),
+        ErrorParam("value_name", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Run low-borrow-lifetime before emission or release the carrier "
+        "explicitly after its final use."
+    ),
+)
+
 ALL_DOMINANCE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_DOMINANCE_001,
     ERR_DOMINANCE_002,
@@ -352,4 +371,5 @@ ALL_DOMINANCE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_DOMINANCE_017,
     ERR_DOMINANCE_018,
     ERR_DOMINANCE_019,
+    ERR_DOMINANCE_020,
 )
