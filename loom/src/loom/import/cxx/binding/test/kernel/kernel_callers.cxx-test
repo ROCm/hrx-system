@@ -1,0 +1,490 @@
+// RUN: pass canonicalize,cse,dce
+// Per-lane calls retain their source widths, argument order, and output slots.
+#include <hip/hip_runtime.h>
+[[loom::inline]] unsigned bound_pair(unsigned first, unsigned second);
+[[loom::inline]] unsigned bound_seven(unsigned a, unsigned b, unsigned c,
+                                      unsigned d, unsigned e, unsigned f,
+                                      unsigned g);
+[[loom::inline]] unsigned bound_repeated(unsigned value);
+[[loom::inline]] unsigned bound_capacity(unsigned value);
+[[loom::inline]] unsigned bound_cast(unsigned value);
+[[loom::inline]] unsigned bound_byte(unsigned char value);
+[[loom::inline]] unsigned bound_wide(unsigned long long value);
+[[loom::inline]] unsigned bound_size(unsigned value);
+[[loom::inline]] unsigned bound_scoped(unsigned value);
+[[loom::inline]] unsigned bound_inclusive(unsigned tokens);
+[[loom::inline]] int bound_signed(int hidden, int capacity);
+[[loom::inline]] unsigned bound_unsigned(unsigned tokens, unsigned capacity);
+
+[[loom::kernel, loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void assumption_kernel(unsigned* output, unsigned input) {
+  unsigned lane = threadIdx.x;
+  unsigned value = input + lane;
+  unsigned output_offset = lane * 12u;
+  output[output_offset] = bound_pair(value & 255u, (value >> 8u) & 255u);
+  output[output_offset + 1u] =
+      bound_seven(value & 255u, 1u, 2u, 3u, 5u, 7u, 11u);
+  output[output_offset + 2u] = bound_repeated(value & 31u);
+  output[output_offset + 3u] = bound_capacity(value % 428u);
+  output[output_offset + 4u] = bound_cast(value & 15u);
+  output[output_offset + 5u] = bound_byte((unsigned char)value);
+  output[output_offset + 6u] = bound_wide(value & 255u);
+  output[output_offset + 7u] = bound_size(value & 15u);
+  output[output_offset + 8u] = bound_scoped(value);
+  output[output_offset + 9u] = bound_inclusive(value % 428u);
+  int hidden = (int)(value % 63u) + 1;
+  int capacity = hidden + (int)(value % 5u);
+  output[output_offset + 10u] = (unsigned)bound_signed(hidden, capacity);
+  unsigned tokens = value & 0x7fffffffu;
+  unsigned token_capacity = tokens | 0x80000000u;
+  output[output_offset + 11u] = bound_unsigned(tokens, token_capacity);
+}
+
+// ----
+kernel.def @assumption_kernel() {
+  %2 = index.constant 1 : index
+  %5 = index.constant 64 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%5, %2, %2) : index
+} launch(%output: buffer, %input: i32) {
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %lane = index.cast %workitem_id_x : index to i32
+  %value = scalar.addi %input, %lane : i32
+  %12 = scalar.constant 12 : i32
+  %output_offset = scalar.muli %lane, %12 : i32
+  %14 = scalar.constant 255 : i32
+  %15 = scalar.andi %value, %14 : i32
+  %16 = scalar.constant 8 : i32
+  %17 = scalar.shrui %value, %16 : i32
+  %19 = scalar.andi %17, %14 : i32
+  %20 = func.call @bound_pair(%15, %19) : (i32, i32) -> (i32)
+  %273 = scalar.constant 2 : i32
+  %274 = scalar.shli %output_offset, %273 : i32
+  %275 = scalar.extui %274 : i32 to i64
+  %26 = scalar.assume %275 [range(%275, 0, 9223372036854775807)] : i64
+  %27 = index.cast %26 : i64 to offset
+  %28 = buffer.view %output[%27] : buffer -> view<1xi32>
+  view.store %20, %28[0] : i32, view<1xi32>
+  %31 = scalar.constant 1 : i32
+  %33 = scalar.constant 3 : i32
+  %34 = scalar.constant 5 : i32
+  %35 = scalar.constant 7 : i32
+  %36 = scalar.constant 11 : i32
+  %37 = func.call @bound_seven(%15, %31, %273, %33, %34, %35, %36) : (i32, i32, i32, i32, i32, i32, i32) -> (i32)
+  %39 = scalar.addi %output_offset, %31 : i32
+  %269 = scalar.shli %39, %273 : i32
+  %270 = scalar.extui %269 : i32 to i64
+  %45 = scalar.assume %270 [range(%270, 0, 9223372036854775807)] : i64
+  %46 = index.cast %45 : i64 to offset
+  %47 = buffer.view %output[%46] : buffer -> view<1xi32>
+  view.store %37, %47[0] : i32, view<1xi32>
+  %48 = scalar.constant 31 : i32
+  %49 = scalar.andi %value, %48 : i32
+  %50 = func.call @bound_repeated(%49) : (i32) -> (i32)
+  %52 = scalar.addi %output_offset, %273 : i32
+  %264 = scalar.shli %52, %273 : i32
+  %265 = scalar.extui %264 : i32 to i64
+  %58 = scalar.assume %265 [range(%265, 0, 9223372036854775807)] : i64
+  %59 = index.cast %58 : i64 to offset
+  %60 = buffer.view %output[%59] : buffer -> view<1xi32>
+  view.store %50, %60[0] : i32, view<1xi32>
+  %61 = scalar.constant 428 : i32
+  %62 = scalar.remui %value, %61 : i32
+  %63 = func.call @bound_capacity(%62) : (i32) -> (i32)
+  %65 = scalar.addi %output_offset, %33 : i32
+  %259 = scalar.shli %65, %273 : i32
+  %260 = scalar.extui %259 : i32 to i64
+  %71 = scalar.assume %260 [range(%260, 0, 9223372036854775807)] : i64
+  %72 = index.cast %71 : i64 to offset
+  %73 = buffer.view %output[%72] : buffer -> view<1xi32>
+  view.store %63, %73[0] : i32, view<1xi32>
+  %74 = scalar.constant 15 : i32
+  %75 = scalar.andi %value, %74 : i32
+  %76 = func.call @bound_cast(%75) : (i32) -> (i32)
+  %77 = scalar.constant 4 : i32
+  %78 = scalar.addi %output_offset, %77 : i32
+  %254 = scalar.shli %78, %273 : i32
+  %255 = scalar.extui %254 : i32 to i64
+  %84 = scalar.assume %255 [range(%255, 0, 9223372036854775807)] : i64
+  %85 = index.cast %84 : i64 to offset
+  %86 = buffer.view %output[%85] : buffer -> view<1xi32>
+  view.store %76, %86[0] : i32, view<1xi32>
+  %87 = scalar.trunci %value : i32 to i8
+  %88 = func.call @bound_byte(%87) : (i8) -> (i32)
+  %90 = scalar.addi %output_offset, %34 : i32
+  %249 = scalar.shli %90, %273 : i32
+  %250 = scalar.extui %249 : i32 to i64
+  %96 = scalar.assume %250 [range(%250, 0, 9223372036854775807)] : i64
+  %97 = index.cast %96 : i64 to offset
+  %98 = buffer.view %output[%97] : buffer -> view<1xi32>
+  view.store %88, %98[0] : i32, view<1xi32>
+  %101 = scalar.extui %15 : i32 to i64
+  %102 = func.call @bound_wide(%101) : (i64) -> (i32)
+  %103 = scalar.constant 6 : i32
+  %104 = scalar.addi %output_offset, %103 : i32
+  %244 = scalar.shli %104, %273 : i32
+  %245 = scalar.extui %244 : i32 to i64
+  %110 = scalar.assume %245 [range(%245, 0, 9223372036854775807)] : i64
+  %111 = index.cast %110 : i64 to offset
+  %112 = buffer.view %output[%111] : buffer -> view<1xi32>
+  view.store %102, %112[0] : i32, view<1xi32>
+  %115 = func.call @bound_size(%75) : (i32) -> (i32)
+  %117 = scalar.addi %output_offset, %35 : i32
+  %239 = scalar.shli %117, %273 : i32
+  %240 = scalar.extui %239 : i32 to i64
+  %123 = scalar.assume %240 [range(%240, 0, 9223372036854775807)] : i64
+  %124 = index.cast %123 : i64 to offset
+  %125 = buffer.view %output[%124] : buffer -> view<1xi32>
+  view.store %115, %125[0] : i32, view<1xi32>
+  %126 = func.call @bound_scoped(%value) : (i32) -> (i32)
+  %128 = scalar.addi %output_offset, %16 : i32
+  %234 = scalar.shli %128, %273 : i32
+  %235 = scalar.extui %234 : i32 to i64
+  %134 = scalar.assume %235 [range(%235, 0, 9223372036854775807)] : i64
+  %135 = index.cast %134 : i64 to offset
+  %136 = buffer.view %output[%135] : buffer -> view<1xi32>
+  view.store %126, %136[0] : i32, view<1xi32>
+  %139 = func.call @bound_inclusive(%62) : (i32) -> (i32)
+  %140 = scalar.constant 9 : i32
+  %141 = scalar.addi %output_offset, %140 : i32
+  %229 = scalar.shli %141, %273 : i32
+  %230 = scalar.extui %229 : i32 to i64
+  %147 = scalar.assume %230 [range(%230, 0, 9223372036854775807)] : i64
+  %148 = index.cast %147 : i64 to offset
+  %149 = buffer.view %output[%148] : buffer -> view<1xi32>
+  view.store %139, %149[0] : i32, view<1xi32>
+  %150 = scalar.constant 63 : i32
+  %151 = scalar.remui %value, %150 : i32
+  %hidden = scalar.addi %151, %31 : i32
+  %155 = scalar.remui %value, %34 : i32
+  %capacity = scalar.addi %hidden, %155 : i32
+  %157 = func.call @bound_signed(%hidden, %capacity) : (i32, i32) -> (i32)
+  %158 = scalar.constant 10 : i32
+  %159 = scalar.addi %output_offset, %158 : i32
+  %224 = scalar.shli %159, %273 : i32
+  %225 = scalar.extui %224 : i32 to i64
+  %165 = scalar.assume %225 [range(%225, 0, 9223372036854775807)] : i64
+  %166 = index.cast %165 : i64 to offset
+  %167 = buffer.view %output[%166] : buffer -> view<1xi32>
+  view.store %157, %167[0] : i32, view<1xi32>
+  %168 = scalar.constant 2147483647 : i32
+  %tokens = scalar.andi %value, %168 : i32
+  %170 = scalar.constant -2147483648 : i32
+  %token_capacity = scalar.ori %tokens, %170 : i32
+  %172 = func.call @bound_unsigned(%tokens, %token_capacity) : (i32, i32) -> (i32)
+  %174 = scalar.addi %output_offset, %36 : i32
+  %219 = scalar.shli %174, %273 : i32
+  %220 = scalar.extui %219 : i32 to i64
+  %180 = scalar.assume %220 [range(%220, 0, 9223372036854775807)] : i64
+  %181 = index.cast %180 : i64 to offset
+  %182 = buffer.view %output[%181] : buffer -> view<1xi32>
+  view.store %172, %182[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.decl inline @bound_pair(%183: i32, %184: i32) -> (i32)
+
+func.decl inline @bound_seven(%186: i32, %187: i32, %188: i32, %189: i32, %190: i32, %191: i32, %192: i32) -> (i32)
+
+func.decl inline @bound_repeated(%194: i32) -> (i32)
+
+func.decl inline @bound_capacity(%196: i32) -> (i32)
+
+func.decl inline @bound_cast(%198: i32) -> (i32)
+
+func.decl inline @bound_byte(%200: i8) -> (i32)
+
+func.decl inline @bound_wide(%202: i64) -> (i32)
+
+func.decl inline @bound_size(%204: i32) -> (i32)
+
+func.decl inline @bound_scoped(%206: i32) -> (i32)
+
+func.decl inline @bound_inclusive(%208: i32) -> (i32)
+
+func.decl inline @bound_signed(%210: i32, %211: i32) -> (i32)
+
+func.decl inline @bound_unsigned(%213: i32, %214: i32) -> (i32)
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Two retained aggregate calls compose with the actual kernel entry ABI.
+#include <loomcxx/kernel.h>
+
+struct Pair {
+  // Additive observation of the loaded value.
+  unsigned sum;
+  // Bitwise observation of the same loaded value.
+  unsigned mixed;
+};
+
+[[loom::noinline]]
+static Pair update(const unsigned* input, unsigned index, unsigned bias) {
+  const unsigned value = input[index];
+  return {value + bias, value ^ bias};
+}
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(64, 1, 1)]]
+void retained_calls(const unsigned* input, unsigned* sums, unsigned* mixed) {
+  const unsigned index = loom::kernel::workitem::id.x;
+  const Pair first = update(input, index, 7u);
+  const Pair second = update(input, index, 13u);
+  sums[index] = first.sum + second.sum;
+  mixed[index] = first.mixed + second.mixed;
+}
+
+// ----
+kernel.def @retained_calls() {
+  %3 = index.constant 1 : index
+  %6 = index.constant 64 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%6, %3, %3) : index
+} launch(%input: buffer, %sums: buffer, %mixed: buffer) {
+  %input_byte_offset = index.constant 0 : offset
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %index = index.cast %workitem_id_x : index to i32
+  %14 = scalar.constant 7 : i32
+  %first_sum, %first_mixed = func.call readonly @update(%input, %input_byte_offset, %index, %14) : (buffer, offset, i32, i32) -> (i32, i32)
+  %17 = scalar.constant 13 : i32
+  %second_sum, %second_mixed = func.call readonly @update(%input, %input_byte_offset, %index, %17) : (buffer, offset, i32, i32) -> (i32, i32)
+  %20 = scalar.addi %first_sum, %second_sum : i32
+  %62 = scalar.constant 2 : i32
+  %63 = scalar.shli %index, %62 : i32
+  %64 = scalar.extui %63 : i32 to i64
+  %26 = scalar.assume %64 [range(%64, 0, 9223372036854775807)] : i64
+  %27 = index.cast %26 : i64 to offset
+  %28 = buffer.view %sums[%27] : buffer -> view<1xi32>
+  view.store %20, %28[0] : i32, view<1xi32>
+  %29 = scalar.addi %first_mixed, %second_mixed : i32
+  %37 = buffer.view %mixed[%27] : buffer -> view<1xi32>
+  view.store %29, %37[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def noinline @update(%input: buffer, %input_byte_offset: offset, %index: i32, %bias: i32) -> (i32, i32) {
+  %44 = scalar.extui %index : i32 to i64
+  %65 = scalar.constant 2 : i64
+  %66 = scalar.shli %44, %65 : i64
+  %47 = index.cast %input_byte_offset : offset to i64
+  %48 = scalar.addi %47, %66 : i64
+  %49 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
+  %50 = index.cast %49 : i64 to offset
+  %51 = buffer.view %input[%50] : buffer -> view<1xi32>
+  %value = view.load %51[0] : view<1xi32> -> i32
+  %53 = scalar.addi %value, %bias : i32
+  %54 = scalar.xori %value, %bias : i32
+  func.return %53, %54 : i32, i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// HIP kernel admission preserves the enum argument and pointee width.
+#include <hip/hip_runtime.h>
+enum class Byte : unsigned char { zero, high = 255 };
+template <class T>
+static T add(T value, T delta) {
+  return static_cast<T>(static_cast<unsigned long long>(value) +
+                        static_cast<unsigned long long>(delta));
+}
+__global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void enum_storage_u8(const Byte* input, Byte* output, Byte delta) {
+  Byte* cursor = output + threadIdx.x + 1;
+  cursor[-1] = add(input[threadIdx.x], delta);
+}
+
+// ----
+kernel.def @enum_storage_u8() {
+  %3 = index.constant 1 : index
+  %6 = index.constant 64 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%6, %3, %3) : index
+} launch(%input: buffer, %output: buffer, %delta: i8) {
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %12 = index.cast %workitem_id_x : index to i32
+  %13 = scalar.extui %12 : i32 to i64
+  %18 = scalar.assume %13 [range(%13, 0, 9223372036854775807)] : i64
+  %19 = index.cast %18 : i64 to offset
+  %59 = scalar.constant 1 : i64
+  %24 = index.cast %19 : offset to i64
+  %25 = scalar.addi %24, %59 : i64
+  %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
+  %cursor_byte_offset = index.cast %26 : i64 to offset
+  %37 = buffer.view %input[%19] : buffer -> view<1xi8>
+  %38 = view.load %37[0] : view<1xi8> -> i8
+  %39 = func.call pure @add___Byte(%38, %delta) : (i8, i8) -> (i8)
+  %58 = scalar.constant -1 : i64
+  %46 = index.cast %cursor_byte_offset : offset to i64
+  %47 = scalar.addi %46, %58 : i64
+  %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
+  %49 = index.cast %48 : i64 to offset
+  %50 = buffer.view %output[%49] : buffer -> view<1xi8>
+  view.store %39, %50[0] : i8, view<1xi8>
+  kernel.return
+}
+
+func.def @add___Byte(%value: i8, %delta: i8) -> (i8) {
+  %54 = scalar.extui %value : i8 to i64
+  %55 = scalar.extui %delta : i8 to i64
+  %56 = scalar.addi %54, %55 : i64
+  %57 = scalar.trunci %56 : i64 to i8
+  func.return %57 : i8
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// HIP kernel admission preserves the enum argument and pointee width.
+#include <hip/hip_runtime.h>
+enum class Short : unsigned short { zero, high = 65535 };
+template <class T>
+static T add(T value, T delta) {
+  return static_cast<T>(static_cast<unsigned long long>(value) +
+                        static_cast<unsigned long long>(delta));
+}
+__global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void enum_storage_u16(const Short* input, Short* output, Short delta) {
+  Short* cursor = output + threadIdx.x + 1;
+  cursor[-1] = add(input[threadIdx.x], delta);
+}
+
+// ----
+kernel.def @enum_storage_u16() {
+  %3 = index.constant 1 : index
+  %6 = index.constant 64 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%6, %3, %3) : index
+} launch(%input: buffer, %output: buffer, %delta: i16) {
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %12 = index.cast %workitem_id_x : index to i32
+  %67 = scalar.constant 1 : i32
+  %68 = scalar.shli %12, %67 : i32
+  %69 = scalar.extui %68 : i32 to i64
+  %18 = scalar.assume %69 [range(%69, 0, 9223372036854775807)] : i64
+  %19 = index.cast %18 : i64 to offset
+  %64 = scalar.constant 2 : i64
+  %24 = index.cast %19 : offset to i64
+  %25 = scalar.addi %24, %64 : i64
+  %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
+  %cursor_byte_offset = index.cast %26 : i64 to offset
+  %37 = buffer.view %input[%19] : buffer -> view<1xi16>
+  %38 = view.load %37[0] : view<1xi16> -> i16
+  %39 = func.call pure @add___Short(%38, %delta) : (i16, i16) -> (i16)
+  %58 = scalar.constant -2 : i64
+  %46 = index.cast %cursor_byte_offset : offset to i64
+  %47 = scalar.addi %46, %58 : i64
+  %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
+  %49 = index.cast %48 : i64 to offset
+  %50 = buffer.view %output[%49] : buffer -> view<1xi16>
+  view.store %39, %50[0] : i16, view<1xi16>
+  kernel.return
+}
+
+func.def @add___Short(%value: i16, %delta: i16) -> (i16) {
+  %54 = scalar.extui %value : i16 to i64
+  %55 = scalar.extui %delta : i16 to i64
+  %56 = scalar.addi %54, %55 : i64
+  %57 = scalar.trunci %56 : i64 to i16
+  func.return %57 : i16
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// HIP kernel admission preserves the enum argument and pointee width.
+#include <hip/hip_runtime.h>
+enum class Word : unsigned { zero, high = 0xffffffffu };
+template <class T>
+static T add(T value, T delta) {
+  return static_cast<T>(static_cast<unsigned long long>(value) +
+                        static_cast<unsigned long long>(delta));
+}
+__global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void enum_storage_u32(const Word* input, Word* output, Word delta) {
+  Word* cursor = output + threadIdx.x + 1;
+  cursor[-1] = add(input[threadIdx.x], delta);
+}
+
+// ----
+kernel.def @enum_storage_u32() {
+  %3 = index.constant 1 : index
+  %6 = index.constant 64 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%6, %3, %3) : index
+} launch(%input: buffer, %output: buffer, %delta: i32) {
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %12 = index.cast %workitem_id_x : index to i32
+  %67 = scalar.constant 2 : i32
+  %68 = scalar.shli %12, %67 : i32
+  %69 = scalar.extui %68 : i32 to i64
+  %18 = scalar.assume %69 [range(%69, 0, 9223372036854775807)] : i64
+  %19 = index.cast %18 : i64 to offset
+  %64 = scalar.constant 4 : i64
+  %24 = index.cast %19 : offset to i64
+  %25 = scalar.addi %24, %64 : i64
+  %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
+  %cursor_byte_offset = index.cast %26 : i64 to offset
+  %37 = buffer.view %input[%19] : buffer -> view<1xi32>
+  %38 = view.load %37[0] : view<1xi32> -> i32
+  %39 = func.call pure @add___Word(%38, %delta) : (i32, i32) -> (i32)
+  %58 = scalar.constant -4 : i64
+  %46 = index.cast %cursor_byte_offset : offset to i64
+  %47 = scalar.addi %46, %58 : i64
+  %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
+  %49 = index.cast %48 : i64 to offset
+  %50 = buffer.view %output[%49] : buffer -> view<1xi32>
+  view.store %39, %50[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def @add___Word(%value: i32, %delta: i32) -> (i32) {
+  %54 = scalar.extui %value : i32 to i64
+  %55 = scalar.extui %delta : i32 to i64
+  %56 = scalar.addi %54, %55 : i64
+  %57 = scalar.trunci %56 : i64 to i32
+  func.return %57 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// HIP kernel admission preserves the enum argument and pointee width.
+#include <hip/hip_runtime.h>
+enum class Long : unsigned long long { zero, high = 0xffffffffffffffffULL };
+template <class T>
+static T add(T value, T delta) {
+  return static_cast<T>(static_cast<unsigned long long>(value) +
+                        static_cast<unsigned long long>(delta));
+}
+__global__ [[loom::workgroup_size(64, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void enum_storage_u64(const Long* input, Long* output, Long delta) {
+  Long* cursor = output + threadIdx.x + 1;
+  cursor[-1] = add(input[threadIdx.x], delta);
+}
+
+// ----
+kernel.def @enum_storage_u64() {
+  %3 = index.constant 1 : index
+  %6 = index.constant 64 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%6, %3, %3) : index
+} launch(%input: buffer, %output: buffer, %delta: i64) {
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %12 = index.cast %workitem_id_x : index to i32
+  %64 = scalar.constant 3 : i32
+  %65 = scalar.shli %12, %64 : i32
+  %66 = scalar.extui %65 : i32 to i64
+  %18 = scalar.assume %66 [range(%66, 0, 9223372036854775807)] : i64
+  %19 = index.cast %18 : i64 to offset
+  %61 = scalar.constant 8 : i64
+  %24 = index.cast %19 : offset to i64
+  %25 = scalar.addi %24, %61 : i64
+  %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
+  %cursor_byte_offset = index.cast %26 : i64 to offset
+  %37 = buffer.view %input[%19] : buffer -> view<1xi64>
+  %38 = view.load %37[0] : view<1xi64> -> i64
+  %39 = func.call pure @add___Long(%38, %delta) : (i64, i64) -> (i64)
+  %55 = scalar.constant -8 : i64
+  %46 = index.cast %cursor_byte_offset : offset to i64
+  %47 = scalar.addi %46, %55 : i64
+  %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
+  %49 = index.cast %48 : i64 to offset
+  %50 = buffer.view %output[%49] : buffer -> view<1xi64>
+  view.store %39, %50[0] : i64, view<1xi64>
+  kernel.return
+}
+
+func.def @add___Long(%value: i64, %delta: i64) -> (i64) {
+  %54 = scalar.addi %value, %delta : i64
+  func.return %54 : i64
+}

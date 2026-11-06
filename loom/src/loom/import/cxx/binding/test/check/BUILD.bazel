@@ -24,6 +24,7 @@ loom_check_test_suite(
         "check_scenarios_invalid.cxx-test",
         "check_typed_expectations.cxx-test",
         "check_typed_expectations_invalid.cxx-test",
+        "generated_shapes.cxx-test",
         "header_cases.cxx-test",
         "vector_tensors.cxx-test",
         "vector_tensors_invalid.cxx-test",

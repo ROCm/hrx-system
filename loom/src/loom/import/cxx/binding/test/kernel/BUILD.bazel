@@ -31,6 +31,7 @@ loom_check_test_suite(
         "configured_workgroup_storage.cxx-test",
         "kernel_arguments.cxx-test",
         "kernel_arguments_invalid.cxx-test",
+        "kernel_callers.cxx-test",
         "kernel_intrinsics.cxx-test",
         "kernel_intrinsics_invalid.cxx-test",
         "launch.cxx-test",

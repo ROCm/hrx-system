@@ -30,6 +30,7 @@ loom_check_test_suite(
         "opaque_pointers_invalid.cxx-test",
         "packed_memory.cxx-test",
         "pointer_origins.cxx-test",
+        "pointer_updates.cxx-test",
         "pointer_walk.cxx-test",
         "pointers.cxx-test",
         "storage_composition.cxx-test",

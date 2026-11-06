@@ -1,0 +1,234 @@
+// RUN: pass canonicalize,cse,dce
+// Prefix and postfix updates select different read origins while output
+// pointer increments preserve the order of the observations.
+void observe(const int* cursor, int* result) {
+  *result++ = *cursor++;
+  *result++ = *++cursor;
+  *result++ = *cursor--;
+  *result++ = *--cursor;
+  *result = *cursor;
+}
+
+// ----
+func.def public @observe(%cursor: buffer, %cursor_byte_offset$1: offset, %result: buffer, %result_byte_offset$3: offset) {
+  %92 = scalar.constant 4 : i64
+  %8 = index.cast %cursor_byte_offset$1 : offset to i64
+  %9 = scalar.addi %8, %92 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %cursor_byte_offset$11 = index.cast %10 : i64 to offset
+  %12 = buffer.view %cursor[%cursor_byte_offset$1] : buffer -> view<1xi32>
+  %13 = view.load %12[0] : view<1xi32> -> i32
+  %18 = index.cast %result_byte_offset$3 : offset to i64
+  %19 = scalar.addi %18, %92 : i64
+  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+  %result_byte_offset$21 = index.cast %20 : i64 to offset
+  %22 = buffer.view %result[%result_byte_offset$3] : buffer -> view<1xi32>
+  view.store %13, %22[0] : i32, view<1xi32>
+  %27 = index.cast %cursor_byte_offset$11 : offset to i64
+  %28 = scalar.addi %27, %92 : i64
+  %29 = scalar.assume %28 [range(%28, 0, 9223372036854775807)] : i64
+  %cursor_byte_offset$30 = index.cast %29 : i64 to offset
+  %31 = buffer.view %cursor[%cursor_byte_offset$30] : buffer -> view<1xi32>
+  %32 = view.load %31[0] : view<1xi32> -> i32
+  %37 = index.cast %result_byte_offset$21 : offset to i64
+  %38 = scalar.addi %37, %92 : i64
+  %39 = scalar.assume %38 [range(%38, 0, 9223372036854775807)] : i64
+  %result_byte_offset$40 = index.cast %39 : i64 to offset
+  %41 = buffer.view %result[%result_byte_offset$21] : buffer -> view<1xi32>
+  view.store %32, %41[0] : i32, view<1xi32>
+  %46 = index.cast %cursor_byte_offset$30 : offset to i64
+  %87 = scalar.constant -4 : i64
+  %88 = scalar.addi %46, %87 : i64
+  %48 = scalar.assume %88 [range(%88, 0, 9223372036854775807)] : i64
+  %cursor_byte_offset$49 = index.cast %48 : i64 to offset
+  %51 = view.load %31[0] : view<1xi32> -> i32
+  %56 = index.cast %result_byte_offset$40 : offset to i64
+  %57 = scalar.addi %56, %92 : i64
+  %58 = scalar.assume %57 [range(%57, 0, 9223372036854775807)] : i64
+  %result_byte_offset$59 = index.cast %58 : i64 to offset
+  %60 = buffer.view %result[%result_byte_offset$40] : buffer -> view<1xi32>
+  view.store %51, %60[0] : i32, view<1xi32>
+  %65 = index.cast %cursor_byte_offset$49 : offset to i64
+  %85 = scalar.addi %65, %87 : i64
+  %67 = scalar.assume %85 [range(%85, 0, 9223372036854775807)] : i64
+  %cursor_byte_offset$68 = index.cast %67 : i64 to offset
+  %69 = buffer.view %cursor[%cursor_byte_offset$68] : buffer -> view<1xi32>
+  %70 = view.load %69[0] : view<1xi32> -> i32
+  %75 = index.cast %result_byte_offset$59 : offset to i64
+  %76 = scalar.addi %75, %92 : i64
+  %77 = scalar.assume %76 [range(%76, 0, 9223372036854775807)] : i64
+  %result_byte_offset$78 = index.cast %77 : i64 to offset
+  %79 = buffer.view %result[%result_byte_offset$59] : buffer -> view<1xi32>
+  view.store %70, %79[0] : i32, view<1xi32>
+  %81 = view.load %69[0] : view<1xi32> -> i32
+  %82 = buffer.view %result[%result_byte_offset$78] : buffer -> view<1xi32>
+  view.store %81, %82[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// The chosen expression returns either the old or new pointer, while both
+// branches carry the updated pointer into the following observation.
+void observe(const int* cursor, int* result, unsigned choose) {
+  const int* selected = (choose & 1u) ? cursor++ : ++cursor;
+  *result++ = *selected;
+  *result = *cursor;
+}
+
+// ----
+func.def public @observe(%cursor: buffer, %cursor_byte_offset$1: offset, %result: buffer, %result_byte_offset$3: offset, %choose: i32) {
+  %5 = scalar.constant 1 : i32
+  %6 = scalar.andi %choose, %5 : i32
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.cmpi ne, %6, %7 : i32
+  %selected_byte_offset, %cursor_byte_offset$47 = scf.if %8 -> (offset, offset) {
+    %45 = scalar.constant 4 : i64
+    %17 = index.cast %cursor_byte_offset$1 : offset to i64
+    %18 = scalar.addi %17, %45 : i64
+    %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+    %cursor_byte_offset = index.cast %19 : i64 to offset
+    scf.yield %cursor_byte_offset$1, %cursor_byte_offset : offset, offset
+  } else {
+    %44 = scalar.constant 4 : i64
+    %25 = index.cast %cursor_byte_offset$1 : offset to i64
+    %26 = scalar.addi %25, %44 : i64
+    %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
+    %cursor_byte_offset = index.cast %27 : i64 to offset
+    scf.yield %cursor_byte_offset, %cursor_byte_offset : offset, offset
+  }
+  %29 = buffer.view %cursor[%selected_byte_offset] : buffer -> view<1xi32>
+  %30 = view.load %29[0] : view<1xi32> -> i32
+  %43 = scalar.constant 4 : i64
+  %35 = index.cast %result_byte_offset$3 : offset to i64
+  %36 = scalar.addi %35, %43 : i64
+  %37 = scalar.assume %36 [range(%36, 0, 9223372036854775807)] : i64
+  %result_byte_offset$38 = index.cast %37 : i64 to offset
+  %39 = buffer.view %result[%result_byte_offset$3] : buffer -> view<1xi32>
+  view.store %30, %39[0] : i32, view<1xi32>
+  %40 = buffer.view %cursor[%cursor_byte_offset$47] : buffer -> view<1xi32>
+  %41 = view.load %40[0] : view<1xi32> -> i32
+  %42 = buffer.view %result[%result_byte_offset$38] : buffer -> view<1xi32>
+  view.store %41, %42[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// Short-circuit expressions skip both the read and the pointer update.
+void observe(const int* cursor, int* result, unsigned choose) {
+  bool accepted = (choose & 2u) || *cursor++ != 0;
+  *result++ = (int)accepted;
+  *result++ = *cursor;
+  bool guarded = (choose & 4u) && *cursor++ != 0;
+  *result++ = (int)guarded;
+  *result = *cursor;
+}
+
+// ----
+func.def public @observe(%cursor: buffer, %cursor_byte_offset$1: offset, %result: buffer, %result_byte_offset$3: offset, %choose: i32) {
+  %5 = scalar.constant 2 : i32
+  %6 = scalar.andi %choose, %5 : i32
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.cmpi ne, %6, %7 : i32
+  %accepted, %cursor_byte_offset$85 = scf.if %8 -> (i1, offset) {
+    scf.yield %8, %cursor_byte_offset$1 : i1, offset
+  } else {
+    %81 = scalar.constant 4 : i64
+    %16 = index.cast %cursor_byte_offset$1 : offset to i64
+    %17 = scalar.addi %16, %81 : i64
+    %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
+    %cursor_byte_offset = index.cast %18 : i64 to offset
+    %20 = buffer.view %cursor[%cursor_byte_offset$1] : buffer -> view<1xi32>
+    %21 = view.load %20[0] : view<1xi32> -> i32
+    %23 = scalar.cmpi ne, %21, %7 : i32
+    scf.yield %23, %cursor_byte_offset : i1, offset
+  }
+  %24 = scalar.extui %accepted : i1 to i32
+  %80 = scalar.constant 4 : i64
+  %29 = index.cast %result_byte_offset$3 : offset to i64
+  %30 = scalar.addi %29, %80 : i64
+  %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
+  %result_byte_offset$32 = index.cast %31 : i64 to offset
+  %33 = buffer.view %result[%result_byte_offset$3] : buffer -> view<1xi32>
+  view.store %24, %33[0] : i32, view<1xi32>
+  %34 = buffer.view %cursor[%cursor_byte_offset$85] : buffer -> view<1xi32>
+  %35 = view.load %34[0] : view<1xi32> -> i32
+  %40 = index.cast %result_byte_offset$32 : offset to i64
+  %41 = scalar.addi %40, %80 : i64
+  %42 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
+  %result_byte_offset$43 = index.cast %42 : i64 to offset
+  %44 = buffer.view %result[%result_byte_offset$32] : buffer -> view<1xi32>
+  view.store %35, %44[0] : i32, view<1xi32>
+  %45 = scalar.constant 4 : i32
+  %46 = scalar.andi %choose, %45 : i32
+  %48 = scalar.cmpi ne, %46, %7 : i32
+  %guarded, %cursor_byte_offset$83 = scf.if %48 -> (i1, offset) {
+    %56 = index.cast %cursor_byte_offset$85 : offset to i64
+    %57 = scalar.addi %56, %80 : i64
+    %58 = scalar.assume %57 [range(%57, 0, 9223372036854775807)] : i64
+    %cursor_byte_offset = index.cast %58 : i64 to offset
+    %61 = view.load %34[0] : view<1xi32> -> i32
+    %63 = scalar.cmpi ne, %61, %7 : i32
+    scf.yield %63, %cursor_byte_offset : i1, offset
+  } else {
+    scf.yield %48, %cursor_byte_offset$85 : i1, offset
+  }
+  %64 = scalar.extui %guarded : i1 to i32
+  %69 = index.cast %result_byte_offset$43 : offset to i64
+  %70 = scalar.addi %69, %80 : i64
+  %71 = scalar.assume %70 [range(%70, 0, 9223372036854775807)] : i64
+  %result_byte_offset$72 = index.cast %71 : i64 to offset
+  %73 = buffer.view %result[%result_byte_offset$43] : buffer -> view<1xi32>
+  view.store %64, %73[0] : i32, view<1xi32>
+  %74 = buffer.view %cursor[%cursor_byte_offset$83] : buffer -> view<1xi32>
+  %75 = view.load %74[0] : view<1xi32> -> i32
+  %76 = buffer.view %result[%result_byte_offset$72] : buffer -> view<1xi32>
+  view.store %75, %76[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// The loop carries the pointer updated by each body, including its final
+// position after the post-increment condition fails.
+void observe(const int* cursor, int* result) {
+  unsigned index = 0;
+  int total = 0;
+  while (index++ < 2u) {
+    total += *cursor++;
+  }
+  *result++ = total;
+  *result = *cursor;
+}
+
+// ----
+func.def public @observe(%cursor$0: buffer, %cursor_byte_offset$1: offset, %result: buffer, %result_byte_offset$3: offset) {
+  %index$4 = scalar.constant 0 : i32
+  %index$14, %total, %cursor$16, %cursor_byte_offset$17 = scf.while(%index$6 = %index$4 : i32, %total = %index$4 : i32, %cursor = %cursor$0 : buffer, %cursor_byte_offset = %cursor_byte_offset$1 : offset) -> (i32, i32, buffer, offset) {
+    %18 = scalar.constant 1 : i32
+    %index$19 = scalar.addi %index$6, %18 : i32
+    %20 = scalar.constant 2 : i32
+    %21 = scalar.cmpi ult, %index$6, %20 : i32
+    scf.condition %21, %index$19, %total, %cursor, %cursor_byte_offset : i1, i32, i32, buffer, offset
+  } do(%index: i32, %total$11: i32, %cursor: buffer, %cursor_byte_offset$13: offset) {
+    %46 = scalar.constant 4 : i64
+    %26 = index.cast %cursor_byte_offset$13 : offset to i64
+    %27 = scalar.addi %26, %46 : i64
+    %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
+    %cursor_byte_offset$29 = index.cast %28 : i64 to offset
+    %30 = buffer.view %cursor[%cursor_byte_offset$13] : buffer -> view<1xi32>
+    %31 = view.load %30[0] : view<1xi32> -> i32
+    %total$32 = scalar.addi %total$11, %31 : i32
+    scf.yield %index, %total$32, %cursor, %cursor_byte_offset$29 : i32, i32, buffer, offset
+  }
+  %45 = scalar.constant 4 : i64
+  %37 = index.cast %result_byte_offset$3 : offset to i64
+  %38 = scalar.addi %37, %45 : i64
+  %39 = scalar.assume %38 [range(%38, 0, 9223372036854775807)] : i64
+  %result_byte_offset$40 = index.cast %39 : i64 to offset
+  %41 = buffer.view %result[%result_byte_offset$3] : buffer -> view<1xi32>
+  view.store %total, %41[0] : i32, view<1xi32>
+  %42 = buffer.view %cursor$16[%cursor_byte_offset$17] : buffer -> view<1xi32>
+  %43 = view.load %42[0] : view<1xi32> -> i32
+  %44 = buffer.view %result[%result_byte_offset$40] : buffer -> view<1xi32>
+  view.store %43, %44[0] : i32, view<1xi32>
+  func.return
+}

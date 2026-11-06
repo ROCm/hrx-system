@@ -21,6 +21,7 @@ loom_check_test_suite(
         "encoding_schemas.cxx-test",
         "encoding_schemas_invalid.cxx-test",
         "index_views.cxx-test",
+        "observations.cxx-test",
         "typed_view_composition.cxx-test",
         "view_values.cxx-test",
         "view_values_invalid.cxx-test",
