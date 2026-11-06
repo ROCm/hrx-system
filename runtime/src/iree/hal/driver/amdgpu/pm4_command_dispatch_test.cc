@@ -123,9 +123,8 @@ class PM4CommandDispatchTest : public ::testing::Test {
   iree_status_t CreateIndirectCommandBuffer(
       iree_hal_buffer_t* output_buffer, iree_hal_buffer_ref_t parameter_ref,
       iree_hal_dispatch_flags_t dispatch_flags, uint32_t binding_capacity,
-      iree_hal_command_buffer_t** out_command_buffer,
-      iree_hal_command_buffer_mode_t mode =
-          IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT) {
+      iree_hal_command_buffer_mode_t mode,
+      iree_hal_command_buffer_t** out_command_buffer) {
     Ref<iree_hal_command_buffer_t> command_buffer;
     IREE_RETURN_IF_ERROR(iree_hal_command_buffer_create(
         iree_hal_queue_family(test_device_.queue()), mode,
@@ -245,7 +244,8 @@ TEST_F(PM4CommandDispatchTest, StaticParametersUseNativePacketAndRetainBuffer) {
       iree_hal_make_buffer_ref(parameter_buffer, kParameterOffset,
                                kParameterByteLength),
       IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS,
-      /*binding_capacity=*/0, command_buffer.out()));
+      /*binding_capacity=*/0, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      command_buffer.out()));
   ASSERT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(command_buffer));
   const iree_hal_amdgpu_pm4_program_t* program =
       iree_hal_amdgpu_pm4_command_buffer_program(command_buffer);
@@ -326,7 +326,8 @@ TEST_F(PM4CommandDispatchTest, WritesInteriorOfNestedQueuedArena) {
       view,
       iree_hal_make_buffer_ref(parameters, kParameterOffset,
                                kParameterByteLength),
-      IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS, 0, commands.out()));
+      IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS, 0,
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, commands.out()));
   IREE_ASSERT_OK(Execute(commands));
   std::array<uint32_t, 64> result = {};
   SemaphoreList downloaded(test_device_.base_device(), {0}, {1});
@@ -369,7 +370,8 @@ TEST_F(PM4CommandDispatchTest, DynamicBindingFixupSupportsReusableExecution) {
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, kParameterOffset,
                                         kParameterByteLength),
       IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS,
-      /*binding_capacity=*/1, command_buffer.out()));
+      /*binding_capacity=*/1, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      command_buffer.out()));
   ASSERT_TRUE(iree_hal_amdgpu_pm4_command_buffer_isa(command_buffer));
   const iree_hal_amdgpu_pm4_program_t* program =
       iree_hal_amdgpu_pm4_command_buffer_program(command_buffer);
@@ -503,7 +505,8 @@ TEST_F(PM4CommandDispatchTest, ZeroParametersRemainAnExecutionTimeNoOp) {
       iree_hal_make_buffer_ref(parameter_buffer, kParameterOffset,
                                kParameterByteLength),
       IREE_HAL_DISPATCH_FLAG_STATIC_INDIRECT_PARAMETERS,
-      /*binding_capacity=*/0, command_buffer.out()));
+      /*binding_capacity=*/0, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+      command_buffer.out()));
   const iree_hal_amdgpu_pm4_program_t* program =
       iree_hal_amdgpu_pm4_command_buffer_program(command_buffer);
   ASSERT_NE(nullptr, FindIndirectPacket(program));
@@ -539,8 +542,9 @@ TEST_F(PM4CommandDispatchTest,
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, kParameterOffset,
                                         kParameterByteLength),
       IREE_HAL_DISPATCH_FLAG_DYNAMIC_INDIRECT_PARAMETERS,
-      /*binding_capacity=*/1, command_buffer.out(),
-      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA));
+      /*binding_capacity=*/1,
+      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA,
+      command_buffer.out()));
   const iree_hal_amdgpu_pm4_command_buffer_profile_plan_t* profile_plan =
       iree_hal_amdgpu_pm4_command_buffer_profile_plan(
           command_buffer, /*physical_queue_ordinal=*/0);
