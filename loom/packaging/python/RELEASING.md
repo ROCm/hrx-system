@@ -50,9 +50,18 @@ and its SHA-256 without configuring the repository's build graph.
 ## Publishing account setup
 
 The [release workflow](../../../.github/workflows/release_loom_sdk.yml) uses the
-repository's `GITHUB_TOKEN` to create or complete the GitHub release. Its PyPI
-job runs in the `pypi` GitHub environment and uses OIDC with attestations through
-the official PyPA publishing action. It does not require a stored PyPI API token.
+repository's `GITHUB_TOKEN` to create or complete a draft GitHub release and
+publish it after its asset set is complete. Its PyPI job runs in the `pypi`
+GitHub environment and uses OIDC with attestations through the official PyPA
+publishing action. It does not require a stored PyPI API token.
+
+Repository owners enable
+[immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)
+before creating the first release governed by this process. GitHub applies the
+setting only to releases created after it is enabled. Drafts remain repairable;
+publication then locks the release's tag and assets. The workflow therefore
+attaches and verifies every artifact while the release is a draft and performs
+publication as its final GitHub mutation.
 
 The PyPI trusted publisher configuration matches these fields:
 
@@ -114,9 +123,11 @@ revision to release; the preparation helper creates neither a commit nor a tag.
 Ordinary PR CI covers the Release SDK. To qualify the other profiles on a branch
 named `sdk-release-preparation`:
 
-```sh
-gh workflow run build_loom_sdk.yml --repo ROCm/hrx-system \
-  --ref sdk-release-preparation -f 'profiles=["Tracy","Debug","ASAN"]'
+```bash
+for profile in Tracy Debug ASAN; do
+  gh workflow run build_loom_sdk.yml --repo ROCm/hrx-system \
+    --ref sdk-release-preparation -f profile="$profile"
+done
 ```
 
 This workflow builds and tests artifacts without publishing them. The installed
@@ -135,11 +146,21 @@ this workflow publishes the Loom SDK assets. The release branch owns the
 candidate and stable identities, while ordinary development continues on
 `main`.
 
-The first candidate sets `package-version` to `X.Y.Zrc1` and pins an immutable,
-qualified catalog reference. Tag its merged release-line commit as
-`vX.Y.Zrc1`. The tag publishes a public GitHub prerelease with direct wheel and
-standalone-executable installation instructions. It does not enter the PyPI
-environment or stage a PyPI upload.
+The first candidate sets `package-version` to `X.Y.Zrc1` and names the
+coordinated library tag
+`github:ROCm/hrx-loom-library@vX.Y.Zrc1`. Build and qualify the SDK candidate
+before that tag exists, then use the library's SDK qualification workflow to
+pin the exact candidate wheel and source revision. After its host and hardware
+gates pass, merge the library pin and run **Loom Library / Release**. That
+workflow creates the same-version library tag, proves that the candidate SDK's
+implicit `loom-fetch --list` path resolves the tagged admitted catalog, and
+publishes the empty immutable library release.
+
+Only after that catalog release is immutable, tag the merged HRX release-line
+commit as `vX.Y.Zrc1`. The SDK workflow requires the matching immutable catalog
+release before any SDK release mutation, then publishes a public GitHub
+prerelease with direct wheel and standalone-executable installation instructions.
+It does not enter the PyPI environment or stage a PyPI upload.
 
 Feedback fixes land on `main` first and are then cherry-picked onto the release
 line. Each changed candidate increments the package version and tag (`rc2`,
@@ -170,11 +191,15 @@ can also be selected explicitly:
 gh workflow run release_loom_sdk.yml --repo ROCm/hrx-system --ref v1.2.3
 ```
 
-This is a publishing workflow. It checks the tag against the committed identity,
-builds all four profiles for both platforms, and requires every installed test
-to pass. The bundle job verifies the complete set and writes `SHA256SUMS`.
-Publication consumes those bytes without recompiling. GitHub publication
-completes before the stable-only PyPI publication starts.
+This is a publishing workflow. It checks the tag against the committed identity
+and requires the identity's same-version catalog tag to be an immutable public
+library release. It builds all four profiles for both platforms and requires
+every installed test to pass. The bundle job verifies the complete set and
+writes `SHA256SUMS`.
+Publication consumes those bytes without recompiling. The GitHub job creates or
+resumes a draft, verifies its exact asset inventory and SHA-256 digests, uploads
+only missing assets, and publishes only after the set is complete. GitHub
+publication completes before the stable-only PyPI publication starts.
 
 GitHub publication writes a compact SDK description naming the installation
 path, attached native profiles, standalone executables, and checksum document.
@@ -219,17 +244,20 @@ The retry behavior is deliberate:
 
 | Condition | Result |
 | --- | --- |
-| Matching GitHub assets already exist | Download and compare their SHA-256, then upload only missing assets. |
+| A matching GitHub draft exists | Compare its API-reported SHA-256 digests, upload only missing assets, then publish it. |
+| A complete matching GitHub release is already public | Accept it without another release mutation. |
+| The coordinated library release is absent, mutable, or mismatched | Fail before creating or changing the SDK release. |
 | Matching normal wheels already exist on PyPI | Compare published hashes and yanked state, then upload only missing wheels. |
-| Existing bytes differ, a wheel is unexpected, or a PyPI wheel is yanked | Fail; changed artifacts need a new version. |
-| A GitHub asset is incompletely uploaded, or release draft/prerelease metadata conflicts | Fail for release-owner review before further uploads. |
+| Existing bytes differ, an asset is unexpected, or a PyPI wheel is yanked | Fail; changed artifacts need a new version. |
+| A public GitHub release is incomplete | Fail; an immutable public release cannot be repaired, so the corrected release needs a new version. |
+| A GitHub asset is incompletely uploaded, or release tag/channel metadata conflicts | Fail for release-owner review before further uploads. |
 | Authentication, rate limiting, or a service fails | Report the error; retry after the cause is resolved. |
 
-No publication operation overwrites an existing asset. After the 14-day workflow
-artifact retention expires, a new build must produce byte-identical artifacts to
-resume a partial release. Different bytes require a new version. A new workflow
-dispatch starts new producers; it is not the same operation as rerunning failed
-publication jobs.
+No publication operation overwrites an existing asset, and no operation mutates
+a completed public release. After the 14-day workflow artifact retention
+expires, a new build must produce byte-identical artifacts to resume a partial
+draft. Different bytes require a new version. A new workflow dispatch starts new
+producers; it is not the same operation as rerunning failed publication jobs.
 
 ## Maintaining the release machinery
 

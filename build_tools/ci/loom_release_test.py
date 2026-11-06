@@ -13,7 +13,6 @@ import io
 import json
 import os
 import stat
-import subprocess
 import tempfile
 import unittest
 import urllib.error
@@ -32,6 +31,8 @@ class LoomReleaseTest(unittest.TestCase):
         self.root = Path(temporary.name)
         self.output = self.root / "pypi"
         self.description = "# SDK\n"
+        self.revision = "a" * 40
+        self.catalog_revision = "b" * 40
         self.bundle("1.2.3")
 
     def bundle(self, version):
@@ -87,21 +88,73 @@ class LoomReleaseTest(unittest.TestCase):
         release.write_checksums(self.directory, self.artifacts)
         self.assets = {artifact.path.name: artifact.path for artifact in self.artifacts}
         self.assets["SHA256SUMS"] = self.directory / "SHA256SUMS"
+        self.asset_digests = {
+            name: loom_release._digest(path) for name, path in self.assets.items()
+        }
 
     def publish(self):
-        loom_release.publish_github(
-            "fixture/sdk",
-            self.tag,
-            self.identity,
-            self.artifacts,
-            self.assets["SHA256SUMS"],
+        with patch.object(loom_release, "_require_catalog_release"):
+            loom_release.publish_github(
+                "fixture/sdk",
+                self.revision,
+                self.tag,
+                self.identity,
+                self.artifacts,
+                self.assets["SHA256SUMS"],
+            )
+
+    def existing_release(self, *, draft=False, immutable=None):
+        if immutable is None:
+            immutable = not draft
+        return dict(
+            id=123,
+            tag_name=self.tag,
+            name=f"Loom {self.tag}",
+            body=loom_release.github_release_body(self.identity, "fixture/sdk"),
+            draft=draft,
+            prerelease=(
+                self.identity.release_channel is release.ReleaseChannel.PRERELEASE
+            ),
+            immutable=immutable,
         )
 
-    def existing_release(self):
-        return dict(id=123, tag_name=self.tag, draft=False, prerelease=False)
-
     def records(self, names):
-        return [{"name": name, "state": "uploaded"} for name in names]
+        return [
+            {
+                "name": name,
+                "state": "uploaded",
+                "digest": "sha256:" + self.asset_digests.get(name, "0" * 64),
+            }
+            for name in names
+        ]
+
+    def catalog_release(self, **changes):
+        return {
+            "tag_name": self.tag,
+            "draft": False,
+            "prerelease": (
+                self.identity.release_channel is release.ReleaseChannel.PRERELEASE
+            ),
+            "immutable": True,
+        } | changes
+
+    def catalog_pin(self, **changes):
+        wheel = next(
+            wheel
+            for wheel in self.wheels
+            if wheel.profile == "release"
+            and wheel.platform == release.LINUX_X86_64_PLATFORM
+        )
+        return {
+            "repository": "fixture/sdk",
+            "revision": self.revision,
+            "run_id": 123,
+            "artifact_id": 456,
+            "release_tag": self.tag,
+            "wheel": wheel.path.name,
+            "sha256": wheel.digest,
+            "catalog": self.identity.catalog,
+        } | changes
 
     def test_verification_requires_existing_matching_complete_checksums(self):
         actual = loom_release.verified_release(
@@ -120,6 +173,130 @@ class LoomReleaseTest(unittest.TestCase):
                 self.directory, self.identity, self.description, self.tag
             )
 
+    def test_catalog_tag_requires_a_matching_immutable_public_release(self):
+        with (
+            patch.object(
+                github_api,
+                "get_json",
+                side_effect=[
+                    self.catalog_release(),
+                    {"object": {"type": "commit", "sha": self.catalog_revision}},
+                ],
+            ) as get,
+            patch.object(
+                github_api,
+                "get_bytes",
+                return_value=json.dumps(self.catalog_pin()).encode(),
+            ),
+        ):
+            loom_release._require_catalog_release(
+                "fixture/sdk",
+                self.revision,
+                self.identity,
+                self.artifacts,
+                "token",
+            )
+        self.assertIn(
+            f"repos/fixture/library/releases/tags/{self.tag}",
+            get.call_args_list[0].args[0],
+        )
+
+        for change in (
+            {"tag_name": "different"},
+            {"draft": True},
+            {"prerelease": True},
+            {"immutable": False},
+        ):
+            with (
+                self.subTest(change=change),
+                patch.object(
+                    github_api,
+                    "get_json",
+                    return_value=self.catalog_release(**change),
+                ),
+            ):
+                with self.assertRaisesRegex(ValueError, "immutable public"):
+                    loom_release._require_catalog_release(
+                        "fixture/sdk",
+                        self.revision,
+                        self.identity,
+                        self.artifacts,
+                        "token",
+                    )
+
+        mismatched = release.Identity(
+            self.identity.version, "github:fixture/library@different"
+        )
+        with self.assertRaisesRegex(ValueError, "matching versioned"):
+            loom_release._require_catalog_release(
+                "fixture/sdk",
+                self.revision,
+                mismatched,
+                self.artifacts,
+                "token",
+            )
+
+    def test_catalog_pin_must_name_the_exact_sdk_bytes(self):
+        changes = (
+            {"revision": "c" * 40},
+            {"release_tag": "different"},
+            {"wheel": "different.whl"},
+            {"sha256": "d" * 64},
+            {"catalog": "github:fixture/library@different"},
+        )
+        for change in changes:
+            with (
+                self.subTest(change=change),
+                patch.object(
+                    github_api,
+                    "get_json",
+                    side_effect=[
+                        self.catalog_release(),
+                        {
+                            "object": {
+                                "type": "commit",
+                                "sha": self.catalog_revision,
+                            }
+                        },
+                    ],
+                ),
+                patch.object(
+                    github_api,
+                    "get_bytes",
+                    return_value=json.dumps(self.catalog_pin(**change)).encode(),
+                ),
+            ):
+                with self.assertRaisesRegex(ValueError, "exact SDK bytes"):
+                    loom_release._require_catalog_release(
+                        "fixture/sdk",
+                        self.revision,
+                        self.identity,
+                        self.artifacts,
+                        "token",
+                    )
+
+    def test_catalog_failure_prevents_sdk_release_mutation(self):
+        with (
+            patch.object(
+                loom_release,
+                "_require_catalog_release",
+                side_effect=ValueError("catalog unavailable"),
+            ),
+            patch.object(github_api, "get_json") as get,
+            patch("subprocess.run") as run,
+        ):
+            with self.assertRaisesRegex(ValueError, "catalog unavailable"):
+                loom_release.publish_github(
+                    "fixture/sdk",
+                    self.revision,
+                    self.tag,
+                    self.identity,
+                    self.artifacts,
+                    self.assets["SHA256SUMS"],
+                )
+        get.assert_not_called()
+        run.assert_not_called()
+
     def test_new_github_release_uses_existing_tag_and_complete_assets(self):
         for version in ("1.2.3", "1.2.3a1", "1.2.3b2", "1.2.3rc1"):
             if version != self.identity.version:
@@ -129,22 +306,30 @@ class LoomReleaseTest(unittest.TestCase):
                 patch.object(
                     github_api,
                     "get_json",
-                    side_effect=urllib.error.HTTPError(
-                        "https://api.github.com", 404, "Not Found", {}, None
-                    ),
+                    side_effect=[
+                        urllib.error.HTTPError(
+                            "https://api.github.com", 404, "Not Found", {}, None
+                        ),
+                        self.existing_release(draft=True),
+                        self.records(self.assets),
+                        self.existing_release(),
+                    ],
                 ),
                 patch("subprocess.run") as run,
             ):
                 self.publish()
-                command = run.call_args.args[0]
+                self.assertEqual(run.call_count, 2)
+                command = run.call_args_list[0].args[0]
                 self.assertEqual(command[:4], ["gh", "release", "create", self.tag])
                 self.assertIn("--verify-tag", command)
+                self.assertIn("--draft", command)
                 self.assertNotIn("--clobber", command)
                 self.assertNotIn("--generate-notes", command)
                 prerelease = (
                     self.identity.release_channel is release.ReleaseChannel.PRERELEASE
                 )
                 self.assertEqual("--prerelease" in command, prerelease)
+                self.assertEqual("--latest=false" in command, prerelease)
                 body = command[command.index("--notes") + 1]
                 if prerelease:
                     self.assertIn("not published to PyPI", body)
@@ -171,6 +356,18 @@ class LoomReleaseTest(unittest.TestCase):
                     asset_arguments, [str(path) for path in self.assets.values()]
                 )
                 self.assertEqual(len(asset_arguments), len(self.assets))
+                self.assertEqual(
+                    run.call_args_list[1].args[0],
+                    [
+                        "gh",
+                        "release",
+                        "edit",
+                        self.tag,
+                        "--repo",
+                        "fixture/sdk",
+                        "--draft=false",
+                    ],
+                )
 
     def test_github_release_body_rejects_service_limit_overflow(self):
         limit = loom_release.GITHUB_RELEASE_BODY_MAXIMUM
@@ -184,98 +381,144 @@ class LoomReleaseTest(unittest.TestCase):
             self.standalones[0].path.name,
             "SHA256SUMS",
         }
-        events = []
-
-        def gh(command, **kwargs):
-            events.append(command)
-            if command[2] == "download":
-                name = command[command.index("--pattern") + 1]
-                directory = Path(command[command.index("--dir") + 1])
-                (directory / name).write_bytes(self.assets[name].read_bytes())
-            return subprocess.CompletedProcess(command, 0)
-
         with (
             patch.object(
                 github_api,
                 "get_json",
-                side_effect=[self.existing_release(), self.records(sorted(present))],
+                side_effect=[
+                    self.existing_release(draft=True),
+                    self.records(sorted(present)),
+                    self.records(self.assets),
+                    self.existing_release(),
+                ],
             ),
-            patch("subprocess.run", side_effect=gh),
+            patch("subprocess.run") as run,
         ):
             self.publish()
-        downloads = [
-            event[event.index("--pattern") + 1]
-            for event in events
-            if event[2] == "download"
-        ]
-        self.assertEqual(downloads, sorted(present))
-        upload = events[-1]
+        self.assertEqual(run.call_count, 2)
+        upload = run.call_args_list[0].args[0]
         self.assertEqual(upload[2], "upload")
         self.assertCountEqual(
             upload[4 : upload.index("--repo")],
             [str(path) for name, path in self.assets.items() if name not in present],
         )
         self.assertNotIn("--clobber", upload)
+        self.assertEqual(run.call_args_list[1].args[0][2], "edit")
 
-    def test_conflicting_overlap_prevents_all_uploads(self):
+    def test_conflicting_digest_prevents_all_uploads(self):
         present = {self.wheels[0].path.name, self.standalones[0].path.name}
         conflicting_name = max(present)
-        downloads = []
-
-        def gh(command, **kwargs):
-            self.assertEqual(command[2], "download")
-            name = command[command.index("--pattern") + 1]
-            downloads.append(name)
-            directory = Path(command[command.index("--dir") + 1])
-            content = b"conflict"
-            if name != conflicting_name:
-                content = self.assets[name].read_bytes()
-            (directory / name).write_bytes(content)
+        records = self.records(sorted(present))
+        next(record for record in records if record["name"] == conflicting_name)[
+            "digest"
+        ] = "sha256:" + "0" * 64
 
         with (
             patch.object(
                 github_api,
                 "get_json",
-                side_effect=[self.existing_release(), self.records(sorted(present))],
+                side_effect=[self.existing_release(draft=True), records],
             ),
-            patch("subprocess.run", side_effect=gh),
+            patch("subprocess.run") as run,
         ):
             with self.assertRaisesRegex(ValueError, "Existing GitHub asset differs"):
                 self.publish()
-        self.assertEqual(downloads, sorted(present))
+        run.assert_not_called()
 
-    def test_complete_retry_downloads_every_asset_once_and_does_not_write(self):
-        downloads = []
-
-        def gh(command, **kwargs):
-            self.assertEqual(command[2], "download")
-            name = command[command.index("--pattern") + 1]
-            downloads.append(name)
-            directory = Path(command[command.index("--dir") + 1])
-            (directory / name).write_bytes(self.assets[name].read_bytes())
-
+    def test_complete_published_retry_is_read_only(self):
         with (
             patch.object(
                 github_api,
                 "get_json",
                 side_effect=[self.existing_release(), self.records(self.assets)],
             ),
-            patch("subprocess.run", side_effect=gh),
+            patch("subprocess.run") as run,
         ):
             self.publish()
-        self.assertEqual(downloads, sorted(self.assets))
+        run.assert_not_called()
+
+    def test_complete_published_retry_reads_every_asset_page(self):
+        records = self.records(self.assets)
+        pages = [records[index : index + 2] for index in range(0, len(records), 2)]
+        with (
+            patch.object(loom_release, "GITHUB_ASSET_PAGE_SIZE", 2),
+            patch.object(
+                github_api,
+                "get_json",
+                side_effect=[self.existing_release(), *pages],
+            ) as get_json,
+            patch("subprocess.run") as run,
+        ):
+            self.publish()
+        self.assertIn("page=2", get_json.call_args_list[2].args[0])
+        run.assert_not_called()
+
+    def test_complete_draft_retry_publishes_without_uploading(self):
+        with (
+            patch.object(
+                github_api,
+                "get_json",
+                side_effect=[
+                    self.existing_release(draft=True),
+                    self.records(self.assets),
+                    self.existing_release(),
+                ],
+            ),
+            patch("subprocess.run") as run,
+        ):
+            self.publish()
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0][2], "edit")
+
+    def test_incomplete_published_release_cannot_be_modified(self):
+        records = self.records(list(self.assets)[:-1])
+        with (
+            patch.object(
+                github_api,
+                "get_json",
+                side_effect=[self.existing_release(), records],
+            ),
+            patch("subprocess.run") as run,
+        ):
+            with self.assertRaisesRegex(ValueError, "incomplete asset set"):
+                self.publish()
+        run.assert_not_called()
 
     def test_conflicting_release_metadata_stops_before_commands(self):
-        for change in ({"draft": True}, {"prerelease": True}, {"tag_name": "v2.0.0"}):
+        for change in (
+            {"prerelease": True},
+            {"tag_name": "v2.0.0"},
+            {"name": "Different"},
+            {"body": "Different"},
+            {"immutable": False},
+        ):
             document = self.existing_release() | change
             with (
                 self.subTest(change=change),
                 patch.object(github_api, "get_json", return_value=document),
                 patch("subprocess.run") as run,
             ):
-                with self.assertRaisesRegex(ValueError, "conflicting tag"):
+                with self.assertRaises(ValueError):
                     self.publish()
                 run.assert_not_called()
+
+    def test_publication_requires_the_immutable_terminal_state(self):
+        with (
+            patch.object(
+                github_api,
+                "get_json",
+                side_effect=[
+                    self.existing_release(draft=True),
+                    self.records(self.assets),
+                    self.existing_release(immutable=False),
+                ],
+            ),
+            patch("subprocess.run") as run,
+        ):
+            with self.assertRaisesRegex(ValueError, "mutable"):
+                self.publish()
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[0][2], "edit")
 
     def test_asset_inventory_is_complete_and_rejects_invalid_records(self):
         name = self.wheels[0].path.name
@@ -287,7 +530,8 @@ class LoomReleaseTest(unittest.TestCase):
             self.records([name, name]),
             self.records(["unexpected.whl"]),
             *(self.records([name]) for name in unexpected_archives),
-            [{"name": name, "state": "starter"}],
+            [self.records([name])[0] | {"state": "starter"}],
+            [self.records([name])[0] | {"digest": None}],
         ):
             with (
                 self.subTest(records=records),
@@ -301,27 +545,6 @@ class LoomReleaseTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.publish()
                 run.assert_not_called()
-        with (
-            patch.object(
-                github_api,
-                "get_json",
-                side_effect=[
-                    self.existing_release(),
-                    self.records(
-                        [
-                            f"notes-{i}"
-                            for i in range(loom_release.GITHUB_ASSET_PAGE_SIZE)
-                        ]
-                    ),
-                    self.records(["unexpected.whl"]),
-                ],
-            ) as get,
-            patch("subprocess.run") as run,
-        ):
-            with self.assertRaisesRegex(ValueError, "Unexpected GitHub release"):
-                self.publish()
-            self.assertIn("page=2", get.call_args.args[0])
-            run.assert_not_called()
 
     def test_github_authorization_and_service_errors_are_not_absence(self):
         for code in (401, 403, 429, 500):
