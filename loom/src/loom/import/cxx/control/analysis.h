@@ -256,6 +256,11 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Calls retained by the same source walk for sparse interprocedural effect
   // propagation before callable signatures are frozen.
   std::span<const DirectCall> calls() const { return calls_; }
+  // Static declarations in lexical order within this instantiated function.
+  // The ordinal distinguishes same-named objects in separate nested scopes.
+  std::span<cxx::InitDeclaratorAST* const> static_locals() const {
+    return static_locals_;
+  }
   // Nontrivial complete-object destruction registered after this automatic
   // binding's initialization succeeds, or null for trivial destruction.
   const Destruction* automatic_destruction(cxx::Symbol* binding) const;
@@ -479,6 +484,8 @@ class ControlFlow final : private cxx::ASTVisitor {
   Types& types_;
   // Source definition whose implicit object fields participate in SSA flow.
   cxx::FunctionSymbol* function_;
+  // Source-owned static declarations retained by the existing body walk.
+  std::vector<cxx::InitDeclaratorAST*> static_locals_;
   // Active write-summary owners during construction only, including direct
   // for-loop bodies without a compound statement.
   std::vector<cxx::AST*> owners_;

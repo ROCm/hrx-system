@@ -35,9 +35,9 @@ unsigned duplicate(unsigned input) {
 }
 
 // ====
-unsigned static_binding(unsigned input) {
+unsigned static_binding() {
   // ERROR@+1: LOWERING/059 "constexpr requires a binding with automatic storage duration"
-  [[loom::constexpr]] static const unsigned value = input;
+  [[loom::constexpr]] static const unsigned value = 7;
   return value;
 }
 

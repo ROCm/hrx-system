@@ -507,9 +507,12 @@ loom_test(
 
 loom_test(
     name = "immutable_objects_test",
-    srcs = ["immutable_objects.cxx"],
-    execution_profiles = [VM_REFERENCE_PROFILE],
-    target_compatible_with = _HOST_COMPATIBILITY,
+    execution_profiles = [
+        VM_REFERENCE_PROFILE,
+        X86_TASK_HARDWARE_PROFILE,
+    ],
+    module = ":immutable_objects_module",
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test_module(
@@ -536,6 +539,18 @@ loom_test(
     execution_profiles = [VM_REFERENCE_PROFILE],
     module = ":immutable_object_link_module",
     target_compatible_with = _HOST_COMPATIBILITY,
+)
+
+loom_test(
+    name = "immutable_local_link_test",
+    benchmark_smoke = False,
+    case = "immutable_local_link_identity",
+    execution_profiles = [
+        VM_REFERENCE_PROFILE,
+        X86_TASK_HARDWARE_PROFILE,
+    ],
+    module = ":immutable_object_link_module",
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
 
 loom_test(
@@ -848,6 +863,7 @@ loom_test_module(
         "early_returns",
         "enum_values",
         "function_specializations",
+        "immutable_objects",
         "integer_increment",
         "mxfp_group_dot",
         "opaque_pointers",
