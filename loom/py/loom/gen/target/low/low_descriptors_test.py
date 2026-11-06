@@ -4997,6 +4997,7 @@ def test_instruction_ownership_requires_matching_ssa_role(index, effect):
 
 
 def test_numeric_descriptor_sets_omit_ownership_tables():
-    generated = generate_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,))
+    generated = generate_descriptor_set(descriptor_set)
     assert "OwnershipOffsets" not in generated.source
     assert "OwnershipEffects" not in generated.source

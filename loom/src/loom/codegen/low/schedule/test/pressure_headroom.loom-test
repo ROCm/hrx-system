@@ -105,26 +105,26 @@ node 2 issue-cycle: 4
 // does not grow the physical bank and has no constraining headroom.
 // RUN: emit low-schedule-json @preferred_ownership_reuses_storage strategy=resource-stall diagnostics=candidates output=none
 
-amdgpu.target<gfx1100> @target {subgroup_size = 32}
+test.target<low_core> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @preferred_ownership_reuses_storage(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %accumulator: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
-  // REMARK@+1: BACKEND/015 {chosen_packet="amdgpu.v_wmma_f32_16x16x16_f16", rejected_packet="low.storage.reserve", chosen_projected_live_units="8", chosen_units_until_pressure_cliff="4294967295"}
-  %result = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %accumulator
+low.func.def target<test.low.core>(@target) @preferred_ownership_reuses_storage(%lhs: reg<test.phys x4>, %rhs: reg<test.phys x4>, %accumulator: reg<test.phys x4>) -> (reg<test.phys x4>) asm {
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.accumulate.v4phys", rejected_packet="low.storage.reserve", chosen_projected_live_units="4", chosen_units_until_pressure_cliff="4294967295"}
+  %result = test.accumulate.v4phys %lhs, %rhs, %accumulator
   %scratch = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
   return %result
 }
 
 // ====
 
-// An independent result overlaps all three eight-unit inputs. The early
-// footprint and seven-unit alignment reserve leave 217 of 256 units free.
+// An independent result overlaps all three four-unit inputs. The early
+// footprint and three-unit alignment reserve leave 13 of 32 units free.
 // RUN: emit low-schedule-json @independent_early_write_has_distinct_storage strategy=resource-stall diagnostics=candidates output=none
 
-amdgpu.target<gfx1100> @target {subgroup_size = 32}
+test.target<low_core> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @independent_early_write_has_distinct_storage(%lhs: reg<amdgpu.vgpr x8>, %rhs: reg<amdgpu.vgpr x8>, %accumulator: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x8>) asm {
-  // REMARK@+1: BACKEND/015 {chosen_packet="amdgpu.v_wmma_f32_16x16x16_f16", rejected_packet="low.storage.reserve", chosen_projected_live_units="8", chosen_units_until_pressure_cliff="217"}
-  %result = v_wmma_f32_16x16x16_f16 %lhs, %rhs, %accumulator : reg<amdgpu.vgpr x8>
+low.func.def target<test.low.core>(@target) @independent_early_write_has_distinct_storage(%lhs: reg<test.phys x4>, %rhs: reg<test.phys x4>, %accumulator: reg<test.phys x4>) -> (reg<test.phys x4>) asm {
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.accumulate.v4phys", rejected_packet="low.storage.reserve", chosen_projected_live_units="4", chosen_units_until_pressure_cliff="13"}
+  %result = test.accumulate.v4phys %lhs, %rhs, %accumulator : reg<test.phys x4>
   %scratch = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
   return %result
 }
@@ -183,16 +183,16 @@ node 2 issue-cycle: 4
 
 // ====
 
-// The subtraction/cmov sequence still reads its original input after writing
-// the result. With all sixteen GPRs live, that temporary overlap exceeds the
-// physical bank even though the final live demand remains sixteen units.
+// The packet still reads its original input after writing the result.
+// With all 32 registers live, that temporary overlap exceeds the
+// physical bank even though the final live demand remains 32 units.
 // RUN: emit low-schedule-json @late_read_overlap strategy=resource-stall diagnostics=candidates output=none
 
-x86.target<avx2> @target
+test.target<low_core> @target
 
-low.func.def target<x86.avx2.core>(@target) @late_read_overlap(%held: reg<x86.gpr32 x15>, %source: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.xmm x15>) asm {
-  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="x86.scalar.sub.if_uge.imm.gpr32", chosen_projected_live_units="16", chosen_pressure_cliff_source="x86.gpr32", chosen_pressure_cliff_units="16", chosen_pressure_cliff_penalty="2"}
-  %result = sub.if_uge.imm.gpr32 %source, 17
-  %released = copy %held : reg<x86.gpr32 x15> -> reg<x86.xmm x15>
+low.func.def target<test.low.core>(@target) @late_read_overlap(%held: reg<test.phys x31>, %source: reg<test.phys>) -> (reg<test.phys>, reg<test.i32 x31>) asm {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.late_update.phys", chosen_projected_live_units="32", chosen_pressure_cliff_source="test.phys", chosen_pressure_cliff_units="32", chosen_pressure_cliff_penalty="2"}
+  %result = test.late_update.phys %source
+  %released = copy %held : reg<test.phys x31> -> reg<test.i32 x31>
   return %result, %released
 }
