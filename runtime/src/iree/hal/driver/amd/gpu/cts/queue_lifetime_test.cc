@@ -130,6 +130,7 @@ class GpuNativeQueueLifetimeTest
   }
 
   void FrontierAllocationProgress(bool fail);
+  void FrontierReleaseProgress(bool fail);
 
   // Native dependency gate, joined by base teardown before its table expires.
   NativeMemoryGate memory_gate_;
@@ -220,6 +221,105 @@ TEST_P(GpuNativeQueueLifetimeTest,
 TEST_P(GpuNativeQueueLifetimeTest,
        ExistingQueuesSurviveFailedFrontierAllocationAndRetry) {
   FrontierAllocationProgress(true);
+}
+
+void GpuNativeQueueLifetimeTest::FrontierReleaseProgress(bool fail) {
+  Ref<iree_hal_queue_t> first, second, growing;
+  IREE_ASSERT_OK(AcquireQueue(first.out()));
+  IREE_ASSERT_OK(AcquireQueue(second.out()));
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(256, 4),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_semaphore_t> retired, filled, done;
+  CreateSemaphore(retired.out());
+  CreateSemaphore(filled.out());
+  CreateSemaphore(done.out());
+  iree_hal_semaphore_t* retired_handle = retired;
+  iree_hal_semaphore_t* filled_handle = filled;
+  iree_hal_semaphore_t* done_handle = done;
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_barrier(first, {}, {1, &retired_handle, &one},
+                                        nullptr, 0));
+  std::jthread constructor;
+  {
+    // Four existing coordinates expand to eight. The provisioned queue's
+    // exact allocation is held before either acquired queue is visited.
+    const size_t table_size =
+        sizeof(iree_hal_amd_gpu_signal_frontiers_t) +
+        options_.queue.retirement_capacity * 8 * sizeof(uint64_t);
+    FrontierAllocationGate::Hold hold(&frontier_gate_, table_size, fail);
+    constructor = std::jthread([&] {
+      auto status = AcquireQueue(growing.out());
+      if (fail) {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+      } else {
+        IREE_EXPECT_OK(status);
+      }
+    });
+    hold.WaitEntered();
+    EXPECT_EQ(frontier_gate_.allocation_thread, constructor.get_id());
+    // Release joins accepted native work itself. The blocked allocation
+    // belongs to another queue and cannot be part of this lifetime join.
+    first.reset();
+    iree_async_single_frontier_t previous = {};
+    ASSERT_EQ(iree_async_semaphore_query_frontier(
+                  reinterpret_cast<iree_async_semaphore_t*>(retired_handle), 1,
+                  iree_async_single_frontier_as_frontier(&previous)),
+              1);
+    Ref<iree_hal_queue_t> reused;
+    IREE_ASSERT_OK(AcquireQueue(reused.out()));
+    constexpr uint32_t pattern = 0xCAFED00D;
+    IREE_ASSERT_OK(iree_hal_queue_fill(
+        reused, {1, &retired_handle, &one}, {1, &filled_handle, &one}, output,
+        0, 256, &pattern, sizeof(pattern), nullptr, 0));
+    reused.reset();
+    iree_async_single_frontier_t current = {};
+    ASSERT_EQ(iree_async_semaphore_query_frontier(
+                  reinterpret_cast<iree_async_semaphore_t*>(filled_handle), 1,
+                  iree_async_single_frontier_as_frontier(&current)),
+              1);
+    EXPECT_EQ(current.entries[0].axis, previous.entries[0].axis);
+    EXPECT_GT(current.entries[0].epoch, previous.entries[0].epoch);
+    std::array<uint32_t, 64> observed = {};
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = output,
+                .target = observed.data(),
+                .length = sizeof(observed),
+            },
+    };
+    IREE_ASSERT_OK(iree_hal_queue_transfer(
+        queues_[1], {1, &filled_handle, &one}, {1, &done_handle, &one}, 1,
+        &download, nullptr));
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_wait(done, one, iree_infinite_timeout(), 0));
+    for (uint32_t value : observed) {
+      EXPECT_EQ(value, pattern);
+    }
+  }
+  constructor.join();
+  if (fail) {
+    EXPECT_EQ(growing.get(), nullptr);
+    IREE_ASSERT_OK(AcquireQueue(growing.out()));
+  }
+  uint64_t two = 2;
+  IREE_ASSERT_OK(iree_hal_queue_barrier(growing, {1, &done_handle, &one},
+                                        {1, &done_handle, &two}, nullptr, 0));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(done, two, iree_infinite_timeout(), 0));
+}
+
+TEST_P(GpuNativeQueueLifetimeTest,
+       AcquiredQueueReleasesAndReusesDuringFrontierGrowth) {
+  FrontierReleaseProgress(false);
+}
+
+TEST_P(GpuNativeQueueLifetimeTest,
+       AcquiredQueueReleaseSurvivesFailedFrontierGrowthAndRetry) {
+  FrontierReleaseProgress(true);
 }
 
 TEST_P(GpuNativeQueueLifetimeTest, FinalReleaseContinuesEpochsAcrossSlotReuse) {

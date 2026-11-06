@@ -24,8 +24,8 @@ struct iree_hal_amd_gpu_queue_slot_t {
   // Older stable coordinate; the link never changes after installation.
   iree_hal_amd_gpu_queue_slot_t* next;
   // Borrowed queue; construction publishes this before worker installation.
-  // LIVE slots admit trims; DRAINING and PRESERVED admit terminal inspection
-  // only. Removal joins every borrower before native shutdown.
+  // LIVE slots admit trims and frontier growth; DRAINING and PRESERVED admit
+  // terminal inspection only. Removal joins borrowers before native shutdown.
   iree_hal_queue_t* queue;
   // Native causal coordinate; source indices additionally skip device services.
   uint32_t ordinal;
@@ -42,7 +42,7 @@ struct iree_hal_amd_gpu_queue_slot_t {
 };
 
 // Construction and removal exclude all new borrowers. Draining excludes new
-// trims while terminal callbacks may still inspect the queue's accepted work.
+// trims and growth; terminal callbacks may still inspect accepted work.
 static bool iree_hal_amd_gpu_queue_slot_is_unborrowed(void* user_data) {
   iree_hal_amd_gpu_queue_slot_t* slot = user_data;
   iree_slim_mutex_lock(&slot->membership->slots_mutex);
@@ -90,7 +90,7 @@ struct iree_hal_amd_gpu_queue_join_t {
 
 void iree_hal_amd_gpu_queue_membership_initialize(
     iree_hal_amd_gpu_queue_membership_t* membership) {
-  membership->frontier_count = membership->provisioned_count;
+  membership->frontiers.count = membership->provisioned_count;
   iree_slim_mutex_initialize(&membership->mutex);
   iree_slim_mutex_initialize(&membership->slots_mutex);
   iree_notification_initialize(&membership->notification);
@@ -280,10 +280,10 @@ static bool iree_hal_amd_gpu_queue_membership_release(void* user_data,
   slot->state = IREE_HAL_AMD_GPU_QUEUE_SLOT_DRAINING;
   iree_slim_mutex_unlock(&membership->slots_mutex);
   iree_slim_mutex_unlock(&membership->mutex);
-  // An already-admitted trim may still enqueue cleanup or begin an async
-  // scratch release. Join it before proving idleness, with this queue's worker
-  // sources still installed to finish that work. Terminal inspection remains
-  // admitted so failure can stop and retire accepted work during this join.
+  // An admitted trim or frontier visitor may still enqueue work. Join it
+  // before proving idleness, with this queue's worker sources still installed
+  // to finish that work. Terminal inspection remains admitted so failure can
+  // stop and retire accepted work during this join.
   iree_notification_await(&membership->notification,
                           iree_hal_amd_gpu_queue_slot_is_unborrowed, slot,
                           iree_infinite_timeout());
@@ -400,31 +400,80 @@ static bool iree_hal_amd_gpu_queue_membership_release(void* user_data,
   return amdf_status_is_ok(status);
 }
 
+static bool iree_hal_amd_gpu_queue_slot_frontiers_available(void* user_data) {
+  iree_hal_amd_gpu_queue_slot_t* slot = user_data;
+  iree_hal_amd_gpu_queue_membership_t* membership = slot->membership;
+  iree_slim_mutex_lock(&membership->mutex);
+  const bool available =
+      slot->ordinal < membership->frontiers.count ||
+      !membership->frontiers.pending_count ||
+      !amdf_status_is_ok(
+          iree_hal_amd_gpu_completion_query_status(membership->completion));
+  iree_slim_mutex_unlock(&membership->mutex);
+  return available;
+}
+
+// Enters and returns with membership exclusion. The reserved coordinate stays
+// CONSTRUCTING while its caller drops exclusion to widen the shared extent.
+// Each protocol has one metadata cursor, so expansions remain ordered; queues
+// using already-installed coordinates do not depend on that expansion.
 static iree_status_t iree_hal_amd_gpu_queue_membership_reserve_frontiers(
-    iree_hal_amd_gpu_queue_membership_t* membership, uint32_t required) {
-  if (required <= membership->frontier_count) {
-    return iree_ok_status();
-  }
-  uint32_t count = membership->frontier_count;
-  while (count < required) {
-    count = iree_min(count * 2, 256u);
-  }
-  iree_status_t status =
-      iree_hal_amd_gpu_program_pool_reserve_queues(membership->programs, count);
-  for (uint32_t i = 0;
-       i < membership->provisioned_count && iree_status_is_ok(status); ++i) {
-    status = membership->lifecycle->reserve_frontiers(
-        membership->provisioned[i], count, &membership->notification);
-  }
-  for (iree_hal_amd_gpu_queue_slot_t* slot = membership->slots;
-       slot && iree_status_is_ok(status); slot = slot->next) {
-    if (slot->state == IREE_HAL_AMD_GPU_QUEUE_SLOT_LIVE) {
-      status = membership->lifecycle->reserve_frontiers(
-          slot->queue, count, &membership->notification);
+    iree_hal_amd_gpu_queue_slot_t* reserved_slot) {
+  iree_hal_amd_gpu_queue_membership_t* membership = reserved_slot->membership;
+  const uint32_t required = reserved_slot->ordinal + 1;
+  iree_status_t status = iree_ok_status();
+  while (required > membership->frontiers.count && iree_status_is_ok(status)) {
+    if (membership->frontiers.pending_count) {
+      iree_slim_mutex_unlock(&membership->mutex);
+      iree_notification_await(&membership->notification,
+                              iree_hal_amd_gpu_queue_slot_frontiers_available,
+                              reserved_slot, iree_infinite_timeout());
+      iree_slim_mutex_lock(&membership->mutex);
+      status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+          iree_hal_amd_gpu_completion_query_status(membership->completion),
+          "GPU frontier growth after observer failure");
+      continue;
     }
-  }
-  if (iree_status_is_ok(status)) {
-    membership->frontier_count = count;
+    uint32_t count = membership->frontiers.count;
+    while (count < required) {
+      count = iree_min(count * 2, 256u);
+    }
+    membership->frontiers.pending_count = count;
+    iree_hal_amd_gpu_queue_slot_t* head = membership->slots;
+    iree_slim_mutex_unlock(&membership->mutex);
+
+    status = iree_hal_amd_gpu_program_pool_reserve_queues(membership->programs,
+                                                          count);
+    for (uint32_t i = 0;
+         i < membership->provisioned_count && iree_status_is_ok(status); ++i) {
+      status = membership->lifecycle->reserve_frontiers(
+          membership->provisioned[i], count, &membership->notification);
+    }
+    for (iree_hal_amd_gpu_queue_slot_t* slot = head;
+         slot && iree_status_is_ok(status); slot = slot->next) {
+      iree_slim_mutex_lock(&membership->slots_mutex);
+      iree_hal_queue_t* queue =
+          slot->state == IREE_HAL_AMD_GPU_QUEUE_SLOT_LIVE ? slot->queue : NULL;
+      if (queue) {
+        ++slot->borrowers;
+      }
+      iree_slim_mutex_unlock(&membership->slots_mutex);
+      if (queue) {
+        status = membership->lifecycle->reserve_frontiers(
+            queue, count, &membership->notification);
+        iree_hal_amd_gpu_queue_slot_return(slot);
+      }
+    }
+
+    iree_slim_mutex_lock(&membership->mutex);
+    if (iree_status_is_ok(status)) {
+      membership->frontiers.count = count;
+      status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+          iree_hal_amd_gpu_completion_query_status(membership->completion),
+          "GPU frontier growth after observer failure");
+    }
+    membership->frontiers.pending_count = 0;
+    iree_notification_post(&membership->notification, IREE_ALL_WAITERS);
   }
   return status;
 }
@@ -452,10 +501,6 @@ iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
     status = iree_hal_amd_gpu_queue_membership_reserve_sources(membership,
                                                                ordinal + 5);
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_queue_membership_reserve_frontiers(membership,
-                                                                 ordinal + 1);
-  }
   if (iree_status_is_ok(status) && !slot) {
     status = iree_allocator_malloc_aligned(
         membership->host_allocator, sizeof(*slot),
@@ -481,7 +526,6 @@ iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
       ++membership->frontier.count;
     }
   }
-  const uint32_t frontier_count = membership->frontier_count;
   iree_hal_queue_t* queue = NULL;
   bool constructing = false;
   if (iree_status_is_ok(status)) {
@@ -497,6 +541,11 @@ iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
     }
     iree_slim_mutex_unlock(&membership->slots_mutex);
   }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_gpu_queue_membership_reserve_frontiers(slot);
+  }
+  uint32_t frontier_count = iree_max(membership->frontiers.count,
+                                     membership->frontiers.pending_count);
   iree_slim_mutex_unlock(&membership->mutex);
   if (iree_status_is_ok(status)) {
     iree_notification_await(&membership->notification,
@@ -523,13 +572,18 @@ iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
     status = IREE_HAL_AMD_STATUS_FROM_AMDF(
         iree_hal_amd_gpu_queue_membership_rebind(membership, NULL),
         "GPU acquired queue source wake");
-    // A concurrent acquisition may have widened the coordinate space while
-    // native construction ran. The unexposed queue catches up through its
-    // exact publisher before any operation can use its new coordinate.
-    if (iree_status_is_ok(status) &&
-        frontier_count < membership->frontier_count) {
+    // CONSTRUCTING excludes this private queue from global frontier visits.
+    // Catch up outside membership exclusion before publishing LIVE; a growth
+    // begun during native construction must not miss the new queue.
+    while (iree_status_is_ok(status) &&
+           frontier_count < iree_max(membership->frontiers.count,
+                                     membership->frontiers.pending_count)) {
+      frontier_count = iree_max(membership->frontiers.count,
+                                membership->frontiers.pending_count);
+      iree_slim_mutex_unlock(&membership->mutex);
       status = membership->lifecycle->reserve_frontiers(
-          queue, membership->frontier_count, &membership->notification);
+          queue, frontier_count, &membership->notification);
+      iree_slim_mutex_lock(&membership->mutex);
     }
     if (iree_status_is_ok(status) && membership->profile) {
       status = membership->lifecycle->set_profile(queue, membership->profile);
