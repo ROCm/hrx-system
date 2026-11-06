@@ -1099,7 +1099,13 @@ static bool loom_amdgpu_source_value_is_durable_i1_bool(
     // Scalar selection produces a normalized word, not an ephemeral SCC bit.
     return true;
   }
-  return (loom_amdgpu_source_i1_value_has_cross_block_use(module,
+  bool crosses_scc_boundary = false;
+  loom_amdgpu_source_value_analysis_cached_bit(
+      analysis, source_value_id,
+      LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_CROSSES_SCC_BOUNDARY,
+      &crosses_scc_boundary);
+  return (crosses_scc_boundary ||
+          loom_amdgpu_source_i1_value_has_cross_block_use(module,
                                                           source_value_id) ||
           loom_amdgpu_source_i1_value_has_same_block_branch_and_mask_use(
               module, fact_table, view_regions, analysis, source_value_id) ||

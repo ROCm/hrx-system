@@ -156,3 +156,53 @@ low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @
   %selected = low.func.call pure @select_vector(%value, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>)
   return %selected
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def noinline @identity(%value: vector<1xi32>) -> (vector<1xi32>) {
+  func.return %value : vector<1xi32>
+}
+
+func.def noinline @select_vector(%value: vector<1xi32>, %condition: i1) -> (vector<1xi32>) {
+  %fallback_value = scalar.constant 3 : i32
+  %fallback = vector.from_elements %fallback_value : vector<1xi32>
+  %selected = scf.select %condition, %value, %fallback : vector<1xi32>
+  func.return %selected : vector<1xi32>
+}
+
+func.def public target(@target) @condition_across_call(%value: vector<1xi32>, %flag: i32) -> (vector<1xi32>) {
+  %c0 = scalar.constant 0 : i32
+  %condition = scalar.cmpi ne, %flag, %c0 : i32
+  %forwarded = func.call @identity(%value) : (vector<1xi32>) -> (vector<1xi32>)
+  %selected = func.call @select_vector(%forwarded, %condition) : (vector<1xi32>, i1) -> (vector<1xi32>)
+  func.return %selected : vector<1xi32>
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @identity(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}
+
+low.func.def noinline target<amdgpu.gfx11.generic.core> @select_vector(%value: reg<amdgpu.vgpr>, %condition: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %selected = v_cndmask_b32_src0_inline %value, %condition {false_value = 3}
+  return %selected
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @condition_across_call(%value: reg<amdgpu.vgpr>, %flag: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %c0 = s_mov_b32 0
+  %27 = s_cmp_lg_i32 %flag, %c0
+  %29 = s_mov_b32 1
+  %condition = s_cselect_b32 %29, %c0, %27
+  %forwarded = low.func.call pure @identity(%value) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  %32 = s_cmp_lg_i32_src1_inline %condition {rhs = 0}
+  %33 = s_mov_b64_exec_read
+  %34 = slice %33[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = slice %33[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %37 = s_cselect_b32 %34, %c0, %32
+  %38 = s_cselect_b32 %35, %c0, %32
+  %39 = concat(%37, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %selected = low.func.call pure @select_vector(%forwarded, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>)
+  return %selected
+}
