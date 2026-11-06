@@ -382,8 +382,9 @@ struct iree_status_storage_t {
 #endif  // has IREE_STATUS_FEATURE_ANNOTATIONS
 };
 
-#define iree_status_storage(status) \
-  ((iree_status_storage_t*)(((uintptr_t)(status) & ~IREE_STATUS_CODE_MASK)))
+#define iree_status_storage(status)               \
+  ((iree_status_storage_t*)((uintptr_t)(status) & \
+                            ~(uintptr_t)IREE_STATUS_CODE_MASK))
 
 // Appends a payload to the storage singly-linked list.
 iree_status_t iree_status_append_payload(iree_status_t status,

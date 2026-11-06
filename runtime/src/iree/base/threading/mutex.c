@@ -237,12 +237,17 @@ void iree_slim_mutex_unlock(iree_slim_mutex_t* mutex) {
 //
 // The high bit of the atomic value indicates whether the lock is held; each
 // thread tries to transition the bit from 0->1 to acquire the lock and 1->0 to
-// release it. The lower bits of the value are whether there are any interested
-// waiters. We track these waiters so that we know when we can avoid performing
-// the futex wake syscall.
+// release it. The lower bits count participating threads: the owner and any
+// waiters while locked, or the remaining contenders while unlocked. We track
+// these participants so that we know when we can avoid the futex wake syscall.
 
-#define iree_slim_mutex_value(value) (0x80000000u | (value))
-#define iree_slim_mutex_is_locked(value) (0x80000000u & (value))
+static inline int32_t iree_slim_mutex_locked_value(int32_t participant_count) {
+  return INT32_MIN + participant_count;
+}
+
+static inline bool iree_slim_mutex_value_is_locked(int32_t value) {
+  return value < 0;
+}
 
 void iree_slim_mutex_initialize(iree_slim_mutex_t* out_mutex) {
   memset(out_mutex, 0, sizeof(*out_mutex));
@@ -265,8 +270,8 @@ static bool iree_slim_mutex_try_lock_compare_exchange(iree_slim_mutex_t* mutex,
 void iree_slim_mutex_lock(iree_slim_mutex_t* mutex) {
   // Try first to acquire the lock from an unlocked state.
   int32_t value = 0;
-  if (iree_slim_mutex_try_lock_compare_exchange(mutex, &value,
-                                                iree_slim_mutex_value(1))) {
+  if (iree_slim_mutex_try_lock_compare_exchange(
+          mutex, &value, iree_slim_mutex_locked_value(1))) {
     return;
   }
 
@@ -277,24 +282,26 @@ void iree_slim_mutex_lock(iree_slim_mutex_t* mutex) {
 
   while (true) {
     // While the lock is available: try to acquire it for this thread.
-    while (!iree_slim_mutex_is_locked(value)) {
+    while (!iree_slim_mutex_value_is_locked(value)) {
       if (iree_slim_mutex_try_lock_compare_exchange(
-              mutex, &value, iree_slim_mutex_value(value))) {
+              mutex, &value, iree_slim_mutex_locked_value(value))) {
         return;
       }
 
       // Spin a small amount to give us a tiny chance of falling through to the
       // wait.
       int spin_count = 100;
-      for (int i = 0; i < spin_count && iree_slim_mutex_is_locked(value); ++i) {
+      for (int i = 0; i < spin_count && iree_slim_mutex_value_is_locked(value);
+           ++i) {
         iree_processor_yield();
         value = iree_atomic_load(&mutex->value, iree_memory_order_relaxed);
       }
     }
 
     // While the lock is unavailable: wait for it to become available.
-    while (iree_slim_mutex_is_locked(value)) {
-      iree_futex_wait(&mutex->value, value, IREE_TIME_INFINITE_FUTURE);
+    while (iree_slim_mutex_value_is_locked(value)) {
+      iree_futex_wait(&mutex->value, (uint32_t)value,
+                      IREE_TIME_INFINITE_FUTURE);
       value = iree_atomic_load(&mutex->value, iree_memory_order_relaxed);
     }
   }
@@ -302,15 +309,15 @@ void iree_slim_mutex_lock(iree_slim_mutex_t* mutex) {
 
 bool iree_slim_mutex_try_lock(iree_slim_mutex_t* mutex) {
   int32_t value = 0;
-  return iree_slim_mutex_try_lock_compare_exchange(mutex, &value,
-                                                   iree_slim_mutex_value(1));
+  return iree_slim_mutex_try_lock_compare_exchange(
+      mutex, &value, iree_slim_mutex_locked_value(1));
 }
 
 void iree_slim_mutex_unlock(iree_slim_mutex_t* mutex) {
   // Transition 1->0 (unlocking with no waiters) or 2->1 (with waiters).
-  if (iree_atomic_fetch_sub(&mutex->value, iree_slim_mutex_value(1),
+  if (iree_atomic_fetch_sub(&mutex->value, iree_slim_mutex_locked_value(1),
                             iree_memory_order_release) !=
-      iree_slim_mutex_value(1)) {
+      iree_slim_mutex_locked_value(1)) {
     // One (or more) waiters; wake a single one to avoid a thundering herd.
     iree_futex_wake(&mutex->value, 1);
   }

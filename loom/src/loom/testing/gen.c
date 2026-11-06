@@ -606,8 +606,8 @@ iree_status_t loom_test_gen_body_internal(
   uint16_t consecutive_failures = 0;
   uint16_t max_consecutive = (uint16_t)(config->hook_count * 3);
 
-  for (uint16_t i = 0; i < config->op_count; ++i) {
-    uint16_t ops_remaining = config->op_count - i;
+  for (uint16_t op_index = 0; op_index < config->op_count;) {
+    uint16_t ops_remaining = config->op_count - op_index;
 
     loom_test_gen_hook_context_t hook_context = {
         .gen = gen,
@@ -640,8 +640,7 @@ iree_status_t loom_test_gen_body_internal(
             builder, const_val, type, LOOM_LOCATION_UNKNOWN, &const_op));
         loom_test_gen_values_add(values, loom_op_results(const_op)[0], type);
         consecutive_failures = 0;
-      } else {
-        --i;  // Retry this iteration with a different hook.
+        ++op_index;
       }
       continue;
     }
@@ -656,6 +655,7 @@ iree_status_t loom_test_gen_body_internal(
         values->buckets_dirty = true;
       }
     }
+    ++op_index;
   }
 
   return iree_ok_status();

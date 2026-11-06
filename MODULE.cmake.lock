@@ -175,6 +175,7 @@ set(IREE_DEP_LIBBACKTRACE_SHA256 "858b1225351052234f7e71f0f36622fc9ad33aac947db7
 set(IREE_DEP_LIBBACKTRACE_STRIP_PREFIX "libbacktrace-793921876c981ce49759114d7bb89bb89b2d3a2d")
 set(IREE_DEP_LIBBACKTRACE_BUILD_FILE "//build_tools/third_party/libbacktrace:libbacktrace.BUILD.bazel")
 set(IREE_DEP_LIBBACKTRACE_PATCHES
+  "//build_tools/third_party/libbacktrace:explicit_integer_conversions.patch"
   "//build_tools/third_party/libbacktrace:threaded_cache_reads.patch"
   "//build_tools/third_party/libbacktrace:ignore_nonruntime_symbols.patch"
   "//build_tools/third_party/libbacktrace:zero_size_vectors.patch"
