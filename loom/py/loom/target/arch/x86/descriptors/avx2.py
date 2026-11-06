@@ -20,6 +20,7 @@ from loom.target.arch.x86.vector_families import (
     AVX2_FLOAT_FMA_MNEMONICS,
     AVX2_FLOAT_INTEGER_I32_FORMS,
     AVX2_FLOAT_ROOT_FAMILIES,
+    AVX2_FLOAT_ROUNDING_FAMILIES,
     AVX2_INTEGER_BINARY_FAMILIES,
     AVX2_INTEGER_COMPARE_MNEMONICS,
     AVX2_INTEGER_FLOAT_I32_FORMS,
@@ -104,6 +105,7 @@ from .float_integer import (
     scalar_float_integer_descriptors,
     vector_float_integer_descriptors,
 )
+from .float_rounding import float_rounding_descriptors
 from .integer_float import (
     integer_float_descriptors,
     vector_integer_float_descriptors,
@@ -1152,6 +1154,12 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         AVX2_FLOAT_BINARY_FAMILIES, native.AVX2_FLOAT_BINARY
     ),
     *_vector_float_root_family_descriptors(),
+    *float_rounding_descriptors(
+        key_prefix="x86.avx2",
+        families=AVX2_FLOAT_ROUNDING_FAMILIES,
+        vector_bit_widths=AVX2_VECTOR_BIT_WIDTHS,
+        evex=False,
+    ),
     *(
         _vector_binary_descriptor(
             vector_bit_width=vector_bit_width,

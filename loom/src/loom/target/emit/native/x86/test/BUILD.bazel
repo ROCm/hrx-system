@@ -37,6 +37,7 @@ loom_check_test_suite(
         "integer_unary.loom-test",
         "operand_ties.loom-test",
         "root_native_bytes.loom-test",
+        "rounding_native_bytes.loom-test",
         "scalar_memory_native_bytes.loom-test",
         "unused_abi_inputs.loom-test",
     ],

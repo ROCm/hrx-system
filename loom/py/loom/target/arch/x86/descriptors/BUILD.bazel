@@ -26,6 +26,7 @@ iree_py_library(
         "f16c.py",
         "float_conversion.py",
         "float_integer.py",
+        "float_rounding.py",
         "half_conversion.py",
         "integer_bits.py",
         "integer_float.py",

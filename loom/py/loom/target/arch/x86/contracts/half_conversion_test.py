@@ -32,6 +32,12 @@ def test_half_conversion_covers_scalar_and_each_native_packet(evex: bool) -> Non
             if guard.kind is GuardKind.VALUE_TYPE
         }
         cells.add((types["input"], types["result"]))
+        if types["input"].kind == "vector":
+            assert any(
+                guard.kind is GuardKind.DESCRIPTOR_AVAILABLE
+                and guard.descriptor == rule.descriptor
+                for guard in rule.guards
+            )
         for emit in rule.emit:
             if emit.descriptor.mnemonic == "vcvtps2ph":
                 assert emit.immediates == {"rounding": 0}

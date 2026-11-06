@@ -111,6 +111,7 @@ loom_check_test_suite(
         "source_low_bmi2_variable_shift.loom-test",
         "source_low_contraction.loom-test",
         "source_low_float_roots.loom-test",
+        "source_low_float_rounding.loom-test",
         "source_low_invoke.loom-test",
         "source_low_math_legalization_report.loom-test",
         "source_low_packed_dot.loom-test",

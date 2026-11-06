@@ -1,6 +1,7 @@
 // Exact integral rounding at signed zero, subnormal, halfway, and last-
-// fractional-exponent boundaries. Each format runs 16 magnitudes with both
-// signs. Scalar reference evaluation checks vector target realization; NaNs
+// fractional-exponent boundaries. F16/BF16/F32/F64 cover directed values and
+// full-width entropy; FP8 covers every encoding. Scalar and vector results
+// compare against scalar reference evaluation. NaNs
 // retain their classification while allowing target-selected payloads.
 
 func.def inline @rounding_f32_result_bits(%value: f32) -> (i32) {
@@ -64,7 +65,7 @@ func.def @rounding_f64_observations(%bits: i64) -> (i64, i64, i64, i64, i64) {
 func.def @rounding_f16_observations(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<32xf16>
-  %results = buffer.view %output[%base] : buffer -> view<5x32xi32>
+  %results = buffer.view %output[%base] : buffer -> view<10x32xi32>
   %begin = index.constant 0 : index
   %end = index.constant 32 : index
   %step = index.constant 4 : index
@@ -85,11 +86,35 @@ func.def @rounding_f16_observations(%input: buffer, %output: buffer) {
     %roundeven_bits = func.call @rounding_f32_vector_bits(%wide_roundeven) : (vector<4xf32>) -> (vector<4xi32>)
     %round_bits = func.call @rounding_f32_vector_bits(%wide_round) : (vector<4xf32>) -> (vector<4xi32>)
     %trunc_bits = func.call @rounding_f32_vector_bits(%wide_trunc) : (vector<4xf32>) -> (vector<4xi32>)
-    vector.store %ceil_bits, %results[0, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %floor_bits, %results[1, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %roundeven_bits, %results[2, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %round_bits, %results[3, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %trunc_bits, %results[4, %i] : vector<4xi32>, view<5x32xi32>
+    vector.store %ceil_bits, %results[0, %i] : vector<4xi32>, view<10x32xi32>
+    vector.store %floor_bits, %results[1, %i] : vector<4xi32>, view<10x32xi32>
+    vector.store %roundeven_bits, %results[2, %i] : vector<4xi32>, view<10x32xi32>
+    vector.store %round_bits, %results[3, %i] : vector<4xi32>, view<10x32xi32>
+    vector.store %trunc_bits, %results[4, %i] : vector<4xi32>, view<10x32xi32>
+  }
+  %scalar_step = index.constant 1 : index
+  scf.for %i = [%begin to %end step %scalar_step] {
+    %value = view.load %source[%i] : view<32xf16> -> f16
+    %ceil = scalar.ceilf %value : f16
+    %wide_ceil = scalar.extf %ceil : f16 to f32
+    %ceil_bits = func.call @rounding_f32_result_bits(%wide_ceil) : (f32) -> (i32)
+    view.store %ceil_bits, %results[5, %i] : i32, view<10x32xi32>
+    %floor = scalar.floorf %value : f16
+    %wide_floor = scalar.extf %floor : f16 to f32
+    %floor_bits = func.call @rounding_f32_result_bits(%wide_floor) : (f32) -> (i32)
+    view.store %floor_bits, %results[6, %i] : i32, view<10x32xi32>
+    %roundeven = scalar.roundevenf %value : f16
+    %wide_roundeven = scalar.extf %roundeven : f16 to f32
+    %roundeven_bits = func.call @rounding_f32_result_bits(%wide_roundeven) : (f32) -> (i32)
+    view.store %roundeven_bits, %results[7, %i] : i32, view<10x32xi32>
+    %round = scalar.roundf %value : f16
+    %wide_round = scalar.extf %round : f16 to f32
+    %round_bits = func.call @rounding_f32_result_bits(%wide_round) : (f32) -> (i32)
+    view.store %round_bits, %results[8, %i] : i32, view<10x32xi32>
+    %trunc = scalar.truncf %value : f16
+    %wide_trunc = scalar.extf %trunc : f16 to f32
+    %trunc_bits = func.call @rounding_f32_result_bits(%wide_trunc) : (f32) -> (i32)
+    view.store %trunc_bits, %results[9, %i] : i32, view<10x32xi32>
   }
   func.return
 }
@@ -109,9 +134,17 @@ check.scenario @rounding_f16_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.fill value(0) : tensor<32xi16>
     check.generate<@rounding_f16_inputs>(%input) : (tensor<32xi16>) -> ()
-    %output = check.generate.fill value(-1) : tensor<5x32xi32>
-    check.compare<@rounding_f16_observations, @rounding_f16_oracle>(%input, %output) : (tensor<32xi16>, tensor<5x32xi32>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<5x32xi32>
+    %output = check.generate.fill value(-1) : tensor<10x32xi32>
+    check.compare<@rounding_f16_observations, @rounding_f16_oracle>(%input, %output) : (tensor<32xi16>, tensor<10x32xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10x32xi32>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<32xi16>
+    %output = check.generate.fill value(-1) : tensor<10x32xi32>
+    check.compare<@rounding_f16_observations, @rounding_f16_oracle>(%input, %output) : (tensor<32xi16>, tensor<10x32xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10x32xi32>
     }
   }
   check.return
@@ -120,7 +153,7 @@ check.scenario @rounding_f16_values {
 func.def @rounding_bf16_observations(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<32xbf16>
-  %results = buffer.view %output[%base] : buffer -> view<5x32xi32>
+  %results = buffer.view %output[%base] : buffer -> view<10x32xi32>
   %begin = index.constant 0 : index
   %end = index.constant 32 : index
   %step = index.constant 4 : index
@@ -141,11 +174,35 @@ func.def @rounding_bf16_observations(%input: buffer, %output: buffer) {
     %roundeven_bits = func.call @rounding_f32_vector_bits(%wide_roundeven) : (vector<4xf32>) -> (vector<4xi32>)
     %round_bits = func.call @rounding_f32_vector_bits(%wide_round) : (vector<4xf32>) -> (vector<4xi32>)
     %trunc_bits = func.call @rounding_f32_vector_bits(%wide_trunc) : (vector<4xf32>) -> (vector<4xi32>)
-    vector.store %ceil_bits, %results[0, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %floor_bits, %results[1, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %roundeven_bits, %results[2, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %round_bits, %results[3, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %trunc_bits, %results[4, %i] : vector<4xi32>, view<5x32xi32>
+    vector.store %ceil_bits, %results[0, %i] : vector<4xi32>, view<10x32xi32>
+    vector.store %floor_bits, %results[1, %i] : vector<4xi32>, view<10x32xi32>
+    vector.store %roundeven_bits, %results[2, %i] : vector<4xi32>, view<10x32xi32>
+    vector.store %round_bits, %results[3, %i] : vector<4xi32>, view<10x32xi32>
+    vector.store %trunc_bits, %results[4, %i] : vector<4xi32>, view<10x32xi32>
+  }
+  %scalar_step = index.constant 1 : index
+  scf.for %i = [%begin to %end step %scalar_step] {
+    %value = view.load %source[%i] : view<32xbf16> -> bf16
+    %ceil = scalar.ceilf %value : bf16
+    %wide_ceil = scalar.extf %ceil : bf16 to f32
+    %ceil_bits = func.call @rounding_f32_result_bits(%wide_ceil) : (f32) -> (i32)
+    view.store %ceil_bits, %results[5, %i] : i32, view<10x32xi32>
+    %floor = scalar.floorf %value : bf16
+    %wide_floor = scalar.extf %floor : bf16 to f32
+    %floor_bits = func.call @rounding_f32_result_bits(%wide_floor) : (f32) -> (i32)
+    view.store %floor_bits, %results[6, %i] : i32, view<10x32xi32>
+    %roundeven = scalar.roundevenf %value : bf16
+    %wide_roundeven = scalar.extf %roundeven : bf16 to f32
+    %roundeven_bits = func.call @rounding_f32_result_bits(%wide_roundeven) : (f32) -> (i32)
+    view.store %roundeven_bits, %results[7, %i] : i32, view<10x32xi32>
+    %round = scalar.roundf %value : bf16
+    %wide_round = scalar.extf %round : bf16 to f32
+    %round_bits = func.call @rounding_f32_result_bits(%wide_round) : (f32) -> (i32)
+    view.store %round_bits, %results[8, %i] : i32, view<10x32xi32>
+    %trunc = scalar.truncf %value : bf16
+    %wide_trunc = scalar.extf %trunc : bf16 to f32
+    %trunc_bits = func.call @rounding_f32_result_bits(%wide_trunc) : (f32) -> (i32)
+    view.store %trunc_bits, %results[9, %i] : i32, view<10x32xi32>
   }
   func.return
 }
@@ -165,9 +222,17 @@ check.scenario @rounding_bf16_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.fill value(0) : tensor<32xi16>
     check.generate<@rounding_bf16_inputs>(%input) : (tensor<32xi16>) -> ()
-    %output = check.generate.fill value(-1) : tensor<5x32xi32>
-    check.compare<@rounding_bf16_observations, @rounding_bf16_oracle>(%input, %output) : (tensor<32xi16>, tensor<5x32xi32>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<5x32xi32>
+    %output = check.generate.fill value(-1) : tensor<10x32xi32>
+    check.compare<@rounding_bf16_observations, @rounding_bf16_oracle>(%input, %output) : (tensor<32xi16>, tensor<10x32xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10x32xi32>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<32xi16>
+    %output = check.generate.fill value(-1) : tensor<10x32xi32>
+    check.compare<@rounding_bf16_observations, @rounding_bf16_oracle>(%input, %output) : (tensor<32xi16>, tensor<10x32xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10x32xi32>
     }
   }
   check.return
@@ -175,13 +240,13 @@ check.scenario @rounding_bf16_values {
 
 func.def @rounding_f8e4m3_observations(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %source = buffer.view %input[%base] : buffer -> view<32xf8E4M3>
-  %results = buffer.view %output[%base] : buffer -> view<5x32xi32>
+  %source = buffer.view %input[%base] : buffer -> view<256xf8E4M3>
+  %results = buffer.view %output[%base] : buffer -> view<10x256xi32>
   %begin = index.constant 0 : index
-  %end = index.constant 32 : index
+  %end = index.constant 256 : index
   %step = index.constant 4 : index
   scf.for %i = [%begin to %end step %step] {
-    %value = vector.load %source[%i] : view<32xf8E4M3> -> vector<4xf8E4M3>
+    %value = vector.load %source[%i] : view<256xf8E4M3> -> vector<4xf8E4M3>
     %ceil = vector.ceilf %value : vector<4xf8E4M3>
     %floor = vector.floorf %value : vector<4xf8E4M3>
     %roundeven = vector.roundevenf %value : vector<4xf8E4M3>
@@ -197,33 +262,45 @@ func.def @rounding_f8e4m3_observations(%input: buffer, %output: buffer) {
     %roundeven_bits = func.call @rounding_f32_vector_bits(%wide_roundeven) : (vector<4xf32>) -> (vector<4xi32>)
     %round_bits = func.call @rounding_f32_vector_bits(%wide_round) : (vector<4xf32>) -> (vector<4xi32>)
     %trunc_bits = func.call @rounding_f32_vector_bits(%wide_trunc) : (vector<4xf32>) -> (vector<4xi32>)
-    vector.store %ceil_bits, %results[0, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %floor_bits, %results[1, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %roundeven_bits, %results[2, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %round_bits, %results[3, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %trunc_bits, %results[4, %i] : vector<4xi32>, view<5x32xi32>
+    vector.store %ceil_bits, %results[0, %i] : vector<4xi32>, view<10x256xi32>
+    vector.store %floor_bits, %results[1, %i] : vector<4xi32>, view<10x256xi32>
+    vector.store %roundeven_bits, %results[2, %i] : vector<4xi32>, view<10x256xi32>
+    vector.store %round_bits, %results[3, %i] : vector<4xi32>, view<10x256xi32>
+    vector.store %trunc_bits, %results[4, %i] : vector<4xi32>, view<10x256xi32>
   }
-  func.return
-}
-
-func.def @rounding_f8e4m3_inputs(%input: buffer) {
-  %base = index.constant 0 : offset
-  %source = buffer.view %input[%base] : buffer -> view<32xi8>
-  %positive = vector.constanti [0, 1, 7, 8, 47, 48, 49, 55, 56, 57, 60, 66, 79, 80, 126, 127] : vector<16xi8>
-  %sign = vector.splati -128 : vector<16xi8>
-  %negative = vector.xori %positive, %sign : vector<16xi8>
-  vector.store %positive, %source[0] : vector<16xi8>, view<32xi8>
-  vector.store %negative, %source[16] : vector<16xi8>, view<32xi8>
+  %scalar_step = index.constant 1 : index
+  scf.for %i = [%begin to %end step %scalar_step] {
+    %value = view.load %source[%i] : view<256xf8E4M3> -> f8E4M3
+    %ceil = scalar.ceilf %value : f8E4M3
+    %wide_ceil = scalar.extf %ceil : f8E4M3 to f32
+    %ceil_bits = func.call @rounding_f32_result_bits(%wide_ceil) : (f32) -> (i32)
+    view.store %ceil_bits, %results[5, %i] : i32, view<10x256xi32>
+    %floor = scalar.floorf %value : f8E4M3
+    %wide_floor = scalar.extf %floor : f8E4M3 to f32
+    %floor_bits = func.call @rounding_f32_result_bits(%wide_floor) : (f32) -> (i32)
+    view.store %floor_bits, %results[6, %i] : i32, view<10x256xi32>
+    %roundeven = scalar.roundevenf %value : f8E4M3
+    %wide_roundeven = scalar.extf %roundeven : f8E4M3 to f32
+    %roundeven_bits = func.call @rounding_f32_result_bits(%wide_roundeven) : (f32) -> (i32)
+    view.store %roundeven_bits, %results[7, %i] : i32, view<10x256xi32>
+    %round = scalar.roundf %value : f8E4M3
+    %wide_round = scalar.extf %round : f8E4M3 to f32
+    %round_bits = func.call @rounding_f32_result_bits(%wide_round) : (f32) -> (i32)
+    view.store %round_bits, %results[8, %i] : i32, view<10x256xi32>
+    %trunc = scalar.truncf %value : f8E4M3
+    %wide_trunc = scalar.extf %trunc : f8E4M3 to f32
+    %trunc_bits = func.call @rounding_f32_result_bits(%wide_trunc) : (f32) -> (i32)
+    view.store %trunc_bits, %results[9, %i] : i32, view<10x256xi32>
+  }
   func.return
 }
 
 check.scenario @rounding_f8e4m3_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %input = check.generate.fill value(0) : tensor<32xi8>
-    check.generate<@rounding_f8e4m3_inputs>(%input) : (tensor<32xi8>) -> ()
-    %output = check.generate.fill value(-1) : tensor<5x32xi32>
-    check.compare<@rounding_f8e4m3_observations, @rounding_f8e4m3_oracle>(%input, %output) : (tensor<32xi8>, tensor<5x32xi32>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<5x32xi32>
+    %input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %output = check.generate.fill value(-1) : tensor<10x256xi32>
+    check.compare<@rounding_f8e4m3_observations, @rounding_f8e4m3_oracle>(%input, %output) : (tensor<256xi8>, tensor<10x256xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10x256xi32>
     }
   }
   check.return
@@ -231,13 +308,13 @@ check.scenario @rounding_f8e4m3_values {
 
 func.def @rounding_f8e5m2_observations(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %source = buffer.view %input[%base] : buffer -> view<32xf8E5M2>
-  %results = buffer.view %output[%base] : buffer -> view<5x32xi32>
+  %source = buffer.view %input[%base] : buffer -> view<256xf8E5M2>
+  %results = buffer.view %output[%base] : buffer -> view<10x256xi32>
   %begin = index.constant 0 : index
-  %end = index.constant 32 : index
+  %end = index.constant 256 : index
   %step = index.constant 4 : index
   scf.for %i = [%begin to %end step %step] {
-    %value = vector.load %source[%i] : view<32xf8E5M2> -> vector<4xf8E5M2>
+    %value = vector.load %source[%i] : view<256xf8E5M2> -> vector<4xf8E5M2>
     %ceil = vector.ceilf %value : vector<4xf8E5M2>
     %floor = vector.floorf %value : vector<4xf8E5M2>
     %roundeven = vector.roundevenf %value : vector<4xf8E5M2>
@@ -253,33 +330,45 @@ func.def @rounding_f8e5m2_observations(%input: buffer, %output: buffer) {
     %roundeven_bits = func.call @rounding_f32_vector_bits(%wide_roundeven) : (vector<4xf32>) -> (vector<4xi32>)
     %round_bits = func.call @rounding_f32_vector_bits(%wide_round) : (vector<4xf32>) -> (vector<4xi32>)
     %trunc_bits = func.call @rounding_f32_vector_bits(%wide_trunc) : (vector<4xf32>) -> (vector<4xi32>)
-    vector.store %ceil_bits, %results[0, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %floor_bits, %results[1, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %roundeven_bits, %results[2, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %round_bits, %results[3, %i] : vector<4xi32>, view<5x32xi32>
-    vector.store %trunc_bits, %results[4, %i] : vector<4xi32>, view<5x32xi32>
+    vector.store %ceil_bits, %results[0, %i] : vector<4xi32>, view<10x256xi32>
+    vector.store %floor_bits, %results[1, %i] : vector<4xi32>, view<10x256xi32>
+    vector.store %roundeven_bits, %results[2, %i] : vector<4xi32>, view<10x256xi32>
+    vector.store %round_bits, %results[3, %i] : vector<4xi32>, view<10x256xi32>
+    vector.store %trunc_bits, %results[4, %i] : vector<4xi32>, view<10x256xi32>
   }
-  func.return
-}
-
-func.def @rounding_f8e5m2_inputs(%input: buffer) {
-  %base = index.constant 0 : offset
-  %source = buffer.view %input[%base] : buffer -> view<32xi8>
-  %positive = vector.constanti [0, 1, 3, 4, 55, 56, 57, 59, 60, 61, 62, 65, 67, 68, 124, 126] : vector<16xi8>
-  %sign = vector.splati -128 : vector<16xi8>
-  %negative = vector.xori %positive, %sign : vector<16xi8>
-  vector.store %positive, %source[0] : vector<16xi8>, view<32xi8>
-  vector.store %negative, %source[16] : vector<16xi8>, view<32xi8>
+  %scalar_step = index.constant 1 : index
+  scf.for %i = [%begin to %end step %scalar_step] {
+    %value = view.load %source[%i] : view<256xf8E5M2> -> f8E5M2
+    %ceil = scalar.ceilf %value : f8E5M2
+    %wide_ceil = scalar.extf %ceil : f8E5M2 to f32
+    %ceil_bits = func.call @rounding_f32_result_bits(%wide_ceil) : (f32) -> (i32)
+    view.store %ceil_bits, %results[5, %i] : i32, view<10x256xi32>
+    %floor = scalar.floorf %value : f8E5M2
+    %wide_floor = scalar.extf %floor : f8E5M2 to f32
+    %floor_bits = func.call @rounding_f32_result_bits(%wide_floor) : (f32) -> (i32)
+    view.store %floor_bits, %results[6, %i] : i32, view<10x256xi32>
+    %roundeven = scalar.roundevenf %value : f8E5M2
+    %wide_roundeven = scalar.extf %roundeven : f8E5M2 to f32
+    %roundeven_bits = func.call @rounding_f32_result_bits(%wide_roundeven) : (f32) -> (i32)
+    view.store %roundeven_bits, %results[7, %i] : i32, view<10x256xi32>
+    %round = scalar.roundf %value : f8E5M2
+    %wide_round = scalar.extf %round : f8E5M2 to f32
+    %round_bits = func.call @rounding_f32_result_bits(%wide_round) : (f32) -> (i32)
+    view.store %round_bits, %results[8, %i] : i32, view<10x256xi32>
+    %trunc = scalar.truncf %value : f8E5M2
+    %wide_trunc = scalar.extf %trunc : f8E5M2 to f32
+    %trunc_bits = func.call @rounding_f32_result_bits(%wide_trunc) : (f32) -> (i32)
+    view.store %trunc_bits, %results[9, %i] : i32, view<10x256xi32>
+  }
   func.return
 }
 
 check.scenario @rounding_f8e5m2_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
-    %input = check.generate.fill value(0) : tensor<32xi8>
-    check.generate<@rounding_f8e5m2_inputs>(%input) : (tensor<32xi8>) -> ()
-    %output = check.generate.fill value(-1) : tensor<5x32xi32>
-    check.compare<@rounding_f8e5m2_observations, @rounding_f8e5m2_oracle>(%input, %output) : (tensor<32xi8>, tensor<5x32xi32>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<5x32xi32>
+    %input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %output = check.generate.fill value(-1) : tensor<10x256xi32>
+    check.compare<@rounding_f8e5m2_observations, @rounding_f8e5m2_oracle>(%input, %output) : (tensor<256xi8>, tensor<10x256xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10x256xi32>
     }
   }
   check.return
@@ -291,7 +380,7 @@ check.scenario @rounding_f8e5m2_values {
 func.def @rounding_f16_oracle(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<32xf16>
-  %results = buffer.view %output[%base] : buffer -> view<5x32xi32>
+  %results = buffer.view %output[%base] : buffer -> view<10x32xi32>
   %begin = index.constant 0 : index
   %end = index.constant 32 : index
   %step = index.constant 1 : index
@@ -300,11 +389,16 @@ func.def @rounding_f16_oracle(%input: buffer, %output: buffer) {
     %wide = scalar.extf %value : f16 to f32
     %bits = scalar.bitcast %wide : f32 to i32
     %ceil, %floor, %roundeven, %round, %trunc = func.call @rounding_f32_observations(%bits) : (i32) -> (i32, i32, i32, i32, i32)
-    view.store %ceil, %results[0, %i] : i32, view<5x32xi32>
-    view.store %floor, %results[1, %i] : i32, view<5x32xi32>
-    view.store %roundeven, %results[2, %i] : i32, view<5x32xi32>
-    view.store %round, %results[3, %i] : i32, view<5x32xi32>
-    view.store %trunc, %results[4, %i] : i32, view<5x32xi32>
+    view.store %ceil, %results[0, %i] : i32, view<10x32xi32>
+    view.store %floor, %results[1, %i] : i32, view<10x32xi32>
+    view.store %roundeven, %results[2, %i] : i32, view<10x32xi32>
+    view.store %round, %results[3, %i] : i32, view<10x32xi32>
+    view.store %trunc, %results[4, %i] : i32, view<10x32xi32>
+    view.store %ceil, %results[5, %i] : i32, view<10x32xi32>
+    view.store %floor, %results[6, %i] : i32, view<10x32xi32>
+    view.store %roundeven, %results[7, %i] : i32, view<10x32xi32>
+    view.store %round, %results[8, %i] : i32, view<10x32xi32>
+    view.store %trunc, %results[9, %i] : i32, view<10x32xi32>
   }
   func.return
 }
@@ -312,7 +406,7 @@ func.def @rounding_f16_oracle(%input: buffer, %output: buffer) {
 func.def @rounding_bf16_oracle(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<32xbf16>
-  %results = buffer.view %output[%base] : buffer -> view<5x32xi32>
+  %results = buffer.view %output[%base] : buffer -> view<10x32xi32>
   %begin = index.constant 0 : index
   %end = index.constant 32 : index
   %step = index.constant 1 : index
@@ -321,53 +415,68 @@ func.def @rounding_bf16_oracle(%input: buffer, %output: buffer) {
     %wide = scalar.extf %value : bf16 to f32
     %bits = scalar.bitcast %wide : f32 to i32
     %ceil, %floor, %roundeven, %round, %trunc = func.call @rounding_f32_observations(%bits) : (i32) -> (i32, i32, i32, i32, i32)
-    view.store %ceil, %results[0, %i] : i32, view<5x32xi32>
-    view.store %floor, %results[1, %i] : i32, view<5x32xi32>
-    view.store %roundeven, %results[2, %i] : i32, view<5x32xi32>
-    view.store %round, %results[3, %i] : i32, view<5x32xi32>
-    view.store %trunc, %results[4, %i] : i32, view<5x32xi32>
+    view.store %ceil, %results[0, %i] : i32, view<10x32xi32>
+    view.store %floor, %results[1, %i] : i32, view<10x32xi32>
+    view.store %roundeven, %results[2, %i] : i32, view<10x32xi32>
+    view.store %round, %results[3, %i] : i32, view<10x32xi32>
+    view.store %trunc, %results[4, %i] : i32, view<10x32xi32>
+    view.store %ceil, %results[5, %i] : i32, view<10x32xi32>
+    view.store %floor, %results[6, %i] : i32, view<10x32xi32>
+    view.store %roundeven, %results[7, %i] : i32, view<10x32xi32>
+    view.store %round, %results[8, %i] : i32, view<10x32xi32>
+    view.store %trunc, %results[9, %i] : i32, view<10x32xi32>
   }
   func.return
 }
 
 func.def @rounding_f8e4m3_oracle(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %source = buffer.view %input[%base] : buffer -> view<32xf8E4M3>
-  %results = buffer.view %output[%base] : buffer -> view<5x32xi32>
+  %source = buffer.view %input[%base] : buffer -> view<256xf8E4M3>
+  %results = buffer.view %output[%base] : buffer -> view<10x256xi32>
   %begin = index.constant 0 : index
-  %end = index.constant 32 : index
+  %end = index.constant 256 : index
   %step = index.constant 1 : index
   scf.for %i = [%begin to %end step %step] {
-    %value = view.load %source[%i] : view<32xf8E4M3> -> f8E4M3
+    %value = view.load %source[%i] : view<256xf8E4M3> -> f8E4M3
     %wide = scalar.extf %value : f8E4M3 to f32
     %bits = scalar.bitcast %wide : f32 to i32
     %ceil, %floor, %roundeven, %round, %trunc = func.call @rounding_f32_observations(%bits) : (i32) -> (i32, i32, i32, i32, i32)
-    view.store %ceil, %results[0, %i] : i32, view<5x32xi32>
-    view.store %floor, %results[1, %i] : i32, view<5x32xi32>
-    view.store %roundeven, %results[2, %i] : i32, view<5x32xi32>
-    view.store %round, %results[3, %i] : i32, view<5x32xi32>
-    view.store %trunc, %results[4, %i] : i32, view<5x32xi32>
+    view.store %ceil, %results[0, %i] : i32, view<10x256xi32>
+    view.store %floor, %results[1, %i] : i32, view<10x256xi32>
+    view.store %roundeven, %results[2, %i] : i32, view<10x256xi32>
+    view.store %round, %results[3, %i] : i32, view<10x256xi32>
+    view.store %trunc, %results[4, %i] : i32, view<10x256xi32>
+    view.store %ceil, %results[5, %i] : i32, view<10x256xi32>
+    view.store %floor, %results[6, %i] : i32, view<10x256xi32>
+    view.store %roundeven, %results[7, %i] : i32, view<10x256xi32>
+    view.store %round, %results[8, %i] : i32, view<10x256xi32>
+    view.store %trunc, %results[9, %i] : i32, view<10x256xi32>
   }
   func.return
 }
 
 func.def @rounding_f8e5m2_oracle(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
-  %source = buffer.view %input[%base] : buffer -> view<32xf8E5M2>
-  %results = buffer.view %output[%base] : buffer -> view<5x32xi32>
+  %source = buffer.view %input[%base] : buffer -> view<256xf8E5M2>
+  %results = buffer.view %output[%base] : buffer -> view<10x256xi32>
   %begin = index.constant 0 : index
-  %end = index.constant 32 : index
+  %end = index.constant 256 : index
   %step = index.constant 1 : index
   scf.for %i = [%begin to %end step %step] {
-    %value = view.load %source[%i] : view<32xf8E5M2> -> f8E5M2
+    %value = view.load %source[%i] : view<256xf8E5M2> -> f8E5M2
     %wide = scalar.extf %value : f8E5M2 to f32
     %bits = scalar.bitcast %wide : f32 to i32
     %ceil, %floor, %roundeven, %round, %trunc = func.call @rounding_f32_observations(%bits) : (i32) -> (i32, i32, i32, i32, i32)
-    view.store %ceil, %results[0, %i] : i32, view<5x32xi32>
-    view.store %floor, %results[1, %i] : i32, view<5x32xi32>
-    view.store %roundeven, %results[2, %i] : i32, view<5x32xi32>
-    view.store %round, %results[3, %i] : i32, view<5x32xi32>
-    view.store %trunc, %results[4, %i] : i32, view<5x32xi32>
+    view.store %ceil, %results[0, %i] : i32, view<10x256xi32>
+    view.store %floor, %results[1, %i] : i32, view<10x256xi32>
+    view.store %roundeven, %results[2, %i] : i32, view<10x256xi32>
+    view.store %round, %results[3, %i] : i32, view<10x256xi32>
+    view.store %trunc, %results[4, %i] : i32, view<10x256xi32>
+    view.store %ceil, %results[5, %i] : i32, view<10x256xi32>
+    view.store %floor, %results[6, %i] : i32, view<10x256xi32>
+    view.store %roundeven, %results[7, %i] : i32, view<10x256xi32>
+    view.store %round, %results[8, %i] : i32, view<10x256xi32>
+    view.store %trunc, %results[9, %i] : i32, view<10x256xi32>
   }
   func.return
 }
@@ -384,7 +493,7 @@ func.def inline @rounding_f64_vector_bits(%value: vector<4xf64>) -> (vector<4xi6
 func.def @rounding_f32_vector_observations(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<32xf32>
-  %results = buffer.view %output[%base] : buffer -> view<5x32xi32>
+  %results = buffer.view %output[%base] : buffer -> view<10x32xi32>
   %begin = index.constant 0 : index
   %end = index.constant 32 : index
   %step = index.constant 4 : index
@@ -392,19 +501,30 @@ func.def @rounding_f32_vector_observations(%input: buffer, %output: buffer) {
     %value = vector.load %source[%i] : view<32xf32> -> vector<4xf32>
     %ceil = vector.ceilf %value : vector<4xf32>
     %ceil_bits = func.call @rounding_f32_vector_bits(%ceil) : (vector<4xf32>) -> (vector<4xi32>)
-    vector.store %ceil_bits, %results[0, %i] : vector<4xi32>, view<5x32xi32>
+    vector.store %ceil_bits, %results[0, %i] : vector<4xi32>, view<10x32xi32>
     %floor = vector.floorf %value : vector<4xf32>
     %floor_bits = func.call @rounding_f32_vector_bits(%floor) : (vector<4xf32>) -> (vector<4xi32>)
-    vector.store %floor_bits, %results[1, %i] : vector<4xi32>, view<5x32xi32>
+    vector.store %floor_bits, %results[1, %i] : vector<4xi32>, view<10x32xi32>
     %roundeven = vector.roundevenf %value : vector<4xf32>
     %roundeven_bits = func.call @rounding_f32_vector_bits(%roundeven) : (vector<4xf32>) -> (vector<4xi32>)
-    vector.store %roundeven_bits, %results[2, %i] : vector<4xi32>, view<5x32xi32>
+    vector.store %roundeven_bits, %results[2, %i] : vector<4xi32>, view<10x32xi32>
     %round = vector.roundf %value : vector<4xf32>
     %round_bits = func.call @rounding_f32_vector_bits(%round) : (vector<4xf32>) -> (vector<4xi32>)
-    vector.store %round_bits, %results[3, %i] : vector<4xi32>, view<5x32xi32>
+    vector.store %round_bits, %results[3, %i] : vector<4xi32>, view<10x32xi32>
     %trunc = vector.truncf %value : vector<4xf32>
     %trunc_bits = func.call @rounding_f32_vector_bits(%trunc) : (vector<4xf32>) -> (vector<4xi32>)
-    vector.store %trunc_bits, %results[4, %i] : vector<4xi32>, view<5x32xi32>
+    vector.store %trunc_bits, %results[4, %i] : vector<4xi32>, view<10x32xi32>
+  }
+  %scalar_step = index.constant 1 : index
+  scf.for %i = [%begin to %end step %scalar_step] {
+    %value = view.load %source[%i] : view<32xf32> -> f32
+    %bits = scalar.bitcast %value : f32 to i32
+    %ceil, %floor, %roundeven, %round, %trunc = func.call @rounding_f32_observations(%bits) : (i32) -> (i32, i32, i32, i32, i32)
+    view.store %ceil, %results[5, %i] : i32, view<10x32xi32>
+    view.store %floor, %results[6, %i] : i32, view<10x32xi32>
+    view.store %roundeven, %results[7, %i] : i32, view<10x32xi32>
+    view.store %round, %results[8, %i] : i32, view<10x32xi32>
+    view.store %trunc, %results[9, %i] : i32, view<10x32xi32>
   }
   func.return
 }
@@ -412,18 +532,23 @@ func.def @rounding_f32_vector_observations(%input: buffer, %output: buffer) {
 func.def @rounding_f32_vector_oracle(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<32xi32>
-  %results = buffer.view %output[%base] : buffer -> view<5x32xi32>
+  %results = buffer.view %output[%base] : buffer -> view<10x32xi32>
   %begin = index.constant 0 : index
   %end = index.constant 32 : index
   %step = index.constant 1 : index
   scf.for %i = [%begin to %end step %step] {
     %bits = view.load %source[%i] : view<32xi32> -> i32
     %ceil, %floor, %roundeven, %round, %trunc = func.call @rounding_f32_observations(%bits) : (i32) -> (i32, i32, i32, i32, i32)
-    view.store %ceil, %results[0, %i] : i32, view<5x32xi32>
-    view.store %floor, %results[1, %i] : i32, view<5x32xi32>
-    view.store %roundeven, %results[2, %i] : i32, view<5x32xi32>
-    view.store %round, %results[3, %i] : i32, view<5x32xi32>
-    view.store %trunc, %results[4, %i] : i32, view<5x32xi32>
+    view.store %ceil, %results[0, %i] : i32, view<10x32xi32>
+    view.store %floor, %results[1, %i] : i32, view<10x32xi32>
+    view.store %roundeven, %results[2, %i] : i32, view<10x32xi32>
+    view.store %round, %results[3, %i] : i32, view<10x32xi32>
+    view.store %trunc, %results[4, %i] : i32, view<10x32xi32>
+    view.store %ceil, %results[5, %i] : i32, view<10x32xi32>
+    view.store %floor, %results[6, %i] : i32, view<10x32xi32>
+    view.store %roundeven, %results[7, %i] : i32, view<10x32xi32>
+    view.store %round, %results[8, %i] : i32, view<10x32xi32>
+    view.store %trunc, %results[9, %i] : i32, view<10x32xi32>
   }
   func.return
 }
@@ -443,9 +568,17 @@ check.scenario @rounding_f32_vector_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.fill value(0) : tensor<32xi32>
     check.generate<@rounding_f32_inputs>(%input) : (tensor<32xi32>) -> ()
-    %output = check.generate.fill value(-1) : tensor<5x32xi32>
-    check.compare<@rounding_f32_vector_observations, @rounding_f32_vector_oracle>(%input, %output) : (tensor<32xi32>, tensor<5x32xi32>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<5x32xi32>
+    %output = check.generate.fill value(-1) : tensor<10x32xi32>
+    check.compare<@rounding_f32_vector_observations, @rounding_f32_vector_oracle>(%input, %output) : (tensor<32xi32>, tensor<10x32xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10x32xi32>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<32xi32>
+    %output = check.generate.fill value(-1) : tensor<10x32xi32>
+    check.compare<@rounding_f32_vector_observations, @rounding_f32_vector_oracle>(%input, %output) : (tensor<32xi32>, tensor<10x32xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10x32xi32>
     }
   }
   check.return
@@ -454,7 +587,7 @@ check.scenario @rounding_f32_vector_values {
 func.def @rounding_f64_vector_observations(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<32xf64>
-  %results = buffer.view %output[%base] : buffer -> view<5x32xi64>
+  %results = buffer.view %output[%base] : buffer -> view<10x32xi64>
   %begin = index.constant 0 : index
   %end = index.constant 32 : index
   %step = index.constant 4 : index
@@ -462,19 +595,30 @@ func.def @rounding_f64_vector_observations(%input: buffer, %output: buffer) {
     %value = vector.load %source[%i] : view<32xf64> -> vector<4xf64>
     %ceil = vector.ceilf %value : vector<4xf64>
     %ceil_bits = func.call @rounding_f64_vector_bits(%ceil) : (vector<4xf64>) -> (vector<4xi64>)
-    vector.store %ceil_bits, %results[0, %i] : vector<4xi64>, view<5x32xi64>
+    vector.store %ceil_bits, %results[0, %i] : vector<4xi64>, view<10x32xi64>
     %floor = vector.floorf %value : vector<4xf64>
     %floor_bits = func.call @rounding_f64_vector_bits(%floor) : (vector<4xf64>) -> (vector<4xi64>)
-    vector.store %floor_bits, %results[1, %i] : vector<4xi64>, view<5x32xi64>
+    vector.store %floor_bits, %results[1, %i] : vector<4xi64>, view<10x32xi64>
     %roundeven = vector.roundevenf %value : vector<4xf64>
     %roundeven_bits = func.call @rounding_f64_vector_bits(%roundeven) : (vector<4xf64>) -> (vector<4xi64>)
-    vector.store %roundeven_bits, %results[2, %i] : vector<4xi64>, view<5x32xi64>
+    vector.store %roundeven_bits, %results[2, %i] : vector<4xi64>, view<10x32xi64>
     %round = vector.roundf %value : vector<4xf64>
     %round_bits = func.call @rounding_f64_vector_bits(%round) : (vector<4xf64>) -> (vector<4xi64>)
-    vector.store %round_bits, %results[3, %i] : vector<4xi64>, view<5x32xi64>
+    vector.store %round_bits, %results[3, %i] : vector<4xi64>, view<10x32xi64>
     %trunc = vector.truncf %value : vector<4xf64>
     %trunc_bits = func.call @rounding_f64_vector_bits(%trunc) : (vector<4xf64>) -> (vector<4xi64>)
-    vector.store %trunc_bits, %results[4, %i] : vector<4xi64>, view<5x32xi64>
+    vector.store %trunc_bits, %results[4, %i] : vector<4xi64>, view<10x32xi64>
+  }
+  %scalar_step = index.constant 1 : index
+  scf.for %i = [%begin to %end step %scalar_step] {
+    %value = view.load %source[%i] : view<32xf64> -> f64
+    %bits = scalar.bitcast %value : f64 to i64
+    %ceil, %floor, %roundeven, %round, %trunc = func.call @rounding_f64_observations(%bits) : (i64) -> (i64, i64, i64, i64, i64)
+    view.store %ceil, %results[5, %i] : i64, view<10x32xi64>
+    view.store %floor, %results[6, %i] : i64, view<10x32xi64>
+    view.store %roundeven, %results[7, %i] : i64, view<10x32xi64>
+    view.store %round, %results[8, %i] : i64, view<10x32xi64>
+    view.store %trunc, %results[9, %i] : i64, view<10x32xi64>
   }
   func.return
 }
@@ -482,18 +626,23 @@ func.def @rounding_f64_vector_observations(%input: buffer, %output: buffer) {
 func.def @rounding_f64_vector_oracle(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %source = buffer.view %input[%base] : buffer -> view<32xi64>
-  %results = buffer.view %output[%base] : buffer -> view<5x32xi64>
+  %results = buffer.view %output[%base] : buffer -> view<10x32xi64>
   %begin = index.constant 0 : index
   %end = index.constant 32 : index
   %step = index.constant 1 : index
   scf.for %i = [%begin to %end step %step] {
     %bits = view.load %source[%i] : view<32xi64> -> i64
     %ceil, %floor, %roundeven, %round, %trunc = func.call @rounding_f64_observations(%bits) : (i64) -> (i64, i64, i64, i64, i64)
-    view.store %ceil, %results[0, %i] : i64, view<5x32xi64>
-    view.store %floor, %results[1, %i] : i64, view<5x32xi64>
-    view.store %roundeven, %results[2, %i] : i64, view<5x32xi64>
-    view.store %round, %results[3, %i] : i64, view<5x32xi64>
-    view.store %trunc, %results[4, %i] : i64, view<5x32xi64>
+    view.store %ceil, %results[0, %i] : i64, view<10x32xi64>
+    view.store %floor, %results[1, %i] : i64, view<10x32xi64>
+    view.store %roundeven, %results[2, %i] : i64, view<10x32xi64>
+    view.store %round, %results[3, %i] : i64, view<10x32xi64>
+    view.store %trunc, %results[4, %i] : i64, view<10x32xi64>
+    view.store %ceil, %results[5, %i] : i64, view<10x32xi64>
+    view.store %floor, %results[6, %i] : i64, view<10x32xi64>
+    view.store %roundeven, %results[7, %i] : i64, view<10x32xi64>
+    view.store %round, %results[8, %i] : i64, view<10x32xi64>
+    view.store %trunc, %results[9, %i] : i64, view<10x32xi64>
   }
   func.return
 }
@@ -513,9 +662,48 @@ check.scenario @rounding_f64_vector_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.fill value(0) : tensor<32xi64>
     check.generate<@rounding_f64_inputs>(%input) : (tensor<32xi64>) -> ()
-    %output = check.generate.fill value(-1) : tensor<5x32xi64>
-    check.compare<@rounding_f64_vector_observations, @rounding_f64_vector_oracle>(%input, %output) : (tensor<32xi64>, tensor<5x32xi64>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<5x32xi64>
+    %output = check.generate.fill value(-1) : tensor<10x32xi64>
+    check.compare<@rounding_f64_vector_observations, @rounding_f64_vector_oracle>(%input, %output) : (tensor<32xi64>, tensor<10x32xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10x32xi64>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<32xi64>
+    %output = check.generate.fill value(-1) : tensor<10x32xi64>
+    check.compare<@rounding_f64_vector_observations, @rounding_f64_vector_oracle>(%input, %output) : (tensor<32xi64>, tensor<10x32xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<10x32xi64>
+    }
+  }
+  check.return
+}
+
+// An irregular packet exercises native chunks and a final single-lane carrier.
+func.def @rounding_f32_tail(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<19xf32>
+  %results = buffer.view %output[%origin] : buffer -> view<5x19xf32>
+  %value = vector.load %source[0] : view<19xf32> -> vector<19xf32>
+  %ceil = vector.ceilf %value : vector<19xf32>
+  %floor = vector.floorf %value : vector<19xf32>
+  %trunc = vector.truncf %value : vector<19xf32>
+  %even = vector.roundevenf %value : vector<19xf32>
+  %away = vector.roundf %value : vector<19xf32>
+  vector.store %ceil, %results[0, 0] : vector<19xf32>, view<5x19xf32>
+  vector.store %floor, %results[1, 0] : vector<19xf32>, view<5x19xf32>
+  vector.store %trunc, %results[2, 0] : vector<19xf32>, view<5x19xf32>
+  vector.store %even, %results[3, 0] : vector<19xf32>, view<5x19xf32>
+  vector.store %away, %results[4, 0] : vector<19xf32>, view<5x19xf32>
+  func.return
+}
+
+check.scenario @rounding_f32_tail_values {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-16.0 to 16.0) : tensor<19xf32>
+    %output = check.generate.fill value(0.0) : tensor<5x19xf32>
+    check.compare<@rounding_f32_tail>(%input, %output) : (tensor<19xf32>, tensor<5x19xf32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<5x19xf32>
     }
   }
   check.return
