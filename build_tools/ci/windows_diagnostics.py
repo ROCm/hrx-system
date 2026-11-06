@@ -521,10 +521,28 @@ def capture_application_crashes(
             output_roots.append(build_dir.resolve())
         images = {}
         for event in root.findall("{*}Event"):
-            for data in event.findall("{*}EventData/{*}Data"):
-                if data.get("Name") not in ("AppPath", "ModulePath") or not data.text:
+            fields = event.findall("{*}EventData/{*}Data")
+            paths = [
+                data.text
+                for data in fields
+                if data.get("Name") in ("AppPath", "ModulePath")
+            ]
+            provider = event.find("{*}System/{*}Provider")
+            if (
+                provider is not None
+                and provider.get("Name") == "Application Error"
+                and event.findtext("{*}System/{*}EventID") == "1000"
+                and event.findtext("{*}System/{*}Version") == "0"
+                and len(fields) >= 12
+                and all(data.get("Name") is None for data in fields)
+            ):
+                # Classic Application Error events use insertion-string order:
+                # application and module paths follow the process start time.
+                paths.extend(data.text for data in fields[10:12])
+            for name in paths:
+                if not name:
                     continue
-                path = Path(data.text)
+                path = Path(name)
                 if path.is_absolute() and any(
                     path.resolve().is_relative_to(output_root)
                     for output_root in output_roots
