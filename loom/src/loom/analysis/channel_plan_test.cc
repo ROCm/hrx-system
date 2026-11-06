@@ -149,6 +149,9 @@ TEST_F(ChannelPlanTest, SharedStorageDoesNotMergeChannelBindings) {
   IREE_ASSERT_OK(loom_func_return_build(&builder_, nullptr, 0,
                                         LOOM_LOCATION_UNKNOWN, &exit));
   const auto plan = Analyze(function, {});
+  ASSERT_EQ(plan.action_count, 2u);
+  EXPECT_EQ(plan.actions[0].kind, LOOM_CHANNEL_PLAN_ACTION_KIND_BIND);
+  EXPECT_EQ(plan.actions[1].kind, LOOM_CHANNEL_PLAN_ACTION_KIND_BIND);
   const auto* first_identity =
       loom_channel_plan_channel(&plan, loom_channel_bind_result(first));
   const auto* second_identity =
@@ -221,7 +224,10 @@ TEST_F(ChannelPlanTest, CallableSummaryTracksNewReadsFromFormalChannels) {
     EXPECT_EQ(loom_channel_plan_channel(&plan, reads[i]), expected);
     EXPECT_EQ(loom_channel_plan_admission(&plan, reads[i]),
               LOOM_VALUE_ID_INVALID);
+    EXPECT_EQ(plan.actions[2 * i].kind, LOOM_CHANNEL_PLAN_ACTION_KIND_CALL);
     EXPECT_EQ(plan.actions[2 * i].callable, &summary);
+    EXPECT_EQ(plan.actions[2 * i + 1].kind,
+              LOOM_CHANNEL_PLAN_ACTION_KIND_RELEASE);
     EXPECT_EQ(plan.actions[2 * i + 1].channel, expected);
   }
 }

@@ -30,6 +30,44 @@ typedef struct loom_channel_plan_membership_t {
   uint8_t* admission_origins;
 } loom_channel_plan_membership_t;
 
+static_assert(LOOM_OP_CHANNEL_COUNT_ == 10,
+              "new channel operations require a retained action kind");
+
+// Classifies one retained action at the collection boundary. Channel-aware
+// calls are identified by their resolved summary; all remaining retained
+// actions are verified Channel-dialect operations.
+static loom_channel_plan_action_kind_t loom_channel_plan_classify_action(
+    const loom_op_t* op, const loom_channel_plan_callable_t* callable) {
+  if (callable) {
+    return LOOM_CHANNEL_PLAN_ACTION_KIND_CALL;
+  }
+  switch (op->kind) {
+    case LOOM_OP_CHANNEL_BIND:
+      return LOOM_CHANNEL_PLAN_ACTION_KIND_BIND;
+    case LOOM_OP_CHANNEL_RESERVE:
+      return LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE;
+    case LOOM_OP_CHANNEL_ACCEPT:
+      return LOOM_CHANNEL_PLAN_ACTION_KIND_ACCEPT;
+    case LOOM_OP_CHANNEL_WAIT:
+      return LOOM_CHANNEL_PLAN_ACTION_KIND_WAIT;
+    case LOOM_OP_CHANNEL_ACQUIRE:
+      return LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE;
+    case LOOM_OP_CHANNEL_PUBLISH:
+      return LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH;
+    case LOOM_OP_CHANNEL_RELEASE:
+      return LOOM_CHANNEL_PLAN_ACTION_KIND_RELEASE;
+    case LOOM_OP_CHANNEL_FANOUT:
+      return LOOM_CHANNEL_PLAN_ACTION_KIND_FANOUT;
+    case LOOM_OP_CHANNEL_COPY:
+      return LOOM_CHANNEL_PLAN_ACTION_KIND_COPY;
+    case LOOM_OP_CHANNEL_SELECT:
+      return LOOM_CHANNEL_PLAN_ACTION_KIND_SELECT;
+    default:
+      IREE_ASSERT_UNREACHABLE("retained action must be a channel op or call");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+}
+
 static bool loom_channel_plan_tracks_type(loom_type_t type) {
   return loom_channel_type_isa(type) || loom_read_type_isa(type) ||
          loom_write_type_isa(type);
@@ -336,8 +374,8 @@ iree_status_t loom_channel_plan_build(
       actions[action_count++] = (loom_channel_plan_action_t){
           .op = op,
           .channel = NULL,
-          .destination_channel = NULL,
           .callable = callable,
+          .kind = loom_channel_plan_classify_action(op, callable),
       };
     }
   }
@@ -406,15 +444,16 @@ iree_status_t loom_channel_plan_build(
       .return_count = return_count,
   };
   for (iree_host_size_t i = 0; i < action_count; ++i) {
-    if (actions[i].callable) {
+    if (actions[i].kind == LOOM_CHANNEL_PLAN_ACTION_KIND_CALL) {
       continue;
     }
     loom_op_t* op = actions[i].op;
     actions[i].channel = loom_channel_plan_channel(
-        &plan, loom_channel_bind_isa(op) ? loom_channel_bind_result(op)
-                                         : loom_op_operands(op)[0]);
+        &plan, actions[i].kind == LOOM_CHANNEL_PLAN_ACTION_KIND_BIND
+                   ? loom_channel_bind_result(op)
+                   : loom_op_operands(op)[0]);
     actions[i].destination_channel =
-        loom_channel_copy_isa(op)
+        actions[i].kind == LOOM_CHANNEL_PLAN_ACTION_KIND_COPY
             ? loom_channel_plan_channel(&plan,
                                         loom_channel_copy_destination(op))
             : NULL;
