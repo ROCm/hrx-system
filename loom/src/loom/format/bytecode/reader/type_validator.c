@@ -361,9 +361,9 @@ static iree_status_t loom_bytecode_type_plan_decode_entry(
     loom_bytecode_reader_module_view_t* module_view,
     iree_arena_allocator_t* scratch_arena,
     loom_bytecode_reader_cursor_t* cursor, loom_type_id_t type_index,
+    loom_bytecode_reference_bindings_t* reference_bindings,
     loom_bytecode_type_plan_entry_t* out_plan_entry,
-    loom_bytecode_type_fact_t** out_fact,
-    loom_bytecode_reference_bindings_t* reference_bindings) {
+    loom_bytecode_type_fact_t** out_fact) {
   const uint64_t type_offset =
       loom_bytecode_reader_cursor_absolute_position(cursor);
   if (out_plan_entry) {
@@ -788,7 +788,7 @@ iree_status_t loom_bytecode_type_plan_decode_indexed_entry(
       IREE_SV("TYPES"), &cursor);
   IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_decode_entry(
       decoder, context, module_view, scratch_arena, &cursor, type_index,
-      out_plan_entry, out_fact, /*reference_bindings=*/NULL));
+      /*reference_bindings=*/NULL, out_plan_entry, out_fact));
   return loom_bytecode_reader_expect_empty(decoder, &cursor,
                                            IREE_SV("type_entry"));
 }
@@ -861,8 +861,8 @@ iree_status_t loom_bytecode_type_validation_advance(
         IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_decode_entry(
             validation->decoder, validation->context, validation->module_view,
             validation->arena, &validation->cursor, i,
-            /*out_plan_entry=*/NULL, /*out_fact=*/NULL,
-            &validation->module_view->reference_bindings));
+            &validation->module_view->reference_bindings,
+            /*out_plan_entry=*/NULL, /*out_fact=*/NULL));
       }
       break;
     case LOOM_BYTECODE_TYPE_RETAIN_RANGES:
@@ -872,8 +872,8 @@ iree_status_t loom_bytecode_type_validation_advance(
         IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_decode_entry(
             validation->decoder, validation->context, validation->module_view,
             validation->arena, &validation->cursor, i,
-            /*out_plan_entry=*/NULL, /*out_fact=*/NULL,
-            &validation->module_view->reference_bindings));
+            &validation->module_view->reference_bindings,
+            /*out_plan_entry=*/NULL, /*out_fact=*/NULL));
         validation->entries[i] = (loom_bytecode_table_entry_metadata_t){
             .entry_offset = offset,
             .entry_length = loom_bytecode_reader_cursor_absolute_position(
@@ -888,8 +888,8 @@ iree_status_t loom_bytecode_type_validation_advance(
         IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_decode_entry(
             validation->decoder, validation->context, validation->module_view,
             validation->arena, &validation->cursor, i,
-            &validation->module_view->types.entries[i], &fact,
-            &validation->module_view->reference_bindings));
+            &validation->module_view->reference_bindings,
+            &validation->module_view->types.entries[i], &fact));
         if (fact) {
           if (validation->last_fact) {
             validation->last_fact->next = fact;

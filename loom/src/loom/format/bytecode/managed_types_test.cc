@@ -171,7 +171,7 @@ class ManagedTypeBytecodeTest : public ::testing::Test {
     loom_module_t* rejected_module = nullptr;
     IREE_ASSERT_OK(loom_bytecode_read_module(
         Bytes(), IREE_SV("objects.loombc"), &context_, &pool_, &read_options,
-        &result, &rejected_module, iree_allocator_system()));
+        iree_allocator_system(), &result, &rejected_module));
     EXPECT_GT(result.error_count, 0u);
     EXPECT_EQ(failure, expected_failure);
     EXPECT_EQ(rejected_module, nullptr);
@@ -326,7 +326,7 @@ TEST_F(ManagedTypeBytecodeTest, SelectedTypesReuseDestinationAliasAndOwnKeys) {
   loom_bytecode_read_result_t result = {};
   IREE_ASSERT_OK(loom_bytecode_materialize_module_symbols_into(
       Bytes(), IREE_SV("objects.loombc"), &pool_, &metadata_, 0, {1, &selected},
-      resolver, nullptr, &result, destination, iree_allocator_system()));
+      resolver, nullptr, destination, iree_allocator_system(), &result));
   ASSERT_EQ(result.error_count, 0u);
   loom_module_free(source_);
   source_ = nullptr;

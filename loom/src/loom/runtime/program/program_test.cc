@@ -349,11 +349,11 @@ TEST(ProgramBindingTest, PreservesDeclaredReferenceMode) {
                                     .WithRefTypes(ref_types)
                                     .WithCallableTypes(callables)
                                     .WithExports(exports)));
-  loom_serve_program_t* program = nullptr;
-  IREE_ASSERT_OK(loom_serve_program_link(module.module(), {},
-                                         iree_allocator_system(), &program));
-  std::unique_ptr<loom_serve_program_t, decltype(&loom_serve_program_free)>
-      program_owner(program, loom_serve_program_free);
+  loom_runtime_program_t* program = nullptr;
+  IREE_ASSERT_OK(loom_runtime_program_link(module.module(), {},
+                                           iree_allocator_system(), &program));
+  std::unique_ptr<loom_runtime_program_t, decltype(&loom_runtime_program_free)>
+      program_owner(program, loom_runtime_program_free);
   for (const auto name : {IREE_SV("owned"), IREE_SV("borrow")}) {
     const bool owning = iree_string_view_equal(name, IREE_SV("owned"));
     const iree_vm_signature_type_t exact = {
@@ -365,14 +365,14 @@ TEST(ProgramBindingTest, PreservesDeclaredReferenceMode) {
     other.kind = owning ? IREE_VM_SIGNATURE_TYPE_KIND_PTR
                         : IREE_VM_SIGNATURE_TYPE_KIND_REF;
     iree_vm_function_t function = {};
-    loom_serve_program_binding_t binding = {
+    loom_runtime_program_binding_t binding = {
         name, {&exact, 1}, {&exact, 1}, &function};
-    IREE_ASSERT_OK(loom_serve_program_bind(program, 1, &binding));
+    IREE_ASSERT_OK(loom_runtime_program_bind(program, 1, &binding));
     for (bool argument : {true, false}) {
       binding.arguments.data = argument ? &other : &exact;
       binding.results.data = argument ? &exact : &other;
       ExpectInvalidContract(
-          loom_serve_program_bind(program, 1, &binding),
+          loom_runtime_program_bind(program, 1, &binding),
           owning ? "expects ptr<vm.buffer>, source declares ref<vm.buffer>"
                  : "expects ref<vm.buffer>, source declares ptr<vm.buffer>");
     }
@@ -383,7 +383,7 @@ TEST(ProgramBindingTest, PreservesDeclaredReferenceMode) {
     binding.arguments.data = &callable;
     binding.results.data = &exact;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
-                          loom_serve_program_bind(program, 1, &binding));
+                          loom_runtime_program_bind(program, 1, &binding));
   }
 }
 
