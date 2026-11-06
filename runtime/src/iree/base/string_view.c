@@ -671,20 +671,29 @@ static bool iree_hex_float_has_one_after(const iree_hex_float_t* parsed,
   return parsed->has_trailing_one;
 }
 
+// Scales the integer significand left by |left_shift|. IEEE binary32 and
+// binary64 conversion only need to fill a 53-bit significand, so the caller's
+// shift is always representable in uint64_t.
+static uint64_t iree_hex_float_shift_left(const iree_hex_float_t* parsed,
+                                          uint32_t left_shift) {
+  IREE_ASSERT_LT(left_shift, 64);
+  return parsed->prefix_bits << left_shift;
+}
+
 // Rounds the integer significand divided by 2^|right_shift| to nearest even.
-// The caller guarantees that the rounded result fits in 54 bits.
+// The caller guarantees that the rounded result fits in 54 bits, including a
+// possible carry from rounding a 53-bit significand.
 static uint64_t iree_hex_float_round_right(const iree_hex_float_t* parsed,
-                                           int64_t right_shift) {
-  if (right_shift <= 0) {
-    const uint32_t left_shift = (uint32_t)-right_shift;
-    return parsed->prefix_bits << left_shift;
-  }
-  if (right_shift > parsed->total_bit_count) {
+                                           uint64_t right_shift) {
+  IREE_ASSERT_GT(right_shift, 0);
+  if (right_shift > (uint64_t)parsed->total_bit_count) {
     return 0;
   }
 
-  const uint32_t quotient_bit_count =
-      (uint32_t)(parsed->total_bit_count - right_shift);
+  const uint64_t quotient_bit_count_u64 =
+      (uint64_t)parsed->total_bit_count - right_shift;
+  IREE_ASSERT_LE(quotient_bit_count_u64, parsed->prefix_bit_count);
+  const uint32_t quotient_bit_count = (uint32_t)quotient_bit_count_u64;
   uint64_t quotient = iree_hex_float_prefix(parsed, quotient_bit_count);
   const bool round_bit = iree_hex_float_bit(parsed, quotient_bit_count);
   const bool sticky = iree_hex_float_has_one_after(parsed, quotient_bit_count);
@@ -715,8 +724,15 @@ static uint64_t iree_hex_float_to_ieee_bits(const iree_hex_float_t* parsed,
   }
 
   if (exponent >= minimum_exponent) {
-    uint64_t significand =
-        iree_hex_float_round_right(parsed, parsed->total_bit_count - precision);
+    uint64_t significand;
+    if (parsed->total_bit_count <= precision) {
+      const uint32_t left_shift = precision - (uint32_t)parsed->total_bit_count;
+      significand = iree_hex_float_shift_left(parsed, left_shift);
+    } else {
+      const uint64_t right_shift =
+          (uint64_t)parsed->total_bit_count - precision;
+      significand = iree_hex_float_round_right(parsed, right_shift);
+    }
     if (significand == (UINT64_C(1) << precision)) {
       significand >>= 1;
       if (++exponent > maximum_exponent) {
@@ -728,11 +744,20 @@ static uint64_t iree_hex_float_to_ieee_bits(const iree_hex_float_t* parsed,
            (significand & fraction_mask);
   }
 
-  const int64_t subnormal_exponent =
-      (int64_t)minimum_exponent - ((int64_t)precision - 1);
-  const int64_t right_shift =
-      iree_saturating_sub_int64(subnormal_exponent, parsed->binary_exponent);
-  const uint64_t fraction = iree_hex_float_round_right(parsed, right_shift);
+  // Express the subnormal shift from the already-classified leading exponent
+  // instead of reversing the potentially saturated binary exponent. This
+  // leaves both shift directions as explicit nonnegative magnitudes.
+  const uint64_t exponent_delta =
+      (uint64_t)iree_saturating_sub_int64(minimum_exponent, exponent);
+  const uint64_t scaled_bit_count =
+      (uint64_t)parsed->total_bit_count + exponent_delta;
+  uint64_t fraction;
+  if (scaled_bit_count <= precision) {
+    const uint32_t left_shift = (uint32_t)(precision - scaled_bit_count);
+    fraction = iree_hex_float_shift_left(parsed, left_shift);
+  } else {
+    fraction = iree_hex_float_round_right(parsed, scaled_bit_count - precision);
+  }
   if (fraction == (UINT64_C(1) << (precision - 1))) {
     return sign | (UINT64_C(1) << (precision - 1));
   }

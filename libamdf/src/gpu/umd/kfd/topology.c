@@ -23,6 +23,8 @@
 static amdf_status_t amdf_gpu_kfd_read_attribute(int directory,
                                                  const char* name, char* text,
                                                  size_t capacity) {
+  // Every exit leaves a valid empty or NUL-terminated string.
+  text[0] = 0;
   int descriptor = openat(directory, name, O_RDONLY | O_CLOEXEC);
   if (descriptor < 0) {
     return amdf_linux_error(errno);
@@ -649,25 +651,30 @@ amdf_status_t amdf_gpu_kfd_topology_initialize(
   amdf_status_t status = amdf_gpu_kfd_read_number(topology_directory,
                                                   "generation_id", &generation);
   int nodes = -1;
+  int nodes_directory = -1;
+  DIR* directory = NULL;
+  amdf_gpu_kfd_topology_t topology = {0};
+  bool found = false;
   if (amdf_status_is_ok(status)) {
     nodes =
         openat(topology_directory, "nodes", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (nodes < 0) {
       status = amdf_linux_error(errno);
-    }
-  }
-  DIR* directory = NULL;
-  if (amdf_status_is_ok(status)) {
-    directory = fdopendir(nodes);
-    if (directory == NULL) {
-      status = amdf_linux_error(errno);
     } else {
-      nodes = -1;
+      directory = fdopendir(nodes);
+      if (directory == NULL) {
+        status = amdf_linux_error(errno);
+      } else {
+        nodes = -1;
+        nodes_directory = dirfd(directory);
+        if (nodes_directory < 0) {
+          status = amdf_linux_error(errno);
+        }
+      }
     }
   }
-  amdf_gpu_kfd_topology_t topology = {0};
-  bool found = false;
-  while (amdf_status_is_ok(status) && !found) {
+  while (directory != NULL && nodes_directory >= 0 &&
+         amdf_status_is_ok(status) && !found) {
     errno = 0;
     const struct dirent* entry = readdir(directory);
     if (entry == NULL) {
@@ -680,7 +687,7 @@ amdf_status_t amdf_gpu_kfd_topology_initialize(
         strspn(entry->d_name, "0123456789") != strlen(entry->d_name)) {
       continue;
     }
-    int node = openat(dirfd(directory), entry->d_name,
+    int node = openat(nodes_directory, entry->d_name,
                       O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (node < 0) {
       status = amdf_linux_error(errno);
@@ -700,11 +707,11 @@ amdf_status_t amdf_gpu_kfd_topology_initialize(
         if (errno || *end != 0 || node_ordinal > UINT32_MAX) {
           status = amdf_linux_error(EPROTO);
         } else {
-          status = amdf_gpu_kfd_read_memory_peers(dirfd(directory), node,
+          status = amdf_gpu_kfd_read_memory_peers(nodes_directory, node,
                                                   (uint32_t)node_ordinal,
                                                   host_allocator, &topology);
           if (amdf_status_is_ok(status)) {
-            status = amdf_gpu_kfd_read_host_access(dirfd(directory), node,
+            status = amdf_gpu_kfd_read_host_access(nodes_directory, node,
                                                    (uint32_t)node_ordinal,
                                                    io_link_count, &topology);
           }

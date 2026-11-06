@@ -858,6 +858,7 @@ TEST(StringViewTest, ParseHexFloat32) {
       {"+0x1p0", UINT32_C(0x3F800000)},
       {"0x1.fffffep+127", UINT32_C(0x7F7FFFFF)},
       {"0x1p-126", UINT32_C(0x00800000)},
+      {"0x1p-148", UINT32_C(0x00000002)},
       {"0x1p-149", UINT32_C(0x00000001)},
       // Round-to-nearest-even at an ordinary, subnormal, and overflow edge.
       {"0x1.000001p0", UINT32_C(0x3F800000)},
@@ -887,6 +888,7 @@ TEST(StringViewTest, ParseHexFloat64) {
       {"0x1p0", UINT64_C(0x3FF0000000000000)},
       {"0x1.fffffffffffffp+1023", UINT64_C(0x7FEFFFFFFFFFFFFF)},
       {"0x1p-1022", UINT64_C(0x0010000000000000)},
+      {"0x1p-1073", UINT64_C(0x0000000000000002)},
       {"0x1p-1074", UINT64_C(0x0000000000000001)},
       {"0x1.00000000000008p0", UINT64_C(0x3FF0000000000000)},
       {"0x1.0000000000000800000000001p0", UINT64_C(0x3FF0000000000001)},

@@ -14,7 +14,10 @@
 
 // Preserves the kernel's native failure code.
 static inline amdf_status_t amdf_linux_error(int error) {
-  return amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, (uint32_t)error);
+  // Never allow a broken syscall wrapper or stale errno to turn a failure path
+  // into success. EIO is the least specific faithful fallback.
+  return amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO,
+                          (uint32_t)(error != 0 ? error : EIO));
 }
 
 // Linux consumes a valid descriptor even when close reports an error. Clearing

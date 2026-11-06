@@ -14,6 +14,7 @@ exports_files([
     "ignore_nonruntime_symbols.patch",
     "libbacktrace.BUILD.bazel",
     "threaded_cache_reads.patch",
+    "zero_size_vectors.patch",
 ])
 
 expand_template(
@@ -84,4 +85,9 @@ cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
+)
+
+test_suite(
+    name = "upstream_tests",
+    tests = ["@libbacktrace//:unittest"],
 )

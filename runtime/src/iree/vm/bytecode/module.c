@@ -129,6 +129,8 @@ static void iree_vm_bytecode_module_initialize_rodata(
         image->layout.rodata.section_begin + section_offset;
     if (!iree_host_ptr_has_alignment(block_data,
                                      descriptor->minimum_alignment_u32)) {
+      // The plan reserves copy storage whenever any block needs realignment.
+      IREE_ASSERT(copy_storage);
       copy_offset =
           iree_host_align(copy_offset, descriptor->minimum_alignment_u32);
       if (block_length != 0) {
