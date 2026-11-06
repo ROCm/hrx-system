@@ -79,10 +79,20 @@ relationship; it does not provide the residency proof.
 
 libamdf context lifetime and fixed backing do not guarantee application tile
 state across independent submissions. The current XDNA HAL therefore uses
-invocation zero for every dispatch. A persistent service instead remains inside
-one outstanding invocation while CPU, GPU, and NPU participants exchange work
-through shared memory. Its terminal completion means that the service has
-stopped its workers and drained transfers, so the placement can be reused.
+invocation zero for every dispatch. A persistent service spans bounded native
+invocations while retaining its executable, weights, bindings, and shared-memory
+protocol state. Within each invocation, CPU, GPU, and NPU participants can
+exchange many logical requests. The program periodically finishes an epoch,
+quiescing its workers and draining transfers before the placement can be reused.
+
+A successor can be queued before its predecessor completes, with an explicit
+dependency ordering their use of the placement and shared state. It establishes
+tile execution again and consumes any live cursors or intermediate results from
+shared memory; native retirement does not require the CPU to copy that state.
+Input and downstream-credit waits count toward the epoch's execution budget.
+An indefinitely outstanding command is not implied by service residency. The
+[native service contract](../../../../../../../../libamdf/docs/xdna.md#resident-work-and-early-admission)
+describes early admission, bounded epochs, and retirement ownership.
 
 Native command retirement alone does not prove arbitrary autonomous tile work
 has ended. The compiled program must establish the required output and worker
