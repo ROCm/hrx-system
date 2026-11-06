@@ -1,0 +1,111 @@
+// RUN: verify
+#include <type_traits>
+
+static_assert(__is_same(std::enable_if<true>::type, void));
+static_assert(__is_same(std::enable_if_t<true>, void));
+static_assert(__is_same(std::enable_if_t<true, const unsigned&>, const unsigned&));
+static_assert(__is_same(std::enable_if_t<true, volatile int*>, volatile int*));
+static_assert(__is_same(std::enable_if_t<true, int[4]>, int[4]));
+
+template <class Type>
+concept HasType = requires { typename Type::type; };
+static_assert(HasType<std::enable_if<true>>);
+static_assert(!HasType<std::enable_if<false>>);
+static_assert(!HasType<std::enable_if<false, unsigned>>);
+
+template <class Type>
+constexpr auto classify(Type) -> std::enable_if_t<__is_integral(Type), int> {
+  return 1;
+}
+template <class Type>
+constexpr auto classify(Type) -> std::enable_if_t<!__is_integral(Type), int> {
+  return 2;
+}
+static_assert(classify(7) == 1);
+static_assert(classify(7.0f) == 2);
+static_assert(classify<double>(7.0) == 2);
+
+template <class Type, std::enable_if_t<__is_integral(Type), int> = 0>
+constexpr int template_parameter(Type) { return 3; }
+template <class Type, std::enable_if_t<!__is_integral(Type), int> = 0>
+constexpr int template_parameter(Type) { return 4; }
+static_assert(template_parameter(7) == 3);
+static_assert(template_parameter(7.0f) == 4);
+
+template <class Type>
+constexpr int function_parameter(Type, std::enable_if_t<__is_integral(Type)>* = nullptr) {
+  return 5;
+}
+static constexpr int function_parameter(...) { return 6; }
+static_assert(function_parameter(7) == 5);
+static_assert(function_parameter(7.0f) == 6);
+
+template <class Type, class = std::enable_if_t<__is_integral(Type)>>
+constexpr int default_type(Type) { return 7; }
+static constexpr int default_type(...) { return 8; }
+static_assert(default_type(7) == 7);
+static_assert(default_type(7.0f) == 8);
+
+template <class Type>
+constexpr typename std::enable_if<__is_integral(Type), int>::type member_type(Type) {
+  return 9;
+}
+static constexpr int member_type(...) { return 10; }
+static_assert(member_type(7) == 9);
+static_assert(member_type(7.0f) == 10);
+
+// ====
+// RUN: roundtrip
+#include <hip/hip_runtime.h>
+
+template <unsigned Rounds>
+auto select_round(unsigned value) -> std::enable_if_t<Rounds % 4 == 0, unsigned> {
+  return value + 1;
+}
+template <unsigned Rounds>
+auto select_round(unsigned value) -> std::enable_if_t<Rounds % 4 != 0, unsigned> {
+  return value + 2;
+}
+unsigned complete_round(unsigned value) { return select_round<20>(value); }
+unsigned partial_round(unsigned value) { return select_round<21>(value); }
+
+// ----
+func.def public @complete_round(%value: i32) -> (i32) {
+  %2 = func.call pure @select_round_20(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def public @partial_round(%value: i32) -> (i32) {
+  %5 = func.call pure @select_round_21(%value) : (i32) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @select_round_20(%value: i32) -> (i32) {
+  %8 = scalar.constant 1 : i32
+  %9 = scalar.addi %value, %8 : i32
+  func.return %9 : i32
+}
+
+func.def @select_round_21(%value: i32) -> (i32) {
+  %12 = scalar.constant 2 : i32
+  %13 = scalar.addi %value, %12 : i32
+  func.return %13 : i32
+}
+
+// ====
+// RUN: verify
+#include <type_traits>
+
+template <class Type>
+// REMARK@+1: PARSE/036 "candidate function not viable: substitution failure: no type named 'type' in '::std::enable_if<0, float>'"
+auto only_integer(Type value) -> std::enable_if_t<__is_integral(Type), Type> {
+  return value;
+}
+// ERROR@+1: PARSE/036 "no matching function for call to 'only_integer'"
+float rejected(float value) { return only_integer(value); }
+
+// ====
+#include <type_traits>
+
+// ERROR@+1: PARSE/036 "'type' is not a type"
+using Missing = std::enable_if<false>::type;

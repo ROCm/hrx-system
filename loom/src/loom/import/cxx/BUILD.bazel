@@ -46,6 +46,7 @@ exports_files([
     "include/loomcxx/view.h",
     "include/initializer_list",
     "include/stdfloat",
+    "include/type_traits",
 ])
 
 loom_cc_test(

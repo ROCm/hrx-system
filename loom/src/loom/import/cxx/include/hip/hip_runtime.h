@@ -10,6 +10,8 @@
 #include <loomcxx/kernel.h>
 #include <loomcxx/math.h>
 
+#include <type_traits>
+
 #define __global__ LOOM_KERNEL
 #define __device__ LOOM_DEVICE
 #define __host__

@@ -24,6 +24,7 @@ iree_c_embed_data(
     srcs = [
         "//loom/src/loom/import/cxx:include/initializer_list",
         "//loom/src/loom/import/cxx:include/stdfloat",
+        "//loom/src/loom/import/cxx:include/type_traits",
     ],
     c_file_output = "embedded_standard_headers.c",
     flatten = True,

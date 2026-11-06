@@ -2669,10 +2669,18 @@ immutable caller-owned headers, including a shared source cache. Each invocation
 owns its mutable preprocessing and semantic state. Header hits and misses are
 reused within an invocation. Diagnostic sinks copy any bytes they retain.
 
-The importer embeds `<stdfloat>`, `loomcxx/` and `hip/` source headers by default.
+The importer embeds `<initializer_list>`, `<stdfloat>`, `<type_traits>`,
+`loomcxx/` and `hip/` source headers by default.
 User and system include paths take precedence over the embedded system root. The HIP
 facade maps topology, synchronization, scalar half conversions and math onto
 the Loom vocabulary; it does not load the HIP runtime or a host SDK.
+
+The embedded `<type_traits>` provides `std::enable_if` and `std::enable_if_t`,
+including the default `void` result and substitution failure for false
+conditions. The HIP facade includes it for device headers that use these
+traits. These are ordinary source templates: return types, function parameters,
+and template parameters all use the frontend's normal substitution rules.
+Other standard-library facilities require caller-supplied headers.
 
 `--builtin-includes=false --I=loom/src/loom/import/cxx/include` uses the external
 headers. Building with `--//loom/config/import/cxx:embed_includes=false`, or
