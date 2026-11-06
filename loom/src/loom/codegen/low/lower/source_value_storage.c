@@ -150,8 +150,7 @@ static bool loom_low_lower_value_storage_required(
 
 bool loom_low_lower_source_value_storage_result_required(
     const loom_low_lower_context_t* context, loom_value_id_t source_value_id) {
-  return loom_low_lower_value_storage_required(context, source_value_id) ||
-         loom_module_value_has_type_uses(context->module, source_value_id);
+  return loom_low_lower_value_storage_required(context, source_value_id);
 }
 
 static bool loom_low_lower_rule_value_ref_source_value(
@@ -636,10 +635,9 @@ void loom_low_lower_source_value_storage_mark_structural_demands(
       loom_low_lower_source_value_storage_op_is_duplication(context, source_op,
                                                             traits) ||
       loom_buffer_assume_same_root_isa(source_op)) {
-    const loom_value_id_t* results = loom_op_const_results(source_op);
-    for (uint16_t i = 0; i < source_op->result_count; ++i) {
-      if (loom_traits_have_observable_effects(traits) ||
-          loom_module_value_has_type_uses(context->module, results[i])) {
+    if (loom_traits_have_observable_effects(traits)) {
+      const loom_value_id_t* results = loom_op_const_results(source_op);
+      for (uint16_t i = 0; i < source_op->result_count; ++i) {
         loom_low_lower_mark_value_storage_required(context, results[i]);
       }
     }
@@ -743,6 +741,7 @@ static void loom_low_lower_mark_selected_plan_storage_demands(
       break;
     case LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE:
     case LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL:
+    case LOOM_LOW_LOWER_SELECTED_PLAN_UNAVAILABLE:
       loom_low_lower_require_source_operands_storage(context,
                                                      selected_plan->source_op);
       break;

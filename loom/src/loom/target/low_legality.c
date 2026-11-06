@@ -770,6 +770,13 @@ static iree_status_t loom_target_low_legality_try_contract_query_op(
         *out_handled = true;
         return iree_ok_status();
       }
+      if (result.rejection == NULL &&
+          context->options->defer_missing_contract.fn != NULL &&
+          context->options->defer_missing_contract.fn(
+              context->options->defer_missing_contract.user_data, op)) {
+        *out_handled = true;
+        return loom_target_low_legality_verify_op_value_types(context, op);
+      }
       *out_handled = true;
       return loom_target_low_legality_reject_contract_query(context, op,
                                                             &result);

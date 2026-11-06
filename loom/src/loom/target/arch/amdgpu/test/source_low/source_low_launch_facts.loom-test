@@ -190,22 +190,22 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_c
   %workgroup = live_in<amdgpu.workgroup_id.x> : reg<amdgpu.sgpr>
   %input_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %output_view = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %25 = v_mov_b32 0
-  %26 = s_lshl_b32_rhs_inline %workgroup, 4
-  %27 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %28 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %29 = s_mov_b32 0
-  %30, %31 = s_add_co_u32 %27, %26
-  %32, %33 = s_addc_u32 %28, %29, %31
-  %34 = concat(%30, %32) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %loaded = global_load_b128_saddr %25, %34
-  %37 = s_lshl_b32_rhs_inline %workgroup, 4
-  %38 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %39 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %41, %42 = s_add_co_u32 %38, %37
-  %43, %44 = s_addc_u32 %39, %29, %42
-  %45 = concat(%41, %43) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  global_store_b128_saddr %25, %loaded, %45
+  %21 = v_mov_b32 0
+  %22 = s_lshl_b32_rhs_inline %workgroup, 4
+  %23 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %24 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = s_mov_b32 0
+  %26, %27 = s_add_co_u32 %23, %22
+  %28, %29 = s_addc_u32 %24, %25, %27
+  %30 = concat(%26, %28) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %loaded = global_load_b128_saddr %21, %30
+  %33 = s_lshl_b32_rhs_inline %workgroup, 4
+  %34 = slice %output_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = slice %output_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %37, %38 = s_add_co_u32 %34, %33
+  %39, %40 = s_addc_u32 %35, %25, %38
+  %41 = concat(%37, %39) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b128_saddr %21, %loaded, %41
   return
 }
 

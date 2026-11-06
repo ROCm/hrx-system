@@ -426,7 +426,8 @@ class LowLowerSourcePlanTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&block_pool_);
   }
 
-  void BuildFunction(iree_string_view_t name = IREE_SV("plan")) {
+  void BuildFunction(iree_string_view_t name = IREE_SV("plan"),
+                     bool use_first_producer = false) {
     loom_builder_t module_builder;
     loom_builder_initialize(module_, &module_->arena,
                             loom_module_block(module_), &module_builder);
@@ -490,9 +491,9 @@ class LowLowerSourcePlanTest : public ::testing::Test {
     const loom_value_id_t dependency_identity =
         loom_scalar_assume_results(dependency_identity_op).values[0];
     loom_op_t* result_op = nullptr;
-    IREE_ASSERT_OK(loom_scalar_addi_build(&body_builder, 0, dependency_identity,
-                                          rhs, i32_type, LOOM_LOCATION_UNKNOWN,
-                                          &result_op));
+    IREE_ASSERT_OK(loom_scalar_addi_build(
+        &body_builder, 0, dependency_identity, use_first_producer ? dead : rhs,
+        i32_type, LOOM_LOCATION_UNKNOWN, &result_op));
     const loom_value_id_t result = loom_scalar_addi_result(result_op);
     loom_op_t* return_op = nullptr;
     IREE_ASSERT_OK(loom_func_return_build(&body_builder, &result, 1,
@@ -687,6 +688,12 @@ TEST_F(LowLowerSourcePlanTest, PropagatesObserverEndFailureBeforeSelection) {
 
 TEST_F(LowLowerSourcePlanTest,
        RejectsIncompleteSelectionBeforeFinalizingConsumers) {
+  BuildFunction(IREE_SV("incomplete_selection"), /*use_first_producer=*/true);
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(
+      &fact_table_, &analysis_arena_, module_->values.count));
+  fact_table_.context.target_facts = &target_facts_;
+  IREE_ASSERT_OK(
+      loom_value_fact_table_compute(&fact_table_, module_, function_));
   // Model a target that rejects two producers while selecting a live user.
   // Finalization may inspect producer carriers only after every operation has
   // a valid selection, so the rejected function must stop at that boundary.
