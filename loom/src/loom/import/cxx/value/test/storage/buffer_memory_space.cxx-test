@@ -188,3 +188,78 @@ func.def public @private_element() -> (i32) {
   %24 = view.load %23[0] : view<1xi32> -> i32
   func.return %24 : i32
 }
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Pointer and typed-buffer borrows retain their respective roots while
+// constant-space refinement preserves the pointer interior origin. Both
+// forms publish alternating outputs from the same logical source coordinate.
+#include <loomcxx/kernel.h>
+#include <loomcxx/view.h>
+[[loom::kernel, loom::workgroup_size(32, 1, 1), loom::workgroup_count(2, 1, 1)]]
+void borrowed_storage(const unsigned* input_pointer,
+                      loom::type::buffer<const unsigned> input_buffer,
+                      unsigned* output) {
+  unsigned item =
+      loom::kernel::workgroup::id.x * 32u + loom::kernel::workitem::id.x;
+  auto* interior =
+      loom::buffer::assume::memory_space<loom::memory_space::constant>(
+          input_pointer + 3);
+  auto buffer =
+      loom::buffer::assume::memory_space<loom::memory_space::constant>(
+          input_buffer);
+  auto source =
+      loom::buffer::view<70>(buffer, {}, loom::encoding::layout::dense<1>());
+  output[item * 2 + 1] = interior[item];
+  output[item * 2 + 2] = loom::view::load(source, item + 3);
+}
+// ----
+kernel.def @borrowed_storage() {
+  %3 = index.constant 2 : index
+  %4 = index.constant 1 : index
+  %6 = index.constant 32 : index
+  kernel.launch.config workgroups(%3, %4, %4) workgroup_size(%6, %4, %4) : index
+} launch(%input_pointer: buffer, %input_buffer: buffer, %output: buffer) {
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %12 = index.cast %workgroup_id_x : index to i32
+  %90 = scalar.constant 5 : i32
+  %91 = scalar.shli %12, %90 : i32
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %16 = index.cast %workitem_id_x : index to i32
+  %item = scalar.addi %91, %16 : i32
+  %interior = buffer.assume.memory_space<constant> %input_pointer : buffer
+  %buffer = buffer.assume.memory_space<constant> %input_buffer : buffer
+  %29 = index.constant 0 : offset
+  %source = buffer.view %buffer[%29] : buffer -> view<70xi32>
+  %87 = scalar.constant 2 : i32
+  %88 = scalar.shli %item, %87 : i32
+  %89 = scalar.extui %88 : i32 to i64
+  %84 = scalar.constant 12 : i64
+  %83 = scalar.addi %89, %84 : i64
+  %36 = scalar.assume %83 [range(%83, 0, 9223372036854775807)] : i64
+  %37 = index.cast %36 : i64 to offset
+  %38 = buffer.view %interior[%37] : buffer -> view<1xi32>
+  %39 = view.load %38[0] : view<1xi32> -> i32
+  %81 = scalar.constant 1 : i32
+  %82 = scalar.shli %item, %81 : i32
+  %43 = scalar.addi %82, %81 : i32
+  %79 = scalar.shli %43, %87 : i32
+  %80 = scalar.extui %79 : i32 to i64
+  %49 = scalar.assume %80 [range(%80, 0, 9223372036854775807)] : i64
+  %50 = index.cast %49 : i64 to offset
+  %51 = buffer.view %output[%50] : buffer -> view<1xi32>
+  view.store %39, %51[0] : i32, view<1xi32>
+  %52 = scalar.constant 3 : i32
+  %53 = scalar.addi %item, %52 : i32
+  %54 = scalar.extui %53 : i32 to i64
+  %55 = index.cast %54 : i64 to index
+  %56 = view.load %source[%55] : view<70xi32> -> i32
+  %60 = scalar.addi %82, %87 : i32
+  %72 = scalar.shli %60, %87 : i32
+  %73 = scalar.extui %72 : i32 to i64
+  %66 = scalar.assume %73 [range(%73, 0, 9223372036854775807)] : i64
+  %67 = index.cast %66 : i64 to offset
+  %68 = buffer.view %output[%67] : buffer -> view<1xi32>
+  view.store %56, %68[0] : i32, view<1xi32>
+  kernel.return
+}

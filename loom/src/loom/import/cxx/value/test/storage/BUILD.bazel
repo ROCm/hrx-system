@@ -15,9 +15,19 @@ package(
 loom_check_test_suite(
     name = "compiler_test",
     srcs = [
+        "buffer_alloca.cxx-test",
+        "buffer_alloca_invalid.cxx-test",
+        "buffer_memory_space.cxx-test",
+        "buffer_memory_space_invalid.cxx-test",
+        "buffer_selection.cxx-test",
         "call_storage.cxx-test",
         "local_addresses.cxx-test",
         "local_arrays.cxx-test",
+        "opaque_pointers.cxx-test",
+        "opaque_pointers_invalid.cxx-test",
+        "pointer_origins.cxx-test",
+        "pointer_walk.cxx-test",
+        "pointers.cxx-test",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
