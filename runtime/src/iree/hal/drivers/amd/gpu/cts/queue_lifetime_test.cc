@@ -14,6 +14,7 @@
 #include "iree/hal/drivers/amd/gpu/queue/aql/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/pm4/queue.h"
 #include "iree/hal/drivers/amd/gpu/queue/semaphore.h"
+#include "iree/hal/drivers/amd/gpu/queue/signal.h"
 #include "iree/hal/slab_pool.h"
 #include "iree/testing/status_matchers.h"
 
@@ -22,6 +23,74 @@ namespace {
 
 using iree::hal::cts::Ref;
 
+// Holds one exact host allocation while every other allocation continues to
+// the system allocator. Only the allocator dependency is controlled here.
+class FrontierAllocationGate {
+ public:
+  iree_allocator_t allocator() {
+    return {this, [](void* self, iree_allocator_command_t command,
+                     const void* params, void** inout_pointer) {
+              auto* gate = static_cast<FrontierAllocationGate*>(self);
+              bool held = false;
+              if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+                size_t size =
+                    static_cast<const iree_allocator_alloc_params_t*>(params)
+                        ->byte_length;
+                held = size && gate->size_.compare_exchange_strong(size, 0);
+                if (held) {
+                  gate->allocation_thread = std::this_thread::get_id();
+                  gate->entered_.release();
+                  gate->resume_.acquire();
+                }
+              }
+              const auto system = iree_allocator_system();
+              auto status =
+                  held && gate->fail_
+                      ? iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                         "frontier allocation unavailable")
+                      : system.ctl(system.self, command, params, inout_pointer);
+              if (held) {
+                gate->returned_.release();
+              }
+              return status;
+            }};
+  }
+
+  class Hold {
+   public:
+    Hold(FrontierAllocationGate* gate, size_t size, bool fail) : gate_(gate) {
+      gate_->fail_ = fail;
+      gate_->size_ = size;
+    }
+    ~Hold() {
+      if (!gate_->size_.exchange(0)) {
+        gate_->resume_.release();
+        gate_->returned_.acquire();
+      }
+    }
+    void WaitEntered() { gate_->entered_.acquire(); }
+
+   private:
+    // Gate outliving the allocation and its caller's queue-construction join.
+    FrontierAllocationGate* gate_;
+  };
+
+  // Read only after the allocation-entry semaphore publishes this value.
+  std::thread::id allocation_thread;
+
+ private:
+  // Zero when disarmed; otherwise the exact frontier replacement size.
+  std::atomic<size_t> size_{0};
+  // Hold policy, published before the constructor thread enters the allocator.
+  bool fail_ = false;
+  // Publishes entry before the system allocator call.
+  std::binary_semaphore entered_{0};
+  // Releases the held caller after independent device output is observed.
+  std::binary_semaphore resume_{0};
+  // Joins the final allocator callback access before gate destruction.
+  std::binary_semaphore returned_{0};
+};
+
 class GpuNativeQueueLifetimeTest
     : public GpuNativeTest,
       public ::testing::WithParamInterface<amdf_queue_command_type_t> {
@@ -29,6 +98,7 @@ class GpuNativeQueueLifetimeTest
   amdf_queue_command_type_t command_type() const override { return GetParam(); }
 
   void SetUp() override {
+    allocator_.backing = frontier_gate_.allocator();
     IREE_ASSERT_OK(memory_gate_.CreateFabric(&fabric_));
     GpuNativeTest::SetUp();
     if (HasFatalFailure() || IsSkipped()) {
@@ -59,13 +129,98 @@ class GpuNativeQueueLifetimeTest
     GpuNativeTest::TearDown();
   }
 
+  void FrontierAllocationProgress(bool fail);
+
   // Native dependency gate, joined by base teardown before its table expires.
   NativeMemoryGate memory_gate_;
+  // Host allocator dependency, alive through the base's device teardown.
+  FrontierAllocationGate frontier_gate_;
   // Explicit physical backing for recording and independent allocation work.
   iree_hal_pool_t* pool_ = nullptr;
   // Device's stable native signal domain, borrowed through device teardown.
   const void* domain_ = nullptr;
 };
+
+void GpuNativeQueueLifetimeTest::FrontierAllocationProgress(bool fail) {
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(256, 4),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_semaphore_t> start, filled, done;
+  CreateSemaphore(start.out());
+  CreateSemaphore(filled.out());
+  CreateSemaphore(done.out());
+  iree_hal_semaphore_t* start_handle = start;
+  iree_hal_semaphore_t* filled_handle = filled;
+  iree_hal_semaphore_t* done_handle = done;
+  uint64_t one = 1;
+  const uint32_t pattern = 0x1234CAFE;
+  Ref<iree_hal_queue_t> acquired;
+  std::jthread constructor;
+  {
+    // Two provisioned coordinates expand to four when a third is acquired.
+    // Select the real signal-table allocation, after vector installation.
+    const size_t table_size =
+        sizeof(iree_hal_amd_gpu_signal_frontiers_t) +
+        options_.queue.retirement_capacity * 4 * sizeof(uint64_t);
+    FrontierAllocationGate::Hold hold(&frontier_gate_, table_size, fail);
+    constructor = std::jthread([&] {
+      auto status = AcquireQueue(acquired.out());
+      if (fail) {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+      } else {
+        IREE_EXPECT_OK(status);
+      }
+    });
+    hold.WaitEntered();
+    EXPECT_EQ(frontier_gate_.allocation_thread, constructor.get_id());
+    // The host wait forces deferred publication, proving the device service
+    // thread can progress as well as caller-inline submission.
+    IREE_ASSERT_OK(iree_hal_queue_fill(
+        queues_[0], {1, &start_handle, &one}, {1, &filled_handle, &one}, output,
+        0, 256, &pattern, sizeof(pattern), nullptr, 0));
+    std::array<uint32_t, 64> observed = {};
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download =
+            {
+                .source_buffer = output,
+                .target = observed.data(),
+                .length = sizeof(observed),
+            },
+    };
+    IREE_ASSERT_OK(iree_hal_queue_transfer(
+        queues_[1], {1, &filled_handle, &one}, {1, &done_handle, &one}, 1,
+        &download, nullptr));
+    IREE_ASSERT_OK(iree_hal_semaphore_signal(start, one, nullptr));
+    IREE_ASSERT_OK(
+        iree_hal_semaphore_wait(done, one, iree_infinite_timeout(), 0));
+    for (uint32_t value : observed) {
+      EXPECT_EQ(value, pattern);
+    }
+  }
+  constructor.join();
+  if (fail) {
+    EXPECT_EQ(acquired.get(), nullptr);
+    IREE_ASSERT_OK(AcquireQueue(acquired.out()));
+  }
+  ASSERT_NE(acquired.get(), nullptr);
+  uint64_t two = 2;
+  IREE_ASSERT_OK(iree_hal_queue_barrier(acquired, {1, &done_handle, &one},
+                                        {1, &done_handle, &two}, nullptr, 0));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(done, two, iree_infinite_timeout(), 0));
+}
+
+TEST_P(GpuNativeQueueLifetimeTest,
+       ExistingQueuesPublishWhileFrontierAllocationIsHeld) {
+  FrontierAllocationProgress(false);
+}
+
+TEST_P(GpuNativeQueueLifetimeTest,
+       ExistingQueuesSurviveFailedFrontierAllocationAndRetry) {
+  FrontierAllocationProgress(true);
+}
 
 TEST_P(GpuNativeQueueLifetimeTest, FinalReleaseContinuesEpochsAcrossSlotReuse) {
   iree_async_single_frontier_t previous = {};

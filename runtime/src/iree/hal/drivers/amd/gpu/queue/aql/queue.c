@@ -59,6 +59,8 @@ typedef struct iree_hal_amd_gpu_aql_pending_t {
 typedef struct iree_hal_amd_gpu_aql_frontier_request_t {
   // Exact protocol tag and publication link.
   iree_hal_amd_gpu_aql_entry_t entry;
+  // Queue borrowed by the serialized membership caller through every handoff.
+  iree_hal_amd_gpu_aql_queue_t* queue;
   // Device-owned notification and caller-owned result.
   iree_hal_amd_gpu_frontier_request_t request;
 } iree_hal_amd_gpu_aql_frontier_request_t;
@@ -1594,28 +1596,22 @@ static void iree_hal_amd_gpu_aql_trim_storage(
   iree_hal_amd_gpu_capture_pool_trim(&queue->captures);
 }
 
-static iree_status_t iree_hal_amd_gpu_aql_expand_frontiers(
-    iree_hal_amd_gpu_aql_queue_t* queue, uint32_t queue_count) {
-  if (queue_count > queue->producer.queue_count) {
-    uint64_t* frontier = NULL;
-    IREE_RETURN_IF_ERROR(
-        iree_allocator_malloc_array(queue->host_allocator, queue_count,
-                                    2 * sizeof(uint64_t), (void**)&frontier));
+static void iree_hal_amd_gpu_aql_expand_frontiers(
+    iree_hal_amd_gpu_aql_queue_t* queue,
+    iree_hal_amd_gpu_frontier_request_t* request) {
+  if (request->phase == IREE_HAL_AMD_GPU_FRONTIER_BEGIN && request->vectors) {
+    uint64_t* frontier = request->vectors;
     memcpy(frontier, queue->producer.frontier,
            queue->producer.queue_count * sizeof(uint64_t));
     uint64_t* previous = queue->producer.frontier;
     queue->producer.frontier = frontier;
-    queue->producer.queue_count = queue_count;
-    if (previous !=
-        (void*)(queue->issued + queue->options.retirement_capacity)) {
-      iree_allocator_free(queue->host_allocator, previous);
-    }
+    queue->producer.queue_count = request->queue_count;
+    request->vectors =
+        previous == (void*)(queue->issued + queue->options.retirement_capacity)
+            ? NULL
+            : previous;
   }
-  queue->growth.queue_count = queue->producer.queue_count;
-  // Wider publisher state remains valid after partial table growth failure.
-  // No work can use the new coordinate until every peer has installed it.
-  return iree_hal_amd_gpu_signal_cache_reserve_frontiers(
-      queue->options.signals, queue->growth.queue_count, queue->host_allocator);
+  iree_hal_amd_gpu_aql_growth_process_frontiers(&queue->growth, request);
 }
 
 static void iree_hal_amd_gpu_aql_process_entry(
@@ -1700,9 +1696,7 @@ static void iree_hal_amd_gpu_aql_process_entry(
     case IREE_HAL_AMD_GPU_AQL_ENTRY_FRONTIERS: {
       iree_hal_amd_gpu_aql_frontier_request_t* request = iree_containerof(
           typed, iree_hal_amd_gpu_aql_frontier_request_t, entry);
-      iree_status_t status = iree_hal_amd_gpu_aql_expand_frontiers(
-          queue, request->request.queue_count);
-      iree_hal_amd_gpu_frontier_request_complete(&request->request, status);
+      iree_hal_amd_gpu_aql_expand_frontiers(queue, &request->request);
       break;
     }
     case IREE_HAL_AMD_GPU_AQL_ENTRY_TRIM:
@@ -2130,18 +2124,35 @@ static iree_status_t iree_hal_amd_gpu_aql_queue_dispatch(
       queue->profile ? &operation : NULL);
 }
 
+static void iree_hal_amd_gpu_aql_enqueue_frontiers(void* user_data) {
+  iree_hal_amd_gpu_aql_frontier_request_t* request = user_data;
+  iree_hal_amd_gpu_aql_queue_t* queue = request->queue;
+  iree_hal_amd_gpu_publication_enqueue(
+      queue->options.publication, queue->options.source_ordinal,
+      &queue->publisher, &request->entry.publication);
+}
+
 iree_status_t iree_hal_amd_gpu_aql_queue_reserve_frontiers(
     iree_hal_queue_t* base, uint32_t queue_count,
     iree_notification_t* notification) {
   iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
+  // Only these serialized lifecycle requests change the installed extent.
+  // Ordinary publication mutates vector contents, never this geometry.
+  const uint32_t previous_count = queue->producer.queue_count;
   iree_hal_amd_gpu_aql_frontier_request_t request = {
       .entry.kind = IREE_HAL_AMD_GPU_AQL_ENTRY_FRONTIERS,
-      .request = {.queue_count = queue_count, .notification = notification},
+      .queue = queue,
+      .request = {.queue_count = iree_max(queue_count, previous_count),
+                  .notification = notification},
   };
-  iree_hal_amd_gpu_publication_enqueue(
-      queue->options.publication, queue->options.source_ordinal,
-      &queue->publisher, &request.entry.publication);
-  return iree_hal_amd_gpu_frontier_request_await(&request.request);
+  if (queue_count > previous_count) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        queue->host_allocator, queue_count, 2 * sizeof(uint64_t),
+        (void**)&request.request.vectors));
+  }
+  return iree_hal_amd_gpu_frontier_request_run(
+      &request.request, queue->host_allocator,
+      iree_hal_amd_gpu_aql_enqueue_frontiers, &request);
 }
 
 void iree_hal_amd_gpu_aql_queue_trim(iree_hal_queue_t* base) {

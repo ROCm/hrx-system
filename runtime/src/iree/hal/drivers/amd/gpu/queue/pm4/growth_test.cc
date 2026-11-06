@@ -6,6 +6,7 @@
 
 #include "iree/hal/drivers/amd/gpu/queue/pm4/growth.h"
 
+#include <array>
 #include <atomic>
 #include <barrier>
 #include <semaphore>
@@ -22,11 +23,54 @@
 
 namespace {
 
+// Holds one replacement allocation while native result publication and cache
+// trim continue through their production owners. Other allocations are
+// ordinary.
+struct HeldFrontierAllocation {
+  // Only the first table allocation is held.
+  std::atomic<bool> armed{true};
+  // Publishes entry before calling the system allocator.
+  std::binary_semaphore entered{0};
+  // Releases the lifecycle caller after independent progress is established.
+  std::binary_semaphore resume{0};
+  // Return an error instead of allocating after the hold is released.
+  bool fail = false;
+
+  iree_allocator_t allocator() {
+    return {this, [](void* self, iree_allocator_command_t command,
+                     const void* params, void** inout_pointer) {
+              auto* allocation = static_cast<HeldFrontierAllocation*>(self);
+              if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+                  allocation->armed.exchange(false)) {
+                allocation->entered.release();
+                allocation->resume.acquire();
+                if (allocation->fail) {
+                  return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                          "frontier allocation unavailable");
+                }
+              }
+              const auto system = iree_allocator_system();
+              return system.ctl(system.self, command, params, inout_pointer);
+            }};
+  }
+};
+
 // Only native memory is substituted. Typed acquisition, its NUMA worker,
 // publication ownership, captures, and backing initialization are production
 // components. These tests qualify their ownership boundary, not GPU execution.
 class GrowthTest : public ::testing::Test {
  protected:
+  struct FrontierRequest {
+    // Actual protocol entry consumed by the fixture's publisher below.
+    iree_hal_amd_gpu_pm4_entry_t entry = {
+        .kind = IREE_HAL_AMD_GPU_PM4_ENTRY_FRONTIERS,
+    };
+    // Caller-owned traversal and allocation handoff.
+    iree_hal_amd_gpu_frontier_request_t request = {};
+    // Fixture supplying the real FIFO and exact growth context.
+    GrowthTest* owner;
+  };
+
   struct Memory {
     // Fixture owning the native allocation dependency.
     GrowthTest* owner;
@@ -229,6 +273,31 @@ class GrowthTest : public ::testing::Test {
     Handoff();
   }
 
+  iree_status_t ExpandFrontiers(uint32_t queue_count,
+                                iree_allocator_t allocator) {
+    iree_notification_t notification;
+    iree_notification_initialize(&notification);
+    FrontierRequest request = {
+        .request = {.queue_count = queue_count, .notification = &notification},
+        .owner = this,
+    };
+    iree_status_t status = iree_hal_amd_gpu_frontier_request_run(
+        &request.request, allocator,
+        [](void* user_data) {
+          auto* request = static_cast<FrontierRequest*>(user_data);
+          auto* owner = request->owner;
+          iree_hal_amd_gpu_publication_enqueue(&owner->publication_, 0,
+                                               &owner->publisher_,
+                                               &request->entry.publication);
+        },
+        &request);
+    // Completion publishes the request before posting the stable notification.
+    // This fixture owns that notification, so it also joins the callback tail.
+    JoinPublication();
+    iree_notification_deinitialize(&notification);
+    return status;
+  }
+
   void Complete(iree_hal_amd_gpu_publication_entry_t* entry,
                 iree_status_code_t code) {
     auto* submission = iree_containerof(
@@ -253,7 +322,11 @@ class GrowthTest : public ::testing::Test {
     if (link) {
       auto* entry =
           iree_containerof(link, iree_hal_amd_gpu_pm4_entry_t, publication);
-      if (entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_REUSE_SIGNALS) {
+      if (entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_FRONTIERS) {
+        auto* request = iree_containerof(entry, FrontierRequest, entry);
+        iree_hal_amd_gpu_pm4_growth_process_frontiers(&growth_,
+                                                      &request->request);
+      } else if (entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_REUSE_SIGNALS) {
         iree_hal_amd_gpu_pm4_growth_reuse_signals(&growth_);
       } else if (entry->kind == IREE_HAL_AMD_GPU_PM4_ENTRY_REUSE_PROGRAM) {
         iree_hal_amd_gpu_pm4_growth_reuse_program(entry);
@@ -269,10 +342,12 @@ class GrowthTest : public ::testing::Test {
             iree_hal_amd_gpu_argument_storage_free(&context_, result.arguments);
           }
           if (result.signals) {
-            EXPECT_EQ(
+            // A caller may still be preparing this block's wider table. The
+            // new coordinate is not admitted until its visit completes.
+            last_signal_width_ =
                 iree_hal_amd_gpu_signal_block_frontiers(&result.signals->block)
-                    ->queue_count,
-                growth_.queue_count);
+                    ->queue_count;
+            EXPECT_LE(last_signal_width_, growth_.queue_count);
             auto* signal =
                 iree_hal_amd_gpu_signal_pool_try_acquire(&signals_.pool, 0);
             EXPECT_NE(signal, nullptr);
@@ -432,6 +507,8 @@ class GrowthTest : public ::testing::Test {
   std::atomic<uint32_t> completed_{0};
   // Number of captures retired through failed native acquisition.
   std::atomic<uint32_t> failed_{0};
+  // Width observed when native backing attaches, published by consumed_.
+  uint32_t last_signal_width_ = 0;
   // This consumer requires a real pool cell before retiring a parked capture.
   bool require_signals_ = false;
   // Exact existing cell expected by the held-growth reuse witness.
@@ -762,17 +839,112 @@ TEST_F(GrowthTest, PendingSignalBackingAdoptsExpandedPublisherFrontiers) {
   Park(IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SIGNALS);
   entered_.acquire();
   JoinPublication();
-  // The native request owns the old three-coordinate host allocation. Its
-  // result must reconcile the publisher's current width before exposing cells.
-  EXPECT_TRUE(iree_hal_amd_gpu_publisher_try_acquire(&publisher_));
-  growth_.queue_count = 8;
-  Handoff();
+  // The pending native request already owns initialized host metadata. Expand
+  // it through the real publication handoff before native attachment finishes.
+  IREE_ASSERT_OK(ExpandFrontiers(8, iree_allocator_system()));
   resume_.release();
   consumed_.acquire();
   JoinQueue();
   EXPECT_EQ(allocations_, 1u);
   EXPECT_EQ(completed_, 1u);
   EXPECT_EQ(failed_, 0u);
+  EXPECT_EQ(last_signal_width_, 8u);
+}
+
+TEST_F(GrowthTest, PendingSignalMetadataOutlivesNativeFailureDuringExpansion) {
+  for (bool fail_expansion : {false, true}) {
+    SCOPED_TRACE(fail_expansion);
+    hold_ = true;
+    fail_ = true;
+    Park(IREE_HAL_AMD_GPU_PM4_ENTRY_GROW_SIGNALS);
+    entered_.acquire();
+    HeldFrontierAllocation allocation{.fail = fail_expansion};
+    const auto allocator = allocation.allocator();
+    std::thread expanding([&] {
+      auto status = ExpandFrontiers(growth_.queue_count * 2, allocator);
+      if (fail_expansion) {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+      } else {
+        IREE_EXPECT_OK(status);
+      }
+    });
+    allocation.entered.acquire();
+    resume_.release();
+    consumed_.acquire();
+    iree_hal_amd_gpu_context_join_memory(&context_);
+    JoinPublication();
+    EXPECT_EQ(live_, 0u);
+    allocation.resume.release();
+    expanding.join();
+    EXPECT_EQ(signals_.frontier_request, nullptr);
+  }
+  EXPECT_EQ(failed_, 2u);
+}
+
+TEST_F(GrowthTest, FrontierVisitSurvivesTrimmingCurrentAndUnvisitedBlocks) {
+  for (uint32_t i = 0; i < 3; ++i) {
+    iree_hal_amd_gpu_signal_storage_t* storage = nullptr;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_signal_storage_allocate(
+        &context_, &signals_.pool, &memory_, 8, 3, iree_allocator_system(),
+        &storage));
+    storage->next = signals_.storage;
+    signals_.storage = storage;
+  }
+  HeldFrontierAllocation allocation;
+  std::thread expanding(
+      [&] { IREE_EXPECT_OK(ExpandFrontiers(8, allocation.allocator())); });
+  allocation.entered.acquire();
+  JoinPublication();
+  ASSERT_TRUE(iree_hal_amd_gpu_publisher_try_acquire(&publisher_));
+  iree_hal_amd_gpu_signal_cache_trim(&context_, 0, &signals_);
+  Handoff();
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  EXPECT_EQ(live_, 0u);
+  EXPECT_EQ(signals_.storage, nullptr);
+  allocation.resume.release();
+  expanding.join();
+  EXPECT_EQ(signals_.frontier_request, nullptr);
+}
+
+TEST_F(GrowthTest, PartialFrontierExpansionCanBeRetriedWithoutReplacingCells) {
+  std::array<iree_hal_amd_gpu_signal_storage_t*, 3> storage = {};
+  for (auto& item : storage) {
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_signal_storage_allocate(
+        &context_, &signals_.pool, &memory_, 8, 3, iree_allocator_system(),
+        &item));
+    item->next = signals_.storage;
+    signals_.storage = item;
+  }
+  uint32_t allocation_count = 0;
+  const iree_allocator_t allocator = {
+      &allocation_count, [](void* self, iree_allocator_command_t command,
+                            const void* params, void** inout_pointer) {
+        auto* count = static_cast<uint32_t*>(self);
+        if (command != IREE_ALLOCATOR_COMMAND_FREE && ++*count == 2) {
+          return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                  "second frontier allocation unavailable");
+        }
+        const auto system = iree_allocator_system();
+        return system.ctl(system.self, command, params, inout_pointer);
+      }};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        ExpandFrontiers(8, allocator));
+  EXPECT_EQ(signals_.frontier_request, nullptr);
+  for (size_t i = 0; i < storage.size(); ++i) {
+    EXPECT_EQ(iree_hal_amd_gpu_signal_block_frontiers(&storage[i]->block)
+                  ->queue_count,
+              i == storage.size() - 1 ? 8u : 3u);
+  }
+  IREE_ASSERT_OK(ExpandFrontiers(8, allocator));
+  EXPECT_EQ(allocation_count,
+            4u);  // Already-installed table was not allocated.
+  EXPECT_EQ(signals_.frontier_request, nullptr);
+  for (auto* item : storage) {
+    EXPECT_EQ(
+        iree_hal_amd_gpu_signal_block_frontiers(&item->block)->queue_count, 8u);
+    EXPECT_EQ(item->block.signals[0].device_address,
+              reinterpret_cast<Memory*>(item->memory.handle)->address);
+  }
 }
 
 TEST_F(GrowthTest, FailedNativeAcquisitionReturnsEveryCapturedOwner) {

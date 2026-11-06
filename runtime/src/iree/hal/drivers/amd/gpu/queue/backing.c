@@ -12,6 +12,8 @@ static_assert(sizeof(iree_hal_amd_gpu_signal_cache_t) <=
                   3 * iree_hardware_destructive_interference_size,
               "signal capacity and stable wake ownership fit in three lines");
 
+static void iree_hal_amd_gpu_signal_storage_release_metadata(void* user_data);
+
 iree_status_t iree_hal_amd_gpu_signal_cache_reserve_frontiers(
     iree_hal_amd_gpu_signal_cache_t* cache, uint32_t queue_count,
     iree_allocator_t host_allocator) {
@@ -24,10 +26,45 @@ iree_status_t iree_hal_amd_gpu_signal_cache_reserve_frontiers(
   return status;
 }
 
-void iree_hal_amd_gpu_frontier_request_complete(
-    iree_hal_amd_gpu_frontier_request_t* request, iree_status_t status) {
+void iree_hal_amd_gpu_frontier_request_process(
+    iree_hal_amd_gpu_signal_cache_t* cache,
+    iree_hal_amd_gpu_signal_storage_t* pending,
+    iree_hal_amd_gpu_frontier_request_t* request) {
+  iree_hal_amd_gpu_signal_storage_t* current = NULL;
+  switch (request->phase) {
+    case IREE_HAL_AMD_GPU_FRONTIER_BEGIN:
+      cache->frontier_request = request;
+      request->next = cache->storage;
+      current = pending;
+      break;
+    case IREE_HAL_AMD_GPU_FRONTIER_ADVANCE:
+      iree_hal_amd_gpu_signal_block_install_frontiers(&request->current->block,
+                                                      request->frontiers);
+      request->frontiers = NULL;
+      break;
+    case IREE_HAL_AMD_GPU_FRONTIER_CANCEL:
+      request->next = NULL;
+      break;
+  }
+  while (
+      !current ||
+      iree_hal_amd_gpu_signal_block_frontiers(&current->block)->queue_count >=
+          request->queue_count) {
+    current = request->next;
+    if (!current) {
+      break;
+    }
+    request->next = current->next;
+  }
+  request->current = current;
+  if (current) {
+    // Only the visited host metadata is retained. Trim/native failure may
+    // still release its native backing while the caller allocates a table.
+    iree_atomic_ref_count_inc(&current->metadata_ref_count);
+  } else {
+    cache->frontier_request = NULL;
+  }
   iree_notification_t* notification = request->notification;
-  request->status = status;
   iree_atomic_store(&request->completed, 1, iree_memory_order_release);
   // Queue release and frontier growth can share this notification. Wake every
   // enrolled predicate; an arbitrary waiter may belong to a different queue.
@@ -39,12 +76,35 @@ static bool iree_hal_amd_gpu_frontier_request_completed(void* user_data) {
   return iree_atomic_load(&request->completed, iree_memory_order_acquire);
 }
 
-iree_status_t iree_hal_amd_gpu_frontier_request_await(
+static void iree_hal_amd_gpu_frontier_request_await(
     iree_hal_amd_gpu_frontier_request_t* request) {
   iree_notification_await(request->notification,
                           iree_hal_amd_gpu_frontier_request_completed, request,
                           iree_infinite_timeout());
-  return request->status;
+}
+
+iree_status_t iree_hal_amd_gpu_frontier_request_run(
+    iree_hal_amd_gpu_frontier_request_t* request,
+    iree_allocator_t host_allocator, void (*enqueue)(void*), void* user_data) {
+  enqueue(user_data);
+  iree_hal_amd_gpu_frontier_request_await(request);
+  iree_allocator_free(host_allocator, request->vectors);
+  request->vectors = NULL;
+  iree_status_t status = iree_ok_status();
+  while (request->current && iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_signal_storage_t* current = request->current;
+    status = iree_hal_amd_gpu_signal_frontiers_allocate(
+        current->capacity, request->queue_count, host_allocator,
+        &request->frontiers);
+    request->phase = iree_status_is_ok(status)
+                         ? IREE_HAL_AMD_GPU_FRONTIER_ADVANCE
+                         : IREE_HAL_AMD_GPU_FRONTIER_CANCEL;
+    iree_atomic_store(&request->completed, 0, iree_memory_order_relaxed);
+    enqueue(user_data);
+    iree_hal_amd_gpu_frontier_request_await(request);
+    iree_hal_amd_gpu_signal_storage_release_metadata(current);
+  }
+  return status;
 }
 
 iree_status_t iree_hal_amd_gpu_backing_query_address(
@@ -154,6 +214,7 @@ iree_status_t iree_hal_amd_gpu_signal_storage_prepare(
       iree_allocator_malloc(host_allocator, total_size, (void**)&storage));
   storage->host_allocator = host_allocator;
   storage->capacity = capacity;
+  iree_atomic_ref_count_init(&storage->metadata_ref_count);
   storage->frontiers = (void*)((uint8_t*)storage + frontiers_offset);
   iree_hal_amd_gpu_signal_block_initialize(
       (void*)((uint8_t*)storage + signals_offset), capacity, queue_count,
@@ -162,8 +223,11 @@ iree_status_t iree_hal_amd_gpu_signal_storage_prepare(
   return iree_ok_status();
 }
 
-static void iree_hal_amd_gpu_signal_storage_released(void* user_data) {
+static void iree_hal_amd_gpu_signal_storage_release_metadata(void* user_data) {
   iree_hal_amd_gpu_signal_storage_t* storage = user_data;
+  if (iree_atomic_ref_count_dec(&storage->metadata_ref_count) != 1) {
+    return;
+  }
   iree_hal_amd_gpu_signal_frontiers_t* frontiers =
       iree_hal_amd_gpu_signal_block_frontiers(&storage->block);
   iree_hal_amd_gpu_signal_frontiers_free(frontiers, storage->frontiers,
@@ -180,7 +244,8 @@ void iree_hal_amd_gpu_signal_storage_free(
   iree_hal_amd_gpu_context_release_memory(
       context, 1, &storage->memory,
       (iree_hal_amd_fabric_memory_release_callback_t){
-          .fn = iree_hal_amd_gpu_signal_storage_released, .user_data = storage},
+          .fn = iree_hal_amd_gpu_signal_storage_release_metadata,
+          .user_data = storage},
       &storage->release);
 }
 
@@ -213,6 +278,9 @@ void iree_hal_amd_gpu_signal_cache_trim(
     iree_hal_amd_gpu_signal_storage_t* storage = *link;
     if (iree_hal_amd_gpu_signal_block_try_deinitialize(&storage->block)) {
       *link = storage->next;
+      if (cache->frontier_request && cache->frontier_request->next == storage) {
+        cache->frontier_request->next = storage->next;
+      }
       iree_hal_amd_gpu_signal_storage_free(context, storage);
     } else {
       link = &storage->next;

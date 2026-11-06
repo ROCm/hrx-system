@@ -66,6 +66,13 @@ typedef struct iree_hal_amd_gpu_pm4_growth_context_t {
   iree_atomic_int32_t pending_count;
 } iree_hal_amd_gpu_pm4_growth_context_t;
 
+// Widens pending host metadata independently of native allocation completion.
+// The exact publisher installs prepared tables; subsequent acquisitions use
+// the new extent. Existing pending backing participates in the caller's visit.
+void iree_hal_amd_gpu_pm4_growth_process_frontiers(
+    iree_hal_amd_gpu_pm4_growth_context_t* context,
+    iree_hal_amd_gpu_frontier_request_t* request);
+
 // Transfers a detached capture to a coalesced growth request. The caller owns
 // the queue publisher and has released any unpublished program reservation.
 // kind is a GROW variant. capacity is the admitted power-of-two argument
