@@ -18,7 +18,6 @@
 #include "loom/ops/scalar/combining.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/combining.h"
-#include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
@@ -133,7 +132,6 @@ static iree_status_t loom_vector_packet_preserve_memory_loads_impl(
     const loom_value_t* value = loom_module_value(
         packetization->context->module, packetized_value->source);
     loom_op_t* load_op = loom_value_def_op(value);
-    IREE_ASSERT_TRUE(loom_vector_load_isa(load_op));
     // A single authored vector load is already an immutable one-packet
     // snapshot. Replacing it with an identical load would falsely report
     // rewrite progress forever; retain the existing SSA value as the regular
@@ -600,7 +598,9 @@ bool loom_vector_packet_dynamic_materialization_operation_count(
         &packetization->values[i];
     iree_host_size_t value_operation_count = 1u;
     if (packetized_value->source_mode ==
-        LOOM_VECTOR_PACKET_SOURCE_MODE_STATIC_ELEMENTS) {
+            LOOM_VECTOR_PACKET_SOURCE_MODE_STREAMED &&
+        packetized_value->source_action ==
+            LOOM_VECTOR_PACKET_SOURCE_ACTION_FROM_ELEMENTS) {
       uint32_t source_lane_count = 0;
       if (!loom_vector_packet_static_lane_count(packetized_value->source_type,
                                                 &source_lane_count) ||
@@ -662,24 +662,38 @@ static iree_status_t loom_vector_packet_materialize_value(
   const loom_value_t* value =
       loom_module_value(context->module, packetized_value->source);
   loom_op_t* op = loom_value_def_op(value);
-  if (loom_vector_load_isa(op)) {
+  if (packetized_value->source_action ==
+      LOOM_VECTOR_PACKET_SOURCE_ACTION_OPERATION) {
+    return loom_vector_packet_materialize_simple_op(packetization, op, slice,
+                                                    packetized_value);
+  }
+  if (packetized_value->source_action ==
+      LOOM_VECTOR_PACKET_SOURCE_ACTION_MEMORY_LOAD) {
     return loom_vector_packet_materialize_memory_load(packetization, op, slice,
                                                       packetized_value);
-  } else if (loom_vector_literal_splat_isa(op)) {
+  }
+  if (packetized_value->source_action ==
+      LOOM_VECTOR_PACKET_SOURCE_ACTION_LITERAL_SPLAT) {
     return loom_vector_packet_materialize_literal_splat(
         packetization, op, slice, packetized_value);
-  } else if (loom_vector_poison_isa(op)) {
-    return loom_vector_packet_materialize_poison(packetization, op, slice,
-                                                 packetized_value);
-  } else if (loom_vector_splat_isa(op)) {
+  }
+  if (packetized_value->source_action ==
+      LOOM_VECTOR_PACKET_SOURCE_ACTION_SPLAT) {
     return loom_vector_packet_materialize_splat(packetization, op, slice,
                                                 packetized_value);
-  } else if (loom_vector_from_elements_isa(op)) {
+  }
+  if (packetized_value->source_action ==
+      LOOM_VECTOR_PACKET_SOURCE_ACTION_FROM_ELEMENTS) {
     return loom_vector_packet_materialize_from_elements(
         packetization, op, slice, packetized_value);
   }
-  return loom_vector_packet_materialize_simple_op(packetization, op, slice,
-                                                  packetized_value);
+  if (packetized_value->source_action ==
+      LOOM_VECTOR_PACKET_SOURCE_ACTION_POISON) {
+    return loom_vector_packet_materialize_poison(packetization, op, slice,
+                                                 packetized_value);
+  }
+  IREE_ASSERT_UNREACHABLE("invalid vector packet source action");
+  IREE_BUILTIN_UNREACHABLE();
 }
 
 iree_status_t loom_vector_packet_materialize(
@@ -1257,7 +1271,9 @@ bool loom_vector_packet_requires_static_slices(
     const loom_vector_packetization_t* packetization) {
   for (uint32_t i = 0; i < packetization->value_count; ++i) {
     if (packetization->values[i].source_mode ==
-        LOOM_VECTOR_PACKET_SOURCE_MODE_STATIC_ELEMENTS) {
+            LOOM_VECTOR_PACKET_SOURCE_MODE_STREAMED &&
+        packetization->values[i].source_action ==
+            LOOM_VECTOR_PACKET_SOURCE_ACTION_FROM_ELEMENTS) {
       return true;
     }
   }
