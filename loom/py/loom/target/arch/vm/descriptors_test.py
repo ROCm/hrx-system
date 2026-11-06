@@ -28,6 +28,11 @@ from iree.vm.bytecode.spec.isa.core.integer import (
     IntegerDivisionSemantics,
     IntegerUnarySemantics,
 )
+from iree.vm.bytecode.spec.isa.core.ref import (
+    REF_COMPARE_EQ,
+    REF_COMPARE_NULL,
+    REF_NULL,
+)
 from iree.vm.bytecode.spec.isa.core.rules import (
     FieldRule,
     RecordRuleKind,
@@ -56,6 +61,7 @@ from loom.target.low_descriptors import (
     EffectKind,
     ImmediateFlag,
     ImmediateKind,
+    MemorySpace,
     OperandRole,
     OwnershipEffect,
 )
@@ -167,6 +173,7 @@ def test_register_fields_preserve_the_wire_bank_and_position():
                 RefOwnership.REPLACE_OWNER: OwnershipEffect.OWNED,
                 RefOwnership.REPLACE_RETAIN: OwnershipEffect.OWNED,
                 RefOwnership.REPLACE_BORROW: OwnershipEffect.BORROWED,
+                RefOwnership.CLEAR: OwnershipEffect.NONE,
             }
             assert operand.ownership is (
                 expected_ownership[field.ref_policy.ownership]
@@ -199,13 +206,35 @@ def test_effects_preserve_state_access_not_runtime_aborts():
         )
         if creates_owner:
             expected += (EffectKind.UNKNOWN,)
-        if expected or creates_owner:
+        if instruction is REF_NULL:
+            expected += (EffectKind.WRITE,)
+            assert descriptor.effects[-1].memory_space is MemorySpace.NONE
+            assert DescriptorFlag.UNIQUE_IDENTITY in descriptor.flags
+        if expected:
             assert DescriptorFlag.SIDE_EFFECTING in descriptor.flags
             assert DescriptorFlag.DEAD_REMOVABLE not in descriptor.flags
             assert tuple(effect.kind for effect in descriptor.effects) == expected
         else:
             assert not descriptor.effects
             assert DescriptorFlag.DEAD_REMOVABLE in descriptor.flags
+
+
+def test_handle_observation_returns_canonical_predicates_without_ownership():
+    descriptors = {
+        descriptor.encoding_id: descriptor
+        for descriptor in VM_CORE_DESCRIPTOR_SET.descriptors
+    }
+    for instruction in (REF_COMPARE_NULL, REF_COMPARE_EQ):
+        descriptor = descriptors[instruction.opcode]
+        (result_type,) = descriptor.asm_forms[0].result_value_types
+        assert result_type.element_type is ScalarTypeKind.I1
+        assert not descriptor.effects
+        assert DescriptorFlag.DEAD_REMOVABLE in descriptor.flags
+        assert all(
+            operand.ownership is OwnershipEffect.BORROW
+            for operand in descriptor.operands
+            if operand.role is OperandRole.OPERAND
+        )
 
 
 def test_lowering_uses_the_projected_descriptors():

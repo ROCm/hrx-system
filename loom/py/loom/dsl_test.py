@@ -3268,6 +3268,17 @@ class TestEffects:
 
 
 class TestOwnershipEffects:
+    def test_pure_observation_borrows_without_transferring_ownership(self) -> None:
+        op = Op(
+            "test.resource.is_null",
+            operands=[Operand("resource", POOL)],
+            results=[Result("result", I1)],
+            traits=[PURE],
+            ownership_effects=[Borrow("resource")],
+        )
+        assert op.is_pure
+        assert op.ownership_effects == (Borrow("resource"),)
+
     def test_copied_result_preserves_each_source_identity(self) -> None:
         op = Op(
             "test.resource.copy_twice",
@@ -3418,13 +3429,28 @@ class TestOwnershipEffects:
             )
 
     def test_pure_with_ownership_effects_raises(self) -> None:
-        with _raises(ValueError, match="PURE.*ownership"):
-            Op(
-                "test.bad",
-                operands=[Operand("resource", POOL)],
-                traits=[PURE],
-                ownership_effects=[Consume("resource")],
-            )
+        for effect in (
+            Consume("resource"),
+            dsl.Retain("resource"),
+            dsl.Release("resource"),
+            dsl.Discard("resource"),
+            dsl.Escape("resource"),
+            dsl.Move("resource"),
+            FreshResult("result"),
+            dsl.BorrowedResult("result"),
+            dsl.RetainedResult("result"),
+            AliasResult("result", "resource"),
+            MovedResult("result", "resource"),
+            CopiedResult("result", "resource"),
+        ):
+            with _raises(ValueError, match="PURE.*ownership"):
+                Op(
+                    "test.bad",
+                    operands=[Operand("resource", POOL)],
+                    results=[Result("result", POOL)],
+                    traits=[PURE],
+                    ownership_effects=[effect],
+                )
 
     def test_result_ownership_effect_on_missing_result_raises(self) -> None:
         with _raises(ValueError, match="not declared"):

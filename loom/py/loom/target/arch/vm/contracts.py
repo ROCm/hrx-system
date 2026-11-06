@@ -49,7 +49,12 @@ from iree.vm.bytecode.spec.isa.core.integer import (
     IntegerUnaryOperation,
     IntegerUnarySemantics,
 )
-from iree.vm.bytecode.spec.isa.core.ref import REF_SELECT
+from iree.vm.bytecode.spec.isa.core.ref import (
+    REF_COMPARE_EQ,
+    REF_COMPARE_NULL,
+    REF_NULL,
+    REF_SELECT,
+)
 from iree.vm.bytecode.spec.isa.core.rules import FieldRule, RecordRuleKind
 from iree.vm.bytecode.spec.isa.core.stack import MEMORY_FORMAT_SELECTOR
 from iree.vm.bytecode.spec.isa.core.value import VALUE_COPY, VALUE_SELECT
@@ -61,6 +66,8 @@ from loom.dialect.globals import ALL_GLOBAL_OPS
 from loom.dialect.globals.defs import global_load
 from loom.dialect.index import ALL_INDEX_OPS, IndexPredicate
 from loom.dialect.index import defs as index
+from loom.dialect.ref import ALL_REF_OPS
+from loom.dialect.ref import defs as ref
 from loom.dialect.scalar import (
     ALL_SCALAR_OPS,
     ClampFMode,
@@ -337,6 +344,7 @@ VM_CORE_CONTRACT_DIALECT_OPS = {
     "global": ALL_GLOBAL_OPS,
     "scalar": ALL_SCALAR_OPS,
     "index": ALL_INDEX_OPS,
+    "ref": ALL_REF_OPS,
     "scf": ALL_SCF_OPS,
     "view": view.ALL_VIEW_OPS,
 }
@@ -1193,6 +1201,41 @@ VM_CORE_CONTRACT_FRAGMENT = ContractFragment(
     + (RecipeRule(source_op=global_load),)
     + tuple(_view_cases())
     + (
+        DescriptorRule(
+            source_op=ref.ref_null,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_DESCRIPTORS[REF_NULL.opcode],
+                    form=DescriptorEmitForm.OP,
+                    results={"destination_r8": ValueRef.result("result")},
+                ),
+            ),
+        ),
+        DescriptorRule(
+            source_op=ref.ref_compare_null,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_DESCRIPTORS[REF_COMPARE_NULL.opcode],
+                    form=DescriptorEmitForm.OP,
+                    operands={"source_r8": ValueRef.operand("value")},
+                    results={"destination_v8": ValueRef.result("result")},
+                ),
+            ),
+        ),
+        DescriptorRule(
+            source_op=ref.ref_compare_eq,
+            emit=(
+                EmitDescriptorOp(
+                    descriptor=_DESCRIPTORS[REF_COMPARE_EQ.opcode],
+                    form=DescriptorEmitForm.OP,
+                    operands={
+                        "left_r8": ValueRef.operand("left"),
+                        "right_r8": ValueRef.operand("right"),
+                    },
+                    results={"destination_v8": ValueRef.result("result")},
+                ),
+            ),
+        ),
         DescriptorRule(
             source_op=scf_select,
             guards=(

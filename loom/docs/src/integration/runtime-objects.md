@@ -41,6 +41,42 @@ Ownership mode is part of type identity, including inside function signatures.
 A provider exporting an owning parameter cannot bind an import declaring a
 borrowed parameter, even though both values use the VM's managed-reference bank.
 
+## Represent absence and compare identity
+
+[`ref.null`](../reference/dialects/ref/ops/null.md) creates a typed empty handle
+without calling a provider or allocating a payload:
+
+```loom
+func.def @empty_frame() -> (ref<@Frame>) {
+  %empty = ref.null : ref<@Frame>
+  func.return %empty : ref<@Frame>
+}
+```
+
+The same operation accepts `ptr<@Frame>`. Each owning null handle has its own
+source lifetime: it must be released or transferred on every normal path, just
+like a live owner. Null release and duplication have no payload effect.
+
+[`ref.compare.null`](../reference/dialects/ref/ops/compare-null.md) returns `i1`
+indicating absence. [`ref.compare.eq`](../reference/dialects/ref/ops/compare-eq.md)
+checks whether handles refer to the same object:
+
+```loom
+func.def @same_frame(%owner: ref<@Frame>, %frame: ptr<@Frame>) -> (i1) {
+  %same = ref.compare.eq %owner, %frame : ref<@Frame>, ptr<@Frame>
+  ref.release %owner : ref<@Frame>
+  func.return %same : i1
+}
+```
+
+Equality accepts owning and borrowed handles in either position, provided both
+name the same external payload type. Two null handles compare equal; null and
+live compare unequal. Two live handles compare equal only for the same object,
+even when distinct objects contain identical data. These operations neither
+retain nor dereference the payload. They observe a live handle and cannot use
+an SSA identity after its explicit release. Their predicate results can drive
+ordinary conditionals; scalar boolean negation expresses non-null or inequality.
+
 ## Borrow an owning handle
 
 [`ref.borrow`](../reference/dialects/ref/ops/borrow.md) obtains a pointer to the

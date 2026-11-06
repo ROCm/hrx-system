@@ -76,3 +76,16 @@ low.func.def target<vm.core>(@vm) abi(vm_function) @enum_spellings(%a: reg<vm.va
 // ----
 CHECK: %named = integer.compare.i64 %a, %b, "ult"
 CHECK: %numeric = integer.compare.i64 %a, %b, "ult"
+
+// ====
+
+// The bound target owns instruction mnemonics, even when a source operation
+// has the same name. Structural assembly aliases still interleave.
+// RUN: roundtrip
+vm.target<core> @vm
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @buffer_length(%buffer: reg<vm.ref : buffer>) -> (reg<vm.value : i64>) asm {
+  %length = buffer.length %buffer
+  %copy = copy %length : reg<vm.value : i64> -> reg<vm.value : i64>
+  return %copy
+}
