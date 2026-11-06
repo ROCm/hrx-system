@@ -831,3 +831,24 @@ static void consume(unsigned guard_digit) {
   observe((guard_digit + 10u));
   return;
 }
+
+// ====
+// RUN: emit cxx roundtrip
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::symbol("library.dispatch"), loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void dotted_kernel() {}
+
+[[loom::kernel, loom::symbol("library_dispatch"), loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void underscored_kernel() {}
+
+// ----
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::symbol("library.dispatch"), loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void library_dispatch() {
+}
+
+[[loom::kernel, loom::symbol("library_dispatch"), loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void library_dispatch_2() {
+}

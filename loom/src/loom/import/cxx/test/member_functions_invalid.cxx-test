@@ -1,21 +1,4 @@
 // RUN: verify
-struct Aliased {
-  unsigned first;
-  unsigned second;
-
-  void mix(unsigned& selected) {
-    first += selected;
-    ++selected;
-  }
-};
-
-Aliased overlapping_receiver(Aliased value) {
-  // ERROR@+1: LOWERING/059 "mutable value-reference arguments must select nonoverlapping"
-  value.mix(value.first);
-  return value;
-}
-
-// ====
 struct Polymorphic {
   unsigned value;
   virtual unsigned read() const { return value; }

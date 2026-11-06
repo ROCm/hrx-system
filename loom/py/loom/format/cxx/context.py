@@ -266,6 +266,7 @@ class CxxRenderContext:
         self.target_names: dict[str, str] = {}
         self.target_type_names: dict[str, str] = {}
         self.function_names: dict[str, str] = {}
+        self.kernel_names: dict[str, str] = {}
         self.function_buffer_elements: dict[str, tuple[str | None, ...]] = {}
         self.command_names: dict[str, str] = {}
         self.pipeline_names: dict[str, str] = {}

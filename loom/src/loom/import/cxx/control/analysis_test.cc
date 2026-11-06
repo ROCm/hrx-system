@@ -470,6 +470,144 @@ TEST(ControlFlowTest, SourceSelectionRetainsInitializerAndSelectedWrites) {
   EXPECT_TRUE(std::ranges::equal(writes, analysis.written(body)));
 }
 
+TEST(ControlFlowTest, AutomaticObjectStorageRemainsDistinctFromAddressDemand) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Pair { unsigned first; unsigned second; };
+    struct Constructed { Constructed(); unsigned value; };
+    void entry(unsigned input) {
+      Pair value{input, input + 1u};
+      Pair output;
+      unsigned scalar;
+      unsigned values[2] = {};
+      volatile unsigned observed = input;
+      unsigned addressed = input;
+      (void)&addressed;
+      Constructed constructed;
+    }
+    Constructed::Constructed() : value(0u) {}
+  )"),
+                IREE_SV("automatic_storage.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+
+  std::vector<cxx::Symbol*> bindings;
+  for (auto* statement : cxx::ListView{body->statementList}) {
+    auto* declaration = cxx::ast_cast<cxx::DeclarationStatementAST>(statement);
+    if (!declaration) {
+      continue;
+    }
+    auto* simple =
+        cxx::ast_cast<cxx::SimpleDeclarationAST>(declaration->declaration);
+    ASSERT_NE(simple, nullptr);
+    bindings.push_back(simple->initDeclaratorList->value->symbol);
+  }
+  ASSERT_EQ(bindings.size(), 7u);
+  EXPECT_FALSE(analysis.storage_backed(bindings[0]));
+  for (auto* binding : std::span{bindings}.subspan(1)) {
+    EXPECT_TRUE(analysis.storage_backed(binding));
+  }
+  for (size_t index = 0; index < bindings.size(); ++index) {
+    EXPECT_EQ(analysis.addressed(bindings[index]), index == 5u);
+  }
+}
+
+TEST(ControlFlowTest, StructuredBindingsAnalyzeTheSynthesizedDeclarationOnce) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Pair { unsigned first; unsigned second; };
+    Pair make_pair(unsigned input);
+    void entry(unsigned input) {
+      auto [first, second] = make_pair(input);
+      (void)(first + second);
+    }
+    Pair make_pair(unsigned input) { return {input, input + 1u}; }
+  )"),
+                IREE_SV("structured_bindings.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  auto* statement =
+      cxx::ast_cast<cxx::DeclarationStatementAST>(body->statementList->value);
+  ASSERT_NE(statement, nullptr);
+  auto* declaration = cxx::ast_cast<cxx::StructuredBindingDeclarationAST>(
+      statement->declaration);
+  ASSERT_NE(declaration, nullptr);
+  ASSERT_NE(declaration->hiddenVariable, nullptr);
+
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+
+  auto calls = analysis.calls();
+  ASSERT_EQ(calls.size(), 1u);
+  EXPECT_NE(calls.front().function, nullptr);
+  EXPECT_FALSE(analysis.storage_backed(declaration->hiddenVariable->symbol));
+  for (auto* binding : cxx::ListView{declaration->bindingDeclaratorList}) {
+    EXPECT_FALSE(analysis.storage_backed(binding->symbol));
+    EXPECT_FALSE(analysis.addressed(binding->symbol));
+  }
+}
+
+TEST(ControlFlowTest, CallArgumentsRetainExactAutomaticObjectIntervals) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Pair { unsigned first; unsigned second; };
+    static void update(Pair& whole, unsigned& second, const unsigned& first);
+    void entry(Pair value) { update(value, value.second, value.first); }
+    static void update(Pair& whole, unsigned& second, const unsigned& first) {
+      whole.first += first;
+      ++second;
+    }
+  )"),
+                IREE_SV("call_intervals.cpp"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+
+  auto calls = analysis.calls();
+  ASSERT_EQ(calls.size(), 1u);
+  ASSERT_EQ(calls.front().arguments.size(), 3u);
+  auto* value = function->symbol->parameters().front();
+  const ObjectInterval expected[] = {
+      {value, 0, ObjectInterval::kWholeObjectEnd},
+      {value, 1, 2},
+      {value, 0, 1},
+  };
+  for (size_t ordinal = 0; ordinal < std::size(expected); ++ordinal) {
+    const auto& argument = calls.front().arguments[ordinal];
+    if (expected[ordinal].end == ObjectInterval::kWholeObjectEnd) {
+      ASSERT_EQ(argument.identity_bindings.size(), 1u);
+      EXPECT_EQ(argument.identity_bindings.front(), expected[ordinal].binding);
+      EXPECT_EQ(argument.identity_intervals, nullptr);
+      continue;
+    }
+    ASSERT_NE(argument.identity_intervals, nullptr);
+    ASSERT_EQ(argument.identity_intervals->size(), 1u);
+    EXPECT_EQ(argument.identity_intervals->front().binding,
+              expected[ordinal].binding);
+    EXPECT_EQ(argument.identity_intervals->front().begin,
+              expected[ordinal].begin);
+    EXPECT_EQ(argument.identity_intervals->front().end, expected[ordinal].end);
+  }
+}
+
 TEST(ControlFlowTest, DecisionSyntaxAndInitializerWritesStayWithTheBinding) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);

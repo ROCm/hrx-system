@@ -540,6 +540,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
             raise CxxRenderError(
                 operation, f"launched kernel {symbol!r} is not present"
             )
+        callee = self.kernel_names[symbol]
         workloads = resolved.value_ids("workloads")
         component_counts = self.kernel_workload_component_counts.get(symbol)
         if component_counts is None:
@@ -574,7 +575,7 @@ class CxxCommandRenderer(CxxExpressionRenderer):
                 0,
                 "loom::kernel::workload(" + ", ".join(workload_arguments) + ")",
             )
-        self.writer.line(f"loom::kernel::launch<{symbol}>({', '.join(rendered)});")
+        self.writer.line(f"loom::kernel::launch<{callee}>({', '.join(rendered)});")
         return ("callee",)
 
     def _render_command_parameter(self, operation: Operation) -> tuple[str, ...]:
