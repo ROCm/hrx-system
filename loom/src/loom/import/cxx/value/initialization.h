@@ -17,6 +17,7 @@
 #include <span>
 
 #include "loom/import/cxx/source/constants.h"
+#include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/value/objects.h"
 #include "loom/import/cxx/value/vector.h"
 
@@ -79,13 +80,21 @@ class Initialization {
                                     const cxx::Type* type,
                                     cxx::ConditionalExpressionAST* expression,
                                     bool retained) = 0;
-    // Invokes one user-provided constructor with the exact destination object
+    // Invokes one selected constructor with the exact destination object
     // and explicit source arguments. The constructor definition owns member
     // initialization followed by ordinary body translation.
     virtual void call_constructor(
         StorageProjection destination, const RecordPartition& record,
         const cxx::Type* object_type, cxx::FunctionSymbol* constructor,
         std::span<cxx::ExpressionAST* const> arguments, cxx::AST* owner) = 0;
+    // Array copies use their retained element call and projected source
+    // storage. The source reference precedes the completed default arguments.
+    virtual const ArrayCopyInitialization* array_copy(cxx::AST* owner) = 0;
+    virtual void call_copy_constructor(
+        StorageProjection destination, const RecordPartition& record,
+        cxx::FunctionSymbol* constructor, StorageProjection source,
+        std::span<cxx::ExpressionAST* const> default_arguments,
+        cxx::AST* owner) = 0;
 
    protected:
     ~Evaluation() = default;
@@ -140,7 +149,7 @@ class Initialization {
               cxx::ExpressionAST* initializer, cxx::FunctionSymbol* constructor,
               cxx::AST* owner, bool retained = false);
   // Applies the frontend-owned member initialization plan at the entry of a
-  // retained user-provided constructor. The ordinary function translator then
+  // retained constructor. The ordinary function translator then
   // executes its compound body against the same storage receiver.
   void constructor_receiver(StorageProjection destination,
                             const RecordPartition& record,
@@ -148,6 +157,10 @@ class Initialization {
                             cxx::FunctionSymbol* constructor, cxx::AST* owner);
 
  private:
+  // Copies or moves each array leaf using its retained nontrivial constructor.
+  void copy_array(StorageProjection destination, const cxx::Type* type,
+                  StorageProjection source, const ArrayCopyInitialization& plan,
+                  cxx::AST* owner);
   Value from_elements(const cxx::Type* type,
                       cxx::List<cxx::ExpressionAST*>* elements,
                       cxx::VariableSymbol* implicit_element,

@@ -1648,10 +1648,11 @@ class Translator final : private Initialization::Evaluation {
       references_.emplace(variable, std::move(target));
       return;
     }
-    const bool user_record_constructor = types_.is_user_record_constructor(
-        variable->type(), variable->constructor(), owner);
+    const bool record_constructor_call =
+        types_.record_constructor_requires_call(variable->type(),
+                                                variable->constructor(), owner);
     const bool requires_initialization =
-        initializer || user_record_constructor ||
+        initializer || record_constructor_call ||
         control_->default_constructor_initializes(variable->constructor());
     if (control_->storage_backed(variable)) {
       auto contents =
@@ -3555,7 +3556,11 @@ class Translator final : private Initialization::Evaluation {
     cxx::ExpressionAST* single = nullptr;
     // Arguments recovered from a declaration initializer.
     std::span<cxx::ExpressionAST* const> range;
+    // Next unevaluated argument in the initializer range.
     size_t range_index = 0;
+    // Projected source element for an array copy's first reference parameter.
+    // Callable analysis has already selected its storage-reference ABI.
+    std::optional<Value> leading_reference;
 
     cxx::ExpressionAST* next() {
       if (remaining) {
@@ -3576,6 +3581,31 @@ class Translator final : private Initialization::Evaluation {
                         cxx::FunctionSymbol* constructor,
                         std::span<cxx::ExpressionAST* const> arguments,
                         cxx::AST* owner) override {
+    emit_constructor_call(destination, record, constructor,
+                          SourceArguments{.range = arguments}, owner);
+  }
+
+  const ArrayCopyInitialization* array_copy(cxx::AST* owner) override {
+    return control_->array_copy(owner);
+  }
+
+  void call_copy_constructor(
+      StorageProjection destination, const RecordPartition& record,
+      cxx::FunctionSymbol* constructor, StorageProjection source,
+      std::span<cxx::ExpressionAST* const> default_arguments,
+      cxx::AST* owner) override {
+    emit_constructor_call(destination, record, constructor,
+                          SourceArguments{
+                              .range = default_arguments,
+                              .leading_reference = Value(source.pointer),
+                          },
+                          owner);
+  }
+
+  void emit_constructor_call(StorageProjection destination,
+                             const RecordPartition& record,
+                             cxx::FunctionSymbol* constructor,
+                             SourceArguments arguments, cxx::AST* owner) {
     ReceiverArgument receiver = {
         ImplicitObjectABI::Storage,
         Value(destination.pointer),
@@ -3585,9 +3615,9 @@ class Translator final : private Initialization::Evaluation {
         functions_.receiver_writes(constructor),
         {},
     };
-    auto result = emit_ordinary_call(
-        owner, constructor, SourceArguments{.range = arguments},
-        std::move(receiver), locations_.get(owner));
+    auto result =
+        emit_ordinary_call(owner, constructor, std::move(arguments),
+                           std::move(receiver), locations_.get(owner));
     IREE_ASSERT(!result.value);
   }
 
@@ -3829,15 +3859,21 @@ class Translator final : private Initialization::Evaluation {
 
     size_t reference_index = 0;
     for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
-      auto* argument = source_arguments.next();
-      IREE_ASSERT(argument);
       const ReferenceParameter* reference = nullptr;
       if (reference_index < references.size() &&
           references[reference_index].ordinal == ordinal) {
         reference = &references[reference_index++];
       }
-      auto evaluated = evaluate_call_argument(argument, parameters[ordinal],
-                                              reference, call);
+      EvaluatedCallArgument evaluated;
+      if (ordinal == 0 && source_arguments.leading_reference) {
+        IREE_ASSERT(reference && reference->abi == ReferenceABI::Storage);
+        evaluated.value = *source_arguments.leading_reference;
+      } else {
+        auto* argument = source_arguments.next();
+        IREE_ASSERT(argument);
+        evaluated = evaluate_call_argument(argument, parameters[ordinal],
+                                           reference, call);
+      }
       if (return_parameter == ordinal) {
         reference_result_alias = {evaluated.value, evaluated.target,
                                   receiver_argument_count + arguments.size()};
@@ -4079,38 +4115,10 @@ class Translator final : private Initialization::Evaluation {
 
   Value assignment(cxx::AssignmentExpressionAST* assignment) {
     auto* ast = assignment;
-    const auto& partition = types_.partition(
-        types_.unqualified(assignment->leftExpression->type), ast);
-    cxx::ClassSymbol* source = nullptr;
-    if (partition.kind == ValueKind::Record) {
-      source = static_cast<const RecordPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Buffer) {
-      source = static_cast<const BufferPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Address) {
-      source = static_cast<const AddressPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::OpaqueDialect) {
-      source = static_cast<const OpaqueDialectPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Encoding) {
-      source = static_cast<const EncodingPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Pool) {
-      source = static_cast<const PoolPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Tile) {
-      source = static_cast<const TilePartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Channel) {
-      source = static_cast<const ChannelPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Vector) {
-      source = static_cast<const VectorPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::View) {
-      source = static_cast<const ViewPartition&>(partition).source;
-    } else if (partition.kind == ValueKind::Tensor) {
-      source = static_cast<const TensorPartition&>(partition).source;
-    }
-    if ((assignment->symbol &&
-         (!source ||
-          (assignment->symbol != source->copyAssignmentOperator() &&
-           assignment->symbol != source->moveAssignmentOperator()))) ||
-        assignment->op != cxx::TokenKind::T_EQUAL) {
-      fail(ast, "only builtin plain assignment is admitted here");
+    if (assignment->symbol &&
+        !types_.is_trivial_value_operation(assignment->symbol)) {
+      auto call = direct_operator_call(ast);
+      return ordinary_operator_value(ast, *call);
     }
     auto value = expression(assignment->rightExpression);
     write(destination(assignment->leftExpression, ast), value, ast);
@@ -4557,8 +4565,8 @@ class Translator final : private Initialization::Evaluation {
       }
       if (cast->conversionFunction &&
           cast->conversionFunction->isConstructor() &&
-          types_.is_user_record_constructor(cast->type,
-                                            cast->conversionFunction, cast)) {
+          types_.record_constructor_requires_call(
+              cast->type, cast->conversionFunction, cast)) {
         return initialization_.value(cast->type, cast->expression,
                                      cast->conversionFunction, cast);
       }

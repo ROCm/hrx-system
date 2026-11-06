@@ -1373,10 +1373,10 @@ class CheckBody {
     if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(source)) {
       if (cast->conversionFunction) {
         if (cast->conversionFunction->isConstructor() &&
-            types_.is_user_record_constructor(
+            types_.record_constructor_requires_call(
                 cast->type, cast->conversionFunction, source)) {
           fail(source,
-               "user-provided constructors require an ordinary function "
+               "record constructor calls require an ordinary function "
                "called by the check case");
         }
         types_.admit_construction(cast->conversionFunction, cast->type, source);
@@ -1418,10 +1418,10 @@ class CheckBody {
              "check locals require initialized automatic non-volatile const "
              "values");
       }
-      if (types_.is_user_record_constructor(
+      if (types_.record_constructor_requires_call(
               variable->type(), variable->constructor(), declarator)) {
         fail(declarator,
-             "user-provided constructors require an ordinary function called "
+             "record constructor calls require an ordinary function called "
              "by the check case");
       }
       types_.admit_construction(variable->constructor(), variable->type(),

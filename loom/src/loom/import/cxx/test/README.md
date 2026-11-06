@@ -25,6 +25,18 @@ Program lowering and source rejection cases belong in these files. Native C++
 tests exercise API contracts such as callback failures, source lifetimes,
 binding identity, and retained analysis facts.
 
+`special_members.cxx-test` executes ordinary copy/move construction and
+assignment through the VM lifecycle observer. Its exact event traces cover
+source clearing, self-assignment, nested/defaulted members, array defaults,
+argument and return ownership, closures, and source destruction timing. The
+expected observations were independently checked with native C++.
+The `special_members_test` target requires both the C++ importer and VM binary
+emitter; source rejection cases remain in the general compiler suite.
+`special_members_roundtrip_test` exports and reimports those same programs,
+then executes them again against the same observations. Buffer-result golden
+tests separately check that exported callable signatures preserve root and
+offset components.
+
 ## Source execution tests
 
 Executable importer inputs use `.cxx`, including handwritten cases and shared

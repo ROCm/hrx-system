@@ -324,6 +324,7 @@ void Functions::prepare_analysis(cxx::FunctionSymbol* function, Types& types,
   if (!concrete || !concrete->declaration()) {
     return;
   }
+  cxx::ASTRewriter::requireFunctionDefinition(&unit_, concrete);
   if (concrete->hasPendingBody()) {
     cxx::ASTRewriter::completePendingBodyFor(&unit_, concrete);
     diagnostics_.finish();

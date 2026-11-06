@@ -15,6 +15,7 @@
 #include <array>
 #include <cstddef>
 #include <optional>
+#include <vector>
 
 namespace loom::cxx_import {
 
@@ -46,6 +47,28 @@ cxx::ImplicitCastExpressionAST* constructor_conversion(
 
 // Whether two resolved source functions denote the same canonical entity.
 bool same_function(cxx::FunctionSymbol* left, cxx::FunctionSymbol* right);
+
+// Explicit arguments of a selected constructor, including functional-cast
+// syntax. A construction expression is the call, not its own first argument.
+std::vector<cxx::ExpressionAST*> constructor_arguments(
+    cxx::ExpressionAST* initializer);
+
+// A nontrivial array-member copy has one source array and a selected leaf
+// constructor. Default arguments are frontend-completed once, then evaluated
+// independently for each leaf, just as in ordinary constructor calls.
+struct ArrayCopyInitialization {
+  // Source array with its original cv qualifiers and value category.
+  cxx::ExpressionAST* source;
+  // Selected nontrivial element constructor.
+  cxx::FunctionSymbol* constructor;
+  // Normalized arguments following the source-element reference.
+  std::vector<cxx::ExpressionAST*> default_arguments;
+};
+
+std::optional<ArrayCopyInitialization> array_copy_initialization(
+    cxx::TranslationUnit& unit, cxx::ScopeSymbol* scope, const cxx::Type* type,
+    cxx::ExpressionAST* initializer, cxx::FunctionSymbol* constructor,
+    cxx::AST* owner);
 
 // Returns the string literal initializing one object, including a single
 // braced clause and transparent expression wrappers, or null otherwise.
@@ -80,8 +103,8 @@ cxx::FunctionSymbol* direct_callee(cxx::CallExpressionAST* call);
 
 // Evaluation sequence imposed by the source operator notation. Forward visits
 // the receiver followed by explicit arguments, or only the explicit arguments
-// when no receiver exists. Compound assignment is the only admitted form that
-// evaluates in another order.
+// when no receiver exists. Assignment notation evaluates the right operand
+// before the destination.
 enum class OperatorEvaluationOrder {
   Forward,
   ArgumentsThenReceiver,

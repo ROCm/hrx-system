@@ -1,7 +1,7 @@
 // RUN: verify
 // Unions do not have an unconditional component partition.
 union Value { unsigned integer; float real; };
-// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate, closure, or user-provided construction and trivial copy and move operations"
+// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type without virtual members"
 Value entry(Value value) { return value; }
 
 // ====
@@ -14,13 +14,13 @@ Value entry() { return Value{}; }
 // Base subobjects need an explicit source-object contract.
 struct Base { unsigned base; };
 struct Value : Base { unsigned member; };
-// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate, closure, or user-provided construction and trivial copy and move operations"
+// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type without virtual members"
 Value entry(Value value) { return value; }
 
 // ====
-// An aggregate with user-defined assignment is not a trivial value.
-struct Value { unsigned member; Value& operator=(const Value& rhs) { member=rhs.member+1; return *this; } };
-// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type with aggregate, closure, or user-provided construction and trivial copy and move operations"
+// Virtual members require an explicit dynamic-object representation.
+struct Value { unsigned member; virtual unsigned read() { return member; } };
+// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type without virtual members"
 Value entry(Value value) { return value; }
 
 // ====

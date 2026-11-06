@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:python.bzl", "iree_py_test")
 load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load("//loom/build_tools/amdgpu:descriptor_sets.bzl", "loom_amdgpu_descriptor_set_compatible_with")
 load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_KEY")
@@ -24,6 +25,38 @@ exports_files([
     "packed_memory.cxx",
     "vector_lookup.cxx",
 ])
+
+loom_check_test(
+    name = "special_members_test",
+    src = "special_members.cxx-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/emit:vm_binary",
+    ]),
+)
+
+iree_py_test(
+    name = "special_members_roundtrip_test",
+    size = "small",
+    srcs = ["special_members_roundtrip_test.py"],
+    args = [
+        "--importer=$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "--exporter=$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+        "--checker=$(rootpath //loom/src/loom/tools/loom-check:loom-check-test)",
+        "--source=$(rootpath special_members.cxx-test)",
+    ],
+    data = [
+        "special_members.cxx-test",
+        "//loom/py/loom/tools:loom-export-cxx",
+        "//loom/src/loom/tools/loom-check:loom-check-test",
+        "//loom/src/loom/tools/loom-import-cxx",
+    ],
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/emit:vm_binary",
+    ]),
+)
 
 iree_execution_test_suite(
     name = "inline_buffer_roundtrip_test",
@@ -212,6 +245,7 @@ loom_check_test_suite(
         "schedules_invalid.cxx-test",
         "shaped_intrinsics.cxx-test",
         "shaped_intrinsics_invalid.cxx-test",
+        "special_members_invalid.cxx-test",
         "standards.cxx-test",
         "static_assert.cxx-test",
         "storage_updates.cxx-test",

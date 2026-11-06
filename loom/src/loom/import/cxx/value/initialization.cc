@@ -151,12 +151,19 @@ Value Initialization::value(const cxx::Type* type,
                             cxx::FunctionSymbol* constructor, cxx::AST* owner,
                             std::optional<Value> retained) {
   if (auto* conversion = constructor_conversion(initializer);
-      conversion && types_.is_user_record_constructor(
+      conversion && types_.record_constructor_requires_call(
                         type, conversion->conversionFunction, owner)) {
     constructor = conversion->conversionFunction;
     initializer = conversion->expression;
   }
   type = types_.unqualified(type);
+  if (unit_.typeTraits().is_array(type) && evaluation_.array_copy(owner)) {
+    auto allocation =
+        storage_.allocate(type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
+    auto destination = storage_.project(allocation.pointer, type, owner);
+    object(destination, type, initializer, constructor, owner);
+    return objects_.load(destination, type, owner);
+  }
   cxx::List<cxx::ExpressionAST*>* elements = nullptr;
   cxx::VariableSymbol* implicit_element = nullptr;
   bool value_initialized = false;
@@ -179,7 +186,8 @@ Value Initialization::value(const cxx::Type* type,
                  cxx::ast_cast<cxx::ParenInitializerAST>(initializer)) {
     elements = list->expressionList;
     value_initialized = list->lparenLoc && !elements;
-  } else if (initializer) {
+  } else if (initializer && !types_.record_constructor_requires_call(
+                                type, constructor, owner)) {
     return evaluation_.convert(initializer, type, owner);
   }
 
@@ -187,11 +195,9 @@ Value Initialization::value(const cxx::Type* type,
   if (constructor && !array) {
     types_.admit_construction(constructor, type, owner);
   }
-  if (!array && types_.is_user_record_constructor(type, constructor, owner)) {
-    std::vector<cxx::ExpressionAST*> arguments;
-    for (auto* element : cxx::ListView{elements}) {
-      arguments.push_back(element);
-    }
+  if (!array &&
+      types_.record_constructor_requires_call(type, constructor, owner)) {
+    auto arguments = constructor_arguments(initializer);
     auto allocation =
         storage_.allocate(type, LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE, 0, owner);
     auto destination = storage_.project(allocation.pointer, type, owner);
@@ -252,13 +258,14 @@ Value Initialization::closure(cxx::LambdaExpressionAST* expression) {
       }
     }
     auto initialized =
-        referent ? pointer_snapshot
-                       ? evaluation_.convert(
-                             referent,
-                             unit_.typeTraits().remove_reference(field->type()),
-                             capture)
-                       : evaluation_.reference(referent, capture)
-                 : evaluation_.convert(initializer, field->type(), capture);
+        referent
+            ? pointer_snapshot
+                  ? evaluation_.convert(
+                        referent,
+                        unit_.typeTraits().remove_reference(field->type()),
+                        capture)
+                  : evaluation_.reference(referent, capture)
+            : value(field->type(), initializer, field->constructor(), capture);
     if (!is_reference || pointer_snapshot) {
       evaluation_.adopt(initializer, initialized);
     }
@@ -845,8 +852,17 @@ void Initialization::object(StorageProjection destination,
                             cxx::ExpressionAST* initializer,
                             cxx::FunctionSymbol* constructor, cxx::AST* owner,
                             bool retained) {
+  if (unit_.typeTraits().is_array(type)) {
+    if (auto* copy = evaluation_.array_copy(owner)) {
+      auto source = evaluation_.reference(copy->source, owner);
+      copy_array(destination, type,
+                 storage_.project(source.pointer(), copy->source->type, owner),
+                 *copy, owner);
+      return;
+    }
+  }
   if (auto* conversion = constructor_conversion(initializer);
-      conversion && types_.is_user_record_constructor(
+      conversion && types_.record_constructor_requires_call(
                         type, conversion->conversionFunction, owner)) {
     constructor = conversion->conversionFunction;
     initializer = conversion->expression;
@@ -947,7 +963,12 @@ void Initialization::object(StorageProjection destination,
   auto* object_type = type;
   auto* shape = types_.unqualified(type);
   if (!types_.array(shape, owner) &&
-      types_.is_user_record_constructor(shape, constructor, owner)) {
+      types_.record_constructor_requires_call(shape, constructor, owner)) {
+    if (!list && initializer) {
+      for (auto* argument : source.arguments()) {
+        elements.push_back(argument);
+      }
+    }
     evaluation_.call_constructor(destination, *types_.record(shape, owner),
                                  object_type, constructor, elements, owner);
     return;
@@ -1009,6 +1030,26 @@ void Initialization::object(StorageProjection destination,
   auto initialized = value(shape, initializer, constructor, owner);
   objects_.store(destination, initialized, object_type, owner);
   evaluation_.adopt(initializer, initialized);
+}
+
+void Initialization::copy_array(StorageProjection destination,
+                                const cxx::Type* type, StorageProjection source,
+                                const ArrayCopyInitialization& plan,
+                                cxx::AST* owner) {
+  if (auto* array =
+          cxx::type_cast<cxx::BoundedArrayType>(types_.unqualified(type))) {
+    for (size_t index = 0; index < array->size(); ++index) {
+      copy_array(storage_.element(destination, array, index, owner),
+                 unit_.typeTraits().get_element_type(type),
+                 storage_.element(source, array, index, owner), plan, owner);
+    }
+  } else {
+    auto mark = evaluation_.begin_full_expression();
+    evaluation_.call_copy_constructor(destination, *types_.record(type, owner),
+                                      plan.constructor, source,
+                                      plan.default_arguments, owner);
+    evaluation_.finish_full_expression(mark);
+  }
 }
 
 void Initialization::constructor_receiver(StorageProjection destination,

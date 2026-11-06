@@ -511,7 +511,7 @@ struct Cell {
   Cell(unsigned seed) : value(seed + 1u) {}
 };
 LOOM_CHECK_CASE(direct_construction) {
-  // ERROR@+1: LOWERING/059 "user-provided constructors require an ordinary function called by the check case"
+  // ERROR@+1: LOWERING/059 "record constructor calls require an ordinary function called by the check case"
   const Cell value(3u);
   loom::check::expect_equal(value.value, 4u);
 }

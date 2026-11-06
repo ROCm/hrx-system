@@ -363,9 +363,13 @@ class Types {
   const RecordPartition* record(const cxx::Type* input, cxx::AST* owner);
   // Whether this constructor executes an ordinary admitted record body. Loom
   // source wrapper constructors retain their intrinsic projection paths.
-  bool is_user_record_constructor(const cxx::Type* type,
-                                  cxx::FunctionSymbol* constructor,
-                                  cxx::AST* owner);
+  bool record_constructor_requires_call(const cxx::Type* type,
+                                        cxx::FunctionSymbol* constructor,
+                                        cxx::AST* owner);
+  // Whether the selected copy/move special member has no source-level body
+  // effects. Retained once per source class; ordinary overloads are
+  // never replaced by component transport.
+  bool is_trivial_value_operation(cxx::FunctionSymbol* function);
   // Returns a fixed array's value schema, or null for a non-array type.
   const ArrayPartition* array(const cxx::Type* input, cxx::AST* owner);
   // Direct lookup of a member slice retained by its owning record's admission.
@@ -433,9 +437,6 @@ class Types {
                          cxx::AST* owner);
 
  private:
-  // Whether flattened value transport preserves every copy and move operation
-  // independently of this object's destruction semantics.
-  bool has_trivial_value_operations(const cxx::Type* input);
   void require_record_storage(const cxx::ClassType* input, cxx::AST* owner);
   const Partition* special(const cxx::Type* input, cxx::AST* owner);
   const BufferPartition* buffer(const cxx::ClassType* input, cxx::AST* owner);
@@ -470,6 +471,8 @@ class Types {
   // Stable source partitions, independent of every particular SSA binding.
   std::unordered_map<cxx::ClassSymbol*, std::unique_ptr<RecordPartition>>
       records_;
+  // Frontend special-member classification, retained at its first demand.
+  std::unordered_map<cxx::ClassSymbol*, bool> trivial_record_operations_;
   // Admitted typed buffer handles keyed by concrete source specialization.
   std::unordered_map<cxx::ClassSymbol*, std::unique_ptr<BufferPartition>>
       buffers_;
