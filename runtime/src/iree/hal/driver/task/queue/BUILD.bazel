@@ -34,7 +34,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal:atomic_slist",
         "//runtime/src/iree/base/internal:cpu",
         "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/base/threading:thread",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/task:atomic",
         "//runtime/src/iree/hal/driver/task:profile",

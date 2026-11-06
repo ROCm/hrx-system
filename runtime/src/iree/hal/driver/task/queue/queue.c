@@ -17,8 +17,9 @@
 #include "iree/async/proactor.h"
 #include "iree/async/semaphore.h"
 #include "iree/async/span.h"
+#include "iree/base/threading/mutex.h"
+#include "iree/base/threading/notification.h"
 #include "iree/base/threading/processor.h"
-#include "iree/base/threading/thread.h"
 #include "iree/hal/driver/task/atomic.h"
 #include "iree/hal/driver/task/command/block_builder.h"
 #include "iree/hal/driver/task/command/block_command_buffer.h"
@@ -128,7 +129,7 @@ static void iree_hal_task_queue_debug_record_destroy(
 //    v
 //  +--------------------+    CB process completion (or inline for barriers/
 //  |   completion       |    host calls): signal semaphores, advance frontier,
-//  +--------------------+    end scope, free arena.
+//  +--------------------+    retire operation, free arena.
 
 //===----------------------------------------------------------------------===//
 // Profiling helpers
@@ -688,6 +689,50 @@ static void iree_hal_task_queue_profile_finish_host_execution(
 // Operation lifecycle
 //===----------------------------------------------------------------------===//
 
+struct iree_hal_task_queue_shutdown_t {
+  // Protects completion publication and the callback's final access.
+  iree_slim_mutex_t mutex;
+  // Wakes the external synchronous destruction caller.
+  iree_notification_t notification;
+  // Both process release callbacks and the shutdown wake have relinquished
+  // queue state.
+  bool completed;
+};
+
+// The last shutdown participant wakes destruction after its final queue access.
+// The mutex also joins its last notification access.
+static void iree_hal_task_queue_shutdown_retire(iree_hal_task_queue_t* queue) {
+  if (iree_atomic_fetch_sub(&queue->pending_shutdown_count, 1,
+                            iree_memory_order_acq_rel) == 1) {
+    iree_hal_task_queue_shutdown_t* shutdown = queue->shutdown;
+    iree_slim_mutex_lock(&shutdown->mutex);
+    shutdown->completed = true;
+    iree_notification_post(&shutdown->notification, IREE_ALL_WAITERS);
+    iree_slim_mutex_unlock(&shutdown->mutex);
+  }
+}
+
+// The admission reference keeps the count nonzero during ordinary live/idle
+// transitions. Only the final operation after shutdown activates termination.
+static void iree_hal_task_queue_operation_begin(iree_hal_task_queue_t* queue) {
+  iree_atomic_fetch_add(&queue->pending_operation_count, 1,
+                        iree_memory_order_relaxed);
+}
+
+static void iree_hal_task_queue_operation_end(iree_hal_task_queue_t* queue) {
+  if (iree_atomic_fetch_sub(&queue->pending_operation_count, 1,
+                            iree_memory_order_acq_rel) != 1) {
+    return;
+  }
+  iree_atomic_store(&queue->shutdown_phase,
+                    IREE_HAL_TASK_QUEUE_SHUTDOWN_PHASE_CONTROL,
+                    iree_memory_order_release);
+  iree_task_executor_schedule_process(queue->executor, &queue->process);
+  // Both processes can retire before schedule_process returns. Their release
+  // callbacks cannot reclaim the queue or its executor during this wake.
+  iree_hal_task_queue_shutdown_retire(queue);
+}
+
 static void iree_hal_task_queue_op_abort_dealloca(
     iree_hal_task_queue_op_t* operation) {
   if (operation->type != IREE_HAL_TASK_QUEUE_OP_DEALLOCA ||
@@ -721,18 +766,23 @@ void iree_hal_task_queue_op_discard(iree_hal_task_queue_op_t* operation) {
   iree_hal_task_queue_op_abort_dealloca(operation);
   iree_hal_semaphore_list_release(operation->signal_semaphores);
   iree_hal_task_queue_op_release_resources(operation);
-  iree_task_scope_t* scope = operation->scope;
+  iree_hal_task_queue_t* queue = operation->queue;
   iree_arena_allocator_t arena = operation->arena;
   operation = NULL;
   iree_arena_deinitialize(&arena);
-  iree_task_scope_end(scope);
+  iree_hal_task_queue_operation_end(queue);
 }
 
 // Destroys an operation, failing signal semaphores if |failure_status| is
-// non-OK. Releases all retained resources, ends the scope, and deinitializes
-// the arena (which frees the operation itself and all transient allocations).
+// non-OK. Releases all retained resources, retires the operation, and
+// deinitializes the arena (which frees the operation itself and all transient
+// allocations).
 void iree_hal_task_queue_op_destroy(iree_hal_task_queue_op_t* operation,
                                     iree_status_t failure_status) {
+  if (IREE_UNLIKELY(operation->queue->abort_on_failure &&
+                    !iree_status_is_ok(failure_status))) {
+    iree_status_abort(failure_status);
+  }
   iree_hal_task_queue_debug_record_destroy(operation->queue, operation,
                                            iree_status_code(failure_status));
   iree_hal_task_queue_profile_finish_host_execution(
@@ -749,19 +799,17 @@ void iree_hal_task_queue_op_destroy(iree_hal_task_queue_op_t* operation,
   }
   iree_hal_semaphore_list_release(operation->signal_semaphores);
 
-  // Capture scope before arena deinitialization frees the operation.
-  iree_task_scope_t* scope = operation->scope;
+  // Capture the queue before arena deinitialization frees the operation.
+  iree_hal_task_queue_t* queue = operation->queue;
 
   // Free all transient memory (including this operation).
   iree_arena_allocator_t arena = operation->arena;
   operation = NULL;
   iree_arena_deinitialize(&arena);
 
-  // Notify the scope that this operation has completed. Must happen after
-  // all operation memory is freed so that idle waiters can safely deallocate.
-  if (scope) {
-    iree_task_scope_end(scope);
-  }
+  // Retire this operation after freeing its captured state. This may start
+  // shutdown, so no operation-owned state can remain accessible afterward.
+  iree_hal_task_queue_operation_end(queue);
 }
 
 // Fails an operation: propagates the error to the frontier tracker (if present)
@@ -849,7 +897,6 @@ static iree_status_t iree_hal_task_queue_op_allocate(
   memset(operation, 0, sizeof(*operation));
   operation->type = type;
   memcpy(&operation->arena, &arena, sizeof(arena));
-  operation->scope = &queue->operation_scope;
   operation->frontier_tracker = queue->frontier_tracker;
   operation->axis = queue->axis;
   operation->epoch_counter = &queue->epoch;
@@ -907,7 +954,7 @@ typedef struct iree_hal_task_queue_wait_entry_t {
   iree_hal_semaphore_t* semaphore;
 } iree_hal_task_queue_wait_entry_t;
 
-bool iree_hal_task_queue_is_shutting_down(iree_hal_task_queue_t* queue) {
+static bool iree_hal_task_queue_is_shutting_down(iree_hal_task_queue_t* queue) {
   return iree_atomic_load(&queue->shutdown_phase, iree_memory_order_acquire) !=
          IREE_HAL_TASK_QUEUE_SHUTDOWN_PHASE_RUNNING;
 }
@@ -918,17 +965,22 @@ static bool iree_hal_task_queue_is_compute_shutting_down(
          IREE_HAL_TASK_QUEUE_SHUTDOWN_PHASE_COMPUTE;
 }
 
-iree_status_t iree_hal_task_queue_make_shutdown_status(void) {
-  return iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down");
-}
-
-// Publishes an operation to the ready list and wakes the queue process. A
-// worker may drain and destroy the operation as soon as it is pushed, so this
-// captures all queue state before publication and consumes the operation.
-void iree_hal_task_queue_schedule_ready(iree_hal_task_queue_op_t* operation) {
+// The caller must own the queue independently of the operation through this
+// call. Publication can let another worker consume the operation immediately.
+static void iree_hal_task_queue_publish_ready(
+    iree_hal_task_queue_op_t* operation) {
   iree_hal_task_queue_t* queue = operation->queue;
   iree_hal_task_queue_op_slist_push(&queue->ready_list, operation);
   iree_task_executor_schedule_process(queue->executor, &queue->process);
+}
+
+void iree_hal_task_queue_schedule_ready(iree_hal_task_queue_op_t* operation) {
+  // Readiness callbacks own only the operation. Hold the queue across the
+  // publish/wake tail so concurrent completion cannot begin shutdown early.
+  iree_hal_task_queue_t* queue = operation->queue;
+  iree_hal_task_queue_operation_begin(queue);
+  iree_hal_task_queue_publish_ready(operation);
+  iree_hal_task_queue_operation_end(queue);
 }
 
 // Callback fired when a semaphore timepoint is resolved (value reached or
@@ -965,12 +1017,6 @@ static void iree_hal_task_queue_wait_resolved(
       // At least one wait failed. Fail signals and destroy.
       iree_hal_task_queue_profile_record_failed_before_ready(operation);
       iree_hal_task_queue_op_destroy(operation, error);
-    } else if (iree_hal_task_queue_is_shutting_down(operation->queue)) {
-      // Shutdown owns all remaining unresolved work. Late wait callbacks must
-      // resolve the operation inline instead of scheduling a terminal process.
-      iree_hal_task_queue_profile_record_failed_before_ready(operation);
-      iree_hal_task_queue_op_destroy(
-          operation, iree_hal_task_queue_make_shutdown_status());
     } else {
       // All waits satisfied. Push to ready list and wake queue.
       iree_hal_task_queue_profile_record_ready(operation);
@@ -1019,13 +1065,9 @@ static iree_status_t iree_hal_task_queue_enqueue_waits(
     iree_hal_task_queue_op_t* operation,
     iree_hal_semaphore_list_t wait_semaphores) {
   if (wait_semaphores.count == 0) {
-    if (iree_hal_task_queue_is_shutting_down(operation->queue)) {
-      return iree_hal_task_queue_make_shutdown_status();
-    }
-
-    // All waits already satisfied — push directly.
+    // The submitting caller owns the queue throughout this synchronous path.
     iree_hal_task_queue_profile_record_ready(operation);
-    iree_hal_task_queue_schedule_ready(operation);
+    iree_hal_task_queue_publish_ready(operation);
     return iree_ok_status();
   }
 
@@ -2128,13 +2170,8 @@ static void iree_hal_task_queue_compute_item_release(
   }
   iree_hal_task_queue_compute_item_slist_push(&queue->compute_free_pool, item);
 
-  // Complete or fail the operation AFTER returning the item to the free pool.
-  // op_complete/op_fail signal semaphores and run scope_end on
-  // queue->operation_scope, which may wake a thread waiting to begin process
-  // shutdown. The separate process_scope keeps the queue storage live until
-  // this worker unwinds from the compute slot. We still want the item back in
-  // the free pool first so that a waiter that resubmits instead of releasing
-  // the queue can use the freshly recycled item.
+  // Return the item before terminal operation retirement can start shutdown.
+  // The persistent process release tail still protects this worker's stack.
   if (iree_status_is_ok(processor_status)) {
     iree_hal_task_queue_op_complete(operation);
   } else {
@@ -2424,20 +2461,8 @@ static void iree_hal_task_queue_compute_item_cleanup(
   }
 }
 
-// Compute process release callback. Fires when the last worker exits the
-// compute slot (slot->active_drainers sentinel CAS succeeds in worker.c).
-// At that point no worker can be inside processor_drain() or
-// compute_item_leave() for this queue, so this is the one safe place to
-// finalize any in-flight items and to release the compute process's
-// scope_begin claim on queue->process_scope.
-//
-// scope_end is deferred to here (rather than to a completion_fn) because
-// completion_fn can fire on the first worker to observe termination while
-// other workers are still inside drain. Releasing the scope there would let
-// a thread blocked in iree_hal_task_queue_deinitialize / scope_wait_idle
-// wake up and free the queue out from under those still-draining workers.
-// After scope_end, only the separate release-callback count may be touched;
-// the destroying thread waits for that count before freeing queue storage.
+// The final compute drainer has left. Cleanup precedes this process's last
+// queue ownership; the destroying caller may reclaim storage immediately.
 static void iree_hal_task_queue_compute_process_release(
     iree_task_process_t* process) {
   iree_hal_task_queue_t* queue = (iree_hal_task_queue_t*)process->user_data;
@@ -2486,12 +2511,7 @@ static void iree_hal_task_queue_compute_process_release(
   // up in the pool scan above; just clear the slist head.
   iree_hal_task_queue_compute_item_slist_discard(&queue->compute_pending);
 
-  // End the scope for the compute process (paired with scope_begin at init).
-  // After this call, scope_wait_idle may unblock; the process-release count
-  // below is the final queue lifetime barrier for the callback itself.
-  iree_task_scope_end(&queue->process_scope);
-  iree_atomic_fetch_sub(&queue->pending_process_release_count, 1,
-                        iree_memory_order_release);
+  iree_hal_task_queue_shutdown_retire(queue);
 }
 
 //===----------------------------------------------------------------------===//
@@ -2761,17 +2781,8 @@ static iree_status_t iree_hal_task_queue_drain_write(
 // Control process (wake_budget == 1 queue drain)
 //===----------------------------------------------------------------------===//
 
-// Queue process release callback. The queue process is wake_budget == 1, so
-// exactly one worker drains it; release fires on that worker immediately after
-// iree_task_process_complete returns, and worker.c makes no further access to
-// |process| after this callback. Ending the scope reference here (rather than
-// in a completion_fn) keeps scope_wait_idle a true lifetime barrier for queue
-// and device memory: ending the scope from completion_fn would unblock waiters
-// while the owning worker still has a live stack frame for the embedded
-// process.
-//
-// completion_fn is intentionally unset — the base process code consumes the
-// terminal status for us when no callback is installed.
+// The control producer has left drain and can no longer publish compute
+// items. Compute shutdown precedes dropping this callback's queue ownership.
 static void iree_hal_task_queue_process_release(iree_task_process_t* process) {
   iree_hal_task_queue_t* queue = (iree_hal_task_queue_t*)process->user_data;
 
@@ -2784,15 +2795,13 @@ static void iree_hal_task_queue_process_release(iree_task_process_t* process) {
                     iree_memory_order_release);
   iree_task_executor_schedule_process(queue->executor, &queue->compute_process);
 
-  iree_task_scope_end(&queue->process_scope);
-  iree_atomic_fetch_sub(&queue->pending_process_release_count, 1,
-                        iree_memory_order_release);
+  iree_hal_task_queue_shutdown_retire(queue);
 }
 
 // Queue process drain function. Pops one operation from the ready list and
 // handles it by type. Returns did_work=false when the ready list is empty
-// (the executor's sleeping protocol will park the process). During
-// deinitialize, cancels remaining ready work before returning completed=true.
+// (the executor's sleeping protocol will park the process). Shutdown begins
+// only after accepted work and readiness callbacks have relinquished the queue.
 static iree_status_t iree_hal_task_queue_process_drain(
     iree_task_process_t* process,
     const iree_task_worker_context_t* worker_context,
@@ -2810,19 +2819,6 @@ static iree_status_t iree_hal_task_queue_process_drain(
   if (!operation) {
     out_result->did_work = false;
     out_result->completed = iree_hal_task_queue_is_shutting_down(queue);
-    return iree_ok_status();
-  }
-
-  if (iree_hal_task_queue_is_shutting_down(queue)) {
-    if (operation->type == IREE_HAL_TASK_QUEUE_OP_DEALLOCA) {
-      iree_hal_task_queue_profile_start_host_execution(operation);
-      iree_hal_task_queue_issue_dealloca(operation);
-    } else {
-      iree_hal_task_queue_op_destroy(
-          operation, iree_hal_task_queue_make_shutdown_status());
-    }
-    out_result->did_work = true;
-    out_result->completed = false;
     return iree_ok_status();
   }
 
@@ -2937,18 +2933,18 @@ static iree_status_t iree_hal_task_queue_process_drain(
 // Submit paths
 //===----------------------------------------------------------------------===//
 
-// Phase 1 of submit: allocates the operation and begins scope tracking.
+// Phase 1 of submit: allocates the operation and claims queue lifetime.
 // The caller fills type-specific union fields and retains resources on the
 // returned operation, then calls submit_op_finish to register waits and
-// enqueue. On failure between begin and finish, the caller must call
-// op_destroy on the operation.
+// enqueue. On failure between begin and finish, the caller discards the
+// unpublished operation without signaling its completion semaphores.
 iree_status_t iree_hal_task_queue_submit_op_begin(
     iree_hal_task_queue_t* queue, iree_hal_task_queue_op_type_t type,
     const iree_hal_semaphore_list_t* signal_semaphores,
     iree_hal_task_queue_op_t** out_operation) {
   IREE_RETURN_IF_ERROR(iree_hal_task_queue_op_allocate(
       queue, type, signal_semaphores, out_operation));
-  iree_task_scope_begin(&queue->operation_scope);
+  iree_hal_task_queue_operation_begin(queue);
   return iree_ok_status();
 }
 
@@ -3024,16 +3020,16 @@ iree_status_t iree_hal_task_queue_initialize(
                     IREE_HAL_TASK_QUEUE_SHUTDOWN_PHASE_RUNNING,
                     iree_memory_order_relaxed);
   out_queue->inline_transfer_threshold = params->inline_transfer_threshold;
+  out_queue->abort_on_failure = params->abort_on_failure;
   out_queue->small_block_pool = params->small_block_pool;
   out_queue->large_block_pool = params->large_block_pool;
   out_queue->device_allocator = params->device_allocator;
   iree_hal_allocator_retain(out_queue->device_allocator);
 
-  iree_task_scope_initialize(params->identifier, params->scope_flags,
-                             &out_queue->operation_scope);
-  iree_task_scope_initialize(params->identifier, params->scope_flags,
-                             &out_queue->process_scope);
-  iree_atomic_store(&out_queue->pending_process_release_count, 2,
+  iree_atomic_store(&out_queue->pending_operation_count, 1,
+                    iree_memory_order_relaxed);
+  // Control release, compute release, and the terminal scheduling tail.
+  iree_atomic_store(&out_queue->pending_shutdown_count, 3,
                     iree_memory_order_relaxed);
 
   // Initialize the ready list.
@@ -3046,26 +3042,15 @@ iree_status_t iree_hal_task_queue_initialize(
                                /*suspend_count=*/0, /*wake_budget=*/1,
                                &out_queue->process);
   out_queue->process.user_data = out_queue;
-  // completion_fn is intentionally NULL — process.c consumes the terminal
-  // status when no completion callback is installed. scope_end is deferred to
-  // release_fn so it fires after the owning worker has exited the drain stack.
+  // Only release_fn may relinquish the queue after the worker leaves drain.
   out_queue->process.release_fn = iree_hal_task_queue_process_release;
-
-  // The queue process participates in the process scope so shutdown blocks
-  // until the process has fully completed and its worker has exited the drain
-  // stack. The matching scope_end fires in the release callback.
-  iree_task_scope_begin(&out_queue->process_scope);
 
   // Initialize the compute process. It uses wake_budget > 1 with N equal to
   // the worker count. Not scheduled until the first recording is pushed to
   // compute_pending by drain_commands. The first schedule_process call places
   // it in a compute slot; subsequent calls just wake workers.
   //
-  // The matching scope_end fires in the RELEASE callback (not the completion
-  // callback). For wake_budget > 1 processes, completion fires eagerly while
-  // other workers may still be draining; scope_end there would allow the main
-  // thread to free the queue prematurely. The release callback fires only after
-  // the last drainer exits, making it safe to unblock scope_wait_idle.
+  // Release waits until the last compute drainer has left the process.
   iree_task_process_initialize(
       iree_hal_task_queue_compute_process_drain,
       /*suspend_count=*/0,
@@ -3075,14 +3060,8 @@ iree_status_t iree_hal_task_queue_initialize(
   iree_task_process_set_flags(&out_queue->compute_process,
                               IREE_TASK_PROCESS_FLAG_COMPUTE_SLOT);
   out_queue->compute_process.user_data = out_queue;
-  // completion_fn is intentionally NULL. For wake_budget > 1 processes,
-  // completion fires eagerly on the first worker that observes termination
-  // while other workers may still be inside drain; doing any queue teardown
-  // there would race them. All teardown (item cleanup + scope_end) lives in
-  // release_fn, which fires only after the last slot drainer exits.
   out_queue->compute_process.release_fn =
       iree_hal_task_queue_compute_process_release;
-  iree_task_scope_begin(&out_queue->process_scope);
 
   // Initialize the compute pending and free pool lists.
   iree_hal_task_queue_compute_item_slist_initialize(
@@ -3185,64 +3164,32 @@ void iree_hal_task_queue_retire_frontier(iree_hal_task_queue_t* queue) {
   }
 }
 
+static bool iree_hal_task_queue_shutdown_completed(void* user_data) {
+  iree_hal_task_queue_shutdown_t* shutdown = user_data;
+  iree_slim_mutex_lock(&shutdown->mutex);
+  const bool completed = shutdown->completed;
+  iree_slim_mutex_unlock(&shutdown->mutex);
+  return completed;
+}
+
 static void iree_hal_task_queue_deinitialize(iree_hal_task_queue_t* queue) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
-  // Complete every operation captured before the caller released the final
-  // queue reference. This includes operations waiting on external semaphore
-  // dependencies and preserves their signal edges for consumers on other
-  // queues. The ownership contract excludes new submissions once destruction
-  // begins.
-  iree_status_t idle_status = iree_task_scope_wait_idle(
-      &queue->operation_scope, IREE_TIME_INFINITE_FUTURE);
-  IREE_ASSERT(iree_status_is_ok(idle_status),
-              "operation scope idle wait must not fail with an infinite "
-              "deadline");
-  iree_status_free(idle_status);
+  // Closing admission leaves accepted operations live, including external
+  // semaphore waits. The final operation requests control shutdown; its release
+  // callback then requests compute shutdown. The final process release or
+  // shutdown wake tail may wake destruction, after all access to queue state.
+  iree_hal_task_queue_shutdown_t shutdown = {0};
+  iree_slim_mutex_initialize(&shutdown.mutex);
+  iree_notification_initialize(&shutdown.notification);
+  queue->shutdown = &shutdown;
+  iree_hal_task_queue_operation_end(queue);
+  iree_notification_await(&shutdown.notification,
+                          iree_hal_task_queue_shutdown_completed, &shutdown,
+                          iree_infinite_timeout());
+  iree_notification_deinitialize(&shutdown.notification);
+  iree_slim_mutex_deinitialize(&shutdown.mutex);
 
-  // Request control-process termination. If the process is already being
-  // drained, schedule_process sets needs_drain and the worker observes the
-  // phase on its next iteration. If IDLE, schedule_process pushes it to the
-  // immediate run list.
-  //
-  // The control release callback advances to COMPUTE and schedules the compute
-  // process only after the control worker has left drain. This producer-first
-  // ordering prevents compute item cleanup from racing control item
-  // initialization and also remains live with a single-worker executor.
-  iree_atomic_store(&queue->shutdown_phase,
-                    IREE_HAL_TASK_QUEUE_SHUTDOWN_PHASE_CONTROL,
-                    iree_memory_order_release);
-  iree_task_executor_schedule_process(queue->executor, &queue->process);
-
-  // Wait for both processes to complete. The wake_budget == 1 process's
-  // scope_end fires in its release callback.
-  // The compute process's scope_end fires in its release callback (after
-  // the last drainer exits), which also cleans up any in-flight items. The
-  // operation scope reached idle before shutdown, so these callbacks are the
-  // final users of queue-owned process state.
-  iree_status_t process_idle_status = iree_task_scope_wait_idle(
-      &queue->process_scope, IREE_TIME_INFINITE_FUTURE);
-  IREE_ASSERT(iree_status_is_ok(process_idle_status),
-              "process scope idle wait must not fail with an infinite "
-              "deadline");
-  iree_status_free(process_idle_status);
-
-  while (iree_atomic_load(&queue->pending_process_release_count,
-                          iree_memory_order_acquire) != 0) {
-    iree_thread_yield();
-  }
-
-  // Drain and destroy any remaining operations in the ready list.
-  // These are operations that were queued but never drained (e.g.,
-  // submitted after the queue process went idle but before shutdown was
-  // signaled).
-  iree_hal_task_queue_op_t* remaining = NULL;
-  while ((remaining = iree_hal_task_queue_op_slist_pop(&queue->ready_list)) !=
-         NULL) {
-    iree_hal_task_queue_op_destroy(
-        remaining,
-        iree_make_status(IREE_STATUS_CANCELLED, "queue shutting down"));
-  }
   iree_hal_task_queue_op_slist_deinitialize(&queue->ready_list);
 
   // Deinitialize the compute lists and free all items via the arena.
@@ -3251,8 +3198,6 @@ static void iree_hal_task_queue_deinitialize(iree_hal_task_queue_t* queue) {
       &queue->compute_free_pool);
   iree_arena_deinitialize(&queue->compute_item_arena);
 
-  iree_task_scope_deinitialize(&queue->process_scope);
-  iree_task_scope_deinitialize(&queue->operation_scope);
   iree_hal_task_queue_retire_frontier(queue);
   iree_hal_allocator_release(queue->device_allocator);
   iree_task_executor_release(queue->executor);
@@ -3347,7 +3292,7 @@ iree_status_t iree_hal_task_queue_submit_commands(
       break;
     }
 
-    iree_task_scope_begin(&queue->operation_scope);
+    iree_hal_task_queue_operation_begin(queue);
 
     // Retain the command buffer.
     status = iree_hal_resource_set_insert(
@@ -3414,7 +3359,7 @@ iree_status_t iree_hal_task_queue_submit_host_call(
     return status;
   }
 
-  iree_task_scope_begin(&queue->operation_scope);
+  iree_hal_task_queue_operation_begin(queue);
 
   // Store host call parameters.
   operation->host_call.queue = &queue->base;
@@ -3449,7 +3394,7 @@ iree_status_t iree_hal_task_queue_submit_alloca(
     return status;
   }
 
-  iree_task_scope_begin(&queue->operation_scope);
+  iree_hal_task_queue_operation_begin(queue);
 
   operation->alloca.pool = pool;
   operation->alloca.request_count = request_count;
@@ -3551,7 +3496,7 @@ iree_status_t iree_hal_task_queue_submit_dealloca(
     return status;
   }
 
-  iree_task_scope_begin(&queue->operation_scope);
+  iree_hal_task_queue_operation_begin(queue);
 
   operation->dealloca.buffer_count = buffer_count;
   operation->dealloca.marks_owned = false;
@@ -3644,7 +3589,7 @@ iree_status_t iree_hal_task_queue_submit_read(
     return status;
   }
 
-  iree_task_scope_begin(&queue->operation_scope);
+  iree_hal_task_queue_operation_begin(queue);
   status = iree_hal_task_queue_memory_barriers_capture(operation, barriers);
 
   operation->read.hal_file = source_file;
@@ -3694,7 +3639,7 @@ iree_status_t iree_hal_task_queue_submit_write(
     return status;
   }
 
-  iree_task_scope_begin(&queue->operation_scope);
+  iree_hal_task_queue_operation_begin(queue);
   status = iree_hal_task_queue_memory_barriers_capture(operation, barriers);
 
   operation->write.hal_file = target_file;

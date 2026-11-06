@@ -65,8 +65,8 @@ typedef struct iree_hal_task_device_t {
   iree_allocator_t host_allocator;
   iree_hal_allocator_t* device_allocator;
 
-  // Scope flags inherited by provisioned and dynamically acquired queues.
-  iree_task_scope_flags_t queue_scope_flags;
+  // Failure policy inherited by provisioned and dynamically acquired queues.
+  bool abort_on_failure;
 
   // Transfer strategy threshold inherited by all queues.
   iree_device_size_t inline_transfer_threshold;
@@ -198,7 +198,7 @@ static bool iree_hal_task_device_query_pool_epoch(void* user_data,
 void iree_hal_task_device_params_initialize(
     iree_hal_task_device_params_t* out_params) {
   out_params->arena_block_size = 32 * 1024;
-  out_params->queue_scope_flags = IREE_TASK_SCOPE_FLAG_NONE;
+  out_params->abort_on_failure = false;
   // Preserve the 256 KB strategy threshold previously used for scalar fills
   // and copies while applying it to the aggregate transaction payload.
   out_params->inline_transfer_threshold = 256 * 1024;
@@ -328,7 +328,7 @@ iree_status_t iree_hal_task_device_create(
                                     (char*)device + identifier_offset);
   device->host_allocator = host_allocator;
   device->device_allocator = device_allocator;
-  device->queue_scope_flags = params->queue_scope_flags;
+  device->abort_on_failure = params->abort_on_failure;
   device->inline_transfer_threshold = params->inline_transfer_threshold;
   iree_hal_allocator_retain(device_allocator);
   iree_atomic_store(&device->next_profile_submission_id, 0,
@@ -429,7 +429,7 @@ iree_status_t iree_hal_task_device_create(
           .device = (iree_hal_device_t*)device,
           .queue_family = &device->queue_family,
           .queue_params = queue_params,
-          .scope_flags = device->queue_scope_flags,
+          .abort_on_failure = device->abort_on_failure,
           .executor = queue_executors[i],
           .proactor = iree_async_proactor_pool_entry_proactor(queue_progress),
           .inline_transfer_threshold = device->inline_transfer_threshold,
@@ -617,7 +617,7 @@ static iree_status_t iree_hal_task_device_acquire_queue(
       .device = base_device,
       .queue_family = queue_family,
       .queue_params = *params,
-      .scope_flags = device->queue_scope_flags,
+      .abort_on_failure = device->abort_on_failure,
       .executor = provisioned_queue->executor,
       .proactor = provisioned_queue->proactor,
       .inline_transfer_threshold = device->inline_transfer_threshold,

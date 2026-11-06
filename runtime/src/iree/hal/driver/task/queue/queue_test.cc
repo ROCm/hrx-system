@@ -53,9 +53,15 @@ class TaskQueueTest : public ::testing::TestWithParam<iree_host_size_t> {
   }
 
   iree_status_t CreateDeviceGroup(iree_hal_device_group_t** out_device_group) {
+    return CreateDeviceGroup(/*abort_on_failure=*/false, out_device_group);
+  }
+
+  iree_status_t CreateDeviceGroup(bool abort_on_failure,
+                                  iree_hal_device_group_t** out_device_group) {
     *out_device_group = nullptr;
     iree_hal_task_device_params_t device_params;
     iree_hal_task_device_params_initialize(&device_params);
+    device_params.abort_on_failure = abort_on_failure;
     iree_hal_device_create_params_t create_params =
         iree_hal_device_create_params_default();
     create_params.proactor_pool = proactor_pool_;
@@ -689,49 +695,136 @@ TEST_P(TaskQueueTest, TransfersReleaseBuffersBeforeTerminalSignal) {
 }
 
 TEST_P(TaskQueueTest, ReleasesDeviceGroupWithAcceptedExecuteInFlight) {
-  // Repeated immediate destruction drives shutdown across the control-to-
-  // compute ownership handoff without externally waiting for completion.
-  // Device group release must either finish or cancel every accepted
-  // submission before it tears down the queue's compute item pool.
-  static constexpr int kIterationCount = 256;
-  for (int iteration = 0; iteration < kIterationCount; ++iteration) {
-    iree_hal_device_group_t* device_group = nullptr;
-    IREE_ASSERT_OK(CreateDeviceGroup(&device_group));
-    iree_hal_device_t* device =
-        iree_hal_device_group_device_at(device_group, 0);
-    iree_hal_queue_t* queue = iree_hal_device_queue(
-        device, /*family_ordinal=*/0, /*queue_ordinal=*/0);
-    ASSERT_NE(queue, nullptr);
-
-    iree_hal_command_buffer_t* command_buffer = nullptr;
-    IREE_ASSERT_OK(iree_hal_command_buffer_create(
-        iree_hal_queue_family(queue), IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
-        IREE_HAL_COMMAND_CATEGORY_TRANSFER,
-        /*binding_capacity=*/0, &command_buffer));
-    IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
-    IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
-
-    iree_hal_semaphore_t* signal_semaphore = nullptr;
+  for (bool fail_dependency : {false, true}) {
+    SCOPED_TRACE(fail_dependency);
+    iree_hal_device_group_t* device_groups[2] = {};
+    iree_hal_queue_t* queues[2] = {};
+    iree_hal_command_buffer_t* command_buffers[2] = {};
+    iree_hal_semaphore_t* completions[2] = {};
+    std::array<std::array<uint8_t, 64>, 2> outputs = {};
+    const uint8_t patterns[2] = {0xA5, 0x3C};
+    for (size_t i = 0; i < 2; ++i) {
+      IREE_ASSERT_OK(CreateDeviceGroup(&device_groups[i]));
+      auto* device = iree_hal_device_group_device_at(device_groups[i], 0);
+      queues[i] = iree_hal_device_queue(device, 0, 0);
+      IREE_ASSERT_OK(iree_hal_semaphore_create(
+          device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+          IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &completions[i]));
+      iree_hal_buffer_t* buffer = nullptr;
+      IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+          iree_hal_buffer_placement_undefined(),
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+          IREE_HAL_MEMORY_ACCESS_WRITE, IREE_HAL_BUFFER_USAGE_TRANSFER,
+          outputs[i].size(),
+          iree_make_byte_span(outputs[i].data(), outputs[i].size()),
+          iree_hal_buffer_release_callback_null(), iree_allocator_system(),
+          &buffer));
+      IREE_ASSERT_OK(iree_hal_command_buffer_create(
+          iree_hal_queue_family(queues[i]),
+          IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT,
+          IREE_HAL_COMMAND_CATEGORY_TRANSFER, 0, &command_buffers[i]));
+      IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffers[i]));
+      IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
+          command_buffers[i],
+          iree_hal_make_buffer_ref(buffer, 0, outputs[i].size()), &patterns[i],
+          sizeof(patterns[i]), IREE_HAL_FILL_FLAG_NONE));
+      IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffers[i]));
+      iree_hal_buffer_release(buffer);
+    }
+    iree_hal_semaphore_t* ready = nullptr;
     IREE_ASSERT_OK(iree_hal_semaphore_create(
-        device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, /*initial_value=*/0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &signal_semaphore));
-    iree_hal_semaphore_t* signal_semaphores[] = {signal_semaphore};
-    uint64_t signal_values[] = {1};
-    const iree_hal_semaphore_list_t signal_list = {
-        IREE_ARRAYSIZE(signal_semaphores),
-        signal_semaphores,
-        signal_values,
-    };
+        iree_hal_device_group_device_at(device_groups[0], 0),
+        IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT,
+        &ready));
+    uint64_t value = 1;
+    const iree_hal_semaphore_list_t waits = {1, &ready, &value};
+    const iree_hal_semaphore_list_t signals_a = {1, &completions[0], &value};
+    const iree_hal_semaphore_list_t signals_b = {1, &completions[1], &value};
+    IREE_ASSERT_OK(iree_hal_queue_execute(queues[0], waits, signals_a,
+                                          command_buffers[0],
+                                          iree_hal_buffer_binding_table_empty(),
+                                          IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
+    iree_hal_command_buffer_release(command_buffers[0]);
 
-    IREE_ASSERT_OK(iree_hal_queue_execute(
-        queue, iree_hal_semaphore_list_empty(), signal_list, command_buffer,
-        iree_hal_buffer_binding_table_empty(),
-        IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
+    auto* task_queue = reinterpret_cast<iree_hal_task_queue_t*>(queues[0]);
+    std::thread destroying(
+        [&] { iree_hal_device_group_release(device_groups[0]); });
+    // The unresolved wait owns the sole accepted operation. Observe admission
+    // closing before running B, so B proves the shared executor remains usable
+    // while A's actual destructor is waiting for its external dependency.
+    while (iree_atomic_load(&task_queue->pending_operation_count,
+                            iree_memory_order_acquire) != 1) {
+      std::this_thread::yield();
+    }
+    iree_status_t submit_status = iree_hal_queue_execute(
+        queues[1], iree_hal_semaphore_list_empty(), signals_b,
+        command_buffers[1], iree_hal_buffer_binding_table_empty(),
+        IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+    const bool submitted_b = iree_status_is_ok(submit_status);
+    IREE_EXPECT_OK(submit_status);
+    iree_hal_command_buffer_release(command_buffers[1]);
+    iree_hal_device_group_release(device_groups[1]);
+    if (submitted_b) {
+      IREE_EXPECT_OK(iree_hal_semaphore_list_wait(
+          signals_b, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+      std::array<uint8_t, 64> expected_b;
+      expected_b.fill(patterns[1]);
+      EXPECT_EQ(outputs[1], expected_b);
+    }
 
-    iree_hal_semaphore_release(signal_semaphore);
-    iree_hal_command_buffer_release(command_buffer);
-    iree_hal_device_group_release(device_group);
+    iree::Status failure(iree_status_annotate_f(
+        iree_make_status(IREE_STATUS_DATA_LOSS, "accepted dependency failed"),
+        "preserve dependency context during queue destruction"));
+    if (fail_dependency) {
+      iree_hal_semaphore_fail(ready, iree_status_clone(failure.get()));
+    } else {
+      IREE_EXPECT_OK(iree_hal_semaphore_signal(ready, value, nullptr));
+    }
+    destroying.join();
+    iree::Status result(iree_hal_semaphore_list_wait(
+        signals_a, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
+    EXPECT_EQ(result.ToString(), fail_dependency ? failure.ToString() : "OK");
+    std::array<uint8_t, 64> expected_a;
+    expected_a.fill(fail_dependency ? 0 : patterns[0]);
+    EXPECT_EQ(outputs[0], expected_a);
+    iree_hal_semaphore_release(ready);
+    for (auto* completion : completions) {
+      iree_hal_semaphore_release(completion);
+    }
   }
+}
+
+TEST_P(TaskQueueTest, AbortOnFailurePreservesDiagnostic) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+#if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS) != 0
+  const char* diagnostic =
+      "queue operation failed.*operation diagnostic context";
+#else
+  const char* diagnostic = "DATA_LOSS";
+#endif
+  EXPECT_DEATH_IF_SUPPORTED(
+      {
+        iree_hal_device_group_t* device_group = nullptr;
+        IREE_ASSERT_OK(
+            CreateDeviceGroup(/*abort_on_failure=*/true, &device_group));
+        auto* device = iree_hal_device_group_device_at(device_group, 0);
+        auto* queue = iree_hal_device_queue(device, 0, 0);
+        auto call = iree_hal_make_host_call(
+            +[](void*, const uint64_t[4], iree_hal_host_call_context_t*) {
+              return iree_status_annotate_f(
+                  iree_make_status(IREE_STATUS_DATA_LOSS,
+                                   "queue operation failed"),
+                  "operation diagnostic context");
+            },
+            nullptr);
+        uint64_t args[4] = {};
+        IREE_ASSERT_OK(
+            iree_hal_queue_host_call(queue, iree_hal_semaphore_list_empty(),
+                                     iree_hal_semaphore_list_empty(), call,
+                                     args, IREE_HAL_HOST_CALL_FLAG_NONE));
+        iree_hal_device_group_release(device_group);
+      },
+      diagnostic);
 }
 
 TEST_P(TaskQueueTest, ReusedDynamicQueueSlotAdvancesIncarnation) {
