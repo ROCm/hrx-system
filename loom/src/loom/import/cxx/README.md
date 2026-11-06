@@ -1369,6 +1369,28 @@ This imports as `scalar.cttzi ... : i32`, using the same shared target lowering
 as authored High. Signed values count representation bits. Floating-point math
 permissions do not apply to these integer operations.
 
+## Multiprecision integer arithmetic
+
+The importer recognizes the Clang and GCC unsigned add-with-carry and
+subtract-with-borrow builtin families:
+
+```cpp
+unsigned sum = __builtin_addc(lhs, rhs, carry_in, &carry_out);
+unsigned difference = __builtin_subc(lhs, rhs, borrow_in, &borrow_out);
+```
+
+The `b`, `s`, unadorned, `l`, and `ll` suffixes select `unsigned char`,
+`unsigned short`, `unsigned int`, `unsigned long`, and `unsigned long long`.
+`unsigned long` follows the configured C++ data model, so the `l` forms use
+i64 under LP64 and i32 under LLP64.
+
+The carry or borrow input has the same full-width unsigned type as the other
+operands; it is not restricted to zero or one. Loom preserves the builtin
+contract by performing the operation in two extended-arithmetic steps and
+combining their flags. The result wraps to the source width, and the output
+pointer receives zero or one in that same unsigned type. Each argument is
+evaluated once before the arithmetic and output store.
+
 ## Integer atomics
 
 `<loomcxx/atomic.h>` exposes scalar atomic observations and updates through typed
