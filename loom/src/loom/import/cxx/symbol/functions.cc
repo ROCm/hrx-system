@@ -366,29 +366,56 @@ void Functions::analyze(Types& types) {
     pending_calls.push_back(index);
   }
   auto enqueue_incident = [&](ControlFlow* function) {
-    for (size_t index : incident_calls.at(function)) {
+    auto found = incident_calls.find(function);
+    if (found == incident_calls.end()) {
+      return;
+    }
+    for (size_t index : found->second) {
       if (!queued[index]) {
         queued[index] = true;
         pending_calls.push_back(index);
       }
     }
   };
-  while (!pending_calls.empty()) {
-    const size_t index = pending_calls.front();
-    pending_calls.pop_front();
-    queued[index] = false;
-    const auto& edge = analyzed_calls[index];
-    auto changed = edge.caller->propagate_call(*edge.call, *edge.callee);
-    if (changed.caller_changed) {
-      enqueue_incident(edge.caller);
+  auto propagate_calls = [&] {
+    while (!pending_calls.empty()) {
+      const size_t index = pending_calls.front();
+      pending_calls.pop_front();
+      queued[index] = false;
+      const auto& edge = analyzed_calls[index];
+      auto changed = edge.caller->propagate_call(*edge.call, *edge.callee);
+      if (changed.caller_changed) {
+        enqueue_incident(edge.caller);
+      }
+      if (changed.callee_changed) {
+        enqueue_incident(edge.callee);
+      }
     }
-    if (changed.callee_changed) {
-      enqueue_incident(edge.callee);
-    }
-  }
+  };
+  propagate_calls();
 
+  // A pointer captured by reference can transport its current value only
+  // after every call edge has published writes and identity demand. Rejecting
+  // one candidate may itself add an address requirement that propagates to
+  // another caller, so alternate the sparse capture edges with the existing
+  // call worklist until both are stable.
+  for (;;) {
+    bool changed = false;
+    for (const auto& analyzed : analyzed_functions) {
+      auto* analysis = analyzed.second;
+      if (analysis->resolve_pointer_reference_captures()) {
+        changed = true;
+        enqueue_incident(analysis);
+      }
+    }
+    if (!changed) {
+      break;
+    }
+    propagate_calls();
+  }
   reference_parameters_.clear();
   for (const auto& [canonical, analysis] : analyzed_functions) {
+    analysis->publish_pointer_reference_snapshots(types);
     analysis->finalize_callable_effects();
     auto* function = definition(canonical);
     if (!function) {
@@ -398,7 +425,7 @@ void Functions::analyze(Types& types) {
     auto parameters = function->parameters();
     for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
       auto* parameter = parameters[ordinal];
-      if (!unit_.typeTraits().is_lvalue_reference(parameter->type())) {
+      if (!unit_.typeTraits().is_reference(parameter->type())) {
         continue;
       }
       references.push_back(
@@ -1140,12 +1167,7 @@ void Functions::admit_reference_parameters(cxx::FunctionSymbol* symbol,
   auto parameters = symbol->parameters();
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
     auto* parameter_type = parameters[ordinal]->type();
-    if (traits.is_rvalue_reference(parameter_type)) {
-      diagnostics_.reject(
-          unit_, source,
-          "rvalue-reference parameters require consuming object identity");
-    }
-    if (!traits.is_lvalue_reference(parameter_type)) {
+    if (!traits.is_reference(parameter_type)) {
       continue;
     }
     auto* value_type = traits.remove_reference(parameter_type);

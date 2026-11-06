@@ -11,6 +11,7 @@
 #include <cxx/ast_rewriter.h>
 #include <cxx/function_body.h>
 #include <cxx/initialization.h>
+#include <cxx/lambda_captures.h>
 #include <cxx/literals.h>
 #include <cxx/symbols.h>
 #include <cxx/types.h>
@@ -209,6 +210,76 @@ Value Initialization::value(const cxx::Type* type,
   }
   return from_elements(type, elements, implicit_element, constructor, owner,
                        retained);
+}
+
+Value Initialization::closure(cxx::LambdaExpressionAST* expression) {
+  const auto* record = types_.record(expression->type, expression);
+  if (!record || !record->source->isClosureType()) {
+    diagnostics_.reject(unit_, expression,
+                        "lambda expression requires an admitted closure type");
+  }
+
+  std::unordered_map<cxx::FieldSymbol*, Value> captures;
+  captures.reserve(record->members.size());
+  for (auto* capture : cxx::ListView{expression->captureList}) {
+    if (cxx::is_pack_capture(capture)) {
+      diagnostics_.reject(unit_, capture,
+                          "lambda pack captures must be expanded by the C++ "
+                          "frontend");
+    }
+    auto* field = cxx::capture_field(capture);
+    auto* initializer = cxx::capture_initializer(capture);
+    if (!field || !initializer) {
+      diagnostics_.reject(unit_, capture,
+                          "lambda capture has no normalized field and "
+                          "initializer");
+    }
+    // Demand the semantic field now so a malformed frontend closure cannot
+    // silently add or omit value components during assembly.
+    types_.member(field, capture);
+    const bool is_reference =
+        unit_.typeTraits().is_lvalue_reference(field->type());
+    const bool pointer_snapshot =
+        is_reference && types_.pointer_reference_is_snapshot(field);
+    cxx::ExpressionAST* referent = nullptr;
+    if (is_reference) {
+      cxx::Initializer reference(initializer);
+      referent = reference.singleExpression();
+      if (!referent) {
+        diagnostics_.reject(unit_, capture,
+                            "lambda reference capture requires one "
+                            "initializer expression");
+      }
+    }
+    auto initialized =
+        referent ? pointer_snapshot
+                       ? evaluation_.convert(
+                             referent,
+                             unit_.typeTraits().remove_reference(field->type()),
+                             capture)
+                       : evaluation_.reference(referent, capture)
+                 : evaluation_.convert(initializer, field->type(), capture);
+    if (!is_reference || pointer_snapshot) {
+      evaluation_.adopt(initializer, initialized);
+    }
+    if (!captures.emplace(field, initialized).second) {
+      diagnostics_.reject(unit_, capture,
+                          "lambda capture initializes one field more than "
+                          "once");
+    }
+  }
+
+  std::vector<loom_value_id_t> components;
+  components.reserve(record->component_count);
+  for (const auto& member : record->members) {
+    auto found = captures.find(member.field);
+    if (found == captures.end()) {
+      diagnostics_.reject(unit_, expression,
+                          "lambda closure field has no capture initializer");
+    }
+    found->second.append_to(components);
+  }
+  return arena_.capture(*record, components);
 }
 
 Value Initialization::constant(const cxx::ConstValue& value,

@@ -34,6 +34,7 @@ void crop_while(const unsigned* input, unsigned* output, unsigned rows, unsigned
 
 // ----
 #include <loomcxx/kernel.h>
+#include <loomcxx/predicate.h>
 
 [[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
 void crop_for(const unsigned* input, unsigned* output, unsigned rows, unsigned stride, unsigned iterations) {
@@ -130,6 +131,7 @@ void crop_while_exported(const unsigned* input, unsigned* output, unsigned rows,
 
 // ----
 #include <loomcxx/kernel.h>
+#include <loomcxx/predicate.h>
 
 [[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
 void crop_while_exported(const unsigned* input, unsigned* output, unsigned rows, unsigned columns, unsigned iterations) {

@@ -11,6 +11,7 @@
 #include <cxx/ast_rewriter.h>
 #include <cxx/function_body.h>
 #include <cxx/initialization.h>
+#include <cxx/lambda_captures.h>
 #include <cxx/symbols.h>
 #include <cxx/translation_unit.h>
 #include <cxx/type_traits.h>
@@ -48,6 +49,8 @@ struct ControlFlow::ReferenceIdentityFacts {
   std::vector<std::unique_ptr<std::vector<ObjectInterval>>> argument_slices;
   // Exact automatic-object intervals supplied by a reference-returning call.
   std::unordered_map<cxx::AST*, std::vector<ObjectInterval>> results;
+  // Calls whose selected callable ABI produces durable storage.
+  std::unordered_set<cxx::AST*> storage_results;
 };
 
 struct ControlFlow::ReferenceWriteFacts {
@@ -79,6 +82,12 @@ class ValueUseAnalysis final : private cxx::ASTVisitor {
   }
 
  private:
+  void visit(cxx::LambdaExpressionAST* ast) override {
+    for (auto* capture : cxx::ListView{ast->captureList}) {
+      accept(capture);
+    }
+  }
+
   bool preVisit(cxx::AST* ast) override {
     switch (ast->kind()) {
       case cxx::ASTKind::ConstExpression:
@@ -111,6 +120,90 @@ class ValueUseAnalysis final : private cxx::ASTVisitor {
 
   cxx::TranslationUnit& unit_;
   std::unordered_map<cxx::Symbol*, size_t>& last_uses_;
+};
+
+// Classifies reference-capture field uses without attributing the lambda body
+// to its enclosing callable. A direct lvalue-to-rvalue conversion observes the
+// captured pointer value but not the pointer object's identity. Every non-read
+// occurrence remains conservative: assignment, increment, address-taking, and
+// reference binding all require storage.
+class PointerCaptureReads final : private cxx::ASTVisitor {
+ public:
+  PointerCaptureReads(cxx::TranslationUnit& unit,
+                      cxx::LambdaExpressionAST* lambda) {
+    auto traits = unit.typeTraits();
+    for (auto* capture : cxx::ListView{lambda->captureList}) {
+      if (!cxx::ast_cast<cxx::RefLambdaCaptureAST>(capture)) {
+        continue;
+      }
+      auto* field = cxx::capture_field(capture);
+      if (!field) {
+        continue;
+      }
+      auto* referent = traits.remove_reference(field->type());
+      if (traits.is_lvalue_reference(field->type()) &&
+          traits.is_pointer(referent) && !traits.is_volatile(referent)) {
+        candidates_.insert(field);
+      }
+    }
+    if (!candidates_.empty()) {
+      accept(lambda->statement);
+    }
+  }
+
+  bool admits(cxx::FieldSymbol* field) const {
+    return candidates_.contains(field) && !other_uses_.contains(field);
+  }
+
+ private:
+  // Nested lambda bodies belong to their own callable analysis. Only their
+  // capture initializers can observe a field of the closure being classified;
+  // skipping the deferred body also keeps nested lambdas linear in total AST
+  // size instead of repeatedly walking every descendant body.
+  void visit(cxx::LambdaExpressionAST* ast) override {
+    for (auto* capture : cxx::ListView{ast->captureList}) {
+      accept(capture);
+    }
+  }
+
+  cxx::FieldSymbol* field(cxx::ExpressionAST* expression) const {
+    expression = unwrap_expression(expression);
+    if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+      auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
+      return candidates_.contains(field) ? field : nullptr;
+    }
+    auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
+    auto* field =
+        member ? cxx::symbol_cast<cxx::FieldSymbol>(member->symbol) : nullptr;
+    return candidates_.contains(field) ? field : nullptr;
+  }
+
+  void visit(cxx::ImplicitCastExpressionAST* ast) override {
+    if (!ast->conversionFunction &&
+        ast->castKind == cxx::ImplicitCastKind::kLValueToRValueConversion) {
+      if (field(ast->expression)) {
+        return;
+      }
+    }
+    cxx::ASTVisitor::visit(ast);
+  }
+
+  void visit(cxx::IdExpressionAST* ast) override {
+    if (auto* captured = field(ast)) {
+      other_uses_.insert(captured);
+    }
+    cxx::ASTVisitor::visit(ast);
+  }
+
+  void visit(cxx::MemberExpressionAST* ast) override {
+    if (auto* captured = field(ast)) {
+      other_uses_.insert(captured);
+    }
+    cxx::ASTVisitor::visit(ast);
+  }
+
+  std::unordered_set<cxx::FieldSymbol*> candidates_;
+  std::unordered_set<cxx::FieldSymbol*> other_uses_;
 };
 
 bool operation_is(cxx::Symbol* symbol, std::string_view operation) {
@@ -324,6 +417,10 @@ bool ControlFlow::value_has_later_lexical_use(cxx::Symbol* binding,
 std::optional<Destination> ControlFlow::destination(
     cxx::ExpressionAST* expression) const {
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+    if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
+        field && is_captured_object_field(field)) {
+      return std::nullopt;
+    }
     if (auto found = reference_aliases_.find(id->symbol);
         found != reference_aliases_.end()) {
       return destination(unwrap_expression(found->second));
@@ -369,9 +466,15 @@ bool ControlFlow::argument_requires_storage(
       (argument.current_receiver && receiver_requires_storage_)) {
     return true;
   }
+  if (reference_identity_facts_ &&
+      std::ranges::any_of(argument.reference_calls, [&](cxx::AST* call) {
+        return reference_identity_facts_->storage_results.contains(call);
+      })) {
+    return true;
+  }
   auto traits = unit_.typeTraits();
   auto requires_storage = [&](cxx::Symbol* binding) {
-    if (traits.is_lvalue_reference(binding->type())) {
+    if (traits.is_reference(binding->type())) {
       return cxx::symbol_cast<cxx::FieldSymbol>(binding) ||
              storage_references_.contains(binding);
     }
@@ -896,7 +999,7 @@ void ControlFlow::visit(cxx::ReturnStatementAST* ast) {
   if (returned && !returned->member && returned->component_offset == 0) {
     auto found = std::ranges::find(parameters, returned->binding);
     if (found != parameters.end() &&
-        unit_.typeTraits().is_lvalue_reference((*found)->type())) {
+        unit_.typeTraits().is_reference((*found)->type())) {
       parameter_ordinal = static_cast<size_t>(found - parameters.begin());
     }
   }
@@ -960,8 +1063,8 @@ void ControlFlow::visit(cxx::CallExpressionAST* ast) {
   for (size_t ordinal = 0; ordinal < parameters.size() && argument;
        ++ordinal, argument = argument->next) {
     auto* parameter_type = parameters[ordinal]->type();
-    if (!traits.is_lvalue_reference(parameter_type) ||
-        argument->value->valueCategory != cxx::ValueCategory::kLValue) {
+    if (!traits.is_reference(parameter_type) ||
+        argument->value->valueCategory == cxx::ValueCategory::kPrValue) {
       continue;
     }
     if (traits.is_const(traits.remove_reference(parameter_type))) {
@@ -969,6 +1072,59 @@ void ControlFlow::visit(cxx::CallExpressionAST* ast) {
     } else {
       record(argument->value);
     }
+  }
+}
+
+void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
+  // Constructing a closure evaluates its captures, not its deferred callable
+  // body. The synthesized operator() definition owns analysis of that body
+  // when ordinary reachable-call discovery admits it.
+  PointerCaptureReads pointer_reads(unit_, ast);
+  for (auto* capture : cxx::ListView{ast->captureList}) {
+    if (cxx::is_pack_capture(capture)) {
+      diagnostics_.reject(unit_, capture,
+                          "lambda pack captures must be expanded by the C++ "
+                          "frontend");
+    }
+    auto* field = cxx::capture_field(capture);
+    auto* initializer = cxx::capture_initializer(capture);
+    if (!field || !initializer) {
+      diagnostics_.reject(unit_, capture,
+                          "lambda capture has no normalized field and "
+                          "initializer");
+    }
+    if (unit_.typeTraits().is_lvalue_reference(field->type())) {
+      cxx::Initializer reference(initializer);
+      auto* referent = reference.singleExpression();
+      if (!referent) {
+        diagnostics_.reject(unit_, capture,
+                            "lambda reference capture requires one "
+                            "initializer expression");
+      }
+      auto argument = retain_call_argument(referent);
+      const bool direct_automatic =
+          argument.identity_bindings.size() == 1 &&
+          !argument.identity_intervals && !argument.current_receiver &&
+          !argument.inherent_storage && argument.reference_calls.empty() &&
+          argument.write_binding == argument.identity_bindings.front() &&
+          !cxx::symbol_cast<cxx::FieldSymbol>(argument.write_binding);
+      if (pointer_reads.admits(field) && direct_automatic) {
+        if (!pointer_reference_facts_) {
+          pointer_reference_facts_ = std::make_unique<PointerReferenceFacts>();
+          for (const auto& entry : writes_) {
+            pointer_reference_facts_->written_bindings.insert(
+                entry.second.begin(), entry.second.end());
+          }
+        }
+        pointer_reference_facts_->captures.push_back(
+            {.field = field, .referent = std::move(argument)});
+      } else {
+        require_identity(argument);
+      }
+    } else if (cxx::ast_cast<cxx::ThisLambdaCaptureAST>(capture)) {
+      receiver_requires_storage_ = true;
+    }
+    accept(capture);
   }
 }
 
@@ -1108,8 +1264,8 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
   for (size_t ordinal = 0; ordinal < call.argument_count; ++ordinal) {
     auto* argument = call.arguments[ordinal];
     auto* parameter_type = parameters[ordinal]->type();
-    if (!traits.is_lvalue_reference(parameter_type) ||
-        argument->valueCategory != cxx::ValueCategory::kLValue) {
+    if (!traits.is_reference(parameter_type) ||
+        argument->valueCategory == cxx::ValueCategory::kPrValue) {
       continue;
     }
     if (traits.is_const(traits.remove_reference(parameter_type))) {
@@ -1122,8 +1278,7 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
     return;
   }
   if (!is_current_object(unit_, call.receiver)) {
-    if (call.receiver->valueCategory == cxx::ValueCategory::kLValue ||
-        explicit_xvalue_operand(unit_, unwrap_expression(call.receiver))) {
+    if (call.receiver->valueCategory != cxx::ValueCategory::kPrValue) {
       if (implicit_object_may_mutate(call.function)) {
         record(call.receiver);
       } else {
@@ -1187,6 +1342,10 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   if (!expression) {
     return;
   }
+  if (is_current_object(unit_, expression)) {
+    argument.current_receiver = true;
+    return;
+  }
   expression = unwrap_object_identity(unit_, expression);
   auto traits = unit_.typeTraits();
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
@@ -1196,6 +1355,10 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       return;
     }
     if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol)) {
+      if (is_captured_object_field(field)) {
+        argument.inherent_storage = true;
+        return;
+      }
       if (traits.is_lvalue_reference(field->type())) {
         argument.inherent_storage = true;
       } else {
@@ -1209,6 +1372,11 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   }
   if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression)) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
+    if (field && is_current_object(unit_, member->baseExpression) &&
+        is_captured_object_field(field)) {
+      argument.inherent_storage = true;
+      return;
+    }
     if (field && traits.is_lvalue_reference(field->type())) {
       argument.inherent_storage = true;
       return;
@@ -1238,9 +1406,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   if (auto* subscript =
           cxx::ast_cast<cxx::SubscriptExpressionAST>(expression)) {
     if (subscript->symbol) {
-      if (expression->valueCategory == cxx::ValueCategory::kLValue) {
-        argument.reference_calls.push_back(expression);
-      }
+      argument.reference_calls.push_back(expression);
       return;
     }
     auto* base_type = subscript->baseExpression->type;
@@ -1273,6 +1439,12 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   }
   if (auto* conditional =
           cxx::ast_cast<cxx::ConditionalExpressionAST>(expression)) {
+    // A glvalue conditional has a runtime-selected identity. The existing
+    // storage projection selects that identity once and preserves mutations;
+    // independent tied SSA writebacks cannot name only the selected arm.
+    if (expression->valueCategory != cxx::ValueCategory::kPrValue) {
+      argument.inherent_storage = true;
+    }
     collect_identity(conditional->iftrueExpression, argument);
     collect_identity(conditional->iffalseExpression, argument);
     return;
@@ -1341,7 +1513,7 @@ bool ControlFlow::require_identity(const CallArgument& argument) {
   }
   auto traits = unit_.typeTraits();
   auto require_binding = [&](cxx::Symbol* binding) {
-    if (traits.is_lvalue_reference(binding->type())) {
+    if (traits.is_reference(binding->type())) {
       if (function_) {
         auto parameters = function_->parameters();
         if (std::ranges::find(parameters, binding) != parameters.end()) {
@@ -1388,7 +1560,7 @@ bool ControlFlow::record_callable_write(cxx::Symbol* binding) {
     return false;
   }
   auto traits = unit_.typeTraits();
-  if (traits.is_lvalue_reference(binding->type()) && function_) {
+  if (traits.is_reference(binding->type()) && function_) {
     auto parameters = function_->parameters();
     if (std::ranges::find(parameters, binding) != parameters.end()) {
       return written_references_.insert(binding).second;
@@ -1406,7 +1578,9 @@ bool ControlFlow::record_scoped_write(cxx::Symbol* binding,
   if (!binding) {
     return false;
   }
-  bool changed = false;
+  bool changed =
+      pointer_reference_facts_ &&
+      pointer_reference_facts_->written_bindings.insert(binding).second;
   for (auto* owner : owners) {
     auto& writes = writes_[owner];
     if (std::ranges::find(writes, binding) == writes.end()) {
@@ -1415,6 +1589,47 @@ bool ControlFlow::record_scoped_write(cxx::Symbol* binding,
     }
   }
   return changed;
+}
+
+bool ControlFlow::resolve_pointer_reference_captures() {
+  if (!pointer_reference_facts_) {
+    return false;
+  }
+  bool changed = false;
+  auto binding_is_written = [&](cxx::Symbol* binding) {
+    return pointer_reference_facts_->written_bindings.contains(binding);
+  };
+  for (auto& capture : pointer_reference_facts_->captures) {
+    if (capture.requires_storage) {
+      continue;
+    }
+    const auto& referent = capture.referent;
+    const bool written =
+        std::ranges::any_of(referent.identity_bindings, binding_is_written) ||
+        (referent.identity_intervals &&
+         std::ranges::any_of(*referent.identity_intervals,
+                             [&](const ObjectInterval& interval) {
+                               return binding_is_written(interval.binding);
+                             }));
+    if (!written && !argument_requires_storage(referent)) {
+      continue;
+    }
+    capture.requires_storage = true;
+    changed = require_identity(referent) || changed;
+  }
+  return changed;
+}
+
+void ControlFlow::publish_pointer_reference_snapshots(Types& types) const {
+  if (!pointer_reference_facts_) {
+    return;
+  }
+  for (const auto& capture : pointer_reference_facts_->captures) {
+    if (!capture.requires_storage) {
+      types.select_pointer_reference_snapshot(capture.field,
+                                              capture.referent.source);
+    }
+  }
 }
 
 bool ControlFlow::record_argument_write(
@@ -1785,13 +2000,21 @@ bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
                                                    const ControlFlow& callee) {
   // Retain an exact automatic origin whenever every return aliases one
   // parameter or its receiver. Outer call edges can compare nested aliases
-  // without traversing either function body again. Storage and mixed-origin
-  // returns remain unresolved and conservatively alias another lvalue.
+  // without traversing either function body again. The selected storage ABI is
+  // retained separately so another reference call can transport it directly.
+  bool result_storage = callee.reference_return_ == ReferenceReturn::Storage;
   std::vector<ObjectInterval> result_intervals;
   if (auto ordinal = callee.reference_return_parameter();
       ordinal && *ordinal < call.arguments.size()) {
+    auto parameters = callee.function_->parameters();
+    result_storage = callee.reference_requires_storage(parameters[*ordinal]) ||
+                     call.arguments[*ordinal].current_receiver;
     append_intervals(call.arguments[*ordinal], result_intervals);
   } else if (callee.returns_current_receiver_reference()) {
+    result_storage =
+        call.current_receiver || callee.receiver_requires_storage_ ||
+        call.storage_receiver ||
+        (call.receiver && argument_requires_storage(*call.receiver));
     if (call.current_receiver) {
       auto* object_type = implicit_object_type(unit_, function_);
       auto* record =
@@ -1808,14 +2031,21 @@ bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
       append_intervals(*call.receiver, result_intervals);
     }
   }
+  bool changed = false;
+  if (result_storage) {
+    if (!reference_identity_facts_) {
+      reference_identity_facts_ = std::make_unique<ReferenceIdentityFacts>();
+    }
+    changed =
+        reference_identity_facts_->storage_results.insert(call.source).second;
+  }
   if (result_intervals.empty()) {
-    return false;
+    return changed;
   }
 
   if (!reference_identity_facts_) {
     reference_identity_facts_ = std::make_unique<ReferenceIdentityFacts>();
   }
-  bool changed = false;
   auto& retained = reference_identity_facts_->results[call.source];
   for (const auto& interval : result_intervals) {
     changed = append_interval(retained, interval) || changed;
@@ -1842,11 +2072,11 @@ CallPropagation ControlFlow::propagate_overlapping_references(
   const size_t parameter_count =
       std::min(parameters.size(), call.arguments.size());
   for (size_t first = 0; first < parameter_count; ++first) {
-    if (!unit_.typeTraits().is_lvalue_reference(parameters[first]->type())) {
+    if (!unit_.typeTraits().is_reference(parameters[first]->type())) {
       continue;
     }
     for (size_t second = first + 1; second < parameter_count; ++second) {
-      if (!unit_.typeTraits().is_lvalue_reference(parameters[second]->type()) ||
+      if (!unit_.typeTraits().is_reference(parameters[second]->type()) ||
           (!callee.reference_written(parameters[first]) &&
            !callee.reference_written(parameters[second])) ||
           !identities_overlap(call.arguments[first], call.arguments[second])) {
@@ -1864,7 +2094,7 @@ CallPropagation ControlFlow::propagate_overlapping_references(
   for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
     auto* parameter = parameters[ordinal];
     const auto& argument = call.arguments[ordinal];
-    if (!unit_.typeTraits().is_lvalue_reference(parameter->type()) ||
+    if (!unit_.typeTraits().is_reference(parameter->type()) ||
         (!receiver_mutable && !callee.reference_written(parameter))) {
       continue;
     }
@@ -1900,7 +2130,7 @@ CallPropagation ControlFlow::propagate_call(const DirectCall& call,
   auto parameters = callee.function_->parameters();
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
     auto* parameter = parameters[ordinal];
-    if (!unit_.typeTraits().is_lvalue_reference(parameter->type()) ||
+    if (!unit_.typeTraits().is_reference(parameter->type()) ||
         ordinal >= call.arguments.size()) {
       continue;
     }
@@ -2227,8 +2457,7 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
     auto* receiver = member->baseExpression;
     if (!is_current_object(unit_, receiver)) {
       if (member->accessOp == cxx::TokenKind::T_DOT &&
-          (receiver->valueCategory == cxx::ValueCategory::kLValue ||
-           explicit_xvalue_operand(unit_, unwrap_expression(receiver)))) {
+          receiver->valueCategory != cxx::ValueCategory::kPrValue) {
         if (implicit_object_may_mutate(callee)) {
           record(receiver);
         } else {
@@ -2266,6 +2495,10 @@ std::optional<Destination> ControlFlow::classify_destination(
         found != reference_aliases_.end()) {
       return classify_destination(unwrap_expression(found->second));
     }
+    if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
+        field && is_captured_object_field(field)) {
+      return std::nullopt;
+    }
     return Destination{id->symbol, 0, nullptr};
   }
   if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
@@ -2293,6 +2526,9 @@ std::optional<Destination> ControlFlow::classify_destination(
     return std::nullopt;
   }
   if (is_current_object(unit_, member->baseExpression)) {
+    if (is_captured_object_field(field)) {
+      return std::nullopt;
+    }
     return Destination{field, 0, nullptr};
   }
   if (member->accessOp != cxx::TokenKind::T_DOT) {
@@ -2336,6 +2572,13 @@ bool ControlFlow::classify_storage(cxx::ExpressionAST* expression) const {
     return !unary->symbol && unary->op == cxx::TokenKind::T_STAR;
   }
   return false;
+}
+
+bool ControlFlow::is_captured_object_field(cxx::FieldSymbol* field) const {
+  auto* closure = function_
+                      ? cxx::symbol_cast<cxx::ClassSymbol>(function_->parent())
+                      : nullptr;
+  return captured_object_member(unit_, closure, field).has_value();
 }
 
 std::optional<CountedLoop> ControlFlow::classify(cxx::ForStatementAST* loop) {

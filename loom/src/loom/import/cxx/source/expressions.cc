@@ -114,6 +114,33 @@ bool is_current_object(cxx::TranslationUnit& unit,
          is_current_object(unit, unary->expression);
 }
 
+std::optional<CapturedObjectMember> captured_object_member(
+    cxx::TranslationUnit& unit, cxx::ClassSymbol* closure,
+    cxx::FieldSymbol* member) {
+  auto* pointer_field = closure && closure->isClosureType()
+                            ? closure->capturedThisField()
+                            : nullptr;
+  auto* member_owner =
+      member && !member->isStatic()
+          ? cxx::symbol_cast<cxx::ClassSymbol>(member->parent())
+          : nullptr;
+  if (!pointer_field || !member_owner) {
+    return std::nullopt;
+  }
+  auto traits = unit.typeTraits();
+  auto* object_type = cxx::type_cast<cxx::ClassType>(cxx::unaligned_type(
+      traits.remove_cv(traits.get_element_type(pointer_field->type()))));
+  auto* object_definition = object_type ? object_type->definition() : nullptr;
+  if (!object_definition || object_definition->resolvedDefinition() !=
+                                member_owner->resolvedDefinition()) {
+    return std::nullopt;
+  }
+  return CapturedObjectMember{
+      .pointer_field = pointer_field,
+      .object_type = object_type,
+  };
+}
+
 const cxx::StringLiteral* string_initializer(cxx::ExpressionAST* initializer) {
   auto arguments = cxx::Initializer(initializer).arguments();
   auto* literal = arguments.size() == 1

@@ -7,6 +7,7 @@
 #include "loom/import/cxx/control/analysis.h"
 
 #include <cxx/ast.h>
+#include <cxx/lambda_captures.h>
 #include <cxx/names.h>
 #include <cxx/symbols.h>
 
@@ -30,6 +31,68 @@ cxx::FunctionDefinitionAST* definition(Source& source) {
     }
   }
   return nullptr;
+}
+
+class FirstLambda final : private cxx::ASTVisitor {
+ public:
+  static cxx::LambdaExpressionAST* find(cxx::AST* root) {
+    FirstLambda finder;
+    finder.accept(root);
+    return finder.result_;
+  }
+
+ private:
+  void visit(cxx::LambdaExpressionAST* ast) override {
+    if (!result_) {
+      result_ = ast;
+    }
+  }
+
+  cxx::LambdaExpressionAST* result_ = nullptr;
+};
+
+TEST(ControlFlowTest, LambdaConstructionVisitsCapturesButNotDeferredBody) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    static unsigned initialize();
+    static void deferred();
+    void entry(unsigned value) {
+      [&value, initialized = initialize()]() mutable {
+        value += initialized;
+        deferred();
+      };
+    }
+  )"),
+                IREE_SV("lambda_boundary.cxx"), options);
+  auto* function = definition(source);
+  ASSERT_NE(function, nullptr);
+  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
+                   function->functionBody)
+                   ->statement;
+  auto* lambda = FirstLambda::find(body);
+  ASSERT_NE(lambda, nullptr);
+  ASSERT_NE(lambda->captureList, nullptr);
+  auto* reference_capture = lambda->captureList->value;
+  auto* value_capture = lambda->captureList->next->value;
+  auto* initializer = cxx::capture_initializer(value_capture);
+  ASSERT_NE(initializer, nullptr);
+
+  Types types(source.unit(), source.diagnostics());
+  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
+                       function->symbol);
+  auto calls = analysis.calls();
+  ASSERT_EQ(calls.size(), 1u);
+  ASSERT_NE(calls[0].function, nullptr);
+  EXPECT_EQ(cxx::to_string(calls[0].function->name()), "initialize");
+  EXPECT_TRUE(analysis.written(body).empty());
+
+  auto* captured_field = cxx::capture_field(reference_capture);
+  ASSERT_NE(captured_field, nullptr);
+  auto* captured_initializer = cxx::capture_initializer(reference_capture);
+  ASSERT_NE(captured_initializer, nullptr);
+  EXPECT_FALSE(analysis.value_has_later_lexical_use(captured_field,
+                                                    captured_initializer));
 }
 
 TEST(ControlFlowTest,

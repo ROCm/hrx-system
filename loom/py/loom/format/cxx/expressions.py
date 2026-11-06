@@ -728,6 +728,7 @@ class CxxExpressionRenderer(CxxRenderContext):
                 conditions.append(condition)
         if conditions:
             condition = " && ".join(conditions)
+            self.uses_predicate_functions = True
             self.writer.line(f"loom::assume({_strip_outer_parentheses(condition)});")
         for source, result in zip(resolved.value_ids("values"), results, strict=True):
             self.expressions[result] = self.expression(source)

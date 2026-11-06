@@ -57,6 +57,23 @@ const cxx::StringLiteral* string_initializer(cxx::ExpressionAST* initializer);
 bool is_current_object(cxx::TranslationUnit& unit,
                        cxx::ExpressionAST* expression);
 
+// One non-static field reached through a closure's captured this pointer.
+// Frontend symbols retain both the synthesized pointer field and the original
+// object's nominal type; consumers need not recover either from expression
+// spelling.
+struct CapturedObjectMember {
+  // Synthesized closure field carrying the captured this pointer.
+  cxx::FieldSymbol* pointer_field;
+  // Unqualified class type declaring |member|.
+  const cxx::ClassType* object_type;
+};
+
+// Returns the captured object contract when |closure| captures this and
+// |member| belongs to that object. Static fields never use object identity.
+std::optional<CapturedObjectMember> captured_object_member(
+    cxx::TranslationUnit& unit, cxx::ClassSymbol* closure,
+    cxx::FieldSymbol* member);
+
 // Returns the directly named function called by |call|, or null for indirect
 // calls and other callable expressions.
 cxx::FunctionSymbol* direct_callee(cxx::CallExpressionAST* call);

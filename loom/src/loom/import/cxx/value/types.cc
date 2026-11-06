@@ -1129,13 +1129,14 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
   }
   if (!source || !source->isComplete() || source->isUnion() ||
       !source->baseClasses().empty() ||
-      (!traits.is_aggregate(input) && !has_user_provided_constructor(source)) ||
+      (!traits.is_aggregate(input) && !source->isClosureType() &&
+       !has_user_provided_constructor(source)) ||
       !has_trivial_value_operations(input)) {
     diagnostics_.reject(
         unit_, owner,
         "record values require a complete baseless non-union type with "
-        "aggregate or user-provided construction and trivial copy and move "
-        "operations");
+        "aggregate, closure, or user-provided construction and trivial copy "
+        "and move operations");
   }
   auto result = std::make_unique<RecordPartition>();
   result->kind = ValueKind::Record;
@@ -1271,6 +1272,20 @@ const MemberPartition& Types::member(cxx::FieldSymbol* field, cxx::AST* owner) {
   }
   record(field->parent()->type(), owner);
   return members_.at(field);
+}
+
+void Types::select_pointer_reference_snapshot(cxx::FieldSymbol* field,
+                                              cxx::AST* owner) {
+  const auto& admitted = member(field, owner);
+  auto traits = unit_.typeTraits();
+  IREE_ASSERT(traits.is_lvalue_reference(field->type()));
+  IREE_ASSERT(traits.is_pointer(traits.remove_reference(field->type())));
+  IREE_ASSERT_EQ(admitted.partition, &kPointerPartition);
+  pointer_reference_snapshots_.insert(field);
+}
+
+bool Types::pointer_reference_is_snapshot(cxx::FieldSymbol* field) const {
+  return pointer_reference_snapshots_.contains(field);
 }
 
 loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
@@ -1747,8 +1762,10 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
                                      member.partition->component_count);
         auto* member_type = member.field->type();
         if (unit_.typeTraits().is_lvalue_reference(member_type)) {
-          member_type = unit_.typeTraits().add_pointer(
-              unit_.typeTraits().remove_reference(member_type));
+          auto* referent = unit_.typeTraits().remove_reference(member_type);
+          member_type = pointer_reference_is_snapshot(member.field)
+                            ? referent
+                            : unit_.typeTraits().add_pointer(referent);
         }
         append_bound(member_type, owner, member_identities, storage, output);
       }
