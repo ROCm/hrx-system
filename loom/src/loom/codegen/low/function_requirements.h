@@ -83,6 +83,8 @@ typedef struct loom_low_function_requirements_t {
   uint32_t return_count;
   // Number of Low operations materializing function-local storage addresses.
   uint32_t storage_address_count;
+  // Source-relative managed borrow operations requiring protection decisions.
+  uint32_t borrow_count;
 } loom_low_function_requirements_t;
 
 // Returns the retained read-only data ordinal for |symbol|, or UINT32_MAX when

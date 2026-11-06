@@ -1,0 +1,13 @@
+vm.target<core> @vm
+
+type.decl import("provider", "object") @Object
+
+low.func.decl import(native, "read", module = "provider") target<vm.core>(@vm) abi(vm_function) @read(%value: reg<vm.ref : ptr<@Object>>)
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run(%owner: reg<vm.ref : ref<@Object>>) asm {
+  %pointer = borrow %owner : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ptr<@Object>>
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  low.func.call @read(%pointer) : (reg<vm.ref : ptr<@Object>>)
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  return
+}

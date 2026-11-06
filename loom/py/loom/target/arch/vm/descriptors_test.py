@@ -197,6 +197,8 @@ def test_effects_preserve_state_access_not_runtime_aborts():
             in (RefOwnership.REPLACE_OWNER, RefOwnership.REPLACE_RETAIN)
             for field in instruction.fields
         )
+        if creates_owner:
+            expected += (EffectKind.UNKNOWN,)
         if expected or creates_owner:
             assert DescriptorFlag.SIDE_EFFECTING in descriptor.flags
             assert DescriptorFlag.DEAD_REMOVABLE not in descriptor.flags

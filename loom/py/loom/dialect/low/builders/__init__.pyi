@@ -432,3 +432,13 @@ class LowBuilder(DialectBuilder):
         value: ValueRef,
         location_id: int | None = ...,
     ) -> None: ...
+    def borrow(
+        self,
+        *,
+        owner: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

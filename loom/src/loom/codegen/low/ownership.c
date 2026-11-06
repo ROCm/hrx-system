@@ -43,6 +43,13 @@ static uint8_t loom_low_ownership_query(const loom_op_t* op, bool is_result,
   return effects[effect];
 }
 
+loom_ownership_effect_provider_t loom_low_ownership_effect_provider(
+    const loom_low_descriptor_set_t* set) {
+  return set->ownership_offsets
+             ? (loom_ownership_effect_provider_t){loom_low_ownership_query, set}
+             : (loom_ownership_effect_provider_t){0};
+}
+
 static loom_ownership_effect_provider_t loom_low_ownership_bind(
     const loom_module_t* module, loom_func_like_t function,
     const void* user_data) {
@@ -54,9 +61,7 @@ static loom_ownership_effect_provider_t loom_low_ownership_bind(
       user_data, loom_string_table_get(&module->strings, contract));
   // The public Low verifier established this binding before shared analysis.
   IREE_ASSERT(set);
-  return set->ownership_offsets
-             ? (loom_ownership_effect_provider_t){loom_low_ownership_query, set}
-             : (loom_ownership_effect_provider_t){0};
+  return loom_low_ownership_effect_provider(set);
 }
 
 loom_ownership_effect_resolver_t loom_low_ownership_effect_resolver(

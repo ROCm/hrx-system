@@ -620,6 +620,55 @@ REF_STACK_STORE_COPY = _stack_transfer(
     "pc = pc + 4;",
 )
 
+REF_BORROW = Instruction(
+    opcode=0xD7,
+    mnemonic="ref.borrow",
+    since=CORE_0,
+    family=REF_FAMILY,
+    summary="Borrows a live reference into a distinct register.",
+    fields=(
+        _ref_register(
+            "destination_r8",
+            FieldRole.RESULT,
+            RefOwnership.REPLACE_BORROW,
+            "Ref-register ordinal replaced by the borrowed handle.",
+        ),
+        _ref_register(
+            "source_r8",
+            FieldRole.OPERAND,
+            RefOwnership.BORROW,
+            "Distinct live source whose owner covers the borrow.",
+        ),
+        _padding(),
+    ),
+    semantics=None,
+    behavior=(
+        "Copies the exact object and descriptor into a distinct borrowed carrier "
+        "without retaining the source. Null stays canonical null. The compiler "
+        "proves a live anchor through every use of the resulting borrow."
+    ),
+    success=("The source is unchanged and the destination holds null or a borrow.",),
+    assembly="%r<destination> = ref.borrow %r<source>",
+    pseudocode=(
+        "source = refs[source_r8];\n"
+        "borrowed = source.is_null ? canonical_null_ref : as_borrowed_ref(source);\n"
+        "replace_ref(&refs[destination_r8], borrowed);\n"
+        "pc = pc + 4;"
+    ),
+    rules=(
+        RecordRule(
+            RecordRuleKind.FIELDS_DISTINCT,
+            ("destination_r8", "source_r8"),
+            summary="The source and destination ref registers must differ.",
+        ),
+    ),
+    ownership=(
+        "The previous destination owner is released after installing the borrow. "
+        "A distinct source carrier and a dominating live anchor are required. "
+        "No ownership is acquired; clearing the destination never releases the source.",
+    ),
+)
+
 REF_INSTRUCTIONS = (
     REF_NULL,
     REF_COMPARE_NULL,
@@ -636,4 +685,5 @@ REF_INSTRUCTIONS = (
     REF_COPY,
     REF_STACK_LOAD_COPY,
     REF_STACK_STORE_COPY,
+    REF_BORROW,
 )

@@ -351,6 +351,18 @@ ERR_DOMINANCE_020 = ErrorDef(
     ),
 )
 
+ERR_DOMINANCE_021 = ErrorDef(
+    domain=ErrorDomain.DOMINANCE,
+    code=21,
+    severity=Severity.REMARK,
+    summary="A saved pointer requires protective ownership.",
+    message=(
+        "pointer protection acquired here: {reason}; protection retires with "
+        "the pointer's final reachable uses"
+    ),
+    params=(ErrorParam("reason", ParamKind.STRING),),
+)
+
 ALL_DOMINANCE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_DOMINANCE_001,
     ERR_DOMINANCE_002,
@@ -372,4 +384,5 @@ ALL_DOMINANCE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_DOMINANCE_018,
     ERR_DOMINANCE_019,
     ERR_DOMINANCE_020,
+    ERR_DOMINANCE_021,
 )

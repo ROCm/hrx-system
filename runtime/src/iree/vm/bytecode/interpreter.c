@@ -1217,6 +1217,16 @@ iree_vm_bytecode_dispatch_ref_copy: {
                             refs[record->source_r8]);
   IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_copy_t);
 }
+iree_vm_bytecode_dispatch_ref_borrow: {
+  const iree_vm_bytecode_ref_borrow_t* record =
+      (const iree_vm_bytecode_ref_borrow_t*)record_data;
+  iree_vm_ref_t borrowed = refs[record->source_r8];
+  if (borrowed.object) {
+    borrowed.type_and_state |= IREE_VM_REF_STATE_BORROWED;
+  }
+  iree_vm_bytecode_ref_replace(&refs[record->destination_r8], borrowed);
+  IREE_VM_BYTECODE_DISPATCH_NEXT(iree_vm_bytecode_ref_borrow_t);
+}
 iree_vm_bytecode_dispatch_ref_select: {
   const iree_vm_bytecode_ref_select_t* record =
       (const iree_vm_bytecode_ref_select_t*)record_data;

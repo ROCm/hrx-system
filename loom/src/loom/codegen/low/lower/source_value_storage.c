@@ -19,6 +19,7 @@
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/cfg/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/ref/ops.h"
 
 bool loom_low_lower_source_value_storage_op_requires_emission(
     const loom_op_t* source_op, loom_trait_flags_t traits) {
@@ -643,6 +644,10 @@ void loom_low_lower_source_value_storage_mark_structural_demands(
       }
     }
     return;
+  }
+  if (loom_ref_borrow_isa(source_op)) {
+    loom_low_lower_mark_value_storage_required(
+        context, loom_ref_borrow_pointer(source_op));
   }
   if (loom_cfg_cond_br_isa(source_op) &&
       loom_low_lower_structural_branch_exact_bool(context, source_op, NULL)) {

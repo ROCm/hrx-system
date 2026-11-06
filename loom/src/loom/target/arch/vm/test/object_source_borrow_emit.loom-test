@@ -1,0 +1,86 @@
+// The same safe operation selects borrow or retain from the final schedule.
+// Exact output checks carrier separation, release order, and both ABI modes.
+// RUN: emit vm-dis
+vm.target<core> @vm
+
+type.decl import("media", "frame") @Frame
+
+low.func.decl import(native, "read", module = "media") target<vm.core>(@vm) abi(vm_function) @read(%pointer: reg<vm.ref : ptr<@Frame>>)
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @covered(%owner: reg<vm.ref : ref<@Frame>>) asm {
+  %pointer = borrow %owner : reg<vm.ref : ref<@Frame>> -> reg<vm.ref : ptr<@Frame>>
+  low.func.call @read(%pointer) : (reg<vm.ref : ptr<@Frame>>)
+  low.release %owner : reg<vm.ref : ref<@Frame>>
+  return
+}
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @protected(%owner: reg<vm.ref : ref<@Frame>>) asm {
+  // REMARK@+1: DOMINANCE/021 {reason="the owner may retire before the pointer's last use"}
+  %pointer = borrow %owner : reg<vm.ref : ref<@Frame>> -> reg<vm.ref : ptr<@Frame>>
+  low.release %owner : reg<vm.ref : ref<@Frame>>
+  low.func.call @read(%pointer) : (reg<vm.ref : ptr<@Frame>>)
+  return
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "covered"
+    string @string1 = "protected"
+    string @string2 = "media"
+    string @string3 = "frame"
+    string @string4 = "media"
+    string @string5 = "read"
+  }
+
+  section ref_types alignment(8) {
+    namespace @ref_group0 name(@string2) {
+      ref_type @ref_type0 name(@string3)
+    }
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (ref(@ref_type0)) -> ()
+    signature @signature1 (ptr(@ref_type0)) -> ()
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+    callable @callable1 flags([]) depth(0) : @signature1
+  }
+
+  section imports alignment(8) {
+    group @import_group0 module_name(@string4) {
+      import @import0 name(@string5) flags([]) : @callable1
+    }
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+    export @export1 name(@string1) : @callable0 = @function1
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      %r1 = ref.move %r0
+    ^bb1:
+      control.block
+      %r0 = ref.borrow %r1
+      control.call @import0 {direct_ref_move_mask = 0x0001}
+      ref.discard %r1
+      control.return
+    }
+    func @function1 : @callable0 flags([has_call]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      %r1 = ref.retain %r0
+      ref.discard %r0
+      %r0 = ref.move %r1
+      control.call @import0 {direct_ref_move_mask = 0x0001}
+      control.return
+    }
+  }
+
+}

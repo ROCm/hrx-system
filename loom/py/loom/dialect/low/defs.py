@@ -81,8 +81,10 @@ from loom.dsl import (
     SYMBOL_DEFINE,
     TERMINATOR,
     UNKNOWN_EFFECTS,
+    AliasResult,
     AttrDef,
     BlockArgsSatisfy,
+    Borrow,
     BorrowedResult,
     CallLikeInterface,
     CallLikeKind,
@@ -1447,7 +1449,7 @@ low_copy = Op(
     structural_materialization=True,
     traits=[STORAGE_RELATION],
     ownership_effects=[CopiedResult("result", "source")],
-    effective_traits="loom_low_copy_effective_traits",
+    effective_traits="loom_low_transfer_effective_traits",
     eager_execution_cost=0,
     verify="loom_low_copy_verify",
     facts="loom_low_copy_facts",
@@ -1491,6 +1493,8 @@ low_move = Op(
     ],
     traits=[STORAGE_RELATION],
     ownership_effects=[MovedResult("result", "source")],
+    effective_traits="loom_low_transfer_effective_traits",
+    eager_execution_cost=0,
     verify="loom_low_move_verify",
     facts="loom_low_move_facts",
     format=[
@@ -1528,6 +1532,28 @@ low_release = Op(
     verify="loom_low_release_verify",
     format=[Ref("value"), COLON, TypeOf("value")],
     examples=["low.release %owner : reg<vm.ref : ref<@Object>>"],
+)
+
+low_borrow = Op(
+    "low.borrow",
+    assembly=AssemblyFormat("borrow"),
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Project an owning managed reference into an independent pointer carrier "
+        "of the same nominal payload. The owner remains valid and keeps its "
+        "explicit lifetime. The pointer remains live through its final use: "
+        "emission acquires protection unless a covering owner is proven. This "
+        "safe operation does not expose an unchecked machine borrow."
+    ),
+    operands=[Operand("owner", REGISTER)],
+    results=[Result("pointer", REGISTER, allocates=True)],
+    structural_materialization=True,
+    traits=[OBSERVABLE_EFFECT],
+    ownership_effects=[Borrow("owner"), AliasResult("pointer", "owner")],
+    verify="loom_low_borrow_verify",
+    format=[Ref("owner"), COLON, TypeOf("owner"), ARROW, ResultType("pointer")],
+    examples=["%pointer = low.borrow %owner : reg<vm.ref : ref<@Frame>> -> reg<vm.ref : ptr<@Frame>>"],
 )
 
 # ============================================================================
@@ -2085,4 +2111,5 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_spill_move,
     low_reload_move,
     low_release,
+    low_borrow,
 )

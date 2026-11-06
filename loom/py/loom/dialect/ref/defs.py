@@ -6,11 +6,18 @@
 
 """Managed object handle operations."""
 
+from loom.assembly import ARROW, COLON, Ref, ResultType, TypeOf
 from loom.dsl import (
     MANAGED_REFERENCE,
     OBSERVABLE_EFFECT,
+    UNIQUE_IDENTITY,
+    AliasResult,
+    Borrow,
     Dialect,
     Op,
+    Operand,
+    OpPhase,
+    Result,
     value_duplication_op,
 )
 
@@ -38,4 +45,25 @@ ref_duplicate = value_duplication_op(
     ],
 )
 
-ALL_REF_OPS: tuple[Op, ...] = (ref_duplicate,)
+ref_borrow = Op(
+    "ref.borrow",
+    group=ref_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Create a pointer to an owner's exact managed payload without consuming "
+        "the owner. Null produces null. The pointer remains live through its "
+        "final reachable use, even when the original owner is released first. "
+        "The compiler acquires protection when it cannot prove a covering owner "
+        "and retires that protection after the final use. The source owner's "
+        "explicit lifetime is unchanged."
+    ),
+    operands=[Operand("owner", MANAGED_REFERENCE)],
+    results=[Result("pointer", MANAGED_REFERENCE)],
+    traits=[UNIQUE_IDENTITY, OBSERVABLE_EFFECT],
+    ownership_effects=[Borrow("owner"), AliasResult("pointer", "owner")],
+    verify="loom_ref_borrow_verify",
+    format=[Ref("owner"), COLON, TypeOf("owner"), ARROW, ResultType("pointer")],
+    examples=["%pointer = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>"],
+)
+
+ALL_REF_OPS: tuple[Op, ...] = (ref_duplicate, ref_borrow)

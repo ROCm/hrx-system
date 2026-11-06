@@ -102,8 +102,8 @@ class ObjectAdmissionTest : public ::testing::Test {
                        span.data_length);
   }
 
-  void CheckPaths(loomc_module_t* original, bool prepared,
-                  bool pointer_cleanup) {
+  void CheckPaths(loomc_module_t* original, bool prepared, bool pointer_cleanup,
+                  const char* invalid_code) {
     for (auto format :
          {LOOMC_SOURCE_FORMAT_TEXT, LOOMC_SOURCE_FORMAT_BYTECODE}) {
       SCOPED_TRACE(format);
@@ -139,7 +139,7 @@ class ObjectAdmissionTest : public ::testing::Test {
           EXPECT_EQ(loomc_result_diagnostic_count(result), 1u);
           if (loomc_result_diagnostic_count(result) == 1) {
             EXPECT_EQ(ToString(loomc_result_diagnostic_at(result, 0)->code),
-                      pointer_cleanup ? "DOMINANCE/020" : "DOMINANCE/014")
+                      pointer_cleanup ? "DOMINANCE/020" : invalid_code)
                 << Diagnostics(result);
           }
           EXPECT_EQ(loomc_result_artifact_count(result), 0u);
@@ -187,22 +187,33 @@ class ObjectAdmissionTest : public ::testing::Test {
 };
 
 TEST_F(ObjectAdmissionTest, EveryArtifactPathChecksPreparedLifetimes) {
-  const auto* files = loomc_object_admission_testdata_create();
-  for (size_t i = 0; i < loomc_object_admission_testdata_size(); ++i) {
-    const auto& file = files[i];
-    SCOPED_TRACE(file.name);
-    const std::string_view filename(file.name);
-    if (filename == "object_link_root.loom" ||
-        filename == "object_library_leak.loom" ||
-        filename == "object_library_prepared.loom") {
-      continue;
-    }
-    const bool prepared = filename == "object_prepared.loom" ||
-                          filename == "object_storage_prepared.loom";
-    const bool pointer_cleanup = filename == "object_pointer_cleanup.loom";
-    auto original = ParseFile(filename);
+  struct Case {
+    // Authored Low program exercised through text and bytecode admission.
+    const char* filename;
+    // Already prepared and accepted through every artifact path.
+    bool prepared;
+    // Accepted only when the default pipeline supplies pointer cleanup.
+    bool pointer_cleanup;
+    // Diagnostic for invalid ownership, independent of cleanup preparation.
+    const char* invalid_code;
+  };
+  const Case cases[] = {
+      {"object_prepared.loom", true, false, ""},
+      {"object_storage_prepared.loom", true, false, ""},
+      {"object_borrow_prepared.loom", true, false, ""},
+      {"object_pointer_cleanup.loom", false, true, ""},
+      {"object_borrow_cleanup.loom", false, true, ""},
+      {"object_owner_leak.loom", false, false, "DOMINANCE/014"},
+      {"object_storage_leak.loom", false, false, "DOMINANCE/014"},
+      {"object_selection_leak.loom", false, false, "DOMINANCE/014"},
+      {"object_borrow_consumed.loom-test", false, false, "DOMINANCE/002"},
+  };
+  for (const auto& test : cases) {
+    SCOPED_TRACE(test.filename);
+    auto original = ParseFile(test.filename);
     ASSERT_NE(original, nullptr);
-    CheckPaths(original.get(), prepared, pointer_cleanup);
+    CheckPaths(original.get(), test.prepared, test.pointer_cleanup,
+               test.invalid_code);
   }
 }
 
@@ -246,7 +257,7 @@ TEST_F(ObjectAdmissionTest, LinkedLibraryCannotBypassAdmission) {
     ModulePtr module_owner(module);
     ASSERT_TRUE(loomc_result_succeeded(result)) << Diagnostics(result);
     ASSERT_NE(module, nullptr);
-    CheckPaths(module, prepared, false);
+    CheckPaths(module, prepared, false, "DOMINANCE/014");
   }
 }
 

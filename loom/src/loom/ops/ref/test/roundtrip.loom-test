@@ -26,3 +26,39 @@ func.def @copy_pointer(%value: ptr<@Frame>) -> (ptr<@Frame>, ptr<@Frame>) {
   %copy = ref.duplicate %value : ptr<@Frame>
   func.return %copy, %value : ptr<@Frame>, ptr<@Frame>
 }
+
+
+// ====
+
+// Borrowing preserves a symbolic payload identity with distinct ownership modes.
+// RUN: roundtrip
+type.decl import("media", "frame") @Frame
+func.def @project(%owner: ref<@Frame>) -> (ref<@Frame>, ptr<@Frame>) {
+  %pointer = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>
+  func.return %owner, %pointer : ref<@Frame>, ptr<@Frame>
+}
+
+// ----
+type.decl import("media", "frame") @Frame
+
+func.def @project(%owner: ref<@Frame>) -> (ref<@Frame>, ptr<@Frame>) {
+  %pointer = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>
+  func.return %owner, %pointer : ref<@Frame>, ptr<@Frame>
+}
+
+// ====
+
+// RUN: format bytecode
+type.decl import("media", "frame") @Frame
+func.def @project(%owner: ref<@Frame>) -> (ref<@Frame>, ptr<@Frame>) {
+  %pointer = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>
+  func.return %owner, %pointer : ref<@Frame>, ptr<@Frame>
+}
+
+// ----
+type.decl import("media", "frame") @Frame
+
+func.def @project(%owner: ref<@Frame>) -> (ref<@Frame>, ptr<@Frame>) {
+  %pointer = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>
+  func.return %owner, %pointer : ref<@Frame>, ptr<@Frame>
+}

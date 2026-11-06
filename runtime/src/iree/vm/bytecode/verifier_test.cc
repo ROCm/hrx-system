@@ -290,6 +290,17 @@ TEST_F(ModuleVerificationTest, RejectsMissingEntryBlock) {
   ExpectInstructionsRejected(std::move(bytes));
 }
 
+TEST_F(ModuleVerificationTest, BorrowCannotReplaceItsOwnAnchor) {
+  std::vector<uint8_t> bytes = CopyImage();
+  const uint8_t* original = FindInstruction(IREE_VM_BYTECODE_OPCODE_REF_BORROW);
+  ASSERT_NE(original, nullptr);
+  auto* borrow = MutableRecord(
+      &bytes, contents_,
+      reinterpret_cast<const iree_vm_bytecode_ref_borrow_t*>(original));
+  borrow->destination_r8 = borrow->source_r8;
+  ExpectInstructionsRejected(std::move(bytes));
+}
+
 TEST_F(ModuleVerificationTest, RejectsFunctionFallthrough) {
   std::vector<uint8_t> bytes = CopyImage();
   const iree_vm_bytecode_v0_function_row_t* function =

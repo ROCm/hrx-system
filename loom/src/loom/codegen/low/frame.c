@@ -532,6 +532,8 @@ static iree_status_t loom_low_emission_frame_emit_diagnostics(
   if (frame->schedule.error_count != 0) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(loom_low_schedule_borrow_diagnostics_emit(
+      &frame->schedule, options->emitter));
   return loom_low_allocation_diagnostics_emit(
       &frame->allocation, options->allocation_diagnostic_flags,
       options->emitter);

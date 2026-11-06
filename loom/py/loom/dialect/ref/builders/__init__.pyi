@@ -21,3 +21,13 @@ class RefBuilder(DialectBuilder):
         result_names: Sequence[str] | None = ...,
         location_id: int | None = ...,
     ) -> list[ValueRef]: ...
+    def borrow(
+        self,
+        *,
+        owner: ValueRef,
+        results: list[Type | TiedResultSpec],
+        name: str | None = ...,
+        names: Sequence[str] | None = ...,
+        result_names: Sequence[str] | None = ...,
+        location_id: int | None = ...,
+    ) -> ValueRef: ...

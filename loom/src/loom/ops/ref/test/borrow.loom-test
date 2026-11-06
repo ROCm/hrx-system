@@ -1,0 +1,144 @@
+// Projection does not discharge the source owner's release obligation.
+// RUN: pass ownership-lifetime
+type.decl import("media", "frame") @Frame
+
+func.def @leak(%owner: ref<@Frame>) -> (ptr<@Frame>) {
+  %pointer = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>
+  // ERROR@+1: DOMINANCE/014 {value_name="owner"}
+  func.return %pointer : ptr<@Frame>
+}
+
+// ====
+
+// A saved pointer can outlive its owner, but creating it after consumption
+// cannot resurrect that owner.
+// RUN: pass ownership-lifetime
+type.decl import("media", "frame") @Frame
+
+func.decl import("media", "consume") @consume(%owner: ref<@Frame>)
+
+func.def @too_late(%owner: ref<@Frame>) -> (ptr<@Frame>) {
+  func.call @consume(%owner) : (ref<@Frame>)
+  // ERROR@+1: DOMINANCE/002 {value_name="owner"}
+  %pointer = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>
+  func.return %pointer : ptr<@Frame>
+}
+
+// ====
+
+// Pointer copying is ref.duplicate, not an owner projection.
+// RUN: verify
+type.decl import("media", "frame") @Frame
+func.def @pointer_source(%source: ptr<@Frame>) -> (ptr<@Frame>) {
+  // ERROR@+1: TYPE/003
+  %pointer = ref.borrow %source : ptr<@Frame> -> ptr<@Frame>
+  func.return %pointer : ptr<@Frame>
+}
+
+// ====
+
+// A projection cannot create another explicit owner.
+// RUN: verify
+type.decl import("media", "frame") @Frame
+func.def @owner_result(%owner: ref<@Frame>) -> (ref<@Frame>, ref<@Frame>) {
+  // ERROR@+1: TYPE/001
+  %pointer = ref.borrow %owner : ref<@Frame> -> ref<@Frame>
+  func.return %owner, %pointer : ref<@Frame>, ref<@Frame>
+}
+
+// ====
+
+// Payload identity is exact, even when the carriers have equal size.
+// RUN: verify
+type.decl import("media", "frame") @Frame
+type.decl import("media", "decoder") @Decoder
+func.def @other_payload(%owner: ref<@Frame>) -> (ref<@Frame>, ptr<@Decoder>) {
+  // ERROR@+1: TYPE/001
+  %pointer = ref.borrow %owner : ref<@Frame> -> ptr<@Decoder>
+  func.return %owner, %pointer : ref<@Frame>, ptr<@Decoder>
+}
+
+// ====
+
+// Numeric address bits are not managed handles.
+// RUN: verify
+type.decl import("media", "frame") @Frame
+func.def @numeric(%bits: i64) -> (ptr<@Frame>) {
+  // ERROR@+1: TYPE/003
+  %pointer = ref.borrow %bits : i64 -> ptr<@Frame>
+  func.return %pointer : ptr<@Frame>
+}
+
+// ====
+
+// Authored Low has the same safe meaning and remains an assembly operation.
+// RUN: roundtrip
+vm.target<core> @vm
+type.decl import("media", "frame") @Frame
+low.func.def target<vm.core>(@vm) @project(%owner: reg<vm.ref : ref<@Frame>>) -> (reg<vm.ref : ref<@Frame>>, reg<vm.ref : ptr<@Frame>>) asm {
+  %pointer = borrow %owner : reg<vm.ref : ref<@Frame>> -> reg<vm.ref : ptr<@Frame>>
+  return %owner, %pointer
+}
+
+// ----
+vm.target<core> @vm
+
+type.decl import("media", "frame") @Frame
+
+low.func.def target<vm.core>(@vm) @project(%owner: reg<vm.ref : ref<@Frame>>) -> (reg<vm.ref : ref<@Frame>>, reg<vm.ref : ptr<@Frame>>) asm {
+  %pointer = borrow %owner : reg<vm.ref : ref<@Frame>> -> reg<vm.ref : ptr<@Frame>>
+  return %owner, %pointer
+}
+
+// ====
+
+// Carrier shape must hold one complete managed reference.
+// RUN: verify
+vm.target<core> @vm
+type.decl import("media", "frame") @Frame
+low.func.def target<vm.core>(@vm) @wide(%owner: reg<vm.ref x2 : ref<@Frame>>) -> (reg<vm.ref x2 : ptr<@Frame>>) asm {
+  // ERROR@+1: TYPE/003
+  %pointer = borrow %owner : reg<vm.ref x2 : ref<@Frame>> -> reg<vm.ref x2 : ptr<@Frame>>
+  return %pointer
+}
+
+// ====
+
+// A Low projection cannot replace nominal checking with an untyped carrier.
+// RUN: verify
+vm.target<core> @vm
+type.decl import("media", "frame") @Frame
+low.func.def target<vm.core>(@vm) @untyped(%owner: reg<vm.ref>) -> (reg<vm.ref : ptr<@Frame>>) asm {
+  // ERROR@+1: TYPE/003
+  %pointer = borrow %owner : reg<vm.ref> -> reg<vm.ref : ptr<@Frame>>
+  return %pointer
+}
+
+// ====
+
+// Physical unprotected borrowing is not an authored descriptor: the safe Low
+// operation owns the decision to acquire protection.
+// RUN: verify
+vm.target<core> @vm
+
+type.decl import("media", "frame") @Frame
+
+low.func.def target<vm.core>(@vm) @unchecked(%owner: reg<vm.ref : ref<@Frame>>) asm {
+  // ERROR@+1: PARSE/034
+  %pointer = low.op<vm.ref.borrow>(%owner) : (reg<vm.ref : ref<@Frame>>) -> reg<vm.ref : ptr<@Frame>>
+  low.release %owner : reg<vm.ref : ref<@Frame>>
+  return
+}
+
+// ====
+
+// Different local declarations can name the same external payload identity.
+// RUN: pass ownership-lifetime
+type.decl import("media", "frame") @Frame
+
+type.decl import("media", "frame") @Image
+
+func.def @project_alias(%owner: ref<@Frame>) -> (ref<@Frame>, ptr<@Image>) {
+  %pointer = ref.borrow %owner : ref<@Frame> -> ptr<@Image>
+  func.return %owner, %pointer : ref<@Frame>, ptr<@Image>
+}
