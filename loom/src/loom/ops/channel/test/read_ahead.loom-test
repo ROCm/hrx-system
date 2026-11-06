@@ -134,7 +134,7 @@ func.def @sum_record(%read: read<tile<64xf32>>, %length: index, %initial: f32) -
   %136 = index.cmp slt, %133, %108 : index
   cfg.cond_br %136, ^_bb14, ^_bb15
 ^_bb14:
-  %135 = index.assume %133 [range(%133, 0, 9223372036854775806), multiple_of(%133, 2), lt(%133, %108)] : index
+  %135 = index.assume %133 [range(%133, 0, 9223372036854775804), multiple_of(%133, 2), lt(%133, %108)] : index
   %112 = index.constant 1 : index
   %113 = index.add %135, %112 : index
   %114, %115 = index.assume %135, %113 [lt(%135, %length), lt(%113, %length)] : index, index
@@ -154,7 +154,7 @@ func.def @sum_record(%read: read<tile<64xf32>>, %length: index, %initial: f32) -
   %130 = index.cmp slt, %127, %length : index
   cfg.cond_br %130, ^_bb18, ^_bb19
 ^_bb18:
-  %129 = index.assume %127 [range(%127, -9223372036854775808, 9223372036854775806), ge(%127, %108), lt(%127, %length)] : index
+  %129 = index.assume %127 [range(%127, 0, 9223372036854775806), ge(%127, %108), lt(%127, %length)] : index
   %value$123 = view.load %payload[%129] : view<64xf32> -> f32
   %next$124 = scalar.addf %128, %value$123 : f32
   %131 = index.add %129, %step : index

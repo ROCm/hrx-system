@@ -75,6 +75,36 @@ TEST(UnsignedDivisionTransfer, RepresentativeIntervalsContainEveryResult) {
   }
 }
 
+TEST(UnsignedDivisionTransfer, WideOperandEndpointsRetainTheirSignedDomain) {
+  const auto nonnegative = loom_value_facts_make(0, INT64_MAX, 1);
+  const auto positive = loom_value_facts_make(1, INT64_MAX, 1);
+  const auto high_bits = loom_value_facts_make(INT64_MIN, -1, 1);
+  loom_value_facts_t quotient;
+  loom_value_facts_t remainder;
+  loom_value_facts_divui(&nonnegative, &positive, 64, &quotient);
+  EXPECT_EQ(quotient.range_lo, 0);
+  EXPECT_EQ(quotient.range_hi, INT64_MAX);
+  loom_value_facts_remui(&nonnegative, &positive, 64, &remainder);
+  EXPECT_EQ(remainder.range_lo, 0);
+  EXPECT_EQ(remainder.range_hi, INT64_MAX - 1);
+
+  EXPECT_TRUE(loom_value_facts_remui_is_identity(nonnegative, high_bits, 64));
+  loom_value_facts_remui(&nonnegative, &high_bits, 64, &remainder);
+  EXPECT_TRUE(loom_value_facts_equal(remainder, nonnegative));
+  const auto two = loom_value_facts_exact_i64(2);
+  loom_value_facts_divui(&high_bits, &two, 64, &quotient);
+  EXPECT_EQ(quotient.range_lo, INT64_C(1) << 62);
+  EXPECT_EQ(quotient.range_hi, INT64_MAX);
+
+  const auto one = loom_value_facts_exact_i64(1);
+  for (const auto interval : {nonnegative, high_bits}) {
+    const auto preimage = loom_value_facts_quotient_preimage(
+        LOOM_VALUE_FACTS_QUOTIENT_DIVUI, 64, interval, one);
+    EXPECT_EQ(preimage.range_lo, interval.range_lo);
+    EXPECT_EQ(preimage.range_hi, interval.range_hi);
+  }
+}
+
 TEST(UnsignedDivisionTransfer, ExactNegativeRepresentationsUseDeclaredWidth) {
   const loom_value_facts_t dividend = loom_value_facts_exact_i64(-30);
   const loom_value_facts_t divisor = loom_value_facts_exact_i64(5);
