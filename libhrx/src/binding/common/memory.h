@@ -343,7 +343,8 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
     iree_hal_streaming_context_t* context, iree_hal_streaming_deviceptr_t ptr,
     iree_hal_streaming_stream_t* stream);
 
-// Releases completed stream-ordered frees retained for conservative reuse.
+// Releases completed stream-ordered frees retained for conservative reuse. A
+// retained stream detached from its context leaves cleanup with the context.
 // Synchronization: stream (requires |stream| to be idle).
 iree_status_t iree_hal_streaming_memory_release_completed_async_frees(
     iree_hal_streaming_stream_t* stream);
