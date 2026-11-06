@@ -1,0 +1,145 @@
+// RUN: roundtrip
+// Header declarations and nested expectation macros are imported with the caller.
+#include "header_cases.h"
+
+#ifndef CHECK_EXPECTED
+#define CHECK_EXPECTED 0u
+#endif
+
+unsigned byte_increment(unsigned input) {
+  return (unsigned char)next_value((unsigned char)input);
+}
+
+#define EXPECT_EQUAL(actual, expected) \
+  loom::check::expect_equal(actual, expected)
+LOOM_CHECK_CASE(wraps_byte) {
+  const auto actual = byte_increment(255u);
+  EXPECT_EQUAL(actual, CHECK_EXPECTED);
+}
+LOOM_CHECK_BENCHMARK(wraps_byte_benchmark, wraps_byte);
+
+#ifdef CHECK_MATH
+LOOM_CHECK_CASE(math_policy) {
+  const auto actual = exact_sine(0.0f);
+  loom::check::expect_equal(actual, 0.0f);
+}
+LOOM_CHECK_BENCHMARK(math_policy_benchmark, math_policy);
+#endif
+
+// ----
+func.def public @next_value(%value: i32) -> (i32) {
+  %2 = scalar.constant 1 : i32
+  %3 = scalar.addi %value, %2 : i32
+  func.return %3 : i32
+}
+
+check.case public @header_assertion {
+  %4 = check.literal value(4) : i32
+  %actual = func.call @next_value(%4) : (i32) -> (i32)
+  %6 = check.literal value(5) : i32
+  check.expect.equal actual(%actual) expected(%6) : i32
+  check.return
+}
+
+func.def public @exact_sine(%value: f32) -> (f32) {
+  %9 = scalar.sinf %value : f32
+  func.return %9 : f32
+}
+
+func.def public @byte_increment(%input: i32) -> (i32) {
+  %12 = scalar.trunci %input : i32 to i8
+  %13 = scalar.extui %12 : i8 to i32
+  %14 = func.call pure @next_value(%13) : (i32) -> (i32)
+  %15 = scalar.trunci %14 : i32 to i8
+  %16 = scalar.extui %15 : i8 to i32
+  func.return %16 : i32
+}
+
+check.case public @wraps_byte {
+  %17 = check.literal value(255) : i32
+  %actual = func.call @byte_increment(%17) : (i32) -> (i32)
+  %19 = check.literal value(0) : i32
+  check.expect.equal actual(%actual) expected(%19) : i32
+  check.return
+}
+
+check.benchmark<@wraps_byte> @wraps_byte_benchmark
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx D=CHECK_EXPECTED=9u D=CHECK_HEADER_EXPECTED=13u D=CHECK_MATH
+// Command-line definitions select source literals and optional check declarations.
+#include "header_cases.h"
+
+#ifndef CHECK_EXPECTED
+#define CHECK_EXPECTED 0u
+#endif
+
+unsigned byte_increment(unsigned input) {
+  return (unsigned char)next_value((unsigned char)input);
+}
+
+#define EXPECT_EQUAL(actual, expected) \
+  loom::check::expect_equal(actual, expected)
+LOOM_CHECK_CASE(wraps_byte) {
+  const auto actual = byte_increment(255u);
+  EXPECT_EQUAL(actual, CHECK_EXPECTED);
+}
+LOOM_CHECK_BENCHMARK(wraps_byte_benchmark, wraps_byte);
+
+#ifdef CHECK_MATH
+LOOM_CHECK_CASE(math_policy) {
+  const auto actual = exact_sine(0.0f);
+  loom::check::expect_equal(actual, 0.0f);
+}
+LOOM_CHECK_BENCHMARK(math_policy_benchmark, math_policy);
+#endif
+
+// ----
+func.def public @next_value(%value: i32) -> (i32) {
+  %2 = scalar.constant 1 : i32
+  %3 = scalar.addi %value, %2 : i32
+  func.return %3 : i32
+}
+
+check.case public @header_assertion {
+  %4 = check.literal value(4) : i32
+  %actual = func.call @next_value(%4) : (i32) -> (i32)
+  %6 = check.literal value(13) : i32
+  check.expect.equal actual(%actual) expected(%6) : i32
+  check.return
+}
+
+func.def public @exact_sine(%value: f32) -> (f32) {
+  %9 = scalar.sinf %value : f32
+  func.return %9 : f32
+}
+
+func.def public @byte_increment(%input: i32) -> (i32) {
+  %12 = scalar.trunci %input : i32 to i8
+  %13 = scalar.extui %12 : i8 to i32
+  %14 = func.call pure @next_value(%13) : (i32) -> (i32)
+  %15 = scalar.trunci %14 : i32 to i8
+  %16 = scalar.extui %15 : i8 to i32
+  func.return %16 : i32
+}
+
+check.case public @wraps_byte {
+  %17 = check.literal value(255) : i32
+  %actual = func.call @byte_increment(%17) : (i32) -> (i32)
+  %19 = check.literal value(9) : i32
+  check.expect.equal actual(%actual) expected(%19) : i32
+  check.return
+}
+
+check.case public @math_policy {
+  %20 = check.literal value(0.0) : f32
+  %actual = func.call @exact_sine(%20) : (f32) -> (f32)
+  %22 = check.literal value(0.0) : f32
+  check.expect.equal actual(%actual) expected(%22) : f32
+  check.return
+}
+
+check.benchmark<@wraps_byte> @wraps_byte_benchmark
+
+check.benchmark<@math_policy> @math_policy_benchmark

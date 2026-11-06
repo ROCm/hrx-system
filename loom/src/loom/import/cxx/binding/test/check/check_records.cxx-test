@@ -1,0 +1,210 @@
+// RUN: roundtrip
+// Record results, immutable copies and member projections retain the ordinary
+// flattened call ABI, including mixed scalar widths and zero-component records.
+#include <loomcxx/check.h>
+
+#ifndef CHECK_RECORD_EXPECTED
+#define CHECK_RECORD_EXPECTED 40u
+#endif
+
+struct Empty {};
+struct Pair {
+  unsigned first, second;
+};
+struct Payload {
+  Pair pair;
+  float scale;
+  unsigned long long wide;
+};
+struct Observation {
+  Empty tag;
+  Payload payload;
+  bool valid;
+};
+
+static Observation observe(unsigned initial, unsigned count) {
+  Observation value{{}, {{initial, 11u}, 0.5f, 0x100000003ULL}, true};
+  for (unsigned index = 0; index < count; ++index) {
+    value.payload.pair.first += value.payload.pair.second;
+    value.valid = !value.valid;
+  }
+  return value;
+}
+
+static Payload update(Payload value) {
+  value.pair.second += 2u;
+  value.scale *= 4.0f;
+  value.wide += 0x200000000ULL;
+  return value;
+}
+
+static Empty empty() { return {}; }
+static Empty identity(Empty value) { return value; }
+static unsigned empty_size(Empty value) { return sizeof(value); }
+
+LOOM_CHECK_CASE(record_observations) {
+  const auto actual = observe(7u, 3u);
+  const auto copy(actual);
+  const auto payload{copy.payload};
+  const auto pair = payload.pair;
+  const auto updated = update(payload);
+  const auto tag = identity(actual.tag);
+  const auto tag_size = empty_size(tag);
+  loom::check::expect_equal(actual.payload.pair.first, CHECK_RECORD_EXPECTED);
+  loom::check::expect_equal(pair.second, 11u);
+  loom::check::expect_equal(payload.scale, 0.5f);
+  loom::check::expect_equal(copy.payload.wide, 0x100000003ULL);
+  loom::check::expect_equal(copy.valid, false);
+  loom::check::expect_equal(updated.pair.first, 40u);
+  loom::check::expect_equal(updated.pair.second, 13u);
+  loom::check::expect_equal(updated.scale, 2.0f);
+  loom::check::expect_equal(updated.wide, 0x300000003ULL);
+  loom::check::expect_equal(tag_size, 1u);
+}
+LOOM_CHECK_BENCHMARK(record_observations_benchmark, record_observations);
+
+LOOM_CHECK_CASE(temporary_record) {
+  loom::check::expect_equal(observe(7u, 0u).payload.pair.first, 7u);
+}
+
+LOOM_CHECK_CASE(empty_record) {
+  const auto value = empty();
+  const auto copy = identity(value);
+  const auto size = empty_size(copy);
+  loom::check::expect_equal(size, 1u);
+}
+// ----
+check.case public @record_observations {
+  %0 = check.literal value(7) : i32
+  %1 = check.literal value(3) : i32
+  %actual_payload_pair_first, %actual_payload_pair_second, %actual_payload_scale, %actual_payload_wide, %actual_valid = func.call @observe(%0, %1) : (i32, i32) -> (i32, i32, f32, i64, i1)
+  %updated_pair_first, %updated_pair_second, %updated_scale, %updated_wide = func.call @update(%actual_payload_pair_first, %actual_payload_pair_second, %actual_payload_scale, %actual_payload_wide) : (i32, i32, f32, i64) -> (i32, i32, f32, i64)
+  func.call @identity() : ()
+  %tag_size = func.call @empty_size() : () -> (i32)
+  %12 = check.literal value(40) : i32
+  check.expect.equal actual(%actual_payload_pair_first) expected(%12) : i32
+  %13 = check.literal value(11) : i32
+  check.expect.equal actual(%actual_payload_pair_second) expected(%13) : i32
+  %14 = check.literal value(0.5) : f32
+  check.expect.equal actual(%actual_payload_scale) expected(%14) : f32
+  %15 = check.literal value(4294967299) : i64
+  check.expect.equal actual(%actual_payload_wide) expected(%15) : i64
+  %16 = check.literal value(0) : i1
+  check.expect.equal actual(%actual_valid) expected(%16) : i1
+  %17 = check.literal value(40) : i32
+  check.expect.equal actual(%updated_pair_first) expected(%17) : i32
+  %18 = check.literal value(13) : i32
+  check.expect.equal actual(%updated_pair_second) expected(%18) : i32
+  %19 = check.literal value(2.0) : f32
+  check.expect.equal actual(%updated_scale) expected(%19) : f32
+  %20 = check.literal value(12884901891) : i64
+  check.expect.equal actual(%updated_wide) expected(%20) : i64
+  %21 = check.literal value(1) : i32
+  check.expect.equal actual(%tag_size) expected(%21) : i32
+  check.return
+}
+
+check.case public @temporary_record {
+  %22 = check.literal value(7) : i32
+  %23 = check.literal value(0) : i32
+  %24, %25, %26, %27, %28 = func.call @observe(%22, %23) : (i32, i32) -> (i32, i32, f32, i64, i1)
+  %29 = check.literal value(7) : i32
+  check.expect.equal actual(%24) expected(%29) : i32
+  check.return
+}
+
+check.case public @empty_record {
+  func.call @empty() : ()
+  func.call @identity() : ()
+  %size = func.call @empty_size() : () -> (i32)
+  %31 = check.literal value(1) : i32
+  check.expect.equal actual(%size) expected(%31) : i32
+  check.return
+}
+
+func.def @observe(%initial: i32, %count: i32) -> (i32, i32, f32, i64, i1) {
+  %value_payload_pair_second$39 = scalar.constant 11 : i32
+  %value_payload_scale$40 = scalar.constant 0.5 : f32
+  %value_payload_wide$41 = scalar.constant 4294967299 : i64
+  %value_valid$42 = scalar.constant 1 : i1
+  %index = scalar.constant 0 : i32
+  %44 = index.cast %index : i32 to offset
+  %45 = index.cast %count : i32 to offset
+  %46 = index.constant 1 : offset
+  %value_payload_pair_first, %value_payload_pair_second$54, %value_payload_scale$55, %value_payload_wide$56, %value_valid$57 = scf.for %index = [%44 to %45 step %46](%value_payload_pair_first$48 = %initial : i32, %value_payload_pair_second = %value_payload_pair_second$39 : i32, %value_payload_scale = %value_payload_scale$40 : f32, %value_payload_wide = %value_payload_wide$41 : i64, %value_valid$52 = %value_valid$42 : i1) -> (i32, i32, f32, i64, i1) {
+    %58 = index.cast %index : offset to i32
+    %value_payload_pair_first$59 = scalar.addi %value_payload_pair_first$48, %value_payload_pair_second : i32
+    %60 = scalar.constant 1 : i1
+    %value_valid$61 = scalar.xori %value_valid$52, %60 : i1
+    scf.yield %value_payload_pair_first$59, %value_payload_pair_second, %value_payload_scale, %value_payload_wide, %value_valid$61 : i32, i32, f32, i64, i1
+  }
+  func.return %value_payload_pair_first, %value_payload_pair_second$54, %value_payload_scale$55, %value_payload_wide$56, %value_valid$57 : i32, i32, f32, i64, i1
+}
+
+func.def @update(%value_pair_first: i32, %value_pair_second$63: i32, %value_scale$64: f32, %value_wide$65: i64) -> (i32, i32, f32, i64) {
+  %70 = scalar.constant 2 : i32
+  %value_pair_second$71 = scalar.addi %value_pair_second$63, %70 : i32
+  %72 = scalar.constant 4.0 : f32
+  %value_scale$73 = scalar.mulf %value_scale$64, %72 : f32
+  %74 = scalar.constant 8589934592 : i64
+  %value_wide$75 = scalar.addi %value_wide$65, %74 : i64
+  func.return %value_pair_first, %value_pair_second$71, %value_scale$73, %value_wide$75 : i32, i32, f32, i64
+}
+
+func.def @identity() {
+  func.return
+}
+
+func.def @empty_size() -> (i32) {
+  %77 = scalar.constant 1 : i64
+  %78 = scalar.trunci %77 : i64 to i32
+  func.return %78 : i32
+}
+
+func.def @empty() {
+  func.return
+}
+
+check.benchmark<@record_observations> @record_observations_benchmark
+
+// ====
+// RUN: verify
+#include <loomcxx/check.h>
+struct Borrowed { unsigned* pointer; };
+static Borrowed borrowed() { return {}; }
+LOOM_CHECK_CASE(pointer_record) {
+  // ERROR@+1: LOWERING/059 "check call results require scalars or records of scalars"
+  const auto value = borrowed();
+}
+
+// ====
+// RUN: verify
+#include <loomcxx/check.h>
+typedef unsigned U4 __attribute__((vector_size(16)));
+struct Vector { U4 lanes; };
+Vector vector() { return {}; }
+LOOM_CHECK_CASE(vector_record) {
+  // ERROR@+1: LOWERING/059 "check call results require scalars or records of scalars"
+  const auto value = vector();
+}
+
+// ====
+// RUN: verify
+#include <loomcxx/check.h>
+struct Pair { unsigned first, second; };
+Pair pair() { return {7u, 11u}; }
+LOOM_CHECK_CASE(volatile_record) {
+  // ERROR@+1: LOWERING/059 "check locals require initialized automatic non-volatile const values"
+  const volatile auto actual = pair();
+}
+
+// ====
+// RUN: verify
+#include <loomcxx/check.h>
+struct Pair { unsigned first, second; };
+Pair pair() { return {7u, 11u}; }
+LOOM_CHECK_CASE(late_invocation) {
+  loom::check::expect_equal(1u, 1u);
+  // ERROR@+1: LOWERING/059 "check expectations must be terminal"
+  loom::check::expect_equal(pair().second, 11u);
+}
