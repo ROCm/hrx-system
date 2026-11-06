@@ -11,6 +11,7 @@
 #include <cxx/ast_rewriter.h>
 #include <cxx/function_body.h>
 #include <cxx/initialization.h>
+#include <cxx/lambda_captures.h>
 #include <cxx/symbols.h>
 #include <cxx/translation_unit.h>
 #include <cxx/type_traits.h>
@@ -330,6 +331,10 @@ bool ControlFlow::value_has_later_lexical_use(cxx::Symbol* binding,
 std::optional<Destination> ControlFlow::destination(
     cxx::ExpressionAST* expression) const {
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+    if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
+        field && is_captured_object_field(field)) {
+      return std::nullopt;
+    }
     if (auto found = reference_aliases_.find(id->symbol);
         found != reference_aliases_.end()) {
       return destination(unwrap_expression(found->second));
@@ -983,6 +988,30 @@ void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
   // body. The synthesized operator() definition owns analysis of that body
   // when ordinary reachable-call discovery admits it.
   for (auto* capture : cxx::ListView{ast->captureList}) {
+    if (cxx::is_pack_capture(capture)) {
+      diagnostics_.reject(unit_, capture,
+                          "lambda pack captures must be expanded by the C++ "
+                          "frontend");
+    }
+    auto* field = cxx::capture_field(capture);
+    auto* initializer = cxx::capture_initializer(capture);
+    if (!field || !initializer) {
+      diagnostics_.reject(unit_, capture,
+                          "lambda capture has no normalized field and "
+                          "initializer");
+    }
+    if (unit_.typeTraits().is_lvalue_reference(field->type())) {
+      cxx::Initializer reference(initializer);
+      auto* referent = reference.singleExpression();
+      if (!referent) {
+        diagnostics_.reject(unit_, capture,
+                            "lambda reference capture requires one "
+                            "initializer expression");
+      }
+      require_identity(referent);
+    } else if (cxx::ast_cast<cxx::ThisLambdaCaptureAST>(capture)) {
+      receiver_requires_storage_ = true;
+    }
     accept(capture);
   }
 }
@@ -1211,6 +1240,10 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       return;
     }
     if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol)) {
+      if (is_captured_object_field(field)) {
+        argument.inherent_storage = true;
+        return;
+      }
       if (traits.is_lvalue_reference(field->type())) {
         argument.inherent_storage = true;
       } else {
@@ -1224,6 +1257,11 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   }
   if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression)) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
+    if (field && is_current_object(unit_, member->baseExpression) &&
+        is_captured_object_field(field)) {
+      argument.inherent_storage = true;
+      return;
+    }
     if (field && traits.is_lvalue_reference(field->type())) {
       argument.inherent_storage = true;
       return;
@@ -2281,6 +2319,10 @@ std::optional<Destination> ControlFlow::classify_destination(
         found != reference_aliases_.end()) {
       return classify_destination(unwrap_expression(found->second));
     }
+    if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
+        field && is_captured_object_field(field)) {
+      return std::nullopt;
+    }
     return Destination{id->symbol, 0, nullptr};
   }
   if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
@@ -2308,6 +2350,9 @@ std::optional<Destination> ControlFlow::classify_destination(
     return std::nullopt;
   }
   if (is_current_object(unit_, member->baseExpression)) {
+    if (is_captured_object_field(field)) {
+      return std::nullopt;
+    }
     return Destination{field, 0, nullptr};
   }
   if (member->accessOp != cxx::TokenKind::T_DOT) {
@@ -2351,6 +2396,13 @@ bool ControlFlow::classify_storage(cxx::ExpressionAST* expression) const {
     return !unary->symbol && unary->op == cxx::TokenKind::T_STAR;
   }
   return false;
+}
+
+bool ControlFlow::is_captured_object_field(cxx::FieldSymbol* field) const {
+  auto* closure = function_
+                      ? cxx::symbol_cast<cxx::ClassSymbol>(function_->parent())
+                      : nullptr;
+  return captured_object_member(unit_, closure, field).has_value();
 }
 
 std::optional<CountedLoop> ControlFlow::classify(cxx::ForStatementAST* loop) {

@@ -116,6 +116,9 @@ class Initialization {
   Value value(const cxx::Type* type, cxx::ExpressionAST* initializer,
               cxx::FunctionSymbol* constructor, cxx::AST* owner,
               std::optional<Value> retained = std::nullopt);
+  // Constructs one frontend-synthesized closure by evaluating captures in
+  // source order and assembling their semantic fields in record order.
+  Value closure(cxx::LambdaExpressionAST* expression);
   // Materializes one frontend-evaluated constant through the same admitted
   // component structure used by ordinary values. Aggregate traversal follows
   // source types and field identities; source object bytes are never decoded.

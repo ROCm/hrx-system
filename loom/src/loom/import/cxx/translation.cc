@@ -404,6 +404,25 @@ class Translator final : private Initialization::Evaluation {
     return field && receiver(field) ? field : nullptr;
   }
 
+  std::optional<StorageProjection> captured_object_storage(
+      cxx::FieldSymbol* field, cxx::AST* owner) {
+    if (receivers_.empty()) {
+      return std::nullopt;
+    }
+    auto* closure = receivers_.back().record->source;
+    auto captured = captured_object_member(unit_, closure, field);
+    if (!captured) {
+      return std::nullopt;
+    }
+    auto pointer = receiver_member(captured->pointer_field, owner);
+    if (!pointer.is_pointer()) {
+      fail(owner, "captured this field lost its source object identity");
+    }
+    return storage_.member(
+        storage_.project(pointer.pointer(), captured->object_type, owner),
+        field, owner);
+  }
+
   std::optional<StorageProjection> receiver_storage(cxx::FieldSymbol* field,
                                                     cxx::AST* owner) {
     auto* active = receiver(field);
@@ -2043,6 +2062,12 @@ class Translator final : private Initialization::Evaluation {
            "record storage");
     }
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(ast)) {
+      auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
+      if (field) {
+        if (auto captured = captured_object_storage(field, ast)) {
+          return *captured;
+        }
+      }
       if (auto found = references_.find(id->symbol);
           found != references_.end()) {
         const auto* object =
@@ -2221,6 +2246,15 @@ class Translator final : private Initialization::Evaluation {
       bool preserve_identity = false) {
     if (access == LvalueAccess::Write) {
       types_.require_mutable(expression->type, expression);
+    }
+    if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(
+            unwrap_object_identity(unit_, expression))) {
+      auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
+      if (field) {
+        if (auto captured = captured_object_storage(field, owner)) {
+          return {expression->type, *captured};
+        }
+      }
     }
     auto destination = retained_destination ? retained_destination
                                             : control_->destination(expression);
@@ -4415,6 +4449,9 @@ class Translator final : private Initialization::Evaluation {
     if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(ast)) {
       return expression(nested->expression);
     }
+    if (auto* lambda = cxx::ast_cast<cxx::LambdaExpressionAST>(ast)) {
+      return initialization_.closure(lambda);
+    }
     if (auto* equal = cxx::ast_cast<cxx::EqualInitializerAST>(ast)) {
       return expression(equal->expression);
     }
@@ -4562,6 +4599,14 @@ class Translator final : private Initialization::Evaluation {
       return binding(decision->symbol, ast);
     }
     if (cxx::ast_cast<cxx::ThisExpressionAST>(ast)) {
+      if (!receivers_.empty()) {
+        auto* closure = receivers_.back().record->source;
+        auto* captured_this =
+            closure->isClosureType() ? closure->capturedThisField() : nullptr;
+        if (captured_this) {
+          return receiver_member(captured_this, ast);
+        }
+      }
       if (receivers_.empty() || !receivers_.back().storage) {
         fail(ast, "this pointer requires a storage-backed receiver");
       }
@@ -4619,7 +4664,11 @@ class Translator final : private Initialization::Evaluation {
           }
         }
       }
-      if (cxx::symbol_cast<cxx::FieldSymbol>(id->symbol)) {
+      if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol)) {
+        if (auto captured = captured_object_storage(field, ast)) {
+          return name(objects_.load(*captured, ast->type, ast),
+                      cxx::to_string(field->name()));
+        }
         fail(ast,
              "member-dependent initialization requires source object "
              "initialization semantics");

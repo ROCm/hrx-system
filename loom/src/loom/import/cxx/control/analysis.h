@@ -428,6 +428,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::optional<Destination> classify_destination(
       cxx::ExpressionAST* expression);
   bool classify_storage(cxx::ExpressionAST* expression) const;
+  bool is_captured_object_field(cxx::FieldSymbol* field) const;
   cxx::Symbol* object_owner(cxx::ExpressionAST* expression) const;
   std::optional<CountedLoop> classify(cxx::ForStatementAST* loop);
   std::optional<CountedLoop> classify_unsigned(

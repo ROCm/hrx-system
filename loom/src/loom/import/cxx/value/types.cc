@@ -1129,13 +1129,14 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
   }
   if (!source || !source->isComplete() || source->isUnion() ||
       !source->baseClasses().empty() ||
-      (!traits.is_aggregate(input) && !has_user_provided_constructor(source)) ||
+      (!traits.is_aggregate(input) && !source->isClosureType() &&
+       !has_user_provided_constructor(source)) ||
       !has_trivial_value_operations(input)) {
     diagnostics_.reject(
         unit_, owner,
         "record values require a complete baseless non-union type with "
-        "aggregate or user-provided construction and trivial copy and move "
-        "operations");
+        "aggregate, closure, or user-provided construction and trivial copy "
+        "and move operations");
   }
   auto result = std::make_unique<RecordPartition>();
   result->kind = ValueKind::Record;
