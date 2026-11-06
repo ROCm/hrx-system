@@ -1567,12 +1567,17 @@ static void loom_fact_refinement_set_carrier_insertion_point(
   }
 }
 
-static iree_status_t loom_fact_refinement_materialize_carriers(
+static iree_status_t loom_fact_refinement_apply_carriers(
     loom_fact_refinement_plan_t* plan) {
   loom_fact_refinement_carrier_use_t* uses = NULL;
   iree_host_size_t use_count = 0;
+  // Definition and use mappings name the original embedded values. Compute
+  // both target types before publishing definitions, which may replace those
+  // identities with an earlier refinement than a later use requires.
   IREE_RETURN_IF_ERROR(
       loom_fact_refinement_build_carrier_uses(plan, &uses, &use_count));
+  IREE_RETURN_IF_ERROR(
+      loom_fact_refinement_apply_carrier_definition_types(plan));
   loom_module_t* module = plan->rewriter->module;
   for (iree_host_size_t i = 0; i < use_count;) {
     const iree_host_size_t use_start = i;
@@ -1585,6 +1590,9 @@ static iree_status_t loom_fact_refinement_materialize_carriers(
 
     const loom_type_t source_type = loom_module_value_type(module, carrier);
     const loom_type_t target_type = uses[use_start].target_type;
+    if (loom_type_equal(source_type, target_type)) {
+      continue;
+    }
     const loom_fact_refinement_carrier_provider_t* provider =
         loom_fact_refinement_find_carrier_provider(plan->policy, source_type,
                                                    target_type);
@@ -1734,10 +1742,7 @@ iree_status_t loom_fact_refinement_preserve_pending(
       status = loom_fact_refinement_materialize_nodes(&plan);
     }
     if (iree_status_is_ok(status) && plan.node_count > 0) {
-      status = loom_fact_refinement_apply_carrier_definition_types(&plan);
-    }
-    if (iree_status_is_ok(status) && plan.node_count > 0) {
-      status = loom_fact_refinement_materialize_carriers(&plan);
+      status = loom_fact_refinement_apply_carriers(&plan);
     }
     if (iree_status_is_ok(status) && plan.node_count > 0) {
       status = loom_fact_refinement_apply_attributes(&plan);
