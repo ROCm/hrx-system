@@ -329,11 +329,12 @@ pipeline.def<kernel> public retain target(@device) @interleaved_distribution() r
 
 aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
 
-// SRAM tiles have no horizontal stream-switch ports.
+// SRAM-to-SRAM cross-column routes would need a detour through compute rows;
+// the monotonic router cannot implement that path.
 pipeline.def<kernel> public retain target(@device) @cross_column_sram_distribution() run(%input_arg: buffer) {
   %input = buffer.assume.alignment %input_arg {minimum_alignment = 64} : buffer
   %source_memory = pipeline.memory<workgroup>[0, 1] : pool
-  %destination_memory = pipeline.memory<workgroup>[1, 2] : pool
+  %destination_memory = pipeline.memory<workgroup>[1, 1] : pool
   %bytes = index.constant 64 : offset
   %origin = index.constant 0 : offset
   %capacity = index.constant 1 : index
@@ -354,7 +355,7 @@ pipeline.def<kernel> public retain target(@device) @cross_column_sram_distributi
   pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
     %read, %payload = channel.acquire %source : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
     %write, %destination_payload = channel.reserve %destination : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
-    // ERROR@+1: XDNA/051 {requirement="same-column channel-copy routes from SRAM storage"}
+    // ERROR@+1: XDNA/051 {requirement="same-column channel-copy routes between SRAM tiles"}
     channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
   }
 }

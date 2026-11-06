@@ -27,6 +27,15 @@ loom_check_test_suite(
     target_compatible_with = loom_config_compatible_with(["//loom/config/arch:aie2p"]),
 )
 
+loom_check_test_suite(
+    name = "source_admission_test",
+    srcs = ["retained_capacity.cxx-test"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/arch:aie2p",
+        "//loom/config/import:cxx",
+    ]),
+)
+
 _XDNA_ONE_COLUMN_PROFILE = loom_execution_profile(
     name = "xdna_one_column",
     build_requirements = XDNA_HARDWARE_PROFILE.build_requirements,
