@@ -119,3 +119,40 @@ func.def public target(@target) @recursive(%value: i32) -> (i32) {
   %result = func.call @cycle_a(%value) : (i32) -> (i32)
   func.return %result : i32
 }
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def noinline @select_vector(%value: vector<1xi32>, %condition: i1) -> (vector<1xi32>) {
+  %fallback_value = scalar.constant 3 : i32
+  %fallback = vector.from_elements %fallback_value : vector<1xi32>
+  %selected = scf.select %condition, %value, %fallback : vector<1xi32>
+  func.return %selected : vector<1xi32>
+}
+
+func.def public target(@target) @call_select_vector(%value: vector<1xi32>, %flag: i32) -> (vector<1xi32>) {
+  %c0 = scalar.constant 0 : i32
+  %condition = scalar.cmpi ne, %flag, %c0 : i32
+  %selected = func.call @select_vector(%value, %condition) : (vector<1xi32>, i1) -> (vector<1xi32>)
+  func.return %selected : vector<1xi32>
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @select_vector(%value: reg<amdgpu.vgpr>, %condition: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %selected = v_cndmask_b32_src0_inline %value, %condition {false_value = 3}
+  return %selected
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @call_select_vector(%value: reg<amdgpu.vgpr>, %flag: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %c0 = s_mov_b32 0
+  %condition = s_cmp_lg_i32 %flag, %c0
+  %23 = s_mov_b64_exec_read
+  %24 = slice %23[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = slice %23[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %27 = s_cselect_b32 %24, %c0, %condition
+  %28 = s_cselect_b32 %25, %c0, %condition
+  %29 = concat(%27, %28) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %selected = low.func.call pure @select_vector(%value, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>)
+  return %selected
+}
