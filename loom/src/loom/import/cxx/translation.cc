@@ -740,7 +740,7 @@ class Translator final : private Initialization::Evaluation {
     std::optional<StorageProjection> storage;
     // Conditional temporary activation flag, stored outside its source arm.
     std::optional<StorageAccess> activity;
-    // Original value identity used to transfer a result object's ownership.
+    // Current value identity used to transfer or replace result ownership.
     std::optional<Value> identity;
     // Source declaration or expression owning the implicit call location.
     cxx::AST* source = nullptr;
@@ -1036,6 +1036,24 @@ class Translator final : private Initialization::Evaluation {
       }
     }
     return false;
+  }
+
+  // Carries a tied mutable receiver result into its pending temporary
+  // destruction. The call consumes the prior SSA identity, so both the object
+  // and its transferable identity advance together.
+  void update_temporary(Value previous, Value updated) {
+    IREE_ASSERT(full_expression_mark_);
+    auto mark = *full_expression_mark_;
+    for (size_t index = temporary_destructions_.size(); index > mark; --index) {
+      auto& action = temporary_destructions_[index - 1];
+      if (!action.identity || !same_value(*action.identity, previous)) {
+        continue;
+      }
+      IREE_ASSERT(action.value && !action.storage);
+      action.value = updated;
+      action.identity = updated;
+      return;
+    }
   }
 
   bool adopt_temporary_result(cxx::ExpressionAST* expression, Value value) {
@@ -2839,9 +2857,27 @@ class Translator final : private Initialization::Evaluation {
                     {}});
     }
 
-    if (receiver->valueCategory == cxx::ValueCategory::kPrValue) {
+    bool direct_prvalue =
+        receiver->valueCategory == cxx::ValueCategory::kPrValue;
+    if (!direct_prvalue &&
+        receiver->valueCategory == cxx::ValueCategory::kXValue) {
+      auto* materialization =
+          cxx::ast_cast<cxx::ImplicitCastExpressionAST>(receiver);
+      direct_prvalue =
+          materialization &&
+          materialization->castKind ==
+              cxx::ImplicitCastKind::kTemporaryMaterializationConversion &&
+          materialization->expression->valueCategory ==
+              cxx::ValueCategory::kPrValue;
+    }
+    if (direct_prvalue) {
+      auto value = expression(receiver);
+      if (&value.partition() != record) {
+        fail(receiver,
+             "member call receiver must preserve its admitted record type");
+      }
       if (requires_storage) {
-        auto projection = object_address(receiver);
+        auto projection = materialize_temporary(receiver, value);
         return {ImplicitObjectABI::Storage,
                 Value(projection.pointer),
                 record,
@@ -2849,11 +2885,6 @@ class Translator final : private Initialization::Evaluation {
                 false,
                 written_fields,
                 {}};
-      }
-      auto value = expression(receiver);
-      if (&value.partition() != record) {
-        fail(receiver,
-             "member call receiver must preserve its admitted record type");
       }
       return admit({ImplicitObjectABI::Value,
                     value,
@@ -2938,6 +2969,9 @@ class Translator final : private Initialization::Evaluation {
       replace_current_receiver(value);
     } else if (receiver.target) {
       write(*receiver.target, value, owner);
+    } else {
+      IREE_ASSERT(receiver.value);
+      update_temporary(*receiver.value, value);
     }
   }
 

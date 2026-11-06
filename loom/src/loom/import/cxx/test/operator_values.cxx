@@ -84,7 +84,10 @@ static unsigned stored_member_result() {
   Pair right{7u, 11u};
   Pair direct = left.direct_add(right);
   Pair stored = left.stored_add(right);
-  return (direct.x + stored.x) * 100u + direct.y + stored.y;
+  Pair chained = left + right + left;
+  Pair mutable_chain = (left + right) += left;
+  return direct.x + direct.y + stored.x + stored.y + chained.x + chained.y +
+         mutable_chain.x + mutable_chain.y;
 }
 
 struct MemberOrder {
@@ -109,6 +112,23 @@ static unsigned member_order() {
 
 static unsigned temporary_reference() {
   return ((MemberOrder{5u} += 2u).value += 3u);
+}
+
+struct TemporaryObserved {
+  unsigned value;
+  unsigned* observed;
+
+  TemporaryObserved& bump() {
+    ++value;
+    return *this;
+  }
+  ~TemporaryObserved() { *observed = value; }
+};
+
+static unsigned temporary_destruction() {
+  unsigned observed = 0u;
+  TemporaryObserved{5u, &observed}.bump();
+  return observed;
 }
 
 struct FreeOrder {
@@ -195,15 +215,17 @@ LOOM_CHECK_CASE(operator_values) {
   const auto stored_result = stored_member_result();
   const auto member_sequence = member_order();
   const auto temporary_result = temporary_reference();
+  const auto destroyed_result = temporary_destruction();
   const auto free_sequence = free_order();
   const auto free_increments = free_increment_values();
   const auto void_result = void_update();
   const auto selected_reference = nonreceiver_reference();
   loom::check::expect_equal(arithmetic, 7u);
   loom::check::expect_equal(member_updates, 20131795u);
-  loom::check::expect_equal(stored_result, 2032u);
+  loom::check::expect_equal(stored_result, 120u);
   loom::check::expect_equal(member_sequence, 10u);
   loom::check::expect_equal(temporary_result, 10u);
+  loom::check::expect_equal(destroyed_result, 6u);
   loom::check::expect_equal(free_sequence, 15u);
   loom::check::expect_equal(free_increments, 910u);
   loom::check::expect_equal(void_result, 13u);
