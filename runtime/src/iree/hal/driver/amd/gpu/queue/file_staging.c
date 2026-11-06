@@ -8,6 +8,7 @@
 
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/proactor.h"
+#include "iree/hal/driver/amd/fabric/memory.h"
 #include "iree/hal/driver/amd/fabric/memory_transition.h"
 #include "iree/hal/driver/amd/gpu/queue/file_completion.h"
 #include "iree/hal/driver/amd/status.h"
@@ -71,13 +72,11 @@ typedef struct iree_hal_amd_gpu_file_staging_slot_t {
     // Coalesced early-error and final-retirement handoff to the file owner.
     iree_hal_amd_gpu_file_completion_t failure;
   };
-  // Placed GPU copy, reused after native retirement.
-  iree_hal_amd_gpu_sdma_copy_t copy;
   // Joins the submitting call and potentially immediate completion.
   iree_atomic_int32_t pending;
-  // Native notifications are serialized by SDMA's observer claim. The first
-  // failure switches io's union storage to the error handoff; healthy writes
-  // keep their prepared I/O request intact until the GPU copy completes.
+  // The native copy reports an early error before its final retirement. The
+  // first failure switches io's union storage to the error handoff; healthy
+  // writes keep their prepared I/O request intact until the GPU copy completes.
   bool failure_initialized;
   // Status transferred by completion to the final join.
   iree_status_t status;
@@ -130,9 +129,9 @@ struct iree_hal_amd_gpu_file_staging_block_t {
   // An idle trim also returns acquisition already accepted by the native owner.
   bool retire_on_publish;
   struct {
-    // Acquire before SDMA consumes file-read output.
+    // Acquire before the queue consumes file-read output.
     iree_hal_memory_effects_t read;
-    // Release before file writes consume SDMA output.
+    // Release before file writes consume queue output.
     iree_hal_memory_effects_t write;
   } effects;
 };
@@ -160,8 +159,8 @@ struct iree_hal_amd_gpu_file_staging_t {
   iree_hal_device_t* device;
   // Borrowed native lifetime and typed allocation owner.
   iree_hal_amd_gpu_context_t* context;
-  // Borrowed SDMA engine, independent of executable queue protocol.
-  iree_hal_amd_gpu_sdma_queue_t* queue;
+  // The family's executor implements native global visibility operations.
+  bool queue_cache_control;
   // Borrowed device poll owner, live through all preparations and final
   // release.
   iree_async_proactor_t* proactor;
@@ -403,10 +402,15 @@ static void iree_hal_amd_gpu_file_staging_copy_failed(void* user_data,
   iree_hal_amd_gpu_file_staging_block_t* block = slot->block;
   iree_hal_amd_gpu_file_staging_t* staging = block->staging;
   iree_slim_mutex_lock(&staging->mutex);
-  const bool first_failure = iree_status_is_ok(staging->failure);
+  iree_hal_amd_gpu_file_staging_request_t* request = slot->request;
+  const bool first_failure = iree_status_is_ok(request->status);
   if (first_failure) {
-    staging->failure = iree_status_clone(status);
-    staging->dirty = true;
+    request->status = iree_status_clone(status);
+    if (request->cursor < request->end) {
+      iree_hal_amd_gpu_file_staging_list_remove(
+          iree_hal_amd_gpu_file_staging_request_list(request), request);
+      request->cursor = request->end;
+    }
   }
   iree_slim_mutex_unlock(&staging->mutex);
   if (first_failure) {
@@ -424,12 +428,11 @@ static void iree_hal_amd_gpu_file_staging_copy_failed(void* user_data,
 }
 
 static void iree_hal_amd_gpu_file_staging_copy_notified(
-    void* user_data, amdf_status_t status,
-    iree_hal_amd_gpu_sdma_retirement_t retirement) {
+    void* user_data, iree_status_t status,
+    const iree_async_single_frontier_t* frontier, bool retired) {
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_hal_amd_gpu_file_staging_slot_t* slot = user_data;
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, slot->copy.length);
-  if (amdf_status_is_ok(status)) {
+  if (iree_status_is_ok(status)) {
     iree_hal_amd_gpu_file_staging_step_completed(slot, iree_ok_status());
     IREE_TRACE_ZONE_END(z0);
     return;
@@ -440,8 +443,7 @@ static void iree_hal_amd_gpu_file_staging_copy_notified(
         slot->request->bucket->proactor,
         iree_hal_amd_gpu_file_staging_copy_failed, slot, &slot->failure);
   }
-  iree_hal_amd_gpu_file_completion_notify(
-      &slot->failure, status, retirement == IREE_HAL_AMD_GPU_SDMA_RETIRED);
+  iree_hal_amd_gpu_file_completion_notify(&slot->failure, status, retired);
   IREE_TRACE_ZONE_END(z0);
 }
 
@@ -481,21 +483,22 @@ static void iree_hal_amd_gpu_file_staging_copy(
       request->transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ;
   const uint64_t staging_address = slot->block->address + slot->offset;
   const uint64_t device_address = request->device_address + slot->io.offset;
-  slot->copy = (iree_hal_amd_gpu_sdma_copy_t){
-      .source = read ? staging_address : device_address,
-      .target = read ? device_address : staging_address,
-      .length = (uint32_t)slot->io.span.length,
-      .effects = request->effects,
-      .notify = iree_hal_amd_gpu_file_staging_copy_notified,
-      .user_data = slot};
-  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, slot->copy.length);
-  slot->copy.effects.bits |=
-      read ? slot->block->effects.read.bits : slot->block->effects.write.bits;
+  IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, slot->io.span.length);
   slot->resume = read ? iree_hal_amd_gpu_file_staging_slot_finish
                       : iree_hal_amd_gpu_file_staging_downloaded;
   slot->failure_initialized = false;
   iree_atomic_store(&slot->pending, 2, iree_memory_order_relaxed);
-  iree_hal_amd_gpu_sdma_queue_submit(request->staging->queue, &slot->copy);
+  status = request->copy(
+      request->copy_user_data, read ? staging_address : device_address,
+      read ? device_address : staging_address, slot->io.span.length,
+      read ? slot->block->effects.read : (iree_hal_memory_effects_t){0},
+      read ? (iree_hal_memory_effects_t){0} : slot->block->effects.write,
+      (iree_hal_amd_gpu_retirement_callback_t){
+          .fn = iree_hal_amd_gpu_file_staging_copy_notified,
+          .user_data = slot});
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amd_gpu_file_staging_copy_notified(slot, status, NULL, true);
+  }
   iree_hal_amd_gpu_file_staging_slot_join(slot);
   IREE_TRACE_ZONE_END(z0);
 }
@@ -532,10 +535,10 @@ static iree_status_t iree_hal_amd_gpu_file_staging_query_effects(
       (queue->kind != IREE_HAL_MEMORY_TRANSITION_KIND_NONE &&
        (queue->kind != IREE_HAL_MEMORY_TRANSITION_KIND_GLOBAL ||
         queue->executor != IREE_HAL_MEMORY_TRANSITION_EXECUTOR_QUEUE ||
-        !iree_hal_amd_gpu_sdma_queue_supports_cache_control(staging->queue)))) {
+        !staging->queue_cache_control))) {
     return iree_make_status(
         IREE_STATUS_UNAVAILABLE,
-        "native file/SDMA staging visibility is unsupported");
+        "native file/queue staging visibility is unsupported");
   }
   iree_hal_memory_effects_t* effects =
       read ? &block->effects.read : &block->effects.write;
@@ -546,31 +549,12 @@ static iree_status_t iree_hal_amd_gpu_file_staging_query_effects(
   return iree_ok_status();
 }
 
-static iree_status_t iree_hal_amd_gpu_file_staging_queue_effect(
-    const iree_hal_memory_transition_recipe_info_t* recipe, bool release,
-    iree_hal_memory_effects_t* effects) {
-  if (recipe->kind == IREE_HAL_MEMORY_TRANSITION_KIND_NONE) {
-    return iree_ok_status();
-  }
-  if (recipe->kind != IREE_HAL_MEMORY_TRANSITION_KIND_GLOBAL ||
-      recipe->executor != IREE_HAL_MEMORY_TRANSITION_EXECUTOR_QUEUE) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "file copy requires unsupported queue visibility");
-  }
-  effects->bits |= release ? IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM
-                           : IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM;
-  return iree_ok_status();
-}
-
 iree_status_t iree_hal_amd_gpu_file_staging_prepare(
     iree_hal_amd_gpu_file_staging_t* staging,
-    const iree_hal_queue_family_t* family, uint32_t native_family_ordinal,
-    iree_hal_amd_fabric_file_transfer_t* transfer,
-    iree_hal_memory_effects_t* before, iree_hal_memory_effects_t* after) {
+    const iree_hal_amd_fabric_file_transfer_t* transfer) {
   if (!staging || !transfer->sources.count) {
-    return iree_make_status(
-        IREE_STATUS_UNAVAILABLE,
-        "file copy requires native SDMA and file-capable staging");
+    return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                            "file copy requires file-capable native staging");
   }
   const iree_async_file_requirements_t* requirements =
       iree_hal_file_requirements(transfer->file);
@@ -582,58 +566,7 @@ iree_status_t iree_hal_amd_gpu_file_staging_prepare(
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "file alignment exceeds staging lane capacity");
   }
-  const bool release =
-      iree_hal_buffer_usage_access(
-          iree_hal_buffer_family_usage(transfer->buffer, family)) &
-      IREE_HAL_MEMORY_ACCESS_WRITE;
-  const bool acquire = transfer->file_access == IREE_HAL_MEMORY_ACCESS_READ;
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       i < transfer->sources.count && iree_status_is_ok(status); ++i) {
-    iree_hal_amd_fabric_file_range_t* range = &transfer->sources.ranges[i];
-    if (range->contents.data) {
-      continue;
-    }
-    const amdf_memory_site_t device = {
-        .type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
-        .structure_size = sizeof(device),
-        .kind = AMDF_MEMORY_SITE_KIND_DEVICE,
-        .value.device = {.memory = range->storage->handle,
-                         .access_ordinal = range->access_ordinal,
-                         .queue_family_ordinal = native_family_ordinal}};
-    amdf_memory_site_t copy = device;
-    copy.value.device.queue_family_ordinal = staging->family_ordinal;
-    for (uint32_t edge = 0; edge < 2 && iree_status_is_ok(status); ++edge) {
-      if (edge == 0 ? !release : !acquire) {
-        continue;
-      }
-      amdf_memory_pair_info_t native = {
-          .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-          .structure_size = sizeof(native)};
-      status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-          staging->context->api->memory_query_pair_info(
-              edge ? &copy : &device, edge ? &device : &copy, &native),
-          "memory_query_pair_info(file copy)");
-      iree_hal_memory_pair_info_t pair;
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_amd_fabric_memory_translate_pair(&native, &pair);
-      }
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_amd_gpu_file_staging_queue_effect(
-            &pair.release, true, edge ? &range->effects : before);
-      }
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_amd_gpu_file_staging_queue_effect(
-            &pair.acquire, false, edge ? after : &range->effects);
-      }
-    }
-    if (iree_status_is_ok(status) && range->effects.bits &&
-        !iree_hal_amd_gpu_sdma_queue_supports_cache_control(staging->queue)) {
-      status = iree_make_status(IREE_STATUS_UNAVAILABLE,
-                                "SDMA family lacks required cache operations");
-    }
-  }
-  return status;
+  return iree_ok_status();
 }
 
 // Native extents include prefix/granularity, not merely the usable lane bytes.
@@ -1376,22 +1309,25 @@ static iree_status_t iree_hal_amd_gpu_file_staging_bucket(
 iree_status_t iree_hal_amd_gpu_file_staging_acquire(
     iree_hal_amd_gpu_file_staging_t* staging,
     const iree_hal_amd_fabric_file_transfer_t* transfer,
+    iree_hal_amd_gpu_file_staging_copy_fn_t copy, void* copy_user_data,
     iree_hal_amd_gpu_file_staging_request_t* request) {
-  *request = (iree_hal_amd_gpu_file_staging_request_t){.staging = staging,
-                                                       .transfer = transfer};
+  *request = (iree_hal_amd_gpu_file_staging_request_t){
+      .staging = staging,
+      .transfer = transfer,
+      .copy = copy,
+      .copy_user_data = copy_user_data};
   return iree_hal_amd_gpu_file_staging_bucket(
       staging, transfer->async.file->proactor, &request->bucket);
 }
 
 void iree_hal_amd_gpu_file_staging_submit(
     iree_hal_amd_gpu_file_staging_request_t* request, uint64_t offset,
-    uint64_t length, uint64_t device_address, iree_hal_memory_effects_t effects,
+    uint64_t length, uint64_t device_address,
     iree_hal_amd_fabric_file_transfer_callback_t completion) {
   iree_hal_amd_gpu_file_staging_t* staging = request->staging;
   request->cursor = offset;
   request->end = offset + length;
   request->device_address = device_address;
-  request->effects = effects;
   request->completion = completion;
   request->in_flight = 1;
   request->block_mask = 0;
@@ -1569,7 +1505,7 @@ iree_status_t iree_hal_amd_gpu_file_staging_query_profile(
 iree_status_t iree_hal_amd_gpu_file_staging_allocate(
     iree_hal_device_t* device, iree_hal_amd_gpu_context_t* context,
     uint32_t family_ordinal, const amdf_memory_profile_t* profile,
-    iree_hal_amd_gpu_sdma_queue_t* queue, iree_async_proactor_t* proactor,
+    bool queue_cache_control, iree_async_proactor_t* proactor,
     uint32_t lane_count, uint32_t lane_capacity, uint32_t numa_node,
     iree_allocator_t host_allocator,
     iree_hal_amd_gpu_file_staging_t** out_staging) {
@@ -1579,7 +1515,7 @@ iree_status_t iree_hal_amd_gpu_file_staging_allocate(
                                              (void**)&staging));
   staging->device = device;
   staging->context = context;
-  staging->queue = queue;
+  staging->queue_cache_control = queue_cache_control;
   staging->proactor = proactor;
   for (uint32_t i = 0; i < 2; ++i) {
     staging->blocks[i].staging = staging;

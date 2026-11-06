@@ -189,6 +189,15 @@ iree_status_t iree_hal_amd_gpu_aql_submission_transfer(
     const iree_hal_transfer_operation_t* operations, uint32_t before,
     uint32_t after, iree_hal_amd_gpu_aql_submission_t** out_submission);
 
+// Captures one qualified file copy, upload, or download, or a barrier for NULL.
+// The file owner keeps borrowed backing live through the retirement callback.
+// Failure retains nothing and invokes no callback.
+iree_status_t iree_hal_amd_gpu_aql_submission_file(
+    iree_hal_amd_gpu_capture_pool_t* pool,
+    const iree_hal_amd_gpu_transfer_operation_t* operation, uint32_t before,
+    uint32_t after, iree_hal_amd_gpu_retirement_callback_t callback,
+    iree_hal_amd_gpu_aql_submission_t** out_submission);
+
 // Records rejection without reporting completion. Accepted native pieces keep
 // their references; the last release drops payloads before failing signals.
 void iree_hal_amd_gpu_aql_submission_reject(

@@ -33,8 +33,8 @@ class FileCompletionTest : public ::testing::Test {
             self->resume_->acquire();
           }
           if (!retired && self->retire_in_callback_) {
-            iree_hal_amd_gpu_file_completion_notify(&self->completion_,
-                                                    self->failure_, true);
+            iree_hal_amd_gpu_file_completion_notify(
+                &self->completion_, iree_status_clone(self->failure_), true);
           }
           if (retired && self->free_in_callback_) {
             delete self->free_in_callback_;
@@ -43,7 +43,10 @@ class FileCompletionTest : public ::testing::Test {
         },
         this, &completion_);
   }
-  void TearDown() override { iree_async_proactor_release(proactor_); }
+  void TearDown() override {
+    iree_status_free(failure_);
+    iree_async_proactor_release(proactor_);
+  }
   void Poll() {
     IREE_ASSERT_OK(
         iree_async_proactor_poll(proactor_, iree_infinite_timeout(), nullptr));
@@ -53,8 +56,9 @@ class FileCompletionTest : public ::testing::Test {
   iree_async_proactor_t* proactor_ = nullptr;
   // Embedded result storage reused by the ordinary file slot.
   iree_hal_amd_gpu_file_completion_t completion_ = {};
-  // Native device fault, separate from the host NOP's successful delivery.
-  amdf_status_t failure_ = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
+  // Device fault, separate from the host NOP's successful delivery.
+  iree_status_t failure_ =
+      iree_make_status(IREE_STATUS_DATA_LOSS, "native copy failed");
   // Poll-thread outcomes; true is the one final lifetime handoff.
   std::vector<bool> outcomes_;
   // Models final native stop racing an active logical-failure callback.
@@ -68,25 +72,30 @@ class FileCompletionTest : public ::testing::Test {
 };
 
 TEST_F(FileCompletionTest, CoalescesFailureAndRetirementBeforePoll) {
-  iree_hal_amd_gpu_file_completion_notify(&completion_, failure_, false);
-  iree_hal_amd_gpu_file_completion_notify(&completion_, failure_, true);
+  iree_hal_amd_gpu_file_completion_notify(&completion_,
+                                          iree_status_clone(failure_), false);
+  iree_hal_amd_gpu_file_completion_notify(&completion_,
+                                          iree_status_clone(failure_), true);
   EXPECT_TRUE(outcomes_.empty());
   Poll();
   EXPECT_EQ(outcomes_, (std::vector<bool>{true}));
 }
 
 TEST_F(FileCompletionTest, RetainsNativeOwnershipAfterEarlyError) {
-  iree_hal_amd_gpu_file_completion_notify(&completion_, failure_, false);
+  iree_hal_amd_gpu_file_completion_notify(&completion_,
+                                          iree_status_clone(failure_), false);
   Poll();
   EXPECT_EQ(outcomes_, (std::vector<bool>{false}));
-  iree_hal_amd_gpu_file_completion_notify(&completion_, failure_, true);
+  iree_hal_amd_gpu_file_completion_notify(&completion_,
+                                          iree_status_clone(failure_), true);
   Poll();
   EXPECT_EQ(outcomes_, (std::vector<bool>{false, true}));
 }
 
 TEST_F(FileCompletionTest, RetirementDuringCallbackCannotResubmitItsLiveNop) {
   retire_in_callback_ = true;
-  iree_hal_amd_gpu_file_completion_notify(&completion_, failure_, false);
+  iree_hal_amd_gpu_file_completion_notify(&completion_,
+                                          iree_status_clone(failure_), false);
   Poll();
   EXPECT_EQ(outcomes_, (std::vector<bool>{false, true}));
 }
@@ -95,7 +104,8 @@ TEST_F(FileCompletionTest, FinalCallbackCanFreeItsOwnStorage) {
   free_in_callback_ = new iree_hal_amd_gpu_file_completion_t;
   iree_hal_amd_gpu_file_completion_initialize(proactor_, completion_.notify,
                                               this, free_in_callback_);
-  iree_hal_amd_gpu_file_completion_notify(free_in_callback_, failure_, true);
+  iree_hal_amd_gpu_file_completion_notify(free_in_callback_,
+                                          iree_status_clone(failure_), true);
   Poll();
   EXPECT_EQ(free_in_callback_, nullptr);
   EXPECT_EQ(outcomes_, (std::vector<bool>{true}));
@@ -105,10 +115,12 @@ TEST_F(FileCompletionTest, ConcurrentRetirementJoinsActiveLogicalCallback) {
   std::binary_semaphore entered(0), resume(0);
   entered_ = &entered;
   resume_ = &resume;
-  iree_hal_amd_gpu_file_completion_notify(&completion_, failure_, false);
+  iree_hal_amd_gpu_file_completion_notify(&completion_,
+                                          iree_status_clone(failure_), false);
   std::thread native([&] {
     entered.acquire();
-    iree_hal_amd_gpu_file_completion_notify(&completion_, failure_, true);
+    iree_hal_amd_gpu_file_completion_notify(&completion_,
+                                            iree_status_clone(failure_), true);
     resume.release();
   });
   Poll();

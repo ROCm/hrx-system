@@ -28,7 +28,7 @@ typedef enum iree_hal_amd_gpu_asan_shadow_backing_e {
 // capability determine admission, independently of RDNA/CDNA.
 typedef struct iree_hal_amd_gpu_device_options_t {
   // Exact native family ordinal, or UINT32_MAX to prefer AQL on CDNA and PM4
-  // on RDNA among supported families. File transfers independently select SDMA.
+  // on RDNA among supported families. File copies use the selected queue.
   uint32_t queue_family_ordinal;
   // Number of provisioned queues in this family, between 1 and 256. Defaults
   // to four so independent execution timelines can use distinct queues.

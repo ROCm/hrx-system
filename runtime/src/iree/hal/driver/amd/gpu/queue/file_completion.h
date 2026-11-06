@@ -7,7 +7,6 @@
 #ifndef IREE_HAL_DRIVER_AMD_GPU_QUEUE_FILE_COMPLETION_H_
 #define IREE_HAL_DRIVER_AMD_GPU_QUEUE_FILE_COMPLETION_H_
 
-#include "amdf/amdf.h"
 #include "iree/async/operations/scheduling.h"
 #include "iree/async/proactor.h"
 
@@ -29,8 +28,8 @@ typedef struct iree_hal_amd_gpu_file_completion_t {
   void (*notify)(void* user_data, iree_status_t status, bool retired);
   // Borrowed file slot, live through final notification.
   void* user_data;
-  // First native error, independent of asynchronous callback delivery.
-  iree_atomic_int64_t status;
+  // Owned first error, retained through the final retired callback.
+  iree_atomic_intptr_t status;
   // Coalesced callback ownership and monotonic native retirement proof.
   iree_atomic_int32_t state;
 } iree_hal_amd_gpu_file_completion_t;
@@ -41,11 +40,11 @@ void iree_hal_amd_gpu_file_completion_initialize(
     iree_async_proactor_t* proactor, void (*notify)(void*, iree_status_t, bool),
     void* user_data, iree_hal_amd_gpu_file_completion_t* completion);
 
-// Publishes native failure and, optionally, final access cessation. At most one
-// early failure precedes one retired notification. This ends the producer's
+// Consumes a failure and, optionally, publishes final access cessation. At most
+// one early failure precedes one retired notification. This ends the producer's
 // access to completion; the retired callback may reclaim it before return.
 void iree_hal_amd_gpu_file_completion_notify(
-    iree_hal_amd_gpu_file_completion_t* completion, amdf_status_t status,
+    iree_hal_amd_gpu_file_completion_t* completion, iree_status_t status,
     bool retired);
 
 #ifdef __cplusplus

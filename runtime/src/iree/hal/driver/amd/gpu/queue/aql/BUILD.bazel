@@ -404,6 +404,7 @@ iree_runtime_cc_test(
         ":packet",
         ":signal",
         ":submission",
+        ":transfer",
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async:platform",

@@ -76,9 +76,9 @@ typedef struct iree_hal_amd_gpu_pm4_frontier_request_t {
 static const iree_hal_queue_vtable_t iree_hal_amd_gpu_pm4_queue_vtable;
 
 static iree_status_t iree_hal_amd_gpu_pm4_file_submit(
-    iree_hal_queue_t* base, const iree_hal_transfer_operation_t* operation,
-    const void* before, const void* after,
-    iree_hal_amd_gpu_retirement_callback_t callback);
+    iree_hal_queue_t* base,
+    const iree_hal_amd_gpu_transfer_operation_t* operation, const void* before,
+    const void* after, iree_hal_amd_gpu_retirement_callback_t callback);
 
 static void iree_hal_amd_gpu_pm4_file_add_effects(
     iree_hal_queue_t* base, iree_hal_memory_effects_t effects, void* value) {
@@ -2651,6 +2651,7 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
       .waits = &queue->wait_context,
       .queue_ordinal = options->queue_ordinal,
       .native_family_ordinal = options->family_ordinal,
+      .transfer_site = IREE_HAL_MEMORY_SITE_QUEUE,
       .barrier_size = sizeof(iree_hal_amd_gpu_pm4_barrier_t),
       .add_effects = iree_hal_amd_gpu_pm4_file_add_effects,
       .submit = iree_hal_amd_gpu_pm4_file_submit};
@@ -2999,15 +3000,14 @@ static iree_status_t iree_hal_amd_gpu_pm4_queue_transfer(
 // File continuations already own dependency resolution and prepared barriers.
 // Reuse ordinary bounded transfer publication without another HAL replay layer.
 static iree_status_t iree_hal_amd_gpu_pm4_file_submit(
-    iree_hal_queue_t* base, const iree_hal_transfer_operation_t* operation,
-    const void* before, const void* after,
-    iree_hal_amd_gpu_retirement_callback_t callback) {
+    iree_hal_queue_t* base,
+    const iree_hal_amd_gpu_transfer_operation_t* operation, const void* before,
+    const void* after, iree_hal_amd_gpu_retirement_callback_t callback) {
   iree_hal_amd_gpu_pm4_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_check_acceptance(queue));
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create_file(
-      &queue->captures, base->queue_family, operation, before, after, callback,
-      &submission));
+      &queue->captures, operation, before, after, callback, &submission));
   iree_hal_amd_gpu_pm4_submit(queue, submission);
   return iree_ok_status();
 }

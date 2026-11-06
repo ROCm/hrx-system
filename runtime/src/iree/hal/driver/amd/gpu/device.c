@@ -1228,10 +1228,8 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   }
   bool has_file_staging = false;
   amdf_memory_profile_t file_profile;
-  if (transfer_family != UINT32_MAX) {
-    IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_file_staging_query_profile(
-        context, &file_profile, &has_file_staging));
-  }
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_file_staging_query_profile(
+      context, &file_profile, &has_file_staging));
   const bool has_transfer_queue = transfer_family != UINT32_MAX;
   iree_host_size_t total_size = sizeof(iree_hal_amd_gpu_device_t);
   const uint32_t source_count =
@@ -1363,10 +1361,9 @@ static iree_status_t iree_hal_amd_gpu_device_create_prepared(
   }
   if (iree_status_is_ok(status) && has_file_staging) {
     status = iree_hal_amd_gpu_file_staging_allocate(
-        (iree_hal_device_t*)device, context, transfer_family, &file_profile,
-        device->transfers.queue,
-        iree_async_proactor_pool_entry_proactor(device->proactor_entry), 8,
-        2 * 1024 * 1024,
+        (iree_hal_device_t*)device, context, family_ordinal, &file_profile,
+        true, iree_async_proactor_pool_entry_proactor(device->proactor_entry),
+        8, 2 * 1024 * 1024,
         iree_async_proactor_pool_entry_node_id(device->proactor_entry),
         host_allocator, &device->transfers.file_staging);
   }

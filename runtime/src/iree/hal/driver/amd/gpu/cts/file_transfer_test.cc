@@ -111,8 +111,8 @@ class SharedGpuNativeDevice final : public GpuNativeTest {
   uint32_t gfx_stepping() const { return gfx_stepping_; }
 
  protected:
-  // File transfer uses the device-wide SDMA owner. Select the production
-  // default compute family so RDNA exercises PM4 and CDNA exercises AQL.
+  // File copies use the selected compute queue. Select the production default
+  // family so RDNA exercises PM4 and CDNA exercises AQL.
   amdf_queue_command_type_t command_type() const override {
     return AMDF_QUEUE_COMMAND_TYPE_UNKNOWN;
   }

@@ -6,12 +6,15 @@
 
 #include <atomic>
 #include <cstring>
+#include <memory>
 #include <thread>
 #include <vector>
 
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/fabric/memory_backend_test_base.h"
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
+#include "iree/hal/driver/amd/gpu/queue/sdma/queue.h"
+#include "iree/hal/driver/amd/status.h"
 #include "iree/hal/utils/fd_file.h"
 #include "iree/hal/utils/host_semaphore.h"
 #include "iree/io/file_contents.h"
@@ -34,6 +37,16 @@ class FileTransferStagingTest : public MemoryBackendTest,
     uint32_t host_owners = 0;
     // Visibility boundaries completed by this coherent dependency.
     uint32_t boundaries = 0;
+    // Exact queue selected by the file caller; staging owns no native queue.
+    iree_hal_amd_gpu_sdma_queue_t* native = nullptr;
+    struct Copy {
+      // Placed command dominated by this dependency's lifetime.
+      iree_hal_amd_gpu_sdma_copy_t command = {};
+      // File owner notified by native failure and final retirement.
+      iree_hal_amd_gpu_retirement_callback_t callback = {};
+    };
+    // Stable accepted records, retained through the explicit native stop.
+    std::vector<std::unique_ptr<Copy>> copies;
   };
 
   static FileTransferStagingTest* FromQueue(amdf_kernel_queue_t* queue) {
@@ -123,11 +136,12 @@ class FileTransferStagingTest : public MemoryBackendTest,
     native_.required_flags =
         AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_HOST_FILE_IO;
     IREE_ASSERT_OK(iree_hal_amd_gpu_file_staging_allocate(
-        devices_[0], &context_, 0, &profile, sdma_, proactor_, 2, 4096,
+        devices_[0], &context_, 0, &profile, false, proactor_, 2, 4096,
         UINT32_MAX, allocator_, &staging_));
     iree_async_semaphore_wait_context_initialize(&waits_);
     iree_hal_amd_gpu_capture_pool_initialize(4096, allocator_, &captures_);
     queue_.queue_family = families_[0];
+    queue_.native = sdma_;
     executor_ = {
         .queue = &queue_,
         .context = &context_,
@@ -143,6 +157,7 @@ class FileTransferStagingTest : public MemoryBackendTest,
         .staging = staging_,
         .waits = &waits_,
         .native_family_ordinal = 0,
+        .transfer_site = IREE_HAL_MEMORY_SITE_QUEUE,
         .barrier_size = sizeof(uint32_t),
         .add_effects =
             [](iree_hal_queue_t*, iree_hal_memory_effects_t effects,
@@ -151,11 +166,38 @@ class FileTransferStagingTest : public MemoryBackendTest,
             },
         .submit =
             [](iree_hal_queue_t* queue,
-               const iree_hal_transfer_operation_t* operation, const void*,
-               const void*, iree_hal_amd_gpu_retirement_callback_t callback) {
-              EXPECT_EQ(operation,
-                        nullptr);  // All payloads must pass through SDMA.
+               const iree_hal_amd_gpu_transfer_operation_t* operation,
+               const void* before, const void* after,
+               iree_hal_amd_gpu_retirement_callback_t callback) {
               auto* boundary = static_cast<BoundaryQueue*>(queue);
+              if (operation) {
+                EXPECT_EQ(operation->type,
+                          IREE_HAL_TRANSFER_OPERATION_TYPE_COPY);
+                auto copy = std::make_unique<BoundaryQueue::Copy>();
+                IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_buffer_reference_resolve(
+                    &operation->source.device, &copy->command.source));
+                IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_buffer_reference_resolve(
+                    &operation->target.device, &copy->command.target));
+                copy->command.length = operation->length;
+                copy->command.effects.bits =
+                    *static_cast<const uint32_t*>(before) |
+                    *static_cast<const uint32_t*>(after);
+                copy->command.notify =
+                    [](void* user_data, amdf_status_t status,
+                       iree_hal_amd_gpu_sdma_retirement_t retirement) {
+                      auto* copy = static_cast<BoundaryQueue::Copy*>(user_data);
+                      copy->callback.fn(
+                          copy->callback.user_data,
+                          IREE_HAL_AMD_STATUS_FROM_AMDF(status, "native copy"),
+                          nullptr, retirement == IREE_HAL_AMD_GPU_SDMA_RETIRED);
+                    };
+                copy->command.user_data = copy.get();
+                copy->callback = callback;
+                auto* command = &copy->command;
+                boundary->copies.push_back(std::move(copy));
+                iree_hal_amd_gpu_sdma_queue_submit(boundary->native, command);
+                return iree_ok_status();
+              }
               iree_async_single_frontier_t frontier;
               iree_async_single_frontier_initialize(&frontier, 7,
                                                     ++boundary->boundaries);
@@ -325,6 +367,7 @@ class FileTransferStagingTest : public MemoryBackendTest,
     const uint64_t chunks = (length + 4095) / 4096;
     PumpUntil([&] { return submitted_ == chunks || queue_.host_owners == 0; });
     ASSERT_EQ(submitted_, chunks);
+    EXPECT_EQ(queue_.copies.size(), chunks);
     const auto source = iree_hal_amd_gpu_sdma_queue_publication_source(sdma_);
     while (source.publish(source.user_data)) {
     }
@@ -525,6 +568,64 @@ TEST_P(FileTransferStagingTest, RetirementBeforeFilePollPreservesFailure) {
   ExpectCompletion(IREE_STATUS_DATA_LOSS);
   pool_.reset();
   EXPECT_EQ(native_.destroy_count.load(), 1);
+}
+
+TEST_P(FileTransferStagingTest, FailedQueueDoesNotPoisonSharedFileStaging) {
+  ASSERT_NO_FATAL_FAILURE(Submit(true));
+  PumpUntil([&] { return file_failures_ != 0; });
+  ExpectPending();
+
+  // A second queue shares staging but has independent execution and completion.
+  // Its dependency executes copies inline while the failed queue still owns
+  // its accepted operands. The two requests touch disjoint device ranges.
+  BoundaryQueue other;
+  other.queue_family = queue_.queue_family;
+  auto executor = executor_;
+  executor.queue = &other;
+  executor.submit = [](iree_hal_queue_t* queue,
+                       const iree_hal_amd_gpu_transfer_operation_t* operation,
+                       const void*, const void*,
+                       iree_hal_amd_gpu_retirement_callback_t callback) {
+    if (operation) {
+      EXPECT_EQ(operation->type, IREE_HAL_TRANSFER_OPERATION_TYPE_COPY);
+      uint64_t source = 0, target = 0;
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_buffer_reference_resolve(
+          &operation->source.device, &source));
+      IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_buffer_reference_resolve(
+          &operation->target.device, &target));
+      std::memcpy(reinterpret_cast<void*>(target),
+                  reinterpret_cast<const void*>(source), operation->length);
+    } else {
+      ++static_cast<BoundaryQueue*>(queue)->boundaries;
+    }
+    callback.fn(callback.user_data, iree_ok_status(), nullptr, true);
+    return iree_ok_status();
+  };
+  Ref<iree_hal_semaphore_t> completed;
+  IREE_ASSERT_OK(iree_hal_host_semaphore_create(proactor_, 0, allocator_,
+                                                completed.out()));
+  if (GetParam()) {
+    std::memcpy(buffer_contents_ + 4096, expected_.data(), expected_.size());
+  }
+  iree_hal_semaphore_t* timeline = completed;
+  uint64_t value = 1;
+  const uint32_t barrier = 0;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit(
+      &executor, {}, {1, &timeline, &value}, file_,
+      GetParam() ? IREE_HAL_MEMORY_ACCESS_WRITE : IREE_HAL_MEMORY_ACCESS_READ,
+      0, buffer_, 4096, expected_.size(), &barrier, &barrier));
+  PumpUntil([&] { return other.host_owners == 0; });
+  uint64_t observed = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(completed, &observed));
+  EXPECT_EQ(observed, 1u);
+  EXPECT_EQ(other.boundaries, 2u);
+  EXPECT_EQ(
+      std::memcmp(buffer_contents_ + 4096, expected_.data(), expected_.size()),
+      0);
+  ExpectPending();
+  ASSERT_NO_FATAL_FAILURE(StopCopies());
+  PumpUntil([&] { return queue_.host_owners == 0; });
+  ExpectCompletion(IREE_STATUS_DATA_LOSS);
 }
 
 TEST_P(FileTransferStagingTest, FailureJoinsEveryAcceptedChunk) {

@@ -9,6 +9,7 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <memory>
 #include <thread>
 
 #include "iree/async/proactor_platform.h"
@@ -52,32 +53,33 @@ struct NativeQueue : iree_hal_queue_t {
   // Borrowed file owner held until the simulated native work retires.
   iree_hal_amd_gpu_retirement_callback_t pending_callback = {};
   // Captured native operands whose bytes remain borrowed until retirement.
-  iree_hal_transfer_operation_t pending_operation = {};
+  iree_hal_amd_gpu_transfer_operation_t pending_operation = {};
 
-  static void Copy(const iree_hal_transfer_operation_t* operation) {
+  static void Copy(const iree_hal_amd_gpu_transfer_operation_t* operation) {
     if (operation) {
       if (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD) {
-        const auto& copy = operation->upload;
-        auto* target = static_cast<iree::hal::testing::MappedTransferBuffer*>(
-            copy.target_buffer);
-        std::memcpy(target->device_contents.data() + copy.target_offset,
-                    copy.source, copy.length);
+        const auto& copy = operation->target.device;
+        auto* target =
+            static_cast<iree::hal::testing::MappedTransferBuffer*>(copy.buffer);
+        std::memcpy(target->device_contents.data() + copy.offset,
+                    operation->source.host, operation->length);
       } else {
         EXPECT_EQ(operation->type, IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD);
-        const auto& copy = operation->download;
-        auto* source = static_cast<iree::hal::testing::MappedTransferBuffer*>(
-            copy.source_buffer);
-        std::memcpy(copy.target,
-                    source->device_contents.data() + copy.source_offset,
-                    copy.length);
+        const auto& copy = operation->source.device;
+        auto* source =
+            static_cast<iree::hal::testing::MappedTransferBuffer*>(copy.buffer);
+        std::memcpy(operation->target.host,
+                    source->device_contents.data() + copy.offset,
+                    operation->length);
       }
     }
   }
 
-  static iree_status_t Submit(iree_hal_queue_t* base,
-                              const iree_hal_transfer_operation_t* operation,
-                              const void* before, const void* after,
-                              iree_hal_amd_gpu_retirement_callback_t callback) {
+  static iree_status_t Submit(
+      iree_hal_queue_t* base,
+      const iree_hal_amd_gpu_transfer_operation_t* operation,
+      const void* before, const void* after,
+      iree_hal_amd_gpu_retirement_callback_t callback) {
     auto* queue = static_cast<NativeQueue*>(base);
     EXPECT_FALSE(queue->submitting);
     queue->submitting = true;
@@ -144,6 +146,23 @@ struct Device {
 
 class FileTransferTest : public ::testing::Test {
  protected:
+  // Qualifies the device-address dependency consumed by the real file capture.
+  // Its storage stays live with this fixture until all native uses have joined.
+  void QualifyBuffer(iree::hal::testing::MappedTransferBuffer* buffer) {
+    device_scope_.bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] = 0;
+    device_contract_->scopes = &device_scope_;
+    device_binding_.device_address =
+        reinterpret_cast<uintptr_t>(buffer->device_contents.data());
+    buffer->memory.contract = device_contract_.get();
+    buffer->memory.bindings = &device_binding_;
+  }
+  // Queue's immutable buffer-access contract.
+  iree_hal_memory_scope_access_t device_scope_ = {};
+  // Native binding layout shared by the one buffer in each operation.
+  std::unique_ptr<iree_hal_memory_contract_t> device_contract_ =
+      std::make_unique<iree_hal_memory_contract_t>();
+  // Address of the dependency's device-visible bytes.
+  iree_hal_buffer_native_binding_t device_binding_ = {};
   void SetUp() override {
     IREE_ASSERT_OK(iree_async_proactor_create_platform(
         iree_async_proactor_options_default(), iree_allocator_system(),
@@ -205,10 +224,12 @@ class FileTransferTest : public ::testing::Test {
         .begin = NativeQueue::Begin,
         .end = NativeQueue::End,
         .waits = &waits_,
+        .transfer_site = IREE_HAL_MEMORY_SITE_QUEUE,
         .barrier_size = sizeof(uint64_t),
         .submit = NativeQueue::Submit,
     };
     auto buffer = iree::hal::testing::MakeMappedTransferBuffer();
+    QualifyBuffer(buffer.get());
     std::array<uint8_t, 64> expected = contents_;
     if (access == IREE_HAL_MEMORY_ACCESS_WRITE) {
       buffer->device_contents = expected;
@@ -321,10 +342,12 @@ void FileTransferTest::FailedNativeWork(iree_hal_memory_access_t access) {
       .begin = NativeQueue::Begin,
       .end = NativeQueue::End,
       .waits = &waits_,
+      .transfer_site = IREE_HAL_MEMORY_SITE_QUEUE,
       .barrier_size = sizeof(uint64_t),
       .submit = NativeQueue::Submit,
   };
   auto buffer = iree::hal::testing::MakeMappedTransferBuffer();
+  QualifyBuffer(buffer.get());
   const std::array<uint8_t, 64> expected = contents_;
   if (access == IREE_HAL_MEMORY_ACCESS_WRITE) {
     buffer->device_contents = expected;
@@ -375,6 +398,39 @@ TEST_F(FileTransferTest, FailedNativeReadPublishesOnlyAfterRetirement) {
 
 TEST_F(FileTransferTest, FailedNativeWritePublishesOnlyAfterRetirement) {
   FailedNativeWork(IREE_HAL_MEMORY_ACCESS_WRITE);
+}
+
+TEST_F(FileTransferTest, UnqualifiedMemoryFileFailsBeforeNativeSubmission) {
+  Device device;
+  iree_hal_queue_family_t family = {.device = device.get()};
+  NativeQueue queue;
+  queue.queue_family = &family;
+  iree_hal_amd_gpu_context_t context = {
+      .event_sink = iree_hal_device_event_sink_discard(),
+  };
+  const iree_hal_amd_gpu_file_executor_t executor = {
+      .queue = &queue,
+      .context = &context,
+      .captures = &captures_,
+      .begin = NativeQueue::Begin,
+      .end = NativeQueue::End,
+      .waits = &waits_,
+      .transfer_site = IREE_HAL_MEMORY_SITE_QUEUE,
+      .barrier_size = sizeof(uint64_t),
+      .submit = NativeQueue::Submit,
+  };
+  auto buffer = iree::hal::testing::MakeMappedTransferBuffer();
+  const uint64_t barrier = 0;
+  uint64_t value = 1;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_file_transfer_submit(
+      &executor, {}, {1, &completion_, &value}, file_,
+      IREE_HAL_MEMORY_ACCESS_READ, 0, buffer.get(), 0, contents_.size(),
+      &barrier, &barrier));
+  uint64_t observed = 0;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
+                        iree_hal_semaphore_query(completion_, &observed));
+  EXPECT_EQ(queue.submissions, 0u);
+  EXPECT_EQ(queue.host_owners, 0);
 }
 
 }  // namespace

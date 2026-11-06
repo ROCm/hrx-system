@@ -39,6 +39,10 @@ iree_status_t iree_hal_amd_gpu_buffer_reference_initialize(
 iree_status_t iree_hal_amd_gpu_buffer_reference_resolve(
     const iree_hal_amd_gpu_buffer_reference_t* reference,
     uint64_t* out_address) {
+  if (!reference->buffer) {
+    *out_address = reference->offset;
+    return iree_ok_status();
+  }
   const uint64_t base =
       iree_hal_buffer_native_binding(reference->buffer, reference->slot)
           .device_address;
