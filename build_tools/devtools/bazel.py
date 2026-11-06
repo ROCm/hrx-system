@@ -2407,16 +2407,28 @@ def query_compiling_targets_depending_on(
 
     targets = set()
     for line in completed.stdout.splitlines():
-        # Explicit aspect nodes are printed alongside rule nodes despite the
-        # kind() filter. Their owning rule is already present in the result.
-        if " of //" in line:
-            continue
         separator = line.rfind(" (")
         if separator < 0 or not line.endswith(")"):
             raise BazelSourceOwnerQueryError(
                 f"malformed Bazel compiling-dependent result: {line!r}"
             )
         label = line[:separator]
+        # Explicit aspect nodes are printed alongside rule nodes despite the
+        # kind() filter. Their owning rule is already present in the result.
+        # Canonical external-repository labels begin with @@, so validate the
+        # aspect shape rather than assuming every owner is in the main repo.
+        if " of " in label:
+            aspect_label, owner_label = label.rsplit(" of ", 1)
+            if "%" not in aspect_label or not owner_label.startswith(("//", "@")):
+                raise BazelSourceOwnerQueryError(
+                    f"malformed Bazel compiling-dependent aspect: {line!r}"
+                )
+            continue
+        # An external seed may appear in rdeps() even though the configured
+        # universe contains only first-party roots. It has no repository source
+        # for this clang-tidy pass; its first-party dependents remain in output.
+        if label.startswith("@"):
+            continue
         if not label.startswith("//"):
             raise BazelSourceOwnerQueryError(
                 f"unexpected Bazel compiling-dependent result: {line!r}"
