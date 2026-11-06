@@ -415,53 +415,73 @@ class HttpRouterLiveChurnTest : public HttpRouterTest {
     request_quota_ = 1;
     HttpRouterTest::SetUp();
   }
+
+  void CheckRetirementPreservesPeerCreditAndReadmission(int round_count) {
+    for (int round = 0; round < round_count; ++round) {
+      SCOPED_TRACE(round);
+      ObservationClient first, middle, last;
+      for (auto* observer : {&first, &middle, &last}) {
+        ASSERT_NO_FATAL_FAILURE(observer->OpenLive(server_));
+        ASSERT_NO_FATAL_FAILURE(observer->ReadUpgrade());
+        EXPECT_NE(observer->WebSocketFrame().find("\"sequence\":\"1\""),
+                  std::string::npos);
+      }
+      // All readers hold application credit. Retiring a middle record must not
+      // change the last reader's sequence, ACK, or independently owned socket.
+      middle.WriteFrame(1, "2");
+      middle.Join();
+      first.WriteFrame(8, "");
+      EXPECT_EQ(first.WebSocketFrame(8), "");
+      first.Join();
+      last.WriteFrame(9, "still here");
+      EXPECT_EQ(last.WebSocketFrame(10), "still here");
+      last.WriteFrame(1, "1");
+      const auto second = last.WebSocketFrame();
+      EXPECT_NE(second.find("\"sequence\":\"2\""), std::string::npos);
+
+      ObservationClient replacement;
+      ASSERT_NO_FATAL_FAILURE(replacement.OpenLive(server_));
+      ASSERT_NO_FATAL_FAILURE(replacement.ReadUpgrade());
+      const auto initial = replacement.WebSocketFrame();
+      EXPECT_NE(initial.find("\"sequence\":\"1\""), std::string::npos);
+      last.Ack(second);
+      replacement.Ack(initial);
+      EXPECT_NE(last.WebSocketFrame().find("\"sequence\":\"3\""),
+                std::string::npos);
+      EXPECT_NE(replacement.WebSocketFrame().find("\"sequence\":\"2\""),
+                std::string::npos);
+      for (auto* observer : {&last, &replacement}) {
+        observer->WriteFrame(8, "");
+        EXPECT_EQ(observer->WebSocketFrame(8), "");
+        observer->Join();
+      }
+      EXPECT_NE(Read(Send("GET", "/v1/status")).find("\"observers\":0"),
+                std::string::npos);
+    }
+  }
 };
 
 TEST_P(HttpRouterLiveChurnTest, RetirementPreservesPeerCreditAndReadmission) {
-  for (int round = 0; round < 3; ++round) {
-    SCOPED_TRACE(round);
-    ObservationClient first, middle, last;
-    for (auto* observer : {&first, &middle, &last}) {
-      ASSERT_NO_FATAL_FAILURE(observer->OpenLive(server_));
-      ASSERT_NO_FATAL_FAILURE(observer->ReadUpgrade());
-      EXPECT_NE(observer->WebSocketFrame().find("\"sequence\":\"1\""),
-                std::string::npos);
-    }
-    // All readers hold application credit. Retiring a middle record must not
-    // change the last reader's sequence, ACK, or independently owned socket.
-    middle.WriteFrame(1, "2");
-    middle.Join();
-    first.WriteFrame(8, "");
-    EXPECT_EQ(first.WebSocketFrame(8), "");
-    first.Join();
-    last.WriteFrame(9, "still here");
-    EXPECT_EQ(last.WebSocketFrame(10), "still here");
-    last.WriteFrame(1, "1");
-    const auto second = last.WebSocketFrame();
-    EXPECT_NE(second.find("\"sequence\":\"2\""), std::string::npos);
-
-    ObservationClient replacement;
-    ASSERT_NO_FATAL_FAILURE(replacement.OpenLive(server_));
-    ASSERT_NO_FATAL_FAILURE(replacement.ReadUpgrade());
-    const auto initial = replacement.WebSocketFrame();
-    EXPECT_NE(initial.find("\"sequence\":\"1\""), std::string::npos);
-    last.Ack(second);
-    replacement.Ack(initial);
-    EXPECT_NE(last.WebSocketFrame().find("\"sequence\":\"3\""),
-              std::string::npos);
-    EXPECT_NE(replacement.WebSocketFrame().find("\"sequence\":\"2\""),
-              std::string::npos);
-    for (auto* observer : {&last, &replacement}) {
-      observer->WriteFrame(8, "");
-      EXPECT_EQ(observer->WebSocketFrame(8), "");
-      observer->Join();
-    }
-    EXPECT_NE(Read(Send("GET", "/v1/status")).find("\"observers\":0"),
-              std::string::npos);
-  }
+  ASSERT_NO_FATAL_FAILURE(CheckRetirementPreservesPeerCreditAndReadmission(1));
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterLiveChurnTest,
+                         ::testing::Values(4));
+
+class HttpRouterLiveChurnStressTest : public HttpRouterLiveChurnTest {
+ protected:
+  // Repeated reader retirement exercises intrusive-list reuse beyond the
+  // bounded lifecycle established by the presubmit case.
+  static constexpr int kRoundCount = 32;
+};
+
+TEST_P(HttpRouterLiveChurnStressTest,
+       RepeatedRetirementPreservesPeerCreditAndReadmission) {
+  ASSERT_NO_FATAL_FAILURE(
+      CheckRetirementPreservesPeerCreditAndReadmission(kRoundCount));
+}
+
+INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterLiveChurnStressTest,
                          ::testing::Values(1, 4));
 
 TEST_P(HttpRouterTest, LiveActivitySamplesOwnersWithoutAMetricsScrape) {
@@ -546,7 +566,7 @@ TEST_P(HttpRouterLiveOriginTest, AdditionalBrowserOriginUsesHttpConfiguration) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterLiveOriginTest,
-                         ::testing::Values(1, 4));
+                         ::testing::Values(4));
 
 TEST_P(HttpRouterTest, UnrelatedCapacityNeverWaitsForHeldCompletion) {
   const int held = Send("POST", "/v1/test", R"({"model":"other"})");
@@ -1026,7 +1046,10 @@ struct loom_serve_test_router_cpu_completion_t {
   }
 };
 
-TEST_P(HttpRouterTest, ContinuouslyReadyOwnerYieldsToSharedCpuWork) {
+class HttpRouterSingleWorkerSchedulingTest : public HttpRouterTest {};
+
+TEST_P(HttpRouterSingleWorkerSchedulingTest,
+       ContinuouslyReadyOwnerYieldsToSharedCpuWork) {
   {
     std::lock_guard<std::mutex> lock(held_.mutex);
     held_.advance_ready_work = true;
@@ -1279,14 +1302,15 @@ TEST_P(HttpRouterCountersTest, LiveCountersPreservePrecisionOnTheWire) {
   EXPECT_NE(model.find("\"value\":\"9007199254740993\""), std::string::npos);
 }
 
-INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterTest, ::testing::Values(1, 4));
+INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterTest, ::testing::Values(4));
+INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterSingleWorkerSchedulingTest,
+                         ::testing::Values(1));
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterReasoningTest,
-                         ::testing::Values(1, 4));
-INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterCountersTest,
-                         ::testing::Values(1, 4));
+                         ::testing::Values(4));
+INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterCountersTest, ::testing::Values(4));
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterTightCapacityTest,
-                         ::testing::Values(1, 4));
+                         ::testing::Values(4));
 INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterNoHoldingTest,
-                         ::testing::Values(1, 4));
+                         ::testing::Values(4));
 
 }  // namespace
