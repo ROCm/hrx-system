@@ -93,3 +93,15 @@ func.def @structured_borrow(%condition: i1, %input: buffer) {
   }
   func.return
 }
+
+// ====
+// DCE must preserve managed moves: their destination still owns the obligation
+// even when ordinary SSA use counting would consider it dead.
+// RUN: pass dce,ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @leaked_move(%source: reg<vm.ref : ref<@Object>>) asm {
+  %moved = move %source : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  // ERROR@+1: DOMINANCE/014 {value_name="moved"}
+  return
+}

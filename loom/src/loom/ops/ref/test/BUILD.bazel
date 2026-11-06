@@ -8,6 +8,7 @@ package(default_visibility = ["//visibility:private"])
 loom_check_test_suite(
     name = "test",
     srcs = [
+        "borrow.loom-test",
         "duplicate.loom-test",
         "roundtrip.loom-test",
     ],

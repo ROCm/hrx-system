@@ -32,7 +32,11 @@ loom_cc_instance_library(
 
 loom_generated_cc_library(
     name = "ref",
-    hdrs = ["ops.h"],
+    srcs = ["verify.c"],
+    hdrs = [
+        "ops.h",
+        "verify.h",
+    ],
     args = ["--dialect=ref"],
     extra_output_flags = [
         "--ops-include",
@@ -48,8 +52,11 @@ loom_generated_cc_library(
     textual_hdrs = ["ops.inc"],
     deps = [
         ":builders",
+        "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
+        "//runtime/src/iree/base",
     ],
 )

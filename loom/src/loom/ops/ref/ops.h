@@ -20,7 +20,8 @@ extern "C" {
 
 enum {
   LOOM_OP_REF_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_REF, 0),
-  LOOM_OP_REF_COUNT_ = 1,
+  LOOM_OP_REF_BORROW = LOOM_OP_KIND(LOOM_DIALECT_REF, 1),
+  LOOM_OP_REF_COUNT_ = 2,
 };
 
 // LOOM_OP_REF_DUPLICATE: Create an independent handle to the same managed payload, preserving its type and null state. Duplicating ref adds an owner that must be released or transferred independently. Duplicating ptr preserves its borrowed mode and any protection needed through its final use. The source remains valid; live source and result lifetimes are independent.
@@ -41,6 +42,21 @@ iree_status_t loom_value_duplication_facts(
     const loom_module_t* module, const loom_op_t* op,
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
+
+// LOOM_OP_REF_BORROW: Create a pointer to an owner's exact managed payload without consuming the owner. Null produces null. The pointer remains live through its final reachable use, even when the original owner is released first. The compiler acquires protection when it cannot prove a covering owner and retires that protection after the final use. The source owner's explicit lifetime is unchanged.
+// %pointer = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>
+LOOM_DEFINE_ISA(loom_ref_borrow_isa, LOOM_OP_REF_BORROW)
+LOOM_DEFINE_OPERAND(loom_ref_borrow_owner, 0)
+LOOM_DEFINE_RESULT(loom_ref_borrow_pointer, 0)
+iree_status_t loom_ref_borrow_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t owner,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_ref_borrow_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // Returns the vtable array for the ref dialect.
 const loom_op_vtable_t* const* loom_ref_dialect_vtables(

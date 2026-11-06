@@ -16,6 +16,7 @@
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/cfg/ops.h"
+#include "loom/ops/ref/ops.h"
 #include "loom/ops/scf/ops.h"
 
 static iree_status_t loom_low_lower_structural_require_blocks(
@@ -119,6 +120,11 @@ iree_status_t loom_low_lower_structural_plan_op(
                                         loom_op_const_results(source_op)[i]);
     }
     return iree_ok_status();
+  }
+  if (loom_ref_borrow_isa(source_op)) {
+    return loom_low_lower_structural_plan_types(
+        context, source_op, loom_op_const_results(source_op),
+        source_op->result_count, /*retain_bindings=*/true);
   }
   if (loom_buffer_assume_same_root_isa(source_op)) {
     loom_low_lower_inherit_value_type(

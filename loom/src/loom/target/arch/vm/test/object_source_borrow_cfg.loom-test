@@ -1,0 +1,175 @@
+// Both edges of a non-inlined choice retire the unselected protection and
+// transfer the selected protection into the joined pointer.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%id: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "consume", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @consume(%owner: reg<vm.ref : ref<@Object>>)
+
+low.func.decl import(native, "read", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%pointer: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def noinline target<vm.core>(@vm) abi(vm_function) @choose(%condition: reg<vm.value : i1>) asm {
+  %one = constant.i32 1
+  %two = constant.i32 2
+  %left, %unused_left = low.func.call @create(%one) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  %right, %unused_right = low.func.call @create(%two) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  // REMARK@+1: DOMINANCE/021
+  %left_pointer = borrow %left : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ptr<@Object>>
+  // REMARK@+1: DOMINANCE/021
+  %right_pointer = borrow %right : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ptr<@Object>>
+  low.func.call @consume(%left) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @consume(%right) : (reg<vm.ref : ref<@Object>>)
+  low.cond_br %condition, ^left_path, ^right_path : reg<vm.value : i1>
+^left_path:
+  low.br ^joined(%left_pointer: reg<vm.ref : ptr<@Object>>)
+^right_path:
+  low.br ^joined(%right_pointer: reg<vm.ref : ptr<@Object>>)
+^joined(%pointer: reg<vm.ref : ptr<@Object>>):
+  low.func.call @read(%pointer) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  return
+}
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %true = constant.i32 1 : reg<vm.value : i1>
+  %false = constant.i32 0 : reg<vm.value : i1>
+  low.func.call @choose(%true) : (reg<vm.value : i1>)
+  low.func.call @choose(%false) : (reg<vm.value : i1>)
+  return
+}
+
+// ----
+create 1
+create 2
+consume 1
+consume 2
+destroy 2
+read 1
+destroy 1
+live 0
+create 1
+create 2
+consume 1
+consume 2
+destroy 1
+read 2
+destroy 2
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Each iteration reads the previous object's pointer after consuming the new
+// owner. A static producer in the loop must not stand in for the old payload's
+// dynamic owner. Each old object dies immediately after its final read.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%id: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "consume", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @consume(%owner: reg<vm.ref : ref<@Object>>)
+
+low.func.decl import(native, "read", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%pointer: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %zero = constant.i32 0
+  %one = constant.i32 1
+  %limit = constant.i32 3
+  %initial, %unused_initial = low.func.call @create(%zero) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  // REMARK@+1: DOMINANCE/021
+  %saved = borrow %initial : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ptr<@Object>>
+  low.func.call @consume(%initial) : (reg<vm.ref : ref<@Object>>)
+  low.br ^loop(%one: reg<vm.value : i32>, %saved: reg<vm.ref : ptr<@Object>>)
+^loop(%id: reg<vm.value : i32>, %previous: reg<vm.ref : ptr<@Object>>):
+  %owner, %unused = low.func.call @create(%id) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  // REMARK@+1: DOMINANCE/021
+  %pointer = borrow %owner : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ptr<@Object>>
+  low.func.call @consume(%owner) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @read(%previous) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  %next = integer.add.i32 %id, %one
+  %more = integer.compare.i32 %id, %limit, "slt"
+  low.cond_br %more, ^repeat, ^done : reg<vm.value : i1>
+^repeat:
+  low.br ^loop(%next: reg<vm.value : i32>, %pointer: reg<vm.ref : ptr<@Object>>)
+^done:
+  low.func.call @read(%pointer) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  return
+}
+
+// ----
+create 0
+consume 0
+create 1
+consume 1
+read 0
+destroy 0
+live 1
+create 2
+consume 2
+read 1
+destroy 1
+live 1
+create 3
+consume 3
+read 2
+destroy 2
+live 1
+read 3
+destroy 3
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A pointer moves through a local slot and is reloaded twice, once by copy and
+// once by move. Emptying the slot lets final-use cleanup retire the last guard.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%id: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "consume", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @consume(%owner: reg<vm.ref : ref<@Object>>)
+
+low.func.decl import(native, "read_pair", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read_pair(%left: reg<vm.ref : ptr<@Object>>, %right: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %slot = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %id = constant.i32 7
+  %owner, %unused = low.func.call @create(%id) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  // REMARK@+1: DOMINANCE/021
+  %pointer = borrow %owner : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ptr<@Object>>
+  low.spill.move %pointer, %slot : reg<vm.ref : ptr<@Object>>, low.storage<private>
+  low.func.call @consume(%owner) : (reg<vm.ref : ref<@Object>>)
+  %copy = low.reload %slot : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  %moved = low.reload.move %slot : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  low.func.call @read_pair(%copy, %moved) : (reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  return
+}
+
+// ----
+create 7
+consume 7
+read 7
+read 7
+destroy 7
+live 0
+OK 0
+retired 0

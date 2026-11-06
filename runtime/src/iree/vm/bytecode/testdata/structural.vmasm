@@ -226,6 +226,8 @@ vm.module core(0.0) {
       %v0 = ref.compare.null %r0
       %v0 = ref.compare.eq %r0, %r0
       %r0 = ref.retain %r0
+      %r1 = ref.borrow %r0
+      %r1 = ref.copy %r0
       %r0 = ref.select %v0, %r0, %r1
       %r0 = ref.move %r1
       ref.discard %r0
@@ -233,6 +235,8 @@ vm.module core(0.0) {
       %r0 = ref.stack.load.move #r0
       ref.stack.store.retain %r0, #r0
       ref.stack.store.move %r0, #r0
+      %r0 = ref.stack.load.copy #r0
+      ref.stack.store.copy %r0, #r0
       ref.stack.discard #r0
       %r0 = buffer.allocate %v0 {minimum_alignment_log2 = 0}
       %v0 = buffer.length %r0

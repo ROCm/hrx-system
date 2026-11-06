@@ -1,0 +1,275 @@
+// A saved source pointer keeps the payload live past explicit owner consumption
+// and releases its last protection before the next unrelated native call.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "count") @count(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 1 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  // REMARK@+1: DOMINANCE/021
+  %pointer = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  func.call @consume(%owner) : (ref<@Object>)
+  func.call @count(%pointer) : (ptr<@Object>)
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 1
+consume 1
+references 2
+read 1
+destroy 1
+live 0
+OK 0
+retired 0
+
+// ====
+
+// An owner whose explicit lifetime covers the complete pointer-copy chain needs
+// no extra protection. The native count observes physical call transport too.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "count") @count(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 1 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %pointer = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  %copy = ref.duplicate %pointer : ptr<@Object>
+  func.call @count(%copy) : (ptr<@Object>)
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.call @consume(%owner) : (ref<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 1
+references 1
+read 1
+consume 1
+destroy 1
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Passing both handles to one call cannot establish coverage: the callee
+// consumes the owner before reading the pointer.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume_read") @consume_read(%owner: ref<@Object>, %pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 2 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  // REMARK@+1: DOMINANCE/021
+  %pointer = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  func.call @consume_read(%owner, %pointer) : (ref<@Object>, ptr<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 2
+consume 2
+read 2
+destroy 2
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Protection follows independent copies. Retiring the original pointer does
+// not invalidate its saved copy, and the last copy retires before observe.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 3 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  // REMARK@+1: DOMINANCE/021
+  %pointer = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  %saved = ref.duplicate %pointer : ptr<@Object>
+  func.call @consume(%owner) : (ref<@Object>)
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.call @read(%saved) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 3
+consume 3
+read 3
+live 1
+read 3
+destroy 3
+live 0
+OK 0
+retired 0
+
+// ====
+
+// An escaping result protects its lifetime beyond the frame that owned it.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @save(%owner: ref<@Object>) -> (ptr<@Object>) {
+  // REMARK@+1: DOMINANCE/021
+  %pointer = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  func.call @consume(%owner) : (ref<@Object>)
+  func.return %pointer : ptr<@Object>
+}
+
+func.def public @run() {
+  %id = scalar.constant 4 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %pointer = func.call @save(%owner) : (ref<@Object>) -> (ptr<@Object>)
+  func.call @observe() : ()
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 4
+consume 4
+live 1
+read 4
+destroy 4
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Both an unused borrow and null projection preserve the source owner's
+// explicit lifetime. Null remains valid after consuming its source handle.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "create_null") @create_null() -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "count") @count(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 5 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %unused_borrow = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  func.call @observe() : ()
+  func.call @consume(%owner) : (ref<@Object>)
+  %null_owner, %unused_null = func.call @create_null() : () -> (ref<@Object>, ptr<@Object>)
+  // REMARK@+1: DOMINANCE/021
+  %null_pointer = ref.borrow %null_owner : ref<@Object> -> ptr<@Object>
+  func.call @consume(%null_owner) : (ref<@Object>)
+  func.call @count(%null_pointer) : (ptr<@Object>)
+  func.call @read(%null_pointer) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 5
+live 1
+consume 5
+destroy 5
+consume -1
+references 0
+read -1
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A protected pointer held by a suspended caller retires on terminal failure.
+// The callee never runs the subsequent payload read or ordinary cleanup path.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "fail") @fail()
+
+func.def noinline @child(%pointer: ptr<@Object>) {
+  func.call @fail() : ()
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.return
+}
+
+func.def public @run() {
+  %id = scalar.constant 6 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  // REMARK@+1: DOMINANCE/021
+  %pointer = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  func.call @consume(%owner) : (ref<@Object>)
+  func.call @child(%pointer) : (ptr<@Object>)
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.return
+}
+
+// ----
+create 6
+consume 6
+fail 1
+destroy 6
+ABORTED 0
+retired 0

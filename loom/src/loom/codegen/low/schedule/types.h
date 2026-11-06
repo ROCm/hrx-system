@@ -27,6 +27,7 @@
 #include "loom/codegen/low/memory_access.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/register_requirements.h"
+#include "loom/codegen/low/schedule/borrow.h"
 #include "loom/codegen/low/schedule/dependencies.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/error/emitter.h"
@@ -820,6 +821,8 @@ typedef struct loom_low_schedule_table_t {
   const loom_low_memory_access_map_t* memory_accesses;
   // Declared interfaces and storage retained from the immutable function model.
   loom_low_function_requirements_t requirements;
+  // Lifetime coverage selected over this exact scheduled snapshot.
+  loom_low_borrow_plan_t borrows;
   // Function-local value IDs indexed by local value ordinal.
   const loom_value_id_t* value_ids;
   // Number of entries in |value_ids|.

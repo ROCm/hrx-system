@@ -37,6 +37,7 @@
 #include "loom/ops/encoding/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/ref/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/ops/view/ops.h"
@@ -196,6 +197,7 @@ static bool loom_low_lower_op_is_structural(
     return true;
   }
   switch (op->kind) {
+    case LOOM_OP_REF_BORROW:
     case LOOM_OP_BUFFER_ASSUME_SAME_ROOT:
     case LOOM_OP_CFG_BR:
     case LOOM_OP_CFG_COND_BR:

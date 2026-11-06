@@ -299,7 +299,7 @@ retired 0
 
 // ====
 
-// Seventeen borrowed aliases cross the real sixteen-field direct-call boundary
+// Seventeen aliases of a source borrow cross the sixteen-field direct-call boundary
 // in both directions. The overflow cell must retire with the final alias.
 // RUN: emit vm-object-lifetime
 type.decl import("lifetime", "object") @Object
@@ -318,7 +318,9 @@ func.def noinline @relay(%a: ptr<@Object>, %b: ptr<@Object>, %c: ptr<@Object>, %
 
 func.def public @run() {
   %identity = scalar.constant 3 : i32
-  %owner, %pointer = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %owner, %unused = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  // REMARK@+1: DOMINANCE/021
+  %pointer = ref.borrow %owner : ref<@Object> -> ptr<@Object>
   func.call @consume(%owner) : (ref<@Object>)
   %a, %b, %c, %d, %e, %f, %g, %h, %i, %j, %k, %l, %m, %n, %o, %p, %q = func.call @relay(%pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer) : (ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>) -> (ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>)
   func.call @read(%a) : (ptr<@Object>)

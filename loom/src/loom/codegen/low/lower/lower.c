@@ -37,6 +37,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/ref/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
 #include "loom/rewrite/remap.h"
@@ -601,6 +602,17 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_lower_structural_op(
   if (loom_low_lower_source_value_storage_op_is_duplication(context, source_op,
                                                             traits)) {
     return loom_low_lower_emit_value_duplication(context, source_op);
+  }
+  if (loom_ref_borrow_isa(source_op)) {
+    const loom_value_id_t source_pointer = loom_ref_borrow_pointer(source_op);
+    loom_op_t* borrow_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_borrow_build(
+        loom_low_lower_context_builder(context),
+        loom_low_lower_lookup_value(context, loom_ref_borrow_owner(source_op)),
+        loom_low_lower_value_binding_type(context, source_pointer),
+        source_op->location, &borrow_op));
+    return loom_low_lower_bind_value(context, source_pointer,
+                                     loom_low_borrow_pointer(borrow_op));
   }
   if (loom_low_lower_source_op_is_callable_exit(context, source_op)) {
     const loom_value_id_t* values = loom_op_const_operands(source_op);

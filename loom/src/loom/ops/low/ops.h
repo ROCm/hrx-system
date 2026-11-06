@@ -59,7 +59,8 @@ enum {
   LOOM_OP_LOW_SPILL_MOVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 35),
   LOOM_OP_LOW_RELOAD_MOVE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 36),
   LOOM_OP_LOW_RELEASE = LOOM_OP_KIND(LOOM_DIALECT_LOW, 37),
-  LOOM_OP_LOW_COUNT_ = 38,
+  LOOM_OP_LOW_BORROW = LOOM_OP_KIND(LOOM_DIALECT_LOW, 38),
+  LOOM_OP_LOW_COUNT_ = 39,
 };
 
 // Symbol visibility. Absent (0) means private (module-internal).
@@ -454,7 +455,7 @@ iree_status_t loom_low_copy_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
-loom_trait_flags_t loom_low_copy_effective_traits(
+loom_trait_flags_t loom_low_transfer_effective_traits(
     const loom_module_t* module, const loom_op_t* op);
 iree_status_t loom_low_copy_facts(
     loom_fact_context_t* context,
@@ -478,6 +479,8 @@ iree_status_t loom_low_move_build(
     loom_type_t result_type,
     loom_location_id_t location,
     loom_op_t** out_op);
+loom_trait_flags_t loom_low_transfer_effective_traits(
+    const loom_module_t* module, const loom_op_t* op);
 iree_status_t loom_low_move_facts(
     loom_fact_context_t* context,
     const loom_module_t* module, const loom_op_t* op,
@@ -1036,6 +1039,21 @@ iree_status_t loom_low_release_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_low_release_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_LOW_BORROW: Project an owning managed reference into an independent pointer carrier of the same nominal payload. The owner remains valid and keeps its explicit lifetime. The pointer remains live through its final use: emission acquires protection unless a covering owner is proven. This safe operation does not expose an unchecked machine borrow.
+// %pointer = low.borrow %owner : reg<vm.ref : ref<@Frame>> -> reg<vm.ref : ptr<@Frame>>
+LOOM_DEFINE_ISA(loom_low_borrow_isa, LOOM_OP_LOW_BORROW)
+LOOM_DEFINE_OPERAND(loom_low_borrow_owner, 0)
+LOOM_DEFINE_RESULT(loom_low_borrow_pointer, 0)
+iree_status_t loom_low_borrow_build(
+    loom_builder_t* builder,
+    loom_may_consume loom_value_id_t owner,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_low_borrow_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 

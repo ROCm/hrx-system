@@ -80,6 +80,13 @@ iree_status_t Consume(Trace* trace, const NativeCall* params) {
   return status;
 }
 
+iree_status_t ConsumeRead(Trace* trace, const NativeCall* params) {
+  IREE_RETURN_IF_ERROR(Consume(trace, params));
+  iree_vm_ref_t pointer = iree_vm_ref_null();
+  iree_vm_call_ref_argument_load_borrow(&params->call, 1, &pointer);
+  return ObserveObject(trace, "read", pointer);
+}
+
 iree_vm_ref_t CreateObject(Trace* trace, int32_t identity) {
   auto* object = new Object;
   iree_vm_ref_object_initialize(&object->ref_object);
@@ -177,17 +184,18 @@ const iree_vm_module_callable_type_declaration_t kCallableTypes[] = {
     {{{kIdentityFields, 1, 1, 0, 0}, {kFactoryFields, 2, 0, 2, 0}}, 0, 0, 0},
     {{{kOwnedFields, 1, 0, 1, 0}, {}}, 0, 0, 0},
     {{{kBorrowedFields, 1, 0, 1, 0}, {}}, 0, 0, 0},
+    {{{kFactoryFields, 2, 0, 2, 0}, {}}, 0, 0, 0},
     {{{kPairFields, 2, 0, 2, 0}, {}}, 0, 0, 0}};
 const iree_vm_module_export_declaration_t kExports[] = {
-    {IREE_SV("consume"), 3, 0, 0},     {IREE_SV("count"), 4, 8, 0},
-    {IREE_SV("create"), 2, 1, 0},      {IREE_SV("create_fail"), 2, 2, 0},
-    {IREE_SV("create_null"), 1, 3, 0}, {IREE_SV("fail"), 0, 4, 0},
-    {IREE_SV("observe"), 0, 5, 0},     {IREE_SV("read"), 4, 6, 0},
-    {IREE_SV("read_pair"), 5, 7, 0}};
+    {IREE_SV("consume"), 3, 0, 0},     {IREE_SV("consume_read"), 5, 9, 0},
+    {IREE_SV("count"), 4, 8, 0},       {IREE_SV("create"), 2, 1, 0},
+    {IREE_SV("create_fail"), 2, 2, 0}, {IREE_SV("create_null"), 1, 3, 0},
+    {IREE_SV("fail"), 0, 4, 0},        {IREE_SV("observe"), 0, 5, 0},
+    {IREE_SV("read"), 4, 6, 0},        {IREE_SV("read_pair"), 6, 7, 0}};
 using NativeFunction = iree_status_t (*)(Trace*, const NativeCall*);
-constexpr NativeFunction kFunctions[] = {Consume,    Create,   CreateFail,
-                                         CreateNull, Fail,     Observe,
-                                         Read,       ReadPair, Count};
+constexpr NativeFunction kFunctions[] = {
+    Consume, Create, CreateFail, CreateNull, Fail,
+    Observe, Read,   ReadPair,   Count,      ConsumeRead};
 
 struct ObjectModule {
   // TableModule and its contained VM module both occupy offset zero.

@@ -680,6 +680,30 @@ static iree_status_t loom_vm_function_storage(
       is_store);
 }
 
+static iree_status_t loom_vm_function_borrow(
+    const loom_low_emission_frame_t* frame,
+    const loom_low_schedule_node_t* node, iree_io_stream_t* stream) {
+  const loom_low_allocation_assignment_t* owner =
+      loom_low_allocation_assignment_for_value_ordinal(
+          &frame->allocation,
+          loom_low_schedule_node_const_operand_ordinals(node)[0], NULL);
+  const loom_low_allocation_assignment_t* pointer =
+      loom_low_allocation_assignment_for_value_ordinal(
+          &frame->allocation,
+          loom_low_schedule_node_const_result_ordinals(node)[0], NULL);
+  const iree_vm_bytecode_ref_retain_t instruction = {
+      .opcode =
+          frame->schedule.borrows
+                      .values[loom_low_schedule_node_const_result_ordinals(
+                          node)[0]] == LOOM_LOW_BORROW_COVERED
+              ? IREE_VM_BYTECODE_OPCODE_REF_BORROW
+              : IREE_VM_BYTECODE_OPCODE_REF_RETAIN,
+      .destination_r8 = (uint8_t)pointer->location_base,
+      .source_r8 = (uint8_t)owner->location_base,
+  };
+  return iree_io_stream_write(stream, sizeof(instruction), &instruction);
+}
+
 static iree_status_t loom_vm_function_release(
     const loom_low_emission_frame_t* frame,
     const loom_low_schedule_node_t* node, iree_io_stream_t* stream) {
@@ -1014,6 +1038,8 @@ iree_status_t loom_vm_function_plan_write(
         status = loom_vm_function_storage(&frame, node, &storage, stream);
       } else if (loom_low_release_isa(node->op)) {
         status = loom_vm_function_release(&frame, node, stream);
+      } else if (loom_low_borrow_isa(node->op)) {
+        status = loom_vm_function_borrow(&frame, node, stream);
       } else if (loom_low_return_isa(node->op)) {
         status = loom_vm_function_return(&frame, node, &return_scratch,
                                          &storage, stream, signature, out_row);

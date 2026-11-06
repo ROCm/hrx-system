@@ -14,6 +14,11 @@ extern "C" {
 #endif
 
 typedef struct loom_low_descriptor_registry_t loom_low_descriptor_registry_t;
+typedef struct loom_low_descriptor_set_t loom_low_descriptor_set_t;
+
+// Queries an already-bound, immutable instruction set without resolving it.
+loom_ownership_effect_provider_t loom_low_ownership_effect_provider(
+    const loom_low_descriptor_set_t* set);
 
 // Binds verified Low instruction ownership to the shared lifetime analysis.
 // The registry and its immutable descriptor tables outlive the analysis.

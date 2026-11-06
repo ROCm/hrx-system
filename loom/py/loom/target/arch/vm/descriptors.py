@@ -347,7 +347,11 @@ def _descriptor(
         if field.role in _OPERAND_ROLES
     )
     # Invocation aborts are runtime behavior, not compiler-visible effects.
-    # State access and acquisition of an independent owner constrain removal.
+    # Owner acquisition must also precede later source consumption. A removal
+    # flag alone does not establish scheduling dependencies with releases.
+    creates_owner = any(
+        operand.ownership is OwnershipEffect.OWNED for operand in operands
+    )
     effects = tuple(
         dict.fromkeys(
             Effect(
@@ -360,7 +364,7 @@ def _descriptor(
             )
             for effect in instruction.state_effects
         )
-    )
+    ) + ((Effect(EffectKind.UNKNOWN, MemorySpace.GENERIC),) if creates_owner else ())
     return Descriptor(
         key=f"vm.{instruction.mnemonic}",
         mnemonic=instruction.mnemonic,
@@ -373,10 +377,7 @@ def _descriptor(
         encoding_format_id=instruction.byte_length,
         effects=effects,
         flags=(
-            DescriptorFlag.SIDE_EFFECTING
-            if effects
-            or any(operand.ownership is OwnershipEffect.OWNED for operand in operands)
-            else DescriptorFlag.DEAD_REMOVABLE,
+            DescriptorFlag.SIDE_EFFECTING if effects else DescriptorFlag.DEAD_REMOVABLE,
         ),
         instruction_classes=(
             InstructionClass.GENERIC_MEMORY

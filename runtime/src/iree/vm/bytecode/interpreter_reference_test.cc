@@ -168,7 +168,7 @@ class BytecodeReferenceTest : public ::testing::Test {
   iree_vm_invocation_t* invocation_ = nullptr;
 };
 
-TEST_F(BytecodeReferenceTest, CopiesPreserveStateAndReplaceDestination) {
+TEST_F(BytecodeReferenceTest, TransfersPreserveOwnershipAndReplaceDestination) {
   struct Case {
     // Export selecting a physical transport operation.
     const char* name;
@@ -177,7 +177,8 @@ TEST_F(BytecodeReferenceTest, CopiesPreserveStateAndReplaceDestination) {
     // Live VM owners acquired when the input is borrowed.
     int32_t borrowed_count;
   };
-  const Case cases[] = {{"copy_register", 2, 0},
+  const Case cases[] = {{"borrow", 1, 0},
+                        {"copy_register", 2, 0},
                         {"copy_load", 3, 0},
                         {"copy_store", 2, 0},
                         {"retain", 2, 1}};
@@ -247,32 +248,37 @@ TEST_F(BytecodeReferenceTest, FailureRetiresCopiesWithoutConsumingHostAnchor) {
   }
 }
 
-TEST_F(BytecodeReferenceTest, ReturnedCopyProtectsItsEscapingLifetime) {
-  for (bool owned : {false, true}) {
-    for (bool null_source : {false, true}) {
-      destroyed_ = 0;
-      iree_vm_ref_t source = null_source ? iree_vm_ref_null() : MakeObject(42);
-      iree_vm_variant_t arguments[] = {
-          owned ? iree_vm_variant_from_ref_move(&source)
-                : iree_vm_variant_from_ref_borrowed(source)};
-      iree_vm_variant_t results[1] = {};
-      IREE_EXPECT_OK(iree_vm_invoke(invocation_, Lookup("copy_return"),
-                                    iree_vm_variant_span_from_array(arguments),
-                                    iree_vm_variant_span_from_array(results)));
-      iree_vm_ref_reset(&source);
-      EXPECT_EQ(destroyed_, 0);
-      void* pointer = nullptr;
-      IREE_EXPECT_OK(iree_vm_ptr_from_variant_borrowed(results[0], &kObjectType,
-                                                       &pointer));
-      if (null_source) {
-        EXPECT_EQ(pointer, nullptr);
-      } else {
-        ASSERT_NE(pointer, nullptr);
-        EXPECT_EQ(static_cast<Object*>(pointer)->identity, 42);
+TEST_F(BytecodeReferenceTest, ReturnedPointerProtectsItsEscapingLifetime) {
+  for (const char* name : {"copy_return", "borrow_return"}) {
+    SCOPED_TRACE(name);
+    for (bool owned : {false, true}) {
+      for (bool null_source : {false, true}) {
+        destroyed_ = 0;
+        iree_vm_ref_t source =
+            null_source ? iree_vm_ref_null() : MakeObject(42);
+        iree_vm_variant_t arguments[] = {
+            owned ? iree_vm_variant_from_ref_move(&source)
+                  : iree_vm_variant_from_ref_borrowed(source)};
+        iree_vm_variant_t results[1] = {};
+        IREE_EXPECT_OK(
+            iree_vm_invoke(invocation_, Lookup(name),
+                           iree_vm_variant_span_from_array(arguments),
+                           iree_vm_variant_span_from_array(results)));
+        iree_vm_ref_reset(&source);
+        EXPECT_EQ(destroyed_, 0);
+        void* pointer = nullptr;
+        IREE_EXPECT_OK(iree_vm_ptr_from_variant_borrowed(
+            results[0], &kObjectType, &pointer));
+        if (null_source) {
+          EXPECT_EQ(pointer, nullptr);
+        } else {
+          ASSERT_NE(pointer, nullptr);
+          EXPECT_EQ(static_cast<Object*>(pointer)->identity, 42);
+        }
+        iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+        iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+        EXPECT_EQ(destroyed_, int(!null_source));
       }
-      iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
-      iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
-      EXPECT_EQ(destroyed_, int(!null_source));
     }
   }
 }

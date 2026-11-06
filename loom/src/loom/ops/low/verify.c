@@ -4,6 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/ops/ref/verify.h"
+
 #include <stdint.h>
 
 #include "loom/error/emitter.h"
@@ -1322,14 +1324,14 @@ static iree_status_t loom_low_emit_call_callee_kind_mismatch(
                                       IREE_ARRAYSIZE(params));
 }
 
-loom_trait_flags_t loom_low_copy_effective_traits(const loom_module_t* module,
-                                                  const loom_op_t* op) {
+loom_trait_flags_t loom_low_transfer_effective_traits(
+    const loom_module_t* module, const loom_op_t* op) {
   loom_trait_flags_t traits = loom_op_vtable(module, op)->traits;
   const loom_type_t* value_type = loom_type_register_value_type(
-      loom_module_value(module, loom_low_copy_source(op))->type);
+      loom_module_value(module, loom_op_const_operands(op)[0])->type);
   if (value_type && loom_type_is_reference(*value_type)) {
-    // An independent managed carrier may acquire ownership even when its
-    // logical type is ptr. Preserve that lifetime through DCE and scheduling.
+    // Managed transfers acquire or relocate a release obligation, including
+    // ptr protection. Preserve these lifetimes through DCE and scheduling.
     traits |= LOOM_TRAIT_OBSERVABLE_EFFECT;
   }
   return traits;
@@ -1351,6 +1353,30 @@ iree_status_t loom_low_move_verify(const loom_module_t* module,
       module, op, loom_low_move_source(op), loom_low_move_result(op), emitter));
   return loom_low_verify_transfer_register_value_relation(
       module, op, loom_low_move_source(op), loom_low_move_result(op), emitter);
+}
+
+iree_status_t loom_low_borrow_verify(const loom_module_t* module,
+                                     const loom_op_t* op,
+                                     iree_diagnostic_emitter_t emitter) {
+  const loom_type_t owner_type =
+      loom_module_value_type(module, loom_low_borrow_owner(op));
+  const loom_type_t pointer_type =
+      loom_module_value_type(module, loom_low_borrow_pointer(op));
+  IREE_RETURN_IF_ERROR(loom_low_verify_same_register_unit_count(
+      module, op, loom_low_borrow_owner(op), loom_low_borrow_pointer(op),
+      emitter));
+  if (loom_low_register_type_unit_count(owner_type) != 1) {
+    return loom_low_emit_type_constraint_error(
+        op, LOOM_DIAGNOSTIC_FIELD_OPERAND, 0, IREE_SV("owner"), owner_type,
+        IREE_SV("one complete ref register"), emitter);
+  }
+  const loom_type_t* owner_value_type =
+      loom_type_register_value_type(owner_type);
+  const loom_type_t* pointer_value_type =
+      loom_type_register_value_type(pointer_type);
+  return loom_ref_verify_borrow_types(
+      op, owner_value_type ? *owner_value_type : loom_type_none(),
+      pointer_value_type ? *pointer_value_type : loom_type_none(), emitter);
 }
 
 iree_status_t loom_low_release_verify(const loom_module_t* module,

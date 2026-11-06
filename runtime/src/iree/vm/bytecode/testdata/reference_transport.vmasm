@@ -1,20 +1,22 @@
 vm.module core(0.0) {
   section strings alignment(8) {
-    string @string0 = "copy_load"
-    string @string1 = "copy_register"
-    string @string2 = "copy_return"
-    string @string3 = "copy_store"
-    string @string4 = "fail"
-    string @string5 = "inspect"
-    string @string6 = "object"
-    string @string7 = "probe"
-    string @string8 = "refcopy"
-    string @string9 = "retain"
+    string @string0 = "borrow"
+    string @string1 = "borrow_return"
+    string @string2 = "copy_load"
+    string @string3 = "copy_register"
+    string @string4 = "copy_return"
+    string @string5 = "copy_store"
+    string @string6 = "fail"
+    string @string7 = "inspect"
+    string @string8 = "object"
+    string @string9 = "probe"
+    string @string10 = "refcopy"
+    string @string11 = "retain"
   }
 
   section ref_types alignment(8) {
-    namespace @ref_group0 name(@string8) {
-      ref_type @ref_type0 name(@string6)
+    namespace @ref_group0 name(@string10) {
+      ref_type @ref_type0 name(@string8)
     }
   }
 
@@ -33,18 +35,20 @@ vm.module core(0.0) {
   }
 
   section imports alignment(8) {
-    group @import_group0 module_name(@string7) {
-      import @import0 name(@string5) flags([]) : @callable2
+    group @import_group0 module_name(@string9) {
+      import @import0 name(@string7) flags([]) : @callable2
     }
   }
 
   section exports alignment(8) {
-    export @export0 name(@string0) : @callable3 = @function1
-    export @export1 name(@string1) : @callable3 = @function0
-    export @export2 name(@string2) : @callable1 = @function5
-    export @export3 name(@string3) : @callable3 = @function2
-    export @export4 name(@string4) : @callable0 = @function4
-    export @export5 name(@string9) : @callable3 = @function3
+    export @export0 name(@string0) : @callable3 = @function6
+    export @export1 name(@string1) : @callable1 = @function7
+    export @export2 name(@string2) : @callable3 = @function1
+    export @export3 name(@string3) : @callable3 = @function0
+    export @export4 name(@string4) : @callable1 = @function5
+    export @export5 name(@string5) : @callable3 = @function2
+    export @export6 name(@string6) : @callable0 = @function4
+    export @export7 name(@string11) : @callable3 = @function3
   }
 
   section functions alignment(8) {
@@ -85,13 +89,14 @@ vm.module core(0.0) {
       control.call @import0 {direct_ref_move_mask = 0x0000}
       control.return
     }
-    func @function4 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 3, function_registers = 0, local_refs = 1, local_functions = 0) {
+    func @function4 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 4, function_registers = 0, local_refs = 1, local_functions = 0) {
     ^bb0:
       control.block
       %r1 = ref.copy %r0
       ref.stack.store.copy %r1, #r0
-      %r2 = ref.null
-      control.fail aborted, %r2
+      %r2 = ref.borrow %r0
+      %r3 = ref.null
+      control.fail aborted, %r3
     }
     func @function5 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
     ^bb0:
@@ -99,6 +104,21 @@ vm.module core(0.0) {
       %r1 = ref.copy %r0
       ref.discard %r0
       %r0 = ref.move %r1
+      control.return
+    }
+    func @function6 : @callable3 flags([has_call]) frame(local_bytes = 0, value_registers = 4, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      %r1 = ref.borrow %r0
+      %v3 = ref.compare.eq %r0, %r1
+      control.call @import0 {direct_ref_move_mask = 0x0000}
+      control.return
+    }
+    func @function7 : @callable1 flags([]) frame(local_bytes = 0, value_registers = 0, ref_registers = 2, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      %r1 = ref.move %r0
+      %r0 = ref.borrow %r1
       control.return
     }
   }

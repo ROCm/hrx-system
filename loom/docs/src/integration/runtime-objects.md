@@ -41,35 +41,64 @@ Ownership mode is part of type identity, including inside function signatures.
 A provider exporting an owning parameter cannot bind an import declaring a
 borrowed parameter, even though both values use the VM's managed-reference bank.
 
-## Keep a returned pointer safe
+## Borrow an owning handle
 
-Suppose an image provider exports `capture`, `consume`, and `width` with these
-signatures:
+[`ref.borrow`](../reference/dialects/ref/ops/borrow.md) obtains a pointer to the
+same payload without consuming the owner:
 
 ```loom
 type.decl import("images", "frame") @Frame
 
-func.decl import("images", "capture") @capture() -> (ref<@Frame>, ptr<@Frame>)
+func.decl import("images", "capture") @capture() -> (ref<@Frame>)
 func.decl import("images", "consume") @consume(%frame: ref<@Frame>)
 func.decl import("images", "width") @width(%frame: ptr<@Frame>) -> (i32)
 
 func.def public @capture_width() -> (i32) {
-  %owner, %saved = func.call @capture() : () -> (ref<@Frame>, ptr<@Frame>)
+  %owner = func.call @capture() : () -> (ref<@Frame>)
+  %frame = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>
+  %width = func.call @width(%frame) : (ptr<@Frame>) -> (i32)
+  func.call @consume(%owner) : (ref<@Frame>)
+  func.return %width : i32
+}
+```
+
+The owner covers the pointer's lifetime in this function. The compiler proves
+that coverage across the pointer's copies and emits a borrowed carrier without
+another reference-count acquisition. Consuming the source owner remains the
+explicit destruction boundary.
+
+A saved pointer also remains valid when its owner ends first:
+
+```loom
+func.def public @saved_width(%owner: ref<@Frame>) -> (i32) {
+  %saved = ref.borrow %owner : ref<@Frame> -> ptr<@Frame>
   func.call @consume(%owner) : (ref<@Frame>)
   %width = func.call @width(%saved) : (ptr<@Frame>) -> (i32)
   func.return %width : i32
 }
 ```
 
-The provider publishes the borrowed result while its payload is live. The native
-result handoff acquires protection before that anchor can disappear. Consuming
-`%owner` therefore leaves `%saved` valid. The final `width` call ends the local
-pointer's protection; if no other owners remain, the payload's native finalizer
-runs before the function returns its scalar result.
+Here the compiler acquires protection at `ref.borrow`, while the owner is still
+live. That protection retires after `width`, before the function returns its
+scalar result. Borrowing after the owner was consumed is a compilation error;
+protection does not resurrect a consumed handle. Null projects to null.
 
-This example uses a native borrowed-result handoff. It does not require a
-source-level reference-to-pointer conversion. A borrowed return has a borrowed
-signature even when the physical carrier holds an owner for safety.
+Coverage is currently proved within a scheduled basic block. A pointer crossing
+control flow, entering local storage, or escaping through a return retains
+protection when coverage is unproved. Passing an owner and its pointer to the
+same consuming call also requires protection: the callee may release the owner
+before reading the pointer. These cases have the same safe source semantics.
+
+The structured `DOMINANCE/021` remark identifies acquired protection and its
+reason. For a local pointer-copy chain it also identifies the owner boundary
+and final use; for control-flow and storage paths it identifies where coverage
+becomes unproved. [Compilation reports](../workflows/compile-reports.md) retain
+these diagnostics alongside source locations.
+
+A provider can also return a `ptr` directly. Native result publication acquires
+protection while the payload is live, and an escaping VM return acquires or
+transfers protection before its frame retires. The callable signature stays
+borrowed even when its physical carrier holds an owner for safety.
 
 Source owners and pointer protection have different endpoints. An explicit
 source owner remains live until release or transfer, even after its last payload
@@ -78,8 +107,10 @@ including branch-local deaths and unused results. Register allocation and spill
 storage preserve those boundaries rather than keeping accidental owners until
 frame teardown.
 
-Authored Low exposes `low.copy`, `low.move`, and `low.release` for explicit
-carrier operations. Copying an owning handle creates another owner; moving it
+Authored Low exposes `low.borrow`, `low.copy`, `low.move`, and `low.release`
+for explicit carrier operations. `low.borrow` has the same safe projection
+contract as the source operation; it cannot request an unchecked machine borrow.
+Copying an owning handle creates another owner; moving it
 transfers the owner and ends use of the source. Releasing a pointer carrier
 retires any acquired protection. Releasing null has no payload effect.
 
@@ -160,7 +191,6 @@ receive the same checks.
 
 These checks establish a compiler-input ownership boundary. They do not validate
 arbitrary native provider behavior or independently prove the lifetime safety
-of externally supplied VM executable bytes. Source conversion primitives,
-C++ managed wrappers, and native machine-code lowering require their own
-frontend and execution mappings; declaring an opaque payload does not supply
-those mappings implicitly.
+of externally supplied VM executable bytes. C++ managed wrappers and native
+machine-code lowering require their own frontend and execution mappings;
+declaring an opaque payload does not supply those mappings implicitly.

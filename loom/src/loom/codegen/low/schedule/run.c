@@ -1928,7 +1928,12 @@ static iree_status_t loom_low_schedule_build(
         .resource_summary_count = state.resource_summary_count,
     };
     out_table->loop_nest.graph = &out_table->cfg_graph;
-    if (state.error_count == 0 &&
+    if (state.error_count == 0) {
+      status = loom_low_schedule_borrow_plan_build(
+          out_table, model->context.storage_origins, scratch_arena, arena,
+          &out_table->borrows);
+    }
+    if (iree_status_is_ok(status) && state.error_count == 0 &&
         iree_any_bit_set(options->flags,
                          LOOM_LOW_SCHEDULE_FLAG_RETAIN_SOURCE_SUFFIX_BOUNDS)) {
       status = loom_low_schedule_source_suffix_bounds_build(

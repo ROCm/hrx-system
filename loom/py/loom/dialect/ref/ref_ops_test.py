@@ -44,3 +44,29 @@ def test_author_and_serialize_independent_handles(handle_builder) -> None:
     assert printer.print_module(restored) == text
     assert duplicate.type == source.type == handle_type
     assert duplicate.id != source.id
+
+
+def test_author_and_serialize_borrowed_projection() -> None:
+    module, builder = module_builder()
+    builder.type.decl(namespace="media", type_name="frame", name="Frame")
+    owned = ref_type(module=module, declaration="Frame")
+    borrowed = ptr_type(module=module, declaration="Frame")
+    owner = builder.value("owner", owned)
+    body = builder.region()
+    builder.func.def_(callee="project", args=[owner], results=[owned, borrowed], body=body)
+    with builder.insertion_block(body.blocks[0]):
+        pointer = builder.ref.borrow(owner=owner, results=[borrowed], name="pointer")
+        builder.func.return_(operands=[owner, pointer])
+
+    ops = default_ops()
+    assert not verify_module(module, ops=ops).has_errors
+    restored = read_module(write_module(module, op_decls=ops), op_decls=ops)
+    assert not verify_module(restored, ops=ops).has_errors
+    printer = Printer()
+    printer.register_ops(ops)
+    printer.register_types(default_types())
+    text = printer.print_module(module)
+    assert "ref.borrow %owner : ref<@Frame> -> ptr<@Frame>" in text
+    assert printer.print_module(restored) == text
+    assert owner.type == owned and pointer.type == borrowed
+    assert owner.id != pointer.id

@@ -115,6 +115,9 @@ iree_c_embed_data(
     name = "object_admission_testdata",
     testonly = True,
     srcs = [
+        "testdata/object_borrow_cleanup.loom",
+        "testdata/object_borrow_consumed.loom-test",
+        "testdata/object_borrow_prepared.loom",
         "testdata/object_library_leak.loom",
         "testdata/object_library_prepared.loom",
         "testdata/object_link_root.loom",
