@@ -13,8 +13,8 @@
 #include "iree/base/internal/arena.h"
 #include "loom/error/emitter.h"
 #include "loom/ir/ir.h"
+#include "loom/runtime/command/program.h"
 #include "loom/target/arch/cmd/abi_layout.h"
-#include "loom/target/arch/cmd/program.h"
 #include "loom/util/fact_table.h"
 
 #ifdef __cplusplus

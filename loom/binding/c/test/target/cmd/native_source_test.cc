@@ -169,6 +169,36 @@ std::string RequestBytes(const Output& output) {
                      bytes.data_length);
 }
 
+TEST(CmdCompilerTest, RetainsAnEmptySourceIndex) {
+  loomc_context_t* context_raw = nullptr;
+  LOOMC_ASSERT_OK(
+      loomc_context_create(nullptr, loomc_allocator_system(), &context_raw));
+  ContextPtr context(context_raw);
+  loomc_link_index_builder_t* builder_raw = nullptr;
+  LOOMC_ASSERT_OK(loomc_link_index_builder_allocate(
+      context.get(), nullptr, loomc_allocator_system(), &builder_raw));
+  BuilderPtr builder(builder_raw);
+  loomc_link_index_t* index_raw = nullptr;
+  loomc_result_t* result_raw = nullptr;
+  LOOMC_ASSERT_OK(
+      loomc_link_index_builder_finish(builder.get(), &index_raw, &result_raw));
+  IndexPtr index(index_raw);
+  ResultPtr result(result_raw);
+  ASSERT_TRUE(loomc_result_succeeded(result.get()))
+      << Diagnostics(result.get());
+
+  CompilerAllocator allocator;
+  loomc_cmd_compiler_t* compiler_raw = nullptr;
+  LOOMC_ASSERT_OK(loomc_cmd_compiler_create(
+      index.get(), nullptr, allocator.allocator(), &compiler_raw));
+  CompilerPtr compiler(compiler_raw);
+  index.reset();
+  builder.reset();
+  context.reset();
+  compiler.reset();
+  EXPECT_EQ(allocator.live_bytes(), 0u);
+}
+
 class NativeSourceTest : public ::testing::TestWithParam<bool> {
  protected:
   void SetUp() override {

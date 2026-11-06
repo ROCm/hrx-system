@@ -403,9 +403,14 @@ iree_status_t loomc_cmd_native_source_cache_allocate(
   cache->allocator = allocator;
   cache->byte_limit = retained_byte_limit;
   iree_slim_mutex_initialize(&cache->mutex);
-  iree_status_t status = iree_allocator_malloc_array(
-      allocator, loom_link_module_index_symbol_count(index),
-      sizeof(*cache->sources), (void**)&cache->sources);
+  const iree_host_size_t symbol_count =
+      loom_link_module_index_symbol_count(index);
+  iree_status_t status = iree_ok_status();
+  if (symbol_count != 0) {
+    status = iree_allocator_malloc_array(allocator, symbol_count,
+                                         sizeof(*cache->sources),
+                                         (void**)&cache->sources);
+  }
   if (iree_status_is_ok(status)) {
     *out_cache = cache;
   } else {
