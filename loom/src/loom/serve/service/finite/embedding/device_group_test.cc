@@ -17,6 +17,7 @@
 
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/runtime/testing/device.h"
 #include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/service/finite/embedding/source_service_test_fixture.h"
 #include "loom/serve/testing/model.h"
@@ -142,6 +143,12 @@ TEST_F(GroupEmbeddingServiceTest, EmbeddingsCompleteBeforeOtherDeviceRetires) {
   ASSERT_EQ(Read(Send(R"({"pool":"pool0","target_bytes":0})", "/v1/pools/trim"))
                 .find("HTTP/1.1 200"),
             0u);
+  // The endpoint initiates an asynchronous trim on the router owner. Join that
+  // owner before the test thread drains native maintenance and observes final
+  // physical accounting.
+  loom_serve_http_server_request_stop(server_);
+  IREE_ASSERT_OK(http_.Join());
+  IREE_ASSERT_OK(loom_runtime_test_pool_trim_and_drain(first_pool, 0));
   EXPECT_EQ(loom_runtime_pool_statistics(first_pool).workspace.bytes_committed,
             0u);
   EXPECT_EQ(loom_runtime_pool_statistics(first_pool).storage.bytes_committed,
