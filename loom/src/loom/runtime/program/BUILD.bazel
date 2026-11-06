@@ -378,9 +378,9 @@ loom_cc_library(
         ":sources",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/module/string",
         "//runtime/src/iree/vm",
         "//runtime/src/iree/vm/bytecode:module",
+        "//runtime/src/iree/vm/module/string",
     ],
 )
 

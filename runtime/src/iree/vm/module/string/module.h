@@ -4,8 +4,8 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#ifndef IREE_MODULE_STRING_MODULE_H_
-#define IREE_MODULE_STRING_MODULE_H_
+#ifndef IREE_VM_MODULE_STRING_MODULE_H_
+#define IREE_VM_MODULE_STRING_MODULE_H_
 
 #include "iree/vm/module.h"
 
@@ -33,11 +33,11 @@ extern "C" {
 // The module is independent of a VM environment or serving host. It can be
 // shared by programs and concurrent processes. |out_module| is set null before
 // construction; the caller releases the returned owner after linking.
-IREE_API_EXPORT iree_status_t iree_string_module_create(
+IREE_API_EXPORT iree_status_t iree_vm_string_module_create(
     iree_allocator_t host_allocator, iree_vm_module_t** out_module);
 
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus
 
-#endif  // IREE_MODULE_STRING_MODULE_H_
+#endif  // IREE_VM_MODULE_STRING_MODULE_H_

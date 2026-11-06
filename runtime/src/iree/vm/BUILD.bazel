@@ -23,6 +23,13 @@ iree_assert_dependency_boundary(
     target = ":vm",
 )
 
+# Hosts compose standard-library modules explicitly when creating a program.
+iree_assert_dependency_boundary(
+    name = "vm_no_standard_library_dep",
+    forbidden_subtrees = ["//runtime/src/iree/vm/module/..."],
+    target = ":vm",
+)
+
 iree_runtime_cc_library(
     name = "vm",
     srcs = [

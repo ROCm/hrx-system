@@ -7,9 +7,9 @@
 #include "loom/tooling/target/vm/testbench.h"
 
 #include "iree/hal/buffer.h"
-#include "iree/module/string/module.h"
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/execution.h"
+#include "iree/vm/module/string/module.h"
 #include "iree/vm/sync.h"
 #include "loom/tooling/target/vm/buffer.h"
 #include "loomc/artifact.h"
@@ -359,7 +359,7 @@ static iree_status_t loom_vm_testbench_prepare(
   iree_vm_environment_free(environment);
   if (iree_status_is_ok(status)) {
     status =
-        iree_string_module_create(testbench->host_allocator, &string_module);
+        iree_vm_string_module_create(testbench->host_allocator, &string_module);
   }
   if (iree_status_is_ok(status)) {
     status = iree_vm_program_create(

@@ -8,8 +8,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "iree/module/string/module.h"
 #include "iree/vm/bytecode/module.h"
+#include "iree/vm/module/string/module.h"
 #include "iree/vm/sync.h"
 #include "loom/runtime/program/jit.h"
 
@@ -282,7 +282,7 @@ iree_status_t loom_runtime_program_link(iree_vm_module_t* module,
   iree_vm_module_t* string_module = NULL;
   iree_vm_module_t** linked_libraries = NULL;
   iree_status_t status =
-      iree_string_module_create(host_allocator, &string_module);
+      iree_vm_string_module_create(host_allocator, &string_module);
   if (iree_status_is_ok(status)) {
     status = iree_allocator_malloc_array(host_allocator, libraries.count + 1,
                                          sizeof(*linked_libraries),
