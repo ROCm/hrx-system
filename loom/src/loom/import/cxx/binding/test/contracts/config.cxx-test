@@ -266,3 +266,53 @@ func.def public @read_tile() -> (i32) {
   %4 = scalar.addi %tile, %tile_alias : i32
   func.return %4 : i32
 }
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A symbolic index factor participates in both loop scheduling and value
+// arithmetic while a scalar count and predicate remain independently named.
+#include <loomcxx/index.h>
+[[loom::config("tuning.factor")]] extern const loom::type::index factor;
+[[loom::config("tuning.count")]] extern const unsigned count;
+[[loom::config("tuning.enabled")]] extern const bool enabled;
+
+unsigned configured_sum(unsigned start) {
+  unsigned result = start;
+  [[loom::unroll(factor)]]
+  for (unsigned index = 0; index < count; ++index) {
+    result += enabled ? index * static_cast<long long>(factor) : index;
+  }
+  return result;
+}
+// ----
+config.decl @tuning.factor : index
+
+config.decl @tuning.count : i32
+
+config.decl @tuning.enabled : i1
+
+func.def public @configured_sum(%start: i32) -> (i32) {
+  %25 = index.constant 0 : offset
+  %count = config.get @tuning.count : i32
+  %8 = index.cast %count : i32 to offset
+  %9 = index.constant 1 : offset
+  %factor = config.get @tuning.factor : index
+  %result = scf.for %index = [%25 to %8 step %9](%result$12 = %start : i32) -> (i32) unroll(%factor) {
+    %14 = index.cast %index : offset to i32
+    %enabled = config.get @tuning.enabled : i1
+    %16 = scf.if %enabled -> (i64) {
+      %17 = scalar.extui %14 : i32 to i64
+      %19 = index.cast %factor : index to i64
+      %20 = scalar.muli %17, %19 : i64
+      scf.yield %20 : i64
+    } else {
+      %21 = scalar.extui %14 : i32 to i64
+      scf.yield %21 : i64
+    }
+    %22 = scalar.extui %result$12 : i32 to i64
+    %23 = scalar.addi %22, %16 : i64
+    %result$24 = scalar.trunci %23 : i64 to i32
+    scf.yield %result$24 : i32
+  }
+  func.return %result : i32
+}
