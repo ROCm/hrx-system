@@ -88,7 +88,7 @@ class GpuNativeAllocationTest : public GpuNativeTest {
         semaphore, value, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   }
 
-  void CreateFinitePool(iree_hal_pool_t** out_pool, uint32_t block_count = 1) {
+  void CreateFinitePool(uint32_t block_count, iree_hal_pool_t** out_pool) {
     iree_hal_fixed_block_pool_options_t options;
     iree_hal_fixed_block_pool_options_initialize(&options);
     options.block_size = 4096;
@@ -375,7 +375,7 @@ TEST_P(GpuNativeOrderedAllocationTest,
        ReusePublishesConsumerBeforeProducerHostRetirement) {
   using iree::hal::cts::Ref;
   Ref<iree_hal_pool_t> finite_pool;
-  CreateFinitePool(finite_pool.out());
+  CreateFinitePool(1, finite_pool.out());
   if (HasFatalFailure()) {
     return;
   }
@@ -595,7 +595,7 @@ TEST_F(GpuNativeAllocationTest, PendingSubspansSurviveCrossQueueTransfers) {
 
 TEST_F(GpuNativeAllocationTest, CapacityWaitDoesNotBlockReleasingItsStorage) {
   iree_hal_pool_t* finite_pool = nullptr;
-  CreateFinitePool(&finite_pool);
+  CreateFinitePool(1, &finite_pool);
   if (HasFatalFailure()) {
     return;
   }
@@ -635,7 +635,7 @@ TEST_F(GpuNativeAllocationTest, CapacityWaitDoesNotBlockReleasingItsStorage) {
 
 TEST_F(GpuNativeAllocationTest, RecycledBatchJoinsIndependentOwnerFrontiers) {
   iree_hal_pool_t* finite_pool = nullptr;
-  CreateFinitePool(&finite_pool, 2);
+  CreateFinitePool(2, &finite_pool);
   if (HasFatalFailure()) {
     return;
   }
@@ -698,7 +698,7 @@ TEST_F(GpuNativeAllocationTest, RecycledBatchJoinsIndependentOwnerFrontiers) {
 TEST_F(GpuNativeAllocationTest, RejectedReleasePreservesIndependentPools) {
   std::array<iree_hal_pool_t*, 2> pools = {};
   for (auto& pool : pools) {
-    CreateFinitePool(&pool);
+    CreateFinitePool(1, &pool);
   }
   if (HasFatalFailure()) {
     return;
@@ -742,7 +742,7 @@ TEST_F(GpuNativeAllocationTest, RejectedReleasePreservesIndependentPools) {
 
 TEST_F(GpuNativeAllocationTest, RejectedBatchLeavesOutputsAndPoolUntouched) {
   iree_hal_pool_t* finite_pool = nullptr;
-  CreateFinitePool(&finite_pool);
+  CreateFinitePool(1, &finite_pool);
   if (HasFatalFailure()) {
     return;
   }
@@ -1144,7 +1144,7 @@ TEST_F(GpuNativeMemoryProgressTest,
        RecycledStorageAndGpuConsumerCompleteWhileAllocationIsHeld) {
   using iree::hal::cts::Ref;
   Ref<iree_hal_pool_t> finite_pool;
-  CreateFinitePool(finite_pool.out());
+  CreateFinitePool(1, finite_pool.out());
   if (HasFatalFailure()) {
     return;
   }

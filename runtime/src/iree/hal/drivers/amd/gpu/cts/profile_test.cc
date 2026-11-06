@@ -134,10 +134,9 @@ class GpuNativeProfileTestBase : public GpuNativeTest {
 
   void Record(iree_hal_executable_t* executable,
               iree_hal_executable_function_t function,
-              iree_hal_command_buffer_mode_t mode,
-              iree_hal_command_buffer_t** out_recording,
-              uint32_t dispatch_count = 2, bool timestamps = false,
-              uint64_t fixed_address = 0) {
+              iree_hal_command_buffer_mode_t mode, uint32_t dispatch_count,
+              bool timestamps, uint64_t fixed_address,
+              iree_hal_command_buffer_t** out_recording) {
     IREE_ASSERT_OK(iree_hal_command_buffer_create(
         iree_hal_queue_family(queues_[0]), mode,
         IREE_HAL_COMMAND_CATEGORY_DISPATCH |
@@ -256,8 +255,8 @@ TEST_P(GpuNativeDispatchProfileTest,
   Ref<iree_hal_command_buffer_t> recording;
   ASSERT_NO_FATAL_FAILURE(
       Record(executable, function,
-             IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA,
-             recording.out(), 1, /*timestamps=*/true));
+             IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA, 1,
+             /*timestamps=*/true, 0, recording.out()));
   Ref<iree_hal_semaphore_t> done;
   CreateSemaphore(done.out());
   auto* timeline = done.get();
@@ -320,10 +319,11 @@ TEST_P(GpuNativeDispatchProfileTest,
   iree_hal_executable_function_t function;
   ASSERT_NO_FATAL_FAILURE(Load(executable, function));
   Ref<iree_hal_command_buffer_t> recording;
-  ASSERT_NO_FATAL_FAILURE(Record(
-      executable, function,
-      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA, recording.out(), 3,
-      false, iree_hal_buffer_native_binding(output, slot).device_address));
+  ASSERT_NO_FATAL_FAILURE(
+      Record(executable, function,
+             IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA, 3, false,
+             iree_hal_buffer_native_binding(output, slot).device_address,
+             recording.out()));
   Ref<iree_hal_semaphore_t> done;
   CreateSemaphore(done.out());
   auto* timeline = done.get();
@@ -497,11 +497,12 @@ TEST_P(GpuNativeDispatchProfileTest,
   for (auto& recording : recordings) {
     ASSERT_NO_FATAL_FAILURE(
         Record(executable, function,
-               IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA,
-               recording.out()));
+               IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA, 2, false,
+               0, recording.out()));
   }
   Ref<iree_hal_command_buffer_t> unprofiled;
-  ASSERT_NO_FATAL_FAILURE(Record(executable, function, 0, unprofiled.out()));
+  ASSERT_NO_FATAL_FAILURE(
+      Record(executable, function, 0, 2, false, 0, unprofiled.out()));
   const uint64_t first_id = iree_hal_command_buffer_profile_id(recordings[0]);
   const uint64_t second_id = iree_hal_command_buffer_profile_id(recordings[1]);
   ASSERT_NE(first_id, second_id);
@@ -730,7 +731,7 @@ TEST_P(GpuNativeDispatchProfileTest,
     ASSERT_NO_FATAL_FAILURE(
         Record(executable, function,
                IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA,
-               recordings[i].out(), kDispatchCounts[i]));
+               kDispatchCounts[i], false, 0, recordings[i].out()));
     command_ids[i] = iree_hal_command_buffer_profile_id(recordings[i]);
     const uint32_t count = kDispatchCounts[i];
     const uint32_t replays = kReplayCount / kDispatchCounts.size();
@@ -823,9 +824,10 @@ TEST_P(GpuNativeProfileTest, ProfileCapableRecordingRunsWithoutDeviceCapture) {
   iree_hal_executable_function_t function;
   ASSERT_NO_FATAL_FAILURE(Load(executable, function));
   Ref<iree_hal_command_buffer_t> recording;
-  ASSERT_NO_FATAL_FAILURE(Record(
-      executable, function,
-      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA, recording.out()));
+  ASSERT_NO_FATAL_FAILURE(
+      Record(executable, function,
+             IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA, 2, false, 0,
+             recording.out()));
   Ref<iree_hal_semaphore_t> done;
   CreateSemaphore(done.out());
   auto* timeline = done.get();
@@ -856,9 +858,10 @@ TEST_P(GpuNativeDispatchProfileTest,
   iree_hal_executable_function_t function;
   ASSERT_NO_FATAL_FAILURE(Load(executable, function));
   Ref<iree_hal_command_buffer_t> recording;
-  ASSERT_NO_FATAL_FAILURE(Record(
-      executable, function,
-      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA, recording.out()));
+  ASSERT_NO_FATAL_FAILURE(
+      Record(executable, function,
+             IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA, 2, false, 0,
+             recording.out()));
   ASSERT_NO_FATAL_FAILURE(End());
 
   Ref<iree_hal_semaphore_t> done;
@@ -1064,7 +1067,8 @@ TEST_P(GpuNativeDispatchProfileTest,
       constants, {1, &reference}, nullptr, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(done, one));
   Ref<iree_hal_command_buffer_t> recording;
-  ASSERT_NO_FATAL_FAILURE(Record(executable, function, 0, recording.out()));
+  ASSERT_NO_FATAL_FAILURE(
+      Record(executable, function, 0, 2, false, 0, recording.out()));
   iree_hal_buffer_binding_t binding = {.buffer = output, .length = 4};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
@@ -1423,8 +1427,8 @@ TEST_P(GpuNativeProfileTest, ChunkedRecordingHasOnePublicEvent) {
   iree_hal_executable_function_t function;
   ASSERT_NO_FATAL_FAILURE(Load(executable, function));
   Ref<iree_hal_command_buffer_t> recording;
-  ASSERT_NO_FATAL_FAILURE(
-      Record(executable, function, 0, recording.out(), kDispatchCount));
+  ASSERT_NO_FATAL_FAILURE(Record(executable, function, 0, kDispatchCount, false,
+                                 0, recording.out()));
   Ref<iree_hal_semaphore_t> done;
   CreateSemaphore(done.out());
   auto* timeline = done.get();
