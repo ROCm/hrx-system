@@ -11,6 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/allocation/physical_domains.h"
 #include "loom/ir/context.h"
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
@@ -87,6 +88,18 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
         module_, loom_low_register_type(descriptor_set_id, 0, unit_count),
         &value_id));
     return value_id;
+  }
+
+  loom_low_allocation_physical_domains_t BuildPhysicalDomains(
+      const loom_low_allocation_target_constraints_t& constraints,
+      const loom_liveness_analysis_t& liveness,
+      const loom_low_allocation_unit_liveness_t& unit_liveness,
+      const loom_low_placement_table_t& placement) {
+    loom_low_allocation_physical_domains_t domains = {};
+    IREE_CHECK_OK(loom_low_allocation_physical_domains_build(
+        &constraints, &liveness, &unit_liveness, &placement, &arena_,
+        &domains));
+    return domains;
   }
 
   // Shared pool for published results and allocation decision storage.
@@ -214,6 +227,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
                                       loom_low_func_def_body(function_op_),
                                       &arena_, &function_cfg_graph));
 
+  auto physical_domains = BuildPhysicalDomains(target_constraints, liveness,
+                                               unit_liveness, placement);
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
       .module = module,
@@ -225,6 +240,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .schedule = nullptr,
       .placement = &placement,
       .preferences = nullptr,
+      .physical_domains = &physical_domains,
       .target_constraints = &target_constraints,
       .entry_locations = nullptr,
       .entry_location_count = 0,
@@ -299,6 +315,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   // improve the incumbent traffic. The same attempt completes when that spill
   // remains below the exclusive bound.
   reg_class.allocatable_count = 1;
+  physical_domains = BuildPhysicalDomains(target_constraints, liveness,
+                                          unit_liveness, placement);
 
   uint64_t spill_traffic_exclusive_limit = 16;
   loom_low_allocation_interval_assignment_context_t bounded_context = context;
@@ -530,6 +548,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       /*reserved_range_count=*/0, /*emitter=*/iree_diagnostic_emitter_t{},
       &arena_, &target_constraints));
 
+  auto physical_domains = BuildPhysicalDomains(target_constraints, liveness,
+                                               unit_liveness, placement);
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
       .module = module,
@@ -541,6 +561,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .schedule = nullptr,
       .placement = &placement,
       .preferences = nullptr,
+      .physical_domains = &physical_domains,
       .target_constraints = &target_constraints,
       .entry_locations = nullptr,
       .entry_location_count = 0,
@@ -569,6 +590,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       IREE_ARRAYSIZE(view_ordinals);
   descriptor_set.physical_register_view_count =
       IREE_ARRAYSIZE(physical_register_views);
+  physical_domains = BuildPhysicalDomains(target_constraints, liveness,
+                                          unit_liveness, placement);
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
       &context, &decision_arena_, &result));
   ASSERT_EQ(result.assignment_count, 3u);
@@ -766,6 +789,8 @@ TEST_P(LowFixedSubrangeAssignmentTest, PreservesOffsetAndTiedOwner) {
   IREE_ASSERT_OK(loom_low_allocation_target_constraints_finalize_fixed_values(
       &target_constraints, &liveness, &unit_liveness, &arena_));
 
+  auto physical_domains = BuildPhysicalDomains(target_constraints, liveness,
+                                               unit_liveness, placement);
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
       .module = module,
@@ -777,6 +802,7 @@ TEST_P(LowFixedSubrangeAssignmentTest, PreservesOffsetAndTiedOwner) {
       .schedule = nullptr,
       .placement = &placement,
       .preferences = nullptr,
+      .physical_domains = &physical_domains,
       .target_constraints = &target_constraints,
       .entry_locations = nullptr,
       .entry_location_count = 0,
@@ -947,6 +973,8 @@ class LowRequiredRegisterRelocationTest
     IREE_ASSERT_OK(loom_cfg_graph_build(module,
                                         loom_low_func_def_body(function_op_),
                                         &arena_, &function_cfg_graph));
+    const auto physical_domains =
+        BuildPhysicalDomains(constraints, liveness, unit_liveness, placement);
     loom_low_allocation_storage_lease_state_t leases = {};
     const loom_low_allocation_interval_assignment_context_t context = {
         .module = module,
@@ -956,6 +984,7 @@ class LowRequiredRegisterRelocationTest
         .liveness = &liveness,
         .value_domain = &value_domain,
         .placement = &placement,
+        .physical_domains = &physical_domains,
         .target_constraints = &constraints,
         .unit_liveness = &unit_liveness,
         .storage_leases = &leases,
@@ -1225,6 +1254,8 @@ void LowEntryPlacementTest::CheckPlacement(
     IREE_ASSERT_OK(loom_low_allocation_target_constraints_finalize_fixed_values(
         &constraints, &liveness, &unit_liveness, &arena_));
   }
+  const auto physical_domains =
+      BuildPhysicalDomains(constraints, liveness, unit_liveness, placement);
   loom_low_allocation_storage_lease_state_t leases = {};
   const loom_low_allocation_interval_assignment_context_t context = {
       .module = module_,
@@ -1234,6 +1265,7 @@ void LowEntryPlacementTest::CheckPlacement(
       .liveness = &liveness,
       .value_domain = &domain,
       .placement = &placement,
+      .physical_domains = &physical_domains,
       .target_constraints = &constraints,
       .entry_locations = incoming,
       .entry_location_count = test_case.incoming_count,

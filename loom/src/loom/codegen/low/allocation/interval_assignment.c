@@ -15,7 +15,6 @@
 #include "loom/codegen/low/allocation/interval_order.h"
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/ordinal_recolor.h"
-#include "loom/codegen/low/allocation/physical_domains.h"
 #include "loom/codegen/low/allocation/scalar_packing.h"
 #include "loom/codegen/low/allocation/search.h"
 #include "loom/codegen/low/allocation/spill_plan.h"
@@ -42,8 +41,6 @@ typedef struct loom_low_allocation_interval_assignment_state_t {
   iree_arena_allocator_t* scratch_arena;
   // Scalar/aggregate lifetime preferences shared by every location query.
   loom_low_allocation_scalar_packing_t scalar_packing;
-  // Full-scalar physical candidate preferences retained before assignment.
-  loom_low_allocation_physical_domains_t physical_domains;
   // Reusable peer snapshots, private to this assignment attempt.
   loom_low_allocation_preference_workspace_t preference_workspace;
   // Reusable consumed-value query for the allocated function body.
@@ -148,7 +145,7 @@ loom_low_allocation_interval_assignment_search_context(
           state->context->search_strategy ==
           LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_PRESSURE_EFFICIENCY,
       .scalar_packing = state->scalar_packing,
-      .physical_domains = &state->physical_domains,
+      .physical_domains = state->context->physical_domains,
   };
 }
 
@@ -1781,9 +1778,6 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
   IREE_RETURN_IF_ERROR(loom_low_allocation_preference_workspace_initialize(
       context->preferences, state->scratch_arena,
       &state->preference_workspace));
-  IREE_RETURN_IF_ERROR(loom_low_allocation_physical_domains_build(
-      context->target_constraints, context->liveness, context->unit_liveness,
-      context->placement, state->scratch_arena, &state->physical_domains));
   if (context->search_strategy ==
       LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_FRAGMENTATION_REPAIR) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_scalar_packing_build(

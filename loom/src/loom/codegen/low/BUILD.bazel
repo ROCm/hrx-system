@@ -709,6 +709,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/allocation:move_plan",
         "//loom/src/loom/codegen/low/allocation:numbering",
         "//loom/src/loom/codegen/low/allocation:packet_move",
+        "//loom/src/loom/codegen/low/allocation:physical_domains",
         "//loom/src/loom/codegen/low/allocation:placement",
         "//loom/src/loom/codegen/low/allocation:search",
         "//loom/src/loom/codegen/low/allocation:storage",
