@@ -260,3 +260,60 @@ fail 1
 destroy 2
 ABORTED 0
 retired 0
+
+// ====
+
+// Inlining preserves the owning call contract, for both cloned and transferred
+// bodies. All three calls destroy their sole owner before the next observer.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def inline target<vm.core>(@vm) abi(vm_function) @inlined(%owner: reg<vm.ref : ref<@Object>>) asm {
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  return
+}
+
+low.func.def noinline target<vm.core>(@vm) abi(vm_function) @outlined(%owner: reg<vm.ref : ref<@Object>>) asm {
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  return
+}
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %first = constant.i32 1
+  %owner, %pointer = low.func.call @create(%first) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  low.func.call @inlined(%owner) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @observe() : ()
+
+  %second = constant.i32 2
+  %other, %other_pointer = low.func.call @create(%second) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %other_pointer : reg<vm.ref : ptr<@Object>>
+  low.func.call @inlined(%other) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @observe() : ()
+
+  %third = constant.i32 3
+  %last, %last_pointer = low.func.call @create(%third) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %last_pointer : reg<vm.ref : ptr<@Object>>
+  low.func.call @outlined(%last) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @observe() : ()
+  return
+}
+
+// ----
+create 1
+destroy 1
+live 0
+create 2
+destroy 2
+live 0
+create 3
+destroy 3
+live 0
+OK 0
+retired 0

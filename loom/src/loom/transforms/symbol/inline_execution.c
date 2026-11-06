@@ -328,8 +328,17 @@ static iree_status_t loom_inline_capture_low_arguments(
     const loom_value_id_t source = operands.values[i];
     const loom_use_t use = loom_value_uses(loom_module_value(
         rewriter->module, source))[loom_op_operand_use_indices(call_op)[i]];
-    // Explicit call ties transfer the caller's owner into the callee.
-    if (iree_any_bit_set(loom_use_flags(use), LOOM_USE_FLAG_CONSUMES)) {
+    // Explicit call ties and owning reference parameters transfer the caller's
+    // owner into the callee. Capturing either with a copy would introduce a
+    // second owner and leave the original obligation behind after inlining.
+    const loom_type_t* value_type = loom_type_register_value_type(
+        loom_module_value_type(rewriter->module, source));
+    const bool transfers_owner = value_type &&
+                                 loom_type_is_reference(*value_type) &&
+                                 loom_type_reference_ownership(*value_type) ==
+                                     LOOM_REFERENCE_OWNERSHIP_OWNED;
+    if (transfers_owner ||
+        iree_any_bit_set(loom_use_flags(use), LOOM_USE_FLAG_CONSUMES)) {
       continue;
     }
     // Stable inputs and observations need no independent register owner. A
