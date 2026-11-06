@@ -961,6 +961,43 @@ iree_status_t loom_rewriter_replace_results_with_materialized_values_and_erase(
                                                   op->result_count);
 }
 
+iree_status_t loom_rewriter_rebuild_direct_branch(
+    loom_rewriter_t* rewriter, loom_op_t* source, loom_block_t* destination,
+    const loom_value_id_t* arguments, uint16_t argument_count) {
+  IREE_ASSERT(loom_direct_branch_can_rebuild_payload(source));
+
+  const loom_builder_ip_t saved_ip = loom_builder_save(&rewriter->builder);
+  loom_builder_set_before(&rewriter->builder, source);
+  loom_op_t* replacement = NULL;
+  iree_status_t status = loom_builder_allocate_op_with_successors(
+      &rewriter->builder, source->kind, argument_count, /*result_count=*/0,
+      /*successor_count=*/1, /*region_count=*/0, /*tied_result_count=*/0,
+      /*attribute_count=*/0, source->location, &replacement);
+  if (iree_status_is_ok(status)) {
+    replacement->instance_flags = source->instance_flags;
+    replacement->traits = source->traits;
+    replacement->intrinsic_write_spaces = source->intrinsic_write_spaces;
+    replacement->flags |= source->flags & LOOM_OP_SOURCE_PRESENTATION_FLAG_MASK;
+    if (argument_count != 0) {
+      memcpy(loom_op_operands(replacement), arguments,
+             argument_count * sizeof(*arguments));
+    }
+    loom_op_successors(replacement)[0] = destination;
+    status = loom_builder_finalize_op(&rewriter->builder, replacement);
+  }
+  loom_builder_restore(&rewriter->builder, saved_ip);
+  IREE_RETURN_IF_ERROR(status);
+
+  iree_host_size_t comment_count = 0;
+  const iree_string_view_t* comments =
+      loom_module_op_comments(rewriter->module, source, &comment_count);
+  if (comment_count != 0) {
+    IREE_RETURN_IF_ERROR(loom_module_attach_op_comments(
+        rewriter->module, replacement, comments, comment_count));
+  }
+  return loom_rewriter_erase(rewriter, source);
+}
+
 iree_status_t loom_rewriter_erase(loom_rewriter_t* rewriter, loom_op_t* op) {
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_elided_fact_identity_names(
       rewriter, op, /*replacements=*/NULL));

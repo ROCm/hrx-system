@@ -756,6 +756,11 @@ enum loom_op_flag_bits_e {
   // The operation implements a target-Low internal call boundary. This is
   // cached from its immutable vtable for the module call inventory.
   LOOM_OP_FLAG_LOW_INTERNAL_CALL = 1u << 6,
+
+  // The operation is an attribute-free variadic DirectBranch whose complete
+  // positional payload may be rebuilt generically. Attributed branches retain
+  // dialect-owned payload mutation because attributes may qualify positions.
+  LOOM_OP_FLAG_REBUILDABLE_DIRECT_BRANCH = 1u << 7,
 };
 typedef uint8_t loom_op_flags_t;
 

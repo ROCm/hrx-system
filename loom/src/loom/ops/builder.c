@@ -666,7 +666,7 @@ static iree_status_t loom_builder_allocate_op_storage(
   return iree_ok_status();
 }
 
-// Caches immutable generated interfaces implemented only by successor-bearing
+// Caches immutable generated contracts implemented only by successor-bearing
 // operations. Keeping this out of the shared allocation routine leaves
 // ordinary operation construction unchanged.
 static void loom_builder_initialize_successor_interfaces(
@@ -675,6 +675,11 @@ static void loom_builder_initialize_successor_interfaces(
   if (vtable &&
       iree_any_bit_set(vtable->vtable_flags, LOOM_OP_VTABLE_DIRECT_BRANCH)) {
     op->flags |= LOOM_OP_FLAG_DIRECT_BRANCH;
+    if (vtable->attribute_count == 0 &&
+        iree_any_bit_set(vtable->vtable_flags,
+                         LOOM_OP_VTABLE_VARIADIC_OPERANDS)) {
+      op->flags |= LOOM_OP_FLAG_REBUILDABLE_DIRECT_BRANCH;
+    }
   }
 }
 

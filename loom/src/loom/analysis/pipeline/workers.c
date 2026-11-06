@@ -11,7 +11,6 @@
 #include "loom/analysis/storage_access.h"
 #include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
-#include "loom/ops/cfg/ops.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/ops.h"
@@ -526,9 +525,8 @@ static iree_status_t loom_pipeline_worker_transport(
         steps[count++] = (loom_pipeline_transport_step_t){
             .op = op, .kind = LOOM_PIPELINE_TRANSPORT_STEP_WAIT};
         ++wait;
-      } else if (!loom_func_return_isa(op) &&
-                 !loom_kernel_async_group_isa(op) && !loom_cfg_br_isa(op) &&
-                 !loom_cfg_cond_br_isa(op)) {
+      } else if (!iree_any_bit_set(op->traits, LOOM_TRAIT_TERMINATOR) &&
+                 !loom_kernel_async_group_isa(op)) {
         const loom_trait_flags_t traits = loom_op_effective_traits(module, op);
         if (!iree_any_bit_set(traits, LOOM_TRAIT_PURE) ||
             loom_traits_may_read(traits) || loom_traits_may_write(traits) ||

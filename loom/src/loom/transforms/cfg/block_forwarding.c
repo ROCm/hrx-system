@@ -8,8 +8,6 @@
 
 #include <string.h>
 
-#include "loom/ops/cfg/ops.h"
-#include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/transforms/cfg/block_arguments.h"
 
@@ -75,24 +73,10 @@ static iree_status_t loom_cfg_apply_forward_edge(
     loom_rewriter_t* rewriter, const loom_cfg_forward_edge_t* edit) {
   loom_op_t* terminator = (loom_op_t*)edit->edge->terminator;
   if (edit->payload) {
-    const loom_value_slice_t arguments =
-        loom_cfg_br_isa(edit->payload)
-            ? loom_cfg_br_args((loom_op_t*)edit->payload)
-            : loom_low_br_args((loom_op_t*)edit->payload);
-    loom_builder_ip_t saved_ip = loom_builder_save(&rewriter->builder);
-    loom_builder_set_before(&rewriter->builder, terminator);
-    loom_op_t* branch = NULL;
-    iree_status_t status =
-        loom_cfg_br_isa(terminator)
-            ? loom_cfg_br_build(&rewriter->builder, edit->destination,
-                                arguments.values, arguments.count,
-                                terminator->location, &branch)
-            : loom_low_br_build(&rewriter->builder, edit->destination,
-                                arguments.values, arguments.count,
-                                terminator->location, &branch);
-    loom_builder_restore(&rewriter->builder, saved_ip);
-    IREE_RETURN_IF_ERROR(status);
-    return loom_rewriter_erase(rewriter, terminator);
+    const loom_value_slice_t arguments = loom_direct_branch_args(edit->payload);
+    return loom_rewriter_rebuild_direct_branch(
+        rewriter, terminator, edit->destination, arguments.values,
+        (uint16_t)arguments.count);
   }
   loom_op_successors(terminator)[edit->edge->successor_index] =
       edit->destination;
@@ -121,12 +105,11 @@ iree_status_t loom_cfg_forward_empty_blocks(
     targets[i] = i;
     const loom_block_t* block = graph->blocks[i].block;
     if (i == 0 || block->arg_count != 0 || block->first_op != block->last_op ||
-        (!loom_cfg_br_isa(block->last_op) &&
-         !loom_low_br_isa(block->last_op))) {
+        !loom_direct_branch_isa(block->last_op)) {
       continue;
     }
     const loom_op_t* branch = block->last_op;
-    loom_block_t* destination = loom_op_successors(branch)[0];
+    loom_block_t* destination = loom_direct_branch_dest(branch);
     // A multi-predecessor gateway keeps one structural edge into a cycle.
     // Forwarding it would turn each predecessor into an independent entry or
     // backedge and destroy the reducible single-gateway shape established by
@@ -136,6 +119,9 @@ iree_status_t loom_cfg_forward_empty_blocks(
       continue;
     }
     if (destination->arg_count != 0) {
+      if (!loom_direct_branch_can_rebuild_payload(branch)) {
+        continue;
+      }
       payloads[i] = branch;
       has_forwarding = true;
     } else {
@@ -154,22 +140,15 @@ iree_status_t loom_cfg_forward_empty_blocks(
   for (iree_host_size_t i = 0; i < graph->edge_count; ++i) {
     const loom_cfg_edge_info_t* edge = &graph->edges[i];
     const loom_op_t* terminator = edge->terminator;
-    if (!loom_cfg_br_isa(terminator) && !loom_cfg_cond_br_isa(terminator) &&
-        !loom_low_br_isa(terminator) && !loom_low_cond_br_isa(terminator)) {
-      continue;
-    }
     uint16_t target_index = targets[edge->target_block_index];
     loom_cfg_forward_edge_t edit = {
         .edge = edge,
         .destination = (loom_block_t*)graph->blocks[target_index].block,
     };
     const loom_op_t* payload = payloads[target_index];
-    if (payload &&
-        (loom_cfg_br_isa(terminator) || loom_low_br_isa(terminator))) {
-      const loom_value_slice_t arguments =
-          loom_cfg_br_isa(payload) ? loom_cfg_br_args((loom_op_t*)payload)
-                                   : loom_low_br_args((loom_op_t*)payload);
-      loom_block_t* destination = loom_op_successors(payload)[0];
+    if (payload && loom_direct_branch_can_rebuild_payload(terminator)) {
+      const loom_value_slice_t arguments = loom_direct_branch_args(payload);
+      loom_block_t* destination = loom_direct_branch_dest(payload);
       if (loom_cfg_block_arguments_can_bind(rewriter->module, dominance,
                                             destination, arguments,
                                             terminator)) {
