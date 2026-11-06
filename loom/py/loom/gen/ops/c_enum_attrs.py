@@ -12,12 +12,52 @@ from collections import defaultdict
 from collections.abc import Sequence
 
 from loom.dsl import AttrDef, EncodingFamilyDef, EnumDef, Op
-from loom.gen.ops.c_names import c_encoding_enum_prefix, c_prefix
+from loom.gen.ops.c_names import COPYRIGHT, c_encoding_enum_prefix, c_prefix
 from loom.gen.support.c import CIdentifierCase, c_identifier
+from loom.gen.support.generated_file import line_comment_header
 
 SharedEnumMap = dict[int, tuple[str, str, EnumDef]]
 EncodingEnumMap = dict[int, tuple[EnumDef, bool]]
 EncodingEnumTypeMap = dict[int, str]
+
+
+def generate_enum_header(enum_def: EnumDef) -> str:
+    """Generates the public C definition for a model-owned enum."""
+    if enum_def.c_type is None or enum_def.c_const_prefix is None or enum_def.c_include is None:
+        raise ValueError(f"generated enum '{enum_def.name}' requires c_type, c_const_prefix, and c_include")
+    if not enum_def.c_type.endswith("_t"):
+        raise ValueError(f"generated enum '{enum_def.name}' C type must end in '_t'")
+
+    guard = c_identifier(enum_def.c_include, case=CIdentifierCase.UPPER) + "_"
+    enum_tag = enum_def.c_type.removesuffix("_t") + "_e"
+    count = max(case.value for case in enum_def.cases) + 1
+    lines = [COPYRIGHT]
+    lines.extend(
+        line_comment_header(
+            "//",
+            generator="loom.gen.ops.c_tables",
+            regenerate="python3 loom/py/loom/gen/run.py c_tables --in-place",
+        )
+    )
+    lines.extend(["", f"#ifndef {guard}", f"#define {guard}", ""])
+    if enum_def.doc:
+        lines.extend(f"// {line}" if line else "//" for line in enum_def.doc.splitlines())
+    lines.append(f"typedef enum {enum_tag} {{")
+    for case in enum_def.cases:
+        if case.doc:
+            lines.extend(f"  // {line}" if line else "  //" for line in case.doc.splitlines())
+        case_name = c_identifier(case.keyword, case=CIdentifierCase.UPPER)
+        lines.append(f"  {enum_def.c_const_prefix}_{case_name} = {case.value},")
+    lines.extend(
+        [
+            f"  {enum_def.c_const_prefix}_COUNT_ = {count},",
+            f"}} {enum_def.c_type};",
+            "",
+            f"#endif  // {guard}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def collect_encoding_enums(

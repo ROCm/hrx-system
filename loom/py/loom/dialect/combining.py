@@ -30,5 +30,5 @@ CombiningKind = EnumDef(
     doc="Algebraic combining operations for reductions and scans.",
     c_type="loom_combining_kind_t",
     c_const_prefix="LOOM_COMBINING_KIND",
-    c_include="loom/ops/combining.h",
+    c_include="loom/ops/combining_kind.h",
 )

@@ -9,7 +9,7 @@
 import pytest
 
 from loom.assembly import Param
-from loom.dsl import AttrDef, Dialect, TypeDef
+from loom.dsl import AttrDef, Dialect, EnumCase, EnumDef, TypeDef
 from loom.gen.ops import model as c_table_model
 from loom.gen.ops.c_dialect import generate_dialect_contents
 from loom.gen.ops.c_tables import checked_in_file_set
@@ -38,6 +38,15 @@ def test_checked_in_file_set_separates_public_artifacts_from_build_outputs() -> 
             ),
         ],
         types=[],
+        generated_enums=(
+            EnumDef(
+                "GeneratedMode",
+                [EnumCase("first", 0), EnumCase("second", 1)],
+                c_type="loom_generated_mode_t",
+                c_const_prefix="LOOM_GENERATED_MODE",
+                c_include="loom/ops/generated_mode.h",
+            ),
+        ),
     )
 
     generated_file_set = checked_in_file_set(model)
@@ -49,6 +58,7 @@ def test_checked_in_file_set_separates_public_artifacts_from_build_outputs() -> 
     assert "loom/src/loom/ops/artifact_test/type_builders.c" in generated_file_set.obsolete_paths
     assert "loom/src/loom/ops/build_generated_test/type_builders.h" in generated_file_set.obsolete_paths
     assert "loom/src/loom/ops/type_builders.h" in generated_file_set.output_paths
+    assert "loom/src/loom/ops/generated_mode.h" in generated_file_set.output_paths
     assert "loom/src/loom/ops/type_builders.c" in generated_file_set.obsolete_paths
     assert "loom/src/loom/ir/scalar_type_table.inc" in generated_file_set.output_paths
     assert "loom/src/loom/ops/artifact_test/ops.inc" in generated_file_set.obsolete_paths
@@ -59,6 +69,12 @@ def test_checked_in_file_set_separates_public_artifacts_from_build_outputs() -> 
     assert "loom/src/loom/ops/op_registry_tables.h" in generated_file_set.obsolete_paths
     assert all(not path.endswith(".c") for path in generated_file_set.output_paths)
     assert set(generated_file_set.output_paths).isdisjoint(generated_file_set.obsolete_paths)
+
+    generated_mode_header = next(generated_file.contents for generated_file in generated_file_set.files if generated_file.path == "loom/src/loom/ops/generated_mode.h")
+    assert "typedef enum loom_generated_mode_e" in generated_mode_header
+    assert "LOOM_GENERATED_MODE_FIRST = 0" in generated_mode_header
+    assert "LOOM_GENERATED_MODE_SECOND = 1" in generated_mode_header
+    assert "LOOM_GENERATED_MODE_COUNT_ = 2" in generated_mode_header
 
 
 @pytest.mark.parametrize("parameterized", [False, True])

@@ -50,6 +50,7 @@ loom_cc_library(
         "atomic.h",
         "cache.h",
         "combining.h",
+        "combining_kind.h",
     ],
     deps = [
         "//loom/src/loom/error:emitter",
@@ -300,7 +301,10 @@ loom_cc_library(
 loom_cc_library(
     name = "combining",
     srcs = ["combining.c"],
-    hdrs = ["combining.h"],
+    hdrs = [
+        "combining.h",
+        "combining_kind.h",
+    ],
     deps = [
         "//loom/src/loom/ir:types",
         "//runtime/src/iree/base",

@@ -8,6 +8,22 @@
 
 #include "loom/ops/vector/ops.h"
 
+loom_combining_kind_t loom_vector_float_extremum_combining_kind(
+    loom_op_kind_t op_kind) {
+  switch (op_kind) {
+    case LOOM_OP_VECTOR_MINIMUMF:
+      return LOOM_COMBINING_KIND_MINIMUMF;
+    case LOOM_OP_VECTOR_MAXIMUMF:
+      return LOOM_COMBINING_KIND_MAXIMUMF;
+    case LOOM_OP_VECTOR_MINNUMF:
+      return LOOM_COMBINING_KIND_MINNUMF;
+    case LOOM_OP_VECTOR_MAXNUMF:
+      return LOOM_COMBINING_KIND_MAXNUMF;
+    default:
+      return LOOM_COMBINING_KIND_COUNT_;
+  }
+}
+
 typedef iree_status_t (*loom_vector_flagged_binary_builder_t)(
     loom_builder_t* builder, uint8_t instance_flags, loom_value_id_t lhs,
     loom_value_id_t rhs, loom_type_t result_type, loom_location_id_t location,

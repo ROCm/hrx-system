@@ -16,6 +16,7 @@
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/scf/ops.h"
+#include "loom/ops/vector/combining.h"
 #include "loom/ops/vector/construction.h"
 #include "loom/ops/vector/memory.h"
 #include "loom/ops/vector/ops.h"
@@ -1170,12 +1171,6 @@ static iree_status_t loom_vector_legalize_predicate_extension(
   return iree_ok_status();
 }
 
-typedef uint8_t loom_vector_float_extremum_kind_t;
-enum loom_vector_float_extremum_kind_e {
-  LOOM_VECTOR_FLOAT_EXTREMUM_MINIMUM = 0,
-  LOOM_VECTOR_FLOAT_EXTREMUM_MAXIMUM = 1,
-};
-
 static iree_status_t loom_vector_legalize_build_select(
     loom_builder_t* builder, loom_location_id_t location, loom_type_t type,
     loom_value_id_t condition, loom_value_id_t true_value,
@@ -1194,9 +1189,9 @@ static iree_status_t loom_vector_legalize_build_select(
 // peer when exactly one operand is NaN and a quiet NaN when both are NaN.
 static iree_status_t loom_vector_legalize_build_number_extremum(
     loom_builder_t* builder, loom_location_id_t location,
-    loom_vector_float_extremum_kind_t kind, uint8_t fastmath,
-    loom_value_id_t lhs, loom_value_id_t rhs, loom_type_t type,
-    loom_value_id_t* out_result) {
+    loom_combining_kind_t kind, uint8_t fastmath, loom_value_id_t lhs,
+    loom_value_id_t rhs, loom_type_t type, loom_value_id_t* out_result) {
+  const bool is_minimum = loom_combining_kind_is_minimum_float_extremum(kind);
   loom_numeric_float_encoding_t encoding = {0};
   const bool has_encoding =
       loom_numeric_float_encoding(loom_type_element_type(type), &encoding);
@@ -1218,7 +1213,7 @@ static iree_status_t loom_vector_legalize_build_number_extremum(
   IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
       builder, rhs, type, integer_type, location, &rhs_bits_op));
   loom_op_t* tie_bits_op = NULL;
-  if (kind == LOOM_VECTOR_FLOAT_EXTREMUM_MINIMUM) {
+  if (is_minimum) {
     IREE_RETURN_IF_ERROR(
         loom_vector_ori_build(builder, loom_vector_bitcast_result(lhs_bits_op),
                               loom_vector_bitcast_result(rhs_bits_op),
@@ -1236,9 +1231,8 @@ static iree_status_t loom_vector_legalize_build_number_extremum(
   const loom_value_id_t tie = loom_vector_bitcast_result(tie_op);
 
   const loom_vector_cmpf_predicate_t predicate =
-      kind == LOOM_VECTOR_FLOAT_EXTREMUM_MINIMUM
-          ? LOOM_VECTOR_CMPF_PREDICATE_OLT
-          : LOOM_VECTOR_CMPF_PREDICATE_OGT;
+      is_minimum ? LOOM_VECTOR_CMPF_PREDICATE_OLT
+                 : LOOM_VECTOR_CMPF_PREDICATE_OGT;
   loom_op_t* lhs_ordered_op = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_cmpf_build(builder, fastmath, predicate, lhs,
                                               rhs, type, predicate_type,
@@ -1313,10 +1307,10 @@ static iree_status_t loom_vector_legalize_build_clamp(
     }
     case LOOM_VECTOR_CLAMPF_MODE_NUMBER: {
       IREE_RETURN_IF_ERROR(loom_vector_legalize_build_number_extremum(
-          builder, op->location, LOOM_VECTOR_FLOAT_EXTREMUM_MAXIMUM, fastmath,
-          value, lower, type, &lower_bounded));
+          builder, op->location, LOOM_COMBINING_KIND_MAXNUMF, fastmath, value,
+          lower, type, &lower_bounded));
       IREE_RETURN_IF_ERROR(loom_vector_legalize_build_number_extremum(
-          builder, op->location, LOOM_VECTOR_FLOAT_EXTREMUM_MINIMUM, fastmath,
+          builder, op->location, LOOM_COMBINING_KIND_MINNUMF, fastmath,
           lower_bounded, upper, type, &replacement));
       break;
     }
@@ -1343,8 +1337,8 @@ static iree_status_t loom_vector_legalize_build_clamp(
 // unordered comparison adds the IEEE NaN policy without changing numeric
 // operands or exposing a NaN payload guarantee.
 static iree_status_t loom_vector_legalize_build_ieee_extremum(
-    loom_builder_t* builder, loom_op_t* op, loom_type_t type,
-    loom_value_id_t* out_result) {
+    loom_builder_t* builder, loom_op_t* op, loom_combining_kind_t kind,
+    loom_type_t type, loom_value_id_t* out_result) {
   const loom_value_id_t lhs = loom_op_operands(op)[0];
   const loom_value_id_t rhs = loom_op_operands(op)[1];
   loom_type_t predicate_type = type;
@@ -1352,14 +1346,15 @@ static iree_status_t loom_vector_legalize_build_ieee_extremum(
       loom_type_make_header(loom_type_kind(type), LOOM_SCALAR_TYPE_I1,
                             loom_type_rank(type), loom_type_flags(type));
 
-  loom_op_t* number = NULL;
-  if (loom_vector_minimumf_isa(op)) {
+  loom_op_t* number_op = NULL;
+  if (loom_combining_kind_is_minimum_float_extremum(kind)) {
     IREE_RETURN_IF_ERROR(loom_vector_minnumf_build(
-        builder, op->instance_flags, lhs, rhs, type, op->location, &number));
+        builder, op->instance_flags, lhs, rhs, type, op->location, &number_op));
   } else {
     IREE_RETURN_IF_ERROR(loom_vector_maxnumf_build(
-        builder, op->instance_flags, lhs, rhs, type, op->location, &number));
+        builder, op->instance_flags, lhs, rhs, type, op->location, &number_op));
   }
+  const loom_value_id_t number = loom_op_results(number_op)[0];
   loom_op_t* unordered = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_cmpf_build(
       builder, op->instance_flags, LOOM_VECTOR_CMPF_PREDICATE_UNO, lhs, rhs,
@@ -1370,8 +1365,7 @@ static iree_status_t loom_vector_legalize_build_ieee_extremum(
   loom_op_t* select = NULL;
   IREE_RETURN_IF_ERROR(loom_vector_select_build(
       builder, loom_vector_cmpf_result(unordered),
-      loom_vector_splatf_result(nan), loom_op_results(number)[0], type,
-      op->location, &select));
+      loom_vector_splatf_result(nan), number, type, op->location, &select));
   *out_result = loom_vector_select_result(select);
   return iree_ok_status();
 }
@@ -1380,9 +1374,10 @@ iree_status_t loom_vector_float_extrema_rewrite_op(loom_rewriter_t* rewriter,
                                                    loom_op_t* op,
                                                    bool* out_rewritten) {
   *out_rewritten = false;
-  if (!loom_vector_minnumf_isa(op) && !loom_vector_maxnumf_isa(op) &&
-      !loom_vector_minimumf_isa(op) && !loom_vector_maximumf_isa(op) &&
-      !loom_vector_clampf_isa(op)) {
+  const loom_combining_kind_t kind =
+      loom_vector_float_extremum_combining_kind(op->kind);
+  const bool is_binary_extremum = kind != LOOM_COMBINING_KIND_COUNT_;
+  if (!is_binary_extremum && !loom_vector_clampf_isa(op)) {
     return iree_ok_status();
   }
 
@@ -1392,19 +1387,17 @@ iree_status_t loom_vector_float_extrema_rewrite_op(loom_rewriter_t* rewriter,
   const loom_type_t type =
       loom_module_value_type(rewriter->module, loom_op_results(op)[0]);
   loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
-  if (loom_vector_minnumf_isa(op) || loom_vector_maxnumf_isa(op)) {
+  if (kind == LOOM_COMBINING_KIND_MINNUMF ||
+      kind == LOOM_COMBINING_KIND_MAXNUMF) {
     IREE_RETURN_IF_ERROR(loom_vector_legalize_build_number_extremum(
-        builder, op->location,
-        loom_vector_minnumf_isa(op) ? LOOM_VECTOR_FLOAT_EXTREMUM_MINIMUM
-                                    : LOOM_VECTOR_FLOAT_EXTREMUM_MAXIMUM,
-        op->instance_flags, loom_op_operands(op)[0], loom_op_operands(op)[1],
-        type, &replacement));
+        builder, op->location, kind, op->instance_flags,
+        loom_op_operands(op)[0], loom_op_operands(op)[1], type, &replacement));
   } else if (loom_vector_clampf_isa(op)) {
     IREE_RETURN_IF_ERROR(
         loom_vector_legalize_build_clamp(builder, op, type, &replacement));
   } else {
     IREE_RETURN_IF_ERROR(loom_vector_legalize_build_ieee_extremum(
-        builder, op, type, &replacement));
+        builder, op, kind, type, &replacement));
   }
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, &replacement, 1, checkpoint));

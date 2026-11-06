@@ -15,48 +15,23 @@
 
 #include "iree/base/api.h"
 #include "loom/ir/scalar_type.h"
+#include "loom/ops/combining_kind.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum loom_combining_kind_e {
-  // Integer addition.
-  LOOM_COMBINING_KIND_ADDI = 0,
-  // Floating-point addition.
-  LOOM_COMBINING_KIND_ADDF = 1,
-  // Integer multiplication.
-  LOOM_COMBINING_KIND_MULI = 2,
-  // Floating-point multiplication.
-  LOOM_COMBINING_KIND_MULF = 3,
-  // Signed integer minimum.
-  LOOM_COMBINING_KIND_MINSI = 4,
-  // Signed integer maximum.
-  LOOM_COMBINING_KIND_MAXSI = 5,
-  // Unsigned integer minimum.
-  LOOM_COMBINING_KIND_MINUI = 6,
-  // Unsigned integer maximum.
-  LOOM_COMBINING_KIND_MAXUI = 7,
-  // Bitwise AND.
-  LOOM_COMBINING_KIND_ANDI = 8,
-  // Bitwise OR.
-  LOOM_COMBINING_KIND_ORI = 9,
-  // Bitwise XOR.
-  LOOM_COMBINING_KIND_XORI = 10,
-  // IEEE 754 floating-point minimum.
-  LOOM_COMBINING_KIND_MINIMUMF = 11,
-  // IEEE 754 floating-point maximum.
-  LOOM_COMBINING_KIND_MAXIMUMF = 12,
-  // C99 fmin-style floating-point minimum.
-  LOOM_COMBINING_KIND_MINNUMF = 13,
-  // C99 fmax-style floating-point maximum.
-  LOOM_COMBINING_KIND_MAXNUMF = 14,
-  LOOM_COMBINING_KIND_COUNT_,
-} loom_combining_kind_t;
-
 // Returns true when |kind| is a known loom_combining_kind_t value.
 static inline bool loom_combining_kind_is_valid(loom_combining_kind_t kind) {
   return (uint32_t)kind < (uint32_t)LOOM_COMBINING_KIND_COUNT_;
+}
+
+// Returns true for either floating-point minimum semantic. Other combining
+// kinds return false.
+static inline bool loom_combining_kind_is_minimum_float_extremum(
+    loom_combining_kind_t kind) {
+  return kind == LOOM_COMBINING_KIND_MINIMUMF ||
+         kind == LOOM_COMBINING_KIND_MINNUMF;
 }
 
 // Returns true when |kind| operates on integer element types.

@@ -9,6 +9,7 @@
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/ir/facts.h"
 #include "loom/ir/module.h"
+#include "loom/ops/combining_kind.h"
 #include "loom/ops/encoding/storage.h"
 #include "loom/util/fact_table.h"
 
@@ -264,7 +265,7 @@ static iree_string_view_t loom_aie2p_array_report_fold_kind_name(
       [LOOM_COMBINING_KIND_MINNUMF] = IREE_SVL("minnumf"),
       [LOOM_COMBINING_KIND_MAXNUMF] = IREE_SVL("maxnumf"),
   };
-  return loom_combining_kind_is_valid(kind) ? names[kind] : IREE_SV("unknown");
+  return names[kind];
 }
 
 static void loom_aie2p_array_report_worker_record_counts(

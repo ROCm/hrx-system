@@ -15,7 +15,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/atomic.h"
 #include "loom/ops/cache.h"
-#include "loom/ops/combining.h"
+#include "loom/ops/combining_kind.h"
 
 #ifdef __cplusplus
 extern "C" {

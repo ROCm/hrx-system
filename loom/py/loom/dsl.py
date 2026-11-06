@@ -1206,10 +1206,11 @@ class EnumDef:
     name: Enum type name (e.g., "CmpIPredicate", "BroadcastDir").
     cases: The valid cases.
     doc: Human-readable description.
-    c_type: Optional externally defined C enum typedef used by generated
-        accessors and builders instead of emitting a dialect-local enum.
-    c_const_prefix: Optional prefix for cases in the external C enum.
-    c_include: Optional header containing c_type.
+    c_type: Optional C enum typedef used by generated accessors and builders
+        instead of emitting a dialect-local enum.
+    c_const_prefix: Optional prefix for cases in the C enum.
+    c_include: Optional header containing c_type. The generation model may own
+        this header or it may be provided by a hand-authored API.
     """
 
     name: str

@@ -8,6 +8,22 @@
 
 #include "loom/ops/scalar/ops.h"
 
+loom_combining_kind_t loom_scalar_float_extremum_combining_kind(
+    loom_op_kind_t op_kind) {
+  switch (op_kind) {
+    case LOOM_OP_SCALAR_MINIMUMF:
+      return LOOM_COMBINING_KIND_MINIMUMF;
+    case LOOM_OP_SCALAR_MAXIMUMF:
+      return LOOM_COMBINING_KIND_MAXIMUMF;
+    case LOOM_OP_SCALAR_MINNUMF:
+      return LOOM_COMBINING_KIND_MINNUMF;
+    case LOOM_OP_SCALAR_MAXNUMF:
+      return LOOM_COMBINING_KIND_MAXNUMF;
+    default:
+      return LOOM_COMBINING_KIND_COUNT_;
+  }
+}
+
 bool loom_scalar_combining_kind_op(loom_combining_kind_t kind,
                                    loom_op_kind_t* out_op_kind) {
   switch (kind) {
