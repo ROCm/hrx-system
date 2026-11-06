@@ -441,9 +441,22 @@ static iree_status_t loom_rewriter_fold_results(
   loom_builder_set_before(&rewriter->builder, op);
   loom_value_id_t value_checkpoint = loom_rewriter_value_checkpoint(rewriter);
 
+  const bool preserve_relations =
+      !exact_facts && loom_traits_are_fact_identity(op->traits) &&
+      rewriter->pending_exact_relations_callback.fn &&
+      loom_value_fact_table_has_pending_exact_relations(rewriter->fact_table);
   loom_value_id_t* replacement_ids = NULL;
-  IREE_RETURN_IF_ERROR(loom_value_fact_table_value_id_scratch(
-      rewriter->fact_table, op->result_count, &replacement_ids));
+  if (preserve_relations) {
+    // Relation materialization mutates facts and may reuse table scratch. Keep
+    // the proven replacements alive across that mutation without reading the
+    // expired observation or publishing another fact batch for this fold.
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        rewriter->arena, op->result_count, sizeof(*replacement_ids),
+        (void**)&replacement_ids));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_value_id_scratch(
+        rewriter->fact_table, op->result_count, &replacement_ids));
+  }
 
   for (uint16_t i = 0; i < op->result_count; ++i) {
 #ifndef NDEBUG
@@ -463,6 +476,10 @@ static iree_status_t loom_rewriter_fold_results(
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, replacement_ids, op->result_count, value_checkpoint));
 
+  if (preserve_relations) {
+    IREE_RETURN_IF_ERROR(rewriter->pending_exact_relations_callback.fn(
+        rewriter->pending_exact_relations_callback.user_data, rewriter));
+  }
   IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
       rewriter, op, replacement_ids, op->result_count));
 
@@ -476,19 +493,6 @@ iree_status_t loom_rewriter_try_fold(loom_rewriter_t* rewriter, loom_op_t* op,
   if (!loom_rewriter_can_fold(rewriter, op)) {
     return iree_ok_status();
   }
-#ifndef NDEBUG
-  const loom_value_fact_observation_t observation =
-      loom_value_fact_observation_capture(rewriter->fact_table);
-#endif
-  if (loom_traits_are_fact_identity(op->traits) &&
-      rewriter->pending_exact_relations_callback.fn &&
-      loom_value_fact_table_has_pending_exact_relations(rewriter->fact_table)) {
-    IREE_RETURN_IF_ERROR(rewriter->pending_exact_relations_callback.fn(
-        rewriter->pending_exact_relations_callback.user_data, rewriter));
-  }
-#ifndef NDEBUG
-  loom_value_fact_observation_assert_valid(observation);
-#endif
   IREE_RETURN_IF_ERROR(loom_rewriter_fold_results(rewriter, op, NULL));
   *out_folded = true;
   return iree_ok_status();
