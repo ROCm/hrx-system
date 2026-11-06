@@ -267,6 +267,7 @@ void scoped_bounds(bool first, bool second, unsigned coordinate, unsigned* outpu
 
 // ----
 #include <loomcxx/kernel.h>
+#include <loomcxx/predicate.h>
 
 [[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
 void scoped_bounds(bool first, bool second, unsigned coordinate, unsigned* output) {

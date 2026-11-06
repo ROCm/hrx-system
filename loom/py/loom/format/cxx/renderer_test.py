@@ -1272,6 +1272,20 @@ def test_projects_index_arithmetic_without_scalarizing_its_domain() -> None:
     assert "loom::type::indices{v43}" in result
 
 
+def test_scalar_assumption_includes_its_predicate_facade() -> None:
+    source = """\
+func.def public @bounded(%value: i64) -> (%result: i64) {
+  %result = scalar.assume %value [range(%value, 0, 9223372036854775807)] : i64
+  func.return %result : i64
+}
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert "#include <loomcxx/predicate.h>" in result
+    assert "loom::assume(value <= 9223372036854775807ull);" in result
+
+
 def test_projects_topology_coordinates_without_losing_index_identity() -> None:
     source = """\
 kernel.def @topology_identity() {

@@ -1614,7 +1614,7 @@ class CxxRenderer(CxxFunctionRenderer):
                 scalar_names.add(repr(value_type))
             elif isinstance(value_type, ShapedType):
                 scalar_names.add(repr(value_type.element_type))
-        uses_predicate_functions = any(
+        uses_predicate_functions = self.uses_predicate_functions or any(
             isinstance(
                 predicates := operation.attributes.get("predicates"), PredicateListAttr
             )

@@ -241,6 +241,7 @@ class CxxRenderContext:
         self.record_types: dict[tuple[str, tuple[tuple[str, str], ...]], str] = {}
         self.uses_scalar_functions = False
         self.uses_numeric_conversion = False
+        self.uses_predicate_functions = False
         self.signed_values = self._analyze_signed_values()
         self.types = CxxTypes(module, self.signed_values)
         self.view_access: ViewAccessPlan | None = None
