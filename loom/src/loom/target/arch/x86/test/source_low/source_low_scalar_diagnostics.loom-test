@@ -3,7 +3,7 @@
 x86.target<avx2> @target
 
 func.def target(@target) @scalar_powf_rejected_by_math_policy(%base: f32, %exponent: f32) -> (f32) {
-  // ERROR@+1: LOWERING/036 {op_name="scalar.powf", phase_name="legalize-math", policy_name="x86-math", math_op="powf", lane_domain="scalar", element_type="f32", constraint_key="math.basis.log2"}
+  // ERROR@+1: LOWERING/036 {op_name="scalar.powf", phase_name="legalize-math", policy_name="x86-math", math_op="powf", lane_domain="scalar", element_type="f32", constraint_key="math.op.supported"}
   %result = scalar.powf<afn> %base, %exponent : f32
   func.return %result : f32
 }
