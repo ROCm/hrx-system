@@ -16,6 +16,7 @@ loom_check_test_suite(
     name = "compiler_test",
     srcs = [
         "constructors.cxx-test",
+        "group_dot.cxx-test",
         "hip_vector_types.cxx-test",
         "matrix_fragments.cxx-test",
         "matrix_fragments_invalid.cxx-test",

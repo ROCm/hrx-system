@@ -37,16 +37,13 @@ loom_library(
 loom_check_test_suite(
     name = "compiler_test",
     srcs = [
-        "group_dot.cxx-test",
         "operators.cxx-test",
         "paged_online_softmax_loop_f32.cxx-test",
         "records.cxx-test",
         "special_members_invalid.cxx-test",
     ],
     data = [
-        "mxfp_group_dot.cxx",
         "operator_values.cxx",
-        "packed_group_dot.cxx",
         "paged_online_softmax_loop_f32.cxx",
         "record_values.cxx",
     ],
