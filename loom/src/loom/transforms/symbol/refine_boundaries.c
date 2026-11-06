@@ -1163,7 +1163,6 @@ static iree_status_t loom_refine_boundaries_collect_return(
         function->return_forward_result_indices, i,
         LOOM_REFINE_BOUNDARIES_FORWARD_NONE);
   }
-  function->has_return_facts = true;
   return iree_ok_status();
 }
 
@@ -1295,9 +1294,6 @@ static iree_status_t loom_refine_boundaries_collect_call(
       &collect->graph->functions[callee_node];
   IREE_RETURN_IF_ERROR(loom_refine_boundaries_collect_argument_equality(
       collect, callee_info, operands));
-  IREE_RETURN_IF_ERROR(loom_refine_boundaries_collect_return_forwarding(
-      collect, op, callee_info, operands, results));
-
   if (callee_info->can_refine_argument_facts) {
     iree_host_size_t count = operands.count < callee_info->argument_count
                                  ? operands.count
@@ -1314,6 +1310,8 @@ static iree_status_t loom_refine_boundaries_collect_call(
   if (!callee_info->has_return_facts) {
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(loom_refine_boundaries_collect_return_forwarding(
+      collect, op, callee_info, operands, results));
   loom_reference_call_t reference_call;
   bool has_reference_call = false;
   iree_host_size_t count = results.count < callee_info->result_count
@@ -1397,6 +1395,9 @@ static iree_status_t loom_refine_boundaries_collect_function(
         (loom_walk_callback_t){loom_refine_boundaries_collect_op, &collect},
         &walk_result));
   }
+  // Recursive calls encountered during collection cannot consume a partial
+  // summary containing only the returns visited before that call.
+  function_info->has_return_facts = true;
   return iree_ok_status();
 }
 

@@ -1,0 +1,71 @@
+// RUN: pass refine-boundaries
+
+// The base case returns zero, but the recursive call cannot inherit that fact
+// before the recursive exit contributes its return value to the summary.
+func.def public noinline @recursive_sum(%count: i64) -> (i64) {
+  %c0 = scalar.constant 0 : i64
+  %c1 = scalar.constant 1 : i64
+  %done = scalar.cmpi eq, %count, %c0 : i64
+  cfg.cond_br %done, ^exit, ^recurse
+^exit:
+  func.return %c0 : i64
+^recurse:
+  %previous = scalar.subi %count, %c1 : i64
+  %tail = func.call @recursive_sum(%previous) : (i64) -> (i64)
+  %sum = scalar.addi %tail, %count : i64
+  func.return %sum : i64
+}
+
+// ----
+func.def public noinline @recursive_sum(%count: i64) -> (i64) {
+  %c0 = scalar.constant 0 : i64
+  %done = scalar.cmpi eq, %count, %c0 : i64
+  cfg.cond_br %done, ^exit, ^recurse
+^exit:
+  func.return %c0 : i64
+^recurse:
+  %8 = scalar.constant -1 : i64
+  %previous = scalar.addi %count, %8 : i64
+  %tail = func.call @recursive_sum(%previous) : (i64) -> (i64)
+  %sum = scalar.addi %tail, %count : i64
+  func.return %sum : i64
+}
+
+// ====
+
+// A base return forwards one argument and repeats a computed result. Neither
+// relation holds for the complete function, whose recursive returns differ.
+func.def public noinline @recursive_forwarding(%count: i32, %left: i32, %right: i32) -> (i32, i32, i32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %done = scalar.cmpi eq, %count, %c0 : i32
+  cfg.cond_br %done, ^exit, ^recurse
+^exit:
+  %combined = scalar.xori %left, %right : i32
+  func.return %left, %combined, %combined : i32, i32, i32
+^recurse:
+  %previous = scalar.subi %count, %c1 : i32
+  %first, %second, %third = func.call @recursive_forwarding(%previous, %right, %left) : (i32, i32, i32) -> (i32, i32, i32)
+  %first_result = scalar.addi %first, %left : i32
+  %second_result = scalar.addi %second, %left : i32
+  %third_result = scalar.addi %third, %right : i32
+  func.return %first_result, %second_result, %third_result : i32, i32, i32
+}
+
+// ----
+func.def public noinline @recursive_forwarding(%count: i32, %left: i32, %right: i32) -> (i32, i32, i32) {
+  %c0 = scalar.constant 0 : i32
+  %done = scalar.cmpi eq, %count, %c0 : i32
+  cfg.cond_br %done, ^exit, ^recurse
+^exit:
+  %combined = scalar.xori %left, %right : i32
+  func.return %left, %combined, %combined : i32, i32, i32
+^recurse:
+  %17 = scalar.constant -1 : i32
+  %previous = scalar.addi %count, %17 : i32
+  %first, %second, %third = func.call @recursive_forwarding(%previous, %right, %left) : (i32, i32, i32) -> (i32, i32, i32)
+  %first_result = scalar.addi %first, %left : i32
+  %second_result = scalar.addi %second, %left : i32
+  %third_result = scalar.addi %third, %right : i32
+  func.return %first_result, %second_result, %third_result : i32, i32, i32
+}

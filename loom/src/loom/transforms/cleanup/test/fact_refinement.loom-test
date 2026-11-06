@@ -828,3 +828,92 @@ func.def @batched_exact_relations(%upper: index, %storage: view<[%upper]xi32>) -
   test.use %loaded : i32
   func.return %bounded, %bounded_again : index, index
 }
+
+// ====
+// RUN: pass canonicalize,vector-memory-footprint
+
+// A view between two refinements takes the first dimension at its definition
+// and the stronger dimension at its later use. Both mappings share the original
+// dimension identity until their target types have been computed.
+func.def @sequential_view_dimensions(%count: index, %storage: buffer) -> (i16, i16) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %first_view = buffer.view %storage[%origin] : buffer -> view<[%count]xi16>
+  %first_column = index.assume %c0 [ge(%c0, 0), lt(%c0, %count)] : index
+  %first = view.load %first_view[%first_column] : view<[%count]xi16> -> i16
+  %second_view = buffer.view %storage[%origin] : buffer -> view<[%count]xi16>
+  %second_column = index.assume %c1 [ge(%c1, 0), lt(%c1, %count)] : index
+  %second = view.load %second_view[%second_column] : view<[%count]xi16> -> i16
+  func.return %first, %second : i16, i16
+}
+
+// ----
+func.def @sequential_view_dimensions(%count: index, %storage: buffer) -> (i16, i16) {
+  %origin = index.constant 0 : offset
+  %first_view = buffer.view %storage[%origin] : buffer -> view<[%count]xi16>
+  %first_column = index.constant 0 : index
+  %count_refined$13 = index.assume %count [gt(%count, 0)] : index
+  %first_view_refined = view.refine %first_view : view<[%count]xi16> -> view<[%count_refined$13]xi16>
+  %first = view.load %first_view_refined[%first_column] : view<[%count_refined$13]xi16> -> i16
+  %second_view = buffer.view %storage[%origin] : buffer -> view<[%count_refined$13]xi16>
+  %second_column = index.constant 1 : index
+  %count_refined$14 = index.assume %count_refined$13 [gt(%count_refined$13, 1)] : index
+  %second_view_refined = view.refine %second_view : view<[%count_refined$13]xi16> -> view<[%count_refined$14]xi16>
+  %second = view.load %second_view_refined[%second_column] : view<[%count_refined$14]xi16> -> i16
+  func.return %first, %second : i16, i16
+}
+
+// ====
+// RUN: pass canonicalize,vector-memory-footprint
+
+// Definition and use refinements compose across every embedded dimension.
+func.def @sequential_view_axes(%rows: index, %columns: index, %storage: buffer) -> (i32, i32) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c2 = index.constant 2 : index
+  %first_row = index.assume %c0 [lt(%c0, %rows)] : index
+  %first_column = index.assume %c0 [lt(%c0, %columns)] : index
+  %view = buffer.view %storage[%origin] : buffer -> view<[%rows]x[%columns]xi32>
+  %first = view.load %view[%first_row, %first_column] : view<[%rows]x[%columns]xi32> -> i32
+  %second_row = index.assume %c1 [lt(%c1, %rows)] : index
+  %second_column = index.assume %c2 [lt(%c2, %columns)] : index
+  %second = view.load %view[%second_row, %second_column] : view<[%rows]x[%columns]xi32> -> i32
+  func.return %first, %second : i32, i32
+}
+
+// ----
+func.def @sequential_view_axes(%rows: index, %columns: index, %storage: buffer) -> (i32, i32) {
+  %origin = index.constant 0 : offset
+  %first_row = index.constant 0 : index
+  %rows_refined$16 = index.assume %rows [gt(%rows, 0)] : index
+  %first_column = index.constant 0 : index
+  %columns_refined$18 = index.assume %columns [gt(%columns, 0)] : index
+  %view = buffer.view %storage[%origin] : buffer -> view<[%rows_refined$16]x[%columns_refined$18]xi32>
+  %first = view.load %view[%first_row, %first_column] : view<[%rows_refined$16]x[%columns_refined$18]xi32> -> i32
+  %second_row = index.constant 1 : index
+  %rows_refined$17 = index.assume %rows_refined$16 [gt(%rows_refined$16, 1)] : index
+  %second_column = index.constant 2 : index
+  %columns_refined$19 = index.assume %columns_refined$18 [gt(%columns_refined$18, 2)] : index
+  %view_refined = view.refine %view : view<[%rows_refined$16]x[%columns_refined$18]xi32> -> view<[%rows_refined$17]x[%columns_refined$19]xi32>
+  %second = view.load %view_refined[%second_row, %second_column] : view<[%rows_refined$17]x[%columns_refined$19]xi32> -> i32
+  func.return %first, %second : i32, i32
+}
+
+// ====
+// RUN: pass canonicalize,vector-memory-footprint
+
+// A later refinement cannot strengthen a use preceding its assumption.
+func.def @earlier_view_use_keeps_its_bound(%count: index, %storage: buffer) -> (i16, i16) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %first_column = index.assume %c0 [lt(%c0, %count)] : index
+  %view = buffer.view %storage[%origin] : buffer -> view<[%count]xi16>
+  // ERROR@+1: SUBRANGE/024
+  %first = view.load %view[%c1] : view<[%count]xi16> -> i16
+  %second_column = index.assume %c1 [lt(%c1, %count)] : index
+  %second = view.load %view[%second_column] : view<[%count]xi16> -> i16
+  func.return %first, %second : i16, i16
+}

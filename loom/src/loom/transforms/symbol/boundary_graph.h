@@ -66,7 +66,8 @@ typedef struct loom_refine_boundaries_function_t {
   // Cyclic functions retain their declared argument contracts.
   bool can_refine_argument_facts;
 
-  // True after return facts have been computed in the current round.
+  // True after every return fact and forwarding summary has been collected in
+  // the current round. Recursive calls cannot consume a partial summary.
   bool has_return_facts;
 
   // Joined return facts for each result slot in the current round. Extension
