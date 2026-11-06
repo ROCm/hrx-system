@@ -14,6 +14,7 @@
 #include "loom/codegen/low/memory_access.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
+#include "loom/ops/command/composition.h"
 #include "loom/ops/command/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/low/capture.h"
@@ -280,7 +281,8 @@ static iree_status_t loom_inline_materialize_command_schedule(
   loom_op_t* first_op = block->first_op;
   loom_op_t* terminator = block->last_op;
   if (first_op == terminator ||
-      (loom_command_serial_isa(first_op) && first_op->next_op == terminator)) {
+      (loom_command_composition_is_serial_program_schedule(first_op) &&
+       first_op->next_op == terminator)) {
     return iree_ok_status();
   }
 

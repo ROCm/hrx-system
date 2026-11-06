@@ -11,6 +11,7 @@
 
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/command/composition.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/tooling/testbench/scenario/plan.h"
@@ -550,14 +551,11 @@ static bool loom_testbench_is_parameter_op(const loom_op_t* op) {
 }
 
 static bool loom_testbench_is_launch_schedule_op(const loom_op_t* op) {
-  return loom_kernel_launch_serial_isa(op) ||
-         loom_kernel_launch_concurrent_isa(op);
+  return loom_command_composition_is_kernel_launch_schedule(op);
 }
 
 static loom_region_t* loom_testbench_launch_schedule_body(const loom_op_t* op) {
-  return loom_kernel_launch_serial_isa(op)
-             ? loom_kernel_launch_serial_body(op)
-             : loom_kernel_launch_concurrent_body(op);
+  return loom_op_regions(op)[0];
 }
 
 // Iterates a launch schedule tree in source order without recursion or
@@ -635,13 +633,12 @@ static bool loom_testbench_is_supported_check_body_op(
     case LOOM_OP_CHECK_FILE_WRITE_NPY:
     case LOOM_OP_CHECK_TENSOR_VIEW:
     case LOOM_OP_CHECK_ORACLE_CALL:
-    case LOOM_OP_KERNEL_LAUNCH_SERIAL:
-    case LOOM_OP_KERNEL_LAUNCH_CONCURRENT:
       return true;
     default:
       break;
   }
-  return loom_testbench_is_expectation_op(op) ||
+  return loom_testbench_is_launch_schedule_op(op) ||
+         loom_testbench_is_expectation_op(op) ||
          loom_testbench_is_invocation_op(module, op);
 }
 
@@ -961,6 +958,9 @@ static iree_status_t loom_testbench_push_launch_schedule_frame(
   loom_region_t* body = loom_testbench_launch_schedule_body(schedule_op);
   loom_block_t* block =
       body && body->block_count != 0 ? loom_region_entry_block(body) : NULL;
+  const bool is_concurrent =
+      loom_command_composition_schedule_mode(schedule_op) ==
+      LOOM_COMMAND_COMPOSITION_MODE_CONCURRENT;
   planner->schedule_frames[planner->schedule_frame_count++] =
       (loom_testbench_launch_schedule_frame_t){
           .next_op = block ? block->first_op : NULL,
@@ -968,13 +968,12 @@ static iree_status_t loom_testbench_push_launch_schedule_frame(
           .span = 0,
           .depth = depth,
           .location = schedule_op->location,
-          .is_concurrent = loom_kernel_launch_concurrent_isa(schedule_op),
+          .is_concurrent = is_concurrent,
       };
   loom_testbench_append_launch_schedule_event(
       planner,
-      loom_kernel_launch_concurrent_isa(schedule_op)
-          ? LOOM_TESTBENCH_LAUNCH_SCHEDULE_EVENT_CONCURRENT_BEGIN
-          : LOOM_TESTBENCH_LAUNCH_SCHEDULE_EVENT_SERIAL_BEGIN,
+      is_concurrent ? LOOM_TESTBENCH_LAUNCH_SCHEDULE_EVENT_CONCURRENT_BEGIN
+                    : LOOM_TESTBENCH_LAUNCH_SCHEDULE_EVENT_SERIAL_BEGIN,
       schedule_op->location);
   return iree_ok_status();
 }

@@ -14,6 +14,7 @@
 #include "loom/ops/cache.h"
 #include "loom/ops/callable_effects.h"
 #include "loom/ops/combining.h"
+#include "loom/ops/command/composition.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/function_contract_verify.h"
 #include "loom/ops/kernel/launch_config_contract.h"
@@ -1146,8 +1147,7 @@ iree_status_t loom_kernel_dispatch_verify(const loom_module_t* module,
 iree_status_t loom_kernel_launch_yield_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
-  if (op->parent_op && (loom_kernel_launch_serial_isa(op->parent_op) ||
-                        loom_kernel_launch_concurrent_isa(op->parent_op))) {
+  if (loom_command_composition_is_kernel_launch_schedule(op->parent_op)) {
     return iree_ok_status();
   }
   return loom_kernel_emit_launch_placement_error(
@@ -1167,17 +1167,20 @@ static iree_status_t loom_kernel_verify_launch_preparation(
     loom_walk_result_t* out_result) {
   const loom_kernel_launch_schedule_verification_t* verification = user_data;
   *out_result = LOOM_WALK_CONTINUE;
-  if (loom_kernel_launch_isa(op) || loom_kernel_dispatch_isa(op) ||
-      loom_kernel_launch_serial_isa(op) ||
-      loom_kernel_launch_concurrent_isa(op) ||
-      loom_kernel_launch_yield_isa(op)) {
+  const loom_trait_flags_t traits =
+      loom_op_effective_traits(verification->module, op);
+  const loom_call_like_t call = loom_call_like_cast(verification->module, op);
+  const bool is_kernel_issue =
+      iree_any_bit_set(traits, LOOM_TRAIT_COMMAND_EFFECT) &&
+      loom_call_like_kind(call) == LOOM_CALL_LIKE_KIND_SEMANTIC;
+  const bool is_launch_schedule =
+      loom_command_composition_is_kernel_launch_schedule(op);
+  if (is_kernel_issue || is_launch_schedule) {
     // Each nested schedule verifies its own preparation. Pruning it keeps
     // every preparation operation owned by exactly one schedule check.
     *out_result = LOOM_WALK_SKIP;
     return iree_ok_status();
   }
-  const loom_trait_flags_t traits =
-      loom_op_effective_traits(verification->module, op);
   if (!iree_any_bit_set(traits, LOOM_TRAIT_COMMAND_EFFECT) &&
       loom_callable_effects_classify_traits(traits) !=
           LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED) {
@@ -1192,9 +1195,7 @@ static iree_status_t loom_kernel_verify_launch_preparation(
 iree_status_t loom_kernel_launch_schedule_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
-  loom_region_t* body = loom_kernel_launch_serial_isa(op)
-                            ? loom_kernel_launch_serial_body(op)
-                            : loom_kernel_launch_concurrent_body(op);
+  loom_region_t* body = loom_op_regions(op)[0];
   loom_kernel_launch_schedule_verification_t verification = {
       .module = module,
       .emitter = emitter,

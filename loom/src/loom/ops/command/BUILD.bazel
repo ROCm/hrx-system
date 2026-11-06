@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_instance_library", "loom_cc_library", "loom_generated_cc_library")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_instance_library", "loom_cc_library", "loom_cc_test", "loom_generated_cc_library")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -31,12 +31,19 @@ loom_cc_instance_library(
 )
 
 loom_cc_library(
+    name = "composition",
+    hdrs = ["composition.h"],
+    deps = [
+        ":op_defs",
+        "//loom/src/loom/ops/kernel:op_defs",
+    ],
+)
+
+loom_cc_library(
     name = "canonicalize",
     srcs = ["canonicalize.c"],
     deps = [
-        ":op_defs",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops/kernel:op_defs",
+        ":composition",
         "//loom/src/loom/rewrite:rewriter",
         "//runtime/src/iree/base",
     ],
@@ -75,5 +82,15 @@ loom_generated_cc_library(
         "//loom/src/loom/ops/view",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "composition_test",
+    srcs = ["composition_test.cc"],
+    deps = [
+        ":composition",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
