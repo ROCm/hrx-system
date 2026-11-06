@@ -161,3 +161,102 @@ func.def public @element(%input: buffer, %input_byte_offset: offset, %row: i32, 
   %12 = scalar.extf %11 : f8E4M3 to f32
   func.return %12 : f32
 }
+
+// ====
+// RUN: roundtrip
+// FP8 decoding retains the direct destination floating format.
+// INPUT: cxx std=c++23
+#include <loomcxx/numeric.h>
+#include <stdfloat>
+std::bfloat16_t to_bfloat(__float8_e4m3fn value) { return value; }
+std::float16_t to_half(__float8_e5m2 value) { return value; }
+// ----
+func.def public @to_bfloat(%value: f8E4M3) -> (bf16) {
+  %2 = scalar.extf %value : f8E4M3 to bf16
+  func.return %2 : bf16
+}
+
+func.def public @to_half(%value: f8E5M2) -> (f16) {
+  %5 = scalar.extf %value : f8E5M2 to f16
+  func.return %5 : f16
+}
+
+// ====
+// RUN: roundtrip
+// Source constants distinguish ties, saturation/infinity, and signed zero.
+// INPUT: cxx std=c++23
+using Float8 = __float8_e4m3fn;
+using Float8x4 = Float8 __attribute__((ext_vector_type(4)));
+Float8x4 constants() {
+  constexpr Float8 even = 1.0625;
+  constexpr Float8 odd = 1.1875;
+  constexpr Float8 limit = 1000.0;
+  return Float8x4{even, odd, limit, Float8(-0.0)};
+}
+// ----
+func.def public @constants() -> (vector<4xf8E4M3>) {
+  %even = scalar.constant 1.0 : f8E4M3
+  %odd = scalar.constant 1.25 : f8E4M3
+  %limit = scalar.constant 448.0 : f8E4M3
+  %4 = vector.constantf [1.0, 1.25, 448.0, -0.0] : vector<4xf8E4M3>
+  func.return %4 : vector<4xf8E4M3>
+}
+
+// ====
+// RUN: roundtrip
+// Constant and ordinary conversions round directly from f64 near FP8 midpoints.
+// INPUT: cxx std=c++23
+using Float8 = __float8_e4m3fn;
+using Float8x4 = Float8 __attribute__((ext_vector_type(4)));
+Float8x4 midpoints() {
+  constexpr Float8 above = 0x1.1000000000001p0;
+  constexpr Float8 below = 0x1.2ffffffffffffp0;
+  return Float8x4{above, Float8(0x1.1000000000001p0), below, Float8(0x1.2ffffffffffffp0)};
+}
+// ----
+func.def public @midpoints() -> (vector<4xf8E4M3>) {
+  %above = scalar.constant 1.125 : f8E4M3
+  %below = scalar.constant 1.125 : f8E4M3
+  %3 = vector.constantf [1.125, 1.125, 1.125, 1.125] : vector<4xf8E4M3>
+  func.return %3 : vector<4xf8E4M3>
+}
+
+// ====
+// RUN: roundtrip
+// Source constants distinguish ties, saturation/infinity, and signed zero.
+// INPUT: cxx std=c++23
+using Float8 = __float8_e5m2;
+using Float8x4 = Float8 __attribute__((ext_vector_type(4)));
+Float8x4 constants() {
+  constexpr Float8 even = 1.125;
+  constexpr Float8 odd = 1.375;
+  constexpr Float8 limit = 61440.0;
+  return Float8x4{even, odd, limit, Float8(-0.0)};
+}
+// ----
+func.def public @constants() -> (vector<4xf8E5M2>) {
+  %even = scalar.constant 1.0 : f8E5M2
+  %odd = scalar.constant 1.5 : f8E5M2
+  %limit = scalar.constant inf : f8E5M2
+  %4 = vector.constantf [1.0, 1.5, inf, -0.0] : vector<4xf8E5M2>
+  func.return %4 : vector<4xf8E5M2>
+}
+
+// ====
+// RUN: roundtrip
+// Constant and ordinary conversions round directly from f64 near FP8 midpoints.
+// INPUT: cxx std=c++23
+using Float8 = __float8_e5m2;
+using Float8x4 = Float8 __attribute__((ext_vector_type(4)));
+Float8x4 midpoints() {
+  constexpr Float8 above = 0x1.2000000000001p0;
+  constexpr Float8 below = 0x1.5ffffffffffffp0;
+  return Float8x4{above, Float8(0x1.2000000000001p0), below, Float8(0x1.5ffffffffffffp0)};
+}
+// ----
+func.def public @midpoints() -> (vector<4xf8E5M2>) {
+  %above = scalar.constant 1.25 : f8E5M2
+  %below = scalar.constant 1.25 : f8E5M2
+  %3 = vector.constantf [1.25, 1.25, 1.25, 1.25] : vector<4xf8E5M2>
+  func.return %3 : vector<4xf8E5M2>
+}

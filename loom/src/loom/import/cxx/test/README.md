@@ -47,6 +47,14 @@ iree-bazel-test --config=asan --config=loom-importer-cxx \
 Its fixtures cover logical expressions, condition declarations, loops,
 iteration exits, switches, and returns with exact, updateable IR expectations.
 
+[Numeric source semantics](../value/test/numeric/README.md) cover promotions,
+conversions, bit representations, updates, and scalar math:
+
+```sh
+iree-bazel-test --config=asan --config=loom-importer-cxx \
+  //loom/src/loom/import/cxx/value/test/numeric:compiler_test
+```
+
 ## Source execution tests
 
 Executable importer inputs use `.cxx`, including handwritten cases and shared

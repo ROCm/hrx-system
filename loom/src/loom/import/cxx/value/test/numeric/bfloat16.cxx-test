@@ -176,3 +176,26 @@ func.def public @mixed(%first: bf16, %second: f16) -> (bf16) {
   %7 = scalar.fptrunc %6 : f32 to bf16
   func.return %7 : bf16
 }
+
+// ====
+// RUN: roundtrip
+// Record member projection feeds a BF16 absolute value and vector broadcast.
+#include <stdfloat>
+#include <loomcxx/scalar.h>
+using BFloat4 = std::bfloat16_t __attribute__((ext_vector_type(4)));
+struct Packet {
+  // Four samples sharing a numeric gain.
+  BFloat4 samples;
+  // Gain applied after taking its absolute value.
+  std::bfloat16_t gain;
+};
+BFloat4 scale(Packet value) {
+  return value.samples * loom::scalar::absf(value.gain);
+}
+// ----
+func.def public @scale(%value_samples: vector<4xbf16>, %value_gain: bf16) -> (vector<4xbf16>) {
+  %3 = scalar.absf %value_gain : bf16
+  %4 = vector.splat %3 : vector<4xbf16>
+  %5 = vector.mulf %value_samples, %4 : vector<4xbf16>
+  func.return %5 : vector<4xbf16>
+}

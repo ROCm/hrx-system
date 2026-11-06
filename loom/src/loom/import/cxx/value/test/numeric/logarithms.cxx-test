@@ -1,0 +1,180 @@
+// RUN: roundtrip
+// Precise logarithms retain their permissions at float precision.
+#include <loomcxx/scalar.h>
+float logf(float value) { return loom::scalar::logf(value); }
+float log2f(float value) { return loom::scalar::log2f(value); }
+float log10f(float value) { return loom::scalar::log10f(value); }
+float log1pf(float value) { return loom::scalar::log1pf(value); }
+// ----
+func.def public @logf(%value: f32) -> (f32) {
+  %2 = scalar.logf %value : f32
+  func.return %2 : f32
+}
+
+func.def public @log2f(%value: f32) -> (f32) {
+  %5 = scalar.log2f %value : f32
+  func.return %5 : f32
+}
+
+func.def public @log10f(%value: f32) -> (f32) {
+  %8 = scalar.log10f %value : f32
+  func.return %8 : f32
+}
+
+func.def public @log1pf(%value: f32) -> (f32) {
+  %11 = scalar.log1pf %value : f32
+  func.return %11 : f32
+}
+
+// ====
+// RUN: roundtrip
+// Approximate logarithms retain their permissions at float precision.
+#include <loomcxx/scalar.h>
+float logf(float value) { return loom::scalar::approximate::logf(value); }
+float log2f(float value) { return loom::scalar::approximate::log2f(value); }
+float log10f(float value) { return loom::scalar::approximate::log10f(value); }
+float log1pf(float value) { return loom::scalar::approximate::log1pf(value); }
+// ----
+func.def public @logf(%value: f32) -> (f32) {
+  %2 = scalar.logf<afn> %value : f32
+  func.return %2 : f32
+}
+
+func.def public @log2f(%value: f32) -> (f32) {
+  %5 = scalar.log2f<afn> %value : f32
+  func.return %5 : f32
+}
+
+func.def public @log10f(%value: f32) -> (f32) {
+  %8 = scalar.log10f<afn> %value : f32
+  func.return %8 : f32
+}
+
+func.def public @log1pf(%value: f32) -> (f32) {
+  %11 = scalar.log1pf<afn> %value : f32
+  func.return %11 : f32
+}
+
+// ====
+// RUN: roundtrip
+// Lexical logarithms retain their permissions at float precision.
+#include <loomcxx/scalar.h>
+[[loom::fastmath]]
+float logf(float value) { return loom::scalar::logf(value); }
+[[loom::fastmath]]
+float log2f(float value) { return loom::scalar::log2f(value); }
+[[loom::fastmath]]
+float log10f(float value) { return loom::scalar::log10f(value); }
+[[loom::fastmath]]
+float log1pf(float value) { return loom::scalar::log1pf(value); }
+// ----
+func.def public @logf(%value: f32) -> (f32) {
+  %2 = scalar.logf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %value : f32
+  func.return %2 : f32
+}
+
+func.def public @log2f(%value: f32) -> (f32) {
+  %5 = scalar.log2f<reassoc|nnan|ninf|nsz|arcp|contract|afn> %value : f32
+  func.return %5 : f32
+}
+
+func.def public @log10f(%value: f32) -> (f32) {
+  %8 = scalar.log10f<reassoc|nnan|ninf|nsz|arcp|contract|afn> %value : f32
+  func.return %8 : f32
+}
+
+func.def public @log1pf(%value: f32) -> (f32) {
+  %11 = scalar.log1pf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %value : f32
+  func.return %11 : f32
+}
+
+// ====
+// RUN: roundtrip
+// Precise logarithms retain their permissions at double precision.
+#include <loomcxx/scalar.h>
+double logf(double value) { return loom::scalar::logf(value); }
+double log2f(double value) { return loom::scalar::log2f(value); }
+double log10f(double value) { return loom::scalar::log10f(value); }
+double log1pf(double value) { return loom::scalar::log1pf(value); }
+// ----
+func.def public @logf(%value: f64) -> (f64) {
+  %2 = scalar.logf %value : f64
+  func.return %2 : f64
+}
+
+func.def public @log2f(%value: f64) -> (f64) {
+  %5 = scalar.log2f %value : f64
+  func.return %5 : f64
+}
+
+func.def public @log10f(%value: f64) -> (f64) {
+  %8 = scalar.log10f %value : f64
+  func.return %8 : f64
+}
+
+func.def public @log1pf(%value: f64) -> (f64) {
+  %11 = scalar.log1pf %value : f64
+  func.return %11 : f64
+}
+
+// ====
+// RUN: roundtrip
+// Approximate logarithms retain their permissions at double precision.
+#include <loomcxx/scalar.h>
+double logf(double value) { return loom::scalar::approximate::logf(value); }
+double log2f(double value) { return loom::scalar::approximate::log2f(value); }
+double log10f(double value) { return loom::scalar::approximate::log10f(value); }
+double log1pf(double value) { return loom::scalar::approximate::log1pf(value); }
+// ----
+func.def public @logf(%value: f64) -> (f64) {
+  %2 = scalar.logf<afn> %value : f64
+  func.return %2 : f64
+}
+
+func.def public @log2f(%value: f64) -> (f64) {
+  %5 = scalar.log2f<afn> %value : f64
+  func.return %5 : f64
+}
+
+func.def public @log10f(%value: f64) -> (f64) {
+  %8 = scalar.log10f<afn> %value : f64
+  func.return %8 : f64
+}
+
+func.def public @log1pf(%value: f64) -> (f64) {
+  %11 = scalar.log1pf<afn> %value : f64
+  func.return %11 : f64
+}
+
+// ====
+// RUN: roundtrip
+// Lexical logarithms retain their permissions at double precision.
+#include <loomcxx/scalar.h>
+[[loom::fastmath]]
+double logf(double value) { return loom::scalar::logf(value); }
+[[loom::fastmath]]
+double log2f(double value) { return loom::scalar::log2f(value); }
+[[loom::fastmath]]
+double log10f(double value) { return loom::scalar::log10f(value); }
+[[loom::fastmath]]
+double log1pf(double value) { return loom::scalar::log1pf(value); }
+// ----
+func.def public @logf(%value: f64) -> (f64) {
+  %2 = scalar.logf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %value : f64
+  func.return %2 : f64
+}
+
+func.def public @log2f(%value: f64) -> (f64) {
+  %5 = scalar.log2f<reassoc|nnan|ninf|nsz|arcp|contract|afn> %value : f64
+  func.return %5 : f64
+}
+
+func.def public @log10f(%value: f64) -> (f64) {
+  %8 = scalar.log10f<reassoc|nnan|ninf|nsz|arcp|contract|afn> %value : f64
+  func.return %8 : f64
+}
+
+func.def public @log1pf(%value: f64) -> (f64) {
+  %11 = scalar.log1pf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %value : f64
+  func.return %11 : f64
+}
