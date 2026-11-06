@@ -16,8 +16,14 @@ loom_check_test_suite(
     name = "compiler_test",
     srcs = [
         "array_records.cxx-test",
+        "class_conversions.cxx-test",
+        "class_conversions_invalid.cxx-test",
+        "const.cxx-test",
+        "const_default_initialization.cxx-test",
+        "lambdas.cxx-test",
         "layout_attributes.cxx-test",
         "layout_attributes_roundtrip.cxx-test",
+        "list_initialization_invalid.cxx-test",
         "member_functions.cxx-test",
         "member_functions_cleanup.cxx-test",
         "member_functions_invalid.cxx-test",
@@ -33,6 +39,8 @@ loom_check_test_suite(
         "reference_accessors.cxx-test",
         "reference_parameters.cxx-test",
         "reference_parameters_invalid.cxx-test",
+        "structured_bindings.cxx-test",
+        "value_initialization.cxx-test",
     ],
     data = [
         "aligned_layout.h",

@@ -17,7 +17,11 @@ files through `// ====` sections and retain exact expectations maintained with
 | Padding, packing, alignment attributes, and nested offset queries | `layout_attributes*`, `offsetof*` |
 | Typed member loads/stores and unsupported object representations | `record_memory*` |
 | Completed-subobject visibility and destination copy elision | `record_initialization` |
-| Defaults, zero initialization, and conditional initializer effects | `record_initialization` |
+| Defaults, zero initialization, and conditional initializer effects | `record_initialization`, `value_initialization`, `const_default_initialization` |
+| Object qualification and invalid list initialization | `const`, `list_initialization_invalid` |
+| Class conversions and overload precedence | `class_conversions*` |
+| Closure captures and recursive forwarding | `lambdas` |
+| Record, array, and tuple decomposition | `structured_bindings` |
 
 For example, a by-value helper may change a dynamically selected array member
 without changing the caller's saved record. The golden checks the flattened
