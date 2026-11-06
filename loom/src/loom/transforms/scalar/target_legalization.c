@@ -1157,28 +1157,43 @@ static iree_status_t loom_scalar_legalize_extended_unsigned_arithmetic(
   loom_builder_set_before(builder, op);
   const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
 
-  loom_op_t* arithmetic = NULL;
-  loom_value_id_t value = LOOM_VALUE_ID_INVALID;
-  if (is_subtraction) {
-    IREE_RETURN_IF_ERROR(loom_scalar_subi_build(builder, /*instance_flags=*/0,
-                                                lhs, rhs, result_type,
-                                                op->location, &arithmetic));
-    value = loom_scalar_subi_result(arithmetic);
-  } else {
-    IREE_RETURN_IF_ERROR(loom_scalar_addi_build(builder, /*instance_flags=*/0,
-                                                lhs, rhs, result_type,
-                                                op->location, &arithmetic));
-    value = loom_scalar_addi_result(arithmetic);
-  }
-
-  loom_op_t* comparison = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
-      builder, LOOM_SCALAR_CMPI_PREDICATE_ULT, is_subtraction ? lhs : value,
-      is_subtraction ? rhs : lhs, op->location, &comparison));
   loom_value_id_t replacements[2] = {
-      value,
-      loom_scalar_cmpi_result(comparison),
+      LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID,
   };
+  if (loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_I1) {
+    // One-bit modular addition and subtraction both produce XOR. Their carry
+    // and borrow are respectively lhs AND rhs and rhs AND (lhs XOR rhs).
+    loom_op_t* value_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_scalar_xori_build(builder, lhs, rhs, result_type,
+                                                op->location, &value_op));
+    replacements[0] = loom_scalar_xori_result(value_op);
+    loom_op_t* predicate_op = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_scalar_andi_build(builder, is_subtraction ? rhs : lhs,
+                               is_subtraction ? replacements[0] : rhs,
+                               result_type, op->location, &predicate_op));
+    replacements[1] = loom_scalar_andi_result(predicate_op);
+  } else {
+    loom_op_t* arithmetic = NULL;
+    if (is_subtraction) {
+      IREE_RETURN_IF_ERROR(loom_scalar_subi_build(builder, /*instance_flags=*/0,
+                                                  lhs, rhs, result_type,
+                                                  op->location, &arithmetic));
+      replacements[0] = loom_scalar_subi_result(arithmetic);
+    } else {
+      IREE_RETURN_IF_ERROR(loom_scalar_addi_build(builder, /*instance_flags=*/0,
+                                                  lhs, rhs, result_type,
+                                                  op->location, &arithmetic));
+      replacements[0] = loom_scalar_addi_result(arithmetic);
+    }
+    loom_op_t* comparison = NULL;
+    IREE_RETURN_IF_ERROR(loom_scalar_cmpi_build(
+        builder, LOOM_SCALAR_CMPI_PREDICATE_ULT,
+        is_subtraction ? lhs : replacements[0], is_subtraction ? rhs : lhs,
+        op->location, &comparison));
+    replacements[1] = loom_scalar_cmpi_result(comparison);
+  }
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, replacements, IREE_ARRAYSIZE(replacements), checkpoint));
   IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
@@ -1926,13 +1941,11 @@ static const loom_target_legalizer_rule_t kScalarLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_SCALAR_ADDUI_EXTENDED,
         .first_operand_element_types = LOOM_SCALAR_TYPE_SET_INTEGER,
-        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_UNHANDLED,
         .legalize = loom_scalar_legalize_extended_unsigned_arithmetic,
     },
     {
         .root_kind = LOOM_OP_SCALAR_SUBUI_EXTENDED,
         .first_operand_element_types = LOOM_SCALAR_TYPE_SET_INTEGER,
-        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_UNHANDLED,
         .legalize = loom_scalar_legalize_extended_unsigned_arithmetic,
     },
     {

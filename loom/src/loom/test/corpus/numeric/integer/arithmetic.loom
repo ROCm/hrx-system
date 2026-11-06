@@ -130,7 +130,9 @@ check.scenario @integer_arithmetic_i64_values {
 // width's unsigned boundary.
 func.def @extended_unsigned_arithmetic_observations(%lhs_bits: i64, %rhs_bits: i64, %output: buffer) {
   %base = index.constant 0 : offset
+  %i1_base = index.constant 128 : offset
   %results = buffer.view %output[%base] : buffer -> view<16xi64>
+  %i1_results = buffer.view %output[%i1_base] : buffer -> view<4xi64>
 
   %lhs8 = scalar.trunci %lhs_bits : i64 to i8
   %rhs8 = scalar.trunci %rhs_bits : i64 to i8
@@ -179,6 +181,19 @@ func.def @extended_unsigned_arithmetic_observations(%lhs_bits: i64, %rhs_bits: i
   view.store %carry64_wide, %results[13] : i64, view<16xi64>
   view.store %difference64, %results[14] : i64, view<16xi64>
   view.store %borrow64_wide, %results[15] : i64, view<16xi64>
+
+  %lhs1 = scalar.trunci %lhs_bits : i64 to i1
+  %rhs1 = scalar.trunci %rhs_bits : i64 to i1
+  %sum1, %carry1 = scalar.addui_extended %lhs1, %rhs1 : i1
+  %difference1, %borrow1 = scalar.subui_extended %lhs1, %rhs1 : i1
+  %sum1_wide = scalar.extui %sum1 : i1 to i64
+  %carry1_wide = scalar.extui %carry1 : i1 to i64
+  %difference1_wide = scalar.extui %difference1 : i1 to i64
+  %borrow1_wide = scalar.extui %borrow1 : i1 to i64
+  view.store %sum1_wide, %i1_results[0] : i64, view<4xi64>
+  view.store %carry1_wide, %i1_results[1] : i64, view<4xi64>
+  view.store %difference1_wide, %i1_results[2] : i64, view<4xi64>
+  view.store %borrow1_wide, %i1_results[3] : i64, view<4xi64>
   func.return
 }
 
@@ -186,7 +201,9 @@ func.def @extended_unsigned_arithmetic_observations(%lhs_bits: i64, %rhs_bits: i
 // expression of the extended-operation contract.
 func.def @extended_unsigned_arithmetic_oracle(%lhs_bits: i64, %rhs_bits: i64, %output: buffer) {
   %base = index.constant 0 : offset
+  %i1_base = index.constant 128 : offset
   %results = buffer.view %output[%base] : buffer -> view<16xi64>
+  %i1_results = buffer.view %output[%i1_base] : buffer -> view<4xi64>
 
   %lhs8 = scalar.trunci %lhs_bits : i64 to i8
   %rhs8 = scalar.trunci %rhs_bits : i64 to i8
@@ -243,6 +260,19 @@ func.def @extended_unsigned_arithmetic_oracle(%lhs_bits: i64, %rhs_bits: i64, %o
   view.store %carry64_wide, %results[13] : i64, view<16xi64>
   view.store %difference64, %results[14] : i64, view<16xi64>
   view.store %borrow64_wide, %results[15] : i64, view<16xi64>
+
+  %lhs1 = scalar.trunci %lhs_bits : i64 to i1
+  %rhs1 = scalar.trunci %rhs_bits : i64 to i1
+  %sum1 = scalar.xori %lhs1, %rhs1 : i1
+  %carry1 = scalar.andi %lhs1, %rhs1 : i1
+  %borrow1 = scalar.andi %rhs1, %sum1 : i1
+  %sum1_wide = scalar.extui %sum1 : i1 to i64
+  %carry1_wide = scalar.extui %carry1 : i1 to i64
+  %borrow1_wide = scalar.extui %borrow1 : i1 to i64
+  view.store %sum1_wide, %i1_results[0] : i64, view<4xi64>
+  view.store %carry1_wide, %i1_results[1] : i64, view<4xi64>
+  view.store %sum1_wide, %i1_results[2] : i64, view<4xi64>
+  view.store %borrow1_wide, %i1_results[3] : i64, view<4xi64>
   func.return
 }
 
@@ -260,9 +290,9 @@ func.def @extended_unsigned_arithmetic_boundary_input(%trial: index) -> (i64, i6
 check.scenario @extended_unsigned_arithmetic_values {
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %lhs, %rhs = check.generate<@extended_unsigned_arithmetic_boundary_input>(%trial) : (index) -> (i64, i64)
-    %output = check.generate.fill value(0) : tensor<16xi64>
-    check.compare<@extended_unsigned_arithmetic_observations, @extended_unsigned_arithmetic_oracle>(%lhs, %rhs, %output) : (i64, i64, tensor<16xi64>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<16xi64>
+    %output = check.generate.fill value(0) : tensor<20xi64>
+    check.compare<@extended_unsigned_arithmetic_observations, @extended_unsigned_arithmetic_oracle>(%lhs, %rhs, %output) : (i64, i64, tensor<20xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<20xi64>
     }
   }
   check.trial[256](%trial: index, %entropy: check.entropy) {
@@ -270,9 +300,9 @@ check.scenario @extended_unsigned_arithmetic_values {
     %rhs_entropy = check.entropy.fork %entropy name("rhs") : check.entropy
     %lhs = check.entropy.read %lhs_entropy[%trial] : check.entropy -> i64
     %rhs = check.entropy.read %rhs_entropy[%trial] : check.entropy -> i64
-    %output = check.generate.fill value(0) : tensor<16xi64>
-    check.compare<@extended_unsigned_arithmetic_observations, @extended_unsigned_arithmetic_oracle>(%lhs, %rhs, %output) : (i64, i64, tensor<16xi64>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<16xi64>
+    %output = check.generate.fill value(0) : tensor<20xi64>
+    check.compare<@extended_unsigned_arithmetic_observations, @extended_unsigned_arithmetic_oracle>(%lhs, %rhs, %output) : (i64, i64, tensor<20xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<20xi64>
     }
   }
   check.return

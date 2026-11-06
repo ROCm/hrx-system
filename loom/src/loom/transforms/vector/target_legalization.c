@@ -194,29 +194,43 @@ static iree_status_t loom_vector_legalize_extended_unsigned_arithmetic(
   loom_builder_set_before(builder, op);
   const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
 
-  loom_op_t* arithmetic = NULL;
-  loom_value_id_t value = LOOM_VALUE_ID_INVALID;
-  if (is_subtraction) {
-    IREE_RETURN_IF_ERROR(loom_vector_subi_build(builder, /*instance_flags=*/0,
-                                                lhs, rhs, value_type,
-                                                op->location, &arithmetic));
-    value = loom_vector_subi_result(arithmetic);
-  } else {
-    IREE_RETURN_IF_ERROR(loom_vector_addi_build(builder, /*instance_flags=*/0,
-                                                lhs, rhs, value_type,
-                                                op->location, &arithmetic));
-    value = loom_vector_addi_result(arithmetic);
-  }
-
-  loom_op_t* comparison = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
-      builder, LOOM_VECTOR_CMPI_PREDICATE_ULT, is_subtraction ? lhs : value,
-      is_subtraction ? rhs : lhs, value_type, predicate_type, op->location,
-      &comparison));
   loom_value_id_t replacements[2] = {
-      value,
-      loom_vector_cmpi_result(comparison),
+      LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID,
   };
+  if (loom_type_element_type(value_type) == LOOM_SCALAR_TYPE_I1) {
+    // One-bit modular addition and subtraction both produce XOR. Their carry
+    // and borrow are respectively lhs AND rhs and rhs AND (lhs XOR rhs).
+    loom_op_t* value_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_xori_build(builder, lhs, rhs, value_type,
+                                                op->location, &value_op));
+    replacements[0] = loom_vector_xori_result(value_op);
+    loom_op_t* predicate_op = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_vector_andi_build(builder, is_subtraction ? rhs : lhs,
+                               is_subtraction ? replacements[0] : rhs,
+                               predicate_type, op->location, &predicate_op));
+    replacements[1] = loom_vector_andi_result(predicate_op);
+  } else {
+    loom_op_t* arithmetic = NULL;
+    if (is_subtraction) {
+      IREE_RETURN_IF_ERROR(loom_vector_subi_build(builder, /*instance_flags=*/0,
+                                                  lhs, rhs, value_type,
+                                                  op->location, &arithmetic));
+      replacements[0] = loom_vector_subi_result(arithmetic);
+    } else {
+      IREE_RETURN_IF_ERROR(loom_vector_addi_build(builder, /*instance_flags=*/0,
+                                                  lhs, rhs, value_type,
+                                                  op->location, &arithmetic));
+      replacements[0] = loom_vector_addi_result(arithmetic);
+    }
+    loom_op_t* comparison = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
+        builder, LOOM_VECTOR_CMPI_PREDICATE_ULT,
+        is_subtraction ? lhs : replacements[0], is_subtraction ? rhs : lhs,
+        value_type, predicate_type, op->location, &comparison));
+    replacements[1] = loom_vector_cmpi_result(comparison);
+  }
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       rewriter, op, replacements, IREE_ARRAYSIZE(replacements), checkpoint));
   IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
@@ -1782,12 +1796,10 @@ static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
     },
     {
         .root_kind = LOOM_OP_VECTOR_ADDUI_EXTENDED,
-        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_UNHANDLED,
         .legalize = loom_vector_legalize_extended_unsigned_arithmetic,
     },
     {
         .root_kind = LOOM_OP_VECTOR_SUBUI_EXTENDED,
-        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_UNHANDLED,
         .legalize = loom_vector_legalize_extended_unsigned_arithmetic,
     },
     // Integral rounding keeps native packets when available and otherwise
