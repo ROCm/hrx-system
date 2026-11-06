@@ -14,6 +14,7 @@
 #include "loom/codegen/low/frame.h"
 #include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/emit/native/amdgpu/function_plan.h"
+#include "loom/target/emit/native/amdgpu/storage_layout.h"
 #include "loom/target/reporting/report.h"
 
 #ifdef __cplusplus
@@ -50,6 +51,9 @@ typedef struct loom_amdgpu_function_compile_options_t {
   loom_low_call_contract_provider_t call_contracts;
   // Callee machine-state contracts consumed during packet planning.
   loom_amdgpu_call_state_provider_t call_states;
+  // Segment bytes occupied by callees below this function's local storage.
+  // Fixed for authored spill lowering, allocation repair, and final placement.
+  loom_amdgpu_storage_layout_segment_sizes_t storage_segment_prefix;
   // Whether this function participates as a callable helper.
   bool callable;
   // Whole-function target-owned location ranges unavailable to allocation.

@@ -51,25 +51,12 @@ void loom_amdgpu_program_resource_builder_require_function(
       function_plan->packet_plan.wait_states.minimum_vgpr_count);
   builder->agpr_count = loom_amdgpu_program_resources_max_u32(
       builder->agpr_count, function_plan->preflight.next_free_agpr);
-}
-
-void loom_amdgpu_program_resource_builder_require_private_frame(
-    uint64_t byte_size, loom_amdgpu_program_resource_builder_t* builder) {
+  builder->storage_segment_sizes.group_segment_fixed_size = iree_max(
+      builder->storage_segment_sizes.group_segment_fixed_size,
+      function_plan->storage_layout.segment_sizes.group_segment_fixed_size);
   builder->storage_segment_sizes.private_segment_fixed_size = iree_max(
-      builder->storage_segment_sizes.private_segment_fixed_size, byte_size);
-}
-
-iree_status_t loom_amdgpu_program_resource_builder_append_function(
-    const loom_low_emission_frame_t* frame,
-    const loom_amdgpu_function_plan_t* function_plan,
-    iree_arena_allocator_t* arena,
-    loom_amdgpu_program_resource_builder_t* builder,
-    loom_amdgpu_storage_layout_t* out_storage_layout) {
-  loom_amdgpu_program_resource_builder_require_function(frame, function_plan,
-                                                        builder);
-  return loom_amdgpu_storage_layout_append(&function_plan->storage_layout,
-                                           &builder->storage_segment_sizes,
-                                           arena, out_storage_layout);
+      builder->storage_segment_sizes.private_segment_fixed_size,
+      function_plan->storage_layout.segment_sizes.private_segment_fixed_size);
 }
 
 void loom_amdgpu_program_resource_builder_require_registers(

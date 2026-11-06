@@ -15,6 +15,7 @@
 #include "loom/error/emitter.h"
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/emit/native/amdgpu/function_plan.h"
+#include "loom/target/emit/native/amdgpu/storage_layout.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,10 +23,12 @@ extern "C" {
 
 // Builds the native decisions common to kernel entries and callable helpers.
 // User-dependent preflight failures emit diagnostics and leave |out_accepted|
-// false. |arena| must outlive |out_plan|.
+// false. |segment_prefix| matches the placement used by spill lowering.
+// |arena| must outlive |out_plan|.
 iree_status_t loom_amdgpu_function_plan_build(
     const loom_low_emission_frame_t* frame, iree_diagnostic_emitter_t emitter,
     const loom_amdgpu_packet_plan_options_t* packet_options,
+    loom_amdgpu_storage_layout_segment_sizes_t segment_prefix,
     iree_arena_allocator_t* arena, bool* out_accepted,
     loom_amdgpu_function_plan_t* out_plan);
 

@@ -37,11 +37,17 @@ typedef struct loom_amdgpu_program_resources_t {
 
 // Mutable resource accumulator used while compiling one native program.
 typedef struct loom_amdgpu_program_resource_builder_t {
+  // Maximum segment extents already occupied by compiled functions.
   loom_amdgpu_storage_layout_segment_sizes_t storage_segment_sizes;
+  // Arena-owned maximum physical extents indexed by descriptor register class.
   uint32_t* direct_resource_units;
+  // Number of entries in |direct_resource_units|.
   iree_host_size_t direct_resource_unit_count;
+  // Minimum final SGPR count across entry, helpers, and call control.
   uint32_t sgpr_count;
+  // Minimum final architectural VGPR count across entry and helpers.
   uint32_t vgpr_count;
+  // Minimum final AGPR count across entry and helpers.
   uint32_t agpr_count;
 } loom_amdgpu_program_resource_builder_t;
 
@@ -50,30 +56,14 @@ iree_status_t loom_amdgpu_program_resource_builder_initialize(
     iree_host_size_t direct_resource_unit_count, iree_arena_allocator_t* arena,
     loom_amdgpu_program_resource_builder_t* out_builder);
 
-// Includes one independently compiled function's register demand without
-// assigning its function-local storage. Artifact planners use this for shared
-// leaf helpers whose mutually exclusive private frames begin at the same
-// offset in every entry that reaches them.
+// Includes one compiled function's register demand and final segment extents.
+// Shared leaf helpers have mutually exclusive private frames beginning at zero.
+// Compile the entry with their maximum extent as its storage prefix before
+// including its final resources here. No storage addresses are reassigned.
 void loom_amdgpu_program_resource_builder_require_function(
     const loom_low_emission_frame_t* frame,
     const loom_amdgpu_function_plan_t* function_plan,
     loom_amdgpu_program_resource_builder_t* builder);
-
-// Reserves the maximum invocation-private leaf frame below a caller's local
-// storage. Repeated calls retain the maximum rather than summing mutually
-// exclusive helper frames.
-void loom_amdgpu_program_resource_builder_require_private_frame(
-    uint64_t byte_size, loom_amdgpu_program_resource_builder_t* builder);
-
-// Appends one independently compiled function. The returned storage layout
-// preserves the function's lookup index and places its reservations after all
-// previously appended functions.
-iree_status_t loom_amdgpu_program_resource_builder_append_function(
-    const loom_low_emission_frame_t* frame,
-    const loom_amdgpu_function_plan_t* function_plan,
-    iree_arena_allocator_t* arena,
-    loom_amdgpu_program_resource_builder_t* builder,
-    loom_amdgpu_storage_layout_t* out_storage_layout);
 
 // Adds register floors used outside ordinary allocated function storage, such
 // as fixed argument carriers and direct-call control registers.
