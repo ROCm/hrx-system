@@ -1,14 +1,33 @@
 // Directed zero and signed-minimum trials cover unary boundaries while
 // deterministic entropy exercises every rotate count and signed/unsigned
-// ordering with runtime values.
+// ordering with runtime values. Inputs travel through buffers so the same
+// scenarios exercise resident workers with buffer-only invocation ABIs.
 
-func.def @integer_arithmetic_i32_observations(%ordinal: index, %value_bits: i64, %lower_bits: i64, %upper_bits: i64, %output: buffer) {
+func.def @integer_arithmetic_inputs(%ordinal: index, %value_bits: i64, %lower_bits: i64, %upper_bits: i64, %input: buffer) {
+  %base = index.constant 0 : offset
+  %values = buffer.view %input[%base] : buffer -> view<4xi64>
+  %ordinal_bits = index.cast %ordinal : index to i64
+  view.store %ordinal_bits, %values[0] : i64, view<4xi64>
+  view.store %value_bits, %values[1] : i64, view<4xi64>
+  view.store %lower_bits, %values[2] : i64, view<4xi64>
+  view.store %upper_bits, %values[3] : i64, view<4xi64>
+  func.return
+}
+
+func.def @integer_arithmetic_i32_observations(%input: buffer, %output: buffer) {
   %c0_index = index.constant 0 : index
   %c1_index = index.constant 1 : index
   %c16_index = index.constant 16 : index
   %cwidth_index = index.constant 32 : index
   %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<4xi64>
   %results = buffer.view %output[%base] : buffer -> view<12xi32>
+  %ordinal_wide = view.load %inputs[0] : view<4xi64> -> i64
+  %ordinal_bits = scalar.trunci %ordinal_wide : i64 to i32
+  %ordinal = index.cast %ordinal_bits : i32 to index
+  %value_bits = view.load %inputs[1] : view<4xi64> -> i64
+  %lower_bits = view.load %inputs[2] : view<4xi64> -> i64
+  %upper_bits = view.load %inputs[3] : view<4xi64> -> i64
   %bounded_ordinal = index.assume %ordinal [range(%ordinal, 0, 255)] : index
   %case = index.rem %bounded_ordinal, %c16_index : index
   %use_zero = index.cmp eq, %case, %c0_index : index
@@ -58,21 +77,30 @@ check.scenario @integer_arithmetic_i32_values {
     %value_bits = check.entropy.read %value_entropy[%trial] : check.entropy -> i64
     %lower_bits = check.entropy.read %lower_entropy[%trial] : check.entropy -> i64
     %upper_bits = check.entropy.read %upper_entropy[%trial] : check.entropy -> i64
+    %input = check.generate.fill value(0) : tensor<4xi64>
+    check.generate<@integer_arithmetic_inputs>(%trial, %value_bits, %lower_bits, %upper_bits, %input) : (index, i64, i64, i64, tensor<4xi64>) -> ()
     %output = check.generate.fill value(0) : tensor<12xi32>
-    check.compare<@integer_arithmetic_i32_observations>(%trial, %value_bits, %lower_bits, %upper_bits, %output) : (index, i64, i64, i64, tensor<12xi32>) -> () {
+    check.compare<@integer_arithmetic_i32_observations>(%input, %output) : (tensor<4xi64>, tensor<12xi32>) -> () {
       check.expect.bitwise actual(%output) expected(%output) : tensor<12xi32>
     }
   }
   check.return
 }
 
-func.def @integer_arithmetic_i64_observations(%ordinal: index, %value_bits: i64, %lower_bits: i64, %upper_bits: i64, %output: buffer) {
+func.def @integer_arithmetic_i64_observations(%input: buffer, %output: buffer) {
   %c0_index = index.constant 0 : index
   %c1_index = index.constant 1 : index
   %c16_index = index.constant 16 : index
   %cwidth_index = index.constant 64 : index
   %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<4xi64>
   %results = buffer.view %output[%base] : buffer -> view<11xi64>
+  %ordinal_wide = view.load %inputs[0] : view<4xi64> -> i64
+  %ordinal_bits = scalar.trunci %ordinal_wide : i64 to i32
+  %ordinal = index.cast %ordinal_bits : i32 to index
+  %value_bits = view.load %inputs[1] : view<4xi64> -> i64
+  %lower_bits = view.load %inputs[2] : view<4xi64> -> i64
+  %upper_bits = view.load %inputs[3] : view<4xi64> -> i64
   %bounded_ordinal = index.assume %ordinal [range(%ordinal, 0, 255)] : index
   %case = index.rem %bounded_ordinal, %c16_index : index
   %use_zero = index.cmp eq, %case, %c0_index : index
@@ -117,8 +145,10 @@ check.scenario @integer_arithmetic_i64_values {
     %value_bits = check.entropy.read %value_entropy[%trial] : check.entropy -> i64
     %lower_bits = check.entropy.read %lower_entropy[%trial] : check.entropy -> i64
     %upper_bits = check.entropy.read %upper_entropy[%trial] : check.entropy -> i64
+    %input = check.generate.fill value(0) : tensor<4xi64>
+    check.generate<@integer_arithmetic_inputs>(%trial, %value_bits, %lower_bits, %upper_bits, %input) : (index, i64, i64, i64, tensor<4xi64>) -> ()
     %output = check.generate.fill value(0) : tensor<11xi64>
-    check.compare<@integer_arithmetic_i64_observations>(%trial, %value_bits, %lower_bits, %upper_bits, %output) : (index, i64, i64, i64, tensor<11xi64>) -> () {
+    check.compare<@integer_arithmetic_i64_observations>(%input, %output) : (tensor<4xi64>, tensor<11xi64>) -> () {
       check.expect.bitwise actual(%output) expected(%output) : tensor<11xi64>
     }
   }
@@ -128,11 +158,14 @@ check.scenario @integer_arithmetic_i64_values {
 // Exercises every fixed integer width through one runtime input pair. Results
 // are widened only after the operation so carry and borrow retain the source
 // width's unsigned boundary.
-func.def @extended_unsigned_arithmetic_observations(%lhs_bits: i64, %rhs_bits: i64, %output: buffer) {
+func.def @extended_unsigned_arithmetic_observations(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %i1_base = index.constant 128 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<2xi64>
   %results = buffer.view %output[%base] : buffer -> view<16xi64>
   %i1_results = buffer.view %output[%i1_base] : buffer -> view<4xi64>
+  %lhs_bits = view.load %inputs[0] : view<2xi64> -> i64
+  %rhs_bits = view.load %inputs[1] : view<2xi64> -> i64
 
   %lhs8 = scalar.trunci %lhs_bits : i64 to i8
   %rhs8 = scalar.trunci %rhs_bits : i64 to i8
@@ -199,11 +232,14 @@ func.def @extended_unsigned_arithmetic_observations(%lhs_bits: i64, %rhs_bits: i
 
 // Uses ordinary modular arithmetic and unsigned comparisons as an independent
 // expression of the extended-operation contract.
-func.def @extended_unsigned_arithmetic_oracle(%lhs_bits: i64, %rhs_bits: i64, %output: buffer) {
+func.def @extended_unsigned_arithmetic_oracle(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %i1_base = index.constant 128 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<2xi64>
   %results = buffer.view %output[%base] : buffer -> view<16xi64>
   %i1_results = buffer.view %output[%i1_base] : buffer -> view<4xi64>
+  %lhs_bits = view.load %inputs[0] : view<2xi64> -> i64
+  %rhs_bits = view.load %inputs[1] : view<2xi64> -> i64
 
   %lhs8 = scalar.trunci %lhs_bits : i64 to i8
   %rhs8 = scalar.trunci %rhs_bits : i64 to i8
@@ -287,11 +323,21 @@ func.def @extended_unsigned_arithmetic_boundary_input(%trial: index) -> (i64, i6
   func.return %lhs, %rhs : i64, i64
 }
 
+func.def @extended_unsigned_arithmetic_input(%lhs: i64, %rhs: i64, %input: buffer) {
+  %base = index.constant 0 : offset
+  %values = buffer.view %input[%base] : buffer -> view<2xi64>
+  view.store %lhs, %values[0] : i64, view<2xi64>
+  view.store %rhs, %values[1] : i64, view<2xi64>
+  func.return
+}
+
 check.scenario @extended_unsigned_arithmetic_values {
   check.trial[2](%trial: index, %entropy: check.entropy) {
     %lhs, %rhs = check.generate<@extended_unsigned_arithmetic_boundary_input>(%trial) : (index) -> (i64, i64)
+    %input = check.generate.fill value(0) : tensor<2xi64>
+    check.generate<@extended_unsigned_arithmetic_input>(%lhs, %rhs, %input) : (i64, i64, tensor<2xi64>) -> ()
     %output = check.generate.fill value(0) : tensor<20xi64>
-    check.compare<@extended_unsigned_arithmetic_observations, @extended_unsigned_arithmetic_oracle>(%lhs, %rhs, %output) : (i64, i64, tensor<20xi64>) -> () {
+    check.compare<@extended_unsigned_arithmetic_observations, @extended_unsigned_arithmetic_oracle>(%input, %output) : (tensor<2xi64>, tensor<20xi64>) -> () {
       check.expect.bitwise actual(%output) expected(%output) : tensor<20xi64>
     }
   }
@@ -300,8 +346,10 @@ check.scenario @extended_unsigned_arithmetic_values {
     %rhs_entropy = check.entropy.fork %entropy name("rhs") : check.entropy
     %lhs = check.entropy.read %lhs_entropy[%trial] : check.entropy -> i64
     %rhs = check.entropy.read %rhs_entropy[%trial] : check.entropy -> i64
+    %input = check.generate.fill value(0) : tensor<2xi64>
+    check.generate<@extended_unsigned_arithmetic_input>(%lhs, %rhs, %input) : (i64, i64, tensor<2xi64>) -> ()
     %output = check.generate.fill value(0) : tensor<20xi64>
-    check.compare<@extended_unsigned_arithmetic_observations, @extended_unsigned_arithmetic_oracle>(%lhs, %rhs, %output) : (i64, i64, tensor<20xi64>) -> () {
+    check.compare<@extended_unsigned_arithmetic_observations, @extended_unsigned_arithmetic_oracle>(%input, %output) : (tensor<2xi64>, tensor<20xi64>) -> () {
       check.expect.bitwise actual(%output) expected(%output) : tensor<20xi64>
     }
   }

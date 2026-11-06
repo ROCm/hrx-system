@@ -27,6 +27,7 @@ loom_corpus_test(
             "numeric/conversion/float8_dequantization.loom",
             "numeric/float/clamp.loom",
             "numeric/float/extrema.loom",
+            "numeric/integer/arithmetic.loom",
             "numeric/integer/bit_count.loom",
             "numeric/integer/division.loom",
             "numeric/integer/wide/shifts.loom",
