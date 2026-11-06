@@ -5429,7 +5429,11 @@ def _validate_ownership_effects(
 ) -> None:
     """Validate ownership effect declarations against operands and results."""
     trait_names = {t.name for t in traits}
-    if "Pure" in trait_names:
+    if "Pure" in trait_names and any(
+        not isinstance(effect, OperandOwnershipEffect)
+        or effect.kind != OperandOwnershipEffectKind.BORROW
+        for effect in ownership_effects
+    ):
         raise ValueError(
             f"Op '{op_name}': declares both traits=[PURE] and ownership "
             f"effects. Ownership transfer is semantic and cannot be pure."

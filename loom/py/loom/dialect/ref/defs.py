@@ -6,10 +6,13 @@
 
 """Managed object handle operations."""
 
-from loom.assembly import ARROW, COLON, Ref, ResultType, TypeOf
+from loom.assembly import ARROW, COLON, COMMA, Ref, ResultType, TypeOf
 from loom.dsl import (
+    I1,
     MANAGED_REFERENCE,
     OBSERVABLE_EFFECT,
+    PURE,
+    SAFE_TO_SPECULATE,
     UNIQUE_IDENTITY,
     AliasResult,
     Borrow,
@@ -85,4 +88,64 @@ ref_release = Op(
     examples=["ref.release %owner : ref<@Frame>"],
 )
 
-ALL_REF_OPS: tuple[Op, ...] = (ref_duplicate, ref_borrow, ref_release)
+ref_null = Op(
+    "ref.null",
+    group=ref_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Create an independent null handle of the declared ref or ptr type. "
+        "No payload is allocated or retained. An owning ref still has its own "
+        "explicit lifetime and must be released or transferred on every normal "
+        "path; releasing null has no payload effect."
+    ),
+    results=[Result("result", MANAGED_REFERENCE)],
+    traits=[UNIQUE_IDENTITY, OBSERVABLE_EFFECT],
+    format=[COLON, ResultType("result")],
+    examples=["%empty = ref.null : ref<@Frame>", "%missing = ref.null : ptr<@Frame>"],
+)
+
+ref_compare_null = Op(
+    "ref.compare.null",
+    group=ref_ops,
+    builder_name="compare_null",
+    phase=OpPhase.EXECUTABLE,
+    doc=("Return true when the handle is null and false otherwise. The handle is borrowed without retaining, releasing, or inspecting its payload."),
+    operands=[Operand("value", MANAGED_REFERENCE)],
+    results=[Result("result", I1)],
+    traits=[PURE, SAFE_TO_SPECULATE],
+    ownership_effects=[Borrow("value")],
+    eager_execution_cost=1,
+    format=[Ref("value"), COLON, TypeOf("value")],
+    examples=["%missing = ref.compare.null %frame : ptr<@Frame>"],
+)
+
+ref_compare_eq = Op(
+    "ref.compare.eq",
+    group=ref_ops,
+    builder_name="compare_eq",
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Return true for two null handles or two handles to the same managed "
+        "payload, and false otherwise. Both operands must name the same "
+        "external payload type, but may have different ownership modes. "
+        "Neither operand is retained, released, or dereferenced. Equality "
+        "compares object identity, not payload contents."
+    ),
+    operands=[Operand("left", MANAGED_REFERENCE), Operand("right", MANAGED_REFERENCE)],
+    results=[Result("result", I1)],
+    traits=[PURE, SAFE_TO_SPECULATE],
+    ownership_effects=[Borrow("left"), Borrow("right")],
+    eager_execution_cost=1,
+    verify="loom_ref_compare_eq_verify",
+    format=[Ref("left"), COMMA, Ref("right"), COLON, TypeOf("left"), COMMA, TypeOf("right")],
+    examples=["%same = ref.compare.eq %owner, %frame : ref<@Frame>, ptr<@Frame>"],
+)
+
+ALL_REF_OPS: tuple[Op, ...] = (
+    ref_duplicate,
+    ref_borrow,
+    ref_release,
+    ref_null,
+    ref_compare_null,
+    ref_compare_eq,
+)

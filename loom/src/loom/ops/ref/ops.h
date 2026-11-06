@@ -22,7 +22,10 @@ enum {
   LOOM_OP_REF_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_REF, 0),
   LOOM_OP_REF_BORROW = LOOM_OP_KIND(LOOM_DIALECT_REF, 1),
   LOOM_OP_REF_RELEASE = LOOM_OP_KIND(LOOM_DIALECT_REF, 2),
-  LOOM_OP_REF_COUNT_ = 3,
+  LOOM_OP_REF_NULL = LOOM_OP_KIND(LOOM_DIALECT_REF, 3),
+  LOOM_OP_REF_COMPARE_NULL = LOOM_OP_KIND(LOOM_DIALECT_REF, 4),
+  LOOM_OP_REF_COMPARE_EQ = LOOM_OP_KIND(LOOM_DIALECT_REF, 5),
+  LOOM_OP_REF_COUNT_ = 6,
 };
 
 // LOOM_OP_REF_DUPLICATE: Create an independent handle to the same managed payload, preserving its type and null state. Duplicating ref adds an owner that must be released or transferred independently. Duplicating ptr preserves its borrowed mode and any protection needed through its final use. The source remains valid; live source and result lifetimes are independent.
@@ -68,6 +71,43 @@ iree_status_t loom_ref_release_build(
     loom_value_id_t value,
     loom_location_id_t location,
     loom_op_t** out_op);
+
+// LOOM_OP_REF_NULL: Create an independent null handle of the declared ref or ptr type. No payload is allocated or retained. An owning ref still has its own explicit lifetime and must be released or transferred on every normal path; releasing null has no payload effect.
+// %empty = ref.null : ref<@Frame>
+LOOM_DEFINE_ISA(loom_ref_null_isa, LOOM_OP_REF_NULL)
+LOOM_DEFINE_RESULT(loom_ref_null_result, 0)
+iree_status_t loom_ref_null_build(
+    loom_builder_t* builder,
+    loom_type_t result_type,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_REF_COMPARE_NULL: Return true when the handle is null and false otherwise. The handle is borrowed without retaining, releasing, or inspecting its payload.
+// %missing = ref.compare.null %frame : ptr<@Frame>
+LOOM_DEFINE_ISA(loom_ref_compare_null_isa, LOOM_OP_REF_COMPARE_NULL)
+LOOM_DEFINE_OPERAND(loom_ref_compare_null_value, 0)
+LOOM_DEFINE_RESULT(loom_ref_compare_null_result, 0)
+iree_status_t loom_ref_compare_null_build(
+    loom_builder_t* builder,
+    loom_value_id_t value,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+
+// LOOM_OP_REF_COMPARE_EQ: Return true for two null handles or two handles to the same managed payload, and false otherwise. Both operands must name the same external payload type, but may have different ownership modes. Neither operand is retained, released, or dereferenced. Equality compares object identity, not payload contents.
+// %same = ref.compare.eq %owner, %frame : ref<@Frame>, ptr<@Frame>
+LOOM_DEFINE_ISA(loom_ref_compare_eq_isa, LOOM_OP_REF_COMPARE_EQ)
+LOOM_DEFINE_OPERAND(loom_ref_compare_eq_left, 0)
+LOOM_DEFINE_OPERAND(loom_ref_compare_eq_right, 1)
+LOOM_DEFINE_RESULT(loom_ref_compare_eq_result, 0)
+iree_status_t loom_ref_compare_eq_build(
+    loom_builder_t* builder,
+    loom_value_id_t left,
+    loom_value_id_t right,
+    loom_location_id_t location,
+    loom_op_t** out_op);
+iree_status_t loom_ref_compare_eq_verify(
+    const loom_module_t* module, const loom_op_t* op,
+    iree_diagnostic_emitter_t emitter);
 
 // Returns the vtable array for the ref dialect.
 const loom_op_vtable_t* const* loom_ref_dialect_vtables(

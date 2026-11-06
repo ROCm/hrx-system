@@ -57,7 +57,12 @@ from iree.vm.bytecode.spec.isa.core.integer import (
     IntegerDivisionSemantics,
     IntegerUnarySemantics,
 )
-from iree.vm.bytecode.spec.isa.core.ref import REF_SELECT
+from iree.vm.bytecode.spec.isa.core.ref import (
+    REF_COMPARE_EQ,
+    REF_COMPARE_NULL,
+    REF_NULL,
+    REF_SELECT,
+)
 from iree.vm.bytecode.spec.isa.core.rules import (
     FieldRule,
     RecordRuleKind,
@@ -336,6 +341,9 @@ def _descriptor(
                     RefOwnership.REPLACE_OWNER: OwnershipEffect.OWNED,
                     RefOwnership.REPLACE_RETAIN: OwnershipEffect.OWNED,
                     RefOwnership.REPLACE_BORROW: OwnershipEffect.BORROWED,
+                    # A null result has no payload owner. Its authored type
+                    # determines the source lifetime obligation.
+                    RefOwnership.CLEAR: OwnershipEffect.NONE,
                 }[field.ref_policy.ownership]
                 if field.ref_policy
                 else OwnershipEffect.NONE
@@ -352,6 +360,12 @@ def _descriptor(
     creates_owner = any(
         operand.ownership is OwnershipEffect.OWNED for operand in operands
     )
+    defines_null = any(
+        field.role is FieldRole.RESULT
+        and field.ref_policy
+        and field.ref_policy.ownership is RefOwnership.CLEAR
+        for field in instruction.fields
+    )
     effects = tuple(
         dict.fromkeys(
             Effect(
@@ -365,6 +379,9 @@ def _descriptor(
             for effect in instruction.state_effects
         )
     ) + ((Effect(EffectKind.UNKNOWN, MemorySpace.GENERIC),) if creates_owner else ())
+    # Null construction defines a source lifetime, not a memory access.
+    if defines_null:
+        effects += (Effect(EffectKind.WRITE, MemorySpace.NONE),)
     return Descriptor(
         key=f"vm.{instruction.mnemonic}",
         mnemonic=instruction.mnemonic,
@@ -378,7 +395,10 @@ def _descriptor(
         effects=effects,
         flags=(
             DescriptorFlag.SIDE_EFFECTING if effects else DescriptorFlag.DEAD_REMOVABLE,
-        ),
+        )
+        # Null owners have independent source lifetimes even without a payload.
+        # Preserve them until mandatory ownership admission checks consumption.
+        + ((DescriptorFlag.UNIQUE_IDENTITY,) if defines_null else ()),
         instruction_classes=(
             InstructionClass.GENERIC_MEMORY
             if instruction.state_effects
@@ -517,6 +537,9 @@ VM_CORE_DESCRIPTOR_SET = DescriptorSet(
         _descriptor(VALUE_COPY, (ScalarTypeKind.I64,)),
         _descriptor(VALUE_SELECT, (ScalarTypeKind.I64,)),
         _descriptor(REF_SELECT, ()),
+        _descriptor(REF_NULL, ()),
+        _descriptor(REF_COMPARE_NULL, (ScalarTypeKind.I1,)),
+        _descriptor(REF_COMPARE_EQ, (ScalarTypeKind.I1,)),
         *(_constant_descriptor(op) for op in (CONSTANT_I32, CONSTANT_I64)),
         *(_descriptor(op, (ScalarTypeKind.I64,)) for op in _SCALAR_CONVERSIONS),
         *(

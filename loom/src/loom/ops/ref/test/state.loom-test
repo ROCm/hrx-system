@@ -1,0 +1,120 @@
+// Null handles retain exact types and independent lifetimes through both
+// textual and binary serialization. Observations permit every mode pair.
+// RUN: format bytecode
+type.decl import("media", "frame") @Frame
+
+func.def @empty() -> (ref<@Frame>, ptr<@Frame>) {
+  %owner = ref.null : ref<@Frame>
+  %pointer = ref.null : ptr<@Frame>
+  func.return %owner, %pointer : ref<@Frame>, ptr<@Frame>
+}
+
+func.def @inspect(%owner: ref<@Frame>, %pointer: ptr<@Frame>) -> (i1, i1, i1, i1, i1, i1) {
+  %empty_owner = ref.compare.null %owner : ref<@Frame>
+  %empty_pointer = ref.compare.null %pointer : ptr<@Frame>
+  %owners = ref.compare.eq %owner, %owner : ref<@Frame>, ref<@Frame>
+  %pointers = ref.compare.eq %pointer, %pointer : ptr<@Frame>, ptr<@Frame>
+  %owner_pointer = ref.compare.eq %owner, %pointer : ref<@Frame>, ptr<@Frame>
+  %pointer_owner = ref.compare.eq %pointer, %owner : ptr<@Frame>, ref<@Frame>
+  ref.release %owner : ref<@Frame>
+  func.return %empty_owner, %empty_pointer, %owners, %pointers, %owner_pointer, %pointer_owner : i1, i1, i1, i1, i1, i1
+}
+
+// ====
+
+// Independent null owners cannot be commoned or removed before admission.
+// RUN: pass cse,dce,ownership-lifetime
+type.decl import("media", "frame") @Frame
+
+func.def @independent() {
+  %first = ref.null : ref<@Frame>
+  %second = ref.null : ref<@Frame>
+  ref.release %first : ref<@Frame>
+  ref.release %second : ref<@Frame>
+  func.return
+}
+
+// ====
+
+// A null owner has the same explicit consumption rule as any other owner.
+// RUN: pass dce,ownership-lifetime
+type.decl import("media", "frame") @Frame
+
+func.def @leak() {
+  %owner = ref.null : ref<@Frame>
+  // ERROR@+1: DOMINANCE/014 {value_name="owner"}
+  func.return
+}
+
+// ====
+
+// Observation does not consume an owner or permit use after consumption.
+// RUN: pass ownership-lifetime
+type.decl import("media", "frame") @Frame
+
+func.def @expired() -> (i1) {
+  %owner = ref.null : ref<@Frame>
+  ref.release %owner : ref<@Frame>
+  // ERROR@+1: DOMINANCE/002 {value_name="owner"}
+  %missing = ref.compare.null %owner : ref<@Frame>
+  func.return %missing : i1
+}
+
+// ====
+
+// Local declaration aliases retain the same external identity.
+// RUN: verify
+type.decl import("media", "frame") @Frame
+
+type.decl import("media", "frame") @Image
+
+func.def @aliases(%owner: ref<@Frame>, %pointer: ptr<@Image>) -> (i1) {
+  %same = ref.compare.eq %owner, %pointer : ref<@Frame>, ptr<@Image>
+  ref.release %owner : ref<@Frame>
+  func.return %same : i1
+}
+
+// ====
+
+// A null value is a typed managed handle, never numerical address bits.
+// RUN: verify
+func.def @numeric() -> (i64) {
+  // ERROR@+1: TYPE/004
+  %bits = ref.null : i64
+  func.return %bits : i64
+}
+
+// ====
+
+// Comparing object identities requires the same nominal payload type.
+// RUN: verify
+type.decl import("media", "frame") @Frame
+
+type.decl import("media", "decoder") @Decoder
+
+func.def @different_payloads(%frame: ptr<@Frame>, %decoder: ptr<@Decoder>) -> (i1) {
+  // ERROR@+1: TYPE/001
+  %same = ref.compare.eq %frame, %decoder : ptr<@Frame>, ptr<@Decoder>
+  func.return %same : i1
+}
+
+// ====
+
+// Scalar bits cannot participate in null observation or object equality.
+// RUN: verify
+func.def @numeric_observation(%bits: i64) -> (i1) {
+  // ERROR@+1: TYPE/003
+  %missing = ref.compare.null %bits : i64
+  func.return %missing : i1
+}
+
+// ====
+
+// RUN: verify
+type.decl import("media", "frame") @Frame
+
+func.def @numeric_identity(%frame: ptr<@Frame>, %bits: i64) -> (i1) {
+  // ERROR@+1: TYPE/003
+  %same = ref.compare.eq %frame, %bits : ptr<@Frame>, i64
+  func.return %same : i1
+}

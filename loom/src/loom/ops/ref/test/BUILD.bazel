@@ -12,5 +12,6 @@ loom_check_test_suite(
         "duplicate.loom-test",
         "release.loom-test",
         "roundtrip.loom-test",
+        "state.loom-test",
     ],
 )

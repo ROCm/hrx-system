@@ -58,3 +58,33 @@ iree_status_t loom_ref_borrow_verify(const loom_module_t* module,
       op, loom_module_value_type(module, loom_ref_borrow_owner(op)),
       loom_module_value_type(module, loom_ref_borrow_pointer(op)), emitter);
 }
+
+iree_status_t loom_ref_compare_eq_verify(const loom_module_t* module,
+                                         const loom_op_t* op,
+                                         iree_diagnostic_emitter_t emitter) {
+  const loom_type_t left_type =
+      loom_module_value_type(module, loom_ref_compare_eq_left(op));
+  const loom_type_t right_type =
+      loom_module_value_type(module, loom_ref_compare_eq_right(op));
+  const loom_type_t expected =
+      loom_type_reference(loom_type_reference_ownership(right_type),
+                          loom_type_reference_namespace_id(left_type),
+                          loom_type_reference_name_id(left_type),
+                          loom_type_reference_declaration_id(left_type));
+  if (loom_type_equal(right_type, expected)) {
+    return iree_ok_status();
+  }
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(IREE_SV("right")),
+      loom_param_type(right_type),
+      loom_param_string(IREE_SV("same payload as left")),
+      loom_param_type(expected),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = op,
+      .error = LOOM_ERR_TYPE_001,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(emitter, &emission);
+}
