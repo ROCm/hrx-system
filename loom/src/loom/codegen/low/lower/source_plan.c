@@ -198,6 +198,7 @@ static bool loom_low_lower_op_is_structural(
   }
   switch (op->kind) {
     case LOOM_OP_REF_BORROW:
+    case LOOM_OP_REF_RELEASE:
     case LOOM_OP_BUFFER_ASSUME_SAME_ROOT:
     case LOOM_OP_CFG_BR:
     case LOOM_OP_CFG_COND_BR:

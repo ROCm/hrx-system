@@ -21,7 +21,8 @@ extern "C" {
 enum {
   LOOM_OP_REF_DUPLICATE = LOOM_OP_KIND(LOOM_DIALECT_REF, 0),
   LOOM_OP_REF_BORROW = LOOM_OP_KIND(LOOM_DIALECT_REF, 1),
-  LOOM_OP_REF_COUNT_ = 2,
+  LOOM_OP_REF_RELEASE = LOOM_OP_KIND(LOOM_DIALECT_REF, 2),
+  LOOM_OP_REF_COUNT_ = 3,
 };
 
 // LOOM_OP_REF_DUPLICATE: Create an independent handle to the same managed payload, preserving its type and null state. Duplicating ref adds an owner that must be released or transferred independently. Duplicating ptr preserves its borrowed mode and any protection needed through its final use. The source remains valid; live source and result lifetimes are independent.
@@ -57,6 +58,16 @@ iree_status_t loom_ref_borrow_build(
 iree_status_t loom_ref_borrow_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
+
+// LOOM_OP_REF_RELEASE: End this managed handle's lifetime. The source identity is invalid afterward. An owning ref releases its owner and runs the native finalizer when it holds the last reference. A ptr retires any compiler-acquired protection; an unprotected borrow or null has no payload effect. Independent handles remain valid.
+// ref.release %owner : ref<@Frame>
+LOOM_DEFINE_ISA(loom_ref_release_isa, LOOM_OP_REF_RELEASE)
+LOOM_DEFINE_OPERAND(loom_ref_release_value, 0)
+iree_status_t loom_ref_release_build(
+    loom_builder_t* builder,
+    loom_value_id_t value,
+    loom_location_id_t location,
+    loom_op_t** out_op);
 
 // Returns the vtable array for the ref dialect.
 const loom_op_vtable_t* const* loom_ref_dialect_vtables(
