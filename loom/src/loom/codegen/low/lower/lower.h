@@ -956,6 +956,12 @@ typedef struct loom_low_lower_op_contract_query_t {
   loom_op_kind_t first_op_kind;
   // Number of contiguous operation kinds accepted from |first_op_kind|.
   uint16_t op_kind_count;
+  // First accepted operation kind that may produce a terminal rejection.
+  loom_op_kind_t first_terminal_rejection_op_kind;
+  // Number of contiguous terminal-capable kinds from
+  // |first_terminal_rejection_op_kind|.
+  // Zero means that this query never produces terminal rejections.
+  uint16_t terminal_rejection_op_kind_count;
 } loom_low_lower_op_contract_query_t;
 
 // Returns true when |query| accepts |op_kind|.
@@ -963,6 +969,15 @@ static inline bool loom_low_lower_op_contract_query_accepts(
     const loom_low_lower_op_contract_query_t* query, loom_op_kind_t op_kind) {
   return query->op_kind_count == 0 ||
          (uint16_t)(op_kind - query->first_op_kind) < query->op_kind_count;
+}
+
+// Returns true when querying |op_kind| may produce a terminal rejection.
+static inline bool
+loom_low_lower_op_contract_query_may_return_terminal_rejection(
+    const loom_low_lower_op_contract_query_t* query, loom_op_kind_t op_kind) {
+  return query->terminal_rejection_op_kind_count != 0 &&
+         (uint16_t)(op_kind - query->first_terminal_rejection_op_kind) <
+             query->terminal_rejection_op_kind_count;
 }
 
 typedef struct loom_low_lower_policy_t {

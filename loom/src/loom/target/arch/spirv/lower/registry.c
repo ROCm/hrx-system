@@ -587,7 +587,15 @@ static const loom_low_lower_policy_t kSpirvLowLowerPolicy = {
             .user_data = NULL,
         },
     .preselect_op = {.fn = loom_spirv_preselect_op, .user_data = NULL},
-    .query_op_contract = {.fn = loom_spirv_query_cooperative_arithmetic},
+    .query_op_contract =
+        {
+            .fn = loom_spirv_query_cooperative_arithmetic,
+            .first_op_kind = LOOM_OP_VECTOR_ADDF,
+            .op_kind_count = LOOM_OP_VECTOR_NEGI - LOOM_OP_VECTOR_ADDF + 1,
+            .first_terminal_rejection_op_kind = LOOM_OP_VECTOR_ADDF,
+            .terminal_rejection_op_kind_count =
+                LOOM_OP_VECTOR_NEGI - LOOM_OP_VECTOR_ADDF + 1,
+        },
     .describe_plan = {.fn = loom_spirv_describe_plan, .user_data = NULL},
     .mark_plan_storage_demands =
         {

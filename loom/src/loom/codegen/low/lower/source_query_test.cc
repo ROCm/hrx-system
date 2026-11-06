@@ -228,6 +228,9 @@ class LowLowerSourceQueryTest : public ::testing::Test {
         .user_data = probe,
         .first_op_kind = probe->handled_op->kind,
         .op_kind_count = 1,
+        .first_terminal_rejection_op_kind = probe->handled_op->kind,
+        .terminal_rejection_op_kind_count = static_cast<uint16_t>(
+            probe->outcome == LOOM_TARGET_CONTRACT_QUERY_TERMINAL_REJECTION),
     };
     options_.policy = policy;
   }
@@ -652,6 +655,25 @@ TEST_F(LowLowerSourceQueryTest, TargetOwnedContractComposesWithGeneratedCases) {
   EXPECT_EQ(target_result.outcome, LOOM_TARGET_CONTRACT_QUERY_LEGAL);
   EXPECT_EQ(target_result.selected_descriptor, nullptr);
   EXPECT_FALSE(probe.observed_unaccepted_op_kind);
+}
+
+TEST_F(LowLowerSourceQueryTest, TargetOwnedTerminalRejectionUsesDeclaredRange) {
+  QueryProbe probe = {
+      .handled_op = mapped_source_op_,
+      .outcome = LOOM_TARGET_CONTRACT_QUERY_TERMINAL_REJECTION,
+  };
+  loom_low_lower_policy_t policy;
+  InstallTargetContract(&probe, &policy);
+  EXPECT_TRUE(loom_low_lower_op_contract_query_may_return_terminal_rejection(
+      &policy.query_op_contract, mapped_source_op_->kind));
+  EXPECT_FALSE(loom_low_lower_op_contract_query_may_return_terminal_rejection(
+      &policy.query_op_contract, source_op_->kind));
+  CreateQueryScope();
+
+  loom_target_contract_query_result_t result =
+      loom_target_contract_query_result_empty();
+  IREE_ASSERT_OK(QueryContract(mapped_source_op_, &result));
+  EXPECT_EQ(result.outcome, LOOM_TARGET_CONTRACT_QUERY_TERMINAL_REJECTION);
 }
 
 TEST_F(LowLowerSourceQueryTest, TargetOwnedRelatedOpExcludesGeneratedGraphs) {
