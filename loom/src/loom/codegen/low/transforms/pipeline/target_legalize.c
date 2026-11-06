@@ -1144,8 +1144,8 @@ loom_low_target_legalize_reference_entry_has_terminal_input(
       continue;
     }
     const loom_op_t* producer = loom_value_def_op(value);
-    if (!loom_low_lower_op_contract_query_accepts(target_query,
-                                                  producer->kind)) {
+    if (!loom_low_lower_op_contract_query_may_return_terminal_rejection(
+            target_query, producer->kind)) {
       continue;
     }
     loom_target_contract_query_result_t producer_result =

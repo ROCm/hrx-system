@@ -151,7 +151,13 @@ static iree_status_t loom_low_lower_source_query_target_contract(
       !loom_low_lower_op_contract_query_accepts(query, source_op->kind)) {
     return iree_ok_status();
   }
-  return query->fn(query->user_data, environment, source_op, out_result);
+  IREE_RETURN_IF_ERROR(
+      query->fn(query->user_data, environment, source_op, out_result));
+  IREE_ASSERT(
+      !loom_target_contract_query_result_is_terminal_rejection(out_result) ||
+      loom_low_lower_op_contract_query_may_return_terminal_rejection(
+          query, source_op->kind));
+  return iree_ok_status();
 }
 
 static iree_status_t loom_low_lower_source_query_one(

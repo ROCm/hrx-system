@@ -357,6 +357,8 @@ static const loom_low_lower_policy_t kWasmLowLowerPolicy = {
         {
             .fn = loom_wasm_query_vector_structural_contract,
             .user_data = NULL,
+            .first_terminal_rejection_op_kind = LOOM_OP_VECTOR_SLICE,
+            .terminal_rejection_op_kind_count = 1,
         },
     .preselect_op = {.fn = loom_wasm_preselect_op, .user_data = NULL},
     .mark_plan_storage_demands =
