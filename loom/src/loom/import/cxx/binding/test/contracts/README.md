@@ -1,13 +1,15 @@
 # Source contracts
 
 These cases assert how C++ authoring contracts become verified Loom IR:
-named configuration, incoming buffer promises, and their source diagnostics.
+named configuration, incoming buffer promises, retained predicate facts, and
+their source diagnostics.
 The tests retain symbolic values and source ownership without selecting an
 execution target. Related cases use `// ====` separators and exact output.
 
 | Contract | Fixtures |
 | --- | --- |
 | Named configuration, aliases, definitions, and typed reads | `config*` |
+| Predicate identity, source arithmetic, scope, and bounded indexing | `assumption*` |
 | Entry alignment, redeclarations, and pointer replacement | `parameter_alignment*` |
 | Independent roots, scoped promises, and possible aliases | `parameter_noalias*` |
 

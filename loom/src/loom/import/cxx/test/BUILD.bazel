@@ -89,8 +89,6 @@ loom_check_test_suite(
         "address_values_invalid.cxx-test",
         "assembly.cxx-test",
         "assembly_invalid.cxx-test",
-        "assumptions.cxx-test",
-        "assumptions_invalid.cxx-test",
         "async.cxx-test",
         "async_invalid.cxx-test",
         "atomic_builtins.cxx-test",
