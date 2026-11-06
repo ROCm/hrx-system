@@ -388,6 +388,15 @@ def test_compile_register_copy_from_selected_source_memory_root() -> None:
         vector_lane_byte_stride=4,
         static_byte_offset=0,
     )
+    equivalent_source_memory = SourceMemoryConstraint(
+        operation=SourceMemoryOperation.VIEW_CARRIER,
+        root_kind=SourceMemoryRootKind.ANY,
+        memory_spaces=("unknown", "global"),
+        element_byte_count=4,
+        vector_lane_count=1,
+        vector_lane_byte_stride=4,
+        static_byte_offset=0,
+    )
     fragment = ContractFragment(
         name="test.source-memory-root-copy",
         descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -397,8 +406,14 @@ def test_compile_register_copy_from_selected_source_memory_root() -> None:
                 emit=(
                     EmitRegisterCopy(
                         source=ValueRef.source_memory_root(),
-                        result=ValueRef.result("result"),
+                        result=ValueRef.temporary("root"),
+                        result_type=ValueRef.result("result"),
                         source_memory=source_memory,
+                    ),
+                    EmitRegisterCopy(
+                        source=ValueRef.source_memory_root(),
+                        result=ValueRef.result("result"),
+                        source_memory=equivalent_source_memory,
                     ),
                 ),
             ),
@@ -412,12 +427,12 @@ def test_compile_register_copy_from_selected_source_memory_root() -> None:
 
     assert len(compiled.source_memories) == 1
     assert compiled.source_memories[0].constraint is source_memory
-    assert len(compiled.emits) == 1
-    emit = compiled.emits[0]
-    assert emit.kind is LowerEmitKind.REGISTER_COPY
-    assert emit.source_memory_ordinal == 1
-    source = compiled.value_refs[emit.operand_ref_start]
-    assert source.kind is SourceValueKind.SOURCE_MEMORY_ROOT
+    assert len(compiled.emits) == 2
+    for emit in compiled.emits:
+        assert emit.kind is LowerEmitKind.REGISTER_COPY
+        assert emit.source_memory_ordinal == 1
+        source = compiled.value_refs[emit.operand_ref_start]
+        assert source.kind is SourceValueKind.SOURCE_MEMORY_ROOT
 
 
 @pytest.mark.parametrize("materialize", [False, True])
