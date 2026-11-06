@@ -21,7 +21,6 @@
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/call.h"
 #include "loom/codegen/low/allocation/diagnostics.h"
-#include "loom/codegen/low/allocation/move_topology.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/codegen/low/allocation/target_constraints.h"

@@ -17,6 +17,7 @@
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/runtime/command/format.h"
 #include "loom/runtime/command/program.h"
 #include "loom/target/arch/cmd/abi_layout.h"
@@ -868,16 +869,21 @@ static iree_status_t loom_cmd_serialize_function_body(
       IREE_ASSERT_EQ(loom_low_resource_import_kind(op),
                      LOOM_LOW_RESOURCE_IMPORT_KIND_COMMAND_INPUT);
       IREE_RETURN_IF_ERROR(loom_cmd_serialize_import_resource(build, op));
-    } else if (loom_low_copy_isa(op) || loom_low_move_isa(op)) {
-      loom_cmd_serialize_transfer(build, op);
-    } else if (loom_low_return_isa(op)) {
-      IREE_ASSERT_EQ(op->operand_count, 0u);
     } else {
-      const iree_string_view_t op_name = loom_op_name(build->module, op);
-      return iree_make_status(
-          IREE_STATUS_UNIMPLEMENTED,
-          "low operation `%.*s` cannot be serialized as a portable command",
-          (int)op_name.size, op_name.data);
+      const loom_low_register_transfer_kind_t transfer_kind =
+          loom_low_register_transfer_kind(op);
+      if (transfer_kind == LOOM_LOW_REGISTER_TRANSFER_COPY ||
+          transfer_kind == LOOM_LOW_REGISTER_TRANSFER_MOVE) {
+        loom_cmd_serialize_transfer(build, op);
+      } else if (loom_low_return_isa(op)) {
+        IREE_ASSERT_EQ(op->operand_count, 0u);
+      } else {
+        const iree_string_view_t op_name = loom_op_name(build->module, op);
+        return iree_make_status(
+            IREE_STATUS_UNIMPLEMENTED,
+            "low operation `%.*s` cannot be serialized as a portable command",
+            (int)op_name.size, op_name.data);
+      }
     }
   }
   return iree_ok_status();
