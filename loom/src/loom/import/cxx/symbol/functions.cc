@@ -158,6 +158,12 @@ loom_inline_policy_t source_inline_policy(cxx::FunctionSymbol* function) {
   return LOOM_INLINE_POLICY_UNSPECIFIED;
 }
 
+bool requires_inline_expansion(cxx::FunctionSymbol* function) {
+  // Special members are intermediate callables over importer-owned receiver
+  // ABIs. Their call boundaries must be consumed before executable lowering.
+  return function->isConstructor() || function->isDestructor();
+}
+
 uint8_t source_temperature(cxx::FunctionSymbol* function) {
   if (annotated(function, "hot")) {
     return LOOM_FUNC_TEMPERATURE_HOT;
@@ -634,6 +640,7 @@ bool Functions::admit_declaration(
         });
   }
   if (function) {
+    const bool requires_inline = requires_inline_expansion(function);
     bool found_inline_policy = false;
     bool found_temperature = false;
     bool found_retain = false;
@@ -661,16 +668,21 @@ bool Functions::admit_declaration(
               diagnostics_.reject(unit_, attribute,
                                   "inline and noinline cannot be combined");
             }
-            if (function->isConstructor() || function->isDestructor() ||
-                annotated(function, "kernel") || annotated(function, "op") ||
-                annotated(function, "assume") ||
-                annotated(function, "check_case") ||
-                annotated(function, "check_scenario") ||
-                annotated(function, "check_benchmark") ||
-                annotated(function, "command_program") ||
-                annotated(function, "pipeline") ||
-                annotated(function, "template_def") ||
-                launches_.is_configuration(function)) {
+            if (requires_inline && name == "noinline") {
+              diagnostics_.reject(
+                  unit_, attribute,
+                  "constructor and destructor calls require inline expansion");
+            }
+            if (!requires_inline &&
+                (annotated(function, "kernel") || annotated(function, "op") ||
+                 annotated(function, "assume") ||
+                 annotated(function, "check_case") ||
+                 annotated(function, "check_scenario") ||
+                 annotated(function, "check_benchmark") ||
+                 annotated(function, "command_program") ||
+                 annotated(function, "pipeline") ||
+                 annotated(function, "template_def") ||
+                 launches_.is_configuration(function))) {
               diagnostics_.reject(
                   unit_, attribute,
                   "inline policy requires an ordinary source function");
@@ -691,9 +703,8 @@ bool Functions::admit_declaration(
               diagnostics_.reject(unit_, attribute,
                                   "hot and cold cannot be combined");
             }
-            if (function->isConstructor() || function->isDestructor() ||
-                annotated(function, "kernel") || annotated(function, "op") ||
-                annotated(function, "assume") ||
+            if (requires_inline || annotated(function, "kernel") ||
+                annotated(function, "op") || annotated(function, "assume") ||
                 annotated(function, "check_case") ||
                 annotated(function, "check_scenario") ||
                 annotated(function, "check_benchmark") ||
@@ -1895,16 +1906,15 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
     const auto target = target_definitions_.reference(symbol);
     const bool link_once =
         exported_.contains(symbol) && symbol->canonical()->isInline();
+    const bool requires_inline = requires_inline_expansion(symbol);
     const loom_inline_policy_t inline_policy =
-        symbol->isConstructor() || symbol->isDestructor()
-            ? LOOM_INLINE_POLICY_INLINE
-            : source_inline_policy(symbol);
+        requires_inline ? LOOM_INLINE_POLICY_INLINE
+                        : source_inline_policy(symbol);
     const uint8_t temperature = source_temperature(symbol);
     const loom_attribute_t source_signature =
-        symbol->isConstructor() || symbol->isDestructor()
-            ? loom_attr_absent()
-            : build_c_source_signature(unit_, diagnostics_, module_, symbol,
-                                       definition, types);
+        requires_inline ? loom_attr_absent()
+                        : build_c_source_signature(unit_, diagnostics_, module_,
+                                                   symbol, definition, types);
     check(loom_func_def_build(
         builder,
         (annotated(symbol, "device") ? LOOM_FUNC_DEF_BUILD_FLAG_HAS_CC : 0) |

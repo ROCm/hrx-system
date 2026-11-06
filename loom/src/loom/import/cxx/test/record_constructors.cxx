@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <hip/hip_runtime.h>
 #include <loomcxx/check.h>
 
 struct Cell {
@@ -36,6 +37,13 @@ struct DefaultDefined {
 };
 
 DefaultDefined::DefaultDefined() = default;
+
+struct ForcedInlineValue {
+  unsigned value;
+
+  __forceinline__ ForcedInlineValue(unsigned seed) : value(seed + 1u) {}
+  __forceinline__ ~ForcedInlineValue() {}
+};
 
 struct Movable {
   unsigned value;
@@ -86,6 +94,11 @@ static unsigned nested_default_sum() {
 
 static unsigned default_defined_value() {
   DefaultDefined value;
+  return value.value;
+}
+
+static unsigned forced_inline_value(unsigned seed) {
+  ForcedInlineValue value(seed);
   return value.value;
 }
 
@@ -167,6 +180,7 @@ LOOM_CHECK_CASE(record_constructors) {
   const auto defaults = default_sum();
   const auto nested_defaults = nested_default_sum();
   const auto default_defined = default_defined_value();
+  const auto forced_inline = forced_inline_value(11u);
   const auto moved_first = move_sources(false, 2u, 5u);
   const auto moved_second = move_sources(true, 2u, 5u);
   const auto array_value = read_xvalue_array(7u, 11u);
@@ -185,6 +199,7 @@ LOOM_CHECK_CASE(record_constructors) {
   loom::check::expect_equal(defaults, 4u);
   loom::check::expect_equal(nested_defaults, 4u);
   loom::check::expect_equal(default_defined, 3u);
+  loom::check::expect_equal(forced_inline, 12u);
   loom::check::expect_equal(moved_first, 16u);
   loom::check::expect_equal(moved_second, 22u);
   loom::check::expect_equal(array_value, 11u);
