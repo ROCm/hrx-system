@@ -132,6 +132,7 @@ loom_cc_library(
     hdrs = ["dead_state.h"],
     deps = [
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:callable_effects",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/util:cfg_graph",

@@ -1343,9 +1343,11 @@ NON_DETERMINISTIC = Trait("NonDeterministic")
 # Effects depend on runtime state (e.g., func.call depends on the callee).
 # Passes treat this conservatively as both READS_MEMORY and WRITES_MEMORY.
 UNKNOWN_EFFECTS = Trait("UnknownEffects")
-# Each dynamic execution is externally observable independently of its SSA
-# results. Optimizers preserve its execution count and control predicate. This
+# Execution may be observable independently of its SSA results. Value-based
+# optimizers preserve its execution count and control predicate. This
 # does not imply memory access, ordering, non-determinism, or convergence.
+# A declared lifetime-only effect may disappear with its complete unused
+# lifetime after an ownership-aware rewrite establishes closure.
 OBSERVABLE_EFFECT = Trait("ObservableEffect")
 # Op represents an explicit command-program effect such as dispatch or schedule
 # composition. Leaf ops declare their exact or unknown effects; structural
@@ -6698,6 +6700,11 @@ class Op:
     constraints: List of Constraint instances.
     traits: List of Trait instances.
     ownership_effects: Ownership actions on operand/result fields.
+    lifetime_effects_only: Execution effects consist only of managing the
+        declared lifetimes; complete unused lifetimes may be eliminated.
+    callable_effect_contract: Optional payload effect-contract attribute for
+        an application without a direct callee, such as a template demand.
+        Direct calls derive this field from CallLikeInterface.
     symbol_def: Symbol definition descriptor for SYMBOL_DEFINE ops.
     format: Format element list describing textual assembly.
     assembly: Short target-assembly spelling using the same operation fields.
@@ -6737,6 +6744,8 @@ class Op:
     traits: tuple[Trait, ...] = ()
     effects: tuple[Effect, ...] = ()
     ownership_effects: tuple[OperandOwnershipEffect | ResultOwnershipEffect, ...] = ()
+    lifetime_effects_only: bool = False
+    callable_effect_contract: str | None = None
     canonicalize: str = ""  # C function name for canonicalization, or "".
     canonicalize_without_facts: bool = False
     effective_traits: str = (
@@ -6781,6 +6790,8 @@ class Op:
         effects: list[Effect] | tuple[Effect, ...] = (),
         ownership_effects: list[OperandOwnershipEffect | ResultOwnershipEffect]
         | tuple[OperandOwnershipEffect | ResultOwnershipEffect, ...] = (),
+        lifetime_effects_only: bool = False,
+        callable_effect_contract: str | None = None,
         canonicalize: str = "",
         canonicalize_without_facts: bool = False,
         effective_traits: str = "",
@@ -6827,6 +6838,29 @@ class Op:
         object.__setattr__(self, "traits", tuple(traits))
         object.__setattr__(self, "effects", frozen_effects)
         object.__setattr__(self, "ownership_effects", frozen_ownership_effects)
+        object.__setattr__(self, "lifetime_effects_only", lifetime_effects_only)
+        if lifetime_effects_only and (
+            frozen_effects
+            or frozen_regions
+            or frozen_successors
+            or not (frozen_operands or frozen_results)
+            or any(
+                trait.name
+                in {
+                    "UnknownEffects",
+                    "NonDeterministic",
+                    "Convergent",
+                    "MemoryFence",
+                    "Terminator",
+                    "SymbolDefine",
+                }
+                for trait in traits
+            )
+        ):
+            raise ValueError(
+                f"{name}: lifetime-only operations require values and cannot "
+                "have payload effects, regions, or control flow"
+            )
         object.__setattr__(self, "canonicalize", canonicalize)
         if canonicalize_without_facts and not canonicalize:
             raise ValueError(
@@ -6902,6 +6936,34 @@ class Op:
         object.__setattr__(self, "category", category)
         object.__setattr__(self, "symbol_def", symbol_def)
         object.__setattr__(self, "interfaces", tuple(interfaces))
+        call_like = next(
+            (
+                interface
+                for interface in interfaces
+                if isinstance(interface, CallLikeInterface)
+            ),
+            None,
+        )
+        if call_like is not None:
+            if callable_effect_contract is not None:
+                raise ValueError(
+                    f"{name}: CallLikeInterface owns the callable effect contract"
+                )
+            callable_effect_contract = call_like.effect_contract
+        if callable_effect_contract is not None:
+            contract_attr = next(
+                (
+                    attr
+                    for attr in frozen_attrs
+                    if attr.name == callable_effect_contract
+                ),
+                None,
+            )
+            if contract_attr is None or contract_attr.attr_type != ATTR_TYPE_ENUM:
+                raise ValueError(
+                    f"{name}: callable effect contract requires an enum attribute"
+                )
+        object.__setattr__(self, "callable_effect_contract", callable_effect_contract)
         object.__setattr__(self, "format", frozen_format)
         object.__setattr__(self, "assembly", assembly)
         object.__setattr__(
@@ -7213,6 +7275,7 @@ def value_duplication_op(
     doc: str,
     category: OpCategory | None = None,
     traits: list[Trait] | tuple[Trait, ...] = (),
+    lifetime_effects_only: bool = False,
     examples: list[str] | tuple[str, ...] = (),
 ) -> Op:
     """Declare one dialect-owned closed-tuple ownership duplication op."""
@@ -7230,6 +7293,7 @@ def value_duplication_op(
             VariadicValuesMatch("duplicates", "sources"),
         ],
         traits=[UNIQUE_IDENTITY, STORAGE_RELATION, *traits],
+        lifetime_effects_only=lifetime_effects_only,
         interfaces=[
             ValueDuplicationInterface(
                 sources="sources",

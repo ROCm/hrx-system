@@ -11,10 +11,22 @@
 
 #include "iree/base/api.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/semantics.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Reads an application's payload effect contract from its generated semantic
+// row. Ownership and handle identity constraints remain independent effects.
+static inline loom_callable_effect_contract_t
+loom_callable_effects_application_contract(const loom_op_t* op,
+                                           loom_op_semantics_t semantics) {
+  const uint8_t index = semantics.callable_effect_attr_index_plus_one;
+  return index ? (loom_callable_effect_contract_t)loom_attr_as_enum(
+                     loom_op_const_attrs(op)[index - 1])
+               : LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED;
+}
 
 // Returns true when |function| has pure callable semantics. Definitions are
 // classified from their cached body effects while declarations use their
@@ -81,8 +93,11 @@ loom_memory_space_mask_t loom_callable_effects_written_memory_spaces(
     loom_func_like_t function);
 
 // Returns the effective traits for a callable application with |contract|.
-// Its callable boundary remains independent of the selected effects.
+// Managed results have independent handle identities. Consuming an owner
+// preserves its lifetime boundary even when the callable is otherwise pure;
+// only a closed lifetime rewrite may erase that ownership transfer.
 loom_trait_flags_t loom_callable_effects_traits(
+    const loom_module_t* module, const loom_op_t* op,
     loom_callable_effect_contract_t contract);
 
 #ifdef __cplusplus

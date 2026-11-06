@@ -25,6 +25,7 @@ from loom.dsl import (
     UNIQUE_IDENTITY,
     VALUE_ALIAS,
     AttrDef,
+    CallLikeInterface,
     Dialect,
     Effect,
     EnumCase,
@@ -262,6 +263,66 @@ def test_generate_tables_marks_structural_materializations() -> None:
 
     source = generate_tables_c("test", 0x01, [op])
     assert ".vtable_flags = LOOM_OP_VTABLE_STRUCTURAL_MATERIALIZATION," in source
+
+
+def test_generate_tables_preserves_lifetime_effect_contract() -> None:
+    op = Op(
+        "test.retire",
+        operands=[Operand("owner", ANY)],
+        lifetime_effects_only=True,
+    )
+    source = generate_tables_c("test", 0x01, [op])
+    assert ".lifetime_effects_only = true," in source
+
+
+@pytest.mark.parametrize("direct", [False, True])
+def test_application_contract_uses_stored_attribute_index(direct: bool) -> None:
+    contract = EnumDef("Effects", [EnumCase("pure", 1), EnumCase("readonly", 2)])
+    flags = EnumDef("Flags", [EnumCase("fast", 1)])
+    op = Op(
+        "test.application",
+        operands=[Operand("arguments", ANY, variadic=True)],
+        results=[Result("results", ANY, variadic=True)],
+        attrs=[
+            AttrDef("flags", "flags", enum_def=flags),
+            AttrDef("callee", "symbol"),
+            AttrDef("effects", "enum", enum_def=contract, optional=True),
+        ],
+        interfaces=[CallLikeInterface("callee", "arguments", "results", effect_contract="effects")] if direct else [],
+        callable_effect_contract=None if direct else "effects",
+    )
+    source = generate_tables_c("test", 0x01, [op])
+    assert ".callable_effect_attr_index_plus_one = 2," in source
+
+
+@pytest.mark.parametrize("attrs", [[], [AttrDef("effects", "i64")]])
+def test_application_contract_requires_enum_attribute(attrs) -> None:
+    with pytest.raises(ValueError, match="callable effect contract requires an enum"):
+        Op("test.application", attrs=attrs, callable_effect_contract="effects")
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        dict(effects=[Reads("owner")]),
+        dict(traits=[CONVERGENT]),
+        dict(traits=[TERMINATOR]),
+        dict(regions=[RegionDef("body")]),
+    ],
+)
+def test_lifetime_contract_rejects_independent_effects(fields) -> None:
+    with pytest.raises(ValueError, match="lifetime-only operations"):
+        Op(
+            "test.retire",
+            operands=[Operand("owner", ANY)],
+            lifetime_effects_only=True,
+            **fields,
+        )
+
+
+def test_lifetime_contract_requires_a_lifetime() -> None:
+    with pytest.raises(ValueError, match="lifetime-only operations"):
+        Op("test.empty", lifetime_effects_only=True)
 
 
 def test_generate_tables_marks_fact_independent_canonicalization() -> None:

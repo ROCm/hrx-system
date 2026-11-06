@@ -880,11 +880,13 @@ enum loom_trait_bits_e {
   // sentinel that propagates through ordinary pure computation until erased
   // or rejected at an observation boundary.
   LOOM_TRAIT_POISON = 1u << 28,
-  // Each dynamic execution is externally observable independently of its SSA
-  // results. Generic transforms must preserve the execution count and control
+  // Execution may be observable independently of its SSA results. Generic
+  // value transforms must preserve the execution count and control
   // predicate: the op cannot be erased, merged, duplicated, rematerialized, or
   // relocated. This does not itself imply a memory footprint, memory ordering,
   // non-determinism, or convergence; operations declare those independently.
+  // A declared lifetime-only effect can disappear with its complete unused
+  // lifetime, after a shared ownership-aware rewrite establishes closure.
   LOOM_TRAIT_OBSERVABLE_EFFECT = 1u << 29,
   // Op's source expansion depends on facts at its control-flow position.
   // Identical operands do not make applications in different contexts
@@ -905,8 +907,9 @@ typedef uint32_t loom_trait_flags_t;
 // Absence (0) leaves effects unspecified and therefore conservative.
 typedef enum loom_callable_effect_contract_e {
   LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED = 0,
-  // No memory, non-deterministic, fresh-resource, convergent, or observable
-  // effects. Function-local virtual-register ownership is independent.
+  // No memory, non-deterministic, convergent, or observable payload effects.
+  // Managed allocation and handle bookkeeping may disappear with an unused
+  // lifetime; live result identities and consumed input owners stay distinct.
   LOOM_CALLABLE_EFFECT_CONTRACT_PURE = 1,
   // Deterministic memory reads with no other effects.
   LOOM_CALLABLE_EFFECT_CONTRACT_READONLY = 2,

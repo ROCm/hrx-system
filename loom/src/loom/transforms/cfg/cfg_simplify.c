@@ -1759,9 +1759,16 @@ static iree_status_t loom_cfg_simplify_process_cfg_region(
   }
   iree_host_size_t removed_arguments = 0;
   iree_host_size_t removed_operations = 0;
+  bool has_carried_state = false;
+  for (uint16_t i = 1; i < graph->block_count; ++i) {
+    has_carried_state |= graph->blocks[i].block->arg_count != 0;
+  }
+  if (!graph->has_cycles || !has_carried_state) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(loom_cfg_eliminate_dead_state(
-      state->rewriter, graph, &state->value_domain, &removed_arguments,
-      &removed_operations));
+      state->rewriter, graph, &state->value_domain, loom_dead_state_classify_op,
+      NULL, &removed_arguments, &removed_operations));
   state->statistics->block_args_removed += removed_arguments;
   state->statistics->dead_ops_removed += removed_operations;
   *out_changed = removed_arguments != 0 || removed_operations != 0;

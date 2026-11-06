@@ -2,19 +2,23 @@
 
 test.target<low_core> @test_target
 
-func.def target(@test_target) @preserves_scf_until_explicit_lowering(%cond: i1) {
-  scf.if %cond {
+func.def target(@test_target) @preserves_scf_until_explicit_lowering(%cond: i1, %left: i32, %right: i32) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    scf.yield %left : i32
   } else {
+    scf.yield %right : i32
   }
-  func.return
+  func.return %result : i32
 }
 
 // ----
 test.target<low_core> @test_target
 
-func.def target(@test_target) @preserves_scf_until_explicit_lowering(%cond: i1) {
-  scf.if %cond {
+func.def target(@test_target) @preserves_scf_until_explicit_lowering(%cond: i1, %left: i32, %right: i32) -> (i32) {
+  %result = scf.if %cond -> (i32) {
+    scf.yield %left : i32
   } else {
+    scf.yield %right : i32
   }
-  func.return
+  func.return %result : i32
 }

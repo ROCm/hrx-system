@@ -17,14 +17,36 @@
 extern "C" {
 #endif
 
-// Traces observable uses backward through operations and incoming block
-// arguments, then removes the closed unused state without changing control
-// flow. Borrows the current CFG and acquired function-local value domain;
+typedef enum loom_dead_state_op_kind_e {
+  // Execution must remain independently of result demand.
+  LOOM_DEAD_STATE_OP_ROOT = 0,
+  // Execution may disappear when all its result dependencies disappear.
+  LOOM_DEAD_STATE_OP_VALUE,
+  // Execution only constructs, copies, borrows, or retires handles.
+  LOOM_DEAD_STATE_OP_LIFETIME,
+  // Otherwise removable execution consumes a managed input obligation.
+  LOOM_DEAD_STATE_OP_CONSUMING,
+} loom_dead_state_op_kind_t;
+
+// Classifies verified operation semantics, independently of current use counts.
+typedef loom_dead_state_op_kind_t (*loom_dead_state_classify_fn_t)(
+    void* user_data, const loom_module_t* module, const loom_op_t* op);
+
+// Source-op classification from declared effects and ownership metadata.
+loom_dead_state_op_kind_t loom_dead_state_classify_op(
+    void* user_data, const loom_module_t* module, const loom_op_t* op);
+
+// Connects lifetime obligations through bookkeeping, consuming applications,
+// and managed branch arguments. Traces observable demand backward through
+// producers and incoming arguments, preserving every connected obligation of
+// a live value. Removes the closed unused state without changing control flow.
+// Borrows the current CFG and acquired function-local value domain;
 // the caller refreshes CFG facts after a changed result. Entry arguments,
 // effects, branch decisions, and nested region captures retain their meaning.
 iree_status_t loom_cfg_eliminate_dead_state(
     loom_rewriter_t* rewriter, const loom_cfg_graph_t* graph,
     const loom_local_value_domain_t* domain,
+    loom_dead_state_classify_fn_t classify, void* user_data,
     iree_host_size_t* out_removed_arguments,
     iree_host_size_t* out_removed_operations);
 

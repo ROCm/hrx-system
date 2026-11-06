@@ -36,14 +36,14 @@ iree_status_t loom_template_call_canonicalize(loom_op_t* op,
 
 loom_trait_flags_t loom_template_apply_effective_traits(
     const loom_module_t* module, const loom_op_t* op) {
-  (void)module;
   return LOOM_TRAIT_CONTEXTUAL |
-         loom_callable_effects_traits(loom_template_apply_effect_contract(op));
+         loom_callable_effects_traits(module, op,
+                                      loom_template_apply_effect_contract(op));
 }
 
 loom_trait_flags_t loom_template_call_effective_traits(
     const loom_module_t* module, const loom_op_t* op) {
-  (void)module;
   return LOOM_TRAIT_CONTEXTUAL |
-         loom_callable_effects_traits(loom_template_call_effect_contract(op));
+         loom_callable_effects_traits(module, op,
+                                      loom_template_call_effect_contract(op));
 }

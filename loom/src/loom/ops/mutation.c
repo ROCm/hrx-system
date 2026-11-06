@@ -80,11 +80,10 @@ bool loom_op_results_unused(const loom_module_t* module, const loom_op_t* op) {
 
 bool loom_op_is_dead_if_unused(const loom_module_t* module,
                                const loom_op_t* op) {
-  if (op->result_count == 0) {
-    return false;
-  }
   loom_trait_flags_t traits = loom_op_effective_traits(module, op);
-  if (iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_SYMBOL_DEFINE)) {
+  if ((op->result_count == 0 && !(traits & LOOM_TRAIT_PURE)) ||
+      iree_any_bit_set(traits, LOOM_TRAIT_HINT | LOOM_TRAIT_SYMBOL_DEFINE |
+                                   LOOM_TRAIT_TERMINATOR)) {
     return false;
   }
   if (loom_traits_are_convergent(traits)) {

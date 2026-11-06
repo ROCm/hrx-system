@@ -298,12 +298,16 @@ retired 0
 
 // ====
 
-// A null source owner cannot disappear before mandatory executable admission.
+// An observed null source owner still requires consumption at executable admission.
 // RUN: emit vm-object-lifetime
 type.decl import("lifetime", "object") @Object
 
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
 func.def public @run() {
   %forgotten = ref.null : ref<@Object>
+  %pointer = ref.borrow %forgotten : ref<@Object> -> ptr<@Object>
+  func.call @read(%pointer) : (ptr<@Object>)
   // ERROR@+1: DOMINANCE/014 {value_name="forgotten"}
   func.return
 }

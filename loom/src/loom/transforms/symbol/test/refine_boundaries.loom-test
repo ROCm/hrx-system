@@ -1306,6 +1306,7 @@ func.def public @call_projected_dead_argument(%kept: index, %dead: index) {
 test.func public @test_direct_body_exit(%condition: i1) -> (index) {
   %nested = index.constant 99 : index
   test.optional_region %condition {
+    test.use %nested : index
     test.yield %nested : index
   }
   %direct = index.constant 7 : index
@@ -1322,6 +1323,7 @@ func.def public @call_test_direct_body_exit(%condition: i1) {
 test.func public @test_direct_body_exit(%condition: i1) -> (index) {
   %nested = index.constant 99 : index
   test.optional_region %condition {
+    test.use %nested : index
     test.yield %nested : index
   }
   %direct = index.constant 7 : index
