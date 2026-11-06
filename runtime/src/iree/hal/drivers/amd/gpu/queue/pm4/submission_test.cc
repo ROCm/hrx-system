@@ -162,9 +162,10 @@ TEST_P(SubmissionTest, PayloadRetiresBeforePublicCompletion) {
   iree_hal_amd_gpu_signal_pool_t signal_pool;
   iree_hal_amd_gpu_signal_block_t signal_block;
   iree_hal_amd_gpu_signal_pool_initialize({}, &signal_pool);
-  iree_hal_amd_gpu_signal_block_initialize(&signal_pool, this, &native_value,
-                                           0x1000, 8, 0, &native_signal, 1, 1,
+  iree_hal_amd_gpu_signal_block_initialize(&native_signal, 1, 1,
                                            frontier_storage, &signal_block);
+  iree_hal_amd_gpu_signal_block_attach(&signal_pool, this, &native_value,
+                                       0x1000, 8, 0, &signal_block);
   capture->signal = iree_hal_amd_gpu_signal_pool_try_acquire(&signal_pool, 0);
   iree_hal_amd_gpu_pm4_submission_t* consumer = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(
@@ -254,9 +255,10 @@ TEST_P(SubmissionTest, RetirementOwnsNativeReadersWithoutCallerInputs) {
   iree_hal_amd_gpu_signal_pool_t signal_pool;
   iree_hal_amd_gpu_signal_block_t signal_block;
   iree_hal_amd_gpu_signal_pool_initialize({}, &signal_pool);
-  iree_hal_amd_gpu_signal_block_initialize(&signal_pool, this, &native_value,
-                                           0x1000, 8, 0, &native_signal, 1, 1,
+  iree_hal_amd_gpu_signal_block_initialize(&native_signal, 1, 1,
                                            frontier_storage, &signal_block);
+  iree_hal_amd_gpu_signal_block_attach(&signal_pool, this, &native_value,
+                                       0x1000, 8, 0, &signal_block);
   auto* producer = iree_hal_amd_gpu_signal_pool_try_acquire(&signal_pool, 0);
   iree_hal_amd_gpu_signal_publish_frontier(producer, &native_frontier);
   IREE_ASSERT_OK(
@@ -479,9 +481,10 @@ TEST_P(SubmissionTest, FailedDependencyStillJoinsOtherProducers) {
   iree_hal_amd_gpu_signal_block_t signal_block;
   iree_hal_amd_gpu_signal_pool_initialize({}, &signal_pool);
   iree_hal_amd_gpu_signal_block_initialize(
-      &signal_pool, this, native_values.data(), 0x1000, 8, 0,
       native_signals.data(), native_signals.size(), 1, native_frontiers.data(),
       &signal_block);
+  iree_hal_amd_gpu_signal_block_attach(&signal_pool, this, native_values.data(),
+                                       0x1000, 8, 0, &signal_block);
   std::array<iree_hal_amd_gpu_pm4_submission_t*, 2> producers = {};
   for (size_t i = 0; i < producers.size(); ++i) {
     IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create(

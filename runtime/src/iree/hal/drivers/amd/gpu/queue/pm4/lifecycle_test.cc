@@ -41,9 +41,11 @@ class Pm4LifecycleTest : public ::testing::Test {
     iree_slim_mutex_initialize(&queue_.pending.completion_mutex);
     iree_hal_amd_gpu_signal_pool_initialize({}, &signal_pool_);
     iree_hal_amd_gpu_signal_block_initialize(
-        &signal_pool_, this, native_values_.data(), 0x1000, sizeof(uint64_t), 0,
         native_signals_.data(), native_signals_.size(), 1,
         native_frontiers_.data(), &signal_block_);
+    iree_hal_amd_gpu_signal_block_attach(&signal_pool_, this,
+                                         native_values_.data(), 0x1000,
+                                         sizeof(uint64_t), 0, &signal_block_);
     IREE_ASSERT_OK(
         iree_hal_amd_gpu_pm4_barrier_profile_initialize({11, 0, 0}, &profile_));
     queue_.retirement.capacity_mask = 3;

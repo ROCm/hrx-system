@@ -32,6 +32,9 @@ iree_status_t MatchesNativeIdentity(iree_hal_amd_fabric_t* fabric,
 
 // Observe complete resource reclamation at synchronous final device release.
 struct DeviceAllocator {
+  // Allocator dependency, selected before device creation and never replaced
+  // while device borrowers exist. Lifetime fixtures can hold exact allocations.
+  iree_allocator_t backing = iree_allocator_system();
   // Live allocations made by the concrete device and its children.
   std::atomic<size_t> live_count = 0;
 

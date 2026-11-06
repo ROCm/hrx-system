@@ -15,9 +15,10 @@ namespace {
 struct Storage {
   Storage() {
     iree_hal_amd_gpu_signal_pool_initialize({}, &pool);
-    iree_hal_amd_gpu_signal_block_initialize(
-        &pool, this, values.data(), 0x1000, 8, 0, signals.data(),
-        signals.size(), 1, frontiers.data(), &block);
+    iree_hal_amd_gpu_signal_block_initialize(signals.data(), signals.size(), 1,
+                                             frontiers.data(), &block);
+    iree_hal_amd_gpu_signal_block_attach(&pool, this, values.data(), 0x1000, 8,
+                                         0, &block);
   }
   ~Storage() {
     iree_hal_amd_gpu_signal_block_deinitialize(&block);
@@ -78,9 +79,10 @@ void BM_Frontier(benchmark::State& state) {
   // Attached native extent and its signal metadata.
   iree_hal_amd_gpu_signal_block_t block;
   iree_hal_amd_gpu_signal_pool_initialize({}, &pool);
-  iree_hal_amd_gpu_signal_block_initialize(&pool, &pool, &value, 0x1000, 8, 0,
-                                           &metadata, 1, queue_count,
+  iree_hal_amd_gpu_signal_block_initialize(&metadata, 1, queue_count,
                                            snapshot.data(), &block);
+  iree_hal_amd_gpu_signal_block_attach(&pool, &pool, &value, 0x1000, 8, 0,
+                                       &block);
   auto* signal = iree_hal_amd_gpu_signal_pool_try_acquire(&pool, 0);
   for (auto _ : state) {
     ++source[0];

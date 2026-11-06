@@ -401,9 +401,9 @@ class NativeQueue {
   // Includes public creation, validation, native recording, and finalization.
   // Recorded dispatches use the same kernel and dependency shape as Submit.
   iree_status_t Record(uint32_t count, BindingMode bindings, Program program,
-                       iree_hal_command_buffer_t** out_recording,
-                       iree_hal_command_buffer_mode_t mode = 0,
-                       uint32_t timestamp_count = 0) {
+                       iree_hal_command_buffer_mode_t mode,
+                       uint32_t timestamp_count,
+                       iree_hal_command_buffer_t** out_recording) {
     *out_recording = nullptr;
     const auto& lane = lanes_[0];
     const bool transfers = program == Program::kTransfers;
@@ -825,6 +825,13 @@ class NativeQueue {
 
   uint64_t allocation_count() const { return allocation_count_.load(); }
 
+  iree_status_t AcquireQueue(iree_hal_queue_t** out_queue) {
+    iree_hal_queue_params_t params;
+    iree_hal_queue_params_initialize(&params);
+    return iree_hal_queue_acquire(iree_hal_queue_family(queue_), &params,
+                                  out_queue);
+  }
+
   // Host retirement supplies an upper bound on first GPU execution, not a
   // calibrated device timestamp. Complete joins this timepoint's callback.
   iree_status_t ObserveFirst(size_t producer,
@@ -912,6 +919,48 @@ class NativeQueue {
   // Total allocations since construction, sampled only outside timing.
   std::atomic<uint64_t> allocation_count_ = 0;
 };
+
+// The first acquired queue crosses the initial frontier extent. Slot reuse
+// retains that metadata. Time construction only; final release is untimed.
+static void BM_QueueAcquire(benchmark::State& state, bool reuse,
+                            amdf_queue_command_type_t command_type) {
+  NativeQueue device(command_type);
+  if (!device.Initialize(state)) {
+    return;
+  }
+  iree_hal_queue_t* queue = nullptr;
+  if (reuse) {
+    IREE_CHECK_OK(device.AcquireQueue(&queue));
+    iree_hal_queue_release(queue);
+  }
+  const uint64_t allocations_before = device.allocation_count();
+  for (auto _ : state) {
+    IREE_CHECK_OK(device.AcquireQueue(&queue));
+    state.PauseTiming();
+    iree_hal_queue_release(queue);
+    state.ResumeTiming();
+  }
+  state.SetItemsProcessed(state.iterations());
+  state.counters["host_allocations"] =
+      device.allocation_count() - allocations_before;
+}
+
+BENCHMARK_CAPTURE(BM_QueueAcquire, Pm4ExpandFrontiers, false,
+                  AMDF_QUEUE_COMMAND_TYPE_GPU_PM4)
+    ->Iterations(1)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_QueueAcquire, Pm4ReuseCoordinate, true,
+                  AMDF_QUEUE_COMMAND_TYPE_GPU_PM4)
+    ->Iterations(20)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_QueueAcquire, AqlExpandFrontiers, false,
+                  AMDF_QUEUE_COMMAND_TYPE_GPU_AQL)
+    ->Iterations(1)
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_QueueAcquire, AqlReuseCoordinate, true,
+                  AMDF_QUEUE_COMMAND_TYPE_GPU_AQL)
+    ->Iterations(20)
+    ->UseRealTime();
 
 static void BM_Dispatch(
     benchmark::State& state, Arguments arguments, Barriers barriers,
@@ -1259,13 +1308,13 @@ static void BM_Record(
   }
   const uint32_t count = state.range(0);
   iree_hal_command_buffer_t* recording = nullptr;
-  IREE_CHECK_OK(queue.Record(count, bindings, program, &recording));
+  IREE_CHECK_OK(queue.Record(count, bindings, program, 0, 0, &recording));
   IREE_CHECK_OK(queue.Execute(recording, bindings));
   IREE_CHECK_OK(queue.Complete(0));
   IREE_CHECK_OK(queue.CheckOutput(0));
   iree_hal_command_buffer_release(recording);
   for (auto _ : state) {
-    IREE_CHECK_OK(queue.Record(count, bindings, program, &recording));
+    IREE_CHECK_OK(queue.Record(count, bindings, program, 0, 0, &recording));
     state.PauseTiming();
     iree_hal_command_buffer_release(recording);
     state.ResumeTiming();
@@ -1337,11 +1386,12 @@ static void BM_Execute(
   }
   const uint32_t count = state.range(0);
   iree_hal_command_buffer_t* recording = nullptr;
-  IREE_CHECK_OK(queue.Record(
-      count, bindings, program, &recording,
-      capture == Capture::kNone
-          ? 0
-          : IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA));
+  IREE_CHECK_OK(
+      queue.Record(count, bindings, program,
+                   capture == Capture::kNone
+                       ? 0
+                       : IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_DISPATCH_METADATA,
+                   0, &recording));
   if (capture == Capture::kActive) {
     IREE_CHECK_OK(queue.BeginCapture());
   }
@@ -1440,8 +1490,8 @@ static void BM_RecordedTimestamps(benchmark::State& state,
   const uint32_t timestamp_count = state.range(1);
   iree_hal_command_buffer_t* recording = nullptr;
   const auto recording_begin = iree_time_now();
-  IREE_CHECK_OK(queue.Record(count, BindingMode::kTable, Program::kDispatch,
-                             &recording, 0, timestamp_count));
+  IREE_CHECK_OK(queue.Record(count, BindingMode::kTable, Program::kDispatch, 0,
+                             timestamp_count, &recording));
   state.counters["record_ns"] = iree_time_now() - recording_begin;
   if (command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL) {
     const auto* program =

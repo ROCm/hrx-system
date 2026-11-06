@@ -1447,8 +1447,9 @@ struct SignalStorage {
   explicit SignalStorage(
       iree_hal_amd_gpu_signal_pool_notification_t notification = {}) {
     iree_hal_amd_gpu_signal_pool_initialize(notification, &pool);
-    iree_hal_amd_gpu_signal_block_initialize(&pool, this, &value, 0x1000, 8, 0,
-                                             &signal, 1, 1, frontiers, &block);
+    iree_hal_amd_gpu_signal_block_initialize(&signal, 1, 1, frontiers, &block);
+    iree_hal_amd_gpu_signal_block_attach(&pool, this, &value, 0x1000, 8, 0,
+                                         &block);
   }
   ~SignalStorage() {
     if (block.pool) {

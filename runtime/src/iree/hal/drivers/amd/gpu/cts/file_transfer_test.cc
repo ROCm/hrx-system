@@ -509,9 +509,9 @@ class GpuNativeFileTest : public GpuNativeTest,
     }
   }
 
-  iree_status_t Open(const std::vector<uint32_t>& contents,
-                     iree_hal_file_t** out_file, bool direct = false,
-                     iree_async_proactor_t* proactor = nullptr) {
+  iree_status_t Open(const std::vector<uint32_t>& contents, bool direct,
+                     iree_async_proactor_t* proactor,
+                     iree_hal_file_t** out_file) {
     IREE_RETURN_IF_ERROR(iree_io_file_contents_write(
         path_.path_view(),
         iree_make_const_byte_span(contents.data(), contents.size() * 4),
@@ -639,7 +639,7 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
     expected[i] = uint32_t(i * 37 + 3);
   }
   Ref<iree_hal_file_t> file;
-  IREE_ASSERT_OK(Open(expected, file.out()));
+  IREE_ASSERT_OK(Open(expected, false, nullptr, file.out()));
   auto* semaphore = timeline_.get();
   uint64_t one = 1, two = 2, three = 3, four = 4, five = 5, six = 6;
   uint32_t sentinel = 0xCDCDCDCDu;
@@ -736,7 +736,7 @@ TEST_P(GpuNativeFileTest, PendingWriteRetiresCapturedBufferBeforeSignal) {
   ASSERT_NO_FATAL_FAILURE(Allocate(kCorrectnessLength + 256, buffer.out()));
   std::vector<uint32_t> expected(kCorrectnessLength / 4, 0);
   Ref<iree_hal_file_t> file;
-  IREE_ASSERT_OK(Open(expected, file.out()));
+  IREE_ASSERT_OK(Open(expected, false, nullptr, file.out()));
   Ref<iree_hal_semaphore_t> gate;
   CreateSemaphore(gate.out());
   auto* gate_handle = gate.get();
@@ -771,7 +771,7 @@ TEST_P(GpuNativeFileTest, TruncatedReadEndsCapturedUsesBeforeFailure) {
   ASSERT_NO_FATAL_FAILURE(Allocate(kCorrectnessLength, buffer.out()));
   Ref<iree_hal_file_t> file;
   std::vector<uint32_t> contents(kCorrectnessLength / 4, 0xABCDu);
-  IREE_ASSERT_OK(Open(contents, file.out()));
+  IREE_ASSERT_OK(Open(contents, false, nullptr, file.out()));
   Ref<iree_hal_semaphore_t> gate;
   CreateSemaphore(gate.out());
   auto* gate_handle = gate.get();
@@ -897,7 +897,7 @@ TEST_P(GpuNativeGlobalFileTest, NestedExecutableGlobalRoundTrip) {
     contents[i] = uint32_t(i * 23 + 7);
   }
   Ref<iree_hal_file_t> file;
-  IREE_ASSERT_OK(Open(contents, file.out()));
+  IREE_ASSERT_OK(Open(contents, false, nullptr, file.out()));
   auto* semaphore = timeline_.get();
   uint64_t one = 1, two = 2, three = 3, four = 4;
   IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &semaphore, &one},
@@ -941,7 +941,7 @@ void GpuNativeFileAccessTest::RoundTrip(bool direct) {
     expected[i] = uint32_t(i * 37 + 3);
   }
   Ref<iree_hal_file_t> file;
-  iree::Status file_status = Open(expected, file.out(), direct);
+  iree::Status file_status = Open(expected, direct, nullptr, file.out());
   if (file_status.code() == iree::StatusCode::kUnavailable) {
     GTEST_SKIP() << iree::hal::cts::FormatSkipStatus(file_status);
   }
@@ -1053,7 +1053,7 @@ TEST_P(GpuNativeFileProgressTest,
     expected[i] = uint32_t(i * 37 + 3);
   }
   Ref<iree_hal_file_t> file;
-  IREE_ASSERT_OK(Open(expected, file.out()));
+  IREE_ASSERT_OK(Open(expected, false, nullptr, file.out()));
   auto* small = timeline_.get();
   uint64_t one = 1, two = 2, three = 3;
   IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &small, &one}, file, 0,
@@ -1130,7 +1130,7 @@ TEST_P(GpuNativeFileTest, ConcurrentRangesSurviveRingWrapAndTrim) {
     expected[i] = uint32_t(i * 37 + 3);
   }
   Ref<iree_hal_file_t> file;
-  IREE_ASSERT_OK(Open(expected, file.out()));
+  IREE_ASSERT_OK(Open(expected, false, nullptr, file.out()));
   std::array<Ref<iree_hal_semaphore_t>, kLaneCount> completions;
   std::array<iree_hal_semaphore_t*, kLaneCount> semaphores;
   std::array<uint64_t, kLaneCount> values;
@@ -1459,8 +1459,8 @@ TEST_P(GpuUnregisteredFileOwnerTest, SharesBackingWithRegisteredDeviceOwner) {
     expected[i] = uint32_t(i * 37 + 3);
   }
   Ref<iree_hal_file_t> primary_file, extra_file;
-  IREE_ASSERT_OK(Open(expected, primary_file.out()));
-  IREE_ASSERT_OK(Open(expected, extra_file.out(), false, extra_proactor_));
+  IREE_ASSERT_OK(Open(expected, false, nullptr, primary_file.out()));
+  IREE_ASSERT_OK(Open(expected, false, extra_proactor_, extra_file.out()));
   auto* timeline = timeline_.get();
   uint64_t one = 1, two = 2, three = 3;
   // Provision staging through the device owner before the independent file
@@ -1501,8 +1501,8 @@ TEST_P(GpuSharedFileStagingTest,
     expected[i] = uint32_t(i * 37 + 3);
   }
   Ref<iree_hal_file_t> primary_file, extra_file;
-  IREE_ASSERT_OK(Open(expected, primary_file.out()));
-  IREE_ASSERT_OK(Open(expected, extra_file.out(), false, extra_proactor_));
+  IREE_ASSERT_OK(Open(expected, false, nullptr, primary_file.out()));
+  IREE_ASSERT_OK(Open(expected, false, extra_proactor_, extra_file.out()));
   ASSERT_NE(iree_hal_file_async_handle(primary_file)->proactor,
             iree_hal_file_async_handle(extra_file)->proactor);
   // Provision the oracle before measuring staging. queue_download grows the
@@ -1661,8 +1661,8 @@ TEST_P(GpuSharedVirtualFileStagingTest,
     expected[i] = uint32_t(i * 37 + 3);
   }
   Ref<iree_hal_file_t> primary_file, extra_file;
-  IREE_ASSERT_OK(Open(expected, primary_file.out()));
-  IREE_ASSERT_OK(Open(expected, extra_file.out(), false, extra_proactor_));
+  IREE_ASSERT_OK(Open(expected, false, nullptr, primary_file.out()));
+  IREE_ASSERT_OK(Open(expected, false, extra_proactor_, extra_file.out()));
   auto* primary = timeline_.get();
   uint64_t one = 1, two = 2;
   IREE_ASSERT_OK(iree_hal_queue_read(queues_[0], {}, {1, &primary, &one},
@@ -1785,7 +1785,7 @@ TEST_P(GpuNativeRegisteredFileProgressTest,
 
   std::vector<uint32_t> expected(kCorrectnessLength / 4, 0);
   Ref<iree_hal_file_t> file;
-  IREE_ASSERT_OK(Open(expected, file.out()));
+  IREE_ASSERT_OK(Open(expected, false, nullptr, file.out()));
   IREE_ASSERT_OK(iree_hal_queue_write(
       queues_[0], {1, &timeline, &three}, {1, &timeline, &four}, buffer,
       kBufferOffset, file, 0, kCorrectnessLength, &barriers_, 0));
@@ -1809,7 +1809,7 @@ TEST_P(GpuNativeFileProgressTest,
     expected[i] = uint32_t(i * 37 + 3);
   }
   Ref<iree_hal_file_t> file;
-  IREE_ASSERT_OK(Open(expected, file.out()));
+  IREE_ASSERT_OK(Open(expected, false, nullptr, file.out()));
   auto* semaphore = timeline_.get();
   auto read_update_write = [&](uint64_t before) {
     uint64_t read = before + 1, dispatch = before + 2, write = before + 3;

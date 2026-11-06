@@ -53,6 +53,17 @@ struct iree_hal_amd_gpu_pm4_growth_t {
   };
 };
 
+void iree_hal_amd_gpu_pm4_growth_process_frontiers(
+    iree_hal_amd_gpu_pm4_growth_context_t* context,
+    iree_hal_amd_gpu_frontier_request_t* request) {
+  if (request->phase == IREE_HAL_AMD_GPU_FRONTIER_BEGIN) {
+    context->queue_count = request->queue_count;
+  }
+  iree_hal_amd_gpu_frontier_request_process(
+      context->signal_cache,
+      context->signals ? context->signals->backing.signals : NULL, request);
+}
+
 static void iree_hal_amd_gpu_pm4_growth_join(
     iree_hal_amd_gpu_pm4_growth_t* growth) {
   if (iree_atomic_ref_count_dec(&growth->ref_count) == 1) {
@@ -292,11 +303,6 @@ iree_status_t iree_hal_amd_gpu_pm4_growth_end(
         status = iree_hal_amd_gpu_pm4_signal_storage_initialize(
             context->context, &context->signal_cache->pool,
             growth->backing.signals);
-      }
-      if (iree_status_is_ok(status)) {
-        status = iree_hal_amd_gpu_signal_block_reserve_frontiers(
-            &growth->backing.signals->block, context->queue_count,
-            growth->backing.signals->host_allocator);
       }
       if (iree_status_is_ok(status)) {
         out_result->signals = growth->backing.signals;

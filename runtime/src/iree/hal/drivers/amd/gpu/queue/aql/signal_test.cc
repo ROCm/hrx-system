@@ -29,9 +29,10 @@ TEST(AqlSignalTest, InitializesNativeAbiAndRecyclesOnlyAfterReadersRetire) {
       .mailbox_address = 0x345678900000,
       .interrupt_context = 0x123456,
   };
-  iree_hal_amd_gpu_aql_signal_block_initialize(
-      &pool, &pool, &event, native.data(), kBaseAddress, metadata.data(),
-      native.size(), 2, frontiers.data(), &block);
+  iree_hal_amd_gpu_signal_block_initialize(metadata.data(), native.size(), 2,
+                                           frontiers.data(), &block);
+  iree_hal_amd_gpu_aql_signal_block_attach(&pool, &pool, &event, native.data(),
+                                           kBaseAddress, &block);
   for (const auto& signal : native) {
     const iree_hal_amd_gpu_aql_signal_t expected = {
         .kind = 1,
@@ -92,8 +93,9 @@ TEST(AqlSignalTest, SemaphoreCacheDoesNotOwnTheLastDependentReader) {
   iree_hal_amd_gpu_signal_block_t block;
   iree_hal_amd_gpu_signal_pool_initialize({}, &pool);
   const amdf_gpu_event_info_t event = {};
-  iree_hal_amd_gpu_aql_signal_block_initialize(
-      &pool, &pool, &event, &native, 0x4000, &metadata, 1, 1, frontier, &block);
+  iree_hal_amd_gpu_signal_block_initialize(&metadata, 1, 1, frontier, &block);
+  iree_hal_amd_gpu_aql_signal_block_attach(&pool, &pool, &event, &native,
+                                           0x4000, &block);
   auto* producer = iree_hal_amd_gpu_signal_pool_try_acquire(&pool, 1);
   const uint64_t epoch = 7;
   iree_hal_amd_gpu_signal_publish_frontier(producer, &epoch);
@@ -153,15 +155,20 @@ TEST(AqlSignalTest, AttachesAcquiredBackingWithExactDescriptorOperands) {
                                   IREE_HAL_HOST_MEMORY_PROPERTY_WRITE_BACK),
           },
       .capacity = 2,
-      .queue_count = 2,
-      .signals = signals.data(),
       .frontiers = reinterpret_cast<iree_hal_amd_gpu_signal_frontiers_t*>(
           frontiers.data()),
   };
+  iree_hal_amd_gpu_signal_block_initialize(signals.data(), signals.size(), 2,
+                                           frontiers.data(), &storage.block);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_signal_block_reserve_frontiers(
+      &storage.block, 8, iree_allocator_system()));
+  auto* expanded = iree_hal_amd_gpu_signal_block_frontiers(&storage.block);
   iree_hal_amd_gpu_signal_pool_t pool;
   iree_hal_amd_gpu_signal_pool_initialize({}, &pool);
   IREE_ASSERT_OK(iree_hal_amd_gpu_aql_signal_storage_initialize(&context, &pool,
                                                                 &storage));
+  EXPECT_EQ(iree_hal_amd_gpu_signal_block_frontiers(&storage.block), expanded);
+  EXPECT_EQ(expanded->queue_count, 8u);
   auto* first = iree_hal_amd_gpu_signal_pool_try_acquire(&pool, 1);
   auto* second = iree_hal_amd_gpu_signal_pool_try_acquire(&pool, 1);
   EXPECT_EQ(first->block->domain, &context);
@@ -180,6 +187,8 @@ TEST(AqlSignalTest, AttachesAcquiredBackingWithExactDescriptorOperands) {
   iree_hal_amd_gpu_signal_release(second);
   iree_hal_amd_gpu_signal_block_deinitialize(&storage.block);
   iree_hal_amd_gpu_signal_pool_deinitialize(&pool);
+  iree_hal_amd_gpu_signal_frontiers_free(expanded, storage.frontiers,
+                                         iree_allocator_system());
 }
 
 }  // namespace

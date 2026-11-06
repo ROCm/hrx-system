@@ -133,10 +133,12 @@ void iree_hal_amd_gpu_pm4_queue_notify_failure(iree_hal_queue_t* queue);
 // execution or backing release. The parent remains live through publication.
 void iree_hal_amd_gpu_pm4_queue_trim(iree_hal_queue_t* queue);
 
-// Extends host dependency metadata under exact publication ownership. The cold
-// caller waits only for this typed metadata operation; native work and backing
-// acquisition can remain outstanding. notification belongs to the device and
-// stays live through callback tails. Failure leaves existing queues usable.
+// Extends host dependency metadata. The lifecycle caller serializes requests
+// for this queue, owns its lifetime, and prepares memory outside publication.
+// Typed publisher turns copy/install the prepared tables without allocating.
+// Native work and backing acquisition may remain outstanding. notification
+// belongs to the device and stays live through callback tails. Partial growth
+// leaves existing queues usable; new coordinates are admitted only on success.
 iree_status_t iree_hal_amd_gpu_pm4_queue_reserve_frontiers(
     iree_hal_queue_t* queue, uint32_t queue_count,
     iree_notification_t* notification);

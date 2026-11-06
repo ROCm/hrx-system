@@ -79,9 +79,10 @@ class SemaphoreTest : public ::testing::Test {
         iree_async_proactor_options_default(), iree_allocator_system(),
         &proactor_));
     iree_hal_amd_gpu_signal_pool_initialize({}, &pool_);
-    iree_hal_amd_gpu_signal_block_initialize(
-        &pool_, this, values_.data(), 0x1000, 8, 0, signals_.data(),
-        signals_.size(), 3, frontiers_.data(), &block_);
+    iree_hal_amd_gpu_signal_block_initialize(signals_.data(), signals_.size(),
+                                             3, frontiers_.data(), &block_);
+    iree_hal_amd_gpu_signal_block_attach(&pool_, this, values_.data(), 0x1000,
+                                         8, 0, &block_);
   }
   void TearDown() override {
     for (auto* semaphore : semaphores_) {
@@ -549,9 +550,10 @@ TEST_F(SemaphoreTest, ForeignQueriesRaceCompletionAndImmediateBackingReuse) {
         iree_hal_amd_gpu_signal_block_try_deinitialize(&block_);
     EXPECT_TRUE(detached);
     if (detached) {
-      iree_hal_amd_gpu_signal_block_initialize(
-          &pool_, this, values_.data(), 0x1000, 8, 0, signals_.data(),
-          signals_.size(), 3, frontiers_.data(), &block_);
+      iree_hal_amd_gpu_signal_block_initialize(signals_.data(), signals_.size(),
+                                               3, frontiers_.data(), &block_);
+      iree_hal_amd_gpu_signal_block_attach(&pool_, this, values_.data(), 0x1000,
+                                           8, 0, &block_);
     }
     recycled.arrive_and_wait();
   }

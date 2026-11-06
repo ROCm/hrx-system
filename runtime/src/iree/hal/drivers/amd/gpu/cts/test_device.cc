@@ -133,9 +133,8 @@ iree_status_t DeviceAllocator::Control(void* self_pointer,
   const bool had_pointer = (command == IREE_ALLOCATOR_COMMAND_FREE ||
                             command == IREE_ALLOCATOR_COMMAND_REALLOC) &&
                            *inout_pointer != nullptr;
-  auto system = iree_allocator_system();
   iree_status_t status =
-      system.ctl(system.self, command, params, inout_pointer);
+      self->backing.ctl(self->backing.self, command, params, inout_pointer);
   if (!iree_status_is_ok(status)) {
     return status;
   }
