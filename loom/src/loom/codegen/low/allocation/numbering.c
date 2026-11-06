@@ -322,6 +322,14 @@ static void loom_low_numbering_constrain_blocks(
                                     entry->location_kind, entry->location_base,
                                     argument->location_count);
   }
+  for (iree_host_size_t i = 0; i < context->boundary_anchor_count; ++i) {
+    const loom_low_allocation_numbering_anchor_t* anchor =
+        &context->boundary_anchors[i];
+    loom_low_numbering_anchor_range(
+        state, anchor->location.descriptor_reg_class_id,
+        anchor->location.location_kind, anchor->location.location_base,
+        anchor->unit_count);
+  }
   for (iree_host_size_t i = 0; i < target->reserved_range_count; ++i) {
     const loom_low_allocation_resolved_reserved_range_t* range =
         &target->reserved_ranges[i];

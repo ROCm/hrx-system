@@ -22,6 +22,15 @@
 extern "C" {
 #endif
 
+// External physical coordinates retained by boundary-move construction before
+// identity elimination and cycle sequencing lose the ABI endpoint identity.
+typedef struct loom_low_allocation_numbering_anchor_t {
+  // Fixed ABI coordinate, independent of the value's local assignment.
+  loom_low_allocation_abi_location_t location;
+  // Number of allocation units in the boundary value.
+  uint32_t unit_count;
+} loom_low_allocation_numbering_anchor_t;
+
 // Mutable allocation facts before publishing the final table. Storage
 // assignment and move sequencing are complete; numbering changes only
 // physical coordinates, never interference, move topology or resource bounds.
@@ -38,6 +47,10 @@ typedef struct loom_low_allocation_numbering_context_t {
   const loom_low_allocation_abi_location_t* entry_locations;
   // Number of entries in |entry_locations|.
   iree_host_size_t entry_location_count;
+  // Exact outgoing/incoming call and return coordinates, including identities.
+  const loom_low_allocation_numbering_anchor_t* boundary_anchors;
+  // Number of producer-retained ranges in |boundary_anchors|.
+  iree_host_size_t boundary_anchor_count;
   // Retained implicit physical uses anchoring architectural locations.
   const loom_low_allocation_unit_liveness_t* unit_liveness;
   // Completed assignments and ordinal lookup, updated in place.

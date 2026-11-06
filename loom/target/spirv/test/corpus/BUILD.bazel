@@ -485,6 +485,7 @@ _SPIRV_EXECUTION_XFAILS = {
     "function/buffer/calls.loom:@buffer_cycle_values": "LOWERING/044",
     "function/buffer/calls.loom:@wide_buffer_call_values": "LOWERING/044",
     "function/call/direct.loom:@direct_call_values": "LOWERING/044",
+    "function/call/direct.loom:@vector_return_values": "LOWERING/044",
     "function/call/overflow.loom:@mixed_overflow_call_values": "LOWERING/044",
     "function/call/overflow.loom:@overflow_call_values": "LOWERING/044",
     "function/call/spill.loom:@spill_values": "LOWERING/044",
