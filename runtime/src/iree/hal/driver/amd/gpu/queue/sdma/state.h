@@ -113,14 +113,14 @@ struct iree_hal_amd_gpu_sdma_queue_t {
   // Returned signal capacity can resume demand before native growth completes.
   struct {
     // Metadata-only entry serialized with signal acquisition and attachment.
-    iree_hal_amd_gpu_sdma_submission_t submission;
+    iree_hal_amd_gpu_sdma_metadata_t metadata;
     // One while this exact entry is queued or being consumed.
     iree_atomic_int32_t pending;
   } signal_reuse;
   // Coalesced trim command owns its entry until its publication turn ends.
   struct {
     // Metadata-only publication entry; it emits no native span.
-    iree_hal_amd_gpu_sdma_submission_t submission;
+    iree_hal_amd_gpu_sdma_metadata_t metadata;
     // One while this exact entry is linked or executing.
     iree_atomic_int32_t pending;
   } trim;

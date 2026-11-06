@@ -14,7 +14,7 @@ struct iree_hal_amd_gpu_sdma_growth_t {
   // Native completion and an enrolled reuse notification own separate uses.
   iree_atomic_ref_count_t ref_count;
   // Metadata-only result continuation under the same native publisher.
-  iree_hal_amd_gpu_sdma_submission_t submission;
+  iree_hal_amd_gpu_sdma_metadata_t metadata;
   // Exact queue, retained by cold host-owner accounting.
   iree_hal_amd_gpu_sdma_queue_t* queue;
   // Pool storage returned after the result and entire waiting cohort detach.
@@ -26,7 +26,7 @@ struct iree_hal_amd_gpu_sdma_growth_t {
   // Retained independently of invocations resumed by an availability hint.
   iree_hal_command_buffer_t* recording;
   // Coalesced program-capacity notification, independent of native completion.
-  iree_hal_amd_gpu_sdma_submission_t reuse_submission;
+  iree_hal_amd_gpu_sdma_metadata_t reuse_metadata;
   // One while a program reuse hint owns a reference and publication entry.
   iree_atomic_int32_t reuse_pending;
   // First parked operation; every entry retains its publication reference.
@@ -75,26 +75,19 @@ static bool iree_hal_amd_gpu_sdma_growth_resume(
   return growth->first != NULL;
 }
 
-static bool iree_hal_amd_gpu_sdma_program_reuse_prepare(void* user_data,
-                                                        uint64_t position) {
+static void iree_hal_amd_gpu_sdma_program_reuse_process(void* user_data,
+                                                        amdf_status_t status) {
   iree_hal_amd_gpu_sdma_growth_t* growth = user_data;
   if (!growth->installed) {
     iree_hal_amd_gpu_program_grow_cancel_reuse(&growth->program);
     if (iree_hal_amd_gpu_sdma_growth_resume(growth, iree_ok_status())) {
-      iree_hal_amd_gpu_sdma_native_queue_defer(growth->queue->native,
-                                               &growth->reuse_submission);
-      return false;
+      iree_hal_amd_gpu_sdma_native_queue_defer_metadata(
+          growth->queue->native, &growth->reuse_metadata);
+      return;
     }
   }
   iree_atomic_store(&growth->reuse_pending, 0, iree_memory_order_release);
   iree_hal_amd_gpu_sdma_growth_release(growth);
-  return false;
-}
-
-static void iree_hal_amd_gpu_sdma_program_reuse_rejected(
-    void* user_data, amdf_status_t status,
-    iree_hal_amd_gpu_sdma_retirement_t retirement) {
-  iree_hal_amd_gpu_sdma_program_reuse_prepare(user_data, 0);
 }
 
 static void iree_hal_amd_gpu_sdma_program_available(void* user_data) {
@@ -102,13 +95,13 @@ static void iree_hal_amd_gpu_sdma_program_available(void* user_data) {
   if (!iree_atomic_exchange(&growth->reuse_pending, 1,
                             iree_memory_order_acq_rel)) {
     iree_atomic_ref_count_inc(&growth->ref_count);
-    iree_hal_amd_gpu_sdma_native_queue_defer(growth->queue->native,
-                                             &growth->reuse_submission);
+    iree_hal_amd_gpu_sdma_native_queue_defer_metadata(growth->queue->native,
+                                                      &growth->reuse_metadata);
   }
 }
 
-static bool iree_hal_amd_gpu_sdma_signal_reuse_prepare(void* user_data,
-                                                       uint64_t position) {
+static void iree_hal_amd_gpu_sdma_signal_reuse_process(void* user_data,
+                                                       amdf_status_t status) {
   iree_hal_amd_gpu_sdma_queue_t* queue = user_data;
   if (queue->signal_growth && iree_hal_amd_gpu_signal_pool_has_available(
                                   &queue->options.signals->pool)) {
@@ -116,19 +109,12 @@ static bool iree_hal_amd_gpu_sdma_signal_reuse_prepare(void* user_data,
                       iree_memory_order_release);
     if (iree_hal_amd_gpu_sdma_growth_resume(queue->signal_growth,
                                             iree_ok_status())) {
-      iree_hal_amd_gpu_sdma_native_queue_defer(queue->native,
-                                               &queue->signal_reuse.submission);
-      return false;
+      iree_hal_amd_gpu_sdma_native_queue_defer_metadata(
+          queue->native, &queue->signal_reuse.metadata);
+      return;
     }
   }
   iree_atomic_store(&queue->signal_reuse.pending, 0, iree_memory_order_release);
-  return false;
-}
-
-static void iree_hal_amd_gpu_sdma_signal_reuse_rejected(
-    void* user_data, amdf_status_t status,
-    iree_hal_amd_gpu_sdma_retirement_t retirement) {
-  iree_hal_amd_gpu_sdma_signal_reuse_prepare(user_data, 0);
 }
 
 void iree_hal_amd_gpu_sdma_growth_signals_available(
@@ -137,13 +123,11 @@ void iree_hal_amd_gpu_sdma_growth_signals_available(
                        iree_memory_order_acquire) &&
       !iree_atomic_exchange(&queue->signal_reuse.pending, 1,
                             iree_memory_order_acq_rel)) {
-    queue->signal_reuse.submission = (iree_hal_amd_gpu_sdma_submission_t){
-        .prepare = iree_hal_amd_gpu_sdma_signal_reuse_prepare,
-        .completion = {.notify = iree_hal_amd_gpu_sdma_signal_reuse_rejected,
-                       .user_data = queue},
+    queue->signal_reuse.metadata = (iree_hal_amd_gpu_sdma_metadata_t){
+        .process = iree_hal_amd_gpu_sdma_signal_reuse_process,
         .user_data = queue};
-    iree_hal_amd_gpu_sdma_native_queue_defer(queue->native,
-                                             &queue->signal_reuse.submission);
+    iree_hal_amd_gpu_sdma_native_queue_defer_metadata(
+        queue->native, &queue->signal_reuse.metadata);
   }
 }
 
@@ -197,31 +181,23 @@ static void iree_hal_amd_gpu_sdma_growth_install(
 
 // Metadata processing is bounded independently of the number of waiting calls.
 // Native acquisition never publishes GPU work or walks the waiting cohort.
-static bool iree_hal_amd_gpu_sdma_growth_prepare(void* user_data,
-                                                 uint64_t position) {
+static void iree_hal_amd_gpu_sdma_growth_process(void* user_data,
+                                                 amdf_status_t status) {
   iree_hal_amd_gpu_sdma_growth_t* growth = user_data;
   iree_hal_amd_gpu_sdma_queue_t* queue = growth->queue;
+  growth->status = iree_status_join(
+      growth->status, IREE_HAL_AMD_STATUS_FROM_AMDF(status, "SDMA growth"));
   if (!growth->installed) {
     iree_hal_amd_gpu_sdma_growth_install(growth);
   }
   if (iree_hal_amd_gpu_sdma_growth_resume(growth, growth->status)) {
-    iree_hal_amd_gpu_sdma_native_queue_defer(queue->native,
-                                             &growth->submission);
+    iree_hal_amd_gpu_sdma_native_queue_defer_metadata(queue->native,
+                                                      &growth->metadata);
   } else {
     iree_status_free(growth->status);
     growth->status = iree_ok_status();
     iree_hal_amd_gpu_sdma_growth_release(growth);
   }
-  return false;
-}
-
-static void iree_hal_amd_gpu_sdma_growth_rejected(
-    void* user_data, amdf_status_t status,
-    iree_hal_amd_gpu_sdma_retirement_t retirement) {
-  iree_hal_amd_gpu_sdma_growth_t* growth = user_data;
-  growth->status = iree_status_join(
-      growth->status, IREE_HAL_AMD_STATUS_FROM_AMDF(status, "SDMA growth"));
-  iree_hal_amd_gpu_sdma_growth_prepare(growth, 0);
 }
 
 static void iree_hal_amd_gpu_sdma_growth_ready(void* user_data,
@@ -229,7 +205,8 @@ static void iree_hal_amd_gpu_sdma_growth_ready(void* user_data,
   iree_hal_amd_gpu_sdma_growth_t* growth = user_data;
   iree_hal_amd_gpu_sdma_queue_t* queue = growth->queue;
   growth->status = status;
-  iree_hal_amd_gpu_sdma_native_queue_defer(queue->native, &growth->submission);
+  iree_hal_amd_gpu_sdma_native_queue_defer_metadata(queue->native,
+                                                    &growth->metadata);
   // No growth access follows handoff: the publisher may already have freed it.
   iree_hal_amd_gpu_sdma_host_end(&queue->base);
 }
@@ -262,23 +239,11 @@ iree_status_t iree_hal_amd_gpu_sdma_growth_begin(
       &queue->captures, sizeof(*growth), &storage));
   growth = (void*)storage.data;
   *growth = (iree_hal_amd_gpu_sdma_growth_t){
-      .submission =
-          {
-              .prepare = iree_hal_amd_gpu_sdma_growth_prepare,
-              .completion =
-                  {
-                      .notify = iree_hal_amd_gpu_sdma_growth_rejected,
-                      .user_data = growth,
-                  },
-              .user_data = growth,
-          },
+      .metadata = {.process = iree_hal_amd_gpu_sdma_growth_process,
+                   .user_data = growth},
       .queue = queue,
-      .reuse_submission =
-          {.prepare = iree_hal_amd_gpu_sdma_program_reuse_prepare,
-           .completion = {.notify =
-                              iree_hal_amd_gpu_sdma_program_reuse_rejected,
-                          .user_data = growth},
-           .user_data = growth},
+      .reuse_metadata = {.process = iree_hal_amd_gpu_sdma_program_reuse_process,
+                         .user_data = growth},
       .allocation_size = storage.data_length,
       .first = operation,
       .last = operation,

@@ -54,6 +54,31 @@ amdf_queue_publication_modes_t
 iree_hal_amd_gpu_sdma_native_queue_publication_modes(
     const amdf_queue_family_info_t* family);
 
+typedef enum iree_hal_amd_gpu_sdma_entry_kind_e {
+  IREE_HAL_AMD_GPU_SDMA_ENTRY_SUBMISSION = 0,
+  IREE_HAL_AMD_GPU_SDMA_ENTRY_METADATA,
+} iree_hal_amd_gpu_sdma_entry_kind_t;
+
+// Commands and metadata share one publisher, but only commands consume native
+// credit. Metadata remains eligible while command publication is parked.
+typedef struct iree_hal_amd_gpu_sdma_entry_t {
+  // Detached before the publisher accesses the enclosing owner.
+  iree_hal_amd_gpu_publication_entry_t publication;
+  // Exact enclosing record and its capacity requirements.
+  iree_hal_amd_gpu_sdma_entry_kind_t kind;
+} iree_hal_amd_gpu_sdma_entry_t;
+
+// Host metadata mutation serialized with native command preparation. The
+// callback runs even after native failure and may free its enclosing owner.
+typedef struct iree_hal_amd_gpu_sdma_metadata_t {
+  // Publisher ownership, initialized by defer_metadata before handoff.
+  iree_hal_amd_gpu_sdma_entry_t entry;
+  // Bounded mutation or cleanup; performs no native calls or payload work.
+  void (*process)(void* user_data, amdf_status_t status);
+  // Borrowed callback owner, live until processing releases it.
+  void* user_data;
+} iree_hal_amd_gpu_sdma_metadata_t;
+
 // One ready native span with resolved addresses, dependencies, and cache work.
 // The caller owns the record and immutable commands until acceptance; the
 // copied completion retains referenced operands through retirement. This bound
@@ -62,7 +87,7 @@ iree_hal_amd_gpu_sdma_native_queue_publication_modes(
 // as capacity returns.
 typedef struct iree_hal_amd_gpu_sdma_submission_t {
   // Intrusive publication ownership, reusable after acceptance detaches it.
-  iree_hal_amd_gpu_publication_entry_t entry;
+  iree_hal_amd_gpu_sdma_entry_t entry;
   // Optional preparation under this queue's exclusive publisher. position is
   // the zero-based native retirement slot sequence. True seals words and
   // completion for admission, including capacity retries. False transfers the
@@ -117,11 +142,11 @@ void iree_hal_amd_gpu_sdma_native_queue_fail(
     iree_hal_amd_gpu_sdma_native_queue_t* queue, amdf_status_t status);
 
 // Publishes one admitted command span without allocation. An idle caller
-// publishes one entry immediately; native capacity parks the prepared span on
-// the existing publisher. Acceptance and completion callbacks may precede
-// return; the caller joins its submitting borrow before reusing the record.
-// Native retirement and event packets are appended after the caller's command
-// span.
+// publishes one entry immediately; native capacity parks the span in an ordered
+// cohort outside the ready FIFO. Acceptance and completion callbacks may
+// precede return; the caller joins its submitting borrow before reusing the
+// record. Native retirement and event packets are appended after the caller's
+// command span.
 void iree_hal_amd_gpu_sdma_native_queue_submit(
     iree_hal_amd_gpu_sdma_native_queue_t* queue,
     iree_hal_amd_gpu_sdma_submission_t* submission);
@@ -132,6 +157,13 @@ void iree_hal_amd_gpu_sdma_native_queue_submit(
 void iree_hal_amd_gpu_sdma_native_queue_defer(
     iree_hal_amd_gpu_sdma_native_queue_t* queue,
     iree_hal_amd_gpu_sdma_submission_t* submission);
+
+// Enqueues metadata for the same exclusive publisher without requiring native
+// credit or running it on the calling thread. A full ring cannot block queue
+// membership, trimming, or the installation of acquired backing.
+void iree_hal_amd_gpu_sdma_native_queue_defer_metadata(
+    iree_hal_amd_gpu_sdma_native_queue_t* queue,
+    iree_hal_amd_gpu_sdma_metadata_t* metadata);
 
 iree_hal_amd_gpu_publication_source_t
 iree_hal_amd_gpu_sdma_native_queue_publication_source(

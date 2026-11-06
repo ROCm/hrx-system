@@ -675,46 +675,36 @@ static iree_status_t iree_hal_amd_gpu_sdma_queue_set_profile(
   return iree_ok_status();
 }
 
-static bool iree_hal_amd_gpu_sdma_trim_prepare(void* user_data,
-                                               uint64_t position) {
+static void iree_hal_amd_gpu_sdma_trim_process(void* user_data,
+                                               amdf_status_t status) {
   iree_hal_amd_gpu_sdma_queue_t* queue = user_data;
   iree_hal_amd_gpu_capture_pool_trim(&queue->captures);
   iree_hal_amd_gpu_signal_cache_trim(queue->context, 1, queue->options.signals);
   iree_atomic_store(&queue->trim.pending, 0, iree_memory_order_release);
-  return false;
-}
-
-static void iree_hal_amd_gpu_sdma_trim_rejected(
-    void* user_data, amdf_status_t status,
-    iree_hal_amd_gpu_sdma_retirement_t retirement) {
-  iree_hal_amd_gpu_sdma_trim_prepare(user_data, 0);
 }
 
 static void iree_hal_amd_gpu_sdma_queue_trim(iree_hal_queue_t* base) {
   iree_hal_amd_gpu_sdma_queue_t* queue = (void*)base;
   if (!iree_atomic_exchange(&queue->trim.pending, 1,
                             iree_memory_order_acq_rel)) {
-    queue->trim.submission = (iree_hal_amd_gpu_sdma_submission_t){
-        .prepare = iree_hal_amd_gpu_sdma_trim_prepare,
-        .completion = {.notify = iree_hal_amd_gpu_sdma_trim_rejected,
-                       .user_data = queue},
-        .user_data = queue};
-    iree_hal_amd_gpu_sdma_native_queue_defer(queue->native,
-                                             &queue->trim.submission);
+    queue->trim.metadata = (iree_hal_amd_gpu_sdma_metadata_t){
+        .process = iree_hal_amd_gpu_sdma_trim_process, .user_data = queue};
+    iree_hal_amd_gpu_sdma_native_queue_defer_metadata(queue->native,
+                                                      &queue->trim.metadata);
   }
 }
 
 typedef struct iree_hal_amd_gpu_sdma_frontiers_t {
   // Metadata-only publication entry, borrowed until the device notification.
-  iree_hal_amd_gpu_sdma_submission_t submission;
+  iree_hal_amd_gpu_sdma_metadata_t metadata;
   // Exact queue borrowed by the serialized membership caller.
   iree_hal_amd_gpu_sdma_queue_t* queue;
   // Shared caller-owned vector/block expansion state.
   iree_hal_amd_gpu_frontier_request_t request;
 } iree_hal_amd_gpu_sdma_frontiers_t;
 
-static bool iree_hal_amd_gpu_sdma_frontiers_prepare(void* user_data,
-                                                    uint64_t position) {
+static void iree_hal_amd_gpu_sdma_frontiers_process(void* user_data,
+                                                    amdf_status_t status) {
   iree_hal_amd_gpu_sdma_frontiers_t* entry = user_data;
   iree_hal_amd_gpu_sdma_queue_t* queue = entry->queue;
   iree_hal_amd_gpu_frontier_request_t* request = &entry->request;
@@ -731,24 +721,14 @@ static bool iree_hal_amd_gpu_sdma_frontiers_prepare(void* user_data,
   iree_hal_amd_gpu_frontier_request_process(
       queue->options.signals,
       iree_hal_amd_gpu_sdma_growth_pending_signals(queue), request);
-  return false;
-}
-
-static void iree_hal_amd_gpu_sdma_frontiers_rejected(
-    void* user_data, amdf_status_t status,
-    iree_hal_amd_gpu_sdma_retirement_t retirement) {
-  iree_hal_amd_gpu_sdma_frontiers_prepare(user_data, 0);
 }
 
 static void iree_hal_amd_gpu_sdma_frontiers_enqueue(void* user_data) {
   iree_hal_amd_gpu_sdma_frontiers_t* entry = user_data;
-  entry->submission = (iree_hal_amd_gpu_sdma_submission_t){
-      .prepare = iree_hal_amd_gpu_sdma_frontiers_prepare,
-      .completion = {.notify = iree_hal_amd_gpu_sdma_frontiers_rejected,
-                     .user_data = entry},
-      .user_data = entry};
-  iree_hal_amd_gpu_sdma_native_queue_defer(entry->queue->native,
-                                           &entry->submission);
+  entry->metadata = (iree_hal_amd_gpu_sdma_metadata_t){
+      .process = iree_hal_amd_gpu_sdma_frontiers_process, .user_data = entry};
+  iree_hal_amd_gpu_sdma_native_queue_defer_metadata(entry->queue->native,
+                                                    &entry->metadata);
 }
 
 static iree_status_t iree_hal_amd_gpu_sdma_queue_reserve_frontiers(

@@ -556,6 +556,49 @@ TEST_P(QueueTest, HostTransferWrapsNativeSlotsAndRetainsBorrowedBytes) {
   EXPECT_GT(commands_.size(), 128u);
 }
 
+TEST_P(QueueTest, MembershipGrowthDoesNotWaitForFullNativeSlots) {
+  std::vector<uint8_t> source(20003);
+  for (size_t i = 0; i < source.size(); ++i) {
+    source[i] = uint8_t(i * 29 + 11);
+  }
+  auto completed = Semaphore(true);
+  iree_hal_semaphore_t* output = completed;
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_upload(queue_, {}, Point(&output, &one),
+                                       source.data(), buffer_, 3, source.size(),
+                                       nullptr));
+  Publish();
+  EXPECT_EQ(commands_.size(), 64u);
+  EXPECT_EQ(retired_, 0u);
+  // Run the actual publication worker while native retirement remains held.
+  // Membership's caller allocates and installs signal tables in multiple turns.
+  iree_notification_deinitialize(&publication_.notification);
+  const iree_hal_amd_gpu_publication_source_t sources[] = {
+      lifecycle().publication_source(queue_),
+      iree_hal_amd_gpu_allocation_context_publication_source(&allocations_),
+  };
+  IREE_ASSERT_OK(iree_hal_amd_gpu_publication_initialize(
+      IREE_ARRAYSIZE(sources), sources, {}, allocator_, &publication_));
+  iree_notification_t notification;
+  iree_notification_initialize(&notification);
+  IREE_EXPECT_OK(lifecycle().reserve_frontiers(queue_, 4, &notification));
+  iree_notification_deinitialize(&notification);
+  iree_hal_amd_gpu_publication_deinitialize(&publication_);
+  publication_ = {};
+  iree_notification_initialize(&publication_.notification);
+  EXPECT_EQ(commands_.size(), 64u);
+  EXPECT_EQ(retired_, 0u);
+  ExpectValue(completed, 0);
+  for (auto* storage = signals_.storage; storage; storage = storage->next) {
+    EXPECT_EQ(
+        iree_hal_amd_gpu_signal_block_frontiers(&storage->block)->queue_count,
+        4u);
+  }
+  ASSERT_NO_FATAL_FAILURE(Drain());
+  ExpectValue(completed, 1);
+  EXPECT_EQ(std::memcmp(bytes_ + 3, source.data(), source.size()), 0);
+}
+
 TEST_P(QueueTest, UnreadyInputDoesNotHoldIndependentReadyWork) {
   auto gate = Semaphore();
   auto blocked = Semaphore();
