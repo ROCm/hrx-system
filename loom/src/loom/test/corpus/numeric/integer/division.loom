@@ -296,6 +296,94 @@ func.def @division_i32_boundary(%ordinal: index) -> (i32, i32, i32, i32) {
   func.return %signed_quotient, %signed_remainder, %unsigned_quotient, %unsigned_remainder : i32, i32, i32, i32
 }
 
+// Loaded operands mix byte, word, just-over-word, and unrestricted divisors.
+// Fused signed and unsigned results exercise the same operation family through
+// varying registers; the full output buffer also checks untouched guard words.
+func.def @varying_wide_division(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %output_base = index.constant 64 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<16xi64>
+  %outputs = buffer.view %output[%output_base] : buffer -> view<4x8xi64>
+  %begin = index.constant 0 : index
+  %end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %divisor_kind_count = index.constant 4 : index
+  %word_kind = index.constant 1 : index
+  %wide_kind = index.constant 2 : index
+  %byte_mask = scalar.constant 255 : i64
+  %word_mask = scalar.constant 4294967295 : i64
+  %wide_bit = scalar.constant 4294967296 : i64
+  %c0 = scalar.constant 0 : i64
+  %unit = scalar.constant 1 : i64
+  %minimum = scalar.constant -9223372036854775808 : i64
+  %overflow_divisor = scalar.constant -1 : i64
+  scf.for %lane = [%begin to %end step %step] {
+    %dividend = view.load %inputs[%lane] : view<16xi64> -> i64
+    %divisor_position = index.add %lane, %end : index
+    %bits = view.load %inputs[%divisor_position] : view<16xi64> -> i64
+    %byte = scalar.andi %bits, %byte_mask : i64
+    %word = scalar.andi %bits, %word_mask : i64
+    %wide = scalar.ori %word, %wide_bit : i64
+    %kind = index.rem %lane, %divisor_kind_count : index
+    %is_byte = index.cmp eq, %kind, %begin : index
+    %is_word = index.cmp eq, %kind, %word_kind : index
+    %is_wide = index.cmp eq, %kind, %wide_kind : index
+    %divisor0 = scf.select %is_byte, %byte, %bits : i64
+    %divisor1 = scf.select %is_word, %word, %divisor0 : i64
+    %divisor2 = scf.select %is_wide, %wide, %divisor1 : i64
+    %is_zero = scalar.cmpi eq, %divisor2, %c0 : i64
+    %nonzero = scf.select %is_zero, %unit, %divisor2 : i64
+    %is_minimum = scalar.cmpi eq, %dividend, %minimum : i64
+    %is_negative_one = scalar.cmpi eq, %nonzero, %overflow_divisor : i64
+    %would_overflow = scalar.andi %is_minimum, %is_negative_one : i1
+    %divisor = scf.select %would_overflow, %unit, %nonzero : i64
+    %signed_quotient, %signed_remainder = scalar.divremsi %dividend, %divisor : i64
+    view.store %signed_quotient, %outputs[0, %lane] : i64, view<4x8xi64>
+    view.store %signed_remainder, %outputs[1, %lane] : i64, view<4x8xi64>
+    %unsigned_quotient, %unsigned_remainder = scalar.divremui %dividend, %divisor : i64
+    view.store %unsigned_quotient, %outputs[2, %lane] : i64, view<4x8xi64>
+    view.store %unsigned_remainder, %outputs[3, %lane] : i64, view<4x8xi64>
+  }
+  func.return
+}
+
+// Vector operands are loaded at runtime; positive divisors avoid the signed
+// minimum/-1 overflow case while retaining the entire positive i64 domain.
+func.def @varying_wide_vector_division(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<16xi64>
+  %outputs = buffer.view %output[%base] : buffer -> view<48xi64>
+  %dividends = vector.load %inputs[0] : view<16xi64> -> vector<2xi64>
+  %bits = vector.load %inputs[8] : view<16xi64> -> vector<2xi64>
+  %mask = scalar.constant 9223372036854775807 : i64
+  %unit = scalar.constant 1 : i64
+  %masks = vector.splat %mask : vector<2xi64>
+  %units = vector.splat %unit : vector<2xi64>
+  %positive_bits = vector.andi %bits, %masks : vector<2xi64>
+  %divisors = vector.ori %positive_bits, %units : vector<2xi64>
+  %signed_quotients = vector.divsi %dividends, %divisors : vector<2xi64>
+  vector.store %signed_quotients, %outputs[8] : vector<2xi64>, view<48xi64>
+  %signed_remainders = vector.remsi %dividends, %divisors : vector<2xi64>
+  vector.store %signed_remainders, %outputs[10] : vector<2xi64>, view<48xi64>
+  %unsigned_quotients = vector.divui %dividends, %divisors : vector<2xi64>
+  vector.store %unsigned_quotients, %outputs[12] : vector<2xi64>, view<48xi64>
+  %unsigned_remainders = vector.remui %dividends, %divisors : vector<2xi64>
+  vector.store %unsigned_remainders, %outputs[14] : vector<2xi64>, view<48xi64>
+  func.return
+}
+
+func.def @dynamic_index_division(%dividend_bits: i64, %divisor_bits: i64) -> (index, index) {
+  %mask = scalar.constant 9223372036854775807 : i64
+  %unit = scalar.constant 1 : i64
+  %positive_dividend = scalar.andi %dividend_bits, %mask : i64
+  %positive_divisor = scalar.andi %divisor_bits, %mask : i64
+  %nonzero_divisor = scalar.ori %positive_divisor, %unit : i64
+  %dividend = index.cast %positive_dividend : i64 to index
+  %divisor = index.cast %nonzero_divisor : i64 to index
+  %quotient, %remainder = index.divrem %dividend, %divisor : index
+  func.return %quotient, %remainder : index, index
+}
+
 func.def @division_i64_boundary(%ordinal: index) -> (i64, i64, i64, i64) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -498,5 +586,81 @@ check.scenario @dynamic_wide_remainder_buffer_values {
       check.expect.bitwise actual(%output) expected(%output) : tensor<4xi64>
     }
   }
+  check.return
+}
+
+check.scenario @wide_division_correction_values {
+  // Requires the final normalized full-divisor correction.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %dividend = check.literal value(6134235218366572340) : i64
+    %divisor = check.literal value(4879874013) : i64
+    check.compare<@division_i64>(%dividend, %divisor) : (i64, i64) -> [actual(%actual_signed_quotient: i64, %actual_signed_remainder: i64, %actual_unsigned_quotient: i64, %actual_unsigned_remainder: i64), expected(%expected_signed_quotient: i64, %expected_signed_remainder: i64, %expected_unsigned_quotient: i64, %expected_unsigned_remainder: i64)] {
+      check.expect.equal actual(%actual_signed_quotient) expected(%expected_signed_quotient) : i64
+      check.expect.equal actual(%actual_signed_remainder) expected(%expected_signed_remainder) : i64
+      check.expect.equal actual(%actual_unsigned_quotient) expected(%expected_unsigned_quotient) : i64
+      check.expect.equal actual(%actual_unsigned_remainder) expected(%expected_unsigned_remainder) : i64
+    }
+  }
+  // Requires both corrections of a normalized halfword quotient estimate.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %dividend = check.literal value(3496223509351386454) : i64
+    %divisor = check.literal value(3138737127077) : i64
+    check.compare<@division_i64>(%dividend, %divisor) : (i64, i64) -> [actual(%actual_signed_quotient: i64, %actual_signed_remainder: i64, %actual_unsigned_quotient: i64, %actual_unsigned_remainder: i64), expected(%expected_signed_quotient: i64, %expected_signed_remainder: i64, %expected_unsigned_quotient: i64, %expected_unsigned_remainder: i64)] {
+      check.expect.equal actual(%actual_signed_quotient) expected(%expected_signed_quotient) : i64
+      check.expect.equal actual(%actual_signed_remainder) expected(%expected_signed_remainder) : i64
+      check.expect.equal actual(%actual_unsigned_quotient) expected(%expected_unsigned_quotient) : i64
+      check.expect.equal actual(%actual_unsigned_remainder) expected(%expected_unsigned_remainder) : i64
+    }
+  }
+  check.return
+}
+
+check.scenario @wide_division_buffer_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-9223372036854775808) step(1229782938247303441) : tensor<16xi64>
+    %output = check.generate.fill value(-123) : tensor<48xi64>
+    check.compare<@varying_wide_division>(%input, %output) : (tensor<16xi64>, tensor<48xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<48xi64>
+    }
+  }
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<16xi64>
+    %output = check.generate.fill value(-123) : tensor<48xi64>
+    check.compare<@varying_wide_division>(%input, %output) : (tensor<16xi64>, tensor<48xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<48xi64>
+    }
+  }
+  check.return
+}
+
+check.scenario @wide_vector_division_buffer_values {
+  check.trial[16](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<16xi64>
+    %output = check.generate.fill value(-123) : tensor<48xi64>
+    check.compare<@varying_wide_vector_division>(%input, %output) : (tensor<16xi64>, tensor<48xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<48xi64>
+    }
+  }
+  check.return
+}
+
+// This scenario requires the full signed 64-bit index carrier.
+check.scenario @wide_index_division_values {
+  check.trial[32](%trial: index, %entropy: check.entropy) {
+    %dividend_entropy = check.entropy.fork %entropy name("index-dividend") : check.entropy
+    %divisor_entropy = check.entropy.fork %entropy name("index-divisor") : check.entropy
+    %dividend = check.entropy.read %dividend_entropy[%trial] : check.entropy -> i64
+    %divisor = check.entropy.read %divisor_entropy[%trial] : check.entropy -> i64
+    check.compare<@dynamic_index_division>(%dividend, %divisor) : (i64, i64) -> [actual(%actual_quotient: index, %actual_remainder: index), expected(%expected_quotient: index, %expected_remainder: index)] {
+      check.expect.equal actual(%actual_quotient) expected(%expected_quotient) : index
+      check.expect.equal actual(%actual_remainder) expected(%expected_remainder) : index
+    }
+  }
+
   check.return
 }

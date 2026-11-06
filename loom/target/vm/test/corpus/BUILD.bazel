@@ -177,6 +177,7 @@ loom_corpus_test(
             "numeric/float/remainder.loom",
             "numeric/float/inverse_hyperbolic.loom",
             "numeric/float/inverse_hyperbolic_narrow.loom",
+            "numeric/integer/division.loom",
         ],
     },
 )

@@ -38,21 +38,32 @@ def append_runtime_unsigned_division_steps(
     divisor: ValueRef,
     temporary_prefix: str,
     final_remainder: ValueRef | None = None,
-) -> tuple[ValueRef, ValueRef]:
-    """Appends one word of native bit-serial unsigned division."""
+    full_remainder: bool = False,
+    return_quotient: bool = False,
+) -> tuple[ValueRef, ValueRef, ValueRef | None]:
+    """Appends one word, retaining a continued remainder's overflow bit."""
     divide_step = descriptor_by_key(
         AIE2P_CORE_DESCRIPTOR_SET, "amd.xdna.aie2p.divide.step.unsigned.i32"
     )
     state = initial_state
     remainder = initial_remainder
+    program = ScalarProgram(temporary_prefix)
+    quotient_correction = None
+    if full_remainder:
+        right31 = program.constant("right31", -31)
+        if return_quotient:
+            left1 = program.constant("left1", 1)
+            quotient_correction = program.constant("quotient_correction_0", 0)
     for step in range(1, 33):
         next_remainder = (
             final_remainder
-            if step == 32 and final_remainder is not None
+            if step == 32 and final_remainder is not None and not full_remainder
             else ValueRef.temporary(f"{temporary_prefix}remainder_{step}")
         )
         next_state = ValueRef.temporary(f"{temporary_prefix}state_{step}")
-        emits.append(
+        if full_remainder:
+            carry = program.binary(f"carry_{step}", "lshl.i32", remainder, right31)
+        program.emits.append(
             EmitDescriptorOp(
                 descriptor=divide_step,
                 operands={"sd": state, "s0": remainder, "s1": divisor},
@@ -65,7 +76,43 @@ def append_runtime_unsigned_division_steps(
         )
         state = next_state
         remainder = next_remainder
-    return state, remainder
+        if full_remainder:
+            # DIVS shifts within 32 bits. On overflow the shifted low word is
+            # below the divisor, so DIVS does not subtract it. Subtracting it
+            # here restores the exact remainder modulo 2^32. The missing
+            # quotient bits can be accumulated outside r31: they cannot reach
+            # its dividend MSB during these 32 steps.
+            correction = program.binary(
+                f"remainder_correction_{step}", "mul.i32", carry, divisor
+            )
+            corrected_remainder = (
+                final_remainder
+                if step == 32 and final_remainder is not None
+                else program.temporary(f"corrected_remainder_{step}")
+            )
+            program.emits.append(
+                EmitDescriptorOp(
+                    descriptor=descriptor_by_key(
+                        AIE2P_CORE_DESCRIPTOR_SET, "amd.xdna.aie2p.sub.i32"
+                    ),
+                    operands={"s0": remainder, "s1": correction},
+                    results={"d0": corrected_remainder},
+                    result_types={"d0": DescriptorResultType()},
+                )
+            )
+            remainder = corrected_remainder
+            if return_quotient:
+                quotient_correction = program.binary(
+                    f"shifted_quotient_correction_{step}",
+                    "lshl.i32",
+                    quotient_correction,
+                    left1,
+                )
+                quotient_correction = program.binary(
+                    f"quotient_correction_{step}", "or.i32", quotient_correction, carry
+                )
+    emits.extend(program.emits)
+    return state, remainder, quotient_correction
 
 
 def _magic_rule(

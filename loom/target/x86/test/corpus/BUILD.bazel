@@ -44,6 +44,7 @@ loom_corpus_test(
             "numeric/integer/bit_count.loom",
             "numeric/integer/bitfield.loom",
             "numeric/integer/constant_division.loom",
+            "numeric/integer/division.loom",
             "numeric/integer/rotation.loom",
             "numeric/integer/scalar_observations.loom",
             "numeric/integer/signed_unary.loom",
