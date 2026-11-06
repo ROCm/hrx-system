@@ -84,6 +84,10 @@ static iree_status_t loom_ownership_lifetime_initialize_summary(
                 module_state, arg_ids[i],
                 LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_ARGUMENTS);
         summary->transfers_ownership |= summary->arg_consumed[i];
+        summary->has_owned_effects |=
+            loom_ownership_lifetime_value_has_policy_flags(
+                module_state, arg_ids[i],
+                LOOM_OWNERSHIP_LIFETIME_POLICY_LAST_USE);
       }
     }
   }
@@ -186,6 +190,11 @@ static bool loom_ownership_lifetime_op_has_owned_effects(
     }
   }
   for (uint16_t i = 0; i < op->result_count; ++i) {
+    if (loom_ownership_lifetime_value_has_policy_flags(
+            state, loom_op_const_results(op)[i],
+            LOOM_OWNERSHIP_LIFETIME_POLICY_LAST_USE)) {
+      return true;
+    }
     loom_ownership_result_effect_t effect = {0};
     if (loom_ownership_result_effect_at(state->module, provider, op, i,
                                         &effect) &&

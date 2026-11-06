@@ -215,7 +215,8 @@ vm.module core(0.0) {
     ^bb0:
       control.block
       control.call @import0 {direct_ref_move_mask = 0x0000}
-      ref.stack.store.move %r0, #r0
+      ref.stack.store.retain %r0, #r0
+      ref.discard %r0
       %r0 = ref.stack.load.retain #r0
       control.call @import1 {direct_ref_move_mask = 0x0001}
       %r0 = ref.stack.load.retain #r0

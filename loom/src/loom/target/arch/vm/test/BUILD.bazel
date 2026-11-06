@@ -41,6 +41,7 @@ loom_check_test_suite(
         "managed_consumption.loom-test",
         "managed_types.loom-test",
         "native_references.loom-test",
+        "object_borrow_retirement.loom-test",
         "object_copy.loom-test",
         "object_lifetime.loom-test",
         "object_release.loom-test",

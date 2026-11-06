@@ -10,6 +10,7 @@
 
 #include "loom/analysis/ownership_lifetime.h"
 #include "loom/error/error_catalog.h"
+#include "loom/ops/cfg/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/test/ops.h"
 #include "loom/pass/options.h"
@@ -272,6 +273,12 @@ static iree_status_t loom_test_resource_lifetime_build_release(
   return loom_test_resource_release_build(builder, value_id, location, out_op);
 }
 
+static iree_status_t loom_test_resource_lifetime_build_branch(
+    loom_builder_t* builder, loom_block_t* target, loom_location_id_t location,
+    loom_op_t** out_op) {
+  return loom_cfg_br_build(builder, target, NULL, 0, location, out_op);
+}
+
 static iree_status_t loom_test_resource_lifetime_run(loom_pass_t* pass,
                                                      loom_module_t* module) {
   const loom_ownership_lifetime_policy_t policy = {
@@ -288,6 +295,7 @@ static iree_status_t loom_test_resource_lifetime_run(loom_pass_t* pass,
       .phase_name = pass->info->name,
       .policies = &policy,
       .policy_count = 1,
+      .build_branch = loom_test_resource_lifetime_build_branch,
   };
   loom_ownership_lifetime_result_t result = {0};
   IREE_RETURN_IF_ERROR(

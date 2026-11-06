@@ -185,3 +185,19 @@ loom_cc_library(
         "//runtime/src/iree/base",
     ],
 )
+
+loom_cc_library(
+    name = "borrow_lifetime",
+    srcs = ["borrow_lifetime.c"],
+    hdrs = ["borrow_lifetime.h"],
+    deps = [
+        "//loom/src/loom/analysis:ownership_lifetime",
+        "//loom/src/loom/codegen/low:ownership",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/pass:types",
+        "//loom/src/loom/target:pass_environment",
+        "//loom/src/loom/target:provider",
+        "//runtime/src/iree/base",
+    ],
+)

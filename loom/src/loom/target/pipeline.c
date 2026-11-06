@@ -936,6 +936,8 @@ static iree_status_t loom_target_pipeline_build_source_low_body(
   }
   IREE_RETURN_IF_ERROR(
       loom_target_pipeline_build_low_cleanup(builder, user_data));
+  IREE_RETURN_IF_ERROR(
+      loom_target_pipeline_build_run(builder, IREE_SV("low-borrow-lifetime")));
   return context->verify_source_low_output
              ? loom_target_pipeline_build_run(builder, IREE_SV("verify-low"))
              : iree_ok_status();

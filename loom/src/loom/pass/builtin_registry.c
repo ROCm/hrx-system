@@ -10,6 +10,7 @@
 
 #include "loom/codegen/low/pipeline/pass_environment.h"
 #include "loom/codegen/low/transforms/allocation.h"
+#include "loom/codegen/low/transforms/borrow_lifetime.h"
 #include "loom/codegen/low/transforms/cfg_tuple_decomposition.h"
 #include "loom/codegen/low/transforms/cse.h"
 #include "loom/codegen/low/transforms/dce.h"
@@ -531,6 +532,11 @@ static const loom_pass_descriptor_t kBuiltinPassDescriptors[] = {
         .key = IREE_SVL("loop-fusion"),
         .info = loom_loop_fusion_pass_info,
         .function_run = loom_loop_fusion_run,
+    },
+    {
+        .key = IREE_SVL("low-borrow-lifetime"),
+        .info = loom_low_borrow_lifetime_pass_info,
+        .module_run = loom_low_borrow_lifetime_run,
     },
     {
         .key = IREE_SVL("low-cse"),

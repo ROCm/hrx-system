@@ -38,6 +38,9 @@ typedef enum loom_ownership_lifetime_policy_flag_bits_e {
   LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_ARGUMENTS = 1u << 0,
   // Matching results from bodyless callees enter callers as owned values.
   LOOM_OWNERSHIP_LIFETIME_POLICY_OWNED_BODYLESS_RESULTS = 1u << 1,
+  // End local carriers after their final use, including borrowed carriers
+  // that may hold acquired protection. This does not change callable ownership.
+  LOOM_OWNERSHIP_LIFETIME_POLICY_LAST_USE = 1u << 2,
 } loom_ownership_lifetime_policy_flag_bits_t;
 
 // Bitset of loom_ownership_lifetime_policy_flag_bits_t values.
@@ -47,6 +50,11 @@ typedef uint32_t loom_ownership_lifetime_policy_flags_t;
 typedef iree_status_t (*loom_ownership_lifetime_build_release_op_fn_t)(
     loom_builder_t* builder, loom_value_id_t value_id,
     loom_location_id_t location, void* user_data, loom_op_t** out_op);
+
+// Builds an argumentless direct branch when cleanup splits a conditional edge.
+typedef iree_status_t (*loom_ownership_lifetime_build_branch_op_fn_t)(
+    loom_builder_t* builder, loom_block_t* target, loom_location_id_t location,
+    loom_op_t** out_op);
 
 // Callable ownership and optional cleanup policy for one resource family.
 typedef struct loom_ownership_lifetime_policy_t {
@@ -76,6 +84,9 @@ typedef struct loom_ownership_lifetime_options_t {
   // Instruction effects bound once per function, in addition to source-op
   // descriptors. Required when the module contains target instruction packets.
   loom_ownership_effect_resolver_t effect_resolver;
+  // Dialect-specific direct branch builder for cleanup edge splitting.
+  // Required by materialize_module; analysis never calls it.
+  loom_ownership_lifetime_build_branch_op_fn_t build_branch;
 } loom_ownership_lifetime_options_t;
 
 typedef struct loom_ownership_lifetime_result_t {
