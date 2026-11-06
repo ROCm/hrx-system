@@ -17,10 +17,12 @@
 #include <d3dkmthk.h>
 #include <ntstatus.h>
 
+#include <algorithm>
 #include <array>
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "libamdf/src/gpu/umd/dxg/private_records.h"
@@ -58,7 +60,8 @@ void PrintQueueProfile(const char* role,
 }
 
 bool QueryAdapter(const D3DKMT_ADAPTERINFO& adapter,
-                  const char* required_target, uint32_t& matched_count) {
+                  const std::vector<std::string>& required_targets,
+                  uint32_t& matched_count) {
   D3DKMT_ADAPTERTYPE adapter_type = {};
   D3DKMT_QUERYADAPTERINFO query = {};
   query.hAdapter = adapter.hAdapter;
@@ -139,7 +142,9 @@ bool QueryAdapter(const D3DKMT_ADAPTERINFO& adapter,
                                              &sdma_profile);
   PrintQueueProfile("pm4", pm4_profile);
   PrintQueueProfile("sdma", sdma_profile);
-  if (required_target == nullptr || std::strcmp(required_target, target) == 0) {
+  if (required_targets.empty() ||
+      std::find(required_targets.begin(), required_targets.end(), target) !=
+          required_targets.end()) {
     ++matched_count;
   }
   return true;
@@ -148,15 +153,16 @@ bool QueryAdapter(const D3DKMT_ADAPTERINFO& adapter,
 }  // namespace
 
 int main(int argc, char** argv) {
-  const char* required_target = nullptr;
+  std::vector<std::string> required_targets;
   constexpr char kTargetPrefix[] = "--amdf_gpu_target=";
-  if (argc == 2 &&
-      std::strncmp(argv[1], kTargetPrefix, sizeof(kTargetPrefix) - 1) == 0 &&
-      argv[1][sizeof(kTargetPrefix) - 1] != '\0') {
-    required_target = argv[1] + sizeof(kTargetPrefix) - 1;
-  } else if (argc != 1) {
-    std::fprintf(stderr, "Usage: %s [--amdf_gpu_target=gfxNNNN]\n", argv[0]);
-    return 1;
+  for (int i = 1; i < argc; ++i) {
+    if (std::strncmp(argv[i], kTargetPrefix, sizeof(kTargetPrefix) - 1) != 0 ||
+        argv[i][sizeof(kTargetPrefix) - 1] == '\0') {
+      std::fprintf(stderr, "Usage: %s [--amdf_gpu_target=gfxNNNN ...]\n",
+                   argv[0]);
+      return 1;
+    }
+    required_targets.emplace_back(argv[i] + sizeof(kTargetPrefix) - 1);
   }
 
   HMODULE gdi_module = GetModuleHandleW(L"gdi32.dll");
@@ -187,7 +193,7 @@ int main(int argc, char** argv) {
   }
   uint32_t matched_count = 0;
   for (uint32_t i = 0; success && i < enumeration.NumAdapters; ++i) {
-    success = QueryAdapter(adapters[i], required_target, matched_count);
+    success = QueryAdapter(adapters[i], required_targets, matched_count);
   }
   for (const D3DKMT_ADAPTERINFO& adapter : adapters) {
     if (adapter.hAdapter == 0) {
@@ -199,9 +205,12 @@ int main(int argc, char** argv) {
       success = false;
     }
   }
-  if (required_target != nullptr && matched_count == 0) {
-    std::fprintf(stderr, "No successfully queried adapter matched %s\n",
-                 required_target);
+  if (!required_targets.empty() && matched_count == 0) {
+    std::fprintf(stderr, "No successfully queried adapter matched:");
+    for (const std::string& target : required_targets) {
+      std::fprintf(stderr, " %s", target.c_str());
+    }
+    std::fprintf(stderr, "\n");
     success = false;
   } else if (success && matched_count == 0) {
     std::printf("SKIP: no AMD GPU supports the private adapter query\n");

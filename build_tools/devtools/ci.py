@@ -143,6 +143,7 @@ if __package__:
 else:
     from build_tools.devtools import ci_config
 
+from build_tools.amdgpu import target_map
 from build_tools.ci import windows_diagnostics
 from build_tools.devtools import (
     bazel_profile_summary,
@@ -954,6 +955,11 @@ def amdgpu_test_steps(
 def amdgpu_windows_steps(
     targets: tuple[str, ...], target_selector: str, config: str | None
 ) -> list[CiStep]:
+    target_options = tuple(
+        f"--test_arg=--amdf_gpu_target={target}"
+        for selector in target_selector.split(",")
+        for target in target_map.exact_targets_for_selection(selector)
+    )
     options = (
         ci_config.AMDGPU_WINDOWS_BAZEL_OPTIONS
         + amd_gpu_device_compiler_options()
@@ -963,12 +969,15 @@ def amdgpu_windows_steps(
         )
     )
     config_name = f" / {config.upper()}" if config is not None else ""
-    # A required finite PM4 copy establishes the exact GPU and usable native
-    # transport. SDMA remains capability-admitted; its skip is not a proof.
-    queue_options = options + (
-        f"--test_arg=--amdf_gpu_target={target_selector}",
-        "--test_arg=--amdf_require_test=Pm4KernelQueueTest.ExecutesMaterializedCopyData",
-        "--test_arg=--gtest_fail_fast=1",
+    # A required finite PM4 copy establishes a usable GPU in the selected target
+    # family. SDMA remains capability-admitted; its skip is not a proof.
+    queue_options = (
+        options
+        + target_options
+        + (
+            "--test_arg=--amdf_require_test=Pm4KernelQueueTest.ExecutesMaterializedCopyData",
+            "--test_arg=--gtest_fail_fast=1",
+        )
     )
     steps = [
         bazel_configure_step(extra_options=ci_config.AMDGPU_WINDOWS_BAZEL_OPTIONS),
@@ -978,11 +987,7 @@ def amdgpu_windows_steps(
             config=config,
             available_resources=ci_config.AMDGPU_WINDOWS_RESOURCES,
             test_env=amd_test_env(),
-            bazel_options=options
-            + (
-                f"--test_arg=--amdf_gpu_target={target_selector}",
-                "--test_output=all",
-            ),
+            bazel_options=options + target_options + ("--test_output=all",),
         ),
         bazel_run_step(
             "Enumerate Windows GPU queue families",
@@ -1014,8 +1019,8 @@ def amdgpu_windows_steps(
             available_resources=ci_config.AMDGPU_WINDOWS_RESOURCES,
             test_env=amd_test_env(),
             bazel_options=options
+            + target_options
             + (
-                f"--test_arg=--amdf_gpu_target={target_selector}",
                 "--test_env=GTEST_FAIL_FAST=1",
                 "--test_filter=*Pm4AtomicStoreTest.*:*Pm4WaitTest.*:"
                 "Pm4UnconditionalWaitTest.*",
@@ -1649,7 +1654,7 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
         if sys.platform != "win32":
             raise ValueError("Native kernel-queue CI requires Windows")
         if args.amdgpu_target is None:
-            raise ValueError("Windows GPU CI requires an exact --amdgpu-target")
+            raise ValueError("Windows GPU CI requires an explicit --amdgpu-target")
         return amdgpu_windows_steps(
             tuple(args.target or ()), amdgpu_target_selector, sanitizer
         )
