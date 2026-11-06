@@ -121,6 +121,61 @@ TEST(OpSemantics, DialectTablesAreDenseAndQueryable) {
   EXPECT_EQ(wrong_dialect.contract_families, 0u);
 }
 
+TEST(OpSemantics, AsyncContractAndCachePolicyIdentifyTransfers) {
+  loom_context_t context;
+  loom_context_initialize(iree_allocator_system(), &context);
+  IREE_ASSERT_OK(loom_op_registry_register_all_dialects(&context));
+  IREE_ASSERT_OK(loom_context_finalize(&context));
+
+  struct ExpectedAsyncOp {
+    loom_op_kind_t kind;
+    bool is_transfer;
+  };
+  static constexpr ExpectedAsyncOp kExpectedAsyncOps[] = {
+      {LOOM_OP_KERNEL_ASYNC_COPY, true},
+      {LOOM_OP_KERNEL_ASYNC_COPY_MASK, true},
+      {LOOM_OP_KERNEL_ASYNC_GATHER, true},
+      {LOOM_OP_KERNEL_ASYNC_GATHER_MASK, true},
+      {LOOM_OP_KERNEL_ASYNC_TENSOR_LOAD_TO_LDS, true},
+      {LOOM_OP_KERNEL_ASYNC_TENSOR_STORE_FROM_LDS, true},
+      {LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER, true},
+      {LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER_MASK, true},
+      {LOOM_OP_KERNEL_ASYNC_GROUP, false},
+      {LOOM_OP_KERNEL_ASYNC_WAIT, false},
+  };
+  for (const auto& expected : kExpectedAsyncOps) {
+    SCOPED_TRACE(expected.kind);
+    const loom_op_semantics_t semantics =
+        loom_context_resolve_op_semantics(&context, expected.kind);
+    EXPECT_TRUE(loom_contract_family_set_has_any(semantics.contract_families,
+                                                 LOOM_CONTRACT_KERNEL_ASYNC));
+    const loom_op_vtable_t* vtable =
+        loom_context_resolve_op(&context, expected.kind);
+    ASSERT_NE(vtable, nullptr);
+    EXPECT_EQ(vtable->cache_policy.available, expected.is_transfer);
+  }
+
+  iree_host_size_t vtable_count = 0;
+  const loom_op_vtable_t* const* vtables =
+      loom_kernel_dialect_vtables(&vtable_count);
+  iree_host_size_t semantics_count = 0;
+  const loom_op_semantics_t* semantics =
+      loom_kernel_dialect_op_semantics(&semantics_count);
+  ASSERT_EQ(vtable_count, semantics_count);
+  iree_host_size_t async_op_count = 0;
+  for (iree_host_size_t i = 0; i < semantics_count; ++i) {
+    if (!loom_contract_family_set_has_any(semantics[i].contract_families,
+                                          LOOM_CONTRACT_KERNEL_ASYNC)) {
+      continue;
+    }
+    EXPECT_NE(vtables[i], nullptr);
+    ++async_op_count;
+  }
+  EXPECT_EQ(async_op_count, IREE_ARRAYSIZE(kExpectedAsyncOps));
+
+  loom_context_deinitialize(&context);
+}
+
 TEST(OpSemantics, IntegerArithmeticConditionsCoverEveryDialectForm) {
   loom_context_t context;
   loom_context_initialize(iree_allocator_system(), &context);

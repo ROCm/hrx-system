@@ -43,7 +43,6 @@ kernel.def target(@target) @masked_cluster_gather_is_not_yet_lowered() {
   %dest = buffer.view %scratch[%buffer_base] : buffer -> view<4xi8>
   // ERROR@+1: AMDGPU/023 {constraint_key="async.transfer_packet"}
   %copy = kernel.async.cluster.gather.mask %source to %dest using %participants, %predicate {cache_scope = device, cache_temporal = regular} : view<4xi8> to view<4xi8>, i32, i1 -> kernel.async.token
-  // ERROR@+1: AMDGPU/023 {constraint_key="async_group.local_transfer_tokens"}
   %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
   // ERROR@+1: AMDGPU/023 {constraint_key="async_wait.group_token"}
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
