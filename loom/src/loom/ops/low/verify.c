@@ -1322,6 +1322,19 @@ static iree_status_t loom_low_emit_call_callee_kind_mismatch(
                                       IREE_ARRAYSIZE(params));
 }
 
+loom_trait_flags_t loom_low_copy_effective_traits(const loom_module_t* module,
+                                                  const loom_op_t* op) {
+  loom_trait_flags_t traits = loom_op_vtable(module, op)->traits;
+  const loom_type_t* value_type = loom_type_register_value_type(
+      loom_module_value(module, loom_low_copy_source(op))->type);
+  if (value_type && loom_type_is_reference(*value_type)) {
+    // An independent managed carrier may acquire ownership even when its
+    // logical type is ptr. Preserve that lifetime through DCE and scheduling.
+    traits |= LOOM_TRAIT_OBSERVABLE_EFFECT;
+  }
+  return traits;
+}
+
 iree_status_t loom_low_copy_verify(const loom_module_t* module,
                                    const loom_op_t* op,
                                    iree_diagnostic_emitter_t emitter) {

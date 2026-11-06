@@ -697,6 +697,7 @@ typedef enum loom_dialect_id_e {
   LOOM_DIALECT_PIPELINE = 0x23,
   LOOM_DIALECT_CHANNEL = 0x24,
   LOOM_DIALECT_TYPE = 0x25,
+  LOOM_DIALECT_REF = 0x26,
   LOOM_DIALECT_RESERVED = 0xFF,
 } loom_dialect_id_t;
 #define LOOM_OP_KIND_UNKNOWN ((loom_op_kind_t)0)
@@ -708,7 +709,7 @@ typedef enum loom_dialect_id_e {
 
 // Maximum number of built-in dialects. Dialect IDs must be less than
 // this value. Matches the size of the dialect vtable registry array.
-#define LOOM_DIALECT_BUILTIN_COUNT_ 38
+#define LOOM_DIALECT_BUILTIN_COUNT_ (LOOM_DIALECT_REF + 1)
 
 // Extracts the dialect ID (high byte) from an op kind.
 static inline uint8_t loom_op_dialect_id(loom_op_kind_t kind) {

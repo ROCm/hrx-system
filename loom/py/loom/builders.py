@@ -731,6 +731,10 @@ def _normalize_result_names(
     names: Sequence[str] | None,
     result_names: Sequence[str] | None,
 ) -> list[str] | None:
+    if not op.results:
+        # Keyword validation admits only declared attributes for void ops, so
+        # a semantic name attribute cannot be an SSA result name.
+        return None
     supplied = sum(value is not None for value in (name, names, result_names))
     if supplied > 1:
         raise TypeError(
@@ -741,10 +745,6 @@ def _normalize_result_names(
             raise TypeError(
                 f"{op.name}: signature-only results cannot be named as SSA values"
             )
-        return None
-    if not op.results:
-        if supplied:
-            raise TypeError(f"{op.name}: result names were supplied for a void op")
         return None
     if name is not None:
         if len(op.results) != 1 or op.results[0].variadic:
@@ -863,6 +863,7 @@ def default_ops() -> tuple[Op, ...]:
     from loom.dialect.pass_ import ALL_PASS_OPS
     from loom.dialect.pipeline import ALL_PIPELINE_OPS
     from loom.dialect.pool import ALL_POOL_OPS
+    from loom.dialect.ref import ALL_REF_OPS
     from loom.dialect.sanitizer import ALL_SANITIZER_OPS
     from loom.dialect.scalar import ALL_SCALAR_OPS
     from loom.dialect.scf import ALL_SCF_OPS
@@ -870,6 +871,7 @@ def default_ops() -> tuple[Op, ...]:
     from loom.dialect.tensor import ALL_TENSOR_OPS
     from loom.dialect.test import ALL_TEST_OPS
     from loom.dialect.tile import ALL_TILE_OPS
+    from loom.dialect.type import ALL_TYPE_OPS
     from loom.dialect.vector import ALL_VECTOR_OPS
     from loom.dialect.view import ALL_VIEW_OPS
 
@@ -889,6 +891,7 @@ def default_ops() -> tuple[Op, ...]:
         *ALL_PASS_OPS,
         *ALL_PIPELINE_OPS,
         *ALL_POOL_OPS,
+        *ALL_REF_OPS,
         *ALL_SANITIZER_OPS,
         *ALL_SCALAR_OPS,
         *ALL_SCF_OPS,
@@ -896,6 +899,7 @@ def default_ops() -> tuple[Op, ...]:
         *ALL_TENSOR_OPS,
         *ALL_TEST_OPS,
         *ALL_TILE_OPS,
+        *ALL_TYPE_OPS,
         *ALL_VECTOR_OPS,
         *ALL_VIEW_OPS,
     )

@@ -1,0 +1,216 @@
+// Independent reference copies survive either consumption order. Borrowed
+// copies keep the payload alive through their last call, including null.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "create_null") @create_null() -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %first_identity = scalar.constant 1 : i32
+  %first, %first_pointer = func.call @create(%first_identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @read(%first_pointer) : (ptr<@Object>)
+  %first_copy = ref.duplicate %first : ref<@Object>
+  func.call @consume(%first) : (ref<@Object>)
+  func.call @observe() : ()
+  func.call @consume(%first_copy) : (ref<@Object>)
+  func.call @observe() : ()
+
+  %second_identity = scalar.constant 2 : i32
+  %second, %second_pointer = func.call @create(%second_identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @read(%second_pointer) : (ptr<@Object>)
+  %second_copy = ref.duplicate %second : ref<@Object>
+  func.call @consume(%second_copy) : (ref<@Object>)
+  func.call @observe() : ()
+  func.call @consume(%second) : (ref<@Object>)
+  func.call @observe() : ()
+
+  %third_identity = scalar.constant 3 : i32
+  %third, %third_pointer = func.call @create(%third_identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @consume(%third) : (ref<@Object>)
+  %pointer_copy = ref.duplicate %third_pointer : ptr<@Object>
+  func.call @read(%third_pointer) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.call @read(%pointer_copy) : (ptr<@Object>)
+  func.call @observe() : ()
+
+  %null_owner, %null_pointer = func.call @create_null() : () -> (ref<@Object>, ptr<@Object>)
+  %null_copy = ref.duplicate %null_owner : ref<@Object>
+  %null_pointer_copy = ref.duplicate %null_pointer : ptr<@Object>
+  func.call @consume(%null_owner) : (ref<@Object>)
+  func.call @consume(%null_copy) : (ref<@Object>)
+  func.call @read(%null_pointer) : (ptr<@Object>)
+  func.call @read(%null_pointer_copy) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 1
+read 1
+consume 1
+live 1
+consume 1
+destroy 1
+live 0
+create 2
+read 2
+consume 2
+live 1
+consume 2
+destroy 2
+live 0
+create 3
+consume 3
+read 3
+live 1
+read 3
+destroy 3
+live 0
+consume -1
+consume -1
+read -1
+read -1
+live 0
+OK 0
+retired 0
+
+// ====
+
+// The executable compilation path preserves an unused owning duplicate and
+// rejects its missing consumption after source lowering and optimization.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.def public @run() {
+  %identity = scalar.constant 7 : i32
+  %owner, %pointer = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %unused = ref.duplicate %owner : ref<@Object>
+  func.call @consume(%owner) : (ref<@Object>)
+  // ERROR@+1: DOMINANCE/014 {phase_name="object-lifetime", value_name="unused"}
+  func.return
+}
+
+// ====
+
+// A copied pointer may die before its original. Both a non-inlined call and
+// the compiler-created transport must preserve that remaining protection.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @use(%pointer: ptr<@Object>) {
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.return
+}
+
+func.def public @run() {
+  %identity = scalar.constant 4 : i32
+  %owner, %pointer = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @consume(%owner) : (ref<@Object>)
+  %copy = ref.duplicate %pointer : ptr<@Object>
+  func.call @use(%copy) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.call @use(%pointer) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 4
+consume 4
+read 4
+live 1
+read 4
+destroy 4
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Terminal failure releases all initialized independent owners and guards;
+// no source-level release operation after the failed call executes.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.decl import("lifetime", "fail") @fail()
+
+func.def noinline @child(%owner: ref<@Object>, %pointer: ptr<@Object>) {
+  func.call @fail() : ()
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.call @consume(%owner) : (ref<@Object>)
+  func.return
+}
+
+func.def public @run() {
+  %identity = scalar.constant 5 : i32
+  %owner, %pointer = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %owner_copy = ref.duplicate %owner : ref<@Object>
+  %pointer_copy = ref.duplicate %pointer : ptr<@Object>
+  func.call @child(%owner_copy, %pointer_copy) : (ref<@Object>, ptr<@Object>)
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.call @consume(%owner) : (ref<@Object>)
+  func.return
+}
+
+// ----
+create 5
+fail 1
+destroy 5
+ABORTED 0
+retired 0
+
+// ====
+
+// Unused pointer duplicates retire before the next observer rather than
+// retaining a hidden guard until the VM frame exits.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %identity = scalar.constant 6 : i32
+  %owner, %pointer = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @consume(%owner) : (ref<@Object>)
+  %unused = ref.duplicate %pointer : ptr<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 6
+consume 6
+destroy 6
+live 0
+OK 0
+retired 0

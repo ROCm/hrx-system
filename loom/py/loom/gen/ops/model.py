@@ -229,6 +229,12 @@ def _load_type_generation() -> DialectGeneration:
     return DialectGeneration(type_ops, list(ALL_TYPE_OPS), None)
 
 
+def _load_ref_generation() -> DialectGeneration:
+    from loom.dialect.ref import ALL_REF_OPS, ref_ops
+
+    return DialectGeneration(ref_ops, list(ALL_REF_OPS), None)
+
+
 def _load_sanitizer_generation() -> DialectGeneration:
     from loom.dialect.sanitizer import ALL_SANITIZER_OPS, sanitizer_ops
 
@@ -309,6 +315,7 @@ _DIALECT_GENERATION_LOADERS: tuple[tuple[str, DialectGenerationLoader], ...] = (
     ("pass", _load_pass_generation),
     ("config", _load_config_generation),
     ("type", _load_type_generation),
+    ("ref", _load_ref_generation),
     ("sanitizer", _load_sanitizer_generation),
     ("amdgpu", _load_amdgpu_generation),
     ("aie2p", _load_aie2p_generation),

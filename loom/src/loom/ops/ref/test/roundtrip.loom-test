@@ -1,0 +1,28 @@
+// RUN: roundtrip
+type.decl import("media", "frame") @Frame
+
+func.def @copy_owner(%value: ref<@Frame>) -> (ref<@Frame>, ref<@Frame>) {
+  %copy = ref.duplicate %value : ref<@Frame>
+  func.return %value, %copy : ref<@Frame>, ref<@Frame>
+}
+
+func.def @copy_pointer(%value: ptr<@Frame>) -> (ptr<@Frame>, ptr<@Frame>) {
+  %copy = ref.duplicate %value : ptr<@Frame>
+  func.return %copy, %value : ptr<@Frame>, ptr<@Frame>
+}
+
+// ====
+
+// Serialization retains the primitive and both exact ownership modes.
+// RUN: format bytecode
+type.decl import("media", "frame") @Frame
+
+func.def @copy_owner(%value: ref<@Frame>) -> (ref<@Frame>, ref<@Frame>) {
+  %copy = ref.duplicate %value : ref<@Frame>
+  func.return %value, %copy : ref<@Frame>, ref<@Frame>
+}
+
+func.def @copy_pointer(%value: ptr<@Frame>) -> (ptr<@Frame>, ptr<@Frame>) {
+  %copy = ref.duplicate %value : ptr<@Frame>
+  func.return %copy, %value : ptr<@Frame>, ptr<@Frame>
+}

@@ -78,6 +78,17 @@ def test_type_constraints_match_payload_scalars() -> None:
         assert not type_satisfies_constraint(value_type, TypeConstraint.PAYLOAD_SCALAR)
 
 
+@pytest.mark.parametrize("ownership", list(ir.ReferenceOwnership))
+def test_managed_reference_constraint_preserves_modes(ownership) -> None:
+    handle = ir.ReferenceType(ownership, "media", "frame", ir.SymbolName("Frame"))
+    assert type_satisfies_constraint(handle, TypeConstraint.MANAGED_REFERENCE)
+    assert not type_satisfies_constraint(handle, TypeConstraint.SCALAR)
+    for value_type in (ir.I64, ir.BufferType(), ir.PoolType()):
+        assert not type_satisfies_constraint(
+            value_type, TypeConstraint.MANAGED_REFERENCE
+        )
+
+
 def test_type_constraints_match_byte_patterns() -> None:
     accepted_kinds = (
         ir.ScalarTypeKind.I8,
