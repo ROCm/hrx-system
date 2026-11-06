@@ -113,3 +113,21 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @trunci_i64x9_i8x9
   %result = vshuffle %10, %10, %11
   return %result
 }
+
+// ====
+
+func.def @trunci_i8x31_i1x31(%input: vector<31xi8>) -> (vector<31xi1>) {
+  %result = vector.trunci %input : vector<31xi8> to vector<31xi1>
+  func.return %result : vector<31xi1>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @trunci_i8x31_i1x31(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.elpredicate>) asm {
+  %9 = mov.short 1
+  %10 = vbcst.8 %9
+  %11 = vband %input, %10
+  %12 = mov.short 0
+  %13 = vbcst.8 %12
+  %result = vlt.u8x64 %13, %11
+  return %result
+}

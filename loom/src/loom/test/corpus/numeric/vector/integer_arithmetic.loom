@@ -110,20 +110,20 @@ func.def @vector_i64_arithmetic(%lhs_input: buffer, %rhs_input: buffer, %output:
   %lhs = vector.load %lhs_view[0] : view<3xi64> -> vector<3xi64>
   %rhs = vector.load %rhs_view[0] : view<3xi64> -> vector<3xi64>
   %min_signed = vector.minsi %lhs, %rhs : vector<3xi64>
-  %max_signed = vector.maxsi %lhs, %rhs : vector<3xi64>
-  %min_unsigned = vector.minui %lhs, %rhs : vector<3xi64>
-  %max_unsigned = vector.maxui %lhs, %rhs : vector<3xi64>
-  %sum, %carry = vector.addui_extended %lhs, %rhs : vector<3xi64> -> vector<3xi1>
-  %difference, %borrow = vector.subui_extended %lhs, %rhs : vector<3xi64> -> vector<3xi1>
-  %carry_values = vector.extui %carry : vector<3xi1> to vector<3xi64>
-  %borrow_values = vector.extui %borrow : vector<3xi1> to vector<3xi64>
   vector.store %min_signed, %results[0, 0] : vector<3xi64>, view<8x3xi64>
+  %max_signed = vector.maxsi %lhs, %rhs : vector<3xi64>
   vector.store %max_signed, %results[1, 0] : vector<3xi64>, view<8x3xi64>
+  %min_unsigned = vector.minui %lhs, %rhs : vector<3xi64>
   vector.store %min_unsigned, %results[2, 0] : vector<3xi64>, view<8x3xi64>
+  %max_unsigned = vector.maxui %lhs, %rhs : vector<3xi64>
   vector.store %max_unsigned, %results[3, 0] : vector<3xi64>, view<8x3xi64>
+  %sum, %carry = vector.addui_extended %lhs, %rhs : vector<3xi64> -> vector<3xi1>
   vector.store %sum, %results[4, 0] : vector<3xi64>, view<8x3xi64>
+  %carry_values = vector.extui %carry : vector<3xi1> to vector<3xi64>
   vector.store %carry_values, %results[5, 0] : vector<3xi64>, view<8x3xi64>
+  %difference, %borrow = vector.subui_extended %lhs, %rhs : vector<3xi64> -> vector<3xi1>
   vector.store %difference, %results[6, 0] : vector<3xi64>, view<8x3xi64>
+  %borrow_values = vector.extui %borrow : vector<3xi1> to vector<3xi64>
   vector.store %borrow_values, %results[7, 0] : vector<3xi64>, view<8x3xi64>
   func.return
 }

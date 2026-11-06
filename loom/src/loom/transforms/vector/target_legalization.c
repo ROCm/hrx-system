@@ -321,6 +321,47 @@ iree_status_t loom_vector_legalize_index_cast(
   return iree_ok_status();
 }
 
+// Keeps integer-to-predicate truncation in packet form. The low-bit mask is
+// semantically distinct from a nonzero test and leaves ordinary vector
+// bitwise/comparison selection to the target.
+static iree_status_t loom_vector_legalize_predicate_truncation(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  const loom_value_id_t input = loom_vector_trunci_input(op);
+  const loom_type_t input_type = loom_module_value_type(context->module, input);
+  const loom_type_t result_type =
+      loom_module_value_type(context->module, loom_vector_trunci_result(op));
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, op);
+  const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+
+  loom_op_t* low_bit_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_splati_build(builder, 1, input_type,
+                                                op->location, &low_bit_op));
+  loom_op_t* masked_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_andi_build(
+      builder, input, loom_vector_splati_result(low_bit_op), input_type,
+      op->location, &masked_op));
+  loom_op_t* zero_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_splati_build(builder, 0, input_type, op->location, &zero_op));
+  loom_op_t* comparison_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_cmpi_build(
+      builder, LOOM_VECTOR_CMPI_PREDICATE_ULT,
+      loom_vector_splati_result(zero_op), loom_vector_andi_result(masked_op),
+      input_type, result_type, op->location, &comparison_op));
+  loom_value_id_t replacement = loom_vector_cmpi_result(comparison_op);
+  IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
+      rewriter, op, &replacement, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_replace_all_uses_and_erase(rewriter, op, &replacement, 1));
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
+  };
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vector_legalize_cast(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
@@ -335,6 +376,14 @@ static iree_status_t loom_vector_legalize_cast(
           .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
       };
       return iree_ok_status();
+    }
+    if (loom_vector_trunci_isa(op)) {
+      const loom_type_t result_type = loom_module_value_type(
+          context->module, loom_vector_trunci_result(op));
+      if (loom_type_element_type(result_type) == LOOM_SCALAR_TYPE_I1) {
+        return loom_vector_legalize_predicate_truncation(context, op,
+                                                         out_result);
+      }
     }
     // Scalarization would split a cast boundary into unrelated lane programs.
     // Preserve it while eager producers expose composable carrier casts.
