@@ -153,15 +153,15 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_test(
-    name = "queue_test",
-    srcs = ["queue_test.cc"],
+    name = "native_queue_test",
+    srcs = ["native_queue_test.cc"],
     target_compatible_with = select({
         "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
         ":commands",
-        ":queue",
+        ":native_queue",
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
@@ -175,9 +175,9 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
-    name = "queue",
-    srcs = ["queue.c"],
-    hdrs = ["queue.h"],
+    name = "native_queue",
+    srcs = ["native_queue.c"],
+    hdrs = ["native_queue.h"],
     target_compatible_with = select({
         "//runtime/config/hal:driver_amd_gpu": [],
         "//conditions:default": ["@platforms//:incompatible"],

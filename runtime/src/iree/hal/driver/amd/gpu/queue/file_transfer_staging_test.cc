@@ -14,7 +14,7 @@
 #include "iree/hal/driver/amd/fabric/memory_backend_test_base.h"
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/sdma/commands.h"
-#include "iree/hal/driver/amd/gpu/queue/sdma/queue.h"
+#include "iree/hal/driver/amd/gpu/queue/sdma/native_queue.h"
 #include "iree/hal/driver/amd/status.h"
 #include "iree/hal/utils/fd_file.h"
 #include "iree/hal/utils/host_semaphore.h"
@@ -39,7 +39,7 @@ class FileTransferStagingTest : public MemoryBackendTest,
     // Visibility boundaries completed by this coherent dependency.
     uint32_t boundaries = 0;
     // Exact queue selected by the file caller; staging owns no native queue.
-    iree_hal_amd_gpu_sdma_queue_t* native = nullptr;
+    iree_hal_amd_gpu_sdma_native_queue_t* native = nullptr;
     struct Copy {
       // Placed command dominated by this dependency's lifetime.
       iree_hal_amd_gpu_sdma_submission_t command = {};
@@ -133,7 +133,7 @@ class FileTransferStagingTest : public MemoryBackendTest,
         .accesses = &access,
         .host_access = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
     };
-    IREE_ASSERT_OK(iree_hal_amd_gpu_sdma_queue_allocate(
+    IREE_ASSERT_OK(iree_hal_amd_gpu_sdma_native_queue_allocate(
         &context_, 0, AMDF_QUEUE_PUBLICATION_MODE_KERNEL, &control,
         &publication_, 0, allocator_, &sdma_));
     native_.required_flags =
@@ -188,7 +188,7 @@ class FileTransferStagingTest : public MemoryBackendTest,
                                                 operation->length);
                 copy->command.words = copy->words;
                 copy->command.word_count = IREE_ARRAYSIZE(copy->words);
-                copy->command.notify =
+                copy->command.completion.notify =
                     [](void* user_data, amdf_status_t status,
                        iree_hal_amd_gpu_sdma_retirement_t retirement) {
                       auto* copy = static_cast<BoundaryQueue::Copy*>(user_data);
@@ -197,11 +197,12 @@ class FileTransferStagingTest : public MemoryBackendTest,
                           IREE_HAL_AMD_STATUS_FROM_AMDF(status, "native copy"),
                           nullptr, retirement == IREE_HAL_AMD_GPU_SDMA_RETIRED);
                     };
-                copy->command.user_data = copy.get();
+                copy->command.completion.user_data = copy.get();
                 copy->callback = callback;
                 auto* command = &copy->command;
                 boundary->copies.push_back(std::move(copy));
-                iree_hal_amd_gpu_sdma_queue_submit(boundary->native, command);
+                iree_hal_amd_gpu_sdma_native_queue_submit(boundary->native,
+                                                          command);
                 return iree_ok_status();
               }
               iree_async_single_frontier_t frontier;
@@ -314,7 +315,7 @@ class FileTransferStagingTest : public MemoryBackendTest,
       cleanup.join();
     }
     if (sdma_) {
-      EXPECT_EQ(iree_hal_amd_gpu_sdma_queue_free(sdma_), AMDF_STATUS_OK);
+      EXPECT_EQ(iree_hal_amd_gpu_sdma_native_queue_free(sdma_), AMDF_STATUS_OK);
     }
     if (fabric_) {
       iree_notification_deinitialize(&publication_.notification);
@@ -374,7 +375,8 @@ class FileTransferStagingTest : public MemoryBackendTest,
     PumpUntil([&] { return submitted_ == chunks || queue_.host_owners == 0; });
     ASSERT_EQ(submitted_, chunks);
     EXPECT_EQ(queue_.copies.size(), chunks);
-    const auto source = iree_hal_amd_gpu_sdma_queue_publication_source(sdma_);
+    const auto source =
+        iree_hal_amd_gpu_sdma_native_queue_publication_source(sdma_);
     while (source.publish(source.user_data)) {
     }
   }
@@ -422,7 +424,7 @@ class FileTransferStagingTest : public MemoryBackendTest,
   }
 
   void PollCopies(amdf_status_t status = AMDF_STATUS_OK) {
-    auto source = iree_hal_amd_gpu_sdma_queue_completion_source(sdma_);
+    auto source = iree_hal_amd_gpu_sdma_native_queue_completion_source(sdma_);
     iree_hal_amd_gpu_completion_wait_t wait = {};
     iree_hal_amd_gpu_completion_t completion = {};
     iree_slim_mutex_initialize(&completion.drain_mutex);
@@ -445,17 +447,18 @@ class FileTransferStagingTest : public MemoryBackendTest,
     // Completion failure wakes the distinct publication owner to deliver its
     // retained-copy notifications. Drive that owner before polling file I/O.
     const auto publication =
-        iree_hal_amd_gpu_sdma_queue_publication_source(sdma_);
+        iree_hal_amd_gpu_sdma_native_queue_publication_source(sdma_);
     while (publication.publish(publication.user_data)) {
     }
   }
 
   void StopCopies() {
     amdf_status_t status = AMDF_STATUS_OK;
-    ASSERT_TRUE(iree_hal_amd_gpu_sdma_queue_try_inactivate(sdma_, &status));
+    ASSERT_TRUE(
+        iree_hal_amd_gpu_sdma_native_queue_try_inactivate(sdma_, &status));
     ASSERT_EQ(status, AMDF_STATUS_OK);
     ASSERT_TRUE(native_stopped_);
-    ASSERT_TRUE(iree_hal_amd_gpu_sdma_queue_retire_failed(sdma_));
+    ASSERT_TRUE(iree_hal_amd_gpu_sdma_native_queue_retire_failed(sdma_));
   }
 
   // Application-scoped policy outlives every captured buffer and reservation.
@@ -483,7 +486,7 @@ class FileTransferStagingTest : public MemoryBackendTest,
   // Publication readiness storage owned by the device fixture.
   iree_hal_amd_gpu_publication_t publication_ = {};
   // Production SDMA queue, including real command and retirement storage.
-  iree_hal_amd_gpu_sdma_queue_t* sdma_ = nullptr;
+  iree_hal_amd_gpu_sdma_native_queue_t* sdma_ = nullptr;
   // Production lazy file staging and registration owner.
   iree_hal_amd_gpu_file_staging_t* staging_ = nullptr;
   // File submission captures, returned only after final observation.

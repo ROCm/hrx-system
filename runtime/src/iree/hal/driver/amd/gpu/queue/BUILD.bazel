@@ -319,7 +319,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/hal/driver/amd/fabric:memory_backend_test_base",
         "//runtime/src/iree/hal/driver/amd/gpu:context",
         "//runtime/src/iree/hal/driver/amd/gpu/queue/sdma:commands",
-        "//runtime/src/iree/hal/driver/amd/gpu/queue/sdma:queue",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/sdma:native_queue",
         "//runtime/src/iree/hal/utils:files",
         "//runtime/src/iree/hal/utils:host_semaphore",
         "//runtime/src/iree/io:file_handle",
