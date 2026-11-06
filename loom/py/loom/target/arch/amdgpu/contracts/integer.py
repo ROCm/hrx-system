@@ -36,6 +36,7 @@ from loom.target.contracts import (
     DescriptorEmitForm,
     DescriptorRule,
     EmitDescriptorOp,
+    EmitRegisterSlice,
     Guard,
     GuardDiagnostic,
     RecipeRule,
@@ -1388,6 +1389,33 @@ def _i32_shift_rules(
     )
 
 
+def _i64_word_extract_rules(source_op: Op) -> tuple[DescriptorRule, ...]:
+    # A complete native word already occupies one register unit. Signed and
+    # unsigned extraction have the same bits when the result is exactly i32.
+    return tuple(
+        DescriptorRule(
+            source_op=source_op,
+            guards=(
+                Guard.value_type("source", _I64),
+                Guard.value_type("result", _I32),
+                Guard.i64_range("offset", offset, offset),
+                Guard.i64_range("width", 32, 32),
+                Guard.low_value_register_class("source", register_class),
+                Guard.low_value_register_class("result", register_class),
+            ),
+            emit=(
+                EmitRegisterSlice(
+                    source=ValueRef.operand("source"),
+                    result=_RESULT,
+                    unit_offset=offset // 32,
+                ),
+            ),
+        )
+        for register_class in ("amdgpu.sgpr", "amdgpu.vgpr")
+        for offset in (0, 32)
+    )
+
+
 def _i32_bitfield_extract_rules(
     source_op: Op,
     *,
@@ -2203,6 +2231,8 @@ def _rules() -> tuple[DescriptorRule, ...]:
             "amdgpu.v_lshrrev_b32.src0_inline",
         )
     )
+    rules.extend(_i64_word_extract_rules(scalar_bitwise.scalar_bitfield_extracts))
+    rules.extend(_i64_word_extract_rules(scalar_bitwise.scalar_bitfield_extractu))
     rules.extend(
         _i32_bitfield_extract_rules(
             scalar_bitwise.scalar_bitfield_extracts,

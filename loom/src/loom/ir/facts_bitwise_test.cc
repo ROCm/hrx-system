@@ -17,6 +17,105 @@ namespace loom {
 namespace {
 
 //===----------------------------------------------------------------------===//
+// Transfer functions: bitfield extraction
+//===----------------------------------------------------------------------===//
+
+TEST(BitfieldExtractTransfer, BoundedWordsAndSignBits) {
+  struct TestCase {
+    // Inclusive source interval in the signed i64 fact domain.
+    int64_t minimum;
+    // Inclusive upper endpoint of the source interval.
+    int64_t maximum;
+    // Least significant bit of the extracted field.
+    int64_t offset;
+    // Number of extracted bits.
+    int64_t width;
+    // Exact zero-extended field value.
+    int64_t unsigned_value;
+    // Exact sign-extended field value.
+    int64_t signed_value;
+  };
+  const TestCase cases[] = {
+      {INT64_C(1) << 32, (INT64_C(2) << 32) - 1, 32, 32, 1, 1},
+      {-(INT64_C(1) << 32), -1, 32, 32, UINT32_MAX, -1},
+      {INT64_MIN, INT64_MIN + UINT32_MAX, 32, 32, INT64_C(1) << 31, INT32_MIN},
+      {0, INT64_MAX, 63, 1, 0, 0},
+      {INT64_MIN, -1, 63, 1, 1, -1},
+      {112, 127, 4, 4, 7, 7},
+      {128, 143, 4, 4, 8, -8},
+      {-16, -1, 4, 4, 15, -1},
+  };
+  for (const TestCase& test_case : cases) {
+    SCOPED_TRACE(test_case.minimum);
+    const auto source =
+        loom_value_facts_make(test_case.minimum, test_case.maximum, 1);
+    loom_value_facts_t result;
+    ASSERT_TRUE(loom_value_facts_extract_unsigned_bitfield(
+        source, 64, test_case.offset, test_case.width, &result));
+    EXPECT_TRUE(loom_value_facts_is_exact(result));
+    EXPECT_EQ(result.range_lo, test_case.unsigned_value);
+    ASSERT_TRUE(loom_value_facts_extract_signed_bitfield(
+        source, 64, test_case.offset, test_case.width, &result));
+    EXPECT_TRUE(loom_value_facts_is_exact(result));
+    EXPECT_EQ(result.range_lo, test_case.signed_value);
+  }
+}
+
+TEST(BitfieldExtractTransfer, ByteIntervalsContainEveryExtractedField) {
+  for (int64_t divisor : {1, 2, 3, 16, 32}) {
+    for (int64_t minimum : {-128, -97, -32, -1, 0, 17, 96, 127}) {
+      for (int64_t maximum : {-128, -32, -1, 0, 31, 127}) {
+        if (minimum > maximum) {
+          continue;
+        }
+        const auto source = loom_value_facts_make(minimum, maximum, divisor);
+        for (int64_t offset = 0; offset < 8; ++offset) {
+          for (int64_t width = 1; width <= 8 - offset; ++width) {
+            const int64_t extent = INT64_C(1) << width;
+            loom_value_facts_t unsigned_result;
+            loom_value_facts_t signed_result;
+            ASSERT_TRUE(loom_value_facts_extract_unsigned_bitfield(
+                source, 8, offset, width, &unsigned_result));
+            ASSERT_TRUE(loom_value_facts_extract_signed_bitfield(
+                source, 8, offset, width, &signed_result));
+            for (int64_t value = minimum; value <= maximum; ++value) {
+              if (value % source.known_divisor != 0) {
+                continue;
+              }
+              const int64_t bits =
+                  ((value + 256) / (INT64_C(1) << offset)) % extent;
+              const int64_t signed_value =
+                  bits >= extent / 2 ? bits - extent : bits;
+              EXPECT_LE(unsigned_result.range_lo, bits);
+              EXPECT_GE(unsigned_result.range_hi, bits);
+              EXPECT_EQ(bits % unsigned_result.known_divisor, 0);
+              EXPECT_LE(signed_result.range_lo, signed_value);
+              EXPECT_GE(signed_result.range_hi, signed_value);
+              EXPECT_EQ(signed_value % signed_result.known_divisor, 0);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(BitfieldExtractTransfer, FullWidthRetainsTheSignedDomain) {
+  const auto source = loom_value_facts_make(-256, 256, 16);
+  loom_value_facts_t result;
+  ASSERT_TRUE(
+      loom_value_facts_extract_signed_bitfield(source, 64, 0, 64, &result));
+  EXPECT_EQ(result.range_lo, -256);
+  EXPECT_EQ(result.range_hi, 256);
+  EXPECT_EQ(result.known_divisor, 16);
+  ASSERT_TRUE(
+      loom_value_facts_extract_unsigned_bitfield(source, 64, 0, 64, &result));
+  EXPECT_TRUE(loom_value_facts_is_unknown(result));
+  EXPECT_FALSE(loom_value_facts_extract_unsigned_bitfield(
+      loom_value_facts_exact_i64(-1), 64, 0, 64, &result));
+}
+
+//===----------------------------------------------------------------------===//
 // Transfer functions: shifts
 //===----------------------------------------------------------------------===//
 
