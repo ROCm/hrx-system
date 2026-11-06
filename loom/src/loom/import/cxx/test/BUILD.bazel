@@ -165,7 +165,6 @@ loom_check_test_suite(
         "pointers.cxx-test",
         "predicate_contracts.cxx-test",
         "predicate_contracts_invalid.cxx-test",
-        "record_constructors.cxx-test",
         "record_memory.cxx-test",
         "record_memory_invalid.cxx-test",
         "records.cxx-test",

@@ -476,7 +476,7 @@ func.def inline @Direct__Direct_storage(%this: buffer, %this_byte_offset: offset
 }
 
 // ====
-// RUN: with-checks pass inline-callables,promote-private-fragments,canonicalize,cse,dce
+// RUN: pass inline-callables,promote-private-fragments,canonicalize,cse,dce
 // Dynamic element selection requires the constructed object to retain private
 // storage, but the constructor call itself is still a normal inlined callable.
 #include <hip/hip_runtime.h>
@@ -498,8 +498,58 @@ __global__ [[loom::workgroup_size(64, 1, 1)]] void scale(double* output, const d
 }
 
 // ----
-// CHECK: *buffer.alloca<private>*
-// CHECK-NOT: *Coefficients__Coefficients*
+kernel.def @scale() {
+  %workgroup_count_x = config.get @scale.workgroup_count.x : index
+  %workgroup_count_y = config.get @scale.workgroup_count.y : index
+  %workgroup_count_z = config.get @scale.workgroup_count.z : index
+  %8 = index.constant 64 : index
+  %9 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%8, %9, %9) : index
+} launch(%output: buffer, %input: buffer) {
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %14 = index.cast %workgroup_id_x : index to i32
+  %91 = scalar.constant 6 : i32
+  %92 = scalar.shli %14, %91 : i32
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %19 = index.cast %workitem_id_x : index to i32
+  %i = scalar.addi %92, %19 : i32
+  %21 = index.constant 16 : offset
+  %coefficients_storage = buffer.alloca<private> align(8) %21 : buffer
+  %59 = scalar.constant 1.0 : f64
+  %90 = index.constant 0 : offset
+  %70 = buffer.view %coefficients_storage[%90] : buffer -> view<1xf64>
+  view.store %59, %70[0] : f64, view<1xf64>
+  %71 = scalar.constant 2.0 : f64
+  %89 = index.constant 8 : offset
+  %82 = buffer.view %coefficients_storage[%89] : buffer -> view<1xf64>
+  view.store %71, %82[0] : f64, view<1xf64>
+  %27 = scalar.constant 1 : i32
+  %28 = scalar.andi %i, %27 : i32
+  %29 = scalar.extsi %28 : i32 to i64
+  %87 = scalar.constant 3 : i64
+  %88 = scalar.shli %29, %87 : i64
+  %34 = scalar.assume %88 [range(%88, 0, 9223372036854775807)] : i64
+  %35 = index.cast %34 : i64 to offset
+  %36 = index.assume %35 [range(%35, 0, 8)] : offset
+  %37 = buffer.view %coefficients_storage[%36] : buffer -> view<1xf64>
+  %38 = view.load %37[0] : view<1xf64> -> f64
+  %39 = scalar.extsi %i : i32 to i64
+  %86 = scalar.shli %39, %87 : i64
+  %44 = scalar.assume %86 [range(%86, 0, 9223372036854775807)] : i64
+  %45 = index.cast %44 : i64 to offset
+  %46 = buffer.view %input[%45] : buffer -> view<1xf64>
+  %47 = view.load %46[0] : view<1xf64> -> f64
+  %48 = scalar.mulf %38, %47 : f64
+  %56 = buffer.view %output[%45] : buffer -> view<1xf64>
+  view.store %48, %56[0] : f64, view<1xf64>
+  kernel.return
+}
+
+config.decl @scale.workgroup_count.x : index
+
+config.decl @scale.workgroup_count.y : index
+
+config.decl @scale.workgroup_count.z : index
 
 // ====
 // RUN: verify
@@ -530,3 +580,172 @@ unsigned pointer_storage(float* data) {
   Slice value(data, 1u);
   return value.length;
 }
+
+// ====
+// HIP force-inline attributes apply to both construction and empty destruction.
+#include <hip/hip_runtime.h>
+struct ForcedInlineValue {
+  // Constructed payload observed before automatic destruction.
+  unsigned value;
+  __forceinline__ ForcedInlineValue(unsigned seed) : value(seed + 1u) {}
+  __forceinline__ ~ForcedInlineValue() {}
+};
+unsigned forced_inline_value(unsigned seed) {
+  ForcedInlineValue value(seed);
+  return value.value;
+}
+// ----
+func.def public @forced_inline_value(%seed: i32) -> (i32) {
+  %16 = scalar.constant 1 : i32
+  %17 = scalar.addi %seed, %16 : i32
+  func.return %17 : i32
+}
+
+// ====
+// Delegating arguments, target member initialization, target body, and the
+// delegating body update the same trace in that order.
+static unsigned append_digit(unsigned* trace, unsigned digit) {
+  *trace = *trace * 10u + digit;
+  return digit;
+}
+struct DelegatingOrder {
+  // The target initializes this before either body updates the trace.
+  unsigned value;
+  DelegatingOrder(unsigned seed, unsigned* trace)
+      : value(seed + append_digit(trace, 2u)) {
+    append_digit(trace, 3u);
+  }
+  DelegatingOrder(unsigned* trace)
+      : DelegatingOrder(append_digit(trace, 1u), trace) {
+    value += append_digit(trace, 4u);
+  }
+};
+unsigned delegating_order_value() {
+  unsigned trace = 0u;
+  DelegatingOrder value(&trace);
+  return trace * 100u + value.value;
+}
+// ----
+func.def public @delegating_order_value() -> (i32) {
+  %73 = scalar.constant 123407 : i32
+  func.return %73 : i32
+}
+
+// ====
+// An enclosing aggregate default-initializes every element through the full
+// delegation chain, rather than reusing a partially initialized destination.
+struct DelegatingChain {
+  // Payload initialized and updated by successive delegating bodies.
+  unsigned value;
+  DelegatingChain(unsigned seed, unsigned bias) : value(seed + bias) {}
+  DelegatingChain(unsigned seed) : DelegatingChain(seed, 2u) { value *= 3u; }
+  DelegatingChain() : DelegatingChain(4u) { value += 1u; }
+};
+struct DelegatingPacket {
+  // Distinct element destinations for default construction.
+  DelegatingChain values[2];
+};
+unsigned delegating_array_value() {
+  DelegatingPacket packet;
+  return packet.values[0].value + packet.values[1].value;
+}
+// ----
+func.def public @delegating_array_value() -> (i32) {
+  %78 = scalar.constant 38 : i32
+  func.return %78 : i32
+}
+
+// ====
+// Braced delegation retains the selected target's default argument.
+struct BracedDelegation {
+  // Payload initialized by the selected target constructor.
+  unsigned value;
+  BracedDelegation(unsigned seed, unsigned bias = 5u) : value(seed + bias) {}
+  BracedDelegation() : BracedDelegation{7u} { value += 1u; }
+};
+unsigned braced_delegation_value() {
+  BracedDelegation value;
+  return value.value;
+}
+// ----
+func.def public @braced_delegation_value() -> (i32) {
+  %28 = scalar.constant 13 : i32
+  func.return %28 : i32
+}
+
+// ====
+// A defaulted target applies default member initialization before the body of
+// the user-provided delegating constructor.
+struct DefaultedDelegationTarget {
+  // Default member initializer observed by the delegating body.
+  unsigned value = 5u;
+  DefaultedDelegationTarget() = default;
+  DefaultedDelegationTarget(unsigned adjustment) : DefaultedDelegationTarget() {
+    value += adjustment;
+  }
+};
+unsigned defaulted_delegation_target_value(unsigned adjustment) {
+  DefaultedDelegationTarget value(adjustment);
+  return value.value;
+}
+// ----
+func.def public @defaulted_delegation_target_value(%adjustment: i32) -> (i32) {
+  %20 = scalar.constant 5 : i32
+  %27 = scalar.addi %adjustment, %20 : i32
+  func.return %27 : i32
+}
+
+// ====
+// Delegation through a same-type prvalue and defaulted copy constructor
+// initializes the final object before its delegating body mutates the value.
+struct PrvalueDelegation {
+  // Payload transported through the selected copy-construction target.
+  unsigned value;
+  PrvalueDelegation(unsigned seed) : value(seed) {}
+  PrvalueDelegation(const PrvalueDelegation&) = default;
+  PrvalueDelegation() : PrvalueDelegation(PrvalueDelegation(9u)) { value += 1u; }
+};
+unsigned prvalue_delegation_value() {
+  PrvalueDelegation value;
+  return value.value;
+}
+// ----
+func.def public @prvalue_delegation_value() -> (i32) {
+  %25 = scalar.constant 10 : i32
+  func.return %25 : i32
+}
+
+// ====
+// Forwarding a constant object's address preserves its load; forwarding a
+// native vector preserves lane order through subsequent extraction.
+template <class T> struct RemoveReference { using Type = T; };
+template <class T> struct RemoveReference<T&> { using Type = T; };
+template <class T> struct RemoveReference<T&&> { using Type = T; };
+template <class T>
+constexpr typename RemoveReference<T>::Type&& move(T&& value) {
+  return static_cast<typename RemoveReference<T>::Type&&>(value);
+}
+static constexpr unsigned kPointerValue = 31u;
+static unsigned forward_pointer(const unsigned* value) { return *move(value); }
+unsigned pointer_observation() { return forward_pointer(&kPointerValue); }
+using Words = unsigned __attribute__((vector_size(16)));
+unsigned vector_observation(unsigned seed) {
+  Words values = {seed, seed + 1u, seed + 2u, seed + 3u};
+  return move(values)[2];
+}
+// ----
+func.def public @pointer_observation() -> (i32) {
+  %kPointerValue_storage = global.load @kPointerValue : buffer
+  %kPointerValue_storage_byte_offset = index.constant 0 : offset
+  %20 = buffer.view %kPointerValue_storage[%kPointerValue_storage_byte_offset] : buffer -> view<1xi32>
+  %21 = view.load %20[0] : view<1xi32> -> i32
+  func.return %21 : i32
+}
+
+func.def public @vector_observation(%seed: i32) -> (i32) {
+  %9 = scalar.constant 2 : i32
+  %10 = scalar.addi %seed, %9 : i32
+  func.return %10 : i32
+}
+
+global.rodata.def @kPointerValue = align(4) bytes("1f000000")

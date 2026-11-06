@@ -17,6 +17,7 @@ loom_check_test_suite(
     srcs = [
         "array_records.cxx-test",
         "record_arrays.cxx-test",
+        "record_constructors.cxx-test",
         "record_initialization.cxx-test",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
