@@ -307,10 +307,13 @@ iree_status_t iree_async_proactor_io_uring_probe_buffer_ring(
     iree_io_uring_ring_t* ring, void* probe_page, bool* out_supported);
 
 // Probes retained-pin attachment before publication. The destination already
-// has an empty sparse buffer table. Replacing one empty slot pins no pages and
-// leaves the table empty, including when the optional operation is unavailable.
+// has an empty sparse buffer table of |table_capacity| slots. Uses |probe_page|
+// to detect whether partial clones preserve unrelated registrations and enables
+// metadata-only composition when required. Leaves no registered pages on
+// success. On failure destroy the unpublished ring before freeing |probe_page|.
 iree_status_t iree_async_proactor_io_uring_probe_buffer_clone(
-    iree_io_uring_ring_t* ring, bool* out_supported);
+    iree_io_uring_ring_t* ring, void* probe_page, uint16_t table_capacity,
+    bool* out_supported);
 
 // Buffer registration vtable implementations (in proactor_registration.c).
 iree_status_t iree_async_proactor_io_uring_prepare_buffer(

@@ -85,8 +85,16 @@ typedef struct iree_io_uring_registration_t {
   // Protects ownership state and the pending request queue.
   iree_slim_mutex_t mutex;
 
-  // Current kernel ownership state. Guarded by |mutex|.
-  iree_io_uring_registration_state_t state;
+  // One iree_io_uring_registration_state_t value. Guarded by |mutex|.
+  uint8_t state;
+
+  // The bound owner is delivering requests. Guarded by |mutex|; callbacks
+  // append asynchronous successors for that drain instead of recursing.
+  bool draining;
+
+  // Sparse buffer table capacity when native partial clones discard the suffix;
+  // zero when the kernel preserves it. Configured before publication.
+  uint16_t buffer_clone_capacity;
 
   // Linux task ID recorded when a SINGLE_ISSUER ring becomes bound.
   // Guarded by |mutex| and meaningful only in BOUND state.
@@ -101,9 +109,9 @@ typedef struct iree_io_uring_registration_t {
   // Non-zero when the pending queue may contain requests.
   iree_atomic_int32_t has_pending;
 
-  // The bound owner is delivering requests. Guarded by |mutex|; callbacks
-  // append asynchronous successors for that drain instead of recursing.
-  bool draining;
+  // Owned, unmapped scratch ring for composing partial clones. Holds no pins
+  // between requests. -1 when unused or closed after a native cleanup failure.
+  int buffer_clone_scratch_fd;
 
   // Callback used to wake the owner after a request is queued.
   // Guarded by |mutex|.
