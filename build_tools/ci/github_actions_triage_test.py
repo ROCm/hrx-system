@@ -216,6 +216,39 @@ class GitHubActionsTriageTest(unittest.TestCase):
         self.assertEqual(confirmed.code, "windows_application_control_denial")
         self.assertEqual(confirmed.issue, "hrx-vvf9c")
 
+    def test_windows_bazel_dns_failure_requires_owning_issue_and_boundary(self):
+        log = (
+            "Download failed: UnrecoverableHttpException Unknown host: github.com\n"
+            "Error in download_and_extract: java.io.IOException: Unknown host: "
+            "github.com"
+        )
+        input_job = job(
+            job_name="Bazel / Windows x86-64 / Clang CL / Fastbuild",
+            failed_step="Run IREE Bazel CI",
+        )
+        unconfirmed = self.classify(log, input_job=input_job)
+        self.assertEqual(unconfirmed.category, triage.REPOSITORY)
+        self.assertEqual(unconfirmed.issue, "hrx-m2tne4")
+
+        confirmed = self.classify(
+            log,
+            input_job=input_job,
+            open_issues=frozenset({"hrx-m2tne4"}),
+        )
+        self.assertEqual(confirmed.category, triage.INFRASTRUCTURE)
+        self.assertEqual(confirmed.code, "windows_bazel_dependency_dns_failure")
+        self.assertEqual(confirmed.issue, "hrx-m2tne4")
+
+        linux_job = job(job_name="Bazel / Linux x86-64 / Clang / Fastbuild")
+        self.assertEqual(
+            self.classify(
+                log,
+                input_job=linux_job,
+                open_issues=frozenset({"hrx-m2tne4"}),
+            ).category,
+            triage.UNKNOWN,
+        )
+
     def test_unknown_failures_do_not_share_an_identity_across_jobs(self):
         first = self.classify("opaque", input_job=job(job_id=10))
         second = self.classify("opaque", input_job=job(job_id=11))

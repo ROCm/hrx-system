@@ -20,7 +20,7 @@ REPOSITORY = "repository"
 KNOWN_PRODUCT = "known_product"
 KNOWN_FLAKE = "known_flake"
 UNKNOWN = "unknown"
-TRACKED_ISSUES = ("hrx-78tqc", "hrx-b1gxf3", "hrx-vvf9c")
+TRACKED_ISSUES = ("hrx-78tqc", "hrx-b1gxf3", "hrx-m2tne4", "hrx-vvf9c")
 
 RUNNER_LOST_MESSAGE = (
     "The self-hosted runner lost communication with the server. Verify the "
@@ -203,6 +203,21 @@ def classify_failure(
             "bazel_dependency_connect_timeout",
             "runner network",
             "multiple pinned Bazel dependencies timed out at GitHub",
+        )
+
+    if (
+        "Windows" in str(job.get("name", ""))
+        and failed_steps == ["Run IREE Bazel CI"]
+        and "UnrecoverableHttpException Unknown host:" in log
+        and "Error in download_and_extract:" in log
+    ):
+        return _tracked_finding(
+            open_issues=open_issues,
+            issue="hrx-m2tne4",
+            tracked_category=INFRASTRUCTURE,
+            code="windows_bazel_dependency_dns_failure",
+            subject="Windows Bazel dependency downloads",
+            summary="the Windows runner could not resolve a Bazel dependency host",
         )
 
     if (
