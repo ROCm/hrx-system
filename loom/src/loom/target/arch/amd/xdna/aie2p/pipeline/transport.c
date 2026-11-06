@@ -568,11 +568,12 @@ static uint32_t loom_aie2p_native_ingress_records(
       continue;
     }
     if (step->kind == LOOM_PIPELINE_TRANSPORT_STEP_CHANNEL) {
+      const loom_channel_plan_action_t* source_action = step->source.channel;
       const loom_aie2p_native_configuration_action_t* action =
-          &worker->configuration_actions[step->source.channel -
+          &worker->configuration_actions[source_action -
                                          source->channels.actions];
-      if (!(loom_channel_reserve_isa(step->op) ||
-            loom_channel_publish_isa(step->op)) ||
+      if ((source_action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE &&
+           source_action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH) ||
           action->expected >= 0) {
         return 1;
       }
@@ -1057,15 +1058,19 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
                                             credits);
       }
       if (configuration) {
-        const loom_op_t* preceding =
-            transport_step ? source->transport.steps[transport_step - 1].op
+        const loom_pipeline_transport_step_t* preceding =
+            transport_step ? &source->transport.steps[transport_step - 1]
                            : NULL;
-        if (!ingress && preceding && loom_channel_acquire_isa(preceding) &&
+        if (!ingress && preceding &&
+            preceding->kind == LOOM_PIPELINE_TRANSPORT_STEP_CHANNEL &&
+            preceding->source.channel->kind ==
+                LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE &&
             transport_step + 1 < source->transport.count &&
             source->transport.steps[transport_step + 1].op ==
                 group->completion &&
-            loom_op_const_results(preceding)[0] == payload_record.value_id) {
-          selected->admission = preceding;
+            loom_op_const_results(preceding->op)[0] ==
+                payload_record.value_id) {
+          selected->admission = preceding->op;
           selected->local_words[layout->lock_word] |=
               loom_xdna_register_field_encode(
                   layout->locks.acquire_id,
