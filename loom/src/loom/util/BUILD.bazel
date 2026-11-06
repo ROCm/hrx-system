@@ -5,6 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_fuzz", "loom_cc_instance_library", "loom_cc_library", "loom_cc_test")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -561,6 +562,11 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
+)
+
+loom_check_test(
+    name = "fact_loop_test",
+    src = "fact_loop_test.loom-test",
 )
 
 loom_cc_library(
