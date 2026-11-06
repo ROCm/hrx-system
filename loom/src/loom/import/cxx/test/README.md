@@ -79,6 +79,14 @@ iree-bazel-test --config=asan --config=loom-importer-cxx \
   //loom/src/loom/import/cxx/value/test/vector:compiler_test
 ```
 
+[Object values and initialization](../value/test/object/README.md) cover record
+copies, member aliases, nested arrays, and destination initialization:
+
+```sh
+iree-bazel-test --config=asan --config=loom-importer-cxx \
+  //loom/src/loom/import/cxx/value/test/object:compiler_test
+```
+
 ## Source execution tests
 
 Executable importer inputs use `.cxx`, including handwritten cases and shared

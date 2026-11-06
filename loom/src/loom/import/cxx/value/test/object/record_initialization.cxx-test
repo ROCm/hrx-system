@@ -492,3 +492,141 @@ func.def public @read_bundle() -> (i32, vector<2xi32>, i32, vector<2xi32>, i32) 
   %bundle_bias = scalar.constant 9 : i32
   func.return %bundle_leaves_0_mode, %bundle_leaves_0_lanes, %bundle_leaves_1_mode, %bundle_leaves_1_lanes, %bundle_bias : i32, vector<2xi32>, i32, vector<2xi32>, i32
 }
+
+// ====
+// RUN: pass canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
+// Each completed destination element is visible to the next initializer, across
+// inner arrays and enclosing record elements. Omitted elements become zero.
+struct Command {
+  // Two words initialized in source order.
+  unsigned words[2];
+};
+unsigned ordered() {
+  Command records[2] = {{{3u, records[0].words[0] + 2u}},
+                        {{records[0].words[1] + 2u}}};
+  Command value{{11u, value.words[0] + 2u}};
+  return records[0].words[0] + 10u * records[0].words[1] +
+         100u * records[1].words[0] + 1000u * records[1].words[1] +
+         10000u * value.words[0] + 1000000u * value.words[1];
+}
+// ----
+func.def public @ordered() -> (i32) {
+  %239 = scalar.constant 13110753 : i32
+  func.return %239 : i32
+}
+
+// ====
+// Same-type prvalues initialize their destinations directly in copy, braced,
+// and parenthesized forms. Later clauses read the destination's earlier word.
+struct Command {
+  // Destination-owned words observed during initialization.
+  unsigned words[2];
+};
+unsigned elided(unsigned seed) {
+  Command value = Command{{seed, value.words[0] + 2u}};
+  Command wrapped{(Command{{seed + 6u, wrapped.words[0] + 2u}})};
+  Command direct(Command{{seed + 14u, direct.words[0] + 2u}});
+  return value.words[1] + 100u * wrapped.words[1] + 10000u * direct.words[1];
+}
+// ----
+func.def public @elided(%seed: i32) -> (i32) {
+  %2 = index.constant 8 : offset
+  %value_storage = buffer.alloca<private> align(4) %2 : buffer
+  %143 = index.constant 0 : offset
+  %9 = buffer.view %value_storage[%143] : buffer -> view<1xi32>
+  view.store %seed, %9[0] : i32, view<1xi32>
+  %24 = view.load %9[0] : view<1xi32> -> i32
+  %25 = scalar.constant 2 : i32
+  %26 = scalar.addi %24, %25 : i32
+  %141 = index.constant 4 : offset
+  %28 = buffer.view %value_storage[%141] : buffer -> view<1xi32>
+  view.store %26, %28[0] : i32, view<1xi32>
+  %wrapped_storage = buffer.alloca<private> align(4) %2 : buffer
+  %35 = scalar.constant 6 : i32
+  %36 = scalar.addi %seed, %35 : i32
+  %38 = buffer.view %wrapped_storage[%143] : buffer -> view<1xi32>
+  view.store %36, %38[0] : i32, view<1xi32>
+  %53 = view.load %38[0] : view<1xi32> -> i32
+  %55 = scalar.addi %53, %25 : i32
+  %57 = buffer.view %wrapped_storage[%141] : buffer -> view<1xi32>
+  view.store %55, %57[0] : i32, view<1xi32>
+  %direct_storage = buffer.alloca<private> align(4) %2 : buffer
+  %64 = scalar.constant 14 : i32
+  %65 = scalar.addi %seed, %64 : i32
+  %67 = buffer.view %direct_storage[%143] : buffer -> view<1xi32>
+  view.store %65, %67[0] : i32, view<1xi32>
+  %82 = view.load %67[0] : view<1xi32> -> i32
+  %84 = scalar.addi %82, %25 : i32
+  %86 = buffer.view %direct_storage[%141] : buffer -> view<1xi32>
+  view.store %84, %86[0] : i32, view<1xi32>
+  %99 = view.load %28[0] : view<1xi32> -> i32
+  %100 = scalar.constant 100 : i32
+  %113 = view.load %57[0] : view<1xi32> -> i32
+  %114 = scalar.muli %100, %113 : i32
+  %115 = scalar.addi %99, %114 : i32
+  %116 = scalar.constant 10000 : i32
+  %129 = view.load %86[0] : view<1xi32> -> i32
+  %130 = scalar.muli %116, %129 : i32
+  %131 = scalar.addi %115, %130 : i32
+  func.return %131 : i32
+}
+
+// ====
+// A conditional initializer updates the outer scalar only in its selected arm
+// and publishes the first destination word before the second clause reads it.
+struct Command {
+  // Initialized word pair owned by the selected destination.
+  unsigned words[2];
+};
+unsigned selected(unsigned choice) {
+  unsigned marker = 3;
+  Command value = choice ? Command{{++marker, value.words[0] + 2}}
+                         : (marker += 7, Command{{13, value.words[0] + 2}});
+  return value.words[0] + 100u * value.words[1] + 10000u * marker;
+}
+// ----
+func.def public @selected(%choice: i32) -> (i32) {
+  %3 = index.constant 8 : offset
+  %value_storage = buffer.alloca<private> align(4) %3 : buffer
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.cmpi ne, %choice, %7 : i32
+  %marker = scf.if %8 -> (i32) {
+    %marker = scalar.constant 4 : i32
+    %101 = index.constant 0 : offset
+    %15 = buffer.view %value_storage[%101] : buffer -> view<1xi32>
+    view.store %marker, %15[0] : i32, view<1xi32>
+    %30 = view.load %15[0] : view<1xi32> -> i32
+    %31 = scalar.constant 2 : i32
+    %32 = scalar.addi %30, %31 : i32
+    %99 = index.constant 4 : offset
+    %34 = buffer.view %value_storage[%99] : buffer -> view<1xi32>
+    view.store %32, %34[0] : i32, view<1xi32>
+    scf.yield %marker : i32
+  } else {
+    %marker = scalar.constant 10 : i32
+    %39 = scalar.constant 13 : i32
+    %97 = index.constant 0 : offset
+    %41 = buffer.view %value_storage[%97] : buffer -> view<1xi32>
+    view.store %39, %41[0] : i32, view<1xi32>
+    %56 = view.load %41[0] : view<1xi32> -> i32
+    %57 = scalar.constant 2 : i32
+    %58 = scalar.addi %56, %57 : i32
+    %95 = index.constant 4 : offset
+    %60 = buffer.view %value_storage[%95] : buffer -> view<1xi32>
+    view.store %58, %60[0] : i32, view<1xi32>
+    scf.yield %marker : i32
+  }
+  %94 = index.constant 0 : offset
+  %72 = buffer.view %value_storage[%94] : buffer -> view<1xi32>
+  %73 = view.load %72[0] : view<1xi32> -> i32
+  %74 = scalar.constant 100 : i32
+  %93 = index.constant 4 : offset
+  %86 = buffer.view %value_storage[%93] : buffer -> view<1xi32>
+  %87 = view.load %86[0] : view<1xi32> -> i32
+  %88 = scalar.muli %74, %87 : i32
+  %89 = scalar.addi %73, %88 : i32
+  %90 = scalar.constant 10000 : i32
+  %91 = scalar.muli %90, %marker : i32
+  %92 = scalar.addi %89, %91 : i32
+  func.return %92 : i32
+}

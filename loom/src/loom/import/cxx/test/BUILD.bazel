@@ -87,7 +87,6 @@ loom_check_test_suite(
     srcs = [
         "address_values.cxx-test",
         "address_values_invalid.cxx-test",
-        "array_records.cxx-test",
         "assembly.cxx-test",
         "assembly_invalid.cxx-test",
         "assumptions.cxx-test",
@@ -166,9 +165,7 @@ loom_check_test_suite(
         "pointers.cxx-test",
         "predicate_contracts.cxx-test",
         "predicate_contracts_invalid.cxx-test",
-        "record_arrays.cxx-test",
         "record_constructors.cxx-test",
-        "record_initialization.cxx-test",
         "record_memory.cxx-test",
         "record_memory_invalid.cxx-test",
         "records.cxx-test",

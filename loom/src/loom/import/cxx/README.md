@@ -681,8 +681,9 @@ run through `//loom/src/loom/import/cxx/test:compiler_test` and focused
 [source-language](source/test/README.md),
 [control-flow](control/test/README.md),
 [symbol](symbol/test/README.md),
-[numeric](value/test/numeric/README.md), and
-[vector](value/test/vector/README.md) packages. Native API tests
+[numeric](value/test/numeric/README.md),
+[vector](value/test/vector/README.md), and
+[object](value/test/object/README.md) packages. Native API tests
 cover ownership, source providers, and failure propagation. The
 [execution corpus](test/README.md) uses ordinary `loom_test` targets with
 independent numerical oracles.

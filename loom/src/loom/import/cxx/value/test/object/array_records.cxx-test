@@ -1,0 +1,783 @@
+// RUN: pass canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
+// A fixed array is an immutable value partition inside an enclosing record.
+struct Command { unsigned words[2]; };
+Command forward(Command value) { return value; }
+
+// ----
+func.def public @forward(%value_words_0: i32, %value_words_1: i32) -> (i32, i32) {
+  func.return %value_words_0, %value_words_1 : i32, i32
+}
+
+// ====
+// Constant element mutations return to SSA without retaining a local array.
+struct Command { unsigned words[2]; };
+Command adjust(Command value) { value.words[1] += 3; return value; }
+
+// ----
+func.def public @adjust(%value_words_0: i32, %value_words_1: i32) -> (i32, i32) {
+  %16 = scalar.constant 3 : i32
+  %30 = scalar.addi %value_words_1, %16 : i32
+  func.return %value_words_0, %30 : i32, i32
+}
+
+// ====
+// Whole-object memory access captures every field before replacing the object.
+struct Record { unsigned first, second; };
+Record read(const Record* input) { return *input; }
+void write(Record* output, Record value) { *output = value; }
+
+// ----
+func.def public @read(%input: buffer, %input_byte_offset: offset) -> (i32, i32) {
+  %6 = buffer.view %input[%input_byte_offset] : buffer -> view<1xi32>
+  %7 = view.load %6[0] : view<1xi32> -> i32
+  %8 = index.constant 4 : offset
+  %9 = index.add %input_byte_offset, %8 : offset
+  %10 = buffer.view %input[%9] : buffer -> view<1xi32>
+  %11 = view.load %10[0] : view<1xi32> -> i32
+  func.return %7, %11 : i32, i32
+}
+
+func.def public @write(%output: buffer, %output_byte_offset: offset, %value_first: i32, %value_second: i32) {
+  %18 = buffer.view %output[%output_byte_offset] : buffer -> view<1xi32>
+  view.store %value_first, %18[0] : i32, view<1xi32>
+  %19 = index.constant 4 : offset
+  %20 = index.add %output_byte_offset, %19 : offset
+  %21 = buffer.view %output[%20] : buffer -> view<1xi32>
+  view.store %value_second, %21[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// Both an object pointer and a member pointer retain the parameter's identity.
+struct Record { unsigned first, second; };
+unsigned address(Record value) {
+  auto* object = &value;
+  auto* member = &value.second;
+  *member += 3;
+  return object->first + object->second;
+}
+
+// ----
+func.def public @address(%value_first: i32, %value_second: i32) -> (i32) {
+  %17 = scalar.constant 3 : i32
+  %38 = scalar.addi %value_second, %value_first : i32
+  %39 = scalar.addi %38, %17 : i32
+  func.return %39 : i32
+}
+
+// ====
+// Two vector elements retain their vector components through a record return.
+typedef unsigned U4 __attribute__((vector_size(16)));
+struct Record { U4 values[2]; };
+Record forward(Record value) { return value; }
+
+// ----
+func.def public @forward(%value_values_0: vector<4xi32>, %value_values_1: vector<4xi32>) -> (vector<4xi32>, vector<4xi32>) {
+  func.return %value_values_0, %value_values_1 : vector<4xi32>, vector<4xi32>
+}
+
+// ====
+// A real command-sized copy retains only the observed words after promotion.
+struct Command { unsigned words[16]; };
+unsigned clipped(const Command* source, unsigned skipped) {
+  Command value = source[0];
+  value.words[0] += skipped * value.words[1];
+  return value.words[0];
+}
+
+// ----
+func.def public @clipped(%source: buffer, %source_byte_offset: offset, %skipped: i32) -> (i32) {
+  %12 = index.cast %source_byte_offset : offset to i64
+  %14 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
+  %15 = index.cast %14 : i64 to offset
+  %18 = buffer.view %source[%15] : buffer -> view<1xi32>
+  %19 = view.load %18[0] : view<1xi32> -> i32
+  %20 = index.constant 4 : offset
+  %21 = index.add %15, %20 : offset
+  %22 = buffer.view %source[%21] : buffer -> view<1xi32>
+  %23 = view.load %22[0] : view<1xi32> -> i32
+  %157 = scalar.muli %skipped, %23 : i32
+  %171 = scalar.addi %19, %157 : i32
+  func.return %171 : i32
+}
+
+// ====
+// Dynamic updates of a by-value array cannot modify the caller's saved or
+// original record. The returned temporary owns its values after the call.
+struct Command {
+  // Independently copied word components.
+  unsigned words[2];
+};
+static Command adjust(Command value, unsigned index) {
+  value.words[index] += 3u;
+  return value;
+}
+unsigned copies(unsigned index) {
+  Command original{{37u, 41u}};
+  Command saved = original;
+  Command result = adjust(saved, index);
+  saved.words[0] += 5u;
+  return result.words[0] + 100u * result.words[1] + 10000u * saved.words[0] +
+         1000000u * original.words[0];
+}
+unsigned temporary(unsigned index) {
+  return adjust(Command{{5, 7}}, 1).words[index];
+}
+// ----
+func.def public @copies(%index: i32) -> (i32) {
+  %8 = scalar.constant 37 : i32
+  %13 = scalar.constant 41 : i32
+  %52, %53 = func.call @adjust(%8, %13, %index) : (i32, i32, i32) -> (i32, i32)
+  %90 = scalar.constant 100 : i32
+  %104 = scalar.muli %90, %53 : i32
+  %105 = scalar.addi %52, %104 : i32
+  %225 = scalar.constant 37420000 : i32
+  %226 = scalar.addi %105, %225 : i32
+  func.return %226 : i32
+}
+
+func.def public @temporary(%index: i32) -> (i32) {
+  %140 = scalar.constant 5 : i32
+  %141 = scalar.constant 7 : i32
+  %142 = scalar.constant 1 : i32
+  %143, %144 = func.call @adjust(%140, %141, %142) : (i32, i32, i32) -> (i32, i32)
+  %145 = index.constant 8 : offset
+  %words = buffer.alloca<private> align(4) %145 : buffer
+  %230 = index.constant 0 : offset
+  %152 = buffer.view %words[%230] : buffer -> view<1xi32>
+  view.store %143, %152[0] : i32, view<1xi32>
+  %229 = index.constant 4 : offset
+  %156 = buffer.view %words[%229] : buffer -> view<1xi32>
+  view.store %144, %156[0] : i32, view<1xi32>
+  %159 = scalar.extui %index : i32 to i64
+  %227 = scalar.constant 2 : i64
+  %228 = scalar.shli %159, %227 : i64
+  %164 = scalar.assume %228 [range(%228, 0, 9223372036854775807)] : i64
+  %165 = index.cast %164 : i64 to offset
+  %166 = index.assume %165 [range(%165, 0, 4)] : offset
+  %167 = buffer.view %words[%166] : buffer -> view<1xi32>
+  %168 = view.load %167[0] : view<1xi32> -> i32
+  func.return %168 : i32
+}
+
+func.def @adjust(%value_words_0$169: i32, %value_words_1$170: i32, %index: i32) -> (i32, i32) {
+  %174 = index.constant 8 : offset
+  %value_storage = buffer.alloca<private> align(4) %174 : buffer
+  %236 = index.constant 0 : offset
+  %181 = buffer.view %value_storage[%236] : buffer -> view<1xi32>
+  view.store %value_words_0$169, %181[0] : i32, view<1xi32>
+  %235 = index.constant 4 : offset
+  %185 = buffer.view %value_storage[%235] : buffer -> view<1xi32>
+  view.store %value_words_1$170, %185[0] : i32, view<1xi32>
+  %186 = scalar.constant 3 : i32
+  %189 = scalar.extui %index : i32 to i64
+  %233 = scalar.constant 2 : i64
+  %234 = scalar.shli %189, %233 : i64
+  %194 = scalar.assume %234 [range(%234, 0, 9223372036854775807)] : i64
+  %195 = index.cast %194 : i64 to offset
+  %196 = index.assume %195 [range(%195, 0, 4)] : offset
+  %197 = buffer.view %value_storage[%196] : buffer -> view<1xi32>
+  %198 = view.load %197[0] : view<1xi32> -> i32
+  %199 = scalar.addi %198, %186 : i32
+  view.store %199, %197[0] : i32, view<1xi32>
+  %value_words_0$204 = view.load %181[0] : view<1xi32> -> i32
+  %value_words_1$209 = view.load %185[0] : view<1xi32> -> i32
+  func.return %value_words_0$204, %value_words_1$209 : i32, i32
+}
+
+// ====
+// Snapshot both source fields before a member alias mutates the copy. A
+// self-assignment preserves it; subsequent whole-record stores use distinct
+// saved snapshots even if the source record aliases a destination.
+struct Command {
+  // Two scalar components belonging to each independent object.
+  unsigned words[2];
+};
+void snapshots(Command* records, unsigned index) {
+  Command saved = records[index];
+  Command other = saved;
+  Command* object = &saved;
+  unsigned* member = object->words;
+  member[1] += 17u;
+  *object = *object;
+  records[0] = saved;
+  records[1] = other;
+}
+// ----
+func.def public @snapshots(%records: buffer, %records_byte_offset: offset, %index: i32) {
+  %7 = scalar.extui %index : i32 to i64
+  %123 = scalar.constant 3 : i64
+  %124 = scalar.shli %7, %123 : i64
+  %10 = index.cast %records_byte_offset : offset to i64
+  %11 = scalar.addi %10, %124 : i64
+  %12 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
+  %13 = index.cast %12 : i64 to offset
+  %16 = buffer.view %records[%13] : buffer -> view<1xi32>
+  %17 = view.load %16[0] : view<1xi32> -> i32
+  %18 = index.constant 4 : offset
+  %19 = index.add %13, %18 : offset
+  %20 = buffer.view %records[%19] : buffer -> view<1xi32>
+  %21 = view.load %20[0] : view<1xi32> -> i32
+  %42 = scalar.constant 17 : i32
+  %54 = scalar.addi %21, %42 : i32
+  %89 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %90 = index.cast %89 : i64 to offset
+  %93 = buffer.view %records[%90] : buffer -> view<1xi32>
+  view.store %17, %93[0] : i32, view<1xi32>
+  %95 = index.add %90, %18 : offset
+  %96 = buffer.view %records[%95] : buffer -> view<1xi32>
+  view.store %54, %96[0] : i32, view<1xi32>
+  %111 = scalar.constant 8 : i64
+  %102 = scalar.addi %89, %111 : i64
+  %103 = scalar.assume %102 [range(%102, 0, 9223372036854775807)] : i64
+  %104 = index.cast %103 : i64 to offset
+  %107 = buffer.view %records[%104] : buffer -> view<1xi32>
+  view.store %17, %107[0] : i32, view<1xi32>
+  %109 = index.add %104, %18 : offset
+  %110 = buffer.view %records[%109] : buffer -> view<1xi32>
+  view.store %21, %110[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// Nested array extents retain their row strides through by-value calls and
+// copies. Updating a copy leaves both the original and the untouched row intact.
+struct Matrix {
+  // Two rows, each containing two words.
+  unsigned values[2][2];
+};
+static Matrix forward(Matrix value) { return value; }
+unsigned matrix_copy(unsigned index, unsigned seed) {
+  Matrix original{};
+  original.values[1][index] = seed;
+  Matrix copy = forward(original);
+  copy.values[1][index] += 2u;
+  return original.values[1][index] + copy.values[1][index] + original.values[0][0];
+}
+// ----
+func.def public @matrix_copy(%index: i32, %seed: i32) -> (i32) {
+  %3 = index.constant 16 : offset
+  %original_storage = buffer.alloca<private> align(4) %3 : buffer
+  %zero$i32 = scalar.constant 0 : i32
+  %211 = index.constant 0 : offset
+  %11 = buffer.view %original_storage[%211] : buffer -> view<1xi32>
+  view.store %zero$i32, %11[0] : i32, view<1xi32>
+  %210 = index.constant 4 : offset
+  %16 = buffer.view %original_storage[%210] : buffer -> view<1xi32>
+  view.store %zero$i32, %16[0] : i32, view<1xi32>
+  %209 = index.constant 8 : offset
+  %21 = buffer.view %original_storage[%209] : buffer -> view<1xi32>
+  view.store %zero$i32, %21[0] : i32, view<1xi32>
+  %208 = index.constant 12 : offset
+  %26 = buffer.view %original_storage[%208] : buffer -> view<1xi32>
+  view.store %zero$i32, %26[0] : i32, view<1xi32>
+  %37 = scalar.extui %index : i32 to i64
+  %206 = scalar.constant 2 : i64
+  %207 = scalar.shli %37, %206 : i64
+  %205 = scalar.constant 8 : i64
+  %204 = scalar.addi %207, %205 : i64
+  %42 = scalar.assume %204 [range(%204, 0, 9223372036854775807)] : i64
+  %43 = index.cast %42 : i64 to offset
+  %44 = index.assume %43 [range(%43, 0, 12)] : offset
+  %45 = buffer.view %original_storage[%44] : buffer -> view<1xi32>
+  view.store %seed, %45[0] : i32, view<1xi32>
+  %copy_storage = buffer.alloca<private> align(4) %3 : buffer
+  %original_values_0_0 = view.load %11[0] : view<1xi32> -> i32
+  %original_values_0_1 = view.load %16[0] : view<1xi32> -> i32
+  %original_values_1_0 = view.load %21[0] : view<1xi32> -> i32
+  %original_values_1_1 = view.load %26[0] : view<1xi32> -> i32
+  %70, %71, %72, %73 = func.call pure @forward(%original_values_0_0, %original_values_0_1, %original_values_1_0, %original_values_1_1) : (i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  %77 = buffer.view %copy_storage[%211] : buffer -> view<1xi32>
+  view.store %70, %77[0] : i32, view<1xi32>
+  %81 = buffer.view %copy_storage[%210] : buffer -> view<1xi32>
+  view.store %71, %81[0] : i32, view<1xi32>
+  %85 = buffer.view %copy_storage[%209] : buffer -> view<1xi32>
+  view.store %72, %85[0] : i32, view<1xi32>
+  %89 = buffer.view %copy_storage[%208] : buffer -> view<1xi32>
+  view.store %73, %89[0] : i32, view<1xi32>
+  %90 = scalar.constant 2 : i32
+  %109 = buffer.view %copy_storage[%44] : buffer -> view<1xi32>
+  %110 = view.load %109[0] : view<1xi32> -> i32
+  %111 = scalar.addi %110, %90 : i32
+  view.store %111, %109[0] : i32, view<1xi32>
+  %131 = view.load %45[0] : view<1xi32> -> i32
+  %151 = view.load %109[0] : view<1xi32> -> i32
+  %152 = scalar.addi %131, %151 : i32
+  %173 = view.load %11[0] : view<1xi32> -> i32
+  %174 = scalar.addi %152, %173 : i32
+  func.return %174 : i32
+}
+
+func.def @forward(%value_values_0_0: i32, %value_values_0_1: i32, %value_values_1_0: i32, %value_values_1_1: i32) -> (i32, i32, i32, i32) {
+  func.return %value_values_0_0, %value_values_0_1, %value_values_1_0, %value_values_1_1 : i32, i32, i32, i32
+}
+
+// ====
+// An array of records containing arrays keeps every object partition separate.
+struct Command {
+  // Two words belonging to one command.
+  unsigned words[2];
+};
+struct Commands {
+  // Two independently copied commands.
+  Command values[2];
+};
+static Commands forward(Commands value) { return value; }
+unsigned command_copy(unsigned index, unsigned seed) {
+  Commands original{};
+  original.values[index].words[1] = seed;
+  Commands copy = forward(original);
+  copy.values[index].words[1] += 3u;
+  return original.values[index].words[1] + copy.values[index].words[1] +
+         original.values[1u - index].words[0];
+}
+// ----
+func.def public @command_copy(%index: i32, %seed: i32) -> (i32) {
+  %3 = index.constant 16 : offset
+  %original_storage = buffer.alloca<private> align(4) %3 : buffer
+  %zero$i32 = scalar.constant 0 : i32
+  %231 = index.constant 0 : offset
+  %13 = buffer.view %original_storage[%231] : buffer -> view<1xi32>
+  view.store %zero$i32, %13[0] : i32, view<1xi32>
+  %230 = index.constant 4 : offset
+  %18 = buffer.view %original_storage[%230] : buffer -> view<1xi32>
+  view.store %zero$i32, %18[0] : i32, view<1xi32>
+  %229 = index.constant 8 : offset
+  %25 = buffer.view %original_storage[%229] : buffer -> view<1xi32>
+  view.store %zero$i32, %25[0] : i32, view<1xi32>
+  %228 = index.constant 12 : offset
+  %30 = buffer.view %original_storage[%228] : buffer -> view<1xi32>
+  view.store %zero$i32, %30[0] : i32, view<1xi32>
+  %33 = scalar.extui %index : i32 to i64
+  %226 = scalar.constant 3 : i64
+  %227 = scalar.shli %33, %226 : i64
+  %38 = scalar.assume %227 [range(%227, 0, 9223372036854775807)] : i64
+  %39 = index.cast %38 : i64 to offset
+  %225 = scalar.constant 4 : i64
+  %46 = index.cast %39 : offset to i64
+  %47 = scalar.addi %46, %225 : i64
+  %48 = scalar.assume %47 [range(%47, 0, 9223372036854775807)] : i64
+  %49 = index.cast %48 : i64 to offset
+  %50 = index.assume %49 [range(%49, 0, 12)] : offset
+  %51 = buffer.view %original_storage[%50] : buffer -> view<1xi32>
+  view.store %seed, %51[0] : i32, view<1xi32>
+  %copy_storage = buffer.alloca<private> align(4) %3 : buffer
+  %original_values_0_words_0 = view.load %13[0] : view<1xi32> -> i32
+  %original_values_0_words_1 = view.load %18[0] : view<1xi32> -> i32
+  %original_values_1_words_0 = view.load %25[0] : view<1xi32> -> i32
+  %original_values_1_words_1 = view.load %30[0] : view<1xi32> -> i32
+  %80, %81, %82, %83 = func.call pure @forward(%original_values_0_words_0, %original_values_0_words_1, %original_values_1_words_0, %original_values_1_words_1) : (i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  %89 = buffer.view %copy_storage[%231] : buffer -> view<1xi32>
+  view.store %80, %89[0] : i32, view<1xi32>
+  %93 = buffer.view %copy_storage[%230] : buffer -> view<1xi32>
+  view.store %81, %93[0] : i32, view<1xi32>
+  %99 = buffer.view %copy_storage[%229] : buffer -> view<1xi32>
+  view.store %82, %99[0] : i32, view<1xi32>
+  %103 = buffer.view %copy_storage[%228] : buffer -> view<1xi32>
+  view.store %83, %103[0] : i32, view<1xi32>
+  %104 = scalar.constant 3 : i32
+  %125 = buffer.view %copy_storage[%50] : buffer -> view<1xi32>
+  %126 = view.load %125[0] : view<1xi32> -> i32
+  %127 = scalar.addi %126, %104 : i32
+  view.store %127, %125[0] : i32, view<1xi32>
+  %149 = view.load %51[0] : view<1xi32> -> i32
+  %171 = view.load %125[0] : view<1xi32> -> i32
+  %172 = scalar.addi %149, %171 : i32
+  %175 = scalar.constant 1 : i32
+  %176 = scalar.subi %175, %index : i32
+  %177 = scalar.extui %176 : i32 to i64
+  %207 = scalar.shli %177, %226 : i64
+  %182 = scalar.assume %207 [range(%207, 0, 9223372036854775807)] : i64
+  %183 = index.cast %182 : i64 to offset
+  %190 = index.cast %183 : offset to i64
+  %192 = scalar.assume %190 [range(%190, 0, 9223372036854775807)] : i64
+  %193 = index.cast %192 : i64 to offset
+  %194 = index.assume %193 [range(%193, 0, 12)] : offset
+  %195 = buffer.view %original_storage[%194] : buffer -> view<1xi32>
+  %196 = view.load %195[0] : view<1xi32> -> i32
+  %197 = scalar.addi %172, %196 : i32
+  func.return %197 : i32
+}
+
+func.def @forward(%value_values_0_words_0: i32, %value_values_0_words_1: i32, %value_values_1_words_0: i32, %value_values_1_words_1: i32) -> (i32, i32, i32, i32) {
+  func.return %value_values_0_words_0, %value_values_0_words_1, %value_values_1_words_0, %value_values_1_words_1 : i32, i32, i32, i32
+}
+
+// ====
+// Narrow signed and boolean arrays use their source storage widths while
+// transported values preserve signed extension and boolean normalization.
+struct Observations {
+  // Signed 16-bit fields updated through integer promotion.
+  short narrow[2];
+  // Boolean fields stored as bytes and transported as predicates.
+  bool flags[2];
+};
+static Observations forward(Observations value) { return value; }
+unsigned narrow_copy(unsigned index) {
+  Observations original{};
+  original.narrow[index] = -7;
+  original.flags[index] = true;
+  Observations copy = forward(original);
+  copy.narrow[index] += 5;
+  copy.flags[index] = false;
+  return unsigned(copy.narrow[index] + 7) + original.flags[index] + copy.flags[index];
+}
+// ----
+func.def public @narrow_copy(%index: i32) -> (i32) {
+  %2 = index.constant 6 : offset
+  %original_storage = buffer.alloca<private> align(2) %2 : buffer
+  %zero$i16 = scalar.constant 0 : i16
+  %224 = index.constant 0 : offset
+  %10 = buffer.view %original_storage[%224] : buffer -> view<1xi16>
+  view.store %zero$i16, %10[0] : i16, view<1xi16>
+  %223 = index.constant 2 : offset
+  %15 = buffer.view %original_storage[%223] : buffer -> view<1xi16>
+  view.store %zero$i16, %15[0] : i16, view<1xi16>
+  %222 = index.constant 4 : offset
+  %20 = buffer.view %original_storage[%222] : buffer -> view<1xi8>
+  %221 = scalar.constant 0 : i8
+  view.store %221, %20[0] : i8, view<1xi8>
+  %220 = index.constant 5 : offset
+  %26 = buffer.view %original_storage[%220] : buffer -> view<1xi8>
+  view.store %221, %26[0] : i8, view<1xi8>
+  %218 = scalar.constant -7 : i16
+  %34 = scalar.extui %index : i32 to i64
+  %216 = scalar.constant 1 : i64
+  %217 = scalar.shli %34, %216 : i64
+  %39 = scalar.assume %217 [range(%217, 0, 9223372036854775807)] : i64
+  %40 = index.cast %39 : i64 to offset
+  %41 = index.assume %40 [range(%40, 0, 4)] : offset
+  %42 = buffer.view %original_storage[%41] : buffer -> view<1xi16>
+  view.store %218, %42[0] : i16, view<1xi16>
+  %215 = scalar.constant 4 : i64
+  %214 = scalar.addi %34, %215 : i64
+  %51 = scalar.assume %214 [range(%214, 0, 9223372036854775807)] : i64
+  %52 = index.cast %51 : i64 to offset
+  %53 = index.assume %52 [range(%52, 0, 5)] : offset
+  %54 = buffer.view %original_storage[%53] : buffer -> view<1xi8>
+  %213 = scalar.constant 1 : i8
+  view.store %213, %54[0] : i8, view<1xi8>
+  %copy_storage = buffer.alloca<private> align(2) %2 : buffer
+  %original_narrow_0 = view.load %10[0] : view<1xi16> -> i16
+  %original_narrow_1 = view.load %15[0] : view<1xi16> -> i16
+  %74 = view.load %20[0] : view<1xi8> -> i8
+  %original_flags_0 = scalar.cmpi ne, %74, %221 : i8
+  %81 = view.load %26[0] : view<1xi8> -> i8
+  %original_flags_1 = scalar.cmpi ne, %81, %221 : i8
+  %84, %85, %86, %87 = func.call pure @forward(%original_narrow_0, %original_narrow_1, %original_flags_0, %original_flags_1) : (i16, i16, i1, i1) -> (i16, i16, i1, i1)
+  %91 = buffer.view %copy_storage[%224] : buffer -> view<1xi16>
+  view.store %84, %91[0] : i16, view<1xi16>
+  %95 = buffer.view %copy_storage[%223] : buffer -> view<1xi16>
+  view.store %85, %95[0] : i16, view<1xi16>
+  %99 = buffer.view %copy_storage[%222] : buffer -> view<1xi8>
+  %100 = scalar.extui %86 : i1 to i8
+  view.store %100, %99[0] : i8, view<1xi8>
+  %104 = buffer.view %copy_storage[%220] : buffer -> view<1xi8>
+  %105 = scalar.extui %87 : i1 to i8
+  view.store %105, %104[0] : i8, view<1xi8>
+  %106 = scalar.constant 5 : i32
+  %117 = buffer.view %copy_storage[%41] : buffer -> view<1xi16>
+  %118 = view.load %117[0] : view<1xi16> -> i16
+  %119 = scalar.extsi %118 : i16 to i32
+  %120 = scalar.addi %119, %106 : i32
+  %121 = scalar.trunci %120 : i32 to i16
+  view.store %121, %117[0] : i16, view<1xi16>
+  %133 = buffer.view %copy_storage[%53] : buffer -> view<1xi8>
+  view.store %221, %133[0] : i8, view<1xi8>
+  %146 = view.load %117[0] : view<1xi16> -> i16
+  %147 = scalar.extsi %146 : i16 to i32
+  %148 = scalar.constant 7 : i32
+  %161 = view.load %54[0] : view<1xi8> -> i8
+  %163 = scalar.cmpi ne, %161, %221 : i8
+  %164 = scalar.extui %163 : i1 to i32
+  %192 = scalar.addi %147, %164 : i32
+  %177 = view.load %133[0] : view<1xi8> -> i8
+  %179 = scalar.cmpi ne, %177, %221 : i8
+  %180 = scalar.extui %179 : i1 to i32
+  %194 = scalar.addi %192, %180 : i32
+  %195 = scalar.addi %194, %148 : i32
+  func.return %195 : i32
+}
+
+func.def @forward(%value_narrow_0: i16, %value_narrow_1: i16, %value_flags_0: i1, %value_flags_1: i1) -> (i16, i16, i1, i1) {
+  func.return %value_narrow_0, %value_narrow_1, %value_flags_0, %value_flags_1 : i16, i16, i1, i1
+}
+
+// ====
+// Const array elements remain independently copied values and support dynamic
+// observations of both the original object and its copy.
+struct ConstArray {
+  // Read-only source words carried through the record value partition.
+  const unsigned words[2];
+};
+unsigned constant_member(unsigned index) {
+  ConstArray original{{3, 5}};
+  ConstArray copy = original;
+  return copy.words[index] + original.words[1u - index];
+}
+// ----
+func.def public @constant_member(%index: i32) -> (i32) {
+  %2 = index.constant 8 : offset
+  %original_storage = buffer.alloca<private> align(4) %2 : buffer
+  %8 = scalar.constant 3 : i32
+  %74 = index.constant 0 : offset
+  %10 = buffer.view %original_storage[%74] : buffer -> view<1xi32>
+  view.store %8, %10[0] : i32, view<1xi32>
+  %13 = scalar.constant 5 : i32
+  %73 = index.constant 4 : offset
+  %15 = buffer.view %original_storage[%73] : buffer -> view<1xi32>
+  view.store %13, %15[0] : i32, view<1xi32>
+  %copy_storage = buffer.alloca<private> align(4) %2 : buffer
+  %original_words_0 = view.load %10[0] : view<1xi32> -> i32
+  %original_words_1 = view.load %15[0] : view<1xi32> -> i32
+  %33 = buffer.view %copy_storage[%74] : buffer -> view<1xi32>
+  view.store %original_words_0, %33[0] : i32, view<1xi32>
+  %37 = buffer.view %copy_storage[%73] : buffer -> view<1xi32>
+  view.store %original_words_1, %37[0] : i32, view<1xi32>
+  %40 = scalar.extui %index : i32 to i64
+  %67 = scalar.constant 2 : i64
+  %68 = scalar.shli %40, %67 : i64
+  %45 = scalar.assume %68 [range(%68, 0, 9223372036854775807)] : i64
+  %46 = index.cast %45 : i64 to offset
+  %47 = index.assume %46 [range(%46, 0, 4)] : offset
+  %48 = buffer.view %copy_storage[%47] : buffer -> view<1xi32>
+  %49 = view.load %48[0] : view<1xi32> -> i32
+  %52 = scalar.constant 1 : i32
+  %53 = scalar.subi %52, %index : i32
+  %54 = scalar.extui %53 : i32 to i64
+  %66 = scalar.shli %54, %67 : i64
+  %59 = scalar.assume %66 [range(%66, 0, 9223372036854775807)] : i64
+  %60 = index.cast %59 : i64 to offset
+  %61 = index.assume %60 [range(%60, 0, 4)] : offset
+  %62 = buffer.view %original_storage[%61] : buffer -> view<1xi32>
+  %63 = view.load %62[0] : view<1xi32> -> i32
+  %64 = scalar.addi %49, %63 : i32
+  func.return %64 : i32
+}
+
+// ====
+// Explicit vectors remain whole components in a copied record array, including
+// dynamic element mutation, a helper call, and a separate local vector array.
+using Words = unsigned __attribute__((vector_size(16)));
+struct VectorRecord {
+  // Two vector components with independent lane values.
+  Words values[2];
+};
+static Words forward(Words value) { return value; }
+unsigned vector_elements(unsigned index) {
+  VectorRecord original{{Words{1, 2, 3, 4}, Words{5, 6, 7, 8}}};
+  VectorRecord copy = original;
+  copy.values[index] += Words{1, 1, 1, 1};
+  Words observed = forward(copy.values[index]);
+  Words first = original.values[0];
+  Words array[2] = {Words{11, 13, 17, 19}, Words{23, 29, 31, 37}};
+  Words selected = array[index];
+  return observed[3] + first[0] + selected[0];
+}
+// ----
+func.def public @vector_elements(%index: i32) -> (i32) {
+  %2 = index.constant 32 : offset
+  %original_storage = buffer.alloca<private> align(16) %2 : buffer
+  %8 = vector.constanti [1, 2, 3, 4] : vector<4xi32>
+  %133 = index.constant 0 : offset
+  %10 = buffer.view %original_storage[%133] : buffer -> view<4xi32>
+  vector.store %8, %10[0] : vector<4xi32>, view<4xi32>
+  %13 = vector.constanti [5, 6, 7, 8] : vector<4xi32>
+  %132 = index.constant 16 : offset
+  %15 = buffer.view %original_storage[%132] : buffer -> view<4xi32>
+  vector.store %13, %15[0] : vector<4xi32>, view<4xi32>
+  %copy_storage = buffer.alloca<private> align(16) %2 : buffer
+  %original_values_0 = vector.load %10[0] : view<4xi32> -> vector<4xi32>
+  %original_values_1 = vector.load %15[0] : view<4xi32> -> vector<4xi32>
+  %33 = buffer.view %copy_storage[%133] : buffer -> view<4xi32>
+  vector.store %original_values_0, %33[0] : vector<4xi32>, view<4xi32>
+  %37 = buffer.view %copy_storage[%132] : buffer -> view<4xi32>
+  vector.store %original_values_1, %37[0] : vector<4xi32>, view<4xi32>
+  %127 = vector.splati 1 : vector<4xi32>
+  %41 = scalar.extui %index : i32 to i64
+  %125 = scalar.constant 4 : i64
+  %126 = scalar.shli %41, %125 : i64
+  %46 = scalar.assume %126 [range(%126, 0, 9223372036854775807)] : i64
+  %47 = index.cast %46 : i64 to offset
+  %48 = index.assume %47 [range(%47, 0, 16)] : offset
+  %49 = buffer.view %copy_storage[%48] : buffer -> view<4xi32>
+  %50 = vector.load %49[0] : view<4xi32> -> vector<4xi32>
+  %51 = vector.addi %50, %127 : vector<4xi32>
+  vector.store %51, %49[0] : vector<4xi32>, view<4xi32>
+  %63 = vector.load %49[0] : view<4xi32> -> vector<4xi32>
+  %observed = func.call pure @forward(%63) : (vector<4xi32>) -> (vector<4xi32>)
+  %117 = view.load %10[0] : view<4xi32> -> i32
+  %array_storage = buffer.alloca<private> align(16) %2 : buffer
+  %82 = vector.constanti [11, 13, 17, 19] : vector<4xi32>
+  %84 = buffer.view %array_storage[%133] : buffer -> view<4xi32>
+  vector.store %82, %84[0] : vector<4xi32>, view<4xi32>
+  %87 = vector.constanti [23, 29, 31, 37] : vector<4xi32>
+  %89 = buffer.view %array_storage[%132] : buffer -> view<4xi32>
+  vector.store %87, %89[0] : vector<4xi32>, view<4xi32>
+  %98 = buffer.view %array_storage[%48] : buffer -> view<4xi32>
+  %116 = view.load %98[0] : view<4xi32> -> i32
+  %115 = vector.extract %observed[3] : vector<4xi32> -> i32
+  %106 = scalar.addi %115, %117 : i32
+  %110 = scalar.addi %106, %116 : i32
+  func.return %110 : i32
+}
+
+func.def @forward(%value: vector<4xi32>) -> (vector<4xi32>) {
+  func.return %value : vector<4xi32>
+}
+
+// ====
+// Mixed nested shapes share one source layout: array extents and narrow field
+// offsets must compose before any by-value snapshot flattens their components.
+struct Command {
+  // Two words belonging to one nested command.
+  unsigned words[2];
+};
+struct Nested {
+  // Two independent row and column extents.
+  unsigned matrix[2][2];
+  // Two commands, each with its own word array.
+  Command commands[2];
+  // Signed 16-bit values after the command array.
+  short narrow[2];
+  // Byte-sized boolean storage after the narrow array.
+  bool flags[2];
+};
+static_assert(sizeof(Nested) == 40);
+void nested_layout(Nested* value, unsigned index) {
+  value->matrix[1][index] = 17;
+  value->commands[index].words[1] = 19;
+  value->narrow[index] = -7;
+  value->flags[index] = true;
+}
+// ----
+func.def public @nested_layout(%value: buffer, %value_byte_offset: offset, %index: i32) {
+  %3 = scalar.constant 17 : i32
+  %78 = scalar.constant 8 : i64
+  %10 = index.cast %value_byte_offset : offset to i64
+  %11 = scalar.addi %10, %78 : i64
+  %12 = scalar.assume %11 [range(%11, 0, 9223372036854775807)] : i64
+  %13 = index.cast %12 : i64 to offset
+  %14 = scalar.extui %index : i32 to i64
+  %76 = scalar.constant 2 : i64
+  %77 = scalar.shli %14, %76 : i64
+  %17 = index.cast %13 : offset to i64
+  %18 = scalar.addi %17, %77 : i64
+  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+  %20 = index.cast %19 : i64 to offset
+  %21 = buffer.view %value[%20] : buffer -> view<1xi32>
+  view.store %3, %21[0] : i32, view<1xi32>
+  %22 = scalar.constant 19 : i32
+  %23 = index.constant 16 : offset
+  %commands_byte_offset = index.add %value_byte_offset, %23 : offset
+  %74 = scalar.constant 3 : i64
+  %75 = scalar.shli %14, %74 : i64
+  %28 = index.cast %commands_byte_offset : offset to i64
+  %29 = scalar.addi %28, %75 : i64
+  %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
+  %31 = index.cast %30 : i64 to offset
+  %73 = scalar.constant 4 : i64
+  %38 = index.cast %31 : offset to i64
+  %39 = scalar.addi %38, %73 : i64
+  %40 = scalar.assume %39 [range(%39, 0, 9223372036854775807)] : i64
+  %41 = index.cast %40 : i64 to offset
+  %42 = buffer.view %value[%41] : buffer -> view<1xi32>
+  view.store %22, %42[0] : i32, view<1xi32>
+  %72 = scalar.constant -7 : i16
+  %47 = index.constant 32 : offset
+  %narrow_byte_offset = index.add %value_byte_offset, %47 : offset
+  %70 = scalar.constant 1 : i64
+  %71 = scalar.shli %14, %70 : i64
+  %52 = index.cast %narrow_byte_offset : offset to i64
+  %53 = scalar.addi %52, %71 : i64
+  %54 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
+  %55 = index.cast %54 : i64 to offset
+  %56 = buffer.view %value[%55] : buffer -> view<1xi16>
+  view.store %72, %56[0] : i16, view<1xi16>
+  %58 = index.constant 36 : offset
+  %flags_byte_offset = index.add %value_byte_offset, %58 : offset
+  %63 = index.cast %flags_byte_offset : offset to i64
+  %64 = scalar.addi %63, %14 : i64
+  %65 = scalar.assume %64 [range(%64, 0, 9223372036854775807)] : i64
+  %66 = index.cast %65 : i64 to offset
+  %67 = buffer.view %value[%66] : buffer -> view<1xi8>
+  %69 = scalar.constant 1 : i8
+  view.store %69, %67[0] : i8, view<1xi8>
+  func.return
+}
+
+// ====
+// A kernel snapshots an input record before a by-value helper changes its own
+// copy. Member and whole-record output writes preserve the original input.
+struct Command {
+  // Independently copied source words.
+  unsigned words[2];
+};
+static unsigned change(Command value, unsigned index) {
+  value.words[index] += 3u;
+  return value.words[index];
+}
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void array_records_kernel(const Command* input, Command* output) {
+  Command saved = input[0];
+  unsigned changed = change(saved, input[1].words[0] & 1u);
+  saved.words[0] += 5u;
+  output[0] = saved;
+  output[1].words[0] = changed;
+  output[1].words[1] = input[0].words[1];
+}
+// ----
+kernel.def @array_records_kernel() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%input: buffer, %output: buffer) {
+  %10 = index.constant 8 : offset
+  %224 = index.constant 0 : offset
+  %24 = buffer.view %input[%224] : buffer -> view<1xi32>
+  %25 = view.load %24[0] : view<1xi32> -> i32
+  %223 = index.constant 4 : offset
+  %28 = buffer.view %input[%223] : buffer -> view<1xi32>
+  %29 = view.load %28[0] : view<1xi32> -> i32
+  %66 = buffer.view %input[%10] : buffer -> view<1xi32>
+  %67 = view.load %66[0] : view<1xi32> -> i32
+  %68 = scalar.constant 1 : i32
+  %69 = scalar.andi %67, %68 : i32
+  %changed = func.call @change(%25, %29, %69) : (i32, i32, i32) -> (i32)
+  %71 = scalar.constant 5 : i32
+  %85 = scalar.addi %25, %71 : i32
+  %106 = buffer.view %output[%224] : buffer -> view<1xi32>
+  view.store %85, %106[0] : i32, view<1xi32>
+  %109 = buffer.view %output[%223] : buffer -> view<1xi32>
+  view.store %29, %109[0] : i32, view<1xi32>
+  %128 = buffer.view %output[%10] : buffer -> view<1xi32>
+  view.store %changed, %128[0] : i32, view<1xi32>
+  %148 = view.load %28[0] : view<1xi32> -> i32
+  %210 = index.constant 12 : offset
+  %167 = buffer.view %output[%210] : buffer -> view<1xi32>
+  view.store %148, %167[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def @change(%value_words_0: i32, %value_words_1: i32, %index: i32) -> (i32) {
+  %172 = index.constant 8 : offset
+  %value_storage = buffer.alloca<private> align(4) %172 : buffer
+  %230 = index.constant 0 : offset
+  %179 = buffer.view %value_storage[%230] : buffer -> view<1xi32>
+  view.store %value_words_0, %179[0] : i32, view<1xi32>
+  %229 = index.constant 4 : offset
+  %183 = buffer.view %value_storage[%229] : buffer -> view<1xi32>
+  view.store %value_words_1, %183[0] : i32, view<1xi32>
+  %184 = scalar.constant 3 : i32
+  %187 = scalar.extui %index : i32 to i64
+  %227 = scalar.constant 2 : i64
+  %228 = scalar.shli %187, %227 : i64
+  %192 = scalar.assume %228 [range(%228, 0, 9223372036854775807)] : i64
+  %193 = index.cast %192 : i64 to offset
+  %194 = index.assume %193 [range(%193, 0, 4)] : offset
+  %195 = buffer.view %value_storage[%194] : buffer -> view<1xi32>
+  %196 = view.load %195[0] : view<1xi32> -> i32
+  %197 = scalar.addi %196, %184 : i32
+  view.store %197, %195[0] : i32, view<1xi32>
+  %209 = view.load %195[0] : view<1xi32> -> i32
+  func.return %209 : i32
+}
