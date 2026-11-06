@@ -904,14 +904,15 @@ static iree_status_t loom_aie2p_bundle_plan_try_place_control(
       builder, (uint16_t)candidate_slot_count);
   if (!loom_aie2p_bundle_plan_instruction_group_fits(
           builder, (uint16_t)candidate_slot_count) ||
-      loom_low_physical_issue_register_ready_cycle(
-          &builder->issue, &builder->instructions[retained_slot_count], 1) >
-          candidate_cycle) {
+      loom_low_physical_issue_find_earliest_issue_cycle(
+          &builder->issue, &builder->instructions[retained_slot_count], 1,
+          candidate_cycle) != candidate_cycle) {
     return iree_ok_status();
   }
   // Generated validation limits shared control resources to issue-stage uses.
-  // The group check and retained frontier cover every concrete register read
-  // and write, including JL's link write, and therefore prove retrospective
+  // The group check covers the surviving packet, while physical admission
+  // also retains reservations from constants removed during packet closure.
+  // Register events include JL's link write. Together these prove retrospective
   // placement among already-timed tail bundles without replaying the block.
 
   const uint8_t old_byte_length =

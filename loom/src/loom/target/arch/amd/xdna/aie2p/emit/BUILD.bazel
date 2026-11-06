@@ -30,6 +30,7 @@ loom_check_test_suite(
     name = "loom_check_test",
     srcs = [
         "configuration.loom-test",
+        "control_tail.loom-test",
     ],
     target_compatible_with = _XDNA_TARGET_COMPATIBLE_WITH,
 )
