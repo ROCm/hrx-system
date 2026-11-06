@@ -1,0 +1,506 @@
+// RUN: pass canonicalize,cse,dce
+// Class packing retains both the odd stride and the one-byte member origin.
+struct [[gnu::packed]] Record { unsigned char tag; unsigned value; };
+unsigned read(const Record* records, unsigned index) {
+  return records[index].value;
+}
+
+// ----
+func.def public @read(%records: buffer, %records_byte_offset: offset, %index: i32) -> (i32) {
+  %4 = scalar.extui %index : i32 to i64
+  %5 = scalar.constant 5 : i64
+  %6 = scalar.muli %4, %5 : i64
+  %7 = index.cast %records_byte_offset : offset to i64
+  %8 = scalar.addi %7, %6 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = index.constant 1 : offset
+  %12 = index.add %10, %11 : offset
+  %13 = buffer.view %records[%12] : buffer -> view<1xi32, align(1)>
+  %value = view.load %13[0] : view<1xi32, align(1)> -> i32
+  func.return %value : i32
+}
+
+// ====
+// Member packing uses the same projection contract.
+struct Record { unsigned char tag; unsigned value [[gnu::packed]]; };
+void update(Record* records) { records[1].value /= 2u; }
+
+// ----
+func.def public @update(%records: buffer, %records_byte_offset: offset) {
+  %18 = scalar.constant 5 : i64
+  %7 = index.cast %records_byte_offset : offset to i64
+  %8 = scalar.addi %7, %18 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = index.constant 1 : offset
+  %12 = index.add %10, %11 : offset
+  %13 = buffer.view %records[%12] : buffer -> view<1xi32, align(1)>
+  %14 = view.load %13[0] : view<1xi32, align(1)> -> i32
+  %16 = scalar.constant 1 : i32
+  %17 = scalar.shrui %14, %16 : i32
+  view.store %17, %13[0] : i32, view<1xi32, align(1)>
+  func.return
+}
+
+// ====
+// A packing cap changes outer placement, not a nested record's own layout.
+struct Payload { unsigned char tag; float value; };
+#pragma pack(push, 2)
+struct Record { unsigned char tag; Payload payload; };
+#pragma pack(pop)
+void update(volatile Record* records) { records[1].payload.value += 2.0f; }
+
+// ----
+func.def public @update(%records: buffer, %records_byte_offset: offset) {
+  %2 = scalar.constant 2.0 : f32
+  %18 = scalar.constant 10 : i64
+  %7 = index.cast %records_byte_offset : offset to i64
+  %8 = scalar.addi %7, %18 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = index.constant 2 : offset
+  %12 = index.add %10, %11 : offset
+  %13 = index.constant 4 : offset
+  %14 = index.add %12, %13 : offset
+  %15 = buffer.view %records[%14] : buffer -> view<1xf32, align(2)>
+  %16 = view.load<volatile> %15[0] : view<1xf32, align(2)> -> f32
+  %17 = scalar.addf %16, %2 : f32
+  view.store<volatile> %17, %15[0] : f32, view<1xf32, align(2)>
+  func.return
+}
+
+// ====
+// Record alignment raises the stride without changing the packed field offset.
+struct alignas(16) __attribute__((packed)) Record {
+  unsigned char tag;
+  double value;
+};
+void copy(Record* output, const Record* input) {
+  output[1].value = input[2].value;
+}
+
+// ----
+func.def public @copy(%output: buffer, %output_byte_offset: offset, %input: buffer, %input_byte_offset: offset) {
+  %28 = scalar.constant 32 : i64
+  %8 = index.cast %input_byte_offset : offset to i64
+  %9 = scalar.addi %8, %28 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %12 = index.constant 1 : offset
+  %13 = index.add %11, %12 : offset
+  %14 = buffer.view %input[%13] : buffer -> view<1xf64, align(1)>
+  %value = view.load %14[0] : view<1xf64, align(1)> -> f64
+  %27 = scalar.constant 16 : i64
+  %20 = index.cast %output_byte_offset : offset to i64
+  %21 = scalar.addi %20, %27 : i64
+  %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
+  %23 = index.cast %22 : i64 to offset
+  %25 = index.add %23, %12 : offset
+  %26 = buffer.view %output[%25] : buffer -> view<1xf64, align(1)>
+  view.store %value, %26[0] : f64, view<1xf64, align(1)>
+  func.return
+}
+
+// ====
+// Vector accesses retain the whole footprint at the exact packed origin.
+typedef unsigned U4 __attribute__((vector_size(16)));
+struct [[gnu::packed]] Record { unsigned char tag; U4 value; };
+void copy(Record* output, const Record* input) { output->value = input->value; }
+
+// ----
+func.def public @copy(%output: buffer, %output_byte_offset: offset, %input: buffer, %input_byte_offset: offset) {
+  %4 = index.constant 1 : offset
+  %5 = index.add %input_byte_offset, %4 : offset
+  %6 = buffer.view %input[%5] : buffer -> view<4xi32, align(1)>
+  %value = vector.load %6[0] : view<4xi32, align(1)> -> vector<4xi32>
+  %9 = index.add %output_byte_offset, %4 : offset
+  %10 = buffer.view %output[%9] : buffer -> view<4xi32, align(1)>
+  vector.store %value, %10[0] : vector<4xi32>, view<4xi32, align(1)>
+  func.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Typed fields of an odd-stride record visit every alignment residue.
+// Initial byte filling precedes the copy, and every access retains align(1).
+template <class Wide>
+struct [[gnu::packed]] Packet {
+  // Eight bytes transported without changing their bit representation.
+  Wide wide;
+  // Floating-point field with an independently typed memory access.
+  float real;
+  // Narrow field whose access must leave adjacent bytes untouched.
+  unsigned short narrow;
+  // Final byte makes consecutive records visit every alignment residue.
+  unsigned char byte;
+};
+using IntegerPacket = Packet<unsigned long long>;
+static_assert(sizeof(IntegerPacket) == 15 && alignof(IntegerPacket) == 1);
+static_assert(__builtin_offsetof(IntegerPacket, real) == 8);
+static_assert(__builtin_offsetof(IntegerPacket, narrow) == 12);
+static_assert(__builtin_offsetof(IntegerPacket, byte) == 14);
+
+// The source and destination visit all residues modulo eight in different
+// orders. The surrounding bytes expose stores wider than the source fields.
+void packed_copy(const unsigned char* input, unsigned char* output) {
+  for (unsigned i = 0; i < 256; ++i) {
+    output[i] = 37;
+  }
+  auto* source = reinterpret_cast<const IntegerPacket*>(input + 1);
+  auto* destination = reinterpret_cast<IntegerPacket*>(output + 5);
+  for (unsigned i = 0; i < 8; ++i) {
+    destination[i].wide = source[i].wide;
+    destination[i].real = source[i].real;
+    destination[i].narrow = source[i].narrow;
+    destination[i].byte = source[i].byte;
+  }
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void packed_copy_kernel(const unsigned char* input, unsigned char* output) {
+  packed_copy(input, output);
+}
+// ----
+func.def public @packed_copy(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) {
+  %144 = index.constant 0 : offset
+  %143 = index.constant 256 : offset
+  %8 = index.constant 1 : offset
+  scf.for %i = [%144 to %143 step %8] {
+    %10 = index.cast %i : offset to i32
+    %142 = scalar.constant 37 : i8
+    %13 = scalar.extui %10 : i32 to i64
+    %16 = index.cast %output_byte_offset : offset to i64
+    %17 = scalar.addi %16, %13 : i64
+    %18 = scalar.assume %17 [range(%17, 0, 9223372036854775807)] : i64
+    %19 = index.cast %18 : i64 to offset
+    %20 = buffer.view %output[%19] : buffer -> view<1xi8>
+    view.store %142, %20[0] : i8, view<1xi8>
+  }
+  %141 = scalar.constant 1 : i64
+  %25 = index.cast %input_byte_offset : offset to i64
+  %26 = scalar.addi %25, %141 : i64
+  %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
+  %source_byte_offset = index.cast %27 : i64 to offset
+  %140 = scalar.constant 5 : i64
+  %33 = index.cast %output_byte_offset : offset to i64
+  %34 = scalar.addi %33, %140 : i64
+  %35 = scalar.assume %34 [range(%34, 0, 9223372036854775807)] : i64
+  %destination_byte_offset = index.cast %35 : i64 to offset
+  %138 = index.constant 8 : offset
+  scf.for %i = [%144 to %138 step %8] {
+    %43 = index.cast %i : offset to i32
+    %44 = scalar.extui %43 : i32 to i64
+    %45 = scalar.constant 15 : i64
+    %46 = scalar.muli %44, %45 : i64
+    %47 = index.cast %source_byte_offset : offset to i64
+    %48 = scalar.addi %47, %46 : i64
+    %49 = scalar.assume %48 [range(%48, 0, 9223372036854775807)] : i64
+    %50 = index.cast %49 : i64 to offset
+    %53 = buffer.view %input[%50] : buffer -> view<1xi64, align(1)>
+    %wide = view.load %53[0] : view<1xi64, align(1)> -> i64
+    %58 = index.cast %destination_byte_offset : offset to i64
+    %59 = scalar.addi %58, %46 : i64
+    %60 = scalar.assume %59 [range(%59, 0, 9223372036854775807)] : i64
+    %61 = index.cast %60 : i64 to offset
+    %64 = buffer.view %output[%61] : buffer -> view<1xi64, align(1)>
+    view.store %wide, %64[0] : i64, view<1xi64, align(1)>
+    %73 = index.add %50, %138 : offset
+    %74 = buffer.view %input[%73] : buffer -> view<1xf32, align(1)>
+    %real = view.load %74[0] : view<1xf32, align(1)> -> f32
+    %84 = index.add %61, %138 : offset
+    %85 = buffer.view %output[%84] : buffer -> view<1xf32, align(1)>
+    view.store %real, %85[0] : f32, view<1xf32, align(1)>
+    %93 = index.constant 12 : offset
+    %94 = index.add %50, %93 : offset
+    %95 = buffer.view %input[%94] : buffer -> view<1xi16, align(1)>
+    %narrow = view.load %95[0] : view<1xi16, align(1)> -> i16
+    %105 = index.add %61, %93 : offset
+    %106 = buffer.view %output[%105] : buffer -> view<1xi16, align(1)>
+    view.store %narrow, %106[0] : i16, view<1xi16, align(1)>
+    %114 = index.constant 14 : offset
+    %115 = index.add %50, %114 : offset
+    %116 = buffer.view %input[%115] : buffer -> view<1xi8>
+    %byte = view.load %116[0] : view<1xi8> -> i8
+    %126 = index.add %61, %114 : offset
+    %127 = buffer.view %output[%126] : buffer -> view<1xi8>
+    view.store %byte, %127[0] : i8, view<1xi8>
+  }
+  func.return
+}
+
+kernel.def @packed_copy_kernel() {
+  %130 = index.constant 1 : index
+  kernel.launch.config workgroups(%130, %130, %130) workgroup_size(%130, %130, %130) : index
+} launch(%input: buffer, %output: buffer) {
+  %input_byte_offset = index.constant 0 : offset
+  func.call @packed_copy(%input, %input_byte_offset, %output, %input_byte_offset) : (buffer, offset, buffer, offset)
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Nested class/member packing and a capped child layout preserve the
+// exact float, unsigned-word, and wrapping-byte destinations under volatile
+// read-modify-write, including when reached from a kernel binding.
+struct MemberPacked {
+  // The following packed member begins immediately after this byte.
+  unsigned char tag;
+  // Packing belongs to this member, rather than its enclosing record.
+  unsigned value [[gnu::packed]];
+};
+static_assert(sizeof(MemberPacked) == 5 && alignof(MemberPacked) == 1);
+
+#pragma pack(push, 2)
+struct Capped {
+  // The pack cap still permits one byte of padding before the float.
+  unsigned char tag;
+  // Two-byte aligned field in the nested record.
+  float real;
+  // Nested member retains its own packed layout.
+  MemberPacked member;
+};
+#pragma pack(pop)
+static_assert(sizeof(Capped) == 12 && alignof(Capped) == 2);
+static_assert(__builtin_offsetof(Capped, real) == 2);
+static_assert(__builtin_offsetof(Capped, member) == 6);
+
+struct __attribute__((packed)) Envelope {
+  // Moves the nested record to an odd byte origin.
+  unsigned char prefix;
+  // Packing the parent retains the child's internal padding and tail byte.
+  Capped data;
+};
+static_assert(sizeof(Envelope) == 13 && alignof(Envelope) == 1);
+
+// Volatile qualifiers propagate through both nested records. Unsigned updates
+// retain their arithmetic conversions even at an unaligned byte origin.
+void packed_update(volatile Envelope* output) {
+  output[2].data.real = 1.25f;
+  output[2].data.real *= 2.0f;
+  output[2].data.member.value = 0x80000000u;
+  output[2].data.member.value /= 2u;
+  output[2].data.member.value |= 1u;
+  output[2].data.member.tag = 255;
+  output[2].data.member.tag++;
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void packed_update_kernel(volatile Envelope* output) {
+  packed_update(output);
+}
+// ----
+func.def public @packed_update(%output: buffer, %output_byte_offset: offset) {
+  %2 = scalar.constant 1.25 : f32
+  %138 = scalar.constant 26 : i64
+  %7 = index.cast %output_byte_offset : offset to i64
+  %8 = scalar.addi %7, %138 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = index.constant 1 : offset
+  %12 = index.add %10, %11 : offset
+  %13 = index.constant 2 : offset
+  %14 = index.add %12, %13 : offset
+  %15 = buffer.view %output[%14] : buffer -> view<1xf32, align(1)>
+  view.store<volatile> %2, %15[0] : f32, view<1xf32, align(1)>
+  %16 = scalar.constant 2.0 : f32
+  %30 = view.load<volatile> %15[0] : view<1xf32, align(1)> -> f32
+  %31 = scalar.mulf %30, %16 : f32
+  view.store<volatile> %31, %15[0] : f32, view<1xf32, align(1)>
+  %32 = scalar.constant -2147483648 : i32
+  %43 = index.constant 6 : offset
+  %44 = index.add %12, %43 : offset
+  %46 = index.add %44, %11 : offset
+  %47 = buffer.view %output[%46] : buffer -> view<1xi32, align(1)>
+  view.store<volatile> %32, %47[0] : i32, view<1xi32, align(1)>
+  %64 = view.load<volatile> %47[0] : view<1xi32, align(1)> -> i32
+  %133 = scalar.constant 1 : i32
+  %134 = scalar.shrui %64, %133 : i32
+  view.store<volatile> %134, %47[0] : i32, view<1xi32, align(1)>
+  %82 = view.load<volatile> %47[0] : view<1xi32, align(1)> -> i32
+  %83 = scalar.ori %82, %133 : i32
+  view.store<volatile> %83, %47[0] : i32, view<1xi32, align(1)>
+  %131 = scalar.constant -1 : i8
+  %100 = buffer.view %output[%44] : buffer -> view<1xi8>
+  view.store<volatile> %131, %100[0] : i8, view<1xi8>
+  %116 = view.load<volatile> %100[0] : view<1xi8> -> i8
+  %117 = scalar.extui %116 : i8 to i32
+  %119 = scalar.addi %117, %133 : i32
+  %120 = scalar.trunci %119 : i32 to i8
+  view.store<volatile> %120, %100[0] : i8, view<1xi8>
+  func.return
+}
+
+kernel.def @packed_update_kernel() {
+  %122 = index.constant 1 : index
+  kernel.launch.config workgroups(%122, %122, %122) workgroup_size(%122, %122, %122) : index
+} launch(%output: buffer) {
+  %output_byte_offset = index.constant 0 : offset
+  func.call @packed_update(%output, %output_byte_offset) : (buffer, offset)
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// The packed vector kernel transports all four lanes at byte offset one
+// without expanding the source footprint to include its tag.
+typedef unsigned U4 __attribute__((vector_size(16)));
+struct [[gnu::packed]] VectorPacket {
+  // The vector begins at an odd byte offset.
+  unsigned char tag;
+  // The source access spans all four lanes without touching the tag.
+  U4 value;
+};
+static_assert(sizeof(VectorPacket) == 17 && alignof(VectorPacket) == 1);
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void packed_vector_kernel(const VectorPacket* input, VectorPacket* output) {
+  output->value = input->value;
+}
+// ----
+kernel.def @packed_vector_kernel() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%input: buffer, %output: buffer) {
+  %18 = index.constant 1 : offset
+  %12 = buffer.view %input[%18] : buffer -> view<4xi32, align(1)>
+  %value = vector.load %12[0] : view<4xi32, align(1)> -> vector<4xi32>
+  %16 = buffer.view %output[%18] : buffer -> view<4xi32, align(1)>
+  vector.store %value, %16[0] : vector<4xi32>, view<4xi32, align(1)>
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Nested array decays retain reduced alignment. Each side-effecting index
+// in a compound assignment is evaluated once, including reversed subscripting.
+struct [[gnu::packed]] ArrayPacket {
+  // The two-dimensional array starts at a byte-aligned origin.
+  unsigned char tag;
+  // Each projection retains the enclosing record's reduced alignment.
+  unsigned values[2][3];
+};
+static_assert(sizeof(ArrayPacket) == 25 && alignof(ArrayPacket) == 1);
+
+void packed_array_copy(const ArrayPacket* input, volatile ArrayPacket* output,
+                       unsigned* observations) {
+  for (unsigned row = 0; row < 2; ++row) {
+    for (unsigned column = 0; column < 3; ++column) {
+      output->values[row][column] = input->values[row][column];
+    }
+  }
+  unsigned object = 0, row = 0, column = 0;
+  output[object++].values[row++][column++] += 1u;
+  unsigned reverse = 0;
+  (reverse++)[output[0].values[1]] += 2u;
+  observations[0] = object;
+  observations[1] = row;
+  observations[2] = column;
+  observations[3] = reverse;
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void packed_array_kernel(const ArrayPacket* input, volatile ArrayPacket* output,
+                         unsigned* observations) {
+  packed_array_copy(input, output, observations);
+}
+// ----
+func.def public @packed_array_copy(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset, %observations: buffer, %observations_byte_offset: offset) {
+  %188 = index.constant 0 : offset
+  %187 = index.constant 2 : offset
+  %10 = index.constant 1 : offset
+  scf.for %row = [%188 to %187 step %10] {
+    %12 = index.cast %row : offset to i32
+    %185 = index.constant 3 : offset
+    scf.for %column = [%188 to %185 step %10] {
+      %19 = index.cast %column : offset to i32
+      %values_byte_offset$21 = index.add %input_byte_offset, %10 : offset
+      %22 = scalar.extui %12 : i32 to i64
+      %23 = scalar.constant 12 : i64
+      %24 = scalar.muli %22, %23 : i64
+      %25 = index.cast %values_byte_offset$21 : offset to i64
+      %26 = scalar.addi %25, %24 : i64
+      %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
+      %28 = index.cast %27 : i64 to offset
+      %196 = scalar.constant 2 : i32
+      %197 = scalar.shli %19, %196 : i32
+      %198 = scalar.extui %197 : i32 to i64
+      %32 = index.cast %28 : offset to i64
+      %33 = scalar.addi %32, %198 : i64
+      %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
+      %35 = index.cast %34 : i64 to offset
+      %36 = buffer.view %input[%35] : buffer -> view<1xi32, align(1)>
+      %37 = view.load %36[0] : view<1xi32, align(1)> -> i32
+      %values_byte_offset$39 = index.add %output_byte_offset, %10 : offset
+      %43 = index.cast %values_byte_offset$39 : offset to i64
+      %44 = scalar.addi %43, %24 : i64
+      %45 = scalar.assume %44 [range(%44, 0, 9223372036854775807)] : i64
+      %46 = index.cast %45 : i64 to offset
+      %50 = index.cast %46 : offset to i64
+      %51 = scalar.addi %50, %198 : i64
+      %52 = scalar.assume %51 [range(%51, 0, 9223372036854775807)] : i64
+      %53 = index.cast %52 : i64 to offset
+      %54 = buffer.view %output[%53] : buffer -> view<1xi32, align(1)>
+      view.store<volatile> %37, %54[0] : i32, view<1xi32, align(1)>
+    }
+  }
+  %58 = scalar.constant 1 : i32
+  %64 = index.cast %output_byte_offset : offset to i64
+  %66 = scalar.assume %64 [range(%64, 0, 9223372036854775807)] : i64
+  %67 = index.cast %66 : i64 to offset
+  %values_byte_offset = index.add %67, %10 : offset
+  %75 = index.cast %values_byte_offset : offset to i64
+  %77 = scalar.assume %75 [range(%75, 0, 9223372036854775807)] : i64
+  %78 = index.cast %77 : i64 to offset
+  %84 = index.cast %78 : offset to i64
+  %86 = scalar.assume %84 [range(%84, 0, 9223372036854775807)] : i64
+  %87 = index.cast %86 : i64 to offset
+  %88 = buffer.view %output[%87] : buffer -> view<1xi32, align(1)>
+  %89 = view.load<volatile> %88[0] : view<1xi32, align(1)> -> i32
+  %90 = scalar.addi %89, %58 : i32
+  view.store<volatile> %90, %88[0] : i32, view<1xi32, align(1)>
+  %92 = scalar.constant 2 : i32
+  %176 = scalar.constant 12 : i64
+  %110 = scalar.addi %77, %176 : i64
+  %111 = scalar.assume %110 [range(%110, 0, 9223372036854775807)] : i64
+  %112 = index.cast %111 : i64 to offset
+  %116 = index.cast %112 : offset to i64
+  %118 = scalar.assume %116 [range(%116, 0, 9223372036854775807)] : i64
+  %119 = index.cast %118 : i64 to offset
+  %120 = buffer.view %output[%119] : buffer -> view<1xi32, align(1)>
+  %121 = view.load<volatile> %120[0] : view<1xi32, align(1)> -> i32
+  %122 = scalar.addi %121, %92 : i32
+  view.store<volatile> %122, %120[0] : i32, view<1xi32, align(1)>
+  %127 = index.cast %observations_byte_offset : offset to i64
+  %129 = scalar.assume %127 [range(%127, 0, 9223372036854775807)] : i64
+  %130 = index.cast %129 : i64 to offset
+  %131 = buffer.view %observations[%130] : buffer -> view<1xi32>
+  view.store %58, %131[0] : i32, view<1xi32>
+  %173 = scalar.constant 4 : i64
+  %137 = scalar.addi %129, %173 : i64
+  %138 = scalar.assume %137 [range(%137, 0, 9223372036854775807)] : i64
+  %139 = index.cast %138 : i64 to offset
+  %140 = buffer.view %observations[%139] : buffer -> view<1xi32>
+  view.store %58, %140[0] : i32, view<1xi32>
+  %172 = scalar.constant 8 : i64
+  %146 = scalar.addi %129, %172 : i64
+  %147 = scalar.assume %146 [range(%146, 0, 9223372036854775807)] : i64
+  %148 = index.cast %147 : i64 to offset
+  %149 = buffer.view %observations[%148] : buffer -> view<1xi32>
+  view.store %58, %149[0] : i32, view<1xi32>
+  %155 = scalar.addi %129, %176 : i64
+  %156 = scalar.assume %155 [range(%155, 0, 9223372036854775807)] : i64
+  %157 = index.cast %156 : i64 to offset
+  %158 = buffer.view %observations[%157] : buffer -> view<1xi32>
+  view.store %58, %158[0] : i32, view<1xi32>
+  func.return
+}
+
+kernel.def @packed_array_kernel() {
+  %162 = index.constant 1 : index
+  kernel.launch.config workgroups(%162, %162, %162) workgroup_size(%162, %162, %162) : index
+} launch(%input: buffer, %output: buffer, %observations: buffer) {
+  %input_byte_offset = index.constant 0 : offset
+  func.call @packed_array_copy(%input, %input_byte_offset, %output, %input_byte_offset, %observations, %input_byte_offset) : (buffer, offset, buffer, offset, buffer, offset)
+  kernel.return
+}

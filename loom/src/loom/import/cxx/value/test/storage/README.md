@@ -15,6 +15,7 @@ checks operands and order as well as the operations emitted.
 | Opaque transport, type recovery, and access qualification | `opaque_pointers*` |
 | Typed allocation and borrowed memory-space refinement | `buffer_alloca*`, `buffer_memory_space*` |
 | Boolean value/byte representation, arrays, fields, and aliases | `boolean_storage*` |
+| Packed class/member layout and unaligned typed accesses | `packed_memory` |
 
 For example, the guarded-array case returns the modified middle element and
 both neighbors separately. The exact result distinguishes an update of the
