@@ -15,22 +15,6 @@
 extern "C" {
 #endif
 
-// Returns true when |type| is the opaque aie2p.load_fifo state type.
-bool loom_aie2p_load_fifo_type_isa(const loom_module_t* module,
-                                   loom_type_t type);
-
-// Returns true when |type| is an opaque aie2p.store_fifo state carrier.
-bool loom_aie2p_store_fifo_type_isa(const loom_module_t* module,
-                                    loom_type_t type);
-
-// Returns true when |type| is an opaque aie2p.store_fifo.pointer carrier.
-bool loom_aie2p_store_fifo_pointer_type_isa(const loom_module_t* module,
-                                            loom_type_t type);
-
-// Returns true when |type| is an opaque aie2p.store_fifo.position carrier.
-bool loom_aie2p_store_fifo_position_type_isa(const loom_module_t* module,
-                                             loom_type_t type);
-
 // Verifies that both architectural entry-state results use aie2p.load_fifo.
 iree_status_t loom_aie2p_load_fifo_state_verify(
     const loom_module_t* module, const loom_op_t* op,

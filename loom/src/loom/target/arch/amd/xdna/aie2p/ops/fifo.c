@@ -11,41 +11,7 @@
 #include "loom/error/parameter.h"
 #include "loom/ir/module.h"
 #include "loom/target/arch/amd/xdna/aie2p/ops/ops.h"
-
-static bool loom_aie2p_fifo_type_name_is(const loom_module_t* module,
-                                         loom_type_t type,
-                                         iree_string_view_t expected_name) {
-  if (!loom_type_is_dialect(type) || loom_type_dialect_param_count(type) != 0) {
-    return false;
-  }
-  const loom_string_id_t name_id = loom_type_dialect_name_id(type);
-  return name_id != LOOM_STRING_ID_INVALID && name_id < module->strings.count &&
-         iree_string_view_equal(
-             loom_string_table_get(&module->strings, name_id), expected_name);
-}
-
-bool loom_aie2p_load_fifo_type_isa(const loom_module_t* module,
-                                   loom_type_t type) {
-  return loom_aie2p_fifo_type_name_is(module, type, IREE_SV("aie2p.load_fifo"));
-}
-
-bool loom_aie2p_store_fifo_type_isa(const loom_module_t* module,
-                                    loom_type_t type) {
-  return loom_aie2p_fifo_type_name_is(module, type,
-                                      IREE_SV("aie2p.store_fifo"));
-}
-
-bool loom_aie2p_store_fifo_pointer_type_isa(const loom_module_t* module,
-                                            loom_type_t type) {
-  return loom_aie2p_fifo_type_name_is(module, type,
-                                      IREE_SV("aie2p.store_fifo.pointer"));
-}
-
-bool loom_aie2p_store_fifo_position_type_isa(const loom_module_t* module,
-                                             loom_type_t type) {
-  return loom_aie2p_fifo_type_name_is(module, type,
-                                      IREE_SV("aie2p.store_fifo.position"));
-}
+#include "loom/target/arch/amd/xdna/aie2p/ops/source_types.h"
 
 static iree_status_t loom_aie2p_emit_load_fifo_result_type(
     const loom_op_t* op, iree_diagnostic_emitter_t emitter,
@@ -69,13 +35,15 @@ iree_status_t loom_aie2p_load_fifo_state_verify(
     iree_diagnostic_emitter_t emitter) {
   const loom_type_t fifo0_type =
       loom_module_value_type(module, loom_aie2p_load_fifo_state_fifo0(op));
-  if (!loom_aie2p_load_fifo_type_isa(module, fifo0_type)) {
+  if (loom_aie2p_source_type_kind(module, fifo0_type) !=
+      LOOM_AIE2P_SOURCE_TYPE_LOAD_FIFO) {
     return loom_aie2p_emit_load_fifo_result_type(op, emitter, IREE_SV("fifo0"),
                                                  fifo0_type);
   }
   const loom_type_t fifo1_type =
       loom_module_value_type(module, loom_aie2p_load_fifo_state_fifo1(op));
-  if (!loom_aie2p_load_fifo_type_isa(module, fifo1_type)) {
+  if (loom_aie2p_source_type_kind(module, fifo1_type) !=
+      LOOM_AIE2P_SOURCE_TYPE_LOAD_FIFO) {
     return loom_aie2p_emit_load_fifo_result_type(op, emitter, IREE_SV("fifo1"),
                                                  fifo1_type);
   }

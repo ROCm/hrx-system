@@ -41,15 +41,15 @@ loom_cc_instance_library(
 loom_generated_cc_library(
     name = "ops",
     srcs = [
-        "bfp_operand.c",
         "fifo.c",
         "registry.c",
+        "source_types.c",
         "target.c",
     ],
     hdrs = [
-        "bfp_operand.h",
         "fifo.h",
         "registry.h",
+        "source_types.h",
         "target.h",
     ],
     args = ["--dialect=aie2p"],
