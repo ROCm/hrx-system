@@ -247,15 +247,34 @@ class CxxFunctionRenderer(CxxConfigRenderer):
         if not results:
             return "void"
         if len(results) == 1:
-            return self.cpp_type(results[0])
+            return self._function_result_component_type(results[0])
         symbol = str(self._resolved(function).attr("callee"))
         fields = tuple(
-            (f"value{index}", self.cpp_type(result))
+            (f"value{index}", self._function_result_component_type(result))
             for index, result in enumerate(results)
         )
         return self._record_type(
             clean_identifier(symbol, "function") + "_result", fields
         )
+
+    def _function_result_component_type(self, value_id: int) -> str:
+        # A buffer result carries one root, independently of any adjacent byte
+        # offset. A C++ pointer would introduce another offset on reimport.
+        if isinstance(self.module.values[value_id].type, BufferType):
+            return "loom::type::buffer<unsigned char>"
+        return self.cpp_type(value_id)
+
+    def _buffer_argument(self, value_id: int, element: str) -> str:
+        expression = self.expression(value_id)
+        source_type = self.expression_type(value_id)
+        expected_type = f"loom::type::buffer<{element}>"
+        if source_type.endswith("*"):
+            expression = f"loom::buffer::root({expression})"
+            if source_type[:-1].strip() == element:
+                return expression
+        elif source_type == expected_type:
+            return expression
+        return f"loom::buffer::cast<{element}>({expression})"
 
     def _render_function_call(self, operation: Operation) -> tuple[str, ...]:
         resolved = self._resolved(operation)
@@ -286,17 +305,7 @@ class CxxFunctionRenderer(CxxConfigRenderer):
                 else None
             )
             if expected_element is not None:
-                expected_type = f"loom::type::buffer<{expected_element}>"
-                source_type = self.expression_type(operand)
-                if source_type.endswith("*"):
-                    expression = f"loom::buffer::root({expression})"
-                    source_element = source_type[:-1].strip()
-                    if source_element != expected_element:
-                        expression = (
-                            f"loom::buffer::cast<{expected_element}>({expression})"
-                        )
-                elif source_type != expected_type:
-                    expression = f"loom::buffer::cast<{expected_element}>({expression})"
+                expression = self._buffer_argument(operand, expected_element)
             reference = references.get(operand)
             if reference is not None:
                 if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", expression) is None:
@@ -319,10 +328,15 @@ class CxxFunctionRenderer(CxxConfigRenderer):
         if not source_results:
             self.writer.line(f"{call};")
         elif len(source_results) == 1:
-            self._declare(source_results[0].value_id, call)
+            result = source_results[0].value_id
+            self._declare(
+                result,
+                call,
+                expression_type=self._function_result_component_type(result),
+            )
         else:
             fields = tuple(
-                (f"value{index}", self.cpp_type(result.value_id))
+                (f"value{index}", self._function_result_component_type(result.value_id))
                 for index, result in enumerate(source_results)
             )
             record_type = self._record_type(
@@ -331,7 +345,11 @@ class CxxFunctionRenderer(CxxConfigRenderer):
             record_name = self._temporary_name("call_result")
             self.writer.line(f"{record_type} {record_name} = {call};")
             for index, result in enumerate(source_results):
-                self._declare(result.value_id, f"{record_name}.value{index}")
+                self._declare(
+                    result.value_id,
+                    f"{record_name}.value{index}",
+                    expression_type=fields[index][1],
+                )
         for reference in projection.references:
             carrier, expression_type = reference_carriers[reference.operand_id]
             self.expressions[reference.result_id] = carrier
@@ -468,12 +486,18 @@ class CxxFunctionRenderer(CxxConfigRenderer):
             operation.operands[index] for index in projection.ordinary_component_indices
         ]
         results = self._flat_source_parameters(operation, ordinary_values)
+        expressions = [
+            self._buffer_argument(result.value_id, "unsigned char")
+            if isinstance(self.module.values[result.value_id].type, BufferType)
+            else self.expression(result.value_id)
+            for result in results
+        ]
         if not results:
             self.writer.line("return;")
         elif len(results) == 1:
-            self.writer.line(f"return {self.expression(results[0].value_id)};")
+            self.writer.line(f"return {expressions[0]};")
         else:
-            values = ", ".join(self.expression(result.value_id) for result in results)
+            values = ", ".join(expressions)
             self.writer.line(f"return {{{values}}};")
 
     def _render_function(self, function: Operation) -> None:
