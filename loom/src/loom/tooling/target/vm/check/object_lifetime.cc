@@ -80,12 +80,11 @@ iree_status_t Consume(Trace* trace, const NativeCall* params) {
   return status;
 }
 
-iree_vm_ref_t CreateObject(Trace* trace, const NativeCall* params) {
+iree_vm_ref_t CreateObject(Trace* trace, int32_t identity) {
   auto* object = new Object;
   iree_vm_ref_object_initialize(&object->ref_object);
   object->trace = trace;
-  object->identity =
-      static_cast<int32_t>(iree_vm_call_value_argument_load(&params->call, 0));
+  object->identity = identity;
   ++trace->live_count;
   trace->events.push_back({"create", object->identity});
   void* pointer = object;
@@ -93,7 +92,9 @@ iree_vm_ref_t CreateObject(Trace* trace, const NativeCall* params) {
 }
 
 iree_status_t Create(Trace* trace, const NativeCall* params) {
-  iree_vm_ref_t owner = CreateObject(trace, params);
+  iree_vm_ref_t owner = CreateObject(
+      trace,
+      static_cast<int32_t>(iree_vm_call_value_argument_load(&params->call, 0)));
   iree_vm_ref_t borrow =
       iree_vm_ref_from_ptr_borrowed(owner.object, &kObjectType);
   // Publish the borrowed result while the native owner is still live. The
@@ -104,7 +105,9 @@ iree_status_t Create(Trace* trace, const NativeCall* params) {
 }
 
 iree_status_t CreateFail(Trace* trace, const NativeCall* params) {
-  iree_vm_ref_t owner = CreateObject(trace, params);
+  iree_vm_ref_t owner = CreateObject(
+      trace,
+      static_cast<int32_t>(iree_vm_call_value_argument_load(&params->call, 0)));
   iree_vm_call_ref_result_store_move(&params->call, 0, &owner);
   trace->events.push_back({"fail", trace->live_count});
   // The second result is intentionally unpublished when the provider fails.
@@ -143,6 +146,19 @@ iree_status_t ReadPair(Trace* trace, const NativeCall* params) {
   return ObserveObject(trace, "read", right);
 }
 
+iree_status_t Count(Trace* trace, const NativeCall* params) {
+  iree_vm_ref_t borrow = iree_vm_ref_null();
+  iree_vm_call_ref_argument_load_borrow(&params->call, 0, &borrow);
+  void* pointer = nullptr;
+  IREE_RETURN_IF_ERROR(
+      iree_vm_ptr_from_ref_borrowed(borrow, &kObjectType, &pointer));
+  auto* object = static_cast<Object*>(pointer);
+  trace->events.push_back(
+      {"references",
+       object ? iree_atomic_ref_count_load(&object->ref_object.ref_count) : 0});
+  return iree_ok_status();
+}
+
 const iree_vm_module_signature_type_t kOwnedFields[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}};
 const iree_vm_module_signature_type_t kBorrowedFields[] = {
@@ -163,13 +179,15 @@ const iree_vm_module_callable_type_declaration_t kCallableTypes[] = {
     {{{kBorrowedFields, 1, 0, 1, 0}, {}}, 0, 0, 0},
     {{{kPairFields, 2, 0, 2, 0}, {}}, 0, 0, 0}};
 const iree_vm_module_export_declaration_t kExports[] = {
-    {IREE_SV("consume"), 3, 0, 0},     {IREE_SV("create"), 2, 1, 0},
-    {IREE_SV("create_fail"), 2, 2, 0}, {IREE_SV("create_null"), 1, 3, 0},
-    {IREE_SV("fail"), 0, 4, 0},        {IREE_SV("observe"), 0, 5, 0},
-    {IREE_SV("read"), 4, 6, 0},        {IREE_SV("read_pair"), 5, 7, 0}};
+    {IREE_SV("consume"), 3, 0, 0},     {IREE_SV("count"), 4, 8, 0},
+    {IREE_SV("create"), 2, 1, 0},      {IREE_SV("create_fail"), 2, 2, 0},
+    {IREE_SV("create_null"), 1, 3, 0}, {IREE_SV("fail"), 0, 4, 0},
+    {IREE_SV("observe"), 0, 5, 0},     {IREE_SV("read"), 4, 6, 0},
+    {IREE_SV("read_pair"), 5, 7, 0}};
 using NativeFunction = iree_status_t (*)(Trace*, const NativeCall*);
-constexpr NativeFunction kFunctions[] = {
-    Consume, Create, CreateFail, CreateNull, Fail, Observe, Read, ReadPair};
+constexpr NativeFunction kFunctions[] = {Consume,    Create,   CreateFail,
+                                         CreateNull, Fail,     Observe,
+                                         Read,       ReadPair, Count};
 
 struct ObjectModule {
   // TableModule and its contained VM module both occupy offset zero.
@@ -234,7 +252,7 @@ struct Execution {
   }
 };
 
-iree_status_t Execute(iree_const_byte_span_t contents,
+iree_status_t Execute(iree_const_byte_span_t contents, bool borrowed_argument,
                       iree_allocator_t allocator,
                       iree_string_builder_t* output) {
   Trace trace;
@@ -254,12 +272,20 @@ iree_status_t Execute(iree_const_byte_span_t contents,
     iree_vm_function_t function;
     IREE_RETURN_IF_ERROR(iree_vm_process_lookup_function(
         execution.process, IREE_SV("client"), IREE_SV("run"), &function));
-    iree_status_t status = iree_vm_invoke(execution.invocation, function,
-                                          iree_vm_variant_span_empty(),
-                                          iree_vm_variant_span_empty());
+    // The host owner covers the complete synchronous invocation, as it would
+    // when passing a native frame or tokenizer to compiled methods.
+    iree_vm_ref_t owner =
+        borrowed_argument ? CreateObject(&trace, 1) : iree_vm_ref_null();
+    iree_vm_variant_t arguments[] = {iree_vm_variant_from_ref_borrowed(owner)};
+    iree_status_t status = iree_vm_invoke(
+        execution.invocation, function,
+        borrowed_argument ? iree_vm_variant_span_from_array(arguments)
+                          : iree_vm_variant_span_empty(),
+        iree_vm_variant_span_empty());
     trace.events.push_back(
         {iree_status_code_string(iree_status_code(status)), trace.live_count});
     iree_status_ignore(status);
+    iree_vm_ref_reset(&owner);
   }
   trace.events.push_back({"retired", trace.live_count});
   iree_status_t status = iree_ok_status();
@@ -278,11 +304,14 @@ bool Match(const loom_check_emit_provider_t*, iree_string_view_t name) {
 
 iree_status_t Emit(const loom_check_emit_provider_t*,
                    const loom_check_emit_provider_request_t* request) {
-  if (!iree_string_view_is_empty(
-          iree_string_view_trim(request->target_options))) {
+  const iree_string_view_t target_options =
+      iree_string_view_trim(request->target_options);
+  const bool borrowed_argument =
+      iree_string_view_equal(target_options, IREE_SV("borrowed-argument"));
+  if (!iree_string_view_is_empty(target_options) && !borrowed_argument) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "vm-object-lifetime accepts no options and runs @run");
+        "vm-object-lifetime runs @run with optional borrowed-argument");
   }
   const loom_check_compile_artifact_options_t options = {
       .artifact_format = IREE_SV("vm"),
@@ -311,7 +340,8 @@ iree_status_t Emit(const loom_check_emit_provider_t*,
     const loomc_byte_span_t contents = loomc_source_contents(source);
     status =
         Execute(iree_make_const_byte_span(contents.data, contents.data_length),
-                request->host_allocator, &request->result->actual_output);
+                borrowed_argument, request->host_allocator,
+                &request->result->actual_output);
   }
   loomc_source_release(source);
   return status;

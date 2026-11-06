@@ -121,27 +121,27 @@ vm.module core(0.0) {
       %r0 = ref.abi.argument.load.move 0
     ^bb1:
       control.block
-      ref.stack.store.retain %r0, #r0
+      ref.stack.store.copy %r0, #r0
       ref.abi.result.store.move %r0, 0
       %r0 = ref.stack.load.move #r0
-      ref.stack.store.retain %r0, #r0
+      ref.stack.store.copy %r0, #r0
       ref.abi.result.store.move %r0, 1
       %r0 = ref.stack.load.move #r0
-      %r1 = ref.retain %r0
-      %r2 = ref.retain %r0
-      %r3 = ref.retain %r0
-      %r4 = ref.retain %r0
-      %r5 = ref.retain %r0
-      %r6 = ref.retain %r0
-      %r7 = ref.retain %r0
-      %r8 = ref.retain %r0
-      %r9 = ref.retain %r0
-      %r10 = ref.retain %r0
-      %r11 = ref.retain %r0
-      %r12 = ref.retain %r0
-      %r13 = ref.retain %r0
-      %r14 = ref.retain %r0
-      %r15 = ref.retain %r0
+      %r1 = ref.copy %r0
+      %r2 = ref.copy %r0
+      %r3 = ref.copy %r0
+      %r4 = ref.copy %r0
+      %r5 = ref.copy %r0
+      %r6 = ref.copy %r0
+      %r7 = ref.copy %r0
+      %r8 = ref.copy %r0
+      %r9 = ref.copy %r0
+      %r10 = ref.copy %r0
+      %r11 = ref.copy %r0
+      %r12 = ref.copy %r0
+      %r13 = ref.copy %r0
+      %r14 = ref.copy %r0
+      %r15 = ref.copy %r0
       control.return
     }
   }

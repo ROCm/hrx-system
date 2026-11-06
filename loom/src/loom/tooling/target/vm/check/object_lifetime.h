@@ -16,7 +16,9 @@ extern "C" {
 #endif
 
 // Executes @run through the public compiler and VM, recording native payload
-// access and destruction. The provider is linked only into loom-check-test.
+// access, reference counts, and destruction. The borrowed-argument option
+// supplies a host-anchored pointer for a synchronous invocation. The provider
+// is linked only into loom-check-test.
 extern const loom_check_provider_t loom_vm_object_lifetime_check_provider;
 
 #ifdef __cplusplus
