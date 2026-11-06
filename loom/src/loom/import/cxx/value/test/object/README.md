@@ -10,7 +10,9 @@ files through `// ====` sections and retain exact expectations maintained with
 | Record copies, returned values, and member aliases | `array_records` |
 | Nested arrays, narrow fields, booleans, and vector components | `array_records`, `record_arrays` |
 | Constructor delegation, default targets, moves, and destination identity | `record_constructors` |
-| Source layout, pointer-to-array strides, and qualified access | `record_arrays` |
+| Source layout, pointer-to-array strides, and qualified access | `record_arrays`, `record_memory` |
+| Padding, packing, alignment attributes, and nested offset queries | `layout_attributes*`, `offsetof*` |
+| Typed member loads/stores and unsupported object representations | `record_memory*` |
 | Completed-subobject visibility and destination copy elision | `record_initialization` |
 | Defaults, zero initialization, and conditional initializer effects | `record_initialization` |
 

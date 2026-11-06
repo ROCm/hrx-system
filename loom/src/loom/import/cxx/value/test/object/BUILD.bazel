@@ -16,9 +16,21 @@ loom_check_test_suite(
     name = "compiler_test",
     srcs = [
         "array_records.cxx-test",
+        "layout_attributes.cxx-test",
+        "layout_attributes_roundtrip.cxx-test",
+        "offsetof.cxx-test",
+        "offsetof_roundtrip.cxx-test",
         "record_arrays.cxx-test",
         "record_constructors.cxx-test",
         "record_initialization.cxx-test",
+        "record_memory.cxx-test",
+        "record_memory_invalid.cxx-test",
+    ],
+    data = [
+        "aligned_layout.h",
+        "offsetof_layout.h",
+        "packed_layout.h",
+        "record_layout.h",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
