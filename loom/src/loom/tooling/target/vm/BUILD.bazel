@@ -184,7 +184,7 @@ loom_cc_test(
         "//loom/src/loom/format:location",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/hal/vm:types",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",

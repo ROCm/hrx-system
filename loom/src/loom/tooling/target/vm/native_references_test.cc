@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "iree/hal/api.h"
-#include "iree/module/hal/types.h"
+#include "iree/hal/vm/types.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
@@ -262,8 +262,8 @@ class NativeReferencesTest : public ::testing::Test {
     IREE_ASSERT_OK(
         iree_vm_environment_allocate(iree_allocator_system(), &environment));
     const iree_vm_ref_type_table_t* table = nullptr;
-    IREE_ASSERT_OK(iree_hal_module_register_types(environment, &table));
-    IREE_ASSERT_OK(iree_hal_module_types_resolve(table, &hal_));
+    IREE_ASSERT_OK(iree_hal_vm_register_types(environment, &table));
+    IREE_ASSERT_OK(iree_hal_vm_types_resolve(table, &hal_));
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
         iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
         &core_));
@@ -330,7 +330,7 @@ class NativeReferencesTest : public ::testing::Test {
   }
 
   // Resolved HAL handles borrowed from the linked static provider.
-  iree_hal_module_types_t hal_ = {};
+  iree_hal_vm_types_t hal_ = {};
   // Resolved Core buffer handle for captured source values.
   iree_vm_ref_types_t core_ = {};
   // Native service implementation and declaration storage.

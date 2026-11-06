@@ -12,7 +12,7 @@
 #include <utility>
 
 #include "iree/base/tooling/flags.h"
-#include "iree/module/hal/types.h"
+#include "iree/hal/vm/types.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
@@ -65,8 +65,8 @@ class ProgramTest : public ::testing::Test {
         iree_vm_environment_lookup_ref_type_table(environment_, IREE_SV("vm")),
         &vm_types_));
     const iree_vm_ref_type_table_t* table = nullptr;
-    IREE_ASSERT_OK(iree_hal_module_register_types(environment_, &table));
-    IREE_ASSERT_OK(iree_hal_module_types_resolve(table, &hal_types_));
+    IREE_ASSERT_OK(iree_hal_vm_register_types(environment_, &table));
+    IREE_ASSERT_OK(iree_hal_vm_types_resolve(table, &hal_types_));
     IREE_ASSERT_OK(loom_runtime_input_module_create(environment_, nullptr,
                                                     host_allocator_, &input_));
     const iree_string_view_t roots[] = {
@@ -103,7 +103,7 @@ class ProgramTest : public ::testing::Test {
   // VM buffer identities used by the host call contract.
   iree_vm_ref_types_t vm_types_ = {};
   // HAL identities, with no device or GPU allocation required by these tests.
-  iree_hal_module_types_t hal_types_ = {};
+  iree_hal_vm_types_t hal_types_ = {};
   // Real native assertion capability proving binding does not execute exports.
   iree_vm_module_t* input_ = nullptr;
   // JIT diagnostics owned independently from the program.

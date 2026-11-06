@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_fuzz.bzl", "iree_runtime_cc_fuzz")
@@ -13,6 +14,13 @@ package(
     default_visibility = ["//visibility:public"],
     features = ["layering_check"],
     licenses = ["notice"],
+)
+
+# HAL reference types and operations are supplied by the optional hal/vm adapter.
+iree_assert_dependency_boundary(
+    name = "vm_no_hal_dep",
+    forbidden_subtrees = ["//runtime/src/iree/hal/..."],
+    target = ":vm",
 )
 
 iree_runtime_cc_library(

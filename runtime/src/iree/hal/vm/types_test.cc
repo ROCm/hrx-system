@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/module/hal/types.h"
+#include "iree/hal/vm/types.h"
 
 #include <array>
 #include <initializer_list>
@@ -14,26 +14,25 @@
 
 namespace {
 
-TEST(HALModuleTypesTest, RegistersCanonicalHandlesAcrossEnvironments) {
+TEST(HALVMTypesTest, RegistersCanonicalHandlesAcrossEnvironments) {
   const iree_vm_ref_type_table_t* first = nullptr;
   const iree_vm_ref_type_table_t* second = nullptr;
   for (auto* output : {&first, &second}) {
     iree_vm_environment_t* environment = nullptr;
     IREE_ASSERT_OK(
         iree_vm_environment_allocate(iree_allocator_system(), &environment));
-    IREE_ASSERT_OK(iree_hal_module_register_types(environment, output));
+    IREE_ASSERT_OK(iree_hal_vm_register_types(environment, output));
     EXPECT_EQ(*output, iree_vm_environment_lookup_ref_type_table(
                            environment, IREE_SV("hal")));
     const iree_vm_ref_type_table_t* duplicate = nullptr;
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_ALREADY_EXISTS,
-        iree_hal_module_register_types(environment, &duplicate));
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
+                          iree_hal_vm_register_types(environment, &duplicate));
     EXPECT_EQ(duplicate, nullptr);
     iree_vm_environment_free(environment);
   }
   EXPECT_EQ(first, second);
-  iree_hal_module_types_t types = {};
-  IREE_ASSERT_OK(iree_hal_module_types_resolve(first, &types));
+  iree_hal_vm_types_t types = {};
+  IREE_ASSERT_OK(iree_hal_vm_types_resolve(first, &types));
   EXPECT_NE(types.buffer, types.buffer_view);
   EXPECT_EQ(types.buffer->table, first);
   EXPECT_EQ(types.buffer_view->table, first);
@@ -66,7 +65,7 @@ struct Provider {
   }
 };
 
-TEST(HALModuleTypesTest, ResolvesKnownPrefixFromNewerProvider) {
+TEST(HALVMTypesTest, ResolvesKnownPrefixFromNewerProvider) {
   Provider provider(IREE_SV("hal"), {IREE_SV("buffer"), IREE_SV("buffer_view"),
                                      IREE_SV("fence"), IREE_SV("device")});
   iree_vm_environment_t* environment = nullptr;
@@ -74,8 +73,8 @@ TEST(HALModuleTypesTest, ResolvesKnownPrefixFromNewerProvider) {
       iree_vm_environment_allocate(iree_allocator_system(), &environment));
   IREE_ASSERT_OK(iree_vm_environment_register_ref_type_table(environment,
                                                              &provider.table));
-  iree_hal_module_types_t types = {};
-  IREE_ASSERT_OK(iree_hal_module_types_resolve(
+  iree_hal_vm_types_t types = {};
+  IREE_ASSERT_OK(iree_hal_vm_types_resolve(
       iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("hal")),
       &types));
   EXPECT_EQ(types.buffer, provider.types[0]);
@@ -84,7 +83,7 @@ TEST(HALModuleTypesTest, ResolvesKnownPrefixFromNewerProvider) {
   iree_vm_environment_free(environment);
 }
 
-TEST(HALModuleTypesTest, RejectsIncompatiblePrefixesWithoutPublishing) {
+TEST(HALVMTypesTest, RejectsIncompatiblePrefixesWithoutPublishing) {
   Provider short_prefix(IREE_SV("hal"), {IREE_SV("buffer")});
   Provider reordered(IREE_SV("hal"), {IREE_SV("buffer_view"), IREE_SV("buffer"),
                                       IREE_SV("fence")});
@@ -96,11 +95,10 @@ TEST(HALModuleTypesTest, RejectsIncompatiblePrefixesWithoutPublishing) {
         iree_vm_environment_allocate(iree_allocator_system(), &environment));
     IREE_ASSERT_OK(iree_vm_environment_register_ref_type_table(
         environment, &provider->table));
-    iree_hal_module_types_t types = {provider->types[0], provider->types[0],
-                                     provider->types[0]};
-    IREE_EXPECT_STATUS_IS(
-        IREE_STATUS_FAILED_PRECONDITION,
-        iree_hal_module_types_resolve(&provider->table, &types));
+    iree_hal_vm_types_t types = {provider->types[0], provider->types[0],
+                                 provider->types[0]};
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                          iree_hal_vm_types_resolve(&provider->table, &types));
     EXPECT_EQ(types.buffer, provider->types[0]);
     EXPECT_EQ(types.buffer_view, provider->types[0]);
     EXPECT_EQ(types.fence, provider->types[0]);
@@ -108,14 +106,14 @@ TEST(HALModuleTypesTest, RejectsIncompatiblePrefixesWithoutPublishing) {
   }
 }
 
-TEST(HALModuleTypesTest, FenceSharesOwnershipAcrossNativeAndVmReferences) {
+TEST(HALVMTypesTest, FenceSharesOwnershipAcrossNativeAndVmReferences) {
   iree_vm_environment_t* environment = nullptr;
   IREE_ASSERT_OK(
       iree_vm_environment_allocate(iree_allocator_system(), &environment));
   const iree_vm_ref_type_table_t* table = nullptr;
-  IREE_ASSERT_OK(iree_hal_module_register_types(environment, &table));
-  iree_hal_module_types_t types = {};
-  IREE_ASSERT_OK(iree_hal_module_types_resolve(table, &types));
+  IREE_ASSERT_OK(iree_hal_vm_register_types(environment, &table));
+  iree_hal_vm_types_t types = {};
+  IREE_ASSERT_OK(iree_hal_vm_types_resolve(table, &types));
   iree_hal_fence_t* fence = nullptr;
   IREE_ASSERT_OK(iree_hal_fence_create(0, iree_allocator_system(), &fence));
   auto ref = iree_hal_fence_ref_from_ptr_retained(&types, fence);

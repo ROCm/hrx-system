@@ -93,7 +93,7 @@ struct loom_serve_image_model_t {
     // Environment owning the canonical buffer reference types.
     iree_vm_environment_t* environment;
     // HAL reference types borrowed from the environment.
-    iree_hal_module_types_t hal_types;
+    iree_hal_vm_types_t hal_types;
     // Core byte-buffer reference types borrowed from the environment.
     iree_vm_ref_types_t vm_types;
     // Owned stage tags in little-endian i64 declaration order.
@@ -647,9 +647,9 @@ static iree_status_t loom_serve_image_load_prepare(
       &model->parameter_sources));
   const iree_vm_ref_type_table_t* table = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_hal_module_register_types(model->control.environment, &table));
+      iree_hal_vm_register_types(model->control.environment, &table));
   IREE_RETURN_IF_ERROR(
-      iree_hal_module_types_resolve(table, &model->control.hal_types));
+      iree_hal_vm_types_resolve(table, &model->control.hal_types));
   const iree_string_view_t bind_parameters =
       loom_runtime_preparation_bind_parameters(model->preparation);
   if (loom_runtime_preparation_arena_count(model->preparation) &&

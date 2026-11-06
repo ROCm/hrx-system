@@ -21,7 +21,7 @@ class JitModuleTest : public JitTest {
   // VM reference type registry.
   iree_vm_environment_t* environment_ = nullptr;
   // HAL types borrowed from the environment.
-  iree_hal_module_types_t types_ = {};
+  iree_hal_vm_types_t types_ = {};
   // Runner module retaining the first variant.
   iree_vm_module_t* native_ = nullptr;
   // JIT bytecode module owning its image.

@@ -7,7 +7,7 @@
 #ifndef LOOM_RUNTIME_PARAMETER_MODULE_H_
 #define LOOM_RUNTIME_PARAMETER_MODULE_H_
 
-#include "iree/module/hal/types.h"
+#include "iree/hal/vm/types.h"
 #include "iree/vm/module.h"
 #include "loom/runtime/parameter/sources.h"
 
@@ -32,7 +32,7 @@ extern "C" {
 // release those obligations. The hosting device group and registered reference
 // types outlive every accepted operation and escaped reference.
 iree_status_t loom_runtime_parameters_module_create(
-    iree_vm_environment_t* environment, const iree_hal_module_types_t* types,
+    iree_vm_environment_t* environment, const iree_hal_vm_types_t* types,
     iree_hal_queue_t* queue, loom_runtime_parameter_sources_t* sources,
     iree_allocator_t host_allocator, iree_vm_module_t** out_module);
 

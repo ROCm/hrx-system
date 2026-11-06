@@ -30,8 +30,8 @@ class ParameterModuleTest : public loom_runtime::testing::ParameterTest {
     ASSERT_NO_FATAL_FAILURE(ParameterTest::SetUp());
     IREE_ASSERT_OK(iree_vm_environment_allocate(allocator_, &environment_));
     const iree_vm_ref_type_table_t* table = nullptr;
-    IREE_ASSERT_OK(iree_hal_module_register_types(environment_, &table));
-    IREE_ASSERT_OK(iree_hal_module_types_resolve(table, &types_));
+    IREE_ASSERT_OK(iree_hal_vm_register_types(environment_, &table));
+    IREE_ASSERT_OK(iree_hal_vm_types_resolve(table, &types_));
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
         iree_vm_environment_lookup_ref_type_table(environment_, IREE_SV("vm")),
         &vm_types_));
@@ -179,7 +179,7 @@ class ParameterModuleTest : public loom_runtime::testing::ParameterTest {
   // Canonical type owner outliving the module and escaped fence references.
   iree_vm_environment_t* environment_ = nullptr;
   // Device reference identities supplied to the native capability.
-  iree_hal_module_types_t types_ = {};
+  iree_hal_vm_types_t types_ = {};
   // Host byte-buffer identities supplied to the native capability.
   iree_vm_ref_types_t vm_types_ = {};
   // Temporary cold catalog ownership released after every binding.

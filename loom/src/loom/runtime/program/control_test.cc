@@ -241,8 +241,8 @@ class ControlTest
     IREE_RETURN_IF_ERROR(
         iree_vm_environment_allocate(host_allocator_, &environment_));
     const iree_vm_ref_type_table_t* table = nullptr;
-    IREE_RETURN_IF_ERROR(iree_hal_module_register_types(environment_, &table));
-    IREE_RETURN_IF_ERROR(iree_hal_module_types_resolve(table, &types_));
+    IREE_RETURN_IF_ERROR(iree_hal_vm_register_types(environment_, &table));
+    IREE_RETURN_IF_ERROR(iree_hal_vm_types_resolve(table, &types_));
     const loom_runtime_stage_t stages[] = {
         {commands_[0], 3},
         {commands_[1], 3},
@@ -433,7 +433,7 @@ class ControlTest
   // Environment owning the type-registration namespace.
   iree_vm_environment_t* environment_ = nullptr;
   // Canonical HAL type handles.
-  iree_hal_module_types_t types_ = {};
+  iree_hal_vm_types_t types_ = {};
   // Owned native execution module.
   iree_vm_module_t* native_module_ = nullptr;
   // Owned compiled model-control module.
