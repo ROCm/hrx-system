@@ -251,7 +251,7 @@ kernel.def @shared_observations() {
 }
 
 // ====
-// RUN: with-checks roundtrip
+// RUN: pass canonicalize,cse,dce
 // A volatile scalar workgroup object retains every source observation.
 #include <loomcxx/kernel.h>
 [[loom::kernel, loom::workgroup_size(1, 1, 1),
@@ -263,10 +263,21 @@ void shared_scalar(unsigned* output, unsigned value) {
   output[0] = slot;
 }
 // ----
-CHECK: *buffer.alloca<workgroup>*
-CHECK: *view.store<volatile> %value*
-CHECK: *view.load<volatile>*
-CHECK: *view.load<volatile>*
+kernel.def @shared_scalar() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%output: buffer, %value: i32) {
+  %9 = index.constant 4 : offset
+  %slot_storage = buffer.alloca<workgroup> align(4) %9 : buffer
+  %slot_storage_byte_offset = index.constant 0 : offset
+  %slot_view = buffer.view %slot_storage[%slot_storage_byte_offset] : buffer -> view<1xi32>
+  view.store<volatile> %value, %slot_view[0] : i32, view<1xi32>
+  %slot$13 = view.load<volatile> %slot_view[0] : view<1xi32> -> i32
+  %slot$14 = view.load<volatile> %slot_view[0] : view<1xi32> -> i32
+  %23 = buffer.view %output[%slot_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %slot$14, %23[0] : i32, view<1xi32>
+  kernel.return
+}
 
 // ====
 // Void returns share the discarded-value path without rereading assignments.

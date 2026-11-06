@@ -17,6 +17,7 @@ checks operands and order as well as the operations emitted.
 | Boolean value/byte representation, arrays, fields, and aliases | `boolean_storage*` |
 | Packed class/member layout and unaligned typed accesses | `packed_memory` |
 | Compound assignment, sequencing, and converted expression results | `storage_updates`, `storage_composition` |
+| Observed accesses, qualified parameter objects, and strided subviews | `volatile*` |
 
 For example, the guarded-array case returns the modified middle element and
 both neighbors separately. The exact result distinguishes an update of the

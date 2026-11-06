@@ -33,6 +33,10 @@ loom_check_test_suite(
         "pointers.cxx-test",
         "storage_composition.cxx-test",
         "storage_updates.cxx-test",
+        "volatile.cxx-test",
+        "volatile_composition.cxx-test",
+        "volatile_invalid.cxx-test",
+        "volatile_views.cxx-test",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )
