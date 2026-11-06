@@ -1,0 +1,138 @@
+// RUN: pass inline-callables,promote-private-fragments,canonicalize,cse,dce
+// Addressed Boolean parameters return to predicate SSA after private promotion.
+bool identity(bool value) { return *&value; }
+// ----
+func.def public @identity(%value: i1) -> (i1) {
+  func.return %value : i1
+}
+
+// ====
+// Conditional helper mutation promotes the stored bytes through an SSA merge.
+[[loom::inline]] static void invert(bool* value) { *value = !*value; }
+bool conditional(bool input, bool enabled) {
+  bool value = input;
+  if (enabled) invert(&value);
+  return value;
+}
+// ----
+func.def public @conditional(%input: i1, %enabled: i1) -> (i1) {
+  %23 = scalar.xori %enabled, %input : i1
+  func.return %23 : i1
+}
+
+// ====
+// Boolean-enum objects participate in the same source-independent promotion.
+enum class Flag : bool { no, yes };
+Flag identity(Flag value) { return *&value; }
+// ----
+func.def public @identity(%value: i1) -> (i1) {
+  func.return %value : i1
+}
+
+// ====
+// Volatile observations retain real byte accesses, including discarded reads.
+bool observed(bool input) {
+  volatile bool value = input;
+  (void)value;
+  value = !input;
+  return value;
+}
+// ----
+func.def public @observed(%input: i1) -> (i1) {
+  %2 = index.constant 1 : offset
+  %value_storage = buffer.alloca<private> align(1) %2 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi8>
+  %6 = scalar.extui %input : i1 to i8
+  view.store<volatile> %6, %value_view[0] : i8, view<1xi8>
+  %7 = view.load<volatile> %value_view[0] : view<1xi8> -> i8
+  %10 = scalar.constant 1 : i1
+  %11 = scalar.xori %input, %10 : i1
+  %12 = scalar.extui %11 : i1 to i8
+  view.store<volatile> %12, %value_view[0] : i8, view<1xi8>
+  %13 = view.load<volatile> %value_view[0] : view<1xi8> -> i8
+  %14 = scalar.constant 0 : i8
+  %value = scalar.cmpi ne, %13, %14 : i8
+  func.return %value : i1
+}
+
+// ====
+// RUN: pass inline-callables,canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
+// An addressed Boolean parameter observes the helper inversion after
+// byte-storage promotion.
+[[loom::inline]] static void invert(bool* value) { *value = !*value; }
+bool parameter(bool value) {
+  invert(&value);
+  return value;
+}
+// ----
+func.def public @parameter(%value: i1) -> (i1) {
+  %16 = scalar.constant 1 : i1
+  %17 = scalar.xori %value, %16 : i1
+  func.return %17 : i1
+}
+
+// ====
+// RUN: pass inline-callables,canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
+// Truth conversion uses the complete integer before all weighted aliases
+// observe the same inverted local predicate.
+[[loom::inline]] static void initialize(bool* value, unsigned input) {
+  *value = input;
+}
+[[loom::inline]] static bool* identity(bool* value) { return value; }
+unsigned aliases(unsigned input) {
+  bool value;
+  initialize(&value, input);
+  auto* first = &value;
+  auto* second = identity(first);
+  *first = !value;
+  return unsigned(value) + 2 * unsigned(*first) + 4 * unsigned(*second);
+}
+// ----
+func.def public @aliases(%input: i32) -> (i32) {
+  %40 = scalar.constant 0 : i32
+  %41 = scalar.cmpi ne, %input, %40 : i32
+  %11 = scalar.constant 1 : i1
+  %12 = scalar.xori %41, %11 : i1
+  %19 = scalar.extui %12 : i1 to i32
+  %50 = scalar.constant 1 : i32
+  %51 = scalar.shli %19, %50 : i32
+  %28 = scalar.addi %19, %51 : i32
+  %48 = scalar.constant 2 : i32
+  %49 = scalar.shli %19, %48 : i32
+  %36 = scalar.addi %28, %49 : i32
+  func.return %36 : i32
+}
+
+// ====
+// RUN: pass inline-callables,canonicalize,cse,promote-private-fragments,canonicalize,cse,dce
+// Discarded and value-producing volatile reads are distinct observations;
+// inversion reads the stored value after the discarded read.
+bool observed(unsigned input) {
+  volatile bool value = input;
+  (void)value;
+  value = !value;
+  return value;
+}
+// ----
+func.def public @observed(%input: i32) -> (i1) {
+  %2 = index.constant 1 : offset
+  %value_storage = buffer.alloca<private> align(1) %2 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<1xi8>
+  %6 = scalar.constant 0 : i32
+  %7 = scalar.cmpi ne, %input, %6 : i32
+  %8 = scalar.extui %7 : i1 to i8
+  view.store<volatile> %8, %value_view[0] : i8, view<1xi8>
+  %9 = view.load<volatile> %value_view[0] : view<1xi8> -> i8
+  %12 = view.load<volatile> %value_view[0] : view<1xi8> -> i8
+  %13 = scalar.constant 0 : i8
+  %value$14 = scalar.cmpi ne, %12, %13 : i8
+  %15 = scalar.constant 1 : i1
+  %16 = scalar.xori %value$14, %15 : i1
+  %17 = scalar.extui %16 : i1 to i8
+  view.store<volatile> %17, %value_view[0] : i8, view<1xi8>
+  %18 = view.load<volatile> %value_view[0] : view<1xi8> -> i8
+  %value$20 = scalar.cmpi ne, %18, %13 : i8
+  func.return %value$20 : i1
+}

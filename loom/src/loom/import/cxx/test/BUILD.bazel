@@ -96,8 +96,6 @@ loom_check_test_suite(
         "atomic_builtins.cxx-test",
         "atomics.cxx-test",
         "atomics_invalid.cxx-test",
-        "boolean_storage.cxx-test",
-        "boolean_storage_cleanup.cxx-test",
         "check.cxx-test",
         "check_approximate.cxx-test",
         "check_approximate_invalid.cxx-test",
