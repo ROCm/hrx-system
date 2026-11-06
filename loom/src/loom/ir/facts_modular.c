@@ -95,6 +95,9 @@ static void loom_value_facts_extended_unsigned_overflow(
   }
   loom_value_facts_propagate_binary_distribution(lhs_facts, rhs_facts,
                                                  out_overflow);
+  if (loom_value_facts_is_lane_varying(*out_overflow)) {
+    loom_value_facts_mark_lane_predicate(out_overflow);
+  }
 }
 
 void loom_value_facts_addui_extended(const loom_value_facts_t* lhs,

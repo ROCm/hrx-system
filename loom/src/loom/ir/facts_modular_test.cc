@@ -111,6 +111,24 @@ TEST(ModularIntegerFacts, ExactExtendedUnsignedArithmeticAcrossWidths) {
   }
 }
 
+TEST(ModularIntegerFacts, ExtendedUnsignedOverflowPreservesLanePredicates) {
+  loom_value_facts_t lhs = loom_value_facts_make(INT8_MIN, INT8_MAX, 1);
+  loom_value_facts_mark_lane_varying(&lhs);
+  const loom_value_facts_t rhs = loom_value_facts_make(INT8_MIN, INT8_MAX, 1);
+  loom_value_facts_t value;
+  loom_value_facts_t overflow;
+
+  loom_value_facts_addui_extended(&lhs, &rhs, 8, &value, &overflow);
+  EXPECT_TRUE(loom_value_facts_is_lane_varying(value));
+  EXPECT_FALSE(loom_value_facts_is_lane_predicate(value));
+  EXPECT_TRUE(loom_value_facts_is_lane_predicate(overflow));
+
+  loom_value_facts_subui_extended(&lhs, &rhs, 8, &value, &overflow);
+  EXPECT_TRUE(loom_value_facts_is_lane_varying(value));
+  EXPECT_FALSE(loom_value_facts_is_lane_predicate(value));
+  EXPECT_TRUE(loom_value_facts_is_lane_predicate(overflow));
+}
+
 TEST(ModularIntegerFacts, RangesRemainSoundAcrossWrap) {
   loom_value_facts_t lhs = loom_value_facts_make(120, 127, 1);
   loom_value_facts_mark_lane_varying(&lhs);
