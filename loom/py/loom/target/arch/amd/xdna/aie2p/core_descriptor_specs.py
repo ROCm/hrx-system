@@ -1924,6 +1924,14 @@ _BASE_DESCRIPTOR_SPECS = (
         asm_mnemonic="mov.quotient",
     ),
     _DescriptorSpec(
+        "MOV_alu_mv_mv_mv_scl",
+        f"{_TARGET_KEY}.move.carry-to-scalar",
+        "register.move.carry-to-scalar",
+        "II_MOV_alu_mv_mv_mv_scl",
+        (("dst", "eR"), ("src", "mSRCarry")),
+        asm_mnemonic="mov.carry",
+    ),
+    _DescriptorSpec(
         "ADD_alu_r_rr",
         f"{_TARGET_KEY}.add.i32",
         "integer.add.i32",
