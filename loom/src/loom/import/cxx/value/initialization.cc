@@ -16,6 +16,7 @@
 #include <cxx/types.h>
 
 #include <cstring>
+#include <unordered_map>
 #include <utility>
 
 #include "loom/import/cxx/source/error.h"
@@ -187,6 +188,149 @@ Value Initialization::value(const cxx::Type* type,
   }
   return from_elements(type, elements, implicit_element, constructor, owner,
                        retained);
+}
+
+Value Initialization::constant(const cxx::ConstValue& value,
+                               const cxx::Type* type, cxx::AST* owner) {
+  return materialize_constant(value, types_.unqualified(type), owner);
+}
+
+Value Initialization::materialize_constant(const cxx::ConstValue& value,
+                                           const cxx::Type* type,
+                                           cxx::AST* owner) {
+  // Address alternatives retain C++ storage identity rather than immutable
+  // value components. Reject them at the exact nested leaf that requires an
+  // addressable object; aggregate parents remain otherwise admissible.
+  if (std::holds_alternative<const cxx::StringLiteral*>(value) ||
+      std::holds_alternative<std::shared_ptr<cxx::ConstAddress>>(value) ||
+      std::holds_alternative<std::shared_ptr<cxx::ConstLabelAddress>>(value)) {
+    diagnostics_.reject(
+        unit_, owner,
+        "constant addresses require an addressable source object");
+  }
+  if (std::holds_alternative<cxx::IndeterminateValue>(value)) {
+    diagnostics_.reject(unit_, owner,
+                        "indeterminate constant values cannot be materialized");
+  }
+  if (std::holds_alternative<std::shared_ptr<cxx::Meta>>(value)) {
+    diagnostics_.reject(unit_, owner,
+                        "constant metadata cannot be materialized as a Loom "
+                        "value");
+  }
+
+  auto traits = unit_.typeTraits();
+  if (traits.is_arithmetic(type) || traits.is_enum(type)) {
+    return Value(scalars_.constant(value, type, owner));
+  }
+
+  if (types_.native_vector(type)) {
+    auto* retained = std::get_if<std::shared_ptr<cxx::InitializerList>>(&value);
+    if (!retained || !*retained) {
+      diagnostics_.reject(unit_, owner,
+                          "constant vector has no retained lane values");
+    }
+    std::array<loom_value_id_t, 1> components = {
+        vectors_.constant(value, type, owner)};
+    return arena_.capture(types_.partition(type, owner), components);
+  }
+
+  if (auto* array = types_.array(type, owner)) {
+    auto* retained = std::get_if<std::shared_ptr<cxx::InitializerList>>(&value);
+    if (!retained || !*retained) {
+      diagnostics_.reject(unit_, owner,
+                          "constant array has no retained element values");
+    }
+    if ((*retained)->elements.size() != array->source->size()) {
+      diagnostics_.reject(unit_, owner,
+                          "constant array element count does not match its "
+                          "source type");
+    }
+    std::vector<loom_value_id_t> components;
+    components.reserve(array->component_count);
+    const auto* element_type = array->source->elementType();
+    for (const auto& [element, retained_type] : (*retained)->elements) {
+      if (!retained_type ||
+          !unit_.typeTraits().is_same(types_.unqualified(retained_type),
+                                      types_.unqualified(element_type))) {
+        diagnostics_.reject(unit_, owner,
+                            "constant array element type does not match its "
+                            "source type");
+      }
+      materialize_constant(element, element_type, owner).append_to(components);
+    }
+    return arena_.capture(*array, components);
+  }
+
+  if (auto* record = types_.record(type, owner)) {
+    auto* retained = std::get_if<std::shared_ptr<cxx::ConstObject>>(&value);
+    if (!retained || !*retained) {
+      diagnostics_.reject(unit_, owner,
+                          "constant record has no retained member values");
+    }
+    if ((*retained)->isConstexprUnknown()) {
+      diagnostics_.reject(unit_, owner,
+                          "unknown constexpr objects cannot be materialized");
+    }
+    if (!(*retained)->type() ||
+        !unit_.typeTraits().is_same(types_.unqualified((*retained)->type()),
+                                    type)) {
+      diagnostics_.reject(unit_, owner,
+                          "constant record type does not match its source "
+                          "type");
+    }
+    std::unordered_map<const cxx::FieldSymbol*, const cxx::ConstValue*>
+        retained_members;
+    retained_members.reserve((*retained)->members().size());
+    for (const auto& member : (*retained)->members()) {
+      auto* field =
+          member.symbol && member.symbol->kind() == cxx::SymbolKind::kField
+              ? static_cast<const cxx::FieldSymbol*>(member.symbol)
+              : nullptr;
+      if (!field) {
+        diagnostics_.reject(unit_, owner,
+                            "constant record contains a non-field member");
+      }
+      if (!retained_members.emplace(field, &member.value).second) {
+        diagnostics_.reject(unit_, owner,
+                            "constant record contains a duplicate member");
+      }
+    }
+
+    std::vector<loom_value_id_t> components;
+    components.reserve(record->component_count);
+    for (const auto& member : record->members) {
+      auto found = retained_members.find(member.field);
+      if (found == retained_members.end()) {
+        diagnostics_.reject(unit_, owner,
+                            "constant record is missing an admitted member");
+      }
+      materialize_constant(*found->second, member.field->type(), owner)
+          .append_to(components);
+      retained_members.erase(found);
+    }
+    if (!retained_members.empty()) {
+      diagnostics_.reject(unit_, owner,
+                          "constant record contains an unadmitted member");
+    }
+    return arena_.capture(*record, components);
+  }
+
+  const auto& partition = types_.partition(type, owner);
+  if (partition.component_count != 1 ||
+      (partition.kind != ValueKind::SSA &&
+       partition.kind != ValueKind::Address)) {
+    diagnostics_.reject(unit_, owner,
+                        "constant value requires an admitted scalar, vector, "
+                        "array, or record type");
+  }
+  auto output = types_.get(type, owner);
+  if (loom_type_kind(output) != LOOM_TYPE_SCALAR) {
+    diagnostics_.reject(unit_, owner,
+                        "constant leaf requires an admitted scalar type");
+  }
+  std::array<loom_value_id_t, 1> components = {
+      scalars_.constant(value, type, owner)};
+  return arena_.capture(partition, components);
 }
 
 Value Initialization::zero(const cxx::Type* type, cxx::AST* owner) {

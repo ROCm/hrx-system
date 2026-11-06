@@ -427,3 +427,68 @@ func.def @initialize_scalar(%seed: i32, %output: buffer, %output_byte_offset: of
   view.store %49, %43[0] : i32, view<1xi32>
   func.return
 }
+
+// ====
+// A frontend-evaluated record follows the same flattened value partition as a
+// runtime record. Control flow inside the constexpr helper leaves no runtime
+// switch or unused members behind.
+struct Rhs {
+  int species_a{-1};
+  int species_b{-1};
+  int exponent_a{0};
+  double branching{1.0};
+};
+static constexpr Rhs rhs_data(int rate) {
+  Rhs value{};
+  switch (rate) {
+    case 1:
+      value.species_a = 1;
+      value.exponent_a = 3;
+      break;
+    case 2:
+      value.species_a = 2;
+      value.species_b = 1;
+      value.exponent_a = 1;
+      break;
+    default:
+      break;
+  }
+  return value;
+}
+double apply(double input) {
+  constexpr Rhs value = rhs_data(1);
+  if constexpr (value.exponent_a == 3) return input * input * input;
+  return input * value.species_b;
+}
+
+// ----
+func.def public @apply(%input: f64) -> (f64) {
+  %6 = scalar.mulf %input, %input : f64
+  %7 = scalar.mulf %6, %input : f64
+  func.return %7 : f64
+}
+
+// ====
+// Nested records, arrays, enums, and native vectors retain their admitted
+// component types when a namespace constant is read into runtime IR.
+using Int2 = int __attribute__((ext_vector_type(2)));
+enum class Mode : unsigned { first = 3, second = 7 };
+struct Leaf { Mode mode; Int2 lanes; };
+struct Bundle { Leaf leaves[2]; unsigned bias; };
+static constexpr Bundle make_bundle() {
+  Bundle value{{{Mode::first, {1, 2}}, {Mode::second, {3, 4}}}, 9};
+  value.leaves[1].lanes[0] = 11;
+  return value;
+}
+constexpr Bundle bundle = make_bundle();
+Bundle read_bundle() { return bundle; }
+
+// ----
+func.def public @read_bundle() -> (i32, vector<2xi32>, i32, vector<2xi32>, i32) {
+  %bundle_leaves_0_mode = scalar.constant 3 : i32
+  %bundle_leaves_0_lanes = vector.constanti [1, 2] : vector<2xi32>
+  %bundle_leaves_1_mode = scalar.constant 7 : i32
+  %bundle_leaves_1_lanes = vector.constanti [11, 4] : vector<2xi32>
+  %bundle_bias = scalar.constant 9 : i32
+  func.return %bundle_leaves_0_mode, %bundle_leaves_0_lanes, %bundle_leaves_1_mode, %bundle_leaves_1_lanes, %bundle_bias : i32, vector<2xi32>, i32, vector<2xi32>, i32
+}

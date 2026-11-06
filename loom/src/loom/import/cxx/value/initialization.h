@@ -8,6 +8,7 @@
 #define LOOM_IMPORT_CXX_VALUE_INITIALIZATION_H_
 
 #include <cxx/ast_fwd.h>
+#include <cxx/const_value.h>
 #include <cxx/symbols_fwd.h>
 
 #include <array>
@@ -110,6 +111,11 @@ class Initialization {
   Value value(const cxx::Type* type, cxx::ExpressionAST* initializer,
               cxx::FunctionSymbol* constructor, cxx::AST* owner,
               std::optional<Value> retained = std::nullopt);
+  // Materializes one frontend-evaluated constant through the same admitted
+  // component structure used by ordinary values. Aggregate traversal follows
+  // source types and field identities; source object bytes are never decoded.
+  Value constant(const cxx::ConstValue& value, const cxx::Type* type,
+                 cxx::AST* owner);
   // Captures a character-array string initializer using the source ABI's code
   // units, terminator, and zero fill. Other initializer forms return no value.
   std::optional<ObjectRepresentation> literal(const cxx::Type* type,
@@ -152,6 +158,8 @@ class Initialization {
       const cxx::Type* type, cxx::List<cxx::ExpressionAST*>* elements,
       cxx::AST* owner);
   loom_string_id_t zero_name(loom_scalar_type_t scalar_type);
+  Value materialize_constant(const cxx::ConstValue& value,
+                             const cxx::Type* type, cxx::AST* owner);
   Value zero(const cxx::Type* type, cxx::AST* owner);
   Value default_record(const RecordPartition& record,
                        cxx::FunctionSymbol* constructor, bool zero_initialize,

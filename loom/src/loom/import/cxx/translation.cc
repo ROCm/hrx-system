@@ -4223,9 +4223,7 @@ class Translator final : private Initialization::Evaluation {
   }
 
   Value constant(const cxx::ConstValue& value, cxx::ExpressionAST* ast) {
-    return types_.native_vector(ast->type)
-               ? vectors_.constant(value, ast->type, ast)
-               : scalars_.constant(value, ast->type, ast);
+    return initialization_.constant(value, ast->type, ast);
   }
 
   std::optional<Value> fold_constant_reference_call(
