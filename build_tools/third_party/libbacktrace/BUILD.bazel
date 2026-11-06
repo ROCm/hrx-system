@@ -13,6 +13,7 @@ package(default_visibility = ["//visibility:private"])
 exports_files([
     "explicit_integer_conversions.patch",
     "ignore_nonruntime_symbols.patch",
+    "iterative_function_scopes.patch",
     "libbacktrace.BUILD.bazel",
     "threaded_cache_reads.patch",
     "zero_size_vectors.patch",
@@ -90,5 +91,8 @@ cc_test(
 
 test_suite(
     name = "upstream_tests",
-    tests = ["@libbacktrace//:unittest"],
+    tests = [
+        "@libbacktrace//:btest",
+        "@libbacktrace//:unittest",
+    ],
 )

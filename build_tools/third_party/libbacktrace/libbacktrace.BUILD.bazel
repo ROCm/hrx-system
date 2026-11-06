@@ -1,6 +1,7 @@
 # Copyright 2026 The IREE Authors
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("@hrx//build_tools/bazel:cc_test.bzl", "cc_unstripped_test")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
@@ -46,6 +47,27 @@ cc_test(
         "unittest.c",
     ],
     copts = [
+        "-include",
+        "config.h",
+    ],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":libbacktrace",
+        "@hrx//build_tools/third_party/libbacktrace:configuration",
+    ],
+)
+
+cc_unstripped_test(
+    name = "btest",
+    srcs = [
+        "btest.c",
+        "filenames.h",
+        "testlib.c",
+        "testlib.h",
+    ],
+    copts = [
+        # File/line and inline-frame assertions also run in fastbuild.
+        "-g",
         "-include",
         "config.h",
     ],

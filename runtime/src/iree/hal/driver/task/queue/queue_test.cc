@@ -797,8 +797,10 @@ TEST_P(TaskQueueTest, ReleasesDeviceGroupWithAcceptedExecuteInFlight) {
 TEST_P(TaskQueueTest, AbortOnFailurePreservesDiagnostic) {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
 #if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS) != 0
-  const char* diagnostic =
-      "queue operation failed.*operation diagnostic context";
+  auto diagnostic =
+      ::testing::AllOf(::testing::HasSubstr("DATA_LOSS"),
+                       ::testing::HasSubstr("queue operation failed"),
+                       ::testing::HasSubstr("operation diagnostic context"));
 #else
   const char* diagnostic = "DATA_LOSS";
 #endif
