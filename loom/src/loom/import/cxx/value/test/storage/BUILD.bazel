@@ -31,6 +31,8 @@ loom_check_test_suite(
         "pointer_origins.cxx-test",
         "pointer_walk.cxx-test",
         "pointers.cxx-test",
+        "storage_composition.cxx-test",
+        "storage_updates.cxx-test",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
 )

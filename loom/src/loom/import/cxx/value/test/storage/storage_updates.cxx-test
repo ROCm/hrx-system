@@ -178,7 +178,7 @@ config.decl @update.workgroup_count.y : index
 config.decl @update.workgroup_count.z : index
 
 // ====
-// RUN: with-checks roundtrip
+// RUN: pass canonicalize,cse,dce
 // Scalar workgroup objects use ordinary scalar lvalue and address semantics.
 #include <loomcxx/kernel.h>
 [[loom::kernel, loom::workgroup_size(1, 1, 1),
@@ -193,16 +193,29 @@ void update(unsigned input, unsigned* output) {
 }
 
 // ----
-CHECK: *index.constant 4 : offset
-CHECK: *buffer.alloca<workgroup> align(32)*
-CHECK: *buffer.view* -> view<1xi32>
-CHECK: *view.store %input*
-CHECK: *scalar.addi*
-CHECK: *kernel.barrier<workgroup>*
-CHECK: *view.load*
+kernel.def @update() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%input: i32, %output: buffer) {
+  %9 = index.constant 4 : offset
+  %slot_storage = buffer.alloca<workgroup> align(32) %9 : buffer
+  %slot_storage_byte_offset = index.constant 0 : offset
+  %slot_view = buffer.view %slot_storage[%slot_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %input, %slot_view[0] : i32, view<1xi32>
+  %15 = scalar.constant 5 : i32
+  %16 = view.load %slot_view[0] : view<1xi32> -> i32
+  %17 = scalar.addi %16, %15 : i32
+  view.store %17, %slot_view[0] : i32, view<1xi32>
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %20 = view.load %slot_view[0] : view<1xi32> -> i32
+  %29 = buffer.view %output[%slot_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %20, %29[0] : i32, view<1xi32>
+  kernel.return
+}
 
 // ====
-// RUN: with-checks roundtrip
+// RUN: pass canonicalize,cse,dce
 // Supported vector objects share the same workgroup storage contract.
 #include <loomcxx/kernel.h>
 using Words = unsigned __attribute__((vector_size(16)));
@@ -216,12 +229,22 @@ void update(Words input, Words* output) {
 }
 
 // ----
-CHECK: *index.constant 16 : offset
-CHECK: *buffer.alloca<workgroup> align(16)*
-CHECK: *buffer.view* -> view<4xi32>
-CHECK: *vector.store %input*
-CHECK: *kernel.barrier<workgroup>*
-CHECK: *vector.load*
+kernel.def @update() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%input: vector<4xi32>, %output: buffer) {
+  %9 = index.constant 16 : offset
+  %slot_storage = buffer.alloca<workgroup> align(16) %9 : buffer
+  %slot_storage_byte_offset = index.constant 0 : offset
+  %slot_view = buffer.view %slot_storage[%slot_storage_byte_offset] : buffer -> view<4xi32>
+  vector.store %input, %slot_view[0] : vector<4xi32>, view<4xi32>
+  kernel.barrier<global> scope(workgroup) ordering(acq_rel)
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %slot = vector.load %slot_view[0] : view<4xi32> -> vector<4xi32>
+  %22 = buffer.view %output[%slot_storage_byte_offset] : buffer -> view<4xi32>
+  vector.store %slot, %22[0] : vector<4xi32>, view<4xi32>
+  kernel.return
+}
 
 // ====
 // RUN: verify

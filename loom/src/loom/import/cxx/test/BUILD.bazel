@@ -148,7 +148,6 @@ loom_check_test_suite(
         "shaped_intrinsics.cxx-test",
         "shaped_intrinsics_invalid.cxx-test",
         "special_members_invalid.cxx-test",
-        "storage_updates.cxx-test",
         "subgroup_reductions.cxx-test",
         "subgroup_reductions_invalid.cxx-test",
         "subgroup_shuffles.cxx-test",
