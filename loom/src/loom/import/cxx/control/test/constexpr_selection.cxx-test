@@ -1,0 +1,432 @@
+// RUN: roundtrip
+// A discarded source branch contributes no runtime operations.
+int entry(int value) {
+  if constexpr (false) {
+    switch (value) {
+      case 1: return 20;
+      default: return 30;
+    }
+  }
+  if constexpr (true) return value + 1;
+  else return value - 1;
+}
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = scalar.constant 1 : i32
+  %3 = scalar.addi %value, %2 : i32
+  func.return %3 : i32
+}
+
+// ====
+// A constant initializer can supply the selection after substitution.
+template <unsigned Bias>
+static unsigned select(unsigned value) {
+  if constexpr (const unsigned bias = Bias; bias > 3) return value + bias;
+  else return value - bias;
+}
+unsigned entry(unsigned value) { return select<5>(value) + select<2>(value); }
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = func.call pure @select_5(%value) : (i32) -> (i32)
+  %3 = func.call pure @select_2(%value) : (i32) -> (i32)
+  %4 = scalar.addi %2, %3 : i32
+  func.return %4 : i32
+}
+
+func.def @select_5(%value: i32) -> (i32) {
+  %bias = scalar.constant 5 : i32
+  %8 = scalar.addi %value, %bias : i32
+  func.return %8 : i32
+}
+
+func.def @select_2(%value: i32) -> (i32) {
+  %bias = scalar.constant 2 : i32
+  %12 = scalar.subi %value, %bias : i32
+  func.return %12 : i32
+}
+
+// ====
+// Discarded dependent expressions need no implementation for this source type.
+template <class T>
+static auto select(T value) {
+  if constexpr (sizeof(T) == sizeof(int)) return value + 1;
+  else return value.missing();
+}
+int entry(int value) { return select(value); }
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  %2 = func.call pure @select_int(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @select_int(%value: i32) -> (i32) {
+  %5 = scalar.constant 1 : i32
+  %6 = scalar.addi %value, %5 : i32
+  func.return %6 : i32
+}
+
+// ====
+// Concrete return types can differ between specializations.
+template <bool Floating>
+static auto select(int value) {
+  if constexpr (Floating) return float(value);
+  else return value;
+}
+float floating(int value) { return select<true>(value); }
+int integer(int value) { return select<false>(value); }
+// ----
+func.def public @floating(%value: i32) -> (f32) {
+  %2 = func.call pure @select_1(%value) : (i32) -> (f32)
+  func.return %2 : f32
+}
+
+func.def public @integer(%value: i32) -> (i32) {
+  %5 = func.call pure @select_0(%value) : (i32) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @select_1(%value: i32) -> (f32) {
+  %8 = scalar.sitofp %value : i32 to f32
+  func.return %8 : f32
+}
+
+func.def @select_0(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ====
+// Discarded writes and exits do not prevent a scheduled counted loop.
+unsigned entry(unsigned count) {
+  unsigned total = 0;
+  [[loom::unroll(2)]]
+  for (unsigned index = 0; index < count; ++index) {
+    if constexpr (false) {
+      --count;
+      return 100;
+    }
+    if constexpr (true) {
+      if (index & 1u) continue;
+    }
+    total += index;
+  }
+  return total;
+}
+// ----
+func.def public @entry(%count: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %index = scalar.constant 0 : i32
+  %4 = index.cast %index : i32 to offset
+  %5 = index.cast %count : i32 to offset
+  %6 = index.constant 1 : offset
+  %7 = scalar.constant 2 : i32
+  %8 = index.cast %7 : i32 to index
+  %total$11 = scf.for %index = [%4 to %5 step %6](%total$10 = %total$2 : i32) -> (i32) unroll(%8) {
+    %12 = index.cast %index : offset to i32
+    %13 = scalar.constant 1 : i32
+    %14 = scalar.andi %12, %13 : i32
+    %15 = scalar.constant 0 : i32
+    %16 = scalar.cmpi ne, %14, %15 : i32
+    %17 = scf.if %16 -> (i1) {
+      %18 = scalar.constant 0 : i1
+      scf.yield %18 : i1
+    } else {
+      %19 = scalar.constant 1 : i1
+      scf.yield %19 : i1
+    }
+    %20, %total$21 = scf.if %17 -> (i1, i32) {
+      %total = scalar.addi %total$10, %12 : i32
+      %23 = scalar.constant 1 : i1
+      scf.yield %23, %total : i1, i32
+    } else {
+      %24 = scalar.constant 0 : i1
+      scf.yield %24, %total$10 : i1, i32
+    }
+    scf.yield %total$21 : i32
+  }
+  func.return %total$11 : i32
+}
+
+// ====
+// Initializer bindings participate in runtime regions just like outer locals.
+unsigned entry(unsigned value, bool selected) {
+  if (unsigned original = value++; selected) value += original;
+  return value;
+}
+// ----
+func.def public @entry(%value$0: i32, %selected: i1) -> (i32) {
+  %3 = scalar.constant 1 : i32
+  %value$4 = scalar.addi %value$0, %3 : i32
+  %value$5 = scf.if %selected -> (i32) {
+    %value = scalar.addi %value$4, %value$0 : i32
+    scf.yield %value : i32
+  } else {
+    scf.yield %value$4 : i32
+  }
+  func.return %value$5 : i32
+}
+
+// ====
+// RUN: roundtrip
+// A constexpr selection keeps its initializer and every selected runtime return.
+template <bool Selected>
+static unsigned selected_return(unsigned value) {
+  if constexpr (++value; Selected) {
+    if (value < 10) {
+      return value + 20;
+    }
+  } else {
+    return value + 30;
+  }
+  return value + 40;
+}
+unsigned taken(unsigned value) { return selected_return<true>(value); }
+unsigned other(unsigned value) { return selected_return<false>(value); }
+// ----
+func.def public @taken(%value: i32) -> (i32) {
+  %2 = func.call pure @selected_return_1(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def public @other(%value: i32) -> (i32) {
+  %5 = func.call pure @selected_return_0(%value) : (i32) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @selected_return_1(%value$6: i32) -> (i32) {
+  %8 = scalar.constant 1 : i32
+  %value$9 = scalar.addi %value$6, %8 : i32
+  %10 = scalar.constant 10 : i32
+  %11 = scalar.cmpi ult, %value$9, %10 : i32
+  %12 = scf.if %11 -> (i32) {
+    %13 = scalar.constant 20 : i32
+    %14 = scalar.addi %value$9, %13 : i32
+    scf.yield %14 : i32
+  } else {
+    %15 = scalar.constant 40 : i32
+    %16 = scalar.addi %value$9, %15 : i32
+    scf.yield %16 : i32
+  }
+  func.return %12 : i32
+}
+
+func.def @selected_return_0(%value$17: i32) -> (i32) {
+  %19 = scalar.constant 1 : i32
+  %value$20 = scalar.addi %value$17, %19 : i32
+  %21 = scalar.constant 30 : i32
+  %22 = scalar.addi %value$20, %21 : i32
+  func.return %22 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Discarding an entire statement does not discard the selection initializer.
+unsigned discarded_statement(unsigned value) {
+  if constexpr (++value; false) {
+    switch (value) {
+      case 1:
+        return 100;
+      default:
+        return 200;
+    }
+  }
+  return value;
+}
+// ----
+func.def public @discarded_statement(%value$0: i32) -> (i32) {
+  %2 = scalar.constant 1 : i32
+  %value$3 = scalar.addi %value$0, %2 : i32
+  func.return %value$3 : i32
+}
+
+// ====
+// RUN: roundtrip
+// An if initializer is sequenced before the condition and lives in the selected arm.
+unsigned runtime_initializer(unsigned value, bool selected) {
+  if (unsigned original = value++; selected) {
+    return value + original;
+  }
+  return value;
+}
+// ----
+func.def public @runtime_initializer(%value$0: i32, %selected: i1) -> (i32) {
+  %3 = scalar.constant 1 : i32
+  %value$4 = scalar.addi %value$0, %3 : i32
+  %5 = scf.if %selected -> (i32) {
+    %6 = scalar.addi %value$4, %value$0 : i32
+    scf.yield %6 : i32
+  } else {
+    scf.yield %value$4 : i32
+  }
+  func.return %5 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Selected continues keep initializer effects; discarded writes do not affect the loop.
+template <bool Filter>
+static unsigned selected_continue(unsigned count) {
+  unsigned total = 0;
+  unsigned visits = 0;
+  for (unsigned index = 0; index < count; ++index) {
+    if constexpr (++visits; Filter) {
+      if (unsigned next = index + 1; next & 1u) {
+        continue;
+      }
+    } else {
+      if constexpr (false) {
+        --count;
+        return 100;
+      }
+    }
+    total += index;
+  }
+  return total + 100 * visits;
+}
+unsigned filtered(unsigned count) { return selected_continue<true>(count); }
+unsigned unfiltered(unsigned count) { return selected_continue<false>(count); }
+// ----
+func.def public @filtered(%count: i32) -> (i32) {
+  %2 = func.call pure @selected_continue_1(%count) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def public @unfiltered(%count: i32) -> (i32) {
+  %5 = func.call pure @selected_continue_0(%count) : (i32) -> (i32)
+  func.return %5 : i32
+}
+
+func.def @selected_continue_1(%count: i32) -> (i32) {
+  %total$8 = scalar.constant 0 : i32
+  %visits$9 = scalar.constant 0 : i32
+  %index = scalar.constant 0 : i32
+  %11 = index.cast %index : i32 to offset
+  %12 = index.cast %count : i32 to offset
+  %13 = index.constant 1 : offset
+  %visits$17, %total$18 = scf.for %index = [%11 to %12 step %13](%visits$15 = %visits$9 : i32, %total$16 = %total$8 : i32) -> (i32, i32) {
+    %19 = index.cast %index : offset to i32
+    %20 = scalar.constant 1 : i32
+    %visits$21 = scalar.addi %visits$15, %20 : i32
+    %22 = scalar.constant 1 : i32
+    %next = scalar.addi %19, %22 : i32
+    %24 = scalar.constant 1 : i32
+    %25 = scalar.andi %next, %24 : i32
+    %26 = scalar.constant 0 : i32
+    %27 = scalar.cmpi ne, %25, %26 : i32
+    %28 = scf.if %27 -> (i1) {
+      %29 = scalar.constant 0 : i1
+      scf.yield %29 : i1
+    } else {
+      %30 = scalar.constant 1 : i1
+      scf.yield %30 : i1
+    }
+    %31, %visits$32, %total$33 = scf.if %28 -> (i1, i32, i32) {
+      %total = scalar.addi %total$16, %19 : i32
+      %35 = scalar.constant 1 : i1
+      scf.yield %35, %visits$21, %total : i1, i32, i32
+    } else {
+      %36 = scalar.constant 0 : i1
+      scf.yield %36, %visits$21, %total$16 : i1, i32, i32
+    }
+    scf.yield %visits$32, %total$33 : i32, i32
+  }
+  %37 = scalar.constant 100 : i32
+  %38 = scalar.muli %37, %visits$17 : i32
+  %39 = scalar.addi %total$18, %38 : i32
+  func.return %39 : i32
+}
+
+func.def @selected_continue_0(%count: i32) -> (i32) {
+  %total$42 = scalar.constant 0 : i32
+  %visits$43 = scalar.constant 0 : i32
+  %index = scalar.constant 0 : i32
+  %45 = index.cast %index : i32 to offset
+  %46 = index.cast %count : i32 to offset
+  %47 = index.constant 1 : offset
+  %visits$51, %total$52 = scf.for %index = [%45 to %46 step %47](%visits$49 = %visits$43 : i32, %total$50 = %total$42 : i32) -> (i32, i32) {
+    %53 = index.cast %index : offset to i32
+    %54 = scalar.constant 1 : i32
+    %visits$55 = scalar.addi %visits$49, %54 : i32
+    %total$56 = scalar.addi %total$50, %53 : i32
+    scf.yield %visits$55, %total$56 : i32, i32
+  }
+  %57 = scalar.constant 100 : i32
+  %58 = scalar.muli %57, %visits$51 : i32
+  %59 = scalar.addi %total$52, %58 : i32
+  func.return %59 : i32
+}
+
+// ====
+// RUN: roundtrip
+// A constexpr else arm can continue past a runtime if initializer and its shared tail.
+unsigned selected_continue_tail(unsigned count) {
+  unsigned total = 0;
+  unsigned visits = 0;
+  for (unsigned index = 0; index < count; ++index) {
+    if (unsigned previous = visits++; index & 1u) {
+      total += previous;
+    } else if constexpr (true) {
+      continue;
+    }
+    total += 10;
+  }
+  return total + 100 * visits;
+}
+// ----
+func.def public @selected_continue_tail(%count: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %visits$3 = scalar.constant 0 : i32
+  %index = scalar.constant 0 : i32
+  %5 = index.cast %index : i32 to offset
+  %6 = index.cast %count : i32 to offset
+  %7 = index.constant 1 : offset
+  %visits$11, %total$12 = scf.for %index = [%5 to %6 step %7](%visits$9 = %visits$3 : i32, %total$10 = %total$2 : i32) -> (i32, i32) {
+    %13 = index.cast %index : offset to i32
+    %14 = scalar.constant 1 : i32
+    %visits$15 = scalar.addi %visits$9, %14 : i32
+    %16 = scalar.constant 1 : i32
+    %17 = scalar.andi %13, %16 : i32
+    %18 = scalar.constant 0 : i32
+    %19 = scalar.cmpi ne, %17, %18 : i32
+    %20, %visits$21, %total$22 = scf.if %19 -> (i1, i32, i32) {
+      %total$23 = scalar.addi %total$10, %visits$9 : i32
+      %24 = scalar.constant 10 : i32
+      %total$25 = scalar.addi %total$23, %24 : i32
+      %26 = scalar.constant 1 : i1
+      scf.yield %26, %visits$15, %total$25 : i1, i32, i32
+    } else {
+      %27 = scalar.constant 0 : i1
+      scf.yield %27, %visits$15, %total$10 : i1, i32, i32
+    }
+    scf.yield %visits$21, %total$22 : i32, i32
+  }
+  %28 = scalar.constant 100 : i32
+  %29 = scalar.muli %28, %visits$11 : i32
+  %30 = scalar.addi %total$12, %29 : i32
+  func.return %30 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Both runtime branches join the state changed by the initializer.
+unsigned runtime_initializer_join(unsigned value, bool selected) {
+  if (unsigned original = value++; selected) {
+    value += original;
+  } else {
+    value += 10;
+  }
+  return value;
+}
+// ----
+func.def public @runtime_initializer_join(%value$0: i32, %selected: i1) -> (i32) {
+  %3 = scalar.constant 1 : i32
+  %value$4 = scalar.addi %value$0, %3 : i32
+  %value$5 = scf.if %selected -> (i32) {
+    %value = scalar.addi %value$4, %value$0 : i32
+    scf.yield %value : i32
+  } else {
+    %7 = scalar.constant 10 : i32
+    %value = scalar.addi %value$4, %7 : i32
+    scf.yield %value : i32
+  }
+  func.return %value$5 : i32
+}

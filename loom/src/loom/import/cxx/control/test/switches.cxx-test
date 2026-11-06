@@ -1,0 +1,744 @@
+// RUN: roundtrip
+int direct(unsigned selector, int value) {
+  switch (selector) {
+    case 0xffffffffu:
+      value += 9;
+      break;
+    case 2u:
+      value += 3;
+      break;
+    default:
+      value -= 1;
+      break;
+  }
+  return value;
+}
+// ----
+func.def public @direct(%selector: i32, %value$1: i32) -> (i32) {
+  %3 = scalar.extui %selector : i32 to i64
+  %switch_selector = index.cast %3 : i64 to index
+  %value$5 = scf.switch %switch_selector -> (i32) {
+    case 2 {
+      %6 = scalar.constant 3 : i32
+      %value = scalar.addi %value$1, %6 : i32
+      %8 = scalar.constant 0 : i1
+      scf.yield %value : i32
+    }
+    case 4294967295 {
+      %9 = scalar.constant 9 : i32
+      %value = scalar.addi %value$1, %9 : i32
+      %11 = scalar.constant 0 : i1
+      scf.yield %value : i32
+    }
+    default {
+      %12 = scalar.constant 1 : i32
+      %value = scalar.subi %value$1, %12 : i32
+      %14 = scalar.constant 0 : i1
+      scf.yield %value : i32
+    }
+  }
+  %15 = scalar.constant 1 : i1
+  func.return %value$5 : i32
+}
+
+// ====
+int fallthrough(unsigned selector, int value) {
+  switch (selector) {
+    case 0u:
+    case 1u:
+      value += 1;
+    case 2u:
+      value *= 2;
+      break;
+    default:
+      value -= 3;
+    case 4u:
+      value += 5;
+  }
+  return value;
+}
+// ----
+func.def public @fallthrough(%selector: i32, %value$1: i32) -> (i32) {
+  %3 = scalar.extui %selector : i32 to i64
+  %switch_selector = index.cast %3 : i64 to index
+  %5 = scalar.constant 0 : i1
+  %6 = scalar.constant 1 : i1
+  %7 = index.constant 0 : index
+  %8 = index.cmp eq, %switch_selector, %7 : index
+  %9 = scalar.ori %5, %8 : i1
+  %10 = scalar.ori %5, %8 : i1
+  %11 = index.constant 1 : index
+  %12 = index.cmp eq, %switch_selector, %11 : index
+  %13 = scalar.ori %9, %12 : i1
+  %14 = scalar.ori %10, %12 : i1
+  %15 = index.constant 2 : index
+  %16 = index.cmp eq, %switch_selector, %15 : index
+  %17 = scalar.ori %5, %16 : i1
+  %18 = scalar.ori %14, %16 : i1
+  %19 = index.constant 4 : index
+  %20 = index.cmp eq, %switch_selector, %19 : index
+  %21 = scalar.ori %5, %20 : i1
+  %22 = scalar.ori %18, %20 : i1
+  %23 = scalar.constant 1 : i1
+  %24 = scalar.xori %22, %23 : i1
+  %25 = scalar.ori %5, %24 : i1
+  %26 = scalar.ori %5, %13 : i1
+  %27, %value$28 = scf.if %26 -> (i1, i32) {
+    %29 = scalar.constant 1 : i32
+    %value = scalar.addi %value$1, %29 : i32
+    %31 = scalar.constant 1 : i1
+    scf.yield %31, %value : i1, i32
+  } else {
+    scf.yield %5, %value$1 : i1, i32
+  }
+  %32 = scalar.ori %27, %17 : i1
+  %33, %value$34 = scf.if %32 -> (i1, i32) {
+    %35 = scalar.constant 2 : i32
+    %value = scalar.muli %value$28, %35 : i32
+    %37 = scalar.constant 0 : i1
+    scf.yield %37, %value : i1, i32
+  } else {
+    scf.yield %27, %value$28 : i1, i32
+  }
+  %38 = scalar.ori %33, %25 : i1
+  %39, %value$40 = scf.if %38 -> (i1, i32) {
+    %41 = scalar.constant 3 : i32
+    %value = scalar.subi %value$34, %41 : i32
+    %43 = scalar.constant 1 : i1
+    scf.yield %43, %value : i1, i32
+  } else {
+    scf.yield %33, %value$34 : i1, i32
+  }
+  %44 = scalar.ori %39, %21 : i1
+  %45, %value$46 = scf.if %44 -> (i1, i32) {
+    %47 = scalar.constant 5 : i32
+    %value = scalar.addi %value$40, %47 : i32
+    %49 = scalar.constant 1 : i1
+    scf.yield %49, %value : i1, i32
+  } else {
+    scf.yield %39, %value$40 : i1, i32
+  }
+  func.return %value$46 : i32
+}
+
+// ====
+int nested(int selector, int value) {
+  switch (int initial = selector; int selected = initial + 1) {
+    case 1:
+      switch (value) {
+        case 0:
+          value = 7;
+          break;
+        default:
+          value = 9;
+          break;
+      }
+      break;
+    default:
+      value = 11;
+      break;
+  }
+  return value;
+}
+// ----
+func.def public @nested(%selector: i32, %value$1: i32) -> (i32) {
+  %3 = scalar.constant 1 : i32
+  %selected = scalar.addi %selector, %3 : i32
+  %switch_selector = index.cast %selected : i32 to index
+  %value$6 = scf.switch %switch_selector -> (i32) {
+    case 1 {
+      %switch_selector = index.cast %value$1 : i32 to index
+      %value = scf.switch %switch_selector -> (i32) {
+        case 0 {
+          %value = scalar.constant 7 : i32
+          %10 = scalar.constant 0 : i1
+          scf.yield %value : i32
+        }
+        default {
+          %value = scalar.constant 9 : i32
+          %12 = scalar.constant 0 : i1
+          scf.yield %value : i32
+        }
+      }
+      %13 = scalar.constant 1 : i1
+      %14 = scalar.constant 0 : i1
+      scf.yield %value : i32
+    }
+    default {
+      %value = scalar.constant 11 : i32
+      %16 = scalar.constant 0 : i1
+      scf.yield %value : i32
+    }
+  }
+  %17 = scalar.constant 1 : i1
+  func.return %value$6 : i32
+}
+
+// ====
+int continued(int selector, int value) {
+  for (int index = 0; index < 4; ++index) {
+    switch (selector) {
+      case -1:
+        value += 2;
+        break;
+      case 1:
+        continue;
+      default:
+        value += index;
+        break;
+    }
+    value += 10;
+  }
+  return value;
+}
+// ----
+func.def public @continued(%selector: i32, %value$1: i32) -> (i32) {
+  %index = scalar.constant 0 : i32
+  %4 = index.cast %index : i32 to index
+  %5 = scalar.constant 4 : i32
+  %6 = index.cast %5 : i32 to index
+  %7 = index.constant 1 : index
+  %value$10 = scf.for %index = [%4 to %6 step %7](%value$9 = %value$1 : i32) -> (i32) {
+    %11 = index.cast %index : index to i32
+    %switch_selector = index.cast %selector : i32 to index
+    %13, %value$14 = scf.switch %switch_selector -> (i1, i32) {
+      case -1 {
+        %15 = scalar.constant 2 : i32
+        %value = scalar.addi %value$9, %15 : i32
+        %17 = scalar.constant 0 : i1
+        %18 = scalar.constant 1 : i1
+        %19 = scalar.xori %17, %18 : i1
+        %20 = scalar.ori %17, %19 : i1
+        scf.yield %20, %value : i1, i32
+      }
+      case 1 {
+        %21 = scalar.constant 0 : i1
+        %22 = scalar.constant 1 : i1
+        %23 = scalar.constant 1 : i1
+        %24 = scalar.xori %22, %23 : i1
+        %25 = scalar.ori %21, %24 : i1
+        scf.yield %25, %value$9 : i1, i32
+      }
+      default {
+        %value = scalar.addi %value$9, %11 : i32
+        %27 = scalar.constant 0 : i1
+        %28 = scalar.constant 1 : i1
+        %29 = scalar.xori %27, %28 : i1
+        %30 = scalar.ori %27, %29 : i1
+        scf.yield %30, %value : i1, i32
+      }
+    }
+    %31, %value$32 = scf.if %13 -> (i1, i32) {
+      %33 = scalar.constant 10 : i32
+      %value = scalar.addi %value$14, %33 : i32
+      %35 = scalar.constant 1 : i1
+      scf.yield %35, %value : i1, i32
+    } else {
+      %36 = scalar.constant 0 : i1
+      scf.yield %36, %value$14 : i1, i32
+    }
+    scf.yield %value$32 : i32
+  }
+  func.return %value$10 : i32
+}
+
+// ====
+int no_default(int selector, int value) {
+  switch (selector) {
+    case -3:
+      value *= 2;
+      break;
+    case 4:
+      value += 5;
+      break;
+  }
+  return value;
+}
+
+// ----
+func.def public @no_default(%selector: i32, %value$1: i32) -> (i32) {
+  %switch_selector = index.cast %selector : i32 to index
+  %value$4 = scf.switch %switch_selector -> (i32) {
+    case -3 {
+      %5 = scalar.constant 2 : i32
+      %value = scalar.muli %value$1, %5 : i32
+      %7 = scalar.constant 0 : i1
+      scf.yield %value : i32
+    }
+    case 4 {
+      %8 = scalar.constant 5 : i32
+      %value = scalar.addi %value$1, %8 : i32
+      %10 = scalar.constant 0 : i1
+      scf.yield %value : i32
+    }
+    default {
+      %11 = scalar.constant 1 : i1
+      scf.yield %value$1 : i32
+    }
+  }
+  %12 = scalar.constant 1 : i1
+  func.return %value$4 : i32
+}
+
+// ====
+void empty(int selector) { switch (selector) {} }
+
+// ----
+func.def public @empty(%selector: i32) {
+  %switch_selector = index.cast %selector : i32 to index
+  scf.switch %switch_selector {
+    default {
+      %2 = scalar.constant 1 : i1
+    }
+  }
+  %3 = scalar.constant 1 : i1
+  func.return
+}
+
+// ====
+// RUN: roundtrip
+// A conditional break bypasses the clause tail and subsequent fallthrough.
+int partial_break(unsigned selector, int value) {
+  switch (selector) {
+    case 0u:
+      value += 1;
+      if ((value & 1) != 0) {
+        break;
+      }
+      value += 2;
+    case 1u:
+      value += 4;
+      break;
+    default:
+      value += 8;
+  }
+  return value;
+}
+// ----
+func.def public @partial_break(%selector: i32, %value$1: i32) -> (i32) {
+  %3 = scalar.extui %selector : i32 to i64
+  %switch_selector = index.cast %3 : i64 to index
+  %5 = scalar.constant 0 : i1
+  %6 = scalar.constant 1 : i1
+  %7 = index.constant 0 : index
+  %8 = index.cmp eq, %switch_selector, %7 : index
+  %9 = scalar.ori %5, %8 : i1
+  %10 = scalar.ori %5, %8 : i1
+  %11 = index.constant 1 : index
+  %12 = index.cmp eq, %switch_selector, %11 : index
+  %13 = scalar.ori %5, %12 : i1
+  %14 = scalar.ori %10, %12 : i1
+  %15 = scalar.constant 1 : i1
+  %16 = scalar.xori %14, %15 : i1
+  %17 = scalar.ori %5, %16 : i1
+  %18 = scalar.ori %5, %9 : i1
+  %19, %value$20 = scf.if %18 -> (i1, i32) {
+    %21 = scalar.constant 1 : i32
+    %value$22 = scalar.addi %value$1, %21 : i32
+    %23 = scalar.constant 1 : i32
+    %24 = scalar.andi %value$22, %23 : i32
+    %25 = scalar.constant 0 : i32
+    %26 = scalar.cmpi ne, %24, %25 : i32
+    %27, %28, %value$29 = scf.if %26 -> (i1, i1, i32) {
+      %30 = scalar.constant 0 : i1
+      scf.yield %30, %30, %value$22 : i1, i1, i32
+    } else {
+      %31 = scalar.constant 2 : i32
+      %value = scalar.addi %value$22, %31 : i32
+      %33 = scalar.constant 1 : i1
+      scf.yield %33, %33, %value : i1, i1, i32
+    }
+    scf.yield %27, %value$29 : i1, i32
+  } else {
+    scf.yield %5, %value$1 : i1, i32
+  }
+  %34 = scalar.ori %19, %13 : i1
+  %35, %value$36 = scf.if %34 -> (i1, i32) {
+    %37 = scalar.constant 4 : i32
+    %value = scalar.addi %value$20, %37 : i32
+    %39 = scalar.constant 0 : i1
+    scf.yield %39, %value : i1, i32
+  } else {
+    scf.yield %19, %value$20 : i1, i32
+  }
+  %40 = scalar.ori %35, %17 : i1
+  %41, %value$42 = scf.if %40 -> (i1, i32) {
+    %43 = scalar.constant 8 : i32
+    %value = scalar.addi %value$36, %43 : i32
+    %45 = scalar.constant 1 : i1
+    scf.yield %45, %value : i1, i32
+  } else {
+    scf.yield %35, %value$36 : i1, i32
+  }
+  func.return %value$42 : i32
+}
+
+// ====
+// RUN: roundtrip
+// A conditional switch continue exits the enclosing loop iteration.
+int conditional_continue(int selector) {
+  int value = 0;
+  for (int index = 0; index < 4; ++index) {
+    switch (selector) {
+      case 0:
+        if ((index & 1) != 0) {
+          continue;
+        }
+        value += 1;
+        break;
+      default:
+        value += 2;
+        break;
+    }
+    value += 10;
+  }
+  return value;
+}
+// ----
+func.def public @conditional_continue(%selector: i32) -> (i32) {
+  %value$2 = scalar.constant 0 : i32
+  %index = scalar.constant 0 : i32
+  %4 = index.cast %index : i32 to index
+  %5 = scalar.constant 4 : i32
+  %6 = index.cast %5 : i32 to index
+  %7 = index.constant 1 : index
+  %value$10 = scf.for %index = [%4 to %6 step %7](%value$9 = %value$2 : i32) -> (i32) {
+    %11 = index.cast %index : index to i32
+    %switch_selector = index.cast %selector : i32 to index
+    %13, %value$14 = scf.switch %switch_selector -> (i1, i32) {
+      case 0 {
+        %15 = scalar.constant 1 : i32
+        %16 = scalar.andi %11, %15 : i32
+        %17 = scalar.constant 0 : i32
+        %18 = scalar.cmpi ne, %16, %17 : i32
+        %19, %20, %value = scf.if %18 -> (i1, i1, i32) {
+          %22 = scalar.constant 0 : i1
+          %23 = scalar.constant 1 : i1
+          scf.yield %22, %23, %value$9 : i1, i1, i32
+        } else {
+          %24 = scalar.constant 1 : i32
+          %value = scalar.addi %value$9, %24 : i32
+          %26 = scalar.constant 0 : i1
+          scf.yield %26, %26, %value : i1, i1, i32
+        }
+        %27 = scalar.constant 1 : i1
+        %28 = scalar.xori %20, %27 : i1
+        %29 = scalar.ori %19, %28 : i1
+        scf.yield %29, %value : i1, i32
+      }
+      default {
+        %30 = scalar.constant 2 : i32
+        %value = scalar.addi %value$9, %30 : i32
+        %32 = scalar.constant 0 : i1
+        %33 = scalar.constant 1 : i1
+        %34 = scalar.xori %32, %33 : i1
+        %35 = scalar.ori %32, %34 : i1
+        scf.yield %35, %value : i1, i32
+      }
+    }
+    %36, %value$37 = scf.if %13 -> (i1, i32) {
+      %38 = scalar.constant 10 : i32
+      %value = scalar.addi %value$14, %38 : i32
+      %40 = scalar.constant 1 : i1
+      scf.yield %40, %value : i1, i32
+    } else {
+      %41 = scalar.constant 0 : i1
+      scf.yield %41, %value$14 : i1, i32
+    }
+    scf.yield %value$37 : i32
+  }
+  func.return %value$10 : i32
+}
+
+// ====
+// RUN: roundtrip
+// A descending fallthrough chain preserves every case and the default-free exit.
+unsigned duff_tail(unsigned remainder) {
+  unsigned visited = 0;
+  switch (remainder & 15u) {
+    case 0:
+      visited |= 1u << 0u;
+    case 15:
+      visited |= 1u << 15u;
+    case 14:
+      visited |= 1u << 14u;
+    case 13:
+      visited |= 1u << 13u;
+    case 12:
+      visited |= 1u << 12u;
+    case 11:
+      visited |= 1u << 11u;
+    case 10:
+      visited |= 1u << 10u;
+    case 9:
+      visited |= 1u << 9u;
+    case 8:
+      visited |= 1u << 8u;
+    case 7:
+      visited |= 1u << 7u;
+    case 6:
+      visited |= 1u << 6u;
+    case 5:
+      visited |= 1u << 5u;
+    case 4:
+      visited |= 1u << 4u;
+    case 3:
+      visited |= 1u << 3u;
+    case 2:
+      visited |= 1u << 2u;
+    case 1:
+      visited |= 1u << 1u;
+  }
+  return visited;
+}
+// ----
+func.def public @duff_tail(%remainder: i32) -> (i32) {
+  %visited$2 = scalar.constant 0 : i32
+  %3 = scalar.constant 15 : i32
+  %4 = scalar.andi %remainder, %3 : i32
+  %5 = scalar.extui %4 : i32 to i64
+  %switch_selector = index.cast %5 : i64 to index
+  %7 = scalar.constant 0 : i1
+  %8 = scalar.constant 1 : i1
+  %9 = index.constant 0 : index
+  %10 = index.cmp eq, %switch_selector, %9 : index
+  %11 = scalar.ori %7, %10 : i1
+  %12 = scalar.ori %7, %10 : i1
+  %13 = index.constant 15 : index
+  %14 = index.cmp eq, %switch_selector, %13 : index
+  %15 = scalar.ori %7, %14 : i1
+  %16 = scalar.ori %12, %14 : i1
+  %17 = index.constant 14 : index
+  %18 = index.cmp eq, %switch_selector, %17 : index
+  %19 = scalar.ori %7, %18 : i1
+  %20 = scalar.ori %16, %18 : i1
+  %21 = index.constant 13 : index
+  %22 = index.cmp eq, %switch_selector, %21 : index
+  %23 = scalar.ori %7, %22 : i1
+  %24 = scalar.ori %20, %22 : i1
+  %25 = index.constant 12 : index
+  %26 = index.cmp eq, %switch_selector, %25 : index
+  %27 = scalar.ori %7, %26 : i1
+  %28 = scalar.ori %24, %26 : i1
+  %29 = index.constant 11 : index
+  %30 = index.cmp eq, %switch_selector, %29 : index
+  %31 = scalar.ori %7, %30 : i1
+  %32 = scalar.ori %28, %30 : i1
+  %33 = index.constant 10 : index
+  %34 = index.cmp eq, %switch_selector, %33 : index
+  %35 = scalar.ori %7, %34 : i1
+  %36 = scalar.ori %32, %34 : i1
+  %37 = index.constant 9 : index
+  %38 = index.cmp eq, %switch_selector, %37 : index
+  %39 = scalar.ori %7, %38 : i1
+  %40 = scalar.ori %36, %38 : i1
+  %41 = index.constant 8 : index
+  %42 = index.cmp eq, %switch_selector, %41 : index
+  %43 = scalar.ori %7, %42 : i1
+  %44 = scalar.ori %40, %42 : i1
+  %45 = index.constant 7 : index
+  %46 = index.cmp eq, %switch_selector, %45 : index
+  %47 = scalar.ori %7, %46 : i1
+  %48 = scalar.ori %44, %46 : i1
+  %49 = index.constant 6 : index
+  %50 = index.cmp eq, %switch_selector, %49 : index
+  %51 = scalar.ori %7, %50 : i1
+  %52 = scalar.ori %48, %50 : i1
+  %53 = index.constant 5 : index
+  %54 = index.cmp eq, %switch_selector, %53 : index
+  %55 = scalar.ori %7, %54 : i1
+  %56 = scalar.ori %52, %54 : i1
+  %57 = index.constant 4 : index
+  %58 = index.cmp eq, %switch_selector, %57 : index
+  %59 = scalar.ori %7, %58 : i1
+  %60 = scalar.ori %56, %58 : i1
+  %61 = index.constant 3 : index
+  %62 = index.cmp eq, %switch_selector, %61 : index
+  %63 = scalar.ori %7, %62 : i1
+  %64 = scalar.ori %60, %62 : i1
+  %65 = index.constant 2 : index
+  %66 = index.cmp eq, %switch_selector, %65 : index
+  %67 = scalar.ori %7, %66 : i1
+  %68 = scalar.ori %64, %66 : i1
+  %69 = index.constant 1 : index
+  %70 = index.cmp eq, %switch_selector, %69 : index
+  %71 = scalar.ori %7, %70 : i1
+  %72 = scalar.ori %68, %70 : i1
+  %73 = scalar.ori %7, %11 : i1
+  %74, %visited$75 = scf.if %73 -> (i1, i32) {
+    %76 = scalar.constant 1 : i32
+    %77 = scalar.constant 0 : i32
+    %78 = scalar.shli %76, %77 : i32
+    %visited = scalar.ori %visited$2, %78 : i32
+    %80 = scalar.constant 1 : i1
+    scf.yield %80, %visited : i1, i32
+  } else {
+    scf.yield %7, %visited$2 : i1, i32
+  }
+  %81 = scalar.ori %74, %15 : i1
+  %82, %visited$83 = scf.if %81 -> (i1, i32) {
+    %84 = scalar.constant 1 : i32
+    %85 = scalar.constant 15 : i32
+    %86 = scalar.shli %84, %85 : i32
+    %visited = scalar.ori %visited$75, %86 : i32
+    %88 = scalar.constant 1 : i1
+    scf.yield %88, %visited : i1, i32
+  } else {
+    scf.yield %74, %visited$75 : i1, i32
+  }
+  %89 = scalar.ori %82, %19 : i1
+  %90, %visited$91 = scf.if %89 -> (i1, i32) {
+    %92 = scalar.constant 1 : i32
+    %93 = scalar.constant 14 : i32
+    %94 = scalar.shli %92, %93 : i32
+    %visited = scalar.ori %visited$83, %94 : i32
+    %96 = scalar.constant 1 : i1
+    scf.yield %96, %visited : i1, i32
+  } else {
+    scf.yield %82, %visited$83 : i1, i32
+  }
+  %97 = scalar.ori %90, %23 : i1
+  %98, %visited$99 = scf.if %97 -> (i1, i32) {
+    %100 = scalar.constant 1 : i32
+    %101 = scalar.constant 13 : i32
+    %102 = scalar.shli %100, %101 : i32
+    %visited = scalar.ori %visited$91, %102 : i32
+    %104 = scalar.constant 1 : i1
+    scf.yield %104, %visited : i1, i32
+  } else {
+    scf.yield %90, %visited$91 : i1, i32
+  }
+  %105 = scalar.ori %98, %27 : i1
+  %106, %visited$107 = scf.if %105 -> (i1, i32) {
+    %108 = scalar.constant 1 : i32
+    %109 = scalar.constant 12 : i32
+    %110 = scalar.shli %108, %109 : i32
+    %visited = scalar.ori %visited$99, %110 : i32
+    %112 = scalar.constant 1 : i1
+    scf.yield %112, %visited : i1, i32
+  } else {
+    scf.yield %98, %visited$99 : i1, i32
+  }
+  %113 = scalar.ori %106, %31 : i1
+  %114, %visited$115 = scf.if %113 -> (i1, i32) {
+    %116 = scalar.constant 1 : i32
+    %117 = scalar.constant 11 : i32
+    %118 = scalar.shli %116, %117 : i32
+    %visited = scalar.ori %visited$107, %118 : i32
+    %120 = scalar.constant 1 : i1
+    scf.yield %120, %visited : i1, i32
+  } else {
+    scf.yield %106, %visited$107 : i1, i32
+  }
+  %121 = scalar.ori %114, %35 : i1
+  %122, %visited$123 = scf.if %121 -> (i1, i32) {
+    %124 = scalar.constant 1 : i32
+    %125 = scalar.constant 10 : i32
+    %126 = scalar.shli %124, %125 : i32
+    %visited = scalar.ori %visited$115, %126 : i32
+    %128 = scalar.constant 1 : i1
+    scf.yield %128, %visited : i1, i32
+  } else {
+    scf.yield %114, %visited$115 : i1, i32
+  }
+  %129 = scalar.ori %122, %39 : i1
+  %130, %visited$131 = scf.if %129 -> (i1, i32) {
+    %132 = scalar.constant 1 : i32
+    %133 = scalar.constant 9 : i32
+    %134 = scalar.shli %132, %133 : i32
+    %visited = scalar.ori %visited$123, %134 : i32
+    %136 = scalar.constant 1 : i1
+    scf.yield %136, %visited : i1, i32
+  } else {
+    scf.yield %122, %visited$123 : i1, i32
+  }
+  %137 = scalar.ori %130, %43 : i1
+  %138, %visited$139 = scf.if %137 -> (i1, i32) {
+    %140 = scalar.constant 1 : i32
+    %141 = scalar.constant 8 : i32
+    %142 = scalar.shli %140, %141 : i32
+    %visited = scalar.ori %visited$131, %142 : i32
+    %144 = scalar.constant 1 : i1
+    scf.yield %144, %visited : i1, i32
+  } else {
+    scf.yield %130, %visited$131 : i1, i32
+  }
+  %145 = scalar.ori %138, %47 : i1
+  %146, %visited$147 = scf.if %145 -> (i1, i32) {
+    %148 = scalar.constant 1 : i32
+    %149 = scalar.constant 7 : i32
+    %150 = scalar.shli %148, %149 : i32
+    %visited = scalar.ori %visited$139, %150 : i32
+    %152 = scalar.constant 1 : i1
+    scf.yield %152, %visited : i1, i32
+  } else {
+    scf.yield %138, %visited$139 : i1, i32
+  }
+  %153 = scalar.ori %146, %51 : i1
+  %154, %visited$155 = scf.if %153 -> (i1, i32) {
+    %156 = scalar.constant 1 : i32
+    %157 = scalar.constant 6 : i32
+    %158 = scalar.shli %156, %157 : i32
+    %visited = scalar.ori %visited$147, %158 : i32
+    %160 = scalar.constant 1 : i1
+    scf.yield %160, %visited : i1, i32
+  } else {
+    scf.yield %146, %visited$147 : i1, i32
+  }
+  %161 = scalar.ori %154, %55 : i1
+  %162, %visited$163 = scf.if %161 -> (i1, i32) {
+    %164 = scalar.constant 1 : i32
+    %165 = scalar.constant 5 : i32
+    %166 = scalar.shli %164, %165 : i32
+    %visited = scalar.ori %visited$155, %166 : i32
+    %168 = scalar.constant 1 : i1
+    scf.yield %168, %visited : i1, i32
+  } else {
+    scf.yield %154, %visited$155 : i1, i32
+  }
+  %169 = scalar.ori %162, %59 : i1
+  %170, %visited$171 = scf.if %169 -> (i1, i32) {
+    %172 = scalar.constant 1 : i32
+    %173 = scalar.constant 4 : i32
+    %174 = scalar.shli %172, %173 : i32
+    %visited = scalar.ori %visited$163, %174 : i32
+    %176 = scalar.constant 1 : i1
+    scf.yield %176, %visited : i1, i32
+  } else {
+    scf.yield %162, %visited$163 : i1, i32
+  }
+  %177 = scalar.ori %170, %63 : i1
+  %178, %visited$179 = scf.if %177 -> (i1, i32) {
+    %180 = scalar.constant 1 : i32
+    %181 = scalar.constant 3 : i32
+    %182 = scalar.shli %180, %181 : i32
+    %visited = scalar.ori %visited$171, %182 : i32
+    %184 = scalar.constant 1 : i1
+    scf.yield %184, %visited : i1, i32
+  } else {
+    scf.yield %170, %visited$171 : i1, i32
+  }
+  %185 = scalar.ori %178, %67 : i1
+  %186, %visited$187 = scf.if %185 -> (i1, i32) {
+    %188 = scalar.constant 1 : i32
+    %189 = scalar.constant 2 : i32
+    %190 = scalar.shli %188, %189 : i32
+    %visited = scalar.ori %visited$179, %190 : i32
+    %192 = scalar.constant 1 : i1
+    scf.yield %192, %visited : i1, i32
+  } else {
+    scf.yield %178, %visited$179 : i1, i32
+  }
+  %193 = scalar.ori %186, %71 : i1
+  %194, %visited$195 = scf.if %193 -> (i1, i32) {
+    %196 = scalar.constant 1 : i32
+    %197 = scalar.constant 1 : i32
+    %198 = scalar.shli %196, %197 : i32
+    %visited = scalar.ori %visited$187, %198 : i32
+    %200 = scalar.constant 1 : i1
+    scf.yield %200, %visited : i1, i32
+  } else {
+    scf.yield %186, %visited$187 : i1, i32
+  }
+  func.return %visited$195 : i32
+}

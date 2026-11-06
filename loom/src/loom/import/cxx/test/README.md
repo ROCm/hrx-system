@@ -37,6 +37,16 @@ then executes them again against the same observations. Buffer-result golden
 tests separately check that exported callable signatures preserve root and
 offset components.
 
+[Control-flow semantics](../control/test/README.md) have a separate package:
+
+```sh
+iree-bazel-test --config=asan --config=loom-importer-cxx \
+  //loom/src/loom/import/cxx/control/test:compiler_test
+```
+
+Its fixtures cover logical expressions, condition declarations, loops,
+iteration exits, switches, and returns with exact, updateable IR expectations.
+
 ## Source execution tests
 
 Executable importer inputs use `.cxx`, including handwritten cases and shared

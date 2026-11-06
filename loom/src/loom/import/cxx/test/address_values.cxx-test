@@ -263,3 +263,15 @@ func.def public @physical_fixed_width(%value: offset) -> (i64) {
   %133 = index.cast %value : offset to i64
   func.return %133 : i64
 }
+
+// ====
+// RUN: roundtrip
+// The native index facade retains constexpr values in the index domain.
+#include <loomcxx/index.h>
+constexpr loom::type::index width{64};
+loom::type::index read_width() { return width; }
+// ----
+func.def public @read_width() -> (index) {
+  %width = index.constant 64 : index
+  func.return %width : index
+}
