@@ -452,6 +452,7 @@ jobs:
             command: iree-bazel-repository-integration
             host_toolchain: clang-cl
             platform_coverage: true
+            remote_cache: true
             runner: azure-windows-scale-rocm
           - name: MSVC / Fastbuild / Repository Build
             kind: repository
