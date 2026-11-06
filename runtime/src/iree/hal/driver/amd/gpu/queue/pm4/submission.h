@@ -265,13 +265,15 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
 
 // Captures one prepared file copy, upload, or download, or a barrier when
 // operation is NULL. The file owner has resolved dependencies and supplies
-// prepared boundaries.
+// prepared boundaries. Copies add mandatory shader/CP cache handoffs using the
+// selected family's profile; empty caller boundaries cannot elide these edges.
 // The callback replaces private signal semaphores and owns the file's borrowed
 // bytes until the capture's last publication/native reference retires. Failure
 // retains nothing and invokes no callback. Success may complete immediately.
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
     iree_hal_amd_gpu_capture_pool_t* pool,
     const iree_hal_amd_gpu_transfer_operation_t* operation,
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_amd_gpu_pm4_barrier_t* before,
     const iree_hal_amd_gpu_pm4_barrier_t* after,
     iree_hal_amd_gpu_retirement_callback_t callback,

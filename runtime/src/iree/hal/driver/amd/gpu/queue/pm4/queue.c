@@ -3007,7 +3007,8 @@ static iree_status_t iree_hal_amd_gpu_pm4_file_submit(
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_check_acceptance(queue));
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_create_file(
-      &queue->captures, operation, before, after, callback, &submission));
+      &queue->captures, operation, &queue->options.barriers, before, after,
+      callback, &submission));
   iree_hal_amd_gpu_pm4_submit(queue, submission);
   return iree_ok_status();
 }

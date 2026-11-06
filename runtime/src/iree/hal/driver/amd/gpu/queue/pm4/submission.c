@@ -336,6 +336,7 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
     iree_hal_amd_gpu_capture_pool_t* pool,
     const iree_hal_amd_gpu_transfer_operation_t* operation,
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_amd_gpu_pm4_barrier_t* before,
     const iree_hal_amd_gpu_pm4_barrier_t* after,
     iree_hal_amd_gpu_retirement_callback_t callback,
@@ -347,14 +348,13 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
           operation ? sizeof(*operation) : 0,
           iree_alignof(iree_hal_amd_gpu_pm4_submission_retirement_t)) +
       sizeof(iree_hal_amd_gpu_pm4_submission_retirement_t);
-  const iree_hal_amd_gpu_pm4_barrier_profile_t profile = {0};
   const iree_hal_barrier_list_t empty = {0};
   const iree_hal_queue_barriers_t barriers = {&empty, &empty};
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
   void* payload = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
       pool, false, iree_hal_semaphore_list_empty(),
-      iree_hal_semaphore_list_empty(), payload_size, &profile, &barriers,
+      iree_hal_semaphore_list_empty(), payload_size, profile, &barriers,
       &submission, &payload));
   if (operation) {
     submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER;
@@ -373,6 +373,22 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
   }
   if (after) {
     submission->after = *after;
+  }
+  if (operation) {
+    // Internal file copies use CP DMA, not a shader-qualified program view.
+    // Publish preceding shader writes before CP reads or overwrites these
+    // bytes, then invalidate shader views before returning the copy to the
+    // file owner. GFX12 CP accesses bypass L2, so their handoff reaches system
+    // memory. These implementation-owned edges survive empty caller barriers.
+    submission->before.execution |=
+        IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE |
+        IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
+    submission->before.cache_control |= profile->command_processor_bypasses_l2
+                                            ? profile->release
+                                            : profile->shader;
+    submission->after.cache_control |= profile->command_processor_bypasses_l2
+                                           ? profile->acquire
+                                           : profile->shader;
   }
   *out_submission = submission;
   return iree_ok_status();
