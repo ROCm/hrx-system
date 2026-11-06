@@ -9,7 +9,7 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_LOWER_FIFO_STATE_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_LOWER_FIFO_STATE_H_
 
-#include "loom/codegen/low/lower/lower.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,9 +21,6 @@ iree_status_t loom_aie2p_query_fifo_state_contract(
     const loom_target_contract_query_environment_t* environment,
     const loom_op_t* source_op,
     loom_target_contract_query_result_t* out_result);
-
-// Returns true when |plan| imports the architectural load-FIFO states.
-bool loom_aie2p_fifo_state_plan_isa(loom_low_lower_plan_t plan);
 
 // Retains one canonical source query and plans both results as load-FIFO
 // registers. Other source operations leave |out_plan| empty.

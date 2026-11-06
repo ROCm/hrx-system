@@ -6,6 +6,7 @@
 
 #include "loom/ir/module.h"
 #include "loom/ir/scalar_type.h"
+#include "loom/ops/global/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/vector/fragment.h"
 #include "loom/target/arch/amd/xdna/aie2p/contracts/core.h"
@@ -25,6 +26,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/lower/vector_load.h"
 #include "loom/target/arch/amd/xdna/aie2p/ops/bfp_operand.h"
 #include "loom/target/arch/amd/xdna/aie2p/ops/fifo.h"
+#include "loom/target/arch/amd/xdna/aie2p/ops/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/vector_carrier.h"
 #include "loom/target/arch/amd/xdna/error_catalog.h"
 #include "loom/target/contract.h"
@@ -291,68 +293,65 @@ static iree_status_t loom_aie2p_preselect_op(void* user_data,
                                              const loom_op_t* source_op,
                                              loom_low_lower_plan_t* out_plan) {
   (void)user_data;
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_select_fifo_state_plan(context, source_op, out_plan));
-  if (!loom_low_lower_plan_is_empty(*out_plan)) {
-    return iree_ok_status();
+  switch (source_op->kind) {
+    case LOOM_OP_AIE2P_LOAD_FIFO_STATE:
+      return loom_aie2p_select_fifo_state_plan(context, source_op, out_plan);
+    case LOOM_OP_VECTOR_FROM_ELEMENTS:
+      return loom_aie2p_select_vector_construct_plan(context, source_op,
+                                                     out_plan);
+    case LOOM_OP_VECTOR_INTERLEAVE:
+    case LOOM_OP_VECTOR_DEINTERLEAVE:
+      return loom_aie2p_select_interleave_plan(context, source_op, out_plan);
+    case LOOM_OP_VECTOR_TRANSPOSE:
+      return loom_aie2p_select_transpose_plan(context, source_op, out_plan);
+    case LOOM_OP_VECTOR_SHUFFLE:
+      return loom_aie2p_select_shuffle_plan(context, source_op, out_plan);
+    case LOOM_OP_VECTOR_MMA:
+      return loom_aie2p_select_matrix_plan(context, source_op, out_plan);
+    case LOOM_OP_VECTOR_GATHER:
+      return loom_aie2p_select_gather_plan(context, source_op, out_plan);
+    case LOOM_OP_GLOBAL_LOAD:
+      return loom_aie2p_select_rodata_plan(context, source_op, out_plan);
+    default:
+      *out_plan = loom_low_lower_plan_empty();
+      return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_select_vector_construct_plan(context, source_op, out_plan));
-  if (!loom_low_lower_plan_is_empty(*out_plan)) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_select_interleave_plan(context, source_op, out_plan));
-  if (!loom_low_lower_plan_is_empty(*out_plan)) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_select_transpose_plan(context, source_op, out_plan));
-  if (!loom_low_lower_plan_is_empty(*out_plan)) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_select_shuffle_plan(context, source_op, out_plan));
-  if (!loom_low_lower_plan_is_empty(*out_plan)) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_select_matrix_plan(context, source_op, out_plan));
-  if (!loom_low_lower_plan_is_empty(*out_plan)) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_select_gather_plan(context, source_op, out_plan));
-  if (!loom_low_lower_plan_is_empty(*out_plan)) {
-    return iree_ok_status();
-  }
-  return loom_aie2p_select_rodata_plan(context, source_op, out_plan);
 }
 
 static void loom_aie2p_mark_plan_storage_demands(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_op, loom_low_lower_plan_t plan) {
   (void)user_data;
-  if (loom_aie2p_fifo_state_plan_isa(plan)) {
-    return;
-  } else if (loom_aie2p_vector_load_plan_isa(plan)) {
-    loom_aie2p_mark_vector_load_plan_demands(context, source_op, plan);
-  } else if (loom_aie2p_vector_construct_plan_isa(plan)) {
-    loom_low_lower_require_source_operands_storage(context, source_op);
-  } else if (loom_aie2p_matrix_plan_isa(plan)) {
-    loom_aie2p_mark_matrix_plan_demands(context, source_op, plan);
-  } else if (loom_aie2p_interleave_plan_isa(plan)) {
-    loom_aie2p_mark_interleave_plan_demands(context, source_op, plan);
-  } else if (loom_aie2p_transpose_plan_isa(plan)) {
-    loom_aie2p_mark_transpose_plan_demands(context, source_op, plan);
-  } else if (loom_aie2p_shuffle_plan_isa(plan)) {
-    loom_aie2p_mark_shuffle_plan_demands(context, source_op, plan);
-  } else if (loom_aie2p_gather_plan_isa(plan)) {
-    loom_aie2p_mark_gather_plan_demands(context, source_op, plan);
-  } else if (loom_aie2p_rodata_plan_isa(plan)) {
-    loom_aie2p_mark_rodata_plan_demands(context, source_op, plan);
-  } else {
-    IREE_ASSERT_UNREACHABLE("AIE2P storage demand has unknown plan kind");
+  switch ((loom_aie2p_plan_kind_t)plan.id) {
+    case LOOM_AIE2P_PLAN_FIFO_STATE_IMPORT:
+      return;
+    case LOOM_AIE2P_PLAN_VECTOR_LOAD_SCALAR_PACKETS:
+      loom_aie2p_mark_vector_load_plan_demands(context, source_op, plan);
+      return;
+    case LOOM_AIE2P_PLAN_VECTOR_CONSTRUCT_PUSH:
+      loom_low_lower_require_source_operands_storage(context, source_op);
+      return;
+    case LOOM_AIE2P_PLAN_MATRIX_MMA_M8N8K8:
+      loom_aie2p_mark_matrix_plan_demands(context, source_op, plan);
+      return;
+    case LOOM_AIE2P_PLAN_INTERLEAVE_NATIVE:
+      loom_aie2p_mark_interleave_plan_demands(context, source_op, plan);
+      return;
+    case LOOM_AIE2P_PLAN_TRANSPOSE_STATIC:
+      loom_aie2p_mark_transpose_plan_demands(context, source_op, plan);
+      return;
+    case LOOM_AIE2P_PLAN_SHUFFLE_FIXED:
+      loom_aie2p_mark_shuffle_plan_demands(context, source_op, plan);
+      return;
+    case LOOM_AIE2P_PLAN_GATHER_IMMUTABLE:
+      loom_aie2p_mark_gather_plan_demands(context, source_op, plan);
+      return;
+    case LOOM_AIE2P_PLAN_RODATA_ADDRESS:
+      loom_aie2p_mark_rodata_plan_demands(context, source_op, plan);
+      return;
+    default:
+      IREE_ASSERT_UNREACHABLE("AIE2P storage demand has unknown plan kind");
+      IREE_BUILTIN_UNREACHABLE();
   }
 }
 
@@ -364,26 +363,37 @@ static iree_status_t loom_aie2p_describe_plan(
   (void)user_data;
   (void)is_elided;
   (void)execution_count_plus_one;
-  if (loom_aie2p_fifo_state_plan_isa(plan)) {
-    loom_aie2p_describe_fifo_state_plan(out_report);
-  } else if (loom_aie2p_vector_load_plan_isa(plan)) {
-    loom_aie2p_describe_vector_load_plan(out_report);
-  } else if (loom_aie2p_vector_construct_plan_isa(plan)) {
-    loom_aie2p_describe_vector_construct_plan(out_report);
-  } else if (loom_aie2p_matrix_plan_isa(plan)) {
-    loom_aie2p_describe_matrix_plan(context, source_op, plan, out_report);
-  } else if (loom_aie2p_interleave_plan_isa(plan)) {
-    loom_aie2p_describe_interleave_plan(context, source_op, plan, out_report);
-  } else if (loom_aie2p_transpose_plan_isa(plan)) {
-    loom_aie2p_describe_transpose_plan(context, source_op, plan, out_report);
-  } else if (loom_aie2p_shuffle_plan_isa(plan)) {
-    loom_aie2p_describe_shuffle_plan(context, source_op, plan, out_report);
-  } else if (loom_aie2p_gather_plan_isa(plan)) {
-    loom_aie2p_describe_gather_plan(context, source_op, plan, out_report);
-  } else if (loom_aie2p_rodata_plan_isa(plan)) {
-    loom_aie2p_describe_rodata_plan(context, source_op, plan, out_report);
-  } else {
-    IREE_ASSERT_UNREACHABLE("AIE2P report has unknown plan kind");
+  switch ((loom_aie2p_plan_kind_t)plan.id) {
+    case LOOM_AIE2P_PLAN_FIFO_STATE_IMPORT:
+      loom_aie2p_describe_fifo_state_plan(out_report);
+      break;
+    case LOOM_AIE2P_PLAN_VECTOR_LOAD_SCALAR_PACKETS:
+      loom_aie2p_describe_vector_load_plan(out_report);
+      break;
+    case LOOM_AIE2P_PLAN_VECTOR_CONSTRUCT_PUSH:
+      loom_aie2p_describe_vector_construct_plan(out_report);
+      break;
+    case LOOM_AIE2P_PLAN_MATRIX_MMA_M8N8K8:
+      loom_aie2p_describe_matrix_plan(context, source_op, plan, out_report);
+      break;
+    case LOOM_AIE2P_PLAN_INTERLEAVE_NATIVE:
+      loom_aie2p_describe_interleave_plan(context, source_op, plan, out_report);
+      break;
+    case LOOM_AIE2P_PLAN_TRANSPOSE_STATIC:
+      loom_aie2p_describe_transpose_plan(context, source_op, plan, out_report);
+      break;
+    case LOOM_AIE2P_PLAN_SHUFFLE_FIXED:
+      loom_aie2p_describe_shuffle_plan(context, source_op, plan, out_report);
+      break;
+    case LOOM_AIE2P_PLAN_GATHER_IMMUTABLE:
+      loom_aie2p_describe_gather_plan(context, source_op, plan, out_report);
+      break;
+    case LOOM_AIE2P_PLAN_RODATA_ADDRESS:
+      loom_aie2p_describe_rodata_plan(context, source_op, plan, out_report);
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("AIE2P report has unknown plan kind");
+      IREE_BUILTIN_UNREACHABLE();
   }
   return iree_ok_status();
 }
@@ -393,13 +403,14 @@ static iree_status_t loom_aie2p_finalize_plan(void* user_data,
                                               const loom_op_t* source_op,
                                               loom_low_lower_plan_t plan) {
   (void)user_data;
-  if (loom_aie2p_shuffle_plan_isa(plan)) {
-    return loom_aie2p_finalize_shuffle_plan(context, source_op, plan);
+  switch ((loom_aie2p_plan_kind_t)plan.id) {
+    case LOOM_AIE2P_PLAN_SHUFFLE_FIXED:
+      return loom_aie2p_finalize_shuffle_plan(context, source_op, plan);
+    case LOOM_AIE2P_PLAN_TRANSPOSE_STATIC:
+      return loom_aie2p_finalize_transpose_plan(context, source_op, plan);
+    default:
+      return iree_ok_status();
   }
-  if (loom_aie2p_transpose_plan_isa(plan)) {
-    return loom_aie2p_finalize_transpose_plan(context, source_op, plan);
-  }
-  return iree_ok_status();
 }
 
 static iree_status_t loom_aie2p_emit_op(void* user_data,
@@ -407,35 +418,29 @@ static iree_status_t loom_aie2p_emit_op(void* user_data,
                                         const loom_op_t* source_op,
                                         loom_low_lower_plan_t plan) {
   (void)user_data;
-  if (loom_aie2p_fifo_state_plan_isa(plan)) {
-    return loom_aie2p_emit_fifo_state_plan(context, source_op, plan);
+  switch ((loom_aie2p_plan_kind_t)plan.id) {
+    case LOOM_AIE2P_PLAN_FIFO_STATE_IMPORT:
+      return loom_aie2p_emit_fifo_state_plan(context, source_op, plan);
+    case LOOM_AIE2P_PLAN_VECTOR_LOAD_SCALAR_PACKETS:
+      return loom_aie2p_emit_vector_load_plan(context, source_op, plan);
+    case LOOM_AIE2P_PLAN_VECTOR_CONSTRUCT_PUSH:
+      return loom_aie2p_emit_vector_construct_plan(context, source_op, plan);
+    case LOOM_AIE2P_PLAN_MATRIX_MMA_M8N8K8:
+      return loom_aie2p_emit_matrix_plan(context, source_op, plan);
+    case LOOM_AIE2P_PLAN_INTERLEAVE_NATIVE:
+      return loom_aie2p_emit_interleave_plan(context, source_op, plan);
+    case LOOM_AIE2P_PLAN_TRANSPOSE_STATIC:
+      return loom_aie2p_emit_transpose_plan(context, source_op, plan);
+    case LOOM_AIE2P_PLAN_SHUFFLE_FIXED:
+      return loom_aie2p_emit_shuffle_plan(context, source_op, plan);
+    case LOOM_AIE2P_PLAN_GATHER_IMMUTABLE:
+      return loom_aie2p_emit_gather_plan(context, source_op, plan);
+    case LOOM_AIE2P_PLAN_RODATA_ADDRESS:
+      return loom_aie2p_emit_rodata_plan(context, source_op, plan);
+    default:
+      IREE_ASSERT_UNREACHABLE("AIE2P emission has unknown plan kind");
+      IREE_BUILTIN_UNREACHABLE();
   }
-  if (loom_aie2p_vector_load_plan_isa(plan)) {
-    return loom_aie2p_emit_vector_load_plan(context, source_op, plan);
-  }
-  if (loom_aie2p_vector_construct_plan_isa(plan)) {
-    return loom_aie2p_emit_vector_construct_plan(context, source_op, plan);
-  }
-  if (loom_aie2p_matrix_plan_isa(plan)) {
-    return loom_aie2p_emit_matrix_plan(context, source_op, plan);
-  }
-  if (loom_aie2p_interleave_plan_isa(plan)) {
-    return loom_aie2p_emit_interleave_plan(context, source_op, plan);
-  }
-  if (loom_aie2p_transpose_plan_isa(plan)) {
-    return loom_aie2p_emit_transpose_plan(context, source_op, plan);
-  }
-  if (loom_aie2p_shuffle_plan_isa(plan)) {
-    return loom_aie2p_emit_shuffle_plan(context, source_op, plan);
-  }
-  if (loom_aie2p_gather_plan_isa(plan)) {
-    return loom_aie2p_emit_gather_plan(context, source_op, plan);
-  }
-  if (loom_aie2p_rodata_plan_isa(plan)) {
-    return loom_aie2p_emit_rodata_plan(context, source_op, plan);
-  }
-  IREE_ASSERT_UNREACHABLE("AIE2P emission has unknown plan kind");
-  IREE_BUILTIN_UNREACHABLE();
 }
 
 static iree_status_t loom_aie2p_finalize_module(

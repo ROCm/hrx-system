@@ -9,7 +9,7 @@
 #ifndef LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_LOWER_RODATA_H_
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_LOWER_RODATA_H_
 
-#include "loom/codegen/low/lower/lower.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,9 +20,6 @@ iree_status_t loom_aie2p_emit_rodata_address(loom_low_lower_context_t* context,
                                              loom_symbol_ref_t symbol,
                                              loom_location_id_t location,
                                              loom_value_id_t* out_address);
-
-// Returns true when |plan| is owned by read-only data lowering.
-bool loom_aie2p_rodata_plan_isa(loom_low_lower_plan_t plan);
 
 // Selects a read-only data plan for one source operation.
 iree_status_t loom_aie2p_select_rodata_plan(loom_low_lower_context_t* context,

@@ -18,7 +18,6 @@
 #include "loom/target/arch/amd/xdna/aie2p/vector_carrier.h"
 
 enum {
-  LOOM_AIE2P_TRANSPOSE_PLAN_STATIC = 0x402,
   LOOM_AIE2P_TRANSPOSE_PACKET_BYTE_COUNT = 64,
   LOOM_AIE2P_TRANSPOSE_MAX_LANE_COUNT = 128,
   LOOM_AIE2P_TRANSPOSE_MAX_STAGE_COUNT = 13,
@@ -389,10 +388,6 @@ iree_status_t loom_aie2p_query_transpose_contract(
   return iree_ok_status();
 }
 
-bool loom_aie2p_transpose_plan_isa(loom_low_lower_plan_t plan) {
-  return plan.id == LOOM_AIE2P_TRANSPOSE_PLAN_STATIC;
-}
-
 iree_status_t loom_aie2p_select_transpose_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t* out_plan) {
@@ -421,7 +416,7 @@ iree_status_t loom_aie2p_select_transpose_plan(
         context, loom_vector_transpose_result(source_op), result_type));
   }
   *out_plan =
-      loom_low_lower_plan_make(LOOM_AIE2P_TRANSPOSE_PLAN_STATIC, retained_plan);
+      loom_low_lower_plan_make(LOOM_AIE2P_PLAN_TRANSPOSE_STATIC, retained_plan);
   return iree_ok_status();
 }
 

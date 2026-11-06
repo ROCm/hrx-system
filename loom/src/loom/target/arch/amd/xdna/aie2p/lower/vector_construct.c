@@ -9,10 +9,6 @@
 #include "loom/ops/vector/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/lower/vector_packet.h"
 
-enum {
-  LOOM_AIE2P_VECTOR_CONSTRUCT_PLAN_PUSH = 0x403,
-};
-
 typedef struct loom_aie2p_vector_construct_plan_t {
   // Number of scalar elements in the verified source segment.
   uint16_t element_count;
@@ -81,10 +77,6 @@ iree_status_t loom_aie2p_query_vector_construct_contract(
   return iree_ok_status();
 }
 
-bool loom_aie2p_vector_construct_plan_isa(loom_low_lower_plan_t plan) {
-  return plan.id == LOOM_AIE2P_VECTOR_CONSTRUCT_PLAN_PUSH;
-}
-
 iree_status_t loom_aie2p_select_vector_construct_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_plan_t* out_plan) {
@@ -104,7 +96,7 @@ iree_status_t loom_aie2p_select_vector_construct_plan(
       &result_type));
   IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
       context, loom_vector_from_elements_result(source_op), result_type));
-  *out_plan = loom_low_lower_plan_make(LOOM_AIE2P_VECTOR_CONSTRUCT_PLAN_PUSH,
+  *out_plan = loom_low_lower_plan_make(LOOM_AIE2P_PLAN_VECTOR_CONSTRUCT_PUSH,
                                        retained_plan);
   return iree_ok_status();
 }

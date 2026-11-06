@@ -19,7 +19,6 @@
 #include "loom/target/registers.h"
 
 enum {
-  LOOM_AIE2P_SHUFFLE_PLAN_FIXED = 0x400,
   LOOM_AIE2P_SHUFFLE_MAX_PACKET_COUNT = 4,
   LOOM_AIE2P_SHUFFLE_PACKET_GENERIC = 4,
   LOOM_AIE2P_SHUFFLE_PACKET_ENCODING_MASK = 0x7,
@@ -153,10 +152,6 @@ static bool loom_aie2p_shuffle_is_identity(
   return true;
 }
 
-bool loom_aie2p_shuffle_plan_isa(loom_low_lower_plan_t plan) {
-  return plan.id == LOOM_AIE2P_SHUFFLE_PLAN_FIXED;
-}
-
 iree_status_t loom_aie2p_select_shuffle_plan(loom_low_lower_context_t* context,
                                              const loom_op_t* source_op,
                                              loom_low_lower_plan_t* out_plan) {
@@ -180,7 +175,7 @@ iree_status_t loom_aie2p_select_shuffle_plan(loom_low_lower_context_t* context,
         context, loom_vector_shuffle_result(source_op), result_type));
   }
   *out_plan =
-      loom_low_lower_plan_make(LOOM_AIE2P_SHUFFLE_PLAN_FIXED, retained_plan);
+      loom_low_lower_plan_make(LOOM_AIE2P_PLAN_SHUFFLE_FIXED, retained_plan);
   return iree_ok_status();
 }
 

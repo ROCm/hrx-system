@@ -10,7 +10,7 @@
 #define LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_LOWER_MATRIX_H_
 
 #include "loom/analysis/contract_vector.h"
-#include "loom/codegen/low/lower/lower.h"
+#include "loom/target/arch/amd/xdna/aie2p/lower/lower.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,9 +30,6 @@ iree_status_t loom_aie2p_descriptor_matrix_query(
     const loom_target_contract_descriptor_matrix_rule_t* rule,
     const loom_op_t* source_op, const loom_contract_request_t* request,
     loom_target_contract_query_result_t* out_result);
-
-// Returns true when |plan| is owned by native matrix lowering.
-bool loom_aie2p_matrix_plan_isa(loom_low_lower_plan_t plan);
 
 // Selects a native matrix or accumulator-movement plan.
 iree_status_t loom_aie2p_select_matrix_plan(loom_low_lower_context_t* context,
