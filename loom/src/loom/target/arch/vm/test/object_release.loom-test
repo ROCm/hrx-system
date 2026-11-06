@@ -1,0 +1,319 @@
+// Release both source owners and acquired pointer carriers at the explicit
+// boundary, independently of physical register reuse. Null is harmless.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "create_null", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create_null() -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "read", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%pointer: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %identity = constant.i32 1
+  %owner, %pointer = low.func.call @create(%identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  %copy = copy %owner : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  low.func.call @observe() : ()
+  low.release %copy : reg<vm.ref : ref<@Object>>
+  low.func.call @observe() : ()
+
+  %second = constant.i32 2
+  %second_owner, %saved = low.func.call @create(%second) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %second_owner : reg<vm.ref : ref<@Object>>
+  low.func.call @read(%saved) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  low.release %saved : reg<vm.ref : ptr<@Object>>
+  low.func.call @observe() : ()
+
+  %null_owner, %null_pointer = low.func.call @create_null() : () -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %null_owner : reg<vm.ref : ref<@Object>>
+  low.release %null_pointer : reg<vm.ref : ptr<@Object>>
+  low.func.call @observe() : ()
+  return
+}
+
+// ----
+create 1
+live 1
+destroy 1
+live 0
+create 2
+read 2
+live 1
+destroy 2
+live 0
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Both choices release the unselected guard before the joined read. This
+// boundary must hold whether the selected payload needs a physical edge move.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "read", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%pointer: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @select(%condition: reg<vm.value : i1>, %left: reg<vm.ref : ptr<@Object>>, %right: reg<vm.ref : ptr<@Object>>) asm {
+  low.cond_br %condition, ^left_path, ^right_path : reg<vm.value : i1>
+^left_path:
+  low.release %right : reg<vm.ref : ptr<@Object>>
+  low.br ^joined(%left: reg<vm.ref : ptr<@Object>>)
+^right_path:
+  low.release %left : reg<vm.ref : ptr<@Object>>
+  low.br ^joined(%right: reg<vm.ref : ptr<@Object>>)
+^joined(%value: reg<vm.ref : ptr<@Object>>):
+  low.func.call @read(%value) : (reg<vm.ref : ptr<@Object>>)
+  low.release %value : reg<vm.ref : ptr<@Object>>
+  low.func.call @observe() : ()
+  return
+}
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @choose(%condition: reg<vm.value : i1>) asm {
+  %first = constant.i32 1
+  %second = constant.i32 2
+  %left, %left_pointer = low.func.call @create(%first) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  %right, %right_pointer = low.func.call @create(%second) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %left : reg<vm.ref : ref<@Object>>
+  low.release %right : reg<vm.ref : ref<@Object>>
+  low.func.call @select(%condition, %left_pointer, %right_pointer) : (reg<vm.value : i1>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>)
+  return
+}
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %left = constant.i32 1 : reg<vm.value : i1>
+  %right = constant.i32 0 : reg<vm.value : i1>
+  low.func.call @choose(%left) : (reg<vm.value : i1>)
+  low.func.call @choose(%right) : (reg<vm.value : i1>)
+  return
+}
+
+// ----
+create 1
+create 2
+destroy 2
+read 1
+destroy 1
+live 0
+create 1
+create 2
+destroy 1
+read 2
+destroy 2
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A local release in a borrowed callee does not consume the caller's
+// still-live pointer. Storage and CFG forwarding preserve separate carriers,
+// including fan-out, both release orders, and a loop-carried pointer.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "read", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%pointer: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @drop(%pointer: reg<vm.ref : ptr<@Object>>) asm {
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  return
+}
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %identity = constant.i32 3
+  %owner, %pointer = low.func.call @create(%identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  low.func.call @drop(%pointer) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @read(%pointer) : (reg<vm.ref : ptr<@Object>>)
+  %slot = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %alias = storage_view %slot {byte_length = 16} : low.storage<private> -> low.storage<private>
+  low.spill.move %pointer, %slot : reg<vm.ref : ptr<@Object>>, low.storage<private>
+  %restored = low.reload.move %alias : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  low.release %restored : reg<vm.ref : ptr<@Object>>
+  low.func.call @observe() : ()
+
+  %fourth_identity = constant.i32 4
+  %fourth_owner, %fourth = low.func.call @create(%fourth_identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %fourth_owner : reg<vm.ref : ref<@Object>>
+  low.br ^copies(%fourth: reg<vm.ref : ptr<@Object>>, %fourth: reg<vm.ref : ptr<@Object>>)
+^copies(%first_copy: reg<vm.ref : ptr<@Object>>, %second_copy: reg<vm.ref : ptr<@Object>>):
+  low.release %first_copy : reg<vm.ref : ptr<@Object>>
+  low.func.call @read(%second_copy) : (reg<vm.ref : ptr<@Object>>)
+  low.release %second_copy : reg<vm.ref : ptr<@Object>>
+  low.func.call @observe() : ()
+
+  %fifth_identity = constant.i32 5
+  %fifth_owner, %fifth = low.func.call @create(%fifth_identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %fifth_owner : reg<vm.ref : ref<@Object>>
+  low.br ^forward(%fifth: reg<vm.ref : ptr<@Object>>)
+^forward(%forwarded: reg<vm.ref : ptr<@Object>>):
+  low.release %forwarded : reg<vm.ref : ptr<@Object>>
+  low.func.call @read(%fifth) : (reg<vm.ref : ptr<@Object>>)
+  low.release %fifth : reg<vm.ref : ptr<@Object>>
+  low.func.call @observe() : ()
+
+  %sixth_identity = constant.i32 6
+  %sixth_owner, %sixth = low.func.call @create(%sixth_identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %sixth_owner : reg<vm.ref : ref<@Object>>
+  low.br ^reverse(%sixth: reg<vm.ref : ptr<@Object>>)
+^reverse(%remaining: reg<vm.ref : ptr<@Object>>):
+  low.release %sixth : reg<vm.ref : ptr<@Object>>
+  low.func.call @read(%remaining) : (reg<vm.ref : ptr<@Object>>)
+  low.release %remaining : reg<vm.ref : ptr<@Object>>
+  low.func.call @observe() : ()
+
+  %seventh_identity = constant.i32 7
+  %seventh_owner, %seventh = low.func.call @create(%seventh_identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %seventh_owner : reg<vm.ref : ref<@Object>>
+  %again = constant.i32 1 : reg<vm.value : i1>
+  %done = constant.i32 0 : reg<vm.value : i1>
+  low.br ^loop(%seventh: reg<vm.ref : ptr<@Object>>, %again: reg<vm.value : i1>)
+^loop(%current: reg<vm.ref : ptr<@Object>>, %repeat: reg<vm.value : i1>):
+  low.func.call @read(%current) : (reg<vm.ref : ptr<@Object>>)
+  low.cond_br %repeat, ^next, ^finish : reg<vm.value : i1>
+^next:
+  low.br ^loop(%current: reg<vm.ref : ptr<@Object>>, %done: reg<vm.value : i1>)
+^finish:
+  low.release %current : reg<vm.ref : ptr<@Object>>
+  low.func.call @read(%seventh) : (reg<vm.ref : ptr<@Object>>)
+  low.release %seventh : reg<vm.ref : ptr<@Object>>
+  low.func.call @observe() : ()
+  return
+}
+
+// ----
+create 3
+read 3
+destroy 3
+live 0
+create 4
+read 4
+destroy 4
+live 0
+create 5
+read 5
+destroy 5
+live 0
+create 6
+read 6
+destroy 6
+live 0
+create 7
+read 7
+read 7
+read 7
+destroy 7
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Terminal failure releases only initialized, still-owned carriers. A
+// previously released object must not be finalized a second time.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "fail", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @fail()
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %first = constant.i32 1
+  %second = constant.i32 2
+  %owner, %pointer = low.func.call @create(%first) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  %remaining, %guard = low.func.call @create(%second) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %remaining : reg<vm.ref : ref<@Object>>
+  low.func.call @fail() : ()
+  low.release %guard : reg<vm.ref : ptr<@Object>>
+  return
+}
+
+// ----
+create 1
+destroy 1
+create 2
+fail 1
+destroy 2
+ABORTED 0
+retired 0
+
+// ====
+
+// Inlining preserves the owning call contract, for both cloned and transferred
+// bodies. All three calls destroy their sole owner before the next observer.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def inline target<vm.core>(@vm) abi(vm_function) @inlined(%owner: reg<vm.ref : ref<@Object>>) asm {
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  return
+}
+
+low.func.def noinline target<vm.core>(@vm) abi(vm_function) @outlined(%owner: reg<vm.ref : ref<@Object>>) asm {
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  return
+}
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %first = constant.i32 1
+  %owner, %pointer = low.func.call @create(%first) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  low.func.call @inlined(%owner) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @observe() : ()
+
+  %second = constant.i32 2
+  %other, %other_pointer = low.func.call @create(%second) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %other_pointer : reg<vm.ref : ptr<@Object>>
+  low.func.call @inlined(%other) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @observe() : ()
+
+  %third = constant.i32 3
+  %last, %last_pointer = low.func.call @create(%third) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %last_pointer : reg<vm.ref : ptr<@Object>>
+  low.func.call @outlined(%last) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @observe() : ()
+  return
+}
+
+// ----
+create 1
+destroy 1
+live 0
+create 2
+destroy 2
+live 0
+create 3
+destroy 3
+live 0
+OK 0
+retired 0

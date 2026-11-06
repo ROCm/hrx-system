@@ -259,6 +259,29 @@ iree_status_t loom_bytecode_write_types_section(
       case LOOM_TYPE_POOL:
         // Opaque types have no additional data.
         break;
+      case LOOM_TYPE_REFERENCE: {
+        IREE_RETURN_IF_ERROR(loom_bytecode_page_writer_write_u8(
+            page_writer, loom_type_reference_ownership(type)));
+        const loom_string_id_t string_ids[] = {
+            loom_type_reference_namespace_id(type),
+            loom_type_reference_name_id(type),
+            module->symbols.entries[loom_type_reference_declaration_id(type)]
+                .name_id,
+        };
+        iree_status_t status = iree_ok_status();
+        for (iree_host_size_t i = 0;
+             i < IREE_ARRAYSIZE(string_ids) && iree_status_is_ok(status); ++i) {
+          uint32_t writer_string_id = 0;
+          status = loom_bytecode_numbering_intern_module_string(
+              numbering, string_ids[i], &writer_string_id);
+          if (iree_status_is_ok(status)) {
+            status = loom_bytecode_page_writer_write_uvarint(page_writer,
+                                                             writer_string_id);
+          }
+        }
+        IREE_RETURN_IF_ERROR(status);
+        break;
+      }
       case LOOM_TYPE_GROUP: {
         const uint8_t rank = loom_type_rank(type);
         IREE_RETURN_IF_ERROR(

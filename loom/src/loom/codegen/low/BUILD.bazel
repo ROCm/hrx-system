@@ -399,6 +399,7 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
+        "//loom/src/loom/util:adaptive_sort",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -430,7 +431,7 @@ loom_cc_library(
         ":function",
         "//loom/src/loom/analysis:storage_layout",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops:type_builders",
+        "//loom/src/loom/ops:core_type_builders",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/rewrite:rewriter",
         "//runtime/src/iree/base",
@@ -1409,5 +1410,32 @@ loom_cc_test(
         ":requirements",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "ownership",
+    srcs = ["ownership.c"],
+    hdrs = ["ownership.h"],
+    deps = [
+        ":descriptors",
+        ":representation_binding",
+        "//loom/src/loom/analysis:ownership",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "object_lifetime",
+    srcs = ["object_lifetime.c"],
+    hdrs = ["object_lifetime.h"],
+    deps = [
+        ":descriptors",
+        ":ownership",
+        "//loom/src/loom/analysis:ownership_lifetime",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//runtime/src/iree/base",
     ],
 )

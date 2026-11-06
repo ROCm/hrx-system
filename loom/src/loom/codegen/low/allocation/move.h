@@ -24,7 +24,7 @@ typedef struct loom_low_move_location_t {
   uint16_t location_kind;
   // Register class in the owning plan's descriptor set.
   uint16_t descriptor_reg_class_id;
-  // Physical register, target ID, provisional spill slot, or move-cell ordinal.
+  // Physical register, target ID, spill, move, binding, or call-packet ordinal.
   uint32_t location;
 } loom_low_move_location_t;
 
@@ -36,6 +36,9 @@ enum loom_low_move_kind_e {
   LOOM_LOW_MOVE_KIND_COPY = 0,
   // Reads both units and exchanges their contents in one native operation.
   LOOM_LOW_MOVE_KIND_EXCHANGE = 1,
+  // Transfers the complete reference state, replacing the destination and
+  // clearing the source. No independent owner is acquired by the transfer.
+  LOOM_LOW_MOVE_KIND_TRANSFER = 2,
 };
 typedef uint8_t loom_low_move_kind_t;
 
@@ -43,16 +46,18 @@ typedef uint8_t loom_low_move_kind_t;
 typedef struct loom_low_move_t {
   // Unit overwritten by the transfer, and also read by an exchange.
   loom_low_move_location_t destination;
-  // Unit read by the transfer, and also overwritten by an exchange.
+  // Unit read by the operation, and cleared by transfer or overwritten by
+  // exchange.
   loom_low_move_location_t source;
-  // Copy or full-unit exchange semantics retained by allocation.
+  // Copy, exchange, or consuming reference transfer retained by allocation.
   loom_low_move_kind_t kind;
 } loom_low_move_t;
 
-// Each transfer has the same number of reads and writes. An exchange's two
-// reads precede both writes at one native issue position.
+// An exchange or reference transfer accesses both cells. Its reads precede
+// both writes at one native issue position. A reference transfer clears its
+// second write instead of publishing the destination's old contents there.
 static inline uint32_t loom_low_move_access_count(const loom_low_move_t* move) {
-  return move->kind == LOOM_LOW_MOVE_KIND_EXCHANGE ? 2 : 1;
+  return move->kind == LOOM_LOW_MOVE_KIND_COPY ? 1 : 2;
 }
 
 // Returns read |index|, which is less than loom_low_move_access_count(move).

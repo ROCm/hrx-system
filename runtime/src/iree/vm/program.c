@@ -163,7 +163,7 @@ static void iree_vm_program_build_signature_side_abi(
               ((uint32_t)type.kind << 2) | IREE_VM_VARIANT_TAG_SCALAR,
           .variant_offset = (uint32_t)(i * sizeof(iree_vm_variant_t)),
       };
-    } else if (type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
+    } else if (iree_vm_module_signature_type_kind_is_ref(type.kind)) {
       *field_storage->ref_fields++ = (iree_vm_program_ref_field_abi_t){
           .type = linked_module->module->descriptor->ref_types
                       .data[type.type_ordinal],
@@ -265,7 +265,7 @@ static int iree_vm_program_compare_signature_type(
   if (comparison != 0) {
     return comparison;
   }
-  if (lhs.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
+  if (iree_vm_module_signature_type_kind_is_ref(lhs.kind)) {
     return iree_vm_program_compare_ref_types(
         lhs_module->module->descriptor->ref_types.data[lhs.type_ordinal],
         rhs_module->module->descriptor->ref_types.data[rhs.type_ordinal]);

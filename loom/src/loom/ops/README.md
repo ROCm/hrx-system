@@ -12,7 +12,7 @@ The same surfaces are available for common and target-owned dialects. A native
 caller depends on `//loom/src/loom/ir:builders` for module construction and on
 the dialect builders it uses, for example `//loom/src/loom/ops/scalar:builders`.
 Common parameterized types, including channels and views, are provided by
-`//loom/src/loom/ops:type_builders`; dialect-owned parameterized types are
+`//loom/src/loom/ops:core_type_builders`; dialect-owned parameterized types are
 included in that dialect's `:builders` surface.
 
 Construction uses the caller's module and its context-owned metadata. These

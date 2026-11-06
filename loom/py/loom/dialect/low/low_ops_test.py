@@ -112,43 +112,45 @@ def test_storage_address_non_default_offset_is_preserved() -> None:
 
 
 def test_spill_explicit_default_offset_prints_omitted_form() -> None:
-    source = " ".join(
-        [
-            "low.spill %value, %slot {offset = 0} :",
-            "reg<test.ptr x4>, low.storage<private>",
-        ]
-    )
-    expected = " ".join(
-        [
-            "low.spill %value, %slot :",
-            "reg<test.ptr x4>, low.storage<private>",
-        ]
-    )
-    module, scope = _scope_with_values(
-        ("value", _test_ptr_register_type(4)),
-        ("slot", StorageType(StorageSpace.PRIVATE)),
-    )
-    attrs, text = _parse_and_print(source, module, scope)
-    assert attrs["offset"] == 0
-    assert text == expected
+    for operation in ("low.spill", "low.spill.move"):
+        source = " ".join(
+            [
+                f"{operation} %value, %slot {{offset = 0}} :",
+                "reg<test.ptr x4>, low.storage<private>",
+            ]
+        )
+        expected = " ".join(
+            [
+                f"{operation} %value, %slot :",
+                "reg<test.ptr x4>, low.storage<private>",
+            ]
+        )
+        module, scope = _scope_with_values(
+            ("value", _test_ptr_register_type(4)),
+            ("slot", StorageType(StorageSpace.PRIVATE)),
+        )
+        attrs, text = _parse_and_print(source, module, scope)
+        assert attrs["offset"] == 0
+        assert text == expected
 
 
 def test_reload_explicit_default_offset_prints_omitted_form() -> None:
-    source = " ".join(
-        [
-            "%reload = low.reload %slot {offset = 0} :",
-            "low.storage<private> -> reg<test.ptr x4>",
-        ]
-    )
-    expected = " ".join(
-        [
-            "%reload = low.reload %slot :",
-            "low.storage<private> -> reg<test.ptr x4>",
-        ]
-    )
-    module, scope = _scope_with_values(
-        ("slot", StorageType(StorageSpace.PRIVATE)),
-    )
-    attrs, text = _parse_and_print(source, module, scope)
-    assert attrs["offset"] == 0
-    assert text == expected
+    for operation in ("low.reload", "low.reload.move"):
+        source = " ".join(
+            [
+                f"%reload = {operation} %slot {{offset = 0}} :",
+                "low.storage<private> -> reg<test.ptr x4>",
+            ]
+        )
+        expected = " ".join(
+            [
+                f"%reload = {operation} %slot :",
+                "low.storage<private> -> reg<test.ptr x4>",
+            ]
+        )
+        module, scope = _scope_with_values(
+            ("slot", StorageType(StorageSpace.PRIVATE)),
+        )
+        attrs, text = _parse_and_print(source, module, scope)
+        assert attrs["offset"] == 0
+        assert text == expected

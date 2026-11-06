@@ -342,6 +342,35 @@ ERR_TYPE_020 = ErrorDef(
     fix_hint="Bind the dynamic dimension to an index value",
 )
 
+ERR_TYPE_021 = ErrorDef(
+    domain=ErrorDomain.TYPE,
+    code=21,
+    severity=Severity.ERROR,
+    summary="Managed payload identity is invalid.",
+    message="managed type '{field_name}' must be nonempty UTF-8 without NUL bytes",
+    params=(ErrorParam("field_name", ParamKind.STRING),),
+)
+
+ERR_TYPE_022 = ErrorDef(
+    domain=ErrorDomain.TYPE,
+    code=22,
+    severity=Severity.ERROR,
+    summary="Managed handle identity disagrees with its declaration.",
+    message=(
+        "managed handle requires '@{symbol_name}' to declare its exact payload identity"
+    ),
+    params=(ErrorParam("symbol_name", ParamKind.STRING),),
+)
+
+ERR_TYPE_023 = ErrorDef(
+    domain=ErrorDomain.TYPE,
+    code=23,
+    severity=Severity.ERROR,
+    summary="Managed handle declaration is unavailable.",
+    message="managed handle requires a preceding type declaration '@{symbol_name}'",
+    params=(ErrorParam("symbol_name", ParamKind.STRING),),
+)
+
 ALL_TYPE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_TYPE_001,
     ERR_TYPE_002,
@@ -363,4 +392,7 @@ ALL_TYPE_ERRORS: tuple[ErrorDef, ...] = (
     ERR_TYPE_018,
     ERR_TYPE_019,
     ERR_TYPE_020,
+    ERR_TYPE_021,
+    ERR_TYPE_022,
+    ERR_TYPE_023,
 )

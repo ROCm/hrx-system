@@ -46,6 +46,8 @@ uint8_t loom_bytecode_type_kind_byte(loom_type_kind_t kind) {
       return LOOM_BYTECODE_TYPE_POOL;
     case LOOM_TYPE_GROUP:
       return LOOM_BYTECODE_TYPE_GROUP;
+    case LOOM_TYPE_REFERENCE:
+      return LOOM_BYTECODE_TYPE_REFERENCE;
     default:
       IREE_ASSERT_UNREACHABLE("verified native type kind");
       IREE_BUILTIN_UNREACHABLE();

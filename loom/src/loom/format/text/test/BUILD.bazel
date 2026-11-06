@@ -28,6 +28,7 @@ loom_check_test_suite(
         "encoding_aliases.loom-test",
         "error_recovery.loom-test",
         "instance_flags.loom-test",
+        "managed_types.loom-test",
         "operand_dictionaries.loom-test",
         "predicate_attributes.loom-test",
         "signature_binders.loom-test",

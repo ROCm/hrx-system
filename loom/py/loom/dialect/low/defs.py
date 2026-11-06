@@ -73,6 +73,7 @@ from loom.dsl import (
     FACT_IDENTITY,
     HINT,
     ISOLATED_FROM_ABOVE,
+    OBSERVABLE_EFFECT,
     PURE,
     REGISTER,
     STORAGE,
@@ -87,6 +88,7 @@ from loom.dsl import (
     CallLikeKind,
     ConditionForwardedCountMatchesBlockArgs,
     ConditionForwardedTypesMatchBlockArgs,
+    CopiedResult,
     Dialect,
     DirectBranchInterface,
     EnumCase,
@@ -96,6 +98,7 @@ from loom.dsl import (
     ImplicitTerminator,
     IterArgsMatchResults,
     LoopLikeInterface,
+    Move,
     MovedResult,
     NoAncestor,
     Op,
@@ -1425,7 +1428,10 @@ low_copy = Op(
         "Explicit virtual-register copy used by lowering and allocation. Each "
         "copy produces a fresh virtual-register identity and may constrain the "
         "result to a different target register class with the same unit count "
-        "and semantic value type."
+        "and semantic value type. The result copies the source ownership mode "
+        "without consuming it: an owner creates an independent owner, while a "
+        "borrow remains borrowed. Managed copies cannot share their physical "
+        "carrier while both lifetimes remain live."
     ),
     operands=[Operand("source", REGISTER)],
     attrs=[
@@ -1440,6 +1446,7 @@ low_copy = Op(
     results=[Result("result", REGISTER, allocates=True)],
     structural_materialization=True,
     traits=[STORAGE_RELATION],
+    ownership_effects=[CopiedResult("result", "source")],
     verify="loom_low_copy_verify",
     facts="loom_low_copy_facts",
     format=[
@@ -1495,6 +1502,30 @@ low_move = Op(
     examples=[
         "%moved = low.move %value : reg<cmd.binding> -> reg<cmd.binding>",
     ],
+)
+
+# ============================================================================
+# low.release — end a managed carrier lifetime
+# ============================================================================
+
+low_release = Op(
+    "low.release",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "End the lifetime of a complete typed managed-reference carrier. The "
+        "source identity is invalid afterward. An owned carrier releases its "
+        "reference; a borrowed or null carrier is only cleared. A ptr carrier "
+        "may hold compiler-acquired protection, which is released here without "
+        "changing its borrowed source type. Native finalization occurs at this "
+        "operation when the carrier holds the last owner."
+    ),
+    operands=[Operand("value", REGISTER)],
+    traits=[OBSERVABLE_EFFECT],
+    ownership_effects=[Move("value")],
+    verify="loom_low_release_verify",
+    format=[Ref("value"), COLON, TypeOf("value")],
+    examples=["low.release %owner : reg<vm.ref : ref<@Object>>"],
 )
 
 # ============================================================================
@@ -1723,6 +1754,54 @@ low_reload = Op(
     examples=[
         "%reload = low.reload %slot : low.storage<private> -> reg<amdgpu.vgpr x4>",
     ],
+)
+
+# Destructive storage transfers preserve a logical value while moving its
+# physical carrier. Ordinary spill/reload operations preserve their source.
+low_spill_move = Op(
+    "low.spill.move",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=(
+        "Transfer a register value into low storage, invalidating the source register value. Managed carriers move without retaining and clear their source; scalar carriers need no physical clearing."
+    ),
+    operands=[Operand("value", REGISTER), Operand("storage", STORAGE)],
+    attrs=[AttrDef("offset", ATTR_TYPE_I64, default=0, elide_default=True)],
+    traits=[UNKNOWN_EFFECTS],
+    ownership_effects=[Move("value")],
+    verify="loom_low_spill_verify",
+    format=[
+        Ref("value"),
+        COMMA,
+        Ref("storage"),
+        AttrDict(),
+        COLON,
+        TypeOf("value"),
+        COMMA,
+        TypeOf("storage"),
+    ],
+    examples=["low.spill.move %value, %slot : reg<amdgpu.vgpr x4>, low.storage<private>"],
+)
+
+low_reload_move = Op(
+    "low.reload.move",
+    group=low_ops,
+    phase=OpPhase.EXECUTABLE,
+    doc=("Transfer a stored value into a register, ending the stored value's lifetime. Managed storage becomes canonical null; scalar storage is unspecified until rewritten."),
+    operands=[Operand("storage", STORAGE)],
+    attrs=[AttrDef("offset", ATTR_TYPE_I64, default=0, elide_default=True)],
+    results=[Result("result", REGISTER)],
+    traits=[UNKNOWN_EFFECTS],
+    verify="loom_low_reload_verify",
+    format=[
+        Ref("storage"),
+        AttrDict(),
+        COLON,
+        TypeOf("storage"),
+        ARROW,
+        ResultType("result"),
+    ],
+    examples=["%value = low.reload.move %slot : low.storage<private> -> reg<amdgpu.vgpr x4>"],
 )
 
 # ============================================================================
@@ -2001,4 +2080,7 @@ ALL_LOW_OPS: tuple[Op, ...] = (
     low_unreachable,
     # Appended to preserve every existing serialized Low operation ordinal.
     low_br_identity,
+    low_spill_move,
+    low_reload_move,
+    low_release,
 )

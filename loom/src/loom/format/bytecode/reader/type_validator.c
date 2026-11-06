@@ -11,6 +11,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/format/bytecode/reader/attribute.h"
 #include "loom/format/bytecode/reader/module_view.h"
+#include "loom/format/bytecode/reader/reference_binding.h"
 #include "loom/format/bytecode/reader/type.h"
 #include "loom/ops/type_registry.h"
 
@@ -360,6 +361,7 @@ static iree_status_t loom_bytecode_type_plan_decode_entry(
     loom_bytecode_reader_module_view_t* module_view,
     iree_arena_allocator_t* scratch_arena,
     loom_bytecode_reader_cursor_t* cursor, loom_type_id_t type_index,
+    loom_bytecode_reference_bindings_t* reference_bindings,
     loom_bytecode_type_plan_entry_t* out_plan_entry,
     loom_bytecode_type_fact_t** out_fact) {
   const uint64_t type_offset =
@@ -395,6 +397,52 @@ static iree_status_t loom_bytecode_type_plan_decode_entry(
             LOOM_SCALAR_TYPE_COUNT_, element_offset);
       }
       direct_type = loom_type_scalar((loom_scalar_type_t)element_type);
+      break;
+    }
+    case LOOM_TYPE_REFERENCE: {
+      uint8_t ownership = 0;
+      IREE_RETURN_IF_ERROR(
+          loom_bytecode_reader_read_u8(decoder, cursor, &ownership));
+      if (ownership > LOOM_REFERENCE_OWNERSHIP_BORROWED) {
+        return loom_bytecode_reader_emit_enum_value(
+            decoder, IREE_SV("reference_ownership"), ownership, 2,
+            type_offset + 1);
+      }
+      uint64_t string_ids[3] = {0};
+      iree_status_t status = iree_ok_status();
+      for (uint8_t i = 0;
+           i < IREE_ARRAYSIZE(string_ids) && iree_status_is_ok(status); ++i) {
+        const uint64_t offset =
+            loom_bytecode_reader_cursor_absolute_position(cursor);
+        status =
+            loom_bytecode_reader_read_uvarint(decoder, cursor, &string_ids[i]);
+        iree_string_view_t unused = iree_string_view_empty();
+        if (iree_status_is_ok(status)) {
+          status = loom_bytecode_type_plan_validate_string_ref(
+              decoder, module_view, string_ids[i], IREE_SV("reference_key"),
+              offset, &unused);
+        }
+      }
+      IREE_RETURN_IF_ERROR(status);
+      if (reference_bindings) {
+        IREE_RETURN_IF_ERROR(loom_bytecode_reference_binding_expect(
+            decoder, scratch_arena, reference_bindings,
+            (loom_string_id_t)string_ids[2], (loom_string_id_t)string_ids[0],
+            (loom_string_id_t)string_ids[1], type_offset));
+      }
+      if (out_plan_entry) {
+        loom_bytecode_reference_type_fact_t* reference = NULL;
+        IREE_RETURN_IF_ERROR(iree_arena_allocate(
+            scratch_arena, sizeof(*reference), (void**)&reference));
+        *reference = (loom_bytecode_reference_type_fact_t){
+            .base = {.type_id = type_index, .kind = LOOM_TYPE_REFERENCE},
+            .namespace_id = (loom_string_id_t)string_ids[0],
+            .name_id = (loom_string_id_t)string_ids[1],
+            .declaration_name_id = (loom_string_id_t)string_ids[2],
+            .ownership = ownership,
+        };
+        type_fact = &reference->base;
+      }
       break;
     }
     case LOOM_TYPE_TILE:
@@ -740,7 +788,7 @@ iree_status_t loom_bytecode_type_plan_decode_indexed_entry(
       IREE_SV("TYPES"), &cursor);
   IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_decode_entry(
       decoder, context, module_view, scratch_arena, &cursor, type_index,
-      out_plan_entry, out_fact));
+      /*reference_bindings=*/NULL, out_plan_entry, out_fact));
   return loom_bytecode_reader_expect_empty(decoder, &cursor,
                                            IREE_SV("type_entry"));
 }
@@ -812,7 +860,8 @@ iree_status_t loom_bytecode_type_validation_advance(
       for (loom_type_id_t i = validation->position; i < type_count; ++i) {
         IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_decode_entry(
             validation->decoder, validation->context, validation->module_view,
-            /*scratch_arena=*/NULL, &validation->cursor, i,
+            validation->arena, &validation->cursor, i,
+            &validation->module_view->reference_bindings,
             /*out_plan_entry=*/NULL, /*out_fact=*/NULL));
       }
       break;
@@ -822,7 +871,8 @@ iree_status_t loom_bytecode_type_validation_advance(
             loom_bytecode_reader_cursor_absolute_position(&validation->cursor);
         IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_decode_entry(
             validation->decoder, validation->context, validation->module_view,
-            /*scratch_arena=*/NULL, &validation->cursor, i,
+            validation->arena, &validation->cursor, i,
+            &validation->module_view->reference_bindings,
             /*out_plan_entry=*/NULL, /*out_fact=*/NULL));
         validation->entries[i] = (loom_bytecode_table_entry_metadata_t){
             .entry_offset = offset,
@@ -838,6 +888,7 @@ iree_status_t loom_bytecode_type_validation_advance(
         IREE_RETURN_IF_ERROR(loom_bytecode_type_plan_decode_entry(
             validation->decoder, validation->context, validation->module_view,
             validation->arena, &validation->cursor, i,
+            &validation->module_view->reference_bindings,
             &validation->module_view->types.entries[i], &fact));
         if (fact) {
           if (validation->last_fact) {

@@ -1,0 +1,115 @@
+// Independent reference copies survive either consumption order. Borrowed
+// copies keep the payload alive through their last call, including null.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "create_null", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create_null() -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "consume", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @consume(%owner: reg<vm.ref : ref<@Object>>)
+
+low.func.decl import(native, "read", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%value: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %first_identity = constant.i32 1
+  %first, %first_pointer = low.func.call @create(%first_identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.func.call @read(%first_pointer) : (reg<vm.ref : ptr<@Object>>)
+  %first_copy = copy %first {detached = true} : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  low.func.call @consume(%first) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @observe() : ()
+  low.func.call @consume(%first_copy) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @observe() : ()
+
+  %second_identity = constant.i32 2
+  %second, %second_pointer = low.func.call @create(%second_identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.func.call @read(%second_pointer) : (reg<vm.ref : ptr<@Object>>)
+  %second_copy = copy %second : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  low.func.call @consume(%second_copy) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @observe() : ()
+  low.func.call @consume(%second) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @observe() : ()
+
+  %third_identity = constant.i32 3
+  %third, %third_pointer = low.func.call @create(%third_identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.func.call @consume(%third) : (reg<vm.ref : ref<@Object>>)
+  %pointer_copy = copy %third_pointer {detached = true} : reg<vm.ref : ptr<@Object>> -> reg<vm.ref : ptr<@Object>>
+  low.func.call @read(%third_pointer) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  low.func.call @read(%pointer_copy) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+
+  %null_owner, %null_pointer = low.func.call @create_null() : () -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  %null_copy = copy %null_owner {detached = true} : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  %null_pointer_copy = copy %null_pointer : reg<vm.ref : ptr<@Object>> -> reg<vm.ref : ptr<@Object>>
+  low.func.call @consume(%null_owner) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @consume(%null_copy) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @read(%null_pointer) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @read(%null_pointer_copy) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  return
+}
+
+// ----
+create 1
+read 1
+consume 1
+live 1
+consume 1
+destroy 1
+live 0
+create 2
+read 2
+consume 2
+live 1
+consume 2
+destroy 2
+live 0
+create 3
+consume 3
+read 3
+live 1
+read 3
+destroy 3
+live 0
+consume -1
+consume -1
+read -1
+read -1
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A detached final-use copy transfers its source guard. Releasing the copy
+// must destroy the payload before the observer, without register reuse.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %identity = constant.i32 1
+  %owner, %pointer = low.func.call @create(%identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  %copy = copy %pointer {detached = true} : reg<vm.ref : ptr<@Object>> -> reg<vm.ref : ptr<@Object>>
+  low.release %copy : reg<vm.ref : ptr<@Object>>
+  low.func.call @observe() : ()
+  return
+}
+
+// ----
+create 1
+destroy 1
+live 0
+OK 0
+retired 0

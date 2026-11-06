@@ -18,7 +18,8 @@
 static bool loom_vm_source_type_supported(void* user_data,
                                           const loom_module_t* module,
                                           loom_type_t type) {
-  return loom_vm_type_reference_key(module, type) != NULL ||
+  loom_type_reference_key_t key;
+  return loom_vm_type_reference_key(module, type, &key) ||
          (loom_type_is_scalar(type) &&
           loom_scalar_type_set_contains(LOOM_SCALAR_TYPE_SET_ADDRESS |
                                             LOOM_SCALAR_TYPE_SET_INTEGER |

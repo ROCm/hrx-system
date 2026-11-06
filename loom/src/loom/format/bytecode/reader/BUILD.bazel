@@ -214,10 +214,23 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "reference_binding",
+    srcs = ["reference_binding.c"],
+    hdrs = ["reference_binding.h"],
+    deps = [
+        ":decoder",
+        "//loom/src/loom/ir:symbol_map",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "module_view",
     hdrs = ["module_view.h"],
     visibility = ["//loom/src/loom/format/bytecode:__pkg__"],
     deps = [
+        ":reference_binding",
         ":source_trivia",
         ":type_plan",
         "//loom/src/loom/format/bytecode:format",
@@ -273,6 +286,7 @@ loom_cc_library(
         ":attribute",
         ":decoder",
         ":module_view",
+        ":reference_binding",
         ":type_plan",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/format/bytecode:index",
@@ -534,6 +548,7 @@ loom_cc_library(
         ":attribute",
         ":decoder",
         ":module_view",
+        ":reference_binding",
         ":source_trivia",
         ":symbol_schema",
         "//loom/src/loom/error:error_defs",

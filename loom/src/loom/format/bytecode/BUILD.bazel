@@ -14,7 +14,10 @@ package(
 )
 
 exports_files(
-    ["scoped_type_interop.loom-test"],
+    [
+        "managed_types.loom-test",
+        "scoped_type_interop.loom-test",
+    ],
     visibility = ["//loom/py/loom/format/bytecode:__pkg__"],
 )
 
@@ -23,6 +26,7 @@ loom_check_test_suite(
     srcs = [
         "callable_effect_contracts.loom-test",
         "catalog_order.loom-test",
+        "managed_types.loom-test",
         "scoped_type_interop.loom-test",
         "source_presentation.loom-test",
         "type_bindings.loom-test",
@@ -208,6 +212,25 @@ loom_cc_test(
         "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/test",
+        "//loom/src/loom/verify",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "managed_types_test",
+    srcs = ["managed_types_test.cc"],
+    deps = [
+        ":reader",
+        ":selected_reader",
+        ":writer",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:core_type_builders",
+        "//loom/src/loom/ops/test",
+        "//loom/src/loom/ops/type",
         "//loom/src/loom/verify",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",

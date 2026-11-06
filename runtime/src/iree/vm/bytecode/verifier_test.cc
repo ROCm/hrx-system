@@ -527,6 +527,22 @@ TEST_F(ModuleVerificationTest, RejectsEnvelopeAndDirectoryCorruption) {
   }
 }
 
+TEST_F(ModuleVerificationTest, ChecksPayloadOrdinalForBothReferenceModes) {
+  for (const uint16_t kind : {IREE_VM_BYTECODE_SIGNATURE_KIND_REF,
+                              IREE_VM_BYTECODE_SIGNATURE_KIND_PTR}) {
+    std::vector<uint8_t> bytes = CopyImage();
+    auto* descriptor = MutableRecord(&bytes, contents_,
+                                     plan_.layout.signatures.descriptors + 1);
+    ASSERT_EQ(descriptor->kind_u16, IREE_VM_BYTECODE_SIGNATURE_KIND_REF);
+    descriptor->kind_u16 = kind;
+    iree_vm_bytecode_module_plan_t output = {};
+    IREE_ASSERT_OK(iree_vm_bytecode_verify_module_structure(
+        iree_make_const_byte_span(bytes.data(), bytes.size()), &output));
+    descriptor->type_ordinal_u16 = plan_.layout.ref_types.entry_count;
+    ExpectRejected(bytes);
+  }
+}
+
 TEST_F(ModuleVerificationTest, RejectsDeclarationCorruption) {
   {
     std::vector<uint8_t> bytes = CopyImage();

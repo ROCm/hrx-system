@@ -62,6 +62,7 @@ from loom.target.low_descriptors import (
     OperandFormMatchKind,
     OperandRole,
     OperandSourceBinding,
+    OwnershipEffect,
     PhysicalRegister,
     PhysicalRegisterView,
     RegClassAlt,
@@ -4983,3 +4984,19 @@ def test_generator_rejects_pseudo_flag_with_target_encoding_format() -> None:
         match=re.escape("descriptor 'test.add.i32' uses the pseudo flag with a target encoding format id"),
     ):
         generate_descriptor_set(descriptor_set)
+
+
+@pytest.mark.parametrize(("index", "effect"), [(0, OwnershipEffect.BORROW), (1, OwnershipEffect.OWNED)])
+def test_instruction_ownership_requires_matching_ssa_role(index, effect):
+    operands = list(TEST_LOW_ADD_I32_DESCRIPTOR.operands)
+    operands[index] = replace(operands[index], ownership=effect)
+    descriptor = replace(TEST_LOW_ADD_I32_DESCRIPTOR, operands=tuple(operands))
+    descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, descriptors=(descriptor,))
+    with pytest.raises(ValueError, match="ownership incompatible with its SSA role"):
+        generate_descriptor_set(descriptor_set)
+
+
+def test_numeric_descriptor_sets_omit_ownership_tables():
+    generated = generate_descriptor_set(TEST_LOW_CORE_DESCRIPTOR_SET)
+    assert "OwnershipOffsets" not in generated.source
+    assert "OwnershipEffects" not in generated.source

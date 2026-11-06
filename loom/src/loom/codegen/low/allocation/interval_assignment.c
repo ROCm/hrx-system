@@ -1823,7 +1823,8 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
           .end_point = interval->end_point,
           .unit_count = interval->unit_count,
           .location_kind = LOOM_LOW_ALLOCATION_LOCATION_STORAGE,
-          .location_base = storage_index,
+          .location_base =
+              context->storage_transport->bindings[storage_index].cell_index,
           .location_count = interval->unit_count,
       };
       const loom_low_allocation_assignment_t assignment =

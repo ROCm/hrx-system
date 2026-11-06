@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "iree/base/internal/math.h"
+#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/spill_storage.h"
 #include "loom/codegen/low/function.h"
 #include "loom/ir/module.h"
@@ -227,6 +228,7 @@ bool loom_low_spill_materialization_plan_query_traffic(
   const loom_low_allocation_spill_plan_t* spill_plan =
       &spill_plans[action->spill_plan_index];
   *out_traffic = (loom_low_spill_materialization_traffic_t){
+      .moves_source = action->moves_source,
       .value_type = loom_type_none(),
   };
   switch (action->kind) {
@@ -1197,6 +1199,63 @@ static iree_status_t loom_low_spill_materialization_project_instructions(
   return iree_ok_status();
 }
 
+// Preserve managed carrier retirement before spill rewriting replaces the
+// original SSA uses. Block gaps in sparse liveness distinguish final uses on
+// mutually exclusive paths; live-out values extend across the gap. Repeated
+// operands reload before the same consumer, so only the final scheduled reload
+// can take the cell. Scalar carriers need no ownership traffic.
+static iree_status_t loom_low_spill_materialization_plan_transfers(
+    loom_low_spill_materialization_plan_builder_t* builder,
+    const loom_low_spill_materialization_instruction_t* instructions,
+    uint32_t instruction_count) {
+  const loom_low_allocation_table_t* table = builder->table;
+  uint32_t* last_operation = NULL;
+  for (uint32_t i = instruction_count; i > 0; --i) {
+    const loom_low_spill_materialization_instruction_t* instruction =
+        &instructions[i - 1];
+    loom_low_spill_materialization_action_t* action =
+        &builder
+             ->actions[loom_low_spill_materialization_instruction_action_index(
+                 instruction)];
+    const loom_low_allocation_spill_plan_t* spill_plan =
+        &builder->spill_plans[action->spill_plan_index];
+    const loom_low_allocation_assignment_t* assignment =
+        &table->assignments[spill_plan->assignment_index];
+    if (!iree_any_bit_set(table->target.descriptor_set
+                              ->reg_classes[assignment->descriptor_reg_class_id]
+                              .flags,
+                          LOOM_LOW_REG_CLASS_FLAG_REFERENCE)) {
+      continue;
+    }
+    if (action->kind ==
+        LOOM_LOW_SPILL_MATERIALIZATION_ACTION_DEFINITION_STORE) {
+      action->moves_source = true;
+    } else if (action->kind ==
+                   LOOM_LOW_SPILL_MATERIALIZATION_ACTION_OPERAND_RELOAD &&
+               action->value.operand_reload.target.kind !=
+                   LOOM_LOW_SPILL_MATERIALIZATION_TARGET_ACTION_SOURCE) {
+      if (!last_operation) {
+        IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+            &builder->scratch_arena, builder->spill_plan_count,
+            sizeof(*last_operation), (void**)&last_operation));
+        memset(last_operation, 0xFF,
+               builder->spill_plan_count * sizeof(*last_operation));
+      }
+      const loom_liveness_operation_point_t* operation =
+          loom_liveness_operation_at(&table->liveness,
+                                     instruction->operation_index);
+      action->moves_source =
+          last_operation[action->spill_plan_index] !=
+              instruction->operation_index &&
+          !loom_low_allocation_live_range_assignment_live_at_point(
+              table->storage_segments, table->unit_end_points,
+              table->unit_point_count, assignment, operation->end_point);
+      last_operation[action->spill_plan_index] = instruction->operation_index;
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_spill_materialization_plan_copy(
     loom_low_spill_materialization_plan_builder_t* builder,
     iree_arena_allocator_t* arena,
@@ -1205,6 +1264,8 @@ static iree_status_t loom_low_spill_materialization_plan_copy(
   uint32_t instruction_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_spill_materialization_project_instructions(
       builder, arena, &instructions, &instruction_count));
+  IREE_RETURN_IF_ERROR(loom_low_spill_materialization_plan_transfers(
+      builder, instructions, instruction_count));
   loom_low_spill_materialization_action_t* actions = NULL;
   if (builder->action_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(

@@ -44,6 +44,8 @@ struct loom_low_move_sequence_node_t {
 
 enum loom_low_move_sequence_location_flag_bits_e {
   LOOM_LOW_MOVE_SEQUENCE_LOCATION_FLAG_OCCUPIED = 1u << 0,
+  // At least one input preserves this carrier after the parallel group.
+  LOOM_LOW_MOVE_SEQUENCE_LOCATION_FLAG_PRESERVED = 1u << 1,
 };
 typedef uint8_t loom_low_move_sequence_location_flags_t;
 
@@ -447,6 +449,19 @@ static iree_status_t loom_low_move_sequence_prepare(
   }
   if (active_move_count == 1) {
     state->out_moves[0] = scratch->moves[active_move_index];
+    if (state->out_moves[0].kind == LOOM_LOW_MOVE_KIND_TRANSFER) {
+      // All other rows are identities. An identity at this source retains
+      // its carrier even though it contributes no emitted instruction.
+      for (iree_host_size_t i = 0; i < state->move_count; ++i) {
+        if (i != active_move_index &&
+            loom_low_move_locations_share_target_storage(
+                state->options->descriptor_set, &scratch->moves[i].source,
+                &state->out_moves[0].source)) {
+          state->out_moves[0].kind = LOOM_LOW_MOVE_KIND_COPY;
+          break;
+        }
+      }
+    }
     state->out_move_count = 1;
     state->active_count = 0;
     return iree_ok_status();
@@ -484,6 +499,11 @@ static iree_status_t loom_low_move_sequence_prepare(
             &scratch->moves[i].source)) {
       scratch->nodes[i].flags = LOOM_LOW_MOVE_SEQUENCE_NODE_FLAG_ACTIVE;
       ++source_entry->source_use_count;
+    } else {
+      source_entry->flags |= LOOM_LOW_MOVE_SEQUENCE_LOCATION_FLAG_PRESERVED;
+    }
+    if (scratch->moves[i].kind == LOOM_LOW_MOVE_KIND_COPY) {
+      source_entry->flags |= LOOM_LOW_MOVE_SEQUENCE_LOCATION_FLAG_PRESERVED;
     }
     IREE_RETURN_IF_ERROR(loom_low_move_sequence_mark_explicit_location(
         state, &scratch->moves[i].destination));
@@ -525,8 +545,16 @@ static void loom_low_move_sequence_append(
 static void loom_low_move_sequence_emit_ready_move(
     loom_low_move_sequence_state_t* state, iree_host_size_t move_index) {
   const loom_low_move_t move = state->scratch->moves[move_index];
-  loom_low_move_sequence_append(state, &move.destination, &move.source,
-                                LOOM_LOW_MOVE_KIND_COPY);
+  const loom_low_move_sequence_location_entry_t* source =
+      loom_low_move_sequence_require_location(state, &move.source);
+  const bool consume_source =
+      move.kind == LOOM_LOW_MOVE_KIND_TRANSFER &&
+      source->source_use_count == 1 &&
+      !iree_any_bit_set(source->flags,
+                        LOOM_LOW_MOVE_SEQUENCE_LOCATION_FLAG_PRESERVED);
+  loom_low_move_sequence_append(
+      state, &move.destination, &move.source,
+      consume_source ? LOOM_LOW_MOVE_KIND_TRANSFER : LOOM_LOW_MOVE_KIND_COPY);
   loom_low_move_sequence_deactivate_move(state, move_index);
 }
 
@@ -560,6 +588,15 @@ static iree_status_t loom_low_move_sequence_emit_cycle(
   }
   const loom_low_descriptor_set_t* descriptor_set =
       state->options->descriptor_set;
+  // Every cycle source is overwritten by another row. Transfer reference
+  // carriers through scratch so the temporary cannot retain a hidden owner.
+  const loom_low_move_kind_t cycle_kind =
+      iree_any_bit_set(
+          descriptor_set->reg_classes[saved_location.descriptor_reg_class_id]
+              .flags,
+          LOOM_LOW_REG_CLASS_FLAG_REFERENCE)
+          ? LOOM_LOW_MOVE_KIND_TRANSFER
+          : LOOM_LOW_MOVE_KIND_COPY;
   bool can_exchange =
       saved_location.location_kind ==
           LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER &&
@@ -603,7 +640,7 @@ static iree_status_t loom_low_move_sequence_emit_cycle(
     }
     const iree_host_size_t scratch_move_index = state->out_move_count;
     loom_low_move_sequence_append(state, temporary_location, &saved_location,
-                                  LOOM_LOW_MOVE_KIND_COPY);
+                                  cycle_kind);
     if (first_temporary_use && state->options->record_scratch.fn != NULL) {
       IREE_RETURN_IF_ERROR(state->options->record_scratch.fn(
           state->options->record_scratch.user_data, scratch_move_index));
@@ -624,7 +661,7 @@ static iree_status_t loom_low_move_sequence_emit_cycle(
     } else {
       loom_low_move_sequence_append(state, &move.destination,
                                     is_last ? temporary_location : &move.source,
-                                    LOOM_LOW_MOVE_KIND_COPY);
+                                    cycle_kind);
     }
     loom_low_move_sequence_deactivate_move(state, move_index);
   }

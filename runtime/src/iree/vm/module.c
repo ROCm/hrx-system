@@ -139,7 +139,7 @@ static iree_status_t iree_vm_module_validate_signature_type(
     }
     return iree_ok_status();
   }
-  if (type.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
+  if (iree_vm_module_signature_type_kind_is_ref(type.kind)) {
     if (type.type_ordinal >= descriptor->ref_types.count) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "signature ref-type ordinal is out of range");
@@ -170,7 +170,7 @@ static int iree_vm_module_compare_signature_type(
   if (comparison != 0) {
     return comparison;
   }
-  if (lhs.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
+  if (iree_vm_module_signature_type_kind_is_ref(lhs.kind)) {
     const iree_vm_ref_type_key_t lhs_key = iree_vm_ref_type_key(
         module->descriptor->ref_types.data[lhs.type_ordinal]);
     const iree_vm_ref_type_key_t rhs_key = iree_vm_ref_type_key(
@@ -245,7 +245,7 @@ static iree_status_t iree_vm_module_validate_signature_side(
     if (side.data[i].kind > IREE_VM_SCALAR_TYPE_NONE &&
         side.data[i].kind <= IREE_VM_SCALAR_TYPE_F64) {
       ++expected_value_count;
-    } else if (side.data[i].kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
+    } else if (iree_vm_module_signature_type_kind_is_ref(side.data[i].kind)) {
       ++expected_ref_count;
     } else {
       ++expected_function_count;

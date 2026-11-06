@@ -1,0 +1,81 @@
+// RUN: roundtrip
+
+type.decl import("input", "decoder") @Decoder
+type.decl import("media", "image.frame") @ImageFrame
+
+func.decl @reset(%decoder: ptr<@Decoder>)
+func.decl @decode(%decoder: ptr<@Decoder>) -> (ref<@ImageFrame>)
+func.decl @callback(%action: (ptr<@Decoder>, ref<@ImageFrame>) -> (ref<@ImageFrame>))
+
+func.def @transfer(%frame: ref<@ImageFrame>) -> (ref<@ImageFrame>) {
+  func.return %frame : ref<@ImageFrame>
+}
+
+// ----
+type.decl import("input", "decoder") @Decoder
+
+type.decl import("media", "image.frame") @ImageFrame
+
+func.decl @reset(%decoder: ptr<@Decoder>)
+
+func.decl @decode(%decoder: ptr<@Decoder>) -> (ref<@ImageFrame>)
+
+func.decl @callback(%action: (ptr<@Decoder>, ref<@ImageFrame>) -> (ref<@ImageFrame>))
+
+func.def @transfer(%frame: ref<@ImageFrame>) -> (ref<@ImageFrame>) {
+  func.return %frame : ref<@ImageFrame>
+}
+
+// ====
+// RUN: roundtrip
+
+// Aliases carry the same external identity, including through callable types.
+type.decl import("input", "decoder") @Decoder
+
+type.decl import("input", "decoder") @Alias
+
+func.def @alias(%value: ref<@Decoder>) -> (ref<@Alias>) {
+  func.return %value : ref<@Alias>
+}
+
+func.def @nested_alias(%action: (ptr<@Decoder>) -> (ref<@Decoder>)) -> ((ptr<@Alias>) -> (ref<@Alias>)) {
+  func.return %action : (ptr<@Alias>) -> (ref<@Alias>)
+}
+
+// ----
+type.decl import("input", "decoder") @Decoder
+
+type.decl import("input", "decoder") @Alias
+
+func.def @alias(%value: ref<@Decoder>) -> (ref<@Decoder>) {
+  func.return %value : ref<@Decoder>
+}
+
+func.def @nested_alias(%action: (ptr<@Decoder>) -> (ref<@Decoder>)) -> ((ptr<@Decoder>) -> (ref<@Decoder>)) {
+  func.return %action : (ptr<@Decoder>) -> (ref<@Decoder>)
+}
+
+// ====
+// RUN: verify
+
+// ERROR@+1: TYPE/023 "Missing"
+func.decl @missing(%decoder: ref<@Missing>)
+
+// ====
+// RUN: verify
+
+test.record @NotAType
+// ERROR@+1: TYPE/023 "NotAType"
+func.decl @wrong_kind(%decoder: ptr<@NotAType>)
+
+// ====
+// RUN: verify
+
+// ERROR@+1: TYPE/021 "namespace"
+type.decl import("", "decoder") @EmptyNamespace
+
+// ====
+// RUN: verify
+
+// ERROR@+1: TYPE/021 "type_name"
+type.decl import("input", "") @EmptyName

@@ -38,7 +38,7 @@ typedef struct loom_bytecode_type_validation_t {
   loom_context_t* context;
   // Table facts whose encoding prefix bounds each newly decoded type.
   loom_bytecode_reader_module_view_t* module_view;
-  // Owner of retained plans or index ranges; unused for count-only validation.
+  // Owner of retained plans/ranges and pending declaration expectations.
   iree_arena_allocator_t* arena;
   // Validated end of the TYPES prefix already consumed from the cursor.
   loom_type_id_t position;

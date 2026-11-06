@@ -17,6 +17,7 @@
 #include "loom/ir/types.h"
 #include "loom/ops/low/kernel.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/target/registers.h"
 #include "loom/target/reporting/low_names.h"
 #include "loom/util/adaptive_sort.h"
@@ -114,7 +115,7 @@ loom_target_compile_report_pressure_origin_from_low_op(const loom_op_t* op) {
       loom_low_storage_address_isa(op)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_STORAGE;
   }
-  if (loom_low_spill_isa(op) || loom_low_reload_isa(op)) {
+  if (loom_low_storage_store_isa(op) || loom_low_storage_load_isa(op)) {
     return LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_SPILL_RELOAD;
   }
   if (loom_direct_branch_isa(op) || loom_low_cond_br_isa(op) ||

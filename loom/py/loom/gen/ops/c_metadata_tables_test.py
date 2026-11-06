@@ -47,12 +47,31 @@ from loom.dsl import (
     SameType,
     SymbolDefinition,
     SymbolReference,
+    SymbolTypeContract,
     SymbolValueContract,
     Writes,
 )
 from loom.gen.ops.c_dialect import generate_dialect_contents
 from loom.gen.ops.c_metadata_tables import generate_tables_c
 from loom.gen.ops.model import DialectGeneration
+
+
+def test_managed_type_contract_retains_key_field_indices() -> None:
+    op = Op(
+        "test.type",
+        group=Dialect("test"),
+        traits=[SYMBOL_DEFINE],
+        attrs=[AttrDef("payload", "string"), AttrDef("symbol", "symbol"), AttrDef("provider", "string")],
+        symbol_def=SymbolDefinition(
+            field="symbol",
+            name="managed type",
+            interfaces=["record"],
+            type_contract=SymbolTypeContract(namespace="provider", name="payload"),
+        ),
+    )
+    source = generate_tables_c("test", 0, [op])
+    assert ".namespace_attr_index_plus_one = 3," in source
+    assert ".name_attr_index_plus_one = 1," in source
 
 
 @pytest.mark.parametrize(

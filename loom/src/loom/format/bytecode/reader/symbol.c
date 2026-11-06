@@ -9,6 +9,7 @@
 #include "loom/error/error_catalog.h"
 #include "loom/format/bytecode/index.h"
 #include "loom/format/bytecode/reader/attribute.h"
+#include "loom/format/bytecode/reader/reference_binding.h"
 #include "loom/format/bytecode/reader/source_trivia.h"
 #include "loom/format/bytecode/reader/symbol_schema.h"
 #include "loom/format/bytecode/reader/symbol_validator.h"
@@ -486,6 +487,34 @@ static iree_status_t loom_bytecode_reader_skip_global_payload(
   return iree_ok_status();
 }
 
+static iree_status_t loom_bytecode_symbol_read_type_key(
+    loom_bytecode_symbol_validator_t* reader,
+    loom_bytecode_reader_cursor_t* cursor, uint64_t symbol_index,
+    loom_bytecode_attr_kind_t value_kind, uint64_t value_offset,
+    loom_string_id_t* out_string_id) {
+  if (value_kind != LOOM_BYTECODE_ATTR_STRING) {
+    return loom_bytecode_reader_emit_invalid_field(
+        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
+        IREE_SV("type_key"), value_offset,
+        IREE_SV("managed_type_key_requires_string_attributes"));
+  }
+  uint64_t string_id = 0;
+  IREE_RETURN_IF_ERROR(loom_bytecode_reader_read_uvarint_inline(
+      &reader->decoder, cursor, &string_id));
+  iree_string_view_t value = iree_string_view_empty();
+  IREE_RETURN_IF_ERROR(loom_bytecode_symbol_validate_string_ref(
+      &reader->decoder, &reader->view, string_id, IREE_SV("type_key"),
+      value_offset, &value));
+  if (value.size == 0 || memchr(value.data, 0, value.size)) {
+    return loom_bytecode_reader_emit_invalid_field(
+        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
+        IREE_SV("type_key"), value_offset,
+        IREE_SV("managed_type_key_requires_nonempty_nul_free_strings"));
+  }
+  *out_string_id = (loom_string_id_t)string_id;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_bytecode_reader_skip_record_payload(
     loom_bytecode_symbol_validator_t* reader,
     loom_bytecode_reader_cursor_t* cursor,
@@ -494,7 +523,8 @@ static iree_status_t loom_bytecode_reader_skip_record_payload(
     iree_host_size_t* region_payload_index,
     loom_bytecode_region_payload_metadata_t* region_payloads,
     iree_arena_allocator_t* retained_arena,
-    loom_bytecode_symbol_metadata_t* symbol_metadata) {
+    loom_bytecode_symbol_metadata_t* symbol_metadata,
+    loom_string_id_t out_type_key[2]) {
   uint64_t op_ref_offset =
       loom_bytecode_reader_cursor_absolute_position(cursor);
   uint64_t op_table_index_plus1 = 0;
@@ -512,6 +542,11 @@ static iree_status_t loom_bytecode_reader_skip_record_payload(
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_validate_symbol_definition_flags(
       reader, symbol_index, symbol_flags, vtable, op_ref_offset));
   symbol_metadata->interfaces = vtable->symbol_def->interfaces;
+
+  const uint8_t type_key_indices[] = {
+      vtable->symbol_def->type_contract.namespace_attr_index_plus_one,
+      vtable->symbol_def->type_contract.name_attr_index_plus_one,
+  };
 
   IREE_RETURN_IF_ERROR(
       loom_bytecode_source_trivia_validate(&reader->decoder, cursor));
@@ -572,13 +607,29 @@ static iree_status_t loom_bytecode_reader_skip_record_payload(
         &reader->decoder, cursor, &value_kind));
     const uint64_t value_offset =
         loom_bytecode_reader_cursor_absolute_position(cursor);
-    IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_named(
-        &attribute_validator, cursor, &vtable->attr_descriptors[attr_index],
-        value_kind, reader->view.types.count));
+    const uint8_t key_index = attr_index + 1 == type_key_indices[0]   ? 0
+                              : attr_index + 1 == type_key_indices[1] ? 1
+                                                                      : 2;
+    if (key_index < 2) {
+      IREE_RETURN_IF_ERROR(loom_bytecode_symbol_read_type_key(
+          reader, cursor, symbol_index, value_kind, value_offset,
+          &out_type_key[key_index]));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_bytecode_attribute_validate_named(
+          &attribute_validator, cursor, &vtable->attr_descriptors[attr_index],
+          value_kind, reader->view.types.count));
+    }
     loom_bytecode_symbol_record_attribute_metadata(
         retained_attributes, i, attr_index, value_kind, value_offset, cursor);
   }
 
+  if (type_key_indices[0] && (out_type_key[0] == LOOM_STRING_ID_INVALID ||
+                              out_type_key[1] == LOOM_STRING_ID_INVALID)) {
+    return loom_bytecode_reader_emit_invalid_field(
+        &reader->decoder, IREE_SV("SYMBOLS"), IREE_SV("symbol"), symbol_index,
+        IREE_SV("type_key"), attr_count_offset,
+        IREE_SV("managed_type_declaration_requires_both_key_attributes"));
+  }
   return loom_bytecode_reader_decode_region_payloads(
       reader, cursor, ir_section, symbol_index, vtable,
       total_region_payload_count, region_payload_index, region_payloads,
@@ -939,6 +990,8 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
     symbol_metadata->import_symbol = import_symbol;
   }
 
+  loom_string_id_t type_key[2] = {LOOM_STRING_ID_INVALID,
+                                  LOOM_STRING_ID_INVALID};
   if (kind <= LOOM_BYTECODE_SYMBOL_TEMPLATE_UKERNEL) {
     uint64_t op_ref_offset =
         loom_bytecode_reader_cursor_absolute_position(&table->cursor);
@@ -1126,8 +1179,13 @@ loom_bytecode_symbol_decode(loom_bytecode_symbol_validator_t* reader,
     IREE_RETURN_IF_ERROR(loom_bytecode_reader_skip_record_payload(
         reader, &table->cursor, table->ir_section, symbol_index, flags,
         table->region_payload_count, &table->region_payload_index,
-        table->region_payloads, table->retained_arena, symbol_metadata));
+        table->region_payloads, table->retained_arena, symbol_metadata,
+        type_key));
   }
+
+  IREE_RETURN_IF_ERROR(loom_bytecode_reference_binding_match(
+      &reader->decoder, &reader->view.reference_bindings,
+      (loom_string_id_t)name_id, type_key[0], type_key[1]));
 
   uint64_t next_entry_offset =
       loom_bytecode_reader_cursor_absolute_position(&table->cursor) -
@@ -1169,6 +1227,8 @@ static iree_status_t loom_bytecode_symbols_finish(
   }
   IREE_RETURN_IF_ERROR(loom_bytecode_reader_expect_empty(
       &reader->decoder, &table->cursor, IREE_SV("SYMBOLS")));
+  IREE_RETURN_IF_ERROR(loom_bytecode_reference_bindings_finish(
+      &reader->decoder, &reader->view.reference_bindings));
   *reader->output_view = reader->view;
   return iree_ok_status();
 }

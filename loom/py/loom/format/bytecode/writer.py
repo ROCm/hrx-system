@@ -63,6 +63,7 @@ from loom.ir import (
     Predicate,
     PredicateArg,
     PredicateListAttr,
+    ReferenceType,
     Region,
     RegisterType,
     ScalarType,
@@ -94,6 +95,7 @@ _IR_TYPE_CLASSES = (
     StorageType,
     DialectType,
     ParameterizedType,
+    ReferenceType,
     EncodingType,
     PoolType,
     GroupType,
@@ -187,6 +189,7 @@ BYTECODE_TYPE_KIND_BY_IR_KIND: dict[TypeKind, int] = {
     TypeKind.STORAGE: 13,
     TypeKind.PARAMETERIZED: 14,
     TypeKind.GROUP: 15,
+    TypeKind.REFERENCE: 16,
 }
 
 BYTECODE_IR_KIND_BY_TYPE_KIND: dict[int, TypeKind] = {
@@ -786,6 +789,10 @@ class BytecodeWriter:
                     yield self._number_type_steps(child)
                 for child in results:
                     yield self._number_type_steps(child)
+            case ReferenceType(namespace=namespace, name=name, declaration=declaration):
+                self._ctx.intern_string(namespace)
+                self._ctx.intern_string(name)
+                self._ctx.intern_string(str(declaration))
             case DialectType(name=name, params=parameters):
                 self._ctx.intern_string(name)
                 for parameter in parameters:
@@ -1065,6 +1072,17 @@ class BytecodeWriter:
                     buf.write_varint(self._type_reference(arg, values))
                 for result in results:
                     buf.write_varint(self._type_reference(result, values))
+            case ReferenceType(
+                ownership=ownership,
+                namespace=namespace,
+                name=name,
+                declaration=declaration,
+            ):
+                buf.write_u8(BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.REFERENCE])
+                buf.write_u8(ownership.value)
+                buf.write_varint(self._ctx.strings[namespace])
+                buf.write_varint(self._ctx.strings[name])
+                buf.write_varint(self._ctx.strings[str(declaration)])
             case DialectType(name=name, params=params):
                 buf.write_u8(BYTECODE_TYPE_KIND_BY_IR_KIND[TypeKind.DIALECT])
                 buf.write_varint(self._ctx.strings[name])

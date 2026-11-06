@@ -192,6 +192,72 @@ class TypeImportTest : public ::testing::Test {
   loom_module_t* module_ = nullptr;
 };
 
+TEST_F(TypeImportTest, ReferenceAliasesShareCanonicalBindingAndCompactSafely) {
+  loom_string_id_t namespace_id;
+  loom_string_id_t name_id;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module_, IREE_SV("input"), &namespace_id));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module_, IREE_SV("decoder"), &name_id));
+  loom_symbol_id_t declarations[4];
+  const char* names[] = {"unused_prefix", "Decoder", "DecoderAlias",
+                         "unused_suffix"};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(names); ++i) {
+    loom_string_id_t spelling;
+    IREE_ASSERT_OK(loom_module_intern_string(
+        module_, iree_make_cstring_view(names[i]), &spelling));
+    IREE_ASSERT_OK(loom_module_add_symbol(module_, spelling, &declarations[i]));
+  }
+  const auto owner = loom_type_reference(
+      LOOM_REFERENCE_OWNERSHIP_OWNED, namespace_id, name_id, declarations[1]);
+  const auto alias = loom_type_reference(
+      LOOM_REFERENCE_OWNERSHIP_OWNED, namespace_id, name_id, declarations[2]);
+  const auto borrow =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_BORROWED, namespace_id,
+                          name_id, declarations[1]);
+  loom_type_id_t owner_id;
+  loom_type_id_t alias_id;
+  loom_type_id_t borrow_id;
+  IREE_ASSERT_OK(loom_module_intern_type_id(module_, owner, &owner_id));
+  IREE_ASSERT_OK(loom_module_intern_type_id(module_, alias, &alias_id));
+  IREE_ASSERT_OK(loom_module_intern_type_id(module_, borrow, &borrow_id));
+  EXPECT_EQ(owner_id, alias_id);
+  EXPECT_NE(owner_id, borrow_id);
+  const auto used = module_->arena.used_allocation_size;
+  for (size_t i = 0; i < 16; ++i) {
+    IREE_ASSERT_OK(loom_module_intern_type_id(module_, alias, &alias_id));
+    EXPECT_EQ(alias_id, owner_id);
+  }
+  EXPECT_EQ(module_->arena.used_allocation_size, used);
+  EXPECT_EQ(module_->types.count, 2u);
+
+  loom_type_t signature;
+  IREE_ASSERT_OK(loom_module_intern_function_type(module_, &alias, 1, &borrow,
+                                                  1, &signature));
+  EXPECT_EQ(loom_type_reference_declaration_id(
+                loom_type_func_arg_types(signature)[0]),
+            declarations[1]);
+  loom_value_id_t value;
+  IREE_ASSERT_OK(loom_module_define_value(module_, alias, &value));
+  EXPECT_EQ(loom_type_reference_declaration_id(
+                loom_module_value_type(module_, value)),
+            declarations[1]);
+
+  iree_arena_allocator_t scratch;
+  iree_arena_initialize(&pool_, &scratch);
+  iree_host_size_t removed = 0;
+  auto status = loom_module_compact_symbols(module_, &scratch, &removed);
+  iree_arena_deinitialize(&scratch);
+  IREE_ASSERT_OK(status);
+  EXPECT_EQ(removed, 2u);
+  EXPECT_EQ(module_->symbols.count, 2u);
+  EXPECT_TRUE(iree_string_view_equal(
+      loom_string_table_get(&module_->strings,
+                            module_->symbols.entries[declarations[1]].name_id),
+      IREE_SV("Decoder")));
+  EXPECT_TRUE(loom_type_equal(loom_module_value_type(module_, value), owner));
+}
+
 TEST_F(TypeImportTest, DeepTemporaryGraphRetainsCanonicalChildren) {
   std::array<Pair, 2048> temporary;
   loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_F32);

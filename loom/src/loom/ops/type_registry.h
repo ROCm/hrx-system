@@ -27,6 +27,8 @@ extern const loom_parameterized_type_descriptor_t loom_channel_type_parameterize
 extern const loom_parameterized_type_descriptor_t loom_read_type_parameterized_descriptor;
 extern const loom_parameterized_type_descriptor_t loom_write_type_parameterized_descriptor;
 extern const loom_parameterized_type_descriptor_t loom_low_storage_type_parameterized_descriptor;
+extern const loom_parameterized_type_descriptor_t loom_ref_type_parameterized_descriptor;
+extern const loom_parameterized_type_descriptor_t loom_ptr_type_parameterized_descriptor;
 
 // Binds common indirect type families to their context owner before finalization.
 iree_status_t loom_type_registry_register_common_types(loom_context_t* context);
@@ -52,6 +54,10 @@ const loom_type_descriptor_t* loom_type_registry_lookup(
 // Returns NULL for dialect, generic parameterized, or invalid kinds.
 const loom_type_descriptor_t* loom_type_registry_lookup_builtin(
     loom_type_kind_t kind);
+
+// Returns the descriptor for an owning or borrowed managed handle.
+const loom_type_descriptor_t* loom_type_registry_lookup_reference(
+    loom_reference_ownership_t ownership);
 
 // Resolves the type-owned value fact domain for |type|, or NULL if the
 // registered type has no extension fact domain.

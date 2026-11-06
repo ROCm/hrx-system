@@ -20,8 +20,8 @@ extern "C" {
 // The key and provisional ordinal move together during canonical ordering;
 // final ordinals are then stored at their original provisional row indexes.
 typedef struct loom_vm_reference_entry_t {
-  // Borrowed immutable compiler type metadata.
-  const loom_type_reference_key_t* key;
+  // Exact identity whose strings borrow immutable source or type metadata.
+  loom_type_reference_key_t key;
   // Insertion-order ordinal carried with the key during sorting.
   uint16_t provisional_ordinal;
   // Final ordinal for the key originally stored at this physical row index.
@@ -30,15 +30,17 @@ typedef struct loom_vm_reference_entry_t {
 
 // Metadata-scoped reference identities. Zero initialization creates an empty
 // plan without allocating storage. Binding interns only participating source
-// names and canonical keys; repeated occurrences and unrelated fields require
-// no additional storage. Image ordinals are independent of provider ordinals.
+// identities and canonical keys; repeated occurrences and unrelated fields
+// require no additional storage. Image ordinals are independent of provider
+// ordinals.
 //
 // Finalization ends binding and orders keys for serialization. The index is no
 // longer queried after keys move. Plan storage may be reclaimed after ordinals
 // have been remapped and metadata serialized; function emission needs neither
-// this plan nor its borrowed keys. Discard the plan after any binding failure.
+// this plan nor its borrowed strings. Discard the plan after any binding
+// failure.
 typedef struct loom_vm_reference_plan_t {
-  // Source-name bindings and canonical keys in disjoint tagged index domains.
+  // Source names, managed declaration IDs, and keys in disjoint index domains.
   loom_intern_table_t index;
   // Stable chunks of 32 key rows beyond the inline prefix.
   loom_segmented_storage_t overflow;
@@ -50,7 +52,7 @@ typedef struct loom_vm_reference_plan_t {
   uint32_t group_count;
 } loom_vm_reference_plan_t;
 
-// Resolves a source type once and returns its provisional canonical ordinal.
+// Resolves a source type binding once and returns its provisional key ordinal.
 // |type| is a supported reference signature type. Allocation, undeclared
 // external identity, and image ordinal exhaustion can fail binding.
 iree_status_t loom_vm_reference_plan_bind(loom_vm_reference_plan_t* plan,

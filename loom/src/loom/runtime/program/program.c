@@ -365,21 +365,40 @@ static iree_status_t loom_runtime_program_check_fields(
   for (iree_host_size_t i = 0; i < expected.count; ++i) {
     const iree_vm_signature_type_t required = expected.data[i];
     const iree_vm_module_signature_type_t field = actual.data[i];
+    if (required.kind == IREE_VM_SIGNATURE_TYPE_KIND_FUNCTION) {
+      return iree_make_status(
+          IREE_STATUS_UNIMPLEMENTED,
+          "model export '%.*s' %s %zu: host binding of function-valued "
+          "fields is not supported",
+          (int)export_name.size, export_name.data, side, i);
+    }
     iree_vm_ref_type_t ref = NULL;
-    if (field.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) {
+    if (iree_vm_module_signature_type_kind_is_ref(field.kind)) {
       IREE_RETURN_IF_ERROR(
           iree_vm_module_ref_type_by_ordinal(module, field.type_ordinal, &ref));
     }
     if ((required.kind == IREE_VM_SIGNATURE_TYPE_KIND_SCALAR &&
          field.kind == required.value.scalar) ||
-        (required.kind == IREE_VM_SIGNATURE_TYPE_KIND_REF &&
+        (((required.kind == IREE_VM_SIGNATURE_TYPE_KIND_REF &&
+           field.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF) ||
+          (required.kind == IREE_VM_SIGNATURE_TYPE_KIND_PTR &&
+           field.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR)) &&
          ref == required.value.ref)) {
       continue;
     }
+    const bool expected_ref = iree_vm_signature_type_kind_is_ref(required.kind);
+    const char* expected_prefix =
+        expected_ref
+            ? (required.kind == IREE_VM_SIGNATURE_TYPE_KIND_REF ? "ref<"
+                                                                : "ptr<")
+            : "";
+    const char* actual_prefix =
+        ref ? (field.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF ? "ref<"
+                                                                    : "ptr<")
+            : "";
     const iree_string_view_t expected_name =
-        required.kind == IREE_VM_SIGNATURE_TYPE_KIND_REF
-            ? required.value.ref->type_name
-            : loom_runtime_program_scalar_name(required.value.scalar);
+        expected_ref ? required.value.ref->type_name
+                     : loom_runtime_program_scalar_name(required.value.scalar);
     const iree_string_view_t actual_name =
         ref ? ref->type_name
         : field.kind == IREE_VM_MODULE_SIGNATURE_TYPE_KIND_FUNCTION
@@ -387,21 +406,23 @@ static iree_status_t loom_runtime_program_check_fields(
             : loom_runtime_program_scalar_name(
                   (iree_vm_scalar_type_t)field.kind);
     const iree_string_view_t expected_namespace =
-        required.kind == IREE_VM_SIGNATURE_TYPE_KIND_REF
-            ? required.value.ref->table->namespace_name
-            : IREE_SV("");
+        expected_ref ? required.value.ref->table->namespace_name : IREE_SV("");
     const iree_string_view_t actual_namespace =
         ref ? ref->table->namespace_name : IREE_SV("");
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "model export '%.*s' %s %zu type mismatch: host expects %.*s%s%.*s, "
-        "source declares %.*s%s%.*s",
-        (int)export_name.size, export_name.data, side, i,
-        (int)expected_namespace.size, expected_namespace.data,
+    iree_status_t status =
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "model export '%.*s' %s %zu type mismatch",
+                         (int)export_name.size, export_name.data, side, i);
+    return iree_status_annotate_f(
+        status,
+        "host expects %s%.*s%s%.*s%s, "
+        "source declares %s%.*s%s%.*s%s",
+        expected_prefix, (int)expected_namespace.size, expected_namespace.data,
         expected_namespace.size ? "." : "", (int)expected_name.size,
-        expected_name.data, (int)actual_namespace.size, actual_namespace.data,
+        expected_name.data, expected_ref ? ">" : "", actual_prefix,
+        (int)actual_namespace.size, actual_namespace.data,
         actual_namespace.size ? "." : "", (int)actual_name.size,
-        actual_name.data);
+        actual_name.data, ref ? ">" : "");
   }
   return iree_ok_status();
 }

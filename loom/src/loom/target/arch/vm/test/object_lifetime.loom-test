@@ -1,0 +1,456 @@
+// A native PTR result protects its payload after the explicit owner is consumed.
+// The final borrowed use ends that protection before the next native observer.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @use(%value: ptr<@Object>) {
+  func.call @read(%value) : (ptr<@Object>)
+  func.return
+}
+
+func.def public @run() {
+  %identity = scalar.constant 7 : i32
+  %owner, %pointer = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @consume(%owner) : (ref<@Object>)
+  func.call @observe() : ()
+  func.call @use(%pointer) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.call @use(%pointer) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+// ----
+create 7
+consume 7
+live 1
+read 7
+live 1
+read 7
+destroy 7
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Real source owners stay alive across their final borrowed read. Their native
+// consumer, rather than register reuse or frame return, determines destruction.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read_pair") @read_pair(%left: ptr<@Object>, %right: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @take(%owner: ref<@Object>) {
+  func.call @consume(%owner) : (ref<@Object>)
+  func.return
+}
+
+func.def public @run() {
+  %first = scalar.constant 1 : i32
+  %second = scalar.constant 2 : i32
+  %left, %left_pointer = func.call @create(%first) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %right, %right_pointer = func.call @create(%second) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @read_pair(%right_pointer, %left_pointer) : (ptr<@Object>, ptr<@Object>)
+  func.call @observe() : ()
+  func.call @take(%left) : (ref<@Object>)
+  func.call @observe() : ()
+  func.call @take(%right) : (ref<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+// ----
+create 1
+create 2
+read 2
+read 1
+live 2
+consume 1
+destroy 1
+live 1
+consume 2
+destroy 2
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Null ownership and borrowed handoffs are valid and have no finalizer.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create_null") @create_null() -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.def public @run() {
+  %owner, %pointer = func.call @create_null() : () -> (ref<@Object>, ptr<@Object>)
+  func.call @consume(%owner) : (ref<@Object>)
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.return
+}
+// ----
+consume -1
+read -1
+OK 0
+retired 0
+
+// ====
+
+// Terminal failure releases both the current frame and its suspended caller.
+// There is no ordering contract between these unrelated native finalizers.
+// RUN: with-checks emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.decl import("lifetime", "fail") @fail()
+
+func.def noinline @child(%owner: ref<@Object>, %pointer: ptr<@Object>) {
+  func.call @fail() : ()
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.call @consume(%owner) : (ref<@Object>)
+  func.return
+}
+
+func.def public @run() {
+  %first = scalar.constant 1 : i32
+  %second = scalar.constant 2 : i32
+  %left, %left_pointer = func.call @create(%first) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %right, %right_pointer = func.call @create(%second) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @child(%left, %left_pointer) : (ref<@Object>, ptr<@Object>)
+  func.call @read(%right_pointer) : (ptr<@Object>)
+  func.call @consume(%right) : (ref<@Object>)
+  func.return
+}
+// ----
+CHECK-COUNT-1: create 1
+CHECK-COUNT-1: create 2
+CHECK-COUNT-1: fail 2
+CHECK-COUNT-1: destroy 1
+CHECK-COUNT-1: destroy 2
+CHECK: ABORTED 0
+CHECK: retired 0
+CHECK-NOT: read *
+CHECK-NOT: consume *
+
+// ====
+
+// A copy and a destructive load through aliased storage both read the live
+// payload. Returning them in the opposite order exercises parallel transport.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "consume", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @consume(%owner: reg<vm.ref : ref<@Object>>)
+
+low.func.decl import(native, "read_pair", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read_pair(%left: reg<vm.ref : ptr<@Object>>, %right: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @alias(%pointer: reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>) asm {
+  %slot = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %view = storage_view %slot {byte_length = 16} : low.storage<private> -> low.storage<private>
+  low.spill.move %pointer, %slot : reg<vm.ref : ptr<@Object>>, low.storage<private>
+  %copy = low.reload %view : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  %moved = low.reload.move %slot : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  return %moved, %copy
+}
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %identity = constant.i32 5
+  %owner, %pointer = low.func.call @create(%identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.func.call @consume(%owner) : (reg<vm.ref : ref<@Object>>)
+  %moved, %copy = low.func.call @alias(%pointer) : (reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.func.call @read_pair(%moved, %copy) : (reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  return
+}
+// ----
+create 5
+consume 5
+read 5
+read 5
+destroy 5
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A destructive load empties the canonical cell before a later aliased read.
+// The borrowed null and live result must survive the same return packet.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "consume", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @consume(%owner: reg<vm.ref : ref<@Object>>)
+
+low.func.decl import(native, "read_pair", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read_pair(%left: reg<vm.ref : ptr<@Object>>, %right: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @alias(%pointer: reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>) asm {
+  %slot = storage {byte_alignment = 16, byte_length = 16} : low.storage<private>
+  %view = storage_view %slot {byte_length = 16} : low.storage<private> -> low.storage<private>
+  low.spill.move %pointer, %slot : reg<vm.ref : ptr<@Object>>, low.storage<private>
+  %moved = low.reload.move %slot : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  %copy = low.reload %view : low.storage<private> -> reg<vm.ref : ptr<@Object>>
+  return %moved, %copy
+}
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %identity = constant.i32 5
+  %owner, %pointer = low.func.call @create(%identity) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.func.call @consume(%owner) : (reg<vm.ref : ref<@Object>>)
+  %moved, %copy = low.func.call @alias(%pointer) : (reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.func.call @read_pair(%moved, %copy) : (reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  return
+}
+// ----
+create 5
+consume 5
+read 5
+read -1
+destroy 5
+live 0
+OK 0
+retired 0
+
+// ====
+
+// The right edge transfers its guard to a different register at the join.
+// No hidden source owner may survive the joined value's last native use.
+// Keep the call boundary so constant folding cannot erase the tested edge.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "consume", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @consume(%owner: reg<vm.ref : ref<@Object>>)
+
+low.func.decl import(native, "read", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%pointer: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def noinline target<vm.core>(@vm) abi(vm_function) @select(%condition: reg<vm.value : i1>, %left: reg<vm.ref : ptr<@Object>>, %right: reg<vm.ref : ptr<@Object>>) asm {
+  low.cond_br %condition, ^left_path, ^right_path : reg<vm.value : i1>
+^left_path:
+  low.br ^joined(%left: reg<vm.ref : ptr<@Object>>)
+^right_path:
+  low.br ^joined(%right: reg<vm.ref : ptr<@Object>>)
+^joined(%value: reg<vm.ref : ptr<@Object>>):
+  low.func.call @read(%value) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  return
+}
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %first = constant.i32 1
+  %second = constant.i32 2
+  %right_path = constant.i32 0 : reg<vm.value : i1>
+  %left, %left_pointer = low.func.call @create(%first) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  %right, %right_pointer = low.func.call @create(%second) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.func.call @consume(%left) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @consume(%right) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @select(%right_path, %left_pointer, %right_pointer) : (reg<vm.value : i1>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>)
+  return
+}
+// ----
+create 1
+create 2
+consume 1
+consume 2
+destroy 1
+read 2
+destroy 2
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Seventeen borrowed aliases cross the real sixteen-field direct-call boundary
+// in both directions. The overflow cell must retire with the final alias.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def noinline @relay(%a: ptr<@Object>, %b: ptr<@Object>, %c: ptr<@Object>, %d: ptr<@Object>, %e: ptr<@Object>, %f: ptr<@Object>, %g: ptr<@Object>, %h: ptr<@Object>, %i: ptr<@Object>, %j: ptr<@Object>, %k: ptr<@Object>, %l: ptr<@Object>, %m: ptr<@Object>, %n: ptr<@Object>, %o: ptr<@Object>, %p: ptr<@Object>, %q: ptr<@Object>) -> (ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>) {
+  func.return %a, %b, %c, %d, %e, %f, %g, %h, %i, %j, %k, %l, %m, %n, %o, %p, %q : ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>
+}
+
+func.def public @run() {
+  %identity = scalar.constant 3 : i32
+  %owner, %pointer = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @consume(%owner) : (ref<@Object>)
+  %a, %b, %c, %d, %e, %f, %g, %h, %i, %j, %k, %l, %m, %n, %o, %p, %q = func.call @relay(%pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer, %pointer) : (ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>) -> (ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>, ptr<@Object>)
+  func.call @read(%a) : (ptr<@Object>)
+  func.call @read(%b) : (ptr<@Object>)
+  func.call @read(%c) : (ptr<@Object>)
+  func.call @read(%d) : (ptr<@Object>)
+  func.call @read(%e) : (ptr<@Object>)
+  func.call @read(%f) : (ptr<@Object>)
+  func.call @read(%g) : (ptr<@Object>)
+  func.call @read(%h) : (ptr<@Object>)
+  func.call @read(%i) : (ptr<@Object>)
+  func.call @read(%j) : (ptr<@Object>)
+  func.call @read(%k) : (ptr<@Object>)
+  func.call @read(%l) : (ptr<@Object>)
+  func.call @read(%m) : (ptr<@Object>)
+  func.call @read(%n) : (ptr<@Object>)
+  func.call @read(%o) : (ptr<@Object>)
+  func.call @read(%p) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.call @read(%q) : (ptr<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+// ----
+create 3
+consume 3
+read 3
+read 3
+read 3
+read 3
+read 3
+read 3
+read 3
+read 3
+read 3
+read 3
+read 3
+read 3
+read 3
+read 3
+read 3
+read 3
+live 1
+read 3
+destroy 3
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Joining one pointer must preserve both original pointers when later uses
+// remain. This distinguishes a legal move from an unsafe unconditional move.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @create(%identity: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "consume", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @consume(%owner: reg<vm.ref : ref<@Object>>)
+
+low.func.decl import(native, "read", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @read(%pointer: reg<vm.ref : ptr<@Object>>)
+
+low.func.decl import(native, "observe", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @observe()
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @select(%condition: reg<vm.value : i1>, %left: reg<vm.ref : ptr<@Object>>, %right: reg<vm.ref : ptr<@Object>>) asm {
+  low.cond_br %condition, ^left_path, ^right_path : reg<vm.value : i1>
+^left_path:
+  low.br ^joined(%left: reg<vm.ref : ptr<@Object>>)
+^right_path:
+  low.br ^joined(%right: reg<vm.ref : ptr<@Object>>)
+^joined(%value: reg<vm.ref : ptr<@Object>>):
+  low.func.call @read(%value) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  low.func.call @read(%left) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  low.func.call @read(%right) : (reg<vm.ref : ptr<@Object>>)
+  low.func.call @observe() : ()
+  return
+}
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run() asm {
+  %first = constant.i32 1
+  %second = constant.i32 2
+  %right_path = constant.i32 0 : reg<vm.value : i1>
+  %left, %left_pointer = low.func.call @create(%first) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  %right, %right_pointer = low.func.call @create(%second) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  low.func.call @consume(%left) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @consume(%right) : (reg<vm.ref : ref<@Object>>)
+  low.func.call @select(%right_path, %left_pointer, %right_pointer) : (reg<vm.value : i1>, reg<vm.ref : ptr<@Object>>, reg<vm.ref : ptr<@Object>>)
+  return
+}
+// ----
+create 1
+create 2
+consume 1
+consume 2
+read 2
+live 2
+read 1
+destroy 1
+live 1
+read 2
+destroy 2
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A failing native factory publishes only its first result. The call frame
+// releases that initialized owner without inspecting the unpublished result.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create_fail") @create(%identity: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "read") @read(%value: ptr<@Object>)
+
+func.def public @run() {
+  %identity = scalar.constant 9 : i32
+  %owner, %pointer = func.call @create(%identity) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @read(%pointer) : (ptr<@Object>)
+  func.call @consume(%owner) : (ref<@Object>)
+  func.return
+}
+// ----
+create 9
+fail 1
+destroy 9
+ABORTED 0
+retired 0

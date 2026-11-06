@@ -50,7 +50,7 @@ static iree_status_t iree_vm_bytecode_call_validate_arguments(
   for (uint32_t i = 0; i < argument_count; ++i) {
     const iree_vm_bytecode_v0_signature_descriptor_row_t* descriptor =
         &descriptors[i];
-    if (descriptor->kind_u16 == IREE_VM_BYTECODE_SIGNATURE_KIND_REF) {
+    if (iree_vm_module_signature_type_kind_is_ref(descriptor->kind_u16)) {
       const iree_vm_ref_t argument =
           ref_ordinal < IREE_VM_CALL_DIRECT_REGISTER_COUNT
               ? state->refs[ref_ordinal]

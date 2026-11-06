@@ -38,12 +38,38 @@ from loom.target.low_descriptors import (
     HazardReferenceKind,
     InstructionClass,
     Operand,
+    OperandRole,
+    OwnershipEffect,
     RegClass,
     RegClassFlag,
     descriptor_stable_id,
     operand_source_binding,
     schedule_model_stable_id,
 )
+
+
+def _emit_ownership_tables(lines: list[str], view: DescriptorSetView) -> list[str]:
+    """Indexes instruction effects in SSA order without widening numeric rows."""
+    offsets: list[int] = []
+    effects: list[OwnershipEffect] = []
+    spans: dict[tuple[OwnershipEffect, ...], int] = {}
+    for descriptor in view.descriptors:
+        span = tuple(operand.ownership for operand in descriptor.operands if operand.role is OperandRole.RESULT or validation.operand_role_is_packet_input(operand.role))
+        if any(effect is not OwnershipEffect.NONE for effect in span):
+            start, _ = append_interned_sequence(span, effects, spans)
+            validation.validate_u16(start + 1, "ownership span offset")
+            offsets.append(start + 1)
+        else:
+            offsets.append(0)
+    if not effects:
+        return []
+    prefix = f"k{view.spec.c_table_prefix}Ownership"
+    c_arrays.append_value_array(lines, "uint16_t", prefix + "Offsets", [str(offset) for offset in offsets])
+    c_arrays.append_value_array(lines, "loom_low_ownership_effect_t", prefix + "Effects", [effect.c_name for effect in effects])
+    return [
+        f"    .ownership_offsets = {prefix}Offsets,",
+        f"    .ownership_effects = {prefix}Effects,",
+    ]
 
 
 def _has_positive_effect_separations(
@@ -1451,6 +1477,7 @@ def emit_source_for_views(
         asm_form_table_symbol = asm_form_table_symbols[view_spec.key]
         operand_form_table_symbol = operand_form_table_symbols[view_spec.key]
         schedule_alternative_table_symbol = schedule_alternative_table_symbols[view_spec.key]
+        ownership_fields = _emit_ownership_tables(lines, view)
         view_lines = [
             f"static const loom_low_descriptor_set_t k{view_spec.c_table_prefix}Set = {{",
             "    .abi_version = LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION,",
@@ -1473,6 +1500,7 @@ def emit_source_for_views(
             f"    .descriptor_identities = {identity_table_symbol},",
             f"    .descriptor_stable_ids = {descriptor_stable_id_table_symbol},",
             f"    .descriptors = {descriptor_table_symbol},",
+            *ownership_fields,
             f"    .descriptor_layouts = {descriptor_layout_table_symbol},",
             f"    .descriptor_identity_count = {len(identity_domain.keys)},",
             f"    .descriptor_layout_count = {len(descriptor_layout_rows)},",

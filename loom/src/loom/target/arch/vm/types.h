@@ -14,11 +14,11 @@
 extern "C" {
 #endif
 
-// Returns the declared external identity for an opaque managed type, the VM
-// mapping for built-in buffer, or NULL when the type has no VM reference ABI.
-// The returned key borrows immutable compiler type metadata.
-const loom_type_reference_key_t* loom_vm_type_reference_key(
-    const loom_module_t* module, loom_type_t type);
+// Resolves an inline managed handle, a declared opaque type, or the VM mapping
+// for built-in buffer. Returns false when the type has no VM reference ABI.
+// Key strings borrow the immutable source module or registered type metadata.
+bool loom_vm_type_reference_key(const loom_module_t* module, loom_type_t type,
+                                loom_type_reference_key_t* out_key);
 
 #ifdef __cplusplus
 }  // extern "C"

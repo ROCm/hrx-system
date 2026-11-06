@@ -310,6 +310,7 @@ loom_cc_library(
         ":registry",
         "//loom/src/loom/codegen/low/pipeline:pass_environment",
         "//loom/src/loom/codegen/low/transforms:allocation",
+        "//loom/src/loom/codegen/low/transforms:borrow_lifetime",
         "//loom/src/loom/codegen/low/transforms:cfg_tuple_decomposition",
         "//loom/src/loom/codegen/low/transforms:cse",
         "//loom/src/loom/codegen/low/transforms:dce",

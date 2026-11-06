@@ -58,7 +58,12 @@ from iree.vm.bytecode.spec.isa.core.integer import (
     IntegerUnarySemantics,
 )
 from iree.vm.bytecode.spec.isa.core.ref import REF_SELECT
-from iree.vm.bytecode.spec.isa.core.rules import FieldRule, RecordRuleKind, StateAccess
+from iree.vm.bytecode.spec.isa.core.rules import (
+    FieldRule,
+    RecordRuleKind,
+    RefOwnership,
+    StateAccess,
+)
 from iree.vm.bytecode.spec.isa.core.stack import MEMORY_FORMAT_SELECTOR
 from iree.vm.bytecode.spec.isa.core.value import VALUE_COPY, VALUE_SELECT
 from iree.vm.bytecode.spec.specification import SPECIFICATION
@@ -86,6 +91,7 @@ from loom.target.low_descriptors import (
     ModelQuality,
     Operand,
     OperandRole,
+    OwnershipEffect,
     RegClass,
     RegClassAlt,
     RegClassFlag,
@@ -322,6 +328,18 @@ def _descriptor(
             _OPERAND_ROLES[field.role],
             (RegClassAlt(_REGISTER_CLASSES[field.rule.kind]),),
             encoding_field_id=offset,
+            ownership=(
+                {
+                    RefOwnership.BORROW: OwnershipEffect.BORROW,
+                    RefOwnership.INSPECT: OwnershipEffect.BORROW,
+                    RefOwnership.RETAIN: OwnershipEffect.RETAIN,
+                    RefOwnership.REPLACE_OWNER: OwnershipEffect.OWNED,
+                    RefOwnership.REPLACE_RETAIN: OwnershipEffect.OWNED,
+                    RefOwnership.REPLACE_BORROW: OwnershipEffect.BORROWED,
+                }[field.ref_policy.ownership]
+                if field.ref_policy
+                else OwnershipEffect.NONE
+            ),
         )
         for field, offset in zip(
             instruction.fields, instruction.field_offsets, strict=True
@@ -329,7 +347,7 @@ def _descriptor(
         if field.role in _OPERAND_ROLES
     )
     # Invocation aborts are runtime behavior, not compiler-visible effects.
-    # Only state accesses constrain optimization of these instructions.
+    # State access and acquisition of an independent owner constrain removal.
     effects = tuple(
         dict.fromkeys(
             Effect(
@@ -355,7 +373,10 @@ def _descriptor(
         encoding_format_id=instruction.byte_length,
         effects=effects,
         flags=(
-            DescriptorFlag.SIDE_EFFECTING if effects else DescriptorFlag.DEAD_REMOVABLE,
+            DescriptorFlag.SIDE_EFFECTING
+            if effects
+            or any(operand.ownership is OwnershipEffect.OWNED for operand in operands)
+            else DescriptorFlag.DEAD_REMOVABLE,
         ),
         instruction_classes=(
             InstructionClass.GENERIC_MEMORY

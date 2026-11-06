@@ -36,6 +36,7 @@ from loom.dialect import (
     tensor,
     test,
     tile,
+    type,
     vector,
     view,
 )
@@ -66,6 +67,7 @@ __all__ = [
     "tensor",
     "test",
     "tile",
+    "type",
     "vector",
     "view",
 ]

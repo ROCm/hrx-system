@@ -59,6 +59,8 @@ typedef struct loom_low_allocation_options_t {
   // Borrowed invocation locations indexed by formal-argument ordinal, including
   // unused arguments. The entry arguments prefix the local value domain. A
   // missing suffix has no entry transport; these are not lifetime constraints.
+  // CALL_STORAGE describes the caller's packet, so entry access to those
+  // arguments belongs to the target's argument-packet mechanism.
   const loom_low_allocation_abi_location_t* entry_locations;
   // Number of entries in |entry_locations|, at most the formal argument count.
   iree_host_size_t entry_location_count;

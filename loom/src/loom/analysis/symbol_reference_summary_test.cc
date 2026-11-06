@@ -139,6 +139,42 @@ class SymbolReferenceSummaryTest : public ::testing::Test {
   loom_symbol_reference_summary_t summary_ = {};
 };
 
+TEST_F(SymbolReferenceSummaryTest,
+       ManagedHandlesRetainDeclarationDependencies) {
+  const auto declaration = Symbol(IREE_SV("Decoder"));
+  loom_string_id_t namespace_id;
+  loom_string_id_t name_id;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module_, IREE_SV("input"), &namespace_id));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module_, IREE_SV("decoder"), &name_id));
+  const auto owner =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_OWNED, namespace_id, name_id,
+                          declaration.symbol_id);
+  const auto borrow =
+      loom_type_reference(LOOM_REFERENCE_OWNERSHIP_BORROWED, namespace_id,
+                          name_id, declaration.symbol_id);
+  loom_type_t signature;
+  IREE_ASSERT_OK(loom_module_intern_function_type(module_, &owner, 1, &borrow,
+                                                  1, &signature));
+  for (const auto type : {owner, borrow, signature}) {
+    IREE_ASSERT_OK(loom_symbol_reference_summary_query_type(
+        &summary_, type, LOOM_SYMBOL_REFERENCE_OCCURRENCE_VALUE_TYPE));
+    loom_symbol_reference_summary_span_t span;
+    size_t count = 0;
+    while (loom_symbol_reference_summary_next(&summary_, &span)) {
+      EXPECT_EQ(span.kind, LOOM_SYMBOL_REFERENCE_OCCURRENCE_VALUE_TYPE);
+      EXPECT_EQ(span.role, LOOM_SYMBOL_REFERENCE_ROLE_DEPENDENCY);
+      EXPECT_EQ(span.interfaces, LOOM_SYMBOL_INTERFACE_RECORD);
+      ASSERT_EQ(span.count, 1u);
+      EXPECT_EQ(span.targets[0].module_id, 0u);
+      EXPECT_EQ(span.targets[0].symbol_id, declaration.symbol_id);
+      ++count;
+    }
+    EXPECT_EQ(count, loom_type_is_function(type) ? 2u : 1u);
+  }
+}
+
 TEST_F(SymbolReferenceSummaryTest, PlainScalarsNeedNoScratchStorage) {
   IREE_ASSERT_OK(loom_symbol_reference_summary_query_type(
       &summary_, loom_type_scalar(LOOM_SCALAR_TYPE_F32),

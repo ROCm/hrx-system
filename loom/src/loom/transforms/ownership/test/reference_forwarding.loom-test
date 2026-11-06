@@ -1,0 +1,155 @@
+// Each direct branch transfers the owner's obligation, including a required
+// physical identity. The destination may release through a storage alias.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @forward(%owner: reg<vm.ref : ref<@Object>>) asm {
+  low.br ^consume(%owner: reg<vm.ref : ref<@Object>>)
+^consume(%received: reg<vm.ref : ref<@Object>>):
+  %alias = low.assume %received [] : reg<vm.ref : ref<@Object>>
+  low.release %alias : reg<vm.ref : ref<@Object>>
+  return
+}
+
+low.func.def target<vm.core> @identity(%owner: reg<vm.ref : ref<@Object>>) asm {
+  low.br.identity(0, 1) ^consume(%owner: reg<vm.ref : ref<@Object>>)
+^consume(%received: reg<vm.ref : ref<@Object>>):
+  low.release %received : reg<vm.ref : ref<@Object>>
+  return
+}
+
+low.func.def target<vm.core> @return_alias(%owner: reg<vm.ref : ref<@Object>>) -> (reg<vm.ref : ref<@Object>>) asm {
+  %alias = low.assume %owner [] : reg<vm.ref : ref<@Object>>
+  return %alias
+}
+
+// ====
+// An alias carries the original factory result's obligation. Copying that
+// alias creates another owner, which can escape through the function result.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.decl import(native, "make", module = "provider") target<vm.core> @make() -> (reg<vm.ref : ref<@Object>>)
+
+low.func.def target<vm.core> @copy() -> (reg<vm.ref : ref<@Object>>) asm {
+  %owner = low.func.call @make() : () -> (reg<vm.ref : ref<@Object>>)
+  %alias = low.assume %owner [] : reg<vm.ref : ref<@Object>>
+  %copy = copy %alias : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  low.release %alias : reg<vm.ref : ref<@Object>>
+  return %copy
+}
+
+low.func.def target<vm.core> @caller() asm {
+  %owner = low.func.call @copy() : () -> (reg<vm.ref : ref<@Object>>)
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  return
+}
+
+// ====
+// A backedge reads both owners before rebinding either block argument.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @rotate(%first: reg<vm.ref : ref<@Object>>, %second: reg<vm.ref : ref<@Object>>, %again: reg<vm.value : i1>) asm {
+  low.br ^loop(%first: reg<vm.ref : ref<@Object>>, %second: reg<vm.ref : ref<@Object>>)
+^loop(%left: reg<vm.ref : ref<@Object>>, %right: reg<vm.ref : ref<@Object>>):
+  low.cond_br %again, ^repeat, ^done : reg<vm.value : i1>
+^repeat:
+  low.br ^loop(%right: reg<vm.ref : ref<@Object>>, %left: reg<vm.ref : ref<@Object>>)
+^done:
+  low.release %left : reg<vm.ref : ref<@Object>>
+  low.release %right : reg<vm.ref : ref<@Object>>
+  return
+}
+
+// ====
+// Borrowed fan-out does not transfer a source owner's obligation or consume
+// the dominating pointer. Each independent carrier may end separately.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @fan_out(%pointer: reg<vm.ref : ptr<@Object>>) asm {
+  low.br ^copies(%pointer: reg<vm.ref : ptr<@Object>>, %pointer: reg<vm.ref : ptr<@Object>>)
+^copies(%left: reg<vm.ref : ptr<@Object>>, %right: reg<vm.ref : ptr<@Object>>):
+  low.release %left : reg<vm.ref : ptr<@Object>>
+  low.release %right : reg<vm.ref : ptr<@Object>>
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  return
+}
+
+// ====
+// One owning carrier cannot satisfy two simultaneous ownership transfers.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @duplicate(%owner: reg<vm.ref : ref<@Object>>) asm {
+  // ERROR@+1: DOMINANCE/012 {phase_name="ownership-lifetime", value_name="owner", op_name="low.br"}
+  low.br ^copies(%owner: reg<vm.ref : ref<@Object>>, %owner: reg<vm.ref : ref<@Object>>)
+^copies(%left: reg<vm.ref : ref<@Object>>, %right: reg<vm.ref : ref<@Object>>):
+  low.release %left : reg<vm.ref : ref<@Object>>
+  low.release %right : reg<vm.ref : ref<@Object>>
+  return
+}
+
+// ====
+// Different alias spellings do not create two owners for a parallel transfer.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @duplicate_alias(%owner: reg<vm.ref : ref<@Object>>) asm {
+  %alias = low.assume %owner [] : reg<vm.ref : ref<@Object>>
+  // ERROR@+1: DOMINANCE/012 {phase_name="ownership-lifetime", value_name="alias", op_name="low.br"}
+  low.br ^copies(%owner: reg<vm.ref : ref<@Object>>, %alias: reg<vm.ref : ref<@Object>>)
+^copies(%left: reg<vm.ref : ref<@Object>>, %right: reg<vm.ref : ref<@Object>>):
+  low.release %left : reg<vm.ref : ref<@Object>>
+  low.release %right : reg<vm.ref : ref<@Object>>
+  return
+}
+
+// ====
+// Releasing an alias on one path leaves a real obligation on the other.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @leak(%owner: reg<vm.ref : ref<@Object>>, %condition: reg<vm.value : i1>) asm {
+  %alias = low.assume %owner [] : reg<vm.ref : ref<@Object>>
+  low.cond_br %condition, ^consume, ^skip : reg<vm.value : i1>
+^consume:
+  low.release %alias : reg<vm.ref : ref<@Object>>
+  return
+^skip:
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="owner"}
+  return
+}
+
+// ====
+// Chained aliases across blocks still discharge one original obligation.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @alias_chain(%owner: reg<vm.ref : ref<@Object>>) asm {
+  %first = low.assume %owner [] : reg<vm.ref : ref<@Object>>
+  low.br ^define
+^define:
+  %second = low.assume %first [] : reg<vm.ref : ref<@Object>>
+  low.br ^consume
+^consume:
+  %third = low.assume %second [] : reg<vm.ref : ref<@Object>>
+  low.release %third : reg<vm.ref : ref<@Object>>
+  return
+}
+
+// ====
+// Ownership-neutral nested execution remains legal. Its local aliases are
+// outside the containing function's flat ownership domain.
+// RUN: pass ownership-lifetime
+func.def @nested_alias(%condition: i1, %value: i32) -> (i32) {
+  %outer = scalar.assume %value [] : i32
+  %selected = scf.if %condition -> (i32) {
+    %inner = scalar.assume %outer [] : i32
+    scf.yield %inner : i32
+  } else {
+    scf.yield %outer : i32
+  }
+  func.return %selected : i32
+}

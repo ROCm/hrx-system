@@ -47,6 +47,16 @@ behavior. Stack-layout arithmetic and register encoding are native contracts;
 ABI lowering and instruction selection from authored operations are IR
 contracts. Exact output is useful in both kinds of test.
 
+VM object lifecycle fixtures use the test runner's `emit vm-object-lifetime`
+provider. It compiles the ordinary `@run()` entry through LoomC, loads the VM
+artifact, and links a native `lifetime` module with heap-allocated opaque
+objects. The output records actual payload reads, ownership consumption,
+finalizers, and live-object counts at observable boundaries. This checks
+destruction timing independently of register assignment and instruction
+spelling. The native provider and its event capture are test-only; compilation,
+linking, calls, and cleanup use the production APIs. The fixtures live beside
+the VM target's other artifact tests.
+
 Combining an IR program with injected register assignments, rewritten internal
 tables, or a resource inventory invented by the runner crosses those boundaries.
 Such a fixture depends on both program semantics and private compiler state.

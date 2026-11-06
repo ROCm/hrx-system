@@ -1,0 +1,135 @@
+// An owning parameter carries a release obligation even without data users.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+func.def @missing_consumption(%owner: ref<@Object>) {
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="owner"}
+  func.return
+}
+
+// ====
+// A native owning result has the same obligation as an owning parameter.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+func.decl import("provider", "make") @make() -> (ref<@Object>)
+
+func.def @missing_result_consumption() {
+  %owner = func.call @make() : () -> (ref<@Object>)
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="owner"}
+  func.return
+}
+
+// ====
+// An owning call transfers the obligation; borrowed calls preserve it in
+// their caller. Independent ref/ptr fields never inherit a family-wide mode.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+func.decl import("provider", "take") @take(%owner: ref<@Object>)
+
+func.decl import("provider", "inspect") @inspect(%pointer: ptr<@Object>)
+
+func.def @mixed(%owner: ref<@Object>, %pointer: ptr<@Object>) {
+  func.call @inspect(%pointer) : (ptr<@Object>)
+  func.call @take(%owner) : (ref<@Object>)
+  func.call @inspect(%pointer) : (ptr<@Object>)
+  func.return
+}
+
+// ====
+// Returning an owner transfers its release obligation to the caller.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+func.def @return_owner(%owner: ref<@Object>) -> (ref<@Object>) {
+  func.return %owner : ref<@Object>
+}
+
+// ====
+// Every normal path must consume the owner.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+func.decl @take(%owner: ref<@Object>)
+
+func.def @missing_branch(%owner: ref<@Object>, %condition: i1) {
+  cfg.cond_br %condition, ^consume, ^skip
+^consume:
+  func.call @take(%owner) : (ref<@Object>)
+  func.return
+^skip:
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="owner"}
+  func.return
+}
+
+// ====
+// Mutually exclusive consumers leave no obligation at their join.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+func.decl @take(%owner: ref<@Object>)
+
+func.def @balanced_branches(%owner: ref<@Object>, %condition: i1) {
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  func.call @take(%owner) : (ref<@Object>)
+  cfg.br ^exit
+^right:
+  func.call @take(%owner) : (ref<@Object>)
+  cfg.br ^exit
+^exit:
+  func.return
+}
+
+// ====
+// Repeated factory execution recreates the dynamic obligation each iteration.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+func.decl @make() -> (ref<@Object>)
+
+func.decl @take(%owner: ref<@Object>)
+
+func.def @recreate(%again: i1) {
+  cfg.br ^loop
+^loop:
+  %owner = func.call @make() : () -> (ref<@Object>)
+  func.call @take(%owner) : (ref<@Object>)
+  cfg.cond_br %again, ^loop, ^exit
+^exit:
+  func.return
+}
+
+// ====
+// A consuming caller cannot excuse an unbalanced callee body.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+func.def noinline @drop(%owner: ref<@Object>) {
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="owner"}
+  func.return
+}
+
+func.def @caller(%owner: ref<@Object>) {
+  func.call @drop(%owner) : (ref<@Object>)
+  func.return
+}
+
+// ====
+// Native ptr results carry no explicit source-owner obligation. Their safety
+// protection is separate from the declared callable ownership mode.
+// RUN: pass ownership-lifetime
+
+type.decl import("provider", "object") @Object
+
+func.decl import("provider", "get") @get() -> (ptr<@Object>)
+
+func.decl import("provider", "inspect") @inspect(%pointer: ptr<@Object>)
+
+func.def @borrowed_result() {
+  %pointer = func.call @get() : () -> (ptr<@Object>)
+  func.call @inspect(%pointer) : (ptr<@Object>)
+  func.call @inspect(%pointer) : (ptr<@Object>)
+  func.return
+}

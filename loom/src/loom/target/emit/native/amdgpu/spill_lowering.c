@@ -16,6 +16,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/ops/type_registry.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/arch/amdgpu/error_catalog.h"
@@ -856,7 +857,7 @@ iree_status_t loom_amdgpu_plan_spill_materialization_traffic(
 static iree_status_t loom_amdgpu_spill_lowering_rewrite_spill(
     loom_amdgpu_spill_lowering_context_t* context, loom_rewriter_t* rewriter,
     loom_op_t* op, iree_arena_allocator_t* recipe_arena) {
-  const loom_value_id_t value = loom_low_spill_value(op);
+  const loom_value_id_t value = loom_low_storage_store_value(op);
   const loom_type_t value_type =
       loom_module_value_type(context->emission.module, value);
   const loom_amdgpu_spill_register_kind_t register_kind =
@@ -868,7 +869,7 @@ static iree_status_t loom_amdgpu_spill_lowering_rewrite_spill(
   }
   const uint32_t unit_count = loom_low_register_type_unit_count(value_type);
 
-  const loom_value_id_t storage = loom_low_spill_storage(op);
+  const loom_value_id_t storage = loom_low_storage_store_storage(op);
   loom_amdgpu_storage_layout_reference_t storage_reference = {0};
   loom_amdgpu_spill_lowering_resolve_storage_reference(context, storage,
                                                        &storage_reference);
@@ -880,16 +881,17 @@ static iree_status_t loom_amdgpu_spill_lowering_rewrite_spill(
       (uint64_t)unit_count * LOOM_AMDGPU_SCRATCH_SPILL_UNIT_BYTES;
   bool access_supported = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_validate_access_range(
-      context, op, storage, &storage_reference, loom_low_spill_offset(op),
-      access_byte_length, &access_supported));
+      context, op, storage, &storage_reference,
+      loom_low_storage_transfer_offset(op), access_byte_length,
+      &access_supported));
   if (!access_supported) {
     return iree_ok_status();
   }
   loom_amdgpu_spill_recipe_t recipe = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_spill_recipe_build(
       context->emission.descriptor_set, LOOM_AMDGPU_SPILL_RECIPE_KIND_STORE,
-      value_type, &storage_reference, loom_low_spill_offset(op), recipe_arena,
-      &recipe));
+      value_type, &storage_reference, loom_low_storage_transfer_offset(op),
+      recipe_arena, &recipe));
 
   loom_builder_set_before(&rewriter->builder, op);
   // A per-lane definition only assigns the lanes active at its program point.
@@ -909,7 +911,7 @@ static iree_status_t loom_amdgpu_spill_lowering_rewrite_spill(
 static iree_status_t loom_amdgpu_spill_lowering_rewrite_reload(
     loom_amdgpu_spill_lowering_context_t* context, loom_rewriter_t* rewriter,
     loom_op_t* op, iree_arena_allocator_t* recipe_arena) {
-  const loom_value_id_t result = loom_low_reload_result(op);
+  const loom_value_id_t result = loom_low_storage_load_result(op);
   const loom_type_t result_type =
       loom_module_value_type(context->emission.module, result);
   const loom_amdgpu_spill_register_kind_t register_kind =
@@ -921,7 +923,7 @@ static iree_status_t loom_amdgpu_spill_lowering_rewrite_reload(
   }
   const uint32_t unit_count = loom_low_register_type_unit_count(result_type);
 
-  const loom_value_id_t storage = loom_low_reload_storage(op);
+  const loom_value_id_t storage = loom_low_storage_load_storage(op);
   loom_amdgpu_storage_layout_reference_t storage_reference = {0};
   loom_amdgpu_spill_lowering_resolve_storage_reference(context, storage,
                                                        &storage_reference);
@@ -933,16 +935,17 @@ static iree_status_t loom_amdgpu_spill_lowering_rewrite_reload(
       (uint64_t)unit_count * LOOM_AMDGPU_SCRATCH_SPILL_UNIT_BYTES;
   bool access_supported = false;
   IREE_RETURN_IF_ERROR(loom_amdgpu_spill_lowering_validate_access_range(
-      context, op, storage, &storage_reference, loom_low_reload_offset(op),
-      access_byte_length, &access_supported));
+      context, op, storage, &storage_reference,
+      loom_low_storage_transfer_offset(op), access_byte_length,
+      &access_supported));
   if (!access_supported) {
     return iree_ok_status();
   }
   loom_amdgpu_spill_recipe_t recipe = {0};
   IREE_RETURN_IF_ERROR(loom_amdgpu_spill_recipe_build(
       context->emission.descriptor_set, LOOM_AMDGPU_SPILL_RECIPE_KIND_RELOAD,
-      result_type, &storage_reference, loom_low_reload_offset(op), recipe_arena,
-      &recipe));
+      result_type, &storage_reference, loom_low_storage_transfer_offset(op),
+      recipe_arena, &recipe));
 
   loom_builder_set_before(&rewriter->builder, op);
   const loom_value_id_t value_checkpoint =
@@ -978,7 +981,7 @@ static iree_status_t loom_amdgpu_spill_lowering_collect_ops(
   loom_op_t* op = NULL;
   loom_region_for_each_block(body, block) {
     loom_block_for_each_op(block, op) {
-      if (!loom_low_spill_isa(op) && !loom_low_reload_isa(op)) {
+      if (!loom_low_storage_store_isa(op) && !loom_low_storage_load_isa(op)) {
         continue;
       }
       const iree_host_size_t minimum_capacity = *out_op_count + 1;
@@ -1081,10 +1084,10 @@ iree_status_t loom_amdgpu_lower_spill_traffic(
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < op_count && iree_status_is_ok(status); ++i) {
     iree_arena_reset(&recipe_arena);
-    if (loom_low_spill_isa(ops[i])) {
+    if (loom_low_storage_store_isa(ops[i])) {
       status = loom_amdgpu_spill_lowering_rewrite_spill(&context, &rewriter,
                                                         ops[i], &recipe_arena);
-    } else if (loom_low_reload_isa(ops[i])) {
+    } else if (loom_low_storage_load_isa(ops[i])) {
       status = loom_amdgpu_spill_lowering_rewrite_reload(&context, &rewriter,
                                                          ops[i], &recipe_arena);
     }

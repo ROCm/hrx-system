@@ -10,6 +10,7 @@
 #include "loom/ir/parameterized_type.h"
 #include "loom/ops/callable_effects.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/reference_type.h"
 #include "loom/verify/verify_diagnostics.h"
 
 static void loom_verify_segmented_operand_structure(
@@ -2201,6 +2202,24 @@ void loom_verify_module_type_symbol_references(loom_verify_state_t* state) {
     }
     state->type_summary.may_reference_values |=
         loom_type_may_reference_values(type);
+    if (loom_type_is_reference(type)) {
+      const loom_symbol_ref_t declaration = {
+          .symbol_id = loom_type_reference_declaration_id(type),
+      };
+      loom_string_id_t namespace_id;
+      loom_string_id_t name_id;
+      if (!loom_reference_type_declaration_key(state->module, declaration,
+                                               &namespace_id, &name_id) ||
+          namespace_id != loom_type_reference_namespace_id(type) ||
+          name_id != loom_type_reference_name_id(type)) {
+        const loom_diagnostic_param_t params[] = {
+            loom_param_string(loom_verify_symbol_name(state, declaration)),
+        };
+        loom_verify_emit_structured(state, NULL, LOOM_ERR_TYPE_022, params,
+                                    IREE_ARRAYSIZE(params));
+      }
+      continue;
+    }
     if (!loom_type_is_parameterized(type)) {
       continue;
     }

@@ -388,11 +388,23 @@ typedef enum loom_bytecode_section_kind_e {
 //         [parameter_name_id: varint]
 //         [value_kind: byte]
 //         [value_data: ...])
+//     (REFERENCE:
+//       [ownership: byte]          (0 = owning ref, 1 = borrowed ptr)
+//       [namespace_id: varint]      (external provider namespace in STRINGS)
+//       [name_id: varint]           (exact payload name in STRINGS)
+//       [declaration_name_id: varint]) (local symbol name in STRINGS)
 //
 // Parameterized type family and parameter names are stable public identities.
 // Dense descriptor pointers and declaration-order slot ordinals never
 // serialize. TYPE parameter payloads reference earlier TYPES entries so the
 // table remains topologically materializable.
+//
+// Managed reference identity is ownership plus the external namespace/name.
+// The declaration name retains readable source and dependency closure without
+// participating in equality. Both key fields must agree with the declaration's
+// symbol type contract; validation establishes this before type interning can
+// canonicalize aliases. Providers and their payload layouts are not needed to
+// read, compare, or link these types.
 
 // ==========================================================================
 // Scoped type uses
@@ -1078,6 +1090,8 @@ typedef enum loom_bytecode_type_kind_e {
   // Descriptor-backed type with stable named attribute parameter slots.
   LOOM_BYTECODE_TYPE_PARAMETERIZED = 14,
   LOOM_BYTECODE_TYPE_GROUP = 15,
+  // Ownership mode, external key, and module-local declaration name.
+  LOOM_BYTECODE_TYPE_REFERENCE = 16,
 } loom_bytecode_type_kind_t;
 
 // Encoding role byte in the TYPES section (ENCODING payload).

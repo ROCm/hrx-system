@@ -810,6 +810,36 @@ TEST_F(FactTableComputeTest, RetainsComputedResultTypeKindsUntilScopeClear) {
   }
 }
 
+TEST_F(FactTableComputeTest, TracksManagedHandleSelectionUntilScopeClear) {
+  loom_string_id_t namespace_id;
+  loom_string_id_t name_id;
+  loom_symbol_id_t declaration_id;
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module_, IREE_SV("input"), &namespace_id));
+  IREE_ASSERT_OK(
+      loom_module_intern_string(module_, IREE_SV("decoder"), &name_id));
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, name_id, &declaration_id));
+  const auto condition = DefineValue(loom_type_scalar(LOOM_SCALAR_TYPE_I1));
+  for (auto ownership :
+       {LOOM_REFERENCE_OWNERSHIP_OWNED, LOOM_REFERENCE_OWNERSHIP_BORROWED}) {
+    const auto type =
+        loom_type_reference(ownership, namespace_id, name_id, declaration_id);
+    const auto first = DefineValue(type);
+    const auto second = DefineValue(type);
+    loom_op_t* select = nullptr;
+    IREE_ASSERT_OK(loom_scf_select_build(&builder_, condition, first, second,
+                                         type, LOOM_LOCATION_UNKNOWN, &select));
+    IREE_ASSERT_OK(loom_value_fact_table_compute_op(&table_, module_, select));
+    EXPECT_TRUE(loom_value_fact_table_has_result_type_kind(
+        &table_, LOOM_TYPE_REFERENCE));
+    EXPECT_TRUE(loom_value_facts_is_unknown(
+        loom_value_fact_table_lookup(&table_, loom_scf_select_result(select))));
+    loom_value_fact_table_clear_scope(&table_);
+    EXPECT_FALSE(loom_value_fact_table_has_result_type_kind(
+        &table_, LOOM_TYPE_REFERENCE));
+  }
+}
+
 TEST_F(FactTableComputeTest, IdentityOnlyMutationReportsChangedFacts) {
   EXPECT_EQ(table_.identities.entries, nullptr);
   EXPECT_EQ(loom_value_fact_table_query_identity(&table_, inputs_[0]),

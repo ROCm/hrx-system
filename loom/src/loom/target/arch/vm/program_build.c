@@ -110,6 +110,13 @@ static iree_status_t loom_vm_signature_type(loom_type_t type,
   };
   const loom_type_t* value_type = loom_type_register_value_type(type);
   if (value_type) {
+    if (loom_type_is_reference(*value_type)) {
+      *out_kind = loom_type_reference_ownership(*value_type) ==
+                          LOOM_REFERENCE_OWNERSHIP_BORROWED
+                      ? IREE_VM_BYTECODE_SIGNATURE_KIND_PTR
+                      : IREE_VM_BYTECODE_SIGNATURE_KIND_REF;
+      return iree_ok_status();
+    }
     if (loom_type_is_buffer(*value_type) ||
         (loom_type_is_dialect(*value_type) &&
          loom_type_dialect_param_count(*value_type) == 0)) {
@@ -261,22 +268,22 @@ static iree_status_t loom_vm_program_collect(
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(plan_arena, iree_max(descriptor_count, 1),
                                 sizeof(*descriptors), (void**)&descriptors));
-  loom_low_allocation_abi_location_t* registers = NULL;
+  loom_low_allocation_abi_location_t* locations = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(plan_arena, iree_max(descriptor_count, 1),
-                                sizeof(*registers), (void**)&registers));
+                                sizeof(*locations), (void**)&locations));
   for (uint32_t i = 0; i < count; ++i) {
     functions[i].signature.fields = descriptors;
-    functions[i].signature.registers = registers;
+    functions[i].signature.locations = locations;
     functions[i].call_contract = (loom_low_call_contract_t){
-        .arguments = registers,
+        .arguments = locations,
         .argument_count = functions[i].argument_count,
-        .results = registers + functions[i].argument_count,
+        .results = locations + functions[i].argument_count,
         .result_count = functions[i].results.count,
         .clobbers = {functions[i].call_clobbers, 2},
     };
     descriptors += functions[i].argument_count + functions[i].results.count;
-    registers += functions[i].argument_count + functions[i].results.count;
+    locations += functions[i].argument_count + functions[i].results.count;
   }
   *out_program = (loom_vm_program_build_t){
       .values = functions,
@@ -315,7 +322,9 @@ static iree_status_t loom_vm_program_resolve_signatures(
       if (iree_status_is_ok(status)) {
         iree_vm_bytecode_v0_signature_row_t* row = &entry->signature.row;
         uint16_t* bank_count = NULL;
-        if (descriptors[j].kind_u16 == IREE_VM_BYTECODE_SIGNATURE_KIND_REF) {
+        const bool is_reference =
+            loom_vm_signature_kind_is_reference(descriptors[j].kind_u16);
+        if (is_reference) {
           status = loom_vm_reference_plan_bind(
               references, module, *loom_type_register_value_type(type),
               scratch_arena, &descriptors[j].type_ordinal_u16);
@@ -326,16 +335,23 @@ static iree_status_t loom_vm_program_resolve_signatures(
                            ? &row->argument_value_count_u16
                            : &row->result_value_count_u16;
         }
-        entry->signature.registers[j] = (loom_low_allocation_abi_location_t){
+        const uint16_t argument_bank_count =
+            is_reference ? row->argument_ref_count_u16
+                         : row->argument_value_count_u16;
+        const uint32_t packet_base =
+            j < entry->argument_count
+                ? 0
+                : argument_bank_count - iree_min(16, argument_bank_count);
+        entry->signature.locations[j] = (loom_low_allocation_abi_location_t){
             .location_kind =
                 *bank_count < 16
                     ? LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER
-                    : LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED,
-            .descriptor_reg_class_id =
-                descriptors[j].kind_u16 == IREE_VM_BYTECODE_SIGNATURE_KIND_REF
-                    ? VM_CORE_REG_CLASS_ID_REF
-                    : VM_CORE_REG_CLASS_ID_VALUE,
-            .location_base = *bank_count,
+                    : LOOM_LOW_ALLOCATION_LOCATION_CALL_STORAGE,
+            .descriptor_reg_class_id = is_reference
+                                           ? VM_CORE_REG_CLASS_ID_REF
+                                           : VM_CORE_REG_CLASS_ID_VALUE,
+            .location_base =
+                *bank_count < 16 ? *bank_count : packet_base + *bank_count - 16,
         };
         ++(*bank_count);
       }
@@ -365,7 +381,7 @@ static iree_status_t loom_vm_program_resolve_signatures(
       for (uint32_t j = 0; j < field_count; ++j) {
         iree_vm_bytecode_v0_signature_descriptor_row_t* field =
             &entry->signature.fields[j];
-        if (field->kind_u16 == IREE_VM_BYTECODE_SIGNATURE_KIND_REF) {
+        if (loom_vm_signature_kind_is_reference(field->kind_u16)) {
           field->type_ordinal_u16 = loom_vm_reference_plan_ordinal(
               references, field->type_ordinal_u16);
         }

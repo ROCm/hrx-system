@@ -22,9 +22,14 @@ struct loom_low_function_model_t;
 
 typedef struct loom_low_storage_transport_binding_t {
   // Function-local space projected by the target's invocation frame.
-  loom_storage_space_t space;
+  uint8_t space;
+  // The boundary transfers and clears this cell after reading all its aliases.
+  bool moves_source;
   // Descriptor class defining the cell width and ownership semantics.
   uint16_t register_class;
+  // First binding naming this same physical cell, used by parallel transport
+  // to keep all aliased reads ahead of a consuming transfer.
+  uint32_t cell_index;
   // Byte offset within |space|, including the root reservation and view.
   uint64_t byte_offset;
 } loom_low_storage_transport_binding_t;

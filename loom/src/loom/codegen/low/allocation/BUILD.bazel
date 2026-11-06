@@ -249,6 +249,7 @@ loom_cc_library(
         ":move_plan",
         ":storage",
         ":table",
+        ":unit_liveness",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/ir",
@@ -496,6 +497,7 @@ loom_cc_library(
     hdrs = ["spill_plan.h"],
     deps = [
         ":assignment",
+        ":live_range",
         ":spill_storage",
         ":table",
         "//loom/src/loom/analysis:liveness",

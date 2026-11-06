@@ -34,6 +34,7 @@ from loom.target.low_descriptors import (
     OperandAddressMapKind,
     OperandFlag,
     OperandRole,
+    OwnershipEffect,
     PhysicalRegister,
     PhysicalRegisterView,
     RegClass,
@@ -1440,6 +1441,10 @@ def validate_descriptor_operands(descriptor: Descriptor) -> DescriptorOperandLay
         if operand.role is OperandRole.OPERAND_RESULT:
             raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' uses OPERAND_RESULT; use separate result and operand rows plus an explicit constraint")
         is_result = operand.role is OperandRole.RESULT
+        if operand.ownership is not OwnershipEffect.NONE:
+            allowed = (OwnershipEffect.OWNED, OwnershipEffect.BORROWED) if is_result else (OwnershipEffect.BORROW, OwnershipEffect.RETAIN)
+            if operand.ownership not in allowed or (not is_result and not operand_role_is_packet_input(operand.role)) or OperandFlag.VARIADIC in operand.flags:
+                raise ValueError(f"descriptor '{descriptor.key}' operand '{operand.field_name}' has ownership incompatible with its SSA role")
         if is_result and seen_non_result:
             raise ValueError(f"descriptor '{descriptor.key}' has result operand '{operand.field_name}' after non-result operands")
         if is_result:

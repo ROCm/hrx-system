@@ -369,6 +369,8 @@ enum loom_operand_ownership_effect_e {
   LOOM_OPERAND_OWNERSHIP_DISCARD = 5,
   // Operand resource escapes to an untracked owner.
   LOOM_OPERAND_OWNERSHIP_ESCAPE = 6,
+  // Transfers the exact owned or borrowed state and invalidates the source.
+  LOOM_OPERAND_OWNERSHIP_MOVE = 7,
 };
 typedef uint8_t loom_operand_ownership_effect_t;
 
@@ -388,6 +390,10 @@ enum loom_result_ownership_effect_e {
   LOOM_RESULT_OWNERSHIP_TIED = 5,
   // Result receives the exact ownership state of a consumed operand.
   LOOM_RESULT_OWNERSHIP_MOVED = 6,
+  // Result duplicates the source ownership state without consuming it. An
+  // owned source creates an independent owner; a borrowed source stays
+  // borrowed.
+  LOOM_RESULT_OWNERSHIP_COPIED = 7,
 };
 typedef uint8_t loom_result_ownership_effect_t;
 
@@ -577,12 +583,19 @@ typedef struct loom_symbol_definition_descriptor_t {
   // Operand field index plus one containing a kernel workload signature, or 0
   // when the signature is stored in a region or the symbol is not a kernel.
   uint8_t kernel_workload_operand_field_index_plus_one;
+  // External managed-payload identity, absent when both indices are zero.
+  struct {
+    // Attribute index plus one for the provider namespace string.
+    uint8_t namespace_attr_index_plus_one;
+    // Attribute index plus one for the provider's exact payload name string.
+    uint8_t name_attr_index_plus_one;
+  } type_contract;
   // Optional domain that computes typed facts for symbols defined by this op.
   const loom_symbol_fact_domain_t* fact_domain;
 } loom_symbol_definition_descriptor_t;
 
 static_assert(sizeof(loom_symbol_definition_descriptor_t) ==
-                  (IREE_PTR_SIZE == 8 ? 32 : 24),
+                  (IREE_PTR_SIZE == 8 ? 40 : 28),
               "loom_symbol_definition_descriptor_t must remain compact");
 
 static inline iree_string_view_t loom_symbol_definition_descriptor_name(
@@ -1010,6 +1023,14 @@ loom_inline_policy_t loom_call_like_inline_policy(loom_call_like_t call);
 // Returns the semantic class of the call-like op.
 loom_call_like_kind_t loom_call_like_kind(loom_call_like_t call);
 
+// Returns true for calls that transfer runtime arguments and results, rather
+// than requests for compile-time expansion.
+static inline bool loom_call_like_kind_is_runtime(loom_call_like_kind_t kind) {
+  return kind == LOOM_CALL_LIKE_KIND_SEMANTIC ||
+         kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL ||
+         kind == LOOM_CALL_LIKE_KIND_LOW_INVOKE;
+}
+
 //===----------------------------------------------------------------------===//
 // FuncLike interface helpers
 //===----------------------------------------------------------------------===//
@@ -1341,6 +1362,8 @@ static inline bool loom_direct_branch_can_rebuild_payload(const loom_op_t* op) {
 // Generation proves that the complete operand and result lists are equally
 // sized positional tuples whose result types remap source-tuple references to
 // the corresponding result identities.
+// Each result copies the source ownership state without consuming it: an owner
+// creates an independent owner, while a borrow remains borrowed.
 bool loom_value_duplication_isa(const loom_module_t* module,
                                 const loom_op_t* op);
 

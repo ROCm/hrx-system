@@ -91,7 +91,7 @@ struct loom_verify_consumption_t {
   uint32_t region_count;
   // Total number of blocks covered by retained regions.
   uint32_t block_count;
-  // Tied and moved consumption occurrences, sorted by canonical owner.
+  // Ownership-transfer occurrences, sorted by canonical owner.
   loom_segmented_storage_t events;
   // Number of recorded occurrences.
   iree_host_size_t event_count;
@@ -608,10 +608,31 @@ static iree_status_t loom_verify_consumption_check_owner(
     loom_verify_consumption_region_t* region =
         loom_verify_consumption_region(consumption, event->region_index);
     const loom_op_t* op = loom_use_user_op(event->use);
-    loom_verify_consumption_seed(
-        loom_verify_consumption_block(consumption, region,
-                                      op->parent_block->region_index, owner),
-        op, event->use);
+    loom_verify_consumption_block_t* block = loom_verify_consumption_block(
+        consumption, region, op->parent_block->region_index, owner);
+    if (block->consumption_anchor == op &&
+        loom_use_operand_index(block->consumption) !=
+            loom_use_operand_index(event->use)) {
+      const uint16_t first_index = loom_use_operand_index(block->consumption);
+      const uint16_t second_index = loom_use_operand_index(event->use);
+      loom_diagnostic_param_t params[] = {
+          loom_param_with_field_ref(
+              loom_param_u32(first_index),
+              loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND,
+                                        first_index)),
+          loom_param_with_field_ref(
+              loom_param_u32(second_index),
+              loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND,
+                                        second_index)),
+          loom_param_string(
+              loom_op_vtable_name(loom_verify_lookup_vtable(state, op->kind))),
+          loom_param_string(loom_verify_value_name(state, owner)),
+      };
+      loom_verify_emit_structured(state, op, LOOM_ERR_DOMINANCE_019, params,
+                                  IREE_ARRAYSIZE(params));
+      return iree_ok_status();
+    }
+    loom_verify_consumption_seed(block, op, event->use);
   }
   uint32_t member = owner + 1;
   while (member) {

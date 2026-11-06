@@ -1,0 +1,90 @@
+// A borrowed copy retains the source mode; it creates no explicit owner.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @borrowed(%source: reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>) asm {
+  %copy = copy %source : reg<vm.ref : ptr<@Object>> -> reg<vm.ref : ptr<@Object>>
+  return %copy
+}
+
+// ====
+// Copying an owner leaves two independent obligations.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @owners(%source: reg<vm.ref : ref<@Object>>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ref<@Object>>) asm {
+  %copy = copy %source : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  return %copy, %source
+}
+
+// ====
+// Returning the copy cannot silently consume its original owner.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @leaked_source(%source: reg<vm.ref : ref<@Object>>) -> (reg<vm.ref : ref<@Object>>) asm {
+  %copy = copy %source : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="source"}
+  return %copy
+}
+
+// ====
+// The second owner must also be consumed even when its value is unused.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @leaked_copy(%source: reg<vm.ref : ref<@Object>>) -> (reg<vm.ref : ref<@Object>>) asm {
+  %copy = copy %source : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="copy"}
+  return %source
+}
+
+// ====
+// A consuming call ends the original owner's lifetime before a later copy.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.decl import(native, "consume", module = "provider") target<vm.core> abi(vm_function) @consume(%owner: reg<vm.ref : ref<@Object>>)
+
+low.func.def target<vm.core> abi(vm_function) @copy_consumed(%source: reg<vm.ref : ref<@Object>>) -> (reg<vm.ref : ref<@Object>>) asm {
+  low.func.call @consume(%source) : (reg<vm.ref : ref<@Object>>)
+  // ERROR@+1: DOMINANCE/002 {value_name="source"}
+  %copy = copy %source : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  return %copy
+}
+
+// ====
+// Ordinary copies do not turn numeric values into owned resources.
+// RUN: pass ownership-lifetime
+low.func.def target<test.low.core> @numeric(%source: reg<test.i32 : i32>) asm {
+  %copy = copy %source : reg<test.i32 : i32> -> reg<test.i32 : i32>
+  return
+}
+
+// ====
+// Closed-tuple duplication preserves each input's borrowed mode.
+// RUN: pass ownership-lifetime
+func.def @borrowed_buffers(%first: buffer, %second: buffer) -> (buffer, buffer) {
+  %first_copy = buffer.duplicate %first : buffer
+  %second_copy = buffer.duplicate %second : buffer
+  func.return %second_copy, %first_copy : buffer, buffer
+}
+
+// ====
+// A complete dynamic tuple carries both its dimension and borrowed view.
+// RUN: pass ownership-lifetime
+func.def @borrowed_view(%size: index, %input: view<[%size]xi32>) {
+  %size_copy, %view_copy = view.duplicate %size, %input : index, view<[%size_copy]xi32>
+  func.return
+}
+
+// ====
+// Borrowed duplication does not force ownership-neutral structured helpers
+// through CFG lowering merely because they produce another handle identity.
+// RUN: pass ownership-lifetime
+func.def @structured_borrow(%condition: i1, %input: buffer) {
+  scf.if %condition {
+    %copy = buffer.duplicate %input : buffer
+  }
+  func.return
+}

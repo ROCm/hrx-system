@@ -79,6 +79,11 @@ enum loom_low_placement_relation_flag_bits_e {
   // This concat part must be materialized at the concat's program point.
   // Other parts are transported directly by their decomposed edge reads.
   LOOM_LOW_PLACEMENT_RELATION_FLAG_MATERIALIZE_PART = 1u << 6,
+  // Copy and forwarding endpoints carry independently consumable states even
+  // when their payload bits match. Overlapping lifetimes cannot share a
+  // physical carrier, and this relation does not establish transitive content
+  // identity. Nonoverlapping lifetimes may still coalesce.
+  LOOM_LOW_PLACEMENT_RELATION_FLAG_INDEPENDENT_LIFETIMES = 1u << 7,
 };
 
 // Bitset of loom_low_placement_relation_flag_bits_e values.

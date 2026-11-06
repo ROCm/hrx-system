@@ -115,11 +115,13 @@ loom_low_allocation_move_plan_next_operation(
 // Appends transport for demanded destination units to the raw parallel group.
 // Empty destination lifetimes own no storage and must not be written. The
 // retained unit lifetimes include demand inherited through required aliases.
+// |consume_source| retires the source carrier after the parallel group's final
+// read. Reference classes preserve that obligation in consuming move rows.
 void loom_low_allocation_move_plan_append_assignment(
     loom_low_allocation_move_plan_t* plan,
     const loom_low_allocation_assignment_t* source, uint32_t source_unit_offset,
     const loom_low_allocation_assignment_t* destination,
-    uint32_t destination_unit_offset, uint32_t unit_count,
+    uint32_t destination_unit_offset, uint32_t unit_count, bool consume_source,
     iree_host_size_t* inout_raw_move_count);
 
 // Sequences |raw_move_count| rows from the reusable raw storage and appends

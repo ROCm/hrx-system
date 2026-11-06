@@ -374,6 +374,7 @@ loom_cc_library(
         "//loom/src/loom/ops/template",
         "//loom/src/loom/ops/tensor",
         "//loom/src/loom/ops/tile",
+        "//loom/src/loom/ops/type",
         "//loom/src/loom/ops/vector",
         "//loom/src/loom/ops/view",
         "//runtime/src/iree/base",
@@ -396,12 +397,24 @@ loom_cc_library(
 )
 
 loom_cc_instance_library(
-    name = "type_builders",
+    name = "core_type_builders",
     srcs = ["type_builders.c"],
     hdrs = ["type_builders.h"],
     deps = [
+        ":reference_type",
         "//loom/src/loom/ir:builders",
         "//loom/src/loom/util:bstring",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "reference_type",
+    srcs = ["reference_type.c"],
+    hdrs = ["reference_type.h"],
+    deps = [
+        ":headers",
+        "//loom/src/loom/ir:builders",
         "//runtime/src/iree/base",
     ],
 )
@@ -417,9 +430,9 @@ loom_cc_library(
         "type_registry_tables.h",
     ],
     deps = [
+        ":core_type_builders",
         ":op_defs",
         ":storage_facts",
-        ":type_builders",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/buffer",
         "//loom/src/loom/ops/encoding",
@@ -431,10 +444,26 @@ loom_cc_library(
 )
 
 loom_cc_test(
+    name = "reference_type_test",
+    srcs = ["reference_type_test.cc"],
+    deps = [
+        ":core_type_builders",
+        ":reference_type",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/type",
+        "//loom/src/loom/testing:diagnostic_matchers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
     name = "type_builders_test",
     srcs = ["type_builders_test.cc"],
     deps = [
-        ":type_builders",
+        ":core_type_builders",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -499,6 +528,7 @@ _DIALECTS = [
     "target",
     "template",
     "test",
+    "type",
     "vector",
     "view",
 ]
@@ -569,7 +599,7 @@ loom_cc_library_group(
     testonly = True,
     visibility = ["//visibility:private"],
     deps = [
-        ":type_builders",
+        ":core_type_builders",
         "//loom/src/loom/pass:builder",
     ] + [
         "//loom/src/loom/ops/%s:builders" % dialect

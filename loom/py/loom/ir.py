@@ -68,6 +68,8 @@ __all__ = [
     "BUFFER_TYPE",
     "StorageSpace",
     "StorageType",
+    "ReferenceOwnership",
+    "ReferenceType",
     "PoolType",
     "GroupType",
     "FunctionType",
@@ -221,7 +223,8 @@ class TypeKind(IntEnum):
     STORAGE = 13
     PARAMETERIZED = 14
     GROUP = 15
-    PLACEHOLDER = 16
+    REFERENCE = 16
+    PLACEHOLDER = 17
 
 
 # ============================================================================
@@ -449,6 +452,46 @@ class StorageType:
     @property
     def type_kind(self) -> TypeKind:
         return TypeKind.STORAGE
+
+    def __repr__(self) -> str:
+        from loom.format.text.printer import print_type
+
+        return print_type(self)
+
+
+class ReferenceOwnership(IntEnum):
+    """Logical ownership, independent of runtime carrier protection."""
+
+    OWNED = 0
+    BORROWED = 1
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceType:
+    """Resolved nullable managed handle, with a non-identity source binding."""
+
+    # Owning or borrowed mode participates in exact type equality.
+    ownership: ReferenceOwnership
+    # External provider namespace; no provider code is needed to interpret it.
+    namespace: str
+    # Exact payload name within the namespace.
+    name: str
+    # Printable local binding; aliases do not change semantic identity.
+    declaration: SymbolName = field(compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "ownership", ReferenceOwnership(self.ownership))
+        if not isinstance(self.declaration, str) or not self.declaration:
+            raise ValueError("managed handle declaration must be a symbol name")
+        object.__setattr__(self, "declaration", SymbolName(self.declaration))
+        for name in (self.namespace, self.name):
+            if not isinstance(name, str) or not name or "\0" in name:
+                raise ValueError("managed type names must be nonempty NUL-free UTF-8")
+            name.encode("utf-8")
+
+    @property
+    def type_kind(self) -> TypeKind:
+        return TypeKind.REFERENCE
 
     def __repr__(self) -> str:
         from loom.format.text.printer import print_type
@@ -748,6 +791,7 @@ type Type = (
     | ShapedType
     | BufferType
     | StorageType
+    | ReferenceType
     | FunctionType
     | RegisterType
     | DialectType
@@ -2183,6 +2227,8 @@ class Symbol:
     op: Operation | None = None
     source_module: str = ""
     source_symbol: str = ""
+    # External payload key established by the defining operation's schema.
+    type_key: tuple[str, str] | None = None
     uses: list[tuple[int, int, int]] = field(default_factory=list)
 
     @property
@@ -2235,7 +2281,20 @@ def symbol_from_operation(operation: Operation, op_decl: Any | None = None) -> S
     if source_module:
         symbol_flags |= SYMBOL_FLAG_IMPORT
 
+    type_key = None
+    if symbol_def.type_contract is not None:
+        contract = symbol_def.type_contract
+        type_key = (
+            operation.attributes[contract.namespace],
+            operation.attributes[contract.name],
+        )
+        for key_part in type_key:
+            if not isinstance(key_part, str) or not key_part or "\0" in key_part:
+                raise ValueError("managed type names must be nonempty NUL-free UTF-8")
+            key_part.encode("utf-8")
+
     return Symbol(
+        type_key=type_key,
         name=operation.attributes.get(name_attr, ""),
         kind=kind,
         flags=symbol_flags,
@@ -2378,6 +2437,10 @@ class Module:
     locations: LocationTable = field(default_factory=LocationTable)
     values: list[Value] = field(default_factory=list)
     symbols: list[Symbol] = field(default_factory=list)
+    # Resolved external identities indexed at declaration publication.
+    type_declarations: dict[str, tuple[str, str]] = field(
+        default_factory=dict, init=False
+    )
     encodings: list[EncodingInstance] = field(default_factory=list)
 
     # Single module-scope block owning every top-level operation.
@@ -2386,6 +2449,13 @@ class Module:
     # Source table is on the context, but for standalone modules
     # we keep a local source list.
     sources: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.type_declarations = {
+            symbol.name: symbol.type_key
+            for symbol in self.symbols
+            if symbol.type_key is not None
+        }
 
     def add_value(self, value: Value) -> int:
         """Add a value to the module, returning its ID."""
@@ -2430,9 +2500,23 @@ class Module:
         """Add a symbol and its defining operation, returning its ID."""
         sym_id = len(self.symbols)
         self.symbols.append(symbol)
+        if symbol.type_key is not None:
+            self.type_declarations[symbol.name] = symbol.type_key
         if symbol.op is not None:
             self.body.ops.append(symbol.op)
         return sym_id
+
+    def reference_type(
+        self, ownership: ReferenceOwnership, declaration: SymbolName
+    ) -> ReferenceType:
+        """Construct a handle from an already published payload declaration."""
+        key = self.type_declarations.get(declaration)
+        if key is None:
+            raise ValueError(
+                f"'@{declaration}' must name a preceding managed type declaration"
+            )
+        value = ReferenceType(ownership, *key, SymbolName(declaration))
+        return self.types.get(self.types.intern(value))
 
     def add_top_level_operation(self, operation: Operation) -> int:
         """Add a non-symbol module-scope operation, returning its ordinal."""

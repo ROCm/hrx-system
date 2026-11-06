@@ -82,6 +82,25 @@ for fixed-width and floating-point values:
 The generated [type reference](../reference/types/index.md) is the complete
 catalog of scalar and aggregate forms.
 
+## Opaque objects have explicit handle ownership
+
+Runtime-provided payloads use a symbolic declaration and typed managed handles:
+
+```loom
+type.decl import("images", "frame") @Frame
+```
+
+`ref<@Frame>` owns a reference; `ptr<@Frame>` borrows the payload. Neither type
+exposes a raw address or native field layout. Passing an owning handle transfers
+its owner, while a borrowed call preserves the caller's handle. The exact
+external namespace, payload name, and ownership mode determine type equality;
+the local declaration name supplies a readable spelling.
+
+[Runtime-provided objects](../integration/runtime-objects.md) follows these
+types through native function imports, saved-pointer protection, explicit
+source-owner lifetimes, and VM execution. Buffer and view types continue to own
+the separate contracts for memory storage and access.
+
 ## Cross address boundaries explicitly
 
 [`index.scale`](../reference/dialects/index/ops/scale.md) is the ordinary

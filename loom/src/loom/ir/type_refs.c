@@ -325,6 +325,8 @@ bool loom_type_equal_after_value_remap(const loom_module_t* module,
   }
 
   switch (source_kind) {
+    case LOOM_TYPE_REFERENCE:
+      return loom_type_equal(source_type, target_type);
     case LOOM_TYPE_FUNCTION: {
       if (source_type.header != target_type.header ||
           source_type.encoding_id != target_type.encoding_id ||

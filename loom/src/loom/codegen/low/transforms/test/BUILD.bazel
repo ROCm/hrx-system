@@ -19,6 +19,7 @@ loom_check_test_suite(
         "allocation_materialization.loom-test",
         "allocation_storage_prefix.loom-test",
         "attr_projection.loom-test",
+        "borrow_lifetime.loom-test",
         "cfg_tuple_decomposition.loom-test",
         "constant_reconstruction.loom-test",
         "copy_rematerialization.loom-test",

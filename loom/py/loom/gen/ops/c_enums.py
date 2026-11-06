@@ -85,6 +85,7 @@ OPERAND_OWNERSHIP_EFFECT_MAP: dict[OperandOwnershipEffectKind, str] = {
     OperandOwnershipEffectKind.RELEASE: "LOOM_OPERAND_OWNERSHIP_RELEASE",
     OperandOwnershipEffectKind.DISCARD: "LOOM_OPERAND_OWNERSHIP_DISCARD",
     OperandOwnershipEffectKind.ESCAPE: "LOOM_OPERAND_OWNERSHIP_ESCAPE",
+    OperandOwnershipEffectKind.MOVE: "LOOM_OPERAND_OWNERSHIP_MOVE",
 }
 
 OPERAND_ROLE_MAP: dict[OperandRole, str] = {
@@ -114,6 +115,7 @@ RESULT_OWNERSHIP_EFFECT_MAP: dict[ResultOwnershipEffectKind, str] = {
     ResultOwnershipEffectKind.RETAINED: "LOOM_RESULT_OWNERSHIP_RETAINED",
     ResultOwnershipEffectKind.ALIAS: "LOOM_RESULT_OWNERSHIP_ALIAS",
     ResultOwnershipEffectKind.MOVED: "LOOM_RESULT_OWNERSHIP_MOVED",
+    ResultOwnershipEffectKind.COPIED: "LOOM_RESULT_OWNERSHIP_COPIED",
 }
 
 _ERROR_REF_CODE_BITS = 10

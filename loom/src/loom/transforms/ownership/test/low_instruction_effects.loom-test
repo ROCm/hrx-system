@@ -1,0 +1,56 @@
+// The VM ref.select instruction acquires an independent owner. Releasing
+// its two inputs cannot discharge that result's normal-exit obligation.
+// RUN: pass dce,ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def public target<vm.core> @select_owner(%condition: reg<vm.value : i1>, %left: reg<vm.ref : ref<@Object>>, %right: reg<vm.ref : ref<@Object>>) asm {
+  %selected = ref.select %condition, %left, %right : reg<vm.ref : ref<@Object>>
+  low.release %left : reg<vm.ref : ref<@Object>>
+  low.release %right : reg<vm.ref : ref<@Object>>
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="selected"}
+  return
+}
+
+// ====
+// Selection retains one owner; consuming the result leaves both inputs alive.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @release_selection(%condition: reg<vm.value : i1>, %left: reg<vm.ref : ref<@Object>>, %right: reg<vm.ref : ref<@Object>>) asm {
+  %selected = ref.select %condition, %left, %right : reg<vm.ref : ref<@Object>>
+  low.release %selected : reg<vm.ref : ref<@Object>>
+  low.release %left : reg<vm.ref : ref<@Object>>
+  low.release %right : reg<vm.ref : ref<@Object>>
+  return
+}
+
+// ====
+// Releasing only the selected owner does not consume the original argument.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @retained_input(%condition: reg<vm.value : i1>, %owner: reg<vm.ref : ref<@Object>>) asm {
+  %selected = ref.select %condition, %owner, %owner : reg<vm.ref : ref<@Object>>
+  low.release %selected : reg<vm.ref : ref<@Object>>
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="owner"}
+  return
+}
+
+// ====
+// Module data remains borrowed and creates no owner to drop.
+// RUN: pass ownership-lifetime
+global.rodata.def @data = bytes("abcd")
+
+low.func.def target<vm.core> @module_storage() asm {
+  %storage = buffer.rodata.load @data : reg<vm.ref : buffer>
+  return
+}
+
+// ====
+// An allocation is a new obligation even if it has no consumers.
+// RUN: pass ownership-lifetime
+low.func.def target<vm.core> @allocation(%length: reg<vm.value : i64>) asm {
+  %storage = buffer.allocate %length, 0 : reg<vm.ref : buffer>
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="storage"}
+  return
+}

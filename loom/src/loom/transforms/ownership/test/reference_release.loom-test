@@ -1,0 +1,41 @@
+// Each explicit owner release discharges precisely one source obligation.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @owners(%owner: reg<vm.ref : ref<@Object>>) asm {
+  %copy = copy %owner : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  low.release %copy : reg<vm.ref : ref<@Object>>
+  return
+}
+
+// ====
+// Ending a borrowed parameter's local carrier preserves the borrowed ABI:
+// the caller may still use its own pointer after the helper returns.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @drop(%pointer: reg<vm.ref : ptr<@Object>>) asm {
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  return
+}
+
+low.func.def target<vm.core> @caller(%pointer: reg<vm.ref : ptr<@Object>>) -> (reg<vm.ref : ptr<@Object>>) asm {
+  low.func.call @drop(%pointer) : (reg<vm.ref : ptr<@Object>>)
+  return %pointer
+}
+
+// ====
+// One branch's release cannot hide an owner leaked on the other branch.
+// RUN: pass ownership-lifetime
+type.decl import("provider", "object") @Object
+
+low.func.def target<vm.core> @leak(%condition: reg<vm.value : i1>, %owner: reg<vm.ref : ref<@Object>>) asm {
+  low.cond_br %condition, ^release, ^leak : reg<vm.value : i1>
+^release:
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  return
+^leak:
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="owner"}
+  return
+}

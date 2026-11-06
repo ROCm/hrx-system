@@ -1204,6 +1204,14 @@ def generate_tables_c(
                 lines.append(f"    .kernel_workload_region_index_plus_one = {kernel_region_index + 1},")
             if kernel_operand_index is not None:
                 lines.append(f"    .kernel_workload_operand_field_index_plus_one = {kernel_operand_index + 1},")
+            if op.symbol_def.type_contract is not None:
+                contract = op.symbol_def.type_contract
+                namespace_index = c_queries.resolve_attr_index(op, contract.namespace, "type namespace")
+                name_index = c_queries.resolve_attr_index(op, contract.name, "type name")
+                lines.append("    .type_contract = {")
+                lines.append(f"        .namespace_attr_index_plus_one = {namespace_index + 1},")
+                lines.append(f"        .name_attr_index_plus_one = {name_index + 1},")
+                lines.append("    },")
             if fact_domain:
                 lines.append(f"    .fact_domain = &{fact_domain},")
             lines.append("};")

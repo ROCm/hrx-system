@@ -133,7 +133,8 @@ void loom_runtime_program_free(loom_runtime_program_t* program);
 // name and expected contract. Earlier destinations may be set if a later
 // binding fails; none may be used until the complete call succeeds. Bound
 // functions borrow program. This cold operation runs before publishing a
-// service.
+// service. Scalar and managed ref/ptr fields are supported; function-valued
+// host contracts return UNIMPLEMENTED.
 iree_status_t loom_runtime_program_bind(
     loom_runtime_program_t* program, iree_host_size_t binding_count,
     const loom_runtime_program_binding_t* bindings);

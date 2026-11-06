@@ -123,6 +123,10 @@ iree_status_t loom_low_move_sequence_scratch_initialize(
 // other cycles add one scratch-save move. Transfers retain their source
 // and destination register views; aliased views need not have the same width.
 // Scratch saves use the source view whose contents must survive the cycle.
+// Consuming reference inputs transfer only on their source's final read;
+// identities and source-preserving inputs keep that carrier live. Reference
+// cycles transfer their carriers through scratch without retaining a spare
+// owner after the group.
 // When non-NULL, |out_input_flags| reports the identity and active rows already
 // classified while preparing the move set.
 // |out_complete| is false only when the temporary resolver emitted an

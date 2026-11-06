@@ -17,6 +17,7 @@
 #include "loom/error/parameter.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/ops/low/storage.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/type_registry.h"
 #include "loom/rewrite/rewriter.h"
@@ -701,17 +702,19 @@ static iree_status_t loom_low_allocation_emit_spill_traffic(
   if (traffic_plan->emit == NULL) {
     if (traffic->kind == LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_STORE) {
       IREE_ASSERT_NE(source_value_id, LOOM_VALUE_ID_INVALID);
-      IREE_RETURN_IF_ERROR(
-          loom_low_spill_build(builder, source_value_id, storage_value_id,
-                               traffic->byte_offset, location, out_last_op));
+      IREE_RETURN_IF_ERROR((traffic->moves_source ? loom_low_spill_move_build
+                                                  : loom_low_spill_build)(
+          builder, source_value_id, storage_value_id, traffic->byte_offset,
+          location, out_last_op));
     } else {
       IREE_ASSERT_EQ(traffic->kind,
                      LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_RELOAD);
       IREE_ASSERT_EQ(source_value_id, LOOM_VALUE_ID_INVALID);
-      IREE_RETURN_IF_ERROR(
-          loom_low_reload_build(builder, storage_value_id, traffic->byte_offset,
-                                traffic->value_type, location, out_last_op));
-      out_action->value_id = loom_low_reload_result(*out_last_op);
+      IREE_RETURN_IF_ERROR((traffic->moves_source ? loom_low_reload_move_build
+                                                  : loom_low_reload_build)(
+          builder, storage_value_id, traffic->byte_offset, traffic->value_type,
+          location, out_last_op));
+      out_action->value_id = loom_low_storage_load_result(*out_last_op);
     }
     return iree_ok_status();
   }

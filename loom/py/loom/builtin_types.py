@@ -35,11 +35,13 @@ from loom.dsl import (
     EnumDef,
     ScalarParam,
     ShapeParam,
+    SymbolReference,
     TypeDef,
 )
 from loom.ir import (
     EncodingRole,
     EncodingType,
+    ReferenceOwnership,
     StorageSpace,
     StorageType,
     TypeKind,
@@ -67,6 +69,8 @@ __all__ = [
     "ChannelReadMode",
     # Storage type.
     "storage_type",
+    "ref_type",
+    "ptr_type",
 ]
 
 # ============================================================================
@@ -327,6 +331,45 @@ storage_type = TypeDef(
 # Registry
 # ============================================================================
 
+ref_type = TypeDef(
+    "ref",
+    ir_kind="reference",
+    reference_ownership=ReferenceOwnership.OWNED,
+    params=[
+        AttrDef(
+            "declaration",
+            "symbol",
+            symbol_ref=SymbolReference("managed type", ["record"]),
+        )
+    ],
+    format=[Param("declaration")],
+    doc=(
+        "Nullable owning handle to a declared opaque managed payload. "
+        "Passing or returning a ref transfers its ownership; subsequent uses "
+        "require an independently acquired owner. Every source owner must be "
+        "released or transferred on each normal execution path."
+    ),
+)
+
+ptr_type = TypeDef(
+    "ptr",
+    ir_kind="reference",
+    reference_ownership=ReferenceOwnership.BORROWED,
+    params=[
+        AttrDef(
+            "declaration",
+            "symbol",
+            symbol_ref=SymbolReference("managed type", ["record"]),
+        )
+    ],
+    format=[Param("declaration")],
+    doc=(
+        "Nullable borrowed handle to a declared opaque managed payload; "
+        "not a numerical address. Passing or returning a ptr preserves "
+        "the source ownership."
+    ),
+)
+
 ALL_BUILTIN_TYPES: tuple[TypeDef, ...] = (
     encoding_type,
     tile_type,
@@ -340,7 +383,11 @@ ALL_BUILTIN_TYPES: tuple[TypeDef, ...] = (
     read_type,
     write_type,
     storage_type,
+    ref_type,
+    ptr_type,
 )
+
+BUILTIN_REFERENCE_TYPES = (ref_type, ptr_type)
 
 # Direct Python representation class to declaration lookup for compact
 # descriptor-backed built-ins. Derived from the declarations so text formatting

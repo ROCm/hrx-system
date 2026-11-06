@@ -293,7 +293,7 @@ loom_cc_test(
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/import/cxx/source:options",
-        "//loom/src/loom/ops:type_builders",
+        "//loom/src/loom/ops:core_type_builders",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//third_party:cxx_parser",

@@ -66,12 +66,21 @@ enum iree_vm_signature_type_kind_e {
   IREE_VM_SIGNATURE_TYPE_KIND_INVALID = 0u,
   // Exact iree_vm_scalar_type_t payload.
   IREE_VM_SIGNATURE_TYPE_KIND_SCALAR = 1u,
-  // Canonical iree_vm_ref_type_t payload.
+  // Owning managed handle with a canonical iree_vm_ref_type_t payload.
   IREE_VM_SIGNATURE_TYPE_KIND_REF = 2u,
   // Borrowed module-bound iree_vm_callable_type_t payload.
   IREE_VM_SIGNATURE_TYPE_KIND_FUNCTION = 3u,
+  // Borrowed managed handle with a canonical iree_vm_ref_type_t payload.
+  IREE_VM_SIGNATURE_TYPE_KIND_PTR = 4u,
 };
 typedef uint32_t iree_vm_signature_type_kind_t;
+
+// Returns whether |kind| selects the canonical ref descriptor payload.
+static inline bool iree_vm_signature_type_kind_is_ref(
+    iree_vm_signature_type_kind_t kind) {
+  return kind == IREE_VM_SIGNATURE_TYPE_KIND_REF ||
+         kind == IREE_VM_SIGNATURE_TYPE_KIND_PTR;
+}
 
 // Resolved public reflection type.
 typedef struct iree_vm_signature_type_t {

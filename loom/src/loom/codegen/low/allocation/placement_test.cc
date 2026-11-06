@@ -570,9 +570,11 @@ class LowPlacementStorageTest : public ::testing::Test {
     iree_arena_block_pool_deinitialize(&module_pool_);
   }
 
-  void BuildChain(uint32_t relation_count, uint32_t first_tie) {
+  void BuildChain(uint32_t relation_count, uint32_t first_tie,
+                  bool reference = false) {
     first_tie_ = first_tie;
-    register_class_.alloc_unit_bits = 32;
+    register_class_.alloc_unit_bits = reference ? 128 : 32;
+    register_class_.flags = reference ? LOOM_LOW_REG_CLASS_FLAG_REFERENCE : 0;
     for (auto& operand : operands_) {
       operand.reg_class_alt_count = 1;
       operand.unit_count = 1;
@@ -795,6 +797,25 @@ class LowPlacementStorageTest : public ::testing::Test {
 class LowPlacementStorageBoundaryTest
     : public LowPlacementStorageTest,
       public ::testing::WithParamInterface<std::pair<uint32_t, uint32_t>> {};
+
+TEST_F(LowPlacementStorageTest, ReferenceForwardingPreservesCarrierLifetimes) {
+  ASSERT_NO_FATAL_FAILURE(BuildChain(3, UINT32_MAX, /*reference=*/true));
+  loom_low_placement_table_t table = {};
+  IREE_ASSERT_OK(Analyze(&table));
+  ASSERT_EQ(table.relation_count, 3u);
+  for (const auto& range :
+       {table.ranges_by_result_ordinal[1], table.ranges_by_result_ordinal[2],
+        table.ranges_by_result_ordinal[3]}) {
+    ASSERT_EQ(range.count, 1u);
+    const auto& relation = table.relations[range.start];
+    EXPECT_FALSE(loom_low_placement_relation_can_alias(&relation));
+    EXPECT_TRUE(iree_any_bit_set(
+        relation.flags,
+        LOOM_LOW_PLACEMENT_RELATION_FLAG_INDEPENDENT_LIFETIMES));
+  }
+  EXPECT_FALSE(iree_any_bit_set(
+      table.storage.flags, LOOM_LOW_PLACEMENT_STORAGE_FLAG_OPTIONAL_ALIASES));
+}
 
 TEST_P(LowPlacementStorageBoundaryTest, PreservesRelationsAndReusesPoolBlocks) {
   ASSERT_NO_FATAL_FAILURE(BuildChain(GetParam().first, GetParam().second));

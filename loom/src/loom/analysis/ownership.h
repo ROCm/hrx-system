@@ -6,9 +6,10 @@
 
 // Target-independent ownership metadata queries.
 //
-// Ownership facts are static op descriptor metadata interpreted through a
-// resource-family policy. The metadata says how operands and results transfer
-// ownership; the policy decides which concrete value types participate.
+// Ownership facts are source-op descriptors or bound instruction metadata
+// interpreted through a resource-family policy. They describe how values
+// transfer ownership; the policy decides which concrete value types
+// participate.
 
 #ifndef LOOM_ANALYSIS_OWNERSHIP_H_
 #define LOOM_ANALYSIS_OWNERSHIP_H_
@@ -23,6 +24,27 @@ extern "C" {
 
 typedef bool (*loom_ownership_type_matches_fn_t)(loom_type_t type,
                                                  void* user_data);
+
+// Optional instruction effects bound once for a verified function. The query
+// returns an operand or result ownership enum according to |is_result|. Zero
+// leaves the ordinary source descriptor in charge. Source-relative effects
+// (copy, move, tie, alias) remain structural operation metadata.
+typedef struct loom_ownership_effect_provider_t {
+  // Infallible lookup over producer-verified instruction metadata.
+  uint8_t (*query)(const loom_op_t* op, bool is_result, uint16_t index,
+                   const void* user_data);
+  // Immutable provider data borrowed for the analysis invocation.
+  const void* user_data;
+} loom_ownership_effect_provider_t;
+
+typedef struct loom_ownership_effect_resolver_t {
+  // Binds instruction semantics for a function without walking its body.
+  loom_ownership_effect_provider_t (*bind)(const loom_module_t* module,
+                                           loom_func_like_t function,
+                                           const void* user_data);
+  // Immutable resolver data borrowed for the analysis invocation.
+  const void* user_data;
+} loom_ownership_effect_resolver_t;
 
 // Managed-resource family recognized by an ownership analysis consumer.
 typedef struct loom_ownership_resource_family_t {
@@ -46,7 +68,7 @@ typedef struct loom_ownership_operand_effect_t {
   loom_operand_ownership_effect_t effect;
   // Carrier mode declared by the operand descriptor.
   loom_ownership_carrier_t carrier;
-  // Borrowed descriptor that supplied the ownership metadata.
+  // Borrowed source descriptor, or NULL for provider-supplied effects.
   const loom_operand_descriptor_t* descriptor;
 } loom_ownership_operand_effect_t;
 
@@ -62,7 +84,7 @@ typedef struct loom_ownership_result_effect_t {
   loom_value_id_t value_id;
   // Ownership action declared by the result descriptor.
   loom_result_ownership_effect_t effect;
-  // Borrowed descriptor that supplied the ownership metadata.
+  // Borrowed source descriptor, or NULL for provider-supplied effects.
   const loom_result_descriptor_t* descriptor;
 } loom_ownership_result_effect_t;
 
@@ -78,14 +100,16 @@ bool loom_ownership_value_matches(
 // Resolves ownership metadata for one operand value. Returns false when the
 // operand has no ownership effect or the index is outside the op's operands.
 bool loom_ownership_operand_effect_at(
-    const loom_module_t* module, const loom_op_t* op, uint16_t operand_index,
-    loom_ownership_operand_effect_t* out_effect);
+    const loom_module_t* module,
+    const loom_ownership_effect_provider_t* provider, const loom_op_t* op,
+    uint16_t operand_index, loom_ownership_operand_effect_t* out_effect);
 
 // Resolves ownership metadata for one result value. Returns false when the
 // result has no ownership effect or the index is outside the op's results.
 bool loom_ownership_result_effect_at(
-    const loom_module_t* module, const loom_op_t* op, uint16_t result_index,
-    loom_ownership_result_effect_t* out_effect);
+    const loom_module_t* module,
+    const loom_ownership_effect_provider_t* provider, const loom_op_t* op,
+    uint16_t result_index, loom_ownership_result_effect_t* out_effect);
 
 #ifdef __cplusplus
 }  // extern "C"

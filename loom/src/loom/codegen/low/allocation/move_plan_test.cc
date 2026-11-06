@@ -183,7 +183,8 @@ TEST_F(LowAllocationMovePlanTest, AppendsOnlyDemandedAssignmentUnits) {
           SCOPED_TRACE(count);
           iree_host_size_t move_count = 0;
           loom_low_allocation_move_plan_append_assignment(
-              &plan, &source, first, &destination, first, count, &move_count);
+              &plan, &source, first, &destination, first, count,
+              /*consume_source=*/false, &move_count);
           iree_host_size_t expected_count = 0;
           for (uint32_t unit = first; unit < first + count; ++unit) {
             if (!(demanded_units & (1u << unit))) {

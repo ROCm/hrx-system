@@ -55,6 +55,21 @@ typedef struct loom_bytecode_type_fact_t {
   loom_type_kind_t kind;
 } loom_bytecode_type_fact_t;
 
+// Resolved payload identity with a source-local declaration name. SYMBOLS
+// validation proves agreement before either reader interns the type.
+typedef struct loom_bytecode_reference_type_fact_t {
+  // Common sparse type-fact header.
+  loom_bytecode_type_fact_t base;
+  // STRINGS identity of the external provider namespace.
+  loom_string_id_t namespace_id;
+  // STRINGS identity of the exact payload name within the provider namespace.
+  loom_string_id_t name_id;
+  // STRINGS identity of the module-local declaration name.
+  loom_string_id_t declaration_name_id;
+  // Declared owning or borrowed handle mode.
+  loom_reference_ownership_t ownership;
+} loom_bytecode_reference_type_fact_t;
+
 // Native prefix and type-reference facts for a structural payload. The prefix
 // contains the function signature header, the two register carrier words, or
 // zeros for dialect types. Canonical construction copies the parent metadata

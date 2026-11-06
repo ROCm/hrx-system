@@ -1,0 +1,9 @@
+vm.target<core> @vm
+
+type.decl import("provider", "object") @Object
+
+low.func.def public target<vm.core>(@vm) abi(vm_function) @run(%condition: reg<vm.value : i1>, %owner: reg<vm.ref : ref<@Object>>) asm {
+  %selected = ref.select %condition, %owner, %owner : reg<vm.ref : ref<@Object>>
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  return
+}

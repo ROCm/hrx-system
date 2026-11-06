@@ -1192,6 +1192,16 @@ static iree_status_t loom_module_mark_symbol_references_in_types(
     const loom_module_t* module, uint8_t* referenced_symbols) {
   for (iree_host_size_t i = 0; i < module->types.count; ++i) {
     loom_type_t type = loom_type_table_get(&module->types, i);
+    if (loom_type_is_reference(type)) {
+      const loom_symbol_ref_t declaration = {
+          .module_id = 0,
+          .symbol_id = loom_type_reference_declaration_id(type),
+      };
+      const loom_attribute_t binding = loom_attr_symbol(declaration);
+      IREE_RETURN_IF_ERROR(loom_module_mark_symbol_references_in_attr(
+          module, &binding, referenced_symbols, 0));
+      continue;
+    }
     if (!loom_type_is_parameterized(type)) {
       continue;
     }
@@ -1555,7 +1565,7 @@ iree_status_t loom_module_compact_symbols_preserving_symbol_refs(
 
   IREE_RETURN_IF_ERROR(
       loom_module_mark_symbol_references_in_types(module, referenced_symbols));
-  // Parameterized types are immutable entries in the module type interner. A
+  // Symbol-bearing types are immutable entries in the module type interner. A
   // preserved ordinal prefix keeps their symbol slots valid without rebuilding
   // that interner during symbol compaction.
   for (iree_host_size_t i = 0; i < old_symbol_count; ++i) {

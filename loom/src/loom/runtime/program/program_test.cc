@@ -16,6 +16,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
+#include "iree/vm/module_test_util.h"
 #include "iree/vm/sync.h"
 #include "loom/model/card.h"
 #include "loom/runtime/program/input.h"
@@ -29,10 +30,14 @@ namespace {
 
 using iree::testing::status::StatusIs;
 
-void ExpectInvalidContract(iree_status_t raw_status, const char* message) {
+void ExpectInvalidContract(iree_status_t raw_status, const char* message,
+                           const char* detail = nullptr) {
   const iree::Status status(std::move(raw_status));
   EXPECT_THAT(status, StatusIs(iree::StatusCode::kInvalidArgument));
   EXPECT_THAT(status.ToString(), ::testing::HasSubstr(message));
+  if (detail) {
+    EXPECT_THAT(status.ToString(), ::testing::HasSubstr(detail));
+  }
 }
 
 iree_vm_signature_type_t Scalar(iree_vm_scalar_type_t type) {
@@ -303,18 +308,84 @@ TEST_F(ProgramTest, ReferenceIdentityIncludesNamespaceAndFieldOrder) {
   const iree_vm_signature_type_t swapped[] = {types[1], types[0]};
   ExpectInvalidContract(
       Bind(IREE_SV("references"), {swapped, 2}, {types, 2}),
-      "model export 'references' argument 0 type mismatch: host "
-      "expects hal.buffer, source declares vm.buffer");
+      "model export 'references' argument 0 type mismatch",
+      "host expects ref<hal.buffer>, source declares ref<vm.buffer>");
   ExpectInvalidContract(
       Bind(IREE_SV("references"), {types, 2}, {swapped, 2}),
-      "model export 'references' result 0 type mismatch: host expects "
-      "hal.buffer, source declares vm.buffer");
+      "model export 'references' result 0 type mismatch",
+      "host expects ref<hal.buffer>, source declares ref<vm.buffer>");
   const iree_vm_signature_type_t scalar[] = {Scalar(IREE_VM_SCALAR_TYPE_I64),
                                              types[1]};
-  ExpectInvalidContract(
-      Bind(IREE_SV("references"), {scalar, 2}, {types, 2}),
-      "model export 'references' argument 0 type mismatch: host "
-      "expects i64, source declares vm.buffer");
+  ExpectInvalidContract(Bind(IREE_SV("references"), {scalar, 2}, {types, 2}),
+                        "model export 'references' argument 0 type mismatch",
+                        "host expects i64, source declares ref<vm.buffer>");
+}
+
+TEST(ProgramBindingTest, PreservesDeclaredReferenceMode) {
+  using iree::vm::testing::TableModule;
+  using iree::vm::testing::TableModuleDefinition;
+  iree_vm_environment_t* environment = nullptr;
+  IREE_ASSERT_OK(
+      iree_vm_environment_allocate(iree_allocator_system(), &environment));
+  std::unique_ptr<iree_vm_environment_t, decltype(&iree_vm_environment_free)>
+      environment_owner(environment, iree_vm_environment_free);
+  iree_vm_ref_types_t types = {};
+  IREE_ASSERT_OK(iree_vm_ref_types_resolve(
+      iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
+      &types));
+  const iree_vm_ref_type_t ref_types[] = {types.buffer};
+  const iree_vm_module_signature_type_t fields[] = {
+      {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+      {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 0},
+  };
+  const iree_vm_module_callable_type_declaration_t callables[] = {
+      {{{fields, 1, 0, 1, 0}, {fields, 1, 0, 1, 0}}, 0, 0, 0},
+      {{{fields + 1, 1, 0, 1, 0}, {fields + 1, 1, 0, 1, 0}}, 0, 0, 0},
+  };
+  const iree_vm_module_export_declaration_t exports[] = {
+      {IREE_SV("borrow"), 1, 1, 0}, {IREE_SV("owned"), 0, 0, 0}};
+  TableModule module;
+  IREE_ASSERT_OK(module.Publish(TableModuleDefinition(IREE_SV("test"), 2)
+                                    .WithRefTypes(ref_types)
+                                    .WithCallableTypes(callables)
+                                    .WithExports(exports)));
+  loom_runtime_program_t* program = nullptr;
+  IREE_ASSERT_OK(loom_runtime_program_link(module.module(), {},
+                                           iree_allocator_system(), &program));
+  std::unique_ptr<loom_runtime_program_t, decltype(&loom_runtime_program_free)>
+      program_owner(program, loom_runtime_program_free);
+  for (const auto name : {IREE_SV("owned"), IREE_SV("borrow")}) {
+    const bool owning = iree_string_view_equal(name, IREE_SV("owned"));
+    const iree_vm_signature_type_t exact = {
+        .kind = static_cast<iree_vm_signature_type_kind_t>(
+            owning ? IREE_VM_SIGNATURE_TYPE_KIND_REF
+                   : IREE_VM_SIGNATURE_TYPE_KIND_PTR),
+        .value = {.ref = types.buffer},
+    };
+    iree_vm_signature_type_t other = exact;
+    other.kind = owning ? IREE_VM_SIGNATURE_TYPE_KIND_PTR
+                        : IREE_VM_SIGNATURE_TYPE_KIND_REF;
+    iree_vm_function_t function = {};
+    loom_runtime_program_binding_t binding = {
+        name, {&exact, 1}, {&exact, 1}, &function};
+    IREE_ASSERT_OK(loom_runtime_program_bind(program, 1, &binding));
+    for (bool argument : {true, false}) {
+      binding.arguments.data = argument ? &other : &exact;
+      binding.results.data = argument ? &exact : &other;
+      ExpectInvalidContract(
+          loom_runtime_program_bind(program, 1, &binding),
+          owning ? "expects ptr<vm.buffer>, source declares ref<vm.buffer>"
+                 : "expects ref<vm.buffer>, source declares ptr<vm.buffer>");
+    }
+    const iree_vm_signature_type_t callable = {
+        .kind = IREE_VM_SIGNATURE_TYPE_KIND_FUNCTION,
+        .value = {.callable = {module.module(), 0}},
+    };
+    binding.arguments.data = &callable;
+    binding.results.data = &exact;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
+                          loom_runtime_program_bind(program, 1, &binding));
+  }
 }
 
 TEST_F(ProgramTest, BindingDoesNotInvokeSourceAndRemainsCallable) {

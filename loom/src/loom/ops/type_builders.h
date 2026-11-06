@@ -116,6 +116,16 @@ static inline bool loom_low_storage_type_space_parse(iree_string_view_t name, lo
   return true;
 }
 
+static inline bool loom_ref_type_isa(loom_type_t type) {
+  return loom_type_is_reference(type) && loom_type_reference_ownership(type) == LOOM_REFERENCE_OWNERSHIP_OWNED;
+}
+iree_status_t loom_ref_type_make(loom_module_t* module, loom_symbol_ref_t declaration, loom_type_t* out_type);
+
+static inline bool loom_ptr_type_isa(loom_type_t type) {
+  return loom_type_is_reference(type) && loom_type_reference_ownership(type) == LOOM_REFERENCE_OWNERSHIP_BORROWED;
+}
+iree_status_t loom_ptr_type_make(loom_module_t* module, loom_symbol_ref_t declaration, loom_type_t* out_type);
+
 #ifdef __cplusplus
 }
 #endif

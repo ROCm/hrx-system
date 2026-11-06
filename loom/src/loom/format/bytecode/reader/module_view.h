@@ -13,6 +13,7 @@
 #include "loom/format/bytecode/format.h"
 #include "loom/format/bytecode/index.h"
 #include "loom/format/bytecode/module_summary.h"
+#include "loom/format/bytecode/reader/reference_binding.h"
 #include "loom/format/bytecode/reader/source_trivia.h"
 #include "loom/format/bytecode/reader/type_plan.h"
 #include "loom/ir/symbol_map.h"
@@ -99,6 +100,9 @@ typedef struct loom_bytecode_reader_module_view_t {
 
   // Validated type count and optional invocation-owned materialization plan.
   loom_bytecode_type_plan_t types;
+
+  // Sparse key expectations consumed by SYMBOLS before materialization.
+  loom_bytecode_reference_bindings_t reference_bindings;
 
   // Validated registered operation table.
   struct {

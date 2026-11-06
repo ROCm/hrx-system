@@ -574,10 +574,13 @@ IREE_ATTRIBUTE_ALWAYS_INLINE static inline iree_status_t loom_verify_op(
   loom_verify_semantic_constraints(state, op, vtable);
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
 
-  // Tied result validation and path-sensitive tied/moved source consumption.
+  // Tied results, moved sources, and owning callable fields share the same
+  // path-sensitive consumption check.
   IREE_RETURN_IF_ERROR(loom_verify_tied_results(state, op, vtable));
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
-  IREE_RETURN_IF_ERROR(loom_verify_moved_results(state, op));
+  IREE_RETURN_IF_ERROR(loom_verify_moves(state, op));
+  IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
+  IREE_RETURN_IF_ERROR(loom_verify_callable_ownership(state, op));
   IREE_RETURN_IF_ERROR(loom_verify_pending_diagnostic_status(state));
 
   // Symbol reference attributes must point to valid symbol table entries.

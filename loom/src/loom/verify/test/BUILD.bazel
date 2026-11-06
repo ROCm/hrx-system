@@ -20,6 +20,7 @@ loom_check_test_suite(
         "func_like_exits.loom-test",
         "function_entry.loom-test",
         "isolation.loom-test",
+        "managed_consumption.loom-test",
         "operand_dictionary.loom-test",
         "predicate_list.loom-test",
         "region_consumption.loom-test",

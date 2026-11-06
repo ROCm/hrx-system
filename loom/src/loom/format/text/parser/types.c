@@ -16,6 +16,7 @@
 #include "loom/format/text/parser/regions.h"
 #include "loom/format/text/parser/scope.h"
 #include "loom/ir/context.h"
+#include "loom/ops/reference_type.h"
 #include "loom/ops/type_registry.h"
 
 //===----------------------------------------------------------------------===//
@@ -1158,7 +1159,7 @@ static iree_status_t loom_parse_parameterized_type_contents(
     loom_parser_t* parser, const loom_type_descriptor_t* descriptor,
     loom_type_parse_mode_t mode, loom_attribute_t* parameter_slots,
     loom_type_t* out_type) {
-  (void)loom_tokenizer_next(&parser->tokenizer);  // consume type name
+  loom_token_t type_token = loom_tokenizer_next(&parser->tokenizer);
 
   const loom_parameterized_type_descriptor_t* parameterized =
       descriptor->parameterized;
@@ -1217,6 +1218,24 @@ static iree_status_t loom_parse_parameterized_type_contents(
   LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RANGLE, NULL);
   if (parser->error_count > errors_before) {
     return iree_ok_status();
+  }
+  if (parameterized->ir_kind == LOOM_TYPE_REFERENCE) {
+    const loom_symbol_ref_t declaration =
+        loom_attr_as_symbol(parameter_slots[0]);
+    iree_status_t status = loom_reference_type_make(
+        parser->module, parameterized->reference_ownership, declaration,
+        out_type);
+    if (iree_status_is_invalid_argument(status)) {
+      iree_status_ignore(status);
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(loom_string_table_get(
+              &parser->module->strings,
+              parser->module->symbols.entries[declaration.symbol_id].name_id)),
+      };
+      return loom_parser_emit(parser, LOOM_ERR_TYPE_023, params,
+                              IREE_ARRAYSIZE(params), type_token);
+    }
+    return status;
   }
   return loom_module_make_parameterized_type(
       parser->module, parameterized, parameter_slots,
