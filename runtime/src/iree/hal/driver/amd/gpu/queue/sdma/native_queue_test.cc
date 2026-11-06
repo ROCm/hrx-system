@@ -13,6 +13,7 @@
 #include <thread>
 #include <vector>
 
+#include "iree/async/event.h"
 #include "iree/hal/driver/amd/gpu/queue/sdma/commands.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -142,7 +143,8 @@ class QueueTest : public ::testing::Test {
                                       amdf_kernel_queue_info_t* info) {
       info->maximum_pending_submission_count =
           reinterpret_cast<QueueTest*>(queue)->capacity_;
-      info->notification_types = UINT64_C(1) << AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+      info->notification_types = AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD |
+                                 AMDF_NATIVE_EVENT_TYPE_BIT_WIN32_EVENT;
       return AMDF_STATUS_OK;
     };
     gpu_.kernel_queue_submit =
@@ -258,7 +260,8 @@ class QueueTest : public ::testing::Test {
     context_.gpu = &gpu_;
     context_.device = reinterpret_cast<amdf_device_t*>(this);
     context_.families = &family_;
-    context_.kernel_notification.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_completion(
+        &context_, AMDF_QUEUE_PUBLICATION_MODE_KERNEL));
     context_.event_sink = {[](void*, const iree_hal_device_event_t*) {},
                            nullptr};
     IREE_ASSERT_OK(
@@ -276,6 +279,7 @@ class QueueTest : public ::testing::Test {
     }
     iree_notification_deinitialize(&publication_.notification);
     iree_hal_amd_gpu_context_deinitialize_memory(&context_);
+    iree_async_event_native_deinitialize(&context_.kernel_event);
     iree_hal_amd_fabric_release(fabric_);
   }
 

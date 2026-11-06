@@ -11,6 +11,7 @@
 #include <tuple>
 #include <vector>
 
+#include "iree/async/event.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/fabric/memory_backend_test_base.h"
 #include "iree/hal/driver/amd/gpu/queue/aql/signal.h"
@@ -153,7 +154,8 @@ class QueueTest : public MemoryBackendTest,
     native_.api.kernel_queue_query_info = [](amdf_kernel_queue_t*,
                                              amdf_kernel_queue_info_t* info) {
       info->maximum_pending_submission_count = 64;
-      info->notification_types = UINT64_C(1) << AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+      info->notification_types = AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD |
+                                 AMDF_NATIVE_EVENT_TYPE_BIT_WIN32_EVENT;
       return AMDF_STATUS_OK;
     };
     gpu_.kernel_queue_submit =
@@ -208,7 +210,8 @@ class QueueTest : public MemoryBackendTest,
     context_.memory_scope_count = 1;
     context_.memory_scopes = &local_scope_;
     context_.families = &native_family_;
-    context_.kernel_notification.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_completion(
+        &context_, AMDF_QUEUE_PUBLICATION_MODE_KERNEL));
     context_.event_sink = {[](void* user_data, const iree_hal_device_event_t*) {
                              ++static_cast<QueueTest*>(user_data)->diagnostics_;
                            },
@@ -324,6 +327,7 @@ class QueueTest : public MemoryBackendTest,
     iree_hal_amd_gpu_program_pool_deinitialize(&programs_);
     iree_hal_amd_gpu_signal_cache_deinitialize(&context_, &signals_);
     iree_hal_amd_gpu_context_deinitialize_memory(&context_);
+    iree_async_event_native_deinitialize(&context_.kernel_event);
     iree_hal_amd_fabric_release(fabric_);
     iree_slim_mutex_deinitialize(&completion_.drain_mutex);
     iree_notification_deinitialize(&publication_.notification);

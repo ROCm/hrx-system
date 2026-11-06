@@ -9,6 +9,7 @@
 #include <cstring>
 #include <vector>
 
+#include "iree/async/event.h"
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/fabric/memory_backend_test_base.h"
 #include "iree/hal/driver/amd/gpu/queue/semaphore.h"
@@ -165,7 +166,8 @@ class KernelQueueTest : public MemoryBackendTest {
     };
     native_.api.kernel_queue_query_info = [](amdf_kernel_queue_t*,
                                              amdf_kernel_queue_info_t* info) {
-      info->notification_types = UINT64_C(1) << AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+      info->notification_types = AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD |
+                                 AMDF_NATIVE_EVENT_TYPE_BIT_WIN32_EVENT;
       return AMDF_STATUS_OK;
     };
     gpu_.kernel_queue_submit =
@@ -222,8 +224,8 @@ class KernelQueueTest : public MemoryBackendTest {
           ++static_cast<KernelQueueTest*>(user_data)->diagnostics_;
         },
         this};
-    context_.kernel_notification.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
-    IREE_ASSERT_OK(iree_async_event_native_initialize(&context_.kernel_event));
+    IREE_ASSERT_OK(iree_hal_amd_gpu_context_prepare_completion(
+        &context_, AMDF_QUEUE_PUBLICATION_MODE_KERNEL));
     IREE_ASSERT_OK(
         iree_hal_amd_gpu_context_prepare_memory(&context_, UINT32_MAX));
     iree_notification_initialize(&publication_.notification);
