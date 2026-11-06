@@ -1,0 +1,60 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test", "loom_check_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],
+)
+
+loom_check_test_suite(
+    name = "compiler_test",
+    srcs = [
+        "constructors.cxx-test",
+        "native_arithmetic.cxx-test",
+        "packed_arithmetic.cxx-test",
+        "packed_slices.cxx-test",
+        "padded_vectors.cxx-test",
+        "vector_arithmetic.cxx-test",
+        "vector_arithmetic_invalid.cxx-test",
+        "vector_constants.cxx-test",
+        "vector_conversion.cxx-test",
+        "vector_conversion_invalid.cxx-test",
+        "vector_decode.cxx-test",
+        "vector_decode_invalid.cxx-test",
+        "vector_lane_updates.cxx-test",
+        "vector_list_assignment.cxx-test",
+        "vector_list_assignment_invalid.cxx-test",
+        "vector_lookup.cxx-test",
+        "vector_math.cxx-test",
+        "vector_math_invalid.cxx-test",
+        "vector_memory.cxx-test",
+        "vector_memory_cleanup.cxx-test",
+        "vector_memory_invalid.cxx-test",
+        "vector_slices.cxx-test",
+        "vector_slices_family.cxx-test",
+        "vector_slices_invalid.cxx-test",
+        "vector_spans.cxx-test",
+        "vectors.cxx-test",
+        "vectors_invalid.cxx-test",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
+    name = "vector_lane_updates_roundtrip_test",
+    src = "vector_lane_updates_roundtrip.cxx-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    # CMake exercises the Python tool through its execution-suite smoke; this
+    # exact golden requires Bazel's executable runfile for the emit provider.
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)

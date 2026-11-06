@@ -1,0 +1,251 @@
+// RUN: roundtrip
+using Half3 = _Float16 __attribute__((ext_vector_type(3)));
+using BFloat3 = __bf16 __attribute__((ext_vector_type(3)));
+
+static_assert(sizeof(Half3) == 8);
+static_assert(sizeof(BFloat3) == 8);
+
+struct BFloatRecord {
+  unsigned before;
+  BFloat3 value;
+  unsigned after;
+};
+static_assert(sizeof(BFloatRecord) == 24);
+static_assert(__builtin_offsetof(BFloatRecord, value) == 8);
+
+static Half3 adjust(Half3 value) {
+  return value + Half3{1.0f, 2.0f, 3.0f};
+}
+
+BFloat3 convert(Half3 value) {
+  return __builtin_convertvector(value, BFloat3);
+}
+
+BFloat3 reinterpret_bits(Half3 value) {
+  return __builtin_bit_cast(BFloat3, value);
+}
+
+BFloat3 record_value(BFloatRecord* records) {
+  return records[1].value;
+}
+
+Half3 update(Half3* values) {
+  Half3 result = adjust(values[0]);
+  values[1] = result;
+  return values[1];
+}
+
+// ----
+func.def public @convert(%value: vector<3xf16>) -> (vector<3xbf16>) {
+  %2 = vector.extf %value : vector<3xf16> to vector<3xf32>
+  %3 = vector.fptrunc %2 : vector<3xf32> to vector<3xbf16>
+  func.return %3 : vector<3xbf16>
+}
+
+func.def public @reinterpret_bits(%value: vector<3xf16>) -> (vector<3xbf16>) {
+  %6 = vector.bitcast %value : vector<3xf16> to vector<3xbf16>
+  func.return %6 : vector<3xbf16>
+}
+
+func.def public @record_value(%records: buffer, %records_byte_offset: offset) -> (vector<3xbf16>) {
+  %10 = scalar.constant 1 : i32
+  %11 = scalar.extsi %10 : i32 to i64
+  %12 = scalar.constant 24 : i64
+  %13 = scalar.muli %11, %12 : i64
+  %14 = index.cast %records_byte_offset : offset to i64
+  %15 = scalar.addi %14, %13 : i64
+  %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
+  %17 = index.cast %16 : i64 to offset
+  %18 = index.constant 8 : offset
+  %19 = index.add %17, %18 : offset
+  %20 = buffer.view %records[%19] : buffer -> view<3xbf16>
+  %value = vector.load %20[0] : view<3xbf16> -> vector<3xbf16>
+  func.return %value : vector<3xbf16>
+}
+
+func.def public @update(%values: buffer, %values_byte_offset: offset) -> (vector<3xf16>) {
+  %25 = scalar.constant 0 : i32
+  %26 = scalar.extsi %25 : i32 to i64
+  %27 = scalar.constant 8 : i64
+  %28 = scalar.muli %26, %27 : i64
+  %29 = index.cast %values_byte_offset : offset to i64
+  %30 = scalar.addi %29, %28 : i64
+  %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
+  %32 = index.cast %31 : i64 to offset
+  %33 = buffer.view %values[%32] : buffer -> view<3xf16>
+  %34 = vector.load %33[0] : view<3xf16> -> vector<3xf16>
+  %result = func.call pure @adjust(%34) : (vector<3xf16>) -> (vector<3xf16>)
+  %36 = scalar.constant 1 : i32
+  %37 = scalar.extsi %36 : i32 to i64
+  %38 = scalar.constant 8 : i64
+  %39 = scalar.muli %37, %38 : i64
+  %40 = index.cast %values_byte_offset : offset to i64
+  %41 = scalar.addi %40, %39 : i64
+  %42 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
+  %43 = index.cast %42 : i64 to offset
+  %44 = buffer.view %values[%43] : buffer -> view<3xf16>
+  vector.store %result, %44[0] : vector<3xf16>, view<3xf16>
+  %45 = scalar.constant 1 : i32
+  %46 = scalar.extsi %45 : i32 to i64
+  %47 = scalar.constant 8 : i64
+  %48 = scalar.muli %46, %47 : i64
+  %49 = index.cast %values_byte_offset : offset to i64
+  %50 = scalar.addi %49, %48 : i64
+  %51 = scalar.assume %50 [range(%50, 0, 9223372036854775807)] : i64
+  %52 = index.cast %51 : i64 to offset
+  %53 = buffer.view %values[%52] : buffer -> view<3xf16>
+  %54 = vector.load %53[0] : view<3xf16> -> vector<3xf16>
+  func.return %54 : vector<3xf16>
+}
+
+func.def @adjust(%value: vector<3xf16>) -> (vector<3xf16>) {
+  %57 = vector.constantf [1.0, 2.0, 3.0] : vector<3xf16>
+  %58 = vector.addf %value, %57 : vector<3xf16>
+  func.return %58 : vector<3xf16>
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Padded vector arrays use eight-byte object stride but six-byte value access.
+using Half3 = _Float16 __attribute__((ext_vector_type(3)));
+using Float3 = float __attribute__((ext_vector_type(3)));
+Half3 update(unsigned selected) {
+  Half3 values[2];
+  values[0] = Half3{1.0f, 2.0f, 3.0f};
+  values[1] = Half3{4.0f, 5.0f, 6.0f};
+  auto* padding = reinterpret_cast<unsigned char*>(&values[0]);
+  padding[6] = 0xa5;
+  padding[7] = 0x5a;
+  Float3 wide = __builtin_convertvector(values[selected], Float3);
+  values[1u - selected] = __builtin_convertvector(
+      wide + Float3{1.0f, 2.0f, 3.0f}, Half3);
+  return values[1u - selected];
+}
+
+// ----
+func.def public @update(%selected: i32) -> (vector<3xf16>) {
+  %2 = index.constant 16 : offset
+  %values_storage = buffer.alloca<private> align(8) %2 : buffer
+  %6 = vector.constantf [1.0, 2.0, 3.0] : vector<3xf16>
+  %108 = index.constant 0 : offset
+  %16 = buffer.view %values_storage[%108] : buffer -> view<3xf16>
+  vector.store %6, %16[0] : vector<3xf16>, view<3xf16>
+  %17 = vector.constantf [4.0, 5.0, 6.0] : vector<3xf16>
+  %107 = index.constant 8 : offset
+  %27 = buffer.view %values_storage[%107] : buffer -> view<3xf16>
+  vector.store %17, %27[0] : vector<3xf16>, view<3xf16>
+  %106 = scalar.constant -91 : i8
+  %105 = index.constant 6 : offset
+  %47 = buffer.view %values_storage[%105] : buffer -> view<1xi8>
+  view.store %106, %47[0] : i8, view<1xi8>
+  %104 = scalar.constant 90 : i8
+  %103 = index.constant 7 : offset
+  %59 = buffer.view %values_storage[%103] : buffer -> view<1xi8>
+  view.store %104, %59[0] : i8, view<1xi8>
+  %60 = scalar.extui %selected : i32 to i64
+  %101 = scalar.constant 3 : i64
+  %102 = scalar.shli %60, %101 : i64
+  %65 = scalar.assume %102 [range(%102, 0, 9223372036854775807)] : i64
+  %66 = index.cast %65 : i64 to offset
+  %67 = index.assume %66 [range(%66, 0, 8)] : offset
+  %68 = buffer.view %values_storage[%67] : buffer -> view<3xf16>
+  %69 = vector.load %68[0] : view<3xf16> -> vector<3xf16>
+  %wide = vector.extf %69 : vector<3xf16> to vector<3xf32>
+  %71 = vector.constantf [1.0, 2.0, 3.0] : vector<3xf32>
+  %72 = vector.addf %wide, %71 : vector<3xf32>
+  %73 = vector.fptrunc %72 : vector<3xf32> to vector<3xf16>
+  %74 = scalar.constant 1 : i32
+  %75 = scalar.subi %74, %selected : i32
+  %76 = scalar.extui %75 : i32 to i64
+  %100 = scalar.shli %76, %101 : i64
+  %81 = scalar.assume %100 [range(%100, 0, 9223372036854775807)] : i64
+  %82 = index.cast %81 : i64 to offset
+  %83 = index.assume %82 [range(%82, 0, 8)] : offset
+  %84 = buffer.view %values_storage[%83] : buffer -> view<3xf16>
+  vector.store %73, %84[0] : vector<3xf16>, view<3xf16>
+  %96 = vector.load %84[0] : view<3xf16> -> vector<3xf16>
+  func.return %96 : vector<3xf16>
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Record field offsets stay independent of the padded vector value extent.
+using BFloat3 = __bf16 __attribute__((ext_vector_type(3)));
+using Float3 = float __attribute__((ext_vector_type(3)));
+struct Record {
+  // Integer preceding the aligned vector member.
+  unsigned before;
+  // Three logical elements in an eight-byte object slot.
+  BFloat3 value;
+  // Integer following the vector object and its padding.
+  unsigned after;
+};
+static_assert(sizeof(Record) == 24 && alignof(Record) == 8);
+static_assert(__builtin_offsetof(Record, value) == 8);
+static_assert(__builtin_offsetof(Record, after) == 16);
+unsigned update(Record* records) {
+  records[0].before = 11;
+  records[0].after = 13;
+  auto* padding = reinterpret_cast<unsigned char*>(&records[0].value);
+  padding[6] = 0x3c;
+  padding[7] = 0xc3;
+  Float3 wide = __builtin_convertvector(records[1].value, Float3);
+  records[0].value = __builtin_convertvector(
+      wide + Float3{1.0f, 2.0f, 3.0f}, BFloat3);
+  return records[0].before + records[0].after + padding[6] + padding[7];
+}
+
+// ----
+func.def public @update(%records: buffer, %records_byte_offset: offset) -> (i32) {
+  %3 = scalar.constant 11 : i32
+  %8 = index.cast %records_byte_offset : offset to i64
+  %10 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %14 = buffer.view %records[%11] : buffer -> view<1xi32>
+  view.store %3, %14[0] : i32, view<1xi32>
+  %15 = scalar.constant 13 : i32
+  %24 = index.constant 16 : offset
+  %25 = index.add %11, %24 : offset
+  %26 = buffer.view %records[%25] : buffer -> view<1xi32>
+  view.store %15, %26[0] : i32, view<1xi32>
+  %35 = index.constant 8 : offset
+  %padding_byte_offset = index.add %11, %35 : offset
+  %141 = scalar.constant 60 : i8
+  %140 = scalar.constant 6 : i64
+  %43 = index.cast %padding_byte_offset : offset to i64
+  %44 = scalar.addi %43, %140 : i64
+  %45 = scalar.assume %44 [range(%44, 0, 9223372036854775807)] : i64
+  %46 = index.cast %45 : i64 to offset
+  %47 = buffer.view %records[%46] : buffer -> view<1xi8>
+  view.store %141, %47[0] : i8, view<1xi8>
+  %139 = scalar.constant -61 : i8
+  %138 = scalar.constant 7 : i64
+  %55 = scalar.addi %43, %138 : i64
+  %56 = scalar.assume %55 [range(%55, 0, 9223372036854775807)] : i64
+  %57 = index.cast %56 : i64 to offset
+  %58 = buffer.view %records[%57] : buffer -> view<1xi8>
+  view.store %139, %58[0] : i8, view<1xi8>
+  %137 = scalar.constant 24 : i64
+  %64 = scalar.addi %10, %137 : i64
+  %65 = scalar.assume %64 [range(%64, 0, 9223372036854775807)] : i64
+  %66 = index.cast %65 : i64 to offset
+  %68 = index.add %66, %35 : offset
+  %69 = buffer.view %records[%68] : buffer -> view<3xbf16>
+  %value = vector.load %69[0] : view<3xbf16> -> vector<3xbf16>
+  %wide = vector.extf %value : vector<3xbf16> to vector<3xf32>
+  %72 = vector.constantf [1.0, 2.0, 3.0] : vector<3xf32>
+  %73 = vector.addf %wide, %72 : vector<3xf32>
+  %74 = vector.fptrunc %73 : vector<3xf32> to vector<3xbf16>
+  %85 = buffer.view %records[%padding_byte_offset] : buffer -> view<3xbf16>
+  vector.store %74, %85[0] : vector<3xbf16>, view<3xbf16>
+  %before = view.load %14[0] : view<1xi32> -> i32
+  %after = view.load %26[0] : view<1xi32> -> i32
+  %110 = scalar.addi %before, %after : i32
+  %120 = view.load %47[0] : view<1xi8> -> i8
+  %121 = scalar.extui %120 : i8 to i32
+  %122 = scalar.addi %110, %121 : i32
+  %132 = view.load %58[0] : view<1xi8> -> i8
+  %133 = scalar.extui %132 : i8 to i32
+  %134 = scalar.addi %122, %133 : i32
+  func.return %134 : i32
+}

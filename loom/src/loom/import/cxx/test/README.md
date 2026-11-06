@@ -55,6 +55,14 @@ iree-bazel-test --config=asan --config=loom-importer-cxx \
   //loom/src/loom/import/cxx/value/test/numeric:compiler_test
 ```
 
+[Vector source semantics](../value/test/vector/README.md) cover lane values,
+evaluation order, shaped operations, and object layout:
+
+```sh
+iree-bazel-test --config=asan --config=loom-importer-cxx \
+  //loom/src/loom/import/cxx/value/test/vector:compiler_test
+```
+
 ## Source execution tests
 
 Executable importer inputs use `.cxx`, including handwritten cases and shared

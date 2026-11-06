@@ -42,3 +42,26 @@ func.def public @lookup(%packed: vector<4xi8>) -> (vector<4xi8>) {
   %39 = vector.table.lookup %table[%indices] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
   func.return %39 : vector<4xi8>
 }
+
+// ====
+// RUN: pass combine,cse
+// Unsigned high-nibble extraction retains the bounded byte index vector.
+using Bytes4 = unsigned char __attribute__((ext_vector_type(4)));
+using Codes4 = signed char __attribute__((ext_vector_type(4)));
+using Codebook16 = signed char __attribute__((ext_vector_type(16)));
+Codes4 lookup(Bytes4 packed) {
+  constexpr Codebook16 table = {-127, -104, -83, -65, -49, -35, -22, -10,
+                               1, 13, 25, 38, 53, 69, 89, 113};
+  Bytes4 indices = packed >> 4;
+  return {table[indices[0]], table[indices[1]], table[indices[2]],
+          table[indices[3]]};
+}
+
+// ----
+func.def public @lookup(%packed: vector<4xi8>) -> (vector<4xi8>) {
+  %table = vector.constanti [-127, -104, -83, -65, -49, -35, -22, -10, 1, 13, 25, 38, 53, 69, 89, 113] : vector<16xi8>
+  %40 = vector.splati 4 : vector<4xi8>
+  %indices = vector.shrui %packed, %40 : vector<4xi8>
+  %39 = vector.table.lookup %table[%indices] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
+  func.return %39 : vector<4xi8>
+}

@@ -1,0 +1,226 @@
+// RUN: roundtrip
+// Register slices preserve element bits at variable, crossing, and tail offsets.
+#include <loomcxx/vector.h>
+using Source = unsigned char __attribute__((ext_vector_type(16)));
+using Four = unsigned char __attribute__((ext_vector_type(4)));
+using Eight = unsigned char __attribute__((ext_vector_type(8)));
+using Two = unsigned char __attribute__((ext_vector_type(2)));
+Four unaligned(Source value, unsigned offset) {
+  return loom::vector::slice<Four>(value, offset);
+}
+Eight crossing(Source value) { return loom::vector::slice<Eight>(value, 3u); }
+Two tail(Source value) { return loom::vector::slice<Two>(value, 14u); }
+
+// ----
+func.def public @unaligned(%value: vector<16xi8>, %offset: i32) -> (vector<4xi8>) {
+  %3 = scalar.extui %offset : i32 to i64
+  %4 = index.cast %3 : i64 to index
+  %5 = vector.slice %value[%4] : vector<16xi8> -> vector<4xi8>
+  func.return %5 : vector<4xi8>
+}
+
+func.def public @crossing(%value: vector<16xi8>) -> (vector<8xi8>) {
+  %8 = scalar.constant 3 : i32
+  %9 = scalar.extui %8 : i32 to i64
+  %10 = index.cast %9 : i64 to index
+  %11 = vector.slice %value[%10] : vector<16xi8> -> vector<8xi8>
+  func.return %11 : vector<8xi8>
+}
+
+func.def public @tail(%value: vector<16xi8>) -> (vector<2xi8>) {
+  %14 = scalar.constant 14 : i32
+  %15 = scalar.extui %14 : i32 to i64
+  %16 = index.cast %15 : i64 to index
+  %17 = vector.slice %value[%16] : vector<16xi8> -> vector<2xi8>
+  func.return %17 : vector<2xi8>
+}
+
+// ====
+// RUN: roundtrip
+// Register slices preserve element bits at variable, crossing, and tail offsets.
+#include <loomcxx/vector.h>
+using Source = unsigned short __attribute__((ext_vector_type(16)));
+using Four = unsigned short __attribute__((ext_vector_type(4)));
+using Eight = unsigned short __attribute__((ext_vector_type(8)));
+using Two = unsigned short __attribute__((ext_vector_type(2)));
+Four unaligned(Source value, unsigned offset) {
+  return loom::vector::slice<Four>(value, offset);
+}
+Eight crossing(Source value) { return loom::vector::slice<Eight>(value, 3u); }
+Two tail(Source value) { return loom::vector::slice<Two>(value, 14u); }
+
+// ----
+func.def public @unaligned(%value: vector<16xi16>, %offset: i32) -> (vector<4xi16>) {
+  %3 = scalar.extui %offset : i32 to i64
+  %4 = index.cast %3 : i64 to index
+  %5 = vector.slice %value[%4] : vector<16xi16> -> vector<4xi16>
+  func.return %5 : vector<4xi16>
+}
+
+func.def public @crossing(%value: vector<16xi16>) -> (vector<8xi16>) {
+  %8 = scalar.constant 3 : i32
+  %9 = scalar.extui %8 : i32 to i64
+  %10 = index.cast %9 : i64 to index
+  %11 = vector.slice %value[%10] : vector<16xi16> -> vector<8xi16>
+  func.return %11 : vector<8xi16>
+}
+
+func.def public @tail(%value: vector<16xi16>) -> (vector<2xi16>) {
+  %14 = scalar.constant 14 : i32
+  %15 = scalar.extui %14 : i32 to i64
+  %16 = index.cast %15 : i64 to index
+  %17 = vector.slice %value[%16] : vector<16xi16> -> vector<2xi16>
+  func.return %17 : vector<2xi16>
+}
+
+// ====
+// RUN: roundtrip
+// Register slices preserve element bits at variable, crossing, and tail offsets.
+#include <loomcxx/vector.h>
+using Source = _Float16 __attribute__((ext_vector_type(16)));
+using Four = _Float16 __attribute__((ext_vector_type(4)));
+using Eight = _Float16 __attribute__((ext_vector_type(8)));
+using Two = _Float16 __attribute__((ext_vector_type(2)));
+Four unaligned(Source value, unsigned offset) {
+  return loom::vector::slice<Four>(value, offset);
+}
+Eight crossing(Source value) { return loom::vector::slice<Eight>(value, 3u); }
+Two tail(Source value) { return loom::vector::slice<Two>(value, 14u); }
+
+// ----
+func.def public @unaligned(%value: vector<16xf16>, %offset: i32) -> (vector<4xf16>) {
+  %3 = scalar.extui %offset : i32 to i64
+  %4 = index.cast %3 : i64 to index
+  %5 = vector.slice %value[%4] : vector<16xf16> -> vector<4xf16>
+  func.return %5 : vector<4xf16>
+}
+
+func.def public @crossing(%value: vector<16xf16>) -> (vector<8xf16>) {
+  %8 = scalar.constant 3 : i32
+  %9 = scalar.extui %8 : i32 to i64
+  %10 = index.cast %9 : i64 to index
+  %11 = vector.slice %value[%10] : vector<16xf16> -> vector<8xf16>
+  func.return %11 : vector<8xf16>
+}
+
+func.def public @tail(%value: vector<16xf16>) -> (vector<2xf16>) {
+  %14 = scalar.constant 14 : i32
+  %15 = scalar.extui %14 : i32 to i64
+  %16 = index.cast %15 : i64 to index
+  %17 = vector.slice %value[%16] : vector<16xf16> -> vector<2xf16>
+  func.return %17 : vector<2xf16>
+}
+
+// ====
+// RUN: roundtrip
+// Register slices preserve element bits at variable, crossing, and tail offsets.
+#include <loomcxx/vector.h>
+using Source = __bf16 __attribute__((ext_vector_type(16)));
+using Four = __bf16 __attribute__((ext_vector_type(4)));
+using Eight = __bf16 __attribute__((ext_vector_type(8)));
+using Two = __bf16 __attribute__((ext_vector_type(2)));
+Four unaligned(Source value, unsigned offset) {
+  return loom::vector::slice<Four>(value, offset);
+}
+Eight crossing(Source value) { return loom::vector::slice<Eight>(value, 3u); }
+Two tail(Source value) { return loom::vector::slice<Two>(value, 14u); }
+
+// ----
+func.def public @unaligned(%value: vector<16xbf16>, %offset: i32) -> (vector<4xbf16>) {
+  %3 = scalar.extui %offset : i32 to i64
+  %4 = index.cast %3 : i64 to index
+  %5 = vector.slice %value[%4] : vector<16xbf16> -> vector<4xbf16>
+  func.return %5 : vector<4xbf16>
+}
+
+func.def public @crossing(%value: vector<16xbf16>) -> (vector<8xbf16>) {
+  %8 = scalar.constant 3 : i32
+  %9 = scalar.extui %8 : i32 to i64
+  %10 = index.cast %9 : i64 to index
+  %11 = vector.slice %value[%10] : vector<16xbf16> -> vector<8xbf16>
+  func.return %11 : vector<8xbf16>
+}
+
+func.def public @tail(%value: vector<16xbf16>) -> (vector<2xbf16>) {
+  %14 = scalar.constant 14 : i32
+  %15 = scalar.extui %14 : i32 to i64
+  %16 = index.cast %15 : i64 to index
+  %17 = vector.slice %value[%16] : vector<16xbf16> -> vector<2xbf16>
+  func.return %17 : vector<2xbf16>
+}
+
+// ====
+// RUN: roundtrip
+// Register slices preserve element bits at variable, crossing, and tail offsets.
+#include <loomcxx/vector.h>
+using Source = __float8_e4m3fn __attribute__((ext_vector_type(16)));
+using Four = __float8_e4m3fn __attribute__((ext_vector_type(4)));
+using Eight = __float8_e4m3fn __attribute__((ext_vector_type(8)));
+using Two = __float8_e4m3fn __attribute__((ext_vector_type(2)));
+Four unaligned(Source value, unsigned offset) {
+  return loom::vector::slice<Four>(value, offset);
+}
+Eight crossing(Source value) { return loom::vector::slice<Eight>(value, 3u); }
+Two tail(Source value) { return loom::vector::slice<Two>(value, 14u); }
+
+// ----
+func.def public @unaligned(%value: vector<16xf8E4M3>, %offset: i32) -> (vector<4xf8E4M3>) {
+  %3 = scalar.extui %offset : i32 to i64
+  %4 = index.cast %3 : i64 to index
+  %5 = vector.slice %value[%4] : vector<16xf8E4M3> -> vector<4xf8E4M3>
+  func.return %5 : vector<4xf8E4M3>
+}
+
+func.def public @crossing(%value: vector<16xf8E4M3>) -> (vector<8xf8E4M3>) {
+  %8 = scalar.constant 3 : i32
+  %9 = scalar.extui %8 : i32 to i64
+  %10 = index.cast %9 : i64 to index
+  %11 = vector.slice %value[%10] : vector<16xf8E4M3> -> vector<8xf8E4M3>
+  func.return %11 : vector<8xf8E4M3>
+}
+
+func.def public @tail(%value: vector<16xf8E4M3>) -> (vector<2xf8E4M3>) {
+  %14 = scalar.constant 14 : i32
+  %15 = scalar.extui %14 : i32 to i64
+  %16 = index.cast %15 : i64 to index
+  %17 = vector.slice %value[%16] : vector<16xf8E4M3> -> vector<2xf8E4M3>
+  func.return %17 : vector<2xf8E4M3>
+}
+
+// ====
+// RUN: roundtrip
+// Register slices preserve element bits at variable, crossing, and tail offsets.
+#include <loomcxx/vector.h>
+using Source = __float8_e5m2 __attribute__((ext_vector_type(16)));
+using Four = __float8_e5m2 __attribute__((ext_vector_type(4)));
+using Eight = __float8_e5m2 __attribute__((ext_vector_type(8)));
+using Two = __float8_e5m2 __attribute__((ext_vector_type(2)));
+Four unaligned(Source value, unsigned offset) {
+  return loom::vector::slice<Four>(value, offset);
+}
+Eight crossing(Source value) { return loom::vector::slice<Eight>(value, 3u); }
+Two tail(Source value) { return loom::vector::slice<Two>(value, 14u); }
+
+// ----
+func.def public @unaligned(%value: vector<16xf8E5M2>, %offset: i32) -> (vector<4xf8E5M2>) {
+  %3 = scalar.extui %offset : i32 to i64
+  %4 = index.cast %3 : i64 to index
+  %5 = vector.slice %value[%4] : vector<16xf8E5M2> -> vector<4xf8E5M2>
+  func.return %5 : vector<4xf8E5M2>
+}
+
+func.def public @crossing(%value: vector<16xf8E5M2>) -> (vector<8xf8E5M2>) {
+  %8 = scalar.constant 3 : i32
+  %9 = scalar.extui %8 : i32 to i64
+  %10 = index.cast %9 : i64 to index
+  %11 = vector.slice %value[%10] : vector<16xf8E5M2> -> vector<8xf8E5M2>
+  func.return %11 : vector<8xf8E5M2>
+}
+
+func.def public @tail(%value: vector<16xf8E5M2>) -> (vector<2xf8E5M2>) {
+  %14 = scalar.constant 14 : i32
+  %15 = scalar.extui %14 : i32 to i64
+  %16 = index.cast %15 : i64 to index
+  %17 = vector.slice %value[%16] : vector<16xf8E5M2> -> vector<2xf8E5M2>
+  func.return %17 : vector<2xf8E5M2>
+}

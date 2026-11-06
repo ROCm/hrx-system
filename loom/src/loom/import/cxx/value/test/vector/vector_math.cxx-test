@@ -190,3 +190,177 @@ func.def public @dot_chain(%a: vector<8xf16>, %b: vector<8xf16>, %seed: vector<4
   %6 = vector.dotf %partial, %seed, %5 : vector<4xf32>, vector<4xf32>, f32
   func.return %6 : f32
 }
+
+// ====
+// RUN: roundtrip
+// Ordered reductions retain the source lane order and explicit seed without reassociation.
+#include <loomcxx/vector.h>
+using Float4 = float __attribute__((ext_vector_type(4)));
+float ordered_sum(float first, float second, float third, float fourth, float seed) {
+  return loom::vector::reduce::addf(Float4{first, second, third, fourth}, seed);
+}
+float ordered_dot(float first, float second, float third, float fourth, float seed) {
+  return loom::vector::dotf(Float4{first, second, third, fourth},
+                           Float4{1.0f, 1.0f, 1.0f, 1.0f}, seed);
+}
+
+// ----
+func.def public @ordered_sum(%first: f32, %second: f32, %third: f32, %fourth: f32, %seed: f32) -> (f32) {
+  %6 = vector.from_elements %first, %second, %third, %fourth : vector<4xf32>
+  %7 = vector.reduce<addf> %6, %seed : vector<4xf32>, f32
+  func.return %7 : f32
+}
+
+func.def public @ordered_dot(%first: f32, %second: f32, %third: f32, %fourth: f32, %seed: f32) -> (f32) {
+  %14 = vector.from_elements %first, %second, %third, %fourth : vector<4xf32>
+  %15 = vector.constantf [1.0, 1.0, 1.0, 1.0] : vector<4xf32>
+  %16 = vector.dotf %14, %15, %seed : vector<4xf32>, vector<4xf32>, f32
+  func.return %16 : f32
+}
+
+// ====
+// RUN: roundtrip
+// The seeded operation remains dotf, whose accumulation contract is fused.
+#include <loomcxx/vector.h>
+using Float2 = float __attribute__((ext_vector_type(2)));
+float fused(float left, float right, float seed) {
+  return loom::vector::dotf(Float2{left, 0.0f}, Float2{right, 0.0f}, seed);
+}
+
+// ----
+func.def public @fused(%left: f32, %right: f32, %seed: f32) -> (f32) {
+  %4 = scalar.constant 0.0 : f32
+  %5 = vector.from_elements %left, %4 : vector<2xf32>
+  %6 = scalar.constant 0.0 : f32
+  %7 = vector.from_elements %right, %6 : vector<2xf32>
+  %8 = vector.dotf %5, %7, %seed : vector<2xf32>, vector<2xf32>, f32
+  func.return %8 : f32
+}
+
+// ====
+// RUN: roundtrip
+// Native pair dots and explicitly widened pairs wire the same corresponding seeds.
+#include <loomcxx/vector.h>
+#include <loomcxx/numeric.h>
+using Narrow4 = _Float16 __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Float2 = float __attribute__((ext_vector_type(2)));
+Float2 pairs(Narrow4 left, Narrow4 right, float first, float second) {
+  return loom::vector::dot2f(left, right, Float2{first, second});
+}
+Float2 widened_pairs(Narrow4 left, Narrow4 right, float first, float second) {
+  Float4 wide_left = loom::convert<Float4>(left);
+  Float4 wide_right = loom::convert<Float4>(right);
+  return {loom::vector::dotf(Float2{wide_left[0], wide_left[1]},
+                           Float2{wide_right[0], wide_right[1]}, first),
+          loom::vector::dotf(Float2{wide_left[2], wide_left[3]},
+                           Float2{wide_right[2], wide_right[3]}, second)};
+}
+
+// ----
+func.def public @pairs(%left: vector<4xf16>, %right: vector<4xf16>, %first: f32, %second: f32) -> (vector<2xf32>) {
+  %5 = vector.from_elements %first, %second : vector<2xf32>
+  %6 = vector.dot2f %left, %right, %5 : vector<4xf16>, vector<4xf16>, vector<2xf32>
+  func.return %6 : vector<2xf32>
+}
+
+func.def public @widened_pairs(%left: vector<4xf16>, %right: vector<4xf16>, %first: f32, %second: f32) -> (vector<2xf32>) {
+  %wide_left = vector.extf %left : vector<4xf16> to vector<4xf32>
+  %wide_right = vector.extf %right : vector<4xf16> to vector<4xf32>
+  %14 = scalar.constant 0 : i32
+  %15 = index.cast %14 : i32 to index
+  %16 = vector.extract %wide_left[%15] : vector<4xf32> -> f32
+  %17 = scalar.constant 1 : i32
+  %18 = index.cast %17 : i32 to index
+  %19 = vector.extract %wide_left[%18] : vector<4xf32> -> f32
+  %20 = vector.from_elements %16, %19 : vector<2xf32>
+  %21 = scalar.constant 0 : i32
+  %22 = index.cast %21 : i32 to index
+  %23 = vector.extract %wide_right[%22] : vector<4xf32> -> f32
+  %24 = scalar.constant 1 : i32
+  %25 = index.cast %24 : i32 to index
+  %26 = vector.extract %wide_right[%25] : vector<4xf32> -> f32
+  %27 = vector.from_elements %23, %26 : vector<2xf32>
+  %28 = vector.dotf %20, %27, %first : vector<2xf32>, vector<2xf32>, f32
+  %29 = scalar.constant 2 : i32
+  %30 = index.cast %29 : i32 to index
+  %31 = vector.extract %wide_left[%30] : vector<4xf32> -> f32
+  %32 = scalar.constant 3 : i32
+  %33 = index.cast %32 : i32 to index
+  %34 = vector.extract %wide_left[%33] : vector<4xf32> -> f32
+  %35 = vector.from_elements %31, %34 : vector<2xf32>
+  %36 = scalar.constant 2 : i32
+  %37 = index.cast %36 : i32 to index
+  %38 = vector.extract %wide_right[%37] : vector<4xf32> -> f32
+  %39 = scalar.constant 3 : i32
+  %40 = index.cast %39 : i32 to index
+  %41 = vector.extract %wide_right[%40] : vector<4xf32> -> f32
+  %42 = vector.from_elements %38, %41 : vector<2xf32>
+  %43 = vector.dotf %35, %42, %second : vector<2xf32>, vector<2xf32>, f32
+  %44 = vector.from_elements %28, %43 : vector<2xf32>
+  func.return %44 : vector<2xf32>
+}
+
+// ====
+// RUN: roundtrip
+// Native pair dots and explicitly widened pairs wire the same corresponding seeds.
+#include <loomcxx/vector.h>
+#include <loomcxx/numeric.h>
+using Narrow4 = __bf16 __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Float2 = float __attribute__((ext_vector_type(2)));
+Float2 pairs(Narrow4 left, Narrow4 right, float first, float second) {
+  return loom::vector::dot2f(left, right, Float2{first, second});
+}
+Float2 widened_pairs(Narrow4 left, Narrow4 right, float first, float second) {
+  Float4 wide_left = loom::convert<Float4>(left);
+  Float4 wide_right = loom::convert<Float4>(right);
+  return {loom::vector::dotf(Float2{wide_left[0], wide_left[1]},
+                           Float2{wide_right[0], wide_right[1]}, first),
+          loom::vector::dotf(Float2{wide_left[2], wide_left[3]},
+                           Float2{wide_right[2], wide_right[3]}, second)};
+}
+
+// ----
+func.def public @pairs(%left: vector<4xbf16>, %right: vector<4xbf16>, %first: f32, %second: f32) -> (vector<2xf32>) {
+  %5 = vector.from_elements %first, %second : vector<2xf32>
+  %6 = vector.dot2f %left, %right, %5 : vector<4xbf16>, vector<4xbf16>, vector<2xf32>
+  func.return %6 : vector<2xf32>
+}
+
+func.def public @widened_pairs(%left: vector<4xbf16>, %right: vector<4xbf16>, %first: f32, %second: f32) -> (vector<2xf32>) {
+  %wide_left = vector.extf %left : vector<4xbf16> to vector<4xf32>
+  %wide_right = vector.extf %right : vector<4xbf16> to vector<4xf32>
+  %14 = scalar.constant 0 : i32
+  %15 = index.cast %14 : i32 to index
+  %16 = vector.extract %wide_left[%15] : vector<4xf32> -> f32
+  %17 = scalar.constant 1 : i32
+  %18 = index.cast %17 : i32 to index
+  %19 = vector.extract %wide_left[%18] : vector<4xf32> -> f32
+  %20 = vector.from_elements %16, %19 : vector<2xf32>
+  %21 = scalar.constant 0 : i32
+  %22 = index.cast %21 : i32 to index
+  %23 = vector.extract %wide_right[%22] : vector<4xf32> -> f32
+  %24 = scalar.constant 1 : i32
+  %25 = index.cast %24 : i32 to index
+  %26 = vector.extract %wide_right[%25] : vector<4xf32> -> f32
+  %27 = vector.from_elements %23, %26 : vector<2xf32>
+  %28 = vector.dotf %20, %27, %first : vector<2xf32>, vector<2xf32>, f32
+  %29 = scalar.constant 2 : i32
+  %30 = index.cast %29 : i32 to index
+  %31 = vector.extract %wide_left[%30] : vector<4xf32> -> f32
+  %32 = scalar.constant 3 : i32
+  %33 = index.cast %32 : i32 to index
+  %34 = vector.extract %wide_left[%33] : vector<4xf32> -> f32
+  %35 = vector.from_elements %31, %34 : vector<2xf32>
+  %36 = scalar.constant 2 : i32
+  %37 = index.cast %36 : i32 to index
+  %38 = vector.extract %wide_right[%37] : vector<4xf32> -> f32
+  %39 = scalar.constant 3 : i32
+  %40 = index.cast %39 : i32 to index
+  %41 = vector.extract %wide_right[%40] : vector<4xf32> -> f32
+  %42 = vector.from_elements %38, %41 : vector<2xf32>
+  %43 = vector.dotf %35, %42, %second : vector<2xf32>, vector<2xf32>, f32
+  %44 = vector.from_elements %28, %43 : vector<2xf32>
+  func.return %44 : vector<2xf32>
+}

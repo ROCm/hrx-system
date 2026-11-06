@@ -211,3 +211,40 @@ func.def public @entry(%live: f32) -> (vector<8xf32>) {
   %6 = vector.insert %live into %5[1] : f32, vector<8xf32>
   func.return %6 : vector<8xf32>
 }
+
+// ====
+// RUN: roundtrip
+// Byte vector lists and scalar initialization have distinct lane coverage.
+using Bytes4 = unsigned char __attribute__((ext_vector_type(4)));
+constexpr Bytes4 partial{255, 128};
+constexpr Bytes4 zero{};
+constexpr Bytes4 first{7};
+constexpr Bytes4 splat = 9;
+static_assert(partial[1] == 128 && partial[3] == 0);
+static_assert(first[0] == 7 && first[3] == 0);
+static_assert(splat[0] == 9 && splat[3] == 9);
+Bytes4 partial_value() { return partial; }
+Bytes4 zero_value() { return zero; }
+Bytes4 first_value() { return first; }
+Bytes4 splat_value() { return splat; }
+
+// ----
+func.def public @partial_value() -> (vector<4xi8>) {
+  %partial = vector.constanti [-1, -128, 0, 0] : vector<4xi8>
+  func.return %partial : vector<4xi8>
+}
+
+func.def public @zero_value() -> (vector<4xi8>) {
+  %zero = vector.constanti [0, 0, 0, 0] : vector<4xi8>
+  func.return %zero : vector<4xi8>
+}
+
+func.def public @first_value() -> (vector<4xi8>) {
+  %first = vector.constanti [7, 0, 0, 0] : vector<4xi8>
+  func.return %first : vector<4xi8>
+}
+
+func.def public @splat_value() -> (vector<4xi8>) {
+  %splat = vector.constanti [9, 9, 9, 9] : vector<4xi8>
+  func.return %splat : vector<4xi8>
+}

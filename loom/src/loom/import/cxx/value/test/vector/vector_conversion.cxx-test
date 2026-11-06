@@ -247,3 +247,165 @@ func.def public @entry(%input: buffer, %input_byte_offset: offset, %index: buffe
   %18 = vector.sitofp %17 : vector<4xi32> to vector<4xf32>
   func.return %18 : vector<4xf32>
 }
+
+// ====
+// RUN: roundtrip
+// Numeric facade conversions preserve source signedness and destination precision.
+#include <loomcxx/numeric.h>
+using Narrow4 = _Float16 __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Byte4 = signed char __attribute__((ext_vector_type(4)));
+using Int4 = int __attribute__((ext_vector_type(4)));
+Float4 expand(Narrow4 value) { return loom::convert<Float4>(value); }
+Narrow4 encode(Byte4 value) { return loom::convert<Narrow4>(value); }
+Byte4 truncate_byte(Narrow4 value) { return loom::convert<Byte4>(value); }
+Int4 truncate_word(Narrow4 value) { return loom::convert<Int4>(value); }
+
+// ----
+func.def public @expand(%value: vector<4xf16>) -> (vector<4xf32>) {
+  %2 = vector.extf %value : vector<4xf16> to vector<4xf32>
+  func.return %2 : vector<4xf32>
+}
+
+func.def public @encode(%value: vector<4xi8>) -> (vector<4xf16>) {
+  %5 = vector.sitofp %value : vector<4xi8> to vector<4xf16>
+  func.return %5 : vector<4xf16>
+}
+
+func.def public @truncate_byte(%value: vector<4xf16>) -> (vector<4xi8>) {
+  %8 = vector.fptosi %value : vector<4xf16> to vector<4xi8>
+  func.return %8 : vector<4xi8>
+}
+
+func.def public @truncate_word(%value: vector<4xf16>) -> (vector<4xi32>) {
+  %11 = vector.fptosi %value : vector<4xf16> to vector<4xi32>
+  func.return %11 : vector<4xi32>
+}
+
+// ====
+// RUN: roundtrip
+// Numeric facade conversions preserve source signedness and destination precision.
+#include <loomcxx/numeric.h>
+using Narrow4 = __bf16 __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Byte4 = signed char __attribute__((ext_vector_type(4)));
+using Int4 = int __attribute__((ext_vector_type(4)));
+Float4 expand(Narrow4 value) { return loom::convert<Float4>(value); }
+Narrow4 encode(Byte4 value) { return loom::convert<Narrow4>(value); }
+Byte4 truncate_byte(Narrow4 value) { return loom::convert<Byte4>(value); }
+Int4 truncate_word(Narrow4 value) { return loom::convert<Int4>(value); }
+
+// ----
+func.def public @expand(%value: vector<4xbf16>) -> (vector<4xf32>) {
+  %2 = vector.extf %value : vector<4xbf16> to vector<4xf32>
+  func.return %2 : vector<4xf32>
+}
+
+func.def public @encode(%value: vector<4xi8>) -> (vector<4xbf16>) {
+  %5 = vector.sitofp %value : vector<4xi8> to vector<4xbf16>
+  func.return %5 : vector<4xbf16>
+}
+
+func.def public @truncate_byte(%value: vector<4xbf16>) -> (vector<4xi8>) {
+  %8 = vector.fptosi %value : vector<4xbf16> to vector<4xi8>
+  func.return %8 : vector<4xi8>
+}
+
+func.def public @truncate_word(%value: vector<4xbf16>) -> (vector<4xi32>) {
+  %11 = vector.fptosi %value : vector<4xbf16> to vector<4xi32>
+  func.return %11 : vector<4xi32>
+}
+
+// ====
+// RUN: roundtrip
+// Numeric facade conversions preserve source signedness and destination precision.
+#include <loomcxx/numeric.h>
+using Narrow4 = __float8_e4m3fn __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Byte4 = signed char __attribute__((ext_vector_type(4)));
+using Int4 = int __attribute__((ext_vector_type(4)));
+Float4 expand(Narrow4 value) { return loom::convert<Float4>(value); }
+Narrow4 encode(Byte4 value) { return loom::convert<Narrow4>(value); }
+Byte4 truncate_byte(Narrow4 value) { return loom::convert<Byte4>(value); }
+Int4 truncate_word(Narrow4 value) { return loom::convert<Int4>(value); }
+
+// ----
+func.def public @expand(%value: vector<4xf8E4M3>) -> (vector<4xf32>) {
+  %2 = vector.extf %value : vector<4xf8E4M3> to vector<4xf32>
+  func.return %2 : vector<4xf32>
+}
+
+func.def public @encode(%value: vector<4xi8>) -> (vector<4xf8E4M3>) {
+  %5 = vector.sitofp %value : vector<4xi8> to vector<4xf8E4M3>
+  func.return %5 : vector<4xf8E4M3>
+}
+
+func.def public @truncate_byte(%value: vector<4xf8E4M3>) -> (vector<4xi8>) {
+  %8 = vector.fptosi %value : vector<4xf8E4M3> to vector<4xi8>
+  func.return %8 : vector<4xi8>
+}
+
+func.def public @truncate_word(%value: vector<4xf8E4M3>) -> (vector<4xi32>) {
+  %11 = vector.fptosi %value : vector<4xf8E4M3> to vector<4xi32>
+  func.return %11 : vector<4xi32>
+}
+
+// ====
+// RUN: roundtrip
+// Numeric facade conversions preserve source signedness and destination precision.
+#include <loomcxx/numeric.h>
+using Narrow4 = __float8_e5m2 __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Byte4 = signed char __attribute__((ext_vector_type(4)));
+using Int4 = int __attribute__((ext_vector_type(4)));
+Float4 expand(Narrow4 value) { return loom::convert<Float4>(value); }
+Narrow4 encode(Byte4 value) { return loom::convert<Narrow4>(value); }
+Byte4 truncate_byte(Narrow4 value) { return loom::convert<Byte4>(value); }
+Int4 truncate_word(Narrow4 value) { return loom::convert<Int4>(value); }
+
+// ----
+func.def public @expand(%value: vector<4xf8E5M2>) -> (vector<4xf32>) {
+  %2 = vector.extf %value : vector<4xf8E5M2> to vector<4xf32>
+  func.return %2 : vector<4xf32>
+}
+
+func.def public @encode(%value: vector<4xi8>) -> (vector<4xf8E5M2>) {
+  %5 = vector.sitofp %value : vector<4xi8> to vector<4xf8E5M2>
+  func.return %5 : vector<4xf8E5M2>
+}
+
+func.def public @truncate_byte(%value: vector<4xf8E5M2>) -> (vector<4xi8>) {
+  %8 = vector.fptosi %value : vector<4xf8E5M2> to vector<4xi8>
+  func.return %8 : vector<4xi8>
+}
+
+func.def public @truncate_word(%value: vector<4xf8E5M2>) -> (vector<4xi32>) {
+  %11 = vector.fptosi %value : vector<4xf8E5M2> to vector<4xi32>
+  func.return %11 : vector<4xi32>
+}
+
+// ====
+// RUN: roundtrip
+// Floating-to-integer conversion precedes modulo byte truncation.
+using Signed4 = signed char __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Int4 = int __attribute__((ext_vector_type(4)));
+using Byte4 = unsigned char __attribute__((ext_vector_type(4)));
+Float4 signed_to_float(Signed4 value) {
+  return __builtin_convertvector(value, Float4);
+}
+Byte4 float_to_byte(Float4 value) {
+  return __builtin_convertvector(__builtin_convertvector(value, Int4), Byte4);
+}
+
+// ----
+func.def public @signed_to_float(%value: vector<4xi8>) -> (vector<4xf32>) {
+  %2 = vector.sitofp %value : vector<4xi8> to vector<4xf32>
+  func.return %2 : vector<4xf32>
+}
+
+func.def public @float_to_byte(%value: vector<4xf32>) -> (vector<4xi8>) {
+  %5 = vector.fptosi %value : vector<4xf32> to vector<4xi32>
+  %6 = vector.trunci %5 : vector<4xi32> to vector<4xi8>
+  func.return %6 : vector<4xi8>
+}
