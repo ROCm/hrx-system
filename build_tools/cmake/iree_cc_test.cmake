@@ -23,6 +23,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/../sanitizer/iree_sanitizer_suppressions.cmak
 # SRCS: List of source files for the binary.
 # DATA: List of other targets and files required for this binary.
 # DEPS: List of other libraries to be linked in to the binary targets.
+# INCLUDES: Additional include directories for the binary.
 # COPTS: List of private compile options.
 # CXX_STANDARD: Optional C++ standard version, such as 23.
 # CXX_FEATURES: Required private C++ runtime features: exceptions and rtti.
@@ -73,7 +74,7 @@ function(iree_cc_test)
     _RULE
     ""
     "NAME;RESOURCE_GROUP;CXX_STANDARD"
-    "ARGS;SRCS;COPTS;CXX_FEATURES;DEFINES;LINKOPTS;DATA;DEPS;LABELS;GROUP;TIMEOUT;ENV;SANITIZER_SUPPRESSIONS"
+    "ARGS;SRCS;INCLUDES;COPTS;CXX_FEATURES;DEFINES;LINKOPTS;DATA;DEPS;LABELS;GROUP;TIMEOUT;ENV;SANITIZER_SUPPRESSIONS"
     ${ARGN}
   )
 
@@ -118,6 +119,10 @@ function(iree_cc_test)
   target_include_directories(${_NAME} SYSTEM
     PUBLIC
       "$<BUILD_INTERFACE:${IREE_SOURCE_DIR};${IREE_BINARY_DIR}>"
+  )
+  target_include_directories(${_NAME}
+    PRIVATE
+      ${_RULE_INCLUDES}
   )
   target_compile_definitions(${_NAME}
     PUBLIC

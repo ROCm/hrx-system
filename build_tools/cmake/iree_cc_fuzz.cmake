@@ -13,6 +13,7 @@
 # SRCS: List of source files for the fuzzer (must define LLVMFuzzerTestOneInput).
 # DATA: List of other targets and files required for this binary.
 # DEPS: List of other libraries to be linked in to the binary targets.
+# INCLUDES: Additional include directories for the binary.
 # COPTS: List of private compile options.
 # DEFINES: List of public defines.
 # LINKOPTS: List of link options.
@@ -46,7 +47,7 @@ function(iree_cc_fuzz)
     _RULE
     ""
     "NAME"
-    "SRCS;COPTS;DEFINES;LINKOPTS;DATA;DEPS;LABELS"
+    "SRCS;INCLUDES;COPTS;DEFINES;LINKOPTS;DATA;DEPS;LABELS"
     ${ARGN}
   )
 
@@ -72,6 +73,10 @@ function(iree_cc_fuzz)
   target_include_directories(${_NAME} SYSTEM
     PUBLIC
       "$<BUILD_INTERFACE:${IREE_SOURCE_DIR};${IREE_BINARY_DIR}>"
+  )
+  target_include_directories(${_NAME}
+    PRIVATE
+      ${_RULE_INCLUDES}
   )
   target_compile_definitions(${_NAME}
     PUBLIC
