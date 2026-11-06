@@ -105,9 +105,7 @@ class SiteTableTest : public ::testing::Test {
         &module_->arena, 2, sizeof(*children), (void**)&children));
     children[0] = first_child;
     children[1] = second_child;
-    loom_location_entry_t entry = {.kind = LOOM_LOCATION_FUSED};
-    entry.fused.count = 2;
-    entry.fused.children = children;
+    loom_location_entry_t entry = loom_location_fused(children, 2);
     loom_location_id_t location_id = LOOM_LOCATION_UNKNOWN;
     IREE_CHECK_OK(loom_module_add_location(module_, entry, &location_id));
     return location_id;
