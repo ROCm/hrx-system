@@ -25,6 +25,37 @@ enum class LocalHostView {
   kUnpublishable,
 };
 
+// Holds one real host allocation while other callers continue using the same
+// allocator. Every allocation and free otherwise goes to the system allocator.
+struct HeldHostAllocation {
+  // Only the first allocation enters the controlled dependency.
+  std::atomic<bool> armed = true;
+  // Establishes that the production allocator call is outstanding.
+  std::binary_semaphore entered{0};
+  // Allows that allocation to return to its production caller.
+  std::binary_semaphore resume{0};
+  // Returns an allocation failure after the held dependency resumes.
+  bool fail = false;
+
+  iree_allocator_t allocator() {
+    return {this, [](void* self, iree_allocator_command_t command,
+                     const void* params, void** inout_pointer) {
+              auto* allocation = static_cast<HeldHostAllocation*>(self);
+              if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+                  allocation->armed.exchange(false)) {
+                allocation->entered.release();
+                allocation->resume.acquire();
+                if (allocation->fail) {
+                  return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                          "host allocation unavailable");
+                }
+              }
+              const auto system = iree_allocator_system();
+              return system.ctl(system.self, command, params, inout_pointer);
+            }};
+  }
+};
+
 // The native memory dependency supplies mapped system storage and distinct
 // local mapping/publication capabilities. Program placement, publication,
 // leases, trim, and cleanup all use the production implementation.
@@ -381,13 +412,13 @@ TEST_P(ProgramLifetimeTest, LastReleaseReturnsBeforeHeldNativeFree) {
   EXPECT_EQ(program->upload != nullptr, !PublishesLocalWrites());
   EXPECT_EQ(pool_.resident.scope, local_handle_);
   EXPECT_EQ(pool_.resident.host_access != 0, PublishesLocalWrites());
-  EXPECT_EQ(pool_.head, program);
+  EXPECT_EQ(pool_.registry.head, program);
   std::binary_semaphore entered{0}, resume{0};
   free_entered_ = &entered;
   free_resume_ = &resume;
   iree_hal_amd_gpu_program_deinitialize(program);
   delete program;
-  EXPECT_EQ(pool_.head, nullptr);
+  EXPECT_EQ(pool_.registry.head, nullptr);
   entered.acquire();
   EXPECT_EQ(live_count_, PublishesLocalWrites() ? 1u : 2u);
   resume.release();
@@ -490,6 +521,145 @@ TEST_P(ProgramLifetimeTest, QueueGrowthPreservesConcurrentInvocationLeases) {
   EXPECT_EQ(allocate_count_, allocations);
   EXPECT_EQ(program.queue_count, 256u);
   iree_hal_amd_gpu_program_deinitialize(&program);
+}
+
+TEST_P(ProgramLifetimeTest,
+       QueueGrowthAllowsIndependentRegistrationRemovalAndPublication) {
+  iree_hal_amd_gpu_program_t remaining = {}, first = {};
+  auto* removed = new iree_hal_amd_gpu_program_t{};
+  ASSERT_NO_FATAL_FAILURE(Record(&remaining));
+  ASSERT_NO_FATAL_FAILURE(Record(removed));
+  ASSERT_NO_FATAL_FAILURE(Record(&first));
+  HeldHostAllocation allocation;
+  const auto allocator = pool_.host_allocator;
+  pool_.host_allocator = allocation.allocator();
+  std::thread growth([&] {
+    IREE_EXPECT_OK(iree_hal_amd_gpu_program_pool_reserve_queues(&pool_, 8));
+  });
+  allocation.entered.acquire();
+
+  // The traversal's pending node may disappear while its current node stays
+  // borrowed. Reclaim its metadata before the traversal resumes.
+  iree_hal_amd_gpu_program_deinitialize(removed);
+  delete removed;
+  iree_hal_amd_gpu_program_t inserted = {};
+  ASSERT_NO_FATAL_FAILURE(Record(&inserted));
+  EXPECT_EQ(inserted.queue_count, 8u);
+
+  uint64_t frontier[16] = {};
+  auto* instance = iree_hal_amd_gpu_program_try_acquire(&first, 2, frontier);
+  EXPECT_EQ(instance, first.initial);
+  iree_hal_amd_gpu_program_publish(&first, instance, 2, 7);
+  iree_hal_amd_gpu_program_release(&first, instance);
+  iree_hal_amd_gpu_program_pool_trim(&pool_);
+
+  // A second traversal can finish a wider installation before the first one
+  // resumes. Its late proposal must not shrink the already-published width.
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_pool_reserve_queues(&pool_, 16));
+  EXPECT_EQ(first.queue_count, 16u);
+  EXPECT_EQ(inserted.queue_count, 16u);
+  EXPECT_EQ(remaining.queue_count, 16u);
+  allocation.resume.release();
+  growth.join();
+  EXPECT_EQ(first.queue_count, 16u);
+  EXPECT_EQ(remaining.queue_count, 16u);
+  EXPECT_EQ(pool_.registry.visits, nullptr);
+  frontier[2] = 7;
+  instance = iree_hal_amd_gpu_program_try_acquire(&first, 15, frontier);
+  EXPECT_EQ(instance, first.initial);
+  iree_hal_amd_gpu_program_cancel(&first, instance);
+  iree_hal_amd_gpu_program_deinitialize(&first);
+  iree_hal_amd_gpu_program_deinitialize(&inserted);
+  iree_hal_amd_gpu_program_deinitialize(&remaining);
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  pool_.host_allocator = allocator;
+}
+
+TEST_P(ProgramLifetimeTest, RemovalJoinsAllActiveVisitsOnSuccessAndFailure) {
+  for (bool fail : {false, true}) {
+    iree_hal_amd_gpu_program_t other = {}, first = {};
+    ASSERT_NO_FATAL_FAILURE(Record(&other));
+    ASSERT_NO_FATAL_FAILURE(Record(&first));
+    HeldHostAllocation allocation;
+    allocation.fail = fail;
+    const auto allocator = pool_.host_allocator;
+    pool_.host_allocator = allocation.allocator();
+    const uint32_t width = pool_.registry.queue_count * 2;
+    std::binary_semaphore growth_completed{0};
+    const auto grow = [&](uint32_t requested_width) {
+      iree_status_t status =
+          iree_hal_amd_gpu_program_pool_reserve_queues(&pool_, requested_width);
+      if (fail) {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+      } else {
+        IREE_EXPECT_OK(status);
+      }
+      growth_completed.release();
+    };
+    std::thread first_growth(grow, width);
+    allocation.entered.acquire();
+    allocation.armed = true;
+    std::thread second_growth(grow, width * 2);
+    allocation.entered.acquire();
+    std::atomic<bool> removed = false;
+    std::thread removal([&] {
+      iree_hal_amd_gpu_program_deinitialize(&first);
+      removed = true;
+    });
+    // Unlinking closes new traversal borrows before joining the active one.
+    // Observe that production boundary without a scheduling delay or deadline.
+    bool unlinked = false;
+    while (!unlinked) {
+      iree_slim_mutex_lock(&pool_.registry.mutex);
+      unlinked = pool_.registry.head != &first;
+      iree_slim_mutex_unlock(&pool_.registry.mutex);
+      if (!unlinked) {
+        std::this_thread::yield();
+      }
+    }
+    EXPECT_FALSE(removed.load());
+    iree_hal_amd_gpu_program_deinitialize(&other);
+    EXPECT_EQ(pool_.registry.head, nullptr);
+    allocation.resume.release();
+    growth_completed.acquire();
+    EXPECT_FALSE(removed.load());
+    allocation.resume.release();
+    growth_completed.acquire();
+    first_growth.join();
+    second_growth.join();
+    removal.join();
+    EXPECT_TRUE(removed.load());
+    EXPECT_EQ(pool_.registry.visits, nullptr);
+    iree_hal_amd_gpu_context_join_memory(&context_);
+    pool_.host_allocator = allocator;
+  }
+}
+
+TEST_P(ProgramLifetimeTest, SealingReconcilesConcurrentQueueExpansion) {
+  iree_hal_amd_gpu_program_t program = {};
+  IREE_ASSERT_OK(
+      iree_hal_amd_gpu_program_initialize(&pool_, 256, 4096, 16, &program));
+  memset(program.contents.data, 0x5a, program.contents.data_length);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_pool_reserve_queues(&pool_, 8));
+  HeldHostAllocation allocation;
+  const auto allocator = pool_.host_allocator;
+  pool_.host_allocator = allocation.allocator();
+  std::thread recorder(
+      [&] { IREE_EXPECT_OK(iree_hal_amd_gpu_program_seal(&program)); });
+  allocation.entered.acquire();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_program_pool_reserve_queues(&pool_, 16));
+  EXPECT_EQ(pool_.registry.head, nullptr);
+  allocation.resume.release();
+  recorder.join();
+  EXPECT_EQ(program.queue_count, 16u);
+  EXPECT_EQ(pool_.registry.head, &program);
+  uint64_t frontier[16] = {};
+  auto* instance = iree_hal_amd_gpu_program_try_acquire(&program, 15, frontier);
+  EXPECT_EQ(instance, program.initial);
+  iree_hal_amd_gpu_program_cancel(&program, instance);
+  iree_hal_amd_gpu_program_deinitialize(&program);
+  iree_hal_amd_gpu_context_join_memory(&context_);
+  pool_.host_allocator = allocator;
 }
 
 TEST_P(ProgramLifetimeTest, RetiredInstanceNotifiesWhileCloneAllocationIsHeld) {
@@ -600,7 +770,7 @@ TEST_P(ProgramLifetimeTest, PartialConstructionReleasesItsAcquiredOwners) {
     iree_hal_amd_gpu_program_deinitialize(&program);
     iree_hal_amd_gpu_context_join_memory(&context_);
     EXPECT_EQ(live_count_, 0u);
-    EXPECT_EQ(pool_.head, nullptr);
+    EXPECT_EQ(pool_.registry.head, nullptr);
   }
 }
 
@@ -709,7 +879,7 @@ TEST_P(ProgramLifetimeTest, CancelledBorrowCanRequireMoreInstancesThanQueues) {
   auto* third = iree_hal_amd_gpu_program_try_acquire(&program, 0, frontier);
   ASSERT_NE(third, nullptr);
   iree_hal_amd_gpu_program_publish(&program, third, 0, 2);
-  EXPECT_EQ(program.capacity, pool_.queue_count);
+  EXPECT_EQ(program.capacity, pool_.registry.queue_count);
 
   const auto* queues = program.queues;
   const auto source = iree_hal_amd_gpu_program_source(&program);
@@ -719,8 +889,8 @@ TEST_P(ProgramLifetimeTest, CancelledBorrowCanRequireMoreInstancesThanQueues) {
   ASSERT_NO_FATAL_FAILURE(Grow(&program, 2));
   auto* fourth = iree_hal_amd_gpu_program_try_acquire(&program, 2, frontier);
   ASSERT_NE(fourth, nullptr);
-  EXPECT_GE(fourth->ordinal, pool_.queue_count);
-  EXPECT_GT(program.capacity, pool_.queue_count);
+  EXPECT_GE(fourth->ordinal, pool_.registry.queue_count);
+  EXPECT_GT(program.capacity, pool_.registry.queue_count);
   EXPECT_EQ(program.queues, queues);
   EXPECT_EQ(program.initial, first);
   EXPECT_EQ(iree_hal_amd_gpu_program_source(&program).address, source.address);
