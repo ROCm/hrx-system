@@ -1705,7 +1705,7 @@ void ControlFlow::retain_constructor_call(cxx::FunctionSymbol* constructor,
       .source = owner,
       .arguments = {},
       .receiver = std::nullopt,
-      .current_receiver = false,
+      .current_receiver = receiver.current_receiver,
       .storage_receiver = storage_receiver,
   };
   if (initializer) {
@@ -1714,7 +1714,9 @@ void ControlFlow::retain_constructor_call(cxx::FunctionSymbol* constructor,
       retained.arguments.push_back(retain_call_argument(argument));
     }
   }
-  retained.receiver = std::move(receiver);
+  if (!retained.current_receiver) {
+    retained.receiver = std::move(receiver);
+  }
   calls_.push_back(std::move(retained));
 }
 
@@ -2338,6 +2340,22 @@ void ControlFlow::visit(cxx::ImplicitCastExpressionAST* ast) {
 
 void ControlFlow::retain_member_constructor(
     cxx::MemInitializerAST* initializer) {
+  auto* delegate = function_->delegatingConstructor();
+  if (delegate && same_function(delegate, initializer->constructor)) {
+    auto* object_type = implicit_object_type(unit_, function_);
+    if (types_.is_user_record_constructor(object_type, delegate, initializer)) {
+      auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
+      // Delegation has no source receiver expression: the selected call reuses
+      // the constructor's current object and its existing storage identity.
+      retain_constructor_call(
+          delegate, source,
+          CallArgument{.current_receiver = true, .inherent_storage = true},
+          /*storage_receiver=*/true, initializer);
+    } else {
+      analyze_default_constructor(object_type, delegate, initializer);
+    }
+    return;
+  }
   auto* field = cxx::symbol_cast<cxx::FieldSymbol>(initializer->symbol);
   if (!field || !types_.is_user_record_constructor(
                     field->type(), initializer->constructor, initializer)) {

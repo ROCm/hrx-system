@@ -45,6 +45,62 @@ struct ForcedInlineValue {
   __forceinline__ ~ForcedInlineValue() {}
 };
 
+static unsigned append_digit(unsigned* trace, unsigned digit) {
+  *trace = *trace * 10u + digit;
+  return digit;
+}
+
+struct DelegatingOrder {
+  unsigned value;
+
+  DelegatingOrder(unsigned seed, unsigned* trace)
+      : value(seed + append_digit(trace, 2u)) {
+    append_digit(trace, 3u);
+  }
+  DelegatingOrder(unsigned* trace)
+      : DelegatingOrder(append_digit(trace, 1u), trace) {
+    value += append_digit(trace, 4u);
+  }
+};
+
+struct DelegatingChain {
+  unsigned value;
+
+  DelegatingChain(unsigned seed, unsigned bias) : value(seed + bias) {}
+  DelegatingChain(unsigned seed) : DelegatingChain(seed, 2u) { value *= 3u; }
+  DelegatingChain() : DelegatingChain(4u) { value += 1u; }
+};
+
+struct DelegatingPacket {
+  DelegatingChain values[2];
+};
+
+struct BracedDelegation {
+  unsigned value;
+
+  BracedDelegation(unsigned seed, unsigned bias = 5u) : value(seed + bias) {}
+  BracedDelegation() : BracedDelegation{7u} { value += 1u; }
+};
+
+struct DefaultedDelegationTarget {
+  unsigned value = 5u;
+
+  DefaultedDelegationTarget() = default;
+  DefaultedDelegationTarget(unsigned adjustment) : DefaultedDelegationTarget() {
+    value += adjustment;
+  }
+};
+
+struct PrvalueDelegation {
+  unsigned value;
+
+  PrvalueDelegation(unsigned seed) : value(seed) {}
+  PrvalueDelegation(const PrvalueDelegation&) = default;
+  PrvalueDelegation() : PrvalueDelegation(PrvalueDelegation(9u)) {
+    value += 1u;
+  }
+};
+
 struct Movable {
   unsigned value;
   void increment() && { ++value; }
@@ -99,6 +155,37 @@ static unsigned default_defined_value() {
 
 static unsigned forced_inline_value(unsigned seed) {
   ForcedInlineValue value(seed);
+  return value.value;
+}
+
+static unsigned delegating_order_value() {
+  unsigned trace = 0u;
+  DelegatingOrder value(&trace);
+  return trace * 100u + value.value;
+}
+
+static unsigned delegating_chain_value() {
+  DelegatingChain value;
+  return value.value;
+}
+
+static unsigned delegating_array_value() {
+  DelegatingPacket packet;
+  return packet.values[0].value + packet.values[1].value;
+}
+
+static unsigned braced_delegation_value() {
+  BracedDelegation value;
+  return value.value;
+}
+
+static unsigned defaulted_delegation_target_value() {
+  DefaultedDelegationTarget value(3u);
+  return value.value;
+}
+
+static unsigned prvalue_delegation_value() {
+  PrvalueDelegation value;
   return value.value;
 }
 
@@ -181,6 +268,12 @@ LOOM_CHECK_CASE(record_constructors) {
   const auto nested_defaults = nested_default_sum();
   const auto default_defined = default_defined_value();
   const auto forced_inline = forced_inline_value(11u);
+  const auto delegation_order = delegating_order_value();
+  const auto delegation_chain = delegating_chain_value();
+  const auto delegation_array = delegating_array_value();
+  const auto braced_delegation = braced_delegation_value();
+  const auto defaulted_delegation = defaulted_delegation_target_value();
+  const auto prvalue_delegation = prvalue_delegation_value();
   const auto moved_first = move_sources(false, 2u, 5u);
   const auto moved_second = move_sources(true, 2u, 5u);
   const auto array_value = read_xvalue_array(7u, 11u);
@@ -200,6 +293,12 @@ LOOM_CHECK_CASE(record_constructors) {
   loom::check::expect_equal(nested_defaults, 4u);
   loom::check::expect_equal(default_defined, 3u);
   loom::check::expect_equal(forced_inline, 12u);
+  loom::check::expect_equal(delegation_order, 123407u);
+  loom::check::expect_equal(delegation_chain, 19u);
+  loom::check::expect_equal(delegation_array, 38u);
+  loom::check::expect_equal(braced_delegation, 13u);
+  loom::check::expect_equal(defaulted_delegation, 8u);
+  loom::check::expect_equal(prvalue_delegation, 10u);
   loom::check::expect_equal(moved_first, 16u);
   loom::check::expect_equal(moved_second, 22u);
   loom::check::expect_equal(array_value, 11u);

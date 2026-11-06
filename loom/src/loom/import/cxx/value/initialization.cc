@@ -100,10 +100,10 @@ bool vector_literal_can_encode(const cxx::ConstValue& value) {
 // only the destination policy; constructor synthesis, omitted members, and
 // default-member clauses remain source semantic facts.
 template <typename Callback>
-void for_each_default_initializer(cxx::TranslationUnit& unit,
-                                  Diagnostics& diagnostics,
-                                  cxx::FunctionSymbol* constructor,
-                                  cxx::AST* owner, Callback&& callback) {
+void for_each_field_initializer(cxx::TranslationUnit& unit,
+                                Diagnostics& diagnostics,
+                                cxx::FunctionSymbol* constructor,
+                                cxx::AST* owner, Callback&& callback) {
   cxx::ASTRewriter::requireFunctionDefinition(&unit, constructor);
   auto* definition = constructor->resolvedDefinition()->declaration();
   auto* body = definition ? definition->functionBody : nullptr;
@@ -115,9 +115,9 @@ void for_each_default_initializer(cxx::TranslationUnit& unit,
   for (auto* initializer : cxx::ListView{cxx::ctor_initializers(body)}) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(initializer->symbol);
     if (!field) {
-      diagnostics.reject(unit, initializer,
-                         "record value constructors cannot initialize bases "
-                         "or delegate");
+      diagnostics.reject(
+          unit, initializer,
+          "record value constructors cannot initialize base classes");
     }
     auto* source = cxx::memInitializerClause(unit.arena(), initializer);
     callback(field, source, initializer);
@@ -645,7 +645,7 @@ Value Initialization::default_record(const RecordPartition& record,
     }
   }
 
-  for_each_default_initializer(
+  for_each_field_initializer(
       unit_, diagnostics_, constructor, owner,
       [&](cxx::FieldSymbol* field, cxx::ExpressionAST* source,
           cxx::MemInitializerAST* initializer) {
@@ -822,7 +822,7 @@ void Initialization::default_storage_record(StorageProjection destination,
     }
   }
 
-  for_each_default_initializer(
+  for_each_field_initializer(
       unit_, diagnostics_, constructor, owner,
       [&](cxx::FieldSymbol* field, cxx::ExpressionAST* source,
           cxx::MemInitializerAST* initializer) {
@@ -1016,6 +1016,22 @@ void Initialization::constructor_receiver(StorageProjection destination,
                                           const cxx::Type* object_type,
                                           cxx::FunctionSymbol* constructor,
                                           cxx::AST* owner) {
+  if (auto* delegate = constructor->delegatingConstructor()) {
+    types_.admit_construction(constructor, object_type, owner);
+    cxx::ASTRewriter::requireFunctionDefinition(&unit_, constructor);
+    auto* definition = constructor->resolvedDefinition()->declaration();
+    auto* body = definition->functionBody;
+    auto* initializer = cxx::ctor_initializers(body)->value;
+    ReceiverScope receiver(evaluation_, record, destination, object_type);
+    auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
+    auto mark = evaluation_.begin_full_expression();
+    object(destination, object_type, source, delegate, initializer);
+    evaluation_.finish_full_expression(mark);
+    for (const auto& member : record.members) {
+      evaluation_.complete_storage_receiver_member(member.field);
+    }
+    return;
+  }
   default_storage_record(destination, record, object_type, constructor,
                          /*zero_initialize=*/false, /*retained=*/false, owner);
 }
