@@ -1006,7 +1006,7 @@ TEST_F(GrowthTest, SignalBackingSurvivesProducerAndSourceRemoval) {
   iree_hal_amd_gpu_signal_release(signal);  // Producer is finished.
 
   JoinPublication();
-  const iree_hal_amd_gpu_publication_source_t vacant = {};
+  iree_hal_amd_gpu_publication_source_t vacant = {};
   iree_hal_amd_gpu_publication_set_sources(&publication_, 1, &vacant);
   iree_hal_amd_gpu_signal_cache_trim(&context_, 0, &signals_);
   iree_hal_amd_gpu_context_join_memory(&context_);

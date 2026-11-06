@@ -59,13 +59,13 @@ typedef struct iree_hal_amd_gpu_publication_t {
   iree_alignas(iree_hardware_destructive_interference_size) struct {
     // Protects only table access and active-callback bookkeeping.
     iree_slim_mutex_t mutex;
-    // Borrowed immutable table; callbacks run from a by-value stack copy.
-    const iree_hal_amd_gpu_publication_source_t* values;
+    // Borrowed table, modified under mutex; callbacks run from a stack copy.
+    iree_hal_amd_gpu_publication_source_t* values;
     // Admitted table extent, including vacant ordinals.
     uint32_t count;
     // Sole active callback's ordinal, or UINT32_MAX between callbacks.
     uint32_t active_ordinal;
-    // A replacement is joining this callback because it was not retained.
+    // The active callback has been removed and its owner may be joining it.
     bool joining;
     // Joins only the removed callback's final access, outside the mutex.
     iree_notification_t joined;
@@ -80,7 +80,7 @@ typedef struct iree_hal_amd_gpu_publication_t {
 // Failure leaves out_publication safe to deinitialize. The embedding device
 // keeps all source state live through replacement or deinitialization.
 iree_status_t iree_hal_amd_gpu_publication_initialize(
-    uint32_t source_count, const iree_hal_amd_gpu_publication_source_t* sources,
+    uint32_t source_count, iree_hal_amd_gpu_publication_source_t* sources,
     iree_thread_affinity_t affinity, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_publication_t* out_publication);
 
@@ -98,7 +98,21 @@ iree_status_t iree_hal_amd_gpu_publication_initialize(
 // or native operation inside the handoff.
 void iree_hal_amd_gpu_publication_set_sources(
     iree_hal_amd_gpu_publication_t* publication, uint32_t source_count,
-    const iree_hal_amd_gpu_publication_source_t* sources);
+    iree_hal_amd_gpu_publication_source_t* sources);
+
+// Disables one source and returns whether its final invocation is still active.
+// Serialized with table replacement, which must keep this ordinal vacant until
+// join_source returns. The owner joins accepted work and external producers
+// before removal, and keeps the source state alive through the separate join.
+// Other sources can be replaced or removed while that join waits.
+bool iree_hal_amd_gpu_publication_remove_source(
+    iree_hal_amd_gpu_publication_t* publication, uint32_t source_ordinal);
+
+// Joins a disabled ordinal's final callback access. Called outside callbacks
+// and outside the owner's table-replacement exclusion. The ordinal cannot be
+// reused until return. There is no allocation or native operation.
+void iree_hal_amd_gpu_publication_join_source(
+    iree_hal_amd_gpu_publication_t* publication, uint32_t source_ordinal);
 
 // Requests a turn for one provisioned source. Duplicate notifications coalesce;
 // a notification racing its current turn is retained for the next turn.

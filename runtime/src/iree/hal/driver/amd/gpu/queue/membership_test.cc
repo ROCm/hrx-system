@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/membership.h"
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <functional>
@@ -195,7 +196,9 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
                          iree_hal_amd_gpu_completion_wait_t*,
                          iree_hal_amd_gpu_completion_copy_t*) {
                         auto* queue = static_cast<Queue*>(data);
-                        if (queue == &queue->owner->provisioned_ &&
+                        auto* selected = queue->owner->callout_queue_.load();
+                        if (queue == (selected ? selected
+                                               : &queue->owner->provisioned_) &&
                             queue->owner->run_callout_.exchange(false)) {
                           iree_hal_amd_gpu_completion_scope_unlock(scope);
                           queue->owner->callout_();
@@ -297,6 +300,7 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
   }
 
   void SourceAllocationProgress(bool fail);
+  void CallbackRemovalProgress(bool publication);
 
   // Native wake dependency; no GPU is accessed.
   amdf_gpu_api_t gpu_ = {};
@@ -334,6 +338,8 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
   std::atomic<uint32_t> destroyed_{0};
   // Publishes the dependency callout after its function has been initialized.
   std::atomic<bool> run_callout_{false};
+  // Optional acquired source selected for the same controlled callback tail.
+  std::atomic<Queue*> callout_queue_{nullptr};
   // Scripted queue callback; real membership and worker ownership surround it.
   std::function<void()> callout_;
   // Native constructor dependency, before the complete queue is returned.
@@ -355,6 +361,91 @@ class MembershipTest : public ::testing::TestWithParam<uint32_t> {
   // Host storage retirement, including displaced worker source tables.
   std::function<void(void*)> free_;
 };
+
+void MembershipTest::CallbackRemovalProgress(bool publication) {
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  iree_hal_queue_t* pending = nullptr;
+  iree_hal_queue_t* independent = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
+                                                           &params, &pending));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &params, &independent));
+  auto* queue = reinterpret_cast<Queue*>(pending);
+  const uint32_t ordinal = queue->ordinal;
+  const uint32_t reusable = reinterpret_cast<Queue*>(independent)->ordinal;
+  std::binary_semaphore entered{0}, resume{0};
+  auto hold = [&] {
+    entered.release();
+    resume.acquire();
+    EXPECT_TRUE(queue->idle.load());
+  };
+  if (publication) {
+    publish_ = [&](Queue* source) {
+      if (source == queue) {
+        hold();
+      }
+    };
+    iree_hal_amd_gpu_publication_notify(&publication_, ordinal + 3);
+  } else {
+    callout_ = hold;
+    callout_queue_ = queue;
+    run_callout_ = true;
+    EXPECT_EQ(iree_hal_amd_gpu_context_signal(&context_), AMDF_STATUS_OK);
+  }
+  entered.acquire();
+  std::jthread releaser([&] { iree_hal_queue_release(pending); });
+  closed_.acquire();
+  // Observe removal's ownership handoff, not elapsed time or thread entry.
+  // The queue is idle but its last callback still owns the protocol object.
+  bool disabled = false;
+  while (!disabled) {
+    if (publication) {
+      iree_slim_mutex_lock(&publication_.sources.mutex);
+      disabled = !publication_.sources.values[ordinal + 3].publish;
+      iree_slim_mutex_unlock(&publication_.sources.mutex);
+    } else {
+      iree_slim_mutex_lock(&completion_.drain_mutex);
+      for (auto* scope = completion_.active_scopes; scope;
+           scope = scope->next) {
+        disabled |= !scope->fn && scope->source->user_data == queue;
+      }
+      iree_slim_mutex_unlock(&completion_.drain_mutex);
+    }
+    if (!disabled) {
+      std::this_thread::yield();
+    }
+  }
+  iree_hal_queue_release(independent);
+  EXPECT_EQ(destroyed_.load(), 1u);
+  iree_hal_queue_t* replacement = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(
+      &membership_, &params, &replacement));
+  EXPECT_EQ(reinterpret_cast<Queue*>(replacement)->ordinal, reusable);
+  // Repeated swaps and table growth must preserve the held callback's owner.
+  std::array<iree_hal_queue_t*, 6> added = {};
+  for (auto& next : added) {
+    IREE_ASSERT_OK(iree_hal_amd_gpu_queue_membership_acquire(&membership_,
+                                                             &params, &next));
+  }
+  for (auto* next : added) {
+    iree_hal_queue_release(next);
+  }
+  iree_hal_queue_release(replacement);
+  EXPECT_EQ(destroyed_.load(), 8u);
+  resume.release();
+  releaser.join();
+  EXPECT_EQ(destroyed_.load(), 9u);
+  EXPECT_TRUE(iree_hal_amd_gpu_queue_membership_is_empty(&membership_));
+}
+
+TEST_P(MembershipTest, RemovedPublisherDoesNotBlockIndependentMembership) {
+  CallbackRemovalProgress(true);
+}
+
+TEST_P(MembershipTest, RemovedCompletionDoesNotBlockIndependentMembership) {
+  CallbackRemovalProgress(false);
+}
 
 TEST_P(MembershipTest, IdleQueueReleaseRearmsRetainedDownload) {
   struct Download {
@@ -408,15 +499,20 @@ TEST_P(MembershipTest, IdleQueueReleaseRearmsRetainedDownload) {
   download.pause.store(true);
   EXPECT_EQ(iree_hal_amd_gpu_context_signal(&context_), AMDF_STATUS_OK);
   download.entered.acquire();
-  const int32_t observing_state =
-      iree_atomic_load(&completion_.state, iree_memory_order_acquire);
+  const uint32_t source_ordinal = reinterpret_cast<Queue*>(queue)->ordinal + 3;
   std::jthread releaser([&] { iree_hal_queue_release(queue); });
-  while (iree_atomic_load(&completion_.state, iree_memory_order_acquire) ==
-         observing_state) {
-    std::this_thread::yield();
+  bool disabled = false;
+  while (!disabled) {
+    iree_slim_mutex_lock(&publication_.sources.mutex);
+    disabled = !publication_.sources.values[source_ordinal].publish;
+    iree_slim_mutex_unlock(&publication_.sources.mutex);
+    if (!disabled) {
+      std::this_thread::yield();
+    }
   }
-  // Replacement excludes this round's new copy borrow. The membership owner
-  // must wake retained sources after swapping tables, even for idle removal.
+  // Removal has disabled publication and is joining the short metadata check.
+  // The copy may be accepted before replacement or deferred through it; either
+  // way it must finish without another application/device event.
   download.resume.release();
   releaser.join();
   download.copied.acquire();

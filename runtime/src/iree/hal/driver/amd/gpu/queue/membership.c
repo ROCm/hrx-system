@@ -14,6 +14,7 @@ typedef enum iree_hal_amd_gpu_queue_slot_state_e {
   IREE_HAL_AMD_GPU_QUEUE_SLOT_CONSTRUCTING,
   IREE_HAL_AMD_GPU_QUEUE_SLOT_LIVE,
   IREE_HAL_AMD_GPU_QUEUE_SLOT_DRAINING,
+  IREE_HAL_AMD_GPU_QUEUE_SLOT_QUIESCING,
   IREE_HAL_AMD_GPU_QUEUE_SLOT_REMOVING,
   IREE_HAL_AMD_GPU_QUEUE_SLOT_PRESERVED,
 } iree_hal_amd_gpu_queue_slot_state_t;
@@ -169,12 +170,11 @@ static bool iree_hal_amd_gpu_queue_membership_poll_join(
 }
 
 // Rebuild only the spare callback table, preserving retained sources' order.
-// The completion handoff joins removed sources and coherent observation while
-// relocating active callbacks that remain members. Neither worker keeps the
-// old table after its handoff returns.
+// Quiescing queues retain a disabled completion position until their exact
+// callback joins outside membership exclusion. Coherent observation is bounded;
+// neither worker keeps the old table after its handoff returns.
 static amdf_status_t iree_hal_amd_gpu_queue_membership_rebind(
-    iree_hal_amd_gpu_queue_membership_t* membership,
-    iree_hal_queue_t* excluded_queue) {
+    iree_hal_amd_gpu_queue_membership_t* membership) {
   iree_hal_amd_gpu_queue_sources_t* sources = membership->sources;
   const uint32_t next = sources->active ^ 1;
   iree_hal_amd_gpu_publication_source_t* publication =
@@ -193,15 +193,19 @@ static amdf_status_t iree_hal_amd_gpu_queue_membership_rebind(
          membership->publication_tail, sizeof(membership->publication_tail));
   for (iree_hal_amd_gpu_queue_slot_t* slot = membership->slots; slot;
        slot = slot->next) {
-    if (!slot->queue || slot->queue == excluded_queue ||
-        slot->state == IREE_HAL_AMD_GPU_QUEUE_SLOT_REMOVING ||
+    if (!slot->queue || slot->state == IREE_HAL_AMD_GPU_QUEUE_SLOT_REMOVING ||
         slot->state == IREE_HAL_AMD_GPU_QUEUE_SLOT_PRESERVED) {
       continue;
     }
-    publication[slot->ordinal + 3] =
-        membership->lifecycle->publication_source(slot->queue);
-    completion[completion_count++] =
+    iree_hal_amd_gpu_completion_source_t source =
         membership->lifecycle->completion_source(slot->queue);
+    if (slot->state == IREE_HAL_AMD_GPU_QUEUE_SLOT_QUIESCING) {
+      source.fn = NULL;
+    } else {
+      publication[slot->ordinal + 3] =
+          membership->lifecycle->publication_source(slot->queue);
+    }
+    completion[completion_count++] = source;
   }
   memcpy(completion + completion_count, membership->completion_tail,
          membership->completion_tail_count * sizeof(*completion));
@@ -295,7 +299,7 @@ static iree_status_t iree_hal_amd_gpu_queue_membership_reserve_sources(
     if (iree_status_is_ok(status)) {
       membership->sources = sources;
       status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-          iree_hal_amd_gpu_queue_membership_rebind(membership, NULL),
+          iree_hal_amd_gpu_queue_membership_rebind(membership),
           "GPU source installation wake");
     }
     membership->pending_allocations.source_capacity = 0;
@@ -322,6 +326,40 @@ static bool iree_hal_amd_gpu_queue_membership_terminal_joined(void* user_data) {
   iree_hal_amd_gpu_queue_membership_t* membership = user_data;
   return iree_atomic_load(&membership->terminal.completed,
                           iree_memory_order_acquire);
+}
+
+// Enters and returns under membership exclusion. Accepted work has joined;
+// callback tails may still hold the queue. Disable them before dropping the
+// mutex, and retain their table position through independent membership
+// changes.
+static amdf_status_t iree_hal_amd_gpu_queue_membership_remove_sources(
+    iree_hal_amd_gpu_queue_slot_t* slot) {
+  iree_hal_amd_gpu_queue_membership_t* membership = slot->membership;
+  const bool publication_active = iree_hal_amd_gpu_publication_remove_source(
+      membership->publication, slot->ordinal + 3);
+  const iree_hal_amd_gpu_completion_source_t source =
+      membership->lifecycle->completion_source(slot->queue);
+  const bool completion_active = iree_hal_amd_gpu_completion_remove_source(
+      membership->completion, source.fn, source.user_data);
+  if (publication_active || completion_active) {
+    iree_slim_mutex_lock(&membership->slots_mutex);
+    slot->state = IREE_HAL_AMD_GPU_QUEUE_SLOT_QUIESCING;
+    iree_slim_mutex_unlock(&membership->slots_mutex);
+    iree_slim_mutex_unlock(&membership->mutex);
+    if (publication_active) {
+      iree_hal_amd_gpu_publication_join_source(membership->publication,
+                                               slot->ordinal + 3);
+    }
+    if (completion_active) {
+      iree_hal_amd_gpu_completion_join_source(membership->completion,
+                                              source.user_data);
+    }
+    iree_slim_mutex_lock(&membership->mutex);
+  }
+  iree_slim_mutex_lock(&membership->slots_mutex);
+  slot->state = IREE_HAL_AMD_GPU_QUEUE_SLOT_REMOVING;
+  iree_slim_mutex_unlock(&membership->slots_mutex);
+  return iree_hal_amd_gpu_queue_membership_rebind(membership);
 }
 
 static bool iree_hal_amd_gpu_queue_membership_release(void* user_data,
@@ -362,7 +400,7 @@ static bool iree_hal_amd_gpu_queue_membership_release(void* user_data,
     }
     *join.previous = &join;
     iree_slim_mutex_unlock(&membership->completion->drain_mutex);
-    status = iree_hal_amd_gpu_queue_membership_rebind(membership, NULL);
+    status = iree_hal_amd_gpu_queue_membership_rebind(membership);
   }
   iree_slim_mutex_unlock(&membership->mutex);
   if (amdf_status_is_ok(status) && joining) {
@@ -406,14 +444,16 @@ static bool iree_hal_amd_gpu_queue_membership_release(void* user_data,
     }
     iree_slim_mutex_unlock(&membership->completion->drain_mutex);
   }
-  const amdf_status_t removal_status = iree_hal_amd_gpu_queue_membership_rebind(
-      membership, amdf_status_is_ok(status) ? queue : NULL);
+  amdf_status_t removal_status = AMDF_STATUS_OK;
   if (amdf_status_is_ok(status)) {
+    removal_status = iree_hal_amd_gpu_queue_membership_remove_sources(slot);
     status = removal_status;
+  } else {
+    removal_status = iree_hal_amd_gpu_queue_membership_rebind(membership);
+    iree_slim_mutex_lock(&membership->slots_mutex);
+    slot->state = IREE_HAL_AMD_GPU_QUEUE_SLOT_REMOVING;
+    iree_slim_mutex_unlock(&membership->slots_mutex);
   }
-  iree_slim_mutex_lock(&membership->slots_mutex);
-  slot->state = IREE_HAL_AMD_GPU_QUEUE_SLOT_REMOVING;
-  iree_slim_mutex_unlock(&membership->slots_mutex);
   iree_slim_mutex_unlock(&membership->mutex);
   // Only this slot's lifecycle borrowers can still access its native state.
   // Other acquired queues remain independent of the native stop/unmap calls.
@@ -636,7 +676,7 @@ iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
     membership->lifecycle->set_release(
         queue, iree_hal_amd_gpu_queue_membership_release, slot);
     status = IREE_HAL_AMD_STATUS_FROM_AMDF(
-        iree_hal_amd_gpu_queue_membership_rebind(membership, NULL),
+        iree_hal_amd_gpu_queue_membership_rebind(membership),
         "GPU acquired queue source wake");
     // CONSTRUCTING excludes this private queue from global frontier visits.
     // Catch up outside membership exclusion before publishing LIVE; a growth
@@ -833,6 +873,7 @@ bool iree_hal_amd_gpu_queue_membership_try_failure(
     iree_slim_mutex_lock(&membership->slots_mutex);
     const bool pending =
         slot->state == IREE_HAL_AMD_GPU_QUEUE_SLOT_CONSTRUCTING ||
+        slot->state == IREE_HAL_AMD_GPU_QUEUE_SLOT_QUIESCING ||
         slot->state == IREE_HAL_AMD_GPU_QUEUE_SLOT_REMOVING;
     iree_hal_queue_t* queue = pending ? NULL : slot->queue;
     if (queue) {
