@@ -1930,8 +1930,14 @@ static iree_status_t iree_hal_streaming_pending_free_release_list(
 
 iree_status_t iree_hal_streaming_memory_release_completed_async_frees(
     iree_hal_streaming_stream_t* stream) {
+  // Context synchronization can retain a stream snapshot while public stream
+  // destruction detaches it. Retain under the stream lock so cleanup either
+  // owns a live context or leaves its deferred frees with the context registry.
+  iree_hal_streaming_context_t* context = NULL;
+  if (!iree_hal_streaming_stream_retain_context(stream, &context)) {
+    return iree_ok_status();
+  }
   iree_hal_streaming_deferred_device_free_t* completed_frees = NULL;
-  iree_hal_streaming_context_t* context = stream->context;
 
   iree_slim_mutex_lock(&context->pending_free_mutex);
   iree_hal_streaming_deferred_device_free_t** current =
@@ -1950,8 +1956,10 @@ iree_status_t iree_hal_streaming_memory_release_completed_async_frees(
   }
   iree_slim_mutex_unlock(&context->pending_free_mutex);
 
-  return iree_hal_streaming_pending_free_release_list(
+  iree_status_t status = iree_hal_streaming_pending_free_release_list(
       completed_frees, /*trim_to_release_threshold=*/true);
+  iree_hal_streaming_context_release(context);
+  return status;
 }
 
 iree_status_t iree_hal_streaming_memory_release_terminal_async_frees(

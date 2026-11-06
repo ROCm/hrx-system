@@ -850,6 +850,17 @@ TEST_F(CpuStreamingMemoryTest, BulkCopiesPreserveExplicitStreamQueue) {
   iree_hal_queue_release(ReplaceStreamQueue(stream_, original_queue));
 }
 
+TEST_F(CpuStreamingMemoryTest, SynchronizeRetainedDetachedStream) {
+  // Model context synchronization retaining a snapshot before another thread
+  // destroys the public stream. The snapshot remains valid after detachment.
+  IREE_ASSERT_OK(iree_hal_streaming_stream_synchronize(stream_));
+  iree_hal_streaming_context_unregister_stream(context_, stream_);
+  ASSERT_EQ(nullptr, stream_->context);
+  IREE_EXPECT_OK(iree_hal_streaming_stream_synchronize_flushed(stream_));
+  iree_hal_streaming_stream_release(stream_);
+  stream_ = nullptr;
+}
+
 TEST_F(CpuStreamingMemoryTest,
        PublicStreamFailureDoesNotReturnBorrowedDownloadEarly) {
   constexpr size_t kLength = 16;
