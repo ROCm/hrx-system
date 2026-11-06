@@ -138,13 +138,13 @@ static iree_status_t iree_allocator_mimalloc_free(void** inout_ptr) {
 IREE_API_EXPORT iree_status_t
 iree_allocator_mimalloc_ctl(void* self, iree_allocator_command_t command,
                             const void* params, void** inout_ptr) {
-  IREE_ASSERT_ARGUMENT(inout_ptr);
   switch (command) {
     case IREE_ALLOCATOR_COMMAND_MALLOC:
       return iree_allocator_mimalloc_malloc(params, inout_ptr);
     case IREE_ALLOCATOR_COMMAND_CALLOC:
       return iree_allocator_mimalloc_calloc(params, inout_ptr);
     case IREE_ALLOCATOR_COMMAND_REALLOC:
+      IREE_ASSERT_ARGUMENT(inout_ptr);
       if (!*inout_ptr) {
         return iree_allocator_mimalloc_malloc(params, inout_ptr);
       } else {
@@ -152,6 +152,12 @@ iree_allocator_mimalloc_ctl(void* self, iree_allocator_command_t command,
       }
     case IREE_ALLOCATOR_COMMAND_FREE:
       return iree_allocator_mimalloc_free(inout_ptr);
+    case IREE_ALLOCATOR_COMMAND_TRIM:
+      // Collection on an uninitialized thread is a no-op, including shared
+      // arena purging. Initialize the caller before requesting reclamation.
+      mi_thread_init();
+      mi_collect(true);
+      return iree_ok_status();
     default:
       return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                               "unsupported mimalloc allocator command");

@@ -583,6 +583,9 @@ static iree_status_t iree_arena_allocator_ctl(void* self,
       // Do nothing: can't free from an arena.
       return iree_ok_status();
     }
+    case IREE_ALLOCATOR_COMMAND_TRIM:
+      iree_arena_block_pool_trim(arena->block_pool);
+      return iree_allocator_trim(arena->block_pool->block_allocator);
     default:
       // NOTE: we could try to support IREE_ALLOCATOR_COMMAND_REALLOC, but
       // it requires the original size to be able to do properly (without

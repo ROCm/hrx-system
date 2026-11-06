@@ -62,6 +62,17 @@ IREE_API_EXPORT void iree_allocator_free(iree_allocator_t allocator,
   }
 }
 
+IREE_API_EXPORT iree_status_t iree_allocator_trim(iree_allocator_t allocator) {
+  if (!allocator.ctl) {
+    return iree_ok_status();
+  }
+  IREE_TRACE_ZONE_BEGIN(z0);
+  iree_status_t status =
+      allocator.ctl(allocator.self, IREE_ALLOCATOR_COMMAND_TRIM, NULL, NULL);
+  IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
 //===----------------------------------------------------------------------===//
 // Array allocation helpers with overflow checking
 //===----------------------------------------------------------------------===//
@@ -252,6 +263,9 @@ iree_allocator_inline_arena_ctl(void* self, iree_allocator_command_t command,
     case IREE_ALLOCATOR_COMMAND_FREE:
       return iree_allocator_inline_arena_free(
           (iree_allocator_inline_storage_t*)self, inout_ptr);
+    case IREE_ALLOCATOR_COMMAND_TRIM:
+      // The caller owns the fixed storage; no backing can be released here.
+      return iree_ok_status();
     default:
       return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                               "unsupported system allocator command");

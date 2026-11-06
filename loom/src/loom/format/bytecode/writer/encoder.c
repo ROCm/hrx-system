@@ -20,6 +20,9 @@ static iree_status_t loom_bytecode_buffer_allocate(
     void* self, iree_allocator_command_t command, const void* parameters,
     void** pointer) {
   loom_bytecode_buffer_t* buffer = self;
+  if (command == IREE_ALLOCATOR_COMMAND_TRIM) {
+    return iree_allocator_trim(iree_arena_allocator(buffer->arena));
+  }
   if (command == IREE_ALLOCATOR_COMMAND_FREE) {
     *pointer = NULL;
     return iree_ok_status();

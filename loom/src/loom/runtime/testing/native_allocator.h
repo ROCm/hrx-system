@@ -141,11 +141,13 @@ class NativeAllocator {
                                iree_allocator_command_t command,
                                const void* params, void** inout_pointer) {
     auto* self = static_cast<NativeAllocator*>(user_data);
+    const bool allocating = command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+                            command == IREE_ALLOCATOR_COMMAND_CALLOC ||
+                            command == IREE_ALLOCATOR_COMMAND_REALLOC;
     const iree_host_size_t requested_bytes =
-        command == IREE_ALLOCATOR_COMMAND_FREE
-            ? 0
-            : static_cast<const iree_allocator_alloc_params_t*>(params)
-                  ->byte_length;
+        allocating ? static_cast<const iree_allocator_alloc_params_t*>(params)
+                         ->byte_length
+                   : 0;
     const bool had_pointer = (command == IREE_ALLOCATOR_COMMAND_REALLOC ||
                               command == IREE_ALLOCATOR_COMMAND_FREE) &&
                              *inout_pointer != nullptr;
@@ -187,7 +189,7 @@ class NativeAllocator {
     {
       std::lock_guard<std::mutex> lock(self->mutex_);
       if (iree_status_is_ok(status)) {
-        if (command != IREE_ALLOCATOR_COMMAND_FREE) {
+        if (allocating) {
           ++self->allocation_metrics_.request_count;
           self->allocation_metrics_.requested_bytes += requested_bytes;
           self->allocation_metrics_.largest_request_bytes = std::max(
@@ -195,7 +197,8 @@ class NativeAllocator {
         }
         if (command == IREE_ALLOCATOR_COMMAND_FREE) {
           self->live_allocations_ -= had_pointer ? 1 : 0;
-        } else if (command != IREE_ALLOCATOR_COMMAND_REALLOC || !had_pointer) {
+        } else if (allocating && (command != IREE_ALLOCATOR_COMMAND_REALLOC ||
+                                  !had_pointer)) {
           self->live_allocations_ += *inout_pointer ? 1 : 0;
         }
       }
