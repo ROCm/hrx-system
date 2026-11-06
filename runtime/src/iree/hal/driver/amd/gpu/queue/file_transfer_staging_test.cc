@@ -13,6 +13,7 @@
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/fabric/memory_backend_test_base.h"
 #include "iree/hal/driver/amd/gpu/queue/file_transfer.h"
+#include "iree/hal/driver/amd/gpu/queue/sdma/commands.h"
 #include "iree/hal/driver/amd/gpu/queue/sdma/queue.h"
 #include "iree/hal/driver/amd/status.h"
 #include "iree/hal/utils/fd_file.h"
@@ -41,7 +42,9 @@ class FileTransferStagingTest : public MemoryBackendTest,
     iree_hal_amd_gpu_sdma_queue_t* native = nullptr;
     struct Copy {
       // Placed command dominated by this dependency's lifetime.
-      iree_hal_amd_gpu_sdma_copy_t command = {};
+      iree_hal_amd_gpu_sdma_submission_t command = {};
+      // Prepared native copy, immutable until checked retirement.
+      uint32_t words[7] = {};
       // File owner notified by native failure and final retirement.
       iree_hal_amd_gpu_retirement_callback_t callback = {};
     };
@@ -174,14 +177,17 @@ class FileTransferStagingTest : public MemoryBackendTest,
                 EXPECT_EQ(operation->type,
                           IREE_HAL_TRANSFER_OPERATION_TYPE_COPY);
                 auto copy = std::make_unique<BoundaryQueue::Copy>();
+                uint64_t source = 0, target = 0;
                 IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_buffer_reference_resolve(
-                    &operation->source.device, &copy->command.source));
+                    &operation->source.device, &source));
                 IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_buffer_reference_resolve(
-                    &operation->target.device, &copy->command.target));
-                copy->command.length = operation->length;
-                copy->command.effects.bits =
-                    *static_cast<const uint32_t*>(before) |
-                    *static_cast<const uint32_t*>(after);
+                    &operation->target.device, &target));
+                EXPECT_EQ(*static_cast<const uint32_t*>(before), 0u);
+                EXPECT_EQ(*static_cast<const uint32_t*>(after), 0u);
+                iree_hal_amd_gpu_sdma_emit_copy(copy->words, 0, source, target,
+                                                operation->length);
+                copy->command.words = copy->words;
+                copy->command.word_count = IREE_ARRAYSIZE(copy->words);
                 copy->command.notify =
                     [](void* user_data, amdf_status_t status,
                        iree_hal_amd_gpu_sdma_retirement_t retirement) {

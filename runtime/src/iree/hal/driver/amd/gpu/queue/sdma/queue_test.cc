@@ -12,6 +12,7 @@
 #include <thread>
 #include <vector>
 
+#include "iree/hal/driver/amd/gpu/queue/sdma/commands.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -23,9 +24,17 @@ namespace {
 // payloads.
 class QueueTest : public ::testing::Test {
  protected:
-  struct Copy {
+  struct Submission {
+    // Immutable prepared span retained independently of native command storage.
+    std::array<uint32_t, IREE_HAL_AMD_GPU_SDMA_MAX_COMMAND_WORDS> words = {};
     // Placed record retained through its terminal notification.
-    iree_hal_amd_gpu_sdma_copy_t operation = {};
+    iree_hal_amd_gpu_sdma_submission_t operation = {};
+    // Number of irrevocable native acceptances, distinct from retirement.
+    uint32_t acceptances = 0;
+    // Optional native publication operand sampled by acceptance.
+    const uint64_t* native_frontier = nullptr;
+    // Native operand value observed before exposing retirement ownership.
+    uint64_t observed_frontier = UINT64_MAX;
     // Number of delivered terminal outcomes.
     uint32_t notifications = 0;
     // Observed native result, independent of safe storage reclamation.
@@ -36,15 +45,22 @@ class QueueTest : public ::testing::Test {
     // Optional native stop proof required before returning accepted operands.
     const bool* native_stopped = nullptr;
 
-    Copy()
+    Submission()
         : operation{
-              .source = 0x100000,
-              .target = 0x200000,
-              .length = 4096,
+              .words = words.data(),
+              .word_count = 7,
+              .accepted =
+                  [](void* user_data) {
+                    auto* self = static_cast<Submission*>(user_data);
+                    ++self->acceptances;
+                    if (self->native_frontier) {
+                      self->observed_frontier = *self->native_frontier;
+                    }
+                  },
               .notify =
                   [](void* user_data, amdf_status_t status,
                      iree_hal_amd_gpu_sdma_retirement_t retirement) {
-                    auto* self = static_cast<Copy*>(user_data);
+                    auto* self = static_cast<Submission*>(user_data);
                     ++self->notifications;
                     self->status = status;
                     self->retirement = retirement;
@@ -54,7 +70,10 @@ class QueueTest : public ::testing::Test {
                     }
                   },
               .user_data = this,
-          } {}
+          } {
+      iree_hal_amd_gpu_sdma_emit_copy(words.data(), 0, 0x100000, 0x200000,
+                                      4096);
+    }
   };
 
   void SetUp() override {
@@ -361,20 +380,22 @@ TEST_F(QueueTest,
        FailedUserReleaseFailsWaitersWithoutReturningAcceptedOperands) {
   ASSERT_NO_FATAL_FAILURE(Allocate(AMDF_QUEUE_PUBLICATION_MODE_USER));
   user_.status = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
-  Copy accepted;
+  Submission accepted;
   iree_hal_amd_gpu_sdma_queue_submit(queue_, &accepted.operation);
   Publish();
   EXPECT_EQ(user_.flush_count, 1u);
   EXPECT_EQ(user_.write_index, 0u);
   EXPECT_EQ(user_.doorbell, 0u);
+  EXPECT_EQ(accepted.acceptances, 0u);
   EXPECT_EQ(accepted.notifications, 1u);
   EXPECT_EQ(accepted.status, user_.status);
   EXPECT_EQ(accepted.retirement, IREE_HAL_AMD_GPU_SDMA_UNRETIRED);
   EXPECT_FALSE(iree_hal_amd_gpu_sdma_queue_is_idle(queue_));
   EXPECT_EQ(iree_hal_amd_gpu_sdma_queue_free(queue_), user_.status);
   EXPECT_EQ(destroyed_, 0u);
-  Copy rejected;
+  Submission rejected;
   iree_hal_amd_gpu_sdma_queue_submit(queue_, &rejected.operation);
+  EXPECT_EQ(rejected.acceptances, 0u);
   EXPECT_EQ(rejected.notifications, 1u);
   EXPECT_EQ(rejected.status, user_.status);
   EXPECT_EQ(rejected.retirement, IREE_HAL_AMD_GPU_SDMA_RETIRED);
@@ -386,11 +407,14 @@ TEST_F(QueueTest,
 TEST_F(QueueTest, KernelRetirementOwnsCapacityAndCommandBytes) {
   capacity_ = 2;
   ASSERT_NO_FATAL_FAILURE(Allocate());
-  std::array<Copy, 3> copies;
+  std::array<Submission, 3> copies;
   for (auto& copy : copies) {
     iree_hal_amd_gpu_sdma_queue_submit(queue_, &copy.operation);
   }
   EXPECT_EQ(submitted_, 2u);
+  EXPECT_EQ(copies[0].acceptances, 1u);
+  EXPECT_EQ(copies[1].acceptances, 1u);
+  EXPECT_EQ(copies[2].acceptances, 0u);
   Poll();
   for (auto& copy : copies) {
     EXPECT_EQ(copy.notifications, 0u);
@@ -402,6 +426,7 @@ TEST_F(QueueTest, KernelRetirementOwnsCapacityAndCommandBytes) {
   EXPECT_EQ(copies[1].notifications, 0u);
   Publish();
   EXPECT_EQ(submitted_, 3u);
+  EXPECT_EQ(copies[2].acceptances, 1u);
   retired_ = 3;
   Poll();
   for (auto& copy : copies) {
@@ -410,12 +435,79 @@ TEST_F(QueueTest, KernelRetirementOwnsCapacityAndCommandBytes) {
   EXPECT_TRUE(iree_hal_amd_gpu_sdma_queue_is_idle(queue_));
 }
 
+TEST_F(QueueTest, UserAcceptanceFollowsReleaseAndPrecedesIndexCommitment) {
+  ASSERT_NO_FATAL_FAILURE(Allocate(AMDF_QUEUE_PUBLICATION_MODE_USER));
+  Submission submission;
+  submission.native_frontier = &user_.write_index;
+  iree_hal_amd_gpu_sdma_queue_submit(queue_, &submission.operation);
+  EXPECT_EQ(submission.acceptances, 1u);
+  EXPECT_EQ(submission.observed_frontier, 0u);
+  EXPECT_EQ(user_.flush_count, 1u);
+  EXPECT_GT(user_.write_index, 0u);
+  EXPECT_EQ(user_.doorbell, user_.write_index);
+  EXPECT_EQ(submission.notifications, 0u);
+  // Retire through failure cessation so this test does not pretend that
+  // writing the native index establishes execution completion.
+  Poll(amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST));
+  Publish();
+  amdf_status_t status = AMDF_STATUS_OK;
+  ASSERT_TRUE(iree_hal_amd_gpu_sdma_queue_try_inactivate(queue_, &status));
+  EXPECT_EQ(status, AMDF_STATUS_OK);
+  ASSERT_TRUE(iree_hal_amd_gpu_sdma_queue_retire_failed(queue_));
+  EXPECT_EQ(submission.acceptances, 1u);
+  EXPECT_EQ(submission.retirement, IREE_HAL_AMD_GPU_SDMA_RETIRED);
+}
+
+TEST_F(QueueTest, KernelCompletionCannotReturnCaptureDuringAcceptance) {
+  ASSERT_NO_FATAL_FAILURE(Allocate());
+  using Owner = decltype(this);
+  struct Observation {
+    // Actual queue fixture owning the native dependency controls.
+    Owner owner;
+    // Acceptance callback has finished publishing producer metadata.
+    bool accepted = false;
+    // Number of safely returned command captures.
+    uint32_t retirements = 0;
+  } observation = {this};
+  iree_hal_amd_gpu_sdma_submission_t submission = {
+      .accepted =
+          [](void* user_data) {
+            auto* observation = static_cast<Observation*>(user_data);
+            EXPECT_EQ(observation->owner->submitted_, 1u);
+            observation->owner->retired_ = 1;
+            observation->owner->Poll();
+            EXPECT_EQ(observation->retirements, 0u);
+            observation->accepted = true;
+          },
+      .notify =
+          [](void* user_data, amdf_status_t status,
+             iree_hal_amd_gpu_sdma_retirement_t retirement) {
+            auto* observation = static_cast<Observation*>(user_data);
+            EXPECT_TRUE(observation->accepted);
+            EXPECT_EQ(status, AMDF_STATUS_OK);
+            EXPECT_EQ(retirement, IREE_HAL_AMD_GPU_SDMA_RETIRED);
+            ++observation->retirements;
+          },
+      .user_data = &observation,
+  };
+  iree_hal_amd_gpu_sdma_queue_submit(queue_, &submission);
+  EXPECT_TRUE(observation.accepted);
+  EXPECT_EQ(observation.retirements, 0u);
+  // An empty span still owns a native completion and its payload boundary.
+  ASSERT_EQ(last_commands_.size(), 4u);
+  EXPECT_EQ(last_commands_[0], 5u);
+  Poll();
+  EXPECT_EQ(observation.retirements, 1u);
+  EXPECT_TRUE(iree_hal_amd_gpu_sdma_queue_is_idle(queue_));
+}
+
 TEST_F(QueueTest, EmptyNativeBusyFailsWithoutInventingAWake) {
   ASSERT_NO_FATAL_FAILURE(Allocate());
   submit_status_ = amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
-  Copy copy;
+  Submission copy;
   iree_hal_amd_gpu_sdma_queue_submit(queue_, &copy.operation);
   EXPECT_EQ(copy.notifications, 1u);
+  EXPECT_EQ(copy.acceptances, 0u);
   EXPECT_EQ(copy.status, submit_status_);
   EXPECT_EQ(copy.retirement, IREE_HAL_AMD_GPU_SDMA_RETIRED);
   EXPECT_TRUE(iree_hal_amd_gpu_sdma_queue_is_idle(queue_));
@@ -424,7 +516,7 @@ TEST_F(QueueTest, EmptyNativeBusyFailsWithoutInventingAWake) {
 TEST_F(QueueTest,
        FailedObserverRejectsQueuedWorkWithoutReclaimingAcceptedCopies) {
   ASSERT_NO_FATAL_FAILURE(Allocate());
-  std::array<Copy, 66> copies;
+  std::array<Submission, 66> copies;
   for (uint32_t i = 0; i < 65; ++i) {
     iree_hal_amd_gpu_sdma_queue_submit(queue_, &copies[i].operation);
   }
@@ -456,7 +548,7 @@ TEST_F(QueueTest,
 
 TEST_F(QueueTest, FailureReportingJoinsAnActiveObserver) {
   ASSERT_NO_FATAL_FAILURE(Allocate());
-  std::array<Copy, 2> copies;
+  std::array<Submission, 2> copies;
   iree_hal_amd_gpu_sdma_queue_submit(queue_, &copies[0].operation);
   hold_refresh_.store(true);
   std::thread observer([&] { Poll(); });
@@ -483,7 +575,7 @@ TEST_F(QueueTest, NativeStopRetiresFaultedCopiesWithoutCompletionWrites) {
        {AMDF_QUEUE_PUBLICATION_MODE_USER, AMDF_QUEUE_PUBLICATION_MODE_KERNEL}) {
     SCOPED_TRACE(mode);
     ASSERT_NO_FATAL_FAILURE(Allocate(mode));
-    std::array<Copy, 2> copies;
+    std::array<Submission, 2> copies;
     for (auto& copy : copies) {
       copy.native_stopped = &native_stopped_;
       iree_hal_amd_gpu_sdma_queue_submit(queue_, &copy.operation);
@@ -518,42 +610,60 @@ TEST_F(QueueTest, NativeStopRetiresFaultedCopiesWithoutCompletionWrites) {
   }
 }
 
-TEST_F(QueueTest, BoundedCopiesSplitPacketsAndReuseRetiredCommandSlots) {
+TEST_F(QueueTest, PreparedCommandSpansReuseRetiredNativeSlots) {
   family_.format_features = AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR;
   ASSERT_NO_FATAL_FAILURE(Allocate());
-  Copy copy;
-  copy.operation.length = IREE_HAL_AMD_GPU_SDMA_MAX_COPY_LENGTH;
-  copy.operation.effects.bits =
-      IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM |
-      IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM;
+  Submission submission;
+  auto* cursor =
+      iree_hal_amd_gpu_sdma_emit_cache(submission.words.data(), 0xc3c0);
+  constexpr uint32_t kLength = 64 * 1024 * 1024;
+  constexpr uint64_t kSource = 0x1234fffffff1;
+  constexpr uint64_t kTarget = 0x567800000003;
+  for (uint32_t offset = 0; offset < kLength;) {
+    const uint32_t length =
+        iree_min(kLength - offset, IREE_HAL_AMD_GPU_SDMA_MAX_PACKET_LENGTH);
+    cursor = iree_hal_amd_gpu_sdma_emit_copy(cursor, family_.format_features,
+                                             kSource + offset, kTarget + offset,
+                                             length);
+    offset += length;
+  }
+  cursor = iree_hal_amd_gpu_sdma_emit_cache(cursor, 0x8040);
+  const uint32_t word_count = cursor - submission.words.data();
+  const auto original_words = submission.words;
   for (uint32_t i = 0; i < 257; ++i) {
-    iree_hal_amd_gpu_sdma_queue_submit(queue_, &copy.operation);
-    EXPECT_EQ(last_commands_.size(), 5u + 17u * 7u + 5u + 4u);
+    // Alternate an exact span and a full slot with trailing native NOPs.
+    submission.operation.word_count =
+        (i & 1) ? IREE_HAL_AMD_GPU_SDMA_MAX_COMMAND_WORDS : word_count;
+    iree_hal_amd_gpu_sdma_queue_submit(queue_, &submission.operation);
+    ASSERT_EQ(last_commands_.size(), submission.operation.word_count + 4u);
     uint32_t copied = 0;
     for (uint32_t j = 0; j < 17; ++j) {
       const auto* words = &last_commands_[5 + j * 7];
       EXPECT_EQ(words[0], 1u);
       EXPECT_LE(words[1] + 1, 0x3fff00u);
-      EXPECT_EQ(words[3], copy.operation.source + copied);
-      EXPECT_EQ(words[5], copy.operation.target + copied);
+      EXPECT_EQ(uint64_t{words[3]} | (uint64_t{words[4]} << 32),
+                kSource + copied);
+      EXPECT_EQ(uint64_t{words[5]} | (uint64_t{words[6]} << 32),
+                kTarget + copied);
       copied += words[1] + 1;
     }
-    EXPECT_EQ(copied, copy.operation.length);
+    EXPECT_EQ(copied, kLength);
     EXPECT_EQ(last_commands_.back(), i + 1u);
+    EXPECT_EQ(submission.acceptances, i + 1u);
     retired_ = submitted_;
     Poll();
-    EXPECT_EQ(copy.notifications, i + 1u);
+    EXPECT_EQ(submission.notifications, i + 1u);
+    EXPECT_EQ(submission.words, original_words);
   }
 }
 
 TEST_F(QueueTest, SubmissionCacheTransitionsRetireAtNativePoint) {
   family_.format_features = AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR;
   ASSERT_NO_FATAL_FAILURE(Allocate());
-  EXPECT_TRUE(iree_hal_amd_gpu_sdma_queue_supports_cache_control(queue_));
-  Copy copy;
-  copy.operation.effects.bits =
-      IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM |
-      IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM;
+  // KERNEL cache work belongs to the submission boundary. The prepared
+  // commands contain only the copy, and its in-stream completion is
+  // insufficient.
+  Submission copy;
   iree_hal_amd_gpu_sdma_queue_submit(queue_, &copy.operation);
   ASSERT_EQ(last_commands_.size(), 11u);
   EXPECT_EQ(last_commands_,

@@ -29,22 +29,26 @@ typedef enum iree_hal_amd_gpu_sdma_retirement_e {
 amdf_queue_publication_modes_t iree_hal_amd_gpu_sdma_queue_publication_modes(
     const amdf_queue_family_info_t* family);
 
-// One ready copy with already-resolved addresses and visibility effects.
-// The pipeline owns this record and both operands through completion. A copy
-// never exceeds MAX_COPY_LENGTH; callers split longer ranges into bounded
-// copies and choose their own pipelining depth.
-#define IREE_HAL_AMD_GPU_SDMA_MAX_COPY_LENGTH (UINT32_C(64) << 20)
-typedef struct iree_hal_amd_gpu_sdma_copy_t {
+// One ready native span with resolved addresses, dependencies, and cache work.
+// The caller owns the record, immutable commands, and all referenced operands
+// through retirement. This bound applies to native publication storage, not a
+// public transfer or recording: larger executions retain their unpublished
+// suffix and submit bounded spans as capacity returns.
+#define IREE_HAL_AMD_GPU_SDMA_MAX_COMMAND_WORDS 224u
+typedef struct iree_hal_amd_gpu_sdma_submission_t {
   // Intrusive publication ownership, reusable only after completion.
   iree_hal_amd_gpu_publication_entry_t entry;
-  // First device byte read by the selected SDMA family.
-  uint64_t source;
-  // First device byte written by the selected SDMA family.
-  uint64_t target;
-  // Nonzero exact extent, including byte-aligned tails.
-  uint32_t length;
-  // Qualified queue-side acquire/release operations for this copy.
-  iree_hal_memory_effects_t effects;
+  // Borrowed complete native packets, or NULL for an empty boundary span.
+  const uint32_t* words;
+  // Initialized command extent, at most MAX_COMMAND_WORDS.
+  uint32_t word_count;
+  // Optional publication of prepared producer metadata. Runs once after
+  // irrevocable native acceptance, before retirement can return this record.
+  // USER has completed every fallible release step; KERNEL has accepted its
+  // submission. This is not payload visibility or execution completion. The
+  // callback performs no native calls, allocation, or user work. A rejected
+  // span never invokes it; an accepted span can still fail before retirement.
+  void (*accepted)(void* user_data);
   // Reports failure independently of final operand retirement. Successful
   // retirement runs on the completion owner. An UNRETIRED failure may precede
   // the one RETIRED notification. Callbacks only enqueue a prepared result;
@@ -54,11 +58,11 @@ typedef struct iree_hal_amd_gpu_sdma_copy_t {
                  iree_hal_amd_gpu_sdma_retirement_t retirement);
   // Borrowed slot or operation, live through the callback.
   void* user_data;
-} iree_hal_amd_gpu_sdma_copy_t;
+} iree_hal_amd_gpu_sdma_submission_t;
 
 // Cold constructor for a device's explicitly selected transfer queue. All
 // command and completion storage is provisioned here. The device installs
-// the returned publication/completion sources before submitting copies.
+// the returned publication/completion sources before submitting commands.
 // No HAL device reference, worker, or payload staging allocation is acquired.
 iree_status_t iree_hal_amd_gpu_sdma_queue_allocate(
     iree_hal_amd_gpu_context_t* context, uint32_t family_ordinal,
@@ -67,17 +71,15 @@ iree_status_t iree_hal_amd_gpu_sdma_queue_allocate(
     iree_hal_amd_gpu_publication_t* publication, uint32_t publication_ordinal,
     iree_allocator_t host_allocator, iree_hal_amd_gpu_sdma_queue_t** out_queue);
 
-// Whether this queue can realize global acquire/release around each copy.
-// The selected publication protocol supplies either explicit stream packets
-// or native submission boundaries; callers establish dependencies first.
-bool iree_hal_amd_gpu_sdma_queue_supports_cache_control(
-    const iree_hal_amd_gpu_sdma_queue_t* queue);
-
-// Transfers one ready, validated copy without allocation. An idle caller
-// publishes one entry immediately. The completion callback may precede return;
-// the caller joins its submitting borrow before reusing the record.
-void iree_hal_amd_gpu_sdma_queue_submit(iree_hal_amd_gpu_sdma_queue_t* queue,
-                                        iree_hal_amd_gpu_sdma_copy_t* copy);
+// Publishes one admitted command span without allocation. An idle caller
+// publishes one entry immediately; native capacity parks the prepared span on
+// the existing publisher. Acceptance and completion callbacks may precede
+// return; the caller joins its submitting borrow before reusing the record.
+// Native retirement and event packets are appended after the caller's command
+// span.
+void iree_hal_amd_gpu_sdma_queue_submit(
+    iree_hal_amd_gpu_sdma_queue_t* queue,
+    iree_hal_amd_gpu_sdma_submission_t* submission);
 
 iree_hal_amd_gpu_publication_source_t
 iree_hal_amd_gpu_sdma_queue_publication_source(
@@ -86,11 +88,11 @@ iree_hal_amd_gpu_completion_source_t
 iree_hal_amd_gpu_sdma_queue_completion_source(
     iree_hal_amd_gpu_sdma_queue_t* queue);
 
-// Cold query after the device has joined its copy producers.
+// Cold query after the device has joined its command producers.
 bool iree_hal_amd_gpu_sdma_queue_is_idle(iree_hal_amd_gpu_sdma_queue_t* queue);
 
 // Joins CPU publication and failure-notification borrowers after admission has
-// closed. Unretired native copies retain both operands and are not certified
+// closed. Unretired native commands retain their operands and are not certified
 // safe by this predicate. NULL is idle.
 bool iree_hal_amd_gpu_sdma_queue_is_host_idle(
     iree_hal_amd_gpu_sdma_queue_t* queue);

@@ -7,15 +7,14 @@
 #include "iree/hal/driver/amd/gpu/queue/sdma/queue.h"
 
 #include "iree/hal/driver/amd/fabric/memory_transition.h"
+#include "iree/hal/driver/amd/gpu/queue/sdma/commands.h"
 #include "iree/hal/driver/amd/status.h"
 
 #define IREE_HAL_AMD_GPU_SDMA_CAPACITY 64u
 #define IREE_HAL_AMD_GPU_SDMA_RING_LENGTH 65536u
 #define IREE_HAL_AMD_GPU_SDMA_COMMAND_STRIDE 1024u
-// The common 22-bit form also covers engines with wider count fields. Keep
-// the established 256-byte headroom without deriving SDMA IP from shader ISA.
-#define IREE_HAL_AMD_GPU_SDMA_PACKET_LENGTH 0x3fff00u
-#define IREE_HAL_AMD_GPU_SDMA_COMMAND_WORDS (17u * 7u + 5u + 5u + 4u + 6u)
+#define IREE_HAL_AMD_GPU_SDMA_COMMAND_WORDS \
+  (IREE_HAL_AMD_GPU_SDMA_MAX_COMMAND_WORDS + 4u + 6u)
 
 enum {
   IREE_HAL_AMD_GPU_SDMA_OBSERVER_ACTIVE = 1u << 0,
@@ -44,14 +43,18 @@ amdf_queue_publication_modes_t iree_hal_amd_gpu_sdma_queue_publication_modes(
 // Thus publication never needs a read-pointer syscall or a delayed writeback
 // wake to reclaim primary-ring storage. KERNEL commands have separate slots
 // retained through their native submission points.
-static_assert((IREE_HAL_AMD_GPU_SDMA_CAPACITY + 2u) *
-                      IREE_HAL_AMD_GPU_SDMA_COMMAND_WORDS * sizeof(uint32_t) <
-                  IREE_HAL_AMD_GPU_SDMA_RING_LENGTH,
-              "the primary ring must dominate the complete live copy window");
+static_assert(
+    (IREE_HAL_AMD_GPU_SDMA_CAPACITY + 2u) *
+            IREE_HAL_AMD_GPU_SDMA_COMMAND_WORDS * sizeof(uint32_t) <
+        IREE_HAL_AMD_GPU_SDMA_RING_LENGTH,
+    "the primary ring must dominate the complete live command window");
+static_assert(IREE_HAL_AMD_GPU_SDMA_COMMAND_WORDS * sizeof(uint32_t) <=
+                  IREE_HAL_AMD_GPU_SDMA_COMMAND_STRIDE,
+              "a complete native span must fit its immutable KERNEL slot");
 
 typedef struct iree_hal_amd_gpu_sdma_record_t {
-  // Borrowed placed copy, returned exactly once by the completion observer.
-  iree_hal_amd_gpu_sdma_copy_t* copy;
+  // Borrowed command span, returned exactly once by the completion observer.
+  iree_hal_amd_gpu_sdma_submission_t* submission;
   // Opaque KERNEL retirement point, or zero for USER publication.
   uint64_t point;
 } iree_hal_amd_gpu_sdma_record_t;
@@ -69,7 +72,8 @@ struct iree_hal_amd_gpu_sdma_queue_t {
   amdf_queue_format_features_t features;
   // First native error; it does not establish quiescence of accepted work.
   iree_atomic_int64_t failure;
-  // The deferred publication source has reported every unretired copy once.
+  // The deferred publication source has reported every unretired submission
+  // once.
   bool failure_delivered;
   // Sole caller/deferred native producer, isolated from completion writes.
   iree_hal_amd_gpu_publisher_t publisher;
@@ -128,13 +132,6 @@ struct iree_hal_amd_gpu_sdma_queue_t {
   bool inactivated;
 };
 
-bool iree_hal_amd_gpu_sdma_queue_supports_cache_control(
-    const iree_hal_amd_gpu_sdma_queue_t* queue) {
-  return (queue->features & AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR) != 0 ||
-         (queue->kernel.queue &&
-          (queue->features & AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR) != 0);
-}
-
 static void iree_hal_amd_gpu_sdma_queue_fail(
     iree_hal_amd_gpu_sdma_queue_t* queue, amdf_status_t status) {
   int64_t expected = 0;
@@ -153,10 +150,10 @@ static void iree_hal_amd_gpu_sdma_queue_fail(
 
 // Only the deferred source reports failures after the completion owner stops.
 // It owns publication or has observed its idle handoff after the failure;
-// subsequent callers can only reject copies and cannot mutate these records.
+// subsequent callers can only reject commands and cannot mutate these records.
 // Failed notification delivery therefore does not depend on another native
 // wake.
-static void iree_hal_amd_gpu_sdma_queue_fail_copies(
+static void iree_hal_amd_gpu_sdma_queue_fail_submissions(
     iree_hal_amd_gpu_sdma_queue_t* queue) {
   int32_t expected = IREE_HAL_AMD_GPU_SDMA_OBSERVER_STOPPED;
   if (!iree_atomic_compare_exchange_strong(
@@ -173,9 +170,10 @@ static void iree_hal_amd_gpu_sdma_queue_fail_copies(
   const uint64_t end =
       (uint64_t)iree_atomic_load(&queue->published, iree_memory_order_relaxed);
   for (uint64_t i = begin; !queue->failure_delivered && i != end; ++i) {
-    iree_hal_amd_gpu_sdma_copy_t* copy =
-        queue->records[i & (IREE_HAL_AMD_GPU_SDMA_CAPACITY - 1)].copy;
-    copy->notify(copy->user_data, status, IREE_HAL_AMD_GPU_SDMA_UNRETIRED);
+    iree_hal_amd_gpu_sdma_submission_t* submission =
+        queue->records[i & (IREE_HAL_AMD_GPU_SDMA_CAPACITY - 1)].submission;
+    submission->notify(submission->user_data, status,
+                       IREE_HAL_AMD_GPU_SDMA_UNRETIRED);
   }
   queue->failure_delivered = true;
   iree_atomic_fetch_and(&queue->observer,
@@ -184,76 +182,19 @@ static void iree_hal_amd_gpu_sdma_queue_fail_copies(
   iree_hal_amd_gpu_context_wake_failure(queue->context);
 }
 
-static uint32_t* iree_hal_amd_gpu_sdma_fence(
-    uint32_t* words, amdf_queue_format_features_t features, uint64_t address,
-    uint32_t value) {
-  uint32_t header = 5;
-  if (features & (AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_MEMORY_TYPE |
-                  AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM)) {
-    header |= 3u << 16;
-  }
-  if (features & AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM) {
-    header |= 1u << 20;
-  }
-  if (features & AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE) {
-    header |= 3u << 24;
-  }
-  *words++ = header;
-  *words++ = (uint32_t)address;
-  *words++ = (uint32_t)(address >> 32);
-  *words++ = value;
-  return words;
-}
-
-static uint32_t* iree_hal_amd_gpu_sdma_cache(uint32_t* words,
-                                             uint32_t control) {
-  *words++ = 17u | (1u << 8);
-  *words++ = 0;
-  *words++ = control << 16;
-  *words++ = 0;
-  *words++ = 0;
-  return words;
-}
-
 static uint32_t iree_hal_amd_gpu_sdma_encode(
     iree_hal_amd_gpu_sdma_queue_t* queue,
-    const iree_hal_amd_gpu_sdma_copy_t* copy, uint32_t value, uint32_t* words) {
-  uint32_t* cursor = words;
-  // KERNEL submission GCR brackets the complete copy through native retirement.
-  // Only USER_GCR admits cache packets inside the command stream itself.
-  const uint32_t cache_effects =
-      queue->features & AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR
-          ? copy->effects.bits
-          : 0;
-  if (cache_effects & IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM) {
-    cursor = iree_hal_amd_gpu_sdma_cache(cursor, 0xc3c0u);
+    const iree_hal_amd_gpu_sdma_submission_t* submission, uint32_t value,
+    uint32_t* words) {
+  if (submission->word_count) {
+    memcpy(words, submission->words, submission->word_count * sizeof(*words));
   }
-  const uint32_t scopes =
-      queue->features & AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE
-          ? (3u << 18) | (3u << 26)
-          : 0;
-  for (uint32_t offset = 0; offset < copy->length;) {
-    const uint32_t length =
-        iree_min(copy->length - offset, IREE_HAL_AMD_GPU_SDMA_PACKET_LENGTH);
-    const uint64_t source = copy->source + offset;
-    const uint64_t target = copy->target + offset;
-    *cursor++ = 1;
-    *cursor++ = length - 1;
-    *cursor++ = scopes;
-    *cursor++ = (uint32_t)source;
-    *cursor++ = (uint32_t)(source >> 32);
-    *cursor++ = (uint32_t)target;
-    *cursor++ = (uint32_t)(target >> 32);
-    offset += length;
-  }
-  if (cache_effects & IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM) {
-    cursor = iree_hal_amd_gpu_sdma_cache(cursor, 0x8040u);
-  }
-  cursor = iree_hal_amd_gpu_sdma_fence(cursor, queue->features,
-                                       queue->completion_address, value);
+  uint32_t* cursor = words + submission->word_count;
+  cursor = iree_hal_amd_gpu_sdma_emit_fence(cursor, queue->features,
+                                            queue->completion_address, value);
   if (queue->user.queue) {
     const amdf_gpu_event_info_t* event = &queue->context->event_info;
-    cursor = iree_hal_amd_gpu_sdma_fence(
+    cursor = iree_hal_amd_gpu_sdma_emit_fence(
         cursor, queue->features, event->mailbox_address, event->trigger_data);
     *cursor++ = 6;
     *cursor++ = event->interrupt_context;
@@ -270,12 +211,13 @@ iree_hal_amd_gpu_sdma_queue_publish_one(iree_hal_amd_gpu_sdma_queue_t* queue) {
   if (!entry) {
     return NULL;
   }
-  iree_hal_amd_gpu_sdma_copy_t* copy =
-      iree_containerof(entry, iree_hal_amd_gpu_sdma_copy_t, entry);
+  iree_hal_amd_gpu_sdma_submission_t* submission =
+      iree_containerof(entry, iree_hal_amd_gpu_sdma_submission_t, entry);
   amdf_status_t status = (amdf_status_t)iree_atomic_load(
       &queue->failure, iree_memory_order_acquire);
   if (!amdf_status_is_ok(status)) {
-    copy->notify(copy->user_data, status, IREE_HAL_AMD_GPU_SDMA_RETIRED);
+    submission->notify(submission->user_data, status,
+                       IREE_HAL_AMD_GPU_SDMA_RETIRED);
     return NULL;
   }
   const uint64_t published =
@@ -292,7 +234,7 @@ iree_hal_amd_gpu_sdma_queue_publish_one(iree_hal_amd_gpu_sdma_queue_t* queue) {
   uint64_t point = 0;
   uint32_t words[IREE_HAL_AMD_GPU_SDMA_COMMAND_WORDS];
   const uint32_t word_count = iree_hal_amd_gpu_sdma_encode(
-      queue, copy, (uint32_t)(published + 1), words);
+      queue, submission, (uint32_t)(published + 1), words);
   if (amdf_status_is_ok(status) && queue->kernel.queue) {
     const uint64_t offset = index * IREE_HAL_AMD_GPU_SDMA_COMMAND_STRIDE;
     memcpy((uint8_t*)queue->commands + offset, words, word_count * 4u);
@@ -301,14 +243,14 @@ iree_hal_amd_gpu_sdma_queue_publish_one(iree_hal_amd_gpu_sdma_queue_t* queue) {
         .byte_offset = offset,
         .byte_length = word_count * 4u,
     };
-    const amdf_gpu_kernel_queue_submission_info_t submission = {
+    const amdf_gpu_kernel_queue_submission_info_t native_submission = {
         .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO,
-        .structure_size = sizeof(submission),
+        .structure_size = sizeof(native_submission),
         .command_count = 1,
         .commands = &command,
     };
-    status = queue->context->gpu->kernel_queue_submit(queue->kernel.queue,
-                                                      &submission, &point);
+    status = queue->context->gpu->kernel_queue_submit(
+        queue->kernel.queue, &native_submission, &point);
     // Capacity can be deferred only while an accepted submission owns a wake.
     // BUSY on an empty, exclusively owned queue has no progress source.
     if (status == amdf_make_api_status(AMDF_STATUS_CODE_BUSY) &&
@@ -321,11 +263,17 @@ iree_hal_amd_gpu_sdma_queue_publish_one(iree_hal_amd_gpu_sdma_queue_t* queue) {
   }
   if (!amdf_status_is_ok(status)) {
     iree_hal_amd_gpu_sdma_queue_fail(queue, status);
-    copy->notify(copy->user_data, status, IREE_HAL_AMD_GPU_SDMA_RETIRED);
+    submission->notify(submission->user_data, status,
+                       IREE_HAL_AMD_GPU_SDMA_RETIRED);
     return NULL;
   }
-  queue->records[index] =
-      (iree_hal_amd_gpu_sdma_record_t){.copy = copy, .point = point};
+  queue->records[index] = (iree_hal_amd_gpu_sdma_record_t){
+      .submission = submission, .point = point};
+  // KERNEL execution may already be complete. Publish producer metadata
+  // before exposing this record to its retirement observer.
+  if (queue->kernel.queue && submission->accepted) {
+    submission->accepted(submission->user_data);
+  }
   iree_atomic_store(&queue->published, (int64_t)(published + 1),
                     iree_memory_order_release);
   if (queue->kernel.queue) {
@@ -361,6 +309,11 @@ iree_hal_amd_gpu_sdma_queue_publish_one(iree_hal_amd_gpu_sdma_queue_t* queue) {
       iree_hal_memory_transition_execute_host_direct(&publication_fence, NULL,
                                                      1);
     }
+    // Every fallible release step has succeeded. The remaining index and
+    // doorbell stores commit this complete stream without another native call.
+    if (submission->accepted) {
+      submission->accepted(submission->user_data);
+    }
     iree_atomic_store(queue->user.write_index, (int64_t)queue->user.position,
                       iree_memory_order_release);
     const iree_hal_memory_transition_recipe_info_t fence = {
@@ -390,7 +343,7 @@ static bool iree_hal_amd_gpu_sdma_queue_publish(void* user_data) {
   iree_hal_amd_gpu_sdma_queue_t* queue = user_data;
   if (!iree_hal_amd_gpu_publisher_acquire_service(&queue->publisher)) {
     if (iree_hal_amd_gpu_publisher_is_idle(&queue->publisher)) {
-      iree_hal_amd_gpu_sdma_queue_fail_copies(queue);
+      iree_hal_amd_gpu_sdma_queue_fail_submissions(queue);
     }
     return false;
   }
@@ -406,7 +359,7 @@ static bool iree_hal_amd_gpu_sdma_queue_publish(void* user_data) {
       break;
     }
   }
-  iree_hal_amd_gpu_sdma_queue_fail_copies(queue);
+  iree_hal_amd_gpu_sdma_queue_fail_submissions(queue);
   const bool ready =
       iree_hal_amd_gpu_sdma_queue_handoff(queue, remainder, completed);
   if (iree_atomic_load(&queue->failure, iree_memory_order_acquire)) {
@@ -415,9 +368,11 @@ static bool iree_hal_amd_gpu_sdma_queue_publish(void* user_data) {
   return ready;
 }
 
-void iree_hal_amd_gpu_sdma_queue_submit(iree_hal_amd_gpu_sdma_queue_t* queue,
-                                        iree_hal_amd_gpu_sdma_copy_t* copy) {
-  if (!iree_hal_amd_gpu_publisher_enqueue(&queue->publisher, &copy->entry)) {
+void iree_hal_amd_gpu_sdma_queue_submit(
+    iree_hal_amd_gpu_sdma_queue_t* queue,
+    iree_hal_amd_gpu_sdma_submission_t* submission) {
+  if (!iree_hal_amd_gpu_publisher_enqueue(&queue->publisher,
+                                          &submission->entry)) {
     return;
   }
   const uint64_t completed =
@@ -476,8 +431,8 @@ static bool iree_hal_amd_gpu_sdma_queue_scan(
     }
     iree_hal_amd_gpu_completion_scope_unlock(scope);
     ++retired;
-    // Detach metadata before its callback can immediately reuse the copy or
-    // publish another slot. KERNEL point retirement also releases command
+    // Detach metadata before its callback can immediately reuse the submission
+    // or publish another slot. KERNEL point retirement also releases command
     // bytes.
     iree_atomic_store(&queue->retired, (int64_t)retired,
                       iree_memory_order_release);
@@ -485,8 +440,8 @@ static bool iree_hal_amd_gpu_sdma_queue_scan(
       iree_hal_amd_gpu_publication_notify(queue->publication,
                                           queue->publication_ordinal);
     }
-    record.copy->notify(record.copy->user_data, AMDF_STATUS_OK,
-                        IREE_HAL_AMD_GPU_SDMA_RETIRED);
+    record.submission->notify(record.submission->user_data, AMDF_STATUS_OK,
+                              IREE_HAL_AMD_GPU_SDMA_RETIRED);
     progress = true;
   }
   return progress;
@@ -498,9 +453,9 @@ static bool iree_hal_amd_gpu_sdma_queue_poll(
     iree_hal_amd_gpu_completion_wait_t* out_wait,
     iree_hal_amd_gpu_completion_copy_t* out_copy) {
   iree_hal_amd_gpu_sdma_queue_t* queue = user_data;
-  // Other engines share the observer. An idle copy source performs no RMW and
-  // supplies no active-wait hint merely because a PM4 queue woke up. A later
-  // publication signals the persistent native event when it completes.
+  // Other engines share the observer. An idle command source performs no RMW
+  // and supplies no active-wait hint merely because a PM4 queue woke up. A
+  // later publication signals the persistent native event when it completes.
   if (amdf_status_is_ok(wait_status) &&
       iree_atomic_load(&queue->published, iree_memory_order_acquire) ==
           iree_atomic_load(&queue->retired, iree_memory_order_relaxed)) {
@@ -597,7 +552,7 @@ bool iree_hal_amd_gpu_sdma_queue_retire_failed(
     return true;
   }
   IREE_ASSERT(queue->inactivated,
-              "failed copy retirement requires native access cessation");
+              "failed command retirement requires native access cessation");
   if (!iree_hal_amd_gpu_publisher_try_acquire(&queue->publisher)) {
     return false;
   }
@@ -615,11 +570,13 @@ bool iree_hal_amd_gpu_sdma_queue_retire_failed(
     uint64_t position =
         (uint64_t)iree_atomic_load(&queue->retired, iree_memory_order_relaxed);
     for (; position != end; ++position) {
-      iree_hal_amd_gpu_sdma_copy_t* copy =
-          queue->records[position & (IREE_HAL_AMD_GPU_SDMA_CAPACITY - 1)].copy;
+      iree_hal_amd_gpu_sdma_submission_t* submission =
+          queue->records[position & (IREE_HAL_AMD_GPU_SDMA_CAPACITY - 1)]
+              .submission;
       iree_atomic_store(&queue->retired, position + 1,
                         iree_memory_order_release);
-      copy->notify(copy->user_data, status, IREE_HAL_AMD_GPU_SDMA_RETIRED);
+      submission->notify(submission->user_data, status,
+                         IREE_HAL_AMD_GPU_SDMA_RETIRED);
     }
     queue->failure_delivered = true;
     iree_atomic_fetch_and(&queue->observer,

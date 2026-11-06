@@ -1,0 +1,52 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef IREE_HAL_DRIVER_AMD_GPU_QUEUE_SDMA_COMMANDS_H_
+#define IREE_HAL_DRIVER_AMD_GPU_QUEUE_SDMA_COMMANDS_H_
+
+#include "amdf/gpu.h"
+#include "iree/base/api.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Native SDMA v1 writers for admitted command spans. The caller establishes
+// storage capacity, operand access/alignment, visibility, and lifetime. Writers
+// return the next DWORD and perform no validation, allocation, or publication.
+// Format features come from the native family, independently of the shader ISA.
+
+enum {
+  // Common byte-count bound, including the narrowest admitted COPY encoding.
+  // Logical transfers use as many packets as needed; this bounds one packet.
+  IREE_HAL_AMD_GPU_SDMA_MAX_PACKET_LENGTH = 0x3fff00u,
+};
+
+// Emits seven DWORDs copying a nonempty byte-aligned range. byte_length is at
+// most MAX_PACKET_LENGTH. NPD remains clear; dependent operations still require
+// their native execution boundary and separately qualified cache operations.
+uint32_t* iree_hal_amd_gpu_sdma_emit_copy(uint32_t* words,
+                                          amdf_queue_format_features_t features,
+                                          uint64_t source_address,
+                                          uint64_t target_address,
+                                          uint32_t byte_length);
+
+// Emits four DWORDs writing a confirmed, aligned coherent completion word.
+// Private binary dependency use does not advertise general HAL atomic support.
+uint32_t* iree_hal_amd_gpu_sdma_emit_fence(
+    uint32_t* words, amdf_queue_format_features_t features, uint64_t address,
+    uint32_t value);
+
+// Emits five DWORDs of USER_GCR with admitted native control bits. This
+// requires the family feature; KERNEL SUBMISSION_GCR is a retirement boundary
+// instead of an in-stream encoding. Dependency waits precede an acquire.
+uint32_t* iree_hal_amd_gpu_sdma_emit_cache(uint32_t* words, uint32_t control);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif  // IREE_HAL_DRIVER_AMD_GPU_QUEUE_SDMA_COMMANDS_H_

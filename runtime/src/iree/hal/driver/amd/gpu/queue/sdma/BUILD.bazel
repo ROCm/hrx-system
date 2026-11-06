@@ -13,6 +13,28 @@ package(
     licenses = ["notice"],
 )
 
+iree_runtime_cc_library(
+    name = "commands",
+    srcs = ["commands.c"],
+    hdrs = ["commands.h"],
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "commands_test",
+    srcs = ["commands_test.cc"],
+    deps = [
+        ":commands",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "queue_test",
     srcs = ["queue_test.cc"],
@@ -21,6 +43,7 @@ iree_runtime_cc_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":commands",
         ":queue",
         "//libamdf:headers",
         "//runtime/src/iree/base",
@@ -43,6 +66,7 @@ iree_runtime_cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":commands",
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
