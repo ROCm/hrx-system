@@ -7,6 +7,7 @@
 #include "loomc/module.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstring>
 #include <memory>
@@ -38,6 +39,46 @@ using WorkspacePtr = HandlePtr<loomc_workspace_t, loomc_workspace_release>;
 using ModulePtr = HandlePtr<loomc_module_t, loomc_module_release>;
 
 using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
+
+struct TrackedAllocator {
+  // Successful allocation requests, including reallocations.
+  std::atomic<size_t> allocations = 0;
+  // Allocations still owned by objects using this allocator.
+  std::atomic<size_t> live_allocations = 0;
+  // Allocation request ordinal, including failed requests.
+  std::atomic<size_t> requests = 0;
+  // Allocation request to reject; SIZE_MAX leaves every request enabled.
+  std::atomic<size_t> fail_on = SIZE_MAX;
+
+  loomc_allocator_t allocator() {
+    return {
+        .self = this,
+        .ctl = [](void* self, loomc_allocator_command_t command,
+                  const void* params, void** inout_ptr) -> loomc_status_t {
+          auto& tracking = *static_cast<TrackedAllocator*>(self);
+          if (command != LOOMC_ALLOCATOR_COMMAND_FREE &&
+              tracking.requests.fetch_add(1) == tracking.fail_on.load()) {
+            return loomc_status_from_code(LOOMC_STATUS_RESOURCE_EXHAUSTED);
+          }
+          const bool was_allocated =
+              (command == LOOMC_ALLOCATOR_COMMAND_FREE ||
+               command == LOOMC_ALLOCATOR_COMMAND_REALLOC) &&
+              *inout_ptr != nullptr;
+          const auto system = loomc_allocator_system();
+          auto status = system.ctl(system.self, command, params, inout_ptr);
+          if (loomc_status_is_ok(status)) {
+            if (command == LOOMC_ALLOCATOR_COMMAND_FREE) {
+              tracking.live_allocations -= was_allocated;
+            } else {
+              ++tracking.allocations;
+              tracking.live_allocations += !was_allocated;
+            }
+          }
+          return status;
+        },
+    };
+  }
+};
 
 ContextPtr CreateContext(
     loomc_source_retention_t source_retention = LOOMC_SOURCE_RETENTION_EXACT) {
@@ -485,6 +526,133 @@ func.def public @identity(%x: i32) -> (i32) {
   ModulePtr bytecode_module_ptr(bytecode_module);
   ResultPtr bytecode_result_ptr(bytecode_result);
   ExpectSucceededResult(bytecode_result_ptr.get());
+}
+
+TEST(ModuleTest, BytecodeSerializationReusesWorkspaceScratch) {
+  TrackedAllocator workspace_allocator;
+  TrackedAllocator output_allocator;
+  auto context = CreateContext();
+  loomc_workspace_t* raw_workspace = nullptr;
+  LOOMC_ASSERT_OK(loomc_workspace_create(
+      nullptr, workspace_allocator.allocator(), &raw_workspace));
+  WorkspacePtr workspace(raw_workspace);
+  auto module = CreateMixedSymbolModule(context.get(), workspace.get());
+  loomc_workspace_trim(workspace.get());
+
+  loomc_source_t* raw_source = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_serialize_bytecode_to_source(
+      module.get(), nullptr, output_allocator.allocator(), &raw_source));
+  SourcePtr source(raw_source);
+  const auto contents = loomc_source_contents(source.get());
+  const std::string expected(reinterpret_cast<const char*>(contents.data),
+                             contents.data_length);
+  // The small source needs one stream header, byte buffer, source header, and
+  // identifier. Numbering and traversal scratch belong to the workspace.
+  EXPECT_EQ(output_allocator.allocations.load(), 4u);
+  const size_t warmed_allocations = workspace_allocator.allocations.load();
+  for (int i = 0; i < 4; ++i) {
+    loomc_source_t* raw_repeated = nullptr;
+    LOOMC_ASSERT_OK(loomc_module_serialize_bytecode_to_source(
+        module.get(), nullptr, output_allocator.allocator(), &raw_repeated));
+    SourcePtr repeated(raw_repeated);
+    const auto bytes = loomc_source_contents(repeated.get());
+    EXPECT_EQ(std::string(reinterpret_cast<const char*>(bytes.data),
+                          bytes.data_length),
+              expected);
+  }
+  EXPECT_EQ(output_allocator.allocations.load(), 20u);
+  EXPECT_EQ(workspace_allocator.allocations.load(), warmed_allocations);
+
+  module.reset();
+  workspace.reset();
+  context.reset();
+  EXPECT_EQ(workspace_allocator.live_allocations.load(), 0u);
+  const auto retained = loomc_source_contents(source.get());
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(retained.data),
+                        retained.data_length),
+            expected);
+  source.reset();
+  EXPECT_EQ(output_allocator.live_allocations.load(), 0u);
+}
+
+TEST(ModuleTest, BytecodeSerializationReturnsScratchAfterOutputFailure) {
+  TrackedAllocator workspace_allocator;
+  auto context = CreateContext();
+  loomc_workspace_t* raw_workspace = nullptr;
+  LOOMC_ASSERT_OK(loomc_workspace_create(
+      nullptr, workspace_allocator.allocator(), &raw_workspace));
+  WorkspacePtr workspace(raw_workspace);
+  auto module = CreateMixedSymbolModule(context.get(), workspace.get());
+  loomc_source_t* raw_reference = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_serialize_bytecode_to_source(
+      module.get(), nullptr, loomc_allocator_system(), &raw_reference));
+  SourcePtr reference(raw_reference);
+  const auto expected = loomc_source_contents(reference.get());
+  const size_t warmed_allocations = workspace_allocator.allocations.load();
+  for (size_t failure = 0; failure < 4; ++failure) {
+    TrackedAllocator output_allocator;
+    output_allocator.fail_on = failure;
+    loomc_source_t* output = nullptr;
+    LOOMC_EXPECT_STATUS_IS(
+        LOOMC_STATUS_RESOURCE_EXHAUSTED,
+        loomc_module_serialize_bytecode_to_source(
+            module.get(), nullptr, output_allocator.allocator(), &output));
+    SourcePtr output_owner(output);
+    EXPECT_EQ(output, nullptr);
+    EXPECT_EQ(output_allocator.live_allocations.load(), 0u);
+  }
+  loomc_source_t* raw_retried = nullptr;
+  LOOMC_ASSERT_OK(loomc_module_serialize_bytecode_to_source(
+      module.get(), nullptr, loomc_allocator_system(), &raw_retried));
+  SourcePtr retried(raw_retried);
+  const auto actual = loomc_source_contents(retried.get());
+  ASSERT_EQ(actual.data_length, expected.data_length);
+  EXPECT_EQ(std::memcmp(actual.data, expected.data, actual.data_length), 0);
+  EXPECT_EQ(workspace_allocator.allocations.load(), warmed_allocations);
+  module.reset();
+  workspace.reset();
+  EXPECT_EQ(workspace_allocator.live_allocations.load(), 0u);
+}
+
+TEST(ModuleTest, BytecodeSerializationSharesScratchPoolAcrossReaders) {
+  TrackedAllocator workspace_allocator;
+  auto context = CreateContext();
+  loomc_workspace_t* raw_workspace = nullptr;
+  LOOMC_ASSERT_OK(loomc_workspace_create(
+      nullptr, workspace_allocator.allocator(), &raw_workspace));
+  WorkspacePtr workspace(raw_workspace);
+  auto module = CreateMixedSymbolModule(context.get(), workspace.get());
+  std::array<loomc_status_t, 4> statuses = {};
+  std::array<SourcePtr, 4> outputs;
+  std::vector<std::thread> readers;
+  for (size_t reader = 0; reader < outputs.size(); ++reader) {
+    readers.emplace_back([&, reader] {
+      for (int i = 0; i < 16 && loomc_status_is_ok(statuses[reader]); ++i) {
+        loomc_source_t* source = nullptr;
+        statuses[reader] = loomc_module_serialize_bytecode_to_source(
+            module.get(), nullptr, loomc_allocator_system(), &source);
+        outputs[reader].reset(source);
+      }
+    });
+  }
+  for (auto& reader : readers) {
+    reader.join();
+  }
+  for (auto& status : statuses) {
+    LOOMC_EXPECT_OK(status);
+  }
+  for (const auto& output : outputs) {
+    ASSERT_NE(output, nullptr);
+  }
+  module.reset();
+  workspace.reset();
+  EXPECT_EQ(workspace_allocator.live_allocations.load(), 0u);
+  const auto expected = loomc_source_contents(outputs[0].get());
+  for (const auto& output : outputs) {
+    const auto actual = loomc_source_contents(output.get());
+    ASSERT_EQ(actual.data_length, expected.data_length);
+    EXPECT_EQ(std::memcmp(actual.data, expected.data, actual.data_length), 0);
+  }
 }
 
 TEST(ModuleTest, RejectsContradictoryExplicitSerializeFormat) {
@@ -1073,32 +1241,12 @@ TEST(ModuleTest, WorkspaceTrimReclaimsIdleBlocksDuringCloning) {
   auto context = CreateContext();
   auto source_workspace = CreateWorkspace();
   auto source = CreateMixedSymbolModule(context.get(), source_workspace.get());
-  std::atomic<size_t> live_allocations = 0;
-  const loomc_allocator_t allocator = {
-      .self = &live_allocations,
-      .ctl = [](void* self, loomc_allocator_command_t command,
-                const void* params, void** inout_ptr) -> loomc_status_t {
-        auto* live = static_cast<std::atomic<size_t>*>(self);
-        const bool was_allocated =
-            (command == LOOMC_ALLOCATOR_COMMAND_FREE ||
-             command == LOOMC_ALLOCATOR_COMMAND_REALLOC) &&
-            *inout_ptr != nullptr;
-        const auto system = loomc_allocator_system();
-        auto status = system.ctl(system.self, command, params, inout_ptr);
-        if (loomc_status_is_ok(status)) {
-          if (command == LOOMC_ALLOCATOR_COMMAND_FREE) {
-            *live -= was_allocated;
-          } else if (!was_allocated) {
-            ++*live;
-          }
-        }
-        return status;
-      },
-  };
+  TrackedAllocator tracking;
+  const loomc_allocator_t allocator = tracking.allocator();
   loomc_workspace_t* raw_workspace = nullptr;
   LOOMC_ASSERT_OK(loomc_workspace_create(nullptr, allocator, &raw_workspace));
   WorkspacePtr workspace(raw_workspace);
-  const size_t empty_allocations = live_allocations.load();
+  const size_t empty_allocations = tracking.live_allocations.load();
   loomc_module_t* raw_retained = nullptr;
   LOOMC_ASSERT_OK(loomc_module_clone(source.get(), workspace.get(),
                                      loomc_allocator_system(), &raw_retained));
@@ -1123,16 +1271,16 @@ TEST(ModuleTest, WorkspaceTrimReclaimsIdleBlocksDuringCloning) {
 
   // The retained module remains readable while only its own blocks survive.
   loomc_workspace_trim(workspace.get());
-  EXPECT_GT(live_allocations.load(), empty_allocations);
+  EXPECT_GT(tracking.live_allocations.load(), empty_allocations);
   loomc_module_function_t function = {};
   LOOMC_ASSERT_OK(loomc_module_lookup_function(
       retained.get(), loomc_make_cstring_view("@entry"), &function));
   EXPECT_EQ(function.kind, LOOMC_MODULE_FUNCTION_KIND_KERNEL);
   retained.reset();
   loomc_workspace_trim(workspace.get());
-  EXPECT_EQ(live_allocations.load(), empty_allocations);
+  EXPECT_EQ(tracking.live_allocations.load(), empty_allocations);
   workspace.reset();
-  EXPECT_EQ(live_allocations.load(), 0u);
+  EXPECT_EQ(tracking.live_allocations.load(), 0u);
 }
 
 TEST(ModuleTest, GetsFunctionsByPublicOrdinal) {
