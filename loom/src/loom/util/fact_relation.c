@@ -530,6 +530,23 @@ static iree_status_t loom_value_fact_relation_union_roots(
       source.excluded_literal_equal, &inout_target->excluded_literal_equal);
 }
 
+iree_status_t loom_value_fact_integer_relations_define_counted_range(
+    loom_value_fact_table_t* table, loom_value_id_t value,
+    loom_value_id_t lower_bound, loom_value_id_t upper_bound) {
+  loom_value_fact_relation_roots_t roots = {0};
+  IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
+      table, &roots,
+      LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL |
+          LOOM_INTEGER_ORDER_OUTCOME_BIT_GREATER,
+      loom_value_fact_table_query_identity(table, lower_bound)));
+  IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
+      table, &roots, LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS,
+      loom_value_fact_table_query_identity(table, upper_bound)));
+  bool changed = false;
+  return loom_value_fact_integer_relations_publish_one(table, value, roots,
+                                                       &changed);
+}
+
 static bool loom_value_fact_integer_facts_exclude(loom_value_facts_t facts,
                                                   int64_t value) {
   if (value < facts.range_lo || value > facts.range_hi) {

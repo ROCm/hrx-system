@@ -15,6 +15,7 @@
 #include "loom/ops/op_defs.h"
 #include "loom/util/fact_induction.h"
 #include "loom/util/fact_loop_replay.h"
+#include "loom/util/fact_relation.h"
 
 #define LOOM_VALUE_FACT_LOOP_MAX_ITERATIONS 8
 
@@ -170,7 +171,10 @@ iree_status_t loom_value_fact_table_seed_loop_iv_arg(
           .upper_bound = loom_loop_like_upper_bound(loop),
           .step = loom_loop_like_step(loop),
       }));
-  return loom_value_fact_table_define(table, iv_id, iv_facts);
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_define(table, iv_id, iv_facts));
+  return loom_value_fact_integer_relations_define_counted_range(
+      table, iv_id, loom_loop_like_lower_bound(loop),
+      loom_loop_like_upper_bound(loop));
 }
 
 static uint16_t loom_value_fact_loop_carried_arg_offset(loom_loop_like_t loop) {
