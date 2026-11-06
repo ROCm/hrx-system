@@ -1027,88 +1027,111 @@ iree_status_t loom_vm_function_plan_write(
       const loom_low_schedule_node_t* node = &frame.schedule.nodes[node_index];
       if (node->descriptor) {
         status = loom_vm_function_packet(&frame, node, functions, stream);
-      } else if (loom_low_func_call_isa(node->op)) {
-        status = loom_vm_function_call(&frame, node_index, functions, &storage,
-                                       stream, out_row);
-      } else if (loom_low_storage_reserve_isa(node->op) ||
-                 loom_low_storage_view_isa(node->op)) {
-        // Storage layout is already fixed by the shared scheduler.
-      } else if (loom_low_storage_store_isa(node->op) ||
-                 loom_low_storage_load_isa(node->op)) {
-        status = loom_vm_function_storage(&frame, node, &storage, stream);
-      } else if (loom_low_release_isa(node->op)) {
-        status = loom_vm_function_release(&frame, node, stream);
-      } else if (loom_low_borrow_isa(node->op)) {
-        status = loom_vm_function_borrow(&frame, node, stream);
-      } else if (loom_low_return_isa(node->op)) {
-        status = loom_vm_function_return(&frame, node, &return_scratch,
-                                         &storage, stream, signature, out_row);
-      } else if (loom_low_unreachable_isa(node->op)) {
-        const iree_vm_bytecode_control_return_t instruction = {
-            .opcode = IREE_VM_BYTECODE_OPCODE_CONTROL_RETURN,
-        };
-        status =
-            iree_io_stream_write(stream, sizeof(instruction), &instruction);
-      } else if (loom_direct_branch_isa(node->op)) {
-        // Allocation records one group for each payload-bearing branch, in
-        // source block order, including groups whose moves all coalesced.
-        if (node->operand_count) {
-          const loom_low_move_range_t range =
-              frame.allocation.edge_copy_groups[edge_copy_index++]
-                  .move_group.moves;
-          status = loom_vm_function_moves(frame.allocation.moves, range,
-                                          &storage, stream);
-        }
-        const uint16_t target =
-            graph->successor_indices[graph->blocks[b].successor_start];
-        if (iree_status_is_ok(status) && target != b + 1) {
-          status = loom_vm_function_branch(
-              stream, IREE_VM_BYTECODE_OPCODE_CONTROL_BRANCH_S32, 0, target,
-              &fixups[fixup_count++]);
-        }
-      } else if (loom_low_cond_br_isa(node->op)) {
-        const uint16_t* targets =
-            graph->successor_indices + graph->blocks[b].successor_start;
-        const loom_value_ordinal_t condition_ordinal =
-            loom_low_schedule_node_const_operand_ordinals(node)[0];
-        const uint8_t condition =
-            (uint8_t)loom_low_allocation_assignment_for_value_ordinal(
-                &frame.allocation, condition_ordinal, NULL)
-                ->location_base;
-        // Invert the condition when the true edge can fall through. Otherwise
-        // branch on true and emit the false jump only if it cannot fall
-        // through.
-        if (targets[0] == b + 1) {
-          status = loom_vm_function_branch(
-              stream, IREE_VM_BYTECODE_OPCODE_CONTROL_BRANCH_UNLESS_S32,
-              condition, targets[1], &fixups[fixup_count++]);
-        } else {
-          status = loom_vm_function_branch(
-              stream, IREE_VM_BYTECODE_OPCODE_CONTROL_BRANCH_IF_S32, condition,
-              targets[0], &fixups[fixup_count++]);
-          if (iree_status_is_ok(status) && targets[1] != b + 1) {
-            status = loom_vm_function_branch(
-                stream, IREE_VM_BYTECODE_OPCODE_CONTROL_BRANCH_S32, 0,
-                targets[1], &fixups[fixup_count++]);
+      } else {
+        switch (node->op->kind) {
+          case LOOM_OP_LOW_FUNC_CALL:
+            status = loom_vm_function_call(&frame, node_index, functions,
+                                           &storage, stream, out_row);
+            break;
+          case LOOM_OP_LOW_STORAGE_RESERVE:
+          case LOOM_OP_LOW_STORAGE_VIEW:
+            // Storage layout is already fixed by the shared scheduler.
+            break;
+          case LOOM_OP_LOW_SPILL:
+          case LOOM_OP_LOW_RELOAD:
+          case LOOM_OP_LOW_SPILL_MOVE:
+          case LOOM_OP_LOW_RELOAD_MOVE:
+            status = loom_vm_function_storage(&frame, node, &storage, stream);
+            break;
+          case LOOM_OP_LOW_RELEASE:
+            status = loom_vm_function_release(&frame, node, stream);
+            break;
+          case LOOM_OP_LOW_BORROW:
+            status = loom_vm_function_borrow(&frame, node, stream);
+            break;
+          case LOOM_OP_LOW_RETURN:
+            status =
+                loom_vm_function_return(&frame, node, &return_scratch, &storage,
+                                        stream, signature, out_row);
+            break;
+          case LOOM_OP_LOW_UNREACHABLE: {
+            const iree_vm_bytecode_control_return_t instruction = {
+                .opcode = IREE_VM_BYTECODE_OPCODE_CONTROL_RETURN,
+            };
+            status =
+                iree_io_stream_write(stream, sizeof(instruction), &instruction);
+            break;
+          }
+          case LOOM_OP_LOW_COND_BR: {
+            const uint16_t* targets =
+                graph->successor_indices + graph->blocks[b].successor_start;
+            const loom_value_ordinal_t condition_ordinal =
+                loom_low_schedule_node_const_operand_ordinals(node)[0];
+            const uint8_t condition =
+                (uint8_t)loom_low_allocation_assignment_for_value_ordinal(
+                    &frame.allocation, condition_ordinal, NULL)
+                    ->location_base;
+            // Invert the condition when the true edge can fall through.
+            // Otherwise branch on true and emit the false jump only if it
+            // cannot fall through.
+            if (targets[0] == b + 1) {
+              status = loom_vm_function_branch(
+                  stream, IREE_VM_BYTECODE_OPCODE_CONTROL_BRANCH_UNLESS_S32,
+                  condition, targets[1], &fixups[fixup_count++]);
+            } else {
+              status = loom_vm_function_branch(
+                  stream, IREE_VM_BYTECODE_OPCODE_CONTROL_BRANCH_IF_S32,
+                  condition, targets[0], &fixups[fixup_count++]);
+              if (iree_status_is_ok(status) && targets[1] != b + 1) {
+                status = loom_vm_function_branch(
+                    stream, IREE_VM_BYTECODE_OPCODE_CONTROL_BRANCH_S32, 0,
+                    targets[1], &fixups[fixup_count++]);
+              }
+            }
+            break;
+          }
+          case LOOM_OP_LOW_COPY:
+          case LOOM_OP_LOW_MOVE:
+          case LOOM_OP_LOW_SLICE:
+          case LOOM_OP_LOW_CONCAT: {
+            const loom_low_allocation_packet_move_group_t* group =
+                loom_low_allocation_find_packet_move_group_by_source_ordinal(
+                    &frame.allocation, node_index);
+            if (group) {
+              const loom_low_move_range_t range = group->move_group.moves;
+              status = loom_vm_function_moves(frame.allocation.moves, range,
+                                              &storage, stream);
+            }
+            break;
+          }
+          default: {
+            if (!loom_direct_branch_isa(node->op)) {
+              status = iree_make_status(
+                  IREE_STATUS_UNIMPLEMENTED,
+                  "VM instruction emission for '%.*s' is unavailable",
+                  (int)loom_op_name(module, node->op).size,
+                  loom_op_name(module, node->op).data);
+              break;
+            }
+            // Allocation records one group for each payload-bearing branch, in
+            // source block order, including groups whose moves all coalesced.
+            if (node->operand_count) {
+              const loom_low_move_range_t range =
+                  frame.allocation.edge_copy_groups[edge_copy_index++]
+                      .move_group.moves;
+              status = loom_vm_function_moves(frame.allocation.moves, range,
+                                              &storage, stream);
+            }
+            const uint16_t target =
+                graph->successor_indices[graph->blocks[b].successor_start];
+            if (iree_status_is_ok(status) && target != b + 1) {
+              status = loom_vm_function_branch(
+                  stream, IREE_VM_BYTECODE_OPCODE_CONTROL_BRANCH_S32, 0, target,
+                  &fixups[fixup_count++]);
+            }
+            break;
           }
         }
-      } else if (loom_low_copy_isa(node->op) || loom_low_move_isa(node->op) ||
-                 loom_low_slice_isa(node->op) ||
-                 loom_low_concat_isa(node->op)) {
-        const loom_low_allocation_packet_move_group_t* group =
-            loom_low_allocation_find_packet_move_group_by_source_ordinal(
-                &frame.allocation, node_index);
-        if (group) {
-          const loom_low_move_range_t range = group->move_group.moves;
-          status = loom_vm_function_moves(frame.allocation.moves, range,
-                                          &storage, stream);
-        }
-      } else {
-        status = iree_make_status(
-            IREE_STATUS_UNIMPLEMENTED,
-            "VM instruction emission for '%.*s' is unavailable",
-            (int)loom_op_name(module, node->op).size,
-            loom_op_name(module, node->op).data);
       }
     }
   }
