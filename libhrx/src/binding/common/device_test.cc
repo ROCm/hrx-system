@@ -13,6 +13,28 @@
 
 namespace {
 
+TEST(StreamingDeviceQueryTest, UninitializedRegistryPreservesQueryFailures) {
+  ASSERT_EQ(iree_hal_streaming_device_registry(), nullptr);
+  EXPECT_EQ(iree_hal_streaming_device_entry(0), nullptr);
+
+  iree_device_size_t free_memory = 123;
+  iree_device_size_t total_memory = 456;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      iree_hal_streaming_device_memory_info(0, &free_memory, &total_memory));
+  EXPECT_EQ(free_memory, 0u);
+  EXPECT_EQ(total_memory, 0u);
+
+  char name[] = "unchanged";
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_hal_streaming_device_name(0, name, sizeof(name)));
+  EXPECT_STREQ(name, "unchanged");
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_hal_streaming_device_get_string_property(
+                            0, "hal.device", "name", name, sizeof(name)));
+  EXPECT_STREQ(name, "unchanged");
+}
+
 TEST(StreamingQueuePlacementTest, SelectsOnlyAdvertisedHostLocalPlacement) {
   const uint32_t cases[] = {
       0, IREE_HAL_QUEUE_PLACEMENT_CAPABILITY_HOST_LOCAL,

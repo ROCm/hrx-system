@@ -70,6 +70,10 @@ TEST_F(HipDeviceSelectionTest, SelectedDevicesHaveDenseExecutableOrdinals) {
   const auto device_properties =
       library_.Resolve<decltype(&hipGetDevicePropertiesR0600)>(
           "hipGetDevicePropertiesR0600");
+  const auto memory_info =
+      library_.Resolve<decltype(&hipMemGetInfo)>("hipMemGetInfo");
+  const auto device_name =
+      library_.Resolve<decltype(&hipDeviceGetName)>("hipDeviceGetName");
   const auto pci_address =
       library_.Resolve<decltype(&hipDeviceGetPCIBusId)>("hipDeviceGetPCIBusId");
   const auto device_uuid =
@@ -129,6 +133,15 @@ TEST_F(HipDeviceSelectionTest, SelectedDevicesHaveDenseExecutableOrdinals) {
     EXPECT_EQ(current, ordinal);
     hipDeviceProp_t properties = {};
     ASSERT_EQ(hipSuccess, device_properties(&properties, ordinal));
+    size_t free_memory = 0;
+    size_t total_memory = 0;
+    ASSERT_EQ(hipSuccess, memory_info(&free_memory, &total_memory));
+    EXPECT_GT(total_memory, 0u);
+    EXPECT_LE(free_memory, total_memory);
+    EXPECT_EQ(total_memory, properties.totalGlobalMem);
+    char name[sizeof(properties.name)] = {};
+    ASSERT_EQ(hipSuccess, device_name(name, sizeof(name), ordinal));
+    EXPECT_STREQ(name, properties.name);
     char actual_pci[32] = {};
     ASSERT_EQ(hipSuccess, pci_address(actual_pci, sizeof(actual_pci), ordinal));
     RecordProperty("device_" + std::to_string(ordinal),
@@ -174,6 +187,10 @@ TEST_F(HipDeviceSelectionTest, SelectedDevicesHaveDenseExecutableOrdinals) {
     EXPECT_EQ(hipSuccess, module_unload(module));
   }
   EXPECT_EQ(hipErrorInvalidDevice, set_device(count));
+  char invalid_name[] = "unchanged";
+  EXPECT_EQ(hipErrorInvalidDevice,
+            device_name(invalid_name, sizeof(invalid_name), count));
+  EXPECT_STREQ(invalid_name, "unchanged");
 
   // Selection is captured once. A later environment edit cannot mutate the
   // sealed group or turn an otherwise valid API call into hipErrorNoDevice.
