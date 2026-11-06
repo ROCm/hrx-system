@@ -366,6 +366,7 @@ loom_check_test(
         "barrier_control_invalid",
         "dynamic_vector_slices",
         "integer_extrema",
+        "local_addresses",
         "matrix_fragments",
         "opaque_pointers",
         "parameter_alignment",

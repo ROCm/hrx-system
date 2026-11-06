@@ -44,10 +44,20 @@ loom_amdgpu_memory_access_alloca_root_rejection_bit(
 bool loom_amdgpu_memory_access_include_alloca_root_byte_offset(
     const loom_amdgpu_source_alloca_layout_t* alloca_layout,
     loom_low_source_memory_access_plan_t* source,
+    bool* out_uses_dynamic_root_address,
     loom_amdgpu_memory_access_diagnostic_t* diagnostic) {
+  *out_uses_dynamic_root_address = false;
+  bool allows_dynamic_root_address = false;
   switch (source->memory_space) {
     case LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP:
+      break;
     case LOOM_VALUE_FACT_MEMORY_SPACE_PRIVATE:
+      allows_dynamic_root_address = true;
+      if (loom_amdgpu_source_alloca_layout_requires_private_root_address(
+              alloca_layout)) {
+        *out_uses_dynamic_root_address = true;
+        return true;
+      }
       break;
     default:
       return true;
@@ -56,8 +66,17 @@ bool loom_amdgpu_memory_access_include_alloca_root_byte_offset(
   uint64_t root_byte_offset = 0;
   if (!loom_amdgpu_source_alloca_layout_lookup_byte_offset(
           alloca_layout, source->memory_space, source->root_value_id,
-          &root_byte_offset) ||
-      root_byte_offset > INT64_MAX) {
+          &root_byte_offset)) {
+    if (allows_dynamic_root_address) {
+      *out_uses_dynamic_root_address = true;
+      return true;
+    }
+    diagnostic->rejection_bits |=
+        loom_amdgpu_memory_access_alloca_root_rejection_bit(
+            source->memory_space);
+    return false;
+  }
+  if (root_byte_offset > INT64_MAX) {
     diagnostic->rejection_bits |=
         loom_amdgpu_memory_access_alloca_root_rejection_bit(
             source->memory_space);
@@ -400,6 +419,10 @@ void loom_amdgpu_mark_memory_access_plan_storage_demands(
        ++packet_index) {
     const loom_amdgpu_memory_access_t* access =
         &plan->packets[packet_index].access;
+    if (access->uses_dynamic_root_address) {
+      loom_low_lower_require_source_value_storage(
+          context, access->source->root_value_id);
+    }
     if (access->realization.vaddr) {
       if (loom_amdgpu_memory_access_uses_resource_operand(access)) {
         loom_low_lower_require_source_value_storage(
@@ -892,8 +915,10 @@ bool loom_amdgpu_memory_access_plan_select(
     // execution prevents Low cleanup from merging or deleting observations.
     selected_source->access_flags |= LOOM_MEMORY_ACCESS_FLAG_VOLATILE;
   }
+  bool uses_dynamic_root_address = false;
   if (!loom_amdgpu_memory_access_include_alloca_root_byte_offset(
-          alloca_layout, selected_source, out_diagnostic)) {
+          alloca_layout, selected_source, &uses_dynamic_root_address,
+          out_diagnostic)) {
     return false;
   }
   loom_amdgpu_memory_dynamic_term_materialization_plan_t materialization_plan;
@@ -924,6 +949,7 @@ bool loom_amdgpu_memory_access_plan_select(
 
   loom_amdgpu_memory_access_t access =
       loom_amdgpu_memory_access_from_source(selected_source);
+  access.uses_dynamic_root_address = uses_dynamic_root_address;
   access.preserve_inactive = preserve_inactive;
   const loom_type_t vector_type =
       loom_amdgpu_memory_access_source_vector_type(module, source_op);

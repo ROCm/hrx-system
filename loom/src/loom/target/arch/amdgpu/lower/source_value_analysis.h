@@ -38,6 +38,7 @@ enum loom_amdgpu_source_value_analysis_bit_e {
   LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_REGISTER_SHAPE = 1u << 3,
   LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_SGPR_I1_BOOL = 1u << 4,
   LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_SCC_I1_BOOL = 1u << 5,
+  LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_CROSSES_SCC_BOUNDARY = 1u << 6,
 };
 
 typedef struct loom_amdgpu_source_value_analysis_record_t {

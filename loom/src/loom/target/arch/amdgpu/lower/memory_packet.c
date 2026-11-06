@@ -1539,7 +1539,8 @@ bool loom_amdgpu_memory_access_select_u32_vaddr_byte_offset(
     return false;
   }
   if (!loom_amdgpu_memory_access_include_alloca_root_byte_offset(
-          alloca_layout, source, out_diagnostic)) {
+          alloca_layout, source, &out_access->uses_dynamic_root_address,
+          out_diagnostic)) {
     return false;
   }
   out_access->static_byte_offset = source->static_byte_offset;

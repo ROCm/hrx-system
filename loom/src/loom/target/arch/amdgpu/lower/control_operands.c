@@ -157,6 +157,16 @@ iree_status_t loom_amdgpu_materialize_structural_operand(
 
   const bool requires_vgpr = loom_amdgpu_low_type_is_register_class(
       context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
+  const bool requires_native_i1_mask =
+      loom_amdgpu_type_is_i1(loom_module_value_type(
+          loom_low_lower_context_module(context), source_value_id)) &&
+      loom_amdgpu_low_type_is_register_class(context, required_low_type,
+                                             LOOM_AMDGPU_REG_CLASS_ID_SGPR) &&
+      loom_low_register_type_unit_count(required_low_type) == 2;
+  if (requires_native_i1_mask) {
+    return loom_amdgpu_materialize_low_native_i1_mask(
+        context, source_op, low_value_id, out_low_value_id);
+  }
   if (!requires_vgpr) {
     return iree_ok_status();
   }

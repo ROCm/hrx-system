@@ -1061,6 +1061,8 @@ typedef struct loom_amdgpu_memory_access_t {
   uint32_t vector_lane_count;
   // The selected load keeps its tied destination in inactive SIMD lanes.
   bool preserve_inactive;
+  // The private allocation base remains in the lowered source root value.
+  bool uses_dynamic_root_address;
   // Effective static byte offset of this physical packet.
   int64_t static_byte_offset;
   // Optional view-derived descriptor bound; explicit resource extents win.

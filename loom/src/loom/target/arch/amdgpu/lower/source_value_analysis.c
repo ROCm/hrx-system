@@ -25,8 +25,96 @@
 #include "loom/target/arch/amdgpu/target_info_defs.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/fact_table.h"
+#include "loom/util/walk.h"
 
 static int loom_amdgpu_source_value_analysis_state_key;
+
+typedef struct loom_amdgpu_scc_boundary_analysis_t {
+  const loom_module_t* module;
+  loom_amdgpu_source_value_analysis_t* analysis;
+} loom_amdgpu_scc_boundary_analysis_t;
+
+static void loom_amdgpu_mark_value_crosses_scc_boundary(
+    loom_amdgpu_scc_boundary_analysis_t* state,
+    const loom_block_t* defining_block, uint64_t boundary_ordinal,
+    loom_value_id_t value_id) {
+  if (value_id >= state->module->values.count) {
+    return;
+  }
+  const loom_value_t* value = loom_module_value(state->module, value_id);
+  if (loom_value_is_block_arg(value)) {
+    return;
+  }
+  const loom_op_t* defining_op = loom_value_def_op(value);
+  if (defining_op == NULL || defining_op->parent_block != defining_block ||
+      defining_op->block_ordinal >= boundary_ordinal) {
+    return;
+  }
+  const loom_value_ordinal_t value_ordinal =
+      loom_local_value_domain_try_ordinal(state->analysis->value_domain,
+                                          value_id);
+  if (value_ordinal == LOOM_VALUE_ORDINAL_INVALID ||
+      value_ordinal >= state->analysis->record_count) {
+    return;
+  }
+  state->analysis->records[value_ordinal].value_bits |=
+      LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_CROSSES_SCC_BOUNDARY;
+}
+
+static iree_status_t loom_amdgpu_analyze_block_scc_boundaries(
+    void* user_data, loom_op_t* op, const loom_walk_context_t* context,
+    loom_walk_result_t* out_result) {
+  *out_result = LOOM_WALK_CONTINUE;
+  if (op != context->block->first_op) {
+    return iree_ok_status();
+  }
+
+  loom_amdgpu_scc_boundary_analysis_t* state =
+      (loom_amdgpu_scc_boundary_analysis_t*)user_data;
+  uint64_t boundary_ordinal = 0;
+  const loom_op_t* block_op = NULL;
+  loom_block_for_each_op(context->block, block_op) {
+    if (boundary_ordinal != 0) {
+      const loom_value_id_t* operands = loom_op_const_operands(block_op);
+      for (uint16_t i = 0; i < block_op->operand_count; ++i) {
+        loom_amdgpu_mark_value_crosses_scc_boundary(
+            state, context->block, boundary_ordinal, operands[i]);
+      }
+    }
+    if (block_op->region_count != 0 ||
+        iree_any_bit_set(block_op->traits, LOOM_TRAIT_CALLABLE_BOUNDARY)) {
+      boundary_ordinal = block_op->block_ordinal;
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_source_value_analyze_scc_boundaries(
+    loom_amdgpu_source_value_analysis_t* analysis) {
+  if (analysis->value_domain == NULL ||
+      !iree_any_bit_set(analysis->value_domain->operation_traits,
+                        LOOM_TRAIT_CALLABLE_BOUNDARY)) {
+    return iree_ok_status();
+  }
+
+  const loom_amdgpu_source_value_analysis_bits_t bit =
+      LOOM_AMDGPU_SOURCE_VALUE_ANALYSIS_CROSSES_SCC_BOUNDARY;
+  for (iree_host_size_t i = 0; i < analysis->record_count; ++i) {
+    analysis->records[i].known_bits |= bit;
+  }
+
+  loom_amdgpu_scc_boundary_analysis_t state = {
+      .module = analysis->value_domain->module,
+      .analysis = analysis,
+  };
+  loom_walk_result_t result = LOOM_WALK_CONTINUE;
+  return loom_walk_region(
+      state.module, (loom_region_t*)analysis->value_domain->region,
+      LOOM_WALK_PRE_ORDER,
+      (loom_walk_callback_t){loom_amdgpu_analyze_block_scc_boundaries, &state},
+      &result);
+}
+
 static iree_status_t loom_amdgpu_source_value_analysis_prepare(
     const loom_value_fact_table_t* fact_table,
     const loom_local_value_domain_t* value_domain,
@@ -67,6 +155,13 @@ static iree_status_t loom_amdgpu_source_value_analysis_prepare(
           arena, analysis->record_count,
           sizeof(*analysis->query.provisional_ordinals),
           (void**)&analysis->query.provisional_ordinals));
+      iree_status_t status =
+          loom_amdgpu_source_value_analyze_scc_boundaries(analysis);
+      if (!iree_status_is_ok(status)) {
+        analysis->value_domain = NULL;
+        analysis->fact_table = NULL;
+        return status;
+      }
     }
   }
   return iree_ok_status();

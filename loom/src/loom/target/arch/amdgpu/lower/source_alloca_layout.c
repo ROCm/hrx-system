@@ -383,6 +383,13 @@ bool loom_amdgpu_source_alloca_layout_storage_requirement(
   return true;
 }
 
+bool loom_amdgpu_source_alloca_layout_requires_private_root_address(
+    const loom_amdgpu_source_alloca_layout_t* layout) {
+  return layout->value_domain != NULL &&
+         iree_any_bit_set(layout->value_domain->operation_traits,
+                          LOOM_TRAIT_CALLABLE_BOUNDARY);
+}
+
 bool loom_amdgpu_source_alloca_layout_lookup_byte_offset(
     const loom_amdgpu_source_alloca_layout_t* layout,
     loom_value_fact_memory_space_t memory_space, loom_value_id_t root_value_id,
