@@ -15,6 +15,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/../sanitizer/iree_sanitizer_suppressions.cmak
 # SRCS: List of source files for the binary
 # DATA: List of other targets and files required for this binary
 # DEPS: List of other libraries to be linked in to the binary targets
+# INCLUDES: Additional include directories for the binary.
 # COPTS: List of private compile options
 # DEFINES: List of public defines
 # LINKOPTS: List of link options
@@ -52,7 +53,7 @@ function(iree_cc_binary)
     _RULE
     "EXCLUDE_FROM_ALL;HOSTONLY;TESTONLY;SETUP_INSTALL_RPATH"
     "NAME;INSTALL_COMPONENT;COVERAGE"
-    "SRCS;COPTS;DEFINES;LINKOPTS;DATA;DEPS"
+    "SRCS;INCLUDES;COPTS;DEFINES;LINKOPTS;DATA;DEPS"
     ${ARGN}
   )
 
@@ -111,6 +112,10 @@ function(iree_cc_binary)
   target_include_directories(${_NAME} SYSTEM
     PUBLIC
       "$<BUILD_INTERFACE:${IREE_SOURCE_DIR};${IREE_BINARY_DIR}>"
+  )
+  target_include_directories(${_NAME}
+    PRIVATE
+      ${_RULE_INCLUDES}
   )
   target_compile_definitions(${_NAME}
     PUBLIC

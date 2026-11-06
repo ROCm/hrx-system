@@ -49,6 +49,31 @@ from runtime.build_tools.bazel import configure as runtime_configure
 
 
 class CiTest(unittest.TestCase):
+    def test_repository_compilation_mode_overrides_build_defaults_only(self):
+        for mode in (None, "fastbuild", "dbg", "opt"):
+            with self.subTest(mode=mode):
+                command = ["iree-bazel-repository-build"]
+                if mode is not None:
+                    command += ["--compilation-mode", mode]
+                args = ci.parse_arguments(command)
+                with mock.patch.object(
+                    ci_config, "BAZEL_DEFAULT_OPTIONS", ("--compilation_mode=dbg",)
+                ):
+                    configure, build = ci.steps_from_args(args)
+                prefix = "--compilation_mode="
+                self.assertFalse(any(arg.startswith(prefix) for arg in configure.argv))
+                modes = [arg for arg in build.argv if arg.startswith(prefix)]
+                self.assertEqual(
+                    modes, [prefix + "dbg"] + ([prefix + mode] if mode else [])
+                )
+
+    def test_compilation_mode_rejects_commands_that_cannot_apply_it(self):
+        for command in ("iree-cmake-repository-build", "iree-bazel-cpu-asan"):
+            with self.subTest(command=command):
+                args = ci.parse_arguments([command, "--compilation-mode", "opt"])
+                with self.assertRaisesRegex(ValueError, "--compilation-mode"):
+                    ci.steps_from_args(args)
+
     def test_cts_family_filter_composes_with_requested_cases(self):
         with (
             mock.patch.object(

@@ -99,9 +99,9 @@ class SystemLibraryLoaderTest : public ::testing::Test {
 
   std::vector<uint8_t> MakeImage(const Footer& footer) {
     const auto* file = elementwise_mul_native_create();
-    const size_t debug_offset = (file->size + 15) & ~size_t{15};
-    std::vector<uint8_t> image(debug_offset + 16 + sizeof(Footer));
-    memcpy(image.data(), file->data, file->size);
+    std::vector<uint8_t> image(file->data, file->data + file->size);
+    const size_t debug_offset = (image.size() + 15) & ~size_t{15};
+    image.resize(debug_offset + 16 + sizeof(Footer));
     memcpy(image.data() + image.size() - sizeof(Footer), &footer,
            sizeof(footer));
     return image;

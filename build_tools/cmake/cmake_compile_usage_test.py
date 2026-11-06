@@ -18,6 +18,7 @@ from build_tools.cmake.test_environment import (
     build_project,
     configure_project,
     run_command,
+    test_project,
 )
 
 FIXTURE = REPO_ROOT / "build_tools/cmake/testdata/compile_usage"
@@ -30,6 +31,114 @@ def copy_source(source):
 
 
 class CMakeCompileUsageTest(unittest.TestCase):
+    def test_executable_includes_reach_source_and_generated_headers(self):
+        with tempfile.TemporaryDirectory(
+            prefix="cmake executable includes "
+        ) as temporary:
+            root = Path(temporary)
+            source, build = root / "source", root / "build"
+            package = source / "package"
+            include = source / "include files"
+            package.mkdir(parents=True)
+            include.mkdir()
+            (
+                source / ".bazel_to_cmake.cfg.py"
+            ).write_text("""from bazel_to_cmake_targets import TargetConverter
+BAZEL_TO_CMAKE_REPO_ROOT = True
+DEFAULT_ROOT_DIRS = ["package"]
+class CustomTargetConverter(TargetConverter):
+    def _convert_unmatched_target(self, target):
+        return ["iree::fixture::" + self._convert_to_cmake_path(target)]
+""")
+            (include / "source_value.h").write_text("#define SOURCE_VALUE 13\n")
+            (package / "probe.cc").write_text("""#include "source_value.h"
+#include "generated_value.h"
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+#if defined(FUZZ_PROBE)
+extern "C" int LLVMFuzzerTestOneInput(const unsigned char*, size_t) {
+  if (SOURCE_VALUE + GENERATED_VALUE != 42) std::abort();
+  return 0;
+}
+#else
+int main(int argc, char** argv) {
+  if (argc != EXPECTED_ARGUMENTS || std::strcmp(argv[argc - 1], "--probe")) return 1;
+  std::printf("%d\\n", SOURCE_VALUE + GENERATED_VALUE);
+  return SOURCE_VALUE + GENERATED_VALUE == 42 ? 0 : 1;
+}
+#endif
+""")
+            (package / "BUILD.bazel").write_text("""cc_binary(
+    name="binary", srcs=["probe.cc"], includes=["../include files"],
+    defines=["EXPECTED_ARGUMENTS=2"], testonly=True)
+cc_test(
+    name="unit", srcs=["probe.cc"], includes=["../include files"],
+    defines=["EXPECTED_ARGUMENTS=2"], args=["--probe"])
+iree_cc_benchmark(
+    name="benchmark", srcs=["probe.cc"], includes=["../include files"],
+    defines=["EXPECTED_ARGUMENTS=4"], args=["--probe"])
+iree_cc_fuzz(
+    name="fuzz", srcs=["probe.cc"], includes=["../include files"],
+    defines=["FUZZ_PROBE"])
+""")
+            (
+                source / "CMakeLists.txt"
+            ).write_text("""cmake_minimum_required(VERSION 3.26...4.2)
+project(executable_includes C CXX)
+enable_testing()
+set(IREE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+set(IREE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+set(CMAKE_CXX_STANDARD 20)
+set(IREE_CXX_STANDARD 20)
+set(IREE_BUILD_TESTS ON)
+set(IREE_BUILD_BENCHMARKS ON)
+set(IREE_ENABLE_FUZZING ON)
+foreach(module macros copts install_support configure_testing native_test
+    cc_binary cc_test cc_binary_benchmark cc_fuzz add_all_subdirs generated_cmake)
+  include("${IREE_REPO_ROOT}/build_tools/cmake/iree_${module}.cmake")
+endforeach()
+iree_setup_c_src_root(PACKAGE_ROOT_PREFIX iree/fixture)
+file(WRITE "${IREE_BINARY_DIR}/include files/generated_value.h"
+  "#define GENERATED_VALUE 29\\n")
+iree_generate_cmake()
+iree_add_subdirectory(package)
+iree_finalize_target_dependencies()
+iree_finalize_test_build_targets()
+foreach(name binary fuzz)
+  file(GENERATE OUTPUT "${IREE_BINARY_DIR}/${name}-$<CONFIG>.txt"
+    CONTENT "$<TARGET_FILE:iree_fixture_package_${name}>")
+endforeach()
+# Always check the fuzz rule's usage requirements, even on toolchains without
+# libFuzzer. Where available, build and execute its real callback too.
+file(GENERATE OUTPUT "${IREE_BINARY_DIR}/fuzz-includes-$<CONFIG>.txt"
+  CONTENT "$<JOIN:$<TARGET_PROPERTY:iree_fixture_package_fuzz,INCLUDE_DIRECTORIES>,\\n>")
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_FLAGS "-fsanitize=fuzzer")
+check_cxx_source_compiles(
+  "#include <stddef.h>\nextern \\"C\\" int LLVMFuzzerTestOneInput(const unsigned char*, size_t) { return 0; }"
+  HAS_LIBFUZZER)
+file(WRITE "${IREE_BINARY_DIR}/has-libfuzzer.txt" "${HAS_LIBFUZZER}")
+""")
+            configure_project(source, build)
+            build_project(build)
+            test_project(build)
+            executable = Path((build / f"binary-{CONFIGURATION}.txt").read_text())
+            self.assertEqual(run_command(str(executable), "--probe"), "42\n")
+            fuzz_includes = {
+                Path(path).resolve()
+                for path in (build / f"fuzz-includes-{CONFIGURATION}.txt")
+                .read_text()
+                .splitlines()
+            }
+            self.assertIn(include.resolve(), fuzz_includes)
+            self.assertIn((build / "include files").resolve(), fuzz_includes)
+            if (build / "has-libfuzzer.txt").read_text():
+                build_project(build, "iree_fixture_package_fuzz")
+                executable = Path((build / f"fuzz-{CONFIGURATION}.txt").read_text())
+                run_command(str(executable), "-runs=1")
+
     def test_wasm_companions_reach_the_bundler_through_generated_libraries(self):
         with tempfile.TemporaryDirectory(prefix="cmake wasm companions ") as temporary:
             root = Path(temporary)

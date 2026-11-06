@@ -100,7 +100,14 @@ modify libamdf's topology.
 Compiler-only AMDGPU checks use `iree-bazel-loom-amdgpu` or
 `iree-cmake-loom-amdgpu`; they need no GPU. Repository-wide compile checks use
 `iree-bazel-repository-build`. Platform-incompatible targets are excluded by
-their build constraints.
+their build constraints. The Linux GCC lane uses GCC Toolset 15 inside the
+manylinux image and `--compilation-mode opt`, preserving the glibc compatibility
+floor while checking optimization-dependent diagnostics. The mode applies to
+the build invocation without changing the worktree's configured defaults:
+
+```bash
+python build_tools/devtools/ci.py iree-bazel-repository-build --compilation-mode opt
+```
 
 ## Hardware and test admission
 

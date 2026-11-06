@@ -35,6 +35,9 @@ def _command_impl(ctx):
         ctx = ctx,
         cc_toolchain = compiler,
         requested_features = ctx.attr.profile,
+        # Each explicit fixture profile owns its mode independently of the
+        # invocation that runs these host-independent command tests.
+        unsupported_features = [mode for mode in ["fastbuild", "dbg", "opt"] if mode not in ctx.attr.profile],
     )
     variables = cc_common.create_compile_variables(
         cc_toolchain = compiler,

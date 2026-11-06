@@ -173,7 +173,9 @@ iree_hal_streaming_device_registry_t* iree_hal_streaming_device_registry(void);
 // Synchronization: none (queries static device count).
 iree_status_t iree_hal_streaming_device_count(iree_host_size_t* out_count);
 
-// Synchronization: none (returns device entry).
+// Returns the borrowed entry for |ordinal|, or NULL if the registry is not
+// initialized or the ordinal is out of range.
+// Synchronization: none (queries immutable registry membership).
 iree_hal_streaming_device_t* iree_hal_streaming_device_entry(
     iree_hal_streaming_device_ordinal_t ordinal);
 
@@ -222,7 +224,9 @@ iree_status_t iree_hal_streaming_device_get_string_property(
     iree_hal_streaming_device_ordinal_t ordinal, const char* category,
     const char* key, char* value, iree_host_size_t value_size);
 
-// Synchronization: none (queries current memory info).
+// Queries the binding's approximate free memory and immutable total memory.
+// Both outputs are zero on failure.
+// Synchronization: relaxed atomic load of the free-memory estimate.
 iree_status_t iree_hal_streaming_device_memory_info(
     iree_hal_streaming_device_ordinal_t ordinal,
     iree_device_size_t* out_free_memory, iree_device_size_t* out_total_memory);

@@ -470,8 +470,7 @@ TEST_F(GpuLinuxMemoryTest, BufferedFileIoUsesOwnedSystemMemory) {
 
   // An ordinary file descriptor copies directly to and from the native view;
   // no stdio payload buffer or page registration mediates either operation.
-  std::unique_ptr<FILE, decltype(&std::fclose)> file(std::tmpfile(),
-                                                     &std::fclose);
+  std::unique_ptr<FILE, int (*)(FILE*)> file(std::tmpfile(), &std::fclose);
   ASSERT_NE(file, nullptr) << std::strerror(errno);
   const int descriptor = fileno(file.get());
   std::array<uint8_t, 4097> expected;
