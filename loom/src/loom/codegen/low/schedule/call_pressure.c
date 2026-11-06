@@ -15,8 +15,8 @@
 #include "loom/ops/low/ops.h"
 
 typedef struct loom_low_schedule_call_pressure_record_t {
-  // First row in loom_low_schedule_call_pressure_table_t::limits.
-  uint32_t limit_start;
+  // Sparse capacities reduced by this call, owned by the scheduling arena.
+  const loom_low_schedule_call_pressure_limit_t* limits;
   // Number of boundary limits for this call.
   uint32_t limit_count;
 } loom_low_schedule_call_pressure_record_t;
@@ -24,8 +24,6 @@ typedef struct loom_low_schedule_call_pressure_record_t {
 struct loom_low_schedule_call_pressure_table_t {
   // Records aligned with loom_low_schedule_build_state_t::call_node_indices.
   loom_low_schedule_call_pressure_record_t* records;
-  // Sparse capacities reduced by a call boundary.
-  loom_low_schedule_call_pressure_limit_t* limits;
 };
 
 static const loom_low_call_contract_t* loom_low_schedule_call_pressure_contract(
@@ -89,14 +87,12 @@ iree_host_size_t loom_low_schedule_call_pressure_build_limits(
     if (preserved_capacity >= ordinary_capacity) {
       continue;
     }
-    if (limits != NULL) {
-      limits[limit_count] = (loom_low_schedule_call_pressure_limit_t){
-          .source_id = reg_class_id,
-          .pressure_set_id = pressure_set_id,
-          .preserved_unit_capacity = preserved_capacity,
-          .source_kind = LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS,
-      };
-    }
+    limits[limit_count] = (loom_low_schedule_call_pressure_limit_t){
+        .source_id = reg_class_id,
+        .pressure_set_id = pressure_set_id,
+        .preserved_unit_capacity = preserved_capacity,
+        .source_kind = LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_CLASS,
+    };
     ++limit_count;
   }
   for (uint16_t resource_id = 0;
@@ -124,17 +120,15 @@ iree_host_size_t loom_low_schedule_call_pressure_build_limits(
     if (preserved_capacity >= ordinary_capacity) {
       continue;
     }
-    if (limits != NULL) {
-      limits[limit_count] = (loom_low_schedule_call_pressure_limit_t){
-          .source_id = resource_id,
-          .preserved_unit_capacity = preserved_capacity,
-          .source_kind =
-              LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_PACKING_RESOURCE,
-          .requires_hard_capacity = iree_all_bits_set(
-              resource->flags,
-              LOOM_LOW_REGISTER_PACKING_RESOURCE_FLAG_UNSPILLABLE),
-      };
-    }
+    limits[limit_count] = (loom_low_schedule_call_pressure_limit_t){
+        .source_id = resource_id,
+        .preserved_unit_capacity = preserved_capacity,
+        .source_kind =
+            LOOM_LOW_SCHEDULE_PRESSURE_SOURCE_REGISTER_PACKING_RESOURCE,
+        .requires_hard_capacity = iree_all_bits_set(
+            resource->flags,
+            LOOM_LOW_REGISTER_PACKING_RESOURCE_FLAG_UNSPILLABLE),
+    };
     ++limit_count;
   }
   return limit_count;
@@ -166,46 +160,44 @@ iree_status_t loom_low_schedule_call_pressure_initialize(
           ? provider->query_common_clobbers(provider->user_data,
                                             state->target.descriptor_set)
           : (loom_low_call_clobber_list_t){0};
-  iree_host_size_t total_limit_count = 0;
-  for (iree_host_size_t i = 0; i < state->call_node_count; ++i) {
-    const iree_host_size_t call_limit_count =
-        loom_low_schedule_call_pressure_build_limits(
-            state, loom_low_schedule_call_pressure_contract(state, i),
-            common_clobbers, /*limits=*/NULL);
-    if (!iree_host_size_checked_add(total_limit_count, call_limit_count,
-                                    &total_limit_count) ||
-        total_limit_count > UINT32_MAX) {
-      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                              "low schedule call pressure table exceeds u32");
-    }
-  }
-  if (total_limit_count == 0) {
-    return iree_ok_status();
-  }
-
+  // One reusable row buffer bounds construction by target classes/resources,
+  // without repeating clobber analysis to discover each call's sparse size.
+  const loom_low_descriptor_set_t* descriptor_set =
+      state->target.descriptor_set;
+  const iree_host_size_t limit_capacity =
+      (iree_host_size_t)descriptor_set->reg_class_count +
+      descriptor_set->register_packing_resource_count;
+  loom_low_schedule_call_pressure_limit_t* limits = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      state->scratch_arena, limit_capacity, sizeof(*limits), (void**)&limits));
   loom_low_schedule_call_pressure_table_t* table = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->scratch_arena, 1, sizeof(*table), (void**)&table));
-  memset(table, 0, sizeof(*table));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->scratch_arena, state->call_node_count, sizeof(*table->records),
-      (void**)&table->records));
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->scratch_arena, total_limit_count, sizeof(*table->limits),
-      (void**)&table->limits));
-
-  iree_host_size_t limit_start = 0;
   for (iree_host_size_t i = 0; i < state->call_node_count; ++i) {
-    loom_low_schedule_call_pressure_record_t* record = &table->records[i];
-    record->limit_start = (uint32_t)limit_start;
-    const iree_host_size_t populated_limit_count =
+    const iree_host_size_t limit_count =
         loom_low_schedule_call_pressure_build_limits(
             state, loom_low_schedule_call_pressure_contract(state, i),
-            common_clobbers, table->limits + record->limit_start);
-    record->limit_count = (uint32_t)populated_limit_count;
-    limit_start += populated_limit_count;
+            common_clobbers, limits);
+    if (limit_count == 0) {
+      continue;
+    }
+    if (table == NULL) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          state->scratch_arena, 1, sizeof(*table), (void**)&table));
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          state->scratch_arena, state->call_node_count, sizeof(*table->records),
+          (void**)&table->records));
+      memset(table->records, 0,
+             state->call_node_count * sizeof(*table->records));
+    }
+    loom_low_schedule_call_pressure_limit_t* retained_limits = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        state->scratch_arena, limit_count, sizeof(*retained_limits),
+        (void**)&retained_limits));
+    memcpy(retained_limits, limits, limit_count * sizeof(*retained_limits));
+    table->records[i] = (loom_low_schedule_call_pressure_record_t){
+        .limits = retained_limits,
+        .limit_count = (uint32_t)limit_count,
+    };
   }
-  IREE_ASSERT_EQ(limit_start, total_limit_count);
   state->call_pressure = table;
   return iree_ok_status();
 }
@@ -321,8 +313,7 @@ void loom_low_schedule_call_pressure_score_candidate(
       loom_low_schedule_call_pressure_find_call(state, candidate_node_index);
   const loom_low_schedule_call_pressure_record_t* record =
       &state->call_pressure->records[call_index];
-  loom_low_schedule_call_pressure_score_limits(
-      state->target.descriptor_set, pressure_state,
-      state->call_pressure->limits + record->limit_start, record->limit_count,
-      score);
+  loom_low_schedule_call_pressure_score_limits(state->target.descriptor_set,
+                                               pressure_state, record->limits,
+                                               record->limit_count, score);
 }
