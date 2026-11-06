@@ -922,6 +922,16 @@ def _low_operand(
     register_parts = _operand_override_map(
         spec, spec.operand_register_parts, "register-part overrides"
     )
+    # DIVS carries its quotient state in r31 across instructions. Explicit SSA
+    # operands preserve the value chain; state accesses also prevent the next
+    # dividend from clobbering r31 before the quotient has been extracted.
+    state_flags = ()
+    if _operand_storage_machine_class(spec, operand) == "mR31_divs":
+        state_flags = (
+            OperandFlag.STATE_WRITE
+            if role is OperandRole.RESULT
+            else OperandFlag.STATE_READ,
+        )
     return Operand(
         field_name=operand.name,
         role=role,
@@ -932,6 +942,7 @@ def _low_operand(
             ),
         ),
         unit_count=_operand_unit_count(spec, operand),
+        flags=state_flags,
         encoding_field_id=encoding_field_id,
         encoding_adapter_id=encoding_adapter_id,
         read_stage=read_stage,

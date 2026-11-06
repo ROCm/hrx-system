@@ -209,7 +209,7 @@ TEST(CxxDiagnosticTest,
         "loom::workgroup_size(64,1,1)]]\n"
         "void divide(const unsigned long long* input, unsigned long long* "
         "output) {\n"
-        "  output[0] = input[0] / input[1];\n"
+        "  output[0] = input[0] / 0ULL;\n"
         "}\n";
     loomc_source_options_t source_options = {
         .identifier = loomc_make_cstring_view("virtual/division.cxx"),
@@ -290,7 +290,7 @@ TEST(CxxDiagnosticTest,
   EXPECT_EQ(range.start_line, 3u);
   EXPECT_EQ(range.start_column, 15u);
   EXPECT_EQ(range.end_line, 3u);
-  EXPECT_EQ(range.end_column, 34u);
+  EXPECT_EQ(range.end_column, 30u);
   EXPECT_EQ(loomc_source_contents(range.source).data_length, 0u);
 }
 
@@ -301,7 +301,7 @@ TEST(CxxDiagnosticTest, CompilationSourceRetentionControlsHeaderSnapshots) {
       "loom::workgroup_size(64,1,1)]]\n"
       "void divide(const unsigned long long* input, unsigned long long* "
       "output) {\n"
-      "  output[0] = input[0] / input[1];\n"
+      "  output[0] = input[0] / 0ULL;\n"
       "}\n";
   for (loomc_source_retention_t source_retention : {
            LOOMC_SOURCE_RETENTION_EXACT,
@@ -392,7 +392,7 @@ TEST(CxxDiagnosticTest, CompilationSourceRetentionControlsHeaderSnapshots) {
     EXPECT_EQ(failure->range.start_line, 3u);
     EXPECT_EQ(failure->range.start_column, 15u);
     EXPECT_EQ(failure->range.end_line, 3u);
-    EXPECT_EQ(failure->range.end_column, 34u);
+    EXPECT_EQ(failure->range.end_column, 30u);
     const auto contents = loomc_source_contents(failure->range.source);
     const std::string formatted(failure->formatted_text.data,
                                 failure->formatted_text.size);
@@ -400,13 +400,13 @@ TEST(CxxDiagnosticTest, CompilationSourceRetentionControlsHeaderSnapshots) {
       EXPECT_EQ(std::string(reinterpret_cast<const char*>(contents.data),
                             contents.data_length),
                 header_text);
-      EXPECT_NE(formatted.find("3 |   output[0] = input[0] / input[1];"),
+      EXPECT_NE(formatted.find("3 |   output[0] = input[0] / 0ULL;"),
                 std::string::npos);
     } else {
       EXPECT_EQ(contents.data_length, 0u);
       EXPECT_EQ(failure->range.start, 0u);
       EXPECT_EQ(failure->range.end, 0u);
-      EXPECT_EQ(formatted.find("3 |   output[0] = input[0] / input[1];"),
+      EXPECT_EQ(formatted.find("3 |   output[0] = input[0] / 0ULL;"),
                 std::string::npos);
     }
   }

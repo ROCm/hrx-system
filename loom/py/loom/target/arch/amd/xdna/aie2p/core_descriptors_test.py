@@ -1201,6 +1201,8 @@ def test_scalar_address_descriptors_expose_fixed_register_state() -> None:
     ]
     assert move_to_state.asm_forms[0].mnemonic == "mov.dividend"
     assert move_from_state.asm_forms[0].mnemonic == "mov.quotient"
+    assert move_to_state.operands[0].flags == (OperandFlag.STATE_WRITE,)
+    assert move_from_state.operands[1].flags == (OperandFlag.STATE_READ,)
 
     divide_step = descriptors["amd.xdna.aie2p.divide.step.unsigned.i32"]
     assert [operand.field_name for operand in divide_step.operands] == [
@@ -1223,6 +1225,8 @@ def test_scalar_address_descriptors_expose_fixed_register_state() -> None:
     assert divide_step.constraints[0].rhs_operand_index == 2
     assert divide_step.asm_forms[0].results == ("d0", "sd_out")
     assert divide_step.asm_forms[0].operands == ("sd", "s0", "s1")
+    assert divide_step.operands[1].flags == (OperandFlag.STATE_WRITE,)
+    assert divide_step.operands[2].flags == (OperandFlag.STATE_READ,)
 
     multiply_add = descriptors["amd.xdna.aie2p.madd.i32"]
     assert [operand.field_name for operand in multiply_add.operands] == [

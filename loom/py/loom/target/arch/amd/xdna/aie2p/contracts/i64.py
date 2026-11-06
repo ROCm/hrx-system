@@ -467,12 +467,19 @@ def _pair_multiply_rule() -> DescriptorRule:
     )
 
 
-def _pair_unsigned_remainder_by_word_rule() -> DescriptorRule:
+def _pair_unsigned_division_by_word_rule(
+    source_op: Op, *, divisor_maximum: int
+) -> DescriptorRule:
     """Continues the native divider state across both dividend words."""
+    has_quotient = source_op != scalar_arithmetic.scalar_remui
+    has_remainder = source_op != scalar_arithmetic.scalar_divui
+    paired = source_op == scalar_arithmetic.scalar_divremui
+    result_names = ("quotient", "remainder") if paired else ("result",)
     lhs_emits, lhs_low, lhs_high = _split_pair(ValueRef.operand("lhs"), "lhs")
     divisor = ValueRef.temporary("divisor")
     zero = ValueRef.temporary("zero")
     move_to_state = _descriptor("amd.xdna.aie2p.move.to.division-state")
+    move_from_state = _descriptor("amd.xdna.aie2p.move.from.division-state")
     divide_step = _descriptor("amd.xdna.aie2p.divide.step.unsigned.i32")
     zero_descriptor = _descriptor("amd.xdna.aie2p.constant.i32.short")
     emits: list[EmitRegisterSlice | EmitDescriptorOp | EmitRegisterConcat] = [
@@ -499,21 +506,59 @@ def _pair_unsigned_remainder_by_word_rule() -> DescriptorRule:
                 form=DescriptorEmitForm.OP,
             )
         )
-        state, remainder = append_runtime_unsigned_division_steps(
+        state, remainder, quotient_correction = append_runtime_unsigned_division_steps(
             emits,
             initial_state=state,
             initial_remainder=remainder,
             divisor=divisor,
             temporary_prefix=f"{word_name}_division_",
+            full_remainder=word_name == "low" and divisor_maximum > 2**31,
+            return_quotient=has_quotient,
         )
-    emits.append(_concat_pair(remainder, zero))
+        if has_quotient:
+            quotient_name = f"quotient_{word_name}"
+            raw_quotient = ValueRef.temporary(
+                f"raw_{quotient_name}" if quotient_correction else quotient_name
+            )
+            emits.append(
+                EmitDescriptorOp(
+                    descriptor=move_from_state,
+                    operands={"src": state},
+                    results={"dst": raw_quotient},
+                    result_types={"dst": DescriptorResultType()},
+                    form=DescriptorEmitForm.OP,
+                )
+            )
+            if quotient_correction:
+                program = ScalarProgram()
+                program.binary(
+                    quotient_name, "or.i32", raw_quotient, quotient_correction
+                )
+                emits.extend(program.emits)
+    if has_quotient:
+        emits.append(
+            EmitRegisterConcat(
+                sources=(
+                    ValueRef.temporary("quotient_low"),
+                    ValueRef.temporary("quotient_high"),
+                ),
+                result=ValueRef.result("quotient" if paired else "result"),
+            )
+        )
+    if has_remainder:
+        emits.append(
+            EmitRegisterConcat(
+                sources=(remainder, zero),
+                result=ValueRef.result("remainder" if paired else "result"),
+            )
+        )
     return DescriptorRule(
-        source_op=scalar_arithmetic.scalar_remui,
+        source_op=source_op,
         descriptor=divide_step,
-        priority=1,
+        priority=2 if divisor_maximum <= 2**31 else 1,
         guards=(
-            *_typed_guards(("lhs", "rhs", "result"), _I64),
-            Guard.value_i64_range("rhs", 1, 2**32 - 1),
+            *_typed_guards(("lhs", "rhs", *result_names), _I64),
+            Guard.value_i64_range("rhs", 1, divisor_maximum),
         ),
         emit=tuple(emits),
     )
@@ -1237,7 +1282,15 @@ AIE2P_I64_RULES = (
         "add.carry_out.i32",
         "add.carry.i32",
     ),
-    _pair_unsigned_remainder_by_word_rule(),
+    *(
+        _pair_unsigned_division_by_word_rule(source_op, divisor_maximum=divisor_maximum)
+        for source_op in (
+            scalar_arithmetic.scalar_divui,
+            scalar_arithmetic.scalar_remui,
+            scalar_arithmetic.scalar_divremui,
+        )
+        for divisor_maximum in (2**31, 2**32 - 1)
+    ),
     _pair_multiply_rule(),
     *(_pair_bounded_left_shift_rule(word_index) for word_index in range(2)),
     _pair_left_shift_rule(),

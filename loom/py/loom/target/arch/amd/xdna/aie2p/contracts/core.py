@@ -499,7 +499,7 @@ def _unsigned_division_rule(
             result_type=type_pattern,
         ),
     ]
-    final_state, _ = append_runtime_unsigned_division_steps(
+    final_state, _, _ = append_runtime_unsigned_division_steps(
         emits,
         initial_state=ValueRef.temporary("division_state_0"),
         initial_remainder=ValueRef.temporary("division_remainder_0"),

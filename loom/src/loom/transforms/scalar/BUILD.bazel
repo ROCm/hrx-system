@@ -76,9 +76,9 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "wide_remainder_legalization",
-    srcs = ["wide_remainder_legalization.c"],
-    hdrs = ["wide_remainder_legalization.h"],
+    name = "wide_division_legalization",
+    srcs = ["wide_division_legalization.c"],
+    hdrs = ["wide_division_legalization.h"],
     deps = [
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/index",
@@ -87,6 +87,7 @@ loom_cc_library(
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/target:legalization",
         "//loom/src/loom/util:fact_table",
+        "//loom/src/loom/util:predicate_facts",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
     ],

@@ -20,7 +20,7 @@
 #include "loom/target/arch/amdgpu/ops/target.h"
 #include "loom/target/arch/amdgpu/pass_registry.h"
 #include "loom/target/arch/amdgpu/profile.h"
-#include "loom/transforms/scalar/wide_remainder_legalization.h"
+#include "loom/transforms/scalar/wide_division_legalization.h"
 
 static const loom_target_low_legality_provider_t*
     kLoomAmdgpuLowLegalityProviders[] = {
@@ -30,7 +30,7 @@ static const loom_target_low_legality_provider_t*
 static const loom_target_legalizer_provider_t* kLoomAmdgpuLegalizerProviders[] =
     {
         &loom_amdgpu_target_legalizer_provider_storage,
-        &loom_scalar_wide_remainder_legalizer_provider_storage,
+        &loom_scalar_wide_division_legalizer_provider_storage,
 };
 
 static const loom_target_low_packet_diagnostic_provider_t*

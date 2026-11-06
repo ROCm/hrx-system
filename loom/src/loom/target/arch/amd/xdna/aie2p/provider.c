@@ -20,7 +20,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/ops/target.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/pass.h"
 #include "loom/target/arch/amd/xdna/aie2p/profile.h"
-#include "loom/transforms/scalar/wide_remainder_legalization.h"
+#include "loom/transforms/scalar/wide_division_legalization.h"
 
 static iree_status_t loom_aie2p_target_provider_select_profile(
     iree_string_view_t selector, const loom_target_profile_t** out_profile) {
@@ -37,7 +37,7 @@ static const loom_low_verify_provider_t* const kAie2pLowVerifyProviders[] = {
 static const loom_target_legalizer_provider_t* const
     kAie2pLegalizerProviders[] = {
         &loom_aie2p_target_legalizer_provider_storage,
-        &loom_scalar_wide_remainder_legalizer_provider_storage,
+        &loom_scalar_wide_division_legalizer_provider_storage,
 };
 
 static iree_status_t loom_aie2p_provider_build_string_attr(

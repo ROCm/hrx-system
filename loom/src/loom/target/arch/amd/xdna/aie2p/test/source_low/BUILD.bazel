@@ -113,6 +113,7 @@ loom_check_test_suite(
         "numeric_unsigned_constant_division.loom-test",
         "numeric_unsigned_remainder.loom-test",
         "numeric_vector_i64_bitwise.loom-test",
+        "numeric_wide_division.loom-test",
         "packed_bitfield.loom-test",
         "packed_bitpack.loom-test",
         "packed_concat_tail.loom-test",

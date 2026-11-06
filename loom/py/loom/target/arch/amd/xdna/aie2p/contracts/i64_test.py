@@ -52,7 +52,9 @@ def _logical_shift(value: int, amount: int) -> int:
     return _u32(value << amount)
 
 
-def _evaluate_rule(rule: DescriptorRule, lhs: int, rhs: int) -> int:
+def _evaluate_rule(
+    rule: DescriptorRule, lhs: int, rhs: int, result_name: str = "result"
+) -> int:
     values: dict[ValueRef, int | tuple[int, int]] = {
         ValueRef.operand("lhs"): _split_i64(lhs),
         ValueRef.operand("rhs"): _split_i64(rhs),
@@ -131,7 +133,7 @@ def _evaluate_rule(rule: DescriptorRule, lhs: int, rhs: int) -> int:
             result = operands["src"]
         elif semantic_tag == "integer.divide.step.unsigned.i32":
             state = operands["sd"]
-            remainder = (operands["s0"] << 1) | (state >> 31)
+            remainder = _u32((operands["s0"] << 1) | (state >> 31))
             state = _u32(state << 1)
             if remainder >= operands["s1"]:
                 remainder -= operands["s1"]
@@ -147,7 +149,7 @@ def _evaluate_rule(rule: DescriptorRule, lhs: int, rhs: int) -> int:
         assert len(data_results) == 1
         values[data_results[0]] = _u32(result)
 
-    result = values[ValueRef.result("result")]
+    result = values[ValueRef.result(result_name)]
     if isinstance(result, tuple):
         return _join_i64(result)
     return result
@@ -393,10 +395,9 @@ def test_i64_binary_recipes_are_exact() -> None:
             assert _evaluate_rule(rule, lhs, rhs) == reference(lhs, rhs) & _U64_MASK
 
 
-def test_i64_unsigned_remainder_by_word_recipe_is_exact() -> None:
-    rule = _rule(scalar_arithmetic.scalar_remui)
+def test_i64_unsigned_division_by_word_recipes_are_exact() -> None:
     generator = random.Random(0xA1E2_D1A1)
-    divisors = (1, 2, 3, 2**24 - 1, 2**31, 2**32 - 1)
+    divisors = (1, 2, 3, 2**24 - 1, 2**31 - 1, 2**31, 2**31 + 1, 2**32 - 1)
     samples = [
         (value, divisor) for value, _ in _i64_samples()[:256] for divisor in divisors
     ]
@@ -404,8 +405,33 @@ def test_i64_unsigned_remainder_by_word_recipe_is_exact() -> None:
         (generator.getrandbits(64), generator.randint(1, 2**32 - 1))
         for _ in range(4096)
     )
-    for value, divisor in samples:
-        assert _evaluate_rule(rule, value, divisor) == value % divisor
+    division_ops = (
+        scalar_arithmetic.scalar_divui,
+        scalar_arithmetic.scalar_remui,
+        scalar_arithmetic.scalar_divremui,
+    )
+    for rule in AIE2P_I64_RULES:
+        if not isinstance(rule, DescriptorRule) or rule.source_op not in division_ops:
+            continue
+        bound = next(
+            guard.maximum
+            for guard in rule.guards
+            if guard.kind is GuardKind.VALUE_I64_RANGE
+        )
+        for value, divisor in samples:
+            if divisor > bound:
+                continue
+            quotient, remainder = divmod(value, divisor)
+            if rule.source_op is scalar_arithmetic.scalar_divremui:
+                assert _evaluate_rule(rule, value, divisor, "quotient") == quotient
+                assert _evaluate_rule(rule, value, divisor, "remainder") == remainder
+            else:
+                expected = (
+                    quotient
+                    if rule.source_op is scalar_arithmetic.scalar_divui
+                    else remainder
+                )
+                assert _evaluate_rule(rule, value, divisor) == expected
 
 
 def test_i64_shift_recipes_are_exact() -> None:

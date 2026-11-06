@@ -7,6 +7,15 @@
 #include "iree/base/internal/math.h"
 #include "loom/ir/facts.h"
 
+// Division consumes values already represented in their source carrier.
+// Wrapping mathematical results at 64 bits treats saturated endpoints as
+// unbounded; doing that to an operand would discard valid sign/range facts.
+static loom_value_facts_t loom_value_facts_division_operand(
+    loom_value_facts_t facts, int32_t bit_count) {
+  return bit_count == 64 ? facts
+                         : loom_value_facts_wrap_integer(facts, bit_count);
+}
+
 typedef struct loom_value_facts_unsigned_range_t {
   // Inclusive minimum unsigned value.
   uint64_t minimum;
@@ -60,10 +69,10 @@ bool loom_value_facts_remui_is_identity(loom_value_facts_t lhs,
   const uint64_t mask = iree_math_mask_low_bits_u64(UINT64_MAX, bit_count);
   const loom_value_facts_unsigned_range_t lhs_range =
       loom_value_facts_unsigned_range(
-          loom_value_facts_wrap_integer(lhs, bit_count), mask);
+          loom_value_facts_division_operand(lhs, bit_count), mask);
   const loom_value_facts_unsigned_range_t rhs_range =
       loom_value_facts_unsigned_range(
-          loom_value_facts_wrap_integer(rhs, bit_count), mask);
+          loom_value_facts_division_operand(rhs, bit_count), mask);
   return lhs_range.maximum < rhs_range.minimum;
 }
 
@@ -77,8 +86,9 @@ static void loom_value_facts_unsigned_division(
     int32_t bit_count, loom_value_facts_unsigned_division_kind_t kind,
     loom_value_facts_t* out) {
   const loom_value_facts_t lhs_facts =
-      loom_value_facts_wrap_integer(*lhs, bit_count);
-  loom_value_facts_t rhs_facts = loom_value_facts_wrap_integer(*rhs, bit_count);
+      loom_value_facts_division_operand(*lhs, bit_count);
+  loom_value_facts_t rhs_facts =
+      loom_value_facts_division_operand(*rhs, bit_count);
   rhs_facts.flags |= rhs->flags & LOOM_VALUE_FACT_NON_ZERO;
   uint64_t lhs_bits = 0;
   uint64_t rhs_bits = 0;
@@ -310,8 +320,8 @@ loom_value_facts_t loom_value_facts_quotient_preimage(
       scale.range_lo > scale.range_hi) {
     return domain;
   }
-  quotient = loom_value_facts_wrap_integer(quotient, bit_count);
-  scale = loom_value_facts_wrap_integer(scale, bit_count);
+  quotient = loom_value_facts_division_operand(quotient, bit_count);
+  scale = loom_value_facts_division_operand(scale, bit_count);
   const bool unsigned_quotient = kind == LOOM_VALUE_FACTS_QUOTIENT_DIVUI ||
                                  kind == LOOM_VALUE_FACTS_QUOTIENT_CEILDIVUI ||
                                  kind == LOOM_VALUE_FACTS_QUOTIENT_SHRUI;
