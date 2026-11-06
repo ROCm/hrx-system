@@ -96,7 +96,7 @@ typedef bool (*iree_hal_amd_gpu_completion_fn_t)(
 // removed sources and coherent observation, and relocates retained invocations
 // before returning the old table's ownership.
 typedef struct iree_hal_amd_gpu_completion_source_t {
-  // Bounded observation or terminal failure delivery; NULL while borrowed.
+  // Bounded observation or terminal delivery; NULL while borrowed or disabled.
   iree_hal_amd_gpu_completion_fn_t fn;
   // Borrowed source state, live through the callback's final access.
   void* user_data;
@@ -143,7 +143,7 @@ struct iree_hal_amd_gpu_completion_scope_t {
   iree_hal_amd_gpu_completion_t* completion;
   // Borrowed table entry, retargeted under drain_mutex during replacement.
   iree_hal_amd_gpu_completion_source_t* source;
-  // Original binding restored after the final source access.
+  // Binding restored after the final access; NULL when explicitly disabled.
   iree_hal_amd_gpu_completion_fn_t fn;
   // Next active invocation, or NULL at the end of the list.
   iree_hal_amd_gpu_completion_scope_t* next;
@@ -209,6 +209,24 @@ iree_status_t iree_hal_amd_gpu_completion_initialize(
 void iree_hal_amd_gpu_completion_set_sources(
     iree_hal_amd_gpu_completion_t* completion, iree_host_size_t source_count,
     iree_hal_amd_gpu_completion_source_t* sources);
+
+// Disables one source and returns whether its final invocation is still active.
+// user_data must uniquely identify this source. Serialized with replacement;
+// the owner joins accepted work and external producers before removal. An
+// active callback retains a disabled entry (NULL fn, same user_data) in every
+// replacement until join_source returns. Its relative order remains stable so
+// terminal failure delivery can continue after it without repeating a source.
+// Other sources can be replaced or removed while the exact join waits.
+bool iree_hal_amd_gpu_completion_remove_source(
+    iree_hal_amd_gpu_completion_t* completion,
+    iree_hal_amd_gpu_completion_fn_t fn, void* user_data);
+
+// Joins this disabled source's final callback/copy access, outside the owner's
+// table-replacement exclusion. The owner keeps source state and its disabled
+// table entry live through return, then may omit the entry and reclaim state.
+// Called outside this source's own invocation; there is no native operation.
+void iree_hal_amd_gpu_completion_join_source(
+    iree_hal_amd_gpu_completion_t* completion, void* user_data);
 
 // Cold membership check after installing a source. Either the source receives
 // a later native failure or this returns the failure already delivered before

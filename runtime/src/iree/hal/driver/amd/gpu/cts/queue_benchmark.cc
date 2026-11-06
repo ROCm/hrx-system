@@ -962,6 +962,39 @@ BENCHMARK_CAPTURE(BM_QueueAcquire, AqlReuseCoordinate, true,
     ->Iterations(20)
     ->UseRealTime();
 
+// Includes callback removal, native queue shutdown, and final reclamation.
+// Acquisition is outside timing and reuses its established coordinate; host
+// allocation accounting covers only release, not the next acquisition.
+static void BM_QueueRelease(benchmark::State& state,
+                            amdf_queue_command_type_t command_type) {
+  NativeQueue device(command_type);
+  if (!device.Initialize(state)) {
+    return;
+  }
+  uint64_t allocations = 0;
+  for (auto _ : state) {
+    state.PauseTiming();
+    iree_hal_queue_t* queue = nullptr;
+    IREE_CHECK_OK(device.AcquireQueue(&queue));
+    const uint64_t allocations_before = device.allocation_count();
+    state.ResumeTiming();
+    iree_hal_queue_release(queue);
+    state.PauseTiming();
+    allocations += device.allocation_count() - allocations_before;
+    state.ResumeTiming();
+  }
+  state.SetItemsProcessed(state.iterations());
+  state.counters["host_allocations"] = allocations;
+}
+BENCHMARK_CAPTURE(BM_QueueRelease, Pm4, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4)
+    ->Iterations(20)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_QueueRelease, Aql, AMDF_QUEUE_COMMAND_TYPE_GPU_AQL)
+    ->Iterations(20)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+
 static void BM_Dispatch(
     benchmark::State& state, Arguments arguments, Barriers barriers,
     Timing timing,

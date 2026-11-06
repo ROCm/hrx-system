@@ -21,7 +21,7 @@ namespace {
 
 TEST(PublicationTest, IdleOwnerInvokesNoSource) {
   uint32_t count = 0;
-  const iree_hal_amd_gpu_publication_source_t source = {
+  iree_hal_amd_gpu_publication_source_t source = {
       .publish =
           [](void* user_data) {
             ++*static_cast<uint32_t*>(user_data);
@@ -90,7 +90,7 @@ TEST(PublicationTest, NotificationDuringFinalObservationIsRetained) {
     // A second publication consumed the racing ready bit.
     std::binary_semaphore completed{0};
   } queue;
-  const iree_hal_amd_gpu_publication_source_t source = {
+  iree_hal_amd_gpu_publication_source_t source = {
       .publish =
           [](void* user_data) {
             auto* queue = static_cast<Source*>(user_data);
@@ -165,10 +165,64 @@ TEST(PublicationTest, ReplacementJoinsLastSourceAccess) {
   EXPECT_TRUE(replaced.load());
 }
 
+TEST(PublicationTest, RemovedOrdinalSurvivesIndependentTableReplacement) {
+  struct Source {
+    // Publishes ownership before the controller disables the source.
+    std::binary_semaphore entered{0};
+    // Holds the final callback access across independent replacements.
+    std::binary_semaphore resume{0};
+    // Accessed after resume and read only after the exact callback joins.
+    uint32_t calls = 0;
+  } source;
+  auto original =
+      std::make_unique<std::array<iree_hal_amd_gpu_publication_source_t, 3>>();
+  (*original)[2] = {
+      .publish =
+          [](void* data) {
+            auto* source = static_cast<Source*>(data);
+            source->entered.release();
+            source->resume.acquire();
+            ++source->calls;
+            return true;
+          },
+      .user_data = &source,
+  };
+  iree_hal_amd_gpu_publication_t publication;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_publication_initialize(
+      original->size(), original->data(), {}, iree_allocator_system(),
+      &publication));
+  iree_hal_amd_gpu_publication_notify(&publication, 2);
+  source.entered.acquire();
+  EXPECT_TRUE(iree_hal_amd_gpu_publication_remove_source(&publication, 2));
+  std::jthread joiner([&] {
+    iree_hal_amd_gpu_publication_join_source(&publication, 2);
+    EXPECT_EQ(source.calls, 1u);
+  });
+  // Even a replacement shorter than the active ordinal must not inspect its
+  // old entry or join it again. The callback holds its identity by value.
+  iree_hal_amd_gpu_publication_set_sources(&publication, 0, nullptr);
+  original.reset();
+  std::binary_semaphore independent{0};
+  iree_hal_amd_gpu_publication_source_t replacement = {
+      .publish =
+          [](void* data) {
+            static_cast<std::binary_semaphore*>(data)->release();
+            return false;
+          },
+      .user_data = &independent,
+  };
+  iree_hal_amd_gpu_publication_set_sources(&publication, 1, &replacement);
+  iree_hal_amd_gpu_publication_notify(&publication, 0);
+  source.resume.release();
+  joiner.join();
+  independent.acquire();
+  iree_hal_amd_gpu_publication_deinitialize(&publication);
+}
+
 TEST(PublicationTest, ReplacementSupportsVacantSlotsAndGrowingReadyExtent) {
   std::counting_semaphore<2> first_completed{0};
   std::counting_semaphore<2> second_completed{0};
-  const iree_hal_amd_gpu_publication_source_t source = {
+  iree_hal_amd_gpu_publication_source_t source = {
       .publish =
           [](void* user_data) {
             static_cast<std::counting_semaphore<2>*>(user_data)->release();
@@ -280,7 +334,7 @@ TEST(PublicationTest, ReadySuffixYieldsToAnotherQueue) {
   } queue;
   iree_hal_amd_gpu_publication_t publication;
   queue.publication = &publication;
-  const iree_hal_amd_gpu_publication_source_t sources[] = {
+  iree_hal_amd_gpu_publication_source_t sources[] = {
       {
           .publish =
               [](void* user_data) {
@@ -349,7 +403,7 @@ TEST(PublicationTest, ConcurrentCallersAndDeferredPublisherRetireEveryEntry) {
     }
   } queue;
   iree_hal_amd_gpu_publisher_initialize(&queue.publisher);
-  const iree_hal_amd_gpu_publication_source_t source = {
+  iree_hal_amd_gpu_publication_source_t source = {
       .publish =
           [](void* user_data) {
             auto* queue = static_cast<Queue*>(user_data);
@@ -406,7 +460,7 @@ TEST(PublicationTest, NativeResultReleasesQueueBeforeCallbackThreadJoins) {
   for (uint32_t i = 0; i < 256; ++i) {
     Source source{std::make_unique<Queue>()};
     iree_hal_amd_gpu_publisher_initialize(&source.queue->publisher);
-    const iree_hal_amd_gpu_publication_source_t binding = {
+    iree_hal_amd_gpu_publication_source_t binding = {
         .publish =
             [](void* user_data) {
               auto* source = static_cast<Source*>(user_data);

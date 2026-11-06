@@ -529,6 +529,124 @@ TEST_F(CompletionTest, TerminalRoundSurvivesRetainedSourceReplacement) {
   EXPECT_EQ(last_failures, 1u);
 }
 
+TEST_F(CompletionTest, DisabledCalloutsJoinIndependentlyAcrossReplacement) {
+  std::binary_semaphore first_entered{0}, first_resume{0};
+  std::binary_semaphore second_entered{0}, second_resume{0};
+  uint32_t first_calls = 0, second_calls = 0, independent_calls = 0;
+  Callout first = [&](iree_hal_amd_gpu_completion_scope_t* scope) {
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
+    first_entered.release();
+    first_resume.acquire();
+    ++first_calls;
+    return false;
+  };
+  Callout second = [&](iree_hal_amd_gpu_completion_scope_t* scope) {
+    iree_hal_amd_gpu_completion_scope_unlock(scope);
+    second_entered.release();
+    second_resume.acquire();
+    ++second_calls;
+    return false;
+  };
+  Callback independent = [&](amdf_status_t) {
+    ++independent_calls;
+    return false;
+  };
+  const auto first_binding = Source(first);
+  const auto second_binding = Source(second);
+  auto original =
+      std::make_unique<std::array<iree_hal_amd_gpu_completion_source_t, 2>>(
+          std::array{first_binding, second_binding});
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, original->size(), original->data(), 0, {},
+      iree_allocator_system(), &completion_));
+  first_entered.acquire();
+  EXPECT_TRUE(iree_hal_amd_gpu_completion_remove_source(
+      &completion_, first_binding.fn, &first));
+  std::jthread helper(
+      [&] { iree_hal_amd_gpu_completion_try_drain(&completion_); });
+  second_entered.acquire();
+  EXPECT_TRUE(iree_hal_amd_gpu_completion_remove_source(
+      &completion_, second_binding.fn, &second));
+  std::array<iree_hal_amd_gpu_completion_source_t, 3> replacement = {
+      iree_hal_amd_gpu_completion_source_t{.user_data = &first},
+      iree_hal_amd_gpu_completion_source_t{.user_data = &second},
+      Source(independent)};
+  iree_hal_amd_gpu_completion_set_sources(&completion_, replacement.size(),
+                                          replacement.data());
+  original.reset();
+  iree_hal_amd_gpu_completion_try_drain(&completion_);
+  EXPECT_EQ(independent_calls, 1u);
+  std::jthread first_joiner([&] {
+    iree_hal_amd_gpu_completion_join_source(&completion_, &first);
+    EXPECT_EQ(first_calls, 1u);
+  });
+  std::jthread second_joiner([&] {
+    iree_hal_amd_gpu_completion_join_source(&completion_, &second);
+    EXPECT_EQ(second_calls, 1u);
+  });
+  second_resume.release();
+  second_joiner.join();
+  helper.join();
+  std::array<iree_hal_amd_gpu_completion_source_t, 2> reduced = {
+      iree_hal_amd_gpu_completion_source_t{.user_data = &first},
+      Source(independent)};
+  iree_hal_amd_gpu_completion_set_sources(&completion_, reduced.size(),
+                                          reduced.data());
+  first_resume.release();
+  first_joiner.join();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(first_calls, 1u);
+  EXPECT_EQ(second_calls, 1u);
+}
+
+TEST_F(CompletionTest,
+       DisabledTerminalCalloutPreservesFailureDeliveryPosition) {
+  std::binary_semaphore entered{0}, resume{0};
+  uint32_t first_failures = 0, last_failures = 0;
+  Callback first = [&](amdf_status_t status) {
+    first_failures += !amdf_status_is_ok(status);
+    return false;
+  };
+  Callback last = [&](amdf_status_t status) {
+    last_failures += !amdf_status_is_ok(status);
+    return false;
+  };
+  Callout callout = [&](iree_hal_amd_gpu_completion_scope_t* scope) {
+    if (!amdf_status_is_ok(
+            iree_hal_amd_gpu_completion_query_status(&completion_))) {
+      iree_hal_amd_gpu_completion_scope_unlock(scope);
+      entered.release();
+      resume.acquire();
+    }
+    return false;
+  };
+  const auto binding = Source(callout);
+  auto original =
+      std::make_unique<std::array<iree_hal_amd_gpu_completion_source_t, 3>>(
+          std::array{Source(first), binding, Source(last)});
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, original->size(), original->data(), 0, {},
+      iree_allocator_system(), &completion_));
+  event_.AwaitWaitCount(1);
+  event_.SetWaitStatus(amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST));
+  entered.acquire();
+  EXPECT_TRUE(iree_hal_amd_gpu_completion_remove_source(&completion_,
+                                                        binding.fn, &callout));
+  // The earlier source already received failure and is removed. The active
+  // callout moves to index zero; the terminal round must continue past it.
+  std::array<iree_hal_amd_gpu_completion_source_t, 2> replacement = {
+      iree_hal_amd_gpu_completion_source_t{.user_data = &callout},
+      Source(last)};
+  iree_hal_amd_gpu_completion_set_sources(&completion_, replacement.size(),
+                                          replacement.data());
+  original.reset();
+  resume.release();
+  iree_hal_amd_gpu_completion_join_source(&completion_, &callout);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+  EXPECT_EQ(first_failures, 1u);
+  EXPECT_EQ(last_failures, 1u);
+}
+
 TEST_F(CompletionTest, ReturnedSourceWakesWorkerWhileAnotherCalloutRemains) {
   std::atomic<bool> ready_a{false}, ready_b{false}, other_ready{false};
   std::binary_semaphore entered_a{0}, entered_b{0};
@@ -966,6 +1084,74 @@ TEST_F(CompletionTest, EventOnlySourcesParkAfterProgress) {
   event_.AwaitWaitCount(1);
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
   EXPECT_EQ(calls, 2u);
+}
+
+TEST_F(CompletionTest, ExactSourceJoinDoesNotDisableCoherentObservation) {
+  std::atomic<bool> callout_ready{false}, observe_ready{false};
+  std::binary_semaphore entered{0}, resume{0}, observing{0}, completed{0};
+  Callout callout = [&](iree_hal_amd_gpu_completion_scope_t* scope) {
+    if (callout_ready.exchange(false)) {
+      iree_hal_amd_gpu_completion_scope_unlock(scope);
+      entered.release();
+      resume.acquire();
+    }
+    return false;
+  };
+  iree_atomic_int32_t word = IREE_ATOMIC_VAR_INIT(0);
+  uint32_t observations = 0;
+  bool completion_reported = false;
+  WaitCallback observer = [&](amdf_status_t,
+                              iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    if (!observe_ready.load()) {
+      return false;
+    }
+    if (iree_atomic_load(&word, iree_memory_order_acquire)) {
+      if (!std::exchange(completion_reported, true)) {
+        EXPECT_EQ(iree_hal_amd_gpu_completion_request_stop(&completion_),
+                  AMDF_STATUS_OK);
+        completed.release();
+      }
+      return false;
+    }
+    *out_wait = {.address = &word, .value = 0};
+    if (++observations == 2) {
+      observing.release();
+    }
+    return observations == 1;
+  };
+  const auto binding = Source(callout);
+  std::array sources = {binding, Source(observer)};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, sources.size(), sources.data(), IREE_DURATION_INFINITE, {},
+      iree_allocator_system(), &completion_));
+  event_.AwaitWaitCount(1);
+  callout_ready = true;
+  std::jthread helper(
+      [&] { iree_hal_amd_gpu_completion_try_drain(&completion_); });
+  entered.acquire();
+  EXPECT_TRUE(iree_hal_amd_gpu_completion_remove_source(&completion_,
+                                                        binding.fn, &callout));
+  const int32_t before_join =
+      iree_atomic_load(&completion_.state, iree_memory_order_acquire);
+  std::jthread joiner(
+      [&] { iree_hal_amd_gpu_completion_join_source(&completion_, &callout); });
+  // The worker is parked and the helper is held: only the exact joiner can
+  // change this state. Observe its enrollment before waking the worker.
+  while (iree_atomic_load(&completion_.state, iree_memory_order_acquire) ==
+         before_join) {
+    std::this_thread::yield();
+  }
+  observe_ready = true;
+  EXPECT_EQ(iree_hal_amd_gpu_context_signal(&context_), AMDF_STATUS_OK);
+  observing.acquire();
+  // No event after this write. Active observation must continue even with an
+  // independently parked source-removal waiter.
+  iree_atomic_store(&word, 1, iree_memory_order_release);
+  completed.acquire();
+  resume.release();
+  helper.join();
+  joiner.join();
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
 }
 
 TEST_F(CompletionTest, StopInterruptsActiveObservation) {

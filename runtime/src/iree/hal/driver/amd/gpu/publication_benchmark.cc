@@ -46,6 +46,36 @@ BENCHMARK(BM_SourceReplacement)
     ->MeasureProcessCPUTime()
     ->UseRealTime();
 
+// Measures the added removal handoff separately from native queue shutdown.
+// Both rows remove and restore one source; the split row first disables the
+// callback, allowing its exact join to happen outside membership exclusion.
+void BM_SourceRemoval(benchmark::State& state, bool split) {
+  iree_hal_amd_gpu_publication_source_t source = {
+      .publish = [](void*) { return false; },
+  };
+  const auto binding = source;
+  iree_hal_amd_gpu_publication_source_t vacant = {};
+  iree_hal_amd_gpu_publication_t publication;
+  IREE_CHECK_OK(iree_hal_amd_gpu_publication_initialize(
+      1, &source, {}, iree_allocator_system(), &publication));
+  for (auto _ : state) {
+    if (split) {
+      iree_hal_amd_gpu_publication_remove_source(&publication, 0);
+    }
+    iree_hal_amd_gpu_publication_set_sources(&publication, 1, &vacant);
+    source = binding;
+    iree_hal_amd_gpu_publication_set_sources(&publication, 1, &source);
+  }
+  iree_hal_amd_gpu_publication_deinitialize(&publication);
+  state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK_CAPTURE(BM_SourceRemoval, Replace, false)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+BENCHMARK_CAPTURE(BM_SourceRemoval, DisableThenReplace, true)
+    ->MeasureProcessCPUTime()
+    ->UseRealTime();
+
 // Includes notification and the final worker completion. The large ready
 // suffix amortizes that boundary to expose the cost of one deferred turn.
 // A turn is one callback, which may publish many operations in a native queue.
@@ -56,7 +86,7 @@ void BM_ReadyTurns(benchmark::State& state) {
     // Publishes the final count access before the controller resets it.
     std::binary_semaphore completed{0};
   } source;
-  const iree_hal_amd_gpu_publication_source_t binding = {
+  iree_hal_amd_gpu_publication_source_t binding = {
       .publish =
           [](void* user_data) {
             auto* source = static_cast<Source*>(user_data);

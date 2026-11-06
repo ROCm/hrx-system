@@ -53,7 +53,7 @@ static bool iree_hal_amd_gpu_publication_run_source(
   publication->sources.joining = false;
   iree_slim_mutex_unlock(&publication->sources.mutex);
   if (joining) {
-    iree_notification_post(&publication->sources.joined, 1);
+    iree_notification_post(&publication->sources.joined, IREE_ALL_WAITERS);
   }
   return ready;
 }
@@ -108,7 +108,7 @@ static int iree_hal_amd_gpu_publication_main(void* user_data) {
 }
 
 iree_status_t iree_hal_amd_gpu_publication_initialize(
-    uint32_t source_count, const iree_hal_amd_gpu_publication_source_t* sources,
+    uint32_t source_count, iree_hal_amd_gpu_publication_source_t* sources,
     iree_thread_affinity_t affinity, iree_allocator_t host_allocator,
     iree_hal_amd_gpu_publication_t* out_publication) {
   *out_publication = (iree_hal_amd_gpu_publication_t){
@@ -146,18 +146,20 @@ static bool iree_hal_amd_gpu_publication_source_joined(void* user_data) {
 
 void iree_hal_amd_gpu_publication_set_sources(
     iree_hal_amd_gpu_publication_t* publication, uint32_t source_count,
-    const iree_hal_amd_gpu_publication_source_t* sources) {
+    iree_hal_amd_gpu_publication_source_t* sources) {
   iree_slim_mutex_lock(&publication->sources.mutex);
   const uint32_t ordinal = publication->sources.active_ordinal;
   bool joining = false;
-  if (ordinal != UINT32_MAX) {
+  // A separately removed source already has a joining owner. Its ordinal may
+  // be outside this table, and other replacements must not join it again.
+  if (ordinal != UINT32_MAX && !publication->sources.joining) {
     const iree_hal_amd_gpu_publication_source_t* active =
         &publication->sources.values[ordinal];
     joining = ordinal >= source_count ||
               active->publish != sources[ordinal].publish ||
               active->user_data != sources[ordinal].user_data;
   }
-  publication->sources.joining = joining;
+  publication->sources.joining |= joining;
   const uint32_t previous_word_count = (publication->sources.count + 63) / 64;
   const uint32_t word_count = (source_count + 63) / 64;
   publication->sources.values = sources;
@@ -175,6 +177,41 @@ void iree_hal_amd_gpu_publication_set_sources(
                             iree_hal_amd_gpu_publication_source_joined,
                             publication, iree_infinite_timeout());
   }
+}
+
+bool iree_hal_amd_gpu_publication_remove_source(
+    iree_hal_amd_gpu_publication_t* publication, uint32_t source_ordinal) {
+  iree_slim_mutex_lock(&publication->sources.mutex);
+  publication->sources.values[source_ordinal] =
+      (iree_hal_amd_gpu_publication_source_t){0};
+  const bool active = publication->sources.active_ordinal == source_ordinal;
+  publication->sources.joining |= active;
+  iree_slim_mutex_unlock(&publication->sources.mutex);
+  return active;
+}
+
+typedef struct iree_hal_amd_gpu_publication_join_t {
+  // Borrowed publication owner, live through this caller's join.
+  iree_hal_amd_gpu_publication_t* publication;
+  // Disabled ordinal, reserved until this join returns.
+  uint32_t ordinal;
+} iree_hal_amd_gpu_publication_join_t;
+
+static bool iree_hal_amd_gpu_publication_ordinal_joined(void* user_data) {
+  iree_hal_amd_gpu_publication_join_t* join = user_data;
+  iree_slim_mutex_lock(&join->publication->sources.mutex);
+  const bool joined =
+      join->publication->sources.active_ordinal != join->ordinal;
+  iree_slim_mutex_unlock(&join->publication->sources.mutex);
+  return joined;
+}
+
+void iree_hal_amd_gpu_publication_join_source(
+    iree_hal_amd_gpu_publication_t* publication, uint32_t source_ordinal) {
+  iree_hal_amd_gpu_publication_join_t join = {publication, source_ordinal};
+  iree_notification_await(&publication->sources.joined,
+                          iree_hal_amd_gpu_publication_ordinal_joined, &join,
+                          iree_infinite_timeout());
 }
 
 void iree_hal_amd_gpu_publication_notify(

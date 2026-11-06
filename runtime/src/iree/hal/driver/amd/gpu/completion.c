@@ -130,6 +130,21 @@ static bool iree_hal_amd_gpu_completion_has_removed_scope(
   return false;
 }
 
+// Enters and returns under drain_mutex. Callback return owns clearing the hint
+// and waking all joiners; one completed join cannot disarm another waiter.
+static void iree_hal_amd_gpu_completion_wait_callout(
+    iree_hal_amd_gpu_completion_t* completion) {
+  const int32_t state =
+      iree_atomic_fetch_or(&completion->state,
+                           IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT,
+                           iree_memory_order_acq_rel) |
+      IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT;
+  iree_slim_mutex_unlock(&completion->drain_mutex);
+  iree_wait_address_wait_int32(&completion->state, state,
+                               IREE_TIME_INFINITE_FUTURE);
+  iree_slim_mutex_lock(&completion->drain_mutex);
+}
+
 // The caller holds drain_mutex and has excluded new worker rounds. Retained
 // callbacks need no join; one may itself be acquiring another queue. Empty
 // replacement joins every active invocation during terminal shutdown.
@@ -138,19 +153,8 @@ static void iree_hal_amd_gpu_completion_join_removed(
     iree_hal_amd_gpu_completion_source_t* sources) {
   while (iree_hal_amd_gpu_completion_has_removed_scope(completion, source_count,
                                                        sources)) {
-    const int32_t state =
-        iree_atomic_fetch_or(&completion->state,
-                             IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT,
-                             iree_memory_order_acq_rel) |
-        IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT;
-    iree_slim_mutex_unlock(&completion->drain_mutex);
-    iree_wait_address_wait_int32(&completion->state, state,
-                                 IREE_TIME_INFINITE_FUTURE);
-    iree_slim_mutex_lock(&completion->drain_mutex);
+    iree_hal_amd_gpu_completion_wait_callout(completion);
   }
-  iree_atomic_fetch_and(&completion->state,
-                        ~IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT,
-                        iree_memory_order_release);
 }
 
 static void iree_hal_amd_gpu_completion_clear_hints(
@@ -280,7 +284,8 @@ static bool iree_hal_amd_gpu_completion_begin_borrow(
     iree_hal_amd_gpu_completion_t* completion) {
   int32_t expected =
       iree_atomic_load(&completion->state, iree_memory_order_relaxed);
-  if (expected & ~IREE_HAL_AMD_GPU_COMPLETION_WAITING_FOR_CALLOUT) {
+  if (expected & ~(IREE_HAL_AMD_GPU_COMPLETION_WAITING_FOR_CALLOUT |
+                   IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT)) {
     return false;
   }
   return iree_atomic_compare_exchange_strong(
@@ -333,8 +338,8 @@ static bool iree_hal_amd_gpu_completion_observe(
       (has_callouts ? IREE_HAL_AMD_GPU_COMPLETION_WAITING_FOR_CALLOUT : 0);
   // A returning callout clears its enrolled wait even if every observed native
   // word is unchanged. Rejoin source observation before waiting on its event.
-  while (iree_atomic_load(&completion->state, iree_memory_order_relaxed) ==
-             observing_state &&
+  while ((iree_atomic_load(&completion->state, iree_memory_order_relaxed) &
+          ~IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT) == observing_state &&
          iree_time_now() < deadline) {
     for (iree_host_size_t i = 0; i < completion->source_count; ++i) {
       const iree_hal_amd_gpu_completion_wait_t* wait =
@@ -536,6 +541,48 @@ void iree_hal_amd_gpu_completion_set_sources(
   iree_atomic_fetch_and(&completion->state,
                         ~IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES,
                         iree_memory_order_release);
+  iree_slim_mutex_unlock(&completion->drain_mutex);
+}
+
+bool iree_hal_amd_gpu_completion_remove_source(
+    iree_hal_amd_gpu_completion_t* completion,
+    iree_hal_amd_gpu_completion_fn_t fn, void* user_data) {
+  iree_slim_mutex_lock(&completion->drain_mutex);
+  for (iree_hal_amd_gpu_completion_scope_t* scope = completion->active_scopes;
+       scope; scope = scope->next) {
+    if (scope->fn == fn && scope->source->user_data == user_data) {
+      // The current entry is already borrowed. Leave it disabled when the
+      // invocation returns, retaining its position through source relocation.
+      scope->fn = NULL;
+      iree_slim_mutex_unlock(&completion->drain_mutex);
+      return true;
+    }
+  }
+  iree_hal_amd_gpu_completion_find_source(completion->source_count,
+                                          completion->sources, fn, user_data)
+      ->fn = NULL;
+  iree_slim_mutex_unlock(&completion->drain_mutex);
+  return false;
+}
+
+static bool iree_hal_amd_gpu_completion_has_disabled_scope(
+    iree_hal_amd_gpu_completion_t* completion, void* user_data) {
+  for (iree_hal_amd_gpu_completion_scope_t* scope = completion->active_scopes;
+       scope; scope = scope->next) {
+    if (!scope->fn && scope->source->user_data == user_data) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void iree_hal_amd_gpu_completion_join_source(
+    iree_hal_amd_gpu_completion_t* completion, void* user_data) {
+  iree_slim_mutex_lock(&completion->drain_mutex);
+  while (
+      iree_hal_amd_gpu_completion_has_disabled_scope(completion, user_data)) {
+    iree_hal_amd_gpu_completion_wait_callout(completion);
+  }
   iree_slim_mutex_unlock(&completion->drain_mutex);
 }
 
