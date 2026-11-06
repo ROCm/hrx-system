@@ -647,6 +647,7 @@ iree-bazel-configure -DIREE_HAL_DRIVER_AMD=OFF
 iree-bazel-configure --//runtime/config/hal:drivers=amd-gpu,task
 iree-bazel-build [targets...]
 iree-bazel-test [targets...]
+iree-bazel-coverage //runtime/src/iree/base:string_view_test
 iree-bazel-query 'deps(//runtime/src/iree/base)'
 iree-bazel-cquery --output=files //runtime/src/iree/base
 python dev.py bazel compile-commands
@@ -750,6 +751,28 @@ iree-bazel-test --config=asan //runtime/src/iree/base:allocator_test
 
 Use focused targets while iterating, then run the affected project or default
 target set before handing work back."""
+
+    if command == "coverage":
+        return """## iree-bazel-coverage
+
+Run an explicit Bazel test target or target pattern with native LLVM source
+coverage. The wrapper selects the repository's `llvm-coverage` configuration
+and writes the combined LCOV report to
+`bazel-out/_coverage/_coverage_report.dat`.
+
+```bash
+iree-bazel-coverage //runtime/src/iree/base:string_view_test
+iree-bazel-coverage //runtime/src/iree/base/...
+iree-bazel-coverage --instrumentation_filter='//loom/src/loom[/:]' //loom/src/loom/...
+```
+
+`--instrumentation_filter` is a label regular expression, not a target pattern;
+the `[/:]` boundary includes both the package itself and its subpackages.
+
+Coverage scopes must be explicit: runtime, Loom, and libamdf reports have
+different denominators and should not be collapsed into one percentage. This
+is an evidence and scheduled-analysis command, not a pull-request percentage
+gate."""
 
     if command == "query":
         return """## iree-bazel-query

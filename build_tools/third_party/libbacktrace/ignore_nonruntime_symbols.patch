@@ -1,0 +1,52 @@
+diff --git a/elf.c b/elf.c
+index 9a1e36f..53b401c 100644
+--- a/elf.c
++++ b/elf.c
+@@ -181 +181,2 @@ dl_iterate_phdr (int (*callback) (struct dl_phdr_info *,
+ #undef SHF_COMPRESSED
++#undef SHF_ALLOC
+@@ -285 +286,2 @@ typedef struct {
+ #define SHF_COMPRESSED 0x800
++#define SHF_ALLOC 0x2
+@@ -642,3 +644,4 @@ static int
+ elf_initialize_syminfo (struct backtrace_state *state,
+-			struct libbacktrace_base_address base_address,
+-			const unsigned char *symtab_data, size_t symtab_size,
++			struct libbacktrace_base_address base_address,
++			const unsigned char *symtab_data, size_t symtab_size,
++			const b_elf_shdr *shdrs, size_t shnum,
+@@ -664,5 +667,11 @@ elf_initialize_syminfo (struct backtrace_state *state,
+       int info;
+-
+-      info = sym->st_info & 0xf;
+-      if ((info == STT_FUNC || info == STT_OBJECT)
+-	  && sym->st_shndx != SHN_UNDEF)
++
++      /* Ordinary symbols in non-allocated sections do not describe runtime
++	 addresses.  Their section-relative values can alias real code.  Keep
++	 special section indices with their existing interpretation.  */
++      info = sym->st_info & 0xf;
++      if ((info == STT_FUNC || info == STT_OBJECT)
++	  && sym->st_shndx != SHN_UNDEF
++	  && (sym->st_shndx >= SHN_LORESERVE
++	      || (sym->st_shndx < shnum
++		  && (shdrs[sym->st_shndx - 1].sh_flags & SHF_ALLOC) != 0)))
+@@ -686,5 +695,9 @@ elf_initialize_syminfo (struct backtrace_state *state,
+       info = sym->st_info & 0xf;
+-      if (info != STT_FUNC && info != STT_OBJECT)
+-	continue;
+-      if (sym->st_shndx == SHN_UNDEF)
+-	continue;
++      if (info != STT_FUNC && info != STT_OBJECT)
++	continue;
++      if (sym->st_shndx == SHN_UNDEF)
++	continue;
++      if (sym->st_shndx < SHN_LORESERVE
++	  && (sym->st_shndx >= shnum
++	      || (shdrs[sym->st_shndx - 1].sh_flags & SHF_ALLOC) == 0))
++	continue;
+@@ -6929,2 +6942,3 @@ elf_add (struct backtrace_state *state, const char *filename, int descriptor,
+       if (!elf_initialize_syminfo (state, base_address,
+-				   symtab_view.view.data, symtab_shdr->sh_size,
++				   symtab_view.view.data, symtab_shdr->sh_size,
++				   shdrs, shnum,

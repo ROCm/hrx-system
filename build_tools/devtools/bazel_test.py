@@ -313,6 +313,9 @@ class BazelTest(unittest.TestCase):
                 "//consumer:library (target)\n"
                 "//consumer:test (target)\n"
                 "//build_tools:aspect%check of //consumer:test (target)\n"
+                "@@rules_cc+//cc/private:rules.bzl%graph_structure_aspect of "
+                "@@+http_archive+libbacktrace//:libbacktrace (configured)\n"
+                "@libbacktrace//:libbacktrace (configured)\n"
             )
             return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
 

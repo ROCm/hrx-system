@@ -11,6 +11,7 @@ load("//build_tools/bazel:cc.bzl", "iree_cc_library")
 package(default_visibility = ["//visibility:private"])
 
 exports_files([
+    "ignore_nonruntime_symbols.patch",
     "libbacktrace.BUILD.bazel",
     "threaded_cache_reads.patch",
 ])
