@@ -505,11 +505,18 @@ typedef struct loom_aie2p_native_worker_t {
   bool has_egress;
 } loom_aie2p_native_worker_t;
 
+typedef struct loom_aie2p_native_join_function_t {
+  // Lazily emitted call-free helper, or null before its first boundary.
+  loom_symbol_ref_t symbol;
+  // Number of generated call sites sharing this exact lock program.
+  iree_host_size_t use_count;
+} loom_aie2p_native_join_function_t;
+
 typedef struct loom_aie2p_native_join_t {
   // Physical lock tree shared by scopes with exactly equal participant sets.
   loom_aie2p_join_plan_t plan;
   // Lazily emitted join helper per physical engine, shared across phase visits.
-  loom_symbol_ref_t* functions;
+  loom_aie2p_native_join_function_t* functions;
   // Next distinct tree requiring configuration-time semaphore initialization.
   struct loom_aie2p_native_join_t* next;
 } loom_aie2p_native_join_t;
