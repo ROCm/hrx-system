@@ -58,6 +58,53 @@ def test_projects_multiple_kernels_in_one_translation_unit() -> None:
     assert "output_1" not in result
 
 
+def test_preserves_kernel_symbols_with_valid_unique_source_names() -> None:
+    source = """\
+kernel.def @library.dispatch(%groups: index) {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def @library_dispatch() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch() {
+  kernel.return
+}
+
+command.def public @run() launch() {
+  %one = index.constant 1 : index
+  kernel.launch @library.dispatch[%one]() : [index]()
+  kernel.launch @library_dispatch() : ()
+  command.return
+}
+"""
+
+    result = render_module(load_module(source.encode()))
+
+    assert (
+        "static loom::kernel::configuration "
+        "library_dispatch_configuration(loom::type::index groups)" in result
+    )
+    assert (
+        "[[loom::kernel(library_dispatch_configuration), "
+        'loom::symbol("library.dispatch")]]\nvoid library_dispatch()' in result
+    )
+    assert (
+        '[[loom::kernel, loom::symbol("library_dispatch"), '
+        "loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]\n"
+        "void library_dispatch_2()" in result
+    )
+    assert (
+        "loom::kernel::launch<library_dispatch>("
+        "loom::kernel::workload(loom::type::index{1}));" in result
+    )
+    assert "loom::kernel::launch<library_dispatch_2>();" in result
+    assert "void library.dispatch" not in result
+
+
 def test_projects_selected_kernels_from_a_mixed_module_in_source_order() -> None:
     source = (
         "func.def @helper() {\n  func.return\n}\n\n"

@@ -1315,7 +1315,14 @@ class CxxRenderer(CxxFunctionRenderer):
         body = resolved.region("body")
         assert body is not None
         entry = body.blocks[0]
+        symbol = str(resolved.attr("callee"))
+        source_name = self.kernel_names[symbol]
         attributes = self._render_kernel_configuration(kernel)
+        if source_name != symbol:
+            attributes.insert(
+                1,
+                f"loom::symbol({cxx_string_literal(symbol.encode('utf-8'))})",
+            )
         self.temporary_names = set(self.scope_names[scope])
         self.rendered_assumptions_by_block.clear()
         if retain := self._retention_attribute(kernel):
@@ -1359,12 +1366,11 @@ class CxxRenderer(CxxFunctionRenderer):
             buffer_elements.append(None)
             self.expressions[argument] = name
             self.expression_types[argument] = type_name
-        symbol = str(resolved.attr("callee"))
         self.kernel_buffer_elements[symbol] = tuple(buffer_elements)
         if parameters:
-            self.writer.open(f"void {symbol}({', '.join(parameters)})")
+            self.writer.open(f"void {source_name}({', '.join(parameters)})")
         else:
-            self.writer.open(f"void {symbol}()")
+            self.writer.open(f"void {source_name}()")
         self._render_block(entry)
         self.writer.close()
 
@@ -1375,7 +1381,18 @@ class CxxRenderer(CxxFunctionRenderer):
         commands: list[Operation],
         pipelines: list[Operation],
     ) -> None:
-        used_names = {str(self._resolved(kernel).attr("callee")) for kernel in kernels}
+        used_names: set[str] = set()
+        for kernel in kernels:
+            symbol = str(self._resolved(kernel).attr("callee"))
+            base = clean_identifier(symbol, "kernel")
+            name = base
+            ordinal = 2
+            while name in used_names:
+                name = f"{base}_{ordinal}"
+                ordinal += 1
+            used_names.add(name)
+            self.kernel_names[symbol] = name
+
         for function in functions:
             symbol = str(self._resolved(function).attr("callee"))
             base = clean_identifier(symbol, "function")
@@ -1414,7 +1431,7 @@ class CxxRenderer(CxxFunctionRenderer):
 
         for kernel in kernels:
             symbol = str(self._resolved(kernel).attr("callee"))
-            base = clean_identifier(symbol, "kernel") + "_configuration"
+            base = self.kernel_names[symbol] + "_configuration"
             name = base
             ordinal = 2
             while name in used_names:
