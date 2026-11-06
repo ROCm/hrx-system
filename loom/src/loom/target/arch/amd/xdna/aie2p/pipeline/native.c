@@ -237,8 +237,8 @@ static iree_status_t loom_aie2p_native_select_channel_accesses(
     if (access->window) {
       continue;
     }
-    if ((!loom_channel_reserve_isa(action->op) &&
-         !loom_channel_publish_isa(action->op)) ||
+    if ((action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE &&
+         action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH) ||
         source->completion.actions[i].maximum_admissions >
             access->channel->replay.record_count) {
       return loom_aie2p_native_reject(
@@ -482,9 +482,11 @@ static iree_status_t loom_aie2p_native_configure_channels(
     loom_aie2p_native_configuration_action_t* action = &actions[action_index];
     *action = (loom_aie2p_native_configuration_action_t){
         .channel = channel, .expected = -1, .value = -1};
-    const loom_op_t* op = step->op;
-    const bool reserve = loom_channel_reserve_isa(op);
-    const bool acquire = loom_channel_acquire_isa(op);
+    const loom_op_t* op = source_action->op;
+    const bool reserve =
+        source_action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE;
+    const bool acquire =
+        source_action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE;
     if (reserve || acquire) {
       const loom_value_id_t record = loom_op_const_results(op)[0];
       records[loom_local_value_domain_ordinal(&source->value_domain, record)] =
@@ -499,7 +501,7 @@ static iree_status_t loom_aie2p_native_configure_channels(
         }
         position->reservation =
             (position->reservation + 1) % channel->replay.record_count;
-      } else if (loom_channel_publish_isa(op)) {
+      } else if (source_action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH) {
         position->publication +=
             source->completion.actions[action_index].credits;
         if (position->publication == channel->replay.record_count) {
@@ -511,7 +513,8 @@ static iree_status_t loom_aie2p_native_configure_channels(
     } else if (channel->source->capacity == 1 &&
                source->completion.actions[action_index].maximum_admissions >
                    1) {
-      action->lock = reserve || loom_channel_release_isa(op)
+      action->lock = reserve || source_action->kind ==
+                                    LOOM_CHANNEL_PLAN_ACTION_KIND_RELEASE
                          ? channel->free_lock
                          : channel->ready_lock;
       if (reserve || acquire) {
@@ -520,7 +523,8 @@ static iree_status_t loom_aie2p_native_configure_channels(
       } else if (source->completion.actions[action_index].credits) {
         action->value = 1;
       }
-    } else if (acquire || loom_channel_publish_isa(op)) {
+    } else if (acquire ||
+               source_action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH) {
       // A single admission from an ordinary ring retains the original
       // initial-credit debit and unobservable final reclamation.
       action->lock = channel->ready_lock;
@@ -545,10 +549,12 @@ static bool loom_aie2p_native_can_repeat(
     return false;
   }
   const loom_pipeline_transport_step_t* steps = transport->steps;
-  if (!loom_channel_reserve_isa(steps[0].op) ||
+  if (steps[0].kind != LOOM_PIPELINE_TRANSPORT_STEP_CHANNEL ||
+      steps[0].source.channel->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE ||
       steps[1].kind != LOOM_PIPELINE_TRANSPORT_STEP_TRANSFER ||
       steps[2].kind != LOOM_PIPELINE_TRANSPORT_STEP_WAIT ||
-      !loom_channel_publish_isa(steps[3].op) ||
+      steps[3].kind != LOOM_PIPELINE_TRANSPORT_STEP_CHANNEL ||
+      steps[3].source.channel->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH ||
       loom_channel_publish_write(steps[3].op) !=
           loom_channel_reserve_write(steps[0].op)) {
     return false;
@@ -772,20 +778,27 @@ static iree_status_t loom_aie2p_native_select(
     for (iree_host_size_t j = 0; j < source->channels.action_count; ++j) {
       const loom_channel_plan_action_t* action = &source->channels.actions[j];
       const loom_op_t* op = action->op;
-      if (!loom_channel_acquire_isa(op) && !loom_channel_reserve_isa(op) &&
-          !loom_channel_publish_isa(op) && !loom_channel_release_isa(op) &&
-          !loom_channel_wait_isa(op)) {
-        return loom_aie2p_native_reject(
-            context, op,
-            IREE_SV(
-                "FIFO acquire/reserve/wait/publish/release channel actions"));
+      switch (action->kind) {
+        case LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE:
+        case LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE:
+        case LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH:
+        case LOOM_CHANNEL_PLAN_ACTION_KIND_RELEASE:
+        case LOOM_CHANNEL_PLAN_ACTION_KIND_WAIT:
+          break;
+        default:
+          return loom_aie2p_native_reject(
+              context, op,
+              IREE_SV("FIFO acquire/reserve/wait/publish/release channel "
+                      "actions"));
       }
-      if (loom_channel_acquire_isa(op) || loom_channel_reserve_isa(op)) {
+      if (action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE ||
+          action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE) {
         loom_aie2p_native_channel_t* channel =
             loom_aie2p_native_channel(context, realization, action->channel);
-        loom_aie2p_native_cursor_t* cursor = loom_channel_acquire_isa(op)
-                                                 ? &channel->cursor.reader
-                                                 : &channel->cursor.writer;
+        loom_aie2p_native_cursor_t* cursor =
+            action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE
+                ? &channel->cursor.reader
+                : &channel->cursor.writer;
         const bool shared = cursor->shared || (cursor->worker != UINT32_MAX &&
                                                cursor->worker != i);
         const uint32_t maximum_admissions =
@@ -911,8 +924,8 @@ static iree_status_t loom_aie2p_native_select(
             : core_engines;
     for (iree_host_size_t j = 0; j < source->channels.action_count; ++j) {
       const loom_channel_plan_action_t* action = &source->channels.actions[j];
-      const bool reader = loom_channel_acquire_isa(action->op);
-      if (!reader && !loom_channel_reserve_isa(action->op)) {
+      const bool reader = action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE;
+      if (!reader && action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE) {
         continue;
       }
       const loom_aie2p_native_channel_t* channel =

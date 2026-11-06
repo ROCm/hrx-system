@@ -95,10 +95,11 @@ static iree_status_t loom_pipeline_transport_cohorts(
   for (iree_host_size_t i = 0; i < step_count; ++i) {
     const loom_channel_plan_action_t* action = steps[i].source.channel;
     const loom_op_t* op = action->op;
-    if (loom_channel_acquire_isa(op) || loom_channel_accept_isa(op)) {
+    if (action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE ||
+        action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACCEPT) {
       admission_sequence += consumed_since_admission;
       consumed_since_admission = false;
-      if (loom_channel_acquire_isa(op) &&
+      if (action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE &&
           !loom_value_has_no_uses(
               loom_module_value(module, loom_channel_acquire_view(op)))) {
         return iree_ok_status();
@@ -120,14 +121,15 @@ static iree_status_t loom_pipeline_transport_cohorts(
               &structure->loops, op->parent_block->region_index),
           .copy_scope = LOOM_CFG_LOOP_NEST_NONE,
           .admission_sequence = admission_sequence};
-    } else if (loom_channel_reserve_isa(op)) {
+    } else if (action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE) {
       if (!loom_value_has_no_uses(
               loom_module_value(module, loom_channel_reserve_view(op)))) {
         return iree_ok_status();
       }
-    } else if (loom_channel_copy_isa(op) || loom_channel_release_isa(op)) {
+    } else if (action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_COPY ||
+               action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RELEASE) {
       consumed_since_admission = true;
-    } else if (!loom_channel_fanout_isa(op)) {
+    } else if (action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_FANOUT) {
       return iree_ok_status();
     }
   }
@@ -136,9 +138,10 @@ static iree_status_t loom_pipeline_transport_cohorts(
   // must stay in its admission scope or in nested replay loops, with final
   // release back in that same admission scope.
   for (iree_host_size_t i = 0; i < step_count; ++i) {
-    const loom_op_t* op = steps[i].op;
-    const bool release = loom_channel_release_isa(op);
-    if (!release && !loom_channel_copy_isa(op)) {
+    const loom_channel_plan_action_t* action = steps[i].source.channel;
+    const loom_op_t* op = action->op;
+    const bool release = action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RELEASE;
+    if (!release && action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_COPY) {
       continue;
     }
     const loom_value_id_t source_admission = loom_channel_plan_admission(
@@ -210,7 +213,7 @@ static iree_status_t loom_pipeline_transport_cohorts(
   for (iree_host_size_t i = 0; i < step_count; ++i) {
     const loom_channel_plan_action_t* action = steps[i].source.channel;
     const loom_op_t* copy = action->op;
-    if (!loom_channel_copy_isa(copy)) {
+    if (action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_COPY) {
       continue;
     }
     const loom_value_id_t source_admission =

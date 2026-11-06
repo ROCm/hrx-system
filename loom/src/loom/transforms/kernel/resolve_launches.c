@@ -11,6 +11,7 @@
 #include "loom/ir/ancestry.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/command/composition.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
@@ -139,8 +140,7 @@ static iree_status_t loom_kernel_launch_resolution_build_entry(
 }
 
 static bool loom_kernel_launch_resolution_is_schedule(const loom_op_t* op) {
-  return loom_kernel_launch_serial_isa(op) ||
-         loom_kernel_launch_concurrent_isa(op);
+  return loom_command_composition_is_kernel_launch_schedule(op);
 }
 
 // Returns the earliest schedule wrapper that a pure configuration call can

@@ -17,6 +17,7 @@
 #include "loom/ir/type_dependencies.h"
 #include "loom/link/linker.h"
 #include "loom/ops/buffer/ops.h"
+#include "loom/ops/command/composition.h"
 #include "loom/ops/command/ops.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
@@ -608,10 +609,7 @@ static loom_symbol_ref_t loom_cmd_launch_count_dispatch_target(
 }
 
 static bool loom_cmd_launch_count_has_serial_parent(const loom_op_t* dispatch) {
-  const loom_op_t* parent = dispatch->parent_op;
-  return parent != NULL &&
-         (loom_command_def_isa(parent) || loom_command_serial_isa(parent) ||
-          loom_kernel_launch_serial_isa(parent));
+  return loom_command_composition_is_serial(dispatch->parent_op);
 }
 
 static bool loom_cmd_launch_count_can_cross_operations(

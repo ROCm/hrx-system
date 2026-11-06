@@ -12,6 +12,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ir/type_refs.h"
+#include "loom/ops/check/expectation.h"
 #include "loom/ops/check/ops.h"
 #include "loom/ops/function_contract_verify.h"
 
@@ -633,10 +634,8 @@ iree_status_t loom_check_expect_close_unsigned_verify(
 static bool loom_check_expectation_pair_values(const loom_op_t* op,
                                                loom_value_id_t* out_actual,
                                                loom_value_id_t* out_expected) {
-  if (loom_check_expect_equal_isa(op) || loom_check_expect_bitwise_isa(op) ||
-      loom_check_expect_approximate_isa(op) ||
-      loom_check_expect_close_signed_isa(op) ||
-      loom_check_expect_close_unsigned_isa(op)) {
+  if (loom_check_expectation_kind_is_pair(
+          loom_check_expectation_classify(op))) {
     *out_actual = loom_op_const_operands(op)[0];
     *out_expected = loom_op_const_operands(op)[1];
     return true;
@@ -667,6 +666,8 @@ static iree_status_t loom_check_verify_result_pair_observation(
   loom_value_for_each_use(actual_value, use) {
     const loom_op_t* user_op = loom_use_user_op(*use);
     const uint16_t operand_index = loom_use_operand_index(*use);
+    const loom_check_expectation_kind_t expectation_kind =
+        loom_check_expectation_classify(user_op);
     loom_value_id_t used_actual = LOOM_VALUE_ID_INVALID;
     loom_value_id_t used_expected = LOOM_VALUE_ID_INVALID;
     if (loom_check_expectation_pair_values(user_op, &used_actual,
@@ -684,10 +685,11 @@ static iree_status_t loom_check_verify_result_pair_observation(
       observed = true;
       continue;
     }
-    if (loom_check_expect_shape_isa(user_op) && operand_index == 0) {
+    if (expectation_kind == LOOM_CHECK_EXPECTATION_SHAPE &&
+        operand_index == 0) {
       continue;
     }
-    if (loom_check_expect_shape_isa(user_op)) {
+    if (expectation_kind == LOOM_CHECK_EXPECTATION_SHAPE) {
       return loom_check_emit_result_origin(
           module, emitter, user_op, IREE_SV("shape dimensions"),
           IREE_SV("values defined outside the comparison result bindings"));
@@ -698,6 +700,8 @@ static iree_status_t loom_check_verify_result_pair_observation(
   loom_value_for_each_use(expected_value, use) {
     const loom_op_t* user_op = loom_use_user_op(*use);
     const uint16_t operand_index = loom_use_operand_index(*use);
+    const loom_check_expectation_kind_t expectation_kind =
+        loom_check_expectation_classify(user_op);
     loom_value_id_t used_actual = LOOM_VALUE_ID_INVALID;
     loom_value_id_t used_expected = LOOM_VALUE_ID_INVALID;
     if (loom_check_expectation_pair_values(user_op, &used_actual,
@@ -714,10 +718,11 @@ static iree_status_t loom_check_verify_result_pair_observation(
       }
       continue;
     }
-    if (loom_check_expect_shape_isa(user_op) && operand_index == 0) {
+    if (expectation_kind == LOOM_CHECK_EXPECTATION_SHAPE &&
+        operand_index == 0) {
       continue;
     }
-    if (loom_check_expect_shape_isa(user_op)) {
+    if (expectation_kind == LOOM_CHECK_EXPECTATION_SHAPE) {
       return loom_check_emit_result_origin(
           module, emitter, user_op, IREE_SV("shape dimensions"),
           IREE_SV("values defined outside the comparison result bindings"));
@@ -784,13 +789,8 @@ static iree_status_t loom_check_verify_compare_body(
 
   const loom_op_t* nested_op = NULL;
   loom_block_for_each_op(block, nested_op) {
-    if (loom_check_expect_equal_isa(nested_op) ||
-        loom_check_expect_bitwise_isa(nested_op) ||
-        loom_check_expect_approximate_isa(nested_op) ||
-        loom_check_expect_close_signed_isa(nested_op) ||
-        loom_check_expect_close_unsigned_isa(nested_op) ||
-        loom_check_expect_shape_isa(nested_op) ||
-        loom_check_expect_event_isa(nested_op) ||
+    if (loom_check_expectation_classify(nested_op) !=
+            LOOM_CHECK_EXPECTATION_NONE ||
         loom_check_return_isa(nested_op)) {
       continue;
     }

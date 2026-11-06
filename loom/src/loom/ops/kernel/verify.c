@@ -14,6 +14,7 @@
 #include "loom/ops/cache.h"
 #include "loom/ops/callable_effects.h"
 #include "loom/ops/combining.h"
+#include "loom/ops/command/composition.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/function_contract_verify.h"
 #include "loom/ops/kernel/launch_config_contract.h"
@@ -735,7 +736,7 @@ static iree_status_t loom_kernel_verify_cluster_static_byte_count(
       IREE_SV("view with static 1, 4, 8, or 16 byte footprint"));
 }
 
-static iree_status_t loom_kernel_verify_copy_token_group_use(
+static iree_status_t loom_kernel_verify_transfer_token_group_use(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
     const loom_op_t* op, loom_value_id_t token_id) {
   if (token_id >= module->values.count) {
@@ -758,7 +759,7 @@ static iree_status_t loom_kernel_verify_copy_token_group_use(
       IREE_SV("kernel.async.group token operand"));
 }
 
-static iree_status_t loom_kernel_verify_token_defined_by_copy(
+static iree_status_t loom_kernel_verify_token_defined_by_transfer(
     const loom_module_t* module, iree_diagnostic_emitter_t emitter,
     const loom_op_t* op, loom_value_id_t token_id) {
   if (token_id >= module->values.count) {
@@ -767,15 +768,12 @@ static iree_status_t loom_kernel_verify_token_defined_by_copy(
   const loom_value_t* token = loom_module_value(module, token_id);
   const loom_op_t* defining_op =
       loom_value_is_block_arg(token) ? NULL : loom_value_def_op(token);
-  if (defining_op &&
-      (loom_kernel_async_copy_isa(defining_op) ||
-       loom_kernel_async_copy_mask_isa(defining_op) ||
-       loom_kernel_async_gather_isa(defining_op) ||
-       loom_kernel_async_gather_mask_isa(defining_op) ||
-       loom_kernel_async_cluster_gather_isa(defining_op) ||
-       loom_kernel_async_cluster_gather_mask_isa(defining_op) ||
-       loom_kernel_async_tensor_load_to_lds_isa(defining_op) ||
-       loom_kernel_async_tensor_store_from_lds_isa(defining_op))) {
+  const loom_op_semantics_t semantics =
+      defining_op ? loom_op_semantics(module, defining_op)
+                  : loom_op_semantics_empty();
+  if (loom_contract_family_set_has_any(semantics.contract_families,
+                                       LOOM_CONTRACT_KERNEL_ASYNC) &&
+      loom_cache_policy_isa(loom_cache_policy_cast(module, defining_op))) {
     return iree_ok_status();
   }
   return loom_kernel_emit_value_user_constraint(
@@ -871,7 +869,8 @@ static iree_status_t loom_kernel_verify_async_copy_like(
           ? LOOM_CACHE_POLICY_ACCESS_STORE
           : LOOM_CACHE_POLICY_ACCESS_LOAD,
       emitter));
-  return loom_kernel_verify_copy_token_group_use(module, emitter, op, token_id);
+  return loom_kernel_verify_transfer_token_group_use(module, emitter, op,
+                                                     token_id);
 }
 
 static iree_status_t loom_kernel_verify_async_gather_like(
@@ -884,7 +883,8 @@ static iree_status_t loom_kernel_verify_async_gather_like(
       module, emitter, op, source_id, dest_id));
   IREE_RETURN_IF_ERROR(loom_cache_policy_verify(
       module, op, LOOM_CACHE_POLICY_ACCESS_LOAD, emitter));
-  return loom_kernel_verify_copy_token_group_use(module, emitter, op, token_id);
+  return loom_kernel_verify_transfer_token_group_use(module, emitter, op,
+                                                     token_id);
 }
 
 static iree_status_t loom_kernel_verify_async_cluster_gather_like(
@@ -899,7 +899,8 @@ static iree_status_t loom_kernel_verify_async_cluster_gather_like(
       module, emitter, op, IREE_SV("cluster_mask"), cluster_mask_id));
   IREE_RETURN_IF_ERROR(loom_cache_policy_verify(
       module, op, LOOM_CACHE_POLICY_ACCESS_LOAD, emitter));
-  return loom_kernel_verify_copy_token_group_use(module, emitter, op, token_id);
+  return loom_kernel_verify_transfer_token_group_use(module, emitter, op,
+                                                     token_id);
 }
 
 static bool loom_kernel_type_is_static_i32_vector(loom_type_t type,
@@ -970,7 +971,8 @@ static iree_status_t loom_kernel_verify_async_tensor_like(
           ? LOOM_CACHE_POLICY_ACCESS_STORE
           : LOOM_CACHE_POLICY_ACCESS_LOAD,
       emitter));
-  return loom_kernel_verify_copy_token_group_use(module, emitter, op, token_id);
+  return loom_kernel_verify_transfer_token_group_use(module, emitter, op,
+                                                     token_id);
 }
 
 iree_status_t loom_kernel_def_verify(const loom_module_t* module,
@@ -1145,8 +1147,7 @@ iree_status_t loom_kernel_dispatch_verify(const loom_module_t* module,
 iree_status_t loom_kernel_launch_yield_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
-  if (op->parent_op && (loom_kernel_launch_serial_isa(op->parent_op) ||
-                        loom_kernel_launch_concurrent_isa(op->parent_op))) {
+  if (loom_command_composition_is_kernel_launch_schedule(op->parent_op)) {
     return iree_ok_status();
   }
   return loom_kernel_emit_launch_placement_error(
@@ -1166,17 +1167,20 @@ static iree_status_t loom_kernel_verify_launch_preparation(
     loom_walk_result_t* out_result) {
   const loom_kernel_launch_schedule_verification_t* verification = user_data;
   *out_result = LOOM_WALK_CONTINUE;
-  if (loom_kernel_launch_isa(op) || loom_kernel_dispatch_isa(op) ||
-      loom_kernel_launch_serial_isa(op) ||
-      loom_kernel_launch_concurrent_isa(op) ||
-      loom_kernel_launch_yield_isa(op)) {
+  const loom_trait_flags_t traits =
+      loom_op_effective_traits(verification->module, op);
+  const loom_call_like_t call = loom_call_like_cast(verification->module, op);
+  const bool is_kernel_issue =
+      iree_any_bit_set(traits, LOOM_TRAIT_COMMAND_EFFECT) &&
+      loom_call_like_kind(call) == LOOM_CALL_LIKE_KIND_SEMANTIC;
+  const bool is_launch_schedule =
+      loom_command_composition_is_kernel_launch_schedule(op);
+  if (is_kernel_issue || is_launch_schedule) {
     // Each nested schedule verifies its own preparation. Pruning it keeps
     // every preparation operation owned by exactly one schedule check.
     *out_result = LOOM_WALK_SKIP;
     return iree_ok_status();
   }
-  const loom_trait_flags_t traits =
-      loom_op_effective_traits(verification->module, op);
   if (!iree_any_bit_set(traits, LOOM_TRAIT_COMMAND_EFFECT) &&
       loom_callable_effects_classify_traits(traits) !=
           LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED) {
@@ -1191,9 +1195,7 @@ static iree_status_t loom_kernel_verify_launch_preparation(
 iree_status_t loom_kernel_launch_schedule_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter) {
-  loom_region_t* body = loom_kernel_launch_serial_isa(op)
-                            ? loom_kernel_launch_serial_body(op)
-                            : loom_kernel_launch_concurrent_body(op);
+  loom_region_t* body = loom_op_regions(op)[0];
   loom_kernel_launch_schedule_verification_t verification = {
       .module = module,
       .emitter = emitter,
@@ -1544,7 +1546,7 @@ iree_status_t loom_kernel_async_group_verify(
           IREE_SV("kernel.async.token")));
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_kernel_verify_token_defined_by_copy(
+    IREE_RETURN_IF_ERROR(loom_kernel_verify_token_defined_by_transfer(
         module, emitter, op, token_id));
   }
 

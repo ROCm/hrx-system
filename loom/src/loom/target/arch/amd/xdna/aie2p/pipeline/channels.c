@@ -222,15 +222,15 @@ static iree_status_t loom_aie2p_native_channel_action(
           emitter->invocations, action->channel)];
   loom_aie2p_native_endpoint_t* endpoint = &emitter->endpoints[index];
   loom_builder_t* builder = &rewriter->builder;
-  if (loom_channel_acquire_isa(action->op) ||
-      loom_channel_reserve_isa(action->op) ||
-      loom_channel_wait_isa(action->op)) {
+  if (action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE ||
+      action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE ||
+      action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_WAIT) {
     loom_value_id_t record;
     uint16_t view_result = 0;
-    if (loom_channel_wait_isa(action->op)) {
+    if (action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_WAIT) {
       record = loom_channel_wait_read(action->op);
     } else {
-      const bool write = loom_channel_reserve_isa(action->op);
+      const bool write = action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE;
       loom_symbol_ref_t* acquire =
           write ? &endpoint->reserve : &endpoint->acquire;
       if (endpoint->access->window && !loom_symbol_ref_is_valid(*acquire)) {
@@ -362,7 +362,7 @@ static iree_status_t loom_aie2p_native_channel_action(
     loom_builder_restore(builder, saved);
     return status;
   }
-  const bool publish = loom_channel_publish_isa(action->op);
+  const bool publish = action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH;
   loom_symbol_ref_t additional = loom_symbol_ref_null();
   loom_symbol_ref_t* completion =
       publish ? &endpoint->publish : &endpoint->release;
@@ -462,7 +462,7 @@ iree_status_t loom_aie2p_native_emit_worker(
     memset(erased_values, 0, source->channels.value_count);
     for (iree_host_size_t i = 0; i < source->channels.action_count; ++i) {
       const loom_channel_plan_action_t* action = &source->channels.actions[i];
-      if (!loom_channel_reserve_isa(action->op)) {
+      if (action->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE) {
         continue;
       }
       const iree_host_size_t channel_index =

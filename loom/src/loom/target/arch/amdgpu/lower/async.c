@@ -914,16 +914,18 @@ static bool loom_amdgpu_async_group_packet_counts(
     }
     const loom_op_t* token_op = loom_value_def_op(token);
     uint16_t counter_id = LOOM_AMDGPU_WAIT_COUNTER_NONE;
-    if (token_op != NULL && loom_kernel_async_gather_isa(token_op)) {
-      counter_id = LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD;
-    } else if (token_op != NULL &&
-               loom_kernel_async_cluster_gather_isa(token_op)) {
-      counter_id = LOOM_AMDGPU_WAIT_COUNTER_ASYNC;
-    } else if (token_op != NULL &&
-               loom_kernel_async_tensor_load_to_lds_isa(token_op)) {
-      counter_id = LOOM_AMDGPU_WAIT_COUNTER_TENSOR;
-    } else {
-      return false;
+    switch (token_op->kind) {
+      case LOOM_OP_KERNEL_ASYNC_GATHER:
+        counter_id = LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD;
+        break;
+      case LOOM_OP_KERNEL_ASYNC_CLUSTER_GATHER:
+        counter_id = LOOM_AMDGPU_WAIT_COUNTER_ASYNC;
+        break;
+      case LOOM_OP_KERNEL_ASYNC_TENSOR_LOAD_TO_LDS:
+        counter_id = LOOM_AMDGPU_WAIT_COUNTER_TENSOR;
+        break;
+      default:
+        return false;
     }
     const uint32_t slot = loom_amdgpu_wait_counter_slot_from_id(counter_id);
     if (out_packet_counts[slot] == UINT32_MAX) {
@@ -1648,30 +1650,6 @@ static iree_status_t loom_amdgpu_low_legality_verify_kernel_tensor_load(
       context, op, loom_amdgpu_tensor_load_rejection_key(&diagnostic));
 }
 
-static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_group(
-    loom_target_low_legality_context_t* context, const loom_op_t* op) {
-  loom_value_slice_t tokens = loom_kernel_async_group_tokens(op);
-  const loom_module_t* module = loom_target_low_legality_module(context);
-  for (iree_host_size_t i = 0; i < tokens.count; ++i) {
-    const loom_value_id_t token_id = tokens.values[i];
-    if (token_id >= module->values.count) {
-      return loom_amdgpu_low_legality_reject(
-          context, op, IREE_SV("async_group.token_value"));
-    }
-    const loom_value_t* token = loom_module_value(module, token_id);
-    const loom_op_t* defining_op =
-        loom_value_is_block_arg(token) ? NULL : loom_value_def_op(token);
-    if (defining_op == NULL ||
-        (!loom_kernel_async_gather_isa(defining_op) &&
-         !loom_kernel_async_cluster_gather_isa(defining_op) &&
-         !loom_kernel_async_tensor_load_to_lds_isa(defining_op))) {
-      return loom_amdgpu_low_legality_reject(
-          context, op, IREE_SV("async_group.local_transfer_tokens"));
-    }
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_amdgpu_low_legality_verify_kernel_async_wait(
     loom_target_low_legality_context_t* context, const loom_op_t* op) {
   uint16_t target_counts[LOOM_AMDGPU_WAIT_COUNTER_SLOT_COUNT] = {0};
@@ -1714,7 +1692,10 @@ iree_status_t loom_amdgpu_low_legality_verify_kernel_async(
           context, op, IREE_SV("tensor_memory.provider_required"));
 #endif  // LOOM_AMDGPU_LOWER_CAPABILITY_ASYNC_TENSOR_LOAD_TO_LDS
     case LOOM_OP_KERNEL_ASYNC_GROUP:
-      return loom_amdgpu_low_legality_verify_kernel_async_group(context, op);
+      // Group validity is target-independent and established by the Kernel
+      // verifier. Each transfer producer receives its own target-legality
+      // decision, while wait lowering maps supported producers to counters.
+      return iree_ok_status();
     case LOOM_OP_KERNEL_ASYNC_WAIT:
       return loom_amdgpu_low_legality_verify_kernel_async_wait(context, op);
     case LOOM_OP_KERNEL_ASYNC_GATHER:

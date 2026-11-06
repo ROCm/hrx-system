@@ -16,6 +16,7 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "loom/ir/ir.h"
+#include "loom/ops/check/expectation.h"
 #include "loom/ops/check/ops.h"
 
 #ifdef __cplusplus
@@ -129,25 +130,6 @@ typedef enum loom_testbench_trial_recipe_step_kind_e {
   // Authored ordinary-function generator invocation.
   LOOM_TESTBENCH_TRIAL_RECIPE_STEP_GENERATOR = 2,
 } loom_testbench_trial_recipe_step_kind_t;
-
-typedef enum loom_testbench_expectation_kind_e {
-  // Invalid or uninitialized expectation slot.
-  LOOM_TESTBENCH_EXPECTATION_NONE = 0,
-  // check.expect.equal over scalar values or shaped buffer views.
-  LOOM_TESTBENCH_EXPECTATION_EQUAL = 1,
-  // check.expect.bitwise over scalar values or shaped buffer views.
-  LOOM_TESTBENCH_EXPECTATION_BITWISE = 2,
-  // check.expect.approximate floating-point comparison.
-  LOOM_TESTBENCH_EXPECTATION_APPROXIMATE = 3,
-  // check.expect.shape metadata comparison.
-  LOOM_TESTBENCH_EXPECTATION_SHAPE = 4,
-  // check.expect.event<provider> structured runtime event validation.
-  LOOM_TESTBENCH_EXPECTATION_EVENT = 5,
-  // check.expect.close.signed exact integer-distance comparison.
-  LOOM_TESTBENCH_EXPECTATION_CLOSE_SIGNED = 6,
-  // check.expect.close.unsigned exact integer-distance comparison.
-  LOOM_TESTBENCH_EXPECTATION_CLOSE_UNSIGNED = 7,
-} loom_testbench_expectation_kind_t;
 
 typedef struct loom_testbench_plan_options_t {
   // Maximum samples retained per case after cartesian expansion.
@@ -439,7 +421,7 @@ typedef struct loom_testbench_event_expectation_plan_t {
 
 typedef struct loom_testbench_expectation_plan_t {
   // Expectation kind and payload discriminator.
-  loom_testbench_expectation_kind_t kind;
+  loom_check_expectation_kind_t kind;
   // Operation that declared the expectation.
   const loom_op_t* op;
   // Primary actual value checked by the expectation.

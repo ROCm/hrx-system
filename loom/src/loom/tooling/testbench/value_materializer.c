@@ -162,7 +162,7 @@ static iree_status_t loom_testbench_walk_expectations(
       IREE_RETURN_IF_ERROR(loom_testbench_value_callback_invoke(
           callback, expectation->expected_value_id));
     }
-    if (expectation->kind != LOOM_TESTBENCH_EXPECTATION_SHAPE) {
+    if (expectation->kind != LOOM_CHECK_EXPECTATION_SHAPE) {
       continue;
     }
     for (iree_host_size_t dim_index = 0;

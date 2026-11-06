@@ -275,7 +275,7 @@ static void loom_testbench_plan_compare_expectations(
           issues, issue_capacity, inout_issue_count,
           LOOM_TESTBENCH_ISSUE_INVALID_EXPECTATION, scenario_index, op,
           scenario_ref);
-    } else if (expectation->kind == LOOM_TESTBENCH_EXPECTATION_EVENT &&
+    } else if (expectation->kind == LOOM_CHECK_EXPECTATION_EVENT &&
                iree_string_view_equal(expectation->event.provider,
                                       IREE_SV("device"))) {
       action->expects_device_events = true;

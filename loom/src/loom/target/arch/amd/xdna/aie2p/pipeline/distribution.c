@@ -831,7 +831,8 @@ iree_status_t loom_aie2p_native_bind_distribution_phases(
     const loom_pipeline_worker_t* source = &realization->workers[i];
     for (iree_host_size_t j = 0; j < source->transport.count; ++j) {
       const loom_pipeline_transport_step_t* step = &source->transport.steps[j];
-      if (!loom_channel_publish_isa(step->op)) {
+      if (step->kind != LOOM_PIPELINE_TRANSPORT_STEP_CHANNEL ||
+          step->source.channel->kind != LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH) {
         continue;
       }
       loom_aie2p_native_configuration_action_t* action =

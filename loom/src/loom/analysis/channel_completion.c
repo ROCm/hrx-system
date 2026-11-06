@@ -210,18 +210,23 @@ static iree_status_t loom_channel_completion_analyze_payload_records(
     iree_arena_allocator_t* arena) {
   // Each direct producer establishes the initial payload/owned-record pair.
   for (iree_host_size_t i = 0; i < plan->action_count; ++i) {
-    const loom_op_t* op = plan->actions[i].op;
+    const loom_channel_plan_action_t* action = &plan->actions[i];
+    const loom_op_t* op = action->op;
     loom_value_id_t payload = LOOM_VALUE_ID_INVALID;
     loom_value_id_t record = LOOM_VALUE_ID_INVALID;
-    if (loom_channel_reserve_isa(op)) {
-      payload = loom_channel_reserve_view(op);
-      record = loom_channel_reserve_write(op);
-    } else if (loom_channel_acquire_isa(op)) {
-      payload = loom_channel_acquire_view(op);
-      record = loom_channel_acquire_read(op);
-    } else if (loom_channel_wait_isa(op)) {
-      payload = loom_channel_wait_view(op);
-      record = loom_channel_wait_read(op);
+    switch (action->kind) {
+      case LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE:
+        payload = loom_channel_reserve_view(op);
+        record = loom_channel_reserve_write(op);
+        break;
+      case LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE:
+        payload = loom_channel_acquire_view(op);
+        record = loom_channel_acquire_read(op);
+        break;
+      case LOOM_CHANNEL_PLAN_ACTION_KIND_WAIT:
+        payload = loom_channel_wait_view(op);
+        record = loom_channel_wait_read(op);
+        break;
     }
     if (payload != LOOM_VALUE_ID_INVALID) {
       const loom_value_ordinal_t ordinal =
@@ -277,7 +282,8 @@ static bool loom_channel_completion_apply(
     loom_channel_completion_state_t* state, uint32_t* credits,
     loom_channel_completion_t* completion) {
   const loom_op_t* op = action->op;
-  if (loom_channel_reserve_isa(op) || loom_channel_acquire_isa(op)) {
+  if (action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE ||
+      action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE) {
     for (iree_host_size_t i = 0; i < state->count; ++i) {
       if (state->records[i].value == LOOM_VALUE_ID_INVALID &&
           !endpoints[state->records[i].endpoint].producer) {
@@ -308,7 +314,7 @@ static bool loom_channel_completion_apply(
         completion, LOOM_CHANNEL_COMPLETION_REQUIREMENT_IDENTITY, op);
     return false;
   }
-  if (loom_channel_wait_isa(op)) {
+  if (action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_WAIT) {
     // Every admitted read originates at acquire, so readiness is already
     // established and the same obligation remains live after borrowing.
     return true;
@@ -358,17 +364,28 @@ iree_status_t loom_channel_completion_analyze(
   for (iree_host_size_t i = 0; i < plan->action_count; ++i) {
     const loom_channel_plan_action_t* action = &plan->actions[i];
     const loom_op_t* op = action->op;
-    if (!loom_channel_reserve_isa(op) && !loom_channel_acquire_isa(op) &&
-        !loom_channel_publish_isa(op) && !loom_channel_release_isa(op) &&
-        !loom_channel_wait_isa(op)) {
-      loom_channel_completion_require(
-          out_completion, LOOM_CHANNEL_COMPLETION_REQUIREMENT_ACTION, op);
-      return iree_ok_status();
+    bool opens_record = false;
+    bool producer = false;
+    switch (action->kind) {
+      case LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE:
+        opens_record = true;
+        producer = true;
+        break;
+      case LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE:
+        opens_record = true;
+        break;
+      case LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH:
+        producer = true;
+        break;
+      case LOOM_CHANNEL_PLAN_ACTION_KIND_RELEASE:
+      case LOOM_CHANNEL_PLAN_ACTION_KIND_WAIT:
+        break;
+      default:
+        loom_channel_completion_require(
+            out_completion, LOOM_CHANNEL_COMPLETION_REQUIREMENT_ACTION, op);
+        return iree_ok_status();
     }
-    record_capacity +=
-        loom_channel_reserve_isa(op) || loom_channel_acquire_isa(op);
-    const bool producer =
-        loom_channel_reserve_isa(op) || loom_channel_publish_isa(op);
+    record_capacity += opens_record;
     uint32_t endpoint = 0;
     while (endpoint < endpoint_count &&
            (endpoints[endpoint].channel != action->channel ||
@@ -401,9 +418,11 @@ iree_status_t loom_channel_completion_analyze(
     while (action_index < plan->action_count &&
            plan->actions[action_index].op->parent_block ==
                graph->blocks[b].block) {
-      const loom_op_t* op = plan->actions[action_index].op;
       if (graph->blocks[b].reachable &&
-          (loom_channel_reserve_isa(op) || loom_channel_acquire_isa(op))) {
+          (plan->actions[action_index].kind ==
+               LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE ||
+           plan->actions[action_index].kind ==
+               LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE)) {
         uint32_t* bound =
             &endpoints[action_endpoints[action_index]].maximum_admissions;
         if (block_execution_bounds) {

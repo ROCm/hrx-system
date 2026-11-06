@@ -214,7 +214,7 @@ class ChannelMaterializationTest : public ::testing::Test {
       }
     }
     for (iree_host_size_t i = 0; i < plan.action_count; ++i) {
-      if (loom_channel_reserve_isa(plan.actions[i].op)) {
+      if (plan.actions[i].kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE) {
         erased[loom_local_value_domain_ordinal(
             plan.value_domain, loom_channel_reserve_view(plan.actions[i].op))] =
             1;
@@ -245,14 +245,14 @@ class ChannelMaterializationTest : public ::testing::Test {
     EXPECT_EQ(state_count, 1u);
     const auto type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
     loom_op_t* call;
-    if (loom_channel_reserve_isa(action->op)) {
+    if (action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE) {
       results[0] = state[0];
       IREE_RETURN_IF_ERROR(loom_func_call_build(
           &rewriter->builder, 0, 0, 0, 0, self.admission_, state, 1, &type, 1,
           nullptr, 0, action->op->location, &call));
       state[0] = loom_op_results(call)[0];
     } else {
-      const auto symbol = loom_channel_publish_isa(action->op)
+      const auto symbol = action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_PUBLISH
                               ? self.publication_
                               : self.submission_;
       IREE_RETURN_IF_ERROR(loom_func_call_build(
@@ -443,6 +443,8 @@ TEST_F(ChannelMaterializationTest, ClonedOccurrencesKeepLoopOwnershipSeparate) {
       EXPECT_NE(instances[i].plan.actions[action].op,
                 plans[i].actions[action].op);
       EXPECT_EQ(instances[i].plan.actions[action].channel, &identities[i]);
+      EXPECT_EQ(instances[i].plan.actions[action].kind,
+                plans[i].actions[action].kind);
     }
   }
   loom_rewriter_deinitialize(&rewriter);

@@ -16,10 +16,44 @@
 #include "loom/format/bytecode/writer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
+#include "loom/ops/check/expectation.h"
 #include "loom/verify/verify.h"
 
 namespace loom {
 namespace {
+
+TEST(CheckExpectationTest, ClassifiesCompleteFamily) {
+  static const struct {
+    loom_op_kind_t op_kind;
+    loom_check_expectation_kind_t expectation_kind;
+    bool is_pair;
+  } kCases[] = {
+      {LOOM_OP_CHECK_EXPECT_EQUAL, LOOM_CHECK_EXPECTATION_EQUAL, true},
+      {LOOM_OP_CHECK_EXPECT_BITWISE, LOOM_CHECK_EXPECTATION_BITWISE, true},
+      {LOOM_OP_CHECK_EXPECT_APPROXIMATE, LOOM_CHECK_EXPECTATION_APPROXIMATE,
+       true},
+      {LOOM_OP_CHECK_EXPECT_CLOSE_SIGNED, LOOM_CHECK_EXPECTATION_CLOSE_SIGNED,
+       true},
+      {LOOM_OP_CHECK_EXPECT_CLOSE_UNSIGNED,
+       LOOM_CHECK_EXPECTATION_CLOSE_UNSIGNED, true},
+      {LOOM_OP_CHECK_EXPECT_SHAPE, LOOM_CHECK_EXPECTATION_SHAPE, false},
+      {LOOM_OP_CHECK_EXPECT_EVENT, LOOM_CHECK_EXPECTATION_EVENT, false},
+  };
+  static_assert(IREE_ARRAYSIZE(kCases) + 1 ==
+                LOOM_CHECK_EXPECTATION_KIND_COUNT_);
+
+  for (const auto& test_case : kCases) {
+    loom_op_t op = {.kind = test_case.op_kind};
+    const loom_check_expectation_kind_t kind =
+        loom_check_expectation_classify(&op);
+    EXPECT_EQ(kind, test_case.expectation_kind);
+    EXPECT_EQ(loom_check_expectation_kind_is_pair(kind), test_case.is_pair);
+  }
+
+  loom_op_t non_expectation = {.kind = LOOM_OP_CHECK_RETURN};
+  EXPECT_EQ(loom_check_expectation_classify(&non_expectation),
+            LOOM_CHECK_EXPECTATION_NONE);
+}
 
 class CheckOpsTest : public ::testing::Test {
  protected:
