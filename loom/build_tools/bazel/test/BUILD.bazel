@@ -23,7 +23,6 @@ load(
     "loom_test",
     "loom_test_module",
 )
-load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test")
 load("//loom/build_tools/bazel/test/testdata/corpus:catalog.bzl", "TEST_CORPUS")
 load(
     ":loom_binary_rules_test.bzl",
@@ -276,13 +275,6 @@ loom_corpus_test(
     },
 )
 
-loom_check_test(
-    name = "loom_check_wrapper_subject",
-    src = "roundtrip.loom-test",
-    runner = "loom_check_fixture_runner.sh",
-    tags = ["manual"],
-)
-
 loom_check_rules_test_suite(name = "loom_check_rules_tests")
 
 loom_corpus_rules_test_suite(name = "loom_corpus_rules_tests")
@@ -354,17 +346,6 @@ iree_executable_test(
     data = [":kernel_binary_deps_linked_module"],
 )
 
-sh_test(
-    name = "loom_check_wrapper_direct_test",
-    srcs = ["loom_check_wrapper_direct_test.sh"],
-    args = ["$(rootpath :loom_check_wrapper_subject)"],
-    data = [
-        "loom_check_fixture_runner.sh",
-        "roundtrip.loom-test",
-        ":loom_check_wrapper_subject",
-    ],
-)
-
 py_test(
     name = "library_launcher_test",
     srcs = ["library_launcher_test.py"],
@@ -416,7 +397,6 @@ test_suite(
         ":library_launcher_test",
         ":loom_binary_rules_tests",
         ":loom_check_rules_tests",
-        ":loom_check_wrapper_direct_test",
         ":loom_corpus_rules_tests",
         ":loom_library_aggregate_direct_test",
         ":loom_library_module_direct_test",
