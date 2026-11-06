@@ -1,0 +1,89 @@
+// Native constant elimination removes the second move after its issue cycle
+// has been reserved. A tail jump must honor that reservation as well as the
+// surviving packet's slots; otherwise its calendar commit exceeds capacity.
+// RUN: emit aie2p-leaf @jump_after_removed_constant report=emission
+
+aie2p.target<core> @target
+
+low.func.def schedule(locked) target<amd.xdna.aie2p.core>(@target) @jump_after_removed_constant(%output: reg<aie2p.ep>) asm {
+  low.br ^loop
+^loop:
+  %first = mov.short 0
+  %second = mov.short 0
+  st %second, %output, 0
+  low.br ^loop
+}
+
+// ----
+issue cycles: 8
+code bytes: 26
+coissued bundles: 1
+coissued components: 2
+
+// ====
+
+// Both conditional branch directions use the same physical admission path.
+// RUN: emit aie2p-leaf @nonzero_after_removed_constant report=emission
+
+aie2p.target<core> @target
+
+low.func.def schedule(locked) target<amd.xdna.aie2p.core>(@target) @nonzero_after_removed_constant(%output: reg<aie2p.ep>) asm {
+  low.br ^loop
+^loop:
+  %first = mov.short 1
+  %second = mov.short 1
+  st %second, %output, 0
+  low.cond_br %second, ^loop, ^exit : reg<aie2p.er>
+^exit:
+  return
+}
+
+// ----
+issue cycles: 14
+code bytes: 40
+coissued bundles: 1
+coissued components: 2
+
+// ====
+
+// RUN: emit aie2p-leaf @zero_after_removed_constant report=emission
+
+aie2p.target<core> @target
+
+low.func.def schedule(locked) target<amd.xdna.aie2p.core>(@target) @zero_after_removed_constant(%output: reg<aie2p.ep>) asm {
+  low.br ^loop
+^loop:
+  %first = mov.short 0
+  %second = mov.short 0
+  st %second, %output, 0
+  low.cond_br %second, ^exit, ^loop : reg<aie2p.er>
+^exit:
+  return
+}
+
+// ----
+issue cycles: 14
+code bytes: 40
+coissued bundles: 1
+coissued components: 2
+
+// ====
+
+// Return placement preserves the same calendar contract without introducing
+// an additional branch block or extending the architectural delay window.
+// RUN: emit aie2p-leaf @return_after_removed_constant report=emission
+
+aie2p.target<core> @target
+
+low.func.def schedule(locked) target<amd.xdna.aie2p.core>(@target) @return_after_removed_constant(%output: reg<aie2p.ep>) asm {
+  %first = mov.short 0
+  %second = mov.short 0
+  st %second, %output, 0
+  return
+}
+
+// ----
+issue cycles: 6
+code bytes: 18
+coissued bundles: 1
+coissued components: 2
