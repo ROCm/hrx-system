@@ -47,11 +47,10 @@ from loom.target.arch.amdgpu.target_info import (
 )
 from loom.target.low_descriptors import InstructionClass
 
-from .alignment import _with_operand_alignment
-from .categories import *
 from .cluster import _gfx125x_cluster_descriptors
 from .common import *
 from .control import _s_delay_alu_descriptor, _s_wait_xcnt_descriptor
+from .finalization import _finalize_amdgpu_descriptors
 from .memory_predication import with_preserving_memory_loads
 from .rdna4m import (
     _RDNA4M_IEEE_MINMAX_INSTRUCTION_ROWS,
@@ -59,11 +58,7 @@ from .rdna4m import (
 )
 from .sets import *
 from .tensor import _gfx125x_tensor_descriptors
-from .timing import (
-    _with_lds_service_timing,
-    _with_state_read_before_clobber_timing,
-    _with_valu_sgpr_timing,
-)
+from .timing import _with_lds_service_timing
 
 
 def _descriptor_has_memory_effect(descriptor: Descriptor) -> bool:
@@ -772,15 +767,13 @@ def _with_overlay_descriptors(
     manual_descriptors = _manual_scalar_descriptors(spec)
     descriptor_set = replace(
         base,
-        descriptors=_categorize_amdgpu_descriptors(
-            (
-                manual_descriptors[0],
-                *overlay_descriptors,
-                *extra_descriptors,
-                *manual_descriptors[1:],
-                *_hal_buffer_descriptor_pseudos(),
-                *base.descriptors,
-            )
+        descriptors=(
+            manual_descriptors[0],
+            *overlay_descriptors,
+            *extra_descriptors,
+            *manual_descriptors[1:],
+            *_hal_buffer_descriptor_pseudos(),
+            *base.descriptors,
         ),
     )
     _validate_address_immediate_units(descriptor_set)
@@ -1322,116 +1315,6 @@ def _with_storage_lease_rows(
     return replace(descriptor_set, descriptors=tuple(descriptors))
 
 
-_AMDGPU_SCHEDULE_INSTRUCTION_CLASSES = {
-    _SCHEDULE_SMEM_LOAD: (InstructionClass.SCALAR_MEMORY,),
-    _SCHEDULE_SMEM_STORE: (InstructionClass.SCALAR_MEMORY,),
-    _SCHEDULE_VMEM_LOAD: (InstructionClass.GLOBAL_MEMORY,),
-    _SCHEDULE_VMEM_LOAD_LDS: (
-        InstructionClass.GLOBAL_MEMORY,
-        InstructionClass.LOCAL_MEMORY,
-        InstructionClass.LDSDMA,
-    ),
-    _SCHEDULE_VMEM_STORE: (InstructionClass.GLOBAL_MEMORY,),
-    _SCHEDULE_VMEM_ATOMIC_RETURN: (InstructionClass.GLOBAL_MEMORY,),
-    _SCHEDULE_VMEM_ATOMIC_NO_RETURN: (InstructionClass.GLOBAL_MEMORY,),
-    _SCHEDULE_FLAT_LOAD: (
-        InstructionClass.GLOBAL_MEMORY,
-        InstructionClass.LOCAL_MEMORY,
-    ),
-    _SCHEDULE_FLAT_STORE: (
-        InstructionClass.GLOBAL_MEMORY,
-        InstructionClass.LOCAL_MEMORY,
-    ),
-    _SCHEDULE_FLAT_ATOMIC_RETURN: (
-        InstructionClass.GLOBAL_MEMORY,
-        InstructionClass.LOCAL_MEMORY,
-    ),
-    _SCHEDULE_FLAT_ATOMIC_NO_RETURN: (
-        InstructionClass.GLOBAL_MEMORY,
-        InstructionClass.LOCAL_MEMORY,
-    ),
-    _SCHEDULE_LDS_LOAD: (InstructionClass.LOCAL_MEMORY,),
-    _SCHEDULE_LDS_STORE: (InstructionClass.LOCAL_MEMORY,),
-    _SCHEDULE_LDS_ATOMIC: (InstructionClass.LOCAL_MEMORY,),
-    _SCHEDULE_LDS_CROSSLANE: (InstructionClass.LOCAL_MEMORY,),
-    _SCHEDULE_TENSOR_LOAD_LDS: (
-        InstructionClass.GLOBAL_MEMORY,
-        InstructionClass.LOCAL_MEMORY,
-        InstructionClass.LDSDMA,
-    ),
-    _SCHEDULE_CLUSTER_LOAD_LDS: (
-        InstructionClass.GLOBAL_MEMORY,
-        InstructionClass.LOCAL_MEMORY,
-        InstructionClass.LDSDMA,
-    ),
-    _SCHEDULE_MFMA: (InstructionClass.MFMA,),
-    _SCHEDULE_WMMA: (InstructionClass.WMMA,),
-    _SCHEDULE_WMMA_SCALE: (InstructionClass.WMMA,),
-    _SCHEDULE_SWMMAC: (InstructionClass.SWMMAC,),
-}
-
-_AMDGPU_KEY_INSTRUCTION_CLASSES = (
-    ("amdgpu.global_load_", InstructionClass.GLOBAL_LOAD),
-    ("amdgpu.global_store_", InstructionClass.GLOBAL_STORE),
-    ("amdgpu.buffer_load_", InstructionClass.BUFFER_LOAD),
-    ("amdgpu.buffer_store_", InstructionClass.BUFFER_STORE),
-    ("amdgpu.flat_load_", InstructionClass.FLAT_MEMORY),
-    ("amdgpu.flat_store_", InstructionClass.FLAT_MEMORY),
-    ("amdgpu.flat_atomic_", InstructionClass.FLAT_MEMORY),
-)
-
-
-def _with_instruction_classes_descriptor(descriptor: Descriptor) -> Descriptor:
-    instruction_classes = set(descriptor.instruction_classes)
-    schedule_instruction_classes = _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES.get(
-        descriptor.schedule_class, ()
-    )
-    if descriptor.schedule_class.startswith(_SCHEDULE_MFMA_QUALIFIED_PREFIX):
-        schedule_instruction_classes = (InstructionClass.MFMA,)
-    elif descriptor.schedule_class.startswith(f"{_SCHEDULE_MATRIX}."):
-        semantic_tag = descriptor.semantic_tag or ""
-        if semantic_tag.startswith("matrix.wmma."):
-            schedule_instruction_classes = (InstructionClass.WMMA,)
-        elif semantic_tag.startswith("matrix.swmmac."):
-            schedule_instruction_classes = (InstructionClass.SWMMAC,)
-    instruction_classes.update(schedule_instruction_classes)
-    semantic_tag = descriptor.semantic_tag or ""
-    if semantic_tag.startswith(("memory.stack.", "memory.private.")):
-        instruction_classes.discard(InstructionClass.GLOBAL_MEMORY)
-    for key_prefix, instruction_class in _AMDGPU_KEY_INSTRUCTION_CLASSES:
-        if descriptor.key.startswith(key_prefix):
-            instruction_classes.add(instruction_class)
-            break
-    projected_instruction_classes = tuple(
-        instruction_class
-        for instruction_class in InstructionClass
-        if instruction_class in instruction_classes
-    )
-    if projected_instruction_classes == descriptor.instruction_classes:
-        return descriptor
-    return replace(
-        descriptor,
-        instruction_classes=projected_instruction_classes,
-    )
-
-
-def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
-    descriptors = tuple(
-        _with_instruction_classes_descriptor(descriptor)
-        for descriptor in descriptor_set.descriptors
-    )
-    if all(
-        descriptor is existing
-        for descriptor, existing in zip(
-            descriptors,
-            descriptor_set.descriptors,
-            strict=True,
-        )
-    ):
-        return descriptor_set
-    return replace(descriptor_set, descriptors=descriptors)
-
-
 _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X = 1 << 0
 
 _AMDGPU_CORE_INSTRUCTION_FACT_NAMES = (
@@ -1661,20 +1544,17 @@ def _build_amdgpu_core_descriptor_set_from_spec(
     is_gfx125x = bool(builder.flags & _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X)
     if is_gfx125x:
         descriptor_set = _with_gfx125x_vgpr_msb_address_states(descriptor_set)
-    descriptor_set = _with_instruction_classes(descriptor_set)
-    descriptor_set = _with_operand_alignment(descriptor_set)
     descriptor_set = _with_storage_lease_rows(
         descriptor_set, builder_flags=builder.flags
     )
-    if builder.valu_sgpr_separation_cycles:
-        descriptor_set = _with_valu_sgpr_timing(
-            descriptor_set, builder.valu_sgpr_separation_cycles
-        )
+    descriptor_set = _finalize_amdgpu_descriptors(
+        descriptor_set,
+        valu_sgpr_separation_cycles=builder.valu_sgpr_separation_cycles,
+    )
     if builder.lds_bits_per_lane_per_cycle:
         descriptor_set = _with_lds_service_timing(
             descriptor_set, builder.lds_bits_per_lane_per_cycle
         )
-    descriptor_set = _with_state_read_before_clobber_timing(descriptor_set)
     # Execution pipelines overlap, but a wave issues one encoded instruction
     # at a time. A VOPD packet still occupies one instruction issue slot.
     descriptor_set = replace(

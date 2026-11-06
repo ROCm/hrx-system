@@ -145,7 +145,6 @@ from loom.target.arch.amdgpu.descriptors import (
 from loom.target.arch.amdgpu.descriptors.api import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     _order_descriptor_sets_for_shared_ordinals,
-    _with_instruction_classes,
     _with_storage_lease_rows,
     amdgpu_core_descriptor_set_instruction_names,
 )
@@ -156,6 +155,9 @@ from loom.target.arch.amdgpu.descriptors.cluster import (
 from loom.target.arch.amdgpu.descriptors.control import (
     _s_delay_alu_descriptor,
     _s_set_vgpr_msb_descriptor,
+)
+from loom.target.arch.amdgpu.descriptors.finalization import (
+    _with_instruction_classes,
 )
 from loom.target.arch.amdgpu.descriptors.tensor import (
     _s_wait_tensorcnt_descriptor,
