@@ -370,6 +370,16 @@ class Types {
   const ArrayPartition* array(const cxx::Type* input, cxx::AST* owner);
   // Direct lookup of a member slice retained by its owning record's admission.
   const MemberPartition& member(cxx::FieldSymbol* field, cxx::AST* owner);
+  // Selects snapshot value transport for a pointer reference field whose
+  // object identity is proven unobservable by whole-function analysis. The
+  // source reference and pointer value share the same two-component partition;
+  // this changes how construction and reads interpret those components, not
+  // the record ABI.
+  void select_pointer_reference_snapshot(cxx::FieldSymbol* field,
+                                         cxx::AST* owner);
+  // Whether this pointer reference field transports a stable referent snapshot
+  // instead of a pointer to the reference's source object.
+  bool pointer_reference_is_snapshot(cxx::FieldSymbol* field) const;
   // Admits a resolved constructor when the source partition represents a
   // trivial copy or move, or when an admitted record supplies the default
   // member-initialization plan. A null constructor requires no lifecycle
@@ -493,6 +503,8 @@ class Types {
       tensors_;
   // Member identity indexes the slice established by record admission.
   std::unordered_map<cxx::FieldSymbol*, MemberPartition> members_;
+  // Pointer reference fields whose source object identity is unobservable.
+  std::unordered_set<cxx::FieldSymbol*> pointer_reference_snapshots_;
   // Completed memory admission; layouts remain owned by the source symbols.
   std::unordered_set<cxx::ClassSymbol*> storage_records_;
 };

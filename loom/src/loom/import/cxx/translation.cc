@@ -4626,17 +4626,22 @@ class Translator final : private Initialization::Evaluation {
         return name(read(found->second, ast),
                     cxx::to_string(id->symbol->name()));
       }
+      auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
+      const bool receiver_field = field && receiver(field);
+      if (receiver_field &&
+          unit_.typeTraits().is_lvalue_reference(field->type())) {
+        if (!types_.pointer_reference_is_snapshot(field)) {
+          return name(load(ast), cxx::to_string(field->name()));
+        }
+        return name(receiver_member(field, ast), cxx::to_string(field->name()));
+      }
       if (auto found = values_.find(id->symbol); found != values_.end()) {
         return found->second;
       }
       if (locals_.contains(id->symbol)) {
         return binding(id->symbol, ast);
       }
-      if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
-          field && receiver(field)) {
-        if (unit_.typeTraits().is_lvalue_reference(field->type())) {
-          return name(load(ast), cxx::to_string(field->name()));
-        }
+      if (receiver_field) {
         return name(receiver_member(field, ast), cxx::to_string(field->name()));
       }
       if (auto* enumerator =
@@ -4706,7 +4711,8 @@ class Translator final : private Initialization::Evaluation {
     }
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast)) {
       if (auto* field = current_receiver_field(member)) {
-        if (unit_.typeTraits().is_lvalue_reference(field->type())) {
+        if (unit_.typeTraits().is_lvalue_reference(field->type()) &&
+            !types_.pointer_reference_is_snapshot(field)) {
           return name(load(ast), cxx::to_string(field->name()));
         }
         return name(receiver_member(field, ast), cxx::to_string(field->name()));
@@ -4740,7 +4746,8 @@ class Translator final : private Initialization::Evaluation {
         if (!field || field->isStatic()) {
           fail(ast, "record value access requires a non-static data member");
         }
-        if (unit_.typeTraits().is_lvalue_reference(field->type())) {
+        if (unit_.typeTraits().is_lvalue_reference(field->type()) &&
+            !types_.pointer_reference_is_snapshot(field)) {
           return name(load(ast), cxx::to_string(field->name()));
         }
         auto value = expression(member->baseExpression);

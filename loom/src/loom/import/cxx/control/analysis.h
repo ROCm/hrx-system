@@ -304,6 +304,13 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Propagates reference and receiver facts in both directions across one
   // retained call edge.
   CallPropagation propagate_call(const DirectCall& call, ControlFlow& callee);
+  // Resolves deferred read-only pointer captures after callable effects reach
+  // a fixed point. Returns whether rejecting a value snapshot added a new
+  // identity fact that must propagate through the call graph.
+  bool resolve_pointer_reference_captures();
+  // Publishes every remaining stable pointer snapshot to the source type
+  // representation contract before callable signatures are built.
+  void publish_pointer_reference_snapshots(Types& types) const;
   // Normalizes exact receiver writes to declaration order after the monotone
   // propagation reaches a fixed point.
   void finalize_callable_effects();
@@ -313,6 +320,23 @@ class ControlFlow final : private cxx::ASTVisitor {
   struct ValueUseFacts;
   struct ReferenceIdentityFacts;
   struct ReferenceWriteFacts;
+
+  struct PointerReferenceCapture {
+    // Synthesized closure field carrying either the referent value or storage
+    // identity according to the completed analysis.
+    cxx::FieldSymbol* field;
+    // Retained automatic binding identity established at construction.
+    CallArgument referent;
+    // Whether later facts forced the ordinary storage representation.
+    bool requires_storage = false;
+  };
+
+  struct PointerReferenceFacts {
+    // Complete binding-write index, seeded when the first candidate appears.
+    std::unordered_set<cxx::Symbol*> written_bindings;
+    // Ordinary automatic pointer captures awaiting whole-callable selection.
+    std::vector<PointerReferenceCapture> captures;
+  };
 
   struct BindingStorageFacts {
     // Whether an evaluated source expression requires object identity.
@@ -471,6 +495,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::unordered_set<cxx::Symbol*> written_references_;
   // Exact current-object field replacements in declaration encounter order.
   std::vector<cxx::FieldSymbol*> receiver_writes_;
+  // Lazily allocated capture and write facts. Ordinary callables carry only
+  // this pointer and never allocate or scan their bodies for this analysis.
+  std::unique_ptr<PointerReferenceFacts> pointer_reference_facts_;
   // Calls retained once for sparse fixed-point propagation.
   std::vector<DirectCall> calls_;
   // Automatic variable identities mapped to their nontrivial cleanup action.

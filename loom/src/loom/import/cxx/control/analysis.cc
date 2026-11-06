@@ -122,6 +122,90 @@ class ValueUseAnalysis final : private cxx::ASTVisitor {
   std::unordered_map<cxx::Symbol*, size_t>& last_uses_;
 };
 
+// Classifies reference-capture field uses without attributing the lambda body
+// to its enclosing callable. A direct lvalue-to-rvalue conversion observes the
+// captured pointer value but not the pointer object's identity. Every non-read
+// occurrence remains conservative: assignment, increment, address-taking, and
+// reference binding all require storage.
+class PointerCaptureReads final : private cxx::ASTVisitor {
+ public:
+  PointerCaptureReads(cxx::TranslationUnit& unit,
+                      cxx::LambdaExpressionAST* lambda) {
+    auto traits = unit.typeTraits();
+    for (auto* capture : cxx::ListView{lambda->captureList}) {
+      if (!cxx::ast_cast<cxx::RefLambdaCaptureAST>(capture)) {
+        continue;
+      }
+      auto* field = cxx::capture_field(capture);
+      if (!field) {
+        continue;
+      }
+      auto* referent = traits.remove_reference(field->type());
+      if (traits.is_lvalue_reference(field->type()) &&
+          traits.is_pointer(referent) && !traits.is_volatile(referent)) {
+        candidates_.insert(field);
+      }
+    }
+    if (!candidates_.empty()) {
+      accept(lambda->statement);
+    }
+  }
+
+  bool admits(cxx::FieldSymbol* field) const {
+    return candidates_.contains(field) && !other_uses_.contains(field);
+  }
+
+ private:
+  // Nested lambda bodies belong to their own callable analysis. Only their
+  // capture initializers can observe a field of the closure being classified;
+  // skipping the deferred body also keeps nested lambdas linear in total AST
+  // size instead of repeatedly walking every descendant body.
+  void visit(cxx::LambdaExpressionAST* ast) override {
+    for (auto* capture : cxx::ListView{ast->captureList}) {
+      accept(capture);
+    }
+  }
+
+  cxx::FieldSymbol* field(cxx::ExpressionAST* expression) const {
+    expression = unwrap_expression(expression);
+    if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+      auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
+      return candidates_.contains(field) ? field : nullptr;
+    }
+    auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
+    auto* field =
+        member ? cxx::symbol_cast<cxx::FieldSymbol>(member->symbol) : nullptr;
+    return candidates_.contains(field) ? field : nullptr;
+  }
+
+  void visit(cxx::ImplicitCastExpressionAST* ast) override {
+    if (!ast->conversionFunction &&
+        ast->castKind == cxx::ImplicitCastKind::kLValueToRValueConversion) {
+      if (field(ast->expression)) {
+        return;
+      }
+    }
+    cxx::ASTVisitor::visit(ast);
+  }
+
+  void visit(cxx::IdExpressionAST* ast) override {
+    if (auto* captured = field(ast)) {
+      other_uses_.insert(captured);
+    }
+    cxx::ASTVisitor::visit(ast);
+  }
+
+  void visit(cxx::MemberExpressionAST* ast) override {
+    if (auto* captured = field(ast)) {
+      other_uses_.insert(captured);
+    }
+    cxx::ASTVisitor::visit(ast);
+  }
+
+  std::unordered_set<cxx::FieldSymbol*> candidates_;
+  std::unordered_set<cxx::FieldSymbol*> other_uses_;
+};
+
 bool operation_is(cxx::Symbol* symbol, std::string_view operation) {
   auto* binding = annotation(symbol, "op");
   return binding && binding->arguments.size() == 1 &&
@@ -995,6 +1079,7 @@ void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
   // Constructing a closure evaluates its captures, not its deferred callable
   // body. The synthesized operator() definition owns analysis of that body
   // when ordinary reachable-call discovery admits it.
+  PointerCaptureReads pointer_reads(unit_, ast);
   for (auto* capture : cxx::ListView{ast->captureList}) {
     if (cxx::is_pack_capture(capture)) {
       diagnostics_.reject(unit_, capture,
@@ -1016,7 +1101,26 @@ void ControlFlow::visit(cxx::LambdaExpressionAST* ast) {
                             "lambda reference capture requires one "
                             "initializer expression");
       }
-      require_identity(referent);
+      auto argument = retain_call_argument(referent);
+      const bool direct_automatic =
+          argument.identity_bindings.size() == 1 &&
+          !argument.identity_intervals && !argument.current_receiver &&
+          !argument.inherent_storage && argument.reference_calls.empty() &&
+          argument.write_binding == argument.identity_bindings.front() &&
+          !cxx::symbol_cast<cxx::FieldSymbol>(argument.write_binding);
+      if (pointer_reads.admits(field) && direct_automatic) {
+        if (!pointer_reference_facts_) {
+          pointer_reference_facts_ = std::make_unique<PointerReferenceFacts>();
+          for (const auto& entry : writes_) {
+            pointer_reference_facts_->written_bindings.insert(
+                entry.second.begin(), entry.second.end());
+          }
+        }
+        pointer_reference_facts_->captures.push_back(
+            {.field = field, .referent = std::move(argument)});
+      } else {
+        require_identity(argument);
+      }
     } else if (cxx::ast_cast<cxx::ThisLambdaCaptureAST>(capture)) {
       receiver_requires_storage_ = true;
     }
@@ -1474,7 +1578,9 @@ bool ControlFlow::record_scoped_write(cxx::Symbol* binding,
   if (!binding) {
     return false;
   }
-  bool changed = false;
+  bool changed =
+      pointer_reference_facts_ &&
+      pointer_reference_facts_->written_bindings.insert(binding).second;
   for (auto* owner : owners) {
     auto& writes = writes_[owner];
     if (std::ranges::find(writes, binding) == writes.end()) {
@@ -1483,6 +1589,47 @@ bool ControlFlow::record_scoped_write(cxx::Symbol* binding,
     }
   }
   return changed;
+}
+
+bool ControlFlow::resolve_pointer_reference_captures() {
+  if (!pointer_reference_facts_) {
+    return false;
+  }
+  bool changed = false;
+  auto binding_is_written = [&](cxx::Symbol* binding) {
+    return pointer_reference_facts_->written_bindings.contains(binding);
+  };
+  for (auto& capture : pointer_reference_facts_->captures) {
+    if (capture.requires_storage) {
+      continue;
+    }
+    const auto& referent = capture.referent;
+    const bool written =
+        std::ranges::any_of(referent.identity_bindings, binding_is_written) ||
+        (referent.identity_intervals &&
+         std::ranges::any_of(*referent.identity_intervals,
+                             [&](const ObjectInterval& interval) {
+                               return binding_is_written(interval.binding);
+                             }));
+    if (!written && !argument_requires_storage(referent)) {
+      continue;
+    }
+    capture.requires_storage = true;
+    changed = require_identity(referent) || changed;
+  }
+  return changed;
+}
+
+void ControlFlow::publish_pointer_reference_snapshots(Types& types) const {
+  if (!pointer_reference_facts_) {
+    return;
+  }
+  for (const auto& capture : pointer_reference_facts_->captures) {
+    if (!capture.requires_storage) {
+      types.select_pointer_reference_snapshot(capture.field,
+                                              capture.referent.source);
+    }
+  }
 }
 
 bool ControlFlow::record_argument_write(

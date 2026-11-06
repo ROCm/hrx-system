@@ -268,7 +268,9 @@ func.def @operator_call_value(%this_left: i32, %this_right: i32, %input: i32) ->
 // ====
 // A forwarding-reference specialization transports the closure value into the
 // first helper. Recursive calls reference-collapse the named parameter to an
-// lvalue reference while preserving the same captured owner identity.
+// lvalue reference while preserving the same captured owner identity. A stable
+// pointer captured by reference travels as its two-component value alongside
+// ordinary scalar reference captures, without private pointer-object storage.
 template <int Index, class Function>
 static void apply(Function&& function) {
   function(Index);
@@ -277,49 +279,102 @@ static void apply(Function&& function) {
   }
 }
 
-int forwarding_recursive(int initial) {
-  int sum = initial;
-  apply<0>([&](auto value) { sum += value; });
+int forwarding_recursive(const int* input, int index) {
+  int sum = 0;
+  apply<0>([&](auto value) { sum += value * input[index]; });
   return sum;
 }
 
 // ----
-func.def public @forwarding_recursive(%initial: i32) -> (i32) {
-  %2 = index.constant 4 : offset
-  %sum_storage = buffer.alloca<private> align(4) %2 : buffer
+func.def public @forwarding_recursive(%input: buffer, %input_byte_offset: offset, %index: i32) -> (i32) {
+  %4 = index.constant 4 : offset
+  %index_storage = buffer.alloca<private> align(4) %4 : buffer
+  %index_storage_byte_offset = index.constant 0 : offset
+  %index_view = buffer.view %index_storage[%index_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %index, %index_view[0] : i32, view<1xi32>
+  %8 = index.constant 4 : offset
+  %sum_storage = buffer.alloca<private> align(4) %8 : buffer
   %sum_storage_byte_offset = index.constant 0 : offset
   %sum_view = buffer.view %sum_storage[%sum_storage_byte_offset] : buffer -> view<1xi32>
-  view.store %initial, %sum_view[0] : i32, view<1xi32>
-  func.call @apply_0__lambda_auto__type_param_0__0___const_(%sum_storage, %sum_storage_byte_offset) : (buffer, offset)
+  %12 = scalar.constant 0 : i32
+  view.store %12, %sum_view[0] : i32, view<1xi32>
+  func.call @apply_0__lambda_auto__type_param_0__0___const_(%sum_storage, %sum_storage_byte_offset, %input, %input_byte_offset, %index_storage, %index_storage_byte_offset) : (buffer, offset, buffer, offset, buffer, offset)
   %sum = view.load %sum_view[0] : view<1xi32> -> i32
   func.return %sum : i32
 }
 
-func.def @apply_0__lambda_auto__type_param_0__0___const_(%function_sum: buffer, %function_sum_byte_offset: offset) {
-  %9 = scalar.constant 0 : i32
-  func.call @operator_call_int_value(%function_sum, %function_sum_byte_offset, %9) : (buffer, offset, i32)
-  func.call @apply_1__lambda_auto__type_param_0__0___const__(%function_sum, %function_sum_byte_offset) : (buffer, offset)
+func.def @apply_0__lambda_auto__type_param_0__0___const_(%function_sum: buffer, %function_sum_byte_offset: offset, %function_input: buffer, %function_input_byte_offset: offset, %function_index: buffer, %function_index_byte_offset: offset) {
+  %20 = scalar.constant 0 : i32
+  func.call @operator_call_int_value(%function_sum, %function_sum_byte_offset, %function_input, %function_input_byte_offset, %function_index, %function_index_byte_offset, %20) : (buffer, offset, buffer, offset, buffer, offset, i32)
+  func.call @apply_1__lambda_auto__type_param_0__0___const__(%function_sum, %function_sum_byte_offset, %function_input, %function_input_byte_offset, %function_index, %function_index_byte_offset) : (buffer, offset, buffer, offset, buffer, offset)
   func.return
 }
 
-func.def @operator_call_int_value(%this_sum: buffer, %this_sum_byte_offset: offset, %value: i32) {
-  %13 = buffer.view %this_sum[%this_sum_byte_offset] : buffer -> view<1xi32>
-  %14 = view.load %13[0] : view<1xi32> -> i32
-  %15 = scalar.addi %14, %value : i32
-  %16 = buffer.view %this_sum[%this_sum_byte_offset] : buffer -> view<1xi32>
-  view.store %15, %16[0] : i32, view<1xi32>
+func.def @operator_call_int_value(%this_sum: buffer, %this_sum_byte_offset: offset, %this_input: buffer, %this_input_byte_offset: offset, %this_index: buffer, %this_index_byte_offset: offset, %value: i32) {
+  %28 = buffer.view %this_index[%this_index_byte_offset] : buffer -> view<1xi32>
+  %index = view.load %28[0] : view<1xi32> -> i32
+  %30 = scalar.extsi %index : i32 to i64
+  %31 = scalar.constant 4 : i64
+  %32 = scalar.muli %30, %31 : i64
+  %33 = index.cast %this_input_byte_offset : offset to i64
+  %34 = scalar.addi %33, %32 : i64
+  %35 = scalar.assume %34 [range(%34, 0, 9223372036854775807)] : i64
+  %36 = index.cast %35 : i64 to offset
+  %37 = buffer.view %this_input[%36] : buffer -> view<1xi32>
+  %38 = view.load %37[0] : view<1xi32> -> i32
+  %39 = scalar.muli %value, %38 : i32
+  %40 = buffer.view %this_sum[%this_sum_byte_offset] : buffer -> view<1xi32>
+  %41 = view.load %40[0] : view<1xi32> -> i32
+  %42 = scalar.addi %41, %39 : i32
+  %43 = buffer.view %this_sum[%this_sum_byte_offset] : buffer -> view<1xi32>
+  view.store %42, %43[0] : i32, view<1xi32>
   func.return
 }
 
-func.def @apply_1__lambda_auto__type_param_0__0___const__(%function_sum: buffer, %function_sum_byte_offset: offset) {
-  %19 = scalar.constant 1 : i32
-  func.call @operator_call_int_value(%function_sum, %function_sum_byte_offset, %19) : (buffer, offset, i32)
-  func.call @apply_2__lambda_auto__type_param_0__0___const__(%function_sum, %function_sum_byte_offset) : (buffer, offset)
+func.def @apply_1__lambda_auto__type_param_0__0___const__(%function_sum: buffer, %function_sum_byte_offset: offset, %function_input: buffer, %function_input_byte_offset: offset, %function_index: buffer, %function_index_byte_offset: offset) {
+  %50 = scalar.constant 1 : i32
+  func.call @operator_call_int_value(%function_sum, %function_sum_byte_offset, %function_input, %function_input_byte_offset, %function_index, %function_index_byte_offset, %50) : (buffer, offset, buffer, offset, buffer, offset, i32)
+  func.call @apply_2__lambda_auto__type_param_0__0___const__(%function_sum, %function_sum_byte_offset, %function_input, %function_input_byte_offset, %function_index, %function_index_byte_offset) : (buffer, offset, buffer, offset, buffer, offset)
   func.return
 }
 
-func.def @apply_2__lambda_auto__type_param_0__0___const__(%function_sum: buffer, %function_sum_byte_offset: offset) {
-  %22 = scalar.constant 2 : i32
-  func.call @operator_call_int_value(%function_sum, %function_sum_byte_offset, %22) : (buffer, offset, i32)
+func.def @apply_2__lambda_auto__type_param_0__0___const__(%function_sum: buffer, %function_sum_byte_offset: offset, %function_input: buffer, %function_input_byte_offset: offset, %function_index: buffer, %function_index_byte_offset: offset) {
+  %57 = scalar.constant 2 : i32
+  func.call @operator_call_int_value(%function_sum, %function_sum_byte_offset, %function_input, %function_input_byte_offset, %function_index, %function_index_byte_offset, %57) : (buffer, offset, buffer, offset, buffer, offset, i32)
   func.return
+}
+
+// ====
+// RUN: verify
+// Mutating a captured pointer observes the pointer object's identity and keeps
+// the ordinary storage contract.
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int* write_pointer_capture(int* input) {
+  return [&] { return ++input; }();
+}
+
+// ====
+// RUN: verify
+// A write to the enclosing pointer after construction also prevents a stale
+// pointer-value snapshot.
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int* write_pointer_owner(int* input, int* replacement) {
+  auto read = [&] { return input; };
+  input = replacement;
+  return read();
+}
+
+// ====
+// RUN: verify
+static void replace_pointer(int*& input, int* replacement) {
+  input = replacement;
+}
+
+// Transitive write effects reach capture selection through the retained call
+// graph rather than freezing the pointer snapshot before callees are known.
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+int* write_pointer_through_call(int* input, int* replacement) {
+  auto read = [&] { return input; };
+  replace_pointer(input, replacement);
+  return read();
 }

@@ -1274,6 +1274,20 @@ const MemberPartition& Types::member(cxx::FieldSymbol* field, cxx::AST* owner) {
   return members_.at(field);
 }
 
+void Types::select_pointer_reference_snapshot(cxx::FieldSymbol* field,
+                                              cxx::AST* owner) {
+  const auto& admitted = member(field, owner);
+  auto traits = unit_.typeTraits();
+  IREE_ASSERT(traits.is_lvalue_reference(field->type()));
+  IREE_ASSERT(traits.is_pointer(traits.remove_reference(field->type())));
+  IREE_ASSERT_EQ(admitted.partition, &kPointerPartition);
+  pointer_reference_snapshots_.insert(field);
+}
+
+bool Types::pointer_reference_is_snapshot(cxx::FieldSymbol* field) const {
+  return pointer_reference_snapshots_.contains(field);
+}
+
 loom_type_t Types::get(const cxx::Type* input, cxx::AST* ast) {
   if (!input) {
     diagnostics_.reject(unit_, ast, "expression has no resolved C++ type");
@@ -1748,8 +1762,10 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
                                      member.partition->component_count);
         auto* member_type = member.field->type();
         if (unit_.typeTraits().is_lvalue_reference(member_type)) {
-          member_type = unit_.typeTraits().add_pointer(
-              unit_.typeTraits().remove_reference(member_type));
+          auto* referent = unit_.typeTraits().remove_reference(member_type);
+          member_type = pointer_reference_is_snapshot(member.field)
+                            ? referent
+                            : unit_.typeTraits().add_pointer(referent);
         }
         append_bound(member_type, owner, member_identities, storage, output);
       }
