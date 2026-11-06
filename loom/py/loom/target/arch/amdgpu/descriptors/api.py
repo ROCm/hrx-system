@@ -1381,48 +1381,55 @@ _AMDGPU_KEY_INSTRUCTION_CLASSES = (
 )
 
 
-def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
-    descriptors: list[Descriptor] = []
-    descriptors_changed = False
-    for descriptor in descriptor_set.descriptors:
-        instruction_classes = set(descriptor.instruction_classes)
-        schedule_instruction_classes = _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES.get(
-            descriptor.schedule_class, ()
-        )
-        if descriptor.schedule_class.startswith(_SCHEDULE_MFMA_QUALIFIED_PREFIX):
-            schedule_instruction_classes = (InstructionClass.MFMA,)
-        elif descriptor.schedule_class.startswith(f"{_SCHEDULE_MATRIX}."):
-            semantic_tag = descriptor.semantic_tag or ""
-            if semantic_tag.startswith("matrix.wmma."):
-                schedule_instruction_classes = (InstructionClass.WMMA,)
-            elif semantic_tag.startswith("matrix.swmmac."):
-                schedule_instruction_classes = (InstructionClass.SWMMAC,)
-        instruction_classes.update(schedule_instruction_classes)
+def _with_instruction_classes_descriptor(descriptor: Descriptor) -> Descriptor:
+    instruction_classes = set(descriptor.instruction_classes)
+    schedule_instruction_classes = _AMDGPU_SCHEDULE_INSTRUCTION_CLASSES.get(
+        descriptor.schedule_class, ()
+    )
+    if descriptor.schedule_class.startswith(_SCHEDULE_MFMA_QUALIFIED_PREFIX):
+        schedule_instruction_classes = (InstructionClass.MFMA,)
+    elif descriptor.schedule_class.startswith(f"{_SCHEDULE_MATRIX}."):
         semantic_tag = descriptor.semantic_tag or ""
-        if semantic_tag.startswith(("memory.stack.", "memory.private.")):
-            instruction_classes.discard(InstructionClass.GLOBAL_MEMORY)
-        for key_prefix, instruction_class in _AMDGPU_KEY_INSTRUCTION_CLASSES:
-            if descriptor.key.startswith(key_prefix):
-                instruction_classes.add(instruction_class)
-                break
-        projected_instruction_classes = tuple(
-            instruction_class
-            for instruction_class in InstructionClass
-            if instruction_class in instruction_classes
+        if semantic_tag.startswith("matrix.wmma."):
+            schedule_instruction_classes = (InstructionClass.WMMA,)
+        elif semantic_tag.startswith("matrix.swmmac."):
+            schedule_instruction_classes = (InstructionClass.SWMMAC,)
+    instruction_classes.update(schedule_instruction_classes)
+    semantic_tag = descriptor.semantic_tag or ""
+    if semantic_tag.startswith(("memory.stack.", "memory.private.")):
+        instruction_classes.discard(InstructionClass.GLOBAL_MEMORY)
+    for key_prefix, instruction_class in _AMDGPU_KEY_INSTRUCTION_CLASSES:
+        if descriptor.key.startswith(key_prefix):
+            instruction_classes.add(instruction_class)
+            break
+    projected_instruction_classes = tuple(
+        instruction_class
+        for instruction_class in InstructionClass
+        if instruction_class in instruction_classes
+    )
+    if projected_instruction_classes == descriptor.instruction_classes:
+        return descriptor
+    return replace(
+        descriptor,
+        instruction_classes=projected_instruction_classes,
+    )
+
+
+def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
+    descriptors = tuple(
+        _with_instruction_classes_descriptor(descriptor)
+        for descriptor in descriptor_set.descriptors
+    )
+    if all(
+        descriptor is existing
+        for descriptor, existing in zip(
+            descriptors,
+            descriptor_set.descriptors,
+            strict=True,
         )
-        if projected_instruction_classes == descriptor.instruction_classes:
-            descriptors.append(descriptor)
-            continue
-        descriptors.append(
-            replace(
-                descriptor,
-                instruction_classes=projected_instruction_classes,
-            )
-        )
-        descriptors_changed = True
-    if not descriptors_changed:
+    ):
         return descriptor_set
-    return replace(descriptor_set, descriptors=tuple(descriptors))
+    return replace(descriptor_set, descriptors=descriptors)
 
 
 _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X = 1 << 0

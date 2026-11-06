@@ -203,6 +203,22 @@ def test_other_producers_preserve_their_result_timing() -> None:
     assert scalar_load.operands[1].read_event == "amdgpu.sgpr.read"
 
 
+def test_timing_reuses_unchanged_descriptor_rows() -> None:
+    descriptor = Descriptor(
+        key="amdgpu.test.unchanged_timing",
+        mnemonic="unchanged_timing",
+        semantic_tag="test.unchanged_timing",
+        operands=(Operand("source", OperandRole.OPERAND, (RegClassAlt(_REG_VGPR),)),),
+        schedule_class="amdgpu.salu",
+    )
+    original = replace(
+        _AMDGPU_RDNA3_CORE_DESCRIPTOR_SET_BASE,
+        descriptors=(descriptor,),
+    )
+    assert _with_valu_sgpr_timing(original, 5).descriptors[0] is descriptor
+    assert _with_state_read_before_clobber_timing(original).descriptors[0] is descriptor
+
+
 def test_state_reads_release_every_architectural_state_at_issue() -> None:
     state_classes = (_REG_M0, _REG_SCC, _REG_EXEC, _REG_VCC, _REG_MODE)
     reads = tuple(

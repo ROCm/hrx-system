@@ -39,12 +39,18 @@ def _amdgpu_descriptor_category(descriptor: Descriptor) -> DescriptorCategory:
     return AMDGPU_MISC_DESCRIPTOR_CATEGORY
 
 
+def _with_amdgpu_descriptor_category(descriptor: Descriptor) -> Descriptor:
+    category = _amdgpu_descriptor_category(descriptor)
+    if descriptor.category == category:
+        return descriptor
+    return replace(descriptor, category=category)
+
+
 def _categorize_amdgpu_descriptors(
     descriptors: tuple[Descriptor, ...],
 ) -> tuple[Descriptor, ...]:
     return tuple(
-        replace(descriptor, category=_amdgpu_descriptor_category(descriptor))
-        for descriptor in descriptors
+        _with_amdgpu_descriptor_category(descriptor) for descriptor in descriptors
     )
 
 
