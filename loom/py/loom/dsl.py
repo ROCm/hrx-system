@@ -88,6 +88,7 @@ __all__ = [
     "ENCODING_TRANSFORM",
     "POOL",
     "GROUP",
+    "MANAGED_REFERENCE",
     "REGISTER",
     "STORAGE",
     "I1",
@@ -408,6 +409,7 @@ class TypeConstraint(Enum):
     ENCODING_TRANSFORM = "encoding<transform>"
     POOL = "pool"
     GROUP = "group"
+    MANAGED_REFERENCE = "managed_reference"
     REGISTER = "register"
     STORAGE = "storage"
     I1 = "i1"
@@ -451,6 +453,7 @@ ENCODING_STORAGE = TypeConstraint.ENCODING_STORAGE
 ENCODING_TRANSFORM = TypeConstraint.ENCODING_TRANSFORM
 POOL = TypeConstraint.POOL
 GROUP = TypeConstraint.GROUP
+MANAGED_REFERENCE = TypeConstraint.MANAGED_REFERENCE
 REGISTER = TypeConstraint.REGISTER
 STORAGE = TypeConstraint.STORAGE
 I1 = TypeConstraint.I1
@@ -5804,6 +5807,10 @@ class ValueDuplicationInterface(NamedTuple):
     owner; a borrowed value remains borrowed. Distinct identities do not require
     disjoint physical storage when their lifetimes do not overlap.
 
+    StorageRelation implementations have no execution effects beyond copying
+    the carrier. ObservableEffect may preserve the carrier's ownership
+    acquisition, which structural lowering materializes through low.copy.
+
     The generator proves the constrained shape, allowing C consumers to query
     one compact operation-vtable marker and use the generic operand and result
     storage directly.
@@ -7200,6 +7207,7 @@ def value_duplication_op(
     carrier: TypeConstraint,
     doc: str,
     category: OpCategory | None = None,
+    traits: list[Trait] | tuple[Trait, ...] = (),
     examples: list[str] | tuple[str, ...] = (),
 ) -> Op:
     """Declare one dialect-owned closed-tuple ownership duplication op."""
@@ -7216,7 +7224,7 @@ def value_duplication_op(
             ClosedValueTuple("duplicates", carrier),
             VariadicValuesMatch("duplicates", "sources"),
         ],
-        traits=[UNIQUE_IDENTITY, STORAGE_RELATION],
+        traits=[UNIQUE_IDENTITY, STORAGE_RELATION, *traits],
         interfaces=[
             ValueDuplicationInterface(
                 sources="sources",

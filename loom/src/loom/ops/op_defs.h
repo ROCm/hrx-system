@@ -1364,6 +1364,9 @@ static inline bool loom_direct_branch_can_rebuild_payload(const loom_op_t* op) {
 // the corresponding result identities.
 // Each result copies the source ownership state without consuming it: an owner
 // creates an independent owner, while a borrow remains borrowed.
+// StorageRelation implementations have no execution effects beyond copying
+// the carrier. ObservableEffect preserves any ownership acquisition performed
+// by that transport.
 bool loom_value_duplication_isa(const loom_module_t* module,
                                 const loom_op_t* op);
 

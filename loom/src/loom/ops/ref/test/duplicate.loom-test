@@ -1,0 +1,85 @@
+// A duplicate preserves each ownership mode and external payload identity.
+// RUN: pass ownership-lifetime
+type.decl import("media", "frame") @Frame
+
+func.def @copy(%owner: ref<@Frame>, %pointer: ptr<@Frame>) -> (ref<@Frame>, ref<@Frame>, ptr<@Frame>) {
+  %owner_copy = ref.duplicate %owner : ref<@Frame>
+  %pointer_copy = ref.duplicate %pointer : ptr<@Frame>
+  func.return %owner, %owner_copy, %pointer_copy : ref<@Frame>, ref<@Frame>, ptr<@Frame>
+}
+
+// ====
+
+// DCE cannot erase an owning obligation just because its handle is unused.
+// RUN: pass dce,ownership-lifetime
+type.decl import("media", "frame") @Frame
+
+func.def @unused_copy(%owner: ref<@Frame>) -> (ref<@Frame>) {
+  %copy = ref.duplicate %owner : ref<@Frame>
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="copy"}
+  func.return %owner : ref<@Frame>
+}
+
+// ====
+
+// Returning an independent copy does not consume its original owner.
+// RUN: pass ownership-lifetime
+type.decl import("media", "frame") @Frame
+
+func.def @unused_source(%owner: ref<@Frame>) -> (ref<@Frame>) {
+  %copy = ref.duplicate %owner : ref<@Frame>
+  // ERROR@+1: DOMINANCE/014 {phase_name="ownership-lifetime", value_name="owner"}
+  func.return %copy : ref<@Frame>
+}
+
+// ====
+
+// Acquisition after the source owner was consumed is invalid.
+// RUN: pass ownership-lifetime
+type.decl import("media", "frame") @Frame
+
+func.decl import("media", "consume") @consume(%owner: ref<@Frame>)
+
+func.def @copy_consumed(%owner: ref<@Frame>) -> (ref<@Frame>) {
+  func.call @consume(%owner) : (ref<@Frame>)
+  // ERROR@+1: DOMINANCE/002 {value_name="owner"}
+  %copy = ref.duplicate %owner : ref<@Frame>
+  func.return %copy : ref<@Frame>
+}
+
+// ====
+
+// Handles never accept scalar address bits as managed payloads.
+// RUN: verify
+func.def @numeric(%value: i64) -> (i64) {
+  // ERROR@+2: TYPE/003
+  // ERROR@+1: TYPE/004
+  %copy = ref.duplicate %value : i64
+  func.return %copy : i64
+}
+
+// ====
+
+// Duplication cannot turn a borrow into an explicit source owner.
+// RUN: verify
+type.decl import("media", "frame") @Frame
+
+func.def @change_mode(%value: ptr<@Frame>) -> (ref<@Frame>) {
+  // ERROR@+1: TYPE/001
+  %copy = ref.duplicate %value : ref<@Frame>
+  func.return %copy : ref<@Frame>
+}
+
+// ====
+
+// Matching storage representation does not make distinct payloads equivalent.
+// RUN: verify
+type.decl import("media", "frame") @Frame
+
+type.decl import("media", "decoder") @Decoder
+
+func.def @change_payload(%value: ref<@Frame>) -> (ref<@Decoder>) {
+  // ERROR@+1: TYPE/001
+  %copy = ref.duplicate %value : ref<@Decoder>
+  func.return %copy : ref<@Decoder>
+}

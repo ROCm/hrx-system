@@ -81,6 +81,8 @@ typedef enum loom_type_constraint_e {
   LOOM_TYPE_CONSTRAINT_BYTE_PATTERN_ELEMENT,
   // Shaped communication participant domain.
   LOOM_TYPE_CONSTRAINT_GROUP,
+  // Owning ref or borrowed ptr to an opaque managed payload identity.
+  LOOM_TYPE_CONSTRAINT_MANAGED_REFERENCE,
   LOOM_TYPE_CONSTRAINT_COUNT_,
 } loom_type_constraint_t;
 

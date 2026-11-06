@@ -57,8 +57,8 @@ bool loom_low_lower_source_value_storage_op_is_duplication(
     loom_trait_flags_t traits) {
   return loom_traits_have_storage_relation(traits) &&
          loom_value_duplication_isa(context->module, source_op) &&
-         !loom_low_lower_source_value_storage_op_requires_emission(source_op,
-                                                                   traits);
+         !loom_low_lower_source_value_storage_op_requires_emission(
+             source_op, traits & ~LOOM_TRAIT_OBSERVABLE_EFFECT);
 }
 
 static void loom_low_lower_mark_value_storage_required(
@@ -637,7 +637,8 @@ void loom_low_lower_source_value_storage_mark_structural_demands(
       loom_buffer_assume_same_root_isa(source_op)) {
     const loom_value_id_t* results = loom_op_const_results(source_op);
     for (uint16_t i = 0; i < source_op->result_count; ++i) {
-      if (loom_module_value_has_type_uses(context->module, results[i])) {
+      if (loom_traits_have_observable_effects(traits) ||
+          loom_module_value_has_type_uses(context->module, results[i])) {
         loom_low_lower_mark_value_storage_required(context, results[i]);
       }
     }

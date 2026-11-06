@@ -30,7 +30,7 @@ low.func.def target<vm.core> @leaked_source(%source: reg<vm.ref : ref<@Object>>)
 
 // ====
 // The second owner must also be consumed even when its value is unused.
-// RUN: pass ownership-lifetime
+// RUN: pass dce,ownership-lifetime
 type.decl import("provider", "object") @Object
 
 low.func.def target<vm.core> @leaked_copy(%source: reg<vm.ref : ref<@Object>>) -> (reg<vm.ref : ref<@Object>>) asm {
@@ -55,9 +55,14 @@ low.func.def target<vm.core> abi(vm_function) @copy_consumed(%source: reg<vm.ref
 
 // ====
 // Ordinary copies do not turn numeric values into owned resources.
-// RUN: pass ownership-lifetime
+// RUN: pass dce,ownership-lifetime
 low.func.def target<test.low.core> @numeric(%source: reg<test.i32 : i32>) asm {
   %copy = copy %source : reg<test.i32 : i32> -> reg<test.i32 : i32>
+  return
+}
+
+// ----
+low.func.def target<test.low.core> @numeric(%source: reg<test.i32 : i32>) asm {
   return
 }
 

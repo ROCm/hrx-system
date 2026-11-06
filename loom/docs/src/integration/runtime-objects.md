@@ -83,6 +83,34 @@ carrier operations. Copying an owning handle creates another owner; moving it
 transfers the owner and ends use of the source. Releasing a pointer carrier
 retires any acquired protection. Releasing null has no payload effect.
 
+## Share an object between consumers
+
+[`ref.duplicate`](../reference/dialects/ref/ops/duplicate.md) creates an
+independent handle with the same payload and ownership mode:
+
+```loom
+type.decl import("images", "frame") @Frame
+
+func.decl import("images", "display") @display(%frame: ref<@Frame>)
+func.decl import("images", "save") @save(%frame: ref<@Frame>)
+
+func.def public @display_and_save(%frame: ref<@Frame>) {
+  %saved = ref.duplicate %frame : ref<@Frame>
+  func.call @display(%frame) : (ref<@Frame>)
+  func.call @save(%saved) : (ref<@Frame>)
+  func.return
+}
+```
+
+Each consumer receives its own owner. Consuming either handle leaves the other
+valid, and the payload finalizes when the last owner releases. Duplication of
+null produces another null handle.
+
+The same operation accepts `ptr<@Frame>` and produces another `ptr<@Frame>`.
+Each pointer's protection ends at its own final use; duplication does not change
+its public signature to `ref`. An unused owning duplicate is still an explicit
+ownership obligation and is diagnosed if it reaches a normal exit unconsumed.
+
 ## Supply the native implementation
 
 The runtime provider publishes an `iree_vm_ref_type_table_t` for its namespace.

@@ -43,6 +43,7 @@ from loom.ir import (
     Operation,
     PoolType,
     PredicateArg,
+    ReferenceType,
     Region,
     RegisterType,
     ScalarType,
@@ -1353,22 +1354,24 @@ def verify_module(
     return diagnostic_engine
 
 
+_TYPE_CONSTRAINT_CLASSES = {
+    TypeConstraint.BUFFER: BufferType,
+    TypeConstraint.POOL: PoolType,
+    TypeConstraint.GROUP: GroupType,
+    TypeConstraint.REGISTER: RegisterType,
+    TypeConstraint.STORAGE: StorageType,
+    TypeConstraint.MANAGED_REFERENCE: ReferenceType,
+    TypeConstraint.ANY_ENCODING: EncodingType,
+}
+
+
 def type_satisfies_constraint(value_type: Type, constraint: TypeConstraint) -> bool:
     """Return true if an IR type satisfies a declarative type constraint."""
     if constraint == TypeConstraint.ANY:
         return True
-    if constraint == TypeConstraint.BUFFER:
-        return isinstance(value_type, BufferType)
-    if constraint == TypeConstraint.POOL:
-        return isinstance(value_type, PoolType)
-    if constraint == TypeConstraint.GROUP:
-        return isinstance(value_type, GroupType)
-    if constraint == TypeConstraint.REGISTER:
-        return isinstance(value_type, RegisterType)
-    if constraint == TypeConstraint.STORAGE:
-        return isinstance(value_type, StorageType)
-    if constraint == TypeConstraint.ANY_ENCODING:
-        return isinstance(value_type, EncodingType)
+    type_class = _TYPE_CONSTRAINT_CLASSES.get(constraint)
+    if type_class is not None:
+        return isinstance(value_type, type_class)
     if constraint == TypeConstraint.ENCODING_LAYOUT:
         return _encoding_role_is(value_type, EncodingRole.LAYOUT)
     if constraint == TypeConstraint.ENCODING_SCHEMA:
