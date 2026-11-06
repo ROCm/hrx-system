@@ -230,6 +230,7 @@ def tree_paths(root: str) -> Iterator[str]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--read", action="append", default=[])
+    parser.add_argument("--read-directory", action="append", default=[])
     parser.add_argument("--delete", action="append", default=[])
     parser.add_argument("--delete-tree", action="append", default=[])
     args = parser.parse_args()
@@ -250,6 +251,15 @@ def main() -> None:
             resources.append(path)
     if resources:
         print(json.dumps({"resource_users": resource_users(resources)}), flush=True)
+
+    for path in dict.fromkeys(
+        str(Path(path).absolute()) for path in args.read_directory
+    ):
+        result = {
+            "path": path,
+            "read_directory": access.probe(path, GENERIC_READ, directory=True),
+        }
+        print(json.dumps({"file_access": result}), flush=True)
 
     for root in dict.fromkeys(str(Path(path).absolute()) for path in args.delete_tree):
         resources = []

@@ -20,7 +20,13 @@ REPOSITORY = "repository"
 KNOWN_PRODUCT = "known_product"
 KNOWN_FLAKE = "known_flake"
 UNKNOWN = "unknown"
-TRACKED_ISSUES = ("hrx-78tqc", "hrx-b1gxf3", "hrx-m2tne4", "hrx-vvf9c")
+TRACKED_ISSUES = (
+    "hrx-78tqc",
+    "hrx-b1gxf3",
+    "hrx-b8oh4d",
+    "hrx-m2tne4",
+    "hrx-vvf9c",
+)
 
 RUNNER_LOST_MESSAGE = (
     "The self-hosted runner lost communication with the server. Verify the "
@@ -272,6 +278,26 @@ def classify_failure(
             code="windows_application_control_denial",
             subject="Windows Application Control",
             summary="Windows policy denied a generated executable before launch",
+        )
+
+    if (
+        "Windows" in str(job.get("name", ""))
+        and failed_steps == ["Run IREE Bazel CI"]
+        and "error executing IreeGenerate command" in log
+        and "return io.open(self, mode, buffering, encoding, errors, newline)" in log
+        and re.search(
+            r"OSError: \[Errno 9\] Bad file descriptor: "
+            r"['\"]bazel-out[/\\]",
+            log,
+        )
+    ):
+        return _tracked_finding(
+            open_issues=open_issues,
+            issue="hrx-b8oh4d",
+            tracked_category=KNOWN_FLAKE,
+            code="windows_generator_output_open_ebadf",
+            subject="Windows Bazel generator output creation",
+            summary="a Windows Python generator could not open its declared output",
         )
 
     undefined_symbol_match = re.search(

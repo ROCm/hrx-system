@@ -249,6 +249,44 @@ class GitHubActionsTriageTest(unittest.TestCase):
             triage.UNKNOWN,
         )
 
+    def test_windows_generator_ebadf_requires_exact_boundary_and_issue(self):
+        log = (
+            "c_errors.exe failed: error executing IreeGenerate command\n"
+            "return io.open(self, mode, buffering, encoding, errors, newline)\n"
+            "OSError: [Errno 9] Bad file descriptor: "
+            "'bazel-out\\\\x64_windows-opt-exec\\\\bin\\\\catalog.c'"
+        )
+        input_job = job(
+            job_name="Bazel / Windows x86-64 / Clang CL / Fastbuild",
+            failed_step="Run IREE Bazel CI",
+        )
+        unconfirmed = self.classify(log, input_job=input_job)
+        self.assertEqual(unconfirmed.category, triage.REPOSITORY)
+        self.assertEqual(unconfirmed.issue, "hrx-b8oh4d")
+
+        confirmed = self.classify(
+            log,
+            input_job=input_job,
+            open_issues=frozenset({"hrx-b8oh4d"}),
+        )
+        self.assertEqual(confirmed.category, triage.KNOWN_FLAKE)
+        self.assertEqual(confirmed.code, "windows_generator_output_open_ebadf")
+
+        for changed_job, changed_log in (
+            (job(job_name="Bazel / Linux x86-64 / Clang / Fastbuild"), log),
+            (input_job, log.replace("IreeGenerate", "OtherAction")),
+            (input_job, log.replace("bazel-out", "C:\\\\host")),
+        ):
+            with self.subTest(job=changed_job["name"], log=changed_log):
+                self.assertEqual(
+                    self.classify(
+                        changed_log,
+                        input_job=changed_job,
+                        open_issues=frozenset({"hrx-b8oh4d"}),
+                    ).category,
+                    triage.UNKNOWN,
+                )
+
     def test_unknown_failures_do_not_share_an_identity_across_jobs(self):
         first = self.classify("opaque", input_job=job(job_id=10))
         second = self.classify("opaque", input_job=job(job_id=11))
