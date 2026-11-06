@@ -341,9 +341,9 @@ class GrowthTest : public ::testing::Test {
     uint64_t frontier[2 + 3] = {};
     iree_hal_amd_gpu_signal_t metadata = {};
     iree_hal_amd_gpu_signal_block_t block;
-    iree_hal_amd_gpu_signal_block_initialize(&signals_.pool, this, &value,
-                                             0x1000, 8, 0, &metadata, 1, 3,
-                                             frontier, &block);
+    iree_hal_amd_gpu_signal_block_initialize(&metadata, 1, 3, frontier, &block);
+    iree_hal_amd_gpu_signal_block_attach(&signals_.pool, this, &value, 0x1000,
+                                         8, 0, &block);
     auto* held = iree_hal_amd_gpu_signal_pool_try_acquire(&signals_.pool, 0);
     ASSERT_NE(held, nullptr);
     EXPECT_FALSE(iree_hal_amd_gpu_signal_pool_has_available(&signals_.pool));
@@ -911,9 +911,9 @@ TEST_F(GrowthTest, CapacityReturnRacesNativeCompletionWithoutDuplicatingWork) {
   uint64_t frontier[2 + 3] = {};
   iree_hal_amd_gpu_signal_t metadata = {};
   iree_hal_amd_gpu_signal_block_t block;
-  iree_hal_amd_gpu_signal_block_initialize(&signals_.pool, this, &value, 0x1000,
-                                           8, 0, &metadata, 1, 3, frontier,
-                                           &block);
+  iree_hal_amd_gpu_signal_block_initialize(&metadata, 1, 3, frontier, &block);
+  iree_hal_amd_gpu_signal_block_attach(&signals_.pool, this, &value, 0x1000, 8,
+                                       0, &block);
   constexpr uint32_t kIterations = 128;
   constexpr uint32_t kCohortSize = 4;
   for (uint32_t i = 0; i < kIterations; ++i) {

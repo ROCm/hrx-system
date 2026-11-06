@@ -12,10 +12,9 @@ iree_status_t iree_hal_amd_gpu_pm4_signal_storage_initialize(
   uint64_t address = 0;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_backing_query_address(
       context, &storage->memory, &address));
-  iree_hal_amd_gpu_signal_block_initialize(
-      pool, context, (uint64_t*)storage->memory.contents.data, address, 8, 0,
-      storage->signals, storage->capacity, storage->queue_count,
-      storage->frontiers, &storage->block);
+  iree_hal_amd_gpu_signal_block_attach(pool, context,
+                                       (uint64_t*)storage->memory.contents.data,
+                                       address, 8, 0, &storage->block);
   return iree_ok_status();
 }
 

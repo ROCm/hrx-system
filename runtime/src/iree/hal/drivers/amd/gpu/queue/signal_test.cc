@@ -30,8 +30,10 @@ struct Storage {
     values.fill(UINT64_MAX);
     iree_hal_amd_gpu_signal_pool_initialize(notification, &pool);
     iree_hal_amd_gpu_signal_block_initialize(
-        target ? target : &pool, this, values.data(), 0x1234fffffff8, 8, 0,
         signals.data(), Capacity, QueueCount, frontiers.data(), &block);
+    iree_hal_amd_gpu_signal_block_attach(target ? target : &pool, this,
+                                         values.data(), 0x1234fffffff8, 8, 0,
+                                         &block);
   }
   ~Storage() {
     if (block.pool) {
@@ -60,6 +62,42 @@ struct Storage {
 TEST(SignalTest, NullReferences) {
   iree_hal_amd_gpu_signal_retain(nullptr);
   iree_hal_amd_gpu_signal_release(nullptr);
+}
+
+TEST(SignalTest, NativeAttachmentPreservesPreparedFrontiers) {
+  std::array<Signal, 2> signals = {};
+  std::array<uint64_t, 2 + 2> initial;
+  iree_hal_amd_gpu_signal_block_t block;
+  iree_hal_amd_gpu_signal_block_initialize(signals.data(), signals.size(), 1,
+                                           initial.data(), &block);
+  EXPECT_EQ(block.pool, nullptr);
+  IREE_ASSERT_OK(iree_hal_amd_gpu_signal_block_reserve_frontiers(
+      &block, 8, iree_allocator_system()));
+  auto* expanded = iree_hal_amd_gpu_signal_block_frontiers(&block);
+
+  Pool pool;
+  iree_hal_amd_gpu_signal_pool_initialize({}, &pool);
+  uint64_t values[2] = {UINT64_MAX, UINT64_MAX};
+  iree_hal_amd_gpu_signal_block_attach(&pool, &pool, values, 0x1000, 8, 0,
+                                       &block);
+  EXPECT_EQ(iree_hal_amd_gpu_signal_block_frontiers(&block), expanded);
+  EXPECT_EQ(expanded->queue_count, 8u);
+  auto* signal = iree_hal_amd_gpu_signal_pool_try_acquire(&pool, 0);
+  ASSERT_NE(signal, nullptr);
+  const std::array<uint64_t, 8> published = {3, 0, 5, 0, 0, 0, 0, 17};
+  iree_hal_amd_gpu_signal_publish_frontier(signal, published.data());
+  std::array<uint64_t, 8> joined = {};
+  iree_hal_amd_gpu_signal_join_frontier(signal, joined.size(), joined.data());
+  EXPECT_EQ(joined, published);
+  EXPECT_EQ(signal->device_address, 0x1000u);
+  EXPECT_EQ(signal->host_value, values);
+  iree_hal_amd_gpu_signal_release(signal);
+  iree_hal_amd_gpu_signal_block_deinitialize(&block);
+  iree_hal_amd_gpu_signal_pool_deinitialize(&pool);
+  iree_hal_amd_gpu_signal_frontiers_free(
+      expanded,
+      reinterpret_cast<iree_hal_amd_gpu_signal_frontiers_t*>(initial.data()),
+      iree_allocator_system());
 }
 
 TEST(SignalTest, EmptyPool) {
@@ -250,6 +288,27 @@ TEST(SignalTest, FrontierExpansionPreservesNativeCellsAndRetainedSnapshots) {
   EXPECT_EQ(installing_peer, (std::array<uint64_t, 3>{7, 11, UINT64_MAX}));
   iree_hal_amd_gpu_signal_release(next);
   iree_hal_amd_gpu_signal_release(producer);
+}
+
+TEST(SignalTest, PreparedExpansionCapturesTheLatestPublication) {
+  Storage<1> storage;
+  auto* signal = iree_hal_amd_gpu_signal_pool_try_acquire(&storage.pool, 1);
+  ASSERT_NE(signal, nullptr);
+  uint64_t epoch = 11;
+  iree_hal_amd_gpu_signal_publish_frontier(signal, &epoch);
+  iree_hal_amd_gpu_signal_frontiers_t* prepared = nullptr;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_signal_frontiers_allocate(
+      1, 4, iree_allocator_system(), &prepared));
+  // Work continues while the lifecycle caller prepares replacement memory.
+  // Installation must copy the publisher's current proof, not an earlier one.
+  epoch = 29;
+  iree_hal_amd_gpu_signal_publish_frontier(signal, &epoch);
+  iree_hal_amd_gpu_signal_block_install_frontiers(&storage.block, prepared);
+  std::array<uint64_t, 4> consumer = {};
+  iree_hal_amd_gpu_signal_join_frontier(signal, consumer.size(),
+                                        consumer.data());
+  EXPECT_EQ(consumer, (std::array<uint64_t, 4>{29, 0, 0, 0}));
+  iree_hal_amd_gpu_signal_release(signal);
 }
 
 TEST(SignalTest, FailedFrontierExpansionPreservesPublishedOwnership) {

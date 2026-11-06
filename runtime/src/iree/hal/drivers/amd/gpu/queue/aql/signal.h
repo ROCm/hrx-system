@@ -25,12 +25,11 @@ extern "C" {
 // decrements to zero; native dependent readers use the descriptor address.
 // Signal metadata and causal vectors follow the shared independent-reader
 // contract. No native allocation or additional thread is created here.
-void iree_hal_amd_gpu_aql_signal_block_initialize(
+void iree_hal_amd_gpu_aql_signal_block_attach(
     iree_hal_amd_gpu_signal_pool_t* pool, const void* domain,
     const amdf_gpu_event_info_t* event,
     iree_hal_amd_gpu_aql_signal_t* native_signals, uint64_t device_address,
-    iree_hal_amd_gpu_signal_t* signals, uint32_t capacity, uint32_t queue_count,
-    void* frontier_storage, iree_hal_amd_gpu_signal_block_t* out_block);
+    iree_hal_amd_gpu_signal_block_t* block);
 
 // Attaches acquired 64-byte AQL USER descriptors to their shared host owners.
 iree_status_t iree_hal_amd_gpu_aql_signal_storage_initialize(

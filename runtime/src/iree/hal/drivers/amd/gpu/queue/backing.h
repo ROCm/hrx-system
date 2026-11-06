@@ -48,10 +48,6 @@ typedef struct iree_hal_amd_gpu_signal_storage_t {
   iree_hal_amd_gpu_signal_block_t block;
   // Number of native cells and corresponding host signal records.
   uint32_t capacity;
-  // Native-domain frontier width for each signal record.
-  uint32_t queue_count;
-  // Prepared inline metadata, initialized after native backing arrives.
-  iree_hal_amd_gpu_signal_t* signals;
   // Initial inline frontier table header and rows. Expanded tables stay linked
   // to this initial allocation until all block readers have joined.
   iree_hal_amd_gpu_signal_frontiers_t* frontiers;

@@ -133,24 +133,26 @@ void iree_hal_amd_gpu_signal_pool_initialize(
 void iree_hal_amd_gpu_signal_pool_deinitialize(
     iree_hal_amd_gpu_signal_pool_t* pool);
 
-// Links capacity native entries and zeroes only their eight-byte value fields.
-// Each native operand begins stride bytes after the previous; value_offset
-// locates its naturally aligned value. Construction has qualified the complete
-// extents, host/device visibility, atomicity, and native protocol. All other
-// native fields are initialized by the protocol owner before publication.
-// Metadata, storage, and frontier_storage do not overlap. Frontier storage is
-// aligned to eight bytes and holds two uint64_t header words followed by
-// capacity * queue_count values. This initializes the header and zeroes the
-// rows; publication fills a complete vector before exposing a signal. The
-// initial table may share the block's enclosing host allocation. A zero
-// capacity attaches an empty block.
-// The exclusive publisher attaches the block and already owns its waiting
-// work; attachment does not invoke the notification.
+// Initializes host metadata before native storage exists. frontier_storage is
+// eight-byte aligned and holds a table header followed by capacity *
+// queue_count uint64_t values. The initial zeroed table may share the enclosing
+// allocation. The exclusive owner may expand this table before attaching native
+// cells.
 void iree_hal_amd_gpu_signal_block_initialize(
-    iree_hal_amd_gpu_signal_pool_t* pool, const void* domain, void* storage,
-    uint64_t device_address, uint32_t stride, uint32_t value_offset,
     iree_hal_amd_gpu_signal_t* signals, uint32_t capacity, uint32_t queue_count,
     void* frontier_storage, iree_hal_amd_gpu_signal_block_t* out_block);
+
+// Attaches prepared host metadata and zeroes each native eight-byte value.
+// Each native operand begins stride bytes after the previous; value_offset
+// locates its naturally aligned value. Construction has qualified the extents,
+// host/device visibility, atomicity, and native protocol. Other native fields
+// are initialized by the protocol owner. The existing frontier table, including
+// expansions made before native acquisition completed, remains installed.
+// The exclusive publisher owns waiting work; attachment does not notify it.
+void iree_hal_amd_gpu_signal_block_attach(
+    iree_hal_amd_gpu_signal_pool_t* pool, const void* domain, void* storage,
+    uint64_t device_address, uint32_t stride, uint32_t value_offset,
+    iree_hal_amd_gpu_signal_block_t* block);
 
 // Returns one table borrow covered by an existing signal reference, or by the
 // block owner's exclusive publication/lifecycle ownership.
@@ -160,6 +162,19 @@ iree_hal_amd_gpu_signal_block_frontiers(
   return (iree_hal_amd_gpu_signal_frontiers_t*)iree_atomic_load(
       &block->frontiers, iree_memory_order_acquire);
 }
+
+// Allocates a zeroed replacement table on the lifecycle caller. Counts come
+// from admitted geometry; this does not read mutable publisher-owned rows.
+iree_status_t iree_hal_amd_gpu_signal_frontiers_allocate(
+    uint32_t capacity, uint32_t queue_count, iree_allocator_t host_allocator,
+    iree_hal_amd_gpu_signal_frontiers_t** out_frontiers);
+
+// Copies current rows and consumes a strictly wider prepared table. Only the
+// exclusive publisher accesses mutable rows. Old tables remain linked for
+// independent readers; installation neither allocates nor frees memory.
+void iree_hal_amd_gpu_signal_block_install_frontiers(
+    iree_hal_amd_gpu_signal_block_t* block,
+    iree_hal_amd_gpu_signal_frontiers_t* frontiers);
 
 // Expands host proof metadata without replacing native cells or waiting for
 // readers. Called only under exclusive publication ownership. New coordinates
