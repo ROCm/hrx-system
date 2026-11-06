@@ -1680,14 +1680,16 @@ static hipError_t iree_hip_ensure_initialized(void) {
   if (!iree_status_is_ok(status)) {
     iree_hip_deinitialize_per_thread_stream_key();
     const iree_status_code_t status_code = iree_status_code(status);
-    iree_status_free(status);
+    const hipError_t result = iree_status_to_fixed_hip_result(
+        iree_status_annotate(status, IREE_SV("initializing HIP runtime")),
+        status_code == IREE_STATUS_NOT_FOUND ? hipErrorNoDevice
+                                             : hipErrorNotInitialized);
     if (status_code == IREE_STATUS_NOT_FOUND) {
       iree_atomic_store(&iree_hip_runtime_init_result, hipErrorNoDevice,
                         iree_memory_order_release);
     }
     iree_slim_mutex_unlock(&iree_hip_global_init_mutex);
-    return status_code == IREE_STATUS_NOT_FOUND ? hipErrorNoDevice
-                                                : hipErrorNotInitialized;
+    return result;
   }
   iree_atomic_store(&iree_hip_runtime_init_result, hipSuccess,
                     iree_memory_order_release);
