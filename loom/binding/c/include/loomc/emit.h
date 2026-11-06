@@ -158,6 +158,12 @@ typedef struct loomc_emit_options_t {
 /// mutate invocation-local scratch state inside `module`; callers that need to
 /// emit the same module concurrently should pass distinct module handles.
 ///
+/// Managed object lifetimes must also be prepared: owning refs require explicit
+/// consumption on every normal path, and pointer carriers require final-use
+/// cleanup. Emission checks this contract without changing semantic IR. Missing
+/// cleanup produces diagnostics and no executable artifact. The same admission
+/// applies after compilation with a custom or empty pass program.
+///
 /// @param target_environment Target environment that contains one or more
 /// linked emitters.
 /// @param workspace Invocation-local scratch workspace.
