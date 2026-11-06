@@ -347,6 +347,8 @@ kernel.def @workgroup_atomics_are_observed() {
   view.atomic.reduce<addi> %value, %view[%lane] {ordering = relaxed, scope = workgroup} : i32, view<64xi32>
   %old = view.atomic.rmw<addi> %value, %view[%lane] {ordering = release, scope = workgroup} : i32, view<64xi32> -> i32
   %cmp = view.atomic.cmpxchg %old, %value, %view[%lane] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<64xi32> -> i32
+  %loaded = view.atomic.load %view[%lane] {ordering = acquire, scope = workgroup} : view<64xi32> -> i32
+  view.atomic.store %loaded, %view[%lane] {ordering = release, scope = workgroup} : i32, view<64xi32>
   kernel.return
 }
 
@@ -368,6 +370,10 @@ kernel.def @workgroup_atomics_are_observed() {
   %old = view.atomic.rmw<addi> %value, %view[%lane] {ordering = release, scope = workgroup} : i32, view<64xi32> -> i32
   sanitizer.race.access<read_write> %view[%lane] {atomic = true, ordering = acq_rel, scope = workgroup} : view<64xi32>
   %cmp = view.atomic.cmpxchg %old, %value, %view[%lane] {failure_ordering = acquire, scope = workgroup, success_ordering = acq_rel} : i32, view<64xi32> -> i32
+  sanitizer.race.access<read> %view[%lane] {atomic = true, ordering = acquire, scope = workgroup} : view<64xi32>
+  %loaded = view.atomic.load %view[%lane] {ordering = acquire, scope = workgroup} : view<64xi32> -> i32
+  sanitizer.race.access<write> %view[%lane] {atomic = true, ordering = release, scope = workgroup} : view<64xi32>
+  view.atomic.store %loaded, %view[%lane] {ordering = release, scope = workgroup} : i32, view<64xi32>
   kernel.return
 }
 

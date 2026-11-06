@@ -14,10 +14,10 @@
 #include "loom/ops/atomic.h"
 #include "loom/ops/index/ops.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/op_defs.h"
 #include "loom/ops/sanitizer/ops.h"
 #include "loom/ops/scf/ops.h"
 #include "loom/ops/vector/ops.h"
-#include "loom/ops/view/ops.h"
 #include "loom/pass/options.h"
 #include "loom/pass/pipeline.h"
 #include "loom/pass/registry.h"
@@ -522,51 +522,18 @@ static iree_status_t loom_sanitizer_try_instrument_vector_race_access_op(
 }
 
 static bool loom_sanitizer_unsupported_vector_memory_view(
-    const loom_op_t* op, loom_value_id_t* out_view) {
+    const loom_module_t* module, const loom_op_t* op,
+    loom_value_id_t* out_view) {
   *out_view = LOOM_VALUE_ID_INVALID;
-  switch (op->kind) {
-    case LOOM_OP_VECTOR_LOAD_MASK:
-      *out_view = loom_vector_load_mask_view(op);
-      return true;
-    case LOOM_OP_VECTOR_STORE_MASK:
-      *out_view = loom_vector_store_mask_view(op);
-      return true;
-    case LOOM_OP_VECTOR_LOAD_EXPAND:
-      *out_view = loom_vector_load_expand_view(op);
-      return true;
-    case LOOM_OP_VECTOR_STORE_COMPRESS:
-      *out_view = loom_vector_store_compress_view(op);
-      return true;
-    case LOOM_OP_VECTOR_GATHER:
-      *out_view = loom_vector_gather_view(op);
-      return true;
-    case LOOM_OP_VECTOR_SCATTER:
-      *out_view = loom_vector_scatter_view(op);
-      return true;
-    case LOOM_OP_VECTOR_GATHER_MASK:
-      *out_view = loom_vector_gather_mask_view(op);
-      return true;
-    case LOOM_OP_VECTOR_SCATTER_MASK:
-      *out_view = loom_vector_scatter_mask_view(op);
-      return true;
-    case LOOM_OP_VECTOR_ATOMIC_REDUCE:
-      *out_view = loom_vector_atomic_reduce_view(op);
-      return true;
-    case LOOM_OP_VECTOR_ATOMIC_REDUCE_MASK:
-      *out_view = loom_vector_atomic_reduce_mask_view(op);
-      return true;
-    case LOOM_OP_VECTOR_ATOMIC_RMW:
-      *out_view = loom_vector_atomic_rmw_view(op);
-      return true;
-    case LOOM_OP_VECTOR_ATOMIC_RMW_MASK:
-      *out_view = loom_vector_atomic_rmw_mask_view(op);
-      return true;
-    case LOOM_OP_VECTOR_ATOMIC_CMPXCHG:
-      *out_view = loom_vector_atomic_cmpxchg_view(op);
-      return true;
-    default:
-      return false;
+  if (loom_op_dialect_id(op->kind) != LOOM_DIALECT_VECTOR) {
+    return false;
   }
+  const loom_memory_access_t access = loom_memory_access_cast(module, op);
+  if (!loom_memory_access_isa(access)) {
+    return false;
+  }
+  *out_view = loom_memory_access_view(access);
+  return true;
 }
 
 static iree_status_t loom_sanitizer_reject_unsupported_vector_race_access_op(
@@ -574,7 +541,7 @@ static iree_status_t loom_sanitizer_reject_unsupported_vector_race_access_op(
     const loom_rewriter_t* rewriter, const loom_op_t* op, bool* out_handled) {
   *out_handled = false;
   loom_value_id_t view = LOOM_VALUE_ID_INVALID;
-  if (!loom_sanitizer_unsupported_vector_memory_view(op, &view)) {
+  if (!loom_sanitizer_unsupported_vector_memory_view(module, op, &view)) {
     return iree_ok_status();
   }
   *out_handled = true;
@@ -611,50 +578,52 @@ static iree_status_t loom_sanitizer_try_instrument_race_access_op(
     return iree_ok_status();
   }
 
-  loom_sanitizer_race_access_kind_t kind = 0;
-  loom_value_id_t view = LOOM_VALUE_ID_INVALID;
-  loom_value_slice_t indices = {0};
-  loom_attribute_t static_indices = loom_attr_absent();
-  bool atomic = false;
-  loom_atomic_ordering_t ordering = 0;
-  loom_atomic_scope_t scope = 0;
-  if (loom_view_load_isa(op)) {
-    kind = LOOM_SANITIZER_RACE_ACCESS_KIND_READ;
-    view = loom_view_load_view(op);
-    indices = loom_view_load_indices(op);
-    static_indices = loom_view_load_static_indices(op);
-  } else if (loom_view_store_isa(op)) {
-    kind = LOOM_SANITIZER_RACE_ACCESS_KIND_WRITE;
-    view = loom_view_store_view(op);
-    indices = loom_view_store_indices(op);
-    static_indices = loom_view_store_static_indices(op);
-  } else if (loom_view_atomic_reduce_isa(op)) {
-    kind = LOOM_SANITIZER_RACE_ACCESS_KIND_READ_WRITE;
-    view = loom_view_atomic_reduce_view(op);
-    indices = loom_view_atomic_reduce_indices(op);
-    static_indices = loom_view_atomic_reduce_static_indices(op);
-    atomic = true;
-    ordering = loom_view_atomic_reduce_ordering(op);
-    scope = loom_view_atomic_reduce_scope(op);
-  } else if (loom_view_atomic_rmw_isa(op)) {
-    kind = LOOM_SANITIZER_RACE_ACCESS_KIND_READ_WRITE;
-    view = loom_view_atomic_rmw_view(op);
-    indices = loom_view_atomic_rmw_indices(op);
-    static_indices = loom_view_atomic_rmw_static_indices(op);
-    atomic = true;
-    ordering = loom_view_atomic_rmw_ordering(op);
-    scope = loom_view_atomic_rmw_scope(op);
-  } else if (loom_view_atomic_cmpxchg_isa(op)) {
-    kind = LOOM_SANITIZER_RACE_ACCESS_KIND_READ_WRITE;
-    view = loom_view_atomic_cmpxchg_view(op);
-    indices = loom_view_atomic_cmpxchg_indices(op);
-    static_indices = loom_view_atomic_cmpxchg_static_indices(op);
-    atomic = true;
-    ordering = loom_view_atomic_cmpxchg_success_ordering(op);
-    scope = loom_view_atomic_cmpxchg_scope(op);
-  } else {
+  const loom_memory_access_t access = loom_memory_access_cast(module, op);
+  if (!loom_memory_access_isa(access)) {
     return iree_ok_status();
   }
+  const loom_value_id_t view = loom_memory_access_view(access);
+  if (!loom_type_is_view(loom_module_value_type(module, view))) {
+    return iree_ok_status();
+  }
+
+  const loom_memory_access_operation_kind_t access_kind =
+      loom_memory_access_operation_kind(access);
+  loom_sanitizer_race_access_kind_t race_kind;
+  switch (access_kind) {
+    case LOOM_MEMORY_ACCESS_OPERATION_LOAD:
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_LOAD:
+      race_kind = LOOM_SANITIZER_RACE_ACCESS_KIND_READ;
+      break;
+    case LOOM_MEMORY_ACCESS_OPERATION_STORE:
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_STORE:
+      race_kind = LOOM_SANITIZER_RACE_ACCESS_KIND_WRITE;
+      break;
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_REDUCE:
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_RMW:
+    case LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG:
+      race_kind = LOOM_SANITIZER_RACE_ACCESS_KIND_READ_WRITE;
+      break;
+    case LOOM_MEMORY_ACCESS_OPERATION_PREFETCH:
+      return iree_ok_status();
+    default:
+      IREE_ASSERT_UNREACHABLE("unknown memory access operation kind");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+  const bool atomic = loom_memory_access_operation_kind_is_atomic(access_kind);
+  const loom_atomic_ordering_t ordering =
+      atomic ? (loom_atomic_ordering_t)loom_attr_as_enum(
+                   access_kind == LOOM_MEMORY_ACCESS_OPERATION_ATOMIC_CMPXCHG
+                       ? loom_memory_access_atomic_success_ordering(access)
+                       : loom_memory_access_atomic_ordering(access))
+             : 0;
+  const loom_atomic_scope_t scope =
+      atomic ? (loom_atomic_scope_t)loom_attr_as_enum(
+                   loom_memory_access_atomic_scope(access))
+             : 0;
+  const loom_value_slice_t indices = loom_memory_access_dynamic_indices(access);
+  const loom_attribute_t static_indices =
+      loom_memory_access_static_indices(access);
 
   loom_value_fact_memory_space_t memory_space =
       LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN;
@@ -663,15 +632,16 @@ static iree_status_t loom_sanitizer_try_instrument_race_access_op(
     return iree_ok_status();
   }
   if (loom_sanitizer_preceded_by_matching_race_access(
-          op, kind, view, indices, static_indices, atomic, ordering, scope)) {
+          op, race_kind, view, indices, static_indices, atomic, ordering,
+          scope)) {
     return iree_ok_status();
   }
 
   loom_builder_set_before(&rewriter->builder, op);
   loom_op_t* observe_op = NULL;
   IREE_RETURN_IF_ERROR(loom_sanitizer_build_race_access(
-      module, rewriter, kind, view, indices, static_indices, atomic, ordering,
-      scope, op->location, &observe_op));
+      module, rewriter, race_kind, view, indices, static_indices, atomic,
+      ordering, scope, op->location, &observe_op));
   (void)observe_op;
   loom_sanitizer_insert_race_observations_statistics_t* statistics =
       loom_sanitizer_insert_race_observations_statistics(pass);
