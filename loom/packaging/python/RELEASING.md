@@ -117,8 +117,18 @@ python loom/packaging/python/release.py \
 
 Repeating without `--dry-run` edits only the named JSON. The release-preparation
 PR includes that change and any updates to [PYPI_README.md](PYPI_README.md), the
-package description embedded in every wheel. Review and CI establish the source
-revision to release; the preparation helper creates neither a commit nor a tag.
+package description embedded in every wheel. Its pull request description also
+contains the exact version-marked editorial section selected for publication.
+The [release-note authoring contract](release_notes/README.md) starts from the
+previous public tag and candidate commit, audits migrations before feature
+prose, and records only evidence-backed outcomes and notable changes. A missing,
+ambiguous, stale, empty, or placeholder-bearing section cannot publish.
+
+Review and CI establish the source revision to release. The release tag points
+directly at the commit GitHub records as the version-bump pull request's merge
+result; the publisher resolves the pull request from that commit rather than
+accepting an independently supplied description. The preparation helper creates
+neither a commit nor a tag.
 
 Ordinary PR CI covers the Release SDK. To qualify the other profiles on a branch
 named `sdk-release-preparation`:
@@ -201,12 +211,18 @@ resumes a draft, verifies its exact asset inventory and SHA-256 digests, uploads
 only missing assets, and publishes only after the set is complete. GitHub
 publication completes before the stable-only PyPI publication starts.
 
-GitHub publication writes a compact SDK description naming the installation
-path, attached native profiles, standalone executables, and checksum document.
-Stable releases install from PyPI; prereleases install their attached Release
-wheel directly. The body comes from the committed SDK identity and artifact
-contract, so the first release cannot expand into the repository's complete
-pull-request history.
+GitHub publication copies the marked editorial section from the exact merged
+version-bump pull request, followed by a generated appendix naming the
+installation path, attached native profiles, standalone executables, checksum
+document, and qualification shape. The body records the source pull request,
+merge commit, version, and editorial digest. Stable releases install from PyPI;
+prereleases install their attached Release wheel directly.
+
+A draft retry resolves the source pull request again and requires the complete
+composed body to match. After publication, the immutable release body is the
+authoritative snapshot: retries validate its source provenance, editorial
+digest, and generated appendix without depending on the still-editable pull
+request description.
 
 The normal filenames have no local-version suffix; instrumented filenames use
 `+tracy`, `+debug`, or `+asan`. Linux release wheels carry the audited
@@ -244,8 +260,8 @@ The retry behavior is deliberate:
 
 | Condition | Result |
 | --- | --- |
-| A matching GitHub draft exists | Compare its API-reported SHA-256 digests, upload only missing assets, then publish it. |
-| A complete matching GitHub release is already public | Accept it without another release mutation. |
+| A matching GitHub draft exists | Require its body to match the merged version-bump pull request, compare API-reported SHA-256 digests, upload only missing assets, then publish it. |
+| A complete matching GitHub release is already public | Validate its self-contained editorial provenance and exact assets, then accept it without another release mutation. |
 | The coordinated library release is absent, mutable, or mismatched | Fail before creating or changing the SDK release. |
 | Matching normal wheels already exist on PyPI | Compare published hashes and yanked state, then upload only missing wheels. |
 | Existing bytes differ, an asset is unexpected, or a PyPI wheel is yanked | Fail; changed artifacts need a new version. |
@@ -264,6 +280,7 @@ producers; it is not the same operation as rerunning failed publication jobs.
 | Concern | Source of truth |
 | --- | --- |
 | Version, catalog association, and package description | [version.json](version.json), [PYPI_README.md](PYPI_README.md) |
+| Editorial release-note contract and pull request template | [release_notes/README.md](release_notes/README.md), [release_notes/TEMPLATE.md](release_notes/TEMPLATE.md) |
 | Wheel contents, native profiles, and Linux ABI audit | [BUILD.bazel](BUILD.bazel), [defs.bzl](defs.bzl), [native.bzl](native.bzl), [manylinux.bzl](manylinux.bzl) |
 | Compiler, runner image, and cross-SDK pins | [Artifact workflow](../../../.github/workflows/build_loom_sdk_artifacts.yml), [Windows setup](../../../.github/scripts/setup_windows_cross.sh), [SDK manifest](../../../.github/scripts/windows-sdk-channel.json) |
 | Artifact export and installed qualification | [loom_wheel.py](../../../build_tools/ci/loom_wheel.py), [installed oracle](../../src/loom/tooling/target/cpu/serve/wheel_model_card_test.py) |
