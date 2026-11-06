@@ -24,15 +24,15 @@ class GroupTextServiceTest : public SourceTextServiceTest {
   // Drives the actual owner state machine, including draining every accepted
   // callback after cancellation. No scheduler worker blocks on this join.
   iree_status_t Prepare(size_t index, bool cancel,
-                        loom_serve_compilation_report_t* report,
+                        loom_runtime_compilation_report_t* report,
                         loom_serve_text_model_t** out_model) {
     const auto options = ModelOptions();
     iree_notification_t notification;
     iree_notification_initialize(&notification);
     loom_serve_text_load_t* load = nullptr;
     auto status = loom_serve_text_load_allocate(
-        loom_serve_device_group_at(group_, index),
-        loom_serve_device_group_pool_at(group_, index), &options,
+        loom_runtime_device_group_at(group_, index),
+        loom_runtime_device_group_pool_at(group_, index), &options,
         [](void* payload) {
           iree_notification_post(static_cast<iree_notification_t*>(payload),
                                  IREE_ALL_WAITERS);
@@ -72,10 +72,11 @@ class GroupTextServiceTest : public SourceTextServiceTest {
 
 TEST_F(GroupTextServiceTest,
        SharedNativeArtifactsSurviveOriginalAndCancelledPeerModels) {
-  ASSERT_EQ(loom_serve_device_group_count(group_), 2u);
-  EXPECT_NE(loom_serve_device_handle(loom_serve_device_group_at(group_, 0)),
-            loom_serve_device_handle(loom_serve_device_group_at(group_, 1)));
-  loom_serve_compilation_report_t first = {}, second = {}, cancelled = {};
+  ASSERT_EQ(loom_runtime_device_group_count(group_), 2u);
+  EXPECT_NE(
+      loom_runtime_device_handle(loom_runtime_device_group_at(group_, 0)),
+      loom_runtime_device_handle(loom_runtime_device_group_at(group_, 1)));
+  loom_runtime_compilation_report_t first = {}, second = {}, cancelled = {};
   IREE_ASSERT_OK(Prepare(0, false, &first, &original_));
   ASSERT_GT(first.kernels, 0u);
   IREE_ASSERT_OK(Prepare(1, false, &second, &model_));
@@ -89,7 +90,7 @@ TEST_F(GroupTextServiceTest,
   Start();
   const std::string prompt = "abxa";
   const int client = Send(Request(Message("user", prompt), 4));
-  const auto before = loom_serve_pool_statistics(storage_owner_);
+  const auto before = loom_runtime_pool_statistics(storage_owner_);
   IREE_ASSERT_STATUS_IS(IREE_STATUS_CANCELLED,
                         Prepare(0, true, &cancelled, &cancelled_));
   ASSERT_NE(cancelled_, nullptr);
@@ -97,7 +98,7 @@ TEST_F(GroupTextServiceTest,
   IREE_ASSERT_OK(
       loom_serve_text_model_free_retired(std::exchange(cancelled_, nullptr)));
   EXPECT_EQ(Content(Read(client)), Oracle::Complete(prompt, 4));
-  const auto after = loom_serve_pool_statistics(storage_owner_);
+  const auto after = loom_runtime_pool_statistics(storage_owner_);
   EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
   EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
   EXPECT_EQ(Content(Read(Send(Request(Message("user", "bax"), 4)))),

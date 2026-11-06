@@ -19,13 +19,14 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/runtime/host/host.h"
+#include "iree/tooling/device_profiling.h"
+#include "loom/runtime/host/host.h"
+#include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/registry.h"
 #include "loom/serve/service/recognition/stream.h"
 #include "loom/serve/service/recognition/transcription.h"
-#include "loom/serve/testing/worker_gate.h"
 #include "loom/tools/loom-serve/options.h"
 
 IREE_FLAG(string, model, "", "Activity model document.");
@@ -97,7 +98,7 @@ struct loom_serve_activity_test_utterance_t {
 // server. Tests retire their registries before this shared device group closes.
 class ActivityEnvironment : public ::testing::Environment {
  public:
-  ActivityEnvironment(const loom_serve_compiler_options_t* compiler_options,
+  ActivityEnvironment(const loom_runtime_compiler_options_t* compiler_options,
                       iree_hal_driver_registry_t* driver_registry)
       : compiler_options_(compiler_options),
         driver_registry_(driver_registry) {}
@@ -106,27 +107,31 @@ class ActivityEnvironment : public ::testing::Environment {
     IREE_ASSERT_OK(loom_serve_host_create_from_flags(
         compiler_options_, iree_allocator_system(), &host_));
     IREE_ASSERT_OK(loom_serve_device_group_allocate_from_flags(
-        host_, driver_registry_, iree_allocator_system(), &devices_, &group_));
+        host_, driver_registry_, iree_allocator_system(), &devices_, &group_,
+        &profiling_));
   }
 
   void TearDown() override {
-    IREE_EXPECT_OK(loom_serve_device_group_free(group_));
+    IREE_EXPECT_OK(iree_hal_end_profiling_from_flags(profiling_));
+    IREE_EXPECT_OK(loom_runtime_device_group_free(group_));
     loom_serve_device_configuration_deinitialize(&devices_);
-    loom_serve_host_release(host_);
+    loom_runtime_host_release(host_);
   }
 
-  loom_serve_host_t* host() const { return host_; }
-  loom_serve_device_group_t* group() const { return group_; }
+  loom_runtime_host_t* host() const { return host_; }
+  loom_runtime_device_group_t* group() const { return group_; }
 
  private:
   // Exact compiler composition borrowed from the executable entry point.
-  const loom_serve_compiler_options_t* compiler_options_;
+  const loom_runtime_compiler_options_t* compiler_options_;
   // Available non-task drivers, borrowed through application teardown.
   iree_hal_driver_registry_t* driver_registry_;
   // Shared task, compiler, and I/O services outlive every test registry.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // Ordered explicit device records, retained through all model retirement.
-  loom_serve_device_group_t* group_ = nullptr;
+  loom_runtime_device_group_t* group_ = nullptr;
+  // CLI-selected profiling encloses all models and ends before group release.
+  iree_hal_profiling_from_flags_t* profiling_ = nullptr;
   // Decoded device URIs, pool policies, and consumer bindings.
   loom_serve_device_configuration_t devices_ = {};
 };
@@ -241,7 +246,7 @@ class NativeActivityTest : public ::testing::Test {
 
   template <typename Done, typename Pump>
   iree_status_t Until(Done done, Pump pump) {
-    const loom_serve_wake_callback_t wake = {
+    const loom_runtime_wake_callback_t wake = {
         [](void* self) {
           iree_notification_post(static_cast<iree_notification_t*>(self),
                                  IREE_ALL_WAITERS);
@@ -261,9 +266,9 @@ class NativeActivityTest : public ::testing::Test {
         bool advanced = false;
         if (model->phase == LOOM_SERVE_REGISTRATION_READY) {
           auto& service = model->service;
-          status = service.advance(service.self,
-                                   loom_serve_registry_service_flags(model),
-                                   &advanced);
+          status = service.runtime.vtable->advance(
+              service.runtime.self, loom_serve_registry_service_flags(model),
+              &advanced);
           progress |= advanced;
         }
         if (iree_status_is_ok(status)) {
@@ -702,21 +707,23 @@ TEST_F(NativeActivityTest, AcceptedCancellationAndRetainedFinalEvent) {
   bool consumed = false;
   IREE_ASSERT_OK(Drain(&interrupted, &consumed));
   {
-    std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> gates;
-    auto* executor = loom_serve_host_executor(activity_environment->host());
+    std::vector<std::unique_ptr<loom_runtime::testing::WorkerGate>> gates;
+    auto* executor = loom_runtime_host_executor(activity_environment->host());
     for (size_t i = 0; i < iree_task_executor_worker_count(executor); ++i) {
       gates.push_back(
-          std::make_unique<loom_serve::testing::WorkerGate>(executor));
+          std::make_unique<loom_runtime::testing::WorkerGate>(executor));
     }
     bool progress = false;
     IREE_ASSERT_OK(Feed(&interrupted, &progress, false));
     auto& service = Model()->service;
-    IREE_ASSERT_OK(service.advance(
-        service.self, loom_serve_registry_service_flags(Model()), &progress));
+    IREE_ASSERT_OK(service.runtime.vtable->advance(
+        service.runtime.self, loom_serve_registry_service_flags(Model()),
+        &progress));
     EXPECT_TRUE(progress);
     interrupted.stream.reset();
-    IREE_ASSERT_OK(service.advance(
-        service.self, loom_serve_registry_service_flags(Model()), &progress));
+    IREE_ASSERT_OK(service.runtime.vtable->advance(
+        service.runtime.self, loom_serve_registry_service_flags(Model()),
+        &progress));
     EXPECT_EQ(service.telemetry.counters->cancelled, 0u);
   }
   loom_serve_activity_test_stream_t peer;
@@ -830,7 +837,7 @@ TEST_F(NativeActivityTest, FollowingUtteranceRetainsIndependentInput) {
 
 int loom_serve_activity_test_main(
     int argc, char** argv,
-    const loom_serve_compiler_options_t* compiler_options,
+    const loom_runtime_compiler_options_t* compiler_options,
     iree_hal_driver_registry_t* driver_registry) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_UNDEFINED_OK |
                                IREE_FLAGS_PARSE_MODE_CONTINUE_AFTER_HELP,

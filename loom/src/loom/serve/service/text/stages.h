@@ -7,10 +7,10 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_STAGES_H_
 #define LOOM_SERVE_SERVICE_TEXT_STAGES_H_
 
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/parameter/weights.h"
-#include "loom/serve/runtime/program/module.h"
-#include "loom/serve/runtime/program/preparation.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/parameter/weights.h"
+#include "loom/runtime/program/module.h"
+#include "loom/runtime/program/preparation.h"
 #include "loomc/task.h"
 
 #ifdef __cplusplus
@@ -19,7 +19,7 @@ extern "C" {
 
 typedef struct loom_serve_text_stage_t {
   // Owned JIT command image and loaded executable entries.
-  loom_serve_jit_stage_t* compiled;
+  loom_runtime_jit_stage_t* compiled;
   // Immutable layout borrowing compiled (or its still-running producer).
   loom_cmd_program_t program;
   // Reusable command retaining its executable and fixed weight resources.
@@ -35,9 +35,9 @@ typedef struct loom_serve_text_parameters_t {
   // Number of domains, including partially initialized plans.
   iree_host_size_t count;
   // Owned array of retained weight plans; each may be null after a failed bind.
-  loom_serve_weights_t** plans;
+  loom_runtime_weights_t** plans;
   // Owned array borrowing immutable checkpoint declarations from preparation.
-  const loom_serve_preparation_parameter_t** sources;
+  const loom_runtime_preparation_parameter_t** sources;
 } loom_serve_text_parameters_t;
 
 // Binds immutable command layouts without loading checkpoint payloads. Native
@@ -48,10 +48,11 @@ typedef struct loom_serve_text_parameters_t {
 // On failure the caller still owns every populated plan and fixed-buffer slot.
 // Consumers retire before plans; declarations outlive the returned sources.
 iree_status_t loom_serve_text_stages_bind(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
-    const loom_serve_preparation_t* preparation, iree_host_size_t shared_count,
-    iree_host_size_t stage_count, loom_serve_text_stage_t* stages,
-    loom_serve_text_parameters_t* parameters, iree_allocator_t host_allocator);
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
+    const loom_runtime_preparation_t* preparation,
+    iree_host_size_t shared_count, iree_host_size_t stage_count,
+    loom_serve_text_stage_t* stages, loom_serve_text_parameters_t* parameters,
+    iree_allocator_t host_allocator);
 
 // Binds replacement code to the original stages' parameter roots. Reflection
 // must preserve parameter keys, placement, alignment and model-buffer arity;
@@ -61,9 +62,10 @@ iree_status_t loom_serve_text_stages_bind(
 // and baseline are immutable and outlive this call; successful slots own
 // independent references.
 iree_status_t loom_serve_text_stages_rebind(
-    const loom_serve_preparation_t* preparation, iree_host_size_t shared_count,
-    iree_host_size_t stage_count, const loom_serve_text_stage_t* baseline,
-    loom_serve_text_stage_t* stages, iree_allocator_t host_allocator);
+    const loom_runtime_preparation_t* preparation,
+    iree_host_size_t shared_count, iree_host_size_t stage_count,
+    const loom_serve_text_stage_t* baseline, loom_serve_text_stage_t* stages,
+    iree_allocator_t host_allocator);
 
 // Transfers the joined recording outcome after every task has retired. All
 // successfully recorded commands remain owned by stages, including on failure.
@@ -87,7 +89,7 @@ iree_status_t loom_serve_text_stages_record_async(
     iree_allocator_t host_allocator);
 
 // Borrows the command and reflects its model-facing native submission ABI.
-loom_serve_stage_t loom_serve_text_stage_binding(
+loom_runtime_stage_t loom_serve_text_stage_binding(
     const loom_serve_text_stage_t* stage);
 
 #ifdef __cplusplus

@@ -37,7 +37,7 @@ int main(int argc, char** argv) {
       loomc_cpu_iree_hal_target_provider(),
       loomc_amdgpu_iree_hal_target_provider(),
   };
-  const loom_serve_compiler_options_t compiler = {
+  const loom_runtime_compiler_options_t compiler = {
       .target_environment_create = loom_serve_activity_test_create_environment,
       .target_providers = providers,
       .target_provider_count = IREE_ARRAYSIZE(providers),

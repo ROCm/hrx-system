@@ -167,8 +167,8 @@ CPU protocol and catalog checks run without model files or a GPU:
 build_tools/bin/iree-bazel-test --config=asan \
   //loom/src/loom/serve/server:configuration_test \
   //loom/src/loom/serve/server:router_test \
-  //loom/src/loom/serve/service/finite/embedding:protocol_test \
-  //loom/src/loom/serve/service/finite/decision:protocol_test
+  //loom/src/loom/service/finite/embedding:protocol_test \
+  //loom/src/loom/service/finite/decision:protocol_test
 ```
 
 The source ABI checks execute actual GPU commands and HTTP results with one and

@@ -16,18 +16,18 @@
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/host/host.h"
 #include "loom/runtime/telemetry/stream.h"
-#include "loom/serve/runtime/host/host.h"
+#include "loom/runtime/testing/application.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/registry.h"
-#include "loom/serve/server/resources.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/speech/output.h"
 #include "loom/serve/service/speech/request.h"
 #include "loom/serve/service/speech/stream.h"
 #include "loom/serve/testing/http_harness.h"
-#include "loom/serve/testing/service_application.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/serve/transport/http/server.h"
 #include "loom/service/telemetry/record.h"
@@ -51,16 +51,16 @@ using SpeechStream = std::unique_ptr<loom_serve_speech_stream_t,
 class RegistrySpeechTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    auto options = loom_serve_test_application_options_default();
+    auto options = loom_runtime_test_application_options_default();
     options.worker_count = FLAG_test_workers;
-    IREE_ASSERT_OK(loom_serve_test_application_acquire(&options, allocator_,
-                                                       &application_));
+    IREE_ASSERT_OK(loom_runtime_test_application_acquire(&options, allocator_,
+                                                         &application_));
     registration_options_.device_group =
-        loom_serve_test_application_device_group(application_);
+        loom_runtime_test_application_device_group(application_);
     const auto transport = loom_serve_http_server_options_default();
     IREE_ASSERT_OK(loom_serve_http_server_allocate(
-        loom_serve_host_proactor_pool(
-            loom_serve_test_application_host(application_)),
+        loom_runtime_host_proactor_pool(
+            loom_runtime_test_application_host(application_)),
         &transport, allocator_, &server_));
     auto listener = loom_serve_http_listener_options_default();
     listener.address = IREE_SV("127.0.0.1:0");
@@ -88,10 +88,8 @@ class RegistrySpeechTest : public ::testing::Test {
       reader_.join();
     }
     iree_status_free(read_status_);
-    const loom_serve_resources_t resources = {
-        .device_group = registration_options_.device_group,
-    };
-    loom_serve_resources_set_observer(&resources, {});
+    loom_runtime_device_group_set_observer(registration_options_.device_group,
+                                           {});
     IREE_EXPECT_OK(loom_serve_http_listener_free(listener_));
     loom_serve_http_server_free(server_);
   }
@@ -118,26 +116,25 @@ class RegistrySpeechTest : public ::testing::Test {
   template <typename Predicate>
   void AdvanceUntil(Predicate ready) {
     auto* notification = loom_serve_http_server_notification(server_);
-    const loom_serve_wake_callback_t wake = {
+    const loom_runtime_wake_callback_t wake = {
         [](void* self) {
           iree_notification_post(static_cast<iree_notification_t*>(self),
                                  IREE_ALL_WAITERS);
         },
         notification};
-    const loom_serve_resources_t resources = {
-        .device_group = registration_options_.device_group,
-    };
-    loom_serve_resources_set_observer(&resources, wake);
+    loom_runtime_device_group_set_observer(registration_options_.device_group,
+                                           wake);
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      iree_status_t status = loom_serve_resources_advance(&resources);
+      iree_status_t status =
+          loom_runtime_device_group_advance(registration_options_.device_group);
       if (Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
         auto& service = Model()->service;
         status = iree_status_join(
-            status, service.advance(service.self,
-                                    loom_serve_registry_service_flags(Model()),
-                                    &progress));
+            status, service.runtime.vtable->advance(
+                        service.runtime.self,
+                        loom_serve_registry_service_flags(Model()), &progress));
         loom_runtime_telemetry_record_t record;
         loom_runtime_telemetry_read_t result;
         while ((result = loom_runtime_telemetry_stream_read(
@@ -247,15 +244,15 @@ class RegistrySpeechTest : public ::testing::Test {
     loom_serve_http_connection_t* connection = nullptr;
     const loom_serve_http_request_t* request = nullptr;
     IREE_ASSERT_OK(http_.TakeRequest(client.get(), &connection, &request));
-    IREE_ASSERT_OK(
-        Model()->service.accept(Model()->service.self, connection, request, 0));
+    IREE_ASSERT_OK(Model()->service.accept(Model()->service.runtime.self,
+                                           connection, request, 0));
     reader_ = std::thread([this, descriptor = client.release()] {
       read_status_ = http_.Read(descriptor, false, &response_);
     });
   }
 
   // Process-owned host/device resources; all requests share this application.
-  loom_serve_test_application_t* application_ = nullptr;
+  loom_runtime_test_application_t* application_ = nullptr;
   // Allocator for registry metadata and test-owned request/response buffers.
   iree_allocator_t allocator_ = iree_allocator_system();
   // Factory capabilities borrowed until registry destruction.
@@ -367,13 +364,13 @@ TEST_F(RegistrySpeechTest, AbortDetachesLiveStreamsBeforeModelRetirement) {
   IREE_ASSERT_OK(Open(FLAG_alternate_voice, &second));
   ASSERT_NE(second, nullptr);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
-    return std::string(
-               Model()->service.snapshot(Model()->service.self).phase) ==
-               "generating" ||
+    return std::string(Model()
+                           ->service.snapshot(Model()->service.runtime.self)
+                           .phase) == "generating" ||
            loom_serve_speech_stream_is_complete(second.get());
   }));
   IREE_ASSERT_OK(loom_serve_speech_stream_status(second.get()));
-  ASSERT_STREQ(Model()->service.snapshot(Model()->service.self).phase,
+  ASSERT_STREQ(Model()->service.snapshot(Model()->service.runtime.self).phase,
                "generating");
   IREE_ASSERT_OK(loom_serve_registry_remove(Model(), LOOM_SERVE_REMOVAL_ABORT));
   SpeechStream rejected(nullptr, loom_serve_speech_stream_close);
@@ -431,13 +428,13 @@ TEST_F(RegistrySpeechTest,
   IREE_ASSERT_OK(Open(voices[1], &streams[1], texts[1].c_str(), 74));
   ASSERT_NE(streams[1], nullptr);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
-    return std::string(
-               Model()->service.snapshot(Model()->service.self).phase) ==
-               "generating" ||
+    return std::string(Model()
+                           ->service.snapshot(Model()->service.runtime.self)
+                           .phase) == "generating" ||
            loom_serve_speech_stream_is_complete(streams[1].get());
   }));
   IREE_ASSERT_OK(loom_serve_speech_stream_status(streams[1].get()));
-  ASSERT_STREQ(Model()->service.snapshot(Model()->service.self).phase,
+  ASSERT_STREQ(Model()->service.snapshot(Model()->service.runtime.self).phase,
                "generating");
   for (size_t i = 2; i < streams.size(); ++i) {
     IREE_ASSERT_OK(Open(voices[i], &streams[i], texts[i].c_str(), 73 + i));
@@ -448,38 +445,42 @@ TEST_F(RegistrySpeechTest,
     ASSERT_FALSE(loom_serve_speech_stream_peek(stream.get())->complete);
   }
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
-    return std::string(
-               Model()->service.snapshot(Model()->service.self).phase) ==
-           "delivering";
+    return std::string(Model()
+                           ->service.snapshot(Model()->service.runtime.self)
+                           .phase) == "delivering";
   }));
-  ASSERT_EQ(Model()->service.snapshot(Model()->service.self).active_requests,
-            4u);
+  ASSERT_EQ(
+      Model()->service.snapshot(Model()->service.runtime.self).active_requests,
+      4u);
 
   // With every peer holding output, only this request can submit new work.
   // Closing before another owner turn leaves its accepted borrower retained.
   loom_serve_speech_stream_consume(streams[2].get());
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] {
-    return std::string(
-               Model()->service.snapshot(Model()->service.self).phase) ==
-               "generating" ||
+    return std::string(Model()
+                           ->service.snapshot(Model()->service.runtime.self)
+                           .phase) == "generating" ||
            loom_serve_speech_stream_is_complete(streams[2].get());
   }));
   IREE_ASSERT_OK(loom_serve_speech_stream_status(streams[2].get()));
-  ASSERT_STREQ(Model()->service.snapshot(Model()->service.self).phase,
+  ASSERT_STREQ(Model()->service.snapshot(Model()->service.runtime.self).phase,
                "generating");
   streams[2].reset();
-  EXPECT_EQ(Model()->service.snapshot(Model()->service.self).active_requests,
-            4u);
+  EXPECT_EQ(
+      Model()->service.snapshot(Model()->service.runtime.self).active_requests,
+      4u);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
       [&] { return Model()->service.telemetry.counters->cancelled == 1; }));
-  ASSERT_EQ(Model()->service.snapshot(Model()->service.self).active_requests,
-            3u);
+  ASSERT_EQ(
+      Model()->service.snapshot(Model()->service.runtime.self).active_requests,
+      3u);
   IREE_ASSERT_OK(Open(voices[2], &streams[2], texts[2].c_str(), 75));
   ASSERT_NE(streams[2], nullptr);
   ASSERT_NO_FATAL_FAILURE(AwaitOutput(streams[2].get()));
   ASSERT_FALSE(loom_serve_speech_stream_peek(streams[2].get())->complete);
-  EXPECT_EQ(Model()->service.snapshot(Model()->service.self).active_requests,
-            4u);
+  EXPECT_EQ(
+      Model()->service.snapshot(Model()->service.runtime.self).active_requests,
+      4u);
 
   // The short peer can finish while all other consumers withhold credit.
   std::array<std::string, 4> actual;

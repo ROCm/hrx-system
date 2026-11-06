@@ -15,7 +15,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/test_allocator.h"
-#include "loom/serve/runtime/execution/execution.h"
+#include "loom/runtime/execution/execution.h"
 #include "loom/serve/server/observation.h"
 
 namespace {
@@ -29,12 +29,12 @@ class ResourcesTest : public ::testing::Test {
     iree_hal_buffer_release(storage_buffer_);
     iree_hal_buffer_release(workspace_buffer_);
     if (execution_) {
-      IREE_EXPECT_OK(loom_serve_execution_drain(execution_));
-      loom_serve_execution_release(execution_);
+      IREE_EXPECT_OK(loom_runtime_execution_drain(execution_));
+      loom_runtime_execution_release(execution_);
     }
     iree_string_builder_deinitialize(&output_);
-    IREE_EXPECT_OK(loom_serve_device_group_free(group_));
-    loom_serve_host_release(host_);
+    IREE_EXPECT_OK(loom_runtime_device_group_free(group_));
+    loom_runtime_host_release(host_);
   }
   std::string Write(const loom_serve_resources_t& resources) {
     iree_string_builder_reset(&output_);
@@ -45,47 +45,47 @@ class ResourcesTest : public ::testing::Test {
     return std::string(value.data, value.size);
   }
   iree_status_t CreateCpuGroup(
-      loom_serve_pool_backing_t backing = LOOM_SERVE_POOL_BACKING_FIXED,
+      loom_runtime_pool_backing_t backing = LOOM_RUNTIME_POOL_BACKING_FIXED,
       iree_string_view_t first_name = IREE_SV("first"),
       iree_string_view_t second_name = IREE_SV("second")) {
     IREE_RETURN_IF_ERROR(
-        loom_serve_host_create(1, nullptr, iree_allocator_system(), &host_));
-    const loom_serve_device_options_t options[] = {
+        loom_runtime_host_create(1, nullptr, iree_allocator_system(), &host_));
+    const loom_runtime_device_options_t options[] = {
         {
-            .driver = loom_serve_host_task_driver(host_),
+            .driver = loom_runtime_host_task_driver(host_),
             .uri = IREE_SV("task"),
             .name = first_name,
         },
         {
-            .driver = loom_serve_host_task_driver(host_),
+            .driver = loom_runtime_host_task_driver(host_),
             .uri = IREE_SV("task"),
             .name = second_name,
         }};
-    IREE_RETURN_IF_ERROR(loom_serve_device_group_allocate(
+    IREE_RETURN_IF_ERROR(loom_runtime_device_group_allocate(
         host_, IREE_ARRAYSIZE(options), options, iree_allocator_system(),
         &group_));
-    const loom_serve_pool_options_t pool_options = {
-        .elastic = backing == LOOM_SERVE_POOL_BACKING_ELASTIC,
+    const loom_runtime_pool_options_t pool_options = {
+        .elastic = backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC,
         .weight_slab_size =
-            backing == LOOM_SERVE_POOL_BACKING_ELASTIC ? 65536u : 0u,
+            backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC ? 65536u : 0u,
         .state_slab_size =
-            backing == LOOM_SERVE_POOL_BACKING_ELASTIC ? 65536u : 0u,
+            backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC ? 65536u : 0u,
         .memory_limit =
-            backing == LOOM_SERVE_POOL_BACKING_ELASTIC ? 1048576u : 0u,
+            backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC ? 1048576u : 0u,
     };
-    loom_serve_pool_t* pool = nullptr;
-    IREE_RETURN_IF_ERROR(loom_serve_device_group_create_pool(
+    loom_runtime_pool_t* pool = nullptr;
+    IREE_RETURN_IF_ERROR(loom_runtime_device_group_create_pool(
         group_, {first_name, 3}, &pool_options, &pool));
-    const loom_serve_pool_options_t fixed_options = {};
-    return loom_serve_device_group_create_pool(group_, {second_name, 2},
-                                               &fixed_options, &pool);
+    const loom_runtime_pool_options_t fixed_options = {};
+    return loom_runtime_device_group_create_pool(group_, {second_name, 2},
+                                                 &fixed_options, &pool);
   }
 
   std::map<std::string, uint64_t> Observe(iree_host_size_t pool_index) {
     iree_string_builder_reset(&output_);
     const loom_serve_resources_t resources = {.device_group = group_};
     IREE_CHECK_OK(loom_serve_resources_write_observation(
-        &resources, loom_serve_device_group_count(group_) + pool_index,
+        &resources, loom_runtime_device_group_count(group_) + pool_index,
         &output_));
     const auto json = iree_string_builder_view(&output_);
     iree_string_view_t topics;
@@ -125,13 +125,13 @@ class ResourcesTest : public ::testing::Test {
   }
 
   // Application owner outliving all borrowed records.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // One immutable group with independently identifiable logical devices.
-  loom_serve_device_group_t* group_ = nullptr;
+  loom_runtime_device_group_t* group_ = nullptr;
   // Response storage detached from all resource owners.
   iree_string_builder_t output_;
   // Real model execution borrowing the first device's workspace.
-  loom_serve_execution_t* execution_ = nullptr;
+  loom_runtime_execution_t* execution_ = nullptr;
   // Caller-owned fixed persistent storage, released before execution join.
   iree_hal_buffer_t* storage_buffer_ = nullptr;
   // Caller-owned transient view, released before execution join.
@@ -146,24 +146,25 @@ TEST_F(ResourcesTest, NoPublishedResourcesDoesNotInventHardware) {
 
 TEST_F(ResourcesTest, FixedBackingObservesNativeStorageAndNestedWorkspace) {
   IREE_ASSERT_OK(CreateCpuGroup());
-  auto* device = loom_serve_device_group_at(group_, 0);
-  auto* storage_owner = loom_serve_device_group_pool_at(group_, 0);
+  auto* device = loom_runtime_device_group_at(group_, 0);
+  auto* storage_owner = loom_runtime_device_group_pool_at(group_, 0);
   IREE_ASSERT_OK(
-      loom_serve_device_create_execution(device, storage_owner, &execution_));
-  IREE_ASSERT_OK(loom_serve_execution_reserve_workspace(execution_, 65536, 16));
+      loom_runtime_device_create_execution(device, storage_owner, &execution_));
+  IREE_ASSERT_OK(
+      loom_runtime_execution_reserve_workspace(execution_, 65536, 16));
   const auto request = iree_hal_make_pool_reservation_request(4096, 16);
-  IREE_ASSERT_OK(loom_serve_execution_alloca_from_pool(
-      execution_, loom_serve_pool_storage(storage_owner), 1, &request,
+  IREE_ASSERT_OK(loom_runtime_execution_alloca_from_pool(
+      execution_, loom_runtime_pool_storage(storage_owner), 1, &request,
       &storage_buffer_));
-  IREE_ASSERT_OK(
-      loom_serve_execution_alloca(execution_, 1, &request, &workspace_buffer_));
-  IREE_ASSERT_OK(loom_serve_execution_wait(
-      execution_, loom_serve_execution_frontier(execution_).values[0]));
+  IREE_ASSERT_OK(loom_runtime_execution_alloca(execution_, 1, &request,
+                                               &workspace_buffer_));
+  IREE_ASSERT_OK(loom_runtime_execution_wait(
+      execution_, loom_runtime_execution_frontier(execution_).values[0]));
   const auto values = Observe(0);
   EXPECT_EQ(values.size(), 34u);
   iree_hal_pool_stats_t native;
-  iree_hal_pool_query_stats(loom_serve_pool_storage(storage_owner), &native);
-  const auto workspace = loom_serve_pool_statistics(storage_owner).workspace;
+  iree_hal_pool_query_stats(loom_runtime_pool_storage(storage_owner), &native);
+  const auto workspace = loom_runtime_pool_statistics(storage_owner).workspace;
   EXPECT_EQ(values.at("storage.committed_bytes"), native.bytes_committed);
   EXPECT_EQ(values.at("workspace.committed_bytes"), workspace.bytes_committed);
   EXPECT_GT(values.at("storage.committed_bytes"),
@@ -174,7 +175,7 @@ TEST_F(ResourcesTest, FixedBackingObservesNativeStorageAndNestedWorkspace) {
 }
 
 TEST_F(ResourcesTest, ElasticBackingHasAnIndependentBudgetAndStorageOwner) {
-  IREE_ASSERT_OK(CreateCpuGroup(LOOM_SERVE_POOL_BACKING_ELASTIC));
+  IREE_ASSERT_OK(CreateCpuGroup(LOOM_RUNTIME_POOL_BACKING_ELASTIC));
   const auto values = Observe(0);
   EXPECT_EQ(values.size(), 43u);
   EXPECT_EQ(values.at("elastic.budget_limit"), 1048576u);
@@ -191,7 +192,7 @@ TEST_F(ResourcesTest, TruncatedDisplayKeysDoNotMergePoolIdentities) {
   const std::string first = prefix + "first";
   const std::string second = prefix + "second";
   IREE_ASSERT_OK(
-      CreateCpuGroup(LOOM_SERVE_POOL_BACKING_FIXED,
+      CreateCpuGroup(LOOM_RUNTIME_POOL_BACKING_FIXED,
                      iree_make_string_view(first.data(), first.size()),
                      iree_make_string_view(second.data(), second.size())));
   for (iree_host_size_t index = 0; index < 2; ++index) {
@@ -306,23 +307,23 @@ TEST_F(ResourcesTest, EveryRecordOfOneCpuGroupIsPublishedWithoutModelWork) {
 
 TEST_F(ResourcesTest, FixedStorageIsVisibleWithoutWorkspaceOrElasticBacking) {
   IREE_ASSERT_OK(CreateCpuGroup());
-  auto* storage_owner = loom_serve_device_group_pool_at(group_, 0);
-  auto* peer = loom_serve_device_group_pool_at(group_, 1);
+  auto* storage_owner = loom_runtime_device_group_pool_at(group_, 0);
+  auto* peer = loom_runtime_device_group_pool_at(group_, 1);
   iree_hal_buffer_t* raw_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-      loom_serve_pool_storage(storage_owner),
+      loom_runtime_pool_storage(storage_owner),
       iree_hal_make_pool_reservation_request(4096, 256),
       iree_infinite_timeout(), &raw_buffer));
   std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)> buffer(
       raw_buffer, iree_hal_buffer_release);
 
-  const auto memory = loom_serve_pool_statistics(storage_owner);
+  const auto memory = loom_runtime_pool_statistics(storage_owner);
   EXPECT_GE(memory.storage.bytes_reserved, 4096u);
   EXPECT_GE(memory.storage.bytes_committed, memory.storage.bytes_reserved);
   EXPECT_EQ(memory.storage.bytes_abandoned, 0u);
   EXPECT_EQ(memory.workspace.bytes_committed, 0u);
   EXPECT_EQ(memory.retained.committed_bytes, 0u);
-  EXPECT_EQ(loom_serve_pool_statistics(peer).storage.bytes_committed, 0u);
+  EXPECT_EQ(loom_runtime_pool_statistics(peer).storage.bytes_committed, 0u);
   const auto response = Write({.device_group = group_});
   EXPECT_NE(response.find(
                 "\"retained\":null,\"storage\":{\"reserved_bytes\":" +
@@ -333,7 +334,7 @@ TEST_F(ResourcesTest, FixedStorageIsVisibleWithoutWorkspaceOrElasticBacking) {
             std::string::npos);
 
   buffer.reset();
-  EXPECT_EQ(loom_serve_pool_statistics(storage_owner).storage.bytes_reserved,
+  EXPECT_EQ(loom_runtime_pool_statistics(storage_owner).storage.bytes_reserved,
             0u);
 }
 

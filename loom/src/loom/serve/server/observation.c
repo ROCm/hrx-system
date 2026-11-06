@@ -9,8 +9,8 @@
 #include <inttypes.h>
 
 #include "loom/runtime/telemetry/stream.h"
-#include "loom/serve/service/kind.h"
 #include "loom/serve/telemetry/sample.h"
+#include "loom/service/kind.h"
 #include "loom/service/telemetry/record.h"
 #include "loom/util/json.h"
 
@@ -148,8 +148,7 @@ static iree_status_t loom_serve_observation_model(
     const loom_serve_registered_model_t* model, iree_host_size_t index,
     iree_string_builder_t* output) {
   const loom_serve_service_t* service = &model->service;
-  const loom_serve_service_snapshot_t snapshot =
-      loom_serve_registry_snapshot(model);
+  const loom_service_snapshot_t snapshot = loom_serve_registry_snapshot(model);
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, "{\"slot\":%zu,\"incarnation\":\"%" PRIu64 "\",\"name\":", index,
       model->incarnation));
@@ -160,7 +159,7 @@ static iree_status_t loom_serve_observation_model(
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, ",\"name_truncated\":%s,\"kind\":\"%s\",\"phase\":",
       service->name.size > 256 ? "true" : "false",
-      loom_serve_model_kind_name(service->kind)));
+      loom_service_kind_name(service->kind)));
   IREE_RETURN_IF_ERROR(loom_json_write_escaped_string(
       &stream, iree_make_cstring_view(snapshot.phase)));
   if (model->configuration.device.size) {
@@ -206,8 +205,8 @@ static iree_status_t loom_serve_observation_model(
   if (model->phase == LOOM_SERVE_REGISTRATION_READY &&
       service->telemetry.sample) {
     IREE_RETURN_IF_ERROR(service->telemetry.sample(
-        service->self, (loom_runtime_telemetry_sample_sink_t){
-                           output, loom_serve_observation_topic}));
+        service->runtime.self, (loom_runtime_telemetry_sample_sink_t){
+                                   output, loom_serve_observation_topic}));
   }
   return iree_string_builder_append_cstring(output, "]}");
 }
@@ -226,11 +225,11 @@ iree_status_t loom_serve_observation_sample(
         "\"pool_count\":%zu,\"counters\":",
         loom_serve_registry_capacity(registry),
         observation->resources->device_group
-            ? loom_serve_device_group_count(
+            ? loom_runtime_device_group_count(
                   observation->resources->device_group)
             : 0,
         observation->resources->device_group
-            ? loom_serve_device_group_pool_count(
+            ? loom_runtime_device_group_pool_count(
                   observation->resources->device_group)
             : 0));
     IREE_RETURN_IF_ERROR(

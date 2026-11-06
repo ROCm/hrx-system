@@ -1,0 +1,633 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/bazel:package_boundary.bzl", "iree_package_boundary")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//loom/src/loom/runtime:__subpackages__"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+iree_package_boundary(
+    allowed_descendant_paths = ["testdata/**"],
+    reason = "Program integration fixtures preserve their compilation-role layout.",
+)
+
+exports_files(
+    [
+        "control_test.cc",
+        "jit_module_test.cc",
+        "jit_workspace_test.cc",
+        "shared_jit_test.cc",
+        "stage_set_test.cc",
+        "stage_table_storage_benchmark.cc",
+        "testdata/compilation/invalid.loom",
+        "testdata/control/control.loom",
+        "testdata/control/kernels.loom",
+        "testdata/jit/config.loom",
+        "testdata/jit/control.loom",
+        "testdata/jit/preparation.loom",
+        "testdata/jit/stage.loom",
+        "testdata/jit/vm_helpers.loom",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+loom_cc_test(
+    name = "sources_test",
+    srcs = ["sources_test.cc"],
+    deps = [
+        ":package",
+        ":sources",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "variant_pool",
+    srcs = ["variant_pool.c"],
+    hdrs = ["variant_pool.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compilation",
+        "//loom/src/loom/runtime:wake",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+loom_cc_test(
+    name = "variant_pool_test",
+    srcs = ["variant_pool_test.cc"],
+    deps = [
+        ":variant_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "transfer_plan",
+    srcs = ["transfer_plan.c"],
+    hdrs = ["transfer_plan.h"],
+    visibility = ["//visibility:public"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "transfer_plan_test",
+    srcs = ["transfer_plan_test.cc"],
+    deps = [
+        ":transfer_plan",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "parameter_layout",
+    srcs = ["parameter_layout.c"],
+    hdrs = ["parameter_layout.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime/command:program",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "stage_set",
+    srcs = ["stage_set.c"],
+    hdrs = ["stage_set.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compilation",
+        ":jit",
+        ":preparation",
+        ":sources",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c:task_pool",
+        "//loom/src/loom/runtime/command:program",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "stage_table",
+    srcs = ["stage_table.c"],
+    hdrs = ["stage_table.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":jit",
+        ":module",
+        "//loom/src/loom/runtime/command:program",
+        "//loom/src/loom/runtime/execution:dispatch",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "module",
+    srcs = ["module.c"],
+    hdrs = ["module.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime/command:program",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/execution:dispatch",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "compilation",
+    srcs = ["compilation.c"],
+    hdrs = ["compilation.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "target",
+    srcs = ["target.c"],
+    hdrs = ["target.h"],
+    deps = [
+        ":compilation",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/iree_hal",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
+    name = "package",
+    srcs = ["package.c"],
+    hdrs = ["package.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_test(
+    name = "package_test",
+    srcs = ["package_test.cc"],
+    deps = [
+        ":package",
+        ":sources",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "sources",
+    srcs = ["sources.c"],
+    hdrs = ["sources.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":package",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/model:card",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+    ],
+)
+
+loom_cc_library(
+    name = "source_index",
+    srcs = ["source_index.c"],
+    hdrs = ["source_index.h"],
+    deps = [
+        ":compilation",
+        ":sources",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/tooling/input:loomc_configured",
+        "//loom/src/loom/util:digest",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "native_artifact",
+    srcs = ["native_artifact.c"],
+    hdrs = ["native_artifact.h"],
+    deps = [
+        ":compilation",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/util:digest",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+loom_cc_library(
+    name = "executable",
+    srcs = ["executable.c"],
+    hdrs = ["executable.h"],
+    deps = [
+        ":native_artifact",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/runtime/execution:dispatch",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_test(
+    name = "native_artifact_test",
+    srcs = ["native_artifact_test.cc"],
+    deps = [
+        ":native_artifact",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/vm",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "executable_tests",
+    testonly = True,
+    srcs = ["executable_test.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":executable",
+        ":jit",
+        ":native_artifact",
+        ":target",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/testing:jit",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "jit_tests",
+    testonly = True,
+    srcs = ["jit_test.cc"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":executable",
+        ":jit",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/testing:jit",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+    ] + select({
+        "@platforms//os:linux": ["//loom/src/loom/runtime/testing:stalled_stderr"],
+        "//conditions:default": [],
+    }),
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "jit",
+    srcs = [
+        "jit.c",
+        "jit_cache.c",
+    ],
+    hdrs = [
+        "jit.h",
+        "jit_cache.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compilation",
+        ":executable",
+        ":native_artifact",
+        ":source_index",
+        ":sources",
+        ":target",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c:task_pool",
+        "//loom/binding/c/target/cmd",
+        "//loom/binding/c/target/vm",
+        "//loom/src/loom/runtime/command:hal_command_buffer",
+        "//loom/src/loom/runtime/command:program",
+        "//loom/src/loom/runtime/execution:dispatch",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/util:digest",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_test(
+    name = "compilation_test",
+    srcs = ["compilation_test.cc"],
+    deps = [
+        ":compilation",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "program",
+    srcs = ["program.c"],
+    hdrs = ["program.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compilation",
+        ":jit",
+        ":sources",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/module/string",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode:module",
+    ],
+)
+
+loom_cc_library(
+    name = "json",
+    srcs = ["json.c"],
+    hdrs = ["json.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "program_test",
+    srcs = [
+        "jit_vm_test.cc",
+        "program_test.cc",
+    ],
+    args = [
+        "--binding_source=$(rootpath :testdata/binding.loom)",
+        "--vm_sources=$(rootpath :testdata/jit/control.loom)",
+        "--vm_invalid_source=$(rootpath :testdata/compilation/invalid.loom)",
+    ],
+    data = [
+        "testdata/binding.loom",
+        "testdata/compilation/invalid.loom",
+        "testdata/jit/control.loom",
+        "testdata/jit/private_vm_helper.loom",
+        "testdata/jit/vm_helpers.loom",
+    ],
+    deps = [
+        ":input",
+        ":jit",
+        ":package",
+        ":program",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/vm",
+        "//loom/src/loom/model:card",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "cxx_provider_test",
+    srcs = ["cxx_provider_test.cc"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    deps = [
+        ":package",
+        ":program",
+        ":source_index",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/vm",
+        "//loom/src/loom/model:card",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "input",
+    srcs = ["input.c"],
+    hdrs = ["input.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/vocab",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "tokenizer_cache",
+    srcs = ["tokenizer_cache.c"],
+    hdrs = ["tokenizer_cache.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_library(
+    name = "tokenizer_load",
+    srcs = ["tokenizer_load.c"],
+    hdrs = ["tokenizer_load.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":sources",
+        ":tokenizer_cache",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/model:card",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+    ],
+)
+
+loom_cc_test(
+    name = "tokenizer_cache_test",
+    srcs = ["tokenizer_cache_test.cc"],
+    deps = [
+        ":tokenizer_cache",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+    ],
+)
+
+loom_cc_test(
+    name = "tokenizer_load_test",
+    srcs = ["tokenizer_load_test.cc"],
+    deps = [
+        ":package",
+        ":tokenizer_cache",
+        ":tokenizer_load",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/model:card",
+        "//loom/src/loom/runtime/host",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/vocab",
+    ],
+)
+
+loom_cc_test(
+    name = "json_test",
+    srcs = ["json_test.cc"],
+    deps = [
+        ":json",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "preparation",
+    srcs = ["preparation.c"],
+    hdrs = ["preparation.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":compilation",
+        ":parameter_layout",
+        ":program",
+        ":sources",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/runtime/command:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "input_test",
+    srcs = ["input_test.cc"],
+    args = ["--input_source=$(rootpath :testdata/input/control.loom)"],
+    data = ["testdata/input/control.loom"],
+    deps = [
+        ":input",
+        ":program",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/vm",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "preparation_test",
+    srcs = ["preparation_test.cc"],
+    args = ["--boundary_source=$(rootpath :testdata/preparation/boundaries.loom)"],
+    data = ["testdata/preparation/boundaries.loom"],
+    deps = [
+        ":preparation",
+        ":program",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/vm",
+        "//loom/src/loom/model:card",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+[
+    loom_cc_test(
+        name = "sources_" + platform + "_test",
+        srcs = ["sources_" + platform + "_test.cc"],
+        target_compatible_with = compatibility,
+        deps = [
+            ":sources",
+            "//runtime/src/iree/base",
+            "//runtime/src/iree/testing:gtest",
+            "//runtime/src/iree/testing:gtest_main",
+        ],
+    )
+    for platform, compatibility in [
+        (
+            "posix",
+            select({
+                "@platforms//os:android": [],
+                "@platforms//os:emscripten": [],
+                "@platforms//os:linux": [],
+                "@platforms//os:macos": [],
+                "@platforms//os:wasi": [],
+                "//conditions:default": ["@platforms//:incompatible"],
+            }),
+        ),
+        (
+            "windows",
+            select({
+                "@platforms//os:windows": [],
+                "//conditions:default": ["@platforms//:incompatible"],
+            }),
+        ),
+    ]
+]

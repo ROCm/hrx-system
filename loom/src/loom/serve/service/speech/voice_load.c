@@ -22,15 +22,15 @@ struct loom_serve_speech_voice_load_t {
   // Allocator owning the loader and original recording request.
   iree_allocator_t host_allocator;
   // Borrowed shared host, alive through completion.
-  loom_serve_host_t* host;
+  loom_runtime_host_t* host;
   // Owned immutable namespace retaining card and package references.
-  loom_serve_sources_t* sources;
+  loom_runtime_sources_t* sources;
   // Borrowed service used for ordinary native upload admission.
   loom_serve_speech_service_t* service;
   // Service advancement and readiness callbacks borrowed through completion.
   loom_serve_service_t interface;
   // Nonblocking owner notification, also installed on the service.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // Next declared recording; unchanged while its read task is accepted.
   iree_host_size_t index;
   // Owner-only next read/admission phase.
@@ -59,7 +59,7 @@ static void loom_serve_speech_voice_load_execute(
       loom_model_card_selection(load->sources->card);
   const loom_model_voice_t* voice = &selection->voices[load->index];
   loomc_source_t* contents = NULL;
-  iree_status_t status = loom_serve_sources_open(
+  iree_status_t status = loom_runtime_sources_open(
       load->sources, voice->file.path, load->host_allocator, &contents);
   if (iree_status_is_ok(status)) {
     const loomc_byte_span_t bytes = loomc_source_contents(contents);
@@ -86,8 +86,8 @@ static const loomc_task_vtable_t voice_load_vtable = {
 };
 
 iree_status_t loom_serve_speech_voice_load_allocate(
-    loom_serve_host_t* host, const loom_serve_sources_t* sources,
-    loom_serve_speech_service_t* service, loom_serve_wake_callback_t observer,
+    loom_runtime_host_t* host, const loom_runtime_sources_t* sources,
+    loom_serve_speech_service_t* service, loom_runtime_wake_callback_t observer,
     iree_allocator_t host_allocator,
     loom_serve_speech_voice_load_t** out_load) {
   *out_load = NULL;
@@ -105,9 +105,10 @@ iree_status_t loom_serve_speech_voice_load_allocate(
   load->observer = observer;
   iree_slim_mutex_initialize(&load->event.mutex);
   iree_status_t status =
-      loom_serve_sources_clone(sources, host_allocator, &load->sources);
+      loom_runtime_sources_clone(sources, host_allocator, &load->sources);
   if (iree_status_is_ok(status)) {
-    load->interface.set_observer(load->interface.self, observer);
+    load->interface.runtime.vtable->set_observer(load->interface.runtime.self,
+                                                 observer);
     *out_load = load;
   } else {
     loom_serve_speech_voice_load_free(load);
@@ -154,7 +155,7 @@ iree_status_t loom_serve_speech_voice_load_advance(
       load->event.pending = true;
       iree_slim_mutex_unlock(&load->event.mutex);
       load->status = iree_status_from_loomc(loomc_task_sink_submit(
-          loom_serve_host_preparation_sink(load->host), &load->task));
+          loom_runtime_host_preparation_sink(load->host), &load->task));
       if (iree_status_is_ok(load->status)) {
         return iree_ok_status();
       }
@@ -167,8 +168,8 @@ iree_status_t loom_serve_speech_voice_load_advance(
       }
       if (iree_status_is_ok(load->status)) {
         bool progress = false;
-        load->status =
-            load->interface.advance(load->interface.self, 0, &progress);
+        load->status = load->interface.runtime.vtable->advance(
+            load->interface.runtime.self, 0, &progress);
         if (load->upload &&
             loom_serve_speech_voice_upload_is_complete(load->upload)) {
           load->status = iree_status_join(
@@ -198,13 +199,14 @@ iree_status_t loom_serve_speech_voice_load_advance(
     }
     bool progress = false;
     load->status = iree_status_join(
-        load->status,
-        load->interface.advance(load->interface.self,
-                                LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
+        load->status, load->interface.runtime.vtable->advance(
+                          load->interface.runtime.self,
+                          LOOM_RUNTIME_SERVICE_FLAG_STOPPING, &progress));
     if (progress) {
       load->observer.wake(load->observer.user_data);
     }
-    *out_complete = !load->interface.is_pending(load->interface.self);
+    *out_complete = !load->interface.runtime.vtable->is_pending(
+        load->interface.runtime.self);
     if (*out_complete) {
       return iree_status_clone(load->status);
     }
@@ -217,7 +219,7 @@ void loom_serve_speech_voice_load_free(loom_serve_speech_voice_load_t* load) {
     return;
   }
   loom_serve_speech_voice_request_deinitialize(&load->request);
-  loom_serve_sources_free(load->sources, load->host_allocator);
+  loom_runtime_sources_free(load->sources, load->host_allocator);
   iree_status_ignore(load->status);
   iree_slim_mutex_deinitialize(&load->event.mutex);
   iree_allocator_free(load->host_allocator, load);

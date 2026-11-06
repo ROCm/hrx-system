@@ -24,8 +24,8 @@ loom_cc_library(
     srcs = ["options.c"],
     hdrs = ["options.h"],
     deps = [
-        "//loom/src/loom/serve/runtime/device",
-        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
         "//loom/src/loom/serve/server:device_configuration",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
@@ -34,6 +34,7 @@ loom_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/tooling:device_flags",
+        "//runtime/src/iree/tooling:device_profiling",
     ],
 )
 
@@ -74,21 +75,22 @@ loom_cc_library(
     hdrs = ["activity_test.h"],
     deps = [
         ":options",
-        "//loom/src/loom/serve/runtime/device",
-        "//loom/src/loom/serve/runtime/host",
+        "//loom/src/loom/runtime/device",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/testing:worker_gate",
         "//loom/src/loom/serve/server:configuration",
         "//loom/src/loom/serve/server:device_configuration",
         "//loom/src/loom/serve/server:model_registration",
         "//loom/src/loom/serve/server:registry",
         "//loom/src/loom/serve/service/recognition:stream",
         "//loom/src/loom/serve/service/recognition:transcription",
-        "//loom/src/loom/serve/testing:worker_gate",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/task",
         "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/tooling:device_profiling",
     ],
 )
 
@@ -100,7 +102,7 @@ loom_cc_library(
         ":build_identity",
         ":options",
         ":signals",
-        "//loom/src/loom/serve/runtime/device",
+        "//loom/src/loom/runtime/device",
         "//loom/src/loom/serve/server:configuration",
         "//loom/src/loom/serve/server:device_configuration",
         "//loom/src/loom/serve/server:model_registration",
@@ -114,6 +116,7 @@ loom_cc_library(
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/tooling:device_profiling",
     ],
 )
 

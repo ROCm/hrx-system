@@ -17,14 +17,14 @@
 
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/service/finite/embedding/source_service_test_fixture.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/package.h"
-#include "loom/serve/testing/stalled_stderr.h"
 
 namespace loom_serve::testing::embedding {
 
-using loom_serve::testing::StalledStderr;
+using loom_runtime::testing::StalledStderr;
 
 TEST_F(SourceEmbeddingServiceTest, ReconfiguresDirectDispatchAndRollsBack) {
   ASSERT_NO_FATAL_FAILURE(UseDirectPackage());

@@ -19,7 +19,7 @@ using loom_serve::testing::text::SourceTextServiceTest;
 class VariantCompilation {
  public:
   VariantCompilation(loom_serve_text_model_t* model,
-                     loom_serve_sources_t sources)
+                     loom_runtime_sources_t sources)
       : model_(model), sources_(sources) {}
 
   ~VariantCompilation() {
@@ -70,7 +70,7 @@ class VariantCompilation {
   }
 
   static void Complete(void* user_data, iree_status_t status, void* variant,
-                       const loom_serve_compilation_report_t* report) {
+                       const loom_runtime_compilation_report_t* report) {
     auto* self = static_cast<VariantCompilation*>(user_data);
     std::lock_guard<std::mutex> lock(self->mutex_);
     self->status_ = status;
@@ -89,7 +89,7 @@ class VariantCompilation {
   // Borrowed live model through completion and candidate release.
   loom_serve_text_model_t* model_;
   // Borrowed immutable source paths through completion.
-  loom_serve_sources_t sources_;
+  loom_runtime_sources_t sources_;
   // Owner task with independent final-release notification.
   iree_task_process_t process_ = {};
   // Protects callback results and final process release.
@@ -141,9 +141,9 @@ TEST_F(SourceTextServiceTest, NativeVariantPreservesLiveRowsAndPinnedPrefix) {
                                              "scalar.remui %total, %c3_i32",
                                              "scalar.remui %total, %c1_i32"));
   const auto provider = iree_make_cstring_view(path.c_str());
-  const loom_serve_sources_t sources = {.count = 1, .values = &provider};
+  const loom_runtime_sources_t sources = {.count = 1, .values = &provider};
   VariantCompilation candidate(model_, sources);
-  candidate.Start(loom_serve_host_executor(host_));
+  candidate.Start(loom_runtime_host_executor(host_));
 
   // The active native table keeps working while its replacement compiles.
   const int32_t during = 1;
@@ -215,9 +215,9 @@ TEST_F(SourceTextServiceTest, FailedNativeVariantsLeaveCurrentModelUsable) {
         invalid_source ? "scalar.remui %total" : "\"bias\"",
         invalid_source ? "scalar.not_an_operation %total" : "\"other\""));
     const auto provider = iree_make_cstring_view(path.c_str());
-    const loom_serve_sources_t sources = {.count = 1, .values = &provider};
+    const loom_runtime_sources_t sources = {.count = 1, .values = &provider};
     VariantCompilation candidate(model_, sources);
-    candidate.Start(loom_serve_host_executor(host_));
+    candidate.Start(loom_runtime_host_executor(host_));
     IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, candidate.Await());
     ASSERT_NE(candidate.variant(), nullptr);
     IREE_EXPECT_STATUS_IS(
@@ -250,8 +250,8 @@ TEST_F(SourceTextServiceTest,
   VariantCompilation modified(model_,
                               {.count = 1, .values = &modified_provider});
   VariantCompilation original(model_, document_.value().sources);
-  modified.Start(loom_serve_host_executor(host_));
-  original.Start(loom_serve_host_executor(host_));
+  modified.Start(loom_runtime_host_executor(host_));
+  original.Start(loom_runtime_host_executor(host_));
   IREE_ASSERT_OK(modified.Await());
   IREE_ASSERT_OK(original.Await());
   ASSERT_NE(modified.variant(), original.variant());
@@ -311,8 +311,9 @@ class ReconfigurationTextServiceTest : public SourceTextServiceTest {
   void TearDown() override {
     if (service_) {
       AdvanceUntil(
-          interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING);
-      interface_.set_observer(interface_.self, {});
+          interface_, [&] { return Idle(); },
+          LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+      interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
       loom_serve_text_service_free(service_, IREE_STATUS_OK);
       IREE_EXPECT_OK(TakeSelectionStatus());
     }
@@ -320,29 +321,29 @@ class ReconfigurationTextServiceTest : public SourceTextServiceTest {
   }
 
   bool Idle() const {
-    return !interface_.is_pending(interface_.self) &&
-           !interface_.is_active(interface_.self) &&
-           !interface_.snapshot(interface_.self).queued_requests;
+    return !interface_.runtime.vtable->is_pending(interface_.runtime.self) &&
+           !interface_.runtime.vtable->is_active(interface_.runtime.self) &&
+           !interface_.snapshot(interface_.runtime.self).queued_requests;
   }
 
-  void Stage(std::string path, loom_serve_variant_id_t base,
-             loom_serve_variant_id_t* out_id) {
+  void Stage(std::string path, loom_runtime_variant_id_t base,
+             loom_runtime_variant_id_t* out_id) {
     // Both the locator array and its string disappear before JIT completion.
     // The service captures inputs instead of borrowing the management request.
     path = std::filesystem::absolute(path).string();
     const auto provider = iree_make_cstring_view(path.c_str());
-    const loom_serve_sources_t sources = {.count = 1, .values = &provider};
+    const loom_runtime_sources_t sources = {.count = 1, .values = &provider};
     IREE_ASSERT_OK(configuration_.stage_native(configuration_.self, base,
                                                &sources, out_id));
   }
 
   void AwaitCandidates() {
     AdvanceUntil(interface_, [&] {
-      return !loom_serve_variant_pool_pending(configuration_.pool);
+      return !loom_runtime_variant_pool_pending(configuration_.pool);
     });
   }
 
-  void Select(loom_serve_variant_id_t id) {
+  void Select(loom_runtime_variant_id_t id) {
     selection_.called = false;
     IREE_ASSERT_OK(configuration_.select(
         configuration_.self, id, configuration_.selected(configuration_.self),
@@ -356,7 +357,7 @@ class ReconfigurationTextServiceTest : public SourceTextServiceTest {
   }
 
   static void Selected(void* user_data, iree_status_t status,
-                       loom_serve_variant_id_t id) {
+                       loom_runtime_variant_id_t id) {
     auto* self = static_cast<ReconfigurationTextServiceTest*>(user_data);
     EXPECT_FALSE(self->selection_.called);
     self->selection_.status = status;
@@ -369,9 +370,9 @@ class ReconfigurationTextServiceTest : public SourceTextServiceTest {
   // Borrowed owner callbacks, invoked without a concurrent router owner.
   loom_serve_service_t interface_ = {};
   // Borrowed modality policy; its pool has no preferred-choice field.
-  loom_serve_reconfiguration_t configuration_ = {};
+  loom_service_reconfiguration_t configuration_ = {};
   // Initially preferred executable identity, used for explicit rollback.
-  loom_serve_variant_id_t original_ = 0;
+  loom_runtime_variant_id_t original_ = 0;
   // Owner-thread terminal selection delivery, alive through TearDown.
   struct {
     // Exactly one callback is owed for an accepted selection.
@@ -379,7 +380,7 @@ class ReconfigurationTextServiceTest : public SourceTextServiceTest {
     // Owned status, consumed by the test or teardown.
     iree_status_t status = iree_ok_status();
     // Actual preferred identity after success, failure or cancellation.
-    loom_serve_variant_id_t id = 0;
+    loom_runtime_variant_id_t id = 0;
   } selection_;
 };
 
@@ -390,13 +391,13 @@ TEST_F(ReconfigurationTextServiceTest,
   ASSERT_NO_FATAL_FAILURE(EditNativeProvider(directory_ + "/advance.loom", path,
                                              "scalar.remui %total, %c3_i32",
                                              "scalar.remui %total, %c1_i32"));
-  loom_serve_variant_id_t id = 0;
+  loom_runtime_variant_id_t id = 0;
   ASSERT_NO_FATAL_FAILURE(Stage(path, original_, &id));
   ASSERT_NO_FATAL_FAILURE(AwaitCandidates());
-  loom_serve_variant_snapshot_t snapshot = {};
+  loom_runtime_variant_snapshot_t snapshot = {};
   ASSERT_TRUE(
-      loom_serve_variant_pool_snapshot(configuration_.pool, id, &snapshot));
-  ASSERT_EQ(snapshot.phase, LOOM_SERVE_VARIANT_READY);
+      loom_runtime_variant_pool_snapshot(configuration_.pool, id, &snapshot));
+  ASSERT_EQ(snapshot.phase, LOOM_RUNTIME_VARIANT_READY);
   EXPECT_EQ(configuration_.selected(configuration_.self), original_);
   const auto compiled = loom_serve_text_model_parameter_activity(model_);
   EXPECT_EQ(compiled.read_bytes, unloaded.read_bytes);
@@ -408,7 +409,8 @@ TEST_F(ReconfigurationTextServiceTest,
   loom_serve_http_connection_t* connection = nullptr;
   ASSERT_NO_FATAL_FAILURE(Accept(first, interface_, &connection));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] {
-    return std::string(interface_.snapshot(interface_.self).phase) == "execute";
+    return std::string(interface_.snapshot(interface_.runtime.self).phase) ==
+           "execute";
   }));
   EXPECT_EQ(interface_.telemetry.counters->batches, 0u);
   // First admission activates a demand-loaded model. Establish the resident
@@ -420,15 +422,17 @@ TEST_F(ReconfigurationTextServiceTest,
   const loom_serve_http_request_t* request = nullptr;
   IREE_ASSERT_OK(http_.TakeRequest(second, &connection, &request));
   loom_serve::testing::text::OwnerTurn::Run(
-      loom_serve_host_executor(host_), [&] {
+      loom_runtime_host_executor(host_), [&] {
         IREE_ASSERT_OK(
-            interface_.accept(interface_.self, connection, request, 0));
-        EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 1u);
+            interface_.accept(interface_.runtime.self, connection, request, 0));
+        EXPECT_EQ(interface_.snapshot(interface_.runtime.self).queued_requests,
+                  1u);
         ASSERT_NO_FATAL_FAILURE(Select(id));
         EXPECT_FALSE(selection_.called);
         EXPECT_EQ(configuration_.selected(configuration_.self), original_);
         bool progress = false;
-        IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+        IREE_ASSERT_OK(interface_.runtime.vtable->advance(
+            interface_.runtime.self, 0, &progress));
         // The accepted CPU task cannot retire while its sole worker runs this
         // turn, even if the outstanding device epoch is already ready.
         EXPECT_FALSE(selection_.called);
@@ -442,14 +446,14 @@ TEST_F(ReconfigurationTextServiceTest,
   EXPECT_EQ(Content(Read(second)), "aaa");
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
-      loom_serve_variant_pool_remove(configuration_.pool, id));
+      loom_runtime_variant_pool_remove(configuration_.pool, id));
 
   ASSERT_NO_FATAL_FAILURE(Select(original_));
   ASSERT_NO_FATAL_FAILURE(
       AdvanceUntil(interface_, [&] { return selection_.called; }));
   IREE_ASSERT_OK(TakeSelectionStatus());
   EXPECT_EQ(selection_.id, original_);
-  IREE_ASSERT_OK(loom_serve_variant_pool_remove(configuration_.pool, id));
+  IREE_ASSERT_OK(loom_runtime_variant_pool_remove(configuration_.pool, id));
   const int resumed = Send(
       Request(Message("user", prompt) + "," + Message("assistant", "aaaa") +
                   "," + Message("user", "bx"),
@@ -474,11 +478,11 @@ TEST_F(ReconfigurationTextServiceTest,
   ASSERT_NO_FATAL_FAILURE(EditNativeProvider(
       directory_ + "/advance.loom", changed, "scalar.remui %total, %c3_i32",
       "scalar.remui %total, %c1_i32"));
-  loom_serve_variant_id_t ready = 0, alternative = 0;
+  loom_runtime_variant_id_t ready = 0, alternative = 0;
   ASSERT_NO_FATAL_FAILURE(Stage(changed, original_, &ready));
   ASSERT_NO_FATAL_FAILURE(
       Stage(directory_ + "/advance.loom", original_, &alternative));
-  loom_serve_variant_id_t failures[2] = {};
+  loom_runtime_variant_id_t failures[2] = {};
   for (unsigned i = 0; i < 2; ++i) {
     const auto rejected =
         iree::testing::MakeTempFilePath("service_rejected", ".loom");
@@ -491,10 +495,10 @@ TEST_F(ReconfigurationTextServiceTest,
   ASSERT_NO_FATAL_FAILURE(AwaitCandidates());
   EXPECT_EQ(configuration_.selected(configuration_.self), original_);
   for (unsigned i = 0; i < 2; ++i) {
-    loom_serve_variant_snapshot_t snapshot = {};
-    ASSERT_TRUE(loom_serve_variant_pool_snapshot(configuration_.pool,
-                                                 failures[i], &snapshot));
-    EXPECT_EQ(snapshot.phase, LOOM_SERVE_VARIANT_FAILED);
+    loom_runtime_variant_snapshot_t snapshot = {};
+    ASSERT_TRUE(loom_runtime_variant_pool_snapshot(configuration_.pool,
+                                                   failures[i], &snapshot));
+    EXPECT_EQ(snapshot.phase, LOOM_RUNTIME_VARIANT_FAILED);
     EXPECT_EQ(snapshot.code, IREE_STATUS_INVALID_ARGUMENT);
     EXPECT_GT(snapshot.message.size, 0u);
     if (!i) {
@@ -526,11 +530,11 @@ TEST_F(ReconfigurationTextServiceTest,
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         configuration_.select(configuration_.self, alternative,
                                               original_, Selected, this));
-  loom_serve_variant_entry_t* pinned = nullptr;
-  IREE_ASSERT_OK(loom_serve_variant_pool_acquire(configuration_.pool,
-                                                 alternative, &pinned));
+  loom_runtime_variant_entry_t* pinned = nullptr;
+  IREE_ASSERT_OK(loom_runtime_variant_pool_acquire(configuration_.pool,
+                                                   alternative, &pinned));
   EXPECT_EQ(configuration_.selected(configuration_.self), ready);
-  loom_serve_variant_entry_release(pinned);
+  loom_runtime_variant_entry_release(pinned);
   const int updated = Send(Request(Message("user", "baxab"), 3));
   ASSERT_NO_FATAL_FAILURE(Accept(updated, interface_, &connection));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
@@ -539,7 +543,7 @@ TEST_F(ReconfigurationTextServiceTest,
 
 TEST_F(ReconfigurationTextServiceTest,
        SelectionWaitsForTheInputCountingSourceBorrow) {
-  loom_serve_variant_id_t id = 0;
+  loom_runtime_variant_id_t id = 0;
   ASSERT_NO_FATAL_FAILURE(Stage(directory_ + "/advance.loom", original_, &id));
   ASSERT_NO_FATAL_FAILURE(AwaitCandidates());
   const int client = Send(Request(Message("user", "abxa")), "",
@@ -548,12 +552,13 @@ TEST_F(ReconfigurationTextServiceTest,
   const loom_serve_http_request_t* request = nullptr;
   IREE_ASSERT_OK(http_.TakeRequest(client, &connection, &request));
   loom_serve::testing::text::OwnerTurn::Run(
-      loom_serve_host_executor(host_), [&] {
+      loom_runtime_host_executor(host_), [&] {
         IREE_ASSERT_OK(
-            interface_.accept(interface_.self, connection, request, 0));
+            interface_.accept(interface_.runtime.self, connection, request, 0));
         ASSERT_NO_FATAL_FAILURE(Select(id));
         bool progress = false;
-        IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
+        IREE_ASSERT_OK(interface_.runtime.vtable->advance(
+            interface_.runtime.self, 0, &progress));
         EXPECT_FALSE(selection_.called);
         EXPECT_EQ(configuration_.selected(configuration_.self), original_);
       });
@@ -567,33 +572,35 @@ TEST_F(ReconfigurationTextServiceTest,
 
 TEST_F(ReconfigurationTextServiceTest,
        StopCancelsSelectionButJoinsAcceptedCompilerBorrow) {
-  loom_serve_variant_id_t id = 0;
+  loom_runtime_variant_id_t id = 0;
   loom_serve::testing::text::OwnerTurn::Run(
-      loom_serve_host_executor(host_), [&] {
+      loom_runtime_host_executor(host_), [&] {
         ASSERT_NO_FATAL_FAILURE(
             Stage(directory_ + "/advance.loom", original_, &id));
         ASSERT_NO_FATAL_FAILURE(Select(original_));
         bool progress = false;
-        IREE_ASSERT_OK(interface_.advance(
-            interface_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
+        IREE_ASSERT_OK(interface_.runtime.vtable->advance(
+            interface_.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING,
+            &progress));
         EXPECT_TRUE(selection_.called);
         EXPECT_EQ(selection_.id, original_);
         IREE_EXPECT_STATUS_IS(IREE_STATUS_CANCELLED, TakeSelectionStatus());
-        EXPECT_TRUE(interface_.is_pending(interface_.self));
-        loom_serve_variant_snapshot_t snapshot = {};
-        ASSERT_TRUE(loom_serve_variant_pool_snapshot(configuration_.pool, id,
-                                                     &snapshot));
-        EXPECT_EQ(snapshot.phase, LOOM_SERVE_VARIANT_COMPILING);
+        EXPECT_TRUE(
+            interface_.runtime.vtable->is_pending(interface_.runtime.self));
+        loom_runtime_variant_snapshot_t snapshot = {};
+        ASSERT_TRUE(loom_runtime_variant_pool_snapshot(configuration_.pool, id,
+                                                       &snapshot));
+        EXPECT_EQ(snapshot.phase, LOOM_RUNTIME_VARIANT_COMPILING);
       });
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING));
-  loom_serve_variant_snapshot_t snapshot = {};
+      interface_, [&] { return Idle(); }, LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
+  loom_runtime_variant_snapshot_t snapshot = {};
   ASSERT_TRUE(
-      loom_serve_variant_pool_snapshot(configuration_.pool, id, &snapshot));
-  EXPECT_EQ(snapshot.phase, LOOM_SERVE_VARIANT_READY);
+      loom_runtime_variant_pool_snapshot(configuration_.pool, id, &snapshot));
+  EXPECT_EQ(snapshot.phase, LOOM_RUNTIME_VARIANT_READY);
   const auto provider = IREE_SV("ignored.loom");
-  const loom_serve_sources_t sources = {.count = 1, .values = &provider};
-  loom_serve_variant_id_t rejected = 0;
+  const loom_runtime_sources_t sources = {.count = 1, .values = &provider};
+  loom_runtime_variant_id_t rejected = 0;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
       configuration_.stage_native(configuration_.self, original_, &sources,

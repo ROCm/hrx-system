@@ -8,13 +8,13 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "loom/serve/service/finite/embedding/protocol.h"
 #include "loom/serve/service/text/epoch.h"
 #include "loom/serve/service/text/epoch_upload.h"
 #include "loom/serve/service/text/media_epoch.h"
 #include "loom/serve/service/text/media_projector.h"
 #include "loom/serve/service/text/readiness.h"
 #include "loom/serve/service/text/service_test_fixture.h"
+#include "loom/service/finite/embedding/protocol.h"
 
 namespace {
 
@@ -28,12 +28,12 @@ class MediaExecutionTest : public SourceTextServiceTest {
     const char* source = std::getenv("LOOM_SERVE_TEST_MEDIA_SOURCE");
     ASSERT_NE(source, nullptr);
     IREE_ASSERT_OK(producer_document_.Load(source));
-    const loom_serve_finite_model_options_t options = {
+    const loom_service_finite_model_options_t options = {
         .sources = producer_document_.value().sources,
         .asset_directory = IREE_SV("."),
         .options = IREE_SV("{}"),
     };
-    IREE_ASSERT_OK(loom_serve_finite_model_allocate(
+    IREE_ASSERT_OK(loom_service_finite_model_allocate(
         device_, storage_owner_, &options, host_allocator_, &producer_));
   }
 
@@ -45,25 +45,25 @@ class MediaExecutionTest : public SourceTextServiceTest {
       iree_hal_buffer_release(buffer);
     }
     if (consumer_) {
-      IREE_EXPECT_OK(loom_serve_execution_drain(consumer_));
-      loom_serve_execution_release(consumer_);
+      IREE_EXPECT_OK(loom_runtime_execution_drain(consumer_));
+      loom_runtime_execution_release(consumer_);
     }
     iree_hal_semaphore_release(gate_);
     loom_serve_text_media_epoch_deinitialize(&packet_);
     SourceTextServiceTest::TearDown();
-    IREE_EXPECT_OK(loom_serve_finite_model_free(producer_));
-    loom_serve_finite_result_release(result_);
+    IREE_EXPECT_OK(loom_service_finite_model_free(producer_));
+    loom_service_finite_result_release(result_);
     for (size_t i = 0; i < requests_.size(); ++i) {
       iree_vm_buffer_release(prepared_[i].bytes);
-      loom_serve_embedding_request_deinitialize(&requests_[i]);
+      loom_service_embedding_request_deinitialize(&requests_[i]);
     }
   }
 
-  void Wait(loom_serve_execution_frontier_t ready) {
+  void Wait(loom_runtime_execution_frontier_t ready) {
     for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-      IREE_ASSERT_OK(
-          loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                    ready.semaphores[i], ready.values[i]));
+      IREE_ASSERT_OK(loom_runtime_workspace_wait(
+          loom_runtime_pool_workspace(storage_owner_), ready.semaphores[i],
+          ready.values[i]));
     }
   }
 
@@ -75,33 +75,34 @@ class MediaExecutionTest : public SourceTextServiceTest {
     // physical rows backwards. Original request and row ordinals are required.
     std::array<iree_host_size_t, 3> rows;
     for (size_t i = 0; i < requests_.size(); ++i) {
-      IREE_ASSERT_OK(loom_serve_embedding_request_initialize(
+      IREE_ASSERT_OK(loom_service_embedding_request_initialize(
           iree_make_cstring_view(bodies[i]), host_allocator_, &requests_[i]));
-      IREE_ASSERT_OK(loom_serve_finite_model_prepare_request(
+      IREE_ASSERT_OK(loom_service_finite_model_prepare_request(
           producer_, requests_[i].base.input, &prepared_[i]));
       rows[i] = requests_[i].base.count;
     }
-    IREE_ASSERT_OK(loom_serve_finite_model_prepare_batch(
+    IREE_ASSERT_OK(loom_service_finite_model_prepare_batch(
         producer_, prepared_.size(), prepared_.data(), rows.data()));
     bool code_ready = false;
     IREE_ASSERT_OK(
-        loom_serve_finite_model_advance_batch(producer_, false, &code_ready));
+        loom_service_finite_model_advance_batch(producer_, false, &code_ready));
     ASSERT_TRUE(code_ready);
-    loom_serve_residency_admission_t admission;
-    IREE_ASSERT_OK(loom_serve_residency_try_admit(
-        loom_serve_finite_model_residency(producer_), &admission));
-    ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
-    loom_serve_execution_frontier_t ready;
-    IREE_ASSERT_OK(loom_serve_finite_model_submit(producer_, &result_, &ready));
+    loom_runtime_residency_admission_t admission;
+    IREE_ASSERT_OK(loom_runtime_residency_try_admit(
+        loom_service_finite_model_residency(producer_), &admission));
+    ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+    loom_runtime_execution_frontier_t ready;
+    IREE_ASSERT_OK(
+        loom_service_finite_model_submit(producer_, &result_, &ready));
     EXPECT_EQ(ready.values[1], 0u);
   }
 
   void RemoveProducer() {
-    ASSERT_NO_FATAL_FAILURE(Wait(loom_serve_finite_result_ready(result_)));
-    loom_serve_finite_model_complete(producer_);
+    ASSERT_NO_FATAL_FAILURE(Wait(loom_service_finite_result_ready(result_)));
+    loom_service_finite_model_complete(producer_);
     IREE_ASSERT_OK(
-        loom_serve_finite_model_free(std::exchange(producer_, nullptr)));
-    loom_serve_finite_result_release(std::exchange(result_, nullptr));
+        loom_service_finite_model_free(std::exchange(producer_, nullptr)));
+    loom_service_finite_result_release(std::exchange(result_, nullptr));
   }
 
   static int32_t Fingerprint(float value, uint32_t image_row = 0) {
@@ -113,15 +114,15 @@ class MediaExecutionTest : public SourceTextServiceTest {
   // Production source document outliving the projector.
   loom_serve::testing::ModelDocument producer_document_;
   // Independent finite model sharing the text device and workspace.
-  loom_serve_finite_model_t* producer_ = nullptr;
+  loom_service_finite_model_t* producer_ = nullptr;
   // Original cohort ownership shared by the text requests.
-  loom_serve_finite_result_t* result_ = nullptr;
+  loom_service_finite_result_t* result_ = nullptr;
   // HTTP protocol and source input storage retained through producer work.
-  std::array<loom_serve_embedding_request_t, 3> requests_ = {};
+  std::array<loom_service_embedding_request_t, 3> requests_ = {};
   // Source-prepared request bytes, independent of cohort result ownership.
-  std::array<loom_serve_prepared_request_t, 3> prepared_ = {};
+  std::array<loom_service_prepared_request_t, 3> prepared_ = {};
   // Explicitly gated consumer for delayed-capture retirement coverage.
-  loom_serve_execution_t* consumer_ = nullptr;
+  loom_runtime_execution_t* consumer_ = nullptr;
   // Owner-signalled readiness; no sleep or deadline models queue retirement.
   iree_hal_semaphore_t* gate_ = nullptr;
   // Consumer-owned metadata and mixed input allocations.
@@ -139,7 +140,7 @@ TEST_F(MediaExecutionTest, ProjectorAlignsAndReturnsItsHostAllocation) {
   alignas(alignment) uint8_t storage[4096];
   iree_async_proactor_t* proactor = nullptr;
   IREE_ASSERT_OK(iree_async_proactor_pool_get(
-      loom_serve_host_proactor_pool(host_), 0, &proactor));
+      loom_runtime_host_proactor_pool(host_), 0, &proactor));
   // A valid host allocator need not provide the task process's extended
   // alignment. Exercise each naturally aligned offset within one cache line.
   for (size_t offset = 0; offset < alignment; offset += iree_max_align_t) {
@@ -150,7 +151,7 @@ TEST_F(MediaExecutionTest, ProjectorAlignsAndReturnsItsHostAllocation) {
     };
     loom_serve_text_media_projector_t* projector = nullptr;
     IREE_ASSERT_OK(loom_serve_text_media_projector_allocate(
-        producer_, 1, loom_serve_host_executor(host_), proactor, {},
+        producer_, 1, loom_runtime_host_executor(host_), proactor, {},
         iree_allocator_inline_arena(&arena), &projector));
     EXPECT_EQ(reinterpret_cast<uintptr_t>(projector) % alignment, 0u);
     EXPECT_TRUE(loom_serve_text_media_projector_is_collecting(projector));
@@ -233,7 +234,7 @@ TEST_F(MediaExecutionTest, RaggedCohortConditionsPackedAndIsolatedTextChunks) {
       loom_serve_text_epoch_prepare(&options, rows, 3, &plan, scheduled, &epoch,
                                     &continuation);
       do {
-        loom_serve_execution_frontier_t ready;
+        loom_runtime_execution_frontier_t ready;
         IREE_ASSERT_OK(loom_serve_text_epoch_submit(
             model_, mode, &epoch, &continuation, nullptr, &ready));
         if (mode == LOOM_SERVICE_TEXT_SCHEDULE_MATCHED && chunk == 1 &&
@@ -309,21 +310,21 @@ TEST_F(MediaExecutionTest,
   std::memset(packet_.packet_record_bytes.data, 0x5A,
               packet_.packet_record_bytes.data_length);
 
-  IREE_ASSERT_OK(
-      loom_serve_device_create_execution(device_, storage_owner_, &consumer_));
+  IREE_ASSERT_OK(loom_runtime_device_create_execution(device_, storage_owner_,
+                                                      &consumer_));
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate_));
+      loom_runtime_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate_));
   uint64_t gate_value = 1;
   IREE_ASSERT_OK(
-      loom_serve_execution_barrier(consumer_, {1, &gate_, &gate_value}));
+      loom_runtime_execution_barrier(consumer_, {1, &gate_, &gate_value}));
   const auto metadata_request = iree_hal_make_pool_reservation_request(16, 16);
   const auto packet_request =
       iree_hal_make_pool_reservation_request(packet_.device_length, 16);
-  IREE_ASSERT_OK(loom_serve_execution_alloca(consumer_, 1, &metadata_request,
-                                             &buffers_[0]));
-  IREE_ASSERT_OK(
-      loom_serve_execution_alloca(consumer_, 1, &packet_request, &buffers_[1]));
+  IREE_ASSERT_OK(loom_runtime_execution_alloca(consumer_, 1, &metadata_request,
+                                               &buffers_[0]));
+  IREE_ASSERT_OK(loom_runtime_execution_alloca(consumer_, 1, &packet_request,
+                                               &buffers_[1]));
   uint8_t ranges[80];
   const uint64_t fields[] = {
       0, 0, 0, 0, sizeof(control_),
@@ -343,7 +344,7 @@ TEST_F(MediaExecutionTest,
                                                      buffers_[1], &value));
   EXPECT_EQ(packet_.transfer.operations, nullptr);
   ASSERT_NO_FATAL_FAILURE(RemoveProducer());
-  IREE_ASSERT_OK(loom_serve_pool_trim(storage_owner_, 0));
+  IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner_, 0));
   output_.resize(packet_.device_length);
   const iree_hal_transfer_operation_t download = {
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
@@ -355,13 +356,13 @@ TEST_F(MediaExecutionTest,
           },
   };
   IREE_ASSERT_OK(
-      loom_serve_execution_transfer(consumer_, 1, &download, &value));
+      loom_runtime_execution_transfer(consumer_, 1, &download, &value));
   for (auto*& buffer : buffers_) {
-    IREE_ASSERT_OK(loom_serve_execution_dealloca(consumer_, buffer, &value));
+    IREE_ASSERT_OK(loom_runtime_execution_dealloca(consumer_, buffer, &value));
     iree_hal_buffer_release(std::exchange(buffer, nullptr));
   }
   IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
-  IREE_ASSERT_OK(loom_serve_execution_drain(consumer_));
+  IREE_ASSERT_OK(loom_runtime_execution_drain(consumer_));
   EXPECT_EQ(output_[0], 0x5A);
   EXPECT_EQ(iree_unaligned_load_le_u32(output_.data() + 128), Fingerprint(1));
   EXPECT_EQ(iree_unaligned_load_le_u32(output_.data() + 144), Fingerprint(9));

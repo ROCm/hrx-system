@@ -104,9 +104,9 @@ TEST_F(SourceTextServiceTest, CopiedTelemetryOutlivesOwnersAndNameReuse) {
       loom_serve_http_connection_t* connection = nullptr;
       ASSERT_NO_FATAL_FAILURE(Accept(client, interface, &connection));
       ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
-        return !interface.is_pending(interface.self) &&
-               !interface.is_active(interface.self) &&
-               !interface.snapshot(interface.self).queued_requests;
+        return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+               !interface.runtime.vtable->is_active(interface.runtime.self) &&
+               !interface.snapshot(interface.runtime.self).queued_requests;
       }));
       EXPECT_EQ(Content(Read(client)), Oracle::Complete(prompt, 2));
       const auto head = loom_runtime_telemetry_stream_head(stream.get());
@@ -137,7 +137,7 @@ TEST_F(SourceTextServiceTest, CopiedTelemetryOutlivesOwnersAndNameReuse) {
     EXPECT_NE(response.find(R"("event":"gap")"), std::string::npos);
     EXPECT_NE(response.find(R"("completed":3)"), std::string::npos);
     iree_string_builder_deinitialize(&output);
-    interface.set_observer(interface.self, {});
+    interface.runtime.vtable->set_observer(interface.runtime.self, {});
     service.reset();
     stream.reset();
     batches.push_back(std::move(batch));

@@ -13,8 +13,8 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/base64.h"
 #include "iree/base/string_builder.h"
-#include "loom/serve/runtime/program/compilation.h"
-#include "loom/serve/runtime/program/sources.h"
+#include "loom/runtime/program/compilation.h"
+#include "loom/runtime/program/sources.h"
 #include "loom/serve/service/text/chat.h"
 #include "loom/serve/testing/text_policy.h"
 #include "loom/util/json.h"
@@ -41,12 +41,12 @@ void CheckSourcePaths() {
 class Environment {
  public:
   explicit Environment(const std::string& source_path) {
-    const loom_serve_sources_t sources = {
+    const loom_runtime_sources_t sources = {
         .base_directory = IREE_SV("."),
         .control =
             iree_make_string_view(source_path.data(), source_path.size()),
     };
-    loom_serve_compilation_report_t report = {};
+    loom_runtime_compilation_report_t report = {};
     IREE_CHECK_OK(loom_serve_test_text_policy_allocate(
         &sources,
         iree_make_string_view(tokenizer_path.data(), tokenizer_path.size()),

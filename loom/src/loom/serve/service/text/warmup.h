@@ -7,8 +7,8 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_WARMUP_H_
 #define LOOM_SERVE_SERVICE_TEXT_WARMUP_H_
 
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/parameter/residency.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/parameter/residency.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,8 +21,8 @@ typedef struct loom_serve_text_warmup_t loom_serve_text_warmup_t;
 
 // Allocates unstarted ownership. No parameter I/O or capacity admission occurs.
 iree_status_t loom_serve_text_warmup_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
-    loom_serve_residency_group_t* group, void (*wake)(void* user_data),
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
+    loom_runtime_residency_group_t* group, void (*wake)(void* user_data),
     void* user_data, iree_allocator_t host_allocator,
     loom_serve_text_warmup_t** out_warmup);
 

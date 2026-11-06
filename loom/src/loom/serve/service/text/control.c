@@ -9,17 +9,17 @@
 #include <string.h>
 
 #include "iree/vm/sync.h"
-#include "loom/serve/runtime/parameter/module.h"
-#include "loom/serve/runtime/program/input.h"
-#include "loom/serve/runtime/program/json.h"
+#include "loom/runtime/parameter/module.h"
+#include "loom/runtime/program/input.h"
+#include "loom/runtime/program/json.h"
 #include "loom/serve/service/text/epoch_plan.h"
 #include "loom/serve/service/text/tool_xml.h"
 
 iree_status_t loom_serve_text_control_initialize(
-    const loom_serve_text_source_t* source, loom_serve_execution_t* execution,
+    const loom_serve_text_source_t* source, loom_runtime_execution_t* execution,
     iree_hal_queue_t* transfer, const loom_serve_text_state_t* state,
     iree_host_size_t shape_count, const loom_serve_packing_shape_t* shapes,
-    iree_host_size_t stage_count, const loom_serve_stage_t* stages,
+    iree_host_size_t stage_count, const loom_runtime_stage_t* stages,
     iree_allocator_t host_allocator, loom_serve_text_control_t* out_control) {
   loom_serve_text_control_t* control = out_control;
   memset(control, 0, sizeof(*control));
@@ -94,26 +94,26 @@ iree_status_t loom_serve_text_control_initialize(
       control->host.bytes[TEXT_HOST_RESULTS],
       control->host.bytes[TEXT_HOST_NEXT_RESULTS],
   };
-  const loom_serve_module_options_t options = {
+  const loom_runtime_module_options_t options = {
       .binding_capacity = 7,
       .stages = {stage_count, stages},
       .feedback = {IREE_ARRAYSIZE(feedback), feedback},
   };
-  status = loom_serve_module_create(&source->types, execution, options,
-                                    host_allocator, &control->native_module);
+  status = loom_runtime_module_create(&source->types, execution, options,
+                                      host_allocator, &control->native_module);
   IREE_RETURN_IF_ERROR(status);
   iree_vm_module_t* libraries[] = {control->native_module, NULL, NULL, NULL,
                                    NULL};
-  status = loom_serve_input_module_create(
-      source->environment, loom_serve_tokenizer_value(source->tokenizer),
+  status = loom_runtime_input_module_create(
+      source->environment, loom_runtime_tokenizer_value(source->tokenizer),
       host_allocator, &libraries[1]);
   if (iree_status_is_ok(status)) {
-    status = loom_serve_json_module_create(source->environment, host_allocator,
-                                           &libraries[2]);
+    status = loom_runtime_json_module_create(source->environment,
+                                             host_allocator, &libraries[2]);
   }
   const bool generates = source->mode == LOOM_SERVE_TEXT_MODE_GENERATE;
   if (iree_status_is_ok(status)) {
-    status = loom_serve_parameters_module_create(
+    status = loom_runtime_parameters_module_create(
         source->environment, &source->types, transfer,
         source->parameter_sources, host_allocator, &libraries[3]);
   }
@@ -122,9 +122,9 @@ iree_status_t loom_serve_text_control_initialize(
         source->environment, host_allocator, &libraries[4]);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_program_link_service(
-        source->module, loom_serve_preparation_card(source->preparation),
-        loom_serve_preparation_component(source->preparation),
+    status = loom_runtime_program_link_service(
+        source->module, loom_runtime_preparation_card(source->preparation),
+        loom_runtime_preparation_component(source->preparation),
         iree_vm_module_span_from_ptr(libraries, generates ? 5 : 4),
         host_allocator, &control->program);
   }
@@ -172,7 +172,7 @@ iree_status_t loom_serve_text_control_initialize(
       i32,           device_buffer, device_buffer, device_buffer, device_buffer,
       device_buffer, device_buffer, device_buffer, device_buffer, device_buffer,
       device_buffer, device_buffer, device_buffer};
-  const loom_serve_program_binding_t bindings[] = {
+  const loom_runtime_program_binding_t bindings[] = {
       {IREE_SVL("encode_epoch"),
        {encode_arguments, IREE_ARRAYSIZE(encode_arguments)},
        {encode_results, IREE_ARRAYSIZE(encode_results)},
@@ -198,22 +198,22 @@ iree_status_t loom_serve_text_control_initialize(
        {&i64, 1},
        &control->epoch_step},
   };
-  IREE_RETURN_IF_ERROR(loom_serve_program_bind_service(
+  IREE_RETURN_IF_ERROR(loom_runtime_program_bind_service(
       control->program, IREE_ARRAYSIZE(bindings), bindings));
   if (generates) {
-    const loom_serve_program_binding_t step = {
+    const loom_runtime_program_binding_t step = {
         IREE_SVL("step"),
         {step_arguments, IREE_ARRAYSIZE(step_arguments)},
         {step_results, IREE_ARRAYSIZE(step_results)},
         &control->step};
-    return loom_serve_program_bind_service(control->program, 1, &step);
+    return loom_runtime_program_bind_service(control->program, 1, &step);
   }
   iree_vm_function_t defaults = {0};
   const iree_vm_signature_type_t capture_arguments[] = {buffer, i32, i32,
                                                         buffer};
   const iree_vm_signature_type_t options_arguments[] = {buffer, buffer, i64,
                                                         buffer};
-  const loom_serve_program_binding_t encoding_bindings[] = {
+  const loom_runtime_program_binding_t encoding_bindings[] = {
       {IREE_SVL("capture_epoch"),
        {capture_arguments, IREE_ARRAYSIZE(capture_arguments)},
        {&buffer, 1},
@@ -224,12 +224,12 @@ iree_status_t loom_serve_text_control_initialize(
        {&buffer, 1},
        &control->prepare_request},
   };
-  IREE_RETURN_IF_ERROR(loom_serve_program_bind_service(
+  IREE_RETURN_IF_ERROR(loom_runtime_program_bind_service(
       control->program, IREE_ARRAYSIZE(encoding_bindings), encoding_bindings));
   iree_vm_variant_t argument = iree_vm_buffer_variant_from_ptr_borrowed(
       &source->vm_types, source->options);
   iree_vm_variant_t result = {0};
-  status = iree_vm_invoke(loom_serve_program_invocation(control->program),
+  status = iree_vm_invoke(loom_runtime_program_invocation(control->program),
                           defaults, iree_vm_variant_span_from_ptr(&argument, 1),
                           iree_vm_variant_span_from_ptr(&result, 1));
   if (iree_status_is_ok(status)) {
@@ -249,7 +249,7 @@ void loom_serve_text_control_unlink(loom_serve_text_control_t* control) {
   iree_vm_buffer_release(control->defaults);
   control->defaults = NULL;
   loom_serve_text_chat_policy_deinitialize(&control->chat_policy);
-  loom_serve_program_free(control->program);
+  loom_runtime_program_free(control->program);
   control->program = NULL;
   iree_vm_module_release(control->native_module);
   control->native_module = NULL;
@@ -280,8 +280,8 @@ iree_status_t loom_serve_text_control_prepare_request(
       iree_vm_buffer_variant_from_ptr_borrowed(&source->vm_types, tokens)};
   iree_vm_variant_t result = {0};
   iree_status_t status = iree_vm_invoke(
-      loom_serve_program_invocation(control->program), control->prepare_request,
-      iree_vm_variant_span_from_array(arguments),
+      loom_runtime_program_invocation(control->program),
+      control->prepare_request, iree_vm_variant_span_from_array(arguments),
       iree_vm_variant_span_from_ptr(&result, 1));
   if (iree_status_is_ok(status)) {
     status = iree_vm_buffer_ptr_from_variant_move(&source->vm_types, &result,
@@ -312,7 +312,7 @@ iree_status_t loom_serve_text_control_capture(
   };
   iree_vm_variant_t result = {0};
   iree_status_t status = iree_vm_invoke(
-      loom_serve_program_invocation(control->program), control->capture_epoch,
+      loom_runtime_program_invocation(control->program), control->capture_epoch,
       iree_vm_variant_span_from_array(arguments),
       iree_vm_variant_span_from_ptr(&result, 1));
   iree_vm_buffer_t* plan = NULL;

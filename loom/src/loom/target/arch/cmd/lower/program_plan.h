@@ -15,10 +15,10 @@
 #include "loom/ir/ir.h"
 #include "loom/link/plan_materializer.h"
 #include "loom/pass/registry.h"
+#include "loom/runtime/command/program.h"
 #include "loom/target/arch/cmd/abi_layout.h"
 #include "loom/target/arch/cmd/lower/parameters.h"
 #include "loom/target/arch/cmd/lower/transients.h"
-#include "loom/target/arch/cmd/program.h"
 #include "loom/transforms/kernel/kernel_request_producer.h"
 
 #ifdef __cplusplus

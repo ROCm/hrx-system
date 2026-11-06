@@ -210,24 +210,24 @@ TEST_P(PrefixCaptureRetirementTest,
   loom_serve_http_connection_t* connection = nullptr;
   ASSERT_NO_FATAL_FAILURE(Accept(client, interface, &connection));
   const auto capture_accepted = [&] {
-    return std::string(interface.snapshot(interface.self).phase) ==
+    return std::string(interface.snapshot(interface.runtime.self).phase) ==
                "prefix_capture" &&
            interface.telemetry.counters->input_tokens == GetParam();
   };
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, capture_accepted));
-  EXPECT_TRUE(interface.is_pending(interface.self));
+  EXPECT_TRUE(interface.runtime.vtable->is_pending(interface.runtime.self));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
       interface,
       [&] {
-        return !interface.is_pending(interface.self) &&
-               !interface.is_active(interface.self);
+        return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+               !interface.runtime.vtable->is_active(interface.runtime.self);
       },
-      LOOM_SERVE_SERVICE_FLAG_STOPPING));
+      LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
   EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
   EXPECT_EQ(interface.telemetry.counters->input_tokens, GetParam());
   EXPECT_EQ(interface.telemetry.counters->output_tokens, 0u);
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).pending, 0u);
-  interface.set_observer(interface.self, {});
+  interface.runtime.vtable->set_observer(interface.runtime.self, {});
   loom_serve_text_service_free(service, IREE_STATUS_OK);
   Read(client, /*allow_empty=*/true);
   for (iree_host_size_t i = 0; i < options.row_count; ++i) {

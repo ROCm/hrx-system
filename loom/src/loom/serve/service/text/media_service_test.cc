@@ -9,8 +9,8 @@
 #include <cstring>
 
 #include "loom/serve/media/image_codec.h"
-#include "loom/serve/service/finite/component.h"
 #include "loom/serve/service/text/service_test_fixture.h"
+#include "loom/service/finite/component.h"
 
 namespace {
 
@@ -27,20 +27,20 @@ class MediaServiceTest : public SourceTextServiceTest {
     const char* source = std::getenv("LOOM_SERVE_TEST_PROJECTOR_SOURCE");
     ASSERT_NE(source, nullptr);
     IREE_ASSERT_OK(projector_document_.Load(source));
-    const loom_serve_finite_model_options_t options = {
+    const loom_service_finite_model_options_t options = {
         .sources = projector_document_.value().sources,
         .asset_directory = IREE_SV("."),
         .options = ProjectorOptions(),
         .specialization_cache = {2, 1024 * 1024},
     };
-    const loom_serve_wake_callback_t observer = {
+    const loom_runtime_wake_callback_t observer = {
         [](void* data) {
           iree_notification_post(static_cast<iree_notification_t*>(data),
                                  IREE_ALL_WAITERS);
         },
         loom_serve_http_server_notification(server_),
     };
-    IREE_ASSERT_OK(loom_serve_finite_component_allocate(
+    IREE_ASSERT_OK(loom_service_finite_component_allocate(
         device_, storage_owner_, &options, observer, host_allocator_, &image_));
     auto service_options = ServiceOptions();
     service_options.image = image_;
@@ -53,8 +53,9 @@ class MediaServiceTest : public SourceTextServiceTest {
   void TearDown() override {
     if (service_) {
       AdvanceUntil(
-          interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING);
-      interface_.set_observer(interface_.self, {});
+          interface_, [&] { return Idle(); },
+          LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
+      interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
       loom_serve_text_service_free(service_, IREE_STATUS_OK);
     }
     if (image_) {
@@ -62,7 +63,7 @@ class MediaServiceTest : public SourceTextServiceTest {
       bool complete = false;
       while (!complete) {
         const auto ticket = iree_notification_prepare_wait(notification);
-        auto status = loom_serve_finite_component_retire(image_, &complete);
+        auto status = loom_service_finite_component_retire(image_, &complete);
         if (complete || !iree_status_is_ok(status)) {
           iree_notification_cancel_wait(notification);
           IREE_ASSERT_OK(status);
@@ -72,15 +73,15 @@ class MediaServiceTest : public SourceTextServiceTest {
                                         IREE_TIME_INFINITE_FUTURE);
         }
       }
-      loom_serve_finite_component_free(image_);
+      loom_service_finite_component_free(image_);
     }
     SourceTextServiceTest::TearDown();
   }
 
   bool Idle() const {
-    return !interface_.is_pending(interface_.self) &&
-           !interface_.is_active(interface_.self) &&
-           !interface_.snapshot(interface_.self).queued_requests;
+    return !interface_.runtime.vtable->is_pending(interface_.runtime.self) &&
+           !interface_.runtime.vtable->is_active(interface_.runtime.self) &&
+           !interface_.snapshot(interface_.runtime.self).queued_requests;
   }
 
   static int32_t Feature(float value) {
@@ -117,10 +118,10 @@ class MediaServiceTest : public SourceTextServiceTest {
       ASSERT_EQ(std::string(requests[i]->body.data, requests[i]->body.size),
                 bodies[i]);
     }
-    OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+    OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
       for (size_t i = 0; i < bodies.size(); ++i) {
-        IREE_ASSERT_OK(
-            interface_.accept(interface_.self, connections[i], requests[i], 0));
+        IREE_ASSERT_OK(interface_.accept(interface_.runtime.self,
+                                         connections[i], requests[i], 0));
       }
     });
   }
@@ -133,9 +134,11 @@ class MediaServiceTest : public SourceTextServiceTest {
     while (!reached && !HasFatalFailure()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
-        IREE_ASSERT_OK(interface_.advance(interface_.self, 0, &progress));
-        if (std::string(interface_.snapshot(interface_.self).phase) == phase) {
+      OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
+        IREE_ASSERT_OK(interface_.runtime.vtable->advance(
+            interface_.runtime.self, 0, &progress));
+        if (std::string(interface_.snapshot(interface_.runtime.self).phase) ==
+            phase) {
           reached = true;
           action();
         }
@@ -152,7 +155,7 @@ class MediaServiceTest : public SourceTextServiceTest {
   // Source documents outlive lazy preparation and final component retirement.
   loom_serve::testing::ModelDocument projector_document_;
   // Independent optional image computation on the actual text device.
-  loom_serve_finite_component_t* image_ = nullptr;
+  loom_service_finite_component_t* image_ = nullptr;
   // Serialized production HTTP owner, including its native projection window.
   loom_serve_text_service_t* service_ = nullptr;
   // Borrowed callbacks driven on the ordinary shared executor.
@@ -192,9 +195,10 @@ class CachedMediaServiceTest : public MediaServiceTest {
 
   size_t CachedSessions() {
     size_t count = 0;
-    loom_serve_http_session_snapshot_t snapshot = {};
-    for (size_t i = 0;
-         interface_.inspection.session_at(interface_.self, i, &snapshot); ++i) {
+    loom_service_session_snapshot_t snapshot = {};
+    for (size_t i = 0; interface_.inspection.session_at(interface_.runtime.self,
+                                                        i, &snapshot);
+         ++i) {
       count += snapshot.id && std::string(snapshot.storage) == "cache";
     }
     return count;
@@ -349,9 +353,9 @@ TEST_F(FailedMediaServiceTest, ComponentFailureRejectsImagesButPreservesText) {
     }
   }
   EXPECT_EQ(Content(Read(clients[2])), Oracle::Complete("abxa", 4));
-  EXPECT_EQ(loom_serve_finite_component_phase(image_),
-            enabled ? LOOM_SERVE_FINITE_COMPONENT_FAILED
-                    : LOOM_SERVE_FINITE_COMPONENT_DECLARED);
+  EXPECT_EQ(loom_service_finite_component_phase(image_),
+            enabled ? LOOM_SERVICE_FINITE_COMPONENT_FAILED
+                    : LOOM_SERVICE_FINITE_COMPONENT_DECLARED);
   EXPECT_EQ(interface_.telemetry.counters->rejected, 2u);
   EXPECT_EQ(interface_.telemetry.counters->completed, 1u);
   EXPECT_EQ(interface_.telemetry.counters->failed, 0u);
@@ -459,14 +463,15 @@ TEST_P(CancelledMediaServiceTest,
           0u);
     }
     bool progress = false;
-    IREE_ASSERT_OK(interface_.advance(
-        interface_.self, LOOM_SERVE_SERVICE_FLAG_STOPPING, &progress));
-    EXPECT_TRUE(interface_.is_pending(interface_.self));
-    EXPECT_EQ(interface_.snapshot(interface_.self).queued_requests, 2u);
+    IREE_ASSERT_OK(interface_.runtime.vtable->advance(
+        interface_.runtime.self, LOOM_RUNTIME_SERVICE_FLAG_STOPPING,
+        &progress));
+    EXPECT_TRUE(interface_.runtime.vtable->is_pending(interface_.runtime.self));
+    EXPECT_EQ(interface_.snapshot(interface_.runtime.self).queued_requests, 2u);
     EXPECT_EQ(interface_.telemetry.counters->cancelled, 0u);
   }));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
-      interface_, [&] { return Idle(); }, LOOM_SERVE_SERVICE_FLAG_STOPPING));
+      interface_, [&] { return Idle(); }, LOOM_RUNTIME_SERVICE_FLAG_STOPPING));
   EXPECT_TRUE(Read(clients[0], true).empty());
   EXPECT_TRUE(Read(clients[1], true).empty());
   EXPECT_EQ(interface_.telemetry.counters->cancelled, 2u);
@@ -504,10 +509,10 @@ TEST_F(MediaServiceTest, CancelledMiddlePeerPreservesPreparedCohortOrdinals) {
     EXPECT_EQ(std::string(requests[i]->body.data, requests[i]->body.size),
               bodies[i]);
   }
-  OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     for (size_t i = 0; i < clients.size(); ++i) {
-      IREE_ASSERT_OK(
-          interface_.accept(interface_.self, connections[i], requests[i], 0));
+      IREE_ASSERT_OK(interface_.accept(interface_.runtime.self, connections[i],
+                                       requests[i], 0));
     }
   });
   ASSERT_NO_FATAL_FAILURE(AtImagePhase("image_batch", [] {}));
@@ -563,10 +568,10 @@ TEST_F(MediaServiceTest, CrossRequestImagesConditionTextAndRetainedFollowup) {
   }
   // All three real HTTP claims arrive in one owner turn. The single shared
   // worker cannot run the first queued CPU preparation until this returns.
-  OwnerTurn::Run(loom_serve_host_executor(host_), [&] {
+  OwnerTurn::Run(loom_runtime_host_executor(host_), [&] {
     for (size_t i = 0; i < clients.size(); ++i) {
-      IREE_ASSERT_OK(
-          interface_.accept(interface_.self, connections[i], requests[i], 0));
+      IREE_ASSERT_OK(interface_.accept(interface_.runtime.self, connections[i],
+                                       requests[i], 0));
     }
   });
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface_, [&] { return Idle(); }));
@@ -574,8 +579,8 @@ TEST_F(MediaServiceTest, CrossRequestImagesConditionTextAndRetainedFollowup) {
     EXPECT_EQ(Read(clients[0]).find("HTTP/1.1 501"), 0u);
     EXPECT_EQ(Read(clients[1]).find("HTTP/1.1 501"), 0u);
     EXPECT_EQ(Content(Read(clients[2])), Oracle::Complete("abxa", 4));
-    EXPECT_EQ(loom_serve_finite_component_phase(image_),
-              LOOM_SERVE_FINITE_COMPONENT_DECLARED);
+    EXPECT_EQ(loom_service_finite_component_phase(image_),
+              LOOM_SERVICE_FINITE_COMPONENT_DECLARED);
     return;
   }
   // The projector incorporates the whole cohort width into its first feature.
@@ -592,7 +597,7 @@ TEST_F(MediaServiceTest, CrossRequestImagesConditionTextAndRetainedFollowup) {
   EXPECT_EQ(first_response, Complete(first_oracle, 4));
   EXPECT_EQ(Content(Read(clients[1])), Complete(second_oracle, 4));
   EXPECT_EQ(Content(Read(clients[2])), Oracle::Complete("abxa", 4));
-  const auto report = *loom_serve_finite_component_report(image_);
+  const auto report = *loom_service_finite_component_report(image_);
   const int followup =
       Send(Request(first + "," + Message("assistant", first_response) + "," +
                        Message("user", "x"),
@@ -606,7 +611,7 @@ TEST_F(MediaServiceTest, CrossRequestImagesConditionTextAndRetainedFollowup) {
   EXPECT_EQ(Content(response), Complete(first_oracle, 4));
   EXPECT_EQ(response.find("\"cached_tokens\":0"), std::string::npos)
       << response;
-  EXPECT_EQ(loom_serve_finite_component_report(image_)->commands,
+  EXPECT_EQ(loom_service_finite_component_report(image_)->commands,
             report.commands);
   EXPECT_EQ(interface_.telemetry.counters->completed, 4u);
   EXPECT_EQ(interface_.telemetry.counters->rejected, 0u);

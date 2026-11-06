@@ -25,6 +25,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
 #include "loom/runtime/telemetry/stream.h"
+#include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
 #include "loom/serve/service/text/input.h"
@@ -35,7 +36,6 @@
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/model_wait.h"
 #include "loom/serve/testing/stalled_http_client.h"
-#include "loom/serve/testing/stalled_stderr.h"
 #include "loom/serve/transport/http/listener.h"
 
 namespace loom_serve::testing::text {
@@ -144,7 +144,7 @@ class SourceTextServiceTest : public ::testing::Test {
                                               host_allocator_, &registry);
         if (iree_status_is_ok(status)) {
           status = loom_serve_router_run(
-              loom_serve_host_executor(host_), server_, registry,
+              loom_runtime_host_executor(host_), server_, registry,
               {
                   .request_quota = options.row_count,
                   .holding_capacity =
@@ -160,11 +160,11 @@ class SourceTextServiceTest : public ::testing::Test {
     });
   }
 
-  void StartManaged(loom_serve_pool_idle_policy_t idle = {}) {
+  void StartManaged(loom_runtime_pool_idle_policy_t idle = {}) {
     ASSERT_EQ(model_, nullptr);
     http_.Start([this, idle]() -> iree_status_t {
-      std::vector<loom_serve_pool_idle_policy_t> policies(
-          loom_serve_device_group_pool_count(group_));
+      std::vector<loom_runtime_pool_idle_policy_t> policies(
+          loom_runtime_device_group_pool_count(group_));
       policies[0] = idle;
       const loom_serve_model_registration_options_t options = {
           .device_group = group_, .heartbeat_interval = 0};
@@ -173,7 +173,7 @@ class SourceTextServiceTest : public ::testing::Test {
           0, nullptr, 3, loom_serve_model_registration_factory(&options),
           host_allocator_, &registry));
       iree_status_t status = loom_serve_router_run(
-          loom_serve_host_executor(host_), server_, registry,
+          loom_runtime_host_executor(host_), server_, registry,
           {
               .request_quota = 16,
               .holding_capacity = 8,
@@ -343,13 +343,13 @@ class SourceTextServiceTest : public ::testing::Test {
   }
 
   void Observe(const loom_serve_service_t& interface) {
-    interface.set_observer(interface.self,
-                           {[](void* payload) {
-                              iree_notification_post(
-                                  static_cast<iree_notification_t*>(payload),
+    interface.runtime.vtable->set_observer(
+        interface.runtime.self,
+        {[](void* payload) {
+           iree_notification_post(static_cast<iree_notification_t*>(payload),
                                   IREE_ALL_WAITERS);
-                            },
-                            loom_serve_http_server_notification(server_)});
+         },
+         loom_serve_http_server_notification(server_)});
   }
 
   void Accept(int client, const loom_serve_service_t& interface,
@@ -358,7 +358,7 @@ class SourceTextServiceTest : public ::testing::Test {
     const loom_serve_http_request_t* request = nullptr;
     IREE_ASSERT_OK(http_.TakeRequest(client, out_connection, &request));
     IREE_ASSERT_OK(
-        interface.accept(interface.self, *out_connection, request, 0));
+        interface.accept(interface.runtime.self, *out_connection, request, 0));
   }
 
   void AcceptLoopback(const loom_serve_service_t& interface,
@@ -372,7 +372,7 @@ class SourceTextServiceTest : public ::testing::Test {
         iree_notification_cancel_wait(notification);
         *out_connection = connection;
         IREE_ASSERT_OK(
-            interface.accept(interface.self, connection, request, 0));
+            interface.accept(interface.runtime.self, connection, request, 0));
         return;
       }
       iree_notification_commit_wait(notification, ticket, IREE_DURATION_ZERO,
@@ -382,12 +382,13 @@ class SourceTextServiceTest : public ::testing::Test {
 
   template <typename Predicate>
   void AdvanceUntil(const loom_serve_service_t& interface, Predicate ready,
-                    loom_serve_service_flags_t flags = 0) {
+                    loom_runtime_service_flags_t flags = 0) {
     auto* notification = loom_serve_http_server_notification(server_);
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      IREE_ASSERT_OK(interface.advance(interface.self, flags, &progress));
+      IREE_ASSERT_OK(interface.runtime.vtable->advance(interface.runtime.self,
+                                                       flags, &progress));
       if (ready() || progress) {
         iree_notification_cancel_wait(notification);
       } else {
@@ -515,7 +516,8 @@ class SourceTextServiceTest : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
         interface,
         [&] {
-          return std::string(interface.snapshot(interface.self).phase) ==
+          return std::string(
+                     interface.snapshot(interface.runtime.self).phase) ==
                  "execute";
         },
         0));
@@ -527,18 +529,19 @@ class SourceTextServiceTest : public ::testing::Test {
                             "X-Loom-Session: second\r\n");
     ASSERT_NO_FATAL_FAILURE(Accept(second, interface, &connection));
     EXPECT_EQ(interface.telemetry.counters->batches, 0u);
-    EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 1u);
+    EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 1u);
     // Metadata stays owner-readable while preparation borrows the second
     // prompt and the device still owns the first epoch's rows.
-    loom_serve_http_request_snapshot_t queued_snapshot = {};
-    ASSERT_TRUE(
-        interface.inspection.request_at(interface.self, 0, &queued_snapshot));
+    loom_service_request_snapshot_t queued_snapshot = {};
+    ASSERT_TRUE(interface.inspection.request_at(interface.runtime.self, 0,
+                                                &queued_snapshot));
     EXPECT_EQ(queued_snapshot.id, 2u);
     EXPECT_STREQ(queued_snapshot.phase, "queued");
     uint64_t active_requests = 0;
     for (iree_host_size_t i = 1;; ++i) {
-      loom_serve_http_request_snapshot_t snapshot = {};
-      if (!interface.inspection.request_at(interface.self, i, &snapshot)) {
+      loom_service_request_snapshot_t snapshot = {};
+      if (!interface.inspection.request_at(interface.runtime.self, i,
+                                           &snapshot)) {
         break;
       }
       if (!snapshot.id) {
@@ -566,11 +569,13 @@ class SourceTextServiceTest : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
         interface,
         [&] {
-          return !interface.is_pending(interface.self) &&
-                 !interface.is_active(interface.self) &&
-                 !interface.snapshot(interface.self).queued_requests;
+          return !interface.runtime.vtable->is_pending(
+                     interface.runtime.self) &&
+                 !interface.runtime.vtable->is_active(interface.runtime.self) &&
+                 !interface.snapshot(interface.runtime.self).queued_requests;
         },
-        action == OverlapAction::kStop ? LOOM_SERVE_SERVICE_FLAG_STOPPING : 0));
+        action == OverlapAction::kStop ? LOOM_RUNTIME_SERVICE_FLAG_STOPPING
+                                       : 0));
     EXPECT_EQ(interface.telemetry.counters->requests, 2u);
     if (action == OverlapAction::kStop) {
       EXPECT_EQ(interface.telemetry.counters->cancelled, 2u);
@@ -606,7 +611,7 @@ class SourceTextServiceTest : public ::testing::Test {
         EXPECT_LT(prepared, first_epoch);
       }
     }
-    interface.set_observer(interface.self, {});
+    interface.runtime.vtable->set_observer(interface.runtime.self, {});
   }
 
   void CheckRetentionCancellation(OverlapAction action) {
@@ -624,9 +629,9 @@ class SourceTextServiceTest : public ::testing::Test {
     auto* notification = loom_serve_http_server_notification(server_);
     Observe(interface);
     auto idle = [&] {
-      return !interface.is_pending(interface.self) &&
-             !interface.is_active(interface.self) &&
-             !interface.snapshot(interface.self).queued_requests;
+      return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+             !interface.runtime.vtable->is_active(interface.runtime.self) &&
+             !interface.snapshot(interface.runtime.self).queued_requests;
     };
     loom_serve_http_connection_t* connection = nullptr;
     const auto first = Oracle::Complete("abxa", 2);
@@ -644,7 +649,8 @@ class SourceTextServiceTest : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
         interface,
         [&] {
-          return std::string(interface.snapshot(interface.self).phase) ==
+          return std::string(
+                     interface.snapshot(interface.runtime.self).phase) ==
                  "retain";
         },
         0));
@@ -666,7 +672,8 @@ class SourceTextServiceTest : public ::testing::Test {
     }
     ASSERT_NO_FATAL_FAILURE(AdvanceUntil(
         interface, idle,
-        action == OverlapAction::kStop ? LOOM_SERVE_SERVICE_FLAG_STOPPING : 0));
+        action == OverlapAction::kStop ? LOOM_RUNTIME_SERVICE_FLAG_STOPPING
+                                       : 0));
     EXPECT_EQ(interface.telemetry.counters->cancelled, 1u);
     if (action == OverlapAction::kStop) {
       EXPECT_TRUE(Read(replacement, /*allow_empty=*/true).empty());
@@ -683,7 +690,7 @@ class SourceTextServiceTest : public ::testing::Test {
       EXPECT_NE(response.find("\"cached_tokens\":5}"), std::string::npos);
       EXPECT_EQ(interface.telemetry.counters->completed, 5u);
     }
-    interface.set_observer(interface.self, {});
+    interface.runtime.vtable->set_observer(interface.runtime.self, {});
   }
 
   // Shared allocator for all production owners.
@@ -697,13 +704,13 @@ class SourceTextServiceTest : public ::testing::Test {
   // Tiny generated checkpoint owned by the test runner's temp directory.
   std::string weights_;
   // Borrowed process-wide task/JIT owner outliving every test model.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // Borrowed process-wide application group enclosing all test models.
-  loom_serve_device_group_t* group_ = nullptr;
+  loom_runtime_device_group_t* group_ = nullptr;
   // Borrowed device record within the process-wide application group.
-  loom_serve_device_t* device_ = nullptr;
+  loom_runtime_device_t* device_ = nullptr;
   // Explicit storage owner selected independently from execution placement.
-  loom_serve_pool_t* storage_owner_ = nullptr;
+  loom_runtime_pool_t* storage_owner_ = nullptr;
   // Actual source-defined text model, with no native mock implementation.
   loom_serve_text_model_t* model_ = nullptr;
   // Real loopback HTTP carrier.

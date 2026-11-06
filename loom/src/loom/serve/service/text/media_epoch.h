@@ -66,7 +66,7 @@ typedef struct loom_serve_text_media_epoch_t {
     // Coalesced device feature copies; source control uploads are independent.
     iree_host_size_t operation_count;
     // Borrowed producer results for intersecting images.
-    const loom_serve_finite_result_t** results;
+    const loom_service_finite_result_t** results;
     // Number of populated producer references, not projected rows.
     iree_host_size_t result_count;
   } transfer;
@@ -90,7 +90,7 @@ iree_status_t loom_serve_text_media_epoch_initialize(
 // Host control storage stays owned by the invocation through successful
 // completion or actual terminal retirement.
 iree_status_t loom_serve_text_media_epoch_enqueue(
-    loom_serve_text_media_epoch_t* epoch, loom_serve_execution_t* execution,
+    loom_serve_text_media_epoch_t* epoch, loom_runtime_execution_t* execution,
     iree_hal_buffer_t* target, uint64_t* out_value);
 
 // Releases unsubmitted or retired metadata; accepts zero state.

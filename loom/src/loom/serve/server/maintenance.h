@@ -6,8 +6,8 @@
 #ifndef LOOM_SERVE_SERVER_MAINTENANCE_H_
 #define LOOM_SERVE_SERVER_MAINTENANCE_H_
 
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/host/timer.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/host/timer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,11 +17,11 @@ extern "C" {
 // model payloads or changing admission. The group outlives final timer join.
 typedef struct loom_serve_maintenance_t {
   // Borrowed immutable pool inventory; NULL only with disabled policies.
-  loom_serve_device_group_t* group;
+  loom_runtime_device_group_t* group;
   // Borrowed per-pool policies, in inventory order, through final timer join.
-  const loom_serve_pool_idle_policy_t* policies;
+  const loom_runtime_pool_idle_policy_t* policies;
   // Shared-proactor alarm; inactive when no retained work awaits expiry.
-  loom_serve_timer_t timer;
+  loom_runtime_timer_t timer;
 } loom_serve_maintenance_t;
 
 // Configures one timer without scheduling work. Zero policy_count disables
@@ -31,14 +31,14 @@ typedef struct loom_serve_maintenance_t {
 // the owner calls deinitialize; no callbacks have been accepted by
 // initialization.
 iree_status_t loom_serve_maintenance_initialize(
-    loom_serve_device_group_t* group, iree_host_size_t policy_count,
-    const loom_serve_pool_idle_policy_t* policies,
+    loom_runtime_device_group_t* group, iree_host_size_t policy_count,
+    const loom_runtime_pool_idle_policy_t* policies,
     loom_serve_maintenance_t* out_maintenance);
 
 // Installs the router wake before advancing; detach only after pending is
 // false.
 void loom_serve_maintenance_set_observer(loom_serve_maintenance_t* maintenance,
-                                         loom_serve_wake_callback_t observer);
+                                         loom_runtime_wake_callback_t observer);
 
 // Applies expiry on the serialized router owner and maintains its alarm.
 // Stopping is irreversible, joins accepted callbacks, and starts no

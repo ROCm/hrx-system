@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_MEDIA_INPUT_H_
 #define LOOM_SERVE_SERVICE_TEXT_MEDIA_INPUT_H_
 
-#include "loom/serve/service/finite/result.h"
+#include "loom/service/finite/result.h"
 
 // One projected image in checked, source-tokenized request input. The result
 // was prepared with input_count expected rows for request_index. Several images
@@ -20,7 +20,7 @@ typedef struct loom_serve_text_media_input_span_t {
   // Original request ordinal in result, unaffected by peer cancellation.
   uint32_t request_index;
   // Borrowed cohort owning device rows and their producer readiness.
-  const loom_serve_finite_result_t* result;
+  const loom_service_finite_result_t* result;
   // Borrowed source-private image metadata, already checked at admission.
   iree_const_byte_span_t metadata;
 } loom_serve_text_media_input_span_t;

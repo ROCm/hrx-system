@@ -25,7 +25,7 @@ void loom_serve_text_readiness_deinitialize(
 
 void loom_serve_text_readiness_set_observer(
     loom_serve_text_readiness_t* readiness,
-    loom_serve_wake_callback_t observer) {
+    loom_runtime_wake_callback_t observer) {
   iree_slim_mutex_lock(&readiness->mutex);
   readiness->observer = observer;
   iree_slim_mutex_unlock(&readiness->mutex);
@@ -50,7 +50,7 @@ static void loom_serve_text_readiness_device_completed(
 
 iree_status_t loom_serve_text_readiness_await(
     loom_serve_text_readiness_t* readiness,
-    const loom_serve_execution_frontier_t* frontier) {
+    const loom_runtime_execution_frontier_t* frontier) {
   iree_async_semaphore_wait_operation_t* wait = &readiness->device.operation;
   memset(wait, 0, sizeof(*wait));
   iree_async_operation_initialize(

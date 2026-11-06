@@ -43,6 +43,17 @@ PACKAGE_POLICIES = [
         forbidden_deps = ["//runtime/src/iree/hal/drivers/amdgpu/..."],
     ),
     package_policy(
+        packages = ["loom/src/loom/runtime/..."],
+        forbidden_deps = [
+            "//loom/src/loom/serve/...",
+            "//loom/src/loom/service/...",
+        ],
+    ),
+    package_policy(
+        packages = ["loom/src/loom/service/..."],
+        forbidden_deps = ["//loom/src/loom/serve/..."],
+    ),
+    package_policy(
         packages = ["loom/binding/c/target/spirv/vulkan/..."],
         build_requirements = [ARCH_SPIRV, VULKAN_API],
     ),

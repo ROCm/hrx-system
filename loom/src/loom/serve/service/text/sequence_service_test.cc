@@ -6,10 +6,10 @@
 
 #include "iree/base/internal/base64.h"
 #include "iree/vm/test_allocator.h"
+#include "loom/runtime/testing/native_allocator.h"
 #include "loom/serve/service/text/sequence.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/serve/service/text/stream.h"
-#include "loom/serve/testing/native_allocator.h"
 
 namespace {
 
@@ -104,7 +104,7 @@ TEST_F(SourceSequencePreparationTest, OwnsActualInputAcrossCapacityRetries) {
     const auto request = iree_make_string_view(body.data(), body.size());
     loom_serve_text_sequence_t sequence = {};
     IREE_ASSERT_OK(loom_serve_text_sequence_parse(request, &sequence));
-    loom_serve::testing::NativeAllocator allocator;
+    loom_runtime::testing::NativeAllocator allocator;
     loom_serve_text_input_t input = {};
     auto status =
         loom_serve_text_sequence_prepare(&sequence, model_, request, 1, {},
@@ -153,7 +153,7 @@ TEST_F(SourceSequenceServiceTest, PreparationFailureLeavesInputUnpublished) {
     iree::vm::testing::CountingAllocator failures(ordinal);
     // Tracks live ownership independently of reallocation attempts and joins
     // all released storage before the injected allocator leaves scope.
-    loom_serve::testing::NativeAllocator allocator(failures.allocator());
+    loom_runtime::testing::NativeAllocator allocator(failures.allocator());
     loom_serve_text_sequence_t sequence = {};
     IREE_ASSERT_OK(loom_serve_text_sequence_parse(request, &sequence));
     loom_serve_text_input_t input = {};
@@ -276,9 +276,9 @@ TEST_F(SourceSequenceServiceTest,
   const auto interface = loom_serve_text_service_interface(value);
   Observe(interface);
   const auto idle = [&] {
-    return !interface.is_pending(interface.self) &&
-           !interface.is_active(interface.self) &&
-           !interface.snapshot(interface.self).queued_requests;
+    return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+           !interface.runtime.vtable->is_active(interface.runtime.self) &&
+           !interface.snapshot(interface.runtime.self).queued_requests;
   };
   loom_serve_http_connection_t* connection = nullptr;
   const int first =
@@ -328,7 +328,7 @@ TEST_F(SourceSequenceServiceTest,
   EXPECT_EQ(interface.telemetry.counters->rejected, before.rejected + 2);
   EXPECT_EQ(interface.telemetry.counters->completed, before.completed + 2);
   EXPECT_EQ(interface.telemetry.counters->failed, before.failed);
-  EXPECT_STREQ(interface.snapshot(interface.self).phase, "idle");
+  EXPECT_STREQ(interface.snapshot(interface.runtime.self).phase, "idle");
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).pending, 0u);
 
   const int resumed =
@@ -348,7 +348,7 @@ TEST_F(SourceSequenceServiceTest,
   CheckChunk(fork_response, {0, 1, 3}, 2);
   EXPECT_EQ(interface.telemetry.counters->completed, before.completed + 4);
   EXPECT_EQ(interface.telemetry.counters->failed, before.failed);
-  interface.set_observer(interface.self, {});
+  interface.runtime.vtable->set_observer(interface.runtime.self, {});
 }
 
 TEST_F(SourceSequenceServiceTest, NativeChatRejectionPreservesOwnedInput) {
@@ -377,7 +377,7 @@ TEST_F(SourceSequenceServiceTest, NativeChatRejectionPreservesOwnedInput) {
   EXPECT_EQ(stream, nullptr);
   EXPECT_EQ(iree_string_builder_buffer(&request.body), input);
   EXPECT_TRUE(iree_string_view_equal(request.session, IREE_SV("caller")));
-  EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 0u);
+  EXPECT_EQ(interface.snapshot(interface.runtime.self).queued_requests, 0u);
   if (stream) {
     loom_serve_text_stream_close(stream);
   }
@@ -398,9 +398,9 @@ TEST_F(SourceSequenceServiceTest,
   const auto interface = loom_serve_text_service_interface(value);
   Observe(interface);
   const auto idle = [&] {
-    return !interface.is_pending(interface.self) &&
-           !interface.is_active(interface.self) &&
-           !interface.snapshot(interface.self).queued_requests;
+    return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+           !interface.runtime.vtable->is_active(interface.runtime.self) &&
+           !interface.snapshot(interface.runtime.self).queued_requests;
   };
   loom_serve_http_connection_t* connection = nullptr;
   const int first =
@@ -436,7 +436,8 @@ TEST_F(SourceSequenceServiceTest,
   const int client = Send(append, "", "/v1/sequences");
   ASSERT_NO_FATAL_FAILURE(Accept(client, interface, &connection));
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil(interface, [&] {
-    return std::string(interface.snapshot(interface.self).phase) == "execute";
+    return std::string(interface.snapshot(interface.runtime.self).phase) ==
+           "execute";
   }));
   ASSERT_EQ(setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
             0);
@@ -462,7 +463,7 @@ TEST_F(SourceSequenceServiceTest,
   const auto restored = Read(fork);
   ASSERT_NE(restored.find("200 OK"), std::string::npos) << restored;
   CheckChunk(restored, {0, 1, 2}, 2);
-  interface.set_observer(interface.self, {});
+  interface.runtime.vtable->set_observer(interface.runtime.self, {});
 }
 
 class CachedSequenceCohortTest : public SourceSequenceServiceTest {
@@ -493,9 +494,9 @@ TEST_F(CachedSequenceCohortTest, FittingCachedCohortTrimsAtEpochBoundary) {
   const auto interface = loom_serve_text_service_interface(value);
   Observe(interface);
   const auto idle = [&] {
-    return !interface.is_pending(interface.self) &&
-           !interface.is_active(interface.self) &&
-           !interface.snapshot(interface.self).queued_requests;
+    return !interface.runtime.vtable->is_pending(interface.runtime.self) &&
+           !interface.runtime.vtable->is_active(interface.runtime.self) &&
+           !interface.snapshot(interface.runtime.self).queued_requests;
   };
   loom_serve_http_connection_t* connection = nullptr;
   std::vector<std::string> handles;
@@ -564,7 +565,7 @@ TEST_F(CachedSequenceCohortTest, FittingCachedCohortTrimsAtEpochBoundary) {
   }
   EXPECT_EQ(interface.telemetry.counters->completed, 24u);
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).pending, 0u);
-  interface.set_observer(interface.self, {});
+  interface.runtime.vtable->set_observer(interface.runtime.self, {});
 }
 
 class RegisteredSequenceServiceTest : public SourceSequenceServiceTest {

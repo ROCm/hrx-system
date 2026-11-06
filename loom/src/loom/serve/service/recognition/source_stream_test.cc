@@ -18,12 +18,12 @@
 #include "iree/hal/api.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/server/resources.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/testing/application.h"
+#include "loom/runtime/testing/native_allocator.h"
+#include "loom/runtime/testing/worker_gate.h"
 #include "loom/serve/service/recognition/model.h"
 #include "loom/serve/service/recognition/stream.h"
-#include "loom/serve/testing/native_allocator.h"
-#include "loom/serve/testing/service_application.h"
-#include "loom/serve/testing/worker_gate.h"
 #include "loom/service/telemetry/record.h"
 
 IREE_FLAG(string, model_source, "", "Recognition fixture bootstrap source.");
@@ -39,21 +39,20 @@ class SourceRecognitionStreamTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_notification_initialize(&notification_);
-    auto options = loom_serve_test_application_options_default();
+    auto options = loom_runtime_test_application_options_default();
     options.worker_count = FLAG_test_workers;
-    options.backing = FLAG_test_elastic ? LOOM_SERVE_POOL_BACKING_ELASTIC
-                                        : LOOM_SERVE_POOL_BACKING_FIXED;
+    options.backing = FLAG_test_elastic ? LOOM_RUNTIME_POOL_BACKING_ELASTIC
+                                        : LOOM_RUNTIME_POOL_BACKING_FIXED;
     // Cache native-page state extents so explicit trim owns physical disposal.
     options.slab_size = FLAG_test_elastic ? 4096 : 0;
-    loom_serve_test_application_t* application = nullptr;
-    IREE_ASSERT_OK(loom_serve_test_application_acquire(&options, allocator_,
-                                                       &application));
-    host_ = loom_serve_test_application_host(application);
-    resources_.device_group =
-        loom_serve_test_application_device_group(application);
-    device_ = loom_serve_test_application_device_at(application, 0);
-    storage_owner_ = loom_serve_device_group_pool_at(
-        loom_serve_test_application_device_group(application), 0);
+    loom_runtime_test_application_t* application = nullptr;
+    IREE_ASSERT_OK(loom_runtime_test_application_acquire(&options, allocator_,
+                                                         &application));
+    host_ = loom_runtime_test_application_host(application);
+    group_ = loom_runtime_test_application_device_group(application);
+    device_ = loom_runtime_test_application_device_at(application, 0);
+    storage_owner_ = loom_runtime_device_group_pool_at(
+        loom_runtime_test_application_device_group(application), 0);
     const auto directory =
         std::filesystem::path(FLAG_model_source).parent_path().string();
     const iree_string_view_t sources[] = {IREE_SVL("generate.loom")};
@@ -87,8 +86,8 @@ class SourceRecognitionStreamTest : public ::testing::Test {
       test->actual_.discard(test->actual_.self, invocation);
     };
     observed.try_admit = [](void* self, void* invocation,
-                            loom_serve_residency_admission_t* admission,
-                            loom_serve_execution_frontier_t* frontier) {
+                            loom_runtime_residency_admission_t* admission,
+                            loom_runtime_execution_frontier_t* frontier) {
       auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       return test->actual_.try_admit(test->actual_.self, invocation, admission,
                                      frontier);
@@ -117,7 +116,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
                                          invocations);
     };
     observed.submit = [](void* self,
-                         loom_serve_execution_frontier_t* frontier) {
+                         loom_runtime_execution_frontier_t* frontier) {
       auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       IREE_RETURN_IF_ERROR(test->actual_.submit(test->actual_.self, frontier));
       ++test->submitted_;
@@ -141,7 +140,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
       test->actual_.release_batch(test->actual_.self);
     };
     observed.release = [](void* self, void* invocation, bool* out_complete,
-                          loom_serve_execution_frontier_t* frontier) {
+                          loom_runtime_execution_frontier_t* frontier) {
       auto* test = static_cast<SourceRecognitionStreamTest*>(self);
       const auto row = test->Row(invocation);
       IREE_RETURN_IF_ERROR(test->actual_.release(test->actual_.self, invocation,
@@ -166,14 +165,14 @@ class SourceRecognitionStreamTest : public ::testing::Test {
     };
     IREE_ASSERT_OK(loom_serve_recognition_stream_service_allocate(
         host_, observed, &service_options, allocator_, &service_));
-    const loom_serve_wake_callback_t observer = {
+    const loom_runtime_wake_callback_t observer = {
         [](void* self) {
           iree_notification_post(static_cast<iree_notification_t*>(self),
                                  IREE_ALL_WAITERS);
         },
         &notification_};
     loom_serve_recognition_stream_service_set_observer(service_, observer);
-    loom_serve_resources_set_observer(&resources_, observer);
+    loom_runtime_device_group_set_observer(group_, observer);
   }
 
   void TearDown() override {
@@ -182,7 +181,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
       loom_serve_recognition_stream_close(stream);
     }
     iree_hal_semaphore_release(failed_readiness_);
-    loom_serve_resources_set_observer(&resources_, {});
+    loom_runtime_device_group_set_observer(group_, {});
     iree_notification_deinitialize(&notification_);
   }
 
@@ -225,7 +224,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
   }
 
   iree_status_t Advance(bool stopping, bool* progress) {
-    auto status = loom_serve_resources_advance(&resources_);
+    auto status = loom_runtime_device_group_advance(group_);
     return iree_status_join(status,
                             loom_serve_recognition_stream_service_advance(
                                 service_, stopping, false, progress));
@@ -239,7 +238,7 @@ class SourceRecognitionStreamTest : public ::testing::Test {
       const bool idle =
           !progress &&
           !loom_serve_recognition_stream_service_is_pending(service_) &&
-          !loom_serve_resources_is_pending(&resources_);
+          !loom_runtime_device_group_is_pending(group_);
       if (idle || progress || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(&notification_);
       } else {
@@ -338,13 +337,13 @@ class SourceRecognitionStreamTest : public ::testing::Test {
   // Host allocations, shared application, and selected physical device.
   iree_allocator_t allocator_ = iree_allocator_system();
   // Borrowed process host with the production executor/proactor.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // Borrowed physical device, also used for independent failure readiness.
-  loom_serve_device_t* device_ = nullptr;
+  loom_runtime_device_t* device_ = nullptr;
   // Explicit storage owner selected independently from execution placement.
-  loom_serve_pool_t* storage_owner_ = nullptr;
-  // Borrowed application resources progressed by this test's router role.
-  loom_serve_resources_t resources_ = {};
+  loom_runtime_pool_t* storage_owner_ = nullptr;
+  // Borrowed application group owning shared pool progress and retirement.
+  loom_runtime_device_group_t* group_ = nullptr;
   // Real source owner, destroyed only after service callbacks retire.
   loom_serve_recognition_model_t* model_ = nullptr;
   // Unmodified source callbacks behind the observation adapter.
@@ -632,10 +631,10 @@ TEST_F(SourceRecognitionStreamTest, ClosedCallerRetainsAcceptedInputBorrow) {
   ASSERT_NO_FATAL_FAILURE(Open(&stream));
   ASSERT_NO_FATAL_FAILURE(Settle());
   const auto offers = offers_[0].load();
-  std::vector<std::unique_ptr<loom_serve::testing::WorkerGate>> workers;
+  std::vector<std::unique_ptr<loom_runtime::testing::WorkerGate>> workers;
   for (int i = 0; i < FLAG_test_workers; ++i) {
-    workers.push_back(std::make_unique<loom_serve::testing::WorkerGate>(
-        loom_serve_host_executor(host_)));
+    workers.push_back(std::make_unique<loom_runtime::testing::WorkerGate>(
+        loom_runtime_host_executor(host_)));
   }
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 2, 3}, 3));
   loom_serve_recognition_stream_finish(stream);
@@ -855,16 +854,16 @@ TEST_F(SourceRecognitionStreamTest, CloseReturnsRowBeforeNativeCapacity) {
       service_, false, false, &progress));
   EXPECT_TRUE(progress);
   ASSERT_NO_FATAL_FAILURE(AdvanceUntil([&] { return released_[0] == 1; }));
-  auto* pool = loom_serve_pool_memory(storage_owner_);
-  IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
-  loom_serve::testing::ScopedNativeHold gate(device_,
-                                             IREE_ALLOCATOR_COMMAND_FREE);
-  loom_serve_memory_pool_trim(pool, 0);
+  auto* pool = loom_runtime_pool_memory(storage_owner_);
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
+  loom_runtime::testing::ScopedNativeHold gate(device_,
+                                               IREE_ALLOCATOR_COMMAND_FREE);
+  loom_runtime_memory_pool_trim(pool, 0);
   gate.WaitEntered();
-  EXPECT_GT(
-      loom_serve_memory_pool_statistics(loom_serve_pool_memory(storage_owner_))
-          .releasing_bytes,
-      0u);
+  EXPECT_GT(loom_runtime_memory_pool_statistics(
+                loom_runtime_pool_memory(storage_owner_))
+                .releasing_bytes,
+            0u);
 
   loom_serve_recognition_stream_t* peer = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&peer));
@@ -892,8 +891,8 @@ TEST_F(SourceRecognitionStreamTest, CloseReturnsRowBeforeNativeCapacity) {
 TEST_F(SourceRecognitionStreamTest,
        FailedReadinessLeavesAcceptedModelOwnership) {
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-      IREE_HAL_SEMAPHORE_FLAG_NONE, &failed_readiness_));
+      loom_runtime_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      0, IREE_HAL_SEMAPHORE_FLAG_NONE, &failed_readiness_));
   loom_serve_recognition_stream_t* stream = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&stream));
   ASSERT_NO_FATAL_FAILURE(Write(stream, {1, 2, 3}, 3));
@@ -932,8 +931,8 @@ TEST_F(SourceRecognitionStreamTest,
     GTEST_SKIP() << "Requires asynchronous elastic backing";
   }
   IREE_ASSERT_OK(iree_hal_semaphore_create(
-      loom_serve_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-      IREE_HAL_SEMAPHORE_FLAG_NONE, &failed_readiness_));
+      loom_runtime_device_handle(device_), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      0, IREE_HAL_SEMAPHORE_FLAG_NONE, &failed_readiness_));
   fail_release_readiness_ = true;
   loom_serve_recognition_stream_t* stream = nullptr;
   ASSERT_NO_FATAL_FAILURE(Open(&stream));

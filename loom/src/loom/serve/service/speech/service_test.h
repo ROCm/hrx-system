@@ -9,9 +9,9 @@
 
 #include <memory>
 
+#include "loom/runtime/testing/application.h"
 #include "loom/serve/service/speech/service.h"
 #include "loom/serve/service/speech/stream.h"
-#include "loom/serve/testing/service_application.h"
 #include "loom/service/telemetry/latency.h"
 #include "loom/service/telemetry/record.h"
 
@@ -26,8 +26,8 @@ using SpeechStream = std::unique_ptr<loom_serve_speech_stream_t,
 int SpeechWorkerCount();
 bool SpeechElasticBacking();
 iree_status_t AcquireApplication(iree_allocator_t allocator,
-                                 loom_serve_host_t** out_host,
-                                 loom_serve_device_group_t** out_group);
+                                 loom_runtime_host_t** out_host,
+                                 loom_runtime_device_group_t** out_group);
 iree_status_t OpenSpeech(loom_serve_speech_service_t* service,
                          iree_string_view_t input, iree_string_view_t voice,
                          uint64_t seed, SpeechStream* out_stream);

@@ -7,15 +7,15 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_RECONFIGURATION_H_
 #define LOOM_SERVE_SERVICE_TEXT_RECONFIGURATION_H_
 
-#include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/text/model.h"
+#include "loom/service/execution_reconfiguration.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // Native replacement capability over this model's retained parameters/state.
-loom_serve_execution_update_t loom_serve_text_model_execution_update(
+loom_service_execution_update_t loom_serve_text_model_execution_update(
     loom_serve_text_model_t* model);
 
 #ifdef __cplusplus

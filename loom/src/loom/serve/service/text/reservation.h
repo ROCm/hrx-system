@@ -52,7 +52,7 @@ uint64_t loom_serve_text_reservation_memory_footprint(
 iree_status_t loom_serve_text_reservation_submit(
     loom_serve_text_reservation_t* reservation,
     loom_serve_text_reserve_result_t* out_result,
-    loom_serve_execution_frontier_t* out_frontier);
+    loom_runtime_execution_frontier_t* out_frontier);
 
 // Cancels unsubmitted ownership or releases submitted plan metadata. Neither
 // path waits, releases an admitted request's pin, or mutates its row.

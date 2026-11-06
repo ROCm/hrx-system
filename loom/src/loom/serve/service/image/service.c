@@ -13,14 +13,15 @@
 #include "iree/base/internal/base64.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/vm/buffer.h"
+#include "loom/runtime/host/clock.h"
+#include "loom/runtime/host/timer.h"
 #include "loom/runtime/parameter/telemetry.h"
-#include "loom/serve/runtime/host/clock.h"
-#include "loom/serve/runtime/host/timer.h"
-#include "loom/serve/runtime/host/wake.h"
-#include "loom/serve/service/execution_reconfiguration.h"
+#include "loom/runtime/wake.h"
+#include "loom/serve/service/endpoint.h"
 #include "loom/serve/service/image/output.h"
-#include "loom/serve/service/kind.h"
+#include "loom/service/execution_reconfiguration.h"
 #include "loom/service/image/telemetry.h"
+#include "loom/service/kind.h"
 #include "loom/service/telemetry/record.h"
 #include "loom/service/telemetry/tracing.h"
 #include "loom/util/json.h"
@@ -37,7 +38,7 @@ typedef struct loom_serve_image_job_t {
   // Request work returned by CPU tasks through their existing release handoff.
   loom_service_image_work_t work;
   // Owned source bytes and compatibility facts, published by CPU preparation.
-  loom_serve_prepared_request_t prepared;
+  loom_service_prepared_request_t prepared;
   // Owned input rejection, published by CPU preparation.
   iree_status_t status;
   // Stable byte offset in the complete cohort RGB result.
@@ -71,7 +72,7 @@ struct loom_serve_image_service_t {
   // Borrowed, serialized native model invocation.
   loom_serve_image_generator_t generator;
   // Candidate ownership and pending selection, retired before the generator.
-  loom_serve_execution_reconfiguration_t* reconfiguration;
+  loom_service_execution_reconfiguration_t* reconfiguration;
   // Copied model geometry and policy; the route name is borrowed.
   loom_serve_image_service_options_t options;
   // Borrowed application executor, shared with JIT and all CPU/model work.
@@ -93,7 +94,7 @@ struct loom_serve_image_service_t {
     // Joins publication callbacks' final access before owner destruction.
     iree_slim_mutex_t mutex;
     // Borrowed router wake, joined by mutex when detached after retirement.
-    loom_serve_wake_callback_t observer;
+    loom_runtime_wake_callback_t observer;
     // CPU/device completions awaiting consumption on the scheduler.
     uint32_t ready;
     // Joined asynchronous outcomes awaiting consumption by the scheduler.
@@ -120,7 +121,7 @@ struct loom_serve_image_service_t {
     // Waits for both model work and feedback without occupying a task worker.
     iree_async_semaphore_wait_operation_t operation;
     // Borrowed HAL handles and values from the accepted model invocation.
-    loom_serve_execution_frontier_t frontier;
+    loom_runtime_execution_frontier_t frontier;
     // Toll-free async semaphore handles used by the public proactor API.
     iree_async_semaphore_t* semaphores[2];
     // The accepted part releases invocation resources at its final frontier.
@@ -131,7 +132,7 @@ struct loom_serve_image_service_t {
     IREE_TRACE(iree_section_id_t section;)
   } device;
   // Periodic readiness and owned cancellation, independent of device waits.
-  loom_serve_timer_t timer;
+  loom_runtime_timer_t timer;
   // Bounded FIFO of owned host requests, excluding the preparation/cohort
   // snapshot.
   loom_serve_image_job_t** pending;
@@ -147,7 +148,7 @@ struct loom_serve_image_service_t {
     // Next terminal encoding slot; earlier jobs have already retired.
     iree_host_size_t next;
     // Borrowed prepared values, contiguous for source batch capture.
-    loom_serve_prepared_request_t* requests;
+    loom_service_prepared_request_t* requests;
     // Protocol-validated byte lengths in the same source packing order.
     iree_host_size_t* output_lengths;
     // Copied source selection, published by CPU batch capture.
@@ -342,7 +343,7 @@ static iree_status_t loom_serve_image_result_json(iree_string_builder_t* output,
   IREE_RETURN_IF_ERROR(loom_serve_image_response_begin(output, "200 OK"));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, "{\"created\":%" PRId64 ",\"data\":[{\"b64_json\":\"",
-      loom_serve_clock_now_unix_seconds()));
+      loom_runtime_clock_now_unix_seconds()));
   const iree_host_size_t encoded_size =
       iree_base64_encoded_size(png.data_length);
   char* encoded = NULL;
@@ -706,7 +707,7 @@ static void loom_serve_image_encode_next(loom_serve_image_service_t* service) {
 }
 
 static void loom_serve_image_prepared(loom_serve_image_service_t* service,
-                                      loom_serve_service_flags_t flags,
+                                      loom_runtime_service_flags_t flags,
                                       bool* progress) {
   if (service->stopping || !loom_serve_image_has_peer(service)) {
     service->generator.discard_batch(service->generator.self);
@@ -716,16 +717,16 @@ static void loom_serve_image_prepared(loom_serve_image_service_t* service,
     *progress = true;
     return;
   }
-  loom_serve_residency_admission_t admission;
+  loom_runtime_residency_admission_t admission;
   service->status =
       service->generator.try_admit(service->generator.self, &admission);
   if (iree_status_is_ok(service->status) &&
-      admission == LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED) {
+      admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED) {
     return;
   }
   if (iree_status_is_ok(service->status) &&
-      admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY) {
-    if (iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY)) {
+      admission == LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY) {
+    if (iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY)) {
       return;
     }
     // No accepted producer can release capacity; waiting on queued peers
@@ -896,7 +897,7 @@ static void loom_serve_image_prune(loom_serve_image_service_t* service,
 static iree_status_t loom_serve_image_accept(
     void* self, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request,
-    loom_serve_service_flags_t flags) {
+    loom_runtime_service_flags_t flags) {
   loom_serve_image_service_t* service = self;
   loom_serve_image_job_t receipt = {
       .id = ++service->telemetry.counters.requests,
@@ -973,10 +974,10 @@ static iree_status_t loom_serve_image_sample(
   return loom_service_image_sample_totals(&service->telemetry.totals, sink);
 }
 
-static loom_serve_service_snapshot_t loom_serve_image_snapshot(void* self) {
+static loom_service_snapshot_t loom_serve_image_snapshot(void* self) {
   const loom_serve_image_service_t* service = self;
   const iree_time_t now = iree_time_now();
-  return (loom_serve_service_snapshot_t){
+  return (loom_service_snapshot_t){
       .phase = image_phases[service->phase],
       .queued_requests = service->pending_count,
       .active_requests = service->cohort.count - service->cohort.next,
@@ -990,7 +991,7 @@ static loom_serve_service_snapshot_t loom_serve_image_snapshot(void* self) {
 
 static bool loom_serve_image_request_at(
     void* self, iree_host_size_t index,
-    loom_serve_http_request_snapshot_t* out_snapshot) {
+    loom_service_request_snapshot_t* out_snapshot) {
   const loom_serve_image_service_t* service = self;
   const loom_serve_image_job_t* job = NULL;
   const char* phase = "queued";
@@ -1004,7 +1005,7 @@ static bool loom_serve_image_request_at(
   } else {
     return false;
   }
-  *out_snapshot = (loom_serve_http_request_snapshot_t){
+  *out_snapshot = (loom_service_request_snapshot_t){
       .id = job->id,
       .phase = phase,
       .arrival_time = job->arrival_time,
@@ -1015,8 +1016,7 @@ static bool loom_serve_image_request_at(
 // Heartbeat work is a scheduler turn, woken by an asynchronous timer. These
 // phases describe ownership, not individual completed device dispatches.
 static void loom_serve_image_heartbeat(loom_serve_image_service_t* service) {
-  const loom_serve_service_snapshot_t state =
-      loom_serve_image_snapshot(service);
+  const loom_service_snapshot_t state = loom_serve_image_snapshot(service);
   loom_runtime_telemetry_record_t record = {
       .time_ns = iree_time_now(),
       .request = loom_serve_image_active(service),
@@ -1053,16 +1053,22 @@ static void loom_serve_image_stop(loom_serve_image_service_t* service) {
   }
 }
 
-static void loom_serve_image_set_observer(void* self,
-                                          loom_serve_wake_callback_t observer) {
+static void loom_serve_image_set_observer(
+    void* self, loom_runtime_wake_callback_t observer) {
   loom_serve_image_service_t* service = self;
   iree_slim_mutex_lock(&service->events.mutex);
   service->events.observer = observer;
   iree_slim_mutex_unlock(&service->events.mutex);
-  loom_serve_timer_set_observer(&service->timer, observer);
-  loom_serve_execution_reconfiguration_set_observer(service->reconfiguration,
-                                                    observer);
+  loom_runtime_timer_set_observer(&service->timer, observer);
+  loom_service_execution_reconfiguration_set_observer(service->reconfiguration,
+                                                      observer);
   service->generator.set_observer(service->generator.self, observer);
+}
+
+static bool loom_serve_image_has_requests(void* self) {
+  const loom_serve_image_service_t* service = self;
+  return service->pending_count ||
+         service->cohort.count != service->cohort.next;
 }
 
 static bool loom_serve_image_is_active(void* self) {
@@ -1080,18 +1086,17 @@ static bool loom_serve_image_is_pending(void* self) {
   return loom_serve_image_is_active(service) ||
          (service->generator.is_pending &&
           service->generator.is_pending(service->generator.self)) ||
-         loom_serve_execution_reconfiguration_pending(
+         loom_service_execution_reconfiguration_pending(
              service->reconfiguration) ||
-         loom_serve_timer_is_pending(&service->timer);
+         loom_runtime_timer_is_pending(&service->timer);
 }
 
-static iree_status_t loom_serve_image_advance(void* self,
-                                              loom_serve_service_flags_t flags,
-                                              bool* out_progress) {
+static iree_status_t loom_serve_image_advance(
+    void* self, loom_runtime_service_flags_t flags, bool* out_progress) {
   loom_serve_image_service_t* service = self;
   *out_progress = false;
   if (!service->stopping &&
-      iree_any_bit_set(flags, LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+      iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
     loom_serve_image_stop(service);
     *out_progress = true;
   }
@@ -1102,7 +1107,7 @@ static iree_status_t loom_serve_image_advance(void* self,
         service->status,
         service->generator.query_status(service->generator.self));
   }
-  *out_progress |= loom_serve_execution_reconfiguration_advance(
+  *out_progress |= loom_service_execution_reconfiguration_advance(
       service->reconfiguration,
       iree_status_is_ok(service->status) &&
           (service->phase == IMAGE_PHASE_IDLE ||
@@ -1167,9 +1172,9 @@ static iree_status_t loom_serve_image_advance(void* self,
   bool tick = false;
   service->status = iree_status_join(
       service->status,
-      loom_serve_timer_advance(&service->timer,
-                               service->stopping && !service->cohort.count,
-                               true, &timer_progress, &tick));
+      loom_runtime_timer_advance(&service->timer,
+                                 service->stopping && !service->cohort.count,
+                                 true, &timer_progress, &tick));
   *out_progress |= timer_progress;
   if (tick) {
     loom_serve_image_heartbeat(service);
@@ -1191,32 +1196,36 @@ static iree_status_t loom_serve_image_advance(void* self,
 
 loom_serve_service_t loom_serve_image_service_interface(
     loom_serve_image_service_t* service) {
+  static const loom_runtime_service_vtable_t vtable = {
+      .set_observer = loom_serve_image_set_observer,
+      .has_requests = loom_serve_image_has_requests,
+      .is_pending = loom_serve_image_is_pending,
+      .is_active = loom_serve_image_is_active,
+      .advance = loom_serve_image_advance,
+  };
   static const iree_string_view_t input_modalities[] = {IREE_SVL("text")};
   static const iree_string_view_t output_modalities[] = {IREE_SVL("image")};
   return (loom_serve_service_t){
       .name = service->options.name,
-      .self = service,
-      .set_observer = loom_serve_image_set_observer,
-      .is_pending = loom_serve_image_is_pending,
-      .is_active = loom_serve_image_is_active,
+      .runtime = {.self = service,
+                  .vtable = &vtable,
+                  .capacity_domain = service->generator.capacity_domain},
       .accept = loom_serve_image_accept,
-      .advance = loom_serve_image_advance,
       .tokenizer = service->generator.tokenizer,
-      .kind = LOOM_SERVE_MODEL_KIND_IMAGE,
-      .endpoint = loom_serve_model_kind_endpoint(LOOM_SERVE_MODEL_KIND_IMAGE),
+      .kind = LOOM_SERVICE_KIND_IMAGE,
+      .endpoint = loom_serve_service_endpoint(LOOM_SERVICE_KIND_IMAGE),
       .capabilities = {.input_modalities = {IREE_ARRAYSIZE(input_modalities),
                                             input_modalities},
                        .output_modalities = {IREE_ARRAYSIZE(output_modalities),
                                              output_modalities}},
       .snapshot = loom_serve_image_snapshot,
       .inspection = {.request_at = loom_serve_image_request_at},
-      .reconfiguration = loom_serve_execution_reconfiguration_interface(
+      .reconfiguration = loom_service_execution_reconfiguration_interface(
           service->reconfiguration),
       .telemetry = {.stream = service->telemetry.stream,
                     .counters = &service->telemetry.counters,
                     .latency = &service->telemetry.latency,
-                    .sample = loom_serve_image_sample},
-      .capacity_domain = service->generator.capacity_domain};
+                    .sample = loom_serve_image_sample}};
 }
 
 void loom_serve_image_service_free(loom_serve_image_service_t* service) {
@@ -1234,10 +1243,10 @@ void loom_serve_image_service_free(loom_serve_image_service_t* service) {
                                          ? LOOM_SERVICE_TELEMETRY_FAILED
                                          : LOOM_SERVICE_TELEMETRY_CANCELLED);
   }
-  loom_serve_execution_reconfiguration_free(service->reconfiguration);
+  loom_service_execution_reconfiguration_free(service->reconfiguration);
   service->generator.set_observer(service->generator.self,
-                                  (loom_serve_wake_callback_t){0});
-  loom_serve_timer_deinitialize(&service->timer);
+                                  (loom_runtime_wake_callback_t){0});
+  loom_runtime_timer_deinitialize(&service->timer);
   iree_string_builder_deinitialize(&service->cpu.response);
   iree_string_builder_deinitialize(&service->response);
   iree_allocator_free(host_allocator, service->pending);
@@ -1255,7 +1264,7 @@ void loom_serve_image_service_free(loom_serve_image_service_t* service) {
 }
 
 iree_status_t loom_serve_image_service_allocate(
-    loom_serve_host_t* host, loom_serve_image_generator_t generator,
+    loom_runtime_host_t* host, loom_serve_image_generator_t generator,
     const loom_serve_image_service_options_t* options,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_image_service_t** out_service) {
@@ -1267,7 +1276,7 @@ iree_status_t loom_serve_image_service_allocate(
       !options->height || !options->name.size || !options->pending_capacity ||
       options->heartbeat_interval < 0 ||
       options->pending_capacity >=
-          IREE_HOST_SIZE_MAX / sizeof(loom_serve_prepared_request_t)) {
+          IREE_HOST_SIZE_MAX / sizeof(loom_service_prepared_request_t)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "image service requires a generator, geometry, "
                             "name and queue capacity");
@@ -1281,9 +1290,9 @@ iree_status_t loom_serve_image_service_allocate(
   service->options = *options;
   service->capacity = options->pending_capacity + 1;
   service->telemetry.stream = stream;
-  service->executor = loom_serve_host_executor(host);
+  service->executor = loom_runtime_host_executor(host);
   iree_slim_mutex_initialize(&service->events.mutex);
-  loom_serve_timer_initialize(&service->timer);
+  loom_runtime_timer_initialize(&service->timer);
   iree_string_builder_initialize(host_allocator, &service->response);
   iree_string_builder_initialize(host_allocator, &service->cpu.response);
   iree_status_t status = iree_allocator_malloc_array(
@@ -1306,7 +1315,7 @@ iree_status_t loom_serve_image_service_allocate(
                                     (void**)&service->cohort.output_lengths);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_execution_reconfiguration_allocate(
+    status = loom_service_execution_reconfiguration_allocate(
         generator.execution_update, options->variant_capacity, host_allocator,
         &service->reconfiguration);
   }
@@ -1321,12 +1330,12 @@ iree_status_t loom_serve_image_service_allocate(
     } else {
       loom_serve_image_event(service, &LOOM_SERVICE_TELEMETRY_STREAM_BEGIN, 0);
     }
-    status = iree_async_proactor_pool_get(loom_serve_host_proactor_pool(host),
+    status = iree_async_proactor_pool_get(loom_runtime_host_proactor_pool(host),
                                           0, &service->proactor);
   }
   if (iree_status_is_ok(status)) {
-    loom_serve_timer_configure(&service->timer, service->proactor,
-                               options->heartbeat_interval);
+    loom_runtime_timer_configure(&service->timer, service->proactor,
+                                 options->heartbeat_interval);
     *out_service = service;
   } else {
     loom_serve_image_service_free(service);

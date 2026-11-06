@@ -12,7 +12,7 @@
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/sync.h"
-#include "loom/serve/runtime/program/program.h"
+#include "loom/runtime/program/program.h"
 
 namespace {
 
@@ -26,15 +26,15 @@ class ToolXmlTest : public ::testing::Test {
         &types_));
     IREE_ASSERT_OK(loom_serve_text_tool_xml_module_create(
         environment_, host_allocator_, &module_));
-    IREE_ASSERT_OK(loom_serve_program_link(module_, {nullptr, 0},
-                                           host_allocator_, &program_));
+    IREE_ASSERT_OK(loom_runtime_program_link(module_, {nullptr, 0},
+                                             host_allocator_, &program_));
     IREE_ASSERT_OK(iree_vm_process_lookup_function(
-        loom_serve_program_process(program_), IREE_SV("tools"),
+        loom_runtime_program_process(program_), IREE_SV("tools"),
         IREE_SV("parse_xml"), &parse_));
   }
 
   void TearDown() override {
-    loom_serve_program_free(program_);
+    loom_runtime_program_free(program_);
     iree_vm_module_release(module_);
     iree_vm_environment_free(environment_);
   }
@@ -69,7 +69,7 @@ class ToolXmlTest : public ::testing::Test {
     };
     iree_vm_variant_t result = iree_vm_variant_empty();
     auto status =
-        iree_vm_invoke(loom_serve_program_invocation(program_), parse_,
+        iree_vm_invoke(loom_runtime_program_invocation(program_), parse_,
                        iree_vm_variant_span_from_array(arguments),
                        iree_vm_variant_span_from_ptr(&result, 1));
     if (iree_status_is_ok(status)) {
@@ -102,7 +102,7 @@ class ToolXmlTest : public ::testing::Test {
   // Production schema-aware codec, retained by the linked program.
   iree_vm_module_t* module_ = nullptr;
   // Shared invocation reused after both successful and failed completions.
-  loom_serve_program_t* program_ = nullptr;
+  loom_runtime_program_t* program_ = nullptr;
   // Native export resolved from the linked program.
   iree_vm_function_t parse_ = {};
 };

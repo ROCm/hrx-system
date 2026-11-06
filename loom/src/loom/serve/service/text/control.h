@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_CONTROL_H_
 #define LOOM_SERVE_SERVICE_TEXT_CONTROL_H_
 
-#include "loom/serve/runtime/program/module.h"
+#include "loom/runtime/program/module.h"
 #include "loom/serve/service/text/source.h"
 #include "loom/serve/service/text/state.h"
 
@@ -40,7 +40,7 @@ typedef struct loom_serve_text_control_t {
   // Native stage module retained independently of its linked program.
   iree_vm_module_t* native_module;
   // Shared VM process; rows hold no private VM instances.
-  loom_serve_program_t* program;
+  loom_runtime_program_t* program;
   // Source-owned isolated input/decode invocation.
   iree_vm_function_t step;
   // Source-owned packed execution sequence.
@@ -76,10 +76,10 @@ typedef struct loom_serve_text_control_t {
 // execution, and stage storage outlive the control program. Partial ownership
 // is returned on failure and follows the same unlink/retirement cleanup.
 iree_status_t loom_serve_text_control_initialize(
-    const loom_serve_text_source_t* source, loom_serve_execution_t* execution,
+    const loom_serve_text_source_t* source, loom_runtime_execution_t* execution,
     iree_hal_queue_t* transfer, const loom_serve_text_state_t* state,
     iree_host_size_t shape_count, const loom_serve_packing_shape_t* shapes,
-    iree_host_size_t stage_count, const loom_serve_stage_t* stages,
+    iree_host_size_t stage_count, const loom_runtime_stage_t* stages,
     iree_allocator_t host_allocator, loom_serve_text_control_t* out_control);
 
 // Drops VM references before native retirement, without freeing queue-visible

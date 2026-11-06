@@ -459,15 +459,17 @@ void RunSparseByteOffsetExecution(
   EXPECT_EQ(output[1], expected_high_output);
 }
 
-TEST(LoomcAmdgpuIreeHalExecutionTest,
-     SpecializesEmitsAndExecutesOnLiveAmdgpuHalDevice) {
-  loomc::testing::target::RunIreeHalKernelExecutionTest(
-      MakeExecutionTarget(kSourceText, "double_i32_at_byte_offset"),
-      loomc::testing::target::RunIreeHalByteOffsetExecution);
+using LoomcAmdgpuIreeHalExecutionTest =
+    loomc::testing::target::IreeHalExecutionTest;
+
+TEST_F(LoomcAmdgpuIreeHalExecutionTest,
+       SpecializesEmitsAndExecutesOnLiveAmdgpuHalDevice) {
+  RunKernel(MakeExecutionTarget(kSourceText, "double_i32_at_byte_offset"),
+            loomc::testing::target::RunIreeHalByteOffsetExecution);
 }
 
-TEST(LoomcAmdgpuIreeHalExecutionTest, VectorArgumentsCrossNativeKernarg) {
-  loomc::testing::target::RunIreeHalKernelExecutionTest(
+TEST_F(LoomcAmdgpuIreeHalExecutionTest, VectorArgumentsCrossNativeKernarg) {
+  RunKernel(
       MakeExecutionTarget(kVectorArgumentSourceText, "select_vector_arguments"),
       [](const loomc::testing::target::IreeHalKernelExecution& execution) {
         EXPECT_EQ(execution.launch_config.workgroup_size.x, 1u);
@@ -494,8 +496,8 @@ TEST(LoomcAmdgpuIreeHalExecutionTest, VectorArgumentsCrossNativeKernarg) {
       });
 }
 
-TEST(LoomcAmdgpuIreeHalExecutionTest, UniformByteOffsetBeyond4GiB) {
-  loomc::testing::target::RunIreeHalKernelExecutionTest(
+TEST_F(LoomcAmdgpuIreeHalExecutionTest, UniformByteOffsetBeyond4GiB) {
+  RunKernel(
       MakeExecutionTarget(kSourceText, "double_i32_at_byte_offset"),
       [](const loomc::testing::target::IreeHalKernelExecution& execution) {
         const uint64_t constants[] = {SparseTestBuffer::kHighPageOffset + 4};
@@ -505,8 +507,8 @@ TEST(LoomcAmdgpuIreeHalExecutionTest, UniformByteOffsetBeyond4GiB) {
       });
 }
 
-TEST(LoomcAmdgpuIreeHalExecutionTest, SpilledVaryingScaledOffsetBeyond4GiB) {
-  loomc::testing::target::RunIreeHalKernelExecutionTest(
+TEST_F(LoomcAmdgpuIreeHalExecutionTest, SpilledVaryingScaledOffsetBeyond4GiB) {
+  RunKernel(
       MakeExecutionTarget(kWideScaledSourceText, "double_i32_at_scaled_offset"),
       [](const loomc::testing::target::IreeHalKernelExecution& execution) {
         const uint32_t constants[] = {0x40000001};

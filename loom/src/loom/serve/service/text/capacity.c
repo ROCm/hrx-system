@@ -78,7 +78,7 @@ iree_status_t loom_serve_text_model_prepare_resize(
       iree_vm_variant_from_i64((int64_t)row_count)};
   iree_vm_variant_t results[1 + LOOM_SERVE_TEXT_STORAGE_RESULT_COUNT] = {0};
   iree_status_t status = iree_vm_invoke(
-      loom_serve_program_invocation(model->control.program),
+      loom_runtime_program_invocation(model->control.program),
       model->control.resize_state, iree_vm_variant_span_from_array(arguments),
       iree_vm_variant_span_from_array(results));
   if (iree_status_is_ok(status)) {
@@ -107,9 +107,9 @@ iree_status_t loom_serve_text_model_prepare_resize(
 
 iree_status_t loom_serve_text_model_submit_resize(
     loom_serve_text_model_t* model, loom_serve_text_resize_t* resize,
-    loom_serve_execution_frontier_t* out_frontier) {
+    loom_runtime_execution_frontier_t* out_frontier) {
   IREE_TRACE_ZONE_BEGIN(z0);
-  *out_frontier = (loom_serve_execution_frontier_t){0};
+  *out_frontier = (loom_runtime_execution_frontier_t){0};
   const iree_host_size_t row_count = resize->row_count;
   iree_status_t status =
       loom_serve_text_state_resize(&model->state, row_count, &resize->storage);
@@ -147,7 +147,7 @@ iree_status_t loom_serve_text_model_submit_resize(
     }
   }
   if (iree_status_is_ok(status)) {
-    *out_frontier = loom_serve_execution_frontier(model->execution);
+    *out_frontier = loom_runtime_execution_frontier(model->execution);
   }
   IREE_RETURN_AND_END_ZONE(z0, status);
 }

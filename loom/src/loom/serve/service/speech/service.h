@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_SPEECH_SERVICE_H_
 #define LOOM_SERVE_SERVICE_SPEECH_SERVICE_H_
 
-#include "loom/serve/runtime/host/host.h"
+#include "loom/runtime/host/host.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/speech/generator.h"
 #include "loom/serve/service/speech/stream.h"
@@ -34,7 +34,7 @@ typedef struct loom_serve_speech_service_t loom_serve_speech_service_t;
 // Source CPU work shares the host executor; device completion uses its
 // proactor. A non-NULL telemetry stream remains borrowed through retirement.
 iree_status_t loom_serve_speech_service_allocate(
-    loom_serve_host_t* host, loom_serve_speech_generator_t generator,
+    loom_runtime_host_t* host, loom_serve_speech_generator_t generator,
     const loom_serve_speech_service_options_t* options,
     loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
     loom_serve_speech_service_t** out_service);

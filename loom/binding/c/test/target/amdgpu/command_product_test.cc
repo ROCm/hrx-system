@@ -12,7 +12,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/binding/c/test/target/amdgpu/command_profile_testdata.h"
-#include "loom/target/arch/cmd/program.h"
+#include "loom/runtime/command/program.h"
 #include "loomc/target/cmd.h"
 #include "target_test_util.h"
 

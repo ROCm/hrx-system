@@ -9,7 +9,7 @@
 #include <inttypes.h>
 
 #include "loom/runtime/telemetry/sample.h"
-#include "loom/serve/service/kind.h"
+#include "loom/service/kind.h"
 #include "loom/service/telemetry/latency.h"
 #include "loom/service/telemetry/record.h"
 
@@ -59,8 +59,7 @@ static iree_status_t loom_serve_http_metrics_identity(
   IREE_RETURN_IF_ERROR(loom_serve_http_metrics_label(output, service->name));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, ",kind="));
   IREE_RETURN_IF_ERROR(loom_serve_http_metrics_label(
-      output,
-      iree_make_cstring_view(loom_serve_model_kind_name(service->kind))));
+      output, iree_make_cstring_view(loom_service_kind_name(service->kind))));
   if (model->incarnation) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         output, ",incarnation=\"%" PRIu64 "\"", model->incarnation));
@@ -160,7 +159,7 @@ static iree_status_t loom_serve_http_metrics_extensions(
     }
     loom_serve_http_metrics_extension_t extension = {output, model};
     status = model->service.telemetry.sample(
-        model->service.self,
+        model->service.runtime.self,
         (loom_runtime_telemetry_sample_sink_t){
             &extension, loom_serve_http_metrics_extension_emit});
   }
@@ -208,7 +207,7 @@ static iree_status_t loom_serve_http_metrics_parameters(
       if (!parameters.prepared) {
         continue;
       }
-      const loom_serve_residency_snapshot_t state = parameters.parameters;
+      const loom_runtime_residency_snapshot_t state = parameters.parameters;
       const char* name = loom_serve_model_component_name(component);
       status = loom_serve_http_metrics_integer(output, "parameter_pins", model,
                                                name, state.pin_count);

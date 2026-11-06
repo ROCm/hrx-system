@@ -84,6 +84,30 @@ iree_runtime_cc_test(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "owner",
+    srcs = ["owner.c"],
+    hdrs = ["owner.h"],
+    deps = [
+        ":task",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "owner_test",
+    srcs = ["owner_test.cc"],
+    deps = [
+        ":owner",
+        ":task",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "executor_test",
     srcs = ["executor_test.cc"],

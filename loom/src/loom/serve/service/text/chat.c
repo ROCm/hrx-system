@@ -568,13 +568,13 @@ void loom_serve_text_chat_policy_deinitialize(
 }
 
 iree_status_t loom_serve_text_chat_policy_initialize(
-    iree_vm_environment_t* environment, loom_serve_program_t* program,
+    iree_vm_environment_t* environment, loom_runtime_program_t* program,
     iree_vm_buffer_t* options, loom_serve_text_chat_policy_t* out_policy) {
   memset(out_policy, 0, sizeof(*out_policy));
   IREE_RETURN_IF_ERROR(iree_vm_ref_types_resolve(
       iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
       &out_policy->types));
-  out_policy->invocation = loom_serve_program_invocation(program);
+  out_policy->invocation = loom_runtime_program_invocation(program);
   iree_vm_function_t name_function = {0};
   iree_vm_function_t defaults_function = {0};
   iree_vm_function_t image_limits_function = {0};
@@ -606,7 +606,7 @@ iree_status_t loom_serve_text_chat_policy_initialize(
   const iree_vm_signature_type_t completion_arguments[] = {
       buffer, buffer, buffer, buffer, buffer, i64, i64};
   const iree_vm_signature_type_t completion_results[] = {buffer, i32};
-  const loom_serve_program_binding_t bindings[] = {
+  const loom_runtime_program_binding_t bindings[] = {
       {IREE_SVL("model_name"), {NULL, 0}, {&buffer, 1}, &name_function},
       {IREE_SVL("chat_reasoning"),
        {NULL, 0},
@@ -657,7 +657,7 @@ iree_status_t loom_serve_text_chat_policy_initialize(
        {&buffer, 1},
        &out_policy->request_options},
   };
-  iree_status_t status = loom_serve_program_bind_service(
+  iree_status_t status = loom_runtime_program_bind_service(
       program, IREE_ARRAYSIZE(bindings), bindings);
   iree_vm_variant_t result = {0};
   if (iree_status_is_ok(status)) {

@@ -4,14 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/serve/runtime/program/variant_pool.h"
+#include "loom/runtime/program/variant_pool.h"
 #include "loom/serve/server/router_test_fixture.h"
 #include "loom/service/telemetry/record.h"
 
 namespace {
 
 const iree_string_view_t kDeviceNames[] = {IREE_SV("device")};
-const loom_serve_pool_binding_t kPools[] = {{IREE_SV("pool"), 1}};
+const loom_runtime_pool_binding_t kPools[] = {{IREE_SV("pool"), 1}};
 
 using loom_serve::testing::HttpRouterTest;
 using loom_serve::testing::loom_serve_test_model_service_t;
@@ -21,9 +21,9 @@ using loom_serve::testing::loom_serve_test_model_service_t;
 // request while these dependencies remain outstanding.
 struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
   // Real cache, accessed only by the serving owner except producer completion.
-  loom_serve_variant_pool_t* variants = nullptr;
+  loom_runtime_variant_pool_t* variants = nullptr;
   // Acquired policy choice; its lifetime belongs to the dependency.
-  loom_serve_variant_entry_t* selected = nullptr;
+  loom_runtime_variant_entry_t* selected = nullptr;
   // Published identity copied for the outer test, never a borrowed pool query.
   std::atomic<uint64_t> original{0};
   // Terminal model destruction, independent of connection completion.
@@ -35,7 +35,7 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
   // Registration-owned stream borrowed through service retirement.
   loom_runtime_telemetry_stream_t* stream = nullptr;
   // Simulated compiler borrows protected by the inherited mutex.
-  std::vector<loom_serve_variant_entry_t*> compilers;
+  std::vector<loom_runtime_variant_entry_t*> compilers;
   // Total accepted producer jobs, also protected by the mutex.
   size_t started = 0;
   // Test cleanup lets any just-accepted job complete before owner shutdown.
@@ -43,9 +43,9 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
   // One accepted policy change, independently controlled by the outer test.
   struct {
     // Acquired candidate, accessed by the owner only.
-    loom_serve_variant_entry_t* entry = nullptr;
+    loom_runtime_variant_entry_t* entry = nullptr;
     // Borrowed completion storage until owner publication.
-    loom_serve_variant_selection_fn_t completion = nullptr;
+    loom_service_variant_selection_fn_t completion = nullptr;
     // Opaque caller state whose lifetime is the subject of these tests.
     void* user_data = nullptr;
     // Device-boundary readiness, protected by the inherited mutex.
@@ -58,30 +58,30 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     return static_cast<loom_serve_test_variant_dependency_t*>(
         static_cast<loom_serve_test_model_service_t*>(self));
   }
-  static void SetObserver(void* self, loom_serve_wake_callback_t observer) {
+  static void SetObserver(void* self, loom_runtime_wake_callback_t observer) {
     loom_serve_test_model_service_t::SetObserver(self, observer);
-    loom_serve_variant_pool_set_observer(From(self)->variants, observer);
+    loom_runtime_variant_pool_set_observer(From(self)->variants, observer);
   }
   static bool IsPending(void* self) {
     auto* dependency = From(self);
     return loom_serve_test_model_service_t::IsPending(self) ||
            dependency->selection.entry ||
-           loom_serve_variant_pool_pending(dependency->variants);
+           loom_runtime_variant_pool_pending(dependency->variants);
   }
-  static iree_status_t Advance(void* self, loom_serve_service_flags_t flags,
+  static iree_status_t Advance(void* self, loom_runtime_service_flags_t flags,
                                bool* out_progress) {
     IREE_RETURN_IF_ERROR(
         loom_serve_test_model_service_t::Advance(self, flags, out_progress));
     auto* dependency = From(self);
-    *out_progress |= loom_serve_variant_pool_collect(dependency->variants);
+    *out_progress |= loom_runtime_variant_pool_collect(dependency->variants);
     std::lock_guard<std::mutex> lock(dependency->mutex);
     auto& selection = dependency->selection;
     if (selection.entry && (selection.ready || dependency->stopping)) {
       const bool cancel = dependency->stopping;
       if (cancel) {
-        loom_serve_variant_entry_release(selection.entry);
+        loom_runtime_variant_entry_release(selection.entry);
       } else {
-        loom_serve_variant_entry_release(dependency->selected);
+        loom_runtime_variant_entry_release(dependency->selected);
         dependency->selected = selection.entry;
       }
       selection.entry = nullptr;
@@ -94,18 +94,18 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     }
     return iree_ok_status();
   }
-  static iree_status_t Stage(void* self, loom_serve_variant_id_t base,
-                             const loom_serve_sources_t* sources,
-                             loom_serve_variant_id_t* out_id) {
+  static iree_status_t Stage(void* self, loom_runtime_variant_id_t base,
+                             const loom_runtime_sources_t* sources,
+                             loom_runtime_variant_id_t* out_id) {
     auto* dependency = static_cast<loom_serve_test_variant_dependency_t*>(self);
-    loom_serve_variant_entry_t* entry = nullptr;
+    loom_runtime_variant_entry_t* entry = nullptr;
     IREE_RETURN_IF_ERROR(
-        loom_serve_variant_pool_begin(dependency->variants, base, &entry));
-    *out_id = loom_serve_variant_entry_id(entry);
+        loom_runtime_variant_pool_begin(dependency->variants, base, &entry));
+    *out_id = loom_runtime_variant_entry_id(entry);
     std::lock_guard<std::mutex> lock(dependency->mutex);
     if (dependency->complete_immediately) {
-      loom_serve_variant_entry_complete(entry, iree_ok_status(), nullptr,
-                                        nullptr);
+      loom_runtime_variant_entry_complete(entry, iree_ok_status(), nullptr,
+                                          nullptr);
     } else {
       dependency->compilers.push_back(entry);
     }
@@ -114,21 +114,21 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     return iree_ok_status();
   }
   static uint64_t Selected(void* self) {
-    return loom_serve_variant_entry_id(
+    return loom_runtime_variant_entry_id(
         static_cast<loom_serve_test_variant_dependency_t*>(self)->selected);
   }
-  static iree_status_t Select(void* self, loom_serve_variant_id_t id,
-                              loom_serve_variant_id_t expected,
-                              loom_serve_variant_selection_fn_t completion,
+  static iree_status_t Select(void* self, loom_runtime_variant_id_t id,
+                              loom_runtime_variant_id_t expected,
+                              loom_service_variant_selection_fn_t completion,
                               void* user_data) {
     auto* dependency = static_cast<loom_serve_test_variant_dependency_t*>(self);
     if (expected != Selected(self) || dependency->selection.entry) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "selection conflict");
     }
-    loom_serve_variant_entry_t* entry = nullptr;
+    loom_runtime_variant_entry_t* entry = nullptr;
     IREE_RETURN_IF_ERROR(
-        loom_serve_variant_pool_acquire(dependency->variants, id, &entry));
+        loom_runtime_variant_pool_acquire(dependency->variants, id, &entry));
     std::lock_guard<std::mutex> lock(dependency->mutex);
     dependency->selection = {entry, completion, user_data, false, true};
     dependency->condition.notify_all();
@@ -138,16 +138,21 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
                                loom_serve_registration_prepare_flags_t flags,
                                bool* out_complete,
                                loom_serve_service_t* out_service,
-                               loom_serve_compilation_report_t* out_report) {
+                               loom_runtime_compilation_report_t* out_report) {
     auto* dependency = static_cast<loom_serve_test_variant_dependency_t*>(self);
     *out_complete = true;
     if (iree_any_bit_set(flags, LOOM_SERVE_REGISTRATION_PREPARE_FLAG_CANCEL)) {
       return iree_make_status(IREE_STATUS_CANCELLED, "preparation cancelled");
     }
     *out_service = dependency->Interface(nullptr, nullptr);
-    out_service->set_observer = SetObserver;
-    out_service->is_pending = IsPending;
-    out_service->advance = Advance;
+    static const loom_runtime_service_vtable_t vtable = {
+        .set_observer = SetObserver,
+        .has_requests = HasRequests,
+        .is_pending = IsPending,
+        .is_active = IsActive,
+        .advance = Advance,
+    };
+    out_service->runtime.vtable = &vtable;
     out_service->telemetry.stream = dependency->stream;
     out_service->reconfiguration = {dependency, dependency->variants, Stage,
                                     Select, Selected};
@@ -157,9 +162,9 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     auto* dependency = static_cast<loom_serve_test_variant_dependency_t*>(self);
     EXPECT_FALSE(
         IsPending(static_cast<loom_serve_test_model_service_t*>(dependency)));
-    loom_serve_variant_entry_release(dependency->selected);
+    loom_runtime_variant_entry_release(dependency->selected);
     dependency->selected = nullptr;
-    loom_serve_variant_pool_free(dependency->variants);
+    loom_runtime_variant_pool_free(dependency->variants);
     dependency->variants = nullptr;
     *out_complete = true;
     return iree_ok_status();
@@ -169,14 +174,14 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
   }
   static iree_status_t Create(
       void* self, const loom_serve_model_configuration_t* configuration,
-      loom_serve_wake_callback_t observer,
+      loom_runtime_wake_callback_t observer,
       loom_runtime_telemetry_stream_t* stream, iree_allocator_t host_allocator,
       loom_serve_registration_t* out_registration) {
     auto* dependency = static_cast<loom_serve_test_variant_dependency_t*>(self);
-    IREE_RETURN_IF_ERROR(loom_serve_variant_pool_allocate(
+    IREE_RETURN_IF_ERROR(loom_runtime_variant_pool_allocate(
         8, nullptr, [](void* value) {}, host_allocator, &dependency->selected,
         &dependency->variants));
-    loom_serve_variant_entry_retain(dependency->selected);
+    loom_runtime_variant_entry_retain(dependency->selected);
     dependency->original.store(Selected(self));
     dependency->name = configuration->name.data;
     dependency->counters = &dependency->totals;
@@ -199,8 +204,8 @@ struct loom_serve_test_variant_dependency_t : loom_serve_test_model_service_t {
     std::lock_guard<std::mutex> lock(mutex);
     complete_immediately |= remaining;
     for (auto* entry : compilers) {
-      loom_serve_variant_entry_complete(entry, iree_ok_status(), nullptr,
-                                        nullptr);
+      loom_runtime_variant_entry_complete(entry, iree_ok_status(), nullptr,
+                                          nullptr);
     }
     compilers.clear();
   }
@@ -221,7 +226,7 @@ class HttpRouterVariantTest : public HttpRouterTest {
     managed_capacity_ = 1;
     factory_ = {
         .self = &model_,
-        .kinds = 1u << LOOM_SERVE_MODEL_KIND_EMBEDDING,
+        .kinds = 1u << LOOM_SERVICE_KIND_EMBEDDING,
         .device_names = {1, kDeviceNames},
         .pool_count = 1,
         .pools = kPools,

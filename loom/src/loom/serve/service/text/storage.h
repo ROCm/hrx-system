@@ -8,8 +8,8 @@
 #define LOOM_SERVE_SERVICE_TEXT_STORAGE_H_
 
 #include "iree/vm/buffer.h"
-#include "loom/serve/runtime/storage/relocation.h"
-#include "loom/serve/runtime/storage/snapshot.h"
+#include "loom/runtime/storage/relocation.h"
+#include "loom/runtime/storage/snapshot.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,7 +42,7 @@ typedef struct loom_serve_text_cache_region_t {
   // Source allocation slot containing these repeated cache planes.
   iree_host_size_t allocation;
   // Source-owned disjoint cache planes inside that allocation.
-  loom_serve_block_region_t blocks;
+  loom_runtime_block_region_t blocks;
 } loom_serve_text_cache_region_t;
 
 // Source storage description, separate from device ownership and model work.
@@ -117,7 +117,7 @@ iree_status_t loom_serve_text_storage_plan_snapshot(
     iree_hal_buffer_t* const* private_views, bool include_carry,
     uint32_t block_count, const uint32_t* blocks,
     iree_allocator_t host_allocator, iree_host_size_t* out_count,
-    loom_serve_snapshot_range_t** out_ranges);
+    loom_runtime_snapshot_range_t** out_ranges);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -8,10 +8,10 @@
 #define LOOM_SERVE_SERVICE_SPEECH_GENERATOR_H_
 
 #include "iree/tokenizer/tokenizer.h"
+#include "loom/runtime/execution/execution.h"
+#include "loom/runtime/parameter/residency.h"
+#include "loom/runtime/storage/memory.h"
 #include "loom/serve/media/audio_source.h"
-#include "loom/serve/runtime/execution/execution.h"
-#include "loom/serve/runtime/parameter/residency.h"
-#include "loom/serve/runtime/storage/memory.h"
 #include "loom/serve/service/speech/request.h"
 
 #ifdef __cplusplus
@@ -98,8 +98,8 @@ typedef struct loom_serve_speech_generator_t {
   // neither row nor pin. Cancellation retains accepted work until successful
   // completion; failure leaves it under model retirement.
   iree_status_t (*try_admit)(void* self, void* invocation,
-                             loom_serve_residency_admission_t* out_admission,
-                             loom_serve_execution_frontier_t* out_frontier);
+                             loom_runtime_residency_admission_t* out_admission,
+                             loom_runtime_execution_frontier_t* out_frontier);
   // Collects successful admission readiness, retaining the admitted row and
   // pin. Capacity is decided before submission, never again at completion.
   void (*complete_admit)(void* self, void* invocation);
@@ -117,7 +117,7 @@ typedef struct loom_serve_speech_generator_t {
   // Queues the prepared numerical batch once. Returned frontiers and all
   // selected requests remain retained through actual retirement.
   iree_status_t (*submit)(void* self,
-                          loom_serve_execution_frontier_t* out_frontier);
+                          loom_runtime_execution_frontier_t* out_frontier);
   // CPU-only interpretation of successfully retired feedback. Checks external
   // source metadata once, then returns a trusted block. The view remains live
   // through encoding; no new submission occurs until the consumer releases it.
@@ -137,7 +137,7 @@ typedef struct loom_serve_speech_generator_t {
   // readiness, excluding other model mutation. Backing release never blocks
   // the owner. Platform failure retains the handle for model teardown.
   iree_status_t (*release)(void* self, void* invocation, bool* out_complete,
-                           loom_serve_execution_frontier_t* out_frontier);
+                           loom_runtime_execution_frontier_t* out_frontier);
   // Optional immutable tokenizer, live through model retirement.
   const iree_tokenizer_t* tokenizer;
   // Shared admission identity; equal non-NULL domains can release each other's

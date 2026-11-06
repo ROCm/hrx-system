@@ -9,6 +9,7 @@
 #include <string>
 
 #include "iree/base/api.h"
+#include "loom/runtime/program/package.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/http/package.h"
 #include "loom/serve/transport/http/request.h"
@@ -114,7 +115,7 @@ void Exercise(const std::string& wire_request) {
 
   loom_serve_model_configuration_t configuration = {};
   iree_string_view_t json;
-  loom_serve_package_t* package = nullptr;
+  loom_runtime_package_t* package = nullptr;
   if (iree_status_is_ok(status)) {
     status = loom_serve_http_package_parse(request, iree_allocator_system(),
                                            &json, &package);
@@ -124,7 +125,7 @@ void Exercise(const std::string& wire_request) {
         json, iree_string_view_empty(), package, iree_allocator_system(),
         &configuration);
   }
-  loom_serve_package_release(package);
+  loom_runtime_package_release(package);
   loom_serve_model_configuration_deinitialize(&configuration);
   iree_status_free(status);
   loom_serve_http_request_parser_free(parser);

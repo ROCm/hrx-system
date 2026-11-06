@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVER_MODEL_RESOLUTION_H_
 #define LOOM_SERVE_SERVER_MODEL_RESOLUTION_H_
 
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/server/configuration.h"
 #include "loomc/task.h"
 
@@ -24,7 +24,7 @@ typedef struct loom_serve_model_resolution_t loom_serve_model_resolution_t;
 iree_status_t loom_serve_model_resolution_start(
     loomc_task_sink_t sink,
     const loom_serve_model_configuration_t* configuration,
-    loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
+    loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_serve_model_resolution_t** out_resolution);
 
 // False leaves every argument unchanged while work is pending. True joins the

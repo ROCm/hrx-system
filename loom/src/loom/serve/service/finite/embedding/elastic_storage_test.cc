@@ -17,15 +17,15 @@
 
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
+#include "loom/runtime/testing/native_allocator.h"
+#include "loom/runtime/testing/stalled_stderr.h"
 #include "loom/serve/service/finite/embedding/source_service_test_fixture.h"
 #include "loom/serve/testing/model.h"
-#include "loom/serve/testing/native_allocator.h"
 #include "loom/serve/testing/package.h"
-#include "loom/serve/testing/stalled_stderr.h"
 
 namespace loom_serve::testing::embedding {
 
-using loom_serve::testing::StalledStderr;
+using loom_runtime::testing::StalledStderr;
 
 class ElasticEmbeddingServiceTest : public SourceEmbeddingServiceTest {
  protected:
@@ -36,9 +36,9 @@ class ElasticEmbeddingServiceTest : public SourceEmbeddingServiceTest {
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(SourceEmbeddingServiceTest::SetUp());
     // Cold-allocation holds must not depend on a previous test's cached slabs.
-    auto* pool = loom_serve_pool_memory(storage_owner_);
-    loom_serve_memory_pool_trim(pool, 0);
-    IREE_ASSERT_OK(loom_serve_memory_pool_await(pool));
+    auto* pool = loom_runtime_pool_memory(storage_owner_);
+    loom_runtime_memory_pool_trim(pool, 0);
+    IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool));
   }
 };
 
@@ -103,7 +103,7 @@ TEST_F(ElasticEmbeddingServiceTest,
   {
     // Both models fit separately in the one-slab budget. Pressure must transfer
     // backing without needing another native allocation or a polling request.
-    loom_serve::testing::ScopedNativeHold gate(device_);
+    loom_runtime::testing::ScopedNativeHold gate(device_);
     EXPECT_NE(Read(Send(R"({"model":"second","input":"a"})"))
                   .find(R"("embedding":[2,2,2,2])"),
               std::string::npos);
@@ -142,7 +142,7 @@ TEST_F(ElasticEmbeddingServiceTest,
             std::string::npos);
   int cold = -1;
   {
-    loom_serve::testing::ScopedNativeHold gate(device_);
+    loom_runtime::testing::ScopedNativeHold gate(device_);
     cold = Send(R"({"model":"cold","input":"a"})");
     gate.WaitEntered();
     const auto waiting = WaitModelState("cold", R"("pending_bytes":4096)");
@@ -175,7 +175,7 @@ TEST_F(ElasticEmbeddingServiceTest,
 
   // Leave native failure free to complete during submission. Holding it until
   // another request queues would exclude this dependency-publication ordering.
-  NativeAllocator::ForDevice(device_).FailNextAllocation(
+  loom_runtime::testing::NativeAllocator::ForDevice(device_).FailNextAllocation(
       IREE_ALLOCATOR_COMMAND_CALLOC, /*native_only=*/true);
   const auto failed = Read(Send(R"({"model":"cold","input":"a"})"));
   ASSERT_EQ(failed.find("HTTP/1.1 503"), 0u) << failed;
@@ -201,12 +201,12 @@ TEST_F(ElasticEmbeddingServiceTest,
                 .find(R"("embedding":[1,1,1,1])"),
             std::string::npos);
 
-  NativeAllocator::ForDevice(device_).FailNextAllocation(
+  loom_runtime::testing::NativeAllocator::ForDevice(device_).FailNextAllocation(
       IREE_ALLOCATOR_COMMAND_CALLOC, /*native_only=*/true);
   int active = -1;
   int pending = -1;
   {
-    ScopedNativeHold allocation(device_);
+    loom_runtime::testing::ScopedNativeHold allocation(device_);
     active = Send(R"({"model":"cold","input":"a"})");
     allocation.WaitEntered();
     pending = Send(R"({"model":"cold","input":"b"})");
@@ -259,7 +259,7 @@ TEST_F(ElasticEmbeddingServiceTest,
             std::string::npos);
   int cold = -1;
   {
-    loom_serve::testing::ScopedNativeHold gate(device_);
+    loom_runtime::testing::ScopedNativeHold gate(device_);
     cold = Send(R"({"model":"cold","input":"a"})");
     gate.WaitEntered();
     ASSERT_NO_FATAL_FAILURE(WaitModelState("cold", R"("pending_bytes":4096)"));
@@ -288,9 +288,10 @@ TEST_F(ElasticEmbeddingServiceTest,
   const std::string package =
       iree::testing::MakeTempFilePath("dynamic_pressure");
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
-  interface_.set_observer(interface_.self, {});
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
-  IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
+  IREE_ASSERT_OK(
+      loom_service_finite_model_free(std::exchange(model_, nullptr)));
   StartManagedRouter();
   EXPECT_NE(Read(Send({}, "/v1/models", "GET")).find(R"("data":[])"),
             std::string::npos);
@@ -319,10 +320,10 @@ TEST_F(ElasticEmbeddingServiceTest,
             std::string::npos);
   loom_serve_http_server_request_stop(server_);
   IREE_ASSERT_OK(http_.Join());
-  const auto memory = loom_serve_pool_statistics(storage_owner_).retained;
-  const auto workspace = loom_serve_workspace_memory_usage(
-      loom_serve_pool_workspace(storage_owner_));
-  EXPECT_FALSE(loom_serve_pool_is_in_use(storage_owner_));
+  const auto memory = loom_runtime_pool_statistics(storage_owner_).retained;
+  const auto workspace = loom_runtime_workspace_memory_usage(
+      loom_runtime_pool_workspace(storage_owner_));
+  EXPECT_FALSE(loom_runtime_pool_is_in_use(storage_owner_));
   EXPECT_EQ(memory.committed_bytes,
             memory.cached_bytes + workspace.committed_bytes);
   EXPECT_EQ(retired_counters_.completed, 3u);
@@ -333,54 +334,56 @@ TEST_F(ElasticEmbeddingServiceTest,
   const std::string package =
       iree::testing::MakeTempFilePath("checkpoint_embedding");
   ASSERT_NO_FATAL_FAILURE(WriteCheckpointPackage(package));
-  interface_.set_observer(interface_.self, {});
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
-  IREE_ASSERT_OK(loom_serve_finite_model_free(std::exchange(model_, nullptr)));
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
+  IREE_ASSERT_OK(
+      loom_service_finite_model_free(std::exchange(model_, nullptr)));
   constexpr uint64_t kSlabBytes = 4096;
   ASSERT_NO_FATAL_FAILURE(CreateModel(package));
   retained_ = std::exchange(model_, nullptr);
   ASSERT_NO_FATAL_FAILURE(CreateModel(package));
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
-  auto* retained_residency = loom_serve_finite_model_residency(retained_);
-  auto* residency = loom_serve_finite_model_residency(model_);
-  IREE_ASSERT_OK(loom_serve_residency_acquire(retained_residency));
-  IREE_ASSERT_OK(loom_serve_residency_await(retained_residency));
-  EXPECT_EQ(loom_serve_residency_statistics(retained_residency).committed_bytes,
-            kSlabBytes);
+  auto* retained_residency = loom_service_finite_model_residency(retained_);
+  auto* residency = loom_service_finite_model_residency(model_);
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(retained_residency));
+  IREE_ASSERT_OK(loom_runtime_residency_await(retained_residency));
+  EXPECT_EQ(
+      loom_runtime_residency_statistics(retained_residency).committed_bytes,
+      kSlabBytes);
   const int cancelled = Send(R"({"model":"fixture","input":["a","bbb"]})");
   loom_serve_http_connection_t* connection = nullptr;
   ASSERT_NO_FATAL_FAILURE(Accept(cancelled, &connection));
-  const auto queued = interface_.snapshot(interface_.self);
+  const auto queued = interface_.snapshot(interface_.runtime.self);
   EXPECT_EQ(queued.queued_requests, 1u);
   EXPECT_EQ(queued.active_requests, 0u);
   EXPECT_GE(queued.oldest_queued_age, 0);
   EXPECT_EQ(queued.oldest_active_age, 0);
   // The outer owner holds another model's pin and will release it. Queue the
   // cohort behind that activity instead of treating capacity as unreachable.
-  constexpr auto kShared = LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY;
+  constexpr auto kShared = LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY;
   EXPECT_TRUE(Step(kShared));  // Prepare requests.
   EXPECT_TRUE(Step(kShared));  // Prepare cohort.
   EXPECT_TRUE(Step(kShared));  // Consume preparation; admission denied.
-  const auto waiting = interface_.snapshot(interface_.self);
+  const auto waiting = interface_.snapshot(interface_.runtime.self);
   EXPECT_STREQ(waiting.phase, "waiting");
   EXPECT_EQ(waiting.queued_requests, 0u);
   EXPECT_EQ(waiting.oldest_queued_age, 0);
   EXPECT_EQ(waiting.active_requests, 1u);
   EXPECT_GT(waiting.oldest_active_age, 0);
   EXPECT_GE(waiting.oldest_active_age, queued.oldest_queued_age);
-  const auto pressure = loom_serve_residency_snapshot(residency);
+  const auto pressure = loom_runtime_residency_snapshot(residency);
   EXPECT_TRUE(pressure.admission.waiting);
   EXPECT_EQ(pressure.admission.count, 1u);
   EXPECT_EQ(pressure.admission.duration_ns, pressure.admission.age_ns);
   EXPECT_EQ(pressure.pin_count, 0u);
-  EXPECT_EQ(loom_serve_residency_snapshot(retained_residency).pin_count, 1u);
+  EXPECT_EQ(loom_runtime_residency_snapshot(retained_residency).pin_count, 1u);
   const uint64_t wakes = wakes_.load();
   for (int i = 0; i < 3; ++i) {
     EXPECT_FALSE(Step(kShared));
-    EXPECT_FALSE(interface_.is_active(interface_.self));
-    EXPECT_GE(interface_.snapshot(interface_.self).oldest_active_age,
+    EXPECT_FALSE(interface_.runtime.vtable->is_active(interface_.runtime.self));
+    EXPECT_GE(interface_.snapshot(interface_.runtime.self).oldest_active_age,
               waiting.oldest_active_age);
-    const auto retry = loom_serve_residency_snapshot(residency);
+    const auto retry = loom_runtime_residency_snapshot(residency);
     EXPECT_TRUE(retry.admission.waiting);
     EXPECT_EQ(retry.admission.count, 1u);
     EXPECT_EQ(retry.admission.duration_ns, retry.admission.age_ns);
@@ -389,11 +392,11 @@ TEST_F(ElasticEmbeddingServiceTest,
   // No new CPU process or device submission occurred during those turns. The
   // source packet and result association were retained, not prepared again.
   EXPECT_EQ(wakes_.load(), wakes);
-  EXPECT_EQ(loom_serve_residency_statistics(residency).committed_bytes, 0u);
-  loom_serve_residency_admission_t admission;
+  EXPECT_EQ(loom_runtime_residency_statistics(residency).committed_bytes, 0u);
+  loom_runtime_residency_admission_t admission;
   IREE_ASSERT_OK(
-      loom_serve_residency_try_admit(retained_residency, &admission));
-  EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
+      loom_runtime_residency_try_admit(retained_residency, &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   const linger reset = {1, 0};
   ASSERT_EQ(setsockopt(cancelled, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
             0);
@@ -408,41 +411,41 @@ TEST_F(ElasticEmbeddingServiceTest,
   EXPECT_TRUE(Step(kShared));
   // Reset withdraws the older pressure interest. The still-pinned peer may
   // accept again without waiting for its existing invocation to finish.
-  const auto withdrawn = loom_serve_residency_snapshot(residency);
+  const auto withdrawn = loom_runtime_residency_snapshot(residency);
   EXPECT_FALSE(withdrawn.admission.waiting);
   EXPECT_EQ(withdrawn.admission.count, 1u);
   EXPECT_EQ(withdrawn.admission.age_ns, 0u);
   EXPECT_GE(withdrawn.admission.duration_ns, pressure.admission.duration_ns);
   EXPECT_EQ(withdrawn.pin_count, 0u);
   IREE_ASSERT_OK(
-      loom_serve_residency_try_admit(retained_residency, &admission));
-  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
-  loom_serve_residency_cancel_admission(retained_residency);
-  loom_serve_residency_release(retained_residency);
-  const auto cancelled_state = interface_.snapshot(interface_.self);
+      loom_runtime_residency_try_admit(retained_residency, &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_runtime_residency_cancel_admission(retained_residency);
+  loom_runtime_residency_release(retained_residency);
+  const auto cancelled_state = interface_.snapshot(interface_.runtime.self);
   EXPECT_EQ(cancelled_state.oldest_queued_age, 0);
   EXPECT_EQ(cancelled_state.oldest_active_age, 0);
-  EXPECT_EQ(loom_serve_residency_snapshot(residency).admission.duration_ns,
+  EXPECT_EQ(loom_runtime_residency_snapshot(residency).admission.duration_ns,
             withdrawn.admission.duration_ns);
   const int request = Send(R"({"model":"fixture","input":["a","bbb"]})");
   ASSERT_NO_FATAL_FAILURE(Accept(request));
   EXPECT_TRUE(Step(kShared));
   EXPECT_TRUE(Step(kShared));
   EXPECT_TRUE(Step(kShared));
-  const auto second_wait = loom_serve_residency_snapshot(residency);
+  const auto second_wait = loom_runtime_residency_snapshot(residency);
   EXPECT_TRUE(second_wait.admission.waiting);
   EXPECT_EQ(second_wait.admission.count, 2u);
   EXPECT_EQ(second_wait.admission.duration_ns,
             withdrawn.admission.duration_ns + second_wait.admission.age_ns);
-  loom_serve_residency_release(retained_residency);
+  loom_runtime_residency_release(retained_residency);
   Drain();
   const std::string result = Read(request);
-  const auto idle = interface_.snapshot(interface_.self);
+  const auto idle = interface_.snapshot(interface_.runtime.self);
   EXPECT_EQ(idle.queued_requests, 0u);
   EXPECT_EQ(idle.active_requests, 0u);
   EXPECT_EQ(idle.oldest_queued_age, 0);
   EXPECT_EQ(idle.oldest_active_age, 0);
-  const auto admitted = loom_serve_residency_snapshot(residency);
+  const auto admitted = loom_runtime_residency_snapshot(residency);
   EXPECT_FALSE(admitted.admission.waiting);
   EXPECT_EQ(admitted.admission.count, 2u);
   EXPECT_EQ(admitted.admission.age_ns, 0u);
@@ -453,19 +456,20 @@ TEST_F(ElasticEmbeddingServiceTest,
             std::string::npos);
   EXPECT_NE(result.find(R"("index":1,"embedding":[12,6,4,4])"),
             std::string::npos);
-  EXPECT_EQ(loom_serve_residency_statistics(retained_residency).committed_bytes,
-            0u);
-  EXPECT_EQ(loom_serve_residency_statistics(residency).committed_bytes,
+  EXPECT_EQ(
+      loom_runtime_residency_statistics(retained_residency).committed_bytes,
+      0u);
+  EXPECT_EQ(loom_runtime_residency_statistics(residency).committed_bytes,
             kSlabBytes);
 
   const uint64_t reservation_bytes =
-      loom_serve_residency_statistics(residency).reserved_bytes;
+      loom_runtime_residency_statistics(residency).reserved_bytes;
   const auto before_removal =
-      loom_serve_pool_statistics(storage_owner_).retained;
+      loom_runtime_pool_statistics(storage_owner_).retained;
   // Retire the model with prepared parameters on the serialized owner that
   // must admit its peer. The one-slab budget cannot hold both parameter sets.
-  interface_.set_observer(interface_.self, {});
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
+  interface_.runtime.vtable->set_observer(interface_.runtime.self, {});
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
   std::swap(model_, retained_);
   ASSERT_NO_FATAL_FAILURE(CreateService(0));
   const int peer = Send(R"({"model":"fixture","input":"a"})");
@@ -484,27 +488,27 @@ TEST_F(ElasticEmbeddingServiceTest,
   EXPECT_EQ(retained_, nullptr);
   EXPECT_NE(Read(peer).find(R"("embedding":[2,2,2,2])"), std::string::npos);
   const auto after_removal =
-      loom_serve_pool_statistics(storage_owner_).retained;
+      loom_runtime_pool_statistics(storage_owner_).retained;
   EXPECT_EQ(after_removal.reserved_bytes,
             before_removal.reserved_bytes - reservation_bytes);
   EXPECT_EQ(after_removal.committed_bytes,
-            kSlabBytes + loom_serve_workspace_memory_usage(
-                             loom_serve_pool_workspace(storage_owner_))
+            kSlabBytes + loom_runtime_workspace_memory_usage(
+                             loom_runtime_pool_workspace(storage_owner_))
                              .committed_bytes);
 
   // Final removal retains reusable physical backing without any model owning
   // it. The same device and host executor remain available for replacements.
-  loom_serve_finite_service_free(std::exchange(service_, nullptr));
+  loom_service_finite_service_free(std::exchange(service_, nullptr));
   loom_serve_test_embedding_model_lifecycle_t final_removal;
   final_removal.model = std::exchange(model_, nullptr);
   removal_status = final_removal.Retire(device_, storage_owner_);
   model_ = final_removal.model;
   IREE_ASSERT_OK(removal_status);
   EXPECT_EQ(model_, nullptr);
-  const auto empty = loom_serve_pool_statistics(storage_owner_).retained;
-  const auto workspace = loom_serve_workspace_memory_usage(
-      loom_serve_pool_workspace(storage_owner_));
-  EXPECT_FALSE(loom_serve_pool_is_in_use(storage_owner_));
+  const auto empty = loom_runtime_pool_statistics(storage_owner_).retained;
+  const auto workspace = loom_runtime_workspace_memory_usage(
+      loom_runtime_pool_workspace(storage_owner_));
+  EXPECT_FALSE(loom_runtime_pool_is_in_use(storage_owner_));
   EXPECT_EQ(empty.committed_bytes,
             empty.cached_bytes + workspace.committed_bytes);
 }

@@ -10,8 +10,8 @@
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/task/executor.h"
-#include "loom/serve/runtime/execution/execution.h"
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/execution/execution.h"
+#include "loom/runtime/wake.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,7 +36,7 @@ typedef struct loom_serve_text_readiness_t {
   // Joins producer publication with owner consumption and observer detachment.
   iree_slim_mutex_t mutex;
   // Borrowed nonblocking owner wake, alive through accepted callback release.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
   // One accepted device wait, independent of the finite CPU borrower.
   struct {
     // Borrowed shared proactor, outliving this publication channel.
@@ -77,7 +77,7 @@ void loom_serve_text_readiness_deinitialize(
 // all accepted callbacks and joins their final observer access under mutex.
 void loom_serve_text_readiness_set_observer(
     loom_serve_text_readiness_t* readiness,
-    loom_serve_wake_callback_t observer);
+    loom_runtime_wake_callback_t observer);
 
 // Makes the owner runnable without submitting another CPU/device operation.
 void loom_serve_text_readiness_notify(loom_serve_text_readiness_t* readiness);
@@ -86,7 +86,7 @@ void loom_serve_text_readiness_notify(loom_serve_text_readiness_t* readiness);
 // frontier semaphores until take_device consumes its terminal outcome.
 iree_status_t loom_serve_text_readiness_await(
     loom_serve_text_readiness_t* readiness,
-    const loom_serve_execution_frontier_t* frontier);
+    const loom_runtime_execution_frontier_t* frontier);
 
 // Runs one finite borrower on shared workers. A prior CPU job has been taken.
 void loom_serve_text_readiness_schedule(loom_serve_text_readiness_t* readiness,

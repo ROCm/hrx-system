@@ -9,12 +9,12 @@
 
 #include "iree/tokenizer/tokenizer.h"
 #include "iree/vm/buffer.h"
-#include "loom/serve/service/inspection.h"
 #include "loom/serve/service/text/chat.h"
 #include "loom/serve/service/text/consumer.h"
 #include "loom/serve/service/text/media_projector.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/sequence.h"
+#include "loom/service/inspection.h"
 #include "loom/service/telemetry/record.h"
 
 #ifdef __cplusplus
@@ -148,7 +148,7 @@ bool loom_serve_text_session_has_history(
 // Copies only owner-published work and immutable admission metadata. Safe on
 // the serialized owner while a CPU task borrows the row's response storage;
 // request phase/output buffers are deliberately excluded. ID zero means idle.
-loom_serve_http_request_snapshot_t loom_serve_text_session_request_snapshot(
+loom_service_request_snapshot_t loom_serve_text_session_request_snapshot(
     const loom_serve_text_session_t* session);
 
 // Allocates reusable decoder/response storage only for generation. Input

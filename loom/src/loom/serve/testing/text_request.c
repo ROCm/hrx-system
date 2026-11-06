@@ -156,7 +156,7 @@ static iree_status_t loom_serve_text_request_check_report(
 
 static iree_status_t loom_serve_text_request_check_run(
     iree_allocator_t host_allocator) {
-  loom_serve_compilation_report_t compilation = {0};
+  loom_runtime_compilation_report_t compilation = {0};
   if ((!!FLAG_control[0] == !!FLAG_model[0]) ||
       (FLAG_preset[0] && !FLAG_model[0]) || !FLAG_tokenizer[0] ||
       !FLAG_request[0] || FLAG_capacity <= 0 || FLAG_response_chunk_size < 0) {
@@ -166,7 +166,7 @@ static iree_status_t loom_serve_text_request_check_run(
         "are required; --preset requires --model; "
         "capacity must be positive");
   }
-  const loom_serve_sources_t requested_sources = {
+  const loom_runtime_sources_t requested_sources = {
       .base_directory = IREE_SV("."),
       .control = iree_make_cstring_view(FLAG_control),
       .reference = {
@@ -269,7 +269,7 @@ static iree_status_t loom_serve_text_request_check_run(
   loom_output_stream_t output;
   loom_output_stream_for_file(stderr, &output);
   status = iree_status_join(
-      status, loom_serve_compilation_write(&compilation, &output));
+      status, loom_runtime_compilation_write(&compilation, &output));
   return status;
 }
 

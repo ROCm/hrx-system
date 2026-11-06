@@ -7,8 +7,8 @@
 #ifndef LOOM_SERVE_SERVICE_RECOGNITION_STREAM_H_
 #define LOOM_SERVE_SERVICE_RECOGNITION_STREAM_H_
 
-#include "loom/serve/runtime/host/host.h"
-#include "loom/serve/runtime/host/wake.h"
+#include "loom/runtime/host/host.h"
+#include "loom/runtime/wake.h"
 #include "loom/serve/service/recognition/document.h"
 #include "loom/serve/service/recognition/generator.h"
 #include "loom/service/telemetry/record.h"
@@ -50,7 +50,7 @@ typedef struct loom_serve_recognition_stream_service_options_t {
 // executor and device readiness uses its proactor. No private threads or waits
 // are introduced. Construction accepts no asynchronous work.
 iree_status_t loom_serve_recognition_stream_service_allocate(
-    loom_serve_host_t* host, loom_serve_recognition_generator_t generator,
+    loom_runtime_host_t* host, loom_serve_recognition_generator_t generator,
     const loom_serve_recognition_stream_service_options_t* options,
     iree_allocator_t host_allocator,
     loom_serve_recognition_stream_service_t** out_service);
@@ -59,7 +59,7 @@ iree_status_t loom_serve_recognition_stream_service_allocate(
 // is_pending becomes false. Final callback publication joins this registration.
 void loom_serve_recognition_stream_service_set_observer(
     loom_serve_recognition_stream_service_t* service,
-    loom_serve_wake_callback_t observer);
+    loom_runtime_wake_callback_t observer);
 
 // Opens a bounded host stream and copies its options. Success with NULL means
 // all source slots are occupied; the caller retains its own queue position.

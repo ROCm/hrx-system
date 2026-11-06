@@ -9,7 +9,7 @@
 
 #include "iree/base/api.h"
 #include "iree/vm/buffer.h"
-#include "loom/serve/runtime/program/program.h"
+#include "loom/runtime/program/program.h"
 #include "loom/serve/service/reasoning.h"
 #include "loom/serve/service/text/media.h"
 #include "loom/serve/service/text/tool_calls.h"
@@ -83,7 +83,7 @@ typedef struct loom_serve_text_chat_policy_t {
 // has owned backing that source may retain. The program/environment outlive
 // the policy and every chat initialized from it.
 iree_status_t loom_serve_text_chat_policy_initialize(
-    iree_vm_environment_t* environment, loom_serve_program_t* program,
+    iree_vm_environment_t* environment, loom_runtime_program_t* program,
     iree_vm_buffer_t* options, loom_serve_text_chat_policy_t* out_policy);
 
 // Releases the owned identity/defaults; functions borrow the model program.

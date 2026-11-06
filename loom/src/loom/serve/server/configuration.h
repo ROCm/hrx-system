@@ -7,10 +7,10 @@
 #ifndef LOOM_SERVE_SERVER_CONFIGURATION_H_
 #define LOOM_SERVE_SERVER_CONFIGURATION_H_
 
-#include "loom/serve/runtime/device/pool.h"
-#include "loom/serve/runtime/program/sources.h"
-#include "loom/serve/runtime/program/variant_pool.h"
-#include "loom/serve/service/kind.h"
+#include "loom/runtime/device/pool.h"
+#include "loom/runtime/program/sources.h"
+#include "loom/runtime/program/variant_pool.h"
+#include "loom/service/kind.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,7 +33,7 @@ typedef struct loom_serve_finite_component_configuration_t {
   // Owned source-defined JSON object; omission becomes an empty object.
   iree_string_view_t options;
   // Idle request-code reuse, independent of checkpoint residency capacity.
-  loom_serve_variant_cache_options_t specialization_cache;
+  loom_runtime_variant_cache_options_t specialization_cache;
 } loom_serve_finite_component_configuration_t;
 
 typedef struct loom_serve_text_configuration_t {
@@ -98,7 +98,7 @@ typedef struct loom_serve_model_configuration_t {
   // Allocator owning decoded strings, retained when this declaration is moved.
   iree_allocator_t host_allocator;
   // Selects the native modality contract and the configuration union member.
-  loom_serve_model_kind_t kind;
+  loom_service_kind_t kind;
   // Owned visible ASCII identifier used in JSON and HTTP header selectors.
   iree_string_view_t name;
   // Owned machine-local device key; empty until singleton admission resolves
@@ -112,10 +112,10 @@ typedef struct loom_serve_model_configuration_t {
   iree_host_size_t pool_index;
   // Owned program paths, provider array/strings, local directory base, and
   // retained source package when registration supplied one.
-  loom_serve_sources_t sources;
+  loom_runtime_sources_t sources;
   // Owned namespace after cold card resolution; sources borrows this value.
   // NULL while a local card reference is pending or for direct declarations.
-  loom_serve_sources_t* resolved_sources;
+  loom_runtime_sources_t* resolved_sources;
   // Owned deployment JSON while a card reference awaits cold resolution.
   // Retains authored overrides until canonical defaults are available.
   iree_string_view_t document;
@@ -130,7 +130,7 @@ typedef struct loom_serve_model_configuration_t {
   iree_host_size_t variant_capacity;
   // Idle source-selected request executables for finite vector/image
   // deployments.
-  loom_serve_variant_cache_options_t specialization_cache;
+  loom_runtime_variant_cache_options_t specialization_cache;
   // Register metadata without preparing the model until admission opens.
   bool start_drained;
   // Only the member selected by kind is initialized and owned.
@@ -163,7 +163,7 @@ typedef struct loom_serve_model_configuration_t {
 // Failure releases partial state and zeros the output.
 iree_status_t loom_serve_model_configuration_initialize(
     iree_string_view_t json, iree_string_view_t document_directory,
-    loom_serve_package_t* package, iree_allocator_t host_allocator,
+    loom_runtime_package_t* package, iree_allocator_t host_allocator,
     loom_serve_model_configuration_t* out_model);
 void loom_serve_model_configuration_deinitialize(
     loom_serve_model_configuration_t* model);
@@ -201,7 +201,7 @@ iree_status_t loom_serve_model_configuration_resolve_device(
 // include the already-resolved execution device. Omission requires one pool.
 iree_status_t loom_serve_model_configuration_resolve_pool(
     const loom_serve_model_configuration_t* model, iree_host_size_t pool_count,
-    const loom_serve_pool_binding_t* pools, iree_host_size_t device_index,
+    const loom_runtime_pool_binding_t* pools, iree_host_size_t device_index,
     iree_host_size_t* out_pool_index);
 
 #ifdef __cplusplus

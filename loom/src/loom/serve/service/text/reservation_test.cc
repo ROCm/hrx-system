@@ -6,8 +6,8 @@
 
 #include "loom/serve/service/text/reservation.h"
 
+#include "loom/runtime/testing/device.h"
 #include "loom/serve/service/text/service_test_fixture.h"
-#include "loom/serve/testing/device.h"
 
 namespace {
 
@@ -51,7 +51,7 @@ TEST_P(TextReservationTest,
   ASSERT_NE(reservation_.state, nullptr);
   EXPECT_EQ(loom_serve_text_row_position(branch), 0u);
   EXPECT_LT(loom_serve_text_model_pool_usage(model_).available, available);
-  loom_serve_execution_frontier_t frontier;
+  loom_runtime_execution_frontier_t frontier;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
       loom_serve_text_checkpoint_submit_suspend(checkpoint_, &frontier));
@@ -97,9 +97,9 @@ TEST_P(TextReservationTest,
       loom_serve_text_reservation_submit(&reservation_, &admitted, &frontier));
   ASSERT_EQ(admitted, LOOM_SERVE_TEXT_RESERVE_ACQUIRED);
   for (size_t i = 0; i < IREE_ARRAYSIZE(frontier.semaphores); ++i) {
-    IREE_ASSERT_OK(
-        loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                  frontier.semaphores[i], frontier.values[i]));
+    IREE_ASSERT_OK(loom_runtime_workspace_wait(
+        loom_runtime_pool_workspace(storage_owner_), frontier.semaphores[i],
+        frontier.values[i]));
   }
   loom_serve_text_row_complete_reserve(branch);
   loom_serve_text_reservation_deinitialize(&reservation_);
@@ -116,8 +116,8 @@ TEST_P(TextReservationTest,
 
 INSTANTIATE_TEST_SUITE_P(
     ResidentAndSuspended, TextReservationTest,
-    ::testing::ValuesIn(loom_serve_test_device()->service_backing ==
-                                LOOM_SERVE_POOL_BACKING_ELASTIC
+    ::testing::ValuesIn(loom_runtime_test_device()->service_backing ==
+                                LOOM_RUNTIME_POOL_BACKING_ELASTIC
                             ? std::vector<bool>{false, true}
                             : std::vector<bool>{false}));
 

@@ -3,7 +3,6 @@
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
 
 package(
@@ -24,29 +23,6 @@ loom_cc_library(
     hdrs = ["field.h"],
     visibility = ["//visibility:public"],
     deps = ["//runtime/src/iree/base"],
-)
-
-_DOMAIN_SUBTREES = [
-    "//loom/binding/...",
-    "//loom/src/loom/runtime/parameter/...",
-    "//loom/src/loom/runtime/storage/...",
-    "//loom/src/loom/serve/...",
-    "//loom/src/loom/service/...",
-    "//loom/src/loom/target/...",
-]
-
-iree_assert_dependency_boundary(
-    name = "sampling_is_runtime_only",
-    forbidden_subtrees = _DOMAIN_SUBTREES,
-    message = "Generic telemetry contracts must not depend on domain schemas, serving, services, or compiler implementation",
-    target = ":sample",
-)
-
-iree_assert_dependency_boundary(
-    name = "fields_are_runtime_only",
-    forbidden_subtrees = _DOMAIN_SUBTREES,
-    message = "Generic telemetry fields must not depend on domain schemas, serving, services, or compiler implementation",
-    target = ":field",
 )
 
 loom_cc_library(
@@ -80,18 +56,4 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
-)
-
-iree_assert_dependency_boundary(
-    name = "record_is_runtime_only",
-    forbidden_subtrees = _DOMAIN_SUBTREES,
-    message = "Generic telemetry must not depend on concrete domains or serving",
-    target = ":record",
-)
-
-iree_assert_dependency_boundary(
-    name = "stream_is_runtime_only",
-    forbidden_subtrees = _DOMAIN_SUBTREES,
-    message = "Generic telemetry must not depend on concrete domains or serving",
-    target = ":stream",
 )

@@ -8,7 +8,6 @@
 #define LOOM_SERVE_SERVICE_TEXT_SERVICE_OWNER_H_
 
 #include "iree/base/internal/arena.h"
-#include "loom/serve/service/execution_reconfiguration.h"
 #include "loom/serve/service/text/checkpoint_request.h"
 #include "loom/serve/service/text/epoch.h"
 #include "loom/serve/service/text/heartbeat.h"
@@ -17,6 +16,7 @@
 #include "loom/serve/service/text/readiness.h"
 #include "loom/serve/service/text/service.h"
 #include "loom/serve/service/text/service_capacity.h"
+#include "loom/service/execution_reconfiguration.h"
 #include "loom/service/telemetry/tracing.h"
 
 // Device work retained until readiness is consumed by the model owner.
@@ -48,14 +48,14 @@ struct loom_serve_text_service_t {
   // Borrowed model residency and its single host execution owner.
   loom_serve_text_model_t* model;
   // Borrowed optional image computation with independent preparation/residency.
-  loom_serve_finite_component_t* image;
+  loom_service_finite_component_t* image;
   // Lazy independent projection owner; text-only requests allocate no window.
   loom_serve_text_media_projector_t* projector;
   // Last receipt in the current finite lookahead window; later arrivals do not
   // postpone a gathered cohort. Zero means no lookahead is pending.
   uint64_t media_preparation_end;
   // Native choice pool and text policy, joined before model retirement.
-  loom_serve_execution_reconfiguration_t* reconfiguration;
+  loom_service_execution_reconfiguration_t* reconfiguration;
   // Borrowed deployment name, independent of the source policy identity.
   iree_string_view_t name;
   // Owned fallback shape for isolated execution.
@@ -83,7 +83,7 @@ struct loom_serve_text_service_t {
     // Owner-only operation discriminator; NONE means no callback is accepted.
     loom_serve_text_work_t work;
     // Exact work and feedback values captured by submission.
-    loom_serve_execution_frontier_t frontier;
+    loom_runtime_execution_frontier_t frontier;
     // Host observation before registering this operation's readiness wait.
     iree_time_t start_time;
     // Accepted epoch through readiness collection; zero for maintenance work.

@@ -1,0 +1,21 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include "iree/testing/gtest.h"
+#include "loom/runtime/program/sources.h"
+
+namespace {
+
+TEST(SourcesPosixTest, RootedAndForeignNames) {
+  EXPECT_TRUE(loom_runtime_path_is_absolute(IREE_SV("/")));
+  EXPECT_TRUE(loom_runtime_path_is_absolute(IREE_SV("/models/kernel.loombc")));
+  EXPECT_FALSE(
+      loom_runtime_path_is_absolute(IREE_SV("C:/models/kernel.loombc")));
+  EXPECT_FALSE(
+      loom_runtime_path_is_absolute(IREE_SV(R"(\models\kernel.loom)")));
+}
+
+}  // namespace

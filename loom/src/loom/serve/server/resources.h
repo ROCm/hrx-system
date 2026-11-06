@@ -7,9 +7,8 @@
 #ifndef LOOM_SERVE_SERVER_RESOURCES_H_
 #define LOOM_SERVE_SERVER_RESOURCES_H_
 
+#include "loom/runtime/device/device.h"
 #include "loom/runtime/telemetry/sample.h"
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/host/wake.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/util/stream.h"
 
@@ -22,36 +21,17 @@ extern "C" {
 // Membership is immutable during routing; models can independently come and go.
 typedef struct loom_serve_resources_t {
   // Application's single cooperating group, or NULL for externally owned work.
-  loom_serve_device_group_t* device_group;
+  loom_runtime_device_group_t* device_group;
   // Zero disables idle reclamation; otherwise equals the group's pool count.
   iree_host_size_t idle_policy_count;
   // Borrowed immutable policies, in pool-inventory order, through the router
   // join.
-  const loom_serve_pool_idle_policy_t* idle_policies;
+  const loom_runtime_pool_idle_policy_t* idle_policies;
   // Number of bound listeners published by this application.
   iree_host_size_t listener_count;
   // Borrowed array; listener storage survives stop until routing has joined.
   loom_serve_http_listener_t* const* listeners;
 } loom_serve_resources_t;
-
-// Registers the router's nonblocking scheduling wake with native capacity work
-// and final output retirement, including cold workspace requests.
-// An empty observer detaches and joins callback access before router teardown.
-void loom_serve_resources_set_observer(const loom_serve_resources_t* resources,
-                                       loom_serve_wake_callback_t observer);
-
-// Advances accepted workspace growth/trim, publishes completed native capacity
-// work, and retires parameter admission interests before services advance.
-// Continue advancing during error draining until accepted work retires.
-// A terminal platform failure stops admission and initiates ordinary draining;
-// it never destroys shared owners.
-iree_status_t loom_serve_resources_advance(
-    const loom_serve_resources_t* resources);
-
-// Whether cold workspace, native capacity work, or accepted outputs borrow
-// application resources. Router shutdown joins this independently of readiness
-// or semaphore failure.
-bool loom_serve_resources_is_pending(const loom_serve_resources_t* resources);
 
 // Writes a JSON object with bound listeners, immutable device identities and
 // serving-managed memory observations. Called on the serialized serving owner;

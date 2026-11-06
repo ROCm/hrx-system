@@ -7,11 +7,13 @@
 """Source closure for the decision serving fixture."""
 
 SOURCE_FILES = [
+    "card.json",
     "config.loom",
     "control.loom",
     "decide.loom",
     "model.json",
     "prepare.loom",
+    "service.loom",
 ]
 
 SOURCES = ["//loom/src/loom/serve/fixture/decision:" + path for path in SOURCE_FILES]

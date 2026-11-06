@@ -20,7 +20,7 @@ loom_cc_library(
     deps = [
         "//loom/binding/c/target/amd/xdna",
         "//loom/binding/c/target/amd/xdna:iree_hal",
-        "//loom/src/loom/serve/testing:compiler",
+        "//loom/src/loom/runtime/testing:compiler",
     ],
     alwayslink = True,
 )
@@ -33,7 +33,7 @@ loom_cc_library(
         "//runtime/config/hal:driver_amd_xdna",
     ]),
     deps = [
-        "//loom/src/loom/serve/testing:device",
+        "//loom/src/loom/runtime/testing:device",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd/registration",

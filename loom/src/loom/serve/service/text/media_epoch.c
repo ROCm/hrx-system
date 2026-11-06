@@ -78,7 +78,7 @@ static bool loom_serve_text_media_epoch_layout(
         return false;
       }
       for (iree_host_size_t input = first; input < last; ++input) {
-        const iree_hal_buffer_ref_t row = loom_serve_finite_result_row(
+        const iree_hal_buffer_ref_t row = loom_service_finite_result_row(
             image->result, image->request_index, input - image->input_offset);
         const uint64_t offset =
             iree_align_uint64(layout->device_length,
@@ -153,7 +153,7 @@ static void loom_serve_text_media_epoch_store(
       }
       for (iree_host_size_t input = first; input < last; ++input) {
         const uint32_t feature = (uint32_t)(input - image->input_offset);
-        const iree_hal_buffer_ref_t row = loom_serve_finite_result_row(
+        const iree_hal_buffer_ref_t row = loom_service_finite_result_row(
             image->result, image->request_index, feature);
         const uint32_t offset = (uint32_t)iree_align_uint64(
             epoch->device_length,
@@ -226,7 +226,7 @@ iree_status_t loom_serve_text_media_epoch_initialize(
   const iree_host_size_t operation_bytes =
       layout.copy_count * sizeof(iree_hal_transfer_operation_t);
   const iree_host_size_t result_bytes =
-      layout.image_count * sizeof(loom_serve_finite_result_t*);
+      layout.image_count * sizeof(loom_service_finite_result_t*);
   loom_serve_text_media_epoch_t epoch = {
       .host_allocator = host_allocator,
       .first_feature_count = first_feature_count,
@@ -253,9 +253,9 @@ iree_status_t loom_serve_text_media_epoch_initialize(
   iree_byte_span_t plan = iree_byte_span_empty();
   if (iree_status_is_ok(status)) {
     epoch.transfer.results =
-        (const loom_serve_finite_result_t**)((uint8_t*)
-                                                 epoch.transfer.operations +
-                                             operation_bytes);
+        (const loom_service_finite_result_t**)((uint8_t*)
+                                                   epoch.transfer.operations +
+                                               operation_bytes);
     status = iree_vm_buffer_map_write(epoch.plan, 0, plan_length, &plan);
   }
   iree_host_size_t record_index = 0;
@@ -277,17 +277,17 @@ iree_status_t loom_serve_text_media_epoch_initialize(
 }
 
 iree_status_t loom_serve_text_media_epoch_enqueue(
-    loom_serve_text_media_epoch_t* epoch, loom_serve_execution_t* execution,
+    loom_serve_text_media_epoch_t* epoch, loom_runtime_execution_t* execution,
     iree_hal_buffer_t* target, uint64_t* out_value) {
   // Cohorts from one component share timelines. Merge their values while
   // preserving distinct execution generations after component reconstruction.
-  loom_serve_execution_frontier_t ready =
-      loom_serve_finite_result_ready(epoch->transfer.results[0]);
+  loom_runtime_execution_frontier_t ready =
+      loom_service_finite_result_ready(epoch->transfer.results[0]);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 1;
        i < epoch->transfer.result_count && iree_status_is_ok(status); ++i) {
-    const loom_serve_execution_frontier_t next =
-        loom_serve_finite_result_ready(epoch->transfer.results[i]);
+    const loom_runtime_execution_frontier_t next =
+        loom_service_finite_result_ready(epoch->transfer.results[i]);
     if (ready.semaphores[0] == next.semaphores[0] &&
         ready.semaphores[1] == next.semaphores[1]) {
       ready.values[0] = iree_max(ready.values[0], next.values[0]);
@@ -295,20 +295,20 @@ iree_status_t loom_serve_text_media_epoch_enqueue(
     } else {
       const iree_hal_semaphore_list_t waits = {2, ready.semaphores,
                                                ready.values};
-      status = loom_serve_execution_barrier(execution, waits);
+      status = loom_runtime_execution_barrier(execution, waits);
       ready = next;
     }
   }
   if (iree_status_is_ok(status)) {
     const iree_hal_semaphore_list_t waits = {2, ready.semaphores, ready.values};
-    status = loom_serve_execution_barrier(execution, waits);
+    status = loom_runtime_execution_barrier(execution, waits);
   }
   iree_hal_transfer_operation_t* operations = epoch->transfer.operations;
   for (iree_host_size_t i = 0; i < epoch->transfer.operation_count; ++i) {
     operations[i].copy.target_buffer = target;
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_execution_transfer(
+    status = loom_runtime_execution_transfer(
         execution, epoch->transfer.operation_count, operations, out_value);
   }
   iree_allocator_free(epoch->host_allocator, epoch->transfer.operations);

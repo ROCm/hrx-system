@@ -8,8 +8,8 @@
 #define LOOM_SERVE_SERVICE_TEXT_STATE_H_
 
 #include "iree/base/internal/arena.h"
-#include "loom/serve/runtime/execution/retirement.h"
-#include "loom/serve/runtime/storage/block_pool.h"
+#include "loom/runtime/execution/retirement.h"
+#include "loom/runtime/storage/block_pool.h"
 #include "loom/serve/service/text/model.h"
 #include "loom/serve/service/text/storage.h"
 
@@ -75,7 +75,7 @@ typedef struct loom_serve_text_state_row_t {
   uint32_t reserved_extent;
   // Owned capture payload, or NULL. Successful suspension releases physical
   // IDs; terminal transfer failure preserves both until teardown.
-  loom_serve_snapshot_t* snapshot;
+  loom_runtime_snapshot_t* snapshot;
 } loom_serve_text_state_row_t;
 
 // Explicit endpoint holding immutable KV and recurrence by reference. Draft
@@ -95,7 +95,7 @@ typedef struct loom_serve_text_state_checkpoint_t {
   uint32_t* blocks;
   // Owned capture payload independent of active rows. Successful suspension
   // releases physical IDs; terminal failure retains them until teardown.
-  loom_serve_snapshot_t* snapshot;
+  loom_runtime_snapshot_t* snapshot;
 } loom_serve_text_state_checkpoint_t;
 
 // Retained text storage, independent of source compilation and VM invocation.
@@ -109,11 +109,11 @@ struct loom_serve_text_state_t {
   // Borrowed device, outliving this state and all virtual reservations.
   iree_hal_device_t* device;
   // Borrowed storage owner, preserved across state growth and compaction.
-  loom_serve_pool_t* pool;
+  loom_runtime_pool_t* pool;
   // Borrowed model timelines shared by its state maintenance and model work.
-  loom_serve_execution_t* execution;
+  loom_runtime_execution_t* execution;
   // Final queue ownership enclosing host payloads and virtual backing.
-  loom_serve_retirement_t retirement;
+  loom_runtime_retirement_t retirement;
   // Enabled packed and speculative storage roles.
   loom_serve_text_state_flags_t flags;
   // Number of published resident records and source-defined private views.
@@ -131,7 +131,7 @@ struct loom_serve_text_state_t {
     // Configured cold record count, including before allocation.
     uint32_t capacity;
     // Available checkpoint IDs; each live endpoint owns one.
-    loom_serve_block_pool_t pool;
+    loom_runtime_block_pool_t pool;
     // Owned records indexed by checkpoint ID.
     loom_serve_text_state_checkpoint_t* values;
     // Owned logical page maps for all checkpoint records.
@@ -140,7 +140,7 @@ struct loom_serve_text_state_t {
   // Recurrent ownership is independent of row-private control and KV maps.
   struct {
     // Free slot IDs; release follows retirement or completed capture.
-    loom_serve_block_pool_t pool;
+    loom_runtime_block_pool_t pool;
     // Owned arena subviews, stable through final queue retirement.
     iree_hal_buffer_t** buffers;
     // Number of rows with unpublished origins; zero skips the row scan.
@@ -152,7 +152,7 @@ struct loom_serve_text_state_t {
     iree_host_size_t capacity;
     // Demand-grown free-ID metadata; ownership returns only after model work
     // retires. Capacity is a live high-water mark, not addressability.
-    loom_serve_block_pool_t pool;
+    loom_runtime_block_pool_t pool;
     // Row-major host maps retained through queued uploads.
     uint32_t* maps;
     // Cold compaction plan indexed by original physical ID.
@@ -165,13 +165,13 @@ struct loom_serve_text_state_t {
   // Physical commitment, separate from logical row/block ownership.
   struct {
     // Borrowed shared allocation domain for state and model parameters.
-    loom_serve_memory_pool_t* pool;
+    loom_runtime_memory_pool_t* pool;
     // Mutable virtual state only, excluding weights and execution workspace.
     loom_runtime_storage_statistics_t statistics;
     // Native backing changes exclude state mutation through their readiness.
     struct {
       // Owned native borrower, joined separately from failed queue readiness.
-      loom_serve_memory_operation_t* operation;
+      loom_runtime_memory_operation_t* operation;
       // Owned timeline imported before dependent transfers or maintenance.
       iree_hal_semaphore_t* semaphore;
       // Last admitted native readiness value.
@@ -182,7 +182,7 @@ struct loom_serve_text_state_t {
     // another reservation's translations.
     struct {
       // Owned native operations, joined before replacing their directories.
-      loom_serve_memory_operation_t*
+      loom_runtime_memory_operation_t*
           operations[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
       // Owned readiness semaphores imported into the model timeline.
       iree_hal_semaphore_t*
@@ -196,7 +196,7 @@ struct loom_serve_text_state_t {
       uint64_t released_before;
     } trim;
     // Optional reservations in source allocation order.
-    loom_serve_virtual_buffer_t*
+    loom_runtime_virtual_buffer_t*
         buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
     // Always-live initialized prefixes outside row-private storage.
     iree_device_size_t
@@ -242,10 +242,9 @@ void loom_serve_text_state_initialize(const loom_serve_text_options_t* options,
 // work timeline without waiting. The owner retains source payloads through
 // successful readiness of its captured execution frontier, or actual consumer
 // retirement on failure. Later model work depends on this initialization.
-iree_status_t loom_serve_text_state_allocate(loom_serve_text_state_t* state,
-                                             loom_serve_device_t* device,
-                                             loom_serve_pool_t* pool,
-                                             loom_serve_execution_t* execution);
+iree_status_t loom_serve_text_state_allocate(
+    loom_serve_text_state_t* state, loom_runtime_device_t* device,
+    loom_runtime_pool_t* pool, loom_runtime_execution_t* execution);
 
 // Source slot to its owned root, shared by allocation and cold maintenance.
 iree_hal_buffer_t** loom_serve_text_state_allocation(
@@ -328,9 +327,9 @@ iree_status_t loom_serve_text_state_row_try_restore(
 // intact; the immediate wrapper returns its tentative IDs in this owner turn.
 typedef iree_status_t (*loom_serve_text_state_admit_fn_t)(
     void* user_data, iree_host_size_t range_count,
-    const loom_serve_memory_range_t* ranges, iree_hal_semaphore_t* readiness,
-    uint64_t value, loom_serve_memory_admission_t* out_admission,
-    loom_serve_memory_operation_t** out_operation);
+    const loom_runtime_memory_range_t* ranges, iree_hal_semaphore_t* readiness,
+    uint64_t value, loom_runtime_memory_admission_t* out_admission,
+    loom_runtime_memory_operation_t** out_operation);
 
 // A prepared continuation owns its selected logical IDs without changing the
 // row, mapping backing, or submitting work. The row and optional checkpoint
@@ -361,7 +360,7 @@ uint64_t loom_serve_text_state_reservation_footprint(
 iree_status_t loom_serve_text_state_reservation_submit(
     loom_serve_text_state_reservation_t* reservation,
     loom_serve_text_state_admit_fn_t admit, void* user_data,
-    loom_serve_memory_admission_t* out_admission);
+    loom_runtime_memory_admission_t* out_admission);
 
 // Before submission, returns the prepared logical ownership without changing
 // the row/checkpoint. After successful submission, only host planning storage
@@ -385,7 +384,7 @@ iree_status_t loom_serve_text_state_row_submit_reserve(
     loom_serve_text_state_row_t* row, loom_serve_text_reserve_mode_t mode,
     loom_serve_text_state_checkpoint_t* checkpoint, iree_host_size_t extent,
     loom_serve_text_state_admit_fn_t admit, void* user_data,
-    loom_serve_memory_admission_t* out_admission);
+    loom_runtime_memory_admission_t* out_admission);
 // After successful readiness, releases the copied tail source. The recurrent
 // reader survives until the first epoch or cancellation.
 void loom_serve_text_state_row_complete_reserve(

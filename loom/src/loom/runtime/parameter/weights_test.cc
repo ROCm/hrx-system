@@ -1,0 +1,1980 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#include <array>
+
+#include "iree/base/tooling/flags.h"
+#include "loom/runtime/parameter/weights_test_base.h"
+
+IREE_FLAG(string, weight_sources, "", "Weight loader source catalog.");
+IREE_FLAG(string, weight_device_uri, "", "Weight loader test device URI.");
+
+namespace loom_runtime::testing {
+
+const char* WeightSourcePath() { return FLAG_weight_sources; }
+const char* WeightDeviceUri() { return FLAG_weight_device_uri; }
+
+namespace {
+
+class WeightDeviceEnvironment : public ::testing::Environment {
+ public:
+  void SetUp() override {
+    loom_runtime_host_t* host = nullptr;
+    iree_hal_driver_t* driver = nullptr;
+    auto status =
+        loom_runtime_test_host_create(1, iree_allocator_system(), &host);
+    if (iree_status_is_ok(status)) {
+      status = loom_runtime_test_driver_acquire(host, &driver);
+    }
+    if (iree_status_is_ok(status)) {
+      const loom_runtime_device_options_t options = {
+          .driver = driver,
+          .uri = WeightDeviceUri()[0]
+                     ? iree_make_cstring_view(WeightDeviceUri())
+                     : loom_runtime_test_device()->device_uri,
+      };
+      status = loom_runtime_device_group_allocate(
+          host, 1, &options, allocator_.allocator(), &group_);
+    }
+    iree_hal_driver_release(driver);
+    loom_runtime_host_release(host);
+    IREE_ASSERT_OK(status);
+
+    // Observe the native allocation worker once. Pool policy and memory budgets
+    // vary per case, but neither changes the physical device or its workers.
+    IREE_ASSERT_OK(AllocateWeightPool(device(), false, 0, 0, &consumer_pool_));
+    IREE_ASSERT_OK(allocator_.Observe(device(), consumer_pool_));
+  }
+
+  void TearDown() override {
+    // Every fixture retires its own pools first. Final release must join native
+    // cleanup before the allocator wrapper can leave scope.
+    IREE_CHECK_OK(loom_runtime_pool_free(consumer_pool_));
+    IREE_CHECK_OK(loom_runtime_device_group_free(group_));
+    group_ = nullptr;
+    allocator_.AwaitReleased();
+  }
+
+  loom_runtime_device_t* device() {
+    return loom_runtime_device_group_at(group_, 0);
+  }
+
+  iree_hal_pool_t* consumer_pool() {
+    return loom_runtime_pool_storage(consumer_pool_);
+  }
+
+ private:
+  // Native allocator dependency outliving every device-owned allocation.
+  NativeAllocator allocator_;
+  // One physical device and host retained through the complete test process.
+  loom_runtime_device_group_t* group_ = nullptr;
+  // Caller-owned bindings outlive parameter residency and have separate policy.
+  loom_runtime_pool_t* consumer_pool_ = nullptr;
+};
+
+auto* const weight_device_environment = static_cast<WeightDeviceEnvironment*>(
+    ::testing::AddGlobalTestEnvironment(new WeightDeviceEnvironment));
+
+}  // namespace
+
+loom_runtime_device_t* WeightDevice() {
+  return weight_device_environment->device();
+}
+
+iree_hal_pool_t* WeightConsumerPool() {
+  return weight_device_environment->consumer_pool();
+}
+
+iree_status_t AllocateWeightPool(loom_runtime_device_t* device, bool elastic,
+                                 uint64_t slab_size, uint64_t memory_limit,
+                                 loom_runtime_pool_t** out_pool) {
+  const auto* dispatch =
+      iree_hal_queue_family(loom_runtime_device_dispatch_queue(device));
+  auto* transfer_queue = loom_runtime_device_transfer_queue(device);
+  const auto* transfer = iree_hal_queue_family(transfer_queue);
+  const iree_hal_pool_family_access_t families[] = {
+      {
+          .family = dispatch,
+          .usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+                   IREE_HAL_BUFFER_USAGE_TRANSFER |
+                   IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS,
+      },
+      {.family = transfer, .usage = IREE_HAL_BUFFER_USAGE_TRANSFER},
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = dispatch == transfer ? 1u : 2u,
+      .families = families,
+  };
+  const auto* sanitizer = iree_hal_device_spec_sanitizer(
+      iree_hal_device_spec(loom_runtime_device_handle(device)));
+  const loom_runtime_pool_options_t options = {
+      .elastic = elastic,
+      .weight_slab_size = slab_size,
+      .state_slab_size = slab_size,
+      .memory_limit = elastic ? memory_limit : 0,
+      .asan = iree_any_bit_set(sanitizer->flags,
+                               IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN)
+                  ? sanitizer->asan.pool_options
+                  : iree_hal_asan_pool_options_t{},
+  };
+  return loom_runtime_pool_allocate(
+      loom_runtime_device_group(device), scope, transfer_queue, &options,
+      NativeAllocator::ForDevice(device).allocator(), out_pool);
+}
+
+TEST_P(WeightsTest, ConfiguredPreparersAndSharedRootsPrepareEachTensorOnce) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  IREE_ASSERT_OK(Compile(1, "target"));
+  IREE_ASSERT_OK(Compile(2, "auxiliary"));
+  IREE_ASSERT_OK(Load(2, 3));
+  // Three consumers and two configurations of the same preparation root.
+  // Matching tensor policies reuse the recorded command; matching names with
+  // distinct configurations must not reuse each other's values.
+  EXPECT_EQ(compilation_.commands, 5u);
+  EXPECT_EQ(buffers_[0][0], buffers_[1][0]);
+  Run(0, 70);
+  Run(1, 70);
+  Run(2, 93);
+}
+
+TEST_P(WeightsTest, SplitFilesPopulateOneSharedCheckpointDomain) {
+  WriteCheckpoint(path_.path(), 0, 0, 1);
+  WriteCheckpoint(adapter_path_.path(), 0, 1, 3);
+  IREE_ASSERT_OK(Compile(0, "target"));
+  IREE_ASSERT_OK(Compile(1, "target"));
+  IREE_ASSERT_OK(Compile(2, "auxiliary"));
+  const loom_runtime_weight_root_t roots[] = {Root(0, 0), Root(1, 0),
+                                              Root(2, 0), Root(2, 1)};
+  IREE_ASSERT_OK(LoadRoots(2, IREE_ARRAYSIZE(roots), roots,
+                           {path_.path(), adapter_path_.path()}));
+  EXPECT_EQ(compilation_.commands, 5u);
+  EXPECT_EQ(buffers_[0][0], buffers_[1][0]);
+  Run(0, 70);
+  Run(1, 70);
+  Run(2, 93);
+}
+
+TEST_P(WeightsTest, EmptyFirstFileDoesNotHideLaterParameters) {
+  WriteCheckpoint(path_.path(), 0, 0, 0);
+  WriteCheckpoint(adapter_path_.path(), 0);
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(LoadRoots(0, 1, &root, {path_.path(), adapter_path_.path()}));
+  Run(0, 70);
+}
+
+TEST_P(WeightsTest, UnreferencedCheckpointEntriesStayCold) {
+  // The archive can contain much more data than the model's active roots or
+  // elastic budget. This key's policy names an unavailable preparer, so even
+  // preparing unused entries would fail instead of being invisible here.
+  constexpr size_t kColdBytes = 4 * kSlabBytes;
+  const std::string header = "{\"missing\":{\"dtype\":\"U8\",\"shape\":[" +
+                             std::to_string(kColdBytes) +
+                             "],\"data_offsets\":[0," +
+                             std::to_string(kColdBytes) + "]}}";
+  std::ofstream file(adapter_path_.path(), std::ios::binary);
+  for (unsigned i = 0; i < 8; ++i) {
+    file.put(
+        static_cast<char>(static_cast<uint64_t>(header.size()) >> (8 * i)));
+  }
+  file.write(header.data(), header.size());
+  std::array<char, 4096> payload;
+  payload.fill(0x5A);
+  for (size_t i = 0; i < kColdBytes / payload.size(); ++i) {
+    file.write(payload.data(), payload.size());
+  }
+  file.close();
+  ASSERT_TRUE(file.good());
+
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(
+      CreateRoots(0, 1, &root, {adapter_path_.path(), path_.path()}));
+  // One consumer and the two preparations of its reflected parameters.
+  EXPECT_EQ(compilation_.commands, 3u);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).read_bytes, 0u);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).prepared_bytes, 0u);
+
+  IREE_ASSERT_OK(loom_runtime_weights_activate(plans_[0]));
+  IREE_ASSERT_OK(loom_runtime_weights_import_readiness(plans_[0], execution_));
+  IREE_ASSERT_OK(loom_runtime_weights_await(plans_[0]));
+  Run(0, 70);
+  const auto activity = loom_runtime_weights_activity(plans_[0]);
+  EXPECT_EQ(activity.activations, 1u);
+  EXPECT_EQ(activity.read_bytes, 3 * 8 * sizeof(int32_t));
+  EXPECT_EQ(activity.prepared_bytes, 2 * 8 * sizeof(int32_t));
+  EXPECT_EQ(compilation_.commands, 3u);
+}
+
+TEST_P(WeightsTest, OneWorkerActivatesAndConsumesThroughAsyncTimelineWait) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  IREE_ASSERT_OK(loom_runtime_jit_stage_record(
+      compiled_[0], iree_hal_queue_family(dispatch_),
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, buffers_[0].data(),
+      &commands_[0]));
+  auto* host = loom_runtime_device_host(device_owner_);
+  loom_runtime_test_weight_activation_t activation;
+  activation.executor = loom_runtime_host_executor(host);
+  IREE_ASSERT_OK(iree_async_proactor_pool_get(
+      loom_runtime_host_proactor_pool(host), 0, &activation.proactor));
+  activation.residency = residencies_[0];
+  activation.execution = execution_;
+  activation.command = commands_[0];
+  activation.output = output_buffer_;
+  activation.readback = &output_;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &activation.gate));
+  uint64_t held = 1;
+  auto status =
+      loom_runtime_execution_barrier(execution_, {1, &activation.gate, &held});
+  if (iree_status_is_ok(status)) {
+    status = activation.Run();
+  }
+  iree_hal_semaphore_release(activation.gate);
+  IREE_ASSERT_OK(status);
+  ASSERT_TRUE(activation.admitted);
+  for (int32_t i = 0; i < 8; ++i) {
+    EXPECT_EQ(output_[i], 70 + 3 * i);
+  }
+  // Readiness publication retains the pin. Pressure cannot evict the result's
+  // parameters before the owning scheduler consumes completion.
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(ResidencyCache(), 0));
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes,
+            GetParam() ? kSlabBytes : 0);
+  loom_runtime_residency_release(residencies_[0]);
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(ResidencyCache(), 0));
+  DrainNativeReturns();
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes, 0u);
+  // The same compiled consumer survives a complete asynchronous reload.
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+}
+
+TEST_P(WeightsTest, CanonicalWeightsNeedNoPreparationOrLeadingSharedGroup) {
+  IREE_ASSERT_OK(Compile(0, "raw"));
+  IREE_ASSERT_OK(Load(0, 1));
+  Run(0, 90);
+}
+
+TEST_P(WeightsTest, PreparationPublishesOnlyRecordableRootAddresses) {
+  IREE_ASSERT_OK(Compile(0, "raw"));
+  const auto root = Root(0, 0);
+  auto allocate = [&] {
+    return loom_runtime_weights_allocate(
+        device_, transfer_, dispatch_,
+        loom_runtime_pool_storage(storage_owner_), pool_,
+        loom_runtime_pool_weight_geometry(storage_owner_), nullptr,
+        loom_runtime_pool_workspace(storage_owner_), 0, 1, &root,
+        host_allocator_, &plans_[plan_count_++]);
+  };
+  if (!pool_) {
+    // Allocation is accepted while its native dependency is held. Its later
+    // failure belongs to preparation completion, before consumer recording.
+    auto& allocator =
+        loom_runtime::testing::NativeAllocator::ForDevice(device_owner_);
+    allocator.FailNextAllocation(IREE_ALLOCATOR_COMMAND_CALLOC,
+                                 /*native_only=*/true);
+    loom_runtime::testing::ScopedNativeHold hold(device_owner_);
+    IREE_ASSERT_OK(allocate());
+    hold.WaitEntered();
+  } else {
+    IREE_ASSERT_OK(allocate());
+  }
+  auto status = Prepare(plans_[0], {path_.path()});
+  if (!pool_) {
+    IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, status);
+    // Failed backing belongs to this plan; the shared compiler and execution
+    // queues remain usable by another parameter owner.
+    IREE_ASSERT_OK(Compile(1, "target"));
+    const auto peer = Root(1, 0);
+    IREE_ASSERT_OK(LoadRoots(0, 1, &peer, {path_.path()}));
+    Run(1, 70);
+  } else {
+    // Elastic roots already have stable virtual addresses. Recording needs
+    // no physical allocation, file read, or parameter activation.
+    IREE_ASSERT_OK(status);
+    IREE_ASSERT_OK(loom_runtime_jit_stage_record(
+        compiled_[0], iree_hal_queue_family(dispatch_),
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, buffers_[0].data(),
+        &commands_[0]));
+    EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes, 0u);
+    EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 0u);
+    EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).read_bytes, 0u);
+  }
+}
+
+TEST_P(WeightsTest, SharedActivationImportsReadinessWithoutReloading) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  IREE_ASSERT_OK(loom_runtime_device_create_execution(
+      device_owner_, storage_owner_, &shared_execution_));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &consumer_gate_));
+  loom_runtime_parameter_activity_t activity = {};
+  {
+    // Elastic backing cannot finish while the actual native allocator is
+    // held. Both consumers must inherit that dependency without host waits.
+    loom_runtime::testing::ScopedNativeHold hold(device_owner_);
+    IREE_ASSERT_OK(loom_runtime_weights_activate(plans_[0]));
+    IREE_ASSERT_OK(
+        loom_runtime_weights_import_readiness(plans_[0], execution_));
+    if (pool_) {
+      hold.WaitEntered();
+    }
+    activity = loom_runtime_weights_activity(plans_[0]);
+    ASSERT_EQ(activity.activations, 1u);
+    ASSERT_GT(activity.prepared_bytes, 0u);
+    uint64_t gate_value = 1;
+    IREE_ASSERT_OK(loom_runtime_execution_barrier(
+        execution_, {1, &consumer_gate_, &gate_value}));
+    const auto producer = loom_runtime_execution_frontier(execution_);
+    const auto before = loom_runtime_execution_frontier(shared_execution_);
+    IREE_ASSERT_OK(loom_runtime_weights_activate(plans_[0]));
+    IREE_ASSERT_OK(
+        loom_runtime_weights_import_readiness(plans_[0], shared_execution_));
+    const auto consumer = loom_runtime_execution_frontier(shared_execution_);
+    // Fail before issuing a consumer if no readiness dependency was imported;
+    // executing against unbacked elastic roots would itself be invalid.
+    ASSERT_GT(consumer.values[0], before.values[0]);
+    EXPECT_EQ(loom_runtime_execution_frontier(execution_).values[0],
+              producer.values[0]);
+    if (pool_) {
+      uint64_t ready_value = 0;
+      IREE_ASSERT_OK(
+          iree_hal_semaphore_query(consumer.semaphores[0], &ready_value));
+      EXPECT_LT(ready_value, consumer.values[0]);
+    }
+  }
+  const auto shared = loom_runtime_weights_activity(plans_[0]);
+  EXPECT_EQ(shared.activations, activity.activations);
+  EXPECT_EQ(shared.read_bytes, activity.read_bytes);
+  EXPECT_EQ(shared.prepared_bytes, activity.prepared_bytes);
+  EXPECT_EQ(shared.groups, activity.groups);
+  // The second consumer finishes before unrelated first-consumer work can
+  // proceed. Importing that execution's frontier would serialize them.
+  ASSERT_NO_FATAL_FAILURE(RunOn(shared_execution_, 0, 70));
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(consumer_gate_, 1, nullptr));
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+}
+
+TEST_P(WeightsTest, WarmResidencyDoesNotResubmitActivation) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(residencies_[0]));
+  const auto before = loom_runtime_execution_frontier(execution_);
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[0]));
+  const auto after = loom_runtime_execution_frontier(execution_);
+  EXPECT_EQ(after.values[0], before.values[0]);
+  EXPECT_EQ(after.values[1], before.values[1]);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 1u);
+  loom_runtime_residency_release(residencies_[0]);
+  loom_runtime_residency_release(residencies_[0]);
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[0]));
+  const auto next = loom_runtime_execution_frontier(execution_);
+  EXPECT_EQ(next.values[0], before.values[0]);
+  EXPECT_EQ(next.values[1], before.values[1]);
+  loom_runtime_residency_release(residencies_[0]);
+}
+
+TEST_P(WeightsTest, SeparateCheckpointDomainsRetainSharedBaseStorage) {
+  WriteCheckpoint(adapter_path_.path(), 100);
+  IREE_ASSERT_OK(Compile(0, "raw"));
+  IREE_ASSERT_OK(Compile(1, "domains"));
+  const loom_runtime_weight_root_t base[] = {Root(1, 0), Root(0, 0)};
+  IREE_ASSERT_OK(LoadRoots(2, 2, base, {path_.path()}));
+  EXPECT_EQ(buffers_[0][0], buffers_[1][0]);
+  EXPECT_EQ(buffers_[1][1], nullptr);
+  Run(0, 90);
+
+  const loom_runtime_weight_root_t adapter = Root(1, 1);
+  IREE_ASSERT_OK(LoadRoots(0, 1, &adapter, {adapter_path_.path()}));
+  EXPECT_NE(buffers_[1][0], buffers_[1][1]);
+  Run(1, 290);
+  Run(1, 290);
+  Run(0, 90);
+}
+
+TEST_P(WeightsTest, PolicySizeMismatchRejectsBeforeFileSubmission) {
+  IREE_ASSERT_OK(Compile(0, "size"));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Load(0, 1));
+}
+
+TEST_P(WeightsTest, MissingPreparationRootFailsCompilation) {
+  WriteCheckpoint(path_.path(), 0, 4, 1);
+  IREE_ASSERT_OK(Compile(0, "missing"));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Load(0, 1));
+}
+
+TEST_P(WeightsTest, MultiplePreparationCommandsRejectBeforeCompilation) {
+  IREE_ASSERT_OK(Compile(0, "size"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      CreateRoots(0, 1, &root, {path_.path()}, "boundaries.loom"));
+  EXPECT_EQ(compilation_.commands, 1u);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).read_bytes, 0u);
+}
+
+TEST_P(WeightsTest, DirectPreparationStageRejectsBeforeCompilation) {
+  IREE_ASSERT_OK(Compile(0, "missing"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      CreateRoots(0, 1, &root, {path_.path()}, "boundaries.loom"));
+  EXPECT_EQ(compilation_.commands, 1u);
+}
+
+TEST_P(WeightsTest, PreparationCommandRequiresFinalExtent) {
+  IREE_ASSERT_OK(Compile(0, "raw"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      CreateRoots(0, 1, &root, {path_.path()}, "boundaries.loom"));
+  EXPECT_EQ(compilation_.commands, 1u);
+}
+
+TEST_P(WeightsTest, CanonicalPolicyRequiresZeroExtent) {
+  IREE_ASSERT_OK(Compile(0, "unavailable"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      CreateRoots(0, 1, &root, {path_.path()}, "boundaries.loom"));
+  EXPECT_EQ(compilation_.commands, 1u);
+}
+
+TEST_P(WeightsTest, WeightPolicyCannotIntroduceCheckpointDomains) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      CreateRoots(0, 1, &root, {path_.path()}, "boundaries.loom"));
+  EXPECT_EQ(compilation_.commands, 1u);
+}
+
+TEST_P(WeightsTest, CheckpointIndexFailureLeavesTheSharedCompilerUsable) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto failed_root = Root(0, 0);
+  IREE_ASSERT_STATUS_IS(
+      IREE_STATUS_NOT_FOUND,
+      CreateRoots(0, 1, &failed_root,
+                  {path_.path(), path_.path() + ".missing.safetensors"}));
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).read_bytes, 0u);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes, 0u);
+  // The failed plan retains its own roots for normal owner-side cleanup while
+  // another plan prepares and consumes through the same single-worker host.
+  IREE_ASSERT_OK(Compile(1, "target"));
+  const auto live_root = Root(1, 0);
+  IREE_ASSERT_OK(LoadRoots(0, 1, &live_root, {path_.path()}));
+  Run(1, 70);
+}
+
+TEST_P(WeightsTest, InitialBackingRetirementMatchesAcceptedWork) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  auto allocate_and_release_view = [&] {
+    IREE_ASSERT_OK(loom_runtime_weights_allocate(
+        device_, transfer_, dispatch_,
+        loom_runtime_pool_storage(storage_owner_), pool_,
+        loom_runtime_pool_weight_geometry(storage_owner_), nullptr,
+        loom_runtime_pool_workspace(storage_owner_), 0, 1, &root,
+        host_allocator_, &plans_[0]));
+    iree_hal_buffer_release(buffers_[0][0]);
+    buffers_[0][0] = nullptr;
+  };
+  if (!pool_) {
+    loom_runtime::testing::ScopedNativeHold hold(device_owner_);
+    ASSERT_NO_FATAL_FAILURE(allocate_and_release_view());
+    hold.WaitEntered();
+    // No caller view remains, but accepted initial allocation still owns the
+    // plan's pool and readiness state. Preparation failure must keep it alive.
+    EXPECT_FALSE(loom_runtime_weights_is_retired(plans_[0]));
+  } else {
+    // Elastic binding only reserves address space; it has no accepted native
+    // backing operation until activation.
+    ASSERT_NO_FATAL_FAILURE(allocate_and_release_view());
+    EXPECT_TRUE(loom_runtime_weights_is_retired(plans_[0]));
+  }
+  IREE_ASSERT_OK(loom_runtime_weights_await_retirement(plans_[0]));
+  EXPECT_TRUE(loom_runtime_weights_is_retired(plans_[0]));
+}
+
+TEST_P(WeightsTest, MissingFileParameterFailsTheLoad) {
+  IREE_ASSERT_OK(Compile(0, "unavailable"));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Load(0, 1));
+}
+
+TEST_P(WeightsTest, LateMissingParameterRejectsBeforeAnyActivationWork) {
+  // A missing key after valid prepared tensors rejects the whole source plan,
+  // before preparer compilation, reads, or physical activation begin.
+  IREE_ASSERT_OK(Compile(0, "partial"));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Load(0, 1));
+  EXPECT_EQ(compilation_.commands, 1u);
+  const auto activity = loom_runtime_weights_activity(plans_[0]);
+  EXPECT_EQ(activity.activations, 0u);
+  EXPECT_EQ(activity.read_bytes, 0u);
+  EXPECT_EQ(activity.prepared_bytes, 0u);
+  EXPECT_EQ(activity.groups, 0u);
+  IREE_ASSERT_OK(Compile(1, "target"));
+  const auto live_root = Root(1, 0);
+  IREE_ASSERT_OK(LoadRoots(0, 1, &live_root, {path_.path()}));
+  Run(1, 70);
+}
+
+TEST_P(WeightsTest,
+       ShortDirectInputsRejectBeforeUnchangedOrInPlacePreparation) {
+  WriteCheckpoint(path_.path(), 0, 0, 4, 4);
+  WriteCheckpoint(adapter_path_.path(), 0, 0, 4, 16);
+  const char* roots[] = {"raw", "target"};
+  for (size_t i = 0; i < IREE_ARRAYSIZE(roots); ++i) {
+    IREE_ASSERT_OK(Compile(i, roots[i]));
+    const auto root = Root(i, 0);
+    iree::Status status(CreateRoots(0, 1, &root, {path_.path()}));
+    EXPECT_THAT(status,
+                iree::testing::status::StatusIs(iree::StatusCode::kOutOfRange));
+    EXPECT_THAT(status.ToString(), ::testing::HasSubstr("requires 32 bytes"));
+    EXPECT_THAT(status.ToString(), ::testing::HasSubstr("entry has 16"));
+    EXPECT_EQ(compilation_.commands, i + 1);
+    const auto activity = loom_runtime_weights_activity(plans_[i]);
+    EXPECT_EQ(activity.activations, 0u);
+    EXPECT_EQ(activity.read_bytes, 0u);
+    EXPECT_EQ(activity.prepared_bytes, 0u);
+    EXPECT_EQ(activity.groups, 0u);
+  }
+  // The invalid models leave their shared device, worker, and peer timeline
+  // usable. The valid peer reads only its requested prefix of each larger
+  // entry.
+  IREE_ASSERT_OK(Compile(2, "target"));
+  const auto live_root = Root(2, 0);
+  IREE_ASSERT_OK(LoadRoots(0, 1, &live_root, {adapter_path_.path()}));
+  Run(2, 70);
+}
+
+TEST_P(WeightsTest, SharedWorkingSetsAdmitAtomicallyAndEvictOnlyIdleGroups) {
+  auto* cache = loom_runtime_pool_residency_cache(storage_owner_);
+  WriteCheckpoint(adapter_path_.path(), 100);
+  const char* stages[] = {"target", "raw", "raw"};
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    IREE_ASSERT_OK(Compile(i, stages[i]));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root,
+                               {i == 2 ? adapter_path_.path() : path_.path()}));
+    EXPECT_EQ(
+        loom_runtime_weights_activation_workspace(plans_[i]).allocation_size,
+        0u);
+    IREE_ASSERT_OK(loom_runtime_residency_group_allocate(
+        cache, 1, &plans_[i], host_allocator_, &parameter_groups_[i]));
+  }
+  IREE_ASSERT_OK(loom_runtime_device_create_execution(
+      device_owner_, storage_owner_, &shared_execution_));
+  loom_runtime_residency_group_t* first[] = {parameter_groups_[0],
+                                             parameter_groups_[1]};
+  loom_runtime_residency_group_t* second[] = {parameter_groups_[0],
+                                              parameter_groups_[2]};
+  IREE_ASSERT_OK(loom_runtime_residency_allocate(
+      cache, execution_, 2, first, host_allocator_, &residencies_[0]));
+  IREE_ASSERT_OK(loom_runtime_residency_allocate(
+      cache, shared_execution_, 2, second, host_allocator_, &residencies_[1]));
+  IREE_ASSERT_OK(loom_runtime_residency_allocate(
+      cache, execution_, 1, &parameter_groups_[0], host_allocator_,
+      &residencies_[2]));
+  {
+    loom_runtime::testing::ScopedNativeHold hold(device_owner_);
+    IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[2]));
+    if (pool_) {
+      hold.WaitEntered();
+    }
+    // The base's accepted backing is already charged even before native
+    // completion. Adding the companion must not charge that base twice.
+    IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[0]));
+  }
+  IREE_ASSERT_OK(loom_runtime_residency_await(residencies_[0]));
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  ASSERT_NO_FATAL_FAILURE(Run(1, 90));
+  if (!pool_) {
+    IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[1]));
+    ASSERT_NO_FATAL_FAILURE(RunOn(shared_execution_, 0, 70));
+    ASSERT_NO_FATAL_FAILURE(RunOn(shared_execution_, 2, 390));
+    loom_runtime_residency_release(residencies_[1]);
+    loom_runtime_residency_release(residencies_[2]);
+    loom_runtime_residency_release(residencies_[0]);
+    EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 1u);
+    return;
+  }
+
+  // The entire second set fits in the pool, but not alongside the live first
+  // set. Denial starts no load and retains no partial working-set protection.
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[1], &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_EQ(loom_runtime_residency_snapshot(residencies_[1]).pin_count, 0u);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[2]).activations, 0u);
+  loom_runtime_residency_cancel_admission(residencies_[1]);
+  EXPECT_FALSE(
+      loom_runtime_residency_snapshot(residencies_[1]).admission.waiting);
+  loom_runtime_residency_release(residencies_[0]);
+  ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(1));
+  ASSERT_NO_FATAL_FAILURE(RunOn(shared_execution_, 0, 70));
+  ASSERT_NO_FATAL_FAILURE(RunOn(shared_execution_, 2, 390));
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 1u);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).deactivations, 0u);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[1]).committed_bytes, 0u);
+
+  // One consumer retiring cannot unpin the base from the other working set.
+  loom_runtime_residency_release(residencies_[2]);
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(cache, 0));
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).committed_bytes,
+            2 * kSlabBytes);
+  bool complete = false;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_runtime_residency_deactivate(residencies_[0], &complete));
+  loom_runtime_residency_release(residencies_[1]);
+
+  // Persistent retention is counted across borrowers, not last-writer-wins.
+  loom_runtime_residency_set_pinned(residencies_[0], true);
+  loom_runtime_residency_set_pinned(residencies_[2], true);
+  loom_runtime_residency_set_pinned(residencies_[0], false);
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(cache, 0));
+  DrainNativeReturns();
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).committed_bytes,
+            2 * kSlabBytes);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).cached_bytes,
+            kSlabBytes);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes,
+            kSlabBytes);
+  loom_runtime_residency_set_pinned(residencies_[2], false);
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(cache, 0));
+  DrainNativeReturns();
+  EXPECT_FALSE(loom_runtime_residency_snapshot(residencies_[0]).active);
+  EXPECT_FALSE(loom_runtime_residency_snapshot(residencies_[1]).active);
+  EXPECT_FALSE(loom_runtime_residency_snapshot(residencies_[2]).active);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).committed_bytes,
+            2 * kSlabBytes);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).cached_bytes,
+            2 * kSlabBytes);
+
+  // The same recordings import newly prepared generations after eviction.
+  const auto* command = commands_[0];
+  IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(residencies_[0]));
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  ASSERT_NO_FATAL_FAILURE(Run(1, 90));
+  EXPECT_EQ(commands_[0], command);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 2u);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).peak_bytes,
+            2 * kSlabBytes);
+  loom_runtime_residency_release(residencies_[0]);
+}
+
+TEST_P(WeightsTest, CachedConsumersSurviveBackingReuseAndPreparationReplay) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  IREE_ASSERT_OK(Compile(1, "target"));
+  IREE_ASSERT_OK(Compile(2, "auxiliary"));
+  IREE_ASSERT_OK(Load(2, 3));
+  const auto first_activity = loom_runtime_weights_activity(plans_[0]);
+  EXPECT_EQ(first_activity.activations, 1u);
+  EXPECT_EQ(first_activity.deactivations, 0u);
+  EXPECT_GT(first_activity.read_bytes, 0u);
+  EXPECT_GT(first_activity.prepared_bytes, 0u);
+  EXPECT_GT(first_activity.groups, 0u);
+  Run(0, 70);
+  Run(2, 93);
+  auto* const root = buffers_[0][0];
+  auto* const command = commands_[0];
+  bool complete = false;
+  if (!GetParam()) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_runtime_weights_deactivate(plans_[0], &complete));
+    Run(0, 70);
+    return;
+  }
+  IREE_ASSERT_OK(loom_runtime_weights_deactivate(plans_[0], &complete));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_runtime_weights_deactivate(plans_[0], &complete));
+  ASSERT_TRUE(complete);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes, 0u);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).committed_bytes,
+            2 * kSlabBytes);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).cached_bytes,
+            2 * kSlabBytes);
+  loom_runtime_virtual_buffer_t* other = nullptr;
+  loom_runtime_storage_statistics_t other_statistics = {};
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool_, loom_runtime_pool_state_geometry(storage_owner_), 2 * kSlabBytes,
+      256, &other_statistics, &other));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(other, 0, 2 * kSlabBytes));
+  // Another allocation consumes every physical byte the model gave up.
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).committed_bytes,
+            2 * kSlabBytes);
+  const uint32_t poison = 0xDEADBEEF;
+  const iree_hal_transfer_operation_t fill = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+      .fill =
+          {
+              .target_buffer = loom_runtime_virtual_buffer_handle(other),
+              .length = 2 * kSlabBytes,
+              .pattern = &poison,
+              .pattern_length = sizeof(poison),
+          },
+  };
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_transfer(execution_, 1, &fill, &completion));
+  IREE_ASSERT_OK(loom_runtime_execution_wait(execution_, completion));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_free(other));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_runtime_weights_activate(plans_[0]));
+  IREE_ASSERT_OK(loom_runtime_weights_activate(plans_[0]));
+  IREE_ASSERT_OK(loom_runtime_weights_import_readiness(plans_[0], execution_));
+  const auto replay_activity = loom_runtime_weights_activity(plans_[0]);
+  EXPECT_EQ(replay_activity.activations, 2u);
+  EXPECT_EQ(replay_activity.deactivations, 1u);
+  EXPECT_EQ(replay_activity.read_bytes, first_activity.read_bytes * 2);
+  EXPECT_EQ(replay_activity.prepared_bytes, first_activity.prepared_bytes * 2);
+  EXPECT_EQ(replay_activity.groups, first_activity.groups * 2);
+  EXPECT_EQ(buffers_[0][0], root);
+  EXPECT_EQ(commands_[0], command);
+  ExpectBacking(0, 2 * kSlabBytes);
+  Run(0, 70);
+  Run(1, 70);
+  Run(2, 93);
+}
+
+TEST_P(WeightsTest, AdmissionUsesRecencyOnlyAmongUnpinnedGroups) {
+  bool complete = false;
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+    IREE_ASSERT_OK(Register(i, i, 1));
+  }
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 70));
+  // Touch the oldest entry, making the other resident entry the LRU victim.
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(2, 70));
+  if (!GetParam()) {
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_FAILED_PRECONDITION,
+        loom_runtime_residency_deactivate(residencies_[0], &complete));
+    ASSERT_NO_FATAL_FAILURE(RunPinned(1, 70));
+    return;
+  }
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes,
+            kSlabBytes);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[1]).committed_bytes, 0u);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[2]).committed_bytes,
+            kSlabBytes);
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[0]));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_runtime_residency_deactivate(residencies_[0], &complete));
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(ResidencyCache(), 0));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).committed_bytes,
+            2 * kSlabBytes);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).cached_bytes,
+            kSlabBytes);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[2]).committed_bytes, 0u);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  loom_runtime_residency_release(residencies_[0]);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 70));
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).peak_bytes,
+            2 * kSlabBytes);
+}
+
+TEST_P(WeightsTest, ImpossibleParameterGroupCannotJoinPressureAdmission) {
+  for (uint32_t i = 0; i < 3; ++i) {
+    IREE_ASSERT_OK(Compile(i, "raw"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  }
+  if (!GetParam()) {
+    IREE_ASSERT_OK(Register(0, 0, 3));
+    return;
+  }
+  EXPECT_EQ(loom_runtime_memory_pool_limit(pool_), 2 * kSlabBytes);
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED, Register(0, 0, 3));
+  EXPECT_EQ(residencies_[0], nullptr);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).committed_bytes, 0u);
+  // Rejection does not poison the shared admission queue or borrowed plans.
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 90));
+  loom_runtime_residency_release(residencies_[0]);
+}
+
+TEST_P(WeightsTest, PersistentPinningOnlyChangesParameterEvictionEligibility) {
+  bool complete = false;
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  auto* residency = residencies_[0];
+  auto* cache = ResidencyCache();
+  loom_runtime_residency_set_pinned(residency, true);
+  loom_runtime_residency_set_pinned(residency, true);
+  EXPECT_FALSE(loom_runtime_residency_snapshot(residency).active);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 0u);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(cache, 0));
+  EXPECT_TRUE(loom_runtime_residency_snapshot(residency).active);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes,
+            GetParam() ? kSlabBytes : 0u);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_FAILED_PRECONDITION,
+      loom_runtime_residency_deactivate(residency, &complete));
+  loom_runtime_residency_set_pinned(residency, false);
+  loom_runtime_residency_set_pinned(residency, false);
+  EXPECT_TRUE(loom_runtime_residency_snapshot(residency).active);
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(cache, 0));
+  EXPECT_EQ(loom_runtime_residency_snapshot(residency).active, !GetParam());
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations,
+            GetParam() ? 2u : 1u);
+}
+
+TEST_P(WeightsTest, ExplicitActivationCancellationJoinsAcceptedReadiness) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  iree_hal_semaphore_t* gate = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate));
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_barrier(execution_, {1, &gate, &gate_value}));
+  loom_runtime_test_weight_activation_wake_t wake;
+  loom_runtime_activation_t* activation = nullptr;
+  IREE_ASSERT_OK(loom_runtime_activation_allocate(
+      residencies_[0],
+      loom_runtime_host_proactor_pool(loom_runtime_device_host(device_owner_)),
+      loom_runtime_test_weight_activation_wake_t::Notify, &wake,
+      host_allocator_, &activation));
+  loom_runtime_activation_phase_t phase;
+  IREE_ASSERT_OK(loom_runtime_activation_advance(activation, 0, &phase));
+  EXPECT_EQ(phase, LOOM_RUNTIME_ACTIVATION_LOADING);
+  // Removing administrative retention cannot release accepted native work.
+  loom_runtime_residency_set_pinned(residencies_[0], true);
+  loom_runtime_residency_set_pinned(residencies_[0], false);
+  IREE_ASSERT_OK(loom_runtime_activation_advance(
+      activation, LOOM_RUNTIME_ACTIVATION_FLAG_CANCEL, &phase));
+  EXPECT_EQ(phase, LOOM_RUNTIME_ACTIVATION_LOADING);
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(ResidencyCache(), 0));
+  ExpectBacking(0, GetParam() ? kSlabBytes : 0u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, gate_value, nullptr));
+  wake.Await();
+  IREE_ASSERT_OK(loom_runtime_activation_advance(
+      activation, LOOM_RUNTIME_ACTIVATION_FLAG_CANCEL, &phase));
+  EXPECT_EQ(phase, LOOM_RUNTIME_ACTIVATION_COMPLETE);
+  loom_runtime_activation_free(activation);
+  iree_hal_semaphore_release(gate);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 1u);
+  // Warmup owns no persistent pin after completion.
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(ResidencyCache(), 0));
+  DrainNativeReturns();
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes, 0u);
+}
+
+TEST_P(WeightsTest, CancelledWarmupWithdrawsCapacityInterestWithoutLoading) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
+  if (!GetParam()) {
+    // Fixed allocations have no serving-imposed physical ceiling.
+    return;
+  }
+  for (uint32_t i = 0; i < 3; ++i) {
+    IREE_ASSERT_OK(Compile(i, "raw"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  }
+  IREE_ASSERT_OK(Register(0, 0, 2));
+  IREE_ASSERT_OK(Register(1, 2, 1));
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[0]));
+  IREE_ASSERT_OK(loom_runtime_residency_await(residencies_[0]));
+  loom_runtime_test_weight_activation_wake_t wake;
+  loom_runtime_activation_t* activation = nullptr;
+  IREE_ASSERT_OK(loom_runtime_activation_allocate(
+      residencies_[1],
+      loom_runtime_host_proactor_pool(loom_runtime_device_host(device_owner_)),
+      loom_runtime_test_weight_activation_wake_t::Notify, &wake,
+      host_allocator_, &activation));
+  loom_runtime_activation_phase_t phase;
+  IREE_ASSERT_OK(loom_runtime_activation_advance(activation, 0, &phase));
+  EXPECT_EQ(phase, LOOM_RUNTIME_ACTIVATION_WAITING);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[2]).activations, 0u);
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+  IREE_ASSERT_OK(loom_runtime_activation_advance(
+      activation, LOOM_RUNTIME_ACTIVATION_FLAG_CANCEL, &phase));
+  EXPECT_EQ(phase, LOOM_RUNTIME_ACTIVATION_COMPLETE);
+  loom_runtime_activation_free(activation);
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_runtime_residency_cancel_admission(residencies_[0]);
+  loom_runtime_residency_release(residencies_[0]);
+  loom_runtime_residency_release(residencies_[0]);
+  // A new operation can now reclaim the unpinned peer and finish normally.
+  loom_runtime_memory_pool_set_observer(
+      pool_, loom_runtime_test_weight_activation_wake_t::Notify, &wake);
+  IREE_ASSERT_OK(loom_runtime_activation_allocate(
+      residencies_[1],
+      loom_runtime_host_proactor_pool(loom_runtime_device_host(device_owner_)),
+      loom_runtime_test_weight_activation_wake_t::Notify, &wake,
+      host_allocator_, &activation));
+  IREE_ASSERT_OK(loom_runtime_activation_advance(activation, 0, &phase));
+  while (phase != LOOM_RUNTIME_ACTIVATION_COMPLETE) {
+    wake.Await();
+    IREE_ASSERT_OK(loom_runtime_activation_advance(activation, 0, &phase));
+  }
+  loom_runtime_memory_pool_set_observer(pool_, nullptr, nullptr);
+  loom_runtime_activation_free(activation);
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[1]));
+  ASSERT_NO_FATAL_FAILURE(Run(2, 90));
+  loom_runtime_residency_release(residencies_[1]);
+}
+
+TEST_P(WeightsTest, CheckpointGroupsAdmitAtomicallyAndRetentionPinsNest) {
+  WriteCheckpoint(adapter_path_.path(), 100);
+  IREE_ASSERT_OK(Compile(0, "raw"));
+  IREE_ASSERT_OK(Compile(1, "domains"));
+  const auto first = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &first, {path_.path()}));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  for (uint32_t i = 0; i < 2; ++i) {
+    const auto root = Root(1, i);
+    IREE_ASSERT_OK(
+        CreateRoots(0, 1, &root, {i ? adapter_path_.path() : path_.path()}));
+  }
+  IREE_ASSERT_OK(Register(1, 1, 2));
+  auto check_activity = [&](uint64_t activations, uint64_t deactivations) {
+    const auto total = loom_runtime_residency_activity(residencies_[1]);
+    const auto base = loom_runtime_weights_activity(plans_[1]);
+    const auto adapter = loom_runtime_weights_activity(plans_[2]);
+    EXPECT_EQ(total.activations, activations);
+    EXPECT_EQ(total.deactivations, deactivations);
+    EXPECT_EQ(total.read_bytes, base.read_bytes + adapter.read_bytes);
+    EXPECT_EQ(total.prepared_bytes,
+              base.prepared_bytes + adapter.prepared_bytes);
+    EXPECT_EQ(total.groups, base.groups + adapter.groups);
+  };
+  check_activity(0, 0);
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[0]));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 90));
+  bool admitted = false;
+  IREE_ASSERT_OK(
+      loom_runtime_residency_try_acquire(residencies_[1], &admitted));
+  if (!GetParam()) {
+    ASSERT_TRUE(admitted);
+    check_activity(2, 0);
+    ASSERT_NO_FATAL_FAILURE(Run(1, 290));
+    loom_runtime_residency_release(residencies_[1]);
+    loom_runtime_residency_release(residencies_[0]);
+    return;
+  }
+  EXPECT_FALSE(admitted);
+  check_activity(0, 0);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[1]).peak_bytes, 0u);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[2]).peak_bytes, 0u);
+  // Failed admission neither consumes its own pin nor releases retention.
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes,
+            kSlabBytes);
+  loom_runtime_residency_release(residencies_[0]);
+  IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(residencies_[1]));
+  check_activity(2, 0);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes, 0u);
+  ASSERT_NO_FATAL_FAILURE(Run(1, 290));
+  loom_runtime_residency_release(residencies_[1]);
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(ResidencyCache(), 0));
+  DrainNativeReturns();
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).committed_bytes,
+            2 * kSlabBytes);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).cached_bytes,
+            2 * kSlabBytes);
+  check_activity(2, 2);
+}
+
+TEST_P(WeightsTest, PressureAdmissionDrainsNewPinsButNotAcceptedConsumers) {
+  WriteCheckpoint(adapter_path_.path(), 100);
+  IREE_ASSERT_OK(Compile(0, "raw"));
+  IREE_ASSERT_OK(Compile(1, "domains"));
+  const auto first = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &first, {path_.path()}));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  for (uint32_t i = 0; i < 2; ++i) {
+    const auto root = Root(1, i);
+    IREE_ASSERT_OK(
+        CreateRoots(0, 1, &root, {i ? adapter_path_.path() : path_.path()}));
+  }
+  IREE_ASSERT_OK(Register(1, 1, 2));
+  IREE_ASSERT_OK(Register(2, 0, 0));
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 90));
+  const auto initial = loom_runtime_residency_snapshot(residencies_[0]);
+  EXPECT_EQ(initial.pin_count, 1u);
+  EXPECT_FALSE(initial.admission.waiting);
+  EXPECT_EQ(initial.admission.count, 0u);
+  EXPECT_EQ(initial.admission.duration_ns, 0u);
+  EXPECT_EQ(initial.admission.age_ns, 0u);
+  const iree_time_t first_wait_start = iree_time_now();
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[1], &admission));
+  if (!GetParam()) {
+    ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+    const auto fixed = loom_runtime_residency_snapshot(residencies_[1]);
+    EXPECT_EQ(fixed.pin_count, 1u);
+    EXPECT_FALSE(fixed.admission.waiting);
+    EXPECT_EQ(fixed.admission.count, 0u);
+    EXPECT_EQ(fixed.admission.duration_ns, 0u);
+    ASSERT_NO_FATAL_FAILURE(Run(1, 290));
+    loom_runtime_residency_release(residencies_[1]);
+    loom_runtime_residency_release(residencies_[0]);
+    return;
+  }
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  const auto waiting = loom_runtime_residency_snapshot(residencies_[1]);
+  EXPECT_EQ(waiting.pin_count, 0u);
+  EXPECT_TRUE(waiting.admission.waiting);
+  EXPECT_EQ(waiting.admission.count, 1u);
+  EXPECT_EQ(waiting.admission.duration_ns, waiting.admission.age_ns);
+  EXPECT_LE(waiting.admission.age_ns, iree_time_now() - first_wait_start);
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+  // The already-admitted consumer still takes its nested execution pin and
+  // produces exact device output. A parameter-free peer cannot obstruct it.
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 90));
+  const auto retained = loom_runtime_residency_snapshot(residencies_[0]);
+  EXPECT_TRUE(retained.admission.waiting);
+  EXPECT_EQ(retained.admission.count, 1u);
+  EXPECT_EQ(retained.pin_count, 1u);
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[2], &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  EXPECT_EQ(loom_runtime_residency_snapshot(residencies_[2]).admission.count,
+            0u);
+  loom_runtime_residency_release(residencies_[2]);
+  // Withdraw both tail and head, including repeated withdrawal. No owned
+  // invocation pin is released by cancellation of a new request.
+  loom_runtime_residency_cancel_admission(residencies_[0]);
+  const auto withdrawn = loom_runtime_residency_snapshot(residencies_[0]);
+  EXPECT_FALSE(withdrawn.admission.waiting);
+  EXPECT_EQ(withdrawn.admission.count, 1u);
+  EXPECT_EQ(withdrawn.admission.age_ns, 0u);
+  EXPECT_GE(withdrawn.admission.duration_ns, retained.admission.duration_ns);
+  EXPECT_EQ(withdrawn.pin_count, 1u);
+  loom_runtime_residency_cancel_admission(residencies_[0]);
+  EXPECT_EQ(
+      loom_runtime_residency_snapshot(residencies_[0]).admission.duration_ns,
+      withdrawn.admission.duration_ns);
+  loom_runtime_residency_cancel_admission(residencies_[1]);
+  const auto first_wait = loom_runtime_residency_snapshot(residencies_[1]);
+  EXPECT_FALSE(first_wait.admission.waiting);
+  EXPECT_EQ(first_wait.admission.count, 1u);
+  EXPECT_EQ(first_wait.admission.age_ns, 0u);
+  EXPECT_GE(first_wait.admission.duration_ns, waiting.admission.duration_ns);
+  EXPECT_LE(first_wait.admission.duration_ns,
+            iree_time_now() - first_wait_start);
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_runtime_residency_release(residencies_[0]);
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[1], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+  loom_runtime_residency_release(residencies_[0]);
+  ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(1));
+  loom_runtime_residency_cancel_admission(residencies_[1]);
+  const auto admitted = loom_runtime_residency_snapshot(residencies_[1]);
+  EXPECT_FALSE(admitted.admission.waiting);
+  EXPECT_EQ(admitted.admission.count, 2u);
+  EXPECT_EQ(admitted.admission.age_ns, 0u);
+  EXPECT_GE(admitted.admission.duration_ns, first_wait.admission.duration_ns);
+  EXPECT_EQ(admitted.pin_count, 1u);
+  ASSERT_NO_FATAL_FAILURE(Run(1, 290));
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_EQ(loom_runtime_residency_snapshot(residencies_[0]).admission.count,
+            2u);
+  loom_runtime_residency_release(residencies_[1]);
+  ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(0));
+  loom_runtime_residency_cancel_admission(residencies_[0]);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 90));
+  loom_runtime_residency_release(residencies_[0]);
+  EXPECT_EQ(loom_runtime_residency_snapshot(residencies_[0]).pin_count, 0u);
+  EXPECT_EQ(
+      loom_runtime_residency_snapshot(residencies_[1]).admission.duration_ns,
+      admitted.admission.duration_ns);
+}
+
+TEST_P(WeightsTest, PressureTurnSurvivesMutableStateNativeReturn) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
+  if (!GetParam()) {
+    return;
+  }
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+    IREE_ASSERT_OK(Register(i, i, 1));
+  }
+  IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(residencies_[0]));
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool_, loom_runtime_pool_state_geometry(storage_owner_), 2 * kSlabBytes,
+      256, &state_statistics_, &state_));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(state_, 0, kSlabBytes));
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[1], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+  loom_runtime_residency_release(residencies_[0]);
+  ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(1));
+  IREE_ASSERT_OK(loom_runtime_residency_await(residencies_[1]));
+
+  // Detach first so the explicit physical trim holds native disposal rather
+  // than the return of a mapping's metadata. The new row cannot claim that
+  // capacity until the source has actually disposed of the old backing.
+  const loom_runtime_memory_range_t next = {state_, kSlabBytes, kSlabBytes};
+  bool admitted = false;
+  loom_runtime_virtual_buffer_begin_trim(state_);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(state_));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  {
+    if (deferred_backing_) {
+      deferred_backing_->DeferReturns();
+    }
+    loom_runtime_memory_pool_trim(pool_, 0);
+    deferred_backing_->WaitForReturn();
+    EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).releasing_bytes,
+              kSlabBytes);
+    IREE_ASSERT_OK(
+        loom_runtime_memory_pool_try_commit(pool_, 1, &next, &admitted));
+    EXPECT_FALSE(admitted);
+    // No row was admitted, and activation has retired. Releasing that pin
+    // must not surrender this request's turn to the younger parameter waiter.
+    loom_runtime_residency_release(residencies_[1]);
+    EXPECT_TRUE(
+        loom_runtime_residency_snapshot(residencies_[1]).admission.waiting);
+    IREE_ASSERT_OK(
+        loom_runtime_residency_try_admit(residencies_[0], &admission));
+    EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+    EXPECT_TRUE(loom_runtime_residency_snapshot(residencies_[1]).active);
+    EXPECT_EQ(loom_runtime_weights_activity(plans_[1]).deactivations, 0u);
+    deferred_backing_->CompleteReturns();
+  }
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[1], &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  IREE_ASSERT_OK(
+      loom_runtime_memory_pool_try_commit(pool_, 1, &next, &admitted));
+  ASSERT_TRUE(admitted);
+  loom_runtime_residency_cancel_admission(residencies_[1]);
+  const auto completed = loom_runtime_residency_snapshot(residencies_[1]);
+  EXPECT_FALSE(completed.admission.waiting);
+  EXPECT_EQ(completed.admission.count, 1u);
+  EXPECT_EQ(completed.pin_count, 1u);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[1]).activations, 1u);
+  ASSERT_NO_FATAL_FAILURE(Run(1, 70));
+  loom_runtime_residency_release(residencies_[1]);
+  ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(0));
+  loom_runtime_residency_cancel_admission(residencies_[0]);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  loom_runtime_residency_release(residencies_[0]);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).peak_bytes,
+            2 * kSlabBytes);
+}
+
+TEST_P(WeightsTest, NewAdmissionsCoexistWithoutPhysicalPressure) {
+  loom_runtime_residency_admission_t admission;
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+    IREE_ASSERT_OK(Register(i, i, 1));
+    IREE_ASSERT_OK(
+        loom_runtime_residency_try_admit(residencies_[i], &admission));
+    ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  }
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(
+        loom_runtime_residency_try_admit(residencies_[i], &admission));
+    ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+    ASSERT_NO_FATAL_FAILURE(Run(i, 70));
+    const auto active = loom_runtime_residency_snapshot(residencies_[i]);
+    EXPECT_EQ(active.pin_count, 2u);
+    EXPECT_FALSE(active.admission.waiting);
+    EXPECT_EQ(active.admission.count, 0u);
+    EXPECT_EQ(active.admission.duration_ns, 0u);
+    EXPECT_EQ(active.admission.age_ns, 0u);
+    loom_runtime_residency_release(residencies_[i]);
+    loom_runtime_residency_release(residencies_[i]);
+  }
+}
+
+TEST_P(WeightsTest, WarmAdmissionCollectsCompletedPeerRelease) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
+  if (!GetParam()) {
+    return;
+  }
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+    IREE_ASSERT_OK(Register(i, i, 1));
+    ASSERT_NO_FATAL_FAILURE(RunPinned(i, 70));
+  }
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[0]));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool_, loom_runtime_pool_state_geometry(storage_owner_), 2 * kSlabBytes,
+      256, &state_statistics_, &state_));
+  auto* cache = ResidencyCache();
+  bool admitted = false;
+  const loom_runtime_memory_range_t first = {state_, 0, kSlabBytes};
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(cache, kSlabBytes));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  {
+    if (deferred_backing_) {
+      deferred_backing_->DeferReturns();
+    }
+    loom_runtime_memory_pool_trim(pool_, 0);
+    deferred_backing_->WaitForReturn();
+    IREE_ASSERT_OK(
+        loom_runtime_memory_pool_try_commit(pool_, 1, &first, &admitted));
+    EXPECT_FALSE(admitted);
+    EXPECT_TRUE(loom_runtime_residency_cache_is_reclaiming(cache));
+    // Native backing can outlive the weights' logical return. The pool owns
+    // those bytes while the cache retains the uncollected release interest.
+    EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).releasing_bytes,
+              kSlabBytes);
+    deferred_backing_->CompleteReturns();
+  }
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  IREE_ASSERT_OK(
+      loom_runtime_memory_pool_try_commit(pool_, 1, &first, &admitted));
+  ASSERT_TRUE(admitted);
+  // A warm admission must retire the peer's logical release interest too.
+  // The following state denial has no pending work that could wake a retry.
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  const loom_runtime_memory_range_t both = {state_, 0, 2 * kSlabBytes};
+  IREE_ASSERT_OK(
+      loom_runtime_memory_pool_try_commit(pool_, 1, &both, &admitted));
+  EXPECT_FALSE(admitted);
+  EXPECT_FALSE(loom_runtime_memory_pool_is_pending(pool_));
+  EXPECT_FALSE(loom_runtime_residency_cache_is_reclaiming(cache));
+  IREE_ASSERT_OK(loom_runtime_residency_cache_query_status(cache));
+  EXPECT_EQ(loom_runtime_residency_snapshot(residencies_[0]).pin_count, 2u);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[1]).deactivations, 1u);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  loom_runtime_residency_release(residencies_[0]);
+  loom_runtime_residency_release(residencies_[0]);
+}
+
+TEST_P(WeightsTest, IdleExpiryPreservesPinsAndReloadsWithoutRecompiling) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+    IREE_ASSERT_OK(Register(i, i, 1));
+    ASSERT_NO_FATAL_FAILURE(RunPinned(i, 70));
+  }
+  auto* cache = ResidencyCache();
+  const auto timeout = iree_make_duration_ms(3600000);
+  loom_runtime_residency_set_pinned(residencies_[0], true);
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[1]));
+  bool pending = true;
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim_idle(
+      cache, iree_time_now() + 2 * timeout, timeout, &pending));
+  EXPECT_FALSE(pending);
+  EXPECT_TRUE(loom_runtime_residency_snapshot(residencies_[0]).active);
+  EXPECT_TRUE(loom_runtime_residency_snapshot(residencies_[1]).active);
+  loom_runtime_residency_set_pinned(residencies_[0], false);
+  const auto unpinned = iree_time_now();
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim_idle(cache, unpinned,
+                                                        timeout, &pending));
+  EXPECT_EQ(pending, GetParam());
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim_idle(
+      cache, unpinned + timeout / 2, timeout, &pending));
+  EXPECT_EQ(pending, GetParam());
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim_idle(
+      cache, unpinned + timeout, timeout, &pending));
+  EXPECT_FALSE(pending);
+  EXPECT_EQ(loom_runtime_residency_snapshot(residencies_[0]).active,
+            !GetParam());
+  EXPECT_TRUE(loom_runtime_residency_snapshot(residencies_[1]).active);
+  if (pool_) {
+    IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  }
+  {
+    if (deferred_backing_) {
+      deferred_backing_->DeferReturns();
+    }
+    if (GetParam()) {
+      loom_runtime_memory_pool_trim(pool_, 0);
+      deferred_backing_->WaitForReturn();
+      EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).releasing_bytes,
+                kSlabBytes);
+    }
+    // The independent consumer has no dependency on the held native release.
+    ASSERT_NO_FATAL_FAILURE(Run(1, 70));
+    if (deferred_backing_) {
+      deferred_backing_->CompleteReturns();
+    }
+  }
+  if (pool_) {
+    IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  }
+  IREE_ASSERT_OK(loom_runtime_residency_cache_query_status(cache));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations,
+            GetParam() ? 2u : 1u);
+  loom_runtime_residency_release(residencies_[1]);
+  const auto released = iree_time_now();
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim_idle(cache, released,
+                                                        timeout, &pending));
+  EXPECT_EQ(pending, GetParam());
+  EXPECT_TRUE(loom_runtime_residency_snapshot(residencies_[1]).active);
+}
+
+TEST_P(WeightsTest, ReclaimsIdleHistoryOnlyWhenProtectedParametersFit) {
+  if (!GetParam()) {
+    return;
+  }
+  IREE_ASSERT_OK(Compile(0, "domains"));
+  for (uint32_t i = 0; i < 2; ++i) {
+    const auto root = Root(0, i);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  }
+  IREE_ASSERT_OK(Register(0, 0, 2));
+  IREE_ASSERT_OK(Register(1, 0, 0));
+  // An accepted consumer holds this model's parameter pin independently of
+  // idle history owned by its reclaimer.
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[1]));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool_, loom_runtime_pool_state_geometry(storage_owner_), kSlabBytes, 256,
+      &state_statistics_, &state_));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(state_, 0, kSlabBytes));
+  struct loom_runtime_test_weight_cache_owner_t {
+    // Actual source ledger, shared with this test's real virtual reservation.
+    const loom_runtime_storage_statistics_t* memory;
+    // Logical ownership can be released once, independently of physical trim.
+    bool retained = true;
+    // Accepted maintenance keeps backing alive until its owner retires it.
+    bool pending = false;
+    // Counts requests, not repeated probes while retirement is pending.
+    uint32_t requests = 0;
+  } owner = {&state_statistics_};
+  loom_runtime_residency_set_reclaimer(
+      residencies_[1],
+      {&owner,
+       [](void* self) {
+         auto* owner =
+             static_cast<loom_runtime_test_weight_cache_owner_t*>(self);
+         if (!owner->retained) {
+           return false;
+         }
+         owner->retained = false;
+         owner->pending = true;
+         ++owner->requests;
+         return true;
+       },
+       [](void* self) {
+         return static_cast<loom_runtime_test_weight_cache_owner_t*>(self)
+             ->pending;
+       },
+       [](void* self, const loom_runtime_residency_forecast_t*,
+          loom_runtime_residency_projection_t* projection) {
+         const auto* owner =
+             static_cast<const loom_runtime_test_weight_cache_owner_t*>(self);
+         *projection = {
+             .resident_bytes =
+                 owner->memory->committed_bytes + owner->memory->pending_bytes,
+         };
+         return iree_ok_status();
+       }});
+  auto* cache = ResidencyCache();
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(Compile(1, "raw"));
+  const auto peer_root = Root(1, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &peer_root, {path_.path()}));
+  IREE_ASSERT_OK(Register(2, 2, 1));
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[2]));
+  ASSERT_NO_FATAL_FAILURE(Run(1, 90));
+  // Even discarding every idle history cannot admit the two-slab group while
+  // this one-slab peer is pinned. Neither kind of pin permits useful eviction.
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_EQ(owner.requests, 0u);
+  EXPECT_TRUE(owner.retained);
+  EXPECT_FALSE(loom_runtime_residency_cache_is_reclaiming(cache));
+  EXPECT_EQ(state_statistics_.committed_bytes, kSlabBytes);
+  loom_runtime_residency_set_pinned(residencies_[2], true);
+  loom_runtime_residency_release(residencies_[2]);
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+  EXPECT_EQ(owner.requests, 0u);
+  EXPECT_TRUE(owner.retained);
+  EXPECT_FALSE(loom_runtime_residency_cache_is_reclaiming(cache));
+  loom_runtime_residency_set_pinned(residencies_[2], false);
+  // Once the peer's parameters become evictable, retiring the idle history is
+  // necessary and sufficient. The regular asynchronous reclaimer must run.
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+  EXPECT_TRUE(loom_runtime_residency_cache_is_reclaiming(cache));
+  EXPECT_EQ(state_statistics_.committed_bytes, kSlabBytes);
+  EXPECT_EQ(loom_runtime_residency_statistics(residencies_[0]).committed_bytes,
+            0u);
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+  EXPECT_EQ(owner.requests, 1u);
+  EXPECT_EQ(loom_runtime_residency_snapshot(residencies_[1]).pin_count, 1u);
+  // Cancelling admission does not pretend accepted maintenance has retired.
+  loom_runtime_residency_cancel_admission(residencies_[0]);
+  EXPECT_TRUE(loom_runtime_residency_cache_is_reclaiming(cache));
+  EXPECT_EQ(state_statistics_.committed_bytes, kSlabBytes);
+  loom_runtime_virtual_buffer_begin_trim(state_);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(state_));
+  owner.pending = false;
+  EXPECT_FALSE(loom_runtime_residency_cache_is_reclaiming(cache));
+  ASSERT_NO_FATAL_FAILURE(AdmitAfterRelease(0));
+  ASSERT_NO_FATAL_FAILURE(Run(0, 90));
+  loom_runtime_residency_release(residencies_[0]);
+  loom_runtime_residency_set_reclaimer(residencies_[1], {});
+  EXPECT_EQ(owner.requests, 1u);
+  EXPECT_EQ(loom_runtime_residency_snapshot(residencies_[1]).pin_count, 1u);
+  loom_runtime_residency_release(residencies_[1]);
+}
+
+TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  if (!GetParam()) {
+    return;
+  }
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool_, loom_runtime_pool_state_geometry(storage_owner_), 2 * kSlabBytes,
+      256, &state_statistics_, &state_));
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[0]));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_runtime_virtual_buffer_commit(state_, 0, 2 * kSlabBytes));
+  EXPECT_EQ(state_statistics_.committed_bytes, 0u);
+  loom_runtime_residency_release(residencies_[0]);
+  // Mutable growth reclaims idle parameters and reuses their backing without
+  // requiring an intervening native free.
+  const loom_runtime_memory_range_t range = {state_, 0, 2 * kSlabBytes};
+  bool state_admitted = false;
+  IREE_ASSERT_OK(
+      loom_runtime_memory_pool_try_commit(pool_, 1, &range, &state_admitted));
+  if (!state_admitted) {
+    // Reclamation can retire before this owner observes the denial. Join any
+    // remaining native work before the next admission attempt.
+    IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+    IREE_ASSERT_OK(
+        loom_runtime_memory_pool_try_commit(pool_, 1, &range, &state_admitted));
+  }
+  ASSERT_TRUE(state_admitted);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes, 0u);
+  const uint32_t value = 0xA1B2C3D4;
+  uint32_t observed = 0;
+  const iree_hal_transfer_operation_t fill = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+      .fill =
+          {
+              .target_buffer = loom_runtime_virtual_buffer_handle(state_),
+              .length = sizeof(value),
+              .pattern = &value,
+              .pattern_length = sizeof(value),
+          },
+  };
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_transfer(execution_, 1, &fill, &completion));
+  IREE_ASSERT_OK(loom_runtime_execution_wait(execution_, completion));
+  bool admitted = true;
+  IREE_ASSERT_OK(
+      loom_runtime_residency_try_acquire(residencies_[0], &admitted));
+  EXPECT_FALSE(admitted);
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(ResidencyCache(), 0));
+  EXPECT_EQ(state_statistics_.committed_bytes, 2 * kSlabBytes);
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download =
+          {
+              .source_buffer = loom_runtime_virtual_buffer_handle(state_),
+              .target = &observed,
+              .length = sizeof(observed),
+          },
+  };
+  IREE_ASSERT_OK(
+      loom_runtime_execution_feedback(execution_, 1, &download, &completion));
+  IREE_ASSERT_OK(loom_runtime_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(observed, value);
+  loom_runtime_virtual_buffer_begin_trim(state_);
+  IREE_ASSERT_OK(
+      loom_runtime_virtual_buffer_keep(state_, 0, sizeof(value), nullptr));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_trim(state_));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).committed_bytes,
+            2 * kSlabBytes);
+}
+
+TEST_P(WeightsTest,
+       DeviceTrimRetiresIdleWorkspaceAndPreservesPinnedParameters) {
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+    IREE_ASSERT_OK(Register(i, i, 1));
+    ASSERT_NO_FATAL_FAILURE(RunPinned(i, 70));
+  }
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[0]));
+  IREE_ASSERT_OK(
+      loom_runtime_execution_reserve_workspace(execution_, kSlabBytes, 256));
+  const iree_hal_pool_reservation_request_t request = {
+      .allocation_size = kSlabBytes,
+      .min_alignment = 256,
+  };
+  IREE_ASSERT_OK(
+      loom_runtime_execution_alloca(execution_, 1, &request, &workspace_));
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_runtime_execution_dealloca(execution_, workspace_, &completion));
+  iree_hal_buffer_release(workspace_);
+  workspace_ = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution_));
+  const auto before = loom_runtime_pool_statistics(storage_owner_);
+  EXPECT_EQ(before.retained.committed_bytes, GetParam() ? 2 * kSlabBytes : 0);
+  if (GetParam()) {
+    // Under the two-slab cap, scratch and the pinned model share the domain;
+    // the other model's unpinned parameter slab was reclaimed for scratch.
+    EXPECT_EQ(loom_runtime_weights_statistics(plans_[1]).committed_bytes, 0u);
+  }
+  // The shared workspace keeps its registered slab geometry after a trim.
+  // Earlier streaming cases may have registered a larger geometry.
+  EXPECT_GE(before.workspace.bytes_committed, kSlabBytes);
+  IREE_ASSERT_OK(
+      loom_runtime_pool_trim(storage_owner_, GetParam() ? kSlabBytes : 0));
+  DrainNativeReturns();
+  EXPECT_EQ(
+      loom_runtime_pool_statistics(storage_owner_).workspace.bytes_committed,
+      0u);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+
+  IREE_ASSERT_OK(
+      loom_runtime_execution_alloca(execution_, 1, &request, &workspace_));
+  // The model's real command completion follows allocation on the work chain.
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner_, kSlabBytes - 1));
+  DrainNativeReturns();
+  const auto pinned = loom_runtime_pool_statistics(storage_owner_);
+  EXPECT_EQ(pinned.workspace.bytes_committed, before.workspace.bytes_committed);
+  EXPECT_EQ(pinned.workspace.reservation_count, 1u);
+  EXPECT_EQ(pinned.retained.committed_bytes, GetParam() ? 2 * kSlabBytes : 0);
+  if (GetParam()) {
+    EXPECT_EQ(loom_runtime_weights_statistics(plans_[1]).committed_bytes, 0u);
+  }
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  loom_runtime_residency_release(residencies_[0]);
+  IREE_ASSERT_OK(
+      loom_runtime_execution_dealloca(execution_, workspace_, &completion));
+  iree_hal_buffer_release(workspace_);
+  workspace_ = nullptr;
+  IREE_ASSERT_OK(loom_runtime_execution_drain(execution_));
+  IREE_ASSERT_OK(loom_runtime_pool_trim(storage_owner_, 0));
+  DrainNativeReturns();
+  const auto cold = loom_runtime_pool_statistics(storage_owner_);
+  EXPECT_EQ(cold.retained.committed_bytes, 0u);
+  EXPECT_EQ(cold.workspace.bytes_committed, 0u);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 70));
+  EXPECT_EQ(
+      loom_runtime_pool_statistics(storage_owner_).retained.committed_bytes,
+      GetParam() ? kSlabBytes : 0);
+}
+
+class SmallRootWeightsTest : public WeightsTest {
+ protected:
+  uint64_t SlabSize() const override { return 2 * 1024 * 1024; }
+};
+
+TEST_P(SmallRootWeightsTest, SmallRootCommitsOnlyItsNativeExtent) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  if (GetParam()) {
+    const auto geometry = loom_runtime_pool_weight_geometry(storage_owner_);
+    const auto memory = loom_runtime_weights_statistics(plans_[0]);
+    EXPECT_EQ(memory.reserved_bytes, geometry.minimum_size);
+    EXPECT_EQ(memory.committed_bytes, geometry.minimum_size);
+    EXPECT_LT(memory.committed_bytes, geometry.mapping_size);
+    IREE_ASSERT_OK(loom_runtime_residency_cache_trim(ResidencyCache(), 0));
+    DrainNativeReturns();
+    EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes, 0u);
+    ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Backing, SmallRootWeightsTest,
+                         ::testing::Values(false, true));
+
+INSTANTIATE_TEST_SUITE_P(Backing, WeightsTest, ::testing::Values(false, true));
+
+class ArenaWeightsTest : public WeightsTest {
+ protected:
+  // A large address-only prefix needs few slab records and no payload.
+  uint64_t SlabSize() const override { return 64 * 1024 * 1024; }
+};
+
+TEST_P(ArenaWeightsTest, IndependentPreparedRangesReloadAndRecycleAbove4GiB) {
+  WriteCheckpoint(adapter_path_.path(), 100);
+  const auto geometry = loom_runtime_pool_weight_geometry(storage_owner_);
+  constexpr uint64_t kPrefixBytes = UINT64_C(1) << 32;
+  const uint64_t arena_bytes = kPrefixBytes + 2 * geometry.minimum_size;
+  const auto before = loom_runtime_memory_pool_statistics(pool_);
+  IREE_ASSERT_OK(loom_runtime_memory_arena_allocate(pool_, geometry,
+                                                    arena_bytes, &arena_));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate_in_arena(
+      arena_, kPrefixBytes, 256, &state_statistics_, &state_));
+  EXPECT_EQ(state_statistics_.committed_bytes, 0u);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).reserved_bytes,
+            before.reserved_bytes + arena_bytes);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).committed_bytes,
+            before.committed_bytes);
+
+  for (size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0, 0);
+    ASSERT_LE(root.root.required_byte_length, geometry.minimum_size);
+    IREE_ASSERT_OK(
+        CreateRoots(0, 1, &root, {i ? adapter_path_.path() : path_.path()}));
+    IREE_ASSERT_OK(Register(i, i, 1));
+    const auto usage = loom_runtime_weights_memory_usage(plans_[i]);
+    EXPECT_EQ(usage.reserved_bytes, geometry.minimum_size);
+    EXPECT_EQ(usage.committed_bytes, 0u);
+  }
+  const auto first_view = iree_hal_buffer_virtual_view(buffers_[0][0]);
+  const auto second_view = iree_hal_buffer_virtual_view(buffers_[1][0]);
+  EXPECT_EQ(first_view.root, second_view.root);
+  EXPECT_EQ(first_view.root, iree_hal_buffer_virtual_view(
+                                 loom_runtime_memory_arena_handle(arena_))
+                                 .root);
+  EXPECT_EQ(first_view.byte_offset, kPrefixBytes);
+  EXPECT_EQ(second_view.byte_offset, kPrefixBytes + geometry.minimum_size);
+  EXPECT_EQ(loom_runtime_memory_pool_statistics(pool_).reserved_bytes,
+            before.reserved_bytes + arena_bytes);
+
+  loom_runtime_residency_set_pinned(residencies_[1], true);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 370));
+  const auto peer_activity = loom_runtime_weights_activity(plans_[1]);
+  EXPECT_EQ(loom_runtime_weights_memory_usage(plans_[0]).committed_bytes,
+            geometry.minimum_size);
+  EXPECT_EQ(loom_runtime_weights_memory_usage(plans_[1]).committed_bytes,
+            geometry.minimum_size);
+
+  // Deactivation preserves the first recording and its address while returning
+  // only that bank's backing. The peer remains live throughout native return.
+  bool complete = false;
+  IREE_ASSERT_OK(loom_runtime_residency_deactivate(residencies_[0], &complete));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_runtime_residency_deactivate(residencies_[0], &complete));
+  ASSERT_TRUE(complete);
+  EXPECT_EQ(loom_runtime_weights_memory_usage(plans_[0]).committed_bytes, 0u);
+  EXPECT_EQ(loom_runtime_weights_memory_usage(plans_[1]).committed_bytes,
+            geometry.minimum_size);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 370));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 2u);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[1]).activations,
+            peer_activity.activations);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[1]).prepared_bytes,
+            peer_activity.prepared_bytes);
+
+  // A recorded view keeps its lease after the caller drops the public view.
+  // Only actual recording retirement permits the same offset to name a new
+  // checkpoint. Neither the peer range nor the untouched prefix is recycled.
+  iree_hal_buffer_release(buffers_[0][0]);
+  buffers_[0][0] = nullptr;
+  EXPECT_FALSE(loom_runtime_weights_is_retired(plans_[0]));
+  iree_hal_command_buffer_release(commands_[0]);
+  commands_[0] = nullptr;
+  IREE_ASSERT_OK(loom_runtime_weights_await_retirement(plans_[0]));
+  IREE_ASSERT_OK(loom_runtime_residency_deactivate(residencies_[0], &complete));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_runtime_residency_deactivate(residencies_[0], &complete));
+  ASSERT_TRUE(complete);
+  loom_runtime_residency_free(residencies_[0]);
+  residencies_[0] = nullptr;
+  loom_runtime_residency_group_free(parameter_groups_[0]);
+  parameter_groups_[0] = nullptr;
+  IREE_ASSERT_OK(loom_runtime_weights_free(plans_[0]));
+  plans_[0] = nullptr;
+
+  WriteCheckpoint(path_.path(), 200);
+  IREE_ASSERT_OK(Compile(2, "target"));
+  const auto replacement = Root(2, 0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &replacement, {path_.path()}));
+  IREE_ASSERT_OK(Register(2, 2, 1));
+  const auto replacement_view = iree_hal_buffer_virtual_view(buffers_[2][0]);
+  EXPECT_EQ(replacement_view.root, first_view.root);
+  EXPECT_EQ(replacement_view.byte_offset, first_view.byte_offset);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(2, 670));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 370));
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[1]).prepared_bytes,
+            peer_activity.prepared_bytes);
+  EXPECT_EQ(state_statistics_.committed_bytes, 0u);
+  loom_runtime_residency_set_pinned(residencies_[1], false);
+}
+
+TEST_P(ArenaWeightsTest, SelectedPreparedBanksShareOneParameterBinding) {
+  WriteCheckpoint(adapter_path_.path(), 100);
+  const auto geometry = loom_runtime_pool_weight_geometry(storage_owner_);
+  constexpr uint64_t kPrefixBytes = UINT64_C(1) << 32;
+  IREE_ASSERT_OK(loom_runtime_memory_arena_allocate(
+      pool_, geometry, kPrefixBytes + 2 * geometry.minimum_size, &arena_));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate_in_arena(
+      arena_, kPrefixBytes, 256, &state_statistics_, &state_));
+  for (size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0, 0);
+    ASSERT_LE(root.root.required_byte_length, geometry.minimum_size);
+    IREE_ASSERT_OK(
+        CreateRoots(0, 1, &root, {i ? adapter_path_.path() : path_.path()}));
+  }
+  IREE_ASSERT_OK(Compile(2, "selected_target"));
+  const auto* selected = loom_runtime_jit_stage_program(compiled_[2]);
+  ASSERT_EQ(selected->parameter_roots.count, 1u);
+  const auto selected_root = Root(2, 0, 0);
+  EXPECT_EQ(selected_root.root.required_byte_length,
+            Root(0, 0, 0).root.required_byte_length);
+  EXPECT_EQ(selected->requirements.rebindable_binding_count, 2u);
+  IREE_ASSERT_OK(Register(2, 0, 2));
+
+  const std::array<uint64_t, 2> bank_offsets = {
+      iree_hal_buffer_virtual_view(buffers_[0][0]).byte_offset,
+      iree_hal_buffer_virtual_view(buffers_[1][0]).byte_offset};
+  EXPECT_EQ(bank_offsets[0], kPrefixBytes);
+  EXPECT_EQ(bank_offsets[1], kPrefixBytes + geometry.minimum_size);
+  std::array<uint64_t, 8> request_offsets;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      WeightConsumerPool(),
+      iree_hal_make_pool_reservation_request(sizeof(request_offsets), 0),
+      iree_infinite_timeout(), &workspace_));
+
+  // Both views end exactly at the last bank's final parameter byte. The second
+  // borrows a nonzero-origin arena subspan; request offsets remain relative to
+  // that binding, not the native reservation or a factor's packed position.
+  const uint64_t binding_end =
+      bank_offsets[1] + selected_root.root.required_byte_length;
+  for (uint64_t binding_origin : {UINT64_C(0), UINT64_C(256)}) {
+    iree_hal_command_buffer_release(commands_[2]);
+    commands_[2] = nullptr;
+    iree_hal_buffer_release(buffers_[2][0]);
+    buffers_[2][0] = nullptr;
+    IREE_ASSERT_OK(iree_hal_buffer_subspan(
+        loom_runtime_memory_arena_handle(arena_), binding_origin,
+        binding_end - binding_origin, host_allocator_, &buffers_[2][0]));
+    IREE_ASSERT_OK(loom_runtime_jit_stage_record(
+        compiled_[2], iree_hal_queue_family(dispatch_),
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, nullptr, buffers_[2].data(),
+        &commands_[2]));
+    for (size_t i = 0; i < request_offsets.size(); ++i) {
+      request_offsets[i] = bank_offsets[i % 2] - binding_origin;
+    }
+    IREE_ASSERT_OK(loom_runtime_residency_acquire_wait(residencies_[2]));
+    auto run = [&]() -> iree_status_t {
+      uint64_t completion = 0;
+      iree_hal_transfer_operation_t upload = {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+      };
+      upload.upload.source = request_offsets.data();
+      upload.upload.target_buffer = workspace_;
+      upload.upload.length = sizeof(request_offsets);
+      IREE_RETURN_IF_ERROR(
+          loom_runtime_execution_transfer(execution_, 1, &upload, &completion));
+      const iree_hal_buffer_binding_t bindings[] = {
+          {workspace_, 0, sizeof(request_offsets)},
+          {output_buffer_, 0, sizeof(output_)}};
+      IREE_RETURN_IF_ERROR(loom_runtime_execution_execute(
+          execution_, commands_[2], {IREE_ARRAYSIZE(bindings), bindings},
+          &completion));
+      iree_hal_transfer_operation_t download = {
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      };
+      download.download.source_buffer = output_buffer_;
+      download.download.target = output_.data();
+      download.download.length = sizeof(output_);
+      IREE_RETURN_IF_ERROR(loom_runtime_execution_feedback(
+          execution_, 1, &download, &completion));
+      return loom_runtime_execution_feedback_wait(execution_, completion);
+    };
+    auto status = run();
+    // Keep the host upload alive through accepted work on every error path.
+    status = iree_status_join(status, loom_runtime_execution_drain(execution_));
+    loom_runtime_residency_release(residencies_[2]);
+    IREE_ASSERT_OK(status);
+    for (size_t i = 0; i < output_.size(); ++i) {
+      EXPECT_EQ(output_[i], (i % 2 ? 370 : 70) + 3 * i);
+    }
+  }
+  EXPECT_EQ(state_statistics_.committed_bytes, 0u);
+  for (size_t i = 0; i < 2; ++i) {
+    EXPECT_EQ(loom_runtime_weights_memory_usage(plans_[i]).committed_bytes,
+              geometry.minimum_size);
+    EXPECT_EQ(loom_runtime_weights_activity(plans_[i]).activations, 1u);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Elastic, ArenaWeightsTest, ::testing::Values(true));
+
+class RejectedPreparationWeightsTest : public ArenaWeightsTest {
+ protected:
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(ArenaWeightsTest::SetUp());
+    const iree_hal_queue_params_t params = {
+        .priority = dispatch_->priority,
+        .features = dispatch_->features,
+        .execution_resources = dispatch_->execution_resources,
+    };
+    static const iree_hal_queue_vtable_t vtable = {
+        .destroy = [](iree_hal_queue_t*) {},
+        .execute =
+            [](iree_hal_queue_t*, iree_hal_semaphore_list_t,
+               iree_hal_semaphore_list_t, iree_hal_command_buffer_t*,
+               iree_hal_buffer_binding_table_t,
+               iree_hal_queue_execute_flags_t) {
+              return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+            },
+    };
+    iree_hal_queue_initialize(iree_hal_queue_family(dispatch_), &params,
+                              &vtable, &rejected_dispatch_);
+    initialized_ = true;
+  }
+
+  void TearDown() override {
+    ArenaWeightsTest::TearDown();
+    if (initialized_) {
+      iree_hal_queue_release(&rejected_dispatch_);
+    }
+  }
+
+  // Rejects preparation dispatch after real mapping submission, before reads.
+  iree_hal_queue_t rejected_dispatch_ = {};
+  // The queue is released only if device setup reached its initialization.
+  bool initialized_ = false;
+};
+
+TEST_P(RejectedPreparationWeightsTest,
+       FailedActivationDeactivatesAcceptedArenaBacking) {
+  const auto geometry = loom_runtime_pool_weight_geometry(storage_owner_);
+  IREE_ASSERT_OK(loom_runtime_memory_arena_allocate(
+      pool_, geometry, 2 * geometry.minimum_size, &arena_));
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0, 0);
+  IREE_ASSERT_OK(loom_runtime_weights_allocate(
+      device_, transfer_, &rejected_dispatch_,
+      loom_runtime_pool_storage(storage_owner_), pool_, geometry, arena_,
+      loom_runtime_pool_workspace(storage_owner_), 0, 1, &root, host_allocator_,
+      &plans_[0]));
+  IREE_ASSERT_OK(Prepare(plans_[0], {path_.path()}));
+  const auto original = iree_hal_buffer_virtual_view(buffers_[0][0]);
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_runtime_weights_activate(plans_[0]));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        loom_runtime_weights_await(plans_[0]));
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 0u);
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).read_bytes, 0u);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes,
+            geometry.minimum_size);
+
+  // Submission failure did not publish an active plan, but accepted backing
+  // still needs ordinary asynchronous deactivation before its lease is free.
+  iree_hal_buffer_release(buffers_[0][0]);
+  buffers_[0][0] = nullptr;
+  IREE_ASSERT_OK(loom_runtime_weights_await_retirement(plans_[0]));
+  bool complete = false;
+  IREE_ASSERT_OK(loom_runtime_weights_deactivate(plans_[0], &complete));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_runtime_weights_deactivate(plans_[0], &complete));
+  ASSERT_TRUE(complete);
+  EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes, 0u);
+  IREE_ASSERT_OK(loom_runtime_weights_free(plans_[0]));
+  plans_[0] = nullptr;
+
+  // A healthy plan prepares into the retired offset without replacing the
+  // native arena or inheriting the failed preparation's private readiness.
+  WriteCheckpoint(path_.path(), 100);
+  IREE_ASSERT_OK(Compile(1, "target"));
+  const auto replacement = Root(1, 0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &replacement, {path_.path()}));
+  const auto reused = iree_hal_buffer_virtual_view(buffers_[1][0]);
+  EXPECT_EQ(reused.root, original.root);
+  EXPECT_EQ(reused.byte_offset, original.byte_offset);
+  IREE_ASSERT_OK(Register(1, 0, 1));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 370));
+}
+
+INSTANTIATE_TEST_SUITE_P(Elastic, RejectedPreparationWeightsTest,
+                         ::testing::Values(true));
+
+// The failed reclaimer belongs to a private pool; native devices remain shared.
+class RejectedAdmissionWeightsTest : public WeightsTest {};
+
+TEST_P(RejectedAdmissionWeightsTest,
+       LogicalDenialDoesNotInvokePhysicalReclamation) {
+  ASSERT_NO_FATAL_FAILURE(UseDeferredBacking());
+  IREE_ASSERT_OK(Compile(0, "raw"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool_, loom_runtime_pool_state_geometry(storage_owner_), 2 * kSlabBytes,
+      256, &state_statistics_, &state_));
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_commit(state_, 0, 2 * kSlabBytes));
+  loom_runtime_memory_pool_set_reclaimer(
+      pool_, {nullptr, [](void*, uint64_t) {
+                return iree_make_status(IREE_STATUS_UNAVAILABLE,
+                                        "parameter capacity reclaim failed");
+              }});
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    loom_runtime_residency_admission_t admission;
+    IREE_ASSERT_OK(
+        loom_runtime_residency_try_admit(residencies_[0], &admission));
+    EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_CAPACITY);
+    const auto snapshot = loom_runtime_residency_snapshot(residencies_[0]);
+    EXPECT_FALSE(snapshot.active);
+    EXPECT_EQ(snapshot.pin_count, 0u);
+    EXPECT_FALSE(loom_runtime_residency_group_is_pinned(parameter_groups_[0]));
+    EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).activations, 0u);
+    EXPECT_EQ(loom_runtime_weights_statistics(plans_[0]).committed_bytes, 0u);
+    EXPECT_EQ(state_statistics_.committed_bytes, 2 * kSlabBytes);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Elastic, RejectedAdmissionWeightsTest,
+                         ::testing::Values(true));
+
+}  // namespace loom_runtime::testing

@@ -10,9 +10,9 @@
 #include "iree/base/internal/json.h"
 #include "iree/base/internal/unicode.h"
 
-static loom_serve_pool_options_t loom_serve_device_configuration_defaults(
+static loom_runtime_pool_options_t loom_serve_device_configuration_defaults(
     void) {
-  return (loom_serve_pool_options_t){
+  return (loom_runtime_pool_options_t){
       .elastic = true,
       .weight_slab_size = UINT64_C(1) << 30,
       .state_slab_size = UINT64_C(64) << 20,
@@ -134,7 +134,7 @@ static iree_status_t loom_serve_device_configuration_entry(
                             IREE_HAL_TOPOLOGY_MAX_DEVICE_COUNT);
   }
   const iree_host_size_t index = configuration->count;
-  loom_serve_device_options_t* options = &configuration->options[index];
+  loom_runtime_device_options_t* options = &configuration->options[index];
   IREE_RETURN_IF_ERROR(
       loom_serve_device_configuration_name(parser, key, &options->name));
   for (iree_host_size_t i = 0; i < index; ++i) {
@@ -208,14 +208,14 @@ typedef struct loom_serve_device_configuration_placement_t {
   // Decoded device inventory and string storage owned by configuration parsing.
   loom_serve_device_configuration_parser_t* parser;
   // Single explicit selector; AUTOMATIC marks an empty object during parsing.
-  loom_serve_pool_placement_t value;
+  loom_runtime_pool_placement_t value;
 } loom_serve_device_configuration_placement_t;
 
 static iree_status_t loom_serve_device_configuration_placement(
     void* self, iree_string_view_t key, iree_json_value_type_t type,
     iree_string_view_t value) {
   loom_serve_device_configuration_placement_t* placement = self;
-  if (placement->value.kind != LOOM_SERVE_POOL_PLACEMENT_AUTOMATIC) {
+  if (placement->value.kind != LOOM_RUNTIME_POOL_PLACEMENT_AUTOMATIC) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "placement requires exactly one selector");
   }
@@ -226,7 +226,7 @@ static iree_status_t loom_serve_device_configuration_placement(
         placement->parser, value, &name));
     IREE_RETURN_IF_ERROR(loom_serve_device_configuration_find_device(
         placement->parser->configuration, name, &placement->value.ordinal));
-    placement->value.kind = LOOM_SERVE_POOL_PLACEMENT_DEVICE;
+    placement->value.kind = LOOM_RUNTIME_POOL_PLACEMENT_DEVICE;
   } else if (iree_string_view_equal(key, IREE_SV("host_numa")) &&
              type == IREE_JSON_VALUE_TYPE_NUMBER) {
     uint64_t ordinal = 0;
@@ -235,7 +235,7 @@ static iree_status_t loom_serve_device_configuration_placement(
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "host NUMA node exceeds the OS node namespace");
     }
-    placement->value.kind = LOOM_SERVE_POOL_PLACEMENT_HOST_NUMA;
+    placement->value.kind = LOOM_RUNTIME_POOL_PLACEMENT_HOST_NUMA;
     placement->value.ordinal = (uint32_t)ordinal;
   } else {
     return iree_make_status(
@@ -283,7 +283,7 @@ static iree_status_t loom_serve_device_configuration_pool(
         (int)pool.binding.name.size, pool.binding.name.data);
   }
   pool.binding.device_mask = members.mask;
-  loom_serve_pool_options_t* options = &pool.options;
+  loom_runtime_pool_options_t* options = &pool.options;
   if (fields.values[7].data) {
     loom_serve_device_configuration_placement_t placement = {.parser = parser};
     IREE_RETURN_IF_ERROR(
@@ -292,7 +292,7 @@ static iree_status_t loom_serve_device_configuration_pool(
             &placement),
         "pool '%.*s' placement", (int)pool.binding.name.size,
         pool.binding.name.data);
-    if (placement.value.kind == LOOM_SERVE_POOL_PLACEMENT_AUTOMATIC) {
+    if (placement.value.kind == LOOM_RUNTIME_POOL_PLACEMENT_AUTOMATIC) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "pool placement requires one selector");
     }
@@ -347,7 +347,7 @@ static iree_status_t loom_serve_device_configuration_pool(
       configuration->host_allocator, index + 1, sizeof(*configuration->idle),
       (void**)&configuration->idle));
   configuration->pools[index] = pool;
-  configuration->idle[index] = (loom_serve_pool_idle_policy_t){
+  configuration->idle[index] = (loom_runtime_pool_idle_policy_t){
       .workspace_timeout = (iree_duration_t)numbers[3] * 1000000,
       .parameter_timeout = (iree_duration_t)numbers[4] * 1000000};
   ++configuration->pool_count;

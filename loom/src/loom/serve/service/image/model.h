@@ -7,9 +7,9 @@
 #ifndef LOOM_SERVE_SERVICE_IMAGE_MODEL_H_
 #define LOOM_SERVE_SERVICE_IMAGE_MODEL_H_
 
-#include "loom/serve/runtime/device/device.h"
-#include "loom/serve/runtime/program/compilation.h"
-#include "loom/serve/runtime/program/sources.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/program/compilation.h"
+#include "loom/runtime/program/sources.h"
 #include "loom/serve/service/image/generator.h"
 
 #ifdef __cplusplus
@@ -22,7 +22,7 @@ typedef struct loom_serve_image_model_t loom_serve_image_model_t;
 
 typedef struct loom_serve_image_model_options_t {
   // Explicit program inputs and local base, borrowed through load completion.
-  loom_serve_sources_t sources;
+  loom_runtime_sources_t sources;
   // Checkpoint asset directory, passed to the source bootstrap.
   iree_string_view_t checkpoint_directory;
   // Optional adapter asset, interpreted by the source bootstrap.
@@ -39,7 +39,7 @@ typedef struct loom_serve_image_model_options_t {
   // Cuts occur only at full barriers, never within an indivisible wave.
   uint32_t command_quantum;
   // Bounds reusable request code without restricting one active image.
-  loom_serve_variant_cache_options_t specialization_cache;
+  loom_runtime_variant_cache_options_t specialization_cache;
 } loom_serve_image_model_options_t;
 
 // Owner-driven preparation. Private CPU/JIT work runs on the shared host;
@@ -55,7 +55,7 @@ typedef void (*loom_serve_image_load_wake_fn_t)(void* user_data);
 // I/O or work submission. Options' views are borrowed, not copied. A registered
 // but drained deployment can defer creating this operation altogether.
 iree_status_t loom_serve_image_load_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_image_model_options_t* options,
     loom_serve_image_load_wake_fn_t wake, void* user_data,
     iree_allocator_t host_allocator, loom_serve_image_load_t** out_load);
@@ -77,7 +77,7 @@ iree_status_t loom_serve_image_load_advance(loom_serve_image_load_t* load,
 
 // Terminal-only queries. Evidence is borrowed until take_model or destruction;
 // take_model transfers a successfully prepared, still-unactivated model.
-const loom_serve_compilation_report_t* loom_serve_image_load_report(
+const loom_runtime_compilation_report_t* loom_serve_image_load_report(
     const loom_serve_image_load_t* load);
 loom_serve_image_model_t* loom_serve_image_load_take_model(
     loom_serve_image_load_t* load);
@@ -151,7 +151,7 @@ iree_status_t loom_serve_image_load_free(loom_serve_image_load_t* load);
 // evidence is available through load_report; this wrapper performs no
 // process-global output.
 iree_status_t loom_serve_image_model_allocate(
-    loom_serve_device_t* device, loom_serve_pool_t* pool,
+    loom_runtime_device_t* device, loom_runtime_pool_t* pool,
     const loom_serve_image_model_options_t* options,
     iree_allocator_t host_allocator, loom_serve_image_model_t** out_model);
 
@@ -193,11 +193,11 @@ iree_status_t loom_serve_image_model_deactivate(loom_serve_image_model_t* model,
 // Borrowed admission for the selected invocation, valid until its release.
 // Without a selected invocation this returns the original cold working set.
 // Model-wide retention policy is applied with model_set_pinned below.
-loom_serve_residency_t* loom_serve_image_model_residency(
+loom_runtime_residency_t* loom_serve_image_model_residency(
     const loom_serve_image_model_t* model);
 
 // Model-wide checkpoint accounting and policy, including idle cached banks.
-loom_serve_residency_snapshot_t loom_serve_image_model_parameters(
+loom_runtime_residency_snapshot_t loom_serve_image_model_parameters(
     const loom_serve_image_model_t* model);
 void loom_serve_image_model_set_pinned(loom_serve_image_model_t* model,
                                        bool pinned);
@@ -232,7 +232,7 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
 // Returns source work/compatibility facts and owned bytes, or zeros on failure.
 iree_status_t loom_serve_image_model_prepare_request(
     loom_serve_image_model_t* model, const loom_serve_image_request_t* request,
-    loom_serve_prepared_request_t* out_prepared);
+    loom_service_prepared_request_t* out_prepared);
 
 // CPU-only preparation of one compatible cohort in stable client order. The
 // caller supplies protocol-validated F32 RGB byte lengths in the same order.
@@ -241,14 +241,14 @@ iree_status_t loom_serve_image_model_prepare_request(
 // Prepared request bytes remain caller-owned and can be released on return.
 iree_status_t loom_serve_image_model_prepare_batch(
     loom_serve_image_model_t* model, iree_host_size_t count,
-    const loom_serve_prepared_request_t* requests,
+    const loom_service_prepared_request_t* requests,
     const iree_host_size_t* output_lengths,
     loom_service_image_prepared_t* out_prepared);
 
 // Installs the serialized owner's nonblocking compilation wake. Detachment
 // follows terminal advance of all accepted preparation work.
 void loom_serve_image_model_set_observer(loom_serve_image_model_t* model,
-                                         loom_serve_wake_callback_t observer);
+                                         loom_runtime_wake_callback_t observer);
 
 // Resolves the prepared invocation's captured executables before admission.
 // Cancellation retires accepted compilation but submits no device work. The
@@ -267,7 +267,7 @@ void loom_serve_image_model_discard_batch(loom_serve_image_model_t* model);
 // outer-owner destruction; no host wait occurs.
 iree_status_t loom_serve_image_model_submit(
     loom_serve_image_model_t* model, loom_serve_image_submit_flags_t flags,
-    loom_serve_execution_frontier_t* out_frontier, bool* out_complete);
+    loom_runtime_execution_frontier_t* out_frontier, bool* out_complete);
 
 // Consumes successful completion of both terminal frontiers on the scheduler
 // owner. Releases the request payload and residency pin. Returned F32 CHW RGB

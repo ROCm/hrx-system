@@ -11,6 +11,7 @@
 
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/tooling/device_profiling.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/router.h"
@@ -328,9 +329,10 @@ int loom_serve_main(int argc, char** argv,
   if (iree_status_is_ok(status)) {
     status = iree_async_signal_ignore_broken_pipe();
   }
-  loom_serve_device_group_t* group = NULL;
+  loom_runtime_device_group_t* group = NULL;
+  iree_hal_profiling_from_flags_t* profiling = NULL;
   loom_serve_device_configuration_t devices = {0};
-  loom_serve_host_t* host = NULL;
+  loom_runtime_host_t* host = NULL;
   loom_serve_http_server_t* server = NULL;
   loom_serve_http_listener_t** listeners = NULL;
   loom_serve_signals_t* signals = NULL;
@@ -346,7 +348,8 @@ int loom_serve_main(int argc, char** argv,
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_device_group_allocate_from_flags(
-        host, configuration->driver_registry, host_allocator, &devices, &group);
+        host, configuration->driver_registry, host_allocator, &devices, &group,
+        &profiling);
   }
   if (iree_status_is_ok(status)) {
     registration_options.device_group = group;
@@ -370,12 +373,13 @@ int loom_serve_main(int argc, char** argv,
     options.allowed_origins = FLAG_http_allowed_origin_list();
     options.request_limits.body_byte_capacity =
         (iree_host_size_t)FLAG_request_body_bytes;
-    status = loom_serve_http_server_allocate(
-        loom_serve_host_proactor_pool(host), &options, host_allocator, &server);
+    status =
+        loom_serve_http_server_allocate(loom_runtime_host_proactor_pool(host),
+                                        &options, host_allocator, &server);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_signals_allocate(
-        loom_serve_host_proactor_pool(host),
+        loom_runtime_host_proactor_pool(host),
         (iree_async_signal_callback_t){loom_serve_main_shutdown_requested,
                                        server},
         host_allocator, &signals);
@@ -395,7 +399,7 @@ int loom_serve_main(int argc, char** argv,
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_router_run(
-        loom_serve_host_executor(host), server, registry,
+        loom_runtime_host_executor(host), server, registry,
         (loom_serve_router_options_t){
             .request_quota = (iree_host_size_t)FLAG_connections,
             .resources = {.device_group = group,
@@ -421,12 +425,14 @@ int loom_serve_main(int argc, char** argv,
   // A failed platform release retains its parents until process exit. It does
   // not authorize destroying a shared device or invalidating borrowed names.
   if (!retained_resources) {
-    iree_status_t group_status = loom_serve_device_group_free(group);
+    status =
+        iree_status_join(status, iree_hal_end_profiling_from_flags(profiling));
+    iree_status_t group_status = loom_runtime_device_group_free(group);
     retained_resources = !iree_status_is_ok(group_status);
     status = iree_status_join(status, group_status);
   }
   if (!retained_resources) {
-    loom_serve_host_release(host);
+    loom_runtime_host_release(host);
   }
   loom_serve_device_configuration_deinitialize(&devices);
   for (iree_host_size_t i = 0; configurations && i < models.count; ++i) {

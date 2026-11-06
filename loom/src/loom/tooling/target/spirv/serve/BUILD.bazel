@@ -28,7 +28,7 @@ loom_cc_library(
     deps = [
         "//loom/binding/c/target/spirv",
         "//loom/binding/c/target/spirv:iree_hal",
-        "//loom/src/loom/serve/testing:compiler",
+        "//loom/src/loom/runtime/testing:compiler",
     ],
     alwayslink = True,
 )
@@ -55,7 +55,7 @@ loom_cc_library(
         "//runtime/config/hal:driver_vulkan",
     ]),
     deps = [
-        "//loom/src/loom/serve/testing:device",
+        "//loom/src/loom/runtime/testing:device",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/vulkan/registration",
@@ -75,7 +75,7 @@ loom_cc_test(
     ]),
     deps = [
         ":test_device",
-        "//loom/src/loom/serve/runtime/storage:memory_tests",
+        "//loom/src/loom/runtime/storage:memory_tests",
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
@@ -90,18 +90,18 @@ loom_cc_test(
     ]),
     deps = [
         ":test_device",
-        "//loom/src/loom/serve/runtime/execution:queues_tests",
+        "//loom/src/loom/runtime/execution:queues_tests",
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
 
 loom_cc_test(
     name = "control_test",
-    srcs = ["//loom/src/loom/serve/runtime/program:control_test.cc"],
-    args = ["--control_sources=$(rootpath //loom/src/loom/serve/runtime/program:testdata/control/kernels.loom)"],
+    srcs = ["//loom/src/loom/runtime/program:control_test.cc"],
+    args = ["--control_sources=$(rootpath //loom/src/loom/runtime/program:testdata/control/kernels.loom)"],
     data = [
-        "//loom/src/loom/serve/runtime/program:testdata/control/control.loom",
-        "//loom/src/loom/serve/runtime/program:testdata/control/kernels.loom",
+        "//loom/src/loom/runtime/program:testdata/control/control.loom",
+        "//loom/src/loom/runtime/program:testdata/control/kernels.loom",
     ],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = [
@@ -117,14 +117,14 @@ loom_cc_test(
         ":test_compiler",
         ":test_device",
         "//loom/binding/c:loomc",
-        "//loom/src/loom/serve/runtime/execution",
-        "//loom/src/loom/serve/runtime/execution:queues",
-        "//loom/src/loom/serve/runtime/execution:workspace",
-        "//loom/src/loom/serve/runtime/host",
-        "//loom/src/loom/serve/runtime/program:jit",
-        "//loom/src/loom/serve/runtime/program:module",
-        "//loom/src/loom/serve/testing:compiler",
-        "//loom/src/loom/serve/testing:device",
+        "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/execution:queues",
+        "//loom/src/loom/runtime/execution:workspace",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/program:jit",
+        "//loom/src/loom/runtime/program:module",
+        "//loom/src/loom/runtime/testing:compiler",
+        "//loom/src/loom/runtime/testing:device",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
@@ -153,7 +153,7 @@ loom_cc_test(
     deps = [
         ":test_compiler",
         ":test_device",
-        "//loom/src/loom/serve/service/finite:component_tests",
+        "//loom/src/loom/service/finite:component_tests",
         "//runtime/src/iree/testing:gtest_main",
     ],
 )

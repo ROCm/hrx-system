@@ -37,7 +37,7 @@ With the corresponding compiler targets, HAL drivers and hardware available:
 
 ```sh
 iree-bazel-test --config=asan \
-  //loom/src/loom/serve/service/finite/decision:protocol_test \
+  //loom/src/loom/service/finite/decision:protocol_test \
   //loom/src/loom/tooling/target/cpu/serve:source_decision_service_test \
   //loom/src/loom/tooling/target/amdgpu/serve:source_decision_service_test \
   //loom/src/loom/tooling/target/spirv/serve:source_decision_service_test

@@ -13,8 +13,9 @@
 #include "loom/serve/media/audio_decoder.h"
 #include "loom/serve/media/audio_resampler.h"
 #include "loom/serve/media/audio_source.h"
-#include "loom/serve/service/kind.h"
+#include "loom/serve/service/endpoint.h"
 #include "loom/serve/service/recognition/transcription.h"
+#include "loom/service/kind.h"
 #include "loom/service/telemetry/record.h"
 #include "loom/util/json.h"
 
@@ -97,7 +98,7 @@ struct loom_serve_recognition_service_t {
     // Serializes completion publication with the serving owner.
     iree_slim_mutex_t mutex;
     // Nonblocking owner wake installed before the first task.
-    loom_serve_wake_callback_t observer;
+    loom_runtime_wake_callback_t observer;
     // The accepted conversion task no longer borrows its row or process
     // storage.
     bool ready;
@@ -426,12 +427,12 @@ static void loom_serve_transcription_decode(
 static iree_status_t loom_serve_transcription_accept(
     void* self, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request,
-    loom_serve_service_flags_t flags) {
+    loom_runtime_service_flags_t flags) {
   loom_serve_recognition_service_t* service = self;
   loom_serve_recognition_job_t pending =
       loom_serve_recognition_request_begin(service);
   pending.connection = connection;
-  if (service->stopping || (flags & LOOM_SERVE_SERVICE_FLAG_STOPPING)) {
+  if (service->stopping || (flags & LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
     return loom_serve_transcription_reject(
         service, &pending, "503 Service Unavailable", iree_ok_status(),
         IREE_SV("transcription is stopping"));
@@ -509,10 +510,10 @@ static iree_status_t loom_serve_transcription_deliver(
 }
 
 static iree_status_t loom_serve_recognition_advance(
-    void* self, loom_serve_service_flags_t flags, bool* out_progress) {
+    void* self, loom_runtime_service_flags_t flags, bool* out_progress) {
   loom_serve_recognition_service_t* service = self;
   *out_progress = false;
-  service->stopping |= (flags & LOOM_SERVE_SERVICE_FLAG_STOPPING) != 0;
+  service->stopping |= (flags & LOOM_RUNTIME_SERVICE_FLAG_STOPPING) != 0;
   iree_slim_mutex_lock(&service->events.mutex);
   const bool ready = service->events.ready;
   iree_status_t cpu_status = iree_ok_status();
@@ -642,7 +643,7 @@ static iree_status_t loom_serve_recognition_advance(
     bool progress = false;
     status = loom_serve_recognition_stream_service_advance(
         service->streams, service->stopping,
-        (flags & LOOM_SERVE_SERVICE_FLAG_SHARED_ACTIVITY) != 0, &progress);
+        (flags & LOOM_RUNTIME_SERVICE_FLAG_SHARED_ACTIVITY) != 0, &progress);
     *out_progress |= progress;
   }
   if (iree_status_is_ok(status) && !service->stopping && !service->cpu.row) {
@@ -653,7 +654,7 @@ static iree_status_t loom_serve_recognition_advance(
 }
 
 static void loom_serve_recognition_set_observer(
-    void* self, loom_serve_wake_callback_t observer) {
+    void* self, loom_runtime_wake_callback_t observer) {
   loom_serve_recognition_service_t* service = self;
   iree_slim_mutex_lock(&service->events.mutex);
   service->events.observer = observer;
@@ -668,20 +669,24 @@ static bool loom_serve_recognition_is_active(void* self) {
          loom_serve_recognition_stream_service_is_active(service->streams);
 }
 
-static bool loom_serve_recognition_is_pending(void* self) {
+static bool loom_serve_recognition_has_requests(void* self) {
   loom_serve_recognition_service_t* service = self;
   for (iree_host_size_t i = 0; i < service->capacity; ++i) {
     if (service->rows[i].id) {
       return true;
     }
   }
-  return loom_serve_recognition_is_active(service);
+  return false;
 }
 
-static loom_serve_service_snapshot_t loom_serve_recognition_snapshot(
-    void* self) {
+static bool loom_serve_recognition_is_pending(void* self) {
+  return loom_serve_recognition_has_requests(self) ||
+         loom_serve_recognition_is_active(self);
+}
+
+static loom_service_snapshot_t loom_serve_recognition_snapshot(void* self) {
   loom_serve_recognition_service_t* service = self;
-  loom_serve_service_snapshot_t snapshot = {.phase = "idle"};
+  loom_service_snapshot_t snapshot = {.phase = "idle"};
   const iree_time_t now = iree_time_now();
   for (iree_host_size_t i = 0; i < service->capacity; ++i) {
     const loom_serve_recognition_job_t* row = &service->rows[i];
@@ -706,6 +711,13 @@ static loom_serve_service_snapshot_t loom_serve_recognition_snapshot(
 
 loom_serve_service_t loom_serve_recognition_service_interface(
     loom_serve_recognition_service_t* service) {
+  static const loom_runtime_service_vtable_t vtable = {
+      .set_observer = loom_serve_recognition_set_observer,
+      .has_requests = loom_serve_recognition_has_requests,
+      .is_pending = loom_serve_recognition_is_pending,
+      .is_active = loom_serve_recognition_is_active,
+      .advance = loom_serve_recognition_advance,
+  };
   static const iree_string_view_t input[] = {IREE_SVL("audio")};
   static const iree_string_view_t output[] = {IREE_SVL("text"),
                                               IREE_SVL("activity")};
@@ -716,23 +728,20 @@ loom_serve_service_t loom_serve_recognition_service_interface(
   };
   return (loom_serve_service_t){
       .name = service->options.name,
-      .self = service,
-      .set_observer = loom_serve_recognition_set_observer,
-      .is_pending = loom_serve_recognition_is_pending,
-      .is_active = loom_serve_recognition_is_active,
-      .accept = service->options.kind == LOOM_SERVE_MODEL_KIND_RECOGNITION
+      .runtime = {.self = service,
+                  .vtable = &vtable,
+                  .capacity_domain = service->generator.capacity_domain},
+      .accept = service->options.kind == LOOM_SERVICE_KIND_RECOGNITION
                     ? loom_serve_transcription_accept
                     : NULL,
       .try_open_recognition = loom_serve_recognition_try_open,
-      .advance = loom_serve_recognition_advance,
       .tokenizer = service->generator.tokenizer,
       .kind = service->options.kind,
-      .endpoint = loom_serve_model_kind_endpoint(service->options.kind),
+      .endpoint = loom_serve_service_endpoint(service->options.kind),
       .capabilities = {.input_modalities = {IREE_ARRAYSIZE(input), input},
                        .output_modalities =
                            outputs[service->generator.outputs]},
       .snapshot = loom_serve_recognition_snapshot,
-      .capacity_domain = service->generator.capacity_domain,
       .telemetry = {.stream = service->telemetry,
                     .counters = &service->counters,
                     .latency = &service->latency}};
@@ -756,25 +765,25 @@ void loom_serve_recognition_service_free(
 }
 
 iree_status_t loom_serve_recognition_service_allocate(
-    loom_serve_host_t* host, loom_serve_recognition_generator_t generator,
+    loom_runtime_host_t* host, loom_serve_recognition_generator_t generator,
     const loom_serve_recognition_service_options_t* options,
     loom_runtime_telemetry_stream_t* telemetry, iree_allocator_t host_allocator,
     loom_serve_recognition_service_t** out_service) {
   *out_service = NULL;
-  if (options->kind != LOOM_SERVE_MODEL_KIND_RECOGNITION &&
-      options->kind != LOOM_SERVE_MODEL_KIND_ACTIVITY) {
+  if (options->kind != LOOM_SERVICE_KIND_RECOGNITION &&
+      options->kind != LOOM_SERVICE_KIND_ACTIVITY) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "recognition owner requires recognition or "
                             "activity deployment kind");
   }
   const loom_serve_recognition_output_flags_t required =
-      options->kind == LOOM_SERVE_MODEL_KIND_RECOGNITION
+      options->kind == LOOM_SERVICE_KIND_RECOGNITION
           ? LOOM_SERVE_RECOGNITION_OUTPUT_TRANSCRIPT
           : LOOM_SERVE_RECOGNITION_OUTPUT_ACTIVITY;
   if (!(generator.outputs & required)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "source outputs do not support '%s' deployment",
-                            loom_serve_model_kind_name(options->kind));
+                            loom_service_kind_name(options->kind));
   }
   if (!options->name.size || !options->pending_capacity ||
       !options->decode_frames || !options->conversion_limit ||
@@ -798,7 +807,7 @@ iree_status_t loom_serve_recognition_service_allocate(
   service->host_allocator = host_allocator;
   service->options = *options;
   service->generator = generator;
-  service->executor = loom_serve_host_executor(host);
+  service->executor = loom_runtime_host_executor(host);
   service->telemetry = telemetry;
   service->capacity = generator.request_capacity + options->pending_capacity;
   iree_slim_mutex_initialize(&service->events.mutex);

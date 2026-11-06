@@ -25,7 +25,7 @@ struct loom_serve_model_resolution_t {
   // Terminal callback has relinquished all borrowed configuration access.
   bool ready;
   // Borrowed serialized-owner notification, never an inline model operation.
-  loom_serve_wake_callback_t observer;
+  loom_runtime_wake_callback_t observer;
 };
 
 static void loom_serve_model_resolution_execute(loomc_task_t* task,
@@ -55,7 +55,7 @@ static const loomc_task_vtable_t model_resolution_vtable = {
 iree_status_t loom_serve_model_resolution_start(
     loomc_task_sink_t sink,
     const loom_serve_model_configuration_t* configuration,
-    loom_serve_wake_callback_t observer, iree_allocator_t host_allocator,
+    loom_runtime_wake_callback_t observer, iree_allocator_t host_allocator,
     loom_serve_model_resolution_t** out_resolution) {
   *out_resolution = NULL;
   loom_serve_model_resolution_t* resolution = NULL;
@@ -72,7 +72,7 @@ iree_status_t loom_serve_model_resolution_start(
     *out_resolution = resolution;
   } else {
     // Rejected submissions retain exclusive task ownership and owe no wake.
-    resolution->observer = (loom_serve_wake_callback_t){0};
+    resolution->observer = (loom_runtime_wake_callback_t){0};
     loomc_task_destroy(&resolution->task);
     iree_slim_mutex_deinitialize(&resolution->mutex);
     iree_allocator_free(host_allocator, resolution);

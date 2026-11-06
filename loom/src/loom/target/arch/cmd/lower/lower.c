@@ -17,9 +17,9 @@
 #include "loom/ops/command/ops.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/low/ops.h"
+#include "loom/runtime/command/program.h"
 #include "loom/target/arch/cmd/abi_layout.h"
 #include "loom/target/arch/cmd/descriptors/descriptors.h"
-#include "loom/target/arch/cmd/program.h"
 #include "loom/target/types.h"
 
 typedef struct loom_cmd_lower_constant_t {

@@ -17,10 +17,10 @@
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/runtime/command/format.h"
+#include "loom/runtime/command/program.h"
 #include "loom/target/arch/cmd/abi_layout.h"
 #include "loom/target/arch/cmd/descriptors/descriptors.h"
-#include "loom/target/arch/cmd/format.h"
-#include "loom/target/arch/cmd/program.h"
 #include "loom/target/registers.h"
 
 enum { LOOM_CMD_SERIALIZE_INITIAL_CAPACITY = 32 };

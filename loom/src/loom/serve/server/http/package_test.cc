@@ -30,7 +30,7 @@ class HttpPackageTest : public ::testing::Test {
 
   iree_status_t Parse(const std::string& body, iree_allocator_t host_allocator,
                       iree_string_view_t* json,
-                      loom_serve_package_t** package) {
+                      loom_runtime_package_t** package) {
     ReleaseRequest();
     *json = iree_string_view_empty();
     *package = nullptr;
@@ -67,15 +67,15 @@ TEST_F(HttpPackageTest, ArbitraryPartOrderAndOwnedBinaryPayload) {
       Part("file", "model/provider.loombc", bytes) +
       Part("request", "model/model.json", "{\"model\":\"demo\"}") + "--b--\r\n";
   iree_string_view_t json;
-  loom_serve_package_t* package = nullptr;
+  loom_runtime_package_t* package = nullptr;
   IREE_ASSERT_OK(Parse(body, iree_allocator_system(), &json, &package));
   EXPECT_EQ(std::string(json.data, json.size), "{\"model\":\"demo\"}");
   ReleaseRequest();
   body.assign(body.size(), '?');
   loomc_source_t* source = nullptr;
   IREE_ASSERT_OK(
-      loom_serve_package_open(package, IREE_SV("provider.loombc"), &source));
-  loom_serve_package_release(package);
+      loom_runtime_package_open(package, IREE_SV("provider.loombc"), &source));
+  loom_runtime_package_release(package);
   const auto contents = loomc_source_contents(source);
   EXPECT_EQ(std::string(reinterpret_cast<const char*>(contents.data),
                         contents.data_length),
@@ -104,12 +104,12 @@ TEST_F(HttpPackageTest, ManyProvidersHaveBoundedAllocationAndExactContents) {
   }
   body += "--b--\r\n";
   iree_string_view_t json;
-  loom_serve_package_t* package = nullptr;
+  loom_runtime_package_t* package = nullptr;
   IREE_ASSERT_OK(Parse(body, bounded_allocator, &json, &package));
   for (int i = 0; i < 128; ++i) {
     const std::string name = "provider" + std::to_string(i) + ".loombc";
     loomc_source_t* source = nullptr;
-    IREE_ASSERT_OK(loom_serve_package_open(
+    IREE_ASSERT_OK(loom_runtime_package_open(
         package, iree_make_cstring_view(name.c_str()), &source));
     const auto contents = loomc_source_contents(source);
     EXPECT_EQ(std::string(reinterpret_cast<const char*>(contents.data),
@@ -117,7 +117,7 @@ TEST_F(HttpPackageTest, ManyProvidersHaveBoundedAllocationAndExactContents) {
               std::to_string(i) + std::string("\0\xff\r\n", 4));
     loomc_source_release(source);
   }
-  loom_serve_package_release(package);
+  loom_runtime_package_release(package);
 }
 
 TEST_F(HttpPackageTest, InvalidPackagePublishesNothing) {
@@ -133,7 +133,7 @@ TEST_F(HttpPackageTest, InvalidPackagePublishesNothing) {
        }) {
     SCOPED_TRACE(body);
     iree_string_view_t json;
-    loom_serve_package_t* package = nullptr;
+    loom_runtime_package_t* package = nullptr;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
         Parse(body, iree_allocator_system(), &json, &package));
@@ -145,7 +145,7 @@ TEST_F(HttpPackageTest, InvalidPackagePublishesNothing) {
 TEST_F(HttpPackageTest, OrdinaryJsonHasNoPackage) {
   const loom_serve_http_request_t request = {.body = IREE_SV("{}")};
   iree_string_view_t json;
-  loom_serve_package_t* package = nullptr;
+  loom_runtime_package_t* package = nullptr;
   IREE_ASSERT_OK(loom_serve_http_package_parse(
       &request, iree_allocator_system(), &json, &package));
   EXPECT_EQ(package, nullptr);

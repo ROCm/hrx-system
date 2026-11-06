@@ -15,15 +15,15 @@
 #include "iree/io/file_contents.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
-#include "loom/serve/runtime/host/host.h"
+#include "loom/runtime/device/device.h"
+#include "loom/runtime/host/host.h"
+#include "loom/runtime/testing/application.h"
 #include "loom/serve/server/configuration.h"
 #include "loom/serve/server/model_registration.h"
 #include "loom/serve/server/registry.h"
-#include "loom/serve/server/resources.h"
 #include "loom/serve/service/recognition/stream.h"
 #include "loom/serve/service/recognition/transcription.h"
 #include "loom/serve/testing/http_harness.h"
-#include "loom/serve/testing/service_application.h"
 #include "loom/serve/transport/http/listener.h"
 #include "loom/serve/transport/http/server.h"
 #include "loom/service/telemetry/record.h"
@@ -103,16 +103,16 @@ class RegistryRecognitionTest : public ::testing::Test {
       iree_unaligned_store_le_f32(samples_.data() + i * sizeof(float),
                                   static_cast<float>(sample) / 32768.0f);
     }
-    auto options = loom_serve_test_application_options_default();
+    auto options = loom_runtime_test_application_options_default();
     options.worker_count = FLAG_test_workers;
-    IREE_ASSERT_OK(loom_serve_test_application_acquire(&options, allocator_,
-                                                       &application_));
+    IREE_ASSERT_OK(loom_runtime_test_application_acquire(&options, allocator_,
+                                                         &application_));
     registration_options_.device_group =
-        loom_serve_test_application_device_group(application_);
+        loom_runtime_test_application_device_group(application_);
     const auto transport = loom_serve_http_server_options_default();
     IREE_ASSERT_OK(loom_serve_http_server_allocate(
-        loom_serve_host_proactor_pool(
-            loom_serve_test_application_host(application_)),
+        loom_runtime_host_proactor_pool(
+            loom_runtime_test_application_host(application_)),
         &transport, allocator_, &server_));
     auto listener = loom_serve_http_listener_options_default();
     listener.address = IREE_SV("127.0.0.1:0");
@@ -140,10 +140,8 @@ class RegistryRecognitionTest : public ::testing::Test {
       reader_.join();
     }
     iree_status_free(read_status_);
-    const loom_serve_resources_t resources = {
-        .device_group = registration_options_.device_group,
-    };
-    loom_serve_resources_set_observer(&resources, {});
+    loom_runtime_device_group_set_observer(registration_options_.device_group,
+                                           {});
     IREE_EXPECT_OK(loom_serve_http_listener_free(listener_));
     loom_serve_http_server_free(server_);
   }
@@ -171,26 +169,25 @@ class RegistryRecognitionTest : public ::testing::Test {
   template <typename Predicate>
   void AdvanceUntil(Predicate ready) {
     auto* notification = loom_serve_http_server_notification(server_);
-    const loom_serve_wake_callback_t wake = {
+    const loom_runtime_wake_callback_t wake = {
         [](void* self) {
           iree_notification_post(static_cast<iree_notification_t*>(self),
                                  IREE_ALL_WAITERS);
         },
         notification};
-    const loom_serve_resources_t resources = {
-        .device_group = registration_options_.device_group,
-    };
-    loom_serve_resources_set_observer(&resources, wake);
+    loom_runtime_device_group_set_observer(registration_options_.device_group,
+                                           wake);
     while (!ready()) {
       const auto ticket = iree_notification_prepare_wait(notification);
       bool progress = false;
-      iree_status_t status = loom_serve_resources_advance(&resources);
+      iree_status_t status =
+          loom_runtime_device_group_advance(registration_options_.device_group);
       if (Model()->phase == LOOM_SERVE_REGISTRATION_READY) {
         auto& service = Model()->service;
         status = iree_status_join(
-            status, service.advance(service.self,
-                                    loom_serve_registry_service_flags(Model()),
-                                    &progress));
+            status, service.runtime.vtable->advance(
+                        service.runtime.self,
+                        loom_serve_registry_service_flags(Model()), &progress));
       }
       bool registry_progress = false;
       if (iree_status_is_ok(status)) {
@@ -315,15 +312,15 @@ class RegistryRecognitionTest : public ::testing::Test {
     loom_serve_http_connection_t* connection = nullptr;
     const loom_serve_http_request_t* request = nullptr;
     IREE_ASSERT_OK(http_.TakeRequest(client.get(), &connection, &request));
-    IREE_ASSERT_OK(
-        Model()->service.accept(Model()->service.self, connection, request, 0));
+    IREE_ASSERT_OK(Model()->service.accept(Model()->service.runtime.self,
+                                           connection, request, 0));
     reader_ = std::thread([this, descriptor = client.release()] {
       read_status_ = http_.Read(descriptor, false, &response_);
     });
   }
 
   // Process-owned shared application, borrowed through registry retirement.
-  loom_serve_test_application_t* application_ = nullptr;
+  loom_runtime_test_application_t* application_ = nullptr;
   // Allocator for registry metadata and caller-owned input/output.
   iree_allocator_t allocator_ = iree_allocator_system();
   // Physical model factory borrowed through registry destruction.
@@ -495,12 +492,12 @@ TEST_F(RegistryRecognitionTest, InvalidOptionsLeaveAdmissionAvailable) {
 class RegistryActivityTest : public RegistryRecognitionTest {
  protected:
   void Configure(loom_serve_model_configuration_t* configuration) override {
-    configuration->kind = LOOM_SERVE_MODEL_KIND_ACTIVITY;
+    configuration->kind = LOOM_SERVICE_KIND_ACTIVITY;
   }
 };
 
 TEST_F(RegistryActivityTest, CompoundOutputSurvivesDrainAndReplacement) {
-  EXPECT_EQ(Model()->service.kind, LOOM_SERVE_MODEL_KIND_ACTIVITY);
+  EXPECT_EQ(Model()->service.kind, LOOM_SERVICE_KIND_ACTIVITY);
   EXPECT_EQ(Model()->service.endpoint, nullptr);
   EXPECT_EQ(Model()->service.accept, nullptr);
   EXPECT_EQ(Model()->service.capabilities.output_modalities.count, 0u);
@@ -508,7 +505,7 @@ TEST_F(RegistryActivityTest, CompoundOutputSurvivesDrainAndReplacement) {
   IREE_ASSERT_OK(Open(&input, LOOM_SERVE_RECOGNITION_OUTPUT_ALL));
   EXPECT_EQ(input.stream, nullptr);
   ASSERT_NO_FATAL_FAILURE(Prepare());
-  EXPECT_EQ(Model()->service.kind, LOOM_SERVE_MODEL_KIND_ACTIVITY);
+  EXPECT_EQ(Model()->service.kind, LOOM_SERVICE_KIND_ACTIVITY);
   EXPECT_EQ(Model()->service.endpoint, nullptr);
   EXPECT_EQ(Model()->service.accept, nullptr);
   const auto outputs = Model()->service.capabilities.output_modalities;

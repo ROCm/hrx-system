@@ -12,38 +12,42 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
+#include <vector>
 
 #include "iree/async/proactor.h"
 #include "iree/base/internal/json.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/runtime/testing/application.h"
 #include "loom/serve/server/resources.h"
 #include "loom/serve/server/router.h"
-#include "loom/serve/service/finite/decision/protocol.h"
-#include "loom/serve/service/finite/embedding/protocol.h"
-#include "loom/serve/service/finite/service.h"
+#include "loom/serve/service/finite/http.h"
 #include "loom/serve/testing/http_harness.h"
 #include "loom/serve/testing/model.h"
 #include "loom/serve/testing/package.h"
-#include "loom/serve/testing/service_application.h"
 #include "loom/serve/transport/http/listener.h"
+#include "loom/service/finite/call.h"
+#include "loom/service/finite/decision/protocol.h"
+#include "loom/service/finite/embedding/protocol.h"
+#include "loom/service/finite/service.h"
 
 namespace {
 
 class SourceDecisionServiceTest : public ::testing::Test {
  protected:
-  void CreateModel(const char* source, loom_serve_finite_model_t** output) {
+  void CreateModel(const char* source, loom_service_finite_model_t** output) {
     const std::string file = source;
     const std::string directory = file.substr(0, file.find_last_of('/'));
     loom_serve::testing::ModelDocument document;
     IREE_ASSERT_OK(document.Load(directory + "/model.json"));
-    const loom_serve_finite_model_options_t options = {
+    const loom_service_finite_model_options_t options = {
         .sources = document.value().sources,
         .asset_directory = IREE_SV("."),
         .options = IREE_SV("{\"batch_units\":64}"),
     };
-    IREE_ASSERT_OK(loom_serve_finite_model_allocate(
+    IREE_ASSERT_OK(loom_service_finite_model_allocate(
         device_, storage_owner_, &options, host_allocator_, output));
   }
   void SetUp() override {
@@ -56,35 +60,37 @@ class SourceDecisionServiceTest : public ::testing::Test {
     embedding_source_ = embedding_source;
     iree_notification_initialize(&notification_);
     const auto application_options =
-        loom_serve_test_application_options_default();
-    loom_serve_test_application_t* application = nullptr;
-    IREE_ASSERT_OK(loom_serve_test_application_acquire(
+        loom_runtime_test_application_options_default();
+    loom_runtime_test_application_t* application = nullptr;
+    IREE_ASSERT_OK(loom_runtime_test_application_acquire(
         &application_options, host_allocator_, &application));
-    host_ = loom_serve_test_application_host(application);
+    host_ = loom_runtime_test_application_host(application);
     resources_.device_group =
-        loom_serve_test_application_device_group(application);
-    device_ = loom_serve_test_application_device_at(application, 0);
-    storage_owner_ = loom_serve_device_group_pool_at(
-        loom_serve_test_application_device_group(application), 0);
+        loom_runtime_test_application_device_group(application);
+    device_ = loom_runtime_test_application_device_at(application, 0);
+    storage_owner_ = loom_runtime_device_group_pool_at(
+        loom_runtime_test_application_device_group(application), 0);
     ASSERT_NO_FATAL_FAILURE(CreateModel(model_source_.c_str(), &models_[0]));
-    IREE_ASSERT_OK(loom_serve_finite_service_allocate(
-        host_, models_[0], loom_serve_decision_protocol(), IREE_SV("decisions"),
-        16, 16, 0, nullptr, host_allocator_, &services_[0]));
-    interfaces_[0] = loom_serve_finite_service_interface(services_[0]);
-    EXPECT_EQ(interfaces_[0].capacity_domain,
-              loom_serve_pool_residency_cache(storage_owner_));
-    const loom_serve_wake_callback_t observer = {
+    IREE_ASSERT_OK(loom_service_finite_service_allocate(
+        host_, models_[0], loom_service_decision_protocol(),
+        IREE_SV("decisions"), 16, 16, 0, nullptr, host_allocator_,
+        &services_[0]));
+    interfaces_[0] = loom_serve_finite_http_interface(services_[0]);
+    EXPECT_EQ(interfaces_[0].runtime.capacity_domain,
+              loom_runtime_pool_residency_cache(storage_owner_));
+    const loom_runtime_wake_callback_t observer = {
         [](void* self) {
           auto* test = static_cast<SourceDecisionServiceTest*>(self);
           test->wakes_.fetch_add(1);
           iree_notification_post(&test->notification_, IREE_ALL_WAITERS);
         },
         this};
-    interfaces_[0].set_observer(interfaces_[0].self, observer);
-    loom_serve_resources_set_observer(&resources_, observer);
+    interfaces_[0].runtime.vtable->set_observer(interfaces_[0].runtime.self,
+                                                observer);
+    loom_runtime_device_group_set_observer(resources_.device_group, observer);
     auto http_options = loom_serve_http_server_options_default();
     IREE_ASSERT_OK(loom_serve_http_server_allocate(
-        loom_serve_host_proactor_pool(host_), &http_options, host_allocator_,
+        loom_runtime_host_proactor_pool(host_), &http_options, host_allocator_,
         &server_));
     auto listener_options = loom_serve_http_listener_options_default();
     listener_options.address = IREE_SV("127.0.0.1:0");
@@ -99,27 +105,32 @@ class SourceDecisionServiceTest : public ::testing::Test {
     }
     for (size_t i = 0; i < 2; ++i) {
       if (services_[i]) {
-        interfaces_[i].set_observer(interfaces_[i].self, {});
-        loom_serve_finite_service_free(services_[i]);
+        interfaces_[i].runtime.vtable->set_observer(interfaces_[i].runtime.self,
+                                                    {});
+        loom_service_finite_service_free(services_[i]);
       }
     }
     IREE_EXPECT_OK(loom_serve_http_listener_free(listener_));
     loom_serve_http_server_free(server_);
     for (auto* model : models_) {
-      IREE_EXPECT_OK(loom_serve_finite_model_free(model));
+      IREE_EXPECT_OK(loom_service_finite_model_free(model));
     }
-    loom_serve_resources_set_observer(&resources_, {});
+    loom_runtime_device_group_set_observer(resources_.device_group, {});
     iree_notification_deinitialize(&notification_);
   }
   int Send(const std::string& body, const char* target = "/v1/systemone",
-           const char* method = "POST") {
+           const char* method = "POST",
+           const char* content_type = "application/json") {
     if (http_.failed() || HasFatalFailure()) {
       return -1;
     }
-    const std::string request = std::string(method) + " " + target +
-                                " HTTP/1.1\r\nHost: local\r\nContent-Type: "
-                                "application/json\r\nContent-Length: " +
-                                std::to_string(body.size()) + "\r\n\r\n" + body;
+    std::string request =
+        std::string(method) + " " + target + " HTTP/1.1\r\nHost: local\r\n";
+    if (content_type) {
+      request += std::string("Content-Type: ") + content_type + "\r\n";
+    }
+    request +=
+        "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
     int client = -1;
     [&] { IREE_ASSERT_OK(http_.Send(request, &client)); }();
     return client;
@@ -143,19 +154,20 @@ class SourceDecisionServiceTest : public ::testing::Test {
     const loom_serve_http_request_t* request = nullptr;
     loom_serve_http_connection_t* connection = nullptr;
     IREE_ASSERT_OK(http_.TakeRequest(client, &connection, &request));
-    IREE_ASSERT_OK(
-        interfaces_[0].accept(interfaces_[0].self, connection, request, 0));
+    IREE_ASSERT_OK(interfaces_[0].accept(interfaces_[0].runtime.self,
+                                         connection, request, 0));
     if (out_connection) {
       *out_connection = connection;
     }
   }
   bool Step() {
     const uint64_t previous = wakes_.load();
-    IREE_EXPECT_OK(loom_serve_resources_advance(&resources_));
+    IREE_EXPECT_OK(loom_runtime_device_group_advance(resources_.device_group));
     bool progress = false;
-    IREE_EXPECT_OK(interfaces_[0].advance(interfaces_[0].self, 0, &progress));
-    if (interfaces_[0].is_active(interfaces_[0].self) ||
-        loom_serve_resources_is_pending(&resources_)) {
+    IREE_EXPECT_OK(interfaces_[0].runtime.vtable->advance(
+        interfaces_[0].runtime.self, 0, &progress));
+    if (interfaces_[0].runtime.vtable->is_active(interfaces_[0].runtime.self) ||
+        loom_runtime_device_group_is_pending(resources_.device_group)) {
       struct loom_serve_test_decision_wait_t {
         // Shared release generation.
         std::atomic<uint64_t>* wakes;
@@ -183,18 +195,20 @@ class SourceDecisionServiceTest : public ::testing::Test {
   void StartRouter() {
     ASSERT_NO_FATAL_FAILURE(
         CreateModel(embedding_source_.c_str(), &models_[1]));
-    IREE_ASSERT_OK(loom_serve_finite_service_allocate(
-        host_, models_[1], loom_serve_embedding_protocol(), IREE_SV("vectors"),
-        16, 16, 0, nullptr, host_allocator_, &services_[1]));
-    interfaces_[1] = loom_serve_finite_service_interface(services_[1]);
-    interfaces_[0].set_observer(interfaces_[0].self, {});
-    loom_serve_resources_set_observer(&resources_, {});
+    IREE_ASSERT_OK(loom_service_finite_service_allocate(
+        host_, models_[1], loom_service_embedding_protocol(),
+        IREE_SV("vectors"), 16, 16, 0, nullptr, host_allocator_,
+        &services_[1]));
+    interfaces_[1] = loom_serve_finite_http_interface(services_[1]);
+    interfaces_[0].runtime.vtable->set_observer(interfaces_[0].runtime.self,
+                                                {});
+    loom_runtime_device_group_set_observer(resources_.device_group, {});
     http_.Start([this]() -> iree_status_t {
       loom_serve_registry_t* registry = nullptr;
       IREE_RETURN_IF_ERROR(loom_serve_registry_allocate(
           2, interfaces_, 0, {}, host_allocator_, &registry));
       iree_status_t status = loom_serve_router_run(
-          loom_serve_host_executor(host_), server_, registry,
+          loom_runtime_host_executor(host_), server_, registry,
           {
               .request_quota = 16,
               .holding_capacity = 8,
@@ -211,17 +225,17 @@ class SourceDecisionServiceTest : public ::testing::Test {
   // Independent source package used for cross-modality routing.
   std::string embedding_source_;
   // Real shared CPU/JIT executor and asynchronous I/O owner.
-  loom_serve_host_t* host_ = nullptr;
+  loom_runtime_host_t* host_ = nullptr;
   // Borrowed application resources progressed by the direct owner or router.
   loom_serve_resources_t resources_ = {};
   // Borrowed device record within the application group.
-  loom_serve_device_t* device_ = nullptr;
+  loom_runtime_device_t* device_ = nullptr;
   // Explicit storage owner selected independently from execution placement.
-  loom_serve_pool_t* storage_owner_ = nullptr;
+  loom_runtime_pool_t* storage_owner_ = nullptr;
   // Independently compiled source models, not mock callbacks.
-  loom_serve_finite_model_t* models_[2] = {};
+  loom_service_finite_model_t* models_[2] = {};
   // Bounded modality services borrowing the corresponding models.
-  loom_serve_finite_service_t* services_[2] = {};
+  loom_service_finite_service_t* services_[2] = {};
   // Exact production scheduling and routing interfaces.
   loom_serve_service_t interfaces_[2] = {};
   // Shared HTTP connection and request owner.
@@ -255,6 +269,225 @@ void CheckSingleNoulResponse(const std::string& response) {
   // Vulkan F32 division permits 2.5 ULP error for normal divisors. At 2/3,
   // one ULP is 2^-24. Exact dyadic cohort probabilities remain wire-checked.
   EXPECT_NEAR(probability, 2.0 / 3.0, 2.5 * 0x1p-24);
+}
+
+TEST_F(SourceDecisionServiceTest, PreflightRejectionsHaveOneRequestLifetime) {
+  struct Case {
+    // Target presented directly to the finite HTTP adapter.
+    const char* target;
+    // Wire request method.
+    const char* method;
+    // Header value, or null to omit the header.
+    const char* content_type;
+    // Exact HTTP status for this preflight rejection.
+    const char* status;
+    // Exact JSON error message, independent of request contents.
+    const char* message;
+  };
+  const Case cases[] = {
+      {"/v1/embeddings", "POST", "application/json", "404 Not Found",
+       "unknown finite-result endpoint"},
+      {"/v1/systemone", "GET", "application/json", "404 Not Found",
+       "unknown finite-result endpoint"},
+      {"/v1/systemone", "POST", "text/plain", "415 Unsupported Media Type",
+       "Content-Type must be application/json"},
+      {"/v1/systemone", "POST", nullptr, "415 Unsupported Media Type",
+       "Content-Type must be application/json"},
+  };
+  for (const auto& test : cases) {
+    const int client = Send(kNoul, test.target, test.method, test.content_type);
+    ASSERT_NO_FATAL_FAILURE(Accept(client));
+    EXPECT_EQ(Read(client),
+              std::string("HTTP/1.1 ") + test.status +
+                  "\r\nContent-Type: application/json\r\nConnection: close"
+                  "\r\n\r\n{\"error\":{\"type\":\"finite_request_error\","
+                  "\"message\":\"" +
+                  test.message + "\"}}");
+  }
+  const auto& counters = *interfaces_[0].telemetry.counters;
+  EXPECT_EQ(counters.requests, IREE_ARRAYSIZE(cases));
+  EXPECT_EQ(counters.rejected, IREE_ARRAYSIZE(cases));
+  EXPECT_EQ(counters.cancelled, 0u);
+  EXPECT_EQ(counters.failed, 0u);
+  EXPECT_EQ(counters.batches, 0u);
+  EXPECT_FALSE(
+      interfaces_[0].runtime.vtable->is_pending(interfaces_[0].runtime.self));
+
+  const int valid =
+      Send(kNoul, "/v1/systemone", "POST", "Application/JSON; Charset=UTF-8");
+  ASSERT_NO_FATAL_FAILURE(Accept(valid));
+  Drain();
+  CheckSingleNoulResponse(Read(valid));
+  EXPECT_EQ(counters.requests, IREE_ARRAYSIZE(cases) + 1);
+  EXPECT_EQ(counters.completed, 1u);
+}
+
+TEST_F(SourceDecisionServiceTest, DisconnectedPreflightRejectionRetiresClaim) {
+  const int client = Send(kNoul, "/v1/systemone", "POST", "text/plain");
+  const loom_serve_http_request_t* request = nullptr;
+  loom_serve_http_connection_t* connection = nullptr;
+  IREE_ASSERT_OK(http_.TakeRequest(client, &connection, &request));
+  const linger reset = {1, 0};
+  ASSERT_EQ(setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+            0);
+  ASSERT_EQ(close(client), 0);
+  iree_notification_await(
+      loom_serve_http_server_notification(server_),
+      [](void* value) {
+        return loom_serve_http_connection_failed(
+            static_cast<loom_serve_http_connection_t*>(value));
+      },
+      connection, iree_infinite_timeout());
+  IREE_ASSERT_OK(interfaces_[0].accept(interfaces_[0].runtime.self, connection,
+                                       request, 0));
+  const auto& counters = *interfaces_[0].telemetry.counters;
+  EXPECT_EQ(counters.requests, 1u);
+  EXPECT_EQ(counters.cancelled, 1u);
+  EXPECT_EQ(counters.rejected, 0u);
+  EXPECT_EQ(counters.failed, 0u);
+  EXPECT_FALSE(
+      interfaces_[0].runtime.vtable->is_pending(interfaces_[0].runtime.self));
+}
+
+TEST_F(SourceDecisionServiceTest, NativePressureRejectsHttpWithoutTakingAJob) {
+  using Call = std::unique_ptr<loom_service_finite_call_t,
+                               decltype(&loom_service_finite_call_close)>;
+  std::vector<Call> calls;
+  for (size_t i = 0; i < 16; ++i) {
+    iree_string_builder_t body;
+    iree_string_builder_initialize(host_allocator_, &body);
+    IREE_EXPECT_OK(iree_string_builder_append_cstring(&body, kNoul));
+    loom_service_finite_call_t* call = nullptr;
+    IREE_EXPECT_OK(loom_service_finite_service_try_open(
+        services_[0], &body, LOOM_SERVICE_FINITE_OUTPUT_JSON, &call));
+    iree_string_builder_deinitialize(&body);
+    calls.emplace_back(call, loom_service_finite_call_close);
+    EXPECT_NE(call, nullptr);
+  }
+  const int client = Send(kNoul);
+  ASSERT_NO_FATAL_FAILURE(Accept(client));
+  EXPECT_EQ(Read(client),
+            "HTTP/1.1 503 Service Unavailable\r\n"
+            "Content-Type: application/json\r\nConnection: close\r\n\r\n"
+            "{\"error\":{\"type\":\"finite_request_error\",\"message\":"
+            "\"finite admission queue is full\"}}");
+  EXPECT_EQ(
+      interfaces_[0].snapshot(interfaces_[0].runtime.self).queued_requests,
+      16u);
+  calls.clear();
+  Drain();
+  const auto& counters = *interfaces_[0].telemetry.counters;
+  EXPECT_EQ(counters.requests, 17u);
+  EXPECT_EQ(counters.rejected, 1u);
+  EXPECT_EQ(counters.cancelled, 16u);
+  EXPECT_EQ(counters.batches, 0u);
+  const int next = Send(kNoul);
+  ASSERT_NO_FATAL_FAILURE(Accept(next));
+  Drain();
+  CheckSingleNoulResponse(Read(next));
+  EXPECT_EQ(counters.completed, 1u);
+}
+
+TEST_F(SourceDecisionServiceTest, AdmissionAllocationFailureRetiresHttpClaim) {
+  bool fail_allocation = false;
+  const iree_allocator_t allocator = {
+      &fail_allocation, [](void* self, iree_allocator_command_t command,
+                           const void* parameters, void** pointer) {
+        if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+            *static_cast<bool*>(self)) {
+          return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+        }
+        const auto system = iree_allocator_system();
+        return system.ctl(system.self, command, parameters, pointer);
+      }};
+  loom_service_finite_service_t* service = nullptr;
+  IREE_ASSERT_OK(loom_service_finite_service_allocate(
+      host_, models_[0], loom_service_decision_protocol(), IREE_SV("decisions"),
+      1, 0, 0, nullptr, allocator, &service));
+  std::unique_ptr<loom_service_finite_service_t,
+                  decltype(&loom_service_finite_service_free)>
+      owner(service, loom_service_finite_service_free);
+  const auto http = loom_serve_finite_http_interface(service);
+  fail_allocation = true;
+  const int client = Send(kNoul);
+  const loom_serve_http_request_t* request = nullptr;
+  loom_serve_http_connection_t* connection = nullptr;
+  IREE_ASSERT_OK(http_.TakeRequest(client, &connection, &request));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
+                        http.accept(http.runtime.self, connection, request, 0));
+  std::string response;
+  IREE_ASSERT_OK(http_.Read(client, /*allow_empty=*/true, &response));
+  EXPECT_TRUE(response.empty());
+  const auto& counters = *http.telemetry.counters;
+  EXPECT_EQ(counters.requests, 1u);
+  EXPECT_EQ(counters.failed, 1u);
+  EXPECT_EQ(counters.rejected, 0u);
+  EXPECT_EQ(counters.cancelled, 0u);
+  EXPECT_FALSE(http.runtime.vtable->is_pending(http.runtime.self));
+}
+
+TEST_F(SourceDecisionServiceTest, NativeAndHttpShareOneCohort) {
+  iree_string_builder_t body;
+  iree_string_builder_initialize(host_allocator_, &body);
+  IREE_EXPECT_OK(iree_string_builder_append_cstring(&body, kNoul));
+  loom_service_finite_call_t* call = nullptr;
+  auto status = loom_service_finite_service_try_open(
+      services_[0], &body, LOOM_SERVICE_FINITE_OUTPUT_DEVICE, &call);
+  iree_string_builder_deinitialize(&body);
+  std::unique_ptr<loom_service_finite_call_t,
+                  decltype(&loom_service_finite_call_close)>
+      native(call, loom_service_finite_call_close);
+  IREE_ASSERT_OK(status);
+  ASSERT_NE(native, nullptr);
+  const int client = Send(kNoul);
+  ASSERT_NO_FATAL_FAILURE(Accept(client));
+  while (!loom_service_finite_call_output(native.get()) &&
+         !loom_service_finite_call_is_complete(native.get())) {
+    ASSERT_TRUE(Step());
+  }
+  const auto* output = loom_service_finite_call_output(native.get());
+  ASSERT_NE(output, nullptr);
+  EXPECT_EQ(output->request_index, 0u);
+  EXPECT_EQ(output->row_count, 1u);
+  EXPECT_FALSE(loom_service_finite_call_is_complete(native.get()));
+  native.reset();
+  Drain();
+  // Two questions in one source cohort produce .25; independent per-request
+  // dispatches would produce 2/3. Removing the native peer must not renumber
+  // the surviving HTTP request's reversed physical row.
+  const auto response = Read(client);
+  EXPECT_EQ(response.find("HTTP/1.1 200"), 0u);
+  EXPECT_NE(response.find(R"("truth":{"type":"noul","noul":0.25})"),
+            std::string::npos)
+      << response;
+}
+
+TEST_F(SourceDecisionServiceTest, NativeJsonMatchesHttpResponseBody) {
+  iree_string_builder_t body;
+  iree_string_builder_initialize(host_allocator_, &body);
+  IREE_EXPECT_OK(iree_string_builder_append_cstring(&body, kNoul));
+  loom_service_finite_call_t* call = nullptr;
+  auto status = loom_service_finite_service_try_open(
+      services_[0], &body, LOOM_SERVICE_FINITE_OUTPUT_JSON, &call);
+  iree_string_builder_deinitialize(&body);
+  std::unique_ptr<loom_service_finite_call_t,
+                  decltype(&loom_service_finite_call_close)>
+      native(call, loom_service_finite_call_close);
+  IREE_ASSERT_OK(status);
+  ASSERT_NE(native, nullptr);
+  const int client = Send(kNoul);
+  ASSERT_NO_FATAL_FAILURE(Accept(client));
+  Drain();
+  ASSERT_TRUE(loom_service_finite_call_is_complete(native.get()));
+  IREE_ASSERT_OK(loom_service_finite_call_status(native.get()));
+  const auto http_response = Read(client);
+  ASSERT_EQ(http_response.find("HTTP/1.1 200"), 0u);
+  const auto separator = http_response.find("\r\n\r\n");
+  ASSERT_NE(separator, std::string::npos);
+  const auto native_response = loom_service_finite_call_response(native.get());
+  EXPECT_EQ(std::string(native_response.data, native_response.size),
+            http_response.substr(separator + 4));
+  EXPECT_NE(http_response.find(R"("noul":0.25)"), std::string::npos);
 }
 
 TEST_F(SourceDecisionServiceTest, PacksQuestionsAndRetainsResultsAcrossReset) {

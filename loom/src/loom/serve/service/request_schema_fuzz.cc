@@ -10,14 +10,14 @@
 
 #include "iree/base/api.h"
 #include "iree/base/string_builder.h"
-#include "loom/serve/service/finite/decision/protocol.h"
-#include "loom/serve/service/finite/embedding/protocol.h"
 #include "loom/serve/service/image/request.h"
 #include "loom/serve/service/recognition/transcription.h"
 #include "loom/serve/service/speech/request.h"
 #include "loom/serve/service/speech/voice.h"
 #include "loom/serve/service/speech/voice_http.h"
 #include "loom/serve/transport/http/request.h"
+#include "loom/service/finite/decision/protocol.h"
+#include "loom/service/finite/embedding/protocol.h"
 
 namespace {
 
@@ -83,9 +83,9 @@ std::string MultipartRequest(char family, iree_string_view_t input) {
   return request;
 }
 
-void ExerciseFinite(const loom_serve_finite_protocol_t* protocol,
+void ExerciseFinite(const loom_service_finite_protocol_t* protocol,
                     iree_string_view_t body) {
-  loom_serve_finite_request_t* request = nullptr;
+  loom_service_finite_request_t* request = nullptr;
   iree_status_t status = iree_allocator_malloc(
       iree_allocator_system(), protocol->request_size, (void**)&request);
   if (iree_status_is_ok(status)) {
@@ -100,10 +100,10 @@ void ExerciseRequest(char family, const loom_serve_http_request_t* request) {
   iree_status_t status = iree_ok_status();
   switch (family) {
     case 'd':
-      ExerciseFinite(loom_serve_decision_protocol(), request->body);
+      ExerciseFinite(loom_service_decision_protocol(), request->body);
       return;
     case 'e':
-      ExerciseFinite(loom_serve_embedding_protocol(), request->body);
+      ExerciseFinite(loom_service_embedding_protocol(), request->body);
       return;
     case 'i': {
       loom_serve_image_request_t image_request;

@@ -9,8 +9,8 @@
 #include <cstring>
 
 #include "loom/serve/media/image_request.h"
-#include "loom/serve/service/finite/model.h"
 #include "loom/serve/service/text/service_test_fixture.h"
+#include "loom/service/finite/model.h"
 
 namespace {
 
@@ -25,15 +25,15 @@ class PixelProjectorExecutionTest : public SourceTextServiceTest,
     const char* source = std::getenv("LOOM_SERVE_TEST_PROJECTOR_SOURCE");
     ASSERT_NE(source, nullptr);
     IREE_ASSERT_OK(projector_document_.Load(source));
-    const loom_serve_finite_model_options_t options = {
+    const loom_service_finite_model_options_t options = {
         .sources = projector_document_.value().sources,
         .asset_directory = IREE_SV("."),
         .options = IREE_SV("{}"),
         .specialization_cache = {2, 1024 * 1024},
     };
-    IREE_ASSERT_OK(loom_serve_finite_model_allocate(
+    IREE_ASSERT_OK(loom_service_finite_model_allocate(
         device_, storage_owner_, &options, host_allocator_, &projector_));
-    loom_serve_finite_model_set_observer(
+    loom_service_finite_model_set_observer(
         projector_, {[](void* data) {
                        iree_notification_post(
                            static_cast<iree_notification_t*>(data),
@@ -44,9 +44,9 @@ class PixelProjectorExecutionTest : public SourceTextServiceTest,
 
   void TearDown() override {
     SourceTextServiceTest::TearDown();
-    IREE_EXPECT_OK(loom_serve_finite_model_free(projector_));
-    loom_serve_finite_result_release(result_);
-    loom_serve_finite_snapshot_release(snapshot_);
+    IREE_EXPECT_OK(loom_service_finite_model_free(projector_));
+    loom_service_finite_result_release(result_);
+    loom_service_finite_snapshot_release(snapshot_);
     for (size_t i = 0; i < inputs_.size(); ++i) {
       iree_vm_buffer_release(prepared_[i].bytes);
       iree_vm_buffer_release(packets_[i]);
@@ -54,11 +54,11 @@ class PixelProjectorExecutionTest : public SourceTextServiceTest,
     }
   }
 
-  void Wait(loom_serve_execution_frontier_t ready) {
+  void Wait(loom_runtime_execution_frontier_t ready) {
     for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-      IREE_ASSERT_OK(
-          loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                    ready.semaphores[i], ready.values[i]));
+      IREE_ASSERT_OK(loom_runtime_workspace_wait(
+          loom_runtime_pool_workspace(storage_owner_), ready.semaphores[i],
+          ready.values[i]));
     }
   }
 
@@ -74,7 +74,7 @@ class PixelProjectorExecutionTest : public SourceTextServiceTest,
     while (!complete) {
       const auto ticket = iree_notification_prepare_wait(notification);
       auto status =
-          loom_serve_finite_model_advance_batch(projector_, false, &complete);
+          loom_service_finite_model_advance_batch(projector_, false, &complete);
       if (complete || !iree_status_is_ok(status)) {
         iree_notification_cancel_wait(notification);
         IREE_ASSERT_OK(status);
@@ -88,17 +88,17 @@ class PixelProjectorExecutionTest : public SourceTextServiceTest,
   // Source ownership outlives asynchronous finite model work.
   loom_serve::testing::ModelDocument projector_document_;
   // Independent image model sharing the actual text device and workspace.
-  loom_serve_finite_model_t* projector_ = nullptr;
+  loom_service_finite_model_t* projector_ = nullptr;
   // Immutable compressed images retained only through packet realization.
   std::array<loom_serve_media_image_input_t, 2> inputs_ = {};
   // Real source input packets, not test-authored decoded pixel arrays.
   std::array<iree_vm_buffer_t*, 2> packets_ = {};
   // Source-produced batch inputs retaining original image ordinals.
-  std::array<loom_serve_prepared_request_t, 2> prepared_ = {};
+  std::array<loom_service_prepared_request_t, 2> prepared_ = {};
   // Device-only output supplied directly to the language consumer.
-  loom_serve_finite_result_t* result_ = nullptr;
+  loom_service_finite_result_t* result_ = nullptr;
   // Final test observation, allocated only after the language result exists.
-  loom_serve_finite_snapshot_t* snapshot_ = nullptr;
+  loom_service_finite_snapshot_t* snapshot_ = nullptr;
 };
 
 TEST_P(PixelProjectorExecutionTest, RgbAndRgbaCohortConditionsRetainedText) {
@@ -135,20 +135,21 @@ TEST_P(PixelProjectorExecutionTest, RgbAndRgbaCohortConditionsRetainedText) {
   for (size_t i = 0; i < inputs_.size(); ++i) {
     IREE_ASSERT_OK(statuses[i]);
     loom_serve_media_image_input_deinitialize(&inputs_[i]);
-    IREE_ASSERT_OK(loom_serve_finite_model_prepare_request(
+    IREE_ASSERT_OK(loom_service_finite_model_prepare_request(
         projector_, packets_[i], &prepared_[i]));
     EXPECT_EQ(prepared_[i].units, requests[i].output_rows);
   }
   const iree_host_size_t expected_rows[] = {3, 2};
-  IREE_ASSERT_OK(loom_serve_finite_model_prepare_batch(
+  IREE_ASSERT_OK(loom_service_finite_model_prepare_batch(
       projector_, prepared_.size(), prepared_.data(), expected_rows));
   ASSERT_NO_FATAL_FAILURE(ResolveCode());
-  loom_serve_residency_admission_t admission;
-  IREE_ASSERT_OK(loom_serve_residency_try_admit(
-      loom_serve_finite_model_residency(projector_), &admission));
-  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
-  loom_serve_execution_frontier_t ready;
-  IREE_ASSERT_OK(loom_serve_finite_model_submit(projector_, &result_, &ready));
+  loom_runtime_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_runtime_residency_try_admit(
+      loom_service_finite_model_residency(projector_), &admission));
+  ASSERT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_runtime_execution_frontier_t ready;
+  IREE_ASSERT_OK(
+      loom_service_finite_model_submit(projector_, &result_, &ready));
   EXPECT_EQ(ready.values[1], 0u);
   const loom_serve_text_media_input_span_t images[] = {
       {
@@ -207,12 +208,12 @@ TEST_P(PixelProjectorExecutionTest, RgbAndRgbaCohortConditionsRetainedText) {
   }
   // Observe the projector only after text has consumed its device result.
   IREE_ASSERT_OK(
-      loom_serve_finite_result_download(result_, &snapshot_, &ready));
+      loom_service_finite_result_download(result_, &snapshot_, &ready));
   ASSERT_NO_FATAL_FAILURE(Wait(ready));
-  loom_serve_finite_model_complete(projector_);
+  loom_service_finite_model_complete(projector_);
   for (size_t i = 0; i < 2; ++i) {
     for (size_t row = 0; row < expected_rows[i]; ++row) {
-      const auto bytes = loom_serve_finite_snapshot_row(snapshot_, i, row);
+      const auto bytes = loom_service_finite_snapshot_row(snapshot_, i, row);
       ASSERT_EQ(bytes.data_length, 4 * sizeof(float));
       float values[4];
       std::memcpy(values, bytes.data, sizeof(values));

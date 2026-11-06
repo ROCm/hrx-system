@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVER_MODEL_REGISTRATION_H_
 #define LOOM_SERVE_SERVER_MODEL_REGISTRATION_H_
 
-#include "loom/serve/runtime/device/device.h"
+#include "loom/runtime/device/device.h"
 #include "loom/serve/server/registry.h"
 
 #ifdef __cplusplus
@@ -17,7 +17,7 @@ extern "C" {
 typedef struct loom_serve_model_registration_options_t {
   // Borrowed application group and host, surviving every registration
   // operation.
-  loom_serve_device_group_t* device_group;
+  loom_runtime_device_group_t* device_group;
   // Nonnegative periodic observation interval; zero disables periodic samples.
   iree_duration_t heartbeat_interval;
 } loom_serve_model_registration_options_t;

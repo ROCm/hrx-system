@@ -10,7 +10,7 @@
 
 iree_status_t loom_serve_http_package_parse(
     const loom_serve_http_request_t* request, iree_allocator_t host_allocator,
-    iree_string_view_t* out_json, loom_serve_package_t** out_package) {
+    iree_string_view_t* out_json, loom_runtime_package_t** out_package) {
   *out_json = iree_string_view_empty();
   *out_package = NULL;
   iree_string_view_t content_type, type;
@@ -31,7 +31,7 @@ iree_status_t loom_serve_http_package_parse(
   const loom_serve_http_part_list_t parts =
       loom_serve_http_multipart_parts(request->multipart);
   iree_status_t status = iree_ok_status();
-  loom_serve_package_file_t* files = NULL;
+  loom_runtime_package_file_t* files = NULL;
   iree_host_size_t count = 0, capacity = 0;
   iree_string_view_t json = iree_string_view_empty();
   iree_string_view_t document = iree_string_view_empty();
@@ -54,7 +54,7 @@ iree_status_t loom_serve_http_package_parse(
                                       &capacity, (void**)&files);
       }
       if (iree_status_is_ok(status)) {
-        files[count++] = (loom_serve_package_file_t){
+        files[count++] = (loom_runtime_package_file_t){
             .path = part.filename,
             .contents = iree_make_const_byte_span(part.contents.data,
                                                   part.contents.size),
@@ -72,8 +72,8 @@ iree_status_t loom_serve_http_package_parse(
                          "source package requires a nonempty request part");
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_package_create(document, count, files, host_allocator,
-                                       out_package);
+    status = loom_runtime_package_create(document, count, files, host_allocator,
+                                         out_package);
   }
   iree_allocator_free(host_allocator, files);
   if (iree_status_is_ok(status)) {

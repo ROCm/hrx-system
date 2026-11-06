@@ -30,11 +30,11 @@ class SourceEncodingExecutionTest : public SourceTextServiceTest {
     }
   }
 
-  void Wait(loom_serve_execution_frontier_t ready) {
+  void Wait(loom_runtime_execution_frontier_t ready) {
     for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-      IREE_ASSERT_OK(
-          loom_serve_workspace_wait(loom_serve_pool_workspace(storage_owner_),
-                                    ready.semaphores[i], ready.values[i]));
+      IREE_ASSERT_OK(loom_runtime_workspace_wait(
+          loom_runtime_pool_workspace(storage_owner_), ready.semaphores[i],
+          ready.values[i]));
     }
   }
 
@@ -65,7 +65,7 @@ TEST_F(SourceEncodingExecutionTest, KnownInputOutputOutlivesEpochAndModel) {
   EXPECT_EQ(loom_serve_text_model_tokenizer(model_), nullptr);
   const std::vector<int32_t> prefix = {0, 1, 2, 0, 1, 1, 0, 0, 2, 1, 0};
   const loom_serve_text_span_t first = {0, prefix.size(), prefix.data(), 0};
-  loom_serve_execution_frontier_t ready;
+  loom_runtime_execution_frontier_t ready;
   IREE_ASSERT_OK(loom_serve_text_model_submit_epoch(
       model_, 1, 1, &first, nullptr, nullptr, &captures_[0], &ready));
   ASSERT_NO_FATAL_FAILURE(Wait(ready));
@@ -116,7 +116,7 @@ TEST_F(SourceEncodingExecutionTest, KnownInputOutputOutlivesEpochAndModel) {
 
 TEST_F(SourceEncodingExecutionTest, SelectionRejectsBeforeMutation) {
   const int32_t token = 0;
-  loom_serve_execution_frontier_t ready;
+  loom_runtime_execution_frontier_t ready;
   const auto initial = loom_serve_text_model_pool_usage(model_);
   for (uint32_t flags : {uint32_t{LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT},
                          uint32_t{LOOM_SERVICE_TEXT_SPAN_FLAG_SELECT |
