@@ -222,6 +222,22 @@ class Translator final : private Initialization::Evaluation {
     std::vector<ReceiverFieldBinding> fields;
   };
 
+  struct SuspendedReceiverField {
+    // Construction receiver ownership hidden during the explicit clause.
+    ReceiverOwner owner;
+    // Construction receiver value hidden during the explicit clause.
+    std::optional<Value> value;
+  };
+
+  struct SuspendedReceiver {
+    // Stack position restored after the explicit clause completes.
+    size_t receiver_index;
+    // Construction receiver whose state remains live but lexically hidden.
+    ActiveReceiver receiver;
+    // Per-field construction state restored independently of lexical writes.
+    std::vector<SuspendedReceiverField> fields;
+  };
+
   void enter_receiver(const RecordPartition& record,
                       std::optional<StorageProjection> storage,
                       const cxx::Type* object_type) {
@@ -252,6 +268,79 @@ class Translator final : private Initialization::Evaluation {
                               StorageProjection destination,
                               const cxx::Type* object_type) override {
     enter_receiver(record, destination, object_type);
+  }
+
+  bool suspend_current_receiver() override {
+    // With no enclosing current object, a type-checked explicit clause cannot
+    // observe the construction-only receiver. Avoid touching every field on
+    // the ordinary free-function aggregate path.
+    if (receivers_.size() <= 1) {
+      return false;
+    }
+
+    const size_t receiver_index = receivers_.size() - 1;
+    SuspendedReceiver suspended = {
+        .receiver_index = receiver_index,
+        .receiver = std::move(receivers_.back()),
+        .fields = {},
+    };
+    receivers_.pop_back();
+    suspended.fields.reserve(suspended.receiver.fields.size());
+    for (auto& binding : suspended.receiver.fields) {
+      auto owner = receiver_owners_.find(binding.field);
+      IREE_ASSERT(owner != receiver_owners_.end() &&
+                  owner->second.index == receiver_index);
+      auto value = values_.find(binding.field);
+      suspended.fields.push_back(
+          {owner->second, value == values_.end()
+                              ? std::nullopt
+                              : std::optional<Value>{value->second}});
+
+      if (binding.previous_owner) {
+        owner->second = *binding.previous_owner;
+      } else {
+        receiver_owners_.erase(owner);
+      }
+      if (binding.previous_value) {
+        values_.set(binding.field, *binding.previous_value);
+      } else {
+        values_.erase(binding.field);
+      }
+    }
+    suspended_receivers_.push_back(std::move(suspended));
+    return true;
+  }
+
+  void resume_current_receiver() override {
+    IREE_ASSERT(!suspended_receivers_.empty());
+    auto suspended = std::move(suspended_receivers_.back());
+    suspended_receivers_.pop_back();
+    IREE_ASSERT_EQ(receivers_.size(), suspended.receiver_index);
+    IREE_ASSERT_EQ(suspended.receiver.fields.size(), suspended.fields.size());
+
+    for (size_t index = 0; index < suspended.receiver.fields.size(); ++index) {
+      auto& binding = suspended.receiver.fields[index];
+      const auto& field = suspended.fields[index];
+
+      auto lexical_owner = receiver_owners_.find(binding.field);
+      binding.previous_owner =
+          lexical_owner == receiver_owners_.end()
+              ? std::nullopt
+              : std::optional<ReceiverOwner>{lexical_owner->second};
+      auto lexical_value = values_.find(binding.field);
+      binding.previous_value =
+          lexical_value == values_.end()
+              ? std::nullopt
+              : std::optional<Value>{lexical_value->second};
+
+      receiver_owners_.insert_or_assign(binding.field, field.owner);
+      if (field.value) {
+        values_.set(binding.field, *field.value);
+      } else {
+        values_.erase(binding.field);
+      }
+    }
+    receivers_.push_back(std::move(suspended.receiver));
   }
 
   void bind_value_receiver(const RecordPartition& record, Value value) {
@@ -1229,6 +1318,7 @@ class Translator final : private Initialization::Evaluation {
     references_.clear();
     receivers_.clear();
     receiver_owners_.clear();
+    suspended_receivers_.clear();
     value_arena_.reset();
     size_t argument_index = 0;
     if (defined.implicit_object) {
@@ -6776,6 +6866,9 @@ class Translator final : private Initialization::Evaluation {
   // the active stack for every member expression.
   std::vector<ActiveReceiver> receivers_;
   std::unordered_map<cxx::FieldSymbol*, ReceiverOwner> receiver_owners_;
+  // Construction receivers hidden while explicit aggregate clauses evaluate
+  // retain their current state separately from lexical receiver mutations.
+  std::vector<SuspendedReceiver> suspended_receivers_;
   // Launch configurations not owned by the ordinary reachable-call analysis
   // retain a function-local analysis here.
   std::optional<ControlFlow> owned_control_;

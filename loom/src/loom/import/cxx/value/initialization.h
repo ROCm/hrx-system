@@ -64,6 +64,11 @@ class Initialization {
     virtual void enter_storage_receiver(const RecordPartition& record,
                                         StorageProjection destination,
                                         const cxx::Type* object_type) = 0;
+    // Explicit aggregate clauses evaluate in their lexical current-object
+    // context, not the result object under construction. Temporarily hides the
+    // innermost construction receiver when an enclosing receiver exists.
+    virtual bool suspend_current_receiver() = 0;
+    virtual void resume_current_receiver() = 0;
     virtual void publish_receiver_member(cxx::FieldSymbol* field,
                                          Value value) = 0;
     virtual void complete_storage_receiver_member(cxx::FieldSymbol* field) = 0;

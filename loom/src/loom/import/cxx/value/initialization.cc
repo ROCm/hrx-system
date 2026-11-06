@@ -50,6 +50,27 @@ class ReceiverScope {
   Initialization::Evaluation& evaluation_;
 };
 
+// Exposes the receiver that was current before one aggregate result began
+// construction. Frontend-normalized default clauses deliberately retain the
+// result receiver and therefore do not use this scope.
+class LexicalReceiverScope {
+ public:
+  explicit LexicalReceiverScope(Initialization::Evaluation& evaluation)
+      : evaluation_(evaluation),
+        suspended_(evaluation.suspend_current_receiver()) {}
+  LexicalReceiverScope(const LexicalReceiverScope&) = delete;
+  LexicalReceiverScope& operator=(const LexicalReceiverScope&) = delete;
+  ~LexicalReceiverScope() {
+    if (suspended_) {
+      evaluation_.resume_current_receiver();
+    }
+  }
+
+ private:
+  Initialization::Evaluation& evaluation_;
+  bool suspended_;
+};
+
 // Importer-owned construction cost. Expression evaluation is common to both
 // candidates and is deliberately excluded; these counts describe only the
 // operations and SSA edges that assemble the final vector.
@@ -639,17 +660,26 @@ Value Initialization::from_elements(const cxx::Type* type,
     for (const auto& member : record->members) {
       auto* initializing_expression = elements ? elements->value : nullptr;
       Value initialized;
-      if (unit_.typeTraits().is_lvalue_reference(member.field->type())) {
-        if (!elements) {
-          diagnostics_.reject(unit_, owner,
-                              "reference members require an initializer");
+      {
+        const bool default_clause =
+            elements && cxx::ast_cast<cxx::DefaultInitializerExpressionAST>(
+                            elements->value);
+        std::optional<LexicalReceiverScope> lexical_receiver;
+        if (elements && !default_clause) {
+          lexical_receiver.emplace(evaluation_);
         }
-        initialized = evaluation_.reference(elements->value, owner);
-      } else {
-        initialized = elements
-                          ? evaluation_.convert(elements->value,
-                                                member.field->type(), owner)
-                          : zero(member.field->type(), owner);
+        if (unit_.typeTraits().is_lvalue_reference(member.field->type())) {
+          if (!elements) {
+            diagnostics_.reject(unit_, owner,
+                                "reference members require an initializer");
+          }
+          initialized = evaluation_.reference(elements->value, owner);
+        } else {
+          initialized = elements
+                            ? evaluation_.convert(elements->value,
+                                                  member.field->type(), owner)
+                            : zero(member.field->type(), owner);
+        }
       }
       evaluation_.adopt(initializing_expression, initialized);
       evaluation_.publish_receiver_member(member.field, initialized);
@@ -886,10 +916,20 @@ void Initialization::object(StorageProjection destination,
       ReceiverScope receiver(evaluation_, *record, destination, object_type);
       for (size_t index = 0; index < record->members.size(); ++index) {
         const auto& member = record->members[index];
-        object(storage_.member(destination, member.field, owner),
-               objects_.member_type(object_type, member.field),
-               index < elements.size() ? elements[index] : nullptr, nullptr,
-               owner, false);
+        {
+          auto* initializer =
+              index < elements.size() ? elements[index] : nullptr;
+          const bool default_clause =
+              initializer &&
+              cxx::ast_cast<cxx::DefaultInitializerExpressionAST>(initializer);
+          std::optional<LexicalReceiverScope> lexical_receiver;
+          if (initializer && !default_clause) {
+            lexical_receiver.emplace(evaluation_);
+          }
+          object(storage_.member(destination, member.field, owner),
+                 objects_.member_type(object_type, member.field), initializer,
+                 nullptr, owner, false);
+        }
         evaluation_.complete_storage_receiver_member(member.field);
       }
       return;

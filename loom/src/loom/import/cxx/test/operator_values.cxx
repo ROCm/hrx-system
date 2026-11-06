@@ -17,6 +17,13 @@ struct Pair {
     result.y = y + other.y;
     return result;
   }
+  Pair direct_add(const Pair& other) const {
+    return {x + other.x, y + other.y};
+  }
+  Pair stored_add(const Pair& other) const {
+    volatile Pair result{x + other.x, y + other.y};
+    return {result.x, result.y};
+  }
   Pair operator-() const {
     Pair result{};
     result.x = 0u - x;
@@ -70,6 +77,14 @@ static unsigned member_update_values() {
       previous.x + previous.y * 10u + updated.x * 100u + updated.y * 1000u;
   value += previous;
   return observed + value.x * 10000u + value.y * 1000000u;
+}
+
+static unsigned stored_member_result() {
+  Pair left{3u, 5u};
+  Pair right{7u, 11u};
+  Pair direct = left.direct_add(right);
+  Pair stored = left.stored_add(right);
+  return (direct.x + stored.x) * 100u + direct.y + stored.y;
 }
 
 struct MemberOrder {
@@ -177,6 +192,7 @@ static void accumulate_pairs(const unsigned* input, unsigned* output) {
 LOOM_CHECK_CASE(operator_values) {
   const auto arithmetic = arithmetic_values();
   const auto member_updates = member_update_values();
+  const auto stored_result = stored_member_result();
   const auto member_sequence = member_order();
   const auto temporary_result = temporary_reference();
   const auto free_sequence = free_order();
@@ -185,6 +201,7 @@ LOOM_CHECK_CASE(operator_values) {
   const auto selected_reference = nonreceiver_reference();
   loom::check::expect_equal(arithmetic, 7u);
   loom::check::expect_equal(member_updates, 20131795u);
+  loom::check::expect_equal(stored_result, 2032u);
   loom::check::expect_equal(member_sequence, 10u);
   loom::check::expect_equal(temporary_result, 10u);
   loom::check::expect_equal(free_sequence, 15u);
