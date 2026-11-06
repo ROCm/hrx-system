@@ -1228,19 +1228,22 @@ overstating the root's alignment.
 ## Typed views and layouts
 
 `<loomcxx/view.h>` exposes Loom views without hiding their shape and encoding
-behind a pointer intrinsic. `view<shape<...>, element, role>` follows the same
-left-to-right order as a Loom IR shaped type. Ranks one through fifteen are
-supported. Static extents remain template arguments; `loom::type::dynamic`
-marks each extent supplied when the view is formed. Layout values live in the
-matching `loom::encoding` namespace and can be dense or use runtime element
-strides.
+behind a pointer intrinsic. `view<shape<...>, element, encoding>` follows the
+same left-to-right order as a Loom IR shaped type. Ranks one through fifteen
+are supported. Static extents remain template arguments;
+`loom::type::dynamic` marks each extent supplied when the view is formed.
+Encoding types name the role and rank of the transported encoding value.
+Layout values live in the matching `loom::encoding` namespace and can be dense
+or use runtime element strides.
 
 ```cpp
 #include <loomcxx/view.h>
 
 namespace loomt = loom::type;
-using rows32 =
-    loomt::view<loomt::shape<loomt::dynamic, 32>, const float>;
+using layout2 =
+    loomt::encoding<loom::encoding::role::layout, 2>;
+using rows32 = loomt::view<loomt::shape<loomt::dynamic, 32>, const float,
+                           layout2>;
 
 rows32 suffix(rows32 source, unsigned first, unsigned remaining) {
   return loom::view::subview(source, {first, 0}, {remaining});
@@ -1259,6 +1262,11 @@ void copy_element(const float* input, float* output, unsigned rows,
                     column);
 }
 ```
+
+Omitting the encoding type denotes an ordinary unencoded view; it does not
+infer a dense layout. `loom::buffer::view(data, dimensions)` forms that plain
+view, while passing a layout or storage value forms a view carrying the
+matching encoding type.
 
 The deduced `subview` overload retains the source's static/dynamic extent
 pattern. An explicit `subview<loom::type::dynamic, 16>(...)` selects a different
@@ -1307,20 +1315,22 @@ float read_view(View source) {
 specialization deduces its own return type. The generic reader accepts either
 type, and Loom retains the shape and layout facts through the helper calls.
 
-Physical storage uses the same view type with an explicit storage role. The
-actual encoding remains an ordinary SSA value composed from a layout and
-schema; only its semantic role is part of the C++ type. This keeps helper
-signatures precise without trying to put a runtime value in a template
-argument:
+Physical storage uses the same view type with an explicit storage encoding
+type. The actual encoding remains an ordinary SSA value composed from a layout
+and schema; only its semantic role and rank are part of the C++ type. This
+keeps helper signatures precise without trying to put a runtime value in a
+template argument:
 
 ```cpp
 #include <loomcxx/encoding.h>
 #include <loomcxx/numeric.h>
 
 using Weight = loom::type::float8_e4m3fn_t;
+using Storage3 =
+    loom::type::encoding<loom::encoding::role::storage, 3>;
 using Weights = loom::type::view<
     loom::type::shape<loom::type::dynamic, loom::type::dynamic, 16>,
-    const Weight, loom::encoding::role::storage>;
+    const Weight, Storage3>;
 
 Weights weights(const Weight* data, unsigned rows, unsigned tiles) {
   auto layout = loom::encoding::layout::dense<3>();
