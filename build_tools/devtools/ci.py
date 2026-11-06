@@ -712,9 +712,14 @@ def repository_configure_step() -> CiStep:
     )
 
 
-def repository_build_steps(amdgpu_target_selector: str | None = None) -> list[CiStep]:
+def repository_build_steps(
+    amdgpu_target_selector: str | None = None,
+    compilation_mode: str | None = None,
+) -> list[CiStep]:
     targets = ("//...",)
     options = ci_config.REPOSITORY_BAZEL_OPTIONS
+    if compilation_mode is not None:
+        options += (f"--compilation_mode={compilation_mode}",)
     if amdgpu_target_selector is not None:
         if not os.environ.get("HRX_ROCM_ROOT"):
             raise ValueError("repository device compilation requires HRX_ROCM_ROOT")
@@ -1584,6 +1589,10 @@ def tilelang_importer_steps(command_name: str) -> list[CiStep]:
 def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
     bazel_target_group = BAZEL_COMMANDS.get(args.command, (None, None))[0]
     cmake_target_group = CMAKE_COMMANDS.get(args.command, (None, None))[0]
+    if args.compilation_mode is not None and bazel_target_group != "repository-build":
+        raise ValueError(
+            "--compilation-mode is only supported for Bazel repository-build commands"
+        )
     amdgpu_target_bazel_groups = (
         "amdgpu",
         "amdgpu-native",
@@ -1660,7 +1669,7 @@ def _steps_from_args(args: argparse.Namespace) -> list[CiStep]:
             raise ValueError(
                 "--target is not supported by the repository-wide build command"
             )
-        return repository_build_steps(args.amdgpu_target)
+        return repository_build_steps(args.amdgpu_target, args.compilation_mode)
     if bazel_target == "repository-integration":
         if args.target:
             raise ValueError(
@@ -2034,6 +2043,14 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
         "--verbose",
         action="store_true",
         help="Print each underlying command before running it.",
+    )
+    parser.add_argument(
+        "--compilation-mode",
+        choices=("fastbuild", "dbg", "opt"),
+        help=(
+            "Bazel compilation mode for the repository-wide build command. "
+            "Defaults to the configured Bazel mode."
+        ),
     )
     parser.add_argument(
         "--amdgpu-target",
