@@ -18,9 +18,9 @@ struct loom_runtime_device_t {
   iree_string_view_t name;
   // Owned device providing memory and queue resources.
   iree_hal_device_t* handle;
-  // Exact dispatch queue borrowed from the device.
+  // Exact dispatch queue borrowed from the retained execution inventory.
   iree_hal_queue_t* dispatch;
-  // Exact transfer queue borrowed from the device.
+  // Exact transfer queue borrowed from the retained execution inventory.
   iree_hal_queue_t* transfer;
   // Fixed inventory shared by independently retained model executions.
   loom_runtime_execution_queues_t* execution_queues;
@@ -55,14 +55,20 @@ struct loom_runtime_device_group_t {
   loom_runtime_device_t devices[];
 };
 
-static iree_hal_queue_t* loom_runtime_device_select_queue(
-    iree_hal_device_t* device, iree_hal_queue_family_role_flags_t role) {
+static const iree_hal_queue_family_t* loom_runtime_device_select_family(
+    iree_hal_device_t* device, iree_hal_queue_family_role_flags_t role,
+    iree_hal_queue_family_role_flags_t excluded_roles) {
   const iree_hal_device_queue_spec_t* queues =
       iree_hal_device_spec_queues(iree_hal_device_spec(device));
   for (iree_host_size_t i = 0; i < queues->family_count; ++i) {
-    if (queues->families[i].provisioned_queue_count &&
-        iree_all_bits_set(queues->families[i].role_flags, role)) {
-      return iree_hal_device_queue(device, i, 0);
+    const iree_hal_queue_family_spec_t* family = &queues->families[i];
+    if ((family->provisioned_queue_count ||
+         iree_any_bit_set(
+             family->flags,
+             IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION)) &&
+        iree_all_bits_set(family->role_flags, role) &&
+        !iree_any_bit_set(family->role_flags, excluded_roles)) {
+      return iree_hal_device_queue_family(device, i);
     }
   }
   return NULL;
@@ -112,21 +118,28 @@ static iree_status_t loom_runtime_device_group_initialize(
 static iree_status_t loom_runtime_device_initialize(
     loom_runtime_device_t* device) {
   loom_runtime_device_group_t* group = device->owner;
-  device->dispatch = loom_runtime_device_select_queue(
-      device->handle, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH);
-  device->transfer = loom_runtime_device_select_queue(
-      device->handle, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
-  if (!device->dispatch || !device->transfer) {
+  const iree_hal_queue_family_t* dispatch_family =
+      loom_runtime_device_select_family(
+          device->handle, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH, 0);
+  const iree_hal_queue_family_t* transfer_family =
+      loom_runtime_device_select_family(
+          device->handle, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
+          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH);
+  if (!transfer_family) {
+    transfer_family = loom_runtime_device_select_family(
+        device->handle, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER, 0);
+  }
+  if (!dispatch_family || !transfer_family) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "device needs dispatch and transfer queues");
   }
-  const iree_hal_queue_family_t* dispatch_family =
-      iree_hal_queue_family(device->dispatch);
-  const iree_hal_queue_family_t* transfer_family =
-      iree_hal_queue_family(device->transfer);
   IREE_RETURN_IF_ERROR(loom_runtime_execution_queues_create(
       dispatch_family, transfer_family, group->host_allocator,
       &device->execution_queues));
+  device->dispatch =
+      loom_runtime_execution_queues_dispatch_queue(device->execution_queues);
+  device->transfer =
+      loom_runtime_execution_queues_transfer_queue(device->execution_queues);
   return loom_runtime_jit_cache_allocate(device->handle, device->dispatch,
                                          group->host_allocator,
                                          &device->jit_cache);
