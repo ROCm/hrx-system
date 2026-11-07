@@ -173,7 +173,7 @@ TEST_F(CommandsTest, WaitsPreserveEveryComparisonWidthAndMask) {
            0x80000004, 0xc0079300, comparison.control, 8, 0x5678,
            static_cast<uint32_t>(reference),
            static_cast<uint32_t>(reference >> 32), static_cast<uint32_t>(mask),
-           static_cast<uint32_t>(mask >> 32), 0x80000004});
+           static_cast<uint32_t>(mask >> 32), 4});
     }
   }
 }

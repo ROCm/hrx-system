@@ -121,9 +121,10 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_wait32(
     uint32_t* words, uint64_t address, uint32_t reference, uint32_t mask,
     iree_hal_amd_gpu_pm4_comparison_t comparison);
 
-// Emits nine DWORDs of MEC WAIT_REG_MEM64 with ACE polling offload. The
-// eight-byte-aligned target also has qualified native 64-bit read/write
-// atomicity. Other ownership and visibility requirements match the DWORD form.
+// Emits nine DWORDs of MEC WAIT_REG_MEM64 without polling offload, preserving
+// the poll address while an unsatisfied wait executes. The eight-byte-aligned
+// target also has qualified native 64-bit read/write atomicity. Other ownership
+// and visibility requirements match the DWORD form.
 uint32_t* iree_hal_amd_gpu_pm4_emit_wait64(
     uint32_t* words, uint64_t address, uint64_t reference, uint64_t mask,
     iree_hal_amd_gpu_pm4_comparison_t comparison);

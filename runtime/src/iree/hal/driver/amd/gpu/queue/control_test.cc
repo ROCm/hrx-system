@@ -54,9 +54,8 @@ TEST(ControlTest, WaitWidthsPredicatesAndFullMasks) {
     command.width = IREE_HAL_ATOMIC_WIDTH_64;
     command.value = UINT64_C(0x8001020381020304);
     command.mask = UINT64_C(0xFF0FFFFF0FFFFFFF);
-    ExpectPacket(command,
-                 {0xc0079300, 0x13u + condition, 0x34567890, 0x12, 0x81020304,
-                  0x80010203, 0x0FFFFFFF, 0xFF0FFFFF, 0x80000004});
+    ExpectPacket(command, {0xc0079300, 0x13u + condition, 0x34567890, 0x12,
+                           0x81020304, 0x80010203, 0x0FFFFFFF, 0xFF0FFFFF, 4});
   }
 }
 
