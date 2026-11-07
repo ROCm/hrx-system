@@ -52,8 +52,9 @@ void GpuFileIoFixture::Execute(const kernels::Kernel& kernel,
   commands.BindCompute(program, arguments->device_address,
                        family_.format_features);
   commands.Dispatch(program, 1, 1, 1);
-  commands.SystemBarrier();
-  commands.WriteData32(completion->device_address, 1);
+  // Only the host needs completion. Publish the shader's stores at
+  // bottom-of-pipe without blocking the command processor on a compute join.
+  commands.ReleaseSystem32(completion->device_address, 1);
   commands.PadToEightWords();
 
   // Observe the actual idle transition instead of assuming a delay sleeps
