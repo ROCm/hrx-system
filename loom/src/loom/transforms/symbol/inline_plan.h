@@ -147,6 +147,8 @@ typedef struct loom_inline_component_entries_t {
   uint32_t last_entry;
 } loom_inline_component_entries_t;
 
+typedef struct loom_inline_execution_targets_t loom_inline_execution_targets_t;
+
 struct loom_inline_callables_plan_t {
   // Active pass invocation.
   loom_pass_t* pass;
@@ -158,6 +160,8 @@ struct loom_inline_callables_plan_t {
   loom_module_t* module;
   // Mutable compiler-version owner, or NULL outside target compilation.
   loom_function_version_owner_t* version_owner;
+  // Lazily allocated target projections for independent execution scopes.
+  loom_inline_execution_targets_t* execution_targets;
   // Dense symbol summaries indexed by module symbol id.
   loom_inline_symbol_info_t* symbols;
   // Dense plan entries collected from direct call edges.

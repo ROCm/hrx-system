@@ -24,6 +24,7 @@ loom_check_test_suite(
         "inline_dependent_types.loom-test",
         "inline_profitability.loom-test",
         "inline_target_context.loom-test",
+        "inline_worker_policy.loom-test",
         "reference_boundaries.loom-test",
         "refine_boundaries.loom-test",
         "refine_boundary_returns.loom-test",
