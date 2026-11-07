@@ -306,6 +306,47 @@ static iree_status_t loom_scalar_wide_division_build_assume_range(
     int64_t maximum, loom_type_t type, loom_location_id_t location,
     loom_value_id_t* out_value);
 
+static iree_status_t loom_scalar_wide_division_extract_word(
+    loom_builder_t* builder, loom_value_id_t value, uint32_t offset,
+    loom_location_id_t location, loom_value_id_t* out_value) {
+  loom_op_t* extract_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_scalar_bitfield_extractu_build(
+      builder, value, offset, /*width=*/32,
+      loom_type_scalar(LOOM_SCALAR_TYPE_I32), location, &extract_op));
+  *out_value = loom_scalar_bitfield_extractu_result(extract_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scalar_wide_division_extend_word(
+    loom_builder_t* builder, loom_value_id_t value, loom_location_id_t location,
+    loom_value_id_t* out_value) {
+  loom_op_t* extend_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_scalar_extui_build(
+      builder, value, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      loom_type_scalar(LOOM_SCALAR_TYPE_I64), location, &extend_op));
+  *out_value = loom_scalar_extui_result(extend_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_scalar_wide_division_join_words(
+    loom_builder_t* builder, loom_value_id_t low, loom_value_id_t high,
+    loom_location_id_t location, loom_value_id_t* out_value) {
+  const loom_type_t i64_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_wide_division_extend_word(builder, low, location, &low));
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_wide_division_extend_word(builder, high, location, &high));
+  loom_value_id_t shift = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_constant(
+      builder, 32, LOOM_SCALAR_TYPE_I64, location, &shift));
+  loom_value_id_t upper = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_shift(
+      builder, /*left=*/true, high, shift, i64_type, location, &upper));
+  return loom_scalar_wide_division_build_binary(
+      builder, LOOM_SCALAR_WIDE_DIVISION_BINARY_OR, upper, low, i64_type,
+      location, out_value);
+}
+
 static iree_status_t loom_scalar_wide_division_split_inputs(
     loom_builder_t* builder, const loom_scalar_wide_division_match_t* match,
     loom_location_id_t location, loom_value_id_t* out_low,
@@ -319,16 +360,10 @@ static iree_status_t loom_scalar_wide_division_split_inputs(
   IREE_RETURN_IF_ERROR(loom_scalar_wide_division_cast_input_to_i64(
       builder, match->divisor, match->source_type, location, &divisor));
 
-  loom_op_t* low_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_trunci_build(builder, dividend, i64_type,
-                                                i32_type, location, &low_op));
-  *out_low = loom_scalar_trunci_result(low_op);
-
-  loom_op_t* high_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_bitfield_extractu_build(
-      builder, dividend, /*offset=*/32, /*width=*/32, i32_type, location,
-      &high_op));
-  *out_high = loom_scalar_bitfield_extractu_result(high_op);
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extract_word(
+      builder, dividend, 0, location, out_low));
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extract_word(
+      builder, dividend, 32, location, out_high));
 
   loom_op_t* divisor_op = NULL;
   IREE_RETURN_IF_ERROR(loom_scalar_trunci_build(
@@ -548,71 +583,20 @@ static iree_status_t loom_scalar_wide_division_build_normalized_pair(
       builder, /*left=*/true, divisor, *out_normalization_shift, i32_type,
       location, out_normalized_divisor));
 
-  loom_op_t* low_wide_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_extui_build(builder, low, i32_type, i64_type,
-                                               location, &low_wide_op));
-  loom_op_t* high_wide_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_extui_build(
-      builder, reduced_high, i32_type, i64_type, location, &high_wide_op));
-  loom_value_id_t word_shift = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_constant(
-      builder, 32, LOOM_SCALAR_TYPE_I64, location, &word_shift));
-  loom_value_id_t shifted_high = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_shift(
-      builder, /*left=*/true, loom_scalar_extui_result(high_wide_op),
-      word_shift, i64_type, location, &shifted_high));
   loom_value_id_t reduced_dividend = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_binary(
-      builder, LOOM_SCALAR_WIDE_DIVISION_BINARY_OR, shifted_high,
-      loom_scalar_extui_result(low_wide_op), i64_type, location,
-      &reduced_dividend));
-  loom_op_t* wide_shift_op = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_scalar_extui_build(builder, *out_normalization_shift, i32_type,
-                              i64_type, location, &wide_shift_op));
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_join_words(
+      builder, low, reduced_high, location, &reduced_dividend));
+  loom_value_id_t wide_shift = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extend_word(
+      builder, *out_normalization_shift, location, &wide_shift));
   loom_value_id_t normalized_dividend = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_shift(
-      builder, /*left=*/true, reduced_dividend,
-      loom_scalar_extui_result(wide_shift_op), i64_type, location,
+      builder, /*left=*/true, reduced_dividend, wide_shift, i64_type, location,
       &normalized_dividend));
-  loom_op_t* normalized_low_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_trunci_build(builder, normalized_dividend,
-                                                i64_type, i32_type, location,
-                                                &normalized_low_op));
-  *out_normalized_low = loom_scalar_trunci_result(normalized_low_op);
-  loom_value_id_t normalized_high_wide = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_shift(
-      builder, /*left=*/false, normalized_dividend, word_shift, i64_type,
-      location, &normalized_high_wide));
-  loom_op_t* normalized_high_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_trunci_build(builder, normalized_high_wide,
-                                                i64_type, i32_type, location,
-                                                &normalized_high_op));
-  *out_normalized_high = loom_scalar_trunci_result(normalized_high_op);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_scalar_wide_division_join_words(
-    loom_builder_t* builder, loom_value_id_t low, loom_value_id_t high,
-    loom_location_id_t location, loom_value_id_t* out_value) {
-  const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
-  const loom_type_t i64_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
-  loom_op_t* low_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_extui_build(builder, low, i32_type, i64_type,
-                                               location, &low_op));
-  loom_op_t* high_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_extui_build(builder, high, i32_type,
-                                               i64_type, location, &high_op));
-  loom_value_id_t shift = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_constant(
-      builder, 32, LOOM_SCALAR_TYPE_I64, location, &shift));
-  loom_value_id_t upper = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_build_shift(
-      builder, /*left=*/true, loom_scalar_extui_result(high_op), shift,
-      i64_type, location, &upper));
-  return loom_scalar_wide_division_build_binary(
-      builder, LOOM_SCALAR_WIDE_DIVISION_BINARY_OR, upper,
-      loom_scalar_extui_result(low_op), i64_type, location, out_value);
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extract_word(
+      builder, normalized_dividend, 0, location, out_normalized_low));
+  return loom_scalar_wide_division_extract_word(
+      builder, normalized_dividend, 32, location, out_normalized_high);
 }
 
 static iree_status_t loom_scalar_wide_division_build_word_divrem(
@@ -728,28 +712,6 @@ static iree_status_t loom_scalar_wide_division_build_word_divrem(
   return iree_ok_status();
 }
 
-static iree_status_t loom_scalar_wide_division_word(
-    loom_builder_t* builder, loom_value_id_t value, uint32_t offset,
-    loom_location_id_t location, loom_value_id_t* out_value) {
-  loom_op_t* extract_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_bitfield_extractu_build(
-      builder, value, offset, /*width=*/32,
-      loom_type_scalar(LOOM_SCALAR_TYPE_I32), location, &extract_op));
-  *out_value = loom_scalar_bitfield_extractu_result(extract_op);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_scalar_wide_division_extend_word(
-    loom_builder_t* builder, loom_value_id_t value, loom_location_id_t location,
-    loom_value_id_t* out_value) {
-  loom_op_t* extend_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_scalar_extui_build(
-      builder, value, loom_type_scalar(LOOM_SCALAR_TYPE_I32),
-      loom_type_scalar(LOOM_SCALAR_TYPE_I64), location, &extend_op));
-  *out_value = loom_scalar_extui_result(extend_op);
-  return iree_ok_status();
-}
-
 static iree_status_t loom_scalar_wide_division_build_general(
     loom_builder_t* builder, loom_value_id_t dividend, loom_value_id_t divisor,
     loom_location_id_t location, loom_value_id_t* out_quotient,
@@ -762,8 +724,8 @@ static iree_status_t loom_scalar_wide_division_build_general(
   const loom_type_t i32_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   const loom_type_t i64_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64);
   loom_value_id_t high = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(
-      loom_scalar_wide_division_word(builder, divisor, 32, location, &high));
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extract_word(
+      builder, divisor, 32, location, &high));
   loom_op_t* count_op = NULL;
   IREE_RETURN_IF_ERROR(
       loom_scalar_ctlzi_build(builder, high, i32_type, location, &count_op));
@@ -775,10 +737,10 @@ static iree_status_t loom_scalar_wide_division_build_general(
       builder, /*left=*/true, divisor, shift, i64_type, location,
       &normalized_divisor));
   loom_value_id_t divisor_word = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_word(
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extract_word(
       builder, normalized_divisor, 32, location, &divisor_word));
   loom_value_id_t divisor_low = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_word(
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extract_word(
       builder, normalized_divisor, 0, location, &divisor_low));
 
   loom_value_id_t word_width = LOOM_VALUE_ID_INVALID;
@@ -808,7 +770,7 @@ static iree_status_t loom_scalar_wide_division_build_general(
                                  division_types, location, &division_op));
   loom_value_id_t quotient = loom_scalar_divremui_quotient(division_op);
   loom_value_id_t remainder = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_word(
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extract_word(
       builder, loom_scalar_divremui_remainder(division_op), 0, location,
       &remainder));
 
@@ -818,8 +780,8 @@ static iree_status_t loom_scalar_wide_division_build_general(
   // only one decrement. For a word divisor its low normalized word is zero,
   // making the same test false even when the quotient occupies two words.
   loom_value_id_t quotient_low = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_word(builder, quotient, 0,
-                                                      location, &quotient_low));
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extract_word(
+      builder, quotient, 0, location, &quotient_low));
   IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extend_word(
       builder, quotient_low, location, &quotient_low));
   IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extend_word(
@@ -833,8 +795,8 @@ static iree_status_t loom_scalar_wide_division_build_general(
       builder, /*left=*/true, dividend, shift, i64_type, location,
       &shifted_dividend));
   loom_value_id_t next_word = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_word(builder, shifted_dividend,
-                                                      0, location, &next_word));
+  IREE_RETURN_IF_ERROR(loom_scalar_wide_division_extract_word(
+      builder, shifted_dividend, 0, location, &next_word));
   loom_value_id_t limit = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_scalar_wide_division_join_words(
       builder, next_word, remainder, location, &limit));
