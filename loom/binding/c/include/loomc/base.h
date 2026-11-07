@@ -382,6 +382,12 @@ enum {
 
   /// Frees an existing allocation.
   LOOMC_ALLOCATOR_COMMAND_FREE = 3,
+
+  /// Requests reclamation of unused storage without affecting live allocations.
+  /// Both parameters and the allocation pointer are NULL. Reclamation is a
+  /// cold-path hint with no guaranteed byte count; allocators with no unused
+  /// storage return success without changing allocation semantics.
+  LOOMC_ALLOCATOR_COMMAND_TRIM = 4,
 };
 
 #if !defined(IREE_ALLOCATOR_ALLOC_PARAMS_T_DEFINED_)

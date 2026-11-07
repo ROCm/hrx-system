@@ -17,6 +17,22 @@ using loom_runtime::testing::memory::DedicatedNativeWorkerMemoryTest;
 using loom_runtime::testing::memory::DeviceMemoryTest;
 using loom_runtime::testing::memory::MemoryTest;
 
+TEST_F(MemoryTest, HostAllocatorTrimPreservesLiveDeviceStorage) {
+  const auto geometry = loom_runtime_pool_state_geometry(storage_owner);
+  IREE_ASSERT_OK(loom_runtime_virtual_buffer_allocate(
+      pool, geometry, geometry.mapping_size, geometry.granularity,
+      &statistics[0], &first));
+  IREE_ASSERT_OK(
+      loom_runtime_virtual_buffer_commit(first, 0, geometry.mapping_size));
+  RoundTrip(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+  const auto before = native.allocation_metrics();
+  IREE_ASSERT_OK(iree_allocator_trim(native.allocator()));
+  const auto after = native.allocation_metrics();
+  EXPECT_EQ(before.request_count, after.request_count);
+  EXPECT_EQ(before.requested_bytes, after.requested_bytes);
+  CheckRetained(loom_runtime_virtual_buffer_handle(first), 0, 0x12345678);
+}
+
 TEST_F(MemoryTest, DefaultAdmissionUsesPhysicalBackingAndOptionalBudget) {
   ASSERT_NO_FATAL_FAILURE(UseBacking(false, 0, nullptr));
   const uint64_t capacity = loom_runtime_memory_pool_limit(pool);

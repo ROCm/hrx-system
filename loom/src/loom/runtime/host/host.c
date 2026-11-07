@@ -281,12 +281,14 @@ loomc_workspace_t* loom_runtime_host_compiler_workspace(
   return host->compiler_workspaces[worker_ordinal];
 }
 
-void loom_runtime_host_trim_compiler(loom_runtime_host_t* host) {
+iree_status_t loom_runtime_host_trim_compiler(loom_runtime_host_t* host) {
   IREE_TRACE_ZONE_BEGIN(z0);
   for (iree_host_size_t i = 0; i < host->compiler_workspace_count; ++i) {
     loomc_workspace_trim(host->compiler_workspaces[i]);
   }
+  iree_status_t status = iree_allocator_trim(host->host_allocator);
   IREE_TRACE_ZONE_END(z0);
+  return status;
 }
 
 iree_arena_block_pool_t* loom_runtime_host_block_pool(

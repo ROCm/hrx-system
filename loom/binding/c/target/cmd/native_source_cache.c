@@ -82,6 +82,9 @@ static iree_status_t loomc_cmd_source_allocator_ctl(
     void* self, iree_allocator_command_t command, const void* params,
     void** inout_ptr) {
   loomc_cmd_native_source_t* source = self;
+  if (command == IREE_ALLOCATOR_COMMAND_TRIM) {
+    return iree_allocator_trim(source->allocator);
+  }
   loomc_cmd_source_allocation_t* allocation =
       *inout_ptr ? (loomc_cmd_source_allocation_t*)*inout_ptr - 1 : NULL;
   if (command == IREE_ALLOCATOR_COMMAND_FREE) {

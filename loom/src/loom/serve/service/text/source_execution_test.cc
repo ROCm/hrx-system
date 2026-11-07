@@ -5,8 +5,13 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <atomic>
+#include <memory>
 
+#include "loom/runtime/execution/workspace.h"
+#include "loom/runtime/host/host.h"
 #include "loom/runtime/testing/application.h"
+#include "loom/runtime/testing/compiler.h"
+#include "loom/runtime/testing/device.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 
 namespace {
@@ -101,6 +106,126 @@ TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
     EXPECT_EQ(after.retained.reserved_bytes, before.retained.reserved_bytes);
     EXPECT_EQ(after.retained.committed_bytes, before.retained.committed_bytes);
   }
+}
+
+TEST_F(SourceTextServiceTest, AllocatorTrimFailureRetiresAcceptedLoad) {
+  struct TrimAllocator {
+    // Storage provider that outlives this test's host and device group.
+    iree_allocator_t backing = iree_allocator_system();
+    // Reclamation calls made by the serialized load owner.
+    iree_host_size_t calls = 0;
+    // External control failure injected independently of allocation/free.
+    bool reject = true;
+  } state;
+  const iree_allocator_t allocator = {
+      &state,
+      [](void* self, iree_allocator_command_t command, const void* parameters,
+         void** pointer) -> iree_status_t {
+        auto* state = static_cast<TrimAllocator*>(self);
+        if (command == IREE_ALLOCATOR_COMMAND_TRIM) {
+          ++state->calls;
+          if (state->reject) {
+            return iree_status_from_code(IREE_STATUS_UNAVAILABLE);
+          }
+        }
+        return state->backing.ctl(state->backing.self, command, parameters,
+                                  pointer);
+      },
+  };
+  loom_runtime_host_t* host = nullptr;
+  IREE_ASSERT_OK(loom_runtime_test_host_create(2, allocator, &host));
+  const std::unique_ptr<loom_runtime_host_t,
+                        decltype(&loom_runtime_host_release)>
+      host_owner(host, loom_runtime_host_release);
+  iree_hal_driver_t* driver = nullptr;
+  IREE_ASSERT_OK(loom_runtime_test_driver_acquire(host, &driver));
+  const std::unique_ptr<iree_hal_driver_t, decltype(&iree_hal_driver_release)>
+      driver_owner(driver, iree_hal_driver_release);
+  const auto* target = loom_runtime_test_device();
+  const loom_runtime_device_options_t device_options = {
+      .driver = driver,
+      .uri = target->device_uri,
+  };
+  loom_runtime_device_group_t* group = nullptr;
+  IREE_ASSERT_OK(loom_runtime_device_group_allocate(host, 1, &device_options,
+                                                    allocator, &group));
+  const auto release_group = [](loom_runtime_device_group_t* group) {
+    IREE_EXPECT_OK(loom_runtime_device_group_free(group));
+  };
+  const std::unique_ptr<loom_runtime_device_group_t, decltype(release_group)>
+      group_owner(group, release_group);
+  const bool elastic =
+      target->service_backing == LOOM_RUNTIME_POOL_BACKING_ELASTIC;
+  const loom_runtime_pool_options_t pool_options = {
+      .elastic = elastic,
+      .weight_slab_size = 2 * 1024 * 1024,
+      .state_slab_size = 2 * 1024 * 1024,
+      .memory_limit = elastic ? 64 * 1024 * 1024u : 0,
+  };
+  loom_runtime_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(loom_runtime_device_group_create_pool(
+      group, {.name = IREE_SV("reclamation"), .device_mask = 1}, &pool_options,
+      &pool));
+  auto* device = loom_runtime_device_group_at(group, 0);
+  iree_notification_t notification;
+  iree_notification_initialize(&notification);
+  const auto wake = [](void* payload) {
+    iree_notification_post(static_cast<iree_notification_t*>(payload),
+                           IREE_ALL_WAITERS);
+  };
+  const auto options = ModelOptions();
+  for (const bool reject : {true, false}) {
+    SCOPED_TRACE(reject);
+    state.reject = reject;
+    const auto trim_count = state.calls;
+    loom_serve_text_load_t* load = nullptr;
+    IREE_ASSERT_OK(loom_serve_text_load_allocate(
+        device, pool, &options, wake, &notification, allocator, &load));
+    struct LoadWait {
+      // Borrowed load advanced by this pool's exclusive outer owner.
+      loom_serve_text_load_t* load;
+      // Owned load result joined with physical allocation progress.
+      iree_status_t status = iree_ok_status();
+      // Terminal preparation and accepted consumer retirement have completed.
+      bool complete = false;
+    } wait{load};
+    iree_status_t status = loom_runtime_workspace_await(
+        loom_runtime_pool_workspace(pool), &notification,
+        [](void* user_data) {
+          auto* wait = static_cast<LoadWait*>(user_data);
+          wait->status = loom_serve_text_load_advance(
+              wait->load, LOOM_SERVE_TEXT_LOAD_FLAG_DEMAND, &wait->complete);
+          return wait->complete || !iree_status_is_ok(wait->status);
+        },
+        &wait);
+    status = iree_status_join(status, wait.status);
+    EXPECT_TRUE(wait.complete);
+    EXPECT_EQ(state.calls, trim_count + 1);
+    auto* model = loom_serve_text_load_take_model(load);
+    loom_serve_text_load_free(load);
+    EXPECT_EQ(loom_serve_text_model_parameter_activity(model).activations, 1u);
+    if (reject) {
+      IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE, status);
+      ASSERT_TRUE(loom_serve_text_model_is_retired(model));
+      IREE_ASSERT_OK(loom_serve_text_model_free_retired(model));
+    } else {
+      IREE_ASSERT_OK(status);
+      // Compiled images and executables outlive the released load catalog.
+      auto* row = loom_serve_text_model_row(model, 0);
+      const int32_t token = Oracle::Id('a');
+      IREE_ASSERT_OK(loom_serve_text_row_prefill(row, 1, &token));
+      Oracle reference;
+      reference.Consume("a");
+      EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
+      IREE_ASSERT_OK(loom_serve_text_model_free(model));
+    }
+    if (auto* memory = loom_runtime_pool_memory(pool)) {
+      IREE_ASSERT_OK(loom_runtime_memory_pool_await(memory));
+    }
+    // Idle backing belongs to the shared pool; no model consumer may remain.
+    EXPECT_FALSE(loom_runtime_pool_is_in_use(pool));
+  }
+  iree_notification_deinitialize(&notification);
 }
 
 TEST_F(SourceTextServiceTest, IndependentParameterPreparationJoinsAllDomains) {

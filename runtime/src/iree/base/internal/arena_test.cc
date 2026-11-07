@@ -75,6 +75,27 @@ TEST(ArenaBlockPool, Trim) {
   iree_arena_block_pool_deinitialize(&pool);
 }
 
+TEST(ArenaBlockPool, AllocatorTrimPreservesLiveArena) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
+  IREE_ASSERT_OK(iree_arena_block_pool_preallocate(&pool, 8));
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+  iree_allocator_t allocator = iree_arena_allocator(&arena);
+  void* live = nullptr;
+  IREE_ASSERT_OK(iree_allocator_malloc(allocator, 128, &live));
+  std::memset(live, 0x5A, 128);
+  IREE_ASSERT_OK(iree_allocator_trim(allocator));
+  for (iree_host_size_t i = 0; i < 128; ++i) {
+    EXPECT_EQ(static_cast<uint8_t*>(live)[i], 0x5A);
+  }
+  void* subsequent = nullptr;
+  IREE_ASSERT_OK(iree_allocator_malloc(allocator, kBlockSize, &subsequent));
+  std::memset(subsequent, 0xA5, kBlockSize);
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
 TEST(ArenaBlockPool, StatisticsTrackOnlySystemAllocations) {
   iree_arena_block_pool_t pool;
   iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);

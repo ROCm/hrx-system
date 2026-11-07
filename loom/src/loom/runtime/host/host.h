@@ -80,12 +80,13 @@ loomc_task_pool_t* loom_runtime_host_task_pool(const loom_runtime_host_t* host);
 loomc_workspace_t* loom_runtime_host_compiler_workspace(
     const loom_runtime_host_t* host, iree_host_size_t worker_ordinal);
 
-// Returns idle compiler scratch to the host allocator after a preparation
-// burst. Active compiler operations and retained modules remain valid; blocks
-// returned after a pool is trimmed remain available for subsequent work.
-// Safe while other models compile. This is cold-path reclamation, not a
-// per-kernel operation. Device-only hosts have no compiler scratch to trim.
-void loom_runtime_host_trim_compiler(loom_runtime_host_t* host);
+// Returns idle compiler scratch after a preparation burst, then requests unused
+// storage reclamation once from the host allocator. Active compiler operations
+// and retained modules remain valid; blocks returned after a pool is trimmed
+// remain available for subsequent work. Safe while other models compile.
+// This is cold-path reclamation and propagates allocator control failures.
+// Device-only hosts forward the allocator hint without compiler scratch.
+iree_status_t loom_runtime_host_trim_compiler(loom_runtime_host_t* host);
 
 // Shared backing for short-lived CPU work arenas. Each invocation owns its
 // arena and returns its blocks after all borrowers retire. The thread-safe pool
