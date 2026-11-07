@@ -18,12 +18,22 @@ _REQUIRED_MEMBERS = (
 )
 # Preserve direct filesystem access through ssl.__file__.
 _UNARCHIVED_MEMBERS = frozenset(("ssl.py",))
-_RUNTIME_MODULE_MEMBER = "_hrx_windows_runtime.py"
-_SITE_CUSTOMIZATION_CALL = b"    execsitecustomize()\n"
-_RUNTIME_INITIALIZATION = (
-    b"    import _hrx_windows_runtime as _hrx_runtime\n"
-    b"    _hrx_runtime._configure_runtime(\n"
-    b"        _hrx_runtime.__file__, sys, os.environ)\n" + _SITE_CUSTOMIZATION_CALL
+_SITE_INITIALIZATION_MARKER = b"\n_fixup_stdlib_paths()\n"
+_COMPACT_RUNTIME_INITIALIZATION = _SITE_INITIALIZATION_MARKER + (
+    b"\n"
+    b"def _configure_compact_windows_runtime():\n"
+    b"    runtime_root = os.path.dirname(\n"
+    b"        os.path.join(_RUNFILES_ROOT, _INTERPRETER_ACTUAL_PATH)\n"
+    b"    )\n"
+    b'    os.environ["TCL_LIBRARY"] = os.path.join(\n'
+    b'        runtime_root, "tcl", "tcl8.6"\n'
+    b"    )\n"
+    b'    os.environ["TK_LIBRARY"] = os.path.join(\n'
+    b'        runtime_root, "tcl", "tk8.6"\n'
+    b"    )\n"
+    b"\n"
+    b"\n"
+    b"_configure_compact_windows_runtime()\n"
 )
 
 
@@ -48,17 +58,11 @@ def archive_members(library_directory: Path) -> Iterator[tuple[Path, PurePath]]:
             yield source_path, relative_path
 
 
-def write_standard_library_archive(
-    library_directory: Path, runtime_module_path: Path, output_path: Path
-) -> None:
+def write_standard_library_archive(library_directory: Path, output_path: Path) -> None:
     """Writes a byte-stable, uncompressed CPython standard-library archive."""
 
     if not library_directory.is_dir():
         raise ValueError(f"Python standard library does not exist: {library_directory}")
-    if not runtime_module_path.is_file():
-        raise ValueError(
-            f"Python runtime initializer does not exist: {runtime_module_path}"
-        )
     members = list(archive_members(library_directory))
     member_names = {relative_path.as_posix() for _, relative_path in members}
     missing_members = set(_REQUIRED_MEMBERS) - member_names
@@ -66,28 +70,12 @@ def write_standard_library_archive(
         raise ValueError(
             f"Python standard library is missing required files: {sorted(missing_members)}"
         )
-    if _RUNTIME_MODULE_MEMBER in member_names:
-        raise ValueError(
-            f"Python standard library already contains {_RUNTIME_MODULE_MEMBER}"
-        )
-    members.append((runtime_module_path, PurePath(_RUNTIME_MODULE_MEMBER)))
-    members.sort(key=lambda member: member[1].as_posix())
-
     # Storing source bytes avoids host-zlib differences in repository content.
     with zipfile.ZipFile(
         output_path, mode="w", compression=zipfile.ZIP_STORED, allowZip64=True
     ) as archive:
         for source_path, relative_path in members:
             contents = source_path.read_bytes()
-            if relative_path.as_posix() == "site.py":
-                if contents.count(_SITE_CUSTOMIZATION_CALL) != 1:
-                    raise ValueError(
-                        "Python site bootstrap does not contain exactly one "
-                        "application customization call"
-                    )
-                contents = contents.replace(
-                    _SITE_CUSTOMIZATION_CALL, _RUNTIME_INITIALIZATION
-                )
             archive_info = zipfile.ZipInfo(
                 relative_path.as_posix(), date_time=_ARCHIVE_TIMESTAMP
             )
@@ -97,14 +85,32 @@ def write_standard_library_archive(
             archive.writestr(archive_info, contents)
 
 
+def write_site_initialization_template(
+    upstream_template_path: Path, output_path: Path
+) -> None:
+    """Adds compact-runtime environment setup to rules_python startup."""
+
+    contents = upstream_template_path.read_bytes()
+    if contents.count(_SITE_INITIALIZATION_MARKER) != 1:
+        raise ValueError(
+            "rules_python site initialization template does not contain exactly "
+            "one standard-library path fixup"
+        )
+    output_path.write_bytes(
+        contents.replace(_SITE_INITIALIZATION_MARKER, _COMPACT_RUNTIME_INITIALIZATION)
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("library_directory", type=Path)
-    parser.add_argument("runtime_module_path", type=Path)
-    parser.add_argument("output_path", type=Path)
+    parser.add_argument("upstream_site_template", type=Path)
+    parser.add_argument("output_archive", type=Path)
+    parser.add_argument("output_site_template", type=Path)
     args = parser.parse_args()
-    write_standard_library_archive(
-        args.library_directory, args.runtime_module_path, args.output_path
+    write_standard_library_archive(args.library_directory, args.output_archive)
+    write_site_initialization_template(
+        args.upstream_site_template, args.output_site_template
     )
     return 0
 

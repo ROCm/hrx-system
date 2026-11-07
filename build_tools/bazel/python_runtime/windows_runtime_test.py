@@ -3,6 +3,7 @@
 
 import hashlib
 import importlib.resources
+import os
 import pathlib
 import sqlite3
 import ssl
@@ -23,6 +24,8 @@ def main() -> None:
     assert hashlib.sha256(b"hrx").hexdigest()
     with sqlite3.connect(":memory:") as database:
         assert database.execute("SELECT 6 * 7").fetchone() == (42,)
+    assert pathlib.Path(os.environ["TCL_LIBRARY"], "init.tcl").is_file()
+    assert pathlib.Path(os.environ["TK_LIBRARY"], "tk.tcl").is_file()
     assert tkinter.Tcl().eval("expr 6 * 7") == "42"
 
     child_output = subprocess.check_output(

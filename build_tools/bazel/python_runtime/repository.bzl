@@ -22,8 +22,8 @@ def _compact_windows_python_repository_impl(repository_ctx):
             fail("Compact Windows Python runtime is missing %s" % required_path)
     compactor = repository_ctx.path(repository_ctx.attr._compactor)
     repository_ctx.watch(compactor)
-    runtime_module = repository_ctx.path(repository_ctx.attr._runtime_module)
-    repository_ctx.watch(runtime_module)
+    upstream_site_template = repository_ctx.path(repository_ctx.attr._site_init_template)
+    repository_ctx.watch(upstream_site_template)
     host_python = repository_ctx.path(repository_ctx.attr._host_python)
     repository_ctx.watch(host_python)
     result = repository_ctx.execute(
@@ -31,8 +31,9 @@ def _compact_windows_python_repository_impl(repository_ctx):
             host_python,
             compactor,
             repository_ctx.path("Lib"),
-            runtime_module,
+            upstream_site_template,
             repository_ctx.path(standard_library_archive),
+            repository_ctx.path("site_init_template.py"),
         ],
         environment = {"PYTHONDONTWRITEBYTECODE": "1"},
         quiet = True,
@@ -87,6 +88,7 @@ py_runtime(
     },
     pyc_tag = "@PYC_TAG@",
     python_version = "PY3",
+    site_init_template = "site_init_template.py",
     # Windows resolves pythonXY.zip beside the venv interpreter before site
     # initialization can remap the base runtime paths.
     venv_bin_files = glob([
@@ -123,8 +125,9 @@ compact_windows_python_repository = repository_rule(
         "_host_python": attr.label(
             default = Label("@python_3_12_host//:python"),
         ),
-        "_runtime_module": attr.label(
-            default = Label("//build_tools/bazel/python_runtime:windows_runtime.py"),
+        "_site_init_template": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_python//python/private:site_init_template.py"),
         ),
     },
 )

@@ -189,15 +189,18 @@ def _test_windows_runtime_owns_source_files(name):
 def _test_windows_runtime_owns_source_files_impl(env, target):
     runtime = target[PyRuntimeInfo]
     runtime_files = runtime.files.to_list()
+    runtime_repository = Label("@hrx_python_windows_x86_64_compact//:python_runtimes").repo_name
 
     owners = {file.owner.repo_name: True for file in runtime_files}
     env.expect.that_collection(owners.keys()).contains(
-        Label("@hrx_python_windows_x86_64_compact//:python_runtimes").repo_name,
+        runtime_repository,
     )
     env.expect.that_collection([file.basename for file in runtime_files]).contains("python312.zip")
     env.expect.that_collection([file.basename for file in runtime_files]).contains("ssl.py")
     env.expect.that_collection([file.basename for file in runtime.venv_bin_files]).contains("python312.zip")
     env.expect.that_bool(len(runtime_files) < 1500).equals(True)
+    if runtime.site_init_template.owner.repo_name != runtime_repository:
+        env.fail("Windows Python runtime uses an external site initialization template")
 
     # Configured outputs can be rematerialized between invocations while a
     # persistent worker still has the interpreter or its DLLs mapped.

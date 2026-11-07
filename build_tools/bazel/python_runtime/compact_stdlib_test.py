@@ -3,20 +3,15 @@
 
 from __future__ import annotations
 
-import ntpath
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path, PurePosixPath
-from types import SimpleNamespace
-from unittest.mock import patch
 
 from build_tools.bazel.python_runtime.compact_stdlib import (
     is_archive_member,
+    write_site_initialization_template,
     write_standard_library_archive,
-)
-from build_tools.bazel.python_runtime.windows_runtime import (
-    _configure_runtime,
 )
 
 
@@ -51,76 +46,53 @@ class CompactStandardLibraryTest(unittest.TestCase):
 
             first_archive = root / "first.zip"
             second_archive = root / "second.zip"
-            runtime_module_path = root / "windows_runtime.py"
-            runtime_module_path.write_bytes(b"runtime = True\n")
-            write_standard_library_archive(
-                library_directory, runtime_module_path, first_archive
-            )
-            write_standard_library_archive(
-                library_directory, runtime_module_path, second_archive
-            )
+            write_standard_library_archive(library_directory, first_archive)
+            write_standard_library_archive(library_directory, second_archive)
 
             self.assertEqual(first_archive.read_bytes(), second_archive.read_bytes())
             with zipfile.ZipFile(first_archive) as archive:
                 self.assertEqual(
                     archive.namelist(),
                     [
-                        "_hrx_windows_runtime.py",
                         "email/__init__.py",
                         "encodings/__init__.py",
                         "importlib/__init__.py",
                         "site.py",
                     ],
                 )
-                self.assertEqual(
-                    archive.read("_hrx_windows_runtime.py"), b"runtime = True\n"
-                )
                 self.assertNotIn("sitecustomize.py", archive.namelist())
-                site_contents = archive.read("site.py")
-                self.assertIn(b"import _hrx_windows_runtime", site_contents)
-                self.assertLess(
-                    site_contents.index(b"import _hrx_windows_runtime"),
-                    site_contents.index(b"execsitecustomize()"),
+                self.assertEqual(
+                    archive.read("site.py"),
+                    members["site.py"].encode("utf-8"),
                 )
                 for archive_info in archive.infolist():
                     self.assertEqual(archive_info.date_time, (1980, 1, 1, 0, 0, 0))
                     self.assertEqual(archive_info.compress_type, zipfile.ZIP_STORED)
 
-    def test_configures_runtime_identity_and_tcl_paths(self) -> None:
-        cases = (
-            (r"\\?\C:\runtime\python312.zip", r"C:\runtime"),
-            (
-                r"\\?\UNC\server\share\runtime\python312.zip",
-                r"\\server\share\runtime",
-            ),
-        )
-        for archive_path, runtime_root in cases:
-            with self.subTest(archive_path=archive_path):
-                system = SimpleNamespace(
-                    base_prefix=r"C:\host-python",
-                    base_exec_prefix=r"C:\host-python",
-                )
-                environment = {}
-                with patch(
-                    "build_tools.bazel.python_runtime.windows_runtime.os.path.realpath",
-                    return_value=archive_path,
-                ):
-                    _configure_runtime(
-                        archive_path + r"\_hrx_windows_runtime.py",
-                        system,
-                        environment,
-                    )
+    def test_extends_rules_python_site_initialization(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            upstream_template = root / "upstream.py"
+            upstream_template.write_bytes(
+                b"_fixup_sys_base_executable()\n"
+                b"_fixup_stdlib_paths()\n\n"
+                b"COVERAGE_SETUP = _setup_sys_path()\n"
+            )
+            output_template = root / "compact.py"
+            write_site_initialization_template(upstream_template, output_template)
 
-                self.assertEqual(system.base_prefix, runtime_root)
-                self.assertEqual(system.base_exec_prefix, runtime_root)
-                self.assertEqual(
-                    environment["TCL_LIBRARY"],
-                    ntpath.join(runtime_root, "tcl", "tcl8.6"),
-                )
-                self.assertEqual(
-                    environment["TK_LIBRARY"],
-                    ntpath.join(runtime_root, "tcl", "tk8.6"),
-                )
+            contents = output_template.read_text(encoding="utf-8")
+            self.assertEqual(contents.count("_fixup_stdlib_paths()"), 1)
+            self.assertIn('os.environ["TCL_LIBRARY"]', contents)
+            self.assertIn('os.environ["TK_LIBRARY"]', contents)
+            self.assertLess(
+                contents.index("_fixup_stdlib_paths()"),
+                contents.index('os.environ["TCL_LIBRARY"]'),
+            )
+            self.assertLess(
+                contents.index('os.environ["TK_LIBRARY"]'),
+                contents.index("COVERAGE_SETUP = _setup_sys_path()"),
+            )
 
 
 if __name__ == "__main__":
