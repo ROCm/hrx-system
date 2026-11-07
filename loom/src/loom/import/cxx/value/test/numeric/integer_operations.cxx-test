@@ -1,0 +1,142 @@
+// RUN: roundtrip
+// Widen both operands before multiplication and arithmetic right shift.
+int fixed_multiply(int left, int right) {
+  long long product = (long long)left * (long long)right;
+  return (int)(product >> 16);
+}
+// ----
+func.def public @fixed_multiply(%left: i32, %right: i32) -> (i32) {
+  %3 = scalar.extsi %left : i32 to i64
+  %4 = scalar.extsi %right : i32 to i64
+  %product = scalar.muli %3, %4 : i64
+  %6 = scalar.constant 16 : i32
+  %7 = scalar.extsi %6 : i32 to i64
+  %8 = scalar.shrsi %product, %7 : i64
+  %9 = scalar.trunci %8 : i64 to i32
+  func.return %9 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Increment truncates to byte storage before widening the result.
+unsigned byte_increment(unsigned input) {
+  unsigned char value = (unsigned char)input;
+  ++value;
+  return value;
+}
+// ----
+func.def public @byte_increment(%input: i32) -> (i32) {
+  %value$2 = scalar.trunci %input : i32 to i8
+  %3 = scalar.extui %value$2 : i8 to i32
+  %4 = scalar.constant 1 : i32
+  %5 = scalar.addi %3, %4 : i32
+  %value$6 = scalar.trunci %5 : i32 to i8
+  %7 = scalar.extui %value$6 : i8 to i32
+  func.return %7 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Postdecrement updates byte storage before widening the final value.
+unsigned byte_decrement(unsigned input) {
+  unsigned char value = (unsigned char)input;
+  value--;
+  return value;
+}
+// ----
+func.def public @byte_decrement(%input: i32) -> (i32) {
+  %value$2 = scalar.trunci %input : i32 to i8
+  %3 = scalar.extui %value$2 : i8 to i32
+  %4 = scalar.constant 1 : i32
+  %5 = scalar.subi %3, %4 : i32
+  %value$6 = scalar.trunci %5 : i32 to i8
+  %7 = scalar.extui %value$6 : i8 to i32
+  func.return %7 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Signed short updates use signed promotion and truncate before the result.
+int short_decrement(int input) {
+  short value = (short)input;
+  --value;
+  return value;
+}
+// ----
+func.def public @short_decrement(%input: i32) -> (i32) {
+  %value$2 = scalar.trunci %input : i32 to i16
+  %3 = scalar.extsi %value$2 : i16 to i32
+  %4 = scalar.constant 1 : i32
+  %5 = scalar.subi %3, %4 : i32
+  %value$6 = scalar.trunci %5 : i32 to i16
+  %7 = scalar.extsi %value$6 : i16 to i32
+  func.return %7 : i32
+}
+
+// ====
+// RUN: roundtrip
+// A wide increment retains its unsigned 64-bit value domain.
+unsigned long long wide_increment(unsigned long long input) {
+  unsigned long long value = input;
+  value++;
+  return value;
+}
+// ----
+func.def public @wide_increment(%input: i64) -> (i64) {
+  %2 = scalar.constant 1 : i64
+  %value = scalar.addi %input, %2 : i64
+  func.return %value : i64
+}
+
+// ====
+// RUN: roundtrip
+// A wider shift count does not widen the left operand.
+unsigned shift_left_narrow(unsigned value, unsigned long long count) {
+  return value << count;
+}
+// ----
+func.def public @shift_left_narrow(%value: i32, %count: i64) -> (i32) {
+  %3 = scalar.trunci %count : i64 to i32
+  %4 = scalar.shli %value, %3 : i32
+  func.return %4 : i32
+}
+
+// ====
+// RUN: roundtrip
+// The narrow unsigned count converts to the left operand width.
+unsigned long long shift_left_wide(unsigned long long value, unsigned count) {
+  return value << count;
+}
+// ----
+func.def public @shift_left_wide(%value: i64, %count: i32) -> (i64) {
+  %3 = scalar.extui %count : i32 to i64
+  %4 = scalar.shli %value, %3 : i64
+  func.return %4 : i64
+}
+
+// ====
+// RUN: roundtrip
+// Right shift of a signed value uses arithmetic shift.
+long long shift_right_signed(long long value, unsigned count) {
+  return value >> count;
+}
+// ----
+func.def public @shift_right_signed(%value: i64, %count: i32) -> (i64) {
+  %3 = scalar.extui %count : i32 to i64
+  %4 = scalar.shrsi %value, %3 : i64
+  func.return %4 : i64
+}
+
+// ====
+// RUN: roundtrip
+// Right shift of an unsigned value uses logical shift.
+unsigned long long shift_right_unsigned(unsigned long long value,
+                                       unsigned count) {
+  return value >> count;
+}
+// ----
+func.def public @shift_right_unsigned(%value: i64, %count: i32) -> (i64) {
+  %3 = scalar.extui %count : i32 to i64
+  %4 = scalar.shrui %value, %3 : i64
+  func.return %4 : i64
+}

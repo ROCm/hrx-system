@@ -1,0 +1,205 @@
+// RUN: pass canonicalize,cse,dce
+// Enum storage uses its underlying width through pointer steps and arithmetic.
+enum class Value : unsigned char { zero };
+template <class T>
+static T add(T value, T delta) {
+  return static_cast<T>(static_cast<unsigned long long>(value) +
+                        static_cast<unsigned long long>(delta));
+}
+void update(const Value* input, Value* output, unsigned lane, Value delta) {
+  Value* cursor = output + lane + 1;
+  cursor[-1] = add(input[lane], delta);
+}
+
+// ----
+func.def public @update(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset, %lane: i32, %delta: i8) {
+  %6 = scalar.extui %lane : i32 to i64
+  %9 = index.cast %output_byte_offset : offset to i64
+  %10 = scalar.addi %9, %6 : i64
+  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %12 = index.cast %11 : i64 to offset
+  %50 = scalar.constant 1 : i64
+  %17 = index.cast %12 : offset to i64
+  %18 = scalar.addi %17, %50 : i64
+  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+  %cursor_byte_offset = index.cast %19 : i64 to offset
+  %24 = index.cast %input_byte_offset : offset to i64
+  %25 = scalar.addi %24, %6 : i64
+  %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
+  %27 = index.cast %26 : i64 to offset
+  %28 = buffer.view %input[%27] : buffer -> view<1xi8>
+  %29 = view.load %28[0] : view<1xi8> -> i8
+  %30 = func.call pure @add___Value(%29, %delta) : (i8, i8) -> (i8)
+  %49 = scalar.constant -1 : i64
+  %37 = index.cast %cursor_byte_offset : offset to i64
+  %38 = scalar.addi %37, %49 : i64
+  %39 = scalar.assume %38 [range(%38, 0, 9223372036854775807)] : i64
+  %40 = index.cast %39 : i64 to offset
+  %41 = buffer.view %output[%40] : buffer -> view<1xi8>
+  view.store %30, %41[0] : i8, view<1xi8>
+  func.return
+}
+
+func.def @add___Value(%value: i8, %delta: i8) -> (i8) {
+  %45 = scalar.extui %value : i8 to i64
+  %46 = scalar.extui %delta : i8 to i64
+  %47 = scalar.addi %45, %46 : i64
+  %48 = scalar.trunci %47 : i64 to i8
+  func.return %48 : i8
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Enum storage uses its underlying width through pointer steps and arithmetic.
+enum class Value : unsigned short { zero };
+template <class T>
+static T add(T value, T delta) {
+  return static_cast<T>(static_cast<unsigned long long>(value) +
+                        static_cast<unsigned long long>(delta));
+}
+void update(const Value* input, Value* output, unsigned lane, Value delta) {
+  Value* cursor = output + lane + 1;
+  cursor[-1] = add(input[lane], delta);
+}
+
+// ----
+func.def public @update(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset, %lane: i32, %delta: i16) {
+  %6 = scalar.extui %lane : i32 to i64
+  %53 = scalar.constant 1 : i64
+  %54 = scalar.shli %6, %53 : i64
+  %9 = index.cast %output_byte_offset : offset to i64
+  %10 = scalar.addi %9, %54 : i64
+  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %12 = index.cast %11 : i64 to offset
+  %52 = scalar.constant 2 : i64
+  %17 = index.cast %12 : offset to i64
+  %18 = scalar.addi %17, %52 : i64
+  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+  %cursor_byte_offset = index.cast %19 : i64 to offset
+  %24 = index.cast %input_byte_offset : offset to i64
+  %25 = scalar.addi %24, %54 : i64
+  %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
+  %27 = index.cast %26 : i64 to offset
+  %28 = buffer.view %input[%27] : buffer -> view<1xi16>
+  %29 = view.load %28[0] : view<1xi16> -> i16
+  %30 = func.call pure @add___Value(%29, %delta) : (i16, i16) -> (i16)
+  %49 = scalar.constant -2 : i64
+  %37 = index.cast %cursor_byte_offset : offset to i64
+  %38 = scalar.addi %37, %49 : i64
+  %39 = scalar.assume %38 [range(%38, 0, 9223372036854775807)] : i64
+  %40 = index.cast %39 : i64 to offset
+  %41 = buffer.view %output[%40] : buffer -> view<1xi16>
+  view.store %30, %41[0] : i16, view<1xi16>
+  func.return
+}
+
+func.def @add___Value(%value: i16, %delta: i16) -> (i16) {
+  %45 = scalar.extui %value : i16 to i64
+  %46 = scalar.extui %delta : i16 to i64
+  %47 = scalar.addi %45, %46 : i64
+  %48 = scalar.trunci %47 : i64 to i16
+  func.return %48 : i16
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Enum storage uses its underlying width through pointer steps and arithmetic.
+enum class Value : unsigned { zero };
+template <class T>
+static T add(T value, T delta) {
+  return static_cast<T>(static_cast<unsigned long long>(value) +
+                        static_cast<unsigned long long>(delta));
+}
+void update(const Value* input, Value* output, unsigned lane, Value delta) {
+  Value* cursor = output + lane + 1;
+  cursor[-1] = add(input[lane], delta);
+}
+
+// ----
+func.def public @update(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset, %lane: i32, %delta: i32) {
+  %6 = scalar.extui %lane : i32 to i64
+  %53 = scalar.constant 2 : i64
+  %54 = scalar.shli %6, %53 : i64
+  %9 = index.cast %output_byte_offset : offset to i64
+  %10 = scalar.addi %9, %54 : i64
+  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %12 = index.cast %11 : i64 to offset
+  %52 = scalar.constant 4 : i64
+  %17 = index.cast %12 : offset to i64
+  %18 = scalar.addi %17, %52 : i64
+  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+  %cursor_byte_offset = index.cast %19 : i64 to offset
+  %24 = index.cast %input_byte_offset : offset to i64
+  %25 = scalar.addi %24, %54 : i64
+  %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
+  %27 = index.cast %26 : i64 to offset
+  %28 = buffer.view %input[%27] : buffer -> view<1xi32>
+  %29 = view.load %28[0] : view<1xi32> -> i32
+  %30 = func.call pure @add___Value(%29, %delta) : (i32, i32) -> (i32)
+  %49 = scalar.constant -4 : i64
+  %37 = index.cast %cursor_byte_offset : offset to i64
+  %38 = scalar.addi %37, %49 : i64
+  %39 = scalar.assume %38 [range(%38, 0, 9223372036854775807)] : i64
+  %40 = index.cast %39 : i64 to offset
+  %41 = buffer.view %output[%40] : buffer -> view<1xi32>
+  view.store %30, %41[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @add___Value(%value: i32, %delta: i32) -> (i32) {
+  %45 = scalar.extui %value : i32 to i64
+  %46 = scalar.extui %delta : i32 to i64
+  %47 = scalar.addi %45, %46 : i64
+  %48 = scalar.trunci %47 : i64 to i32
+  func.return %48 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Enum storage uses its underlying width through pointer steps and arithmetic.
+enum class Value : unsigned long long { zero };
+template <class T>
+static T add(T value, T delta) {
+  return static_cast<T>(static_cast<unsigned long long>(value) +
+                        static_cast<unsigned long long>(delta));
+}
+void update(const Value* input, Value* output, unsigned lane, Value delta) {
+  Value* cursor = output + lane + 1;
+  cursor[-1] = add(input[lane], delta);
+}
+
+// ----
+func.def public @update(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset, %lane: i32, %delta: i64) {
+  %6 = scalar.extui %lane : i32 to i64
+  %50 = scalar.constant 3 : i64
+  %51 = scalar.shli %6, %50 : i64
+  %9 = index.cast %output_byte_offset : offset to i64
+  %10 = scalar.addi %9, %51 : i64
+  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %12 = index.cast %11 : i64 to offset
+  %49 = scalar.constant 8 : i64
+  %17 = index.cast %12 : offset to i64
+  %18 = scalar.addi %17, %49 : i64
+  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+  %cursor_byte_offset = index.cast %19 : i64 to offset
+  %24 = index.cast %input_byte_offset : offset to i64
+  %25 = scalar.addi %24, %51 : i64
+  %26 = scalar.assume %25 [range(%25, 0, 9223372036854775807)] : i64
+  %27 = index.cast %26 : i64 to offset
+  %28 = buffer.view %input[%27] : buffer -> view<1xi64>
+  %29 = view.load %28[0] : view<1xi64> -> i64
+  %30 = func.call pure @add___Value(%29, %delta) : (i64, i64) -> (i64)
+  %46 = scalar.constant -8 : i64
+  %37 = index.cast %cursor_byte_offset : offset to i64
+  %38 = scalar.addi %37, %46 : i64
+  %39 = scalar.assume %38 [range(%38, 0, 9223372036854775807)] : i64
+  %40 = index.cast %39 : i64 to offset
+  %41 = buffer.view %output[%40] : buffer -> view<1xi64>
+  view.store %30, %41[0] : i64, view<1xi64>
+  func.return
+}
+
+func.def @add___Value(%value: i64, %delta: i64) -> (i64) {
+  %45 = scalar.addi %value, %delta : i64
+  func.return %45 : i64
+}

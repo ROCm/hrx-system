@@ -1,0 +1,140 @@
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx
+#include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+
+using Int4 = int __attribute__((ext_vector_type(4)));
+using UInt4 = unsigned __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void convert_vectors(const int* integer_input, const float* float_input, float* signed_float_output, float* unsigned_float_output, int* signed_integer_output, unsigned* unsigned_integer_output) {
+  auto integer_input_view = loom::buffer::view<4>(integer_input, {}, loom::encoding::layout::dense<1>());
+  auto float_input_view = loom::buffer::view<4>(float_input, {}, loom::encoding::layout::dense<1>());
+  auto signed_float_output_view = loom::buffer::view<4>(signed_float_output, {}, loom::encoding::layout::dense<1>());
+  auto unsigned_float_output_view = loom::buffer::view<4>(unsigned_float_output, {}, loom::encoding::layout::dense<1>());
+  auto signed_integer_output_view = loom::buffer::view<4>(signed_integer_output, {}, loom::encoding::layout::dense<1>());
+  auto unsigned_integer_output_view = loom::buffer::view<4>(unsigned_integer_output, {}, loom::encoding::layout::dense<1>());
+  Int4 integers = loom::vector::load<Int4>(integer_input_view, {0});
+  Float4 floats = loom::vector::load<Float4>(float_input_view, {0});
+  Float4 signed_floats = loom::convert<Float4>(integers);
+  Float4 unsigned_floats = loom::convert<Float4>(loom::convert<UInt4>(integers));
+  Int4 signed_integers = loom::convert<Int4>(floats);
+  UInt4 unsigned_integers = loom::convert<UInt4>(floats);
+  loom::vector::store(signed_floats, signed_float_output_view, {0});
+  loom::vector::store(unsigned_floats, unsigned_float_output_view, {0});
+  loom::vector::store(signed_integers, signed_integer_output_view, {0});
+  loom::vector::store(unsigned_integers, unsigned_integer_output_view, {0});
+}
+
+// ----
+#include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+
+using Float32x4 = float __attribute__((ext_vector_type(4)));
+using Int32x4 = int __attribute__((ext_vector_type(4)));
+using UInt32x4 = unsigned __attribute__((ext_vector_type(4)));
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void convert_vectors(const int* integer_input, const float* float_input, float* signed_float_output, float* unsigned_float_output, int* signed_integer_output, unsigned* unsigned_integer_output) {
+  auto integer_input_view = loom::buffer::view<4>(integer_input, {}, loom::encoding::layout::dense<1>());
+  auto float_input_view = loom::buffer::view<4>(float_input, {}, loom::encoding::layout::dense<1>());
+  auto signed_float_output_view = loom::buffer::view<4>(signed_float_output, {}, loom::encoding::layout::dense<1>());
+  auto unsigned_float_output_view = loom::buffer::view<4>(unsigned_float_output, {}, loom::encoding::layout::dense<1>());
+  auto signed_integer_output_view = loom::buffer::view<4>(signed_integer_output, {}, loom::encoding::layout::dense<1>());
+  auto unsigned_integer_output_view = loom::buffer::view<4>(unsigned_integer_output, {}, loom::encoding::layout::dense<1>());
+  Int32x4 integers = loom::vector::load<Int32x4>(integer_input_view, loom::type::indices{loom::type::index{0}});
+  Float32x4 floats = loom::vector::load<Float32x4>(float_input_view, loom::type::indices{loom::type::index{0}});
+  Float32x4 signed_floats = loom::convert<Float32x4>(integers);
+  Float32x4 unsigned_floats = loom::convert<Float32x4>(loom::convert<UInt32x4>(integers));
+  Int32x4 signed_integers = loom::convert<Int32x4>(floats);
+  UInt32x4 unsigned_integers = loom::convert<UInt32x4>(floats);
+  loom::vector::store(signed_floats, signed_float_output_view, loom::type::indices{loom::type::index{0}});
+  loom::vector::store(unsigned_floats, unsigned_float_output_view, loom::type::indices{loom::type::index{0}});
+  loom::vector::store(signed_integers, signed_integer_output_view, loom::type::indices{loom::type::index{0}});
+  loom::vector::store(unsigned_integers, unsigned_integer_output_view, loom::type::indices{loom::type::index{0}});
+}
+
+// ====
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+
+using Float4 = float __attribute__((ext_vector_type(4)));
+using Half4 = _Float16 __attribute__((ext_vector_type(4)));
+using Int4 = int __attribute__((ext_vector_type(4)));
+using Mask4 = loom::type::vector<loom::type::shape<4>, bool>;
+using Words = loom::type::view<loom::type::shape<4>, unsigned>;
+using Bytes = loom::type::view<loom::type::shape<16>, unsigned char>;
+
+Mask4 classify(Int4 lhs, Int4 rhs, Float4 values) {
+  Mask4 ordered = loom::vector::cmpi::slt<Mask4>(lhs, rhs);
+  Mask4 unordered = loom::vector::cmpf::uno<Mask4>(values, values);
+  return ordered | unordered;
+}
+Half4 narrow(Float4 values) {
+  return loom::convert<Half4, loom::conversion::subnormal::daz_ftz>(values);
+}
+Bytes bytes(loom::type::buffer<unsigned> data, loom::type::offset byte_offset) {
+  Words words = loom::buffer::view<4>(data, byte_offset, {});
+  return loom::view::bitcast<Bytes>(words);
+}
+float infinity() { return __builtin_bit_cast(float, 0x7f800000u); }
+float quiet_nan() { return __builtin_bit_cast(float, 0x7fc00000u); }
+
+// ----
+#include <loomcxx/numeric.h>
+#include <loomcxx/vector.h>
+
+#include <stdfloat>
+
+using Boolx4 = loom::type::vector<loom::type::shape<4>, bool>;
+using Float16x4 = std::float16_t __attribute__((ext_vector_type(4)));
+using Float32x4 = float __attribute__((ext_vector_type(4)));
+using Int32x4 = int __attribute__((ext_vector_type(4)));
+
+[[loom::symbol("classify")]]
+Boolx4 classify(Int32x4 lhs, Int32x4 rhs, Float32x4 values);
+
+[[loom::symbol("narrow")]]
+Float16x4 narrow(Float32x4 values);
+
+[[loom::symbol("bytes")]]
+loom::type::view<loom::type::shape<16>, const unsigned char> bytes(loom::type::buffer<unsigned> data, loom::type::offset byte_offset);
+
+[[loom::symbol("infinity")]]
+float infinity();
+
+[[loom::symbol("quiet_nan")]]
+float quiet_nan();
+
+[[loom::symbol("classify")]]
+Boolx4 classify(Int32x4 lhs, Int32x4 rhs, Float32x4 values) {
+  Boolx4 ordered = loom::vector::cmpi::slt<Boolx4>(lhs, rhs);
+  Boolx4 unordered = loom::vector::cmpf::uno<Boolx4>(values, values);
+  return (ordered | unordered);
+}
+
+[[loom::symbol("narrow")]]
+Float16x4 narrow(Float32x4 values) {
+  return loom::convert<Float16x4, loom::conversion::subnormal::daz_ftz>(values);
+}
+
+[[loom::symbol("bytes")]]
+loom::type::view<loom::type::shape<16>, const unsigned char> bytes(loom::type::buffer<unsigned> data, loom::type::offset byte_offset) {
+  auto words = loom::buffer::view<4>(loom::buffer::cast<const unsigned>(data), byte_offset, {});
+  return loom::view::bitcast<loom::type::view<loom::type::shape<16>, const unsigned char>>(words);
+}
+
+[[loom::symbol("infinity")]]
+float infinity() {
+  return __builtin_bit_cast(float, 2139095040u);
+}
+
+[[loom::symbol("quiet_nan")]]
+float quiet_nan() {
+  return __builtin_bit_cast(float, 2143289344u);
+}

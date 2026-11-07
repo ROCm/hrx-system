@@ -1,0 +1,149 @@
+// RUN: roundtrip
+// The last legal unsigned bound retains a positive step without wrapping.
+unsigned counted_edge(unsigned start) {
+  unsigned total = 0;
+  [[loom::unroll(2)]]
+  for (unsigned index = start; index < (~0u - 3u); index += (1u << 2))
+    total += index;
+  return total;
+}
+// ----
+func.def public @counted_edge(%start: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %3 = index.cast %start : i32 to offset
+  %4 = scalar.constant -4 : i32
+  %5 = index.cast %4 : i32 to offset
+  %6 = index.constant 4 : offset
+  %7 = scalar.constant 2 : i32
+  %8 = index.cast %7 : i32 to index
+  %total$11 = scf.for %index = [%3 to %5 step %6](%total$10 = %total$2 : i32) -> (i32) unroll(%8) {
+    %12 = index.cast %index : offset to i32
+    %total$13 = scalar.addi %total$10, %12 : i32
+    scf.yield %total$13 : i32
+  }
+  func.return %total$11 : i32
+}
+
+// ====
+// RUN: roundtrip
+// An empty unsigned interval retains its zero bound and never trips.
+unsigned counted_empty(unsigned start) {
+  unsigned total = 7;
+  [[loom::unroll(2)]]
+  for (unsigned index = start; index < (4u - 4u); index += (1u << 2))
+    total += index;
+  return total;
+}
+// ----
+func.def public @counted_empty(%start: i32) -> (i32) {
+  %total$2 = scalar.constant 7 : i32
+  %3 = index.cast %start : i32 to offset
+  %4 = scalar.constant 0 : i32
+  %5 = index.cast %4 : i32 to offset
+  %6 = index.constant 4 : offset
+  %7 = scalar.constant 2 : i32
+  %8 = index.cast %7 : i32 to index
+  %total$11 = scf.for %index = [%3 to %5 step %6](%total$10 = %total$2 : i32) -> (i32) unroll(%8) {
+    %12 = index.cast %index : offset to i32
+    %total$13 = scalar.addi %total$10, %12 : i32
+    scf.yield %total$13 : i32
+  }
+  func.return %total$11 : i32
+}
+
+// ====
+// RUN: roundtrip
+// The maximum unsigned step admits at most one trip before the upper bound.
+unsigned counted_maximum_step(unsigned start) {
+  unsigned total = 0;
+  [[loom::unroll(2)]]
+  for (unsigned index = start; index < (4u / 4u); index += ~0u)
+    total += index + 7u;
+  return total;
+}
+// ----
+func.def public @counted_maximum_step(%start: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %3 = index.cast %start : i32 to offset
+  %4 = scalar.constant 1 : i32
+  %5 = index.cast %4 : i32 to offset
+  %6 = index.constant 4294967295 : offset
+  %7 = scalar.constant 2 : i32
+  %8 = index.cast %7 : i32 to index
+  %total$11 = scf.for %index = [%3 to %5 step %6](%total$10 = %total$2 : i32) -> (i32) unroll(%8) {
+    %12 = index.cast %index : offset to i32
+    %13 = scalar.constant 7 : i32
+    %14 = scalar.addi %12, %13 : i32
+    %total$15 = scalar.addi %total$10, %14 : i32
+    scf.yield %total$15 : i32
+  }
+  func.return %total$11 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Folded bound and stride expressions preserve a runtime lower endpoint.
+unsigned counted_stride(unsigned start) {
+  unsigned total = 0;
+  [[loom::unroll(3)]]
+  for (unsigned index = start; index < (320u / 16u); index += (1u << 2))
+    total += index;
+  return total;
+}
+// ----
+func.def public @counted_stride(%start: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %3 = index.cast %start : i32 to offset
+  %4 = scalar.constant 20 : i32
+  %5 = index.cast %4 : i32 to offset
+  %6 = index.constant 4 : offset
+  %7 = scalar.constant 3 : i32
+  %8 = index.cast %7 : i32 to index
+  %total$11 = scf.for %index = [%3 to %5 step %6](%total$10 = %total$2 : i32) -> (i32) unroll(%8) {
+    %12 = index.cast %index : offset to i32
+    %total$13 = scalar.addi %total$10, %12 : i32
+    scf.yield %total$13 : i32
+  }
+  func.return %total$11 : i32
+}
+
+// ====
+// RUN: roundtrip
+// A runtime lower endpoint and direct conditional body preserve counted exits.
+unsigned counted_conditional(unsigned start) {
+  unsigned total = 0;
+  [[loom::unroll(2)]]
+  for (unsigned index = start; index < 20u; ++index)
+    if (index & 1u)
+      continue;
+    else
+      total += index;
+  return total;
+}
+// ----
+func.def public @counted_conditional(%start: i32) -> (i32) {
+  %total$2 = scalar.constant 0 : i32
+  %3 = index.cast %start : i32 to offset
+  %4 = scalar.constant 20 : i32
+  %5 = index.cast %4 : i32 to offset
+  %6 = index.constant 1 : offset
+  %7 = scalar.constant 2 : i32
+  %8 = index.cast %7 : i32 to index
+  %total$11 = scf.for %index = [%3 to %5 step %6](%total$10 = %total$2 : i32) -> (i32) unroll(%8) {
+    %12 = index.cast %index : offset to i32
+    %13 = scalar.constant 1 : i32
+    %14 = scalar.andi %12, %13 : i32
+    %15 = scalar.constant 0 : i32
+    %16 = scalar.cmpi ne, %14, %15 : i32
+    %17, %total$18 = scf.if %16 -> (i1, i32) {
+      %19 = scalar.constant 0 : i1
+      scf.yield %19, %total$10 : i1, i32
+    } else {
+      %total = scalar.addi %total$10, %12 : i32
+      %21 = scalar.constant 1 : i1
+      scf.yield %21, %total : i1, i32
+    }
+    scf.yield %total$18 : i32
+  }
+  func.return %total$11 : i32
+}

@@ -1,0 +1,387 @@
+// RUN: roundtrip
+// Namespace boundaries remain distinct from underscores in source identifiers.
+namespace math { unsigned twice(unsigned x) { return x * 2; } }
+unsigned math__twice(unsigned x) { return math::twice(x); }
+// ----
+func.def public @math.twice(%x: i32) -> (i32) {
+  %2 = scalar.constant 2 : i32
+  %3 = scalar.muli %x, %2 : i32
+  func.return %3 : i32
+}
+
+func.def public @math__twice(%x: i32) -> (i32) {
+  %6 = func.call pure @math.twice(%x) : (i32) -> (i32)
+  func.return %6 : i32
+}
+
+// ====
+// A declaration's exact symbol survives its unannotated definition.
+[[loom::symbol("arithmetic.square")]] unsigned square(unsigned);
+unsigned square(unsigned x) { return x * x; }
+unsigned entry(unsigned x) { return square(x); }
+// ----
+func.def public @arithmetic.square(%x: i32) -> (i32) {
+  %2 = scalar.muli %x, %x : i32
+  func.return %2 : i32
+}
+
+func.def public @entry(%x: i32) -> (i32) {
+  %5 = func.call pure @arithmetic.square(%x) : (i32) -> (i32)
+  func.return %5 : i32
+}
+
+// ====
+// Later canonical redeclarations contribute the same exact binding.
+unsigned square(unsigned x) { return x * x; }
+[[loom::symbol("arithmetic.square")]] unsigned square(unsigned);
+[[using loom: symbol("arithmetic.square")]] unsigned square(unsigned);
+unsigned entry(unsigned x) { return square(x); }
+// ----
+func.def public @arithmetic.square(%x: i32) -> (i32) {
+  %2 = scalar.muli %x, %x : i32
+  func.return %2 : i32
+}
+
+func.def public @entry(%x: i32) -> (i32) {
+  %5 = func.call pure @arithmetic.square(%x) : (i32) -> (i32)
+  func.return %5 : i32
+}
+
+// ====
+// Public overloads explicitly choose stable names, independently of types.
+[[loom::symbol("arithmetic.identity.i32")]] int identity(int x) { return x; }
+[[loom::symbol("arithmetic.identity.f32")]] float identity(float x) { return x; }
+int entry(int x) { return identity(x); }
+// ----
+func.def public @arithmetic.identity.i32(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public @arithmetic.identity.f32(%x: f32) -> (f32) {
+  func.return %x : f32
+}
+
+func.def public @entry(%x: i32) -> (i32) {
+  %6 = func.call pure @arithmetic.identity.i32(%x) : (i32) -> (i32)
+  func.return %6 : i32
+}
+
+// ====
+// Source roots and calls keep their C++ identities. A symbol does not retain
+// an unused helper or export a reachable private helper.
+// INPUT: cxx root=api::entry
+namespace api {
+[[loom::symbol("library.entry")]] unsigned entry(unsigned);
+[[loom::symbol("library.unused")]] unsigned unused(unsigned x) { return x; }
+[[loom::symbol("library.helper")]] unsigned helper(unsigned x) { return x + 1; }
+unsigned entry(unsigned x) { return helper(x); }
+}
+// ----
+func.def public @library.entry(%x: i32) -> (i32) {
+  %2 = func.call pure @library.helper(%x) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def @library.helper(%x: i32) -> (i32) {
+  %5 = scalar.constant 1 : i32
+  %6 = scalar.addi %x, %5 : i32
+  func.return %6 : i32
+}
+
+// ====
+// Exact names are reserved before private helpers are discovered. Generated
+// suffixes skip occupied names too.
+// INPUT: cxx root=entry
+static unsigned helper(unsigned x) { return x + 1; }
+[[loom::symbol("helper")]] static unsigned second(unsigned x) { return x + 2; }
+[[loom::symbol("helper_1")]] static unsigned third(unsigned x) { return x + 3; }
+unsigned entry(unsigned x) { return helper(x) + second(x) + third(x); }
+// ----
+func.def public @entry(%x: i32) -> (i32) {
+  %2 = func.call pure @helper_2(%x) : (i32) -> (i32)
+  %3 = func.call pure @helper(%x) : (i32) -> (i32)
+  %4 = scalar.addi %2, %3 : i32
+  %5 = func.call pure @helper_1(%x) : (i32) -> (i32)
+  %6 = scalar.addi %4, %5 : i32
+  func.return %6 : i32
+}
+
+func.def @helper_2(%x: i32) -> (i32) {
+  %9 = scalar.constant 1 : i32
+  %10 = scalar.addi %x, %9 : i32
+  func.return %10 : i32
+}
+
+func.def @helper(%x: i32) -> (i32) {
+  %13 = scalar.constant 2 : i32
+  %14 = scalar.addi %x, %13 : i32
+  func.return %14 : i32
+}
+
+func.def @helper_1(%x: i32) -> (i32) {
+  %17 = scalar.constant 3 : i32
+  %18 = scalar.addi %x, %17 : i32
+  func.return %18 : i32
+}
+
+// ====
+// Semantic namespaces determine defaults; namespace aliases do not rename them.
+namespace api { inline namespace v1 {
+unsigned identity(unsigned x) { return x; }
+} }
+namespace alias = api;
+unsigned entry(unsigned x) { return alias::identity(x); }
+// ----
+func.def public @api.v1.identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public @entry(%x: i32) -> (i32) {
+  %4 = func.call pure @api.v1.identity(%x) : (i32) -> (i32)
+  func.return %4 : i32
+}
+
+// ====
+// C linkage retains its unqualified name even inside a C++ namespace.
+namespace api { extern "C" unsigned identity(unsigned x) { return x; } }
+unsigned entry(unsigned x) { return api::identity(x); }
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def public @entry(%x: i32) -> (i32) {
+  %4 = func.call pure @identity(%x) : (i32) -> (i32)
+  func.return %4 : i32
+}
+
+// ====
+// Concrete template specializations can export an explicit symbol.
+template<class T> T identity(T value) { return value; }
+template<> [[loom::symbol("arithmetic.identity.u32")]]
+unsigned identity<unsigned>(unsigned value) { return value; }
+unsigned entry(unsigned x) { return identity(x); }
+// ----
+func.def public @arithmetic.identity.u32(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @entry(%x: i32) -> (i32) {
+  %4 = func.call pure @arithmetic.identity.u32(%x) : (i32) -> (i32)
+  func.return %4 : i32
+}
+
+// ====
+// Operators can choose ordinary library names without encoding their C++ syntax.
+enum class Bits : unsigned { Zero = 0 };
+[[loom::symbol("bits.union")]] Bits operator|(Bits a, Bits b) {
+  return (Bits)((unsigned)a | (unsigned)b);
+}
+// ----
+func.def public @bits.union(%a: i32, %b: i32) -> (i32) {
+  %3 = scalar.ori %a, %b : i32
+  func.return %3 : i32
+}
+
+// ====
+// Generated launch configuration keys use the actual kernel symbol.
+[[loom::kernel, loom::symbol("library.dispatch")]] void entry() {}
+// ----
+kernel.def @library.dispatch() {
+  %workgroup_count_x = config.get @library.dispatch.workgroup_count.x : index
+  %workgroup_count_y = config.get @library.dispatch.workgroup_count.y : index
+  %workgroup_count_z = config.get @library.dispatch.workgroup_count.z : index
+  %workgroup_size_x = config.get @library.dispatch.workgroup_size.x : index
+  %workgroup_size_y = config.get @library.dispatch.workgroup_size.y : index
+  %workgroup_size_z = config.get @library.dispatch.workgroup_size.z : index
+  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%workgroup_size_x, %workgroup_size_y, %workgroup_size_z) : index
+} launch() {
+  kernel.return
+}
+
+config.decl @library.dispatch.workgroup_count.x : index
+
+config.decl @library.dispatch.workgroup_count.y : index
+
+config.decl @library.dispatch.workgroup_count.z : index
+
+config.decl @library.dispatch.workgroup_size.x : index
+
+config.decl @library.dispatch.workgroup_size.y : index
+
+config.decl @library.dispatch.workgroup_size.z : index
+
+// ====
+// Retention is independent of source visibility and explicit root selection.
+// Every callable family uses the same source annotation, while definitions
+// keep their private visibility and bodyless declarations retain link identity.
+// INPUT: cxx root=entry
+#include <loomcxx/command.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/pipeline.h>
+
+LOOM_TEMPLATE_DECL("retained.family") unsigned retained_family(unsigned value);
+
+[[loom::retain, loom::symbol("retained.function")]]
+static unsigned retained_function(unsigned value);
+static unsigned retained_function(unsigned value) { return value; }
+
+[[loom::retain, loom::symbol("retained.external")]]
+unsigned retained_external(unsigned value);
+
+[[loom::retain, loom::kernel, loom::symbol("retained.kernel")]]
+static void retained_kernel() {}
+
+[[loom::retain, loom::command_program, loom::symbol("retained.command")]]
+static void retained_command() {}
+
+[[loom::retain, loom::pipeline("kernel"), loom::symbol("retained.pipeline")]]
+static void retained_pipeline() {}
+
+LOOM_TEMPLATE_DEF(retained_family)
+[[loom::retain, loom::symbol("retained.provider")]]
+static unsigned retained_provider(unsigned value) { return value; }
+
+unsigned entry(unsigned value) { return value; }
+// ----
+func.def public @entry(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def retain @retained.function(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+kernel.def retain @retained.kernel() {
+  %workgroup_count_x = config.get @retained.kernel.workgroup_count.x : index
+  %workgroup_count_y = config.get @retained.kernel.workgroup_count.y : index
+  %workgroup_count_z = config.get @retained.kernel.workgroup_count.z : index
+  %workgroup_size_x = config.get @retained.kernel.workgroup_size.x : index
+  %workgroup_size_y = config.get @retained.kernel.workgroup_size.y : index
+  %workgroup_size_z = config.get @retained.kernel.workgroup_size.z : index
+  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%workgroup_size_x, %workgroup_size_y, %workgroup_size_z) : index
+} launch() {
+  kernel.return
+}
+
+config.decl @retained.kernel.workgroup_count.x : index
+
+config.decl @retained.kernel.workgroup_count.y : index
+
+config.decl @retained.kernel.workgroup_count.z : index
+
+config.decl @retained.kernel.workgroup_size.x : index
+
+config.decl @retained.kernel.workgroup_size.y : index
+
+config.decl @retained.kernel.workgroup_size.z : index
+
+command.def retain @retained.command() launch() {
+  command.return
+}
+
+pipeline.def<kernel> retain @retained.pipeline() run() {
+}
+
+template.decl @retained.family(%16: i32) -> (i32)
+
+template.def<@retained.family> retain @retained.provider(%value: i32) -> (i32) {
+  template.return %value : i32
+}
+
+func.decl retain @retained.external(%20: i32) -> (i32)
+
+// ====
+// Check cases and their benchmark references obey the same naming contract.
+[[loom::check_case, loom::symbol("checks.case")]] void case_body() {}
+[[loom::check_benchmark(case_body), loom::symbol("checks.benchmark")]]
+void benchmark();
+// ----
+check.case public @checks.case {
+  check.return
+}
+
+check.benchmark<@checks.case> @checks.benchmark
+
+// ====
+// Every printable symbol character is preserved literally.
+[[loom::symbol("$library.1-identity")]] unsigned identity(unsigned x) { return x; }
+// ----
+func.def public @$library.1-identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+// ====
+// Public benchmark names take precedence over generated private helper names.
+#include <loomcxx/check.h>
+namespace sample { static unsigned measure(unsigned x) { return x; } }
+LOOM_CHECK_CASE(correct) { loom::check::expect_equal(sample::measure(7u), 7u); }
+LOOM_CHECK_BENCHMARK(sample__measure, correct);
+// ----
+check.case public @correct {
+  %0 = check.literal value(7) : i32
+  %1 = func.call @sample__measure_1(%0) : (i32) -> (i32)
+  %2 = check.literal value(7) : i32
+  check.expect.equal actual(%1) expected(%2) : i32
+  check.return
+}
+
+func.def @sample__measure_1(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+check.benchmark<@correct> @sample__measure
+
+// ====
+// Exact symbols survive a private forward declaration and a kernel caller.
+namespace arithmetic {
+[[loom::symbol("arithmetic.mix")]] static unsigned mix(unsigned value);
+static unsigned mix(unsigned value) { return value * value + 7u; }
+}
+[[loom::kernel, loom::symbol("library.dispatch"), loom::workgroup_size(1, 1, 1),
+  loom::workgroup_count(1, 1, 1)]]
+void entry(unsigned* output, const unsigned* input) {
+  output[0u] = arithmetic::mix(input[0u]);
+}
+// ----
+kernel.def @library.dispatch() {
+  %2 = index.constant 1 : index
+  %3 = index.constant 1 : index
+  %4 = index.constant 1 : index
+  %5 = index.constant 1 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %3, %4) workgroup_size(%5, %6, %7) : index
+} launch(%output: buffer, %input: buffer) {
+  %output_byte_offset = index.constant 0 : offset
+  %input_byte_offset = index.constant 0 : offset
+  %10 = scalar.constant 0 : i32
+  %11 = scalar.extui %10 : i32 to i64
+  %12 = scalar.constant 4 : i64
+  %13 = scalar.muli %11, %12 : i64
+  %14 = index.cast %input_byte_offset : offset to i64
+  %15 = scalar.addi %14, %13 : i64
+  %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
+  %17 = index.cast %16 : i64 to offset
+  %18 = buffer.view %input[%17] : buffer -> view<1xi32>
+  %19 = view.load %18[0] : view<1xi32> -> i32
+  %20 = func.call pure @arithmetic.mix(%19) : (i32) -> (i32)
+  %21 = scalar.constant 0 : i32
+  %22 = scalar.extui %21 : i32 to i64
+  %23 = scalar.constant 4 : i64
+  %24 = scalar.muli %22, %23 : i64
+  %25 = index.cast %output_byte_offset : offset to i64
+  %26 = scalar.addi %25, %24 : i64
+  %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
+  %28 = index.cast %27 : i64 to offset
+  %29 = buffer.view %output[%28] : buffer -> view<1xi32>
+  view.store %20, %29[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def @arithmetic.mix(%value: i32) -> (i32) {
+  %32 = scalar.muli %value, %value : i32
+  %33 = scalar.constant 7 : i32
+  %34 = scalar.addi %32, %33 : i32
+  func.return %34 : i32
+}

@@ -1,0 +1,295 @@
+// RUN: pass canonicalize,cse
+
+enum class Kind : unsigned { solid, water, sky };
+unsigned entry(Kind kind) { return kind == Kind::water ? 128u : 0u; }
+
+// ----
+func.def public @entry(%kind: i32) -> (i32) {
+  %water = scalar.constant 1 : i32
+  %3 = scalar.cmpi eq, %kind, %water : i32
+  %5 = scalar.constant 128 : i32
+  %6 = scalar.constant 0 : i32
+  %7 = scf.select %3, %5, %6 : i32
+  func.return %7 : i32
+}
+
+// ====
+
+enum class Byte : unsigned char { high = 255 };
+enum class SignedByte : signed char { low = -128 };
+enum class Flag : bool { no, yes };
+unsigned widen(Byte value) { return static_cast<unsigned>(value); }
+int extend(SignedByte value) { return static_cast<int>(value); }
+bool truth(Flag value) { return value == Flag::yes; }
+
+// ----
+func.def public @widen(%value: i8) -> (i32) {
+  %2 = scalar.extui %value : i8 to i32
+  func.return %2 : i32
+}
+
+func.def public @extend(%value: i8) -> (i32) {
+  %5 = scalar.extsi %value : i8 to i32
+  func.return %5 : i32
+}
+
+func.def public @truth(%value: i1) -> (i1) {
+  func.return %value : i1
+}
+
+// ====
+
+enum Inferred { minimum = -1, maximum = 0xffffffffu };
+enum Full { full = 0xffffffffffffffffULL };
+long long choose(bool condition) { return condition ? maximum : minimum; }
+unsigned long long mask() { return full; }
+
+// ----
+func.def public @choose(%condition: i1) -> (i64) {
+  %maximum = scalar.constant 4294967295 : i64
+  %minimum = scalar.constant -1 : i64
+  %7 = scf.select %condition, %maximum, %minimum : i64
+  func.return %7 : i64
+}
+
+func.def public @mask() -> (i64) {
+  %full = scalar.constant -1 : i64
+  func.return %full : i64
+}
+
+// ====
+
+template <class T, T Value>
+static T step() {
+  enum class Kind : T { first = Value, next };
+  return T(Kind::next);
+}
+unsigned entry() { return step<unsigned char, 254>(); }
+
+// ----
+func.def public @entry() -> (i32) {
+  %1 = func.call pure @step_unsigned_char_254() : () -> (i8)
+  %2 = scalar.extui %1 : i8 to i32
+  func.return %2 : i32
+}
+
+func.def @step_unsigned_char_254() -> (i8) {
+  %next = scalar.constant -1 : i8
+  func.return %next : i8
+}
+
+// ====
+// RUN: pass canonicalize,cse
+enum __attribute__((packed)) Byte { byte = 255 };
+enum __attribute__((packed)) SignedByte { low = -128, high = 127 };
+int add(Byte value) { return value + 1; }
+int subtract(SignedByte value) { return value - 1; }
+Byte load_next(const Byte* values) { return values[1]; }
+void store_next(Byte* values, Byte value) { values[1] = value; }
+
+// ----
+func.def public @add(%value: i8) -> (i32) {
+  %2 = scalar.extui %value : i8 to i32
+  %3 = scalar.constant 1 : i32
+  %4 = scalar.addi %2, %3 : i32
+  func.return %4 : i32
+}
+
+func.def public @subtract(%value: i8) -> (i32) {
+  %7 = scalar.extsi %value : i8 to i32
+  %35 = scalar.constant -1 : i32
+  %36 = scalar.addi %7, %35 : i32
+  func.return %36 : i32
+}
+
+func.def public @load_next(%values: buffer, %values_byte_offset: offset) -> (i8) {
+  %37 = scalar.constant 1 : i64
+  %17 = index.cast %values_byte_offset : offset to i64
+  %18 = scalar.addi %17, %37 : i64
+  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+  %20 = index.cast %19 : i64 to offset
+  %21 = buffer.view %values[%20] : buffer -> view<1xi8>
+  %22 = view.load %21[0] : view<1xi8> -> i8
+  func.return %22 : i8
+}
+
+func.def public @store_next(%values: buffer, %values_byte_offset: offset, %value: i8) {
+  %38 = scalar.constant 1 : i64
+  %30 = index.cast %values_byte_offset : offset to i64
+  %31 = scalar.addi %30, %38 : i64
+  %32 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
+  %33 = index.cast %32 : i64 to offset
+  %34 = buffer.view %values[%33] : buffer -> view<1xi8>
+  view.store %value, %34[0] : i8, view<1xi8>
+  func.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// The underlying unsigned representation controls ordered enum comparisons.
+enum class Command : unsigned { world, water, sky, fill, depth, alias, sprite };
+unsigned dispatch(Command kind) {
+  if (kind == Command::water) return 128u;
+  if (kind >= Command::alias) return 255u;
+  return static_cast<unsigned>(kind) + 7u;
+}
+
+// ----
+func.def public @dispatch(%kind: i32) -> (i32) {
+  %water = scalar.constant 1 : i32
+  %3 = scalar.cmpi eq, %kind, %water : i32
+  %4 = scf.if %3 -> (i32) {
+    %5 = scalar.constant 128 : i32
+    scf.yield %5 : i32
+  } else {
+    %12 = scalar.assume %kind [ne(%kind, 1)] : i32
+    %alias = scalar.constant 5 : i32
+    %7 = scalar.cmpi uge, %12, %alias : i32
+    %9 = scalar.constant 255 : i32
+    %10 = scalar.constant 7 : i32
+    %11 = scalar.addi %12, %10 : i32
+    %14 = scf.select %7, %9, %11 : i32
+    %15 = scalar.assume %14 [range(%14, 7, 255)] : i32
+    scf.yield %15 : i32
+  }
+  func.return %4 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A cast back to the narrow enum truncates before the returned integer widens.
+enum class Byte : unsigned char { zero, high = 255 };
+unsigned increment(Byte value) {
+  Byte next = static_cast<Byte>(static_cast<unsigned>(value) + 1u);
+  return static_cast<unsigned>(next);
+}
+
+// ----
+func.def public @increment(%value: i8) -> (i32) {
+  %2 = scalar.extui %value : i8 to i32
+  %3 = scalar.constant 1 : i32
+  %4 = scalar.addi %2, %3 : i32
+  %next = scalar.trunci %4 : i32 to i8
+  %6 = scalar.extui %next : i8 to i32
+  func.return %6 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Enum signedness survives widening before arithmetic.
+enum class SignedByte : signed char { low = -128, high = 127 };
+enum class Word : unsigned { zero, high = 0xffffffffu };
+long long multiply(SignedByte value) {
+  return static_cast<long long>(value) * 65537;
+}
+unsigned long long increment(Word value) {
+  return static_cast<unsigned long long>(value) + 1ULL;
+}
+
+// ----
+func.def public @multiply(%value: i8) -> (i64) {
+  %2 = scalar.extsi %value : i8 to i64
+  %11 = scalar.constant 65537 : i64
+  %5 = scalar.muli %2, %11 : i64
+  func.return %5 : i64
+}
+
+func.def public @increment(%value: i32) -> (i64) {
+  %8 = scalar.extui %value : i32 to i64
+  %9 = scalar.constant 1 : i64
+  %10 = scalar.addi %8, %9 : i64
+  func.return %10 : i64
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Both fixed and inferred full-width enums retain unsigned comparisons.
+enum class Long : unsigned long long { zero, high = 0xffffffffffffffffULL };
+enum InferredUnsigned { maximum = 0xffffffffffffffffULL };
+unsigned compare(Long left, Long right) { return left < right; }
+unsigned below_maximum(unsigned long long value) { return value < maximum; }
+
+// ----
+func.def public @compare(%left: i64, %right: i64) -> (i32) {
+  %3 = scalar.cmpi ult, %left, %right : i64
+  %4 = scalar.extui %3 : i1 to i32
+  func.return %4 : i32
+}
+
+func.def public @below_maximum(%value: i64) -> (i32) {
+  %maximum = scalar.constant -1 : i64
+  %8 = scalar.cmpi ult, %value, %maximum : i64
+  %9 = scalar.extui %8 : i1 to i32
+  func.return %9 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Mixed signed and large positive enumerators require a wide signed value.
+enum Inferred { low = -1, high = 1ULL << 40 };
+long long choose(unsigned condition) { return condition ? high : low; }
+
+// ----
+func.def public @choose(%condition: i32) -> (i64) {
+  %2 = scalar.constant 0 : i32
+  %3 = scalar.cmpi ne, %condition, %2 : i32
+  %high = scalar.constant 1099511627776 : i64
+  %low = scalar.constant -1 : i64
+  %7 = scf.select %3, %high, %low : i64
+  func.return %7 : i64
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Each instantiation computes its own local enum successors at full precision.
+template <unsigned long long Value>
+static unsigned long long specialized(unsigned choose) {
+  enum Kind { first = Value, next, last = next + 1 };
+  return choose ? last : first;
+}
+unsigned long long specialization(unsigned choose) {
+  return specialized<(1ULL << 40)>(choose) + specialized<0xffffffffu>(choose);
+}
+
+// ----
+func.def public @specialization(%choose: i32) -> (i64) {
+  %2 = func.call pure @specialized_1099511627776(%choose) : (i32) -> (i64)
+  %3 = func.call pure @specialized_4294967295(%choose) : (i32) -> (i64)
+  %4 = scalar.addi %2, %3 : i64
+  func.return %4 : i64
+}
+
+func.def @specialized_1099511627776(%choose: i32) -> (i64) {
+  %7 = scalar.constant 0 : i32
+  %8 = scalar.cmpi ne, %choose, %7 : i32
+  %last = scalar.constant 1099511627778 : i64
+  %first = scalar.constant 1099511627776 : i64
+  %19 = scf.select %8, %last, %first : i64
+  func.return %19 : i64
+}
+
+func.def @specialized_4294967295(%choose: i32) -> (i64) {
+  %14 = scalar.constant 0 : i32
+  %15 = scalar.cmpi ne, %choose, %14 : i32
+  %last = scalar.constant 4294967297 : i64
+  %first = scalar.constant 4294967295 : i64
+  %20 = scf.select %15, %last, %first : i64
+  func.return %20 : i64
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A local bool enum still uses the source condition and a one-bit value.
+unsigned truth(unsigned value) {
+  enum class Flag : bool { no, yes };
+  Flag flag = value ? Flag::yes : Flag::no;
+  return flag == Flag::yes;
+}
+
+// ----
+func.def public @truth(%value: i32) -> (i32) {
+  %2 = scalar.constant 0 : i32
+  %3 = scalar.cmpi ne, %value, %2 : i32
+  %9 = scalar.extui %3 : i1 to i32
+  func.return %9 : i32
+}

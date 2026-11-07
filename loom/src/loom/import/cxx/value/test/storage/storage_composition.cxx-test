@@ -1,0 +1,519 @@
+// RUN: pass canonicalize,cse,dce
+// Compound updates through specialized helpers preserve RHS-before-LHS
+// order and independently weighted observations of prefix/postfix effects.
+template <class Word>
+static unsigned bitmap_update(Word* words, unsigned index, unsigned mask) {
+  return words[index] |= mask;
+}
+
+template <class Word>
+static unsigned sequenced_update(Word* words) {
+  unsigned index = 0;
+  // The RHS writes element one before the LHS selects and updates it once.
+  unsigned result = words[index++] |= (index = 1, words[1] = 32, 5);
+  return result + 100 * index;
+}
+
+template <class Word>
+static unsigned increment_storage(Word* words) {
+  unsigned previous = (*words++)++;
+  unsigned next = ++words[0];
+  return previous + 100 * next;
+}
+
+template <class Word>
+static unsigned update_words(Word* words) {
+  words[1] = 7;
+  words[2] = 11;
+  unsigned bitmap = bitmap_update(words, 1, 8);
+  unsigned sequenced = sequenced_update(words);
+  unsigned increments = increment_storage(words + 1);
+  return bitmap + sequenced + increments;
+}
+
+unsigned storage_words(unsigned* words) { return update_words(words); }
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void storage_words_kernel(unsigned* words, unsigned* output) {
+  output[1] = storage_words(words);
+}
+// ----
+func.def public @storage_words(%words: buffer, %words_byte_offset: offset) -> (i32) {
+  %3 = func.call @update_words_unsigned_int(%words, %words_byte_offset) : (buffer, offset) -> (i32)
+  func.return %3 : i32
+}
+
+kernel.def @storage_words_kernel() {
+  %6 = index.constant 1 : index
+  kernel.launch.config workgroups(%6, %6, %6) workgroup_size(%6, %6, %6) : index
+} launch(%words: buffer, %output: buffer) {
+  %words_byte_offset = index.constant 0 : offset
+  %14 = func.call @storage_words(%words, %words_byte_offset) : (buffer, offset) -> (i32)
+  %138 = index.constant 4 : offset
+  %23 = buffer.view %output[%138] : buffer -> view<1xi32>
+  view.store %14, %23[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def @update_words_unsigned_int(%words: buffer, %words_byte_offset: offset) -> (i32) {
+  %27 = scalar.constant 7 : i32
+  %141 = scalar.constant 4 : i64
+  %32 = index.cast %words_byte_offset : offset to i64
+  %33 = scalar.addi %32, %141 : i64
+  %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
+  %35 = index.cast %34 : i64 to offset
+  %36 = buffer.view %words[%35] : buffer -> view<1xi32>
+  view.store %27, %36[0] : i32, view<1xi32>
+  %37 = scalar.constant 11 : i32
+  %140 = scalar.constant 8 : i64
+  %43 = scalar.addi %32, %140 : i64
+  %44 = scalar.assume %43 [range(%43, 0, 9223372036854775807)] : i64
+  %45 = index.cast %44 : i64 to offset
+  %46 = buffer.view %words[%45] : buffer -> view<1xi32>
+  view.store %37, %46[0] : i32, view<1xi32>
+  %47 = scalar.constant 1 : i32
+  %48 = scalar.constant 8 : i32
+  %bitmap = func.call @bitmap_update_unsigned_int(%words, %words_byte_offset, %47, %48) : (buffer, offset, i32, i32) -> (i32)
+  %sequenced = func.call @sequenced_update_unsigned_int(%words, %words_byte_offset) : (buffer, offset) -> (i32)
+  %increments = func.call @increment_storage_unsigned_int(%words, %35) : (buffer, offset) -> (i32)
+  %60 = scalar.addi %bitmap, %sequenced : i32
+  %61 = scalar.addi %60, %increments : i32
+  func.return %61 : i32
+}
+
+func.def @bitmap_update_unsigned_int(%words: buffer, %words_byte_offset: offset, %index: i32, %mask: i32) -> (i32) {
+  %67 = scalar.extui %index : i32 to i64
+  %142 = scalar.constant 2 : i64
+  %143 = scalar.shli %67, %142 : i64
+  %70 = index.cast %words_byte_offset : offset to i64
+  %71 = scalar.addi %70, %143 : i64
+  %72 = scalar.assume %71 [range(%71, 0, 9223372036854775807)] : i64
+  %73 = index.cast %72 : i64 to offset
+  %74 = buffer.view %words[%73] : buffer -> view<1xi32>
+  %75 = view.load %74[0] : view<1xi32> -> i32
+  %76 = scalar.ori %75, %mask : i32
+  view.store %76, %74[0] : i32, view<1xi32>
+  func.return %76 : i32
+}
+
+func.def @sequenced_update_unsigned_int(%words: buffer, %words_byte_offset: offset) -> (i32) {
+  %82 = scalar.constant 32 : i32
+  %146 = scalar.constant 4 : i64
+  %87 = index.cast %words_byte_offset : offset to i64
+  %88 = scalar.addi %87, %146 : i64
+  %89 = scalar.assume %88 [range(%88, 0, 9223372036854775807)] : i64
+  %90 = index.cast %89 : i64 to offset
+  %91 = buffer.view %words[%90] : buffer -> view<1xi32>
+  view.store %82, %91[0] : i32, view<1xi32>
+  %92 = scalar.constant 5 : i32
+  %103 = view.load %91[0] : view<1xi32> -> i32
+  %result = scalar.ori %103, %92 : i32
+  view.store %result, %91[0] : i32, view<1xi32>
+  %144 = scalar.constant 200 : i32
+  %107 = scalar.addi %result, %144 : i32
+  func.return %107 : i32
+}
+
+func.def @increment_storage_unsigned_int(%words: buffer, %words_byte_offset$109: offset) -> (i32) {
+  %147 = scalar.constant 4 : i64
+  %115 = index.cast %words_byte_offset$109 : offset to i64
+  %116 = scalar.addi %115, %147 : i64
+  %117 = scalar.assume %116 [range(%116, 0, 9223372036854775807)] : i64
+  %words_byte_offset$118 = index.cast %117 : i64 to offset
+  %119 = buffer.view %words[%words_byte_offset$109] : buffer -> view<1xi32>
+  %previous = view.load %119[0] : view<1xi32> -> i32
+  %121 = scalar.constant 1 : i32
+  %122 = scalar.addi %previous, %121 : i32
+  view.store %122, %119[0] : i32, view<1xi32>
+  %127 = index.cast %words_byte_offset$118 : offset to i64
+  %129 = scalar.assume %127 [range(%127, 0, 9223372036854775807)] : i64
+  %130 = index.cast %129 : i64 to offset
+  %131 = buffer.view %words[%130] : buffer -> view<1xi32>
+  %132 = view.load %131[0] : view<1xi32> -> i32
+  %next = scalar.addi %132, %121 : i32
+  view.store %next, %131[0] : i32, view<1xi32>
+  %135 = scalar.constant 100 : i32
+  %136 = scalar.muli %135, %next : i32
+  %137 = scalar.addi %previous, %136 : i32
+  func.return %137 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Volatile specialization retains each load and store across the same
+// helper chain; the final value cannot replace the intermediate effects.
+template <class Word>
+static unsigned bitmap_update(Word* words, unsigned index, unsigned mask) {
+  return words[index] |= mask;
+}
+
+template <class Word>
+static unsigned sequenced_update(Word* words) {
+  unsigned index = 0;
+  // The RHS writes element one before the LHS selects and updates it once.
+  unsigned result = words[index++] |= (index = 1, words[1] = 32, 5);
+  return result + 100 * index;
+}
+
+template <class Word>
+static unsigned increment_storage(Word* words) {
+  unsigned previous = (*words++)++;
+  unsigned next = ++words[0];
+  return previous + 100 * next;
+}
+
+template <class Word>
+static unsigned update_words(Word* words) {
+  words[1] = 7;
+  words[2] = 11;
+  unsigned bitmap = bitmap_update(words, 1, 8);
+  unsigned sequenced = sequenced_update(words);
+  unsigned increments = increment_storage(words + 1);
+  return bitmap + sequenced + increments;
+}
+
+unsigned storage_volatile(volatile unsigned* words) {
+  return update_words(words);
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void storage_volatile_kernel(volatile unsigned* words, unsigned* output) {
+  output[1] = storage_volatile(words);
+}
+// ----
+func.def public @storage_volatile(%words: buffer, %words_byte_offset: offset) -> (i32) {
+  %3 = func.call @update_words_volatile_unsigned_int(%words, %words_byte_offset) : (buffer, offset) -> (i32)
+  func.return %3 : i32
+}
+
+kernel.def @storage_volatile_kernel() {
+  %6 = index.constant 1 : index
+  kernel.launch.config workgroups(%6, %6, %6) workgroup_size(%6, %6, %6) : index
+} launch(%words: buffer, %output: buffer) {
+  %words_byte_offset = index.constant 0 : offset
+  %14 = func.call @storage_volatile(%words, %words_byte_offset) : (buffer, offset) -> (i32)
+  %138 = index.constant 4 : offset
+  %23 = buffer.view %output[%138] : buffer -> view<1xi32>
+  view.store %14, %23[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def @update_words_volatile_unsigned_int(%words: buffer, %words_byte_offset: offset) -> (i32) {
+  %27 = scalar.constant 7 : i32
+  %141 = scalar.constant 4 : i64
+  %32 = index.cast %words_byte_offset : offset to i64
+  %33 = scalar.addi %32, %141 : i64
+  %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
+  %35 = index.cast %34 : i64 to offset
+  %36 = buffer.view %words[%35] : buffer -> view<1xi32>
+  view.store<volatile> %27, %36[0] : i32, view<1xi32>
+  %37 = scalar.constant 11 : i32
+  %140 = scalar.constant 8 : i64
+  %43 = scalar.addi %32, %140 : i64
+  %44 = scalar.assume %43 [range(%43, 0, 9223372036854775807)] : i64
+  %45 = index.cast %44 : i64 to offset
+  %46 = buffer.view %words[%45] : buffer -> view<1xi32>
+  view.store<volatile> %37, %46[0] : i32, view<1xi32>
+  %47 = scalar.constant 1 : i32
+  %48 = scalar.constant 8 : i32
+  %bitmap = func.call @bitmap_update_volatile_unsigned_int(%words, %words_byte_offset, %47, %48) : (buffer, offset, i32, i32) -> (i32)
+  %sequenced = func.call @sequenced_update_volatile_unsigned_int(%words, %words_byte_offset) : (buffer, offset) -> (i32)
+  %increments = func.call @increment_storage_volatile_unsigned_int(%words, %35) : (buffer, offset) -> (i32)
+  %60 = scalar.addi %bitmap, %sequenced : i32
+  %61 = scalar.addi %60, %increments : i32
+  func.return %61 : i32
+}
+
+func.def @bitmap_update_volatile_unsigned_int(%words: buffer, %words_byte_offset: offset, %index: i32, %mask: i32) -> (i32) {
+  %67 = scalar.extui %index : i32 to i64
+  %142 = scalar.constant 2 : i64
+  %143 = scalar.shli %67, %142 : i64
+  %70 = index.cast %words_byte_offset : offset to i64
+  %71 = scalar.addi %70, %143 : i64
+  %72 = scalar.assume %71 [range(%71, 0, 9223372036854775807)] : i64
+  %73 = index.cast %72 : i64 to offset
+  %74 = buffer.view %words[%73] : buffer -> view<1xi32>
+  %75 = view.load<volatile> %74[0] : view<1xi32> -> i32
+  %76 = scalar.ori %75, %mask : i32
+  view.store<volatile> %76, %74[0] : i32, view<1xi32>
+  func.return %76 : i32
+}
+
+func.def @sequenced_update_volatile_unsigned_int(%words: buffer, %words_byte_offset: offset) -> (i32) {
+  %82 = scalar.constant 32 : i32
+  %146 = scalar.constant 4 : i64
+  %87 = index.cast %words_byte_offset : offset to i64
+  %88 = scalar.addi %87, %146 : i64
+  %89 = scalar.assume %88 [range(%88, 0, 9223372036854775807)] : i64
+  %90 = index.cast %89 : i64 to offset
+  %91 = buffer.view %words[%90] : buffer -> view<1xi32>
+  view.store<volatile> %82, %91[0] : i32, view<1xi32>
+  %92 = scalar.constant 5 : i32
+  %103 = view.load<volatile> %91[0] : view<1xi32> -> i32
+  %result = scalar.ori %103, %92 : i32
+  view.store<volatile> %result, %91[0] : i32, view<1xi32>
+  %144 = scalar.constant 200 : i32
+  %107 = scalar.addi %result, %144 : i32
+  func.return %107 : i32
+}
+
+func.def @increment_storage_volatile_unsigned_int(%words: buffer, %words_byte_offset$109: offset) -> (i32) {
+  %147 = scalar.constant 4 : i64
+  %115 = index.cast %words_byte_offset$109 : offset to i64
+  %116 = scalar.addi %115, %147 : i64
+  %117 = scalar.assume %116 [range(%116, 0, 9223372036854775807)] : i64
+  %words_byte_offset$118 = index.cast %117 : i64 to offset
+  %119 = buffer.view %words[%words_byte_offset$109] : buffer -> view<1xi32>
+  %previous = view.load<volatile> %119[0] : view<1xi32> -> i32
+  %121 = scalar.constant 1 : i32
+  %122 = scalar.addi %previous, %121 : i32
+  view.store<volatile> %122, %119[0] : i32, view<1xi32>
+  %127 = index.cast %words_byte_offset$118 : offset to i64
+  %129 = scalar.assume %127 [range(%127, 0, 9223372036854775807)] : i64
+  %130 = index.cast %129 : i64 to offset
+  %131 = buffer.view %words[%130] : buffer -> view<1xi32>
+  %132 = view.load<volatile> %131[0] : view<1xi32> -> i32
+  %next = scalar.addi %132, %121 : i32
+  view.store<volatile> %next, %131[0] : i32, view<1xi32>
+  %135 = scalar.constant 100 : i32
+  %136 = scalar.muli %135, %next : i32
+  %137 = scalar.addi %previous, %136 : i32
+  func.return %137 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Byte compound results are converted to the stored type before becoming
+// expression values, and post-increment returns the previous byte.
+unsigned storage_bytes(unsigned char* bytes) {
+  bytes[1] = 255;
+  bytes[2] = 1;
+  unsigned previous = bytes[1]++;
+  unsigned assigned = bytes[2] += 258u;
+  return previous + 100 * assigned;
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void storage_bytes_kernel(unsigned char* bytes, unsigned* output) {
+  output[1] = storage_bytes(bytes);
+}
+// ----
+func.def public @storage_bytes(%bytes: buffer, %bytes_byte_offset: offset) -> (i32) {
+  %83 = scalar.constant -1 : i8
+  %82 = scalar.constant 1 : i64
+  %9 = index.cast %bytes_byte_offset : offset to i64
+  %10 = scalar.addi %9, %82 : i64
+  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %12 = index.cast %11 : i64 to offset
+  %13 = buffer.view %bytes[%12] : buffer -> view<1xi8>
+  view.store %83, %13[0] : i8, view<1xi8>
+  %81 = scalar.constant 1 : i8
+  %80 = scalar.constant 2 : i64
+  %21 = scalar.addi %9, %80 : i64
+  %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
+  %23 = index.cast %22 : i64 to offset
+  %24 = buffer.view %bytes[%23] : buffer -> view<1xi8>
+  view.store %81, %24[0] : i8, view<1xi8>
+  %34 = view.load %13[0] : view<1xi8> -> i8
+  %35 = scalar.extui %34 : i8 to i32
+  %36 = scalar.constant 1 : i32
+  %37 = scalar.addi %35, %36 : i32
+  %38 = scalar.trunci %37 : i32 to i8
+  view.store %38, %13[0] : i8, view<1xi8>
+  %40 = scalar.constant 258 : i32
+  %50 = view.load %24[0] : view<1xi8> -> i8
+  %51 = scalar.extui %50 : i8 to i32
+  %52 = scalar.addi %51, %40 : i32
+  %53 = scalar.trunci %52 : i32 to i8
+  view.store %53, %24[0] : i8, view<1xi8>
+  %assigned = scalar.extui %53 : i8 to i32
+  %55 = scalar.constant 100 : i32
+  %56 = scalar.muli %55, %assigned : i32
+  %57 = scalar.addi %35, %56 : i32
+  func.return %57 : i32
+}
+
+kernel.def @storage_bytes_kernel() {
+  %60 = index.constant 1 : index
+  kernel.launch.config workgroups(%60, %60, %60) workgroup_size(%60, %60, %60) : index
+} launch(%bytes: buffer, %output: buffer) {
+  %bytes_byte_offset = index.constant 0 : offset
+  %68 = func.call @storage_bytes(%bytes, %bytes_byte_offset) : (buffer, offset) -> (i32)
+  %84 = index.constant 4 : offset
+  %77 = buffer.view %output[%84] : buffer -> view<1xi32>
+  view.store %68, %77[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Signed-byte updates truncate before sign extension; the shift uses
+// the promoted signed left operand despite an unsigned wide shift count.
+int storage_signed(signed char* bytes) {
+  bytes[1] = -127;
+  bytes[2] = 125;
+  int first = bytes[1] -= 2;
+  int second = bytes[2] += -250;
+  bytes[1] >>= 1ull;
+  --bytes[2];
+  return first + 100 * second;
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void storage_signed_kernel(signed char* bytes, int* output) {
+  output[1] = storage_signed(bytes);
+}
+// ----
+func.def public @storage_signed(%bytes: buffer, %bytes_byte_offset: offset) -> (i32) {
+  %124 = scalar.constant -127 : i8
+  %123 = scalar.constant 1 : i64
+  %11 = index.cast %bytes_byte_offset : offset to i64
+  %12 = scalar.addi %11, %123 : i64
+  %13 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
+  %14 = index.cast %13 : i64 to offset
+  %15 = buffer.view %bytes[%14] : buffer -> view<1xi8>
+  view.store %124, %15[0] : i8, view<1xi8>
+  %122 = scalar.constant 125 : i8
+  %121 = scalar.constant 2 : i64
+  %23 = scalar.addi %11, %121 : i64
+  %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
+  %25 = index.cast %24 : i64 to offset
+  %26 = buffer.view %bytes[%25] : buffer -> view<1xi8>
+  view.store %122, %26[0] : i8, view<1xi8>
+  %37 = view.load %15[0] : view<1xi8> -> i8
+  %38 = scalar.extsi %37 : i8 to i32
+  %118 = scalar.constant -2 : i32
+  %119 = scalar.addi %38, %118 : i32
+  %40 = scalar.trunci %119 : i32 to i8
+  view.store %40, %15[0] : i8, view<1xi8>
+  %first = scalar.extsi %40 : i8 to i32
+  %117 = scalar.constant -250 : i32
+  %54 = view.load %26[0] : view<1xi8> -> i8
+  %55 = scalar.extsi %54 : i8 to i32
+  %56 = scalar.addi %55, %117 : i32
+  %57 = scalar.trunci %56 : i32 to i8
+  view.store %57, %26[0] : i8, view<1xi8>
+  %second = scalar.extsi %57 : i8 to i32
+  %69 = view.load %15[0] : view<1xi8> -> i8
+  %70 = scalar.extsi %69 : i8 to i32
+  %114 = scalar.constant 1 : i32
+  %72 = scalar.shrsi %70, %114 : i32
+  %73 = scalar.trunci %72 : i32 to i8
+  view.store %73, %15[0] : i8, view<1xi8>
+  %83 = view.load %26[0] : view<1xi8> -> i8
+  %84 = scalar.extsi %83 : i8 to i32
+  %111 = scalar.constant -1 : i32
+  %112 = scalar.addi %84, %111 : i32
+  %87 = scalar.trunci %112 : i32 to i8
+  view.store %87, %26[0] : i8, view<1xi8>
+  %88 = scalar.constant 100 : i32
+  %89 = scalar.muli %88, %second : i32
+  %90 = scalar.addi %first, %89 : i32
+  func.return %90 : i32
+}
+
+kernel.def @storage_signed_kernel() {
+  %93 = index.constant 1 : index
+  kernel.launch.config workgroups(%93, %93, %93) workgroup_size(%93, %93, %93) : index
+} launch(%bytes: buffer, %output: buffer) {
+  %bytes_byte_offset = index.constant 0 : offset
+  %101 = func.call @storage_signed(%bytes, %bytes_byte_offset) : (buffer, offset) -> (i32)
+  %125 = index.constant 4 : offset
+  %110 = buffer.view %output[%125] : buffer -> view<1xi32>
+  view.store %101, %110[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Signed byte division truncates toward zero and returns the converted
+// stored value, not an unsigned quotient.
+int storage_divide(signed char* bytes) {
+  bytes[1] = -125;
+  return bytes[1] /= 3;
+}
+// ----
+func.def public @storage_divide(%bytes: buffer, %bytes_byte_offset: offset) -> (i32) {
+  %33 = scalar.constant -125 : i8
+  %32 = scalar.constant 1 : i64
+  %11 = index.cast %bytes_byte_offset : offset to i64
+  %12 = scalar.addi %11, %32 : i64
+  %13 = scalar.assume %12 [range(%12, 0, 9223372036854775807)] : i64
+  %14 = index.cast %13 : i64 to offset
+  %15 = buffer.view %bytes[%14] : buffer -> view<1xi8>
+  view.store %33, %15[0] : i8, view<1xi8>
+  %16 = scalar.constant 3 : i32
+  %26 = view.load %15[0] : view<1xi8> -> i8
+  %27 = scalar.extsi %26 : i8 to i32
+  %28 = scalar.divsi %27, %16 : i32
+  %29 = scalar.trunci %28 : i32 to i8
+  view.store %29, %15[0] : i8, view<1xi8>
+  %30 = scalar.extsi %29 : i8 to i32
+  func.return %30 : i32
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Floating compound results retain their value before later mutations
+// of the same storage, and integer RHS values convert to floating point.
+float storage_floats(float* values) {
+  values[1] = 1.5f;
+  values[2] = -3.0f;
+  float first = values[1] *= 2;
+  float second = values[2] /= 2;
+  values[1] += 0.25f;
+  values[2] -= 0.5f;
+  return first + second;
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void storage_floats_kernel(float* values, float* output) {
+  output[1] = storage_floats(values);
+}
+// ----
+func.def public @storage_floats(%values: buffer, %values_byte_offset: offset) -> (f32) {
+  %3 = scalar.constant 1.5 : f32
+  %103 = scalar.constant 4 : i64
+  %8 = index.cast %values_byte_offset : offset to i64
+  %9 = scalar.addi %8, %103 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %12 = buffer.view %values[%11] : buffer -> view<1xf32>
+  view.store %3, %12[0] : f32, view<1xf32>
+  %102 = scalar.constant -3.0 : f32
+  %101 = scalar.constant 8 : i64
+  %20 = scalar.addi %8, %101 : i64
+  %21 = scalar.assume %20 [range(%20, 0, 9223372036854775807)] : i64
+  %22 = index.cast %21 : i64 to offset
+  %23 = buffer.view %values[%22] : buffer -> view<1xf32>
+  view.store %102, %23[0] : f32, view<1xf32>
+  %100 = scalar.constant 2.0 : f32
+  %35 = view.load %12[0] : view<1xf32> -> f32
+  %first = scalar.mulf %35, %100 : f32
+  view.store %first, %12[0] : f32, view<1xf32>
+  %48 = view.load %23[0] : view<1xf32> -> f32
+  %second = scalar.divf %48, %100 : f32
+  view.store %second, %23[0] : f32, view<1xf32>
+  %50 = scalar.constant 0.25 : f32
+  %60 = view.load %12[0] : view<1xf32> -> f32
+  %61 = scalar.addf %60, %50 : f32
+  view.store %61, %12[0] : f32, view<1xf32>
+  %62 = scalar.constant 0.5 : f32
+  %72 = view.load %23[0] : view<1xf32> -> f32
+  %73 = scalar.subf %72, %62 : f32
+  view.store %73, %23[0] : f32, view<1xf32>
+  %74 = scalar.addf %first, %second : f32
+  func.return %74 : f32
+}
+
+kernel.def @storage_floats_kernel() {
+  %77 = index.constant 1 : index
+  kernel.launch.config workgroups(%77, %77, %77) workgroup_size(%77, %77, %77) : index
+} launch(%values: buffer, %output: buffer) {
+  %values_byte_offset = index.constant 0 : offset
+  %85 = func.call @storage_floats(%values, %values_byte_offset) : (buffer, offset) -> (f32)
+  %104 = index.constant 4 : offset
+  %94 = buffer.view %output[%104] : buffer -> view<1xf32>
+  view.store %85, %94[0] : f32, view<1xf32>
+  kernel.return
+}

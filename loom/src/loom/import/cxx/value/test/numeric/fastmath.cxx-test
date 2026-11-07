@@ -1,0 +1,375 @@
+// RUN: roundtrip
+float strict(float left, float right) { return -left + right / left; }
+// ----
+func.def public @strict(%left: f32, %right: f32) -> (f32) {
+  %3 = scalar.negf %left : f32
+  %4 = scalar.divf %right, %left : f32
+  %5 = scalar.addf %3, %4 : f32
+  func.return %5 : f32
+}
+
+// ====
+// RUN: roundtrip
+using Float4 = float __attribute__((ext_vector_type(4)));
+[[loom::fastmath]]
+Float4 vector_relaxed(Float4 left, Float4 right) {
+  return -(left + right) * right / left;
+}
+// ----
+func.def public @vector_relaxed(%left: vector<4xf32>, %right: vector<4xf32>) -> (vector<4xf32>) {
+  %3 = vector.addf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %left, %right : vector<4xf32>
+  %4 = vector.negf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %3 : vector<4xf32>
+  %5 = vector.mulf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %4, %right : vector<4xf32>
+  %6 = vector.divf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %5, %left : vector<4xf32>
+  func.return %6 : vector<4xf32>
+}
+
+// ====
+// RUN: roundtrip
+bool compare(float left, float right) [[loom::fastmath("nnan", "ninf")]] {
+  return left < right;
+}
+// ----
+func.def public @compare(%left: f32, %right: f32) -> (i1) {
+  %3 = scalar.cmpf<nnan|ninf> olt, %left, %right : f32
+  func.return %3 : i1
+}
+
+// ====
+// RUN: roundtrip
+bool truth(float value) [[loom::fastmath("nnan")]] { return value; }
+// ----
+func.def public @truth(%value: f32) -> (i1) {
+  %2 = scalar.constant 0.0 : f32
+  %3 = scalar.cmpf<nnan> une, %value, %2 : f32
+  func.return %3 : i1
+}
+
+// ====
+// RUN: roundtrip
+float widen(_Float16 value) [[loom::fastmath("nsz")]] {
+  return float(value) + 1.0f;
+}
+// ----
+func.def public @widen(%value: f16) -> (f32) {
+  %2 = scalar.extf %value : f16 to f32
+  %3 = scalar.constant 1.0 : f32
+  %4 = scalar.addf<nsz> %2, %3 : f32
+  func.return %4 : f32
+}
+
+// ====
+// RUN: roundtrip
+float nested(float value, float scale)
+    [[loom::fastmath("nnan")]] {
+  float result = value + scale;
+  [[loom::fastmath("reassoc", "nsz")]] {
+    result += value * scale;
+  }
+  return result / scale;
+}
+// ----
+func.def public @nested(%value: f32, %scale: f32) -> (f32) {
+  %result$3 = scalar.addf<nnan> %value, %scale : f32
+  %4 = scalar.mulf<reassoc|nsz> %value, %scale : f32
+  %result$5 = scalar.addf<reassoc|nsz> %result$3, %4 : f32
+  %6 = scalar.divf<nnan> %result$5, %scale : f32
+  func.return %6 : f32
+}
+
+// ====
+// RUN: roundtrip
+template <class T>
+[[loom::fastmath]]
+static T scaled(T value, T scale) {
+  return value * scale + value;
+}
+
+float templated(float value, float scale) { return scaled(value, scale); }
+// ----
+func.def public @templated(%value: f32, %scale: f32) -> (f32) {
+  %3 = func.call pure @scaled_float(%value, %scale) : (f32, f32) -> (f32)
+  func.return %3 : f32
+}
+
+func.def @scaled_float(%value: f32, %scale: f32) -> (f32) {
+  %7 = scalar.mulf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %value, %scale : f32
+  %8 = scalar.addf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %7, %value : f32
+  func.return %8 : f32
+}
+
+// ====
+// RUN: roundtrip
+using Float4 = float __attribute__((ext_vector_type(4)));
+template <class Vector, class Scalar>
+[[loom::op("vector.reduce", "addf", "reassoc")]]
+Scalar sum(Vector, Scalar);
+
+float reduction(Float4 values, float seed) [[loom::fastmath("nsz")]] {
+  return sum(values, seed);
+}
+// ----
+func.def public @reduction(%values: vector<4xf32>, %seed: f32) -> (f32) {
+  %3 = vector.reduce<addf, reassoc|nsz> %values, %seed : vector<4xf32>, f32
+  func.return %3 : f32
+}
+
+// ====
+// RUN: roundtrip
+static float helper(float value, float scale)
+    [[loom::fastmath("reassoc")]] {
+  return value * scale + value;
+}
+
+float caller(float value, float scale) {
+  return helper(value, scale) + value;
+}
+// ----
+func.def public @caller(%value: f32, %scale: f32) -> (f32) {
+  %3 = func.call pure @helper(%value, %scale) : (f32, f32) -> (f32)
+  %4 = scalar.addf %3, %value : f32
+  func.return %4 : f32
+}
+
+func.def @helper(%value: f32, %scale: f32) -> (f32) {
+  %8 = scalar.mulf<reassoc> %value, %scale : f32
+  %9 = scalar.addf<reassoc> %8, %value : f32
+  func.return %9 : f32
+}
+
+// ====
+// RUN: roundtrip
+float structured(float left, float right) {
+  [[loom::fastmath("nnan")]] if (left > right) {
+    return left + right;
+  } else {
+    return left - right;
+  }
+}
+// ----
+func.def public @structured(%left: f32, %right: f32) -> (f32) {
+  %3 = scalar.cmpf<nnan> ogt, %left, %right : f32
+  %4 = scf.if %3 -> (f32) {
+    %5 = scalar.addf<nnan> %left, %right : f32
+    scf.yield %5 : f32
+  } else {
+    %6 = scalar.subf<nnan> %left, %right : f32
+    scf.yield %6 : f32
+  }
+  func.return %4 : f32
+}
+
+// ====
+// RUN: roundtrip
+float redeclared(float value, float scale) [[loom::fastmath("ninf")]];
+float redeclared(float value, float scale) { return value * scale; }
+// ----
+func.def public @redeclared(%value: f32, %scale: f32) -> (f32) {
+  %3 = scalar.mulf<ninf> %value, %scale : f32
+  func.return %3 : f32
+}
+
+// ====
+// RUN: roundtrip
+float scheduled(float value, float scale) {
+  [[loom::fastmath("reassoc"), loom::unroll]]
+  for (unsigned i = 0; i < 2; ++i) {
+    value += scale * float(i);
+  }
+  return value;
+}
+// ----
+func.def public @scheduled(%value$0: f32, %scale: f32) -> (f32) {
+  %i = scalar.constant 0 : i32
+  %4 = index.cast %i : i32 to offset
+  %5 = scalar.constant 2 : i32
+  %6 = index.cast %5 : i32 to offset
+  %7 = index.constant 1 : offset
+  %value$10 = scf.for %i = [%4 to %6 step %7](%value$9 = %value$0 : f32) -> (f32) unroll {
+    %11 = index.cast %i : offset to i32
+    %12 = scalar.uitofp %11 : i32 to f32
+    %13 = scalar.mulf<reassoc> %scale, %12 : f32
+    %value$14 = scalar.addf<reassoc> %value$9, %13 : f32
+    scf.yield %value$14 : f32
+  }
+  func.return %value$10 : f32
+}
+
+// ====
+// RUN: roundtrip
+float returning_scope(float value, bool early) {
+  [[loom::fastmath("nnan")]] if (early) {
+    return value * value;
+  }
+  return value + 1.0f;
+}
+// ----
+func.def public @returning_scope(%value: f32, %early: i1) -> (f32) {
+  %3 = scf.if %early -> (f32) {
+    %4 = scalar.mulf<nnan> %value, %value : f32
+    scf.yield %4 : f32
+  } else {
+    %5 = scalar.constant 1.0 : f32
+    %6 = scalar.addf %value, %5 : f32
+    scf.yield %6 : f32
+  }
+  func.return %3 : f32
+}
+
+// ====
+// RUN: roundtrip
+float continuing_scope(float value, bool skip) {
+  for (unsigned i = 0; i < 2; ++i) {
+    [[loom::fastmath("ninf")]] if (skip) {
+      value *= 2.0f;
+      continue;
+    }
+    value += 1.0f;
+  }
+  return value * 3.0f;
+}
+// ----
+func.def public @continuing_scope(%value$0: f32, %skip: i1) -> (f32) {
+  %i = scalar.constant 0 : i32
+  %4 = index.cast %i : i32 to offset
+  %5 = scalar.constant 2 : i32
+  %6 = index.cast %5 : i32 to offset
+  %7 = index.constant 1 : offset
+  %value$10 = scf.for %i = [%4 to %6 step %7](%value$9 = %value$0 : f32) -> (f32) {
+    %11 = index.cast %i : offset to i32
+    %12, %value$13 = scf.if %skip -> (i1, f32) {
+      %14 = scalar.constant 2.0 : f32
+      %value = scalar.mulf<ninf> %value$9, %14 : f32
+      %16 = scalar.constant 0 : i1
+      scf.yield %16, %value : i1, f32
+    } else {
+      %17 = scalar.constant 1.0 : f32
+      %value = scalar.addf %value$9, %17 : f32
+      %19 = scalar.constant 1 : i1
+      scf.yield %19, %value : i1, f32
+    }
+    scf.yield %value$13 : f32
+  }
+  %20 = scalar.constant 3.0 : f32
+  %21 = scalar.mulf %value$10, %20 : f32
+  func.return %21 : f32
+}
+
+// ====
+// RUN: roundtrip
+[[loom::op("scalar.mulf", "contract")]]
+float multiply(float left, float right);
+
+float scalar_intrinsic(float left, float right)
+    [[loom::fastmath("nnan")]] {
+  return multiply(left, right);
+}
+// ----
+func.def public @scalar_intrinsic(%left: f32, %right: f32) -> (f32) {
+  %3 = scalar.mulf<nnan|contract> %left, %right : f32
+  func.return %3 : f32
+}
+
+// ====
+// RUN: roundtrip
+using Float4 = float __attribute__((ext_vector_type(4)));
+[[loom::op("vector.dotf", "reassoc")]]
+float dot(Float4 left, Float4 right, float seed);
+
+float floating_dot(Float4 left, Float4 right, float seed)
+    [[loom::fastmath("nsz")]] {
+  return dot(left, right, seed);
+}
+// ----
+func.def public @floating_dot(%left: vector<4xf32>, %right: vector<4xf32>, %seed: f32) -> (f32) {
+  %4 = vector.dotf<reassoc|nsz> %left, %right, %seed : vector<4xf32>, vector<4xf32>, f32
+  func.return %4 : f32
+}
+
+// ====
+// RUN: roundtrip
+float statement_fast(float left, float right) {
+  [[loom::fastmath]] return left * right;
+}
+// ----
+func.def public @statement_fast(%left: f32, %right: f32) -> (f32) {
+  %3 = scalar.mulf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %left, %right : f32
+  func.return %3 : f32
+}
+
+// ====
+// RUN: roundtrip
+float declaration_fast(float left, float right) {
+  [[loom::fastmath("nnan", "ninf", "arcp")]] float quotient = left / right;
+  return quotient;
+}
+// ----
+func.def public @declaration_fast(%left: f32, %right: f32) -> (f32) {
+  %quotient = scalar.divf<nnan|ninf|arcp> %left, %right : f32
+  func.return %quotient : f32
+}
+
+// ====
+// INPUT: cxx fp-model=fast
+// Invocation policy is inherited and exact source contracts replace it.
+float inherited(float left, float right) { return left * right + left; }
+
+[[loom::fastmath(false)]]
+float precise(float left, float right) {
+  return left * right + left;
+}
+
+float mixed(float left, float right) {
+  float result = left * right;
+  [[loom::fastmath(false)]] { result += left / right; }
+  [[loom::fastmath("contract")]] { result += left * right; }
+  return result + right;
+}
+
+int integer_unchanged(int left, int right) { return left + right; }
+
+[[loom::op("scalar.cttzi")]] unsigned count_trailing_zeros(unsigned value);
+unsigned integer_intrinsic_unchanged(unsigned value) {
+  return count_trailing_zeros(value);
+}
+
+using Int4 = int __attribute__((ext_vector_type(4)));
+Int4 vector_integer_unchanged(Int4 left, Int4 right) { return left + right; }
+
+// ----
+func.def public @inherited(%left: f32, %right: f32) -> (f32) {
+  %3 = scalar.mulf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %left, %right : f32
+  %4 = scalar.addf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %3, %left : f32
+  func.return %4 : f32
+}
+
+func.def public @precise(%left: f32, %right: f32) -> (f32) {
+  %8 = scalar.mulf %left, %right : f32
+  %9 = scalar.addf %8, %left : f32
+  func.return %9 : f32
+}
+
+func.def public @mixed(%left: f32, %right: f32) -> (f32) {
+  %result$13 = scalar.mulf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %left, %right : f32
+  %14 = scalar.divf %left, %right : f32
+  %result$15 = scalar.addf %result$13, %14 : f32
+  %16 = scalar.mulf<contract> %left, %right : f32
+  %result$17 = scalar.addf<contract> %result$15, %16 : f32
+  %18 = scalar.addf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %result$17, %right : f32
+  func.return %18 : f32
+}
+
+func.def public @integer_unchanged(%left: i32, %right: i32) -> (i32) {
+  %22 = scalar.addi %left, %right : i32
+  func.return %22 : i32
+}
+
+func.def public @integer_intrinsic_unchanged(%value: i32) -> (i32) {
+  %25 = scalar.cttzi %value : i32
+  func.return %25 : i32
+}
+
+func.def public @vector_integer_unchanged(%left: vector<4xi32>, %right: vector<4xi32>) -> (vector<4xi32>) {
+  %29 = vector.addi %left, %right : vector<4xi32>
+  func.return %29 : vector<4xi32>
+}

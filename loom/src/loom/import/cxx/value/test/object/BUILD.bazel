@@ -1,0 +1,57 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],
+)
+
+loom_check_test_suite(
+    name = "compiler_test",
+    srcs = [
+        "array_records.cxx-test",
+        "class_conversions.cxx-test",
+        "class_conversions_invalid.cxx-test",
+        "const.cxx-test",
+        "const_default_initialization.cxx-test",
+        "lambdas.cxx-test",
+        "layout_attributes.cxx-test",
+        "layout_attributes_roundtrip.cxx-test",
+        "list_initialization_invalid.cxx-test",
+        "member_functions.cxx-test",
+        "member_functions_cleanup.cxx-test",
+        "member_functions_invalid.cxx-test",
+        "offsetof.cxx-test",
+        "offsetof_roundtrip.cxx-test",
+        "operators.cxx-test",
+        "record_arrays.cxx-test",
+        "record_constructors.cxx-test",
+        "record_initialization.cxx-test",
+        "record_memory.cxx-test",
+        "record_memory_invalid.cxx-test",
+        "record_values.cxx-test",
+        "records.cxx-test",
+        "records_invalid.cxx-test",
+        "reference_accessors.cxx-test",
+        "reference_parameters.cxx-test",
+        "reference_parameters_invalid.cxx-test",
+        "special_members_invalid.cxx-test",
+        "structured_bindings.cxx-test",
+        "value_initialization.cxx-test",
+    ],
+    data = [
+        "aligned_layout.h",
+        "offsetof_layout.h",
+        "operator_values.cxx",
+        "packed_layout.h",
+        "record_layout.h",
+        "record_values.cxx",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)

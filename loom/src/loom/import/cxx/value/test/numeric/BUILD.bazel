@@ -1,0 +1,51 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],
+)
+
+loom_check_test_suite(
+    name = "compiler_test",
+    srcs = [
+        "bfloat16.cxx-test",
+        "bfloat16_invalid.cxx-test",
+        "bitcast.cxx-test",
+        "bitcast_folding.cxx-test",
+        "bitcast_invalid.cxx-test",
+        "bitcast_payloads.cxx-test",
+        "constexpr_bitcast.cxx-test",
+        "constexpr_bitcast_cleanup.cxx-test",
+        "constexpr_bitcast_invalid.cxx-test",
+        "exponent.cxx-test",
+        "fastmath.cxx-test",
+        "fastmath_invalid.cxx-test",
+        "float16.cxx-test",
+        "float8.cxx-test",
+        "float8_invalid.cxx-test",
+        "increments.cxx-test",
+        "integer_intrinsics.cxx-test",
+        "integer_operations.cxx-test",
+        "integer_widening.cxx-test",
+        "logarithms.cxx-test",
+        "multiprecision_arithmetic.cxx-test",
+        "nan_payloads.cxx-test",
+        "narrow_float_subtraction.cxx-test",
+        "numeric_conversion.cxx-test",
+        "numeric_conversion_invalid.cxx-test",
+        "reciprocal.cxx-test",
+        "rounding.cxx-test",
+        "scalar.cxx-test",
+        "scalar_invalid.cxx-test",
+        "scalar_templates.cxx-test",
+        "scalar_templates_invalid.cxx-test",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)

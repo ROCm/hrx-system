@@ -1,0 +1,330 @@
+// RUN: pass canonicalize,cse,dce
+// A fixed-extent callee receives the caller's layout as part of its signature.
+#include <loomcxx/kernel.h>
+#include <loomcxx/view.h>
+namespace loomt = loom::type;
+using Bytes = loomt::view<loomt::shape<4>, const unsigned char,
+                         loomt::encoding<loom::encoding::role::layout, 1>>;
+[[loom::symbol("library.read_byte")]]
+unsigned read_byte(Bytes values, unsigned position) {
+  loom::assume(position < 4u);
+  return loom::view::load(values, position);
+}
+// ----
+func.def public @library.read_byte(%values_layout: encoding<layout>, %values: view<4xi8, %values_layout>, %position$2: i32) -> (i32) {
+  %position$4 = scalar.assume %position$2 [range(%position$2, 0, 3)] : i32
+  %5 = scalar.extui %position$4 : i32 to i64
+  %6 = index.cast %5 : i64 to index
+  %7 = view.load %values[%6] : view<4xi8, %values_layout> -> i8
+  %8 = scalar.extui %7 : i8 to i32
+  func.return %8 : i32
+}
+
+// ====
+// Dense and strided callers share the declaration but pass different encodings
+// and independent input origins; neither layout can be baked into the callee.
+#include <loomcxx/view.h>
+namespace loomt = loom::type;
+using Bytes = loomt::view<loomt::shape<4>, const unsigned char,
+                         loomt::encoding<loom::encoding::role::layout, 1>>;
+[[loom::symbol("library.read_byte")]]
+unsigned read_byte(Bytes values, unsigned position);
+unsigned read_layouts(const unsigned char* dense_values,
+                      const unsigned char* strided_values, unsigned position) {
+  auto dense = loom::buffer::view<4>(dense_values, {},
+                                    loom::encoding::layout::dense<1>());
+  auto strided = loom::buffer::view<4>(strided_values, {},
+                                      loom::encoding::layout::strided(2u));
+  return read_byte(dense, position) + read_byte(strided, position);
+}
+// ----
+func.def public @read_layouts(%dense_values: buffer, %dense_values_byte_offset: offset, %strided_values: buffer, %strided_values_byte_offset: offset, %position: i32) -> (i32) {
+  %dense_layout = encoding.layout.dense : encoding<layout>
+  %dense = buffer.view %dense_values[%dense_values_byte_offset] : buffer -> view<4xi8, %dense_layout>
+  %20 = index.constant 2 : index
+  %strided_layout = encoding.layout.strided [%20] : encoding<layout>
+  %strided = buffer.view %strided_values[%strided_values_byte_offset] : buffer -> view<4xi8, %strided_layout>
+  %13 = func.call @library.read_byte(%dense_layout, %dense, %position) : (encoding<layout>, view<4xi8, %dense_layout>, i32) -> (i32)
+  %14 = func.call @library.read_byte(%strided_layout, %strided, %position) : (encoding<layout>, view<4xi8, %strided_layout>, i32) -> (i32)
+  %15 = scalar.addi %13, %14 : i32
+  func.return %15 : i32
+}
+
+func.decl @library.read_byte(%16: encoding<layout>, %17: view<4xi8, %16>, %18: i32) -> (i32)
+
+// ====
+// The dynamic dimension precedes the layout and view in the definition ABI.
+#include <loomcxx/view.h>
+namespace loomt = loom::type;
+using Bytes = loomt::view<loomt::shape<loomt::dynamic>, const unsigned char,
+                         loomt::encoding<loom::encoding::role::layout, 1>>;
+[[loom::symbol("library.read_dynamic_byte")]]
+unsigned read_dynamic_byte(Bytes values) { return loom::view::load(values, 3u); }
+// ----
+func.def public @library.read_dynamic_byte(%values_dim0: index, %values_layout: encoding<layout>, %values: view<[%values_dim0]xi8, %values_layout>) -> (i32) {
+  %9 = index.constant 3 : index
+  %7 = view.load %values[%9] : view<[%values_dim0]xi8, %values_layout> -> i8
+  %8 = scalar.extui %7 : i8 to i32
+  func.return %8 : i32
+}
+
+// ====
+// A caller supplies the same dimension/layout/view tuple to a declaration.
+#include <loomcxx/view.h>
+namespace loomt = loom::type;
+using Bytes = loomt::view<loomt::shape<loomt::dynamic>, const unsigned char,
+                         loomt::encoding<loom::encoding::role::layout, 1>>;
+[[loom::symbol("library.read_dynamic_byte")]] unsigned read_dynamic_byte(Bytes values);
+unsigned read_dynamic(const unsigned char* values, unsigned count) {
+  auto view = loom::buffer::view<loomt::dynamic>(values, {count},
+                                               loom::encoding::layout::dense<1>());
+  return read_dynamic_byte(view);
+}
+// ----
+func.def public @read_dynamic(%values: buffer, %values_byte_offset: offset, %count: i32) -> (i32) {
+  %4 = scalar.extui %count : i32 to i64
+  %view_layout = encoding.layout.dense : encoding<layout>
+  %view_dim0 = index.cast %4 : i64 to index
+  %view = buffer.view %values[%values_byte_offset] : buffer -> view<[%view_dim0]xi8, %view_layout>
+  %8 = func.call @library.read_dynamic_byte(%view_dim0, %view_layout, %view) : (index, encoding<layout>, view<[%view_dim0]xi8, %view_layout>) -> (i32)
+  func.return %8 : i32
+}
+
+func.decl @library.read_dynamic_byte(%9: index, %10: encoding<layout>, %11: view<[%9]xi8, %10>) -> (i32)
+
+// ====
+// A crop result retains the source layout and its nonzero row/column origin.
+#include <loomcxx/view.h>
+namespace loomt = loom::type;
+using Source = loomt::view<loomt::shape<4, loomt::dynamic>, const unsigned char,
+                          loomt::encoding<loom::encoding::role::layout, 2>>;
+using Crop = loomt::view<loomt::shape<2, 3>, const unsigned char,
+                        loomt::encoding<loom::encoding::role::layout, 2>>;
+[[loom::symbol("library.crop_2x3")]] Crop crop(Source source) {
+  return loom::view::subview<2, 3>(source, {1u, 2u}, {});
+}
+// ----
+func.def public @library.crop_2x3(%source_dim1: index, %source_layout: encoding<layout>, %source: view<4x[%source_dim1]xi8, %source_layout>) -> (%3: encoding<layout>, view<2x3xi8, %3>) {
+  %14 = index.constant 1 : index
+  %13 = index.constant 2 : index
+  %11, %12 = view.subview %source[%14, %13] : view<4x[%source_dim1]xi8, %source_layout> -> view<2x3xi8, %12>
+  func.return %12, %11 : encoding<layout>, view<2x3xi8, %12>
+}
+
+// ====
+// The caller adds an interior pointer origin before constructing the source.
+// The returned view uses the returned encoding, not the caller's dense layout.
+#include <loomcxx/view.h>
+namespace loomt = loom::type;
+using Source = loomt::view<loomt::shape<4, loomt::dynamic>, const unsigned char,
+                          loomt::encoding<loom::encoding::role::layout, 2>>;
+using Crop = loomt::view<loomt::shape<2, 3>, const unsigned char,
+                        loomt::encoding<loom::encoding::role::layout, 2>>;
+[[loom::symbol("library.crop_2x3")]] Crop crop(Source source);
+unsigned observe_crop(const unsigned char* values, unsigned columns) {
+  auto source = loom::buffer::view<4, loomt::dynamic>(
+      values + 2, {columns}, loom::encoding::layout::dense<2>());
+  auto result = crop(source);
+  return loom::view::load(result, 1u, 1u);
+}
+// ----
+func.def public @observe_crop(%values: buffer, %values_byte_offset: offset, %columns: i32) -> (i32) {
+  %33 = scalar.constant 2 : i64
+  %8 = index.cast %values_byte_offset : offset to i64
+  %9 = scalar.addi %8, %33 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %12 = scalar.extui %columns : i32 to i64
+  %source_layout = encoding.layout.dense : encoding<layout>
+  %source_dim1 = index.cast %12 : i64 to index
+  %source = buffer.view %values[%11] : buffer -> view<4x[%source_dim1]xi8, %source_layout>
+  %result_layout, %result = func.call @library.crop_2x3(%source_dim1, %source_layout, %source) : (index, encoding<layout>, view<4x[%source_dim1]xi8, %source_layout>) -> (encoding<layout>, view<2x3xi8, %result_layout>)
+  %32 = index.constant 1 : index
+  %24 = view.load %result[%32, %32] : view<2x3xi8, %result_layout> -> i8
+  %25 = scalar.extui %24 : i8 to i32
+  func.return %25 : i32
+}
+
+func.decl @library.crop_2x3(%26: index, %27: encoding<layout>, %28: view<4x[%26]xi8, %27>) -> (%29: encoding<layout>, view<2x3xi8, %29>)
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Dense and strided local arrays retain separate roots at the external call boundary.
+#include <loomcxx/view.h>
+
+using LinkedByteView =
+    loom::type::view<loom::type::shape<4>, const unsigned char,
+                     loom::type::encoding<loom::encoding::role::layout, 1>>;
+
+[[loom::symbol("library.read_byte")]] unsigned linked_read_byte(
+    LinkedByteView values, unsigned position);
+unsigned observe_linked_views(unsigned position) {
+  const unsigned char dense_values[4] = {2, 3, 5, 7};
+  const unsigned char strided_values[8] = {11, 0, 13, 0, 17, 0, 19, 0};
+  auto dense = loom::buffer::view<4>(dense_values, {},
+                                     loom::encoding::layout::dense<1>());
+  auto strided = loom::buffer::view<4>(strided_values, {},
+                                       loom::encoding::layout::strided(2u));
+  return linked_read_byte(dense, position) +
+         linked_read_byte(strided, position);
+}
+
+// ----
+func.def public @observe_linked_views(%position: i32) -> (i32) {
+  %2 = index.constant 4 : offset
+  %dense_values_storage = buffer.alloca<private> align(1) %2 : buffer
+  %dense_values_storage_byte_offset = index.constant 0 : offset
+  %dense_values_view = buffer.view %dense_values_storage[%dense_values_storage_byte_offset] : buffer -> view<4xi8>
+  %72 = scalar.constant 2 : i8
+  %8 = index.constant 0 : index
+  view.store %72, %dense_values_view[%8] : i8, view<4xi8>
+  %71 = scalar.constant 3 : i8
+  %11 = index.constant 1 : index
+  view.store %71, %dense_values_view[%11] : i8, view<4xi8>
+  %70 = scalar.constant 5 : i8
+  %14 = index.constant 2 : index
+  view.store %70, %dense_values_view[%14] : i8, view<4xi8>
+  %69 = scalar.constant 7 : i8
+  %17 = index.constant 3 : index
+  view.store %69, %dense_values_view[%17] : i8, view<4xi8>
+  %18 = index.constant 8 : offset
+  %strided_values_storage = buffer.alloca<private> align(1) %18 : buffer
+  %strided_values_view = buffer.view %strided_values_storage[%dense_values_storage_byte_offset] : buffer -> view<8xi8>
+  %68 = scalar.constant 11 : i8
+  view.store %68, %strided_values_view[%8] : i8, view<8xi8>
+  %67 = scalar.constant 0 : i8
+  view.store %67, %strided_values_view[%11] : i8, view<8xi8>
+  %66 = scalar.constant 13 : i8
+  view.store %66, %strided_values_view[%14] : i8, view<8xi8>
+  view.store %67, %strided_values_view[%17] : i8, view<8xi8>
+  %64 = scalar.constant 17 : i8
+  %36 = index.constant 4 : index
+  view.store %64, %strided_values_view[%36] : i8, view<8xi8>
+  %39 = index.constant 5 : index
+  view.store %67, %strided_values_view[%39] : i8, view<8xi8>
+  %62 = scalar.constant 19 : i8
+  %42 = index.constant 6 : index
+  view.store %62, %strided_values_view[%42] : i8, view<8xi8>
+  %45 = index.constant 7 : index
+  view.store %67, %strided_values_view[%45] : i8, view<8xi8>
+  %dense_layout = encoding.layout.dense : encoding<layout>
+  %dense = buffer.view %dense_values_storage[%dense_values_storage_byte_offset] : buffer -> view<4xi8, %dense_layout>
+  %strided_layout = encoding.layout.strided [%14] : encoding<layout>
+  %strided = buffer.view %strided_values_storage[%dense_values_storage_byte_offset] : buffer -> view<4xi8, %strided_layout>
+  %53 = func.call @library.read_byte(%dense_layout, %dense, %position) : (encoding<layout>, view<4xi8, %dense_layout>, i32) -> (i32)
+  %54 = func.call @library.read_byte(%strided_layout, %strided, %position) : (encoding<layout>, view<4xi8, %strided_layout>, i32) -> (i32)
+  %55 = scalar.addi %53, %54 : i32
+  func.return %55 : i32
+}
+
+func.decl @library.read_byte(%56: encoding<layout>, %57: view<4xi8, %56>, %58: i32) -> (i32)
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A locally initialized array supplies the dependent dimension and encoding together.
+#include <loomcxx/view.h>
+
+using LinkedDynamicByteView =
+    loom::type::view<loom::type::shape<loom::type::dynamic>,
+                     const unsigned char,
+                     loom::type::encoding<loom::encoding::role::layout, 1>>;
+
+[[loom::symbol("library.read_dynamic_byte")]] unsigned linked_read_dynamic_byte(
+    LinkedDynamicByteView values);
+unsigned observe_linked_dynamic_view() {
+  const unsigned char values[6] = {29, 31, 37, 41, 43, 47};
+  const auto count = loom::index::cast(4u);
+  auto view = loom::buffer::view<loom::type::dynamic>(
+      values, {count}, loom::encoding::layout::dense<1>());
+  return linked_read_dynamic_byte(view);
+}
+
+// ----
+func.def public @observe_linked_dynamic_view() -> (i32) {
+  %1 = index.constant 6 : offset
+  %values_storage = buffer.alloca<private> align(1) %1 : buffer
+  %values_storage_byte_offset = index.constant 0 : offset
+  %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<6xi8>
+  %39 = scalar.constant 29 : i8
+  %7 = index.constant 0 : index
+  view.store %39, %values_view[%7] : i8, view<6xi8>
+  %38 = scalar.constant 31 : i8
+  %10 = index.constant 1 : index
+  view.store %38, %values_view[%10] : i8, view<6xi8>
+  %37 = scalar.constant 37 : i8
+  %13 = index.constant 2 : index
+  view.store %37, %values_view[%13] : i8, view<6xi8>
+  %36 = scalar.constant 41 : i8
+  %16 = index.constant 3 : index
+  view.store %36, %values_view[%16] : i8, view<6xi8>
+  %35 = scalar.constant 43 : i8
+  %19 = index.constant 4 : index
+  view.store %35, %values_view[%19] : i8, view<6xi8>
+  %34 = scalar.constant 47 : i8
+  %22 = index.constant 5 : index
+  view.store %34, %values_view[%22] : i8, view<6xi8>
+  %view_layout = encoding.layout.dense : encoding<layout>
+  %view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<[%19]xi8, %view_layout>
+  %28 = func.call @library.read_dynamic_byte(%19, %view_layout, %view) : (index, encoding<layout>, view<[%19]xi8, %view_layout>) -> (i32)
+  func.return %28 : i32
+}
+
+func.decl @library.read_dynamic_byte(%29: index, %30: encoding<layout>, %31: view<[%29]xi8, %30>) -> (i32)
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A loop-initialized local array keeps its interior origin across a view-returning call.
+#include <loomcxx/view.h>
+
+using LinkedCropSource =
+    loom::type::view<loom::type::shape<4, loom::type::dynamic>,
+                     const unsigned char,
+                     loom::type::encoding<loom::encoding::role::layout, 2>>;
+using LinkedCrop =
+    loom::type::view<loom::type::shape<2, 3>, const unsigned char,
+                     loom::type::encoding<loom::encoding::role::layout, 2>>;
+
+
+[[loom::symbol("library.crop_2x3")]] LinkedCrop linked_crop_2x3(
+    LinkedCropSource source);
+
+unsigned observe_linked_crop(unsigned columns) {
+  unsigned char values[46];
+  for (unsigned index = 0; index < 46u; ++index) {
+    values[index] = static_cast<unsigned char>(index);
+  }
+  const unsigned char* input = values + 2;
+  auto source = loom::buffer::view<4, loom::type::dynamic>(
+      input, {columns}, loom::encoding::layout::dense<2>());
+  auto crop = linked_crop_2x3(source);
+  return loom::view::load(crop, 1u, 1u);
+}
+
+// ----
+func.def public @observe_linked_crop(%columns: i32) -> (i32) {
+  %2 = index.constant 46 : offset
+  %values_storage = buffer.alloca<private> align(1) %2 : buffer
+  %values_storage_byte_offset = index.constant 0 : offset
+  %values_view = buffer.view %values_storage[%values_storage_byte_offset] : buffer -> view<46xi8>
+  %10 = index.constant 1 : offset
+  scf.for %index = [%values_storage_byte_offset to %2 step %10] {
+    %12 = index.cast %index : offset to i32
+    %13 = scalar.trunci %12 : i32 to i8
+    %14 = scalar.extui %12 : i32 to i64
+    %15 = scalar.assume %14 [range(%14, 0, 45)] : i64
+    %16 = index.cast %15 : i64 to index
+    view.store %13, %values_view[%16] : i8, view<46xi8>
+  }
+  %input_byte_offset = index.constant 2 : offset
+  %25 = scalar.extui %columns : i32 to i64
+  %source_layout = encoding.layout.dense : encoding<layout>
+  %source_dim1 = index.cast %25 : i64 to index
+  %source = buffer.view %values_storage[%input_byte_offset] : buffer -> view<4x[%source_dim1]xi8, %source_layout>
+  %crop_layout, %crop = func.call @library.crop_2x3(%source_dim1, %source_layout, %source) : (index, encoding<layout>, view<4x[%source_dim1]xi8, %source_layout>) -> (encoding<layout>, view<2x3xi8, %crop_layout>)
+  %45 = index.constant 1 : index
+  %37 = view.load %crop[%45, %45] : view<2x3xi8, %crop_layout> -> i8
+  %38 = scalar.extui %37 : i8 to i32
+  func.return %38 : i32
+}
+
+func.decl @library.crop_2x3(%39: index, %40: encoding<layout>, %41: view<4x[%39]xi8, %40>) -> (%42: encoding<layout>, view<2x3xi8, %42>)

@@ -1,0 +1,201 @@
+// RUN: roundtrip
+#include <stdfloat>
+#include <loomcxx/scalar.h>
+using std::bfloat16_t;
+using std::float16_t;
+using BFloat4 = bfloat16_t __attribute__((ext_vector_type(4)));
+static_assert(__STDCPP_FLOAT16_T__ == 1);
+static_assert(__STDCPP_BFLOAT16_T__ == 1);
+static_assert(__is_floating_point(bfloat16_t));
+static_assert(__is_arithmetic(bfloat16_t));
+static_assert(__is_same(decltype(1.0bf16), bfloat16_t));
+static_assert(__is_same(decltype(1.0BF16 + 2), bfloat16_t));
+static_assert(__is_same(decltype(1.0bf16 + 2.0f), float));
+static_assert(sizeof(bfloat16_t) == 2);
+static_assert(alignof(bfloat16_t) == 2);
+static_assert(sizeof(BFloat4) == 8);
+static_assert(alignof(BFloat4) == 8);
+constexpr bfloat16_t rounded = 1.01171875;
+static_assert(rounded == 1.015625);
+
+bfloat16_t scale(bfloat16_t value) {
+  bfloat16_t factor = 5.0f;
+  return value * factor;
+}
+BFloat4 vector_scale(BFloat4 value, bfloat16_t factor) { return value * factor; }
+bfloat16_t constant() { return rounded; }
+float extend(bfloat16_t value) { return value; }
+bfloat16_t truncate(float value) { return value; }
+float16_t to_half(bfloat16_t value) { return (float16_t)value; }
+bfloat16_t to_bfloat(float16_t value) { return (bfloat16_t)value; }
+bool truth(bfloat16_t value) { return value; }
+bfloat16_t literal() { return 1.01171875bf16; }
+bfloat16_t absolute(bfloat16_t value) { return loom::scalar::absf(value); }
+// ----
+func.def public @scale(%value: bf16) -> (bf16) {
+  %2 = scalar.constant 5.0 : f32
+  %factor = scalar.fptrunc %2 : f32 to bf16
+  %4 = scalar.mulf %value, %factor : bf16
+  func.return %4 : bf16
+}
+
+func.def public @vector_scale(%value: vector<4xbf16>, %factor: bf16) -> (vector<4xbf16>) {
+  %8 = vector.splat %factor : vector<4xbf16>
+  %9 = vector.mulf %value, %8 : vector<4xbf16>
+  func.return %9 : vector<4xbf16>
+}
+
+func.def public @constant() -> (bf16) {
+  %rounded = scalar.constant 1.015625 : bf16
+  func.return %rounded : bf16
+}
+
+func.def public @extend(%value: bf16) -> (f32) {
+  %14 = scalar.extf %value : bf16 to f32
+  func.return %14 : f32
+}
+
+func.def public @truncate(%value: f32) -> (bf16) {
+  %17 = scalar.fptrunc %value : f32 to bf16
+  func.return %17 : bf16
+}
+
+func.def public @to_half(%value: bf16) -> (f16) {
+  %20 = scalar.extf %value : bf16 to f32
+  %21 = scalar.fptrunc %20 : f32 to f16
+  func.return %21 : f16
+}
+
+func.def public @to_bfloat(%value: f16) -> (bf16) {
+  %24 = scalar.extf %value : f16 to f32
+  %25 = scalar.fptrunc %24 : f32 to bf16
+  func.return %25 : bf16
+}
+
+func.def public @truth(%value: bf16) -> (i1) {
+  %28 = scalar.constant 0.0 : bf16
+  %29 = scalar.cmpf une, %value, %28 : bf16
+  func.return %29 : i1
+}
+
+func.def public @literal() -> (bf16) {
+  %31 = scalar.constant 1.015625 : bf16
+  func.return %31 : bf16
+}
+
+func.def public @absolute(%value: bf16) -> (bf16) {
+  %34 = scalar.absf %value : bf16
+  func.return %34 : bf16
+}
+
+// ====
+// INPUT: cxx std=c23
+__bf16 twice(__bf16 value) { return value * (__bf16)2.0f; }
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [0], results = [0], types = [#func.abi.c.type<floating, byte_length = 2, byte_alignment = 2, component_count = 1, format = bf16>]>) @twice(%value: bf16) -> (bf16) {
+  %2 = scalar.constant 2.0 : f32
+  %3 = scalar.fptrunc %2 : f32 to bf16
+  %4 = scalar.mulf %value, %3 : bf16
+  func.return %4 : bf16
+}
+
+// ====
+// INPUT: cxx std=c++23
+#include <stdfloat>
+#include <loomcxx/view.h>
+
+std::bfloat16_t element(const std::bfloat16_t* input, unsigned row,
+                       unsigned column) {
+  auto source = loom::buffer::view<4, 8>(
+      input, {}, loom::encoding::layout::dense<2>());
+  return loom::view::load(source, row, column);
+}
+
+// ----
+func.def public @element(%input: buffer, %input_byte_offset: offset, %row: i32, %column: i32) -> (bf16) {
+  %source_layout = encoding.layout.dense : encoding<layout>
+  %source = buffer.view %input[%input_byte_offset] : buffer -> view<4x8xbf16, %source_layout>
+  %7 = scalar.extui %row : i32 to i64
+  %8 = index.cast %7 : i64 to index
+  %9 = scalar.extui %column : i32 to i64
+  %10 = index.cast %9 : i64 to index
+  %11 = view.load %source[%8, %10] : view<4x8xbf16, %source_layout> -> bf16
+  func.return %11 : bf16
+}
+
+// ====
+
+#include <stdfloat>
+
+float pair_sum(const std::bfloat16_t* input) {
+  return float(input[0]) + float(input[1]);
+}
+
+// ----
+func.def public @pair_sum(%input: buffer, %input_byte_offset: offset) -> (f32) {
+  %3 = scalar.constant 0 : i32
+  %4 = scalar.extsi %3 : i32 to i64
+  %5 = scalar.constant 2 : i64
+  %6 = scalar.muli %4, %5 : i64
+  %7 = index.cast %input_byte_offset : offset to i64
+  %8 = scalar.addi %7, %6 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = buffer.view %input[%10] : buffer -> view<1xbf16>
+  %12 = view.load %11[0] : view<1xbf16> -> bf16
+  %13 = scalar.extf %12 : bf16 to f32
+  %14 = scalar.constant 1 : i32
+  %15 = scalar.extsi %14 : i32 to i64
+  %16 = scalar.constant 2 : i64
+  %17 = scalar.muli %15, %16 : i64
+  %18 = index.cast %input_byte_offset : offset to i64
+  %19 = scalar.addi %18, %17 : i64
+  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+  %21 = index.cast %20 : i64 to offset
+  %22 = buffer.view %input[%21] : buffer -> view<1xbf16>
+  %23 = view.load %22[0] : view<1xbf16> -> bf16
+  %24 = scalar.extf %23 : bf16 to f32
+  %25 = scalar.addf %13, %24 : f32
+  func.return %25 : f32
+}
+
+// ====
+
+#include <stdfloat>
+
+std::bfloat16_t mixed(std::bfloat16_t first, std::float16_t second) {
+  return first + second;
+}
+
+// ----
+func.def public @mixed(%first: bf16, %second: f16) -> (bf16) {
+  %3 = scalar.extf %first : bf16 to f32
+  %4 = scalar.fptrunc %3 : f32 to f16
+  %5 = scalar.addf %4, %second : f16
+  %6 = scalar.extf %5 : f16 to f32
+  %7 = scalar.fptrunc %6 : f32 to bf16
+  func.return %7 : bf16
+}
+
+// ====
+// RUN: roundtrip
+// Record member projection feeds a BF16 absolute value and vector broadcast.
+#include <stdfloat>
+#include <loomcxx/scalar.h>
+using BFloat4 = std::bfloat16_t __attribute__((ext_vector_type(4)));
+struct Packet {
+  // Four samples sharing a numeric gain.
+  BFloat4 samples;
+  // Gain applied after taking its absolute value.
+  std::bfloat16_t gain;
+};
+BFloat4 scale(Packet value) {
+  return value.samples * loom::scalar::absf(value.gain);
+}
+// ----
+func.def public @scale(%value_samples: vector<4xbf16>, %value_gain: bf16) -> (vector<4xbf16>) {
+  %3 = scalar.absf %value_gain : bf16
+  %4 = vector.splat %3 : vector<4xbf16>
+  %5 = vector.mulf %value_samples, %4 : vector<4xbf16>
+  func.return %5 : vector<4xbf16>
+}

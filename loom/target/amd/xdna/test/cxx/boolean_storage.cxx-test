@@ -1,7 +1,11 @@
-// INPUT: cxx root=boolean_transfer data-model=ilp32 I=../../../../../src/loom/import/cxx/test
+// INPUT: cxx root=boolean_transfer data-model=ilp32
 // RUN: emit source-low @boolean_transfer target=amd.xdna.aie2p:core output=low
 
-#include "boolean_storage.cxx"
+bool boolean_transfer(volatile bool* destination, const volatile bool* source) {
+  bool value = *source;
+  *destination = value;
+  return value;
+}
 
 // ----
 low.func.def public target<amd.xdna.aie2p.core> abi(object_function) @boolean_transfer(%destination_byte_offset: reg<aie2p.er>, %source_byte_offset: reg<aie2p.er>) -> (reg<aie2p.er>) asm {

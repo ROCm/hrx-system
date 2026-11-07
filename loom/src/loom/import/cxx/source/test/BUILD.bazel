@@ -1,0 +1,45 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],
+)
+
+loom_check_test_suite(
+    name = "compiler_test",
+    srcs = [
+        "aggregate_constants.cxx-test",
+        "auto_deduction.cxx-test",
+        "constexpr_aggregate_loads.cxx-test",
+        "constexpr_aggregate_loads_roundtrip.cxx-test",
+        "constexpr_destruction.cxx-test",
+        "constexpr_references.cxx-test",
+        "constexpr_semantics.cxx-test",
+        "constexpr_storage.cxx-test",
+        "data_models.cxx-test",
+        "enum_semantics.cxx-test",
+        "enum_storage.cxx-test",
+        "enums.cxx-test",
+        "enums_invalid.cxx-test",
+        "frontend.cxx-test",
+        "initializer_dependencies.cxx-test",
+        "local_names.cxx-test",
+        "locations.cxx-test",
+        "macro_operators.cxx-test",
+        "standards.cxx-test",
+        "static_assert.cxx-test",
+    ],
+    data = [
+        "enum_semantics.h",
+        "locations.h",
+        "packed_enums.h",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)

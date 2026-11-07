@@ -1,0 +1,751 @@
+// RUN: pass inline-callables,promote-private-fragments,canonicalize,cse,dce
+// Delegation constructs the same destination through the selected target
+// before executing each delegating body in the chain.
+struct State {
+  unsigned value;
+
+  State(unsigned seed, unsigned bias) : value(seed + bias) {}
+  State(unsigned seed) : State(seed, 2u) { value *= 3u; }
+  State() : State(4u) { value += 1u; }
+};
+
+unsigned delegated_value() {
+  State state;
+  return state.value;
+}
+
+// ----
+func.def public @delegated_value() -> (i32) {
+  %37 = scalar.constant 19 : i32
+  func.return %37 : i32
+}
+
+// ====
+// Constructor member initializers precede structured body mutations, and a
+// local with no address demand returns to ordinary SSA after inlining.
+struct Pair {
+  unsigned first;
+  unsigned second;
+
+  Pair(unsigned seed) : first(seed), second(seed + 1u) {
+    if (seed & 1u) this->second += 2u;
+  }
+};
+
+unsigned build(unsigned seed) {
+  Pair pair(seed);
+  return pair.first + pair.second;
+}
+
+// ----
+func.def public @build(%seed: i32) -> (i32) {
+  %25 = scalar.constant 1 : i32
+  %26 = scalar.addi %seed, %25 : i32
+  %29 = scalar.andi %seed, %25 : i32
+  %30 = scalar.constant 0 : i32
+  %31 = scalar.cmpi ne, %29, %30 : i32
+  %39 = scalar.constant 3 : i32
+  %40 = scalar.addi %seed, %39 : i32
+  %41 = scf.select %31, %40, %26 : i32
+  %16 = scalar.addi %seed, %41 : i32
+  func.return %16 : i32
+}
+
+// ====
+// Nested constructors retain their own member-initializer plans and use the
+// ordinary member-function machinery from the constructor body.
+struct Pair {
+  unsigned first;
+  unsigned second;
+
+  Pair(unsigned seed) : first(seed), second(seed + 1u) { adjust(); }
+
+  [[loom::inline]] void adjust() { first += 3u; }
+};
+
+struct Outer {
+  Pair pair;
+  unsigned tail;
+
+  Outer(unsigned seed) : pair(seed), tail(pair.second + 4u) {}
+};
+
+unsigned build(unsigned seed) {
+  Outer outer(seed);
+  return outer.pair.first + outer.pair.second + outer.tail;
+}
+
+// ----
+func.def public @build(%seed: i32) -> (i32) {
+  %55 = scalar.constant 1 : i32
+  %56 = scalar.addi %seed, %55 : i32
+  %68 = scalar.addi %seed, %56 : i32
+  %70 = scalar.addi %68, %56 : i32
+  %72 = scalar.constant 7 : i32
+  %73 = scalar.addi %70, %72 : i32
+  func.return %73 : i32
+}
+
+// ====
+// Default construction runs once per array element. Constructor overloads and
+// prvalue return transport preserve the selected explicit arguments.
+struct Cell {
+  unsigned value;
+  Cell() : value(1u) { ++value; }
+  Cell(unsigned seed) : value(seed + 1u) {}
+};
+
+struct Packet {
+  Cell cells[2];
+};
+
+unsigned build_array() {
+  Cell cells[2];
+  return cells[0].value + cells[1].value;
+}
+
+unsigned build_nested_array() {
+  Packet packet;
+  return packet.cells[0].value + packet.cells[1].value;
+}
+
+Cell build_value(unsigned seed) { return Cell(seed); }
+unsigned read_value(unsigned seed) { return build_value(seed).value; }
+
+// ----
+func.def public @build_array() -> (i32) {
+  %149 = scalar.constant 4 : i32
+  func.return %149 : i32
+}
+
+func.def public @build_nested_array() -> (i32) {
+  %150 = scalar.constant 4 : i32
+  func.return %150 : i32
+}
+
+func.def public @build_value(%seed: i32) -> (i32) {
+  %105 = scalar.constant 1 : i32
+  %106 = scalar.addi %seed, %105 : i32
+  func.return %106 : i32
+}
+
+func.def public @read_value(%seed: i32) -> (i32) {
+  %113 = scalar.constant 1 : i32
+  %114 = scalar.addi %seed, %113 : i32
+  func.return %114 : i32
+}
+
+// ====
+// Constructor conversions in array elements preserve each selected call and
+// construct directly into the element destination.
+struct Cell {
+  unsigned value;
+
+  Cell(unsigned seed) : value(seed + 1u) {
+    if (seed & 1u) value += 2u;
+  }
+};
+
+struct Packet {
+  Cell cells[2];
+  Packet(unsigned seed) : cells{seed, seed + 1u} {}
+};
+
+unsigned sum(unsigned seed) {
+  Packet packet(seed);
+  return packet.cells[0].value + packet.cells[1].value;
+}
+
+// ----
+func.def public @sum(%seed: i32) -> (i32) {
+  %66 = scalar.constant 1 : i32
+  %67 = scalar.addi %seed, %66 : i32
+  %70 = scalar.andi %seed, %66 : i32
+  %71 = scalar.constant 0 : i32
+  %72 = scalar.cmpi ne, %70, %71 : i32
+  %81 = scalar.constant 3 : i32
+  %82 = scalar.addi %seed, %81 : i32
+  %90 = scf.select %72, %82, %67 : i32
+  %88 = scalar.constant 2 : i32
+  %89 = scalar.addi %seed, %88 : i32
+  %55 = scalar.andi %67, %66 : i32
+  %57 = scalar.cmpi ne, %55, %71 : i32
+  %85 = scalar.constant 4 : i32
+  %86 = scalar.addi %seed, %85 : i32
+  %87 = scf.select %57, %86, %89 : i32
+  %36 = scalar.addi %90, %87 : i32
+  func.return %36 : i32
+}
+
+// ====
+// Out-of-line definitions, default arguments, copy initialization, and return
+// conversion all retain the constructor selected by the frontend.
+struct Defined {
+  unsigned value;
+  Defined(unsigned seed = 7u);
+};
+
+Defined::Defined(unsigned seed) : value(seed + 1u) {}
+
+struct DefaultDefined {
+  unsigned value = 3u;
+  DefaultDefined();
+};
+
+DefaultDefined::DefaultDefined() = default;
+
+Defined build_value(unsigned seed) { return seed; }
+unsigned read_default() { Defined value; return value.value; }
+unsigned read_copy(unsigned seed) { Defined value = seed; return value.value; }
+unsigned read_record_copy(unsigned seed) {
+  Defined source(seed);
+  Defined copy = source;
+  return copy.value;
+}
+Defined relay_record(unsigned seed) {
+  Defined source(seed);
+  return source;
+}
+unsigned read_relay(unsigned seed) { return relay_record(seed).value; }
+unsigned read_defaulted_definition() { DefaultDefined value; return value.value; }
+
+// ----
+func.def public @build_value(%seed: i32) -> (i32) {
+  %99 = scalar.constant 1 : i32
+  %100 = scalar.addi %seed, %99 : i32
+  func.return %100 : i32
+}
+
+func.def public @read_default() -> (i32) {
+  %113 = scalar.constant 8 : i32
+  func.return %113 : i32
+}
+
+func.def public @read_copy(%seed: i32) -> (i32) {
+  %89 = scalar.constant 1 : i32
+  %90 = scalar.addi %seed, %89 : i32
+  func.return %90 : i32
+}
+
+func.def public @read_record_copy(%seed: i32) -> (i32) {
+  %84 = scalar.constant 1 : i32
+  %85 = scalar.addi %seed, %84 : i32
+  func.return %85 : i32
+}
+
+func.def public @relay_record(%seed: i32) -> (i32) {
+  %73 = scalar.constant 1 : i32
+  %74 = scalar.addi %seed, %73 : i32
+  func.return %74 : i32
+}
+
+func.def public @read_relay(%seed: i32) -> (i32) {
+  %107 = scalar.constant 1 : i32
+  %108 = scalar.addi %seed, %107 : i32
+  func.return %108 : i32
+}
+
+func.def public @read_defaulted_definition() -> (i32) {
+  %80 = scalar.constant 3 : i32
+  func.return %80 : i32
+}
+
+// ====
+// A static cast to an rvalue reference changes only the source value category.
+// Trivial record moves retain SSA structure across named, member, conditional,
+// and subscript operands; an &&-qualified member call updates the same object.
+struct Movable {
+  unsigned value;
+  void increment() && { ++value; }
+  Movable&& self() && { return static_cast<Movable&&>(*this); }
+};
+
+struct Outer {
+  Movable member;
+};
+
+unsigned move_sources(bool choose, unsigned first, unsigned second) {
+  Movable left{first};
+  Movable right{second};
+  Outer outer{{first + second}};
+  Movable named = static_cast<Movable&&>((left));
+  Movable member = static_cast<Movable&&>(outer.member);
+  Movable conditional = static_cast<Movable&&>(choose ? right : left);
+  Movable values[2] = {{first}, {second}};
+  Movable subscript = static_cast<Movable&&>(values[choose]);
+  const Movable fixed{3u};
+  Movable qualified = static_cast<const Movable&&>(fixed);
+  return named.value + member.value + conditional.value + subscript.value + qualified.value;
+}
+
+unsigned read_xvalue_array(unsigned first, unsigned second) {
+  unsigned values[2] = {first, second};
+  return static_cast<unsigned(&&)[2]>(values)[1];
+}
+
+unsigned mutate_xvalue(bool choose, unsigned value) {
+  Movable source{value};
+  if (choose) static_cast<Movable&&>(source).increment();
+  return source.value;
+}
+
+unsigned alias_xvalue(unsigned value) {
+  unsigned&& reference = static_cast<unsigned&&>(value);
+  ++reference;
+  return value;
+}
+
+unsigned extend_xvalue(unsigned value) {
+  Movable&& reference = Movable{value};
+  reference.value += 2u;
+  return reference.value;
+}
+
+template <typename T>
+struct RemoveReference { using Type = T; };
+template <typename T>
+struct RemoveReference<T&> { using Type = T; };
+template <typename T>
+struct RemoveReference<T&&> { using Type = T; };
+template <typename T>
+constexpr typename RemoveReference<T>::Type&& move(T&& value) {
+  return static_cast<typename RemoveReference<T>::Type&&>(value);
+}
+
+using MoveUInt4 = unsigned __attribute__((vector_size(16)));
+unsigned move_helper_record(unsigned value) {
+  Movable source{value};
+  return move(source).value;
+}
+unsigned move_helper_scalar(unsigned value) { return move(value); }
+unsigned move_helper_pointer(const unsigned* value) { return *move(value); }
+MoveUInt4 move_helper_vector(MoveUInt4 value) { return move(value); }
+unsigned move_helper_array(unsigned first, unsigned second) {
+  unsigned values[2] = {first, second};
+  return move(values)[1];
+}
+unsigned move_helper_member(unsigned value) {
+  Movable source{value};
+  return static_cast<Movable&&>(source).self().value;
+}
+
+// ----
+func.def public @move_sources(%choose: i1, %first: i32, %second: i32) -> (i32) {
+  %outer_member_value = scalar.addi %first, %second : i32
+  %conditional_value = scf.select %choose, %second, %first : i32
+  %6 = index.constant 8 : offset
+  %values_storage = buffer.alloca<private> align(4) %6 : buffer
+  %124 = index.constant 0 : offset
+  %13 = buffer.view %values_storage[%124] : buffer -> view<1xi32>
+  view.store %first, %13[0] : i32, view<1xi32>
+  %123 = index.constant 4 : offset
+  %19 = buffer.view %values_storage[%123] : buffer -> view<1xi32>
+  view.store %second, %19[0] : i32, view<1xi32>
+  %20 = scalar.extui %choose : i1 to i32
+  %21 = scalar.extsi %20 : i32 to i64
+  %125 = scalar.constant 2 : i64
+  %126 = scalar.shli %21, %125 : i64
+  %26 = scalar.assume %126 [range(%126, 0, 9223372036854775807)] : i64
+  %27 = index.cast %26 : i64 to offset
+  %30 = index.assume %27 [range(%27, 0, 4)] : offset
+  %31 = buffer.view %values_storage[%30] : buffer -> view<1xi32>
+  %subscript_value = view.load %31[0] : view<1xi32> -> i32
+  %fixed_value = scalar.constant 3 : i32
+  %34 = scalar.addi %first, %outer_member_value : i32
+  %35 = scalar.addi %34, %conditional_value : i32
+  %36 = scalar.addi %35, %subscript_value : i32
+  %37 = scalar.addi %36, %fixed_value : i32
+  func.return %37 : i32
+}
+
+func.def public @read_xvalue_array(%first: i32, %second: i32) -> (i32) {
+  func.return %second : i32
+}
+
+func.def public @mutate_xvalue(%choose: i1, %value$53: i32) -> (i32) {
+  %112 = scalar.constant 1 : i32
+  %value$113 = scalar.addi %value$53, %112 : i32
+  %source_value = scf.select %choose, %value$113, %value$53 : i32
+  func.return %source_value : i32
+}
+
+func.def public @alias_xvalue(%value$57: i32) -> (i32) {
+  %59 = scalar.constant 1 : i32
+  %value$60 = scalar.addi %value$57, %59 : i32
+  func.return %value$60 : i32
+}
+
+func.def public @extend_xvalue(%value: i32) -> (i32) {
+  %71 = scalar.constant 2 : i32
+  %77 = scalar.addi %value, %71 : i32
+  func.return %77 : i32
+}
+
+func.def public @move_helper_record(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @move_helper_scalar(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @move_helper_pointer(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %90 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  %91 = view.load %90[0] : view<1xi32> -> i32
+  func.return %91 : i32
+}
+
+func.def public @move_helper_vector(%value: vector<4xi32>) -> (vector<4xi32>) {
+  func.return %value : vector<4xi32>
+}
+
+func.def public @move_helper_array(%first: i32, %second: i32) -> (i32) {
+  func.return %second : i32
+}
+
+func.def public @move_helper_member(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ====
+// Scalar, pointer, and native-vector xvalues remain their existing admitted
+// values; the category projection contributes no operation to the Loom IR.
+using UInt4 = unsigned __attribute__((vector_size(16)));
+unsigned move_scalar(unsigned value) { return static_cast<unsigned&&>(value); }
+unsigned move_pointer(unsigned* value) { return *static_cast<unsigned*&&>(value); }
+UInt4 move_vector(UInt4 value) { return static_cast<UInt4&&>(value); }
+
+// ----
+func.def public @move_scalar(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @move_pointer(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %5 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  %6 = view.load %5[0] : view<1xi32> -> i32
+  func.return %6 : i32
+}
+
+func.def public @move_vector(%value: vector<4xi32>) -> (vector<4xi32>) {
+  func.return %value : vector<4xi32>
+}
+
+// ====
+// RUN: roundtrip
+// The retained constructor is a private storage-receiver callable over the
+// exact destination allocated by its construction site.
+struct Direct {
+  unsigned value;
+  Direct(unsigned seed) : value(seed + 1u) { this->value += 2u; }
+};
+unsigned build_direct(unsigned seed) {
+  Direct value(seed);
+  return value.value;
+}
+
+// ----
+func.def public @build_direct(%seed: i32) -> (i32) {
+  %2 = index.constant 4 : offset
+  %value_storage = buffer.alloca<private> align(4) %2 : buffer
+  %value_storage_byte_offset = index.constant 0 : offset
+  %value_view = buffer.view %value_storage[%value_storage_byte_offset] : buffer -> view<4xi8>
+  func.call @Direct__Direct_storage(%value_storage, %value_storage_byte_offset, %seed) : (buffer, offset, i32)
+  %6 = index.constant 0 : offset
+  %7 = index.add %value_storage_byte_offset, %6 : offset
+  %8 = index.assume %7 [range(%7, 0, 0)] : offset
+  %9 = buffer.view %value_storage[%8] : buffer -> view<1xi32>
+  %value = view.load %9[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+func.def inline @Direct__Direct_storage(%this: buffer, %this_byte_offset: offset, %seed: i32) {
+  %14 = index.constant 0 : offset
+  %15 = index.add %this_byte_offset, %14 : offset
+  %16 = scalar.constant 1 : i32
+  %17 = scalar.addi %seed, %16 : i32
+  %18 = buffer.view %this[%15] : buffer -> view<1xi32>
+  view.store %17, %18[0] : i32, view<1xi32>
+  %19 = scalar.constant 2 : i32
+  %20 = index.constant 0 : offset
+  %21 = index.add %this_byte_offset, %20 : offset
+  %22 = buffer.view %this[%21] : buffer -> view<1xi32>
+  %23 = view.load %22[0] : view<1xi32> -> i32
+  %24 = scalar.addi %23, %19 : i32
+  view.store %24, %22[0] : i32, view<1xi32>
+  func.return
+}
+
+// ====
+// RUN: pass inline-callables,promote-private-fragments,canonicalize,cse,dce
+// Dynamic element selection requires the constructed object to retain private
+// storage, but the constructor call itself is still a normal inlined callable.
+#include <hip/hip_runtime.h>
+
+struct Coefficients {
+  double values[2];
+
+  __forceinline__ __device__ Coefficients() {
+    values[0] = 1.0;
+    values[1] = 2.0;
+  }
+  __forceinline__ __device__ ~Coefficients() = default;
+};
+
+__global__ [[loom::workgroup_size(64, 1, 1)]] void scale(double* output, const double* input) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  Coefficients coefficients;
+  output[i] = coefficients.values[i & 1] * input[i];
+}
+
+// ----
+kernel.def @scale() {
+  %workgroup_count_x = config.get @scale.workgroup_count.x : index
+  %workgroup_count_y = config.get @scale.workgroup_count.y : index
+  %workgroup_count_z = config.get @scale.workgroup_count.z : index
+  %8 = index.constant 64 : index
+  %9 = index.constant 1 : index
+  kernel.launch.config workgroups(%workgroup_count_x, %workgroup_count_y, %workgroup_count_z) workgroup_size(%8, %9, %9) : index
+} launch(%output: buffer, %input: buffer) {
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %14 = index.cast %workgroup_id_x : index to i32
+  %91 = scalar.constant 6 : i32
+  %92 = scalar.shli %14, %91 : i32
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %19 = index.cast %workitem_id_x : index to i32
+  %i = scalar.addi %92, %19 : i32
+  %21 = index.constant 16 : offset
+  %coefficients_storage = buffer.alloca<private> align(8) %21 : buffer
+  %59 = scalar.constant 1.0 : f64
+  %90 = index.constant 0 : offset
+  %70 = buffer.view %coefficients_storage[%90] : buffer -> view<1xf64>
+  view.store %59, %70[0] : f64, view<1xf64>
+  %71 = scalar.constant 2.0 : f64
+  %89 = index.constant 8 : offset
+  %82 = buffer.view %coefficients_storage[%89] : buffer -> view<1xf64>
+  view.store %71, %82[0] : f64, view<1xf64>
+  %27 = scalar.constant 1 : i32
+  %28 = scalar.andi %i, %27 : i32
+  %29 = scalar.extsi %28 : i32 to i64
+  %87 = scalar.constant 3 : i64
+  %88 = scalar.shli %29, %87 : i64
+  %34 = scalar.assume %88 [range(%88, 0, 9223372036854775807)] : i64
+  %35 = index.cast %34 : i64 to offset
+  %36 = index.assume %35 [range(%35, 0, 8)] : offset
+  %37 = buffer.view %coefficients_storage[%36] : buffer -> view<1xf64>
+  %38 = view.load %37[0] : view<1xf64> -> f64
+  %39 = scalar.extsi %i : i32 to i64
+  %86 = scalar.shli %39, %87 : i64
+  %44 = scalar.assume %86 [range(%86, 0, 9223372036854775807)] : i64
+  %45 = index.cast %44 : i64 to offset
+  %46 = buffer.view %input[%45] : buffer -> view<1xf64>
+  %47 = view.load %46[0] : view<1xf64> -> f64
+  %48 = scalar.mulf %38, %47 : f64
+  %56 = buffer.view %output[%45] : buffer -> view<1xf64>
+  view.store %48, %56[0] : f64, view<1xf64>
+  kernel.return
+}
+
+config.decl @scale.workgroup_count.x : index
+
+config.decl @scale.workgroup_count.y : index
+
+config.decl @scale.workgroup_count.z : index
+
+// ====
+// RUN: verify
+// Check records remain declarative; constructor execution belongs in an
+// ordinary function that the record invokes.
+#include <loomcxx/check.h>
+struct Cell {
+  unsigned value;
+  Cell(unsigned seed) : value(seed + 1u) {}
+};
+LOOM_CHECK_CASE(direct_construction) {
+  // ERROR@+1: LOWERING/059 "record constructor calls require an ordinary function called by the check case"
+  const Cell value(3u);
+  loom::check::expect_equal(value.value, 4u);
+}
+
+// ====
+// RUN: verify
+// Address-valued fields need a target-independent object representation rather
+// than a raw source-layout spill.
+struct Slice {
+  float* data;
+  unsigned length;
+  Slice(float* data, unsigned length) : data(data), length(length) {}
+};
+unsigned pointer_storage(float* data) {
+  // ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
+  Slice value(data, 1u);
+  return value.length;
+}
+
+// ====
+// HIP force-inline attributes apply to both construction and empty destruction.
+#include <hip/hip_runtime.h>
+struct ForcedInlineValue {
+  // Constructed payload observed before automatic destruction.
+  unsigned value;
+  __forceinline__ ForcedInlineValue(unsigned seed) : value(seed + 1u) {}
+  __forceinline__ ~ForcedInlineValue() {}
+};
+unsigned forced_inline_value(unsigned seed) {
+  ForcedInlineValue value(seed);
+  return value.value;
+}
+// ----
+func.def public @forced_inline_value(%seed: i32) -> (i32) {
+  %16 = scalar.constant 1 : i32
+  %17 = scalar.addi %seed, %16 : i32
+  func.return %17 : i32
+}
+
+// ====
+// Delegating arguments, target member initialization, target body, and the
+// delegating body update the same trace in that order.
+static unsigned append_digit(unsigned* trace, unsigned digit) {
+  *trace = *trace * 10u + digit;
+  return digit;
+}
+struct DelegatingOrder {
+  // The target initializes this before either body updates the trace.
+  unsigned value;
+  DelegatingOrder(unsigned seed, unsigned* trace)
+      : value(seed + append_digit(trace, 2u)) {
+    append_digit(trace, 3u);
+  }
+  DelegatingOrder(unsigned* trace)
+      : DelegatingOrder(append_digit(trace, 1u), trace) {
+    value += append_digit(trace, 4u);
+  }
+};
+unsigned delegating_order_value() {
+  unsigned trace = 0u;
+  DelegatingOrder value(&trace);
+  return trace * 100u + value.value;
+}
+// ----
+func.def public @delegating_order_value() -> (i32) {
+  %73 = scalar.constant 123407 : i32
+  func.return %73 : i32
+}
+
+// ====
+// An enclosing aggregate default-initializes every element through the full
+// delegation chain, rather than reusing a partially initialized destination.
+struct DelegatingChain {
+  // Payload initialized and updated by successive delegating bodies.
+  unsigned value;
+  DelegatingChain(unsigned seed, unsigned bias) : value(seed + bias) {}
+  DelegatingChain(unsigned seed) : DelegatingChain(seed, 2u) { value *= 3u; }
+  DelegatingChain() : DelegatingChain(4u) { value += 1u; }
+};
+struct DelegatingPacket {
+  // Distinct element destinations for default construction.
+  DelegatingChain values[2];
+};
+unsigned delegating_array_value() {
+  DelegatingPacket packet;
+  return packet.values[0].value + packet.values[1].value;
+}
+// ----
+func.def public @delegating_array_value() -> (i32) {
+  %78 = scalar.constant 38 : i32
+  func.return %78 : i32
+}
+
+// ====
+// Braced delegation retains the selected target's default argument.
+struct BracedDelegation {
+  // Payload initialized by the selected target constructor.
+  unsigned value;
+  BracedDelegation(unsigned seed, unsigned bias = 5u) : value(seed + bias) {}
+  BracedDelegation() : BracedDelegation{7u} { value += 1u; }
+};
+unsigned braced_delegation_value() {
+  BracedDelegation value;
+  return value.value;
+}
+// ----
+func.def public @braced_delegation_value() -> (i32) {
+  %28 = scalar.constant 13 : i32
+  func.return %28 : i32
+}
+
+// ====
+// A defaulted target applies default member initialization before the body of
+// the user-provided delegating constructor.
+struct DefaultedDelegationTarget {
+  // Default member initializer observed by the delegating body.
+  unsigned value = 5u;
+  DefaultedDelegationTarget() = default;
+  DefaultedDelegationTarget(unsigned adjustment) : DefaultedDelegationTarget() {
+    value += adjustment;
+  }
+};
+unsigned defaulted_delegation_target_value(unsigned adjustment) {
+  DefaultedDelegationTarget value(adjustment);
+  return value.value;
+}
+// ----
+func.def public @defaulted_delegation_target_value(%adjustment: i32) -> (i32) {
+  %20 = scalar.constant 5 : i32
+  %27 = scalar.addi %adjustment, %20 : i32
+  func.return %27 : i32
+}
+
+// ====
+// Delegation through a same-type prvalue and defaulted copy constructor
+// initializes the final object before its delegating body mutates the value.
+struct PrvalueDelegation {
+  // Payload transported through the selected copy-construction target.
+  unsigned value;
+  PrvalueDelegation(unsigned seed) : value(seed) {}
+  PrvalueDelegation(const PrvalueDelegation&) = default;
+  PrvalueDelegation() : PrvalueDelegation(PrvalueDelegation(9u)) { value += 1u; }
+};
+unsigned prvalue_delegation_value() {
+  PrvalueDelegation value;
+  return value.value;
+}
+// ----
+func.def public @prvalue_delegation_value() -> (i32) {
+  %25 = scalar.constant 10 : i32
+  func.return %25 : i32
+}
+
+// ====
+// Forwarding a constant object's address preserves its load; forwarding a
+// native vector preserves lane order through subsequent extraction.
+template <class T> struct RemoveReference { using Type = T; };
+template <class T> struct RemoveReference<T&> { using Type = T; };
+template <class T> struct RemoveReference<T&&> { using Type = T; };
+template <class T>
+constexpr typename RemoveReference<T>::Type&& move(T&& value) {
+  return static_cast<typename RemoveReference<T>::Type&&>(value);
+}
+static constexpr unsigned kPointerValue = 31u;
+static unsigned forward_pointer(const unsigned* value) { return *move(value); }
+unsigned pointer_observation() { return forward_pointer(&kPointerValue); }
+using Words = unsigned __attribute__((vector_size(16)));
+unsigned vector_observation(unsigned seed) {
+  Words values = {seed, seed + 1u, seed + 2u, seed + 3u};
+  return move(values)[2];
+}
+// ----
+func.def public @pointer_observation() -> (i32) {
+  %kPointerValue_storage = global.load @kPointerValue : buffer
+  %kPointerValue_storage_byte_offset = index.constant 0 : offset
+  %20 = buffer.view %kPointerValue_storage[%kPointerValue_storage_byte_offset] : buffer -> view<1xi32>
+  %21 = view.load %20[0] : view<1xi32> -> i32
+  func.return %21 : i32
+}
+
+func.def public @vector_observation(%seed: i32) -> (i32) {
+  %9 = scalar.constant 2 : i32
+  %10 = scalar.addi %seed, %9 : i32
+  func.return %10 : i32
+}
+
+global.rodata.def @kPointerValue = align(4) bytes("1f000000")

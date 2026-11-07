@@ -1,0 +1,316 @@
+// RUN: verify
+// Defaults before a deduced type do not complete a qualified template call.
+namespace geometry {
+template <unsigned Rows = 3, unsigned Columns = 8, class T>
+constexpr T add_area(T value) { return value + T(Rows * Columns); }
+}
+template <class T>
+constexpr T area(T value) { return geometry::add_area<3, 8>(value); }
+static_assert(area(5) == 29);
+static_assert(area(0.5f) == 24.5f);
+
+// ====
+// A partial explicit pack is completed from all source call arguments.
+namespace geometry {
+template <class... Values>
+constexpr unsigned count(Values... values) { return sizeof...(Values); }
+}
+template <class T>
+constexpr unsigned count(T value) { return geometry::count<int>(1, value); }
+static_assert(count(2.0f) == 2);
+
+// ====
+// Qualified overload candidates remain available until call-site deduction.
+namespace geometry {
+template <unsigned Bias, class T>
+constexpr T offset(T value) { return value + T(Bias); }
+template <unsigned Bias, class T>
+constexpr T offset(T* value) { return *value + T(2 * Bias); }
+}
+template <class T>
+constexpr int offset(T value) { return geometry::offset<3>(value); }
+static_assert(offset(7) == 10);
+constexpr int value = 7;
+static_assert(offset(&value) == 13);
+
+// ====
+// Explicit specializations retain their primary overload when another arity
+// is introduced after the first specialization.
+namespace {
+template <class Word>
+constexpr unsigned rotation(unsigned round) = delete;
+template <>
+constexpr unsigned rotation<unsigned>(unsigned round) { return round + 3; }
+template <>
+constexpr unsigned rotation<unsigned long long>(unsigned round) {
+  return round + 7;
+}
+template <class Word>
+constexpr unsigned rotation(unsigned round, unsigned lane) = delete;
+template <>
+constexpr unsigned rotation<unsigned>(unsigned round, unsigned lane) {
+  return round + lane + 11;
+}
+template <>
+constexpr unsigned rotation<unsigned long long>(unsigned round, unsigned lane) {
+  return round + lane + 19;
+}
+static_assert(rotation<unsigned>(5) == 8);
+static_assert(rotation<unsigned long long>(5) == 12);
+static_assert(rotation<unsigned>(5, 2) == 18);
+static_assert(rotation<unsigned long long>(5, 2) == 26);
+}
+
+// ====
+// Same-arity primaries remain distinct by parameter type. Explicit and
+// deduced specializations/calls must select the same corresponding bodies.
+namespace {
+namespace algorithm {
+template <class Type>
+constexpr unsigned select(Type value) = delete;
+template <class Type>
+constexpr unsigned select(const Type* value) = delete;
+template <>
+constexpr unsigned select<unsigned>(const unsigned* value) { return *value + 17; }
+template <>
+constexpr unsigned select(unsigned value) { return value + 5; }
+}
+constexpr unsigned value = 23;
+static_assert(algorithm::select(value) == 28);
+static_assert(algorithm::select<unsigned>(value) == 28);
+static_assert(algorithm::select(&value) == 40);
+static_assert(algorithm::select<unsigned>(&value) == 40);
+}
+
+// ====
+// A declaration and its out-of-namespace definition name the same selected
+// primary, even when every overload is declared before any specialization.
+namespace {
+namespace algorithm {
+template <class Type>
+constexpr unsigned combine(Type) = delete;
+template <class Type>
+constexpr unsigned combine(Type, unsigned) = delete;
+template <>
+constexpr unsigned combine<unsigned>(unsigned, unsigned);
+template <>
+constexpr unsigned combine<unsigned>(unsigned);
+}
+template <>
+constexpr unsigned algorithm::combine<unsigned>(unsigned value) {
+  return value + 7;
+}
+template <>
+constexpr unsigned algorithm::combine<unsigned>(unsigned value, unsigned bias) {
+  return value + bias + 13;
+}
+static_assert(algorithm::combine(11u) == 18);
+static_assert(algorithm::combine(11u, 3u) == 27);
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=specialized_values
+// Runtime calls retain the selected primary by arity and parameter type,
+// including explicit and deduced calls with caller-owned pointer storage.
+#include "function_specializations.cxx"
+
+// ----
+func.def public @specialized_values(%value: i32, %output: buffer) {
+  %2 = index.constant 4 : offset
+  %selected_storage = buffer.alloca<private> align(4) %2 : buffer
+  %selected_storage_byte_offset = index.constant 0 : offset
+  %selected_view = buffer.view %selected_storage[%selected_storage_byte_offset] : buffer -> view<1xi32>
+  view.store %value, %selected_view[0] : i32, view<1xi32>
+  %values_layout = encoding.layout.dense : encoding<layout>
+  %7 = index.constant 0 : offset
+  %values = buffer.view %output[%7] : buffer -> view<10xi32, %values_layout>
+  %9 = func.call pure @rotation____unsigned_int(%value) : (i32) -> (i32)
+  %10 = scalar.constant 0 : i32
+  %11 = index.cast %10 : i32 to index
+  view.store %9, %values[%11] : i32, view<10xi32, %values_layout>
+  %12 = func.call pure @rotation____unsigned_long_long(%value) : (i32) -> (i32)
+  %13 = scalar.constant 1 : i32
+  %14 = index.cast %13 : i32 to index
+  view.store %12, %values[%14] : i32, view<10xi32, %values_layout>
+  %15 = scalar.constant 2 : i32
+  %16 = func.call pure @rotation____unsigned_int_1(%value, %15) : (i32, i32) -> (i32)
+  %17 = scalar.constant 2 : i32
+  %18 = index.cast %17 : i32 to index
+  view.store %16, %values[%18] : i32, view<10xi32, %values_layout>
+  %19 = scalar.constant 2 : i32
+  %20 = func.call pure @rotation____unsigned_long_long_1(%value, %19) : (i32, i32) -> (i32)
+  %21 = scalar.constant 3 : i32
+  %22 = index.cast %21 : i32 to index
+  view.store %20, %values[%22] : i32, view<10xi32, %values_layout>
+  %23 = func.call pure @select_unsigned_int(%value) : (i32) -> (i32)
+  %24 = scalar.constant 4 : i32
+  %25 = index.cast %24 : i32 to index
+  view.store %23, %values[%25] : i32, view<10xi32, %values_layout>
+  %26 = func.call pure @select_unsigned_int(%value) : (i32) -> (i32)
+  %27 = scalar.constant 5 : i32
+  %28 = index.cast %27 : i32 to index
+  view.store %26, %values[%28] : i32, view<10xi32, %values_layout>
+  %29 = func.call readonly @select____unsigned_int(%selected_storage, %selected_storage_byte_offset) : (buffer, offset) -> (i32)
+  %30 = scalar.constant 6 : i32
+  %31 = index.cast %30 : i32 to index
+  view.store %29, %values[%31] : i32, view<10xi32, %values_layout>
+  %32 = func.call readonly @select____unsigned_int(%selected_storage, %selected_storage_byte_offset) : (buffer, offset) -> (i32)
+  %33 = scalar.constant 7 : i32
+  %34 = index.cast %33 : i32 to index
+  view.store %32, %values[%34] : i32, view<10xi32, %values_layout>
+  %35 = func.call pure @algorithm__combine____unsigned_int(%value) : (i32) -> (i32)
+  %36 = scalar.constant 8 : i32
+  %37 = index.cast %36 : i32 to index
+  view.store %35, %values[%37] : i32, view<10xi32, %values_layout>
+  %38 = scalar.constant 2 : i32
+  %39 = func.call pure @algorithm__combine____unsigned_int_1(%value, %38) : (i32, i32) -> (i32)
+  %40 = scalar.constant 9 : i32
+  %41 = index.cast %40 : i32 to index
+  view.store %39, %values[%41] : i32, view<10xi32, %values_layout>
+  func.return
+}
+
+func.def @rotation____unsigned_int(%round: i32) -> (i32) {
+  %44 = scalar.constant 3 : i32
+  %45 = scalar.addi %round, %44 : i32
+  func.return %45 : i32
+}
+
+func.def @rotation____unsigned_long_long(%round: i32) -> (i32) {
+  %48 = scalar.constant 7 : i32
+  %49 = scalar.addi %round, %48 : i32
+  func.return %49 : i32
+}
+
+func.def @rotation____unsigned_int_1(%round: i32, %lane: i32) -> (i32) {
+  %53 = scalar.addi %round, %lane : i32
+  %54 = scalar.constant 11 : i32
+  %55 = scalar.addi %53, %54 : i32
+  func.return %55 : i32
+}
+
+func.def @rotation____unsigned_long_long_1(%round: i32, %lane: i32) -> (i32) {
+  %59 = scalar.addi %round, %lane : i32
+  %60 = scalar.constant 19 : i32
+  %61 = scalar.addi %59, %60 : i32
+  func.return %61 : i32
+}
+
+func.def @select_unsigned_int(%value: i32) -> (i32) {
+  %64 = scalar.constant 5 : i32
+  %65 = scalar.addi %value, %64 : i32
+  func.return %65 : i32
+}
+
+func.def @select____unsigned_int(%value: buffer, %value_byte_offset: offset) -> (i32) {
+  %69 = buffer.view %value[%value_byte_offset] : buffer -> view<1xi32>
+  %70 = view.load %69[0] : view<1xi32> -> i32
+  %71 = scalar.constant 17 : i32
+  %72 = scalar.addi %70, %71 : i32
+  func.return %72 : i32
+}
+
+func.def @algorithm__combine____unsigned_int(%value: i32) -> (i32) {
+  %75 = scalar.constant 29 : i32
+  %76 = scalar.addi %value, %75 : i32
+  func.return %76 : i32
+}
+
+func.def @algorithm__combine____unsigned_int_1(%value: i32, %bias: i32) -> (i32) {
+  %80 = scalar.addi %value, %bias : i32
+  %81 = scalar.constant 31 : i32
+  %82 = scalar.addi %80, %81 : i32
+  func.return %82 : i32
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=specialization_oracle
+// The independent reference keeps all ten output columns and their distinct
+// modular biases.
+#include "function_specializations.cxx"
+
+// ----
+func.def public @specialization_oracle(%value: i32, %output: buffer) {
+  %values_layout = encoding.layout.dense : encoding<layout>
+  %3 = index.constant 0 : offset
+  %values = buffer.view %output[%3] : buffer -> view<10xi32, %values_layout>
+  %5 = scalar.constant 3 : i32
+  %6 = scalar.addi %value, %5 : i32
+  %7 = scalar.constant 0 : i32
+  %8 = index.cast %7 : i32 to index
+  view.store %6, %values[%8] : i32, view<10xi32, %values_layout>
+  %9 = scalar.constant 7 : i32
+  %10 = scalar.addi %value, %9 : i32
+  %11 = scalar.constant 1 : i32
+  %12 = index.cast %11 : i32 to index
+  view.store %10, %values[%12] : i32, view<10xi32, %values_layout>
+  %13 = scalar.constant 13 : i32
+  %14 = scalar.addi %value, %13 : i32
+  %15 = scalar.constant 2 : i32
+  %16 = index.cast %15 : i32 to index
+  view.store %14, %values[%16] : i32, view<10xi32, %values_layout>
+  %17 = scalar.constant 21 : i32
+  %18 = scalar.addi %value, %17 : i32
+  %19 = scalar.constant 3 : i32
+  %20 = index.cast %19 : i32 to index
+  view.store %18, %values[%20] : i32, view<10xi32, %values_layout>
+  %21 = scalar.constant 5 : i32
+  %22 = scalar.addi %value, %21 : i32
+  %23 = scalar.constant 4 : i32
+  %24 = index.cast %23 : i32 to index
+  view.store %22, %values[%24] : i32, view<10xi32, %values_layout>
+  %25 = scalar.constant 5 : i32
+  %26 = scalar.addi %value, %25 : i32
+  %27 = scalar.constant 5 : i32
+  %28 = index.cast %27 : i32 to index
+  view.store %26, %values[%28] : i32, view<10xi32, %values_layout>
+  %29 = scalar.constant 17 : i32
+  %30 = scalar.addi %value, %29 : i32
+  %31 = scalar.constant 6 : i32
+  %32 = index.cast %31 : i32 to index
+  view.store %30, %values[%32] : i32, view<10xi32, %values_layout>
+  %33 = scalar.constant 17 : i32
+  %34 = scalar.addi %value, %33 : i32
+  %35 = scalar.constant 7 : i32
+  %36 = index.cast %35 : i32 to index
+  view.store %34, %values[%36] : i32, view<10xi32, %values_layout>
+  %37 = scalar.constant 29 : i32
+  %38 = scalar.addi %value, %37 : i32
+  %39 = scalar.constant 8 : i32
+  %40 = index.cast %39 : i32 to index
+  view.store %38, %values[%40] : i32, view<10xi32, %values_layout>
+  %41 = scalar.constant 33 : i32
+  %42 = scalar.addi %value, %41 : i32
+  %43 = scalar.constant 9 : i32
+  %44 = index.cast %43 : i32 to index
+  view.store %42, %values[%44] : i32, view<10xi32, %values_layout>
+  func.return
+}
+
+// ====
+// RUN: roundtrip
+// INPUT: cxx root=specialization_input
+// Trial ordinals select low values and values next to the unsigned maximum.
+#include "function_specializations.cxx"
+
+// ----
+func.def public @specialization_input(%trial: index) -> (i32) {
+  %2 = index.cast %trial : index to i64
+  %value = scalar.trunci %2 : i64 to i32
+  %4 = scalar.constant 4 : i32
+  %5 = scalar.cmpi ult, %value, %4 : i32
+  %6 = scf.if %5 -> (i32) {
+    scf.yield %value : i32
+  } else {
+    %7 = scalar.constant 0 : i32
+    %8 = scalar.constant -1 : i32
+    %9 = scalar.xori %7, %8 : i32
+    %10 = scalar.constant 4 : i32
+    %11 = scalar.subi %value, %10 : i32
+    %12 = scalar.subi %9, %11 : i32
+    scf.yield %12 : i32
+  }
+  func.return %6 : i32
+}

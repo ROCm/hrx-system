@@ -1,0 +1,388 @@
+// RUN: pass canonicalize,cse
+// Entry contracts compose independently and survive helper forwarding.
+static const unsigned* advance(const unsigned* input) { return input + 1; }
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void copy([[loom::noalias, loom::assume_aligned(64)]] const unsigned* input,
+          [[loom::noalias]] unsigned* output) {
+  output[0] = *advance(input);
+}
+
+// ----
+kernel.def @copy() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%0: buffer, %1: buffer) {
+  %8 = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
+  %input = buffer.assume.noalias %8 : buffer
+  %input_byte_offset = index.constant 0 : offset
+  %output = buffer.assume.noalias %1 : buffer
+  %13, %14 = func.call pure @advance(%input, %input_byte_offset) : (buffer, offset) -> (buffer, offset)
+  %15 = buffer.view %13[%14] : buffer -> view<1xi32>
+  %16 = view.load %15[0] : view<1xi32> -> i32
+  %25 = buffer.view %output[%input_byte_offset] : buffer -> view<1xi32>
+  view.store %16, %25[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def @advance(%input: buffer, %input_byte_offset: offset) -> (buffer, offset) {
+  %39 = scalar.constant 4 : i64
+  %34 = index.cast %input_byte_offset : offset to i64
+  %35 = scalar.addi %34, %39 : i64
+  %36 = scalar.assume %35 [range(%35, 0, 9223372036854775807)] : i64
+  %37 = index.cast %36 : i64 to offset
+  func.return %input, %37 : buffer, offset
+}
+
+// ====
+// Redeclarations contribute independent contracts by parameter ordinal.
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void renamed(unsigned index, [[loom::noalias]] const unsigned* source,
+             [[loom::noalias]] unsigned* destination);
+void renamed(unsigned index,
+             [[loom::noalias, loom::assume_aligned(64)]] const unsigned* input,
+             unsigned* output) {
+  output[0] = input[index];
+}
+
+// ----
+kernel.def @renamed() {
+  %3 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%3, %3, %3) : index
+} launch(%index: i32, %1: buffer, %2: buffer) {
+  %9 = buffer.assume.alignment %1 {minimum_alignment = 64} : buffer
+  %input = buffer.assume.noalias %9 : buffer
+  %output = buffer.assume.noalias %2 : buffer
+  %14 = scalar.extui %index : i32 to i64
+  %33 = scalar.constant 2 : i64
+  %34 = scalar.shli %14, %33 : i64
+  %19 = scalar.assume %34 [range(%34, 0, 9223372036854775807)] : i64
+  %20 = index.cast %19 : i64 to offset
+  %21 = buffer.view %input[%20] : buffer -> view<1xi32>
+  %22 = view.load %21[0] : view<1xi32> -> i32
+  %32 = index.constant 0 : offset
+  %31 = buffer.view %output[%32] : buffer -> view<1xi32>
+  view.store %22, %31[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// An unmarked pointer does not acquire a noalias promise.
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void mixed([[loom::noalias]] const unsigned* input, unsigned* output) {
+  output[0] = input[0];
+}
+
+// ----
+kernel.def @mixed() {
+  %2 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %2, %2) workgroup_size(%2, %2, %2) : index
+} launch(%0: buffer, %output: buffer) {
+  %input = buffer.assume.noalias %0 : buffer
+  %31 = index.constant 0 : offset
+  %19 = buffer.view %input[%31] : buffer -> view<1xi32>
+  %20 = view.load %19[0] : view<1xi32> -> i32
+  %29 = buffer.view %output[%31] : buffer -> view<1xi32>
+  view.store %20, %29[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// Reassignment does not strengthen the incoming replacement pointer.
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void reassigned([[loom::noalias]] const unsigned* input,
+                [[loom::noalias]] unsigned* output,
+                const unsigned* replacement) {
+  input = replacement;
+  output[0] = input[0];
+}
+
+// ----
+kernel.def @reassigned() {
+  %3 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%3, %3, %3) : index
+} launch(%input: buffer, %1: buffer, %replacement: buffer) {
+  %output = buffer.assume.noalias %1 : buffer
+  %34 = index.constant 0 : offset
+  %22 = buffer.view %replacement[%34] : buffer -> view<1xi32>
+  %23 = view.load %22[0] : view<1xi32> -> i32
+  %32 = buffer.view %output[%34] : buffer -> view<1xi32>
+  view.store %23, %32[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// Adjusted arrays, cv-qualified aliases and opaque pointers denote roots.
+using Pointer = unsigned*;
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void forms([[using loom: noalias]] const unsigned input[4],
+           [[loom::noalias]] const Pointer output,
+           [[loom::noalias]] const void* opaque) {
+  output[0] = input[1] + static_cast<const unsigned*>(opaque)[2];
+}
+
+// ----
+kernel.def @forms() {
+  %3 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%3, %3, %3) : index
+} launch(%0: buffer, %1: buffer, %2: buffer) {
+  %input = buffer.assume.noalias %0 : buffer
+  %output = buffer.assume.noalias %1 : buffer
+  %opaque = buffer.assume.noalias %2 : buffer
+  %47 = index.constant 4 : offset
+  %23 = buffer.view %input[%47] : buffer -> view<1xi32>
+  %24 = view.load %23[0] : view<1xi32> -> i32
+  %46 = index.constant 8 : offset
+  %33 = buffer.view %opaque[%46] : buffer -> view<1xi32>
+  %34 = view.load %33[0] : view<1xi32> -> i32
+  %35 = scalar.addi %24, %34 : i32
+  %45 = index.constant 0 : offset
+  %44 = buffer.view %output[%45] : buffer -> view<1xi32>
+  view.store %35, %44[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// The concrete instance owns substituted parameter contracts.
+#include <loomcxx/check.h>
+template <class T>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void instantiated([[loom::noalias]] const T* input,
+                  [[loom::noalias]] T* output) {
+  output[0] = input[0];
+}
+LOOM_CHECK_CASE(noalias_instance) {
+  const auto input = loom::check::fill<1, unsigned>(7u);
+  const auto output = loom::check::fill<1, unsigned>(0u);
+  loom::check::launch<instantiated<unsigned>>(input, output);
+  loom::check::expect_bitwise(input, output);
+}
+
+// ----
+check.case public @noalias_instance {
+  %input = check.generate.fill value(7) : tensor<1xi32>
+  %output = check.generate.fill value(0) : tensor<1xi32>
+  kernel.launch @instantiated_unsigned_int(%input, %output) : (tensor<1xi32>, tensor<1xi32>)
+  check.expect.bitwise actual(%input) expected(%output) : tensor<1xi32>
+  check.return
+}
+
+kernel.def @instantiated_unsigned_int() {
+  %4 = index.constant 1 : index
+  kernel.launch.config workgroups(%4, %4, %4) workgroup_size(%4, %4, %4) : index
+} launch(%2: buffer, %3: buffer) {
+  %input = buffer.assume.noalias %2 : buffer
+  %output = buffer.assume.noalias %3 : buffer
+  %34 = index.constant 0 : offset
+  %22 = buffer.view %input[%34] : buffer -> view<1xi32>
+  %23 = view.load %22[0] : view<1xi32> -> i32
+  %32 = buffer.view %output[%34] : buffer -> view<1xi32>
+  view.store %23, %32[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// Scoped contracts refine interior pointer roots without strengthening the
+// callable's public parameters.
+#include <loomcxx/buffer.h>
+
+unsigned scoped(const unsigned* input, unsigned* output) {
+  auto* unique_input = loom::buffer::assume::noalias(input + 1);
+  auto* unique_output = loom::buffer::assume::noalias(output + 2);
+  unique_output[0] = unique_input[0];
+  return unique_output[0];
+}
+
+// ----
+func.def public @scoped(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) -> (i32) {
+  %53 = scalar.constant 4 : i64
+  %9 = index.cast %input_byte_offset : offset to i64
+  %10 = scalar.addi %9, %53 : i64
+  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %unique_input_byte_offset = index.cast %11 : i64 to offset
+  %unique_input = buffer.assume.noalias %input : buffer
+  %52 = scalar.constant 8 : i64
+  %18 = index.cast %output_byte_offset : offset to i64
+  %19 = scalar.addi %18, %52 : i64
+  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+  %unique_output_byte_offset = index.cast %20 : i64 to offset
+  %unique_output = buffer.assume.noalias %output : buffer
+  %27 = index.cast %unique_input_byte_offset : offset to i64
+  %29 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
+  %30 = index.cast %29 : i64 to offset
+  %31 = buffer.view %unique_input[%30] : buffer -> view<1xi32>
+  %32 = view.load %31[0] : view<1xi32> -> i32
+  %37 = index.cast %unique_output_byte_offset : offset to i64
+  %39 = scalar.assume %37 [range(%37, 0, 9223372036854775807)] : i64
+  %40 = index.cast %39 : i64 to offset
+  %41 = buffer.view %unique_output[%40] : buffer -> view<1xi32>
+  view.store %32, %41[0] : i32, view<1xi32>
+  %51 = view.load %41[0] : view<1xi32> -> i32
+  func.return %51 : i32
+}
+
+// ====
+// Scoped alignment refines a zero-origin buffer only along the branch where
+// the source promise is active.
+#include <loomcxx/buffer.h>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void scoped_alignment(bool active, const unsigned* input, unsigned* output) {
+  if (active) {
+    auto* aligned = loom::buffer::assume::alignment<16>(input);
+    output[0] = aligned[0];
+  }
+}
+
+// ----
+kernel.def @scoped_alignment() {
+  %3 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%3, %3, %3) : index
+} launch(%active: i1, %input: buffer, %output: buffer) {
+  scf.if %active {
+    %aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+    %32 = index.constant 0 : offset
+    %20 = buffer.view %aligned[%32] : buffer -> view<1xi32>
+    %21 = view.load %20[0] : view<1xi32> -> i32
+    %30 = buffer.view %output[%32] : buffer -> view<1xi32>
+    view.store %21, %30[0] : i32, view<1xi32>
+  }
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Independent roots and alignment survive row gathers and widening.
+// Workgroup coordinates select the row/column before the four-lane access.
+#include <loomcxx/kernel.h>
+#include <stdfloat>
+using Half4 = std::float16_t __attribute__((ext_vector_type(4)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+[[loom::kernel, loom::workgroup_size(256, 1, 1),
+  loom::workgroup_count(3, 2, 1)]]
+void gather_rows([[loom::noalias,
+                   loom::assume_aligned(64)]] const Half4* weights,
+                 [[loom::noalias]] const unsigned* row_ids,
+                 [[loom::noalias, loom::assume_aligned(64)]] Float4* output) {
+  unsigned row = loom::kernel::workgroup::id.y;
+  unsigned column =
+      loom::kernel::workgroup::id.x * 256u + loom::kernel::workitem::id.x;
+  unsigned source_row = row_ids[row];
+  loom::assume(source_row < 2u);
+  output[row * 768u + column] =
+      __builtin_convertvector(weights[source_row * 768u + column], Float4);
+}
+// ----
+kernel.def @gather_rows() {
+  %3 = index.constant 3 : index
+  %4 = index.constant 2 : index
+  %5 = index.constant 1 : index
+  %6 = index.constant 256 : index
+  kernel.launch.config workgroups(%3, %4, %5) workgroup_size(%6, %5, %5) : index
+} launch(%0: buffer, %1: buffer, %2: buffer) {
+  %9 = buffer.assume.alignment %0 {minimum_alignment = 64} : buffer
+  %weights = buffer.assume.noalias %9 : buffer
+  %row_ids = buffer.assume.noalias %1 : buffer
+  %14 = buffer.assume.alignment %2 {minimum_alignment = 64} : buffer
+  %output = buffer.assume.noalias %14 : buffer
+  %workgroup_id_y = kernel.workgroup.id<y> : index
+  %row = index.cast %workgroup_id_y : index to i32
+  %workgroup_id_x = kernel.workgroup.id<x> : index
+  %20 = index.cast %workgroup_id_x : index to i32
+  %75 = scalar.constant 8 : i32
+  %76 = scalar.shli %20, %75 : i32
+  %workitem_id_x = kernel.workitem.id<x> : index
+  %24 = index.cast %workitem_id_x : index to i32
+  %column = scalar.addi %76, %24 : i32
+  %72 = scalar.constant 2 : i32
+  %73 = scalar.shli %row, %72 : i32
+  %74 = scalar.extui %73 : i32 to i64
+  %31 = scalar.assume %74 [range(%74, 0, 9223372036854775807)] : i64
+  %32 = index.cast %31 : i64 to offset
+  %33 = buffer.view %row_ids[%32] : buffer -> view<1xi32>
+  %source_row$34 = view.load %33[0] : view<1xi32> -> i32
+  %source_row$35 = scalar.assume %source_row$34 [range(%source_row$34, 0, 1)] : i32
+  %36 = scalar.constant 768 : i32
+  %37 = scalar.muli %source_row$35, %36 : i32
+  %38 = scalar.addi %37, %column : i32
+  %67 = scalar.constant 3 : i32
+  %68 = scalar.shli %38, %67 : i32
+  %69 = scalar.extui %68 : i32 to i64
+  %44 = scalar.assume %69 [range(%69, 0, 9223372036854775807)] : i64
+  %45 = index.cast %44 : i64 to offset
+  %46 = buffer.view %weights[%45] : buffer -> view<4xf16>
+  %47 = vector.load %46[0] : view<4xf16> -> vector<4xf16>
+  %48 = vector.extf %47 : vector<4xf16> to vector<4xf32>
+  %50 = scalar.muli %row, %36 : i32
+  %51 = scalar.addi %50, %column : i32
+  %62 = scalar.constant 4 : i32
+  %63 = scalar.shli %51, %62 : i32
+  %64 = scalar.extui %63 : i32 to i64
+  %57 = scalar.assume %64 [range(%64, 0, 9223372036854775807)] : i64
+  %58 = index.cast %57 : i64 to offset
+  %59 = buffer.view %output[%58] : buffer -> view<4xf32>
+  vector.store %48, %59[0] : vector<4xf32>, view<4xf32>
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// An unmarked alias can modify a marked input. The later read must
+// observe storage after that write; an entry promise does not erase it.
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void unmarked_alias([[loom::noalias]] const unsigned* input, unsigned* alias,
+                    [[loom::noalias]] unsigned* output) {
+  unsigned before = input[0];
+  alias[0] = before + 5u;
+  output[0] = input[0];
+}
+// ----
+kernel.def @unmarked_alias() {
+  %3 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%3, %3, %3) : index
+} launch(%0: buffer, %alias: buffer, %2: buffer) {
+  %input = buffer.assume.noalias %0 : buffer
+  %output = buffer.assume.noalias %2 : buffer
+  %57 = index.constant 0 : offset
+  %22 = buffer.view %input[%57] : buffer -> view<1xi32>
+  %before = view.load %22[0] : view<1xi32> -> i32
+  %24 = scalar.constant 5 : i32
+  %25 = scalar.addi %before, %24 : i32
+  %34 = buffer.view %alias[%57] : buffer -> view<1xi32>
+  view.store %25, %34[0] : i32, view<1xi32>
+  %44 = view.load %22[0] : view<1xi32> -> i32
+  %53 = buffer.view %output[%57] : buffer -> view<1xi32>
+  view.store %44, %53[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// Reassigning a marked parameter keeps the unmarked replacement root.
+// A later read after an output store remains a separate observation.
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void reassigned([[loom::noalias]] const unsigned* input,
+                [[loom::noalias]] unsigned* output,
+                const unsigned* replacement) {
+  input = replacement;
+  unsigned before = input[0];
+  output[0] = before + 7u;
+  output[1] = input[0];
+}
+// ----
+kernel.def @reassigned() {
+  %3 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %3, %3) workgroup_size(%3, %3, %3) : index
+} launch(%input: buffer, %1: buffer, %replacement: buffer) {
+  %output = buffer.assume.noalias %1 : buffer
+  %57 = index.constant 0 : offset
+  %22 = buffer.view %replacement[%57] : buffer -> view<1xi32>
+  %before = view.load %22[0] : view<1xi32> -> i32
+  %24 = scalar.constant 7 : i32
+  %25 = scalar.addi %before, %24 : i32
+  %34 = buffer.view %output[%57] : buffer -> view<1xi32>
+  view.store %25, %34[0] : i32, view<1xi32>
+  %44 = view.load %22[0] : view<1xi32> -> i32
+  %54 = index.constant 4 : offset
+  %53 = buffer.view %output[%54] : buffer -> view<1xi32>
+  view.store %44, %53[0] : i32, view<1xi32>
+  kernel.return
+}

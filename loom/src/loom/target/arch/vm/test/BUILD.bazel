@@ -4,8 +4,9 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/bazel:python.bzl", "iree_py_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test", "loom_check_test_suite")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -58,6 +59,38 @@ loom_check_test_suite(
         "storage_transfers.loom-test",
     ],
     target_compatible_with = loom_config_compatible_with([
+        "//loom/config/emit:vm_binary",
+    ]),
+)
+
+loom_check_test(
+    name = "special_members_test",
+    src = "special_members.cxx-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/emit:vm_binary",
+    ]),
+)
+
+iree_py_test(
+    name = "special_members_roundtrip_test",
+    size = "small",
+    srcs = ["special_members_roundtrip_test.py"],
+    args = [
+        "--importer=$(rootpath //loom/src/loom/tools/loom-import-cxx)",
+        "--exporter=$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+        "--checker=$(rootpath //loom/src/loom/tools/loom-check:loom-check-test)",
+        "--source=$(rootpath special_members.cxx-test)",
+    ],
+    data = [
+        "special_members.cxx-test",
+        "//loom/py/loom/tools:loom-export-cxx",
+        "//loom/src/loom/tools/loom-check:loom-check-test",
+        "//loom/src/loom/tools/loom-import-cxx",
+    ],
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
         "//loom/config/emit:vm_binary",
     ]),
 )

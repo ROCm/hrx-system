@@ -1,0 +1,190 @@
+// RUN: roundtrip
+#include <loomcxx/index.h>
+
+loom::type::index index_sum(loom::type::index begin, loom::type::index end) {
+  loom::type::index total{0};
+  [[loom::unroll(2)]]
+  for (auto position = begin; position < end;
+       position = position + loom::type::index{1}) {
+    total = total + position;
+  }
+  return total;
+}
+
+loom::type::offset offset_sum(loom::type::offset begin, loom::type::offset end) {
+  loom::type::offset total{0};
+  [[loom::pipeline(2)]]
+  for (auto position = begin; position < end;
+       position = loom::type::offset{1} + position) {
+    total = total + position;
+  }
+  return total;
+}
+
+loom::type::index index_constant_sum(loom::type::index begin) {
+  loom::type::index total{0};
+  for (auto position = begin; position < loom::type::index{4};
+       position = position + loom::type::index{1}) {
+    total = total + position;
+  }
+  return total;
+}
+
+loom::type::offset offset_constant_sum(loom::type::offset begin) {
+  loom::type::offset total{0};
+  for (auto position = begin; position < loom::type::offset{4};
+       position = position + loom::type::offset{1}) {
+    total = total + position;
+  }
+  return total;
+}
+// ----
+func.def public @index_sum(%begin: index, %end: index) -> (index) {
+  %3 = scalar.constant 0 : i32
+  %4 = scalar.extsi %3 : i32 to i64
+  %total$5 = index.cast %4 : i64 to index
+  %6 = index.constant 1 : index
+  %7 = scalar.constant 2 : i32
+  %8 = index.cast %7 : i32 to index
+  %total$11 = scf.for %position = [%begin to %end step %6](%total$10 = %total$5 : index) -> (index) unroll(%8) {
+    %total$12 = index.add %total$10, %position : index
+    scf.yield %total$12 : index
+  }
+  func.return %total$11 : index
+}
+
+func.def public @offset_sum(%begin: offset, %end: offset) -> (offset) {
+  %16 = scalar.constant 0 : i32
+  %17 = scalar.extsi %16 : i32 to i64
+  %total$18 = index.cast %17 : i64 to offset
+  %19 = index.constant 1 : offset
+  %20 = scalar.constant 2 : i32
+  %21 = index.cast %20 : i32 to index
+  %total$24 = scf.for %position = [%begin to %end step %19](%total$23 = %total$18 : offset) -> (offset) pipeline(%21) {
+    %total$25 = index.add %total$23, %position : offset
+    scf.yield %total$25 : offset
+  }
+  func.return %total$24 : offset
+}
+
+func.def public @index_constant_sum(%begin: index) -> (index) {
+  %28 = scalar.constant 0 : i32
+  %29 = scalar.extsi %28 : i32 to i64
+  %total$30 = index.cast %29 : i64 to index
+  %31 = scalar.constant 4 : i32
+  %32 = scalar.extsi %31 : i32 to i64
+  %33 = index.cast %32 : i64 to index
+  %34 = index.constant 1 : index
+  %total$37 = scf.for %position = [%begin to %33 step %34](%total$36 = %total$30 : index) -> (index) {
+    %total$38 = index.add %total$36, %position : index
+    scf.yield %total$38 : index
+  }
+  func.return %total$37 : index
+}
+
+func.def public @offset_constant_sum(%begin: offset) -> (offset) {
+  %41 = scalar.constant 0 : i32
+  %42 = scalar.extsi %41 : i32 to i64
+  %total$43 = index.cast %42 : i64 to offset
+  %44 = scalar.constant 4 : i32
+  %45 = scalar.extsi %44 : i32 to i64
+  %46 = index.cast %45 : i64 to offset
+  %47 = index.constant 1 : offset
+  %total$50 = scf.for %position = [%begin to %46 step %47](%total$49 = %total$43 : offset) -> (offset) {
+    %total$51 = index.add %total$49, %position : offset
+    scf.yield %total$51 : offset
+  }
+  func.return %total$50 : offset
+}
+
+// ====
+// RUN: pass canonicalize,cse,dce
+#include <loomcxx/index.h>
+
+loom::type::index empty_index_loop(loom::type::index bound) {
+  loom::type::index result{7};
+  for (auto position = bound; position < bound;
+       position = position + loom::type::index{1}) {
+    result = result + position;
+  }
+  return result;
+}
+
+loom::type::offset empty_offset_loop(loom::type::offset bound) {
+  loom::type::offset result{9};
+  for (auto position = bound; position < bound;
+       position = position + loom::type::offset{1}) {
+    result = result + position;
+  }
+  return result;
+}
+// ----
+func.def public @empty_index_loop(%bound: index) -> (index) {
+  %result = index.constant 7 : index
+  func.return %result : index
+}
+
+func.def public @empty_offset_loop(%bound: offset) -> (offset) {
+  %result = index.constant 9 : offset
+  func.return %result : offset
+}
+
+// ====
+// RUN: roundtrip
+// Signed integer endpoints and results retain the logical index domain.
+#include <loomcxx/index.h>
+int index_sum(int begin, int end) {
+  const auto lower = loom::index::cast(begin);
+  const auto upper = loom::index::cast(end);
+  auto total = loom::type::index{0};
+  for (auto position = lower; position < upper;
+       position = position + loom::type::index{1}) {
+    total = total + position;
+  }
+  return loom::index::cast<int>(total);
+}
+// ----
+func.def public @index_sum(%begin: i32, %end: i32) -> (i32) {
+  %lower = index.cast %begin : i32 to index
+  %upper = index.cast %end : i32 to index
+  %5 = scalar.constant 0 : i32
+  %6 = scalar.extsi %5 : i32 to i64
+  %total$7 = index.cast %6 : i64 to index
+  %8 = index.constant 1 : index
+  %total$11 = scf.for %position = [%lower to %upper step %8](%total$10 = %total$7 : index) -> (index) {
+    %total$12 = index.add %total$10, %position : index
+    scf.yield %total$12 : index
+  }
+  %13 = index.cast %total$11 : index to i32
+  func.return %13 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Unsigned integer endpoints and results retain the physical offset domain.
+#include <loomcxx/index.h>
+unsigned offset_sum(unsigned begin, unsigned end) {
+  const auto lower = loom::offset::cast(begin);
+  const auto upper = loom::offset::cast(end);
+  auto total = loom::type::offset{0};
+  for (auto position = lower; position < upper;
+       position = loom::type::offset{1} + position) {
+    total = total + position;
+  }
+  return loom::offset::cast<unsigned>(total);
+}
+// ----
+func.def public @offset_sum(%begin: i32, %end: i32) -> (i32) {
+  %lower = index.cast %begin : i32 to offset
+  %upper = index.cast %end : i32 to offset
+  %5 = scalar.constant 0 : i32
+  %6 = scalar.extsi %5 : i32 to i64
+  %total$7 = index.cast %6 : i64 to offset
+  %8 = index.constant 1 : offset
+  %total$11 = scf.for %position = [%lower to %upper step %8](%total$10 = %total$7 : offset) -> (offset) {
+    %total$12 = index.add %total$10, %position : offset
+    scf.yield %total$12 : offset
+  }
+  %13 = index.cast %total$11 : offset to i32
+  func.return %13 : i32
+}

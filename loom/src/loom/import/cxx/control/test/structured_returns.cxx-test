@@ -1,0 +1,874 @@
+// RUN: roundtrip
+// A bounded search returns from its counted loop at the first matching lane.
+int find(const double* values, int count) {
+  for (int index = 0; index < count; ++index) {
+    if (values[index] < 0.0) return index;
+  }
+  return -1;
+}
+
+// ----
+func.def public @find(%values: buffer, %values_byte_offset: offset, %count: i32) -> (i32) {
+  %index = scalar.constant 0 : i32
+  %5 = index.cast %index : i32 to index
+  %6 = index.cast %count : i32 to index
+  %7 = index.constant 1 : index
+  scf.for %index = [%5 to %6 step %7] {
+    %9 = index.cast %index : index to i32
+    %10 = scalar.extsi %9 : i32 to i64
+    %11 = scalar.constant 8 : i64
+    %12 = scalar.muli %10, %11 : i64
+    %13 = index.cast %values_byte_offset : offset to i64
+    %14 = scalar.addi %13, %12 : i64
+    %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
+    %16 = index.cast %15 : i64 to offset
+    %17 = buffer.view %values[%16] : buffer -> view<1xf64>
+    %18 = view.load %17[0] : view<1xf64> -> f64
+    %19 = scalar.constant 0.0 : f64
+    %20 = scalar.cmpf olt, %18, %19 : f64
+    scf.if %20 {
+      %21 = scalar.constant 1 : i1
+      func.exit %21 : i1 {
+        func.return %9 : i32
+      }
+    }
+  }
+  %22 = scalar.constant 1 : i32
+  %23 = scalar.constant 0 : i32
+  %24 = scalar.subi %23, %22 : i32
+  func.return %24 : i32
+}
+
+// ====
+// Post-test loops preserve a taken exit and the mutated fallthrough value.
+int post_test(int value) {
+  do {
+    if (value == 0) return 7;
+    --value;
+  } while (value > 0);
+  return value;
+}
+
+// ----
+func.def public @post_test(%value$0: i32) -> (i32) {
+  %value$4 = scf.while(%value$2 = %value$0 : i32) -> (i32) {
+    %5 = scalar.constant 0 : i32
+    %6 = scalar.cmpi eq, %value$2, %5 : i32
+    scf.if %6 {
+      %7 = scalar.constant 7 : i32
+      %8 = scalar.constant 1 : i1
+      func.exit %8 : i1 {
+        func.return %7 : i32
+      }
+    }
+    %9 = scalar.constant 1 : i32
+    %value$10 = scalar.subi %value$2, %9 : i32
+    %11 = scalar.constant 0 : i32
+    %12 = scalar.cmpi sgt, %value$10, %11 : i32
+    scf.condition %12, %value$10 : i1, i32
+  } do(%value: i32) {
+    scf.yield %value : i32
+  }
+  func.return %value$4 : i32
+}
+
+// ====
+// Void runtime functions carry an empty return through structured control.
+void stop(unsigned count) {
+  while (count) {
+    if (--count == 0u) return;
+  }
+}
+
+// ----
+func.def public @stop(%count$0: i32) {
+  %count$3 = scf.while(%count = %count$0 : i32) -> (i32) {
+    %4 = scalar.constant 0 : i32
+    %5 = scalar.cmpi ne, %count, %4 : i32
+    scf.condition %5, %count : i1, i32
+  } do(%count$2: i32) {
+    %6 = scalar.constant 1 : i32
+    %count$7 = scalar.subi %count$2, %6 : i32
+    %8 = scalar.constant 0 : i32
+    %9 = scalar.cmpi eq, %count$7, %8 : i32
+    %count$10 = scf.if %9 -> (i32) {
+      %11 = scalar.constant 1 : i1
+      func.exit %11 : i1 {
+        func.return
+      }
+      scf.yield %count$7 : i32
+    } else {
+      scf.yield %count$7 : i32
+    }
+    scf.yield %count$10 : i32
+  }
+  func.return
+}
+
+// ====
+// Loop-carried values and continue paths remain structured around two exits.
+int integrate(double* values, double step) {
+  int iteration = 0;
+  while (true) {
+    if (iteration >= 1000) return -4;
+    double error = values[0];
+    if (error > 1.0) {
+      step *= 0.5;
+      ++iteration;
+      continue;
+    }
+    values[0] += step;
+    ++iteration;
+    if (values[0] > 10.0) return 1;
+  }
+}
+
+// ----
+func.def public @integrate(%values: buffer, %values_byte_offset: offset, %step$2: f64) -> (i32) {
+  %iteration$4 = scalar.constant 0 : i32
+  %step$9, %iteration$10 = scf.while(%step = %step$2 : f64, %iteration = %iteration$4 : i32) -> (f64, i32) {
+    %11 = scalar.constant 1 : i1
+    scf.condition %11, %step, %iteration : i1, f64, i32
+  } do(%step$7: f64, %iteration$8: i32) {
+    %12 = scalar.constant 1000 : i32
+    %13 = scalar.cmpi sge, %iteration$8, %12 : i32
+    scf.if %13 {
+      %14 = scalar.constant 4 : i32
+      %15 = scalar.constant 0 : i32
+      %16 = scalar.subi %15, %14 : i32
+      %17 = scalar.constant 1 : i1
+      func.exit %17 : i1 {
+        func.return %16 : i32
+      }
+    }
+    %18 = scalar.constant 0 : i32
+    %19 = scalar.extsi %18 : i32 to i64
+    %20 = scalar.constant 8 : i64
+    %21 = scalar.muli %19, %20 : i64
+    %22 = index.cast %values_byte_offset : offset to i64
+    %23 = scalar.addi %22, %21 : i64
+    %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
+    %25 = index.cast %24 : i64 to offset
+    %26 = buffer.view %values[%25] : buffer -> view<1xf64>
+    %error = view.load %26[0] : view<1xf64> -> f64
+    %28 = scalar.constant 1.0 : f64
+    %29 = scalar.cmpf ogt, %error, %28 : f64
+    %30, %step$31, %iteration$32 = scf.if %29 -> (i1, f64, i32) {
+      %33 = scalar.constant 0.5 : f64
+      %step = scalar.mulf %step$7, %33 : f64
+      %35 = scalar.constant 1 : i32
+      %iteration = scalar.addi %iteration$8, %35 : i32
+      %37 = scalar.constant 0 : i1
+      scf.yield %37, %step, %iteration : i1, f64, i32
+    } else {
+      %38 = scalar.constant 0 : i32
+      %39 = scalar.extsi %38 : i32 to i64
+      %40 = scalar.constant 8 : i64
+      %41 = scalar.muli %39, %40 : i64
+      %42 = index.cast %values_byte_offset : offset to i64
+      %43 = scalar.addi %42, %41 : i64
+      %44 = scalar.assume %43 [range(%43, 0, 9223372036854775807)] : i64
+      %45 = index.cast %44 : i64 to offset
+      %46 = buffer.view %values[%45] : buffer -> view<1xf64>
+      %47 = view.load %46[0] : view<1xf64> -> f64
+      %48 = scalar.addf %47, %step$7 : f64
+      view.store %48, %46[0] : f64, view<1xf64>
+      %49 = scalar.constant 1 : i32
+      %iteration = scalar.addi %iteration$8, %49 : i32
+      %51 = scalar.constant 0 : i32
+      %52 = scalar.extsi %51 : i32 to i64
+      %53 = scalar.constant 8 : i64
+      %54 = scalar.muli %52, %53 : i64
+      %55 = index.cast %values_byte_offset : offset to i64
+      %56 = scalar.addi %55, %54 : i64
+      %57 = scalar.assume %56 [range(%56, 0, 9223372036854775807)] : i64
+      %58 = index.cast %57 : i64 to offset
+      %59 = buffer.view %values[%58] : buffer -> view<1xf64>
+      %60 = view.load %59[0] : view<1xf64> -> f64
+      %61 = scalar.constant 10.0 : f64
+      %62 = scalar.cmpf ogt, %60, %61 : f64
+      scf.if %62 {
+        %63 = scalar.constant 1 : i32
+        %64 = scalar.constant 1 : i1
+        func.exit %64 : i1 {
+          func.return %63 : i32
+        }
+      }
+      %65 = scalar.constant 1 : i1
+      scf.yield %65, %step$7, %iteration : i1, f64, i32
+    }
+    scf.yield %step$31, %iteration$32 : f64, i32
+  }
+  func.unreachable
+}
+
+// ====
+// A nested exit skips one shared continuation without duplicating it.
+int shared_tail(int first, int second) {
+  if (first) {
+    if (second) return 1;
+    first = 2;
+  }
+  return first + second;
+}
+
+// ----
+func.def public @shared_tail(%first$0: i32, %second: i32) -> (i32) {
+  %3 = scalar.constant 0 : i32
+  %4 = scalar.cmpi ne, %first$0, %3 : i32
+  %first$5 = scf.if %4 -> (i32) {
+    %6 = scalar.constant 0 : i32
+    %7 = scalar.cmpi ne, %second, %6 : i32
+    scf.if %7 {
+      %8 = scalar.constant 1 : i32
+      %9 = scalar.constant 1 : i1
+      func.exit %9 : i1 {
+        func.return %8 : i32
+      }
+    }
+    %first = scalar.constant 2 : i32
+    scf.yield %first : i32
+  } else {
+    scf.yield %first$0 : i32
+  }
+  %11 = scalar.addi %first$5, %second : i32
+  func.return %11 : i32
+}
+
+// ====
+// Switch clauses may return while ordinary clauses reach the shared tail.
+int classify(int value) {
+  switch (value) {
+    case 1: return 4;
+    case 2: value += 3; break;
+    default: return -1;
+  }
+  return value;
+}
+
+// ----
+func.def public @classify(%value$0: i32) -> (i32) {
+  %switch_selector = index.cast %value$0 : i32 to index
+  %value$3 = scf.switch %switch_selector -> (i32) {
+    case 1 {
+      %4 = scalar.constant 4 : i32
+      %5 = scalar.constant 1 : i1
+      func.exit %5 : i1 {
+        func.return %4 : i32
+      }
+      %6 = scalar.constant 0 : i1
+      scf.yield %value$0 : i32
+    }
+    case 2 {
+      %7 = scalar.constant 3 : i32
+      %value = scalar.addi %value$0, %7 : i32
+      %9 = scalar.constant 0 : i1
+      scf.yield %value : i32
+    }
+    default {
+      %10 = scalar.constant 1 : i32
+      %11 = scalar.constant 0 : i32
+      %12 = scalar.subi %11, %10 : i32
+      %13 = scalar.constant 1 : i1
+      func.exit %13 : i1 {
+        func.return %12 : i32
+      }
+      %14 = scalar.constant 0 : i1
+      scf.yield %value$0 : i32
+    }
+  }
+  %15 = scalar.constant 1 : i1
+  func.return %value$3 : i32
+}
+
+// ====
+// Aggregate return values cross the exit without an inactive placeholder.
+struct Result {
+  unsigned index;
+  float value;
+};
+Result find_result(const float* values, unsigned count) {
+  for (unsigned index = 0; index < count; ++index) {
+    if (values[index] != 0.0f) return {index, values[index]};
+  }
+  return {~0u, 0.0f};
+}
+
+// ----
+func.def public @find_result(%values: buffer, %values_byte_offset: offset, %count: i32) -> (i32, f32) {
+  %index = scalar.constant 0 : i32
+  %6 = index.cast %index : i32 to offset
+  %7 = index.cast %count : i32 to offset
+  %8 = index.constant 1 : offset
+  scf.for %index = [%6 to %7 step %8] {
+    %10 = index.cast %index : offset to i32
+    %11 = scalar.extui %10 : i32 to i64
+    %12 = scalar.constant 4 : i64
+    %13 = scalar.muli %11, %12 : i64
+    %14 = index.cast %values_byte_offset : offset to i64
+    %15 = scalar.addi %14, %13 : i64
+    %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
+    %17 = index.cast %16 : i64 to offset
+    %18 = buffer.view %values[%17] : buffer -> view<1xf32>
+    %19 = view.load %18[0] : view<1xf32> -> f32
+    %20 = scalar.constant 0.0 : f32
+    %21 = scalar.cmpf une, %19, %20 : f32
+    scf.if %21 {
+      %22 = scalar.extui %10 : i32 to i64
+      %23 = scalar.constant 4 : i64
+      %24 = scalar.muli %22, %23 : i64
+      %25 = index.cast %values_byte_offset : offset to i64
+      %26 = scalar.addi %25, %24 : i64
+      %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
+      %28 = index.cast %27 : i64 to offset
+      %29 = buffer.view %values[%28] : buffer -> view<1xf32>
+      %30 = view.load %29[0] : view<1xf32> -> f32
+      %31 = scalar.constant 1 : i1
+      func.exit %31 : i1 {
+        func.return %10, %30 : i32, f32
+      }
+    }
+  }
+  %32 = scalar.constant 0 : i32
+  %33 = scalar.constant -1 : i32
+  %34 = scalar.xori %32, %33 : i32
+  %35 = scalar.constant 0.0 : f32
+  func.return %34, %35 : i32, f32
+}
+
+// ====
+// Mutable reference writeback is captured at the taken return point.
+static bool advance(unsigned& value, unsigned limit) {
+  while (value < limit) {
+    ++value;
+    if ((value & 3u) == 0u) return true;
+  }
+  return false;
+}
+unsigned advance_entry(unsigned value, unsigned limit) {
+  bool stopped = advance(value, limit);
+  return value + (stopped ? 100u : 0u);
+}
+
+// ----
+func.def public @advance_entry(%value$0: i32, %limit: i32) -> (i32) {
+  %stopped, %value$4 = func.call @advance(%value$0, %limit) : (i32, i32) -> (i1, %value$0 as i32)
+  %5 = scf.if %stopped -> (i32) {
+    %6 = scalar.constant 100 : i32
+    scf.yield %6 : i32
+  } else {
+    %7 = scalar.constant 0 : i32
+    scf.yield %7 : i32
+  }
+  %8 = scalar.addi %value$4, %5 : i32
+  func.return %8 : i32
+}
+
+func.def @advance(%value$9: i32, %limit: i32) -> (i1, %value$9 as i32) {
+  %value$15 = scf.while(%value = %value$9 : i32) -> (i32) {
+    %16 = scalar.cmpi ult, %value, %limit : i32
+    scf.condition %16, %value : i1, i32
+  } do(%value$14: i32) {
+    %17 = scalar.constant 1 : i32
+    %value$18 = scalar.addi %value$14, %17 : i32
+    %19 = scalar.constant 3 : i32
+    %20 = scalar.andi %value$18, %19 : i32
+    %21 = scalar.constant 0 : i32
+    %22 = scalar.cmpi eq, %20, %21 : i32
+    scf.if %22 {
+      %23 = scalar.constant 1 : i1
+      %24 = scalar.constant 1 : i1
+      func.exit %24 : i1 {
+        func.return %23, %value$18 : i1, i32
+      }
+    }
+    scf.yield %value$18 : i32
+  }
+  %25 = scalar.constant 0 : i1
+  func.return %25, %value$15 : i1, i32
+}
+
+// ====
+// Kernel exits use the enclosing kernel's return contract.
+#include <loomcxx/kernel.h>
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void first_nonzero(const unsigned* input, unsigned* output, unsigned count) {
+  for (unsigned index = 0; index < count; ++index) {
+    if (input[index] != 0u) {
+      output[0] = index;
+      return;
+    }
+  }
+  output[0] = ~0u;
+}
+
+// ----
+kernel.def @first_nonzero() {
+  %3 = index.constant 1 : index
+  %4 = index.constant 1 : index
+  %5 = index.constant 1 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  %8 = index.constant 1 : index
+  kernel.launch.config workgroups(%3, %4, %5) workgroup_size(%6, %7, %8) : index
+} launch(%input: buffer, %output: buffer, %count: i32) {
+  %input_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : offset
+  %index = scalar.constant 0 : i32
+  %12 = index.cast %index : i32 to offset
+  %13 = index.cast %count : i32 to offset
+  %14 = index.constant 1 : offset
+  scf.for %index = [%12 to %13 step %14] {
+    %16 = index.cast %index : offset to i32
+    %17 = scalar.extui %16 : i32 to i64
+    %18 = scalar.constant 4 : i64
+    %19 = scalar.muli %17, %18 : i64
+    %20 = index.cast %input_byte_offset : offset to i64
+    %21 = scalar.addi %20, %19 : i64
+    %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
+    %23 = index.cast %22 : i64 to offset
+    %24 = buffer.view %input[%23] : buffer -> view<1xi32>
+    %25 = view.load %24[0] : view<1xi32> -> i32
+    %26 = scalar.constant 0 : i32
+    %27 = scalar.cmpi ne, %25, %26 : i32
+    scf.if %27 {
+      %28 = scalar.constant 0 : i32
+      %29 = scalar.extsi %28 : i32 to i64
+      %30 = scalar.constant 4 : i64
+      %31 = scalar.muli %29, %30 : i64
+      %32 = index.cast %output_byte_offset : offset to i64
+      %33 = scalar.addi %32, %31 : i64
+      %34 = scalar.assume %33 [range(%33, 0, 9223372036854775807)] : i64
+      %35 = index.cast %34 : i64 to offset
+      %36 = buffer.view %output[%35] : buffer -> view<1xi32>
+      view.store %16, %36[0] : i32, view<1xi32>
+      %37 = scalar.constant 1 : i1
+      func.exit %37 : i1 {
+        kernel.return
+      }
+    }
+  }
+  %38 = scalar.constant 0 : i32
+  %39 = scalar.constant -1 : i32
+  %40 = scalar.xori %38, %39 : i32
+  %41 = scalar.constant 0 : i32
+  %42 = scalar.extsi %41 : i32 to i64
+  %43 = scalar.constant 4 : i64
+  %44 = scalar.muli %42, %43 : i64
+  %45 = index.cast %output_byte_offset : offset to i64
+  %46 = scalar.addi %45, %44 : i64
+  %47 = scalar.assume %46 [range(%46, 0, 9223372036854775807)] : i64
+  %48 = index.cast %47 : i64 to offset
+  %49 = buffer.view %output[%48] : buffer -> view<1xi32>
+  view.store %40, %49[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// An early return stays lexical before a later counted loop that can return.
+int early_then_counted(const int* values, int count) {
+  if (values[0] > 9) return -2;
+  for (int index = 0; index < count; ++index) {
+    if (values[index] < 0) return index;
+  }
+  return -1;
+}
+
+// ----
+func.def public @early_then_counted(%values: buffer, %values_byte_offset: offset, %count: i32) -> (i32) {
+  %4 = scalar.constant 0 : i32
+  %5 = scalar.extsi %4 : i32 to i64
+  %6 = scalar.constant 4 : i64
+  %7 = scalar.muli %5, %6 : i64
+  %8 = index.cast %values_byte_offset : offset to i64
+  %9 = scalar.addi %8, %7 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %12 = buffer.view %values[%11] : buffer -> view<1xi32>
+  %13 = view.load %12[0] : view<1xi32> -> i32
+  %14 = scalar.constant 9 : i32
+  %15 = scalar.cmpi sgt, %13, %14 : i32
+  scf.if %15 {
+    %16 = scalar.constant 2 : i32
+    %17 = scalar.constant 0 : i32
+    %18 = scalar.subi %17, %16 : i32
+    %19 = scalar.constant 1 : i1
+    func.exit %19 : i1 {
+      func.return %18 : i32
+    }
+  }
+  %index = scalar.constant 0 : i32
+  %21 = index.cast %index : i32 to index
+  %22 = index.cast %count : i32 to index
+  %23 = index.constant 1 : index
+  scf.for %index = [%21 to %22 step %23] {
+    %25 = index.cast %index : index to i32
+    %26 = scalar.extsi %25 : i32 to i64
+    %27 = scalar.constant 4 : i64
+    %28 = scalar.muli %26, %27 : i64
+    %29 = index.cast %values_byte_offset : offset to i64
+    %30 = scalar.addi %29, %28 : i64
+    %31 = scalar.assume %30 [range(%30, 0, 9223372036854775807)] : i64
+    %32 = index.cast %31 : i64 to offset
+    %33 = buffer.view %values[%32] : buffer -> view<1xi32>
+    %34 = view.load %33[0] : view<1xi32> -> i32
+    %35 = scalar.constant 0 : i32
+    %36 = scalar.cmpi slt, %34, %35 : i32
+    scf.if %36 {
+      %37 = scalar.constant 1 : i1
+      func.exit %37 : i1 {
+        func.return %25 : i32
+      }
+    }
+  }
+  %38 = scalar.constant 1 : i32
+  %39 = scalar.constant 0 : i32
+  %40 = scalar.subi %39, %38 : i32
+  func.return %40 : i32
+}
+
+// ====
+// A nonfallthrough loop remains lexical after an earlier return.
+int early_then_forever(const int* values, int count) {
+  if (values[0] > 9) return -2;
+  int index = 0;
+  for (;;) {
+    if (values[index] < 0) return index;
+    ++index;
+    if (index >= count) return -1;
+  }
+}
+
+// ----
+func.def public @early_then_forever(%values: buffer, %values_byte_offset: offset, %count: i32) -> (i32) {
+  %4 = scalar.constant 0 : i32
+  %5 = scalar.extsi %4 : i32 to i64
+  %6 = scalar.constant 4 : i64
+  %7 = scalar.muli %5, %6 : i64
+  %8 = index.cast %values_byte_offset : offset to i64
+  %9 = scalar.addi %8, %7 : i64
+  %10 = scalar.assume %9 [range(%9, 0, 9223372036854775807)] : i64
+  %11 = index.cast %10 : i64 to offset
+  %12 = buffer.view %values[%11] : buffer -> view<1xi32>
+  %13 = view.load %12[0] : view<1xi32> -> i32
+  %14 = scalar.constant 9 : i32
+  %15 = scalar.cmpi sgt, %13, %14 : i32
+  scf.if %15 {
+    %16 = scalar.constant 2 : i32
+    %17 = scalar.constant 0 : i32
+    %18 = scalar.subi %17, %16 : i32
+    %19 = scalar.constant 1 : i1
+    func.exit %19 : i1 {
+      func.return %18 : i32
+    }
+  }
+  %index$20 = scalar.constant 0 : i32
+  %index$23 = scf.while(%index = %index$20 : i32) -> (i32) {
+    %24 = scalar.constant 1 : i1
+    scf.condition %24, %index : i1, i32
+  } do(%index$22: i32) {
+    %25 = scalar.extsi %index$22 : i32 to i64
+    %26 = scalar.constant 4 : i64
+    %27 = scalar.muli %25, %26 : i64
+    %28 = index.cast %values_byte_offset : offset to i64
+    %29 = scalar.addi %28, %27 : i64
+    %30 = scalar.assume %29 [range(%29, 0, 9223372036854775807)] : i64
+    %31 = index.cast %30 : i64 to offset
+    %32 = buffer.view %values[%31] : buffer -> view<1xi32>
+    %33 = view.load %32[0] : view<1xi32> -> i32
+    %34 = scalar.constant 0 : i32
+    %35 = scalar.cmpi slt, %33, %34 : i32
+    scf.if %35 {
+      %36 = scalar.constant 1 : i1
+      func.exit %36 : i1 {
+        func.return %index$22 : i32
+      }
+    }
+    %37 = scalar.constant 1 : i32
+    %index$38 = scalar.addi %index$22, %37 : i32
+    %39 = scalar.cmpi sge, %index$38, %count : i32
+    scf.if %39 {
+      %40 = scalar.constant 1 : i32
+      %41 = scalar.constant 0 : i32
+      %42 = scalar.subi %41, %40 : i32
+      %43 = scalar.constant 1 : i1
+      func.exit %43 : i1 {
+        func.return %42 : i32
+      }
+    }
+    scf.yield %index$38 : i32
+  }
+  func.unreachable
+}
+
+// ====
+// Each returning loop remains a lexical sibling after the early return.
+int early_then_two_loops(int first_limit, int second_limit, int selected) {
+  if (selected < 0) return -2;
+  for (int index = 0; index < first_limit; ++index) {
+    if (index == selected) return index;
+  }
+  for (int index = 0; index < second_limit; ++index) {
+    if (index + first_limit == selected) return index + first_limit;
+  }
+  return -1;
+}
+
+// ----
+func.def public @early_then_two_loops(%first_limit: i32, %second_limit: i32, %selected: i32) -> (i32) {
+  %4 = scalar.constant 0 : i32
+  %5 = scalar.cmpi slt, %selected, %4 : i32
+  scf.if %5 {
+    %6 = scalar.constant 2 : i32
+    %7 = scalar.constant 0 : i32
+    %8 = scalar.subi %7, %6 : i32
+    %9 = scalar.constant 1 : i1
+    func.exit %9 : i1 {
+      func.return %8 : i32
+    }
+  }
+  %index$10 = scalar.constant 0 : i32
+  %11 = index.cast %index$10 : i32 to index
+  %12 = index.cast %first_limit : i32 to index
+  %13 = index.constant 1 : index
+  scf.for %index = [%11 to %12 step %13] {
+    %15 = index.cast %index : index to i32
+    %16 = scalar.cmpi eq, %15, %selected : i32
+    scf.if %16 {
+      %17 = scalar.constant 1 : i1
+      func.exit %17 : i1 {
+        func.return %15 : i32
+      }
+    }
+  }
+  %index$18 = scalar.constant 0 : i32
+  %19 = index.cast %index$18 : i32 to index
+  %20 = index.cast %second_limit : i32 to index
+  %21 = index.constant 1 : index
+  scf.for %index = [%19 to %20 step %21] {
+    %23 = index.cast %index : index to i32
+    %24 = scalar.addi %23, %first_limit : i32
+    %25 = scalar.cmpi eq, %24, %selected : i32
+    scf.if %25 {
+      %26 = scalar.addi %23, %first_limit : i32
+      %27 = scalar.constant 1 : i1
+      func.exit %27 : i1 {
+        func.return %26 : i32
+      }
+    }
+  }
+  %28 = scalar.constant 1 : i32
+  %29 = scalar.constant 0 : i32
+  %30 = scalar.subi %29, %28 : i32
+  func.return %30 : i32
+}
+
+// ====
+// A helper return exits two nested counted loops without a source-level flag.
+bool nested_matrix_finite(const double* values) {
+  for (int row = 0; row < 4; ++row) {
+    for (int column = 0; column < 4; ++column) {
+      double value = values[row * 4 + column];
+      if (value != value) return false;
+    }
+  }
+  return true;
+}
+
+// ----
+func.def public @nested_matrix_finite(%values: buffer, %values_byte_offset: offset) -> (i1) {
+  %row = scalar.constant 0 : i32
+  %4 = index.cast %row : i32 to index
+  %5 = scalar.constant 4 : i32
+  %6 = index.cast %5 : i32 to index
+  %7 = index.constant 1 : index
+  scf.for %row = [%4 to %6 step %7] {
+    %9 = index.cast %row : index to i32
+    %column = scalar.constant 0 : i32
+    %11 = index.cast %column : i32 to index
+    %12 = scalar.constant 4 : i32
+    %13 = index.cast %12 : i32 to index
+    %14 = index.constant 1 : index
+    scf.for %column = [%11 to %13 step %14] {
+      %16 = index.cast %column : index to i32
+      %17 = scalar.constant 4 : i32
+      %18 = scalar.muli %9, %17 : i32
+      %19 = scalar.addi %18, %16 : i32
+      %20 = scalar.extsi %19 : i32 to i64
+      %21 = scalar.constant 8 : i64
+      %22 = scalar.muli %20, %21 : i64
+      %23 = index.cast %values_byte_offset : offset to i64
+      %24 = scalar.addi %23, %22 : i64
+      %25 = scalar.assume %24 [range(%24, 0, 9223372036854775807)] : i64
+      %26 = index.cast %25 : i64 to offset
+      %27 = buffer.view %values[%26] : buffer -> view<1xf64>
+      %value = view.load %27[0] : view<1xf64> -> f64
+      %29 = scalar.cmpf une, %value, %value : f64
+      scf.if %29 {
+        %30 = scalar.constant 0 : i1
+        %31 = scalar.constant 1 : i1
+        func.exit %31 : i1 {
+          func.return %30 : i1
+        }
+      }
+    }
+  }
+  %32 = scalar.constant 1 : i1
+  func.return %32 : i1
+}
+
+// ====
+// RUN: roundtrip
+// A value-returning exit crosses three runtime loop bounds, including empty axes.
+int nested_position(unsigned selected, unsigned planes, unsigned rows,
+                    unsigned columns) {
+  for (unsigned plane = 0; plane < planes; ++plane) {
+    for (unsigned row = 0; row < rows; ++row) {
+      for (unsigned column = 0; column < columns; ++column) {
+        if (plane * 4u + row * 2u + column == selected) {
+          return int(plane * 100u + row * 10u + column);
+        }
+      }
+    }
+  }
+  return -1;
+}
+// ----
+func.def public @nested_position(%selected: i32, %planes: i32, %rows: i32, %columns: i32) -> (i32) {
+  %plane = scalar.constant 0 : i32
+  %6 = index.cast %plane : i32 to offset
+  %7 = index.cast %planes : i32 to offset
+  %8 = index.constant 1 : offset
+  scf.for %plane = [%6 to %7 step %8] {
+    %10 = index.cast %plane : offset to i32
+    %row = scalar.constant 0 : i32
+    %12 = index.cast %row : i32 to offset
+    %13 = index.cast %rows : i32 to offset
+    %14 = index.constant 1 : offset
+    scf.for %row = [%12 to %13 step %14] {
+      %16 = index.cast %row : offset to i32
+      %column = scalar.constant 0 : i32
+      %18 = index.cast %column : i32 to offset
+      %19 = index.cast %columns : i32 to offset
+      %20 = index.constant 1 : offset
+      scf.for %column = [%18 to %19 step %20] {
+        %22 = index.cast %column : offset to i32
+        %23 = scalar.constant 4 : i32
+        %24 = scalar.muli %10, %23 : i32
+        %25 = scalar.constant 2 : i32
+        %26 = scalar.muli %16, %25 : i32
+        %27 = scalar.addi %24, %26 : i32
+        %28 = scalar.addi %27, %22 : i32
+        %29 = scalar.cmpi eq, %28, %selected : i32
+        scf.if %29 {
+          %30 = scalar.constant 100 : i32
+          %31 = scalar.muli %10, %30 : i32
+          %32 = scalar.constant 10 : i32
+          %33 = scalar.muli %16, %32 : i32
+          %34 = scalar.addi %31, %33 : i32
+          %35 = scalar.addi %34, %22 : i32
+          %36 = scalar.constant 1 : i1
+          func.exit %36 : i1 {
+            func.return %35 : i32
+          }
+        }
+      }
+    }
+  }
+  %37 = scalar.constant 1 : i32
+  %38 = scalar.constant 0 : i32
+  %39 = scalar.subi %38, %37 : i32
+  func.return %39 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Each early return retains preceding stores and suppresses later loads and effects.
+int classify(const int* input, unsigned index, unsigned length, int* trace,
+             unsigned position) {
+  if (index >= length) {
+    trace[position] = 1;
+    return -7;
+  }
+  int value = input[index];
+  trace[position] = 2;
+  if (value < 0) {
+    return -value;
+  }
+  if (value == 0) {
+    trace[position] = 3;
+    return 3;
+  }
+  return value + 4;
+}
+// ----
+func.def public @classify(%input: buffer, %input_byte_offset: offset, %index: i32, %length: i32, %trace: buffer, %trace_byte_offset: offset, %position: i32) -> (i32) {
+  %8 = scalar.cmpi uge, %index, %length : i32
+  %9 = scf.if %8 -> (i32) {
+    %10 = scalar.constant 1 : i32
+    %11 = scalar.extui %position : i32 to i64
+    %12 = scalar.constant 4 : i64
+    %13 = scalar.muli %11, %12 : i64
+    %14 = index.cast %trace_byte_offset : offset to i64
+    %15 = scalar.addi %14, %13 : i64
+    %16 = scalar.assume %15 [range(%15, 0, 9223372036854775807)] : i64
+    %17 = index.cast %16 : i64 to offset
+    %18 = buffer.view %trace[%17] : buffer -> view<1xi32>
+    view.store %10, %18[0] : i32, view<1xi32>
+    %19 = scalar.constant 7 : i32
+    %20 = scalar.constant 0 : i32
+    %21 = scalar.subi %20, %19 : i32
+    scf.yield %21 : i32
+  } else {
+    %22 = scalar.extui %index : i32 to i64
+    %23 = scalar.constant 4 : i64
+    %24 = scalar.muli %22, %23 : i64
+    %25 = index.cast %input_byte_offset : offset to i64
+    %26 = scalar.addi %25, %24 : i64
+    %27 = scalar.assume %26 [range(%26, 0, 9223372036854775807)] : i64
+    %28 = index.cast %27 : i64 to offset
+    %29 = buffer.view %input[%28] : buffer -> view<1xi32>
+    %value = view.load %29[0] : view<1xi32> -> i32
+    %31 = scalar.constant 2 : i32
+    %32 = scalar.extui %position : i32 to i64
+    %33 = scalar.constant 4 : i64
+    %34 = scalar.muli %32, %33 : i64
+    %35 = index.cast %trace_byte_offset : offset to i64
+    %36 = scalar.addi %35, %34 : i64
+    %37 = scalar.assume %36 [range(%36, 0, 9223372036854775807)] : i64
+    %38 = index.cast %37 : i64 to offset
+    %39 = buffer.view %trace[%38] : buffer -> view<1xi32>
+    view.store %31, %39[0] : i32, view<1xi32>
+    %40 = scalar.constant 0 : i32
+    %41 = scalar.cmpi slt, %value, %40 : i32
+    %42 = scf.if %41 -> (i32) {
+      %43 = scalar.constant 0 : i32
+      %44 = scalar.subi %43, %value : i32
+      scf.yield %44 : i32
+    } else {
+      %45 = scalar.constant 0 : i32
+      %46 = scalar.cmpi eq, %value, %45 : i32
+      %47 = scf.if %46 -> (i32) {
+        %48 = scalar.constant 3 : i32
+        %49 = scalar.extui %position : i32 to i64
+        %50 = scalar.constant 4 : i64
+        %51 = scalar.muli %49, %50 : i64
+        %52 = index.cast %trace_byte_offset : offset to i64
+        %53 = scalar.addi %52, %51 : i64
+        %54 = scalar.assume %53 [range(%53, 0, 9223372036854775807)] : i64
+        %55 = index.cast %54 : i64 to offset
+        %56 = buffer.view %trace[%55] : buffer -> view<1xi32>
+        view.store %48, %56[0] : i32, view<1xi32>
+        %57 = scalar.constant 3 : i32
+        scf.yield %57 : i32
+      } else {
+        %58 = scalar.constant 4 : i32
+        %59 = scalar.addi %value, %58 : i32
+        scf.yield %59 : i32
+      }
+      scf.yield %47 : i32
+    }
+    scf.yield %42 : i32
+  }
+  func.return %9 : i32
+}

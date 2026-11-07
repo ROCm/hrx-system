@@ -1,0 +1,42 @@
+// RUN: roundtrip
+// INPUT: cxx std=c23
+// Returned-new arithmetic uses the RMW result, never a second memory read.
+unsigned add_new(volatile unsigned* state, unsigned value) {
+  return __atomic_add_fetch(state, value, __ATOMIC_SEQ_CST);
+}
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [0, 1], results = [1], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>]>) @add_new(%state: buffer, %state_byte_offset: offset, %value: i32) -> (i32) {
+  %4 = buffer.view %state[%state_byte_offset] : buffer -> view<1xi32>
+  %5 = view.atomic.rmw<addi> %value, %4[0] {ordering = seq_cst, scope = system} : i32, view<1xi32> -> i32
+  %6 = scalar.addi %5, %value : i32
+  func.return %6 : i32
+}
+
+// ====
+// Both orderings and the weak argument's effect survive the source adapter.
+bool compare(volatile unsigned long long* state, unsigned long long* expected,
+             unsigned long long value, unsigned* calls) {
+  return __atomic_compare_exchange_n(state, expected, value, ++*calls != 0,
+                                    __ATOMIC_ACQ_REL, __ATOMIC_CONSUME);
+}
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [0, 1, 2, 3], results = [4], types = [#func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<unsigned_integer, byte_length = 8, byte_alignment = 8, component_count = 1, bitwidth = 64>, #func.abi.c.type<pointer, byte_length = 8, byte_alignment = 8, component_count = 2>, #func.abi.c.type<boolean, byte_length = 1, byte_alignment = 1, component_count = 1>]>) @compare(%state: buffer, %state_byte_offset: offset, %expected: buffer, %expected_byte_offset: offset, %value: i64, %calls: buffer, %calls_byte_offset: offset) -> (i1) {
+  %8 = buffer.view %calls[%calls_byte_offset] : buffer -> view<1xi32>
+  %9 = view.load %8[0] : view<1xi32> -> i32
+  %10 = scalar.constant 1 : i32
+  %11 = scalar.addi %9, %10 : i32
+  view.store %11, %8[0] : i32, view<1xi32>
+  %12 = scalar.constant 0 : i32
+  %13 = scalar.cmpi ne, %11, %12 : i32
+  %14 = buffer.view %expected[%expected_byte_offset] : buffer -> view<1xi64>
+  %15 = view.load %14[0] : view<1xi64> -> i64
+  %16 = buffer.view %state[%state_byte_offset] : buffer -> view<1xi64>
+  %17 = view.atomic.cmpxchg %15, %value, %16[0] {failure_ordering = acquire, scope = system, success_ordering = acq_rel} : i64, view<1xi64> -> i64
+  %18 = scalar.cmpi eq, %17, %15 : i64
+  %19 = scalar.constant 1 : i1
+  %20 = scalar.xori %18, %19 : i1
+  scf.if %20 {
+    view.store %17, %14[0] : i64, view<1xi64>
+  }
+  func.return %18 : i1
+}

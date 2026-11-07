@@ -1,0 +1,353 @@
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx
+#include <loomcxx/kernel.h>
+#include <loomcxx/pipeline.h>
+#include <loomcxx/target.h>
+
+namespace loomt = loom::type;
+using Bytes = loomt::buffer<unsigned char>;
+
+struct [[loom::target("target.generic")]] generic_target {
+  const char* kind;
+  const char* export_symbol;
+  unsigned long long subgroup_size;
+};
+constexpr generic_target worker_target{
+    .kind = "reference",
+    .export_symbol = "resident_worker",
+    .subgroup_size = 32,
+};
+
+[[loom::symbol("deployment.array")]]
+extern const loom::target::declaration array_target;
+
+[[loom::symbol("workers.adjust"), loom::inline, loom::target(array_target)]]
+unsigned adjust(unsigned value);
+
+[[loom::pipeline("kernel")]] void child(unsigned factor, [[loom::launch]] Bytes output);
+
+[[loom::pipeline("kernel"), loom::retain, loom::target(array_target)]] void resident(unsigned factor, loomt::index column, loomt::index count, [[loom::launch]] Bytes output) {
+  auto pool = loom::pipeline::memory<loom::memory_space::workgroup>(loomt::indices{column, loomt::index{3}});
+  auto* scratch = loom::buffer::alloca<unsigned char, loom::memory_space::workgroup, 64>(loomt::index{256}, pool);
+  loom::pipeline::compose<child>(factor, output);
+
+  [[loom::strand(loomt::indices{column, loomt::index{2}}, loomt::indices{count, loomt::index{1}}, loomt::indices{loomt::index{1}, loomt::index{1}}), loom::target(worker_target)]] {
+    auto worker = loom::kernel::workitem::id.x;
+    auto scratch_view = loom::buffer::view<256>(scratch, {});
+    loom::view::store(static_cast<unsigned char>(adjust(worker)), scratch_view, 0);
+    (void)output;
+  }
+}
+
+// ----
+#include <loomcxx/kernel.h>
+#include <loomcxx/numeric.h>
+#include <loomcxx/pipeline.h>
+#include <loomcxx/target.h>
+
+[[loom::symbol("deployment.array")]]
+extern const loom::target::declaration rendered_target_deployment_array;
+
+struct [[loom::target("target.generic")]] rendered_target_worker_target_type {
+  const char* kind;
+  const char* export_symbol;
+  long long subgroup_size;
+};
+constexpr rendered_target_worker_target_type rendered_target_worker_target{
+  .kind = "reference",
+  .export_symbol = "resident_worker",
+  .subgroup_size = 32,
+};
+
+[[loom::symbol("workers.adjust"), loom::target(rendered_target_deployment_array), loom::inline]]
+unsigned workers_adjust(unsigned v21);
+
+[[loom::pipeline("kernel"), loom::symbol("resident"), loom::retain, loom::target(rendered_target_deployment_array)]]
+void resident(unsigned factor, loom::type::index column, loom::type::index count, [[loom::launch]] loom::type::buffer<unsigned char> output);
+
+[[loom::pipeline("kernel"), loom::symbol("child")]]
+void child(unsigned v19, [[loom::launch]] loom::type::buffer<unsigned char> v20);
+
+[[loom::pipeline("kernel"), loom::symbol("resident"), loom::retain, loom::target(rendered_target_deployment_array)]]
+void resident(unsigned factor, loom::type::index column, loom::type::index count, [[loom::launch]] loom::type::buffer<unsigned char> output) {
+  auto pool = loom::pipeline::memory<loom::memory_space::workgroup>(loom::type::indices{column, loom::type::index{3}});
+  auto* scratch = loom::buffer::alloca<unsigned char, loom::memory_space::workgroup, 64>(loom::type::index{256}, pool);
+  loom::pipeline::compose<child>(factor, output);
+  [[loom::strand(loom::type::indices{column, loom::type::index{2}}, loom::type::indices{count, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}), loom::target(rendered_target_worker_target)]] {
+    auto scratch_view = loom::buffer::view<256>(scratch, {});
+    unsigned workitem = static_cast<unsigned>(loom::kernel::workitem::id.x);
+    unsigned v15 = workers_adjust(workitem);
+    loom::view::store(loom::convert<unsigned char>(v15), scratch_view, loom::type::index{0});
+  }
+}
+
+// ====
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx
+#include <loomcxx/pipeline.h>
+
+namespace loomt = loom::type;
+using Layout = loomt::encoding<loom::encoding::role::layout, 2>;
+using Payload = loomt::tile<loomt::shape<loomt::dynamic, 4>, float, Layout>;
+using Stream = loomt::channel<Payload>;
+using Slots = loomt::view<loomt::shape<2, loomt::dynamic, 4>, float>;
+using PayloadView = loomt::view<loomt::shape<loomt::dynamic, 4>, const float, Layout>;
+
+float first(PayloadView payload) { return loom::view::load(payload, 0, 0); }
+
+float consume(Stream input) {
+  auto read = loom::channel::accept(input);
+  auto payload = loom::channel::wait(read);
+  auto value = first(payload);
+  loom::channel::release(read);
+  return value;
+}
+
+[[loom::pipeline("kernel")]] void sink([[loom::launch]] Stream input);
+
+[[loom::pipeline("kernel")]] void streaming(loomt::index column, loomt::index capacity, Layout payload_layout, [[loom::launch]] Slots slots) {
+  auto input = loom::channel::bind<loom::channel::discipline::fifo>(slots, capacity, payload_layout);
+  loom::pipeline::compose<sink>(input);
+  [[loom::strand(loomt::indices{column, loomt::index{2}}, loomt::indices{capacity, loomt::index{1}}, loomt::indices{loomt::index{1}, loomt::index{1}})]] {
+    auto reservation = loom::channel::reserve(input);
+    loom::view::store(1.0f, reservation.payload, 0, 0);
+    loom::channel::publish(reservation.write);
+
+    auto acquisition = loom::channel::acquire(input);
+    auto observed = loom::view::load(acquisition.payload, 0, 0);
+    (void)observed;
+    auto readers = loom::channel::fanout<2>(acquisition.read);
+    loom::channel::release(readers.first);
+    loom::channel::release(readers.second);
+
+    auto pending = loom::channel::accept(input);
+    auto payload = loom::channel::wait(pending);
+    (void)loom::view::load(payload, 0, 0);
+    loom::channel::release(pending);
+
+    auto mutable_read = loom::channel::accept<loom::channel::mode::mutable_>(input);
+    auto mutable_payload = loom::channel::wait(mutable_read);
+    loom::view::store(2.0f, mutable_payload, 0, 0);
+    loom::channel::release(mutable_read);
+
+    auto source = loom::channel::accept(input);
+    auto destination = loom::channel::reserve(input);
+    loom::channel::copy(source, destination.write);
+
+    auto selected = loom::channel::select(input);
+    (void)selected.source_rank;
+    loom::channel::release(selected.read);
+    (void)consume(input);
+  }
+}
+
+// ----
+#include <loomcxx/pipeline.h>
+
+[[loom::symbol("first")]]
+float first(loom::type::view<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>> payload);
+
+[[loom::symbol("consume")]]
+float consume(loom::type::channel<loom::type::tile<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>>> input);
+
+[[loom::pipeline("kernel"), loom::symbol("streaming")]]
+void streaming(loom::type::index column, loom::type::index capacity, loom::type::encoding<loom::encoding::role::layout> payload_layout, [[loom::launch]] loom::type::view<loom::type::shape<2, loom::type::dynamic, 4>, float> slots);
+
+[[loom::pipeline("kernel"), loom::symbol("sink")]]
+void sink([[loom::launch]] loom::type::channel<loom::type::tile<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>>> v60);
+
+[[loom::symbol("first")]]
+float first(loom::type::view<loom::type::shape<loom::type::dynamic, 4>, const float, loom::type::encoding<loom::encoding::role::layout, 2>> payload) {
+  float v8 = loom::view::load(payload, loom::type::index{0}, loom::type::index{0});
+  return v8;
+}
+
+[[loom::symbol("consume")]]
+float consume(loom::type::channel<loom::type::tile<loom::type::shape<loom::type::dynamic, 4>, float, loom::type::encoding<loom::encoding::role::layout, 2>>> input) {
+  auto read = loom::channel::accept(input);
+  auto payload = loom::channel::wait(read);
+  float value = first(payload);
+  loom::channel::release(read);
+  return value;
+}
+
+[[loom::pipeline("kernel"), loom::symbol("streaming")]]
+void streaming(loom::type::index column, loom::type::index capacity, loom::type::encoding<loom::encoding::role::layout> payload_layout, [[loom::launch]] loom::type::view<loom::type::shape<2, loom::type::dynamic, 4>, float> slots) {
+  auto input = loom::channel::bind<loom::channel::discipline::fifo>(slots, capacity, payload_layout);
+  loom::pipeline::compose<sink>(input);
+  [[loom::strand(loom::type::indices{column, loom::type::index{2}}, loom::type::indices{capacity, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}})]] {
+    auto reservation = loom::channel::reserve(input);
+    loom::view::store(1.0f, reservation.payload, loom::type::index{0}, loom::type::index{0});
+    loom::channel::publish(reservation.write);
+    auto acquisition = loom::channel::acquire(input);
+    float observed = loom::view::load(acquisition.payload, loom::type::index{0}, loom::type::index{0});
+    auto fanout = loom::channel::fanout<2>(acquisition.read);
+    loom::channel::release(fanout.first);
+    loom::channel::release(fanout.second);
+    auto pending = loom::channel::accept(input);
+    auto payload = loom::channel::wait(pending);
+    float v44 = loom::view::load(payload, loom::type::index{0}, loom::type::index{0});
+    loom::channel::release(pending);
+    auto mutable_read = loom::channel::accept<loom::channel::mode::mutable_>(input);
+    auto mutable_payload = loom::channel::wait(mutable_read);
+    loom::view::store(2.0f, mutable_payload, loom::type::index{0}, loom::type::index{0});
+    loom::channel::release(mutable_read);
+    auto source = loom::channel::accept(input);
+    auto reservation_2 = loom::channel::reserve(input);
+    loom::channel::copy(source, reservation_2.write);
+    auto selection = loom::channel::select(input);
+    loom::channel::release(selection.read);
+    float v57 = consume(input);
+  }
+}
+
+// ====
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx
+#include <loomcxx/pipeline.h>
+
+using Bytes = loom::type::buffer<unsigned>;
+
+// A definition inherits its composable contract from the declaration.
+[[loom::pipeline]] void child([[loom::launch]] Bytes output, unsigned phase);
+
+void child(Bytes output, unsigned phase) {
+  [[loom::strand(loom::type::indices{loom::type::index{0}, loom::type::index{2}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}})]] {
+    auto values = loom::buffer::view<4>(output, {});
+    loom::view::store(phase + 1u, values, phase);
+  }
+}
+
+[[loom::pipeline("kernel"), loom::retain]]
+void resident([[loom::launch]] Bytes output) {
+  [[loom::serial]] {
+    for (unsigned phase = 0; phase < 3; ++phase) {
+      loom::pipeline::compose<child>(output, phase);
+    }
+    [[loom::serial]] {
+      loom::pipeline::compose<child>(output, 3u);
+    }
+  }
+}
+
+// ----
+#include <loomcxx/pipeline.h>
+
+[[loom::pipeline, loom::symbol("child")]]
+void child([[loom::launch]] loom::type::buffer<unsigned char> output, unsigned phase);
+
+[[loom::pipeline("kernel"), loom::symbol("resident"), loom::retain]]
+void resident([[loom::launch]] loom::type::buffer<unsigned char> output);
+
+[[loom::pipeline, loom::symbol("child")]]
+void child([[loom::launch]] loom::type::buffer<unsigned char> output, unsigned phase) {
+  [[loom::strand(loom::type::indices{loom::type::index{0}, loom::type::index{2}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}})]] {
+    auto values = loom::buffer::view<4>(loom::buffer::cast<unsigned>(output), {});
+    loom::view::store((phase + 1u), values, loom::index::cast(phase));
+  }
+}
+
+[[loom::pipeline("kernel"), loom::symbol("resident"), loom::retain]]
+void resident([[loom::launch]] loom::type::buffer<unsigned char> output) {
+  [[loom::serial]] {
+    for (unsigned phase_1 = 0u; phase_1 < 3u; ++phase_1) {
+      loom::pipeline::compose<child>(output, phase_1);
+    }
+    [[loom::serial]] {
+      loom::pipeline::compose<child>(output, 3u);
+    }
+  }
+}
+
+// ====
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx
+// Local typed storage crosses the same byte-buffer boundary as external roots.
+#include <loomcxx/pipeline.h>
+using Bytes = loom::type::buffer<unsigned char>;
+[[loom::pipeline]] void child(Bytes specialized, [[loom::launch]] Bytes runtime);
+[[loom::pipeline("kernel")]] void root() {
+  auto memory = loom::pipeline::memory<loom::memory_space::workgroup>(loom::type::indices{loom::type::index{0}, loom::type::index{2}});
+  auto* storage = loom::buffer::alloca<unsigned, loom::memory_space::workgroup, 64>(loom::type::index{4}, memory);
+  auto bytes = loom::buffer::cast<unsigned char>(loom::buffer::root(storage));
+  [[loom::serial]] {
+    loom::pipeline::compose<child>(bytes, bytes);
+  }
+  [[loom::strand(loom::type::indices{loom::type::index{0}, loom::type::index{2}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}})]] {
+    auto values = loom::buffer::view<4>(storage, {});
+    loom::view::store(7u, values, 0u);
+  }
+}
+
+// ----
+#include <loomcxx/pipeline.h>
+
+[[loom::pipeline("kernel"), loom::symbol("root")]]
+void root();
+
+[[loom::pipeline, loom::symbol("child")]]
+void child(loom::type::buffer<unsigned char> v13, [[loom::launch]] loom::type::buffer<unsigned char> v14);
+
+[[loom::pipeline("kernel"), loom::symbol("root")]]
+void root() {
+  auto memory = loom::pipeline::memory<loom::memory_space::workgroup>(loom::type::indices{loom::type::index{0}, loom::type::index{2}});
+  auto* storage = loom::buffer::alloca<loom::memory_space::workgroup, 64>(loom::index::scale(loom::type::index{4}, loom::type::offset{4}), memory);
+  [[loom::serial]] {
+    loom::pipeline::compose<child>(loom::buffer::root(storage), loom::buffer::root(storage));
+  }
+  [[loom::strand(loom::type::indices{loom::type::index{0}, loom::type::index{2}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}})]] {
+    auto values = loom::buffer::view<4>(reinterpret_cast<unsigned*>(reinterpret_cast<unsigned char*>(storage)), {});
+    loom::view::store(7u, values, loom::type::index{0});
+  }
+}
+
+// ====
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx
+#include <loomcxx/pipeline.h>
+using Bytes = loom::type::buffer<unsigned>;
+[[loom::pipeline]] void child([[loom::launch]] Bytes output, unsigned phase);
+[[loom::pipeline("kernel")]] void nested([[loom::launch]] Bytes output) {
+  [[loom::serial]] {
+    for (unsigned phase = 0; phase < 3; ++phase) {
+      [[loom::concurrent]] {
+        loom::pipeline::compose<child>(output, phase);
+        [[loom::serial]] {
+          loom::pipeline::compose<child>(output, phase + 1u);
+          [[loom::concurrent]] {
+            loom::pipeline::compose<child>(output, phase + 2u);
+          }
+        }
+      }
+    }
+    loom::pipeline::compose<child>(output, 3u);
+  }
+}
+
+// ----
+#include <loomcxx/pipeline.h>
+
+[[loom::pipeline("kernel"), loom::symbol("nested")]]
+void nested([[loom::launch]] loom::type::buffer<unsigned char> output);
+
+[[loom::pipeline, loom::symbol("child")]]
+void child([[loom::launch]] loom::type::buffer<unsigned char> v13, unsigned v14);
+
+[[loom::pipeline("kernel"), loom::symbol("nested")]]
+void nested([[loom::launch]] loom::type::buffer<unsigned char> output) {
+  [[loom::serial]] {
+    for (unsigned phase = 0u; phase < 3u; ++phase) {
+      unsigned v7 = phase;
+      [[loom::concurrent]] {
+        loom::pipeline::compose<child>(output, v7);
+        [[loom::serial]] {
+          loom::pipeline::compose<child>(output, (v7 + 1u));
+          [[loom::concurrent]] {
+            loom::pipeline::compose<child>(output, (v7 + 2u));
+          }
+        }
+      }
+    }
+    loom::pipeline::compose<child>(output, 3u);
+  }
+}

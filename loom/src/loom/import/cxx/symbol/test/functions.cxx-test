@@ -1,0 +1,227 @@
+// RUN: roundtrip
+// Hidden void helpers retain private visibility.
+[[gnu::visibility("hidden")]] void helper(float* p) { p[0u] = 1.0f; }
+void entry(float* p) { helper(p); }
+// ----
+func.def public @entry(%p: buffer, %p_byte_offset: offset) {
+  func.call @helper(%p, %p_byte_offset) : (buffer, offset)
+  func.return
+}
+
+func.def @helper(%p: buffer, %p_byte_offset: offset) {
+  %4 = scalar.constant 1.0 : f32
+  %5 = scalar.constant 0 : i32
+  %6 = scalar.extui %5 : i32 to i64
+  %7 = scalar.constant 4 : i64
+  %8 = scalar.muli %6, %7 : i64
+  %9 = index.cast %p_byte_offset : offset to i64
+  %10 = scalar.addi %9, %8 : i64
+  %11 = scalar.assume %10 [range(%10, 0, 9223372036854775807)] : i64
+  %12 = index.cast %11 : i64 to offset
+  %13 = buffer.view %p[%12] : buffer -> view<1xf32>
+  view.store %4, %13[0] : f32, view<1xf32>
+  func.return
+}
+
+// ====
+// Public C++ inline definitions retain source visibility and carry link-once
+// module linkage independently of Loom's call-site inline policy.
+inline unsigned header_identity(unsigned value) { return value; }
+unsigned call_header_identity(unsigned value) { return header_identity(value); }
+// ----
+func.def public linkonce @header_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def public @call_header_identity(%value: i32) -> (i32) {
+  %4 = func.call pure @header_identity(%value) : (i32) -> (i32)
+  func.return %4 : i32
+}
+
+// ====
+// An explicit noinline policy survives import and C++ rendering independently
+// of ordinary C++ linkage.
+[[loom::noinline]] static unsigned retained_identity(unsigned value) {
+  return value;
+}
+unsigned call_retained_identity(unsigned value) {
+  return retained_identity(value);
+}
+// ----
+func.def public @call_retained_identity(%value: i32) -> (i32) {
+  %2 = func.call pure @retained_identity(%value) : (i32) -> (i32)
+  func.return %2 : i32
+}
+
+func.def noinline @retained_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ====
+// Inline policy and temperature are independent function contracts.
+[[loom::inline, loom::hot]] static unsigned hot_identity(unsigned value) {
+  return value;
+}
+[[loom::noinline, loom::cold]] static unsigned cold_identity(unsigned value) {
+  return value;
+}
+unsigned call_temperatures(unsigned value) {
+  return hot_identity(value) + cold_identity(value);
+}
+// ----
+func.def public @call_temperatures(%value: i32) -> (i32) {
+  %2 = func.call pure @hot_identity(%value) : (i32) -> (i32)
+  %3 = func.call pure @cold_identity(%value) : (i32) -> (i32)
+  %4 = scalar.addi %2, %3 : i32
+  func.return %4 : i32
+}
+
+func.def hot inline @hot_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+func.def cold noinline @cold_identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ====
+// RUN: verify
+// ERROR@+1: LOWERING/059 "inline and noinline cannot be combined"
+[[loom::inline, loom::noinline]] unsigned conflicting(unsigned value) {
+  return value;
+}
+
+// ====
+// RUN: verify
+// ERROR@+1: LOWERING/059 "inline policy takes no argument clause"
+[[loom::noinline(1)]] unsigned parameterized(unsigned value) { return value; }
+
+// ====
+// RUN: verify
+// ERROR@+1: LOWERING/059 "hot and cold cannot be combined"
+[[loom::hot, loom::cold]] unsigned conflicting_temperature(unsigned value) {
+  return value;
+}
+
+// ====
+// RUN: verify
+// ERROR@+1: LOWERING/059 "temperature hint takes no argument clause"
+[[loom::hot(1)]] unsigned parameterized_temperature(unsigned value) {
+  return value;
+}
+
+// ====
+// RUN: verify
+// ERROR@+1: LOWERING/059 "inline policy requires an ordinary source function"
+[[loom::noinline]] constexpr unsigned global_value = 1u;
+
+// ====
+// RUN: verify
+struct NoInlineConstructor {
+  // ERROR@+1: LOWERING/059 "constructor and destructor calls require inline expansion"
+  [[loom::noinline]] NoInlineConstructor() {}
+};
+unsigned construct_noinline() {
+  NoInlineConstructor value;
+  return 0u;
+}
+
+// ====
+// RUN: verify
+struct NoInlineDestructor {
+  // ERROR@+1: LOWERING/059 "constructor and destructor calls require inline expansion"
+  [[loom::noinline]] ~NoInlineDestructor() {}
+};
+unsigned destroy_noinline() {
+  NoInlineDestructor value;
+  return 0u;
+}
+
+// ====
+// RUN: verify
+// ERROR@+1: LOWERING/059 "temperature hint requires an ordinary source function"
+[[loom::cold]] constexpr unsigned cold_global_value = 1u;
+
+// ====
+// INPUT: cxx root=entry
+// RUN: verify
+// Explicit source roots must identify one concrete definition.
+// ERROR@+1: LOWERING/059 "ambiguous root: entry"
+int entry(int value) { return value; }
+float entry(float value) { return value; }
+
+// ====
+// INPUT: cxx root=absent
+// RUN: verify
+// ERROR: LOWERING/059 "root has no concrete definition: absent"
+int entry(int value) { return value; }
+float entry(float value) { return value; }
+
+// ====
+// INPUT: cxx root=absent
+// RUN: verify
+// ERROR: LOWERING/059 "root has no concrete definition: absent"
+// A translation unit with no user declarations still has its own location.
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// A retained helper reads through the incoming pointer origin and returns two
+// independent values. Both calls keep their result ordering at separate stores.
+struct Pair {
+  // Arithmetic result carried in the first call-result slot.
+  unsigned sum;
+  // Bitwise result carried independently in the second call-result slot.
+  unsigned mixed;
+};
+[[loom::noinline]]
+static Pair update(const unsigned* input, unsigned index, unsigned bias) {
+  const unsigned value = input[index];
+  return {value + bias, value ^ bias};
+}
+void retained_calls(const unsigned* input, unsigned* sums, unsigned* mixed,
+                    unsigned index) {
+  const Pair first = update(input, index, 7u);
+  const Pair second = update(input, index, 13u);
+  sums[index] = first.sum + second.sum;
+  mixed[index] = first.mixed + second.mixed;
+}
+// ----
+func.def public @retained_calls(%input: buffer, %input_byte_offset: offset, %sums: buffer, %sums_byte_offset: offset, %mixed: buffer, %mixed_byte_offset: offset, %index: i32) {
+  %7 = scalar.constant 7 : i32
+  %first_sum, %first_mixed = func.call readonly @update(%input, %input_byte_offset, %index, %7) : (buffer, offset, i32, i32) -> (i32, i32)
+  %10 = scalar.constant 13 : i32
+  %second_sum, %second_mixed = func.call readonly @update(%input, %input_byte_offset, %index, %10) : (buffer, offset, i32, i32) -> (i32, i32)
+  %13 = scalar.addi %first_sum, %second_sum : i32
+  %14 = scalar.extui %index : i32 to i64
+  %50 = scalar.constant 2 : i64
+  %51 = scalar.shli %14, %50 : i64
+  %17 = index.cast %sums_byte_offset : offset to i64
+  %18 = scalar.addi %17, %51 : i64
+  %19 = scalar.assume %18 [range(%18, 0, 9223372036854775807)] : i64
+  %20 = index.cast %19 : i64 to offset
+  %21 = buffer.view %sums[%20] : buffer -> view<1xi32>
+  view.store %13, %21[0] : i32, view<1xi32>
+  %22 = scalar.addi %first_mixed, %second_mixed : i32
+  %26 = index.cast %mixed_byte_offset : offset to i64
+  %27 = scalar.addi %26, %51 : i64
+  %28 = scalar.assume %27 [range(%27, 0, 9223372036854775807)] : i64
+  %29 = index.cast %28 : i64 to offset
+  %30 = buffer.view %mixed[%29] : buffer -> view<1xi32>
+  view.store %22, %30[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def noinline @update(%input: buffer, %input_byte_offset: offset, %index: i32, %bias: i32) -> (i32, i32) {
+  %37 = scalar.extui %index : i32 to i64
+  %52 = scalar.constant 2 : i64
+  %53 = scalar.shli %37, %52 : i64
+  %40 = index.cast %input_byte_offset : offset to i64
+  %41 = scalar.addi %40, %53 : i64
+  %42 = scalar.assume %41 [range(%41, 0, 9223372036854775807)] : i64
+  %43 = index.cast %42 : i64 to offset
+  %44 = buffer.view %input[%43] : buffer -> view<1xi32>
+  %value = view.load %44[0] : view<1xi32> -> i32
+  %46 = scalar.addi %value, %bias : i32
+  %47 = scalar.xori %value, %bias : i32
+  func.return %46, %47 : i32, i32
+}

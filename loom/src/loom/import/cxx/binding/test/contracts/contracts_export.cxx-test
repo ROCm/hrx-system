@@ -1,0 +1,80 @@
+// RUN: emit cxx
+// REQUIRES: loom-export-cxx
+#include <loomcxx/atomic.h>
+#include <loomcxx/kernel.h>
+#include <loomcxx/predicate.h>
+#include <loomcxx/vector.h>
+
+using Half8 = _Float16 __attribute__((ext_vector_type(8)));
+using Float4 = float __attribute__((ext_vector_type(4)));
+
+using loom::atomic::kind;
+using loom::atomic::ordering;
+using loom::atomic::scope;
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void scheduled_sum(const float* input, float* output, unsigned count, unsigned unroll, unsigned pipeline) {
+  auto source = loom::buffer::view<64>(input, {}, loom::encoding::layout::dense<1>());
+  float total = 0.0f;
+  [[loom::unroll(unroll), loom::pipeline(pipeline), loom::schedule("recurrence")]]
+  for (unsigned index = 0; index < count; ++index) {
+    float value = loom::view::load(source, index);
+    if (value > 0.0f) {
+      total += value;
+    }
+  }
+  auto destination = loom::buffer::view<1>(output, {}, loom::encoding::layout::dense<1>());
+  loom::view::store(total, destination, 0);
+}
+// ----
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void scheduled_sum(const float* input, float* output, unsigned count, unsigned unroll, unsigned pipeline) {
+  auto source = loom::buffer::view<64>(input, {}, loom::encoding::layout::dense<1>());
+  float total = 0.0f;
+  [[loom::unroll(loom::index::cast(unroll)), loom::pipeline(loom::index::cast(pipeline)), loom::schedule("recurrence")]]
+  for (unsigned index = 0u; index < count; ++index) {
+    float value = loom::view::load(source, loom::index::cast(index));
+    if (value > 0.0f) {
+      total = total + value;
+    }
+  }
+  auto destination = loom::buffer::view<1>(output, {}, loom::encoding::layout::dense<1>());
+  loom::view::store(total, destination, loom::type::index{0});
+}
+
+// ====
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx
+#include <loomcxx/kernel.h>
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void scoped_bounds(bool first, bool second, unsigned coordinate, unsigned* output) {
+  auto output_view = loom::buffer::view<16>(output, {}, loom::encoding::layout::dense<1>());
+  if (first) {
+    loom::assume(coordinate < 16u);
+    loom::view::store(1u, output_view, loom::index::cast(static_cast<int>(coordinate)));
+  }
+  if (second) {
+    loom::assume(coordinate < 16u);
+    loom::view::store(2u, output_view, loom::index::cast(static_cast<int>(coordinate)));
+  }
+}
+
+// ----
+#include <loomcxx/kernel.h>
+#include <loomcxx/predicate.h>
+
+[[loom::kernel, loom::workgroup_count(1, 1, 1), loom::workgroup_size(1, 1, 1)]]
+void scoped_bounds(bool first, bool second, unsigned coordinate, unsigned* output) {
+  auto output_view = loom::buffer::view<16>(output, {}, loom::encoding::layout::dense<1>());
+  if (first) {
+    loom::assume(coordinate <= 15u);
+    loom::view::store(1u, output_view, loom::index::cast(static_cast<int>(coordinate)));
+  }
+  if (second) {
+    loom::assume(coordinate <= 15u);
+    loom::view::store(2u, output_view, loom::index::cast(static_cast<int>(coordinate)));
+  }
+}

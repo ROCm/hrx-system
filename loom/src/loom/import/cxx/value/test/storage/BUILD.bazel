@@ -1,0 +1,70 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test", "loom_check_test_suite")
+
+package(
+    default_visibility = ["//visibility:private"],
+    licenses = ["notice"],
+)
+
+loom_check_test_suite(
+    name = "compiler_test",
+    srcs = [
+        "boolean_storage.cxx-test",
+        "boolean_storage_cleanup.cxx-test",
+        "buffer_alloca.cxx-test",
+        "buffer_alloca_invalid.cxx-test",
+        "buffer_memory_space.cxx-test",
+        "buffer_memory_space_invalid.cxx-test",
+        "buffer_selection.cxx-test",
+        "call_storage.cxx-test",
+        "inline_buffer_payloads.cxx-test",
+        "local_addresses.cxx-test",
+        "local_arrays.cxx-test",
+        "opaque_pointers.cxx-test",
+        "opaque_pointers_invalid.cxx-test",
+        "packed_memory.cxx-test",
+        "pointer_origins.cxx-test",
+        "pointer_updates.cxx-test",
+        "pointer_walk.cxx-test",
+        "pointers.cxx-test",
+        "storage_composition.cxx-test",
+        "storage_updates.cxx-test",
+        "volatile.cxx-test",
+        "volatile_composition.cxx-test",
+        "volatile_invalid.cxx-test",
+        "volatile_views.cxx-test",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+loom_check_test(
+    name = "inline_buffer_export_test",
+    src = "inline_buffer_export.loom-test",
+    data = ["//loom/py/loom/tools:loom-export-cxx"],
+    env = {
+        "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",
+    },
+    tags = ["skip-bazel_to_cmake"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+)
+
+iree_execution_test_suite(
+    name = "inline_buffer_roundtrip_test",
+    manifests = ["inline_buffer_roundtrip.test.json"],
+    tags = [
+        "hostonly",
+        "skip-bazel_to_cmake",
+    ],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/import:cxx"]),
+    tools = {
+        "loom-export-cxx": "//loom/py/loom/tools:loom-export-cxx",
+        "loom-import-cxx": "//loom/src/loom/tools/loom-import-cxx",
+    },
+)

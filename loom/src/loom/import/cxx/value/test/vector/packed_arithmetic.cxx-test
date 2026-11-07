@@ -1,0 +1,99 @@
+// RUN: roundtrip
+// Native byte arithmetic keeps each lane at i8 without a cross-lane carry.
+using Bytes8 = unsigned char __attribute__((ext_vector_type(8)));
+Bytes8 double_bytes(Bytes8 value) { return value + value; }
+Bytes8 add(Bytes8 left, Bytes8 right) { return left + right; }
+Bytes8 subtract(Bytes8 left, Bytes8 right) { return left - right; }
+
+// ----
+func.def public @double_bytes(%value: vector<8xi8>) -> (vector<8xi8>) {
+  %2 = vector.addi %value, %value : vector<8xi8>
+  func.return %2 : vector<8xi8>
+}
+
+func.def public @add(%left: vector<8xi8>, %right: vector<8xi8>) -> (vector<8xi8>) {
+  %6 = vector.addi %left, %right : vector<8xi8>
+  func.return %6 : vector<8xi8>
+}
+
+func.def public @subtract(%left: vector<8xi8>, %right: vector<8xi8>) -> (vector<8xi8>) {
+  %10 = vector.subi %left, %right : vector<8xi8>
+  func.return %10 : vector<8xi8>
+}
+
+// ====
+// RUN: roundtrip
+// Scalar shift counts broadcast in the vector element type.
+using Bytes8 = unsigned char __attribute__((ext_vector_type(8)));
+Bytes8 left(Bytes8 value, unsigned amount) { return value << amount; }
+Bytes8 right(Bytes8 value, unsigned amount) { return value >> amount; }
+
+// ----
+func.def public @left(%value: vector<8xi8>, %amount: i32) -> (vector<8xi8>) {
+  %3 = scalar.trunci %amount : i32 to i8
+  %4 = vector.splat %3 : vector<8xi8>
+  %5 = vector.shli %value, %4 : vector<8xi8>
+  func.return %5 : vector<8xi8>
+}
+
+func.def public @right(%value: vector<8xi8>, %amount: i32) -> (vector<8xi8>) {
+  %9 = scalar.trunci %amount : i32 to i8
+  %10 = vector.splat %9 : vector<8xi8>
+  %11 = vector.shrui %value, %10 : vector<8xi8>
+  func.return %11 : vector<8xi8>
+}
+
+// ====
+// RUN: roundtrip
+// A shared bound on per-lane counts does not turn them into a scalar count.
+using Bytes8 = unsigned char __attribute__((ext_vector_type(8)));
+Bytes8 left(Bytes8 value) { return value << (value & 7); }
+Bytes8 right(Bytes8 value) { return value >> (value & 7); }
+
+// ----
+func.def public @left(%value: vector<8xi8>) -> (vector<8xi8>) {
+  %2 = scalar.constant 7 : i32
+  %3 = scalar.trunci %2 : i32 to i8
+  %4 = vector.splat %3 : vector<8xi8>
+  %5 = vector.andi %value, %4 : vector<8xi8>
+  %6 = vector.shli %value, %5 : vector<8xi8>
+  func.return %6 : vector<8xi8>
+}
+
+func.def public @right(%value: vector<8xi8>) -> (vector<8xi8>) {
+  %9 = scalar.constant 7 : i32
+  %10 = scalar.trunci %9 : i32 to i8
+  %11 = vector.splat %10 : vector<8xi8>
+  %12 = vector.andi %value, %11 : vector<8xi8>
+  %13 = vector.shrui %value, %12 : vector<8xi8>
+  func.return %13 : vector<8xi8>
+}
+
+// ====
+// RUN: roundtrip
+// A narrowing left shift can set the sign bit observed by a signed comparison.
+using Bytes8 = unsigned char __attribute__((ext_vector_type(8)));
+using SignedBytes8 = signed char __attribute__((ext_vector_type(8)));
+Bytes8 sign_mask(Bytes8 value) {
+  Bytes8 sign_bits = (value & 1) << 7;
+  return __builtin_convertvector(
+      __builtin_convertvector(sign_bits, SignedBytes8) < 0, Bytes8);
+}
+
+// ----
+func.def public @sign_mask(%value: vector<8xi8>) -> (vector<8xi8>) {
+  %2 = scalar.constant 1 : i32
+  %3 = scalar.trunci %2 : i32 to i8
+  %4 = vector.splat %3 : vector<8xi8>
+  %5 = vector.andi %value, %4 : vector<8xi8>
+  %6 = scalar.constant 7 : i32
+  %7 = scalar.trunci %6 : i32 to i8
+  %8 = vector.splat %7 : vector<8xi8>
+  %sign_bits = vector.shli %5, %8 : vector<8xi8>
+  %10 = scalar.constant 0 : i32
+  %11 = scalar.trunci %10 : i32 to i8
+  %12 = vector.splat %11 : vector<8xi8>
+  %13 = vector.cmpi slt, %sign_bits, %12 : vector<8xi8> -> vector<8xi1>
+  %14 = vector.extsi %13 : vector<8xi1> to vector<8xi8>
+  func.return %14 : vector<8xi8>
+}

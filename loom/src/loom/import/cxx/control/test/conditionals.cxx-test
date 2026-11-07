@@ -1,0 +1,222 @@
+// RUN: roundtrip
+// A return before a load keeps the load in the fallthrough region.
+int guarded(const int* input, unsigned length) {
+  if (length == 0u) {
+    return 3;
+  }
+  return input[0u];
+}
+// ----
+func.def public @guarded(%input: buffer, %input_byte_offset: offset, %length: i32) -> (i32) {
+  %4 = scalar.constant 0 : i32
+  %5 = scalar.cmpi eq, %length, %4 : i32
+  %6 = scf.if %5 -> (i32) {
+    %7 = scalar.constant 3 : i32
+    scf.yield %7 : i32
+  } else {
+    %8 = scalar.constant 0 : i32
+    %9 = scalar.extui %8 : i32 to i64
+    %10 = scalar.constant 4 : i64
+    %11 = scalar.muli %9, %10 : i64
+    %12 = index.cast %input_byte_offset : offset to i64
+    %13 = scalar.addi %12, %11 : i64
+    %14 = scalar.assume %13 [range(%13, 0, 9223372036854775807)] : i64
+    %15 = index.cast %14 : i64 to offset
+    %16 = buffer.view %input[%15] : buffer -> view<1xi32>
+    %17 = view.load %16[0] : view<1xi32> -> i32
+    scf.yield %17 : i32
+  }
+  func.return %6 : i32
+}
+
+// ====
+// RUN: roundtrip
+// All nested arms return through one function exit.
+int nested(int x, int y) {
+  if (x) {
+    if (y) {
+      return 2;
+    }
+    return 3;
+  } else {
+    return 4;
+  }
+}
+// ----
+func.def public @nested(%x: i32, %y: i32) -> (i32) {
+  %3 = scalar.constant 0 : i32
+  %4 = scalar.cmpi ne, %x, %3 : i32
+  %5 = scf.if %4 -> (i32) {
+    %6 = scalar.constant 0 : i32
+    %7 = scalar.cmpi ne, %y, %6 : i32
+    %8 = scf.if %7 -> (i32) {
+      %9 = scalar.constant 2 : i32
+      scf.yield %9 : i32
+    } else {
+      %10 = scalar.constant 3 : i32
+      scf.yield %10 : i32
+    }
+    scf.yield %8 : i32
+  } else {
+    %11 = scalar.constant 4 : i32
+    scf.yield %11 : i32
+  }
+  func.return %5 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Partially returning branches share the final fallthrough return.
+int partial(int x, int y) {
+  if (x) {
+    if (y) {
+      return 2;
+    }
+  } else {
+    return 4;
+  }
+  return 3;
+}
+// ----
+func.def public @partial(%x: i32, %y: i32) -> (i32) {
+  %3 = scalar.constant 0 : i32
+  %4 = scalar.cmpi ne, %x, %3 : i32
+  %5 = scf.if %4 -> (i32) {
+    %6 = scalar.constant 0 : i32
+    %7 = scalar.cmpi ne, %y, %6 : i32
+    %8 = scf.if %7 -> (i32) {
+      %9 = scalar.constant 2 : i32
+      scf.yield %9 : i32
+    } else {
+      %10 = scalar.constant 3 : i32
+      scf.yield %10 : i32
+    }
+    scf.yield %8 : i32
+  } else {
+    %11 = scalar.constant 4 : i32
+    scf.yield %11 : i32
+  }
+  func.return %5 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Returns capture the current state through nested lexical scopes.
+int state(int x, int y) {
+  if (x < 0) {
+    y += 10;
+    return y;
+  } else {
+    y += 4;
+  }
+  {
+    if (x == 0) {
+      return y;
+    }
+    y += 2;
+  }
+  return y;
+}
+// ----
+func.def public @state(%x: i32, %y$1: i32) -> (i32) {
+  %3 = scalar.constant 0 : i32
+  %4 = scalar.cmpi slt, %x, %3 : i32
+  %5 = scf.if %4 -> (i32) {
+    %6 = scalar.constant 10 : i32
+    %y = scalar.addi %y$1, %6 : i32
+    scf.yield %y : i32
+  } else {
+    %8 = scalar.constant 4 : i32
+    %y$9 = scalar.addi %y$1, %8 : i32
+    %10 = scalar.constant 0 : i32
+    %11 = scalar.cmpi eq, %x, %10 : i32
+    %12 = scf.if %11 -> (i32) {
+      scf.yield %y$9 : i32
+    } else {
+      %13 = scalar.constant 2 : i32
+      %y = scalar.addi %y$9, %13 : i32
+      scf.yield %y : i32
+    }
+    scf.yield %12 : i32
+  }
+  func.return %5 : i32
+}
+
+// ====
+// RUN: roundtrip
+// Each return converts to the declared result type.
+int convert_result(bool choose, float value) {
+  if (choose) {
+    return value;
+  }
+  return 7.5;
+}
+// ----
+func.def public @convert_result(%choose: i1, %value: f32) -> (i32) {
+  %3 = scf.if %choose -> (i32) {
+    %4 = scalar.fptosi %value : f32 to i32
+    scf.yield %4 : i32
+  } else {
+    %5 = scalar.constant 7.5 : f64
+    %6 = scalar.fptosi %5 : f64 to i32
+    scf.yield %6 : i32
+  }
+  func.return %3 : i32
+}
+
+// ====
+// RUN: roundtrip
+// A void return expression retains its call and skips later effects.
+void store(int* output) { output[0u] = 7; }
+void effect(int* output, bool choose) {
+  if (choose) {
+    return store(output);
+  }
+  output[0u] = 9;
+}
+// ----
+func.def public @store(%output: buffer, %output_byte_offset: offset) {
+  %2 = scalar.constant 7 : i32
+  %3 = scalar.constant 0 : i32
+  %4 = scalar.extui %3 : i32 to i64
+  %5 = scalar.constant 4 : i64
+  %6 = scalar.muli %4, %5 : i64
+  %7 = index.cast %output_byte_offset : offset to i64
+  %8 = scalar.addi %7, %6 : i64
+  %9 = scalar.assume %8 [range(%8, 0, 9223372036854775807)] : i64
+  %10 = index.cast %9 : i64 to offset
+  %11 = buffer.view %output[%10] : buffer -> view<1xi32>
+  view.store %2, %11[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def public @effect(%output: buffer, %output_byte_offset: offset, %choose: i1) {
+  scf.if %choose {
+    func.call @store(%output, %output_byte_offset) : (buffer, offset)
+  } else {
+    %15 = scalar.constant 9 : i32
+    %16 = scalar.constant 0 : i32
+    %17 = scalar.extui %16 : i32 to i64
+    %18 = scalar.constant 4 : i64
+    %19 = scalar.muli %17, %18 : i64
+    %20 = index.cast %output_byte_offset : offset to i64
+    %21 = scalar.addi %20, %19 : i64
+    %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
+    %23 = index.cast %22 : i64 to offset
+    %24 = buffer.view %output[%23] : buffer -> view<1xi32>
+    view.store %15, %24[0] : i32, view<1xi32>
+  }
+  func.return
+}
+
+// ====
+// RUN: roundtrip
+// Statements after an unconditional return are unreachable.
+void unreachable(int* output) {
+  return;
+  output[0u] = 10;
+}
+// ----
+func.def public @unreachable(%output: buffer, %output_byte_offset: offset) {
+  func.return
+}

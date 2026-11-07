@@ -1,0 +1,33 @@
+// REQUIRES: loom-export-cxx
+// RUN: emit cxx
+#include <loomcxx/pipeline.h>
+#include <loomcxx/target/aie2p.h>
+
+constexpr loom::aie2p::target array_target{
+    .kind = "array",
+    .device_profile = "amd.xdna.strix_halo.17f0_11",
+};
+
+[[loom::pipeline("kernel"), loom::target(array_target)]]
+void aie_pipeline() {
+  [[loom::strand(loom::type::indices{loom::type::index{0}, loom::type::index{1}}, loom::type::indices{loom::type::index{4}, loom::type::index{2}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}), loom::target(array_target)]] {
+  }
+}
+
+// ----
+#include <loomcxx/pipeline.h>
+#include <loomcxx/target/aie2p.h>
+
+constexpr loom::aie2p::target rendered_target{
+  .kind = "array",
+  .device_profile = "amd.xdna.strix_halo.17f0_11",
+};
+
+[[loom::pipeline("kernel"), loom::symbol("aie_pipeline"), loom::target(rendered_target)]]
+void aie_pipeline();
+
+[[loom::pipeline("kernel"), loom::symbol("aie_pipeline"), loom::target(rendered_target)]]
+void aie_pipeline() {
+  [[loom::strand(loom::type::indices{loom::type::index{0}, loom::type::index{1}}, loom::type::indices{loom::type::index{4}, loom::type::index{2}}, loom::type::indices{loom::type::index{1}, loom::type::index{1}}), loom::target(rendered_target)]] {
+  }
+}

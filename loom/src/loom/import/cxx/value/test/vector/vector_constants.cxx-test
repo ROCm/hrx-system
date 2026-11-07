@@ -1,0 +1,250 @@
+// RUN: roundtrip
+using Int4 = int __attribute__((ext_vector_type(4)));
+constexpr Int4 values{1, 2};
+static_assert(values[0] == 1 && values[2] == 0);
+Int4 entry() { return values; }
+
+// ----
+func.def public @entry() -> (vector<4xi32>) {
+  %values = vector.constanti [1, 2, 0, 0] : vector<4xi32>
+  func.return %values : vector<4xi32>
+}
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+constexpr Int4 values{};
+static_assert(values[3] == 0);
+Int4 entry() { return values; }
+
+// ----
+func.def public @entry() -> (vector<4xi32>) {
+  %values = vector.constanti [0, 0, 0, 0] : vector<4xi32>
+  func.return %values : vector<4xi32>
+}
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+constexpr Int4 first{7};
+constexpr Int4 splat = 9;
+static_assert(first[0] == 7 && first[3] == 0);
+static_assert(splat[0] == 9 && splat[3] == 9);
+Int4 entry() { return first + splat; }
+
+// ----
+func.def public @entry() -> (vector<4xi32>) {
+  %first = vector.constanti [7, 0, 0, 0] : vector<4xi32>
+  %splat = vector.constanti [9, 9, 9, 9] : vector<4xi32>
+  %3 = vector.addi %first, %splat : vector<4xi32>
+  func.return %3 : vector<4xi32>
+}
+
+// ====
+using Bytes4 = unsigned char __attribute__((ext_vector_type(4)));
+constexpr Bytes4 values{0, 127, 128, 255};
+static_assert(values[2] == 128 && values[3] == 255);
+Bytes4 entry() { return values; }
+
+// ----
+func.def public @entry() -> (vector<4xi8>) {
+  %values = vector.constanti [0, 127, -128, -1] : vector<4xi8>
+  func.return %values : vector<4xi8>
+}
+
+// ====
+using Float8x4 = __float8_e4m3fn __attribute__((ext_vector_type(4)));
+constexpr Float8x4 values{__float8_e4m3fn(0x1.1000000000001p0),
+                         __float8_e4m3fn(-0.0)};
+static_assert(values[0] == 1.125 && values[3] == 0.0);
+Float8x4 entry() { return values; }
+
+// ----
+func.def public @entry() -> (vector<4xf8E4M3>) {
+  %values = vector.constantf [1.125, -0.0, 0.0, 0.0] : vector<4xf8E4M3>
+  func.return %values : vector<4xf8E4M3>
+}
+
+// ====
+using Float4 = float __attribute__((ext_vector_type(4)));
+constexpr Float4 values{1.5f, -0.0f, 3.25f};
+static_assert(values[0] == 1.5f && values[3] == 0.0f);
+Float4 entry() { return values; }
+
+// ----
+func.def public @entry() -> (vector<4xf32>) {
+  %values = vector.constantf [1.5, -0.0, 3.25, 0.0] : vector<4xf32>
+  func.return %values : vector<4xf32>
+}
+
+// ====
+using Float2 = float __attribute__((ext_vector_type(2)));
+constexpr float payload = __builtin_bit_cast(float, 0x7f812345u);
+constexpr Float2 values{payload, -0.0f};
+Float2 entry() { return values; }
+
+// ----
+func.def public @entry() -> (vector<2xf32>) {
+  %1 = scalar.constant 2139169605 : i32
+  %2 = scalar.bitcast %1 : i32 to f32
+  %3 = scalar.constant -0.0 : f32
+  %values = vector.from_elements %2, %3 : vector<2xf32>
+  func.return %values : vector<2xf32>
+}
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+constexpr Int4 values{1, 2, 3, 4};
+static constexpr int change_copy(Int4 value) {
+  value[0] = 8;
+  return value[0];
+}
+static_assert(change_copy(values) == 8);
+static_assert(values[0] == 1);
+static constexpr int change_local_copy() {
+  auto copy = values;
+  copy[0] = 9;
+  return copy[0];
+}
+static_assert(change_local_copy() == 9);
+static_assert(values[0] == 1);
+int entry() { return values[0]; }
+
+// ----
+func.def public @entry() -> (i32) {
+  %values = vector.constanti [1, 2, 3, 4] : vector<4xi32>
+  %2 = scalar.constant 0 : i32
+  %3 = index.cast %2 : i32 to index
+  %4 = vector.extract %values[%3] : vector<4xi32> -> i32
+  func.return %4 : i32
+}
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+Int4 entry(int input) { return Int4{input, 2, 3, 4}; }
+
+// ----
+func.def public @entry(%input: i32) -> (vector<4xi32>) {
+  %2 = vector.constanti [0, 2, 3, 4] : vector<4xi32>
+  %3 = vector.insert %input into %2[0] : i32, vector<4xi32>
+  func.return %3 : vector<4xi32>
+}
+
+// ====
+using Float4 = float __attribute__((ext_vector_type(4)));
+Float4 entry(float input) { return Float4{1.5f, input, -0.0f, 4.25f}; }
+
+// ----
+func.def public @entry(%input: f32) -> (vector<4xf32>) {
+  %2 = vector.constantf [1.5, 0.0, -0.0, 4.25] : vector<4xf32>
+  %3 = vector.insert %input into %2[1] : f32, vector<4xf32>
+  func.return %3 : vector<4xf32>
+}
+
+// ====
+using Int8 = int __attribute__((ext_vector_type(8)));
+int first();
+int second();
+Int8 entry() { return Int8{first(), 2, 3, second(), 5, 6, 7, 8}; }
+
+// ----
+func.def public @entry() -> (vector<8xi32>) {
+  %1 = vector.constanti [0, 2, 3, 0, 5, 6, 7, 8] : vector<8xi32>
+  %2 = func.call @first() : () -> (i32)
+  %3 = vector.insert %2 into %1[0] : i32, vector<8xi32>
+  %4 = func.call @second() : () -> (i32)
+  %5 = vector.insert %4 into %3[3] : i32, vector<8xi32>
+  func.return %5 : vector<8xi32>
+}
+
+func.decl @first() -> (i32)
+
+func.decl @second() -> (i32)
+
+// ====
+using Int8 = int __attribute__((ext_vector_type(8)));
+Int8 entry(int input) { return Int8{input, 2, 3, 4}; }
+
+// ----
+func.def public @entry(%input: i32) -> (vector<8xi32>) {
+  %2 = vector.constanti [0, 2, 3, 4, 0, 0, 0, 0] : vector<8xi32>
+  %3 = vector.insert %input into %2[0] : i32, vector<8xi32>
+  func.return %3 : vector<8xi32>
+}
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+Int4 entry(int first, int second) { return Int4{first, 2, second, 4}; }
+
+// ----
+func.def public @entry(%first: i32, %second: i32) -> (vector<4xi32>) {
+  %3 = scalar.constant 2 : i32
+  %4 = scalar.constant 4 : i32
+  %5 = vector.from_elements %first, %3, %second, %4 : vector<4xi32>
+  func.return %5 : vector<4xi32>
+}
+
+// ====
+using Int4 = int __attribute__((ext_vector_type(4)));
+Int4 entry(int input) { return Int4{input, 0, 0, 0}; }
+
+// ----
+func.def public @entry(%input: i32) -> (vector<4xi32>) {
+  %2 = scalar.constant 0 : i32
+  %3 = scalar.constant 0 : i32
+  %4 = scalar.constant 0 : i32
+  %5 = vector.from_elements %input, %2, %3, %4 : vector<4xi32>
+  func.return %5 : vector<4xi32>
+}
+
+// ====
+using Float8 = float __attribute__((ext_vector_type(8)));
+constexpr float payload = __builtin_bit_cast(float, 0x7f812345u);
+Float8 entry(float live) {
+  return Float8{payload, live, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
+}
+
+// ----
+func.def public @entry(%live: f32) -> (vector<8xf32>) {
+  %2 = vector.constantf [0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0] : vector<8xf32>
+  %3 = scalar.constant 2139169605 : i32
+  %4 = scalar.bitcast %3 : i32 to f32
+  %5 = vector.insert %4 into %2[0] : f32, vector<8xf32>
+  %6 = vector.insert %live into %5[1] : f32, vector<8xf32>
+  func.return %6 : vector<8xf32>
+}
+
+// ====
+// RUN: roundtrip
+// Byte vector lists and scalar initialization have distinct lane coverage.
+using Bytes4 = unsigned char __attribute__((ext_vector_type(4)));
+constexpr Bytes4 partial{255, 128};
+constexpr Bytes4 zero{};
+constexpr Bytes4 first{7};
+constexpr Bytes4 splat = 9;
+static_assert(partial[1] == 128 && partial[3] == 0);
+static_assert(first[0] == 7 && first[3] == 0);
+static_assert(splat[0] == 9 && splat[3] == 9);
+Bytes4 partial_value() { return partial; }
+Bytes4 zero_value() { return zero; }
+Bytes4 first_value() { return first; }
+Bytes4 splat_value() { return splat; }
+
+// ----
+func.def public @partial_value() -> (vector<4xi8>) {
+  %partial = vector.constanti [-1, -128, 0, 0] : vector<4xi8>
+  func.return %partial : vector<4xi8>
+}
+
+func.def public @zero_value() -> (vector<4xi8>) {
+  %zero = vector.constanti [0, 0, 0, 0] : vector<4xi8>
+  func.return %zero : vector<4xi8>
+}
+
+func.def public @first_value() -> (vector<4xi8>) {
+  %first = vector.constanti [7, 0, 0, 0] : vector<4xi8>
+  func.return %first : vector<4xi8>
+}
+
+func.def public @splat_value() -> (vector<4xi8>) {
+  %splat = vector.constanti [9, 9, 9, 9] : vector<4xi8>
+  func.return %splat : vector<4xi8>
+}

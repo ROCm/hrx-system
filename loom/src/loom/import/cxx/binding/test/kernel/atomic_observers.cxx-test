@@ -1,0 +1,329 @@
+// RUN: pass canonicalize,cse,dce
+// INPUT: cxx root=observe_i32
+// Guarded local storage is observed after the call and returned in source field order.
+template <class T>
+struct SequenceObservation {
+  // Bitmask of independently verified atomic return values.
+  unsigned passed;
+  // Guard immediately before the updated word.
+  T before;
+  // Final value of the updated word.
+  T value;
+  // Guard immediately after the updated word.
+  T after;
+};
+
+unsigned atomic_i32(int* storage);
+static SequenceObservation<int> observe_i32() {
+  int storage[3] = {37, 37, 37};
+  unsigned passed = atomic_i32(storage);
+  return {passed, storage[0], storage[1], storage[2]};
+}
+// ----
+func.def public @observe_i32() -> (i32, i32, i32, i32) {
+  %4 = index.constant 12 : offset
+  %storage_storage = buffer.alloca<private> align(4) %4 : buffer
+  %storage_storage_byte_offset = index.constant 0 : offset
+  %storage_view = buffer.view %storage_storage[%storage_storage_byte_offset] : buffer -> view<3xi32>
+  %8 = scalar.constant 37 : i32
+  %9 = index.constant 0 : index
+  view.store %8, %storage_view[%9] : i32, view<3xi32>
+  %11 = index.constant 1 : index
+  view.store %8, %storage_view[%11] : i32, view<3xi32>
+  %13 = index.constant 2 : index
+  view.store %8, %storage_view[%13] : i32, view<3xi32>
+  %passed = func.call @atomic_i32(%storage_storage, %storage_storage_byte_offset) : (buffer, offset) -> (i32)
+  %19 = view.load %storage_view[%9] : view<3xi32> -> i32
+  %24 = view.load %storage_view[%11] : view<3xi32> -> i32
+  %29 = view.load %storage_view[%13] : view<3xi32> -> i32
+  func.return %passed, %19, %24, %29 : i32, i32, i32, i32
+}
+
+func.decl @atomic_i32(%30: buffer, %31: offset) -> (i32)
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// INPUT: cxx root=observe_u32
+// Guarded local storage is observed after the call and returned in source field order.
+template <class T>
+struct SequenceObservation {
+  // Bitmask of independently verified atomic return values.
+  unsigned passed;
+  // Guard immediately before the updated word.
+  T before;
+  // Final value of the updated word.
+  T value;
+  // Guard immediately after the updated word.
+  T after;
+};
+
+unsigned atomic_u32(volatile unsigned* storage);
+static SequenceObservation<unsigned> observe_u32() {
+  unsigned storage[3] = {37, 37, 37};
+  unsigned passed = atomic_u32(storage);
+  return {passed, storage[0], storage[1], storage[2]};
+}
+// ----
+func.def public @observe_u32() -> (i32, i32, i32, i32) {
+  %4 = index.constant 12 : offset
+  %storage_storage = buffer.alloca<private> align(4) %4 : buffer
+  %storage_storage_byte_offset = index.constant 0 : offset
+  %storage_view = buffer.view %storage_storage[%storage_storage_byte_offset] : buffer -> view<3xi32>
+  %8 = scalar.constant 37 : i32
+  %9 = index.constant 0 : index
+  view.store %8, %storage_view[%9] : i32, view<3xi32>
+  %11 = index.constant 1 : index
+  view.store %8, %storage_view[%11] : i32, view<3xi32>
+  %13 = index.constant 2 : index
+  view.store %8, %storage_view[%13] : i32, view<3xi32>
+  %passed = func.call @atomic_u32(%storage_storage, %storage_storage_byte_offset) : (buffer, offset) -> (i32)
+  %19 = view.load %storage_view[%9] : view<3xi32> -> i32
+  %24 = view.load %storage_view[%11] : view<3xi32> -> i32
+  %29 = view.load %storage_view[%13] : view<3xi32> -> i32
+  func.return %passed, %19, %24, %29 : i32, i32, i32, i32
+}
+
+func.decl @atomic_u32(%30: buffer, %31: offset) -> (i32)
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// INPUT: cxx root=observe_i64
+// Guarded local storage is observed after the call and returned in source field order.
+template <class T>
+struct SequenceObservation {
+  // Bitmask of independently verified atomic return values.
+  unsigned passed;
+  // Guard immediately before the updated word.
+  T before;
+  // Final value of the updated word.
+  T value;
+  // Guard immediately after the updated word.
+  T after;
+};
+
+unsigned atomic_i64(long long* storage);
+static SequenceObservation<long long> observe_i64() {
+  long long storage[3] = {37, 37, 37};
+  unsigned passed = atomic_i64(storage);
+  return {passed, storage[0], storage[1], storage[2]};
+}
+// ----
+func.def public @observe_i64() -> (i32, i64, i64, i64) {
+  %4 = index.constant 24 : offset
+  %storage_storage = buffer.alloca<private> align(8) %4 : buffer
+  %storage_storage_byte_offset = index.constant 0 : offset
+  %storage_view = buffer.view %storage_storage[%storage_storage_byte_offset] : buffer -> view<3xi64>
+  %41 = scalar.constant 37 : i64
+  %10 = index.constant 0 : index
+  view.store %41, %storage_view[%10] : i64, view<3xi64>
+  %13 = index.constant 1 : index
+  view.store %41, %storage_view[%13] : i64, view<3xi64>
+  %16 = index.constant 2 : index
+  view.store %41, %storage_view[%16] : i64, view<3xi64>
+  %passed = func.call @atomic_i64(%storage_storage, %storage_storage_byte_offset) : (buffer, offset) -> (i32)
+  %22 = view.load %storage_view[%10] : view<3xi64> -> i64
+  %27 = view.load %storage_view[%13] : view<3xi64> -> i64
+  %32 = view.load %storage_view[%16] : view<3xi64> -> i64
+  func.return %passed, %22, %27, %32 : i32, i64, i64, i64
+}
+
+func.decl @atomic_i64(%33: buffer, %34: offset) -> (i32)
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// INPUT: cxx root=observe_u64
+// Guarded local storage is observed after the call and returned in source field order.
+template <class T>
+struct SequenceObservation {
+  // Bitmask of independently verified atomic return values.
+  unsigned passed;
+  // Guard immediately before the updated word.
+  T before;
+  // Final value of the updated word.
+  T value;
+  // Guard immediately after the updated word.
+  T after;
+};
+
+unsigned atomic_u64(unsigned long long* storage);
+static SequenceObservation<unsigned long long> observe_u64() {
+  unsigned long long storage[3] = {37, 37, 37};
+  unsigned passed = atomic_u64(storage);
+  return {passed, storage[0], storage[1], storage[2]};
+}
+// ----
+func.def public @observe_u64() -> (i32, i64, i64, i64) {
+  %4 = index.constant 24 : offset
+  %storage_storage = buffer.alloca<private> align(8) %4 : buffer
+  %storage_storage_byte_offset = index.constant 0 : offset
+  %storage_view = buffer.view %storage_storage[%storage_storage_byte_offset] : buffer -> view<3xi64>
+  %41 = scalar.constant 37 : i64
+  %10 = index.constant 0 : index
+  view.store %41, %storage_view[%10] : i64, view<3xi64>
+  %13 = index.constant 1 : index
+  view.store %41, %storage_view[%13] : i64, view<3xi64>
+  %16 = index.constant 2 : index
+  view.store %41, %storage_view[%16] : i64, view<3xi64>
+  %passed = func.call @atomic_u64(%storage_storage, %storage_storage_byte_offset) : (buffer, offset) -> (i32)
+  %22 = view.load %storage_view[%10] : view<3xi64> -> i64
+  %27 = view.load %storage_view[%13] : view<3xi64> -> i64
+  %32 = view.load %storage_view[%16] : view<3xi64> -> i64
+  func.return %passed, %22, %27, %32 : i32, i64, i64, i64
+}
+
+func.decl @atomic_u64(%33: buffer, %34: offset) -> (i32)
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// INPUT: cxx root=observe_builtin_compare
+// The observer retains independent storage slots and returned result components.
+template <class T>
+struct CompareObservation {
+  // Failed comparisons of atomic return and expected-value semantics.
+  unsigned failures;
+  // Guard immediately before the atomic and expected-value slots.
+  T before;
+  // Final value of the atomically updated word.
+  T value;
+  // Expected-value slot written by a failed compare-exchange.
+  T expected;
+  // Guard immediately after the atomic and expected-value slots.
+  T after;
+};
+
+struct CountedObservation {
+  // Atomic values observed after all compare-exchange operations.
+  CompareObservation<unsigned> compare;
+  // Mismatches in argument evaluation counts and their neighboring guards.
+  unsigned evaluation_failures;
+};
+
+unsigned builtin_compare_values(unsigned* storage, unsigned* evaluations);
+static CountedObservation observe_builtin_compare() {
+  // The trailing counters and their guards start at zero. Both helper
+  // arguments name disjoint regions of this same automatic allocation.
+  unsigned storage[10] = {37, 37, 37, 37};
+  unsigned failures = builtin_compare_values(storage, storage + 4);
+  unsigned evaluation_failures = 0;
+  for (unsigned index = 4; index < 10; ++index) {
+    unsigned wanted = index >= 5 && index < 9 ? 2 : 0;
+    evaluation_failures += storage[index] != wanted;
+  }
+  return {{failures, storage[0], storage[1], storage[2], storage[3]},
+          evaluation_failures};
+}
+// ----
+func.def public @observe_builtin_compare() -> (i32, i32, i32, i32, i32, i32) {
+  %6 = index.constant 40 : offset
+  %storage_storage = buffer.alloca<private> align(4) %6 : buffer
+  %storage_storage_byte_offset = index.constant 0 : offset
+  %storage_view = buffer.view %storage_storage[%storage_storage_byte_offset] : buffer -> view<10xi32>
+  %10 = scalar.constant 37 : i32
+  %11 = index.constant 0 : index
+  view.store %10, %storage_view[%11] : i32, view<10xi32>
+  %13 = index.constant 1 : index
+  view.store %10, %storage_view[%13] : i32, view<10xi32>
+  %15 = index.constant 2 : index
+  view.store %10, %storage_view[%15] : i32, view<10xi32>
+  %17 = index.constant 3 : index
+  view.store %10, %storage_view[%17] : i32, view<10xi32>
+  %zero$i32 = scalar.constant 0 : i32
+  %19 = index.constant 4 : index
+  view.store %zero$i32, %storage_view[%19] : i32, view<10xi32>
+  %21 = index.constant 5 : index
+  view.store %zero$i32, %storage_view[%21] : i32, view<10xi32>
+  %23 = index.constant 6 : index
+  view.store %zero$i32, %storage_view[%23] : i32, view<10xi32>
+  %25 = index.constant 7 : index
+  view.store %zero$i32, %storage_view[%25] : i32, view<10xi32>
+  %27 = index.constant 8 : index
+  view.store %zero$i32, %storage_view[%27] : i32, view<10xi32>
+  %29 = index.constant 9 : index
+  view.store %zero$i32, %storage_view[%29] : i32, view<10xi32>
+  %96 = index.constant 16 : offset
+  %failures = func.call @builtin_compare_values(%storage_storage, %storage_storage_byte_offset, %storage_storage, %96) : (buffer, offset, buffer, offset) -> (i32)
+  %95 = index.constant 4 : offset
+  %94 = index.constant 10 : offset
+  %44 = index.constant 1 : offset
+  %evaluation_failures = scf.for %index = [%95 to %94 step %44](%evaluation_failures$46 = %zero$i32 : i32) -> (i32) {
+    %48 = index.cast %index : offset to i32
+    %49 = scalar.constant 5 : i32
+    %50 = scalar.cmpi uge, %48, %49 : i32
+    %52 = scalar.constant 9 : i32
+    %53 = scalar.cmpi ult, %48, %52 : i32
+    %98 = scf.select %50, %53, %50 : i1
+    %55 = scalar.constant 2 : i32
+    %wanted = scf.select %98, %55, %zero$i32 : i32
+    %57 = scalar.extui %48 : i32 to i64
+    %58 = scalar.assume %57 [range(%57, 0, 9)] : i64
+    %59 = index.cast %58 : i64 to index
+    %60 = view.load %storage_view[%59] : view<10xi32> -> i32
+    %61 = scalar.cmpi ne, %60, %wanted : i32
+    %62 = scalar.extui %61 : i1 to i32
+    %evaluation_failures$63 = scalar.addi %evaluation_failures$46, %62 : i32
+    scf.yield %evaluation_failures$63 : i32
+  }
+  %68 = view.load %storage_view[%11] : view<10xi32> -> i32
+  %73 = view.load %storage_view[%13] : view<10xi32> -> i32
+  %78 = view.load %storage_view[%15] : view<10xi32> -> i32
+  %83 = view.load %storage_view[%17] : view<10xi32> -> i32
+  func.return %failures, %68, %73, %78, %83, %evaluation_failures : i32, i32, i32, i32, i32, i32
+}
+
+func.decl @builtin_compare_values(%84: buffer, %85: offset, %86: buffer, %87: offset) -> (i32)
+
+// ====
+// RUN: pass canonicalize,cse,dce
+// INPUT: cxx root=observe_builtin_wide
+// The observer retains independent storage slots and returned result components.
+template <class T>
+struct CompareObservation {
+  // Failed comparisons of atomic return and expected-value semantics.
+  unsigned failures;
+  // Guard immediately before the atomic and expected-value slots.
+  T before;
+  // Final value of the atomically updated word.
+  T value;
+  // Expected-value slot written by a failed compare-exchange.
+  T expected;
+  // Guard immediately after the atomic and expected-value slots.
+  T after;
+};
+
+struct CountedObservation {
+  // Atomic values observed after all compare-exchange operations.
+  CompareObservation<unsigned> compare;
+  // Mismatches in argument evaluation counts and their neighboring guards.
+  unsigned evaluation_failures;
+};
+
+unsigned builtin_wide_values(unsigned long long* storage);
+static CompareObservation<unsigned long long> observe_builtin_wide() {
+  unsigned long long storage[4] = {37, 37, 37, 37};
+  unsigned failures = builtin_wide_values(storage);
+  return {failures, storage[0], storage[1], storage[2], storage[3]};
+}
+// ----
+func.def public @observe_builtin_wide() -> (i32, i64, i64, i64, i64) {
+  %5 = index.constant 32 : offset
+  %storage_storage = buffer.alloca<private> align(8) %5 : buffer
+  %storage_storage_byte_offset = index.constant 0 : offset
+  %storage_view = buffer.view %storage_storage[%storage_storage_byte_offset] : buffer -> view<4xi64>
+  %52 = scalar.constant 37 : i64
+  %11 = index.constant 0 : index
+  view.store %52, %storage_view[%11] : i64, view<4xi64>
+  %14 = index.constant 1 : index
+  view.store %52, %storage_view[%14] : i64, view<4xi64>
+  %17 = index.constant 2 : index
+  view.store %52, %storage_view[%17] : i64, view<4xi64>
+  %20 = index.constant 3 : index
+  view.store %52, %storage_view[%20] : i64, view<4xi64>
+  %failures = func.call @builtin_wide_values(%storage_storage, %storage_storage_byte_offset) : (buffer, offset) -> (i32)
+  %26 = view.load %storage_view[%11] : view<4xi64> -> i64
+  %31 = view.load %storage_view[%14] : view<4xi64> -> i64
+  %36 = view.load %storage_view[%17] : view<4xi64> -> i64
+  %41 = view.load %storage_view[%20] : view<4xi64> -> i64
+  func.return %failures, %26, %31, %36, %41 : i32, i64, i64, i64, i64
+}
+
+func.decl @builtin_wide_values(%42: buffer, %43: offset) -> (i32)

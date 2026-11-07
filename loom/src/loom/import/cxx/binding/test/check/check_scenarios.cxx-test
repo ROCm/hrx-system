@@ -1,0 +1,236 @@
+// RUN: roundtrip
+#include <loomcxx/check.h>
+#include <loomcxx/view.h>
+
+unsigned long long combine(loom::check::ordinal configuration,
+                           loom::check::ordinal trial,
+                           unsigned long long entropy) {
+  return configuration + trial + entropy;
+}
+
+unsigned long long identity(unsigned long long value) { return value; }
+
+unsigned long long identity_oracle(unsigned long long value) { return value; }
+
+[[loom::check_scenario(3)]]
+void configured(loom::check::ordinal configuration,
+                loom::check::entropy scenario_entropy) {
+  loom::check::trial<2>(
+      [&](loom::check::ordinal trial, loom::check::entropy trial_entropy) {
+        const auto stream = loom::check::fork(trial_entropy, "input");
+        const auto word = loom::check::read(stream, trial);
+        const auto input =
+            loom::check::generate<combine>(configuration, trial, word);
+        loom::check::compare<identity, identity_oracle>(
+            input, [](unsigned long long actual,
+                      unsigned long long expected) {
+              loom::check::expect_equal(actual, expected);
+            });
+      });
+}
+
+LOOM_CHECK_BENCHMARK(configured_benchmark, configured);
+
+// ----
+func.def public @combine(%configuration: index, %trial: index, %entropy: i64) -> (i64) {
+  %4 = index.cast %configuration : index to i64
+  %5 = index.cast %trial : index to i64
+  %6 = scalar.addi %4, %5 : i64
+  %7 = scalar.addi %6, %entropy : i64
+  func.return %7 : i64
+}
+
+func.def public @identity(%value: i64) -> (i64) {
+  func.return %value : i64
+}
+
+func.def public @identity_oracle(%value: i64) -> (i64) {
+  func.return %value : i64
+}
+
+check.scenario public @configured configure[3](%configuration: index, %scenario_entropy: check.entropy) {
+  check.trial[2](%trial: index, %trial_entropy: check.entropy) {
+    %stream = check.entropy.fork %trial_entropy name("input") : check.entropy
+    %word = check.entropy.read %stream[%trial] : check.entropy -> i64
+    %input = check.generate<@combine>(%configuration, %trial, %word) : (index, index, i64) -> (i64)
+    check.compare<@identity, @identity_oracle>(%input) : (i64) -> [actual(%actual: i64), expected(%expected: i64)] {
+      check.expect.equal actual(%actual) expected(%expected) : i64
+    }
+  }
+  check.return
+}
+
+check.benchmark<@configured> @configured_benchmark
+
+// ====
+// RUN: roundtrip
+#include <loomcxx/check.h>
+#include <loomcxx/view.h>
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1),
+  loom::workgroup_count(1, 1, 1)]] void
+write_value(unsigned* output, unsigned value) {
+  output[0] = value;
+}
+
+void write_value_oracle(loom::type::buffer<unsigned> output, unsigned value) {
+  auto values =
+      loom::buffer::view<1>(output, {}, loom::encoding::layout::dense<1>());
+  loom::view::store(value, values, 0);
+}
+
+LOOM_CHECK_SCENARIO(tensor_actions) {
+  loom::check::trial<1>(
+      [](loom::check::ordinal trial, loom::check::entropy entropy) {
+        const auto storage = loom::check::fill<1, unsigned>(0u);
+        loom::check::compare<write_value, write_value_oracle>(storage, 7u, [&] {
+          loom::check::expect_bitwise(storage, storage);
+        });
+      });
+  loom::check::trial<1>(
+      [](loom::check::ordinal trial, loom::check::entropy entropy) {
+        const auto storage = loom::check::fill<1, unsigned>(0u);
+        loom::check::invoke<write_value>(storage, 11u);
+      });
+}
+
+// ----
+kernel.def @write_value() {
+  %2 = index.constant 1 : index
+  %3 = index.constant 1 : index
+  %4 = index.constant 1 : index
+  %5 = index.constant 1 : index
+  %6 = index.constant 1 : index
+  %7 = index.constant 1 : index
+  kernel.launch.config workgroups(%2, %3, %4) workgroup_size(%5, %6, %7) : index
+} launch(%output: buffer, %value: i32) {
+  %output_byte_offset = index.constant 0 : offset
+  %9 = scalar.constant 0 : i32
+  %10 = scalar.extsi %9 : i32 to i64
+  %11 = scalar.constant 4 : i64
+  %12 = scalar.muli %10, %11 : i64
+  %13 = index.cast %output_byte_offset : offset to i64
+  %14 = scalar.addi %13, %12 : i64
+  %15 = scalar.assume %14 [range(%14, 0, 9223372036854775807)] : i64
+  %16 = index.cast %15 : i64 to offset
+  %17 = buffer.view %output[%16] : buffer -> view<1xi32>
+  view.store %value, %17[0] : i32, view<1xi32>
+  kernel.return
+}
+
+func.def public @write_value_oracle(%output: buffer, %value: i32) {
+  %values_layout = encoding.layout.dense : encoding<layout>
+  %21 = index.constant 0 : offset
+  %values = buffer.view %output[%21] : buffer -> view<1xi32, %values_layout>
+  %23 = scalar.constant 0 : i32
+  %24 = index.cast %23 : i32 to index
+  view.store %value, %values[%24] : i32, view<1xi32, %values_layout>
+  func.return
+}
+
+check.scenario public @tensor_actions {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(0) : tensor<1xi32>
+    %28 = check.literal value(7) : i32
+    check.compare<@write_value, @write_value_oracle>(%storage, %28) : (tensor<1xi32>, i32) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<1xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(0) : tensor<1xi32>
+    %32 = check.literal value(11) : i32
+    check.invoke<@write_value>(%storage, %32) : (tensor<1xi32>, i32) -> ()
+  }
+  check.return
+}
+
+// ====
+// RUN: roundtrip
+#include <loomcxx/check.h>
+#include <loomcxx/view.h>
+
+loom::type::index runtime_element_count(loom::check::ordinal trial) {
+  return loom::index::cast((unsigned long long)trial + 3ull);
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1),
+  loom::workgroup_count(1, 1, 1)]] void
+copy_first(const int* input, int* output) {
+  output[0] = input[0];
+}
+
+LOOM_CHECK_SCENARIO(dynamic_tensor_actions) {
+  loom::check::trial<2>(
+      [](loom::check::ordinal trial, loom::check::entropy entropy) {
+        const auto element_count =
+            loom::check::generate<runtime_element_count>(trial);
+        const auto input = loom::check::iota(element_count, -100, 37, 5);
+        const auto filled = loom::check::fill(element_count, 9);
+        const auto storage = loom::check::fill<39, int>(-123);
+        const auto output = loom::check::slice(storage, 16, element_count);
+        loom::check::compare<copy_first>(input, output, [&] {
+          loom::check::expect_bitwise(input, input);
+          loom::check::expect_bitwise(filled, filled);
+          loom::check::expect_bitwise(output, output);
+        });
+      });
+}
+
+// ----
+func.def public @runtime_element_count(%trial: index) -> (index) {
+  %2 = index.cast %trial : index to i64
+  %3 = scalar.constant 3 : i64
+  %4 = scalar.addi %2, %3 : i64
+  %5 = index.cast %4 : i64 to index
+  func.return %5 : index
+}
+
+kernel.def @copy_first() {
+  %8 = index.constant 1 : index
+  %9 = index.constant 1 : index
+  %10 = index.constant 1 : index
+  %11 = index.constant 1 : index
+  %12 = index.constant 1 : index
+  %13 = index.constant 1 : index
+  kernel.launch.config workgroups(%8, %9, %10) workgroup_size(%11, %12, %13) : index
+} launch(%input: buffer, %output: buffer) {
+  %input_byte_offset = index.constant 0 : offset
+  %output_byte_offset = index.constant 0 : offset
+  %16 = scalar.constant 0 : i32
+  %17 = scalar.extsi %16 : i32 to i64
+  %18 = scalar.constant 4 : i64
+  %19 = scalar.muli %17, %18 : i64
+  %20 = index.cast %input_byte_offset : offset to i64
+  %21 = scalar.addi %20, %19 : i64
+  %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
+  %23 = index.cast %22 : i64 to offset
+  %24 = buffer.view %input[%23] : buffer -> view<1xi32>
+  %25 = view.load %24[0] : view<1xi32> -> i32
+  %26 = scalar.constant 0 : i32
+  %27 = scalar.extsi %26 : i32 to i64
+  %28 = scalar.constant 4 : i64
+  %29 = scalar.muli %27, %28 : i64
+  %30 = index.cast %output_byte_offset : offset to i64
+  %31 = scalar.addi %30, %29 : i64
+  %32 = scalar.assume %31 [range(%31, 0, 9223372036854775807)] : i64
+  %33 = index.cast %32 : i64 to offset
+  %34 = buffer.view %output[%33] : buffer -> view<1xi32>
+  view.store %25, %34[0] : i32, view<1xi32>
+  kernel.return
+}
+
+check.scenario public @dynamic_tensor_actions {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %element_count = check.generate<@runtime_element_count>(%trial) : (index) -> (index)
+    %input = check.generate.iota offset(-100) step(37) period(5) : tensor<[%element_count]xi32>
+    %filled = check.generate.fill value(9) : tensor<[%element_count]xi32>
+    %storage = check.generate.fill value(-123) : tensor<39xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<39xi32> -> tensor<[%element_count]xi32>
+    check.compare<@copy_first>(%input, %output) : (tensor<[%element_count]xi32>, tensor<[%element_count]xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%element_count]xi32>
+      check.expect.bitwise actual(%filled) expected(%filled) : tensor<[%element_count]xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<[%element_count]xi32>
+    }
+  }
+  check.return
+}
