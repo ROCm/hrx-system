@@ -110,14 +110,13 @@ uint32_t loom_amdgpu_target_native_subgroup_width(
     uint32_t source_wavefront_size) {
   IREE_ASSERT(target_facts != NULL,
               "AMDGPU subgroup communication requires AMDGPU target facts");
-  const uint32_t default_wavefront_size =
-      target_facts->properties.processor->wavefront.default_size;
-  IREE_ASSERT(loom_amdgpu_wavefront_size_is_valid(default_wavefront_size),
-              "AMDGPU subgroup communication selected a processor with an "
-              "invalid default wavefront size");
-  return source_wavefront_size < default_wavefront_size
-             ? source_wavefront_size
-             : default_wavefront_size;
+  const uint32_t exchange_width =
+      iree_any_bit_set(target_facts->properties.instruction_constraints,
+                       LOOM_AMDGPU_INSTRUCTION_CONSTRAINT_DS_PERMUTE_HALF_WAVE)
+          ? 32u
+          : 64u;
+  return source_wavefront_size < exchange_width ? source_wavefront_size
+                                                : exchange_width;
 }
 
 bool loom_amdgpu_target_supports_direct_subgroup_width(

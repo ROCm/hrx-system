@@ -14,7 +14,7 @@ Python input rows consumed by the table generator, not emitted C ABI shapes.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 
 from loom.dialect.cache import CacheScope, CacheTemporal
@@ -179,6 +179,7 @@ AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_F4_32X16_SPLIT = 1 << 6
 AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING = 1 << 7
 AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING = 1 << 8
 AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING = 1 << 9
+AMDGPU_INSTRUCTION_CONSTRAINT_DS_PERMUTE_HALF_WAVE = 1 << 10
 AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS = (
     AMDGPU_INSTRUCTION_CONSTRAINT_DS_PAIRED_ADDRESS_ALIGNMENT
     | AMDGPU_INSTRUCTION_CONSTRAINT_DS_ADDTID_ADDRESS_MATERIALIZATION
@@ -190,6 +191,7 @@ AMDGPU_INSTRUCTION_CONSTRAINT_KNOWN_BITS = (
     | AMDGPU_INSTRUCTION_CONSTRAINT_WMMA_SCALE_ENCODING
     | AMDGPU_INSTRUCTION_CONSTRAINT_SWMMAC_LOW_PRECISION_LOWERING
     | AMDGPU_INSTRUCTION_CONSTRAINT_INTEGER_MATRIX_COEXECUTION_SPACING
+    | AMDGPU_INSTRUCTION_CONSTRAINT_DS_PERMUTE_HALF_WAVE
 )
 
 AMDGPU_TARGET_ID_FEATURE_SUPPORT_NONE = 0
@@ -821,6 +823,9 @@ AMDGPU_OCCUPANCY_NONE = AmdgpuProcessorOccupancyInfo()
 AMDGPU_KERNEL_DESCRIPTOR_INFO_NONE = AmdgpuProcessorKernelDescriptorInfo()
 AMDGPU_KERNEL_ENTRY_INFO_NONE = AmdgpuProcessorKernelEntryInfo()
 AMDGPU_PROCESSOR_INSTRUCTION_INFO_NONE = AmdgpuProcessorInstructionInfo()
+AMDGPU_PROCESSOR_INSTRUCTION_INFO_HALF_WAVE_PERMUTE = AmdgpuProcessorInstructionInfo(
+    base_constraints=AMDGPU_INSTRUCTION_CONSTRAINT_DS_PERMUTE_HALF_WAVE,
+)
 AMDGPU_KERNEL_DESCRIPTOR_INFO_PACKED_WORKITEM_ID = AmdgpuProcessorKernelDescriptorInfo(
     flags=AMDGPU_KERNEL_DESCRIPTOR_ABI_FLAG_PACKED_WORKITEM_ID,
 )
@@ -1194,6 +1199,23 @@ def gfx9_10_processor_info(
     )
 
 
+def gfx10_processor_info(
+    processor: str,
+    elf_machine_flags: int,
+    *,
+    elf_feature_flags: int = 0,
+) -> AmdgpuProcessorInfo:
+    return replace(
+        gfx9_10_processor_info(
+            processor,
+            elf_machine_flags,
+            elf_feature_flags=elf_feature_flags,
+            default_wavefront_size=32,
+        ),
+        instructions=AMDGPU_PROCESSOR_INSTRUCTION_INFO_HALF_WAVE_PERMUTE,
+    )
+
+
 def rdna3_processor_info(
     processor: str,
     elf_machine_flags: int,
@@ -1213,6 +1235,7 @@ def rdna3_processor_info(
         elf_feature_flags=elf_feature_flags,
         elf_generic_version=elf_generic_version,
         default_wavefront_size=32,
+        instructions=AMDGPU_PROCESSOR_INSTRUCTION_INFO_HALF_WAVE_PERMUTE,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA3_GFX11,
         max_wave_scratch_bytes=AMDGPU_GFX11_MAX_WAVE_SCRATCH_BYTES,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
@@ -1265,6 +1288,7 @@ def gfx115x_processor_info(
         descriptor_set_key="amdgpu.rdna3_5.core",
         elf_machine_flags=elf_machine_flags,
         default_wavefront_size=32,
+        instructions=AMDGPU_PROCESSOR_INSTRUCTION_INFO_HALF_WAVE_PERMUTE,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA3_GFX11,
         max_wave_scratch_bytes=AMDGPU_GFX11_MAX_WAVE_SCRATCH_BYTES,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX11,
@@ -1290,6 +1314,7 @@ def rdna4m_processor_info(
         descriptor_set_key="amdgpu.rdna4m.core",
         elf_machine_flags=elf_machine_flags,
         default_wavefront_size=32,
+        instructions=AMDGPU_PROCESSOR_INSTRUCTION_INFO_HALF_WAVE_PERMUTE,
         kernel_descriptor=AMDGPU_KERNEL_DESCRIPTOR_INFO_RDNA3_GFX11,
         max_wave_scratch_bytes=AMDGPU_GFX11_MAX_WAVE_SCRATCH_BYTES,
         matrix_feature_profile=AMDGPU_MATRIX_FEATURE_PROFILE_WMMA_GFX12,
@@ -1680,37 +1705,33 @@ AMDGPU_PROCESSOR_INFOS: tuple[AmdgpuProcessorInfo, ...] = (
         max_workgroup_storage_bytes=AMDGPU_CDNA4_MAX_WORKGROUP_STORAGE_BYTES,
         occupancy=AMDGPU_OCCUPANCY_CDNA4,
     ),
-    gfx9_10_processor_info(
+    gfx10_processor_info(
         "gfx1010",
         0x033,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
-        default_wavefront_size=32,
     ),
-    gfx9_10_processor_info(
+    gfx10_processor_info(
         "gfx1011",
         0x034,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
-        default_wavefront_size=32,
     ),
-    gfx9_10_processor_info(
+    gfx10_processor_info(
         "gfx1012",
         0x035,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
-        default_wavefront_size=32,
     ),
-    gfx9_10_processor_info(
+    gfx10_processor_info(
         "gfx1013",
         0x042,
         elf_feature_flags=AMDGPU_ELF_FEATURE_XNACK_ANY_V4,
-        default_wavefront_size=32,
     ),
-    gfx9_10_processor_info("gfx1030", 0x036, default_wavefront_size=32),
-    gfx9_10_processor_info("gfx1031", 0x037, default_wavefront_size=32),
-    gfx9_10_processor_info("gfx1032", 0x038, default_wavefront_size=32),
-    gfx9_10_processor_info("gfx1033", 0x039, default_wavefront_size=32),
-    gfx9_10_processor_info("gfx1034", 0x03E, default_wavefront_size=32),
-    gfx9_10_processor_info("gfx1035", 0x03D, default_wavefront_size=32),
-    gfx9_10_processor_info("gfx1036", 0x045, default_wavefront_size=32),
+    gfx10_processor_info("gfx1030", 0x036),
+    gfx10_processor_info("gfx1031", 0x037),
+    gfx10_processor_info("gfx1032", 0x038),
+    gfx10_processor_info("gfx1033", 0x039),
+    gfx10_processor_info("gfx1034", 0x03E),
+    gfx10_processor_info("gfx1035", 0x03D),
+    gfx10_processor_info("gfx1036", 0x045),
     rdna3_processor_info(
         processor="gfx1100",
         elf_machine_flags=0x041,

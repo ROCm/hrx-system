@@ -24,13 +24,12 @@ extern "C" {
 // Returns the exact wavefront size selected by the active target bundle.
 uint32_t loom_amdgpu_target_wavefront_size(const loom_target_bundle_t* bundle);
 
-// Returns the native execution partition width available to subgroup
-// communication for |source_wavefront_size| on |target_facts|.
+// Returns the direct DS permutation width for |source_wavefront_size| on
+// |target_facts|, independent of the processor's default wavefront size.
 //
-// Source target records may request a kernel wavefront size that is wider than
-// the processor's default/native execution partition. Workgroup collectives can
-// stitch native partitions together through LDS, but direct subgroup operations
-// must not claim semantic communication wider than this value.
+// Partitioned wave64 instructions exchange only within each 32-lane half.
+// Workgroup collectives can join those partitions through LDS; direct subgroup
+// operations must establish the reach of their selected instruction sequence.
 uint32_t loom_amdgpu_target_native_subgroup_width(
     const loom_amdgpu_target_facts_t* target_facts,
     uint32_t source_wavefront_size);

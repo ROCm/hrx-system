@@ -1479,6 +1479,22 @@ def _v_max_u32_overlay() -> AmdgpuDescriptorOverlay:
     return _v_max_u32_overlays()[0]
 
 
+def _v_permlane64_b32_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_permlane64_b32",
+        instruction_name="V_PERMLANE64_B32",
+        mnemonic="v_permlane64_b32",
+        encoding_name="ENC_VOP1",
+        semantic_tag="lane.exchange.halves.b32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result()),
+            AmdgpuOperandOverlay("SRC0", _vgpr_operand("value")),
+        ),
+        effects=(_CONVERGENT_EFFECT,),
+    )
+
+
 def _v_readfirstlane_b32_overlay() -> AmdgpuDescriptorOverlay:
     return AmdgpuDescriptorOverlay(
         descriptor_key="amdgpu.v_readfirstlane_b32",
@@ -8417,6 +8433,7 @@ __all__ = (
     "_v_rcp_f64_overlay",
     "_v_rndne_f64_overlay",
     "_v_readfirstlane_b32_overlay",
+    "_v_permlane64_b32_overlay",
     "_v_readlane_b32_src1_inline_overlay",
     "_v_readlane_b32_src1_sgpr_overlay",
     "_v_rndne_f32_overlay",
