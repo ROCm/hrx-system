@@ -220,6 +220,30 @@ iree_py_test(
 )
 
 iree_py_test(
+    name = "i64_division_stress_test",
+    size = "small",
+    srcs = [
+        "i64_test.py",
+        "//loom/py/loom/tools:pytest_style_runner.py",
+    ],
+    args = [
+        "--include-exhaustive",
+        "loom.target.arch.amd.xdna.aie2p.contracts.i64_test",
+    ],
+    main = "pytest_style_runner.py",
+    tags = [
+        "manual",
+        "stress",
+    ],
+    deps = [
+        ":contracts",
+        "//loom/py/loom/dialect/scalar",
+        "//loom/py/loom/dialect/vector",
+        "//loom/py/loom/target/contracts",
+    ],
+)
+
+iree_py_test(
     name = "dynamic_slice_exhaustive_test",
     size = "medium",
     srcs = [
