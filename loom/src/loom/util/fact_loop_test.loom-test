@@ -105,6 +105,167 @@ func.def @unbounded_distance(%lower: index, %upper: index) {
 
 // ====
 
+// RUN: pass canonicalize
+
+// Endpoint composition covers all six signed predicates. Opposing order and
+// disequality do not establish an ordering for the induction value.
+func.def @endpoint_relations_index(%bound_value: index, %equal: index, %different: index, %greater: index, %greater_equal: index, %less: index, %less_equal: index) {
+  %bound = index.assume %bound_value [range(%bound_value, 1, 32), eq(%bound_value, %equal), ne(%bound_value, %different), lt(%bound_value, %greater), le(%bound_value, %greater_equal), gt(%bound_value, %less), ge(%bound_value, %less_equal)] : index
+  %begin = index.constant 0 : index
+  %stride = index.constant 1 : index
+  %limit = index.constant 64 : index
+  scf.for %iv = [%bound to %limit step %stride] {
+    %equal_lower = index.cmp sge, %iv, %equal : index
+    %different_lower = index.cmp sge, %iv, %different : index
+    %greater_lower = index.cmp sge, %iv, %greater : index
+    %greater_equal_lower = index.cmp sge, %iv, %greater_equal : index
+    %less_lower = index.cmp sgt, %iv, %less : index
+    %less_equal_lower = index.cmp sge, %iv, %less_equal : index
+    test.use %equal_lower, %different_lower, %greater_lower, %greater_equal_lower, %less_lower, %less_equal_lower : i1, i1, i1, i1, i1, i1
+  }
+  scf.for %iv = [%begin to %bound step %stride] {
+    %equal_upper = index.cmp slt, %iv, %equal : index
+    %different_upper = index.cmp slt, %iv, %different : index
+    %greater_upper = index.cmp slt, %iv, %greater : index
+    %greater_equal_upper = index.cmp slt, %iv, %greater_equal : index
+    %less_upper = index.cmp slt, %iv, %less : index
+    %less_equal_upper = index.cmp slt, %iv, %less_equal : index
+    test.use %equal_upper, %different_upper, %greater_upper, %greater_equal_upper, %less_upper, %less_equal_upper : i1, i1, i1, i1, i1, i1
+  }
+  func.return
+}
+// ----
+func.def @endpoint_relations_index(%bound_value: index, %equal: index, %different: index, %greater: index, %greater_equal: index, %less: index, %less_equal: index) {
+  %bound = index.assume %bound_value [range(%bound_value, 1, 32), eq(%bound_value, %equal), ne(%bound_value, %different), lt(%bound_value, %greater), le(%bound_value, %greater_equal), gt(%bound_value, %less), ge(%bound_value, %less_equal)] : index
+  %begin = index.constant 0 : index
+  %stride = index.constant 1 : index
+  %limit = index.constant 64 : index
+  scf.for %iv = [%bound to %limit step %stride] {
+    %equal_lower = scalar.constant true : i1
+    %different_lower = index.cmp sge, %iv, %different : index
+    %greater_lower = index.cmp sge, %iv, %greater : index
+    %greater_equal_lower = index.cmp sge, %iv, %greater_equal : index
+    %less_lower = scalar.constant true : i1
+    %less_equal_lower = scalar.constant true : i1
+    test.use %equal_lower, %different_lower, %greater_lower, %greater_equal_lower, %less_lower, %less_equal_lower : i1, i1, i1, i1, i1, i1
+  }
+  scf.for %iv = [%begin to %bound step %stride] {
+    %equal_upper = scalar.constant true : i1
+    %different_upper = index.cmp slt, %iv, %different : index
+    %greater_upper = scalar.constant true : i1
+    %greater_equal_upper = scalar.constant true : i1
+    %less_upper = index.cmp slt, %iv, %less : index
+    %less_equal_upper = index.cmp slt, %iv, %less_equal : index
+    test.use %equal_upper, %different_upper, %greater_upper, %greater_equal_upper, %less_upper, %less_equal_upper : i1, i1, i1, i1, i1, i1
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+// Endpoint composition covers all six signed predicates. Opposing order and
+// disequality do not establish an ordering for the induction value.
+func.def @endpoint_relations_offset(%bound_value: offset, %equal: offset, %different: offset, %greater: offset, %greater_equal: offset, %less: offset, %less_equal: offset) {
+  %bound = index.assume %bound_value [range(%bound_value, 1, 32), eq(%bound_value, %equal), ne(%bound_value, %different), lt(%bound_value, %greater), le(%bound_value, %greater_equal), gt(%bound_value, %less), ge(%bound_value, %less_equal)] : offset
+  %begin = index.constant 0 : offset
+  %stride = index.constant 1 : offset
+  %limit = index.constant 64 : offset
+  scf.for %iv = [%bound to %limit step %stride] {
+    %equal_lower = index.cmp sge, %iv, %equal : offset
+    %different_lower = index.cmp sge, %iv, %different : offset
+    %greater_lower = index.cmp sge, %iv, %greater : offset
+    %greater_equal_lower = index.cmp sge, %iv, %greater_equal : offset
+    %less_lower = index.cmp sgt, %iv, %less : offset
+    %less_equal_lower = index.cmp sge, %iv, %less_equal : offset
+    test.use %equal_lower, %different_lower, %greater_lower, %greater_equal_lower, %less_lower, %less_equal_lower : i1, i1, i1, i1, i1, i1
+  }
+  scf.for %iv = [%begin to %bound step %stride] {
+    %equal_upper = index.cmp slt, %iv, %equal : offset
+    %different_upper = index.cmp slt, %iv, %different : offset
+    %greater_upper = index.cmp slt, %iv, %greater : offset
+    %greater_equal_upper = index.cmp slt, %iv, %greater_equal : offset
+    %less_upper = index.cmp slt, %iv, %less : offset
+    %less_equal_upper = index.cmp slt, %iv, %less_equal : offset
+    test.use %equal_upper, %different_upper, %greater_upper, %greater_equal_upper, %less_upper, %less_equal_upper : i1, i1, i1, i1, i1, i1
+  }
+  func.return
+}
+// ----
+func.def @endpoint_relations_offset(%bound_value: offset, %equal: offset, %different: offset, %greater: offset, %greater_equal: offset, %less: offset, %less_equal: offset) {
+  %bound = index.assume %bound_value [range(%bound_value, 1, 32), eq(%bound_value, %equal), ne(%bound_value, %different), lt(%bound_value, %greater), le(%bound_value, %greater_equal), gt(%bound_value, %less), ge(%bound_value, %less_equal)] : offset
+  %begin = index.constant 0 : offset
+  %stride = index.constant 1 : offset
+  %limit = index.constant 64 : offset
+  scf.for %iv = [%bound to %limit step %stride] {
+    %equal_lower = scalar.constant true : i1
+    %different_lower = index.cmp sge, %iv, %different : offset
+    %greater_lower = index.cmp sge, %iv, %greater : offset
+    %greater_equal_lower = index.cmp sge, %iv, %greater_equal : offset
+    %less_lower = scalar.constant true : i1
+    %less_equal_lower = scalar.constant true : i1
+    test.use %equal_lower, %different_lower, %greater_lower, %greater_equal_lower, %less_lower, %less_equal_lower : i1, i1, i1, i1, i1, i1
+  }
+  scf.for %iv = [%begin to %bound step %stride] {
+    %equal_upper = scalar.constant true : i1
+    %different_upper = index.cmp slt, %iv, %different : offset
+    %greater_upper = scalar.constant true : i1
+    %greater_equal_upper = scalar.constant true : i1
+    %less_upper = index.cmp slt, %iv, %less : offset
+    %less_equal_upper = index.cmp slt, %iv, %less_equal : offset
+    test.use %equal_upper, %different_upper, %greater_upper, %greater_equal_upper, %less_upper, %less_equal_upper : i1, i1, i1, i1, i1, i1
+  }
+  func.return
+}
+
+// ====
+
+// RUN: pass canonicalize
+
+// Nested induction values inherit the outer endpoint's retained relations.
+// Alias forwarding retains them; neither loop changes the ambient values.
+func.def @nested_endpoint_aliases(%capacity_value: index, %count_value: index, %step_value: index) {
+  %capacity = index.assume %capacity_value [range(%capacity_value, 2, 1024)] : index
+  %count = index.assume %count_value [range(%count_value, 0, %capacity)] : index
+  %end = index.assume %count [] : index
+  %step = index.assume %step_value [range(%step_value, 1, 16)] : index
+  %begin = index.constant 0 : index
+  %stride = index.constant 1 : index
+  scf.for %outer = [%begin to %end step %step] {
+    %upper_alias = index.assume %outer [] : index
+    scf.for %inner = [%begin to %upper_alias step %stride] {
+      %alias = index.assume %inner [] : index
+      %remaining = index.sub %capacity, %alias : index
+      %minimum = test.fact_range_lo %remaining : index -> i64
+      test.use %minimum : i64
+    }
+  }
+  %outside = index.sub %capacity_value, %count_value : index
+  %outside_minimum = test.fact_range_lo %outside : index -> i64
+  test.use %outside_minimum : i64
+  func.return
+}
+// ----
+func.def @nested_endpoint_aliases(%capacity_value: index, %count_value: index, %step_value: index) {
+  %capacity = index.assume %capacity_value [range(%capacity_value, 2, 1024)] : index
+  %count = index.assume %count_value [range(%count_value, 0, %capacity)] : index
+  %step = index.assume %step_value [range(%step_value, 1, 16)] : index
+  %begin = index.constant 0 : index
+  %stride = index.constant 1 : index
+  scf.for %outer = [%begin to %count step %step] {
+    scf.for %inner = [%begin to %outer step %stride] {
+      %minimum = scalar.constant 1 : i64
+      test.use %minimum : i64
+    }
+  }
+  %outside_minimum = scalar.constant -9223372036854775808 : i64
+  test.use %outside_minimum : i64
+  func.return
+}
+
+// ====
+
 // RUN: pass unroll-scf-for,canonicalize
 
 // Unrolling exposes an impossible tail arm. Its unsigned guard can fold only

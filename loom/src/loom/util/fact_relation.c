@@ -530,18 +530,57 @@ static iree_status_t loom_value_fact_relation_union_roots(
       source.excluded_literal_equal, &inout_target->excluded_literal_equal);
 }
 
+typedef struct loom_value_fact_bound_composition_t {
+  // Fact owner retaining the endpoint relations and completed induction facts.
+  loom_value_fact_table_t* table;
+  // Induction relations being constructed before publication.
+  loom_value_fact_relation_roots_t* roots;
+  // Possible outcomes for the induction value relative to this endpoint.
+  loom_integer_order_outcome_bits_t value_bound_outcomes;
+  // Allocation failure stops endpoint enumeration.
+  iree_status_t status;
+} loom_value_fact_bound_composition_t;
+
+static bool loom_value_fact_relation_compose_bound(
+    void* user_data, loom_value_id_t counterpart,
+    loom_integer_order_outcome_bits_t bound_counterpart_outcomes) {
+  loom_value_fact_bound_composition_t* composition =
+      (loom_value_fact_bound_composition_t*)user_data;
+  composition->status = loom_value_fact_relation_add_exclusions(
+      composition->table, composition->roots,
+      loom_integer_order_outcomes_compose(composition->value_bound_outcomes,
+                                          bound_counterpart_outcomes),
+      counterpart);
+  return iree_status_is_ok(composition->status);
+}
+
+static iree_status_t loom_value_fact_relation_add_bound(
+    loom_value_fact_table_t* table, loom_value_fact_relation_roots_t* roots,
+    loom_value_id_t bound, loom_integer_order_outcome_bits_t outcomes) {
+  IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
+      table, roots, outcomes,
+      loom_value_fact_table_query_identity(table, bound)));
+  loom_value_fact_bound_composition_t composition = {
+      .table = table,
+      .roots = roots,
+      .value_bound_outcomes = outcomes,
+      .status = iree_ok_status(),
+  };
+  (void)loom_value_fact_table_for_each_signed_integer_relation_while(
+      table, bound, loom_value_fact_relation_compose_bound, &composition);
+  return composition.status;
+}
+
 iree_status_t loom_value_fact_integer_relations_define_counted_range(
     loom_value_fact_table_t* table, loom_value_id_t value,
     loom_value_id_t lower_bound, loom_value_id_t upper_bound) {
   loom_value_fact_relation_roots_t roots = {0};
-  IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
-      table, &roots,
+  IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_bound(
+      table, &roots, lower_bound,
       LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL |
-          LOOM_INTEGER_ORDER_OUTCOME_BIT_GREATER,
-      loom_value_fact_table_query_identity(table, lower_bound)));
-  IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_exclusions(
-      table, &roots, LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS,
-      loom_value_fact_table_query_identity(table, upper_bound)));
+          LOOM_INTEGER_ORDER_OUTCOME_BIT_GREATER));
+  IREE_RETURN_IF_ERROR(loom_value_fact_relation_add_bound(
+      table, &roots, upper_bound, LOOM_INTEGER_ORDER_OUTCOME_BIT_LESS));
   bool changed = false;
   return loom_value_fact_integer_relations_publish_one(table, value, roots,
                                                        &changed);
