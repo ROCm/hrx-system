@@ -147,20 +147,41 @@ class Capture:
             )
         return record
 
-    def tool(self, argv: Sequence[str], cwd: Path, name: str) -> Path | None:
+    def tool(
+        self,
+        argv: Sequence[str],
+        cwd: Path,
+        name: str,
+        *,
+        separate_stderr: bool = False,
+    ) -> Path | None:
+        """Runs a diagnostic tool and preserves its status and output channels."""
         output_path = self.directory / f"{len(self.tools):04d}-{name}.txt"
         record = {"argv": list(argv), "cwd": str(cwd), "output": output_path.name}
         self.tools.append(record)
         try:
             with output_path.open("wb") as output:
-                result = subprocess.run(
-                    argv,
-                    cwd=cwd,
-                    env=dict(self.environment),
-                    stdout=output,
-                    stderr=subprocess.STDOUT,
-                    timeout=30,
-                )
+                if separate_stderr:
+                    stderr_path = output_path.with_suffix(".stderr.txt")
+                    record["stderr_output"] = stderr_path.name
+                    with stderr_path.open("wb") as stderr:
+                        result = subprocess.run(
+                            argv,
+                            cwd=cwd,
+                            env=dict(self.environment),
+                            stdout=output,
+                            stderr=stderr,
+                            timeout=30,
+                        )
+                else:
+                    result = subprocess.run(
+                        argv,
+                        cwd=cwd,
+                        env=dict(self.environment),
+                        stdout=output,
+                        stderr=subprocess.STDOUT,
+                        timeout=30,
+                    )
             record["returncode"] = result.returncode
         except (OSError, subprocess.TimeoutExpired) as error:
             record["error"] = str(error)
@@ -605,7 +626,9 @@ def capture_access_failures(capture: Capture, cwd: Path, output: str) -> None:
             arguments.extend(["--delete", path])
         for path in dict.fromkeys(delete_trees):
             arguments.extend(["--delete-tree", path])
-        capture.tool(arguments, cwd, "windows-file-access")
+        # Keep the collector's JSON-lines protocol isolated from Python startup
+        # and native loader diagnostics while preserving both output channels.
+        capture.tool(arguments, cwd, "windows-file-access", separate_stderr=True)
         for volume in dict.fromkeys(
             path.anchor.rstrip("\\/") for path in output_open_paths
         ):
