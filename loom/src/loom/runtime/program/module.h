@@ -7,7 +7,7 @@
 #ifndef LOOM_RUNTIME_PROGRAM_MODULE_H_
 #define LOOM_RUNTIME_PROGRAM_MODULE_H_
 
-#include "iree/module/hal/types.h"
+#include "iree/hal/vm/types.h"
 #include "iree/vm/module.h"
 #include "loom/runtime/command/program.h"
 #include "loom/runtime/execution/dispatch.h"
@@ -74,7 +74,7 @@ typedef struct loom_runtime_module_options_t {
 // immutable. Per-invocation binding scratch lives in the process storage, so
 // sessions sharing one model process need no VM state or allocation of their
 // own. Registered HAL types must outlive this module and all its references.
-iree_status_t loom_runtime_module_create(const iree_hal_module_types_t* types,
+iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
                                          loom_runtime_execution_t* execution,
                                          loom_runtime_module_options_t options,
                                          iree_allocator_t host_allocator,

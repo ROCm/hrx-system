@@ -12,6 +12,20 @@ and process creation materializes mutable state. A warm invocation uses an
 already-bound function and caller-owned storage without allocation, locking,
 name lookup, type lookup, or module-shape queries.
 
+## Library Modules
+
+General programming facilities live under `iree/vm/module/`. Each library is
+individually linked and supplied by the host during program creation. The VM
+core has no dependency on these libraries and does not register them implicitly.
+The [string module](module/string/module.h) exposes Unicode codepoint predicates
+and case mappings without a HAL dependency; the native Unicode implementation
+remains in `iree/base/internal/` for other runtime users.
+
+Integrations with independently owned subsystems live beside those subsystems,
+such as [HAL's VM integration](../hal/vm/README.md). Those packages expose the
+subsystem's types, ownership, and operations through VM interfaces while keeping
+the native subsystem and VM core independent.
+
 ## Object Model
 
 ```text

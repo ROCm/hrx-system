@@ -113,12 +113,13 @@ identities through calls and control flow; they are distinct from the Core
 native type provider before loading the image. Unknown opaque types fail
 compilation instead of being treated as untyped pointers.
 
-The optional [HAL reference provider](../../../../../../runtime/src/iree/module/hal/README.md)
-supplies canonical descriptors and typed host adapters for the two HAL types.
+The optional [HAL reference provider](../../../../../../runtime/src/iree/hal/vm/README.md)
+supplies canonical descriptors and typed host adapters for buffers, buffer
+views, and fences.
 Their VM references share the original HAL owner count, including buffer
-recycling and view destruction. Neither the compiler nor the generic VM links
-this provider automatically; the embedding composes the providers its modules
-use.
+recycling, view destruction, and fence semaphore ownership. Neither the compiler
+nor the generic VM links this provider automatically; the embedding composes the
+providers its modules use.
 
 Low reference registers retain their source types. The module planner binds
 each distinct type declaration once and emits a sorted namespace/type table;

@@ -124,7 +124,7 @@ struct loom_serve_speech_model_t {
     // Environment outliving all escaped buffers and linked capabilities.
     iree_vm_environment_t* environment;
     // Canonical HAL reference types borrowed from the environment.
-    iree_hal_module_types_t hal_types;
+    iree_hal_vm_types_t hal_types;
     // Canonical VM reference types borrowed from the environment.
     iree_vm_ref_types_t vm_types;
     // Immutable source stage tags in little-endian i64 order.
@@ -912,9 +912,9 @@ static iree_status_t loom_serve_speech_load_prepare(
       &model->parameter_sources));
   const iree_vm_ref_type_table_t* table = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_hal_module_register_types(model->control.environment, &table));
+      iree_hal_vm_register_types(model->control.environment, &table));
   IREE_RETURN_IF_ERROR(
-      iree_hal_module_types_resolve(table, &model->control.hal_types));
+      iree_hal_vm_types_resolve(table, &model->control.hal_types));
   const iree_string_view_t roots[] = {
       IREE_SVL("prepare_request"), IREE_SVL("prepare_work"),
       IREE_SVL("prepare_batch"),   IREE_SVL("generate"),

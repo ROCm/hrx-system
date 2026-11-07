@@ -40,9 +40,7 @@ static iree_status_t iree_hal_task_driver_factory_try_create(
     iree_hal_driver_t** out_driver) {
   iree_hal_task_device_params_t default_params;
   iree_hal_task_device_params_initialize(&default_params);
-  if (FLAG_task_abort_on_failure) {
-    default_params.queue_scope_flags |= IREE_TASK_SCOPE_FLAG_ABORT_ON_FAILURE;
-  }
+  default_params.abort_on_failure = FLAG_task_abort_on_failure;
 
   // Create executors for each topology specified by flags.
   // Stack allocated storage today but we can query for the total count and

@@ -158,8 +158,8 @@ class ExecutablesTest : public loom_runtime::testing::WeightsTest {
         iree_vm_environment_lookup_ref_type_table(environment_, IREE_SV("vm")),
         &vm_types_));
     const iree_vm_ref_type_table_t* types = nullptr;
-    IREE_RETURN_IF_ERROR(iree_hal_module_register_types(environment_, &types));
-    IREE_RETURN_IF_ERROR(iree_hal_module_types_resolve(types, &hal_types_));
+    IREE_RETURN_IF_ERROR(iree_hal_vm_register_types(environment_, &types));
+    IREE_RETURN_IF_ERROR(iree_hal_vm_types_resolve(types, &hal_types_));
     const char* root_name =
         arena_bytes ? "bank_cold" : (single_domain ? "raw" : "domains");
     IREE_RETURN_IF_ERROR(
@@ -390,7 +390,7 @@ class ExecutablesTest : public loom_runtime::testing::WeightsTest {
   // Canonical builtin VM reference identities.
   iree_vm_ref_types_t vm_types_ = {};
   // Canonical native buffer identities.
-  iree_hal_module_types_t hal_types_ = {};
+  iree_hal_vm_types_t hal_types_ = {};
   // Immutable registration declarations.
   loom_runtime_preparation_t* preparation_ = nullptr;
   // Original checkpoint indexes shared by parameter banks and request choices.

@@ -316,7 +316,7 @@ iree_status_t loom_runtime_module_bind_stages(
   return status;
 }
 
-iree_status_t loom_runtime_module_create(const iree_hal_module_types_t* types,
+iree_status_t loom_runtime_module_create(const iree_hal_vm_types_t* types,
                                          loom_runtime_execution_t* execution,
                                          loom_runtime_module_options_t options,
                                          iree_allocator_t host_allocator,

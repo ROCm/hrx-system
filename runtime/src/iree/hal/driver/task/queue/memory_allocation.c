@@ -111,13 +111,6 @@ static void iree_hal_task_queue_alloca_memory_wait_resolved(
     return;
   }
 
-  if (iree_hal_task_queue_is_shutting_down(operation->queue)) {
-    iree_hal_task_queue_profile_record_failed_before_ready(operation);
-    iree_hal_task_queue_op_destroy(operation,
-                                   iree_hal_task_queue_make_shutdown_status());
-    return;
-  }
-
   iree_hal_task_queue_alloca_memory_wait_t* wait =
       operation->alloca.memory_wait;
   if (wait && wait->kind == IREE_HAL_TASK_QUEUE_ALLOCA_MEMORY_WAIT_CAPACITY) {

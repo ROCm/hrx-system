@@ -107,7 +107,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/program:module",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/hal/vm:types",
         "//runtime/src/iree/vm",
         "//runtime/src/iree/vm/bytecode:module",
     ],

@@ -7,7 +7,7 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_SOURCE_H_
 #define LOOM_SERVE_SERVICE_TEXT_SOURCE_H_
 
-#include "iree/module/hal/types.h"
+#include "iree/hal/vm/types.h"
 #include "iree/vm/buffer.h"
 #include "iree/vm/environment.h"
 #include "iree/vm/module.h"
@@ -37,7 +37,7 @@ typedef struct loom_serve_text_source_t {
   // Resolved byte-buffer reference descriptors.
   iree_vm_ref_types_t vm_types;
   // Resolved HAL reference descriptors, without device capabilities.
-  iree_hal_module_types_t types;
+  iree_hal_vm_types_t types;
   // Owned source declarations and parameter policies.
   loom_runtime_preparation_t* preparation;
   // Owned immutable checkpoint indexes shared by resident and demand reads.

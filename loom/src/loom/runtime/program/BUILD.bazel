@@ -150,7 +150,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/execution:dispatch",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/hal/vm:types",
         "//runtime/src/iree/vm",
     ],
 )
@@ -378,9 +378,9 @@ loom_cc_library(
         ":sources",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/module/string",
         "//runtime/src/iree/vm",
         "//runtime/src/iree/vm/bytecode:module",
+        "//runtime/src/iree/vm/module/string",
     ],
 )
 
@@ -425,7 +425,7 @@ loom_cc_test(
         "//loom/src/loom/model:card",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/hal/vm:types",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",

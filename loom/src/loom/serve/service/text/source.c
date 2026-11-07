@@ -321,9 +321,8 @@ iree_status_t loom_serve_text_source_initialize(
       &out_source->parameter_sources));
   const iree_vm_ref_type_table_t* table = NULL;
   IREE_RETURN_IF_ERROR(
-      iree_hal_module_register_types(out_source->environment, &table));
-  IREE_RETURN_IF_ERROR(
-      iree_hal_module_types_resolve(table, &out_source->types));
+      iree_hal_vm_register_types(out_source->environment, &table));
+  IREE_RETURN_IF_ERROR(iree_hal_vm_types_resolve(table, &out_source->types));
   return iree_ok_status();
 }
 

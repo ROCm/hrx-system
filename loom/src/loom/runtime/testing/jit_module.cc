@@ -17,8 +17,8 @@ iree_status_t JitModuleTest::PrepareVm() {
   IREE_RETURN_IF_ERROR(
       iree_vm_environment_allocate(host_allocator_, &environment_));
   const iree_vm_ref_type_table_t* table = nullptr;
-  IREE_RETURN_IF_ERROR(iree_hal_module_register_types(environment_, &table));
-  IREE_RETURN_IF_ERROR(iree_hal_module_types_resolve(table, &types_));
+  IREE_RETURN_IF_ERROR(iree_hal_vm_register_types(environment_, &table));
+  IREE_RETURN_IF_ERROR(iree_hal_vm_types_resolve(table, &types_));
   const loom_runtime_stage_t stages[] = {
       {commands_[0], 1, transients_[0], dispatches_[0]},
       {commands_[1], 1, transients_[1], dispatches_[1]},

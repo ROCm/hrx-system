@@ -151,7 +151,7 @@ static const iree_vm_module_vtable_t module_vtable = {
 };
 
 iree_status_t loom_runtime_parameters_module_create(
-    iree_vm_environment_t* environment, const iree_hal_module_types_t* types,
+    iree_vm_environment_t* environment, const iree_hal_vm_types_t* types,
     iree_hal_queue_t* queue, loom_runtime_parameter_sources_t* sources,
     iree_allocator_t host_allocator, iree_vm_module_t** out_module) {
   *out_module = NULL;

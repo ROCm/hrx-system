@@ -131,7 +131,7 @@ loom_cc_test(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/hal/vm:types",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",

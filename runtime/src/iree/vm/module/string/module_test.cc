@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/module/string/module.h"
+#include "iree/vm/module/string/module.h"
 
 #include <array>
 #include <initializer_list>
@@ -19,7 +19,8 @@ class StringModuleTest : public ::testing::Test {
  protected:
   void SetUp() override {
     iree_vm_module_t* module = nullptr;
-    IREE_ASSERT_OK(iree_string_module_create(iree_allocator_system(), &module));
+    IREE_ASSERT_OK(
+        iree_vm_string_module_create(iree_allocator_system(), &module));
     iree_status_t status = iree_vm_program_create(
         {module, {}}, iree_allocator_system(), &program_);
     iree_vm_module_release(module);

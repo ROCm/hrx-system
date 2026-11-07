@@ -41,7 +41,6 @@
 #include "iree/hal/driver/task/queue/memory_barrier.h"
 #include "iree/task/executor.h"
 #include "iree/task/process.h"
-#include "iree/task/scope.h"
 #include "iree/task/tuning.h"
 
 #ifdef __cplusplus
@@ -70,6 +69,7 @@ typedef struct iree_async_proactor_t iree_async_proactor_t;
 typedef struct iree_async_frontier_tracker_t iree_async_frontier_tracker_t;
 typedef struct iree_hal_resource_set_t iree_hal_resource_set_t;
 typedef struct iree_hal_task_queue_t iree_hal_task_queue_t;
+typedef struct iree_hal_task_queue_shutdown_t iree_hal_task_queue_shutdown_t;
 
 //===----------------------------------------------------------------------===//
 // Queue operation (ready list entry)
@@ -146,10 +146,6 @@ struct iree_hal_task_queue_op_t {
   // deinitialized when the operation completes.
   iree_arena_allocator_t arena;
 
-  // Scope for begin/end lifecycle tracking. The matching scope_begin is
-  // called at submit time; scope_end is called when the operation completes.
-  iree_task_scope_t* scope;
-
   // Semaphores to signal on completion.
   iree_hal_semaphore_list_t signal_semaphores;
 
@@ -176,8 +172,8 @@ struct iree_hal_task_queue_op_t {
 
   // Back-pointer to the owning queue. Used by semaphore wait callbacks to
   // push to the ready list and schedule the queue process when all waits
-  // are satisfied. The queue outlives all operations (deinitialize waits
-  // for scope idle).
+  // are satisfied. The queue outlives all accepted operations and their
+  // readiness callbacks.
   iree_hal_task_queue_t* queue;
 
 #if !defined(NDEBUG)
@@ -425,8 +421,8 @@ struct iree_hal_task_queue_compute_item_t {
   // Back-pointer to the queue operation that submitted this recording.
   // Owned by the item from fill time until the final release worker consumes
   // the processor result and completes/fails the operation. Keeping the
-  // operation alive until the last drainer exits preserves its resource_set
-  // and scope without a separate ownership handoff.
+  // operation alive until the last drainer exits preserves its captured
+  // resources and queue lifetime without a separate ownership handoff.
   iree_hal_task_queue_op_t* operation;
 
   // Allocator used to free the processor context. Snapshotted at fill time so
@@ -497,8 +493,8 @@ typedef struct iree_hal_task_queue_create_params_t {
   // for initialization and copied by dynamic allocation.
   iree_hal_queue_params_t queue_params;
 
-  // Flags used to initialize the queue task scope.
-  iree_task_scope_flags_t scope_flags;
+  // Aborts the process with the full status when a queue operation fails.
+  bool abort_on_failure;
 
   // Executor retained by the queue.
   iree_task_executor_t* executor;
@@ -586,6 +582,9 @@ struct iree_hal_task_queue_t {
   // iree_hal_task_device_params_t for details.
   iree_device_size_t inline_transfer_threshold;
 
+  // Aborts the process on a failed operation when diagnostic mode is enabled.
+  bool abort_on_failure;
+
   // Shared block pool for allocating submission transients.
   iree_arena_block_pool_t* small_block_pool;
   // Shared block pool for large allocations (command buffers/etc).
@@ -603,16 +602,16 @@ struct iree_hal_task_queue_t {
   // Device-owned submission id counter shared by all queues in the session.
   iree_atomic_int64_t* profile_submission_counter;
 
-  // Scope tracking all accepted queue operations through terminal completion.
-  iree_task_scope_t operation_scope;
+  // Accepted operations, readiness wake tails, and one admission reference
+  // until the exclusive destruction caller closes submission.
+  iree_atomic_int32_t pending_operation_count;
 
-  // Scope tracking the persistent control and compute processes until their
-  // release callbacks have run during queue shutdown.
-  iree_task_scope_t process_scope;
+  // Control/compute release callbacks and the shutdown wake's final access.
+  iree_atomic_int32_t pending_shutdown_count;
 
-  // Persistent process release callbacks that may still access queue fields
-  // after the process scope reaches idle.
-  iree_atomic_int32_t pending_process_release_count;
+  // Borrowed destruction caller's wait, published before closing admission.
+  // The final shutdown participant makes its last access before waking it.
+  iree_hal_task_queue_shutdown_t* shutdown;
 
 #if !defined(NDEBUG)
   // Debug-only operation counters omitted from release builds.
@@ -640,10 +639,8 @@ struct iree_hal_task_queue_t {
   // process below). For all other operation types, this process handles
   // them inline, except mappings scheduled as finite processes on the executor.
   //
-  // The process participates in the process scope: scope_begin at
-  // initialization, scope_end in the release callback. This ensures
-  // scope_wait_idle blocks until the process has fully completed and its
-  // worker has exited the drain stack.
+  // Its release callback relinquishes queue ownership only after the worker
+  // has exited the drain stack and requested compute-process termination.
   iree_alignas(iree_hardware_destructive_interference_size)
       iree_task_process_t process;
 
@@ -663,10 +660,10 @@ struct iree_hal_task_queue_t {
   // fail the CAS (already DRAINING) but still wake workers. The process
   // stays in its slot until shutdown.
   //
-  // Participates in the process scope: scope_begin at initialization,
-  // scope_end in the release callback after the last drainer exits. Completes
-  // only after the control process release callback advances shutdown to the
-  // COMPUTE phase, ensuring no producer can still touch the item pool.
+  // Its release callback relinquishes queue ownership after the last drainer
+  // exits. Completes only after the control process release callback advances
+  // shutdown to the COMPUTE phase, ensuring no producer can touch the item
+  // pool.
   iree_alignas(iree_hardware_destructive_interference_size)
       iree_task_process_t compute_process;
 
@@ -779,7 +776,7 @@ iree_status_t iree_hal_task_queue_submit_map(
 // The operation may complete and free itself before this call returns.
 void iree_hal_task_queue_issue_map(iree_hal_task_queue_op_t* operation);
 
-// Allocates one operation and begins its accepted-work scope. On success the
+// Allocates one operation and claims queue lifetime. On success the
 // caller fills its payload and passes it to submit_op_finish exactly once.
 iree_status_t iree_hal_task_queue_submit_op_begin(
     iree_hal_task_queue_t* queue, iree_hal_task_queue_op_type_t type,
@@ -791,13 +788,9 @@ iree_status_t iree_hal_task_queue_submit_op_finish(
     iree_hal_task_queue_op_t* operation, iree_hal_semaphore_list_t waits,
     iree_host_size_t resource_count, iree_hal_resource_t* const* resources);
 
-// Returns whether new queue progress should complete with cancellation.
-bool iree_hal_task_queue_is_shutting_down(iree_hal_task_queue_t* queue);
-
-// Constructs the terminal error for work cancelled during queue shutdown.
-iree_status_t iree_hal_task_queue_make_shutdown_status(void);
-
-// Transfers one ready operation to the existing queue process.
+// Transfers one ready operation from a callback to the queue process. Keeps
+// the queue alive through the wake even if a worker immediately consumes the
+// operation; the caller needs no queue ownership after this call.
 void iree_hal_task_queue_schedule_ready(iree_hal_task_queue_op_t* operation);
 
 // Discards rejected capture without publishing signals. Consumes the operation.
@@ -843,12 +836,12 @@ void iree_hal_task_queue_profile_record_failed_before_ready(
 void iree_hal_task_queue_profile_start_host_execution(
     iree_hal_task_queue_op_t* operation);
 
-// Publishes terminal success and retires the operation's frontier and scope.
-// Consumes the operation.
+// Publishes terminal success and retires the operation's frontier and
+// resources. Consumes the operation.
 void iree_hal_task_queue_op_complete(iree_hal_task_queue_op_t* operation);
 
 // Publishes terminal failure to the signals and frontier, then retires the
-// operation's scope. Consumes both the operation and its non-OK status.
+// operation's resources. Consumes both the operation and its non-OK status.
 void iree_hal_task_queue_op_fail(iree_hal_task_queue_op_t* operation,
                                  iree_status_t status);
 
