@@ -6755,46 +6755,58 @@ def _v_cmp_operand(field_name: str, bit_width: int = 32) -> Operand:
     )
 
 
-def _v_cmp_i32_overlay(
-    *, predicate: str, instruction_suffix: str, semantic_suffix: str
+def _v_cmp_signed_overlay(
+    *,
+    predicate: str,
+    instruction_suffix: str,
+    semantic_suffix: str,
+    bit_width: int = 32,
 ) -> AmdgpuDescriptorOverlay:
     instruction_predicate = instruction_suffix.lower()
-    descriptor_key = f"amdgpu.v_cmp_{predicate}_i32"
+    descriptor_key = f"amdgpu.v_cmp_{predicate}_i{bit_width}"
     return AmdgpuDescriptorOverlay(
         descriptor_key=descriptor_key,
-        instruction_name=f"V_CMP_{instruction_suffix}_I32",
-        mnemonic=f"v_cmp_{instruction_predicate}_i32",
+        instruction_name=f"V_CMP_{instruction_suffix}_I{bit_width}",
+        mnemonic=f"v_cmp_{instruction_predicate}_i{bit_width}",
         encoding_name="ENC_VOP3",
-        semantic_tag=f"cmp.i32.{semantic_suffix}",
+        semantic_tag=f"cmp.i{bit_width}.{semantic_suffix}",
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _sgpr_result("mask", units=2)),
-            AmdgpuOperandOverlay("SRC0", _v_cmp_operand("lhs")),
-            AmdgpuOperandOverlay("SRC1", _v_cmp_operand("rhs")),
+            AmdgpuOperandOverlay("SRC0", _v_cmp_operand("lhs", bit_width)),
+            AmdgpuOperandOverlay("SRC1", _v_cmp_operand("rhs", bit_width)),
         ),
-        operand_forms=_v_cmp_inline_operand_forms(descriptor_key),
+        operand_forms=_v_cmp_inline_operand_forms(descriptor_key)
+        if bit_width == 32
+        else (),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
 
-def _v_cmp_u32_overlay(
-    *, predicate: str, instruction_suffix: str, semantic_suffix: str
+def _v_cmp_unsigned_overlay(
+    *,
+    predicate: str,
+    instruction_suffix: str,
+    semantic_suffix: str,
+    bit_width: int = 32,
 ) -> AmdgpuDescriptorOverlay:
     instruction_predicate = instruction_suffix.lower()
-    descriptor_key = f"amdgpu.v_cmp_{predicate}_u32"
+    descriptor_key = f"amdgpu.v_cmp_{predicate}_u{bit_width}"
     return AmdgpuDescriptorOverlay(
         descriptor_key=descriptor_key,
-        instruction_name=f"V_CMP_{instruction_suffix}_U32",
-        mnemonic=f"v_cmp_{instruction_predicate}_u32",
+        instruction_name=f"V_CMP_{instruction_suffix}_U{bit_width}",
+        mnemonic=f"v_cmp_{instruction_predicate}_u{bit_width}",
         encoding_name="ENC_VOP3",
-        semantic_tag=f"cmp.u32.{semantic_suffix}",
+        semantic_tag=f"cmp.u{bit_width}.{semantic_suffix}",
         schedule_class=_SCHEDULE_VALU,
         operands=(
             AmdgpuOperandOverlay("VDST", _sgpr_result("mask", units=2)),
-            AmdgpuOperandOverlay("SRC0", _v_cmp_operand("lhs")),
-            AmdgpuOperandOverlay("SRC1", _v_cmp_operand("rhs")),
+            AmdgpuOperandOverlay("SRC0", _v_cmp_operand("lhs", bit_width)),
+            AmdgpuOperandOverlay("SRC1", _v_cmp_operand("rhs", bit_width)),
         ),
-        operand_forms=_v_cmp_inline_operand_forms(descriptor_key),
+        operand_forms=_v_cmp_inline_operand_forms(descriptor_key)
+        if bit_width == 32
+        else (),
         flags=(DescriptorFlag.DEAD_REMOVABLE,),
     )
 
@@ -7034,9 +7046,9 @@ _V_CMP_FLOAT_PREDICATES = (
 )
 
 
-_V_CMP_OVERLAY_FAMILIES = (
+_V_CMP_INTEGER_OVERLAY_FAMILIES = (
     (
-        _v_cmp_i32_overlay,
+        _v_cmp_signed_overlay,
         _v_cmp_i32_source_overlays,
         _SOURCE_INLINE_U32_IMMEDIATE,
         (
@@ -7049,7 +7061,7 @@ _V_CMP_OVERLAY_FAMILIES = (
         ),
     ),
     (
-        _v_cmp_u32_overlay,
+        _v_cmp_unsigned_overlay,
         _v_cmp_u32_source_overlays,
         _SOURCE_INLINE_U32_IMMEDIATE,
         (
@@ -7059,6 +7071,10 @@ _V_CMP_OVERLAY_FAMILIES = (
             ("uge", "GE", "uge"),
         ),
     ),
+)
+
+_V_CMP_OVERLAY_FAMILIES = (
+    *_V_CMP_INTEGER_OVERLAY_FAMILIES,
     (
         _v_cmp_float_overlay,
         _v_cmp_f32_source_overlays,
@@ -7066,22 +7082,6 @@ _V_CMP_OVERLAY_FAMILIES = (
         _V_CMP_FLOAT_PREDICATES,
     ),
 )
-
-
-def _v_cmp_base_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
-    return (
-        tuple(
-            base_builder(
-                predicate=predicate,
-                instruction_suffix=instruction_suffix,
-                semantic_suffix=semantic_suffix,
-            )
-            for base_builder, _, _, rows in _V_CMP_OVERLAY_FAMILIES
-            for predicate, instruction_suffix, semantic_suffix in rows
-        )
-        + _v_cmp_float_overlays(16)
-        + _v_cmp_float_overlays(64)
-    )
 
 
 def _v_cmp_float_overlays(bit_width: int) -> tuple[AmdgpuDescriptorOverlay, ...]:
@@ -7375,6 +7375,16 @@ def _v_cmp_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
                     semantic_suffix=semantic_suffix,
                 ),
             )
+        )
+        + tuple(
+            base_builder(
+                predicate=predicate,
+                instruction_suffix=instruction_suffix,
+                semantic_suffix=semantic_suffix,
+                bit_width=64,
+            )
+            for base_builder, _, _, rows in _V_CMP_INTEGER_OVERLAY_FAMILIES
+            for predicate, instruction_suffix, semantic_suffix in rows
         )
         + _v_cmp_float_overlays(16)
         + _v_cmp_float_overlays(64)
@@ -8212,7 +8222,6 @@ __all__ = (
     "_v_binary_src0_inline_overlay",
     "_v_binary_u32_overlay",
     "_v_binary_vop3_float_overlay",
-    "_v_cmp_base_overlays",
     "_v_cmp_class_cdna_overlays",
     "_v_cmp_class_inline_overlay",
     "_v_cmp_class_literal_overlay",
@@ -8220,7 +8229,7 @@ __all__ = (
     "_v_cmp_class_overlays",
     "_v_cmp_float_overlay",
     "_v_cmp_f32_source_overlays",
-    "_v_cmp_i32_overlay",
+    "_v_cmp_signed_overlay",
     "_v_cmp_i32_equality_vcc_overlays",
     "_v_cmp_i32_source0_inline_vcc_overlay",
     "_v_cmp_i32_source1_inline_vcc_overlay",
@@ -8228,7 +8237,7 @@ __all__ = (
     "_v_cmp_inline_operand_forms",
     "_v_cmp_overlays",
     "_v_cmp_source_inline_overlay",
-    "_v_cmp_u32_overlay",
+    "_v_cmp_unsigned_overlay",
     "_v_cmp_u32_source_overlays",
     "_v_dpp_uniform_rhs_integer_compare_candidates",
     "_v_commutative_binary_f16_overlay",

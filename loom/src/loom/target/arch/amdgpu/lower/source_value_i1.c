@@ -192,9 +192,8 @@ static bool loom_amdgpu_index_cmp_requires_native_mask(
     const loom_module_t* module,
     const loom_amdgpu_source_value_analysis_t* analysis,
     const loom_op_t* source_op) {
-  // Full-width address comparisons are assembled from 32-bit vector compares
-  // and therefore produce a native lane mask. Address comparisons proven to
-  // fit in 32 bits retain the scalar SCC path.
+  // Full-width address comparisons use native vector compares and produce a
+  // lane mask. Address comparisons proven to fit in 32 bits retain scalar SCC.
   if (!loom_index_cmp_isa(source_op)) {
     return false;
   }

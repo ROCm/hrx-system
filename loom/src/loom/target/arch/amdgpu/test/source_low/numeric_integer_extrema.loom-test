@@ -1,4 +1,4 @@
-// RUN: with-checks emit source-low target=amdgpu:gfx1151 output=low
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
 
 func.def @integer_extrema_i32(%lhs: i32, %rhs: i32) -> (i32, i32, i32, i32) {
   %signed_min = scalar.minsi %lhs, %rhs : i32
@@ -9,12 +9,13 @@ func.def @integer_extrema_i32(%lhs: i32, %rhs: i32) -> (i32, i32, i32, i32) {
 }
 
 // ----
-CHECK: %signed_min = s_min_i32 *
-CHECK: %signed_max = s_max_i32 *
-CHECK: %unsigned_min = s_min_u32 *
-CHECK: %unsigned_max = s_max_u32 *
-CHECK-NOT: * = v_cndmask*
-CHECK: return %signed_min, %signed_max, %unsigned_min, %unsigned_max
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @integer_extrema_i32(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %signed_min = s_min_i32 %lhs, %rhs
+  %signed_max = s_max_i32 %lhs, %rhs
+  %unsigned_min = s_min_u32 %lhs, %rhs
+  %unsigned_max = s_max_u32 %lhs, %rhs
+  return %signed_min, %signed_max, %unsigned_min, %unsigned_max
+}
 
 // ====
 
@@ -27,13 +28,30 @@ func.def @integer_extrema_i64(%lhs: i64, %rhs: i64) -> (i64, i64, i64, i64) {
 }
 
 // ----
-CHECK: * = v_cmp_lt_i32 *
-CHECK: * = v_cmp_gt_i32 *
-CHECK: * = v_cmp_lt_u32 *
-CHECK: * = v_cmp_gt_u32 *
-CHECK: * = v_cndmask_b32 *
-CHECK: %signed_min = concat(*) : *
-CHECK: %signed_max = concat(*) : *
-CHECK: %unsigned_min = concat(*) : *
-CHECK: %unsigned_max = concat(*) : *
-CHECK: return %signed_min, %signed_max, %unsigned_min, %unsigned_max
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @integer_extrema_i64(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %24 = v_cmp_lt_i64 %lhs, %rhs
+  %25 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = v_mov_b32_copy %25
+  %27 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = v_mov_b32_copy %27
+  %29 = v_cndmask_b32 %28, %26, %24
+  %30 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = v_mov_b32_copy %30
+  %32 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = v_mov_b32_copy %32
+  %34 = v_cndmask_b32 %33, %31, %24
+  %signed_min = concat(%29, %34) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %36 = v_cmp_gt_i64 %lhs, %rhs
+  %41 = v_cndmask_b32 %28, %26, %36
+  %46 = v_cndmask_b32 %33, %31, %36
+  %signed_max = concat(%41, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %48 = v_cmp_lt_u64 %lhs, %rhs
+  %53 = v_cndmask_b32 %28, %26, %48
+  %58 = v_cndmask_b32 %33, %31, %48
+  %unsigned_min = concat(%53, %58) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %60 = v_cmp_gt_u64 %lhs, %rhs
+  %65 = v_cndmask_b32 %28, %26, %60
+  %70 = v_cndmask_b32 %33, %31, %60
+  %unsigned_max = concat(%65, %70) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %signed_min, %signed_max, %unsigned_min, %unsigned_max
+}

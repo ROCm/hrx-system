@@ -316,44 +316,15 @@ iree_status_t loom_amdgpu_lookup_or_materialize_integer_operand(
                                           out_low_value);
 }
 
-static iree_status_t loom_amdgpu_emit_i64_compare_mask(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_descriptor_ref_t descriptor_ref, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t mask_type, loom_value_id_t* out_mask) {
-  *out_mask = LOOM_VALUE_ID_INVALID;
-  const loom_value_id_t operands[] = {lhs, rhs};
-  loom_op_t* compare_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
-      context, source_op, descriptor_ref, operands, IREE_ARRAYSIZE(operands),
-      loom_named_attr_slice_empty(), &mask_type, 1, &compare_op));
-  *out_mask = loom_value_slice_get(loom_low_op_results(compare_op), 0);
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_emit_i64_compare_mask_combine(
-    loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_amdgpu_descriptor_ref_t descriptor_ref, loom_value_id_t lhs,
-    loom_value_id_t rhs, loom_type_t mask_type, loom_value_id_t* out_mask) {
-  *out_mask = LOOM_VALUE_ID_INVALID;
-  const loom_value_id_t operands[] = {lhs, rhs};
-  loom_op_t* combine_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
-      context, source_op, descriptor_ref, operands, IREE_ARRAYSIZE(operands),
-      loom_named_attr_slice_empty(), &mask_type, 1, &combine_op));
-  *out_mask = loom_value_slice_get(loom_low_op_results(combine_op), 0);
-  return iree_ok_status();
-}
-
 iree_status_t loom_amdgpu_lower_i64_compare(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_i64_compare_plan_t* plan) {
-  const loom_module_t* module = loom_low_lower_context_module(context);
   loom_type_t mask_type = loom_type_none();
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_make_sgpr_range_type(context, 2, &mask_type));
 
-  // Normalize each operand once before splitting it. A narrow signed index
-  // needs a sign word even when the other operand has a wide address carrier.
+  // A narrow signed index needs a sign word even when the other operand has a
+  // wide address carrier. The native compare consumes both normalized pairs.
   loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_lookup_or_materialize_integer_operand(
       context, source_op, plan->lhs,
@@ -369,50 +340,14 @@ iree_status_t loom_amdgpu_lower_i64_compare(
   loom_value_id_t operands[] = {lhs, rhs};
   IREE_RETURN_IF_ERROR(loom_amdgpu_legalize_vop3_scalar_sources(
       context, source_op, operands, IREE_ARRAYSIZE(operands)));
-  lhs = operands[0];
-  rhs = operands[1];
-  const loom_type_t lhs_lane_type =
-      loom_amdgpu_low_register_lane_type(module, lhs);
-  const loom_type_t rhs_lane_type =
-      loom_amdgpu_low_register_lane_type(module, rhs);
-  loom_value_id_t lhs_lo = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(context, source_op, lhs, 0,
-                                                  lhs_lane_type, &lhs_lo));
-  loom_value_id_t lhs_hi = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(context, source_op, lhs, 1,
-                                                  lhs_lane_type, &lhs_hi));
-  loom_value_id_t rhs_lo = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(context, source_op, rhs, 0,
-                                                  rhs_lane_type, &rhs_lo));
-  loom_value_id_t rhs_hi = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(context, source_op, rhs, 1,
-                                                  rhs_lane_type, &rhs_hi));
-
-  loom_value_id_t high_mask = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_i64_compare_mask(
-      context, source_op, plan->high_descriptor_ref, lhs_hi, rhs_hi, mask_type,
-      &high_mask));
-  loom_value_id_t low_mask = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_i64_compare_mask(
-      context, source_op, plan->low_descriptor_ref, lhs_lo, rhs_lo, mask_type,
-      &low_mask));
-
-  loom_value_id_t combined_low_mask = low_mask;
-  if (plan->needs_high_equal) {
-    loom_value_id_t high_equal_mask = LOOM_VALUE_ID_INVALID;
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_i64_compare_mask(
-        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_CMP_EQ_I32, lhs_hi,
-        rhs_hi, mask_type, &high_equal_mask));
-    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_i64_compare_mask_combine(
-        context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_AND_B64,
-        high_equal_mask, low_mask, mask_type, &combined_low_mask));
-  }
-
-  loom_value_id_t result_mask = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_i64_compare_mask_combine(
-      context, source_op, plan->combine_descriptor_ref, high_mask,
-      combined_low_mask, mask_type, &result_mask));
-  return loom_low_lower_bind_value(context, plan->result, result_mask);
+  loom_op_t* compare_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_op(
+      context, source_op, plan->descriptor_ref, operands,
+      IREE_ARRAYSIZE(operands), loom_named_attr_slice_empty(), &mask_type, 1,
+      &compare_op));
+  return loom_low_lower_bind_value(
+      context, plan->result,
+      loom_value_slice_get(loom_low_op_results(compare_op), 0));
 }
 
 iree_status_t loom_amdgpu_extract_low_32_bits_as_vgpr(

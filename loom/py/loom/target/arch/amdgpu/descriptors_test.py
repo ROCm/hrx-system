@@ -3811,9 +3811,14 @@ def test_binary_vop3_comparisons_admit_scalar_and_vector_sources() -> None:
         "uno",
     )
     families = (
-        [(f"amdgpu.v_cmp_{predicate}_i32", 32) for predicate in integer_predicates[:6]]
+        [
+            (f"amdgpu.v_cmp_{predicate}_i{width}", width)
+            for width in (32, 64)
+            for predicate in integer_predicates[:6]
+        ]
         + [
-            (f"amdgpu.v_cmp_{predicate}_u32", 32)
+            (f"amdgpu.v_cmp_{predicate}_u{width}", width)
+            for width in (32, 64)
             for predicate in integer_predicates[6:]
         ]
         + [

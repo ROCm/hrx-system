@@ -147,24 +147,12 @@ func.def @mixed_i64(%uniform: i64, %payload: vector<1xi64>) -> (i32, i32) {
 
 // ----
 low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @mixed_i64(%uniform: reg<amdgpu.sgpr x2>, %varying: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %19 = slice %uniform[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %20 = slice %uniform[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %21 = slice %varying[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %22 = slice %varying[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %23 = v_cmp_lt_i32 %20, %22
-  %24 = v_cmp_lt_u32 %19, %21
-  %25 = v_cmp_eq_i32 %20, %22
-  %26 = s_and_b64 %25, %24
-  %forward = s_or_b64 %23, %26
-  %32 = v_cmp_gt_u32 %22, %20
-  %33 = v_cmp_ge_u32 %21, %19
-  %34 = v_cmp_eq_i32 %22, %20
-  %35 = s_and_b64 %34, %33
-  %reverse = s_or_b64 %32, %35
-  %38 = s_mov_b32 0
-  %39 = v_mov_b32_copy %38
-  %forward_word = v_cndmask_b32_src1_inline %39, %forward {true_value = 1}
-  %reverse_word = v_cndmask_b32_src1_inline %39, %reverse {true_value = 1}
+  %forward = v_cmp_lt_i64 %uniform, %varying
+  %reverse = v_cmp_ge_u64 %varying, %uniform
+  %22 = s_mov_b32 0
+  %23 = v_mov_b32_copy %22
+  %forward_word = v_cndmask_b32_src1_inline %23, %forward {true_value = 1}
+  %reverse_word = v_cndmask_b32_src1_inline %23, %reverse {true_value = 1}
   return %forward_word, %reverse_word
 }
 

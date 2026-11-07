@@ -1,0 +1,114 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @varying_predicates(%values: vector<2xi64>) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+  %lhs = vector.extract %values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %values[1] : vector<2xi64> -> i64
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @varying_predicates(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+  %lhs = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %rhs = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %eq = v_cmp_eq_i64 %lhs, %rhs
+  %ne = v_cmp_ne_i64 %lhs, %rhs
+  %slt = v_cmp_lt_i64 %lhs, %rhs
+  %sle = v_cmp_le_i64 %lhs, %rhs
+  %sgt = v_cmp_gt_i64 %lhs, %rhs
+  %sge = v_cmp_ge_i64 %lhs, %rhs
+  %ult = v_cmp_lt_u64 %lhs, %rhs
+  %ule = v_cmp_le_u64 %lhs, %rhs
+  %ugt = v_cmp_gt_u64 %lhs, %rhs
+  %uge = v_cmp_ge_u64 %lhs, %rhs
+  return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @varying_predicates(%values: vector<2xi64>) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+  %lhs = vector.extract %values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %values[1] : vector<2xi64> -> i64
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+}
+
+// ----
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @varying_predicates(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+  %lhs = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %rhs = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %eq = v_cmp_eq_i64 %lhs, %rhs
+  %ne = v_cmp_ne_i64 %lhs, %rhs
+  %slt = v_cmp_lt_i64 %lhs, %rhs
+  %sle = v_cmp_le_i64 %lhs, %rhs
+  %sgt = v_cmp_gt_i64 %lhs, %rhs
+  %sge = v_cmp_ge_i64 %lhs, %rhs
+  %ult = v_cmp_lt_u64 %lhs, %rhs
+  %ule = v_cmp_le_u64 %lhs, %rhs
+  %ugt = v_cmp_gt_u64 %lhs, %rhs
+  %uge = v_cmp_ge_u64 %lhs, %rhs
+  return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx1201> @target
+
+func.def target(@target) @varying_predicates(%values: vector<2xi64>) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1) {
+  %lhs = vector.extract %values[0] : vector<2xi64> -> i64
+  %rhs = vector.extract %values[1] : vector<2xi64> -> i64
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  func.return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge : i1, i1, i1, i1, i1, i1, i1, i1, i1, i1
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @varying_predicates(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+  %lhs = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %rhs = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %eq = v_cmp_eq_i64 %lhs, %rhs
+  %ne = v_cmp_ne_i64 %lhs, %rhs
+  %slt = v_cmp_lt_i64 %lhs, %rhs
+  %sle = v_cmp_le_i64 %lhs, %rhs
+  %sgt = v_cmp_gt_i64 %lhs, %rhs
+  %sge = v_cmp_ge_i64 %lhs, %rhs
+  %ult = v_cmp_lt_u64 %lhs, %rhs
+  %ule = v_cmp_le_u64 %lhs, %rhs
+  %ugt = v_cmp_gt_u64 %lhs, %rhs
+  %uge = v_cmp_ge_u64 %lhs, %rhs
+  return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge
+}
