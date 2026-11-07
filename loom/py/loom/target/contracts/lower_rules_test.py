@@ -4350,6 +4350,26 @@ def test_compile_lower_rule_set_compiles_value_memory_space_guard() -> None:
     )
 
 
+def test_compile_lower_rule_set_compiles_value_divisibility_guard() -> None:
+    table = ContractFragment(
+        name="test.value-divisibility",
+        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        cases=[
+            RecipeRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                guards=(Guard.value_divisible_by("rhs", 2**32),),
+            )
+        ],
+    )
+    compiled = compile_lower_rule_set(table, dialect_ops={"scalar": ALL_SCALAR_OPS})
+    guard = compiled.guards[0]
+    assert guard.kind == GuardKind.VALUE_DIVISIBLE_BY
+    assert guard.u64 == 2**32
+    value = compiled.value_refs[guard.value_ref_index]
+    assert value.kind == SourceValueKind.OPERAND
+    assert value.index == 1
+
+
 def test_compile_lower_rule_set_compiles_target_subgroup_size_range_guard() -> None:
     table = ContractFragment(
         name="test.target-subgroup-size",

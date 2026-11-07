@@ -1127,6 +1127,7 @@ class _LowerRuleSetCompiler:
         if guard.kind in (
             GuardKind.VALUE_SIGNED_BIT_COUNT,
             GuardKind.VALUE_UNSIGNED_BIT_COUNT,
+            GuardKind.VALUE_DIVISIBLE_BY,
             GuardKind.VALUE_EXACT_I64,
             GuardKind.VALUE_NOT_EXACT_I64,
             GuardKind.VALUE_EXACT_POWER_OF_TWO_I64,
@@ -1447,6 +1448,24 @@ class _LowerRuleSetCompiler:
                         ),
                     ),
                     u64=guard.count,
+                )
+            )
+            return
+        if guard.kind == GuardKind.VALUE_DIVISIBLE_BY:
+            self._guards.append(
+                LowerGuard(
+                    kind=guard.kind,
+                    value_ref_index=value_ref_index,
+                    u64=guard.count,
+                    diagnostic_index=self._append_diagnostic_ref(
+                        source_op,
+                        _guard_diagnostic(
+                            guard,
+                            _named_constraint_diagnostic(
+                                "field", guard.field, f"divisible_by.{guard.count}"
+                            ),
+                        ),
+                    ),
                 )
             )
             return

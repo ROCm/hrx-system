@@ -739,6 +739,116 @@ def test_scalar_i32_bitwise_rules_prefer_encoded_constants() -> None:
         )
 
 
+def test_scalar_i64_shift_family_has_native_and_word_transport_rules() -> None:
+    compiled = _COMPILED_INTEGER_RULES
+    for source_op, scalar_key, vector_key in (
+        (scalar_bitwise.scalar_shli, "s_lshl_b64", "v_lshlrev_b64"),
+        (scalar_bitwise.scalar_shrui, "s_lshr_b64", "v_lshrrev_b64"),
+        (scalar_bitwise.scalar_shrsi, "s_ashr_i64", "v_ashrrev_i64"),
+    ):
+        rules = tuple(
+            rule
+            for rule in _rules_for_source_op(compiled, source_op)
+            if set(_rule_type_patterns(compiled, rule)) == {Scalar("i64")}
+        )
+        keys = tuple(_rule_descriptor_keys(compiled, rule) for rule in rules)
+        native = ((f"amdgpu.{scalar_key}",), (f"amdgpu.{vector_key}",))
+        if source_op is scalar_bitwise.scalar_shrsi:
+            assert keys == native
+        else:
+            assert keys == (
+                ("amdgpu.s_mov_b32",),
+                native[0],
+                ("amdgpu.v_mov_b32",),
+                (
+                    "amdgpu.v_mov_b32",
+                    f"amdgpu.{vector_key.removesuffix('_b64')}_b32.src0_inline",
+                ),
+                ("amdgpu.v_mov_b32", f"amdgpu.{vector_key.removesuffix('_b64')}_b32"),
+                native[1],
+            )
+            for rule in (rules[0], rules[2]):
+                guards = compiled.guards[
+                    rule.guard_start : rule.guard_start + rule.guard_count
+                ]
+                assert any(
+                    guard.kind is GuardKind.VALUE_I64_RANGE
+                    and guard.minimum_i64 == guard.maximum_i64 == 32
+                    for guard in guards
+                )
+                emits = compiled.emits[
+                    rule.emit_start : rule.emit_start + rule.emit_count
+                ]
+                assert emits[0].kind is LowerEmitKind.REGISTER_SLICE
+                assert emits[0].structural_offset == (
+                    0 if source_op is scalar_bitwise.scalar_shli else 1
+                )
+                assert emits[-1].kind is LowerEmitKind.REGISTER_CONCAT
+            bounded = rules[4]
+            guards = compiled.guards[
+                bounded.guard_start : bounded.guard_start + bounded.guard_count
+            ]
+            assert any(
+                guard.kind is GuardKind.VALUE_I64_RANGE
+                and (guard.minimum_i64, guard.maximum_i64) == (32, 63)
+                for guard in guards
+            )
+            emits = compiled.emits[
+                bounded.emit_start : bounded.emit_start + bounded.emit_count
+            ]
+            assert emits[0].structural_offset == (
+                0 if source_op is scalar_bitwise.scalar_shli else 1
+            )
+            assert emits[-1].kind is LowerEmitKind.REGISTER_CONCAT
+
+
+def test_disjoint_word_bitwise_rules_cover_both_orders_and_banks() -> None:
+    compiled = _COMPILED_INTEGER_RULES
+    for source_op in (scalar_bitwise.scalar_ori, scalar_bitwise.scalar_xori):
+        covered = []
+        for rule in _rules_for_source_op(compiled, source_op):
+            guards = compiled.guards[
+                rule.guard_start : rule.guard_start + rule.guard_count
+            ]
+            divisors = [
+                guard for guard in guards if guard.kind is GuardKind.VALUE_DIVISIBLE_BY
+            ]
+            if not divisors:
+                continue
+            assert set(_rule_type_patterns(compiled, rule)) == {Scalar("i64")}
+            divisor = divisors[0]
+            assert divisor.u64 == 2**32
+            bounds = next(
+                guard for guard in guards if guard.kind is GuardKind.VALUE_I64_RANGE
+            )
+            assert (bounds.minimum_i64, bounds.maximum_i64) == (0, 2**32 - 1)
+            low = compiled.value_refs[bounds.value_ref_index].index
+            high = compiled.value_refs[divisor.value_ref_index].index
+            result_class = next(
+                AMDGPU_INTEGER_CONTRACT_FRAGMENT.descriptor_set.reg_classes[
+                    guard.register_class_id
+                ].name
+                for guard in guards
+                if guard.kind is GuardKind.LOW_VALUE_REGISTER_CLASS
+                and compiled.value_refs[guard.value_ref_index].kind
+                is SourceValueKind.RESULT
+            )
+            covered.append((low, high, result_class))
+            emits = compiled.emits[rule.emit_start : rule.emit_start + rule.emit_count]
+            assert tuple(emit.kind for emit in emits) == (
+                LowerEmitKind.REGISTER_SLICE,
+                LowerEmitKind.REGISTER_SLICE,
+                LowerEmitKind.REGISTER_CONCAT,
+            )
+            assert tuple(emit.structural_offset for emit in emits[:2]) == (0, 1)
+        assert covered == [
+            (0, 1, "amdgpu.sgpr"),
+            (1, 0, "amdgpu.sgpr"),
+            (0, 1, "amdgpu.vgpr"),
+            (1, 0, "amdgpu.vgpr"),
+        ]
+
+
 def test_mixed_scalar_bool_mask_rules_precede_mask_materialization() -> None:
     compiled = _COMPILED_INTEGER_RULES
 

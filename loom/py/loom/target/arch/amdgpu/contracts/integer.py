@@ -19,6 +19,7 @@ from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
 from loom.target.arch.amdgpu.contracts.index_bitwise import index_bitwise_rules
+from loom.target.arch.amdgpu.contracts.integer64 import integer64_rules
 from loom.target.arch.amdgpu.contracts.integer_division import integer_division_rules
 from loom.target.arch.amdgpu.contracts.materializers import (
     ADDRESS_SGPR_MATERIALIZER,
@@ -91,6 +92,10 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.s_xor_b64",
     "amdgpu.s_lshl_b64",
     "amdgpu.s_lshr_b64",
+    "amdgpu.s_ashr_i64",
+    "amdgpu.v_lshlrev_b64",
+    "amdgpu.v_lshrrev_b64",
+    "amdgpu.v_ashrrev_i64",
     "amdgpu.s_lshl_b32",
     "amdgpu.s_lshr_b32",
     "amdgpu.s_lshr_b32.rhs_inline",
@@ -2058,7 +2063,7 @@ def _scalar_ctpopi_i32_rules() -> tuple[DescriptorRule, ...]:
 
 
 def _rules() -> tuple[DescriptorRule, ...]:
-    rules: list[DescriptorRule] = []
+    rules: list[DescriptorRule] = list(integer64_rules(_DESCRIPTOR_SET))
     for source_op, suffix in (
         (scalar_arithmetic.scalar_minsi, "min_i32"),
         (scalar_arithmetic.scalar_maxsi, "max_i32"),

@@ -1225,6 +1225,20 @@ static iree_status_t loom_low_lower_rule_guard_matches(
           guard->selector.value.value_ref_index,
           loom_low_lower_rule_set_guard_payload(rule_set, guard)->u64,
           /*is_signed_domain=*/false, out_matches);
+    case LOOM_LOW_LOWER_GUARD_VALUE_DIVISIBLE_BY: {
+      const loom_value_id_t value_id = loom_low_lower_rule_source_value(
+          match_context->module, rule_set, source_op,
+          guard->selector.value.value_ref_index);
+      loom_value_facts_t facts = loom_value_facts_unknown();
+      *out_matches = loom_low_lower_rule_integer_element_range_facts(
+                         match_context->module, match_context->fact_table,
+                         value_id, &facts) &&
+                     loom_value_facts_divisible_by(
+                         facts, (int64_t)loom_low_lower_rule_set_guard_payload(
+                                    rule_set, guard)
+                                    ->u64);
+      return iree_ok_status();
+    }
     case LOOM_LOW_LOWER_GUARD_VALUE_EXACT_I64:
       *out_matches = loom_low_lower_rule_value_facts_exact_i64(
           match_context, rule_set, source_op,

@@ -31,12 +31,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @uniform_i64(%div
   %140 = s_cselect_b32 %135, %137, %138
   %141 = s_clz_i32_u32 %116
   %142 = s_lshl_b32 %116, %141
-  %143 = s_mov_b32 0
-  %144 = concat(%114, %143) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %146 = concat(%140, %143) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %147 = s_mov_b32 32
-  %151 = s_lshl_b64 %146, %147
-  %152 = s_or_b64 %151, %144
+  %152 = concat(%114, %140) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %156 = s_lshl_b64 %152, %141
   %157 = slice %156[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %158 = slice %156[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -46,6 +41,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @uniform_i64(%div
   %162 = s_lshr_b32 %142, %160
   %163 = s_and_b32_lit %157, 65535
   %164 = s_lshr_b32 %157, %160
+  %165 = s_mov_b32 0
   %166 = s_mov_b32 1
   %167 = v_cvt_f32_u32 %162
   %168 = v_rcp_f32 %167
@@ -53,7 +49,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @uniform_i64(%div
   %170 = v_cvt_u32_f32 %169
   %171 = v_readfirstlane_b32 %170
   %172 = s_mul_i32 %162, %171
-  %173 = s_sub_u32 %143, %172
+  %173 = s_sub_u32 %165, %172
   %174 = s_mul_hi_u32 %171, %173
   %175 = s_add_u32 %171, %174
   %176 = s_mul_hi_u32 %158, %175
@@ -257,12 +253,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @wide_index(%divi
   %147 = s_cselect_b32 %142, %144, %145
   %148 = s_clz_i32_u32 %divisor
   %149 = s_lshl_b32 %divisor, %148
-  %150 = s_mov_b32 0
-  %151 = concat(%121, %150) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %153 = concat(%147, %150) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %154 = s_mov_b32 32
-  %158 = s_lshl_b64 %153, %154
-  %159 = s_or_b64 %158, %151
+  %159 = concat(%121, %147) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %163 = s_lshl_b64 %159, %148
   %164 = slice %163[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %165 = slice %163[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -272,6 +263,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @wide_index(%divi
   %169 = s_lshr_b32 %149, %167
   %170 = s_and_b32_lit %164, 65535
   %171 = s_lshr_b32 %164, %167
+  %172 = s_mov_b32 0
   %173 = s_mov_b32 1
   %174 = v_cvt_f32_u32 %169
   %175 = v_rcp_f32 %174
@@ -279,7 +271,7 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @wide_index(%divi
   %177 = v_cvt_u32_f32 %176
   %178 = v_readfirstlane_b32 %177
   %179 = s_mul_i32 %169, %178
-  %180 = s_sub_u32 %150, %179
+  %180 = s_sub_u32 %172, %179
   %181 = s_mul_hi_u32 %178, %180
   %182 = s_add_u32 %178, %181
   %183 = s_mul_hi_u32 %165, %182
