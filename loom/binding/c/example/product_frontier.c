@@ -83,6 +83,8 @@ typedef struct jit_scheduler_t {
 
   // Frozen source index reused by command-product builds.
   loomc_link_index_t* link_index;
+  // Reusable command preparation over the immutable source index.
+  loomc_cmd_compiler_t* command_compiler;
 
   // Prepared compiler shared by kernel compile tasks.
   loomc_compiler_t* compiler;
@@ -188,6 +190,7 @@ static void jit_scheduler_deinitialize(jit_scheduler_t* scheduler) {
   loomc_product_release(scheduler->command_product);
   loomc_pass_program_release(scheduler->pass_program);
   loomc_compiler_release(scheduler->compiler);
+  loomc_cmd_compiler_release(scheduler->command_compiler);
   loomc_link_index_release(scheduler->link_index);
   loomc_source_release(scheduler->source);
   loomc_workspace_release(scheduler->command_workspace);
@@ -334,6 +337,11 @@ static loomc_status_t prepare_source_catalog(jit_scheduler_t* scheduler,
     status = require_successful_result(index_result, "source indexing failed");
   }
 
+  if (loomc_status_is_ok(status)) {
+    status = loomc_cmd_compiler_create(scheduler->link_index, NULL,
+                                       scheduler->allocator,
+                                       &scheduler->command_compiler);
+  }
   loomc_link_index_symbol_t root_symbol = {0};
   if (loomc_status_is_ok(status) &&
       !loomc_link_index_lookup_global(scheduler->link_index,
@@ -415,7 +423,7 @@ static loomc_status_t build_command_product(jit_scheduler_t* scheduler,
   const loomc_cmd_program_product_options_t options = {
       .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
       .structure_size = sizeof(options),
-      .link_index = scheduler->link_index,
+      .compiler = scheduler->command_compiler,
       .root_symbol_ordinals = &root_ordinal,
       .root_symbol_count = 1,
       .request_sink =

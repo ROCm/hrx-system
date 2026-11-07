@@ -186,22 +186,33 @@ static loomc_string_view_t loomc_diagnostic_copy_string(
 
 static loomc_status_t loomc_result_capture_diagnostic_source(
     const loomc_result_t* result, const loomc_source_t* source,
-    loomc_source_t** out_source) {
+    bool independent_sources, loomc_source_t** out_source) {
   *out_source = NULL;
   if (source == NULL) {
     return loomc_ok_status();
   }
-  if (result->source_retention == LOOMC_SOURCE_RETENTION_EXACT) {
+  if (result->source_retention == LOOMC_SOURCE_RETENTION_EXACT &&
+      !independent_sources) {
     *out_source = (loomc_source_t*)source;
     loomc_source_retain(*out_source);
     return loomc_ok_status();
+  }
+  if (result->source_retention == LOOMC_SOURCE_RETENTION_EXACT) {
+    const loomc_source_options_t options = {
+        .format = loomc_source_format(source),
+        .identifier = loomc_source_identifier(source),
+        .contents = loomc_source_contents(source),
+        .storage = LOOMC_SOURCE_STORAGE_COPY,
+    };
+    return loomc_source_create(&options, result->allocator, out_source);
   }
   return loomc_source_clone_identity(source, result->allocator, out_source);
 }
 
 static loomc_status_t loomc_result_copy_diagnostic_range(
     const loomc_result_t* result, const loomc_source_range_t* range,
-    loomc_source_t* shared_source, loomc_source_range_t* out_range) {
+    loomc_source_t* shared_source, bool independent_sources,
+    loomc_source_range_t* out_range) {
   *out_range = *range;
   out_range->source = NULL;
   if (shared_source != NULL) {
@@ -210,14 +221,15 @@ static loomc_status_t loomc_result_copy_diagnostic_range(
   } else {
     loomc_source_t* captured_source = NULL;
     LOOMC_RETURN_IF_ERROR(loomc_result_capture_diagnostic_source(
-        result, range->source, &captured_source));
+        result, range->source, independent_sources, &captured_source));
     out_range->source = captured_source;
   }
   return loomc_ok_status();
 }
 
-loomc_status_t loomc_result_add_diagnostic(
-    loomc_result_t* result, const loomc_diagnostic_t* diagnostic) {
+static loomc_status_t loomc_result_add_diagnostic_impl(
+    loomc_result_t* result, const loomc_diagnostic_t* diagnostic,
+    bool independent_sources) {
   if (result == NULL || diagnostic == NULL) {
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT,
                              "result and diagnostic must not be NULL");
@@ -293,7 +305,8 @@ loomc_status_t loomc_result_add_diagnostic(
         loomc_diagnostic_copy_string(parameters[i].value, &cursor);
   }
   loomc_status_t status = loomc_result_copy_diagnostic_range(
-      result, &diagnostic->range, /*shared_source=*/NULL, &target->value.range);
+      result, &diagnostic->range, /*shared_source=*/NULL, independent_sources,
+      &target->value.range);
   for (loomc_host_size_t i = 0; i < diagnostic->related_location_count; ++i) {
     related_locations[i] = diagnostic->related_locations[i];
     related_locations[i].range.source = NULL;
@@ -313,7 +326,7 @@ loomc_status_t loomc_result_add_diagnostic(
     if (loomc_status_is_ok(status)) {
       status = loomc_result_copy_diagnostic_range(
           result, &diagnostic->related_locations[i].range, shared_source,
-          &related_locations[i].range);
+          independent_sources, &related_locations[i].range);
     }
   }
   if (!loomc_status_is_ok(status)) {
@@ -322,6 +335,27 @@ loomc_status_t loomc_result_add_diagnostic(
   }
   ++result->diagnostic_count;
   return loomc_ok_status();
+}
+
+loomc_status_t loomc_result_add_diagnostic(
+    loomc_result_t* result, const loomc_diagnostic_t* diagnostic) {
+  return loomc_result_add_diagnostic_impl(result, diagnostic,
+                                          /*independent_sources=*/false);
+}
+
+loomc_status_t loomc_result_copy_diagnostics(loomc_result_t* destination,
+                                             const loomc_result_t* source) {
+  loomc_status_t status = loomc_ok_status();
+  const loomc_host_size_t count = loomc_result_diagnostic_count(source);
+  for (loomc_host_size_t i = 0; i < count && loomc_status_is_ok(status); ++i) {
+    status = loomc_result_add_diagnostic_impl(
+        destination, loomc_result_diagnostic_at(source, i),
+        /*independent_sources=*/true);
+  }
+  if (source != NULL && !loomc_result_succeeded(source)) {
+    loomc_result_set_status_code(destination, loomc_result_status_code(source));
+  }
+  return status;
 }
 
 static loomc_status_t loomc_result_prepare_artifact(

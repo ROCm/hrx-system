@@ -14,6 +14,7 @@
 #include "loom/analysis/template_provider_catalog.h"
 #include "loom/ir/module.h"
 #include "loom/link/index_materializer.h"
+#include "loom/link/planner.h"
 #include "loom/link/template_candidate_loader.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/target/facts.h"
@@ -35,6 +36,29 @@ struct loom_kernel_request_producer_t {
 
   // Lazy provider-header cache shared by every kernel publication.
   loom_link_template_candidate_loader_t* candidate_loader;
+};
+
+struct loom_kernel_request_preparation_t {
+  // Host allocator owning this preparation and its module metadata.
+  iree_allocator_t allocator;
+
+  // Source identity within the immutable provider index.
+  iree_host_size_t source_symbol_ordinal;
+
+  // Owned header loader whose immutable summaries back the classifier.
+  loom_kernel_request_producer_t* producer;
+
+  // Owned linked module, detached from its temporary materialization plan.
+  loom_module_t* module;
+
+  // Classifier analyses and configuration-key array backing the source view.
+  iree_arena_allocator_t arena;
+
+  // Read-only source view shared by concurrent class collections.
+  loom_kernel_request_source_t source;
+
+  // Unique names of config symbols selected by the successful source closure.
+  iree_string_view_list_t config_keys;
 };
 
 iree_status_t loom_kernel_request_producer_allocate(
@@ -233,16 +257,14 @@ iree_status_t loom_kernel_request_materialize(
       block_pool, allocator, out_product);
 }
 
-iree_status_t loom_kernel_request_producer_publish(
-    loom_kernel_request_producer_t* producer,
-    const loom_link_plan_materialization_environment_t* environment,
+static iree_status_t loom_kernel_request_source_publish(
+    const loom_kernel_request_source_t* source,
     iree_host_size_t source_symbol_ordinal, const loom_module_t* site_module,
     const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
     const loom_kernel_class_collection_options_t* collection_options,
     loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
     loom_kernel_class_collection_t* out_collection) {
-  IREE_ASSERT_ARGUMENT(producer);
-  IREE_ASSERT_ARGUMENT(environment);
+  IREE_ASSERT_ARGUMENT(source);
   IREE_ASSERT_ARGUMENT(sites);
   IREE_ASSERT_GT(site_count, 0u);
   IREE_ASSERT_ARGUMENT(collection_options);
@@ -251,17 +273,10 @@ iree_status_t loom_kernel_request_producer_publish(
   IREE_ASSERT_ARGUMENT(out_collection);
   *out_collection = (loom_kernel_class_collection_t){0};
 
-  loom_kernel_request_source_t source = {0};
-  loom_link_index_materialization_t materialization = {0};
-  iree_status_t status = loom_kernel_request_source_prepare(
-      producer, environment, source_symbol_ordinal, scratch_arena, &source,
-      &materialization);
   loom_kernel_class_collection_t collection = {0};
-  if (iree_status_is_ok(status)) {
-    status = loom_kernel_class_classifier_collect(
-        &source.classifier, site_module, sites, site_count, collection_options,
-        scratch_arena, &collection);
-  }
+  iree_status_t status = loom_kernel_class_classifier_collect(
+      &source->classifier, site_module, sites, site_count, collection_options,
+      scratch_arena, &collection);
 
   for (loom_decision_class_ordinal_t class_ordinal = 0;
        class_ordinal < collection.class_count && iree_status_is_ok(status);
@@ -270,7 +285,7 @@ iree_status_t loom_kernel_request_producer_publish(
         .source_symbol_ordinal = source_symbol_ordinal,
         .class_ordinal = class_ordinal,
         .member_count = collection.classes[class_ordinal].member_count,
-        .source = &source,
+        .source = source,
         .collection = &collection,
     };
     status = sink.publish(sink.user_data, &request);
@@ -279,6 +294,153 @@ iree_status_t loom_kernel_request_producer_publish(
   if (iree_status_is_ok(status)) {
     *out_collection = collection;
   }
+  return status;
+}
+
+iree_status_t loom_kernel_request_producer_publish(
+    loom_kernel_request_producer_t* producer,
+    const loom_link_plan_materialization_environment_t* environment,
+    iree_host_size_t source_symbol_ordinal, const loom_module_t* site_module,
+    const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
+    const loom_kernel_class_collection_options_t* collection_options,
+    loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
+    loom_kernel_class_collection_t* out_collection) {
+  *out_collection = (loom_kernel_class_collection_t){0};
+  loom_kernel_request_source_t source = {0};
+  loom_link_index_materialization_t materialization = {0};
+  iree_status_t status = loom_kernel_request_source_prepare(
+      producer, environment, source_symbol_ordinal, scratch_arena, &source,
+      &materialization);
+  if (iree_status_is_ok(status)) {
+    status = loom_kernel_request_source_publish(
+        &source, source_symbol_ordinal, site_module, sites, site_count,
+        collection_options, sink, scratch_arena, out_collection);
+  }
   loom_link_index_materialization_deinitialize(&materialization);
   return status;
+}
+
+static iree_status_t loom_kernel_request_preparation_capture_config_keys(
+    const loom_link_module_index_t* index,
+    const loom_link_index_materialization_t* materialization,
+    loom_kernel_request_preparation_t* preparation) {
+  const loom_module_t* module = materialization->product.module;
+  const iree_host_size_t selection_count =
+      loom_link_plan_symbol_count(materialization->plan);
+  iree_host_size_t count = 0;
+  iree_host_size_t capacity = 0;
+  loom_symbol_id_t* selected_ids = NULL;
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(preparation->arena.block_pool, &scratch_arena);
+  uint8_t* selected = NULL;
+  iree_status_t status =
+      iree_arena_allocate_array(&scratch_arena, module->symbols.count,
+                                sizeof(*selected), (void**)&selected);
+  if (iree_status_is_ok(status)) {
+    memset(selected, 0, module->symbols.count * sizeof(*selected));
+    for (iree_host_size_t i = 0;
+         i < selection_count && iree_status_is_ok(status); ++i) {
+      const loom_link_plan_symbol_t* selection =
+          loom_link_plan_symbol_at(materialization->plan, i);
+      const loom_link_module_index_symbol_t* symbol =
+          loom_link_module_index_symbol_at(index, selection->symbol_ordinal);
+      if (!iree_any_bit_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_CONFIG)) {
+        continue;
+      }
+      const loom_symbol_ref_t target = materialization->product.target_symbols
+                                           .values[selection->symbol_ordinal];
+      if (selected[target.symbol_id]) {
+        continue;
+      }
+      selected[target.symbol_id] = 1;
+      status = iree_arena_grow_array(&scratch_arena, count, count + 1,
+                                     sizeof(*selected_ids), &capacity,
+                                     (void**)&selected_ids);
+      if (iree_status_is_ok(status)) {
+        selected_ids[count++] = target.symbol_id;
+      }
+    }
+  }
+  iree_string_view_t* keys = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_arena_allocate_array(&preparation->arena, count,
+                                       sizeof(*keys), (void**)&keys);
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      keys[i] = loom_string_table_get(
+          &module->strings, module->symbols.entries[selected_ids[i]].name_id);
+    }
+    preparation->config_keys =
+        (iree_string_view_list_t){.count = count, .values = keys};
+  }
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
+}
+
+iree_status_t loom_kernel_request_preparation_allocate(
+    const loom_link_module_index_t* index,
+    const loom_link_plan_materialization_environment_t* environment,
+    iree_host_size_t source_symbol_ordinal,
+    loom_kernel_request_preparation_t** out_preparation) {
+  *out_preparation = NULL;
+  loom_kernel_request_preparation_t* preparation = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      environment->allocator, sizeof(*preparation), (void**)&preparation));
+  *preparation = (loom_kernel_request_preparation_t){
+      .allocator = environment->allocator,
+      .source_symbol_ordinal = source_symbol_ordinal,
+  };
+  iree_arena_initialize(environment->block_pool, &preparation->arena);
+  iree_status_t status = loom_kernel_request_producer_allocate(
+      index, environment, &preparation->producer);
+  loom_link_index_materialization_t materialization = {0};
+  if (iree_status_is_ok(status)) {
+    status = loom_kernel_request_source_prepare(
+        preparation->producer, environment, source_symbol_ordinal,
+        &preparation->arena, &preparation->source, &materialization);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_kernel_request_preparation_capture_config_keys(
+        index, &materialization, preparation);
+  }
+  if (iree_status_is_ok(status)) {
+    preparation->module = materialization.product.module;
+    materialization.product.module = NULL;
+    *out_preparation = preparation;
+    preparation = NULL;
+  }
+  loom_link_index_materialization_deinitialize(&materialization);
+  loom_kernel_request_preparation_free(preparation);
+  return status;
+}
+
+void loom_kernel_request_preparation_free(
+    loom_kernel_request_preparation_t* preparation) {
+  if (preparation == NULL) {
+    return;
+  }
+  const iree_allocator_t allocator = preparation->allocator;
+  loom_module_free(preparation->module);
+  iree_arena_deinitialize(&preparation->arena);
+  loom_kernel_request_producer_free(preparation->producer);
+  iree_allocator_free(allocator, preparation);
+}
+
+iree_string_view_list_t loom_kernel_request_preparation_config_keys(
+    const loom_kernel_request_preparation_t* preparation) {
+  return preparation->config_keys;
+}
+
+iree_status_t loom_kernel_request_preparation_publish(
+    const loom_kernel_request_preparation_t* preparation,
+    const loom_module_t* site_module, const loom_kernel_class_site_t* sites,
+    iree_host_size_t site_count,
+    const loom_kernel_class_collection_options_t* collection_options,
+    loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
+    loom_kernel_class_collection_t* out_collection) {
+  return loom_kernel_request_source_publish(
+      &preparation->source, preparation->source_symbol_ordinal, site_module,
+      sites, site_count, collection_options, sink, scratch_arena,
+      out_collection);
 }

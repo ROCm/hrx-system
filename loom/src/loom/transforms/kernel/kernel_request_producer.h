@@ -21,6 +21,8 @@ extern "C" {
 
 typedef struct loom_kernel_request_producer_t loom_kernel_request_producer_t;
 typedef struct loom_kernel_request_source_t loom_kernel_request_source_t;
+typedef struct loom_kernel_request_preparation_t
+    loom_kernel_request_preparation_t;
 
 // One borrowed live-class request prepared for optional materialization.
 //
@@ -62,6 +64,58 @@ typedef struct loom_kernel_request_sink_t {
   // Opaque value passed to |publish|.
   void* user_data;
 } loom_kernel_request_sink_t;
+
+// Invocation-local provider of complete source-class publications. The callback
+// owns preparation lifetime through every sink callback. Requests borrow that
+// preparation; explicitly materialized products own independent storage. The
+// returned collection uses caller scratch and borrows site literals. This lets
+// an embedding retain immutable prepared sources while
+// custom materialization environments keep their ordinary one-shot lifetime.
+typedef struct loom_kernel_request_provider_t {
+  // Publishes all classes after collecting the complete source-kernel site set.
+  iree_status_t (*publish)(
+      void* user_data,
+      const loom_link_plan_materialization_environment_t* environment,
+      iree_host_size_t source_symbol_ordinal, const loom_module_t* site_module,
+      const loom_kernel_class_site_t* sites, iree_host_size_t site_count,
+      const loom_kernel_class_collection_options_t* collection_options,
+      loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
+      loom_kernel_class_collection_t* out_collection);
+
+  // Borrowed state valid for the enclosing command-product operation.
+  void* user_data;
+} loom_kernel_request_provider_t;
+
+// Prepares one immutable source independently of invocation scratch. Owns the
+// linked module, classifier analyses, and candidate-header backing. Borrows the
+// fixed index, context, and block pool until freed; the environment's callbacks
+// and user data are used only during this call and are never retained.
+iree_status_t loom_kernel_request_preparation_allocate(
+    const loom_link_module_index_t* index,
+    const loom_link_plan_materialization_environment_t* environment,
+    iree_host_size_t source_symbol_ordinal,
+    loom_kernel_request_preparation_t** out_preparation);
+
+// Releases every object owned by |preparation| before its backing pool retires.
+void loom_kernel_request_preparation_free(
+    loom_kernel_request_preparation_t* preparation);
+
+// Returns names from the finalized configuration dependency closure, including
+// defaults and unresolved declarations. Names belong to |preparation|. The
+// producer derives them from the final link plan and its symbol correspondence.
+iree_string_view_list_t loom_kernel_request_preparation_config_keys(
+    const loom_kernel_request_preparation_t* preparation);
+
+// Collects invocation-local classes and publishes them from an immutable
+// source. Concurrent calls use distinct scratch arenas and independently owned
+// sinks.
+iree_status_t loom_kernel_request_preparation_publish(
+    const loom_kernel_request_preparation_t* preparation,
+    const loom_module_t* site_module, const loom_kernel_class_site_t* sites,
+    iree_host_size_t site_count,
+    const loom_kernel_class_collection_options_t* collection_options,
+    loom_kernel_request_sink_t sink, iree_arena_allocator_t* scratch_arena,
+    loom_kernel_class_collection_t* out_collection);
 
 // Allocates an invocation-local producer over an immutable provider index.
 //

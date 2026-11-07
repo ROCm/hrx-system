@@ -18,7 +18,6 @@
 #include "loom/runtime/command/program.h"
 #include "loom/target/arch/cmd/abi_layout.h"
 #include "loom/target/arch/cmd/lower/parameters.h"
-#include "loom/target/arch/cmd/lower/transients.h"
 #include "loom/transforms/kernel/kernel_request_producer.h"
 
 #ifdef __cplusplus
@@ -110,9 +109,8 @@ iree_status_t loom_cmd_program_kernel_request_materialize(
 
 // Optional kernel source environment for command-plan construction.
 typedef struct loom_cmd_program_kernel_source_t {
-  // Invocation-local indexed request producer, or NULL when the selected
-  // roots reach only generated sources.
-  loom_kernel_request_producer_t* producer;
+  // Indexed request provider, empty when roots reach only generated sources.
+  loom_kernel_request_provider_t provider;
 
   // Invocation environment providing diagnostics and specialization.
   const loom_link_plan_materialization_environment_t* environment;
@@ -163,7 +161,7 @@ typedef struct loom_cmd_program_root_t {
   loom_cmd_parameter_requirement_table_t parameters;
 
   // Aggregate issue-time storage required by command-program allocas.
-  loom_cmd_transient_requirement_t transient;
+  loom_cmd_program_transient_requirement_t transient;
 
   // Host-produced workgroup-count storage consumed by static dispatches.
   loom_cmd_program_launch_count_requirement_t launch_counts;

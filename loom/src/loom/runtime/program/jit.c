@@ -113,6 +113,8 @@ struct loom_runtime_jit_t {
   loom_runtime_native_domain_t* native_domain;
   // Frozen source providers, shared across all shape specializations.
   loomc_link_index_t* index;
+  // Concurrent command compiler retaining native source preparations.
+  loomc_cmd_compiler_t* command_compiler;
   // Immutable linker for direct kernel roots in the shared source catalog.
   loomc_linker_t* linker;
   // Exact output reuse, independent of input specialization and entry mapping.
@@ -325,6 +327,7 @@ static void loom_runtime_jit_destroy(loom_runtime_jit_t* jit) {
   iree_allocator_free(jit->host_allocator, jit->natives.values);
   loom_runtime_native_domain_release(jit->native_domain);
   loom_runtime_executable_cache_free(jit->executables);
+  loomc_cmd_compiler_release(jit->command_compiler);
   loomc_link_index_release(jit->index);
   loomc_linker_release(jit->linker);
   loom_runtime_jit_compiler_deinitialize(&jit->kernel);
@@ -469,6 +472,10 @@ static iree_status_t loom_runtime_jit_create_impl(
     status = loom_runtime_source_index_create(
         jit->kernel.context, sources, NULL, report, host_allocator,
         cache ? &source_identity : NULL, &jit->index);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_status_from_loomc(loomc_cmd_compiler_create(
+        jit->index, NULL, ca, &jit->command_compiler));
   }
   if (iree_status_is_ok(status) && cache) {
     loom_runtime_jit_identity_update(&identity, source_identity.bytes,
@@ -1561,7 +1568,7 @@ static void loom_runtime_jit_job_execute(loomc_task_t* base,
   }
   if (iree_status_is_ok(status)) {
     const loomc_cmd_program_product_options_t options = {
-        .link_index = jit->index,
+        .compiler = jit->command_compiler,
         .root_symbol_ordinals = &root_ordinal,
         .root_symbol_count = 1,
         .config = *job->config,

@@ -474,6 +474,7 @@ static iree_status_t loom_cmd_parameter_allocate_requirement_table(
 
   table->root_count = root_count;
   table->count = build->parameter_count;
+  table->key_storage_length = build->key_storage_length;
   iree_status_t status = iree_ok_status();
   if (root_table_size != 0) {
     status = iree_allocator_malloc(host_allocator, root_table_size,
@@ -605,8 +606,7 @@ iree_status_t loom_cmd_parameter_layout_build(
     }
     const uint32_t fixed_buffer_index = bindings[i].resource_index;
     out_requirements->roots[fixed_buffer_index] =
-        (loom_cmd_parameter_root_requirement_t){
-            .source_binding_ordinal = i,
+        (loom_cmd_program_parameter_root_t){
             .fixed_buffer_index = fixed_buffer_index,
             .required_byte_length = 0,
             .minimum_alignment = LOOM_CMD_PARAMETER_DEFAULT_ALIGNMENT,
@@ -640,7 +640,7 @@ iree_status_t loom_cmd_parameter_layout_build(
 
     const uint32_t fixed_buffer_index =
         bindings[source->source_binding_ordinal].resource_index;
-    loom_cmd_parameter_root_requirement_t* root =
+    loom_cmd_program_parameter_root_t* root =
         &out_requirements->roots[fixed_buffer_index];
     root->required_byte_length = iree_max(root->required_byte_length, byte_end);
     root->minimum_alignment =
@@ -651,9 +651,8 @@ iree_status_t loom_cmd_parameter_layout_build(
         iree_make_string_view(key_cursor, source->key.size);
     key_cursor += source->key.size;
     out_requirements->entries[source->requirement_index] =
-        (loom_cmd_parameter_requirement_t){
+        (loom_cmd_program_parameter_t){
             .key = owned_key,
-            .source_binding_ordinal = source->source_binding_ordinal,
             .fixed_buffer_index = fixed_buffer_index,
             .byte_offset = byte_offset,
             .byte_length = source->required_byte_length,
@@ -710,7 +709,7 @@ iree_status_t loom_cmd_parameter_layout_build(
     // A parameter-relative base borrows the rest of its supplied binding. It
     // does not change the finite packed footprint required by named content.
     if (binding.role == LOOM_CMD_BUFFER_ROLE_FIXED && has_extent) {
-      loom_cmd_parameter_root_requirement_t* root =
+      loom_cmd_program_parameter_root_t* root =
           &out_requirements->roots[binding.resource_index];
       root->required_byte_length =
           iree_max(root->required_byte_length, byte_end);

@@ -23,6 +23,8 @@
 namespace loomc::bench {
 namespace {
 
+using CommandCompilerPtr =
+    HandlePtr<loomc_cmd_compiler_t, loomc_cmd_compiler_release>;
 using CmdProductPtr = HandlePtr<loomc_product_t, loomc_product_release>;
 using RequestPtr = HandlePtr<loomc_request_t, loomc_request_release>;
 
@@ -188,6 +190,10 @@ class CommandProductFixture {
         /*binding_count=*/0, loom_allocator(), &request)));
     request_.reset(request);
     index_.reset(index_ptr.release());
+    loomc_cmd_compiler_t* command_compiler = nullptr;
+    IREE_RETURN_IF_ERROR(to_iree_status(loomc_cmd_compiler_create(
+        index_.get(), nullptr, loom_allocator(), &command_compiler)));
+    command_compiler_.reset(command_compiler);
 
     loomc_workspace_t* workspace = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_workspace_create(
@@ -218,7 +224,7 @@ class CommandProductFixture {
           .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
           .structure_size = sizeof(options),
           .next = nullptr,
-          .link_index = index_.get(),
+          .compiler = command_compiler_.get(),
           .root_symbol_ordinals = &root_symbol_ordinal_,
           .root_symbol_count = 1,
           .flags = 0,
@@ -285,6 +291,9 @@ class CommandProductFixture {
 
   // Frozen source index reused by every command-product build.
   LinkIndexPtr index_;
+
+  // Native source preparations reused by indexed command products.
+  CommandCompilerPtr command_compiler_;
 
   // Immutable request selecting the same command root by source-local ordinal.
   RequestPtr request_;

@@ -16,6 +16,7 @@
 #include "loomc/product.h"
 #include "loomc/result.h"
 #include "loomc/target.h"
+#include "loomc/target/cmd/compiler.h"
 #include "loomc/workspace.h"
 
 /// @file
@@ -50,7 +51,7 @@
 /// loomc_cmd_program_product_options_t options = {
 ///     .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
 ///     .structure_size = sizeof(options),
-///     .link_index = link_index,
+///     .compiler = compiler,
 ///     .root_symbol_ordinals = &root_symbol_ordinal,
 ///     .root_symbol_count = 1,
 /// };
@@ -106,8 +107,9 @@ typedef struct loomc_cmd_program_product_options_t {
   /// `loomc_target_specialization_options_t`.
   const void* next;
 
-  /// Frozen provider index containing command and kernel sources.
-  loomc_link_index_t* link_index;
+  /// Reusable compiler retaining the frozen command and kernel sources.
+  /// Borrowed until this synchronous invocation returns.
+  loomc_cmd_compiler_t* compiler;
 
   /// Index-wide symbol ordinals of explicit command roots.
   ///

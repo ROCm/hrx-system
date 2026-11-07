@@ -64,17 +64,23 @@ loomc_status_t loomc_module_apply_config(
     const bool has_bindings =
         config != NULL && (config->binding_count != 0 ||
                            !loomc_string_view_is_empty(config->json_object));
+    loom_config_text_binding_set_t bindings;
+    status = loomc_config_prepare_text_bindings(
+        config, iree_allocator_from_loomc(allocator), result, &bindings);
     const loomc_config_apply_text_to_module_options_t apply_options = {
         .context = context,
-        .config = config,
+        .bindings = &bindings,
+        .policy_flags = config ? config->flags : 0,
         .module = internal_module,
         .source_resolver = loomc_module_source_resolver(module),
         .applied_value_sink = loomc_module_config_applied_value_sink(module),
         .result = result,
         .block_pool = loomc_workspace_block_pool(workspace),
-        .allocator = allocator,
     };
-    status = loomc_config_apply_text_to_module(&apply_options);
+    if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {
+      status = loomc_config_apply_text_to_module(&apply_options);
+    }
+    loom_config_text_binding_set_deinitialize(&bindings);
     if (has_bindings) {
       loomc_module_invalidate_target_verification(module);
       if (loomc_status_is_ok(status) && loomc_result_succeeded(result)) {

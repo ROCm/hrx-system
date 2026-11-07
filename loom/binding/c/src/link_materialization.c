@@ -69,23 +69,6 @@ static loom_diagnostic_sink_t loomc_link_materialization_diagnostic_sink(
   };
 }
 
-// One invocation assignment expressed in the immutable source index domain.
-typedef struct loomc_link_target_assignment_t {
-  // Index-wide source symbol selected by an invocation assignment.
-  iree_host_size_t symbol_ordinal;
-  // Complete profile borrowed for the synchronous invocation.
-  const loom_target_profile_t* profile;
-} loomc_link_target_assignment_t;
-
-struct loomc_link_target_specializations_t {
-  // Arena-owned source assignments, with function rows before declaration rows.
-  loomc_link_target_assignment_t* assignments;
-  // Number of function rows at the start of assignments.
-  iree_host_size_t function_count;
-  // Total number of source assignments, including declaration aliases.
-  iree_host_size_t count;
-};
-
 static loom_symbol_ref_t loomc_link_configuration_function(
     const loom_link_plan_materialization_t* materialization,
     loom_symbol_ref_t function_ref) {
@@ -101,6 +84,7 @@ static loom_symbol_ref_t loomc_link_configuration_function(
 static iree_status_t loomc_link_target_specializations_capture(
     const loom_link_module_index_t* index,
     const loom_link_plan_materialization_t* materialization,
+    const loomc_target_specialization_options_t* options,
     loom_target_specialization_request_list_t* inout_requests,
     loom_target_declaration_binding_list_t bindings,
     iree_arena_allocator_t* scratch_arena, iree_arena_allocator_t* arena,
@@ -178,9 +162,10 @@ static iree_status_t loomc_link_target_specializations_capture(
         is_function ? next_function++ : next_binding++;
     specializations->assignments[output] = (loomc_link_target_assignment_t){
         .symbol_ordinal = i,
-        .profile = is_function
-                       ? requests.values[row].target_profile
-                       : bindings.values[row - requests.count].target_profile,
+        .profile =
+            is_function
+                ? options->specializations[row].target_profile
+                : options->target_bindings[row - requests.count].target_profile,
     };
   }
 
@@ -266,7 +251,8 @@ static iree_status_t loomc_link_target_specializations_project(
     if (i < specializations->function_count) {
       requests[request_count++] = (loom_target_specialization_request_t){
           .function_ref = ref,
-          .target_profile = assignment->profile,
+          .target_profile =
+              loomc_target_profile_loom_target_profile(assignment->profile),
       };
       const loom_symbol_ref_t configuration =
           loomc_link_configuration_function(materialization, ref);
@@ -275,13 +261,15 @@ static iree_status_t loomc_link_target_specializations_project(
         iree_bitmap_set(assigned, configuration.symbol_id);
         requests[request_count++] = (loom_target_specialization_request_t){
             .function_ref = configuration,
-            .target_profile = assignment->profile,
+            .target_profile =
+                loomc_target_profile_loom_target_profile(assignment->profile),
         };
       }
     } else {
       bindings[binding_count++] = (loom_target_declaration_binding_t){
           .target_ref = ref,
-          .target_profile = assignment->profile,
+          .target_profile =
+              loomc_target_profile_loom_target_profile(assignment->profile),
       };
     }
   }
@@ -301,13 +289,12 @@ static iree_status_t loomc_link_materialization_prepare_module(
       (loomc_link_materialization_state_t*)user_data;
   const loomc_config_apply_text_to_module_options_t apply_options = {
       .context = state->composition.context,
-      .config = state->specialization.config,
+      .bindings = &state->specialization.config_bindings,
+      .policy_flags = state->specialization.config_policy_flags,
       .module = *inout_module,
       .source_resolver = (loom_source_resolver_t){0},
       .result = state->diagnostics.result,
-      .diagnostic_code = loomc_make_cstring_view("CONFIG/INVALID"),
       .block_pool = block_pool,
-      .allocator = loomc_allocator_from_iree(allocator),
   };
   loomc_status_t status = loomc_config_apply_text_to_module(&apply_options);
   if (!loomc_status_is_ok(status)) {
@@ -367,7 +354,7 @@ static iree_status_t loomc_link_materialization_prepare_module(
       if (loomc_status_is_ok(status)) {
         status =
             loomc_status_from_iree(loomc_link_target_specializations_capture(
-                index, materialization, &requests, bindings, &arena,
+                index, materialization, target, &requests, bindings, &arena,
                 state->arena, &state->specialization.indexed));
       }
     } else {
@@ -442,7 +429,7 @@ iree_status_t loomc_link_materialization_validate_command_kernel_entries(
   return iree_ok_status();
 }
 
-void loomc_link_materialization_state_initialize(
+loomc_status_t loomc_link_materialization_state_initialize(
     loomc_context_t* context, loomc_workspace_t* workspace,
     const loomc_link_index_t* link_index, const loomc_config_options_t* config,
     const loomc_target_specialization_options_t* target_specialization,
@@ -465,7 +452,7 @@ void loomc_link_materialization_state_initialize(
           },
       .specialization =
           {
-              .config = config,
+              .config_policy_flags = config ? config->flags : 0,
               .target = target_specialization,
           },
       .diagnostics =
@@ -475,9 +462,12 @@ void loomc_link_materialization_state_initialize(
       .arena = arena,
       .allocator = allocator,
   };
+  return loomc_config_prepare_text_bindings(
+      config, iree_allocator_from_loomc(allocator), result,
+      &out_state->specialization.config_bindings);
 }
 
-void loomc_link_materialization_state_initialize_overlay(
+loomc_status_t loomc_link_materialization_state_initialize_overlay(
     loomc_context_t* context, loomc_workspace_t* workspace,
     const loomc_link_index_t* library_index,
     iree_host_size_t appended_provider_ordinal,
@@ -486,12 +476,19 @@ void loomc_link_materialization_state_initialize_overlay(
     loomc_result_t* result, iree_arena_allocator_t* arena,
     loomc_allocator_t allocator,
     loomc_link_materialization_state_t* out_state) {
-  loomc_link_materialization_state_initialize(
+  loomc_status_t status = loomc_link_materialization_state_initialize(
       context, workspace, library_index, config, target_specialization, result,
       arena, allocator, out_state);
   out_state->composition.sources.appended.source = appended_source;
   out_state->composition.sources.appended.provider_ordinal =
       appended_provider_ordinal;
+  return status;
+}
+
+void loomc_link_materialization_state_deinitialize(
+    loomc_link_materialization_state_t* state) {
+  loom_config_text_binding_set_deinitialize(
+      &state->specialization.config_bindings);
 }
 
 loom_link_plan_materialization_environment_t
