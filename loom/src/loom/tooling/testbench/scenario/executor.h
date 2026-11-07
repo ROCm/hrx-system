@@ -38,6 +38,9 @@ typedef struct loom_testbench_product_call_t {
 // Every call has the arities declared by |invocation|. Implementations may
 // execute calls serially or submit them together, but must complete every call
 // before returning successfully and populate every declared result.
+// Preparation shares products across compatible calls to the same subject.
+// |invocation| identifies the current trial, which may differ from the
+// product's representative invocation; trial-local values live in |calls|.
 typedef iree_status_t(IREE_API_PTR* loom_testbench_product_execute_fn_t)(
     void* user_data, const loom_testbench_invocation_plan_t* invocation,
     iree_host_size_t call_count, loom_testbench_product_call_t* calls);

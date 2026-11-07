@@ -102,30 +102,29 @@ func.def @uniform_narrow_divrem(%dividend: i16, %divisor: i16) -> (i16, i16) {
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @uniform_narrow_divrem(%dividend: reg<amdgpu.vgpr>, %divisor: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
-  %19 = v_and_b32_lit %dividend, 65535
-  %20 = v_and_b32_lit %divisor, 65535
-  %21 = v_mov_b32 0
-  %22 = v_mov_b32 1
-  %23 = v_cvt_f32_u32 %20
-  %24 = v_rcp_f32 %23
-  %25 = v_mul_f32_lit %24, 1333788670
-  %26 = v_cvt_u32_f32 %25
-  %27 = v_mul_lo_u32 %20, %26
-  %28 = v_sub_nc_u32 %21, %27
-  %29 = v_mul_hi_u32 %26, %28
-  %30 = v_add_u32 %26, %29
-  %31 = v_mul_hi_u32 %19, %30
-  %32 = v_mul_lo_u32 %31, %20
-  %33 = v_sub_nc_u32 %19, %32
-  %34 = v_add_u32 %31, %22
-  %35, %36 = v_sub_co_u32 %33, %20
-  %37 = v_cndmask_b32 %34, %31, %36
-  %38 = v_cndmask_b32 %35, %33, %36
-  %39 = v_add_u32 %37, %22
-  %40, %41 = v_sub_co_u32 %38, %20
-  %quotient = v_cndmask_b32 %39, %37, %41
-  %44 = v_mul_lo_u32 %quotient, %20
-  %remainder = v_sub_nc_u32 %19, %44
+  %16 = v_and_b32_lit %dividend, 65535
+  %17 = v_and_b32_lit %divisor, 65535
+  %18 = v_mov_b32 0
+  %19 = v_mov_b32 1
+  %20 = v_cvt_f32_u32 %17
+  %21 = v_rcp_f32 %20
+  %22 = v_mul_f32_lit %21, 1333788670
+  %23 = v_cvt_u32_f32 %22
+  %24 = v_mul_lo_u32 %17, %23
+  %25 = v_sub_nc_u32 %18, %24
+  %26 = v_mul_hi_u32 %23, %25
+  %27 = v_add_u32 %23, %26
+  %28 = v_mul_hi_u32 %16, %27
+  %29 = v_mul_lo_u32 %28, %17
+  %30 = v_sub_nc_u32 %16, %29
+  %31 = v_add_u32 %28, %19
+  %32, %33 = v_sub_co_u32 %30, %17
+  %34 = v_cndmask_b32 %31, %28, %33
+  %35 = v_cndmask_b32 %32, %30, %33
+  %36 = v_add_u32 %34, %19
+  %37, %38 = v_sub_co_u32 %35, %17
+  %quotient = v_cndmask_b32 %36, %34, %38
+  %remainder = v_cndmask_b32 %37, %35, %38
   return %quotient, %remainder
 }
 
@@ -204,37 +203,38 @@ func.def @varying_signed_divrem(%dividends: vector<2xi32>, %divisors: vector<2xi
 low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @varying_signed_divrem(%dividends: reg<amdgpu.vgpr x2>, %divisors: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
   %dividend = slice %dividends[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %divisor = slice %divisors[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %17 = v_ashrrev_i32_src0_inline %dividend, 31
-  %18 = v_ashrrev_i32_src0_inline %divisor, 31
-  %19 = v_xor_b32 %dividend, %17
-  %20 = v_sub_u32 %19, %17
-  %21 = v_xor_b32 %divisor, %18
-  %22 = v_sub_u32 %21, %18
-  %23 = v_mov_b32 0
-  %24 = v_mov_b32 1
-  %25 = v_cvt_f32_u32 %22
-  %26 = v_rcp_f32 %25
-  %27 = v_mul_f32_lit %26, 1333788670
-  %28 = v_cvt_u32_f32 %27
-  %29 = v_mul_lo_u32 %22, %28
-  %30 = v_sub_u32 %23, %29
-  %31 = v_mul_hi_u32 %28, %30
-  %32 = v_add_u32 %28, %31
-  %33 = v_mul_hi_u32 %20, %32
-  %34 = v_mul_lo_u32 %33, %22
-  %35 = v_sub_u32 %20, %34
-  %36 = v_add_u32 %33, %24
-  %37, %38 = v_sub_co_u32 %35, %22
-  %39 = v_cndmask_b32 %36, %33, %38
-  %40 = v_cndmask_b32 %37, %35, %38
-  %41 = v_add_u32 %39, %24
-  %42, %43 = v_sub_co_u32 %40, %22
-  %44 = v_cndmask_b32 %41, %39, %43
-  %46 = v_xor_b32 %17, %18
-  %47 = v_xor_b32 %44, %46
-  %quotient = v_sub_u32 %47, %46
-  %51 = v_mul_lo_u32 %quotient, %divisor
-  %remainder = v_sub_u32 %dividend, %51
+  %14 = v_ashrrev_i32_src0_inline %dividend, 31
+  %15 = v_ashrrev_i32_src0_inline %divisor, 31
+  %16 = v_xor_b32 %dividend, %14
+  %17 = v_sub_u32 %16, %14
+  %18 = v_xor_b32 %divisor, %15
+  %19 = v_sub_u32 %18, %15
+  %20 = v_mov_b32 0
+  %21 = v_mov_b32 1
+  %22 = v_cvt_f32_u32 %19
+  %23 = v_rcp_f32 %22
+  %24 = v_mul_f32_lit %23, 1333788670
+  %25 = v_cvt_u32_f32 %24
+  %26 = v_mul_lo_u32 %19, %25
+  %27 = v_sub_u32 %20, %26
+  %28 = v_mul_hi_u32 %25, %27
+  %29 = v_add_u32 %25, %28
+  %30 = v_mul_hi_u32 %17, %29
+  %31 = v_mul_lo_u32 %30, %19
+  %32 = v_sub_u32 %17, %31
+  %33 = v_add_u32 %30, %21
+  %34, %35 = v_sub_co_u32 %32, %19
+  %36 = v_cndmask_b32 %33, %30, %35
+  %37 = v_cndmask_b32 %34, %32, %35
+  %38 = v_add_u32 %36, %21
+  %39, %40 = v_sub_co_u32 %37, %19
+  %41 = v_cndmask_b32 %38, %36, %40
+  %42 = v_cndmask_b32 %39, %37, %40
+  %43 = v_xor_b32 %14, %15
+  %44 = v_xor_b32 %41, %43
+  %quotient = v_sub_u32 %44, %43
+  %46 = v_xor_b32 %42, %14
+  %remainder = v_sub_u32 %46, %14
   return %quotient, %remainder
 }
 

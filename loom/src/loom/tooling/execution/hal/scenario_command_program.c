@@ -1134,11 +1134,7 @@ static iree_status_t loom_run_hal_command_scenario_product_execute(
     iree_host_size_t call_count, loom_testbench_product_call_t* calls) {
   loom_run_hal_command_scenario_product_t* product =
       (loom_run_hal_command_scenario_product_t*)user_data;
-  if (invocation != product->subject) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "command scenario invocation does not match its prepared product");
-  }
+  (void)invocation;
   if (call_count == 0) {
     return iree_ok_status();
   }
@@ -1228,11 +1224,7 @@ static iree_status_t loom_run_hal_command_scenario_product_benchmark(
   loom_run_benchmark_result_initialize(out_result);
   loom_run_hal_command_scenario_product_t* product =
       (loom_run_hal_command_scenario_product_t*)user_data;
-  if (invocation != product->subject) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "command scenario benchmark does not match its prepared product");
-  }
+  (void)invocation;
   loom_run_hal_benchmark_options_t hal_options;
   loom_run_hal_benchmark_options_initialize(&hal_options);
   hal_options.timing = *options;
@@ -1476,11 +1468,11 @@ iree_status_t loom_run_hal_testbench_benchmark_command_scenario_product(
     const loom_run_hal_benchmark_options_t* options,
     iree_allocator_t host_allocator,
     loom_run_hal_testbench_scenario_benchmark_result_t* out_result) {
-  if (!loom_run_hal_testbench_is_command_scenario_product(prepared_product) ||
-      invocation != prepared_product->invocation) {
+  (void)invocation;
+  if (!loom_run_hal_testbench_is_command_scenario_product(prepared_product)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "command scenario benchmark does not match its prepared product");
+        "prepared scenario product is not a command product");
   }
   loom_run_hal_command_scenario_product_t* product =
       (loom_run_hal_command_scenario_product_t*)prepared_product->user_data;
@@ -1494,11 +1486,10 @@ iree_status_t loom_run_hal_testbench_query_command_scenario_input_layout(
     loom_testbench_product_call_t* call,
     loom_run_hal_testbench_scenario_input_layout_t* out_layout) {
   *out_layout = (loom_run_hal_testbench_scenario_input_layout_t){0};
-  if (!loom_run_hal_testbench_is_command_scenario_product(prepared_product) ||
-      invocation != prepared_product->invocation) {
+  if (!loom_run_hal_testbench_is_command_scenario_product(prepared_product)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "command scenario layout query does not match its prepared product");
+        "prepared scenario product is not a command product");
   }
   uint64_t binding_bytes = 0;
   IREE_RETURN_IF_ERROR(loom_run_hal_command_scenario_validate_call(

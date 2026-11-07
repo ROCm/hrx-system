@@ -645,9 +645,27 @@ static bool loom_value_facts_extract_bitfield(loom_value_facts_t source,
   uint64_t source_bits = 0;
   if (!loom_value_facts_as_exact_raw_bits(source, source_bit_count,
                                           &source_bits)) {
-    *out_facts = signed_extract
-                     ? loom_value_facts_make_signed_bit_count_range(width)
-                     : loom_value_facts_make_unsigned_bit_count_range(width);
+    if (loom_value_facts_is_float(source) || (!signed_extract && width == 64)) {
+      *out_facts = signed_extract
+                       ? loom_value_facts_make_signed_bit_count_range(width)
+                       : loom_value_facts_make_unsigned_bit_count_range(width);
+      return true;
+    }
+    // Arithmetic shifting preserves signed interval order. Wrapping to the
+    // field width then discards the sign fill, which lies above the field.
+    // Reuse the modular transfer to retain ranges and divisibility without
+    // claiming a narrow interval across a field's wrap or sign boundary.
+    const loom_value_facts_t shift = loom_value_facts_exact_i64(offset);
+    loom_value_facts_t shifted;
+    loom_value_facts_shrsi(&source, &shift, &shifted);
+    *out_facts =
+        signed_extract
+            ? loom_value_facts_wrap_integer(shifted, (int32_t)width)
+            : loom_value_facts_wrap_unsigned_integer(shifted, (int32_t)width);
+    if (signed_extract && width == 1) {
+      // A signed one-bit field extends to -1 or 0, unlike the i1 fact domain.
+      *out_facts = loom_value_facts_sign_extend(*out_facts, 1);
+    }
     return true;
   }
   uint64_t field_bits =

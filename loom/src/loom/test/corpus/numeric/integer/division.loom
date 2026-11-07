@@ -244,6 +244,42 @@ func.def @random_division_i64_observations(%dividend: i64, %divisor: i64) -> (i6
   func.return %signed_quotient, %signed_remainder, %unsigned_quotient, %unsigned_remainder : i64, i64, i64, i64
 }
 
+// Both quotient and remainder cross a recurrence backedge. Input values stay
+// runtime operands, and rotating the dividend retains its full-width domain.
+func.def @loop_carried_division(%initial: i64, %divisor: i64) -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %shift = scalar.constant 32 : i64
+  %increment = scalar.constant -7046029254386353131 : i64
+  %initial_checksum = scalar.constant 0 : i64
+  %final, %checksum = scf.for %iteration = [%begin to %end step %step](%value = %initial : i64, %accumulator = %initial_checksum : i64) -> (i64, i64) {
+    %signed_quotient, %signed_remainder, %unsigned_quotient, %unsigned_remainder = func.call @random_division_i64_observations(%value, %divisor) : (i64, i64) -> (i64, i64, i64, i64)
+    %high = scalar.shli %value, %shift : i64
+    %low = scalar.shrui %value, %shift : i64
+    %rotated = scalar.ori %high, %low : i64
+    %mixed = scalar.xori %rotated, %unsigned_quotient : i64
+    %next = scalar.addi %mixed, %increment : i64
+    %remainders = scalar.xori %signed_remainder, %unsigned_remainder : i64
+    %observations = scalar.addi %remainders, %signed_quotient : i64
+    %next_accumulator = scalar.addi %accumulator, %observations : i64
+    scf.yield %next, %next_accumulator : i64, i64
+  }
+  func.return %final, %checksum : i64, i64
+}
+
+func.def @loop_carried_division_buffers(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %inputs = buffer.view %input[%base] : buffer -> view<2xi64>
+  %outputs = buffer.view %output[%base] : buffer -> view<4xi64>
+  %dividend = view.load %inputs[0] : view<2xi64> -> i64
+  %divisor = view.load %inputs[1] : view<2xi64> -> i64
+  %final, %checksum = func.call @loop_carried_division(%dividend, %divisor) : (i64, i64) -> (i64, i64)
+  view.store %final, %outputs[1] : i64, view<4xi64>
+  view.store %checksum, %outputs[2] : i64, view<4xi64>
+  func.return
+}
+
 // Selects the exact boundary pairs independently from target integer width.
 func.def @division_i32_boundary(%ordinal: index) -> (i32, i32, i32, i32) {
   %c0 = index.constant 0 : index
@@ -610,6 +646,19 @@ check.scenario @wide_division_correction_values {
       check.expect.equal actual(%actual_signed_remainder) expected(%expected_signed_remainder) : i64
       check.expect.equal actual(%actual_unsigned_quotient) expected(%expected_unsigned_quotient) : i64
       check.expect.equal actual(%actual_unsigned_remainder) expected(%expected_unsigned_remainder) : i64
+    }
+  }
+  check.return
+}
+
+check.scenario @loop_carried_division_values {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<2xi64>
+    %output = check.generate.fill value(-123) : tensor<4xi64>
+    check.compare<@loop_carried_division_buffers>(%input, %output) : (tensor<2xi64>, tensor<4xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<2xi64>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<4xi64>
     }
   }
   check.return

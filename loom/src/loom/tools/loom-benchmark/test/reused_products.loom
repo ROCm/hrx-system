@@ -1,0 +1,89 @@
+// Separate trial domains share compiled subjects but retain their own values,
+// binding extents, and result identities.
+func.def @identity(%input: i32) -> (i32) {
+  func.return %input : i32
+}
+
+func.def @increment(%storage: buffer) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %c1 = scalar.constant 1 : i32
+  %result = scalar.addi %value, %c1 : i32
+  view.store %result, %view[0] : i32, view<1xi32>
+  func.return
+}
+
+kernel.def @increment_kernel() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%storage: buffer) {
+  func.call @increment(%storage) : (buffer)
+  kernel.return
+}
+
+command.def @increment_twice() launch(%storage: buffer) {
+  kernel.launch @increment_kernel(%storage) : (buffer)
+  kernel.launch @increment_kernel(%storage) : (buffer)
+  command.return
+}
+
+func.def @increment_twice_oracle(%storage: buffer) {
+  func.call @increment(%storage) : (buffer)
+  func.call @increment(%storage) : (buffer)
+  func.return
+}
+
+check.scenario @reused_function {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.literal value(17) : i32
+    check.compare<@identity>(%input) : (i32) -> [actual(%actual: i32), expected(%expected: i32)] {
+      check.expect.equal actual(%actual) expected(%expected) : i32
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.literal value(-93) : i32
+    check.compare<@identity>(%input) : (i32) -> [actual(%actual: i32), expected(%expected: i32)] {
+      check.expect.equal actual(%actual) expected(%expected) : i32
+    }
+  }
+  check.return
+}
+
+check.benchmark<@reused_function> @reused_function_latency
+
+check.scenario @reused_kernel {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(7) : tensor<1xi32>
+    check.compare<@increment_kernel, @increment>(%storage) : (tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<1xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-11) : tensor<3xi32>
+    check.compare<@increment_kernel, @increment>(%storage) : (tensor<3xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<3xi32>
+    }
+  }
+  check.return
+}
+
+check.benchmark<@reused_kernel> @reused_kernel_latency
+
+check.scenario @reused_command {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(7) : tensor<1xi32>
+    check.compare<@increment_twice, @increment_twice_oracle>(%storage) : (tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<1xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %storage = check.generate.fill value(-11) : tensor<3xi32>
+    check.compare<@increment_twice, @increment_twice_oracle>(%storage) : (tensor<3xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<3xi32>
+    }
+  }
+  check.return
+}
+
+check.benchmark<@reused_command> @reused_command_latency

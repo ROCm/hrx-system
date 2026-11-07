@@ -1,0 +1,369 @@
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+func.def @uniform_u_0(%input: i64) -> (i32) {
+  %word = scalar.bitfield.extractu %input {offset = 0, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @uniform_u_0(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %word = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+func.def @uniform_u_32(%input: i64) -> (i32) {
+  %word = scalar.bitfield.extractu %input {offset = 32, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @uniform_u_32(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %word = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+func.def @uniform_s_0(%input: i64) -> (i32) {
+  %word = scalar.bitfield.extracts %input {offset = 0, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @uniform_s_0(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %word = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+func.def @uniform_s_32(%input: i64) -> (i32) {
+  %word = scalar.bitfield.extracts %input {offset = 32, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @uniform_s_32(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %word = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+func.def @vector_u_0(%input: f64) -> (i32) {
+  %bits = scalar.bitcast %input : f64 to i64
+  %word = scalar.bitfield.extractu %bits {offset = 0, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @vector_u_0(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %word = slice %bits[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+func.def @vector_u_32(%input: f64) -> (i32) {
+  %bits = scalar.bitcast %input : f64 to i64
+  %word = scalar.bitfield.extractu %bits {offset = 32, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @vector_u_32(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %word = slice %bits[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+func.def @vector_s_0(%input: f64) -> (i32) {
+  %bits = scalar.bitcast %input : f64 to i64
+  %word = scalar.bitfield.extracts %bits {offset = 0, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @vector_s_0(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %word = slice %bits[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+func.def @vector_s_32(%input: f64) -> (i32) {
+  %bits = scalar.bitcast %input : f64 to i64
+  %word = scalar.bitfield.extracts %bits {offset = 32, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @vector_s_32(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %word = slice %bits[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @uniform_u_0(%input: i64) -> (i32) {
+  %word = scalar.bitfield.extractu %input {offset = 0, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @uniform_u_0(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %word = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @uniform_u_32(%input: i64) -> (i32) {
+  %word = scalar.bitfield.extractu %input {offset = 32, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @uniform_u_32(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %word = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @uniform_s_0(%input: i64) -> (i32) {
+  %word = scalar.bitfield.extracts %input {offset = 0, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @uniform_s_0(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %word = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @uniform_s_32(%input: i64) -> (i32) {
+  %word = scalar.bitfield.extracts %input {offset = 32, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @uniform_s_32(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %word = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @vector_u_0(%input: f64) -> (i32) {
+  %bits = scalar.bitcast %input : f64 to i64
+  %word = scalar.bitfield.extractu %bits {offset = 0, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @vector_u_0(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %word = slice %bits[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @vector_u_32(%input: f64) -> (i32) {
+  %bits = scalar.bitcast %input : f64 to i64
+  %word = scalar.bitfield.extractu %bits {offset = 32, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @vector_u_32(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %word = slice %bits[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @vector_s_0(%input: f64) -> (i32) {
+  %bits = scalar.bitcast %input : f64 to i64
+  %word = scalar.bitfield.extracts %bits {offset = 0, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @vector_s_0(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %word = slice %bits[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @vector_s_32(%input: f64) -> (i32) {
+  %bits = scalar.bitcast %input : f64 to i64
+  %word = scalar.bitfield.extracts %bits {offset = 32, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @vector_s_32(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %word = slice %bits[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
+
+func.def @uniform_u_0(%input: i64) -> (i32) {
+  %word = scalar.bitfield.extractu %input {offset = 0, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @uniform_u_0(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %word = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
+
+func.def @uniform_u_32(%input: i64) -> (i32) {
+  %word = scalar.bitfield.extractu %input {offset = 32, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @uniform_u_32(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %word = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
+
+func.def @uniform_s_0(%input: i64) -> (i32) {
+  %word = scalar.bitfield.extracts %input {offset = 0, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @uniform_s_0(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %word = slice %input[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
+
+func.def @uniform_s_32(%input: i64) -> (i32) {
+  %word = scalar.bitfield.extracts %input {offset = 32, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @uniform_s_32(%input: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %word = slice %input[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
+
+func.def @vector_u_0(%input: f64) -> (i32) {
+  %bits = scalar.bitcast %input : f64 to i64
+  %word = scalar.bitfield.extractu %bits {offset = 0, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @vector_u_0(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %word = slice %bits[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
+
+func.def @vector_u_32(%input: f64) -> (i32) {
+  %bits = scalar.bitcast %input : f64 to i64
+  %word = scalar.bitfield.extractu %bits {offset = 32, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @vector_u_32(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %word = slice %bits[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
+
+func.def @vector_s_0(%input: f64) -> (i32) {
+  %bits = scalar.bitcast %input : f64 to i64
+  %word = scalar.bitfield.extracts %bits {offset = 0, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @vector_s_0(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %word = slice %bits[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %word
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
+
+func.def @vector_s_32(%input: f64) -> (i32) {
+  %bits = scalar.bitcast %input : f64 to i64
+  %word = scalar.bitfield.extracts %bits {offset = 32, width = 32} : i64 -> i32
+  func.return %word : i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @vector_s_32(%bits: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>) asm {
+  %word = slice %bits[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  return %word
+}
