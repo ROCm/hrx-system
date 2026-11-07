@@ -711,7 +711,7 @@ TEST_P(JitTest, CompletedCatalogsRetireWithoutClosingSharedCompilerQueue) {
   EXPECT_EQ(peer_report.entries, 8u);
   EXPECT_EQ(peer_report.kernels + peer_report.reused_kernels, 8u);
   // Loaded executable ownership is independent of idle compiler scratch.
-  loom_runtime_host_trim_compiler(host);
+  IREE_ASSERT_OK(loom_runtime_host_trim_compiler(host));
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       loom_runtime_pool_storage(storage_owner_),
       iree_hal_make_pool_reservation_request(sizeof(input_), 0),

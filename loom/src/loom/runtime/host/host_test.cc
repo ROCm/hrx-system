@@ -35,10 +35,48 @@ TEST(HostTest, CompilerAdapterUsesApplicationExecutor) {
   EXPECT_EQ(loom_runtime_host_target_providers(host, &target_provider_count),
             nullptr);
   EXPECT_EQ(target_provider_count, 0u);
-  loom_runtime_host_trim_compiler(host);
+  IREE_ASSERT_OK(loom_runtime_host_trim_compiler(host));
   loom_runtime_host_retain(host);
   loom_runtime_host_release(host);
   EXPECT_NE(loom_runtime_host_proactor_pool(host), nullptr);
+  loom_runtime_host_release(host);
+}
+
+TEST(HostTest, CompilerTrimUsesConfiguredAllocatorOnce) {
+  struct TrimAllocator {
+    // Actual storage provider for the complete host lifetime.
+    iree_allocator_t backing = iree_allocator_system();
+    // Number of explicit reclamation requests from the host owner.
+    iree_host_size_t calls = 0;
+    // Injected external control failure, leaving allocation/free unaffected.
+    iree_status_code_t status_code = IREE_STATUS_OK;
+  } state;
+  const iree_allocator_t allocator = {
+      &state,
+      [](void* self, iree_allocator_command_t command, const void* parameters,
+         void** pointer) -> iree_status_t {
+        auto* state = static_cast<TrimAllocator*>(self);
+        if (command == IREE_ALLOCATOR_COMMAND_TRIM) {
+          ++state->calls;
+          if (state->status_code != IREE_STATUS_OK) {
+            return iree_status_from_code(state->status_code);
+          }
+        }
+        return state->backing.ctl(state->backing.self, command, parameters,
+                                  pointer);
+      },
+  };
+  loom_runtime_host_t* host = nullptr;
+  IREE_ASSERT_OK(loom_runtime_host_create(2, nullptr, allocator, &host));
+  EXPECT_EQ(state.calls, 0u);
+  IREE_EXPECT_OK(loom_runtime_host_trim_compiler(host));
+  EXPECT_EQ(state.calls, 1u);
+  state.status_code = IREE_STATUS_UNAVAILABLE;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE,
+                        loom_runtime_host_trim_compiler(host));
+  EXPECT_EQ(state.calls, 2u);
+  EXPECT_EQ(iree_task_executor_worker_count(loom_runtime_host_executor(host)),
+            2u);
   loom_runtime_host_release(host);
 }
 

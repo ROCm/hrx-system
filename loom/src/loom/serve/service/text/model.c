@@ -626,6 +626,13 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
       status = loom_serve_text_warmup_status(model->warmup);
     }
   }
+  if (load->phase == TEXT_LOAD_COMPLETE && model->jit) {
+    // Compiled stages retain their images and executable owners independently
+    // of the load catalog. Every preparation producer has retired by here.
+    loom_runtime_jit_release(model->jit);
+    model->jit = NULL;
+    status = iree_status_join(status, loom_runtime_host_trim_compiler(host));
+  }
   if (!iree_status_is_ok(status)) {
     // Binding may already have queued backing allocation. Failure of a later
     // preparation step does not retire that accepted ownership.
@@ -637,11 +644,6 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
     }
   }
   *out_complete = load->phase == TEXT_LOAD_COMPLETE;
-  if (*out_complete) {
-    // All preparation producers have retired and returned their scratch.
-    // Reclaim the burst's idle storage before entering steady serving.
-    loom_runtime_host_trim_compiler(host);
-  }
   return status;
 }
 
