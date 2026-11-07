@@ -100,9 +100,9 @@ http_archive(
 http_archive(
     name = "cxx",
     build_file = "//build_tools/third_party/cxx:cxx.BUILD.bazel",
-    sha256 = "91792831a9e6e5ed762ff1a7468ac4fdac94e748561008c84dcb86877efe8b67",
-    strip_prefix = "cplusplus-d9d2f489fb2975c88a0ae4461e79ae7c444b9ef9",
-    url = "https://github.com/benvanik/cplusplus/archive/d9d2f489fb2975c88a0ae4461e79ae7c444b9ef9.tar.gz",
+    sha256 = "a6b07118281b9e4c76685672aa11a0ea5da74f6493fcd6e7f0b329b3b6e7043a",
+    strip_prefix = "cplusplus-fdcec6184858eb676dcccf59ac0e846fd3275d69",
+    url = "https://github.com/benvanik/cplusplus/archive/fdcec6184858eb676dcccf59ac0e846fd3275d69.tar.gz",
 )
 
 http_archive(
