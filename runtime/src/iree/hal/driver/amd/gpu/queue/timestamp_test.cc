@@ -98,7 +98,10 @@ TEST_F(TimestampWritesTest, ExecutionDoesNotDeliverPayload) {
   };
   EXPECT_FALSE(iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier));
   barrier.target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST;
-  EXPECT_FALSE(iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier));
+  barrier.flags = iree_hal_barrier_resolve_flags(&barrier);
+  EXPECT_TRUE(iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier));
+  barrier.target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH;
+  barrier.flags = 0;
   barrier.memory_barrier_count = 1;
   EXPECT_TRUE(iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier));
   barrier.source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH;
@@ -110,6 +113,53 @@ TEST_F(TimestampWritesTest, ExecutionDoesNotDeliverPayload) {
   EXPECT_TRUE(iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier));
   writes_.count = 0;
   EXPECT_FALSE(iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier));
+}
+
+TEST_F(TimestampWritesTest, HostCacheVisibilityPreservesPayloadScope) {
+  IREE_ASSERT_OK(iree_hal_amd_gpu_timestamp_writes_append(
+      &recording_, iree_hal_make_indirect_buffer_ref(0, 16, 8), &writes_));
+  iree_hal_buffer_barrier_t range = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ,
+      .buffer_ref = iree_hal_make_indirect_buffer_ref(0, 32, 8),
+  };
+  iree_hal_barrier_t barrier = {
+      .source_stage_mask =
+          IREE_HAL_EXECUTION_STAGE_TRANSFER | IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+      .buffer_barrier_count = 1,
+      .buffer_barriers = &range,
+  };
+  barrier.flags = iree_hal_barrier_resolve_flags(&barrier);
+  EXPECT_EQ(barrier.flags, 0u);
+  EXPECT_EQ(iree_hal_barrier_resolve_cache_flags(&barrier),
+            IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE);
+  EXPECT_FALSE(iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier));
+  range.buffer_ref.offset = 16;
+  EXPECT_TRUE(iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier));
+  range.source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE;
+  EXPECT_FALSE(iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier));
+
+  // A global access dependency for shader writes does not consume clock writes.
+  const iree_hal_memory_barrier_t memory = {
+      .source_scope = range.source_scope,
+      .target_scope = range.target_scope,
+  };
+  barrier.buffer_barrier_count = 0;
+  barrier.memory_barrier_count = 1;
+  barrier.memory_barriers = &memory;
+  barrier.flags = iree_hal_barrier_resolve_flags(&barrier);
+  EXPECT_FALSE(iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier));
+
+  // Explicit global publication consumes all covered writes despite the range.
+  barrier.memory_barrier_count = 0;
+  barrier.buffer_barrier_count = 1;
+  barrier.flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+  EXPECT_TRUE(iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier));
+  barrier.flags = 0;
+  barrier.effects.bits = IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM;
+  barrier.flags = iree_hal_barrier_resolve_flags(&barrier);
+  EXPECT_TRUE(iree_hal_amd_gpu_timestamp_writes_overlap(&writes_, &barrier));
 }
 
 TEST_F(TimestampWritesTest, RecordingReusesOneInvocationScratchWord) {

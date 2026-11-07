@@ -86,7 +86,7 @@ static iree_hal_amdgpu_queue_barrier_t iree_hal_amdgpu_barrier_list_resolve(
     const iree_hal_amdgpu_barrier_scopes_t scopes =
         iree_hal_amdgpu_barrier_resolve_scopes(
             barrier->source_stage_mask, barrier->target_stage_mask,
-            iree_hal_barrier_resolve_flags(barrier),
+            iree_hal_barrier_resolve_cache_flags(barrier),
             barrier->memory_barrier_count, barrier->memory_barriers,
             barrier->buffer_barrier_count, barrier->buffer_barriers);
     result.acquire = (uint8_t)iree_hal_amdgpu_barrier_max_scope(result.acquire,

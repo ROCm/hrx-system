@@ -60,7 +60,8 @@ static iree_hal_vulkan_barrier_t iree_hal_vulkan_barrier_list_resolve(
   iree_hal_vulkan_barrier_t result = {0};
   for (iree_host_size_t i = 0; i < barriers->count; ++i) {
     const iree_hal_barrier_t* barrier = &barriers->values[i];
-    iree_hal_barrier_flags_t flags = iree_hal_barrier_resolve_flags(barrier);
+    iree_hal_barrier_flags_t flags =
+        iree_hal_barrier_resolve_cache_flags(barrier);
     for (iree_host_size_t j = 0; j < barrier->buffer_barrier_count; ++j) {
       const iree_hal_memory_transition_recipe_t* recipe =
           barrier->buffer_barriers[j].recipe;

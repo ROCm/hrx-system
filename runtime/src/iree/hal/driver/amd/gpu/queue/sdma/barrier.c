@@ -44,12 +44,15 @@ iree_hal_amd_gpu_sdma_barrier_t iree_hal_amd_gpu_sdma_barrier_prepare(
   iree_hal_amd_gpu_sdma_barrier_t result = 0;
   for (iree_host_size_t i = 0; i < barriers->count; ++i) {
     const iree_hal_barrier_t* barrier = &barriers->values[i];
-    result |= iree_hal_amd_gpu_sdma_barrier_effects(barrier->effects);
-    if (barrier->flags & IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE) {
+    const iree_hal_barrier_flags_t flags =
+        iree_hal_barrier_resolve_cache_flags(barrier);
+    result |= iree_hal_amd_gpu_sdma_barrier_effects((iree_hal_memory_effects_t){
+        barrier->effects.bits & IREE_HAL_MEMORY_EFFECT_RESOURCE_MASK});
+    if (flags & IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE) {
       result |= IREE_HAL_AMD_GPU_SDMA_BARRIER_RELEASE |
                 IREE_HAL_AMD_GPU_SDMA_BARRIER_JOIN;
     }
-    if (barrier->flags & IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE) {
+    if (flags & IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE) {
       result |= IREE_HAL_AMD_GPU_SDMA_BARRIER_ACQUIRE;
     }
     iree_hal_access_scope_t source = 0, target = 0;

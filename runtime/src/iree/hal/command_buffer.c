@@ -384,9 +384,9 @@ iree_hal_command_buffer_barrier(iree_hal_command_buffer_t* command_buffer,
                 command_buffer, VALIDATION_STATE(command_buffer), barrier));
   });
 
-  // Global prepared actions and explicit minimum flags have identical native
-  // semantics. Resolve those once while preserving ranged effects and their
-  // copied buffer recipes for the native recorder.
+  // Resolve global actions while preserving authored access/range scope for
+  // native recorders selecting payload dependencies. Native cache lowering may
+  // promote HOST visibility further without consuming unrelated payloads.
   iree_hal_barrier_t resolved = *barrier;
   resolved.flags = iree_hal_barrier_resolve_flags(barrier);
   resolved.effects.bits &= IREE_HAL_MEMORY_EFFECT_RESOURCE_MASK;

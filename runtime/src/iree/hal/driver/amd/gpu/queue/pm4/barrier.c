@@ -103,17 +103,16 @@ iree_hal_amd_gpu_pm4_barrier_t iree_hal_amd_gpu_pm4_barrier_prepare(
   iree_hal_amd_gpu_pm4_barrier_t result = {0};
   for (iree_host_size_t i = 0; i < barriers->count; ++i) {
     const iree_hal_barrier_t* barrier = &barriers->values[i];
-    iree_hal_barrier_flags_t flags = barrier->flags;
+    iree_hal_barrier_flags_t flags =
+        iree_hal_barrier_resolve_cache_flags(barrier);
     // Validation proves that the recipes cover all ranged effects and use the
     // queue executor. Global promotion needs only their already captured bits.
     if (barrier->effects.bits &
-        (IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM |
-         IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM)) {
+        IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM) {
       flags |= IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
     }
     if (barrier->effects.bits &
-        (IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM |
-         IREE_HAL_MEMORY_EFFECT_RANGE_ACQUIRE_FROM_SYSTEM)) {
+        IREE_HAL_MEMORY_EFFECT_RANGE_ACQUIRE_FROM_SYSTEM) {
       flags |= IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE;
     }
     iree_hal_access_scope_t source = 0;
