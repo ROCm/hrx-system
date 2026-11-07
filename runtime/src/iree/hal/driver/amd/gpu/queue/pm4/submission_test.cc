@@ -949,7 +949,12 @@ TEST_P(SubmissionTest, CopyBatchesCaptureProgramCompatibilityAndKeepOwnership) {
                             IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS};
   const iree_hal_buffer_binding_layout_t binding_layout = {
       2 * sizeof(iree_hal_buffer_native_binding_t), 2, 0, types};
+  const iree_hal_queue_family_spec_t spec = {
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
+  };
   const iree_hal_queue_family_t family = {
+      .spec = &spec,
       .memory = {.domain = this, .queue_scope_id = 0},
   };
   for (uint16_t program_binding :
@@ -1067,7 +1072,12 @@ TEST_P(SubmissionTest, RejectedDownloadSuffixJoinsBeforeFailingPublicSignals) {
                                    << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
   contract->scopes[0].bindings[IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS] = 0;
   contract->scopes[0].usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  const iree_hal_queue_family_spec_t spec = {
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
+  };
   const iree_hal_queue_family_t family = {
+      .spec = &spec,
       .memory = {.domain = this, .queue_scope_id = 0},
   };
   const iree_hal_buffer_native_binding_t binding = {.device_address = 0x1000};

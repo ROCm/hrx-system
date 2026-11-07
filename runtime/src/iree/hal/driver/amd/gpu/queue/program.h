@@ -68,12 +68,13 @@ typedef struct iree_hal_amd_gpu_program_pool_t {
   } constants;
 } iree_hal_amd_gpu_program_pool_t;
 
-// Captures placement for one native device; failure leaves a
-// deinitializable partial owner.
+// Captures placement for one native device and the caller's required access.
+// Pools also owning shader builtins include EXECUTE; data-only programs use
+// READ | WRITE. Failure leaves a deinitializable partial owner.
 iree_status_t iree_hal_amd_gpu_program_pool_initialize(
     iree_hal_amd_gpu_context_t* context, uint32_t native_family_ordinal,
-    uint32_t queue_count, iree_allocator_t host_allocator,
-    iree_hal_amd_gpu_program_pool_t* out_pool);
+    uint32_t queue_count, amdf_memory_access_t access,
+    iree_allocator_t host_allocator, iree_hal_amd_gpu_program_pool_t* out_pool);
 void iree_hal_amd_gpu_program_pool_trim(iree_hal_amd_gpu_program_pool_t* pool);
 void iree_hal_amd_gpu_program_pool_deinitialize(
     iree_hal_amd_gpu_program_pool_t* pool);

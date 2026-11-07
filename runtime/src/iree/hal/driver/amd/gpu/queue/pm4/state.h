@@ -194,6 +194,17 @@ struct iree_hal_amd_gpu_pm4_queue_t {
     // Lazy private storage; only the exact publisher mutates active ownership.
     iree_hal_amd_gpu_pm4_scratch_t scratch;
   } producer;
+  // Native waiters leave metadata eligible under the same exclusive publisher.
+  struct {
+    // Oldest waiter; cold idle queries observe it independently of the FIFO.
+    iree_atomic_intptr_t first;
+    // Last native waiter for constant-time publisher-owned append.
+    iree_hal_amd_gpu_publication_entry_t* last;
+    // Coalesced retirement/failure continuation in the normal ready FIFO.
+    iree_hal_amd_gpu_pm4_entry_t entry;
+    // One while the continuation is queued for the publisher.
+    iree_atomic_int32_t pending;
+  } capacity;
   // Single completion observer's release-published capacity credit.
   struct {
     // Number of consumed retirement records.

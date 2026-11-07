@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "iree/hal/driver/amd/gpu/queue/blit.h"
+#include "iree/hal/driver/amd/gpu/queue/dma_transfer.h"
 #include "iree/hal/driver/amd/gpu/queue/pm4/launch.h"
 #include "iree/hal/driver/amd/gpu/queue/transfer.h"
 #include "iree/testing/gtest.h"
@@ -31,12 +32,13 @@ class TransferTest : public ::testing::Test {
     staging_.fill(0xCC);
   }
 
-  iree_hal_amd_gpu_pm4_transfer_packet_t Emit(
-      const iree_hal_amd_gpu_pm4_transfer_span_t& span, uint64_t offset,
+  iree_hal_amd_gpu_dma_transfer_packet_t Emit(
+      const iree_hal_amd_gpu_dma_transfer_span_t& span, uint64_t offset,
       size_t capacity) {
-    return iree_hal_amd_gpu_pm4_transfer_emit_packet(
-        &span, offset, iree_make_byte_span(staging_.data(), capacity),
-        0x987600003000, words_.data() + 1);
+    return iree_hal_amd_gpu_dma_transfer_emit_packet(
+        &iree_hal_amd_gpu_pm4_transfer_encoding, &span, offset,
+        iree_make_byte_span(staging_.data(), capacity), 0x987600003000,
+        words_.data() + 1);
   }
 
   void Expect(std::initializer_list<uint32_t> packet) {
@@ -55,7 +57,7 @@ class TransferTest : public ::testing::Test {
 };
 
 TEST_F(TransferTest, CopySplitsAtPacketLimitWithoutStaging) {
-  const iree_hal_amd_gpu_pm4_transfer_span_t span = {
+  const iree_hal_amd_gpu_dma_transfer_span_t span = {
       .source_address = 0x1234FFFFFFF0,
       .target_address = 0x567800000003,
       .length = 32 * 1024 * 1024 + 3,
@@ -72,7 +74,7 @@ TEST_F(TransferTest, CopySplitsAtPacketLimitWithoutStaging) {
 }
 
 TEST_F(TransferTest, FillRotatesPatternAcrossStagedEdgesAndImmediateBody) {
-  const iree_hal_amd_gpu_pm4_transfer_span_t span = {
+  const iree_hal_amd_gpu_dma_transfer_span_t span = {
       .target_address = 0x567800001001,
       .length = 12,
       .pattern = 0xA1B2C3D4,
@@ -100,7 +102,7 @@ TEST_F(TransferTest, HostSourcesRespectCursorAndAvailableStaging) {
   for (auto type : {IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE,
                     IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD}) {
     SCOPED_TRACE(type);
-    const iree_hal_amd_gpu_pm4_transfer_span_t span = {
+    const iree_hal_amd_gpu_dma_transfer_span_t span = {
         .target_address = 0x567800001000,
         .source_bytes = source,
         .length = sizeof(source),
@@ -124,7 +126,7 @@ TEST_F(TransferTest, HostSourcesRespectCursorAndAvailableStaging) {
 }
 
 TEST_F(TransferTest, DownloadTargetsOwnedStagingWithoutReadingDeviceBytes) {
-  const iree_hal_amd_gpu_pm4_transfer_span_t span = {
+  const iree_hal_amd_gpu_dma_transfer_span_t span = {
       .source_address = 0x123400001000,
       .length = 100,
       .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
@@ -144,7 +146,7 @@ TEST_F(TransferTest, EmptyStagingEmitsNothingForStagedOperations) {
                     IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
                     IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD}) {
     SCOPED_TRACE(type);
-    const iree_hal_amd_gpu_pm4_transfer_span_t span = {
+    const iree_hal_amd_gpu_dma_transfer_span_t span = {
         .target_address = 1,
         .length = 1,
         .type = type,
@@ -192,9 +194,10 @@ TEST(TransferBatchTest, HostTransfersUseAvailableStagingInOnePacket) {
         .count = 1,
         .operations = &operation,
     };
-    iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
-    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
-        &transfer, IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS,
+    iree_hal_amd_gpu_dma_transfer_chunk_t chunk;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_dma_transfer_prepare_chunk(
+        &iree_hal_amd_gpu_pm4_transfer_encoding, &transfer,
+        IREE_HAL_AMD_GPU_DMA_TRANSFER_MAX_WORDS,
         iree_make_byte_span(staging.data() + 1, kLength), kStagingAddress,
         &chunk));
     ASSERT_EQ(chunk.word_count, 7u);
@@ -259,9 +262,10 @@ TEST(TransferBatchTest, DownloadRunsShareStagingAndRetirement) {
     SCOPED_TRACE(capacity);
     std::array<uint8_t, 24> staging;
     staging.fill(0xCC);
-    iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
-    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
-        &transfer, IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS,
+    iree_hal_amd_gpu_dma_transfer_chunk_t chunk;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_dma_transfer_prepare_chunk(
+        &iree_hal_amd_gpu_pm4_transfer_encoding, &transfer,
+        IREE_HAL_AMD_GPU_DMA_TRANSFER_MAX_WORDS,
         iree_make_byte_span(staging.data() + 1, capacity), 0x20000, &chunk));
     const uint32_t length = std::min(capacity, 21u);
     const uint32_t packets = !length ? 0 : 1 + (length + 2) / 8;
@@ -288,10 +292,10 @@ TEST(TransferBatchTest, DownloadRunsShareStagingAndRetirement) {
   auto large_transfer = transfer;
   large_transfer.cursor.offset = (UINT64_C(8) << 30) + 3;
   std::array<uint8_t, 5> staging;
-  iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
-      &large_transfer, 7, iree_make_byte_span(staging.data(), staging.size()),
-      0x20000, &chunk));
+  iree_hal_amd_gpu_dma_transfer_chunk_t chunk;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_dma_transfer_prepare_chunk(
+      &iree_hal_amd_gpu_pm4_transfer_encoding, &large_transfer, 7,
+      iree_make_byte_span(staging.data(), staging.size()), 0x20000, &chunk));
   EXPECT_EQ(chunk.download.offset, large_transfer.cursor.offset);
   EXPECT_EQ(chunk.next.index, 1u);
   EXPECT_EQ(chunk.next.offset, 0u);
@@ -321,9 +325,10 @@ TEST(TransferBatchTest, DeviceCopiesUseCommandCapacityWithoutStaging) {
       .slot = {.index = 0, .type = IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS},
   };
   iree_hal_amd_gpu_transfer_t transfer = {.count = 1, .operations = &operation};
-  iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
-      &transfer, 14, iree_byte_span_empty(), 0, &chunk));
+  iree_hal_amd_gpu_dma_transfer_chunk_t chunk;
+  IREE_ASSERT_OK(iree_hal_amd_gpu_dma_transfer_prepare_chunk(
+      &iree_hal_amd_gpu_pm4_transfer_encoding, &transfer, 14,
+      iree_byte_span_empty(), 0, &chunk));
   const std::vector<uint32_t> expected = {
       0xC0055000, 0x60300000, 0xFFFFFFF0, 0x1234, 3,         0x5678, 0x2000000,
       0xC0055000, 0x60300000, 0x1FFFFF0,  0x1235, 0x2000003, 0x5678, 0x2000000};
@@ -335,8 +340,9 @@ TEST(TransferBatchTest, DeviceCopiesUseCommandCapacityWithoutStaging) {
   EXPECT_EQ(chunk.staging_length, 0u);
   EXPECT_EQ(chunk.download.length, 0u);
   transfer.cursor = chunk.next;
-  IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_chunk(
-      &transfer, 7, iree_byte_span_empty(), 0, &chunk));
+  IREE_ASSERT_OK(iree_hal_amd_gpu_dma_transfer_prepare_chunk(
+      &iree_hal_amd_gpu_pm4_transfer_encoding, &transfer, 7,
+      iree_byte_span_empty(), 0, &chunk));
   ASSERT_EQ(chunk.word_count, 7u);
   EXPECT_EQ(std::vector<uint32_t>(chunk.words, chunk.words + chunk.word_count),
             (std::vector<uint32_t>{0xC0055000, 0x60300000, 0x3FFFFF0, 0x1235,
@@ -347,7 +353,7 @@ TEST(TransferBatchTest, DeviceCopiesUseCommandCapacityWithoutStaging) {
 }
 
 TEST_F(TransferTest, BulkFillPreservesPatternPhaseAcrossPacketBoundary) {
-  const iree_hal_amd_gpu_pm4_transfer_span_t span = {
+  const iree_hal_amd_gpu_dma_transfer_span_t span = {
       .target_address = 0x567800001001,
       .length = 32 * 1024 * 1024 + 7,
       .pattern = 0xA1B2C3D4,
@@ -439,7 +445,7 @@ TEST(TransferBatchTest, ProgramCopiesRespectPacketArgumentsAndOperationBounds) {
                                           << " bytes=" << byte_capacity);
         std::array<uint8_t, 98> bytes;
         bytes.fill(0xCC);
-        iree_hal_amd_gpu_pm4_transfer_chunk_t chunk;
+        iree_hal_amd_gpu_dma_transfer_chunk_t chunk;
         std::memset(&chunk, 0xA5, sizeof(chunk));
         IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_transfer_prepare_program_chunk(
             &transfer, &launch, word_capacity,
@@ -505,7 +511,7 @@ TEST(TransferBatchTest, ProgramCopiesRespectPacketArgumentsAndOperationBounds) {
                                 [](uint8_t byte) { return byte == 0xCC; }));
         EXPECT_TRUE(
             std::all_of(chunk.words + count * 31,
-                        chunk.words + IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_WORDS,
+                        chunk.words + IREE_HAL_AMD_GPU_DMA_TRANSFER_MAX_WORDS,
                         [](uint32_t word) { return word == 0xA5A5A5A5; }));
       }
     }

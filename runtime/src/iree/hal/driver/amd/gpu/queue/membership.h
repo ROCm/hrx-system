@@ -67,22 +67,38 @@ typedef struct iree_hal_amd_gpu_queue_slot_t iree_hal_amd_gpu_queue_slot_t;
 typedef struct iree_hal_amd_gpu_queue_sources_t
     iree_hal_amd_gpu_queue_sources_t;
 typedef struct iree_hal_amd_gpu_queue_join_t iree_hal_amd_gpu_queue_join_t;
+typedef struct iree_hal_amd_gpu_queue_family_t iree_hal_amd_gpu_queue_family_t;
 
 // One cold construction request. Coordinates and backing belong to the device
 // and survive queue replacement; the returned queue borrows them without
 // retaining the device. Native allocations execute on the acquiring caller.
 typedef iree_status_t (*iree_hal_amd_gpu_queue_create_fn_t)(
-    void* user_data, uint32_t ordinal, uint32_t source_ordinal,
-    uint32_t frontier_count, uint64_t initial_epoch,
+    const iree_hal_amd_gpu_queue_family_t* family, uint32_t ordinal,
+    uint32_t source_ordinal, uint32_t frontier_count, uint64_t initial_epoch,
     iree_hal_amd_gpu_signal_cache_t* signals,
     const iree_hal_queue_params_t* params, iree_hal_queue_t** out_queue);
 
+// Device-owned family identity and immutable native ownership contract. Every
+// queue borrows this same identity through final native removal. Construction
+// and cold membership operations use the family; execution stays
+// protocol-local.
+struct iree_hal_amd_gpu_queue_family_t {
+  // Public identity, first so a queue's existing family pointer selects it.
+  iree_hal_queue_family_t base;
+  // Exact native protocol's lifetime operations.
+  const iree_hal_amd_gpu_queue_lifecycle_t* lifecycle;
+  // Native constructor consuming this family's placement policies.
+  iree_hal_amd_gpu_queue_create_fn_t create;
+  // Borrowed construction owner, live through device cleanup.
+  void* user_data;
+};
+
 // Device-owned cold queue membership. Native vector coordinates are reused only
-// after synchronous removal proves completion. Their monotonically continuing
-// epochs preserve old signal readers and resident-program reuse proofs. All
-// arrays grow on acquisition; release uses already-secured source-table
-// scratch. No steady-state submission or retirement traverses this registry or
-// locks it.
+// within their original family after synchronous removal proves completion.
+// Their monotonically continuing epochs preserve old signal readers and
+// resident-program reuse proofs. All arrays grow on acquisition; release uses
+// already-secured source-table scratch. No steady-state submission or
+// retirement traverses this registry or locks it.
 typedef struct iree_hal_amd_gpu_queue_membership_t {
   // Borrowed native owner and diagnostic sink, live through final cleanup.
   iree_hal_amd_gpu_context_t* context;
@@ -94,14 +110,10 @@ typedef struct iree_hal_amd_gpu_queue_membership_t {
   iree_hal_amd_gpu_completion_t* completion;
   // Borrowed first-fault deadline and host ownership notification.
   iree_hal_amd_gpu_failure_t* failure;
-  // Borrowed registry of resident recordings requiring publisher coordinates.
-  iree_hal_amd_gpu_program_pool_t* programs;
-  // Immutable exact protocol ownership contract.
-  const iree_hal_amd_gpu_queue_lifecycle_t* lifecycle;
-  // Native construction supplied by the device's placement policies.
-  iree_hal_amd_gpu_queue_create_fn_t create;
-  // Borrowed device passed to create.
-  void* user_data;
+  // Number of family-owned recording registries sharing publisher coordinates.
+  uint32_t program_pool_count;
+  // Borrowed immutable array of resident recording registries.
+  iree_hal_amd_gpu_program_pool_t* const* program_pools;
   // Fixed device-owned provisioned queue count.
   uint32_t provisioned_count;
   // Number of allocated dynamic coordinates, including currently vacant slots.
@@ -181,6 +193,7 @@ bool iree_hal_amd_gpu_queue_membership_is_empty(
 
 iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
     iree_hal_amd_gpu_queue_membership_t* membership,
+    const iree_hal_amd_gpu_queue_family_t* family,
     const iree_hal_queue_params_t* params, iree_hal_queue_t** out_queue);
 
 // Assigns or clears the group namespace before public work. Registration is

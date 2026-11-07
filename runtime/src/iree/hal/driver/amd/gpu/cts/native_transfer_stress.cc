@@ -22,9 +22,13 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, false),
                       std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4, true),
                       std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, false),
-                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, true)),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL, true),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA, false),
+                      std::make_pair(AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA, true)),
     [](const auto& info) {
-      return std::string(info.param.first == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
+      return std::string(info.param.first == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
+                             ? "Sdma"
+                         : info.param.first == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
                              ? "Aql"
                              : "Pm4") +
              (info.param.second ? "Explicit" : "Default");

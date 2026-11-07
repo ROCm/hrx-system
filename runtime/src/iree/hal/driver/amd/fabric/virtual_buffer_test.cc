@@ -376,11 +376,14 @@ TEST_F(VirtualBufferContractTest,
        NewCacheObligationRejectsBeforeNativeMutation) {
   iree_hal_pool_t* coherent = nullptr;
   IREE_ASSERT_OK(CreateSource(&coherent));
-  const iree_hal_virtual_buffer_options_t options = {.byte_length = 4096};
+  const iree_hal_virtual_buffer_options_t options = {.byte_length = 8192};
   iree_hal_buffer_t* target = nullptr;
   IREE_ASSERT_OK(iree_hal_virtual_buffer_create(group_, Scope(), {1, &coherent},
                                                 &options, allocator_, &target));
-  iree_hal_pool_release(coherent);
+  iree_hal_buffer_t* coherent_backing = nullptr;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      coherent, iree_hal_make_pool_reservation_request(8192, 4096),
+      iree_infinite_timeout(), &coherent_backing));
   const auto host = ResolveScope(IREE_HAL_MEMORY_SITE_HOST);
   const auto gpu = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
   const auto before = iree_hal_buffer_query_transition(target, host, gpu);
@@ -394,7 +397,7 @@ TEST_F(VirtualBufferContractTest,
       noncoherent));
   iree_hal_buffer_t* backing = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
-      noncoherent, iree_hal_make_pool_reservation_request(4096, 4096),
+      noncoherent, iree_hal_make_pool_reservation_request(8192, 4096),
       iree_infinite_timeout(), &backing));
   const iree_hal_memory_mapping_t mapping = {
       .target = target,
@@ -407,10 +410,38 @@ TEST_F(VirtualBufferContractTest,
       IREE_STATUS_UNAVAILABLE,
       iree_hal_queue_map(iree_hal_device_queue(cpu_device_, 0, 0), {}, {}, 1,
                          &mapping, 0));
+
+  // A compatible prefix cannot admit a different source contract later in the
+  // same batch, even when its target and scope are unchanged.
+  std::array<iree_hal_memory_mapping_t, 2> mappings = {mapping, mapping};
+  mappings[0].source = coherent_backing;
+  mappings[1].target_range.byte_offset = 4096;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      iree_hal_queue_map(iree_hal_device_queue(cpu_device_, 0, 0), {}, {},
+                         mappings.size(), mappings.data(), 0));
+
+  // This same source is valid for a target that declares its cache obligations.
+  // Admitting that target must not weaken the following target's guarantees.
+  iree_hal_buffer_t* noncoherent_target = nullptr;
+  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(
+      group_, Scope(), {1, &noncoherent}, &options, allocator_,
+      &noncoherent_target));
+  EXPECT_TRUE(iree_hal_virtual_buffer_query_pool_compatibility(
+      noncoherent_target, gpu, noncoherent));
+  mappings[0].source = backing;
+  mappings[0].target = noncoherent_target;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      iree_hal_queue_map(iree_hal_device_queue(cpu_device_, 0, 0), {}, {},
+                         mappings.size(), mappings.data(), 0));
   EXPECT_EQ(native_.update_count, 0);
   const auto after = iree_hal_buffer_query_transition(target, host, gpu);
   EXPECT_EQ(after.release.bits, before.release.bits);
   EXPECT_EQ(after.acquire.bits, before.acquire.bits);
+  iree_hal_buffer_release(noncoherent_target);
+  iree_hal_buffer_release(coherent_backing);
+  iree_hal_pool_release(coherent);
   iree_hal_buffer_release(backing);
   iree_hal_pool_release(noncoherent);
   iree_hal_buffer_release(target);
@@ -1262,6 +1293,22 @@ TEST_F(MappingPublicationTest, PreservesNativeAndSemanticRunBoundaries) {
   }
   iree_hal_buffer_release(other_target);
   iree_hal_buffer_release(other_backing);
+}
+
+TEST_F(MappingPublicationTest, ChecksNativeBackingForEveryMapping) {
+  // Both ranges have the same immutable contract. Only the second committed
+  // native source is misaligned; capture cannot check uncommitted backing.
+  const iree_hal_memory_mapping_t mappings[] = {Mapping(0, 4096),
+                                                Mapping(4096, 4096, 1)};
+  iree_hal_memory_mapping_batch_t* batch = nullptr;
+  IREE_ASSERT_OK(iree_hal_memory_mapping_batch_create(
+      iree_hal_device_queue(cpu_device_, 0, 0), IREE_ARRAYSIZE(mappings),
+      mappings, 0, allocator_, &batch));
+  EXPECT_EQ(batch->update_count, 2u);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        iree_hal_memory_mapping_batch_resolve(batch));
+  EXPECT_EQ(native_.update_count, 0);
+  iree_hal_memory_mapping_batch_release(batch);
 }
 
 TEST_F(MappingPublicationTest, CompactedEntriesKeepSeparateUpdateVectors) {

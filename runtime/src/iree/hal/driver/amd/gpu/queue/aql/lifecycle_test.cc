@@ -99,7 +99,11 @@ class AqlLifecycleTest : public ::testing::Test {
     }
     if (partial) {
       std::array<iree_hal_transfer_operation_t, 6> operations = {};
-      const iree_hal_queue_family_t family = {};
+      const iree_hal_queue_family_spec_t spec = {
+          .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+                        IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
+      };
+      const iree_hal_queue_family_t family = {.spec = &spec};
       const uint32_t pattern = 0;
       for (size_t i = 0; i < references.size(); ++i) {
         references[i].buffer->memory = {

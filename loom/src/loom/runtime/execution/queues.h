@@ -12,13 +12,15 @@
 extern "C" {
 #endif
 
-// Fixed provisioned queues shared by independently retained model executions.
+// Fixed queue inventory shared by independently retained model executions.
 // Borrower counts describe live execution domains, not active requests, device
 // occupancy, or priority. Binding never creates or destroys a native queue.
 typedef struct loom_runtime_execution_queues_t loom_runtime_execution_queues_t;
 
-// Captures the provisioned inventory of two selected, nonempty families on the
-// same device. Retains that device; its live group must enclose every binding.
+// Retains the provisioned queues of two selected families on the same device,
+// acquiring one queue for each family with no provisioned queues. Such a family
+// must support dynamic acquisition; acquisition failures propagate directly.
+// Retains that device; its live group must enclose every binding.
 // A shared family contributes one inventory and one borrower per execution.
 iree_status_t loom_runtime_execution_queues_create(
     const iree_hal_queue_family_t* dispatch_family,
@@ -26,22 +28,31 @@ iree_status_t loom_runtime_execution_queues_create(
     iree_allocator_t host_allocator,
     loom_runtime_execution_queues_t** out_queues);
 
-// Reference ownership; NULL is accepted.
+// Reference ownership; NULL is accepted. The device owner retains the inventory
+// through execution retirement. Final release destroys any acquired queues on
+// that owner, after all submissions and their callbacks have been joined.
 void loom_runtime_execution_queues_retain(
     loom_runtime_execution_queues_t* queues);
 void loom_runtime_execution_queues_release(
     loom_runtime_execution_queues_t* queues);
 
+// Primary dispatch queue borrowed for device-owned setup and executable work.
+iree_hal_queue_t* loom_runtime_execution_queues_dispatch_queue(
+    const loom_runtime_execution_queues_t* queues);
+// Primary transfer queue borrowed for device-owned setup and file I/O.
+iree_hal_queue_t* loom_runtime_execution_queues_transfer_queue(
+    const loom_runtime_execution_queues_t* queues);
+
 typedef struct loom_runtime_execution_binding_t {
-  // Retained inventory owning both provisioned queues and borrower counters.
+  // Retained inventory owning both exact queues and borrower counters.
   loom_runtime_execution_queues_t* owner;
   // Exact command queue, borrowed through binding release.
   iree_hal_queue_t* dispatch;
   // Exact transfer queue, borrowed through binding release.
   iree_hal_queue_t* transfer;
-  // Borrowed queue's ordinal within the selected dispatch family.
+  // Borrowed queue's index within the inventory's dispatch entries.
   iree_hal_queue_ordinal_t dispatch_ordinal;
-  // Borrowed queue's ordinal within the selected transfer family.
+  // Borrowed queue's index within the inventory's transfer entries.
   iree_hal_queue_ordinal_t transfer_ordinal;
 } loom_runtime_execution_binding_t;
 
@@ -54,7 +65,8 @@ loom_runtime_execution_binding_t loom_runtime_execution_queues_acquire(
 
 // Consumes one acquired binding after its final execution reference retires.
 // May run on a completion callback. Counts are placement hints, not completion
-// signals, and returning a binding neither waits nor destroys its queues.
+// signals. While the device owner retains the inventory, returning a binding
+// neither waits nor destroys its queues.
 void loom_runtime_execution_binding_release(
     loom_runtime_execution_binding_t binding);
 

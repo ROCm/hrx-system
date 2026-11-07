@@ -17,7 +17,7 @@
 #include "loom/runtime/testing/device.h"
 
 IREE_FLAG(string, execution_device_uri, "",
-          "Device URI for the provisioned execution queue tests.");
+          "Device URI for the execution queue inventory tests.");
 
 namespace {
 
@@ -52,7 +52,10 @@ class ExecutionQueuesTest : public ::testing::TestWithParam<bool> {
       for (iree_host_size_t i = 0; i < spec->family_count; ++i) {
         const auto* family = iree_hal_device_queue_family(device_, i);
         if (family != dispatch_family_ &&
-            spec->families[i].provisioned_queue_count &&
+            (spec->families[i].provisioned_queue_count ||
+             iree_any_bit_set(
+                 spec->families[i].flags,
+                 IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION)) &&
             iree_all_bits_set(spec->families[i].role_flags,
                               IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)) {
           transfer_family_ = family;
@@ -60,15 +63,39 @@ class ExecutionQueuesTest : public ::testing::TestWithParam<bool> {
         }
       }
       if (!transfer_family_) {
-        GTEST_SKIP() << "Device has no separate provisioned transfer family";
+        GTEST_SKIP() << "Device has no separate available transfer family";
+      }
+      if (!(iree_hal_queue_family_spec(transfer_family_)->role_flags &
+            IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH)) {
+        EXPECT_FALSE(iree_hal_queue_family_spec(
+                         iree_hal_queue_family(
+                             loom_runtime_device_transfer_queue(owner)))
+                         ->role_flags &
+                     IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH);
       }
     }
-    dispatch_count_ =
-        iree_hal_queue_family_spec(dispatch_family_)->provisioned_queue_count;
-    transfer_count_ =
-        iree_hal_queue_family_spec(transfer_family_)->provisioned_queue_count;
+    dispatch_count_ = std::max(
+        1u,
+        iree_hal_queue_family_spec(dispatch_family_)->provisioned_queue_count);
+    transfer_count_ = std::max(
+        1u,
+        iree_hal_queue_family_spec(transfer_family_)->provisioned_queue_count);
     IREE_ASSERT_OK(loom_runtime_execution_queues_create(
         dispatch_family_, transfer_family_, iree_allocator_system(), &queues_));
+    primary_dispatch_ = loom_runtime_execution_queues_dispatch_queue(queues_);
+    primary_transfer_ = loom_runtime_execution_queues_transfer_queue(queues_);
+    if (iree_hal_queue_family_spec(dispatch_family_)->provisioned_queue_count) {
+      EXPECT_EQ(
+          primary_dispatch_,
+          iree_hal_device_queue(
+              device_, iree_hal_queue_family_ordinal(dispatch_family_), 0));
+    }
+    if (iree_hal_queue_family_spec(transfer_family_)->provisioned_queue_count) {
+      EXPECT_EQ(
+          primary_transfer_,
+          iree_hal_device_queue(
+              device_, iree_hal_queue_family_ordinal(transfer_family_), 0));
+    }
     const iree_hal_pool_family_access_t families[] = {
         {
             .family = dispatch_family_,
@@ -133,14 +160,20 @@ class ExecutionQueuesTest : public ::testing::TestWithParam<bool> {
 
   void Check(loom_runtime_execution_binding_t binding, uint32_t dispatch,
              uint32_t transfer) {
-    EXPECT_EQ(binding.dispatch,
-              iree_hal_device_queue(
-                  device_, iree_hal_queue_family_ordinal(dispatch_family_),
-                  dispatch));
-    EXPECT_EQ(binding.transfer,
-              iree_hal_device_queue(
-                  device_, iree_hal_queue_family_ordinal(transfer_family_),
-                  transfer));
+    EXPECT_EQ(iree_hal_queue_family(binding.dispatch), dispatch_family_);
+    EXPECT_EQ(iree_hal_queue_family(binding.transfer), transfer_family_);
+    EXPECT_EQ(
+        binding.dispatch,
+        dispatch ? iree_hal_device_queue(
+                       device_, iree_hal_queue_family_ordinal(dispatch_family_),
+                       dispatch)
+                 : primary_dispatch_);
+    EXPECT_EQ(
+        binding.transfer,
+        transfer ? iree_hal_device_queue(
+                       device_, iree_hal_queue_family_ordinal(transfer_family_),
+                       transfer)
+                 : primary_transfer_);
     EXPECT_EQ(binding.dispatch_ordinal, dispatch);
     EXPECT_EQ(binding.transfer_ordinal, transfer);
     for (auto* queue : {binding.dispatch, binding.transfer}) {
@@ -163,16 +196,20 @@ class ExecutionQueuesTest : public ::testing::TestWithParam<bool> {
   loom_runtime_device_group_t* group_ = nullptr;
   // Borrowed physical device shared by both selected families.
   iree_hal_device_t* device_ = nullptr;
-  // Borrowed provisioned dispatch family.
+  // Borrowed dispatch family.
   const iree_hal_queue_family_t* dispatch_family_ = nullptr;
   // Borrowed transfer family, optionally distinct from dispatch.
   const iree_hal_queue_family_t* transfer_family_ = nullptr;
-  // Provisioned dispatch queue count from the immutable device specification.
+  // Inventory dispatch count, including a dynamically acquired singleton.
   uint32_t dispatch_count_ = 0;
-  // Provisioned transfer queue count from the immutable device specification.
+  // Inventory transfer count, including a dynamically acquired singleton.
   uint32_t transfer_count_ = 0;
   // Shared queue inventory whose returned bindings are the test subject.
   loom_runtime_execution_queues_t* queues_ = nullptr;
+  // First dispatch queue borrowed through inventory or binding ownership.
+  iree_hal_queue_t* primary_dispatch_ = nullptr;
+  // First transfer queue borrowed through inventory or binding ownership.
+  iree_hal_queue_t* primary_transfer_ = nullptr;
   // Owned bindings, including any left live by a failed assertion.
   std::vector<loom_runtime_execution_binding_t> bindings_;
   // Owned model execution used to exercise final-reference and failure paths.

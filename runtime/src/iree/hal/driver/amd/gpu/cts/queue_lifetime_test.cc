@@ -8,6 +8,7 @@
 #include <memory>
 #include <semaphore>
 #include <thread>
+#include <vector>
 
 #include "iree/hal/cts/util/test_base.h"
 #include "iree/hal/driver/amd/gpu/cts/test_device.h"
@@ -135,6 +136,8 @@ class GpuNativeQueueLifetimeTest
 
   void FrontierAllocationProgress(bool fail);
   void AllocationReleaseProgress(size_t allocation_size, bool fail);
+  void MembershipProgress(iree_hal_queue_t* saturated_queue,
+                          uint32_t acquired_count);
 
   // Native dependency gate, joined by base teardown before its table expires.
   NativeMemoryGate memory_gate_;
@@ -145,6 +148,99 @@ class GpuNativeQueueLifetimeTest
   // Device's stable native signal domain, borrowed through device teardown.
   const void* domain_ = nullptr;
 };
+
+void GpuNativeQueueLifetimeTest::MembershipProgress(
+    iree_hal_queue_t* saturated_queue, uint32_t acquired_count) {
+  Ref<iree_hal_semaphore_t> progress, done;
+  CreateSemaphore(progress.out());
+  CreateSemaphore(done.out());
+  iree_hal_semaphore_t* progress_handle = progress;
+  iree_hal_semaphore_t* done_handle = done;
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool_, iree_hal_make_pool_reservation_request(256, 4),
+      iree_infinite_timeout(), output.out()));
+  std::vector<Ref<iree_hal_queue_t>> acquired(acquired_count);
+  // Retain the first completion callback so no native retirement credit can
+  // return, even though the GPU continues executing accepted work.
+  CompletionPause pause{
+      reinterpret_cast<iree_async_semaphore_t*>(progress_handle)};
+  uint64_t previous = 1;
+  IREE_ASSERT_OK(pause.Arm(previous));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(
+      saturated_queue, {}, {1, &progress_handle, &previous}, nullptr, 0));
+  pause.entered.acquire();
+  for (uint32_t i = 0; i <= options_.queue.retirement_capacity; ++i) {
+    uint64_t next = previous + 1;
+    IREE_ASSERT_OK(iree_hal_queue_barrier(
+        saturated_queue, {1, &progress_handle, &previous},
+        {1, &progress_handle, &next}, nullptr, 0));
+    previous = next;
+  }
+  // Coordinate expansion must pass native-capacity waiters. The caller owns
+  // the prerequisite that will let those waiters retire after acquisition.
+  for (auto& queue : acquired) {
+    IREE_ASSERT_OK(AcquireQueue(queue.out()));
+  }
+  const uint32_t pattern = 0x1234CAFE;
+  uint64_t one = 1;
+  IREE_ASSERT_OK(iree_hal_queue_fill(acquired.back(),
+                                     {1, &progress_handle, &previous},
+                                     {1, &done_handle, &one}, output, 0, 256,
+                                     &pattern, sizeof(pattern), nullptr, 0));
+  pause.Join();
+  std::array<uint32_t, 64> observed = {};
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download =
+          {
+              .source_buffer = output,
+              .target = observed.data(),
+              .length = sizeof(observed),
+          },
+  };
+  uint64_t two = 2;
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queues_[1], {1, &done_handle, &one},
+                                         {1, &done_handle, &two}, 1, &download,
+                                         nullptr));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_wait(done, two, iree_infinite_timeout(), 0));
+  for (uint32_t value : observed) {
+    EXPECT_EQ(value, pattern);
+  }
+}
+
+TEST_P(GpuNativeQueueLifetimeTest,
+       AcquisitionProgressesPastFullComputeSubmissionWindow) {
+  // The third coordinate expands the two provisioned queues' metadata.
+  MembershipProgress(queues_[0], 1);
+}
+
+TEST_P(GpuNativeQueueLifetimeTest,
+       AcquisitionProgressesPastFullTransferSubmissionWindow) {
+  const auto* specs =
+      iree_hal_device_spec_queues(iree_hal_device_spec(device_));
+  const iree_hal_queue_family_t* transfer_family = nullptr;
+  for (uint32_t i = 0; i < specs->family_count; ++i) {
+    const auto roles = specs->families[i].role_flags;
+    if ((roles & IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER) &&
+        !(roles & IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH)) {
+      transfer_family = iree_hal_device_queue_family(device_, i);
+      break;
+    }
+  }
+  if (!transfer_family) {
+    GTEST_SKIP() << "Native SDMA family is unavailable";
+  }
+  iree_hal_queue_params_t params;
+  iree_hal_queue_params_initialize(&params);
+  Ref<iree_hal_queue_t> transfer;
+  IREE_ASSERT_OK(
+      iree_hal_queue_acquire(transfer_family, &params, transfer.out()));
+  // SDMA owns the third coordinate. Keep two more queues live to force the
+  // next expansion, from four coordinates to eight.
+  MembershipProgress(transfer, 2);
+}
 
 void GpuNativeQueueLifetimeTest::FrontierAllocationProgress(bool fail) {
   Ref<iree_hal_buffer_t> output;

@@ -361,8 +361,9 @@ TEST_P(ResidencyPressureTest, LogicalAdmissionCollectsFailureBeforeEviction) {
   EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
   EXPECT_EQ(incoming_operation, nullptr);
   EXPECT_EQ(history_requests_, 0u);
-  loom_runtime_memory_pool_set_observer(
-      pool_, loom_runtime_test_weight_activation_wake_t::Notify, &publication_);
+  loom_runtime_memory_operation_set_observer(
+      failed_operation, loom_runtime_test_weight_activation_wake_t::Notify,
+      &publication_);
   deferred_backing_->FailOne();
   publication_.Await();
   deferred_backing_->ResumeAcquisitions();
@@ -453,8 +454,9 @@ TEST_P(ResidencyPressureTest, WorkspaceGrowthCollectsFailureBeforeDenial) {
   IREE_ASSERT_OK(loom_runtime_memory_pool_commit_async(
       pool_, 1, &failed_range, nullptr, 0, &admission, &operation));
   deferred_backing_->WaitForAcquisition();
-  loom_runtime_memory_pool_set_observer(
-      pool_, loom_runtime_test_weight_activation_wake_t::Notify, &publication_);
+  loom_runtime_memory_operation_set_observer(
+      operation, loom_runtime_test_weight_activation_wake_t::Notify,
+      &publication_);
   deferred_backing_->FailOne();
   publication_.Await();
   deferred_backing_->ResumeAcquisitions();

@@ -113,6 +113,20 @@ static iree_hal_pool_t** hrx_mem_pool_backing_source_slot(
   return NULL;
 }
 
+iree_hal_buffer_usage_t hrx_mem_pool_family_usage(
+    const iree_hal_queue_family_t* family) {
+  const iree_hal_queue_family_role_flags_t roles =
+      iree_hal_queue_family_spec(family)->role_flags;
+  iree_hal_buffer_usage_t usage = IREE_HAL_BUFFER_USAGE_NONE;
+  if (iree_any_bit_set(roles, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)) {
+    usage |= IREE_HAL_BUFFER_USAGE_TRANSFER;
+  }
+  if (iree_any_bit_set(roles, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH)) {
+    usage |= IREE_HAL_BUFFER_USAGE_DISPATCH;
+  }
+  return usage;
+}
+
 // Ordinary HRX sources span every family of their device. Remappable backing
 // spans the sealed group so later HIP access grants can name any participating
 // device. Construction qualifies that complete access set before allocation.
@@ -157,8 +171,7 @@ static iree_status_t hrx_mem_pool_backing_create_source(
     for (iree_host_size_t j = 0; j < queues->family_count; ++j) {
       iree_hal_pool_family_access_t* family = &families[family_index++];
       family->family = iree_hal_device_queue_family(participant, j);
-      family->usage =
-          IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH;
+      family->usage = hrx_mem_pool_family_usage(family->family);
       if (mapping_source) {
         family->interfaces = UINT64_C(1)
                              << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE;

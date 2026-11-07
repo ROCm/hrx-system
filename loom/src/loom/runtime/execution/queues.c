@@ -6,7 +6,7 @@
 #include "loom/runtime/execution/queues.h"
 
 typedef struct loom_runtime_execution_queue_t {
-  // Provisioned queue borrowed from the set's retained device.
+  // Retained exact queue, released before the inventory's parent device.
   iree_hal_queue_t* handle;
   // Live execution bindings; final returns may arrive from other threads.
   iree_atomic_int64_t borrowers;
@@ -17,7 +17,7 @@ struct loom_runtime_execution_queues_t {
   iree_atomic_ref_count_t ref_count;
   // Allocation policy for the fixed inventory and its counters.
   iree_allocator_t host_allocator;
-  // Retained owner of every provisioned queue in the inventory.
+  // Retained parent of every queue in the inventory.
   iree_hal_device_t* device;
   // Number of entries in the dispatch family, starting at zero.
   iree_host_size_t dispatch_count;
@@ -29,16 +29,35 @@ struct loom_runtime_execution_queues_t {
   loom_runtime_execution_queue_t entries[];
 };
 
+static iree_status_t loom_runtime_execution_queues_initialize_family(
+    const iree_hal_queue_family_t* family,
+    loom_runtime_execution_queue_t* entries) {
+  const iree_host_size_t count =
+      iree_hal_queue_family_spec(family)->provisioned_queue_count;
+  if (!count) {
+    iree_hal_queue_params_t params;
+    iree_hal_queue_params_initialize(&params);
+    return iree_hal_queue_acquire(family, &params, &entries[0].handle);
+  }
+  iree_hal_device_t* device = iree_hal_queue_family_device(family);
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    entries[i].handle =
+        iree_hal_device_queue(device, iree_hal_queue_family_ordinal(family), i);
+    iree_hal_queue_retain(entries[i].handle);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_runtime_execution_queues_create(
     const iree_hal_queue_family_t* dispatch_family,
     const iree_hal_queue_family_t* transfer_family,
     iree_allocator_t host_allocator,
     loom_runtime_execution_queues_t** out_queues) {
   *out_queues = NULL;
-  const iree_host_size_t dispatch_count =
-      iree_hal_queue_family_spec(dispatch_family)->provisioned_queue_count;
-  const iree_host_size_t transfer_count =
-      iree_hal_queue_family_spec(transfer_family)->provisioned_queue_count;
+  const iree_host_size_t dispatch_count = iree_max(
+      iree_hal_queue_family_spec(dispatch_family)->provisioned_queue_count, 1);
+  const iree_host_size_t transfer_count = iree_max(
+      iree_hal_queue_family_spec(transfer_family)->provisioned_queue_count, 1);
   const iree_host_size_t transfer_offset =
       dispatch_family == transfer_family ? 0 : dispatch_count;
   loom_runtime_execution_queues_t* queues = NULL;
@@ -52,15 +71,15 @@ iree_status_t loom_runtime_execution_queues_create(
   queues->dispatch_count = dispatch_count;
   queues->transfer_count = transfer_count;
   queues->transfer_offset = transfer_offset;
-  for (iree_host_size_t i = 0; i < dispatch_count; ++i) {
-    queues->entries[i].handle = iree_hal_device_queue(
-        queues->device, iree_hal_queue_family_ordinal(dispatch_family), i);
+  iree_status_t status = loom_runtime_execution_queues_initialize_family(
+      dispatch_family, queues->entries);
+  if (iree_status_is_ok(status) && transfer_offset) {
+    status = loom_runtime_execution_queues_initialize_family(
+        transfer_family, queues->entries + transfer_offset);
   }
-  if (transfer_offset) {
-    for (iree_host_size_t i = 0; i < transfer_count; ++i) {
-      queues->entries[transfer_offset + i].handle = iree_hal_device_queue(
-          queues->device, iree_hal_queue_family_ordinal(transfer_family), i);
-    }
+  if (!iree_status_is_ok(status)) {
+    loom_runtime_execution_queues_release(queues);
+    return status;
   }
   *out_queues = queues;
   return iree_ok_status();
@@ -76,9 +95,23 @@ void loom_runtime_execution_queues_retain(
 void loom_runtime_execution_queues_release(
     loom_runtime_execution_queues_t* queues) {
   if (queues && iree_atomic_ref_count_dec(&queues->ref_count) == 1) {
+    for (iree_host_size_t i = 0;
+         i < queues->transfer_offset + queues->transfer_count; ++i) {
+      iree_hal_queue_release(queues->entries[i].handle);
+    }
     iree_hal_device_release(queues->device);
     iree_allocator_free(queues->host_allocator, queues);
   }
+}
+
+iree_hal_queue_t* loom_runtime_execution_queues_dispatch_queue(
+    const loom_runtime_execution_queues_t* queues) {
+  return queues->entries[0].handle;
+}
+
+iree_hal_queue_t* loom_runtime_execution_queues_transfer_queue(
+    const loom_runtime_execution_queues_t* queues) {
+  return queues->entries[queues->transfer_offset].handle;
 }
 
 static iree_hal_queue_ordinal_t loom_runtime_execution_queues_select(

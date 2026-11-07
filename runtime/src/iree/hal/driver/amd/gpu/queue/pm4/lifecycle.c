@@ -104,11 +104,13 @@ bool iree_hal_amd_gpu_pm4_queue_is_host_idle(iree_hal_queue_t* base) {
   iree_slim_mutex_lock(&queue->pending.completion_mutex);
   // Deferred work stays counted until terminal publication or abandonment.
   // Join the callback's final notification under the same mutex.
-  const bool idle = !iree_atomic_load(&queue->pending.host_owners,
-                                      iree_memory_order_acquire) &&
-                    !iree_atomic_load(&queue->growth.pending_count,
-                                      iree_memory_order_acquire) &&
-                    iree_hal_amd_gpu_publisher_is_idle(&queue->publisher);
+  const bool idle =
+      !iree_atomic_load(&queue->pending.host_owners,
+                        iree_memory_order_acquire) &&
+      !iree_atomic_load(&queue->growth.pending_count,
+                        iree_memory_order_acquire) &&
+      !iree_atomic_load(&queue->capacity.first, iree_memory_order_acquire) &&
+      iree_hal_amd_gpu_publisher_is_idle(&queue->publisher);
   iree_slim_mutex_unlock(&queue->pending.completion_mutex);
   return idle;
 }

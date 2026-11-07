@@ -70,6 +70,7 @@ iree_executable_test(
     src = ":file_benchmark",
     args = [
         "--device=task",
+        "--queue_family=0",
         "--file=$(rootpath file_benchmark.cc)",
         "--file_length=4096",
         "--read_bytes=4096",

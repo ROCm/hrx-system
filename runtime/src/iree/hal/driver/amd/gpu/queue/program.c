@@ -327,7 +327,8 @@ static void iree_hal_amd_gpu_program_visit_deinitialize(
 
 iree_status_t iree_hal_amd_gpu_program_pool_initialize(
     iree_hal_amd_gpu_context_t* context, uint32_t native_family_ordinal,
-    uint32_t queue_count, iree_allocator_t host_allocator,
+    uint32_t queue_count, amdf_memory_access_t access,
+    iree_allocator_t host_allocator,
     iree_hal_amd_gpu_program_pool_t* out_pool) {
   *out_pool = (iree_hal_amd_gpu_program_pool_t){
       .context = context,
@@ -335,9 +336,7 @@ iree_status_t iree_hal_amd_gpu_program_pool_initialize(
       .access = {.device = context->device,
                  .requirements =
                      {
-                         .access = AMDF_MEMORY_ACCESS_READ |
-                                   AMDF_MEMORY_ACCESS_WRITE |
-                                   AMDF_MEMORY_ACCESS_EXECUTE,
+                         .access = access,
                          .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
                          .address_kinds = UINT64_C(1)
                                           << AMDF_MEMORY_ADDRESS_GPU,

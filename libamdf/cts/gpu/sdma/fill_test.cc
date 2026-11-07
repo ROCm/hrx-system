@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <string>
@@ -189,6 +190,130 @@ TEST_F(SdmaFillTest, ConstantFillFeedsCopiesAcrossEpochs) {
     RecordProperty(
         "retired_byte_frontier",
         static_cast<int>((epoch + 1) * words_per_epoch * sizeof(uint32_t)));
+  }
+}
+
+TEST_F(SdmaFillTest, ByteEdgesComposeWithDwordFillsAcrossEpochs) {
+  struct Geometry {
+    // Natural alignment and period of the repeating pattern, in bytes.
+    uint32_t pattern_length;
+    // Target displacement modulo a DWORD, aligned to the pattern period.
+    uint32_t displacement;
+  };
+  constexpr std::array<Geometry, 7> kGeometries = {
+      {{1, 0}, {1, 1}, {1, 2}, {1, 3}, {2, 0}, {2, 2}, {4, 0}}};
+  constexpr std::array<uint32_t, 6> kElementCounts = {1, 2, 3, 4, 7, 2051};
+  constexpr size_t kSpanCount = kGeometries.size() * kElementCounts.size();
+  constexpr size_t kStride = 16384;
+  constexpr size_t kDataLength = kSpanCount * kStride;
+  constexpr size_t kEpochCount = 2;
+  constexpr amdf_memory_access_t kReadWrite =
+      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
+  GpuMemory* patterns = nullptr;
+  GpuMemory* target = nullptr;
+  GpuMemory* output = nullptr;
+  GpuMemory* completion = nullptr;
+  ASSERT_NO_FATAL_FAILURE(
+      CreateMemory(AMDF_MEMORY_ACCESS_READ, 4096, &patterns));
+  ASSERT_NO_FATAL_FAILURE(CreateMemory(kReadWrite, kDataLength, &target));
+  ASSERT_NO_FATAL_FAILURE(CreateMemory(kReadWrite, kDataLength, &output));
+  ASSERT_NO_FATAL_FAILURE(CreateMemory(kReadWrite, 4096, &completion));
+  GpuCommandQueue* queue = nullptr;
+  ASSERT_NO_FATAL_FAILURE(CreateQueue(16384, &queue));
+  // Each span needs at most two byte copies, one fill, and one consumer copy.
+  ASSERT_GE(queue->words().size(), kEpochCount * (kSpanCount * 26 + 32));
+  SdmaCommandWriter commands(queue->words().data(), family_.format_features);
+  const bool user_gcr =
+      (family_.format_features & AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR) != 0;
+  std::array<uint32_t, 1024> expected_patterns;
+  std::array<uint32_t, 1024> observed_patterns;
+  std::vector<uint8_t> expected_target(kDataLength);
+  std::vector<uint8_t> expected_output(kDataLength);
+  std::vector<uint8_t> observed_target(kDataLength);
+  std::vector<uint8_t> observed_output(kDataLength);
+  RecordProperty("fill_spans_per_epoch", kSpanCount);
+  RecordProperty("completed_epochs", 0);
+  for (size_t epoch = 0; epoch < kEpochCount; ++epoch) {
+    SCOPED_TRACE(epoch);
+    expected_patterns.fill(0xd3916e25u);
+    std::fill(expected_target.begin(), expected_target.end(), 0x6d ^ epoch);
+    std::fill(expected_output.begin(), expected_output.end(), 0xa7 ^ epoch);
+    std::memcpy(target->host.pointer, expected_target.data(), kDataLength);
+    std::memcpy(output->host.pointer, expected_output.data(), kDataLength);
+    *static_cast<uint32_t*>(completion->host.pointer) = 0;
+    if (user_gcr) {
+      commands.AcquireFromSystem();
+    }
+    for (size_t i = 0; i < kSpanCount; ++i) {
+      const auto geometry = kGeometries[i / kElementCounts.size()];
+      const uint32_t length =
+          kElementCounts[i % kElementCounts.size()] * geometry.pattern_length;
+      const size_t target_offset = i * kStride + geometry.displacement;
+      const uint32_t value =
+          (0x6d2ac491u + static_cast<uint32_t>(i) * 0x03050709u) ^
+          (epoch ? 0xffffffffu : 0);
+      uint32_t pattern = value;
+      if (geometry.pattern_length == 1) {
+        pattern = (value & 0xffu) * 0x01010101u;
+      } else if (geometry.pattern_length == 2) {
+        pattern = (value & 0xffffu) * 0x00010001u;
+      }
+      expected_patterns[i] = pattern;
+      const uint64_t pattern_address = patterns->device_address + i * 4;
+      const uint64_t target_address = target->device_address + target_offset;
+      const uint32_t head =
+          std::min(length, static_cast<uint32_t>((-target_address) & 3));
+      const uint32_t body = (length - head) & ~uint32_t{3};
+      const uint32_t tail = length - head - body;
+      if (head) {
+        commands.CopyLinear(pattern_address, target_address, head);
+      }
+      if (body) {
+        commands.Fill32(target_address + head, pattern, body);
+      }
+      if (tail) {
+        commands.CopyLinear(pattern_address, target_address + head + body,
+                            tail);
+      }
+      // Natural alignment makes each edge a whole number of pattern periods.
+      // The oracle uses original pattern bytes, not the command decomposition.
+      for (uint32_t byte = 0; byte < length; ++byte) {
+        const uint8_t expected =
+            value >> ((byte % geometry.pattern_length) * 8);
+        expected_target[target_offset + byte] = expected;
+        expected_output[i * kStride + 31 + byte] = expected;
+      }
+    }
+    commands.Noop();
+    for (size_t i = 0; i < kSpanCount; ++i) {
+      const auto geometry = kGeometries[i / kElementCounts.size()];
+      commands.CopyLinear(
+          target->device_address + i * kStride + geometry.displacement,
+          output->device_address + i * kStride + 31,
+          kElementCounts[i % kElementCounts.size()] * geometry.pattern_length);
+    }
+    if (user_gcr) {
+      commands.ReleaseToSystem();
+    }
+    commands.Fence32(completion->device_address,
+                     static_cast<uint32_t>(epoch + 1));
+    commands.PadToEightWords();
+    std::memcpy(patterns->host.pointer, expected_patterns.data(), 4096);
+    ASSERT_NO_FATAL_FAILURE(
+        queue->Publish(api_, gpu_api_, commands.word_count()));
+    ASSERT_TRUE(GpuWaitEqual<uint32_t>(
+        reinterpret_cast<uintptr_t>(completion->host.pointer), epoch + 1));
+    ASSERT_NO_FATAL_FAILURE(queue->WaitRetired(api_));
+    std::memcpy(observed_output.data(), output->host.pointer, kDataLength);
+    std::memcpy(observed_target.data(), target->host.pointer, kDataLength);
+    std::memcpy(observed_patterns.data(), patterns->host.pointer, 4096);
+    EXPECT_EQ(observed_output, expected_output);
+    EXPECT_EQ(observed_target, expected_target);
+    EXPECT_EQ(observed_patterns, expected_patterns);
+    if (HasFailure()) {
+      return;
+    }
+    RecordProperty("completed_epochs", epoch + 1);
   }
 }
 

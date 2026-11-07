@@ -796,9 +796,22 @@ typedef enum iree_hal_memory_mapping_phase_e {
   IREE_HAL_MEMORY_MAPPING_PHASE_COMMIT,
 } iree_hal_memory_mapping_phase_t;
 
+// Last successful immutable-contract query in one resolution traversal. Pages
+// from one slab commonly share this key; native ranges and live backing remain
+// independently resolved for every mapping. No result crosses phases.
+typedef struct iree_hal_memory_mapping_compatibility_t {
+  // Native target whose projection aliases and source schema were checked.
+  const iree_hal_virtual_buffer_t* target;
+  // Immutable source contract retained by the captured buffer views.
+  const iree_hal_memory_contract_t* source;
+  // Exact scope used to qualify inseparable native projections.
+  uint32_t scope_id;
+} iree_hal_memory_mapping_compatibility_t;
+
 static iree_status_t iree_hal_memory_mapping_resolve(
     const iree_hal_memory_mapping_t* mapping,
     iree_hal_memory_mapping_phase_t phase,
+    iree_hal_memory_mapping_compatibility_t* compatibility,
     iree_hal_memory_mapping_batch_storage_t* batch) {
   const iree_hal_virtual_buffer_view_t view =
       iree_hal_buffer_virtual_view(mapping->target);
@@ -831,11 +844,20 @@ static iree_status_t iree_hal_memory_mapping_resolve(
   const iree_hal_memory_contract_t* contract = mapping->target->memory.contract;
   const iree_hal_memory_contract_t* source_contract =
       mapping->source ? mapping->source->memory.contract : NULL;
-  if (source_contract && !iree_hal_virtual_buffer_source_is_compatible(
-                             target, mapping->scope.id, source_contract)) {
-    return iree_make_status(
-        IREE_STATUS_UNAVAILABLE,
-        "source does not preserve the virtual buffer mapping contract");
+  if (source_contract && (compatibility->target != target ||
+                          compatibility->source != source_contract ||
+                          compatibility->scope_id != mapping->scope.id)) {
+    if (!iree_hal_virtual_buffer_source_is_compatible(target, mapping->scope.id,
+                                                      source_contract)) {
+      return iree_make_status(
+          IREE_STATUS_UNAVAILABLE,
+          "source does not preserve the virtual buffer mapping contract");
+    }
+    *compatibility = (iree_hal_memory_mapping_compatibility_t){
+        .target = target,
+        .source = source_contract,
+        .scope_id = mapping->scope.id,
+    };
   }
   const uint32_t begin = mapping->scope.id ? mapping->scope.id : 1;
   const uint32_t end = mapping->scope.id ? begin + 1 : contract->scope_count;
@@ -945,10 +967,12 @@ static iree_status_t iree_hal_memory_mapping_batch_resolve_phase(
     iree_hal_memory_mapping_phase_t phase) {
   batch->base.update_count = 0;
   batch->base.entry_count = 0;
+  iree_hal_memory_mapping_compatibility_t compatibility = {0};
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < batch->mapping_count && iree_status_is_ok(status); ++i) {
-    status = iree_hal_memory_mapping_resolve(&batch->mappings[i], phase, batch);
+    status = iree_hal_memory_mapping_resolve(&batch->mappings[i], phase,
+                                             &compatibility, batch);
   }
   if (iree_status_is_ok(status)) {
     qsort(batch->resolved, batch->base.update_count, sizeof(batch->resolved[0]),

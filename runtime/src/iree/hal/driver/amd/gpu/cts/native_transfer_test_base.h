@@ -22,7 +22,9 @@ class GpuNativeTransferTest : public GpuNativeTest,
                                   std::pair<amdf_queue_command_type_t, bool>> {
  protected:
   amdf_queue_command_type_t command_type() const override {
-    return GetParam().first;
+    return GetParam().first == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
+               ? AMDF_QUEUE_COMMAND_TYPE_UNKNOWN
+               : GetParam().first;
   }
 
   void SetUp() override {
@@ -39,6 +41,12 @@ class GpuNativeTransferTest : public GpuNativeTest,
     Create();
     if (HasFatalFailure()) {
       return;
+    }
+    if (GetParam().first == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA) {
+      AcquireTransferQueues();
+      if (HasFatalFailure() || IsSkipped()) {
+        return;
+      }
     }
     const iree_hal_pool_family_access_t access = {
         .family = iree_hal_queue_family(queues_[0]),

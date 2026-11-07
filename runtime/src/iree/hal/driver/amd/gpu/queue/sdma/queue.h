@@ -7,115 +7,88 @@
 #ifndef IREE_HAL_DRIVER_AMD_GPU_QUEUE_SDMA_QUEUE_H_
 #define IREE_HAL_DRIVER_AMD_GPU_QUEUE_SDMA_QUEUE_H_
 
-#include "iree/hal/driver/amd/gpu/completion.h"
-#include "iree/hal/driver/amd/gpu/publication.h"
-#include "iree/hal/driver/amd/gpu/queue/publisher.h"
+#include "iree/hal/driver/amd/gpu/queue/allocation.h"
+#include "iree/hal/driver/amd/gpu/queue/file_staging.h"
+#include "iree/hal/driver/amd/gpu/queue/membership.h"
+#include "iree/hal/driver/amd/gpu/queue/memory_mapping.h"
+#include "iree/hal/driver/amd/gpu/queue/sdma/barrier.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct iree_hal_amd_gpu_sdma_queue_t iree_hal_amd_gpu_sdma_queue_t;
+// Native dependency representation shared with this device's compute queues.
+// SDMA accesses the value inside the native operand; AQL consumers require the
+// descriptor address while PM4 consumers use the value address itself.
+typedef struct iree_hal_amd_gpu_sdma_signal_layout_t {
+  // Bytes per native operand, including any firmware descriptor.
+  uint32_t stride;
+  // Value displacement from a signal's device_address, in bytes.
+  uint32_t value_offset;
+  // Coherent binary value before completion; the complete value is its inverse.
+  uint32_t pending_value;
+  // Attaches acquired native backing to the existing independent-reader pool.
+  iree_status_t (*initialize)(iree_hal_amd_gpu_context_t* context,
+                              iree_hal_amd_gpu_signal_pool_t* pool,
+                              iree_hal_amd_gpu_signal_storage_t* storage);
+} iree_hal_amd_gpu_sdma_signal_layout_t;
 
-// A native failure reports logical completion independently of storage safety.
-// Unretired operands remain owned by the caller even after the error is
-// reported.
-typedef enum iree_hal_amd_gpu_sdma_retirement_e {
-  IREE_HAL_AMD_GPU_SDMA_UNRETIRED = 0,
-  IREE_HAL_AMD_GPU_SDMA_RETIRED,
-} iree_hal_amd_gpu_sdma_retirement_t;
+// Cold construction facts. Services and policies belong to the device and
+// outlive the queue; no worker, public pool, or auxiliary compute queue is
+// owned here. Membership assigns stable causal coordinates independently of
+// families.
+typedef struct iree_hal_amd_gpu_sdma_queue_options_t {
+  // Selected native transfer family ordinal.
+  uint32_t family_ordinal;
+  // Stable native-domain causal coordinate.
+  uint32_t queue_ordinal;
+  // Device publication/completion source ordinal.
+  uint32_t source_ordinal;
+  // Installed extent of every native-domain causal vector.
+  uint32_t queue_count;
+  // Completed epoch from the prior owner of this coordinate.
+  uint64_t initial_epoch;
+  // Exactly one qualified USER or KERNEL carrier.
+  amdf_queue_publication_modes_t publication_mode;
+  // Immutable native cache and execution boundary encoding.
+  iree_hal_amd_gpu_sdma_barrier_profile_t barriers;
+  // Qualified binary-signal layout, independent of SDMA packet format.
+  iree_hal_amd_gpu_sdma_signal_layout_t signal_layout;
+  // Device-owned native cells, retained beyond this queue's last reader.
+  iree_hal_amd_gpu_signal_cache_t* signals;
+  // Coherent host/device control and staging placement.
+  const iree_hal_amd_fabric_memory_options_t* memory;
+  // Existing device publisher; allocation callbacks only enqueue work here.
+  iree_hal_amd_gpu_publication_t* publication;
+  // Shared pool transaction owner.
+  iree_hal_amd_gpu_allocation_context_t* allocations;
+  // Shared mapping admission and result owner.
+  iree_hal_amd_gpu_memory_mapping_context_t* mappings;
+  // Family-owned file staging and registration owner.
+  iree_hal_amd_gpu_file_staging_t* file_staging;
+  // Bounded host transfer window per native span, in bytes, at least 64.
+  uint32_t staging_capacity;
+  // Reusable CPU capture block size, independent of payload staging.
+  iree_host_size_t capture_block_size;
+  // Number of CPU capture blocks to preallocate during construction.
+  iree_host_size_t capture_block_count;
+} iree_hal_amd_gpu_sdma_queue_options_t;
 
-// Cold protocol admission from captured native family facts.
-amdf_queue_publication_modes_t iree_hal_amd_gpu_sdma_queue_publication_modes(
-    const amdf_queue_family_info_t* family);
+// Creates one explicit TRANSFER queue. The parent installs both worker sources
+// and release ownership before exposing it. Construction performs cold native
+// acquisition on this caller; all later growth uses existing shared services.
+iree_status_t iree_hal_amd_gpu_sdma_queue_create(
+    const iree_hal_queue_family_t* family, iree_hal_amd_gpu_context_t* context,
+    const iree_hal_amd_gpu_sdma_queue_options_t* options,
+    const iree_hal_queue_params_t* params, iree_allocator_t host_allocator,
+    iree_hal_queue_t** out_queue);
 
-// One ready copy with already-resolved addresses and visibility effects.
-// The pipeline owns this record and both operands through completion. A copy
-// never exceeds MAX_COPY_LENGTH; callers split longer ranges into bounded
-// copies and choose their own pipelining depth.
-#define IREE_HAL_AMD_GPU_SDMA_MAX_COPY_LENGTH (UINT32_C(64) << 20)
-typedef struct iree_hal_amd_gpu_sdma_copy_t {
-  // Intrusive publication ownership, reusable only after completion.
-  iree_hal_amd_gpu_publication_entry_t entry;
-  // First device byte read by the selected SDMA family.
-  uint64_t source;
-  // First device byte written by the selected SDMA family.
-  uint64_t target;
-  // Nonzero exact extent, including byte-aligned tails.
-  uint32_t length;
-  // Qualified queue-side acquire/release operations for this copy.
-  iree_hal_memory_effects_t effects;
-  // Reports failure independently of final operand retirement. Successful
-  // retirement runs on the completion owner. An UNRETIRED failure may precede
-  // the one RETIRED notification. Callbacks only enqueue a prepared result;
-  // they never issue I/O or run user code. RETIRED includes rejected work that
-  // never acquired a native consumer.
-  void (*notify)(void* user_data, amdf_status_t status,
-                 iree_hal_amd_gpu_sdma_retirement_t retirement);
-  // Borrowed slot or operation, live through the callback.
-  void* user_data;
-} iree_hal_amd_gpu_sdma_copy_t;
-
-// Cold constructor for a device's explicitly selected transfer queue. All
-// command and completion storage is provisioned here. The device installs
-// the returned publication/completion sources before submitting copies.
-// No HAL device reference, worker, or payload staging allocation is acquired.
-iree_status_t iree_hal_amd_gpu_sdma_queue_allocate(
-    iree_hal_amd_gpu_context_t* context, uint32_t family_ordinal,
-    amdf_queue_publication_modes_t publication_mode,
-    const iree_hal_amd_fabric_memory_options_t* control,
-    iree_hal_amd_gpu_publication_t* publication, uint32_t publication_ordinal,
-    iree_allocator_t host_allocator, iree_hal_amd_gpu_sdma_queue_t** out_queue);
-
-// Whether this queue can realize global acquire/release around each copy.
-// The selected publication protocol supplies either explicit stream packets
-// or native submission boundaries; callers establish dependencies first.
-bool iree_hal_amd_gpu_sdma_queue_supports_cache_control(
-    const iree_hal_amd_gpu_sdma_queue_t* queue);
-
-// Transfers one ready, validated copy without allocation. An idle caller
-// publishes one entry immediately. The completion callback may precede return;
-// the caller joins its submitting borrow before reusing the record.
-void iree_hal_amd_gpu_sdma_queue_submit(iree_hal_amd_gpu_sdma_queue_t* queue,
-                                        iree_hal_amd_gpu_sdma_copy_t* copy);
-
-iree_hal_amd_gpu_publication_source_t
-iree_hal_amd_gpu_sdma_queue_publication_source(
-    iree_hal_amd_gpu_sdma_queue_t* queue);
-iree_hal_amd_gpu_completion_source_t
-iree_hal_amd_gpu_sdma_queue_completion_source(
-    iree_hal_amd_gpu_sdma_queue_t* queue);
-
-// Cold query after the device has joined its copy producers.
-bool iree_hal_amd_gpu_sdma_queue_is_idle(iree_hal_amd_gpu_sdma_queue_t* queue);
-
-// Joins CPU publication and failure-notification borrowers after admission has
-// closed. Unretired native copies retain both operands and are not certified
-// safe by this predicate. NULL is idle.
-bool iree_hal_amd_gpu_sdma_queue_is_host_idle(
-    iree_hal_amd_gpu_sdma_queue_t* queue);
-
-// Stops native access while retaining command, mapping, and operand ownership.
-// The parent excludes completion observers first. False means a CPU publisher
-// is still active and leaves out_status unchanged; true supplies the native
-// stop result. A failed native stop remains sticky and preserves backing.
-bool iree_hal_amd_gpu_sdma_queue_try_inactivate(
-    iree_hal_amd_gpu_sdma_queue_t* queue, amdf_status_t* out_status);
-
-// Returns accepted operands with the original failure after all affected
-// native queues have stopped. The parent exclusively owns completion. False
-// means a concurrent CPU publisher or failure notifier must join first.
-bool iree_hal_amd_gpu_sdma_queue_retire_failed(
-    iree_hal_amd_gpu_sdma_queue_t* queue);
-
-// Joins the final notification tail and releases native storage. Called after
-// both sources and every submitting caller have joined. Failure preserves the
-// owner and context; it never certifies reclamation after a failed native join.
-amdf_status_t iree_hal_amd_gpu_sdma_queue_free(
-    iree_hal_amd_gpu_sdma_queue_t* queue);
+// Cold device membership operations; public execution stays on the queue
+// vtable.
+extern const iree_hal_amd_gpu_queue_lifecycle_t
+    iree_hal_amd_gpu_sdma_queue_lifecycle;
 
 #ifdef __cplusplus
 }  // extern "C"
 #endif
-
 #endif  // IREE_HAL_DRIVER_AMD_GPU_QUEUE_SDMA_QUEUE_H_

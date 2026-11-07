@@ -284,9 +284,10 @@ TEST(PublicationTest, RetainedCallbackOutlivesReclaimedTables) {
   std::binary_semaphore peer_completed{0};
   using Table = std::array<iree_hal_amd_gpu_publication_source_t,
                            IREE_HAL_AMD_GPU_PUBLICATION_MAX_SOURCES>;
+  constexpr uint32_t kLastSource = IREE_HAL_AMD_GPU_PUBLICATION_MAX_SOURCES - 1;
   auto second = std::make_unique<Table>();
   (*second)[0] = *first;
-  (*second)[258] = {
+  (*second)[kLastSource] = {
       .publish =
           [](void* data) {
             static_cast<std::binary_semaphore*>(data)->release();
@@ -297,13 +298,13 @@ TEST(PublicationTest, RetainedCallbackOutlivesReclaimedTables) {
   iree_hal_amd_gpu_publication_set_sources(&publication, second->size(),
                                            second->data());
   first.reset();
-  iree_hal_amd_gpu_publication_notify(&publication, 258);
+  iree_hal_amd_gpu_publication_notify(&publication, kLastSource);
 
   // Retaining the same callback across another handoff still needs no join.
   // Shrink away the last ready word, leaving its notification as a stale hint.
   Table third = {};
   third[0] = (*second)[0];
-  third[128] = (*second)[258];
+  third[128] = (*second)[kLastSource];
   iree_hal_amd_gpu_publication_set_sources(&publication, 129, third.data());
   second.reset();
   source.resume.release();
@@ -313,7 +314,7 @@ TEST(PublicationTest, RetainedCallbackOutlivesReclaimedTables) {
   // A later replacement can make the stale word observable again. Its hint
   // already exists, so no new producer notification is needed for progress.
   Table fourth = {};
-  fourth[258] = third[128];
+  fourth[kLastSource] = third[128];
   iree_hal_amd_gpu_publication_set_sources(&publication, fourth.size(),
                                            fourth.data());
   peer_completed.acquire();
