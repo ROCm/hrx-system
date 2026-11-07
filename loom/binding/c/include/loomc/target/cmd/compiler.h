@@ -48,15 +48,28 @@ typedef struct loomc_cmd_compiler_options_t {
 ///
 /// The compiler supports concurrent invocations with independent workspaces;
 /// callers hold a reference until each synchronous invocation has returned.
+///
+/// @param link_index Immutable source index retained by the compiler.
+/// @param options Storage policy, or `NULL` for defaults. Borrowed for this
+/// call.
+/// @param allocator Host allocator used for compiler and retained source
+/// storage.
+/// @param out_compiler Receives one owned compiler reference on success and
+///     `NULL` on failure. Release it with `loomc_cmd_compiler_release`.
+/// @return OK when the compiler was created.
 LOOMC_API_EXPORT loomc_status_t loomc_cmd_compiler_create(
     loomc_link_index_t* link_index, const loomc_cmd_compiler_options_t* options,
     loomc_allocator_t allocator, loomc_cmd_compiler_t** out_compiler);
 
 /// Retains a compiler. Passing NULL is allowed. Thread-safe.
+///
+/// @param compiler Compiler to retain, or `NULL`.
 LOOMC_API_EXPORT void loomc_cmd_compiler_retain(loomc_cmd_compiler_t* compiler);
 
 /// Releases a compiler. Passing NULL is allowed. Thread-safe. The final release
 /// destroys prepared sources before releasing their source index and context.
+///
+/// @param compiler Compiler reference to release, or `NULL`.
 LOOMC_API_EXPORT void loomc_cmd_compiler_release(
     loomc_cmd_compiler_t* compiler);
 
