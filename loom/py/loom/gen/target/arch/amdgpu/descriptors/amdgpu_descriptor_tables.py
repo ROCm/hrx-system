@@ -48,7 +48,7 @@ from loom.gen.target.arch.amdgpu.descriptors.amdgpu_planning_table_inputs import
     load_amdgpu_planning_table_inputs,
 )
 from loom.gen.target.arch.amdgpu.descriptors.amdgpu_vopd_component_tables import (  # noqa: E402
-    amdgpu_vopd_instruction_names_by_isa_key,
+    amdgpu_vopd_instruction_encoding_names_by_isa_key,
     generate_vopd_component_table_outputs,
 )
 from loom.gen.target.arch.amdgpu.descriptors.amdgpu_wait_packet_tables import (  # noqa: E402
@@ -254,7 +254,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     inputs = load_amdgpu_planning_table_inputs(
         args.isa_xml,
-        amdgpu_vopd_instruction_names_by_isa_key(),
+        amdgpu_vopd_instruction_encoding_names_by_isa_key(),
     )
     selected_descriptor_set_infos = select_target_ref_descriptor_set_infos(args.descriptor_set)
     selected_descriptor_sets = tuple(inputs.descriptor_sets_by_key[info.key] for info in selected_descriptor_set_infos)

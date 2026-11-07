@@ -10,7 +10,6 @@ import pytest
 
 from loom.target.arch.amdgpu.descriptors.api import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
-    _with_instruction_classes,
     _with_storage_lease_rows,
 )
 from loom.target.arch.amdgpu.descriptors.common import (
@@ -23,6 +22,9 @@ from loom.target.arch.amdgpu.descriptors.common import (
 )
 from loom.target.arch.amdgpu.descriptors.contracts import (
     _amdgpu_contract_descriptor_from_overlay,
+)
+from loom.target.arch.amdgpu.descriptors.finalization import (
+    _with_instruction_classes,
 )
 from loom.target.arch.amdgpu.target_info import (
     AMDGPU_PROCESSOR_INFO_FLAG_HSACO_EMISSION,

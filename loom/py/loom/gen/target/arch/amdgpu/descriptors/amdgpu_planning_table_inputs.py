@@ -14,12 +14,12 @@ from pathlib import Path
 from types import MappingProxyType
 
 from loom.target.arch.amdgpu.descriptors import (
-    amdgpu_core_descriptor_set_instruction_names_by_isa_key,
+    amdgpu_core_descriptor_set_instruction_encoding_names_by_isa_key,
     build_amdgpu_core_descriptor_sets_from_specs,
 )
 from loom.target.arch.amdgpu.isa_xml import (
     AmdgpuIsaFactSource,
-    parse_amdgpu_isa_xml_paths_for_instructions,
+    parse_amdgpu_isa_xml_paths_for_instruction_encodings,
 )
 from loom.target.arch.amdgpu.target_info import (
     AmdgpuDescriptorSetInfo,
@@ -62,17 +62,34 @@ def _parse_isa_xml_paths(
 
 def load_amdgpu_planning_table_inputs(
     isa_xml_arguments: Sequence[str],
-    additional_instruction_names_by_isa_key: Mapping[str, Iterable[str]],
+    additional_instruction_encoding_names_by_isa_key: Mapping[
+        str,
+        Mapping[str, Iterable[str] | None],
+    ],
 ) -> AmdgpuPlanningTableInputs:
     """Loads one ISA corpus and materializes every registered descriptor set."""
 
     descriptor_set_infos = sorted_descriptor_set_infos()
-    instruction_names_by_isa_key = {isa_key: set(instruction_names) for isa_key, instruction_names in (amdgpu_core_descriptor_set_instruction_names_by_isa_key(descriptor_set_infos).items())}
-    for isa_key, additional_instruction_names in additional_instruction_names_by_isa_key.items():
-        instruction_names_by_isa_key.setdefault(isa_key, set()).update(additional_instruction_names)
-    isa_specs = parse_amdgpu_isa_xml_paths_for_instructions(
+    instruction_encoding_names_by_isa_key = {
+        isa_key: {instruction_name: (None if encoding_names is None else set(encoding_names)) for instruction_name, encoding_names in demands.items()}
+        for isa_key, demands in (amdgpu_core_descriptor_set_instruction_encoding_names_by_isa_key(descriptor_set_infos).items())
+    }
+    for isa_key, additional_demands in additional_instruction_encoding_names_by_isa_key.items():
+        demands = instruction_encoding_names_by_isa_key.setdefault(isa_key, {})
+        for instruction_name, encoding_names in additional_demands.items():
+            if instruction_name not in demands:
+                demands[instruction_name] = None if encoding_names is None else set(encoding_names)
+                continue
+            existing_encoding_names = demands[instruction_name]
+            if existing_encoding_names is None:
+                continue
+            if encoding_names is None:
+                demands[instruction_name] = None
+                continue
+            existing_encoding_names.update(encoding_names)
+    isa_specs = parse_amdgpu_isa_xml_paths_for_instruction_encodings(
         _parse_isa_xml_paths(isa_xml_arguments),
-        instruction_names_by_isa_key,
+        instruction_encoding_names_by_isa_key,
     )
     descriptor_sets_by_generator_target = build_amdgpu_core_descriptor_sets_from_specs(
         tuple(info.generator_target for info in descriptor_set_infos),

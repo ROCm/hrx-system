@@ -443,6 +443,38 @@ def parse_amdgpu_isa_xml_path_for_instructions(
     )
 
 
+def parse_amdgpu_isa_xml_path_for_instruction_encodings(
+    path: str | Path,
+    instruction_encoding_names: Mapping[str, Iterable[str] | None],
+) -> AmdgpuIsaSpec:
+    """Parses complete shared facts and exact instruction encoding demands.
+
+    Each mapping key is a canonical instruction name or alias. Its value names
+    the physical encodings to retain, while ``None`` retains every encoding for
+    an instruction consumed as a complete donor. Names absent from the XML are
+    omitted so consumers can supplement or reject them according to their own
+    contract.
+    """
+    normalized_encoding_names: dict[str, frozenset[str] | None] = {}
+    for instruction_name, encoding_names in instruction_encoding_names.items():
+        if encoding_names is None:
+            normalized_encoding_names[instruction_name] = None
+            continue
+        normalized_names = frozenset(encoding_names)
+        if not normalized_names:
+            raise ValueError(
+                f"AMDGPU ISA instruction '{instruction_name}' has no encoding "
+                "fact demands"
+            )
+        normalized_encoding_names[instruction_name] = normalized_names
+    root, source_name = _parse_amdgpu_isa_xml_root_path(path)
+    return _parse_spec_root(
+        root,
+        source_name,
+        instruction_encoding_names=normalized_encoding_names,
+    )
+
+
 def parse_amdgpu_isa_xml_paths_for_instructions(
     paths_by_isa_key: Mapping[str, str | Path],
     instruction_names_by_isa_key: Mapping[str, Iterable[str]],
@@ -469,6 +501,39 @@ def parse_amdgpu_isa_xml_paths_for_instructions(
             instruction_names,
         )
         for isa_key, instruction_names in instruction_names_by_isa_key.items()
+    }
+
+
+def parse_amdgpu_isa_xml_paths_for_instruction_encodings(
+    paths_by_isa_key: Mapping[str, str | Path],
+    instruction_encoding_names_by_isa_key: Mapping[
+        str, Mapping[str, Iterable[str] | None]
+    ],
+) -> dict[str, AmdgpuIsaSpec]:
+    """Parses a keyed ISA corpus using exact instruction encoding demands."""
+
+    path_keys = paths_by_isa_key.keys()
+    instruction_keys = instruction_encoding_names_by_isa_key.keys()
+    missing_keys = sorted(instruction_keys - path_keys)
+    unexpected_keys = sorted(path_keys - instruction_keys)
+    if missing_keys or unexpected_keys:
+        details = []
+        if missing_keys:
+            details.append("missing " + ", ".join(missing_keys))
+        if unexpected_keys:
+            details.append("unexpected " + ", ".join(unexpected_keys))
+        raise ValueError(
+            "AMDGPU ISA XML paths do not match instruction encoding fact demands: "
+            + "; ".join(details)
+        )
+    return {
+        isa_key: parse_amdgpu_isa_xml_path_for_instruction_encodings(
+            paths_by_isa_key[isa_key],
+            instruction_encoding_names,
+        )
+        for isa_key, instruction_encoding_names in (
+            instruction_encoding_names_by_isa_key.items()
+        )
     }
 
 
@@ -614,7 +679,13 @@ def _parse_spec_root(
     source_name: str,
     *,
     instruction_names: frozenset[str] | None = None,
+    instruction_encoding_names: Mapping[str, frozenset[str] | None] | None = None,
 ) -> AmdgpuIsaSpec:
+    if instruction_names is not None and instruction_encoding_names is not None:
+        raise ValueError(
+            "AMDGPU ISA parsing cannot select both whole instructions and exact "
+            "instruction encodings"
+        )
     isa_element, architecture_name, architecture_id = _parse_spec_identity(
         root, source_name
     )
@@ -638,20 +709,32 @@ def _parse_spec_root(
     )
 
     instructions_element = _required_child(isa_element, "Instructions", source_name)
-    instructions = tuple(
-        sorted(
-            (
-                _parse_instruction(instruction_element, source_name)
-                for instruction_element in instructions_element.findall("Instruction")
-                if instruction_names is None
-                or _instruction_element_matches_names(
-                    instruction_element,
-                    source_name,
-                    instruction_names,
-                )
-            ),
-            key=lambda instruction: instruction.name,
+    selected_instructions = []
+    for instruction_element in instructions_element.findall("Instruction"):
+        if instruction_names is not None and not _instruction_element_matches_names(
+            instruction_element,
+            source_name,
+            instruction_names,
+        ):
+            continue
+        selected_encoding_names = None
+        if instruction_encoding_names is not None:
+            matches, selected_encoding_names = _instruction_element_encoding_names(
+                instruction_element,
+                source_name,
+                instruction_encoding_names,
+            )
+            if not matches:
+                continue
+        selected_instructions.append(
+            _parse_instruction(
+                instruction_element,
+                source_name,
+                encoding_names=selected_encoding_names,
+            )
         )
+    instructions = tuple(
+        sorted(selected_instructions, key=lambda instruction: instruction.name)
     )
     if not instructions:
         raise AmdgpuIsaXmlError(
@@ -683,7 +766,7 @@ def _parse_spec_root(
         source_name,
     )
 
-    if instruction_names is None:
+    if instruction_names is None and instruction_encoding_names is None:
         partitioned_operand_uses = _partitioned_operand_uses_from_instructions(
             instructions,
             operand_types,
@@ -829,6 +912,38 @@ def _instruction_element_matches_names(
     )
 
 
+def _instruction_element_encoding_names(
+    instruction_element: ElementTree.Element,
+    source_name: str,
+    instruction_encoding_names: Mapping[str, frozenset[str] | None],
+) -> tuple[bool, frozenset[str] | None]:
+    names = [
+        _required_text(instruction_element, "InstructionName", source_name),
+    ]
+    aliases_element = instruction_element.find("AliasedInstructionNames")
+    if aliases_element is not None:
+        names.extend(
+            _required_element_text(
+                alias_element,
+                source_name,
+                "Instruction/alias",
+            )
+            for alias_element in aliases_element.findall("InstructionName")
+        )
+
+    matched = False
+    selected_encoding_names: set[str] = set()
+    for name in names:
+        if name not in instruction_encoding_names:
+            continue
+        matched = True
+        encoding_names = instruction_encoding_names[name]
+        if encoding_names is None:
+            return True, None
+        selected_encoding_names.update(encoding_names)
+    return matched, frozenset(selected_encoding_names)
+
+
 def _parse_encoding(
     encoding_element: ElementTree.Element, source_name: str
 ) -> AmdgpuIsaEncoding:
@@ -963,7 +1078,10 @@ def _parse_bit_range(
 
 
 def _parse_instruction(
-    instruction_element: ElementTree.Element, source_name: str
+    instruction_element: ElementTree.Element,
+    source_name: str,
+    *,
+    encoding_names: frozenset[str] | None = None,
 ) -> AmdgpuIsaInstruction:
     name = _required_text(instruction_element, "InstructionName", source_name)
     context = _context("Instruction", name)
@@ -989,7 +1107,19 @@ def _parse_instruction(
         for encoding_element in instruction_encodings_element.findall(
             "InstructionEncoding"
         )
+        if encoding_names is None
+        or _required_text(encoding_element, "EncodingName", source_name)
+        in encoding_names
     )
+    if encoding_names is not None:
+        missing_encoding_names = sorted(
+            encoding_names - {encoding.encoding_name for encoding in encodings}
+        )
+        if missing_encoding_names:
+            raise AmdgpuIsaXmlError(
+                f"{source_name}: {context} is missing requested encoding(s): "
+                + ", ".join(missing_encoding_names)
+            )
     if not encodings:
         raise AmdgpuIsaXmlError(f"{source_name}: {context} has no encodings")
 

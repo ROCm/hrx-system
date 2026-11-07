@@ -145,8 +145,8 @@ from loom.target.arch.amdgpu.descriptors import (
 from loom.target.arch.amdgpu.descriptors.api import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDER_FLAG_GFX125X,
     _order_descriptor_sets_for_shared_ordinals,
-    _with_instruction_classes,
     _with_storage_lease_rows,
+    amdgpu_core_descriptor_set_instruction_encoding_names_by_isa_key,
     amdgpu_core_descriptor_set_instruction_names,
 )
 from loom.target.arch.amdgpu.descriptors.cluster import (
@@ -156,6 +156,9 @@ from loom.target.arch.amdgpu.descriptors.cluster import (
 from loom.target.arch.amdgpu.descriptors.control import (
     _s_delay_alu_descriptor,
     _s_set_vgpr_msb_descriptor,
+)
+from loom.target.arch.amdgpu.descriptors.finalization import (
+    _with_instruction_classes,
 )
 from loom.target.arch.amdgpu.descriptors.tensor import (
     _s_wait_tensorcnt_descriptor,
@@ -183,6 +186,7 @@ from loom.target.arch.amdgpu.matrix_formats import (
     AMDGPU_CDNA4_MATRIX_FORMAT_ENUM_DOMAIN_NAMES,
     AMDGPU_F8F6F4_MATRIX_PHYSICAL_FORMATS,
 )
+from loom.target.arch.amdgpu.target_info import sorted_descriptor_set_infos
 from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
@@ -1911,6 +1915,18 @@ def test_dynamic_u32_division_primitives_are_available_on_all_targets() -> None:
             target,
             descriptor_keys - available_keys,
         )
+
+
+def test_instruction_encoding_fact_demands_preserve_complete_donors() -> None:
+    demands_by_isa_key = (
+        amdgpu_core_descriptor_set_instruction_encoding_names_by_isa_key(
+            sorted_descriptor_set_infos()
+        )
+    )
+
+    assert demands_by_isa_key["rdna4"]["S_MOV_B32"] == ("ENC_SOP1",)
+    assert demands_by_isa_key["rdna4"]["BUFFER_ATOMIC_ADD_U64"] is None
+    assert demands_by_isa_key["rdna3_5"]["V_MIN_F32"] is None
 
 
 def test_scc_free_scalar_integer_results_are_rematerializable() -> None:

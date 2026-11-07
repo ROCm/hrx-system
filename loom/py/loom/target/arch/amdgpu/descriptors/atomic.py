@@ -161,25 +161,31 @@ def _float64_atomic_rows(
     )
 
 
+_GFX125X_ATOMIC_INSTRUCTION_ROWS = (
+    *(
+        (f"{family}_ATOMIC_{operation}_F64", f"{family}_ATOMIC_ADD_U64", opcode)
+        for family in ("BUFFER", "GLOBAL", "FLAT")
+        for operation, opcode in (
+            ("ADD", 0x55),
+            ("MIN_NUM", 0x5B),
+            ("MAX_NUM", 0x5C),
+        )
+    ),
+    ("DS_ADD_F64", "DS_ADD_U64", 0x54),
+    ("DS_ADD_RTN_F64", "DS_ADD_RTN_U64", 0x74),
+)
+
+_GFX125X_ATOMIC_SOURCE_INSTRUCTION_NAMES = tuple(
+    sorted({source_name for _, source_name, _ in _GFX125X_ATOMIC_INSTRUCTION_ROWS})
+)
+
+
 def _gfx125x_atomic_instruction_facts(
     spec: AmdgpuIsaFactSource,
 ) -> tuple[AmdgpuIsaInstruction, ...]:
     # LLVM FLATInstructions.td, BUFInstructions.td, and DSInstructions.td
     # define these GFX125 operations missing from the RDNA4 XML. Their operands
     # and encoding fields match the corresponding 64-bit integer additions.
-    rows = (
-        *(
-            (f"{family}_ATOMIC_{operation}_F64", f"{family}_ATOMIC_ADD_U64", opcode)
-            for family in ("BUFFER", "GLOBAL", "FLAT")
-            for operation, opcode in (
-                ("ADD", 0x55),
-                ("MIN_NUM", 0x5B),
-                ("MAX_NUM", 0x5C),
-            )
-        ),
-        ("DS_ADD_F64", "DS_ADD_U64", 0x54),
-        ("DS_ADD_RTN_F64", "DS_ADD_RTN_U64", 0x74),
-    )
     instructions = spec.instruction_map(include_aliases=True)
     return tuple(
         replace(
@@ -200,7 +206,7 @@ def _gfx125x_atomic_instruction_facts(
                 for encoding in instructions[integer_name].encodings
             ),
         )
-        for name, integer_name, opcode in rows
+        for name, integer_name, opcode in _GFX125X_ATOMIC_INSTRUCTION_ROWS
         if name not in instructions
     )
 
