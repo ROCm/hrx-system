@@ -41,7 +41,6 @@ common:locked --lockfile_mode=error
 # network. This config is selected only by jobs running in that cluster; it is
 # unreachable from developer machines and is not selected by release workflows.
 build:rocm-ci-cache --remote_cache=grpc://bazelremote-svc.bazelremote-ns.svc.cluster.local:9092
-build:rocm-ci-cache --remote_cache_compression
 
 # Cached build actions may cross CI runs, but every test invocation must still
 # execute against the hardware and process environment assigned to that job.
