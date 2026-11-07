@@ -201,6 +201,135 @@ void ExpectNumericRange(loom_value_facts_t facts, int64_t lower, int64_t upper,
   EXPECT_EQ(facts.known_divisor, divisor);
 }
 
+TEST(LoopDomainLogicalRightShiftRecurrenceTest,
+     ExactAndRangedSeedsRetainFiniteCounts) {
+  const auto shift2 = loom_value_facts_exact_i64(2);
+  auto facts = loom_loop_domain_shrui_to_zero_recurrence_facts(
+      64, loom_value_facts_exact_i64(0), shift2);
+  EXPECT_EQ(facts.trip_count_kind, LOOM_LOOP_TRIP_COUNT_EXACT);
+  EXPECT_EQ(facts.trip_count, 0u);
+  ExpectNumericRange(facts.values, 0, 0, 1);
+  EXPECT_TRUE(loom_value_facts_is_unknown(facts.body_values));
+  ExpectNumericRange(facts.exit_value, 0, 0, 1);
+
+  facts = loom_loop_domain_shrui_to_zero_recurrence_facts(
+      64, loom_value_facts_exact_i64(-1), shift2);
+  EXPECT_EQ(facts.trip_count_kind, LOOM_LOOP_TRIP_COUNT_EXACT);
+  EXPECT_EQ(facts.trip_count, 32u);
+  ExpectNumericRange(facts.values, -1, INT64_MAX / 2, 1);
+  ExpectNumericRange(facts.body_values, -1, INT64_MAX / 2, 1);
+  ExpectNumericRange(facts.exit_value, 0, 0, 1);
+
+  facts = loom_loop_domain_shrui_to_zero_recurrence_facts(
+      64, loom_value_facts_unknown(), shift2);
+  EXPECT_EQ(facts.trip_count_kind, LOOM_LOOP_TRIP_COUNT_BOUNDED);
+  EXPECT_EQ(facts.trip_count, 32u);
+  ExpectNumericRange(facts.values, INT64_MIN, INT64_MAX, 1);
+  ExpectNumericRange(facts.body_values, INT64_MIN, INT64_MAX, 1);
+  ExpectNumericRange(facts.exit_value, 0, 0, 1);
+
+  facts = loom_loop_domain_shrui_to_zero_recurrence_facts(
+      64, loom_value_facts_make(0, 255, 1), loom_value_facts_exact_i64(4));
+  EXPECT_EQ(facts.trip_count_kind, LOOM_LOOP_TRIP_COUNT_BOUNDED);
+  EXPECT_EQ(facts.trip_count, 2u);
+  ExpectNumericRange(facts.values, 0, 255, 1);
+  ExpectNumericRange(facts.body_values, 1, 255, 1);
+  ExpectNumericRange(facts.exit_value, 0, 0, 1);
+
+  facts = loom_loop_domain_shrui_to_zero_recurrence_facts(
+      8, loom_value_facts_exact_i64(-128), loom_value_facts_exact_i64(3));
+  EXPECT_EQ(facts.trip_count_kind, LOOM_LOOP_TRIP_COUNT_EXACT);
+  EXPECT_EQ(facts.trip_count, 3u);
+  ExpectNumericRange(facts.values, -128, 16, 1);
+  ExpectNumericRange(facts.body_values, -128, 16, 1);
+  ExpectNumericRange(facts.exit_value, 0, 0, 1);
+}
+
+TEST(LoopDomainLogicalRightShiftRecurrenceTest,
+     InvalidDomainsPublishNoPartialProof) {
+  const auto initial = loom_value_facts_make(-128, 127, 1);
+  for (const auto shift :
+       {loom_value_facts_exact_i64(-1), loom_value_facts_exact_i64(0),
+        loom_value_facts_exact_i64(8), loom_value_facts_make(1, 2, 1),
+        loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 1.0)}) {
+    const auto facts =
+        loom_loop_domain_shrui_to_zero_recurrence_facts(8, initial, shift);
+    EXPECT_EQ(facts.trip_count_kind, LOOM_LOOP_TRIP_COUNT_UNKNOWN);
+    EXPECT_EQ(facts.trip_count, 0u);
+    EXPECT_TRUE(loom_value_facts_is_unknown(facts.values));
+    EXPECT_TRUE(loom_value_facts_is_unknown(facts.body_values));
+    EXPECT_TRUE(loom_value_facts_is_unknown(facts.exit_value));
+  }
+  const auto floating = loom_loop_domain_shrui_to_zero_recurrence_facts(
+      8, loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 1.0),
+      loom_value_facts_exact_i64(1));
+  EXPECT_EQ(floating.trip_count_kind, LOOM_LOOP_TRIP_COUNT_UNKNOWN);
+  for (uint8_t bitwidth : {uint8_t{0}, uint8_t{1}, uint8_t{65}}) {
+    const auto facts = loom_loop_domain_shrui_to_zero_recurrence_facts(
+        bitwidth, initial, loom_value_facts_exact_i64(1));
+    EXPECT_EQ(facts.trip_count_kind, LOOM_LOOP_TRIP_COUNT_UNKNOWN);
+  }
+}
+
+TEST(LoopDomainLogicalRightShiftRecurrenceTest,
+     SmallRangesContainEveryExecution) {
+  auto contains = [](loom_value_facts_t facts, int64_t value) {
+    return facts.range_lo <= value && value <= facts.range_hi &&
+           value % facts.known_divisor == 0;
+  };
+  for (uint8_t bitwidth = 2; bitwidth <= 6; ++bitwidth) {
+    const uint64_t modulus = UINT64_C(1) << bitwidth;
+    const uint64_t mask = modulus - 1;
+    const int64_t minimum = -int64_t(modulus / 2);
+    const int64_t maximum = int64_t(modulus / 2) - 1;
+    for (int64_t lower = minimum; lower <= maximum; ++lower) {
+      for (int64_t upper = lower; upper <= maximum; ++upper) {
+        for (uint8_t shift = 1; shift < bitwidth; ++shift) {
+          const auto facts = loom_loop_domain_shrui_to_zero_recurrence_facts(
+              bitwidth, loom_value_facts_make(lower, upper, 1),
+              loom_value_facts_exact_i64(shift));
+          ASSERT_NE(facts.trip_count_kind, LOOM_LOOP_TRIP_COUNT_UNKNOWN);
+          EXPECT_EQ(facts.trip_count_kind, lower == upper
+                                               ? LOOM_LOOP_TRIP_COUNT_EXACT
+                                               : LOOM_LOOP_TRIP_COUNT_BOUNDED);
+          for (int64_t initial = lower; initial <= upper; ++initial) {
+            uint64_t state = (uint64_t)initial & mask;
+            uint64_t trip_count = 0;
+            int64_t header_minimum = initial;
+            int64_t header_maximum = initial;
+            int64_t body_minimum = INT64_MAX;
+            int64_t body_maximum = INT64_MIN;
+            while (state != 0) {
+              const int64_t body_value =
+                  trip_count == 0 ? initial : (int64_t)state;
+              body_minimum = std::min(body_minimum, body_value);
+              body_maximum = std::max(body_maximum, body_value);
+              state >>= shift;
+              ++trip_count;
+              header_minimum = std::min(header_minimum, (int64_t)state);
+              header_maximum = std::max(header_maximum, (int64_t)state);
+            }
+            const bool exact =
+                facts.trip_count_kind == LOOM_LOOP_TRIP_COUNT_EXACT;
+            if (trip_count > facts.trip_count ||
+                (exact && trip_count != facts.trip_count) ||
+                !contains(facts.values, header_minimum) ||
+                !contains(facts.values, header_maximum) ||
+                !contains(facts.exit_value, 0) ||
+                (trip_count != 0 &&
+                 (!contains(facts.body_values, body_minimum) ||
+                  !contains(facts.body_values, body_maximum)))) {
+              FAIL() << "width=" << int(bitwidth) << " initial=[" << lower
+                     << "," << upper << "] shift=" << int(shift)
+                     << " witness=" << initial;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(LoopDomainAdditiveRecurrenceTest, PositiveAndNegativeRangeSeeds) {
   loom_loop_recurrence_facts_t facts;
   ASSERT_TRUE(loom_loop_domain_additive_recurrence_facts(

@@ -28,6 +28,7 @@ loom_corpus_test(
             "control/loop/scalar_state.loom",
             "function/call/direct.loom",
             "function/rodata.loom",
+            "memory/address/logical_shift_loop.loom",
             "memory/view/scalar_exchange.loom",
             "numeric/conversion/conversion.loom",
             "numeric/conversion/f32_narrowing.loom",

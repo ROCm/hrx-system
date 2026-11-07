@@ -39,6 +39,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "function/template/relations.loom",
     "memory/address/address.loom",
     "memory/address/biased_offsets.loom",
+    "memory/address/logical_shift_loop.loom",
     "memory/address/tiled_channel.loom",
     "memory/atomic/float64.loom",
     "memory/buffer/allocation_freshness.loom",

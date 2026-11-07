@@ -160,6 +160,70 @@ static bool loom_value_fact_induction_comparison(
   return true;
 }
 
+static bool loom_value_fact_induction_nonzero_comparison(
+    const loom_value_fact_table_t* table, const loom_module_t* module,
+    const loom_op_t* compare, const loom_block_t* header, bool compare_truth,
+    loom_value_fact_induction_guard_t* out_guard, loom_value_id_t* out_zero) {
+  loom_condition_integer_comparison_t comparison;
+  if (!loom_condition_integer_comparison_describe(module, compare,
+                                                  &comparison)) {
+    return false;
+  }
+  loom_symbolic_integer_relation_t relation;
+  bool unsigned_order = false;
+  if (!loom_condition_integer_comparison_relation(&comparison, &relation,
+                                                  &unsigned_order)) {
+    return false;
+  }
+  if (!compare_truth) {
+    relation = loom_symbolic_integer_relation_invert(relation);
+  }
+
+  loom_value_id_t candidate = comparison.lhs;
+  loom_value_id_t zero = comparison.rhs;
+  loom_value_fact_recurrence_operand_t zero_operand =
+      loom_value_fact_recurrence_operand_make(table, module, zero);
+  if (!zero_operand.is_literal || zero_operand.literal != 0) {
+    candidate = comparison.rhs;
+    zero = comparison.lhs;
+    relation = loom_symbolic_integer_relation_swap(relation);
+    zero_operand = loom_value_fact_recurrence_operand_make(table, module, zero);
+    if (!zero_operand.is_literal || zero_operand.literal != 0) {
+      return false;
+    }
+  }
+  if (relation != LOOM_SYMBOLIC_INTEGER_RELATION_NE &&
+      !(unsigned_order && relation == LOOM_SYMBOLIC_INTEGER_RELATION_GT)) {
+    return false;
+  }
+
+  candidate = loom_value_fact_table_query_identity(table, candidate);
+  const loom_value_t* candidate_value = loom_module_value(module, candidate);
+  if (!loom_value_is_block_arg(candidate_value) ||
+      loom_value_def_block(candidate_value) != header ||
+      !loom_type_is_scalar(loom_module_value_type(module, candidate))) {
+    return false;
+  }
+  *out_guard = (loom_value_fact_induction_guard_t){
+      .counter = candidate,
+      .step = LOOM_VALUE_ID_INVALID,
+  };
+  *out_zero = zero;
+  return true;
+}
+
+static bool loom_value_fact_induction_shrui_update(const loom_op_t* op,
+                                                   loom_value_id_t* out_source,
+                                                   loom_value_id_t* out_shift) {
+  if (!loom_index_shrui_isa(op) && !loom_scalar_shrui_isa(op)) {
+    return false;
+  }
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  *out_source = operands[0];
+  *out_shift = operands[1];
+  return true;
+}
+
 static bool loom_value_fact_induction_steps_equal(
     const loom_value_fact_table_t* table, const loom_module_t* module,
     loom_value_id_t lhs, bool lhs_subtract, loom_value_id_t rhs,
@@ -227,12 +291,26 @@ static loom_value_fact_induction_t loom_value_fact_induction_recognize(
       .step = LOOM_VALUE_ID_INVALID,
   };
   loom_value_id_t bound = LOOM_VALUE_ID_INVALID;
-  if (!loom_value_fact_induction_comparison(
-          table, module, compare, header, &guard_match, &bound, &bound_flags)) {
-    return unknown;
+  const bool has_additive_guard = loom_value_fact_induction_comparison(
+      table, module, compare, header, &guard_match, &bound, &bound_flags);
+  loom_value_fact_induction_guard_t shrui_guard = {
+      .counter = LOOM_VALUE_ID_INVALID,
+      .step = LOOM_VALUE_ID_INVALID,
+  };
+  loom_value_id_t shrui_zero = LOOM_VALUE_ID_INVALID;
+  bool has_shrui_guard = false;
+  if (!has_additive_guard) {
+    has_shrui_guard = loom_value_fact_induction_nonzero_comparison(
+        table, module, compare, header, continue_on_true, &shrui_guard,
+        &shrui_zero);
+    if (!has_shrui_guard) {
+      return unknown;
+    }
+    guard_match = shrui_guard;
+    bound = shrui_zero;
   }
   const loom_value_id_t counter = guard_match.counter;
-  if (!continue_on_true) {
+  if (has_additive_guard && !continue_on_true) {
     bound_flags ^= LOOM_LOOP_BOUND_DESCENDING | LOOM_LOOP_BOUND_INCLUSIVE;
   }
   const loom_value_t* value = loom_module_value(module, counter);
@@ -270,6 +348,7 @@ static loom_value_fact_induction_t loom_value_fact_induction_recognize(
       .bound_flags = bound_flags,
       .flags = loop->exits.count > 1 ? LOOM_VALUE_FACT_INDUCTION_MAY_EXIT_EARLY
                                      : LOOM_VALUE_FACT_INDUCTION_NONE,
+      .update = LOOM_VALUE_FACT_INDUCTION_UPDATE_ADDITIVE,
   };
   // A false entry guard proves an empty loop even when its dead increment has
   // folded away. Retain the guard equation independently of the backedge form.
@@ -278,7 +357,35 @@ static loom_value_fact_induction_t loom_value_fact_induction_recognize(
   const loom_op_t* update = loom_value_fact_induction_defining_op(module, next);
   bool subtract_step = false;
   if (!update || !loom_value_fact_induction_update(update, &subtract_step)) {
-    return guard_match.step == LOOM_VALUE_ID_INVALID ? induction : unknown;
+    loom_value_id_t source = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t shift = LOOM_VALUE_ID_INVALID;
+    const bool has_shrui_update =
+        update &&
+        loom_value_fact_induction_shrui_update(update, &source, &shift) &&
+        loom_value_fact_table_query_identity(table, source) == counter;
+    if (has_shrui_update && !has_shrui_guard) {
+      has_shrui_guard = loom_value_fact_induction_nonzero_comparison(
+          table, module, compare, header, continue_on_true, &shrui_guard,
+          &shrui_zero);
+    }
+    if (has_shrui_update && has_shrui_guard && shrui_guard.counter == counter &&
+        loom_value_fact_induction_is_invariant(
+            module, loops, loop_index,
+            loom_value_fact_table_query_identity(table, shift))) {
+      induction.bound =
+          loom_value_fact_recurrence_operand_make(table, module, shrui_zero);
+      induction.step =
+          loom_value_fact_recurrence_operand_make(table, module, shift);
+      induction.bound_flags = LOOM_LOOP_BOUND_NONE;
+      induction.update = LOOM_VALUE_FACT_INDUCTION_UPDATE_SHRUI_TO_ZERO;
+      return induction;
+    }
+    return has_additive_guard && guard_match.step == LOOM_VALUE_ID_INVALID
+               ? induction
+               : unknown;
+  }
+  if (!has_additive_guard) {
+    return unknown;
   }
   const loom_value_id_t* operands = loom_op_const_operands(update);
   const loom_value_id_t lhs =
@@ -379,13 +486,28 @@ loom_value_fact_induction_t loom_value_fact_condition_loop_induction(
       .step = LOOM_VALUE_ID_INVALID,
   };
   loom_value_id_t bound = LOOM_VALUE_ID_INVALID;
-  if (!compare || compare->parent_block != before ||
-      !loom_value_fact_induction_comparison(
-          table, module, compare, before, &guard_match, &bound, &bound_flags)) {
+  if (!compare || compare->parent_block != before) {
     return unknown;
   }
+  const bool has_additive_guard = loom_value_fact_induction_comparison(
+      table, module, compare, before, &guard_match, &bound, &bound_flags);
+  loom_value_fact_induction_guard_t shrui_guard = {
+      .counter = LOOM_VALUE_ID_INVALID,
+      .step = LOOM_VALUE_ID_INVALID,
+  };
+  loom_value_id_t shrui_zero = LOOM_VALUE_ID_INVALID;
+  bool has_shrui_guard = false;
+  if (!has_additive_guard) {
+    has_shrui_guard = loom_value_fact_induction_nonzero_comparison(
+        table, module, compare, before, guard_truth, &shrui_guard, &shrui_zero);
+    if (!has_shrui_guard) {
+      return unknown;
+    }
+    guard_match = shrui_guard;
+    bound = shrui_zero;
+  }
   const loom_value_id_t counter = guard_match.counter;
-  if (!guard_truth) {
+  if (has_additive_guard && !guard_truth) {
     bound_flags ^= LOOM_LOOP_BOUND_DESCENDING | LOOM_LOOP_BOUND_INCLUSIVE;
   }
   const loom_value_t* value = loom_module_value(module, counter);
@@ -408,13 +530,42 @@ loom_value_fact_induction_t loom_value_fact_condition_loop_induction(
       .flags = guard != selector || !guard_truth
                    ? LOOM_VALUE_FACT_INDUCTION_MAY_EXIT_EARLY
                    : LOOM_VALUE_FACT_INDUCTION_NONE,
+      .update = LOOM_VALUE_FACT_INDUCTION_UPDATE_ADDITIVE,
   };
   const loom_value_id_t next = loom_value_fact_table_query_identity(
       table, loom_op_const_operands(yield)[index]);
   const loom_op_t* update = loom_value_fact_induction_defining_op(module, next);
   bool subtract_step = false;
   if (!update || !loom_value_fact_induction_update(update, &subtract_step)) {
-    return guard_match.step == LOOM_VALUE_ID_INVALID ? induction : unknown;
+    loom_value_id_t source = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t shift = LOOM_VALUE_ID_INVALID;
+    const bool has_shrui_update =
+        update &&
+        loom_value_fact_induction_shrui_update(update, &source, &shift) &&
+        loom_value_fact_condition_forwards_counter(module, table, condition,
+                                                   body, source, counter);
+    if (has_shrui_update && !has_shrui_guard) {
+      has_shrui_guard = loom_value_fact_induction_nonzero_comparison(
+          table, module, compare, before, guard_truth, &shrui_guard,
+          &shrui_zero);
+    }
+    if (has_shrui_update && has_shrui_guard && shrui_guard.counter == counter &&
+        loom_value_fact_loop_is_invariant(
+            module, loop, loom_value_fact_table_query_identity(table, shift))) {
+      induction.bound =
+          loom_value_fact_recurrence_operand_make(table, module, shrui_zero);
+      induction.step =
+          loom_value_fact_recurrence_operand_make(table, module, shift);
+      induction.bound_flags = LOOM_LOOP_BOUND_NONE;
+      induction.update = LOOM_VALUE_FACT_INDUCTION_UPDATE_SHRUI_TO_ZERO;
+      return induction;
+    }
+    return has_additive_guard && guard_match.step == LOOM_VALUE_ID_INVALID
+               ? induction
+               : unknown;
+  }
+  if (!has_additive_guard) {
+    return unknown;
   }
   const loom_value_id_t* operands = loom_op_const_operands(update);
   const loom_value_id_t lhs =
@@ -616,10 +767,6 @@ loom_loop_recurrence_facts_t loom_value_fact_induction_facts(
   }
   const loom_value_facts_t initial =
       loom_value_fact_recurrence_operand_facts(table, induction->initial_value);
-  const loom_value_facts_t bound =
-      loom_value_fact_recurrence_operand_facts(table, induction->bound);
-  const loom_value_facts_t step =
-      loom_value_fact_induction_step_facts(table, induction);
   const loom_scalar_type_t scalar_type =
       loom_type_element_type(loom_module_value_type(module, induction->value));
   uint8_t bitwidth = (uint8_t)loom_scalar_type_bitwidth(scalar_type);
@@ -636,13 +783,24 @@ loom_loop_recurrence_facts_t loom_value_fact_induction_facts(
       bitwidth = target->offset_bitwidth;
     }
   }
-  loom_loop_recurrence_facts_t result =
-      iree_any_bit_set(induction->flags,
-                       LOOM_VALUE_FACT_INDUCTION_GUARD_USES_NEXT)
-          ? loom_loop_domain_next_guard_recurrence_facts(
-                induction->bound_flags, bitwidth, initial, bound, step)
-          : loom_loop_domain_recurrence_facts(induction->bound_flags, bitwidth,
-                                              initial, bound, step);
+  loom_loop_recurrence_facts_t result;
+  if (induction->update == LOOM_VALUE_FACT_INDUCTION_UPDATE_SHRUI_TO_ZERO) {
+    const loom_value_facts_t shift =
+        loom_value_fact_recurrence_operand_facts(table, induction->step);
+    result = loom_loop_domain_shrui_to_zero_recurrence_facts(bitwidth, initial,
+                                                             shift);
+  } else {
+    const loom_value_facts_t bound =
+        loom_value_fact_recurrence_operand_facts(table, induction->bound);
+    const loom_value_facts_t step =
+        loom_value_fact_induction_step_facts(table, induction);
+    result = iree_any_bit_set(induction->flags,
+                              LOOM_VALUE_FACT_INDUCTION_GUARD_USES_NEXT)
+                 ? loom_loop_domain_next_guard_recurrence_facts(
+                       induction->bound_flags, bitwidth, initial, bound, step)
+                 : loom_loop_domain_recurrence_facts(
+                       induction->bound_flags, bitwidth, initial, bound, step);
+  }
   if (iree_any_bit_set(induction->flags,
                        LOOM_VALUE_FACT_INDUCTION_MAY_EXIT_EARLY) &&
       result.trip_count_kind == LOOM_LOOP_TRIP_COUNT_EXACT &&
