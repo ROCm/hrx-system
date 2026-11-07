@@ -1,0 +1,322 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @masked_gather_gfx942_4_bytes() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %limit: index) {
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %predicate = index.cmp ult, %lane, %limit : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x2xbf16>
+  %source = view.subview %source_base[%lane, 0] : view<64x2xbf16> -> view<1x2xbf16>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x2xbf16>
+  %copy = kernel.async.gather.mask %source to %dest, %predicate {cache_scope = device, cache_temporal = regular} : view<1x2xbf16> to view<64x1x2xbf16>, i1 -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @masked_gather_gfx942_4_bytes(%limit: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %19 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
+  %predicate = v_cmp_lt_u32 %lane, %limit
+  %21 = v_lshlrev_b32_src0_inline %lane, 2
+  %22 = s_mov_b32_m0_imm 0
+  %23, %24 = s_and_saveexec_b64 %predicate
+  global_load_lds_dword_saddr %21, %global, %22
+  s_mov_b64_exec %23
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+kernel.def target(@target) @masked_gather_gfx950_4_bytes() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %limit: index) {
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %predicate = index.cmp ult, %c0, %limit : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x1xi32>
+  %source = view.subview %source_base[%lane, 0] : view<64x1xi32> -> view<1x1xi32>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x1xi32>
+  %copy = kernel.async.gather.mask %source to %dest, %predicate {cache_scope = device, cache_temporal = regular} : view<1x1xi32> to view<64x1x1xi32>, i1 -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @masked_gather_gfx950_4_bytes(%limit: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %19 = storage {byte_alignment = 16, byte_length = 256} : low.storage<workgroup>
+  %c0 = s_mov_b32 0
+  %predicate = s_cmp_lt_u32 %c0, %limit
+  %22 = v_lshlrev_b32_src0_inline %lane, 2
+  %23 = s_mov_b32_m0_imm 0
+  %24 = s_mov_b64_exec_read
+  %25 = slice %24[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = slice %24[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = s_cselect_b32 %25, %c0, %predicate
+  %29 = s_cselect_b32 %26, %c0, %predicate
+  %30 = concat(%28, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %31, %32 = s_and_saveexec_b64 %30
+  global_load_lds_dword_saddr %22, %global, %23
+  s_mov_b64_exec %31
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+kernel.def target(@target) @masked_gather_gfx950_12_bytes() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %limit: index) {
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %predicate = index.cmp ult, %lane, %limit : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x12xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x12xi8> -> view<1x12xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x16xi8>
+  %copy = kernel.async.gather.mask %source to %dest, %predicate {cache_scope = device, cache_temporal = regular} : view<1x12xi8> to view<64x1x16xi8>, i1 -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @masked_gather_gfx950_12_bytes(%limit: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {extent = 768, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %19 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
+  %predicate = v_cmp_lt_u32 %lane, %limit
+  %21 = v_mov_b32 12
+  %22 = v_mul_lo_u32 %lane, %21
+  %23 = s_mov_b32_m0_imm 0
+  %24, %25 = s_and_saveexec_b64 %predicate
+  global_load_lds_dwordx3_saddr %22, %global, %23
+  s_mov_b64_exec %24
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+amdgpu.target<gfx950> @target
+
+kernel.def target(@target) @masked_gather_gfx950_16_bytes() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %limit: index) {
+  %lane = kernel.workitem.id<x> : index
+  %c0 = index.constant 0 : index
+  %predicate = index.cmp ult, %c0, %limit : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x8xi16>
+  %source = view.subview %source_base[%lane, 0] : view<64x8xi16> -> view<1x8xi16>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x8xi16>
+  %copy = kernel.async.gather.mask %source to %dest, %predicate {cache_scope = device, cache_temporal = regular} : view<1x8xi16> to view<64x1x8xi16>, i1 -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna4.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @masked_gather_gfx950_16_bytes(%limit: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {extent = 1024, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %19 = storage {byte_alignment = 16, byte_length = 1024} : low.storage<workgroup>
+  %c0 = s_mov_b32 0
+  %predicate = s_cmp_lt_u32 %c0, %limit
+  %22 = v_lshlrev_b32_src0_inline %lane, 4
+  %23 = s_mov_b32_m0_imm 0
+  %24 = s_mov_b64_exec_read
+  %25 = slice %24[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = slice %24[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = s_cselect_b32 %25, %c0, %predicate
+  %29 = s_cselect_b32 %26, %c0, %predicate
+  %30 = concat(%28, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %31, %32 = s_and_saveexec_b64 %30
+  global_load_lds_dwordx4_saddr %22, %global, %23
+  s_mov_b64_exec %31
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+// Only unmasked younger packets may contribute to a partial wait count.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @partial_wait_unmasked_masked() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %limit: index) {
+  %lane = kernel.workitem.id<x> : index
+  %predicate = index.cmp ult, %lane, %limit : index
+  %base = index.constant 0 : offset
+  %second = index.constant 256 : offset
+  %bytes = index.constant 512 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest0 = buffer.view %scratch[%base] : buffer -> view<64x1x4xi8>
+  %dest1 = buffer.view %scratch[%second] : buffer -> view<64x1x4xi8>
+  %copy0 = kernel.async.gather %source to %dest0 {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8> -> kernel.async.token
+  %group0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
+  %copy1 = kernel.async.gather.mask %source to %dest1, %predicate {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8>, i1 -> kernel.async.token
+  %group1 = kernel.async.group %copy1 : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group0 {newer_groups = 1} : kernel.async.group
+  kernel.async.wait %group1 {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @partial_wait_unmasked_masked(%limit: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %22 = storage {byte_alignment = 16, byte_length = 512} : low.storage<workgroup>
+  %predicate = v_cmp_lt_u32 %lane, %limit
+  %24 = v_lshlrev_b32_src0_inline %lane, 2
+  %25 = s_mov_b32_m0_imm 0
+  global_load_lds_dword_saddr %24, %global, %25
+  %27 = s_mov_b32_m0_imm 256
+  %28, %29 = s_and_saveexec_b64 %predicate
+  global_load_lds_dword_saddr %24, %global, %27
+  s_mov_b64_exec %28
+  s_waitcnt {vmcnt = 0}
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+// Only unmasked younger packets may contribute to a partial wait count.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @partial_wait_masked_unmasked() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %limit: index) {
+  %lane = kernel.workitem.id<x> : index
+  %predicate = index.cmp ult, %lane, %limit : index
+  %base = index.constant 0 : offset
+  %second = index.constant 256 : offset
+  %bytes = index.constant 512 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest0 = buffer.view %scratch[%base] : buffer -> view<64x1x4xi8>
+  %dest1 = buffer.view %scratch[%second] : buffer -> view<64x1x4xi8>
+  %copy0 = kernel.async.gather.mask %source to %dest0, %predicate {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8>, i1 -> kernel.async.token
+  %group0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
+  %copy1 = kernel.async.gather %source to %dest1 {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8> -> kernel.async.token
+  %group1 = kernel.async.group %copy1 : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group0 {newer_groups = 1} : kernel.async.group
+  kernel.async.wait %group1 {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @partial_wait_masked_unmasked(%limit: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %22 = storage {byte_alignment = 16, byte_length = 512} : low.storage<workgroup>
+  %predicate = v_cmp_lt_u32 %lane, %limit
+  %24 = v_lshlrev_b32_src0_inline %lane, 2
+  %25 = s_mov_b32_m0_imm 0
+  %26, %27 = s_and_saveexec_b64 %predicate
+  global_load_lds_dword_saddr %24, %global, %25
+  s_mov_b64_exec %26
+  %28 = v_lshlrev_b32_src0_inline %lane, 2
+  %29 = s_mov_b32_m0_imm 256
+  global_load_lds_dword_saddr %28, %global, %29
+  s_waitcnt {vmcnt = 1}
+  s_waitcnt {vmcnt = 0}
+  return
+}
+
+// ====
+
+// Only unmasked younger packets may contribute to a partial wait count.
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @partial_wait_masked_masked() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %limit: index) {
+  %lane = kernel.workitem.id<x> : index
+  %predicate = index.cmp ult, %lane, %limit : index
+  %base = index.constant 0 : offset
+  %second = index.constant 256 : offset
+  %bytes = index.constant 512 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest0 = buffer.view %scratch[%base] : buffer -> view<64x1x4xi8>
+  %dest1 = buffer.view %scratch[%second] : buffer -> view<64x1x4xi8>
+  %copy0 = kernel.async.gather.mask %source to %dest0, %predicate {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8>, i1 -> kernel.async.token
+  %group0 = kernel.async.group %copy0 : kernel.async.token -> kernel.async.group
+  %copy1 = kernel.async.gather.mask %source to %dest1, %predicate {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8>, i1 -> kernel.async.token
+  %group1 = kernel.async.group %copy1 : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group0 {newer_groups = 1} : kernel.async.group
+  kernel.async.wait %group1 {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core>(@target) abi_layout({constant_count = 1, direct_arg_count = 1, direct_arg_names = {arg0 = "limit"}, direct_arg_offsets = [8], direct_arg_parameter_indices = [1], direct_arg_sizes = [4], parameter_count = 2, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @partial_wait_masked_masked(%limit: reg<amdgpu.sgpr>) asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %global = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %22 = storage {byte_alignment = 16, byte_length = 512} : low.storage<workgroup>
+  %predicate = v_cmp_lt_u32 %lane, %limit
+  %24 = v_lshlrev_b32_src0_inline %lane, 2
+  %25 = s_mov_b32_m0_imm 0
+  %26, %27 = s_and_saveexec_b64 %predicate
+  global_load_lds_dword_saddr %24, %global, %25
+  s_mov_b64_exec %26
+  %28 = v_lshlrev_b32_src0_inline %lane, 2
+  %29 = s_mov_b32_m0_imm 256
+  %30, %31 = s_and_saveexec_b64 %predicate
+  global_load_lds_dword_saddr %28, %global, %29
+  s_mov_b64_exec %30
+  s_waitcnt {vmcnt = 0}
+  s_waitcnt {vmcnt = 0}
+  return
+}

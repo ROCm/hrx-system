@@ -129,3 +129,103 @@ kernel.def target(@target) @async_gather_wide_destination_rejected() {
   kernel.async.wait %group {newer_groups = 0} : kernel.async.group
   kernel.return
 }
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @masked_gather_missing_packet_gfx942() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %limit: index) {
+  %lane = kernel.workitem.id<x> : index
+  %predicate = index.cmp ult, %lane, %limit : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 1024 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x16xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x16xi8> -> view<1x16xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x16xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="async_gather.descriptor_missing"}
+  %copy = kernel.async.gather.mask %source to %dest, %predicate {cache_scope = device, cache_temporal = regular} : view<1x16xi8> to view<64x1x16xi8>, i1 -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+kernel.def target(@target) @masked_gather_missing_packet_gfx1100() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %limit: index) {
+  %lane = kernel.workitem.id<x> : index
+  %predicate = index.cmp ult, %lane, %limit : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x4xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="async_gather.descriptor_missing"}
+  %copy = kernel.async.gather.mask %source to %dest, %predicate {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8>, i1 -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1200> @target
+
+kernel.def target(@target) @masked_gather_missing_packet_gfx1200() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %limit: index) {
+  %lane = kernel.workitem.id<x> : index
+  %predicate = index.cmp ult, %lane, %limit : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x4xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="async_gather.descriptor_missing"}
+  %copy = kernel.async.gather.mask %source to %dest, %predicate {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8>, i1 -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}
+
+// ====
+
+amdgpu.target<gfx1250> @target
+
+kernel.def target(@target) @masked_gather_missing_packet_gfx1250() {
+  %c1 = index.constant 1 : index
+  %c64 = index.constant 64 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c64, %c1, %c1) : index
+} launch(%input: buffer, %limit: index) {
+  %lane = kernel.workitem.id<x> : index
+  %predicate = index.cmp ult, %lane, %limit : index
+  %base = index.constant 0 : offset
+  %bytes = index.constant 256 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %source_base = buffer.view %global[%base] : buffer -> view<64x4xi8>
+  %source = view.subview %source_base[%lane, 0] : view<64x4xi8> -> view<1x4xi8>
+  %scratch = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dest = buffer.view %scratch[%base] : buffer -> view<64x1x4xi8>
+  // ERROR@+1: AMDGPU/023 {constraint_key="async_gather.descriptor_missing"}
+  %copy = kernel.async.gather.mask %source to %dest, %predicate {cache_scope = device, cache_temporal = regular} : view<1x4xi8> to view<64x1x4xi8>, i1 -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  kernel.return
+}

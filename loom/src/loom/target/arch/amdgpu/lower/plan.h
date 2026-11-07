@@ -1656,6 +1656,10 @@ typedef struct loom_amdgpu_prefetch_plan_t {
 typedef struct loom_amdgpu_async_gather_plan_t {
   // Source global-like view access transferred into LDS.
   loom_low_source_memory_access_plan_t source;
+  // Optional lane predicate; invalid for an unconditional gather.
+  loom_value_id_t condition;
+  // Retained native-mask materialization recipe for the lane predicate.
+  const void* condition_plan;
   // Destination address terms retained without the unused full memory plan.
   const loom_low_source_memory_dynamic_term_t* dest_dynamic_terms;
   // Number of retained destination address terms.

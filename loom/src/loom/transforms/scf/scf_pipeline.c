@@ -223,13 +223,16 @@ static iree_status_t loom_scf_pipeline_resolve_facts(
       continue;
     }
     loom_memory_access_t access = loom_memory_access_cast(module, entry->op);
-    loom_value_fact_view_reference_t reference = {0};
-    if (loom_value_facts_query_view_reference(
-            &facts->context,
-            loom_value_fact_table_lookup(facts,
-                                         loom_memory_access_view(access)),
-            &reference)) {
-      entry->space = reference.memory_space;
+    const loom_value_facts_t access_facts =
+        loom_value_fact_table_lookup(facts, loom_memory_access_view(access));
+    loom_value_fact_view_reference_t view_reference;
+    loom_value_fact_buffer_reference_t buffer_reference;
+    if (loom_value_facts_query_view_reference(&facts->context, access_facts,
+                                              &view_reference)) {
+      entry->space = view_reference.memory_space;
+    } else if (loom_value_facts_query_buffer_reference(
+                   &facts->context, access_facts, &buffer_reference)) {
+      entry->space = buffer_reference.memory_space;
     }
     if (loom_scf_memory_space_is_read_ahead_source(entry->space) &&
         loom_memory_access_operation_kind(access) ==
