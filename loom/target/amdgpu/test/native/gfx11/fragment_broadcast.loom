@@ -1,0 +1,406 @@
+// Native matrix fragments with repeated or independently strided addresses.
+// Scalar VM oracles read logical coordinates without lane/register mappings.
+// Static sources have exact physical extents, and workgroup cases stage data
+// before fragment reads so address and thread instrumentation cover both paths.
+
+amdgpu.target<gfx11-generic> @broadcast_gfx11 {subgroup_size = 32}
+
+kernel.def target(@broadcast_gfx11) @result_column() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %layout = encoding.layout.strided [0, 1] : encoding<layout>
+  %output_layout = encoding.layout.strided [16, 1] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<16x16xf32, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf32, %output_layout>
+  %value = vector.fragment.load<result> %source[0, 0] shape [%extent, %extent] : view<16x16xf32, %layout> -> vector<8xf32>
+  vector.fragment.store<result> %value, %destination[0, 0] shape [%extent, %extent] : vector<8xf32>, view<16x16xf32, %output_layout>
+  kernel.return
+}
+
+func.def @result_column_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %layout = encoding.layout.strided [0, 1] : encoding<layout>
+  %output_layout = encoding.layout.strided [16, 1] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<16x16xf32, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf32, %output_layout>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %row = [%begin to %extent step %step] {
+    scf.for %column = [%begin to %extent step %step] {
+      %value = view.load %source[%row, %column] : view<16x16xf32, %layout> -> f32
+      view.store %value, %destination[%row, %column] : f32, view<16x16xf32, %output_layout>
+    }
+  }
+  func.return
+}
+
+check.scenario public @result_column_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1.0) step(1.0) : tensor<16xf32>
+    %output = check.generate.fill value(0.0) : tensor<16x16xf32>
+    check.compare<@result_column, @result_column_oracle>(%input, %output) : (tensor<16xf32>, tensor<16x16xf32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x16xf32>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@broadcast_gfx11) @lhs_f16_row() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %layout = encoding.layout.strided [1, 0] : encoding<layout>
+  %output_layout = encoding.layout.strided [16, 1] : encoding<layout>
+  %binding = buffer.assume.memory_space<descriptor> %input : buffer
+  %source = buffer.view %binding[%base] : buffer -> view<16x16xf16, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf16, %output_layout>
+  %value = vector.fragment.load<lhs> %source[0, 0] shape [%extent, %extent] : view<16x16xf16, %layout> -> vector<16xf16>
+  vector.fragment.store<lhs> %value, %destination[0, 0] shape [%extent, %extent] : vector<16xf16>, view<16x16xf16, %output_layout>
+  kernel.return
+}
+
+func.def @lhs_f16_row_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %layout = encoding.layout.strided [1, 0] : encoding<layout>
+  %output_layout = encoding.layout.strided [16, 1] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<16x16xf16, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf16, %output_layout>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %row = [%begin to %extent step %step] {
+    scf.for %column = [%begin to %extent step %step] {
+      %value = view.load %source[%row, %column] : view<16x16xf16, %layout> -> f16
+      view.store %value, %destination[%row, %column] : f16, view<16x16xf16, %output_layout>
+    }
+  }
+  func.return
+}
+
+check.scenario public @lhs_f16_row_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1.0) step(1.0) : tensor<16xf16>
+    %output = check.generate.fill value(0.0) : tensor<16x16xf16>
+    check.compare<@lhs_f16_row, @lhs_f16_row_oracle>(%input, %output) : (tensor<16xf16>, tensor<16x16xf16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x16xf16>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@broadcast_gfx11) @rhs_i8_column() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %layout = encoding.layout.strided [0, 1] : encoding<layout>
+  %output_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<16x16xi8, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xi8, %output_layout>
+  %value = vector.fragment.load<rhs> %source[0, 0] shape [%extent, %extent] : view<16x16xi8, %layout> -> vector<16xi8>
+  vector.fragment.store<rhs> %value, %destination[0, 0] shape [%extent, %extent] : vector<16xi8>, view<16x16xi8, %output_layout>
+  kernel.return
+}
+
+func.def @rhs_i8_column_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %layout = encoding.layout.strided [0, 1] : encoding<layout>
+  %output_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<16x16xi8, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xi8, %output_layout>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %row = [%begin to %extent step %step] {
+    scf.for %column = [%begin to %extent step %step] {
+      %value = view.load %source[%row, %column] : view<16x16xi8, %layout> -> i8
+      view.store %value, %destination[%row, %column] : i8, view<16x16xi8, %output_layout>
+    }
+  }
+  func.return
+}
+
+check.scenario public @rhs_i8_column_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) : tensor<16xi8>
+    %output = check.generate.fill value(0) : tensor<16x16xi8>
+    check.compare<@rhs_i8_column, @rhs_i8_column_oracle>(%input, %output) : (tensor<16xi8>, tensor<16x16xi8>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x16xi8>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@broadcast_gfx11) @fragment_broadcast_f32() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%row_stride_input: index, %column_stride_input: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %row_stride = index.assume %row_stride_input [range(%row_stride_input, 0, 16)] : index
+  %column_stride = index.assume %column_stride_input [range(%column_stride_input, 0, 16)] : index
+  %layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<16x16xf32, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf32>
+  %value = vector.fragment.load<result> %source[0, 0] shape [%extent, %extent] : view<16x16xf32, %layout> -> vector<8xf32>
+  vector.fragment.store<result> %value, %destination[0, 0] shape [%extent, %extent] : vector<8xf32>, view<16x16xf32>
+  kernel.return
+}
+
+func.def @fragment_broadcast_f32_oracle(%row_stride_input: index, %column_stride_input: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %extent = index.constant 16 : index
+  %row_stride = index.assume %row_stride_input [range(%row_stride_input, 0, 16)] : index
+  %column_stride = index.assume %column_stride_input [range(%column_stride_input, 0, 16)] : index
+  %layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<16x16xf32, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf32>
+  scf.for %row = [%begin to %extent step %step] {
+    scf.for %column = [%begin to %extent step %step] {
+      %value = view.load %source[%row, %column] : view<16x16xf32, %layout> -> f32
+      view.store %value, %destination[%row, %column] : f32, view<16x16xf32>
+    }
+  }
+  func.return
+}
+
+check.scenario public @fragment_broadcast_f32_values configure[4](%row_stride: index, %configuration_entropy: check.entropy) {
+  check.trial[4](%column_stride: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%column_stride] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-16.0 to 16.0) : tensor<512xf32>
+    %output = check.generate.fill value(0.0) : tensor<16x16xf32>
+    check.compare<@fragment_broadcast_f32, @fragment_broadcast_f32_oracle>(%row_stride, %column_stride, %input, %output) : (index, index, tensor<512xf32>, tensor<16x16xf32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x16xf32>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@broadcast_gfx11) @fragment_broadcast_f16() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%row_stride_input: index, %column_stride_input: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %row_stride = index.assume %row_stride_input [range(%row_stride_input, 0, 16)] : index
+  %column_stride = index.assume %column_stride_input [range(%column_stride_input, 0, 16)] : index
+  %layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf16>
+  %count = index.constant 512 : index
+  %threads = index.constant 32 : index
+  %bytes = index.constant 1024 : offset
+  %shared = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dense_input = buffer.view %input[%base] : buffer -> view<512xf16>
+  %dense_shared = buffer.view %shared[%base] : buffer -> view<512xf16>
+  %lane = kernel.subgroup.lane.id : index
+  scf.for %position = [%lane to %count step %threads] {
+    %value = view.load %dense_input[%position] : view<512xf16> -> f16
+    view.store %value, %dense_shared[%position] : f16, view<512xf16>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %shared_source = buffer.view %shared[%base] : buffer -> view<16x16xf16, %layout>
+  %value = vector.fragment.load<lhs> %shared_source[0, 0] shape [%extent, %extent] : view<16x16xf16, %layout> -> vector<16xf16>
+  vector.fragment.store<lhs> %value, %destination[0, 0] shape [%extent, %extent] : vector<16xf16>, view<16x16xf16>
+  kernel.return
+}
+
+func.def @fragment_broadcast_f16_oracle(%row_stride_input: index, %column_stride_input: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %extent = index.constant 16 : index
+  %row_stride = index.assume %row_stride_input [range(%row_stride_input, 0, 16)] : index
+  %column_stride = index.assume %column_stride_input [range(%column_stride_input, 0, 16)] : index
+  %layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<16x16xf16, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf16>
+  scf.for %row = [%begin to %extent step %step] {
+    scf.for %column = [%begin to %extent step %step] {
+      %value = view.load %source[%row, %column] : view<16x16xf16, %layout> -> f16
+      view.store %value, %destination[%row, %column] : f16, view<16x16xf16>
+    }
+  }
+  func.return
+}
+
+check.scenario public @fragment_broadcast_f16_values configure[4](%row_stride: index, %configuration_entropy: check.entropy) {
+  check.trial[4](%column_stride: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%column_stride] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-16.0 to 16.0) : tensor<512xf16>
+    %output = check.generate.fill value(0.0) : tensor<16x16xf16>
+    check.compare<@fragment_broadcast_f16, @fragment_broadcast_f16_oracle>(%row_stride, %column_stride, %input, %output) : (index, index, tensor<512xf16>, tensor<16x16xf16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x16xf16>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@broadcast_gfx11) @fragment_broadcast_i8() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%row_stride_input: index, %column_stride_input: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %row_stride = index.assume %row_stride_input [range(%row_stride_input, 0, 16)] : index
+  %column_stride = index.assume %column_stride_input [range(%column_stride_input, 0, 16)] : index
+  %layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xi8>
+  %count = index.constant 512 : index
+  %threads = index.constant 32 : index
+  %bytes = index.constant 512 : offset
+  %shared = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %dense_input = buffer.view %input[%base] : buffer -> view<512xi8>
+  %dense_shared = buffer.view %shared[%base] : buffer -> view<512xi8>
+  %lane = kernel.subgroup.lane.id : index
+  scf.for %position = [%lane to %count step %threads] {
+    %value = view.load %dense_input[%position] : view<512xi8> -> i8
+    view.store %value, %dense_shared[%position] : i8, view<512xi8>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %shared_source = buffer.view %shared[%base] : buffer -> view<16x16xi8, %layout>
+  %value = vector.fragment.load<rhs> %shared_source[0, 0] shape [%extent, %extent] : view<16x16xi8, %layout> -> vector<16xi8>
+  vector.fragment.store<rhs> %value, %destination[0, 0] shape [%extent, %extent] : vector<16xi8>, view<16x16xi8>
+  kernel.return
+}
+
+func.def @fragment_broadcast_i8_oracle(%row_stride_input: index, %column_stride_input: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %extent = index.constant 16 : index
+  %row_stride = index.assume %row_stride_input [range(%row_stride_input, 0, 16)] : index
+  %column_stride = index.assume %column_stride_input [range(%column_stride_input, 0, 16)] : index
+  %layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<16x16xi8, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xi8>
+  scf.for %row = [%begin to %extent step %step] {
+    scf.for %column = [%begin to %extent step %step] {
+      %value = view.load %source[%row, %column] : view<16x16xi8, %layout> -> i8
+      view.store %value, %destination[%row, %column] : i8, view<16x16xi8>
+    }
+  }
+  func.return
+}
+
+check.scenario public @fragment_broadcast_i8_values configure[4](%row_stride: index, %configuration_entropy: check.entropy) {
+  check.trial[4](%column_stride: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%column_stride] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<512xi8>
+    %output = check.generate.fill value(0) : tensor<16x16xi8>
+    check.compare<@fragment_broadcast_i8, @fragment_broadcast_i8_oracle>(%row_stride, %column_stride, %input, %output) : (index, index, tensor<512xi8>, tensor<16x16xi8>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x16xi8>
+    }
+  }
+  check.return
+}
+
+kernel.def target(@broadcast_gfx11) @fragment_broadcast_fp8() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%row_stride_input: index, %column_stride_input: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %row_stride = index.assume %row_stride_input [range(%row_stride_input, 0, 16)] : index
+  %column_stride = index.assume %column_stride_input [range(%column_stride_input, 0, 16)] : index
+  %layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<16x16xf8E4M3, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xbf16>
+  %value = vector.fragment.load<rhs> %source[0, 0] shape [%extent, %extent] : view<16x16xf8E4M3, %layout> -> vector<16xbf16>
+  vector.fragment.store<rhs> %value, %destination[0, 0] shape [%extent, %extent] : vector<16xbf16>, view<16x16xbf16>
+  kernel.return
+}
+
+func.def @fragment_broadcast_fp8_oracle(%row_stride_input: index, %column_stride_input: index, %input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %extent = index.constant 16 : index
+  %row_stride = index.assume %row_stride_input [range(%row_stride_input, 0, 16)] : index
+  %column_stride = index.assume %column_stride_input [range(%column_stride_input, 0, 16)] : index
+  %layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<16x16xf8E4M3, %layout>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xbf16>
+  scf.for %row = [%begin to %extent step %step] {
+    scf.for %column = [%begin to %extent step %step] {
+      %stored = view.load %source[%row, %column] : view<16x16xf8E4M3, %layout> -> f8E4M3
+      %value = scalar.extf %stored : f8E4M3 to bf16
+      view.store %value, %destination[%row, %column] : bf16, view<16x16xbf16>
+    }
+  }
+  func.return
+}
+
+check.scenario public @fragment_broadcast_fp8_values configure[4](%row_stride: index, %configuration_entropy: check.entropy) {
+  check.trial[4](%column_stride: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%column_stride] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-16.0 to 16.0) : tensor<512xf8E4M3>
+    %output = check.generate.fill value(0.0) : tensor<16x16xbf16>
+    check.compare<@fragment_broadcast_fp8, @fragment_broadcast_fp8_oracle>(%row_stride, %column_stride, %input, %output) : (index, index, tensor<512xf8E4M3>, tensor<16x16xbf16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x16xbf16>
+    }
+  }
+  check.return
+}
+
+// One source byte is sufficient for a scalar broadcast, including conversion.
+// A negative BF8 subnormal also distinguishes decoding from integer replication.
+kernel.def target(@broadcast_gfx11) @fragment_broadcast_bf8_scalar() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %extent = index.constant 16 : index
+  %layout = encoding.layout.strided [0, 0] : encoding<layout>
+  %schema = encoding.define #encoding.operand<element_format=f8e5m2, payload_elements=16, payload_registers=4, rounding=finite_only> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %source = buffer.view %input[%base] : buffer -> view<16x16xf8E5M2, %storage>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf16>
+  %value = vector.fragment.load<rhs> %source[0, 0] shape [%extent, %extent] : view<16x16xf8E5M2, %storage> -> vector<16xf16>
+  vector.fragment.store<rhs> %value, %destination[0, 0] shape [%extent, %extent] : vector<16xf16>, view<16x16xf16>
+  kernel.return
+}
+
+func.def @fragment_broadcast_bf8_scalar_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %extent = index.constant 16 : index
+  %source = buffer.view %input[%base] : buffer -> view<1xf8E5M2>
+  %destination = buffer.view %output[%base] : buffer -> view<16x16xf16>
+  %stored = view.load %source[0] : view<1xf8E5M2> -> f8E5M2
+  %value = scalar.extf %stored : f8E5M2 to f16
+  scf.for %row = [%begin to %extent step %step] {
+    scf.for %column = [%begin to %extent step %step] {
+      view.store %value, %destination[%row, %column] : f16, view<16x16xf16>
+    }
+  }
+  func.return
+}
+
+check.scenario public @fragment_broadcast_bf8_scalar_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(-1.52587890625e-05) : tensor<1xf8E5M2>
+    %output = check.generate.fill value(0.0) : tensor<16x16xf16>
+    check.compare<@fragment_broadcast_bf8_scalar, @fragment_broadcast_bf8_scalar_oracle>(%input, %output) : (tensor<1xf8E5M2>, tensor<16x16xf16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x16xf16>
+    }
+  }
+  check.return
+}

@@ -47,6 +47,8 @@ typedef struct loom_amdgpu_fragment_memory_descriptor_table_t {
   loom_amdgpu_descriptor_ref_t
       packet_refs[LOOM_LOW_SOURCE_MEMORY_OPERATION_COUNT_]
                  [LOOM_AMDGPU_FRAGMENT_MEMORY_MAX_PACKET_REGISTERS + 1u];
+  // Descriptor refs for zero-extended byte loads and byte stores.
+  loom_amdgpu_descriptor_ref_t b8_refs[LOOM_LOW_SOURCE_MEMORY_OPERATION_COUNT_];
   // Descriptor refs for scalar 16-bit packets, indexed by operation kind.
   loom_amdgpu_descriptor_ref_t
       b16_refs[LOOM_LOW_SOURCE_MEMORY_OPERATION_COUNT_];
@@ -76,6 +78,13 @@ static const loom_amdgpu_fragment_memory_descriptor_table_t
                                 LOOM_AMDGPU_DESCRIPTOR_REF_NONE,
                                 LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B128_SADDR,
                             },
+                    },
+                .b8_refs =
+                    {
+                        [LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD] =
+                            LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_U8_SADDR,
+                        [LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE] =
+                            LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B8_SADDR,
                     },
                 .b16_refs =
                     {
@@ -113,6 +122,13 @@ static const loom_amdgpu_fragment_memory_descriptor_table_t
                                 LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_STORE_B128,
                             },
                     },
+                .b8_refs =
+                    {
+                        [LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD] =
+                            LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_LOAD_U8,
+                        [LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE] =
+                            LOOM_AMDGPU_DESCRIPTOR_REF_BUFFER_STORE_B8,
+                    },
                 .b16_refs =
                     {
                         [LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD] =
@@ -148,6 +164,13 @@ static const loom_amdgpu_fragment_memory_descriptor_table_t
                                 LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B96,
                                 LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B128,
                             },
+                    },
+                .b8_refs =
+                    {
+                        [LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD] =
+                            LOOM_AMDGPU_DESCRIPTOR_REF_DS_READ_U8,
+                        [LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE] =
+                            LOOM_AMDGPU_DESCRIPTOR_REF_DS_WRITE_B8,
                     },
                 .b16_refs =
                     {
@@ -391,26 +414,30 @@ static bool loom_amdgpu_fragment_memory_descriptor_ref(
   return true;
 }
 
-static bool loom_amdgpu_fragment_memory_16bit_descriptor_ref(
+static bool loom_amdgpu_fragment_memory_subword_descriptor_ref(
     loom_low_source_memory_operation_kind_t operation_kind,
-    loom_value_fact_memory_space_t memory_space,
+    loom_value_fact_memory_space_t memory_space, uint16_t element_byte_count,
     loom_amdgpu_descriptor_ref_t* out_descriptor_ref) {
   *out_descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
-  if (operation_kind >= LOOM_LOW_SOURCE_MEMORY_OPERATION_COUNT_) {
-    return false;
-  }
   loom_amdgpu_fragment_memory_domain_t domain =
       LOOM_AMDGPU_FRAGMENT_MEMORY_DOMAIN_COUNT_;
   if (!loom_amdgpu_fragment_memory_domain_from_space(memory_space, &domain)) {
     return false;
   }
   const loom_amdgpu_descriptor_ref_t descriptor_ref =
-      kFragmentMemoryDescriptorTables[domain].b16_refs[operation_kind];
-  if (descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_NONE) {
-    return false;
-  }
+      element_byte_count == 1
+          ? kFragmentMemoryDescriptorTables[domain].b8_refs[operation_kind]
+          : kFragmentMemoryDescriptorTables[domain].b16_refs[operation_kind];
   *out_descriptor_ref = descriptor_ref;
   return true;
+}
+
+static bool loom_amdgpu_fragment_memory_16bit_descriptor_ref(
+    loom_low_source_memory_operation_kind_t operation_kind,
+    loom_value_fact_memory_space_t memory_space,
+    loom_amdgpu_descriptor_ref_t* out_descriptor_ref) {
+  return loom_amdgpu_fragment_memory_subword_descriptor_ref(
+      operation_kind, memory_space, 2, out_descriptor_ref);
 }
 
 static bool loom_amdgpu_fragment_memory_packed_b16_load_descriptor_refs(
@@ -460,7 +487,14 @@ bool loom_amdgpu_fragment_memory_space_supports_access(
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_fact_memory_space_t memory_space,
     loom_amdgpu_fragment_memory_packetization_t packetization,
-    loom_amdgpu_fragment_memory_payload_form_t payload_form) {
+    loom_amdgpu_fragment_memory_payload_form_t payload_form,
+    uint16_t element_byte_count) {
+  if (packetization != LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE) {
+    loom_amdgpu_descriptor_ref_t descriptor_ref =
+        LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
+    return loom_amdgpu_fragment_memory_subword_descriptor_ref(
+        operation_kind, memory_space, element_byte_count, &descriptor_ref);
+  }
   if (loom_amdgpu_fragment_memory_payload_form_is_load_fp8_to_16bit(
           payload_form)) {
     loom_amdgpu_descriptor_ref_t descriptor_ref =
@@ -472,13 +506,6 @@ bool loom_amdgpu_fragment_memory_space_supports_access(
             loom_amdgpu_fragment_memory_16bit_descriptor_ref(
                 LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD, memory_space,
                 &descriptor_ref));
-  }
-
-  if (packetization != LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE) {
-    loom_amdgpu_descriptor_ref_t descriptor_ref =
-        LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
-    return loom_amdgpu_fragment_memory_16bit_descriptor_ref(
-        operation_kind, memory_space, &descriptor_ref);
   }
 
   if (payload_form ==
@@ -637,8 +664,9 @@ static bool loom_amdgpu_fragment_memory_select_low_subword_packet(
   *out_packet = (loom_amdgpu_fragment_memory_packet_plan_t){0};
   loom_amdgpu_descriptor_ref_t descriptor_ref = preferred_descriptor_ref;
   if ((descriptor_ref == LOOM_AMDGPU_DESCRIPTOR_REF_NONE &&
-       !loom_amdgpu_fragment_memory_16bit_descriptor_ref(
-           plan->operation_kind, plan->source.memory_space, &descriptor_ref)) ||
+       !loom_amdgpu_fragment_memory_subword_descriptor_ref(
+           plan->operation_kind, plan->source.memory_space,
+           plan->element_byte_count, &descriptor_ref)) ||
       !loom_amdgpu_descriptor_set_has_ref(descriptor_set, descriptor_ref)) {
     return false;
   }
@@ -1021,6 +1049,34 @@ uint16_t loom_amdgpu_fragment_memory_query_issued_accesses(
     return 1;
   }
 
+  if (plan->packetization ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_BROADCAST_SUBWORD) {
+    loom_amdgpu_fragment_memory_set_issued_access(
+        packet->register_index, 0, 1, packet->descriptor_ref,
+        LOOM_AMDGPU_FRAGMENT_MEMORY_ISSUED_ACCESS_FLAG_NONE, &out_accesses[0]);
+    return 1;
+  }
+
+  if (plan->packetization ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_SUBWORD) {
+    for (uint16_t element_index = 0;
+         element_index < plan->address_layout.payload_elements_per_register;
+         ++element_index) {
+      const loom_amdgpu_descriptor_ref_t descriptor_ref =
+          plan->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD &&
+                  element_index == 1 &&
+                  plan->packed_b16_high_descriptor_ref !=
+                      LOOM_AMDGPU_DESCRIPTOR_REF_NONE
+              ? plan->packed_b16_high_descriptor_ref
+              : packet->descriptor_ref;
+      loom_amdgpu_fragment_memory_set_issued_access(
+          packet->register_index, element_index, /*element_count=*/1,
+          descriptor_ref, LOOM_AMDGPU_FRAGMENT_MEMORY_ISSUED_ACCESS_FLAG_NONE,
+          &out_accesses[element_index]);
+    }
+    return plan->address_layout.payload_elements_per_register;
+  }
+
   if (plan->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD &&
       loom_amdgpu_fragment_memory_payload_form_is_load_fp8_to_16bit(
           plan->payload_form)) {
@@ -1046,26 +1102,6 @@ uint16_t loom_amdgpu_fragment_memory_query_issued_accesses(
           &out_accesses[i]);
     }
     return packet->result_register_count;
-  }
-
-  if (plan->packetization ==
-      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16) {
-    for (uint16_t element_index = 0;
-         element_index < LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT;
-         ++element_index) {
-      const loom_amdgpu_descriptor_ref_t descriptor_ref =
-          plan->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD &&
-                  element_index == 1 &&
-                  plan->packed_b16_high_descriptor_ref !=
-                      LOOM_AMDGPU_DESCRIPTOR_REF_NONE
-              ? plan->packed_b16_high_descriptor_ref
-              : packet->descriptor_ref;
-      loom_amdgpu_fragment_memory_set_issued_access(
-          packet->register_index, element_index, /*element_count=*/1,
-          descriptor_ref, LOOM_AMDGPU_FRAGMENT_MEMORY_ISSUED_ACCESS_FLAG_NONE,
-          &out_accesses[element_index]);
-    }
-    return LOOM_AMDGPU_FRAGMENT_PACKED_B16_ELEMENT_COUNT;
   }
 
   uint16_t element_count =
@@ -1171,7 +1207,8 @@ bool loom_amdgpu_fragment_memory_plan_packets(
       LOOM_AMDGPU_DESCRIPTOR_REF_NONE;
   if (plan->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD &&
       plan->packetization ==
-          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16 &&
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_SUBWORD &&
+      plan->element_byte_count == 2 &&
       loom_amdgpu_fragment_memory_packed_b16_load_descriptor_refs(
           plan->source.memory_space, &packed_b16_low_descriptor_ref,
           &packed_b16_high_descriptor_ref) &&
@@ -1191,14 +1228,13 @@ bool loom_amdgpu_fragment_memory_plan_packets(
   for (uint16_t register_index = 0; register_index < plan->register_count;) {
     loom_amdgpu_fragment_memory_packet_plan_t packet = {0};
     const bool selected =
-        load_fp8_to_16bit
-            ? loom_amdgpu_fragment_memory_select_fp8_to_16bit_load_packet(
-                  descriptor_set, layout, plan, register_index, &packet)
-        : plan->packetization !=
-                LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE
+        plan->packetization != LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE
             ? loom_amdgpu_fragment_memory_select_low_subword_packet(
                   descriptor_set, plan, register_index,
                   packed_b16_low_descriptor_ref, &packet)
+        : load_fp8_to_16bit
+            ? loom_amdgpu_fragment_memory_select_fp8_to_16bit_load_packet(
+                  descriptor_set, layout, plan, register_index, &packet)
         : load_packed_16bit_result
             ? loom_amdgpu_fragment_memory_select_packed_16bit_result_load_packet(
                   descriptor_set, plan, register_index, &packet)
@@ -1432,13 +1468,25 @@ static iree_string_view_t loom_amdgpu_fragment_memory_packet_strategy_key(
   }
 
   if (plan->packetization ==
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_BROADCAST_SUBWORD) {
+    return IREE_SV("broadcast_subword_fragment_load");
+  }
+  if (plan->packetization ==
+          LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_SUBWORD &&
+      plan->element_byte_count == 1) {
+    return plan->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD
+               ? IREE_SV("strided_packed_b8_fragment_load")
+               : IREE_SV("strided_packed_b8_fragment_store");
+  }
+
+  if (plan->packetization ==
       LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_SCALAR_B16) {
     return plan->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD
                ? IREE_SV("scalar_b16_fragment_load")
                : IREE_SV("scalar_b16_fragment_store");
   }
   if (plan->packetization ==
-      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16) {
+      LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_SUBWORD) {
     const bool strided = plan->address_layout.packed_element_byte_stride !=
                          plan->element_byte_count;
     if (plan->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD) {
