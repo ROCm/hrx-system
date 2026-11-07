@@ -450,6 +450,7 @@ def bazel_fuzz_build_step() -> CiStep:
             "fuzz",
             "--compile-only",
             *ci_config.BAZEL_DEFAULT_OPTIONS,
+            "--//loom/config/import:enable=cxx",
             *codec_options("bazel"),
             "//...",
         ),

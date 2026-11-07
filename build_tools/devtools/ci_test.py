@@ -1464,6 +1464,7 @@ class CiTest(unittest.TestCase):
             ("python3", "dev.py", "bazel", "fuzz", "--compile-only"),
         )
         self.assertEqual(fuzz_step.argv[-1], "//...")
+        self.assertIn("--//loom/config/import:enable=cxx", fuzz_step.argv)
         self.assertIn(
             "--//loom/config/serve:image_codecs=png,jpeg,gif,webp", fuzz_step.argv
         )

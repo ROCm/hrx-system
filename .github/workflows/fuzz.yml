@@ -96,6 +96,7 @@ jobs:
         run: |
           python3 dev.py bazel configure \
             --//runtime/config/hal:drivers=task \
+            --//loom/config/import:enable=cxx \
             --//loom/config/serve:image_codecs=png,jpeg,gif,webp \
             --//loom/config/serve:audio_codecs=wav,mp3,flac
 

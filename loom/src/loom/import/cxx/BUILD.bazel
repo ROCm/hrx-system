@@ -6,7 +6,7 @@
 
 load("//build_tools/bazel:package_boundary.bzl", "iree_package_boundary")
 load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_fuzz", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 load(":build_defs.bzl", "CXX_COMPILER_OPTIONS")
 
 package(
@@ -65,6 +65,23 @@ loom_cc_test(
         "//loom/src/loom/target/test:descriptors",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_fuzz(
+    name = "import_fuzz",
+    srcs = ["import_fuzz.cc"],
+    # Two import-option bytes followed by the 64-byte source grammar.
+    args = ["-max_len=66"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+    ]),
+    deps = [
+        ":cxx",
+        "//loom/src/loom/format/text:printer",
+        "//loom/src/loom/import/cxx/testing:source_generator",
+        "//loom/src/loom/ops:op_registry",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
