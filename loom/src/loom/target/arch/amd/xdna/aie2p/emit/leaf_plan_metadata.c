@@ -10,6 +10,7 @@
 
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/packet.h"
+#include "loom/codegen/low/read_only_data.h"
 #include "loom/codegen/low/storage_layout.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
@@ -56,16 +57,16 @@ static iree_status_t loom_aie2p_leaf_plan_retain_read_only_data(
     loom_aie2p_leaf_program_plan_t* plan) {
   const loom_low_function_requirements_t* requirements =
       &frame->schedule.requirements;
-  if (requirements->read_only_data_count == 0) {
+  if (requirements->read_only_data.count == 0) {
     return iree_ok_status();
   }
   loom_aie2p_leaf_read_only_data_t* read_only_data = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, requirements->read_only_data_count, sizeof(*read_only_data),
+      arena, requirements->read_only_data.count, sizeof(*read_only_data),
       (void**)&read_only_data));
-  for (iree_host_size_t i = 0; i < requirements->read_only_data_count; ++i) {
+  for (iree_host_size_t i = 0; i < requirements->read_only_data.count; ++i) {
     const loom_low_read_only_data_requirement_t* requirement =
-        &requirements->read_only_data[i];
+        &requirements->read_only_data.values[i];
     IREE_ASSERT_EQ(requirement->symbol.module_id, 0u);
     IREE_ASSERT_LT(requirement->symbol.symbol_id, frame->module->symbols.count);
     const loom_symbol_t* symbol =
@@ -91,9 +92,8 @@ static iree_status_t loom_aie2p_leaf_plan_retain_read_only_data(
         (void**)&bank_conflicts));
     iree_host_size_t bank_conflict_count = 0;
     for (iree_host_size_t j = 0; j < requirement->bank_conflicts.count; ++j) {
-      const uint32_t ordinal =
-          loom_low_function_requirements_read_only_data_ordinal(
-              requirements, requirement->bank_conflicts.values[j]);
+      const uint32_t ordinal = loom_low_read_only_data_ordinal(
+          &requirements->read_only_data, requirement->bank_conflicts.values[j]);
       if (ordinal != UINT32_MAX) {
         bank_conflicts[bank_conflict_count++] = ordinal;
       }
@@ -108,7 +108,7 @@ static iree_status_t loom_aie2p_leaf_plan_retain_read_only_data(
     };
   }
   plan->read_only_data = read_only_data;
-  plan->read_only_data_count = requirements->read_only_data_count;
+  plan->read_only_data_count = requirements->read_only_data.count;
   return iree_ok_status();
 }
 

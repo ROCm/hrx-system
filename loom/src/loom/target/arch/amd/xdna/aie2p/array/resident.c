@@ -176,10 +176,10 @@ static iree_status_t loom_aie2p_array_resident_clone_read_only_data(
          ++worker_index) {
       const loom_low_function_requirements_t* requirements =
           &plan->workers[worker_index].source->requirements;
-      for (iree_host_size_t i = 0; i < requirements->read_only_data_count;
+      for (iree_host_size_t i = 0; i < requirements->read_only_data.count;
            ++i) {
         const loom_low_read_only_data_requirement_t* requirement =
-            &requirements->read_only_data[i];
+            &requirements->read_only_data.values[i];
         const loom_symbol_ref_t source_ref = requirement->symbol;
         IREE_ASSERT(loom_symbol_ref_is_valid(source_ref));
         IREE_ASSERT_EQ(source_ref.module_id, 0u);
@@ -202,10 +202,10 @@ static iree_status_t loom_aie2p_array_resident_clone_read_only_data(
          ++worker_index) {
       const loom_low_function_requirements_t* requirements =
           &plan->workers[worker_index].source->requirements;
-      for (iree_host_size_t i = 0; i < requirements->read_only_data_count;
+      for (iree_host_size_t i = 0; i < requirements->read_only_data.count;
            ++i) {
         const loom_low_read_only_data_requirement_t* requirement =
-            &requirements->read_only_data[i];
+            &requirements->read_only_data.values[i];
         const loom_symbol_ref_t source_ref = requirement->symbol;
         const loom_symbol_ref_t target_ref =
             builder->resident_symbols_by_source[source_ref.symbol_id];

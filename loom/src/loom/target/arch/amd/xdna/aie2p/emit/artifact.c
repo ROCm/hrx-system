@@ -306,7 +306,7 @@ static iree_status_t loom_aie2p_xdna_plan_tile_link(
   }
 
   const iree_host_size_t expected_read_only_data_count =
-      plan->workers[worker_index].source->requirements.read_only_data_count;
+      plan->workers[worker_index].source->requirements.read_only_data.count;
   if (realization->read_only_data_count != expected_read_only_data_count) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,

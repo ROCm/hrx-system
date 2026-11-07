@@ -66,6 +66,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:function_requirements",
         "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low:read_only_data",
         "//loom/src/loom/codegen/low:storage_layout",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
@@ -124,8 +125,8 @@ loom_cc_library(
     visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
     deps = [
         "//loom/src/loom/codegen/low:frame",
-        "//loom/src/loom/codegen/low:function_requirements",
         "//loom/src/loom/codegen/low:packet",
+        "//loom/src/loom/codegen/low:read_only_data",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:encoding",

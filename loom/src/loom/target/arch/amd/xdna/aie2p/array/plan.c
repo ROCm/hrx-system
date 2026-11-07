@@ -1197,8 +1197,8 @@ static bool loom_aie2p_array_read_only_data_proposal_conflicts(
     }
     const loom_low_read_only_data_requirement_t* prior_requirement =
         &builder->workers[worker_index]
-             .source->requirements
-             .read_only_data[placement->requirement_ordinal];
+             .source->requirements.read_only_data
+             .values[placement->requirement_ordinal];
     if (!loom_aie2p_array_read_only_data_conflicts_with(
             requirement, prior_requirement->symbol)) {
       continue;
@@ -1312,10 +1312,10 @@ static iree_status_t loom_aie2p_array_plan_workers(
     loom_aie2p_array_tile_state_t* tile_state =
         loom_aie2p_array_tile_state(builder, worker->coordinate);
     for (iree_host_size_t requirement_ordinal = 0;
-         requirement_ordinal < requirements->read_only_data_count;
+         requirement_ordinal < requirements->read_only_data.count;
          ++requirement_ordinal) {
       const loom_low_read_only_data_requirement_t* requirement =
-          &requirements->read_only_data[requirement_ordinal];
+          &requirements->read_only_data.values[requirement_ordinal];
       uint32_t owner_offset = 0;
       if (requirement->contents.data_length != 0) {
         loom_aie2p_array_local_memory_proposal_t proposal;
@@ -2276,7 +2276,7 @@ static iree_status_t loom_aie2p_array_admit_physical_cardinalities(
               .byte_length != 0;
     }
     out_cardinalities->read_only_data_count +=
-        (uint32_t)requirements->read_only_data_count;
+        (uint32_t)requirements->read_only_data.count;
   }
   return iree_ok_status();
 }
