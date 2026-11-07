@@ -17,7 +17,7 @@ package(default_visibility = ["//visibility:public"])
 exports_files([
     "compact_stdlib.py",
     "repository.bzl",
-    "windows_sitecustomize.py",
+    "windows_runtime.py",
 ])
 
 config_setting(
@@ -124,7 +124,7 @@ iree_py_test(
     srcs = [
         "compact_stdlib.py",
         "compact_stdlib_test.py",
-        "windows_sitecustomize.py",
+        "windows_runtime.py",
     ],
     main = "compact_stdlib_test.py",
 )

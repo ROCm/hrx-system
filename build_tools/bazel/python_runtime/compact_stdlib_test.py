@@ -15,7 +15,7 @@ from build_tools.bazel.python_runtime.compact_stdlib import (
     is_archive_member,
     write_standard_library_archive,
 )
-from build_tools.bazel.python_runtime.windows_sitecustomize import (
+from build_tools.bazel.python_runtime.windows_runtime import (
     _configure_runtime,
 )
 
@@ -40,24 +40,24 @@ class CompactStandardLibraryTest(unittest.TestCase):
                 "encodings/__init__.py": "encoding = True\n",
                 "email/__init__.py": "email = True\n",
                 "importlib/__init__.py": "importer = True\n",
-                "site.py": "site = True\n",
+                "site.py": "def main():\n    execsitecustomize()\n",
                 "site-packages/ambient.py": "ambient = True\n",
                 "ssl.py": "ssl = True\n",
             }
             for relative_path, contents in members.items():
                 path = library_directory / relative_path
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(contents, encoding="utf-8")
+                path.write_bytes(contents.encode("utf-8"))
 
             first_archive = root / "first.zip"
             second_archive = root / "second.zip"
-            sitecustomize_path = root / "windows_sitecustomize.py"
-            sitecustomize_path.write_text("runtime = True\n", encoding="utf-8")
+            runtime_module_path = root / "windows_runtime.py"
+            runtime_module_path.write_bytes(b"runtime = True\n")
             write_standard_library_archive(
-                library_directory, sitecustomize_path, first_archive
+                library_directory, runtime_module_path, first_archive
             )
             write_standard_library_archive(
-                library_directory, sitecustomize_path, second_archive
+                library_directory, runtime_module_path, second_archive
             )
 
             self.assertEqual(first_archive.read_bytes(), second_archive.read_bytes())
@@ -65,14 +65,23 @@ class CompactStandardLibraryTest(unittest.TestCase):
                 self.assertEqual(
                     archive.namelist(),
                     [
+                        "_hrx_windows_runtime.py",
                         "email/__init__.py",
                         "encodings/__init__.py",
                         "importlib/__init__.py",
                         "site.py",
-                        "sitecustomize.py",
                     ],
                 )
-                self.assertEqual(archive.read("sitecustomize.py"), b"runtime = True\n")
+                self.assertEqual(
+                    archive.read("_hrx_windows_runtime.py"), b"runtime = True\n"
+                )
+                self.assertNotIn("sitecustomize.py", archive.namelist())
+                site_contents = archive.read("site.py")
+                self.assertIn(b"import _hrx_windows_runtime", site_contents)
+                self.assertLess(
+                    site_contents.index(b"import _hrx_windows_runtime"),
+                    site_contents.index(b"execsitecustomize()"),
+                )
                 for archive_info in archive.infolist():
                     self.assertEqual(archive_info.date_time, (1980, 1, 1, 0, 0, 0))
                     self.assertEqual(archive_info.compress_type, zipfile.ZIP_STORED)
@@ -93,12 +102,13 @@ class CompactStandardLibraryTest(unittest.TestCase):
                 )
                 environment = {}
                 with patch(
-                    "build_tools.bazel.python_runtime.windows_sitecustomize."
-                    "os.path.realpath",
+                    "build_tools.bazel.python_runtime.windows_runtime.os.path.realpath",
                     return_value=archive_path,
                 ):
                     _configure_runtime(
-                        archive_path + r"\sitecustomize.py", system, environment
+                        archive_path + r"\_hrx_windows_runtime.py",
+                        system,
+                        environment,
                     )
 
                 self.assertEqual(system.base_prefix, runtime_root)

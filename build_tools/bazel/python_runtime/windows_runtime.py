@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import ntpath
 import os
-import sys
 
 _EXTENDED_PATH_PREFIX = "\\\\?\\"
 _EXTENDED_UNC_PATH_PREFIX = "\\\\?\\UNC\\"
@@ -36,8 +35,3 @@ def _configure_runtime(module_file: str, system, environment) -> None:
     system.base_exec_prefix = runtime_root
     environment["TCL_LIBRARY"] = ntpath.join(runtime_root, "tcl", "tcl8.6")
     environment["TK_LIBRARY"] = ntpath.join(runtime_root, "tcl", "tk8.6")
-
-
-_ARCHIVE_DIRECTORY = ntpath.dirname(__file__)
-if os.name == "nt" and _ARCHIVE_DIRECTORY.casefold().endswith(".zip"):
-    _configure_runtime(__file__, sys, os.environ)
