@@ -156,7 +156,7 @@ bool loom_serve_text_cache_reclaim_request(void* self) {
     return false;
   }
   service->pool.trim.pending = true;
-  loom_serve_text_readiness_notify(&service->readiness);
+  loom_runtime_readiness_notify(&service->readiness);
   return true;
 }
 
@@ -480,8 +480,8 @@ static iree_status_t loom_serve_text_prepare_media(
                               "image queue extent overflow");
     }
     IREE_RETURN_IF_ERROR(loom_serve_text_media_projector_allocate(
-        model, capacity, service->readiness.cpu.executor,
-        service->readiness.device.proactor, service->readiness.observer,
+        model, capacity, service->readiness.executor,
+        service->readiness.proactor, service->readiness.observer,
         service->host_allocator, &service->projector));
   }
   loom_serve_text_media_projector_offer(

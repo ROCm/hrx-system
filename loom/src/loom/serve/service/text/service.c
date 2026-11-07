@@ -13,6 +13,7 @@
 #include "iree/base/threading/mutex.h"
 #include "loom/runtime/device/device.h"
 #include "loom/runtime/host/host.h"
+#include "loom/runtime/host/readiness.h"
 #include "loom/runtime/wake.h"
 #include "loom/serve/media/image_codec.h"
 #include "loom/serve/service/endpoint.h"
@@ -33,7 +34,6 @@
 #include "loom/serve/service/text/pending_queue.h"
 #include "loom/serve/service/text/pending_request.h"
 #include "loom/serve/service/text/prefix_cache.h"
-#include "loom/serve/service/text/readiness.h"
 #include "loom/serve/service/text/reconfiguration.h"
 #include "loom/serve/service/text/request_admission.h"
 #include "loom/serve/service/text/reservation.h"
@@ -828,7 +828,7 @@ void loom_serve_text_service_free(loom_serve_text_service_t* service,
   iree_arena_deinitialize(&service->session_records);
   iree_allocator_free(host_allocator, service->sessions);
   iree_allocator_free(host_allocator, service->ready);
-  loom_serve_text_readiness_deinitialize(&service->readiness);
+  loom_runtime_readiness_deinitialize(&service->readiness);
   loom_serve_text_tool_calls_deinitialize(&service->tool_calls);
   loom_serve_text_chat_scratch_deinitialize(&service->completion_scratch);
   iree_string_builder_deinitialize(&service->scratch);
@@ -929,8 +929,8 @@ iree_status_t loom_serve_text_service_allocate(
     service->scheduling.shape_count = 1;
   }
   loom_serve_text_heartbeat_initialize(&service->heartbeat);
-  loom_serve_text_readiness_initialize(loom_runtime_host_executor(host),
-                                       proactor, &service->readiness);
+  loom_runtime_readiness_initialize(loom_runtime_host_executor(host), proactor,
+                                    &service->readiness);
   iree_string_builder_initialize(host_allocator, &service->scratch);
   loom_serve_text_tool_calls_initialize(host_allocator, &service->tool_calls);
   loom_serve_text_chat_scratch_initialize(host_allocator,
@@ -971,7 +971,7 @@ static void loom_serve_text_set_observer(
   loom_serve_text_warmup_set_observer(
       loom_serve_text_model_warmup(service->model), observer.wake,
       observer.user_data);
-  loom_serve_text_readiness_set_observer(&service->readiness, observer);
+  loom_runtime_readiness_set_observer(&service->readiness, observer);
   loom_serve_text_media_projector_set_observer(service->projector, observer);
   loom_service_execution_reconfiguration_set_observer(service->reconfiguration,
                                                       observer);
@@ -1041,7 +1041,8 @@ static iree_status_t loom_serve_text_advance_work(
   bool yield_preparation = false;
   if (service->cpu_work != TEXT_CPU_WORK_NONE) {
     iree_status_t status = iree_ok_status();
-    if (!loom_serve_text_readiness_take_cpu(&service->readiness, &status)) {
+    if (!loom_runtime_readiness_take(&service->readiness,
+                                     &service->cpu_task.result, &status)) {
       return iree_ok_status();
     }
     const loom_serve_text_cpu_work_t work = service->cpu_work;
@@ -1074,7 +1075,8 @@ static iree_status_t loom_serve_text_advance_work(
   }
   if (service->completion.work != TEXT_WORK_NONE) {
     iree_status_t status = iree_ok_status();
-    if (!loom_serve_text_readiness_take_device(&service->readiness, &status)) {
+    if (!loom_runtime_readiness_take(
+            &service->readiness, &service->device_wait.wait.result, &status)) {
       if (service->completion.work == TEXT_WORK_EPOCH &&
           !iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING)) {
         *out_progress |= loom_serve_text_begin_preparation(service);

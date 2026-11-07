@@ -8,8 +8,8 @@
 
 #include <string.h>
 
-#include "iree/async/operations/semaphore.h"
-#include "iree/base/threading/mutex.h"
+#include "loom/runtime/execution/wait.h"
+#include "loom/runtime/host/readiness.h"
 #include "loom/runtime/host/timer.h"
 #include "loom/runtime/wake.h"
 #include "loom/service/execution_reconfiguration.h"
@@ -75,10 +75,8 @@ struct loom_service_finite_service_t {
   iree_host_size_t capacity;
   // Accepted jobs still owned by this service.
   iree_host_size_t count;
-  // Borrowed common CPU executor.
-  iree_task_executor_t* executor;
-  // Borrowed host proactor for device dependency readiness.
-  iree_async_proactor_t* proactor;
+  // Common worker/proactor publication, independent of model phase.
+  loom_runtime_readiness_t readiness;
   // Scheduler-owned exclusive model invocation phase.
   loom_service_finite_phase_t phase;
   // Stops new work while accepted CPU/device obligations retire.
@@ -102,27 +100,12 @@ struct loom_service_finite_service_t {
   loom_service_finite_result_t* result;
   // Explicit host materialization retained through CPU encoding release.
   loom_service_finite_snapshot_t* snapshot;
-  // Completion publication; callbacks only publish and wake.
+  // Exclusive finite CPU borrower, recycled after its result is consumed.
+  loom_runtime_readiness_task_t cpu_task;
+  // Captured execution readiness, independent of the CPU operation record.
   struct {
-    // Joins final callback accesses with owner collection/destruction.
-    iree_slim_mutex_t mutex;
-    // Borrowed serialized-owner wake interface.
-    loom_runtime_wake_callback_t observer;
-    // CPU release or device readiness awaiting collection.
-    bool ready;
-    // Owned terminal result, consumed once after publication.
-    iree_status_t status;
-  } event;
-  // Exclusive finite CPU process, recycled only after release.
-  iree_task_process_t process;
-  // Stable asynchronous ALL wait and its borrowed model frontier.
-  struct {
-    // Intrusive wait owned until its callback finishes.
-    iree_async_semaphore_wait_operation_t operation;
-    // Accepted work and feedback values.
-    loom_runtime_execution_frontier_t frontier;
-    // Toll-free async handles of the same HAL semaphores.
-    iree_async_semaphore_t* semaphores[2];
+    // Stable work/feedback snapshot through terminal readiness consumption.
+    loom_runtime_execution_wait_t wait;
     // Accepted batch through readiness collection, including result download.
     IREE_TRACE(iree_section_id_t section;)
   } device;
@@ -285,18 +268,14 @@ static void loom_service_finite_reject_cohort(
   loom_service_finite_finish(service, iree_ok_status());
 }
 
-static iree_status_t loom_service_finite_cpu_run(
-    iree_task_process_t* process, const iree_task_worker_context_t* context,
-    iree_task_process_drain_result_t* result) {
-  loom_service_finite_service_t* service = process->user_data;
+static iree_status_t loom_service_finite_cpu_run(void* user_data) {
+  loom_service_finite_service_t* service = user_data;
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, service->name.data, service->name.size);
   IREE_TRACE_ZONE_APPEND_TEXT(z0, finite_phases[service->phase]);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(
       z0, loom_runtime_telemetry_stream_identity(service->telemetry.stream)
               .ordinal);
-  result->completed = true;
-  result->did_work = true;
   if (service->phase == FINITE_BATCHING) {
     const iree_status_t status = loom_service_finite_model_prepare_batch(
         service->model, service->cohort_count, service->prepared,
@@ -350,42 +329,12 @@ static iree_status_t loom_service_finite_cpu_run(
   return status;
 }
 
-static void loom_service_finite_cpu_completed(iree_task_process_t* process,
-                                              iree_status_t status) {
-  loom_service_finite_service_t* service = process->user_data;
-  iree_slim_mutex_lock(&service->event.mutex);
-  service->event.status = status;
-  iree_slim_mutex_unlock(&service->event.mutex);
-}
-
-static void loom_service_finite_cpu_released(iree_task_process_t* process) {
-  loom_service_finite_service_t* service = process->user_data;
-  iree_slim_mutex_lock(&service->event.mutex);
-  service->event.ready = true;
-  service->event.observer.wake(service->event.observer.user_data);
-  iree_slim_mutex_unlock(&service->event.mutex);
-}
-
 static void loom_service_finite_schedule_cpu(
     loom_service_finite_service_t* service, loom_service_finite_phase_t phase) {
   service->phase = phase;
-  iree_task_process_initialize(loom_service_finite_cpu_run, 0, 1,
-                               &service->process);
-  service->process.user_data = service;
-  service->process.completion_fn = loom_service_finite_cpu_completed;
-  service->process.release_fn = loom_service_finite_cpu_released;
-  iree_task_executor_schedule_process(service->executor, &service->process);
-}
-
-static void loom_service_finite_device_completed(
-    void* user_data, iree_async_operation_t* operation, iree_status_t status,
-    iree_async_completion_flags_t flags) {
-  loom_service_finite_service_t* service = user_data;
-  iree_slim_mutex_lock(&service->event.mutex);
-  service->event.status = status;
-  service->event.ready = true;
-  service->event.observer.wake(service->event.observer.user_data);
-  iree_slim_mutex_unlock(&service->event.mutex);
+  loom_runtime_readiness_schedule(&service->readiness,
+                                  loom_service_finite_cpu_run, service,
+                                  &service->cpu_task);
 }
 
 static iree_status_t loom_service_finite_submit(
@@ -396,9 +345,10 @@ static iree_status_t loom_service_finite_submit(
       z0, loom_runtime_telemetry_stream_identity(service->telemetry.stream)
               .ordinal);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(z0, service->telemetry.counters.batches + 1);
+  loom_runtime_execution_frontier_t frontier;
   IREE_RETURN_AND_END_ZONE_IF_ERROR(
       z0, loom_service_finite_model_submit(service->model, &service->result,
-                                           &service->device.frontier));
+                                           &frontier));
   loom_service_finite_result_t* result = service->result;
   bool needs_host = false;
   for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
@@ -409,24 +359,11 @@ static iree_status_t loom_service_finite_submit(
   iree_status_t status = iree_ok_status();
   if (needs_host) {
     status = loom_service_finite_result_download(result, &service->snapshot,
-                                                 &service->device.frontier);
+                                                 &frontier);
   }
-  iree_async_semaphore_wait_operation_t* wait = &service->device.operation;
-  memset(wait, 0, sizeof(*wait));
-  iree_async_operation_initialize(
-      &wait->base, IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT,
-      IREE_ASYNC_OPERATION_FLAG_NONE, loom_service_finite_device_completed,
-      service);
-  for (iree_host_size_t i = 0; i < 2; ++i) {
-    service->device.semaphores[i] =
-        (iree_async_semaphore_t*)service->device.frontier.semaphores[i];
-  }
-  wait->semaphores = service->device.semaphores;
-  wait->values = service->device.frontier.values;
-  wait->count = 2;
-  wait->mode = IREE_ASYNC_WAIT_MODE_ALL;
   if (iree_status_is_ok(status)) {
-    status = iree_async_proactor_submit_one(service->proactor, &wait->base);
+    status = loom_runtime_execution_await(&service->readiness, &frontier,
+                                          &service->device.wait);
   }
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
@@ -636,16 +573,11 @@ static void loom_service_finite_complete_execution(
 
 static iree_status_t loom_service_finite_collect(
     loom_service_finite_service_t* service, bool* progress) {
-  iree_slim_mutex_lock(&service->event.mutex);
-  const bool ready = service->event.ready;
   iree_status_t status = iree_ok_status();
-  if (ready) {
-    service->event.ready = false;
-    status = service->event.status;
-    service->event.status = iree_ok_status();
-  }
-  iree_slim_mutex_unlock(&service->event.mutex);
-  if (!ready) {
+  loom_runtime_readiness_result_t* result =
+      service->phase == FINITE_RUNNING ? &service->device.wait.wait.result
+                                       : &service->cpu_task.result;
+  if (!loom_runtime_readiness_take(&service->readiness, result, &status)) {
     return iree_ok_status();
   }
   *progress = true;
@@ -872,9 +804,7 @@ iree_status_t loom_service_finite_service_try_open(
 static void loom_service_finite_set_observer(
     void* self, loom_runtime_wake_callback_t observer) {
   loom_service_finite_service_t* service = self;
-  iree_slim_mutex_lock(&service->event.mutex);
-  service->event.observer = observer;
-  iree_slim_mutex_unlock(&service->event.mutex);
+  loom_runtime_readiness_set_observer(&service->readiness, observer);
   loom_runtime_timer_set_observer(&service->timer, observer);
   loom_service_finite_model_set_observer(service->model, observer);
   loom_service_execution_reconfiguration_set_observer(service->reconfiguration,
@@ -929,7 +859,7 @@ void loom_service_finite_service_free(loom_service_finite_service_t* service) {
   iree_status_free(service->failure);
   loom_service_execution_reconfiguration_free(service->reconfiguration);
   loom_runtime_timer_deinitialize(&service->timer);
-  iree_slim_mutex_deinitialize(&service->event.mutex);
+  loom_runtime_readiness_deinitialize(&service->readiness);
   iree_allocator_free(service->host_allocator, service->pending);
   iree_allocator_free(service->host_allocator, service->cohort);
   iree_allocator_free(service->host_allocator, service->prepared);
@@ -954,6 +884,9 @@ iree_status_t loom_service_finite_service_allocate(
         IREE_STATUS_INVALID_ARGUMENT,
         "finite service requires a name and queue capacity");
   }
+  iree_async_proactor_t* proactor = NULL;
+  IREE_RETURN_IF_ERROR(iree_async_proactor_pool_get(
+      loom_runtime_host_proactor_pool(host), 0, &proactor));
   loom_service_finite_service_t* service = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_aligned(
       host_allocator, sizeof(*service),
@@ -965,8 +898,8 @@ iree_status_t loom_service_finite_service_allocate(
   service->capacity = capacity;
   service->telemetry.stream = stream;
   service->telemetry.owns_stream = !stream;
-  service->executor = loom_runtime_host_executor(host);
-  iree_slim_mutex_initialize(&service->event.mutex);
+  loom_runtime_readiness_initialize(loom_runtime_host_executor(host), proactor,
+                                    &service->readiness);
   loom_runtime_timer_initialize(&service->timer);
   iree_status_t status = iree_allocator_malloc_array(host_allocator, capacity,
                                                      sizeof(*service->pending),
@@ -987,10 +920,6 @@ iree_status_t loom_service_finite_service_allocate(
                                          (void**)&service->rows);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_async_proactor_pool_get(loom_runtime_host_proactor_pool(host),
-                                          0, &service->proactor);
-  }
-  if (iree_status_is_ok(status)) {
     status = loom_service_execution_reconfiguration_allocate(
         loom_service_finite_model_execution_update(model), variant_capacity,
         host_allocator, &service->reconfiguration);
@@ -1000,8 +929,7 @@ iree_status_t loom_service_finite_service_allocate(
                                                     &service->telemetry.stream);
   }
   if (iree_status_is_ok(status)) {
-    loom_runtime_timer_configure(&service->timer, service->proactor,
-                                 heartbeat_interval);
+    loom_runtime_timer_configure(&service->timer, proactor, heartbeat_interval);
     loom_runtime_telemetry_record_t record = {
         .time_ns = iree_time_now(),
         .event = stream ? &LOOM_SERVICE_TELEMETRY_SNAPSHOT

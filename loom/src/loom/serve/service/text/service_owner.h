@@ -8,12 +8,13 @@
 #define LOOM_SERVE_SERVICE_TEXT_SERVICE_OWNER_H_
 
 #include "iree/base/internal/arena.h"
+#include "loom/runtime/execution/wait.h"
+#include "loom/runtime/host/readiness.h"
 #include "loom/serve/service/text/checkpoint_request.h"
 #include "loom/serve/service/text/epoch.h"
 #include "loom/serve/service/text/heartbeat.h"
 #include "loom/serve/service/text/input_count.h"
 #include "loom/serve/service/text/pending_queue.h"
-#include "loom/serve/service/text/readiness.h"
 #include "loom/serve/service/text/service.h"
 #include "loom/serve/service/text/service_capacity.h"
 #include "loom/service/execution_reconfiguration.h"
@@ -77,7 +78,11 @@ struct loom_serve_text_service_t {
   // Proactor-timed reporting of copied state, independent of model readiness.
   loom_serve_text_heartbeat_t heartbeat;
   // Independent CPU/device publication; only the owner mutates model state.
-  loom_serve_text_readiness_t readiness;
+  loom_runtime_readiness_t readiness;
+  // Independent finite CPU borrower, reusable after final release.
+  loom_runtime_readiness_task_t cpu_task;
+  // Captured device dependency, independent of CPU preparation.
+  loom_runtime_execution_wait_t device_wait;
   // Owner's device operation, retained until readiness is consumed.
   struct {
     // Owner-only operation discriminator; NONE means no callback is accepted.
@@ -149,7 +154,7 @@ iree_status_t loom_serve_text_await_work(loom_serve_text_service_t* service,
 // Lends the model and phase-specific host payload to one finite CPU job.
 void loom_serve_text_schedule_cpu(loom_serve_text_service_t* service,
                                   loom_serve_text_cpu_work_t work,
-                                  loom_serve_text_cpu_work_fn_t run);
+                                  loom_runtime_cpu_work_fn_t run);
 
 // Publishes owner-only model/session facts to the heartbeat snapshot.
 void loom_serve_text_observe(loom_serve_text_service_t* service,

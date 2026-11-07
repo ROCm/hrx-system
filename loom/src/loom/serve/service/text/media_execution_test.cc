@@ -8,11 +8,11 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "loom/runtime/host/readiness.h"
 #include "loom/serve/service/text/epoch.h"
 #include "loom/serve/service/text/epoch_upload.h"
 #include "loom/serve/service/text/media_epoch.h"
 #include "loom/serve/service/text/media_projector.h"
-#include "loom/serve/service/text/readiness.h"
 #include "loom/serve/service/text/service_test_fixture.h"
 #include "loom/service/finite/embedding/protocol.h"
 
@@ -136,7 +136,7 @@ class MediaExecutionTest : public SourceTextServiceTest {
 };
 
 TEST_F(MediaExecutionTest, ProjectorAlignsAndReturnsItsHostAllocation) {
-  constexpr size_t alignment = alignof(loom_serve_text_readiness_t);
+  constexpr size_t alignment = alignof(loom_runtime_readiness_task_t);
   alignas(alignment) uint8_t storage[4096];
   iree_async_proactor_t* proactor = nullptr;
   IREE_ASSERT_OK(iree_async_proactor_pool_get(

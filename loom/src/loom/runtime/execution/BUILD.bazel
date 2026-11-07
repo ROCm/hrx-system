@@ -135,3 +135,33 @@ loom_cc_library(
     ],
     alwayslink = True,
 )
+
+loom_cc_library(
+    name = "wait",
+    srcs = ["wait.c"],
+    hdrs = ["wait.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":execution",
+        "//loom/src/loom/runtime/host:readiness",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_test(
+    name = "wait_test",
+    srcs = ["wait_test.cc"],
+    deps = [
+        ":execution",
+        ":wait",
+        "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/host:readiness",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

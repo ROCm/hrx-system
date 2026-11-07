@@ -371,8 +371,8 @@ loom_cc_library(
         ":epoch_upload",
         ":media_projector",
         ":model",
-        ":readiness",
         ":source_service_fixture",
+        "//loom/src/loom/runtime/host:readiness",
         "//loom/src/loom/serve/media:image_codec",
         "//loom/src/loom/serve/media:image_codecs",
         "//loom/src/loom/serve/media:image_request",
@@ -1034,36 +1034,6 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "readiness",
-    srcs = ["readiness.c"],
-    hdrs = ["readiness.h"],
-    deps = [
-        "//loom/src/loom/runtime:wake",
-        "//loom/src/loom/runtime/execution",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/task",
-    ],
-)
-
-loom_cc_test(
-    name = "readiness_test",
-    srcs = ["readiness_test.cc"],
-    deps = [
-        ":readiness",
-        "//loom/src/loom/runtime/execution",
-        "//loom/src/loom/runtime/host",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/async/util:proactor_pool",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_library(
     name = "http",
     srcs = ["http.c"],
     hdrs = ["http.h"],
@@ -1195,8 +1165,9 @@ loom_cc_library(
         ":chat",
         ":input",
         ":model",
-        ":readiness",
         "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/execution:wait",
+        "//loom/src/loom/runtime/host:readiness",
         "//loom/src/loom/runtime/parameter:residency",
         "//loom/src/loom/serve/media:image",
         "//loom/src/loom/serve/media:image_request",
@@ -1204,7 +1175,9 @@ loom_cc_library(
         "//loom/src/loom/service:prepared_request",
         "//loom/src/loom/service/finite:model",
         "//loom/src/loom/service/finite:result",
+        "//runtime/src/iree/async",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/task",
         "//runtime/src/iree/vm",
     ],
 )
@@ -1322,7 +1295,6 @@ loom_cc_library(
         ":pending_queue",
         ":pending_request",
         ":prefix_cache",
-        ":readiness",
         ":reconfiguration",
         ":schedule",
         ":sequence",
@@ -1333,7 +1305,9 @@ loom_cc_library(
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/execution",
+        "//loom/src/loom/runtime/execution:wait",
         "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/host:readiness",
         "//loom/src/loom/runtime/host:timer",
         "//loom/src/loom/runtime/telemetry:sample",
         "//loom/src/loom/runtime/telemetry:stream",
