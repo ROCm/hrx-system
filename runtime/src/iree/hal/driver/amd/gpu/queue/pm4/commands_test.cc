@@ -93,7 +93,7 @@ TEST_F(CommandsTest, IndirectUsesAbsoluteAddressAndCompiledWaveMode) {
 TEST_F(CommandsTest, ExecutionAndVisibilityRemainSeparate) {
   auto* end = iree_hal_amd_gpu_pm4_emit_compute_flush(words());
   end = iree_hal_amd_gpu_pm4_emit_acquire(end, 0xc3a1);
-  Expect(end, {0xc0004600, 0x00000407, 0xc0065800, 0, 0xffffffff, 0xff, 0, 0,
+  Expect(end, {0xc0004600, 0x80000407, 0xc0065800, 0, 0xffffffff, 0xff, 0, 0,
                0x0a, 0x0000c3a1});
 }
 
@@ -173,7 +173,7 @@ TEST_F(CommandsTest, WaitsPreserveEveryComparisonWidthAndMask) {
            0x80000004, 0xc0079300, comparison.control, 8, 0x5678,
            static_cast<uint32_t>(reference),
            static_cast<uint32_t>(reference >> 32), static_cast<uint32_t>(mask),
-           static_cast<uint32_t>(mask >> 32), 4});
+           static_cast<uint32_t>(mask >> 32), 0x80000004});
     }
   }
 }
@@ -230,7 +230,7 @@ TEST_F(CommandsTest, ClockReadAfterComputeJoinConfirmsTheSampleWrite) {
   auto* end = iree_hal_amd_gpu_pm4_emit_compute_flush(words());
   end =
       iree_hal_amd_gpu_pm4_emit_clock(end, UINT64_C(0x00001234fffffff8), true);
-  Expect(end, {0xc0004600, 0x00000407, 0xc0044000, 0x00110509, 0, 0, 0xfffffff8,
+  Expect(end, {0xc0004600, 0x80000407, 0xc0044000, 0x00110509, 0, 0, 0xfffffff8,
                0x1234});
 }
 

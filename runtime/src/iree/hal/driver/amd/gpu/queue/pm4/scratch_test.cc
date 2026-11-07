@@ -43,7 +43,7 @@ TEST(ScratchTest, NativeGeometryAndExactPacketLayouts) {
     EXPECT_EQ(iree_hal_amd_gpu_pm4_scratch_emit(words.data() + 1, &scratch, 9),
               words.data() + 10);
     const std::array<uint32_t, 9> expected = {
-        0xc0004600, 0x407,
+        0xc0004600, 0x80000407,
         0xc0027602, 0x210,
         0x3456789a, 0x12,
         0xc0017602, ip[0] == 12 && ip[1] == 5 ? 0x216u : 0x218u,

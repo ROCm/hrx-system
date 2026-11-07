@@ -187,7 +187,8 @@ TEST_P(BarrierTest, ExecutionOnlyUsesNoCacheCommands) {
   std::array<uint32_t, 3> words = {0, 0, 0x12345678};
   EXPECT_EQ(iree_hal_amd_gpu_pm4_barrier_emit(words.data(), barrier),
             words.data() + 2);
-  EXPECT_EQ(words, (std::array<uint32_t, 3>{0xc0004600, 0x407, 0x12345678}));
+  EXPECT_EQ(words,
+            (std::array<uint32_t, 3>{0xc0004600, 0x80000407, 0x12345678}));
 }
 
 TEST_P(BarrierTest, LocalShaderDependenciesStayInsideShaderCaches) {
@@ -309,9 +310,9 @@ TEST_P(BarrierTest, OrdinaryEmissionJoinsBeforeMaintenance) {
   EXPECT_EQ(iree_hal_amd_gpu_pm4_barrier_emit(words.data(), barrier),
             words.data() + 17);
   EXPECT_EQ((std::vector<uint32_t>(words.begin(), words.end())),
-            (std::vector<uint32_t>{0xc0004600, 0x407, 0xc0055000, 0, 0, 0, 0, 0,
-                                   0, 0xc0065800, 0, 0xffffffff, 0xff, 0, 0,
-                                   0xa, GetParam().acquire, 0x12345678}));
+            (std::vector<uint32_t>{0xc0004600, 0x80000407, 0xc0055000, 0, 0, 0,
+                                   0, 0, 0, 0xc0065800, 0, 0xffffffff, 0xff, 0,
+                                   0, 0xa, GetParam().acquire, 0x12345678}));
 }
 
 TEST_P(BarrierTest, TailCompletesCachesBeforePublishingCompletion) {
@@ -325,7 +326,7 @@ TEST_P(BarrierTest, TailCompletesCachesBeforePublishingCompletion) {
   EXPECT_EQ(end, words.data() + 25);
   EXPECT_EQ((std::vector<uint32_t>(words.begin(), words.end())),
             (std::vector<uint32_t>{0xc0004600,
-                                   0x407,
+                                   0x80000407,
                                    0xc0055000,
                                    0,
                                    0,
@@ -361,8 +362,8 @@ TEST_P(BarrierTest, VisibilityOnlyTailJoinsComputeBeforeWriteback) {
   EXPECT_EQ(iree_hal_amd_gpu_pm4_barrier_tail_word_count(barrier), 10u);
   EXPECT_EQ(iree_hal_amd_gpu_pm4_barrier_emit_tail(words.data(), barrier),
             words.data() + 10);
-  EXPECT_EQ(words, (std::array<uint32_t, 11>{0xc0004600, 0x407, 0xc0065800, 0,
-                                             0xffffffff, 0xff, 0, 0, 0xa,
+  EXPECT_EQ(words, (std::array<uint32_t, 11>{0xc0004600, 0x80000407, 0xc0065800,
+                                             0, 0xffffffff, 0xff, 0, 0, 0xa,
                                              GetParam().release, 0x12345678}));
 }
 

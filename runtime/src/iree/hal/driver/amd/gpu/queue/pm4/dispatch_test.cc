@@ -240,7 +240,7 @@ TEST_F(DispatchTest, PreparationProgramEmitsCompleteOrderedLaunch) {
         0x204,      0,          0,          0,          1,
         1,          1,          0xC0027602, 0x240,      0x9ABCDEF0,
         0x5678,     0xC0031502, 1,          1,          1,
-        0x8005,     0xC0004600, 0x407,      0xC0065800, 0,
+        0x8005,     0xC0004600, 0x80000407, 0xC0065800, 0,
         UINT32_MAX, 0xFF,       0,          0,          0xA,
         0x103E0};
     EXPECT_EQ(end - words.data() - 1,

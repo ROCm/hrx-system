@@ -71,7 +71,8 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_dispatch_indirect(
 
 uint32_t* iree_hal_amd_gpu_pm4_emit_compute_flush(uint32_t* words) {
   words[0] = UINT32_C(0xc0004600);
-  words[1] = 7 | (4 << 8);  // CS_PARTIAL_FLUSH, partial-flush event index.
+  // CS_PARTIAL_FLUSH, partial-flush event index, MEC offload while EOP drains.
+  words[1] = UINT32_C(0x80000407);
   return words + 2;
 }
 
@@ -176,7 +177,8 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_wait64(
   words[5] = (uint32_t)(reference >> 32);
   words[6] = (uint32_t)mask;
   words[7] = (uint32_t)(mask >> 32);
-  words[8] = 4;
+  words[8] =
+      UINT32_C(0x80000004);  // ACE polling offload, as in the DWORD form.
   return words + 9;
 }
 
