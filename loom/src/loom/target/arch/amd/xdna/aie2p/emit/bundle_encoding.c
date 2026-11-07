@@ -6,7 +6,7 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/emit/bundle_encoding.h"
 
-#include "loom/codegen/low/function_requirements.h"
+#include "loom/codegen/low/read_only_data.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 
@@ -145,9 +145,9 @@ void loom_aie2p_bundle_encoding_encode_packet(
     if (value.kind == LOOM_ATTR_SYMBOL) {
       IREE_ASSERT_EQ(packet->descriptor_ordinal,
                      AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32);
-      const uint32_t ordinal =
-          loom_low_function_requirements_read_only_data_ordinal(
-              &frame->schedule.requirements, loom_attr_as_symbol(value));
+      const uint32_t ordinal = loom_low_read_only_data_ordinal(
+          &frame->schedule.requirements.read_only_data,
+          loom_attr_as_symbol(value));
       IREE_ASSERT_NE(ordinal, UINT32_MAX);
       IREE_ASSERT_EQ(*out_read_only_data_ordinal, UINT32_MAX);
       *out_read_only_data_ordinal = ordinal;

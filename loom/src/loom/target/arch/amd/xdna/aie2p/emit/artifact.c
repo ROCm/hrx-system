@@ -306,7 +306,7 @@ static iree_status_t loom_aie2p_xdna_plan_tile_link(
   }
 
   const iree_host_size_t expected_read_only_data_count =
-      plan->workers[worker_index].source->requirements.read_only_data_count;
+      plan->workers[worker_index].source->program_data->count;
   if (realization->read_only_data_count != expected_read_only_data_count) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -417,7 +417,8 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
             .values = direct_helpers,
             .count = resident->direct_helper_count,
         },
-        &worker_compile_options, &program_compiled, contribution);
+        &resident->program_data, &worker_compile_options, &program_compiled,
+        contribution);
     if (worker_report_ptr != NULL) {
       iree_status_t report_status =
           program_compiled ? loom_target_compile_report_record_entry_report(

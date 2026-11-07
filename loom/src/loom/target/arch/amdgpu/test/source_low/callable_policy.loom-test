@@ -206,3 +206,153 @@ low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @
   %selected = low.func.call pure @select_vector(%forwarded, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>)
   return %selected
 }
+
+// ====
+
+// HAL launch-argument facts reach retained calls through wide arithmetic.
+amdgpu.target<gfx11-generic> @target
+
+func.def noinline @increment(%position: index) -> (i32) {
+  %step = index.constant 1 : index
+  %next = index.add %position, %step : index
+  %result = index.cast %next : index to i32
+  func.return %result : i32
+}
+
+func.def public target(@target) @caller(%configuration: i64) -> (i32) {
+  %shift = scalar.constant 3 : i64
+  %shifted = scalar.shrui %configuration, %shift : i64
+  %mask = scalar.constant 7 : i64
+  %selector = scalar.andi %shifted, %mask : i64
+  %limit = scalar.constant 5 : i64
+  %bounded = scalar.minui %selector, %limit : i64
+  %position = index.cast %bounded : i64 to index
+  %value = func.call @increment(%position) : (index) -> (i32)
+  func.return %value : i32
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @increment(%position: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %step = s_mov_b32 1
+  %result = s_add_u32 %position, %step
+  return %result
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @caller(%configuration: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr>) asm {
+  %23 = s_mov_b32 3
+  %shifted = s_lshr_b64 %configuration, %23
+  %28 = s_mov_b32 7
+  %29 = s_mov_b32 0
+  %mask = concat(%28, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %selector = s_and_b64 %shifted, %mask
+  %32 = s_mov_b32 5
+  %35 = slice %selector[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %36 = slice %selector[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = s_cmp_lt_u32 %35, %32
+  %40, %41 = s_subb_u32 %36, %29, %39
+  %44 = s_cselect_b32 %35, %32, %41
+  %value = low.func.call pure @increment(%44) : (reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>)
+  return %value
+}
+
+// ====
+
+// An exported function can also consume per-lane device-call arguments.
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public noinline target(@target) @absolute(%value: i32) -> (i32) {
+  %sign_boundary = scalar.constant 0 : i32
+  %positive = scalar.cmpi sgt, %value, %sign_boundary : i32
+  %result = scf.if %positive -> (i32) {
+    scf.yield %value : i32
+  } else {
+    %negative = scalar.subi %sign_boundary, %value : i32
+    scf.yield %negative : i32
+  }
+  func.return %result : i32
+}
+
+kernel.def target(@target) @varying_values() {
+  %groups = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %groups, %groups) workgroup_size(%threads, %groups, %groups) : index
+} launch(%output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %lane_value = index.cast %lane : index to i32
+  %bias = scalar.constant 32 : i32
+  %centered = scalar.subi %lane_value, %bias : i32
+  %result = func.call @absolute(%centered) : (i32) -> (i32)
+  %origin = index.constant 0 : offset
+  %results = buffer.view %output[%origin] : buffer -> view<64xi32>
+  view.store %result, %results[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.func.def public noinline target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @absolute(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %positive = v_cmp_gt_i32_src1_inline %value {rhs = 0}
+  %25 = v_mov_b32 0
+  %negative = v_sub_nc_u32 %25, %value
+  %result = v_cndmask_b32 %negative, %value, %positive
+  return %result
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @varying_values() asm {
+  %lane_value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %results = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %31 = v_mov_b32 4294967264
+  %centered = v_add_u32 %lane_value, %31
+  %result = low.func.call pure @absolute(%centered) : (reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>)
+  %34 = v_lshlrev_b32_src0_inline %lane_value, 2
+  global_store_b32_saddr %34, %result, %results
+  return
+}
+
+// ====
+
+// A public predicate helper preserves independently varying lanes.
+
+amdgpu.target<gfx11-generic> @target
+
+func.def public noinline target(@target) @invert(%predicate: i1) -> (i1) {
+  %true = scalar.constant true : i1
+  %result = scalar.xori %predicate, %true : i1
+  func.return %result : i1
+}
+
+kernel.def target(@target) @caller() {
+  %groups = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %groups, %groups) workgroup_size(%threads, %groups, %groups) : index
+} launch(%output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %half = index.constant 32 : index
+  %first_half = index.cmp ult, %lane, %half : index
+  %predicate = func.call @invert(%first_half) : (i1) -> (i1)
+  %enabled = scalar.constant 19 : i32
+  %disabled = scalar.constant 37 : i32
+  %result = scf.select %predicate, %enabled, %disabled : i32
+  %origin = index.constant 0 : offset
+  %results = buffer.view %output[%origin] : buffer -> view<64xi32>
+  view.store %result, %results[%lane] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+low.func.def public noinline target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @invert(%predicate: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  %20 = s_mov_b64_exec_read
+  %result = s_xor_b64 %predicate, %20
+  return %result
+}
+
+low.kernel.def target<amdgpu.gfx11.generic.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @caller() asm {
+  %lane = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %results = resource<hal_binding> {extent = 256, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %first_half = v_cmp_lt_u32_src1_inline %lane {rhs = 32}
+  %predicate = low.func.call pure @invert(%first_half) : (reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>)
+  %result = v_cndmask_b32_src0_lit_src1_inline %predicate {imm32 = 37, true_value = 19}
+  %29 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %29, %result, %results
+  return
+}

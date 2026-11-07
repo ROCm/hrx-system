@@ -174,3 +174,58 @@ func.def public @call_external(%value: i32) -> (i32) {
 }
 
 func.decl @increment(%value: i32) -> (%result: i32) where [eq(%result, %value)]
+
+// ====
+
+// Uniform loads can use vector registers even when a retained helper selects
+// scalar registers. Preserve narrow payloads and both words of wide values;
+// floating payloads keep their ordinary callable representation.
+amdgpu.target<gfx11-generic> @target
+
+func.def noinline @forward_scalars(%i8: i8, %i16: i16, %i32: i32, %i64: i64, %f16: f16, %bf16: bf16, %f32: f32, %f64: f64) -> (i8, i16, i32, i64, f16, bf16, f32, f64) {
+  func.return %i8, %i16, %i32, %i64, %f16, %bf16, %f32, %f64 : i8, i16, i32, i64, f16, bf16, f32, f64
+}
+
+func.def public target(@target) @loaded_scalars(%input: buffer) -> (i8, i16, i32, i64, f16, bf16, f32, f64) {
+  %origin = index.constant 0 : offset
+  %view_i8 = buffer.view %input[%origin] : buffer -> view<1xi8>
+  %i8 = view.load %view_i8[0] : view<1xi8> -> i8
+  %view_i16 = buffer.view %input[%origin] : buffer -> view<1xi16>
+  %i16 = view.load %view_i16[0] : view<1xi16> -> i16
+  %view_i32 = buffer.view %input[%origin] : buffer -> view<1xi32>
+  %i32 = view.load %view_i32[0] : view<1xi32> -> i32
+  %view_i64 = buffer.view %input[%origin] : buffer -> view<1xi64>
+  %i64 = view.load %view_i64[0] : view<1xi64> -> i64
+  %view_f16 = buffer.view %input[%origin] : buffer -> view<1xf16>
+  %f16 = view.load %view_f16[0] : view<1xf16> -> f16
+  %view_bf16 = buffer.view %input[%origin] : buffer -> view<1xbf16>
+  %bf16 = view.load %view_bf16[0] : view<1xbf16> -> bf16
+  %view_f32 = buffer.view %input[%origin] : buffer -> view<1xf32>
+  %f32 = view.load %view_f32[0] : view<1xf32> -> f32
+  %view_f64 = buffer.view %input[%origin] : buffer -> view<1xf64>
+  %f64 = view.load %view_f64[0] : view<1xf64> -> f64
+  %result_i8, %result_i16, %result_i32, %result_i64, %result_f16, %result_bf16, %result_f32, %result_f64 = func.call @forward_scalars(%i8, %i16, %i32, %i64, %f16, %bf16, %f32, %f64) : (i8, i16, i32, i64, f16, bf16, f32, f64) -> (i8, i16, i32, i64, f16, bf16, f32, f64)
+  func.return %result_i8, %result_i16, %result_i32, %result_i64, %result_f16, %result_bf16, %result_f32, %result_f64 : i8, i16, i32, i64, f16, bf16, f32, f64
+}
+
+// ----
+low.func.def noinline target<amdgpu.gfx11.generic.core> @forward_scalars(%i8: reg<amdgpu.vgpr>, %i16: reg<amdgpu.vgpr>, %i32: reg<amdgpu.sgpr>, %i64: reg<amdgpu.sgpr x2>, %f16: reg<amdgpu.vgpr>, %bf16: reg<amdgpu.vgpr>, %f32: reg<amdgpu.vgpr>, %f64: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+  return %i8, %i16, %i32, %i64, %f16, %bf16, %f32, %f64
+}
+
+low.func.def public target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @loaded_scalars() -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) asm {
+  %view_f64 = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %75 = v_mov_b32 0
+  %i8 = global_load_u8_saddr %75, %view_f64
+  %i16 = global_load_u16_saddr %75, %view_f64
+  %i32 = global_load_b32_saddr %75, %view_f64
+  %i64 = global_load_b64_saddr %75, %view_f64
+  %91 = v_readfirstlane_b32 %i32
+  %92 = slice %i64[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %93 = v_readfirstlane_b32 %92
+  %94 = slice %i64[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %95 = v_readfirstlane_b32 %94
+  %96 = concat(%93, %95) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %result_i8, %result_i16, %result_i32, %result_i64, %result_f16, %result_bf16, %result_f32, %result_f64 = low.func.call pure @forward_scalars(%i8, %i16, %91, %96, %i16, %i16, %i32, %i64) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr x2>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr x2>)
+  return %result_i8, %result_i16, %result_i32, %result_i64, %result_f16, %result_bf16, %result_f32, %result_f64
+}

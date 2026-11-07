@@ -49,6 +49,8 @@ typedef struct loom_call_graph_node_t {
   // SCC ID after loom_call_graph_build completes. Functions in the
   // same SCC share the same scc_id. UINT16_MAX before SCC analysis.
   uint16_t scc_id;
+  // Number of distinct callers, including a self-edge for recursion.
+  uint16_t caller_count;
 } loom_call_graph_node_t;
 
 // Call graph for all functions in a module.

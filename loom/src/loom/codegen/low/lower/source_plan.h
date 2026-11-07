@@ -27,6 +27,8 @@ extern "C" {
 typedef struct loom_low_lower_resolved_emit_t loom_low_lower_resolved_emit_t;
 typedef struct loom_low_representation_plan_t loom_low_representation_plan_t;
 typedef struct loom_low_lower_realizations_t loom_low_lower_realizations_t;
+typedef struct loom_low_lower_source_call_plan_t
+    loom_low_lower_source_call_plan_t;
 typedef struct loom_low_lower_source_invoke_plan_t
     loom_low_lower_source_invoke_plan_t;
 typedef struct loom_low_lower_projected_call_plan_t
@@ -85,6 +87,8 @@ typedef enum loom_low_lower_selected_plan_kind_e {
   // No target recipe exists. Demand analysis must elide this pure operation;
   // a retained runtime demand is rejected before any Low IR is constructed.
   LOOM_LOW_LOWER_SELECTED_PLAN_UNAVAILABLE = 7,
+  // Direct semantic call with prepared receiving-carrier conversions.
+  LOOM_LOW_LOWER_SELECTED_PLAN_CALL = 8,
 } loom_low_lower_selected_plan_kind_t;
 
 // Canonical source-memory data retained with a selected table rule.
@@ -127,6 +131,9 @@ typedef struct loom_low_lower_selected_plan_t {
   const loom_low_lower_selected_source_memory_t* source_memory;
   // Selected-plan-specific retained payload.
   union {
+    // Direct callee signature and operand conversions finalized before
+    // emission.
+    loom_low_lower_source_call_plan_t* call;
     // Helper signature and proved preconditions owned by the function plan.
     const loom_low_lower_source_invoke_plan_t* invoke;
     // Physical callee projection and proved logical preconditions.

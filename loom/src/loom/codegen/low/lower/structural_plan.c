@@ -9,7 +9,6 @@
 #include <string.h>
 
 #include "loom/codegen/low/lower/context.h"
-#include "loom/codegen/low/lower/source_call.h"
 #include "loom/codegen/low/lower/source_value_storage.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/facts.h"
@@ -163,33 +162,12 @@ iree_status_t loom_low_lower_structural_plan_op(
           ? loom_region_const_entry_block(loom_scf_while_before(source_op))
           : NULL;
   const uint16_t header_count = header ? header->arg_count : 0;
-  const bool is_source_call =
-      loom_low_lower_source_call_is_structural(context->module, source_op);
-  if (!loom_scf_if_isa(source_op) && header == NULL && !is_source_call) {
+  if (!loom_scf_if_isa(source_op) && header == NULL) {
     return iree_ok_status();
   }
-  const loom_low_lower_call_interface_t* call_interface = NULL;
-  if (is_source_call) {
-    const loom_call_like_t call =
-        loom_call_like_const_cast(context->module, source_op);
-    const loom_symbol_ref_t callee = loom_call_like_callee(call);
-    if (loom_symbol_ref_is_valid(callee) && callee.module_id == 0) {
-      call_interface = loom_low_lower_call_interface_index_find(
-          context->options->call_interfaces, callee.symbol_id);
-    }
-  }
-  if (call_interface != NULL) {
-    IREE_ASSERT_EQ(call_interface->result_count, source_op->result_count);
-    for (uint16_t i = 0; i < source_op->result_count; ++i) {
-      IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
-          context, loom_op_const_results(source_op)[i],
-          call_interface->result_types[i]));
-    }
-  } else {
-    IREE_RETURN_IF_ERROR(loom_low_lower_structural_plan_types(
-        context, source_op, loom_op_const_results(source_op),
-        source_op->result_count, /*retain_bindings=*/true));
-  }
+  IREE_RETURN_IF_ERROR(loom_low_lower_structural_plan_types(
+      context, source_op, loom_op_const_results(source_op),
+      source_op->result_count, /*retain_bindings=*/true));
   if (header != NULL) {
     IREE_RETURN_IF_ERROR(loom_low_lower_structural_plan_types(
         context, source_op, header->arg_ids, header_count,

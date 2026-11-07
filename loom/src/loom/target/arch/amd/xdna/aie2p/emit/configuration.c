@@ -288,7 +288,7 @@ static iree_status_t loom_aie2p_configuration_compile_worker(
             .values = direct_helpers,
             .count = requirements->direct_callees.count,
         },
-        &options, &compiled, worker);
+        source->program_data, &options, &compiled, worker);
     if (report_ptr) {
       iree_status_t report_status =
           compiled ? loom_target_compile_report_record_entry_report(

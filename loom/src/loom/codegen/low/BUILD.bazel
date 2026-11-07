@@ -335,6 +335,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "read_only_data",
+    srcs = ["read_only_data.c"],
+    hdrs = ["read_only_data.h"],
+    deps = [
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/global",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "function_requirements",
     srcs = ["function_requirements.c"],
     hdrs = ["function_requirements.h"],
@@ -342,10 +354,10 @@ loom_cc_library(
         ":descriptors",
         ":function",
         ":immediates",
+        ":read_only_data",
         ":representation_binding",
         ":storage_layout",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ops/global",
         "//loom/src/loom/ops/low",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -411,6 +423,7 @@ loom_cc_test(
     deps = [
         ":builder",
         ":function_requirements",
+        ":read_only_data",
         ":storage_layout",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/global",

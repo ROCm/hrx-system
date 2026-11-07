@@ -37,6 +37,9 @@ typedef struct loom_aie2p_program_source_function_t {
   const loom_low_loop_execution_map_t* loop_execution;
   // Source imports, storage, data, and direct calls.
   loom_low_function_requirements_t requirements;
+  // Unique immutable definitions used by this entry and its admitted helpers.
+  // Aliases the function inventory until helper admission adds definitions.
+  const loom_low_read_only_data_set_t* program_data;
   // Whether the direct-leaf native call contract has been admitted.
   bool direct_helpers_admitted;
 } loom_aie2p_program_source_function_t;
@@ -83,7 +86,8 @@ loom_aie2p_program_source_table_lookup(
 
 // Admits the entry-to-direct-leaf native call closure of |entry|. A nested
 // retained helper emits one XDNA diagnostic and leaves |out_admitted| false.
-// The entry and every admitted helper remain indexed for materialization.
+// The entry and every admitted helper remain indexed for materialization;
+// program_data retains their union in entry-then-callee reference order.
 iree_status_t loom_aie2p_program_source_admit_direct_helpers(
     loom_aie2p_program_source_table_t* table,
     loom_aie2p_program_source_function_t* entry, bool* out_admitted);

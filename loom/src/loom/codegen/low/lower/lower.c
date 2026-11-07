@@ -641,9 +641,6 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t loom_low_lower_structural_op(
                                      : source_op->operand_count,
                                  source_op->location, &low_return_op);
   }
-  if (loom_low_lower_source_call_is_structural(context->module, source_op)) {
-    return loom_low_lower_source_call(context, source_op);
-  }
   switch (source_op->kind) {
     case LOOM_OP_REF_RELEASE: {
       loom_op_t* release_op = NULL;
@@ -1115,6 +1112,9 @@ static iree_status_t loom_low_lower_emit_selected_plan(
              LOOM_LOW_LOWER_SELECTED_PLAN_FUNCTION_STORAGE) {
     IREE_RETURN_IF_ERROR(loom_low_lower_function_storage_emit(
         context, selected_plan.source_op, selected_plan.data.function_storage));
+  } else if (selected_plan.kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALL) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_source_call(
+        context, selected_plan.source_op, selected_plan.data.call));
   } else if (selected_plan.kind == LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE) {
     IREE_RETURN_IF_ERROR(loom_low_lower_source_invoke(
         context, selected_plan.source_op, selected_plan.data.invoke));

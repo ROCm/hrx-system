@@ -182,6 +182,58 @@ static iree_status_t loom_low_source_invocation_merge_outgoing(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_source_invocation_seed_entry_arguments(
+    const loom_module_t* module, const loom_call_graph_t* call_graph,
+    const loom_call_graph_node_t* node, loom_func_like_t function,
+    const loom_target_facts_t* target_facts,
+    loom_value_fact_table_t* arguments) {
+  if (!target_facts) {
+    return iree_ok_status();
+  }
+  const loom_region_descriptor_t* body_descriptor =
+      loom_op_vtable_region_descriptor(
+          loom_op_vtable(module, function.op),
+          loom_func_like_body_region_index(function));
+  if (body_descriptor && iree_any_bit_set(body_descriptor->flags,
+                                          LOOM_REGION_CLUSTER_UNIFORM_ARGS)) {
+    // The ordinary fact solve already establishes the declared entry domain.
+    // Redundant seeds would distinguish identical scopes in the fact cache.
+    return iree_ok_status();
+  }
+  const bool launch_only =
+      node->caller_count == 0 &&
+      target_facts->storage.export_plan.abi_kind == LOOM_TARGET_ABI_HAL_KERNEL;
+  const bool opaque_arguments =
+      !loom_func_like_is_module_internal(function) ||
+      loom_call_graph_is_recursive(call_graph, node->symbol_id);
+  const bool lane_varying = !launch_only && opaque_arguments &&
+                            target_facts->storage.snapshot.subgroup_size > 1;
+  if (!launch_only && !lane_varying) {
+    return iree_ok_status();
+  }
+  // A launch-only entry receives identical parameters across its dispatch.
+  // Opaque device-call boundaries admit independent values in each lane.
+  // Private acyclic callees instead consume the actual-argument meet.
+  uint16_t argument_count = 0;
+  const loom_value_id_t* argument_ids =
+      loom_func_like_arg_ids(function, &argument_count);
+  iree_status_t status = iree_ok_status();
+  for (uint16_t i = 0; i < argument_count && iree_status_is_ok(status); ++i) {
+    const loom_type_t type = loom_module_value_type(module, argument_ids[i]);
+    loom_value_facts_t facts = loom_value_facts_unknown();
+    if (loom_type_is_scalar(type) || loom_type_is_vector(type) ||
+        loom_type_is_buffer(type) || loom_type_is_view(type)) {
+      if (launch_only) {
+        loom_value_facts_mark_cluster_uniform(&facts);
+      } else {
+        loom_value_facts_mark_lane_distribution_for_type(type, &facts);
+      }
+    }
+    status = loom_value_fact_table_define(arguments, argument_ids[i], facts);
+  }
+  return status;
+}
+
 static const loom_low_source_selection_t*
 loom_low_source_invocation_find_selection(
     const loom_low_source_selection_t* const* selections_by_symbol,
@@ -293,6 +345,12 @@ iree_status_t loom_low_source_invocation_facts_compute(
                     : NULL;
       const loom_target_facts_t* target_facts =
           selection ? selection->target_facts : NULL;
+      status = loom_low_source_invocation_seed_entry_arguments(
+          module, call_graph, node, function, target_facts,
+          &out_facts->arguments);
+      if (!iree_status_is_ok(status)) {
+        break;
+      }
       loom_pass_value_fact_scope_t scope =
           loom_pass_value_fact_scope_conditioned_function_for_target(
               function, target_facts);

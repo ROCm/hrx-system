@@ -162,6 +162,7 @@ TEST_F(CallGraphTest, SingleFunctionNoCalls) {
       loom_call_graph_node(&graph, f.symbol_id);
   ASSERT_NE(node, nullptr);
   EXPECT_EQ(node->callee_count, 0u);
+  EXPECT_EQ(node->caller_count, 0u);
 }
 
 TEST_F(CallGraphTest, LinearChain) {
@@ -191,10 +192,30 @@ TEST_F(CallGraphTest, LinearChain) {
   EXPECT_EQ(na->callee_count, 1u);
   EXPECT_EQ(nb->callee_count, 1u);
   EXPECT_EQ(nc->callee_count, 0u);
+  EXPECT_EQ(na->caller_count, 0u);
+  EXPECT_EQ(nb->caller_count, 1u);
+  EXPECT_EQ(nc->caller_count, 1u);
 
   // SCC IDs are assigned in callee-first order.
   EXPECT_LT(nc->scc_id, nb->scc_id);
   EXPECT_LT(nb->scc_id, na->scc_id);
+}
+
+TEST_F(CallGraphTest, DistinctCallersCountRepeatedCallsOnce) {
+  auto first = create_func("first");
+  auto second = create_func("second");
+  auto shared = create_func("shared");
+  add_call(first, shared.symbol_id);
+  add_call(first, shared.symbol_id);
+  add_call(second, shared.symbol_id);
+  finalize();
+
+  loom_call_graph_t graph;
+  IREE_ASSERT_OK(loom_call_graph_build(module_, &graph_arena_, &graph));
+
+  EXPECT_EQ(loom_call_graph_node(&graph, first.symbol_id)->caller_count, 0u);
+  EXPECT_EQ(loom_call_graph_node(&graph, second.symbol_id)->caller_count, 0u);
+  EXPECT_EQ(loom_call_graph_node(&graph, shared.symbol_id)->caller_count, 2u);
 }
 
 TEST_F(CallGraphTest, FindsCallsInEveryFunctionRootRegion) {
@@ -224,6 +245,7 @@ TEST_F(CallGraphTest, SelfRecursion) {
 
   EXPECT_EQ(graph.node_count, 1u);
   EXPECT_TRUE(loom_call_graph_is_recursive(&graph, f.symbol_id));
+  EXPECT_EQ(loom_call_graph_node(&graph, f.symbol_id)->caller_count, 1u);
 }
 
 TEST_F(CallGraphTest, MutualRecursion) {

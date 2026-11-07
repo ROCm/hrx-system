@@ -11,15 +11,7 @@
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/immediates.h"
 #include "loom/codegen/low/representation_binding.h"
-#include "loom/ops/global/ops.h"
 #include "loom/ops/low/ops.h"
-
-typedef struct loom_low_read_only_data_builder_t {
-  loom_low_read_only_data_requirement_t* records;
-  iree_host_size_t record_capacity;
-  uint16_t* ordinal_slots;
-  iree_host_size_t slot_capacity;
-} loom_low_read_only_data_builder_t;
 
 typedef struct loom_low_direct_callee_builder_t {
   loom_low_direct_callee_requirement_t* values;
@@ -41,130 +33,10 @@ static iree_host_size_t loom_low_symbol_ref_hash(
   return (identity * UINT32_C(0x85EBCA77)) & (slot_capacity - 1);
 }
 
-static uint32_t loom_low_read_only_data_lookup(
-    const loom_low_read_only_data_requirement_t* records,
-    iree_host_size_t record_count, const uint16_t* ordinal_slots,
-    iree_host_size_t slot_capacity, loom_symbol_ref_t symbol) {
-  if (!loom_symbol_ref_is_valid(symbol)) {
-    return UINT32_MAX;
-  }
-  if (slot_capacity == 0) {
-    for (uint32_t ordinal = 0; ordinal < (uint32_t)record_count; ++ordinal) {
-      const loom_symbol_ref_t existing = records[ordinal].symbol;
-      if (loom_low_symbol_ref_equal(existing, symbol)) {
-        return ordinal;
-      }
-    }
-    return UINT32_MAX;
-  }
-  const iree_host_size_t slot_mask = slot_capacity - 1;
-  iree_host_size_t slot_index = loom_low_symbol_ref_hash(symbol, slot_capacity);
-  while (ordinal_slots[slot_index] != 0) {
-    const uint32_t ordinal = ordinal_slots[slot_index] - 1;
-    IREE_ASSERT_LT(ordinal, record_count);
-    const loom_symbol_ref_t existing = records[ordinal].symbol;
-    if (loom_low_symbol_ref_equal(existing, symbol)) {
-      return ordinal;
-    }
-    slot_index = (slot_index + 1) & slot_mask;
-  }
-  return UINT32_MAX;
-}
-
-static void loom_low_read_only_data_insert_slot(
-    const loom_low_read_only_data_requirement_t* records, uint16_t ordinal,
-    uint16_t* ordinal_slots, iree_host_size_t slot_capacity) {
-  const iree_host_size_t slot_mask = slot_capacity - 1;
-  iree_host_size_t slot_index =
-      loom_low_symbol_ref_hash(records[ordinal].symbol, slot_capacity);
-  while (ordinal_slots[slot_index] != 0) {
-    slot_index = (slot_index + 1) & slot_mask;
-  }
-  ordinal_slots[slot_index] = ordinal + 1;
-}
-
-static iree_status_t loom_low_function_requirements_append_read_only_data(
-    const loom_module_t* module, loom_symbol_ref_t symbol,
-    iree_arena_allocator_t* arena, loom_low_read_only_data_builder_t* builder,
-    loom_low_function_requirements_t* out_requirements) {
-  IREE_ASSERT(loom_symbol_ref_is_valid(symbol));
-  IREE_ASSERT_EQ(symbol.module_id, 0);
-  IREE_ASSERT_LT(symbol.symbol_id, module->symbols.count);
-  if (loom_low_read_only_data_lookup(
-          builder->records, out_requirements->read_only_data_count,
-          builder->ordinal_slots, builder->slot_capacity,
-          symbol) != UINT32_MAX) {
-    return iree_ok_status();
-  }
-  const loom_op_t* definition =
-      module->symbols.entries[symbol.symbol_id].defining_op;
-  IREE_ASSERT(loom_global_rodata_def_isa(definition));
-  IREE_ASSERT_LT(out_requirements->read_only_data_count, UINT16_MAX);
-
-  const iree_host_size_t minimum_capacity =
-      out_requirements->read_only_data_count + 1;
-  const bool grow_records = minimum_capacity > builder->record_capacity;
-  const bool grow_slots =
-      minimum_capacity > 4 && minimum_capacity > builder->slot_capacity / 2;
-  loom_low_read_only_data_builder_t candidate = *builder;
-  if (grow_records || grow_slots) {
-    const iree_arena_checkpoint_t checkpoint =
-        iree_arena_checkpoint_save(arena);
-    iree_status_t status = iree_ok_status();
-    if (grow_records) {
-      status = iree_arena_grow_array(
-          arena, out_requirements->read_only_data_count,
-          iree_max(minimum_capacity, 4u), sizeof(*candidate.records),
-          &candidate.record_capacity, (void**)&candidate.records);
-    }
-    if (iree_status_is_ok(status) && grow_slots) {
-      candidate.slot_capacity =
-          candidate.slot_capacity == 0 ? 16 : candidate.slot_capacity * 2;
-      status = iree_arena_allocate_array(arena, candidate.slot_capacity,
-                                         sizeof(*candidate.ordinal_slots),
-                                         (void**)&candidate.ordinal_slots);
-      if (iree_status_is_ok(status)) {
-        memset(candidate.ordinal_slots, 0,
-               candidate.slot_capacity * sizeof(*candidate.ordinal_slots));
-        for (uint16_t ordinal = 0;
-             ordinal < out_requirements->read_only_data_count; ++ordinal) {
-          loom_low_read_only_data_insert_slot(candidate.records, ordinal,
-                                              candidate.ordinal_slots,
-                                              candidate.slot_capacity);
-        }
-      }
-    }
-    if (!iree_status_is_ok(status)) {
-      iree_arena_checkpoint_restore(&checkpoint);
-      return status;
-    }
-  }
-  const uint16_t ordinal = (uint16_t)out_requirements->read_only_data_count;
-  candidate.records[ordinal] = (loom_low_read_only_data_requirement_t){
-      .symbol = symbol,
-      .definition = definition,
-      .contents = loom_global_rodata_def_contents(definition),
-      .minimum_alignment =
-          loom_global_rodata_def_has_alignment(definition)
-              ? (uint64_t)loom_global_rodata_def_alignment(definition)
-              : 1,
-      .bank_conflicts = loom_global_rodata_def_bank_conflicts(definition),
-  };
-  if (candidate.slot_capacity != 0) {
-    loom_low_read_only_data_insert_slot(candidate.records, ordinal,
-                                        candidate.ordinal_slots,
-                                        candidate.slot_capacity);
-  }
-  *builder = candidate;
-  ++out_requirements->read_only_data_count;
-  return iree_ok_status();
-}
-
 static iree_status_t loom_low_function_requirements_collect_read_only_data(
     const loom_module_t* module,
     const loom_low_descriptor_set_t* descriptor_set, const loom_op_t* op,
-    iree_arena_allocator_t* arena, loom_low_read_only_data_builder_t* builder,
-    loom_low_function_requirements_t* out_requirements) {
+    iree_arena_allocator_t* arena, loom_low_read_only_data_builder_t* builder) {
   loom_low_descriptor_packet_t packet = {0};
   loom_low_descriptor_packet_initialize(descriptor_set, op, &packet);
   if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE ||
@@ -188,21 +60,11 @@ static iree_status_t loom_low_function_requirements_collect_read_only_data(
     const loom_attribute_t value =
         loom_low_bound_immediate_attr(attrs, presence, immediate);
     if (value.kind == LOOM_ATTR_SYMBOL) {
-      IREE_RETURN_IF_ERROR(loom_low_function_requirements_append_read_only_data(
-          module, loom_attr_as_symbol(value), arena, builder,
-          out_requirements));
+      IREE_RETURN_IF_ERROR(loom_low_read_only_data_builder_insert(
+          builder, module, loom_attr_as_symbol(value), arena));
     }
   }
   return iree_ok_status();
-}
-
-uint32_t loom_low_function_requirements_read_only_data_ordinal(
-    const loom_low_function_requirements_t* requirements,
-    loom_symbol_ref_t symbol) {
-  return loom_low_read_only_data_lookup(
-      requirements->read_only_data, requirements->read_only_data_count,
-      requirements->read_only_data_ordinal_slots,
-      requirements->read_only_data_ordinal_slot_count, symbol);
 }
 
 static uint32_t loom_low_direct_callee_lookup(
@@ -368,21 +230,17 @@ static iree_status_t loom_low_function_requirements_build_impl(
       }
       IREE_RETURN_IF_ERROR(
           loom_low_function_requirements_collect_read_only_data(
-              module, descriptor_set, op, arena, &read_only_data_builder,
-              out_requirements));
+              module, descriptor_set, op, arena, &read_only_data_builder));
     }
   }
   out_requirements->resources = resources;
-  out_requirements->read_only_data = read_only_data_builder.records;
+  out_requirements->read_only_data =
+      loom_low_read_only_data_builder_finish(&read_only_data_builder);
   out_requirements->direct_callees =
       (loom_low_direct_callee_requirement_list_t){
           .values = direct_callee_builder.values,
           .count = direct_callee_builder.count,
       };
-  out_requirements->read_only_data_ordinal_slots =
-      read_only_data_builder.ordinal_slots;
-  out_requirements->read_only_data_ordinal_slot_count =
-      read_only_data_builder.slot_capacity;
   return loom_low_storage_layout_builder_finish(
       &storage_builder, arena, &out_requirements->storage_layout);
 }

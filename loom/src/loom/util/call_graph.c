@@ -200,6 +200,9 @@ static iree_status_t loom_call_graph_compute_sccs(
           continue;  // External/declaration only.
         }
 
+        // Each deduplicated edge is visited once by the SCC traversal.
+        ++graph->nodes[w].caller_count;
+
         if (state[w].index == UINT16_MAX) {
           // Not yet visited — push onto DFS stack.
           state[w].index = discovery_counter;
@@ -337,6 +340,7 @@ iree_status_t loom_call_graph_build(const loom_module_t* module,
 
     loom_symbol_id_t sym_id = (loom_symbol_id_t)(sym - module->symbols.entries);
     out_graph->nodes[node_index].symbol_id = sym_id;
+    out_graph->nodes[node_index].caller_count = 0;
     out_graph->nodes[node_index].scc_id = UINT16_MAX;
     out_graph->symbol_to_node[sym_id] = node_index;
 
