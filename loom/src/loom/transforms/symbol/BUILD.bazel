@@ -282,6 +282,7 @@ loom_cc_benchmark(
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/pass:environment",
         "//loom/src/loom/pass:types",
+        "//loom/src/loom/pass:value_facts",
         "//loom/src/loom/rewrite:module_projection",
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:low_descriptor_registry_core_test",
