@@ -72,10 +72,11 @@ static iree_status_t hrx_virtual_buffer_prepare_scope(
             ? IREE_HAL_BUFFER_INTERFACE_HOST
             : IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS;
     for (iree_host_size_t j = 0; j < queues->family_count; ++j) {
+      const iree_hal_queue_family_t* family =
+          iree_hal_device_queue_family(device->hal_device, j);
       families[family_index++] = (iree_hal_pool_family_access_t){
-          .family = iree_hal_device_queue_family(device->hal_device, j),
-          .usage =
-              IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH,
+          .family = family,
+          .usage = hrx_mem_pool_family_usage(family),
           .interfaces = UINT64_C(1) << binding_type,
       };
     }

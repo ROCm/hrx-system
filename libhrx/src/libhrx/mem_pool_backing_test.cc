@@ -177,10 +177,17 @@ TEST_F(MemPoolBackingTest, LivePoolsReuseBackingAndKeepIndependentAccounting) {
   const auto* queues =
       iree_hal_device_spec_queues(iree_hal_device_spec(device_->hal_device));
   for (iree_host_size_t i = 0; i < queues->family_count; ++i) {
-    EXPECT_EQ(iree_hal_buffer_family_usage(
-                  buffer->hal_buffer,
-                  iree_hal_device_queue_family(device_->hal_device, i)),
-              IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH);
+    auto* family = iree_hal_device_queue_family(device_->hal_device, i);
+    const auto usage = iree_hal_buffer_family_usage(buffer->hal_buffer, family);
+    const auto roles = iree_hal_queue_family_spec(family)->role_flags;
+    EXPECT_EQ(usage & IREE_HAL_BUFFER_USAGE_TRANSFER,
+              iree_any_bit_set(roles, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER)
+                  ? IREE_HAL_BUFFER_USAGE_TRANSFER
+                  : IREE_HAL_BUFFER_USAGE_NONE);
+    EXPECT_EQ(usage & IREE_HAL_BUFFER_USAGE_DISPATCH,
+              iree_any_bit_set(roles, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH)
+                  ? IREE_HAL_BUFFER_USAGE_DISPATCH
+                  : IREE_HAL_BUFFER_USAGE_NONE);
   }
 #if defined(HRX_TEST_GPU)
   EXPECT_TRUE(iree_all_bits_set(iree_hal_buffer_memory_type(buffer->hal_buffer),

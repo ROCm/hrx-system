@@ -8,6 +8,7 @@
 #include "iree/base/threading/mutex.h"
 #include "iree/hal/buffer.h"
 #include "iree/hal/memory/tlsf_pool.h"
+#include "iree/hal/queue.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -66,6 +67,12 @@ void hrx_mem_pool_backing_initialize(hrx_mem_pool_backing_t* backing);
 // Releases shared storage before native device teardown. All public pools,
 // buffers, and reservations must have retired.
 void hrx_mem_pool_backing_deinitialize(hrx_mem_pool_backing_t* backing);
+
+// Returns the HRX buffer usage for a family's declared roles. Physical sources
+// and virtual reservations use the same access contract, including copy-only
+// families without requiring dispatch access from them.
+iree_hal_buffer_usage_t hrx_mem_pool_family_usage(
+    const iree_hal_queue_family_t* family);
 
 // Creates one independent allocation policy over the device's shared cache.
 // The caller retains the device; construction acquires no native payload.
