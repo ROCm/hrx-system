@@ -30,14 +30,14 @@ constexpr Profile kProfiles[] = {
     {"x86.avx512_features.core", UINT64_C(0x7ddea86e8df4a0d5), 512},
 };
 
-TEST(MathPolicyTest, ApproximateLogarithmFamily) {
+TEST(MathPolicyTest, ApproximateElementaryFamilies) {
   loom_target_math_policy_registry_t registry = {};
   loom_x86_math_policy_registry_initialize(&registry);
   const loom_target_math_op_t operations[] = {
-      LOOM_TARGET_MATH_OP_LOGF,
-      LOOM_TARGET_MATH_OP_LOG2F,
-      LOOM_TARGET_MATH_OP_LOG10F,
-      LOOM_TARGET_MATH_OP_LOG1PF,
+      LOOM_TARGET_MATH_OP_LOGF,   LOOM_TARGET_MATH_OP_LOG2F,
+      LOOM_TARGET_MATH_OP_LOG10F, LOOM_TARGET_MATH_OP_LOG1PF,
+      LOOM_TARGET_MATH_OP_EXPF,   LOOM_TARGET_MATH_OP_EXP2F,
+      LOOM_TARGET_MATH_OP_EXPM1F,
   };
   const loom_scalar_type_t elements[] = {
       LOOM_SCALAR_TYPE_F8E4M3, LOOM_SCALAR_TYPE_F8E5M2, LOOM_SCALAR_TYPE_F16,
@@ -78,10 +78,24 @@ TEST(MathPolicyTest, ApproximateLogarithmFamily) {
             } else {
               EXPECT_EQ(decision.action,
                         LOOM_TARGET_MATH_POLICY_ACTION_REWRITE);
+              loom_target_math_recipe_t recipe =
+                  LOOM_TARGET_MATH_RECIPE_APPROXIMATE_LOGARITHM;
+              if (operation == LOOM_TARGET_MATH_OP_EXPM1F ||
+                  operation == LOOM_TARGET_MATH_OP_EXPF ||
+                  operation == LOOM_TARGET_MATH_OP_EXP2F) {
+                recipe = LOOM_TARGET_MATH_RECIPE_APPROXIMATE_EXPONENTIAL;
+                if (element == LOOM_SCALAR_TYPE_F32) {
+                  if (operation == LOOM_TARGET_MATH_OP_EXPF) {
+                    recipe = LOOM_TARGET_MATH_RECIPE_EXP_EXP2_F32;
+                  } else if (operation == LOOM_TARGET_MATH_OP_EXP2F) {
+                    recipe = LOOM_TARGET_MATH_RECIPE_APPROXIMATE_EXP2_F32;
+                  }
+                }
+              }
               EXPECT_EQ(decision.recipe,
                         loom_scalar_type_bitwidth(element) < 32
                             ? LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND
-                            : LOOM_TARGET_MATH_RECIPE_APPROXIMATE_LOGARITHM);
+                            : recipe);
             }
           }
         }

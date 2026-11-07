@@ -1521,13 +1521,7 @@ iree_status_t loom_vector_float_extrema_rewrite_op(loom_rewriter_t* rewriter,
   return iree_ok_status();
 }
 
-static bool loom_vector_legalize_f32_aggregate_is_supported(
-    const loom_target_legalization_context_t* context, const loom_op_t* op) {
-  return !context->source_function_has_unsupported_vector_carrier &&
-         loom_target_legalization_op_has_source_vector_carriers(context, op);
-}
-
-iree_status_t loom_vector_legalize_f32_extrema(
+iree_status_t loom_vector_legalize_float_extrema(
     const loom_target_legalizer_entry_t* entry,
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_target_legalizer_result_t* out_result) {
@@ -1535,7 +1529,8 @@ iree_status_t loom_vector_legalize_f32_extrema(
   *out_result = (loom_target_legalizer_result_t){
       .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
   };
-  if (!loom_vector_legalize_f32_aggregate_is_supported(context, op)) {
+  if (context->source_function_has_unsupported_vector_carrier ||
+      !loom_target_legalization_op_has_source_vector_carriers(context, op)) {
     return iree_ok_status();
   }
   bool rewritten = false;
@@ -1810,33 +1805,33 @@ static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
     },
     {
         .root_kind = LOOM_OP_VECTOR_CLAMPF,
-        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_F32,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_FLOAT,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_UNHANDLED,
-        .legalize = loom_vector_legalize_f32_extrema,
+        .legalize = loom_vector_legalize_float_extrema,
     },
     {
         .root_kind = LOOM_OP_VECTOR_MINNUMF,
-        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_F32,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_FLOAT,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_UNHANDLED,
-        .legalize = loom_vector_legalize_f32_extrema,
+        .legalize = loom_vector_legalize_float_extrema,
     },
     {
         .root_kind = LOOM_OP_VECTOR_MAXNUMF,
-        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_F32,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_FLOAT,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_UNHANDLED,
-        .legalize = loom_vector_legalize_f32_extrema,
+        .legalize = loom_vector_legalize_float_extrema,
     },
     {
         .root_kind = LOOM_OP_VECTOR_MINIMUMF,
-        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_F32,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_FLOAT,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
-        .legalize = loom_vector_legalize_f32_extrema,
+        .legalize = loom_vector_legalize_float_extrema,
     },
     {
         .root_kind = LOOM_OP_VECTOR_MAXIMUMF,
-        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_F32,
+        .first_operand_element_types = LOOM_SCALAR_TYPE_SET_FLOAT,
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
-        .legalize = loom_vector_legalize_f32_extrema,
+        .legalize = loom_vector_legalize_float_extrema,
     },
     {
         .root_kind = LOOM_OP_VECTOR_SUBI,

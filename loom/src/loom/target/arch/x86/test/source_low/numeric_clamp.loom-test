@@ -1,0 +1,99 @@
+// RUN: emit source-low target=x86:avx2 output=low
+
+// The shared clamp decomposition preserves the F64 vector carrier.
+func.def @ordered_double(%value: vector<4xf64>, %lower: vector<4xf64>, %upper: vector<4xf64>) -> (vector<4xf64>) {
+  %result = vector.clampf<ordered> %value, %lower, %upper : vector<4xf64>
+  func.return %result : vector<4xf64>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xf64>, vector<4xf64>, vector<4xf64>) -> (vector<4xf64>)}) @ordered_double(%value: reg<x86.ymm>, %lower: reg<x86.ymm>, %upper: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %13 = avx2.vcmppd.ymm %value, %lower, 17
+  %14 = vpblendvb.ymm %value, %lower, %13
+  %15 = avx2.vcmppd.ymm %14, %upper, 30
+  %result = vpblendvb.ymm %14, %upper, %15
+  return %result
+}
+
+// ====
+// RUN: emit source-low target=x86:avx512 output=low
+
+// A feature overlay without FP16 must leave comparisons and extrema to the
+// exact widening path, including operations with relaxed NaN/zero semantics.
+x86.target<avx512> @target {features = [-avx512fp16]}
+
+func.def target(@target) @half_without_native(%lhs: f16, %rhs: f16) -> (f16, i1) {
+  %minimum = scalar.minnumf<nnan|nsz> %lhs, %rhs : f16
+  %less = scalar.cmpf olt, %lhs, %rhs : f16
+  func.return %minimum, %less : f16, i1
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (f16, f16) -> (f16, i1)}) @half_without_native(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
+  %17 = vmovd.xmm.gpr32 %lhs
+  %18 = avx512.vcvtph2ps.xmm.xmm %17
+  %19 = vmovd.xmm.gpr32 %rhs
+  %20 = avx512.vcvtph2ps.xmm.xmm %19
+  %21 = vminss.xmm %18, %20
+  %22 = avx512.vcvtps2ph.xmm.xmm %21, 0
+  %minimum = vmovd.gpr32.xmm %22
+  %24 = avx2.vcmpps.xmm %18, %20, 17
+  %25 = vmovd.gpr32.xmm %24
+  %less = and.imm.gpr32 %25 {imm32 = 1}
+  return %minimum, %less
+}
+
+// ====
+// RUN: emit source-low target=x86:avx512 output=low
+
+x86.target<avx512> @target {features = [-avx512fp16]}
+
+func.def target(@target) @half_vector_without_native(%lhs: vector<4xf16>, %rhs: vector<4xf16>) -> (vector<4xf16>) {
+  %maximum = vector.maxnumf<nnan|nsz> %lhs, %rhs : vector<4xf16>
+  func.return %maximum : vector<4xf16>
+}
+
+// ----
+low.func.def target<x86.avx512_features.core>(@target) abi(object_function) abi_layout({signature = (vector<4xf16>, vector<4xf16>) -> (vector<4xf16>)}) @half_vector_without_native(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %36 = vpextrw.xmm %lhs, 0
+  %37 = vpextrw.xmm %rhs, 0
+  %38 = vmovd.xmm.gpr32 %36
+  %39 = avx512.vcvtph2ps.xmm.xmm %38
+  %40 = vmovd.xmm.gpr32 %37
+  %41 = avx512.vcvtph2ps.xmm.xmm %40
+  %42 = vmaxss.xmm %39, %41
+  %43 = avx512.vcvtps2ph.xmm.xmm %42, 0
+  %44 = vmovd.gpr32.xmm %43
+  %45 = vpextrw.xmm %lhs, 1
+  %46 = vpextrw.xmm %rhs, 1
+  %47 = vmovd.xmm.gpr32 %45
+  %48 = avx512.vcvtph2ps.xmm.xmm %47
+  %49 = vmovd.xmm.gpr32 %46
+  %50 = avx512.vcvtph2ps.xmm.xmm %49
+  %51 = vmaxss.xmm %48, %50
+  %52 = avx512.vcvtps2ph.xmm.xmm %51, 0
+  %53 = vmovd.gpr32.xmm %52
+  %54 = vpextrw.xmm %lhs, 2
+  %55 = vpextrw.xmm %rhs, 2
+  %56 = vmovd.xmm.gpr32 %54
+  %57 = avx512.vcvtph2ps.xmm.xmm %56
+  %58 = vmovd.xmm.gpr32 %55
+  %59 = avx512.vcvtph2ps.xmm.xmm %58
+  %60 = vmaxss.xmm %57, %59
+  %61 = avx512.vcvtps2ph.xmm.xmm %60, 0
+  %62 = vmovd.gpr32.xmm %61
+  %63 = vpextrw.xmm %lhs, 3
+  %64 = vpextrw.xmm %rhs, 3
+  %65 = vmovd.xmm.gpr32 %63
+  %66 = avx512.vcvtph2ps.xmm.xmm %65
+  %67 = vmovd.xmm.gpr32 %64
+  %68 = avx512.vcvtph2ps.xmm.xmm %67
+  %69 = vmaxss.xmm %66, %68
+  %70 = avx512.vcvtps2ph.xmm.xmm %69, 0
+  %71 = vmovd.gpr32.xmm %70
+  %72 = vmovd.xmm.gpr32 %44
+  %73 = vpinsrw.xmm %72, %53, 1
+  %74 = vpinsrw.xmm %73, %62, 2
+  %maximum = vpinsrw.xmm %74, %71, 3
+  return %maximum
+}

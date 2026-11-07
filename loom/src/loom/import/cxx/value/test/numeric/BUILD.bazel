@@ -25,6 +25,7 @@ loom_check_test_suite(
         "constexpr_bitcast_cleanup.cxx-test",
         "constexpr_bitcast_invalid.cxx-test",
         "exponent.cxx-test",
+        "exponentials.cxx-test",
         "fastmath.cxx-test",
         "fastmath_invalid.cxx-test",
         "float16.cxx-test",
