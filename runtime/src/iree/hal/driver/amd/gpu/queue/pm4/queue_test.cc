@@ -367,7 +367,7 @@ class KernelQueueTest : public MemoryBackendTest {
             break;
           case 0x46:  // EVENT_WRITE joins preceding shader work.
             EXPECT_EQ(length, 2u);
-            EXPECT_EQ(words[cursor + 1], 0x407u);
+            EXPECT_EQ(words[cursor + 1], 0x80000407u);
             break;
           case 0x50:  // Zero-byte DMA_DATA joins preceding DMA work.
             EXPECT_EQ(length, 7u);
