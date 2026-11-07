@@ -241,7 +241,9 @@ iree_status_t iree_async_proactor_create_io_uring(
   if (iree_status_is_ok(status) && proactor->buffer_table) {
     bool supports_buffer_clone = false;
     status = iree_async_proactor_io_uring_probe_buffer_clone(
-        &proactor->ring, &supports_buffer_clone);
+        &proactor->ring, buffer_ring_probe_page,
+        iree_io_uring_sparse_table_capacity(proactor->buffer_table),
+        &supports_buffer_clone);
     if (supports_buffer_clone) {
       proactor->kernel_capabilities |=
           IREE_ASYNC_PROACTOR_CAPABILITY_CONCURRENT_BUFFER_REGISTRATION;

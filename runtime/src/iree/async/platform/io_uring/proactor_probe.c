@@ -59,8 +59,59 @@ iree_status_t iree_async_proactor_io_uring_probe_buffer_ring(
   return iree_ok_status();
 }
 
+// Tagged resource removal posts its CQE synchronously when no I/O borrows it.
+// This observes the actual replacement contract without binding an R_DISABLED
+// ring to this thread or submitting any I/O during construction.
+static int iree_async_proactor_io_uring_probe_clone_suffix(
+    iree_io_uring_ring_t* ring, int source_fd, void* probe_page,
+    uint32_t table_capacity, bool* out_preserved) {
+  *out_preserved = false;
+  const uint64_t retirement_tag = UINT64_MAX;
+  struct iovec buffer = {probe_page, 1};
+  iree_io_uring_rsrc_update2_t update = {
+      .offset = table_capacity - 1,
+      .data = (uint64_t)(uintptr_t)&buffer,
+      .tags = (uint64_t)(uintptr_t)&retirement_tag,
+      .nr = 1,
+  };
+  int result = iree_io_uring_ring_register(
+      ring, IREE_IORING_REGISTER_BUFFERS_UPDATE, &update, sizeof(update));
+  if (result < 0) {
+    return result;
+  }
+  iree_io_uring_clone_buffers_t clone = {
+      .src_fd = (uint32_t)source_fd,
+      .flags = IREE_IORING_REGISTER_DST_REPLACE,
+      .nr = 1,
+  };
+  result = iree_io_uring_ring_register(ring, IREE_IORING_REGISTER_CLONE_BUFFERS,
+                                       &clone, 1);
+  if (result < 0) {
+    return result;
+  }
+  *out_preserved = !iree_io_uring_ring_cq_ready(ring);
+
+  // Both kernel behaviors now produce exactly one retirement notification:
+  // during the clone if its suffix was lost, or during this explicit clear.
+  memset(&buffer, 0, sizeof(buffer));
+  update.tags = 0;
+  result = iree_io_uring_ring_register(
+      ring, IREE_IORING_REGISTER_BUFFERS_UPDATE, &update, sizeof(update));
+  if (result < 0) {
+    return result;
+  }
+  iree_io_uring_cqe_t* completion = iree_io_uring_ring_peek_cqe(ring);
+  if (!completion || completion->user_data != retirement_tag ||
+      completion->res != 0) {
+    return -EIO;
+  }
+  iree_io_uring_ring_cq_advance(ring, 1);
+  return 0;
+}
+
 iree_status_t iree_async_proactor_io_uring_probe_buffer_clone(
-    iree_io_uring_ring_t* ring, bool* out_supported) {
+    iree_io_uring_ring_t* ring, void* probe_page, uint16_t table_capacity,
+    bool* out_supported) {
   *out_supported = false;
   // Match the caller-side pin owner: no mapped SQ/CQ or SINGLE_ISSUER binding.
   iree_io_uring_params_t parameters = {0};
@@ -92,11 +143,25 @@ iree_status_t iree_async_proactor_io_uring_probe_buffer_clone(
     result = iree_io_uring_ring_register(
         ring, IREE_IORING_REGISTER_CLONE_BUFFERS, &clone, 1);
   }
+  const bool unavailable = result == -EINVAL || result == -ENOSYS ||
+                           result == -EOPNOTSUPP || result == -EPERM ||
+                           result == -EACCES;
+  if (result >= 0) {
+    bool preserves_suffix = false;
+    result = iree_async_proactor_io_uring_probe_clone_suffix(
+        ring, source_fd, probe_page, table_capacity, &preserves_suffix);
+    if (result >= 0 && !preserves_suffix) {
+      // Reuse the probe's empty ring for metadata-only composition. Fixed
+      // kernels need neither the descriptor nor additional attachment calls.
+      ring->registration.buffer_clone_capacity = table_capacity;
+      ring->registration.buffer_clone_scratch_fd = source_fd;
+      source_fd = -1;
+    }
+  }
   if (source_fd >= 0) {
     close(source_fd);
   }
-  if (result == -EINVAL || result == -ENOSYS || result == -EOPNOTSUPP ||
-      result == -EPERM || result == -EACCES) {
+  if (unavailable) {
     return iree_ok_status();
   }
   if (result < 0) {

@@ -10,6 +10,7 @@
 # kernels by returning IREE_STATUS_UNAVAILABLE from the create function.
 
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
+load("//runtime/build_tools/bazel:cc_benchmark.bzl", "iree_runtime_cc_benchmark")
 load("//runtime/build_tools/bazel:cc_test.bzl", "iree_runtime_cc_test")
 
 package(
@@ -135,6 +136,20 @@ iree_runtime_cc_library(
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
+    ],
+)
+
+iree_runtime_cc_benchmark(
+    name = "uring_registration_benchmark",
+    srcs = ["uring_registration_benchmark.cc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    deps = [
+        ":defs",
+        ":sparse_table",
+        ":uring",
+        ":uring_registration",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:benchmark_main",
     ],
 )
 

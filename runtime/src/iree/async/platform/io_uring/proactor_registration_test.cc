@@ -722,6 +722,88 @@ INSTANTIATE_TEST_SUITE_P(
       return "";
     });
 
+class PreparedSlotReuseTest : public FileRegistrationTest {
+ protected:
+  void SetUp() override {
+    FileRegistrationTest::SetUp();
+    if (HasFatalFailure() || IsSkipped()) {
+      return;
+    }
+    IREE_ASSERT_OK(iree_async_proactor_prepare_buffer(
+        proactor_, &upper_registration_state_,
+        iree_make_byte_span(static_cast<uint8_t*>(mapping_) + page_size_,
+                            page_size_),
+        IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+            IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+        &upper_entry_));
+    ASSERT_GT(upper_entry_->region->handles.iouring.base_buffer_index,
+              region_->handles.iouring.base_buffer_index);
+    Completion completion;
+    iree_async_proactor_attach_buffer(
+        proactor_, upper_entry_, {Completion::RecordRegistration, &completion});
+    ASSERT_NO_FATAL_FAILURE(Wait(completion));
+    upper_attached_ = true;
+  }
+
+  void TearDown() override {
+    if (upper_attached_) {
+      Completion completion;
+      iree_async_proactor_detach_buffer(
+          proactor_, upper_entry_,
+          {Completion::RecordRegistration, &completion});
+      Wait(completion);
+    }
+    iree_async_buffer_registration_state_deinitialize(
+        &upper_registration_state_);
+    FileRegistrationTest::TearDown();
+  }
+
+  // Independently owned higher slot remains attached across lower-slot reuse.
+  iree_async_buffer_registration_state_t upper_registration_state_ = {};
+  // Borrowed entry owned by |upper_registration_state_|.
+  iree_async_buffer_registration_entry_t* upper_entry_ = nullptr;
+  // Successful attachment requires explicit detachment before releasing pins.
+  bool upper_attached_ = false;
+};
+
+TEST_P(PreparedSlotReuseTest, LowerReattachmentPreservesHigherSlot) {
+  auto* lower_entry = prepared_entry_;
+  ASSERT_NO_FATAL_FAILURE(DetachPreparedBuffer());
+  Completion completion;
+  iree_async_proactor_attach_buffer(
+      proactor_, lower_entry, {Completion::RecordRegistration, &completion});
+  ASSERT_NO_FATAL_FAILURE(Wait(completion));
+  prepared_entry_ = lower_entry;
+
+  // Both views must still reach the original pages without faulting them back
+  // into the host page table. The higher view must not become a stale slot.
+  memset(mapping_, 0xA9, mapping_length_);
+  ASSERT_NO_FATAL_FAILURE(DiscardCpuTranslations());
+  for (iree_async_region_t* region : {region_, upper_entry_->region}) {
+    iree_async_file_write_operation_t write = {};
+    write.base.type = IREE_ASYNC_OPERATION_TYPE_FILE_WRITE;
+    write.file = file_;
+    write.buffer = iree_async_span_make(region, 0, page_size_);
+    ASSERT_NO_FATAL_FAILURE(Run(&write.base));
+    ASSERT_EQ(write.bytes_written, page_size_);
+    std::vector<uint8_t> actual(page_size_);
+    ASSERT_EQ(pread(file_->primitive.value.fd, actual.data(), actual.size(), 0),
+              actual.size());
+    EXPECT_EQ(actual, std::vector<uint8_t>(page_size_, 0xA9));
+    ASSERT_NO_FATAL_FAILURE(ExpectNoCpuTranslations());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PollingOwner, PreparedSlotReuseTest,
+    ::testing::Values(FileRegistrationKind::kPreparedBuffer,
+                      FileRegistrationKind::kPreparedBufferCrossThread),
+    [](const auto& info) {
+      return info.param == FileRegistrationKind::kPreparedBuffer
+                 ? "SameThread"
+                 : "CrossThread";
+    });
+
 class SharedPreparedRegistrationTest : public FileRegistrationTest {
  protected:
   void TearDown() override {
