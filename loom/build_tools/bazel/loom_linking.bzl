@@ -42,6 +42,7 @@ def _declare_relocatable_module(
         mnemonic,
         progress_message,
         data = [],
+        dependency_report_suffix = "",
         input_format = "",
         inputopts = []):
     dependencies = _collect_dependency_modules(dependency_infos)
@@ -51,7 +52,7 @@ def _declare_relocatable_module(
     )
     module = ctx.actions.declare_file(output_stem + ".loombc")
     dependency_report = ctx.actions.declare_file(
-        output_stem + ".dependencies.json",
+        output_stem + dependency_report_suffix + ".dependencies.json",
     )
     args = ctx.actions.args()
     args.add("--mode=merge")

@@ -120,7 +120,7 @@ def _test_library_keeps_dependency_module_separate_impl(env, target):
         env,
         action.argv,
         "--dependency-report=",
-        "library_consumer.dependencies.json",
+        "library_consumer.cache_probe_attempt_10.dependencies.json",
     )
     _expect_arg_with_prefix_and_suffix(
         env,
@@ -143,7 +143,11 @@ def _test_library_keeps_dependency_module_separate_impl(env, target):
     reports = target[OutputGroupInfo].dependency_reports.to_list()
     if len(reports) != 1:
         env.fail("expected one dependency report, got %r" % reports)
-    _expect_basename(env, reports, "library_consumer.dependencies.json")
+    _expect_basename(
+        env,
+        reports,
+        "library_consumer.cache_probe_attempt_10.dependencies.json",
+    )
 
 def _test_deps_only_library_propagates_dependencies(name, **kwargs):
     if native.existing_rule("library_aggregate_test"):

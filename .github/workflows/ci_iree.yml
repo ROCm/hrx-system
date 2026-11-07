@@ -492,6 +492,7 @@ jobs:
             command: iree-bazel-repository-build
             host_toolchain: clang-cl
             platform_coverage: true
+            remote_cache: true
             runner: azure-windows-scale-rocm
             target_selector: gfx11-generic
           - name: Clang CL / Fastbuild / Shared Tools
@@ -676,10 +677,16 @@ jobs:
             Write-Output "ROCm CI Bazel cache: $($cacheStatus | ConvertTo-Json -Compress)"
             "build --config=rocm-ci-cache" |
               Out-File -FilePath .bazelrc.local -Encoding ascii -Append
-            if ($env:IREE_CI_BAZEL_REMOTE_UPLOAD -ne 'true') {
-              "build --remote_upload_local_results=false" |
-                Out-File -FilePath .bazelrc.local -Encoding ascii -Append
-            }
+            "build --remote_upload_local_results=false" |
+              Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+            "build --nouse_action_cache" |
+              Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+            # Preserve every action event so the diagnostic mnemonic count is
+            # exhaustive instead of Bazel's default slim-profile sample.
+            "build --record_full_profiler_data" |
+              Out-File -FilePath .bazelrc.local -Encoding ascii -Append
+            "build --noslim_profile" |
+              Out-File -FilePath .bazelrc.local -Encoding ascii -Append
           }
           if ("${{ matrix.kind }}" -eq "repository") {
             if ("${{ matrix.host_toolchain }}" -eq "clang-cl") {

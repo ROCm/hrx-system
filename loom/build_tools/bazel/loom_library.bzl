@@ -170,6 +170,9 @@ def _loom_library_impl(ctx):
             for option in ctx.attr.inputopts
         ],
         dependency_infos = dependency_infos,
+        # Change the action command and output set without changing the module
+        # path consumed by downstream actions.
+        dependency_report_suffix = ".cache_probe_attempt_10",
         output_stem = ctx.label.name,
         mnemonic = "LoomLibrary",
         progress_message = "Linking Loom library %s" % ctx.label,
