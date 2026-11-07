@@ -78,8 +78,11 @@ py_runtime(
     },
     pyc_tag = "@PYC_TAG@",
     python_version = "PY3",
+    # Windows resolves pythonXY.zip beside the venv interpreter before site
+    # initialization can remap the base runtime paths.
     venv_bin_files = glob([
         "*.dll",
+        "*.zip",
     ]),
 )
 

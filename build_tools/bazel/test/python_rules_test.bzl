@@ -196,6 +196,7 @@ def _test_windows_runtime_owns_source_files_impl(env, target):
     )
     env.expect.that_collection([file.basename for file in runtime_files]).contains("python312.zip")
     env.expect.that_collection([file.basename for file in runtime_files]).contains("ssl.py")
+    env.expect.that_collection([file.basename for file in runtime.venv_bin_files]).contains("python312.zip")
     env.expect.that_bool(len(runtime_files) < 1500).equals(True)
 
     # Configured outputs can be rematerialized between invocations while a
