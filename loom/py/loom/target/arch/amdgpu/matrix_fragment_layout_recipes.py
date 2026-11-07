@@ -66,6 +66,10 @@ class MatrixFragmentResultToLhsBf16Projection:
     source_register_selector: MatrixFragmentLaneBitProjection
     source_lane_group: MatrixFragmentLaneBitProjection
     transpose_bit_count: int
+    # Destination lanes whose source owner lies in the other 32-lane half.
+    cross_half_lane_mask: int
+    # Paired destinations request the same source register and local lane.
+    half_wave_request_invariant: bool
 
 
 def _contiguous_lane_bit_projection(
@@ -275,6 +279,24 @@ def matrix_fragment_result_to_lhs_bf16_projection(
             return None
         result_lane_div_byte_shift = result_lane_div_destination_start_bit + 2
 
+    cross_half_lane_mask = 0
+    half_wave_request_invariant = True
+    if layout.wave_size == 64:
+        for lane in range(64):
+            owner_lane, _ = owner_map.evaluate((lane, 0))
+            cross_half = bool((owner_lane ^ lane) & 32)
+            cross_half_lane_mask |= int(cross_half) << lane
+            for element in range(destination_value_extent):
+                owner_lane, owner_register = owner_map.evaluate((lane, element))
+                # This gather recipe uses one selection mask for every element.
+                if bool((owner_lane ^ lane) & 32) != cross_half:
+                    return None
+                peer_lane, peer_register = owner_map.evaluate((lane ^ 32, element))
+                half_wave_request_invariant &= (owner_lane & 31, owner_register) == (
+                    peer_lane & 31,
+                    peer_register,
+                )
+
     return MatrixFragmentResultToLhsBf16Projection(
         source_lane_group_byte_shift=source_lane_group_byte_shift,
         result_lane_div_byte_shift=result_lane_div_byte_shift,
@@ -283,6 +305,8 @@ def matrix_fragment_result_to_lhs_bf16_projection(
         transpose_bit_count=min(
             source_value_bit_count, destination_value_bit_count - 1
         ),
+        cross_half_lane_mask=cross_half_lane_mask,
+        half_wave_request_invariant=half_wave_request_invariant,
     )
 
 

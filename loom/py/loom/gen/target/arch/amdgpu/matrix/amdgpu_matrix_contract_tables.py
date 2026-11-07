@@ -1153,6 +1153,8 @@ def _emit_result_to_lhs_repack_projections() -> str:
                 f"        .source_register_selector_right_shift = UINT8_C({projection.source_register_selector.right_shift}),",
                 f"        .source_lane_group_right_shift = UINT8_C({projection.source_lane_group.right_shift}),",
                 f"        .transpose_bit_count = UINT8_C({projection.transpose_bit_count}),",
+                f"        .half_wave_request_invariant = {'true' if projection.half_wave_request_invariant else 'false'},",
+                f"        .cross_half_lane_mask = UINT64_C(0x{projection.cross_half_lane_mask:016x}),",
                 f"        .native_transition_facts = {native_transition_reference},",
                 "    },",
             ]

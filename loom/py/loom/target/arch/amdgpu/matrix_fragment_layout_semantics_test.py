@@ -19,17 +19,71 @@ from loom.target.arch.amdgpu.matrix_fragment_layout import (
 )
 from loom.target.arch.amdgpu.matrix_fragment_layout_adaptation import (
     matrix_fragment_native_contraction_facts,
+    matrix_fragment_native_role_layout,
     matrix_fragment_packed_element_axis,
     matrix_fragment_role_storage_coordinate_map,
 )
 from loom.target.arch.amdgpu.matrix_fragment_layout_recipes import (
     MatrixFragmentPackedB16PublicationProjection,
     matrix_fragment_packed_b16_publication_projection,
+    matrix_fragment_result_to_lhs_bf16_projection,
 )
 from loom.target.arch.amdgpu.matrix_fragment_layouts import (
     AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY,
 )
+from loom.target.native_contraction_layout import operation_local_coordinate_map
 from loom.target.native_layout_facts import NativeLayoutEvidence
+
+
+def test_result_to_lhs_half_wave_gathers_preserve_every_owner() -> None:
+    mechanisms = set()
+    for layout in AMDGPU_MATRIX_FRAGMENT_LAYOUTS_BY_KEY.values():
+        projection = matrix_fragment_result_to_lhs_bf16_projection(layout)
+        if projection is None:
+            continue
+        source = operation_local_coordinate_map(
+            matrix_fragment_native_role_layout(layout, layout.result)
+        )
+        destination = operation_local_coordinate_map(
+            matrix_fragment_native_role_layout(layout, layout.lhs)
+        )
+        if layout.wave_size == 32:
+            assert projection.cross_half_lane_mask == 0
+            mechanisms.add("direct")
+            continue
+
+        mechanisms.add(
+            "exchange_result"
+            if projection.half_wave_request_invariant
+            else "exchange_source"
+        )
+        for lane in range(64):
+            cross_half = bool(projection.cross_half_lane_mask & (1 << lane))
+            for element in range(layout.lhs.coordinate_element_count):
+                expected = destination.evaluate((lane, element))
+                owner_lane, owner_register = source.evaluate_canonical_inverse(expected)
+                local_lane = (lane & 32) | (owner_lane & 31)
+                local_value = source.evaluate((local_lane, owner_register))
+                # General composition exchanges prepared source registers before
+                # the second gather, preserving this destination's local request.
+                peer_value = source.evaluate((local_lane ^ 32, owner_register))
+                assert (peer_value if cross_half else local_value) == expected, (
+                    layout.key
+                )
+
+                if projection.half_wave_request_invariant:
+                    peer_owner_lane, peer_owner_register = (
+                        source.evaluate_canonical_inverse(
+                            destination.evaluate((lane ^ 32, element))
+                        )
+                    )
+                    peer_lane = ((lane ^ 32) & 32) | (peer_owner_lane & 31)
+                    peer_value = source.evaluate((peer_lane, peer_owner_register))
+                    # Only this class permits exchanging the single gather's result.
+                    assert (peer_value if cross_half else local_value) == expected, (
+                        layout.key
+                    )
+    assert mechanisms == {"direct", "exchange_result", "exchange_source"}
 
 
 def _axis(
