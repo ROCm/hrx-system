@@ -1,0 +1,109 @@
+// RUN: pass specialize-target-callgraph,inline-callables{policy=target},canonicalize
+
+// Construction helpers expand even when cold. Worker helpers use the projected
+// native context and remain calls; repeated uses share that same environment.
+test.target<device> @device
+
+func.def cold @adjust(%value: i32) -> (i32) {
+  %increment = scalar.constant 1 : i32
+  %result = scalar.addi %value, %increment : i32
+  func.return %result : i32
+}
+
+pipeline.def public target(@device) @run(%seed: i32) run(%output: buffer) {
+  %initial = func.call @adjust(%seed) : (i32) -> (i32)
+  pipeline.strand workers([0], [1], [1]) {
+    %first = func.call @adjust(%initial) : (i32) -> (i32)
+    %second = func.call @adjust(%first) : (i32) -> (i32)
+    %origin = index.constant 0 : offset
+    %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+    view.store %second, %view[0] : i32, view<1xi32>
+  }
+}
+
+// ----
+test.target<device> @device
+
+func.def cold @adjust(%value: i32) -> (i32) {
+  %increment = scalar.constant 1 : i32
+  %result = scalar.addi %value, %increment : i32
+  func.return %result : i32
+}
+
+pipeline.def public target(@device) @run(%seed: i32) run(%output: buffer) {
+  %increment = scalar.constant 1 : i32
+  %result = scalar.addi %seed, %increment : i32
+  pipeline.strand workers([0], [1], [1]) {
+    %first = func.call pure @adjust(%result) : (i32) -> (i32)
+    %second = func.call pure @adjust(%first) : (i32) -> (i32)
+    %origin = index.constant 0 : offset
+    %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+    view.store %second, %view[0] : i32, view<1xi32>
+  }
+}
+
+// ====
+
+// An explicitly unresolved worker cannot inherit the container's no-call
+// policy. Its authored noinline contract stays intact until the target binds.
+test.target<device> @device
+
+target.decl @unknown
+
+func.def @write(%output: view<1xi32>, %value: i32) {
+  view.store %value, %output[0] : i32, view<1xi32>
+  func.return
+}
+
+pipeline.def public target(@device) @run(%value: i32) run(%output: buffer) {
+  pipeline.strand target(@unknown) workers([0], [1], [1]) {
+    %origin = index.constant 0 : offset
+    %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+    func.call noinline @write(%view, %value) : (view<1xi32>, i32)
+  }
+}
+
+// ====
+
+// A worker target can be explicit even when the enclosing construction is
+// unbound. Tied semantic boundaries still require early expansion under that
+// worker's ABI; cold does not override required inlining.
+test.target<low_core> @worker
+
+func.def cold @update(%value: i32) -> (%value as i32) {
+  %increment = scalar.constant 1 : i32
+  %result = scalar.addi %value, %increment : i32
+  func.return %result : i32
+}
+
+func.def noinline @write(%output: view<1xi32>, %value: i32) {
+  view.store %value, %output[0] : i32, view<1xi32>
+  func.return
+}
+
+pipeline.def public @run(%value: i32) run(%output: buffer) {
+  pipeline.strand target(@worker) workers([0], [1], [1]) {
+    %origin = index.constant 0 : offset
+    %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+    %updated = func.call @update(%value) : (i32) -> (%value as i32)
+    func.call @write(%view, %updated) : (view<1xi32>, i32)
+  }
+}
+
+// ----
+test.target<low_core> @worker
+
+func.def noinline @write(%output: view<1xi32>, %value: i32) {
+  view.store %value, %output[0] : i32, view<1xi32>
+  func.return
+}
+
+pipeline.def public @run(%value: i32) run(%output: buffer) {
+  pipeline.strand target(@worker) workers([0], [1], [1]) {
+    %origin = index.constant 0 : offset
+    %view = buffer.view %output[%origin] : buffer -> view<1xi32>
+    %increment = scalar.constant 1 : i32
+    %result = scalar.addi %value, %increment : i32
+    func.call @write(%view, %result) : (view<1xi32>, i32)
+  }
+}

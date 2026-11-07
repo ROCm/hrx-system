@@ -25,6 +25,7 @@
 #include "loom/pass/options.h"
 #include "loom/pass/pipeline.h"
 #include "loom/rewrite/callable.h"
+#include "loom/target/execution_scope.h"
 #include "loom/target/facts.h"
 #include "loom/target/function_version.h"
 #include "loom/target/pass_environment.h"
@@ -94,6 +95,15 @@ typedef struct loom_inline_callables_pass_state_t {
   // Materialization budgets for otherwise optional direct calls.
   loom_inline_profitability_options_t profitability;
 } loom_inline_callables_pass_state_t;
+
+struct loom_inline_execution_targets_t {
+  // Worker environments indexed by the plan's immutable reference snapshot.
+  loom_target_execution_scope_table_t scopes;
+  // Cached authored targets used by explicitly targeted regions.
+  loom_symbol_fact_table_t symbol_facts;
+  // Borrowed family-provider registry for the current compiler invocation.
+  const loom_target_environment_t* environment;
+};
 
 static iree_status_t loom_inline_callables_parse_policy(
     iree_string_view_t value, loom_inline_callables_pass_state_t* state) {
@@ -213,20 +223,65 @@ iree_status_t loom_inline_callables_create(loom_pass_t* pass,
 
 static bool loom_inline_target_requires_call_inline(
     const loom_inline_callables_plan_t* state,
-    loom_symbol_id_t caller_symbol_id, loom_call_like_kind_t call_kind,
+    const loom_inline_plan_entry_t* entry, loom_call_like_kind_t call_kind,
     loom_call_like_t call, loom_func_like_t callee) {
   if (!state->options.target_policy) {
     return false;
   }
-  const loom_target_function_version_t* caller_version =
-      loom_target_function_version_snapshot_at(state->options.target_versions,
-                                               caller_symbol_id);
-  if (!caller_version || !caller_version->resolved_target.provider) {
+  loom_resolved_target_t target = {0};
+  if (entry->execution_scope) {
+    const loom_target_execution_scope_t* scope =
+        state->execution_targets->scopes.values[entry->execution_scope - 1];
+    target = (loom_resolved_target_t){scope->provider, scope->facts};
+  } else {
+    const loom_target_function_version_t* caller_version =
+        loom_target_function_version_snapshot_at(state->options.target_versions,
+                                                 entry->source_symbol_id);
+    if (caller_version) {
+      target = caller_version->resolved_target;
+    }
+  }
+  if (!target.provider) {
     return false;
   }
-  return loom_target_provider_select_call_policy(
-             &caller_version->resolved_target, state->module, call_kind, call,
-             callee) == LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+  return loom_target_provider_select_call_policy(&target, state->module,
+                                                 call_kind, call, callee) ==
+         LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
+}
+
+static iree_status_t loom_inline_prepare_execution_target(
+    loom_inline_callables_plan_t* state,
+    const loom_inline_plan_entry_t* entry) {
+  if (state->execution_targets == NULL) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(
+        state->pass->arena, sizeof(*state->execution_targets),
+        (void**)&state->execution_targets));
+    *state->execution_targets = (loom_inline_execution_targets_t){
+        .environment = loom_target_pass_capability_target_environment(
+            loom_target_pass_capability_from_pass(state->pass)),
+    };
+    loom_symbol_fact_table_initialize(&state->execution_targets->symbol_facts,
+                                      state->pass->arena);
+  }
+  const loom_target_function_version_t* caller_version =
+      loom_target_function_version_snapshot_at(state->options.target_versions,
+                                               entry->source_symbol_id);
+  const loom_func_like_t caller =
+      state->symbols[entry->source_symbol_id].function;
+  const loom_target_execution_scope_t inherited = {
+      .witness = loom_func_like_isa(caller) ? loom_func_like_target(caller)
+                                            : loom_symbol_ref_null(),
+      .facts = caller_version ? caller_version->resolved_target.facts : NULL,
+      .provider =
+          caller_version ? caller_version->resolved_target.provider : NULL,
+  };
+  const loom_target_execution_scope_t* scope = NULL;
+  return loom_target_execution_scope_resolve(
+      &state->execution_targets->scopes, state->options.references,
+      entry->execution_scope, state->module,
+      &state->execution_targets->symbol_facts,
+      state->execution_targets->environment, inherited, state->pass->arena,
+      &scope);
 }
 
 static bool loom_inline_policy_is_inline(loom_inline_policy_t policy) {
@@ -532,9 +587,8 @@ static void loom_inline_resolve_entry_policy(
   const bool target_requires_inline =
       (call_kind == LOOM_CALL_LIKE_KIND_SEMANTIC ||
        call_kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL) &&
-      loom_inline_target_requires_call_inline(state, entry->source_symbol_id,
-                                              call_kind, entry->call,
-                                              entry->callee);
+      loom_inline_target_requires_call_inline(state, entry, call_kind,
+                                              entry->call, entry->callee);
   if (target_requires_inline && (callee_noinline || call_noinline)) {
     entry->effective_policy = LOOM_INLINE_POLICY_NOINLINE;
     loom_inline_mark_blocker(entry, LOOM_INLINE_BLOCKER_TARGET_REQUIRES_INLINE);
@@ -678,7 +732,13 @@ static iree_status_t loom_inline_build_plan(
     loom_inline_plan_entry_t* entry = loom_inline_append_entry(
         state, edge->source_symbol_id, edge->execution_scope,
         edge->target_symbol_id, (loom_op_t*)edge->user_op);
-    if (loom_call_like_kind(entry->call) == LOOM_CALL_LIKE_KIND_TEMPLATE) {
+    const loom_call_like_kind_t kind = loom_call_like_kind(entry->call);
+    if (state->options.target_policy && entry->execution_scope &&
+        (kind == LOOM_CALL_LIKE_KIND_SEMANTIC ||
+         kind == LOOM_CALL_LIKE_KIND_LOW_INTERNAL)) {
+      IREE_RETURN_IF_ERROR(loom_inline_prepare_execution_target(state, entry));
+    }
+    if (kind == LOOM_CALL_LIKE_KIND_TEMPLATE) {
       bool eligible = false;
       const loom_inline_callables_eligibility_callback_t callback =
           state->options.template_eligibility;
@@ -693,7 +753,7 @@ static iree_status_t loom_inline_build_plan(
     loom_inline_resolve_entry_policy(state, entry, edge->joins_composition);
     if ((entry->action == LOOM_INLINE_PLAN_ACTION_KEEP ||
          entry->action == LOOM_INLINE_PLAN_ACTION_CANDIDATE) &&
-        loom_call_like_kind(entry->call) == LOOM_CALL_LIKE_KIND_SEMANTIC &&
+        kind == LOOM_CALL_LIKE_KIND_SEMANTIC &&
         entry->source_symbol_id < state->module->symbols.count &&
         loom_inline_scope_inherits_target(state, entry->execution_scope)) {
       // A retained semantic invocation inherits its caller's environment even

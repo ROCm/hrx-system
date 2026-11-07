@@ -10,6 +10,7 @@
 
 #include "loom/ops/test/registry.h"
 #include "loom/pass/test/registry.h"
+#include "loom/target/facts.h"
 #include "loom/target/low_descriptor_registry_core_test.h"
 #include "loom/target/test/lower/registry.h"
 #include "loom/target/test/target_records.h"
@@ -333,7 +334,23 @@ static void loom_test_math_policy_registry_initialize(
       kEntries, IREE_ARRAYSIZE(kEntries), out_registry);
 }
 
+// Device construction has no native callable ABI. Its independently executing
+// low_core workers do, so source policy must distinguish those environments.
+static loom_target_call_policy_t loom_test_select_call_policy(
+    const loom_resolved_target_t* target, const loom_module_t* module,
+    loom_call_like_kind_t kind, loom_call_like_t call,
+    loom_func_like_t callee) {
+  (void)module;
+  (void)kind;
+  (void)call;
+  (void)callee;
+  return target->facts->selector == LOOM_TEST_TARGET_KIND_DEVICE
+             ? LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE
+             : LOOM_TARGET_CALL_POLICY_DIRECT;
+}
+
 const loom_target_provider_t loom_test_target_provider = {
+    .select_call_policy = loom_test_select_call_policy,
     .register_context = loom_test_dialect_register,
     .initialize_low_descriptor_registry =
         loom_target_core_test_low_descriptor_registry_initialize,

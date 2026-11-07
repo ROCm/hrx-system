@@ -109,6 +109,7 @@ loom_cc_library(
         "//loom/src/loom/pass:types",
         "//loom/src/loom/pass/test:registry",
         "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/target:facts",
         "//loom/src/loom/target:low_descriptor_registry_core_test",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/test/lower:registry",
