@@ -220,6 +220,8 @@ struct iree_hal_amd_gpu_pm4_queue_t {
   } completed;
   // Native host-visible records, immutable after preparation.
   iree_hal_amd_fabric_memory_t control;
+  // Device-only barrier state reused by ordered direct cooperative grids.
+  iree_hal_amd_gpu_grid_storage_t grid;
   // Indexed native record geometry shared by publisher and observer.
   iree_hal_amd_gpu_pm4_retirement_ring_t retirement;
   // Fixed host actions and inline captures parallel to native slots.

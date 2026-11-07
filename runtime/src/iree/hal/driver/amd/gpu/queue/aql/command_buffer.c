@@ -492,6 +492,11 @@ static iree_status_t iree_hal_amd_gpu_aql_command_dispatch(
             executable, token, &geometry, flags));
     buffer->program->required_features |=
         IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH;
+    if (!buffer->pool->grid_sync) {
+      // Grid barriers mutate shader-atomic state. Keep that state in each
+      // resident instance instead of copying it to the host control upload.
+      buffer->requires_device_publication = true;
+    }
   }
   const bool indirect = iree_hal_dispatch_uses_indirect_parameters(flags);
   const bool external_arguments =

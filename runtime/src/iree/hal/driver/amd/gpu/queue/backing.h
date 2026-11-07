@@ -39,6 +39,29 @@ typedef struct iree_hal_amd_gpu_argument_storage_t {
   iree_allocator_t host_allocator;
 } iree_hal_amd_gpu_argument_storage_t;
 
+// One device-only grid record for ordered direct cooperative dispatches. The
+// command processor initializes it after the preceding grid completes; shaders
+// own it until the next ordered initialization. No CPU mapping is required.
+typedef struct iree_hal_amd_gpu_grid_storage_t {
+  // Owned resident backing, released only after the native queue stops.
+  amdf_memory_t* memory;
+  // Cached address in the queue's native device domain.
+  uint64_t address;
+} iree_hal_amd_gpu_grid_storage_t;
+
+// Qualifies device-scope shader LOAD/ADD before allocating one grid record from
+// the queue's resident read/write policy. Failure leaves out_storage empty.
+// Ordinary and hardware-GWS queues do not acquire this backing.
+iree_status_t iree_hal_amd_gpu_grid_storage_initialize(
+    iree_hal_amd_gpu_context_t* context,
+    const iree_hal_amd_fabric_memory_options_t* options,
+    iree_hal_amd_gpu_grid_storage_t* out_storage);
+
+// Releases the backing after native queue shutdown.
+void iree_hal_amd_gpu_grid_storage_deinitialize(
+    iree_hal_amd_gpu_context_t* context,
+    iree_hal_amd_gpu_grid_storage_t* storage);
+
 typedef struct iree_hal_amd_gpu_signal_storage_t {
   // Next backing, retained while active or referenced by native readers.
   struct iree_hal_amd_gpu_signal_storage_t* next;

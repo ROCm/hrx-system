@@ -23,6 +23,44 @@ TEST(AqlGridSyncTest, InitializationRunsOneOrderedWorkitemFromExistingState) {
   EXPECT_EQ(memcmp(packet.words, expected.data(), sizeof(packet)), 0);
 }
 
+TEST(AqlGridSyncTest, ResidentInitializationHasOneWriterAndADeviceHandoff) {
+  constexpr uint32_t kGuard = 0xcafebabe;
+  const iree_hal_amd_gpu_grid_sync_t grid = {
+      .grid_count = 1,
+      .total_workitem_count = 256,
+      .workgroup_count = 4,
+  };
+  for (uint32_t xcc_count : {1u, 8u}) {
+    SCOPED_TRACE(xcc_count);
+    std::array<uint32_t, 20> words;
+    words.fill(kGuard);
+    const auto packet = iree_hal_amd_gpu_aql_grid_sync_write_packet(
+        xcc_count, UINT64_C(0x123456780000), &grid, UINT64_C(0x432100002000),
+        words.data() + 1);
+    const uint32_t prefix = xcc_count > 1 ? 2 : 0;
+    const std::array<uint32_t, 16> expected_packet = {
+        0x11500, 0xc0023f00, 0x2000, 0x4321, 0x00800010u + prefix,
+        10,      0,          0,      0,      0,
+        0,       0,          0,      0,      0,
+        0};
+    EXPECT_EQ(memcmp(packet.words, expected_packet.data(), sizeof(packet)), 0);
+    if (prefix) {
+      EXPECT_EQ(words[1], 0xc0002300u);
+      EXPECT_EQ(words[2], 0x01000010u);
+    }
+    const std::array<uint32_t, 16> expected_write = {
+        0xc00e3700, 0x00100200, 0x56780000, 0x1234, 0, 0, 0, 1,
+        0,          0,          256,        0,      0, 0, 4, 0};
+    EXPECT_EQ(memcmp(words.data() + 1 + prefix, expected_write.data(),
+                     sizeof(expected_write)),
+              0);
+    EXPECT_EQ(words.front(), kGuard);
+    for (size_t i = 1 + prefix + expected_write.size(); i < words.size(); ++i) {
+      EXPECT_EQ(words[i], kGuard);
+    }
+  }
+}
+
 class AqlDispatchTest : public ::testing::Test {
  protected:
   iree_status_t Prepare(

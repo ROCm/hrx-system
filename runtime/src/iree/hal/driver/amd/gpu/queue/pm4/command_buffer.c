@@ -710,8 +710,15 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
     buffer->pending_barrier.cache_control |= buffer->profile.shader;
   }
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_flush_barrier(buffer));
-  const iree_hal_amd_gpu_pm4_dispatch_storage_t storage =
+  iree_hal_amd_gpu_pm4_dispatch_storage_t storage =
       iree_hal_amd_gpu_pm4_dispatch_storage(function, flags);
+  const uint32_t grid_sync_offset = (storage.length + 7u) & ~7u;
+  if (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
+    // Recorded grid state belongs to each resident replay instance, alongside
+    // its arguments. Direct dispatches instead reuse queue-owned device state.
+    storage.alignment = iree_max(storage.alignment, 8u);
+    storage.length = grid_sync_offset + sizeof(iree_hal_amd_gpu_grid_sync_t);
+  }
   uint32_t argument_offset = 0;
   void* arguments = NULL;
   if (storage.length) {
@@ -719,9 +726,12 @@ static iree_status_t iree_hal_amd_gpu_pm4_command_dispatch(
         &buffer->recording.storage, storage.length, storage.alignment,
         &argument_offset, &arguments));
     iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
-        function, &dispatch, constants, NULL, flags, 0, arguments);
+        function, &dispatch, constants, NULL, flags, arguments);
     if (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
-      const uint32_t grid_offset = argument_offset + storage.grid_sync_offset;
+      iree_hal_amd_gpu_dispatch_emplace_grid_sync(
+          function->base.kernarg, &dispatch.geometry, 0, arguments,
+          (void*)((uint8_t*)arguments + grid_sync_offset));
+      const uint32_t grid_offset = argument_offset + grid_sync_offset;
       if (function->base.kernarg->requirements &
           IREE_HAL_AMD_GPU_KERNARG_REQUIREMENT_GRID_SYNC) {
         IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_command_pointer(

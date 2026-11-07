@@ -821,6 +821,8 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
                    (dispatch_request->launch.geometry.workgroup_count[0] &&
                     dispatch_request->launch.geometry.workgroup_count[1] &&
                     dispatch_request->launch.geometry.workgroup_count[2]));
+  const bool cooperative = dispatch && (dispatch_request->flags &
+                                        IREE_HAL_DISPATCH_FLAG_COOPERATIVE);
   const bool indirect =
       iree_hal_dispatch_uses_indirect_arguments(dispatch_request->flags);
   const iree_hal_amd_gpu_pm4_dispatch_storage_t argument_storage =
@@ -876,7 +878,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
     after.cache_control |= queue->options.barriers.release;
   }
   if (dispatch) {
-    if (dispatch_request->flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
+    if (cooperative) {
       // Exclusive queue admission prevents competition from other queues;
       // these joins also prevent two resident grids on this queue competing
       // for the resources each was independently admitted to occupy.
@@ -918,6 +920,8 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
       &queue->producer.scratch, scratch_required, queue->kernel != NULL);
   const uint32_t body_words =
       request->native_wait_count * 7 + launch_words + scratch_words +
+      (cooperative ? 4 + sizeof(iree_hal_amd_gpu_grid_sync_t) / sizeof(uint32_t)
+                   : 0) +
       (sample_length ? 16 : 0) +
       iree_hal_amd_gpu_pm4_barrier_word_count(before) +
       iree_hal_amd_gpu_pm4_barrier_tail_word_count(after) +
@@ -1000,7 +1004,7 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
   if (argument_storage.length) {
     iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
         function, &dispatch_request->launch, dispatch_request->constants,
-        addresses, dispatch_request->flags, argument_address,
+        addresses, dispatch_request->flags,
         arguments->memory.contents.data + argument_offset);
   }
   uint64_t packet_address = 0;
@@ -1024,6 +1028,20 @@ iree_hal_amd_gpu_pm4_publish_dispatch(
           words, request->waits[i].signal->device_address, 1, UINT32_MAX,
           IREE_HAL_AMD_GPU_PM4_COMPARISON_EQUAL);
     }
+  }
+  if (cooperative) {
+    // Reuse the record on the device timeline. The existing mandatory acquire
+    // follows the confirmed TC/L2 write, making it visible to the next grid.
+    words = iree_hal_amd_gpu_pm4_emit_compute_flush(words);
+    before.execution &= ~IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE;
+    iree_hal_amd_gpu_grid_sync_t grid;
+    iree_hal_amd_gpu_dispatch_emplace_grid_sync(
+        function->base.kernarg, &dispatch_request->launch.geometry,
+        queue->grid.address, arguments->memory.contents.data + argument_offset,
+        &grid);
+    words = iree_hal_amd_gpu_pm4_emit_write(words, queue->grid.address,
+                                            sizeof(grid) / sizeof(uint32_t),
+                                            (const uint32_t*)&grid);
   }
   words = iree_hal_amd_gpu_pm4_barrier_emit(words, before);
   words = iree_hal_amd_gpu_pm4_scratch_emit(words, &queue->producer.scratch,
@@ -2789,6 +2807,11 @@ iree_status_t iree_hal_amd_gpu_pm4_queue_create(
       &queue->captures, options->capture_block_count);
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_gpu_pm4_prepare_native(queue);
+  }
+  if (iree_status_is_ok(status) &&
+      (params->features & IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH)) {
+    status = iree_hal_amd_gpu_grid_storage_initialize(
+        context, options->scratch_memory, &queue->grid);
   }
   if (iree_status_is_ok(status)) {
     *out_queue = &queue->base;
