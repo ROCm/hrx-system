@@ -8,7 +8,8 @@
 #define IREE_HAL_DRIVER_AMD_GPU_QUEUE_FILE_STAGING_H_
 
 #include "iree/hal/driver/amd/fabric/file_transfer.h"
-#include "iree/hal/driver/amd/gpu/queue/sdma/queue.h"
+#include "iree/hal/driver/amd/gpu/completion.h"
+#include "iree/hal/driver/amd/gpu/context.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,6 +18,14 @@ extern "C" {
 typedef struct iree_hal_amd_gpu_file_staging_t iree_hal_amd_gpu_file_staging_t;
 typedef struct iree_hal_amd_gpu_file_staging_bucket_t
     iree_hal_amd_gpu_file_staging_bucket_t;
+
+// Submits a dependency-ready native copy on the originating file queue. The
+// staging request owns both operands through the final retired callback.
+// Success may complete inline; failure retains nothing and invokes no callback.
+typedef iree_status_t (*iree_hal_amd_gpu_file_staging_copy_fn_t)(
+    void* user_data, uint64_t source, uint64_t target, uint64_t length,
+    iree_hal_memory_effects_t before, iree_hal_memory_effects_t after,
+    iree_hal_amd_gpu_retirement_callback_t callback);
 
 // Placed staging use for one complete file operation. Physical ranges submit
 // serially through this state without releasing its prepared proactor view.
@@ -34,14 +43,16 @@ typedef struct iree_hal_amd_gpu_file_staging_request_t {
   iree_hal_amd_gpu_file_staging_bucket_t* bucket;
   // Borrowed file and buffer facts, immutable through the entire operation.
   const iree_hal_amd_fabric_file_transfer_t* transfer;
+  // Exact originating queue's native copy submission, stable through release.
+  iree_hal_amd_gpu_file_staging_copy_fn_t copy;
+  // Borrowed copy executor, owned by the enclosing file operation's queue.
+  void* copy_user_data;
   // Next unassigned transfer-relative byte.
   uint64_t cursor;
   // Exclusive transfer-relative end of this physical range.
   uint64_t end;
   // GPU address corresponding to transfer-relative byte zero.
   uint64_t device_address;
-  // Native destination's already-qualified SDMA visibility effects.
-  iree_hal_memory_effects_t effects;
   // Terminal callback after every accepted I/O and GPU use has retired.
   iree_hal_amd_fabric_file_transfer_callback_t completion;
   // First terminal failure, owned until final callback delivery.
@@ -54,11 +65,12 @@ typedef struct iree_hal_amd_gpu_file_staging_request_t {
   uint32_t chunk_capacity;
 } iree_hal_amd_gpu_file_staging_request_t;
 
-// Resolves file-capable system backing before acquiring a native copy queue.
+// Resolves file-capable system backing without acquiring a native queue.
 // Absence is reported through out_available; native query failures propagate.
 // The profile is consumed directly by allocate on the same context. Staging
-// bytes are accessed by native file I/O and SDMA, without a CPU access site or
-// virtual aliases. Their visibility follows FILE_IO/DEVICE pair recipes.
+// bytes are accessed by native file I/O and the queue, without a CPU access
+// site or virtual aliases. Their visibility follows FILE_IO/DEVICE pair
+// recipes.
 iree_status_t iree_hal_amd_gpu_file_staging_query_profile(
     iree_hal_amd_gpu_context_t* context, amdf_memory_profile_t* out_profile,
     bool* out_available);
@@ -69,25 +81,23 @@ iree_status_t iree_hal_amd_gpu_file_staging_query_profile(
 // constructing, live, and retiring blocks share the native-aligned byte budget
 // for lane_count * lane_capacity. Per-proactor views add no physical payload.
 // The device proactor owns canonical preparation and cold result publication.
-// The native SDMA queue and HAL device outlive this engine. Cached backing owns
-// no device reference; parent file captures also borrow the device. Destruction
+// The HAL device outlives this engine. Cached backing owns no device reference;
+// parent file captures also borrow the device. Destruction
 // joins asynchronous detach and native release before releasing metadata.
 iree_status_t iree_hal_amd_gpu_file_staging_allocate(
     iree_hal_device_t* device, iree_hal_amd_gpu_context_t* context,
     uint32_t family_ordinal, const amdf_memory_profile_t* profile,
-    iree_hal_amd_gpu_sdma_queue_t* queue, iree_async_proactor_t* proactor,
+    bool queue_cache_control, iree_async_proactor_t* proactor,
     uint32_t lane_count, uint32_t lane_capacity, uint32_t numa_node,
     iree_allocator_t host_allocator,
     iree_hal_amd_gpu_file_staging_t** out_staging);
 
-// Qualifies each captured physical copy range once, before touching a prefix.
-// Combines originating-queue effects into the operation's two boundaries and
-// stores copy-engine effects with each range. Direct host ranges are unchanged.
+// Qualifies staging availability and file alignment before touching a prefix.
+// Copies use the same queue as public buffer access; no cross-family ownership
+// transition is needed. Direct host ranges are unchanged.
 iree_status_t iree_hal_amd_gpu_file_staging_prepare(
     iree_hal_amd_gpu_file_staging_t* staging,
-    const iree_hal_queue_family_t* family, uint32_t native_family_ordinal,
-    iree_hal_amd_fabric_file_transfer_t* transfer,
-    iree_hal_memory_effects_t* before, iree_hal_memory_effects_t* after);
+    const iree_hal_amd_fabric_file_transfer_t* transfer);
 
 // Acquires one staging use spanning all physical ranges of a qualified file
 // operation. The parent capture borrows the device and retains the transfer
@@ -96,6 +106,7 @@ iree_status_t iree_hal_amd_gpu_file_staging_prepare(
 iree_status_t iree_hal_amd_gpu_file_staging_acquire(
     iree_hal_amd_gpu_file_staging_t* staging,
     const iree_hal_amd_fabric_file_transfer_t* transfer,
+    iree_hal_amd_gpu_file_staging_copy_fn_t copy, void* copy_user_data,
     iree_hal_amd_gpu_file_staging_request_t* request);
 
 // Begins one dependency-ready nonempty copy range on an acquired staging use.
@@ -105,7 +116,7 @@ iree_status_t iree_hal_amd_gpu_file_staging_acquire(
 // borrow.
 void iree_hal_amd_gpu_file_staging_submit(
     iree_hal_amd_gpu_file_staging_request_t* request, uint64_t offset,
-    uint64_t length, uint64_t device_address, iree_hal_memory_effects_t effects,
+    uint64_t length, uint64_t device_address,
     iree_hal_amd_fabric_file_transfer_callback_t completion);
 
 // Releases the complete file operation after every range retires. Consumes

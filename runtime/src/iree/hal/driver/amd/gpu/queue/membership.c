@@ -202,7 +202,8 @@ static amdf_status_t iree_hal_amd_gpu_queue_membership_rebind(
     if (slot->state == IREE_HAL_AMD_GPU_QUEUE_SLOT_QUIESCING) {
       source.fn = NULL;
     } else {
-      publication[slot->ordinal + 3] =
+      publication[slot->ordinal +
+                  IREE_ARRAYSIZE(membership->publication_tail)] =
           membership->lifecycle->publication_source(slot->queue);
     }
     completion[completion_count++] = source;
@@ -217,7 +218,8 @@ static amdf_status_t iree_hal_amd_gpu_queue_membership_rebind(
   }
   iree_hal_amd_gpu_publication_set_sources(
       membership->publication,
-      iree_min(membership->provisioned_count + membership->slot_count + 3,
+      iree_min(membership->provisioned_count + membership->slot_count +
+                   IREE_ARRAYSIZE(membership->publication_tail),
                sources->capacity),
       publication);
   iree_hal_amd_gpu_completion_set_sources(membership->completion,
@@ -336,7 +338,8 @@ static amdf_status_t iree_hal_amd_gpu_queue_membership_remove_sources(
     iree_hal_amd_gpu_queue_slot_t* slot) {
   iree_hal_amd_gpu_queue_membership_t* membership = slot->membership;
   const bool publication_active = iree_hal_amd_gpu_publication_remove_source(
-      membership->publication, slot->ordinal + 3);
+      membership->publication,
+      slot->ordinal + IREE_ARRAYSIZE(membership->publication_tail));
   const iree_hal_amd_gpu_completion_source_t source =
       membership->lifecycle->completion_source(slot->queue);
   const bool completion_active = iree_hal_amd_gpu_completion_remove_source(
@@ -347,8 +350,9 @@ static amdf_status_t iree_hal_amd_gpu_queue_membership_remove_sources(
     iree_slim_mutex_unlock(&membership->slots_mutex);
     iree_slim_mutex_unlock(&membership->mutex);
     if (publication_active) {
-      iree_hal_amd_gpu_publication_join_source(membership->publication,
-                                               slot->ordinal + 3);
+      iree_hal_amd_gpu_publication_join_source(
+          membership->publication,
+          slot->ordinal + IREE_ARRAYSIZE(membership->publication_tail));
     }
     if (completion_active) {
       iree_hal_amd_gpu_completion_join_source(membership->completion,
@@ -608,7 +612,9 @@ static iree_status_t iree_hal_amd_gpu_queue_membership_reserve_slot(
       slot->membership = membership;
       slot->ordinal = membership->provisioned_count + membership->slot_count;
       iree_hal_amd_gpu_signal_cache_initialize(
-          membership->publication, slot->ordinal + 3, &slot->signals);
+          membership->publication,
+          slot->ordinal + IREE_ARRAYSIZE(membership->publication_tail),
+          &slot->signals);
       slot->next = membership->slots;
       membership->slots = slot;
       ++membership->slot_count;
@@ -660,9 +666,10 @@ iree_status_t iree_hal_amd_gpu_queue_membership_acquire(
     status = iree_hal_amd_gpu_signal_cache_reserve_frontiers(
         &slot->signals, frontier_count, membership->host_allocator);
     if (iree_status_is_ok(status)) {
-      status = membership->create(membership->user_data, ordinal, ordinal + 3,
-                                  frontier_count, slot->epoch, &slot->signals,
-                                  params, &queue);
+      status = membership->create(
+          membership->user_data, ordinal,
+          ordinal + IREE_ARRAYSIZE(membership->publication_tail),
+          frontier_count, slot->epoch, &slot->signals, params, &queue);
     }
   }
   iree_slim_mutex_lock(&membership->mutex);

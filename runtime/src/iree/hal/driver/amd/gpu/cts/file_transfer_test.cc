@@ -111,8 +111,8 @@ class SharedGpuNativeDevice final : public GpuNativeTest {
   uint32_t gfx_stepping() const { return gfx_stepping_; }
 
  protected:
-  // File transfer uses the device-wide SDMA owner. Select the production
-  // default compute family so RDNA exercises PM4 and CDNA exercises AQL.
+  // File copies use the selected compute queue. Select the production default
+  // family so RDNA exercises PM4 and CDNA exercises AQL.
   amdf_queue_command_type_t command_type() const override {
     return AMDF_QUEUE_COMMAND_TYPE_UNKNOWN;
   }
@@ -542,9 +542,17 @@ class GpuNativeFileTest : public GpuNativeTest,
         path_.path_view(), iree_allocator_system(), &contents));
     EXPECT_EQ(contents->buffer.data_length, expected.size() * 4);
     if (contents->buffer.data_length == expected.size() * 4) {
-      EXPECT_EQ(std::memcmp(contents->buffer.data, expected.data(),
-                            expected.size() * 4),
-                0);
+      const auto* expected_bytes =
+          reinterpret_cast<const uint8_t*>(expected.data());
+      const auto mismatch = std::mismatch(
+          contents->buffer.data,
+          contents->buffer.data + contents->buffer.data_length, expected_bytes);
+      if (mismatch.first !=
+          contents->buffer.data + contents->buffer.data_length) {
+        ADD_FAILURE() << "File byte " << (mismatch.second - expected_bytes)
+                      << ": expected " << unsigned(*mismatch.second)
+                      << ", observed " << unsigned(*mismatch.first);
+      }
     }
     iree_io_file_contents_free(contents);
   }

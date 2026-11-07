@@ -779,13 +779,82 @@ struct FileRetirement {
   }
 };
 
+TEST_P(SubmissionTest, FileCopiesPreserveShaderAndCommandProcessorVisibility) {
+  struct Case {
+    // Native compute cache architecture.
+    iree_hal_amd_gpu_gfxip_version_t gfxip;
+    // Exact writeback/invalidation around the CP transaction.
+    uint32_t before;
+    // Exact invalidation before the native copy returns to its owner.
+    uint32_t after;
+  };
+  const Case cases[] = {
+      {{11, 0, 0}, 0x103E0, 0x103E0}, {{11, 5, 1}, 0x103E0, 0x103E0},
+      {{11, 7, 0}, 0x103E0, 0x103E0}, {{12, 0, 1}, 0x18040, 0x1C1C0},
+      {{12, 5, 0}, 0x18060, 0x1C1E0},
+  };
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.gfxip.major);
+    SCOPED_TRACE(test_case.gfxip.minor);
+    iree_hal_amd_gpu_pm4_barrier_profile_t profile;
+    IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_barrier_profile_initialize(
+        test_case.gfxip, &profile));
+    for (auto type : {IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+                      IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+                      IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD}) {
+      SCOPED_TRACE(type);
+      uint8_t bytes[8] = {};
+      iree_hal_amd_gpu_transfer_operation_t operation = {
+          .type = type,
+          .length = sizeof(bytes),
+      };
+      if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD) {
+        operation.source.host = bytes;
+      } else {
+        operation.source.device =
+            iree_hal_amd_gpu_buffer_reference_borrow(0x12340000);
+      }
+      if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD) {
+        operation.target.host = bytes;
+      } else {
+        operation.target.device =
+            iree_hal_amd_gpu_buffer_reference_borrow(0x56780000);
+      }
+      // Empty caller boundaries cannot erase the implementation's CP edge.
+      // Nonempty boundaries are merged, including instruction invalidation.
+      const iree_hal_amd_gpu_pm4_barrier_t requested = {
+          .cache_control = GetParam() ? 1u : 0u,
+      };
+      FileRetirement owner;
+      iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
+      IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_file(
+          &pool_, &operation, &profile, &requested, &requested,
+          owner.callback(), &capture));
+      EXPECT_EQ(capture->entry.kind, IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER);
+      EXPECT_FALSE(capture->transfer.program_accessible);
+      EXPECT_EQ(capture->before.cache_control,
+                test_case.before | requested.cache_control);
+      EXPECT_EQ(capture->before.execution,
+                IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE |
+                    IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA);
+      EXPECT_EQ(capture->after.cache_control,
+                test_case.after | requested.cache_control);
+      EXPECT_EQ(capture->after.execution, 0u);
+      iree_hal_amd_gpu_pm4_submission_release_payload(capture);
+      iree_hal_amd_gpu_pm4_submission_release(capture);
+      EXPECT_EQ(owner.retirements, 1u);
+      EXPECT_EQ(owner.status_code, IREE_STATUS_OK);
+    }
+  }
+}
+
 TEST_P(SubmissionTest, FileRetirementTransfersTheFinalPublicationReference) {
   FileRetirement owner;
   iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
   const iree_hal_amd_gpu_pm4_barrier_t before = {.cache_control = 17};
   const iree_hal_amd_gpu_pm4_barrier_t after = {.cache_control = 29};
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_file(
-      &pool_, nullptr, nullptr, &before, &after, owner.callback(), &capture));
+      &pool_, nullptr, &profile_, &before, &after, owner.callback(), &capture));
   EXPECT_EQ(capture->entry.kind, IREE_HAL_AMD_GPU_PM4_ENTRY_BARRIER);
   EXPECT_EQ(capture->signals.count, 0u);
   EXPECT_EQ(capture->signal, nullptr);
@@ -820,7 +889,8 @@ TEST_P(SubmissionTest, FileFailureDoesNotRetireAcceptedNativePieces) {
   FileRetirement owner;
   iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_file(
-      &pool_, nullptr, nullptr, nullptr, nullptr, owner.callback(), &capture));
+      &pool_, nullptr, &profile_, nullptr, nullptr, owner.callback(),
+      &capture));
   // Two accepted pieces hold references independently of the publishing owner.
   iree_hal_amd_gpu_pm4_submission_retain(capture);
   iree_hal_amd_gpu_pm4_submission_retain(capture);
@@ -855,7 +925,8 @@ TEST_P(SubmissionTest, RejectedFileSuffixWaitsForAcceptedHostAccesses) {
   FileRetirement owner;
   iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_file(
-      &pool_, nullptr, nullptr, nullptr, nullptr, owner.callback(), &capture));
+      &pool_, nullptr, &profile_, nullptr, nullptr, owner.callback(),
+      &capture));
   iree_hal_amd_gpu_pm4_submission_retain(capture);
   iree_hal_amd_gpu_pm4_submission_retain(capture);
   iree_hal_amd_gpu_pm4_submission_reject(capture,
@@ -1059,7 +1130,7 @@ TEST_P(SubmissionTest, FileCallbackMayDestroyCapturePool) {
   owner.pool = &pool;
   iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
   IREE_ASSERT_OK(iree_hal_amd_gpu_pm4_submission_create_file(
-      &pool, nullptr, nullptr, nullptr, nullptr, owner.callback(), &capture));
+      &pool, nullptr, &profile_, nullptr, nullptr, owner.callback(), &capture));
   iree_hal_amd_gpu_pm4_submission_fail(
       capture, iree_status_from_code(IREE_STATUS_CANCELLED));
   EXPECT_EQ(owner.retirements, 0u);
@@ -1070,37 +1141,29 @@ TEST_P(SubmissionTest, FileCallbackMayDestroyCapturePool) {
 
 TEST_P(SubmissionTest, RejectedFileCaptureDoesNotAcquireCallbackOwnership) {
   FileRetirement owner;
-  std::array<uint8_t, 16> contents = {};
-  bool buffer_destroyed = false;
-  iree_hal_buffer_t* buffer = nullptr;
-  IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
-      {}, IREE_HAL_MEMORY_TYPE_HOST_LOCAL, IREE_HAL_MEMORY_ACCESS_ALL,
-      IREE_HAL_BUFFER_USAGE_TRANSFER, contents.size(),
-      iree_make_byte_span(contents.data(), contents.size()),
-      {[](void* data, iree_hal_buffer_t*) { *static_cast<bool*>(data) = true; },
-       &buffer_destroyed},
-      iree_allocator_system(), &buffer));
-  // A host-only buffer has no qualified native transfer binding. Its caller
-  // must handle rejection; no callback can subsequently release that owner.
-  iree_hal_transfer_operation_t transfer = {};
-  if (GetParam()) {
-    transfer.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
-    transfer.upload = {contents.data(), buffer, 0, contents.size()};
-  } else {
-    transfer.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
-    transfer.download = {buffer, 0, contents.data(), contents.size()};
-  }
-  const iree_hal_queue_family_t family = {};
+  iree_hal_amd_gpu_capture_pool_t pool;
+  iree_hal_amd_gpu_capture_pool_initialize(GetParam() ? 1024 : 64,
+                                           iree_allocator_null(), &pool);
+  const iree_hal_amd_gpu_transfer_operation_t transfer = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+      .source =
+          {
+              .device = iree_hal_amd_gpu_buffer_reference_borrow(0x12340000),
+          },
+      .target =
+          {
+              .device = iree_hal_amd_gpu_buffer_reference_borrow(0x56780000),
+          },
+      .length = 4096,
+  };
   iree_hal_amd_gpu_pm4_submission_t* capture = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED,
-                        iree_hal_amd_gpu_pm4_submission_create_file(
-                            &pool_, &family, &transfer, nullptr, nullptr,
-                            owner.callback(), &capture));
+  IREE_EXPECT_NOT_OK(iree_hal_amd_gpu_pm4_submission_create_file(
+      &pool, &transfer, &profile_, nullptr, nullptr, owner.callback(),
+      &capture));
   EXPECT_EQ(capture, nullptr);
   EXPECT_EQ(owner.failures, 0u);
   EXPECT_EQ(owner.retirements, 0u);
-  iree_hal_buffer_release(buffer);
-  EXPECT_TRUE(buffer_destroyed);
+  iree_hal_amd_gpu_capture_pool_deinitialize(&pool);
 }
 
 INSTANTIATE_TEST_SUITE_P(CaptureStorage, SubmissionTest, ::testing::Bool());

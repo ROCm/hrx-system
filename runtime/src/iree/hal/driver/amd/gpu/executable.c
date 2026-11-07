@@ -141,7 +141,7 @@ static iree_hal_amd_gpu_function_t* iree_hal_amd_gpu_executable_function(
 static void iree_hal_amd_gpu_executable_release_variant_metadata(
     iree_hal_amd_gpu_executable_t* executable,
     iree_hal_amd_gpu_executable_variant_t* variant) {
-  iree_hal_amd_gpu_code_upload_free(executable->context, variant->upload);
+  iree_hal_amd_gpu_code_upload_free(variant->upload);
   if (variant->asan) {
     iree_hal_amd_fabric_asan_advise_range(
         variant->asan, variant->bindings[1].device_address,
@@ -723,9 +723,9 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
   }
   iree_byte_span_t contents;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_code_allocate(
-      executable->context, options->memory, options->upload.memory, byte_length,
-      image->alignment, executable->host_allocator, variant->memory,
-      &variant->upload, &contents));
+      executable->context, options->memory, byte_length, image->alignment,
+      executable->host_allocator, variant->memory, &variant->upload,
+      &contents));
   variant->bindings[0].host_pointer = variant->memory->contents.data;
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       executable->context->api->memory_query_address(
@@ -878,14 +878,9 @@ static iree_status_t iree_hal_amd_gpu_executable_load_image(
            sizeof(*tsan_config));
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_gpu_code_publish(
-        executable->context, options->upload.queue,
-        options->upload.family_ordinal, options->native_family_ordinal,
-        variant->memory, &variant->upload);
-  }
-  if (iree_status_is_ok(status) && options->aql_code) {
     status =
-        iree_hal_amd_gpu_aql_code_publish(options->aql_code, variant->memory);
+        iree_hal_amd_gpu_code_publish(executable->context, options->code_queue,
+                                      variant->memory, &variant->upload);
   }
   if (iree_status_is_ok(status) && !variant_ordinal) {
     status = iree_hal_amd_gpu_executable_initialize_contracts(

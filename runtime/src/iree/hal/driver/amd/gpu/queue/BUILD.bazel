@@ -150,9 +150,11 @@ iree_runtime_cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":buffer",
         ":capture_pool",
         ":file_staging",
         ":host_wait",
+        ":transfer",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:semaphore_wait",
         "//runtime/src/iree/base",
@@ -181,9 +183,10 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/amd:status",
         "//runtime/src/iree/hal/driver/amd/fabric:file_transfer",
+        "//runtime/src/iree/hal/driver/amd/fabric:memory",
         "//runtime/src/iree/hal/driver/amd/fabric:memory_transition",
+        "//runtime/src/iree/hal/driver/amd/gpu:completion",
         "//runtime/src/iree/hal/driver/amd/gpu:context",
-        "//runtime/src/iree/hal/driver/amd/gpu/queue/sdma:queue",
     ],
 )
 
@@ -298,6 +301,7 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",
+        "//runtime/src/iree/hal/driver/amd:status",
         "//runtime/src/iree/hal/driver/amd/fabric",
         "//runtime/src/iree/hal/driver/amd/fabric:memory",
         "//runtime/src/iree/hal/driver/amd/fabric:memory_backend_test_base",
@@ -788,10 +792,8 @@ iree_runtime_cc_library(
     }),
     visibility = ["//visibility:private"],
     deps = [
-        "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/hal/driver/amd:status",
     ],
 )
 

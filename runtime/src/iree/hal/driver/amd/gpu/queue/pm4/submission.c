@@ -335,33 +335,60 @@ iree_status_t iree_hal_amd_gpu_pm4_submission_create_transfer(
 
 iree_status_t iree_hal_amd_gpu_pm4_submission_create_file(
     iree_hal_amd_gpu_capture_pool_t* pool,
-    const iree_hal_queue_family_t* family,
-    const iree_hal_transfer_operation_t* operation,
+    const iree_hal_amd_gpu_transfer_operation_t* operation,
+    const iree_hal_amd_gpu_pm4_barrier_profile_t* profile,
     const iree_hal_amd_gpu_pm4_barrier_t* before,
     const iree_hal_amd_gpu_pm4_barrier_t* after,
     iree_hal_amd_gpu_retirement_callback_t callback,
     iree_hal_amd_gpu_pm4_submission_t** out_submission) {
   *out_submission = NULL;
-  // File copies borrow their captured host span instead of copying UPDATE
-  // bytes. One UPLOAD/DOWNLOAD descriptor has a fixed capture size.
-  const iree_hal_amd_gpu_transfer_layout_t layout = {
-      .count = operation ? 1 : 0,
-      .byte_length =
-          operation ? sizeof(iree_hal_amd_gpu_transfer_operation_t) : 0,
-  };
-  const iree_hal_amd_gpu_pm4_barrier_profile_t profile = {0};
+  // The file owner keeps native backing and host bytes live through retirement.
+  const iree_host_size_t payload_size =
+      iree_host_align(
+          operation ? sizeof(*operation) : 0,
+          iree_alignof(iree_hal_amd_gpu_pm4_submission_retirement_t)) +
+      sizeof(iree_hal_amd_gpu_pm4_submission_retirement_t);
   const iree_hal_barrier_list_t empty = {0};
   const iree_hal_queue_barriers_t barriers = {&empty, &empty};
   iree_hal_amd_gpu_pm4_submission_t* submission = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_capture_transfer(
-      pool, false, family, iree_hal_semaphore_list_empty(),
-      iree_hal_semaphore_list_empty(), operation ? 1 : 0, operation, &profile,
-      &barriers, layout, callback, &submission));
+  void* payload = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_pm4_submission_acquire(
+      pool, false, iree_hal_semaphore_list_empty(),
+      iree_hal_semaphore_list_empty(), payload_size, profile, &barriers,
+      &submission, &payload));
+  if (operation) {
+    submission->entry.kind = IREE_HAL_AMD_GPU_PM4_ENTRY_TRANSFER;
+    iree_hal_amd_gpu_transfer_initialize_operation(
+        (iree_hal_amd_gpu_transfer_staging_limits_t){
+            .upload_capacity = IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_UPLOAD_LENGTH,
+            .download_capacity =
+                IREE_HAL_AMD_GPU_PM4_TRANSFER_MAX_DOWNLOAD_LENGTH},
+        operation, payload, &submission->transfer);
+  }
+  *iree_hal_amd_gpu_pm4_submission_retirement(submission) =
+      (iree_hal_amd_gpu_pm4_submission_retirement_t){.callback = callback};
+  submission->has_retirement_callback = true;
   if (before) {
     submission->before = *before;
   }
   if (after) {
     submission->after = *after;
+  }
+  if (operation) {
+    // Internal file copies use CP DMA, not a shader-qualified program view.
+    // Publish preceding shader writes before CP reads or overwrites these
+    // bytes, then invalidate shader views before returning the copy to the
+    // file owner. GFX12 CP accesses bypass L2, so their handoff reaches system
+    // memory. These implementation-owned edges survive empty caller barriers.
+    submission->before.execution |=
+        IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_COMPUTE |
+        IREE_HAL_AMD_GPU_PM4_BARRIER_EXECUTION_DMA;
+    submission->before.cache_control |= profile->command_processor_bypasses_l2
+                                            ? profile->release
+                                            : profile->shader;
+    submission->after.cache_control |= profile->command_processor_bypasses_l2
+                                           ? profile->acquire
+                                           : profile->shader;
   }
   *out_submission = submission;
   return iree_ok_status();

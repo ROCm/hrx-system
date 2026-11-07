@@ -2527,18 +2527,15 @@ static void iree_hal_amd_gpu_aql_file_add_effects(
 }
 
 static iree_status_t iree_hal_amd_gpu_aql_file_submit(
-    iree_hal_queue_t* base, const iree_hal_transfer_operation_t* operation,
-    const void* before, const void* after,
-    iree_hal_amd_gpu_retirement_callback_t callback) {
+    iree_hal_queue_t* base,
+    const iree_hal_amd_gpu_transfer_operation_t* operation, const void* before,
+    const void* after, iree_hal_amd_gpu_retirement_callback_t callback) {
   iree_hal_amd_gpu_aql_queue_t* queue = (void*)base;
   IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_check_acceptance(queue));
   iree_hal_amd_gpu_aql_submission_t* submission = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_transfer(
-      &queue->captures, NULL, base->queue_family,
-      iree_hal_semaphore_list_empty(), iree_hal_semaphore_list_empty(),
-      operation ? 1 : 0, operation, before ? *(const uint32_t*)before : 0,
-      after ? *(const uint32_t*)after : 0, &submission));
-  submission->transfer.callback = callback;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_gpu_aql_submission_file(
+      &queue->captures, operation, before ? *(const uint32_t*)before : 0,
+      after ? *(const uint32_t*)after : 0, callback, &submission));
   submission->has_host_owner = true;
   iree_atomic_fetch_add(&queue->pending.host_owners, 1,
                         iree_memory_order_relaxed);
@@ -2708,6 +2705,7 @@ iree_status_t iree_hal_amd_gpu_aql_queue_create(
       .waits = &queue->wait_context,
       .queue_ordinal = options->queue_ordinal,
       .native_family_ordinal = options->family_ordinal,
+      .transfer_site = IREE_HAL_MEMORY_SITE_PROGRAM,
       .barrier_size = sizeof(uint32_t),
       .add_effects = iree_hal_amd_gpu_aql_file_add_effects,
       .submit = iree_hal_amd_gpu_aql_file_submit};

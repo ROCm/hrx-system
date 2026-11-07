@@ -243,8 +243,8 @@ class GpuNativeTest : public ::testing::Test {
   void SelectControlMemory(amdf_memory_device_access_t* access,
                            iree_hal_amd_fabric_memory_options_t* policy);
 
-  // Raw packet fixtures publish through the production transfer owner before
-  // entering programs; HAL device tests use their device-owned transfer queue.
+  // Raw packet fixtures publish through the production compute code loader
+  // before entering programs; HAL device tests use their device-owned loader.
   void PublishCode(uint32_t compute_family_ordinal,
                    iree_hal_amd_fabric_memory_t* memory,
                    iree_hal_amd_gpu_code_upload_t** upload);

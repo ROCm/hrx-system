@@ -8,9 +8,8 @@
 #define IREE_HAL_DRIVER_AMD_GPU_DEVICE_FAILURE_H_
 
 #include "iree/base/threading/mutex.h"
-#include "iree/hal/driver/amd/gpu/queue/aql/code.h"
+#include "iree/hal/driver/amd/gpu/code_queue.h"
 #include "iree/hal/driver/amd/gpu/queue/membership.h"
-#include "iree/hal/driver/amd/gpu/queue/sdma/queue.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,10 +36,8 @@ typedef struct iree_hal_amd_gpu_device_failure_t {
   iree_hal_amd_gpu_completion_t* completion;
   // Stable compute owners, including dynamically acquired queues.
   iree_hal_amd_gpu_queue_membership_t* membership;
-  // Internal transfer owner, or NULL when no native copy service exists.
-  iree_hal_amd_gpu_sdma_queue_t* transfers;
-  // Private instruction-cache queue, or NULL for PM4 execution.
-  iree_hal_amd_gpu_aql_code_t* code;
+  // Private compute code publisher, absent for directly mapped PM4 code.
+  iree_hal_amd_gpu_code_queue_t* code;
 } iree_hal_amd_gpu_device_failure_t;
 
 // Installs the terminal callbacks after native owners exist, before starting
@@ -50,7 +47,7 @@ void iree_hal_amd_gpu_device_failure_initialize(
     uint32_t timeout_ms, iree_hal_amd_gpu_publication_t* publication,
     iree_hal_amd_gpu_completion_t* completion,
     iree_hal_amd_gpu_queue_membership_t* membership,
-    iree_hal_amd_gpu_sdma_queue_t* transfers, iree_hal_amd_gpu_aql_code_t* code,
+    iree_hal_amd_gpu_code_queue_t* code,
     iree_hal_amd_gpu_device_failure_t* failure);
 
 // Called only after both workers and native callbacks have joined. Clears

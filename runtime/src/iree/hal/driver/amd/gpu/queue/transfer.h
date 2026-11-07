@@ -121,6 +121,16 @@ iree_status_t iree_hal_amd_gpu_transfer_initialize(
     iree_hal_amd_gpu_transfer_layout_t layout, void* storage,
     iree_hal_amd_gpu_transfer_t* out_transfer);
 
+// Captures one already-qualified operation into caller-owned descriptor
+// storage. Retains HAL buffers; borrowed native backing remains owned by the
+// enclosing operation through its retirement callback. UPDATE bytes are already
+// captured by the caller. No validation, payload copy, or allocation is needed.
+void iree_hal_amd_gpu_transfer_initialize_operation(
+    iree_hal_amd_gpu_transfer_staging_limits_t staging_limits,
+    const iree_hal_amd_gpu_transfer_operation_t* operation,
+    iree_hal_amd_gpu_transfer_operation_t* storage,
+    iree_hal_amd_gpu_transfer_t* out_transfer);
+
 // Releases retained buffers after the owning submission's last native use.
 void iree_hal_amd_gpu_transfer_deinitialize(
     iree_hal_amd_gpu_transfer_t* transfer);

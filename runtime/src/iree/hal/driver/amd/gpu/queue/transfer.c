@@ -110,6 +110,34 @@ static bool iree_hal_amd_gpu_transfer_program_accessible(
              reference->slot.index;
 }
 
+static void iree_hal_amd_gpu_transfer_append_operation(
+    iree_hal_amd_gpu_transfer_staging_limits_t staging_limits,
+    const iree_hal_amd_gpu_transfer_operation_t* operation,
+    iree_hal_amd_gpu_transfer_t* transfer) {
+  if (operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_COPY ||
+      operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD) {
+    iree_hal_buffer_retain(operation->source.device.buffer);
+  }
+  if (operation->type != IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD) {
+    iree_hal_buffer_retain(operation->target.device.buffer);
+  }
+  transfer->operations[transfer->count++] = *operation;
+  transfer->host_wait_required |=
+      operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+  transfer->host_completion_required |=
+      operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+  if (operation->type != IREE_HAL_TRANSFER_OPERATION_TYPE_FILL &&
+      operation->type != IREE_HAL_TRANSFER_OPERATION_TYPE_COPY) {
+    const uint32_t maximum_staging_capacity =
+        operation->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD
+            ? staging_limits.download_capacity
+            : staging_limits.upload_capacity;
+    transfer->staging_capacity = iree_max(
+        transfer->staging_capacity,
+        (uint32_t)iree_min(operation->length, maximum_staging_capacity));
+  }
+}
+
 iree_status_t iree_hal_amd_gpu_transfer_initialize(
     const iree_hal_queue_family_t* family, iree_hal_memory_site_kind_t site,
     iree_hal_amd_gpu_transfer_staging_limits_t staging_limits,
@@ -166,13 +194,11 @@ iree_status_t iree_hal_amd_gpu_transfer_initialize(
         operation.source.host = (void*)source->upload.source;
         target_buffer = source->upload.target_buffer;
         target_offset = source->upload.target_offset;
-        out_transfer->host_wait_required = true;
         break;
       case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
         source_buffer = source->download.source_buffer;
         source_offset = source->download.source_offset;
         operation.target.host = source->download.target;
-        out_transfer->host_completion_required = true;
         break;
     }
     if (source_buffer) {
@@ -195,22 +221,21 @@ iree_status_t iree_hal_amd_gpu_transfer_initialize(
                 family, &operation.target.device,
                 IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET);
       }
-      iree_hal_buffer_retain(source_buffer);
-      iree_hal_buffer_retain(target_buffer);
-      out_transfer->operations[out_transfer->count++] = operation;
-      if (source->type != IREE_HAL_TRANSFER_OPERATION_TYPE_FILL &&
-          source->type != IREE_HAL_TRANSFER_OPERATION_TYPE_COPY) {
-        const uint32_t maximum_staging_capacity =
-            source->type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD
-                ? staging_limits.download_capacity
-                : staging_limits.upload_capacity;
-        out_transfer->staging_capacity =
-            iree_max(out_transfer->staging_capacity,
-                     (uint32_t)iree_min(length, maximum_staging_capacity));
-      }
+      iree_hal_amd_gpu_transfer_append_operation(staging_limits, &operation,
+                                                 out_transfer);
     }
   }
   return status;
+}
+
+void iree_hal_amd_gpu_transfer_initialize_operation(
+    iree_hal_amd_gpu_transfer_staging_limits_t staging_limits,
+    const iree_hal_amd_gpu_transfer_operation_t* operation,
+    iree_hal_amd_gpu_transfer_operation_t* storage,
+    iree_hal_amd_gpu_transfer_t* out_transfer) {
+  *out_transfer = (iree_hal_amd_gpu_transfer_t){.operations = storage};
+  iree_hal_amd_gpu_transfer_append_operation(staging_limits, operation,
+                                             out_transfer);
 }
 
 void iree_hal_amd_gpu_transfer_deinitialize(

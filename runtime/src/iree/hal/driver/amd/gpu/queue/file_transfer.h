@@ -13,6 +13,7 @@
 #include "iree/hal/driver/amd/gpu/queue/capture_pool.h"
 #include "iree/hal/driver/amd/gpu/queue/file_staging.h"
 #include "iree/hal/driver/amd/gpu/queue/host_wait.h"
+#include "iree/hal/driver/amd/gpu/queue/transfer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,7 +34,7 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
   // Returns that borrow after the final capture access and wakes shutdown.
   void (*end)(iree_hal_queue_t* queue);
 
-  // Device-owned native file-copy pipeline, or NULL without a transfer family.
+  // Family-owned file staging, or NULL without file-capable native backing.
   iree_hal_amd_gpu_file_staging_t* staging;
   // Queue-owned host dependency associations, finalized by their last borrower.
   iree_async_semaphore_wait_context_t* waits;
@@ -43,6 +44,8 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
   uint32_t queue_ordinal;
   // Exact native family for physical-source host/device visibility queries.
   uint32_t native_family_ordinal;
+  // Native address contract consumed by the queue's transfer implementation.
+  iree_hal_memory_site_kind_t transfer_site;
   // Size of one immutable native barrier value copied into each operation.
   // The executor defines its representation; the file pipeline never reads it.
   iree_host_size_t barrier_size;
@@ -58,10 +61,11 @@ typedef struct iree_hal_amd_gpu_file_executor_t {
   // does not end borrowed payload lifetime.
   // NULL before/after omits that boundary. Other values point to barrier_size
   // prepared bytes that remain live through this call.
-  iree_status_t (*submit)(iree_hal_queue_t* queue,
-                          const iree_hal_transfer_operation_t* operation,
-                          const void* before, const void* after,
-                          iree_hal_amd_gpu_retirement_callback_t callback);
+  iree_status_t (*submit)(
+      iree_hal_queue_t* queue,
+      const iree_hal_amd_gpu_transfer_operation_t* operation,
+      const void* before, const void* after,
+      iree_hal_amd_gpu_retirement_callback_t callback);
 } iree_hal_amd_gpu_file_executor_t;
 
 // The executor is queue-owned and outlives accepted operations.

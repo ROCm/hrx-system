@@ -164,6 +164,22 @@ fabric allocation service. Explicit trim releases idle scratch and cached
 storage. Synchronous executable and command-buffer construction allocate on the
 calling thread.
 
+Executable loading writes directly to qualified host-mapped code when possible.
+Unmapped code uses an independent cold queue in the selected compute family:
+bounded confirmed `WRITE_DATA` commands upload the bytes, and instruction-cache
+publication completes before loading returns. This bootstraps the resident blit
+shaders without an SDMA queue or a shader that must already be resident. AQL
+always uses this owner for instruction-cache publication; mapped PM4 code uses
+its ordinary before-dispatch cache action. Application queue dependencies cannot
+block the loader. Accepted uploads retain their target until checked retirement
+or native stop, including when shutdown wakes a blocked loading caller.
+
+File reads and writes preserve the selected queue for any GPU copy. Directly
+file-accessible backing needs no staging copy. Other ranges use bounded shared
+staging storage, with copies submitted through the originating queue's transfer
+path and slots retained until that queue retires the copy. The staging owner
+manages asynchronous file I/O and storage, and owns no execution queue.
+
 The existing device workers own deferred admission, native completion, host
 actions, and feedback. Dynamic queues join those owners and receive their own
 native publication resources. A failed public semaphore is not a native
@@ -443,8 +459,11 @@ operation; callers still own backing retirement and the device lifetime.
 
 GPU file transfers use a native host view directly when that exact view
 supports file I/O. CPU visibility alone does not establish file eligibility,
-for either buffered or direct files. Other ranges use the device's shared SDMA
-staging pool, including host-visible UMA allocations and device-local VRAM.
+for either buffered or direct files. Other ranges use shared native staging,
+including host-visible UMA allocations and device-local VRAM. GPU copies run
+on the exact queue passed to `iree_hal_queue_read` or `iree_hal_queue_write`:
+PM4 uses its ordinary transfer packets, and AQL uses its transfer kernels.
+Staging manages backing and file progress without acquiring a GPU queue.
 Virtual buffers retain the routing and visibility requirements of each physical
 source range.
 
@@ -457,12 +476,18 @@ registering the full model. Each staged ingress adds one payload read and
 write. Explicit file-capable pools avoid that copy when their placement and
 native admission costs suit the application.
 
-The device qualifies file-capable backing before creating its SDMA queue.
-Without that capability, compute remains available and file operations requiring
-staging report `UNAVAILABLE`. Linux process-lifetime registration can attach
+The device qualifies file-capable backing for the selected compute family.
+Without that capability, file operations requiring staging report `UNAVAILABLE`.
+Linux process-lifetime registration can attach
 ordinary host pages; instance-lifetime native connections require the optional
 host exporter for this backing. Native file visibility uses its own pair
 queries and does not require CPU-coherent GPU accesses.
+
+Each file request retains its native operands until the selected queue confirms
+retirement, including after an early execution failure. A failed request does
+not poison the staging shared by independent queues. File-I/O acquire/release
+effects execute on the same queue as the copy, alongside the caller's explicit
+boundaries; no cross-engine cache handoff is needed.
 
 ### Registered physical backing
 

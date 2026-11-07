@@ -13,16 +13,24 @@
 extern "C" {
 #endif
 
-// Qualified address source. The submission owns the buffer reference while
-// queue-ordered commitment supplies the address after dependency admission.
+// Qualified address source. A buffer reference resolves after queue-ordered
+// commitment. Native backing already owned by an enclosing operation uses an
+// absolute address; that operation keeps it live through native retirement.
 typedef struct iree_hal_amd_gpu_buffer_reference_t {
-  // Buffer whose lifetime is managed by the enclosing submission.
+  // Buffer retained by the submission, or NULL for borrowed native backing.
   iree_hal_buffer_t* buffer;
-  // Byte offset relative to the buffer's logical beginning.
+  // Buffer-relative byte offset, or absolute GPU address when buffer is NULL.
   iree_device_size_t offset;
-  // Direct index into the immutable native binding layout.
+  // Direct native binding index, unused for borrowed native backing.
   iree_hal_buffer_native_binding_slot_t slot;
 } iree_hal_amd_gpu_buffer_reference_t;
+
+// Borrows an already-qualified native address. The enclosing operation owns
+// its backing and visibility contract through the submission's final callback.
+static inline iree_hal_amd_gpu_buffer_reference_t
+iree_hal_amd_gpu_buffer_reference_borrow(uint64_t address) {
+  return (iree_hal_amd_gpu_buffer_reference_t){.offset = address};
+}
 
 // Qualifies the native interface without requiring a committed address.
 // Public validation has established the range, usage, and family membership.

@@ -386,7 +386,8 @@ void MembershipTest::CallbackRemovalProgress(bool publication) {
         hold();
       }
     };
-    iree_hal_amd_gpu_publication_notify(&publication_, ordinal + 3);
+    iree_hal_amd_gpu_publication_notify(
+        &publication_, ordinal + IREE_ARRAYSIZE(membership_.publication_tail));
   } else {
     callout_ = hold;
     callout_queue_ = queue;
@@ -402,7 +403,10 @@ void MembershipTest::CallbackRemovalProgress(bool publication) {
   while (!disabled) {
     if (publication) {
       iree_slim_mutex_lock(&publication_.sources.mutex);
-      disabled = !publication_.sources.values[ordinal + 3].publish;
+      disabled =
+          !publication_.sources
+               .values[ordinal + IREE_ARRAYSIZE(membership_.publication_tail)]
+               .publish;
       iree_slim_mutex_unlock(&publication_.sources.mutex);
     } else {
       iree_slim_mutex_lock(&completion_.drain_mutex);
@@ -499,7 +503,8 @@ TEST_P(MembershipTest, IdleQueueReleaseRearmsRetainedDownload) {
   download.pause.store(true);
   EXPECT_EQ(iree_hal_amd_gpu_context_signal(&context_), AMDF_STATUS_OK);
   download.entered.acquire();
-  const uint32_t source_ordinal = reinterpret_cast<Queue*>(queue)->ordinal + 3;
+  const uint32_t source_ordinal = reinterpret_cast<Queue*>(queue)->ordinal +
+                                  IREE_ARRAYSIZE(membership_.publication_tail);
   std::jthread releaser([&] { iree_hal_queue_release(queue); });
   bool disabled = false;
   while (!disabled) {
@@ -663,7 +668,9 @@ TEST_P(MembershipTest, RetainedPublisherDoesNotBlockIndependentMembership) {
     }
   };
   queue->idle = false;
-  iree_hal_amd_gpu_publication_notify(&publication_, queue->ordinal + 3);
+  iree_hal_amd_gpu_publication_notify(
+      &publication_,
+      queue->ordinal + IREE_ARRAYSIZE(membership_.publication_tail));
   entered.acquire();
 
   // These acquisitions grow and replace the actual immutable source arrays.
