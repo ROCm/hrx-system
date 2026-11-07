@@ -43,6 +43,8 @@ typedef struct loom_low_source_invocation_facts_t {
 // HAL launch-only entries contribute their ABI uniformity. Exported and
 // recursive callees retain their declared value domains and admit lane-varying
 // arguments on targets with more than one lane per subgroup.
+// Region-declared uniformity comes from the ordinary fact solve instead of
+// being duplicated in this summary.
 // Selected functions use their exact target facts while computing caller-local
 // facts.
 iree_status_t loom_low_source_invocation_facts_compute(

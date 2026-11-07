@@ -190,6 +190,16 @@ static iree_status_t loom_low_source_invocation_seed_entry_arguments(
   if (!target_facts) {
     return iree_ok_status();
   }
+  const loom_region_descriptor_t* body_descriptor =
+      loom_op_vtable_region_descriptor(
+          loom_op_vtable(module, function.op),
+          loom_func_like_body_region_index(function));
+  if (body_descriptor && iree_any_bit_set(body_descriptor->flags,
+                                          LOOM_REGION_CLUSTER_UNIFORM_ARGS)) {
+    // The ordinary fact solve already establishes the declared entry domain.
+    // Redundant seeds would distinguish identical scopes in the fact cache.
+    return iree_ok_status();
+  }
   const bool launch_only =
       node->caller_count == 0 &&
       target_facts->storage.export_plan.abi_kind == LOOM_TARGET_ABI_HAL_KERNEL;
