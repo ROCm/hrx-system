@@ -299,14 +299,14 @@ static bool iree_hal_amd_gpu_sdma_native_queue_try_publish(
   }
   queue->records[index] = (iree_hal_amd_gpu_sdma_record_t){
       .completion = completion, .point = point};
-  // KERNEL execution may already be complete. Publish producer metadata
-  // before exposing this record to its retirement observer.
-  if (queue->kernel.queue && accepted) {
-    accepted(accepted_data);
-  }
-  iree_atomic_store(&queue->published, (int64_t)(published + 1),
-                    iree_memory_order_release);
   if (queue->kernel.queue) {
+    // Execution may already be complete. Publish producer metadata before
+    // exposing this record to its retirement observer.
+    if (accepted) {
+      accepted(accepted_data);
+    }
+    iree_atomic_store(&queue->published, (int64_t)(published + 1),
+                      iree_memory_order_release);
     status = queue->context->api->kernel_queue_request_notification(
         queue->kernel.queue, point, &queue->context->kernel_notification);
     if (!amdf_status_is_ok(status)) {
@@ -326,6 +326,9 @@ static bool iree_hal_amd_gpu_sdma_native_queue_try_publish(
     queue->user.position += length;
     status = iree_hal_amd_gpu_user_queue_flush(&queue->user.storage);
     if (IREE_UNLIKELY(!amdf_status_is_ok(status))) {
+      // Failed release retains the record until checked native cessation.
+      iree_atomic_store(&queue->published, (int64_t)(published + 1),
+                        iree_memory_order_release);
       iree_hal_amd_gpu_sdma_native_queue_fail(queue, status);
       return true;
     }
@@ -334,6 +337,10 @@ static bool iree_hal_amd_gpu_sdma_native_queue_try_publish(
     if (accepted) {
       accepted(accepted_data);
     }
+    // Native completion alone does not publish the CPU acceptance metadata.
+    // The retirement observer acquires this record before reading that state.
+    iree_atomic_store(&queue->published, (int64_t)(published + 1),
+                      iree_memory_order_release);
     iree_atomic_store(queue->user.write_index, (int64_t)queue->user.position,
                       iree_memory_order_release);
     const iree_hal_memory_transition_recipe_info_t fence = {
