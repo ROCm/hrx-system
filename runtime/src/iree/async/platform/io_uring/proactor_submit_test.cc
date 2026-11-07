@@ -6,10 +6,16 @@
 
 #include <sys/eventfd.h>
 
+#include <array>
+#include <cerrno>
 #include <condition_variable>
+#include <cstdio>
 #include <functional>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "iree/async/file.h"
@@ -216,6 +222,122 @@ class IoUringSubmitTest : public ::testing::Test {
   CompletionState filler_completion_;
   uint32_t filler_count_ = 0;
 };
+
+class IoUringFileErrorTest
+    : public IoUringSubmitTest,
+      public ::testing::WithParamInterface<std::tuple<bool, bool>> {
+ protected:
+  void TearDown() override {
+    iree_async_buffer_registration_state_deinitialize(&registrations_);
+    iree_async_file_release(file_);
+    IoUringSubmitTest::TearDown();
+  }
+
+  // File retained until the rejected operation's completion has been consumed.
+  iree_async_file_t* file_ = nullptr;
+  // Payload remains allocated until native registration has been removed.
+  std::array<uint8_t, 4096> contents_ = {};
+  // Optional fixed-buffer registration owned through completion.
+  iree_async_buffer_registration_state_t registrations_ = {};
+};
+
+TEST_P(IoUringFileErrorTest, ReportsTransferCoordinates) {
+  const auto [write, registered] = GetParam();
+  iree::testing::TempFilePath path("iree_async_file_error");
+  IREE_ASSERT_OK(iree_io_file_contents_write(
+      path.path_view(),
+      iree_make_const_byte_span(contents_.data(), contents_.size()),
+      iree_allocator_system()));
+
+  // Open a valid file in the opposite mode. The kernel rejects the transfer
+  // without touching the payload, exercising the ordinary completion error.
+  CompletionState opened;
+  iree_async_file_open_operation_t open = {};
+  iree_async_operation_initialize(
+      &open.base, IREE_ASYNC_OPERATION_TYPE_FILE_OPEN,
+      IREE_ASYNC_OPERATION_FLAG_NONE, CompletionState::Callback, &opened);
+  open.path = path.path().c_str();
+  open.open_flags =
+      write ? IREE_ASYNC_FILE_OPEN_FLAG_READ : IREE_ASYNC_FILE_OPEN_FLAG_WRITE;
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, &open.base));
+  PollUntil(proactor_, [&] { return opened.call_count == 1; });
+  file_ = open.opened_file;
+  ASSERT_EQ(opened.status_codes,
+            (std::vector<iree_status_code_t>{IREE_STATUS_OK}));
+
+  iree_async_buffer_registration_entry_t* entry = nullptr;
+  if (registered) {
+    IREE_ASSERT_OK(iree_async_proactor_register_buffer(
+        proactor_, &registrations_,
+        iree_make_byte_span(contents_.data(), contents_.size()),
+        IREE_ASYNC_BUFFER_ACCESS_FLAG_READ |
+            IREE_ASYNC_BUFFER_ACCESS_FLAG_WRITE,
+        &entry));
+  }
+  const auto span = registered
+                        ? iree_async_span_make(entry->region, 23, 257)
+                        : iree_async_span_from_ptr(contents_.data() + 23, 257);
+  iree_async_file_read_operation_t read = {};
+  iree_async_file_write_operation_t write_operation = {};
+  iree_async_operation_t* operation =
+      write ? &write_operation.base : &read.base;
+  struct Completion {
+    // Set by the same-thread poll callback after capturing the native status.
+    bool done = false;
+    // Retains error context after operation completion releases its resources.
+    iree::Status status;
+  } completion;
+  iree_async_operation_initialize(
+      operation,
+      write ? IREE_ASYNC_OPERATION_TYPE_FILE_WRITE
+            : IREE_ASYNC_OPERATION_TYPE_FILE_READ,
+      IREE_ASYNC_OPERATION_FLAG_NONE,
+      [](void* user_data, iree_async_operation_t*, iree_status_t status,
+         iree_async_completion_flags_t) {
+        auto* completion = static_cast<Completion*>(user_data);
+        completion->status = std::move(status);
+        completion->done = true;
+      },
+      &completion);
+  if (write) {
+    write_operation.file = file_;
+    write_operation.offset = 71;
+    write_operation.buffer = span;
+  } else {
+    read.file = file_;
+    read.offset = 71;
+    read.buffer = span;
+  }
+  IREE_ASSERT_OK(iree_async_proactor_submit_one(proactor_, operation));
+  PollUntil(proactor_, [&] { return completion.done; });
+  EXPECT_EQ(completion.status.code(),
+            static_cast<iree::StatusCode>(iree_status_code_from_errno(EBADF)));
+  if constexpr (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS) {
+    const std::string message = completion.status.ToString();
+    EXPECT_THAT(message, ::testing::HasSubstr(write ? "file write failed"
+                                                    : "file read failed"));
+    EXPECT_THAT(message, ::testing::HasSubstr("file_offset=71"));
+    char buffer_range[96];
+    std::snprintf(buffer_range, sizeof(buffer_range), "buffer=%p length=257",
+                  static_cast<void*>(contents_.data() + 23));
+    EXPECT_THAT(message, ::testing::HasSubstr(buffer_range));
+    EXPECT_THAT(message, ::testing::HasSubstr(
+                             registered ? "region_length=4096 region_offset=23"
+                                        : "region_length=0 region_offset=0"));
+    const int32_t fixed_base =
+        registered ? entry->region->handles.iouring.base_buffer_index : -1;
+    EXPECT_THAT(message, ::testing::HasSubstr("fixed_buffer_base=" +
+                                              std::to_string(fixed_base)));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Native, IoUringFileErrorTest,
+    ::testing::Combine(::testing::Bool(), ::testing::Bool()),
+    [](const ::testing::TestParamInfo<IoUringFileErrorTest::ParamType>& info) {
+      return std::string(std::get<0>(info.param) ? "Write" : "Read") +
+             (std::get<1>(info.param) ? "Registered" : "Unregistered");
+    });
 
 TEST_F(IoUringSubmitTest, CrossThreadNopDoesNotLoseIdleWake) {
   IREE_ASSERT_OK(iree_async_proactor_thread_create(
