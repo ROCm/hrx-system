@@ -1168,14 +1168,18 @@ static bool loom_amdgpu_source_value_dependency_is_native_i1_mask(
 }
 
 static bool loom_amdgpu_source_value_memory_payload_use_requires_vgpr(
-    const loom_module_t* module, loom_value_id_t source_value_id,
-    const loom_op_t* user_op, uint16_t operand_index) {
+    const loom_module_t* module, const loom_value_fact_table_t* fact_table,
+    loom_value_id_t source_value_id, const loom_op_t* user_op,
+    uint16_t operand_index) {
   loom_memory_access_t access = loom_memory_access_cast(module, user_op);
   if (!loom_memory_access_operand_index_is_payload(access, operand_index)) {
     return false;
   }
-  return operand_index < user_op->operand_count &&
-         loom_op_const_operands(user_op)[operand_index] == source_value_id;
+  // Memory emission materializes uniform payloads at the store. Its VGPR
+  // operand requirement must not pull an entire uniform recurrence into VGPRs.
+  return fact_table == NULL ||
+         !loom_value_facts_is_subgroup_uniform(
+             loom_value_fact_table_lookup(fact_table, source_value_id));
 }
 
 static bool loom_amdgpu_source_value_select_payload_use_requires_vgpr(
@@ -1229,7 +1233,7 @@ bool loom_amdgpu_source_value_has_vgpr_payload_use(
     const loom_op_t* user_op = loom_use_user_op(*use);
     const uint16_t operand_index = loom_use_operand_index(*use);
     if (loom_amdgpu_source_value_memory_payload_use_requires_vgpr(
-            module, source_value_id, user_op, operand_index) ||
+            module, fact_table, source_value_id, user_op, operand_index) ||
         loom_amdgpu_source_value_select_payload_use_requires_vgpr(
             module, fact_table, view_regions, analysis, source_value_id,
             user_op, operand_index)) {

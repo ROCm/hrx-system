@@ -146,6 +146,8 @@ static iree_status_t loom_licm_hoist_from_loop_body(
 
     loom_block_t* block = NULL;
     loom_region_for_each_block(region, block) {
+      bool in_entry_prefix =
+          region == body && block == loom_region_entry_block(body);
       loom_op_t* op = block->first_op;
       while (op) {
         loom_op_t* next_op = op->next_op;
@@ -156,7 +158,18 @@ static iree_status_t loom_licm_hoist_from_loop_body(
 
         loom_motion_loop_hoist_result_t result;
         IREE_RETURN_IF_ERROR(loom_motion_subtree_evaluate_hoist_before_loop(
-            &context->motion, loop, op, &result));
+            &context->motion, loop, op, in_entry_prefix, &result));
+        // A fact identity in this prefix executes on every entry into a
+        // nonempty loop. Effects, control regions, or other non-speculatable
+        // work end that proof even when a later identity is invariant.
+        in_entry_prefix =
+            in_entry_prefix && op->region_count == 0 &&
+            loom_motion_traits_are_speculation_compatible(
+                loom_op_effective_traits(context->module, op),
+                /*is_root_op=*/true) &&
+            !iree_any_bit_set(
+                result.rejection_bits,
+                LOOM_MOTION_LOOP_HOIST_REJECTION_CANDIDATE_SEMANTICS);
         if (loom_motion_loop_hoist_result_is_legal(&result)) {
           IREE_RETURN_IF_ERROR(
               loom_rewriter_move_before(context->rewriter, op, loop.op));
