@@ -239,6 +239,17 @@ N, and K dimensions remain ordinary SSA values and may be specialized from
 configuration and target facts. Encoded fragments may also carry a schema,
 scale, table, or sparse metadata in the keyed `using` dictionary.
 
+Strided views also express broadcasts into fragments. A layout with strides
+`[0, 1]` repeats per-column values across rows, `[1, 0]` repeats per-row values
+across columns, and `[0, 0]` repeats one scalar. This is useful for loading
+channel scales, biases, or row sums into the same logical coordinates as a
+matrix result. AMDGPU fragment loads support these layouts, including packed
+byte and halfword elements and FP8 decoding. Bounded runtime strides can also
+include zero; the compiler uses their retained range facts to select the
+accesses. Fragment stores still require positive stride facts. The
+[broadcast scenarios](https://github.com/ROCm/hrx-system/blob/main/loom/target/amdgpu/test/native/gfx11/fragment_broadcast.loom)
+exercise static and runtime layouts against scalar coordinate oracles.
+
 [`vector.mma`](../reference/dialects/vector/ops/mma.md) consumes the fragment
 facts rather than spelling an AMDGPU, SPIR-V, or other target instruction in
 source. Provider selection can choose a native matrix operation, a carrier

@@ -1216,16 +1216,18 @@ static bool loom_amdgpu_fragment_memory_query_view_strides(
     const loom_low_source_memory_access_plan_t* access,
     uint32_t* out_static_axis_byte_strides,
     loom_amdgpu_fragment_memory_diagnostic_t* diagnostic) {
+  const int64_t minimum_stride =
+      access->operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD ? 0 : 1;
   for (uint8_t axis = 0; axis < access->view_rank; ++axis) {
     const loom_low_source_memory_axis_byte_stride_t* axis_stride =
         &access->axis_byte_strides[axis];
     if ((axis_stride->kind != LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_STATIC &&
          axis_stride->kind !=
              LOOM_LOW_SOURCE_MEMORY_AXIS_BYTE_STRIDE_DYNAMIC) ||
-        axis_stride->static_byte_coefficient <= 0 ||
+        axis_stride->static_byte_coefficient < minimum_stride ||
         axis_stride->static_byte_coefficient > UINT32_MAX ||
         !loom_value_facts_fit_unsigned_bit_count(axis_stride->byte_facts, 32) ||
-        axis_stride->byte_facts.range_lo <= 0) {
+        axis_stride->byte_facts.range_lo < minimum_stride) {
       return loom_amdgpu_fragment_memory_reject(
           diagnostic, IREE_SV("fragment_memory.view_stride"));
     }
@@ -1615,7 +1617,7 @@ static bool loom_amdgpu_fragment_memory_evaluate_prepared(
   if (!use_transpose_load &&
       !loom_amdgpu_fragment_memory_space_supports_access(
           operation_kind, prepared->source_access.memory_space, packetization,
-          payload_form)) {
+          payload_form, (uint16_t)prepared->source_access.element_byte_count)) {
     return loom_amdgpu_fragment_memory_reject(
         diagnostic, IREE_SV("fragment_memory.memory_space"));
   }

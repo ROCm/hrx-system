@@ -53,7 +53,8 @@ bool loom_amdgpu_fragment_memory_space_supports_access(
     loom_low_source_memory_operation_kind_t operation_kind,
     loom_value_fact_memory_space_t memory_space,
     loom_amdgpu_fragment_memory_packetization_t packetization,
-    loom_amdgpu_fragment_memory_payload_form_t payload_form);
+    loom_amdgpu_fragment_memory_payload_form_t payload_form,
+    uint16_t element_byte_count);
 
 typedef enum loom_amdgpu_fragment_publication_source_flag_bits_e {
   // No optional narrowed-result source form is available.

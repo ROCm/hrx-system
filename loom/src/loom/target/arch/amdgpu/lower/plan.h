@@ -1238,8 +1238,10 @@ typedef enum loom_amdgpu_fragment_memory_packetization_e {
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_NATIVE = 0,
   // Each fragment register transfers one meaningful low 16-bit element.
   LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_SCALAR_B16 = 1,
-  // Two independently addressed 16-bit elements are packed per register.
-  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_B16 = 2,
+  // Independently addressed 8- or 16-bit elements are packed per register.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_PACKED_SUBWORD = 2,
+  // One addressed subword is repeated across a packed register.
+  LOOM_AMDGPU_FRAGMENT_MEMORY_PACKETIZATION_BROADCAST_SUBWORD = 3,
 } loom_amdgpu_fragment_memory_packetization_t;
 
 enum {
