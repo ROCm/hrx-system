@@ -38,6 +38,20 @@ loom_cc_library(
     ],
 )
 
+loom_cc_test(
+    name = "options_test",
+    srcs = ["options_test.cc"],
+    deps = [
+        ":options",
+        "//loom/src/loom/serve/server:device_configuration",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/testing:temp_file",
+    ],
+)
+
 loom_cc_library(
     name = "signals",
     srcs = ["signals.c"],
