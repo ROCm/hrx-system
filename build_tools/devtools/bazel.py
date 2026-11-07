@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import collections
 import json
 import os
 import re
@@ -1646,6 +1647,43 @@ def write_fuzz_campaign_result(
             temporary_path.unlink()
 
 
+def format_fuzz_campaign_summary(run_result: BazelFuzzRunResult) -> str:
+    """Formats one bounded summary of a completed multi-target campaign."""
+    state_counts = collections.Counter(result.state for result in run_result.targets)
+    executed_units = sum(
+        result.statistics.executed_units or 0 for result in run_result.targets
+    )
+    corpus_units_added = sum(
+        result.corpus_after.file_count - result.corpus_before.file_count
+        for result in run_result.targets
+    )
+    coverage_points_added = sum(
+        result.statistics.coverage_points - result.statistics.initial_coverage_points
+        for result in run_result.targets
+        if result.statistics.coverage_points is not None
+        and result.statistics.initial_coverage_points is not None
+    )
+    peak_rss_mb = max(
+        (result.statistics.peak_rss_mb or 0 for result in run_result.targets),
+        default=0,
+    )
+    duration_seconds = run_result.duration_ns / 1_000_000_000
+    executions_per_second = (
+        round(executed_units / duration_seconds) if duration_seconds else 0
+    )
+    state_summary = ", ".join(
+        f"{count} {state.replace('_', ' ')}"
+        for state, count in sorted(state_counts.items())
+    )
+    return (
+        f"{len(run_result.targets)} target(s) ({state_summary or 'none'}); "
+        f"{executed_units:,} executions ({executions_per_second:,}/s); "
+        f"corpus {corpus_units_added:+,} input(s); "
+        f"coverage {coverage_points_added:+,} point(s); "
+        f"{peak_rss_mb:,} MiB max target RSS; {duration_seconds:.1f}s"
+    )
+
+
 @dataclass(frozen=True)
 class BazelRunStep:
     bazel: str
@@ -1994,6 +2032,7 @@ class BazelFuzzStep:
             incompatible_targets,
             source,
         )
+        print("dev.py: fuzz campaign: " + format_fuzz_campaign_summary(run_result))
         print(f"dev.py: fuzz campaign result: {result_path}")
         return run_result.exit_code
 
