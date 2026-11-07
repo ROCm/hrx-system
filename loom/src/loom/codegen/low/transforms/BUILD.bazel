@@ -61,6 +61,7 @@ loom_cc_library(
         "//loom/src/loom/target:registers",
         "//loom/src/loom/transforms/boundary:projection_core",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
     ],
 )
 

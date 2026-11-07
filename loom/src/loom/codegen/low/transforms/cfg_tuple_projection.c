@@ -6,6 +6,7 @@
 
 #include "loom/codegen/low/transforms/cfg_tuple_projection.h"
 
+#include "iree/base/internal/math.h"
 #include "loom/codegen/low/function.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/capture.h"
@@ -17,9 +18,9 @@
 typedef struct loom_low_cfg_tuple_slice_use_t {
   // Admitted low.slice operation consuming the logical tuple.
   loom_op_t* op;
-  // First physical component observed by the slice.
+  // First projected group observed by the slice, in units until planning ends.
   uint16_t first_component;
-  // Number of consecutive unit components observed by the slice.
+  // Number of consecutive projected groups, in units until planning ends.
   uint16_t component_count;
 } loom_low_cfg_tuple_slice_use_t;
 
@@ -59,7 +60,7 @@ typedef struct loom_low_cfg_tuple_source_component_t {
 typedef struct loom_low_cfg_tuple_source_plan_t {
   // One materialization recipe per destination component.
   loom_low_cfg_tuple_source_component_t* components;
-  // Unit-register type produced by every component recipe.
+  // Register-group type produced by every component recipe.
   loom_type_t component_type;
   // Number of entries in components.
   uint16_t component_count;
@@ -135,9 +136,9 @@ static iree_status_t loom_low_cfg_tuple_plan_slot(
                                               value_id, block));
 
   const loom_type_t tuple_type = loom_module_value_type(plan->module, value_id);
-  const uint16_t component_count =
+  const uint16_t tuple_unit_count =
       (uint16_t)loom_low_register_type_unit_count(tuple_type);
-  const loom_type_t component_type =
+  const loom_type_t unit_type =
       loom_low_register_carrier_type_with_unit_count(tuple_type, 1);
   const loom_value_t* value = loom_module_value(plan->module, value_id);
   if (value->use_count == 0 || loom_value_has_attribute_uses(value) ||
@@ -153,15 +154,37 @@ static iree_status_t loom_low_cfg_tuple_plan_slot(
       (void**)&slot_plan->slice_uses));
   slot_plan->slice_use_count = value->use_count;
 
+  // Retain the largest uniform groups that every observation can consume.
+  // Splitting a native multi-register operand into individual units only to
+  // reconstruct it after the edge loses the allocation's contiguity contract.
+  uint16_t component_unit_count = tuple_unit_count;
   const loom_use_t* uses = loom_value_uses(value);
   for (uint32_t i = 0; i < value->use_count; ++i) {
     if (loom_use_operand_index(uses[i]) != 0) {
       return iree_ok_status();
     }
     loom_op_t* slice_op = loom_use_user_op(uses[i]);
-    if (!loom_low_cfg_tuple_match_slice(plan, component_type, component_count,
+    if (!loom_low_cfg_tuple_match_slice(plan, unit_type, tuple_unit_count,
                                         slice_op, &slot_plan->slice_uses[i])) {
       return iree_ok_status();
+    }
+    if (component_unit_count > 1) {
+      const loom_low_cfg_tuple_slice_use_t* slice_use =
+          &slot_plan->slice_uses[i];
+      component_unit_count = (uint16_t)iree_math_gcd_u64(
+          component_unit_count, slice_use->first_component);
+      component_unit_count = (uint16_t)iree_math_gcd_u64(
+          component_unit_count, slice_use->component_count);
+    }
+  }
+  const uint16_t component_count = tuple_unit_count / component_unit_count;
+  const loom_type_t component_type =
+      loom_low_register_carrier_type_with_unit_count(tuple_type,
+                                                     component_unit_count);
+  if (component_unit_count > 1) {
+    for (uint32_t i = 0; i < slot_plan->slice_use_count; ++i) {
+      slot_plan->slice_uses[i].first_component /= component_unit_count;
+      slot_plan->slice_uses[i].component_count /= component_unit_count;
     }
   }
 
@@ -185,7 +208,8 @@ static iree_status_t loom_low_cfg_tuple_plan_slot(
 
 static void loom_low_cfg_tuple_refine_concat_component(
     const loom_boundary_projection_plan_t* plan, loom_value_id_t value_id,
-    uint16_t component, loom_low_cfg_tuple_source_component_t* out_source) {
+    uint32_t unit_offset, uint32_t unit_count,
+    loom_low_cfg_tuple_source_component_t* out_source) {
   const loom_value_t* value = loom_module_value(plan->module, value_id);
   if (loom_value_is_block_arg(value)) {
     return;
@@ -209,12 +233,17 @@ static void loom_low_cfg_tuple_refine_concat_component(
     if (source_component_count > UINT32_MAX - source_begin) {
       return;
     }
-    if (component >= source_begin &&
-        component < source_begin + source_component_count) {
+    if (unit_offset >= source_begin &&
+        unit_offset < source_begin + source_component_count) {
+      // A group spanning operands keeps the concat's captured value. Moving
+      // its observation to one operand would discard part of that ownership.
+      if (unit_count > source_component_count - (unit_offset - source_begin)) {
+        return;
+      }
       out_source->kind = LOOM_LOW_CFG_TUPLE_SOURCE_SLICE_CONCAT_OPERAND;
       out_source->source.concat_operand.op = op;
       out_source->source.concat_operand.operand_index = i;
-      out_source->source_offset = component - source_begin;
+      out_source->source_offset = unit_offset - source_begin;
       return;
     }
     source_begin += source_component_count;
@@ -249,6 +278,8 @@ static iree_status_t loom_low_cfg_tuple_plan_source(
 
   const loom_type_t component_type = schema->component_types[0];
   source_plan->component_type = component_type;
+  const uint32_t component_unit_count =
+      loom_low_register_type_unit_count(component_type);
   for (uint16_t component = 0; component < schema->component_count;
        ++component) {
     loom_low_cfg_tuple_source_component_t* source =
@@ -256,10 +287,11 @@ static iree_status_t loom_low_cfg_tuple_plan_source(
     *source = (loom_low_cfg_tuple_source_component_t){
         .kind = LOOM_LOW_CFG_TUPLE_SOURCE_SLICE_VALUE,
         .source.value_id = source_value_id,
-        .source_offset = component,
+        .source_offset = component * component_unit_count,
     };
-    loom_low_cfg_tuple_refine_concat_component(plan, source_value_id, component,
-                                               source);
+    loom_low_cfg_tuple_refine_concat_component(plan, source_value_id,
+                                               component * component_unit_count,
+                                               component_unit_count, source);
   }
 
   *out_source = (loom_boundary_projection_source_t){

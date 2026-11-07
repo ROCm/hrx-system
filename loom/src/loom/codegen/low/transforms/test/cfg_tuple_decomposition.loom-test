@@ -378,7 +378,7 @@ low.func.def target<test.low.core>(@test_target) @scalar_control(%input: reg<tes
 
 // ----
 CHECK: *"changed":true,*
-CHECK: *"block-args-decomposed":2,"lane-block-args-inserted":5,"branch-edges-decomposed":1,"slices-removed":2}*
+CHECK: *"block-args-decomposed":2,"group-block-args-inserted":5,"branch-edges-decomposed":1,"slices-removed":2}*
 CHECK: *"category":"value-facts","acquisition_count":1,*"recomputation_count":1,*
 
 // ====
