@@ -577,7 +577,7 @@ TEST_P(QueueTest, MembershipGrowthDoesNotWaitForFullNativeSlots) {
   // Run the actual publication worker while native retirement remains held.
   // Membership's caller allocates and installs signal tables in multiple turns.
   iree_notification_deinitialize(&publication_.notification);
-  const iree_hal_amd_gpu_publication_source_t sources[] = {
+  iree_hal_amd_gpu_publication_source_t sources[] = {
       lifecycle().publication_source(queue_),
       iree_hal_amd_gpu_allocation_context_publication_source(&allocations_),
   };

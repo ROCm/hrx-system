@@ -303,7 +303,7 @@ class KernelQueueTest : public MemoryBackendTest {
   }
 
   void ExpandFrontiers() {
-    const std::array sources = {
+    std::array sources = {
         iree_hal_amd_gpu_pm4_queue_publication_source(queues_[0]),
         iree_hal_amd_gpu_pm4_queue_publication_source(queues_[1]),
     };
