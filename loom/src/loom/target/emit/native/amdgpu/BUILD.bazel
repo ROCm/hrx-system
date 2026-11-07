@@ -582,6 +582,7 @@ loom_cc_library(
         ":function_plan",
         ":function_plan_build",
         ":spill_lowering",
+        ":storage_layout",
         "//loom/src/loom/codegen/low:allocation_materialization",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/target/arch/amdgpu/abi:call_abi",
@@ -603,6 +604,7 @@ loom_cc_library(
     hdrs = ["function_plan_build.h"],
     deps = [
         ":function_plan",
+        ":storage_layout",
         "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/target/arch/amdgpu/planning:packet_plan",

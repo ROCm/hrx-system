@@ -98,10 +98,6 @@ static iree_status_t loom_amdgpu_program_compile_retained(
     IREE_ASSERT_NE(callable, NULL);
     loom_amdgpu_program_resource_builder_require_function(
         &callable->compilation.frame, &callable->compilation.plan, &resources);
-    loom_amdgpu_program_resource_builder_require_private_frame(
-        callable->compilation.plan.storage_layout.segment_sizes
-            .private_segment_fixed_size,
-        &resources);
     loom_amdgpu_program_require_callable_registers(callable, &resources);
   }
 
@@ -137,6 +133,7 @@ static iree_status_t loom_amdgpu_program_compile_retained(
       loom_amdgpu_program_call_table_provider(root->call_table);
   entry_options.call_states =
       loom_amdgpu_program_call_table_state_provider(root->call_table);
+  entry_options.storage_segment_prefix = resources.storage_segment_sizes;
   entry_options.allocation_reserved_ranges = entry_reservations;
   entry_options.allocation_reserved_range_count = entry_reservation_count;
   bool entry_compiled = false;
@@ -147,11 +144,8 @@ static iree_status_t loom_amdgpu_program_compile_retained(
     return iree_ok_status();
   }
 
-  loom_amdgpu_storage_layout_t entry_storage = {0};
-  IREE_RETURN_IF_ERROR(loom_amdgpu_program_resource_builder_append_function(
-      &out_compilation->entry.frame, &out_compilation->entry.plan, arena,
-      &resources, &entry_storage));
-  out_compilation->entry.plan.storage_layout = entry_storage;
+  loom_amdgpu_program_resource_builder_require_function(
+      &out_compilation->entry.frame, &out_compilation->entry.plan, &resources);
   loom_amdgpu_program_resource_builder_require_registers(
       LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_BASE +
           LOOM_AMDGPU_CALL_ABI_RESERVED_SGPR_COUNT,

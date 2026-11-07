@@ -260,6 +260,49 @@ TEST_F(LowAllocationNumberingTest, EntryMoveSourceKeepsExternalCoordinates) {
   ExpectFootprint();
 }
 
+TEST_F(LowAllocationNumberingTest, BoundaryIdentitiesKeepExternalCoordinates) {
+  const loom_low_allocation_numbering_anchor_t anchors[] = {
+      {{LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 0, 0}, 4},
+      {{LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 0, 4}, 4},
+  };
+  context_.boundary_anchors = anchors;
+  context_.boundary_anchor_count = IREE_ARRAYSIZE(anchors);
+  Number();
+  ExpectIdentity();
+}
+
+TEST_F(LowAllocationNumberingTest, BoundaryMovesKeepBothAbiDirections) {
+  const loom_low_allocation_numbering_anchor_t anchors[] = {
+      {{LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 0, 0}, 1},
+  };
+  loom_low_move_t moves[2] = {};
+  moves[0].source = {LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 0, 8};
+  moves[0].destination = {LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 0, 0};
+  moves[1].source = moves[0].destination;
+  moves[1].destination = moves[0].source;
+  context_.boundary_anchors = anchors;
+  context_.boundary_anchor_count = IREE_ARRAYSIZE(anchors);
+  context_.moves = moves;
+  context_.move_count = IREE_ARRAYSIZE(moves);
+  Number();
+  EXPECT_EQ(moves[0].destination.location, 0u);
+  EXPECT_EQ(moves[1].source.location, 0u);
+  EXPECT_EQ(moves[0].source.location, assignments_[2].location_base);
+  EXPECT_EQ(moves[1].destination.location, assignments_[2].location_base);
+  ExpectImproved();
+}
+
+TEST_F(LowAllocationNumberingTest, BoundaryAnchorsCoverAliasedClasses) {
+  classes_[0].alias_set_id = classes_[1].alias_set_id = 1;
+  const loom_low_allocation_numbering_anchor_t anchors[] = {
+      {{LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 1, 0}, 8},
+  };
+  context_.boundary_anchors = anchors;
+  context_.boundary_anchor_count = IREE_ARRAYSIZE(anchors);
+  Number();
+  ExpectIdentity();
+}
+
 TEST_F(LowAllocationNumberingTest, UpdatesLeasesAndCycleScratchTogether) {
   loom_low_allocation_storage_lease_t instances[2] = {};
   for (uint32_t i = 0; i < 2; ++i) {

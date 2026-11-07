@@ -4,8 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
-load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test", "loom_check_test_suite")
+load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -25,27 +24,13 @@ loom_check_test_suite(
         "pressure_headroom.loom-test",
         "ready_nomination.loom-test",
         "required_pressure.loom-test",
+        "result_lifetimes.loom-test",
         "schedule.loom-test",
         "schedule_locked.loom-test",
         "schedule_scopes.loom-test",
         "setup_order.loom-test",
+        "spill_traffic.loom-test",
         "state_updates.loom-test",
         "storage_lifetime.loom-test",
     ],
-)
-
-loom_check_test(
-    name = "spill_traffic",
-    src = "spill_traffic.loom-test",
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/arch:amdgpu",
-    ]),
-)
-
-loom_check_test(
-    name = "result_lifetimes",
-    src = "result_lifetimes.loom-test",
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/arch:amdgpu",
-    ]),
 )

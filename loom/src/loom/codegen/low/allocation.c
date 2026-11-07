@@ -73,6 +73,10 @@ typedef struct loom_low_allocation_build_state_t {
   loom_low_allocation_exit_moves_t* exit_moves;
   // Number of initialized exit transport records.
   iree_host_size_t exit_move_count;
+  // External boundary coordinates retained only through final numbering.
+  loom_low_allocation_numbering_anchor_t* boundary_anchors;
+  // Number of initialized ranges, including elided identity transfers.
+  iree_host_size_t boundary_anchor_count;
   // Mutable branch edge-copy plan being built.
   loom_low_allocation_edge_copy_plan_t edge_copy_plan;
   // Mutable packet-local final move plan being built.
@@ -427,6 +431,15 @@ loom_low_allocation_append_boundary_moves(
     boundary.descriptor_reg_class_id = locations[i].descriptor_reg_class_id;
     boundary.location_kind = locations[i].location_kind;
     boundary.location_base = locations[i].location_base;
+    if (state->boundary_anchors != NULL &&
+        boundary.location_kind ==
+            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
+      state->boundary_anchors[state->boundary_anchor_count++] =
+          (loom_low_allocation_numbering_anchor_t){
+              .location = locations[i],
+              .unit_count = assignment->location_count,
+          };
+    }
     loom_low_allocation_target_constraints_record_location_extent(
         &state->target_constraints, boundary.descriptor_reg_class_id,
         boundary.location_kind, boundary.location_base,
@@ -472,7 +485,8 @@ loom_low_allocation_append_boundary_moves(
 // Capacity includes whole register views and declared call-packet cells.
 static void loom_low_allocation_call_move_capacity(
     const loom_low_allocation_build_state_t* state,
-    iree_host_size_t* total_count, iree_host_size_t* group_count) {
+    iree_host_size_t* total_count, iree_host_size_t* group_count,
+    iree_host_size_t* boundary_count) {
   const loom_low_schedule_table_t* schedule = state->options->schedule;
   if (!state->options->call_contracts.query || !schedule) {
     return;
@@ -497,6 +511,7 @@ static void loom_low_allocation_call_move_capacity(
           state, locations, ordinals, count);
       *total_count += units;
       *group_count = iree_max(*group_count, units);
+      *boundary_count += count;
     }
   }
 }
@@ -565,7 +580,7 @@ static const loom_low_schedule_node_t* loom_low_allocation_block_exit(
 static void loom_low_allocation_exit_move_capacity(
     const loom_low_allocation_build_state_t* state,
     iree_host_size_t* total_count, iree_host_size_t* group_count,
-    iree_host_size_t* exit_count) {
+    iree_host_size_t* exit_count, iree_host_size_t* boundary_count) {
   const loom_low_schedule_table_t* schedule = state->options->schedule;
   if (!state->options->exit_locations || !schedule) {
     return;
@@ -586,6 +601,7 @@ static void loom_low_allocation_exit_move_capacity(
         state, state->options->exit_locations, ordinals, count);
     *total_count += units;
     *group_count = iree_max(*group_count, units);
+    *boundary_count += count;
   }
 }
 
@@ -650,13 +666,15 @@ static iree_status_t loom_low_allocation_build_moves(
   }
   iree_host_size_t call_unit_count = 0;
   iree_host_size_t call_group_capacity = 0;
-  loom_low_allocation_call_move_capacity(state, &call_unit_count,
-                                         &call_group_capacity);
+  iree_host_size_t boundary_capacity = 0;
+  loom_low_allocation_call_move_capacity(
+      state, &call_unit_count, &call_group_capacity, &boundary_capacity);
   iree_host_size_t exit_unit_count = 0;
   iree_host_size_t exit_group_capacity = 0;
   iree_host_size_t exit_move_capacity = 0;
   loom_low_allocation_exit_move_capacity(
-      state, &exit_unit_count, &exit_group_capacity, &exit_move_capacity);
+      state, &exit_unit_count, &exit_group_capacity, &exit_move_capacity,
+      &boundary_capacity);
   const bool has_calls = state->options->call_contracts.query &&
                          state->options->schedule &&
                          state->options->schedule->call_node_count;
@@ -664,6 +682,11 @@ static iree_status_t loom_low_allocation_build_moves(
       state->placement.edge_copy_group_count == 0 && entry_unit_count == 0 &&
       !has_calls && exit_move_capacity == 0) {
     return iree_ok_status();
+  }
+  if (boundary_capacity != 0 && state->preferences.instruction_use_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        decision_arena, boundary_capacity, sizeof(*state->boundary_anchors),
+        (void**)&state->boundary_anchors));
   }
   const iree_arena_checkpoint_t scratch_checkpoint =
       iree_arena_checkpoint_save(decision_arena);
@@ -1075,6 +1098,8 @@ static iree_status_t loom_low_allocate_function_impl(
         .storage_leases = &state.storage_leases,
         .moves = state.move_plan.moves,
         .move_count = state.move_plan.move_count,
+        .boundary_anchors = state.boundary_anchors,
+        .boundary_anchor_count = state.boundary_anchor_count,
     };
     status = loom_low_allocation_number_registers(&numbering_context,
                                                   &decision_arena);

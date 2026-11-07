@@ -1969,12 +1969,10 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
         (interval->value_id < context->required_register_values.bit_count &&
          iree_bitmap_test(context->required_register_values,
                           interval->value_id));
-    // A producer lease needs physical storage at definition. Previously
-    // assigned values can still spill; rebuilding the frame then closes their
-    // leases before the stores and establishes new leases for the reloads.
+    // A provisional spill shortens the value to its defining write and store.
+    // Rebuilding the frame establishes physical leases for that write and
+    // each reload; a producer lease does not require a lifetime-wide register.
     const bool requires_register =
-        loom_low_allocation_storage_lease_state_value_has_records(
-            context->storage_leases, context->liveness, interval->value_id) ||
         is_spill_traffic ||
         spill_requirement != LOOM_LOW_REGISTER_REQUIREMENT_NONE;
     const bool interval_requires_register =

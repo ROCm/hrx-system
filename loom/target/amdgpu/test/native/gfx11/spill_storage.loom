@@ -1,11 +1,12 @@
 // A live comparison set exceeds the hardware SGPR budget. The locked fragment
 // keeps those masks live together so automatic spill repair is exercised.
 // A snapshot in a later block must keep its address as repair extends storage.
+// The retained helper's scratch frame must not overwrite caller spill slots.
 // One active lane makes a true comparison mask equal to one.
 
 amdgpu.target<gfx11-generic> @spill_target
 
-low.func.def schedule(locked) target<amdgpu.gfx11.generic.core>(@spill_target) @spill_snapshot(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def noinline schedule(locked) target<amdgpu.gfx11.generic.core>(@spill_target) @spill_snapshot(%input: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %uniform = v_readfirstlane_b32 %input
   %bound = s_mov_b32 64
   %condition = s_cmp_lt_u32 %uniform, %bound

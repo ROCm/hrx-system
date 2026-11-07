@@ -2,18 +2,18 @@
 // the read that precedes a partial overwrite. Addresses come from Low storage.
 // RUN: emit low-schedule-query @scratch_chain strategy=resource-stall kind=effect consumer=2,4,6,8
 
-amdgpu.target<gfx942> @target
+test.target<low_core> @target
 
-low.func.def target<amdgpu.cdna3.core>(@target) @scratch_chain(%live: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+low.func.def target<test.low.core>(@target) @scratch_chain(%live: reg<test.i32 x2>) -> (reg<test.i32 x2>) asm {
   %storage = storage {byte_alignment = 8, byte_length = 8} : low.storage<private>
-  %initial_address = storage_address %storage : low.storage<private> -> reg<amdgpu.vgpr>
-  scratch_store_b64_vaddr %initial_address, %live
-  %narrow_load_address = storage_address %storage : low.storage<private> -> reg<amdgpu.vgpr>
-  %narrow = scratch_load_b32_vaddr %narrow_load_address : reg<amdgpu.vgpr>
-  %narrow_store_address = storage_address %storage : low.storage<private> -> reg<amdgpu.vgpr>
-  scratch_store_b32_vaddr %narrow_store_address, %narrow
-  %final_address = storage_address %storage : low.storage<private> -> reg<amdgpu.vgpr>
-  %wide = scratch_load_b64_vaddr %final_address : reg<amdgpu.vgpr x2>
+  %initial_address = storage_address %storage : low.storage<private> -> reg<test.ptr>
+  test.private.store.v2i32 %initial_address, %live
+  %narrow_load_address = storage_address %storage : low.storage<private> -> reg<test.ptr>
+  %narrow = test.private.load.i32 %narrow_load_address
+  %narrow_store_address = storage_address %storage : low.storage<private> -> reg<test.ptr>
+  test.private.store.i32 %narrow_store_address, %narrow
+  %final_address = storage_address %storage : low.storage<private> -> reg<test.ptr>
+  %wide = test.private.load.v2i32 %final_address
   return %wide
 }
 
@@ -28,17 +28,17 @@ node 8 <- 0, 6
 // Materialized literal addresses preserve the same scratch access ordering.
 // RUN: emit low-schedule-query @literal_chain strategy=resource-stall kind=effect consumer=1,3,5,7
 
-amdgpu.target<gfx942> @target
+test.target<low_core> @target
 
-low.func.def target<amdgpu.cdna3.core>(@target) @literal_chain(%live: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
-  %initial_address = v_mov_b32 0
-  scratch_store_b64_vaddr %initial_address, %live
-  %narrow_load_address = v_mov_b32 0
-  %narrow = scratch_load_b32_vaddr %narrow_load_address : reg<amdgpu.vgpr>
-  %narrow_store_address = v_mov_b32 0
-  scratch_store_b32_vaddr %narrow_store_address, %narrow
-  %final_address = v_mov_b32 0
-  %wide = scratch_load_b64_vaddr %final_address : reg<amdgpu.vgpr x2>
+low.func.def target<test.low.core>(@target) @literal_chain(%live: reg<test.i32 x2>) -> (reg<test.i32 x2>) asm {
+  %initial_address = test.const.ptr 0
+  test.private.store.v2i32 %initial_address, %live
+  %narrow_load_address = test.const.ptr 0
+  %narrow = test.private.load.i32 %narrow_load_address
+  %narrow_store_address = test.const.ptr 0
+  test.private.store.i32 %narrow_store_address, %narrow
+  %final_address = test.const.ptr 0
+  %wide = test.private.load.v2i32 %final_address
   return %wide
 }
 
@@ -50,25 +50,25 @@ node 7 <- 5
 
 // ====
 
-// Arithmetic and scratch transfers read EXEC before its saved value is
+// Arithmetic and private transfers read state before its saved value is
 // restored. Address materialization can wait until the stored sum is ready.
-// RUN: emit low-schedule-query @scratch_arithmetic strategy=resource-stall order=* scheduled-pressure=amdgpu.vgpr kind=state consumer=7
+// RUN: emit low-schedule-query @scratch_arithmetic strategy=resource-stall order=* scheduled-pressure=test.i32 kind=state consumer=7
 
-amdgpu.target<gfx942> @target
+test.target<low_core> @target
 
-low.func.def target<amdgpu.cdna3.core>(@target) @scratch_arithmetic(%input: reg<amdgpu.vgpr x2>, %held: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
-  %saved_exec = s_mov_b64_exec_read
-  %storage = storage {byte_alignment = 8, byte_length = 8} : low.storage<private>
-  %left = v_mul_f64 %input, %input
-  %right = v_mul_f64 %input, %held
-  %address = storage_address %storage : low.storage<private> -> reg<amdgpu.vgpr>
-  %sum = v_add_f64 %left, %right
-  scratch_store_b64_vaddr %address, %sum
-  s_mov_b64_exec %saved_exec
+low.func.def target<test.low.core>(@target) @scratch_arithmetic(%input: reg<test.i32>, %held: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %saved_state = test.state.sample.i32
+  %storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %left = test.state.read.i32 %input
+  %right = test.state.read.i32 %held
+  %address = storage_address %storage : low.storage<private> -> reg<test.ptr>
+  %sum = test.add.i32 %left, %right
+  test.private.store.i32 %address, %sum
+  test.state.assign.i32 %saved_state
   return %input, %held
 }
 
 // ----
-block 0 order: 2, 3, 5, 1, 4, 6, 0, 7, 8
-scheduled pressure amdgpu.vgpr: peak-live-units=8 peak-live-values=4
-node 7 <- 0, 2, 3, 5, 6
+block 0 order: 2, 1, 3, 5, 4, 6, 0, 7, 8
+scheduled pressure test.i32: peak-live-units=4 peak-live-values=4
+node 7 <- 0, 2, 3, 6

@@ -2,20 +2,20 @@
 // RUN: with-low-asm pass low-borrow-lifetime,low-borrow-lifetime
 type.decl import("provider", "object") @Object
 
-low.func.def target<vm.core> @select(%unused: reg<vm.ref : ptr<@Object>>, %value: reg<vm.ref : ptr<@Object>>, %condition: reg<vm.value : i1>) -> (reg<vm.ref : ptr<@Object>>) asm {
-  %alias = low.assume %value [] : reg<vm.ref : ptr<@Object>>
-  %selected = ref.select %condition, %alias, %alias : reg<vm.ref : ptr<@Object>>
+low.func.def target<test.low.core> @select(%unused: reg<test.ref : ptr<@Object>>, %value: reg<test.ref : ptr<@Object>>, %condition: reg<test.i32 : i1>) -> (reg<test.ref : ptr<@Object>>) asm {
+  %alias = low.assume %value [] : reg<test.ref : ptr<@Object>>
+  %selected = test.select.ref %condition, %alias, %alias : reg<test.ref : ptr<@Object>>
   return %selected
 }
 
 // ----
 type.decl import("provider", "object") @Object
 
-low.func.def target<vm.core> @select(%unused: reg<vm.ref : ptr<@Object>>, %value: reg<vm.ref : ptr<@Object>>, %condition: reg<vm.value : i1>) -> (reg<vm.ref : ptr<@Object>>) asm {
-  low.release %unused : reg<vm.ref : ptr<@Object>>
-  %alias = low.assume %value [] : reg<vm.ref : ptr<@Object>>
-  %selected = ref.select %condition, %alias, %alias : reg<vm.ref : ptr<@Object>>
-  low.release %value : reg<vm.ref : ptr<@Object>>
+low.func.def target<test.low.core> @select(%unused: reg<test.ref : ptr<@Object>>, %value: reg<test.ref : ptr<@Object>>, %condition: reg<test.i32 : i1>) -> (reg<test.ref : ptr<@Object>>) asm {
+  low.release %unused : reg<test.ref : ptr<@Object>>
+  %alias = low.assume %value [] : reg<test.ref : ptr<@Object>>
+  %selected = test.select.ref %condition, %alias, %alias : reg<test.ref : ptr<@Object>>
+  low.release %value : reg<test.ref : ptr<@Object>>
   return %selected
 }
 
@@ -25,17 +25,17 @@ low.func.def target<vm.core> @select(%unused: reg<vm.ref : ptr<@Object>>, %value
 // RUN: with-low-asm pass low-borrow-lifetime,low-borrow-lifetime
 type.decl import("provider", "object") @Object
 
-low.func.def target<vm.core> @copy(%value: reg<vm.ref : ptr<@Object>>) asm {
-  %copied = copy %value {detached = true} : reg<vm.ref : ptr<@Object>> -> reg<vm.ref : ptr<@Object>>
+low.func.def target<test.low.core> @copy(%value: reg<test.ref : ptr<@Object>>) asm {
+  %copied = copy %value {detached = true} : reg<test.ref : ptr<@Object>> -> reg<test.ref : ptr<@Object>>
   return
 }
 
 // ----
 type.decl import("provider", "object") @Object
 
-low.func.def target<vm.core> @copy(%value: reg<vm.ref : ptr<@Object>>) asm {
-  %copied = copy %value {detached = true} : reg<vm.ref : ptr<@Object>> -> reg<vm.ref : ptr<@Object>>
-  low.release %copied : reg<vm.ref : ptr<@Object>>
+low.func.def target<test.low.core> @copy(%value: reg<test.ref : ptr<@Object>>) asm {
+  %copied = copy %value {detached = true} : reg<test.ref : ptr<@Object>> -> reg<test.ref : ptr<@Object>>
+  low.release %copied : reg<test.ref : ptr<@Object>>
   return
 }
 
@@ -44,12 +44,12 @@ low.func.def target<vm.core> @copy(%value: reg<vm.ref : ptr<@Object>>) asm {
 // RUN: with-low-asm pass low-borrow-lifetime,low-borrow-lifetime
 type.decl import("provider", "object") @Object
 
-low.func.decl import(native, "observe", module = "provider") target<vm.core> @observe()
+low.func.decl import(native, "observe", module = "provider") target<test.low.core> @observe()
 
-low.func.def target<vm.core> @choose(%value: reg<vm.ref : ptr<@Object>>, %condition: reg<vm.value : i1>) asm {
-  low.cond_br %condition, ^read, ^skip : reg<vm.value : i1>
+low.func.def target<test.low.core> @choose(%value: reg<test.ref : ptr<@Object>>, %condition: reg<test.i32 : i1>) asm {
+  low.cond_br %condition, ^read, ^skip : reg<test.i32 : i1>
 ^read:
-  low.release %value : reg<vm.ref : ptr<@Object>>
+  low.release %value : reg<test.ref : ptr<@Object>>
   return
 ^skip:
   low.func.call @observe() : ()
@@ -59,15 +59,15 @@ low.func.def target<vm.core> @choose(%value: reg<vm.ref : ptr<@Object>>, %condit
 // ----
 type.decl import("provider", "object") @Object
 
-low.func.decl import(native, "observe", module = "provider") target<vm.core> @observe()
+low.func.decl import(native, "observe", module = "provider") target<test.low.core> @observe()
 
-low.func.def target<vm.core> @choose(%value: reg<vm.ref : ptr<@Object>>, %condition: reg<vm.value : i1>) asm {
-  low.cond_br %condition, ^read, ^_bb3 : reg<vm.value : i1>
+low.func.def target<test.low.core> @choose(%value: reg<test.ref : ptr<@Object>>, %condition: reg<test.i32 : i1>) asm {
+  low.cond_br %condition, ^read, ^_bb3 : reg<test.i32 : i1>
 ^read:
-  low.release %value : reg<vm.ref : ptr<@Object>>
+  low.release %value : reg<test.ref : ptr<@Object>>
   return
 ^_bb3:
-  low.release %value : reg<vm.ref : ptr<@Object>>
+  low.release %value : reg<test.ref : ptr<@Object>>
   low.br ^skip
 ^skip:
   low.func.call @observe() : ()

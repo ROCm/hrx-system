@@ -156,6 +156,7 @@ loom_corpus_test(
     profile_sources = {
         VM_REFERENCE_PROFILE.name: [
             "function/call/calls.loom",
+            "function/call/direct.loom",
             "memory/buffer/packing.loom",
             "memory/buffer/selection.loom",
             "memory/view/bitcast.loom",

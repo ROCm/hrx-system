@@ -1,46 +1,33 @@
-// A dead carry needs a destination at the add, but opens no live scalar
-// storage. Both address calculations can run before either vector load.
-// RUN: emit low-schedule-query @dead_carry strategy=resource-stall order=* issue=0,1,2,3,4
+// A dead carry needs a destination at issue, but has no live storage demand.
+// RUN: emit low-schedule-query @dead_carry strategy=resource-stall order=* scheduled-pressure=test.alias32
 
-amdgpu.target<gfx1100> @target
+test.target<low_core> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @dead_carry(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
-  %first_address = s_lshl_b64_rhs_inline %base, 1
-  %first = global_load_b32_saddr %offset, %first_address
-  %second_address = s_lshl_b64_rhs_inline %base, 2
-  %second = global_load_b32_saddr %offset, %second_address {offset = 4}
-  %sum, %carry = v_add_co_u32 %first, %second
+low.func.def target<test.low.core>(@target) @dead_carry(%lhs: reg<test.phys>, %rhs: reg<test.phys>) -> (reg<test.phys>) asm {
+  %first = test.add.phys %lhs, %rhs
+  %second = test.add.phys %rhs, %lhs
+  %sum, %carry = test.add.carry.phys %first, %second
   return %sum
 }
 
 // ----
-block 0 order: 0, 2, 1, 3, 4, 5
-node 0 issue-cycle: 0
-node 1 issue-cycle: 2
-node 2 issue-cycle: 1
-node 3 issue-cycle: 3
-node 4 issue-cycle: 323
+block 0 order: 0, 1, 2, 3
+scheduled pressure test.alias32: none
 
 // ====
 
-// A returned carry has a real lifetime and retains its scalar storage.
-// RUN: emit low-schedule-query @returned_carry strategy=resource-stall order=* issue=0,1,2,3,4
+// A returned carry retains its physical storage.
+// RUN: emit low-schedule-query @returned_carry strategy=resource-stall order=* scheduled-pressure=test.alias32
 
-amdgpu.target<gfx1100> @target
+test.target<low_core> @target
 
-low.func.def target<amdgpu.rdna3.core>(@target) @returned_carry(%base: reg<amdgpu.sgpr x2>, %offset: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
-  %first_address = s_lshl_b64_rhs_inline %base, 1
-  %first = global_load_b32_saddr %offset, %first_address
-  %second_address = s_lshl_b64_rhs_inline %base, 2
-  %second = global_load_b32_saddr %offset, %second_address {offset = 4}
-  %sum, %carry = v_add_co_u32 %first, %second
+low.func.def target<test.low.core>(@target) @returned_carry(%lhs: reg<test.phys>, %rhs: reg<test.phys>) -> (reg<test.phys>, reg<test.alias32>) asm {
+  %first = test.add.phys %lhs, %rhs
+  %second = test.add.phys %rhs, %lhs
+  %sum, %carry = test.add.carry.phys %first, %second
   return %sum, %carry
 }
 
 // ----
-block 0 order: 0, 2, 1, 3, 4, 5
-node 0 issue-cycle: 0
-node 1 issue-cycle: 2
-node 2 issue-cycle: 1
-node 3 issue-cycle: 3
-node 4 issue-cycle: 323
+block 0 order: 0, 1, 2, 3
+scheduled pressure test.alias32: peak-live-units=1 peak-live-values=1
