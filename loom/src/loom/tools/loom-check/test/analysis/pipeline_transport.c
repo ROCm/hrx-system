@@ -30,8 +30,9 @@ static iree_status_t loom_check_test_pipeline_schedule_print(
     const loom_module_t* module, const loom_pipeline_schedule_t* schedule,
     int indentation, iree_string_builder_t* output) {
   static const char* const names[] = {
-      "dataflow",   "compose", "serial", "memory",
-      "allocation", "channel", "branch", "yield",
+      "dataflow",   "compose", "serial",     "memory",
+      "allocation", "channel", "collective", "collective-member",
+      "branch",     "yield",
   };
   const loom_cfg_graph_t* graph = &schedule->control->graph;
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -71,6 +72,21 @@ static iree_status_t loom_check_test_pipeline_schedule_print(
           IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
               output, "%s%%%.*s", a ? "," : "", (int)argument.size,
               argument.data));
+        }
+      } else if (step->kind == LOOM_PIPELINE_SCHEDULE_STEP_COLLECTIVE) {
+        const loom_pipeline_collective_t* collective = step->collective;
+        IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+            output,
+            " operations=%" PRIhsz " results=", collective->operation_count));
+        for (iree_host_size_t r = 0; r < collective->result_count; ++r) {
+          const loom_pipeline_collective_result_t* result =
+              &collective->results[r];
+          const iree_string_view_t name = loom_module_value_name(
+              module,
+              loom_op_const_results(
+                  collective->operations[result->operation])[result->result]);
+          IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+              output, "%s%%%.*s", r ? "," : "", (int)name.size, name.data));
         }
       }
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, "\n"));

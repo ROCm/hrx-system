@@ -11,6 +11,7 @@
 #include "loom/ir/symbol_map.h"
 #include "loom/ir/value_replacement.h"
 #include "loom/ops/cfg/ops.h"
+#include "loom/ops/channel/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/pipeline/ops.h"
 #include "loom/rewrite/materialize.h"
@@ -21,6 +22,8 @@ typedef enum loom_pipeline_control_site_kind_e {
   LOOM_PIPELINE_CONTROL_EMPTY,
   LOOM_PIPELINE_CONTROL_COMPOSITION,
   LOOM_PIPELINE_CONTROL_SERIAL,
+  LOOM_PIPELINE_CONTROL_COLLECTIVE,
+  LOOM_PIPELINE_CONTROL_COLLECTIVE_MEMBER,
   LOOM_PIPELINE_CONTROL_YIELD,
   LOOM_PIPELINE_CONTROL_END,
 } loom_pipeline_control_site_kind_t;
@@ -40,6 +43,8 @@ typedef struct loom_pipeline_control_site_t {
   const loom_pipeline_invocation_schedule_t* scope;
   // Parent serial scope ordering a nested SERIAL site, or NULL at the root.
   const loom_pipeline_invocation_schedule_t* enclosing_scope;
+  // Closed immutable record read, present only on its acquisition site.
+  const loom_pipeline_collective_t* collective;
   // An autonomous single-child choice split around concurrent parent work.
   bool deferred;
 } loom_pipeline_control_site_t;
@@ -192,6 +197,14 @@ static iree_status_t loom_pipeline_control_collect(
             break;
           case LOOM_PIPELINE_SCHEDULE_STEP_YIELD:
             site.kind = LOOM_PIPELINE_CONTROL_YIELD;
+            break;
+          case LOOM_PIPELINE_SCHEDULE_STEP_COLLECTIVE:
+            site.kind = LOOM_PIPELINE_CONTROL_COLLECTIVE;
+            site.collective = step->collective;
+            instructions = true;
+            break;
+          case LOOM_PIPELINE_SCHEDULE_STEP_COLLECTIVE_MEMBER:
+            site.kind = LOOM_PIPELINE_CONTROL_COLLECTIVE_MEMBER;
             break;
           default:
             continue;
@@ -355,6 +368,65 @@ static iree_status_t loom_pipeline_control_call_projection(
                               NULL, 0, LOOM_LOCATION_UNKNOWN, &call);
 }
 
+static iree_status_t loom_pipeline_control_collective(
+    loom_rewriter_t* rewriter, const loom_pipeline_control_options_t* options,
+    const loom_pipeline_control_sites_t* sites,
+    const loom_pipeline_control_site_t* site, iree_host_size_t engine,
+    const loom_value_id_t* state_arguments) {
+  const loom_pipeline_collective_t* collective = site->collective;
+  const iree_host_size_t count = collective->operation_count;
+  loom_op_t** operations = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      rewriter->arena, count, sizeof(*operations), (void**)&operations));
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    operations[i] =
+        loom_pipeline_control_find_site(sites, collective->operations[i])
+            ->target;
+  }
+  loom_value_id_t payload = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(options->emit.collective_begin(
+      options->emit.user_data, &rewriter->builder, engine, site->scope,
+      collective, state_arguments,
+      loom_module_value_type(rewriter->module,
+                             loom_channel_acquire_view(operations[0])),
+      &payload));
+  const bool reader = payload != LOOM_VALUE_ID_INVALID;
+  if (reader) {
+    IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_with(
+        rewriter, loom_channel_acquire_view(operations[0]), payload));
+  }
+  loom_value_id_t* values = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(rewriter->arena, collective->result_count,
+                                sizeof(*values), (void**)&values));
+  for (iree_host_size_t i = 0; i < collective->result_count; ++i) {
+    const loom_pipeline_collective_result_t* result = &collective->results[i];
+    values[i] =
+        reader ? loom_op_results(operations[result->operation])[result->result]
+               : LOOM_VALUE_ID_INVALID;
+  }
+  loom_builder_set_before(&rewriter->builder, operations[count - 1]);
+  IREE_RETURN_IF_ERROR(
+      options->emit.collective_end(options->emit.user_data, &rewriter->builder,
+                                   engine, site->scope, collective, values));
+  for (iree_host_size_t i = 0; i < collective->result_count; ++i) {
+    const loom_pipeline_collective_result_t* result = &collective->results[i];
+    const loom_value_id_t original =
+        loom_op_results(operations[result->operation])[result->result];
+    if (original != values[i]) {
+      IREE_RETURN_IF_ERROR(
+          loom_rewriter_replace_all_uses_with(rewriter, original, values[i]));
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, operations[count - 1]));
+  if (!reader) {
+    for (iree_host_size_t i = count - 1; i > 1; --i) {
+      IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, operations[i - 1]));
+    }
+  }
+  return loom_rewriter_erase(rewriter, operations[0]);
+}
+
 static iree_status_t loom_pipeline_control_project(
     loom_rewriter_t* rewriter, const loom_pipeline_realization_t* realization,
     const loom_pipeline_execution_t* execution,
@@ -446,6 +518,16 @@ static iree_status_t loom_pipeline_control_project(
         IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, site->target));
         break;
       }
+      case LOOM_PIPELINE_CONTROL_COLLECTIVE:
+        if (projection == LOOM_PIPELINE_CONTROL_COMPLETE &&
+            loom_pipeline_execution_schedule(execution, site->scope)
+                    ->workers[engine] != IREE_HOST_SIZE_MAX) {
+          IREE_RETURN_IF_ERROR(loom_pipeline_control_collective(
+              rewriter, options, sites, site, engine, state_arguments));
+        }
+        break;
+      case LOOM_PIPELINE_CONTROL_COLLECTIVE_MEMBER:
+        break;  // The acquire site consumes the complete closed borrow.
       case LOOM_PIPELINE_CONTROL_COMPOSITION: {
         if (site->deferred) {
           if (projection != LOOM_PIPELINE_CONTROL_COMPLETE &&

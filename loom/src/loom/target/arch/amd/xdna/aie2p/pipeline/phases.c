@@ -86,7 +86,8 @@ iree_status_t loom_aie2p_native_select_joins(
         arena, execution->engine_count, sizeof(*join->functions),
         (void**)&join->functions));
     for (iree_host_size_t e = 0; e < execution->engine_count; ++e) {
-      join->functions[e] = loom_symbol_ref_null();
+      join->functions[e] =
+          (loom_aie2p_native_join_function_t){.symbol = loom_symbol_ref_null()};
     }
     context->first_join = context->joins[scopes[i].ordinal] = join;
   }
@@ -107,7 +108,8 @@ iree_status_t loom_aie2p_native_join_boundary(
   if (!program->count) {
     return iree_ok_status();
   }
-  loom_symbol_ref_t* symbol = &join->functions[engine];
+  loom_aie2p_native_join_function_t* emitted = &join->functions[engine];
+  loom_symbol_ref_t* symbol = &emitted->symbol;
   if (!loom_symbol_ref_is_valid(*symbol)) {
     loom_aie2p_worker_builder_t* code = &context->code;
     code->worker_index = context->execution.workers[engine];
@@ -124,6 +126,13 @@ iree_status_t loom_aie2p_native_join_boundary(
           action->selector, action->acquire ? -1 : 1));
     }
     IREE_RETURN_IF_ERROR(loom_aie2p_worker_return(&helper, NULL, 0));
+  }
+  if (loom_aie2p_join_program_prefers_sharing(program, ++emitted->use_count)) {
+    const loom_func_like_t callable = loom_func_like_cast(
+        context->code.module,
+        context->code.module->symbols.entries[symbol->symbol_id].defining_op);
+    loom_op_attrs(callable.op)[callable.vtable->inline_policy_attr_index] =
+        loom_attr_enum(LOOM_INLINE_POLICY_NOINLINE);
   }
   loom_op_t* call = NULL;
   return loom_low_invoke_build(builder, 0, 0, 0, 0, *symbol, NULL, 0, NULL, 0,

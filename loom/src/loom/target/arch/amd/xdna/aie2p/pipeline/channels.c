@@ -211,6 +211,52 @@ static iree_status_t loom_aie2p_native_materialize_buffer_accesses(
   return iree_ok_status();
 }
 
+iree_status_t loom_aie2p_native_cursor_advance(
+    loom_builder_t* builder, const loom_aie2p_native_channel_t* channel,
+    loom_value_id_t origin, loom_value_id_t cursor, loom_location_id_t location,
+    loom_value_id_t* out_record, loom_value_id_t* out_next) {
+  const loom_type_t offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  // Cursors start at zero and advance one record, wrapping at capacity.
+  // Retain that induction invariant at the borrow so source CFG widening
+  // cannot discard the selected address width and record alignment.
+  const loom_predicate_t predicates[] = {
+      {.kind = LOOM_PREDICATE_RANGE,
+       .arg_count = 3,
+       .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                    LOOM_PRED_ARG_CONST},
+       .args = {cursor, 0,
+                channel->byte_stride * (channel->source->capacity - 1)}},
+      {.kind = LOOM_PREDICATE_MULTIPLE_OF,
+       .arg_count = 2,
+       .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                    LOOM_PRED_ARG_NONE},
+       .args = {cursor, channel->byte_stride, 0}},
+  };
+  loom_op_t* bounded;
+  IREE_RETURN_IF_ERROR(loom_index_assume_build(
+      builder, &cursor, 1, predicates, IREE_ARRAYSIZE(predicates), &offset_type,
+      1, location, &bounded));
+  *out_record = loom_index_assume_results(bounded).values[0];
+  loom_op_t *stride, *limit, *next, *wrap, *selected;
+  IREE_RETURN_IF_ERROR(
+      loom_index_constant_build(builder, loom_attr_i64(channel->byte_stride),
+                                offset_type, location, &stride));
+  IREE_RETURN_IF_ERROR(loom_index_constant_build(
+      builder, loom_attr_i64(channel->byte_stride * channel->source->capacity),
+      offset_type, location, &limit));
+  IREE_RETURN_IF_ERROR(loom_index_add_build(builder, *out_record,
+                                            loom_index_constant_result(stride),
+                                            offset_type, location, &next));
+  IREE_RETURN_IF_ERROR(loom_index_cmp_build(
+      builder, LOOM_INDEX_CMP_PREDICATE_EQ, loom_index_add_result(next),
+      loom_index_constant_result(limit), location, &wrap));
+  IREE_RETURN_IF_ERROR(loom_scf_select_build(
+      builder, loom_index_cmp_result(wrap), origin, loom_index_add_result(next),
+      offset_type, location, &selected));
+  *out_next = loom_scf_select_result(selected);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_aie2p_native_channel_action(
     void* user_data, loom_rewriter_t* rewriter,
     const loom_channel_plan_action_t* action, loom_value_id_t* state,
@@ -251,50 +297,9 @@ static iree_status_t loom_aie2p_native_channel_action(
               .advances) {
         const iree_host_size_t cursor =
             write ? endpoint->cursor.writer : endpoint->cursor.reader;
-        record = state[cursor];
-        const loom_type_t offset_type =
-            loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
-        // Cursors start at zero and advance one record, wrapping at capacity.
-        // Retain that induction invariant at the borrow so source CFG widening
-        // cannot discard the selected address width and record alignment.
-        const loom_predicate_t predicates[] = {
-            {.kind = LOOM_PREDICATE_RANGE,
-             .arg_count = 3,
-             .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
-                          LOOM_PRED_ARG_CONST},
-             .args = {record, 0,
-                      physical->byte_stride *
-                          (physical->source->capacity - 1)}},
-            {.kind = LOOM_PREDICATE_MULTIPLE_OF,
-             .arg_count = 2,
-             .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
-                          LOOM_PRED_ARG_NONE},
-             .args = {record, physical->byte_stride, 0}},
-        };
-        loom_op_t* bounded;
-        IREE_RETURN_IF_ERROR(loom_index_assume_build(
-            builder, &record, 1, predicates, IREE_ARRAYSIZE(predicates),
-            &offset_type, 1, action->op->location, &bounded));
-        record = loom_index_assume_results(bounded).values[0];
-        loom_op_t *stride, *limit, *next, *wrap, *selected;
-        IREE_RETURN_IF_ERROR(loom_index_constant_build(
-            builder, loom_attr_i64(physical->byte_stride), offset_type,
-            action->op->location, &stride));
-        IREE_RETURN_IF_ERROR(loom_index_constant_build(
-            builder,
-            loom_attr_i64(physical->byte_stride * physical->source->capacity),
-            offset_type, action->op->location, &limit));
-        IREE_RETURN_IF_ERROR(loom_index_add_build(
-            builder, record, loom_index_constant_result(stride), offset_type,
-            action->op->location, &next));
-        IREE_RETURN_IF_ERROR(loom_index_cmp_build(
-            builder, LOOM_INDEX_CMP_PREDICATE_EQ, loom_index_add_result(next),
-            loom_index_constant_result(limit), action->op->location, &wrap));
-        IREE_RETURN_IF_ERROR(loom_scf_select_build(
-            builder, loom_index_cmp_result(wrap), emitter->origin,
-            loom_index_add_result(next), offset_type, action->op->location,
-            &selected));
-        state[cursor] = loom_scf_select_result(selected);
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_cursor_advance(
+            builder, physical, emitter->origin, state[cursor],
+            action->op->location, &record, &state[cursor]));
       }
       results[0] = record;
       view_result = 1;

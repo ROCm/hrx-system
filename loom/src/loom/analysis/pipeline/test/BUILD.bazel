@@ -10,6 +10,7 @@ loom_check_test_suite(
     name = "test",
     srcs = [
         "admissions.loom-test",
+        "collective.loom-test",
         "invocation_stability.loom-test",
         "invocation_storage.loom-test",
         "invocation_workers.loom-test",

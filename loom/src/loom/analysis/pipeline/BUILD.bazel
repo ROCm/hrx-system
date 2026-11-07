@@ -17,6 +17,7 @@ loom_cc_library(
     srcs = ["schedule.c"],
     hdrs = ["schedule.h"],
     deps = [
+        "//loom/src/loom/analysis:value_relation",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",
@@ -24,6 +25,7 @@ loom_cc_library(
         "//loom/src/loom/ops/buffer:op_defs",
         "//loom/src/loom/ops/channel:op_defs",
         "//loom/src/loom/ops/pipeline:op_defs",
+        "//loom/src/loom/ops/view:op_defs",
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
@@ -126,6 +128,7 @@ loom_cc_library(
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/error:parameter",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/channel:op_defs",
         "//loom/src/loom/ops/pipeline:op_defs",
         "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",

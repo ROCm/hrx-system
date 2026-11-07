@@ -1,0 +1,120 @@
+// RUN: pass outline-pipeline-strands,test.realize-pipeline,symbol-dce,cfg-simplify
+
+// Both engines take the same request-dependent branch. Only one acquires the
+// FIFO; peers receive values, join, and enter the child after the record's use.
+// Interleaved constants and calculations independent of the record stay local.
+func.decl @record(%count: i32, %base: index)
+
+pipeline.def @work() run(%count: i32, %base: index) {
+  pipeline.strand workers([0], [1], [1]) {
+    func.call @record(%count, %base) : (i32, index)
+  }
+  pipeline.strand workers([1], [1], [1]) {
+    func.call @record(%count, %base) : (i32, index)
+  }
+}
+
+pipeline.def public @requests() run(%storage: buffer, %start: index) {
+  %origin = index.constant 0 : offset
+  %capacity = index.constant 1 : index
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x8xi32>
+  %requests = channel.bind<fifo> %slots, %capacity : view<1x8xi32>, index -> channel<tile<8xi32>>
+  pipeline.serial {
+    cfg.br ^request
+  ^request:
+    %read, %payload = channel.acquire %requests : channel<tile<8xi32>> -> (read<tile<8xi32>>, view<8xi32>)
+    %c0 = scalar.constant 0 : i32
+    %c4 = index.constant 4 : index
+    %base = index.add %start, %c4 : index
+    %operation = view.load %payload[0] : view<8xi32> -> i32
+    %count = view.load %payload[1] : view<8xi32> -> i32
+    %stop = scalar.cmpi eq, %operation, %c0 : i32
+    channel.release %read : read<tile<8xi32>>
+    cfg.cond_br %stop, ^done, ^execute
+  ^execute:
+    pipeline.compose @work(%count, %base) : (i32, index)
+    cfg.br ^request
+  ^done:
+  }
+}
+
+// ----
+func.decl @record(%count: i32, %base: index)
+
+func.def inline @__pipeline_worker_0(%count: i32, %base: index) {
+  func.call @record(%count, %base) : (i32, index)
+  func.return
+}
+
+func.def inline @__pipeline_worker_1(%count: i32, %base: index) {
+  func.call @record(%count, %base) : (i32, index)
+  func.return
+}
+
+func.decl @__test_phase_join(%26: index)
+
+func.decl @__test_phase_enter(%27: index)
+
+func.def inline @__pipeline_engine_0(%28: i32, %29: index) {
+  func.call @__pipeline_worker_0(%28, %29) : (i32, index)
+  func.return
+}
+
+func.def inline @__pipeline_engine_1(%32: i32, %33: index) {
+  func.call @__pipeline_worker_1(%32, %33) : (i32, index)
+  func.return
+}
+
+func.def public inline @__pipeline_engine_2(%37: index) {
+  cfg.br ^_bb1
+^_bb1:
+  %55 = func.call @__test_collective_acquire_0() : () -> (view<8xi32>)
+  %c0 = scalar.constant 0 : i32
+  %c4 = index.constant 4 : index
+  %base = index.add %37, %c4 : index
+  %operation = view.load %55[0] : view<8xi32> -> i32
+  %count = view.load %55[1] : view<8xi32> -> i32
+  %stop = scalar.cmpi eq, %operation, %c0 : i32
+  func.call @__test_collective_send_1(%count, %stop) : (i32, i1)
+  %58 = index.constant 0 : index
+  func.call @__test_phase_join(%58) : (index)
+  func.call @__test_collective_release_2() : ()
+  cfg.cond_br %stop, ^_bb3, ^_bb2
+^_bb2:
+  %52 = index.constant 0 : index
+  func.call @__test_phase_enter(%52) : (index)
+  func.call @__pipeline_engine_0(%count, %base) : (i32, index)
+  %53 = index.constant 0 : index
+  func.call @__test_phase_join(%53) : (index)
+  cfg.br ^_bb1
+^_bb3:
+  func.return
+}
+
+func.decl @__test_collective_acquire_0() -> (view<8xi32>)
+
+func.decl @__test_collective_send_1(%56: i32, %57: i1)
+
+func.decl @__test_collective_release_2()
+
+func.def public inline @__pipeline_engine_3(%60: index) {
+  cfg.br ^_bb1
+^_bb1:
+  %c4 = index.constant 4 : index
+  %base = index.add %60, %c4 : index
+  %79, %80 = func.call @__test_collective_receive_3() : () -> (i32, i1)
+  %81 = index.constant 1 : index
+  func.call @__test_phase_join(%81) : (index)
+  cfg.cond_br %80, ^_bb3, ^_bb2
+^_bb2:
+  %75 = index.constant 1 : index
+  func.call @__test_phase_enter(%75) : (index)
+  func.call @__pipeline_engine_1(%79, %base) : (i32, index)
+  %76 = index.constant 1 : index
+  func.call @__test_phase_join(%76) : (index)
+  cfg.br ^_bb1
+^_bb3:
+  func.return
+}
+
+func.decl @__test_collective_receive_3() -> (i32, i1)

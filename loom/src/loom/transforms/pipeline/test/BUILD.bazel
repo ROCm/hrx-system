@@ -15,6 +15,7 @@ package(
 loom_check_test_suite(
     name = "test",
     srcs = [
+        "collective.loom-test",
         "compose.loom-test",
         "concurrent.loom-test",
         "control.loom-test",

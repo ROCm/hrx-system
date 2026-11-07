@@ -31,6 +31,23 @@ typedef struct loom_pipeline_control_callback_t {
                             const loom_pipeline_invocation_schedule_t* scope,
                             const loom_pipeline_invocation_t* child,
                             bool before);
+  // Acquires one logical record on the selected reader. A valid payload view
+  // places the retained read body on this engine; INVALID selects a receiver.
+  // State values are this projected call's invocation-private arguments, in
+  // the same order as options.state_types.
+  iree_status_t (*collective_begin)(
+      void* user_data, loom_builder_t* builder, iree_host_size_t engine,
+      const loom_pipeline_invocation_schedule_t* scope,
+      const loom_pipeline_collective_t* collective,
+      const loom_value_id_t* state_arguments, loom_type_t payload_type,
+      loom_value_id_t* out_payload);
+  // Distributes the reader's values, joins all participants, and returns the
+  // record's credit. Receivers supply INVALID input values. Every output is
+  // an actual value in this engine's execution domain, never an address alias.
+  iree_status_t (*collective_end)(
+      void* user_data, loom_builder_t* builder, iree_host_size_t engine,
+      const loom_pipeline_invocation_schedule_t* scope,
+      const loom_pipeline_collective_t* collective, loom_value_id_t* values);
   // Borrowed selected physical execution state.
   void* user_data;
 } loom_pipeline_control_callback_t;
