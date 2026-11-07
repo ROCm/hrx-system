@@ -62,7 +62,10 @@ static bool loom_low_schedule_effect_is_ordered(
   switch (effect->kind) {
     case LOOM_LOW_EFFECT_KIND_READ:
     case LOOM_LOW_EFFECT_KIND_WRITE:
-      return iree_any_bit_set(access_flags, LOOM_MEMORY_ACCESS_FLAG_VOLATILE);
+      // Conservatively retain issue order for atomic observations. Completion
+      // planning remains separate: independent atomics need no volatile drain.
+      return iree_any_bit_set(access_flags, LOOM_MEMORY_ACCESS_FLAG_VOLATILE |
+                                                LOOM_MEMORY_ACCESS_FLAG_ATOMIC);
     case LOOM_LOW_EFFECT_KIND_UNKNOWN:
     case LOOM_LOW_EFFECT_KIND_CALL:
     case LOOM_LOW_EFFECT_KIND_BARRIER:

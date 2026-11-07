@@ -1903,8 +1903,9 @@ static iree_status_t loom_low_verify_descriptor_features(
 static iree_status_t loom_low_verify_packet_access_flags(
     loom_low_function_verify_state_t* function_state,
     const loom_low_descriptor_packet_t* packet) {
-  if (!iree_any_bit_set(packet->op->instance_flags,
-                        LOOM_MEMORY_ACCESS_FLAG_VOLATILE)) {
+  if (!iree_any_bit_set(
+          packet->op->instance_flags,
+          LOOM_MEMORY_ACCESS_FLAG_VOLATILE | LOOM_MEMORY_ACCESS_FLAG_ATOMIC)) {
     return iree_ok_status();
   }
   const loom_low_descriptor_set_t* descriptor_set =

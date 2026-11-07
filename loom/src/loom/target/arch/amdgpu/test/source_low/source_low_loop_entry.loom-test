@@ -872,7 +872,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@loop_entry_wave64) abi_layout(
   s_waitcnt_vscnt {vscnt = 0}
   %26 = v_mov_b32 1
   %27 = v_mov_b32 0
-  global_store_b32_saddr<volatile> %27, %26, %summary_view
+  global_store_b32_saddr<atomic> %27, %26, %summary_view
   low.br ^_bb2
 ^_bb2:
   s_mov_b64_exec %24
@@ -884,7 +884,7 @@ low.kernel.def target<amdgpu.gfx11.generic.core>(@loop_entry_wave64) abi_layout(
   low.cond_br %pending, ^_bb5, ^_bb6 : reg<amdgpu.scc>
 ^_bb5:
   %29 = v_mov_b32 0
-  %loaded = global_load_b32_saddr<volatile> %29, %summary_view {offset = 4, glc = 1}
+  %loaded = global_load_b32_saddr<atomic> %29, %summary_view {offset = 4, glc = 1}
   %value = v_readfirstlane_b32 %loaded
   low.br ^_bb4(%value: reg<amdgpu.sgpr>)
 ^_bb6:

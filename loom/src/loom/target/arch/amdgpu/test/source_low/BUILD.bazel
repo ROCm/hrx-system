@@ -78,6 +78,7 @@ _AMDGPU_ARTIFACT_CHECK_TESTS = [
     "low_wait_incoming_completion.loom-test",
     "low_wait_incoming_suffix.loom-test",
     "low_wait_loop_frontier.loom-test",
+    "low_wait_memory_frontier.loom-test",
     "low_wait_packet_transfers.loom-test",
     "low_wait_plan.loom-test",
     "low_wait_retained_order.loom-test",

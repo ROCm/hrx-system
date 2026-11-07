@@ -44,7 +44,7 @@ low.kernel.def target<amdgpu.rdna4.core> abi_layout({constant_count = 1, direct_
   %7 = v_mov_b32_copy %value
   %8 = v_mov_b32 0
   global_store_b32_saddr %8, %7, %output_view {scope = 2}
-  global_store_b32_saddr<volatile> %8, %7, %output_view {offset = 4, scope = 3}
+  global_store_b32_saddr<atomic> %8, %7, %output_view {offset = 4, scope = 3}
   return
 }
 

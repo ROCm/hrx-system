@@ -419,7 +419,7 @@ iree_status_t loom_low_func_call_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_LOW_OP: Descriptor-backed target instruction over virtual registers. Memory access flags constrain each instruction instance independently of its descriptor and machine cache controls. Volatile preserves dynamic memory observations and their order; it supplies no atomicity, synchronization, or cache-coherence guarantee.
+// LOOM_OP_LOW_OP: Descriptor-backed target instruction over virtual registers. Memory access flags constrain each instruction instance independently of its descriptor and machine cache controls. Volatile preserves dynamic memory observations and their order; it supplies no atomicity, synchronization, or cache-coherence guarantee. Atomic preserves each indivisible observation and same-location issue order without ordering completion across independent addresses. The instruction, alignment, fences, and cache controls supply the physical atomic memory contract.
 // %sum = low.op<amdgpu.v_add_u32>(%lhs, %rhs) : (reg<amdgpu.vgpr x1>, reg<amdgpu.vgpr x1>) -> reg<amdgpu.vgpr x1>
 LOOM_DEFINE_ISA(loom_low_op_isa, LOOM_OP_LOW_OP)
 LOOM_DEFINE_VARIADIC_OPERANDS(loom_low_op_operands, 0)

@@ -51,4 +51,26 @@ MemoryAccessFlags = EnumDef(
     c_include="loom/ops/op_defs.h",
 )
 
-__all__ = ["MemoryAccessFlags", "MemorySpace"]
+LowMemoryAccessFlags = EnumDef(
+    "LowMemoryAccessFlags",
+    [
+        MemoryAccessFlags.case("volatile"),
+        EnumCase(
+            "atomic",
+            4,
+            doc=(
+                "Mark one physical load/store as an indivisible atomic observation. "
+                "Every dynamic access is observable and same-location issue order "
+                "is preserved. The instruction and address alignment supply atomicity; "
+                "explicit fences and cache controls supply synchronization and visibility. "
+                "Independent addresses do not require ordered completion."
+            ),
+        ),
+    ],
+    doc="Physical memory observation semantics for descriptor-backed instructions.",
+    c_type="loom_memory_access_flags_t",
+    c_const_prefix="LOOM_MEMORY_ACCESS_FLAG",
+    c_include="loom/ops/op_defs.h",
+)
+
+__all__ = ["LowMemoryAccessFlags", "MemoryAccessFlags", "MemorySpace"]

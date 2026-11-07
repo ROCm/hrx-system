@@ -26,9 +26,9 @@ kernel.def @poll_then_publish() {
 }
 
 // ----
-CHECK: %seen = global_load_b32_saddr<volatile> * {glc = 1}
+CHECK: %seen = global_load_b32_saddr<atomic> * {glc = 1}
 CHECK: %pending = v_cmp_eq_i32* %seen*
-CHECK: global_store_b32_saddr<volatile> * {offset = 8}
+CHECK: global_store_b32_saddr<atomic> * {offset = 8}
 CHECK: s_waitcnt {vmcnt = 0}
 CHECK: s_waitcnt_vscnt {vscnt = 0}
 CHECK-NOT: buffer_gl*_inv
@@ -69,9 +69,61 @@ kernel.def @poll_result_controls_next_loop() {
 // ----
 CHECK: ^*(%startup: reg<amdgpu.vgpr>):
 CHECK: %waiting = v_cmp_eq_i32*
-CHECK: %value = global_load_b32_saddr<volatile> * {glc = 1}
+CHECK: %value = global_load_b32_saddr<atomic> * {glc = 1}
 CHECK: low.br ^*(%value: reg<amdgpu.vgpr>)
 CHECK: low.br ^*(%startup: reg<amdgpu.vgpr>)
 CHECK: ^*(%mode: reg<amdgpu.vgpr>):
 CHECK: %running = v_cmp_eq_i32*
 CHECK-NOT: v_readfirstlane*
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+// Source atomicity remains visible after lowering independently of cache flags.
+kernel.def @relaxed_cohort() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 8} : buffer
+  %words = buffer.view %aligned[%origin] : buffer -> view<4xi64>
+  %results = buffer.view %output[%origin] : buffer -> view<1xi64>
+  %first = view.atomic.load %words[0] {ordering = relaxed, scope = device} : view<4xi64> -> i64
+  %second = view.atomic.load %words[1] {ordering = relaxed, scope = device} : view<4xi64> -> i64
+  %third = view.atomic.load %words[2] {ordering = relaxed, scope = system} : view<4xi64> -> i64
+  %fourth = view.atomic.load %words[3] {ordering = relaxed, scope = system} : view<4xi64> -> i64
+  %ab = scalar.ori %first, %second : i64
+  %cd = scalar.ori %third, %fourth : i64
+  %result = scalar.ori %ab, %cd : i64
+  view.store %result, %results[0] : i64, view<1xi64>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.cdna3.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @relaxed_cohort() asm {
+  %words = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %results = resource<hal_binding> {extent = 8, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %17 = v_mov_b32 0
+  %first = global_load_dwordx2_saddr<atomic> %17, %words {sc1 = 1} : reg<amdgpu.vgpr x2>
+  %second = global_load_dwordx2_saddr<atomic> %17, %words {offset = 8, sc1 = 1} : reg<amdgpu.vgpr x2>
+  %third = global_load_dwordx2_saddr<atomic> %17, %words {offset = 16, sc0 = 1, sc1 = 1} : reg<amdgpu.vgpr x2>
+  %fourth = global_load_dwordx2_saddr<atomic> %17, %words {offset = 24, sc0 = 1, sc1 = 1} : reg<amdgpu.vgpr x2>
+  %25 = slice %first[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %26 = slice %second[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %27 = v_or_b32 %25, %26
+  %28 = slice %first[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %29 = slice %second[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %30 = v_or_b32 %28, %29
+  %32 = slice %third[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %33 = slice %fourth[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %34 = v_or_b32 %32, %33
+  %35 = slice %third[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %36 = slice %fourth[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %37 = v_or_b32 %35, %36
+  %41 = v_or_b32 %27, %34
+  %44 = v_or_b32 %30, %37
+  %result = concat(%41, %44) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_dwordx2_saddr %17, %result, %results
+  return
+}

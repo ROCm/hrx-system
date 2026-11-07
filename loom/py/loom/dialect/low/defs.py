@@ -59,7 +59,7 @@ from loom.dialect.func.defs import (
     InlinePolicyAttr,
     Temperature,
 )
-from loom.dialect.memory import MemoryAccessFlags
+from loom.dialect.memory import LowMemoryAccessFlags
 from loom.dialect.symbol import Retain, Visibility
 from loom.dialect.target.defs import ExportAbiKind, ExportLinkage
 from loom.dsl import (
@@ -1279,7 +1279,10 @@ low_op = Op(
         "access flags constrain each instruction instance independently of its "
         "descriptor and machine cache controls. Volatile preserves dynamic "
         "memory observations and their order; it supplies no atomicity, "
-        "synchronization, or cache-coherence guarantee."
+        "synchronization, or cache-coherence guarantee. Atomic preserves each "
+        "indivisible observation and same-location issue order without ordering "
+        "completion across independent addresses. The instruction, alignment, "
+        "fences, and cache controls supply the physical atomic memory contract."
     ),
     operands=[Operand("operands", REGISTER, variadic=True)],
     attrs=[
@@ -1288,7 +1291,7 @@ low_op = Op(
             "memory_flags",
             ATTR_TYPE_FLAGS,
             optional=True,
-            enum_def=MemoryAccessFlags,
+            enum_def=LowMemoryAccessFlags,
         ),
         AttrDef("attrs", "dict", optional=True),
     ],

@@ -13,6 +13,7 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/allocation/storage_lease_index.h"
 #include "loom/codegen/low/builder.h"
 #include "loom/codegen/low/immediates.h"
 #include "loom/ir/context.h"
@@ -35,6 +36,21 @@ namespace {
 // issue-limit and memory-completion inputs explicit.
 class AmdgpuWaitPlanTest : public ::testing::Test {
  protected:
+  virtual iree_string_view_t DescriptorSetName() {
+    return IREE_SV("amdgpu.rdna4.gfx125x.core");
+  }
+
+  virtual iree_string_view_t ProcessorName() { return IREE_SV("gfx1250"); }
+
+  virtual uint16_t ArgumentRegisterClass(uint32_t index) {
+    return LOOM_AMDGPU_REG_CLASS_ID_SGPR;
+  }
+
+  virtual uint32_t ArgumentWidth(uint32_t index) {
+    const uint32_t widths[] = {4, 8, 4, 4};
+    return widths[index];
+  }
+
   static iree_status_t Allocate(void* self, iree_allocator_command_t command,
                                 const void* parameters, void** pointer) {
     auto* test = static_cast<AmdgpuWaitPlanTest*>(self);
@@ -75,15 +91,17 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
                                         &module_pool_, nullptr,
                                         iree_allocator_system(), &module_));
     loom_amdgpu_low_descriptor_registry_initialize(&registry_);
-    descriptors_ = loom_low_descriptor_registry_lookup(
-        &registry_.registry, IREE_SV("amdgpu.rdna4.gfx125x.core"));
-    ASSERT_NE(descriptors_, nullptr);
+    descriptors_ = loom_low_descriptor_registry_lookup(&registry_.registry,
+                                                       DescriptorSetName());
+    if (descriptors_ == nullptr) {
+      GTEST_SKIP() << "AMDGPU descriptor set is not linked";
+    }
     schedule_model_ = loom_low_descriptor_set_lookup_schedule_model_by_id(
         descriptors_, UINT64_C(0x2a42ccc9fb04b34e));
     ASSERT_NE(schedule_model_, nullptr);
     const loom_amdgpu_processor_info_t* processor = nullptr;
-    IREE_ASSERT_OK(loom_amdgpu_target_info_lookup_processor(IREE_SV("gfx1250"),
-                                                            &processor));
+    IREE_ASSERT_OK(
+        loom_amdgpu_target_info_lookup_processor(ProcessorName(), &processor));
     facts_.base.fact_type = &loom_amdgpu_target_fact_type;
     facts_.properties.processor = &processor->properties;
 
@@ -93,8 +111,8 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     loom_string_id_t descriptor_set = LOOM_STRING_ID_INVALID;
     IREE_ASSERT_OK(
         loom_builder_intern_string(&builder_, IREE_SV("transfers"), &name));
-    IREE_ASSERT_OK(loom_builder_intern_string(
-        &builder_, IREE_SV("amdgpu.rdna4.gfx125x.core"), &descriptor_set));
+    IREE_ASSERT_OK(loom_builder_intern_string(&builder_, DescriptorSetName(),
+                                              &descriptor_set));
     loom_string_id_t helper_name = LOOM_STRING_ID_INVALID;
     IREE_ASSERT_OK(
         loom_builder_intern_string(&builder_, IREE_SV("helper"), &helper_name));
@@ -119,11 +137,10 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     uint16_t symbol = LOOM_SYMBOL_ID_INVALID;
     IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol));
     loom_type_t argument_types[4];
-    const uint32_t widths[] = {4, 8, 4, 4};
     for (uint32_t i = 0; i < 4; ++i) {
-      IREE_ASSERT_OK(loom_low_build_register_type(
-          descriptors_, LOOM_AMDGPU_REG_CLASS_ID_SGPR, widths[i],
-          &argument_types[i]));
+      IREE_ASSERT_OK(
+          loom_low_build_register_type(descriptors_, ArgumentRegisterClass(i),
+                                       ArgumentWidth(i), &argument_types[i]));
     }
     loom_op_t* function = nullptr;
     IREE_ASSERT_OK(loom_low_func_def_build(
@@ -149,12 +166,12 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     for (uint32_t i = 0; i < 4; ++i) {
       value_producer_nodes_[i] = LOOM_LOW_SCHEDULE_NODE_NONE;
       assignments_[i].value_id = block->arg_ids[i];
-      assignments_[i].descriptor_reg_class_id = LOOM_AMDGPU_REG_CLASS_ID_SGPR;
-      assignments_[i].unit_count = widths[i];
+      assignments_[i].descriptor_reg_class_id = ArgumentRegisterClass(i);
+      assignments_[i].unit_count = ArgumentWidth(i);
       assignments_[i].location_kind =
           LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
       assignments_[i].location_base = locations[i];
-      assignments_[i].location_count = widths[i];
+      assignments_[i].location_count = ArgumentWidth(i);
       assignment_indices_[i] = i;
     }
     allocation_.module = module_;
@@ -535,7 +552,9 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
 
   void Append(loom_amdgpu_descriptor_ref_t descriptor_ref,
               loom_named_attr_slice_t attrs,
-              loom_memory_access_flags_t access_flags = 0) {
+              loom_memory_access_flags_t access_flags = 0,
+              uint32_t result_width = 0,
+              loom_value_ordinal_t result_ordinal = 0) {
     const uint32_t node_index = (uint32_t)nodes_.size();
     const auto* descriptor =
         loom_amdgpu_descriptor_ref_descriptor(descriptors_, descriptor_ref);
@@ -555,11 +574,19 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     for (uint16_t i = 0; i < node.operand_count; ++i) {
       loom_low_schedule_node_operand_ordinals(&node)[i] = i;
     }
+    loom_type_t result_type = {};
+    if (result_width != 0) {
+      IREE_ASSERT_OK(loom_low_build_register_type(descriptors_,
+                                                  LOOM_AMDGPU_REG_CLASS_ID_VGPR,
+                                                  result_width, &result_type));
+      node.result_count = 1;
+      loom_low_schedule_node_result_ordinals(&node)[0] = result_ordinal;
+    }
     loom_op_t* op = nullptr;
     IREE_ASSERT_OK(loom_low_build_resolved_descriptor_op(
         &builder_, descriptors_, descriptor, access_flags,
-        block_.block->arg_ids, node.operand_count, attrs, nullptr, 0, nullptr,
-        0, LOOM_LOCATION_UNKNOWN, &op));
+        block_.block->arg_ids, node.operand_count, attrs, &result_type,
+        node.result_count, nullptr, 0, LOOM_LOCATION_UNKNOWN, &op));
     node.op = op;
     node.traits = op->traits;
     node.immediate_presence = loom_low_bind_immediate_presence(
@@ -644,7 +671,7 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   loom_symbol_ref_t call_target_ = loom_symbol_ref_null();
   // Immutable input assembled before the planner call.
   loom_low_schedule_table_t schedule_ = {};
-  // Nonoverlapping physical SGPR tuples backing the function arguments.
+  // Nonoverlapping physical tuples backing the function arguments.
   loom_low_allocation_assignment_t assignments_[4] = {};
   // Direct value-ordinal to assignment mapping.
   uint32_t assignment_indices_[4] = {};
@@ -658,6 +685,171 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
   // Fixed-delay plan produced after counter waits are materialized.
   loom_amdgpu_wait_state_plan_t wait_state_plan_ = {};
 };
+
+struct ResultReuseCase {
+  // Instruction vocabulary for both loads.
+  iree_string_view_t descriptor_set;
+  // Canonical processor properties governing ordered result replacement.
+  iree_string_view_t processor;
+  // Width of the later load replacing part or all of the four-word result.
+  uint32_t width;
+  // Whether the older result must complete before replacement.
+  bool requires_wait;
+};
+
+class AmdgpuResultReuseWaitTest
+    : public AmdgpuWaitPlanTest,
+      public ::testing::WithParamInterface<ResultReuseCase> {
+ protected:
+  iree_string_view_t DescriptorSetName() override {
+    return GetParam().descriptor_set;
+  }
+  iree_string_view_t ProcessorName() override { return GetParam().processor; }
+  uint16_t ArgumentRegisterClass(uint32_t index) override {
+    return index == 0 ? LOOM_AMDGPU_REG_CLASS_ID_VGPR
+                      : LOOM_AMDGPU_REG_CLASS_ID_SGPR;
+  }
+  uint32_t ArgumentWidth(uint32_t index) override {
+    const uint32_t widths[] = {1, 2, 4, 4};
+    return widths[index];
+  }
+};
+
+TEST_P(AmdgpuResultReuseWaitTest, ReplacementRetiresTheWholePendingLease) {
+  const auto& test_case = GetParam();
+  Append(LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_B128_SADDR,
+         loom_named_attr_slice_empty(), 0, 4, 4);
+  const auto replacement =
+      test_case.width == 1 ? LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_B32_SADDR
+      : test_case.width == 2
+          ? LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_B64_SADDR
+          : LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_LOAD_B128_SADDR;
+  Append(replacement, loom_named_attr_slice_empty(), 0, test_case.width, 5);
+  FinalizeSchedule();
+
+  // Allocation may reuse a dead SSA result while its asynchronous write still
+  // owns the physical tuple. The retained release action protects that lease.
+  loom_value_id_t value_ids[6];
+  uint32_t producers[6];
+  uint32_t assignment_indices[6];
+  loom_low_allocation_assignment_t assignments[6];
+  for (uint32_t i = 0; i < 4; ++i) {
+    value_ids[i] = block_.block->arg_ids[i];
+    producers[i] = LOOM_LOW_SCHEDULE_NODE_NONE;
+    assignments[i] = assignments_[i];
+  }
+  for (uint32_t i = 4; i < 6; ++i) {
+    value_ids[i] = loom_op_results(nodes_[i - 4].op)[0];
+    producers[i] = i - 4;
+    const uint32_t width = i == 4 ? 4 : test_case.width;
+    assignments[i] = {};
+    assignments[i].value_id = value_ids[i];
+    assignments[i].descriptor_reg_class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR;
+    assignments[i].unit_count = width;
+    assignments[i].location_kind =
+        LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
+    assignments[i].location_base = width == 4 ? 4 : 6;
+    assignments[i].location_count = width;
+  }
+  for (uint32_t i = 0; i < 6; ++i) {
+    assignment_indices[i] = i;
+  }
+  schedule_.value_ids = value_ids;
+  schedule_.value_count = 6;
+  schedule_.value_producer_nodes = producers;
+  allocation_.liveness.value_ids = value_ids;
+  allocation_.liveness.value_count = 6;
+  allocation_.assignments = assignments;
+  allocation_.assignment_count = 6;
+  allocation_.assignment_indices_by_value_ordinal = assignment_indices;
+  const loom_liveness_block_info_t liveness_block = {.end_point = 3};
+  allocation_.liveness.blocks = &liveness_block;
+  allocation_.liveness.block_count = 1;
+  physical_extents_[LOOM_AMDGPU_REG_CLASS_ID_VGPR] = 8;
+  loom_low_storage_lease_provider_t provider = {};
+  loom_amdgpu_storage_lease_provider(&provider);
+  IREE_ASSERT_OK(loom_low_storage_lease_build(
+      &schedule_, &provider, &module_->arena, &allocation_.storage_leases));
+  ASSERT_EQ(allocation_.storage_leases.record_count, 2u);
+  loom_low_allocation_storage_lease_t leases[2] = {};
+  for (uint32_t i = 0; i < 2; ++i) {
+    const auto& record = allocation_.storage_leases.records[i];
+    ASSERT_EQ(record.node_index, i);
+    ASSERT_EQ(record.kind, LOOM_LOW_STORAGE_LEASE_RESULT_WRITE);
+    auto& lease = leases[i];
+    lease.lease_record_index = i;
+    lease.assignment_index = 4 + i;
+    lease.value_id = value_ids[4 + i];
+    lease.start_point = i + 1;
+    lease.end_point = i == 0 ? 1 : 3;
+    lease.release_action_index =
+        i == 0 ? 0 : LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE;
+    lease.descriptor_reg_class_id = LOOM_AMDGPU_REG_CLASS_ID_VGPR;
+    lease.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
+    lease.location_base = assignments[4 + i].location_base;
+    lease.location_count = assignments[4 + i].location_count;
+  }
+  const loom_low_storage_release_action_t release = {
+      .insertion_packet_index = 1,
+      .insertion_node_index = 1,
+      .scheduled_ordinal = 1,
+      .release_class_id = LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD,
+      .release_action_id = LOOM_AMDGPU_WAIT_PLAN_RESIDUAL_ACTION_WAIT_PACKET,
+      .next_same_insertion_node_action_index =
+          LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
+      .release_reason_id = LOOM_AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE,
+      .required_progress = 1,
+      .lease_record_index = 0,
+  };
+  const uint32_t release_indices[] = {
+      LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE, 0,
+      LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE};
+  allocation_.storage_lease_instances = leases;
+  allocation_.storage_lease_instance_count = 2;
+  loom_low_allocation_storage_lease_unit_index_t lease_index = {};
+  IREE_ASSERT_OK(loom_low_allocation_storage_lease_unit_index_initialize(
+      &lease_index, leases, 2, 4 + test_case.width, 4, &module_->arena));
+  for (uint32_t i = 0; i < 2; ++i) {
+    loom_low_allocation_storage_lease_unit_index_insert(
+        &lease_index, descriptors_, i,
+        allocation_.storage_leases.records[i].flags);
+  }
+  allocation_.storage_lease_unit_index = &lease_index;
+  allocation_.storage_release_actions = &release;
+  allocation_.storage_release_action_count = 1;
+  allocation_.first_storage_release_action_by_node = release_indices;
+  IREE_ASSERT_OK(BuildPlan());
+  ASSERT_EQ(plan_.action_count, test_case.requires_wait ? 1u : 0u);
+  if (test_case.requires_wait) {
+    const auto& action = plan_.actions[0];
+    EXPECT_EQ(action.node_index, 1u);
+    EXPECT_EQ(action.producer_node, 0u);
+    EXPECT_EQ(action.counter_id, LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD);
+    EXPECT_EQ(action.target_count, 0u);
+    EXPECT_EQ(action.reason, LOOM_AMDGPU_WAIT_PLAN_REASON_READ_RESULT_REUSE);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ResultWidths, AmdgpuResultReuseWaitTest,
+    ::testing::Values(ResultReuseCase{IREE_SV("amdgpu.cdna3.core"),
+                                      IREE_SV("gfx942"), 1, true},
+                      ResultReuseCase{IREE_SV("amdgpu.cdna3.core"),
+                                      IREE_SV("gfx942"), 2, true},
+                      ResultReuseCase{IREE_SV("amdgpu.cdna3.core"),
+                                      IREE_SV("gfx942"), 4, false},
+                      ResultReuseCase{IREE_SV("amdgpu.rdna3_5.core"),
+                                      IREE_SV("gfx1151"), 1, true},
+                      ResultReuseCase{IREE_SV("amdgpu.rdna3_5.core"),
+                                      IREE_SV("gfx1151"), 2, true},
+                      ResultReuseCase{IREE_SV("amdgpu.rdna3_5.core"),
+                                      IREE_SV("gfx1151"), 4, false},
+                      ResultReuseCase{IREE_SV("amdgpu.rdna4.core"),
+                                      IREE_SV("gfx1200"), 1, true},
+                      ResultReuseCase{IREE_SV("amdgpu.rdna4.core"),
+                                      IREE_SV("gfx1200"), 2, true},
+                      ResultReuseCase{IREE_SV("amdgpu.rdna4.core"),
+                                      IREE_SV("gfx1200"), 4, true}));
 
 TEST_F(AmdgpuWaitPlanTest, IndependentTransfersKeepTheHardwareIssueBound) {
   Tensor();

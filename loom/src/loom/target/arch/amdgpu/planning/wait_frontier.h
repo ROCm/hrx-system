@@ -95,6 +95,14 @@ typedef struct loom_amdgpu_wait_memory_state_t {
   uint16_t access_counter_masks[LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT];
 } loom_amdgpu_wait_memory_state_t;
 
+// Incoming memory effects completed on every path through one block.
+typedef struct loom_amdgpu_wait_memory_completion_t {
+  // Consumer alias classes whose incoming reads are completed by writes.
+  loom_amdgpu_wait_memory_space_flags_t read_space_flags;
+  // Consumer alias classes whose incoming writes are completed by reads.
+  loom_amdgpu_wait_memory_space_flags_t write_space_flags;
+} loom_amdgpu_wait_memory_completion_t;
+
 // Cross-block wait frontier for one scheduled function.
 typedef struct loom_amdgpu_wait_frontier_t {
   // Schedule whose CFG and block order define the frontier.
@@ -105,12 +113,16 @@ typedef struct loom_amdgpu_wait_frontier_t {
   const loom_amdgpu_wait_frontier_node_t* nodes;
   // Memory dependency state.
   struct {
+    // Per-block completed incoming alias classes, excluding local producers.
+    loom_amdgpu_wait_memory_completion_t* incoming_completions;
     // Conservative transitive outgoing state for every block.
     loom_amdgpu_wait_memory_state_t* static_outgoing_states;
     // Conservative outgoing state recorded after each processed block.
     loom_amdgpu_wait_memory_state_t* resolved_outgoing_states;
     // Conservative incoming state active while the current block is processed.
     loom_amdgpu_wait_memory_state_t active_state;
+    // Per-block source-refined classes completed by unrefined accesses.
+    loom_amdgpu_wait_memory_completion_t* refined_incoming_completions;
     // Source-refined transitive outgoing state over forward CFG edges.
     loom_amdgpu_wait_memory_state_t* refined_static_outgoing_states;
     // Source-refined outgoing state recorded after each processed block.
