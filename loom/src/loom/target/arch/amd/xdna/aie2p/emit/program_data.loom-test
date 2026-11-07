@@ -1,0 +1,144 @@
+// RUN: emit aie2p-xdna output=sections
+
+// The entry and two equivalent helpers share first. A third helper reads an
+// equal-valued but distinct definition; it must keep its own address fixup.
+// Neither helper's local inventory sees the cross-function bank constraint.
+// The two placements also exercise linking the same detached program twice.
+global.rodata.def @first = align(64) conflicts([@second, @unused]) bytes("1122334455667788")
+
+global.rodata.def @second = align(128) conflicts([@first]) bytes("1122334455667788")
+
+global.rodata.def @unused = align(32) conflicts([@first]) bytes("99aabbcc")
+
+aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) @configure() asm {
+  %columns = constant 2 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @initialize() asm {
+  %first_column = constant 0 : reg<aie2p.config.scalar : i64>
+  %second_column = constant 1 : reg<aie2p.config.scalar : i64>
+  %row = constant 3 : reg<aie2p.config.scalar : i64>
+  %origin = constant 0 : reg<aie2p.config.scalar : i64>
+  %bank_bytes = constant 16384 : reg<aie2p.config.scalar : i64>
+  data.reserve %first_column, %row, %origin, %bank_bytes
+  program.load %first_column, %row, @worker
+  program.load %second_column, %row, @worker
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @invoke() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @worker() asm {
+  %scratch = storage {byte_alignment = 64, byte_length = 64} : low.storage<private>
+  %destination = storage_address %scratch : low.storage<private> -> reg<aie2p.ep>
+  %address = mov.local-address @first
+  %own = lda %address, 4
+  st %own, %destination, 0
+  %first = low.func.call @read_first() : () -> (reg<aie2p.er>)
+  st %first, %destination, 4
+  %again = low.func.call @read_first_again() : () -> (reg<aie2p.er>)
+  st %again, %destination, 8
+  %second = low.func.call @read_second() : () -> (reg<aie2p.er>)
+  st %second, %destination, 12
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @read_first() -> (reg<aie2p.er>) asm {
+  %address = mov.local-address @first
+  %value = lda %address, 0
+  return %value
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @read_first_again() -> (reg<aie2p.er>) asm {
+  %address = mov.local-address @first
+  %value = lda %address, 0
+  return %value
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @read_second() -> (reg<aie2p.er>) asm {
+  %address = mov.local-address @second
+  %value = lda %address, 0
+  return %value
+}
+
+// ----
+.text.worker: address=0x00000000 bytes=200 initialized
+  f8e0d11d4480c0400700ba1000b0d00100d08202000000000000000004010048000000009811040900000000180000109811140900000401004800000000000018000010040000000000040000000000981124090000040100580000000000001800001004000000000004000000000098113409f8a07b1f1800281000000000000000000000000000000000000000004480c040070098160400180028100000000000000000000000000000000000004400c0800700981604001800281000000000000000000000
+.text.worker: address=0x00000000 bytes=200 initialized
+  f8e0d11d4480c0000700ba1000b0c00100d08202000000000000000004010048000000009811040900000000180000109811140900000401004800000000000018000010040000000000040000000000981124090000040100580000000000001800001004000000000004000000000098113409f8a07b1f1800281000000000000000000000000000000000000000004480c000070098160400180028100000000000000000000000000000000000004400c0400700981604001800281000000000000000000000
+.rodata.first: address=0x00074040 bytes=8 initialized
+  1122334455667788
+.rodata.second: address=0x00078000 bytes=8 initialized
+  1122334455667788
+.storage.worker.private: address=0x00074000 bytes=64 reserved
+.rodata.first: address=0x00070040 bytes=8 initialized
+  1122334455667788
+.rodata.second: address=0x00074000 bytes=8 initialized
+  1122334455667788
+.storage.worker.private: address=0x00070000 bytes=64 reserved
+
+// ====
+// RUN: emit aie2p-xdna output=sections
+
+// Resident cloning must retain definitions reachable only from direct helpers,
+// including their full conflict relation, before source-module destruction.
+global.rodata.def @first = align(64) conflicts([@second, @unused]) bytes("1122334455667788")
+
+global.rodata.def @second = align(128) conflicts([@first]) bytes("99aabbccddeeff00")
+
+global.rodata.def @unused = align(32) conflicts([@first]) bytes("01234567")
+
+aie2p.target<array> @array {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core
+
+low.func.def public retain target<amd.xdna.aie2p.array>(@array) abi(array_program) @read_tables() asm {
+  %one = constant.u32 1 : reg<aie2p.array.scalar : index>
+  %zero = constant.u32 0 : reg<aie2p.array.scalar : index>
+  %row = constant.u32 2 : reg<aie2p.array.scalar : index>
+  %group = group %one
+  %worker = worker %group, %zero, @worker
+  %binding = binding 0, "write"
+  %sender = sender %worker, 0 : reg<aie2p.array.sender : tile<4xi32>>
+  %receiver = receiver %binding, 0 : reg<aie2p.array.receiver : tile<4xi32>>
+  %channel = channel %sender, %receiver, %one, %one : reg<aie2p.array.channel : tile<4xi32>>
+  constrain.location %worker, %zero, %row
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @worker() asm {
+  %output = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %first = low.func.call @read_first() : () -> (reg<aie2p.er>)
+  st %first, %output, 0
+  %second = low.func.call @read_second() : () -> (reg<aie2p.er>)
+  st %second, %output, 4
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @read_first() -> (reg<aie2p.er>) asm {
+  %address = mov.local-address @first
+  %value = lda %address, 0
+  return %value
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) @read_second() -> (reg<aie2p.er>) asm {
+  %address = mov.local-address @second
+  %value = lda %address, 0
+  return %value
+}
+
+// ----
+.text.read_tables$worker$0: address=0x00000000 bytes=184 initialized
+  b8fe5f18b80290184400c0000700188b800900000000000000000000000000001818021604010040000000000000040000000000040000000000040000000000981104090000040100500000000000001800001004000000000004000000000098111409000084000010000000001828201600000000000000000000000000004400c0c0070098160400180028100000000000000000000000000000000000004400c0800700981604001800281000000000000000000000
+.rodata.first: address=0x0007c000 bytes=8 initialized
+  1122334455667788
+.rodata.second: address=0x00078000 bytes=8 initialized
+  99aabbccddeeff00

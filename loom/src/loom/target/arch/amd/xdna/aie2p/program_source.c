@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/codegen/low/diagnostics.h"
+#include "loom/codegen/low/read_only_data.h"
 #include "loom/error/parameter.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
@@ -124,6 +125,7 @@ iree_status_t loom_aie2p_program_source_table_resolve(
   IREE_RETURN_IF_ERROR(loom_low_function_requirements_build(
       table->module, target.descriptor_set, loom_low_func_def_body(function_op),
       table->arena, &function->requirements));
+  function->program_data = &function->requirements.read_only_data;
   table->functions_by_symbol[symbol.symbol_id] = function;
   *out_function = function;
   *out_resolved = true;
@@ -149,6 +151,8 @@ iree_status_t loom_aie2p_program_source_admit_direct_helpers(
     *out_admitted = true;
     return iree_ok_status();
   }
+  loom_low_read_only_data_builder_t data_builder = {0};
+  bool has_helper_data = false;
   for (iree_host_size_t i = 0; i < entry->requirements.direct_callees.count;
        ++i) {
     const loom_low_direct_callee_requirement_t* call =
@@ -167,6 +171,22 @@ iree_status_t loom_aie2p_program_source_admit_direct_helpers(
           &helper->requirements.direct_callees.values[0]));
       return iree_ok_status();
     }
+    if (helper->requirements.read_only_data.count != 0) {
+      if (!has_helper_data) {
+        IREE_RETURN_IF_ERROR(loom_low_read_only_data_builder_extend(
+            &data_builder, entry->program_data, table->arena));
+        has_helper_data = true;
+      }
+      IREE_RETURN_IF_ERROR(loom_low_read_only_data_builder_extend(
+          &data_builder, &helper->requirements.read_only_data, table->arena));
+    }
+  }
+  if (has_helper_data) {
+    loom_low_read_only_data_set_t* program_data = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate(
+        table->arena, sizeof(*program_data), (void**)&program_data));
+    *program_data = loom_low_read_only_data_builder_finish(&data_builder);
+    entry->program_data = program_data;
   }
   entry->direct_helpers_admitted = true;
   *out_admitted = true;

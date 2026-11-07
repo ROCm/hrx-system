@@ -38,6 +38,7 @@ loom_check_test_suite(
 loom_check_test_suite(
     name = "program_test",
     srcs = [
+        "program_data.loom-test",
         "program_link_lifetime.loom-test",
         "program_report.loom-test",
     ],
@@ -253,6 +254,8 @@ loom_cc_library(
         ":leaf_compile",
         ":program_capacity",
         ":program_object",
+        "//loom/src/loom/codegen/low:read_only_data",
+        "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",

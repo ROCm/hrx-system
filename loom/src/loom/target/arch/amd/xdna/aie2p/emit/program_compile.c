@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/target/arch/amd/xdna/aie2p/call_abi.h"
@@ -309,9 +310,43 @@ static iree_status_t loom_aie2p_program_compose_report(
   return iree_ok_status();
 }
 
+// Native contributions retain module-unique names. Project the already admitted
+// inventory once so composition can bind those names and preserve constraints
+// between definitions used by different functions.
+static iree_status_t loom_aie2p_program_bind_data(
+    const loom_module_t* module, const loom_low_read_only_data_set_t* inventory,
+    iree_arena_allocator_t* arena, loom_aie2p_program_data_t** out_data) {
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, inventory->count, sizeof(**out_data), (void**)out_data));
+  for (iree_host_size_t i = 0; i < inventory->count; ++i) {
+    const loom_low_read_only_data_requirement_t* source = &inventory->values[i];
+    const loom_symbol_t* symbol =
+        &module->symbols.entries[source->symbol.symbol_id];
+    uint32_t* conflicts = NULL;
+    IREE_RETURN_IF_ERROR(
+        iree_arena_allocate_array(arena, source->bank_conflicts.count,
+                                  sizeof(*conflicts), (void**)&conflicts));
+    iree_host_size_t conflict_count = 0;
+    for (iree_host_size_t j = 0; j < source->bank_conflicts.count; ++j) {
+      const uint32_t ordinal = loom_low_read_only_data_ordinal(
+          inventory, source->bank_conflicts.values[j]);
+      if (ordinal != LOOM_LOW_READ_ONLY_DATA_ORDINAL_INVALID) {
+        conflicts[conflict_count++] = ordinal;
+      }
+    }
+    (*out_data)[i] = (loom_aie2p_program_data_t){
+        .name = loom_string_table_get(&module->strings, symbol->name_id),
+        .bank_conflicts = conflicts,
+        .bank_conflict_count = conflict_count,
+    };
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_aie2p_program_compile_impl(
     loom_aie2p_program_compiler_t* compiler, loom_op_t* entry_function_op,
     bool may_return, loom_aie2p_program_helper_list_t direct_helpers,
+    const loom_low_read_only_data_set_t* program_data,
     const loom_aie2p_leaf_compile_options_t* entry_options,
     iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena,
     bool* out_compiled, loom_aie2p_leaf_contribution_t* out_contribution) {
@@ -472,9 +507,13 @@ static iree_status_t loom_aie2p_program_compile_impl(
   if (!entry_compiled) {
     return iree_ok_status();
   }
+  loom_aie2p_program_data_t* data = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_program_bind_data(module, program_data, scratch_arena, &data));
   loom_aie2p_program_object_t program = {0};
   IREE_RETURN_IF_ERROR(loom_aie2p_program_object_merge(
-      contributions, direct_helpers.count + 1, arena, scratch_arena, &program));
+      contributions, direct_helpers.count + 1, data, program_data->count, arena,
+      scratch_arena, &program));
   if (entry_options->compile_report != NULL) {
     IREE_RETURN_IF_ERROR(loom_aie2p_program_compose_report(
         compiler, entry_function_op, direct_helpers, &program,
@@ -496,6 +535,7 @@ static iree_status_t loom_aie2p_program_compile_impl(
 iree_status_t loom_aie2p_program_compile(
     loom_aie2p_program_compiler_t* compiler, loom_op_t* entry_function_op,
     bool may_return, loom_aie2p_program_helper_list_t direct_helpers,
+    const loom_low_read_only_data_set_t* program_data,
     const loom_aie2p_leaf_compile_options_t* entry_options, bool* out_compiled,
     loom_aie2p_leaf_contribution_t* out_contribution) {
   IREE_ASSERT_ARGUMENT(compiler);
@@ -520,8 +560,8 @@ iree_status_t loom_aie2p_program_compile(
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(arena->block_pool, &scratch_arena);
   const iree_status_t status = loom_aie2p_program_compile_impl(
-      compiler, entry_function_op, may_return, direct_helpers, entry_options,
-      arena, &scratch_arena, out_compiled, out_contribution);
+      compiler, entry_function_op, may_return, direct_helpers, program_data,
+      entry_options, arena, &scratch_arena, out_compiled, out_contribution);
   iree_arena_deinitialize(&scratch_arena);
   return status;
 }
