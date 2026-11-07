@@ -52,6 +52,7 @@ def _s_add_co_u32_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="s_add_co_u32",
         semantic_tag="integer.add.carry_out.u32",
         implicit_operands=(_scc_output(_scc_result("carry")),),
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 1),),
         asm_forms=_asm(
             native_assembly_mnemonic="s_add_u32",
             results=("dst", "carry"),
@@ -73,6 +74,7 @@ def _s_add_co_u32_rhs_inline_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="s_add_co_u32",
         semantic_tag="integer.add.carry_out.u32",
         implicit_operands=(_scc_output(_scc_result("carry")),),
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 1),),
         asm_forms=_asm(
             mnemonic="s_add_co_u32_rhs_inline",
             native_assembly_mnemonic="s_add_u32",
@@ -121,6 +123,7 @@ def _s_sub_co_u32_overlay() -> AmdgpuDescriptorOverlay:
         mnemonic="s_sub_co_u32",
         semantic_tag="integer.sub.borrow_out.u32",
         implicit_operands=(_scc_output(_scc_result("borrow")),),
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 1),),
         asm_forms=_asm(
             native_assembly_mnemonic="s_sub_u32",
             results=("dst", "borrow"),
@@ -192,6 +195,7 @@ def _s_subb_u32_overlay() -> AmdgpuDescriptorOverlay:
             _scc_output(_scc_result("borrow")),
             _scc_input(_scc_predicate("borrow_in")),
         ),
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 1),),
         asm_forms=_asm(
             results=("difference", "borrow"),
             operands=("lhs", "rhs", "borrow_in"),
@@ -228,6 +232,7 @@ def _s_addc_u32_overlay() -> AmdgpuDescriptorOverlay:
             _scc_output(_scc_result("carry")),
             _scc_input(_scc_predicate("carry_in")),
         ),
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 1),),
         asm_forms=_asm(results=("sum", "carry"), operands=("lhs", "rhs", "carry_in")),
         operand_forms=tuple(
             _literal_operand_form(

@@ -16,8 +16,9 @@ from loom.dialect.vector import ALL_VECTOR_OPS
 from loom.dialect.vector import defs as vector
 from loom.dsl import Op
 from loom.target.arch.amdgpu.contracts.materializers import (
+    ADDRESS_COMPARE_SGPR_MATERIALIZER,
     ADDRESS_REGISTER_MATERIALIZER,
-    ADDRESS_SGPR_MATERIALIZER,
+    ADDRESS_SGPR64_MATERIALIZER,
     F32_VGPR_MATERIALIZER,
     I32_VGPR_MATERIALIZER,
     REGISTERS_VGPR_MATERIALIZER,
@@ -31,6 +32,7 @@ from loom.target.contracts import (
     DescriptorOperandMaterialization,
     DescriptorRule,
     EmitDescriptorOp,
+    EmitRegisterSlice,
     Guard,
     GuardDiagnostic,
     RecipeRule,
@@ -127,6 +129,8 @@ _FLOAT_CLASSIFICATION_DESCRIPTOR_KEYS = (
 _DESCRIPTOR_KEYS = (
     "amdgpu.s_mov_b32",
     "amdgpu.s_cselect_b32",
+    "amdgpu.s_subb_u32",
+    "amdgpu.s_xor_b32.lit",
     *_COMPARE_DESCRIPTOR_KEYS,
     *_FLOAT_COMPARE_DESCRIPTOR_KEYS,
     *_FLOAT_COMPARE_MASK_DESCRIPTOR_KEYS,
@@ -212,6 +216,34 @@ def _scc_rule(
     )
 
 
+def _sgpr_bool_emits(condition: ValueRef) -> tuple[EmitDescriptorOp, ...]:
+    move_descriptor = _descriptor("amdgpu.s_mov_b32")
+    select_descriptor = _descriptor("amdgpu.s_cselect_b32")
+    return (
+        EmitDescriptorOp(
+            descriptor=move_descriptor,
+            results={"dst": ValueRef.temporary("false_value")},
+            result_types={"dst": _I32},
+            immediates={"imm32": 0},
+        ),
+        EmitDescriptorOp(
+            descriptor=move_descriptor,
+            results={"dst": ValueRef.temporary("true_value")},
+            result_types={"dst": _I32},
+            immediates={"imm32": 1},
+        ),
+        EmitDescriptorOp(
+            descriptor=select_descriptor,
+            operands={
+                "true_value": ValueRef.temporary("true_value"),
+                "false_value": ValueRef.temporary("false_value"),
+                "condition": condition,
+            },
+            results={"dst": ValueRef.result("result")},
+        ),
+    )
+
+
 def _sgpr_bool_rule(
     source_op: Op,
     type_pattern: TypePattern,
@@ -267,134 +299,160 @@ def _sgpr_bool_rule(
                 results={"scc": ValueRef.temporary("condition")},
                 result_types={"scc": _I1},
             ),
-            EmitDescriptorOp(
-                descriptor=move_descriptor,
-                results={"dst": ValueRef.temporary("false_value")},
-                result_types={"dst": _I32},
-                immediates={"imm32": 0},
-            ),
-            EmitDescriptorOp(
-                descriptor=move_descriptor,
-                results={"dst": ValueRef.temporary("true_value")},
-                result_types={"dst": _I32},
-                immediates={"imm32": 1},
-            ),
-            EmitDescriptorOp(
-                descriptor=select_descriptor,
-                operands={
-                    "true_value": ValueRef.temporary("true_value"),
-                    "false_value": ValueRef.temporary("false_value"),
-                    "condition": ValueRef.temporary("condition"),
-                },
-                results={"dst": ValueRef.result("result")},
-            ),
+            *_sgpr_bool_emits(ValueRef.temporary("condition")),
         ),
     )
 
 
-def _i64_scc_rule(
+def _i64_scalar_rule(
     source_op: Op,
+    type_pattern: TypePattern,
     predicate: str,
-    descriptor: Descriptor,
+    *,
+    scalar_boolean: bool,
+    operand_materializer: ValueMaterializer | None = None,
 ) -> DescriptorRule:
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=descriptor,
-        guards=(
-            Guard.enum_attr_equals("predicate", predicate),
-            Guard.value_type("lhs", _I64),
-            Guard.value_type("rhs", _I64),
-            Guard.value_type("result", _I1),
-            Guard.low_value_register_class("lhs", "amdgpu.sgpr"),
-            Guard.low_value_register_unit_count("lhs", 2),
-            Guard.low_value_register_class("rhs", "amdgpu.sgpr"),
-            Guard.low_value_register_unit_count("rhs", 2),
-            Guard.low_value_register_class("result", "amdgpu.scc"),
-            Guard.descriptor_available(descriptor),
-        ),
-        emit=(
-            EmitDescriptorOp(
-                descriptor=descriptor,
-                operands={
-                    "lhs": ValueRef.operand("lhs"),
-                    "rhs": ValueRef.operand("rhs"),
-                },
-                results={"scc": ValueRef.result("result")},
-            ),
-        ),
+    operands = {
+        field: ValueRef.operand(
+            field,
+            materializer=operand_materializer.name if operand_materializer else None,
+        )
+        for field in ("lhs", "rhs")
+    }
+    condition = (
+        ValueRef.temporary("condition") if scalar_boolean else ValueRef.result("result")
     )
-
-
-def _i64_sgpr_bool_rule(
-    source_op: Op,
-    predicate: str,
-    compare_descriptor: Descriptor,
-) -> DescriptorRule:
-    move_descriptor = _descriptor("amdgpu.s_mov_b32")
-    select_descriptor = _descriptor("amdgpu.s_cselect_b32")
-    return DescriptorRule(
-        source_op=source_op,
-        descriptor=select_descriptor,
-        guards=(
-            Guard.enum_attr_equals("predicate", predicate),
-            Guard.value_type("lhs", _I64),
-            Guard.value_type("rhs", _I64),
-            Guard.value_type("result", _I1),
-            Guard.low_value_register_class("lhs", "amdgpu.sgpr"),
-            Guard.low_value_register_unit_count("lhs", 2),
-            Guard.low_value_register_class("rhs", "amdgpu.sgpr"),
-            Guard.low_value_register_unit_count("rhs", 2),
-            Guard.low_value_register_class("result", "amdgpu.sgpr"),
-            Guard.low_value_register_unit_count("result", 1),
-            Guard.descriptor_available(compare_descriptor),
-            Guard.descriptor_available(move_descriptor),
-            Guard.descriptor_available(select_descriptor),
-        ),
-        emit=(
+    emits: list[EmitDescriptorOp | EmitRegisterSlice] = []
+    if predicate in ("eq", "ne"):
+        descriptor_key = dict(_CMP_I64_SCALAR_CASES)[predicate]
+        emits.append(
             EmitDescriptorOp(
-                descriptor=compare_descriptor,
-                operands={
-                    "lhs": ValueRef.operand("lhs"),
-                    "rhs": ValueRef.operand("rhs"),
-                },
-                results={"scc": ValueRef.temporary("condition")},
+                descriptor=_descriptor(descriptor_key),
+                operands=operands,
+                results={"scc": condition},
                 result_types={"scc": _I1},
-            ),
+            )
+        )
+    else:
+        for field, source in operands.items():
+            if operand_materializer:
+                normalized = ValueRef.temporary(f"{field}_pair")
+                emits.append(
+                    EmitRegisterSlice(source=source, result=normalized, unit_count=2)
+                )
+                source = normalized
+            emits.extend(
+                EmitRegisterSlice(
+                    source=source,
+                    result=ValueRef.temporary(f"{field}_{word}"),
+                    unit_offset=word,
+                    unit_count=1,
+                )
+                for word in range(2)
+            )
+        high = {field: ValueRef.temporary(f"{field}_1") for field in operands}
+        if predicate.startswith("s"):
+            # Biasing the sign bit maps signed high-word order to unsigned order.
+            for field in operands:
+                biased = ValueRef.temporary(f"{field}_biased")
+                emits.append(
+                    EmitDescriptorOp(
+                        descriptor=_descriptor("amdgpu.s_xor_b32.lit"),
+                        operands={"lhs": high[field]},
+                        results={"dst": biased},
+                        result_types={"dst": _I32},
+                        immediates={"imm32": 0x80000000},
+                    )
+                )
+                high[field] = biased
+        relation = predicate[1:]
+        low_compare = _descriptor(f"amdgpu.s_cmp_{relation}_u32")
+        low_condition = ValueRef.temporary("low_condition")
+        emits.append(
             EmitDescriptorOp(
-                descriptor=move_descriptor,
-                results={"dst": ValueRef.temporary("false_value")},
-                result_types={"dst": _I32},
-                immediates={"imm32": 0},
-            ),
-            EmitDescriptorOp(
-                descriptor=move_descriptor,
-                results={"dst": ValueRef.temporary("true_value")},
-                result_types={"dst": _I32},
-                immediates={"imm32": 1},
-            ),
-            EmitDescriptorOp(
-                descriptor=select_descriptor,
+                descriptor=low_compare,
                 operands={
-                    "true_value": ValueRef.temporary("true_value"),
-                    "false_value": ValueRef.temporary("false_value"),
-                    "condition": ValueRef.temporary("condition"),
+                    field: ValueRef.temporary(f"{field}_0") for field in operands
                 },
-                results={"dst": ValueRef.result("result")},
+                results={"scc": low_condition},
+                result_types={"scc": _I1},
+            )
+        )
+        lhs, rhs = ("rhs", "lhs") if relation in ("gt", "ge") else ("lhs", "rhs")
+        # Borrow is high_less || (high_equal && low_relation), including <=.
+        emits.append(
+            EmitDescriptorOp(
+                descriptor=_descriptor("amdgpu.s_subb_u32"),
+                operands={
+                    "lhs": high[lhs],
+                    "rhs": high[rhs],
+                    "borrow_in": low_condition,
+                },
+                results={
+                    "difference": ValueRef.temporary("difference"),
+                    "borrow": condition,
+                },
+                result_types={"difference": _I32, "borrow": _I1},
+            )
+        )
+    if scalar_boolean:
+        emits.extend(_sgpr_bool_emits(condition))
+    operand_guards = tuple(
+        guard
+        for field in operands
+        for guard in (
+            (Guard.value_materializable(field, operand_materializer.name),)
+            if operand_materializer
+            else (
+                Guard.low_value_register_class(field, "amdgpu.sgpr"),
+                Guard.low_value_register_unit_count(field, 2),
+            )
+        )
+    )
+    descriptors = {
+        emit.descriptor.key: emit.descriptor
+        for emit in emits
+        if isinstance(emit, EmitDescriptorOp)
+    }
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=emits[-1].descriptor,
+        guards=(
+            Guard.enum_attr_equals("predicate", predicate),
+            Guard.value_type("lhs", type_pattern),
+            Guard.value_type("rhs", type_pattern),
+            Guard.value_type("result", _I1),
+            *operand_guards,
+            Guard.low_value_register_class(
+                "result", "amdgpu.sgpr" if scalar_boolean else "amdgpu.scc"
+            ),
+            Guard.low_value_register_unit_count("result", 1),
+            *(
+                Guard.descriptor_available(descriptor)
+                for descriptor in descriptors.values()
             ),
         ),
+        emit=tuple(emits),
     )
 
 
-def _i64_scalar_rules(source_op: Op) -> tuple[DescriptorRule, ...]:
-    scalar_rules = tuple(
-        _i64_scc_rule(source_op, predicate, _descriptor(descriptor_key))
-        for predicate, descriptor_key in _CMP_I64_SCALAR_CASES
+def _i64_scalar_rules(
+    source_op: Op,
+    type_pattern: TypePattern = _I64,
+    *,
+    operand_materializer: ValueMaterializer | None = None,
+) -> tuple[DescriptorRule, ...]:
+    return tuple(
+        _i64_scalar_rule(
+            source_op,
+            type_pattern,
+            predicate,
+            scalar_boolean=scalar_boolean,
+            operand_materializer=operand_materializer,
+        )
+        for predicate, _, _ in _CMP_I32_CASES
+        for scalar_boolean in (False, True)
     )
-    sgpr_bool_rules = tuple(
-        _i64_sgpr_bool_rule(source_op, predicate, _descriptor(descriptor_key))
-        for predicate, descriptor_key in _CMP_I64_SCALAR_CASES
-    )
-    return scalar_rules + sgpr_bool_rules
 
 
 def _float_scalar_rules(
@@ -762,6 +820,19 @@ def _typed_rules(
         "lhs": lhs,
         "rhs": rhs,
     }
+    cases = _CMP_I32_CASES
+    if type_pattern == _OFFSET:
+        # A compact offset is zero-extended in its semantic address carrier.
+        # Its physical word's sign bit is therefore part of the magnitude.
+        unsigned_cases = {
+            predicate: (scalar, mask) for predicate, scalar, mask in cases
+        }
+        cases = tuple(
+            (predicate, *unsigned_cases["u" + predicate[1:]])
+            if predicate.startswith("s")
+            else (predicate, scalar, mask)
+            for predicate, scalar, mask in cases
+        )
     scalar_rules = tuple(
         _scc_rule(
             source_op,
@@ -770,7 +841,7 @@ def _typed_rules(
             _descriptor(descriptor_key),
             operand_materializer=scalar_materializer,
         )
-        for predicate, descriptor_key, _ in _CMP_I32_CASES
+        for predicate, descriptor_key, _ in cases
     )
     sgpr_bool_rules = tuple(
         _sgpr_bool_rule(
@@ -780,11 +851,11 @@ def _typed_rules(
             _descriptor(descriptor_key),
             operand_materializer=scalar_materializer,
         )
-        for predicate, descriptor_key, _ in _CMP_I32_CASES
+        for predicate, descriptor_key, _ in cases
     )
     inline_rules = tuple(
         rule
-        for predicate, _, descriptor_key in _CMP_I32_CASES
+        for predicate, _, descriptor_key in cases
         for rule in (
             _mask_inline_rule(
                 source_op,
@@ -818,7 +889,7 @@ def _typed_rules(
             predicate,
             _descriptor(descriptor_key),
         )
-        for predicate, _, descriptor_key in _CMP_I32_CASES
+        for predicate, _, descriptor_key in cases
     )
     return scalar_rules + sgpr_bool_rules + inline_rules + mask_rules
 
@@ -884,7 +955,7 @@ def _rules() -> tuple[DescriptorRule | RecipeRule, ...]:
             _ADDRESS_LHS,
             _ADDRESS_RHS,
             ADDRESS_REGISTER_MATERIALIZER.name,
-            scalar_materializer=ADDRESS_SGPR_MATERIALIZER,
+            scalar_materializer=ADDRESS_COMPARE_SGPR_MATERIALIZER,
         ),
         *_typed_rules(
             index.index_cmp,
@@ -892,7 +963,13 @@ def _rules() -> tuple[DescriptorRule | RecipeRule, ...]:
             _ADDRESS_LHS,
             _ADDRESS_RHS,
             ADDRESS_REGISTER_MATERIALIZER.name,
-            scalar_materializer=ADDRESS_SGPR_MATERIALIZER,
+            scalar_materializer=ADDRESS_COMPARE_SGPR_MATERIALIZER,
+        ),
+        *_i64_scalar_rules(
+            index.index_cmp, _INDEX, operand_materializer=ADDRESS_SGPR64_MATERIALIZER
+        ),
+        *_i64_scalar_rules(
+            index.index_cmp, _OFFSET, operand_materializer=ADDRESS_SGPR64_MATERIALIZER
         ),
     )
 
@@ -908,7 +985,8 @@ AMDGPU_COMPARE_CONTRACT_FRAGMENT = ContractFragment(
     descriptor_set=_DESCRIPTOR_SET,
     public_header="loom/target/arch/amdgpu/contracts/compare.h",
     materializers=(
-        ADDRESS_SGPR_MATERIALIZER,
+        ADDRESS_SGPR64_MATERIALIZER,
+        ADDRESS_COMPARE_SGPR_MATERIALIZER,
         I32_VGPR_MATERIALIZER,
         REGISTERS_VGPR_MATERIALIZER,
         F32_VGPR_MATERIALIZER,

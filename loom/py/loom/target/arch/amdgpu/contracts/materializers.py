@@ -83,6 +83,23 @@ ADDRESS_SGPR_MATERIALIZER = ValueMaterializer(
     header="loom/target/arch/amdgpu/lower/materializers.h",
 )
 
+ADDRESS_SGPR64_MATERIALIZER = ValueMaterializer(
+    name="address_sgpr64",
+    result_type="loom_amdgpu_materialized_sgpr64_address_type",
+    can_materialize="loom_amdgpu_value_can_materialize_as_sgpr_address",
+    prepare="loom_amdgpu_prepare_sgpr64_address",
+    materialize="loom_amdgpu_emit_prepared_sgpr64_address",
+    header="loom/target/arch/amdgpu/lower/materializers.h",
+)
+
+ADDRESS_COMPARE_SGPR_MATERIALIZER = ValueMaterializer(
+    name="address_compare_sgpr",
+    result_type="loom_amdgpu_materialized_sgpr_address_type",
+    can_materialize="loom_amdgpu_value_can_materialize_as_sgpr_address_compare",
+    materialize="loom_amdgpu_lookup_or_materialize_sgpr_address",
+    header="loom/target/arch/amdgpu/lower/materializers.h",
+)
+
 I1_NATIVE_MASK_MATERIALIZER = ValueMaterializer(
     name="i1_native_mask",
     result_type="loom_amdgpu_materialized_native_i1_mask_type",

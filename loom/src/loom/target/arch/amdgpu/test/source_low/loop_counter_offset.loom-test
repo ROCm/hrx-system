@@ -1,4 +1,4 @@
-// RUN: with-checks emit source-low target=amdgpu:gfx1151 output=low
+// RUN: emit source-low target=amdgpu:gfx1151 output=low
 
 func.def @offset_counter(%lower: offset, %upper: offset, %step: offset, %initial: i32) -> (i32) {
   %positive_step = index.assume %step [range(%step, 1, 2147483647)] : offset
@@ -11,6 +11,24 @@ func.def @offset_counter(%lower: offset, %upper: offset, %step: offset, %initial
 }
 
 // ----
-CHECK: * = v_cmp_lt_u32 *
-CHECK: low.cond_br *
-CHECK: * = s_addc_u32 *
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @offset_counter(%lower: reg<amdgpu.sgpr x2>, %upper: reg<amdgpu.sgpr x2>, %positive_step: reg<amdgpu.sgpr x2>, %initial: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %increment = s_mov_b32 1
+  %50 = slice %lower[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %51 = slice %lower[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  low.br ^_bb1(%50: reg<amdgpu.sgpr>, %51: reg<amdgpu.sgpr>, %initial: reg<amdgpu.sgpr>)
+^_bb1(%48: reg<amdgpu.sgpr>, %49: reg<amdgpu.sgpr>, %count: reg<amdgpu.sgpr>):
+  %45 = slice %upper[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = slice %upper[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = s_cmp_lt_u32 %48, %45
+  %32, %33 = s_subb_u32 %49, %44, %31
+  low.cond_br %33, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  %next = s_add_u32 %count, %increment
+  %37 = slice %positive_step[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = slice %positive_step[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39, %40 = s_add_co_u32 %48, %37
+  %41, %42 = s_addc_u32 %49, %38, %40
+  low.br ^_bb1(%39: reg<amdgpu.sgpr>, %41: reg<amdgpu.sgpr>, %next: reg<amdgpu.sgpr>)
+^_bb3:
+  return %count
+}

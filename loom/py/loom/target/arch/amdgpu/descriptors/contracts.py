@@ -47,6 +47,7 @@ _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS: dict[
     "amdgpu.s_add_co_u32": _s_add_co_u32_overlay,
     "amdgpu.s_sub_u32": _s_sub_u32_overlay,
     "amdgpu.s_sub_co_u32": _s_sub_co_u32_overlay,
+    "amdgpu.s_subb_u32": _s_subb_u32_overlay,
     "amdgpu.s_mul_i32": _s_mul_i32_overlay,
     "amdgpu.s_mul_hi_u32": _s_mul_hi_u32_overlay,
     "amdgpu.s_mul_hi_u32.lit": _s_mul_hi_u32_literal_overlay,

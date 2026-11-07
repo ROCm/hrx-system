@@ -20,6 +20,7 @@
 #include "loom/target/arch/amdgpu/lower/materializers.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
+#include "loom/target/arch/amdgpu/lower/value/integer64.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/util/fact_table.h"
 
@@ -881,10 +882,24 @@ iree_status_t loom_amdgpu_select_scf_select_plan(
   if (!loom_low_type_is_register(result_low_type)) {
     return iree_ok_status();
   }
-  if (loom_type_is_buffer(result_type) ||
-      loom_amdgpu_type_is_address_scalar(result_type)) {
+  const bool address_operands = loom_amdgpu_type_is_address_scalar(result_type);
+  if (loom_type_is_buffer(result_type) || address_operands) {
     register_count = loom_low_register_type_unit_count(result_low_type);
     allows_lane_immediates = register_count == 1;
+  }
+  loom_amdgpu_select_data_flags_t data_flags = 0;
+  if (address_operands) {
+    data_flags |= LOOM_AMDGPU_SELECT_DATA_ADDRESS;
+    if (loom_value_fact_table_lookup(loom_low_lower_context_fact_table(context),
+                                     true_value)
+            .range_lo < 0) {
+      data_flags |= LOOM_AMDGPU_SELECT_DATA_SIGN_EXTEND_TRUE;
+    }
+    if (loom_value_fact_table_lookup(loom_low_lower_context_fact_table(context),
+                                     false_value)
+            .range_lo < 0) {
+      data_flags |= LOOM_AMDGPU_SELECT_DATA_SIGN_EXTEND_FALSE;
+    }
   }
 
   const bool condition_is_scc = loom_amdgpu_low_type_is_register_class_count(
@@ -920,6 +935,7 @@ iree_status_t loom_amdgpu_select_scf_select_plan(
                               : LOOM_AMDGPU_SELECT_CONDITION_KIND_SGPR_BOOL,
         .scc_descriptor = scc_descriptor,
         .sgpr_bool_compare_descriptor = sgpr_bool_compare_descriptor,
+        .payload.data = {.flags = data_flags},
         .condition = condition,
         .true_value = true_value,
         .false_value = false_value,
@@ -951,6 +967,7 @@ iree_status_t loom_amdgpu_select_scf_select_plan(
       .payload_kind = LOOM_AMDGPU_SELECT_PAYLOAD_KIND_DATA,
       .condition_kind = LOOM_AMDGPU_SELECT_CONDITION_KIND_SCALAR_MASK,
       .cndmask_descriptors = cndmask_descriptors,
+      .payload.data = {.flags = data_flags},
       .condition = condition,
       .true_value = true_value,
       .false_value = false_value,
@@ -1376,7 +1393,7 @@ static iree_status_t loom_amdgpu_lower_i1_mask_select(
 // Bring both carriers to the result width before selecting individual words.
 static iree_status_t loom_amdgpu_resize_select_address_operand(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
-    loom_value_id_t low_value, uint32_t register_count,
+    loom_value_id_t low_value, uint32_t register_count, bool sign_extend,
     loom_value_id_t* out_low_value) {
   *out_low_value = low_value;
   const loom_type_t type =
@@ -1388,6 +1405,10 @@ static iree_status_t loom_amdgpu_resize_select_address_operand(
     return loom_amdgpu_emit_low_slice(
         context, source_op, low_value, 0,
         loom_low_register_carrier_type_with_unit_count(type, 1), out_low_value);
+  }
+  if (sign_extend) {
+    return loom_amdgpu_emit_i64_from_i32(context, source_op, low_value,
+                                         out_low_value);
   }
   if (loom_low_register_type_class_id(type) == LOOM_AMDGPU_REG_CLASS_ID_SGPR) {
     return loom_amdgpu_emit_sgpr64_from_u32(context, source_op, low_value,
@@ -1531,11 +1552,16 @@ iree_status_t loom_amdgpu_lower_select(
   loom_value_id_t low_false_value =
       loom_low_lower_lookup_value(context, plan->false_value);
 
-  if (loom_amdgpu_value_is_address_scalar(context, plan->result)) {
+  const loom_amdgpu_select_data_flags_t data_flags = plan->payload.data.flags;
+  if (iree_any_bit_set(data_flags, LOOM_AMDGPU_SELECT_DATA_ADDRESS)) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_resize_select_address_operand(
-        context, source_op, low_true_value, lane_count, &low_true_value));
+        context, source_op, low_true_value, lane_count,
+        iree_any_bit_set(data_flags, LOOM_AMDGPU_SELECT_DATA_SIGN_EXTEND_TRUE),
+        &low_true_value));
     IREE_RETURN_IF_ERROR(loom_amdgpu_resize_select_address_operand(
-        context, source_op, low_false_value, lane_count, &low_false_value));
+        context, source_op, low_false_value, lane_count,
+        iree_any_bit_set(data_flags, LOOM_AMDGPU_SELECT_DATA_SIGN_EXTEND_FALSE),
+        &low_false_value));
   }
 
   if (plan->condition_kind == LOOM_AMDGPU_SELECT_CONDITION_KIND_SCC ||

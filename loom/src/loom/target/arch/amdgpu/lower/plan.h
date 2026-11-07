@@ -481,18 +481,12 @@ typedef struct loom_amdgpu_i64_compare_plan_t {
   loom_value_id_t rhs;
   // Result i1 value receiving the native lane mask.
   loom_value_id_t result;
-  // Descriptor comparing high 32-bit lanes.
-  loom_amdgpu_descriptor_ref_t high_descriptor_ref;
-  // Descriptor comparing low 32-bit lanes.
-  loom_amdgpu_descriptor_ref_t low_descriptor_ref;
-  // Descriptor combining high and low lane masks.
-  loom_amdgpu_descriptor_ref_t combine_descriptor_ref;
-  // True when low-lane comparison is guarded by high-lane equality.
-  bool needs_high_equal;
+  // Native comparison of the normalized 64-bit operands.
+  loom_amdgpu_descriptor_ref_t descriptor_ref;
   // Pair transports, two bits each: lhs in bits 0-1, rhs in bits 2-3.
   uint8_t operand_forms;
 } loom_amdgpu_i64_compare_plan_t;
-static_assert(sizeof(loom_amdgpu_i64_compare_plan_t) == 20,
+static_assert(sizeof(loom_amdgpu_i64_compare_plan_t) == 16,
               "integer comparison plans must stay cache dense");
 
 typedef enum loom_amdgpu_scalar_i64_alu_kind_e {

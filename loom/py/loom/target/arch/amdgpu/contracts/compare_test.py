@@ -18,6 +18,8 @@ from loom.target.arch.amdgpu.contracts.compare import (
 )
 from loom.target.contracts import (
     CompiledLowerRuleSet,
+    DescriptorRule,
+    EmitDescriptorOp,
     GuardKind,
     LowerRule,
     Scalar,
@@ -89,7 +91,7 @@ def test_scalar_address_comparisons_materialize_source_carriers() -> None:
         for materializer_index, materializer in enumerate(
             AMDGPU_COMPARE_CONTRACT_FRAGMENT.materializers, start=1
         )
-        if materializer.name == "address_sgpr"
+        if materializer.name == "address_compare_sgpr"
     )
     direct_low_guard_kinds = {
         GuardKind.LOW_VALUE_REGISTER_CLASS,
@@ -133,3 +135,69 @@ def test_scalar_address_comparisons_materialize_source_carriers() -> None:
                     assert value_ref.materializer_index != 0
     assert address_rule_count != 0
     assert scalar_rule_count != 0
+
+
+def test_wide_scalar_comparisons_cover_types_predicates_and_result_carriers() -> None:
+    signatures = []
+    for rule in AMDGPU_COMPARE_CONTRACT_FRAGMENT.cases:
+        if not isinstance(rule, DescriptorRule):
+            continue
+        operand_type = next(
+            (
+                guard.type_pattern
+                for guard in rule.guards
+                if guard.field == "lhs" and guard.kind is GuardKind.VALUE_TYPE
+            ),
+            None,
+        )
+        if operand_type == Scalar("i64"):
+            assert rule.source_op is scalar.scalar_cmpi
+        elif not any(guard.materializer == "address_sgpr64" for guard in rule.guards):
+            continue
+        predicate = next(
+            guard.enum_keyword
+            for guard in rule.guards
+            if guard.kind is GuardKind.ENUM_ATTR_EQUALS
+        )
+        result_class = next(
+            guard.register_class
+            for guard in rule.guards
+            if guard.field == "result"
+            and guard.kind is GuardKind.LOW_VALUE_REGISTER_CLASS
+        )
+        signatures.append((operand_type, predicate, result_class))
+    assert len(signatures) == len(set(signatures))
+    assert set(signatures) == {
+        (Scalar(kind), predicate, result_class)
+        for kind in ("i64", "index", "offset")
+        for predicate in (
+            "eq",
+            "ne",
+            "slt",
+            "sle",
+            "sgt",
+            "sge",
+            "ult",
+            "ule",
+            "ugt",
+            "uge",
+        )
+        for result_class in ("amdgpu.scc", "amdgpu.sgpr")
+    }
+
+
+def test_compact_offset_comparisons_preserve_unsigned_magnitude() -> None:
+    signed_word_prefixes = tuple(
+        prefix
+        for relation in ("lt", "le", "gt", "ge")
+        for prefix in (f"amdgpu.s_cmp_{relation}_i32", f"amdgpu.v_cmp_s{relation}_i32")
+    )
+    for rule in AMDGPU_COMPARE_CONTRACT_FRAGMENT.cases:
+        if not isinstance(rule, DescriptorRule) or not any(
+            guard.field == "lhs" and guard.type_pattern == Scalar("offset")
+            for guard in rule.guards
+        ):
+            continue
+        for emit in rule.emit:
+            if isinstance(emit, EmitDescriptorOp):
+                assert not emit.descriptor.key.startswith(signed_word_prefixes)

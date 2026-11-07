@@ -1829,6 +1829,10 @@ def _validate_rematerializable_result(
         if OperandFlag.SCHEDULE_ONLY_STATE in operand.flags:
             continue
         if state_flags == {OperandFlag.STATE_READ}:
+            # Explicit state is an SSA recipe dependency. Replay reconstructs
+            # its producer rather than capturing ephemeral architectural state.
+            if operand_role_is_packet_input(operand.role):
+                continue
             # Replaying a state-dependent instruction is stable when no
             # instruction in the descriptor set can change that state storage.
             # The set-wide alias-aware check keeps this local promise honest as

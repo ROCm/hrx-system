@@ -532,16 +532,13 @@ func.def target(@target) @offset_compare_uniform(%lhs: offset, %rhs: offset) -> 
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @offset_compare_uniform(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
-  %7 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %8 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %9 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %10 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %11 = v_cmp_lt_u32 %8, %10
-  %12 = v_cmp_lt_u32 %7, %9
-  %13 = v_cmp_eq_i32 %8, %10
-  %14 = s_and_b64 %13, %12
-  %result = s_or_b64 %11, %14
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @offset_compare_uniform(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.scc>) asm {
+  %19 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %17 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %13 = s_cmp_lt_u32 %19, %17
+  %14, %result = s_subb_u32 %18, %16, %13
   return %result
 }
 
@@ -558,15 +555,14 @@ func.def target(@target) @index_compare_mixed_width_uniform(%narrow: i32, %wide_
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_compare_mixed_width_uniform(%signed: reg<amdgpu.sgpr>, %wide: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_compare_mixed_width_uniform(%signed: reg<amdgpu.sgpr>, %wide: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.scc>) asm {
   %10 = s_ashr_i32_rhs_inline %signed, 31
-  %14 = slice %wide[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %15 = slice %wide[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %16 = v_cmp_lt_i32 %10, %15
-  %17 = v_cmp_lt_u32 %signed, %14
-  %18 = v_cmp_eq_i32 %10, %15
-  %19 = s_and_b64 %18, %17
-  %result = s_or_b64 %16, %19
+  %24 = slice %wide[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %23 = slice %wide[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = s_xor_b32_lit %10, 2147483648
+  %19 = s_xor_b32_lit %23, 2147483648
+  %20 = s_cmp_lt_u32 %signed, %24
+  %21, %result = s_subb_u32 %18, %19, %20
   return %result
 }
 
@@ -587,13 +583,8 @@ func.def target(@target) @index_compare_mixed_width_divergent(%values: vector<2x
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_compare_mixed_width_divergent(%values: reg<amdgpu.vgpr x2>, %wide: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
   %signed = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %12 = v_ashrrev_i32_src0_inline %signed, 31
-  %14 = slice %wide[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %15 = slice %wide[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %18 = v_cmp_lt_i32 %15, %12
-  %19 = v_cmp_lt_u32 %14, %signed
-  %20 = v_cmp_eq_i32 %15, %12
-  %21 = s_and_b64 %20, %19
-  %result = s_or_b64 %18, %21
+  %13 = concat(%signed, %12) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %result = v_cmp_lt_i64 %wide, %13
   return %result
 }
 
@@ -608,15 +599,12 @@ func.def target(@target) @offset_compare_mixed_width(%narrow: i32, %wide: offset
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @offset_compare_mixed_width(%unsigned: reg<amdgpu.sgpr>, %wide: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @offset_compare_mixed_width(%unsigned: reg<amdgpu.sgpr>, %wide: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.scc>) asm {
   %8 = s_mov_b32 0
-  %12 = slice %wide[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %13 = slice %wide[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %14 = v_cmp_lt_u32 %8, %13
-  %15 = v_cmp_lt_u32 %unsigned, %12
-  %16 = v_cmp_eq_i32 %8, %13
-  %17 = s_and_b64 %16, %15
-  %result = s_or_b64 %14, %17
+  %20 = slice %wide[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %19 = slice %wide[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = s_cmp_lt_u32 %unsigned, %20
+  %17, %result = s_subb_u32 %8, %19, %16
   return %result
 }
 
@@ -683,4 +671,102 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @cfg_bin
   low.br ^header(%next: reg<amdgpu.sgpr>)
 ^exit:
   return %result
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @index_compare_positive_word(%positive_input: i64, %signed_input: i32) -> (i32, i32) {
+  %bounded = scalar.assume %positive_input [range(%positive_input, 0, 8589934591)] : i64
+  %wide = index.cast %bounded : i64 to index
+  %positive = index.assume %wide [range(%wide, 0, 4294967295)] : index
+  %signed = index.cast %signed_input : i32 to index
+  %equal = index.cmp eq, %positive, %signed : index
+  %less = index.cmp slt, %positive, %signed : index
+  %equal_word = scalar.extui %equal : i1 to i32
+  %less_word = scalar.extui %less : i1 to i32
+  func.return %equal_word, %less_word : i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_compare_positive_word(%positive: reg<amdgpu.sgpr x2>, %signed: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %22 = s_ashr_i32_rhs_inline %signed, 31
+  %23 = concat(%signed, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %equal = s_cmp_eq_u64 %positive, %23
+  %45 = slice %positive[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %44 = slice %positive[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = s_ashr_i32_rhs_inline %signed, 31
+  %33 = s_xor_b32_lit %44, 2147483648
+  %34 = s_xor_b32_lit %28, 2147483648
+  %35 = s_cmp_lt_u32 %45, %signed
+  %36, %less = s_subb_u32 %33, %34, %35
+  %38 = s_mov_b32 1
+  %39 = s_mov_b32 0
+  %equal_word = s_cselect_b32 %38, %39, %equal
+  %less_word = s_cselect_b32 %38, %39, %less
+  return %equal_word, %less_word
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @index_select_sign_union(%positive_input: i64, %signed_input: i32, %choose: i1) -> (i64) {
+  %bounded = scalar.assume %positive_input [range(%positive_input, 0, 8589934591)] : i64
+  %wide = index.cast %bounded : i64 to index
+  %positive = index.assume %wide [range(%wide, 0, 4294967295)] : index
+  %signed = index.cast %signed_input : i32 to index
+  %selected = scf.select %choose, %positive, %signed : index
+  %bits = index.cast %selected : index to i64
+  func.return %bits : i64
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_select_sign_union(%positive: reg<amdgpu.sgpr x2>, %signed: reg<amdgpu.sgpr>, %choose: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %14 = s_cmp_lg_i32_src1_inline %choose {rhs = 0}
+  %15 = s_ashr_i32_rhs_inline %signed, 31
+  %17 = slice %positive[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %19 = s_cselect_b32 %17, %signed, %14
+  %20 = slice %positive[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %22 = s_cselect_b32 %20, %15, %14
+  %bits = concat(%19, %22) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %bits
+}
+
+// ====
+
+// RUN: pass source-to-low,low-select-operand-forms,low-cse,low-dce
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @index_join_sign_union(%positive_input: i64, %signed_input: i32, %choose: i1) -> (i64) {
+  %bounded = scalar.assume %positive_input [range(%positive_input, 0, 8589934591)] : i64
+  %wide = index.cast %bounded : i64 to index
+  %positive = index.assume %wide [range(%wide, 0, 4294967295)] : index
+  %signed = index.cast %signed_input : i32 to index
+  cfg.cond_br %choose, ^positive, ^negative
+^positive:
+  cfg.br ^joined(%positive: index)
+^negative:
+  cfg.br ^joined(%signed: index)
+^joined(%selected: index):
+  %bits = index.cast %selected : index to i64
+  func.return %bits : i64
+}
+
+// ----
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @index_join_sign_union(%positive: reg<amdgpu.sgpr x2>, %signed_input: reg<amdgpu.sgpr>, %choose: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %15 = s_ashr_i32_rhs_inline %signed_input, 31
+  %signed = concat(%signed_input, %15) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %19 = s_cmp_lg_i32_src1_inline %choose {rhs = 0}
+  low.cond_br %19, ^positive, ^negative : reg<amdgpu.scc>
+^positive:
+  low.br ^joined(%positive: reg<amdgpu.sgpr x2>)
+^negative:
+  low.br ^joined(%signed: reg<amdgpu.sgpr x2>)
+^joined(%bits: reg<amdgpu.sgpr x2>):
+  return %bits
 }

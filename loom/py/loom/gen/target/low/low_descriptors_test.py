@@ -87,6 +87,7 @@ from loom.target.test.descriptors import (
     TEST_LOW_COND_BR_I32_DESCRIPTOR,
     TEST_LOW_CONST_I32_DESCRIPTOR,
     TEST_LOW_CORE_DESCRIPTOR_SET,
+    TEST_LOW_EXPLICIT_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
     TEST_LOW_MUL_I32_DESCRIPTOR,
     TEST_LOW_NATIVE_COND_BR_I32_DESCRIPTOR,
     TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
@@ -1719,6 +1720,51 @@ def test_compiler_allows_rematerialization_from_unwritten_target_state() -> None
     compiled = compiler.compile_descriptor_set(descriptor_set)
 
     assert compiled.operand_rematerializable[0]
+
+
+def test_compiler_replays_nonzero_result_with_explicit_state_input() -> None:
+    base = TEST_LOW_EXPLICIT_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR
+    descriptor = replace(
+        base,
+        operands=(
+            TEST_LOW_ADD_I32_DESCRIPTOR.operands[0],
+            replace(
+                base.operands[0],
+                field_name="state_out",
+                flags=(OperandFlag.STATE_WRITE,),
+            ),
+            *base.operands[1:],
+        ),
+        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 1),),
+        asm_forms=(AsmForm(results=("dst", "state_out"), operands=("lhs", "rhs")),),
+    )
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=(descriptor,),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+
+    assert compiled.operand_rematerializable == [False, True, False, False]
+    assert compiled.operand_rematerialization_source_operand_indices == [None] * 4
+
+    # Selecting the arithmetic result would also overwrite a different state
+    # result. Only the declared state result has the replay contract.
+    with pytest.raises(
+        ValueError,
+        match=re.escape("rematerializable result 0 cannot replay target state operand 'state_out'"),
+    ):
+        compiler.compile_descriptor_set(
+            replace(
+                descriptor_set,
+                descriptors=(
+                    replace(
+                        descriptor,
+                        constraints=(Constraint(ConstraintKind.REMATERIALIZABLE, 0),),
+                    ),
+                ),
+            )
+        )
 
 
 @pytest.mark.parametrize(
