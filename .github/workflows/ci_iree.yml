@@ -159,13 +159,6 @@ jobs:
             target_selector: gfx1150
             optional: true
             container_options: *amdgpu_container_options
-          - name: Clang / Fastbuild / AMD gfx1151
-            kind: amdgpu
-            command: iree-bazel-amdgpu
-            runner: linux-gfx1151-gpu-rocm
-            target_selector: gfx1151
-            optional: true
-            container_options: *amdgpu_container_options
           - name: Clang / Fastbuild / AMD gfx120x
             kind: amdgpu
             command: iree-bazel-amdgpu
