@@ -1,0 +1,446 @@
+// RUN: emit source-low target=x86:avx2 output=low
+
+// Double precision uses split range reduction and two normal scale factors.
+func.def @natural_double(%value: f64) -> (f64) {
+  %result = scalar.expf<afn> %value : f64
+  func.return %result : f64
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (f64) -> (f64)}) @natural_double(%value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %70 = mov.imm64 -4573598935641227264
+  %71 = vmovq.xmm.gpr64 %70
+  %72 = mov.imm64 4649456441864749056
+  %73 = vmovq.xmm.gpr64 %72
+  %74 = avx2.vcmppd.xmm %value, %71, 17
+  %75 = vpblendvb.xmm %value, %71, %74
+  %76 = avx2.vcmppd.xmm %75, %73, 30
+  %77 = vpblendvb.xmm %75, %73, %76
+  %78 = mov.imm64 4609176140021203710
+  %79 = vmovq.xmm.gpr64 %78
+  %80 = vmulsd.xmm %77, %79
+  %81 = vroundsd.xmm %80, %80, 8
+  %82 = mov.imm64 -4618953502557732864
+  %83 = vmovq.xmm.gpr64 %82
+  %84 = mov.imm64 -4746997151036397681
+  %85 = vmovq.xmm.gpr64 %84
+  %86 = copy %77 : reg<x86.xmm> -> reg<x86.xmm>
+  %87 = vfmadd231sd.xmm %86, %81, %83
+  %88 = copy %87 : reg<x86.xmm> -> reg<x86.xmm>
+  %89 = vfmadd231sd.xmm %88, %81, %85
+  %90 = mov.imm64 4460272573143870729
+  %91 = vmovq.xmm.gpr64 %90
+  %92 = mov.imm64 4477122120089393304
+  %93 = vmovq.xmm.gpr64 %92
+  %94 = copy %93 : reg<x86.xmm> -> reg<x86.xmm>
+  %95 = vfmadd231sd.xmm %94, %91, %89
+  %96 = mov.imm64 4493156764026750180
+  %97 = vmovq.xmm.gpr64 %96
+  %98 = copy %97 : reg<x86.xmm> -> reg<x86.xmm>
+  %99 = vfmadd231sd.xmm %98, %95, %89
+  %100 = mov.imm64 4508805057796939612
+  %101 = vmovq.xmm.gpr64 %100
+  %102 = copy %101 : reg<x86.xmm> -> reg<x86.xmm>
+  %103 = vfmadd231sd.xmm %102, %99, %89
+  %104 = mov.imm64 4523617214285662004
+  %105 = vmovq.xmm.gpr64 %104
+  %106 = copy %105 : reg<x86.xmm> -> reg<x86.xmm>
+  %107 = vfmadd231sd.xmm %106, %103, %89
+  %108 = mov.imm64 4537941361671905306
+  %109 = vmovq.xmm.gpr64 %108
+  %110 = copy %109 : reg<x86.xmm> -> reg<x86.xmm>
+  %111 = vfmadd231sd.xmm %110, %107, %89
+  %112 = mov.imm64 4551452160554016794
+  %113 = vmovq.xmm.gpr64 %112
+  %114 = copy %113 : reg<x86.xmm> -> reg<x86.xmm>
+  %115 = vfmadd231sd.xmm %114, %111, %89
+  %116 = mov.imm64 4564047942368979991
+  %117 = vmovq.xmm.gpr64 %116
+  %118 = copy %117 : reg<x86.xmm> -> reg<x86.xmm>
+  %119 = vfmadd231sd.xmm %118, %115, %89
+  %120 = mov.imm64 4575957461383581969
+  %121 = vmovq.xmm.gpr64 %120
+  %122 = copy %121 : reg<x86.xmm> -> reg<x86.xmm>
+  %123 = vfmadd231sd.xmm %122, %119, %89
+  %124 = mov.imm64 4586165620538955093
+  %125 = vmovq.xmm.gpr64 %124
+  %126 = copy %125 : reg<x86.xmm> -> reg<x86.xmm>
+  %127 = vfmadd231sd.xmm %126, %123, %89
+  %128 = mov.imm64 4595172819793696085
+  %129 = vmovq.xmm.gpr64 %128
+  %130 = copy %129 : reg<x86.xmm> -> reg<x86.xmm>
+  %131 = vfmadd231sd.xmm %130, %127, %89
+  %132 = mov.imm64 4602678819172646912
+  %133 = vmovq.xmm.gpr64 %132
+  %134 = copy %133 : reg<x86.xmm> -> reg<x86.xmm>
+  %135 = vfmadd231sd.xmm %134, %131, %89
+  %136 = vmulsd.xmm %89, %89
+  %137 = copy %89 : reg<x86.xmm> -> reg<x86.xmm>
+  %138 = vfmadd231sd.xmm %137, %136, %135
+  %139 = mov.imm64 -4571171213967097856
+  %140 = vmovq.xmm.gpr64 %139
+  %141 = mov.imm64 4652209618980700160
+  %142 = vmovq.xmm.gpr64 %141
+  %143 = avx2.vcmppd.xmm %81, %140, 17
+  %144 = vpblendvb.xmm %81, %140, %143
+  %145 = avx2.vcmppd.xmm %144, %142, 30
+  %146 = vpblendvb.xmm %144, %142, %145
+  %147 = vsubsd.xmm %81, %146
+  %148 = mov.imm64 4843621399236968448
+  %149 = vmovq.xmm.gpr64 %148
+  %150 = vaddsd.xmm %146, %149
+  %151 = vmovq.gpr64.xmm %150
+  %152 = copy %151 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %153 = add.imm.gpr64 %152 {imm32 = 1023}
+  %154 = copy %153 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %155 = shl.imm.gpr64 %154 {shift = 52}
+  %156 = vmovq.xmm.gpr64 %155
+  %157 = vaddsd.xmm %147, %149
+  %158 = vmovq.gpr64.xmm %157
+  %159 = copy %158 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %160 = add.imm.gpr64 %159 {imm32 = 1023}
+  %161 = copy %160 : reg<x86.gpr64> -> reg<x86.gpr64>
+  %162 = shl.imm.gpr64 %161 {shift = 52}
+  %163 = vmovq.xmm.gpr64 %162
+  %164 = copy %156 : reg<x86.xmm> -> reg<x86.xmm>
+  %165 = vfmadd231sd.xmm %164, %156, %138
+  %result = vmulsd.xmm %165, %163
+  return %result
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+// The same reconstruction stays in the vector carrier, including exponent bits.
+func.def @binary_double(%value: vector<4xf64>) -> (vector<4xf64>) {
+  %result = vector.exp2f<afn> %value : vector<4xf64>
+  func.return %result : vector<4xf64>
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xf64>) -> (vector<4xf64>)}) @binary_double(%value: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %69 = mov.imm64 -4570924923362476032
+  %70 = vmovq.xmm.gpr64 %69
+  %71 = vpbroadcastq.ymm %70
+  %72 = mov.imm64 4652218415073722368
+  %73 = vmovq.xmm.gpr64 %72
+  %74 = vpbroadcastq.ymm %73
+  %75 = avx2.vcmppd.ymm %value, %71, 17
+  %76 = vpblendvb.ymm %value, %71, %75
+  %77 = avx2.vcmppd.ymm %76, %74, 30
+  %78 = vpblendvb.ymm %76, %74, %77
+  %79 = vroundpd.ymm %78, 8
+  %80 = vsubpd.ymm %78, %79
+  %81 = mov.imm64 4604418534313441775
+  %82 = vmovq.xmm.gpr64 %81
+  %83 = vpbroadcastq.ymm %82
+  %84 = mov.imm64 4358002977218854975
+  %85 = vmovq.xmm.gpr64 %84
+  %86 = vpbroadcastq.ymm %85
+  %87 = vmulpd.ymm %80, %83
+  %88 = copy %87 : reg<x86.ymm> -> reg<x86.ymm>
+  %89 = vfmadd231pd.ymm %88, %80, %86
+  %90 = mov.imm64 4460272573143870729
+  %91 = vmovq.xmm.gpr64 %90
+  %92 = vpbroadcastq.ymm %91
+  %93 = mov.imm64 4477122120089393304
+  %94 = vmovq.xmm.gpr64 %93
+  %95 = vpbroadcastq.ymm %94
+  %96 = copy %95 : reg<x86.ymm> -> reg<x86.ymm>
+  %97 = vfmadd231pd.ymm %96, %92, %89
+  %98 = mov.imm64 4493156764026750180
+  %99 = vmovq.xmm.gpr64 %98
+  %100 = vpbroadcastq.ymm %99
+  %101 = copy %100 : reg<x86.ymm> -> reg<x86.ymm>
+  %102 = vfmadd231pd.ymm %101, %97, %89
+  %103 = mov.imm64 4508805057796939612
+  %104 = vmovq.xmm.gpr64 %103
+  %105 = vpbroadcastq.ymm %104
+  %106 = copy %105 : reg<x86.ymm> -> reg<x86.ymm>
+  %107 = vfmadd231pd.ymm %106, %102, %89
+  %108 = mov.imm64 4523617214285662004
+  %109 = vmovq.xmm.gpr64 %108
+  %110 = vpbroadcastq.ymm %109
+  %111 = copy %110 : reg<x86.ymm> -> reg<x86.ymm>
+  %112 = vfmadd231pd.ymm %111, %107, %89
+  %113 = mov.imm64 4537941361671905306
+  %114 = vmovq.xmm.gpr64 %113
+  %115 = vpbroadcastq.ymm %114
+  %116 = copy %115 : reg<x86.ymm> -> reg<x86.ymm>
+  %117 = vfmadd231pd.ymm %116, %112, %89
+  %118 = mov.imm64 4551452160554016794
+  %119 = vmovq.xmm.gpr64 %118
+  %120 = vpbroadcastq.ymm %119
+  %121 = copy %120 : reg<x86.ymm> -> reg<x86.ymm>
+  %122 = vfmadd231pd.ymm %121, %117, %89
+  %123 = mov.imm64 4564047942368979991
+  %124 = vmovq.xmm.gpr64 %123
+  %125 = vpbroadcastq.ymm %124
+  %126 = copy %125 : reg<x86.ymm> -> reg<x86.ymm>
+  %127 = vfmadd231pd.ymm %126, %122, %89
+  %128 = mov.imm64 4575957461383581969
+  %129 = vmovq.xmm.gpr64 %128
+  %130 = vpbroadcastq.ymm %129
+  %131 = copy %130 : reg<x86.ymm> -> reg<x86.ymm>
+  %132 = vfmadd231pd.ymm %131, %127, %89
+  %133 = mov.imm64 4586165620538955093
+  %134 = vmovq.xmm.gpr64 %133
+  %135 = vpbroadcastq.ymm %134
+  %136 = copy %135 : reg<x86.ymm> -> reg<x86.ymm>
+  %137 = vfmadd231pd.ymm %136, %132, %89
+  %138 = mov.imm64 4595172819793696085
+  %139 = vmovq.xmm.gpr64 %138
+  %140 = vpbroadcastq.ymm %139
+  %141 = copy %140 : reg<x86.ymm> -> reg<x86.ymm>
+  %142 = vfmadd231pd.ymm %141, %137, %89
+  %143 = mov.imm64 4602678819172646912
+  %144 = vmovq.xmm.gpr64 %143
+  %145 = vpbroadcastq.ymm %144
+  %146 = copy %145 : reg<x86.ymm> -> reg<x86.ymm>
+  %147 = vfmadd231pd.ymm %146, %142, %89
+  %148 = vmulpd.ymm %89, %89
+  %149 = copy %89 : reg<x86.ymm> -> reg<x86.ymm>
+  %150 = vfmadd231pd.ymm %149, %148, %147
+  %151 = mov.imm64 -4571171213967097856
+  %152 = vmovq.xmm.gpr64 %151
+  %153 = vpbroadcastq.ymm %152
+  %154 = mov.imm64 4652209618980700160
+  %155 = vmovq.xmm.gpr64 %154
+  %156 = vpbroadcastq.ymm %155
+  %157 = avx2.vcmppd.ymm %79, %153, 17
+  %158 = vpblendvb.ymm %79, %153, %157
+  %159 = avx2.vcmppd.ymm %158, %156, 30
+  %160 = vpblendvb.ymm %158, %156, %159
+  %161 = vsubpd.ymm %79, %160
+  %162 = mov.imm64 4843621399236968448
+  %163 = vmovq.xmm.gpr64 %162
+  %164 = vpbroadcastq.ymm %163
+  %165 = vaddpd.ymm %160, %164
+  %166 = mov.imm64 1023
+  %167 = vmovq.xmm.gpr64 %166
+  %168 = vpbroadcastq.ymm %167
+  %169 = vpaddq.ymm %165, %168
+  %170 = vpsllq.ymm %169, 52
+  %171 = vaddpd.ymm %161, %164
+  %172 = vpaddq.ymm %171, %168
+  %173 = vpsllq.ymm %172, 52
+  %174 = copy %170 : reg<x86.ymm> -> reg<x86.ymm>
+  %175 = vfmadd231pd.ymm %174, %170, %150
+  %result = vmulpd.ymm %175, %173
+  return %result
+}
+
+// ====
+// RUN: emit source-low target=x86:avx2 output=low
+
+// Direct difference reconstruction retains small results and signed zero.
+func.def @difference_single(%value: f32) -> (f32) {
+  %result = scalar.expm1f<afn> %value : f32
+  func.return %result : f32
+}
+
+// ----
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (f32) -> (f32)}) @difference_single(%value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %71 = mov.imm32 -1046478848
+  %72 = vmovd.xmm.gpr32 %71
+  %73 = mov.imm32 1118961664
+  %74 = vmovd.xmm.gpr32 %73
+  %75 = avx2.vcmpps.xmm %value, %72, 17
+  %76 = vpblendvb.xmm %value, %72, %75
+  %77 = avx2.vcmpps.xmm %76, %74, 30
+  %78 = vpblendvb.xmm %76, %74, %77
+  %79 = mov.imm32 1069066811
+  %80 = vmovd.xmm.gpr32 %79
+  %81 = vmulss.xmm %78, %80
+  %82 = vroundss.xmm %81, %81, 8
+  %83 = mov.imm32 -1087278592
+  %84 = vmovd.xmm.gpr32 %83
+  %85 = mov.imm32 -1245725042
+  %86 = vmovd.xmm.gpr32 %85
+  %87 = copy %78 : reg<x86.xmm> -> reg<x86.xmm>
+  %88 = vfmadd231ss.xmm %87, %82, %84
+  %89 = copy %88 : reg<x86.xmm> -> reg<x86.xmm>
+  %90 = vfmadd231ss.xmm %89, %82, %86
+  %91 = mov.imm32 961547521
+  %92 = vmovd.xmm.gpr32 %91
+  %93 = mov.imm32 985008993
+  %94 = vmovd.xmm.gpr32 %93
+  %95 = copy %94 : reg<x86.xmm> -> reg<x86.xmm>
+  %96 = vfmadd231ss.xmm %95, %92, %90
+  %97 = mov.imm32 1007192201
+  %98 = vmovd.xmm.gpr32 %97
+  %99 = copy %98 : reg<x86.xmm> -> reg<x86.xmm>
+  %100 = vfmadd231ss.xmm %99, %96, %90
+  %101 = mov.imm32 1026206379
+  %102 = vmovd.xmm.gpr32 %101
+  %103 = copy %102 : reg<x86.xmm> -> reg<x86.xmm>
+  %104 = vfmadd231ss.xmm %103, %100, %90
+  %105 = mov.imm32 1042983595
+  %106 = vmovd.xmm.gpr32 %105
+  %107 = copy %106 : reg<x86.xmm> -> reg<x86.xmm>
+  %108 = vfmadd231ss.xmm %107, %104, %90
+  %109 = mov.imm32 1056964608
+  %110 = vmovd.xmm.gpr32 %109
+  %111 = copy %110 : reg<x86.xmm> -> reg<x86.xmm>
+  %112 = vfmadd231ss.xmm %111, %108, %90
+  %113 = vmulss.xmm %90, %90
+  %114 = copy %90 : reg<x86.xmm> -> reg<x86.xmm>
+  %115 = vfmadd231ss.xmm %114, %113, %112
+  %116 = mov.imm32 -1023672320
+  %117 = vmovd.xmm.gpr32 %116
+  %118 = mov.imm32 1123942400
+  %119 = vmovd.xmm.gpr32 %118
+  %120 = avx2.vcmpps.xmm %82, %117, 17
+  %121 = vpblendvb.xmm %82, %117, %120
+  %122 = avx2.vcmpps.xmm %121, %119, 30
+  %123 = vpblendvb.xmm %121, %119, %122
+  %124 = vsubss.xmm %82, %123
+  %125 = mov.imm32 1262485504
+  %126 = vmovd.xmm.gpr32 %125
+  %127 = vaddss.xmm %123, %126
+  %128 = vmovd.gpr32.xmm %127
+  %129 = copy %128 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %130 = add.imm.gpr32 %129 {imm32 = 127}
+  %131 = copy %130 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %132 = shl.imm.gpr32 %131 {shift = 23}
+  %133 = vmovd.xmm.gpr32 %132
+  %134 = vaddss.xmm %124, %126
+  %135 = vmovd.gpr32.xmm %134
+  %136 = copy %135 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %137 = add.imm.gpr32 %136 {imm32 = 127}
+  %138 = copy %137 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %139 = shl.imm.gpr32 %138 {shift = 23}
+  %140 = vmovd.xmm.gpr32 %139
+  %141 = mov.imm32 1065353216
+  %142 = vmovd.xmm.gpr32 %141
+  %143 = avx2.vcmpps.xmm %82, %123, 0
+  %144 = vpblendvb.xmm %110, %142, %143
+  %145 = vsubss.xmm %133, %144
+  %146 = copy %145 : reg<x86.xmm> -> reg<x86.xmm>
+  %147 = vfmadd231ss.xmm %146, %133, %115
+  %148 = vmulss.xmm %147, %140
+  %149 = vmovd.gpr32.xmm %value
+  %150 = copy %149 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %151 = and.imm.gpr32 %150 {imm32 = 2147483647}
+  %152 = vmovd.xmm.gpr32 %151
+  %153 = mov.imm32 855638016
+  %154 = vmovd.xmm.gpr32 %153
+  %155 = avx2.vcmpps.xmm %154, %152, 29
+  %result = vpblendvb.xmm %148, %value, %155
+  return %result
+}
+
+// ====
+// RUN: emit source-low output=low
+
+// Narrow values widen before evaluation and round once after reconstruction.
+x86.target<avx2> @target {features = [f16c]}
+
+func.def target(@target) @difference_half(%value: vector<4xf16>) -> (vector<4xf16>) {
+  %result = vector.expm1f<afn> %value : vector<4xf16>
+  func.return %result : vector<4xf16>
+}
+
+// ----
+low.func.def target<x86.avx2_features.core>(@target) abi(object_function) abi_layout({signature = (vector<4xf16>) -> (vector<4xf16>)}) @difference_half(%value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %74 = vcvtph2ps.xmm.xmm %value
+  %75 = mov.imm32 -1046478848
+  %76 = vmovd.xmm.gpr32 %75
+  %77 = avx2.vpbroadcastd.xmm %76
+  %78 = mov.imm32 1118961664
+  %79 = vmovd.xmm.gpr32 %78
+  %80 = avx2.vpbroadcastd.xmm %79
+  %81 = avx2.vcmpps.xmm %74, %77, 17
+  %82 = vpblendvb.xmm %74, %77, %81
+  %83 = avx2.vcmpps.xmm %82, %80, 30
+  %84 = vpblendvb.xmm %82, %80, %83
+  %85 = mov.imm32 1069066811
+  %86 = vmovd.xmm.gpr32 %85
+  %87 = avx2.vpbroadcastd.xmm %86
+  %88 = vmulps.xmm %84, %87
+  %89 = vroundps.xmm %88, 8
+  %90 = mov.imm32 -1087278592
+  %91 = vmovd.xmm.gpr32 %90
+  %92 = avx2.vpbroadcastd.xmm %91
+  %93 = mov.imm32 -1245725042
+  %94 = vmovd.xmm.gpr32 %93
+  %95 = avx2.vpbroadcastd.xmm %94
+  %96 = copy %84 : reg<x86.xmm> -> reg<x86.xmm>
+  %97 = vfmadd231ps.xmm %96, %89, %92
+  %98 = copy %97 : reg<x86.xmm> -> reg<x86.xmm>
+  %99 = vfmadd231ps.xmm %98, %89, %95
+  %100 = mov.imm32 961547521
+  %101 = vmovd.xmm.gpr32 %100
+  %102 = avx2.vpbroadcastd.xmm %101
+  %103 = mov.imm32 985008993
+  %104 = vmovd.xmm.gpr32 %103
+  %105 = avx2.vpbroadcastd.xmm %104
+  %106 = copy %105 : reg<x86.xmm> -> reg<x86.xmm>
+  %107 = vfmadd231ps.xmm %106, %102, %99
+  %108 = mov.imm32 1007192201
+  %109 = vmovd.xmm.gpr32 %108
+  %110 = avx2.vpbroadcastd.xmm %109
+  %111 = copy %110 : reg<x86.xmm> -> reg<x86.xmm>
+  %112 = vfmadd231ps.xmm %111, %107, %99
+  %113 = mov.imm32 1026206379
+  %114 = vmovd.xmm.gpr32 %113
+  %115 = avx2.vpbroadcastd.xmm %114
+  %116 = copy %115 : reg<x86.xmm> -> reg<x86.xmm>
+  %117 = vfmadd231ps.xmm %116, %112, %99
+  %118 = mov.imm32 1042983595
+  %119 = vmovd.xmm.gpr32 %118
+  %120 = avx2.vpbroadcastd.xmm %119
+  %121 = copy %120 : reg<x86.xmm> -> reg<x86.xmm>
+  %122 = vfmadd231ps.xmm %121, %117, %99
+  %123 = mov.imm32 1056964608
+  %124 = vmovd.xmm.gpr32 %123
+  %125 = avx2.vpbroadcastd.xmm %124
+  %126 = copy %125 : reg<x86.xmm> -> reg<x86.xmm>
+  %127 = vfmadd231ps.xmm %126, %122, %99
+  %128 = vmulps.xmm %99, %99
+  %129 = copy %99 : reg<x86.xmm> -> reg<x86.xmm>
+  %130 = vfmadd231ps.xmm %129, %128, %127
+  %131 = mov.imm32 -1023672320
+  %132 = vmovd.xmm.gpr32 %131
+  %133 = avx2.vpbroadcastd.xmm %132
+  %134 = mov.imm32 1123942400
+  %135 = vmovd.xmm.gpr32 %134
+  %136 = avx2.vpbroadcastd.xmm %135
+  %137 = avx2.vcmpps.xmm %89, %133, 17
+  %138 = vpblendvb.xmm %89, %133, %137
+  %139 = avx2.vcmpps.xmm %138, %136, 30
+  %140 = vpblendvb.xmm %138, %136, %139
+  %141 = vsubps.xmm %89, %140
+  %142 = mov.imm32 1262485504
+  %143 = vmovd.xmm.gpr32 %142
+  %144 = avx2.vpbroadcastd.xmm %143
+  %145 = vaddps.xmm %140, %144
+  %146 = mov.imm32 127
+  %147 = vmovd.xmm.gpr32 %146
+  %148 = avx2.vpbroadcastd.xmm %147
+  %149 = vpaddd.xmm %145, %148
+  %150 = vpslld.xmm %149, 23
+  %151 = vaddps.xmm %141, %144
+  %152 = vpaddd.xmm %151, %148
+  %153 = vpslld.xmm %152, 23
+  %154 = mov.imm32 1065353216
+  %155 = vmovd.xmm.gpr32 %154
+  %156 = avx2.vpbroadcastd.xmm %155
+  %157 = avx2.vcmpps.xmm %89, %140, 0
+  %158 = vpblendvb.xmm %125, %156, %157
+  %159 = vsubps.xmm %150, %158
+  %160 = copy %159 : reg<x86.xmm> -> reg<x86.xmm>
+  %161 = vfmadd231ps.xmm %160, %150, %130
+  %162 = vmulps.xmm %161, %153
+  %163 = mov.imm32 2147483647
+  %164 = vmovd.xmm.gpr32 %163
+  %165 = avx2.vpbroadcastd.xmm %164
+  %166 = vpand.xmm %74, %165
+  %167 = mov.imm32 855638016
+  %168 = vmovd.xmm.gpr32 %167
+  %169 = avx2.vpbroadcastd.xmm %168
+  %170 = avx2.vcmpps.xmm %169, %166, 29
+  %171 = vpblendvb.xmm %162, %74, %170
+  %result = vcvtps2ph.xmm.xmm %171, 0
+  return %result
+}

@@ -51,8 +51,7 @@ static const uint64_t kX86MathTargetFeatureMasks[] = {
   _(ELEMENT_F32, element_f32, "math.element.f32")                            \
   _(ELEMENT_NATIVE_FLOAT, element_native_float, "math.element.native_float") \
   _(ERF_EXACT_F32, erf_exact_f32, "math.erf.exact_f32")                      \
-  _(EXP_EXACT_F32, exp_exact_f32, "math.exp.exact_f32")                      \
-  _(EXP2_EXACT_F32, exp2_exact_f32, "math.exp2.exact_f32")                   \
+  _(EXPONENTIAL_AFN, exponential_afn, "math.exponential.afn")                \
   _(LOGARITHM_AFN, logarithm_afn, "math.logarithm.afn")                      \
   _(OP_NATIVE_FLOAT, op_native_float, "math.op.native_float")                \
   _(OP_NATIVE_RSQRT_ESTIMATE, op_native_rsqrt_estimate,                      \
@@ -65,6 +64,8 @@ static const uint64_t kX86MathTargetFeatureMasks[] = {
     "math.recipe.approximate_cos_turns_f32")                                 \
   _(RECIPE_APPROXIMATE_EXP2_F32, recipe_approximate_exp2_f32,                \
     "math.recipe.approximate_exp2_f32")                                      \
+  _(RECIPE_APPROXIMATE_EXPONENTIAL, recipe_approximate_exponential,          \
+    "math.recipe.approximate_exponential")                                   \
   _(RECIPE_APPROXIMATE_LOGARITHM, recipe_approximate_logarithm,              \
     "math.recipe.approximate_logarithm")                                     \
   _(RECIPE_APPROXIMATE_SIN_TURNS_F32, recipe_approximate_sin_turns_f32,      \
@@ -184,7 +185,7 @@ static const loom_target_math_policy_direct_rule_t
                                        RECIPE_SILU_LOGISTIC_F32,
                                        ACTIVATION_EXACT_F32),
         LOOM_X86_MATH_APPROXIMATE_RULE(EXPF, EXP_EXP2_F32, RECIPE_EXP_EXP2_F32,
-                                       EXP_EXACT_F32),
+                                       EXPONENTIAL_AFN),
         LOOM_X86_MATH_APPROXIMATE_RULE(ERFF, ERF_RATIONAL_F32,
                                        RECIPE_ERF_RATIONAL_F32, ERF_EXACT_F32),
         LOOM_X86_MATH_APPROXIMATE_RULE(
@@ -209,7 +210,14 @@ static const loom_target_math_policy_direct_rule_t
             TANHF, TANH_LOGISTIC_F32, RECIPE_TANH_LOGISTIC_F32, TANH_EXACT_F32),
         LOOM_X86_MATH_APPROXIMATE_RULE(EXP2F, APPROXIMATE_EXP2_F32,
                                        RECIPE_APPROXIMATE_EXP2_F32,
-                                       EXP2_EXACT_F32),
+                                       EXPONENTIAL_AFN),
+        [LOOM_TARGET_MATH_OP_EXPM1F] = LOOM_X86_MATH_DIRECT_RULE(
+            LOOM_SCALAR_TYPE_SET_F32 | LOOM_SCALAR_TYPE_SET_F64,
+            LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+            LOOM_TARGET_MATH_RECIPE_APPROXIMATE_EXPONENTIAL,
+            LOOM_TARGET_MATH_FASTMATH_FLAG_NONE,
+            LOOM_X86_MATH_CONSTRAINT_RECIPE_APPROXIMATE_EXPONENTIAL,
+            LOOM_X86_MATH_CONSTRAINT_EXPONENTIAL_AFN),
         LOOM_X86_MATH_REJECT_F32_RULE(SOFTPLUSF, OP_SUPPORTED),
 #define LOOM_X86_MATH_LOGARITHM_RULE(op_)                    \
   [LOOM_TARGET_MATH_OP_##op_] = LOOM_X86_MATH_DIRECT_RULE(   \
@@ -257,7 +265,8 @@ static const loom_target_math_policy_direct_rule_t
 enum loom_x86_math_rule_e {
   LOOM_X86_MATH_RULE_NATIVE_FP16 = 0,
   LOOM_X86_MATH_RULE_WIDEN_NARROW,
-  LOOM_X86_MATH_RULE_LOGARITHM_NARROW,
+  LOOM_X86_MATH_RULE_EXPONENTIAL_F64,
+  LOOM_X86_MATH_RULE_APPROXIMATE_NARROW,
   LOOM_X86_MATH_RULE_RSQRT_ESTIMATE_F64,
   LOOM_X86_MATH_RULE_RSQRT_ESTIMATE_F16,
   LOOM_X86_MATH_RULE_RSQRT_REFINE_F32,
@@ -293,7 +302,19 @@ static const loom_target_math_policy_rule_t
                 .decision_constraint =
                     LOOM_X86_MATH_CONSTRAINT_RECIPE_WIDEN_F32_ROUND,
             },
-        [LOOM_X86_MATH_RULE_LOGARITHM_NARROW] =
+        [LOOM_X86_MATH_RULE_EXPONENTIAL_F64] =
+            {
+                .match =
+                    LOOM_X86_MATH_MATCH(LOOM_SCALAR_TYPE_SET_F64,
+                                        LOOM_TARGET_MATH_LANE_DOMAIN_SET_ALL,
+                                        LOOM_TARGET_MATH_POLICY_SHAPE_ANY, 0, 0,
+                                        LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+                                        LOOM_X86_MATH_FEATURE_CLASS_NONE),
+                .recipe = LOOM_TARGET_MATH_RECIPE_APPROXIMATE_EXPONENTIAL,
+                .decision_constraint =
+                    LOOM_X86_MATH_CONSTRAINT_RECIPE_APPROXIMATE_EXPONENTIAL,
+            },
+        [LOOM_X86_MATH_RULE_APPROXIMATE_NARROW] =
             {
                 .match =
                     LOOM_X86_MATH_MATCH(LOOM_SCALAR_TYPE_SET_FLOAT_LE16,
@@ -463,7 +484,6 @@ static const loom_target_math_policy_rule_span_t
         LOOM_X86_MATH_F32_SPAN(LOGISTICF),
         LOOM_X86_MATH_F32_SPAN(SILUF),
         LOOM_X86_MATH_F32_SPAN(SOFTPLUSF),
-        LOOM_X86_MATH_F32_SPAN(EXPF),
         LOOM_X86_MATH_F32_SPAN(ERFF),
         LOOM_X86_MATH_F32_SPAN(GELUF_ERF),
         LOOM_X86_MATH_F32_SPAN(GELUF_TANH),
@@ -474,14 +494,22 @@ static const loom_target_math_policy_rule_span_t
         LOOM_X86_MATH_F32_SPAN(COSTURNSF),
         LOOM_X86_MATH_F32_SPAN(TANHF),
         LOOM_X86_MATH_F32_SPAN(POWF),
-        LOOM_X86_MATH_F32_SPAN(EXP2F),
         LOOM_X86_MATH_F32_SPAN(ASINHF),
         LOOM_X86_MATH_F32_SPAN(ACOSHF),
         LOOM_X86_MATH_F32_SPAN(ATANHF),
 #undef LOOM_X86_MATH_F32_SPAN
-#define LOOM_X86_MATH_LOGARITHM_SPAN(op_)                        \
-  [LOOM_TARGET_MATH_OP_##op_] =                                  \
-      LOOM_X86_MATH_SPAN(LOOM_X86_MATH_RULE_LOGARITHM_NARROW, 1, \
+        [LOOM_TARGET_MATH_OP_EXPF] =
+            LOOM_X86_MATH_SPAN(LOOM_X86_MATH_RULE_EXPONENTIAL_F64, 2,
+                               LOOM_X86_MATH_CONSTRAINT_EXPONENTIAL_AFN),
+        [LOOM_TARGET_MATH_OP_EXP2F] =
+            LOOM_X86_MATH_SPAN(LOOM_X86_MATH_RULE_EXPONENTIAL_F64, 2,
+                               LOOM_X86_MATH_CONSTRAINT_EXPONENTIAL_AFN),
+        [LOOM_TARGET_MATH_OP_EXPM1F] =
+            LOOM_X86_MATH_SPAN(LOOM_X86_MATH_RULE_APPROXIMATE_NARROW, 1,
+                               LOOM_X86_MATH_CONSTRAINT_EXPONENTIAL_AFN),
+#define LOOM_X86_MATH_LOGARITHM_SPAN(op_)                          \
+  [LOOM_TARGET_MATH_OP_##op_] =                                    \
+      LOOM_X86_MATH_SPAN(LOOM_X86_MATH_RULE_APPROXIMATE_NARROW, 1, \
                          LOOM_X86_MATH_CONSTRAINT_LOGARITHM_AFN)
         LOOM_X86_MATH_LOGARITHM_SPAN(LOGF),
         LOOM_X86_MATH_LOGARITHM_SPAN(LOG2F),

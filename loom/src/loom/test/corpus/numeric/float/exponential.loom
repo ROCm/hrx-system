@@ -273,3 +273,425 @@ check.scenario @power_values {
   }
   check.return
 }
+
+// Scalar and packet evaluations consume the same runtime values. The VM
+// reference uses the independent stable exponential mappings.
+func.def @exponential_f32_family(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 32 : index
+  %packet = index.constant 4 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%origin] : buffer -> view<32xf32>
+  %result = buffer.view %output[%origin] : buffer -> view<6x32xf32>
+  scf.for %i = [%begin to %end step %packet] {
+    %values = vector.load %source[%i] : view<32xf32> -> vector<4xf32>
+    %natural = vector.expf<afn> %values : vector<4xf32>
+    %binary = vector.exp2f<afn> %values : vector<4xf32>
+    %difference = vector.expm1f<afn> %values : vector<4xf32>
+    vector.store %natural, %result[0, %i] : vector<4xf32>, view<6x32xf32>
+    vector.store %binary, %result[1, %i] : vector<4xf32>, view<6x32xf32>
+    vector.store %difference, %result[2, %i] : vector<4xf32>, view<6x32xf32>
+  }
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %source[%i] : view<32xf32> -> f32
+    %natural = scalar.expf<afn> %value : f32
+    %binary = scalar.exp2f<afn> %value : f32
+    %difference = scalar.expm1f<afn> %value : f32
+    view.store %natural, %result[3, %i] : f32, view<6x32xf32>
+    view.store %binary, %result[4, %i] : f32, view<6x32xf32>
+    view.store %difference, %result[5, %i] : f32, view<6x32xf32>
+  }
+  func.return
+}
+
+// Zeros, subnormals, NaNs, and neighboring reduction/overflow/underflow cuts.
+func.def @exponential_f32_inputs(%input: buffer) {
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %input[%origin] : buffer -> view<32xi32>
+  %bits = vector.constanti [0, -2147483648, 1, -2147483647, 8388607, 8388608, 2139095040, -8388608, 2143289344, 2139095041, 1051816471, 1051816472, 1051816473, -1095667177, -1095667176, -1095667175, 1118925335, 1118925336, 1118925337, -1026559565, -1026559564, -1026559563, 1124073471, 1124073472, 1124073473, -1021968385, -1021968384, -1021968383, 864026624, -1283457024, 1065353216, -1082130432] : vector<32xi32>
+  vector.store %bits, %destination[0] : vector<32xi32>, view<32xi32>
+  func.return
+}
+
+check.scenario @exponential_f32_family_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(0) : tensor<32xi32>
+    check.generate<@exponential_f32_inputs>(%input) : (tensor<32xi32>) -> ()
+    %output = check.generate.fill value(0.0) : tensor<6x32xf32>
+    %vector_difference = check.tensor.view %output offset(256) : tensor<6x32xf32> -> tensor<32xf32>
+    %scalar_difference = check.tensor.view %output offset(640) : tensor<6x32xf32> -> tensor<32xf32>
+    %vector_tiny = check.tensor.view %output offset(256) : tensor<6x32xf32> -> tensor<4xf32>
+    %scalar_tiny = check.tensor.view %output offset(640) : tensor<6x32xf32> -> tensor<4xf32>
+    check.compare<@exponential_f32_family>(%input, %output) : (tensor<32xi32>, tensor<6x32xf32>) -> () {
+      check.expect.bitwise actual(%vector_tiny) expected(%vector_tiny) : tensor<4xf32>
+      check.expect.bitwise actual(%scalar_tiny) expected(%scalar_tiny) : tensor<4xf32>
+      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) : tensor<6x32xf32>, tensor<6x32xf32>
+      check.expect.approximate actual(%vector_difference) expected(%vector_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
+      check.expect.approximate actual(%scalar_difference) expected(%scalar_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<32xi32>
+    %output = check.generate.fill value(0.0) : tensor<6x32xf32>
+    %vector_difference = check.tensor.view %output offset(256) : tensor<6x32xf32> -> tensor<32xf32>
+    %scalar_difference = check.tensor.view %output offset(640) : tensor<6x32xf32> -> tensor<32xf32>
+    check.compare<@exponential_f32_family>(%input, %output) : (tensor<32xi32>, tensor<6x32xf32>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) : tensor<6x32xf32>, tensor<6x32xf32>
+      check.expect.approximate actual(%vector_difference) expected(%vector_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
+      check.expect.approximate actual(%scalar_difference) expected(%scalar_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-160.0 to 140.0) : tensor<32xf32>
+    %output = check.generate.fill value(0.0) : tensor<6x32xf32>
+    %vector_difference = check.tensor.view %output offset(256) : tensor<6x32xf32> -> tensor<32xf32>
+    %scalar_difference = check.tensor.view %output offset(640) : tensor<6x32xf32> -> tensor<32xf32>
+    check.compare<@exponential_f32_family>(%input, %output) : (tensor<32xf32>, tensor<6x32xf32>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) : tensor<6x32xf32>, tensor<6x32xf32>
+      check.expect.approximate actual(%vector_difference) expected(%vector_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
+      check.expect.approximate actual(%scalar_difference) expected(%scalar_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-0.40000000000000002 to 0.40000000000000002) : tensor<32xf32>
+    %output = check.generate.fill value(0.0) : tensor<6x32xf32>
+    %vector_difference = check.tensor.view %output offset(256) : tensor<6x32xf32> -> tensor<32xf32>
+    %scalar_difference = check.tensor.view %output offset(640) : tensor<6x32xf32> -> tensor<32xf32>
+    check.compare<@exponential_f32_family>(%input, %output) : (tensor<32xf32>, tensor<6x32xf32>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) : tensor<6x32xf32>, tensor<6x32xf32>
+      check.expect.approximate actual(%vector_difference) expected(%vector_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
+      check.expect.approximate actual(%scalar_difference) expected(%scalar_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
+    }
+  }
+  check.return
+}
+
+// Scalar and packet evaluations consume the same runtime values. The VM
+// reference uses the independent stable exponential mappings.
+func.def @exponential_f64_family(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 32 : index
+  %packet = index.constant 4 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%origin] : buffer -> view<32xf64>
+  %result = buffer.view %output[%origin] : buffer -> view<6x32xf64>
+  scf.for %i = [%begin to %end step %packet] {
+    %values = vector.load %source[%i] : view<32xf64> -> vector<4xf64>
+    %natural = vector.expf<afn> %values : vector<4xf64>
+    %binary = vector.exp2f<afn> %values : vector<4xf64>
+    %difference = vector.expm1f<afn> %values : vector<4xf64>
+    vector.store %natural, %result[0, %i] : vector<4xf64>, view<6x32xf64>
+    vector.store %binary, %result[1, %i] : vector<4xf64>, view<6x32xf64>
+    vector.store %difference, %result[2, %i] : vector<4xf64>, view<6x32xf64>
+  }
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %source[%i] : view<32xf64> -> f64
+    %natural = scalar.expf<afn> %value : f64
+    %binary = scalar.exp2f<afn> %value : f64
+    %difference = scalar.expm1f<afn> %value : f64
+    view.store %natural, %result[3, %i] : f64, view<6x32xf64>
+    view.store %binary, %result[4, %i] : f64, view<6x32xf64>
+    view.store %difference, %result[5, %i] : f64, view<6x32xf64>
+  }
+  func.return
+}
+
+// Zeros, subnormals, NaNs, and neighboring reduction/overflow/underflow cuts.
+func.def @exponential_f64_inputs(%input: buffer) {
+  %origin = index.constant 0 : offset
+  %destination = buffer.view %input[%origin] : buffer -> view<32xi64>
+  %bits = vector.constanti [0, -9223372036854775808, 1, -9223372036854775807, 4503599627370495, 4503599627370496, 9218868437227405312, -4503599627370496, 9221120237041090560, 9218868437227405313, 4599914934686071278, 4599914934686071279, 4599914934686071280, -4623457102168704530, -4623457102168704529, -4623457102168704528, 4649454530587146734, 4649454530587146735, 4649454530587146736, -4573606559926636464, -4573606559926636463, -4573606559926636462, 4652218415073722367, 4652218415073722368, 4652218415073722369, -4570929321408987137, -4570929321408987136, -4570929321408987135, 4368491638549381120, -4854880398305394688, 4607182418800017408, -4616189618054758400] : vector<32xi64>
+  vector.store %bits, %destination[0] : vector<32xi64>, view<32xi64>
+  func.return
+}
+
+check.scenario @exponential_f64_family_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(0) : tensor<32xi64>
+    check.generate<@exponential_f64_inputs>(%input) : (tensor<32xi64>) -> ()
+    %output = check.generate.fill value(0.0) : tensor<6x32xf64>
+    %vector_tiny = check.tensor.view %output offset(512) : tensor<6x32xf64> -> tensor<4xf64>
+    %scalar_tiny = check.tensor.view %output offset(1280) : tensor<6x32xf64> -> tensor<4xf64>
+    check.compare<@exponential_f64_family>(%input, %output) : (tensor<32xi64>, tensor<6x32xf64>) -> () {
+      check.expect.bitwise actual(%vector_tiny) expected(%vector_tiny) : tensor<4xf64>
+      check.expect.bitwise actual(%scalar_tiny) expected(%scalar_tiny) : tensor<4xf64>
+      check.expect.approximate actual(%output) expected(%output) atol(4.9406564584124654e-324) rtol(1.1102230246251565e-15) nan(same) : tensor<6x32xf64>, tensor<6x32xf64>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-9223372036854775808 to 9223372036854775807) : tensor<32xi64>
+    %output = check.generate.fill value(0.0) : tensor<6x32xf64>
+    check.compare<@exponential_f64_family>(%input, %output) : (tensor<32xi64>, tensor<6x32xf64>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(4.9406564584124654e-324) rtol(1.1102230246251565e-15) nan(same) : tensor<6x32xf64>, tensor<6x32xf64>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-1100.0 to 1050.0) : tensor<32xf64>
+    %output = check.generate.fill value(0.0) : tensor<6x32xf64>
+    check.compare<@exponential_f64_family>(%input, %output) : (tensor<32xf64>, tensor<6x32xf64>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(4.9406564584124654e-324) rtol(1.1102230246251565e-15) nan(same) : tensor<6x32xf64>, tensor<6x32xf64>
+    }
+  }
+  check.return
+}
+
+// Scalar and packet evaluations consume the same runtime values. The VM
+// reference uses the independent stable exponential mappings.
+func.def @exponential_f16_family(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 65536 : index
+  %packet = index.constant 8 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%origin] : buffer -> view<65536xf16>
+  %result = buffer.view %output[%origin] : buffer -> view<6x65536xf16>
+  scf.for %i = [%begin to %end step %packet] {
+    %values = vector.load %source[%i] : view<65536xf16> -> vector<8xf16>
+    %natural = vector.expf<afn> %values : vector<8xf16>
+    %binary = vector.exp2f<afn> %values : vector<8xf16>
+    %difference = vector.expm1f<afn> %values : vector<8xf16>
+    vector.store %natural, %result[0, %i] : vector<8xf16>, view<6x65536xf16>
+    vector.store %binary, %result[1, %i] : vector<8xf16>, view<6x65536xf16>
+    vector.store %difference, %result[2, %i] : vector<8xf16>, view<6x65536xf16>
+  }
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %source[%i] : view<65536xf16> -> f16
+    %natural = scalar.expf<afn> %value : f16
+    %binary = scalar.exp2f<afn> %value : f16
+    %difference = scalar.expm1f<afn> %value : f16
+    view.store %natural, %result[3, %i] : f16, view<6x65536xf16>
+    view.store %binary, %result[4, %i] : f16, view<6x65536xf16>
+    view.store %difference, %result[5, %i] : f16, view<6x65536xf16>
+  }
+  func.return
+}
+
+// Every source encoding, including signaling NaNs and signed subnormals.
+check.scenario @exponential_f16_family_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32768) step(1) : tensor<65536xi16>
+    %output = check.generate.fill value(0.0) : tensor<6x65536xf16>
+    check.compare<@exponential_f16_family>(%input, %output) : (tensor<65536xi16>, tensor<6x65536xf16>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(5.9604644775390625e-08) rtol(0.0009765625) nan(same) : tensor<6x65536xf16>, tensor<6x65536xf16>
+    }
+  }
+  check.return
+}
+
+// Scalar and packet evaluations consume the same runtime values. The VM
+// reference uses the independent stable exponential mappings.
+func.def @exponential_bf16_family(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 65536 : index
+  %packet = index.constant 8 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%origin] : buffer -> view<65536xbf16>
+  %result = buffer.view %output[%origin] : buffer -> view<6x65536xbf16>
+  scf.for %i = [%begin to %end step %packet] {
+    %values = vector.load %source[%i] : view<65536xbf16> -> vector<8xbf16>
+    %natural = vector.expf<afn> %values : vector<8xbf16>
+    %binary = vector.exp2f<afn> %values : vector<8xbf16>
+    %difference = vector.expm1f<afn> %values : vector<8xbf16>
+    vector.store %natural, %result[0, %i] : vector<8xbf16>, view<6x65536xbf16>
+    vector.store %binary, %result[1, %i] : vector<8xbf16>, view<6x65536xbf16>
+    vector.store %difference, %result[2, %i] : vector<8xbf16>, view<6x65536xbf16>
+  }
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %source[%i] : view<65536xbf16> -> bf16
+    %natural = scalar.expf<afn> %value : bf16
+    %binary = scalar.exp2f<afn> %value : bf16
+    %difference = scalar.expm1f<afn> %value : bf16
+    view.store %natural, %result[3, %i] : bf16, view<6x65536xbf16>
+    view.store %binary, %result[4, %i] : bf16, view<6x65536xbf16>
+    view.store %difference, %result[5, %i] : bf16, view<6x65536xbf16>
+  }
+  func.return
+}
+
+// Every source encoding, including signaling NaNs and signed subnormals.
+check.scenario @exponential_bf16_family_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32768) step(1) : tensor<65536xi16>
+    %output = check.generate.fill value(0.0) : tensor<6x65536xbf16>
+    check.compare<@exponential_bf16_family>(%input, %output) : (tensor<65536xi16>, tensor<6x65536xbf16>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(9.1835496157991212e-41) rtol(0.0078125) nan(same) : tensor<6x65536xbf16>, tensor<6x65536xbf16>
+    }
+  }
+  check.return
+}
+
+// Scalar and packet evaluations consume the same runtime values. The VM
+// reference uses the independent stable exponential mappings.
+func.def @exponential_f8e4m3_family(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %packet = index.constant 4 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%origin] : buffer -> view<256xf8E4M3>
+  %result = buffer.view %output[%origin] : buffer -> view<6x256xf8E4M3>
+  scf.for %i = [%begin to %end step %packet] {
+    %values = vector.load %source[%i] : view<256xf8E4M3> -> vector<4xf8E4M3>
+    %natural = vector.expf<afn> %values : vector<4xf8E4M3>
+    %binary = vector.exp2f<afn> %values : vector<4xf8E4M3>
+    %difference = vector.expm1f<afn> %values : vector<4xf8E4M3>
+    vector.store %natural, %result[0, %i] : vector<4xf8E4M3>, view<6x256xf8E4M3>
+    vector.store %binary, %result[1, %i] : vector<4xf8E4M3>, view<6x256xf8E4M3>
+    vector.store %difference, %result[2, %i] : vector<4xf8E4M3>, view<6x256xf8E4M3>
+  }
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %source[%i] : view<256xf8E4M3> -> f8E4M3
+    %natural = scalar.expf<afn> %value : f8E4M3
+    %binary = scalar.exp2f<afn> %value : f8E4M3
+    %difference = scalar.expm1f<afn> %value : f8E4M3
+    view.store %natural, %result[3, %i] : f8E4M3, view<6x256xf8E4M3>
+    view.store %binary, %result[4, %i] : f8E4M3, view<6x256xf8E4M3>
+    view.store %difference, %result[5, %i] : f8E4M3, view<6x256xf8E4M3>
+  }
+  func.return
+}
+
+// Every source encoding, including signaling NaNs and signed subnormals.
+check.scenario @exponential_f8e4m3_family_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %output = check.generate.fill value(0.0) : tensor<6x256xf8E4M3>
+    check.compare<@exponential_f8e4m3_family>(%input, %output) : (tensor<256xi8>, tensor<6x256xf8E4M3>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(0.001953125) rtol(0.125) nan(same) : tensor<6x256xf8E4M3>, tensor<6x256xf8E4M3>
+    }
+  }
+  check.return
+}
+
+// Scalar and packet evaluations consume the same runtime values. The VM
+// reference uses the independent stable exponential mappings.
+func.def @exponential_f8e5m2_family(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %packet = index.constant 4 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%origin] : buffer -> view<256xf8E5M2>
+  %result = buffer.view %output[%origin] : buffer -> view<6x256xf8E5M2>
+  scf.for %i = [%begin to %end step %packet] {
+    %values = vector.load %source[%i] : view<256xf8E5M2> -> vector<4xf8E5M2>
+    %natural = vector.expf<afn> %values : vector<4xf8E5M2>
+    %binary = vector.exp2f<afn> %values : vector<4xf8E5M2>
+    %difference = vector.expm1f<afn> %values : vector<4xf8E5M2>
+    vector.store %natural, %result[0, %i] : vector<4xf8E5M2>, view<6x256xf8E5M2>
+    vector.store %binary, %result[1, %i] : vector<4xf8E5M2>, view<6x256xf8E5M2>
+    vector.store %difference, %result[2, %i] : vector<4xf8E5M2>, view<6x256xf8E5M2>
+  }
+  scf.for %i = [%begin to %end step %step] {
+    %value = view.load %source[%i] : view<256xf8E5M2> -> f8E5M2
+    %natural = scalar.expf<afn> %value : f8E5M2
+    %binary = scalar.exp2f<afn> %value : f8E5M2
+    %difference = scalar.expm1f<afn> %value : f8E5M2
+    view.store %natural, %result[3, %i] : f8E5M2, view<6x256xf8E5M2>
+    view.store %binary, %result[4, %i] : f8E5M2, view<6x256xf8E5M2>
+    view.store %difference, %result[5, %i] : f8E5M2, view<6x256xf8E5M2>
+  }
+  func.return
+}
+
+// Every source encoding, including signaling NaNs and signed subnormals.
+check.scenario @exponential_f8e5m2_family_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %output = check.generate.fill value(0.0) : tensor<6x256xf8E5M2>
+    check.compare<@exponential_f8e5m2_family>(%input, %output) : (tensor<256xi8>, tensor<6x256xf8E5M2>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(1.52587890625e-05) rtol(0.25) nan(same) : tensor<6x256xf8E5M2>, tensor<6x256xf8E5M2>
+    }
+  }
+  check.return
+}
+
+// An irregular width exercises full packets and tails. Source reassociation
+// permission must not destroy the reduction's split correction. The generated
+// inputs and all three results remain finite, satisfying nnan/ninf promises.
+func.def @exponential_f64_packets(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<19xf64>
+  %result = buffer.view %output[%origin] : buffer -> view<3x19xf64>
+  %values = vector.load %source[0] : view<19xf64> -> vector<19xf64>
+  %natural = vector.expf<reassoc|nnan|ninf|nsz|arcp|contract|afn> %values : vector<19xf64>
+  %binary = vector.exp2f<reassoc|nnan|ninf|nsz|arcp|contract|afn> %values : vector<19xf64>
+  %difference = vector.expm1f<reassoc|nnan|ninf|nsz|arcp|contract|afn> %values : vector<19xf64>
+  vector.store %natural, %result[0, 0] : vector<19xf64>, view<3x19xf64>
+  vector.store %binary, %result[1, 0] : vector<19xf64>, view<3x19xf64>
+  vector.store %difference, %result[2, 0] : vector<19xf64>, view<3x19xf64>
+  func.return
+}
+
+check.scenario @exponential_f64_packet_values {
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-700.0 to 700.0) : tensor<19xf64>
+    %output = check.generate.fill value(0.0) : tensor<3x19xf64>
+    check.compare<@exponential_f64_packets>(%input, %output) : (tensor<19xf64>, tensor<3x19xf64>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(4.9406564584124654e-324) rtol(1.1102230246251565e-15) nan(same) : tensor<3x19xf64>, tensor<3x19xf64>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-0.40000000000000002 to 0.40000000000000002) : tensor<19xf64>
+    %output = check.generate.fill value(0.0) : tensor<3x19xf64>
+    check.compare<@exponential_f64_packets>(%input, %output) : (tensor<19xf64>, tensor<3x19xf64>) -> () {
+      check.expect.approximate actual(%output) expected(%output) atol(4.9406564584124654e-324) rtol(1.1102230246251565e-15) nan(same) : tensor<3x19xf64>, tensor<3x19xf64>
+    }
+  }
+  check.return
+}
+
+// Small-lambda Poisson sampling stops when the product of uniform values
+// reaches exp(-lambda). Only the threshold evaluation permits approximation;
+// the observable sample count is compared exactly with the stable VM mapping.
+func.def @poisson_count(%ordinal: index, %uniforms: buffer, %output: buffer) {
+  %ordinal_i64 = index.cast %ordinal : index to i64
+  %lambda = scalar.uitofp %ordinal_i64 : i64 to f64
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %unit = scalar.constant 1.0 : f64
+  %negative_lambda = scalar.negf %lambda : f64
+  %limit = scalar.expf<afn> %negative_lambda : f64
+  %stream = buffer.view %uniforms[%origin] : buffer -> view<256xf64>
+  %result = buffer.view %output[%origin] : buffer -> view<1xi32>
+  %final_product, %final_count = scf.while(%product = %unit : f64, %count = %begin : index) -> (f64, index) {
+    // The caller's lambda < 64 and uniform <= 0.75 domain bounds the product
+    // recurrence, which integer range analysis cannot infer from floating math.
+    %position = index.assume %count [range(%count, 0, 223)] : index
+    %uniform = view.load %stream[%position] : view<256xf64> -> f64
+    %next_product = scalar.mulf %product, %uniform : f64
+    %next_count = index.add %count, %step : index
+    %more = scalar.cmpf ogt, %next_product, %limit : f64
+    scf.condition %more, %next_product, %next_count : i1, f64, index
+  } do(%product: f64, %count: index) {
+    scf.yield %product, %count : f64, index
+  }
+  %sample = index.sub %final_count, %step : index
+  %sample_i32 = index.cast %sample : index to i32
+  view.store %sample_i32, %result[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @poisson_count_values {
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    // With lambda < 64 and uniforms <= 0.75 the loop consumes < 224 values.
+    %uniforms = check.generate.random.uniform seed(%seed) range(0.25 to 0.75) : tensor<256xf64>
+    %output = check.generate.fill value(0) : tensor<1xi32>
+    check.compare<@poisson_count>(%trial, %uniforms, %output) : (index, tensor<256xf64>, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}

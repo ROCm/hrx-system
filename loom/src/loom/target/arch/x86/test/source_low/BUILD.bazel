@@ -56,6 +56,7 @@ loom_check_test_suite(
         "numeric_boolean_comparison.loom-test",
         "numeric_clamp.loom-test",
         "numeric_constant_remainder.loom-test",
+        "numeric_exponential.loom-test",
         "numeric_f32_constants.loom-test",
         "numeric_f64_constants.loom-test",
         "numeric_float_conversion_avx2.loom-test",
