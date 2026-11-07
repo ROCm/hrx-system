@@ -169,6 +169,20 @@ cannot establish the requested capability. Mapping a host-only queue later
 does not add device publication, and a different GPU requires its own supported
 mapping rather than reusing the owner's addresses.
 
+On Linux GC 9.4.3, 9.4.4, and 9.5.0, discovery qualifies this capability
+against the native driver's [shader-doorbell routing repair](../../docs/reference/amd/gpu/sdma/device-publication.md#shader-routing-on-gc-943-944-and-950).
+A readable in-tree module identity and fixed kernel release establish support.
+Separately installed vendor modules have their own patch histories and do not
+inherit the host kernel's guarantee; no fixed vendor release is currently
+qualified. Missing module provenance, including a built-in driver without the
+loaded-module identity attributes, leaves this optional capability unavailable.
+Host-produced SDMA and compute queues retain their capabilities.
+
+Discovery performs no queue creation or allocation probe. It caches the native
+qualification, and queue construction consumes the same capability decision.
+An explicit unsupported request fails before native allocation. Submission
+performs no version check.
+
 The device reserves available ring bytes, writes complete packets, and makes
 those writes visible at system scope before publishing WPTR. It then writes
 the same monotonic byte frontier to the write-only 64-bit doorbell, with system
