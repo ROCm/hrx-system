@@ -191,11 +191,6 @@ static bool loom_low_lower_op_is_structural(
   if (is_callable_exit) {
     return true;
   }
-  if (iree_any_bit_set(traits, LOOM_TRAIT_CALLABLE_BOUNDARY) &&
-      loom_low_lower_source_call_is_structural(context->module, op) &&
-      !loom_low_lower_source_call_requires_projection(context, op)) {
-    return true;
-  }
   switch (op->kind) {
     case LOOM_OP_REF_BORROW:
     case LOOM_OP_REF_RELEASE:
@@ -658,6 +653,9 @@ static iree_status_t loom_low_lower_finalize_selected_plan_phase(
       status = context->policy->finalize_plan.fn(
           context->policy->finalize_plan.user_data, context,
           selected_plan->source_op, selected_plan->data.target_plan);
+    } else if (selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALL) {
+      status = loom_low_lower_source_call_finalize(
+          context, selected_plan->source_op, selected_plan->data.call);
     } else if (selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE) {
       status = loom_low_lower_source_invoke_finalize(
           context, selected_plan->source_op, selected_plan->data.invoke);
@@ -1739,6 +1737,22 @@ static iree_status_t loom_low_lower_plan_op(
         .rule_set_index = UINT16_MAX,
         .rule_index = UINT16_MAX,
         .data.projected_call = plan,
+    };
+    return loom_low_lower_select_fixed_plan(
+        context, candidate_plan, &selected_plan,
+        LOOM_LOW_LOWER_SOURCE_GRAPH_ALTERNATIVE_FIXED);
+  }
+
+  if (loom_low_lower_source_call_is_direct(context->module, source_op)) {
+    loom_low_lower_source_call_plan_t* plan = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_source_call_plan(context, source_op, &plan));
+    const loom_low_lower_selected_plan_t selected_plan = {
+        .source_op = source_op,
+        .kind = LOOM_LOW_LOWER_SELECTED_PLAN_CALL,
+        .rule_set_index = UINT16_MAX,
+        .rule_index = UINT16_MAX,
+        .data.call = plan,
     };
     return loom_low_lower_select_fixed_plan(
         context, candidate_plan, &selected_plan,
