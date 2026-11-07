@@ -7,6 +7,7 @@
 #ifndef LOOMCXX_HIP_RUNTIME_H_
 #define LOOMCXX_HIP_RUNTIME_H_
 
+#include <hip/hip_vector_types.h>
 #include <loomcxx/kernel.h>
 #include <loomcxx/math.h>
 
@@ -26,8 +27,6 @@
 #define __builtin_assume(condition) ::loom::assume(condition)
 #define __builtin_inff() ::loom::infinity()
 #define __builtin_amdgcn_rcpf(value) ::loom::reciprocal(value)
-
-using uint3 = loom::kernel::uint3;
 
 [[loom::device, loom::inline]] static inline float __shfl_xor(
     float value, int mask, int width = warpSize) {

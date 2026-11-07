@@ -66,6 +66,7 @@ _MODULES = [
     "enum_values",
     "flash_attention",
     "function_specializations",
+    "hip_vector_types",
     "immutable_object_link",
     "immutable_objects",
     "increment_values",

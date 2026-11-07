@@ -98,3 +98,10 @@ using Int4 = int __attribute__((ext_vector_type(4)));
 Int4 invalid(Int4 left, Int4 right) {
   return loom::vector::minnumf(left, right);
 }
+
+// ====
+// Native component values preserve whole-vector storage and are not
+// independently addressable source objects.
+using UInt4 = unsigned __attribute__((ext_vector_type(4)));
+// ERROR@+1: LOWERING/059 "extended-vector components are not addressable"
+unsigned* invalid(UInt4* values) { return &values->x; }

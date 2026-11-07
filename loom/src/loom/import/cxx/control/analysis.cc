@@ -2600,6 +2600,11 @@ std::optional<Destination> ControlFlow::classify_destination(
   if (!member) {
     return std::nullopt;
   }
+  if (member->vectorComponentKind != cxx::VectorComponentKind::kNone) {
+    return member->accessOp == cxx::TokenKind::T_DOT
+               ? classify_destination(member->baseExpression)
+               : std::nullopt;
+  }
   auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
   if (!field || field->isStatic()) {
     return std::nullopt;
@@ -2627,7 +2632,10 @@ std::optional<Destination> ControlFlow::classify_destination(
 bool ControlFlow::classify_storage(cxx::ExpressionAST* expression) const {
   if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression)) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
-    return field && !field->isStatic() &&
+    const bool object_member =
+        member->vectorComponentKind != cxx::VectorComponentKind::kNone ||
+        (field && !field->isStatic());
+    return object_member &&
            (member->accessOp == cxx::TokenKind::T_MINUS_GREATER ||
             storage_expressions_.contains(member->baseExpression));
   }

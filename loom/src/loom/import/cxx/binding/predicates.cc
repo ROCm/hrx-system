@@ -305,7 +305,9 @@ class MaterializablePredicateExpression {
 
   bool admit_member(cxx::MemberExpressionAST* member) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
-    if (!field || field->isStatic()) {
+    const bool is_vector_component =
+        member->vectorComponentKind != cxx::VectorComponentKind::kNone;
+    if (!is_vector_component && (!field || field->isStatic())) {
       return false;
     }
     if (member->accessOp == cxx::TokenKind::T_DOT) {
