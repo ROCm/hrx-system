@@ -40,8 +40,12 @@ void iree_hal_amd_gpu_timestamp_writes_deinitialize(
     iree_allocator_t allocator, iree_hal_amd_gpu_timestamp_writes_t* writes);
 
 // Whether this payload dependency can consume an outstanding clock write.
-// Same-slot/allocation ranges preserve byte precision. Distinct binding or
-// imported-buffer identities may alias and conservatively require delivery.
+// The public recording entry point resolves global actions into
+// |barrier->flags| while preserving authored access/range scope. Native cache
+// promotion does not make unrelated timestamp destinations part of the
+// dependency. Same-slot/allocation ranges preserve byte precision. Distinct
+// binding or imported-buffer identities may alias and conservatively require
+// delivery.
 bool iree_hal_amd_gpu_timestamp_writes_overlap(
     const iree_hal_amd_gpu_timestamp_writes_t* writes,
     const iree_hal_barrier_t* barrier);

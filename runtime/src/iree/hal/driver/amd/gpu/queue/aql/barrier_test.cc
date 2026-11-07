@@ -30,17 +30,36 @@ TEST(AqlBarrierTest, DefaultAndExplicitEmptyHaveDifferentSemantics) {
   EXPECT_EQ(Prepare({}), 0u);
 }
 
-TEST(AqlBarrierTest, ExecutionOrderingDoesNotRequireCacheEffects) {
+TEST(AqlBarrierTest, DeviceExecutionOrderingDoesNotRequireCacheEffects) {
   EXPECT_EQ(Prepare({
                 .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
                 .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
             }),
             IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED);
+}
+
+TEST(AqlBarrierTest, HostStagesImplySystemVisibilityWithoutAccessDescriptors) {
   EXPECT_EQ(Prepare({
                 .source_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
                 .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
             }),
-            0u);
+            IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM);
+  EXPECT_EQ(Prepare({
+                .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+                .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+            }),
+            IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM);
+  EXPECT_EQ(Prepare({
+                .source_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST |
+                                     IREE_HAL_EXECUTION_STAGE_TRANSFER,
+                .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST |
+                                     IREE_HAL_EXECUTION_STAGE_DISPATCH,
+            }),
+            IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+                IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
+                IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM);
 }
 
 TEST(AqlBarrierTest, AtomicReleasePrecedesAndAcquireFollowsTheCarrier) {

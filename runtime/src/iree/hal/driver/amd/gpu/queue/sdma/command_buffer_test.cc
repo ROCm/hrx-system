@@ -616,13 +616,16 @@ TEST_F(CommandBufferTest, UserCacheBoundariesStayInTheNativeStream) {
   const iree_hal_barrier_t acquire = {
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
-      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
   };
   IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording_, &acquire));
   IREE_ASSERT_OK(iree_hal_command_buffer_copy_buffer(
       recording_, iree_hal_make_buffer_ref(&source->base, 0, 8),
       iree_hal_make_buffer_ref(&target->base, 0, 8), 0));
-  ASSERT_NO_FATAL_FAILURE(Barrier(IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE));
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+  };
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording_, &release));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(recording_));
   Invocation invocation;
   IREE_ASSERT_OK(invocation.Initialize(recording_));

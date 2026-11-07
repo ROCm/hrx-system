@@ -740,20 +740,24 @@ TEST_F(VulkanCommandBufferTest, TimestampDeliveryFollowsDataDependencies) {
     kDirect
   };
   const std::pair<References, iree_hal_execution_stage_t> cases[] = {
-      {References::kSameSlot, IREE_HAL_EXECUTION_STAGE_TRANSFER},
-      {References::kOtherSlot, IREE_HAL_EXECUTION_STAGE_TRANSFER},
-      {References::kDirectCapture, IREE_HAL_EXECUTION_STAGE_TRANSFER},
-      {References::kDirectConsumer, IREE_HAL_EXECUTION_STAGE_TRANSFER},
-      {References::kDirect, IREE_HAL_EXECUTION_STAGE_TRANSFER},
+      {References::kSameSlot, IREE_HAL_EXECUTION_STAGE_DISPATCH},
+      {References::kOtherSlot, IREE_HAL_EXECUTION_STAGE_DISPATCH},
+      {References::kDirectCapture, IREE_HAL_EXECUTION_STAGE_DISPATCH},
+      {References::kDirectConsumer, IREE_HAL_EXECUTION_STAGE_DISPATCH},
+      {References::kDirect, IREE_HAL_EXECUTION_STAGE_DISPATCH},
       {References::kSameSlot, IREE_HAL_EXECUTION_STAGE_HOST},
       {References::kOtherSlot, IREE_HAL_EXECUTION_STAGE_HOST},
       {References::kDirectCapture, IREE_HAL_EXECUTION_STAGE_HOST},
       {References::kDirectConsumer, IREE_HAL_EXECUTION_STAGE_HOST},
       {References::kDirect, IREE_HAL_EXECUTION_STAGE_HOST},
   };
-  for (auto [references, execution_target] : cases) {
+  for (auto [references, target_stage] : cases) {
     SCOPED_TRACE(static_cast<int>(references));
-    SCOPED_TRACE(execution_target);
+    SCOPED_TRACE(target_stage);
+    const iree_hal_access_scope_t target_scope =
+        target_stage == IREE_HAL_EXECUTION_STAGE_HOST
+            ? IREE_HAL_ACCESS_SCOPE_HOST_READ
+            : IREE_HAL_ACCESS_SCOPE_DISPATCH_READ;
     const bool direct_capture = references == References::kDirectCapture ||
                                 references == References::kDirect;
     const bool direct_consumer = references == References::kDirectConsumer ||
@@ -772,26 +776,26 @@ TEST_F(VulkanCommandBufferTest, TimestampDeliveryFollowsDataDependencies) {
     // A wave join orders captures, but does not consume timestamp data.
     const iree_hal_barrier_t execution = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
-        .target_stage_mask = execution_target,
+        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(commands.get(), &execution));
     IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(commands.get(), 0, 0,
                                                      capture_ref(8), 0));
     const iree_hal_buffer_barrier_t unrelated = {
         .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-        .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+        .target_scope = target_scope,
         .buffer_ref = capture_ref(32),
     };
     iree_hal_barrier_t consume = {
         .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
-        .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+        .target_stage_mask = target_stage,
         .buffer_barrier_count = 1,
         .buffer_barriers = &unrelated,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_barrier(commands.get(), &consume));
     const iree_hal_buffer_barrier_t sample = {
         .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-        .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ,
+        .target_scope = target_scope,
         .buffer_ref =
             direct_consumer
                 ? iree_hal_make_buffer_ref(buffer, direct_capture ? 0 : 8, 8)
@@ -877,12 +881,102 @@ TEST_F(VulkanCommandBufferTest, TimestampDeliveryFollowsDataDependencies) {
       EXPECT_NE(capture.memory_barriers[capture.memory_barrier_count - 1]
                     .srcAccessMask,
                 0u);
+      if (target_stage == IREE_HAL_EXECUTION_STAGE_HOST) {
+        EXPECT_NE(capture.memory_barriers[capture.memory_barrier_count - 1]
+                          .dstAccessMask &
+                      VK_ACCESS_2_HOST_READ_BIT,
+                  0u);
+      }
       const size_t execution_index = direct_capture ? 0 : 1;
       EXPECT_NE(capture.memory_barriers[execution_index].srcStageMask &
                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                 0u);
       EXPECT_EQ(capture.memory_barriers[execution_index].srcAccessMask, 0u);
     }
+  }
+}
+
+TEST_F(VulkanCommandBufferTest,
+       HostReleaseDeliversTimestampBeforeFollowingCapture) {
+  const auto syms = MakeNativeReplaySyms();
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_vulkan_buffer_create_borrowed(
+      &syms, reinterpret_cast<VkDevice>(uintptr_t{1}),
+      iree_hal_buffer_placement_undefined(),
+      IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE, IREE_HAL_MEMORY_ACCESS_ALL,
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE, 32, 0, 32,
+      0, 1, VK_NULL_HANDLE, nullptr,
+      reinterpret_cast<VkBuffer>(uintptr_t{0x2468}), 0x1000, nullptr,
+      iree_hal_buffer_release_callback_null(), iree_allocator_system(),
+      &buffer));
+  const std::unique_ptr<iree_hal_buffer_t, decltype(&iree_hal_buffer_release)>
+      buffer_owner(buffer, iree_hal_buffer_release);
+  const iree_hal_buffer_barrier_t unrelated = {
+      .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      .target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ,
+      .buffer_ref = iree_hal_make_buffer_ref(buffer, 16, 8),
+  };
+  const iree_hal_barrier_t releases[] = {
+      {
+          .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+          .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+      },
+      {
+          .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+          .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+          .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+          .buffer_barrier_count = 1,
+          .buffer_barriers = &unrelated,
+      },
+      {
+          .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+          .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+          .effects = {.bits = IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM},
+          .buffer_barrier_count = 1,
+          .buffer_barriers = &unrelated,
+      },
+  };
+  for (const auto& release : releases) {
+    SCOPED_TRACE(release.flags);
+    SCOPED_TRACE(release.effects.bits);
+    auto commands = CreateCommandBuffer();
+    IREE_ASSERT_OK(iree_hal_command_buffer_begin(commands.get()));
+    IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+        commands.get(), 0, 0, iree_hal_make_buffer_ref(buffer, 0, 8), 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_barrier(commands.get(), &release));
+    IREE_ASSERT_OK(iree_hal_command_buffer_timestamp(
+        commands.get(), 0, 0, iree_hal_make_buffer_ref(buffer, 8, 8), 0));
+    IREE_ASSERT_OK(iree_hal_command_buffer_end(commands.get()));
+
+    std::array<iree_hal_vulkan_timestamp_pending_t, 2> pending = {};
+    const iree_hal_vulkan_timestamp_pipeline_t pipeline = {};
+    const iree_hal_vulkan_timestamp_state_t timestamps = {
+        .resolve_address = 0x3000,
+        .pipeline = &pipeline,
+        .pending = pending.data(),
+    };
+    const iree_hal_vulkan_debug_utils_t debug_utils = {};
+    const iree_hal_vulkan_builtins_t builtins = {};
+    NativeReplayCapture capture;
+    g_native_replay_capture = &capture;
+    IREE_ASSERT_OK(iree_hal_vulkan_command_buffer_record_native(
+        commands.get(), &syms, reinterpret_cast<VkDevice>(uintptr_t{1}),
+        &debug_utils, &builtins,
+        reinterpret_cast<VkCommandBuffer>(uintptr_t{2}), 0, VK_NULL_HANDLE, {},
+        nullptr, nullptr, &timestamps, nullptr, iree_allocator_system()));
+    g_native_replay_capture = nullptr;
+    EXPECT_EQ(capture.events,
+              (std::vector<std::pair<char, uint32_t>>{
+                  {'R', 2}, {'T', 0}, {'C', 0}, {'B', 0}, {'T', 1}, {'C', 1}}));
+    EXPECT_EQ(capture.query_copies,
+              (std::vector<std::array<uint64_t, 3>>{{0, 1, 0}, {1, 1, 8}}));
+    ASSERT_EQ(capture.memory_barrier_count, 1u);
+    EXPECT_NE(
+        capture.memory_barriers[0].srcAccessMask & VK_ACCESS_2_MEMORY_WRITE_BIT,
+        0u);
+    EXPECT_NE(
+        capture.memory_barriers[0].dstAccessMask & VK_ACCESS_2_HOST_READ_BIT,
+        0u);
   }
 }
 

@@ -151,13 +151,32 @@ TEST_P(BarrierTest, EveryExecutionStagePreservesItsCompletionDomain) {
   const uint32_t expected[] = {0, 3, 1, 3, 3, 0, 1};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(expected); ++i) {
     SCOPED_TRACE(i);
+    const iree_hal_execution_stage_t stage = 1u << i;
     const auto barrier = Prepare({
-        .source_stage_mask = 1u << i,
+        .source_stage_mask = stage,
         .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
     });
-    EXPECT_EQ(barrier.cache_control, 0u);
+    EXPECT_EQ(barrier.cache_control,
+              stage & IREE_HAL_EXECUTION_STAGE_HOST ? GetParam().acquire : 0u);
     EXPECT_EQ(barrier.execution, expected[i]);
   }
+}
+
+TEST_P(BarrierTest, HostStagesImplySystemVisibilityWithoutAccessDescriptors) {
+  const auto release = Prepare({
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+  });
+  EXPECT_EQ(release.cache_control, GetParam().release);
+  EXPECT_EQ(release.execution, 1u);
+  const auto both = Prepare({
+      .source_stage_mask =
+          IREE_HAL_EXECUTION_STAGE_HOST | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      .target_stage_mask =
+          IREE_HAL_EXECUTION_STAGE_HOST | IREE_HAL_EXECUTION_STAGE_DISPATCH,
+  });
+  EXPECT_EQ(both.cache_control, GetParam().acquire | GetParam().release);
+  EXPECT_EQ(both.execution, 3u);
 }
 
 TEST_P(BarrierTest, ExecutionOnlyUsesNoCacheCommands) {

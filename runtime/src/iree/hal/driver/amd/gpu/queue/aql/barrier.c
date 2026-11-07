@@ -18,6 +18,8 @@ uint32_t iree_hal_amd_gpu_aql_barrier_prepare(
   uint32_t ordered = 0;
   for (iree_host_size_t i = 0; i < barriers->count; ++i) {
     const iree_hal_barrier_t* barrier = &barriers->values[i];
+    const iree_hal_barrier_flags_t flags =
+        iree_hal_barrier_resolve_cache_flags(barrier);
     iree_hal_access_scope_t source = 0;
     iree_hal_access_scope_t target = 0;
     for (iree_host_size_t j = 0; j < barrier->memory_barrier_count; ++j) {
@@ -38,17 +40,15 @@ uint32_t iree_hal_amd_gpu_aql_barrier_prepare(
       acquire = iree_max(acquire, 1u);
     }
     if ((source & external) ||
-        (barrier->flags & IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE) ||
+        (flags & IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE) ||
         (barrier->effects.bits &
-         (IREE_HAL_MEMORY_EFFECT_GLOBAL_ACQUIRE_FROM_SYSTEM |
-          IREE_HAL_MEMORY_EFFECT_RANGE_ACQUIRE_FROM_SYSTEM))) {
+         IREE_HAL_MEMORY_EFFECT_RANGE_ACQUIRE_FROM_SYSTEM)) {
       acquire = 2;
     }
     if ((target & external) ||
-        (barrier->flags & IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE) ||
+        (flags & IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE) ||
         (barrier->effects.bits &
-         (IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM |
-          IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM))) {
+         IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM)) {
       release = 2;
     }
     if ((barrier->source_stage_mask & ~IREE_HAL_EXECUTION_STAGE_HOST) ||

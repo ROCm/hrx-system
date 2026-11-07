@@ -63,16 +63,8 @@ iree_hal_atomic_capabilities_t iree_hal_task_atomic_capabilities(
 
 iree_hal_atomic_flags_t iree_hal_task_barrier_resolve_atomic_flags(
     const iree_hal_barrier_t* barrier) {
-  iree_hal_barrier_flags_t barrier_flags =
-      iree_hal_barrier_resolve_flags(barrier);
-  if (iree_any_bit_set(barrier->source_stage_mask,
-                       IREE_HAL_EXECUTION_STAGE_HOST)) {
-    barrier_flags |= IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE;
-  }
-  if (iree_any_bit_set(barrier->target_stage_mask,
-                       IREE_HAL_EXECUTION_STAGE_HOST)) {
-    barrier_flags |= IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
-  }
+  const iree_hal_barrier_flags_t barrier_flags =
+      iree_hal_barrier_resolve_cache_flags(barrier);
 
   iree_hal_atomic_flags_t flags = IREE_HAL_ATOMIC_FLAG_NONE;
   if (iree_any_bit_set(barrier_flags,

@@ -276,6 +276,98 @@ TEST_P(GpuNativeDispatchTest, ExecutableGlobalsPreservePlacementAndVisibility) {
   EXPECT_EQ(concurrency.maximum_concurrent_workgroup_count_per_domain, 0u);
 }
 
+TEST_P(GpuNativeDispatchTest, HostStagesPublishRepeatedMappedUpdates) {
+  Create();
+  if (HasFatalFailure() || IsSkipped()) {
+    return;
+  }
+  const auto* family = iree_hal_queue_family(queues_[0]);
+  const iree_hal_pool_family_access_t access = {
+      .family = family,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .interfaces = UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_DEVICE_ADDRESS,
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = 1,
+      .families = &access,
+      .host = {IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+               IREE_HAL_MAPPING_MODE_SCOPED},
+  };
+  iree_hal_slab_pool_options_t options;
+  iree_hal_slab_pool_options_initialize(&options);
+  Ref<iree_hal_pool_t> pool;
+  IREE_ASSERT_OK(iree_hal_slab_pool_create(
+      group_, scope, &options, iree_allocator_system(), pool.out()));
+  Ref<iree_hal_buffer_t> output;
+  IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
+      pool, iree_hal_make_pool_reservation_request(4, 4),
+      iree_infinite_timeout(), output.out()));
+  Ref<iree_hal_executable_t> executable;
+  IREE_ASSERT_OK(Load(executable.out()));
+  iree_hal_executable_function_t function;
+  IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
+      executable, IREE_SV("image_accumulate"), &function));
+  const iree_hal_barrier_t acquire = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+  };
+  const iree_hal_barrier_t release = {
+      .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+  };
+  const iree_hal_barrier_list_t before = {1, &acquire};
+  const iree_hal_barrier_list_t after = {1, &release};
+  const iree_hal_queue_barriers_t barriers = {&before, &after};
+  const auto binding = iree_hal_make_buffer_ref(output, 0, 4);
+  uint32_t addend = 7;
+  const auto constants = iree_make_const_byte_span(&addend, sizeof(addend));
+  auto config = iree_hal_make_static_dispatch_config(1, 1, 1);
+  config.workgroup_size[0] = 32;
+  config.workgroup_size[1] = config.workgroup_size[2] = 1;
+  Ref<iree_hal_command_buffer_t> recording;
+  IREE_ASSERT_OK(iree_hal_command_buffer_create(
+      family, 0, IREE_HAL_COMMAND_CATEGORY_DISPATCH, 0, recording.out()));
+  IREE_ASSERT_OK(iree_hal_command_buffer_begin(recording));
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &acquire));
+  IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
+      recording, executable, function, config, constants, {1, &binding}, 0));
+  IREE_ASSERT_OK(iree_hal_command_buffer_barrier(recording, &release));
+  IREE_ASSERT_OK(iree_hal_command_buffer_end(recording));
+
+  Ref<iree_hal_semaphore_t> timeline;
+  CreateSemaphore(timeline.out());
+  ASSERT_FALSE(HasFatalFailure());
+  auto* semaphore = timeline.get();
+  uint64_t value = 0;
+  for (bool recorded : {false, true}) {
+    SCOPED_TRACE(recorded);
+    for (uint32_t i = 0; i < 4; ++i) {
+      SCOPED_TRACE(i);
+      // Reuse warm payload caches across both producers; the map helpers own
+      // CPU maintenance and the HOST stages own the corresponding GPU effects.
+      uint32_t payload = 37u + i * 11;
+      IREE_ASSERT_OK(
+          iree_hal_buffer_map_write(output, 0, &payload, sizeof(payload)));
+      ++value;
+      if (recorded) {
+        IREE_ASSERT_OK(iree_hal_queue_execute(
+            queues_[0], {}, {1, &semaphore, &value}, recording,
+            iree_hal_buffer_binding_table_empty(), 0));
+      } else {
+        IREE_ASSERT_OK(iree_hal_queue_dispatch(
+            queues_[0], {}, {1, &semaphore, &value}, executable, function,
+            config, constants, {1, &binding}, &barriers, 0));
+      }
+      IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, value,
+                                             iree_infinite_timeout(),
+                                             IREE_ASYNC_WAIT_FLAG_NONE));
+      IREE_ASSERT_OK(
+          iree_hal_buffer_map_read(output, 0, &payload, sizeof(payload)));
+      EXPECT_EQ(payload, 37u + i * 11 + addend);
+    }
+  }
+}
+
 TEST_P(GpuNativeDispatchTest, DirectDispatchThroughExplicitPoolAndSealedGroup) {
   constexpr uint32_t kThreads = 4;
   constexpr uint32_t kSteps = 256;
@@ -1285,7 +1377,6 @@ TEST_P(GpuNativeDispatchTest, FixedArgumentsSurviveQueuedReplayAndTrim) {
   const iree_hal_barrier_t acquire = {
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
-      .flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE,
   };
   const iree_hal_memory_barrier_t memory = {
       IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE,
@@ -1303,8 +1394,7 @@ TEST_P(GpuNativeDispatchTest, FixedArgumentsSurviveQueuedReplayAndTrim) {
   config.workgroup_size[1] = config.workgroup_size[2] = 1;
   const iree_hal_barrier_t release = {
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_DISPATCH,
-      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
-      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
+      .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
   };
   // The first recording identifies whether native publication permits immutable
   // argument placement through the CPU aperture. Both that path and staged code

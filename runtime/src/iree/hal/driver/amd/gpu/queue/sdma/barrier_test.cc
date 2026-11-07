@@ -54,6 +54,31 @@ TEST(BarrierTest, OptionalAndRequiredBoundariesRemainDistinct) {
   EXPECT_EQ(iree_hal_amd_gpu_sdma_barrier_prepare(&list), 1u);
 }
 
+TEST(BarrierTest, HostStagesImplySystemVisibilityWithoutAccessDescriptors) {
+  const iree_hal_barrier_t barriers[] = {
+      {
+          .source_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+          .target_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      },
+      {
+          .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+          .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+      },
+      {
+          .source_stage_mask =
+              IREE_HAL_EXECUTION_STAGE_HOST | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+          .target_stage_mask =
+              IREE_HAL_EXECUTION_STAGE_HOST | IREE_HAL_EXECUTION_STAGE_TRANSFER,
+      },
+  };
+  const uint32_t expected[] = {2u, 5u, 7u};
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(barriers); ++i) {
+    SCOPED_TRACE(i);
+    const iree_hal_barrier_list_t list = {1, &barriers[i]};
+    EXPECT_EQ(iree_hal_amd_gpu_sdma_barrier_prepare(&list), expected[i]);
+  }
+}
+
 TEST(BarrierTest, HostAndGenericMemoryScopesCaptureDirection) {
   const iree_hal_access_scope_t external[] = {
       IREE_HAL_ACCESS_SCOPE_HOST_READ, IREE_HAL_ACCESS_SCOPE_HOST_WRITE,
