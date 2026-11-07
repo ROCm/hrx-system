@@ -45,10 +45,10 @@ class CSourceSignatureBuilder {
                           "C ABI functions require a nonvariadic signature");
     }
     for (auto* parameter : function->parameters()) {
-      argument_roots_.push_back(AddType(parameter->type()));
+      argument_roots_.push_back(AddRoot(parameter->type()));
     }
     if (!unit_.typeTraits().is_void(signature->returnType())) {
-      result_roots_.push_back(AddType(signature->returnType()));
+      result_roots_.push_back(AddRoot(signature->returnType()));
     }
     loom_attribute_t result;
     check(loom_func_abi_c_signature_attr_make(
@@ -62,6 +62,18 @@ class CSourceSignatureBuilder {
   }
 
  private:
+  int64_t AddRoot(const cxx::Type* type) {
+    // C linkage retains C++ object-passing rules. Classify the complete value
+    // once at the call boundary, not again for every nested field. The
+    // structural C signature cannot describe invisible references and their
+    // caller-owned lifetimes.
+    if (unit_.typeTraits().is_non_trivial_for_calls(type)) {
+      diagnostics_.reject(unit_, source_,
+                          "C ABI records must be trivial for calls");
+    }
+    return AddType(type);
+  }
+
   struct ObjectLayout {
     int64_t length;
     int64_t alignment;
