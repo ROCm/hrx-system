@@ -1,0 +1,207 @@
+// RUN: pass licm
+
+// Invariant promises in the entry prefix of a nonempty loop execute on the
+// same paths after hoisting. Their arithmetic users can then move with them.
+func.def @hoists_invariant_normalization(%divisor: i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %iv = [%begin to %end step %step] {
+    %bounded = scalar.assume %divisor [range(%divisor, 1, 4294967295)] : i64
+    %word = scalar.trunci %bounded : i64 to i32
+    %nonzero = scalar.assume %word [ne(%word, 0)] : i32
+    %shift = scalar.ctlzi %nonzero : i32
+    %normalized = scalar.shli %nonzero, %shift : i32
+    test.use %normalized : i32
+  }
+  func.return
+}
+
+// ----
+func.def @hoists_invariant_normalization(%divisor: i64) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %bounded = scalar.assume %divisor [range(%divisor, 1, 4294967295)] : i64
+  %word = scalar.trunci %bounded : i64 to i32
+  %nonzero = scalar.assume %word [ne(%word, 0)] : i32
+  %shift = scalar.ctlzi %nonzero : i32
+  %normalized = scalar.shli %nonzero, %shift : i32
+  scf.for %iv = [%begin to %end step %step] {
+    test.use %normalized : i32
+  }
+  func.return
+}
+
+// ====
+
+// A prefix promise may mention loop-local values without making the next
+// invariant promise conditional. Capture availability still keeps it inside.
+func.def @keeps_local_predicates(%limit: index, %divisor: i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %iv = [%begin to %end step %step] {
+    %refined_limit = index.assume %limit [gt(%limit, %iv)] : index
+    %nonzero = scalar.assume %divisor [ne(%divisor, 0)] : i32
+    test.use %refined_limit : index
+    test.use %nonzero : i32
+  }
+  func.return
+}
+
+// ----
+func.def @keeps_local_predicates(%limit: index, %divisor: i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %nonzero = scalar.assume %divisor [ne(%divisor, 0)] : i32
+  scf.for %iv = [%begin to %end step %step] {
+    %refined_limit = index.assume %limit [gt(%limit, %iv)] : index
+    test.use %refined_limit : index
+    test.use %nonzero : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @keeps_unknown_trip_promises(%count: index, %divisor: i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %iv = [%begin to %count step %step] {
+    %nonzero = scalar.assume %divisor [ne(%divisor, 0)] : i32
+    test.use %nonzero : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @keeps_zero_trip_promises(%divisor: i32) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  scf.for %iv = [%begin to %begin step %step] {
+    %nonzero = scalar.assume %divisor [ne(%divisor, 0)] : i32
+    test.use %nonzero : i32
+  }
+  func.return
+}
+
+// ====
+
+func.def @keeps_conditional_promises(%condition: i1, %divisor: i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %iv = [%begin to %end step %step] {
+    scf.if %condition {
+      %nonzero = scalar.assume %divisor [ne(%divisor, 0)] : i32
+      test.use %nonzero : i32
+    } else {
+    }
+  }
+  func.return
+}
+
+// ====
+
+// Observable work cannot move after a possibly invalid promise.
+func.def @keeps_promises_after_effects(%divisor: i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %iv = [%begin to %end step %step] {
+    test.use %divisor : i32
+    %nonzero = scalar.assume %divisor [ne(%divisor, 0)] : i32
+    test.use %nonzero : i32
+  }
+  func.return
+}
+
+// ====
+
+// An arbitrary PURE operation need not be safe to speculate or return before
+// a later promise. test.addi deliberately lacks SAFE_TO_SPECULATE.
+func.def @keeps_promises_after_non_speculatable_work(%value: i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %iv = [%begin to %end step %step] {
+    %doubled = test.addi %value, %value : i32
+    %nonzero = scalar.assume %value [ne(%value, 0)] : i32
+    test.use %doubled : i32
+    test.use %nonzero : i32
+  }
+  func.return
+}
+
+// ====
+
+// A nested loop may not terminate. Even an invariant promise after it has no
+// guaranteed execution, despite the outer loop's nonempty range.
+func.def @keeps_promises_after_control(%condition: i1, %value: i32) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %iv = [%begin to %end step %step] {
+    %result = scf.while(%before = %value : i32) -> (i32) {
+      scf.condition %condition, %before : i1, i32
+    } do(%after: i32) {
+      scf.yield %after : i32
+    }
+    %nonzero = scalar.assume %value [ne(%value, 0)] : i32
+    test.use %result : i32
+    test.use %nonzero : i32
+  }
+  func.return
+}
+
+// ====
+
+// The same trait contract covers nonnumeric identities, including dynamic
+// shape references and multi-result buffer promises.
+func.def @hoists_shape_and_storage_promises(%size: index, %data: vector<[%size]xf32>, %view: view<[%size]xf32>, %input: buffer, %output: buffer, %schema: encoding<schema>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  scf.for %iv = [%begin to %end step %step] {
+    %bounded = index.assume %size [eq(%size, 4)] : index
+    %vector_fixed = vector.refine %data : vector<[%size]xf32> -> vector<4xf32>
+    %view_fixed = view.refine %view : view<[%size]xf32> -> view<4xf32>
+    %aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+    %global = buffer.assume.memory_space<global> %aligned : buffer
+    %input_unique, %output_unique = buffer.assume.noalias %global, %output : buffer, buffer
+    %schema_fixed = encoding.assume.spec %schema, #ggml.q4_0 : encoding<schema>
+    test.use %bounded : index
+    test.use %vector_fixed : vector<4xf32>
+    test.use %view_fixed : view<4xf32>
+    test.use %input_unique : buffer
+    test.use %output_unique : buffer
+    test.use %schema_fixed : encoding<schema>
+  }
+  func.return
+}
+
+// ----
+func.def @hoists_shape_and_storage_promises(%size: index, %data: vector<[%size]xf32>, %view: view<[%size]xf32>, %input: buffer, %output: buffer, %schema: encoding<schema>) {
+  %begin = index.constant 0 : index
+  %end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %bounded = index.assume %size [eq(%size, 4)] : index
+  %vector_fixed = vector.refine %data : vector<[%size]xf32> -> vector<4xf32>
+  %view_fixed = view.refine %view : view<[%size]xf32> -> view<4xf32>
+  %aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %global = buffer.assume.memory_space<global> %aligned : buffer
+  %input_unique, %output_unique = buffer.assume.noalias %global, %output : buffer, buffer
+  %schema_fixed = encoding.assume.spec %schema, #ggml.q4_0 : encoding<schema>
+  scf.for %iv = [%begin to %end step %step] {
+    test.use %bounded : index
+    test.use %vector_fixed : vector<4xf32>
+    test.use %view_fixed : view<4xf32>
+    test.use %input_unique : buffer
+    test.use %output_unique : buffer
+    test.use %schema_fixed : encoding<schema>
+  }
+  func.return
+}

@@ -514,11 +514,15 @@ static iree_status_t loom_motion_analysis_ensure_movement(
   return iree_ok_status();
 }
 
-static iree_status_t loom_motion_evaluate_speculative_subtree(
+static iree_status_t loom_motion_evaluate_effect_free_subtree(
     loom_motion_analysis_t* analysis, const loom_op_t* candidate_op,
-    const loom_op_t* loop_op, loom_motion_loop_hoist_result_t* result) {
-  if (!loom_motion_op_satisfies_policy(analysis, candidate_op,
-                                       LOOM_MOTION_POLICY_SPECULATION,
+    const loom_op_t* loop_op, bool preserves_fact_identity_execution,
+    loom_motion_loop_hoist_result_t* result) {
+  const loom_motion_policy_t policy =
+      preserves_fact_identity_execution
+          ? LOOM_MOTION_POLICY_EFFECT_FREE_RELOCATION
+          : LOOM_MOTION_POLICY_SPECULATION;
+  if (!loom_motion_op_satisfies_policy(analysis, candidate_op, policy,
                                        /*is_root_op=*/true) ||
       loom_motion_op_has_retained_regions(candidate_op)) {
     loom_motion_loop_hoist_reject(
@@ -546,6 +550,18 @@ static iree_status_t loom_motion_evaluate_speculative_subtree(
         candidate_op);
   }
   return iree_ok_status();
+}
+
+static bool loom_motion_loop_is_proven_nonempty(
+    const loom_motion_analysis_t* analysis, loom_loop_like_t loop) {
+  return loom_loop_like_has_counted_range(loop) &&
+         loom_loop_domain_proven_nonempty(
+             loom_value_fact_table_lookup(analysis->fact_table,
+                                          loom_loop_like_lower_bound(loop)),
+             loom_value_fact_table_lookup(analysis->fact_table,
+                                          loom_loop_like_upper_bound(loop)),
+             loom_value_fact_table_lookup(analysis->fact_table,
+                                          loom_loop_like_step(loop)));
 }
 
 bool loom_motion_op_is_ordinary_load(const loom_module_t* module,
@@ -587,7 +603,7 @@ static bool loom_motion_request_is_ordinary_load(
 
 iree_status_t loom_motion_subtree_evaluate_hoist_before_loop(
     loom_motion_analysis_t* analysis, loom_loop_like_t loop,
-    const loom_op_t* candidate_op,
+    const loom_op_t* candidate_op, bool in_entry_prefix,
     loom_motion_loop_hoist_result_t* out_result) {
   *out_result = (loom_motion_loop_hoist_result_t){0};
   if (!analysis || !analysis->module || !loom_loop_like_isa(loop) ||
@@ -600,8 +616,16 @@ iree_status_t loom_motion_subtree_evaluate_hoist_before_loop(
   }
 
   if (!loom_motion_op_is_ordinary_load(analysis->module, candidate_op)) {
-    return loom_motion_evaluate_speculative_subtree(analysis, candidate_op,
-                                                    loop.op, out_result);
+    const loom_trait_flags_t traits =
+        loom_op_effective_traits(analysis->module, candidate_op);
+    const bool preserves_fact_identity_execution =
+        in_entry_prefix && candidate_op->region_count == 0 &&
+        iree_any_bit_set(traits, LOOM_TRAIT_FACT_IDENTITY) &&
+        !loom_traits_has_unique_identity(traits) &&
+        loom_motion_loop_is_proven_nonempty(analysis, loop);
+    return loom_motion_evaluate_effect_free_subtree(
+        analysis, candidate_op, loop.op, preserves_fact_identity_execution,
+        out_result);
   }
 
   loom_region_t* loop_body = loom_loop_like_body(loop);
@@ -612,19 +636,7 @@ iree_status_t loom_motion_subtree_evaluate_hoist_before_loop(
         candidate_op);
     return iree_ok_status();
   }
-  if (!loom_loop_like_has_counted_range(loop)) {
-    loom_motion_loop_hoist_reject(
-        out_result, LOOM_MOTION_LOOP_HOIST_REJECTION_LOOP_MAY_NOT_EXECUTE,
-        loop.op);
-    return iree_ok_status();
-  }
-  if (!loom_loop_domain_proven_nonempty(
-          loom_value_fact_table_lookup(analysis->fact_table,
-                                       loom_loop_like_lower_bound(loop)),
-          loom_value_fact_table_lookup(analysis->fact_table,
-                                       loom_loop_like_upper_bound(loop)),
-          loom_value_fact_table_lookup(analysis->fact_table,
-                                       loom_loop_like_step(loop)))) {
+  if (!loom_motion_loop_is_proven_nonempty(analysis, loop)) {
     loom_motion_loop_hoist_reject(
         out_result, LOOM_MOTION_LOOP_HOIST_REJECTION_LOOP_MAY_NOT_EXECUTE,
         loop.op);
