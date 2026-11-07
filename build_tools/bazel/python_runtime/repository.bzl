@@ -14,8 +14,16 @@ def _compact_windows_python_repository_impl(repository_ctx):
         sha256 = repository_ctx.attr.sha256,
         stripPrefix = repository_ctx.attr.strip_prefix,
     )
+    for required_path in [
+        "tcl/tcl8.6/init.tcl",
+        "tcl/tk8.6/tk.tcl",
+    ]:
+        if not repository_ctx.path(required_path).exists:
+            fail("Compact Windows Python runtime is missing %s" % required_path)
     compactor = repository_ctx.path(repository_ctx.attr._compactor)
     repository_ctx.watch(compactor)
+    sitecustomize = repository_ctx.path(repository_ctx.attr._sitecustomize)
+    repository_ctx.watch(sitecustomize)
     host_python = repository_ctx.path(repository_ctx.attr._host_python)
     repository_ctx.watch(host_python)
     result = repository_ctx.execute(
@@ -23,6 +31,7 @@ def _compact_windows_python_repository_impl(repository_ctx):
             host_python,
             compactor,
             repository_ctx.path("Lib"),
+            sitecustomize,
             repository_ctx.path(standard_library_archive),
         ],
         environment = {"PYTHONDONTWRITEBYTECODE": "1"},
@@ -113,6 +122,9 @@ compact_windows_python_repository = repository_rule(
         ),
         "_host_python": attr.label(
             default = Label("@python_3_12_host//:python"),
+        ),
+        "_sitecustomize": attr.label(
+            default = Label("//build_tools/bazel/python_runtime:windows_sitecustomize.py"),
         ),
     },
 )

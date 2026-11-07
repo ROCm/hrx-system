@@ -41,26 +41,34 @@ def archive_members(library_directory: Path) -> Iterator[tuple[Path, PurePath]]:
             yield source_path, relative_path
 
 
-def write_standard_library_archive(library_directory: Path, output_path: Path) -> None:
+def write_standard_library_archive(
+    library_directory: Path, sitecustomize_path: Path, output_path: Path
+) -> None:
     """Writes a byte-stable, uncompressed CPython standard-library archive."""
 
     if not library_directory.is_dir():
         raise ValueError(f"Python standard library does not exist: {library_directory}")
-    member_names = {
-        relative_path.as_posix()
-        for _, relative_path in archive_members(library_directory)
-    }
+    if not sitecustomize_path.is_file():
+        raise ValueError(
+            f"Python site customization does not exist: {sitecustomize_path}"
+        )
+    members = list(archive_members(library_directory))
+    member_names = {relative_path.as_posix() for _, relative_path in members}
     missing_members = set(_REQUIRED_MEMBERS) - member_names
     if missing_members:
         raise ValueError(
             f"Python standard library is missing required files: {sorted(missing_members)}"
         )
+    if "sitecustomize.py" in member_names:
+        raise ValueError("Python standard library already contains sitecustomize.py")
+    members.append((sitecustomize_path, PurePath("sitecustomize.py")))
+    members.sort(key=lambda member: member[1].as_posix())
 
     # Storing source bytes avoids host-zlib differences in repository content.
     with zipfile.ZipFile(
         output_path, mode="w", compression=zipfile.ZIP_STORED, allowZip64=True
     ) as archive:
-        for source_path, relative_path in archive_members(library_directory):
+        for source_path, relative_path in members:
             archive_info = zipfile.ZipInfo(
                 relative_path.as_posix(), date_time=_ARCHIVE_TIMESTAMP
             )
@@ -73,9 +81,12 @@ def write_standard_library_archive(library_directory: Path, output_path: Path) -
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("library_directory", type=Path)
+    parser.add_argument("sitecustomize_path", type=Path)
     parser.add_argument("output_path", type=Path)
     args = parser.parse_args()
-    write_standard_library_archive(args.library_directory, args.output_path)
+    write_standard_library_archive(
+        args.library_directory, args.sitecustomize_path, args.output_path
+    )
     return 0
 
 
