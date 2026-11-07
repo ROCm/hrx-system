@@ -1195,9 +1195,18 @@ loom_low_allocation_coalescing_assign_concat_source_from_edge_destination(
     uint16_t ignored_value_count = 0;
     const loom_value_id_t destination_value_id =
         destination_assignment->value_id;
+    // The edge consumes the aggregate, but this candidate is one of its
+    // components. Prove overlap against that component's observations: the
+    // aggregate may die at the handoff while the component remains live in
+    // the destination, including on the next loop iteration.
+    loom_low_placement_relation_t component_edge = *edge_relation;
+    component_edge.source_ordinal = concat_relation->source_ordinal;
+    component_edge.source_unit_offset = concat_relation->source_unit_offset;
+    component_edge.result_unit_offset = destination_unit_offset;
+    component_edge.unit_count = concat_relation->unit_count;
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_coalescing_select_ignored_counterpart_value(
-            context, interval, edge_relation, destination_assignment,
+            context, interval, &component_edge, destination_assignment,
             &destination_value_id, destination_unit_offset,
             concat_relation->unit_count, &ignored_value_ids,
             &ignored_value_count));
