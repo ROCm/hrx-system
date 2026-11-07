@@ -177,8 +177,9 @@ uint32_t* iree_hal_amd_gpu_pm4_emit_wait64(
   words[5] = (uint32_t)(reference >> 32);
   words[6] = (uint32_t)mask;
   words[7] = (uint32_t)(mask >> 32);
-  words[8] =
-      UINT32_C(0x80000004);  // ACE polling offload, as in the DWORD form.
+  // GFX11.5 firmware can lose the low poll-address bits when an unresolved
+  // 64-bit wait is offloaded, including on native PM4 queues.
+  words[8] = 4;
   return words + 9;
 }
 
