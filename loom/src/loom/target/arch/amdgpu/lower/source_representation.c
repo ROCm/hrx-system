@@ -205,8 +205,17 @@ static void loom_amdgpu_address_representation_constrain_value(
     return;
   }
 
-  const bool needs_wide = loom_amdgpu_source_address_value_needs_64bit(
+  bool needs_wide = loom_amdgpu_source_address_value_needs_64bit(
       module, loom_low_lower_context_fact_table(context), value_id, type);
+  if (loom_type_element_type(type) == LOOM_SCALAR_TYPE_INDEX) {
+    const loom_value_facts_t facts = loom_value_fact_table_lookup(
+        loom_low_lower_context_fact_table(context), value_id);
+    // A transport joining negative coordinates and positive u32 magnitudes
+    // cannot distinguish them in one word. Keep both signs before the join;
+    // extending its already-selected low word would lose that distinction.
+    needs_wide |= facts.range_lo >= INT32_MIN && facts.range_lo < 0 &&
+                  facts.range_hi > INT32_MAX;
+  }
   const bool wide_requires_vgpr =
       loom_amdgpu_address_representation_requires_wide_vgpr(context, value_id);
   loom_low_representation_candidate_t candidates[3];
@@ -446,6 +455,14 @@ static bool loom_amdgpu_source_representation_relation(
     loom_amdgpu_address_representation_constrain_value(
         context, relation->destination_value_id, recorder);
     return true;
+  }
+  if (loom_amdgpu_type_is_address_scalar(source_type) &&
+      relation->kind == LOOM_VALUE_RELATION_SELECT_PAYLOAD) {
+    // Payloads retain independent representations and are converted by select
+    // lowering, but the result must represent the union of their values.
+    loom_amdgpu_address_representation_constrain_value(
+        context, relation->destination_value_id, recorder);
+    return false;
   }
   switch ((loom_value_relation_kind_t)relation->kind) {
     case LOOM_VALUE_RELATION_FACT_IDENTITY:

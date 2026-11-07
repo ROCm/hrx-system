@@ -72,6 +72,21 @@ loom_type_t loom_amdgpu_materialized_vgpr_address_type(
 loom_type_t loom_amdgpu_materialized_sgpr_address_type(
     const loom_low_lower_context_t* context, loom_value_id_t source_value);
 
+// Normalizes an address to an SGPR pair without changing its source mapping.
+loom_type_t loom_amdgpu_materialized_sgpr64_address_type(
+    const loom_low_lower_context_t* context, loom_value_id_t source_value);
+
+// Retains the address's signed or unsigned extension as an immutable recipe.
+iree_status_t loom_amdgpu_prepare_sgpr64_address(
+    loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void** out_plan);
+
+// Extends or reuses the bound address payload according to the selected recipe.
+iree_status_t loom_amdgpu_emit_prepared_sgpr64_address(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, const void* plan,
+    loom_value_id_t* out_low_value);
+
 // Exposes the address's low word in its producer's register class.
 loom_type_t loom_amdgpu_materialized_address_register_type(
     const loom_low_lower_context_t* context, loom_value_id_t source_value);
@@ -139,6 +154,12 @@ iree_status_t loom_amdgpu_value_can_materialize_as_vgpr_address(
 // operand for scalar address arithmetic. A VGPR source requires shared
 // proof that every active lane carries the same value.
 iree_status_t loom_amdgpu_value_can_materialize_as_sgpr_address(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value_id, bool* out_can_materialize);
+
+// Accepts a scalar address comparison whose numeric range fits a word, even
+// when other consumers require a wider physical carrier.
+iree_status_t loom_amdgpu_value_can_materialize_as_sgpr_address_compare(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_value_id_t value_id, bool* out_can_materialize);
 

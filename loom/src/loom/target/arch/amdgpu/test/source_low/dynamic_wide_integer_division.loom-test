@@ -5,7 +5,7 @@ func.def @unsigned_pair(%dividend: i64, %divisor: i64) -> (i64, i64) {
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @unsigned_pair(%dividend: reg<amdgpu.sgpr x2>, %divisor: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @unsigned_pair(%dividend: reg<amdgpu.sgpr x2>, %divisor: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
   %159 = slice %divisor[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %160 = s_clz_i32_u32 %159
   %161 = s_mov_b32 32
@@ -156,41 +156,36 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @unsigned_pair(%d
   %342 = slice %338[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %349 = s_mul_i32 %342, %168
   %350 = s_mul_hi_u32 %342, %168
-  %351 = concat(%349, %350) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %353 = s_lshl_b64 %dividend, %162
   %354 = slice %353[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %356 = concat(%354, %332) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %358 = concat(%329, %332) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   %360 = s_lshl_b64 %358, %161
   %361 = s_or_b64 %360, %356
-  %362 = v_cmp_gt_u64 %351, %361
-  %363 = s_mov_b32 1
-  %370 = v_mov_b32_copy %363
-  %372 = v_mov_b32_copy %332
-  %373 = v_cndmask_b32 %372, %370, %362
-  %378 = v_mov_b32_copy %342
-  %379 = slice %338[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %380 = v_mov_b32_copy %379
-  %386, %387 = v_sub_co_u32 %378, %373
-  %388, %389 = v_sub_co_ci_u32 %380, %372, %387
-  %quotient = concat(%386, %388) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %391 = slice %divisor[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %392 = v_mov_b32_copy %391
-  %393 = slice %divisor[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %394 = v_mov_b32_copy %393
-  %400 = v_mul_lo_u32 %386, %392
-  %401 = v_mul_hi_u32 %386, %392
-  %402 = v_mul_lo_u32 %386, %394
-  %403 = v_mul_lo_u32 %388, %392
-  %404 = v_add_u32 %401, %402
-  %405 = v_add_u32 %404, %403
-  %407 = slice %dividend[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %408 = v_mov_b32_copy %407
-  %409 = slice %dividend[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %410 = v_mov_b32_copy %409
-  %416, %417 = v_sub_co_u32 %408, %400
-  %418, %419 = v_sub_co_ci_u32 %410, %405, %417
-  %remainder = concat(%416, %418) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %364 = slice %361[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %365 = slice %361[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %366 = s_cmp_gt_u32 %349, %364
+  %367, %368 = s_subb_u32 %365, %350, %366
+  %369 = s_mov_b32 1
+  %377 = s_cselect_b32 %369, %332, %368
+  %380 = s_cselect_b32 %332, %332, %368
+  %383 = slice %338[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %386, %387 = s_sub_co_u32 %342, %377
+  %388, %389 = s_subb_u32 %383, %380, %387
+  %quotient = concat(%386, %388) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %393 = slice %divisor[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %394 = slice %divisor[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %395 = s_mul_i32 %386, %393
+  %396 = s_mul_hi_u32 %386, %393
+  %397 = s_mul_i32 %386, %394
+  %398 = s_mul_i32 %388, %393
+  %399 = s_add_u32 %396, %397
+  %400 = s_add_u32 %399, %398
+  %402 = slice %dividend[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %403 = slice %dividend[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %406, %407 = s_sub_co_u32 %402, %395
+  %408, %409 = s_subb_u32 %403, %400, %407
+  %remainder = concat(%406, %408) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   return %quotient, %remainder
 }
 

@@ -28,30 +28,34 @@ func.def @integer_extrema_i64(%lhs: i64, %rhs: i64) -> (i64, i64, i64, i64) {
 }
 
 // ----
-low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @integer_extrema_i64(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
-  %24 = v_cmp_lt_i64 %lhs, %rhs
-  %25 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %26 = v_mov_b32_copy %25
-  %27 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %28 = v_mov_b32_copy %27
-  %29 = v_cndmask_b32 %28, %26, %24
-  %30 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %31 = v_mov_b32_copy %30
-  %32 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %33 = v_mov_b32_copy %32
-  %34 = v_cndmask_b32 %33, %31, %24
-  %signed_min = concat(%29, %34) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %36 = v_cmp_gt_i64 %lhs, %rhs
-  %41 = v_cndmask_b32 %28, %26, %36
-  %46 = v_cndmask_b32 %33, %31, %36
-  %signed_max = concat(%41, %46) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %48 = v_cmp_lt_u64 %lhs, %rhs
-  %53 = v_cndmask_b32 %28, %26, %48
-  %58 = v_cndmask_b32 %33, %31, %48
-  %unsigned_min = concat(%53, %58) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %60 = v_cmp_gt_u64 %lhs, %rhs
-  %65 = v_cndmask_b32 %28, %26, %60
-  %70 = v_cndmask_b32 %33, %31, %60
-  %unsigned_max = concat(%65, %70) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @integer_extrema_i64(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+  %24 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %27 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %28 = s_xor_b32_lit %25, 2147483648
+  %29 = s_xor_b32_lit %27, 2147483648
+  %30 = s_cmp_lt_u32 %24, %26
+  %31, %32 = s_subb_u32 %28, %29, %30
+  %35 = s_cselect_b32 %24, %26, %32
+  %38 = s_cselect_b32 %25, %27, %32
+  %signed_min = concat(%35, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %44 = s_xor_b32_lit %25, 2147483648
+  %45 = s_xor_b32_lit %27, 2147483648
+  %46 = s_cmp_gt_u32 %24, %26
+  %47, %48 = s_subb_u32 %45, %44, %46
+  %51 = s_cselect_b32 %24, %26, %48
+  %54 = s_cselect_b32 %25, %27, %48
+  %signed_max = concat(%51, %54) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %60 = s_cmp_lt_u32 %24, %26
+  %61, %62 = s_subb_u32 %25, %27, %60
+  %65 = s_cselect_b32 %24, %26, %62
+  %68 = s_cselect_b32 %25, %27, %62
+  %unsigned_min = concat(%65, %68) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %74 = s_cmp_gt_u32 %24, %26
+  %75, %76 = s_subb_u32 %27, %25, %74
+  %79 = s_cselect_b32 %24, %26, %76
+  %82 = s_cselect_b32 %25, %27, %76
+  %unsigned_max = concat(%79, %82) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
   return %signed_min, %signed_max, %unsigned_min, %unsigned_max
 }

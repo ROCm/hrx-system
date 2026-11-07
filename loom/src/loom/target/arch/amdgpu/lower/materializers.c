@@ -13,6 +13,7 @@
 #include "loom/target/arch/amdgpu/lower/constants.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
+#include "loom/target/arch/amdgpu/lower/value/integer64.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info_defs.h"
 
@@ -212,6 +213,41 @@ loom_type_t loom_amdgpu_materialized_sgpr_address_type(
       LOOM_AMDGPU_REG_CLASS_ID_SGPR, 1);
 }
 
+loom_type_t loom_amdgpu_materialized_sgpr64_address_type(
+    const loom_low_lower_context_t* context, loom_value_id_t source_value) {
+  (void)source_value;
+  return loom_low_register_type(
+      loom_low_lower_context_descriptor_set(context)->stable_id,
+      LOOM_AMDGPU_REG_CLASS_ID_SGPR, 2);
+}
+
+iree_status_t loom_amdgpu_prepare_sgpr64_address(
+    loom_low_lower_context_t* context, loom_value_id_t source_value,
+    const void** out_plan) {
+  static const loom_amdgpu_integer_operand_form_t kForms[] = {
+      [LOOM_AMDGPU_INTEGER_OPERAND_UNSIGNED_PAIR] =
+          LOOM_AMDGPU_INTEGER_OPERAND_UNSIGNED_PAIR,
+      [LOOM_AMDGPU_INTEGER_OPERAND_SIGNED_PAIR] =
+          LOOM_AMDGPU_INTEGER_OPERAND_SIGNED_PAIR,
+  };
+  const loom_amdgpu_integer_operand_form_t form =
+      loom_amdgpu_select_integer_operand_form(
+          loom_value_fact_table_lookup(
+              loom_low_lower_context_fact_table(context), source_value),
+          2);
+  *out_plan = &kForms[form];
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_emit_prepared_sgpr64_address(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t source_value, const void* plan,
+    loom_value_id_t* out_low_value) {
+  return loom_amdgpu_lookup_or_materialize_integer_operand(
+      context, source_op, source_value, LOOM_AMDGPU_REG_CLASS_ID_SGPR,
+      *(const loom_amdgpu_integer_operand_form_t*)plan, out_low_value);
+}
+
 loom_type_t loom_amdgpu_materialized_address_register_type(
     const loom_low_lower_context_t* context, loom_value_id_t source_value) {
   return loom_low_register_carrier_type_with_unit_count(
@@ -402,6 +438,19 @@ iree_status_t loom_amdgpu_value_can_materialize_as_sgpr_address(
   *out_can_materialize =
       loom_value_facts_is_subgroup_uniform(loom_value_fact_table_lookup(
           loom_low_lower_context_fact_table(context), value_id));
+  return iree_ok_status();
+}
+
+iree_status_t loom_amdgpu_value_can_materialize_as_sgpr_address_compare(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_value_id_t value_id, bool* out_can_materialize) {
+  IREE_RETURN_IF_ERROR(loom_amdgpu_value_can_materialize_as_sgpr_address(
+      context, source_op, value_id, out_can_materialize));
+  const loom_module_t* module = loom_low_lower_context_module(context);
+  *out_can_materialize =
+      *out_can_materialize &&
+      !loom_amdgpu_address_comparison_needs_pair(
+          module, loom_low_lower_context_fact_table(context), source_op);
   return iree_ok_status();
 }
 

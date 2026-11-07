@@ -112,3 +112,534 @@ low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @varying_predica
   %uge = v_cmp_ge_u64 %lhs, %rhs
   return %eq, %ne, %slt, %sle, %sgt, %sge, %ult, %ule, %ugt, %uge
 }
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @uniform_predicates(%lhs: i64, %rhs: i64, %take: i1, %fallback: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) {
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  cfg.cond_br %take, ^observed, ^fallback
+^observed:
+  %eq_word = scalar.extui %eq : i1 to i32
+  %ne_word = scalar.extui %ne : i1 to i32
+  %slt_word = scalar.extui %slt : i1 to i32
+  %sle_word = scalar.extui %sle : i1 to i32
+  %sgt_word = scalar.extui %sgt : i1 to i32
+  %sge_word = scalar.extui %sge : i1 to i32
+  %ult_word = scalar.extui %ult : i1 to i32
+  %ule_word = scalar.extui %ule : i1 to i32
+  %ugt_word = scalar.extui %ugt : i1 to i32
+  %uge_word = scalar.extui %uge : i1 to i32
+  func.return %eq_word, %ne_word, %slt_word, %sle_word, %sgt_word, %sge_word, %ult_word, %ule_word, %ugt_word, %uge_word : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32
+^fallback:
+  func.return %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @uniform_predicates(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %take: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %78 = s_cmp_eq_u64 %lhs, %rhs
+  %79 = s_mov_b32 0
+  %80 = s_mov_b32 1
+  %eq = s_cselect_b32 %80, %79, %78
+  %82 = s_cmp_lg_u64 %lhs, %rhs
+  %ne = s_cselect_b32 %80, %79, %82
+  %86 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %87 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %88 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %89 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %90 = s_xor_b32_lit %87, 2147483648
+  %91 = s_xor_b32_lit %89, 2147483648
+  %92 = s_cmp_lt_u32 %86, %88
+  %93, %94 = s_subb_u32 %90, %91, %92
+  %slt = s_cselect_b32 %80, %79, %94
+  %102 = s_xor_b32_lit %87, 2147483648
+  %103 = s_xor_b32_lit %89, 2147483648
+  %104 = s_cmp_le_u32 %86, %88
+  %105, %106 = s_subb_u32 %102, %103, %104
+  %sle = s_cselect_b32 %80, %79, %106
+  %114 = s_xor_b32_lit %87, 2147483648
+  %115 = s_xor_b32_lit %89, 2147483648
+  %116 = s_cmp_gt_u32 %86, %88
+  %117, %118 = s_subb_u32 %115, %114, %116
+  %sgt = s_cselect_b32 %80, %79, %118
+  %126 = s_xor_b32_lit %87, 2147483648
+  %127 = s_xor_b32_lit %89, 2147483648
+  %128 = s_cmp_ge_u32 %86, %88
+  %129, %130 = s_subb_u32 %127, %126, %128
+  %sge = s_cselect_b32 %80, %79, %130
+  %138 = s_cmp_lt_u32 %86, %88
+  %139, %140 = s_subb_u32 %87, %89, %138
+  %ult = s_cselect_b32 %80, %79, %140
+  %148 = s_cmp_le_u32 %86, %88
+  %149, %150 = s_subb_u32 %87, %89, %148
+  %ule = s_cselect_b32 %80, %79, %150
+  %158 = s_cmp_gt_u32 %86, %88
+  %159, %160 = s_subb_u32 %89, %87, %158
+  %ugt = s_cselect_b32 %80, %79, %160
+  %168 = s_cmp_ge_u32 %86, %88
+  %169, %170 = s_subb_u32 %89, %87, %168
+  %uge = s_cselect_b32 %80, %79, %170
+  %175 = s_cmp_lg_i32 %take, %79
+  low.cond_br %175, ^observed, ^fallback : reg<amdgpu.scc>
+^observed:
+  %178 = s_cmp_lg_i32_src1_inline %eq {rhs = 0}
+  %eq_word = s_cselect_b32 %80, %79, %178
+  %180 = s_cmp_lg_i32_src1_inline %ne {rhs = 0}
+  %ne_word = s_cselect_b32 %80, %79, %180
+  %182 = s_cmp_lg_i32_src1_inline %slt {rhs = 0}
+  %slt_word = s_cselect_b32 %80, %79, %182
+  %184 = s_cmp_lg_i32_src1_inline %sle {rhs = 0}
+  %sle_word = s_cselect_b32 %80, %79, %184
+  %186 = s_cmp_lg_i32_src1_inline %sgt {rhs = 0}
+  %sgt_word = s_cselect_b32 %80, %79, %186
+  %188 = s_cmp_lg_i32_src1_inline %sge {rhs = 0}
+  %sge_word = s_cselect_b32 %80, %79, %188
+  %190 = s_cmp_lg_i32_src1_inline %ult {rhs = 0}
+  %ult_word = s_cselect_b32 %80, %79, %190
+  %192 = s_cmp_lg_i32_src1_inline %ule {rhs = 0}
+  %ule_word = s_cselect_b32 %80, %79, %192
+  %194 = s_cmp_lg_i32_src1_inline %ugt {rhs = 0}
+  %ugt_word = s_cselect_b32 %80, %79, %194
+  %196 = s_cmp_lg_i32_src1_inline %uge {rhs = 0}
+  %uge_word = s_cselect_b32 %80, %79, %196
+  return %eq_word, %ne_word, %slt_word, %sle_word, %sgt_word, %sge_word, %ult_word, %ule_word, %ugt_word, %uge_word
+^fallback:
+  return %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @uniform_selections(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) {
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %selected_eq = scf.select %eq, %then_value, %else_value : i32
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %selected_ne = scf.select %ne, %then_value, %else_value : i32
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %selected_slt = scf.select %slt, %then_value, %else_value : i32
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %selected_sle = scf.select %sle, %then_value, %else_value : i32
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %selected_sgt = scf.select %sgt, %then_value, %else_value : i32
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %selected_sge = scf.select %sge, %then_value, %else_value : i32
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %selected_ult = scf.select %ult, %then_value, %else_value : i32
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %selected_ule = scf.select %ule, %then_value, %else_value : i32
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %selected_ugt = scf.select %ugt, %then_value, %else_value : i32
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  %selected_uge = scf.select %uge, %then_value, %else_value : i32
+  func.return %selected_eq, %selected_ne, %selected_slt, %selected_sle, %selected_sgt, %selected_sge, %selected_ult, %selected_ule, %selected_ugt, %selected_uge : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @uniform_selections(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %then_value: reg<amdgpu.sgpr>, %else_value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %eq = s_cmp_eq_u64 %lhs, %rhs
+  %selected_eq = s_cselect_b32 %then_value, %else_value, %eq
+  %ne = s_cmp_lg_u64 %lhs, %rhs
+  %selected_ne = s_cselect_b32 %then_value, %else_value, %ne
+  %52 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %53 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %54 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %55 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %56 = s_xor_b32_lit %53, 2147483648
+  %57 = s_xor_b32_lit %55, 2147483648
+  %58 = s_cmp_lt_u32 %52, %54
+  %59, %slt = s_subb_u32 %56, %57, %58
+  %selected_slt = s_cselect_b32 %then_value, %else_value, %slt
+  %66 = s_xor_b32_lit %53, 2147483648
+  %67 = s_xor_b32_lit %55, 2147483648
+  %68 = s_cmp_le_u32 %52, %54
+  %69, %sle = s_subb_u32 %66, %67, %68
+  %selected_sle = s_cselect_b32 %then_value, %else_value, %sle
+  %76 = s_xor_b32_lit %53, 2147483648
+  %77 = s_xor_b32_lit %55, 2147483648
+  %78 = s_cmp_gt_u32 %52, %54
+  %79, %sgt = s_subb_u32 %77, %76, %78
+  %selected_sgt = s_cselect_b32 %then_value, %else_value, %sgt
+  %86 = s_xor_b32_lit %53, 2147483648
+  %87 = s_xor_b32_lit %55, 2147483648
+  %88 = s_cmp_ge_u32 %52, %54
+  %89, %sge = s_subb_u32 %87, %86, %88
+  %selected_sge = s_cselect_b32 %then_value, %else_value, %sge
+  %96 = s_cmp_lt_u32 %52, %54
+  %97, %ult = s_subb_u32 %53, %55, %96
+  %selected_ult = s_cselect_b32 %then_value, %else_value, %ult
+  %104 = s_cmp_le_u32 %52, %54
+  %105, %ule = s_subb_u32 %53, %55, %104
+  %selected_ule = s_cselect_b32 %then_value, %else_value, %ule
+  %112 = s_cmp_gt_u32 %52, %54
+  %113, %ugt = s_subb_u32 %55, %53, %112
+  %selected_ugt = s_cselect_b32 %then_value, %else_value, %ugt
+  %120 = s_cmp_ge_u32 %52, %54
+  %121, %uge = s_subb_u32 %55, %53, %120
+  %selected_uge = s_cselect_b32 %then_value, %else_value, %uge
+  return %selected_eq, %selected_ne, %selected_slt, %selected_sle, %selected_sgt, %selected_sge, %selected_ult, %selected_ule, %selected_ugt, %selected_uge
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1100 output=low
+
+func.def @uniform_predicates(%lhs: i64, %rhs: i64, %take: i1, %fallback: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) {
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  cfg.cond_br %take, ^observed, ^fallback
+^observed:
+  %eq_word = scalar.extui %eq : i1 to i32
+  %ne_word = scalar.extui %ne : i1 to i32
+  %slt_word = scalar.extui %slt : i1 to i32
+  %sle_word = scalar.extui %sle : i1 to i32
+  %sgt_word = scalar.extui %sgt : i1 to i32
+  %sge_word = scalar.extui %sge : i1 to i32
+  %ult_word = scalar.extui %ult : i1 to i32
+  %ule_word = scalar.extui %ule : i1 to i32
+  %ugt_word = scalar.extui %ugt : i1 to i32
+  %uge_word = scalar.extui %uge : i1 to i32
+  func.return %eq_word, %ne_word, %slt_word, %sle_word, %sgt_word, %sge_word, %ult_word, %ule_word, %ugt_word, %uge_word : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32
+^fallback:
+  func.return %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @uniform_predicates(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %take: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %78 = s_cmp_eq_u64 %lhs, %rhs
+  %79 = s_mov_b32 0
+  %80 = s_mov_b32 1
+  %eq = s_cselect_b32 %80, %79, %78
+  %82 = s_cmp_lg_u64 %lhs, %rhs
+  %ne = s_cselect_b32 %80, %79, %82
+  %86 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %87 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %88 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %89 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %90 = s_xor_b32_lit %87, 2147483648
+  %91 = s_xor_b32_lit %89, 2147483648
+  %92 = s_cmp_lt_u32 %86, %88
+  %93, %94 = s_subb_u32 %90, %91, %92
+  %slt = s_cselect_b32 %80, %79, %94
+  %102 = s_xor_b32_lit %87, 2147483648
+  %103 = s_xor_b32_lit %89, 2147483648
+  %104 = s_cmp_le_u32 %86, %88
+  %105, %106 = s_subb_u32 %102, %103, %104
+  %sle = s_cselect_b32 %80, %79, %106
+  %114 = s_xor_b32_lit %87, 2147483648
+  %115 = s_xor_b32_lit %89, 2147483648
+  %116 = s_cmp_gt_u32 %86, %88
+  %117, %118 = s_subb_u32 %115, %114, %116
+  %sgt = s_cselect_b32 %80, %79, %118
+  %126 = s_xor_b32_lit %87, 2147483648
+  %127 = s_xor_b32_lit %89, 2147483648
+  %128 = s_cmp_ge_u32 %86, %88
+  %129, %130 = s_subb_u32 %127, %126, %128
+  %sge = s_cselect_b32 %80, %79, %130
+  %138 = s_cmp_lt_u32 %86, %88
+  %139, %140 = s_subb_u32 %87, %89, %138
+  %ult = s_cselect_b32 %80, %79, %140
+  %148 = s_cmp_le_u32 %86, %88
+  %149, %150 = s_subb_u32 %87, %89, %148
+  %ule = s_cselect_b32 %80, %79, %150
+  %158 = s_cmp_gt_u32 %86, %88
+  %159, %160 = s_subb_u32 %89, %87, %158
+  %ugt = s_cselect_b32 %80, %79, %160
+  %168 = s_cmp_ge_u32 %86, %88
+  %169, %170 = s_subb_u32 %89, %87, %168
+  %uge = s_cselect_b32 %80, %79, %170
+  %175 = s_cmp_lg_i32 %take, %79
+  low.cond_br %175, ^observed, ^fallback : reg<amdgpu.scc>
+^observed:
+  %178 = s_cmp_lg_i32_src1_inline %eq {rhs = 0}
+  %eq_word = s_cselect_b32 %80, %79, %178
+  %180 = s_cmp_lg_i32_src1_inline %ne {rhs = 0}
+  %ne_word = s_cselect_b32 %80, %79, %180
+  %182 = s_cmp_lg_i32_src1_inline %slt {rhs = 0}
+  %slt_word = s_cselect_b32 %80, %79, %182
+  %184 = s_cmp_lg_i32_src1_inline %sle {rhs = 0}
+  %sle_word = s_cselect_b32 %80, %79, %184
+  %186 = s_cmp_lg_i32_src1_inline %sgt {rhs = 0}
+  %sgt_word = s_cselect_b32 %80, %79, %186
+  %188 = s_cmp_lg_i32_src1_inline %sge {rhs = 0}
+  %sge_word = s_cselect_b32 %80, %79, %188
+  %190 = s_cmp_lg_i32_src1_inline %ult {rhs = 0}
+  %ult_word = s_cselect_b32 %80, %79, %190
+  %192 = s_cmp_lg_i32_src1_inline %ule {rhs = 0}
+  %ule_word = s_cselect_b32 %80, %79, %192
+  %194 = s_cmp_lg_i32_src1_inline %ugt {rhs = 0}
+  %ugt_word = s_cselect_b32 %80, %79, %194
+  %196 = s_cmp_lg_i32_src1_inline %uge {rhs = 0}
+  %uge_word = s_cselect_b32 %80, %79, %196
+  return %eq_word, %ne_word, %slt_word, %sle_word, %sgt_word, %sge_word, %ult_word, %ule_word, %ugt_word, %uge_word
+^fallback:
+  return %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1100 output=low
+
+func.def @uniform_selections(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) {
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %selected_eq = scf.select %eq, %then_value, %else_value : i32
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %selected_ne = scf.select %ne, %then_value, %else_value : i32
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %selected_slt = scf.select %slt, %then_value, %else_value : i32
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %selected_sle = scf.select %sle, %then_value, %else_value : i32
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %selected_sgt = scf.select %sgt, %then_value, %else_value : i32
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %selected_sge = scf.select %sge, %then_value, %else_value : i32
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %selected_ult = scf.select %ult, %then_value, %else_value : i32
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %selected_ule = scf.select %ule, %then_value, %else_value : i32
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %selected_ugt = scf.select %ugt, %then_value, %else_value : i32
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  %selected_uge = scf.select %uge, %then_value, %else_value : i32
+  func.return %selected_eq, %selected_ne, %selected_slt, %selected_sle, %selected_sgt, %selected_sge, %selected_ult, %selected_ule, %selected_ugt, %selected_uge : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @uniform_selections(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %then_value: reg<amdgpu.sgpr>, %else_value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %eq = s_cmp_eq_u64 %lhs, %rhs
+  %selected_eq = s_cselect_b32 %then_value, %else_value, %eq
+  %ne = s_cmp_lg_u64 %lhs, %rhs
+  %selected_ne = s_cselect_b32 %then_value, %else_value, %ne
+  %52 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %53 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %54 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %55 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %56 = s_xor_b32_lit %53, 2147483648
+  %57 = s_xor_b32_lit %55, 2147483648
+  %58 = s_cmp_lt_u32 %52, %54
+  %59, %slt = s_subb_u32 %56, %57, %58
+  %selected_slt = s_cselect_b32 %then_value, %else_value, %slt
+  %66 = s_xor_b32_lit %53, 2147483648
+  %67 = s_xor_b32_lit %55, 2147483648
+  %68 = s_cmp_le_u32 %52, %54
+  %69, %sle = s_subb_u32 %66, %67, %68
+  %selected_sle = s_cselect_b32 %then_value, %else_value, %sle
+  %76 = s_xor_b32_lit %53, 2147483648
+  %77 = s_xor_b32_lit %55, 2147483648
+  %78 = s_cmp_gt_u32 %52, %54
+  %79, %sgt = s_subb_u32 %77, %76, %78
+  %selected_sgt = s_cselect_b32 %then_value, %else_value, %sgt
+  %86 = s_xor_b32_lit %53, 2147483648
+  %87 = s_xor_b32_lit %55, 2147483648
+  %88 = s_cmp_ge_u32 %52, %54
+  %89, %sge = s_subb_u32 %87, %86, %88
+  %selected_sge = s_cselect_b32 %then_value, %else_value, %sge
+  %96 = s_cmp_lt_u32 %52, %54
+  %97, %ult = s_subb_u32 %53, %55, %96
+  %selected_ult = s_cselect_b32 %then_value, %else_value, %ult
+  %104 = s_cmp_le_u32 %52, %54
+  %105, %ule = s_subb_u32 %53, %55, %104
+  %selected_ule = s_cselect_b32 %then_value, %else_value, %ule
+  %112 = s_cmp_gt_u32 %52, %54
+  %113, %ugt = s_subb_u32 %55, %53, %112
+  %selected_ugt = s_cselect_b32 %then_value, %else_value, %ugt
+  %120 = s_cmp_ge_u32 %52, %54
+  %121, %uge = s_subb_u32 %55, %53, %120
+  %selected_uge = s_cselect_b32 %then_value, %else_value, %uge
+  return %selected_eq, %selected_ne, %selected_slt, %selected_sle, %selected_sgt, %selected_sge, %selected_ult, %selected_ule, %selected_ugt, %selected_uge
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
+
+func.def @uniform_predicates(%lhs: i64, %rhs: i64, %take: i1, %fallback: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) {
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  cfg.cond_br %take, ^observed, ^fallback
+^observed:
+  %eq_word = scalar.extui %eq : i1 to i32
+  %ne_word = scalar.extui %ne : i1 to i32
+  %slt_word = scalar.extui %slt : i1 to i32
+  %sle_word = scalar.extui %sle : i1 to i32
+  %sgt_word = scalar.extui %sgt : i1 to i32
+  %sge_word = scalar.extui %sge : i1 to i32
+  %ult_word = scalar.extui %ult : i1 to i32
+  %ule_word = scalar.extui %ule : i1 to i32
+  %ugt_word = scalar.extui %ugt : i1 to i32
+  %uge_word = scalar.extui %uge : i1 to i32
+  func.return %eq_word, %ne_word, %slt_word, %sle_word, %sgt_word, %sge_word, %ult_word, %ule_word, %ugt_word, %uge_word : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32
+^fallback:
+  func.return %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @uniform_predicates(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %take: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %78 = s_cmp_eq_u64 %lhs, %rhs
+  %79 = s_mov_b32 0
+  %80 = s_mov_b32 1
+  %eq = s_cselect_b32 %80, %79, %78
+  %82 = s_cmp_lg_u64 %lhs, %rhs
+  %ne = s_cselect_b32 %80, %79, %82
+  %86 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %87 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %88 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %89 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %90 = s_xor_b32_lit %87, 2147483648
+  %91 = s_xor_b32_lit %89, 2147483648
+  %92 = s_cmp_lt_u32 %86, %88
+  %93, %94 = s_subb_u32 %90, %91, %92
+  %slt = s_cselect_b32 %80, %79, %94
+  %102 = s_xor_b32_lit %87, 2147483648
+  %103 = s_xor_b32_lit %89, 2147483648
+  %104 = s_cmp_le_u32 %86, %88
+  %105, %106 = s_subb_u32 %102, %103, %104
+  %sle = s_cselect_b32 %80, %79, %106
+  %114 = s_xor_b32_lit %87, 2147483648
+  %115 = s_xor_b32_lit %89, 2147483648
+  %116 = s_cmp_gt_u32 %86, %88
+  %117, %118 = s_subb_u32 %115, %114, %116
+  %sgt = s_cselect_b32 %80, %79, %118
+  %126 = s_xor_b32_lit %87, 2147483648
+  %127 = s_xor_b32_lit %89, 2147483648
+  %128 = s_cmp_ge_u32 %86, %88
+  %129, %130 = s_subb_u32 %127, %126, %128
+  %sge = s_cselect_b32 %80, %79, %130
+  %138 = s_cmp_lt_u32 %86, %88
+  %139, %140 = s_subb_u32 %87, %89, %138
+  %ult = s_cselect_b32 %80, %79, %140
+  %148 = s_cmp_le_u32 %86, %88
+  %149, %150 = s_subb_u32 %87, %89, %148
+  %ule = s_cselect_b32 %80, %79, %150
+  %158 = s_cmp_gt_u32 %86, %88
+  %159, %160 = s_subb_u32 %89, %87, %158
+  %ugt = s_cselect_b32 %80, %79, %160
+  %168 = s_cmp_ge_u32 %86, %88
+  %169, %170 = s_subb_u32 %89, %87, %168
+  %uge = s_cselect_b32 %80, %79, %170
+  %175 = s_cmp_lg_i32 %take, %79
+  low.cond_br %175, ^observed, ^fallback : reg<amdgpu.scc>
+^observed:
+  %178 = s_cmp_lg_i32_src1_inline %eq {rhs = 0}
+  %eq_word = s_cselect_b32 %80, %79, %178
+  %180 = s_cmp_lg_i32_src1_inline %ne {rhs = 0}
+  %ne_word = s_cselect_b32 %80, %79, %180
+  %182 = s_cmp_lg_i32_src1_inline %slt {rhs = 0}
+  %slt_word = s_cselect_b32 %80, %79, %182
+  %184 = s_cmp_lg_i32_src1_inline %sle {rhs = 0}
+  %sle_word = s_cselect_b32 %80, %79, %184
+  %186 = s_cmp_lg_i32_src1_inline %sgt {rhs = 0}
+  %sgt_word = s_cselect_b32 %80, %79, %186
+  %188 = s_cmp_lg_i32_src1_inline %sge {rhs = 0}
+  %sge_word = s_cselect_b32 %80, %79, %188
+  %190 = s_cmp_lg_i32_src1_inline %ult {rhs = 0}
+  %ult_word = s_cselect_b32 %80, %79, %190
+  %192 = s_cmp_lg_i32_src1_inline %ule {rhs = 0}
+  %ule_word = s_cselect_b32 %80, %79, %192
+  %194 = s_cmp_lg_i32_src1_inline %ugt {rhs = 0}
+  %ugt_word = s_cselect_b32 %80, %79, %194
+  %196 = s_cmp_lg_i32_src1_inline %uge {rhs = 0}
+  %uge_word = s_cselect_b32 %80, %79, %196
+  return %eq_word, %ne_word, %slt_word, %sle_word, %sgt_word, %sge_word, %ult_word, %ule_word, %ugt_word, %uge_word
+^fallback:
+  return %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback, %fallback
+}
+
+// ====
+
+// RUN: emit source-low target=amdgpu:gfx1201 output=low
+
+func.def @uniform_selections(%lhs: i64, %rhs: i64, %then_value: i32, %else_value: i32) -> (i32, i32, i32, i32, i32, i32, i32, i32, i32, i32) {
+  %eq = scalar.cmpi eq, %lhs, %rhs : i64
+  %selected_eq = scf.select %eq, %then_value, %else_value : i32
+  %ne = scalar.cmpi ne, %lhs, %rhs : i64
+  %selected_ne = scf.select %ne, %then_value, %else_value : i32
+  %slt = scalar.cmpi slt, %lhs, %rhs : i64
+  %selected_slt = scf.select %slt, %then_value, %else_value : i32
+  %sle = scalar.cmpi sle, %lhs, %rhs : i64
+  %selected_sle = scf.select %sle, %then_value, %else_value : i32
+  %sgt = scalar.cmpi sgt, %lhs, %rhs : i64
+  %selected_sgt = scf.select %sgt, %then_value, %else_value : i32
+  %sge = scalar.cmpi sge, %lhs, %rhs : i64
+  %selected_sge = scf.select %sge, %then_value, %else_value : i32
+  %ult = scalar.cmpi ult, %lhs, %rhs : i64
+  %selected_ult = scf.select %ult, %then_value, %else_value : i32
+  %ule = scalar.cmpi ule, %lhs, %rhs : i64
+  %selected_ule = scf.select %ule, %then_value, %else_value : i32
+  %ugt = scalar.cmpi ugt, %lhs, %rhs : i64
+  %selected_ugt = scf.select %ugt, %then_value, %else_value : i32
+  %uge = scalar.cmpi uge, %lhs, %rhs : i64
+  %selected_uge = scf.select %uge, %then_value, %else_value : i32
+  func.return %selected_eq, %selected_ne, %selected_slt, %selected_sle, %selected_sgt, %selected_sge, %selected_ult, %selected_ule, %selected_ugt, %selected_uge : i32, i32, i32, i32, i32, i32, i32, i32, i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @uniform_selections(%lhs: reg<amdgpu.sgpr x2>, %rhs: reg<amdgpu.sgpr x2>, %then_value: reg<amdgpu.sgpr>, %else_value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %eq = s_cmp_eq_u64 %lhs, %rhs
+  %selected_eq = s_cselect_b32 %then_value, %else_value, %eq
+  %ne = s_cmp_lg_u64 %lhs, %rhs
+  %selected_ne = s_cselect_b32 %then_value, %else_value, %ne
+  %52 = slice %lhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %53 = slice %lhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %54 = slice %rhs[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %55 = slice %rhs[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %56 = s_xor_b32_lit %53, 2147483648
+  %57 = s_xor_b32_lit %55, 2147483648
+  %58 = s_cmp_lt_u32 %52, %54
+  %59, %slt = s_subb_u32 %56, %57, %58
+  %selected_slt = s_cselect_b32 %then_value, %else_value, %slt
+  %66 = s_xor_b32_lit %53, 2147483648
+  %67 = s_xor_b32_lit %55, 2147483648
+  %68 = s_cmp_le_u32 %52, %54
+  %69, %sle = s_subb_u32 %66, %67, %68
+  %selected_sle = s_cselect_b32 %then_value, %else_value, %sle
+  %76 = s_xor_b32_lit %53, 2147483648
+  %77 = s_xor_b32_lit %55, 2147483648
+  %78 = s_cmp_gt_u32 %52, %54
+  %79, %sgt = s_subb_u32 %77, %76, %78
+  %selected_sgt = s_cselect_b32 %then_value, %else_value, %sgt
+  %86 = s_xor_b32_lit %53, 2147483648
+  %87 = s_xor_b32_lit %55, 2147483648
+  %88 = s_cmp_ge_u32 %52, %54
+  %89, %sge = s_subb_u32 %87, %86, %88
+  %selected_sge = s_cselect_b32 %then_value, %else_value, %sge
+  %96 = s_cmp_lt_u32 %52, %54
+  %97, %ult = s_subb_u32 %53, %55, %96
+  %selected_ult = s_cselect_b32 %then_value, %else_value, %ult
+  %104 = s_cmp_le_u32 %52, %54
+  %105, %ule = s_subb_u32 %53, %55, %104
+  %selected_ule = s_cselect_b32 %then_value, %else_value, %ule
+  %112 = s_cmp_gt_u32 %52, %54
+  %113, %ugt = s_subb_u32 %55, %53, %112
+  %selected_ugt = s_cselect_b32 %then_value, %else_value, %ugt
+  %120 = s_cmp_ge_u32 %52, %54
+  %121, %uge = s_subb_u32 %55, %53, %120
+  %selected_uge = s_cselect_b32 %then_value, %else_value, %uge
+  return %selected_eq, %selected_ne, %selected_slt, %selected_sle, %selected_sgt, %selected_sge, %selected_ult, %selected_ule, %selected_ugt, %selected_uge
+}

@@ -294,6 +294,7 @@ _ALL_PROFILE_XFAILS = {
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_bf16": "TARGET/002",
     "numeric/conversion/float8_dequantization.loom:@e8m0_mxfp4_wide_bf16": "TARGET/002",
     "numeric/integer/wide/address_comparison.loom:@mixed_width_index_comparisons": "SPIRV/026",
+    "numeric/integer/wide/address_comparison.loom:@positive_word_index_comparisons": "SPIRV/026",
     "numeric/predicate/extract.loom:@predicate_extract": "TARGET/003",
     "numeric/vector/broadcast_arithmetic.loom:@broadcast_fma": "TARGET/001",
 }
@@ -472,7 +473,6 @@ _ALL_ROOTS_XFAIL = [
     "memory/atomic/workgroup/observations.loom",
     "memory/atomic/workgroup/panel_stream.loom",
     "memory/storage/private.loom",
-    "numeric/integer/wide/address_comparison.loom",
 ]
 
 _SPIRV_EXECUTION_XFAILS = {
@@ -583,6 +583,7 @@ _SPIRV_EXECUTION_XFAILS = {
     # SPIR-V indices have a 32-bit carrier even when i64 arithmetic is enabled.
     "numeric/integer/division.loom:@wide_index_division_values": "SPIRV/026,SPIRV/027,TARGET/005",
     "numeric/integer/wide/address_comparison.loom:@mixed_width_index_comparison_values": "SPIRV/026",
+    "numeric/integer/wide/address_comparison.loom:@positive_word_index_comparison_values": "SPIRV/026",
     "numeric/matrix/nvfp4.loom:@nvfp4_matrix_values": "TARGET/002",
     # BF16-capable profiles reach the missing FMA contract; other devices reject
     # the narrow carrier before arithmetic selection.

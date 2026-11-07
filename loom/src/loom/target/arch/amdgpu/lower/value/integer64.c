@@ -510,21 +510,37 @@ static uint32_t loom_amdgpu_target_index_bitwidth(
              : 0;
 }
 
-static bool loom_amdgpu_address_cmp_needs_64bit(
+bool loom_amdgpu_address_comparison_needs_pair(
     const loom_module_t* module, const loom_value_fact_table_t* fact_table,
     const loom_op_t* source_op) {
   const loom_value_id_t lhs = loom_index_cmp_lhs(source_op);
   const loom_value_id_t rhs = loom_index_cmp_rhs(source_op);
-  if (module == NULL || lhs >= module->values.count ||
-      rhs >= module->values.count) {
+  const loom_type_t type = loom_module_value_type(module, lhs);
+  if (loom_amdgpu_source_address_value_needs_64bit(module, fact_table, lhs,
+                                                   type) ||
+      loom_amdgpu_source_address_value_needs_64bit(module, fact_table, rhs,
+                                                   type)) {
+    return true;
+  }
+  if (loom_type_element_type(type) != LOOM_SCALAR_TYPE_INDEX) {
     return false;
   }
-  const loom_type_t lhs_type = loom_module_value_type(module, lhs);
-  const loom_type_t rhs_type = loom_module_value_type(module, rhs);
-  return loom_amdgpu_source_address_value_needs_64bit(module, fact_table, lhs,
-                                                      lhs_type) ||
-         loom_amdgpu_source_address_value_needs_64bit(module, fact_table, rhs,
-                                                      rhs_type);
+  const loom_value_facts_t lhs_facts =
+      loom_value_fact_table_lookup(fact_table, lhs);
+  const loom_value_facts_t rhs_facts =
+      loom_value_fact_table_lookup(fact_table, rhs);
+  const bool positive_high_bit =
+      (lhs_facts.range_lo >= INT32_MIN && lhs_facts.range_hi > INT32_MAX) ||
+      (rhs_facts.range_lo >= INT32_MIN && rhs_facts.range_hi > INT32_MAX);
+  const loom_index_cmp_predicate_t predicate =
+      loom_index_cmp_predicate(source_op);
+  const bool signed_order = predicate >= LOOM_INDEX_CMP_PREDICATE_SLT &&
+                            predicate <= LOOM_INDEX_CMP_PREDICATE_SGE;
+  // Equality and unsigned order of nonnegative word magnitudes need only the
+  // low words. A signed comparison or a possibly negative peer needs the high
+  // words to distinguish positive magnitudes from sign-extended coordinates.
+  return positive_high_bit &&
+         (signed_order || lhs_facts.range_lo < 0 || rhs_facts.range_lo < 0);
 }
 
 static iree_status_t loom_amdgpu_mapped_address_value_is_wide(
@@ -639,7 +655,7 @@ iree_status_t loom_amdgpu_low_legality_verify_address_compare(
   }
 
   const loom_module_t* module = loom_target_low_legality_module(context);
-  if (!loom_amdgpu_address_cmp_needs_64bit(
+  if (!loom_amdgpu_address_comparison_needs_pair(
           module, loom_target_low_legality_fact_table(context), op)) {
     return iree_ok_status();
   }
@@ -1120,7 +1136,7 @@ iree_status_t loom_amdgpu_select_index_cmp_i64_plan(
     loom_amdgpu_i64_compare_plan_t* out_plan, bool* out_selected) {
   *out_plan = (loom_amdgpu_i64_compare_plan_t){0};
   *out_selected = false;
-  if (!loom_amdgpu_address_cmp_needs_64bit(
+  if (!loom_amdgpu_address_comparison_needs_pair(
           loom_low_lower_context_module(context),
           loom_low_lower_context_fact_table(context), source_op)) {
     return iree_ok_status();
