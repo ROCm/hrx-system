@@ -84,9 +84,10 @@ iree_status_t loom_value_fact_integer_relations_clone_value(
     loom_value_fact_table_t* target, const loom_value_fact_table_t* source,
     loom_value_id_t value_id);
 
-// Replaces the counted induction value's relations with lower <= value < upper.
-// The loop owner publishes these body-local facts when it seeds the argument;
-// aliases inherit them through the ordinary relation lifecycle.
+// Replaces the counted induction value's relations with lower <= value < upper
+// and their consequences through the endpoints' retained relations. The loop
+// owner publishes these body-local facts when it seeds the argument; aliases
+// inherit them through the ordinary relation lifecycle.
 iree_status_t loom_value_fact_integer_relations_define_counted_range(
     loom_value_fact_table_t* table, loom_value_id_t value,
     loom_value_id_t lower_bound, loom_value_id_t upper_bound);
