@@ -171,20 +171,26 @@ def test_fragment_compiles_every_authored_rule() -> None:
     assert len(compiled.rules) == len(X86_AVX512_FP16_CONTRACT_FRAGMENT.cases)
 
 
-def test_base_transport_and_alias_rules_require_the_fp16_representation() -> None:
+def test_every_native_half_rule_requires_available_instructions() -> None:
     for case in X86_AVX512_FP16_CONTRACT_FRAGMENT.cases:
         descriptors = [
             guard.descriptor
             for guard in case.guards
             if guard.kind is GuardKind.DESCRIPTOR_AVAILABLE
         ]
-        if isinstance(case, DescriptorRule) and case.descriptor is not None:
-            descriptors.append(case.descriptor)
         assert any(
             descriptor.feature_mask_words
             and descriptor.feature_mask_words[0] & FEATURE_AVX512_FP16
             for descriptor in descriptors
         ), case
+        if (
+            isinstance(case, DescriptorRule)
+            and case.descriptor is not None
+            and case.descriptor.feature_mask_words
+            and case.descriptor.feature_mask_words[0] & FEATURE_AVX512_FP16
+        ):
+            # This also retains narrower-form requirements such as AVX512VL.
+            assert case.descriptor in descriptors
 
 
 def test_scalar_arithmetic_covers_the_native_fp16_family() -> None:

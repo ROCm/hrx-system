@@ -1872,7 +1872,6 @@ static const loom_target_legalizer_rule_t kScalarLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_SCALAR_CLAMPF,
         .first_operand_element_types = LOOM_SCALAR_TYPE_SET_FLOAT_LE16,
-        .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
         .legalize = loom_scalar_legalize_exact_narrow_float,
     },
     {

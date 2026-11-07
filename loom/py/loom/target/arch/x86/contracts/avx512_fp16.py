@@ -341,21 +341,26 @@ def _cases() -> Sequence[ContractCase]:
         *avx512_fp16_float_dot_rules(_descriptor),
         *_transport_rules(),
     )
-    # Transport and bit operations use base instructions, but their XMM half
-    # representation belongs to this feature. Native FP16 rows already carry
-    # the feature requirement on their primary descriptor.
+    # Primary descriptors remain queryable when unavailable so diagnostics can
+    # explain missing features. Matching must explicitly require availability
+    # to let the shared widening/decomposition paths handle those inputs.
+    # Base transport instructions also depend on the native half carrier.
     native_half = _descriptor("x86.avx512_fp16.vcvtsh2ss.xmm")
-    return tuple(
-        case
-        if isinstance(case, DescriptorRule)
-        and case.descriptor is not None
-        and case.descriptor.feature_mask_words
-        and case.descriptor.feature_mask_words[0] & FEATURE_AVX512_FP16
-        else replace(
-            case, guards=(*case.guards, Guard.descriptor_available(native_half))
+    guarded_cases = []
+    for case in cases:
+        required_descriptor = (
+            case.descriptor
+            if isinstance(case, DescriptorRule)
+            and case.descriptor is not None
+            and case.descriptor.feature_mask_words
+            and case.descriptor.feature_mask_words[0] & FEATURE_AVX512_FP16
+            else native_half
         )
-        for case in cases
-    )
+        availability = Guard.descriptor_available(required_descriptor)
+        if availability not in case.guards:
+            case = replace(case, guards=(*case.guards, availability))
+        guarded_cases.append(case)
+    return tuple(guarded_cases)
 
 
 X86_AVX512_FP16_CONTRACT_DIALECT_OPS = {

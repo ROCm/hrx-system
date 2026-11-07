@@ -1250,7 +1250,7 @@ static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
         .root_kind = LOOM_OP_VECTOR_CLAMPF,
         .first_operand_element_types = LOOM_SCALAR_TYPE_SET_F32,
         .match = loom_amdgpu_match_f32_clamp_decomposition,
-        .legalize = loom_vector_legalize_f32_extrema,
+        .legalize = loom_vector_legalize_float_extrema,
     },
     {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,
