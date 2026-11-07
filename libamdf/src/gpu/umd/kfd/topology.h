@@ -30,9 +30,6 @@ typedef struct amdf_gpu_kfd_topology_t {
   uint32_t gpu_id;
   // Exact graphics/compute IP identity from native discovery.
   amdf_gpu_kfd_ip_version_t gc_ip;
-  // Loaded amdgpu module version, without its trailing newline. Empty when
-  // unavailable or too long for exact matching; distinct from kernel release.
-  char driver_version[64];
   // Read-modify-write AtomicOps widths supported by every CPU-facing route.
   struct {
     // Whether enabled CPU routes support 32-bit AtomicOps transactions.
@@ -86,6 +83,8 @@ typedef struct amdf_gpu_kfd_topology_t {
     uint32_t queue_count_per_engine;
     // Cached IP discovery version used to select exact packet encodings.
     amdf_gpu_kfd_ip_version_t ip;
+    // Native driver cannot guarantee correctly routed shader doorbells.
+    bool device_producer_restricted;
   } sdma;
   // Native per-XCC context-save/restore bytes, or zero when not reported.
   // Compute queue plans require this group; memory and SDMA do not.

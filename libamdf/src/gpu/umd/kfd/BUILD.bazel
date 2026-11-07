@@ -98,6 +98,7 @@ amdf_cc_test(
     linkopts = [
         "-Wl,--wrap=amdf_linux_endpoint_open_file",
         "-Wl,--wrap=ioctl",
+        "-Wl,--wrap=uname",
     ],
     target_compatible_with = KFD_COMPATIBILITY,
     deps = [

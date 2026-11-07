@@ -504,9 +504,10 @@ TEST_F(KfdUserQueueTest, DeviceConstructionHasNoPartialCapabilityResult) {
 }
 
 TEST_F(KfdUserQueueTest, RestrictedDevicePublicationPreservesHostQueues) {
+  SelectAqlTopology();
   device_.topology.gc_ip = {9, 4, 3, true};
   device_.topology.sdma.ip = {4, 4, 2, true};
-  std::strcpy(device_.topology.driver_version, "6.16.13");
+  device_.topology.sdma.device_producer_restricted = true;
   auto create = MakeCreateInfo(AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
   create.required_capabilities |= AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER;
   auto* const sentinel =
@@ -519,9 +520,8 @@ TEST_F(KfdUserQueueTest, RestrictedDevicePublicationPreservesHostQueues) {
             amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
   EXPECT_EQ(output, sentinel);
   EXPECT_EQ(std::memcmp(&result, &original, sizeof(result)), 0);
-  EXPECT_EQ(native_state_.queue_create_count, 0);
+  EXPECT_EQ(native_state_.creation_operation_count, 0);
   EXPECT_EQ(native_state_.LiveBufferCount(), 0u);
-  EXPECT_EQ(native_state_.device_doorbell.create_count, 0u);
 
   ASSERT_NO_FATAL_FAILURE(CreateQueue(AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA));
   ASSERT_NO_FATAL_FAILURE(MapQueue());
@@ -530,6 +530,20 @@ TEST_F(KfdUserQueueTest, RestrictedDevicePublicationPreservesHostQueues) {
   EXPECT_NE(mapping_result_.doorbell_address, 0u);
   EXPECT_EQ(native_state_.queue_create_count, 1);
   EXPECT_EQ(native_state_.device_doorbell.create_count, 0u);
+  ASSERT_EQ(amdf_gpu_umd_user_queue_mapping_destroy(mapping_), AMDF_STATUS_OK);
+  mapping_ = nullptr;
+  ASSERT_EQ(amdf_gpu_umd_user_queue_destroy(queue_), AMDF_STATUS_OK);
+  queue_ = nullptr;
+
+  ASSERT_EQ(native_state_.LiveBufferCount(), 0u);
+  native_state_.Reset();
+  device_.topology.sdma.device_producer_restricted = false;
+  ASSERT_EQ(amdf_gpu_umd_user_queue_create(&device_, &create, &queue_,
+                                           &queue_result_),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(queue_result_.capabilities & create.required_capabilities,
+            create.required_capabilities);
+  EXPECT_EQ(native_state_.device_doorbell.create_count, 1u);
 }
 
 TEST_F(KfdUserQueueTest, DeviceViewFollowsTerminalQueueOwnership) {

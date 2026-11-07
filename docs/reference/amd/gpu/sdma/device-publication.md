@@ -104,12 +104,30 @@ selection. Successful GPUVM mapping or CPU notification therefore does not
 establish a valid shader notification route. The actual assignment and routing
 rule determine that independently of the command-memory release sequence.
 
-The correction is present in Linux stable 7.2.11 and 6.12.113. The separate
-ROCm driver tree at the shared `rocm-7.2.3` / `rocm-7.2.4` revision still uses
-the unaligned assignment. These are source identities, not interchangeable
-version thresholds: a separately installed AMDGPU/KFD module has its own
-patch history. [Stable 7.2 backport][routing-stable72]
-[Stable 6.12 backport][routing-stable612] [ROCm allocator][routing-rocm]
+The upstream fix is present from Linux 7.3-rc7 and in these stable release
+lines. Earlier kernels in each line retain the defect; a higher patch number
+on a different, unfixed line does not establish support.
+
+| Kernel release line | First fixed release |
+| --- | --- |
+| 6.6 | 6.6.160 |
+| 6.12 | 6.12.113 |
+| 6.18 | 6.18.57 |
+| 7.2 | 7.2.11 |
+| Mainline | 7.3-rc7 |
+
+[Stable 6.6 backport][routing-stable66]
+[Stable 6.12 backport][routing-stable612]
+[Stable 6.18 backport][routing-stable618]
+[Stable 7.2 backport][routing-stable72]
+[Mainline allocator][routing-mainline]
+
+Separately installed AMDGPU modules have their own patch history. The ROCm
+7.2.4, AMDGPU 31.50, and AMDGPU 31.60 release branches still use the unaligned
+allocator. AMDGPU 31.40.1's packaged module `6.19.14.31400100` also retains it.
+Installing these modules on a fixed upstream kernel does not repair their
+allocator. [ROCm allocator][routing-rocm] [AMDGPU 31.50][routing-amd3150]
+[AMDGPU 31.60][routing-amd3160] [AMDGPU 31.40.1 package][routing-dkms314]
 
 The native assignment also participates in checkpoint restore. KFD compares
 the saved doorbell ID with the newly calculated ID and rejects a mismatch
@@ -314,3 +332,10 @@ permission to notify another device's queue.
 [routing-stable72]: https://cdn.kernel.org/pub/linux/kernel/v7.x/ChangeLog-7.2.11
 [routing-stable612]: https://cdn.kernel.org/pub/linux/kernel/v6.x/ChangeLog-6.12.113
 [routing-rocm]: https://github.com/ROCm/amdgpu/blob/e5865b4307629a6ad1e44fe2343be68b08818915/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c#L474-L497
+[routing-dkms314]: https://repo.radeon.com/amdgpu/31.40.1/ubuntu/pool/main/a/amdgpu-dkms/
+
+[routing-stable66]: https://cdn.kernel.org/pub/linux/kernel/v6.x/ChangeLog-6.6.160
+[routing-stable618]: https://cdn.kernel.org/pub/linux/kernel/v6.x/ChangeLog-6.18.57
+[routing-mainline]: https://github.com/torvalds/linux/blob/v7.3-rc7/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c#L575-L600
+[routing-amd3150]: https://github.com/ROCm/amdgpu/blob/48f2f4486a8dc6122195fa8755b6a1a6ee2ad3e2/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c
+[routing-amd3160]: https://github.com/ROCm/amdgpu/blob/820212794d184710298efcecce42c0215bfc9c6a/drivers/gpu/drm/amd/amdkfd/kfd_device_queue_manager.c
