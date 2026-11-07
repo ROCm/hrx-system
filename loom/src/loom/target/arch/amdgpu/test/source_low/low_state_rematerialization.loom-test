@@ -342,3 +342,176 @@ low.func.def target<amdgpu.rdna3.core>(@target) @imported_scc_clobber_is_diagnos
   %result = s_cselect_b32 %advanced, %fallback, %valid
   return %result
 }
+
+// ====
+// RUN: emit amdgpu-assembly @borrow_chain_across_clobber
+
+amdgpu.target<gfx1100> @target
+
+// A wide comparison returns its predicate as the second result. Both the
+// low-word comparison and the high-word borrow must replay after the add.
+low.func.def target<amdgpu.rdna3.core>(@target) @borrow_chain_across_clobber(%low: reg<amdgpu.sgpr>, %high: reg<amdgpu.sgpr>, %limit_low: reg<amdgpu.sgpr>, %limit_high: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %low_borrow = s_cmp_lt_u32 %low, %limit_low
+  %difference, %borrow = s_subb_u32 %high, %limit_high, %low_borrow
+  %bounded = s_cselect_b32 %low, %fallback, %borrow
+  %advanced = s_add_u32 %bounded, %limit_low
+  %result = s_cselect_b32 %advanced, %fallback, %borrow
+  return %result
+}
+
+// ----
+  s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_subb_u32 s5, s2, s3
+  s_cselect_b32 s5, s0, s4
+  s_add_u32 s5, s5, s1
+  s_cmp_lt_u32 s0, s1
+  s_delay_alu instid0(SALU_CYCLE_1)
+  s_subb_u32 s0, s2, s3
+  s_cselect_b32 s0, s5, s4
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @carry_chain_preserves_arithmetic_results
+
+amdgpu.target<gfx1100> @target
+
+// The original arithmetic results remain live after their carry is replayed.
+// A tied update consumes the high word without consuming the carry's inputs.
+low.func.def target<amdgpu.rdna3.core>(@target) @carry_chain_preserves_arithmetic_results(%low: reg<amdgpu.sgpr>, %high: reg<amdgpu.sgpr>, %increment_low: reg<amdgpu.sgpr>, %increment_high: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %low_sum, %low_carry = s_add_co_u32 %low, %increment_low
+  %high_sum, %carry = s_addc_u32 %high, %increment_high, %low_carry
+  %bounded = s_cselect_b32 %low_sum, %fallback, %carry
+  %updated = s_addk_i32 %high_sum, 1
+  %advanced = s_add_u32 %bounded, %updated
+  %result = s_cselect_b32 %advanced, %low_sum, %carry
+  return %result, %updated
+}
+
+// ----
+  s_add_u32 s5, s1, s2
+  s_addc_u32 s6, s3, s4
+  s_add_u32 s7, s1, s2
+  s_addc_u32 s7, s3, s4
+  s_cselect_b32 s0, s5, s0
+  s_addk_i32 s6, 1
+  s_add_u32 s0, s0, s6
+  s_add_u32 s1, s1, s2
+  s_addc_u32 s1, s3, s4
+  s_cselect_b32 s0, s0, s5
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @inline_borrow_crosses_branch
+
+amdgpu.target<gfx1100> @target
+
+// Immediate variants retain the same explicit state dependency through a
+// source-order boundary, even when the arithmetic high word is unused.
+low.func.def target<amdgpu.rdna3.core>(@target) @inline_borrow_crosses_branch(%low: reg<amdgpu.sgpr>, %high: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %low_difference, %low_borrow = s_sub_co_u32_rhs_inline %low, 63
+  %high_difference, %borrow = s_subb_u32_lhs_inline %high, %low_borrow, 0
+  %bounded = s_cselect_b32 %low_difference, %fallback, %borrow
+  %advanced = s_add_u32 %bounded, %high
+  low.cond_br %borrow, ^success, ^failure : reg<amdgpu.scc>
+^success:
+  return %advanced
+^failure:
+  return %fallback
+}
+
+// ----
+  s_sub_u32 s3, s0, 63
+  s_sub_u32 s4, s0, 63
+  s_subb_u32 s4, 0, s1
+  s_cselect_b32 s3, s3, s2
+  s_add_u32 s3, s3, s1
+  s_sub_u32 s0, s0, 63
+  s_subb_u32 s0, 0, s1
+  s_cbranch_scc0 .Lbb2
+.Lbb1:
+  s_endpgm
+.Lbb2:
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @inline_carry_crosses_blocks
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @inline_carry_crosses_blocks(%low: reg<amdgpu.sgpr>, %high: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %low_sum, %low_carry = s_add_co_u32_rhs_inline %low, 1
+  %high_sum, %carry = s_addc_u32_rhs_inline %high, %low_carry, 0
+  %bounded = s_cselect_b32 %low_sum, %fallback, %carry
+  low.br ^advance
+^advance:
+  %advanced = s_add_u32 %bounded, %high_sum
+  low.br ^consume
+^consume:
+  %result = s_cselect_b32 %advanced, %fallback, %carry
+  return %result
+}
+
+// ----
+  s_add_u32 s3, s0, 1
+  s_addc_u32 s4, s1, 0
+  s_add_u32 s5, s0, 1
+  s_addc_u32 s5, s1, 0
+  s_cselect_b32 s3, s3, s2
+.Lbb1:
+  s_add_u32 s3, s3, s4
+.Lbb2:
+  s_add_u32 s0, s0, 1
+  s_addc_u32 s0, s1, 0
+  s_cselect_b32 s0, s3, s2
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @carry_recipe_shares_arithmetic_and_state_inputs
+
+amdgpu.target<gfx1201> @target
+
+// Both inputs of the high step come from one low step. Each replay must clone
+// that predecessor once and wire both of its results to the same successor.
+low.func.def target<amdgpu.rdna4.core>(@target) @carry_recipe_shares_arithmetic_and_state_inputs(%value: reg<amdgpu.sgpr>, %increment: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>) asm {
+  %sum, %carry = s_add_co_u32 %value, %increment
+  %extended_sum, %extended_carry = s_addc_u32 %sum, %increment, %carry
+  %bounded = s_cselect_b32 %extended_sum, %fallback, %extended_carry
+  %advanced = s_add_u32 %bounded, %value
+  %result = s_cselect_b32 %advanced, %sum, %extended_carry
+  return %result
+}
+
+// ----
+  s_add_u32 s3, s1, s2
+  s_addc_u32 s4, s3, s2
+  s_add_u32 s5, s1, s2
+  s_addc_u32 s5, s5, s2
+  s_cselect_b32 s0, s4, s0
+  s_add_u32 s0, s0, s1
+  s_add_u32 s1, s1, s2
+  s_addc_u32 s1, s1, s2
+  s_cselect_b32 s0, s0, s3
+  s_endpgm
+
+// ====
+// RUN: emit amdgpu-assembly @borrow_from_imported_state_is_not_replayable
+
+amdgpu.target<gfx1100> @target
+
+// Replay cannot reconstruct an imported carry, even when its consumer has a
+// replay declaration. A clobber still requires a diagnostic at its owner.
+low.func.def target<amdgpu.rdna3.core>(@target) @borrow_from_imported_state_is_not_replayable(%value: reg<amdgpu.sgpr>, %limit: reg<amdgpu.sgpr>, %fallback: reg<amdgpu.sgpr>, %incoming_borrow: reg<amdgpu.scc>) -> (reg<amdgpu.sgpr>) asm {
+  %difference, %borrow = s_subb_u32 %value, %limit, %incoming_borrow
+  %bounded = s_cselect_b32 %value, %fallback, %borrow
+  low.br ^advance
+^advance:
+  // ERROR@+1: BACKEND/048 {function_name="borrow_from_imported_state_is_not_replayable", block_name="advance", value_name="borrow", clobber_packet="amdgpu.s_add_u32"}
+  %advanced = s_add_u32 %bounded, %limit
+  low.br ^consume
+^consume:
+  %result = s_cselect_b32 %advanced, %fallback, %borrow
+  return %result
+}
+
+// ----

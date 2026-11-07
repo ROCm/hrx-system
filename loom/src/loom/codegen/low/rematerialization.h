@@ -11,11 +11,13 @@
 // structural composition can recreate a closed graph over operand-free target
 // leaves. A narrow view retains its wider input as a capture instead of
 // rebuilding that input for each use.
-// Other native recipes recreate tied ownership predecessors and available
-// descriptor-declared sources, retaining their remaining inputs as external
-// captures with stable contents and ownership. Recipes preserve consuming
-// order. Each distinct user receives a private producer graph, shared by
-// repeated operands of that user.
+// Other native recipes recreate tied ownership predecessors, explicit state
+// inputs, and available descriptor-declared sources, retaining their remaining
+// inputs as external captures with stable contents and ownership. Recipes
+// preserve consuming order and clone each producer once, remapping all of its
+// results together. The original producer survives while any sibling result
+// remains used. Each distinct user receives a private producer graph, shared
+// by repeated operands of that user.
 //
 // Allocation and scheduling supply function-local value domains and ordering
 // facts. Rematerialization computes closure once per original value in a repair
