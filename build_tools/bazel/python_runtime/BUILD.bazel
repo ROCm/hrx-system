@@ -4,13 +4,21 @@
 # Interpreter registrations have no CMake target surface.
 # bazel-to-cmake: skip
 
-# Keep runtime, C-extension, and exec-tools registration semantics together at
-# the same upstream boundary used to create the runtime repositories.
+load("@bazel_skylib//lib:selects.bzl", "selects")
+
+# Keep Linux runtime, C-extension, and exec-tools registration semantics at the
+# same upstream boundary used to create their runtime repositories.
 # buildifier: disable=bzl-visibility
 load("@rules_python//python/private:py_toolchain_suite.bzl", "py_toolchain_suite")
 load("//build_tools/bazel:python.bzl", "iree_py_test")
 
 package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "compact_stdlib.py",
+    "repository.bzl",
+    "windows_runtime.py",
+])
 
 config_setting(
     name = "version_default",
@@ -33,6 +41,13 @@ config_setting(
         "//build_tools/bazel:python_runtime_debug": "true",
         "@rules_python//python/config_settings:py_freethreaded": "no",
         "@rules_python//python/config_settings:py_linux_libc": "glibc",
+    },
+)
+
+config_setting(
+    name = "windows_compact_runtime",
+    flag_values = {
+        "@rules_python//python/config_settings:py_freethreaded": "no",
     },
 )
 
@@ -75,4 +90,41 @@ py_toolchain_suite(
         ":version_minor",
         ":version_exact",
     ],
+)
+
+selects.config_setting_group(
+    name = "windows_compact_version",
+    match_any = [
+        ":version_default",
+        ":version_minor",
+        ":version_exact",
+    ],
+)
+
+# Python tools do not compile extensions at runtime. Keep the Windows target
+# runtime compact while the separately registered upstream C-extension and
+# execution-tools toolchains continue to own headers, import libraries, and
+# precompilation.
+toolchain(
+    name = "windows_compact_toolchain",
+    target_compatible_with = [
+        "@platforms//os:windows",
+        "@platforms//cpu:x86_64",
+    ],
+    target_settings = [
+        ":windows_compact_runtime",
+        ":windows_compact_version",
+    ],
+    toolchain = "@hrx_python_windows_x86_64_compact//:python_runtimes",
+    toolchain_type = "@rules_python//python:toolchain_type",
+)
+
+iree_py_test(
+    name = "compact_stdlib_test",
+    srcs = [
+        "compact_stdlib.py",
+        "compact_stdlib_test.py",
+        "windows_runtime.py",
+    ],
+    main = "compact_stdlib_test.py",
 )

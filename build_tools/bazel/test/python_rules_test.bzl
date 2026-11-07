@@ -188,10 +188,20 @@ def _test_windows_runtime_owns_source_files(name):
 
 def _test_windows_runtime_owns_source_files_impl(env, target):
     runtime = target[PyRuntimeInfo]
+    runtime_files = runtime.files.to_list()
+
+    owners = {file.owner.repo_name: True for file in runtime_files}
+    env.expect.that_collection(owners.keys()).contains(
+        Label("@hrx_python_windows_x86_64_compact//:python_runtimes").repo_name,
+    )
+    env.expect.that_collection([file.basename for file in runtime_files]).contains("python312.zip")
+    env.expect.that_collection([file.basename for file in runtime_files]).contains("ssl.py")
+    env.expect.that_collection([file.basename for file in runtime.venv_bin_files]).contains("python312.zip")
+    env.expect.that_bool(len(runtime_files) < 1500).equals(True)
 
     # Configured outputs can be rematerialized between invocations while a
     # persistent worker still has the interpreter or its DLLs mapped.
-    for file in [runtime.interpreter] + runtime.files.to_list():
+    for file in [runtime.interpreter] + runtime_files:
         if not file.is_source:
             env.fail("Windows Python runtime contains a generated artifact: {}".format(file.path))
 
