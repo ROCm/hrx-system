@@ -22,3 +22,45 @@ func.def target(@test_target) @preserves_scf_until_explicit_lowering(%cond: i1, 
   }
   func.return %result : i32
 }
+
+// ====
+// RUN: pass target-legalize{mode=eager}
+
+// Native and reference providers see logical bank accesses only after source
+// expansion has had an opportunity to expose static slots.
+test.target<low_core> @test_target
+
+func.def target(@test_target) @retain_tail_accesses(%bank: vector<2x3xf64>, %slot: index, %replacement: vector<3xf64>) -> (vector<3xf64>, vector<2x3xf64>) {
+  %old = vector.extract %bank[%slot] : vector<2x3xf64> -> vector<3xf64>
+  %updated = vector.insert %replacement into %bank[%slot] : vector<3xf64>, vector<2x3xf64>
+  func.return %old, %updated : vector<3xf64>, vector<2x3xf64>
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @retain_tail_accesses(%bank: vector<2x3xf64>, %slot: index, %replacement: vector<3xf64>) -> (vector<3xf64>, vector<2x3xf64>) {
+  %old = vector.extract %bank[%slot] : vector<2x3xf64> -> vector<3xf64>
+  %updated = vector.insert %replacement into %bank[%slot] : vector<3xf64>, vector<2x3xf64>
+  func.return %old, %updated : vector<3xf64>, vector<2x3xf64>
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager,policy=reference-only}
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @retain_scalar_accesses(%bank: vector<2x2xi8>, %slot: index, %replacement: i8) -> (i8, vector<2x2xi8>) {
+  %old = vector.extract %bank[0, %slot] : vector<2x2xi8> -> i8
+  %updated = vector.insert %replacement into %bank[0, %slot] : i8, vector<2x2xi8>
+  func.return %old, %updated : i8, vector<2x2xi8>
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @retain_scalar_accesses(%bank: vector<2x2xi8>, %slot: index, %replacement: i8) -> (i8, vector<2x2xi8>) {
+  %old = vector.extract %bank[0, %slot] : vector<2x2xi8> -> i8
+  %updated = vector.insert %replacement into %bank[0, %slot] : i8, vector<2x2xi8>
+  func.return %old, %updated : i8, vector<2x2xi8>
+}

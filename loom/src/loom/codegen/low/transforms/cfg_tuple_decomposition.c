@@ -17,7 +17,7 @@
   V(statistics_type, branch_edges_decomposed, "branch-edges-decomposed",   \
     "Number of low.br edges rewritten to forward scalar lanes.")           \
   V(statistics_type, slices_removed, "slices-removed",                     \
-    "Number of low.slice projections replaced by lane block arguments.")
+    "Number of low.slice projections replaced by component observations.")
 
 LOOM_PASS_STATISTICS_DEFINE(loom_low_decompose_cfg_tuples_statistics,
                             loom_low_decompose_cfg_tuples_statistics_t,
@@ -25,7 +25,8 @@ LOOM_PASS_STATISTICS_DEFINE(loom_low_decompose_cfg_tuples_statistics,
 
 static const loom_pass_info_t kPassInfo = {
     .name = IREE_SVL("low-decompose-cfg-tuples"),
-    .description = IREE_SVL("Decompose lane-local low CFG register tuples."),
+    .description =
+        IREE_SVL("Decompose partially sliced low CFG register tuples."),
     .kind = LOOM_PASS_MODULE,
     .statistic_layout = &loom_low_decompose_cfg_tuples_statistics_layout,
 };

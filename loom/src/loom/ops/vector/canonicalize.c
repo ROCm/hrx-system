@@ -2119,6 +2119,11 @@ static iree_status_t loom_vector_canonicalize_bitcast(loom_op_t* op,
   }
   IREE_RETURN_IF_ERROR(
       loom_vector_replace_single_result_with_value(op, rewriter, inner_input));
+  // Retire the now-unused shape alias before a requeued consumer plans memory
+  // ownership. A dead alias must not make its producer appear multiply used.
+  bool erased = false;
+  IREE_RETURN_IF_ERROR(
+      loom_rewriter_erase_if_dead(rewriter, input_def, &erased));
   *out_changed = true;
   return iree_ok_status();
 }

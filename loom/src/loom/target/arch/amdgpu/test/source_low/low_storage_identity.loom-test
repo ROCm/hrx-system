@@ -441,3 +441,88 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @partial_write_consumes_alias_
   global_store_short_saddr %address, %seed, %output
   return
 }
+
+// ====
+// Prefetches may overlap LDS publication, but their required loop slots cannot
+// overlap intermediate values that are still awaiting their LDS writes.
+// RUN: emit amdgpu-assembly @prefetch
+
+amdgpu.target<gfx942> @target
+
+low.func.def schedule(phased) target<amdgpu.cdna3.core>(@target) @prefetch(%input: reg<amdgpu.sgpr x2>, %output: reg<amdgpu.sgpr x2>, %storage: reg<amdgpu.vgpr>, %thread: reg<amdgpu.vgpr>) asm {
+  %zero = s_mov_b32 0
+  %one = s_mov_b32 1
+  %count = s_mov_b32 4
+  %address = v_lshlrev_b32_src0_inline %thread, 2
+  %local = v_add_u32 %storage, %address
+  %seed0 = global_load_dword_saddr %address, %input : reg<amdgpu.vgpr>
+  %seed1 = global_load_dword_saddr %address, %input {offset = 256} : reg<amdgpu.vgpr>
+  %seed2 = global_load_dword_saddr %address, %input {offset = 512} : reg<amdgpu.vgpr>
+  low.br.identity(1, 3) ^loop(%zero: reg<amdgpu.sgpr>, %seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>, %seed2: reg<amdgpu.vgpr>)
+^loop(%iteration: reg<amdgpu.sgpr>, %current0: reg<amdgpu.vgpr>, %current1: reg<amdgpu.vgpr>, %current2: reg<amdgpu.vgpr>):
+  %has_next = s_cmp_lt_u32 %iteration, %count
+  low.cond_br %has_next, ^body, ^exit : reg<amdgpu.scc>
+^body:
+  low.schedule.begin
+  %early0 = v_add_u32 %current0, %current0
+  %late0 = v_mul_lo_u32 %current0, %early0
+  ds_write_b32 %local, %late0
+  low.schedule.phase
+  %early1 = v_add_u32 %current1, %current1
+  %late1 = v_mul_lo_u32 %current1, %early1
+  ds_write_b32 %local, %late1 {offset = 256}
+  low.schedule.phase
+  %early2 = v_add_u32 %current2, %current2
+  %late2 = v_mul_lo_u32 %current2, %early2
+  ds_write_b32 %local, %late2 {offset = 512}
+  low.schedule.end
+  %next0 = global_load_dword_saddr %address, %input {offset = 768} : reg<amdgpu.vgpr>
+  %next1 = global_load_dword_saddr %address, %input {offset = 1024} : reg<amdgpu.vgpr>
+  %next2 = global_load_dword_saddr %address, %input {offset = 1280} : reg<amdgpu.vgpr>
+  low.schedule.phase
+  %next_iteration = s_add_u32 %iteration, %one
+  low.br.identity(1, 3) ^loop(%next_iteration: reg<amdgpu.sgpr>, %next0: reg<amdgpu.vgpr>, %next1: reg<amdgpu.vgpr>, %next2: reg<amdgpu.vgpr>)
+^exit:
+  %stored = ds_read_b32 %local
+  global_store_dword_saddr %address, %stored, %output
+  return
+}
+
+// ----
+  v_lshlrev_b32 v0, 2, v0
+  global_load_dword v2, v0, s[0:1] offset:0
+  global_load_dword v3, v0, s[0:1] offset:256
+  global_load_dword v4, v0, s[0:1] offset:512
+  v_add_u32 v1, v1, v0
+  s_mov_b32 s4, 0
+  s_mov_b32 s5, 1
+  s_mov_b32 s6, 4
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+.Lbb1:
+  s_cmp_lt_u32 s4, s6
+  s_cbranch_scc0 .Lbb3
+.Lbb2:
+  s_waitcnt vmcnt(2) lgkmcnt(15)
+  v_add_u32 v5, v2, v2
+  v_mul_lo_u32 v2, v2, v5
+  ds_write_b32 v1, v2 offset:0
+  s_waitcnt vmcnt(1) lgkmcnt(15)
+  v_add_u32 v2, v3, v3
+  v_mul_lo_u32 v5, v3, v2
+  global_load_dword v2, v0, s[0:1] offset:768
+  global_load_dword v3, v0, s[0:1] offset:1024
+  ds_write_b32 v1, v5 offset:256
+  s_waitcnt vmcnt(2) lgkmcnt(15)
+  v_add_u32 v5, v4, v4
+  v_mul_lo_u32 v5, v4, v5
+  global_load_dword v4, v0, s[0:1] offset:1280
+  ds_write_b32 v1, v5 offset:512
+  s_add_u32 s4, s4, s5
+  s_branch .Lbb1
+.Lbb3:
+  s_waitcnt vmcnt(63) lgkmcnt(0)
+  ds_read_b32 v1, v1 offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(0)
+  global_store_dword v0, v1, s[2:3] offset:0
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm

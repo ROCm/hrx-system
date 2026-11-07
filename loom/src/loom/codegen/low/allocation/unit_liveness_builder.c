@@ -1744,6 +1744,16 @@ iree_status_t loom_low_allocation_unit_liveness_retain_storage(
 
   IREE_RETURN_IF_ERROR(loom_low_allocation_storage_reservations_build(
       unit_liveness, liveness, placement, result_arena, decision_arena));
+  if (placement->tied_storage_origins_by_value_ordinal != NULL) {
+    for (loom_value_ordinal_t i = 0; i < liveness->value_count; ++i) {
+      const loom_value_ordinal_t origin =
+          placement->tied_storage_origins_by_value_ordinal[i];
+      if (origin != i) {
+        loom_low_allocation_unit_liveness_mark_independent_storage_extension(
+            unit_liveness, origin);
+      }
+    }
+  }
   for (iree_host_size_t i = 0; i < placement->relation_count; ++i) {
     const loom_low_placement_relation_t* relation = &placement->relations[i];
     if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT) {

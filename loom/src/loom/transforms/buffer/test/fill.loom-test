@@ -46,14 +46,14 @@ func.def @loop_and_tail(%target: buffer, %pattern: i16) {
   %7 = scalar.shli %5, %6 : i32
   %8 = scalar.ori %5, %7 : i32
   %9 = index.constant 64 : offset
-  %20 = vector.splat %8 : vector<8xi32>
+  %10 = vector.splat %8 : vector<8xi32>
   %12 = index.constant 32 : offset
   scf.for %13 = [%4 to %9 step %12] {
     %15 = buffer.view %target[%13] : buffer -> view<8xi32, align(1)>
-    vector.store %20, %15[0] : vector<8xi32>, view<8xi32, align(1)>
+    vector.store %10, %15[0] : vector<8xi32>, view<8xi32, align(1)>
   }
-  %19 = index.constant 64 : offset
-  buffer.store.i8 %8, %target[%19]
+  %18 = index.constant 64 : offset
+  buffer.store.i8 %8, %target[%18]
   func.return
 }
 

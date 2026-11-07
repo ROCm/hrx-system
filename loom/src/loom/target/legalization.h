@@ -41,6 +41,8 @@ typedef struct loom_target_legalizer_provider_t
 
 typedef enum loom_target_legalization_mode_e {
   // Opportunistic legalization. Unsupported ops can be left for a later run.
+  // Multidimensional vector extract/insert accesses retain their logical bank
+  // structure for unrolling and boundary projection before final legalization.
   LOOM_TARGET_LEGALIZATION_MODE_EAGER = 0,
   // Final legalization. Remaining unsupported ops must be diagnosed by the
   // caller after the rewrite fixed point.
