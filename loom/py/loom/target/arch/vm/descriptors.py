@@ -379,9 +379,6 @@ def _descriptor(
             for effect in instruction.state_effects
         )
     ) + ((Effect(EffectKind.UNKNOWN, MemorySpace.GENERIC),) if creates_owner else ())
-    # Null construction defines a source lifetime, not a memory access.
-    if defines_null:
-        effects += (Effect(EffectKind.WRITE, MemorySpace.NONE),)
     return Descriptor(
         key=f"vm.{instruction.mnemonic}",
         mnemonic=instruction.mnemonic,
@@ -396,8 +393,7 @@ def _descriptor(
         flags=(
             DescriptorFlag.SIDE_EFFECTING if effects else DescriptorFlag.DEAD_REMOVABLE,
         )
-        # Null owners have independent source lifetimes even without a payload.
-        # Preserve them until mandatory ownership admission checks consumption.
+        # Live null owners have independent lifetimes; dead ones may disappear.
         + ((DescriptorFlag.UNIQUE_IDENTITY,) if defines_null else ()),
         instruction_classes=(
             InstructionClass.GENERIC_MEMORY

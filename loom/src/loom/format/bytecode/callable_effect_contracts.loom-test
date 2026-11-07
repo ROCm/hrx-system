@@ -10,3 +10,20 @@ func.def readonly @read_twice(%address: buffer) -> (i32) {
   %sum = scalar.addi %first, %second : i32
   func.return %sum : i32
 }
+
+// ====
+
+// Payload purity and handle ownership remain independent after serialization.
+type.decl import("images", "frame") @Frame
+
+func.decl pure @create() -> (ref<@Frame>)
+
+func.decl pure @consume(%owner: ref<@Frame>)
+
+func.def pure @discard() {
+  %owner = func.call pure @create() : () -> (ref<@Frame>)
+  %copy = ref.duplicate %owner : ref<@Frame>
+  func.call pure @consume(%copy) : (ref<@Frame>)
+  ref.release %owner : ref<@Frame>
+  func.return
+}

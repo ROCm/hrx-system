@@ -25,6 +25,7 @@ loom_check_test_suite(
         "integer_division.loom-test",
         "integer_float_chains.loom-test",
         "loop_fact_publication.loom-test",
+        "managed_lifetimes.loom-test",
         "parameter_domains.loom-test",
         "redundant_assumptions.loom-test",
         "value_equality.loom-test",

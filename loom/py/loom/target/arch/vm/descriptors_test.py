@@ -61,7 +61,6 @@ from loom.target.low_descriptors import (
     EffectKind,
     ImmediateFlag,
     ImmediateKind,
-    MemorySpace,
     OperandRole,
     OwnershipEffect,
 )
@@ -207,8 +206,6 @@ def test_effects_preserve_state_access_not_runtime_aborts():
         if creates_owner:
             expected += (EffectKind.UNKNOWN,)
         if instruction is REF_NULL:
-            expected += (EffectKind.WRITE,)
-            assert descriptor.effects[-1].memory_space is MemorySpace.NONE
             assert DescriptorFlag.UNIQUE_IDENTITY in descriptor.flags
         if expected:
             assert DescriptorFlag.SIDE_EFFECTING in descriptor.flags

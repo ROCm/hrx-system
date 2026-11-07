@@ -191,6 +191,44 @@ transport, without acquiring extra owners. A pointer that already carries
 protection duplicates that protection instead. Returning either kind of pointer
 acquires or transfers an owner so the result can outlive the invocation.
 
+## Eliminate unused lifetimes
+
+A pure factory can allocate an object without making that allocation observable.
+When its result is used only for handle bookkeeping, the compiler can remove
+the factory, its input computation, and the complete unused lifetime:
+
+```loom
+type.decl import("images", "frame") @Frame
+
+func.decl import("images", "create") pure @create(%width: i32) -> (ref<@Frame>)
+
+func.def @discard_frame(%width: i32) {
+  %frame = func.call pure @create(%width) : (i32) -> (ref<@Frame>)
+  %copy = ref.duplicate %frame : ref<@Frame>
+  ref.release %frame : ref<@Frame>
+  ref.release %copy : ref<@Frame>
+  func.return
+}
+```
+
+The optimized body contains only `func.return`. There is no allocation,
+reference-count acquisition, or finalizer invocation. Typed nulls and unused
+copy, borrow, move, and release graphs follow the same rule, including
+ownership forwarded through branches and loops. A pure obtain call borrowing
+an existing object can disappear when its returned handles are unused.
+
+Purity describes payload effects; it does not make two live owners
+interchangeable. Repeated pure factory calls still produce independent handles.
+Returning a handle, reading its payload, or using an identity comparison keeps
+the required creation and cleanup. If a call produces a used scalar result
+alongside an otherwise unused owner, that owner still needs its release.
+
+Observable resource acquisition belongs in an effectful factory. Such a call
+and its cleanup remain even when no payload is read. Incoming owners retain
+their cleanup as well: a pure call consuming an already-materialized owner
+cannot disappear on its own. Elimination removes a complete dead lifetime;
+it does not shorten the explicit lifetime of a surviving object.
+
 ## Supply the native implementation
 
 The runtime provider publishes an `iree_vm_ref_type_table_t` for its namespace.
@@ -214,9 +252,10 @@ source declaration; the runtime needs them to execute its imports.
 ## Normal exit, failure, and artifact admission
 
 An owning SSA value cannot be consumed twice or used after transfer. Reaching a
-normal exit with an unconsumed source owner is a compilation error. The source
-or frontend expresses that owner's release; the compiler does not invent a
-normal function-exit destructor for it.
+normal exit with an unconsumed owner in the optimized program is a compilation
+error. Optimization may eliminate a complete unused lifetime before this check.
+The source or frontend expresses that owner's release; the compiler does not
+invent a normal function-exit destructor for it.
 
 Terminal VM failure releases every initialized managed owner held by the
 invocation and runs native finalizers, including initialized results from a

@@ -1760,12 +1760,12 @@ loom_trait_flags_t loom_low_op_effective_traits(const loom_module_t* module,
 
 loom_trait_flags_t loom_low_func_call_effective_traits(
     const loom_module_t* module, const loom_op_t* op) {
-  (void)module;
-  return loom_callable_effects_traits(loom_low_func_call_effect_contract(op));
+  return loom_callable_effects_traits(module, op,
+                                      loom_low_func_call_effect_contract(op));
 }
 
 loom_trait_flags_t loom_low_invoke_effective_traits(const loom_module_t* module,
                                                     const loom_op_t* op) {
-  (void)module;
-  return loom_callable_effects_traits(loom_low_invoke_effect_contract(op));
+  return loom_callable_effects_traits(module, op,
+                                      loom_low_invoke_effect_contract(op));
 }

@@ -96,6 +96,8 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @proven_
 
 // ====
 
+// Diagnose omitted results at the lowering boundary before dead-call cleanup.
+// RUN: pass source-to-low
 amdgpu.target<gfx11-generic> @target
 
 low.func.def target<amdgpu.gfx11.generic.core>(@target) @unary_result(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {

@@ -22,7 +22,7 @@ func.def @inspect(%owner: ref<@Frame>, %pointer: ptr<@Frame>) -> (i1, i1, i1, i1
 
 // ====
 
-// Independent null owners cannot be commoned or removed before admission.
+// Complete unused null lifetimes disappear together.
 // RUN: pass cse,dce,ownership-lifetime
 type.decl import("media", "frame") @Frame
 
@@ -34,16 +34,24 @@ func.def @independent() {
   func.return
 }
 
+// ----
+type.decl import("media", "frame") @Frame
+
+func.def @independent() {
+  func.return
+}
+
 // ====
 
-// A null owner has the same explicit consumption rule as any other owner.
+// A live null owner has the same explicit consumption rule as any other owner.
 // RUN: pass dce,ownership-lifetime
 type.decl import("media", "frame") @Frame
 
-func.def @leak() {
+func.def @leak() -> (i1) {
   %owner = ref.null : ref<@Frame>
+  %missing = ref.compare.null %owner : ref<@Frame>
   // ERROR@+1: DOMINANCE/014 {value_name="owner"}
-  func.return
+  func.return %missing : i1
 }
 
 // ====

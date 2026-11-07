@@ -293,6 +293,9 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/pass:types",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/transforms/cfg:dead_state",
+        "//loom/src/loom/util:cfg_graph",
         "//runtime/src/iree/base",
     ],
 )

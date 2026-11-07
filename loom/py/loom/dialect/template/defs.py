@@ -328,6 +328,7 @@ template_apply = Op(
     ],
     results=[Result("results", ANY, variadic=True)],
     traits=[UNKNOWN_EFFECTS, COMMAND_EFFECT, CONTEXTUAL, CALLABLE_BOUNDARY],
+    callable_effect_contract="effect_contract",
     verify="loom_template_apply_verify",
     canonicalize="loom_template_apply_canonicalize",
     effective_traits="loom_template_apply_effective_traits",

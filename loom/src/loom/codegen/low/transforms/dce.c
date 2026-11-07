@@ -40,31 +40,28 @@ typedef struct loom_low_dce_deadness_context_t {
   const loom_low_resolved_target_t* target;
 } loom_low_dce_deadness_context_t;
 
-static iree_status_t loom_low_dce_deadness_query(void* user_data,
-                                                 const loom_module_t* module,
-                                                 const loom_op_t* op,
-                                                 bool* out_is_dead) {
+static loom_dead_state_op_kind_t loom_low_dce_deadness_query(
+    void* user_data, const loom_module_t* module, const loom_op_t* op) {
   loom_low_dce_deadness_context_t* context =
       (loom_low_dce_deadness_context_t*)user_data;
-  *out_is_dead = false;
 
   loom_low_descriptor_packet_t packet = {0};
   loom_low_descriptor_packet_initialize(context->target->descriptor_set, op,
                                         &packet);
   if (packet.kind == LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
-    *out_is_dead = loom_op_is_trivially_dead(module, op);
-    return iree_ok_status();
+    return loom_dead_state_classify_op(NULL, module, op);
   }
 
-  if (op->result_count == 0 || !loom_op_results_unused(module, op) ||
+  if (op->result_count == 0 ||
       iree_any_bit_set(loom_op_effective_traits(module, op),
                        LOOM_TRAIT_OBSERVABLE_EFFECT)) {
-    return iree_ok_status();
+    return LOOM_DEAD_STATE_OP_ROOT;
   }
 
-  *out_is_dead = iree_any_bit_set(packet.descriptor->flags,
-                                  LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE);
-  return iree_ok_status();
+  return iree_any_bit_set(packet.descriptor->flags,
+                          LOOM_LOW_DESCRIPTOR_FLAG_DEAD_REMOVABLE)
+             ? LOOM_DEAD_STATE_OP_VALUE
+             : LOOM_DEAD_STATE_OP_ROOT;
 }
 
 static iree_status_t loom_low_dce_function(

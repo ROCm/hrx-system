@@ -44,6 +44,7 @@ loom_check_test_suite(
         "object_borrow_retirement.loom-test",
         "object_borrow_transport.loom-test",
         "object_copy.loom-test",
+        "object_dead_lifetimes.loom-test",
         "object_lifetime.loom-test",
         "object_release.loom-test",
         "object_source_borrow.loom-test",

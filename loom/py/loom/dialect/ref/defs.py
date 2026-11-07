@@ -36,6 +36,7 @@ ref_duplicate = value_duplication_op(
     group=ref_ops,
     carrier=MANAGED_REFERENCE,
     traits=[OBSERVABLE_EFFECT],
+    lifetime_effects_only=True,
     doc=(
         "Create an independent handle to the same managed payload, preserving "
         "its type and null state. Duplicating ref adds an owner that must be "
@@ -64,6 +65,7 @@ ref_borrow = Op(
     operands=[Operand("owner", MANAGED_REFERENCE)],
     results=[Result("pointer", MANAGED_REFERENCE)],
     traits=[UNIQUE_IDENTITY, OBSERVABLE_EFFECT],
+    lifetime_effects_only=True,
     ownership_effects=[Borrow("owner"), AliasResult("pointer", "owner")],
     verify="loom_ref_borrow_verify",
     format=[Ref("owner"), COLON, TypeOf("owner"), ARROW, ResultType("pointer")],
@@ -83,6 +85,7 @@ ref_release = Op(
     ),
     operands=[Operand("value", MANAGED_REFERENCE)],
     traits=[OBSERVABLE_EFFECT],
+    lifetime_effects_only=True,
     ownership_effects=[Move("value")],
     format=[Ref("value"), COLON, TypeOf("value")],
     examples=["ref.release %owner : ref<@Frame>"],
@@ -99,7 +102,8 @@ ref_null = Op(
         "path; releasing null has no payload effect."
     ),
     results=[Result("result", MANAGED_REFERENCE)],
-    traits=[UNIQUE_IDENTITY, OBSERVABLE_EFFECT],
+    traits=[UNIQUE_IDENTITY],
+    lifetime_effects_only=True,
     format=[COLON, ResultType("result")],
     examples=["%empty = ref.null : ref<@Frame>", "%missing = ref.null : ptr<@Frame>"],
 )

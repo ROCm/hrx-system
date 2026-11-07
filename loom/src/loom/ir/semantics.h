@@ -120,12 +120,20 @@ typedef struct loom_op_semantics_t {
   // Relative cost for transforms that eagerly execute the op on additional
   // control paths, or zero when generic eager execution is not profitable.
   uint8_t eager_execution_cost;
+  // All execution effects manage the declared operand/result lifetimes.
+  // A closed unused lifetime may disappear together; this does not permit
+  // dropping cleanup of a live value or moving its lifetime boundaries.
+  bool lifetime_effects_only;
+  // One-based payload effect-contract attribute index for an application,
+  // or zero when no such contract is declared. Independent of direct-callee
+  // identity so unresolved template applications share the same semantics.
+  uint8_t callable_effect_attr_index_plus_one;
   // Target-contract families required to preserve this op's semantics.
   loom_contract_family_set_t contract_families;
 } loom_op_semantics_t;
 
-static_assert(sizeof(loom_op_semantics_t) == 8,
-              "op semantic rows must remain eight bytes");
+static_assert(sizeof(loom_op_semantics_t) == 12,
+              "op semantic rows must remain twelve bytes");
 
 // Returns the default empty semantic metadata row.
 static inline loom_op_semantics_t loom_op_semantics_empty(void) {

@@ -6,6 +6,7 @@
 
 #include "loom/ops/callable_effects.h"
 
+#include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/op_defs.h"
 
@@ -139,9 +140,20 @@ static loom_callable_effect_contract_t loom_callable_effects_classify_region(
   loom_region_for_each_block(region, block) {
     const loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
-      const loom_callable_effect_contract_t op_contract =
+      loom_callable_effect_contract_t op_contract =
           loom_callable_effects_classify_traits(
               loom_op_effective_traits(module, op));
+      const loom_op_semantics_t semantics = loom_op_semantics(module, op);
+      const loom_callable_effect_contract_t application_contract =
+          loom_callable_effects_application_contract(op, semantics);
+      if (semantics.lifetime_effects_only) {
+        op_contract = LOOM_CALLABLE_EFFECT_CONTRACT_PURE;
+      } else if (application_contract !=
+                 LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED) {
+        // The declared contract describes payload effects. Handle creation
+        // and consumed arguments separately constrain ownership rewrites.
+        op_contract = application_contract;
+      }
       if (op_contract == LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED) {
         return LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED;
       }
@@ -199,13 +211,43 @@ bool loom_callable_effects_body_is_readonly(const loom_module_t* module,
 }
 
 loom_trait_flags_t loom_callable_effects_traits(
+    const loom_module_t* module, const loom_op_t* op,
     loom_callable_effect_contract_t contract) {
+  loom_trait_flags_t traits = LOOM_TRAIT_CALLABLE_BOUNDARY;
   switch (contract) {
     case LOOM_CALLABLE_EFFECT_CONTRACT_PURE:
-      return LOOM_TRAIT_CALLABLE_BOUNDARY | LOOM_TRAIT_PURE;
+      traits |= LOOM_TRAIT_PURE;
+      break;
     case LOOM_CALLABLE_EFFECT_CONTRACT_READONLY:
-      return LOOM_TRAIT_CALLABLE_BOUNDARY | LOOM_TRAIT_READS_MEMORY;
+      traits |= LOOM_TRAIT_READS_MEMORY;
+      break;
     default:
-      return LOOM_TRAIT_CALLABLE_BOUNDARY | LOOM_TRAIT_UNKNOWN_EFFECTS;
+      traits |= LOOM_TRAIT_UNKNOWN_EFFECTS;
+      break;
   }
+  for (uint16_t i = 0; i < op->result_count; ++i) {
+    loom_type_t type =
+        loom_module_value_type(module, loom_op_const_results(op)[i]);
+    const loom_type_t* element = loom_type_register_value_type(type);
+    if (loom_type_is_reference(element ? *element : type)) {
+      traits = (traits & ~LOOM_TRAIT_PURE) | LOOM_TRAIT_UNIQUE_IDENTITY;
+      break;
+    }
+  }
+  for (uint16_t i = 0; i < op->operand_count; ++i) {
+    const loom_value_id_t value = loom_op_const_operands(op)[i];
+    // Effective traits are also constructed for unresolved parser operands.
+    if (value == LOOM_VALUE_ID_INVALID) {
+      continue;
+    }
+    loom_type_t type = loom_module_value_type(module, value);
+    const loom_type_t* element = loom_type_register_value_type(type);
+    type = element ? *element : type;
+    if (loom_type_is_reference(type) &&
+        loom_type_reference_ownership(type) == LOOM_REFERENCE_OWNERSHIP_OWNED) {
+      traits = (traits & ~LOOM_TRAIT_PURE) | LOOM_TRAIT_OBSERVABLE_EFFECT;
+      break;
+    }
+  }
+  return traits;
 }

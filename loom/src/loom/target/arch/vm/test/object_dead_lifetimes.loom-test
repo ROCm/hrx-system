@@ -1,0 +1,289 @@
+// Allocation and finalizer events instrument physical work; the declared
+// pure producer has no application-visible resource acquisition.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") pure @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 13 : i32
+  %owner, %unused = func.call pure @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %copy = ref.duplicate %owner : ref<@Object>
+  %pointer = ref.borrow %copy : ref<@Object> -> ptr<@Object>
+  %dead = ref.compare.null %pointer : ptr<@Object>
+  ref.release %copy : ref<@Object>
+  ref.release %owner : ref<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+live 0
+OK 0
+retired 0
+
+// ====
+
+// An effectful resource producer must remain, along with its cleanup.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 14 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  ref.release %owner : ref<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 14
+destroy 14
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A real payload observation keeps even a pure producer and its cleanup.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") pure @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 15 : i32
+  %owner, %unused = func.call pure @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %pointer = ref.borrow %owner : ref<@Object> -> ptr<@Object>
+  func.call @read(%pointer) : (ptr<@Object>)
+  ref.release %owner : ref<@Object>
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 15
+read 15
+destroy 15
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Pure computation that consumes a materialized owner must retain cleanup.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") pure @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 17 : i32
+  %owner, %unused = func.call @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call pure @consume(%owner) : (ref<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+// ----
+create 17
+consume 17
+destroy 17
+live 0
+OK 0
+retired 0
+
+// ====
+
+// Pure creators have independent handle identities even with identical inputs.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") pure @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 18 : i32
+  %first, %unused_first = func.call pure @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %second, %unused_second = func.call pure @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call @consume(%first) : (ref<@Object>)
+  func.call @consume(%second) : (ref<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+// ----
+create 18
+create 18
+consume 18
+destroy 18
+consume 18
+destroy 18
+live 0
+OK 0
+retired 0
+
+// ====
+
+// The producer and a pure consuming call disappear together.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "create") pure @create(%id: i32) -> (ref<@Object>, ptr<@Object>)
+
+func.decl import("lifetime", "consume") pure @consume(%owner: ref<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+func.def public @run() {
+  %id = scalar.constant 19 : i32
+  %owner, %unused = func.call pure @create(%id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  func.call pure @consume(%owner) : (ref<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+// ----
+live 0
+OK 0
+retired 0
+
+// ====
+
+// A pure, non-inlined function can return an independent null owner.
+// RUN: emit vm-object-lifetime
+type.decl import("lifetime", "object") @Object
+
+func.decl import("lifetime", "consume") @consume(%owner: ref<@Object>)
+
+func.def pure noinline @empty() -> (ref<@Object>) {
+  %owner = ref.null : ref<@Object>
+  func.return %owner : ref<@Object>
+}
+
+func.def public @run() {
+  %owner = func.call pure @empty() : () -> (ref<@Object>)
+  func.call @consume(%owner) : (ref<@Object>)
+  func.return
+}
+// ----
+consume -1
+OK 0
+retired 0
+
+// ====
+
+// Authored Low uses the same closure for null, copy, move, borrow, and release.
+// RUN: with-low-asm pass low-dce
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @empty() asm {
+  %owner = ref.null : reg<vm.ref : ref<@Object>>
+  %copy = copy %owner : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  %moved = move %copy : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  %pointer = borrow %moved : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ptr<@Object>>
+  %dead = ref.compare.null %pointer
+  low.release %pointer : reg<vm.ref : ptr<@Object>>
+  low.release %moved : reg<vm.ref : ref<@Object>>
+  low.release %owner : reg<vm.ref : ref<@Object>>
+  return
+}
+
+// ----
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @empty() asm {
+  return
+}
+
+// ====
+
+// Materialized input ownership survives the same Low transfer operations.
+// RUN: with-low-asm pass low-dce
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @drop(%owner: reg<vm.ref : ref<@Object>>) asm {
+  %moved = move %owner : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  low.release %moved : reg<vm.ref : ref<@Object>>
+  return
+}
+
+// ----
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.def target<vm.core>(@vm) abi(vm_function) @drop(%owner: reg<vm.ref : ref<@Object>>) asm {
+  %moved = move %owner : reg<vm.ref : ref<@Object>> -> reg<vm.ref : ref<@Object>>
+  low.release %moved : reg<vm.ref : ref<@Object>>
+  return
+}
+
+// ====
+
+// Source calls to authored Low helpers honor pure allocation and consuming
+// arguments before and after crossing the representation boundary.
+// RUN: emit vm-object-lifetime
+vm.target<core> @vm
+
+type.decl import("lifetime", "object") @Object
+
+low.func.decl pure import(native, "create", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @native_create(%id: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+
+low.func.decl pure import(native, "consume", module = "lifetime") target<vm.core>(@vm) abi(vm_function) @native_consume(%owner: reg<vm.ref : ref<@Object>>)
+
+func.decl import("lifetime", "read") @read(%pointer: ptr<@Object>)
+
+func.decl import("lifetime", "observe") @observe()
+
+low.func.def pure target<vm.core>(@vm) abi(vm_function) @create(%id: reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>) asm {
+  %owner, %pointer = low.func.call pure @native_create(%id) : (reg<vm.value : i32>) -> (reg<vm.ref : ref<@Object>>, reg<vm.ref : ptr<@Object>>)
+  return %owner, %pointer
+}
+
+low.func.def pure target<vm.core>(@vm) abi(vm_function) @consume(%owner: reg<vm.ref : ref<@Object>>) asm {
+  low.func.call pure @native_consume(%owner) : (reg<vm.ref : ref<@Object>>)
+  return
+}
+
+func.def public target(@vm) @run() {
+  %dead_id = scalar.constant 20 : i32
+  %dead, %dead_pointer = low.invoke pure @create(%dead_id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  low.invoke pure @consume(%dead) : (ref<@Object>)
+  %live_id = scalar.constant 21 : i32
+  %live, %unused = low.invoke pure @create(%live_id) : (i32) -> (ref<@Object>, ptr<@Object>)
+  %pointer = ref.borrow %live : ref<@Object> -> ptr<@Object>
+  func.call @read(%pointer) : (ptr<@Object>)
+  low.invoke pure @consume(%live) : (ref<@Object>)
+  func.call @observe() : ()
+  func.return
+}
+
+// ----
+create 21
+read 21
+consume 21
+destroy 21
+live 0
+OK 0
+retired 0
