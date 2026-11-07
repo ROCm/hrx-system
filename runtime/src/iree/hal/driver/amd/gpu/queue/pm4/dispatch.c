@@ -96,12 +96,6 @@ iree_hal_amd_gpu_pm4_dispatch_storage_t iree_hal_amd_gpu_pm4_dispatch_storage(
       storage.length += 16u;
     }
   }
-  if (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
-    storage.alignment = iree_max(storage.alignment, 8u);
-    storage.grid_sync_offset = (storage.length + 7u) & ~7u;
-    storage.length =
-        storage.grid_sync_offset + sizeof(iree_hal_amd_gpu_grid_sync_t);
-  }
   return storage;
 }
 
@@ -188,7 +182,7 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
     const iree_hal_amd_gpu_pm4_function_t* function,
     const iree_hal_amd_gpu_pm4_dispatch_t* dispatch,
     iree_const_byte_span_t constants, const uint64_t* binding_addresses,
-    iree_hal_dispatch_flags_t flags, uint64_t argument_address, void* target) {
+    iree_hal_dispatch_flags_t flags, void* target) {
   iree_hal_amd_gpu_dispatch_emplace_arguments(&function->base,
                                               &dispatch->geometry, constants,
                                               binding_addresses, flags, target);
@@ -208,15 +202,6 @@ void iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
         function, dispatch, flags,
         (iree_hal_amd_gpu_pm4_dispatch_packet_t*)((uint8_t*)target +
                                                   storage.packet_offset));
-  }
-  if (flags & IREE_HAL_DISPATCH_FLAG_COOPERATIVE) {
-    const iree_hal_amd_gpu_pm4_dispatch_storage_t storage =
-        iree_hal_amd_gpu_pm4_dispatch_storage(function, flags);
-    iree_hal_amd_gpu_dispatch_emplace_grid_sync(
-        function->base.kernarg, &dispatch->geometry,
-        argument_address + storage.grid_sync_offset, target,
-        (iree_hal_amd_gpu_grid_sync_t*)((uint8_t*)target +
-                                        storage.grid_sync_offset));
   }
 }
 

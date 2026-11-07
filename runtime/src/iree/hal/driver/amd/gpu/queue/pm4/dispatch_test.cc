@@ -184,7 +184,7 @@ TEST_F(DispatchTest, PacketTemplatesInitializePaddingAndPreparationInputs) {
     iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
         &function_, &dispatch_,
         iree_make_const_byte_span(constants.data(), constants.size()), nullptr,
-        flags, 0, bytes.data());
+        flags, bytes.data());
     if (!external) {
       EXPECT_EQ(memcmp(bytes.data(), constants.data(), constants.size()), 0);
       for (size_t i = constants.size(); i < storage.packet_offset; ++i) {

@@ -118,7 +118,7 @@ static void BM_EmplaceDispatchArguments(benchmark::State& state) {
       iree_hal_amd_gpu_pm4_dispatch_emplace_arguments(
           &function, &dispatch,
           iree_make_const_byte_span(constants.data(), sizeof(constants)),
-          nullptr, flags, 0, bytes.data());
+          nullptr, flags, bytes.data());
     }
     benchmark::DoNotOptimize(storage);
     benchmark::ClobberMemory();

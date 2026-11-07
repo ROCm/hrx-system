@@ -261,6 +261,7 @@ iree_runtime_cc_library(
         ":barrier",
         ":packet",
         "//runtime/src/iree/hal/driver/amd/gpu:dispatch",
+        "//runtime/src/iree/hal/driver/amd/gpu/queue/pm4:commands",
     ],
 )
 

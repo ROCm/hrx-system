@@ -6,6 +6,7 @@
 
 #include "iree/hal/driver/amd/gpu/queue/backing.h"
 
+#include "iree/hal/driver/amd/gpu/dispatch.h"
 #include "iree/hal/driver/amd/status.h"
 
 static_assert(sizeof(iree_hal_amd_gpu_signal_cache_t) <=
@@ -13,6 +14,89 @@ static_assert(sizeof(iree_hal_amd_gpu_signal_cache_t) <=
               "signal capacity and stable wake ownership fit in three lines");
 
 static void iree_hal_amd_gpu_signal_storage_release_metadata(void* user_data);
+
+iree_status_t iree_hal_amd_gpu_grid_storage_initialize(
+    iree_hal_amd_gpu_context_t* context,
+    const iree_hal_amd_fabric_memory_options_t* options,
+    iree_hal_amd_gpu_grid_storage_t* out_storage) {
+  *out_storage = (iree_hal_amd_gpu_grid_storage_t){0};
+  amdf_memory_program_atomics_t program = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROGRAM_ATOMICS,
+      .structure_size = sizeof(program),
+  };
+  amdf_memory_access_capabilities_t access = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+      .structure_size = sizeof(access),
+      .next = &program,
+  };
+  amdf_memory_profile_t profile = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+      .structure_size = sizeof(profile),
+  };
+  IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
+      context->api->memory_scope_query_device_profile(
+          options->scope, options->profile.ordinal, 1, options->accesses,
+          &profile, &access),
+      "qualify cooperative grid backing"));
+  if (!iree_all_bits_set(
+          program.operations.device_scope_32,
+          AMDF_ATOMIC_OPERATION_LOAD | AMDF_ATOMIC_OPERATION_ADD)) {
+    return iree_make_status(
+        IREE_STATUS_UNAVAILABLE,
+        "resident cooperative grid backing lacks device-scope 32-bit LOAD/ADD");
+  }
+  uint64_t allocation_length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_fabric_memory_allocation_size(
+      options, sizeof(iree_hal_amd_gpu_grid_sync_t), &allocation_length));
+  const amdf_memory_create_info_t create_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+      .structure_size = sizeof(create_info),
+      .memory_profile_ordinal = options->profile.ordinal,
+      .access_count = 1,
+      .required_flags = options->required_flags,
+      .byte_length = allocation_length,
+      .minimum_alignment = iree_max(8u, profile.allocation.minimum_alignment),
+      .accesses = options->accesses,
+      .placement = options->placement,
+  };
+  iree_hal_amd_gpu_grid_storage_t storage = {0};
+  amdf_memory_release_info_t release_info = {0};
+  iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+      context->api->memory_create(options->scope, &create_info, &storage.memory,
+                                  &release_info),
+      "allocate cooperative grid backing");
+  if (!amdf_status_is_ok(release_info.status)) {
+    iree_hal_amd_gpu_context_report(context, release_info.status,
+                                    "cooperative grid acquisition cleanup");
+  }
+  if (iree_status_is_ok(status)) {
+    status = IREE_HAL_AMD_STATUS_FROM_AMDF(
+        context->api->memory_query_address(
+            storage.memory, 0, AMDF_MEMORY_ADDRESS_GPU, &storage.address),
+        "query cooperative grid address");
+  }
+  if (iree_status_is_ok(status)) {
+    *out_storage = storage;
+  } else {
+    iree_hal_amd_gpu_grid_storage_deinitialize(context, &storage);
+  }
+  return status;
+}
+
+void iree_hal_amd_gpu_grid_storage_deinitialize(
+    iree_hal_amd_gpu_context_t* context,
+    iree_hal_amd_gpu_grid_storage_t* storage) {
+  if (storage->memory) {
+    amdf_memory_release_info_t release_info = {0};
+    const amdf_status_t status =
+        context->api->memory_destroy(storage->memory, &release_info);
+    if (!amdf_status_is_ok(status)) {
+      iree_hal_amd_gpu_context_report(context, status,
+                                      "release cooperative grid backing");
+    }
+  }
+  *storage = (iree_hal_amd_gpu_grid_storage_t){0};
+}
 
 iree_status_t iree_hal_amd_gpu_signal_cache_reserve_frontiers(
     iree_hal_amd_gpu_signal_cache_t* cache, uint32_t queue_count,

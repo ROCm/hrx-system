@@ -7,6 +7,7 @@
 #include "iree/hal/driver/amd/gpu/queue/aql/dispatch.h"
 
 #include "iree/hal/driver/amd/gpu/queue/aql/barrier.h"
+#include "iree/hal/driver/amd/gpu/queue/pm4/commands.h"
 
 iree_status_t iree_hal_amd_gpu_aql_dispatch_prepare(
     const iree_hal_amd_gpu_aql_function_t* function,
@@ -55,6 +56,22 @@ iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_grid_sync_packet(
       .kernarg_address = grid_sync,
   };
   return iree_hal_amd_gpu_aql_packet_dispatch(&packet);
+}
+
+iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_grid_sync_write_packet(
+    uint32_t xcc_count, uint64_t grid_address,
+    const iree_hal_amd_gpu_grid_sync_t* grid, uint64_t command_address,
+    uint32_t* commands) {
+  uint32_t* words = iree_hal_amd_gpu_aql_emit_single_executor(
+      commands, xcc_count, 4 + sizeof(*grid) / sizeof(uint32_t));
+  words = iree_hal_amd_gpu_pm4_emit_write(words, grid_address,
+                                          sizeof(*grid) / sizeof(uint32_t),
+                                          (const uint32_t*)grid);
+  return iree_hal_amd_gpu_aql_packet_indirect_buffer(
+      IREE_HAL_AMD_GPU_AQL_HEADER_ORDERED |
+          IREE_HAL_AMD_GPU_AQL_HEADER_ACQUIRE_SYSTEM |
+          IREE_HAL_AMD_GPU_AQL_HEADER_RELEASE_SYSTEM,
+      command_address, (uint32_t)(words - commands), 0);
 }
 
 iree_hal_amd_gpu_aql_packet_t iree_hal_amd_gpu_aql_dispatch_packet(

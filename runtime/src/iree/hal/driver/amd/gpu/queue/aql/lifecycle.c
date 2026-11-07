@@ -145,6 +145,7 @@ amdf_status_t iree_hal_amd_gpu_aql_queue_shutdown(iree_hal_queue_t* base) {
   if (queue->scratch.growth) {
     iree_hal_amd_gpu_aql_scratch_deinitialize(&queue->scratch);
   }
+  iree_hal_amd_gpu_grid_storage_deinitialize(queue->context, &queue->grid);
   iree_atomic_store(&queue->options.signals->waiting, 0,
                     iree_memory_order_release);
   iree_hal_amd_gpu_signal_cache_trim(queue->context, 0, queue->options.signals);
@@ -168,7 +169,7 @@ void iree_hal_amd_gpu_aql_queue_destroy(iree_hal_queue_t* base) {
   if (queue->release.fn && !queue->release.fn(queue->release.user_data, base)) {
     return;
   }
-  IREE_ASSERT(!queue->storage.queue,
+  IREE_ASSERT(!queue->storage.queue && !queue->grid.memory,
               "parent must join native ownership before final queue release");
   iree_hal_amd_gpu_publisher_deinitialize(&queue->publisher);
   iree_hal_amd_gpu_host_wait_set_deinitialize(&queue->pending.waits);

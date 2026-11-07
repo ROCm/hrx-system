@@ -149,6 +149,47 @@ TEST_P(GpuCooperativeTest, PrivateGridStateSurvivesQueuedRecordedReplays) {
     EXPECT_EQ(value, sum);
   }
   completed = direct_done;
+  // Queue different grid extents without a host completion between them. The
+  // shared direct-dispatch barrier record must be initialized in device order,
+  // including when the caller supplies no optional payload cache operations.
+  std::array<uint32_t, kGroups * kReplays> queued_values = {};
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(output, 0, queued_values.data(),
+                                           sizeof(queued_values)));
+  const iree_hal_queue_barriers_t no_payload_barriers = {};
+  for (uint32_t replay = 0; replay < kReplays; ++replay) {
+    const uint32_t groups = kGroups - replay;
+    auto queued_config = config;
+    queued_config.workgroup_count[0] = groups;
+    const std::array<uint32_t, 2> queued_constants = {17 + replay, groups};
+    const iree_hal_buffer_ref_t queued_bindings[] = {
+        iree_hal_make_buffer_ref(scratch, 0, kBytes),
+        iree_hal_make_buffer_ref(output, replay * kBytes, kBytes),
+    };
+    uint64_t next = completed + 1;
+    IREE_ASSERT_OK(iree_hal_queue_dispatch(
+        queue, {1, &semaphore, &completed}, {1, &semaphore, &next}, executable,
+        function, queued_config,
+        iree_make_const_byte_span(queued_constants.data(),
+                                  sizeof(queued_constants)),
+        {IREE_ARRAYSIZE(queued_bindings), queued_bindings},
+        replay == 1 ? &no_payload_barriers : nullptr,
+        IREE_HAL_DISPATCH_FLAG_COOPERATIVE));
+    completed = next;
+  }
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(semaphore, completed,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(output, 0, queued_values.data(),
+                                          sizeof(queued_values)));
+  for (uint32_t replay = 0; replay < kReplays; ++replay) {
+    const uint32_t groups = kGroups - replay;
+    const uint32_t expected =
+        (17 + replay) * groups + groups * (groups - 1) / 2;
+    for (uint32_t group = 0; group < kGroups; ++group) {
+      EXPECT_EQ(queued_values[replay * kGroups + group],
+                group < groups ? expected : 0u);
+    }
+  }
   const iree_hal_buffer_ref_t bindings[] = {
       iree_hal_make_indirect_buffer_ref(0, 0, kBytes),
       iree_hal_make_indirect_buffer_ref(1, 0, kBytes),
@@ -174,9 +215,9 @@ TEST_P(GpuCooperativeTest, PrivateGridStateSurvivesQueuedRecordedReplays) {
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE,
       .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE,
   };
-  // One dispatch exercises AQL's bounded template; eight require a resident
-  // program. Each invocation has different bindings and no intervening CPU
-  // wait.
+  // Small and larger recordings both retain private barrier state. AQL's GWS
+  // strategy can use a bounded host template; its memory strategy keeps even
+  // the small recording resident. Replays change bindings without a CPU wait.
   for (uint32_t dispatches : {1u, 8u}) {
     std::array<uint32_t, kGroups * kReplays> values = {};
     IREE_ASSERT_OK(
