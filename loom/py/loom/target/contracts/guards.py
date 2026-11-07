@@ -112,6 +112,7 @@ class GuardKind(Enum):
     I64_ARRAY_ELEMENTS_RANGE = "i64_array_elements_range"
     VALUE_SIGNED_BIT_COUNT = "value_signed_bit_count"
     VALUE_UNSIGNED_BIT_COUNT = "value_unsigned_bit_count"
+    VALUE_DIVISIBLE_BY = "value_divisible_by"
     VALUE_EXACT_I64 = "value_exact_i64"
     VALUE_NOT_EXACT_I64 = "value_not_exact_i64"
     VALUE_EXACT_POWER_OF_TWO_I64 = "value_exact_power_of_two_i64"
@@ -605,6 +606,21 @@ class Guard:
             kind=GuardKind.VALUE_UNSIGNED_BIT_COUNT,
             field=field,
             count=bit_count,
+            diagnostic=diagnostic,
+        )
+
+    @classmethod
+    def value_divisible_by(
+        cls,
+        field: str,
+        divisor: int,
+        *,
+        diagnostic: GuardDiagnostic | None = None,
+    ) -> Self:
+        return cls(
+            kind=GuardKind.VALUE_DIVISIBLE_BY,
+            field=field,
+            count=divisor,
             diagnostic=diagnostic,
         )
 
@@ -1175,6 +1191,7 @@ class Guard:
         if self.kind in (
             GuardKind.VALUE_SIGNED_BIT_COUNT,
             GuardKind.VALUE_UNSIGNED_BIT_COUNT,
+            GuardKind.VALUE_DIVISIBLE_BY,
             GuardKind.VALUE_EXACT_I64,
             GuardKind.VALUE_NOT_EXACT_I64,
             GuardKind.VALUE_EXACT_POWER_OF_TWO_I64,
@@ -1396,6 +1413,12 @@ def _validate_value_fact_guard(
     ):
         if guard.count is None or guard.count <= 0:
             raise ValueError(f"{source_op.name}: {subject} needs a positive bit count")
+        return
+    if guard.kind == GuardKind.VALUE_DIVISIBLE_BY:
+        if guard.count is None or not 0 < guard.count < 2**63:
+            raise ValueError(
+                f"{source_op.name}: {subject} needs a positive i64 divisor"
+            )
         return
     if guard.kind == GuardKind.VALUE_U32_DIVISOR_MAGIC_KIND:
         if guard.other_field is None:

@@ -22,23 +22,17 @@ func.def target(@target) @literal_logical_right_shifts(%values: vector<2xi64>) -
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @literal_logical_right_shifts(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
   %value = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
-  %77 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %76 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %45 = v_lshrrev_b32_src0_inline %77, 8
-  %46 = v_lshlrev_b32_src0_inline %76, 24
-  %47 = v_or_b32 %45, %46
-  %48 = v_lshrrev_b32_src0_inline %76, 8
-  %s8 = concat(%47, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %52 = v_lshrrev_b32_src0_inline %77, 31
-  %53 = v_lshlrev_b32_src0_inline %76, 1
-  %54 = v_or_b32 %52, %53
-  %55 = v_lshrrev_b32_src0_inline %76, 31
-  %s31 = concat(%54, %55) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %59 = v_mov_b32 0
-  %s32 = concat(%76, %59) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %63 = v_lshrrev_b32_src0_inline %76, 1
-  %s33 = concat(%63, %59) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %s63 = concat(%55, %59) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %28 = s_mov_b32 8
+  %31 = s_mov_b32 31
+  %s8 = v_lshrrev_b64 %28, %value
+  %s31 = v_lshrrev_b64 %31, %value
+  %51 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %39 = v_mov_b32 0
+  %s32 = concat(%51, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %43 = v_lshrrev_b32_src0_inline %51, 33
+  %s33 = concat(%43, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %47 = v_lshrrev_b32_src0_inline %51, 63
+  %s63 = concat(%47, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %value, %s8, %s31, %s32, %s33, %s63
 }
 

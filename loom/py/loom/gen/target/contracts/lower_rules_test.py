@@ -1774,6 +1774,15 @@ def test_guard_row_preserves_power_of_two_addend() -> None:
         assert guard_payload_row(row) == [f".addend = {literal}"]
 
 
+def test_guard_row_preserves_value_divisibility() -> None:
+    row = LowerGuard(kind=GuardKind.VALUE_DIVISIBLE_BY, value_ref_index=3, u64=2**32)
+    fields = guard_row({}, row, payload_ordinal=1)
+    assert ".kind = LOOM_LOW_LOWER_GUARD_VALUE_DIVISIBLE_BY" in fields
+    assert ".selector.value.value_ref_index = 3" in fields
+    assert ".payload_ordinal = 1" in fields
+    assert guard_payload_row(row) == [".u64 = UINT64_C(4294967296)"]
+
+
 def test_guard_row_preserves_float_power_of_two_exponent_range() -> None:
     row = LowerGuard(
         kind=GuardKind.VALUE_EXACT_POWER_OF_TWO_FLOAT,

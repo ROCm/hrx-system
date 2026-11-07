@@ -924,6 +924,8 @@ typedef enum loom_low_lower_guard_kind_e {
   LOOM_LOW_LOWER_GUARD_VALUE_I64_EQUALS_TARGET_SUBGROUP_SIZE = 49,
   // Source i64_array element must be divisible by the positive i64 payload.
   LOOM_LOW_LOWER_GUARD_ATTR_I64_ARRAY_ELEMENT_MULTIPLE = 50,
+  // Source integer element facts must prove divisibility by a positive i64.
+  LOOM_LOW_LOWER_GUARD_VALUE_DIVISIBLE_BY = 51,
   // Maximum guard kind value plus one.
   LOOM_LOW_LOWER_GUARD_COUNT_,
 } loom_low_lower_guard_kind_t;
@@ -936,7 +938,7 @@ static_assert(LOOM_ATTR_COUNT_ <= UINT8_MAX,
 typedef union loom_low_lower_guard_payload_t {
   // Required enum value, divisor recipe kind, expected count, bit-count limit,
   // register unit count, exact f64 bit pattern, flag mask, storage element
-  // format, or memory-space mask.
+  // format, memory-space mask, or positive integer divisor.
   uint64_t u64;
   // Signed bias applied before testing an exact power of two.
   int64_t addend;

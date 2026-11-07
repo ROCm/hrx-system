@@ -1,0 +1,187 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx942> @target
+
+// Word producers stay independently useful after the join.
+func.def target(@target) @uniform_words(%low_input: i32, %high_input: i32) -> (i64, i64, i64, i64) {
+  %c32 = scalar.constant 32 : i64
+  %low = scalar.extui %low_input : i32 to i64
+  %high_word = scalar.extui %high_input : i32 to i64
+  %high = scalar.shli %high_word, %c32 : i64
+  %joined_or = scalar.ori %high, %low : i64
+  %joined_xor = scalar.xori %low, %high : i64
+  func.return %joined_or, %joined_xor, %low, %high : i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @uniform_words(%low_input: reg<amdgpu.sgpr>, %high_input: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+  %18 = s_mov_b32 0
+  %low = concat(%low_input, %18) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %high = concat(%18, %high_input) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %joined_or = concat(%low_input, %high_input) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %joined_xor = concat(%low_input, %high_input) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %joined_or, %joined_xor, %low, %high
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+// Imported range and divisibility facts suffice without inspecting producers.
+func.def target(@target) @word_facts(%low_input: i64, %high_input: i64, %overlap: i64) -> (i64, i64, i64, i64) {
+  %low = scalar.assume %low_input [range(%low_input, 0, 4294967295)] : i64
+  %high = scalar.assume %high_input [multiple_of(%high_input, 4294967296)] : i64
+  %joined_or = scalar.ori %low, %high : i64
+  %joined_xor = scalar.xori %high, %low : i64
+  %overlapping_or = scalar.ori %overlap, %high : i64
+  %overlapping_xor = scalar.xori %low, %overlap : i64
+  func.return %joined_or, %joined_xor, %overlapping_or, %overlapping_xor : i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @word_facts(%low: reg<amdgpu.sgpr x2>, %high: reg<amdgpu.sgpr x2>, %overlap: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+  %20 = slice %low[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %21 = slice %high[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %joined_or = concat(%20, %21) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %joined_xor = concat(%20, %21) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %overlapping_or = s_or_b64 %overlap, %high
+  %overlapping_xor = s_xor_b64 %low, %overlap
+  return %joined_or, %joined_xor, %overlapping_or, %overlapping_xor
+}
+
+// ====
+
+amdgpu.target<gfx1201> @target
+
+func.def target(@target) @varying_words(%words: vector<4xi32>, %uniform_word: i32) -> (i64, i64, i64, i64) {
+  %low_input = vector.extract %words[0] : vector<4xi32> -> i32
+  %high_input = vector.extract %words[1] : vector<4xi32> -> i32
+  %c32 = scalar.constant 32 : i64
+  %low = scalar.extui %low_input : i32 to i64
+  %high_word = scalar.extui %high_input : i32 to i64
+  %uniform = scalar.extui %uniform_word : i32 to i64
+  %high = scalar.shli %high_word, %c32 : i64
+  %uniform_high = scalar.shli %uniform, %c32 : i64
+  %joined_or = scalar.ori %low, %high : i64
+  %joined_xor = scalar.xori %high, %low : i64
+  %mixed_or = scalar.ori %uniform_high, %low : i64
+  %mixed_xor = scalar.xori %uniform, %high : i64
+  func.return %joined_or, %joined_xor, %mixed_or, %mixed_xor : i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @varying_words(%words: reg<amdgpu.vgpr x4>, %uniform_word: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %low_input = slice %words[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %high_input = slice %words[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %joined_or = concat(%low_input, %high_input) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %joined_xor = concat(%low_input, %high_input) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %48 = v_mov_b32_copy %uniform_word
+  %mixed_or = concat(%low_input, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %mixed_xor = concat(%48, %high_input) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %joined_or, %joined_xor, %mixed_or, %mixed_xor
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @uniform_shifts(%value: i64, %count_input: i64) -> (i64, i64, i64, i64, i64, i64) {
+  %count = scalar.assume %count_input [range(%count_input, 0, 63)] : i64
+  %c32 = scalar.constant 32 : i64
+  %left = scalar.shli %value, %count : i64
+  %logical = scalar.shrui %value, %count : i64
+  %signed = scalar.shrsi %value, %count : i64
+  %word_left = scalar.shli %value, %c32 : i64
+  %word_logical = scalar.shrui %value, %c32 : i64
+  %word_signed = scalar.shrsi %value, %c32 : i64
+  func.return %left, %logical, %signed, %word_left, %word_logical, %word_signed : i64, i64, i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @uniform_shifts(%value: reg<amdgpu.sgpr x2>, %count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) asm {
+  %24 = s_mov_b32 32
+  %27 = slice %count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %left = s_lshl_b64 %value, %27
+  %logical = s_lshr_b64 %value, %27
+  %signed = s_ashr_i64 %value, %27
+  %33 = slice %value[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %34 = s_mov_b32 0
+  %word_left = concat(%34, %33) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %36 = slice %value[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %word_logical = concat(%36, %34) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %word_signed = s_ashr_i64 %value, %24
+  return %left, %logical, %signed, %word_left, %word_logical, %word_signed
+}
+
+// ====
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @varying_shifts(%values: vector<2xi64>, %uniform: i64, %uniform_count_input: i64) -> (i64, i64, i64, i64, i64, i64) {
+  %value = vector.extract %values[0] : vector<2xi64> -> i64
+  %count_input = vector.extract %values[1] : vector<2xi64> -> i64
+  %count = scalar.assume %count_input [range(%count_input, 0, 63)] : i64
+  %uniform_count = scalar.assume %uniform_count_input [range(%uniform_count_input, 0, 63)] : i64
+  %left = scalar.shli %value, %count : i64
+  %logical = scalar.shrui %value, %count : i64
+  %signed = scalar.shrsi %value, %count : i64
+  %mixed_left = scalar.shli %uniform, %count : i64
+  %mixed_logical = scalar.shrui %value, %uniform_count : i64
+  %mixed_signed = scalar.shrsi %value, %uniform_count : i64
+  func.return %left, %logical, %signed, %mixed_left, %mixed_logical, %mixed_signed : i64, i64, i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<amdgpu.rdna3.core>(@target) abi(hal_kernel) @varying_shifts(%values: reg<amdgpu.vgpr x4>, %uniform: reg<amdgpu.sgpr x2>, %uniform_count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %value = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
+  %50 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %left = v_lshlrev_b64 %50, %value
+  %logical = v_lshrrev_b64 %50, %value
+  %signed = v_ashrrev_i64 %50, %value
+  %37 = slice %uniform[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = v_mov_b32_copy %37
+  %39 = slice %uniform[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %40 = v_mov_b32_copy %39
+  %41 = concat(%38, %40) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %mixed_left = v_lshlrev_b64 %50, %41
+  %43 = slice %uniform_count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %mixed_logical = v_lshrrev_b64 %43, %value
+  %mixed_signed = v_ashrrev_i64 %43, %value
+  return %left, %logical, %signed, %mixed_left, %mixed_logical, %mixed_signed
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @bounded_varying_shifts(%values: vector<2xi64>, %uniform: i64, %uniform_count_input: i64) -> (i64, i64, i64, i64) {
+  %value = vector.extract %values[0] : vector<2xi64> -> i64
+  %count_input = vector.extract %values[1] : vector<2xi64> -> i64
+  %count = scalar.assume %count_input [range(%count_input, 32, 63)] : i64
+  %uniform_count = scalar.assume %uniform_count_input [range(%uniform_count_input, 32, 63)] : i64
+  %left = scalar.shli %value, %count : i64
+  %logical = scalar.shrui %value, %count : i64
+  %mixed_left = scalar.shli %uniform, %count : i64
+  %mixed_logical = scalar.shrui %value, %uniform_count : i64
+  func.return %left, %logical, %mixed_left, %mixed_logical : i64, i64, i64, i64
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @bounded_varying_shifts(%values: reg<amdgpu.vgpr x4>, %uniform: reg<amdgpu.sgpr x2>, %uniform_count: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) asm {
+  %54 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %25 = v_mov_b32 0
+  %53 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %27 = v_lshlrev_b32 %53, %54
+  %left = concat(%25, %27) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %52 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %32 = v_lshrrev_b32 %53, %52
+  %logical = concat(%32, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %34 = slice %uniform[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %35 = v_mov_b32_copy %34
+  %42 = v_lshlrev_b32 %53, %35
+  %mixed_left = concat(%25, %42) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %46 = slice %uniform_count[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %47 = v_lshrrev_b32 %46, %52
+  %mixed_logical = concat(%47, %25) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %left, %logical, %mixed_left, %mixed_logical
+}
