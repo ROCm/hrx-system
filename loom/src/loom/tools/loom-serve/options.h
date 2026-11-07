@@ -23,6 +23,39 @@ iree_status_t loom_serve_host_create_from_flags(
     const loom_runtime_compiler_options_t* compiler_options,
     iree_allocator_t host_allocator, loom_runtime_host_t** out_host);
 
+// Borrowed command options selecting one machine configuration source and its
+// command-line overrides. Values need only remain live through initialization.
+typedef struct loom_serve_device_configuration_options_t {
+  // Optional path to a named machine configuration selected by --devices.
+  iree_string_view_t configuration_path;
+  // Repeated explicit HAL URIs selected by --device.
+  iree_string_view_list_t device_uris;
+  // Optional completion policy override selected by --wait_mode.
+  iree_string_view_t wait_mode;
+  // Optional single-device storage mode selected by --pool_backing.
+  iree_string_view_t pool_backing;
+  // Optional single-device reusable parameter/workspace slab byte size.
+  iree_string_view_t weight_slab_bytes;
+  // Optional single-device mutable-state slab byte size.
+  iree_string_view_t state_slab_bytes;
+  // Optional single-device elastic physical-backing byte budget.
+  iree_string_view_t memory_bytes;
+  // Optional single-device workspace idle expiry in milliseconds.
+  iree_string_view_t workspace_idle_ms;
+  // Optional single-device parameter idle expiry in milliseconds.
+  iree_string_view_t parameter_idle_ms;
+} loom_serve_device_configuration_options_t;
+
+// Decodes command options without resolving or opening any device. Exactly one
+// named configuration path or explicit device URI is required. Named machine
+// configurations exclude all single-device options; wait_mode may override
+// either source. Copies retained values and zeros output on error. The caller
+// deinitializes out_configuration on success.
+iree_status_t loom_serve_device_configuration_initialize_from_options(
+    const loom_serve_device_configuration_options_t* options,
+    iree_allocator_t host_allocator,
+    loom_serve_device_configuration_t* out_configuration);
+
 // CLI leaf constructing the application group from a keyed --devices file or
 // one explicit --device URI. Pool entries own backing and idle policy,
 // independently of their declared execution-device consumers.
