@@ -8,6 +8,8 @@
 
 import random
 
+import pytest
+
 from loom.dialect.scalar import arithmetic as scalar_arithmetic
 from loom.dialect.scalar import bitwise as scalar_bitwise
 from loom.dialect.scalar import comparison as scalar_comparison
@@ -24,6 +26,21 @@ from loom.target.contracts import (
 
 _U32_MASK = 2**32 - 1
 _U64_MASK = 2**64 - 1
+_I64_UNSIGNED_DIVISION_DIVISORS = (
+    1,
+    2,
+    3,
+    2**24 - 1,
+    2**31 - 1,
+    2**31,
+    2**31 + 1,
+    2**32 - 1,
+)
+_I64_UNSIGNED_DIVISION_OPS = (
+    scalar_arithmetic.scalar_divui,
+    scalar_arithmetic.scalar_remui,
+    scalar_arithmetic.scalar_divremui,
+)
 
 
 def _u32(value: int) -> int:
@@ -352,6 +369,79 @@ def _i64_shift_basis() -> tuple[int, ...]:
     )
 
 
+def _i64_unsigned_division_rules() -> tuple[tuple[DescriptorRule, int], ...]:
+    rules: list[tuple[DescriptorRule, int]] = []
+    for rule in AIE2P_I64_RULES:
+        if not isinstance(rule, DescriptorRule):
+            continue
+        if rule.source_op not in _I64_UNSIGNED_DIVISION_OPS:
+            continue
+        divisor_range = next(
+            guard for guard in rule.guards if guard.kind is GuardKind.VALUE_I64_RANGE
+        )
+        assert divisor_range.minimum == 1
+        assert isinstance(divisor_range.maximum, int)
+        rules.append((rule, divisor_range.maximum))
+    assert {(rule.source_op, divisor_maximum) for rule, divisor_maximum in rules} == {
+        (operation, divisor_maximum)
+        for operation in _I64_UNSIGNED_DIVISION_OPS
+        for divisor_maximum in (2**31, 2**32 - 1)
+    }
+    return tuple(rules)
+
+
+def _i64_unsigned_division_transition_values(divisor: int) -> tuple[int, ...]:
+    quotient_transitions = (
+        1,
+        2,
+        (2**32 - 1) // divisor,
+        2**32 // divisor,
+        2**32 - 1,
+        2**32,
+        _U64_MASK // divisor,
+    )
+    values = {0, _U64_MASK}
+    for quotient in quotient_transitions:
+        if quotient == 0:
+            continue
+        threshold = quotient * divisor
+        for value in (threshold - 1, threshold, threshold + 1):
+            if 0 <= value <= _U64_MASK:
+                values.add(value)
+    return tuple(sorted(values))
+
+
+def _i64_unsigned_division_basis() -> list[tuple[int, int]]:
+    samples: list[tuple[int, int]] = []
+    for divisor in _I64_UNSIGNED_DIVISION_DIVISORS:
+        samples.extend((1 << bit, divisor) for bit in range(64))
+        samples.extend(
+            (value, divisor)
+            for value in _i64_unsigned_division_transition_values(divisor)
+        )
+    return list(dict.fromkeys(samples))
+
+
+def _check_i64_unsigned_division_samples(
+    samples: list[tuple[int, int]],
+) -> None:
+    for rule, divisor_maximum in _i64_unsigned_division_rules():
+        for value, divisor in samples:
+            if divisor > divisor_maximum:
+                continue
+            quotient, remainder = divmod(value, divisor)
+            if rule.source_op is scalar_arithmetic.scalar_divremui:
+                assert _evaluate_rule(rule, value, divisor, "quotient") == quotient
+                assert _evaluate_rule(rule, value, divisor, "remainder") == remainder
+            else:
+                expected = (
+                    quotient
+                    if rule.source_op is scalar_arithmetic.scalar_divui
+                    else remainder
+                )
+                assert _evaluate_rule(rule, value, divisor) == expected
+
+
 def _pair_vector_words(values: tuple[int, ...]) -> tuple[int, ...]:
     return tuple(word for value in values for word in _split_i64(value))
 
@@ -427,42 +517,17 @@ def test_i64_carry_and_borrow_recipes_are_exact() -> None:
 
 
 def test_i64_unsigned_division_by_word_recipes_are_exact() -> None:
+    _check_i64_unsigned_division_samples(_i64_unsigned_division_basis())
+
+
+@pytest.mark.exhaustive
+def test_i64_unsigned_division_by_word_recipes_match_seeded_stress_oracle() -> None:
     generator = random.Random(0xA1E2_D1A1)
-    divisors = (1, 2, 3, 2**24 - 1, 2**31 - 1, 2**31, 2**31 + 1, 2**32 - 1)
     samples = [
-        (value, divisor) for value, _ in _i64_samples()[:256] for divisor in divisors
-    ]
-    samples.extend(
         (generator.getrandbits(64), generator.randint(1, 2**32 - 1))
         for _ in range(4096)
-    )
-    division_ops = (
-        scalar_arithmetic.scalar_divui,
-        scalar_arithmetic.scalar_remui,
-        scalar_arithmetic.scalar_divremui,
-    )
-    for rule in AIE2P_I64_RULES:
-        if not isinstance(rule, DescriptorRule) or rule.source_op not in division_ops:
-            continue
-        bound = next(
-            guard.maximum
-            for guard in rule.guards
-            if guard.kind is GuardKind.VALUE_I64_RANGE
-        )
-        for value, divisor in samples:
-            if divisor > bound:
-                continue
-            quotient, remainder = divmod(value, divisor)
-            if rule.source_op is scalar_arithmetic.scalar_divremui:
-                assert _evaluate_rule(rule, value, divisor, "quotient") == quotient
-                assert _evaluate_rule(rule, value, divisor, "remainder") == remainder
-            else:
-                expected = (
-                    quotient
-                    if rule.source_op is scalar_arithmetic.scalar_divui
-                    else remainder
-                )
-                assert _evaluate_rule(rule, value, divisor) == expected
+    ]
+    _check_i64_unsigned_division_samples(samples)
 
 
 def test_i64_shift_recipes_are_exact() -> None:
