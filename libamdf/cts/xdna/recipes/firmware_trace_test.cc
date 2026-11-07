@@ -135,6 +135,13 @@ class FirmwareTraceRecipeTest : public XdnaDeviceFixture {
   }
 
   void TearDown() override {
+    // Recorder ownership is independent of workload retirement. A failed
+    // resource release must not leave the device-global recorder enabled.
+    if (owns_trace_) {
+      EXPECT_EQ(xdna_api_->device_configure_firmware_trace(device_, 0, 0),
+                AMDF_STATUS_OK);
+      owns_trace_ = false;
+    }
     for (auto& work : work_) {
       if (!work.execution.Release(api_, xdna_api_)) {
         return;
@@ -144,11 +151,6 @@ class FirmwareTraceRecipeTest : public XdnaDeviceFixture {
           return;
         }
       }
-    }
-    if (owns_trace_) {
-      ASSERT_EQ(xdna_api_->device_configure_firmware_trace(device_, 0, 0),
-                AMDF_STATUS_OK);
-      owns_trace_ = false;
     }
   }
 
@@ -528,7 +530,7 @@ class FirmwareTraceRecipeTest : public XdnaDeviceFixture {
   amdf_memory_profile_t profile_ = {};
   // Native transaction queue family.
   uint32_t family_ = UINT32_MAX;
-  // Explicit recorder ownership, restored after normal workload cleanup.
+  // Explicit recorder ownership, released independently of workload cleanup.
   bool owns_trace_ = false;
   // Fixed-capacity native read storage, with whole retained-window capacity.
   std::vector<uint64_t> read_storage_;
