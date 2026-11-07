@@ -24,45 +24,51 @@ template <t::size_type Count, t::size_type Size>
 
 template <t::size_type Size, t::size_type Count>
 struct Retained {
-  // Read obligation for this contiguous record.
-  t::read<Tile<Size>> first;
-  // Remaining contiguous records protected by the same retained lifetime.
-  Retained<Size, Count - 1> remaining;
+  // First ordered half of the retained batch.
+  Retained<Size, Count / 2> left;
+  // Second ordered half of the retained batch.
+  Retained<Size, Count - Count / 2> right;
 };
 template <t::size_type Size>
 struct Retained<Size, 1> {
-  // Final read obligation in the retained batch.
-  t::read<Tile<Size>> first;
+  // Read obligation for this contiguous record.
+  t::read<Tile<Size>> record;
 };
 
 template <t::size_type Count, t::size_type Size>
 [[loom::inline]] static Retained<Size, Count> acquire_all(Stream<Size> source) {
-  auto read = loom::channel::acquire(source);
   if constexpr (Count == 1) {
+    auto read = loom::channel::acquire(source);
     return {read.read};
   } else {
-    return {read.read, acquire_all<Count - 1>(source)};
+    auto left = acquire_all<Count / 2>(source);
+    auto right = acquire_all<Count - Count / 2>(source);
+    return {left, right};
   }
 }
 
 template <t::size_type Size, t::size_type Count>
 [[loom::inline]] static void release_all(Retained<Size, Count> records) {
-  loom::channel::release(records.first);
-  if constexpr (Count != 1) {
-    release_all(records.remaining);
+  if constexpr (Count == 1) {
+    loom::channel::release(records.record);
+  } else {
+    release_all(records.left);
+    release_all(records.right);
   }
 }
 
 template <t::size_type Size, t::size_type Count>
 [[loom::inline]] static Retained<Size, Count> replay_all(
     Retained<Size, Count> records, Stream<Size> destination) {
-  auto reads = loom::channel::fanout<2>(records.first);
-  auto write = loom::channel::reserve(destination);
-  loom::channel::copy(reads.first, write.write);
   if constexpr (Count == 1) {
+    auto reads = loom::channel::fanout<2>(records.record);
+    auto write = loom::channel::reserve(destination);
+    loom::channel::copy(reads.first, write.write);
     return {reads.second};
   } else {
-    return {reads.second, replay_all(records.remaining, destination)};
+    auto left = replay_all(records.left, destination);
+    auto right = replay_all(records.right, destination);
+    return {left, right};
   }
 }
 
