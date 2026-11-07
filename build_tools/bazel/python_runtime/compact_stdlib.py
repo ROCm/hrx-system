@@ -25,14 +25,22 @@ _COMPACT_RUNTIME_INITIALIZATION = _SITE_INITIALIZATION_MARKER + (
     b"    runtime_root = os.path.dirname(\n"
     b"        os.path.join(_RUNFILES_ROOT, _INTERPRETER_ACTUAL_PATH)\n"
     b"    )\n"
+    b"    dlls_directory = _get_windows_path_with_unc_prefix(\n"
+    b'        os.path.join(runtime_root, "DLLs")\n'
+    b"    )\n"
+    b"    sys.path.insert(0, dlls_directory)\n"
+    b"    dlls_directory_handle = os.add_dll_directory(dlls_directory)\n"
     b'    os.environ["TCL_LIBRARY"] = os.path.join(\n'
     b'        runtime_root, "tcl", "tcl8.6"\n'
     b"    )\n"
     b'    os.environ["TK_LIBRARY"] = os.path.join(\n'
     b'        runtime_root, "tcl", "tk8.6"\n'
     b"    )\n"
+    b"    return dlls_directory_handle\n"
     b"\n"
     b"\n"
+    b"# Retain the loader registration for the process lifetime.\n"
+    b"_COMPACT_RUNTIME_DLL_DIRECTORY_HANDLE = "
     b"_configure_compact_windows_runtime()\n"
 )
 

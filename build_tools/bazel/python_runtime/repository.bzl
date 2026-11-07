@@ -15,6 +15,8 @@ def _compact_windows_python_repository_impl(repository_ctx):
         stripPrefix = repository_ctx.attr.strip_prefix,
     )
     for required_path in [
+        "DLLs/tcl86t.dll",
+        "DLLs/tk86t.dll",
         "tcl/tcl8.6/init.tcl",
         "tcl/tk8.6/tk.tcl",
     ]:
@@ -90,7 +92,8 @@ py_runtime(
     python_version = "PY3",
     site_init_template = "site_init_template.py",
     # Windows resolves pythonXY.zip beside the venv interpreter before site
-    # initialization can remap the base runtime paths.
+    # initialization can remap the base runtime paths. Extension dependencies
+    # are registered with the process loader by the site initialization hook.
     venv_bin_files = glob([
         "*.dll",
         "*.zip",

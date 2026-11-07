@@ -82,15 +82,33 @@ class CompactStandardLibraryTest(unittest.TestCase):
             write_site_initialization_template(upstream_template, output_template)
 
             contents = output_template.read_text(encoding="utf-8")
+            compile(contents, str(output_template), "exec")
             self.assertEqual(contents.count("_fixup_stdlib_paths()"), 1)
+            self.assertEqual(contents.count("sys.path.insert(0, dlls_directory)"), 1)
+            self.assertEqual(contents.count("os.add_dll_directory("), 1)
+            self.assertIn("_get_windows_path_with_unc_prefix(", contents)
+            self.assertIn('os.path.join(runtime_root, "DLLs")', contents)
+            self.assertIn("_COMPACT_RUNTIME_DLL_DIRECTORY_HANDLE", contents)
             self.assertIn('os.environ["TCL_LIBRARY"]', contents)
             self.assertIn('os.environ["TK_LIBRARY"]', contents)
             self.assertLess(
                 contents.index("_fixup_stdlib_paths()"),
+                contents.index("sys.path.insert(0, dlls_directory)"),
+            )
+            self.assertLess(
+                contents.index("sys.path.insert(0, dlls_directory)"),
+                contents.index("os.add_dll_directory("),
+            )
+            self.assertLess(
+                contents.index("os.add_dll_directory("),
                 contents.index('os.environ["TCL_LIBRARY"]'),
             )
             self.assertLess(
                 contents.index('os.environ["TK_LIBRARY"]'),
+                contents.index("_COMPACT_RUNTIME_DLL_DIRECTORY_HANDLE"),
+            )
+            self.assertLess(
+                contents.index("_COMPACT_RUNTIME_DLL_DIRECTORY_HANDLE"),
                 contents.index("COVERAGE_SETUP = _setup_sys_path()"),
             )
 
