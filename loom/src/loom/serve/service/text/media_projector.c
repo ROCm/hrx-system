@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "loom/runtime/execution/wait.h"
+#include "loom/runtime/host/readiness.h"
 #include "loom/serve/media/image_request.h"
 #include "loom/service/prepared_request.h"
 
@@ -217,7 +219,11 @@ struct loom_serve_text_media_projector_t {
   // Borrowed component model; its owner excludes trim during these loans.
   loom_service_finite_model_t* model;
   // Independent publication channels, never serialized behind text readiness.
-  loom_serve_text_readiness_t readiness;
+  loom_runtime_readiness_t readiness;
+  // Finite preparation borrower, independent of accepted device readiness.
+  loom_runtime_readiness_task_t cpu_task;
+  // Captured producer execution frontier through result collection.
+  loom_runtime_execution_wait_t device_wait;
   // Exclusive producer/VM phase.
   loom_serve_text_media_phase_t phase;
   // Maximum projections in one host preparation window.
@@ -287,9 +293,8 @@ iree_status_t loom_serve_text_media_projector_allocate(
       .prepared = (void*)(storage + prepared_offset),
       .rows = (void*)(storage + rows_offset),
   };
-  loom_serve_text_readiness_initialize(executor, proactor,
-                                       &projector->readiness);
-  loom_serve_text_readiness_set_observer(&projector->readiness, observer);
+  loom_runtime_readiness_initialize(executor, proactor, &projector->readiness);
+  loom_runtime_readiness_set_observer(&projector->readiness, observer);
   loom_service_finite_model_set_observer(model, observer);
   *out_projector = projector;
   return iree_ok_status();
@@ -508,9 +513,9 @@ bool loom_serve_text_media_projector_start(
     return false;
   }
   projector->phase = MEDIA_PREPARING;
-  loom_serve_text_readiness_schedule(&projector->readiness,
-                                     loom_serve_text_media_projector_prepare,
-                                     projector);
+  loom_runtime_readiness_schedule(&projector->readiness,
+                                  loom_serve_text_media_projector_prepare,
+                                  projector, &projector->cpu_task);
   return true;
 }
 
@@ -614,9 +619,9 @@ static void loom_serve_text_media_projector_select(
       }
     }
     projector->phase = MEDIA_BATCHING;
-    loom_serve_text_readiness_schedule(&projector->readiness,
-                                       loom_serve_text_media_projector_batch,
-                                       projector);
+    loom_runtime_readiness_schedule(&projector->readiness,
+                                    loom_serve_text_media_projector_batch,
+                                    projector, &projector->cpu_task);
   } else {
     projector->count = 0;
     projector->packet_bytes = 0;
@@ -658,8 +663,8 @@ static iree_status_t loom_serve_text_media_projector_submit(
   IREE_RETURN_IF_ERROR(loom_service_finite_model_submit(
       projector->model, &projector->result, &ready));
   loom_serve_text_media_projector_publish(projector, false);
-  IREE_RETURN_IF_ERROR(
-      loom_serve_text_readiness_await(&projector->readiness, &ready));
+  IREE_RETURN_IF_ERROR(loom_runtime_execution_await(
+      &projector->readiness, &ready, &projector->device_wait));
   projector->phase = MEDIA_RUNNING;
   return iree_ok_status();
 }
@@ -676,7 +681,7 @@ void loom_serve_text_media_projector_set_observer(
     loom_serve_text_media_projector_t* projector,
     loom_runtime_wake_callback_t observer) {
   if (projector) {
-    loom_serve_text_readiness_set_observer(&projector->readiness, observer);
+    loom_runtime_readiness_set_observer(&projector->readiness, observer);
     loom_service_finite_model_set_observer(projector->model, observer);
   }
 }
@@ -729,7 +734,8 @@ iree_status_t loom_serve_text_media_projector_advance(
   iree_status_t status = iree_ok_status();
   if (projector->phase == MEDIA_PREPARING ||
       projector->phase == MEDIA_BATCHING) {
-    if (!loom_serve_text_readiness_take_cpu(&projector->readiness, &status)) {
+    if (!loom_runtime_readiness_take(&projector->readiness,
+                                     &projector->cpu_task.result, &status)) {
       return status;
     }
     *out_progress = true;
@@ -765,8 +771,9 @@ iree_status_t loom_serve_text_media_projector_advance(
       projector->phase = MEDIA_SPECIALIZING;
     }
   } else if (projector->phase == MEDIA_RUNNING) {
-    if (!loom_serve_text_readiness_take_device(&projector->readiness,
-                                               &status)) {
+    if (!loom_runtime_readiness_take(&projector->readiness,
+                                     &projector->device_wait.wait.result,
+                                     &status)) {
       return status;
     }
     *out_progress = true;
@@ -869,7 +876,7 @@ void loom_serve_text_media_projector_free(
   for (iree_host_size_t i = 0; i < projector->count; ++i) {
     loom_serve_text_media_job_release(&projector->jobs[i]);
   }
-  loom_serve_text_readiness_deinitialize(&projector->readiness);
+  loom_runtime_readiness_deinitialize(&projector->readiness);
   loom_service_finite_result_release(projector->result);
   iree_allocator_free_aligned(projector->host_allocator, projector);
 }

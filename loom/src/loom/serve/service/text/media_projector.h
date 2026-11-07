@@ -7,10 +7,11 @@
 #ifndef LOOM_SERVE_SERVICE_TEXT_MEDIA_PROJECTOR_H_
 #define LOOM_SERVE_SERVICE_TEXT_MEDIA_PROJECTOR_H_
 
+#include "iree/async/proactor.h"
+#include "iree/task/executor.h"
 #include "loom/serve/service/service.h"
 #include "loom/serve/service/text/input.h"
 #include "loom/serve/service/text/media_input.h"
-#include "loom/serve/service/text/readiness.h"
 #include "loom/service/finite/model.h"
 
 #ifdef __cplusplus
