@@ -17,6 +17,7 @@ loom_check_test_suite(
     srcs = [
         "licm.loom-test",
         "licm_arithmetic.loom-test",
+        "licm_division.loom-test",
         "licm_fact_identity.loom-test",
         "licm_memory.loom-test",
         "licm_periodic.loom-test",

@@ -1456,6 +1456,9 @@ class ExecutionCondition(Enum):
     INTEGER_SUBTRACT = "LOOM_EXECUTION_CONDITION_INTEGER_SUBTRACT"
     INTEGER_MULTIPLY = "LOOM_EXECUTION_CONDITION_INTEGER_MULTIPLY"
     INTEGER_MULTIPLY_ADD = "LOOM_EXECUTION_CONDITION_INTEGER_MULTIPLY_ADD"
+    INTEGER_NONZERO_DIVISOR = "LOOM_EXECUTION_CONDITION_INTEGER_NONZERO_DIVISOR"
+    INTEGER_SIGNED_QUOTIENT = "LOOM_EXECUTION_CONDITION_INTEGER_SIGNED_QUOTIENT"
+    INDEX_DIVISION = "LOOM_EXECUTION_CONDITION_INDEX_DIVISION"
 
     @property
     def c_name(self) -> str:
@@ -6356,20 +6359,30 @@ def _validate_execution_condition(
         ExecutionCondition.INTEGER_MULTIPLY,
         ExecutionCondition.INTEGER_MULTIPLY_ADD,
     }
+    division_conditions = {
+        ExecutionCondition.INTEGER_NONZERO_DIVISOR,
+        ExecutionCondition.INTEGER_SIGNED_QUOTIENT,
+        ExecutionCondition.INDEX_DIVISION,
+    }
     operand_count = 3 if condition is ExecutionCondition.INTEGER_MULTIPLY_ADD else 2
+    result_counts = (1, 2) if condition in division_conditions else (1,)
     if (
         len(operands) != operand_count
         or any(operand.optional or operand.variadic for operand in operands)
-        or len(results) != 1
-        or not isinstance(results[0], Result)
-        or results[0].variadic
+        or len(results) not in result_counts
+        or any(not isinstance(result, Result) or result.variadic for result in results)
     ):
+        result_description = (
+            "one or two required results"
+            if condition in division_conditions
+            else "one required result"
+        )
         raise ValueError(
             f"Op '{op_name}': integer execution condition requires "
-            f"{operand_count} required operands and one required result"
+            f"{operand_count} required operands and {result_description}"
         )
 
-    fields = (*operands, results[0])
+    fields = (*operands, *results)
     field_names = {field.name for field in fields}
     has_same_type = any(
         constraint.name == "SameType" and field_names.issubset(constraint.args)
@@ -6380,19 +6393,32 @@ def _validate_execution_condition(
         next(iter(constraints_by_field)) if len(constraints_by_field) == 1 else None
     )
     allowed_scalar_constraints = {INTEGER, INDEX}
+    if condition is ExecutionCondition.INDEX_DIVISION:
+        allowed_scalar_constraints = {INDEX}
+    elif condition in division_conditions:
+        allowed_scalar_constraints = {INTEGER}
     if condition in (
         ExecutionCondition.INTEGER_ADD,
         ExecutionCondition.INTEGER_SUBTRACT,
     ):
         allowed_scalar_constraints.add(ADDRESS)
     scalar = scalar_constraint in allowed_scalar_constraints
-    vector = constraints_by_field == {VECTOR} and any(
-        constraint.name == "HasIntegerElement" and results[0].name in constraint.args
-        for constraint in constraints
+    vector = (
+        condition is not ExecutionCondition.INDEX_DIVISION
+        and constraints_by_field == {VECTOR}
+        and any(
+            constraint.name == "HasIntegerElement"
+            and results[0].name in constraint.args
+            for constraint in constraints
+        )
     )
     if not has_same_type or not (scalar or vector):
         allowed_fields = "integer, index, or integer-vector"
-        if condition in (
+        if condition is ExecutionCondition.INDEX_DIVISION:
+            allowed_fields = "index"
+        elif condition in division_conditions:
+            allowed_fields = "integer or integer-vector"
+        elif condition in (
             ExecutionCondition.INTEGER_ADD,
             ExecutionCondition.INTEGER_SUBTRACT,
         ):
@@ -6401,6 +6427,14 @@ def _validate_execution_condition(
             f"Op '{op_name}': integer execution condition requires same-typed "
             f"{allowed_fields} fields"
         )
+
+    if condition in division_conditions:
+        if attrs:
+            raise ValueError(
+                f"Op '{op_name}': division execution condition does not "
+                "accept instance attributes"
+            )
+        return
 
     if condition is ExecutionCondition.INTEGER_SHIFT_RIGHT:
         if attrs:

@@ -65,7 +65,16 @@ typedef enum loom_execution_condition_e {
   // mathematical index multiply-add whose result fits the selected signed
   // target carrier.
   LOOM_EXECUTION_CONDITION_INTEGER_MULTIPLY_ADD = 6,
-  LOOM_EXECUTION_CONDITION_COUNT_ = 7,
+  // Unsigned integer quotient or signed/unsigned remainder with a nonzero
+  // divisor. Signed remainder remains defined for MIN modulo -1.
+  LOOM_EXECUTION_CONDITION_INTEGER_NONZERO_DIVISOR = 7,
+  // Signed integer quotient with a nonzero divisor and a representable
+  // result: the dividend and divisor cannot be MIN and -1 together.
+  LOOM_EXECUTION_CONDITION_INTEGER_SIGNED_QUOTIENT = 8,
+  // Logical index quotient/remainder with a nonnegative dividend and a
+  // positive divisor. The result fits independently of target index width.
+  LOOM_EXECUTION_CONDITION_INDEX_DIVISION = 9,
+  LOOM_EXECUTION_CONDITION_COUNT_ = 10,
 } loom_execution_condition_e;
 
 static_assert(LOOM_EXECUTION_CONDITION_COUNT_ <= UINT8_MAX + 1u,

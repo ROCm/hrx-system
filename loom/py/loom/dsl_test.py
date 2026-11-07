@@ -4356,6 +4356,80 @@ def test_execution_condition_requires_complete_integer_arithmetic_shape() -> Non
         )
 
 
+def test_execution_condition_checks_division_results_and_domains() -> None:
+    for condition, domains in (
+        (dsl.ExecutionCondition.INTEGER_NONZERO_DIVISOR, (INTEGER, dsl.VECTOR)),
+        (dsl.ExecutionCondition.INTEGER_SIGNED_QUOTIENT, (INTEGER, dsl.VECTOR)),
+        (dsl.ExecutionCondition.INDEX_DIVISION, (INDEX,)),
+    ):
+        for domain in domains:
+            for result_count in (1, 2):
+                results = [
+                    Result(name, domain)
+                    for name in ("quotient", "remainder")[:result_count]
+                ]
+                constraints = [
+                    SameType("lhs", "rhs", *(result.name for result in results))
+                ]
+                if domain is dsl.VECTOR:
+                    constraints.append(HasIntegerElement("quotient"))
+                fields = dict(
+                    operands=[Operand("lhs", domain), Operand("rhs", domain)],
+                    results=results,
+                    constraints=constraints,
+                    traits=[PURE],
+                    execution_condition=condition,
+                )
+                Op("test.divide", **fields)
+                with _raises(ValueError, match="does not accept instance attributes"):
+                    Op(
+                        "test.divide",
+                        **fields,
+                        attrs=[AttrDef("mode", dsl.ATTR_TYPE_I64)],
+                    )
+                with _raises(ValueError, match="one or two required results"):
+                    Op(
+                        "test.divide",
+                        **(
+                            fields
+                            | {
+                                "results": [
+                                    *results,
+                                    Result("extra", domain),
+                                    Result("another", domain),
+                                ]
+                            }
+                        ),
+                    )
+                with _raises(ValueError, match="same-typed"):
+                    Op("test.divide", **(fields | {"constraints": []}))
+                if result_count == 2:
+                    with _raises(ValueError, match="same-typed"):
+                        Op(
+                            "test.divide",
+                            **(
+                                fields
+                                | {"results": [results[0], Result("remainder", FLOAT)]}
+                            ),
+                        )
+
+        for domain in (INTEGER, INDEX, ADDRESS, dsl.VECTOR):
+            if domain in domains:
+                continue
+            with _raises(ValueError, match="same-typed"):
+                Op(
+                    "test.wrong_domain",
+                    operands=[Operand("lhs", domain), Operand("rhs", domain)],
+                    results=[Result("quotient", domain)],
+                    constraints=[
+                        SameType("lhs", "rhs", "quotient"),
+                        HasIntegerElement("quotient"),
+                    ],
+                    traits=[PURE],
+                    execution_condition=condition,
+                )
+
+
 def test_assembly_format_rejects_undeclared_fields() -> None:
     with _raises(ValueError, match="undeclared fields.*missing"):
         Op("test.copy", assembly=AssemblyFormat("copy", [Ref("missing")]))
