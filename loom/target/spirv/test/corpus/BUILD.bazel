@@ -491,6 +491,7 @@ _SPIRV_EXECUTION_XFAILS = {
     "function/call/overflow.loom:@overflow_call_values": "LOWERING/044",
     "function/call/spill.loom:@spill_values": "LOWERING/044",
     "function/rodata.loom:@immutable_gather_values": "TARGET/001",
+    "function/rodata.loom:@retained_rodata_values": "LOWERING/044",
     "function/rodata.loom:@rodata_copy_values": "TARGET/001",
     "function/rodata.loom:@rodata_gather_values": "TARGET/001,TARGET/003",
     "function/rodata.loom:@rodata_values": "TARGET/001",

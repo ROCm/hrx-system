@@ -11,6 +11,7 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
+#include "loom/codegen/low/read_only_data.h"
 #include "loom/ir/ir.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/plan.h"
 
@@ -44,6 +45,9 @@ typedef struct loom_aie2p_array_resident_program_t {
   loom_low_memory_access_map_t* memory_accesses;
   // Module-owned loop facts translated into the resident invocation.
   loom_low_loop_execution_map_t* loop_execution;
+  // Complete immutable inventory for helper composition, translated to resident
+  // symbols in physical-plan order. Empty when there are no direct helpers.
+  loom_low_read_only_data_set_t program_data;
   // Direct helpers remapped into the resident module in source call order.
   const loom_aie2p_array_resident_helper_t* direct_helpers;
   // Number of records in |direct_helpers|.

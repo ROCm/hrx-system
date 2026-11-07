@@ -16,6 +16,8 @@
 extern "C" {
 #endif
 
+typedef struct loom_low_lower_source_call_plan_t
+    loom_low_lower_source_call_plan_t;
 typedef struct loom_low_lower_source_invoke_plan_t
     loom_low_lower_source_invoke_plan_t;
 typedef struct loom_low_lower_projected_call_plan_t
@@ -24,17 +26,30 @@ typedef struct loom_low_lower_projected_call_plan_t
 // Returns true when |source_op| is a direct semantic CallLike operation owned
 // by common source-to-Low lowering. Callable operands and results must occupy
 // the complete flat operation boundary.
-bool loom_low_lower_source_call_is_structural(const loom_module_t* module,
-                                              const loom_op_t* source_op);
+bool loom_low_lower_source_call_is_direct(const loom_module_t* module,
+                                          const loom_op_t* source_op);
 
 // Returns true when a direct semantic call targets a retained physical source
 // ABI projection and therefore requires an explicit selected plan.
 bool loom_low_lower_source_call_requires_projection(
     const loom_low_lower_context_t* context, const loom_op_t* source_op);
 
-// Lowers one direct semantic CallLike operation to low.func.call.
-iree_status_t loom_low_lower_source_call(loom_low_lower_context_t* context,
-                                         const loom_op_t* source_op);
+// Retains the direct callee interface and fixes its result carriers.
+iree_status_t loom_low_lower_source_call_plan(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_source_call_plan_t** out_plan);
+
+// Prepares receiving-carrier conversions after source selection has finalized
+// operand bindings. Only nonempty recipes consume additional retained storage.
+iree_status_t loom_low_lower_source_call_finalize(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_source_call_plan_t* plan);
+
+// Emits a direct semantic call and its prepared operand conversions without
+// consulting source analysis or changing canonical source value bindings.
+iree_status_t loom_low_lower_source_call(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_low_lower_source_call_plan_t* plan);
 
 // Retains the callee's physical source signature plan, proves logical
 // preconditions, and fixes logical result carriers before Low construction.

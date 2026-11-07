@@ -477,6 +477,7 @@ loom_low_lower_selected_plan_view_t loom_low_lower_context_selected_plan_view(
           selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_RULE ||
                   selected_plan->kind ==
                       LOOM_LOW_LOWER_SELECTED_PLAN_FUNCTION_STORAGE ||
+                  selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALL ||
                   selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE ||
                   selected_plan->kind ==
                       LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL ||

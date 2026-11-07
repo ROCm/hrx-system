@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 typedef struct loom_low_source_invocation_facts_t {
-  // Conservative argument facts indexed by private callee argument value ID.
+  // Entry and private-callee facts indexed by argument value ID.
   loom_value_fact_table_t arguments;
   // Complete source call graph retained for dependent module planning.
   loom_call_graph_t call_graph;
@@ -33,14 +33,18 @@ typedef struct loom_low_source_invocation_facts_t {
   iree_host_size_t direct_call_target_count;
 } loom_low_source_invocation_facts_t;
 
-// Computes private, acyclic source-call argument facts before source lowering.
+// Computes entry and private acyclic call facts before source lowering.
 // Modules without semantic calls return an empty summary without allocating or
 // walking IR; the module maintains that inventory as operations mutate.
 //
 // Every retained direct semantic caller participates in each callee argument
 // meet, independent of whether source policy or profitability retained the
 // boundary. Target-required inline edges consume caller facts after inlining.
-// Exported and recursive callees retain their declared argument domains.
+// HAL launch-only entries contribute their ABI uniformity. Exported and
+// recursive callees retain their declared value domains and admit lane-varying
+// arguments on targets with more than one lane per subgroup.
+// Region-declared uniformity comes from the ordinary fact solve instead of
+// being duplicated in this summary.
 // Selected functions use their exact target facts while computing caller-local
 // facts.
 iree_status_t loom_low_source_invocation_facts_compute(

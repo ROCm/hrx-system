@@ -317,7 +317,7 @@ typedef iree_status_t (*loom_low_lower_emit_control_operand_fn_t)(
     const void* plan, loom_value_id_t* out_low_value_id);
 
 typedef struct loom_low_lower_control_operand_t {
-  // Prepares a branch or callable-exit operand whose actual producer carrier
+  // Prepares a branch, call, or callable-exit operand whose producer carrier
   // differs from its receiving signature. Source facts are available here;
   // rejection emits diagnostics before any Low construction. Retained data
   // belongs to the function arena or immutable target storage. NULL is a

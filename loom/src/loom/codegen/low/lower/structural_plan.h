@@ -43,7 +43,7 @@ loom_type_t loom_low_lower_structural_block_argument_type(
     const loom_low_lower_context_t* context, uint16_t block_index,
     uint16_t argument_index);
 
-// Retains result carriers for direct semantic calls and structured control,
+// Retains result carriers for structured control,
 // including the distinct header tuple of scf.while. Rejects unconsumed source
 // pipeline annotations before any Low operation is constructed.
 iree_status_t loom_low_lower_structural_plan_op(

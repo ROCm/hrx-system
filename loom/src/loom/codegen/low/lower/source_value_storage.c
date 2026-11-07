@@ -717,7 +717,8 @@ static bool loom_low_lower_selected_plan_result_storage_required(
 static bool loom_low_lower_can_elide_selected_plan(
     const loom_low_lower_context_t* context,
     const loom_low_lower_selected_plan_t* selected_plan) {
-  return selected_plan->kind != LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE &&
+  return selected_plan->kind != LOOM_LOW_LOWER_SELECTED_PLAN_CALL &&
+         selected_plan->kind != LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE &&
          selected_plan->kind != LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL &&
          !loom_low_lower_selected_plan_storage_required(context, selected_plan);
 }
@@ -739,6 +740,7 @@ static void loom_low_lower_mark_selected_plan_storage_demands(
     case LOOM_LOW_LOWER_SELECTED_PLAN_FUNCTION_STORAGE:
       // The selected plan retains the extent; no source operand is emitted.
       break;
+    case LOOM_LOW_LOWER_SELECTED_PLAN_CALL:
     case LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE:
     case LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL:
     case LOOM_LOW_LOWER_SELECTED_PLAN_UNAVAILABLE:
