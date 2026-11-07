@@ -109,8 +109,12 @@ class _TransferWorker:
         ):
             # A Windows venv executable redirects to another process. Own the
             # interpreter directly so kill/wait joins the actual file writer,
-            # while retaining the venv identity as CPython multiprocessing does.
-            environment = {**environment, "__PYVENV_LAUNCHER__": executable}
+            # while retaining the venv identity and its remapped base runtime.
+            environment = {
+                **environment,
+                "__PYVENV_LAUNCHER__": executable,
+                "PYTHONHOME": sys.base_prefix,
+            }
             executable = sys._base_executable
         # One child exclusively borrowed for one synchronous operation at a time.
         self.process = subprocess.Popen(
