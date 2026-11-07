@@ -99,8 +99,8 @@ static iree_status_t loom_math_exponential_reduced(
     status = loom_math_evaluation_build_constant(
         evaluation, kCoefficients[term], &coefficient);
     if (iree_status_is_ok(status)) {
-      status = loom_math_evaluation_build_fma(evaluation, &polynomial, residual,
-                                              &coefficient, &polynomial);
+      status = loom_math_evaluation_build_multiply_add(
+          evaluation, &polynomial, residual, &coefficient, &polynomial);
     }
   }
   IREE_RETURN_IF_ERROR(status);
@@ -108,8 +108,8 @@ static iree_status_t loom_math_exponential_reduced(
   IREE_RETURN_IF_ERROR(loom_math_evaluation_build_binary(
       evaluation, LOOM_MATH_EVALUATION_BINARY_MULF, residual, residual,
       &square));
-  return loom_math_evaluation_build_fma(evaluation, &square, &polynomial,
-                                        residual, out_value);
+  return loom_math_evaluation_build_multiply_add(
+      evaluation, &square, &polynomial, residual, out_value);
 }
 
 iree_status_t loom_math_build_exponential(
@@ -157,7 +157,7 @@ iree_status_t loom_math_build_exponential(
     IREE_RETURN_IF_ERROR(loom_math_evaluation_build_binary(
         &arithmetic, LOOM_MATH_EVALUATION_BINARY_MULF, &fraction, &high,
         &product));
-    IREE_RETURN_IF_ERROR(loom_math_evaluation_build_fma(
+    IREE_RETURN_IF_ERROR(loom_math_evaluation_build_multiply_add(
         &arithmetic, &fraction, &low, &product, &residual));
   } else {
     // The leading product is exact throughout the finite reconstruction range.
@@ -165,9 +165,9 @@ iree_status_t loom_math_build_exponential(
         &arithmetic, wide ? -0x1.62e42fep-1 : -0x1.62e4p-1, &high));
     IREE_RETURN_IF_ERROR(loom_math_evaluation_build_constant(
         &arithmetic, wide ? -0x1.f473de6af278fp-30 : -0x1.7f7d1cp-20, &low));
-    IREE_RETURN_IF_ERROR(loom_math_evaluation_build_fma(
+    IREE_RETURN_IF_ERROR(loom_math_evaluation_build_multiply_add(
         &arithmetic, &exponent, &high, &input, &residual));
-    IREE_RETURN_IF_ERROR(loom_math_evaluation_build_fma(
+    IREE_RETURN_IF_ERROR(loom_math_evaluation_build_multiply_add(
         &arithmetic, &exponent, &low, &residual, &residual));
   }
   loom_math_exponential_value_t reduced;
@@ -207,7 +207,7 @@ iree_status_t loom_math_build_exponential(
         &addend));
   }
   loom_math_exponential_value_t result;
-  IREE_RETURN_IF_ERROR(loom_math_evaluation_build_fma(
+  IREE_RETURN_IF_ERROR(loom_math_evaluation_build_multiply_add(
       &arithmetic, &scale, &reduced, &addend, &result));
   IREE_RETURN_IF_ERROR(loom_math_evaluation_build_binary(
       &arithmetic, LOOM_MATH_EVALUATION_BINARY_MULF, &result, &tail, &result));

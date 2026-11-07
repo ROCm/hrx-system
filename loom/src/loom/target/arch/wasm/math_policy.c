@@ -9,6 +9,9 @@
 #include <stddef.h>
 
 #define LOOM_WASM_MATH_CONSTRAINTS(_)                                        \
+  _(EXPONENTIAL_AFN, exponential_afn, "math.exponential.afn")                \
+  _(RECIPE_APPROXIMATE_EXPONENTIAL, recipe_approximate_exponential,          \
+    "math.recipe.approximate_exponential")                                   \
   _(ELEMENT_NATIVE_FLOAT, element_native_float, "math.element.native_float") \
   _(OP_NATIVE_FLOAT, op_native_float, "math.op.native_float")                \
   _(OP_SUPPORTED, op_supported, "math.op.supported")                         \
@@ -79,6 +82,19 @@ static const loom_target_math_evaluation_t kWasmMathEvaluations[] = {
 
 static const loom_target_math_policy_direct_rule_t
     kWasmMathDirectRules[LOOM_TARGET_MATH_OP_COUNT] = {
+#define LOOM_WASM_MATH_EXPONENTIAL_RULE(op_)                               \
+  [LOOM_TARGET_MATH_OP_##op_] = LOOM_TARGET_MATH_POLICY_DIRECT_RULE(       \
+      LOOM_WASM_NATIVE_FLOAT_TYPES, LOOM_TARGET_MATH_LANE_DOMAIN_SET_ALL,  \
+      LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,                                  \
+      LOOM_TARGET_MATH_RECIPE_APPROXIMATE_EXPONENTIAL,                     \
+      LOOM_TARGET_MATH_FASTMATH_FLAG_NONE,                                 \
+      LOOM_TARGET_MATH_FASTMATH_FLAG_NONE, LOOM_WASM_MATH_EVALUATION_NONE, \
+      LOOM_WASM_MATH_CONSTRAINT_RECIPE_APPROXIMATE_EXPONENTIAL,            \
+      LOOM_WASM_MATH_CONSTRAINT_EXPONENTIAL_AFN)
+        LOOM_WASM_MATH_EXPONENTIAL_RULE(EXPF),
+        LOOM_WASM_MATH_EXPONENTIAL_RULE(EXP2F),
+        LOOM_WASM_MATH_EXPONENTIAL_RULE(EXPM1F),
+#undef LOOM_WASM_MATH_EXPONENTIAL_RULE
         [LOOM_TARGET_MATH_OP_ADDF] = LOOM_WASM_MATH_DIRECT_RULE(
             LOOM_WASM_NATIVE_FLOAT_TYPES, LOOM_TARGET_MATH_RECIPE_UNKNOWN,
             LOOM_WASM_MATH_EVALUATION_NONE,
@@ -139,6 +155,7 @@ static const loom_target_math_policy_direct_rule_t
 enum loom_wasm_math_rule_e {
   LOOM_WASM_MATH_RULE_WIDEN_F32_NARROW = 0,
   LOOM_WASM_MATH_RULE_ROUND_AWAY_NARROW,
+  LOOM_WASM_MATH_RULE_EXPONENTIAL_NARROW,
   LOOM_WASM_MATH_RULE_COUNT_,
 };
 
@@ -150,6 +167,22 @@ static const loom_target_math_policy_rule_t
                 .recipe = LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND,
                 .decision_constraint =
                     LOOM_WASM_MATH_CONSTRAINT_RECIPE_WIDEN_F32_ROUND,
+            },
+        [LOOM_WASM_MATH_RULE_EXPONENTIAL_NARROW] =
+            {
+                .match =
+                    {
+                        .element_types = LOOM_SCALAR_TYPE_SET_FLOAT_LE16,
+                        .lane_domains = LOOM_TARGET_MATH_LANE_DOMAIN_SET_ALL,
+                        .shape = LOOM_TARGET_MATH_POLICY_SHAPE_ANY,
+                        .required_fastmath_flags =
+                            LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+                    },
+                .recipe = LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND,
+                .decision_constraint =
+                    LOOM_WASM_MATH_CONSTRAINT_RECIPE_WIDEN_F32_ROUND,
+                .permission_constraint =
+                    LOOM_WASM_MATH_CONSTRAINT_EXPONENTIAL_AFN,
             },
         [LOOM_WASM_MATH_RULE_ROUND_AWAY_NARROW] =
             {
@@ -183,6 +216,14 @@ static const loom_target_math_policy_rule_t
 
 static const loom_target_math_policy_rule_span_t
     kWasmMathOperationSpans[LOOM_TARGET_MATH_OP_COUNT] = {
+#define LOOM_WASM_MATH_EXPONENTIAL_SPAN(op_)                         \
+  [LOOM_TARGET_MATH_OP_##op_] =                                      \
+      LOOM_WASM_MATH_SPAN(LOOM_WASM_MATH_RULE_EXPONENTIAL_NARROW, 1, \
+                          LOOM_WASM_MATH_CONSTRAINT_ELEMENT_NATIVE_FLOAT)
+        LOOM_WASM_MATH_EXPONENTIAL_SPAN(EXPF),
+        LOOM_WASM_MATH_EXPONENTIAL_SPAN(EXP2F),
+        LOOM_WASM_MATH_EXPONENTIAL_SPAN(EXPM1F),
+#undef LOOM_WASM_MATH_EXPONENTIAL_SPAN
         [LOOM_TARGET_MATH_OP_ADDF] = LOOM_WASM_MATH_WIDEN_F32_SPAN,
         [LOOM_TARGET_MATH_OP_SUBF] = LOOM_WASM_MATH_WIDEN_F32_SPAN,
         [LOOM_TARGET_MATH_OP_MULF] = LOOM_WASM_MATH_WIDEN_F32_SPAN,

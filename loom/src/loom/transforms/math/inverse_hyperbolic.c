@@ -10,22 +10,6 @@
 
 typedef loom_math_evaluation_value_t loom_math_value_t;
 
-// This recipe's error bound admits both rounding paths. Ordinary target-aware
-// contraction chooses FMA where supported without requiring a fused primitive.
-static iree_status_t loom_math_build_multiply_add(
-    loom_math_evaluation_t* evaluation, loom_math_value_t* lhs,
-    loom_math_value_t* rhs, loom_math_value_t* accumulator,
-    loom_math_value_t* out_value) {
-  loom_math_evaluation_t arithmetic = *evaluation;
-  arithmetic.fastmath_flags |= LOOM_TARGET_MATH_FASTMATH_FLAG_CONTRACT;
-  loom_math_value_t product;
-  IREE_RETURN_IF_ERROR(loom_math_evaluation_build_binary(
-      &arithmetic, LOOM_MATH_EVALUATION_BINARY_MULF, lhs, rhs, &product));
-  return loom_math_evaluation_build_binary(&arithmetic,
-                                           LOOM_MATH_EVALUATION_BINARY_ADDF,
-                                           &product, accumulator, out_value);
-}
-
 // Odd polynomials retain tiny inputs without subtracting nearly equal values.
 // Coefficients are in increasing order of the even power multiplying x.
 static iree_status_t loom_math_build_odd_polynomial(
@@ -45,8 +29,8 @@ static iree_status_t loom_math_build_odd_polynomial(
     status = loom_math_evaluation_build_constant(
         evaluation, coefficients[i - 1], &coefficient);
     if (iree_status_is_ok(status)) {
-      status = loom_math_build_multiply_add(evaluation, &accumulator, &square,
-                                            &coefficient, &accumulator);
+      status = loom_math_evaluation_build_multiply_add(
+          evaluation, &accumulator, &square, &coefficient, &accumulator);
     }
   }
   IREE_RETURN_IF_ERROR(status);
@@ -142,7 +126,7 @@ static iree_status_t loom_math_build_asinh(loom_math_evaluation_t* evaluation,
   IREE_RETURN_IF_ERROR(
       loom_math_evaluation_build_constant(evaluation, 1.0, &one));
   loom_math_value_t radicand;
-  IREE_RETURN_IF_ERROR(loom_math_build_multiply_add(
+  IREE_RETURN_IF_ERROR(loom_math_evaluation_build_multiply_add(
       evaluation, &magnitude, &magnitude, &one, &radicand));
   loom_math_value_t regular_result;
   IREE_RETURN_IF_ERROR(loom_math_build_log_root(evaluation, &magnitude,

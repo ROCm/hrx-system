@@ -303,7 +303,8 @@ static const loom_target_vector_packet_policy_t kWasmVectorPacketPolicy = {
     .native_lane_counts = kWasmVectorPacketLaneCounts,
     .index_bit_count = 32u,
     .offset_bit_count = 32u,
-    .flags = LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_DYNAMIC_WINDOW_REPLAY,
+    .flags = LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_DYNAMIC_WINDOW_REPLAY |
+             LOOM_TARGET_VECTOR_PACKET_POLICY_FLAG_NO_PRIVATE_STAGING,
     .structural_lane_limits = kWasmVectorPacketStructuralLaneLimits,
     .maximum_unpacketized_bit_count = 128u,
     .native_bit_count_count = IREE_ARRAYSIZE(kWasmVectorPacketBitCounts),
