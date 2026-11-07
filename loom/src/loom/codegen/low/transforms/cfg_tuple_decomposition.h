@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Decomposes low CFG register tuples consumed only through partial slices.
+// Transport retains the largest uniform groups shared by every slice boundary.
 
 #ifndef LOOM_CODEGEN_LOW_TRANSFORMS_CFG_TUPLE_DECOMPOSITION_H_
 #define LOOM_CODEGEN_LOW_TRANSFORMS_CFG_TUPLE_DECOMPOSITION_H_

@@ -21,6 +21,7 @@ loom_check_test_suite(
         "attr_projection.loom-test",
         "borrow_lifetime.loom-test",
         "cfg_tuple_decomposition.loom-test",
+        "cfg_tuple_groups.loom-test",
         "constant_reconstruction.loom-test",
         "copy_rematerialization.loom-test",
         "cse.loom-test",

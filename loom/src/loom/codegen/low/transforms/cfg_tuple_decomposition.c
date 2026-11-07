@@ -9,14 +9,14 @@
 #include "loom/codegen/low/transforms/cfg_tuple_projection.h"
 #include "loom/transforms/boundary/projection_driver.h"
 
-#define LOOM_LOW_DECOMPOSE_CFG_TUPLES_STATISTICS(V, statistics_type)       \
-  V(statistics_type, block_args_decomposed, "block-args-decomposed",       \
-    "Number of tuple-valued low CFG block arguments decomposed.")          \
-  V(statistics_type, lane_block_args_inserted, "lane-block-args-inserted", \
-    "Number of scalar lane block arguments inserted.")                     \
-  V(statistics_type, branch_edges_decomposed, "branch-edges-decomposed",   \
-    "Number of low.br edges rewritten to forward scalar lanes.")           \
-  V(statistics_type, slices_removed, "slices-removed",                     \
+#define LOOM_LOW_DECOMPOSE_CFG_TUPLES_STATISTICS(V, statistics_type)         \
+  V(statistics_type, block_args_decomposed, "block-args-decomposed",         \
+    "Number of tuple-valued low CFG block arguments decomposed.")            \
+  V(statistics_type, group_block_args_inserted, "group-block-args-inserted", \
+    "Number of register-group block arguments inserted.")                    \
+  V(statistics_type, branch_edges_decomposed, "branch-edges-decomposed",     \
+    "Number of low.br edges rewritten to forward register groups.")          \
+  V(statistics_type, slices_removed, "slices-removed",                       \
     "Number of low.slice projections replaced by component observations.")
 
 LOOM_PASS_STATISTICS_DEFINE(loom_low_decompose_cfg_tuples_statistics,
@@ -55,7 +55,7 @@ iree_status_t loom_low_decompose_cfg_tuples_run(loom_pass_t* pass,
     loom_low_decompose_cfg_tuples_statistics_t* statistics =
         loom_low_decompose_cfg_tuples_statistics(pass);
     statistics->block_args_decomposed += rule_statistics->projections;
-    statistics->lane_block_args_inserted += rule_statistics->components;
+    statistics->group_block_args_inserted += rule_statistics->components;
     statistics->branch_edges_decomposed +=
         projection_statistics.cfg_edges_rewritten;
     statistics->slices_removed += rule_statistics->destination_uses_rewritten;
