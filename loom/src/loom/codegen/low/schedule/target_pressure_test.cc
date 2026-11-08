@@ -9,10 +9,10 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/schedule/completion_demand.h"
+#include "loom/codegen/low/schedule/completion_pressure.h"
 #include "loom/codegen/low/schedule/dependencies.h"
 #include "loom/codegen/low/schedule/dependency_incoming.h"
 #include "loom/codegen/low/schedule/dependency_index.h"
-#include "loom/codegen/low/schedule/required_pressure.h"
 #include "loom/target/residency.h"
 
 namespace loom {
@@ -148,7 +148,7 @@ TEST_F(TargetPressureScoringTest, CompletionDomainsSharePressureSets) {
     values[reg_class_id].register_class_id = reg_class_id;
     if (reg_class_id != 4) {
       values[reg_class_id].flags |=
-          LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+          LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
     }
   }
   loom_local_value_domain_t value_domain = {
@@ -158,7 +158,7 @@ TEST_F(TargetPressureScoringTest, CompletionDomainsSharePressureSets) {
   loom_low_schedule_pressure_set_limit_t pressure_sets[2] = {};
   pressure_sets[1] = {
       .live_unit_limit = 4,
-      .unspillable_completion_domain_id = UINT16_MAX,
+      .constrained_completion_domain_id = UINT16_MAX,
       .has_multiple_active_reg_classes = 1,
   };
   loom_low_schedule_build_state_t state = {
@@ -176,25 +176,25 @@ TEST_F(TargetPressureScoringTest, CompletionDomainsSharePressureSets) {
   IREE_ASSERT_OK(
       loom_low_schedule_target_pressure_initialize_completion_domains(&state));
 
-  EXPECT_EQ(state.pressure_limits.unspillable_completion_domain_count, 2);
+  EXPECT_EQ(state.pressure_limits.constrained_completion_domain_count, 2);
   const uint16_t* domain_ids =
-      state.pressure_limits.unspillable_completion_domain_ids_by_reg_class;
+      state.pressure_limits.constrained_completion_domain_ids_by_reg_class;
   EXPECT_EQ(domain_ids[0], 0);
   EXPECT_EQ(domain_ids[1], 1);
   EXPECT_EQ(domain_ids[2], 1);
   EXPECT_EQ(domain_ids[3], UINT16_MAX);
   EXPECT_EQ(domain_ids[4], UINT16_MAX);
-  EXPECT_EQ(pressure_sets[1].unspillable_completion_domain_id, 1);
+  EXPECT_EQ(pressure_sets[1].constrained_completion_domain_id, 1);
   const loom_low_schedule_completion_domain_t* domains =
-      state.pressure_limits.unspillable_completion_domains;
+      state.pressure_limits.constrained_completion_domains;
   EXPECT_EQ(domains[0].capacity, 3);
   EXPECT_EQ(domains[0].reg_class_id, 0);
   EXPECT_EQ(domains[1].capacity, 4);
   EXPECT_EQ(domains[1].reg_class_id, 2);
   for (iree_host_size_t i = 0; i < value_domain.value_count; ++i) {
-    EXPECT_EQ(state.value_unspillable_completions[i].activation_units,
+    EXPECT_EQ(state.value_constrained_completions[i].activation_units,
               UINT32_MAX);
-    EXPECT_EQ(state.value_unspillable_completions[i].sink,
+    EXPECT_EQ(state.value_constrained_completions[i].sink,
               LOOM_LOW_SCHEDULE_NODE_NONE);
   }
 }
@@ -281,7 +281,7 @@ TEST_F(TargetPressureScoringTest, GrowthUsesCanonicalBankAndOwnership) {
           sets[1] = {
               .live_unit_limit = 4,
               .representative_reg_class_id = 2,
-              .unspillable_completion_domain_id = 1,
+              .constrained_completion_domain_id = 1,
               .all_classes_unspillable = unspillable,
               .has_multiple_active_reg_classes = 1,
           };
@@ -298,10 +298,10 @@ TEST_F(TargetPressureScoringTest, GrowthUsesCanonicalBankAndOwnership) {
                       .by_reg_class = limits,
                       .pressure_sets = sets,
                       .pressure_set_count = 1,
-                      .unspillable_completion_domains = domains,
-                      .unspillable_completion_domain_ids_by_reg_class =
+                      .constrained_completion_domains = domains,
+                      .constrained_completion_domain_ids_by_reg_class =
                           domain_ids,
-                      .unspillable_completion_domain_count = 2,
+                      .constrained_completion_domain_count = 2,
                   },
           };
           uint64_t live[3] = {};
@@ -316,9 +316,9 @@ TEST_F(TargetPressureScoringTest, GrowthUsesCanonicalBankAndOwnership) {
           touched[reg_class_id] = 1;
           uint32_t reserves[3] = {};
           uint32_t activation[2] = {};
-          loom_low_schedule_required_pressure_t required_pressure[2] = {};
+          loom_low_schedule_completion_pressure_t completion_pressure[2] = {};
           if (required) {
-            required_pressure[domain_ids[reg_class_id]] = {
+            completion_pressure[domain_ids[reg_class_id]] = {
                 .candidate_delta_units = 1,
                 .candidate_write_delta_units = 1,
                 .candidate_early_added_units = test_case.early_units,
@@ -342,7 +342,7 @@ TEST_F(TargetPressureScoringTest, GrowthUsesCanonicalBankAndOwnership) {
           uint16_t shared_ids[] = {1};
           loom_low_schedule_pressure_state_t pressure = {
               .current_live_units_by_reg_class = live,
-              .required_pressure = required_pressure,
+              .completion_pressure = completion_pressure,
               .packing_reserve_units_by_reg_class = reserves,
               .pressure_sets =
                   {
@@ -361,8 +361,8 @@ TEST_F(TargetPressureScoringTest, GrowthUsesCanonicalBankAndOwnership) {
                       .early_added_units = early,
                       .late_released_units = late,
                   },
-              .candidate_unspillable_activation_units = activation,
-              .unspillable_completion_demand = completions,
+              .candidate_constrained_activation_units = activation,
+              .constrained_completion_demand = completions,
               .candidate_delta_touched_flags = touched,
               .candidate_delta_touched_reg_class_ids = &reg_class_id,
               .candidate_delta_touched_count = 1,
@@ -374,8 +374,8 @@ TEST_F(TargetPressureScoringTest, GrowthUsesCanonicalBankAndOwnership) {
               .pressure_cliff_units = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
               .units_until_pressure_cliff =
                   LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
-              .active_unspillable_completion_capacity = UINT32_MAX,
-              .active_unspillable_transaction_final_capacity = UINT32_MAX,
+              .active_constrained_completion_capacity = UINT32_MAX,
+              .active_constrained_transaction_final_capacity = UINT32_MAX,
           };
           loom_low_schedule_target_pressure_score_candidate(
               &state, &pressure, LOOM_LOW_SCHEDULE_NODE_NONE, &score);
@@ -384,7 +384,7 @@ TEST_F(TargetPressureScoringTest, GrowthUsesCanonicalBankAndOwnership) {
                   ? UINT64_C(1) << (reg_class_id == 0 ? 0 : 2)
                   : 0;
           EXPECT_EQ(debt.banks, expected_bank);
-          EXPECT_EQ(debt.required_banks, required ? expected_bank : 0);
+          EXPECT_EQ(debt.constrained_banks, required ? expected_bank : 0);
           EXPECT_EQ(score.units_until_pressure_cliff,
                     test_case.units_until_limit);
           EXPECT_EQ(score.pressure_cliff_penalty, test_case.peak_penalty);
@@ -397,12 +397,12 @@ TEST_F(TargetPressureScoringTest, GrowthUsesCanonicalBankAndOwnership) {
           EXPECT_EQ(
               iree_any_bit_set(
                   score.flags,
-                  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REQUIRED_REGISTER_DEBT),
+                  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_CONSTRAINED_REGISTER_DEBT),
               required && expected_bank != 0);
           EXPECT_EQ(
               iree_any_bit_set(
                   score.flags,
-                  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY),
+                  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY),
               unspillable && test_case.opens_debt);
         }
       }
@@ -451,20 +451,20 @@ TEST_F(TargetPressureScoringTest, ActiveCompletionsRetainDomainIdentity) {
       .nodes = nodes,
       .pressure_limits =
           {
-              .unspillable_completion_domains = domains,
-              .unspillable_completion_domain_count = IREE_ARRAYSIZE(domains),
+              .constrained_completion_domains = domains,
+              .constrained_completion_domain_count = IREE_ARRAYSIZE(domains),
           },
   };
   uint64_t live[2] = {};
   uint32_t reserves[2] = {};
   uint32_t activation[2] = {};
   uint8_t touched[2] = {};
-  loom_low_schedule_required_pressure_t required[2] = {};
+  loom_low_schedule_completion_pressure_t required[2] = {};
   loom_low_schedule_pressure_state_t pressure = {
       .current_live_units_by_reg_class = live,
-      .required_pressure = required,
+      .completion_pressure = required,
       .packing_reserve_units_by_reg_class = reserves,
-      .candidate_unspillable_activation_units = activation,
+      .candidate_constrained_activation_units = activation,
       .candidate_delta_touched_flags = touched,
   };
   for (const auto kind :
@@ -473,11 +473,11 @@ TEST_F(TargetPressureScoringTest, ActiveCompletionsRetainDomainIdentity) {
     SCOPED_TRACE(kind);
     IREE_ASSERT_OK(loom_low_schedule_completion_demand_initialize(
         &dependencies, &incoming, IREE_ARRAYSIZE(domains), &arena_,
-        &pressure.unspillable_completion_demand));
+        &pressure.constrained_completion_demand));
     // Each bank nominates its own consumer; the third node advances neither.
     for (uint16_t domain = 0; domain < IREE_ARRAYSIZE(domains); ++domain) {
       loom_low_schedule_completion_demand_nominate(
-          &pressure.unspillable_completion_demand, kind, domain, domain);
+          &pressure.constrained_completion_demand, kind, domain, domain);
     }
     for (uint64_t live_units : {3u, 4u}) {
       SCOPED_TRACE(live_units);
@@ -494,16 +494,16 @@ TEST_F(TargetPressureScoringTest, ActiveCompletionsRetainDomainIdentity) {
         loom_low_schedule_candidate_score_t score = {
             .pressure_cliff_units = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
             .units_until_pressure_cliff = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
-            .active_unspillable_completion_capacity = UINT32_MAX,
-            .active_unspillable_transaction_final_capacity = UINT32_MAX,
-            .active_unspillable_completion_domain_id = UINT16_MAX,
+            .active_constrained_completion_capacity = UINT32_MAX,
+            .active_constrained_transaction_final_capacity = UINT32_MAX,
+            .active_constrained_completion_domain_id = UINT16_MAX,
         };
         loom_low_schedule_target_pressure_score_candidate(&state, &pressure,
                                                           candidate, &score);
         const bool advances_full_bank = live_units == 4 && candidate < 2;
-        EXPECT_EQ(score.active_unspillable_completion_capacity,
+        EXPECT_EQ(score.active_constrained_completion_capacity,
                   advances_full_bank ? 4u : UINT32_MAX);
-        EXPECT_EQ(score.active_unspillable_completion_domain_id,
+        EXPECT_EQ(score.active_constrained_completion_domain_id,
                   advances_full_bank ? candidate : UINT16_MAX);
       }
     }
@@ -531,9 +531,9 @@ TEST_F(TargetPressureScoringTest, ActiveCompletionsRetainDomainIdentity) {
               .pressure_cliff_units = LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
               .units_until_pressure_cliff =
                   LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE,
-              .active_unspillable_completion_capacity = UINT32_MAX,
-              .active_unspillable_transaction_final_capacity = UINT32_MAX,
-              .active_unspillable_completion_domain_id = UINT16_MAX,
+              .active_constrained_completion_capacity = UINT32_MAX,
+              .active_constrained_transaction_final_capacity = UINT32_MAX,
+              .active_constrained_completion_domain_id = UINT16_MAX,
           };
           loom_low_schedule_target_pressure_score_candidate(&state, &pressure,
                                                             candidate, &score);
@@ -686,6 +686,79 @@ TEST_F(RegisterPackingPressureTest, RoundedMembersReleaseOnlyCompleteGroups) {
     EXPECT_EQ(score.pressure_cliff_penalty, 1u);
     EXPECT_EQ(score.persistent_pressure_cliff_penalty, units == 3 ? 0u : 1u);
   }
+}
+
+TEST_F(RegisterPackingPressureTest, CompletionFollowsLiveNominations) {
+  loom_low_schedule_node_t nodes[7] = {};
+  for (auto& node : nodes) {
+    node.scheduled_ordinal = LOOM_LOW_SCHEDULE_NODE_NONE;
+  }
+  loom_low_schedule_value_record_t values[4] = {};
+  for (auto& value : values) {
+    value.register_class_id = 0;
+    value.unit_count = 1;
+  }
+  uint32_t producers[] = {0, 1, 2, 3};
+  uint32_t sinks[] = {4, 5, 4, 6, UINT32_MAX, UINT32_MAX, UINT32_MAX};
+  loom_value_ordinal_t ordinals[] = {0, 1, 2, 3};
+  uint32_t active_sink = LOOM_LOW_SCHEDULE_NODE_NONE;
+  uint32_t active_count = 0;
+  state_.nodes = nodes;
+  state_.values = values;
+  state_.value_producer_nodes = producers;
+  state_.node_register_packing.completion_sinks = sinks;
+  pressure_.block_value_ordinals = ordinals;
+  pressure_.block_value_count = IREE_ARRAYSIZE(ordinals);
+  pressure_.active_register_packing_completion_sinks = &active_sink;
+  pressure_.active_register_packing_completion_value_counts = &active_count;
+  auto add = [&](uint32_t ordinal) {
+    values[ordinal].flags |= LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE;
+    loom_low_schedule_target_pressure_add_packing_completion_value(
+        &state_, &pressure_, ordinal);
+  };
+  auto remove = [&](uint32_t ordinal) {
+    loom_low_schedule_target_pressure_remove_packing_completion_value(
+        &state_, &pressure_, ordinal);
+    values[ordinal].flags &= ~LOOM_LOW_SCHEDULE_VALUE_FLAG_LIVE;
+  };
+  auto advance = [&](uint32_t node) {
+    loom_low_schedule_target_pressure_repair_packing_completions(
+        &state_, &pressure_, node);
+  };
+
+  advance(0);
+  EXPECT_EQ(active_sink, LOOM_LOW_SCHEDULE_NODE_NONE);
+  add(1);
+  EXPECT_EQ(active_sink, 5u);
+  add(0);
+  add(2);
+  EXPECT_EQ(active_sink, 4u);
+  EXPECT_EQ(active_count, 2u);
+  remove(0);
+  advance(0);
+  EXPECT_EQ(active_sink, 4u);
+  EXPECT_EQ(active_count, 1u);
+
+  // Scheduling a completion retires its nomination even when its value has
+  // further uses. The next live nomination remains selected independently.
+  nodes[4].scheduled_ordinal = 0;
+  advance(4);
+  EXPECT_EQ(active_sink, 5u);
+  remove(1);
+  advance(1);
+  EXPECT_EQ(active_sink, LOOM_LOW_SCHEDULE_NODE_NONE);
+  advance(2);
+  EXPECT_EQ(active_sink, LOOM_LOW_SCHEDULE_NODE_NONE);
+
+  // An empty result is invalidated by a newly live producer, and block reset
+  // discards the old nominations before another block initializes its values.
+  add(3);
+  EXPECT_EQ(active_sink, 6u);
+  EXPECT_EQ(active_count, 1u);
+  loom_low_schedule_target_pressure_reset_packing_completions(&state_,
+                                                              &pressure_);
+  EXPECT_EQ(active_sink, LOOM_LOW_SCHEDULE_NODE_NONE);
+  EXPECT_EQ(active_count, 0u);
 }
 
 }  // namespace

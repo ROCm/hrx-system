@@ -218,8 +218,7 @@ loom_aie2p_bundle_encoding_encode_structural_descriptor(
                                       NULL);
 }
 
-loom_aie2p_encoded_slot_t
-loom_aie2p_bundle_encoding_encode_loop_setup_descriptor(
+loom_aie2p_encoded_slot_t loom_aie2p_bundle_encoding_encode_state_immediate(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal, int64_t immediate) {
   const loom_low_descriptor_t* descriptor =
@@ -228,7 +227,7 @@ loom_aie2p_bundle_encoding_encode_loop_setup_descriptor(
     const loom_low_operand_t* operand =
         loom_low_descriptor_operand(descriptor_set, descriptor, i);
     IREE_ASSERT(operand->source_value_index == LOOM_LOW_ID_NONE &&
-                "hardware-loop state must use an implicit physical register");
+                "state setup must use an implicit physical register");
   }
   IREE_ASSERT_EQ(
       loom_low_descriptor_layout(descriptor_set, descriptor)->immediate_count,

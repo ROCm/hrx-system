@@ -79,9 +79,10 @@ TEST_F(LowAllocationOrdinalComponentTest,
   EXPECT_EQ(components.indices_by_value_ordinal[6], UINT32_MAX);
   ASSERT_EQ(components.ranges[0].start, 0u);
   ASSERT_EQ(components.ranges[0].count, 4u);
+  ASSERT_EQ(components.ranges[0].origin_count, 3u);
   EXPECT_THAT(std::vector<loom_value_ordinal_t>(components.members,
                                                 components.members + 4),
-              ::testing::ElementsAre(0, 1, 2, 3));
+              ::testing::ElementsAre(0, 2, 3, 1));
 
   const loom_low_placement_table_t placement = {
       .value_count = IREE_ARRAYSIZE(storage_origins),
@@ -95,12 +96,61 @@ TEST_F(LowAllocationOrdinalComponentTest,
       loom_low_placement_hard_register_ordinal_component(&placement, 1);
   EXPECT_EQ(component.index, 0u);
   EXPECT_EQ(component.count, 4u);
+  EXPECT_EQ(component.origin_count, 3u);
   EXPECT_EQ(component.members, components.members);
   const auto unconstrained =
       loom_low_placement_hard_register_ordinal_component(&placement, 4);
   EXPECT_EQ(unconstrained.index, UINT32_MAX);
   EXPECT_EQ(unconstrained.count, 0u);
   EXPECT_EQ(unconstrained.members, nullptr);
+}
+
+TEST_F(LowAllocationOrdinalComponentTest,
+       RetainsDistinctOriginsBeforeLongTiedChains) {
+  constexpr uint32_t kAliasCount = 512;
+  std::vector<loom_value_ordinal_t> origins(5 + kAliasCount);
+  for (uint32_t i = 0; i < 5; ++i) {
+    origins[i] = i;
+  }
+  for (uint32_t i = 5; i < origins.size(); ++i) {
+    origins[i] = i % 2;
+  }
+  const loom_low_placement_relation_t relations[] = {
+      {
+          .result_ordinal = 0,
+          .source_ordinal = 1,
+          .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL,
+          .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD,
+      },
+      {
+          .result_ordinal = 2,
+          .source_ordinal = 3,
+          .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_REGISTER_ORDINAL,
+          .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD,
+      },
+  };
+  loom_low_allocation_ordinal_components_t components = {};
+  IREE_ASSERT_OK(loom_low_allocation_ordinal_components_build(
+      origins.size(), origins.data(), relations, IREE_ARRAYSIZE(relations),
+      &arena_, &scratch_arena_, &components));
+
+  ASSERT_EQ(components.count, 2u);
+  const auto first = components.ranges[components.indices_by_value_ordinal[0]];
+  ASSERT_EQ(first.origin_count, 2u);
+  ASSERT_EQ(first.count, 2u + kAliasCount);
+  EXPECT_EQ(components.members[first.start], 0u);
+  EXPECT_EQ(components.members[first.start + 1], 1u);
+  for (uint32_t i = 0; i < kAliasCount; ++i) {
+    EXPECT_EQ(components.members[first.start + 2 + i], 5u + i);
+    EXPECT_EQ(components.indices_by_value_ordinal[5 + i],
+              components.indices_by_value_ordinal[0]);
+  }
+  const auto second = components.ranges[components.indices_by_value_ordinal[2]];
+  ASSERT_EQ(second.origin_count, 2u);
+  ASSERT_EQ(second.count, 2u);
+  EXPECT_EQ(components.members[second.start], 2u);
+  EXPECT_EQ(components.members[second.start + 1], 3u);
+  EXPECT_EQ(components.indices_by_value_ordinal[4], UINT32_MAX);
 }
 
 }  // namespace

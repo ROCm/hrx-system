@@ -14,6 +14,7 @@
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/local_value_domain.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,6 +24,10 @@ extern "C" {
 typedef struct loom_low_allocation_spill_plan_traffic_t {
   // Predicted stores needed by the current synthetic spill plan.
   uint32_t store_count;
+  // At least one use reads a proper subrange of the value, even if several
+  // such reads share a full-width reload. Rebuilding the whole producer at
+  // each narrow use would multiply materialization work.
+  bool has_narrow_uses;
   // Predicted bytes stored by the current synthetic spill plan.
   uint64_t store_bytes;
   // Predicted operand-use reloads in the current synthetic spill plan.
@@ -119,8 +124,8 @@ typedef struct loom_low_spill_materialization_action_t {
     struct {
       // Slice operation replaced and erased by this reload.
       loom_op_t* slice_op;
-      // Byte offset within the spill slot.
-      int64_t byte_offset;
+      // First logical register unit within the complete spilled value.
+      uint32_t unit_offset;
     } narrow_slice_reload;
     struct {
       // Earliest slice operation anchoring the shared reload.
@@ -217,10 +222,11 @@ typedef struct loom_low_spill_materialization_plan_t {
   const uint32_t* slot_representatives;
 } loom_low_spill_materialization_plan_t;
 
-typedef enum loom_low_spill_materialization_traffic_kind_e {
+enum loom_low_spill_materialization_traffic_kind_e {
   LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_STORE = 0,
   LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_RELOAD = 1,
-} loom_low_spill_materialization_traffic_kind_t;
+};
+typedef uint8_t loom_low_spill_materialization_traffic_kind_t;
 
 // Target-independent access shape for one materialization action. This is a
 // transient query result; the ordered action remains the retained source of
@@ -230,11 +236,35 @@ typedef struct loom_low_spill_materialization_traffic_t {
   loom_low_spill_materialization_traffic_kind_t kind;
   // True when the retained plan transfers rather than copies the carrier.
   bool moves_source;
+  // Defined register parts for a partial value; zero denotes a complete value.
+  uint32_t defined_parts;
   // Complete register value transferred by the action.
   loom_type_t value_type;
-  // Byte offset within the action's spill slot.
-  int64_t byte_offset;
+  // Number of logical register units in the complete spilled value. A target
+  // may store the components of these units in separate contiguous planes.
+  uint32_t slot_unit_count;
+  // First logical register unit transferred within the complete spilled value.
+  uint32_t unit_offset;
 } loom_low_spill_materialization_traffic_t;
+
+// Retains partial-value masks while allocation still owns the immutable domain.
+// Full-value classes and spill-free functions require no additional analysis.
+// Temporary mask/continuation storage belongs to |scratch_arena|.
+iree_status_t loom_low_allocation_spill_plan_define_parts(
+    const loom_local_value_domain_t* value_domain,
+    const loom_low_descriptor_set_t* descriptors,
+    const loom_low_allocation_assignment_t* assignments,
+    loom_low_allocation_spill_plan_t* spill_plans,
+    iree_host_size_t spill_plan_count, iree_arena_allocator_t* scratch_arena);
+
+// Projects a logical transfer onto a slot with uniformly strided units.
+// Targets with component planes consume the logical range directly instead.
+static inline int64_t loom_low_spill_materialization_traffic_byte_offset(
+    const loom_low_spill_materialization_traffic_t* traffic,
+    uint32_t slot_byte_size) {
+  return (int64_t)traffic->unit_offset *
+         (slot_byte_size / traffic->slot_unit_count);
+}
 
 enum {
   // Equal-byte full reloads are only worthwhile after removing enough reload
@@ -245,7 +275,7 @@ enum {
 // Computes the byte size and alignment required for spilling |assignment|.
 iree_status_t loom_low_allocation_spill_plan_layout(
     const loom_low_allocation_assignment_t* assignment,
-    uint16_t alloc_unit_bits, uint32_t* out_byte_size,
+    const loom_low_reg_class_t* reg_class, uint32_t* out_byte_size,
     uint32_t* out_byte_alignment);
 
 // Returns true and the complete result byte size when |use_op| is a slice of
@@ -294,17 +324,16 @@ iree_status_t loom_low_allocation_spill_plan_traffic_workspace_initialize(
 iree_status_t loom_low_allocation_spill_plan_traffic(
     const loom_module_t* module, const loom_cfg_graph_t* cfg_graph,
     const loom_low_allocation_assignment_t* assignment,
-    uint16_t alloc_unit_bits,
+    uint16_t spill_unit_bits,
     loom_low_allocation_spill_plan_traffic_workspace_t* workspace,
     loom_low_allocation_spill_plan_traffic_t* out_traffic);
 
 // Appends the spill materialization plan for |assignment| using its previously
 // computed |traffic|. The traffic fact must describe the same assignment and
-// allocation-unit width passed here.
+// memory width retained by |reg_class|.
 iree_status_t loom_low_allocation_spill_plan_append(
     const loom_low_allocation_assignment_t* assignment,
-    uint32_t assignment_index, uint16_t alloc_unit_bits,
-    loom_low_spill_slot_space_t spill_slot_space,
+    uint32_t assignment_index, const loom_low_reg_class_t* reg_class,
     const loom_low_allocation_spill_plan_traffic_t* traffic,
     loom_low_allocation_spill_plan_t* spill_plans,
     iree_host_size_t* inout_spill_plan_count);

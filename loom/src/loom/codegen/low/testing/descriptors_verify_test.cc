@@ -120,7 +120,9 @@ void InitializeTestTables(TestTables* tables) {
   tables->reg_classes[0].name_string_ref = TEST_STRING_REF(reg_gpr);
   tables->reg_classes[0].flags = LOOM_LOW_REG_CLASS_FLAG_VIRTUAL_ONLY;
   tables->reg_classes[0].alloc_unit_bits = 32;
-  tables->reg_classes[0].spill_class_id = LOOM_LOW_REG_CLASS_NONE;
+  tables->reg_classes[0].spill_unit_bits =
+      tables->reg_classes[0].alloc_unit_bits;
+  tables->reg_classes[0].spill_alignment_log2 = 0x40;
   tables->reg_classes[0].spill_slot_space = LOOM_LOW_SPILL_SLOT_SPACE_STACK;
 
   for (loom_low_reg_class_alt_t& alternative : tables->reg_class_alts) {
@@ -1092,6 +1094,15 @@ TEST(LowDescriptorsTest, RejectsUnprojectedStorageContinuationConstraint) {
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_low_descriptor_set_verify(&tables.set));
+}
+
+TEST(LowDescriptorsTest, AcceptsStorageContinuationOfAvailableParts) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  ConfigureAddStorageContinuation(&tables);
+  tables.reg_class_alts[2].register_part_id = LOOM_LOW_REGISTER_PART_NONE;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 }
 
 TEST(LowDescriptorsTest, RejectsOverlappingStorageContinuationParts) {

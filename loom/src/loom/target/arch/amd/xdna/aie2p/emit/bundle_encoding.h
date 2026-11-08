@@ -60,9 +60,8 @@ loom_aie2p_bundle_encoding_encode_structural_descriptor(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal);
 
-// Encodes an immediate LC, LS, or LE state-programming instruction.
-loom_aie2p_encoded_slot_t
-loom_aie2p_bundle_encoding_encode_loop_setup_descriptor(
+// Encodes a single-immediate instruction acting only on fixed native state.
+loom_aie2p_encoded_slot_t loom_aie2p_bundle_encoding_encode_state_immediate(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal, int64_t immediate);
 

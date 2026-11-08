@@ -48,6 +48,9 @@ from loom.target.arch.amd.xdna.aie2p.core_move_topology import (
     SCALAR_MOVE_TOPOLOGY,
 )
 from loom.target.arch.amd.xdna.aie2p.core_schedule_data import CORE_SCHEDULE_TABLE
+from loom.target.arch.amd.xdna.aie2p.core_stack_descriptors import (
+    STACK_SPILLABLE_CLASSES,
+)
 from loom.target.arch.amd.xdna.aie2p.core_stream_descriptors import (
     _SCALAR_STREAM_ISSUE_EVENT,
 )
@@ -540,6 +543,7 @@ _IMPLICIT_REGISTER_LAYOUT_OVERRIDES = {
     # The link register participates in both the 20-bit address and 32-bit
     # scalar domains. RET consumes the architectural return address.
     "lr": "mLRa",
+    "sp": "mSPm",
 }
 
 _IMPLICIT_REGISTER_LAYOUTS = {
@@ -621,10 +625,20 @@ def _reg_classes() -> tuple[RegClass, ...]:
             RegClass(
                 name=_low_register_class_name(machine_name),
                 alloc_unit_bits=machine_class.layout.register_size_bits,
-                spill_slot_space=SpillSlotSpace.PRIVATE,
+                spill_unit_bits=machine_class.layout.spill_size_bits,
+                spill_min_alignment=(machine_class.layout.spill_alignment_bits + 7)
+                // 8,
+                spill_max_alignment=64
+                if machine_name == "VEC256"
+                else (machine_class.layout.spill_alignment_bits + 7) // 8,
+                spill_slot_space=SpillSlotSpace.STACK,
                 flags=(
                     RegClassFlag.PHYSICAL,
-                    RegClassFlag.UNSPILLABLE,
+                    *(
+                        (RegClassFlag.UNSPILLABLE,)
+                        if machine_name not in STACK_SPILLABLE_CLASSES
+                        else ()
+                    ),
                     RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
                 ),
                 target_bank_id=target_bank_id,
@@ -654,6 +668,9 @@ def _reg_classes() -> tuple[RegClass, ...]:
             RegClass(
                 name=register_class_name,
                 alloc_unit_bits=layout.register_size_bits,
+                spill_unit_bits=layout.spill_size_bits,
+                spill_min_alignment=(layout.spill_alignment_bits + 7) // 8,
+                spill_max_alignment=(layout.spill_alignment_bits + 7) // 8,
                 spill_slot_space=SpillSlotSpace.PRIVATE,
                 flags=(
                     RegClassFlag.PHYSICAL,
@@ -957,16 +974,15 @@ def _storage_continuation_operand(
     register_outputs: tuple[MachineOperand, ...],
 ) -> Operand | None:
     part_name = spec.storage_continuation_part
-    if part_name is None:
+    if part_name is None and not spec.preserves_unwritten_parts:
         return None
+    if part_name is not None and spec.preserves_unwritten_parts:
+        raise ValueError(
+            f"{spec.form_name}: storage continuation has two source contracts"
+        )
     if len(register_outputs) != 1:
         raise ValueError(
             f"{spec.form_name}: storage continuation requires exactly one result"
-        )
-    part = descriptor_specs._REGISTER_PARTS_BY_NAME.get(part_name)
-    if part is None:
-        raise ValueError(
-            f"{spec.form_name}: unknown storage-continuation part {part_name}"
         )
     result_part_name = _operand_override_map(
         spec, spec.operand_register_parts, "register-part overrides"
@@ -976,15 +992,21 @@ def _storage_continuation_operand(
             f"{spec.form_name}: storage continuation requires a partial result"
         )
     result_part = descriptor_specs._REGISTER_PARTS_BY_NAME[result_part_name]
-    if result_part.reg_class != part.reg_class or result_part.mask & part.mask:
-        raise ValueError(
-            f"{spec.form_name}: storage continuation must preserve a disjoint "
-            "part of the result register"
-        )
+    if part_name is not None:
+        part = descriptor_specs._REGISTER_PARTS_BY_NAME.get(part_name)
+        if part is None:
+            raise ValueError(
+                f"{spec.form_name}: unknown storage-continuation part {part_name}"
+            )
+        if result_part.reg_class != part.reg_class or result_part.mask & part.mask:
+            raise ValueError(
+                f"{spec.form_name}: storage continuation must preserve a disjoint "
+                "part of the result register"
+            )
     return Operand(
         field_name="storage",
         role=OperandRole.OPERAND,
-        reg_alts=(RegClassAlt(part.reg_class, register_part=part.name),),
+        reg_alts=(RegClassAlt(result_part.reg_class, register_part=part_name),),
         flags=(OperandFlag.IMPLICIT, OperandFlag.STORAGE_CONTINUATION),
     )
 

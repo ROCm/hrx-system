@@ -55,6 +55,10 @@ typedef struct loom_aie2p_leaf_compile_options_t {
   const loom_low_allocation_reserved_range_t* allocation_reserved_ranges;
   // Number of records in |allocation_reserved_ranges|.
   iree_host_size_t allocation_reserved_range_count;
+  // Whether this function borrows the caller's stack rather than owning it.
+  bool is_helper;
+  // Largest admitted direct-helper frame, charged to the entry's stack domain.
+  uint64_t callee_stack_byte_length;
   // Whether the entry program preserves its incoming link across calls.
   bool preserve_link_register;
   // Reserved scalar register holding that incoming link.

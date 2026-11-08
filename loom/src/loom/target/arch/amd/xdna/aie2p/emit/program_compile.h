@@ -55,7 +55,8 @@ iree_status_t loom_aie2p_program_compiler_allocate(
 // Compiles |entry_function_op| and its producer-retained direct,
 // nonrecursive, module-internal helper callees into one tile contribution.
 // Helpers use scalar and pointer register ABI values, may reference immutable
-// data, and cannot have imports, mutable storage, spills, or child calls.
+// data, and have passed source admission for imports, authored mutable storage,
+// and child calls. Compiler-generated frames borrow the entry-owned stack.
 // |program_data| is the admitted union of entry and helper definitions in this
 // module. Its order agrees with the caller's physical placement plan.
 // Call-free entries retain the exact ordinary leaf compilation path and ignore

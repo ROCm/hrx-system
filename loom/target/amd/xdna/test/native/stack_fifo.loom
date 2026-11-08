@@ -1,0 +1,123 @@
+// Three independent streams compete for two co-indexed FIFO/register tuples.
+// Every half is checked: high halves are stored directly, while two pop rounds
+// check preserved FIFO contents and updated pointer/position associations.
+aie2p.target<array> @array_target
+
+low.func.def noinline schedule(locked) target<amd.xdna.aie2p.core> @fifo_pressure(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
+  %base1_initial = copy %input : reg<aie2p.ep> -> reg<aie2p.ep>
+  %base1 = padda %base1_initial, 128
+  %base2_initial = copy %base1 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %base2 = padda %base2_initial, 128
+  %pointer0 = mov.load-fifo.pointer %input
+  %low0 = vlda.load-fifo.low512 %input, 0
+  %fifo0 = vlda.load-fifo.high512 %input, %low0, 64
+  %position0 = mova.fifo.position 64
+  %pointer1 = mov.load-fifo.pointer %base1
+  %low1 = vlda.load-fifo.low512 %input, 128
+  %fifo1 = vlda.load-fifo.high512 %input, %low1, 192
+  %position1 = mova.fifo.position 64
+  %pointer2 = mov.load-fifo.pointer %base2
+  %low2 = vlda.load-fifo.low512 %input, 256
+  %fifo2 = vlda.load-fifo.high512 %input, %low2, 320
+  %position2 = mova.fifo.position 64
+  low.br ^consume
+^consume:
+  %high_initial = copy %output : reg<aie2p.ep> -> reg<aie2p.ep>
+  %high_output = padda %high_initial, 384
+  vst.load-fifo.high512 %fifo0, %high_output, 0
+  vst.load-fifo.high512 %fifo1, %high_output, 64
+  vst.load-fifo.high512 %fifo2, %high_output, 128
+  %data0, %next_pointer0, %next_fifo0, %next_position0 = vlda.pop.512.i32x16 %pointer0, %fifo0, %position0
+  vst.512.i32x16 %data0, %output, 0
+  %data1, %next_pointer1, %next_fifo1, %next_position1 = vlda.pop.512.i32x16 %pointer1, %fifo1, %position1
+  vst.512.i32x16 %data1, %output, 64
+  %data2, %next_pointer2, %next_fifo2, %next_position2 = vlda.pop.512.i32x16 %pointer2, %fifo2, %position2
+  vst.512.i32x16 %data2, %output, 128
+  %second0, %final_pointer0, %final_fifo0, %final_position0 = vldb.pop.512.i32x16 %next_pointer0, %next_fifo0, %next_position0
+  vst.512.i32x16 %second0, %output, 192
+  %second1, %final_pointer1, %final_fifo1, %final_position1 = vldb.pop.512.i32x16 %next_pointer1, %next_fifo1, %next_position1
+  vst.512.i32x16 %second1, %output, 256
+  %second2, %final_pointer2, %final_fifo2, %final_position2 = vldb.pop.512.i32x16 %next_pointer2, %next_fifo2, %next_position2
+  vst.512.i32x16 %second2, %output, 320
+  return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @fifo_stack() run(%input_arg: buffer, %output_arg: buffer) {
+  %input, %output = buffer.assume.alignment %input_arg, %output_arg {minimum_alignment = 64} : buffer, buffer
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %origin = index.constant 0 : offset
+  %input_bytes = index.constant 512 : offset
+  %output_bytes = index.constant 576 : offset
+  %capacity = index.constant 1 : index
+  %input_storage = buffer.alloca<workgroup> pool(%memory) align(64) %input_bytes : buffer
+  %input_slots = buffer.view %input_storage[%origin] : buffer -> view<1x128xi32>
+  %incoming = channel.bind<fifo> %input_slots, %capacity : view<1x128xi32>, index -> channel<tile<128xi32>>
+  %output_storage = buffer.alloca<workgroup> pool(%memory) align(64) %output_bytes : buffer
+  %output_slots = buffer.view %output_storage[%origin] : buffer -> view<1x144xi32>
+  %outgoing = channel.bind<fifo> %output_slots, %capacity : view<1x144xi32>, index -> channel<tile<144xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %external_input = buffer.view %input[%origin] : buffer -> view<128xi32>
+    %write, %destination = channel.reserve %incoming : channel<tile<128xi32>> -> (write<tile<128xi32>>, view<128xi32>)
+    %ingress = kernel.async.copy %external_input to %destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<128xi32> to view<128xi32> -> kernel.async.token
+    %incoming_group = kernel.async.group %ingress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %incoming_group {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<128xi32>>
+    %read, %source = channel.acquire %outgoing : channel<tile<144xi32>> -> (read<tile<144xi32>>, view<144xi32>)
+    %external_output = buffer.view %output[%origin] : buffer -> view<144xi32>
+    %egress = kernel.async.copy %source to %external_output {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<144xi32> to view<144xi32> -> kernel.async.token
+    %outgoing_group = kernel.async.group %egress : kernel.async.token -> kernel.async.group
+    kernel.async.wait %outgoing_group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<144xi32>>
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %read, %input_view = channel.acquire %incoming : channel<tile<128xi32>> -> (read<tile<128xi32>>, view<128xi32>)
+    %write, %output_view = channel.reserve %outgoing : channel<tile<144xi32>> -> (write<tile<144xi32>>, view<144xi32>)
+    low.invoke @fifo_pressure(%input_storage, %output_storage) : (buffer, buffer)
+    channel.publish %write : write<tile<144xi32>>
+    channel.release %read : read<tile<128xi32>>
+  }
+}
+
+func.def @fifo_reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %inputs = buffer.view %input[%origin] : buffer -> view<128xi32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<144xi32>
+  %begin = index.constant 0 : index
+  %streams = index.constant 3 : index
+  %step = index.constant 1 : index
+  %width = index.constant 16 : index
+  %input_stride = index.constant 32 : index
+  %round_stride = index.constant 48 : index
+  %high_output = index.constant 96 : index
+  scf.for %stream = [%begin to %streams step %step] {
+    %input_base = index.mul %stream, %input_stride : index
+    %output_base = index.mul %stream, %width : index
+    scf.for %element = [%begin to %width step %step] {
+      %low_index = index.add %input_base, %element : index
+      %high_index = index.add %low_index, %width : index
+      %first_index = index.add %output_base, %element : index
+      %second_index = index.add %first_index, %round_stride : index
+      %snapshot_index = index.add %first_index, %high_output : index
+      %low = view.load %inputs[%low_index] : view<128xi32> -> i32
+      %high = view.load %inputs[%high_index] : view<128xi32> -> i32
+      view.store %low, %outputs[%first_index] : i32, view<144xi32>
+      view.store %high, %outputs[%second_index] : i32, view<144xi32>
+      view.store %high, %outputs[%snapshot_index] : i32, view<144xi32>
+    }
+  }
+  func.return
+}
+
+check.scenario public @coindexed_fifo_spills {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<128xi32>
+    %output_storage = check.generate.fill value(-1515870811) : tensor<176xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<176xi32> -> tensor<144xi32>
+    check.compare<@fifo_stack, @fifo_reference>(%input, %output) : (tensor<128xi32>, tensor<144xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<128xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<176xi32>
+    }
+  }
+  check.return
+}

@@ -11,8 +11,8 @@
 #include "iree/base/internal/math.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/schedule/call_pressure.h"
+#include "loom/codegen/low/schedule/completion_pressure.h"
 #include "loom/codegen/low/schedule/pressure_lifetime.h"
-#include "loom/codegen/low/schedule/required_pressure.h"
 #include "loom/target/residency.h"
 
 static uint64_t loom_low_schedule_project_live_units(
@@ -27,7 +27,7 @@ static uint64_t loom_low_schedule_project_live_units(
   return current_live_units + added_units;
 }
 
-static uint32_t loom_low_schedule_unspillable_completion_capacity(
+static uint32_t loom_low_schedule_constrained_completion_capacity(
     const loom_low_schedule_build_state_t* state, uint16_t reg_class_id) {
   const uint16_t pressure_set_id =
       loom_low_schedule_reg_class_pressure_set_id(state, reg_class_id);
@@ -42,28 +42,28 @@ iree_status_t loom_low_schedule_target_pressure_initialize_completion_domains(
   const loom_low_descriptor_set_t* descriptor_set =
       state->target.descriptor_set;
 
-  // The domain-ID table doubles as a required-class marker until the class
+  // The domain-ID table doubles as a constrained-class marker until the class
   // scan replaces each marker with its final dense ID.
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       state->scratch_arena, descriptor_set->reg_class_count,
       sizeof(*state->pressure_limits
-                  .unspillable_completion_domain_ids_by_reg_class),
+                  .constrained_completion_domain_ids_by_reg_class),
       (void**)&state->pressure_limits
-          .unspillable_completion_domain_ids_by_reg_class));
-  memset(state->pressure_limits.unspillable_completion_domain_ids_by_reg_class,
+          .constrained_completion_domain_ids_by_reg_class));
+  memset(state->pressure_limits.constrained_completion_domain_ids_by_reg_class,
          0xFF,
          descriptor_set->reg_class_count *
              sizeof(*state->pressure_limits
-                         .unspillable_completion_domain_ids_by_reg_class));
+                         .constrained_completion_domain_ids_by_reg_class));
   for (loom_value_ordinal_t value_ordinal = 0;
        value_ordinal < state->value_domain->value_count; ++value_ordinal) {
     const uint16_t reg_class_id =
         state->values[value_ordinal].register_class_id;
     if (reg_class_id != LOOM_LOW_REG_CLASS_NONE &&
-        loom_low_schedule_value_requires_register(
+        loom_low_schedule_value_has_constrained_register(
             &state->values[value_ordinal])) {
       state->pressure_limits
-          .unspillable_completion_domain_ids_by_reg_class[reg_class_id] = 0;
+          .constrained_completion_domain_ids_by_reg_class[reg_class_id] = 0;
     }
   }
 
@@ -72,11 +72,11 @@ iree_status_t loom_low_schedule_target_pressure_initialize_completion_domains(
        reg_class_id < descriptor_set->reg_class_count; ++reg_class_id) {
     uint16_t* completion_domain_id =
         &state->pressure_limits
-             .unspillable_completion_domain_ids_by_reg_class[reg_class_id];
+             .constrained_completion_domain_ids_by_reg_class[reg_class_id];
     if (*completion_domain_id == UINT16_MAX) {
       continue;
     }
-    const uint32_t capacity = loom_low_schedule_unspillable_completion_capacity(
+    const uint32_t capacity = loom_low_schedule_constrained_completion_capacity(
         state, (uint16_t)reg_class_id);
     if (capacity == UINT32_MAX) {
       *completion_domain_id = UINT16_MAX;
@@ -91,17 +91,17 @@ iree_status_t loom_low_schedule_target_pressure_initialize_completion_domains(
     }
     loom_low_schedule_pressure_set_limit_t* pressure_set_limit =
         &state->pressure_limits.pressure_sets[pressure_set_id];
-    if (pressure_set_limit->unspillable_completion_domain_id == UINT16_MAX) {
-      pressure_set_limit->unspillable_completion_domain_id =
+    if (pressure_set_limit->constrained_completion_domain_id == UINT16_MAX) {
+      pressure_set_limit->constrained_completion_domain_id =
           (uint16_t)completion_domain_count++;
     }
     *completion_domain_id =
-        pressure_set_limit->unspillable_completion_domain_id;
+        pressure_set_limit->constrained_completion_domain_id;
   }
   if (completion_domain_count >= UINT16_MAX) {
     return iree_make_status(
         IREE_STATUS_RESOURCE_EXHAUSTED,
-        "low schedule bounded unspillable storage domain count exceeds "
+        "low schedule bounded constrained storage domain count exceeds "
         "uint16_t capacity");
   }
   if (completion_domain_count == 0) {
@@ -110,34 +110,34 @@ iree_status_t loom_low_schedule_target_pressure_initialize_completion_domains(
 
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       state->scratch_arena, completion_domain_count,
-      sizeof(*state->pressure_limits.unspillable_completion_domains),
-      (void**)&state->pressure_limits.unspillable_completion_domains));
+      sizeof(*state->pressure_limits.constrained_completion_domains),
+      (void**)&state->pressure_limits.constrained_completion_domains));
   for (uint32_t reg_class_id = 0;
        reg_class_id < descriptor_set->reg_class_count; ++reg_class_id) {
     const uint16_t completion_domain_id =
         state->pressure_limits
-            .unspillable_completion_domain_ids_by_reg_class[reg_class_id];
+            .constrained_completion_domain_ids_by_reg_class[reg_class_id];
     if (completion_domain_id == UINT16_MAX) {
       continue;
     }
     state->pressure_limits
-        .unspillable_completion_domains[completion_domain_id] =
+        .constrained_completion_domains[completion_domain_id] =
         (loom_low_schedule_completion_domain_t){
-            .capacity = loom_low_schedule_unspillable_completion_capacity(
+            .capacity = loom_low_schedule_constrained_completion_capacity(
                 state, (uint16_t)reg_class_id),
             .reg_class_id = (uint16_t)reg_class_id,
         };
   }
-  state->pressure_limits.unspillable_completion_domain_count =
+  state->pressure_limits.constrained_completion_domain_count =
       (uint16_t)completion_domain_count;
   const iree_host_size_t value_count = state->value_domain->value_count;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(state->scratch_arena, value_count,
-                                sizeof(*state->value_unspillable_completions),
-                                (void**)&state->value_unspillable_completions));
+                                sizeof(*state->value_constrained_completions),
+                                (void**)&state->value_constrained_completions));
   for (loom_value_ordinal_t ordinal = 0; ordinal < value_count; ++ordinal) {
-    state->value_unspillable_completions[ordinal] =
-        (loom_low_schedule_unspillable_completion_path_t){
+    state->value_constrained_completions[ordinal] =
+        (loom_low_schedule_constrained_completion_path_t){
             .activation_units = UINT32_MAX,
             .sink = LOOM_LOW_SCHEDULE_NODE_NONE,
         };
@@ -350,8 +350,8 @@ static void loom_low_schedule_score_candidate_pressure_limit(
     loom_low_schedule_candidate_score_t* score, uint16_t reg_class_id,
     uint32_t limit_units, uint64_t current_live_units, int64_t delta_units,
     uint64_t transient_added_units, uint32_t packing_reserve_units,
-    uint32_t unspillable_activation_units, bool requires_hard_register_capacity,
-    bool opens_required_lifetime) {
+    uint32_t constrained_activation_units, bool requires_hard_register_capacity,
+    bool opens_constrained_lifetime) {
   if (limit_units == UINT32_MAX) {
     return;
   }
@@ -371,42 +371,42 @@ static void loom_low_schedule_score_candidate_pressure_limit(
       candidate_live_units > current_live_units) {
     if (requires_hard_register_capacity) {
       score->flags |=
-          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY;
     } else {
       score->flags |= LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REGISTER_DEBT;
       loom_low_schedule_register_debt_word_t* debt =
           &score->register_debt[reg_class_id / 64];
       const uint64_t bank = UINT64_C(1) << (reg_class_id % 64);
       debt->banks |= bank;
-      if (opens_required_lifetime) {
+      if (opens_constrained_lifetime) {
         score->flags |=
-            LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REQUIRED_REGISTER_DEBT;
-        debt->required_banks |= bank;
+            LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_CONSTRAINED_REGISTER_DEBT;
+        debt->constrained_banks |= bank;
       }
     }
   }
   const uint64_t activation_reserve_units =
       delta_units > 0 ? score->activation_reserve_units : 0;
-  const uint64_t unspillable_activated_live_units =
+  const uint64_t constrained_activated_live_units =
       iree_math_saturating_add_u64(projected_live_units,
-                                   unspillable_activation_units);
+                                   constrained_activation_units);
   uint64_t required_live_units = iree_math_saturating_add_u64(
       projected_live_units, activation_reserve_units);
   required_live_units = iree_max(required_live_units, candidate_live_units);
   required_live_units =
       iree_math_saturating_add_u64(required_live_units, packing_reserve_units);
-  uint64_t unspillable_required_live_units =
-      iree_max(unspillable_activated_live_units, candidate_live_units);
-  unspillable_required_live_units = iree_math_saturating_add_u64(
-      unspillable_required_live_units, packing_reserve_units);
+  uint64_t constrained_required_live_units =
+      iree_max(constrained_activated_live_units, candidate_live_units);
+  constrained_required_live_units = iree_math_saturating_add_u64(
+      constrained_required_live_units, packing_reserve_units);
   // Retained per-domain activation is an exact warning about a hard capacity,
   // while the generic activation reserve still defines ordinary distance to
   // that capacity. Let domain activation add debt when it reaches the limit,
   // but do not let a fitting downstream transaction switch the whole ready
   // frontier into pressure recovery early.
-  if (unspillable_required_live_units >= limit_units) {
+  if (constrained_required_live_units >= limit_units) {
     required_live_units =
-        iree_max(required_live_units, unspillable_required_live_units);
+        iree_max(required_live_units, constrained_required_live_units);
   }
   if (projected_live_units >= limit_units) {
     const uint64_t persistent_limit_debt =
@@ -461,24 +461,24 @@ static void loom_low_schedule_score_candidate_pressure_limit_for_class(
                     .late_released_units[reg_class_id])
           : 0;
   const uint16_t completion_domain_id =
-      loom_low_schedule_unspillable_completion_domain_id(state, reg_class_id);
-  const uint32_t unspillable_activation_units =
+      loom_low_schedule_constrained_completion_domain_id(state, reg_class_id);
+  const uint32_t constrained_activation_units =
       completion_domain_id != UINT16_MAX &&
-              pressure_state->candidate_unspillable_activation_units != NULL
+              pressure_state->candidate_constrained_activation_units != NULL
           ? pressure_state
-                ->candidate_unspillable_activation_units[completion_domain_id]
+                ->candidate_constrained_activation_units[completion_domain_id]
           : 0;
   loom_low_schedule_score_candidate_pressure_limit(
       score, reg_class_id, state->pressure_limits.by_reg_class[reg_class_id],
       pressure_state->current_live_units_by_reg_class[reg_class_id],
       delta_units, transient_added_units,
       pressure_state->packing_reserve_units_by_reg_class[reg_class_id],
-      unspillable_activation_units,
+      constrained_activation_units,
       iree_all_bits_set(
           state->target.descriptor_set->reg_classes[reg_class_id].flags,
           LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE),
       completion_domain_id != UINT16_MAX &&
-          pressure_state->required_pressure[completion_domain_id]
+          pressure_state->completion_pressure[completion_domain_id]
               .candidate_opens_lifetime);
 }
 
@@ -492,12 +492,12 @@ static void loom_low_schedule_score_candidate_pressure_limit_for_pressure_set(
       state->pressure_limits.pressure_sets[pressure_set_id]
           .representative_reg_class_id;
   const uint16_t completion_domain_id =
-      loom_low_schedule_unspillable_completion_domain_id(state, reg_class_id);
-  const uint32_t unspillable_activation_units =
+      loom_low_schedule_constrained_completion_domain_id(state, reg_class_id);
+  const uint32_t constrained_activation_units =
       completion_domain_id != UINT16_MAX &&
-              pressure_state->candidate_unspillable_activation_units != NULL
+              pressure_state->candidate_constrained_activation_units != NULL
           ? pressure_state
-                ->candidate_unspillable_activation_units[completion_domain_id]
+                ->candidate_constrained_activation_units[completion_domain_id]
           : 0;
   loom_low_schedule_score_candidate_pressure_limit(
       score, reg_class_id,
@@ -507,11 +507,11 @@ static void loom_low_schedule_score_candidate_pressure_limit_for_pressure_set(
           record->candidate_delta_units,
           record->candidate_lifetime.early_added_units,
           record->candidate_lifetime.late_released_units),
-      record->packing_reserve_units, unspillable_activation_units,
+      record->packing_reserve_units, constrained_activation_units,
       state->pressure_limits.pressure_sets[pressure_set_id]
           .all_classes_unspillable,
       completion_domain_id != UINT16_MAX &&
-          pressure_state->required_pressure[completion_domain_id]
+          pressure_state->completion_pressure[completion_domain_id]
               .candidate_opens_lifetime);
 }
 
@@ -1069,13 +1069,13 @@ static bool loom_low_schedule_candidate_reaches_active_packing_completion(
          candidate_completion_sink == active_completion_sink;
 }
 
-uint32_t loom_low_schedule_target_pressure_full_unspillable_completion_capacity(
+uint32_t loom_low_schedule_target_pressure_full_constrained_completion_capacity(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_pressure_state_t* pressure_state,
     uint16_t completion_domain_id) {
   const loom_low_schedule_completion_domain_t* domain =
       &state->pressure_limits
-           .unspillable_completion_domains[completion_domain_id];
+           .constrained_completion_domains[completion_domain_id];
   const uint16_t reg_class_id = domain->reg_class_id;
   const uint16_t pressure_set_id =
       loom_low_schedule_reg_class_pressure_set_id(state, reg_class_id);
@@ -1087,13 +1087,13 @@ uint32_t loom_low_schedule_target_pressure_full_unspillable_completion_capacity(
   return current_live_units >= domain->capacity ? domain->capacity : UINT32_MAX;
 }
 
-static uint64_t loom_low_schedule_target_pressure_unspillable_transaction_units(
+static uint64_t loom_low_schedule_target_pressure_constrained_transaction_units(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_pressure_state_t* pressure_state,
     uint16_t completion_domain_id) {
   const loom_low_schedule_completion_domain_t* domain =
       &state->pressure_limits
-           .unspillable_completion_domains[completion_domain_id];
+           .constrained_completion_domains[completion_domain_id];
   const uint16_t reg_class_id = domain->reg_class_id;
   const uint16_t pressure_set_id =
       loom_low_schedule_reg_class_pressure_set_id(state, reg_class_id);
@@ -1136,7 +1136,7 @@ static uint64_t loom_low_schedule_target_pressure_unspillable_transaction_units(
                                             candidate_transient_added_units));
   const uint32_t activation_units =
       pressure_state
-          ->candidate_unspillable_activation_units[completion_domain_id];
+          ->candidate_constrained_activation_units[completion_domain_id];
   const uint64_t activated_live_units =
       iree_math_saturating_add_u64(projected_live_units, activation_units);
   return iree_math_saturating_add_u64(
@@ -1144,30 +1144,30 @@ static uint64_t loom_low_schedule_target_pressure_unspillable_transaction_units(
       packing_reserve_units);
 }
 
-static void loom_low_schedule_score_active_unspillable_completions(
+static void loom_low_schedule_score_active_constrained_completions(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state, uint32_t candidate_node,
     loom_low_schedule_candidate_score_t* score) {
   const uint16_t completion_domain_count =
-      state->pressure_limits.unspillable_completion_domain_count;
+      state->pressure_limits.constrained_completion_domain_count;
   for (uint16_t completion_domain_id = 0;
        completion_domain_id < completion_domain_count; ++completion_domain_id) {
     const loom_low_schedule_completion_domain_t* domain =
         &state->pressure_limits
-             .unspillable_completion_domains[completion_domain_id];
+             .constrained_completion_domains[completion_domain_id];
     const uint32_t capacity = domain->capacity;
-    const loom_low_schedule_required_pressure_t* required =
-        &pressure_state->required_pressure[completion_domain_id];
+    const loom_low_schedule_completion_pressure_t* required =
+        &pressure_state->completion_pressure[completion_domain_id];
     if (required->candidate_delta_units > 0 &&
         required->live_units + (uint64_t)required->candidate_delta_units >=
             capacity) {
       const uint32_t sink = loom_low_schedule_completion_demand_select(
-          &pressure_state->unspillable_completion_demand, state->nodes,
+          &pressure_state->constrained_completion_demand, state->nodes,
           LOOM_LOW_SCHEDULE_COMPLETION_SELECTION_TRANSACTION,
           completion_domain_id);
       if (sink != LOOM_LOW_SCHEDULE_NODE_NONE &&
           !loom_low_schedule_completion_demand_contains(
-              &pressure_state->unspillable_completion_demand,
+              &pressure_state->constrained_completion_demand,
               LOOM_LOW_SCHEDULE_COMPLETION_SELECTION_TRANSACTION,
               completion_domain_id, candidate_node)) {
         score->flags |=
@@ -1180,58 +1180,58 @@ static void loom_low_schedule_score_active_unspillable_completions(
       }
     }
     const bool can_improve_active =
-        capacity < score->active_unspillable_completion_capacity;
+        capacity < score->active_constrained_completion_capacity;
     const bool can_improve_transaction_final =
-        capacity < score->active_unspillable_transaction_final_capacity;
+        capacity < score->active_constrained_transaction_final_capacity;
     if (!can_improve_active && !can_improve_transaction_final) {
       continue;
     }
     if (can_improve_active &&
-        loom_low_schedule_target_pressure_full_unspillable_completion_capacity(
+        loom_low_schedule_target_pressure_full_constrained_completion_capacity(
             state, pressure_state, completion_domain_id) != UINT32_MAX) {
       const uint32_t final_sink = loom_low_schedule_completion_demand_select(
-          &pressure_state->unspillable_completion_demand, state->nodes,
+          &pressure_state->constrained_completion_demand, state->nodes,
           LOOM_LOW_SCHEDULE_COMPLETION_SELECTION_FINAL, completion_domain_id);
       if (final_sink != LOOM_LOW_SCHEDULE_NODE_NONE &&
           loom_low_schedule_completion_demand_contains(
-              &pressure_state->unspillable_completion_demand,
+              &pressure_state->constrained_completion_demand,
               LOOM_LOW_SCHEDULE_COMPLETION_SELECTION_FINAL,
               completion_domain_id, candidate_node)) {
-        score->active_unspillable_completion_capacity = capacity;
-        score->active_unspillable_completion_domain_id = completion_domain_id;
+        score->active_constrained_completion_capacity = capacity;
+        score->active_constrained_completion_domain_id = completion_domain_id;
       }
     }
-    if (loom_low_schedule_target_pressure_unspillable_transaction_units(
+    if (loom_low_schedule_target_pressure_constrained_transaction_units(
             state, pressure_state, completion_domain_id) < capacity) {
       continue;
     }
     const uint32_t transaction_sink =
         loom_low_schedule_completion_demand_select(
-            &pressure_state->unspillable_completion_demand, state->nodes,
+            &pressure_state->constrained_completion_demand, state->nodes,
             LOOM_LOW_SCHEDULE_COMPLETION_SELECTION_TRANSACTION,
             completion_domain_id);
     if (transaction_sink == LOOM_LOW_SCHEDULE_NODE_NONE ||
         !loom_low_schedule_completion_demand_contains(
-            &pressure_state->unspillable_completion_demand,
+            &pressure_state->constrained_completion_demand,
             LOOM_LOW_SCHEDULE_COMPLETION_SELECTION_TRANSACTION,
             completion_domain_id, candidate_node)) {
       continue;
     }
     if (can_improve_active) {
-      score->active_unspillable_completion_capacity = capacity;
-      score->active_unspillable_completion_domain_id = completion_domain_id;
+      score->active_constrained_completion_capacity = capacity;
+      score->active_constrained_completion_domain_id = completion_domain_id;
     }
     if (can_improve_transaction_final) {
       const uint32_t final_sink =
           loom_low_schedule_completion_demand_select_transaction_final(
-              &pressure_state->unspillable_completion_demand, state->nodes,
+              &pressure_state->constrained_completion_demand, state->nodes,
               completion_domain_id);
       if (final_sink != LOOM_LOW_SCHEDULE_NODE_NONE &&
           loom_low_schedule_completion_demand_contains(
-              &pressure_state->unspillable_completion_demand,
+              &pressure_state->constrained_completion_demand,
               LOOM_LOW_SCHEDULE_COMPLETION_SELECTION_TRANSACTION_FINAL,
               completion_domain_id, candidate_node)) {
-        score->active_unspillable_transaction_final_capacity = capacity;
+        score->active_constrained_transaction_final_capacity = capacity;
       }
     }
   }
@@ -1323,7 +1323,7 @@ void loom_low_schedule_score_candidate_register_packing_resources(
                          LOOM_LOW_REGISTER_PACKING_RESOURCE_FLAG_UNSPILLABLE) &&
         candidate_units > capacity && candidate_units > current_units) {
       score->flags |=
-          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY;
     }
     const uint64_t required_units = iree_max(candidate_units, activated_units);
     const uint64_t units_until_capacity =
@@ -1410,9 +1410,9 @@ void loom_low_schedule_target_pressure_score_candidate(
       state, pressure_state, candidate_node_index, score);
   loom_low_schedule_score_candidate_pressure_limits(state, pressure_state,
                                                     score);
-  loom_low_schedule_required_pressure_score_candidate(state, pressure_state,
-                                                      score);
-  loom_low_schedule_score_active_unspillable_completions(
+  loom_low_schedule_completion_pressure_score_candidate(state, pressure_state,
+                                                        score);
+  loom_low_schedule_score_active_constrained_completions(
       state, pressure_state, candidate_node_index, score);
   loom_low_schedule_call_pressure_score_candidate(state, pressure_state,
                                                   candidate_node_index, score);

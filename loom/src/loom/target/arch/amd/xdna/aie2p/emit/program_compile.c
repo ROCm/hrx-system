@@ -50,6 +50,38 @@ struct loom_aie2p_program_compiler_t {
   loom_target_compile_report_t** helper_reports_by_symbol;
 };
 
+typedef struct loom_aie2p_program_diagnostics_t {
+  // Private module owning native operations and their source locations.
+  const loom_module_t* module;
+  // Invocation arena for contextualized related-operation records.
+  iree_arena_allocator_t* arena;
+  // Caller-owned sink whose active module may be the prepared source.
+  iree_diagnostic_emitter_t emitter;
+} loom_aie2p_program_diagnostics_t;
+
+static iree_status_t loom_aie2p_program_emit_diagnostic(
+    void* user_data, const loom_diagnostic_emission_t* emission) {
+  const loom_aie2p_program_diagnostics_t* diagnostics = user_data;
+  loom_diagnostic_emission_t contextual = *emission;
+  if (contextual.module == NULL) {
+    contextual.module = diagnostics->module;
+  }
+  if (emission->related_op_count != 0) {
+    loom_diagnostic_related_op_t* related = NULL;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        diagnostics->arena, emission->related_op_count, sizeof(*related),
+        (void**)&related));
+    for (iree_host_size_t i = 0; i < emission->related_op_count; ++i) {
+      related[i] = emission->related_ops[i];
+      if (related[i].module == NULL) {
+        related[i].module = diagnostics->module;
+      }
+    }
+    contextual.related_ops = related;
+  }
+  return iree_diagnostic_emit(diagnostics->emitter, &contextual);
+}
+
 iree_status_t loom_aie2p_program_compiler_allocate(
     loom_module_t* module, iree_arena_allocator_t* arena,
     const loom_target_compile_report_t* report_template,
@@ -437,6 +469,7 @@ static iree_status_t loom_aie2p_program_compile_impl(
           compiler->requested_detail_flags;
     }
     const loom_aie2p_leaf_compile_options_t helper_options = {
+        .is_helper = true,
         .function_target_facts = helper_input->function_target_facts,
         .memory_accesses = helper_input->memory_accesses,
         .loop_execution = helper_input->loop_execution,
@@ -498,6 +531,11 @@ static iree_status_t loom_aie2p_program_compile_impl(
     resolved_entry_options.allocation_reserved_range_count =
         entry_reservation_count;
   }
+  for (iree_host_size_t i = 1; i <= direct_helpers.count; ++i) {
+    resolved_entry_options.callee_stack_byte_length =
+        iree_max(resolved_entry_options.callee_stack_byte_length,
+                 contributions[i].realization.stack_frame_byte_length);
+  }
   resolved_entry_options.preserve_link_register = may_return;
   resolved_entry_options.link_shadow_register = link_shadow_register;
   bool entry_compiled = false;
@@ -552,16 +590,26 @@ iree_status_t loom_aie2p_program_compile(
   *out_compiled = false;
   *out_contribution = (loom_aie2p_leaf_contribution_t){0};
   iree_arena_allocator_t* arena = compiler->arena;
+  loom_aie2p_program_diagnostics_t diagnostics = {
+      .module = compiler->module,
+      .arena = arena,
+      .emitter = entry_options->diagnostic_emitter,
+  };
+  loom_aie2p_leaf_compile_options_t options = *entry_options;
+  options.diagnostic_emitter = (iree_diagnostic_emitter_t){
+      .fn = loom_aie2p_program_emit_diagnostic,
+      .user_data = &diagnostics,
+  };
   if (direct_helpers.count == 0) {
     return loom_aie2p_leaf_compile(compiler->module, entry_function_op,
-                                   entry_options, arena, out_compiled,
+                                   &options, arena, out_compiled,
                                    out_contribution);
   }
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(arena->block_pool, &scratch_arena);
   const iree_status_t status = loom_aie2p_program_compile_impl(
       compiler, entry_function_op, may_return, direct_helpers, program_data,
-      entry_options, arena, &scratch_arena, out_compiled, out_contribution);
+      &options, arena, &scratch_arena, out_compiled, out_contribution);
   iree_arena_deinitialize(&scratch_arena);
   return status;
 }

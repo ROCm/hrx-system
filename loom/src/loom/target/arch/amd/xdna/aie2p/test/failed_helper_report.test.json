@@ -21,11 +21,9 @@
           "stderr": {
             "contains": {
               "unordered": [
-                "BACKEND/005",
-                "aie2p.edj",
-                "budget 8",
-                "peak 9",
-                "unspillable-register-exhausted"
+                "BACKEND/044",
+                "unresolved state dependency",
+                "amd.xdna.aie2p.add.carry.i32"
               ]
             }
           },
@@ -39,7 +37,7 @@
                   "\"source_op\":\"scalar.mulf\"",
                   "\"plan_key\":\"exact_binary32\"",
                   "\"maximum_emitted_low_op_count\":163",
-                  "\"allocation_failure_rows\":{\"count\":1"
+                  "\"planning\":{\"frame_build_count\":1,\"allocation_run_count\":0"
                 ]
               }
             }

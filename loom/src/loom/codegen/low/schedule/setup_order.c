@@ -73,13 +73,13 @@ static bool loom_low_schedule_setup_order_is_member(
     // and issue-slot scheduling instead of acquiring these ordering edges.
     const loom_low_schedule_value_record_t* result =
         &state->values[loom_low_schedule_node_const_result_ordinals(node)[0]];
-    if (!loom_low_schedule_value_requires_register(result)) {
+    if (!loom_low_schedule_value_has_constrained_register(result)) {
       return false;
     }
-    const uint16_t domain = loom_low_schedule_unspillable_completion_domain_id(
+    const uint16_t domain = loom_low_schedule_constrained_completion_domain_id(
         state, result->register_class_id);
     return domain != UINT16_MAX && result->unit_count == 1 &&
-           state->pressure_limits.unspillable_completion_domains[domain]
+           state->pressure_limits.constrained_completion_domains[domain]
                    .capacity == 1;
   }
   if (node->result_count != 1) {
@@ -96,10 +96,10 @@ static bool loom_low_schedule_setup_order_is_member(
          (node->operand_count != 0 || requires_register);
 }
 
-// Artificial prerequisites must preserve the footprint of storage that
-// allocation cannot spill. Keep conversions and contractions available
-// to pressure scheduling so those inputs can retire before independent work.
-static bool loom_low_schedule_setup_order_preserves_required_pressure(
+// Artificial prerequisites must preserve the footprint of constrained storage.
+// Keep conversions and contractions available to pressure scheduling so those
+// inputs can retire before independent work.
+static bool loom_low_schedule_setup_order_preserves_completion_pressure(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_node_t* node) {
   if (node->result_count != 1) {
@@ -120,7 +120,7 @@ static bool loom_low_schedule_setup_order_preserves_required_pressure(
     const loom_low_schedule_value_record_t* operand =
         &state->values[operands[i]];
     if (operand->unit_count == 0 ||
-        !loom_low_schedule_value_requires_register(operand)) {
+        !loom_low_schedule_value_has_constrained_register(operand)) {
       continue;
     }
     if (operand->register_class_id != result->register_class_id &&
@@ -153,7 +153,7 @@ static bool loom_low_schedule_setup_order_preserves_required_pressure(
   if (operand_units == 0) {
     return true;
   }
-  return loom_low_schedule_value_requires_register(result) &&
+  return loom_low_schedule_value_has_constrained_register(result) &&
          operand_units <= result->unit_count &&
          !iree_any_bit_set(node->flags,
                            LOOM_LOW_SCHEDULE_NODE_FLAG_EARLY_CLOBBER |
@@ -162,7 +162,8 @@ static bool loom_low_schedule_setup_order_preserves_required_pressure(
 
 static bool loom_low_schedule_setup_order_mark_node(
     loom_low_schedule_build_state_t* state, loom_low_schedule_node_t* node) {
-  if (!loom_low_schedule_setup_order_preserves_required_pressure(state, node)) {
+  if (!loom_low_schedule_setup_order_preserves_completion_pressure(state,
+                                                                   node)) {
     return false;
   }
   node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP;
@@ -176,7 +177,7 @@ static void loom_low_schedule_setup_order_mark_continuation_source(
   loom_low_schedule_node_t* node = &state->nodes[producer];
   if (node->descriptor == NULL ||
       iree_any_bit_set(node->traits, LOOM_TRAIT_OBSERVABLE_EFFECT) ||
-      !loom_low_schedule_value_requires_register(
+      !loom_low_schedule_value_has_constrained_register(
           &state->values[source_ordinal])) {
     return;
   }
@@ -193,8 +194,8 @@ static void loom_low_schedule_setup_order_mark_continuation_source(
       bool requires_register = false;
       if (loom_low_schedule_setup_order_has_per_user_placement(
               state, node, &requires_register) ||
-          loom_low_schedule_setup_order_preserves_required_pressure(state,
-                                                                    node)) {
+          loom_low_schedule_setup_order_preserves_completion_pressure(state,
+                                                                      node)) {
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP;
         state->setup_order.has_members = true;
       }

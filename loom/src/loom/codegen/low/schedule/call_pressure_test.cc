@@ -179,7 +179,7 @@ TEST_F(CallPressureTest, CallClobbersReduceSharedPackingCapacity) {
       EXPECT_EQ(score.pressure_cliff_penalty, debt);
       const uint16_t debt_flag =
           hard_capacity
-              ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY
+              ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY
               : LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REGISTER_DEBT;
       EXPECT_EQ(score.flags, debt ? debt_flag : 0);
       EXPECT_EQ(packed_units[0], 3u);

@@ -154,6 +154,8 @@ typedef uint16_t loom_low_operand_flags_t;
 // disjoint register parts supplied by the tied input without reading them for
 // execution, and writes only the result's declared register part. The source
 // establishes issue order and storage identity but not completion dependence.
+// A named source part must be defined. An unnamed source part preserves the
+// available unwritten parts without requiring any of them to be defined.
 #define LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION ((uint16_t)1u << 8)
 // Operand row describes zero or more trailing packet operands. Variadic rows
 // are explicit packet operands and must terminate the descriptor operand list.
@@ -630,7 +632,7 @@ typedef uint32_t loom_low_instruction_class_flags_t;
 typedef struct loom_low_reg_class_t {
   // String-pool reference for the stable register-class name, or
   // LOOM_STRING_REF_NONE for a storage slot absent from this view.
-  // Absent slots have spill_class_id NONE and all other fields zero.
+  // Absent slots have all other fields zero.
   loom_string_ref_t name_string_ref;
   // Target bank identifier used by allocators and pressure reporting.
   uint16_t target_bank_id;
@@ -677,12 +679,17 @@ typedef struct loom_low_reg_class_t {
   // Dense one-based alias-set identifier shared by overlapping register
   // classes in a linear storage namespace, or zero when disjoint.
   uint16_t alias_set_id;
-  // Register class used for spill/reload values, or LOOM_LOW_REG_CLASS_NONE.
-  uint16_t spill_class_id;
+  // Memory bits occupied by each spilled allocation unit. This may exceed
+  // |alloc_unit_bits| when native transfers widen a register's payload.
+  uint16_t spill_unit_bits;
   // Bits defined by ordinary full-register writes for one allocation unit.
   loom_low_register_part_mask_t full_register_part_mask;
   // Storage space used when values from this class are spilled.
   uint8_t spill_slot_space;
+  // Log2 minimum slot alignment in the low nibble and maximum natural tuple
+  // alignment in the high nibble. Both describe byte alignment. Tuple slots
+  // align for up to four units, clamped to these target-owned limits.
+  uint8_t spill_alignment_log2;
   // Atomic storage units occupied by each explicit physical candidate. All
   // candidates in a class have equal width. Zero for linear register classes,
   // whose locations each occupy one unit in their storage namespace.

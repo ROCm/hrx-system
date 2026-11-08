@@ -189,12 +189,13 @@ loom_low_placement_hard_register_ordinal_component(
     };
   }
   IREE_ASSERT_LT(component_index, table->hard_register_ordinal_component_count);
-  const loom_low_placement_value_range_t range =
+  const loom_low_placement_ordinal_component_range_t range =
       table->hard_register_ordinal_ranges[component_index];
   return (loom_low_placement_value_component_t){
       .members = table->hard_register_ordinal_members + range.start,
       .count = range.count,
       .index = component_index,
+      .origin_count = range.origin_count,
   };
 }
 

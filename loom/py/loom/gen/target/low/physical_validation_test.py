@@ -118,8 +118,11 @@ def _coindexed_register_classes(
     )
 
 
-def test_physical_descriptor_set_accepts_same_register_ordinal_tuple() -> None:
-    register_classes = _coindexed_register_classes()
+@pytest.mark.parametrize("spillable", [False, True])
+def test_physical_descriptor_set_accepts_same_register_ordinal_tuple(spillable: bool) -> None:
+    register_classes = tuple(
+        replace(register_class, flags=tuple(flag for flag in register_class.flags if not spillable or flag is not RegClassFlag.UNSPILLABLE)) for register_class in _coindexed_register_classes()
+    )
     descriptor = _descriptor(
         "test.coindexed",
         (

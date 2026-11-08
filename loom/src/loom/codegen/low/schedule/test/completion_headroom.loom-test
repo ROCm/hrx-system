@@ -1,35 +1,35 @@
-// Four values fit the operand bank, but consuming one stream requires a
-// value from its peer. Keep room for the selected pair's missing operand
+// Four spillable values fit the physical bank. Consuming one stream requires
+// a value from its peer. Keep room for the selected pair's missing operand
 // instead of filling the bank with later records from the first stream.
-// RUN: emit low-schedule-query @paired_stream_headroom strategy=resource-stall order=* scheduled-pressure=test.explicit32
+// RUN: emit low-schedule-query @paired_stream_headroom strategy=resource-stall order=* scheduled-pressure=test.spillable.explicit32
 
 test.target<low_core> @target
 
 low.func.def target<test.low.core>(@target) @paired_stream_headroom(%input: reg<test.i32>) -> (reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>, reg<test.i32 x4>) asm {
   %left_state0 = test.recolor.create
-  %left0, %left_state1 = test.stream.step.i32 %left_state0, %input
-  %left1, %left_state2 = test.stream.step.i32 %left_state1, %input
-  %left2, %left_state3 = test.stream.step.i32 %left_state2, %input
-  %left3, %left_state4 = test.stream.step.i32 %left_state3, %input
+  %left0, %left_state1 = test.stream.step.i32.spillable %left_state0, %input
+  %left1, %left_state2 = test.stream.step.i32.spillable %left_state1, %input
+  %left2, %left_state3 = test.stream.step.i32.spillable %left_state2, %input
+  %left3, %left_state4 = test.stream.step.i32.spillable %left_state3, %input
   %right_state0 = test.recolor.create
-  %right0, %right_state1 = test.stream.step.i32 %right_state0, %input
-  %right1, %right_state2 = test.stream.step.i32 %right_state1, %input
-  %right2, %right_state3 = test.stream.step.i32 %right_state2, %input
-  %right3, %right_state4 = test.stream.step.i32 %right_state3, %input
-  %combined0 = test.rematerialize.pair.explicit32 %left0, %right0
-  %result0 = test.explicit.release.v4i32 %combined0
-  %combined1 = test.rematerialize.pair.explicit32 %left1, %right1
-  %result1 = test.explicit.release.v4i32 %combined1
-  %combined2 = test.rematerialize.pair.explicit32 %left2, %right2
-  %result2 = test.explicit.release.v4i32 %combined2
-  %combined3 = test.rematerialize.pair.explicit32 %left3, %right3
-  %result3 = test.explicit.release.v4i32 %combined3
+  %right0, %right_state1 = test.stream.step.i32.spillable %right_state0, %input
+  %right1, %right_state2 = test.stream.step.i32.spillable %right_state1, %input
+  %right2, %right_state3 = test.stream.step.i32.spillable %right_state2, %input
+  %right3, %right_state4 = test.stream.step.i32.spillable %right_state3, %input
+  %combined0 = test.rematerialize.pair.explicit32.spillable %left0, %right0
+  %result0 = test.explicit.release.v4i32.spillable %combined0
+  %combined1 = test.rematerialize.pair.explicit32.spillable %left1, %right1
+  %result1 = test.explicit.release.v4i32.spillable %combined1
+  %combined2 = test.rematerialize.pair.explicit32.spillable %left2, %right2
+  %result2 = test.explicit.release.v4i32.spillable %combined2
+  %combined3 = test.rematerialize.pair.explicit32.spillable %left3, %right3
+  %result3 = test.explicit.release.v4i32.spillable %combined3
   return %result0, %result1, %result2, %result3
 }
 
 // ----
 block 0 order: 0, 1, 2, 5, 6, 10, 3, 11, 7, 12, 4, 13, 8, 14, 15, 9, 16, 17, 18
-scheduled pressure test.explicit32: peak-live-units=3 peak-live-values=3
+scheduled pressure test.spillable.explicit32: peak-live-units=3 peak-live-values=3
 
 // ====
 

@@ -137,3 +137,33 @@ value %third: test.pressure.alias32 -> physical_register[2:2]
 value %fourth: test.pressure.alias32 -> physical_register[4:2]
 value %fifth: test.pressure.alias32 -> physical_register[4:2]
 value %parts: test.pressure.alias32 -> physical_register[0:5]
+
+// ====
+
+// Five derived values cross a block boundary in a four-register bank.
+// Recreating one result extends its inputs and can leave the spill count
+// unchanged. Continuing through that plateau eliminates storage entirely.
+// RUN: emit low-allocation-query @derived_value_plateau strategy=resource-stall spill-free spill-count
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @derived_value_plateau(%base: reg<test.spillable.explicit32>) -> (reg<test.i32 x5>) asm {
+  %derived0 = test.rematerialize.pair.explicit32.spillable %base, %base
+  %derived1 = test.rematerialize.pair.explicit32.spillable %base, %derived0
+  %derived2 = test.rematerialize.pair.explicit32.spillable %base, %derived1
+  %derived3 = test.rematerialize.pair.explicit32.spillable %base, %derived2
+  %derived4 = test.rematerialize.pair.explicit32.spillable %base, %derived3
+  low.br ^publish
+^publish:
+  %value0 = copy %derived0 : reg<test.spillable.explicit32> -> reg<test.i32>
+  %value1 = copy %derived1 : reg<test.spillable.explicit32> -> reg<test.i32>
+  %value2 = copy %derived2 : reg<test.spillable.explicit32> -> reg<test.i32>
+  %value3 = copy %derived3 : reg<test.spillable.explicit32> -> reg<test.i32>
+  %value4 = copy %derived4 : reg<test.spillable.explicit32> -> reg<test.i32>
+  %result = concat(%value0, %value1, %value2, %value3, %value4) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x5>
+  return %result
+}
+
+// ----
+spills: 0
+materialized traffic: stores=0 reloads=0

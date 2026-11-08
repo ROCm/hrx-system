@@ -37,6 +37,10 @@ from loom.target.arch.amd.xdna.aie2p.core_fifo_descriptors import (
     _fifo_store_descriptor_specs,
 )
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
+from loom.target.arch.amd.xdna.aie2p.core_stack_descriptors import (
+    STACK_DESCRIPTOR_SPECS,
+    STACK_REGISTER_PARTS,
+)
 from loom.target.arch.amd.xdna.aie2p.core_stream_descriptors import (
     _cascade_descriptor_specs,
     _cascade_matrix_descriptor_specs,
@@ -103,6 +107,7 @@ _LOCK_EFFECT = Effect(
 _VEC256_LOW128_PART = "aie2p.vec256.low128"
 _VEC256_HIGH128_PART = "aie2p.vec256.high128"
 _REGISTER_PARTS = (
+    *STACK_REGISTER_PARTS,
     *BFP_REGISTER_PARTS,
     *PREDICATE_REGISTER_PARTS,
     RegisterPart(_VEC256_LOW128_PART, "aie2p.vec256", 0x1),
@@ -842,6 +847,7 @@ def _loop_setup_descriptor_specs() -> tuple[_DescriptorSpec, ...]:
 _BASE_DESCRIPTOR_SPECS = (
     *_address_descriptor_specs(),
     *_loop_setup_descriptor_specs(),
+    *STACK_DESCRIPTOR_SPECS,
     _DescriptorSpec(
         "ADD_NC_mv_add_ri",
         f"{_TARGET_KEY}.add.i32.immediate.shift",

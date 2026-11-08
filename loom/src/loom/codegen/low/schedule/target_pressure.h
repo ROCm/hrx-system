@@ -24,7 +24,7 @@ enum loom_low_schedule_resource_pressure_flag_bits_e {
   LOOM_LOW_SCHEDULE_RESOURCE_PRESSURE_FLAG_CANDIDATE_TOUCHED = 1u << 0,
 };
 
-// Builds dense bounded-unspillable completion domains after the scheduler has
+// Builds dense bounded constrained completion domains after the scheduler has
 // resolved per-class and shared pressure-set capacities.
 iree_status_t loom_low_schedule_target_pressure_initialize_completion_domains(
     loom_low_schedule_build_state_t* state);
@@ -132,7 +132,7 @@ void loom_low_schedule_target_pressure_repair_packing_completions(
 
 // Returns the capacity of |completion_domain_id| when its live pressure is at
 // or above that hard limit, or UINT32_MAX while it still has headroom.
-uint32_t loom_low_schedule_target_pressure_full_unspillable_completion_capacity(
+uint32_t loom_low_schedule_target_pressure_full_constrained_completion_capacity(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_pressure_state_t* pressure_state,
     uint16_t completion_domain_id);

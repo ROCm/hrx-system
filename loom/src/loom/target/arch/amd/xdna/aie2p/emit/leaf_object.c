@@ -216,6 +216,7 @@ iree_status_t loom_aie2p_leaf_object_emit(
   loom_aie2p_leaf_realization_t* realization = &out_contribution->realization;
   *realization = (loom_aie2p_leaf_realization_t){
       .register_writes = plan->register_writes,
+      .stack_frame_byte_length = plan->stack_frame_byte_length,
       .target_identity = LOOM_AIE2P_LEAF_TARGET_IDENTITY,
       .abi_identity = LOOM_AIE2P_LEAF_ABI_IDENTITY,
       .entry_symbol_index = 0,
@@ -419,6 +420,10 @@ iree_status_t loom_aie2p_leaf_object_emit(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "AIE2P native fixup count exceeds host size");
   }
+  const iree_host_size_t stack_fixup_index = fixup_count;
+  if (realization->stack.byte_length != 0) {
+    ++fixup_count;
+  }
   loom_native_object_fixup_t* fixups = NULL;
   if (fixup_count != 0) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -467,6 +472,19 @@ iree_status_t loom_aie2p_leaf_object_emit(
       const loom_aie2p_planned_slot_t* slot =
           &plan->slots[bundle->slot_start + j];
       encoded_slots[j] = slot->encoded_slot;
+      if (iree_any_bit_set(slot->flags,
+                           LOOM_AIE2P_PLANNED_SLOT_FLAG_STACK_INITIALIZATION)) {
+        fixups[stack_fixup_index] = (loom_native_object_fixup_t){
+            .section_contribution_index = 0,
+            .section_offset = bundle->byte_offset,
+            .relocation_kind =
+                LOOM_AIE2P_NATIVE_RELOCATION_KIND_LOCAL_ADDRESS_ABSOLUTE,
+            .target_symbol_index =
+                storage_symbol_indices[LOOM_STORAGE_SPACE_STACK],
+            .addend = (int64_t)plan->stack_frame_byte_length,
+        };
+        continue;
+      }
       if (!iree_any_bit_set(
               slot->flags,
               LOOM_AIE2P_PLANNED_SLOT_FLAG_STRUCTURAL_STORAGE_ADDRESS |

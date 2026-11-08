@@ -1,0 +1,220 @@
+// Three independent pairs compete for two hardware ordinals. Repair must spill
+// both members needed to release an ordinal and reload each pair together.
+// Three simultaneously live pairs compete for two physical ordinals. Repair
+// preserves each pair's matching ordinal at both definitions and uses.
+// RUN: pass low-select-operand-forms,low-materialize-allocation
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @paired_pressure() asm {
+  %primary0, %partner0 = test.coindexed.results.spillable
+  %primary1, %partner1 = test.coindexed.results.spillable
+  %primary2, %partner2 = test.coindexed.results.spillable
+  low.br ^consume
+^consume:
+  test.coindexed.operands.spillable %primary0, %partner0
+  test.coindexed.operands.spillable %primary1, %partner1
+  test.coindexed.operands.spillable %primary2, %partner2
+  return
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @paired_pressure() asm {
+  %paired_pressure_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %paired_pressure_spill_storage_1 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %paired_pressure_spill_storage_2 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %paired_pressure_spill_storage_3 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %primary0, %partner0 = test.coindexed.results.spillable
+  %primary1, %partner1 = test.coindexed.results.spillable
+  low.spill %primary1, %paired_pressure_spill_storage_3 : reg<test.spillable.primary>, low.storage<stack>
+  low.spill %partner1, %paired_pressure_spill_storage_2 : reg<test.spillable.partner>, low.storage<stack>
+  %primary2, %partner2 = test.coindexed.results.spillable
+  low.spill %partner2, %paired_pressure_spill_storage_1 : reg<test.spillable.partner>, low.storage<stack>
+  low.spill %primary2, %paired_pressure_spill_storage_0 : reg<test.spillable.primary>, low.storage<stack>
+  low.br ^consume
+^consume:
+  test.coindexed.operands.spillable %primary0, %partner0
+  %12 = low.reload %paired_pressure_spill_storage_2 : low.storage<stack> -> reg<test.spillable.partner>
+  %13 = low.reload %paired_pressure_spill_storage_3 : low.storage<stack> -> reg<test.spillable.primary>
+  test.coindexed.operands.spillable %13, %12
+  %8 = low.reload %paired_pressure_spill_storage_0 : low.storage<stack> -> reg<test.spillable.primary>
+  %9 = low.reload %paired_pressure_spill_storage_1 : low.storage<stack> -> reg<test.spillable.partner>
+  test.coindexed.operands.spillable %8, %9
+  return
+}
+
+// ====
+
+// Updating a pair ties both results to their inputs. Repeated uses must retain
+// the updated contents while repair breaks the long-lived storage chains.
+// RUN: pass low-select-operand-forms,low-materialize-allocation
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @updated_pairs() asm {
+  %primary0, %partner0 = test.coindexed.results.spillable
+  %primary1, %partner1 = test.coindexed.results.spillable
+  %primary2, %partner2 = test.coindexed.results.spillable
+  low.br ^update
+^update:
+  %next_primary0, %next_partner0 = test.coindexed.update.spillable %primary0, %partner0
+  %next_primary1, %next_partner1 = test.coindexed.update.spillable %primary1, %partner1
+  %next_primary2, %next_partner2 = test.coindexed.update.spillable %primary2, %partner2
+  test.coindexed.operands.spillable %next_primary0, %next_partner0
+  test.coindexed.operands.spillable %next_primary1, %next_partner1
+  test.coindexed.operands.spillable %next_primary2, %next_partner2
+  return
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @updated_pairs() asm {
+  %updated_pairs_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %updated_pairs_spill_storage_1 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %updated_pairs_spill_storage_2 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %updated_pairs_spill_storage_3 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %updated_pairs_spill_storage_4 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %updated_pairs_spill_storage_5 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %updated_pairs_spill_storage_6 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %updated_pairs_spill_storage_7 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %primary0, %partner0 = test.coindexed.results.spillable
+  %primary1, %partner1 = test.coindexed.results.spillable
+  low.spill %primary1, %updated_pairs_spill_storage_4 : reg<test.spillable.primary>, low.storage<stack>
+  low.spill %partner1, %updated_pairs_spill_storage_5 : reg<test.spillable.partner>, low.storage<stack>
+  %primary2, %partner2 = test.coindexed.results.spillable
+  low.spill %primary2, %updated_pairs_spill_storage_0 : reg<test.spillable.primary>, low.storage<stack>
+  low.spill %partner2, %updated_pairs_spill_storage_1 : reg<test.spillable.partner>, low.storage<stack>
+  low.br ^update
+^update:
+  %next_primary0, %next_partner0 = test.coindexed.update.spillable %primary0, %partner0
+  %24 = low.reload %updated_pairs_spill_storage_5 : low.storage<stack> -> reg<test.spillable.partner>
+  %25 = low.reload %updated_pairs_spill_storage_4 : low.storage<stack> -> reg<test.spillable.primary>
+  %next_primary1, %next_partner1 = test.coindexed.update.spillable %25, %24
+  low.spill %next_primary1, %updated_pairs_spill_storage_7 : reg<test.spillable.primary>, low.storage<stack>
+  low.spill %next_partner1, %updated_pairs_spill_storage_6 : reg<test.spillable.partner>, low.storage<stack>
+  %16 = low.reload %updated_pairs_spill_storage_1 : low.storage<stack> -> reg<test.spillable.partner>
+  %17 = low.reload %updated_pairs_spill_storage_0 : low.storage<stack> -> reg<test.spillable.primary>
+  %next_primary2, %next_partner2 = test.coindexed.update.spillable %17, %16
+  low.spill %next_primary2, %updated_pairs_spill_storage_3 : reg<test.spillable.primary>, low.storage<stack>
+  low.spill %next_partner2, %updated_pairs_spill_storage_2 : reg<test.spillable.partner>, low.storage<stack>
+  test.coindexed.operands.spillable %next_primary0, %next_partner0
+  %26 = low.reload %updated_pairs_spill_storage_6 : low.storage<stack> -> reg<test.spillable.partner>
+  %27 = low.reload %updated_pairs_spill_storage_7 : low.storage<stack> -> reg<test.spillable.primary>
+  test.coindexed.operands.spillable %27, %26
+  %18 = low.reload %updated_pairs_spill_storage_2 : low.storage<stack> -> reg<test.spillable.partner>
+  %19 = low.reload %updated_pairs_spill_storage_3 : low.storage<stack> -> reg<test.spillable.primary>
+  test.coindexed.operands.spillable %19, %18
+  return
+}
+
+// ====
+
+// The primary bank is empty, but both slots in its future partner's bank are
+// occupied. Victim selection must include that partner's physical conflicts.
+// RUN: pass low-select-operand-forms,low-materialize-allocation
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @staggered_pair(%held0: reg<test.spillable.partner>, %held1: reg<test.spillable.partner>, %seed: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %primary = copy %seed : reg<test.i32> -> reg<test.spillable.primary>
+  low.br ^partner
+^partner:
+  %partner = copy %seed : reg<test.i32> -> reg<test.spillable.partner>
+  test.coindexed.operands.spillable %primary, %partner
+  %result0 = copy %held0 : reg<test.spillable.partner> -> reg<test.i32>
+  %result1 = copy %held1 : reg<test.spillable.partner> -> reg<test.i32>
+  return %result0, %result1
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @staggered_pair(%held0: reg<test.spillable.partner>, %held1: reg<test.spillable.partner>, %seed: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %staggered_pair_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  low.spill %held1, %staggered_pair_spill_storage_0 : reg<test.spillable.partner>, low.storage<stack>
+  %primary = copy %seed : reg<test.i32> -> reg<test.spillable.primary>
+  low.br ^partner
+^partner:
+  %partner = copy %seed : reg<test.i32> -> reg<test.spillable.partner>
+  test.coindexed.operands.spillable %primary, %partner
+  %result0 = copy %held0 : reg<test.spillable.partner> -> reg<test.i32>
+  %10 = low.reload %staggered_pair_spill_storage_0 : low.storage<stack> -> reg<test.spillable.partner>
+  %result1 = copy %10 : reg<test.spillable.partner> -> reg<test.i32>
+  return %result0, %result1
+}
+
+// ====
+
+// At the physical capacity, coupled values need no spill traffic.
+// RUN: pass low-select-operand-forms,low-materialize-allocation
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @pairs_fit() asm {
+  %primary0, %partner0 = test.coindexed.results.spillable
+  %primary1, %partner1 = test.coindexed.results.spillable
+  %next_primary, %next_partner = test.coindexed.update.spillable %primary0, %partner0
+  test.coindexed.operands.spillable %primary1, %partner1
+  test.coindexed.operands.spillable %next_primary, %next_partner
+  return
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @pairs_fit() asm {
+  %primary0, %partner0 = test.coindexed.results.spillable
+  %primary1, %partner1 = test.coindexed.results.spillable
+  %next_primary, %next_partner = test.coindexed.update.spillable %primary0, %partner0
+  test.coindexed.operands.spillable %primary1, %partner1
+  test.coindexed.operands.spillable %next_primary, %next_partner
+  return
+}
+
+// ====
+
+// A fixed live register removes one ordinal only in the primary bank. Both
+// halves must use the remaining ordinal, spilling across the block boundary.
+// RUN: pass low-select-operand-forms,low-materialize-allocation
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @fixed_lane(%held: reg<test.fixed.r0>) -> (reg<test.i32>) asm {
+  %primary0, %partner0 = test.coindexed.results.spillable
+  %primary1, %partner1 = test.coindexed.results.spillable
+  low.br ^consume
+^consume:
+  test.coindexed.operands.spillable %primary0, %partner0
+  test.coindexed.operands.spillable %primary1, %partner1
+  %result = copy %held : reg<test.fixed.r0> -> reg<test.i32>
+  return %result
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @fixed_lane(%held: reg<test.fixed.r0>) -> (reg<test.i32>) asm {
+  %fixed_lane_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %fixed_lane_spill_storage_1 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %fixed_lane_spill_storage_2 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %fixed_lane_spill_storage_3 = storage {byte_alignment = 4, byte_length = 4} : low.storage<stack>
+  %primary0, %partner0 = test.coindexed.results.spillable
+  low.spill %primary0, %fixed_lane_spill_storage_1 : reg<test.spillable.primary>, low.storage<stack>
+  low.spill %partner0, %fixed_lane_spill_storage_2 : reg<test.spillable.partner>, low.storage<stack>
+  %primary1, %partner1 = test.coindexed.results.spillable
+  low.spill %partner1, %fixed_lane_spill_storage_3 : reg<test.spillable.partner>, low.storage<stack>
+  low.spill %primary1, %fixed_lane_spill_storage_0 : reg<test.spillable.primary>, low.storage<stack>
+  low.br ^consume
+^consume:
+  %11 = low.reload %fixed_lane_spill_storage_2 : low.storage<stack> -> reg<test.spillable.partner>
+  %12 = low.reload %fixed_lane_spill_storage_1 : low.storage<stack> -> reg<test.spillable.primary>
+  test.coindexed.operands.spillable %12, %11
+  %8 = low.reload %fixed_lane_spill_storage_0 : low.storage<stack> -> reg<test.spillable.primary>
+  %14 = low.reload %fixed_lane_spill_storage_3 : low.storage<stack> -> reg<test.spillable.partner>
+  test.coindexed.operands.spillable %8, %14
+  %result = copy %held : reg<test.fixed.r0> -> reg<test.i32>
+  return %result
+}

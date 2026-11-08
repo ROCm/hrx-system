@@ -217,9 +217,9 @@ static bool loom_low_allocation_ordinal_recolor_candidate_conflicts(
     uint32_t component_index, const loom_low_allocation_assignment_t* candidate,
     uint16_t ignored_value_count) {
   if (loom_low_allocation_search_assignment_conflicts(
-          state->search, candidate, state->value_ids, ignored_value_count,
-          state->value_ids, ignored_value_count,
-          LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN,
+          state->search, candidate, /*check_active_assignments=*/true,
+          state->value_ids, ignored_value_count, state->value_ids,
+          ignored_value_count, LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN,
           /*shared_content=*/NULL)) {
     return true;
   }

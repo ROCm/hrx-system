@@ -8,8 +8,8 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/schedule/completion_pressure.h"
 #include "loom/codegen/low/schedule/pressure.h"
-#include "loom/codegen/low/schedule/required_pressure.h"
 
 namespace loom {
 namespace {
@@ -49,7 +49,7 @@ class PressureAliasTest : public ::testing::Test {
     }
     for (uint32_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
       if (required_mask & (1u << i)) {
-        values[i].flags |= LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+        values[i].flags |= LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
       }
     }
     uint32_t value_producer_nodes[] = {
@@ -87,16 +87,16 @@ class PressureAliasTest : public ::testing::Test {
     };
     loom_low_schedule_pressure_state_t pressure = {};
     uint16_t completion_domains[] = {0};
-    state.pressure_limits.unspillable_completion_domain_ids_by_reg_class =
+    state.pressure_limits.constrained_completion_domain_ids_by_reg_class =
         completion_domains;
     loom_low_schedule_completion_domain_t completion = {
         .capacity = 8,
         .reg_class_id = 0,
     };
-    state.pressure_limits.unspillable_completion_domains = &completion;
-    state.pressure_limits.unspillable_completion_domain_count = 1;
-    loom_low_schedule_required_pressure_t required = {};
-    pressure.required_pressure = &required;
+    state.pressure_limits.constrained_completion_domains = &completion;
+    state.pressure_limits.constrained_completion_domain_count = 1;
+    loom_low_schedule_completion_pressure_t required = {};
+    pressure.completion_pressure = &required;
     IREE_ASSERT_OK(loom_low_schedule_pressure_alias_initialize(
         &state, &pressure.storage_aliases));
     values[1].live_unit_count =

@@ -50,6 +50,15 @@ typedef enum loom_low_allocation_search_strategy_e {
   LOOM_LOW_ALLOCATION_SEARCH_STRATEGY_RETAINED_LOCATIONS = 3,
 } loom_low_allocation_search_strategy_t;
 
+// Pressure-only facts shared by every assignment attempt. Its arena is separate
+// from both result rollback and attempt scratch, and is empty without pressure.
+typedef struct loom_low_allocation_reconstruction_t {
+  // Owns classification through alternative assignment attempts.
+  iree_arena_allocator_t arena;
+  // Immutable producer flags by local value ordinal, or NULL until needed.
+  uint8_t* value_flags;
+} loom_low_allocation_reconstruction_t;
+
 typedef struct loom_low_allocation_interval_assignment_context_t {
   // Module containing the allocated low function.
   loom_module_t* module;
@@ -91,6 +100,8 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   loom_low_allocation_storage_lease_state_t* storage_leases;
   // Arena owning returned assignment, spill, and remark arrays.
   iree_arena_allocator_t* arena;
+  // Shared lazy reconstruction analysis for this immutable function snapshot.
+  loom_low_allocation_reconstruction_t* reconstruction;
   // Shared read-only control-flow graph for |body|.
   const loom_cfg_graph_t* function_cfg_graph;
   // Function-local residency view used for physical extent decisions.

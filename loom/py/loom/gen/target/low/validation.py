@@ -410,7 +410,6 @@ def _validate_same_register_ordinal_components(
             register_class = register_classes[operand.reg_alts[0].reg_class]
             required_flags = {
                 RegClassFlag.PHYSICAL,
-                RegClassFlag.UNSPILLABLE,
                 RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
             }
             missing_flags = required_flags.difference(register_class.flags)
@@ -1999,22 +1998,24 @@ def validate_descriptor_storage_continuations(
             raise ValueError(f"{description} and tied result must have equal unit counts")
         source_parts = {alternative.reg_class: alternative.register_part for alternative in operand.reg_alts if alternative.reg_class is not None}
         result_parts = {alternative.reg_class: alternative.register_part for alternative in result.reg_alts if alternative.reg_class is not None}
-        if (
-            not source_parts
-            or source_parts.keys() != result_parts.keys()
-            or any(part_name is None for part_name in source_parts.values())
-            or any(part_name is None for part_name in result_parts.values())
-        ):
+        if not source_parts or source_parts.keys() != result_parts.keys() or any(part_name is None for part_name in result_parts.values()):
             raise ValueError(f"{description} and tied result must name register parts for the same register classes")
         for register_class, source_part_name in source_parts.items():
             result_part_name = result_parts[register_class]
-            source_part = register_parts.get(source_part_name)
             result_part = register_parts.get(result_part_name)
-            if source_part is None:
-                raise ValueError(f"{description} references unknown register part '{source_part_name}'")
             if result_part is None:
                 raise ValueError(f"{description} tied result references unknown register part '{result_part_name}'")
-            if source_part.reg_class != register_class or result_part.reg_class != register_class:
+            if result_part.reg_class != register_class:
+                raise ValueError(f"{description} and tied result use register parts for the wrong register class")
+            # An unnamed input preserves whichever unwritten parts are defined,
+            # without requiring any of them to exist. Named inputs require the
+            # specified disjoint part, as ordinary partial-write forms do.
+            if source_part_name is None:
+                continue
+            source_part = register_parts.get(source_part_name)
+            if source_part is None:
+                raise ValueError(f"{description} references unknown register part '{source_part_name}'")
+            if source_part.reg_class != register_class:
                 raise ValueError(f"{description} and tied result use register parts for the wrong register class")
             if source_part.mask & result_part.mask:
                 raise ValueError(f"{description} and tied result have overlapping register parts")

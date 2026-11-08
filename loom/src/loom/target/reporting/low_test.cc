@@ -313,9 +313,10 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           .physical_register_candidate_start = {},
           .candidate_lookup = {},
           .alias_set_id = {},
-          .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+          .spill_unit_bits = 32,
           .full_register_part_mask = 1,
           .spill_slot_space = LOOM_LOW_SPILL_SLOT_SPACE_STACK,
+          .spill_alignment_log2 = 0x40,
       },
       {
           .name_string_ref = kRegisterClassFpr,
@@ -326,9 +327,10 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
           .physical_register_candidate_start = {},
           .candidate_lookup = {},
           .alias_set_id = {},
-          .spill_class_id = LOOM_LOW_REG_CLASS_NONE,
+          .spill_unit_bits = 32,
           .full_register_part_mask = 1,
           .spill_slot_space = LOOM_LOW_SPILL_SLOT_SPACE_STACK,
+          .spill_alignment_log2 = 0x40,
       },
   };
   loom_low_descriptor_set_t descriptor_set = {

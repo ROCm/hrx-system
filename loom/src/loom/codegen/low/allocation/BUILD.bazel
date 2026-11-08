@@ -350,11 +350,27 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "spill_search",
+    srcs = ["spill_search.c"],
+    hdrs = ["spill_search.h"],
+    deps = [
+        ":live_range",
+        ":search",
+        ":storage",
+        "//loom/src/loom/codegen/low:rematerialization_facts",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
 loom_cc_test(
     name = "search_test",
     srcs = ["search_test.cc"],
     deps = [
         ":search",
+        ":spill_search",
+        "//loom/src/loom/codegen/low:rematerialization_facts",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:registers",
         "//loom/src/loom/target:residency",
@@ -370,6 +386,7 @@ loom_cc_test(
     deps = [
         ":content_identity",
         ":search",
+        ":spill_search",
         ":storage_lease",
         "//loom/src/loom/ir",
         "//runtime/src/iree/base/internal:arena",
@@ -501,6 +518,7 @@ loom_cc_library(
         ":table",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:function",
+        "//loom/src/loom/codegen/low:register_parts",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
@@ -897,6 +915,7 @@ loom_cc_library(
         ":scalar_packing",
         ":search",
         ":spill_plan",
+        ":spill_search",
         ":storage",
         ":storage_lease",
         ":table",
@@ -909,6 +928,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/codegen/low:register_requirements",
+        "//loom/src/loom/codegen/low:rematerialization_facts",
         "//loom/src/loom/codegen/low:target_binding",
         "//loom/src/loom/ir",
         "//loom/src/loom/target:residency",

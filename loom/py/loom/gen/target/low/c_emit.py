@@ -483,15 +483,15 @@ def _register_class_row_lines(
             f"  .register_count = {compiled.physical_register_candidate_lookups[compiled.reg_class_ids[reg_class.name]].register_count},",
             "},",
             f".alias_set_id = {reg_class.alias_set_id},",
-            ".spill_class_id = " + ("LOOM_LOW_REG_CLASS_NONE" if reg_class.spill_class is None else str(compiled.reg_class_ids[reg_class.spill_class])) + ",",
+            f".spill_unit_bits = {reg_class.spill_unit_bits},",
             f".full_register_part_mask = {c_spelling.hex_u32_literal(reg_class.full_register_part_mask)},",
             f".spill_slot_space = {reg_class.spill_slot_space.c_name},",
+            f".spill_alignment_log2 = {(reg_class.spill_min_alignment.bit_length() - 1) | ((reg_class.spill_max_alignment.bit_length() - 1) << 4)},",
             f".physical_atomic_unit_count = {physical_register_widths[reg_class.physical_registers[0]] if reg_class.physical_registers else 0},",
         ]
         if reg_class is not None
         else [
             ".name_string_ref = LOOM_STRING_REF_NONE,",
-            ".spill_class_id = LOOM_LOW_REG_CLASS_NONE,",
         ]
         for reg_class in reg_classes
     ]

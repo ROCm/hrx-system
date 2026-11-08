@@ -4,14 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/codegen/low/schedule/required_pressure.h"
+#include "loom/codegen/low/schedule/completion_pressure.h"
 
 #include "iree/testing/gtest.h"
 
 namespace loom {
 namespace {
 
-TEST(RequiredPressureTest, ReplayKeepsSameDomainCapturesResident) {
+TEST(CompletionPressureTest, ReplayKeepsSameDomainCapturesResident) {
   const loom_low_reg_class_t classes[] = {
       {.alias_set_id = 1},
       {.alias_set_id = 2},
@@ -86,13 +86,13 @@ TEST(RequiredPressureTest, ReplayKeepsSameDomainCapturesResident) {
             values[i].flags =
                 i < test_case.input_count
                     ? 0
-                    : LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+                    : LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
           }
           loom_low_schedule_build_state_t state = {
               .target = {.descriptor_set = &descriptors},
               .values = values,
           };
-          loom_low_schedule_required_pressure_classify_node(&state, &node);
+          loom_low_schedule_completion_pressure_classify_node(&state, &node);
           for (uint16_t i = test_case.input_count; i < descriptor.operand_count;
                ++i) {
             EXPECT_EQ(
@@ -108,7 +108,7 @@ TEST(RequiredPressureTest, ReplayKeepsSameDomainCapturesResident) {
   }
 }
 
-TEST(RequiredPressureTest, OwnershipAndWriteOverlapBelongToPhysicalDomains) {
+TEST(CompletionPressureTest, OwnershipAndWriteOverlapBelongToPhysicalDomains) {
   loom_low_schedule_completion_domain_t domains[] = {
       {.capacity = 4, .reg_class_id = 0},
       {.capacity = 4, .reg_class_id = 2},
@@ -117,44 +117,44 @@ TEST(RequiredPressureTest, OwnershipAndWriteOverlapBelongToPhysicalDomains) {
   const loom_low_schedule_build_state_t state = {
       .pressure_limits =
           {
-              .unspillable_completion_domains = domains,
-              .unspillable_completion_domain_ids_by_reg_class = domain_ids,
-              .unspillable_completion_domain_count = IREE_ARRAYSIZE(domains),
+              .constrained_completion_domains = domains,
+              .constrained_completion_domain_ids_by_reg_class = domain_ids,
+              .constrained_completion_domain_count = IREE_ARRAYSIZE(domains),
           },
   };
   const loom_low_schedule_value_record_t values[] = {
       {
           .unit_count = 2,
           .register_class_id = 0,
-          .flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER |
+          .flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER |
                    LOOM_LOW_SCHEDULE_VALUE_FLAG_REPLAYABLE_OUTSIDE_DOMAIN,
       },
       {
           .unit_count = 2,
           .register_class_id = 1,
-          .flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER,
+          .flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER,
       },
       {
           .unit_count = 4,
           .register_class_id = 2,
-          .flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER,
+          .flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER,
       },
       {.unit_count = 1, .register_class_id = 0},
       {
           .unit_count = 1,
           .register_class_id = 3,
-          .flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER,
+          .flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER,
       },
   };
   for (bool late_read : {false, true}) {
     SCOPED_TRACE(late_read);
-    loom_low_schedule_required_pressure_t required[2] = {};
+    loom_low_schedule_completion_pressure_t required[2] = {};
     loom_low_schedule_pressure_state_t pressure = {
-        .required_pressure = required,
+        .completion_pressure = required,
     };
     for (const auto& value : values) {
-      loom_low_schedule_required_pressure_adjust_live(&state, &pressure, &value,
-                                                      value.unit_count);
+      loom_low_schedule_completion_pressure_adjust_live(
+          &state, &pressure, &value, value.unit_count);
     }
     EXPECT_EQ(required[0].live_units, 4u);
     EXPECT_EQ(required[1].live_units, 4u);
@@ -164,16 +164,16 @@ TEST(RequiredPressureTest, OwnershipAndWriteOverlapBelongToPhysicalDomains) {
     // The alias views exchange one unit, with transient overlap for late
     // reads. Emptying another bank cannot repay that shared bank's pressure.
     required[0].candidate_opens_lifetime = true;
-    loom_low_schedule_required_pressure_adjust_candidate(&state, &pressure,
-                                                         &values[0], 1, false);
-    loom_low_schedule_required_pressure_adjust_candidate(
+    loom_low_schedule_completion_pressure_adjust_candidate(
+        &state, &pressure, &values[0], 1, false);
+    loom_low_schedule_completion_pressure_adjust_candidate(
         &state, &pressure, &values[1], -1, late_read);
-    loom_low_schedule_required_pressure_adjust_candidate(&state, &pressure,
-                                                         &values[2], -4, false);
-    loom_low_schedule_required_pressure_adjust_candidate(&state, &pressure,
-                                                         &values[3], 1, false);
-    loom_low_schedule_required_pressure_adjust_candidate(&state, &pressure,
-                                                         &values[4], 1, false);
+    loom_low_schedule_completion_pressure_adjust_candidate(
+        &state, &pressure, &values[2], -4, false);
+    loom_low_schedule_completion_pressure_adjust_candidate(
+        &state, &pressure, &values[3], 1, false);
+    loom_low_schedule_completion_pressure_adjust_candidate(
+        &state, &pressure, &values[4], 1, false);
     EXPECT_EQ(required[0].candidate_delta_units, 0);
     EXPECT_EQ(required[0].candidate_write_delta_units, late_read ? 1 : 0);
     EXPECT_EQ(required[1].candidate_delta_units, -4);
@@ -181,16 +181,16 @@ TEST(RequiredPressureTest, OwnershipAndWriteOverlapBelongToPhysicalDomains) {
     EXPECT_EQ(required[0].non_replayable_candidate_delta_units, -1);
     EXPECT_EQ(required[1].non_replayable_candidate_delta_units, -4);
     loom_low_schedule_candidate_score_t score = {};
-    loom_low_schedule_required_pressure_score_candidate(&state, &pressure,
-                                                        &score);
+    loom_low_schedule_completion_pressure_score_candidate(&state, &pressure,
+                                                          &score);
     EXPECT_EQ(
         iree_any_bit_set(
             score.flags,
-            LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY),
+            LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY),
         late_read);
 
     for (const auto& value : values) {
-      loom_low_schedule_required_pressure_adjust_live(
+      loom_low_schedule_completion_pressure_adjust_live(
           &state, &pressure, &value, -(int64_t)value.unit_count);
     }
     EXPECT_EQ(required[0].live_units, 0u);
@@ -200,18 +200,18 @@ TEST(RequiredPressureTest, OwnershipAndWriteOverlapBelongToPhysicalDomains) {
   }
 }
 
-TEST(RequiredPressureTest, HardCapacityUsesTheLargestInstructionPhase) {
+TEST(CompletionPressureTest, HardCapacityUsesTheLargestInstructionPhase) {
   loom_low_schedule_completion_domain_t domain = {.capacity = 4};
   const loom_low_schedule_build_state_t state = {
       .pressure_limits =
           {
-              .unspillable_completion_domains = &domain,
-              .unspillable_completion_domain_count = 1,
+              .constrained_completion_domains = &domain,
+              .constrained_completion_domain_count = 1,
           },
   };
   const struct {
     // Required ownership before, during, and after a candidate.
-    loom_low_schedule_required_pressure_t pressure;
+    loom_low_schedule_completion_pressure_t pressure;
     // Whether this candidate grows beyond the physical capacity.
     bool exceeds_capacity;
   } cases[] = {
@@ -237,15 +237,15 @@ TEST(RequiredPressureTest, HardCapacityUsesTheLargestInstructionPhase) {
                  << " write=" << required.candidate_write_delta_units
                  << " early=" << required.candidate_early_added_units);
     const loom_low_schedule_pressure_state_t pressure = {
-        .required_pressure = &required,
+        .completion_pressure = &required,
     };
     loom_low_schedule_candidate_score_t score = {};
-    loom_low_schedule_required_pressure_score_candidate(&state, &pressure,
-                                                        &score);
+    loom_low_schedule_completion_pressure_score_candidate(&state, &pressure,
+                                                          &score);
     EXPECT_EQ(
         iree_any_bit_set(
             score.flags,
-            LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY),
+            LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY),
         test_case.exceeds_capacity);
   }
 }

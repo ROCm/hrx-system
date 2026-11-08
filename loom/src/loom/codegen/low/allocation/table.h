@@ -68,7 +68,7 @@ typedef enum loom_low_allocation_value_scratch_flag_bits_e {
 // Bitset of loom_low_allocation_value_scratch_flag_bits_t values.
 typedef uint16_t loom_low_allocation_value_scratch_flags_t;
 
-// Allocation remark for agent/tool feedback.
+// Allocation decision facts retained for pressure repair and reporting.
 typedef struct loom_low_allocation_remark_t {
   // Remark category.
   loom_low_allocation_remark_kind_t kind;
@@ -100,6 +100,9 @@ typedef struct loom_low_allocation_spill_plan_t {
   // Predicted operand-use reloads in the current synthetic spill plan. Actual
   // materialization may differ after earlier spill rewrites in the same frame.
   uint32_t reload_count;
+  // Defined register parts for a partial value; zero denotes a complete value.
+  // Native transport preserves exactly these parts without reading other bits.
+  uint32_t defined_parts;
 } loom_low_allocation_spill_plan_t;
 
 // Distinct fixed retained-read blockers encountered by spilled assignments, in
@@ -332,6 +335,9 @@ typedef struct loom_low_allocation_table_t {
   // Borrowed structural register requirements in the liveness value domain.
   // NULL when the function snapshot has no structural requirements.
   const loom_low_register_requirement_t* register_requirements;
+  // Producer reconstruction flags in the liveness value domain, retained when
+  // pressure required victim ranking. NULL if no ranking needed the analysis.
+  const uint8_t* rematerialization_flags;
   // Arena-owned physical reservations indexed by assignment segment ranges.
   // Borrows |liveness.segments| when no tied-source refinement is required.
   const loom_liveness_segment_t* storage_segments;
@@ -376,7 +382,7 @@ typedef struct loom_low_allocation_table_t {
   iree_host_size_t spill_plan_count;
   // Distinct retained-read blockers published by the accepted coloring.
   loom_low_allocation_retained_fixed_values_t retained_fixed_values;
-  // Allocation remarks in spill-decision order.
+  // Allocation decision facts in spill order, independent of diagnostics.
   const loom_low_allocation_remark_t* remarks;
   // Number of records in |remarks|.
   iree_host_size_t remark_count;

@@ -13,12 +13,15 @@
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_program.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/stack_frame.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct loom_aie2p_bundle_plan_options_t {
+  // Admitted function frame and worker-owned backing.
+  loom_aie2p_stack_frame_t stack;
   // Structured diagnostics for final-frame semantic rejection.
   iree_diagnostic_emitter_t diagnostic_emitter;
   // Whether this entry program preserves its incoming link register across

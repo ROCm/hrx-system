@@ -428,9 +428,29 @@ class RegClass:
     fixed_location_base: int = 0
     fixed_location_count: int = 0
     alias_set_id: int = 0
-    spill_class: str | None = None
+    # Memory width per allocation unit; None uses the register payload width.
+    spill_unit_bits: int | None = None
+    # Minimum byte alignment of a spill slot.
+    spill_min_alignment: int = 1
+    # Maximum natural tuple alignment in bytes.
+    spill_max_alignment: int = 16
     full_register_part_mask: int = 1
     physical_registers: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.spill_unit_bits is None:
+            object.__setattr__(self, "spill_unit_bits", self.alloc_unit_bits)
+        if not 0 < self.spill_unit_bits <= 0xFFFF:
+            raise ValueError(f"register class '{self.name}' has invalid spill width")
+        for alignment in (self.spill_min_alignment, self.spill_max_alignment):
+            if alignment <= 0 or alignment > 32768 or alignment & (alignment - 1):
+                raise ValueError(
+                    f"register class '{self.name}' has invalid spill alignment"
+                )
+        if self.spill_min_alignment > self.spill_max_alignment:
+            raise ValueError(
+                f"register class '{self.name}' has inverted spill alignment limits"
+            )
 
 
 @dataclass(frozen=True, slots=True)

@@ -1208,8 +1208,9 @@ static iree_status_t loom_low_verify_storage_continuation_pair(
     if (source_alternative == NULL ||
         result_alternative->register_part_id >=
             descriptor_set->register_part_count ||
-        source_alternative->register_part_id >=
-            descriptor_set->register_part_count) {
+        (source_alternative->register_part_id != LOOM_LOW_REGISTER_PART_NONE &&
+         source_alternative->register_part_id >=
+             descriptor_set->register_part_count)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "low storage-continuation result and source must name valid "
@@ -1217,14 +1218,22 @@ static iree_status_t loom_low_verify_storage_continuation_pair(
     }
     const loom_low_register_part_t* result_part =
         &descriptor_set->register_parts[result_alternative->register_part_id];
-    const loom_low_register_part_t* source_part =
-        &descriptor_set->register_parts[source_alternative->register_part_id];
-    if (result_part->reg_class_id != result_alternative->reg_class_id ||
-        source_part->reg_class_id != result_alternative->reg_class_id) {
+    if (result_part->reg_class_id != result_alternative->reg_class_id) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "low storage-continuation result and source register parts must "
           "belong to their alternative register class");
+    }
+    if (source_alternative->register_part_id == LOOM_LOW_REGISTER_PART_NONE) {
+      continue;
+    }
+    const loom_low_register_part_t* source_part =
+        &descriptor_set->register_parts[source_alternative->register_part_id];
+    if (source_part->reg_class_id != result_alternative->reg_class_id) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "low storage-continuation source register part must belong to its "
+          "alternative register class");
     }
     if ((result_part->mask & source_part->mask) != 0) {
       return iree_make_status(
@@ -3090,8 +3099,8 @@ static iree_status_t loom_low_verify_reg_class(
         reg_class->alloc_unit_bits != 0 || reg_class->allocatable_count != 0 ||
         reg_class->storage.fixed_locations.fixed_location_base != 0 ||
         reg_class->storage.fixed_locations.fixed_location_count != 0 ||
-        reg_class->alias_set_id != 0 ||
-        reg_class->spill_class_id != LOOM_LOW_REG_CLASS_NONE ||
+        reg_class->alias_set_id != 0 || reg_class->spill_unit_bits != 0 ||
+        reg_class->spill_alignment_log2 != 0 ||
         reg_class->full_register_part_mask != 0 ||
         reg_class->spill_slot_space != 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -3254,14 +3263,13 @@ static iree_status_t loom_low_verify_reg_class(
                             reg_class_index, fixed_location_base,
                             reg_class->allocatable_count);
   }
-  if (reg_class->spill_class_id != LOOM_LOW_REG_CLASS_NONE &&
-      reg_class->spill_class_id >= descriptor_set->reg_class_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+  if (reg_class->spill_unit_bits == 0 ||
+      (reg_class->spill_alignment_log2 & 15u) >
+          (reg_class->spill_alignment_log2 >> 4)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "low register class %" PRIu32
-                            " references spill class %" PRIu16
-                            " but only %" PRIu32 " classes exist",
-                            reg_class_index, reg_class->spill_class_id,
-                            descriptor_set->reg_class_count);
+                            " has invalid spill width or alignment limits",
+                            reg_class_index);
   }
   return iree_ok_status();
 }

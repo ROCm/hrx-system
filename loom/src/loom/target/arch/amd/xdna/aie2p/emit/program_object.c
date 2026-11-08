@@ -18,24 +18,6 @@ static bool loom_aie2p_program_object_is_code_section(
                              LOOM_NATIVE_SECTION_ACCESS_EXECUTE);
 }
 
-static iree_status_t loom_aie2p_program_object_validate_helper(
-    const loom_aie2p_leaf_contribution_t* helper) {
-  const loom_aie2p_leaf_realization_t* realization = &helper->realization;
-  const loom_aie2p_leaf_capability_flags_t unsupported =
-      LOOM_AIE2P_LEAF_CAPABILITY_FLAG_RESOURCE_IMPORTS |
-      LOOM_AIE2P_LEAF_CAPABILITY_FLAG_FUNCTION_STORAGE |
-      LOOM_AIE2P_LEAF_CAPABILITY_FLAG_MATERIALIZED_SPILLS;
-  if (iree_any_bit_set(realization->capability_flags, unsupported) ||
-      realization->resource_import_count != 0 ||
-      realization->storage_domain_count != 0 ||
-      realization->spill.byte_length != 0) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "AIE2P direct helper cannot have imports, mutable storage, or spills");
-  }
-  return iree_ok_status();
-}
-
 static iree_status_t loom_aie2p_program_object_resolve_calls(
     loom_native_object_symbol_t* symbols, iree_host_size_t symbol_count,
     loom_native_object_fixup_t* fixups, iree_host_size_t fixup_count) {
@@ -313,10 +295,6 @@ iree_status_t loom_aie2p_program_object_merge(
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
           "AIE2P tile program contributions disagree on target or ABI");
-    }
-    if (i != 0) {
-      IREE_RETURN_IF_ERROR(
-          loom_aie2p_program_object_validate_helper(contribution));
     }
   }
 

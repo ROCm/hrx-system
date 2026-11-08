@@ -204,6 +204,26 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "program_clone",
+    srcs = ["program_clone.c"],
+    hdrs = ["program_clone.h"],
+    visibility = ["//loom/src/loom/target/arch/amd/xdna/aie2p:implementation"],
+    deps = [
+        ":program_source",
+        "//loom/src/loom/codegen/low:loop_execution",
+        "//loom/src/loom/codegen/low:memory_access",
+        "//loom/src/loom/codegen/low:read_only_data",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/global",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/rewrite:materialize",
+        "//loom/src/loom/rewrite:remap",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "program_source",
     srcs = ["program_source.c"],
     hdrs = ["program_source.h"],

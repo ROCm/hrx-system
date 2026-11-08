@@ -89,10 +89,13 @@ _REG_RECOLOR_STATE = "test.recolor.state"
 _REG_EXPLICIT_RANGE32 = "test.explicit_range32"
 _REG_SPILLABLE_EXPLICIT32 = "test.spillable.explicit32"
 _REG_FIXED_R0 = "test.fixed.r0"
+_REG_SPILLABLE_FIXED_R0 = "test.spillable.fixed.r0"
 _REG_FIXED_R2 = "test.fixed.r2"
 _REG_PACKED_NARROW = "test.packed.narrow"
 _REG_PACKED_WIDE = "test.packed.wide"
 _REG_COINDEXED_PARTNER = "test.coindexed.partner"
+_REG_SPILLABLE_PRIMARY = "test.spillable.primary"
+_REG_SPILLABLE_PARTNER = "test.spillable.partner"
 _REG_ATOMIC_NARROW = "test.atomic.narrow"
 _REG_ALIAS_NARROW = "test.alias.narrow"
 
@@ -145,7 +148,7 @@ _EXPLICIT32_ALT = (RegClassAlt(_REG_EXPLICIT32),)
 _RECOLOR32_ALT = (RegClassAlt(_REG_RECOLOR32),)
 _RECOLOR_STATE_ALT = (RegClassAlt(_REG_RECOLOR_STATE),)
 _SPILLABLE_EXPLICIT32_ALT = (RegClassAlt(_REG_SPILLABLE_EXPLICIT32),)
-_FIXED_R0_ALT = (RegClassAlt(_REG_FIXED_R0),)
+_FIXED_R0_ALT = (RegClassAlt(_REG_FIXED_R0), RegClassAlt(_REG_SPILLABLE_FIXED_R0))
 _SCHEDULE_STATE_ALT = (RegClassAlt(_REG_SCHEDULE_STATE),)
 _PRESSURE_ALIAS32_ALT = (RegClassAlt(_REG_PRESSURE_ALIAS32),)
 _PACKED_NARROW_ALT = (RegClassAlt(_REG_PACKED_NARROW),)
@@ -1231,6 +1234,55 @@ TEST_LOW_COINDEXED_OPERANDS_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.SIDE_EFFECTING,),
 )
 
+TEST_LOW_SPILLABLE_COINDEXED_DESCRIPTORS = (
+    *(
+        replace(
+            descriptor,
+            key=descriptor.key + ".spillable",
+            mnemonic=descriptor.mnemonic + ".spillable",
+            semantic_tag=descriptor.semantic_tag + ".spillable",
+            operands=tuple(
+                replace(operand, reg_alts=(RegClassAlt(register_class),))
+                for operand, register_class in zip(
+                    descriptor.operands,
+                    (_REG_SPILLABLE_PRIMARY, _REG_SPILLABLE_PARTNER),
+                    strict=True,
+                )
+            ),
+        )
+        for descriptor in (
+            TEST_LOW_COINDEXED_RESULTS_DESCRIPTOR,
+            TEST_LOW_COINDEXED_OPERANDS_DESCRIPTOR,
+        )
+    ),
+    Descriptor(
+        key="test.coindexed.update.spillable",
+        mnemonic="test.coindexed.update.spillable",
+        semantic_tag="test.coindexed.update.spillable",
+        operands=tuple(
+            Operand(name, role, (RegClassAlt(register_class),))
+            for role, prefix in (
+                (OperandRole.RESULT, "next_"),
+                (OperandRole.OPERAND, ""),
+            )
+            for name, register_class in (
+                (prefix + "primary", _REG_SPILLABLE_PRIMARY),
+                (prefix + "partner", _REG_SPILLABLE_PARTNER),
+            )
+        ),
+        constraints=(
+            Constraint(ConstraintKind.SAME_REGISTER_ORDINAL, 2, 3),
+            Constraint(ConstraintKind.TIED, 0, 2),
+            Constraint(ConstraintKind.TIED, 1, 3),
+        ),
+        asm_forms=_asm(
+            results=("next_primary", "next_partner"), operands=("primary", "partner")
+        ),
+        schedule_class=_SCHEDULE_SCALAR_ALU,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
+)
+
 TEST_LOW_ADD_F32_DESCRIPTOR = Descriptor(
     key="test.add.f32",
     mnemonic="test.add.f32",
@@ -1354,6 +1406,26 @@ TEST_LOW_EXPLICIT_RELEASE_V4I32_DESCRIPTOR = Descriptor(
     asm_forms=_asm(results=("dst",), operands=("src",)),
     schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_SPILLABLE_COMPLETION_DESCRIPTORS = tuple(
+    replace(
+        descriptor,
+        key=descriptor.key + ".spillable",
+        mnemonic=descriptor.mnemonic + ".spillable",
+        semantic_tag=descriptor.semantic_tag + ".spillable",
+        operands=tuple(
+            replace(operand, reg_alts=_SPILLABLE_EXPLICIT32_ALT)
+            if operand.reg_alts == _EXPLICIT32_ALT
+            else operand
+            for operand in descriptor.operands
+        ),
+    )
+    for descriptor in (
+        TEST_LOW_STREAM_STEP_I32_DESCRIPTOR,
+        TEST_LOW_REMATERIALIZE_PAIR_EXPLICIT32_DESCRIPTOR,
+        TEST_LOW_EXPLICIT_RELEASE_V4I32_DESCRIPTOR,
+    )
 )
 
 TEST_LOW_ADD_V4I32_DESCRIPTOR = Descriptor(
@@ -1754,6 +1826,26 @@ TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR = Descriptor(
     effects=(_LOAD_EFFECT,),
     schedule_class=_SCHEDULE_LOAD,
     flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
+TEST_LOW_STORAGE_WRITE_DESCRIPTORS = tuple(
+    replace(
+        descriptor,
+        key=f"test.write.{half}.continue.i32",
+        mnemonic=f"test.write.{half}.continue.i32",
+        operands=(
+            descriptor.operands[0],
+            replace(
+                _i32_operand("src"),
+                flags=(OperandFlag.IMPLICIT, OperandFlag.STORAGE_CONTINUATION),
+            ),
+            descriptor.operands[2],
+        ),
+    )
+    for half, descriptor in (
+        ("low16", TEST_LOW_TIED_WRITE_LOW16_I32_DESCRIPTOR),
+        ("high16", TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR),
+    )
 )
 
 TEST_LOW_SPV_OP_IADD_I32_DESCRIPTOR = Descriptor(
@@ -2779,6 +2871,19 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             ),
             physical_registers=("test.r2", "test.r3"),
         ),
+        *(
+            RegClass(
+                name,
+                32,
+                SpillSlotSpace.STACK,
+                flags=(RegClassFlag.PHYSICAL, RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS),
+                physical_registers=registers,
+            )
+            for name, registers in (
+                (_REG_SPILLABLE_PRIMARY, ("test.r0", "test.r1")),
+                (_REG_SPILLABLE_PARTNER, ("test.r2", "test.r3")),
+            )
+        ),
         RegClass(
             _REG_ATOMIC_NARROW,
             32,
@@ -2827,6 +2932,16 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
                 "test.r3",
                 "test.r2",
             ),
+        ),
+        RegClass(
+            _REG_SPILLABLE_FIXED_R0,
+            32,
+            SpillSlotSpace.STACK,
+            flags=(
+                RegClassFlag.PHYSICAL,
+                RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+            ),
+            physical_registers=("test.r0",),
         ),
     ),
     physical_registers=(
@@ -3175,11 +3290,13 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_SAME_REGISTER_VALUE_TYPES_DESCRIPTOR,
         TEST_LOW_COINDEXED_RESULTS_DESCRIPTOR,
         TEST_LOW_COINDEXED_OPERANDS_DESCRIPTOR,
+        *TEST_LOW_SPILLABLE_COINDEXED_DESCRIPTORS,
         TEST_LOW_READ_LOW16_I32_DESCRIPTOR,
         TEST_LOW_READ_HIGH16_I32_DESCRIPTOR,
         TEST_LOW_WRITE_LOW16_I32_DESCRIPTOR,
         TEST_LOW_TIED_WRITE_LOW16_I32_DESCRIPTOR,
         TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR,
+        *TEST_LOW_STORAGE_WRITE_DESCRIPTORS,
         TEST_LOW_SPV_OP_IADD_I32_DESCRIPTOR,
         TEST_LOW_CMP_EQ_I32_DESCRIPTOR,
         TEST_LOW_CMP_SLT_I32_DESCRIPTOR,
@@ -3188,6 +3305,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_FIXED_UPDATE_I32_DESCRIPTOR,
         TEST_LOW_EXPLICIT_EXPAND_I32_DESCRIPTOR,
         TEST_LOW_EXPLICIT_RELEASE_V4I32_DESCRIPTOR,
+        *TEST_LOW_SPILLABLE_COMPLETION_DESCRIPTORS,
         TEST_LOW_ADD_V4I32_DESCRIPTOR,
         TEST_LOW_EARLY_CLOBBER_V4I32_DESCRIPTOR,
         TEST_LOW_MIXED_EARLY_CLOBBER_V4I32_DESCRIPTOR,

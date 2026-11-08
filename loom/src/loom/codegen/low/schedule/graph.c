@@ -13,9 +13,9 @@
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/immediates.h"
 #include "loom/codegen/low/representation_binding.h"
+#include "loom/codegen/low/schedule/completion_pressure.h"
 #include "loom/codegen/low/schedule/diagnostics.h"
 #include "loom/codegen/low/schedule/effect_dependencies.h"
-#include "loom/codegen/low/schedule/required_pressure.h"
 #include "loom/codegen/low/storage_relation.h"
 #include "loom/codegen/low/storage_transport.h"
 #include "loom/ir/context.h"
@@ -205,7 +205,7 @@ static void loom_low_schedule_classify_short_register_move_results(
        ++result_index) {
     loom_low_schedule_value_record_t* result =
         &state->values[result_ordinals[result_index]];
-    if (!loom_low_schedule_value_requires_register(result) ||
+    if (!loom_low_schedule_value_has_constrained_register(result) ||
         !loom_low_descriptor_result_can_rematerialize(
             state->target.descriptor_set, node->descriptor, result_index)) {
       continue;
@@ -1570,7 +1570,7 @@ iree_status_t loom_low_schedule_fill_nodes(
       IREE_RETURN_IF_ERROR(
           loom_low_schedule_initialize_node_value_ordinals(state, node));
       loom_low_schedule_classify_short_register_move_results(state, node);
-      loom_low_schedule_required_pressure_classify_node(state, node);
+      loom_low_schedule_completion_pressure_classify_node(state, node);
       loom_low_schedule_index_active_structural_results(state, node);
       IREE_RETURN_IF_ERROR(
           loom_low_schedule_apply_structural_model(state, node));

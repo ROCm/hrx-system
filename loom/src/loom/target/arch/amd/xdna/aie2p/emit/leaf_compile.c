@@ -13,6 +13,8 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/low_registry.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/bundle_plan.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_capacity.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/spill.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/stack_frame.h"
 #include "loom/target/reporting/low.h"
 
 // Uses the scheduler's retained call inventory. A call-bearing frame is
@@ -55,8 +57,8 @@ static iree_status_t loom_aie2p_leaf_admit_calls(
 static iree_status_t loom_aie2p_leaf_build_frame(
     loom_module_t* module, loom_op_t* function_op,
     const loom_aie2p_leaf_compile_options_t* options,
-    iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame,
-    bool* out_accepted) {
+    loom_aie2p_stack_layout_t* stack_layout, iree_arena_allocator_t* arena,
+    loom_low_emission_frame_t* out_frame, bool* out_accepted) {
   loom_low_planning_statistics_t planning_statistics = {0};
   const loom_low_emission_frame_options_t frame_options = {
       .descriptor_registry = options->descriptor_registry,
@@ -90,7 +92,9 @@ static iree_status_t loom_aie2p_leaf_build_frame(
       .materialization_options =
           {
               .has_supported_storage_spaces = true,
-              .supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_NONE,
+              .supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_STACK,
+              .plan_traffic = loom_aie2p_spill_plan,
+              .plan_traffic_user_data = stack_layout,
               .record_materialized_spills =
                   loom_target_compile_report_wants_details(
                       options->compile_report,
@@ -134,14 +138,27 @@ iree_status_t loom_aie2p_leaf_compile(
   // allocation, and packet-planning storage is reusable by the next worker.
   iree_arena_allocator_t scratch_arena;
   iree_arena_initialize(arena->block_pool, &scratch_arena);
+  iree_arena_allocator_t stack_arena;
+  iree_arena_initialize(arena->block_pool, &stack_arena);
+  loom_aie2p_stack_layout_t stack_layout = {.arena = &stack_arena};
   loom_low_emission_frame_t frame = {0};
   bool frame_accepted = false;
-  iree_status_t status = loom_aie2p_leaf_build_frame(
-      module, function_op, options, &scratch_arena, &frame, &frame_accepted);
+  iree_status_t status =
+      loom_aie2p_leaf_build_frame(module, function_op, options, &stack_layout,
+                                  &scratch_arena, &frame, &frame_accepted);
+  loom_aie2p_stack_frame_t stack = {0};
+  bool stack_accepted = false;
+  if (iree_status_is_ok(status) && frame_accepted) {
+    status = loom_aie2p_stack_frame_build(
+        module, function_op, &frame.schedule.requirements.storage_layout,
+        &stack_layout, options->callee_stack_byte_length, options->is_helper,
+        options->diagnostic_emitter, &stack_accepted, &stack);
+  }
   loom_aie2p_leaf_program_plan_t program_plan = {0};
   bool program_planned = false;
-  if (iree_status_is_ok(status) && frame_accepted) {
+  if (iree_status_is_ok(status) && stack_accepted) {
     const loom_aie2p_bundle_plan_options_t plan_options = {
+        .stack = stack,
         .diagnostic_emitter = options->diagnostic_emitter,
         .preserve_link_register = options->preserve_link_register,
         .link_shadow_register = options->link_shadow_register,
@@ -181,6 +198,7 @@ iree_status_t loom_aie2p_leaf_compile(
   if (iree_status_is_ok(status) && program_planned && capacity_admitted) {
     *out_compiled = true;
   }
+  iree_arena_deinitialize(&stack_arena);
   iree_arena_deinitialize(&scratch_arena);
   return status;
 }

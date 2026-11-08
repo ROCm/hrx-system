@@ -286,7 +286,7 @@ static uint64_t loom_low_schedule_compute_register_packing_operand_units(
   return resource_units;
 }
 
-static uint64_t loom_low_schedule_compute_unspillable_result_units(
+static uint64_t loom_low_schedule_compute_constrained_result_units(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_node_t* node, uint16_t completion_domain_id) {
   uint64_t result_units = 0;
@@ -296,8 +296,8 @@ static uint64_t loom_low_schedule_compute_unspillable_result_units(
        ++result_index) {
     const loom_low_schedule_value_record_t* value =
         &state->values[result_ordinals[result_index]];
-    if (!loom_low_schedule_value_requires_register(value) ||
-        loom_low_schedule_unspillable_completion_domain_id(
+    if (!loom_low_schedule_value_has_constrained_register(value) ||
+        loom_low_schedule_constrained_completion_domain_id(
             state, value->register_class_id) != completion_domain_id) {
       continue;
     }
@@ -310,7 +310,7 @@ static uint64_t loom_low_schedule_compute_unspillable_result_units(
 // Returns units of |operand_index| handed back to an already-live argument of
 // the consumer's block. A loop backedge replaces that entry storage; it does
 // not activate another copy when the terminator becomes ready.
-static uint64_t loom_low_schedule_unspillable_handoff_replacement_units(
+static uint64_t loom_low_schedule_constrained_handoff_replacement_units(
     const loom_low_schedule_build_state_t* state, uint32_t consumer_node,
     uint16_t operand_index, uint16_t completion_domain_id) {
   const loom_low_schedule_node_t* consumer = &state->nodes[consumer_node];
@@ -339,8 +339,8 @@ static uint64_t loom_low_schedule_unspillable_handoff_replacement_units(
         state->value_domain->value_ids[relation->destination_ordinal]);
     if (!loom_value_is_block_arg(destination_value) ||
         loom_value_def_block(destination_value) != consumer_block ||
-        !loom_low_schedule_value_requires_register(destination) ||
-        loom_low_schedule_unspillable_completion_domain_id(
+        !loom_low_schedule_value_has_constrained_register(destination) ||
+        loom_low_schedule_constrained_completion_domain_id(
             state, destination->register_class_id) != completion_domain_id) {
       continue;
     }
@@ -350,7 +350,7 @@ static uint64_t loom_low_schedule_unspillable_handoff_replacement_units(
   return replacement_units;
 }
 
-static uint64_t loom_low_schedule_compute_unspillable_operand_units(
+static uint64_t loom_low_schedule_compute_constrained_operand_units(
     const loom_low_schedule_build_state_t* state, uint32_t node_index,
     uint16_t completion_domain_id, uint32_t source_range_start) {
   const loom_low_schedule_node_t* node = &state->nodes[node_index];
@@ -363,13 +363,13 @@ static uint64_t loom_low_schedule_compute_unspillable_operand_units(
         operand_ordinals[operand_index];
     const loom_low_schedule_value_record_t* value =
         &state->values[operand_ordinal];
-    if (loom_low_schedule_value_requires_register(value) &&
+    if (loom_low_schedule_value_has_constrained_register(value) &&
         loom_low_schedule_operand_has_future_activation(
             state, node, operand_ordinals, operand_index, source_range_start) &&
-        loom_low_schedule_unspillable_completion_domain_id(
+        loom_low_schedule_constrained_completion_domain_id(
             state, value->register_class_id) == completion_domain_id) {
       const uint64_t replacement_units =
-          loom_low_schedule_unspillable_handoff_replacement_units(
+          loom_low_schedule_constrained_handoff_replacement_units(
               state, node_index, operand_index, completion_domain_id);
       const uint64_t activation_units =
           value->unit_count > replacement_units
@@ -405,9 +405,9 @@ static uint32_t loom_low_schedule_compute_downstream_activation_units(
 // activation remains node-owned; this pair identifies one transaction that can
 // release the value with the least additional storage. Node order breaks an
 // otherwise identical pressure tie.
-static void loom_low_schedule_update_unspillable_completion_path(
+static void loom_low_schedule_update_constrained_completion_path(
     uint32_t activation_units, uint32_t sink,
-    loom_low_schedule_unspillable_completion_path_t* inout_path) {
+    loom_low_schedule_constrained_completion_path_t* inout_path) {
   if (sink == LOOM_LOW_SCHEDULE_NODE_NONE ||
       activation_units > inout_path->activation_units ||
       (activation_units == inout_path->activation_units &&
@@ -422,11 +422,11 @@ static void loom_low_schedule_update_unspillable_completion_path(
 // Selects the least expensive retained completion among a node's result
 // values. Reverse analysis has already populated every same-block result path
 // before visiting its producers.
-static loom_low_schedule_unspillable_completion_path_t
-loom_low_schedule_select_unspillable_result_completion(
+static loom_low_schedule_constrained_completion_path_t
+loom_low_schedule_select_constrained_result_completion(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_node_t* node, uint16_t completion_domain_id) {
-  loom_low_schedule_unspillable_completion_path_t selected = {
+  loom_low_schedule_constrained_completion_path_t selected = {
       .activation_units = UINT32_MAX,
       .sink = LOOM_LOW_SCHEDULE_NODE_NONE,
   };
@@ -436,14 +436,14 @@ loom_low_schedule_select_unspillable_result_completion(
        ++result_index) {
     const loom_low_schedule_value_record_t* value =
         &state->values[result_ordinals[result_index]];
-    if (!loom_low_schedule_value_requires_register(value) ||
-        loom_low_schedule_unspillable_completion_domain_id(
+    if (!loom_low_schedule_value_has_constrained_register(value) ||
+        loom_low_schedule_constrained_completion_domain_id(
             state, value->register_class_id) != completion_domain_id) {
       continue;
     }
-    const loom_low_schedule_unspillable_completion_path_t* completion =
-        &state->value_unspillable_completions[result_ordinals[result_index]];
-    loom_low_schedule_update_unspillable_completion_path(
+    const loom_low_schedule_constrained_completion_path_t* completion =
+        &state->value_constrained_completions[result_ordinals[result_index]];
+    loom_low_schedule_update_constrained_completion_path(
         completion->activation_units, completion->sink, &selected);
   }
   return selected;
@@ -478,7 +478,7 @@ void loom_low_schedule_pressure_compute_node_priorities(
       state->node_opened_completion_latency_cycles == NULL &&
       state->node_pressure_demand_units == NULL &&
       state->node_pressure_activation_units == NULL &&
-      state->node_unspillable_activation_units == NULL &&
+      state->node_constrained_activation_units == NULL &&
       state->node_register_packing.activation_units == NULL &&
       pressure_state->first_actionable_pressure_cliff_indices == NULL) {
     return;
@@ -567,10 +567,10 @@ void loom_low_schedule_pressure_compute_node_priorities(
                   state, state->node_register_packing.completion_sinks,
                   node_index)
             : NULL;
-    uint32_t* unspillable_activation_units =
-        state->node_unspillable_activation_units != NULL
-            ? loom_low_schedule_unspillable_pressure_row(
-                  state, state->node_unspillable_activation_units, node_index)
+    uint32_t* constrained_activation_units =
+        state->node_constrained_activation_units != NULL
+            ? loom_low_schedule_constrained_pressure_row(
+                  state, state->node_constrained_activation_units, node_index)
             : NULL;
     if (dependency_details->dependency_count != 0) {
       const uint32_t dependency_begin =
@@ -638,25 +638,25 @@ void loom_low_schedule_pressure_compute_node_priorities(
                   : consumer_demand;
           pressure_activation_units =
               iree_max(pressure_activation_units, consumer_activation);
-          if (unspillable_activation_units != NULL) {
+          if (constrained_activation_units != NULL) {
             const uint32_t* consumer_activation_units =
-                loom_low_schedule_const_unspillable_pressure_row(
-                    state, state->node_unspillable_activation_units,
+                loom_low_schedule_const_constrained_pressure_row(
+                    state, state->node_constrained_activation_units,
                     dependency->consumer_node);
             const uint16_t completion_domain_count =
-                state->pressure_limits.unspillable_completion_domain_count;
+                state->pressure_limits.constrained_completion_domain_count;
             for (uint16_t completion_domain_id = 0;
                  completion_domain_id < completion_domain_count;
                  ++completion_domain_id) {
               const uint64_t node_result_units =
-                  loom_low_schedule_compute_unspillable_result_units(
+                  loom_low_schedule_compute_constrained_result_units(
                       state, node, completion_domain_id);
               const uint64_t consumer_operand_units =
-                  loom_low_schedule_compute_unspillable_operand_units(
+                  loom_low_schedule_compute_constrained_operand_units(
                       state, dependency->consumer_node, completion_domain_id,
                       source_range_start);
               const uint64_t consumer_result_units =
-                  loom_low_schedule_compute_unspillable_result_units(
+                  loom_low_schedule_compute_constrained_result_units(
                       state, consumer, completion_domain_id);
               const uint32_t activation_units =
                   loom_low_schedule_compute_downstream_activation_units(
@@ -666,8 +666,8 @@ void loom_low_schedule_pressure_compute_node_priorities(
                       iree_any_bit_set(
                           consumer->flags,
                           LOOM_LOW_SCHEDULE_NODE_FLAG_EARLY_CLOBBER));
-              unspillable_activation_units[completion_domain_id] =
-                  iree_max(unspillable_activation_units[completion_domain_id],
+              constrained_activation_units[completion_domain_id] =
+                  iree_max(constrained_activation_units[completion_domain_id],
                            activation_units);
               if (dependency->value_operand_index >= consumer->operand_count) {
                 continue;
@@ -678,23 +678,23 @@ void loom_low_schedule_pressure_compute_node_priorities(
               loom_low_schedule_value_record_t* value =
                   &state->values[value_ordinal];
               if (state->value_producer_nodes[value_ordinal] != node_index ||
-                  !loom_low_schedule_value_requires_register(value) ||
+                  !loom_low_schedule_value_has_constrained_register(value) ||
                   iree_any_bit_set(value->flags,
                                    LOOM_LOW_SCHEDULE_VALUE_FLAG_FORWARDED) ||
-                  loom_low_schedule_unspillable_completion_domain_id(
+                  loom_low_schedule_constrained_completion_domain_id(
                       state, value->register_class_id) !=
                       completion_domain_id) {
                 continue;
               }
-              loom_low_schedule_unspillable_completion_path_t consumer_path =
-                  loom_low_schedule_select_unspillable_result_completion(
+              loom_low_schedule_constrained_completion_path_t consumer_path =
+                  loom_low_schedule_select_constrained_result_completion(
                       state, consumer, completion_domain_id);
               if (consumer_result_units == 0 &&
                   !loom_low_schedule_node_retains_aggregate_packing_from_class(
                       state, dependency->consumer_node,
                       value->register_class_id)) {
                 consumer_path =
-                    (loom_low_schedule_unspillable_completion_path_t){
+                    (loom_low_schedule_constrained_completion_path_t){
                         .activation_units = 0,
                         .sink = dependency->consumer_node,
                     };
@@ -704,7 +704,7 @@ void loom_low_schedule_pressure_compute_node_priorities(
               // cannot pin that range to its earlier producer's transaction.
               if (consumer_path.sink != LOOM_LOW_SCHEDULE_NODE_NONE &&
                   consumer_path.sink <= source_range_end) {
-                loom_low_schedule_update_unspillable_completion_path(
+                loom_low_schedule_update_constrained_completion_path(
                     loom_low_schedule_compute_downstream_activation_units(
                         node_result_units, consumer_operand_units,
                         consumer_result_units, consumer_path.activation_units,
@@ -712,7 +712,7 @@ void loom_low_schedule_pressure_compute_node_priorities(
                             consumer->flags,
                             LOOM_LOW_SCHEDULE_NODE_FLAG_EARLY_CLOBBER)),
                     consumer_path.sink,
-                    &state->value_unspillable_completions[value_ordinal]);
+                    &state->value_constrained_completions[value_ordinal]);
               }
             }
           }

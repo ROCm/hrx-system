@@ -55,6 +55,7 @@ def test_bfp_parts_follow_physical_mantissas_and_exponent_words() -> None:
     [
         {"encoding": "encoding_tables.inl"},
         {"machine": "machine_tables.inl"},
+        {"spill": "spill_tables.inl"},
         {
             "register": "register_tables.inl",
             "descriptor-header": "core_descriptors.h",

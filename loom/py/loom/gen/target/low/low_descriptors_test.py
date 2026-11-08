@@ -748,11 +748,17 @@ def test_compiler_derives_shared_explicit_register_pressure_sets() -> None:
     )
     compiled = compiler.compile_descriptor_set(descriptor_set)
     fixed_id = compiled.reg_class_ids["test.fixed.r0"]
+    spillable_fixed_id = compiled.reg_class_ids["test.spillable.fixed.r0"]
 
     pressure_set_id = compiled.reg_class_pressure_set_ids[explicit_id]
     assert pressure_set_id != 0
     assert compiled.reg_class_pressure_set_ids[spillable_id] == pressure_set_id
-    assert compiled.reg_class_pressure_set_ids[fixed_id] == 0
+    # Equal singleton domains share pressure independently of spillability,
+    # but do not merge with the larger domain that contains their register.
+    fixed_pressure_set_id = compiled.reg_class_pressure_set_ids[fixed_id]
+    assert fixed_pressure_set_id != 0
+    assert fixed_pressure_set_id != pressure_set_id
+    assert compiled.reg_class_pressure_set_ids[spillable_fixed_id] == fixed_pressure_set_id
 
     generated = generate_descriptor_set(descriptor_set)
     assert f".pressure_set_id = {pressure_set_id}," in generated.source
@@ -1338,6 +1344,23 @@ def test_compiler_rejects_authored_storage_continuation_result_projection() -> N
         match=re.escape("authors a result projection; mark only the tied packet input"),
     ):
         compiler.compile_descriptor_set(descriptor_set)
+
+
+def test_compiler_accepts_storage_continuation_of_available_parts() -> None:
+    descriptor = _storage_continuation_descriptor()
+    operands = list(descriptor.operands)
+    operands[1] = replace(
+        operands[1],
+        reg_alts=(replace(operands[1].reg_alts[0], register_part=None),),
+    )
+    compiled = compiler.compile_descriptor_set(
+        replace(
+            TEST_LOW_CORE_DESCRIPTOR_SET,
+            descriptors=(replace(descriptor, operands=tuple(operands)),),
+        )
+    )
+    assert OperandFlag.STORAGE_CONTINUATION in compiled.descriptors[0].operands[1].flags
+    assert compiled.descriptors[0].operands[1].reg_alts[0].register_part is None
 
 
 def test_compiler_rejects_overlapping_storage_continuation_parts() -> None:

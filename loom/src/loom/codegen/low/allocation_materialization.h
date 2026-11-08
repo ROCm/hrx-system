@@ -161,11 +161,6 @@ typedef struct loom_low_allocation_materialization_options_t {
   bool emit_spill_diagnostics;
   // True when materialized spill records should be retained in |out_result|.
   bool record_materialized_spills;
-  // Maximum number of current spill plans to materialize. Zero materializes all
-  // plans in the table. Passes that reallocate greedily use a small limit so
-  // CFG/signature rewrites can invalidate obsolete later plans before they are
-  // turned into unnecessary storage traffic.
-  iree_host_size_t max_spill_plan_count;
   // Borrowed module-value membership for retained private producer placement.
   // Materialization clears values whose users it changes, preserving placement
   // for other producers across the next schedule rebuild. May be empty.

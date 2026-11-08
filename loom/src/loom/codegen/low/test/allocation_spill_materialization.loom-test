@@ -66,3 +66,23 @@ low.func.def schedule(locked) target<test.low.core>(@target) @retained_self_edge
   %11 = low.reload %retained_self_edge_spill_storage_0 : low.storage<stack> -> reg<test.pressure.alias32 x7>
   low.br ^loop(%11: reg<test.pressure.alias32 x7>)
 }
+
+// ====
+
+// A locked schedule requires two live conditions in one physical register.
+// Scheduler pressure protection must not turn spillability into a prohibition:
+// preserve the incoming condition in memory while the second one is consumed.
+// RUN: emit low-allocation-query @spillable_singleton strategy=resource-stall spill-free spill-count
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @spillable_singleton(%retained: reg<test.spillable.fixed.r0>, %condition: reg<test.i32>, %left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.i32>) asm {
+  %next = copy %condition : reg<test.i32> -> reg<test.spillable.fixed.r0>
+  %selected = test.fixed.select.i32 %left, %right, %next
+  %result = test.fixed.select.i32 %selected, %right, %retained
+  return %result
+}
+
+// ----
+spills: 0
+materialized traffic: stores=1 reloads=1
