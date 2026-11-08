@@ -75,8 +75,9 @@ bool iree_hal_amd_gpu_completion_scope_finish(
   iree_hal_amd_gpu_completion_t* completion = scope->completion;
   int32_t state =
       iree_atomic_load(&completion->state, iree_memory_order_acquire);
-  const int32_t waiting = IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT |
-                          IREE_HAL_AMD_GPU_COMPLETION_WAITING_FOR_CALLOUT;
+  const int32_t waiting =
+      IREE_HAL_AMD_GPU_COMPLETION_JOINING_CALLOUT |
+      (scope->is_worker ? 0 : IREE_HAL_AMD_GPU_COMPLETION_WAITING_FOR_CALLOUT);
   if (state & waiting) {
     // Ending observation may clear BORROWING after the load above. Decide
     // whether to wake from this atomic handoff, not that earlier snapshot.
@@ -88,7 +89,8 @@ bool iree_hal_amd_gpu_completion_scope_finish(
   }
   // An active observer sees the cleared enrollment in its existing state
   // load. Only a worker that can park needs the native event wake.
-  return (state & IREE_HAL_AMD_GPU_COMPLETION_WAITING_FOR_CALLOUT) != 0 &&
+  return !scope->is_worker &&
+         (state & IREE_HAL_AMD_GPU_COMPLETION_WAITING_FOR_CALLOUT) != 0 &&
          !(state & IREE_HAL_AMD_GPU_COMPLETION_BORROWING_SOURCES);
 }
 
@@ -187,11 +189,17 @@ static void iree_hal_amd_gpu_completion_relocate_sources(
   iree_hal_amd_gpu_completion_clear_hints(completion);
 }
 
+typedef enum iree_hal_amd_gpu_completion_caller_e {
+  IREE_HAL_AMD_GPU_COMPLETION_CALLER_HELPER,
+  IREE_HAL_AMD_GPU_COMPLETION_CALLER_WORKER,
+} iree_hal_amd_gpu_completion_caller_t;
+
 static bool iree_hal_amd_gpu_completion_drain(
     iree_hal_amd_gpu_completion_t* completion, amdf_status_t status,
-    iree_host_size_t first_source, bool* out_has_wait,
-    iree_hal_amd_gpu_completion_copy_t* out_copy,
+    iree_hal_amd_gpu_completion_caller_t caller, iree_host_size_t first_source,
+    bool* out_has_wait, iree_hal_amd_gpu_completion_copy_t* out_copy,
     iree_hal_amd_gpu_completion_scope_t* out_copy_scope, bool* out_wake) {
+  const bool is_worker = caller == IREE_HAL_AMD_GPU_COMPLETION_CALLER_WORKER;
   bool ready = false;
   iree_host_size_t count = completion->source_count;
   iree_host_size_t index = first_source < count ? first_source : 0;
@@ -199,6 +207,17 @@ static bool iree_hal_amd_gpu_completion_drain(
        --remaining, index = index + 1 < count ? index + 1 : 0) {
     iree_hal_amd_gpu_completion_source_t* source = &completion->sources[index];
     if (!source->fn) {
+      if (is_worker && completion->active_scopes &&
+          (!out_copy || !out_copy->fn)) {
+        // Enroll before another source can unlock this round. The skipped
+        // helper may return during that callout, after its native wake has
+        // already been consumed but before the worker is ready to park.
+        // A pending worker copy guarantees another round and may itself be
+        // the only active scope when this source is permanently disabled.
+        iree_atomic_fetch_or(&completion->state,
+                             IREE_HAL_AMD_GPU_COMPLETION_WAITING_FOR_CALLOUT,
+                             iree_memory_order_release);
+      }
       continue;
     }
     // The callback may replace and free its original table while unlocked.
@@ -206,8 +225,10 @@ static bool iree_hal_amd_gpu_completion_drain(
     iree_hal_amd_gpu_completion_wait_t wait = {0};
     iree_hal_amd_gpu_completion_copy_t* copy =
         out_copy && !out_copy->fn ? out_copy : NULL;
-    iree_hal_amd_gpu_completion_scope_t scope = {
-        .completion = completion, .source = source, .fn = source->fn};
+    iree_hal_amd_gpu_completion_scope_t scope = {.completion = completion,
+                                                 .source = source,
+                                                 .fn = source->fn,
+                                                 .is_worker = is_worker};
     ready |= scope.fn(source->user_data, status, &scope, &wait, copy);
     iree_hal_amd_gpu_completion_scope_lock(&scope);
     if (out_has_wait) {
@@ -264,8 +285,9 @@ bool iree_hal_amd_gpu_completion_try_drain(
           iree_atomic_load(&completion->state, iree_memory_order_acquire),
           IREE_HAL_AMD_GPU_COMPLETION_STOP_REQUESTED |
               IREE_HAL_AMD_GPU_COMPLETION_STOPPED)) {
-    ready = iree_hal_amd_gpu_completion_drain(completion, AMDF_STATUS_OK, 0,
-                                              NULL, NULL, NULL, &wake);
+    ready = iree_hal_amd_gpu_completion_drain(
+        completion, AMDF_STATUS_OK, IREE_HAL_AMD_GPU_COMPLETION_CALLER_HELPER,
+        0, NULL, NULL, NULL, &wake);
   }
   iree_slim_mutex_unlock(&completion->drain_mutex);
   if (wake) {
@@ -381,9 +403,9 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
     iree_hal_amd_gpu_completion_scope_t copy_scope = {0};
     bool ready = false;
     if (!(state & IREE_HAL_AMD_GPU_COMPLETION_REPLACING_SOURCES)) {
-      ready = iree_hal_amd_gpu_completion_drain(completion, AMDF_STATUS_OK,
-                                                first_source, &has_wait, &copy,
-                                                &copy_scope, &wake);
+      ready = iree_hal_amd_gpu_completion_drain(
+          completion, AMDF_STATUS_OK, IREE_HAL_AMD_GPU_COMPLETION_CALLER_WORKER,
+          first_source, &has_wait, &copy, &copy_scope, &wake);
     }
     if (copy.fn) {
       first_source = copy_scope.source - completion->sources + 1;
@@ -471,8 +493,9 @@ static int iree_hal_amd_gpu_completion_main(void* user_data) {
     // Join active helpers before the one terminal notification round. Native
     // inactivation runs outside this mutex so CPU publishers can hand off.
     bool wake = false;
-    iree_hal_amd_gpu_completion_drain(completion, failure, 0, NULL, NULL, NULL,
-                                      &wake);
+    iree_hal_amd_gpu_completion_drain(completion, failure,
+                                      IREE_HAL_AMD_GPU_COMPLETION_CALLER_WORKER,
+                                      0, NULL, NULL, NULL, &wake);
   }
   iree_slim_mutex_unlock(&completion->drain_mutex);
   if (!amdf_status_is_ok(failure) && context->execution_failure.join) {
