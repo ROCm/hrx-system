@@ -461,7 +461,6 @@ TEST_F(MaterializeTest, ClonesRegionSuccessorsToClonedBlocks) {
   ASSERT_TRUE(loom_test_br_isa(cloned_branch));
   EXPECT_EQ(loom_test_br_dest(cloned_branch), cloned_dest);
   EXPECT_NE(loom_test_br_dest(cloned_branch), source_dest);
-  EXPECT_EQ(remap.block_map_count, 0u);
 }
 
 TEST_F(MaterializeTest, ClonesReferencesToLaterListedBlockDefinitions) {
@@ -575,7 +574,6 @@ TEST_F(MaterializeTest, SplicesRegionBlocksAtTargetOffset) {
   for (uint16_t i = 0; i < target_region->block_count; ++i) {
     EXPECT_EQ(loom_block_region_index(loom_region_block(target_region, i)), i);
   }
-  EXPECT_EQ(remap.block_map_count, 0u);
 }
 
 TEST_F(MaterializeTest, ClonesRegionSourcePresentation) {
@@ -646,7 +644,7 @@ TEST_F(MaterializeTest, ClonesOperationAndBlockSourcePresentation) {
   EXPECT_TRUE(iree_string_view_equal(cloned_op_comments[1], op_comments[1]));
 }
 
-TEST_F(MaterializeTest, RejectsCrossModuleCloneWithUnmappedSuccessor) {
+TEST_F(MaterializeTest, RejectsStandaloneCrossModuleSuccessor) {
   loom_region_t* source_region = nullptr;
   IREE_ASSERT_OK(loom_module_allocate_region(source_, 2, &source_region));
   loom_block_t* source_entry = loom_region_block(source_region, 0);
@@ -695,34 +693,26 @@ TEST_F(MaterializeTest, RejectsSplicingBeforeExistingEntryBeforeMutation) {
   EXPECT_EQ(loom_region_entry_block(target_region), original_entry);
 }
 
-TEST_F(MaterializeTest, ClonesStandaloneSuccessorThroughExplicitBlockMap) {
-  loom_region_t* source_region = nullptr;
-  IREE_ASSERT_OK(loom_module_allocate_region(source_, 2, &source_region));
-  loom_block_t* source_entry = loom_region_block(source_region, 0);
-  loom_block_t* source_dest = loom_region_block(source_region, 1);
-  loom_builder_t source_region_builder = {};
-  loom_builder_initialize(source_, &source_->arena, source_entry,
-                          &source_region_builder);
+TEST_F(MaterializeTest, ClonesStandaloneSameModuleSuccessorByIdentity) {
+  loom_region_t* region = nullptr;
+  IREE_ASSERT_OK(loom_module_allocate_region(source_, 3, &region));
+  loom_block_t* entry = loom_region_block(region, 0);
+  loom_block_t* destination = loom_region_block(region, 1);
+  loom_block_t* clone_block = loom_region_block(region, 2);
+  loom_builder_t builder = {};
+  loom_builder_initialize(source_, &source_->arena, entry, &builder);
   loom_op_t* branch_op = nullptr;
-  IREE_ASSERT_OK(loom_test_br_build(&source_region_builder, source_dest,
+  IREE_ASSERT_OK(loom_test_br_build(&builder, destination,
                                     LOOM_LOCATION_UNKNOWN, &branch_op));
+  loom_builder_initialize(source_, &source_->arena, clone_block, &builder);
 
-  loom_region_t* target_region = nullptr;
-  IREE_ASSERT_OK(loom_module_allocate_region(target_, 2, &target_region));
-  loom_block_t* target_entry = loom_region_block(target_region, 0);
-  loom_block_t* target_dest = loom_region_block(target_region, 1);
-  loom_builder_t target_region_builder = {};
-  loom_builder_initialize(target_, &target_->arena, target_entry,
-                          &target_region_builder);
-
-  loom_ir_remap_t remap = InitializeRemap();
-  IREE_ASSERT_OK(loom_ir_remap_map_block(&remap, source_dest, target_dest));
+  loom_ir_remap_t remap =
+      InitializeSameModuleRemap(/*allow_unmapped_values=*/true);
   loom_op_t* cloned_op = nullptr;
-  IREE_ASSERT_OK(
-      loom_ir_clone_op(&target_region_builder, branch_op, &remap, &cloned_op));
+  IREE_ASSERT_OK(loom_ir_clone_op(&builder, branch_op, &remap, &cloned_op));
 
   ASSERT_TRUE(loom_test_br_isa(cloned_op));
-  EXPECT_EQ(loom_test_br_dest(cloned_op), target_dest);
+  EXPECT_EQ(loom_test_br_dest(cloned_op), destination);
 }
 
 TEST_F(MaterializeTest, ClonesOperandDictOps) {
