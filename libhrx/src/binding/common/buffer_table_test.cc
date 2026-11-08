@@ -13,6 +13,7 @@ using iree_hal_streaming_any_ptr_t = uint64_t;
 using iree_hal_streaming_buffer_table_t = hrx_buffer_table_t;
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <numeric>
 #include <random>
@@ -22,16 +23,15 @@ using iree_hal_streaming_buffer_table_t = hrx_buffer_table_t;
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
-// Dummy buffer structure for testing.
-//
-// NOTE: this is not the layout of the real structure, but in this isolated
-// test that does not even initialize a HAL device we can't use the real
-// structure without partially populating it. I figure it's more confusing to
-// have the partially populated structure than to have one that's totally
-// different. At least we have tests!
+// Opaque allocation identities for index-only tests. These helpers never
+// retain or dereference an entry's handle; lifetime tests use real HRX
+// wrappers.
 struct iree_hal_streaming_buffer_t {
+  // Device address inserted into the table.
   iree_hal_streaming_deviceptr_t device_ptr;
+  // Optional host alias inserted with the device address.
   void* host_ptr;
+  // Allocation length exposed by each registered alias.
   size_t size;
   // Padding to make allocation pattern impacts a bit more realistic.
   uint64_t padding[5];
@@ -117,13 +117,18 @@ namespace {
 using ::iree::testing::status::StatusIs;
 
 struct EntryCallbackState {
+  // Opaque entry payload expected while the callback holds the table lock.
   void* expected_user_data;
+  // Byte offset expected for the callback's lookup.
   size_t expected_offset;
+  // Number of entries accepted by this callback.
   int call_count;
 };
 
 struct BulkCallbackState {
+  // Number of unique entries visited by the bulk lookup.
   int call_count;
+  // One-based callback ordinal that rejects acquisition, or zero to accept all.
   int reject_call;
 };
 
@@ -421,6 +426,202 @@ TEST(BufferTableTest, RemovalRepairsMovedEntryAliases) {
   FreeDummyBuffer(middle, allocator);
   FreeDummyBuffer(last, allocator);
 }
+
+struct RemovalAddressOrder {
+  // Descriptive ordering of the three device/host address pairs.
+  const char* name;
+  // Address ranks for device0, host0, device1, host1, device2, and host2.
+  std::array<unsigned, 6> ranks;
+};
+
+enum class RemovalProtocol { kOrdinary, kReservedCancel, kReservedRestore };
+
+class BufferTableRemovalTest
+    : public ::testing::TestWithParam<RemovalAddressOrder> {
+ protected:
+  void SetUp() override {
+    hrx_buffer_table_initialize(&table_);
+    for (hrx_buffer_t& buffer : buffers_) {
+      IREE_ASSERT_OK(hrx_buffer_create_from_hal(
+          /*hal_buffer=*/nullptr, /*device=*/nullptr,
+          HRX_MEMORY_TYPE_HOST_LOCAL, kAllocationSize,
+          /*device_ptr=*/nullptr, &buffer));
+    }
+  }
+
+  void TearDown() override {
+    // Release any reservation still owned after a failed test assertion.
+    while (table_.reserved_insert_count != 0) {
+      hrx_buffer_table_cancel_reserved_insert(&table_);
+    }
+    hrx_buffer_table_deinitialize(&table_);
+    for (hrx_buffer_t buffer : buffers_) {
+      hrx_buffer_release(buffer);
+    }
+  }
+
+  void VerifyLookups(const std::array<bool, 3>& live) {
+    EXPECT_EQ(std::count(live.begin(), live.end(), true), table_.count);
+    for (size_t index = 0; index < buffers_.size(); ++index) {
+      for (uint64_t base : {device_addresses_[index], host_addresses_[index]}) {
+        if (base == 0) {
+          continue;
+        }
+        for (size_t expected_offset : {size_t{0}, kAllocationSize - 1}) {
+          hrx_buffer_t found = nullptr;
+          size_t offset = SIZE_MAX;
+          void* user_data = nullptr;
+          bool matched = hrx_buffer_table_try_find(
+              &table_, base + expected_offset, &found, &offset, &user_data);
+          EXPECT_EQ(live[index], matched);
+          if (matched) {
+            EXPECT_EQ(buffers_[index], found);
+            EXPECT_EQ(expected_offset, offset);
+            EXPECT_EQ(&buffers_[index], user_data);
+          } else {
+            EXPECT_EQ(nullptr, found);
+            EXPECT_EQ(0u, offset);
+            EXPECT_EQ(nullptr, user_data);
+          }
+        }
+        EXPECT_FALSE(hrx_buffer_table_try_find(&table_, base + kAllocationSize,
+                                               nullptr, nullptr, nullptr));
+      }
+    }
+  }
+
+  void ExerciseRemovalSequence(unsigned alias_modes,
+                               const std::array<unsigned, 3>& order,
+                               RemovalProtocol protocol, bool prefer_host,
+                               size_t offset) {
+    ASSERT_EQ(0u, table_.count);
+    ASSERT_EQ(0u, table_.reserved_insert_count);
+    std::array<bool, 3> live = {true, true, true};
+    for (size_t index = 0; index < buffers_.size(); ++index) {
+      const unsigned mode = alias_modes % 3;
+      alias_modes /= 3;
+      device_addresses_[index] = 0x10000 + GetParam().ranks[2 * index] * 256;
+      host_addresses_[index] =
+          mode == 0   ? 0
+          : mode == 1 ? device_addresses_[index]
+                      : 0x10000 + GetParam().ranks[2 * index + 1] * 256;
+      IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_table_insert(
+          &table_, device_addresses_[index],
+          reinterpret_cast<void*>(host_addresses_[index]), kAllocationSize,
+          buffers_[index], &buffers_[index])));
+    }
+    VerifyLookups(live);
+
+    for (unsigned index : order) {
+      const uint64_t pointer =
+          (prefer_host && host_addresses_[index] ? host_addresses_[index]
+                                                 : device_addresses_[index]) +
+          offset;
+      if (protocol == RemovalProtocol::kOrdinary) {
+        IREE_ASSERT_OK(
+            hrx_status_to_iree(hrx_buffer_table_remove(&table_, pointer)));
+      } else {
+        hrx_buffer_table_entry_t removed = {};
+        size_t removed_offset = SIZE_MAX;
+        IREE_EXPECT_STATUS_IS(
+            IREE_STATUS_FAILED_PRECONDITION,
+            hrx_status_to_iree(hrx_buffer_table_remove_reserved_if(
+                &table_, pointer, RejectEntryCallback, nullptr, &removed,
+                &removed_offset)));
+        EXPECT_EQ(nullptr, removed.buffer);
+        EXPECT_EQ(0u, removed_offset);
+        ASSERT_EQ(0u, table_.reserved_insert_count);
+        VerifyLookups(live);
+
+        IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_table_remove_reserved_if(
+            &table_, pointer, nullptr, nullptr, &removed, &removed_offset)));
+        EXPECT_EQ(buffers_[index], removed.buffer);
+        EXPECT_EQ(&buffers_[index], removed.user_data);
+        EXPECT_EQ(device_addresses_[index], removed.device_ptr);
+        EXPECT_EQ(reinterpret_cast<void*>(host_addresses_[index]),
+                  removed.host_ptr);
+        EXPECT_EQ(kAllocationSize, removed.size);
+        EXPECT_EQ(offset, removed_offset);
+        ASSERT_EQ(1u, table_.reserved_insert_count);
+      }
+      live[index] = false;
+      VerifyLookups(live);
+
+      if (protocol == RemovalProtocol::kReservedCancel) {
+        hrx_buffer_table_cancel_reserved_insert(&table_);
+      } else if (protocol == RemovalProtocol::kReservedRestore) {
+        auto* entries = table_.entries;
+        auto* ranges = table_.range_index;
+        const size_t capacity = table_.capacity;
+        IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_table_insert_reserved(
+            &table_, device_addresses_[index],
+            reinterpret_cast<void*>(host_addresses_[index]), kAllocationSize,
+            buffers_[index], &buffers_[index])));
+        EXPECT_EQ(entries, table_.entries);
+        EXPECT_EQ(ranges, table_.range_index);
+        EXPECT_EQ(capacity, table_.capacity);
+        ASSERT_EQ(0u, table_.reserved_insert_count);
+        live[index] = true;
+        VerifyLookups(live);
+        IREE_ASSERT_OK(
+            hrx_status_to_iree(hrx_buffer_table_remove(&table_, pointer)));
+        live[index] = false;
+        VerifyLookups(live);
+      }
+    }
+    EXPECT_EQ(0u, table_.range_count);
+    EXPECT_EQ(0u, table_.reserved_insert_count);
+  }
+
+  static constexpr size_t kAllocationSize = 16;
+  // Table borrowing the fixture's allocation handles and payload addresses.
+  hrx_buffer_table_t table_ = {};
+  // Real allocation wrappers owned until after table teardown.
+  std::array<hrx_buffer_t, 3> buffers_ = {};
+  // Device addresses for the current independently modeled registrations.
+  std::array<uint64_t, 3> device_addresses_ = {};
+  // Host aliases, including absent and identical aliases, for those entries.
+  std::array<uint64_t, 3> host_addresses_ = {};
+};
+
+TEST_P(BufferTableRemovalTest, RemovalPreservesAliasesAndReservedRestoration) {
+  for (unsigned alias_modes = 0; alias_modes < 27; ++alias_modes) {
+    SCOPED_TRACE(::testing::Message() << "alias modes " << alias_modes);
+    std::array<unsigned, 3> order = {0, 1, 2};
+    do {
+      SCOPED_TRACE(::testing::Message()
+                   << "removal order " << order[0] << order[1] << order[2]);
+      for (RemovalProtocol protocol :
+           {RemovalProtocol::kOrdinary, RemovalProtocol::kReservedCancel,
+            RemovalProtocol::kReservedRestore}) {
+        SCOPED_TRACE(static_cast<int>(protocol));
+        for (bool prefer_host : {false, true}) {
+          SCOPED_TRACE(prefer_host);
+          for (size_t offset : {size_t{0}, kAllocationSize - 1}) {
+            SCOPED_TRACE(offset);
+            ASSERT_NO_FATAL_FAILURE(ExerciseRemovalSequence(
+                alias_modes, order, protocol, prefer_host, offset));
+          }
+        }
+      }
+    } while (std::next_permutation(order.begin(), order.end()));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    AddressOrders, BufferTableRemovalTest,
+    ::testing::Values(
+        RemovalAddressOrder{"AdjacentHostAfter", {0, 1, 2, 3, 4, 5}},
+        RemovalAddressOrder{"AdjacentHostBefore", {1, 0, 3, 2, 5, 4}},
+        RemovalAddressOrder{"HostRegionAfter", {0, 3, 1, 4, 2, 5}},
+        RemovalAddressOrder{"HostRegionBefore", {3, 0, 4, 1, 5, 2}},
+        RemovalAddressOrder{"NestedAliases", {0, 5, 1, 4, 2, 3}},
+        RemovalAddressOrder{"CrossedAliases", {0, 4, 2, 1, 5, 3}},
+        RemovalAddressOrder{"ReverseDeviceOrder", {5, 4, 3, 2, 1, 0}},
+        RemovalAddressOrder{"MixedDeviceOrder", {3, 0, 1, 5, 4, 2}}),
+    [](const ::testing::TestParamInfo<RemovalAddressOrder>& info) {
+      return info.param.name;
+    });
 
 TEST(BufferTableTest, LookupMissing) {
   iree_allocator_t allocator = iree_allocator_system();
@@ -1121,17 +1322,21 @@ TEST(BufferTableTest, ReservedInsertSurvivesCapacityPressure) {
   iree_hal_streaming_buffer_table_t* table = nullptr;
   IREE_ASSERT_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
 
-  auto* removed_buffer = CreateDummyBuffer(0x100000000ULL, 4096, allocator);
+  auto* removed_buffer =
+      CreateDummyBuffer(0x100000000ULL, 4096, allocator,
+                        reinterpret_cast<void*>(UINT64_C(0x300000000)));
   IREE_ASSERT_OK(iree_hal_streaming_buffer_table_insert(table, removed_buffer));
   const size_t reserved_capacity = table->capacity;
   hrx_buffer_table_entry_t removed_entry = {};
   size_t removed_offset = SIZE_MAX;
   IREE_ASSERT_OK(BufferTableStatus(hrx_buffer_table_remove_reserved_if(
-      table, removed_buffer->device_ptr, /*callback=*/nullptr,
+      table, (uint64_t)(uintptr_t)removed_buffer->host_ptr + 32,
+      /*callback=*/nullptr,
       /*callback_user_data=*/nullptr, &removed_entry, &removed_offset)));
   EXPECT_EQ(removed_buffer->device_ptr, removed_entry.device_ptr);
   EXPECT_EQ((hrx_buffer_t)removed_buffer, removed_entry.buffer);
-  EXPECT_EQ(0u, removed_offset);
+  EXPECT_EQ(removed_buffer->host_ptr, removed_entry.host_ptr);
+  EXPECT_EQ(32u, removed_offset);
   EXPECT_EQ(1u, table->reserved_insert_count);
 
   std::vector<iree_hal_streaming_buffer_t*> competing_buffers;
@@ -1154,6 +1359,10 @@ TEST(BufferTableTest, ReservedInsertSurvivesCapacityPressure) {
   iree_hal_streaming_buffer_t* found = nullptr;
   IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup(
       table, removed_buffer->device_ptr, &found));
+  EXPECT_EQ(found, removed_buffer);
+
+  IREE_EXPECT_OK(iree_hal_streaming_buffer_table_lookup(
+      table, (uint64_t)(uintptr_t)removed_buffer->host_ptr + 32, &found));
   EXPECT_EQ(found, removed_buffer);
 
   iree_hal_streaming_buffer_table_free(table);
