@@ -132,7 +132,6 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/vulkan/util:libvulkan",
-        "//runtime/src/iree/hal/utils:submitted_signal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
@@ -302,7 +301,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/driver/vulkan/util:libvulkan",
-        "//runtime/src/iree/hal/utils:submitted_signal",
         "//runtime/src/iree/testing:gtest",
     ],
     alwayslink = True,
@@ -331,7 +329,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/threading:thread",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/driver/vulkan/util:libvulkan",
-        "//runtime/src/iree/hal/utils:submitted_signal",
     ],
 )
 
@@ -359,7 +356,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/cts/util:test_base",
         "//runtime/src/iree/hal/driver/vulkan/util:libvulkan",
-        "//runtime/src/iree/hal/utils:submitted_signal",
         "//runtime/src/iree/testing:gtest",
     ],
     alwayslink = True,
@@ -442,7 +438,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/hal/memory:tracing",
         "//runtime/src/iree/hal/utils:files",
         "//runtime/src/iree/hal/utils:resource_set",
-        "//runtime/src/iree/hal/utils:submitted_signal",
         "//third_party:vulkan_headers",
     ],
 )

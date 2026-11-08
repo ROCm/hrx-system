@@ -31,8 +31,13 @@ typedef struct iree_hal_vulkan_semaphore_t {
   // Creation flags controlling synchronization behavior.
   iree_hal_semaphore_flags_t flags;
 
-  // Seqlock-protected cache of the most recent queue signal.
-  iree_hal_submitted_signal_t submitted_signal;
+  // Latest accepted producer, protected by async.mutex. Independent of the
+  // optional accumulated frontier's capacity.
+  iree_hal_vulkan_semaphore_submission_t submitted;
+
+  // Lazily allocated availability timeline, owned here and protected by
+  // async.mutex. It never owns the parent semaphore or any queue submission.
+  iree_async_semaphore_t* submission_timeline;
 } iree_hal_vulkan_semaphore_t;
 
 static const iree_hal_semaphore_vtable_t iree_hal_vulkan_semaphore_vtable;
@@ -113,8 +118,6 @@ iree_status_t iree_hal_vulkan_semaphore_create(
     semaphore->logical_device = logical_device;
     semaphore->handle = handle;
     semaphore->flags = flags;
-    memset(&semaphore->submitted_signal, 0,
-           sizeof(semaphore->submitted_signal));
     *out_semaphore = iree_hal_semaphore_cast(&semaphore->async);
   } else {
     iree_vkDestroySemaphore(IREE_VULKAN_DEVICE(syms), logical_device, handle,
@@ -136,6 +139,7 @@ static void iree_hal_vulkan_semaphore_destroy(
                           semaphore->logical_device, semaphore->handle,
                           /*pAllocator=*/NULL);
   iree_async_semaphore_deinitialize(&semaphore->async);
+  iree_async_semaphore_release(semaphore->submission_timeline);
   iree_allocator_free(host_allocator, semaphore);
 
   IREE_TRACE_ZONE_END(z0);
@@ -169,38 +173,79 @@ iree_status_t iree_hal_vulkan_semaphore_handle(
   return iree_ok_status();
 }
 
-iree_hal_submitted_signal_t* iree_hal_vulkan_semaphore_submitted_signal(
-    iree_hal_semaphore_t* base_semaphore) {
+bool iree_hal_vulkan_semaphore_query_submission(
+    iree_hal_semaphore_t* base_semaphore, uint64_t value,
+    iree_hal_vulkan_semaphore_submission_t* out_submission) {
   iree_hal_vulkan_semaphore_t* semaphore =
       iree_hal_vulkan_semaphore_cast(base_semaphore);
-  return &semaphore->submitted_signal;
+  iree_slim_mutex_lock(&semaphore->async.mutex);
+  *out_submission = semaphore->submitted;
+  iree_slim_mutex_unlock(&semaphore->async.mutex);
+  return out_submission->semaphore != VK_NULL_HANDLE &&
+         out_submission->value == value;
 }
 
-bool iree_hal_vulkan_semaphore_publish_signal(
+iree_status_t iree_hal_vulkan_semaphore_submission_timeline(
+    iree_hal_semaphore_t* base_semaphore,
+    iree_async_semaphore_t** out_timeline) {
+  iree_hal_vulkan_semaphore_t* semaphore =
+      iree_hal_vulkan_semaphore_cast(base_semaphore);
+  iree_slim_mutex_lock(&semaphore->async.mutex);
+  iree_status_t status = iree_status_clone((iree_status_t)iree_atomic_load(
+      &semaphore->async.failure_status, iree_memory_order_acquire));
+  if (iree_status_is_ok(status) && !semaphore->submission_timeline) {
+    uint64_t value = (uint64_t)iree_atomic_load(
+        &semaphore->async.timeline_value, iree_memory_order_acquire);
+    if (semaphore->submitted.semaphore) {
+      value = iree_max(value, semaphore->submitted.value);
+    }
+    status = iree_async_semaphore_create(
+        semaphore->async.proactor, value, /*frontier_capacity=*/0,
+        semaphore->async.allocator, &semaphore->submission_timeline);
+  }
+  *out_timeline = semaphore->submission_timeline;
+  iree_slim_mutex_unlock(&semaphore->async.mutex);
+  return status;
+}
+
+void iree_hal_vulkan_semaphore_notify_submission(
+    iree_hal_semaphore_t* base_semaphore, uint64_t value) {
+  iree_hal_vulkan_semaphore_t* semaphore =
+      iree_hal_vulkan_semaphore_cast(base_semaphore);
+  iree_slim_mutex_lock(&semaphore->async.mutex);
+  iree_async_semaphore_t* timeline = semaphore->submission_timeline;
+  iree_slim_mutex_unlock(&semaphore->async.mutex);
+  if (timeline) {
+    iree_status_t status =
+        iree_async_semaphore_publish_untainted(timeline, value, NULL);
+    if (!iree_status_is_ok(status)) {
+      iree_async_semaphore_fail(&semaphore->async, status);
+    }
+  }
+}
+
+void iree_hal_vulkan_semaphore_publish_signal(
     iree_hal_semaphore_t* base_semaphore, iree_async_axis_t producer_axis,
-    const iree_async_frontier_t* producer_frontier, uint64_t producer_epoch,
+    const iree_async_frontier_t* producer_frontier,
+    VkSemaphore producer_semaphore, uint64_t producer_epoch,
     uint64_t producer_value) {
   IREE_ASSERT_ARGUMENT(producer_frontier);
   iree_hal_vulkan_semaphore_t* semaphore =
       iree_hal_vulkan_semaphore_cast(base_semaphore);
 
-  iree_hal_submitted_signal_flags_t flags =
-      IREE_HAL_SUBMITTED_SIGNAL_FLAG_VALID;
-  bool source_dominates_frontier = false;
   iree_slim_mutex_lock(&semaphore->async.mutex);
-  const bool merged = iree_async_frontier_merge_and_test_source_dominance(
-      semaphore->async.frontier, semaphore->async.frontier_capacity,
-      producer_frontier, &source_dominates_frontier);
-  if (merged && source_dominates_frontier) {
-    flags |= IREE_HAL_SUBMITTED_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT;
+  iree_async_frontier_merge(semaphore->async.frontier,
+                            semaphore->async.frontier_capacity,
+                            producer_frontier);
+  if (producer_value > semaphore->submitted.value) {
+    semaphore->submitted = (iree_hal_vulkan_semaphore_submission_t){
+        .semaphore = producer_semaphore,
+        .axis = producer_axis,
+        .epoch = producer_epoch,
+        .value = producer_value,
+    };
   }
-  iree_hal_submitted_signal_store(
-      &semaphore->submitted_signal, merged ? flags : 0,
-      merged ? producer_axis : (iree_async_axis_t)0,
-      merged ? producer_epoch : 0, merged ? producer_value : 0);
   iree_slim_mutex_unlock(&semaphore->async.mutex);
-
-  return merged;
 }
 
 static uint64_t iree_hal_vulkan_semaphore_observe_native_value(
@@ -321,6 +366,8 @@ static iree_status_t iree_hal_vulkan_semaphore_signal(
   }
   if (iree_status_is_ok(status)) {
     iree_async_semaphore_dispatch_timepoints(base_semaphore, new_value);
+    iree_hal_vulkan_semaphore_notify_submission(
+        iree_hal_semaphore_cast(base_semaphore), new_value);
   }
   return status;
 }
@@ -339,7 +386,13 @@ static void iree_hal_vulkan_semaphore_on_fail(
   iree_slim_mutex_lock(&base_semaphore->mutex);
   VkResult result = iree_vkSignalSemaphore_raw(
       &semaphore->syms, semaphore->logical_device, &signal_info);
+  iree_async_semaphore_t* timeline = semaphore->submission_timeline;
   iree_slim_mutex_unlock(&base_semaphore->mutex);
+  if (timeline) {
+    iree_status_t failure = (iree_status_t)iree_atomic_load(
+        &base_semaphore->failure_status, iree_memory_order_acquire);
+    iree_async_semaphore_fail(timeline, iree_status_clone(failure));
+  }
   IREE_ASSERT(result == VK_SUCCESS || result == VK_ERROR_DEVICE_LOST);
   (void)result;
 }

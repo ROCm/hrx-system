@@ -138,6 +138,88 @@ TEST_F(VulkanSemaphoreTest, QueryDoesNotPublishInFlightHostSignal) {
   EXPECT_EQ(value, 1u);
 }
 
+TEST_F(VulkanSemaphoreTest, NativeProducerIsIndependentOfFrontierCapacity) {
+  auto* async = reinterpret_cast<iree_async_semaphore_t*>(semaphore_);
+  ASSERT_EQ(async->frontier_capacity, 0);
+  const auto native = reinterpret_cast<VkSemaphore>(static_cast<uintptr_t>(2));
+  iree_async_single_frontier_t frontier;
+  iree_async_single_frontier_initialize(&frontier, /*axis=*/1, /*epoch=*/7);
+  iree_hal_vulkan_semaphore_publish_signal(
+      semaphore_, 1, iree_async_single_frontier_as_const_frontier(&frontier),
+      native, 7, 3);
+  iree_hal_vulkan_semaphore_submission_t producer;
+  EXPECT_TRUE(
+      iree_hal_vulkan_semaphore_query_submission(semaphore_, 3, &producer));
+  EXPECT_EQ(producer.semaphore, native);
+  EXPECT_EQ(producer.axis, 1);
+  EXPECT_EQ(producer.epoch, 7);
+  // An older requested point may precede this producer in the dependency graph.
+  EXPECT_FALSE(
+      iree_hal_vulkan_semaphore_query_submission(semaphore_, 2, &producer));
+  EXPECT_FALSE(
+      iree_hal_vulkan_semaphore_query_submission(semaphore_, 4, &producer));
+
+  // An older publication cannot replace the current producer, and a newer
+  // host-dependent producer cannot borrow a previous native readiness point.
+  iree_hal_vulkan_semaphore_publish_signal(
+      semaphore_, 1, iree_async_single_frontier_as_const_frontier(&frontier),
+      VK_NULL_HANDLE, 6, 2);
+  EXPECT_TRUE(
+      iree_hal_vulkan_semaphore_query_submission(semaphore_, 3, &producer));
+  iree_hal_vulkan_semaphore_publish_signal(
+      semaphore_, 1, iree_async_single_frontier_as_const_frontier(&frontier),
+      VK_NULL_HANDLE, 8, 4);
+  EXPECT_FALSE(
+      iree_hal_vulkan_semaphore_query_submission(semaphore_, 4, &producer));
+}
+
+TEST_F(VulkanSemaphoreTest, NativeAvailabilityDoesNotPublishPublicCompletion) {
+  iree_async_semaphore_t* availability = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_vulkan_semaphore_submission_timeline(semaphore_, &availability));
+  EXPECT_EQ(iree_async_semaphore_query(availability), 0u);
+  const auto native = reinterpret_cast<VkSemaphore>(static_cast<uintptr_t>(2));
+  iree_async_single_frontier_t frontier;
+  iree_async_single_frontier_initialize(&frontier, /*axis=*/1, /*epoch=*/7);
+  iree_hal_vulkan_semaphore_publish_signal(
+      semaphore_, 1, iree_async_single_frontier_as_const_frontier(&frontier),
+      native, 7, 3);
+  iree_hal_vulkan_semaphore_notify_submission(semaphore_, 3);
+  EXPECT_EQ(iree_async_semaphore_query(availability), 3u);
+  uint64_t value = UINT64_MAX;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore_, &value));
+  EXPECT_EQ(value, 0u);
+
+  // A later host obligation cannot become available from native submission.
+  iree_hal_vulkan_semaphore_publish_signal(
+      semaphore_, 1, iree_async_single_frontier_as_const_frontier(&frontier),
+      VK_NULL_HANDLE, 8, 4);
+  EXPECT_EQ(iree_async_semaphore_query(availability), 3u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(semaphore_, 4, nullptr));
+  EXPECT_EQ(iree_async_semaphore_query(availability), 4u);
+}
+
+TEST_F(VulkanSemaphoreTest, AvailabilityCreatedAfterNativePublication) {
+  const auto native = reinterpret_cast<VkSemaphore>(static_cast<uintptr_t>(2));
+  iree_async_single_frontier_t frontier;
+  iree_async_single_frontier_initialize(&frontier, /*axis=*/1, /*epoch=*/7);
+  iree_hal_vulkan_semaphore_publish_signal(
+      semaphore_, 1, iree_async_single_frontier_as_const_frontier(&frontier),
+      native, 7, 3);
+  iree_hal_vulkan_semaphore_notify_submission(semaphore_, 3);
+  iree_async_semaphore_t* availability = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_vulkan_semaphore_submission_timeline(semaphore_, &availability));
+  EXPECT_EQ(iree_async_semaphore_query(availability), 3u);
+  iree_hal_semaphore_fail(semaphore_,
+                          iree_status_from_code(IREE_STATUS_ABORTED));
+  EXPECT_EQ(iree_async_semaphore_query_status(availability),
+            IREE_STATUS_ABORTED);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_ABORTED,
+      iree_hal_vulkan_semaphore_submission_timeline(semaphore_, &availability));
+}
+
 TEST_F(VulkanSemaphoreTest, FailureWinsBeforeNativeSignalCompletes) {
   native_.paused_value = 1;
   std::thread signal_thread([&]() {
