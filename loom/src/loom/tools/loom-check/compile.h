@@ -71,8 +71,8 @@ typedef struct loom_check_compile_artifact_options_t {
   iree_string_view_t artifact_format;
   // Optional explicit root function symbol.
   iree_string_view_t root;
-  // Optional complete family:selector target profile specification.
-  iree_string_view_t target;
+  // Optional public target profile borrowed until artifact compilation returns.
+  loomc_target_profile_t* target_profile;
   // Whether to lower source IR to Low before target emission.
   bool lower_source_to_low;
   // Source-to-Low control-flow shape when lowering source IR.

@@ -1,0 +1,108 @@
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal input=source-low limits=SUBGROUP_SIZE:64 validate
+// REQUIRES: spirv-dis, spirv-val
+
+// The supplied limit determines both the launch size and the stored value.
+// Selecting the base profile again would lose the query's exact value.
+kernel.def @profile_width() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%output: buffer) {
+  %base = index.constant 0 : offset
+  %destination = buffer.view %output[%base] : buffer -> view<64xi32>
+  %thread = kernel.workitem.id<x> : index
+  %width = target.subgroup.size : index
+  %value = index.cast %width : index to i32
+  view.store %value, %destination[%thread] : i32, view<64xi32>
+  kernel.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpMemoryModel PhysicalStorageBuffer64 GLSL450
+               OpEntryPoint GLCompute %profile_width "profile_width" %local_invocation_id
+               OpExecutionMode %profile_width LocalSize 64 1 1
+               OpName %profile_width "profile_width"
+               OpName %output "output"
+               OpName %local_invocation_id "local_invocation_id"
+               OpName %thread "thread"
+               OpName %value "value"
+               OpModuleProcessed "iree.vulkan.bda.v1[profile_width].subgroup_size=64"
+               OpModuleProcessed "iree.vulkan.bda.v1[profile_width].root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1[profile_width].constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[profile_width].constant_length=0"
+               OpModuleProcessed "iree.vulkan.bda.v1[profile_width].bindings=1"
+               OpModuleProcessed "iree.vulkan.bda.parameters.v1[profile_width]=b0"
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_11 Block
+               OpMemberDecorate %_struct_11 0 Offset 0
+               OpDecorate %local_invocation_id BuiltIn LocalInvocationId
+               OpDecorate %_ptr_PhysicalStorageBuffer_int ArrayStride 4
+               OpDecorate %_struct_37 Block
+               OpMemberDecorate %_struct_37 0 Offset 0
+               OpMemberDecorate %_struct_37 1 Offset 8
+               OpMemberDecorate %_struct_37 2 Offset 16
+               OpMemberDecorate %_struct_37 3 Offset 20
+               OpMemberDecorate %_struct_37 4 Offset 24
+               OpMemberDecorate %_struct_37 5 Offset 28
+       %void = OpTypeVoid
+          %4 = OpTypeFunction %void
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_11 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_11 = OpTypePointer PhysicalStorageBuffer %_struct_11
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %int_2 = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+     %v3uint = OpTypeVector %uint 3
+%_ptr_Input_v3uint = OpTypePointer Input %v3uint
+%local_invocation_id = OpVariable %_ptr_Input_v3uint Input
+      %value = OpConstant %int 64
+    %ulong_4 = OpConstant %ulong 4
+%_ptr_PhysicalStorageBuffer_int = OpTypePointer PhysicalStorageBuffer %int
+ %_struct_37 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint
+%_ptr_PushConstant__struct_37 = OpTypePointer PushConstant %_struct_37
+          %2 = OpVariable %_ptr_PushConstant__struct_37 PushConstant
+%profile_width = OpFunction %void None %4
+          %5 = OpLabel
+         %16 = OpAccessChain %_ptr_PushConstant_ulong %2 %int_0
+         %17 = OpLoad %ulong %16 Aligned 8
+         %18 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_11 %17
+         %19 = OpAccessChain %_ptr_PushConstant_uint %2 %int_2
+         %20 = OpLoad %uint %19 Aligned 4
+         %22 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %18 %int_0 %20
+     %output = OpLoad %ulong %22 Aligned 8
+         %27 = OpLoad %v3uint %local_invocation_id
+         %28 = OpCompositeExtract %uint %27 0
+     %thread = OpBitcast %int %28
+         %31 = OpSConvert %ulong %thread
+         %33 = OpIMul %ulong %31 %ulong_4
+         %34 = OpIAdd %ulong %output %33
+         %36 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %34
+               OpStore %36 %value Aligned 4
+               OpReturn
+               OpFunctionEnd
+
+// ====
+
+// RUN: emit spirv-dis target=spirv:vulkan1.3+bda+hal input=source-low limits=MAX_WORKGROUP_SIZE_X:16 validate
+// REQUIRES: spirv-dis, spirv-val
+
+// A valid refinement still constrains the compiled kernel's launch.
+// ERROR@+1: TARGET/024 {axis="x", size="32", limit="16"}
+kernel.def @oversized_workgroup() {
+  %unit = index.constant 1 : index
+  %width = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch() {
+  kernel.return
+}
+
+// ----

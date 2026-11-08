@@ -256,13 +256,16 @@ profile and emits directly; `input=source-low` additionally runs source
 preparation and lowering.
 
 SPIR-V lowering fixtures use `emit spirv-low` to compare Low IR without binary
-emission or external SPIR-V tools. They can refine a selected `target=` profile
-with named feature facts. `features=FLOAT16,COOPERATIVE_MATRIX_KHR,-INT16` uses
+emission or external SPIR-V tools. Both `spirv-low` and `spirv-dis` can refine a
+selected `target=` profile with named feature facts.
+`features=FLOAT16,COOPERATIVE_MATRIX_KHR,-INT16` uses
 the suffixes of the public `loomc_spirv_feature_t` constants; a leading `-`
 records an unavailable feature. Numeric limits use the public
 `loomc_spirv_limit_t` suffixes and decimal values, for example
 `limits=MAX_WORKGROUP_STORAGE_BYTES:512,MAX_WORKGROUP_SUBGROUP_COUNT:8`.
-The profile API validates these facts before compilation.
+The profile API validates these facts before compilation. The final artifact
+uses that same refined profile; add `validate` to `spirv-dis` and declare
+`// REQUIRES: spirv-dis, spirv-val` to check it with the external validator.
 
 `emit cxx` projects an admitted High module through the public
 `loom-export-cxx` tool. `emit cxx @kernel` selects one kernel from a mixed

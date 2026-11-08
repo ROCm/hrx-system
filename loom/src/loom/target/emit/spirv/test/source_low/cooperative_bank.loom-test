@@ -1,0 +1,213 @@
+// RUN: emit spirv-dis @accumulator_bank input=source-low control-flow=structured-low target=spirv:vulkan1.3+bda+hal features=FLOAT16,STORAGE_BUFFER_16BIT_ACCESS,COOPERATIVE_MATRIX_KHR validate
+// REQUIRES: spirv-dis, spirv-val
+
+// Two independent opaque accumulators survive the outer recurrence. Unrolling
+// the bank traversal retains one shared LHS load and two RHS/MMA chains; each
+// loop phi and final store must use its own cooperative-matrix value.
+kernel.def @accumulator_bank() {
+  %step = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%step, %step, %step) workgroup_size(%threads, %step, %step) : index
+} launch(%left_buffer: buffer, %right_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %count = index.constant 2 : index
+  %tile = index.constant 16 : index
+  %width = index.constant 1 : index
+  %unroll = index.constant 1 : index
+  %left_aligned = buffer.assume.alignment %left_buffer {minimum_alignment = 16} : buffer
+  %right_aligned = buffer.assume.alignment %right_buffer {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output_buffer {minimum_alignment = 16} : buffer
+  %left = buffer.view %left_aligned[%base] : buffer -> view<16x32xf16>
+  %right = buffer.view %right_aligned[%base] : buffer -> view<32x32xf16>
+  %output = buffer.view %output_aligned[%base] : buffer -> view<16x32xf32>
+  %seed_values = vector.splatf 0.0 : vector<[%width]xf32>
+  %initial = vector.fragment<init> %seed_values shape [%tile, %tile] : vector<[%width]xf32>
+  %empty_bank = vector.splatf 0.0 : vector<2x[%width]xf32>
+  %first_seed = vector.insert %initial into %empty_bank[0] : vector<[%width]xf32>, vector<2x[%width]xf32>
+  %seed = vector.insert %initial into %first_seed[1] : vector<[%width]xf32>, vector<2x[%width]xf32>
+  %result_bank = scf.for %panel = [%begin to %count step %step](%bank = %seed : vector<2x[%width]xf32>) -> (vector<2x[%width]xf32>) unroll(%unroll) {
+    %reduction = index.mul %panel, %tile : index
+    %lhs = vector.fragment.load<lhs> %left[0, %reduction] shape [%tile, %tile] : view<16x32xf16> -> vector<1xf16>
+    %next_bank = scf.for %ordinal = [%begin to %count step %step](%partial_bank = %bank : vector<2x[%width]xf32>) -> (vector<2x[%width]xf32>) unroll {
+      %column = index.mul %ordinal, %tile : index
+      %previous = vector.extract %partial_bank[%ordinal] : vector<2x[%width]xf32> -> vector<[%width]xf32>
+      %accumulator = vector.fragment<init> %previous shape [%tile, %tile] : vector<[%width]xf32>
+      %rhs = vector.fragment.load<rhs> %right[%reduction, %column] shape [%tile, %tile] : view<32x32xf16> -> vector<1xf16>
+      %dot = vector.mma %lhs, %rhs, %accumulator : vector<1xf16>, vector<1xf16>, vector<[%width]xf32>
+      %updated = vector.insert %dot into %partial_bank[%ordinal] : vector<[%width]xf32>, vector<2x[%width]xf32>
+      scf.yield %updated : vector<2x[%width]xf32>
+    }
+    scf.yield %next_bank : vector<2x[%width]xf32>
+  }
+  scf.for %ordinal = [%begin to %count step %step] unroll {
+    %column = index.mul %ordinal, %tile : index
+    %result = vector.extract %result_bank[%ordinal] : vector<2x[%width]xf32> -> vector<[%width]xf32>
+    %fragment = vector.fragment<result> %result shape [%tile, %tile] : vector<[%width]xf32>
+    vector.fragment.store<result> %fragment, %output[0, %column] shape [%tile, %tile] : vector<[%width]xf32>, view<16x32xf32>
+  }
+  kernel.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Float16
+               OpCapability StorageBuffer16BitAccess
+               OpCapability CooperativeMatrixKHR
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_16bit_storage"
+               OpExtension "SPV_KHR_cooperative_matrix"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %accumulator_bank "accumulator_bank"
+               OpExecutionMode %accumulator_bank LocalSize 32 1 1
+               OpName %accumulator_bank "accumulator_bank"
+               OpName %left_aligned "left_aligned"
+               OpName %right_aligned "right_aligned"
+               OpName %output_aligned "output_aligned"
+               OpName %begin "begin"
+               OpName %step "step"
+               OpName %count "count"
+               OpName %initial "initial"
+               OpName %panel "panel"
+               OpName %accumulator "accumulator"
+               OpName %accumulator_1 "accumulator_1"
+               OpName %lhs "lhs"
+               OpName %rhs "rhs"
+               OpName %dot "dot"
+               OpName %rhs_1 "rhs_1"
+               OpName %dot_1 "dot_1"
+               OpName %fragment "fragment"
+               OpName %fragment_1 "fragment_1"
+               OpModuleProcessed "iree.vulkan.bda.v1[accumulator_bank].root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1[accumulator_bank].constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[accumulator_bank].constant_length=0"
+               OpModuleProcessed "iree.vulkan.bda.v1[accumulator_bank].bindings=3"
+               OpModuleProcessed "iree.vulkan.bda.parameters.v1[accumulator_bank]=b0;b1;b2"
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_11 Block
+               OpMemberDecorate %_struct_11 0 Offset 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 2
+               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 4
+               OpDecorate %_struct_101 Block
+               OpMemberDecorate %_struct_101 0 Offset 0
+               OpMemberDecorate %_struct_101 1 Offset 8
+               OpMemberDecorate %_struct_101 2 Offset 16
+               OpMemberDecorate %_struct_101 3 Offset 20
+               OpMemberDecorate %_struct_101 4 Offset 24
+               OpMemberDecorate %_struct_101 5 Offset 28
+       %void = OpTypeVoid
+          %4 = OpTypeFunction %void
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_11 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_11 = OpTypePointer PhysicalStorageBuffer %_struct_11
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %int_2 = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+     %uint_1 = OpConstant %uint 1
+     %uint_2 = OpConstant %uint 2
+      %begin = OpConstant %int 0
+       %step = OpConstant %int 1
+      %count = OpConstant %int 2
+      %float = OpTypeFloat 32
+    %float_0 = OpConstant %float 0
+     %uint_3 = OpConstant %uint 3
+    %uint_16 = OpConstant %uint 16
+         %39 = OpTypeCooperativeMatrixKHR %float %uint_3 %uint_16 %uint_16 %uint_2
+       %bool = OpTypeBool
+   %ulong_32 = OpConstant %ulong 32
+       %half = OpTypeFloat 16
+%_ptr_PhysicalStorageBuffer_half = OpTypePointer PhysicalStorageBuffer %half
+     %uint_0 = OpConstant %uint 0
+         %68 = OpTypeCooperativeMatrixKHR %half %uint_3 %uint_16 %uint_16 %uint_0
+ %ulong_32_0 = OpConstant %ulong 32
+ %ulong_1024 = OpConstant %ulong 1024
+         %77 = OpTypeCooperativeMatrixKHR %half %uint_3 %uint_16 %uint_16 %uint_1
+ %ulong_32_1 = OpConstant %ulong 32
+%ulong_1024_0 = OpConstant %ulong 1024
+ %ulong_32_2 = OpConstant %ulong 32
+    %ulong_0 = OpConstant %ulong 0
+%_ptr_PhysicalStorageBuffer_float = OpTypePointer PhysicalStorageBuffer %float
+ %ulong_32_3 = OpConstant %ulong 32
+   %ulong_64 = OpConstant %ulong 64
+%_struct_101 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint
+%_ptr_PushConstant__struct_101 = OpTypePointer PushConstant %_struct_101
+          %2 = OpVariable %_ptr_PushConstant__struct_101 PushConstant
+%accumulator_bank = OpFunction %void None %4
+          %5 = OpLabel
+         %16 = OpAccessChain %_ptr_PushConstant_ulong %2 %int_0
+         %17 = OpLoad %ulong %16 Aligned 8
+         %18 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_11 %17
+         %19 = OpAccessChain %_ptr_PushConstant_uint %2 %int_2
+         %20 = OpLoad %uint %19 Aligned 4
+         %22 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %18 %int_0 %20
+%left_aligned = OpLoad %ulong %22 Aligned 8
+         %25 = OpIAdd %uint %20 %uint_1
+         %26 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %18 %int_0 %25
+%right_aligned = OpLoad %ulong %26 Aligned 8
+         %29 = OpIAdd %uint %20 %uint_2
+         %30 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %18 %int_0 %29
+%output_aligned = OpLoad %ulong %30 Aligned 8
+    %initial = OpCompositeConstruct %39 %float_0
+         %42 = OpSLessThan %bool %begin %count
+         %43 = OpISub %int %count %begin
+         %44 = OpULessThan %bool %step %43
+         %45 = OpISub %int %count %step
+         %46 = OpSelect %int %44 %45 %begin
+               OpBranch %47
+         %47 = OpLabel
+      %panel = OpPhi %int %begin %5 %51 %50
+%accumulator = OpPhi %39 %initial %5 %dot %50
+%accumulator_1 = OpPhi %39 %initial %5 %dot_1 %50
+         %58 = OpPhi %bool %42 %5 %52 %50
+               OpLoopMerge %49 %50 None
+               OpBranchConditional %58 %48 %49
+         %48 = OpLabel
+         %60 = OpUConvert %uint %ulong_32
+         %61 = OpSConvert %ulong %panel
+         %62 = OpIMul %ulong %61 %ulong_32
+         %63 = OpIAdd %ulong %left_aligned %62
+         %66 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %63
+        %lhs = OpCooperativeMatrixLoadKHR %68 %66 %uint_0 %60 Aligned 16
+         %71 = OpUConvert %uint %ulong_32_0
+         %72 = OpSConvert %ulong %panel
+         %74 = OpIMul %ulong %72 %ulong_1024
+         %75 = OpIAdd %ulong %right_aligned %74
+         %76 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %75
+        %rhs = OpCooperativeMatrixLoadKHR %77 %76 %uint_0 %71 Aligned 16
+        %dot = OpCooperativeMatrixMulAddKHR %39 %lhs %rhs %accumulator
+         %80 = OpUConvert %uint %ulong_32_1
+         %81 = OpSConvert %ulong %panel
+         %83 = OpIMul %ulong %81 %ulong_1024_0
+         %84 = OpIAdd %ulong %83 %ulong_32_1
+         %85 = OpIAdd %ulong %right_aligned %84
+         %86 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %85
+      %rhs_1 = OpCooperativeMatrixLoadKHR %77 %86 %uint_0 %80 Aligned 16
+      %dot_1 = OpCooperativeMatrixMulAddKHR %39 %lhs %rhs_1 %accumulator_1
+               OpBranch %50
+         %50 = OpLabel
+         %52 = OpSLessThan %bool %panel %46
+         %51 = OpIAdd %int %panel %step
+               OpBranch %47
+         %49 = OpLabel
+   %fragment = OpPhi %39 %accumulator %47
+ %fragment_1 = OpPhi %39 %accumulator_1 %47
+         %91 = OpUConvert %uint %ulong_32_2
+         %93 = OpIAdd %ulong %output_aligned %ulong_0
+         %95 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %93
+               OpCooperativeMatrixStoreKHR %95 %fragment %uint_0 %91 Aligned 16
+         %97 = OpUConvert %uint %ulong_32_3
+         %99 = OpIAdd %ulong %output_aligned %ulong_64
+        %100 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %99
+               OpCooperativeMatrixStoreKHR %100 %fragment_1 %uint_0 %97 Aligned 16
+               OpReturn
+               OpFunctionEnd

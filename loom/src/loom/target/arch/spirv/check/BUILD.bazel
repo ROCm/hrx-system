@@ -14,12 +14,25 @@ package(
 )
 
 loom_cc_library(
+    name = "profile",
+    srcs = ["profile.c"],
+    hdrs = ["profile.h"],
+    visibility = ["//loom/src/loom/tooling/target/spirv:__pkg__"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/spirv:profile",
+        "//loom/src/loom/tools/loom-check:execute",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "source_low",
     srcs = ["source_low.c"],
     hdrs = ["source_low.h"],
     deps = [
+        ":profile",
         "//loom/binding/c:loomc",
-        "//loom/binding/c/target/spirv:profile",
         "//loom/src/loom/tools/loom-check:execute",
         "//loom/src/loom/tools/loom-check:source_low",
         "//runtime/src/iree/base",

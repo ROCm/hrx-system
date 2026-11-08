@@ -460,13 +460,6 @@ iree_status_t loom_check_compile_artifact(
         session, options, request->diagnostic_collector, &pass_program);
   }
 
-  loomc_target_profile_t* target_profile = NULL;
-  if (iree_status_is_ok(status) && pass_program != NULL &&
-      !iree_string_view_is_empty(options->target)) {
-    status = loom_check_compile_session_select_target_profile(
-        session, options->target, &target_profile);
-  }
-
   const loomc_emit_options_t emit_options = {
       .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
       .structure_size = sizeof(emit_options),
@@ -479,7 +472,7 @@ iree_status_t loom_check_compile_artifact(
       .structure_size = sizeof(compile_options),
       .roots = iree_string_view_is_empty(options->root) ? NULL : &root,
       .root_count = iree_string_view_is_empty(options->root) ? 0 : 1,
-      .target_profile = target_profile,
+      .target_profile = options->target_profile,
       .emit_options = &emit_options,
   };
   if (iree_status_is_ok(status) && pass_program != NULL) {
@@ -488,7 +481,6 @@ iree_status_t loom_check_compile_artifact(
         request->diagnostic_collector, request->host_allocator, out_result);
   }
 
-  loomc_target_profile_release(target_profile);
   return status;
 }
 

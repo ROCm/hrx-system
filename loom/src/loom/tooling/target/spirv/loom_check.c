@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+#include "loom/target/arch/spirv/check/profile.h"
 #include "loom/target/tool/spirv.h"
 #include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/requirements.h"
@@ -24,6 +25,10 @@ typedef struct loom_spirv_loom_check_emit_request_t {
   iree_string_view_t function_name;
   // Complete family:selector profile for source or Low input.
   iree_string_view_t target_specification;
+  // Public feature enum names; a leading '-' records an unavailable feature.
+  iree_string_view_t features;
+  // Public numeric limit enum names paired with unsigned values.
+  iree_string_view_t limits;
 } loom_spirv_loom_check_emit_request_t;
 
 static bool loom_spirv_loom_check_emit_provider_matches(
@@ -75,11 +80,28 @@ static iree_status_t loom_spirv_loom_check_parse_emit_request(
     iree_string_view_t option_name = iree_string_view_empty();
     iree_string_view_t option_value = iree_string_view_empty();
     iree_string_view_split(token, '=', &option_name, &option_value);
+    if (iree_string_view_equal(option_name, IREE_SV("features")) ||
+        iree_string_view_equal(option_name, IREE_SV("limits"))) {
+      iree_string_view_t* field =
+          iree_string_view_equal(option_name, IREE_SV("features"))
+              ? &out_request->features
+              : &out_request->limits;
+      if (!iree_string_view_is_empty(*field) ||
+          iree_string_view_is_empty(option_value) ||
+          iree_string_view_ends_with(option_value, IREE_SV(","))) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "spirv-dis requires one nonempty %.*s list",
+                                (int)option_name.size, option_name.data);
+      }
+      *field = option_value;
+      continue;
+    }
     if (iree_string_view_equal(option_name, IREE_SV("target"))) {
       if (iree_any_bit_set(parse_options,
-                           LOOM_SPIRV_LOOM_CHECK_PARSE_OPTION_TARGET)) {
+                           LOOM_SPIRV_LOOM_CHECK_PARSE_OPTION_TARGET) ||
+          iree_string_view_is_empty(option_value)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "duplicate spirv-dis option 'target'");
+                                "spirv-dis requires one nonempty target");
       }
       out_request->target_specification = option_value;
       parse_options |= LOOM_SPIRV_LOOM_CHECK_PARSE_OPTION_TARGET;
@@ -132,12 +154,14 @@ static iree_status_t loom_spirv_loom_check_parse_emit_request(
                             "unknown spirv-dis option '%.*s'", (int)token.size,
                             token.data);
   }
-  if (!iree_string_view_is_empty(out_request->function_name) &&
+  if ((!iree_string_view_is_empty(out_request->function_name) ||
+       !iree_string_view_is_empty(out_request->features) ||
+       !iree_string_view_is_empty(out_request->limits)) &&
       !iree_any_bit_set(parse_options,
                         LOOM_SPIRV_LOOM_CHECK_PARSE_OPTION_TARGET)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "spirv-dis @function requires target=family:selector");
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "spirv-dis @function, features, or limits requires "
+                            "target=family:selector");
   }
   if (!out_request->lower_source_to_low &&
       iree_any_bit_set(parse_options,
@@ -192,16 +216,25 @@ static iree_status_t loom_spirv_loom_check_emit_provider_execute(
   IREE_RETURN_IF_ERROR(loom_spirv_loom_check_parse_emit_request(
       request->target_options, &emit_request));
 
+  loomc_target_profile_t* target_profile = NULL;
+  iree_status_t status = loom_spirv_check_profile_select(
+      request, emit_request.target_specification, emit_request.features,
+      emit_request.limits, &target_profile);
   const loom_check_compile_artifact_options_t compile_options = {
       .artifact_format = IREE_SV("spirv"),
       .root = emit_request.function_name,
-      .target = emit_request.target_specification,
+      .target_profile = target_profile,
       .lower_source_to_low = emit_request.lower_source_to_low,
       .control_flow_lowering = emit_request.control_flow_lowering,
   };
   loomc_result_t* compile_result = NULL;
-  iree_status_t status =
-      loom_check_compile_artifact(request, &compile_options, &compile_result);
+  if (iree_status_is_ok(status) &&
+      (iree_string_view_is_empty(emit_request.target_specification) ||
+       target_profile != NULL)) {
+    status =
+        loom_check_compile_artifact(request, &compile_options, &compile_result);
+  }
+  loomc_target_profile_release(target_profile);
   const loomc_artifact_t* artifact = NULL;
   if (iree_status_is_ok(status) && compile_result != NULL) {
     status = loom_check_compile_select_artifact(

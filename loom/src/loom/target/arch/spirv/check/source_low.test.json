@@ -355,7 +355,7 @@
               "SPIRV/PROFILE",
               "SPIR-V feature 'spirv.physical_storage_buffer' has contradictory facts",
               "'spirv:vulkan1.3+bda+hal' says true",
-              "'spirv-low features option' says false"
+              "'SPIR-V checker features option' says false"
             ]
           },
           "stdout": {
