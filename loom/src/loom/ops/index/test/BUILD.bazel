@@ -25,5 +25,6 @@ loom_check_test_suite(
         "roundtrip.loom-test",
         "subtraction.loom-test",
         "verify.loom-test",
+        "wide_carrier_facts.loom-test",
     ],
 )

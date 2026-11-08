@@ -1,0 +1,144 @@
+// RUN: pass canonicalize
+
+// Runtime coordinate products can exceed the preferred carrier. Their minimum,
+// maximum, and logical shift must retain the wider domain before comparisons
+// fold. Every returned predicate is true throughout the admitted input ranges.
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @wide_products(%left: index, %right: index) -> (i1, i1, i1) {
+  %left_count = index.assume %left [range(%left, 536870912, 536870914)] : index
+  %right_count = index.assume %right [range(%right, 536870913, 536870915)] : index
+  %stride = index.constant 8 : index
+  %a = index.mul %left_count, %stride : index
+  %b = index.mul %right_count, %stride : index
+  %small = index.min %a, %b : index
+  %large = index.max %a, %b : index
+  %native_maximum = index.constant 2147483647 : index
+  %minimum_shifted = index.constant 2147483648 : index
+  %small_ok = index.cmp sgt, %small, %native_maximum : index
+  %large_ok = index.cmp sgt, %large, %native_maximum : index
+  %c1 = index.constant 1 : index
+  %shifted = index.shrui %a, %c1 : index
+  %shift_ok = index.cmp uge, %shifted, %minimum_shifted : index
+  func.return %small_ok, %large_ok, %shift_ok : i1, i1, i1
+}
+
+// ----
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @wide_products(%left: index, %right: index) -> (i1, i1, i1) {
+  %small_ok = scalar.constant true : i1
+  %large_ok = scalar.constant true : i1
+  %shift_ok = scalar.constant true : i1
+  func.return %small_ok, %large_ok, %shift_ok : i1, i1, i1
+}
+
+// ====
+
+// Overlapping ranges keep both selection operands live. The wide carrier
+// preserves the selected interval and common divisor.
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @wide_intervals(%left: index, %right: index) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+  %left_count = index.assume %left [range(%left, 536870912, 536870914)] : index
+  %right_count = index.assume %right [range(%right, 1073741825, 1073741830)] : index
+  %c8 = index.constant 8 : index
+  %c4 = index.constant 4 : index
+  %a = index.mul %left_count, %c8 : index
+  %b = index.mul %right_count, %c4 : index
+  %small = index.min %a, %b : index
+  %large = index.max %a, %b : index
+  %small_lo = test.fact_range_lo %small : index -> i64
+  %small_hi = test.fact_range_hi %small : index -> i64
+  %small_divisor = test.fact_divisor %small : index -> i64
+  %large_lo = test.fact_range_lo %large : index -> i64
+  %large_hi = test.fact_range_hi %large : index -> i64
+  %c1 = index.constant 1 : index
+  %shifted = index.shrui %a, %c1 : index
+  %shift_lo = test.fact_range_lo %shifted : index -> i64
+  %shift_hi = test.fact_range_hi %shifted : index -> i64
+  %shift_divisor = test.fact_divisor %shifted : index -> i64
+  func.return %small_lo, %small_hi, %small_divisor, %large_lo, %large_hi, %shift_lo, %shift_hi, %shift_divisor : i64, i64, i64, i64, i64, i64, i64, i64
+}
+
+// ----
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @wide_intervals(%left: index, %right: index) -> (i64, i64, i64, i64, i64, i64, i64, i64) {
+  %small_lo = scalar.constant 4294967296 : i64
+  %small_hi = scalar.constant 4294967312 : i64
+  %small_divisor = scalar.constant 4 : i64
+  %large_lo = scalar.constant 4294967300 : i64
+  %large_hi = scalar.constant 4294967320 : i64
+  %shift_lo = scalar.constant 2147483648 : i64
+  %shift_hi = scalar.constant 2147483656 : i64
+  %shift_divisor = scalar.constant 4 : i64
+  func.return %small_lo, %small_hi, %small_divisor, %large_lo, %large_hi, %shift_lo, %shift_hi, %shift_divisor : i64, i64, i64, i64, i64, i64, i64, i64
+}
+
+// ====
+
+// A narrow operand may overlap a wider one across the native unsigned limit.
+// Both operand orientations use their common comparison carrier.
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @mixed_intervals(%left: index, %right: index) -> (i64, i64, i64, i64) {
+  %left_count = index.assume %left [range(%left, 2147483645, 2147483647)] : index
+  %right_count = index.assume %right [range(%right, 1073741823, 1073741825)] : index
+  %c2 = index.constant 2 : index
+  %c4 = index.constant 4 : index
+  %narrow = index.mul %left_count, %c2 : index
+  %wide = index.mul %right_count, %c4 : index
+  %small = index.min %narrow, %wide : index
+  %large = index.max %wide, %narrow : index
+  %small_lo = test.fact_range_lo %small : index -> i64
+  %small_hi = test.fact_range_hi %small : index -> i64
+  %large_lo = test.fact_range_lo %large : index -> i64
+  %large_hi = test.fact_range_hi %large : index -> i64
+  func.return %small_lo, %small_hi, %large_lo, %large_hi : i64, i64, i64, i64
+}
+
+// ----
+test.target<low_core> @target {index_bitwidth = 32}
+
+func.def target(@target) @mixed_intervals(%left: index, %right: index) -> (i64, i64, i64, i64) {
+  %small_lo = scalar.constant 4294967290 : i64
+  %small_hi = scalar.constant 4294967294 : i64
+  %large_lo = scalar.constant 4294967292 : i64
+  %large_hi = scalar.constant 4294967300 : i64
+  func.return %small_lo, %small_hi, %large_lo, %large_hi : i64, i64, i64, i64
+}
+
+// ====
+
+// A target with no wide carrier cannot assign narrow facts to unsupported wide
+// values. Legality diagnoses the unsupported producer; analysis stays unknown.
+test.target<quirky> @target
+
+func.def target(@target) @unsupported_wide_intervals(%left: index, %right: index) -> (i64, i64, i64, i64) {
+  %left_count = index.assume %left [range(%left, 536870912, 536870914)] : index
+  %right_count = index.assume %right [range(%right, 536870913, 536870915)] : index
+  %stride = index.constant 8 : index
+  %a = index.mul %left_count, %stride : index
+  %b = index.mul %right_count, %stride : index
+  %small = index.min %a, %b : index
+  %large = index.max %a, %b : index
+  %small_lo = test.fact_range_lo %small : index -> i64
+  %large_hi = test.fact_range_hi %large : index -> i64
+  %c1 = index.constant 1 : index
+  %shifted = index.shrui %a, %c1 : index
+  %shift_lo = test.fact_range_lo %shifted : index -> i64
+  %shift_hi = test.fact_range_hi %shifted : index -> i64
+  func.return %small_lo, %large_hi, %shift_lo, %shift_hi : i64, i64, i64, i64
+}
+
+// ----
+test.target<quirky> @target
+
+func.def target(@target) @unsupported_wide_intervals(%left: index, %right: index) -> (i64, i64, i64, i64) {
+  %small_lo = scalar.constant -9223372036854775808 : i64
+  %large_hi = scalar.constant 9223372036854775807 : i64
+  %shift_lo = scalar.constant -9223372036854775808 : i64
+  %shift_hi = scalar.constant 9223372036854775807 : i64
+  func.return %small_lo, %large_hi, %shift_lo, %shift_hi : i64, i64, i64, i64
+}
