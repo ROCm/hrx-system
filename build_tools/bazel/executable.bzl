@@ -100,18 +100,21 @@ def _source_target(ctx):
         source = source[0]
     return source
 
-def _merge_runfiles(ctx):
+def _merge_runfiles(ctx, tools = []):
     source = _source_target(ctx)
-    runfiles = ctx.runfiles(files = ctx.files.data)
+    runfiles = ctx.runfiles(
+        files = ctx.files.data,
+        transitive_files = depset(transitive = [tool[DefaultInfo].files for tool in tools]),
+    )
     return runfiles.merge_all(
         [source[DefaultInfo].default_runfiles] +
-        [target[DefaultInfo].default_runfiles for target in ctx.attr.data],
+        [target[DefaultInfo].default_runfiles for target in ctx.attr.data + tools],
     )
 
-def _expand_env(ctx):
+def _expand_env(ctx, tools):
     source = _source_target(ctx)
     return {
-        key: ctx.expand_location(value, ctx.attr.data + [source])
+        key: ctx.expand_location(value, ctx.attr.data + tools + [source])
         for key, value in ctx.attr.env.items()
     }
 
@@ -338,12 +341,12 @@ def _iree_executable_test_impl(ctx):
     if _is_wasm_target(ctx):
         wasm_output = _wasm_executable_output(ctx, allow_default_test_main = True)
         output = wasm_output.output
-        runfiles = _merge_runfiles(ctx).merge(wasm_output.runfiles)
+        runfiles = _merge_runfiles(ctx, ctx.attr.tools).merge(wasm_output.runfiles)
         launch_environment = {}
     else:
         native_output = _native_executable_output(ctx)
         output = native_output.output
-        runfiles = _merge_runfiles(ctx).merge(native_output.runfiles)
+        runfiles = _merge_runfiles(ctx, ctx.attr.tools).merge(native_output.runfiles)
         launch_environment = native_output.launch_environment
     expanded_env = {}
     inherited_environment = list(ctx.attr.env_inherit)
@@ -352,7 +355,7 @@ def _iree_executable_test_impl(ctx):
         source_environment = source[RunEnvironmentInfo]
         expanded_env.update(source_environment.environment)
         inherited_environment.extend(source_environment.inherited_environment)
-    expanded_env.update(_expand_env(ctx))
+    expanded_env.update(_expand_env(ctx, ctx.attr.tools))
     test_environment = dict(expanded_env)
     _merge_launch_environment(
         ctx,
@@ -367,7 +370,7 @@ def _iree_executable_test_impl(ctx):
             runfiles = runfiles,
         ),
         IreeExecutableInfo(
-            data = depset(ctx.files.data),
+            data = depset(ctx.files.data + ctx.files.tools),
             env = expanded_env,
             output = output,
             src = source.label,
@@ -379,14 +382,14 @@ def _iree_executable_test_impl(ctx):
     ]
     runfiles_arguments = create_runfiles_arguments_info(
         ctx,
-        ctx.attr.data + [source],
+        ctx.attr.data + ctx.attr.tools + [source],
     )
     if runfiles_arguments != None:
         providers.append(runfiles_arguments)
     return inject_execution_requirements(
         ctx,
         providers,
-        ctx.attr.data + [source],
+        ctx.attr.data + ctx.attr.tools + [source],
         output,
     )
 
@@ -454,8 +457,14 @@ _WASI_ALIAS_ATTRS["target_platform"] = attr.label(
 )
 
 _TEST_ATTRS = dict(_SHARED_ATTRS)
+_TEST_ATTRS["tools"] = attr.label_list(
+    allow_files = True,
+    aspects = [collect_execution_requirements],
+    cfg = config.exec("test"),
+    doc = "External helper tools built for the test execution platform, independently of the test subject's target flags.",
+)
 _TEST_ATTRS["env"] = attr.string_dict(
-    doc = "Environment variables passed to the wrapped executable. Values may use $(location) for src or data labels.",
+    doc = "Environment variables passed to the wrapped executable. Values may use $(location) for src, data, or tools labels.",
 )
 _TEST_ATTRS["env_inherit"] = attr.string_list(
     doc = "Host environment variable names inherited by the wrapped test.",
@@ -479,6 +488,23 @@ _iree_executable_test = rule(
     implementation = _iree_executable_test_impl,
     attrs = _TEST_ATTRS,
     doc = "Runs an executable target or file directly as a Bazel test.",
+    test = True,
+)
+
+_TOOL_TEST_ATTRS = dict(_TEST_ATTRS)
+_TOOL_TEST_ATTRS["src"] = attr.label(
+    allow_files = True,
+    aspects = [collect_execution_requirements],
+    cfg = config.exec("test"),
+    doc = "External tool used to check target-configured artifacts.",
+    executable = True,
+    mandatory = True,
+)
+
+_iree_tool_test = rule(
+    implementation = _iree_executable_test_impl,
+    attrs = _TOOL_TEST_ATTRS,
+    doc = "Checks target artifacts using an external tool built for the test execution platform.",
     test = True,
 )
 
@@ -572,4 +598,26 @@ iree_executable_test = macro(
         "windows_launcher": None,
     },
     doc = "Runs an executable target or file directly as a Bazel test.",
+)
+
+def _tool_test_macro_impl(name, visibility, tags, resource_group, **kwargs):
+    _iree_tool_test(
+        name = name,
+        visibility = visibility,
+        tags = cc_attrs.with_resource_group_tags(tags, resource_group),
+        windows_launcher = _windows_launcher(),
+        **kwargs
+    )
+
+iree_tool_test = macro(
+    implementation = _tool_test_macro_impl,
+    inherit_attrs = _iree_tool_test,
+    attrs = {
+        "resource_group": attr.string(
+            configurable = False,
+            doc = "Local resource name used to serialize tests competing for the same host resource.",
+        ),
+        "windows_launcher": None,
+    },
+    doc = "Checks target artifacts with an external tool instead of testing the tool itself.",
 )

@@ -73,6 +73,15 @@ function(iree_configure_spirv_tools)
     set(SKIP_SPIRV_TOOLS_INSTALL ON CACHE BOOL "" FORCE)
     set(SPIRV_SKIP_TESTS ON CACHE BOOL "" FORCE)
     set(SPIRV_WERROR OFF CACHE BOOL "" FORCE)
+    # These tools run in separate processes and exchange files with the code
+    # under test. Their C++ runtime is outside that process's MSAN boundary.
+    # Function scope confines this configuration to the fetched tools.
+    if(IREE_ENABLE_MSAN)
+      foreach(_FLAG_VARIABLE CMAKE_C_FLAGS CMAKE_CXX_FLAGS
+          CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS)
+        string(APPEND ${_FLAG_VARIABLE} " -fno-sanitize=memory")
+      endforeach()
+    endif()
     iree_declare_locked_fetch_content(spirv_tools)
     FetchContent_MakeAvailable(spirv_tools)
 

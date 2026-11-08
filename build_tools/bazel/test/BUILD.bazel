@@ -56,6 +56,11 @@ constraint_value(
     constraint_setting = ":test_execution_requirement",
 )
 
+config_setting(
+    name = "on_test_execution_platform",
+    constraint_values = [":test_execution_required"],
+)
+
 platform(
     name = "test_execution_platform",
     constraint_values = [":test_execution_required"],

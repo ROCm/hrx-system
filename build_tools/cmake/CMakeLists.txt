@@ -113,6 +113,13 @@ _iree_cmake_integration_test(
 
 _iree_cmake_integration_test(
   NAME
+    cmake_spirv_tools_test
+  SRCS
+    cmake_spirv_tools_test.py
+)
+
+_iree_cmake_integration_test(
+  NAME
     cmake_external_c_library_test
   SRCS
     cmake_external_c_library_test.py
