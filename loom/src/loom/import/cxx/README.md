@@ -93,6 +93,27 @@ storage nor add a pointer offset to the IR buffer value. Writes through an
 immutable result and immutable arguments to an opaque external declaration
 without a compatible access contract produce diagnostics.
 
+Branch results use typed declarations, with each continuing arm supplying the
+value. Resource declarations create no placeholder allocation or null payload:
+
+```cpp
+loom::type::buffer<const unsigned char> selected;
+if (condition) {
+  selected = first;
+} else {
+  selected = second;
+}
+```
+
+Reimport reconstructs an immutable SSA result. Numeric result declarations use
+explicit zero initialization, which becomes dead when the arms assign their
+values. Loops can also construct results whose types or count differ from their
+incoming state. The general condition-loop projection uses a `do` loop for its
+mandatory first phase and guards the repeating body with the computed condition.
+This preserves a result produced before the first condition check, including
+when the repeating body never executes. Branch effects, returns, and cleanup
+remain in their original callable scope.
+
 ## Resident pipelines and ordered phases
 
 `[[loom::pipeline]]` declares a composable child graph. Adding the `"kernel"`
