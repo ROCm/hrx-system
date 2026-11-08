@@ -31,8 +31,9 @@ bool loom_index_cmp_same_value_result(uint8_t predicate, bool* out_result);
 // Returns the common carrier width established for two source SSA values.
 // Producer-backed index values may select the full source carrier; raw fact
 // summaries alone retain the target-native interpretation exposed by the
-// helpers below. Zero indicates a targetless fact context and -1 indicates an
-// invalid carrier.
+// helpers below. Zero indicates a targetless fact context. A negative result
+// means no common carrier has been established and width-dependent proofs must
+// remain unresolved.
 int32_t loom_index_cmp_value_carrier_bitwidth(
     const loom_fact_context_t* context, const loom_module_t* module,
     loom_scalar_type_t operand_scalar_type, loom_value_id_t lhs,

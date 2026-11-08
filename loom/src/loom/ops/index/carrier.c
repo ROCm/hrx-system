@@ -114,22 +114,28 @@ int32_t loom_index_value_fact_carrier_bitwidth(
   // A native index carrier preserves its signed domain and nonnegative raw bit
   // patterns. Values proven wholly below the native signed domain are not
   // supported by the target's wide-coordinate carrier. A conservative
-  // envelope crossing that boundary remains native: ordinary arithmetic over
-  // unconstrained native inputs produces such an envelope without establishing
-  // a wider representation. An established envelope extending above the raw
-  // native payload requires the target's wider carrier.
+  // envelope crossing that boundary can describe native arithmetic or a wide
+  // value whose range lost precision. It establishes neither representation.
+  // Positive high-bit coordinates require a signed-capable wider carrier when
+  // one is available. A single-carrier target retains its raw native payload.
   const int64_t native_signed_minimum = -(INT64_C(1) << (native_bitwidth - 1));
+  const int64_t native_signed_maximum =
+      (INT64_C(1) << (native_bitwidth - 1)) - 1;
   const int64_t native_unsigned_maximum =
       (int64_t)((UINT64_C(1) << native_bitwidth) - 1);
+  const uint32_t maximum_bitwidth = loom_target_snapshot_maximum_index_bitwidth(
+      &context->target_facts->storage.snapshot);
   if (facts.range_hi < native_signed_minimum) {
     return -1;
   }
-  if (facts.range_lo < native_signed_minimum ||
-      facts.range_hi <= native_unsigned_maximum) {
+  if (facts.range_lo < native_signed_minimum) {
+    return maximum_bitwidth > (uint32_t)native_bitwidth ? 0 : native_bitwidth;
+  }
+  if (facts.range_hi <= native_signed_maximum ||
+      (maximum_bitwidth <= (uint32_t)native_bitwidth &&
+       facts.range_hi <= native_unsigned_maximum)) {
     return native_bitwidth;
   }
-  const uint32_t maximum_bitwidth = loom_target_snapshot_maximum_index_bitwidth(
-      &context->target_facts->storage.snapshot);
   if (maximum_bitwidth <= (uint32_t)native_bitwidth || maximum_bitwidth > 64) {
     return -1;
   }
