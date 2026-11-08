@@ -15,8 +15,9 @@
 extern "C" {
 #endif
 
-// Retains branch/return literal or active-mask choices and establishes the
-// uniformity proof for selecting one lane from a vector-register producer.
+// Retains branch/call/return literal, extension, or active-mask choices and
+// establishes the uniformity proof for selecting one lane from a
+// vector-register producer.
 iree_status_t loom_amdgpu_prepare_control_operand(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_terminator, loom_value_id_t source_value,

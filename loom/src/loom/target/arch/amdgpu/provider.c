@@ -7,6 +7,7 @@
 #include "loom/target/arch/amdgpu/provider.h"
 
 #include "loom/ir/module.h"
+#include "loom/ops/callable_effects.h"
 #include "loom/pass/builder.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
 #include "loom/target/arch/amdgpu/diagnostics/packet_diagnostics.h"
@@ -160,14 +161,17 @@ static loom_target_call_policy_t loom_amdgpu_select_call_policy(
       kind != LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
     return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
   }
-  if (kind == LOOM_CALL_LIKE_KIND_SEMANTIC) {
-    // A borrowed buffer has an address carrier and may cross into a helper as
-    // an argument. A buffer result also transports allocation identity and
-    // alias/lifetime state, which the fixed register ABI does not represent.
-    // Keep those calls semantic so required inlining owns that state.
+  if (kind == LOOM_CALL_LIKE_KIND_SEMANTIC &&
+      loom_callable_effects_may_create_resources(callee)) {
+    // Helpers without resource creation return borrowed references, including
+    // helpers that write to caller-owned storage. Other reference returns stay
+    // semantic until inlining exposes their allocation and lifetime effects.
+    // Apply the same policy before and after view-to-buffer projection.
     const loom_value_id_t* results = loom_op_const_results(callee.op);
     for (uint16_t i = 0; i < callee.op->result_count; ++i) {
-      if (loom_type_is_buffer(loom_module_value_type(module, results[i]))) {
+      const loom_type_t result_type =
+          loom_module_value_type(module, results[i]);
+      if (loom_type_is_buffer(result_type) || loom_type_is_view(result_type)) {
         return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
       }
     }
@@ -183,6 +187,7 @@ const loom_target_provider_t loom_amdgpu_target_provider = {
     .profile_type = &loom_amdgpu_target_profile_type,
     .materialize_definition = loom_amdgpu_target_materialize_definition,
     .select_call_policy = loom_amdgpu_select_call_policy,
+    .view_boundary_carrier = LOOM_TARGET_VIEW_BOUNDARY_CARRIER_BUFFER_OFFSET,
     .loop_predicate_carrier = LOOM_TARGET_LOOP_PREDICATE_CARRIER_I32,
     .loop_predicate_max_vector_element_count =
         LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES,

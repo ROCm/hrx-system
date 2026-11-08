@@ -25,6 +25,17 @@ bool loom_callable_effects_may_access_memory(loom_func_like_t function) {
           !body);
 }
 
+bool loom_callable_effects_may_create_resources(loom_func_like_t function) {
+  const loom_region_t* body = loom_func_like_body(function);
+  if (body) {
+    return loom_region_may_create_resources(body);
+  }
+  const loom_callable_effect_contract_t contract =
+      loom_func_like_effect_contract(function);
+  return contract != LOOM_CALLABLE_EFFECT_CONTRACT_PURE &&
+         contract != LOOM_CALLABLE_EFFECT_CONTRACT_READONLY;
+}
+
 loom_memory_space_mask_t loom_callable_effects_written_memory_spaces(
     loom_func_like_t function) {
   if (!loom_func_like_isa(function)) {
@@ -60,7 +71,7 @@ bool loom_callable_effects_is_pure(loom_func_like_t function) {
            !loom_region_has_write_effects(body) &&
            !loom_region_has_convergent_effects(body) &&
            !loom_region_has_observable_effects(body) &&
-           !loom_region_has_resource_identities(body);
+           !loom_region_may_create_resources(body);
   }
   return loom_func_like_effect_contract(function) ==
          LOOM_CALLABLE_EFFECT_CONTRACT_PURE;
@@ -122,7 +133,7 @@ loom_callable_effect_contract_t loom_callable_effects_classify_traits(
       LOOM_TRAIT_UNKNOWN_EFFECTS | LOOM_TRAIT_CONVERGENT |
       LOOM_TRAIT_MEMORY_FENCE | LOOM_TRAIT_OBSERVABLE_EFFECT;
   if (iree_any_bit_set(traits, forbidden_traits) ||
-      loom_traits_has_resource_identity(traits)) {
+      loom_traits_may_create_resources(traits)) {
     return LOOM_CALLABLE_EFFECT_CONTRACT_UNSPECIFIED;
   }
   return iree_any_bit_set(traits, LOOM_TRAIT_READS_MEMORY)

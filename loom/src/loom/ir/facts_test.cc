@@ -104,6 +104,94 @@ TEST(FactsFlags, FloatClassesAndUniformityScopesAreIndependent) {
 // Constructors
 //===----------------------------------------------------------------------===//
 
+TEST(FactsNarrowing, IntegerFeedbackHasFiniteDescendingHeight) {
+  const loom_scalar_type_t types[] = {
+      LOOM_SCALAR_TYPE_I8,  LOOM_SCALAR_TYPE_I16,   LOOM_SCALAR_TYPE_I32,
+      LOOM_SCALAR_TYPE_I64, LOOM_SCALAR_TYPE_INDEX, LOOM_SCALAR_TYPE_OFFSET};
+  for (auto type : types) {
+    SCOPED_TRACE(type);
+    int64_t lower;
+    int64_t upper;
+    ASSERT_TRUE(loom_value_facts_scalar_type_domain(type, &lower, &upper));
+    auto facts = loom_value_facts_make(lower, upper, 1);
+    loom_value_facts_mark_lane_varying(&facts);
+    auto incoming = loom_value_facts_make(4, 100, 2);
+    facts = loom_value_facts_narrow(type, facts, incoming);
+    EXPECT_EQ(facts.range_lo, 4);
+    EXPECT_EQ(facts.range_hi, 100);
+    EXPECT_EQ(facts.known_divisor, 2);
+    incoming = loom_value_facts_make(8, 96, 4);
+    loom_value_facts_mark_workgroup_uniform(&incoming);
+    facts = loom_value_facts_narrow(type, facts, incoming);
+    EXPECT_EQ(facts.range_lo, 4);
+    EXPECT_EQ(facts.range_hi, 100);
+    EXPECT_EQ(facts.known_divisor, 2);
+    EXPECT_TRUE(loom_value_facts_is_workgroup_uniform(facts));
+    EXPECT_FALSE(loom_value_facts_is_lane_varying(facts));
+    EXPECT_TRUE(loom_value_facts_equal(
+        facts, loom_value_facts_narrow(type, facts, incoming)));
+  }
+}
+
+TEST(FactsNarrowing, UnknownEndpointCanRefineAfterTheOtherEndpoint) {
+  const auto left_bounded = loom_value_facts_make(0, INT64_MAX, 1);
+  auto facts = loom_value_facts_narrow(
+      LOOM_SCALAR_TYPE_I64, loom_value_facts_unknown(), left_bounded);
+  facts = loom_value_facts_narrow(LOOM_SCALAR_TYPE_I64, facts,
+                                  loom_value_facts_make(8, 64, 8));
+  EXPECT_EQ(facts.range_lo, 0);
+  EXPECT_EQ(facts.range_hi, 64);
+  EXPECT_EQ(facts.known_divisor, 8);
+}
+
+TEST(FactsNarrowing, UntypedUnknownDoesNotEraseTheIntegerDomain) {
+  const auto domain = loom_value_facts_make(INT32_MIN, INT32_MAX, 1);
+  const auto facts = loom_value_facts_narrow(LOOM_SCALAR_TYPE_I32, domain,
+                                             loom_value_facts_unknown());
+  EXPECT_EQ(facts.range_lo, INT32_MIN);
+  EXPECT_EQ(facts.range_hi, INT32_MAX);
+}
+
+TEST(FactsNarrowing, ExactValuesRemainDiscoverableAfterBoundedIntervals) {
+  const auto integer = loom_value_facts_narrow(LOOM_SCALAR_TYPE_I32,
+                                               loom_value_facts_make(-8, 8, 2),
+                                               loom_value_facts_exact_i64(4));
+  EXPECT_TRUE(loom_value_facts_is_exact(integer));
+  EXPECT_EQ(integer.range_lo, 4);
+  const auto floating = loom_value_facts_narrow(
+      LOOM_SCALAR_TYPE_F32,
+      loom_value_facts_make_float_range(LOOM_SCALAR_TYPE_F32, -8.0, 8.0),
+      loom_value_facts_exact_float(LOOM_SCALAR_TYPE_F32, 4.0));
+  EXPECT_TRUE(loom_value_facts_is_exact(floating));
+}
+
+TEST(FactsNarrowing, FloatClassesCanRefineBeforeAndAfterTheInterval) {
+  const loom_scalar_type_t types[] = {
+      LOOM_SCALAR_TYPE_F8E4M3, LOOM_SCALAR_TYPE_F8E5M2, LOOM_SCALAR_TYPE_F16,
+      LOOM_SCALAR_TYPE_BF16,   LOOM_SCALAR_TYPE_F32,    LOOM_SCALAR_TYPE_F64};
+  for (auto type : types) {
+    SCOPED_TRACE(type);
+    auto classes = loom_value_facts_unknown();
+    classes.flags = LOOM_VALUE_FACT_FLOAT | LOOM_VALUE_FACT_NOT_NAN;
+    auto facts =
+        loom_value_facts_narrow(type, loom_value_facts_unknown(), classes);
+    facts = loom_value_facts_narrow(
+        type, facts, loom_value_facts_make_float_range(type, -8.0, 8.0));
+    auto incoming = loom_value_facts_make_float_range(type, -4.0, 4.0);
+    incoming.flags |= LOOM_VALUE_FACT_NOT_SUBNORMAL;
+    facts = loom_value_facts_narrow(type, facts, incoming);
+    double lower;
+    double upper;
+    ASSERT_TRUE(loom_value_facts_as_float_range(type, facts, &lower, &upper));
+    EXPECT_EQ(lower, -8.0);
+    EXPECT_EQ(upper, 8.0);
+    EXPECT_TRUE(facts.flags & LOOM_VALUE_FACT_NOT_NAN);
+    EXPECT_TRUE(facts.flags & LOOM_VALUE_FACT_NOT_SUBNORMAL);
+    EXPECT_TRUE(loom_value_facts_equal(
+        facts, loom_value_facts_narrow(type, facts, incoming)));
+  }
+}
+
 TEST(FactsUnknown, IsUnknown) {
   loom_value_facts_t f = loom_value_facts_unknown();
   EXPECT_TRUE(loom_value_facts_is_unknown(f));

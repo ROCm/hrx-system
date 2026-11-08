@@ -147,9 +147,15 @@ static uint32_t loom_low_source_memory_combine_alignment(uint32_t alignment,
 
 static void loom_low_source_memory_access_finalize(
     loom_low_source_memory_access_plan_t* plan) {
-  loom_value_fact_uniform_scope_t uniform_scope = plan->root_uniform_scope;
+  loom_value_fact_uniform_scope_t uniform_scope =
+      (loom_value_fact_uniform_scope_t)plan->uniform_scope;
   uint32_t alignment =
       plan->root_minimum_alignment == 0 ? 1 : plan->root_minimum_alignment;
+  if (plan->materialized_base_region != NULL) {
+    alignment = loom_low_source_memory_combine_alignment(
+        alignment, plan->materialized_base_region->base_begin_byte_offset.facts
+                       .known_divisor);
+  }
   alignment = loom_low_source_memory_combine_alignment(
       alignment, plan->static_byte_offset);
   for (uint8_t i = 0; i < plan->dynamic_term_count; ++i) {
@@ -799,6 +805,10 @@ static void loom_low_source_memory_access_append_expression_realization(
 bool loom_low_source_memory_access_plan_include_root_byte_offset(
     loom_low_source_memory_access_plan_t* plan, uint64_t root_byte_offset) {
   IREE_ASSERT_ARGUMENT(plan);
+  if (plan->materialized_base_region != NULL) {
+    // The carrier already contains its physical allocation base.
+    return true;
+  }
   if (root_byte_offset > INT64_MAX) {
     return false;
   }
@@ -1004,7 +1014,14 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
     loom_low_source_memory_access_diagnostic_t* diagnostic,
     int64_t* inout_static_byte_offset) {
   const loom_value_fact_table_t* fact_table = expression_context->fact_table;
-  if (!loom_symbolic_expr_is_linear(&view_region->begin_byte_offset)) {
+  const bool materialized_base =
+      !loom_symbolic_expr_is_linear(&view_region->begin_byte_offset);
+  const loom_symbolic_expr_t* begin = materialized_base
+                                          ? &view_region->projection_byte_offset
+                                          : &view_region->begin_byte_offset;
+  if (!loom_symbolic_expr_is_linear(begin) ||
+      (materialized_base &&
+       loom_symbolic_expr_is_linear(&view_region->base_begin_byte_offset))) {
     diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_BASE;
     return false;
@@ -1012,17 +1029,24 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
   if (view_region->base_view_value_id != LOOM_VALUE_ID_INVALID) {
     plan->base_view_value_id = view_region->base_view_value_id;
   }
+  if (materialized_base) {
+    // Default regions retain an independently materialized view carrier when
+    // its storage-relative origin is known only through facts. A buffer.view
+    // instead has an exact SSA byte origin, retained as a linear expression
+    // even for nonlinear arithmetic. It must not become its own address base.
+    plan->materialized_base_region = view_region;
+  }
   // As with logical indices, keep a negative affine constant in the existing
   // SSA origin. Extracting it would violate the nonnegative static-addend
   // contract even when the complete root-relative address is nonnegative.
-  if (view_region->begin_byte_offset.constant < 0 &&
+  if (!materialized_base && begin->constant < 0 &&
       view_region->begin_value_id != LOOM_VALUE_ID_INVALID) {
     loom_low_source_memory_dynamic_term_t term = {
         .index = view_region->begin_value_id,
         .axis = LOOM_LOW_SOURCE_MEMORY_DYNAMIC_TERM_AXIS_NONE,
         .byte_stride = 1,
         .byte_shift = 0,
-        .byte_facts = view_region->begin_byte_offset.facts,
+        .byte_facts = begin->facts,
     };
     loom_low_source_memory_access_dynamic_index_source(
         fact_table, term.index, &term.source, &term.dimension);
@@ -1035,14 +1059,13 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
                                                              diagnostic);
   }
   int64_t static_byte_offset = 0;
-  if (!iree_checked_add_i64(*inout_static_byte_offset,
-                            view_region->begin_byte_offset.constant,
+  if (!iree_checked_add_i64(*inout_static_byte_offset, begin->constant,
                             &static_byte_offset)) {
     diagnostic->rejection_bits |=
         LOOM_LOW_SOURCE_MEMORY_ACCESS_REJECTION_VIEW_BASE_OVERFLOW;
     return false;
   }
-  plan->static_view_base_byte_offset = view_region->begin_byte_offset.constant;
+  plan->static_view_base_byte_offset = begin->constant;
   *inout_static_byte_offset = static_byte_offset;
 
   const uint8_t dynamic_view_base_begin = plan->dynamic_term_count;
@@ -1051,17 +1074,18 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
   // Multi-term bases can additionally carry relational bounds in the analyzed
   // complete expression that independent canonical terms cannot represent.
   const bool can_refine_dynamic_view_base_facts =
-      view_region->base_begin_byte_offset.term_count +
+      (materialized_base ? 0 : view_region->base_begin_byte_offset.term_count) +
               view_region->projection_byte_offset.term_count >=
           2 &&
-      !loom_value_facts_is_unknown(view_region->begin_byte_offset.facts);
+      !loom_value_facts_is_unknown(begin->facts);
   loom_value_facts_t canonical_view_base_byte_facts =
       loom_value_facts_exact_i64(0);
-  if (!loom_low_source_memory_access_add_view_region_expression_terms(
-          fact_table, vector_access,
-          LOOM_LOW_SOURCE_MEMORY_VIEW_EXPRESSION_ROOT_BASE,
-          &view_region->base_begin_byte_offset, plan, diagnostic,
-          &canonical_view_base_byte_facts) ||
+  if ((!materialized_base &&
+       !loom_low_source_memory_access_add_view_region_expression_terms(
+           fact_table, vector_access,
+           LOOM_LOW_SOURCE_MEMORY_VIEW_EXPRESSION_ROOT_BASE,
+           &view_region->base_begin_byte_offset, plan, diagnostic,
+           &canonical_view_base_byte_facts)) ||
       !loom_low_source_memory_access_add_view_region_expression_terms(
           fact_table, vector_access,
           LOOM_LOW_SOURCE_MEMORY_VIEW_EXPRESSION_PROJECTION,
@@ -1078,8 +1102,7 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
   if (can_refine_dynamic_view_base_facts) {
     // The canonical static contribution is already represented separately in
     // the access plan, so retain only the analyzed dynamic contribution.
-    loom_value_facts_t analyzed_view_base_byte_facts =
-        view_region->begin_byte_offset.facts;
+    loom_value_facts_t analyzed_view_base_byte_facts = begin->facts;
     const loom_value_facts_t static_view_base_byte_facts =
         loom_value_facts_exact_i64(plan->static_view_base_byte_offset);
     loom_value_facts_subi(&analyzed_view_base_byte_facts,
@@ -1094,7 +1117,7 @@ static bool loom_low_source_memory_access_add_view_region_byte_offset(
       plan->dynamic_view_base_byte_facts = refined_view_base_byte_facts;
     }
   }
-  if (dynamic_view_base_count != 0 &&
+  if (!materialized_base && dynamic_view_base_count != 0 &&
       view_region->begin_value_id != LOOM_VALUE_ID_INVALID) {
     plan->dynamic_view_base_value_id = view_region->begin_value_id;
     plan->dynamic_view_base_value_static_byte_offset =
@@ -1176,6 +1199,13 @@ static bool loom_low_source_memory_access_add_view_base_byte_offset(
   if (view_region->origin.kind == LOOM_VALUE_FACT_REFERENCE_ORIGIN_ALLOCATION &&
       view_region->memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
     plan->root_uniform_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP;
+  }
+  plan->uniform_scope = (uint8_t)plan->root_uniform_scope;
+  if (plan->materialized_base_region != NULL) {
+    const loom_value_facts_t base_facts = loom_value_fact_table_lookup(
+        fact_table, view_region->base_view_value_id);
+    plan->uniform_scope = (uint8_t)iree_min(
+        plan->root_uniform_scope, loom_value_facts_uniform_scope(base_facts));
   }
   plan->root_minimum_alignment = loom_low_source_memory_clamp_alignment(
       view_region->root_minimum_alignment);
@@ -1739,6 +1769,7 @@ static bool loom_low_source_memory_access_plan_build_byte_offset_impl(
 
   out_plan->root_uniform_scope = loom_value_facts_uniform_scope(
       loom_value_fact_table_lookup(fact_table, out_plan->root_value_id));
+  out_plan->uniform_scope = (uint8_t)out_plan->root_uniform_scope;
   const loom_value_facts_t byte_offset_facts =
       loom_value_fact_table_lookup(fact_table, byte_offset_value_id);
   int64_t static_byte_offset = 0;

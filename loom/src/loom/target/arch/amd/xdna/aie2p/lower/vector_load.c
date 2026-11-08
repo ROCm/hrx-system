@@ -445,8 +445,8 @@ iree_status_t loom_aie2p_emit_vector_load_plan(
           &loom_amd_xdna_aie2p_core_lower_rule_set
                .source_memory_byte_offset_materializers[0],
           source_op, access, &complete_byte_offset));
-  const loom_value_id_t root =
-      loom_low_lower_lookup_value(context, access->root_value_id);
+  const loom_value_id_t root = loom_low_lower_lookup_value(
+      context, loom_low_source_memory_access_address_value_id(access));
   const loom_low_lower_memory_origin_t* origin = load_plan->origin;
   loom_value_id_t packets[LOOM_AIE2P_VECTOR_PACKET_MAX_COUNT] = {
       LOOM_VALUE_ID_INVALID,

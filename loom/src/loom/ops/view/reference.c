@@ -51,7 +51,12 @@ static loom_value_fact_view_reference_t loom_view_join_reference_fields(
   }
   loom_value_fact_view_reference_t reference = {
       .minimum_alignment =
-          iree_math_gcd_u64(lhs.minimum_alignment, rhs.minimum_alignment),
+          // Exact zero imposes no relative-alignment constraint. Its stored
+          // alignment is one, just like the integer lattice's zero divisor.
+      loom_value_facts_is_zero(lhs.base_byte_offset) ? rhs.minimum_alignment
+      : loom_value_facts_is_zero(rhs.base_byte_offset)
+          ? lhs.minimum_alignment
+          : iree_math_gcd_u64(lhs.minimum_alignment, rhs.minimum_alignment),
       .root_minimum_alignment = iree_math_gcd_u64(lhs.root_minimum_alignment,
                                                   rhs.root_minimum_alignment),
       .static_element_byte_count = lhs.static_element_byte_count,
@@ -110,9 +115,18 @@ static loom_value_facts_t loom_view_widen_reference_range(
     loom_value_facts_t previous, loom_value_facts_t next) {
   previous.extension_id = LOOM_VALUE_FACT_EXTENSION_ID_NONE;
   next.extension_id = LOOM_VALUE_FACT_EXTENSION_ID_NONE;
-  return loom_value_facts_equal(previous, next)
-             ? next
-             : loom_value_facts_make(0, INT64_MAX, 1);
+  if (loom_value_facts_equal(previous, next)) {
+    return next;
+  }
+  loom_value_facts_t joined = loom_value_facts_unknown();
+  loom_value_facts_meet(&previous, &next, &joined);
+  // Range growth does not invalidate divisibility. The joined divisor descends
+  // through positive divisors and converges independently of widened bounds.
+  // Byte origins are signed displacements, unlike nonnegative footprints.
+  // Retain the proven sign while forgetting expanding endpoint magnitudes.
+  return loom_value_facts_make(joined.range_lo < 0 ? INT64_MIN : 0,
+                               joined.range_hi > 0 ? INT64_MAX : 0,
+                               joined.known_divisor);
 }
 
 static iree_status_t loom_view_widen_reference_extension(
@@ -134,14 +148,6 @@ static iree_status_t loom_view_widen_reference_extension(
   }
   loom_value_fact_view_reference_t reference =
       loom_view_join_reference_fields(previous_reference, next_reference);
-  if (previous_reference.minimum_alignment !=
-      next_reference.minimum_alignment) {
-    reference.minimum_alignment = 1;
-  }
-  if (previous_reference.root_minimum_alignment !=
-      next_reference.root_minimum_alignment) {
-    reference.root_minimum_alignment = 1;
-  }
   if (reference.root_value_id != LOOM_VALUE_ID_INVALID) {
     reference.base_byte_offset = loom_view_widen_reference_range(
         previous_reference.base_byte_offset, next_reference.base_byte_offset);
@@ -156,9 +162,52 @@ static iree_status_t loom_view_widen_reference_extension(
   return iree_ok_status();
 }
 
+static iree_status_t loom_view_narrow_reference_extension(
+    const loom_value_fact_domain_t* domain, const loom_module_t* module,
+    loom_type_t type, loom_value_fact_table_t* target,
+    const loom_value_fact_table_t* previous_table, loom_value_facts_t previous,
+    const loom_value_fact_table_t* next_table, loom_value_facts_t next,
+    loom_value_facts_t* inout_facts) {
+  (void)domain;
+  (void)module;
+  (void)type;
+  loom_value_fact_view_reference_t reference = {0};
+  loom_value_fact_view_reference_t incoming = {0};
+  loom_view_query_references(previous_table, previous, next_table, next,
+                             &reference, &incoming);
+  // Offset intervals are comparable only in the same retained coordinate.
+  if (reference.root_value_id != LOOM_VALUE_ID_INVALID &&
+      reference.root_value_id == incoming.root_value_id) {
+    reference.base_byte_offset = loom_value_facts_narrow(
+        LOOM_SCALAR_TYPE_I64, reference.base_byte_offset,
+        incoming.base_byte_offset);
+    if (reference.minimum_alignment == 1) {
+      reference.minimum_alignment = incoming.minimum_alignment;
+    }
+    if (reference.root_minimum_alignment == 1) {
+      reference.root_minimum_alignment = incoming.root_minimum_alignment;
+    }
+  }
+  reference.footprint_byte_length = loom_value_facts_narrow(
+      LOOM_SCALAR_TYPE_OFFSET, reference.footprint_byte_length,
+      incoming.footprint_byte_length);
+  if (reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN) {
+    reference.memory_space = incoming.memory_space;
+  }
+  if (reference.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN) {
+    reference.nullability = incoming.nullability;
+  }
+  loom_value_facts_t narrowed = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(loom_value_facts_make_view_reference(
+      &target->context, reference, &narrowed));
+  inout_facts->extension_id = narrowed.extension_id;
+  return iree_ok_status();
+}
+
 const loom_value_fact_domain_t loom_view_fact_domain = {
     .meet_extension = loom_view_meet_reference_extension,
     .widen_extension = loom_view_widen_reference_extension,
+    .narrow_extension = loom_view_narrow_reference_extension,
 };
 
 //===----------------------------------------------------------------------===//
@@ -215,7 +264,7 @@ static loom_value_facts_t loom_view_scale_by_element_bytes(
 }
 
 static uint64_t loom_view_power_of_two_factor(int64_t value) {
-  if (value <= 1) {
+  if (value == 0) {
     return 1;
   }
   uint64_t unsigned_value = (uint64_t)value;
@@ -433,9 +482,6 @@ static bool loom_view_static_or_dynamic_index_facts(
     int64_t static_index = static_indices.i64_array[i];
     if (static_index != INT64_MIN) {
       if (i == axis) {
-        if (static_index < 0) {
-          return false;
-        }
         *out_index = loom_value_facts_exact_i64(static_index);
         return true;
       }
@@ -447,8 +493,7 @@ static bool loom_view_static_or_dynamic_index_facts(
         return false;
       }
       loom_value_id_t index_value_id = dynamic_indices.values[dynamic_ordinal];
-      *out_index = loom_view_clamp_nonnegative(
-          loom_value_fact_table_lookup(context->table, index_value_id));
+      *out_index = loom_value_fact_table_lookup(context->table, index_value_id);
       return true;
     }
     ++dynamic_ordinal;
@@ -510,12 +555,14 @@ static bool loom_view_subview_additional_byte_offset_facts(
                                      &stride)) {
       return false;
     }
-    loom_value_facts_t contribution = loom_view_muli_nonnegative(index, stride);
-    element_offset = loom_view_addi_nonnegative(element_offset, contribution);
+    loom_value_facts_t contribution = loom_value_facts_unknown();
+    loom_value_facts_muli(&index, &stride, &contribution);
+    loom_value_facts_addi(&element_offset, &contribution, &element_offset);
   }
 
-  *out_offset = loom_view_scale_by_element_bytes(element_offset,
-                                                 static_element_byte_count);
+  const loom_value_facts_t element_bytes =
+      loom_value_facts_exact_i64(static_element_byte_count);
+  loom_value_facts_muli(&element_offset, &element_bytes, out_offset);
   return true;
 }
 
@@ -571,8 +618,8 @@ iree_status_t loom_view_reference_make_record(loom_fact_context_t* context,
         loom_view_muli_nonnegative(slot, stride),
         reference.static_element_byte_count);
   }
-  reference.base_byte_offset =
-      loom_view_addi_nonnegative(reference.base_byte_offset, offset);
+  loom_value_facts_addi(&reference.base_byte_offset, &offset,
+                        &reference.base_byte_offset);
   reference.minimum_alignment =
       loom_view_alignment_from_offset_facts(reference.base_byte_offset);
   reference.footprint_byte_length = loom_view_suffix_footprint_facts(
@@ -595,8 +642,9 @@ iree_status_t loom_view_reference_make_buffer_view(
                                                           buffer_value_id);
 
   loom_value_fact_view_reference_t view_reference = {0};
-  view_reference.base_byte_offset =
-      loom_view_clamp_nonnegative(byte_offset_facts);
+  view_reference.base_byte_offset = byte_offset_facts;
+  view_reference.base_byte_offset.extension_id =
+      LOOM_VALUE_FACT_EXTENSION_ID_NONE;
   view_reference.static_element_byte_count =
       loom_view_static_element_byte_count(result_type);
   view_reference.footprint_byte_length = loom_view_footprint_facts(
@@ -653,10 +701,11 @@ iree_status_t loom_view_reference_make_subview(
   if (!loom_view_subview_additional_byte_offset_facts(
           context, module, source_type, static_offsets, dynamic_offsets,
           view_reference.static_element_byte_count, &additional_byte_offset)) {
-    additional_byte_offset = loom_view_nonnegative_unknown_facts();
+    additional_byte_offset = loom_value_facts_unknown();
   }
-  view_reference.base_byte_offset = loom_view_addi_nonnegative(
-      source_reference.base_byte_offset, additional_byte_offset);
+  loom_value_facts_addi(&source_reference.base_byte_offset,
+                        &additional_byte_offset,
+                        &view_reference.base_byte_offset);
   view_reference.footprint_byte_length = loom_view_footprint_facts(
       context, module, result_type, view_reference.static_element_byte_count,
       result_address_layout);

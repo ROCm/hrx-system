@@ -44,16 +44,16 @@ iree_status_t loom_value_facts_rebind_reference_origin(
   return iree_ok_status();
 }
 
-iree_status_t loom_value_facts_rebase_call_argument(
-    loom_fact_context_t* context, loom_value_id_t argument_id,
-    loom_value_fact_reference_origin_t argument_origin,
+iree_status_t loom_value_facts_rebase_reference(
+    loom_fact_context_t* context, loom_value_id_t receiving_value,
+    loom_value_fact_reference_origin_t receiving_origin,
     loom_value_facts_t* inout_facts) {
   loom_value_facts_t rebound = loom_value_facts_unknown();
   loom_value_fact_buffer_reference_t buffer;
   if (loom_value_facts_query_buffer_reference(context, *inout_facts, &buffer)) {
-    buffer.root_value_id = argument_id;
+    buffer.root_value_id = receiving_value;
     buffer.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
-    buffer.origin = argument_origin;
+    buffer.origin = receiving_origin;
     IREE_RETURN_IF_ERROR(
         loom_value_facts_make_buffer_reference(context, buffer, &rebound));
   } else {
@@ -68,10 +68,10 @@ iree_status_t loom_value_facts_rebase_call_argument(
     }
     view.base_byte_offset = loom_value_facts_exact_i64(0);
     view.minimum_alignment = 1;
-    view.root_value_id = argument_id;
+    view.root_value_id = receiving_value;
     view.buffer_value_id = LOOM_VALUE_ID_INVALID;
     view.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
-    view.origin = argument_origin;
+    view.origin = receiving_origin;
     IREE_RETURN_IF_ERROR(
         loom_value_facts_make_view_reference(context, view, &rebound));
   }

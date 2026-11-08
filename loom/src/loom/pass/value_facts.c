@@ -239,9 +239,10 @@ void loom_pass_value_fact_owner_invalidate(
   loom_pass_value_fact_owner_clear_scope(owner);
 }
 
-iree_status_t loom_pass_value_fact_owner_prepare(
+iree_status_t loom_pass_value_fact_owner_prepare_range(
     loom_pass_value_fact_owner_t* owner, const loom_module_t* module,
-    loom_pass_value_fact_scope_t scope, loom_value_fact_table_t** out_table) {
+    loom_pass_value_fact_scope_t scope, loom_value_fact_range_t reserved_values,
+    loom_value_fact_table_t** out_table) {
   *out_table = NULL;
   IREE_ASSERT(scope.kind != LOOM_PASS_VALUE_FACT_SCOPE_CONDITIONED_FUNCTION);
 
@@ -249,9 +250,11 @@ iree_status_t loom_pass_value_fact_owner_prepare(
     ++owner->lifecycle_counts->preparation_count;
   }
   IREE_RETURN_IF_ERROR(loom_pass_value_fact_scope_validate(scope));
-  IREE_RETURN_IF_ERROR(loom_pass_value_fact_owner_ensure_table(
-      owner, module, (loom_value_fact_range_t){0}));
+  IREE_RETURN_IF_ERROR(
+      loom_pass_value_fact_owner_ensure_table(owner, module, reserved_values));
   loom_pass_value_fact_owner_clear_scope(owner);
+  IREE_RETURN_IF_ERROR(loom_pass_value_fact_owner_reserve_scope(
+      owner, reserved_values, /*preserve_existing=*/false));
   owner->table.context.target_facts = scope.target_facts;
   if (scope.seed_facts.table) {
     const iree_status_t status = loom_value_fact_table_seed_values(
@@ -263,6 +266,13 @@ iree_status_t loom_pass_value_fact_owner_prepare(
   }
   *out_table = &owner->table;
   return iree_ok_status();
+}
+
+iree_status_t loom_pass_value_fact_owner_prepare(
+    loom_pass_value_fact_owner_t* owner, const loom_module_t* module,
+    loom_pass_value_fact_scope_t scope, loom_value_fact_table_t** out_table) {
+  return loom_pass_value_fact_owner_prepare_range(
+      owner, module, scope, (loom_value_fact_range_t){0}, out_table);
 }
 
 iree_status_t loom_pass_value_fact_owner_acquire_range(

@@ -103,6 +103,25 @@ func.def public target(@target) @owned_buffer_result() -> (offset) {
 
 amdgpu.target<gfx11-generic> @target
 
+func.def noinline @make_view() -> (view<1xi32>) {
+  %length = index.constant 4 : offset
+  %origin = index.constant 0 : offset
+  %storage = buffer.alloca<private> align(4) %length : buffer
+  %result = buffer.view %storage[%origin] : buffer -> view<1xi32>
+  func.return %result : view<1xi32>
+}
+
+func.def public target(@target) @owned_view_result() -> (i32) {
+  // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="make_view", failure_code="target_requires_inline"}
+  %view = func.call @make_view() : () -> (view<1xi32>)
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
 func.def @cycle_a(%value: i32) -> (i32) {
   // ERROR@+1: LOWERING/044 {op_name="func.call", phase_name="inline-callables", callee_name="cycle_b", failure_code="required_cycle"}
   %result = func.call @cycle_b(%value) : (i32) -> (i32)

@@ -1041,15 +1041,36 @@ iree_status_t loom_amdgpu_select_index_cast_plan(
 }
 
 iree_status_t loom_amdgpu_finalize_index_cast_plan(
-    loom_low_lower_context_t* context,
-    const loom_amdgpu_index_cast_plan_t* plan) {
+    loom_low_lower_context_t* context, loom_amdgpu_index_cast_plan_t* plan) {
   if (plan->kind == LOOM_AMDGPU_INDEX_CAST_KIND_DIAGNOSTIC_REJECTED) {
     return iree_ok_status();
   }
+  const loom_type_t source_type =
+      loom_low_lower_value_binding_type(context, plan->source);
+  const uint16_t source_register_class =
+      loom_low_register_type_class_id(source_type);
+  if (plan->kind == LOOM_AMDGPU_INDEX_CAST_KIND_ZERO_EXTENDING_LOW_32 ||
+      plan->kind == LOOM_AMDGPU_INDEX_CAST_KIND_SIGN_EXTENDING_LOW_32) {
+    // Address producers can retain a wider carrier than their preferred fact
+    // mapping, including callable results. Such a carrier already contains the
+    // high word; extending its low word would destroy it.
+    if (loom_amdgpu_type_is_address_scalar(loom_module_value_type(
+            loom_low_lower_context_module(context), plan->source)) &&
+        loom_low_register_type_unit_count(source_type) == 2) {
+      plan->kind = loom_amdgpu_index_cast_preserving_kind(
+          source_register_class == LOOM_AMDGPU_REG_CLASS_ID_SGPR &&
+          plan->result_register_class == LOOM_AMDGPU_REG_CLASS_ID_VGPR);
+    } else if (source_register_class == LOOM_AMDGPU_REG_CLASS_ID_VGPR) {
+      plan->result_register_class = source_register_class;
+      if (plan->kind == LOOM_AMDGPU_INDEX_CAST_KIND_ZERO_EXTENDING_LOW_32) {
+        plan->conversion_descriptor_ref =
+            kAmdgpuIndexCastZeroDescriptorRefs[source_register_class];
+      }
+    }
+  }
   const uint16_t register_class =
       plan->kind == LOOM_AMDGPU_INDEX_CAST_KIND_PRESERVING_LOW_BITS
-          ? loom_low_register_type_class_id(
-                loom_low_lower_value_binding_type(context, plan->source))
+          ? source_register_class
           : plan->result_register_class;
   const loom_type_t result_type = loom_low_register_type(
       loom_low_lower_context_descriptor_set(context)->stable_id, register_class,

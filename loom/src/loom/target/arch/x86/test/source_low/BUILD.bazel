@@ -21,6 +21,7 @@ loom_check_test_suite(
         "buffer_selection.loom-test",
         "callable_values.loom-test",
         "carried_counter_store.loom-test",
+        "carried_view_address.loom-test",
         "function_boundary.loom-test",
         "function_storage.loom-test",
         "lane_constants.loom-test",

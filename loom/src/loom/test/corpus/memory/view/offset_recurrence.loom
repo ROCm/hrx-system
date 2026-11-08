@@ -1,24 +1,30 @@
-func.def noinline @window_forward(%input: view<1xi32>, %position: index, %count: index) -> (view<1xi32>) where [range(%position, 0, 2)] {
+func.def noinline @window_forward(%input: view<1xi32>, %position: index, %count: index) -> (view<1xi32>, i32) where [range(%position, 0, 2)] {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
-  %last = scf.for %i = [%begin to %count step %step](%window = %input : view<1xi32>) -> (view<1xi32>) {
+  %initial_sum = scalar.constant 0 : i32
+  %last, %sum = scf.for %i = [%begin to %count step %step](%window = %input : view<1xi32>, %total = %initial_sum : i32) -> (view<1xi32>, i32) {
+    %value = view.load %window[0] : view<1xi32> -> i32
+    %next_total = scalar.addi %total, %value : i32
     %next = view.subview %window[%position] : view<1xi32> -> view<1xi32>
-    scf.yield %next : view<1xi32>
+    scf.yield %next, %next_total : view<1xi32>, i32
   }
-  func.return %last : view<1xi32>
+  func.return %last, %sum : view<1xi32>, i32
 }
 
-func.def noinline @window_backward(%input: view<1xi32>, %position: index, %count: index) -> (view<1xi32>) where [range(%position, -2, 0)] {
+func.def noinline @window_backward(%input: view<1xi32>, %position: index, %count: index) -> (view<1xi32>, i32) where [range(%position, -2, 0)] {
   %begin = index.constant 0 : index
   %step = index.constant 1 : index
-  %last = scf.for %i = [%begin to %count step %step](%window = %input : view<1xi32>) -> (view<1xi32>) {
+  %initial_sum = scalar.constant 0 : i32
+  %last, %sum = scf.for %i = [%begin to %count step %step](%window = %input : view<1xi32>, %total = %initial_sum : i32) -> (view<1xi32>, i32) {
+    %value = view.load %window[0] : view<1xi32> -> i32
+    %next_total = scalar.addi %total, %value : i32
     %next = view.subview %window[%position] : view<1xi32> -> view<1xi32>
-    scf.yield %next : view<1xi32>
+    scf.yield %next, %next_total : view<1xi32>, i32
   }
-  func.return %last : view<1xi32>
+  func.return %last, %sum : view<1xi32>, i32
 }
 
-func.def @call_window_recurrence(%position_value: i64, %count_value: i64) -> (i32, i32) {
+func.def @call_window_recurrence(%position_value: i64, %count_value: i64) -> (i32, i32, i32, i32) {
   %length = index.constant 64 : offset
   %origin = index.constant 0 : offset
   %storage = buffer.alloca<private> align(4) %length : buffer
@@ -36,30 +42,39 @@ func.def @call_window_recurrence(%position_value: i64, %count_value: i64) -> (i3
   %count = index.cast %count_input : i64 to index
   %negative_position = index.sub %begin, %position : index
   %first = view.subview %whole[8] : view<16xi32> -> view<1xi32>
-  %forward = func.call @window_forward(%first, %position, %count) : (view<1xi32>, index, index) -> (view<1xi32>)
-  %backward = func.call @window_backward(%first, %negative_position, %count) : (view<1xi32>, index, index) -> (view<1xi32>)
+  %forward, %forward_sum = func.call @window_forward(%first, %position, %count) : (view<1xi32>, index, index) -> (view<1xi32>, i32)
+  %backward, %backward_sum = func.call @window_backward(%first, %negative_position, %count) : (view<1xi32>, index, index) -> (view<1xi32>, i32)
   %forward_value = view.load %forward[0] : view<1xi32> -> i32
   %backward_value = view.load %backward[0] : view<1xi32> -> i32
-  func.return %forward_value, %backward_value : i32, i32
+  func.return %forward_value, %backward_value, %forward_sum, %backward_sum : i32, i32, i32, i32
 }
 
-func.def @expected_window_recurrence(%position_value: i64, %count_value: i64) -> (i32, i32) {
+func.def @expected_window_recurrence(%position_value: i64, %count_value: i64) -> (i32, i32, i32, i32) {
   %position = scalar.trunci %position_value : i64 to i32
   %count = scalar.trunci %count_value : i64 to i32
   %distance = scalar.muli %position, %count : i32
   %start = scalar.constant 8 : i32
   %forward = scalar.addi %start, %distance : i32
   %backward = scalar.subi %start, %distance : i32
-  func.return %forward, %backward : i32, i32
+  %unit = scalar.constant 1 : i32
+  %pair_shift = scalar.constant 1 : i32
+  %previous_count = scalar.subi %count, %unit : i32
+  %ordered_pairs = scalar.muli %count, %previous_count : i32
+  %pairs = scalar.shrsi %ordered_pairs, %pair_shift : i32
+  %progression = scalar.muli %position, %pairs : i32
+  %origin_sum = scalar.muli %start, %count : i32
+  %forward_sum = scalar.addi %origin_sum, %progression : i32
+  %backward_sum = scalar.subi %origin_sum, %progression : i32
+  func.return %forward, %backward, %forward_sum, %backward_sum : i32, i32, i32, i32
 }
 
 func.def inline @window_recurrence_configuration(%ordinal: index) -> (i64, i64) {
-  %c3 = index.constant 3 : index
-  %c6 = index.constant 6 : index
-  %first_group = index.cmp ult, %ordinal, %c3 : index
-  %second_group = index.cmp ult, %ordinal, %c6 : index
-  %middle_position = index.sub %ordinal, %c3 : index
-  %last_position = index.sub %ordinal, %c6 : index
+  %single_count_group = index.constant 3 : index
+  %multiple_count_group = index.constant 6 : index
+  %first_group = index.cmp ult, %ordinal, %single_count_group : index
+  %second_group = index.cmp ult, %ordinal, %multiple_count_group : index
+  %middle_position = index.sub %ordinal, %single_count_group : index
+  %last_position = index.sub %ordinal, %multiple_count_group : index
   %later_position = scf.select %second_group, %middle_position, %last_position : index
   %position = scf.select %first_group, %ordinal, %later_position : index
   %count0 = index.constant 0 : index
@@ -74,29 +89,29 @@ func.def inline @window_recurrence_configuration(%ordinal: index) -> (i64, i64) 
 
 func.def @window_recurrence_observations(%ordinal: index, %output: buffer) {
   %position, %count = func.call @window_recurrence_configuration(%ordinal) : (index) -> (i64, i64)
-  %forward, %backward = func.call @call_window_recurrence(%position, %count) : (i64, i64) -> (i32, i32)
-  %values = vector.from_elements %forward, %backward : vector<2xi32>
+  %forward, %backward, %forward_sum, %backward_sum = func.call @call_window_recurrence(%position, %count) : (i64, i64) -> (i32, i32, i32, i32)
+  %values = vector.from_elements %forward, %backward, %forward_sum, %backward_sum : vector<4xi32>
   %origin = index.constant 0 : offset
-  %results = buffer.view %output[%origin] : buffer -> view<2xi32>
-  vector.store %values, %results[0] : vector<2xi32>, view<2xi32>
+  %results = buffer.view %output[%origin] : buffer -> view<4xi32>
+  vector.store %values, %results[0] : vector<4xi32>, view<4xi32>
   func.return
 }
 
 func.def @expected_window_recurrence_observations(%ordinal: index, %output: buffer) {
   %position, %count = func.call @window_recurrence_configuration(%ordinal) : (index) -> (i64, i64)
-  %forward, %backward = func.call @expected_window_recurrence(%position, %count) : (i64, i64) -> (i32, i32)
-  %values = vector.from_elements %forward, %backward : vector<2xi32>
+  %forward, %backward, %forward_sum, %backward_sum = func.call @expected_window_recurrence(%position, %count) : (i64, i64) -> (i32, i32, i32, i32)
+  %values = vector.from_elements %forward, %backward, %forward_sum, %backward_sum : vector<4xi32>
   %origin = index.constant 0 : offset
-  %results = buffer.view %output[%origin] : buffer -> view<2xi32>
-  vector.store %values, %results[0] : vector<2xi32>, view<2xi32>
+  %results = buffer.view %output[%origin] : buffer -> view<4xi32>
+  vector.store %values, %results[0] : vector<4xi32>, view<4xi32>
   func.return
 }
 
 check.scenario @window_recurrence_values {
   check.trial[9](%trial: index, %entropy: check.entropy) {
-    %output = check.generate.fill value(0) : tensor<2xi32>
-    check.compare<@window_recurrence_observations, @expected_window_recurrence_observations>(%trial, %output) : (index, tensor<2xi32>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<2xi32>
+    %output = check.generate.fill value(0) : tensor<4xi32>
+    check.compare<@window_recurrence_observations, @expected_window_recurrence_observations>(%trial, %output) : (index, tensor<4xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<4xi32>
     }
   }
   check.return

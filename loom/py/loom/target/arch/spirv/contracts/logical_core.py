@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.buffer import defs as buffer
 from loom.dialect.index import ALL_INDEX_OPS
@@ -833,13 +835,37 @@ def _raw_storage_buffer_byte_store_rule() -> DescriptorRule:
     )
 
 
-def _storage_subview_rule(scalar: StorageBufferScalar) -> ValueElideRule:
-    return ValueElideRule(
+def _storage_subview_rule(*, dynamic: bool) -> DescriptorRule:
+    # Structural projections disappear through storage-demand analysis. Views
+    # crossing a control boundary instead carry their complete byte address.
+    # The address remains an integer; loads/stores create typed BDA pointers.
+    descriptor = _descriptor("spirv.op_copy_object.storage_buffer")
+    address_materializer = replace(
+        _storage_buffer_address_materializer(RAW_STORAGE_BUFFER_BYTE),
+        address=_descriptor("spirv.op_iadd.storage_buffer.byte_offset"),
+    )
+    return DescriptorRule(
         source_op=view.view_subview,
-        values=(ValueRef.result("result"),),
+        descriptor=descriptor,
         guards=(
-            Guard.value_type("result", View(_storage_source_types(scalar))),
             Guard.value_memory_space("result", _STORAGE_BUFFER_MEMORY_SPACES),
+            *_source_memory_address_feature_guards(address_materializer),
+        ),
+        emit=(
+            _descriptor_emit(
+                descriptor=descriptor,
+                operands={"input": ValueRef.source_memory_address()},
+                results={"dst": ValueRef.result("result")},
+                source_memory=replace(
+                    _storage_buffer_source_memory(
+                        SourceMemoryOperation.VIEW_CARRIER, RAW_STORAGE_BUFFER_BYTE
+                    ),
+                    dynamic_term_count=None if dynamic else 0,
+                    dynamic_term_count_minimum=1 if dynamic else 0,
+                    allow_dynamic_stride_values=dynamic,
+                ),
+                source_memory_address_materializer=address_materializer,
+            ),
         ),
     )
 
@@ -1089,7 +1115,9 @@ def _view_store_workgroup_rule(
 
 
 def _storage_buffer_rules() -> tuple[ContractCase, ...]:
-    rules: list[ContractCase] = []
+    rules: list[ContractCase] = [
+        _storage_subview_rule(dynamic=dynamic) for dynamic in (False, True)
+    ]
     for scalar in STORAGE_BUFFER_SCALARS:
         if scalar.source_rule_enabled or scalar.numeric_format_c_expression is None:
             continue
@@ -1101,7 +1129,6 @@ def _storage_buffer_rules() -> tuple[ContractCase, ...]:
         )
     for scalar in SOURCE_STORAGE_BUFFER_SCALARS:
         rules.append(_buffer_view_rule(scalar))
-        rules.append(_storage_subview_rule(scalar))
         rules.append(_workgroup_subview_rule(scalar))
         rules.append(_view_load_rule(scalar))
         rules.append(_view_store_rule(scalar))

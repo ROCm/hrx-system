@@ -31,10 +31,7 @@ func.def target(@target) @uniform_refined_offset_wide(%address: offset) -> (i64)
 }
 
 // ----
-low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform_refined_offset_wide(%bounded: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
-  %6 = slice %bounded[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %7 = s_mov_b32 0
-  %result = concat(%6, %7) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @uniform_refined_offset_wide(%result: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
   return %result
 }
 
@@ -78,9 +75,7 @@ func.def target(@target) @varying_refined_offset_wide(%values: vector<2xi64>) ->
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @varying_refined_offset_wide(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x2>) asm {
-  %13 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %11 = v_mov_b32 0
-  %result = concat(%13, %11) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %result = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
   return %result
 }
 

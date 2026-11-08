@@ -306,7 +306,7 @@ TEST(LowDescriptorTraitsTest, ImplicitStateResultOwnsLocalRegisterLifetime) {
 
   EXPECT_TRUE(loom_traits_has_unique_identity(traits));
   EXPECT_TRUE(loom_traits_have_storage_relation(traits));
-  EXPECT_FALSE(loom_traits_has_resource_identity(traits));
+  EXPECT_FALSE(loom_traits_may_create_resources(traits));
   EXPECT_FALSE(loom_traits_may_read(traits));
   EXPECT_FALSE(loom_traits_may_write(traits));
   EXPECT_FALSE(iree_any_bit_set(traits, LOOM_TRAIT_NON_DETERMINISTIC));

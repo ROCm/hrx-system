@@ -1403,6 +1403,29 @@ iree_status_t loom_value_fact_table_meet_for_type(
   return iree_ok_status();
 }
 
+iree_status_t loom_value_fact_table_narrow_for_type(
+    loom_value_fact_table_t* target, const loom_module_t* module,
+    loom_type_t type, const loom_value_fact_table_t* previous_table,
+    loom_value_facts_t previous, const loom_value_fact_table_t* next_table,
+    loom_value_facts_t next, loom_value_facts_t* out_facts) {
+  *out_facts =
+      loom_value_facts_narrow(loom_type_element_type(type), previous, next);
+  const loom_value_fact_domain_t* domain =
+      loom_value_fact_domain_for_type(target, module, type);
+  if (previous.extension_id && next.extension_id && domain &&
+      domain->narrow_extension) {
+    return domain->narrow_extension(domain, module, type, target,
+                                    previous_table, previous, next_table, next,
+                                    out_facts);
+  }
+  loom_value_facts_t extension = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_clone_fact_for_type(
+      target, previous.extension_id ? previous_table : next_table, module, type,
+      previous.extension_id ? previous : next, &extension));
+  out_facts->extension_id = extension.extension_id;
+  return iree_ok_status();
+}
+
 static int64_t loom_value_fact_widen_integer_lower(int64_t next,
                                                    int64_t domain_lower) {
   static const int64_t thresholds[] = {

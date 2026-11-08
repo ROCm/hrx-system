@@ -676,6 +676,30 @@ static bool loom_refine_boundaries_fact_tables_equal(
   return true;
 }
 
+static iree_status_t loom_refine_boundaries_narrow_scalar_facts(
+    const loom_module_t* module, const loom_value_fact_table_t* previous,
+    loom_value_fact_table_t* next) {
+  // Every round meets all callers and exits before narrowing. Repeated calls
+  // can form feedback even without recursion in the function call graph.
+  // Numeric proofs survive semantic rewrites; reference identities instead
+  // follow the current graph and are not retained across IR mutation here.
+  for (iree_host_size_t i = 0; i < next->touched_count; ++i) {
+    const loom_value_id_t value = next->touched_values[i];
+    const loom_type_t type = loom_module_value_type(module, value);
+    if (!loom_type_is_scalar(type)) {
+      continue;
+    }
+    const loom_value_facts_t incoming =
+        loom_value_fact_table_lookup(next, value);
+    loom_value_facts_t narrowed = loom_value_facts_narrow(
+        loom_type_element_type(type),
+        loom_value_fact_table_lookup(previous, value), incoming);
+    narrowed.extension_id = incoming.extension_id;
+    IREE_RETURN_IF_ERROR(loom_value_fact_table_define(next, value, narrowed));
+  }
+  return iree_ok_status();
+}
+
 static void loom_refine_boundaries_merge_canonicalize_result(
     loom_canonicalizer_result_t* target,
     const loom_canonicalizer_result_t* source) {
@@ -1904,6 +1928,11 @@ iree_status_t loom_refine_boundaries_run_with_options(
       break;
     }
 
+    status = loom_refine_boundaries_narrow_scalar_facts(
+        module, &current_boundary->facts, &next_boundary->facts);
+    if (!iree_status_is_ok(status)) {
+      break;
+    }
     bool boundary_facts_changed = !loom_refine_boundaries_fact_tables_equal(
         module, &current_boundary->facts, &next_boundary->facts);
     bool boundary_replacements_changed =

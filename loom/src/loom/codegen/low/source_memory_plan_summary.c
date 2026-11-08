@@ -136,7 +136,8 @@ void loom_low_source_memory_access_plan_make_summary(
   loom_low_strided_byte_interval_t strided_interval = {0};
   int64_t lane_begin_offset = 0;
   int64_t lane_end_offset = 0;
-  if (loom_low_source_memory_access_plan_lane_byte_envelope(
+  if (plan->materialized_base_region == NULL &&
+      loom_low_source_memory_access_plan_lane_byte_envelope(
           plan, &lane_begin_offset, &lane_end_offset)) {
     loom_value_facts_t begin_facts =
         loom_low_source_memory_dynamic_offset_facts(plan,

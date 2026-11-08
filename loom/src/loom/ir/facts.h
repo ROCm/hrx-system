@@ -303,6 +303,17 @@ loom_value_facts_t loom_value_facts_exact_i64(int64_t value);
 loom_value_facts_t loom_value_facts_make(int64_t lo, int64_t hi,
                                          int64_t known_divisor);
 
+// Narrows two sound overapproximations of the same value with finite descending
+// height. Each integer endpoint may leave its type-domain extreme once; finite
+// endpoints and nontrivial divisors are then retained. Floating intervals are
+// admitted once. An exact value may replace a bounded interval; this is a
+// terminal refinement. Independent predicates and uniformity may strengthen.
+// Extension payloads are handled by the owning fact table, not this scalar
+// transfer.
+loom_value_facts_t loom_value_facts_narrow(loom_scalar_type_t scalar_type,
+                                           loom_value_facts_t previous,
+                                           loom_value_facts_t next);
+
 // Returns the target-independent signed integer range represented by a scalar
 // integer or address type. Returns false for floating-point scalar types.
 bool loom_value_facts_scalar_type_domain(loom_scalar_type_t scalar_type,

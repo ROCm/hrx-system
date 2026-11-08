@@ -222,12 +222,13 @@ low.kernel.def target<amdgpu.rdna3.core>(@target) workgroup_size(64, 1, 1) @loom
 .type loom_kernel,@function
 loom_kernel:
   v_mov_b32 v1, 1
+  s_delay_alu instid0(VALU_DEP_1)
+  v_add_u32 v0, v0, v1
   s_getpc_b64 s[32:33]
   s_add_u32 s32, s32, @noop@rel32_lo
   s_addc_u32 s33, s33, @noop@rel32_hi
   s_swappc_b64 s[30:31], s[32:33]
-  s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(VALU_DEP_1)
-  v_add_u32 v0, v0, v1
+  s_delay_alu instid0(VALU_DEP_1)
   v_add_u32 v0, v0, v1
   s_endpgm
 

@@ -27,6 +27,7 @@ loom_check_test_suite(
         "callable_result_diagnostics.loom-test",
         "callable_values.loom-test",
         "carried_counter_store.loom-test",
+        "carried_view_address.loom-test",
         "component_packetization.loom-test",
         "component_packetization_report.loom-test",
         "exact_bf16_accumulator_conversion.loom-test",

@@ -1836,6 +1836,21 @@ iree_status_t loom_low_schedule_build_dependencies(
           state, node_index, descriptor));
       IREE_RETURN_IF_ERROR(
           loom_low_schedule_note_structural_state_reads(state, node_index));
+      // A call observes the architectural environment even when no operand or
+      // result names it. The callee's state accesses are outside this graph;
+      // keep surrounding state accesses on their authored side of the call.
+      // Descriptor-backed instructions retain their own precise state effects.
+      if (iree_any_bit_set(node->traits, LOOM_TRAIT_CALLABLE_BOUNDARY)) {
+        const loom_low_schedule_state_access_t boundary =
+            loom_low_schedule_state_access(
+                node_index, loom_low_schedule_dependency_endpoint_none());
+        for (uint16_t class_id = 0;
+             class_id < state->target.descriptor_set->reg_class_count;
+             ++class_id) {
+          IREE_RETURN_IF_ERROR(
+              loom_low_schedule_note_state_fence(state, boundary, class_id));
+        }
+      }
     }
     // A later block can forward a value produced here onto a loop backedge.
     // Apply its placement lifetime while this producer's reads are still live.

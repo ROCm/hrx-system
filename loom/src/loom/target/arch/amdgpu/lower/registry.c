@@ -1847,7 +1847,7 @@ static iree_status_t loom_amdgpu_finalize_plan(
     }
     case LOOM_OP_INDEX_CAST:
       return loom_amdgpu_finalize_index_cast_plan(
-          context, (const loom_amdgpu_index_cast_plan_t*)plan.target_data);
+          context, (loom_amdgpu_index_cast_plan_t*)plan.target_data);
     case LOOM_OP_SCALAR_DIVSI:
     case LOOM_OP_SCALAR_DIVUI:
     case LOOM_OP_SCALAR_DIVREMSI:

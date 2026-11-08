@@ -84,6 +84,10 @@ typedef struct loom_call_collector_t {
   loom_edge_list_t* edges;
   iree_arena_allocator_t* arena;
   const loom_module_t* module;
+  // Function currently supplying call edges.
+  loom_symbol_id_t caller;
+  // Optional owner retaining the discovered callsites.
+  loom_call_graph_call_visitor_t visitor;
 } loom_call_collector_t;
 
 bool loom_call_graph_tracks_call_kind(loom_call_like_kind_t kind) {
@@ -113,8 +117,12 @@ static iree_status_t loom_call_collector_visit(
         "call-like op target symbol ref {module=%u, symbol=%u} is invalid",
         (unsigned)callee_ref.module_id, (unsigned)callee_ref.symbol_id);
   }
-  return loom_edge_list_add(collector->edges, collector->arena,
-                            callee_ref.symbol_id);
+  IREE_RETURN_IF_ERROR(loom_edge_list_add(collector->edges, collector->arena,
+                                          callee_ref.symbol_id));
+  return collector->visitor.fn
+             ? collector->visitor.fn(collector->visitor.user_data,
+                                     collector->caller, call)
+             : iree_ok_status();
 }
 
 //===----------------------------------------------------------------------===//
@@ -285,6 +293,13 @@ static iree_status_t loom_call_graph_compute_sccs(
 iree_status_t loom_call_graph_build(const loom_module_t* module,
                                     iree_arena_allocator_t* arena,
                                     loom_call_graph_t* out_graph) {
+  return loom_call_graph_build_with_calls(
+      module, arena, (loom_call_graph_call_visitor_t){0}, out_graph);
+}
+
+iree_status_t loom_call_graph_build_with_calls(
+    const loom_module_t* module, iree_arena_allocator_t* arena,
+    loom_call_graph_call_visitor_t visitor, loom_call_graph_t* out_graph) {
   memset(out_graph, 0, sizeof(*out_graph));
   out_graph->module = module;
 
@@ -348,6 +363,8 @@ iree_status_t loom_call_graph_build(const loom_module_t* module,
         .edges = &edge_lists[node_index],
         .arena = arena,
         .module = module,
+        .caller = sym_id,
+        .visitor = visitor,
     };
     loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
     IREE_RETURN_IF_ERROR(loom_walk_function(

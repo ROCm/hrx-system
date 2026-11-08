@@ -335,7 +335,7 @@ static void loom_module_adjust_op_direct_summaries(loom_module_t* module,
   int32_t observable_delta =
       loom_traits_have_observable_effects(traits) ? direction : 0;
   int32_t resource_identity_delta =
-      loom_traits_has_resource_identity(traits) ? direction : 0;
+      loom_traits_may_create_resources(traits) ? direction : 0;
   int32_t memory_access_delta =
       loom_traits_may_access_memory(traits) ? direction : 0;
   const loom_memory_space_mask_t write_spaces =
@@ -428,9 +428,9 @@ void loom_module_update_op_direct_summaries(loom_module_t* module,
   int32_t new_observable =
       loom_traits_have_observable_effects(new_traits) ? 1 : 0;
   int32_t old_resource_identity =
-      loom_traits_has_resource_identity(old_traits) ? 1 : 0;
+      loom_traits_may_create_resources(old_traits) ? 1 : 0;
   int32_t new_resource_identity =
-      loom_traits_has_resource_identity(new_traits) ? 1 : 0;
+      loom_traits_may_create_resources(new_traits) ? 1 : 0;
   int32_t old_memory_access = loom_traits_may_access_memory(old_traits) ? 1 : 0;
   int32_t new_memory_access = loom_traits_may_access_memory(new_traits) ? 1 : 0;
   const loom_memory_space_mask_t old_spaces =

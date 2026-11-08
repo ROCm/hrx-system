@@ -119,9 +119,46 @@ static iree_status_t loom_buffer_widen_reference_extension(
                                               next_table, next, inout_facts);
 }
 
+static iree_status_t loom_buffer_narrow_reference_extension(
+    const loom_value_fact_domain_t* domain, const loom_module_t* module,
+    loom_type_t type, loom_value_fact_table_t* target,
+    const loom_value_fact_table_t* previous_table, loom_value_facts_t previous,
+    const loom_value_fact_table_t* next_table, loom_value_facts_t next,
+    loom_value_facts_t* inout_facts) {
+  (void)domain;
+  (void)module;
+  (void)type;
+  loom_value_fact_buffer_reference_t reference = {0};
+  loom_value_fact_buffer_reference_t incoming = {0};
+  loom_value_facts_query_buffer_reference(&previous_table->context, previous,
+                                          &reference);
+  loom_value_facts_query_buffer_reference(&next_table->context, next,
+                                          &incoming);
+  reference.maximum_byte_extent = loom_value_facts_narrow(
+      LOOM_SCALAR_TYPE_OFFSET, reference.maximum_byte_extent,
+      incoming.maximum_byte_extent);
+  if (reference.minimum_alignment == 1) {
+    reference.minimum_alignment = incoming.minimum_alignment;
+  }
+  if (reference.memory_space == LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN) {
+    reference.memory_space = incoming.memory_space;
+  }
+  if (reference.nullability == LOOM_VALUE_FACT_REFERENCE_NULLABILITY_UNKNOWN) {
+    reference.nullability = incoming.nullability;
+  }
+  // Identity is deliberately retained from the existing coordinate. A new
+  // numeric/storage proof does not authorize importing a different root.
+  loom_value_facts_t narrowed = loom_value_facts_unknown();
+  IREE_RETURN_IF_ERROR(loom_value_facts_make_buffer_reference(
+      &target->context, reference, &narrowed));
+  inout_facts->extension_id = narrowed.extension_id;
+  return iree_ok_status();
+}
+
 const loom_value_fact_domain_t loom_buffer_fact_domain = {
     .meet_extension = loom_buffer_meet_reference_extension,
     .widen_extension = loom_buffer_widen_reference_extension,
+    .narrow_extension = loom_buffer_narrow_reference_extension,
 };
 
 iree_status_t loom_buffer_constant_facts(

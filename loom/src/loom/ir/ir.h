@@ -976,14 +976,15 @@ static inline bool loom_traits_has_unique_identity(loom_trait_flags_t traits) {
   return (traits & LOOM_TRAIT_UNIQUE_IDENTITY) != 0;
 }
 
-// Returns true when an op creates a resource identity visible across callable
-// boundaries. Register storage relations create local owners for value
-// contents; their independent ownership still prevents direct CSE and
-// constrains motion, but does not make a value-returning callable allocate a
+// Returns true when an op may create a resource identity visible across
+// callable boundaries. Unknown effects include possible resource creation.
+// Register storage relations create local owners for value contents; their
+// independent ownership still prevents direct CSE and constrains motion,
+// but does not make a value-returning callable allocate a
 // resource.
-static inline bool loom_traits_has_resource_identity(
-    loom_trait_flags_t traits) {
-  return (traits & (LOOM_TRAIT_UNIQUE_IDENTITY |
+static inline bool loom_traits_may_create_resources(loom_trait_flags_t traits) {
+  return (traits & LOOM_TRAIT_UNKNOWN_EFFECTS) != 0 ||
+         (traits & (LOOM_TRAIT_UNIQUE_IDENTITY |
                     LOOM_TRAIT_STORAGE_RELATION)) == LOOM_TRAIT_UNIQUE_IDENTITY;
 }
 
@@ -2195,7 +2196,8 @@ typedef struct loom_region_t {
   // nested in this region. These ops remain live even when their SSA results
   // are unused.
   uint32_t observable_effect_count;
-  // Transitive count of fresh resource identities produced by live nested ops.
+  // Transitive count of live nested ops that may create resource identities,
+  // including operations with unknown effects.
   // Function-local register storage relations retain independent ownership
   // without contributing to this callable effect summary.
   uint32_t resource_identity_count;
@@ -2300,8 +2302,8 @@ static inline bool loom_region_has_observable_effects(
   return region && region->observable_effect_count != 0;
 }
 
-// Returns true when any live nested op creates a fresh resource identity.
-static inline bool loom_region_has_resource_identities(
+// Returns true when any live nested op may create a fresh resource identity.
+static inline bool loom_region_may_create_resources(
     const loom_region_t* region) {
   return region && region->resource_identity_count != 0;
 }

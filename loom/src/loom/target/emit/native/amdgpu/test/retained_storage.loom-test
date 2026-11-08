@@ -67,12 +67,12 @@ small_frame:
   v_mov_b32 v1, s0
   scratch_store_b32 off, v1, off offset:44
   s_mov_b64 exec, s[2:3]
-  s_mov_b64_exec_read s[0:1]
   s_waitcnt_vscnt vscnt(0)
   s_getpc_b64 s[32:33]
   s_add_u32 s32, s32, @snapshot@rel32_lo
   s_addc_u32 s33, s33, @snapshot@rel32_hi
   s_swappc_b64 s[30:31], s[32:33]
+  s_mov_b64_exec_read s[0:1]
   scratch_load_b32 v0, off, off offset:20
   scratch_load_b32 v3, off, off offset:32
   scratch_load_b64 v[1:2], off, off offset:24

@@ -231,6 +231,11 @@ TEST_F(PassValueFactsTest, ProducerRangeControlsInitialStorage) {
       .capacity = 1,
   };
   loom_value_fact_table_t* facts = nullptr;
+  IREE_ASSERT_OK(loom_pass_value_fact_owner_prepare_range(
+      &owner, module, scope, reserved_values, &facts));
+  EXPECT_LT(facts->capacity, loom_value_table_capacity(&module->values));
+  EXPECT_TRUE(loom_value_facts_is_unknown(
+      loom_value_fact_table_lookup(facts, second_value)));
   IREE_ASSERT_OK(loom_pass_value_fact_owner_acquire_range(
       &owner, module, scope, reserved_values, &facts));
   ASSERT_NE(facts, nullptr);

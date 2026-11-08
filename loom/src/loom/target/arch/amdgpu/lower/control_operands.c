@@ -11,6 +11,7 @@
 #include "loom/target/arch/amdgpu/lower/materializers.h"
 #include "loom/target/arch/amdgpu/lower/topology.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
+#include "loom/target/arch/amdgpu/lower/value/integer64.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 iree_status_t loom_amdgpu_prepare_control_operand(
@@ -28,6 +29,17 @@ iree_status_t loom_amdgpu_prepare_control_operand(
       context, required_type, LOOM_AMDGPU_REG_CLASS_ID_VGPR);
   const loom_type_t actual_type =
       loom_low_lower_value_binding_type(context, source_value);
+  if ((requires_sgpr || requires_vgpr) &&
+      loom_amdgpu_type_is_address_scalar(source_type) &&
+      loom_low_register_type_unit_count(actual_type) == 1 &&
+      loom_low_register_type_unit_count(required_type) == 2) {
+    const loom_value_facts_t facts = loom_value_fact_table_lookup(
+        loom_low_lower_context_fact_table(context), source_value);
+    if (facts.range_lo < 0) {
+      static const bool sign_extend = true;
+      *out_plan = &sign_extend;
+    }
+  }
   if (requires_sgpr && loom_type_is_scalar(source_type) &&
       !loom_amdgpu_type_is_i1(source_type) &&
       loom_amdgpu_low_type_is_register_class(context, actual_type,
@@ -65,6 +77,10 @@ iree_status_t loom_amdgpu_emit_control_operand(
       context, required_low_type, LOOM_AMDGPU_REG_CLASS_ID_SGPR);
   if ((requires_sgpr || requires_vgpr) &&
       loom_amdgpu_type_is_address_scalar(source_type)) {
+    if (plan != NULL && *(const bool*)plan) {
+      IREE_RETURN_IF_ERROR(loom_amdgpu_emit_i64_from_i32(
+          context, source_terminator, low_value_id, &low_value_id));
+    }
     return loom_amdgpu_materialize_low_scalar_carrier(
         context, source_terminator, low_value_id, required_low_type,
         out_low_value_id);
