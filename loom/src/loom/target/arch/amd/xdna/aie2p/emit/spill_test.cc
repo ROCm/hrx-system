@@ -326,10 +326,10 @@ TEST_P(Aie2pSpillTest, PreservesTupleWordsAndNarrowOffsetsAtEncodingBoundary) {
         source = loom_low_slice_result(op);
         op = op->next_op;
       }
-      const bool far = start + word * 4 < -2048;
-      far_count += far;
+      const bool uses_far_address = start + word * 4 < -2048;
+      far_count += uses_far_address;
       loom_value_id_t address = LOOM_VALUE_ID_INVALID;
-      if (far) {
+      if (uses_far_address) {
         ASSERT_NE(op, nullptr);
         ASSERT_TRUE(loom_low_op_isa(op));
         ASSERT_EQ(loom_low_op_descriptor(op),
@@ -357,17 +357,18 @@ TEST_P(Aie2pSpillTest, PreservesTupleWordsAndNarrowOffsetsAtEncodingBoundary) {
       ASSERT_NE(op, nullptr);
       EXPECT_EQ(
           loom_low_op_descriptor(op),
-          far ? (store
+          uses_far_address
+              ? (store
                      ? AIE2P_CORE_DESCRIPTOR_REF_STORE_SCALAR_I32_INDEXED_IMMEDIATE
                      : AIE2P_CORE_DESCRIPTOR_REF_LOAD_SCALAR_I32_INDEXED_IMMEDIATE)
               : (store ? AIE2P_CORE_DESCRIPTOR_REF_STACK_STORE_ER
                        : AIE2P_CORE_DESCRIPTOR_REF_STACK_LOAD_ER));
       EXPECT_EQ(loom_attr_as_i64(loom_low_op_attrs(op).entries[0].value),
-                far ? 0 : start + word * 4);
+                uses_far_address ? 0 : start + word * 4);
       if (store) {
         EXPECT_EQ(loom_low_op_operands(op).values[0], source);
       }
-      if (far) {
+      if (uses_far_address) {
         EXPECT_EQ(loom_low_op_operands(op).values[store ? 1 : 0], address);
       }
       if (!store) {

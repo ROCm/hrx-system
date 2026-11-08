@@ -156,12 +156,12 @@ static iree_status_t loom_aie2p_spill_emit(
           &plan->descriptors->descriptors[descriptor_ordinals[0]];
       const loom_low_descriptor_layout_t* descriptor_layout =
           &plan->descriptors->descriptor_layouts[descriptor->layout_index];
-      const bool far =
+      const bool uses_far_address =
           byte_offset <
           plan->descriptors->immediates[descriptor_layout->immediate_start]
               .signed_min;
       loom_value_id_t address = LOOM_VALUE_ID_INVALID;
-      if (far) {
+      if (uses_far_address) {
         status = loom_aie2p_spill_emit_address(plan, builder, byte_offset,
                                                location, values + value_count);
         if (iree_status_is_ok(status)) {
@@ -176,7 +176,7 @@ static iree_status_t loom_aie2p_spill_emit(
         if (store) {
           operands[operand_count++] = source;
         }
-        if (far) {
+        if (uses_far_address) {
           operands[operand_count++] = address;
         }
         const loom_tied_result_t tie = {
@@ -186,7 +186,7 @@ static iree_status_t loom_aie2p_spill_emit(
         }
         const loom_named_attr_t immediate = {
             .name_id = plan->immediate_name,
-            .value = loom_attr_i64(far ? 0 : byte_offset),
+            .value = loom_attr_i64(uses_far_address ? 0 : byte_offset),
         };
         loom_op_t* op = NULL;
         status = loom_low_build_resolved_descriptor_op(
