@@ -58,6 +58,8 @@ _VM_REFERENCE_COMPATIBLE_WITH = loom_config_compatible_with([
         "packed_matrix_groups",
         "radian_trigonometry",
         "source_owned_accumulation",
+        "stack_calls",
+        "stack_fifo",
     ]
 ]
 

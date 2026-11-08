@@ -1204,17 +1204,15 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
       *out_accepted = true;
       return iree_ok_status();
     }
-    const loom_low_allocation_spill_plan_t* storage_plans = NULL;
-    iree_host_size_t storage_plan_count = 0;
     loom_low_rematerialization_batch_result_t reconstruction = {0};
     IREE_RETURN_IF_ERROR(loom_low_allocation_reconstruct_spills(
         module, &frame.allocation, &rematerialization, repair_emitter,
-        scratch_arena, &storage_plans, &storage_plan_count, &reconstruction));
+        scratch_arena, &reconstruction));
     if (statistics != NULL) {
       statistics->repair.rematerialized_operand_count +=
           reconstruction.rewritten_operand_count;
     }
-    if (storage_plan_count == 0) {
+    if (reconstruction.rewritten_operand_count != 0) {
       repair_options.schedule_flags |=
           LOOM_LOW_SCHEDULE_FLAG_ORDER_STRUCTURAL_SETUP;
       ++value_repair_iteration_count;
@@ -1223,8 +1221,8 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
       continue;
     }
     IREE_RETURN_IF_ERROR(loom_low_emission_frame_record_spill_plan_values(
-        storage_plans, storage_plan_count, repair_arena,
-        &required_register_values));
+        frame.allocation.spill_plans, frame.allocation.spill_plan_count,
+        repair_arena, &required_register_values));
     loom_low_allocation_materialization_result_t result = {0};
     loom_low_allocation_materialization_options_t materialization_options =
         spill_free_options->materialization_options;
@@ -1234,8 +1232,9 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
       materialization_options.emitter = frame_options->emitter;
     }
     IREE_RETURN_IF_ERROR(loom_low_allocation_materialize_spills(
-        &frame.allocation, storage_plans, storage_plan_count,
-        &materialization_options, scratch_arena, &result));
+        &frame.allocation, frame.allocation.spill_plans,
+        frame.allocation.spill_plan_count, &materialization_options,
+        scratch_arena, &result));
     if (result.error_count != 0) {
       return iree_ok_status();
     }

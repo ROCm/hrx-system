@@ -24,11 +24,17 @@ enum loom_low_rematerialization_value_flag_bits_e {
   LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED = 1u << 0,
   // The producer permits independent recreation of this result.
   LOOM_LOW_REMATERIALIZATION_VALUE_ELIGIBLE = 1u << 1,
-  // The producer is input-free or composes closed values of the same class
-  // without narrowing a wider input.
+  // The producer is input-free, composes closed values of the same class, or
+  // transports constants between banks without narrowing a wider tuple.
   LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED = 1u << 2,
   // At least one operand use consumes this value's storage.
   LOOM_LOW_REMATERIALIZATION_VALUE_CONSUMED = 1u << 3,
+  // The target register class cannot use spill storage. Replaying a captured
+  // input cannot extend this lifetime and then repair it with memory traffic.
+  LOOM_LOW_REMATERIALIZATION_VALUE_UNSPILLABLE = 1u << 4,
+  // A replayable native register move may carry a closed constant between
+  // register classes without retaining an external register lifetime.
+  LOOM_LOW_REMATERIALIZATION_VALUE_CONSTANT_TRANSPORT = 1u << 5,
 };
 
 // One immutable function snapshot. The caller owns the module ordinal map

@@ -156,6 +156,33 @@ AIE2P slots, hazards, timing, and encoding constraints. The result fits the
 selected tile's instruction and data budgets; code growth is a physical
 resource cost, not just a compile-time statistic.
 
+### Function stack frames
+
+Register pressure can spill ordinary values into tile SRAM. The shared
+allocator selects values, shares slots across disjoint lifetimes, and retains
+the logical register ranges and defined parts for each transfer. Native
+[spill recipes](aie2p/emit/spill.h) encode scalar, address, vector, accumulator,
+predicate, dimension, FIFO, and block-floating-point payloads using their
+actual memory widths and alignments. A 20-bit address register occupies four
+memory bytes; a block-floating-point register packs its mantissas and exponent
+planes into 72 bytes. Partial transfers preserve the other defined parts.
+
+Each function has an upward-growing [stack frame](aie2p/emit/stack_frame.h).
+Entry advances SP by the aligned frame size, spill slots use negative offsets
+from SP, and every return releases that frame. The supported call graph is a
+resident worker calling direct leaf helpers. The worker reserves its own frame
+plus the largest helper frame, so sequential helper calls reuse the same
+backing while preserving the caller's live values. Placement charges that
+complete bound against the tile's other storage before producing the image.
+Functions needing no stack storage contribute no frame bytes.
+
+Spill support preserves physical register constraints and architectural-state
+ownership. Link and carry state retain their call and instruction ordering
+contracts. Constant initialization can be reconstructed beside its users to
+avoid stack traffic; runtime-input computations retain their loop execution
+domain. Compile reports include materialized spill traffic and its source
+origins after temporary allocation state has been released.
+
 ## Detached leaves and placement
 
 [Leaf compilation](aie2p/emit/leaf_compile.h) returns a

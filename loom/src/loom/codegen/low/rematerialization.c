@@ -129,7 +129,7 @@ static loom_op_t* loom_low_rematerialization_recipe_op(
   return loom_value_def_op(loom_module_value(module, recipe->values[index]));
 }
 
-enum { LOOM_LOW_REMATERIALIZATION_VALUE_COLLECTED = 1u << 4 };
+enum { LOOM_LOW_REMATERIALIZATION_VALUE_COLLECTED = 1u << 6 };
 
 // Immutable producer facts for one consumer-first repair batch. Rewrites may
 // change uses, but cannot change an unprocessed producer's original inputs.
@@ -416,8 +416,6 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
           loom_low_rematerialization_is_tied_source(op, operand_index) ||
           (rebuild_composition &&
            iree_any_bit_set(flags, LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED) &&
-           iree_any_bit_set(loom_op_vtable(module, op)->vtable_flags,
-                            LOOM_OP_VTABLE_STRUCTURAL_MATERIALIZATION) &&
            loom_type_kind(loom_module_value_type(module, input)) ==
                LOOM_TYPE_REGISTER &&
            iree_any_bit_set(input_flags,
@@ -484,6 +482,8 @@ static iree_status_t loom_low_rematerialization_plan_recipe(
       // a lifetime proof beyond the captured value's direct consuming uses.
       eligible = loom_low_capture_source_is_stable(module, input);
       has_required_external_input |=
+          iree_any_bit_set(facts->value_flags[ordinal],
+                           LOOM_LOW_REMATERIALIZATION_VALUE_UNSPILLABLE) ||
           loom_low_register_requirements_get(facts->register_requirements,
                                              ordinal) !=
               LOOM_LOW_REGISTER_REQUIREMENT_NONE ||
@@ -742,6 +742,17 @@ static iree_status_t loom_low_rematerialization_prepare_value(
   for (uint32_t i = 0; i < use_count; ++i) {
     if (!loom_low_rematerialization_use_is_eligible(value_id, defining_op,
                                                     observed_uses[i])) {
+      return iree_ok_status();
+    }
+    // A branch forwards storage into a successor argument; it is not a
+    // register consumer replacing a reload. Reconstructing all edge values
+    // here would require them to coexist in registers even when their block
+    // arguments need spill storage.
+    if (facts->reconstruct_constants &&
+        iree_any_bit_set(
+            loom_op_vtable(module, loom_use_user_op(observed_uses[i]))
+                ->vtable_flags,
+            LOOM_OP_VTABLE_DIRECT_BRANCH)) {
       return iree_ok_status();
     }
     // A proper subrange keeps the wider producer as an external capture.
@@ -1592,27 +1603,7 @@ iree_status_t loom_low_allocation_reconstruct_spills(
     loom_module_t* module, const loom_low_allocation_table_t* table,
     loom_low_rematerialization_state_t* state,
     iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
-    const loom_low_allocation_spill_plan_t** out_spill_plans,
-    iree_host_size_t* out_spill_plan_count,
     loom_low_rematerialization_batch_result_t* out_result) {
-  *out_spill_plans = table->spill_plans;
-  *out_spill_plan_count = table->spill_plan_count;
-  IREE_RETURN_IF_ERROR(loom_low_allocation_rematerialize_spill_plans_impl(
-      module, table, true, state, emitter, arena, out_result));
-  if (out_result->rewritten_operand_count == 0) {
-    return iree_ok_status();
-  }
-  loom_low_allocation_spill_plan_t* remaining = NULL;
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, table->spill_plan_count, sizeof(*remaining), (void**)&remaining));
-  iree_host_size_t count = 0;
-  for (iree_host_size_t i = 0; i < table->spill_plan_count; ++i) {
-    const loom_low_allocation_spill_plan_t* plan = &table->spill_plans[i];
-    if (loom_module_value(module, plan->value_id)->use_count != 0) {
-      remaining[count++] = *plan;
-    }
-  }
-  *out_spill_plans = remaining;
-  *out_spill_plan_count = count;
-  return iree_ok_status();
+  return loom_low_allocation_rematerialize_spill_plans_impl(
+      module, table, true, state, emitter, arena, out_result);
 }

@@ -137,10 +137,9 @@ static iree_status_t loom_low_schedule_initialize_value_records(
            loom_module_value_has_uses(state->module, value_id));
       if (iree_all_bits_set(reg_class->flags,
                             LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE) ||
-          (reg_class->allocatable_count == 1 &&
-           iree_all_bits_set(
-               reg_class->flags,
-               LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS)) ||
+          iree_all_bits_set(
+              reg_class->flags,
+              LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS) ||
           has_required_lifetime ||
           (value_id < state->options->required_register_values.bit_count &&
            iree_bitmap_test(state->options->required_register_values,

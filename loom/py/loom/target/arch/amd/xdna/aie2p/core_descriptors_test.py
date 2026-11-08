@@ -30,6 +30,9 @@ from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     _register_packing_members,
 )
 from loom.target.arch.amd.xdna.aie2p.core_machine_data import CORE_MACHINE_TABLE
+from loom.target.arch.amd.xdna.aie2p.core_stack_descriptors import (
+    STACK_SPILLABLE_CLASSES,
+)
 from loom.target.low_descriptors import (
     Constraint,
     ConstraintKind,
@@ -604,12 +607,17 @@ def test_low_register_classes_retain_machine_candidate_order() -> None:
                 register_class.spill_min_alignment
                 == (layout.spill_alignment_bits + 7) // 8
             )
-            assert (
-                register_class.spill_max_alignment == register_class.spill_min_alignment
+            assert register_class.spill_max_alignment == (
+                64
+                if register_class.name == "aie2p.vec256"
+                else register_class.spill_min_alignment
             )
         assert RegClassFlag.PHYSICAL in register_class.flags
         assert RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS in register_class.flags
-        assert RegClassFlag.UNSPILLABLE in register_class.flags
+        assert (RegClassFlag.UNSPILLABLE in register_class.flags) == (
+            register_class.name
+            not in {f"aie2p.{name.lower()}" for name in STACK_SPILLABLE_CLASSES}
+        )
 
     el_class = next(
         register_class

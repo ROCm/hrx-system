@@ -13,6 +13,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/low_registry.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/bundle_plan.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_capacity.h"
+#include "loom/target/arch/amd/xdna/aie2p/emit/spill.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/stack_frame.h"
 #include "loom/target/reporting/low.h"
 
@@ -56,8 +57,8 @@ static iree_status_t loom_aie2p_leaf_admit_calls(
 static iree_status_t loom_aie2p_leaf_build_frame(
     loom_module_t* module, loom_op_t* function_op,
     const loom_aie2p_leaf_compile_options_t* options,
-    iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame,
-    bool* out_accepted) {
+    loom_aie2p_stack_layout_t* stack_layout, iree_arena_allocator_t* arena,
+    loom_low_emission_frame_t* out_frame, bool* out_accepted) {
   loom_low_planning_statistics_t planning_statistics = {0};
   const loom_low_emission_frame_options_t frame_options = {
       .descriptor_registry = options->descriptor_registry,
@@ -91,7 +92,9 @@ static iree_status_t loom_aie2p_leaf_build_frame(
       .materialization_options =
           {
               .has_supported_storage_spaces = true,
-              .supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_NONE,
+              .supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_STACK,
+              .plan_traffic = loom_aie2p_spill_plan,
+              .plan_traffic_user_data = stack_layout,
               .record_materialized_spills =
                   loom_target_compile_report_wants_details(
                       options->compile_report,
@@ -140,8 +143,9 @@ iree_status_t loom_aie2p_leaf_compile(
   loom_aie2p_stack_layout_t stack_layout = {.arena = &stack_arena};
   loom_low_emission_frame_t frame = {0};
   bool frame_accepted = false;
-  iree_status_t status = loom_aie2p_leaf_build_frame(
-      module, function_op, options, &scratch_arena, &frame, &frame_accepted);
+  iree_status_t status =
+      loom_aie2p_leaf_build_frame(module, function_op, options, &stack_layout,
+                                  &scratch_arena, &frame, &frame_accepted);
   loom_aie2p_stack_frame_t stack = {0};
   bool stack_accepted = false;
   if (iree_status_is_ok(status) && frame_accepted) {

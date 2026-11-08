@@ -1,4 +1,4 @@
-// Two configurations share a worker and a retained helper. Native allocation
+// Two configurations share a worker and a spilling helper. Native allocation
 // changes must stay private to each emission, including immutable data placement.
 global.rodata.def @left = align(4) conflicts([@right]) bytes("01000000")
 
@@ -70,6 +70,44 @@ low.func.def noinline target<amd.xdna.aie2p.core>(@core) @xor_words(%buffer: reg
   %word21 = lda %address1, 20
   %word22 = lda %address1, 24
   %word23 = lda %address1, 28
+  %base2 = copy %address1 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address2 = padda %base2, 64
+  %word24 = lda %address2, -32
+  %word25 = lda %address2, -28
+  %word26 = lda %address2, -24
+  %word27 = lda %address2, -20
+  %word28 = lda %address2, -16
+  %word29 = lda %address2, -12
+  %word30 = lda %address2, -8
+  %word31 = lda %address2, -4
+  %word32 = lda %address2, 0
+  %word33 = lda %address2, 4
+  %word34 = lda %address2, 8
+  %word35 = lda %address2, 12
+  %result35 = xor %word35, %operand
+  st %result35, %address2, 12
+  %result34 = xor %word34, %operand
+  st %result34, %address2, 8
+  %result33 = xor %word33, %operand
+  st %result33, %address2, 4
+  %result32 = xor %word32, %operand
+  st %result32, %address2, 0
+  %result31 = xor %word31, %operand
+  st %result31, %address2, -4
+  %result30 = xor %word30, %operand
+  st %result30, %address2, -8
+  %result29 = xor %word29, %operand
+  st %result29, %address2, -12
+  %result28 = xor %word28, %operand
+  st %result28, %address2, -16
+  %result27 = xor %word27, %operand
+  st %result27, %address2, -20
+  %result26 = xor %word26, %operand
+  st %result26, %address2, -24
+  %result25 = xor %word25, %operand
+  st %result25, %address2, -28
+  %result24 = xor %word24, %operand
+  st %result24, %address2, -32
   %result23 = xor %word23, %operand
   st %result23, %address1, 28
   %result22 = xor %word22, %operand

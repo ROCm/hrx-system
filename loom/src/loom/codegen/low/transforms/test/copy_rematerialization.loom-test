@@ -152,3 +152,43 @@ low.func.def target<test.low.core>(@target) @snapshot_alias_consumer(%input: reg
   %result = copy %12 : reg<test.f32> -> reg<test.i32>
   return %output, %result, %changed
 }
+
+// ====
+
+// A snapshot of a fixed register must be saved before a later definition
+// reuses that register, even when neither value has a consuming SSA use.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.f32=1}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @snapshot_fixed(%input: reg<test.fixed.r0>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %captured = copy %input : reg<test.fixed.r0> -> reg<test.f32>
+  low.br ^work
+^work:
+  %next = copy %other : reg<test.i32> -> reg<test.fixed.r0>
+  %temporary = copy %next : reg<test.fixed.r0> -> reg<test.f32>
+  %output = copy %temporary : reg<test.f32> -> reg<test.i32>
+  low.br ^consume
+^consume:
+  %result = copy %captured : reg<test.f32> -> reg<test.i32>
+  return %output, %result
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @snapshot_fixed(%input: reg<test.fixed.r0>, %other: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %snapshot_fixed_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %captured = copy %input : reg<test.fixed.r0> -> reg<test.f32>
+  low.spill %captured, %snapshot_fixed_spill_storage_0 : reg<test.f32>, low.storage<private>
+  low.br ^work
+^work:
+  %next = copy %other : reg<test.i32> -> reg<test.fixed.r0>
+  %temporary = copy %next : reg<test.fixed.r0> -> reg<test.f32>
+  %output = copy %temporary : reg<test.f32> -> reg<test.i32>
+  low.br ^consume
+^consume:
+  %10 = low.reload %snapshot_fixed_spill_storage_0 : low.storage<private> -> reg<test.f32>
+  %result = copy %10 : reg<test.f32> -> reg<test.i32>
+  return %output, %result
+}

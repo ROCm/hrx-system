@@ -168,8 +168,8 @@ enum loom_low_schedule_value_flag_bits_e {
   LOOM_LOW_SCHEDULE_VALUE_FLAG_FORWARDED = 1u << 6,
   // At least one occurrence in the current candidate reads after result writes.
   LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_LATE_READ = 1u << 7,
-  // Allocation requires a register or the class has one physical candidate.
-  // Scheduling protects that scarce capacity; allocation still owns spilling.
+  // Allocation requires a register or the class names physical candidates.
+  // Scheduling protects that finite capacity; allocation still owns spilling.
   LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER = 1u << 8,
   // Definition creates independent storage before its input reads complete.
   LOOM_LOW_SCHEDULE_VALUE_FLAG_EARLY_WRITE = 1u << 9,

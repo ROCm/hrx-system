@@ -139,16 +139,13 @@ iree_status_t loom_low_allocation_rematerialize_spill_plans(
 // execute at those same users, including users inside loops. Each private
 // result requires a register, preventing reconstruction/spill cycles. The
 // caller supplies state->required_register_values and retains it across
-// rebuilds. Returns the remaining storage plans, borrowing |table| when no
-// reconstruction applies or allocated from |arena| otherwise. Other allocation
-// facts remain an immutable snapshot. Consume the returned plans before
-// rebuilding allocation.
+// rebuilds. After any rewrite, callers rebuild allocation before materializing
+// memory traffic: shortening constant lifetimes can free the registers needed
+// by the other values in the old spill plan.
 iree_status_t loom_low_allocation_reconstruct_spills(
     loom_module_t* module, const loom_low_allocation_table_t* table,
     loom_low_rematerialization_state_t* state,
     iree_diagnostic_emitter_t emitter, iree_arena_allocator_t* arena,
-    const loom_low_allocation_spill_plan_t** out_spill_plans,
-    iree_host_size_t* out_spill_plan_count,
     loom_low_rematerialization_batch_result_t* out_result);
 
 #ifdef __cplusplus

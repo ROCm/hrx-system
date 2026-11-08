@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//libamdf/requirements:defs.bzl", "LIBAMDF")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with", "loom_generated_source")
 load("//loom/build_tools/bazel:loom_check.bzl", "loom_check_test_suite")
 
 package(
@@ -224,6 +224,33 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "spill",
+    srcs = ["spill.c"],
+    hdrs = ["spill.h"],
+    textual_hdrs = [":spill_tables.inl"],
+    deps = [
+        ":stack_frame",
+        "//loom/src/loom/codegen/low:allocation_materialization",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low/allocation:spill_plan",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_generated_source(
+    name = "spill_tables_gen",
+    generator = "//loom/py/loom/gen/target/arch/amd/xdna/aie2p:encoding_tables",
+    output = "spill_tables.inl",
+    output_flag = "--spill-output",
+)
+
+loom_cc_library(
     name = "leaf_compile",
     srcs = ["leaf_compile.c"],
     hdrs = ["leaf_compile.h"],
@@ -232,6 +259,7 @@ loom_cc_library(
         ":bundle_plan",
         ":leaf_object",
         ":program_capacity",
+        ":spill",
         ":stack_frame",
         "//loom/src/loom/analysis:symbol_facts",
         "//loom/src/loom/codegen/low:descriptors",
@@ -453,6 +481,28 @@ loom_cc_test(
     deps = [
         ":bundle_alignment",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/encoding",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "spill_test",
+    srcs = ["spill_test.cc"],
+    deps = [
+        ":spill",
+        ":stack_frame",
+        "//loom/src/loom/codegen/low:allocation_materialization",
+        "//loom/src/loom/codegen/low:builder",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:register_parts",
+        "//loom/src/loom/codegen/low:storage_layout",
+        "//loom/src/loom/codegen/low/allocation:spill_plan",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/descriptors:core",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

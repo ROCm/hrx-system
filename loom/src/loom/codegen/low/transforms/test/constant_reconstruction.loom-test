@@ -121,8 +121,6 @@ low.func.def target<test.low.core>(@target) @loop_constants(%again: reg<test.i32
 test.target<low_core> @target
 
 low.func.def target<test.low.core>(@target) @loop_constants(%again: reg<test.i32>) -> (reg<test.f32 x2>, reg<test.f32 x2>) asm {
-  %loop_constants_spill_storage_0 = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
-  low.spill %again, %loop_constants_spill_storage_0 : reg<test.i32>, low.storage<private>
   low.br ^loop
 ^loop:
   %word0_remat = test.const.i32 11
@@ -133,8 +131,7 @@ low.func.def target<test.low.core>(@target) @loop_constants(%again: reg<test.i32
   %word3_remat_remat = test.const.i32 14
   %pair1_remat = concat(%word2_remat, %word3_remat_remat) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
   %second = copy %pair1_remat : reg<test.i32 x2> -> reg<test.f32 x2>
-  %16 = low.reload %loop_constants_spill_storage_0 : low.storage<private> -> reg<test.i32>
-  low.cond_br %16, ^repeat, ^exit : reg<test.i32>
+  low.cond_br %again, ^repeat, ^exit : reg<test.i32>
 ^repeat:
   low.br ^loop
 ^exit:
@@ -296,4 +293,54 @@ low.func.def target<test.low.core>(@target) @composed_literal() -> (reg<test.f32
   %pair_remat$18 = concat(%literal0_remat$16, %literal1_remat$17) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
   %second = copy %pair_remat$18 : reg<test.i32 x2> -> reg<test.f32 x2>
   return %other_result, %first, %saved, %second
+}
+
+// ====
+
+// A native register move can initialize a constant in another register bank.
+// Rebuilding the complete input-free recipe replaces a loop reload without
+// carrying either register lifetime across the backedge.
+// RUN: with-low-asm pass low-materialize-allocation
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @loop_register_constant(%again: reg<test.i32>, %block0: reg<test.explicit32>, %block1: reg<test.explicit32>, %block2: reg<test.explicit32>, %block3: reg<test.explicit32>) -> (reg<test.i32>) asm {
+  %literal = test.const.i32 7
+  %transport = test.rematerialize.spillable.explicit32 %literal
+  %value0 = copy %block0 : reg<test.explicit32> -> reg<test.i32>
+  %value1 = copy %block1 : reg<test.explicit32> -> reg<test.i32>
+  %value2 = copy %block2 : reg<test.explicit32> -> reg<test.i32>
+  %value3 = copy %block3 : reg<test.explicit32> -> reg<test.i32>
+  %pair0 = test.add.i32 %value0, %value1
+  %pair1 = test.add.i32 %value2, %value3
+  %seed = test.add.i32 %pair0, %pair1
+  low.br ^loop
+^loop:
+  %mapped = copy %transport : reg<test.spillable.explicit32> -> reg<test.i32>
+  %sum = test.add.i32 %seed, %mapped
+  low.cond_br %again, ^loop, ^exit : reg<test.i32>
+^exit:
+  return %sum
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @loop_register_constant(%again: reg<test.i32>, %block0: reg<test.explicit32>, %block1: reg<test.explicit32>, %block2: reg<test.explicit32>, %block3: reg<test.explicit32>) -> (reg<test.i32>) asm {
+  %value0 = copy %block0 : reg<test.explicit32> -> reg<test.i32>
+  %value1 = copy %block1 : reg<test.explicit32> -> reg<test.i32>
+  %value2 = copy %block2 : reg<test.explicit32> -> reg<test.i32>
+  %value3 = copy %block3 : reg<test.explicit32> -> reg<test.i32>
+  %pair0 = test.add.i32 %value0, %value1
+  %pair1 = test.add.i32 %value2, %value3
+  %seed = test.add.i32 %pair0, %pair1
+  low.br ^loop
+^loop:
+  %literal_remat = test.const.i32 7
+  %transport_remat = test.rematerialize.spillable.explicit32 %literal_remat
+  %mapped = copy %transport_remat : reg<test.spillable.explicit32> -> reg<test.i32>
+  %sum = test.add.i32 %seed, %mapped
+  low.cond_br %again, ^loop, ^exit : reg<test.i32>
+^exit:
+  return %sum
 }

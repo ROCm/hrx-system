@@ -1408,6 +1408,26 @@ TEST_LOW_EXPLICIT_RELEASE_V4I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_SPILLABLE_COMPLETION_DESCRIPTORS = tuple(
+    replace(
+        descriptor,
+        key=descriptor.key + ".spillable",
+        mnemonic=descriptor.mnemonic + ".spillable",
+        semantic_tag=descriptor.semantic_tag + ".spillable",
+        operands=tuple(
+            replace(operand, reg_alts=_SPILLABLE_EXPLICIT32_ALT)
+            if operand.reg_alts == _EXPLICIT32_ALT
+            else operand
+            for operand in descriptor.operands
+        ),
+    )
+    for descriptor in (
+        TEST_LOW_STREAM_STEP_I32_DESCRIPTOR,
+        TEST_LOW_REMATERIALIZE_PAIR_EXPLICIT32_DESCRIPTOR,
+        TEST_LOW_EXPLICIT_RELEASE_V4I32_DESCRIPTOR,
+    )
+)
+
 TEST_LOW_ADD_V4I32_DESCRIPTOR = Descriptor(
     key="test.add.v4i32",
     mnemonic="test.add.v4i32",
@@ -3285,6 +3305,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_FIXED_UPDATE_I32_DESCRIPTOR,
         TEST_LOW_EXPLICIT_EXPAND_I32_DESCRIPTOR,
         TEST_LOW_EXPLICIT_RELEASE_V4I32_DESCRIPTOR,
+        *TEST_LOW_SPILLABLE_COMPLETION_DESCRIPTORS,
         TEST_LOW_ADD_V4I32_DESCRIPTOR,
         TEST_LOW_EARLY_CLOBBER_V4I32_DESCRIPTOR,
         TEST_LOW_MIXED_EARLY_CLOBBER_V4I32_DESCRIPTOR,

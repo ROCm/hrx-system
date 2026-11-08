@@ -5,7 +5,7 @@
 
 aie2p.target<core> @target
 
-// REMARK@+1: BACKEND/045 {function_name="broadcast_pressure", trigger_kind="allocation-failure", repaired_value_count="13", cloned_packet_count="13", rewritten_operand_count="13", retained_placement_count="0"}
+// REMARK@+1: BACKEND/045 {function_name="broadcast_pressure", trigger_kind="spill-plan", repaired_value_count="2", cloned_packet_count="2", rewritten_operand_count="2", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core>(@target) @broadcast_pressure(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
   %scalar0 = mov.i32 1
   %vector0 = vbcst.32 %scalar0
@@ -64,7 +64,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @broadcast_pressure(%input: re
 
 aie2p.target<core> @target
 
-// REMARK@+1: BACKEND/045 {function_name="dependent_cross_block", trigger_kind="allocation-failure", repaired_value_count="42", cloned_packet_count="42", rewritten_operand_count="42", retained_placement_count="0"}
+// REMARK@+1: BACKEND/045 {function_name="dependent_cross_block", trigger_kind="spill-plan", repaired_value_count="10", cloned_packet_count="10", rewritten_operand_count="10", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core>(@target) @dependent_cross_block(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
   %scalar0 = mov.i32 1
   %vector0 = vbcst.32 %scalar0
@@ -191,7 +191,9 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @dependent_cross_block(%input:
 
 aie2p.target<core> @target
 
-// REMARK@+1: BACKEND/045 {function_name="bounded_padding", trigger_kind="allocation-failure", repaired_value_count="13", cloned_packet_count="13", rewritten_operand_count="13", retained_placement_count="0"}
+// REMARK@+3: BACKEND/045 {function_name="bounded_padding", trigger_kind="spill-plan", repaired_value_count="4", cloned_packet_count="4", rewritten_operand_count="4", retained_placement_count="0"}
+// REMARK@+2: BACKEND/045 {function_name="bounded_padding", trigger_kind="spill-plan", repaired_value_count="1", cloned_packet_count="1", rewritten_operand_count="1", retained_placement_count="0"}
+// REMARK@+1: BACKEND/045 {function_name="bounded_padding", trigger_kind="spill-plan", repaired_value_count="2", cloned_packet_count="2", rewritten_operand_count="2", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core>(@target) @bounded_padding(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
   %zeros = acc.clear.f32x64
   %mode = mova.i32 60
@@ -333,7 +335,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @bounded_padding(%input: reg<a
 
 aie2p.target<core> @target
 
-// REMARK@+1: BACKEND/045 {function_name="retained_scalar_stream", trigger_kind="allocation-failure", repaired_value_count="8", cloned_packet_count="14", rewritten_operand_count="14", retained_placement_count="0"}
+// REMARK@+1: BACKEND/045 {function_name="retained_scalar_stream", trigger_kind="spill-plan", repaired_value_count="1", cloned_packet_count="7", rewritten_operand_count="7", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core>(@target) @retained_scalar_stream(%record_input: reg<aie2p.ep>, %stream_input: reg<aie2p.ep>, %stream_output: reg<aie2p.ep>, %record_output: reg<aie2p.ep>) asm {
   %retained0, %read1 = lda.i32.post %record_input, 4
   %retained1, %read2 = lda.i32.post %read1, 4
@@ -455,8 +457,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @retained_scalar_stream(%recor
 %retained21 -> st.i32.post operand=0 (%retained21, %write21)
 %retained22 -> st.i32.post operand=0 (%retained22, %write22)
 %retained23 -> st.i32.post operand=0 (%retained23, %write23)
-%retained24 -> st.i32.post operand=0 (%retained24, %write24)
-%retained25 -> st.i32.post operand=0 (%retained25, %write25)
+%retained24 -> st.stack operand=0 (%retained24)
+%retained25 -> st.stack operand=0 (%retained25)
 %value0 -> lshl operand=0 (%value0, %scale_shift_remat)
 %value1 -> lshl operand=0 (%value1, %scale_shift_remat)
 %value2 -> lshl operand=0 (%value2, %scale_shift_remat)
@@ -501,8 +503,8 @@ low.func.def target<amd.xdna.aie2p.core> @irreducible_private_indices(%position0
   %index4 = mov.address-index %position4
   %index5 = mov.address-index %position5
   %index6 = mov.address-index %position6
+  // ERROR@+1: BACKEND/005 "aie2p.edj" "budget 8" "peak 9" "spill-traffic-register-exhausted"
   %index7 = mov.address-index %position7
-  // ERROR@+1: BACKEND/005 "aie2p.edj" "budget 8" "peak 9" "unspillable-register-exhausted"
   %index8 = mov.address-index %position8
   return %index0, %index1, %index2, %index3, %index4, %index5, %index6, %index7, %index8
 }
@@ -517,14 +519,12 @@ low.func.def target<amd.xdna.aie2p.core> @irreducible_private_indices(%position0
 // vaddSign0 target state, so replay preserves their zero-extension mode.
 // RUN: emit aie2p-leaf @packed_extract_extend_pressure diagnostics=predicted-spills
 
-// Each failed frontier contributes a consumer-first batch. Rebuilding
-// allocation exposes the next set of extraction and extension repairs.
+// Each spill plan contributes a consumer-first replay batch. Rebuilding
+// allocation exposes the next extraction and extension repair.
 aie2p.target<core> @target
 
-// REMARK@+4: BACKEND/045 {function_name="packed_extract_extend_pressure", trigger_kind="allocation-failure", repaired_value_count="2", cloned_packet_count="2", rewritten_operand_count="2", retained_placement_count="0"}
-// REMARK@+3: BACKEND/045 {function_name="packed_extract_extend_pressure", trigger_kind="allocation-failure", repaired_value_count="2", cloned_packet_count="2", rewritten_operand_count="2", retained_placement_count="0"}
-// REMARK@+2: BACKEND/045 {function_name="packed_extract_extend_pressure", trigger_kind="allocation-failure", repaired_value_count="1", cloned_packet_count="1", rewritten_operand_count="1", retained_placement_count="0"}
-// REMARK@+1: BACKEND/045 {function_name="packed_extract_extend_pressure", trigger_kind="allocation-failure", repaired_value_count="1", cloned_packet_count="1", rewritten_operand_count="1", retained_placement_count="0"}
+// REMARK@+2: BACKEND/045 {function_name="packed_extract_extend_pressure", trigger_kind="spill-plan", repaired_value_count="1", cloned_packet_count="1", rewritten_operand_count="1", retained_placement_count="0"}
+// REMARK@+1: BACKEND/045 {function_name="packed_extract_extend_pressure", trigger_kind="spill-plan", repaired_value_count="1", cloned_packet_count="1", rewritten_operand_count="1", retained_placement_count="0"}
 low.func.def schedule(locked) target<amd.xdna.aie2p.core>(@target) @packed_extract_extend_pressure(%packed: reg<aie2p.vec256 x2>, %keep0: reg<aie2p.er x2>, %keep1: reg<aie2p.er x2>, %keep2: reg<aie2p.er x2>, %keep3: reg<aie2p.er x2>, %keep4: reg<aie2p.er x2>, %keep5: reg<aie2p.er x2>, %keep6: reg<aie2p.er x2>, %keep7: reg<aie2p.er x2>, %keep8: reg<aie2p.er x2>, %keep9: reg<aie2p.er x2>, %keep10: reg<aie2p.er x2>, %keep11: reg<aie2p.er x2>, %keep12: reg<aie2p.er x2>, %keep13: reg<aie2p.er x2>, %keep14: reg<aie2p.er x2>) -> (reg<aie2p.er>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>, reg<aie2p.er x2>) asm {
   %byte0 = vextract.8.imm %packed, 0
   %wide0 = extend.u8 %byte0
@@ -731,10 +731,10 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @retained_scale_select(%record
 }
 
 // ----
-issue cycles: 163
-code bytes: 746
+issue cycles: 159
+code bytes: 728
 coissued bundles: 40
-coissued components: 80
+coissued components: 81
 
 // ====
 
@@ -769,15 +769,15 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @literal_address_pressure(%pay
 }
 
 // ----
-code: 44 00 c0 00 07 00 3a 11 20 30 c0 01 00 30 82 00 3a 11 40 30 c0 01 00 30 82 00 3a 11 60 30 c0 01 00 30 82 00 3a 11 80 30 c0 01 00 30 82 00 3a 11 a0 30 c0 01 00 30 82 00 3a 11 c0 30 c0 01 00 30 82 00 3a 11 e0 30 c0 01 00 30 82 00 3a 11 00 31 c0 01 00 30 82 00 5c 00 50 30 82 00 00 00 00 00 00 00 00 00 00 00
-%payload -> st operand=0 (%payload, %endpoint0_remat)
-%payload -> st operand=0 (%payload, %endpoint1_remat)
-%payload -> st operand=0 (%payload, %endpoint2_remat)
-%payload -> st operand=0 (%payload, %endpoint3_remat)
-%payload -> st operand=0 (%payload, %endpoint4_remat)
-%payload -> st operand=0 (%payload, %endpoint5_remat)
-%payload -> st operand=0 (%payload, %endpoint6_remat)
-%payload -> st operand=0 (%payload, %endpoint7_remat)
+code: 44 00 c0 00 07 00 44 80 c0 02 07 00 44 00 c1 04 07 00 44 80 c1 06 07 00 44 00 c2 08 07 00 44 80 c2 0a 07 00 44 00 c3 0c 07 00 44 80 c3 0e 07 00 3a 11 00 31 c0 01 00 30 82 00 98 11 04 09 98 11 04 0a 98 11 04 0b 98 11 04 0c 98 11 04 0d 5c 00 50 30 82 c0 98 11 04 0f 98 11 04 08 00 00 00 00 00 00
+%payload -> st operand=0 (%payload, %endpoint0)
+%payload -> st operand=0 (%payload, %endpoint1)
+%payload -> st operand=0 (%payload, %endpoint2)
+%payload -> st operand=0 (%payload, %endpoint3)
+%payload -> st operand=0 (%payload, %endpoint4)
+%payload -> st operand=0 (%payload, %endpoint5)
+%payload -> st operand=0 (%payload, %endpoint6)
+%payload -> st operand=0 (%payload, %endpoint7)
 %payload -> st operand=0 (%payload, %endpoint8_remat)
 
 // ====
@@ -867,48 +867,50 @@ low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @read_coeff
 }
 
 // ----
-.text.read_coefficients: address=0x00000000 bytes=250 initialized
-  4400c04007004480c0420700ba1022b0d00100d0822000000000000000000000000098110408ba1024b0d00100d0822000000000000000000000000098111408ba1026b0d00100d0822000000000000000000000000098112408ba1028b0d00100d0822000000000000000000000000098113408ba102ab0d00100d0822000000000000000000000000098114408ba102cb0d00100d0822000000000000000000000000098115408ba102eb0d00100d0822000000000000000000000000098116408ba1030b0d00100d082200000000000000000000000000c23e8f08c0398160401000000000000000018002810000098118408000000000000
-.text.read_coefficients: address=0x00000000 bytes=250 initialized
-  4400c00007004480c0020700ba1022b0c00100d0822000000000000000000000000098110408ba1024b0c00100d0822000000000000000000000000098111408ba1026b0c00100d0822000000000000000000000000098112408ba1028b0c00100d0822000000000000000000000000098113408ba102ab0c00100d0822000000000000000000000000098114408ba102cb0c00100d0822000000000000000000000000098115408ba102eb0c00100d0822000000000000000000000000098116408ba1030b0c00100d082200000000000000000000000000c23e8f08c0398160401000000000000000018002810000098118408000000000000
-.rodata.coefficient0: address=0x00074040 bytes=4 initialized
+.text.read_coefficients: address=0x00000000 bytes=300 initialized
+  4480e04907004480c04007003a114030d00100b083ff4408c14207004410c14407004418c14607004420c14807004428c14a07004430c14c07004438c14e0700981604001819fc0700000000000000000000000098110408981604011819fc0700000000000000000000000098111408981604021819fc0700000000000000000000000098112408981604031819fc0700000000000000000000000098113408981604041819fc0700000000000000000000000098114408981604051819fc0700000000000000000000000098115408981604061819fc0700000000000000000000000098116408981604071819fc070000000000000000000000003a115030d0010030820e1899fc079816040000000000000000001800281098671c0198118409c4010000f8ff00000000
+.text.read_coefficients: address=0x00000000 bytes=300 initialized
+  4480e00907004480c00007003a114030c00100b083ff4408c10207004410c10407004418c10607004420c10807004428c10a07004430c10c07004438c10e0700981604001819fc0700000000000000000000000098110408981604011819fc0700000000000000000000000098111408981604021819fc0700000000000000000000000098112408981604031819fc0700000000000000000000000098113408981604041819fc0700000000000000000000000098114408981604051819fc0700000000000000000000000098115408981604061819fc0700000000000000000000000098116408981604071819fc070000000000000000000000003a115030c0010030820e1899fc079816040000000000000000001800281098671c0198118409c4010000f8ff00000000
+.rodata.coefficient0: address=0x00074080 bytes=4 initialized
   01000000
-.rodata.coefficient1: address=0x00074044 bytes=4 initialized
+.rodata.coefficient1: address=0x00074084 bytes=4 initialized
   02000000
-.rodata.coefficient2: address=0x00074048 bytes=4 initialized
+.rodata.coefficient2: address=0x00074088 bytes=4 initialized
   03000000
-.rodata.coefficient3: address=0x0007404c bytes=4 initialized
+.rodata.coefficient3: address=0x0007408c bytes=4 initialized
   04000000
-.rodata.coefficient4: address=0x00074050 bytes=4 initialized
+.rodata.coefficient4: address=0x00074090 bytes=4 initialized
   05000000
-.rodata.coefficient5: address=0x00074054 bytes=4 initialized
+.rodata.coefficient5: address=0x00074094 bytes=4 initialized
   06000000
-.rodata.coefficient6: address=0x00074058 bytes=4 initialized
+.rodata.coefficient6: address=0x00074098 bytes=4 initialized
   07000000
-.rodata.coefficient7: address=0x0007405c bytes=4 initialized
+.rodata.coefficient7: address=0x0007409c bytes=4 initialized
   08000000
-.rodata.coefficient8: address=0x00074060 bytes=4 initialized
+.rodata.coefficient8: address=0x000740a0 bytes=4 initialized
   09000000
-.storage.read_coefficients.private: address=0x00074000 bytes=64 reserved
-.rodata.coefficient0: address=0x00070040 bytes=4 initialized
+.storage.read_coefficients.stack: address=0x00074000 bytes=64 reserved
+.storage.read_coefficients.private: address=0x00074040 bytes=64 reserved
+.rodata.coefficient0: address=0x00070080 bytes=4 initialized
   01000000
-.rodata.coefficient1: address=0x00070044 bytes=4 initialized
+.rodata.coefficient1: address=0x00070084 bytes=4 initialized
   02000000
-.rodata.coefficient2: address=0x00070048 bytes=4 initialized
+.rodata.coefficient2: address=0x00070088 bytes=4 initialized
   03000000
-.rodata.coefficient3: address=0x0007004c bytes=4 initialized
+.rodata.coefficient3: address=0x0007008c bytes=4 initialized
   04000000
-.rodata.coefficient4: address=0x00070050 bytes=4 initialized
+.rodata.coefficient4: address=0x00070090 bytes=4 initialized
   05000000
-.rodata.coefficient5: address=0x00070054 bytes=4 initialized
+.rodata.coefficient5: address=0x00070094 bytes=4 initialized
   06000000
-.rodata.coefficient6: address=0x00070058 bytes=4 initialized
+.rodata.coefficient6: address=0x00070098 bytes=4 initialized
   07000000
-.rodata.coefficient7: address=0x0007005c bytes=4 initialized
+.rodata.coefficient7: address=0x0007009c bytes=4 initialized
   08000000
-.rodata.coefficient8: address=0x00070060 bytes=4 initialized
+.rodata.coefficient8: address=0x000700a0 bytes=4 initialized
   09000000
-.storage.read_coefficients.private: address=0x00070000 bytes=64 reserved
+.storage.read_coefficients.stack: address=0x00070000 bytes=64 reserved
+.storage.read_coefficients.private: address=0x00070040 bytes=64 reserved
 
 // ====
 
@@ -973,7 +975,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @restricted_zero(%input: reg<a
   return
 }
 // ----
-code: 98 15 04 00 98 95 04 00 98 15 05 00 98 95 05 00 98 15 06 00 98 35 04 00 98 55 04 00 98 75 04 00 98 b5 04 00 98 d5 04 00 98 f5 04 00 98 35 05 00 98 55 05 00 98 75 05 00 98 b5 05 00 98 d5 05 00 98 f5 05 00 98 35 06 00 98 55 06 00 98 75 06 00 00 00 00 00 00 00 00 00 00 00 00 00 98 06 04 09 98 86 04 09 98 06 05 09 98 86 05 09 98 06 06 09 98 26 04 09 98 46 04 09 98 66 04 09 98 a6 04 09 98 c6 04 09 98 e6 04 09 98 26 05 09 98 46 05 09 98 66 05 09 98 a6 05 09 98 c6 05 09 98 e6 05 09 98 26 06 09 98 46 06 09 98 66 06 09 00 00 00 00 00 00 08 1d e0 00 00 00 00 00 00 00 18 00 28 10 00 00 98 06 04 09 00 00 00 00 00 00
+code: 44 00 e0 09 00 00 08 1d e0 00 00 00 00 00 00 00 00 00 00 00 98 16 fc 0f 00 00 00 00 00 00 98 15 04 00 98 95 04 00 98 15 05 00 98 95 05 00 98 15 06 00 98 35 04 00 98 55 04 00 98 75 04 00 98 b5 04 00 98 d5 04 00 98 f5 04 00 98 35 05 00 98 55 05 00 98 75 05 00 98 b5 05 00 98 d5 05 00 98 f5 05 00 98 35 06 00 98 55 06 00 98 75 06 00 00 00 00 00 00 00 00 00 00 00 00 00 98 06 04 09 98 86 04 09 98 06 05 09 98 86 05 09 98 06 06 09 98 26 04 09 98 46 04 09 98 66 04 09 98 a6 04 09 98 c6 04 09 98 e6 04 09 98 26 05 09 98 46 05 09 98 66 05 09 98 a6 05 09 98 c6 05 09 98 e6 05 09 98 26 06 09 98 46 06 09 98 66 06 09 00 00 00 00 00 00 98 0d fc 07 00 00 00 00 00 00 00 00 18 00 28 10 00 00 98 06 04 09 c4 01 00 00 f8 ff 00 00 00 00
+fixup: section=0 offset=0 kind=2 symbol=1 addend=64
 
 // ====
 
@@ -1007,7 +1010,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @partial_predicate_lifetime(%l
 
 // Nine derived addresses cross the block boundary. Their owned pointer copies
 // and pure updates can be recreated at each store from the stable input base.
-// RUN: emit low-allocation-query @derived_addresses strategy=resource-stall spill-free spill-count
+// RUN: emit aie2p-leaf @derived_addresses report=code
 
 aie2p.target<core> @target
 
@@ -1046,5 +1049,5 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @derived_addresses(%base: reg<
 }
 
 // ----
-spills: 0
-materialized traffic: stores=0 reloads=0
+code: 44 00 e0 09 00 00 02 70 10 00 00 b0 83 ff 0c 16 01 23 f3 ff 0c 16 01 f5 8c 23 0c 16 01 f7 0c 41 4c 16 01 09 72 61 18 8b 80 0d 4c b6 38 08 f2 a3 18 8b 80 0e 18 5b 08 0e 18 5b 1c 0f 98 9d fb 0f 00 00 00 00 00 00 98 31 84 09 18 8b 80 09 4c 63 28 07 72 21 98 31 a4 0c 98 31 b4 0a 98 31 c4 0d 0c 63 a8 fd 8c 03 98 31 e4 08 98 31 f4 09 18 19 f8 07 00 00 00 00 00 00 00 00 18 00 28 10 00 00 98 31 04 08 c4 01 00 00 f8 ff 00 00 00 00
+fixup: section=0 offset=0 kind=2 symbol=1 addend=64

@@ -20,21 +20,17 @@ static bool loom_low_descriptor_packet_kind_may_rematerialize(
 
 static bool loom_low_rematerialization_packet_is_eligible(
     loom_module_t* module, const loom_low_resolved_target_t* target,
-    loom_value_id_t value_id, loom_op_t** out_defining_op) {
+    loom_value_id_t value_id, loom_low_reg_class_flags_t register_flags,
+    loom_op_t** out_defining_op, bool* out_constant_transport) {
   *out_defining_op = NULL;
+  *out_constant_transport = false;
   const loom_value_t* value = loom_module_value(module, value_id);
   if (loom_value_is_block_arg(value) || loom_value_has_attribute_uses(value) ||
       loom_module_value_has_type_uses(module, value_id)) {
     return false;
   }
 
-  const loom_type_t value_type = loom_module_value_type(module, value_id);
-  const loom_low_register_type_resolver_t register_type_resolver =
-      loom_low_register_type_resolver_for_descriptor_set(
-          target->descriptor_set);
-  if (loom_low_register_type_resolver_has_class_flags(
-          &register_type_resolver, value_type,
-          LOOM_LOW_REG_CLASS_FLAG_REFERENCE)) {
+  if (iree_any_bit_set(register_flags, LOOM_LOW_REG_CLASS_FLAG_REFERENCE)) {
     return false;
   }
 
@@ -64,6 +60,12 @@ static bool loom_low_rematerialization_packet_is_eligible(
     return false;
   }
   *out_defining_op = defining_op;
+  *out_constant_transport =
+      packet.kind != LOOM_LOW_DESCRIPTOR_PACKET_NONE &&
+      iree_any_bit_set(
+          target->descriptor_set->descriptor_views[packet.descriptor_ordinal]
+              .instruction_class_flags,
+          LOOM_LOW_INSTRUCTION_CLASS_FLAG_REGISTER_MOVE);
   return true;
 }
 
@@ -89,6 +91,9 @@ static iree_status_t loom_low_rematerialization_classify(
     const loom_low_rematerialization_scope_t* scope, bool reconstruct_constants,
     uint8_t* value_flags, iree_arena_allocator_t* arena) {
   loom_module_t* module = scope->module;
+  const loom_low_register_type_resolver_t register_type_resolver =
+      loom_low_register_type_resolver_for_descriptor_set(
+          scope->target->descriptor_set);
   for (loom_value_ordinal_t ordinal = 0; ordinal < scope->value_count;
        ++ordinal) {
     const loom_value_id_t value_id = scope->value_ids[ordinal];
@@ -96,9 +101,24 @@ static iree_status_t loom_low_rematerialization_classify(
         loom_value_consuming_use_count(loom_module_value(module, value_id)) != 0
             ? LOOM_LOW_REMATERIALIZATION_VALUE_CONSUMED
             : 0;
+    uint16_t register_class_id = LOOM_LOW_REG_CLASS_NONE;
+    const loom_low_reg_class_t* register_class = NULL;
+    loom_low_register_type_resolver_try_resolve(
+        &register_type_resolver, loom_module_value_type(module, value_id),
+        &register_class_id, &register_class);
+    const loom_low_reg_class_flags_t register_flags =
+        register_class ? register_class->flags : 0;
+    if (iree_any_bit_set(register_flags, LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE)) {
+      flags |= LOOM_LOW_REMATERIALIZATION_VALUE_UNSPILLABLE;
+    }
     loom_op_t* op = NULL;
+    bool constant_transport = false;
     bool eligible = loom_low_rematerialization_packet_is_eligible(
-        module, scope->target, value_id, &op);
+        module, scope->target, value_id, register_flags, &op,
+        &constant_transport);
+    if (constant_transport) {
+      flags |= LOOM_LOW_REMATERIALIZATION_VALUE_CONSTANT_TRANSPORT;
+    }
     if (eligible && scope->liveness != NULL) {
       const uint32_t interval_index =
           scope->liveness->value_interval_indices[ordinal];
@@ -115,10 +135,11 @@ static iree_status_t loom_low_rematerialization_classify(
       if (op->operand_count == 0) {
         flags |= LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED |
                  LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED;
-      } else if (!iree_any_bit_set(loom_op_vtable(module, op)->vtable_flags,
+      } else if (!constant_transport &&
+                 !iree_any_bit_set(loom_op_vtable(module, op)->vtable_flags,
                                    LOOM_OP_VTABLE_STRUCTURAL_MATERIALIZATION)) {
-        // Late reconstruction initializes constants and composes their storage.
-        // Replaying arithmetic retains the ordinary execution-domain contract.
+        // Late reconstruction initializes constants and composes or transports
+        // their storage. Arithmetic retains the execution-domain contract.
         flags |= LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED;
       }
     }
@@ -162,10 +183,13 @@ static iree_status_t loom_low_rematerialization_classify(
           LOOM_TYPE_REGISTER) {
         cursor->is_closed = !iree_any_bit_set(
             input_flags, LOOM_LOW_REMATERIALIZATION_VALUE_CONSUMED);
-      } else if (loom_low_register_type_class_id(
+      } else if (!iree_any_bit_set(
+                     value_flags[cursor->ordinal],
+                     LOOM_LOW_REMATERIALIZATION_VALUE_CONSTANT_TRANSPORT) &&
+                 loom_low_register_type_class_id(
                      loom_module_value_type(module, input)) !=
-                 loom_low_register_type_class_id(loom_module_value_type(
-                     module, scope->value_ids[cursor->ordinal]))) {
+                     loom_low_register_type_class_id(loom_module_value_type(
+                         module, scope->value_ids[cursor->ordinal]))) {
         cursor->is_closed = false;
       } else if (loom_low_register_type_unit_count(
                      loom_module_value_type(module, input)) >

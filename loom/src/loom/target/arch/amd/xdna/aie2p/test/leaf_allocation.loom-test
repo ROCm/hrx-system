@@ -370,10 +370,10 @@ scheduled pressure aie2p.vec256: peak-live-units<=24
 // final singleton insert index, even when that address work crosses capacity.
 // RUN: emit aie2p-leaf @index_repair_ordering diagnostics=predicted-spills
 
-// Both live address results are repaired together before rebuilding allocation.
+// Both address recipes are reconstructed without retaining their scalar inputs.
 aie2p.target<core> @target
 
-// REMARK@+1: BACKEND/045 {function_name="index_repair_ordering", trigger_kind="allocation-failure", repaired_value_count="2", cloned_packet_count="4", rewritten_operand_count="4", retained_placement_count="0"}
+// REMARK@+1: BACKEND/045 {function_name="index_repair_ordering", trigger_kind="spill-plan", repaired_value_count="2", cloned_packet_count="4", rewritten_operand_count="4", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core>(@target) @index_repair_ordering(%source: reg<aie2p.ep>, %destination: reg<aie2p.ep>, %address0: reg<aie2p.edj>, %address1: reg<aie2p.edj>, %address2: reg<aie2p.edj>, %address3: reg<aie2p.edj>, %address4: reg<aie2p.edj>, %address5: reg<aie2p.edj>, %address6: reg<aie2p.edj>, %position1: reg<aie2p.er>, %position2: reg<aie2p.er>, %position3: reg<aie2p.er>, %position4: reg<aie2p.er>, %position5: reg<aie2p.er>, %position6: reg<aie2p.er>, %position7: reg<aie2p.er>, %position8: reg<aie2p.er>, %position9: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
   %offset7 = mov.static-byte-offset 119
   %address7 = mov.address-index %offset7
@@ -431,14 +431,12 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @index_repair_ordering(%source
 
 // ====
 
-// Nine loop-invariant address moves need repair while seven entry indexes stay
-// live. Repair convergence is bounded by the function's value population, not
-// an arbitrary attempt count below the amount of useful progress available.
-// RUN: emit aie2p-leaf @index_repair_population diagnostics=predicted-spills
+// Nine loop-invariant address moves exceed the one remaining physical index.
+// Reconstruct their constants beside the stores without adding stack traffic.
+// RUN: emit low-allocation-query @index_repair_population strategy=resource-stall spill-free spill-count
 
 aie2p.target<core> @target
 
-// REMARK@+1: BACKEND/045 {function_name="index_repair_population", trigger_kind="allocation-failure", repaired_value_count="9", cloned_packet_count="9", rewritten_operand_count="9", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core>(@target) @index_repair_population(%output: reg<aie2p.ep>, %count: reg<aie2p.er>, %block0: reg<aie2p.edj>, %block1: reg<aie2p.edj>, %block2: reg<aie2p.edj>, %block3: reg<aie2p.edj>, %block4: reg<aie2p.edj>, %block5: reg<aie2p.edj>, %block6: reg<aie2p.edj>) -> (reg<aie2p.edj>, reg<aie2p.edj>, reg<aie2p.edj>, reg<aie2p.edj>, reg<aie2p.edj>, reg<aie2p.edj>, reg<aie2p.edj>) asm {
   %value = mov.short 1
   %offset = mov.static-byte-offset 0
@@ -472,6 +470,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @index_repair_population(%outp
 }
 
 // ----
+spills: 0
+materialized traffic: stores=0 reloads=0
 
 // ====
 
@@ -516,13 +516,12 @@ CHECK: spills: 0
 
 // ====
 
-// Twenty invariant indices exceed eight address-index registers. Shortening
-// one original value per repair requires more than eight successful repairs.
-// RUN: emit aie2p-leaf @many_indexed_fields diagnostics=predicted-spills
+// Twenty invariant indices exceed eight address-index registers. Reconstruct
+// their constants beside the loads without retaining a stack copy for each.
+// RUN: emit low-allocation-query @many_indexed_fields strategy=resource-stall spill-free spill-count
 
 aie2p.target<core> @target
 
-// REMARK@+1: BACKEND/045 {function_name="many_indexed_fields", trigger_kind="allocation-failure", repaired_value_count="20", cloned_packet_count="20", rewritten_operand_count="20", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core>(@target) @many_indexed_fields(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>, %count: reg<aie2p.er>) asm {
   %zero = mov.short 0
   %one = mov.short 1
@@ -619,6 +618,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @many_indexed_fields(%input: r
 }
 
 // ----
+spills: 0
+materialized traffic: stores=0 reloads=0
 
 // ====
 
@@ -644,9 +645,9 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @simultaneous_indices() -> (re
   %offset6 = mov.static-byte-offset 448
   %index6 = mov.address-index %offset6
   %offset7 = mov.static-byte-offset 512
+  // ERROR@+1: BACKEND/005 "aie2p.edj" "budget 8" "peak 9" "spill-traffic-register-exhausted"
   %index7 = mov.address-index %offset7
   %offset8 = mov.static-byte-offset 576
-  // ERROR@+1: BACKEND/005 "aie2p.edj" "budget 8" "peak 9" "unspillable-register-exhausted"
   %index8 = mov.address-index %offset8
   return %index0, %index1, %index2, %index3, %index4, %index5, %index6, %index7, %index8
 }
