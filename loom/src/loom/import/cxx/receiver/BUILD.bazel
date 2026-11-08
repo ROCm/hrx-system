@@ -1,0 +1,47 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//loom/src/loom/import/cxx:build_defs.bzl", "CXX_COMPILER_OPTIONS")
+
+package(
+    default_visibility = ["//loom/src/loom/import/cxx:__subpackages__"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "scopes",
+    srcs = ["scopes.cc"],
+    hdrs = ["scopes.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        "//loom/src/loom/import/cxx/value:bindings",
+        "//loom/src/loom/import/cxx/value:storage",
+        "//loom/src/loom/import/cxx/value:types",
+        "//runtime/src/iree/base",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_test(
+    name = "scopes_test",
+    srcs = ["scopes_test.cc"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        ":scopes",
+        "//loom/src/loom/import/cxx/source",
+        "//loom/src/loom/import/cxx/value:bindings",
+        "//loom/src/loom/import/cxx/value:representation",
+        "//loom/src/loom/import/cxx/value:storage",
+        "//loom/src/loom/import/cxx/value:types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//third_party:cxx_parser",
+    ],
+)

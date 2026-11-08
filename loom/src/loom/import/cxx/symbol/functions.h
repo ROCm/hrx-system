@@ -78,7 +78,7 @@ struct ImplicitObjectParameter {
   // Cv-qualified complete source object type governing member observations.
   const cxx::Type* object_type;
   // Exact top-level fields replaced by a value receiver, in declaration order.
-  std::span<cxx::FieldSymbol* const> written_fields;
+  std::span<cxx::Symbol* const> written_fields;
 };
 
 enum class ReferenceABI {
@@ -219,7 +219,7 @@ class Functions {
   std::optional<size_t> reference_return_parameter(
       cxx::FunctionSymbol* symbol) const;
   // Exact top-level implicit-object fields replaced by the definition.
-  std::span<cxx::FieldSymbol* const> receiver_writes(
+  std::span<cxx::Symbol* const> receiver_writes(
       cxx::FunctionSymbol* symbol) const;
 
  private:

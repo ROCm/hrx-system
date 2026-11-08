@@ -2200,14 +2200,44 @@ while transporting zero values; a two-scalar record remains distinct from a
 pointer. Kernel parameters continue to use the ordinary launch binding ABI and
 reject record parameters.
 
-Admitted records are complete, baseless, non-union types without virtual
-members. Copy, move, and destruction may execute ordinary source bodies. Fields
+Admitted records are complete, non-union types with nonvirtual bases and no
+virtual members. Copy, move, and destruction may execute ordinary source bodies. Fields
 recursively admit scalar, vector, pointer, record, and fixed-array values. Braced
 and parenthesized aggregate construction preserve positional, designated, and
 omitted-field initialization. Implicit default
 construction such as `Result()` executes the frontend's declaration-order
 member-initialization plan, including nested records and arrays. Bitfields
 require an additional object representation and receive source diagnostics.
+
+Nonvirtual inheritance uses the same value and storage model as composition.
+Direct bases precede fields in aggregate initialization and callable signatures;
+destruction visits fields and then bases in reverse order. Inherited fields,
+methods, operators, and constructors retain the base selected by C++ lookup:
+
+```cpp
+struct Base { double a[3]; };
+struct Grad : Base { double scale; };
+
+double coefficient(double input) {
+  Grad value{{{input, 2.0, 3.0}}, 4.0};
+  return value.a[0] * value.scale + value.a[1];
+}
+```
+
+Ordinary private-storage promotion reduces this example to a multiply and an
+add, just as it does for a nested `Base` field. Multiple and repeated bases
+retain separate identities, including empty bases. Access control, qualified
+member selection, and template substitution follow the frontend's C++ rules.
+Copies of a base subobject copy its represented fields; a derived field in
+reused base tail padding remains untouched.
+
+Derived-to-base references select the existing subobject. An explicit
+base-to-derived reference cast retains the enclosing object's storage and
+requires a live object of the requested derived type, as in C++. Inherited
+access through a derived pointer is supported. Standalone derived/base pointer
+conversions receive a diagnostic until buffer identity can preserve null during
+address adjustment. Virtual bases and virtual dispatch require a dynamic
+object representation and receive source diagnostics.
 
 A record can also define its own constructors. The selected constructor runs
 its declaration-ordered member initializers and then its ordinary C++ body
@@ -2238,8 +2268,7 @@ the target's initialization and body, and then executes its own body. Chained,
 parenthesized, and braced delegation retain converted and default arguments
 from the frontend's initialization plan.
 
-Base subobjects, unions, and virtual dispatch require additional object
-representations and receive source diagnostics.
+Unions require an additional object representation and receive source diagnostics.
 The receiver must also have a source-layout object representation: records
 that store pointers, references, or semantic Loom values remain SSA aggregates
 and cannot use this constructor form.
@@ -2445,7 +2474,7 @@ Memory records admit scalar, enum, vector and nested named fields,
 including fixed arrays of those types and multidimensional arrays. Array
 members decay to borrowed pointers, so ordinary helpers can consume them.
 Indexing and pointer-to-array arithmetic preserve each source extent's stride.
-The admitted object must be complete, without bases, unions, virtual members,
+The admitted object must be complete, without virtual bases, unions, virtual members,
 bitfields, or `no_unique_address`. Selected copy/move bodies and source cleanup
 apply to these objects as they do to other admitted records. Stored
 pointers, references and Loom view/encoding objects require additional
@@ -2548,7 +2577,8 @@ offset retains the source `size_t` width.
 Bitfield layouts retain actual bit positions, including fields crossing their
 declared storage units and zero-width alignment boundaries. Layout queries are
 independent of value admission; bitfield memory operations remain unsupported.
-Packed base classes, virtual members, Microsoft bitfield ABI layouts, aligned
+Packed bases retain their source offsets and alignment. Virtual members,
+Microsoft bitfield ABI layouts, aligned
 typedefs, and GNU `aligned` without an explicit argument produce source diagnostics.
 
 Explicit fixed vectors retain their lanes and element widths in High IR:

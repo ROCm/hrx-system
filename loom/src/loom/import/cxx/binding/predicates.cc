@@ -421,7 +421,7 @@ std::optional<PredicateValue> predicate_value(
     cxx::ExpressionAST* expression,
     PredicateExpressionPolicy expression_policy) {
   auto* identity = unwrap_expression(expression);
-  std::vector<cxx::FieldSymbol*> members;
+  std::vector<cxx::Symbol*> members;
   while (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(identity)) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
     if (!field || field->isStatic() ||
@@ -436,6 +436,11 @@ std::optional<PredicateValue> predicate_value(
           "predicate member paths require direct non-static record fields");
     }
     members.push_back(field);
+    const size_t prefix_begin = members.size();
+    for (auto* step : cxx::ListView{member->subobjectPath}) {
+      members.push_back(step);
+    }
+    std::reverse(members.begin() + prefix_begin, members.end());
     identity = unwrap_expression(member->baseExpression);
   }
   std::reverse(members.begin(), members.end());

@@ -55,3 +55,18 @@ func.def public source_signature(#func.abi.c.signature<arguments = [0], results 
   %value = view.load %5[0] : view<1xi32> -> i32
   func.return %value : i32
 }
+
+// ====
+// Base padding can hold a derived field; ABI classification sees the actual
+// leaves inside the complete object instead of overlapping record extents.
+struct Base {
+  unsigned value;
+  unsigned char tag;
+  Base() : value(0), tag(0) {}
+};
+struct Derived : Base { unsigned char extra; };
+extern "C" Derived identity(Derived value) { return value; }
+// ----
+func.def public source_signature(#func.abi.c.signature<arguments = [2], results = [2], types = [#func.abi.c.type<unsigned_integer, byte_length = 4, byte_alignment = 4, component_count = 1, bitwidth = 32>, #func.abi.c.type<unsigned_integer, byte_length = 1, byte_alignment = 1, component_count = 1, bitwidth = 8>, #func.abi.c.type<record, byte_length = 8, byte_alignment = 4, component_count = 3, name = "Derived", fields = [#func.abi.c.field<"Base::value", type = 0, byte_offset = 0>, #func.abi.c.field<"Base::tag", type = 1, byte_offset = 4>, #func.abi.c.field<"extra", type = 1, byte_offset = 5>]>]>) @identity(%value_Base_value: i32, %value_Base_tag: i8, %value_extra: i8) -> (i32, i8, i8) {
+  func.return %value_Base_value, %value_Base_tag, %value_extra : i32, i8, i8
+}

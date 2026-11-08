@@ -100,7 +100,8 @@ std::vector<loom_string_id_t> require_named_operands(
     const cxx::Type* type, bool permits_schema, loom_module_t* module,
     cxx::AST* owner) {
   auto* record = types.record(type, owner);
-  if (!record || record->component_count != record->members.size()) {
+  if (!record || !record->source->baseClasses().empty() ||
+      record->component_count != record->members.size()) {
     diagnostics.reject(unit, owner,
                        "fragment named operands must be a flat record");
   }
@@ -114,9 +115,9 @@ std::vector<loom_string_id_t> require_named_operands(
   bool has_schema = false;
   bool has_auxiliary = false;
   for (const auto& member : record->members) {
-    auto name = cxx::to_string(member.field->name());
+    auto name = cxx::to_string(member.source->name());
     if (name == "schema") {
-      const auto& partition = types.partition(member.field->type(), owner);
+      const auto& partition = types.partition(member.type(), owner);
       if (!permits_schema || partition.kind != ValueKind::Encoding ||
           static_cast<const EncodingPartition&>(partition).role !=
               LOOM_ENCODING_ROLE_STORAGE_SCHEMA) {
@@ -130,7 +131,7 @@ std::vector<loom_string_id_t> require_named_operands(
         diagnostics.reject(unit, owner,
                            "unknown fragment named operand '" + name + "'");
       }
-      if (!types.native_vector(member.field->type())) {
+      if (!types.native_vector(member.type())) {
         diagnostics.reject(unit, owner,
                            "fragment auxiliary operands must be vectors");
       }
@@ -176,7 +177,8 @@ FragmentIntrinsic::Shape FragmentIntrinsic::require_shape(
     cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
     const cxx::Type* type, cxx::AST* owner) {
   auto* record = types.record(type, owner);
-  if (!record || (record->members.size() != 2 && record->members.size() != 3) ||
+  if (!record || !record->source->baseClasses().empty() ||
+      (record->members.size() != 2 && record->members.size() != 3) ||
       record->component_count != record->members.size()) {
     diagnostics.reject(unit, owner,
                        "fragment shape requires flat {rows, columns} or "
@@ -188,14 +190,14 @@ FragmentIntrinsic::Shape FragmentIntrinsic::require_shape(
   uint16_t unsigned_mask = 0;
   for (size_t index = 0; index < record->members.size(); ++index) {
     const auto& member = record->members[index];
-    auto name = cxx::to_string(member.field->name());
+    auto name = cxx::to_string(member.source->name());
     if (name != expected[index]) {
       diagnostics.reject(unit, owner,
                          "fragment shape requires flat {rows, columns} or "
                          "{blocks, rows, columns} integer fields");
     }
-    if (require_index_value(unit, diagnostics, types, member.field->type(),
-                            owner, "fragment shape")) {
+    if (require_index_value(unit, diagnostics, types, member.type(), owner,
+                            "fragment shape")) {
       unsigned_mask |= uint16_t{1} << index;
     }
   }

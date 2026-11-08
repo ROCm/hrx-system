@@ -27,6 +27,7 @@
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/expressions.h"
+#include "loom/import/cxx/source/objects.h"
 
 namespace loom::cxx_import {
 
@@ -53,7 +54,7 @@ struct ControlFlow::ReferenceWriteFacts {
     // Structured source constructs whose carried binding must be updated.
     std::vector<cxx::AST*> owners;
     // Exact current-object fields changed through the returned alias.
-    std::vector<cxx::FieldSymbol*> receiver_fields;
+    std::vector<cxx::Symbol*> receiver_fields;
   };
 
   // Lexical scopes for calls whose receiver is a reference-returning call.
@@ -326,7 +327,8 @@ ControlFlow::~ControlFlow() = default;
 
 std::optional<Destination> ControlFlow::destination(
     cxx::ExpressionAST* expression) const {
-  if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+  if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression);
+      id && !id->subobjectPath) {
     if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
         field && is_captured_object_field(field)) {
       return std::nullopt;
@@ -384,11 +386,12 @@ bool ControlFlow::argument_requires_storage(
   }
   auto traits = unit_.typeTraits();
   auto requires_storage = [&](cxx::Symbol* binding) {
-    if (traits.is_reference(binding->type())) {
+    if (traits.is_reference(source_object_type(binding))) {
       return cxx::symbol_cast<cxx::FieldSymbol>(binding) ||
              storage_references_.contains(binding);
     }
-    return storage_backed(binding);
+    return is_direct_subobject(binding) ? receiver_requires_storage_
+                                        : storage_backed(binding);
   };
   if (std::ranges::any_of(argument.identity_bindings, requires_storage)) {
     return true;
@@ -415,7 +418,7 @@ bool ControlFlow::storage_backed(cxx::MemberExpressionAST* expression) const {
 
 cxx::Symbol* ControlFlow::object_owner(cxx::ExpressionAST* expression) const {
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
-    return id->symbol;
+    return id->subobjectPath ? id->subobjectPath->value : id->symbol;
   }
   auto found = object_owners_.find(expression);
   return found == object_owners_.end() ? nullptr : found->second;
@@ -542,7 +545,7 @@ void ControlFlow::postVisit(cxx::AST* ast) {
       if (cast->valueCategory != cxx::ValueCategory::kPrValue) {
         owner = object_owner(cast->expression);
       }
-    } else if (auto* operand = explicit_xvalue_operand(unit_, expression)) {
+    } else if (auto* operand = explicit_reference_operand(unit_, expression)) {
       owner = object_owner(operand);
     }
     if (owner) {
@@ -1133,12 +1136,18 @@ void ControlFlow::retain_call(cxx::CallExpressionAST* call,
     auto* base = unwrap_expression(call->baseExpression);
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(base)) {
       retained.current_receiver =
+          !member->subobjectPath &&
           is_current_object(unit_, member->baseExpression);
       retained.storage_receiver =
           member->accessOp == cxx::TokenKind::T_MINUS_GREATER;
       if (!retained.current_receiver) {
-        retained.receiver = retain_call_argument(member->baseExpression);
+        retained.receiver = retain_member_receiver(
+            member->baseExpression, member->subobjectPath, member);
       }
+    } else if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(base);
+               id && id->subobjectPath) {
+      retained.receiver =
+          retain_member_receiver(nullptr, id->subobjectPath, id);
     } else {
       retained.current_receiver = true;
     }
@@ -1189,7 +1198,7 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
   }
   if (!is_current_object(unit_, call.receiver)) {
     if (call.receiver->valueCategory != cxx::ValueCategory::kPrValue) {
-      if (implicit_object_may_mutate(call.function)) {
+      if (types_.implicit_object_may_mutate(call.function, source)) {
         record(call.receiver);
       } else {
         retain_destination(call.receiver);
@@ -1197,7 +1206,7 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
     }
     return;
   }
-  if (!implicit_object_may_mutate(call.function)) {
+  if (!types_.implicit_object_may_mutate(call.function, source)) {
     return;
   }
   auto* object_type = implicit_object_type(unit_, function_);
@@ -1210,7 +1219,7 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
                         "object");
   }
   for (const auto& member : receiver->members) {
-    record(member.field);
+    record(member.source);
   }
 }
 
@@ -1237,6 +1246,40 @@ CallArgument ControlFlow::retain_call_argument(cxx::ExpressionAST* expression) {
   collect_identity(expression, argument);
   auto target = classify_destination(unwrap_object_identity(unit_, expression));
   argument.write_binding = target ? target->binding : nullptr;
+  return argument;
+}
+
+CallArgument ControlFlow::retain_member_receiver(cxx::ExpressionAST* expression,
+                                                 cxx::List<cxx::Symbol*>* path,
+                                                 cxx::AST* owner) {
+  if (!path) {
+    return retain_call_argument(expression);
+  }
+  const auto& selected = types_.projection(path, owner);
+  if (!expression || is_current_object(unit_, expression)) {
+    CallArgument argument{
+        .source = expression,
+        .write_binding = selected.root->source,
+    };
+    append_identity(
+        {selected.root->source,
+         selected.component_offset - selected.root->component_offset,
+         selected.partition},
+        argument);
+    return argument;
+  }
+  auto argument = retain_call_argument(expression);
+  if (argument.identity_intervals) {
+    for (auto& interval : *argument.identity_intervals) {
+      interval.begin += selected.component_offset;
+      interval.end = interval.begin + selected.partition->component_count;
+    }
+  }
+  for (auto* binding : argument.identity_bindings) {
+    append_identity({binding, selected.component_offset, selected.partition},
+                    argument);
+  }
+  argument.identity_bindings.clear();
   return argument;
 }
 
@@ -1276,6 +1319,19 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   }
   expression = unwrap_object_identity(unit_, expression);
   auto traits = unit_.typeTraits();
+  if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression);
+      cast && is_class_adjustment(cast)) {
+    if (cast->castKind == cxx::ImplicitCastKind::kDerivedToBaseConversion) {
+      if (auto selected = classify_destination(cast)) {
+        append_identity(*selected, argument);
+        return;
+      }
+    }
+    collect_identity(cast->expression, argument);
+    argument.inherent_storage |=
+        cast->castKind == cxx::ImplicitCastKind::kBaseToDerivedConversion;
+    return;
+  }
   if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
     if (auto found = reference_aliases_.find(id->symbol);
         found != reference_aliases_.end()) {
@@ -1283,15 +1339,15 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       return;
     }
     if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol)) {
-      if (is_captured_object_field(field)) {
+      auto* root = id->subobjectPath ? id->subobjectPath->value : field;
+      if (is_captured_object_field(root)) {
         argument.inherent_storage = true;
         return;
       }
       if (traits.is_lvalue_reference(field->type())) {
         argument.inherent_storage = true;
       } else {
-        argument.current_receiver = true;
-        append_identity({field, 0, nullptr}, argument);
+        append_identity(*classify_destination(id), argument);
       }
       return;
     }
@@ -1300,8 +1356,9 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
   }
   if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression)) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
+    auto* root = member->subobjectPath ? member->subobjectPath->value : field;
     if (field && is_current_object(unit_, member->baseExpression) &&
-        is_captured_object_field(field)) {
+        is_captured_object_field(root)) {
       argument.inherent_storage = true;
       return;
     }
@@ -1315,16 +1372,12 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
       return;
     }
     if (is_current_object(unit_, member->baseExpression)) {
-      argument.current_receiver = true;
       if (field) {
-        append_identity({field, 0, nullptr}, argument);
+        append_identity(*classify_destination(member), argument);
       }
       return;
     }
     if (auto destination = classify_destination(expression)) {
-      if (cxx::symbol_cast<cxx::FieldSymbol>(destination->binding)) {
-        argument.current_receiver = true;
-      }
       append_identity(*destination, argument);
     } else {
       collect_identity(member->baseExpression, argument);
@@ -1341,18 +1394,12 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     auto* index_type = subscript->indexExpression->type;
     if (types_.native_vector(base_type)) {
       if (auto destination = classify_destination(expression)) {
-        if (cxx::symbol_cast<cxx::FieldSymbol>(destination->binding)) {
-          argument.current_receiver = true;
-        }
         append_identity(*destination, argument);
       }
       return;
     }
     if (types_.native_vector(index_type)) {
       if (auto destination = classify_destination(expression)) {
-        if (cxx::symbol_cast<cxx::FieldSymbol>(destination->binding)) {
-          argument.current_receiver = true;
-        }
         append_identity(*destination, argument);
       }
       return;
@@ -1400,9 +1447,6 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
     }
   }
   if (auto* owner = object_owner(expression)) {
-    if (cxx::symbol_cast<cxx::FieldSymbol>(owner)) {
-      argument.current_receiver = true;
-    }
     append_identity({owner, 0, nullptr}, argument);
   }
 }
@@ -1441,7 +1485,7 @@ bool ControlFlow::require_identity(const CallArgument& argument) {
   }
   auto traits = unit_.typeTraits();
   auto require_binding = [&](cxx::Symbol* binding) {
-    if (traits.is_reference(binding->type())) {
+    if (traits.is_reference(source_object_type(binding))) {
       if (function_) {
         auto parameters = function_->parameters();
         if (std::ranges::find(parameters, binding) != parameters.end()) {
@@ -1450,7 +1494,7 @@ bool ControlFlow::require_identity(const CallArgument& argument) {
       }
       return;
     }
-    if (cxx::symbol_cast<cxx::FieldSymbol>(binding)) {
+    if (is_direct_subobject(binding)) {
       changed = !receiver_requires_storage_ || changed;
       receiver_requires_storage_ = true;
       return;
@@ -1488,17 +1532,17 @@ bool ControlFlow::record_callable_write(cxx::Symbol* binding) {
     return false;
   }
   auto traits = unit_.typeTraits();
-  if (traits.is_reference(binding->type()) && function_) {
+  if (traits.is_reference(source_object_type(binding)) && function_) {
     auto parameters = function_->parameters();
     if (std::ranges::find(parameters, binding) != parameters.end()) {
       return written_references_.insert(binding).second;
     }
   }
-  auto* field = cxx::symbol_cast<cxx::FieldSymbol>(binding);
-  if (!field || traits.is_lvalue_reference(field->type())) {
+  if (!is_direct_subobject(binding) ||
+      traits.is_lvalue_reference(source_object_type(binding))) {
     return false;
   }
-  return add_receiver_write(field);
+  return add_receiver_write(binding);
 }
 
 bool ControlFlow::record_scoped_write(cxx::Symbol* binding,
@@ -1562,13 +1606,13 @@ void ControlFlow::publish_pointer_reference_snapshots(Types& types) const {
 
 bool ControlFlow::record_argument_write(
     const CallArgument& argument, std::span<cxx::AST* const> owners,
-    std::span<cxx::FieldSymbol* const> receiver_fields) {
+    std::span<cxx::Symbol* const> receiver_fields) {
   bool changed = false;
   if (argument.write_binding) {
     changed = record_scoped_write(argument.write_binding, owners) || changed;
     changed = record_callable_write(argument.write_binding) || changed;
   }
-  if (argument.current_receiver) {
+  if (argument.current_receiver && !argument.write_binding) {
     for (auto* field : receiver_fields) {
       changed = add_receiver_write(field) || changed;
     }
@@ -1582,7 +1626,7 @@ bool ControlFlow::record_argument_write(
 
 bool ControlFlow::record_reference_result_write(
     cxx::AST* call, std::span<cxx::AST* const> owners,
-    std::span<cxx::FieldSymbol* const> receiver_fields) {
+    std::span<cxx::Symbol* const> receiver_fields) {
   if (!reference_write_facts_) {
     reference_write_facts_ = std::make_unique<ReferenceWriteFacts>();
   }
@@ -1606,7 +1650,7 @@ bool ControlFlow::record_reference_result_write(
 
 void ControlFlow::retain_reference_receiver_write(const DirectCall& call) {
   if (!call.receiver || call.receiver->reference_calls.empty() ||
-      !implicit_object_may_mutate(call.function)) {
+      !types_.implicit_object_may_mutate(call.function, call.source)) {
     return;
   }
   if (!reference_write_facts_) {
@@ -1615,7 +1659,7 @@ void ControlFlow::retain_reference_receiver_write(const DirectCall& call) {
   reference_write_facts_->receiver_owners.emplace(call.source, owners_);
 }
 
-bool ControlFlow::add_receiver_write(cxx::FieldSymbol* field) {
+bool ControlFlow::add_receiver_write(cxx::Symbol* field) {
   if (std::ranges::find(receiver_writes_, field) != receiver_writes_.end()) {
     return false;
   }
@@ -1763,11 +1807,11 @@ void ControlFlow::retain_subobject_destructions() {
                         "destructor requires an admitted record object");
   }
   for (const auto& member : partition->members) {
-    auto selected = destruction_for(unit_, member.field->type());
+    auto selected = destruction_for(unit_, member.type());
     if (!selected) {
       continue;
     }
-    subobject_destructions_.push_back({member.field, *selected});
+    subobject_destructions_.push_back({member.source, *selected});
     retain_destructor_call(*selected, std::nullopt,
                            /*current_receiver=*/true, owner);
   }
@@ -1792,8 +1836,7 @@ void ControlFlow::retain_reference_initializers(cxx::VariableSymbol* variable,
   }
   const size_t count = std::min(arguments.size(), record->members.size());
   for (size_t index = 0; index < count; ++index) {
-    if (unit_.typeTraits().is_lvalue_reference(
-            record->members[index].field->type())) {
+    if (unit_.typeTraits().is_lvalue_reference(record->members[index].type())) {
       require_identity(arguments[index]);
     }
   }
@@ -1898,15 +1941,14 @@ bool ControlFlow::identities_overlap(const CallArgument& left,
 
 bool ControlFlow::references_current_receiver_field(
     const CallArgument& argument) const {
-  if (std::ranges::any_of(argument.identity_bindings,
-                          [](cxx::Symbol* binding) {
-                            return cxx::symbol_cast<cxx::FieldSymbol>(binding);
-                          }) ||
+  if (std::ranges::any_of(
+          argument.identity_bindings,
+          [](cxx::Symbol* binding) { return is_direct_subobject(binding); }) ||
       (argument.identity_intervals &&
-       std::ranges::any_of(
-           *argument.identity_intervals, [](const ObjectInterval& interval) {
-             return cxx::symbol_cast<cxx::FieldSymbol>(interval.binding);
-           }))) {
+       std::ranges::any_of(*argument.identity_intervals,
+                           [](const ObjectInterval& interval) {
+                             return is_direct_subobject(interval.binding);
+                           }))) {
     return true;
   }
   if (!reference_identity_facts_) {
@@ -1916,7 +1958,7 @@ bool ControlFlow::references_current_receiver_field(
     auto found = reference_identity_facts_->results.find(reference_call);
     if (found != reference_identity_facts_->results.end() &&
         std::ranges::any_of(found->second, [](const ObjectInterval& interval) {
-          return cxx::symbol_cast<cxx::FieldSymbol>(interval.binding);
+          return is_direct_subobject(interval.binding);
         })) {
       return true;
     }
@@ -1952,7 +1994,7 @@ bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
       if (record) {
         for (const auto& member : record->members) {
           append_interval(result_intervals,
-                          {member.field, 0, ObjectInterval::kWholeObjectEnd});
+                          {member.source, 0, ObjectInterval::kWholeObjectEnd});
         }
       }
     } else if (call.receiver) {
@@ -2170,12 +2212,12 @@ void ControlFlow::finalize_callable_effects() {
   if (!record || receiver_writes_.size() < 2) {
     return;
   }
-  std::vector<cxx::FieldSymbol*> ordered;
+  std::vector<cxx::Symbol*> ordered;
   ordered.reserve(receiver_writes_.size());
-  for (auto* member : record->members()) {
-    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member);
-    if (field &&
-        std::ranges::find(receiver_writes_, field) != receiver_writes_.end()) {
+  for (const auto& member :
+       types_.record(record->type(), function_->declaration())->members) {
+    auto* field = member.source;
+    if (std::ranges::find(receiver_writes_, field) != receiver_writes_.end()) {
       ordered.push_back(field);
     }
   }
@@ -2240,6 +2282,20 @@ void ControlFlow::visit(cxx::StructuredBindingDeclarationAST* ast) {
 
 void ControlFlow::visit(cxx::ImplicitCastExpressionAST* ast) {
   cxx::ASTVisitor::visit(ast);
+  if (is_class_adjustment(ast)) {
+    if (unit_.typeTraits().is_pointer(ast->type)) {
+      diagnostics_.reject(
+          unit_, ast,
+          "class-pointer conversions require null-preserving buffer identity; "
+          "use a reference conversion for a live object");
+    }
+    if (ast->castKind == cxx::ImplicitCastKind::kBaseToDerivedConversion) {
+      require_identity(ast->expression);
+    } else {
+      retain_destination(ast);
+    }
+    return;
+  }
   auto* conversion_object =
       implicit_object_type(unit_, ast->conversionFunction);
   if (ast->conversionFunction && !ast->conversionFunction->isConstructor() &&
@@ -2328,9 +2384,10 @@ void ControlFlow::retain_member_constructor(
     }
     return;
   }
-  auto* field = cxx::symbol_cast<cxx::FieldSymbol>(initializer->symbol);
-  if (!field || !types_.record_constructor_requires_call(
-                    field->type(), initializer->constructor, initializer)) {
+  auto* field = initializer->symbol;
+  if (!is_direct_subobject(field) ||
+      !types_.record_constructor_requires_call(
+          source_object_type(field), initializer->constructor, initializer)) {
     return;
   }
   auto* source = cxx::memInitializerClause(unit_.arena(), initializer);
@@ -2418,7 +2475,8 @@ std::optional<Destination> ControlFlow::retain_destination(
   if (!target) {
     return std::nullopt;
   }
-  if (!cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
+  auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression);
+  if (!id || id->subobjectPath) {
     destinations_.emplace(expression, *target);
   }
   return target;
@@ -2443,12 +2501,25 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
     return;
   }
   auto* base = unwrap_expression(call->baseExpression);
+  if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(base);
+      id && id->subobjectPath) {
+    if (types_.implicit_object_may_mutate(callee, call)) {
+      record(types_.projection(id->subobjectPath, id).root->source);
+    }
+    return;
+  }
   if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(base)) {
     auto* receiver = member->baseExpression;
+    if (member->subobjectPath && is_current_object(unit_, receiver)) {
+      if (types_.implicit_object_may_mutate(callee, call)) {
+        record(types_.projection(member->subobjectPath, member).root->source);
+      }
+      return;
+    }
     if (!is_current_object(unit_, receiver)) {
       if (member->accessOp == cxx::TokenKind::T_DOT &&
           receiver->valueCategory != cxx::ValueCategory::kPrValue) {
-        if (implicit_object_may_mutate(callee)) {
+        if (types_.implicit_object_may_mutate(callee, call)) {
           record(receiver);
         } else {
           retain_destination(receiver);
@@ -2457,7 +2528,7 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
       return;
     }
   }
-  if (!implicit_object_may_mutate(callee)) {
+  if (!types_.implicit_object_may_mutate(callee, call)) {
     return;
   }
   auto* object_type = implicit_object_type(unit_, function_);
@@ -2470,7 +2541,7 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
                         "object");
   }
   for (const auto& member : receiver->members) {
-    record(member.field);
+    record(member.source);
   }
 }
 
@@ -2485,11 +2556,37 @@ std::optional<Destination> ControlFlow::classify_destination(
         found != reference_aliases_.end()) {
       return classify_destination(unwrap_expression(found->second));
     }
-    if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
-        field && is_captured_object_field(field)) {
+    auto* root = id->subobjectPath ? id->subobjectPath->value : id->symbol;
+    if (is_direct_subobject(root) && is_captured_object_field(root)) {
       return std::nullopt;
     }
+    if (id->subobjectPath) {
+      auto selected = types_.selection(id->symbol, id->subobjectPath, id);
+      return Destination{
+          root, selected.component_offset - selected.root->component_offset,
+          selected.partition};
+    }
     return Destination{id->symbol, 0, nullptr};
+  }
+  if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression);
+      cast && is_class_adjustment(cast)) {
+    if (cast->castKind == cxx::ImplicitCastKind::kBaseToDerivedConversion) {
+      return std::nullopt;
+    }
+    if (is_current_object(unit_, cast->expression)) {
+      const auto& selected = types_.projection(cast->subobjectPath, cast);
+      return Destination{
+          selected.root->source,
+          selected.component_offset - selected.root->component_offset,
+          selected.partition};
+    }
+    auto target = classify_destination(cast->expression);
+    if (target) {
+      const auto& selected = types_.projection(cast->subobjectPath, cast);
+      target->component_offset += selected.component_offset;
+      target->member = selected.partition;
+    }
+    return target;
   }
   if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
     return classify_destination(nested->expression);
@@ -2521,10 +2618,14 @@ std::optional<Destination> ControlFlow::classify_destination(
     return std::nullopt;
   }
   if (is_current_object(unit_, member->baseExpression)) {
-    if (is_captured_object_field(field)) {
+    auto selected = types_.selection(field, member->subobjectPath, member);
+    if (is_captured_object_field(selected.root->source)) {
       return std::nullopt;
     }
-    return Destination{field, 0, nullptr};
+    return Destination{
+        selected.root->source,
+        selected.component_offset - selected.root->component_offset,
+        member->subobjectPath ? selected.partition : nullptr};
   }
   if (member->accessOp != cxx::TokenKind::T_DOT) {
     return std::nullopt;
@@ -2533,7 +2634,7 @@ std::optional<Destination> ControlFlow::classify_destination(
   // member can also project a record reached through a pointer or subscript.
   auto target = classify_destination(member->baseExpression);
   if (target) {
-    const auto& slice = types_.member(field, member);
+    auto slice = types_.selection(field, member->subobjectPath, member);
     target->component_offset += slice.component_offset;
     target->member = slice.partition;
   }
@@ -2559,7 +2660,7 @@ bool ControlFlow::classify_storage(cxx::ExpressionAST* expression) const {
   if (auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression)) {
     return storage_expressions_.contains(cast->expression);
   }
-  if (auto* operand = explicit_xvalue_operand(unit_, expression)) {
+  if (auto* operand = explicit_reference_operand(unit_, expression)) {
     return storage_expressions_.contains(operand);
   }
   if (auto* subscript =
@@ -2572,7 +2673,7 @@ bool ControlFlow::classify_storage(cxx::ExpressionAST* expression) const {
   return false;
 }
 
-bool ControlFlow::is_captured_object_field(cxx::FieldSymbol* field) const {
+bool ControlFlow::is_captured_object_field(cxx::Symbol* field) const {
   auto* closure = function_
                       ? cxx::symbol_cast<cxx::ClassSymbol>(function_->parent())
                       : nullptr;

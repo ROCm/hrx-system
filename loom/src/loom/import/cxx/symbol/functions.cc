@@ -30,6 +30,7 @@
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
+#include "loom/import/cxx/source/objects.h"
 #include "loom/import/cxx/symbol/immutable_objects.h"
 #include "loom/import/cxx/symbol/source_signature.h"
 #include "loom/import/cxx/value/signature.h"
@@ -1242,14 +1243,14 @@ std::optional<size_t> Functions::reference_return_parameter(
   return analysis ? analysis->reference_return_parameter() : std::nullopt;
 }
 
-std::span<cxx::FieldSymbol* const> Functions::receiver_writes(
+std::span<cxx::Symbol* const> Functions::receiver_writes(
     cxx::FunctionSymbol* symbol) const {
   if (symbol->isDestructor()) {
     return {};
   }
   auto* analysis = control_flow(symbol);
   return analysis ? analysis->receiver_writes()
-                  : std::span<cxx::FieldSymbol* const>{};
+                  : std::span<cxx::Symbol* const>{};
 }
 
 std::optional<ImplicitObjectParameter> Functions::implicit_object(
@@ -1279,7 +1280,7 @@ std::optional<ImplicitObjectParameter> Functions::implicit_object(
       instance.receiver_abi == ImplicitObjectABI::Value &&
               !symbol->isDestructor()
           ? analysis->receiver_writes()
-          : std::span<cxx::FieldSymbol* const>{}};
+          : std::span<cxx::Symbol* const>{}};
 }
 
 BoundSignature Functions::bind_callable_signature(
@@ -1364,7 +1365,7 @@ BoundSignature Functions::bind_callable_signature(
   }
   if (receiver && receiver->abi == ImplicitObjectABI::Value) {
     for (auto* field : receiver->written_fields) {
-      sources.push_back(types.unqualified_value(field->type()));
+      sources.push_back(types.unqualified_value(source_object_type(field)));
     }
   }
   for (const auto& reference : references) {

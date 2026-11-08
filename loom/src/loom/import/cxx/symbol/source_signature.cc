@@ -227,31 +227,7 @@ class CSourceSignatureBuilder {
     }
     std::vector<loom_attribute_t> fields;
     fields.reserve(record->members.size());
-    for (const auto& member : record->members) {
-      auto* field = member.field;
-      if (!field->name() || field->isNoUniqueAddress() ||
-          unit_.typeTraits().is_reference(field->type())) {
-        diagnostics_.reject(
-            unit_, source_,
-            "C ABI record fields require distinct named object storage");
-      }
-      const int64_t type_index = AddType(field->type());
-      const auto byte_offset = field->offsetInClass();
-      if (!byte_offset || *byte_offset > INT64_MAX) {
-        diagnostics_.reject(unit_, source_,
-                            "C ABI record field has an unknown or "
-                            "unrepresentable offset");
-      }
-      loom_string_id_t field_name;
-      const std::string field_spelling = cxx::to_string(field->name());
-      check(loom_module_intern_string(module_, view(field_spelling),
-                                      &field_name));
-      loom_attribute_t field_attr;
-      check(loom_func_abi_c_field_attr_make(module_, field_name, type_index,
-                                            static_cast<int64_t>(*byte_offset),
-                                            &field_attr));
-      fields.push_back(field_attr);
-    }
+    AddRecordFields(*record, "", 0, fields);
     loom_string_id_t record_name;
     const std::string record_spelling = cxx::to_string(record->source->name());
     check(loom_module_intern_string(module_, view(record_spelling),
@@ -267,6 +243,45 @@ class CSourceSignatureBuilder {
         loom_make_parameterized_attr_array(fields.data(), fields.size()),
         &node));
     return node;
+  }
+
+  // Base layers share the enclosing object's physical extent: their tail
+  // padding may contain derived fields. Ordinary record fields keep their
+  // independent complete-object nodes and nominal layout.
+  void AddRecordFields(const RecordPartition& record, const std::string& prefix,
+                       uint64_t byte_offset,
+                       std::vector<loom_attribute_t>& fields) {
+    for (const auto& member : record.members) {
+      if (member.source->kind() == cxx::SymbolKind::kBaseClass) {
+        AddRecordFields(static_cast<const RecordPartition&>(*member.partition),
+                        prefix + cxx::to_string(member.source->name()) + "::",
+                        byte_offset + member.byte_offset(), fields);
+        continue;
+      }
+      auto* field = static_cast<cxx::FieldSymbol*>(member.source);
+      if (!field->name() || field->isNoUniqueAddress() ||
+          unit_.typeTraits().is_reference(field->type())) {
+        diagnostics_.reject(
+            unit_, source_,
+            "C ABI record fields require distinct named object storage");
+      }
+      const int64_t type_index = AddType(field->type());
+      const auto field_offset = field->offsetInClass();
+      if (!field_offset || *field_offset > INT64_MAX) {
+        diagnostics_.reject(unit_, source_,
+                            "C ABI record field has an unknown or "
+                            "unrepresentable offset");
+      }
+      loom_string_id_t field_name;
+      const std::string field_spelling = prefix + cxx::to_string(field->name());
+      check(loom_module_intern_string(module_, view(field_spelling),
+                                      &field_name));
+      loom_attribute_t field_attr;
+      check(loom_func_abi_c_field_attr_make(
+          module_, field_name, type_index,
+          static_cast<int64_t>(byte_offset + *field_offset), &field_attr));
+      fields.push_back(field_attr);
+    }
   }
 
   loom_func_abi_c_type_format_t FloatFormat(const cxx::Type* type) {

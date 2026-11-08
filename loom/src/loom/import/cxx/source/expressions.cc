@@ -14,6 +14,8 @@
 #include <cxx/type_checker.h>
 #include <cxx/types.h>
 
+#include "loom/import/cxx/source/objects.h"
+
 namespace loom::cxx_import {
 
 std::vector<cxx::ExpressionAST*> constructor_arguments(
@@ -66,6 +68,9 @@ std::optional<ArrayCopyInitialization> array_copy_initialization(
 cxx::ExpressionAST* strip_implicit_casts(cxx::ExpressionAST* expression) {
   while (auto* cast =
              cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression)) {
+    if (is_class_adjustment(cast)) {
+      break;
+    }
     expression = cast->expression;
   }
   return expression;
@@ -87,13 +92,13 @@ cxx::ExpressionAST* unwrap_expression(cxx::ExpressionAST* expression) {
   }
 }
 
-cxx::ExpressionAST* explicit_xvalue_operand(cxx::TranslationUnit& unit,
-                                            cxx::ExpressionAST* expression) {
+cxx::ExpressionAST* explicit_reference_operand(cxx::TranslationUnit& unit,
+                                               cxx::ExpressionAST* expression) {
   auto* cast = cxx::ast_cast<cxx::CppCastExpressionAST>(expression);
   return cast && cast->castOp == cxx::TokenKind::T_STATIC_CAST &&
-                 cast->valueCategory == cxx::ValueCategory::kXValue &&
+                 cast->valueCategory != cxx::ValueCategory::kPrValue &&
                  cast->typeId &&
-                 unit.typeTraits().is_rvalue_reference(cast->typeId->type)
+                 unit.typeTraits().is_reference(cast->typeId->type)
              ? cast->expression
              : nullptr;
 }
@@ -101,7 +106,7 @@ cxx::ExpressionAST* explicit_xvalue_operand(cxx::TranslationUnit& unit,
 cxx::ExpressionAST* unwrap_object_identity(cxx::TranslationUnit& unit,
                                            cxx::ExpressionAST* expression) {
   expression = unwrap_expression(expression);
-  while (auto* operand = explicit_xvalue_operand(unit, expression)) {
+  while (auto* operand = explicit_reference_operand(unit, expression)) {
     expression = operand;
     for (;;) {
       if (auto* nested = cxx::ast_cast<cxx::NestedExpressionAST>(expression)) {
@@ -114,7 +119,8 @@ cxx::ExpressionAST* unwrap_object_identity(cxx::TranslationUnit& unit,
         continue;
       }
       auto* cast = cxx::ast_cast<cxx::ImplicitCastExpressionAST>(expression);
-      if (!cast || cast->valueCategory == cxx::ValueCategory::kPrValue) {
+      if (!cast || is_class_adjustment(cast) ||
+          cast->valueCategory == cxx::ValueCategory::kPrValue) {
         break;
       }
       expression = cast->expression;
@@ -164,12 +170,12 @@ bool is_current_object(cxx::TranslationUnit& unit,
 
 std::optional<CapturedObjectMember> captured_object_member(
     cxx::TranslationUnit& unit, cxx::ClassSymbol* closure,
-    cxx::FieldSymbol* member) {
+    cxx::Symbol* member) {
   auto* pointer_field = closure && closure->isClosureType()
                             ? closure->capturedThisField()
                             : nullptr;
   auto* member_owner =
-      member && !member->isStatic()
+      is_direct_subobject(member)
           ? cxx::symbol_cast<cxx::ClassSymbol>(member->parent())
           : nullptr;
   if (!pointer_field || !member_owner) {
@@ -299,28 +305,6 @@ const cxx::Type* implicit_object_type(cxx::TranslationUnit& unit,
   return qualifiers == cxx::CvQualifiers::kNone
              ? record->type()
              : unit.control()->getQualType(record->type(), qualifiers);
-}
-
-bool implicit_object_may_mutate(cxx::FunctionSymbol* function) {
-  auto* record = function
-                     ? cxx::symbol_cast<cxx::ClassSymbol>(function->parent())
-                     : nullptr;
-  auto* signature =
-      function ? cxx::type_cast<cxx::FunctionType>(function->type()) : nullptr;
-  if (!function || !function->isImplicitObjectMemberFunction() || !record ||
-      !signature) {
-    return false;
-  }
-  if (!cxx::has_const(signature->cvQualifiers())) {
-    return true;
-  }
-  for (auto* member : record->members()) {
-    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member);
-    if (field && !field->isStatic() && field->isMutable()) {
-      return true;
-    }
-  }
-  return false;
 }
 
 cxx::ConditionExpressionAST* condition_declaration(

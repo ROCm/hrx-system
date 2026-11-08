@@ -70,10 +70,9 @@ class Initialization {
     // innermost construction receiver when an enclosing receiver exists.
     virtual bool suspend_current_receiver() = 0;
     virtual void resume_current_receiver() = 0;
-    virtual void publish_receiver_member(cxx::FieldSymbol* field,
-                                         Value value) = 0;
-    virtual void complete_storage_receiver_member(cxx::FieldSymbol* field) = 0;
-    virtual Value receiver_member(cxx::FieldSymbol* field, cxx::AST* owner) = 0;
+    virtual void publish_receiver_member(cxx::Symbol* field, Value value) = 0;
+    virtual void complete_storage_receiver_member(cxx::Symbol* field) = 0;
+    virtual Value receiver_member(cxx::Symbol* field, cxx::AST* owner) = 0;
     virtual void leave_receiver() = 0;
     // Branch construction retains the translator's automatic-binding joins.
     virtual void conditional_object(StorageProjection destination,
