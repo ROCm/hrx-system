@@ -178,6 +178,7 @@ def _with_instruction_classes(descriptor_set: DescriptorSet) -> DescriptorSet:
     return replace(descriptor_set, descriptors=descriptors)
 
 
+@cache
 def _finalize_amdgpu_descriptor(
     descriptor: Descriptor, *, with_valu_sgpr_timing: bool
 ) -> Descriptor:

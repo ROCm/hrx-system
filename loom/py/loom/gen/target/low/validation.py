@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from functools import cache
 from itertools import pairwise, permutations
 
 from loom.target.low_descriptors import (
@@ -323,9 +324,10 @@ def _solve_physical_component_order_pair(
     return visited_count == len(components)
 
 
+@cache
 def _physical_components_admit_placement(
-    components: Sequence[_PhysicalComponent],
-    base_domains: Sequence[_PhysicalBaseDomain],
+    components: tuple[_PhysicalComponent, ...],
+    base_domains: tuple[_PhysicalBaseDomain, ...],
 ) -> bool:
     pre_components = tuple(index for index, component in enumerate(components) if component.pre_width)
     post_components = tuple(index for index, component in enumerate(components) if component.post_width)
@@ -619,7 +621,7 @@ def validate_physical_descriptor_set(
         # by this proof. Every independent component that accepts a resource can
         # therefore select it in the same packet and must fit simultaneously.
         for resource_key, resource_capacity in resources.items():
-            resource_components = [component for component in components if resource_key in component.resource_keys]
+            resource_components = tuple(component for component in components if resource_key in component.resource_keys)
             if not resource_components:
                 continue
             # Exact physical domains were proved against their atomic storage
