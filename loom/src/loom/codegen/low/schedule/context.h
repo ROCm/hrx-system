@@ -168,8 +168,9 @@ enum loom_low_schedule_value_flag_bits_e {
   LOOM_LOW_SCHEDULE_VALUE_FLAG_FORWARDED = 1u << 6,
   // At least one occurrence in the current candidate reads after result writes.
   LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_LATE_READ = 1u << 7,
-  // Allocation requires this value to remain in physical register storage.
-  LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER = 1u << 8,
+  // Allocation requires a register or the class has one physical candidate.
+  // Scheduling protects that scarce capacity; allocation still owns spilling.
+  LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER = 1u << 8,
   // Definition creates independent storage before its input reads complete.
   LOOM_LOW_SCHEDULE_VALUE_FLAG_EARLY_WRITE = 1u << 9,
   // A short register move can recreate this result across register banks.
@@ -179,13 +180,13 @@ enum loom_low_schedule_value_flag_bits_e {
 };
 typedef uint16_t loom_low_schedule_value_flags_t;
 
-// Selected local exit for one value in a bounded unspillable pressure domain.
-typedef struct loom_low_schedule_unspillable_completion_path_t {
+// Selected local exit for one value in a bounded constrained pressure domain.
+typedef struct loom_low_schedule_constrained_completion_path_t {
   // Additional live units needed to reach the exit from the value producer.
   uint32_t activation_units;
   // Exit node, or LOOM_LOW_SCHEDULE_NODE_NONE when no local exit is reachable.
   uint32_t sink;
-} loom_low_schedule_unspillable_completion_path_t;
+} loom_low_schedule_constrained_completion_path_t;
 
 // Mutable scheduling facts indexed by function-local value ordinal. The
 // acquired value domain owns the corresponding module value IDs.
@@ -215,10 +216,10 @@ typedef struct loom_low_schedule_value_record_t {
 static_assert(sizeof(loom_low_schedule_value_record_t) == 20,
               "schedule value records must remain compact");
 
-static inline bool loom_low_schedule_value_requires_register(
+static inline bool loom_low_schedule_value_has_constrained_register(
     const loom_low_schedule_value_record_t* value) {
   return iree_any_bit_set(value->flags,
-                          LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER);
+                          LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER);
 }
 
 typedef struct loom_low_schedule_pressure_set_limit_t {
@@ -226,15 +227,15 @@ typedef struct loom_low_schedule_pressure_set_limit_t {
   uint32_t live_unit_limit;
   // Representative descriptor register class used by diagnostics.
   uint16_t representative_reg_class_id;
-  // Dense bounded-unspillable completion domain, or UINT16_MAX when absent.
-  uint16_t unspillable_completion_domain_id;
+  // Dense bounded constrained completion domain, or UINT16_MAX when absent.
+  uint16_t constrained_completion_domain_id;
   // True when every register class sharing the limit is unspillable.
   uint8_t all_classes_unspillable;
   // True when values or architectural state use multiple member classes.
   uint8_t has_multiple_active_reg_classes;
 } loom_low_schedule_pressure_set_limit_t;
 
-// One bounded unspillable register-pressure domain.
+// One bounded constrained register-pressure domain.
 typedef struct loom_low_schedule_completion_domain_t {
   // Hard live-unit capacity, including any shared register pressure set.
   uint32_t capacity;
@@ -283,10 +284,10 @@ typedef struct loom_low_schedule_build_state_t {
   const loom_liveness_dataflow_t* liveness_dataflow;
   // Dense per-local-value scheduler records indexed by value ordinal.
   loom_low_schedule_value_record_t* values;
-  // Least expensive local exit for each compiler-produced unspillable value.
-  // Allocated by value ordinal only when bounded unspillable domains exist.
-  loom_low_schedule_unspillable_completion_path_t*
-      value_unspillable_completions;
+  // Least expensive local exit for each compiler-produced constrained value.
+  // Allocated by value ordinal only when bounded constrained domains exist.
+  loom_low_schedule_constrained_completion_path_t*
+      value_constrained_completions;
   // Defining schedule node indexed by local value ordinal.
   uint32_t* value_producer_nodes;
   // Schedule block records indexed by region block ordinal.
@@ -360,8 +361,8 @@ typedef struct loom_low_schedule_build_state_t {
   // Maximum downstream register width needed to advance each node's value.
   uint32_t* node_pressure_activation_units;
   // Downstream activation footprint indexed by schedule node then bounded
-  // unspillable completion domain.
-  uint32_t* node_unspillable_activation_units;
+  // constrained completion domain.
+  uint32_t* node_constrained_activation_units;
   // Per-node packing facts retained by the reverse priority analysis. Each
   // table is indexed by schedule node then register-packing resource.
   struct {
@@ -390,11 +391,11 @@ typedef struct loom_low_schedule_build_state_t {
     // Highest active shared pressure-set ID, or zero when none are present.
     uint16_t pressure_set_count;
     // Hard limits and live-counter identities indexed by completion domain.
-    loom_low_schedule_completion_domain_t* unspillable_completion_domains;
+    loom_low_schedule_completion_domain_t* constrained_completion_domains;
     // Completion-domain IDs indexed by descriptor register-class ID.
-    uint16_t* unspillable_completion_domain_ids_by_reg_class;
-    // Number of bounded-unspillable completion domains.
-    uint16_t unspillable_completion_domain_count;
+    uint16_t* constrained_completion_domain_ids_by_reg_class;
+    // Number of bounded constrained completion domains.
+    uint16_t constrained_completion_domain_count;
     // Effective capacities indexed by descriptor packing-resource ID.
     // UINT32_MAX marks a resource duplicating direct register pressure.
     uint32_t* register_packing_resource_capacities;

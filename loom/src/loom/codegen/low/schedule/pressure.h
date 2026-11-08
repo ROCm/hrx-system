@@ -25,15 +25,15 @@ typedef struct loom_low_schedule_resource_pressure_record_t
     loom_low_schedule_resource_pressure_record_t;
 typedef struct loom_low_schedule_unlock_record_t
     loom_low_schedule_unlock_record_t;
-typedef struct loom_low_schedule_required_pressure_t
-    loom_low_schedule_required_pressure_t;
+typedef struct loom_low_schedule_completion_pressure_t
+    loom_low_schedule_completion_pressure_t;
 
 // Mutable pressure simulation state for one scheduling run.
 struct loom_low_schedule_pressure_state_t {
   // Current live register units by descriptor register-class ID.
   uint64_t* current_live_units_by_reg_class;
-  // Required ownership and instruction-phase changes by completion domain.
-  loom_low_schedule_required_pressure_t* required_pressure;
+  // Constrained ownership and instruction-phase changes by completion domain.
+  loom_low_schedule_completion_pressure_t* completion_pressure;
   // Block-local aligned-packing headroom by descriptor register-class ID.
   uint32_t* packing_reserve_units_by_reg_class;
   // Shared pressure state for register classes with one allocation domain.
@@ -97,8 +97,8 @@ struct loom_low_schedule_pressure_state_t {
   // Current live footprint indexed by register-packing resource.
   uint64_t* current_register_packing_units;
   // Downstream headroom reserved by the current candidate, indexed by bounded
-  // unspillable completion domain.
-  uint32_t* candidate_unspillable_activation_units;
+  // constrained completion domain.
+  uint32_t* candidate_constrained_activation_units;
   // Earliest unscheduled completion sink retaining live storage in each
   // register-packing resource. NODE_NONE remains empty until live-value
   // insertion nominates a sink; retiring the active sink triggers selection of
@@ -106,8 +106,8 @@ struct loom_low_schedule_pressure_state_t {
   uint32_t* active_register_packing_completion_sinks;
   // Number of live storage values retaining each active packing completion.
   uint32_t* active_register_packing_completion_value_counts;
-  // Pinned completion dependencies for bounded unspillable storage domains.
-  loom_low_schedule_completion_demand_t unspillable_completion_demand;
+  // Pinned completion dependencies for bounded constrained storage domains.
+  loom_low_schedule_completion_demand_t constrained_completion_demand;
   // True when a register class has candidate delta state to reset.
   uint8_t* candidate_delta_touched_flags;
   // Register-class IDs touched in candidate_delta_units_by_reg_class.
@@ -126,8 +126,8 @@ struct loom_low_schedule_pressure_state_t {
     // register-packing resource.
     uint32_t* register_packing_activation_units;
     // Downstream activation footprints indexed by producer node then bounded
-    // unspillable completion domain.
-    uint32_t* unspillable_activation_units;
+    // constrained completion domain.
+    uint32_t* constrained_activation_units;
     // Descriptor-consumer list heads indexed by producer node.
     uint32_t* descriptor_heads;
     // Next descriptor consumer indexed by consumer node.
@@ -167,33 +167,33 @@ static inline const uint32_t* loom_low_schedule_const_register_packing_row(
              state->target.descriptor_set->register_packing_resource_count;
 }
 
-// Returns the row for |node_index| in a bounded unspillable-domain table.
-static inline uint32_t* loom_low_schedule_unspillable_pressure_row(
+// Returns the row for |node_index| in a bounded constrained-domain table.
+static inline uint32_t* loom_low_schedule_constrained_pressure_row(
     const loom_low_schedule_build_state_t* state, uint32_t* table,
     uint32_t node_index) {
   return table + (iree_host_size_t)node_index *
-                     state->pressure_limits.unspillable_completion_domain_count;
+                     state->pressure_limits.constrained_completion_domain_count;
 }
 
-// Returns the const row for |node_index| in a bounded unspillable-domain
+// Returns the const row for |node_index| in a bounded constrained-domain
 // table.
-static inline const uint32_t* loom_low_schedule_const_unspillable_pressure_row(
+static inline const uint32_t* loom_low_schedule_const_constrained_pressure_row(
     const loom_low_schedule_build_state_t* state, const uint32_t* table,
     uint32_t node_index) {
   return table + (iree_host_size_t)node_index *
-                     state->pressure_limits.unspillable_completion_domain_count;
+                     state->pressure_limits.constrained_completion_domain_count;
 }
 
 // Returns the bounded completion domain containing |reg_class_id|.
-static inline uint16_t loom_low_schedule_unspillable_completion_domain_id(
+static inline uint16_t loom_low_schedule_constrained_completion_domain_id(
     const loom_low_schedule_build_state_t* state, uint16_t reg_class_id) {
   if (reg_class_id == LOOM_LOW_REG_CLASS_NONE ||
-      state->pressure_limits.unspillable_completion_domain_ids_by_reg_class ==
+      state->pressure_limits.constrained_completion_domain_ids_by_reg_class ==
           NULL) {
     return UINT16_MAX;
   }
   return state->pressure_limits
-      .unspillable_completion_domain_ids_by_reg_class[reg_class_id];
+      .constrained_completion_domain_ids_by_reg_class[reg_class_id];
 }
 
 // Resets the sparse operand-use scratch for one candidate operand.
@@ -273,8 +273,9 @@ typedef enum loom_low_schedule_pressure_risk_e {
 typedef struct loom_low_schedule_register_debt_word_t {
   // Banks whose physical pressure grows beyond their spillable capacity.
   uint64_t banks;
-  // Subset of banks in which the candidate opens required register lifetimes.
-  uint64_t required_banks;
+  // Subset of banks in which the candidate opens constrained register
+  // lifetimes.
+  uint64_t constrained_banks;
 } loom_low_schedule_register_debt_word_t;
 
 // Complete bounded score for one ready scheduling candidate.
@@ -319,15 +320,15 @@ typedef struct loom_low_schedule_candidate_score_t {
   // Remaining units before the next cliff in a resource the candidate grows,
   // or LOOM_LOW_SCHEDULE_PRESSURE_CLIFF_NONE when none applies or one crossed.
   uint32_t units_until_pressure_cliff;
-  // Smallest hard unspillable capacity whose selected completion chain the
+  // Smallest constrained capacity whose selected completion chain the
   // candidate advances, or UINT32_MAX when it advances none.
-  uint32_t active_unspillable_completion_capacity;
+  uint32_t active_constrained_completion_capacity;
   // Smallest hard capacity whose transaction-local final the candidate
   // advances, or UINT32_MAX when it advances none.
-  uint32_t active_unspillable_transaction_final_capacity;
-  // Smallest full unspillable capacity whose exact next-consumer handoff the
+  uint32_t active_constrained_transaction_final_capacity;
+  // Smallest full constrained capacity whose exact next-consumer handoff the
   // candidate opens, or UINT32_MAX when it opens none.
-  uint32_t opened_unspillable_completion_capacity;
+  uint32_t opened_constrained_completion_capacity;
   // Smallest packing-resource capacity whose selected completion chain the
   // candidate advances, or UINT32_MAX when it advances none.
   uint32_t active_register_packing_completion_capacity;
@@ -336,9 +337,9 @@ typedef struct loom_low_schedule_candidate_score_t {
   // Physical descriptor selected for this candidate, or
   // LOOM_LOW_DESCRIPTOR_ORDINAL_NONE for structural nodes.
   uint32_t selected_descriptor_ordinal;
-  // Unspillable domain corresponding to active_unspillable_completion_capacity,
+  // Constrained domain corresponding to active_constrained_completion_capacity,
   // or UINT16_MAX when the candidate advances no active completion.
-  uint16_t active_unspillable_completion_domain_id;
+  uint16_t active_constrained_completion_domain_id;
   // Maximum latency of same-block SSA producers consumed by the candidate.
   uint16_t dependency_latency_cycles;
   // Descriptor latency for the candidate itself.
@@ -381,9 +382,9 @@ enum loom_low_schedule_candidate_flag_bits_e {
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_CONSTRAINED_COMPLETION = 1u << 3,
   // Candidate grows at least one constrained register-packing resource.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_GROWS_PACKING_RESOURCE = 1u << 4,
-  // Candidate itself requires more physical storage than an unspillable
+  // Candidate itself requires more physical storage than a constrained
   // register class, pressure set, or shared packing resource can provide.
-  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY = 1u << 5,
+  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY = 1u << 5,
   // Candidate is an at-most-two-cycle cross-bank register move whose newly
   // live physical results each have one consumer and can be rematerialized. It
   // can fill an otherwise idle issue cycle, but opening its destination does
@@ -392,19 +393,19 @@ enum loom_low_schedule_candidate_flag_bits_e {
   // Candidate produces a private value whose per-user placement was retained
   // before allocation repair materialized any spill traffic.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_RETAINS_PRE_SPILL_PLACEMENT = 1u << 14,
-  // Candidate fills required storage without advancing the selected
+  // Candidate fills constrained storage without advancing the selected
   // completion that can release storage in that same physical domain.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_CONSUMES_COMPLETION_HEADROOM = 1u << 15,
-  // Candidate opens required storage above a spillable bank's capacity.
+  // Candidate opens constrained storage above a spillable bank's capacity.
   // Other live values can still spill, so this is pressure debt, not proof
   // that the candidate's mandatory physical footprint cannot fit.
-  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REQUIRED_REGISTER_DEBT = 1u << 10,
+  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_CONSTRAINED_REGISTER_DEBT = 1u << 10,
   // Candidate grows a spillable bank beyond its capacity, independently of
   // whether its new values require physical registers across later repairs.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REGISTER_DEBT = 1u << 11,
   // Candidate's transitive downstream activation reaches a bounded
-  // unspillable completion domain.
-  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION = 1u << 12,
+  // constrained completion domain.
+  LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION = 1u << 12,
   // Candidate establishes storage for a later operation. Storage setup is
   // actionable only when it also advances storage or unlocks a descriptor.
   LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_STORAGE_SETUP = 1u << 7,

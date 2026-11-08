@@ -748,11 +748,17 @@ def test_compiler_derives_shared_explicit_register_pressure_sets() -> None:
     )
     compiled = compiler.compile_descriptor_set(descriptor_set)
     fixed_id = compiled.reg_class_ids["test.fixed.r0"]
+    spillable_fixed_id = compiled.reg_class_ids["test.spillable.fixed.r0"]
 
     pressure_set_id = compiled.reg_class_pressure_set_ids[explicit_id]
     assert pressure_set_id != 0
     assert compiled.reg_class_pressure_set_ids[spillable_id] == pressure_set_id
-    assert compiled.reg_class_pressure_set_ids[fixed_id] == 0
+    # Equal singleton domains share pressure independently of spillability,
+    # but do not merge with the larger domain that contains their register.
+    fixed_pressure_set_id = compiled.reg_class_pressure_set_ids[fixed_id]
+    assert fixed_pressure_set_id != 0
+    assert fixed_pressure_set_id != pressure_set_id
+    assert compiled.reg_class_pressure_set_ids[spillable_fixed_id] == fixed_pressure_set_id
 
     generated = generate_descriptor_set(descriptor_set)
     assert f".pressure_set_id = {pressure_set_id}," in generated.source

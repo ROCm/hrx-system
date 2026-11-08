@@ -89,6 +89,7 @@ _REG_RECOLOR_STATE = "test.recolor.state"
 _REG_EXPLICIT_RANGE32 = "test.explicit_range32"
 _REG_SPILLABLE_EXPLICIT32 = "test.spillable.explicit32"
 _REG_FIXED_R0 = "test.fixed.r0"
+_REG_SPILLABLE_FIXED_R0 = "test.spillable.fixed.r0"
 _REG_FIXED_R2 = "test.fixed.r2"
 _REG_PACKED_NARROW = "test.packed.narrow"
 _REG_PACKED_WIDE = "test.packed.wide"
@@ -147,7 +148,7 @@ _EXPLICIT32_ALT = (RegClassAlt(_REG_EXPLICIT32),)
 _RECOLOR32_ALT = (RegClassAlt(_REG_RECOLOR32),)
 _RECOLOR_STATE_ALT = (RegClassAlt(_REG_RECOLOR_STATE),)
 _SPILLABLE_EXPLICIT32_ALT = (RegClassAlt(_REG_SPILLABLE_EXPLICIT32),)
-_FIXED_R0_ALT = (RegClassAlt(_REG_FIXED_R0),)
+_FIXED_R0_ALT = (RegClassAlt(_REG_FIXED_R0), RegClassAlt(_REG_SPILLABLE_FIXED_R0))
 _SCHEDULE_STATE_ALT = (RegClassAlt(_REG_SCHEDULE_STATE),)
 _PRESSURE_ALIAS32_ALT = (RegClassAlt(_REG_PRESSURE_ALIAS32),)
 _PACKED_NARROW_ALT = (RegClassAlt(_REG_PACKED_NARROW),)
@@ -2911,6 +2912,16 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
                 "test.r3",
                 "test.r2",
             ),
+        ),
+        RegClass(
+            _REG_SPILLABLE_FIXED_R0,
+            32,
+            SpillSlotSpace.STACK,
+            flags=(
+                RegClassFlag.PHYSICAL,
+                RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+            ),
+            physical_registers=("test.r0",),
         ),
     ),
     physical_registers=(

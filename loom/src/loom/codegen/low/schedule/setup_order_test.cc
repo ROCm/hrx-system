@@ -69,7 +69,7 @@ TEST(SetupMembershipTest, StructuralSetupRequiresPolicyOrRetainedRegister) {
         {.unit_count = 1, .register_class_id = 0},
     };
     if (test_case.required) {
-      values[1].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+      values[1].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
     }
     loom_low_schedule_build_state_t state = {
         .options = &options,
@@ -135,7 +135,7 @@ TEST(SetupMembershipTest, SingletonRequiredStorageNeedsExclusionOrdering) {
         {.unit_count = test_case.result_units, .register_class_id = 0},
     };
     if (test_case.required) {
-      values[1].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+      values[1].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
     }
     loom_low_schedule_build_state_t state = {
         .options = &options,
@@ -143,9 +143,9 @@ TEST(SetupMembershipTest, SingletonRequiredStorageNeedsExclusionOrdering) {
         .values = values,
         .pressure_limits =
             {
-                .unspillable_completion_domains = &completion,
-                .unspillable_completion_domain_ids_by_reg_class = &domain_id,
-                .unspillable_completion_domain_count =
+                .constrained_completion_domains = &completion,
+                .constrained_completion_domain_ids_by_reg_class = &domain_id,
+                .constrained_completion_domain_count =
                     test_case.capacity == 0 ? uint16_t{0} : uint16_t{1},
             },
     };
@@ -220,13 +220,13 @@ TEST(SetupMembershipTest, CapturedRequiredStorageMustPreserveItsFootprint) {
         },
     };
     if (test_case.inputs_required) {
-      values[0].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+      values[0].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
       if (test_case.second_units != 0) {
-        values[1].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+        values[1].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
       }
     }
     if (test_case.result_required) {
-      values[2].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+      values[2].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
     }
     loom_low_schedule_build_state_t state = {
         .options = &options,
@@ -316,12 +316,12 @@ TEST(SetupMembershipTest, DescriptorMembershipPreservesRequiredReadPhases) {
     };
     if (test_case.input_required) {
       iree_bitmap_set(options.required_register_values, value_ids[0]);
-      values[0].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+      values[0].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
     }
     for (uint16_t i = 1; i <= test_case.result_count; ++i) {
       iree_bitmap_set(options.per_user_placement_values, value_ids[i]);
       iree_bitmap_set(options.required_register_values, value_ids[i]);
-      values[i].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+      values[i].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
     }
     loom_low_schedule_node_t node = {
         .descriptor = &descriptor,
@@ -645,7 +645,7 @@ TEST_F(SetupOrderTest, ContinuationsConsumeRetainedStorageIdentity) {
     if (cross_bank) {
       values[0].unit_count = 4;
       values[0].register_class_id = 1;
-      values[0].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+      values[0].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
       iree_bitmap_set(options.required_register_values, value_ids[0]);
     }
     for (uint32_t i = 0; i < 2; ++i) {
@@ -654,7 +654,7 @@ TEST_F(SetupOrderTest, ContinuationsConsumeRetainedStorageIdentity) {
       }
       if (i == 1 || test_case.source_required) {
         iree_bitmap_set(options.required_register_values, value_ids[i + 2]);
-        values[i + 2].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_REQUIRES_REGISTER;
+        values[i + 2].flags = LOOM_LOW_SCHEDULE_VALUE_FLAG_CONSTRAINED_REGISTER;
       }
     }
     loom_low_schedule_node_t nodes[] = {

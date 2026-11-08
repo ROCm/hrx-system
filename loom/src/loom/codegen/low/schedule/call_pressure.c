@@ -285,7 +285,7 @@ void loom_low_schedule_call_pressure_score_limits(
 
     score->flags |=
         limit->requires_hard_capacity
-            ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY
+            ? LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY
             : LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REGISTER_DEBT;
     const uint64_t debt = crossing_live_units - limit->preserved_unit_capacity;
     score->pressure_cliff_penalty = iree_math_saturating_add_u32(

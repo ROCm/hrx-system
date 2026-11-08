@@ -49,7 +49,7 @@ static bool loom_low_schedule_candidate_opens_other_register_debt(
     const loom_low_schedule_candidate_score_t* alternative) {
   for (iree_host_size_t i = 0; i < register_debt_word_count; ++i) {
     if ((alternative->register_debt[i].banks &
-         ~required->register_debt[i].required_banks) != 0) {
+         ~required->register_debt[i].constrained_banks) != 0) {
       return true;
     }
   }
@@ -94,26 +94,26 @@ static const loom_low_schedule_recovery_policy_t
 // cone membership alone cannot justify opening another register debt.
 static bool loom_low_schedule_candidate_advances_pinned_completion(
     const loom_low_schedule_candidate_score_t* score) {
-  return score->active_unspillable_transaction_final_capacity != UINT32_MAX &&
+  return score->active_constrained_transaction_final_capacity != UINT32_MAX &&
          !iree_any_bit_set(
              score->flags,
              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REGISTER_DEBT |
-                 LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY);
+                 LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY);
 }
 
 // Before spill materialization, allocation repair can retain a private value
-// needed to reach an unspillable consumer. Advance that placement while its
+// needed to reach a constrained consumer. Advance that placement while its
 // bounded downstream demand remains outside the near-cliff region. Once spill
 // traffic exists the scorer withholds the retained-placement flag because
 // mandatory helpers can still intervene.
-static bool loom_low_schedule_candidate_advances_retained_unspillable_value(
+static bool loom_low_schedule_candidate_advances_retained_constrained_value(
     const loom_low_schedule_candidate_score_t* score) {
-  const uint16_t retained_unspillable_flags =
-      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION |
+  const uint16_t retained_constrained_flags =
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION |
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_RETAINS_PRE_SPILL_PLACEMENT;
   return score->pressure_risk == LOOM_LOW_SCHEDULE_PRESSURE_RISK_NONE &&
          score->pressure_cliff_penalty == 0 &&
-         iree_all_bits_set(score->flags, retained_unspillable_flags) &&
+         iree_all_bits_set(score->flags, retained_constrained_flags) &&
          !iree_any_bit_set(
              score->flags,
              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_REMATERIALIZABLE_LEAF);
@@ -121,7 +121,7 @@ static bool loom_low_schedule_candidate_advances_retained_unspillable_value(
 
 // Returns true when |score| establishes a new live storage value without
 // reducing live units, exposing a storage step or descriptor, advancing a
-// retained unspillable value while it still fits, advancing a feasible pinned
+// retained constrained value while it still fits, advancing a feasible pinned
 // completion, or releasing inputs along another completion.
 // Scheduling such setup early only transfers or grows liveness in its
 // destination register class and can hold scarce physical locations across
@@ -136,8 +136,8 @@ static bool loom_low_schedule_candidate_defers_storage_setup(
   const uint16_t actionable_flags =
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR |
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE;
-  const bool advances_retained_unspillable_value =
-      loom_low_schedule_candidate_advances_retained_unspillable_value(score);
+  const bool advances_retained_constrained_value =
+      loom_low_schedule_candidate_advances_retained_constrained_value(score);
   const bool advances_completion =
       (iree_any_bit_set(
            score->flags,
@@ -150,7 +150,7 @@ static bool loom_low_schedule_candidate_defers_storage_setup(
   return score->produced_live_value_count != 0 &&
          score->killed_live_units <= score->produced_live_units &&
          !iree_any_bit_set(score->flags, actionable_flags) &&
-         !advances_retained_unspillable_value && !advances_completion;
+         !advances_retained_constrained_value && !advances_completion;
 }
 
 // A pinned completion can require several input-free setup operations before
@@ -214,17 +214,17 @@ static bool loom_low_schedule_candidate_unlocks_descriptor(
                           LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR);
 }
 
-static bool loom_low_schedule_candidate_exceeds_unspillable_capacity(
+static bool loom_low_schedule_candidate_exceeds_constrained_capacity(
     const loom_low_schedule_candidate_score_t* score) {
   return iree_any_bit_set(
       score->flags,
-      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY);
+      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_CONSTRAINED_CAPACITY);
 }
 
-static uint32_t loom_low_schedule_candidate_unspillable_completion_capacity(
+static uint32_t loom_low_schedule_candidate_constrained_completion_capacity(
     const loom_low_schedule_candidate_score_t* score) {
-  return iree_min(score->active_unspillable_completion_capacity,
-                  score->opened_unspillable_completion_capacity);
+  return iree_min(score->active_constrained_completion_capacity,
+                  score->opened_constrained_completion_capacity);
 }
 
 // Direct storage progress and setup that exposes a storage descriptor are
@@ -444,9 +444,9 @@ bool loom_low_schedule_candidate_policy_admits_recovery_nominee(
              LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE ||
          loom_low_schedule_candidate_defers_materialization(compare_mode,
                                                             chosen_score) ||
-         (loom_low_schedule_candidate_exceeds_unspillable_capacity(
+         (loom_low_schedule_candidate_exceeds_constrained_capacity(
               chosen_score) &&
-          !loom_low_schedule_candidate_exceeds_unspillable_capacity(score));
+          !loom_low_schedule_candidate_exceeds_constrained_capacity(score));
 }
 
 bool loom_low_schedule_candidate_score_less(
@@ -455,12 +455,12 @@ bool loom_low_schedule_candidate_score_less(
     const loom_low_schedule_candidate_score_t* lhs,
     const loom_low_schedule_candidate_score_t* rhs,
     iree_host_size_t register_debt_word_count) {
-  const bool lhs_exceeds_unspillable_capacity =
-      loom_low_schedule_candidate_exceeds_unspillable_capacity(lhs);
-  const bool rhs_exceeds_unspillable_capacity =
-      loom_low_schedule_candidate_exceeds_unspillable_capacity(rhs);
-  if (lhs_exceeds_unspillable_capacity != rhs_exceeds_unspillable_capacity) {
-    return !lhs_exceeds_unspillable_capacity;
+  const bool lhs_exceeds_constrained_capacity =
+      loom_low_schedule_candidate_exceeds_constrained_capacity(lhs);
+  const bool rhs_exceeds_constrained_capacity =
+      loom_low_schedule_candidate_exceeds_constrained_capacity(rhs);
+  if (lhs_exceeds_constrained_capacity != rhs_exceeds_constrained_capacity) {
+    return !lhs_exceeds_constrained_capacity;
   }
   const bool lhs_defers_materialization =
       loom_low_schedule_candidate_defers_materialization(compare_mode, lhs);
@@ -480,8 +480,8 @@ bool loom_low_schedule_candidate_score_less(
     const bool preserving_defers_materialization =
         lhs_consumes_completion_headroom ? rhs_defers_materialization
                                          : lhs_defers_materialization;
-    // Allocation cannot recreate non-replayable storage to make room for a
-    // missing completion operand. Its last slot takes priority over predicted
+    // Reconstructing a value with captured storage cannot independently free
+    // a missing completion operand's slot. Its last slot precedes predicted
     // downstream pressure. Replayable storage keeps the ordinary physical-cost
     // ordering; blocked setup still needs a strict improvement to run early.
     if ((consuming->consumes_non_replayable_headroom ||
@@ -527,13 +527,13 @@ bool loom_low_schedule_candidate_score_less(
   }
   // A ready exact packing completion cannot wait for another bank's release:
   // that release may consume the last slot needed to finish the packing chain.
-  // Other candidates sharing a full unspillable domain also compete by ready
+  // Other candidates sharing a full constrained domain also compete by ready
   // progress, subject to aggregate handoff and spill-traffic ordering.
   if (loom_low_schedule_candidate_policy_uses_ready_progress_order(
           options, compare_mode, lhs, rhs)) {
     return lhs->effective_stall_cycles < rhs->effective_stall_cycles;
   }
-  // Under pressure, an unspillable path with the same risk and no greater
+  // Under pressure, a constrained path with the same risk and no greater
   // physical cliff cost already owns its live footprint. Advance a neutral
   // storage handoff when it issues no later than the alternative so that
   // footprint can reach its consumer and drain. A zero-unit setup owns no
@@ -545,10 +545,10 @@ bool loom_low_schedule_candidate_score_less(
       lhs->pressure_risk == rhs->pressure_risk &&
       iree_any_bit_set(
           lhs->flags,
-          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION) &&
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION) &&
       iree_any_bit_set(
           rhs->flags,
-          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION)) {
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION)) {
     const bool lhs_advances_storage =
         loom_low_schedule_candidate_advances_storage(lhs);
     const bool rhs_advances_storage =
@@ -571,20 +571,20 @@ bool loom_low_schedule_candidate_score_less(
       }
     }
   }
-  // Once hard-capacity feasibility ties, advance the tighter full bank's
+  // Once constrained-capacity feasibility ties, advance the tighter full bank's
   // pending completion. Waiting until both candidates exceed capacity lets
   // other chains consume the temporary storage that completion still needs.
   if (options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
       compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT) {
-    if (lhs->active_unspillable_transaction_final_capacity !=
-        rhs->active_unspillable_transaction_final_capacity) {
-      return lhs->active_unspillable_transaction_final_capacity <
-             rhs->active_unspillable_transaction_final_capacity;
+    if (lhs->active_constrained_transaction_final_capacity !=
+        rhs->active_constrained_transaction_final_capacity) {
+      return lhs->active_constrained_transaction_final_capacity <
+             rhs->active_constrained_transaction_final_capacity;
     }
     const uint32_t lhs_completion_capacity =
-        loom_low_schedule_candidate_unspillable_completion_capacity(lhs);
+        loom_low_schedule_candidate_constrained_completion_capacity(lhs);
     const uint32_t rhs_completion_capacity =
-        loom_low_schedule_candidate_unspillable_completion_capacity(rhs);
+        loom_low_schedule_candidate_constrained_completion_capacity(rhs);
     if (lhs_completion_capacity != rhs_completion_capacity) {
       return lhs_completion_capacity < rhs_completion_capacity;
     }
@@ -610,26 +610,26 @@ bool loom_low_schedule_candidate_score_less(
       return lhs_unlocks_descriptor;
     }
   }
-  // Prefer repairable pressure over new required lifetimes within the same
+  // Prefer flexible pressure over new constrained lifetimes within the same
   // banks. Opening debt in another bank is not relief: repeatedly postponing
   // a required reload can otherwise spill all of its consumers' setup there.
   // Cross-bank alternatives keep the ordinary pressure/cost comparison.
   if (options->strategy == LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL &&
       compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT) {
-    const bool lhs_opens_required_debt = iree_any_bit_set(
+    const bool lhs_opens_constrained_debt = iree_any_bit_set(
         lhs->flags,
-        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REQUIRED_REGISTER_DEBT);
-    const bool rhs_opens_required_debt = iree_any_bit_set(
+        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_CONSTRAINED_REGISTER_DEBT);
+    const bool rhs_opens_constrained_debt = iree_any_bit_set(
         rhs->flags,
-        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_REQUIRED_REGISTER_DEBT);
-    if (lhs_opens_required_debt != rhs_opens_required_debt) {
+        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_OPENS_CONSTRAINED_REGISTER_DEBT);
+    if (lhs_opens_constrained_debt != rhs_opens_constrained_debt) {
       const loom_low_schedule_candidate_score_t* required =
-          lhs_opens_required_debt ? lhs : rhs;
+          lhs_opens_constrained_debt ? lhs : rhs;
       const loom_low_schedule_candidate_score_t* alternative =
-          lhs_opens_required_debt ? rhs : lhs;
+          lhs_opens_constrained_debt ? rhs : lhs;
       if (!loom_low_schedule_candidate_opens_other_register_debt(
               register_debt_word_count, required, alternative)) {
-        return !lhs_opens_required_debt;
+        return !lhs_opens_constrained_debt;
       }
     }
   }
@@ -664,7 +664,7 @@ bool loom_low_schedule_candidate_score_less(
       }
       // Keep equally viable constrained transactions in source order without
       // letting age override a physical register-bank cliff. Selected packing
-      // and unspillable completions were compared by identity above.
+      // and constrained completions were compared by identity above.
       if (lhs_advances_constrained_completion &&
           rhs_advances_constrained_completion &&
           lhs->source_ordinal != rhs->source_ordinal) {
@@ -674,17 +674,17 @@ bool loom_low_schedule_candidate_score_less(
       // Spillable work that remains below every bounded pressure horizon can
       // run while recovery waits for its inputs. Candidates creating no live
       // units can also fill the gap under the same completion guards. Growing
-      // unspillable paths retain their completion ordering because later
-      // ownership cannot be recovered. Preserve pair-placement opportunities
-      // because neither component's standalone stall represents their combined
-      // issue cost.
+      // constrained paths retain their completion ordering to keep downstream
+      // ownership feasible. Preserve pair-placement opportunities because
+      // neither component's standalone stall represents their combined issue
+      // cost.
       if (compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF &&
           lhs->pressure_risk == LOOM_LOW_SCHEDULE_PRESSURE_RISK_NONE &&
           rhs->pressure_risk == LOOM_LOW_SCHEDULE_PRESSURE_RISK_NONE &&
           lhs->pressure_cliff_penalty == rhs->pressure_cliff_penalty &&
           (!iree_any_bit_set(
                lhs->flags | rhs->flags,
-               LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION) ||
+               LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION) ||
            (lhs->produced_live_units == 0 && rhs->produced_live_units == 0)) &&
           !loom_low_schedule_candidate_pair_affinity_differs(lhs, rhs) &&
           lhs->effective_stall_cycles != rhs->effective_stall_cycles) {
@@ -751,13 +751,13 @@ bool loom_low_schedule_candidate_score_less(
     }
     // When candidates reach the same issue cycle, keep work on the longer
     // dependency path ahead of the incidental split between data, hazard, and
-    // resource stalls. Preserve that split for paths reaching unspillable
-    // storage: opening another hard-capacity chain cannot be repaired by
-    // spilling if its later lifetimes become infeasible.
-    const bool has_unspillable_activation = iree_any_bit_set(
+    // resource stalls. Preserve that split for paths reaching constrained
+    // storage: opening another chain can require spill repair before its
+    // consumer can acquire the remaining physical location.
+    const bool has_constrained_activation = iree_any_bit_set(
         lhs->flags | rhs->flags,
-        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION);
-    if (!has_unspillable_activation &&
+        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_CONSTRAINED_ACTIVATION);
+    if (!has_constrained_activation &&
         lhs->critical_path_cycles != rhs->critical_path_cycles) {
       return lhs->critical_path_cycles > rhs->critical_path_cycles;
     }

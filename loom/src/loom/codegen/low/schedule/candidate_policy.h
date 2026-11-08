@@ -35,8 +35,8 @@ typedef enum loom_low_schedule_candidate_compare_mode_e {
 } loom_low_schedule_candidate_compare_mode_t;
 
 // Returns true when issue readiness should order constrained candidates after
-// immediate hard-capacity feasibility. A ready exact packing completion keeps
-// its remaining headroom instead of waiting to release storage in another
+// immediate constrained-capacity feasibility. A ready exact packing completion
+// keeps its remaining headroom instead of waiting to release storage in another
 // bank. Other storage handoffs participating in aggregate packing recovery
 // reach the physical completion policy first; issuing their ready peers can
 // fragment the bank those handoffs are closing.
@@ -49,13 +49,13 @@ static inline bool loom_low_schedule_candidate_policy_uses_ready_progress_order(
       compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT ||
       iree_any_bit_set(options->flags,
                        LOOM_LOW_SCHEDULE_FLAG_HAS_LOWERED_SPILL_TRAFFIC) ||
-      lhs->active_unspillable_completion_domain_id == UINT16_MAX ||
-      rhs->active_unspillable_completion_domain_id == UINT16_MAX ||
+      lhs->active_constrained_completion_domain_id == UINT16_MAX ||
+      rhs->active_constrained_completion_domain_id == UINT16_MAX ||
       lhs->effective_stall_cycles == rhs->effective_stall_cycles) {
     return false;
   }
-  if (lhs->active_unspillable_completion_domain_id !=
-      rhs->active_unspillable_completion_domain_id) {
+  if (lhs->active_constrained_completion_domain_id !=
+      rhs->active_constrained_completion_domain_id) {
     return (lhs->effective_stall_cycles == 0 &&
             iree_any_bit_set(
                 lhs->flags,
