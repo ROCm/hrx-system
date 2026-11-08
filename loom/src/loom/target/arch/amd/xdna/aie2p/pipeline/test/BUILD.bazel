@@ -23,6 +23,7 @@ loom_check_test_suite(
         "dma_submit_sharing.loom-test",
         "external_metadata.loom-test",
         "join_sharing.loom-test",
+        "ordered_copy_occurrences.loom-test",
         "shared_entry_calls.loom-test",
     ],
     target_compatible_with = loom_config_compatible_with(["//loom/config/arch:aie2p"]),

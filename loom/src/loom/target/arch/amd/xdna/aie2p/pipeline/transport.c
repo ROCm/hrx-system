@@ -185,13 +185,16 @@ iree_status_t loom_aie2p_native_select_control_route(
   return iree_ok_status();
 }
 
-// Workers have flat CFGs, and async legality retires every group within its
-// block. Different streams therefore cannot overlap. Within a stream, the
-// retained completion edge determines when a physical resource becomes
-// reusable.
+// Callers compare transfers sharing one admitted physical resource owner.
+// Common execution proves distinct worker occurrences have disjoint lifetimes,
+// even when repeated calls share source operations. Within one occurrence,
+// async legality retires every group in its block, and the retained completion
+// edge determines when that block can reuse the resource.
 static bool loom_aie2p_native_transfer_retired(
-    const loom_aie2p_native_transfer_t* transfer, const loom_op_t* issue) {
-  return transfer->completion->parent_block != issue->parent_block ||
+    const loom_aie2p_native_transfer_t* transfer, iree_host_size_t worker_index,
+    const loom_op_t* issue) {
+  return transfer->worker_index != worker_index ||
+         transfer->completion->parent_block != issue->parent_block ||
          transfer->completion->block_ordinal <= issue->block_ordinal;
 }
 
@@ -274,6 +277,7 @@ loom_aie2p_native_reusable_descriptor(
     return NULL;
   }
   const loom_op_t* issue = task->first_transfer->source->request.op;
+  const iree_host_size_t worker_index = task->first_transfer->worker_index;
   uint32_t address_mask = 0;
   if (!shim) {
     const loom_xdna_register_field_info_t address =
@@ -293,10 +297,10 @@ loom_aie2p_native_reusable_descriptor(
     const bool same_bank = shim ? candidate->path->shim == task->path->shim
                                 : candidate->path == task->path;
     if (candidate->shim != shim || !same_bank ||
-        !loom_aie2p_native_transfer_retired(previous, issue) ||
+        !loom_aie2p_native_transfer_retired(previous, worker_index, issue) ||
         (candidate->completion &&
          !loom_aie2p_native_transfer_retired(
-             candidate->completion->last_transfer, issue)) ||
+             candidate->completion->last_transfer, worker_index, issue)) ||
         !loom_aie2p_native_task_descriptor_matches(
             task, candidate, address_mask, &address_differs)) {
       continue;
@@ -323,16 +327,19 @@ loom_aie2p_native_reusable_descriptor(
 // credit can serve another descriptor geometry on the same tile. The search is
 // bounded by the physical lock count.
 static loom_aie2p_native_dma_completion_t*
-loom_aie2p_native_reusable_completion(const loom_aie2p_native_worker_t* worker,
-                                      const loom_aie2p_native_tile_t* tile,
-                                      const loom_op_t* issue) {
+loom_aie2p_native_reusable_completion(
+    const loom_aie2p_native_worker_t* worker,
+    const loom_aie2p_native_tile_t* tile,
+    const loom_aie2p_native_transfer_t* next) {
   if (worker->execution == LOOM_AIE2P_NATIVE_EXECUTION_DMA) {
     return NULL;
   }
   for (loom_aie2p_native_dma_completion_t* completion = worker->dma_completions;
        completion; completion = completion->next) {
     if (completion->tile == tile &&
-        loom_aie2p_native_transfer_retired(completion->last_transfer, issue)) {
+        loom_aie2p_native_transfer_retired(completion->last_transfer,
+                                           next->worker_index,
+                                           next->source->request.op)) {
       return completion;
     }
   }
@@ -386,7 +393,7 @@ static iree_status_t loom_aie2p_native_allocate_task_descriptor(
   }
   if (!shim && task->path->ingress && !task->path->completion_tokens) {
     descriptor->completion = loom_aie2p_native_reusable_completion(
-        resource_owner, tile, task->first_transfer->source->request.op);
+        resource_owner, tile, task->first_transfer);
     if (!descriptor->completion) {
       if (tile->next_lock == tile->facts->lock_count) {
         return loom_aie2p_native_reject(
@@ -1012,6 +1019,7 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
           .task = queue->task,
           .source = transfer,
           .completion = group->completion,
+          .worker_index = i,
           .binding = loom_value_def_index(root),
           .source_count = source_count,
           .external_view = external_view,
@@ -1155,7 +1163,7 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
       const loom_aie2p_native_transfer_t* previous = path->last_token_transfer;
       if (previous && path != task->path &&
           previous->completion != transfer->completion &&
-          !loom_aie2p_native_transfer_retired(previous,
+          !loom_aie2p_native_transfer_retired(previous, i,
                                               transfer->source->request.op)) {
         return loom_aie2p_native_reject(
             context, transfer->source->request.op,

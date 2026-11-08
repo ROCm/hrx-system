@@ -258,6 +258,9 @@ typedef struct loom_aie2p_native_transfer_t {
   const loom_kernel_async_transfer_t* source;
   // Wait that retires this transfer's group.
   const loom_op_t* completion;
+  // Worker occurrence owning the issue and completion. Repeated invocations
+  // can share source operations while having disjoint execution lifetimes.
+  iree_host_size_t worker_index;
   // Read admission fused into the local ready-credit acquire, or NULL.
   const loom_op_t* admission;
   // Local endpoint whose descriptor and completion credit are available.
