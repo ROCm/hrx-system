@@ -318,6 +318,7 @@ TEST(Arena, TransferPreservesStorageAndDestinationCheckpoint) {
   uint8_t* retained = nullptr;
   IREE_ASSERT_OK(iree_arena_allocate(&target, 128, (void**)&retained));
   memset(retained, 0xAB, 128);
+  iree_arena_block_t* const retained_block_tail = target.block_tail;
   void* target_oversized = nullptr;
   IREE_ASSERT_OK(
       iree_arena_allocate(&target, kBlockSize * 2, &target_oversized));
@@ -358,7 +359,7 @@ TEST(Arena, TransferPreservesStorageAndDestinationCheckpoint) {
   EXPECT_EQ(target.used_allocation_size, checkpoint.used_allocation_size);
   EXPECT_EQ(target.total_allocation_size, checkpoint.total_allocation_size);
   EXPECT_EQ(target.block_head, checkpoint.block_head);
-  EXPECT_EQ(target.block_tail, checkpoint.block_tail);
+  EXPECT_EQ(target.block_tail, retained_block_tail);
   EXPECT_EQ(target.allocation_head, checkpoint.allocation_head);
   EXPECT_EQ(target.block_bytes_remaining, checkpoint.block_bytes_remaining);
   EXPECT_EQ(retained[0], 0xAB);
@@ -470,6 +471,7 @@ TEST(Arena, CheckpointRestoreWithinBlock) {
   uint8_t* retained_ptr = NULL;
   IREE_ASSERT_OK(iree_arena_allocate(&arena, 128, (void**)&retained_ptr));
   memset(retained_ptr, 0xAB, 128);
+  iree_arena_block_t* const retained_block_tail = arena.block_tail;
   const iree_arena_checkpoint_t checkpoint = iree_arena_checkpoint_save(&arena);
 
   void* discarded_ptr = NULL;
@@ -481,7 +483,7 @@ TEST(Arena, CheckpointRestoreWithinBlock) {
   EXPECT_EQ(arena.total_allocation_size, checkpoint.total_allocation_size);
   EXPECT_EQ(arena.used_allocation_size, checkpoint.used_allocation_size);
   EXPECT_EQ(arena.block_head, checkpoint.block_head);
-  EXPECT_EQ(arena.block_tail, checkpoint.block_tail);
+  EXPECT_EQ(arena.block_tail, retained_block_tail);
   EXPECT_EQ(arena.block_bytes_remaining, checkpoint.block_bytes_remaining);
   for (iree_host_size_t i = 0; i < 128; ++i) {
     EXPECT_EQ(retained_ptr[i], 0xAB);
@@ -495,7 +497,7 @@ TEST(Arena, CheckpointRestoreWithinBlock) {
   iree_arena_block_pool_deinitialize(&pool);
 }
 
-TEST(Arena, CheckpointRestoreReleasesBlocksAndOversizedAllocations) {
+TEST(Arena, CheckpointMayLiveInDiscardedStorage) {
   iree_arena_block_pool_t pool;
   iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
   iree_arena_allocator_t arena;
@@ -503,21 +505,93 @@ TEST(Arena, CheckpointRestoreReleasesBlocksAndOversizedAllocations) {
 
   void* retained_ptr = NULL;
   IREE_ASSERT_OK(iree_arena_allocate(&arena, 128, &retained_ptr));
+  const iree_arena_checkpoint_t saved_checkpoint =
+      iree_arena_checkpoint_save(&arena);
+  iree_arena_block_t* const retained_block_tail = arena.block_tail;
+
+  // Restore through a checkpoint stored in the discarded portion of the
+  // current block. ASAN poisons that storage as part of the restore.
+  iree_arena_checkpoint_t* same_block_checkpoint = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, sizeof(*same_block_checkpoint),
+                                     (void**)&same_block_checkpoint));
+  *same_block_checkpoint = saved_checkpoint;
+  iree_arena_checkpoint_restore(same_block_checkpoint);
+  EXPECT_EQ(arena.block_head, saved_checkpoint.block_head);
+  EXPECT_EQ(arena.block_tail, retained_block_tail);
+  EXPECT_EQ(arena.used_allocation_size, saved_checkpoint.used_allocation_size);
+
+  // Exhaust the current block so the checkpoint is stored in a block that the
+  // restore releases to the shared pool.
+  void* discarded_ptr = NULL;
+  IREE_ASSERT_OK(
+      iree_arena_allocate(&arena, arena.block_bytes_remaining, &discarded_ptr));
+  iree_arena_checkpoint_t* released_block_checkpoint = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, sizeof(*released_block_checkpoint),
+                                     (void**)&released_block_checkpoint));
+  *released_block_checkpoint = saved_checkpoint;
+  EXPECT_NE(arena.block_head, saved_checkpoint.block_head);
+
+  iree_arena_checkpoint_restore(released_block_checkpoint);
+  EXPECT_EQ(arena.block_head, saved_checkpoint.block_head);
+  EXPECT_EQ(arena.block_tail, retained_block_tail);
+  EXPECT_EQ(arena.total_allocation_size,
+            saved_checkpoint.total_allocation_size);
+  EXPECT_EQ(arena.used_allocation_size, saved_checkpoint.used_allocation_size);
+  EXPECT_EQ(arena.block_bytes_remaining,
+            saved_checkpoint.block_bytes_remaining);
+
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&pool);
+}
+
+TEST(Arena,
+     CheckpointRestoreReleasesBlocksAndOversizedAllocationsIndependently) {
+  iree_arena_block_pool_t pool;
+  iree_arena_block_pool_initialize(kBlockSize, iree_allocator_system(), &pool);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&pool, &arena);
+
+  // An empty checkpoint releases every block and restores a null tail.
+  const iree_arena_checkpoint_t empty_checkpoint =
+      iree_arena_checkpoint_save(&arena);
+  void* empty_discarded_ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, 128, &empty_discarded_ptr));
+  iree_arena_checkpoint_restore(&empty_checkpoint);
+  EXPECT_EQ(arena.block_head, nullptr);
+  EXPECT_EQ(arena.block_tail, nullptr);
+  EXPECT_EQ(arena.total_allocation_size, 0u);
+  EXPECT_EQ(arena.used_allocation_size, 0u);
+
+  void* retained_ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, 128, &retained_ptr));
   ASSERT_NE(retained_ptr, nullptr);
+  iree_arena_block_t* const retained_block_tail = arena.block_tail;
   const iree_arena_checkpoint_t checkpoint = iree_arena_checkpoint_save(&arena);
 
-  void* block_ptr = NULL;
-  IREE_ASSERT_OK(iree_arena_allocate(&arena, kBlockSize / 2, &block_ptr));
-  IREE_ASSERT_OK(iree_arena_allocate(&arena, kBlockSize / 2, &block_ptr));
+  // An oversized allocation changes only the allocation list.
   void* oversized_ptr = NULL;
   IREE_ASSERT_OK(iree_arena_allocate(&arena, kBlockSize * 2, &oversized_ptr));
-  EXPECT_NE(arena.block_head, checkpoint.block_head);
+  EXPECT_EQ(arena.block_head, checkpoint.block_head);
   EXPECT_NE(arena.allocation_head, checkpoint.allocation_head);
 
   iree_arena_checkpoint_restore(&checkpoint);
   EXPECT_EQ(arena.allocation_head, checkpoint.allocation_head);
   EXPECT_EQ(arena.block_head, checkpoint.block_head);
-  EXPECT_EQ(arena.block_tail, checkpoint.block_tail);
+  EXPECT_EQ(arena.total_allocation_size, checkpoint.total_allocation_size);
+  EXPECT_EQ(arena.used_allocation_size, checkpoint.used_allocation_size);
+  EXPECT_EQ(arena.block_bytes_remaining, checkpoint.block_bytes_remaining);
+
+  // Exhausting the retained block changes only the block list.
+  void* block_ptr = NULL;
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, kBlockSize / 2, &block_ptr));
+  IREE_ASSERT_OK(iree_arena_allocate(&arena, kBlockSize / 2, &block_ptr));
+  EXPECT_NE(arena.block_head, checkpoint.block_head);
+  EXPECT_EQ(arena.allocation_head, checkpoint.allocation_head);
+
+  iree_arena_checkpoint_restore(&checkpoint);
+  EXPECT_EQ(arena.allocation_head, checkpoint.allocation_head);
+  EXPECT_EQ(arena.block_head, checkpoint.block_head);
+  EXPECT_EQ(arena.block_tail, retained_block_tail);
   EXPECT_EQ(arena.total_allocation_size, checkpoint.total_allocation_size);
   EXPECT_EQ(arena.used_allocation_size, checkpoint.used_allocation_size);
   EXPECT_EQ(arena.block_bytes_remaining, checkpoint.block_bytes_remaining);
