@@ -50,6 +50,7 @@
 #include "loom/import/cxx/binding/template_definitions.h"
 #include "loom/import/cxx/check.h"
 #include "loom/import/cxx/control/analysis.h"
+#include "loom/import/cxx/receiver/scopes.h"
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
@@ -193,156 +194,22 @@ class Translator final : private Initialization::Evaluation {
          "helper");
   }
 
-  struct ReceiverOwner {
-    // Active receiver stack index.
-    size_t index;
-    // Whether source initialization has completed this subobject.
-    bool complete;
-  };
-
-  struct ReceiverFieldBinding {
-    // Member identity owned by this source current-object scope.
-    cxx::FieldSymbol* field;
-    // Enclosing receiver for the same declaration, when recursively active.
-    std::optional<ReceiverOwner> previous_owner;
-    // Enclosing value binding hidden while this receiver is current.
-    std::optional<Value> previous_value;
-  };
-
-  struct ActiveReceiver {
-    // Canonical flattened structure shared by value and storage receivers.
-    const RecordPartition* record;
-    // Addressable destination, absent for a record assembled as SSA values.
-    std::optional<StorageProjection> storage;
-    // Cv-qualified complete object type governing storage observations.
-    const cxx::Type* object_type;
-    // State restored when this source current-object scope ends.
-    std::vector<ReceiverFieldBinding> fields;
-  };
-
-  struct SuspendedReceiverField {
-    // Construction receiver ownership hidden during the explicit clause.
-    ReceiverOwner owner;
-    // Construction receiver value hidden during the explicit clause.
-    std::optional<Value> value;
-  };
-
-  struct SuspendedReceiver {
-    // Stack position restored after the explicit clause completes.
-    size_t receiver_index;
-    // Construction receiver whose state remains live but lexically hidden.
-    ActiveReceiver receiver;
-    // Per-field construction state restored independently of lexical writes.
-    std::vector<SuspendedReceiverField> fields;
-  };
-
-  void enter_receiver(const RecordPartition& record,
-                      std::optional<StorageProjection> storage,
-                      const cxx::Type* object_type) {
-    ActiveReceiver receiver{&record, storage, object_type, {}};
-    receiver.fields.reserve(record.members.size());
-    const size_t receiver_index = receivers_.size();
-    for (const auto& member : record.members) {
-      auto owner = receiver_owners_.find(member.field);
-      auto value = values_.find(member.field);
-      receiver.fields.push_back(
-          {member.field,
-           owner == receiver_owners_.end()
-               ? std::nullopt
-               : std::optional<ReceiverOwner>{owner->second},
-           value == values_.end() ? std::nullopt
-                                  : std::optional<Value>{value->second}});
-      receiver_owners_[member.field] = {receiver_index, false};
-      values_.erase(member.field);
-    }
-    receivers_.push_back(std::move(receiver));
-  }
-
   void enter_value_receiver(const RecordPartition& record) override {
-    enter_receiver(record, std::nullopt, record.source->type());
+    receivers_.enter(record, std::nullopt, record.source->type());
   }
 
   void enter_storage_receiver(const RecordPartition& record,
                               StorageProjection destination,
                               const cxx::Type* object_type) override {
-    enter_receiver(record, destination, object_type);
+    receivers_.enter(record, destination, object_type);
   }
 
-  bool suspend_current_receiver() override {
-    // With no enclosing current object, a type-checked explicit clause cannot
-    // observe the construction-only receiver. Avoid touching every field on
-    // the ordinary free-function aggregate path.
-    if (receivers_.size() <= 1) {
-      return false;
-    }
+  bool suspend_current_receiver() override { return receivers_.suspend(); }
 
-    const size_t receiver_index = receivers_.size() - 1;
-    SuspendedReceiver suspended = {
-        .receiver_index = receiver_index,
-        .receiver = std::move(receivers_.back()),
-        .fields = {},
-    };
-    receivers_.pop_back();
-    suspended.fields.reserve(suspended.receiver.fields.size());
-    for (auto& binding : suspended.receiver.fields) {
-      auto owner = receiver_owners_.find(binding.field);
-      IREE_ASSERT(owner != receiver_owners_.end() &&
-                  owner->second.index == receiver_index);
-      auto value = values_.find(binding.field);
-      suspended.fields.push_back(
-          {owner->second, value == values_.end()
-                              ? std::nullopt
-                              : std::optional<Value>{value->second}});
-
-      if (binding.previous_owner) {
-        owner->second = *binding.previous_owner;
-      } else {
-        receiver_owners_.erase(owner);
-      }
-      if (binding.previous_value) {
-        values_.set(binding.field, *binding.previous_value);
-      } else {
-        values_.erase(binding.field);
-      }
-    }
-    suspended_receivers_.push_back(std::move(suspended));
-    return true;
-  }
-
-  void resume_current_receiver() override {
-    IREE_ASSERT(!suspended_receivers_.empty());
-    auto suspended = std::move(suspended_receivers_.back());
-    suspended_receivers_.pop_back();
-    IREE_ASSERT_EQ(receivers_.size(), suspended.receiver_index);
-    IREE_ASSERT_EQ(suspended.receiver.fields.size(), suspended.fields.size());
-
-    for (size_t index = 0; index < suspended.receiver.fields.size(); ++index) {
-      auto& binding = suspended.receiver.fields[index];
-      const auto& field = suspended.fields[index];
-
-      auto lexical_owner = receiver_owners_.find(binding.field);
-      binding.previous_owner =
-          lexical_owner == receiver_owners_.end()
-              ? std::nullopt
-              : std::optional<ReceiverOwner>{lexical_owner->second};
-      auto lexical_value = values_.find(binding.field);
-      binding.previous_value =
-          lexical_value == values_.end()
-              ? std::nullopt
-              : std::optional<Value>{lexical_value->second};
-
-      receiver_owners_.insert_or_assign(binding.field, field.owner);
-      if (field.value) {
-        values_.set(binding.field, *field.value);
-      } else {
-        values_.erase(binding.field);
-      }
-    }
-    receivers_.push_back(std::move(suspended.receiver));
-  }
+  void resume_current_receiver() override { receivers_.resume(); }
 
   void bind_value_receiver(const RecordPartition& record, Value value) {
-    enter_receiver(record, std::nullopt, record.source->type());
+    receivers_.enter(record, std::nullopt, record.source->type());
     for (const auto& member : record.members) {
       publish_receiver_member(
           member.field,
@@ -353,15 +220,15 @@ class Translator final : private Initialization::Evaluation {
   void bind_storage_receiver(const RecordPartition& record,
                              StorageProjection destination,
                              const cxx::Type* object_type) {
-    enter_receiver(record, destination, object_type);
+    receivers_.enter(record, destination, object_type);
     for (const auto& member : record.members) {
       complete_storage_receiver_member(member.field);
     }
   }
 
   Value current_receiver_value(cxx::AST* owner) {
-    IREE_ASSERT(!receivers_.empty());
-    const auto& active = receivers_.back();
+    IREE_ASSERT(receivers_.current());
+    const auto& active = *receivers_.current();
     IREE_ASSERT(!active.storage);
     std::vector<loom_value_id_t> components;
     components.reserve(active.record->component_count);
@@ -372,8 +239,8 @@ class Translator final : private Initialization::Evaluation {
   }
 
   void replace_current_receiver(Value value) {
-    IREE_ASSERT(!receivers_.empty());
-    const auto& active = receivers_.back();
+    IREE_ASSERT(receivers_.current());
+    const auto& active = *receivers_.current();
     IREE_ASSERT(!active.storage && &value.partition() == active.record);
     for (const auto& member : active.record->members) {
       publish_receiver_member(
@@ -382,32 +249,26 @@ class Translator final : private Initialization::Evaluation {
     }
   }
 
-  ActiveReceiver* receiver(cxx::FieldSymbol* field) {
-    auto found = receiver_owners_.find(field);
-    return found == receiver_owners_.end() ? nullptr
-                                           : &receivers_[found->second.index];
-  }
-
   cxx::FieldSymbol* current_receiver_field(cxx::ExpressionAST* expression) {
     expression = unwrap_object_identity(unit_, expression);
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(expression)) {
       auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
-      return field && receiver(field) ? field : nullptr;
+      return field && receivers_.find(field) ? field : nullptr;
     }
     auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(expression);
     if (!member || !is_current_object(unit_, member->baseExpression)) {
       return nullptr;
     }
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member->symbol);
-    return field && receiver(field) ? field : nullptr;
+    return field && receivers_.find(field) ? field : nullptr;
   }
 
   std::optional<StorageProjection> captured_object_storage(
       cxx::FieldSymbol* field, cxx::AST* owner) {
-    if (receivers_.empty()) {
+    if (!receivers_.current()) {
       return std::nullopt;
     }
-    auto* closure = receivers_.back().record->source;
+    auto* closure = receivers_.current()->record->source;
     auto captured = captured_object_member(unit_, closure, field);
     if (!captured) {
       return std::nullopt;
@@ -423,7 +284,7 @@ class Translator final : private Initialization::Evaluation {
 
   std::optional<StorageProjection> receiver_storage(cxx::FieldSymbol* field,
                                                     cxx::AST* owner) {
-    auto* active = receiver(field);
+    auto* active = receivers_.find(field);
     if (!active || !active->storage) {
       return std::nullopt;
     }
@@ -431,24 +292,19 @@ class Translator final : private Initialization::Evaluation {
   }
 
   void publish_receiver_member(cxx::FieldSymbol* field, Value value) override {
-    auto* active = receiver(field);
-    IREE_ASSERT(active && !active->storage);
-    values_.set(field, value);
-    receiver_owners_.at(field).complete = true;
+    receivers_.publish(field, value);
   }
 
   void complete_storage_receiver_member(cxx::FieldSymbol* field) override {
-    auto* active = receiver(field);
-    IREE_ASSERT(active && active->storage);
-    receiver_owners_.at(field).complete = true;
+    receivers_.mark_complete(field);
   }
 
   Value receiver_member(cxx::FieldSymbol* field, cxx::AST* owner) override {
-    auto* active = receiver(field);
+    auto* active = receivers_.find(field);
     if (!active) {
       fail(owner, "member expression requires a current source object");
     }
-    if (!receiver_owners_.at(field).complete) {
+    if (!receivers_.is_complete(field)) {
       fail(owner, "member is read before its initialization is complete");
     }
     if (active->storage) {
@@ -468,27 +324,7 @@ class Translator final : private Initialization::Evaluation {
     return found->second;
   }
 
-  void leave_receiver() override {
-    IREE_ASSERT(!receivers_.empty());
-    const size_t receiver_index = receivers_.size() - 1;
-    auto receiver = std::move(receivers_.back());
-    receivers_.pop_back();
-    for (const auto& binding : receiver.fields) {
-      auto found = receiver_owners_.find(binding.field);
-      IREE_ASSERT(found != receiver_owners_.end() &&
-                  found->second.index == receiver_index);
-      if (binding.previous_owner) {
-        found->second = *binding.previous_owner;
-      } else {
-        receiver_owners_.erase(found);
-      }
-      if (binding.previous_value) {
-        values_.set(binding.field, *binding.previous_value);
-      } else {
-        values_.erase(binding.field);
-      }
-    }
-  }
+  void leave_receiver() override { receivers_.leave(); }
 
   Value convert(cxx::ExpressionAST* input_ast, const cxx::Type* output_type,
                 cxx::AST* owner) override {
@@ -1354,8 +1190,6 @@ class Translator final : private Initialization::Evaluation {
     immutable_preamble_end_ = nullptr;
     references_.clear();
     receivers_.clear();
-    receiver_owners_.clear();
-    suspended_receivers_.clear();
     value_arena_.reset();
     size_t argument_index = 0;
     if (defined.implicit_object) {
@@ -1443,9 +1277,9 @@ class Translator final : private Initialization::Evaluation {
     if (defined.source->symbol->isConstructor()) {
       IREE_ASSERT(defined.implicit_object &&
                   defined.implicit_object->abi == ImplicitObjectABI::Storage &&
-                  !receivers_.empty() && receivers_.back().storage);
+                  receivers_.current() && receivers_.current()->storage);
       initialization_.constructor_receiver(
-          *receivers_.back().storage, *receivers_.back().record,
+          *receivers_.current()->storage, *receivers_.current()->record,
           defined.implicit_object->object_type, defined.source->symbol,
           defined.source);
     }
@@ -2012,7 +1846,7 @@ class Translator final : private Initialization::Evaluation {
     cxx::FieldSymbol* field = nullptr;
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(ast)) {
       field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
-      if (!field || !receiver(field)) {
+      if (!field || !receivers_.find(field)) {
         return std::nullopt;
       }
     } else if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast)) {
@@ -2023,7 +1857,7 @@ class Translator final : private Initialization::Evaluation {
       if (!unit_.typeTraits().is_lvalue_reference(field->type())) {
         return std::nullopt;
       }
-      if (auto* active = receiver(field);
+      if (auto* active = receivers_.find(field);
           active && is_current_object(unit_, member->baseExpression)) {
         auto pointer = receiver_member(field, ast);
         return storage_.project(
@@ -2284,9 +2118,9 @@ class Translator final : private Initialization::Evaluation {
     if (destination) {
       if (auto* field =
               cxx::symbol_cast<cxx::FieldSymbol>(destination->binding);
-          field && receiver(field)) {
-        auto* active = receiver(field);
-        if (!receiver_owners_.at(field).complete) {
+          field && receivers_.find(field)) {
+        auto* active = receivers_.find(field);
+        if (!receivers_.is_complete(field)) {
           fail(owner,
                "member is mutated before its initialization is complete");
         }
@@ -2868,11 +2702,11 @@ class Translator final : private Initialization::Evaluation {
   ReceiverArgument current_receiver_argument(
       const RecordPartition& record, bool requires_storage,
       std::span<cxx::FieldSymbol* const> written_fields, cxx::AST* owner) {
-    if (receivers_.empty() || receivers_.back().record != &record) {
+    if (!receivers_.current() || receivers_.current()->record != &record) {
       fail(owner,
            "implicit member call requires a matching current source object");
     }
-    const auto& active = receivers_.back();
+    const auto& active = *receivers_.current();
     if (active.storage) {
       return {ImplicitObjectABI::Storage,
               Value(active.storage->pointer),
@@ -4616,18 +4450,18 @@ class Translator final : private Initialization::Evaluation {
       return binding(decision->symbol, ast);
     }
     if (cxx::ast_cast<cxx::ThisExpressionAST>(ast)) {
-      if (!receivers_.empty()) {
-        auto* closure = receivers_.back().record->source;
+      if (receivers_.current()) {
+        auto* closure = receivers_.current()->record->source;
         auto* captured_this =
             closure->isClosureType() ? closure->capturedThisField() : nullptr;
         if (captured_this) {
           return receiver_member(captured_this, ast);
         }
       }
-      if (receivers_.empty() || !receivers_.back().storage) {
+      if (!receivers_.current() || !receivers_.current()->storage) {
         fail(ast, "this pointer requires a storage-backed receiver");
       }
-      return Value(receivers_.back().storage->pointer);
+      return Value(receivers_.current()->storage->pointer);
     }
     if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(ast)) {
       if (auto found = references_.find(id->symbol);
@@ -4636,7 +4470,7 @@ class Translator final : private Initialization::Evaluation {
                     cxx::to_string(id->symbol->name()));
       }
       auto* field = cxx::symbol_cast<cxx::FieldSymbol>(id->symbol);
-      const bool receiver_field = field && receiver(field);
+      const bool receiver_field = field && receivers_.find(field);
       if (receiver_field &&
           unit_.typeTraits().is_lvalue_reference(field->type())) {
         if (!types_.pointer_reference_is_snapshot(field)) {
@@ -6971,14 +6805,8 @@ class Translator final : private Initialization::Evaluation {
   // rebind. Storage references therefore preserve their root and byte offset
   // without re-evaluating a source address expression.
   std::unordered_map<cxx::Symbol*, Lvalue> references_;
-  // Nested source current objects retain declaration identity independently of
-  // spelling. The direct index avoids rediscovering an owning receiver through
-  // the active stack for every member expression.
-  std::vector<ActiveReceiver> receivers_;
-  std::unordered_map<cxx::FieldSymbol*, ReceiverOwner> receiver_owners_;
-  // Construction receivers hidden while explicit aggregate clauses evaluate
-  // retain their current state separately from lexical receiver mutations.
-  std::vector<SuspendedReceiver> suspended_receivers_;
+  // Lexical current objects share bindings and retain construction completion.
+  ReceiverScopes receivers_{values_};
   // Launch configurations not owned by the ordinary reachable-call analysis
   // retain a function-local analysis here.
   std::optional<ControlFlow> owned_control_;
