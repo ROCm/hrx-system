@@ -96,7 +96,6 @@ iree_py_test(
     srcs = ["source_roundtrip_test.py"],
     args = [
         "--importer=$(rootpath //loom/src/loom/tools/loom-import-cxx)",
-        "--exporter=$(rootpath //loom/py/loom/tools:loom-export-cxx)",
         "--checker=$(rootpath //loom/src/loom/tools/loom-check:loom-check-test)",
         "--source=$(rootpath special_members.cxx-test)",
         "--source=$(rootpath value_evaluation.cxx-test)",
@@ -104,7 +103,6 @@ iree_py_test(
     data = [
         "special_members.cxx-test",
         "value_evaluation.cxx-test",
-        "//loom/py/loom/tools:loom-export-cxx",
         "//loom/src/loom/tools/loom-check:loom-check-test",
         "//loom/src/loom/tools/loom-import-cxx",
     ],
@@ -113,4 +111,5 @@ iree_py_test(
         "//loom/config/import:cxx",
         "//loom/config/emit:vm_binary",
     ]),
+    deps = ["//loom/py/loom/tools:export_cxx"],
 )
