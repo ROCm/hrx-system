@@ -104,7 +104,8 @@ enum loom_low_lower_value_ref_kind_e {
   LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_DYNAMIC_BYTE_OFFSET = 5,
   // Complete target address materialized from one source-memory plan.
   LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_ADDRESS = 6,
-  // Storage root selected by one source-memory plan.
+  // Materialized address base paired with the plan's byte coordinates. Storage
+  // provenance can retain a different root for an advancing view carrier.
   LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_ROOT = 7,
   // Complete byte offset including the selected source-memory static bias.
   LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_BYTE_OFFSET = 8,

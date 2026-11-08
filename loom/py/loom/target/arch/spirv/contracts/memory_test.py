@@ -29,7 +29,11 @@ def test_constant_storage_is_readable_across_storage_memory_contracts() -> None:
                 continue
             operations.add(memory.operation)
             assert ("constant" in memory.memory_spaces) == (
-                memory.operation is SourceMemoryOperation.LOAD
+                memory.operation
+                in (
+                    SourceMemoryOperation.LOAD,
+                    SourceMemoryOperation.VIEW_CARRIER,
+                )
             ), (rule.source_op.name, step.descriptor.key)
     assert operations == {
         SourceMemoryOperation.LOAD,
@@ -37,6 +41,7 @@ def test_constant_storage_is_readable_across_storage_memory_contracts() -> None:
         SourceMemoryOperation.ATOMIC_REDUCE,
         SourceMemoryOperation.ATOMIC_RMW,
         SourceMemoryOperation.ATOMIC_CMPXCHG,
+        SourceMemoryOperation.VIEW_CARRIER,
     }
 
 

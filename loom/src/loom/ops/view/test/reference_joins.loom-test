@@ -297,7 +297,8 @@ func.def @rotate_distinct_allocations(%count: index) -> (i64, i64) {
   %result, %spare = scf.for %iteration = [%begin to %count step %step](%current = %left : view<8xi32>, %next = %right : view<8xi32>) -> (view<8xi32>, view<8xi32>) {
     %space = test.fact_view_memory_space %current : view<8xi32> -> i64
     %length = test.fact_view_byte_length_hi %current : view<8xi32> -> i64
-    test.use %space, %length : i64, i64
+    %alignment = test.fact_view_root_min_alignment %current : view<8xi32> -> i64
+    test.use %space, %length, %alignment : i64, i64, i64
     scf.yield %next, %current : view<8xi32>, view<8xi32>
   }
   %space = test.fact_view_memory_space %result : view<8xi32> -> i64
@@ -318,7 +319,8 @@ func.def @rotate_distinct_allocations(%count: index) -> (i64, i64) {
   %result, %spare = scf.for %iteration = [%begin to %count step %step](%current = %left : view<8xi32>, %next = %right : view<8xi32>) -> (view<8xi32>, view<8xi32>) {
     %space = scalar.constant 2 : i64
     %length = scalar.constant 32 : i64
-    test.use %space, %length : i64, i64
+    %alignment = scalar.constant 32 : i64
+    test.use %space, %length, %alignment : i64, i64, i64
     scf.yield %next, %current : view<8xi32>, view<8xi32>
   }
   %space = scalar.constant 2 : i64

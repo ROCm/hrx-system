@@ -380,7 +380,7 @@ static void loom_low_lower_mark_source_memory_access_storage_demands(
         address_materializer->base_kind ==
                 LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_BASE_VIEW
             ? loom_low_source_memory_access_base_view_value_id(access)
-            : access->root_value_id;
+            : loom_low_source_memory_access_address_value_id(access);
     IREE_ASSERT_NE(base_value_id, LOOM_VALUE_ID_INVALID);
     loom_low_lower_mark_value_storage_required(context, base_value_id);
     if (address_materializer->coordinate_unit_byte_count == 1 &&
@@ -446,7 +446,8 @@ static void loom_low_lower_mark_source_memory_access_storage_demands(
 void loom_low_lower_require_source_memory_complete_byte_offset_storage(
     loom_low_lower_context_t* context,
     const loom_low_source_memory_access_plan_t* access) {
-  loom_low_lower_mark_value_storage_required(context, access->root_value_id);
+  loom_low_lower_mark_value_storage_required(
+      context, loom_low_source_memory_access_address_value_id(access));
   const loom_low_lower_source_memory_t source_memory = {
       .flags = LOOM_LOW_LOWER_SOURCE_MEMORY_FLAG_REUSE_VIEW_BASE,
   };
@@ -484,7 +485,8 @@ static void loom_low_lower_mark_rule_storage_demands(
       if (value_ref->kind == LOOM_LOW_LOWER_VALUE_REF_SOURCE_MEMORY_ROOT) {
         IREE_ASSERT(source_memory_access != NULL);
         loom_low_lower_mark_value_storage_required(
-            context, source_memory_access->root_value_id);
+            context, loom_low_source_memory_access_address_value_id(
+                         source_memory_access));
         continue;
       }
       if (value_ref->kind ==

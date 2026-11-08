@@ -203,6 +203,81 @@ TEST_F(SourceMemoryPlanTest, StaticDenseLoadIncludesViewBase) {
   EXPECT_EQ(plan.dynamic_view_base_term_count, 0u);
 }
 
+TEST_F(SourceMemoryPlanTest, MaterializedCarrierKeepsStorageProvenance) {
+  const auto root = DefineBufferArg();
+  const auto view_type = loom_type_shaped_1d(
+      LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, loom_dim_pack_static(32), 0);
+  const auto carrier = DefineArg(view_type);
+  const int64_t indices[] = {0, 4, 16};
+  const uint32_t alignments[] = {64, 16, 64};
+  loom_op_t* loads[IREE_ARRAYSIZE(indices)] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(indices); ++i) {
+    IREE_ASSERT_OK(loom_vector_load_build(&builder_, 0, 0, carrier, nullptr, 0,
+                                          &indices[i], 1, 0, 0, VectorType1D(4),
+                                          LOOM_LOCATION_UNKNOWN, &loads[i]));
+  }
+  loom_value_fact_table_t facts = {};
+  ComputeFacts(&facts);
+  auto root_facts = loom_value_fact_table_lookup(&facts, root);
+  loom_value_facts_mark_uniform_at_scope(
+      &root_facts, LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&facts, root, root_facts));
+
+  // A loop's pointer is materialized even when its varying displacement from
+  // the original storage has only range/divisibility facts, not an SSA offset.
+  const loom_value_fact_view_reference_t reference = {
+      .base_byte_offset = loom_value_facts_make(0, 8192, 64),
+      .footprint_byte_length = loom_value_facts_exact_i64(128),
+      .minimum_alignment = 64,
+      .root_minimum_alignment = 64,
+      .static_element_byte_count = 4,
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL,
+      .root_value_id = root,
+      .buffer_value_id = LOOM_VALUE_ID_INVALID,
+      .alias_scope_id = 7,
+  };
+  auto carrier_facts = loom_value_facts_unknown();
+  IREE_ASSERT_OK(loom_value_facts_make_view_reference(&facts.context, reference,
+                                                      &carrier_facts));
+  loom_value_facts_mark_uniform_at_scope(
+      &carrier_facts, LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&facts, carrier, carrier_facts));
+
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(indices); ++i) {
+    SCOPED_TRACE(indices[i]);
+    loom_low_source_memory_access_plan_t plan = {};
+    loom_low_source_memory_access_diagnostic_t diagnostic = {};
+    ASSERT_TRUE(BuildPlan(&facts, loads[i], &plan, &diagnostic));
+    ASSERT_NE(plan.materialized_base_region, nullptr);
+    EXPECT_EQ(plan.root_value_id, root);
+    EXPECT_EQ(plan.alias_scope_id, reference.alias_scope_id);
+    EXPECT_EQ(loom_low_source_memory_access_address_value_id(&plan), carrier);
+    EXPECT_EQ(plan.static_byte_offset, indices[i] * 4);
+    EXPECT_EQ(plan.dynamic_term_count, 0);
+    EXPECT_EQ(plan.minimum_alignment, alignments[i]);
+    EXPECT_EQ(plan.root_uniform_scope, LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP);
+    EXPECT_EQ(loom_low_source_memory_access_uniform_scope(&plan),
+              LOOM_VALUE_FACT_UNIFORM_SCOPE_SUBGROUP);
+
+    // The pointer already contains allocation placement. Adding that placement
+    // again would shift every access, while claiming precise alias intervals
+    // would confuse the carrier's displacement with storage-relative bytes.
+    ASSERT_TRUE(loom_low_source_memory_access_plan_include_root_byte_offset(
+        &plan, 256));
+    EXPECT_EQ(plan.static_byte_offset, indices[i] * 4);
+    EXPECT_EQ(plan.physical_root_byte_offset, 0);
+    loom_low_byte_interval_t interval = {};
+    loom_low_memory_access_summary_t summary = {};
+    loom_low_source_memory_access_plan_make_summary(&plan, &interval, &summary);
+    EXPECT_EQ(summary.memory_space, LOOM_LOW_MEMORY_SPACE_GLOBAL);
+    EXPECT_EQ(summary.alias_root_id, reference.alias_scope_id);
+    EXPECT_EQ(summary.precision_flags,
+              LOOM_LOW_MEMORY_ACCESS_PRECISION_SPACE |
+                  LOOM_LOW_MEMORY_ACCESS_PRECISION_ROOT);
+    EXPECT_EQ(summary.byte_interval, nullptr);
+  }
+}
+
 TEST_F(SourceMemoryPlanTest, ReducedAlignmentAppliesOnlyToTypedAccess) {
   const auto buffer = DefineBufferArg();
   const auto base_offset = DefineOffsetArg();

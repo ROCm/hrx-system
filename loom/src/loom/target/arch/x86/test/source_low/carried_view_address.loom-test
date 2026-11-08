@@ -1,0 +1,74 @@
+// RUN: emit source-low target=x86:avx2 output=low
+
+// A direct view argument advances as a pointer. The store in one iteration
+// aliases the following iteration's load despite different local displacements.
+func.def noinline @advance(%input: view<2xi32>, %count: index) -> (i32) where [range(%count, 0, 4)] {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial_sum = scalar.constant 0 : i32
+  %last, %sum = scf.for %iteration = [%begin to %count step %step](%window = %input : view<2xi32>, %accumulator = %initial_sum : i32) -> (view<2xi32>, i32) {
+    %value = view.load %window[0] : view<2xi32> -> i32
+    %next_sum = scalar.addi %accumulator, %value : i32
+    view.store %next_sum, %window[1] : i32, view<2xi32>
+    %next = view.subview %window[1] : view<2xi32> -> view<2xi32>
+    scf.yield %next, %next_sum : view<2xi32>, i32
+  }
+  %tail = view.load %last[0] : view<2xi32> -> i32
+  %result = scalar.addi %sum, %tail : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def noinline target<x86.avx2.core> abi(object_function) @advance(%input: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr32>) where [range(%count, 0, 4)] asm {
+  %begin = mov.imm64 0
+  %initial_sum = mov.imm32 0
+  low.br ^_bb1(%begin: reg<x86.gpr64>, %input: reg<x86.gpr64>, %initial_sum: reg<x86.gpr32>)
+^_bb1(%iteration: reg<x86.gpr64>, %window: reg<x86.gpr64>, %accumulator: reg<x86.gpr32>):
+  low.op.cond_br<x86.scalar.cmp.branch.gpr64>(%iteration, %count) {predicate = 12}, ^_bb2, ^_bb3 : (reg<x86.gpr64>, reg<x86.gpr64>)
+^_bb2:
+  %32 = copy %accumulator : reg<x86.gpr32> -> reg<x86.gpr32>
+  %next_sum = add.load.gpr32 %32, %window {disp32 = 0}
+  mov.store.gpr32 %next_sum, %window {disp32 = 4}
+  %next = lea.disp %window {disp32 = 4}
+  %35 = lea.disp %iteration {disp32 = 1}
+  low.br ^_bb1(%35: reg<x86.gpr64>, %next: reg<x86.gpr64>, %next_sum: reg<x86.gpr32>)
+^_bb3:
+  %36 = copy %accumulator : reg<x86.gpr32> -> reg<x86.gpr32>
+  %result = add.load.gpr32 %36, %window {disp32 = 0}
+  return %result
+}
+
+// ====
+
+func.def noinline @backward(%input: view<1xi32>, %position: index, %count: index) -> (view<1xi32>, i32) where [range(%position, -2, 0)] {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial_sum = scalar.constant 0 : i32
+  %last, %sum = scf.for %iteration = [%begin to %count step %step](%window = %input : view<1xi32>, %accumulator = %initial_sum : i32) -> (view<1xi32>, i32) {
+    %value = view.load %window[0] : view<1xi32> -> i32
+    %next_sum = scalar.addi %accumulator, %value : i32
+    %next = view.subview %window[%position] : view<1xi32> -> view<1xi32>
+    scf.yield %next, %next_sum : view<1xi32>, i32
+  }
+  func.return %last, %sum : view<1xi32>, i32
+}
+
+// ----
+low.func.def noinline target<x86.avx2.core> abi(object_function) @backward(%input: reg<x86.gpr64>, %position: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr32>) where [range(%position, -2, 0)] asm {
+  %begin = mov.imm64 0
+  %initial_sum = mov.imm32 0
+  low.br ^_bb1(%begin: reg<x86.gpr64>, %input: reg<x86.gpr64>, %initial_sum: reg<x86.gpr32>)
+^_bb1(%iteration: reg<x86.gpr64>, %window: reg<x86.gpr64>, %accumulator: reg<x86.gpr32>):
+  low.op.cond_br<x86.scalar.cmp.branch.gpr64>(%iteration, %count) {predicate = 12}, ^_bb2, ^_bb3 : (reg<x86.gpr64>, reg<x86.gpr64>)
+^_bb2:
+  %34 = copy %accumulator : reg<x86.gpr32> -> reg<x86.gpr32>
+  %next_sum = add.load.gpr32 %34, %window {disp32 = 0}
+  %36 = mov.imm64 4
+  %37 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
+  %38 = imul.gpr64 %37, %36
+  %next = lea.add_scale %window, %38 {disp32 = 0, scale = 1}
+  %40 = lea.disp %iteration {disp32 = 1}
+  low.br ^_bb1(%40: reg<x86.gpr64>, %next: reg<x86.gpr64>, %next_sum: reg<x86.gpr32>)
+^_bb3:
+  return %window, %accumulator
+}

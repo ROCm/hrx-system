@@ -1080,6 +1080,13 @@ def _coordinate_binary_rows() -> list[_PacketRow]:
             result_type=offset64_value,
             operand_types=(offset64_value, offset64_value),
         ),
+        _PacketRow(
+            "spirv.op_iadd.storage_buffer.byte_offset",
+            opcode="LOOM_SPIRV_OP_I_ADD",
+            form="LOOM_SPIRV_PACKET_FORM_BINARY_LHS_TYPE",
+            result_type=_storage_buffer_address_value(),
+            operand_types=(_storage_buffer_address_value(), offset64_value),
+        ),
     ]
     return rows
 
@@ -1096,6 +1103,13 @@ def _coordinate_unary_rows() -> list[_PacketRow]:
             form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
             result_type=i32_value,
             operand_types=(i32_value,),
+        ),
+        _PacketRow(
+            "spirv.op_copy_object.storage_buffer",
+            opcode="LOOM_SPIRV_OP_COPY_OBJECT",
+            form="LOOM_SPIRV_PACKET_FORM_UNARY_TYPED",
+            result_type=_storage_buffer_address_value(),
+            operand_types=(_storage_buffer_address_value(),),
         ),
     ]
 

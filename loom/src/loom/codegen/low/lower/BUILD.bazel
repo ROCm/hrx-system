@@ -352,6 +352,7 @@ loom_cc_test(
         ":lower",
         "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/analysis:symbolic_expr_test_fixture",
+        "//loom/src/loom/analysis:view_regions",
         "//loom/src/loom/codegen/low:memory_access",
         "//loom/src/loom/codegen/low:source_memory_plan",
         "//loom/src/loom/ir:facts",

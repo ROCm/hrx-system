@@ -1,0 +1,45 @@
+// RUN: pass canonicalize
+
+// Displacements can be negative even though extents and layout strides cannot.
+func.def @signed_origins(%input: view<1xi32>, %position: index) -> (i64, i64, i64, i64, i64) where [range(%position, -2, 0)] {
+  %earlier = view.subview %input[-8] : view<1xi32> -> view<1xi32>
+  %moving = view.subview %input[%position] : view<1xi32> -> view<1xi32>
+  %static_offset = test.fact_view_byte_offset_lo %earlier : view<1xi32> -> i64
+  %alignment = test.fact_view_min_alignment %earlier : view<1xi32> -> i64
+  %lower = test.fact_view_byte_offset_lo %moving : view<1xi32> -> i64
+  %upper = test.fact_view_byte_offset_hi %moving : view<1xi32> -> i64
+  %length = test.fact_view_byte_length_hi %moving : view<1xi32> -> i64
+  func.return %static_offset, %alignment, %lower, %upper, %length : i64, i64, i64, i64, i64
+}
+
+// ----
+func.def @signed_origins(%input: view<1xi32>, %position: index) -> (i64, i64, i64, i64, i64) where [range(%position, -2, 0)] {
+  %static_offset = scalar.constant -32 : i64
+  %alignment = scalar.constant 32 : i64
+  %lower = scalar.constant -8 : i64
+  %upper = scalar.constant 0 : i64
+  %length = scalar.constant 4 : i64
+  func.return %static_offset, %alignment, %lower, %upper, %length : i64, i64, i64, i64, i64
+}
+
+// ====
+
+// A backward recurrence cannot become an exact zero-origin alias of its input.
+func.def @backward_origin(%input: view<1xi32>, %count: index) -> (i64, i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %last = scf.for %iteration = [%begin to %count step %step](%window = %input : view<1xi32>) -> (view<1xi32>) {
+    %next = view.subview %window[-1] : view<1xi32> -> view<1xi32>
+    scf.yield %next : view<1xi32>
+  }
+  %lower = test.fact_view_byte_offset_lo %last : view<1xi32> -> i64
+  %alignment = test.fact_view_min_alignment %last : view<1xi32> -> i64
+  func.return %lower, %alignment : i64, i64
+}
+
+// ----
+func.def @backward_origin(%input: view<1xi32>, %count: index) -> (i64, i64) {
+  %lower = scalar.constant -9223372036854775808 : i64
+  %alignment = scalar.constant 4 : i64
+  func.return %lower, %alignment : i64, i64
+}

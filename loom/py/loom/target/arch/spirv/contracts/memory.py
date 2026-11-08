@@ -131,19 +131,25 @@ def storage_buffer_source_memory(
     operation: SourceMemoryOperation,
     scalar: StorageBufferScalar,
 ) -> SourceMemoryConstraint:
+    is_carrier = operation is SourceMemoryOperation.VIEW_CARRIER
+    byte_width = 1 if is_carrier else scalar.byte_width
     return SourceMemoryConstraint(
         operation=operation,
         root_kind=SourceMemoryRootKind.ANY,
         memory_spaces=storage_buffer_memory_spaces(operation),
-        element_byte_count=scalar.byte_width,
+        element_byte_count=byte_width,
         vector_lane_count=1,
-        vector_lane_byte_stride=scalar.byte_width,
-        static_byte_offset_minimum=0,
+        vector_lane_byte_stride=byte_width,
+        static_byte_offset_minimum=-(2**63) if is_carrier else 0,
         static_byte_offset_maximum=(2**63) - 1,
-        minimum_alignment=scalar.byte_width,
+        minimum_alignment=byte_width,
         dynamic_term_count=None,
         dynamic_index_source=SourceMemoryDynamicIndexSource.NONE,
-        alignment_diagnostic=storage_buffer_alignment_diagnostic(scalar.byte_width),
+        alignment_diagnostic=(
+            None
+            if is_carrier
+            else storage_buffer_alignment_diagnostic(scalar.byte_width)
+        ),
     )
 
 

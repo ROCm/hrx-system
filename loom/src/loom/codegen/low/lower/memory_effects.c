@@ -22,7 +22,8 @@ iree_status_t loom_low_lower_memory_origin_plan(
     iree_arena_allocator_t* arena,
     const loom_low_lower_memory_origin_t** out_origin) {
   *out_origin = NULL;
-  if (source_plan->dynamic_term_count == 0 ||
+  if (source_plan->materialized_base_region != NULL ||
+      source_plan->dynamic_term_count == 0 ||
       source_plan->root_value_id == LOOM_VALUE_ID_INVALID ||
       source_plan->root_uniform_scope <
           LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP ||
@@ -70,7 +71,8 @@ bool loom_low_lower_memory_packet_interval(
     int64_t* out_lane_byte_count) {
   *out_interval = (loom_low_memory_relative_interval_t){0};
   *out_lane_byte_count = 0;
-  if (source_plan->root_value_id == LOOM_VALUE_ID_INVALID ||
+  if (source_plan->materialized_base_region != NULL ||
+      source_plan->root_value_id == LOOM_VALUE_ID_INVALID ||
       source_plan->root_uniform_scope <
           LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP ||
       source_plan->vector_offset_kind ==

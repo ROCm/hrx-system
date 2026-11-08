@@ -1,0 +1,36 @@
+// RUN: emit source-low target=wasm:simd128 output=low control-flow=structured-low
+
+// A direct view argument advances as a pointer. The store in one iteration
+// aliases the following iteration's load despite different local displacements.
+func.def noinline @advance(%input: view<2xi32>, %count: index) -> (i32) where [range(%count, 0, 4)] {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %initial_sum = scalar.constant 0 : i32
+  %last, %sum = scf.for %iteration = [%begin to %count step %step](%window = %input : view<2xi32>, %accumulator = %initial_sum : i32) -> (view<2xi32>, i32) {
+    %value = view.load %window[0] : view<2xi32> -> i32
+    %next_sum = scalar.addi %accumulator, %value : i32
+    view.store %next_sum, %window[1] : i32, view<2xi32>
+    %next = view.subview %window[1] : view<2xi32> -> view<2xi32>
+    scf.yield %next, %next_sum : view<2xi32>, i32
+  }
+  %tail = view.load %last[0] : view<2xi32> -> i32
+  %result = scalar.addi %sum, %tail : i32
+  func.return %result : i32
+}
+
+// ----
+low.func.def noinline target<wasm.core.simd128> abi(wasm_function) @advance(%input: reg<wasm.i32>, %count: reg<wasm.i32>) -> (reg<wasm.i32>) where [range(%count, 0, 4)] asm {
+  %begin = i32.const 0
+  %step = i32.const 1
+  %last, %sum = low.scf.for signed [%begin to %count step %step] iter_args(%input: reg<wasm.i32>, %begin: reg<wasm.i32>) -> (reg<wasm.i32>, reg<wasm.i32>) do(%iteration: reg<wasm.i32>, %window: reg<wasm.i32>, %accumulator: reg<wasm.i32>) {
+    %value = i32.load %window
+    %next_sum = i32.add %accumulator, %value
+    i32.store %window, %next_sum {offset = 4}
+    %29 = i32.const 4
+    %next = i32.add %window, %29
+    low.scf.yield %next, %next_sum : reg<wasm.i32>, reg<wasm.i32>
+  }
+  %tail = i32.load %last
+  %result = i32.add %sum, %tail
+  return %result
+}

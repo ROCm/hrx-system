@@ -213,6 +213,11 @@ typedef struct loom_low_source_memory_access_plan_t {
   loom_value_id_t view_value_id;
   // Source view or memory-object SSA value materializing the resource base.
   loom_value_id_t base_view_value_id;
+  // Borrowed analyzed region when address terms are relative to its existing
+  // base-view carrier instead of the storage root. Its root-relative offset
+  // remains unknown; address precision does not establish alias precision.
+  // The function's view-region analysis outlives its source-access plans.
+  const struct loom_view_region_t* materialized_base_region;
   // Target-independent memory space selected from source view facts.
   loom_value_fact_memory_space_t memory_space;
   // Proven target-independent address-layout classification.
@@ -349,6 +354,15 @@ static inline loom_value_id_t loom_low_source_memory_access_base_view_value_id(
   return plan->base_view_value_id != LOOM_VALUE_ID_INVALID
              ? plan->base_view_value_id
              : plan->view_value_id;
+}
+
+// Materialized address consumed with the plan's canonical byte offsets. This
+// may be an advancing view carrier while root_value_id retains storage
+// identity.
+static inline loom_value_id_t loom_low_source_memory_access_address_value_id(
+    const loom_low_source_memory_access_plan_t* plan) {
+  return plan->materialized_base_region != NULL ? plan->base_view_value_id
+                                                : plan->root_value_id;
 }
 
 static inline const loom_low_source_memory_dynamic_term_t*

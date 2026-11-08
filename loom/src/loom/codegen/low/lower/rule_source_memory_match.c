@@ -397,10 +397,9 @@ static bool loom_low_lower_rule_source_memory_address_matches(
           LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_COORDINATE_OFFSET &&
       access->dynamic_view_base_term_count != 0 &&
       access->dynamic_view_base_value_id != LOOM_VALUE_ID_INVALID) {
-    const loom_type_t view_base_type = loom_module_value_type(
-        match_context->module, access->dynamic_view_base_value_id);
-    if (!loom_type_equal(view_base_type,
-                         loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET))) {
+    if (!loom_low_lower_rule_source_memory_address_input_matches(
+            match_context, address_materializer,
+            access->dynamic_view_base_value_id)) {
       return loom_low_lower_rule_source_memory_reject(
           diagnostics,
           LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_ADDRESS_MATERIALIZATION,
