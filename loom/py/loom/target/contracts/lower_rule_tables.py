@@ -408,7 +408,11 @@ def _intern_program_rows[ProgramRowT: Hashable](
     rows: Sequence[ProgramRowT],
     ranges: Iterable[tuple[int, int]],
 ) -> tuple[tuple[ProgramRowT, ...], tuple[int, ...]]:
-    """Interns exact immutable row programs and returns their new starts."""
+    """Interns whole row programs and returns their new starts.
+
+    Distinct programs never overlap. Storage encoders may align their starts
+    independently without inserting padding inside another program.
+    """
 
     interned_rows: list[ProgramRowT] = []
     program_starts: dict[tuple[ProgramRowT, ...], int] = {(): 0}

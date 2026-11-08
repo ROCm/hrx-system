@@ -1021,15 +1021,6 @@ typedef uint8_t loom_low_lower_guard_ref_t;
 
 #define LOOM_LOW_LOWER_GUARD_REF_ESCAPE ((uint8_t)UINT8_MAX)
 
-typedef uint8_t loom_low_lower_guard_ref_encoding_t;
-
-enum loom_low_lower_guard_ref_encoding_e {
-  // Frequency-ranked byte ordinals with inline wide escapes.
-  LOOM_LOW_LOWER_GUARD_REF_ENCODING_COMPACT = 0,
-  // Fixed three-byte escape records retaining logical u16 guard starts.
-  LOOM_LOW_LOWER_GUARD_REF_ENCODING_FIXED_WIDTH = 1,
-};
-
 typedef uint8_t loom_low_lower_emit_kind_t;
 
 enum loom_low_lower_emit_kind_e {
@@ -1507,8 +1498,9 @@ typedef struct loom_low_lower_rule_set_t {
   const loom_low_lower_guard_ref_t* guard_refs;
   // Number of bytes in guard_refs.
   uint32_t guard_ref_count;
-  // Representation selected for guard_refs.
-  loom_low_lower_guard_ref_encoding_t guard_ref_encoding;
+  // Log2 byte alignment of guard-program starts. Rule offsets use these units;
+  // guard references within each program retain the same compact byte encoding.
+  uint8_t guard_ref_offset_shift;
   // Attribute-copy rows referenced by emits.
   const loom_low_lower_attr_copy_t* attr_copies;
   // Number of rows in attr_copies.

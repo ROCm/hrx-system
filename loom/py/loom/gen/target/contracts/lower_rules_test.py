@@ -2309,9 +2309,9 @@ def test_generated_tables_intern_guards_and_diagnostic_params() -> None:
 def test_guard_ref_storage_keeps_the_most_used_rows_byte_addressable() -> None:
     rows = tuple(range(256))
     refs = (*range(256), *(255 for _ in range(10)))
-    storage = _encode_guard_ref_storage(rows, refs)
+    storage = _encode_guard_ref_storage(rows, refs, (0,))
 
-    assert not storage.uses_fixed_width
+    assert storage.offset_shift == 0
     assert storage.rows[:255] == (*range(254), 255)
     assert storage.rows[255] == 254
     assert storage.values[254:258] == (0xFF, 0xFF, 0x00, 0xFE)
@@ -2319,17 +2319,28 @@ def test_guard_ref_storage_keeps_the_most_used_rows_byte_addressable() -> None:
     assert storage.values[258:] == (0xFE,) * 10
 
 
-def test_guard_ref_storage_uses_fixed_width_when_offsets_exceed_u16() -> None:
-    rows = tuple(range(256))
-    refs = tuple(range(256)) * 255 + tuple(range(255))
-    storage = _encode_guard_ref_storage(rows, refs)
-
-    assert storage.uses_fixed_width
-    assert storage.rows == rows
-    assert len(storage.values) == 3 * len(refs)
-    assert storage.values[:3] == (0xFF, 0x00, 0x00)
-    assert storage.values[-3:] == (0xFF, 0xFE, 0x00)
-    assert storage.starts == tuple(range(len(refs) + 1))
+def test_guard_program_offsets_cover_compact_byte_halfword_and_word_units() -> None:
+    for row_count, expected_shift in ((255, 0), (256, 1), (1024, 2)):
+        rows = tuple(range(row_count))
+        refs = tuple(index % row_count for index in range(65535))
+        program_starts = tuple(range(0, len(refs), 17))
+        storage = _encode_guard_ref_storage(rows, refs, program_starts)
+        assert storage.offset_shift == expected_shift
+        for start in program_starts:
+            cursor = storage.starts[start] << storage.offset_shift
+            assert storage.starts[start] <= 65535
+            decoded = []
+            for _ in range(min(17, len(refs) - start)):
+                ordinal = storage.values[cursor]
+                cursor += 1
+                if ordinal == 255:
+                    ordinal = storage.values[cursor] | (storage.values[cursor + 1] << 8)
+                    cursor += 2
+                decoded.append(storage.rows[ordinal])
+            assert tuple(decoded) == refs[start : start + 17]
+        # Alignment changes only program starts, not every compact reference.
+        if row_count == 256:
+            assert len(storage.values) < 2 * len(refs)
 
 
 def test_generated_tables_intern_source_memory_shapes() -> None:

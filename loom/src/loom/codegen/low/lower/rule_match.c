@@ -1709,13 +1709,9 @@ static iree_status_t loom_low_lower_rule_guard_program_matches(
   if (guard_count == 0) {
     return iree_ok_status();
   }
-  uint32_t guard_storage_start = guard_start;
-  if (IREE_UNLIKELY(rule_set->guard_ref_encoding ==
-                    LOOM_LOW_LOWER_GUARD_REF_ENCODING_FIXED_WIDTH)) {
-    guard_storage_start *= 3u;
-  }
   const loom_low_lower_guard_ref_t* guard_ref_cursor =
-      rule_set->guard_refs + guard_storage_start;
+      rule_set->guard_refs +
+      ((uint32_t)guard_start << rule_set->guard_ref_offset_shift);
   for (uint16_t i = 0; i < guard_count; ++i) {
     uint16_t guard_index = *guard_ref_cursor++;
     if (IREE_UNLIKELY(guard_index == LOOM_LOW_LOWER_GUARD_REF_ESCAPE)) {
