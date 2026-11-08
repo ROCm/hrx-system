@@ -139,7 +139,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_b
   %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %21 = mov.load-fifo.pointer %aligned
   %22 = mova.modifier 64
-  %23 = padda.modifier %21, %22
+  %23 = paddb.modifier %21, %22
   %24 = vlda.load-fifo.low512 %23, 0
   %25 = mova.fifo.position 64
   %26, %27, %28, %29 = vlda.pop.bfp16ebs8.buffered64 %23, %24, %25
@@ -200,7 +200,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_b
   %30 = mov.i32 576
   %31 = mac %29, %record, %30
   %32 = mov.modifier %31
-  %33 = padda.modifier %28, %32
+  %33 = paddb.modifier %28, %32
   %34 = vlda.load-fifo.low512.volatile<volatile> %33, 0
   %35 = mova.fifo.position 64
   %36, %37, %38, %39 = vlda.pop.bfp16ebs8.buffered64.volatile<volatile> %33, %34, %35
@@ -261,7 +261,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @matrix_b
   %31 = mov.i32 1728
   %32 = mac %30, %record, %31
   %33 = mov.modifier %32
-  %34 = padda.modifier %29, %33
+  %34 = paddb.modifier %29, %33
   %35 = vlda.load-fifo.low512.volatile<volatile> %34, 0
   %36 = mova.fifo.position 64
   %37, %38, %39, %40 = vlda.pop.bfp16ebs8.buffered64.volatile<volatile> %34, %35, %36

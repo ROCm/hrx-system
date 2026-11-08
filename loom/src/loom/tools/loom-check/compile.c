@@ -367,7 +367,8 @@ iree_status_t loom_check_compile_source_low(
     status = loom_check_compile_append_result(request->diagnostic_collector,
                                               result, out_compiled);
   }
-  if (iree_status_is_ok(status) && *out_compiled && out_result != NULL) {
+  if (iree_status_is_ok(status) && out_result != NULL &&
+      (*out_compiled || loomc_result_artifact_count(result) != 0)) {
     *out_result = result;
     result = NULL;
   }
@@ -391,7 +392,8 @@ static iree_status_t loom_check_compile_artifact_module(
   if (iree_status_is_ok(status)) {
     status = loom_check_compile_append_result(collector, result, &compiled);
   }
-  if (iree_status_is_ok(status) && compiled) {
+  if (iree_status_is_ok(status) &&
+      (compiled || loomc_result_artifact_count(result) != 0)) {
     *out_result = result;
     result = NULL;
   }
@@ -498,7 +500,8 @@ iree_status_t loom_check_emit_artifact(
     status = loom_check_compile_append_result(request->diagnostic_collector,
                                               result, &emitted);
   }
-  if (iree_status_is_ok(status) && emitted) {
+  if (iree_status_is_ok(status) &&
+      (emitted || loomc_result_artifact_count(result) != 0)) {
     *out_result = result;
     result = NULL;
   }

@@ -126,7 +126,7 @@ CHECK: vst.512.i32x16 %sum, %output_aligned, 64
 
 // ====
 
-// RUN: with-checks emit source-low output=low
+// RUN: emit source-low output=low
 
 aie2p.target<core> @target
 
@@ -141,10 +141,14 @@ func.def target(@target) @copy_i32x16_materialized_static(%source: buffer, %outp
 }
 
 // ----
-CHECK: * = mov.static-byte-offset 1024
-CHECK: %value = vlda.512.i32x16.index %source_aligned, *
-CHECK: vst.512.i32x16.index %value, %output_aligned, *
-CHECK-NOT: * = lda *
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @copy_i32x16_materialized_static() asm {
+  %source_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %10 = mov.static-address-index 1024
+  %value = vlda.512.i32x16.index %source_aligned, %10
+  vst.512.i32x16.index %value, %output_aligned, %10
+  return
+}
 
 // ====
 
@@ -570,10 +574,11 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @roundtri
 
 // ====
 
-// RUN: with-checks emit source-low output=low
+// RUN: emit source-low output=low
 
 aie2p.target<core> @target
 
+// The 28-byte copy has a native prefix; its tail cannot widen to 32 bytes.
 func.def target(@target) @roundtrip_bf16x14(%input: buffer, %output: buffer) {
   %input_aligned, %output_aligned = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
   %base = index.constant 0 : offset
@@ -585,14 +590,31 @@ func.def target(@target) @roundtrip_bf16x14(%input: buffer, %output: buffer) {
 }
 
 // ----
-// The 28-byte copy has a native prefix; its tail cannot widen to 32 bytes.
-CHECK: * = vlda.128.bf16x8 %input_aligned, 0
-CHECK: vst.128.bf16x8 *, %output_aligned, 0
-CHECK: * = mov.static-byte-offset 26
-CHECK-NOT: *vlda.256.*
-CHECK-NOT: *vlda.512.*
-CHECK-NOT: vst.256.*
-CHECK-NOT: vst.512.*
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @roundtrip_bf16x14() asm {
+  %input_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  %28 = vlda.128.bf16x8 %input_aligned, 0
+  %30 = mov.static-address-index 16
+  %31 = lda.i16.index %input_aligned, %30
+  %32 = mov.static-address-index 18
+  %33 = lda.i16.index %input_aligned, %32
+  %34 = mov.static-address-index 20
+  %35 = lda.i16.index %input_aligned, %34
+  %36 = mov.static-address-index 22
+  %37 = lda.i16.index %input_aligned, %36
+  %38 = mov.static-address-index 24
+  %39 = lda.i16.index %input_aligned, %38
+  %40 = mov.static-address-index 26
+  %41 = lda.i16.index %input_aligned, %40
+  vst.128.bf16x8 %28, %output_aligned, 0
+  st.i16.index %31, %output_aligned, %30
+  st.i16.index %33, %output_aligned, %32
+  st.i16.index %35, %output_aligned, %34
+  st.i16.index %37, %output_aligned, %36
+  st.i16.index %39, %output_aligned, %38
+  st.i16.index %41, %output_aligned, %40
+  return
+}
 
 // ====
 
@@ -613,19 +635,16 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @roundtri
   %input_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %22 = vlda.128.i8x16 %input_aligned, 0
-  %24 = mov.static-byte-offset 16
-  %25 = mov.address-index %24
-  %26 = lda.i8.index %input_aligned, %25
-  %27 = mov.static-byte-offset 17
-  %28 = mov.address-index %27
+  %24 = mov.static-address-index 16
+  %25 = lda.i8.index %input_aligned, %24
+  %26 = mov.static-address-index 17
+  %27 = lda.i8.index %input_aligned, %26
+  %28 = mov.static-address-index 18
   %29 = lda.i8.index %input_aligned, %28
-  %30 = mov.static-byte-offset 18
-  %31 = mov.address-index %30
-  %32 = lda.i8.index %input_aligned, %31
   vst.128.i8x16 %22, %output_aligned, 0
-  st.i8.index %26, %output_aligned, %25
+  st.i8.index %25, %output_aligned, %24
+  st.i8.index %27, %output_aligned, %26
   st.i8.index %29, %output_aligned, %28
-  st.i8.index %32, %output_aligned, %31
   return
 }
 
@@ -923,17 +942,16 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @gather_s
   %38 = lda.u16 %input_aligned, 0
   %39 = lda.u16 %input_aligned, 6
   %40 = lda.u16 %input_aligned, 14
-  %41 = mov.static-byte-offset 24
-  %42 = mov.address-index %41
-  %43 = lda.i16.index %input_aligned, %42
-  %44 = vbcst.16 %43
-  %45 = vpush.lo.16 %40, %44
-  %46 = vpush.lo.16 %39, %45
-  %value = vpush.lo.16 %38, %46
+  %41 = mov.static-address-index 24
+  %42 = lda.i16.index %input_aligned, %41
+  %43 = vbcst.16 %42
+  %44 = vpush.lo.16 %40, %43
+  %45 = vpush.lo.16 %39, %44
+  %value = vpush.lo.16 %38, %45
   st.s16 %38, %output_aligned, 0
   st.s16 %39, %output_aligned, 6
   st.s16 %40, %output_aligned, 14
-  st.i16.index %43, %output_aligned, %42
+  st.i16.index %42, %output_aligned, %41
   return %value
 }
 
@@ -993,42 +1011,40 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @masked_g
   %93 = vextract.8.imm %71, 3
   low.cond_br %93, ^_bb10, ^_bb11 : reg<aie2p.er>
 ^_bb10:
-  %94 = mov.static-byte-offset 24
-  %95 = mov.address-index %94
-  %96 = lda.i16.index %input_aligned, %95
-  low.br ^_bb12(%96: reg<aie2p.er>)
+  %94 = mov.static-address-index 24
+  %95 = lda.i16.index %input_aligned, %94
+  low.br ^_bb12(%95: reg<aie2p.er>)
 ^_bb11:
-  %97 = vextract.16.imm %old, 3
-  low.br ^_bb12(%97: reg<aie2p.er>)
+  %96 = vextract.16.imm %old, 3
+  low.br ^_bb12(%96: reg<aie2p.er>)
 ^_bb12(%65: reg<aie2p.er>):
-  %98 = vbcst.16 %65
-  %99 = vpush.lo.16 %64, %98
-  %100 = vpush.lo.16 %63, %99
-  %gathered = vpush.lo.16 %62, %100
-  %102 = vextract.16.imm %value, 0
-  %103 = vextract.16.imm %value, 1
-  %104 = vextract.16.imm %value, 2
-  %105 = vextract.16.imm %value, 3
+  %97 = vbcst.16 %65
+  %98 = vpush.lo.16 %64, %97
+  %99 = vpush.lo.16 %63, %98
+  %gathered = vpush.lo.16 %62, %99
+  %101 = vextract.16.imm %value, 0
+  %102 = vextract.16.imm %value, 1
+  %103 = vextract.16.imm %value, 2
+  %104 = vextract.16.imm %value, 3
   low.cond_br %72, ^_bb13, ^_bb14 : reg<aie2p.er>
 ^_bb13:
-  st.s16 %102, %output_aligned, 0
+  st.s16 %101, %output_aligned, 0
   low.br ^_bb14
 ^_bb14:
   low.cond_br %79, ^_bb15, ^_bb16 : reg<aie2p.er>
 ^_bb15:
-  st.s16 %103, %output_aligned, 6
+  st.s16 %102, %output_aligned, 6
   low.br ^_bb16
 ^_bb16:
   low.cond_br %86, ^_bb17, ^_bb18 : reg<aie2p.er>
 ^_bb17:
-  st.s16 %104, %output_aligned, 14
+  st.s16 %103, %output_aligned, 14
   low.br ^_bb18
 ^_bb18:
   low.cond_br %93, ^_bb19, ^_bb20 : reg<aie2p.er>
 ^_bb19:
-  %106 = mov.static-byte-offset 24
-  %107 = mov.address-index %106
-  st.i16.index %105, %output_aligned, %107
+  %105 = mov.static-address-index 24
+  st.i16.index %104, %output_aligned, %105
   low.br ^_bb20
 ^_bb20:
   return %gathered

@@ -90,17 +90,28 @@ static iree_status_t loom_aie2p_native_dma_local_word(
   }
   const loom_xdna_register_field_info_t address_field =
       loom_xdna_register_field_info(layout->address);
-  loom_op_t *integer, *shift, *address_bits, *length, *word;
+  const int address_shift =
+      address_field.least_significant_bit - encoding_shift;
+  loom_op_t *integer, *shift, *shifted, *length, *word;
   IREE_RETURN_IF_ERROR(
       loom_index_cast_build(builder, loom_index_add_result(address),
                             offset_type, word_type, location, &integer));
   IREE_RETURN_IF_ERROR(loom_scalar_constant_build(
       builder,
-      loom_attr_i64(address_field.least_significant_bit - encoding_shift),
+      loom_attr_i64(address_shift < 0 ? -address_shift : address_shift),
       word_type, location, &shift));
-  IREE_RETURN_IF_ERROR(loom_scalar_shli_build(
-      builder, 0, loom_index_cast_result(integer),
-      loom_scalar_constant_result(shift), word_type, location, &address_bits));
+  loom_value_id_t address_bits;
+  if (address_shift < 0) {
+    IREE_RETURN_IF_ERROR(loom_scalar_shrui_build(
+        builder, loom_index_cast_result(integer),
+        loom_scalar_constant_result(shift), word_type, location, &shifted));
+    address_bits = loom_scalar_shrui_result(shifted);
+  } else {
+    IREE_RETURN_IF_ERROR(loom_scalar_shli_build(
+        builder, 0, loom_index_cast_result(integer),
+        loom_scalar_constant_result(shift), word_type, location, &shifted));
+    address_bits = loom_scalar_shli_result(shifted);
+  }
   IREE_RETURN_IF_ERROR(loom_scalar_constant_build(
       builder,
       loom_attr_i64(
@@ -108,8 +119,8 @@ static iree_status_t loom_aie2p_native_dma_local_word(
               .words[transfer->descriptor_ordinal][layout->address_word]),
       word_type, location, &length));
   IREE_RETURN_IF_ERROR(loom_scalar_ori_build(
-      builder, loom_scalar_shli_result(address_bits),
-      loom_scalar_constant_result(length), word_type, location, &word));
+      builder, address_bits, loom_scalar_constant_result(length), word_type,
+      location, &word));
   *out_word = loom_scalar_ori_result(word);
   return iree_ok_status();
 }

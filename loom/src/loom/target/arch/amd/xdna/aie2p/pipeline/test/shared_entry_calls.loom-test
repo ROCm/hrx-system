@@ -54,7 +54,7 @@ low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_3() asm {
   st %seed, %38, 0
   %input = copy %38 : reg<aie2p.ep> -> reg<aie2p.ep>
   %84 = copy %38 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %output = padda %84, 128
+  %output = paddb %84, 128
   low.func.call @copy_spec0_spec0(%input, %output) : (reg<aie2p.ep>, reg<aie2p.ep>)
   rel %seed, 48
   low.br ^_bb1

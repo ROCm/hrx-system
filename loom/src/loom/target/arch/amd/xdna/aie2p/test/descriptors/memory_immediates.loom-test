@@ -1,6 +1,31 @@
-// Address additions write the DJ projection directly and accept signed bytes.
+// Static indices accept signed 32-bit displacements; DJ retains the low 20 bits.
 // RUN: verify
 
+low.func.def target<amd.xdna.aie2p.core> @static_index_bounds() -> (reg<aie2p.edj>, reg<aie2p.edj>) asm {
+  %minimum = mov.static-address-index -2147483648
+  %maximum = mov.static-address-index 2147483647
+  return %minimum, %maximum
+}
+
+// ====
+
+low.func.def target<amd.xdna.aie2p.core> @static_index_underflow() -> (reg<aie2p.edj>) asm {
+  // ERROR@+1: STRUCTURE/014 "i" "-2147483649"
+  %value = mov.static-address-index -2147483649
+  return %value
+}
+
+// ====
+
+low.func.def target<amd.xdna.aie2p.core> @static_index_overflow() -> (reg<aie2p.edj>) asm {
+  // ERROR@+1: STRUCTURE/014 "i" "2147483648"
+  %value = mov.static-address-index 2147483648
+  return %value
+}
+
+// ====
+
+// Address additions write the DJ projection directly and accept signed bytes.
 low.func.def target<amd.xdna.aie2p.core> @index_add_bounds(%origin: reg<aie2p.er>, %bias: reg<aie2p.er>) -> (reg<aie2p.edj>, reg<aie2p.edj>, reg<aie2p.edj>) asm {
   %lower = add.address-index.immediate %origin, -128
   %upper = add.address-index.immediate %origin, 127

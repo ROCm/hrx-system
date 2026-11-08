@@ -16,9 +16,8 @@ func.def @scalar_static_rank2_i32(%input: buffer, %output: buffer) -> (i32) {
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_static_rank2_i32() -> (reg<aie2p.er>) asm {
   %input_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %16 = mov.static-byte-offset 32
-  %17 = mov.address-index %16
-  %loaded = lda.i32.index %input_aligned, %17
+  %16 = mov.static-address-index 32
+  %loaded = lda.i32.index %input_aligned, %16
   st %loaded, %output_aligned, 24
   return %loaded
 }
@@ -210,11 +209,9 @@ func.def @scalar_static_rank3_i16(%input: buffer, %output: buffer) -> (i16) {
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @scalar_static_rank3_i16() -> (reg<aie2p.er>) asm {
   %input_aligned = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %output_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %16 = mov.static-byte-offset 54
-  %17 = mov.address-index %16
-  %loaded = lda.i16.index %input_aligned, %17
-  %19 = mov.static-byte-offset 24
-  %20 = mov.address-index %19
-  st.i16.index %loaded, %output_aligned, %20
+  %16 = mov.static-address-index 54
+  %loaded = lda.i16.index %input_aligned, %16
+  %18 = mov.static-address-index 24
+  st.i16.index %loaded, %output_aligned, %18
   return %loaded
 }

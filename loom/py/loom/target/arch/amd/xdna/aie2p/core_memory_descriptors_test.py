@@ -98,6 +98,40 @@ def test_pointer_updates_can_recreate_owned_input_chains() -> None:
             } == {("ptr_out", "ptr")}
 
 
+def test_pointer_updates_offer_only_timing_equivalent_address_lanes() -> None:
+    descriptors = {
+        descriptor.key: descriptor
+        for descriptor in AIE2P_CORE_DESCRIPTOR_SET.descriptors
+    }
+    schedules = {
+        schedule.name: schedule
+        for schedule in AIE2P_CORE_DESCRIPTOR_SET.schedule_classes
+    }
+    for addressing in ("immediate", "register", "2d", "3d"):
+        updates = {
+            lane: descriptors[f"amd.xdna.aie2p.address.add.{lane}.{addressing}"]
+            for lane in ("a", "b", "s")
+        }
+        assert updates["a"].schedule_alternatives == ()
+        for lane, alternate in (("b", "s"), ("s", "b")):
+            source = updates[lane]
+            target = updates[alternate]
+            assert source.schedule_alternatives == (target.key,)
+            assert source.constraints == target.constraints
+            assert source.effects == target.effects
+            assert [
+                (operand.read_event, operand.write_event) for operand in source.operands
+            ] == [
+                (operand.read_event, operand.write_event) for operand in target.operands
+            ]
+            assert schedules[source.schedule_class].latency_cycles == (
+                schedules[target.schedule_class].latency_cycles
+            )
+        assert schedules[updates["a"].schedule_class].latency_cycles > (
+            schedules[updates["b"].schedule_class].latency_cycles
+        )
+
+
 def test_modifier_moves_preserve_pure_move_family_contracts() -> None:
     descriptors = {
         descriptor.key: descriptor

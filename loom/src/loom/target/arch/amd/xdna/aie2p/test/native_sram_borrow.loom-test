@@ -3,6 +3,8 @@
 // A core fills a retained SRAM batch through borrowed DMA views, then consumes
 // its replay through compute memory. SRAM payloads have no core address. Each
 // copy retires both endpoint tasks before the complete batch is published.
+// Fixed byte addresses encode as word-address constants in the DMA packets;
+// advancing the destination by four bytes advances that encoded address by one.
 aie2p.target<array> @device {device_profile = "amd.xdna.strix.17f0_10"}
 
 pipeline.def<kernel> public retain target(@device) @staged_records() run(%input_arg: buffer, %output_arg: buffer) {
@@ -106,29 +108,24 @@ low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_17() asm {
   %190 = mov.local-address 458752
   %493 = mov.short 8
   %494 = mov.short 4
-  %498 = mov.i32 524288
-  %499 = mov.short -2
-  %500 = lshl %498, %499
+  %498 = mov.i32 131072
   %211 = mov.local-address 458768
   %212 = mov.i32 -2146316284
   %213 = mov.i32 -2147483648
-  low.func.call @__aie2p_worker_helper_1(%write, %211, %212, %500, %213) : (reg<aie2p.er>, reg<aie2p.ep>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>)
+  low.func.call @__aie2p_worker_helper_1(%write, %211, %212, %498, %213) : (reg<aie2p.er>, reg<aie2p.ep>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>)
   %214 = mov.ss
   %215 = mov.ss
-  %502 = mov.i32 524292
-  %503 = lshl %502, %499
-  low.func.call @__aie2p_worker_helper_1(%494, %211, %212, %503, %213) : (reg<aie2p.er>, reg<aie2p.ep>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>)
+  %500 = mov.i32 131073
+  low.func.call @__aie2p_worker_helper_1(%494, %211, %212, %500, %213) : (reg<aie2p.er>, reg<aie2p.ep>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>)
   %233 = mov.ss
   %234 = mov.ss
-  %505 = mov.i32 524296
-  %506 = lshl %505, %499
-  low.func.call @__aie2p_worker_helper_1(%493, %211, %212, %506, %213) : (reg<aie2p.er>, reg<aie2p.ep>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>)
+  %502 = mov.i32 131074
+  low.func.call @__aie2p_worker_helper_1(%493, %211, %212, %502, %213) : (reg<aie2p.er>, reg<aie2p.ep>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>)
   %254 = mov.ss
   %255 = mov.ss
-  %507 = mov.short 12
-  %508 = mov.i32 524300
-  %509 = lshl %508, %499
-  low.func.call @__aie2p_worker_helper_1(%507, %211, %212, %509, %213) : (reg<aie2p.er>, reg<aie2p.ep>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>)
+  %503 = mov.short 12
+  %504 = mov.i32 131075
+  low.func.call @__aie2p_worker_helper_1(%503, %211, %212, %504, %213) : (reg<aie2p.er>, reg<aie2p.ep>, reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>)
   %273 = mov.ss
   %274 = mov.ss
   %328 = mov.i32 -2146697216
@@ -141,23 +138,23 @@ low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_17() asm {
   mov.ms.last %489
   low.br ^_bb1(%write: reg<aie2p.er>, %write: reg<aie2p.er>)
 ^_bb1(%record: reg<aie2p.er>, %read: reg<aie2p.er>):
-  %510 = lt %record, %494
-  low.cond_br %510, ^_bb2, ^_bb3 : reg<aie2p.er>
+  %505 = lt %record, %494
+  low.cond_br %505, ^_bb2, ^_bb3 : reg<aie2p.er>
 ^_bb2:
   acq %322, 49
-  %511 = mov.short 16
-  %512 = add.nc %read, %493
-  %513 = eq %512, %511
-  %514 = copy %513 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %515 = sel.nez %write, %512, %514
-  %516 = mov.address-index %read
-  %value = lda.i32.index %190, %516
+  %506 = mov.short 16
+  %507 = add.nc %read, %493
+  %508 = eq %507, %506
+  %509 = copy %508 : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %510 = sel.nez %write, %507, %509
+  %511 = mov.address-index %read
+  %value = lda.i32.index %190, %511
   %result = add.nc %value, %489
-  st.i32.index %result, %190, %516
+  st.i32.index %result, %190, %511
   %offset = mul %record, %493
-  %521 = lshl %read, %507
-  %522 = mov.short 2
-  %523 = or %521, %522
+  %516 = lshl %read, %503
+  %517 = mov.short 2
+  %518 = or %516, %517
   %291 = mov.local-address 458776
   %292 = lda %291, 0
   %293 = lda %291, 4
@@ -165,9 +162,9 @@ low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_17() asm {
   %295 = ltu %294, %292
   %296 = add.rr %293, %295
   %298 = mov.i32 118816
-  mov.ms %522
+  mov.ms %517
   mov.ms %298
-  mov.ms.last %523
+  mov.ms.last %518
   %300 = mov.i32 1167396
   mov.ms %489
   mov.ms %300
@@ -179,13 +176,13 @@ low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_17() asm {
   mov.ms %304
   mov.ms.last %302
   %306 = mov.i32 122388
-  mov.ms %522
+  mov.ms %517
   mov.ms %306
   mov.ms.last %489
   %307 = mov.ss
   rel %489, 48
-  %524 = add.nc %record, %489
-  low.br ^_bb1(%524: reg<aie2p.er>, %515: reg<aie2p.er>)
+  %519 = add.nc %record, %489
+  low.br ^_bb1(%519: reg<aie2p.er>, %510: reg<aie2p.er>)
 ^_bb3:
   rel %489, 50
   low.br ^_bb4

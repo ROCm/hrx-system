@@ -153,19 +153,19 @@ control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 
 resident-programs count=1 instances=1
-resident-program index=0 representative-worker=0 instances=1 entry=@private_atomic_array$worker$0 tile=(0,2) code-bytes=432 resources=0 fixups=1
+resident-program index=0 representative-worker=0 instances=1 entry=@private_atomic_array$worker$0 tile=(0,2) code-bytes=402 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @private_atomic_array$worker$0() asm {
   %acquire_delta = mov.short -1
   %release_delta = mov.short 1
-  %78 = mov.local-address 458752
-  %79 = mov.local-address 491520
-  low.br ^_bb1(%78: reg<aie2p.ep>, %79: reg<aie2p.ep>)
-^_bb1(%67: reg<aie2p.ep>, %69: reg<aie2p.ep>):
+  %68 = mov.local-address 458752
+  %69 = mov.local-address 491520
+  low.br ^_bb1(%68: reg<aie2p.ep>, %69: reg<aie2p.ep>)
+^_bb1(%57: reg<aie2p.ep>, %59: reg<aie2p.ep>):
   acq %acquire_delta, 49
   acq %acquire_delta, 50
-  %input = copy %67 : reg<aie2p.ep> -> reg<aie2p.ep>
-  %output = copy %69 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %input = copy %57 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %output = copy %59 : reg<aie2p.ep> -> reg<aie2p.ep>
   %4 = lda %input, 0
   %5 = lda %input, 4
   %6 = lda %input, 8
@@ -204,57 +204,47 @@ low.func.def retain target<amd.xdna.aie2p.core> @private_atomic_array$worker$0()
   %33 = copy %32 : reg<aie2p.er> -> reg<aie2p.mr27_select>
   %34 = sel.nez %25, %24, %33
   %35 = mov.short 3
-  %36 = mov.static-byte-offset 32
-  %37 = mov.address-index %36
-  st.i32.index %28, %output, %37
-  %38 = mov.static-byte-offset 36
-  %39 = mov.address-index %38
-  st.i32.index %27, %output, %39
-  %40 = mov.static-byte-offset 40
-  %41 = mov.address-index %40
-  st.i32.index %30, %output, %41
-  %42 = mov.static-byte-offset 44
-  %43 = mov.address-index %42
-  st.i32.index %31, %output, %43
-  %44 = mov.static-byte-offset 48
-  %45 = mov.address-index %44
-  st.i32.index %28, %output, %45
-  %46 = mov.static-byte-offset 52
-  %47 = mov.address-index %46
-  st.i32.index %24, %output, %47
-  %48 = mov.static-byte-offset 56
-  %49 = mov.address-index %48
-  st.i32.index %35, %output, %49
-  %50 = mov.static-byte-offset 60
-  %51 = mov.address-index %50
-  st.i32.index %34, %output, %51
-  %initial_f32 = lda.i32.index %input, %37
-  %increment_f32 = lda.i32.index %input, %39
-  %54 = vbcst.32 %initial_f32
-  %55 = vbcst.32 %increment_f32
-  %56 = vmov.vector512.to.accumulator512.low %54
-  %57 = vmov.vector512.to.accumulator512.low %55
-  %58 = mova.i32 60
-  %59 = vadd.f32x16 %56, %57, %58
-  %60 = slice %59[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %61 = vmov.accumulator512.to.vector512 %60
-  %62 = vextract.32.imm %61, 0
-  %63 = mov.static-byte-offset 64
-  %64 = mov.address-index %63
-  st.i32.index %initial_f32, %output, %64
-  %65 = mov.static-byte-offset 68
-  %66 = mov.address-index %65
-  st.i32.index %62, %output, %66
+  %36 = mov.static-address-index 32
+  st.i32.index %28, %output, %36
+  %37 = mov.static-address-index 36
+  st.i32.index %27, %output, %37
+  %38 = mov.static-address-index 40
+  st.i32.index %30, %output, %38
+  %39 = mov.static-address-index 44
+  st.i32.index %31, %output, %39
+  %40 = mov.static-address-index 48
+  st.i32.index %28, %output, %40
+  %41 = mov.static-address-index 52
+  st.i32.index %24, %output, %41
+  %42 = mov.static-address-index 56
+  st.i32.index %35, %output, %42
+  %43 = mov.static-address-index 60
+  st.i32.index %34, %output, %43
+  %initial_f32 = lda.i32.index %input, %36
+  %increment_f32 = lda.i32.index %input, %37
+  %46 = vbcst.32 %initial_f32
+  %47 = vbcst.32 %increment_f32
+  %48 = vmov.vector512.to.accumulator512.low %46
+  %49 = vmov.vector512.to.accumulator512.low %47
+  %50 = mova.i32 60
+  %51 = vadd.f32x16 %48, %49, %50
+  %52 = slice %51[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %53 = vmov.accumulator512.to.vector512 %52
+  %54 = vextract.32.imm %53, 0
+  %55 = mov.static-address-index 64
+  st.i32.index %initial_f32, %output, %55
+  %56 = mov.static-address-index 68
+  st.i32.index %54, %output, %56
   rel %release_delta, 51
   rel %release_delta, 48
-  %71 = mov.address-to-scalar %67
-  %72 = mov.i32 16384
-  %73 = xor %71, %72
-  %74 = mov.scalar-to-address %73
-  %75 = mov.address-to-scalar %69
-  %76 = xor %75, %72
-  %77 = mov.scalar-to-address %76
-  low.br ^_bb1(%74: reg<aie2p.ep>, %77: reg<aie2p.ep>)
+  %61 = mov.address-to-scalar %57
+  %62 = mov.i32 16384
+  %63 = xor %61, %62
+  %64 = mov.scalar-to-address %63
+  %65 = mov.address-to-scalar %59
+  %66 = xor %65, %62
+  %67 = mov.scalar-to-address %66
+  low.br ^_bb1(%64: reg<aie2p.ep>, %67: reg<aie2p.ep>)
 }
 
 // ====

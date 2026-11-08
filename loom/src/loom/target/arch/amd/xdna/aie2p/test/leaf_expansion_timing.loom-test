@@ -20,6 +20,77 @@ coissued components: 4
 
 // ====
 
+// An independent pointer update moves from B to S while both load lanes are
+// occupied. The exact packet keeps the immediate and both load operands.
+// RUN: emit aie2p-leaf @address_lane_immediate report=code
+
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @address_lane_immediate(%accumulator_pointer: reg<aie2p.ep>, %vector_pointer: reg<aie2p.ep>, %cursor: reg<aie2p.ep>) -> (reg<aie2p.mbms>, reg<aie2p.vec256 x2>, reg<aie2p.ep>) asm {
+  %accumulator = vlda.acc %accumulator_pointer, 0
+  %vector = vldb.512.i32x16 %vector_pointer, 0
+  %next_cursor = paddb %cursor, 64
+  return %accumulator, %vector, %next_cursor
+}
+
+// ----
+code: 32 5b 1c 6a 08 b2 82 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+
+// ====
+
+// Register increments have the same alternative, without moving or copying
+// the modifier or weakening the pointer's consuming tie.
+// RUN: emit aie2p-leaf @address_lane_modifier report=code
+
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @address_lane_modifier(%accumulator_pointer: reg<aie2p.ep>, %vector_pointer: reg<aie2p.ep>, %cursor: reg<aie2p.ep>, %modifier: reg<aie2p.em>) -> (reg<aie2p.mbms>, reg<aie2p.vec256 x2>, reg<aie2p.ep>) asm {
+  %accumulator = vlda.acc %accumulator_pointer, 0
+  %vector = vldb.512.i32x16 %vector_pointer, 0
+  %next_cursor = paddb.modifier %cursor, %modifier
+  return %accumulator, %vector, %next_cursor
+}
+
+// ----
+code: 3c 20 17 b0 82 20 18 34 04 3a 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+
+// ====
+
+// A 2D update retains its aggregate count/size/stride/wrap ownership while
+// selecting the free address lane.
+// RUN: emit aie2p-leaf @address_lane_2d report=code
+
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @address_lane_2d(%accumulator_pointer: reg<aie2p.ep>, %vector_pointer: reg<aie2p.ep>, %cursor: reg<aie2p.ep>, %dimension: reg<aie2p.ed>) -> (reg<aie2p.mbms>, reg<aie2p.vec256 x2>, reg<aie2p.ep>, reg<aie2p.ed>) asm {
+  %accumulator = vlda.acc %accumulator_pointer, 0
+  %vector = vldb.512.i32x16 %vector_pointer, 0
+  %next_cursor, %next_dimension = paddb.2d %cursor, %dimension
+  return %accumulator, %vector, %next_cursor, %next_dimension
+}
+
+// ----
+code: 32 5b 10 6a 08 b2 82 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+
+// ====
+
+// The 3D form similarly carries both counts and all immutable address fields.
+// RUN: emit aie2p-leaf @address_lane_3d report=code
+
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @address_lane_3d(%accumulator_pointer: reg<aie2p.ep>, %vector_pointer: reg<aie2p.ep>, %cursor: reg<aie2p.ep>, %dimension: reg<aie2p.eds>) -> (reg<aie2p.mbms>, reg<aie2p.vec256 x2>, reg<aie2p.ep>, reg<aie2p.eds>) asm {
+  %accumulator = vlda.acc %accumulator_pointer, 0
+  %vector = vldb.512.i32x16 %vector_pointer, 0
+  %next_cursor, %next_dimension = paddb.3d %cursor, %dimension
+  return %accumulator, %vector, %next_cursor, %next_dimension
+}
+
+// ----
+code: 32 5b 18 6a 08 b2 82 00 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+
+// ====
+
 // Independent A/B FIFO pops can occupy one native packet even though both
 // update the sticky FIFO-underflow status register. Returning both payloads
 // keeps their load results observable after that packet.
