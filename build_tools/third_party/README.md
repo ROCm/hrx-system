@@ -229,9 +229,8 @@ endif()
 if(IREE_TARGET_HAS_THREADS AND IREE_BUILD_BENCHMARKS)
   iree_configure_google_benchmark()
 endif()
-if(IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_BUILD AND LOOM_ARCH_AMDGPU)
   iree_configure_rocm_hsa_runtime_headers()
-  iree_configure_rocm_aqlprofile_sdk_headers()
 endif()
 if(IREE_HAL_DRIVER_VULKAN)
   iree_configure_vulkan_headers()
@@ -242,7 +241,7 @@ endif()
 ```
 
 This keeps embedding builds predictable: disabling tests, benchmarks, HRX CTS,
-or AMDGPU support prevents those dependencies from being discovered or fetched.
+or Loom AMDGPU support prevents those dependencies from being discovered or fetched.
 
 ## Adding Or Updating A Dependency
 
@@ -284,9 +283,7 @@ Libbacktrace:     //third_party:libbacktrace
 Catch2:           //third_party:catch2
                   iree::third_party::catch2
 ROCm headers:     //third_party:hsa_runtime_headers
-                  //third_party:aqlprofile_sdk_headers
                   iree::third_party::hsa_runtime_headers
-                  iree::third_party::aqlprofile_sdk_headers
 Vulkan headers:   //third_party:vulkan_headers
                   iree::third_party::vulkan_headers
 ```

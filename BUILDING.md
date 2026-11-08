@@ -698,7 +698,6 @@ Building a driver does not open devices; applications select devices at runtime.
 | `IREE_ENABLE_VULKAN` | `ON`, `OFF` | Enables Vulkan API clients independently of HAL drivers. Defaults to `ON`; the Vulkan HAL also enables API availability. | Selects Vulkan API clients with the same default and HAL implication. | `--//build_tools/vulkan/config:enabled=<bool>` |
 | `IREE_ENABLE_D3D12` | `ON`, `OFF` | Enables D3D12 API clients for Windows targets. Defaults to `ON`. | Selects D3D12 API clients for Windows targets, including cross-compilation. Defaults to `ON`. | `--//build_tools/d3d12/config:enabled=<bool>` |
 | `IREE_NET_RDMA` | `ON`, `OFF` | Enables native RDMA resources and registration on Linux. Defaults to `OFF`. | Enables the same native RDMA packages; no host carrier is implicitly registered. Defaults to `OFF`. | `--//runtime/config/net:rdma=<bool>` |
-| `IREE_HAL_DRIVER_AMDGPU` | `ON`, `OFF` | Builds the legacy ROCr HAL driver, selected at runtime as `legacy-amdgpu`. | Adds or removes the `amdgpu` build selector from the recursive package scope and registers `legacy-amdgpu`. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_TASK` | `ON`, `OFF` | Builds the task runtime HAL driver. | Adds or removes `task` from the runtime driver registry. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_VULKAN` | `ON`, `OFF` | Builds the Vulkan runtime HAL driver. | Adds or removes `vulkan` from the runtime driver registry and recursive package scope. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
 | `IREE_HAL_DRIVER_WEBGPU` | `ON`, `OFF` | Builds the WebGPU runtime HAL driver. | Adds or removes `webgpu` from the runtime driver registry and recursive package scope for WebGPU development. | `--//runtime/config/hal:drivers=<complete-driver-list>` |
@@ -751,7 +750,7 @@ dependency stack:
 python dev.py bazel configure -DIREE_HAL_DRIVER_AMD=OFF -DAMDF_BUILD=ON
 iree-bazel-build //libamdf:all
 
-iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
+iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
 iree-cmake-build libamdf/all
 ```
 
@@ -789,47 +788,34 @@ package mode; without a ROCm path it inherits the global mode. To consume a
 ROCm or TheRock SDK while keeping other source dependencies pinned, set
 `IREE_ROCM_PATH` and leave `IREE_DEPENDENCY_MODE=pinned`.
 
-### Legacy ROCr HAL and ROCm
+### Optional ROCm device tooling
 
-The native AMD GPU HAL is enabled by default and requires neither ROCr nor a
-ROCm SDK. This section applies only to the legacy `legacy-amdgpu` HAL and to
-development that explicitly needs ROCm device tooling.
+The native AMD GPU HAL is enabled by default and needs neither ROCr nor a
+ROCm SDK. HIP interoperability tests and source-built HSACO fixtures can use a
+ROCm device compiler independently of the runtime. Pinned dependency mode
+provides headers without a ROCm installation; without a configured device
+toolchain, builds use the available checked-in device fixtures.
 
-Pinned mode is the default. It lets AMDGPU host-side code compile without a
-ROCm/TheRock root; Bazel writes `IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=none` when no
-ROCm path is configured:
-
-```bash
-python dev.py bazel configure -DIREE_HAL_DRIVER_AMDGPU=ON
-```
-
-Package mode consumes headers from a configured ROCm/TheRock root. Setting
-`IREE_ROCM_PATH` selects ROCm package header mode by default:
+Setting `IREE_ROCM_PATH` selects package headers and the optional ROCm device
+toolchain:
 
 ```bash
-python dev.py bazel configure \
-  -DIREE_HAL_DRIVER_AMDGPU=ON \
-  -DIREE_ROCM_PATH=/opt/rocm
+python dev.py bazel configure -DIREE_ROCM_PATH=/opt/rocm
 ```
 
-When a ROCm path is only needed for device tooling and the headers should still
-come from pinned sources, set `IREE_ROCM_DEPENDENCY_MODE=pinned` explicitly.
-
-Bazel configuration also accepts `IREE_ROCM_PATH` from the environment when
-the AMDGPU HAL is enabled:
+To use that device compiler with pinned headers, add
+`-DIREE_ROCM_DEPENDENCY_MODE=pinned`. With the native GPU engine enabled,
+Bazel configuration also accepts `IREE_ROCM_PATH` from the environment:
 
 ```bash
 IREE_ROCM_PATH=/opt/rocm python dev.py bazel configure \
-  -DIREE_HAL_DRIVER_AMDGPU=ON \
   -DIREE_ROCM_DEPENDENCY_MODE=pinned
 ```
 
-Host compiler selection is independent of the ROCm device toolchain. Set
-`CC`, `CXX`, and `AR` before configuring to choose the host compiler. A
-successful host build with pinned headers does not install ROCr; executing
-ROCr-backed AMDGPU programs still needs the runtime and access to a GPU.
-See the [AMDGPU build tools guide](build_tools/amdgpu/README.md) for device
-compiler selection and runtime target selectors.
+Host compiler selection remains independent: `CC`, `CXX`, and `AR` select the
+host tools. Explicit HIP/HSA interoperability tests still require their external
+runtime and GPU access. See the [AMDGPU build tools guide](build_tools/amdgpu/README.md)
+for device compiler selection and runtime target selectors.
 
 ### Loom compiler capabilities and execution
 
@@ -954,7 +940,7 @@ The Loom AMDGPU selector accepts:
 Runtime AMDGPU selectors such as `gfx9-generic`, `gfx908`,
 `gfx10-1-generic`, and `gfx10-3-generic` are not supported by the Loom compiler.
 The `iree_hal` selector narrows Loom to the supported subset requested by
-`IREE_HAL_AMDGPU_TARGETS`. Use it for a JIT build targeting the same processors
+`IREE_HAL_AMD_GPU_TARGETS`. Use it for a JIT build targeting the same processors
 as the runtime; `loom_defaults` keeps the compiler's full target set.
 
 AMDGPU compiler target selection is also a complete list. Bazel uses
@@ -976,7 +962,7 @@ To select Loom targets from the runtime's processor set:
 python dev.py cmake configure \
   -DLOOM_TARGET_ALL_AMD_GPU=ON \
   -DLOOM_ARCH_AMDGPU_TARGETS=iree_hal \
-  -DIREE_HAL_AMDGPU_TARGETS='gfx942;gfx1201'
+  -DIREE_HAL_AMD_GPU_TARGETS='gfx942;gfx1201'
 ```
 
 Execution options describe the runtime substrate available to Loom tools, not a

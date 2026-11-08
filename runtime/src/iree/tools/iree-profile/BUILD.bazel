@@ -18,7 +18,7 @@ iree_runtime_cc_binary(
     name = "iree-profile",
     srcs = ["iree-profile.c"],
     defines = iree_select({
-        "//runtime/config/hal:driver_amdgpu": ["IREE_PROFILE_HAVE_AMDGPU_ATT=1"],
+        "//runtime/config/hal:driver_amd_gpu": ["IREE_PROFILE_HAVE_AMDGPU_ATT=1"],
         "//conditions:default": ["IREE_PROFILE_HAVE_AMDGPU_ATT=0"],
     }),
     visibility = ["//tools:__pkg__"],
@@ -28,7 +28,7 @@ iree_runtime_cc_binary(
         "//runtime/src/iree/tooling/profile:commands",
         "//runtime/src/iree/tooling/profile:help",
     ] + iree_select({
-        "//runtime/config/hal:driver_amdgpu": ["//runtime/src/iree/tooling/profile/att"],
+        "//runtime/config/hal:driver_amd_gpu": ["//runtime/src/iree/tooling/profile/att"],
         "//conditions:default": [],
     }),
 )

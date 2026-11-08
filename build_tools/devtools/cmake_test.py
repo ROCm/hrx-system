@@ -183,12 +183,12 @@ class CMakeTest(unittest.TestCase):
         configure_plan = cmake_dev.configure_plan(
             tool_env,
             configured_build_dir=Path("build/cmake-debug"),
-            backend_args=["-DIREE_HAL_DRIVER_AMDGPU=OFF"],
+            backend_args=["-DIREE_HAL_DRIVER_AMD_GPU=OFF"],
         )
         configure_description = normalized_plan_description(configure_plan)
         self.assertIn("build/cmake-debug", configure_description)
         self.assertIn("record CMake build directory", configure_description)
-        self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=OFF", configure_description)
+        self.assertIn("-DIREE_HAL_DRIVER_AMD_GPU=OFF", configure_description)
 
         build_plan = cmake_dev.build_plan(
             tool_env,
@@ -645,7 +645,7 @@ class CMakeTest(unittest.TestCase):
 
     def test_try_cache_copy_preserves_project_configuration(self):
         entries = [
-            cmake_cache.CMakeCacheEntry("IREE_HAL_DRIVER_AMDGPU", "BOOL", "OFF"),
+            cmake_cache.CMakeCacheEntry("IREE_HAL_DRIVER_AMD_GPU", "BOOL", "OFF"),
             cmake_cache.CMakeCacheEntry("LIBHRX_BUILD", "BOOL", "OFF"),
             cmake_cache.CMakeCacheEntry("CMAKE_C_COMPILER", "FILEPATH", "/bin/cc"),
             cmake_cache.CMakeCacheEntry("BENCHMARK_ENABLE_TESTING", "BOOL", "OFF"),
@@ -657,7 +657,7 @@ class CMakeTest(unittest.TestCase):
             cmake_try.write_initial_cache_file(cache_path, entries)
             cache_text = cache_path.read_text(encoding="utf-8")
 
-        self.assertIn("IREE_HAL_DRIVER_AMDGPU", cache_text)
+        self.assertIn("IREE_HAL_DRIVER_AMD_GPU", cache_text)
         self.assertIn("LIBHRX_BUILD", cache_text)
         self.assertIn("CMAKE_C_COMPILER", cache_text)
         self.assertNotIn("BENCHMARK_ENABLE_TESTING", cache_text)

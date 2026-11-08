@@ -23,7 +23,7 @@ contracts are still changing. It is not an official component of the ROCm stack.
 
 Native AMD GPU and NPU execution uses [libamdf](../libamdf/README.md) through
 the HAL. It needs compatible operating-system drivers; it does not require
-ROCr or a ROCm SDK installation. The optional `legacy-amdgpu` HAL uses ROCr.
+ROCr or a ROCm SDK installation.
 Compiling HIP device programs or exercising ROCm-specific tooling has its own
 toolchain requirements, described in the
 [AMDGPU build guide](../build_tools/amdgpu/README.md).
@@ -90,9 +90,9 @@ LD_PRELOAD="${HRX_ROOT}/lib/libamdhip64.so" ./my_hip_application
 
 The default `HRX_GPU_DRIVER=amdgpu` selects the native AMD GPU HAL.
 `HRX_GPU_DRIVER=rdna` or `HRX_GPU_DRIVER=cdna` restricts enumeration to one
-architecture family. `legacy-amdgpu` explicitly selects a build containing the
-ROCr-backed HAL. The [CTS guide](cts/README.md#selecting-the-runtime-and-device)
-describes device selection and how to identify the implementation under test.
+architecture family. The
+[CTS guide](cts/README.md#selecting-the-runtime-and-device) describes device
+selection and how to identify the implementation under test.
 
 HIP's automatic scheduling mode favors active waiting for low-latency stream
 synchronization. `hipDeviceScheduleYield` performs a bounded observation period

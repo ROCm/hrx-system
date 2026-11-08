@@ -69,9 +69,7 @@ Running `target_map.py` emits generated fragments consumed by multiple layers:
 | `build_tools/amdgpu/target_map.cmake` | CMake selector helpers. |
 | `build_tools/amdgpu/elf_machine_map.inl` | C/C++ ELF machine decode tables for runtime, libhrx, and Loom. |
 | `build_tools/amdgpu/target_map.h` | C/C++ tests that need exact-to-code-object lookup. |
-| `runtime/src/iree/hal/driver/amdgpu/target/identity_catalog.inl` | ROCr HAL target-ID mappings and processor facts. |
-| `runtime/src/iree/hal/driver/amd/gpu/target/identity_catalog.inl` | Independent AMD GPU HAL target-ID mappings and processor facts. |
-| `runtime/src/iree/hal/driver/amdgpu/util/device_library_target_map.inl` | Runtime qualified device-library artifact lookup. |
+| `runtime/src/iree/hal/driver/amd/gpu/target/identity_catalog.inl` | AMD GPU HAL target-ID mappings and processor facts. |
 
 The generated files are checked in. The presubmit check runs:
 
@@ -128,7 +126,7 @@ The runtime build owns the shared AMDGPU support selector:
 
 | Bazel flag | Consumer |
 | --- | --- |
-| `//runtime/src/iree/hal/driver/amdgpu:targets` | Runtime AMDGPU support: embedded device libraries, AMDGPU HAL CTS, source-built util test/benchmark assets, and libhrx CTS native executable assets. |
+| `//runtime/src/iree/hal/driver/amd/gpu:targets` | Native AMD GPU HAL device libraries and CTS, plus libhrx executable fixtures. |
 
 Source-built binaries use the optional `@iree_amdgpu_device_toolchain`
 repository. It is inert by default. A real producer is selected with:
@@ -198,7 +196,7 @@ The matching CMake selector variable is:
 
 | CMake variable | Consumer |
 | --- | --- |
-| `IREE_HAL_AMDGPU_TARGETS` | Runtime AMDGPU support: embedded device libraries, AMDGPU HAL CTS, source-built util test/benchmark assets, and libhrx CTS native executable assets. |
+| `IREE_HAL_AMD_GPU_TARGETS` | Native AMD GPU HAL device libraries and CTS, plus libhrx executable fixtures. |
 
 `iree_amdgpu_binary(...)` builds a single AMDGPU ELF shared object.
 `iree_amdgpu_binary_variants(...)` builds one shared object per selected

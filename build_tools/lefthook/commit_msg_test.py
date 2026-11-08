@@ -146,7 +146,7 @@ class CommitMessageTest(unittest.TestCase):
             "Update race lowering\n\nBody.\n",
             changed_paths=[
                 "loom/src/loom/target/arch/amdgpu/lower/sanitizer.c",
-                "runtime/src/iree/hal/driver/amdgpu/device.c",
+                "runtime/src/iree/hal/driver/amd/gpu/device.c",
             ],
         )
 

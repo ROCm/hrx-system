@@ -136,11 +136,10 @@ class CiCoreLinuxTest(unittest.TestCase):
             ),
         )
 
-    def test_amdgpu_device_binary_source_options_pin_rocm_root(self):
+    def test_amdgpu_device_toolchain_options_pin_rocm_root(self):
         self.assertEqual(
-            ci_core_linux.amdgpu_device_binary_source_options(Path("/tmp/rocm-root")),
+            ci_core_linux.amdgpu_device_toolchain_options(Path("/tmp/rocm-root")),
             [
-                "IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source",
                 "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN=rocm",
                 "IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN_ROCM_PATH=/tmp/rocm-root",
             ],
@@ -177,7 +176,7 @@ class CiCoreLinuxTest(unittest.TestCase):
             }
         )
         self.assertEqual(len(commands), 1)
-        self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=ON", commands[0])
+        self.assertIn("-DIREE_HAL_DRIVER_AMD_GPU=ON", commands[0])
         self.assertIn("-DLIBHRX_BUILD_CTS=ON", commands[0])
 
     def test_build_core_can_exclude_loom_from_the_product(self):

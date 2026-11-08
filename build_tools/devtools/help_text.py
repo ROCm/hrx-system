@@ -165,7 +165,7 @@ Use .bazelrc.local for checkout-specific Bazel overrides.""",
   python dev.py cmake configure
   python dev.py cmake configure --fresh
   python dev.py cmake configure -DCMAKE_BUILD_TYPE=Debug
-  python dev.py cmake configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
+  python dev.py cmake configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
   python dev.py cmake configure -DIREE_HAL_DRIVER_AMD_XDNA=OFF
   python dev.py cmake configure -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF
   python dev.py cmake configure -DLOOM_TARGET_ALL_CPU=ON
@@ -510,7 +510,7 @@ and host requirements can be scheduled independently.""",
             description="Build and run a CMake libFuzzer target.",
             arguments="CMake fuzz target and build options, followed by -- and fuzzer arguments.",
             epilog="""Examples:
-  python dev.py cmake configure -DIREE_ENABLE_FUZZING=ON -DLIBHRX_BUILD=OFF -DIREE_HAL_DRIVER_AMDGPU=OFF
+  python dev.py cmake configure -DIREE_ENABLE_FUZZING=ON -DLIBHRX_BUILD=OFF
   python dev.py cmake fuzz iree::tokenizer::special_tokens_fuzz
   python dev.py cmake fuzz iree::tokenizer::special_tokens_fuzz -- -max_total_time=60
 
@@ -639,7 +639,7 @@ maps to `cmake --build ... --target TARGET`.
 iree-cmake-configure
 iree-cmake-configure --fresh
 iree-cmake-configure --fresh -GNinja
-iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
+iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
 iree-cmake-configure -DIREE_HAL_DRIVER_AMD_XDNA=OFF
 iree-cmake-configure -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF
 iree-cmake-build hrx::hrx
@@ -1112,7 +1112,7 @@ wrapper builds that target, resolves the executable with the CMake target map,
 then execs it directly.
 
 ```bash
-iree-cmake-configure -DIREE_ENABLE_FUZZING=ON -DLIBHRX_BUILD=OFF -DIREE_HAL_DRIVER_AMDGPU=OFF
+iree-cmake-configure -DIREE_ENABLE_FUZZING=ON -DLIBHRX_BUILD=OFF
 iree-cmake-fuzz iree::tokenizer::special_tokens_fuzz
 iree-cmake-fuzz iree::tokenizer::special_tokens_fuzz -- -max_total_time=60
 ```

@@ -530,7 +530,6 @@ class CiCoreWindowsTest(unittest.TestCase):
         self.assertIn("-DLIBHRX_BUILD_CTS=OFF", configure_cmd)
         self.assertIn("-DLIBHRX_BUILD_HIP_BINDING=OFF", configure_cmd)
         self.assertIn("-DLIBHRX_BUILD_PASSTHROUGH=OFF", configure_cmd)
-        self.assertIn("-DIREE_HAL_DRIVER_AMDGPU=OFF", configure_cmd)
 
     def test_test_core_builds_the_selected_source_ctest_closure(self):
         with tempfile.TemporaryDirectory() as temporary:

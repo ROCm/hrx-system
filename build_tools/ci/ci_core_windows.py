@@ -588,7 +588,6 @@ def build_core(args: argparse.Namespace) -> None:
         "LIBHRX_BUILD_CTS=OFF",
         "LIBHRX_BUILD_HIP_BINDING=OFF",
         "LIBHRX_BUILD_PASSTHROUGH=OFF",
-        "IREE_HAL_DRIVER_AMDGPU=OFF",
         f"IREE_ROCM_PATH={cmake_path(rocm_root)}",
         "IREE_ENABLE_LIBBACKTRACE=OFF",
         f"IREE_ENABLE_ASSERTIONS={'ON' if args.assertions else 'OFF'}",

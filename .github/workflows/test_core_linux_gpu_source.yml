@@ -27,7 +27,7 @@ on:
         default: core
       amdgpu_targets:
         type: string
-        description: "IREE_HAL_AMDGPU_TARGETS selectors this runner can execute."
+        description: "IREE_HAL_AMD_GPU_TARGETS selectors this runner can execute."
         required: true
       expect_stream_value_waits:
         type: boolean
@@ -68,7 +68,7 @@ on:
         required: true
       amdgpu_targets:
         type: string
-        description: "IREE_HAL_AMDGPU_TARGETS selectors this runner can execute."
+        description: "IREE_HAL_AMD_GPU_TARGETS selectors this runner can execute."
         required: true
       run_id:
         type: string
@@ -136,7 +136,7 @@ jobs:
       HRX_ROCM_ROOT: ${{ github.workspace }}/build/linux-gpu/rocm-root
       HRX_DOWNLOAD_CACHE_DIR: ${{ github.workspace }}/build/linux-gpu/downloads
       HRX_BUILD_DIR: ${{ github.workspace }}/build/linux-gpu/build/hrx-core
-      HRX_CMAKE_OPTIONS: "-DIREE_HAL_AMDGPU_TARGETS=${{ inputs.amdgpu_targets }}"
+      HRX_CMAKE_OPTIONS: "-DIREE_HAL_AMD_GPU_TARGETS=${{ inputs.amdgpu_targets }}"
       HRX_BUILD_LOOM: "false"
       HRX_PACKAGE: "false"
       HRX_PACKAGE_SMOKE: "false"

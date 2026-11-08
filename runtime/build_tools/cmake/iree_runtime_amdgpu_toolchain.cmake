@@ -6,11 +6,6 @@
 
 include(CMakeParseArguments)
 
-set(IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE "prebuilt" CACHE STRING
-  "AMDGPU builtin device binary producer: prebuilt or source.")
-set_property(CACHE IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE
-  PROPERTY STRINGS prebuilt source)
-
 set(IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN "auto" CACHE STRING
   "AMDGPU device compiler provider: none, auto, rocm, or llvm-tools.")
 set_property(CACHE IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN
@@ -102,11 +97,6 @@ endfunction()
 
 function(_iree_amdgpu_device_toolchain_unavailable REASON)
   string(JOIN "" _REASON "${REASON}" ${ARGN})
-  if(IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE STREQUAL "source")
-    message(FATAL_ERROR
-      "IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE=source requires a complete "
-      "AMDGPU device toolchain: ${_REASON}")
-  endif()
   if(NOT IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN STREQUAL "auto" AND
      NOT IREE_HAL_AMDGPU_DEVICE_TOOLCHAIN STREQUAL "none")
     message(FATAL_ERROR
@@ -176,17 +166,9 @@ endfunction()
 
 function(iree_runtime_configure_amdgpu_toolchain)
   _iree_amdgpu_reset_resolved_device_toolchain()
-  if(NOT IREE_HAL_DRIVER_AMDGPU AND NOT IREE_HAL_DRIVER_AMD_GPU)
+  if(NOT IREE_HAL_DRIVER_AMD_GPU)
     return()
   endif()
-  if(NOT IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE STREQUAL "prebuilt" AND
-     NOT IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE STREQUAL "source")
-    message(FATAL_ERROR
-      "Unknown IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE="
-      "'${IREE_HAL_AMDGPU_DEVICE_BINARY_BUILD_MODE}'. Expected prebuilt or "
-      "source.")
-  endif()
-
   _iree_amdgpu_resolve_device_toolchain_provider(_PROVIDER)
   if(_PROVIDER STREQUAL "none")
     _iree_amdgpu_device_toolchain_unavailable(

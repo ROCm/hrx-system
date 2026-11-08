@@ -5,7 +5,6 @@
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 load("//build_tools/bazel:cmake.bzl", "iree_cmake_extra_content")
-load("//build_tools/bazel:query.bzl", "iree_assert_dependency_boundary")
 load("//build_tools/bazel:select.bzl", "iree_select")
 load("//runtime/build_tools/bazel:cc.bzl", "iree_runtime_cc_library")
 load("//runtime/build_tools/bazel:hal_driver.bzl", "iree_hal_driver_registry")
@@ -70,10 +69,4 @@ iree_runtime_cc_library(
 iree_cmake_extra_content(
     content = "iree_configure_external_hal_drivers()",
     inline = True,
-)
-
-iree_assert_dependency_boundary(
-    name = "no_legacy_amdgpu_dependencies",
-    forbidden_subtrees = ["//runtime/src/iree/hal/driver/amdgpu/..."],
-    target = ":driver",
 )

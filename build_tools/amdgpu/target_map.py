@@ -751,37 +751,6 @@ def render_runtime_identity_catalog_inl(repo_root, output_path, symbol_prefix):
     return "\n".join(lines)
 
 
-def render_device_library_target_map_inl():
-    output_path = (
-        "runtime/src/iree/hal/driver/amdgpu/util/device_library_target_map.inl"
-    )
-    lines = [
-        generated_header("//", output_path),
-        "//",
-        "// Define IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT(",
-        "//     artifact, target) before including this file.",
-        "",
-        "// clang-format off",
-        "#if defined(IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT)",
-    ]
-    for physical_target in AMDGPU_PHYSICAL_TARGET_INFOS:
-        if physical_target.target == physical_target.processor:
-            continue
-        lines.append(
-            'IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT("{}", "{}")'.format(
-                physical_target.target,
-                physical_target.target,
-            )
-        )
-    lines.extend(
-        [
-            "#endif  // IREE_AMDGPU_DEVICE_LIBRARY_TARGET_VARIANT",
-            "",
-        ]
-    )
-    return "\n".join(lines)
-
-
 def render_elf_machine_map_inl():
     output_path = "build_tools/amdgpu/elf_machine_map.inl"
     lines = [
@@ -869,24 +838,15 @@ def render_header():
 
 def generated_outputs(repo_root):
     build_tools_output_dir = repo_root / "build_tools/amdgpu"
-    legacy_catalog_path = (
-        "runtime/src/iree/hal/driver/amdgpu/target/identity_catalog.inl"
-    )
     gpu_catalog_path = "runtime/src/iree/hal/driver/amd/gpu/target/identity_catalog.inl"
-    driver_util_output_dir = repo_root / "runtime/src/iree/hal/driver/amdgpu/util"
     return {
         build_tools_output_dir / "target_map.bzl": render_bzl(),
         build_tools_output_dir / "target_map.cmake": render_cmake(),
         build_tools_output_dir / "elf_machine_map.inl": render_elf_machine_map_inl(),
         build_tools_output_dir / "target_map.h": render_header(),
-        repo_root / legacy_catalog_path: render_runtime_identity_catalog_inl(
-            repo_root, legacy_catalog_path, "IREE_HAL_AMDGPU"
-        ),
         repo_root / gpu_catalog_path: render_runtime_identity_catalog_inl(
             repo_root, gpu_catalog_path, "IREE_HAL_AMD_GPU"
         ),
-        driver_util_output_dir
-        / "device_library_target_map.inl": render_device_library_target_map_inl(),
     }
 
 

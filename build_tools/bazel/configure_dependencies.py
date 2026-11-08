@@ -91,10 +91,7 @@ def _apply_option(request: ConfigRequest, name: str, value: str) -> None:
 def _finalize(request: ConfigRequest) -> None:
     state = configuration(request)
     runtime = runtime_configure.configuration(request)
-    if (
-        runtime.drivers.intersection(runtime_configure.ROCM_DRIVERS)
-        and not state.rocm_path
-    ):
+    if "amd-gpu" in runtime.drivers and not state.rocm_path:
         environment_path = os.environ.get("IREE_ROCM_PATH")
         if environment_path:
             _set_rocm_path(state, environment_path)
@@ -102,27 +99,16 @@ def _finalize(request: ConfigRequest) -> None:
 
 def _validate(request: ConfigRequest) -> None:
     state = configuration(request)
-    rocm_drivers = runtime_configure.configuration(request).drivers.intersection(
-        runtime_configure.ROCM_DRIVERS
-    )
-    if (
-        rocm_drivers
-        and state.effective_rocm_dependency_mode == "package"
-        and not state.rocm_path
-    ):
+    if state.rocm_dependency_mode == "package" and not state.rocm_path:
         raise SystemExit(
-            "ROCm package dependency mode requires -DIREE_ROCM_PATH=/path/to/rocm, "
-            "--repo_env=IREE_ROCM_PATH=/path/to/rocm, or IREE_ROCM_PATH in the "
-            "environment when enabling {}. Set IREE_ROCM_DEPENDENCY_MODE=pinned "
-            "or auto to use pinned ROCm headers without a ROCm root.".format(
-                ", ".join(sorted(rocm_drivers))
-            )
+            "ROCm package dependency mode requires -DIREE_ROCM_PATH=/path/to/rocm "
+            "or --repo_env=IREE_ROCM_PATH=/path/to/rocm. Use pinned or auto "
+            "for header consumers that do not need a ROCm installation."
         )
 
 
 def _sections(request: ConfigRequest) -> tuple[BazelrcSection, ...]:
     state = configuration(request)
-    runtime = runtime_configure.configuration(request)
     dependency_lines = [
         bazelrc_line(
             "common", "--repo_env=IREE_DEPENDENCY_MODE=" + state.dependency_mode
@@ -136,11 +122,7 @@ def _sections(request: ConfigRequest) -> tuple[BazelrcSection, ...]:
                 + state.effective_rocm_dependency_mode,
             )
         )
-    device_toolchain = (
-        "rocm"
-        if "amdgpu" in runtime.drivers and state.rocm_path is not None
-        else "none"
-    )
+    device_toolchain = "rocm" if state.rocm_path is not None else "none"
     dependency_lines.append(
         bazelrc_line(
             "common",
