@@ -116,8 +116,16 @@ typedef enum loom_spirv_feature_atom_e {
   LOOM_SPIRV_FEATURE_ATOM_GROUP_NON_UNIFORM_SHUFFLE = 45,
   // Subgroup up and down shuffle operations.
   LOOM_SPIRV_FEATURE_ATOM_GROUP_NON_UNIFORM_SHUFFLE_RELATIVE = 46,
+  // SPV_KHR_integer_dot_product operations.
+  LOOM_SPIRV_FEATURE_ATOM_INTEGER_DOT_PRODUCT = 47,
+  // Integer dots admit all native integer vector types.
+  LOOM_SPIRV_FEATURE_ATOM_INTEGER_DOT_PRODUCT_INPUT_ALL = 48,
+  // Integer dots admit four-byte vectors.
+  LOOM_SPIRV_FEATURE_ATOM_INTEGER_DOT_PRODUCT_INPUT4X8_BIT = 49,
+  // Integer dots admit four bytes packed in an i32.
+  LOOM_SPIRV_FEATURE_ATOM_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED = 50,
   // Number of feature atom enum slots.
-  LOOM_SPIRV_FEATURE_ATOM_COUNT = 47,
+  LOOM_SPIRV_FEATURE_ATOM_COUNT = 51,
 } loom_spirv_feature_atom_t;
 
 // Bitset of loom_spirv_feature_atom_t values.
@@ -281,6 +289,23 @@ typedef enum loom_spirv_feature_bit_e {
 #define LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_SHUFFLE_RELATIVE \
   (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_GROUP_NON_UNIFORM_SHUFFLE_RELATIVE)
 
+// Target enables SPV_KHR_integer_dot_product operations.
+#define LOOM_SPIRV_FEATURE_INTEGER_DOT_PRODUCT \
+  (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_INTEGER_DOT_PRODUCT)
+
+// Target admits integer dot products of all native integer vector types.
+#define LOOM_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT_ALL \
+  (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_INTEGER_DOT_PRODUCT_INPUT_ALL)
+
+// Target admits integer dot products of four-byte vectors.
+#define LOOM_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT \
+  (UINT64_C(1) << LOOM_SPIRV_FEATURE_ATOM_INTEGER_DOT_PRODUCT_INPUT4X8_BIT)
+
+// Target admits integer dot products of four bytes packed in an i32.
+#define LOOM_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED \
+  (UINT64_C(1)                                                     \
+   << LOOM_SPIRV_FEATURE_ATOM_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED)
+
 // Feature bits known by the SPIR-V target package.
 #define LOOM_SPIRV_FEATURE_KNOWN_BITS                                         \
   (LOOM_SPIRV_FEATURE_VULKAN_SHADER |                                         \
@@ -325,7 +350,11 @@ typedef enum loom_spirv_feature_bit_e {
    LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_CLUSTERED |                           \
    LOOM_SPIRV_FEATURE_SUBGROUP_EXTENDED_TYPES |                               \
    LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_SHUFFLE |                             \
-   LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_SHUFFLE_RELATIVE)
+   LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM_SHUFFLE_RELATIVE |                    \
+   LOOM_SPIRV_FEATURE_INTEGER_DOT_PRODUCT |                                   \
+   LOOM_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT_ALL |                         \
+   LOOM_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT |                      \
+   LOOM_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED)
 
 // Feature bits unconditionally required by Vulkan 1.3 BDA HAL modules.
 #define LOOM_SPIRV_FEATURE_MODULE_VULKAN_1_3_BDA_BASELINE \
@@ -338,11 +367,11 @@ typedef enum loom_spirv_feature_bit_e {
    LOOM_SPIRV_FEATURE_GROUP_NON_UNIFORM)
 
 // Maximum number of OpExtension rows emitted by all modeled atoms.
-#define LOOM_SPIRV_FEATURE_MAX_EXTENSION_COUNT 10
+#define LOOM_SPIRV_FEATURE_MAX_EXTENSION_COUNT 11
 // Maximum number of OpCapability rows emitted by all modeled atoms.
-#define LOOM_SPIRV_FEATURE_MAX_CAPABILITY_COUNT 31
+#define LOOM_SPIRV_FEATURE_MAX_CAPABILITY_COUNT 35
 // Maximum number of opcode rows exposed by all modeled atoms.
-#define LOOM_SPIRV_FEATURE_MAX_OPCODE_COUNT 34
+#define LOOM_SPIRV_FEATURE_MAX_OPCODE_COUNT 37
 // Maximum number of storage-class rows exposed by all modeled atoms.
 #define LOOM_SPIRV_FEATURE_MAX_STORAGE_CLASS_COUNT 1
 // Maximum number of decoration rows exposed by all modeled atoms.

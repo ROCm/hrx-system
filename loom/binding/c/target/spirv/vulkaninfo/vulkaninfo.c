@@ -1199,6 +1199,41 @@ static const loomc_spirv_vulkaninfo_feature_field_t
         },
 };
 
+static loomc_status_t loomc_spirv_vulkaninfo_import_integer_dot_features(
+    loomc_spirv_vulkaninfo_import_t* import, iree_string_view_t features,
+    iree_string_view_t extended_features, loomc_target_fact_state_t int8) {
+  static const char* const struct_names[] = {
+      "VkPhysicalDeviceVulkan13Features",
+      "VkPhysicalDeviceShaderIntegerDotProductFeatures",
+      "VkPhysicalDeviceShaderIntegerDotProductFeaturesKHR",
+  };
+  static const loomc_spirv_feature_t dot_features[] = {
+      LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT,
+      LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT_ALL,
+      LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT,
+      LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT_PACKED,
+  };
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(struct_names); ++i) {
+    iree_string_view_t feature_struct = iree_string_view_empty();
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_lookup_feature_struct(
+        import, features, extended_features,
+        iree_make_cstring_view(struct_names[i]), &feature_struct));
+    loomc_target_fact_state_t state = LOOMC_TARGET_FACT_STATE_UNKNOWN;
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_read_bool_feature(
+        import, feature_struct, IREE_SV("shaderIntegerDotProduct"), &state));
+    for (iree_host_size_t j = 0; j < IREE_ARRAYSIZE(dot_features); ++j) {
+      LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
+          import, dot_features[j],
+          dot_features[j] ==
+                  LOOMC_SPIRV_FEATURE_INTEGER_DOT_PRODUCT_INPUT4X8_BIT
+              ? loomc_spirv_vulkaninfo_and_fact_states(state, int8)
+              : state,
+          loomc_make_cstring_view("vulkaninfo:shaderIntegerDotProduct")));
+    }
+  }
+  return loomc_ok_status();
+}
+
 static loomc_status_t loomc_spirv_vulkaninfo_import_features_from_structs(
     loomc_spirv_vulkaninfo_import_t* import, iree_string_view_t features,
     iree_string_view_t extended_features) {
@@ -1297,14 +1332,22 @@ static loomc_status_t loomc_spirv_vulkaninfo_import_features_from_structs(
       import, float16_int8_features, IREE_SV("shaderFloat16"),
       LOOMC_SPIRV_FEATURE_FLOAT16,
       loomc_make_cstring_view("vulkaninfo:shaderFloat16")));
-  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_bool_feature(
-      import, vulkan12_features, IREE_SV("shaderInt8"),
-      LOOMC_SPIRV_FEATURE_INT8,
-      loomc_make_cstring_view("vulkaninfo:shaderInt8")));
-  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_bool_feature(
-      import, float16_int8_features, IREE_SV("shaderInt8"),
-      LOOMC_SPIRV_FEATURE_INT8,
-      loomc_make_cstring_view("vulkaninfo:shaderInt8")));
+  loomc_target_fact_state_t int8 = LOOMC_TARGET_FACT_STATE_UNKNOWN;
+  const iree_string_view_t int8_structs[] = {vulkan12_features,
+                                             float16_int8_features};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(int8_structs); ++i) {
+    loomc_target_fact_state_t state = LOOMC_TARGET_FACT_STATE_UNKNOWN;
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_read_bool_feature(
+        import, int8_structs[i], IREE_SV("shaderInt8"), &state));
+    LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_feature_fact(
+        import, LOOMC_SPIRV_FEATURE_INT8, state,
+        loomc_make_cstring_view("vulkaninfo:shaderInt8")));
+    if (state != LOOMC_TARGET_FACT_STATE_UNKNOWN) {
+      int8 = state;
+    }
+  }
+  LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_import_integer_dot_features(
+      import, features, extended_features, int8));
   LOOMC_RETURN_IF_ERROR(loomc_spirv_vulkaninfo_add_bool_feature(
       import, vulkan12_features, IREE_SV("storageBuffer8BitAccess"),
       LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_8BIT_ACCESS,
