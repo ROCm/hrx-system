@@ -61,12 +61,9 @@ func.def @assemble_wide_word(%low: i32, %high: i32) -> (i64) {
 // ----
 low.func.def target<amd.xdna.aie2p.core> abi(object_function) @assemble_wide_word(%low: reg<aie2p.er>, %high: reg<aie2p.er>) -> (reg<aie2p.er x2>) asm {
   %11 = mov.short 0
-  %15 = mov.i32 32
-  %21 = add.nc.immediate %15, -32
-  %23 = lshl %high, %21
-  %29 = or %low, %11
-  %30 = or %11, %23
-  %result = concat(%29, %30) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
+  %22 = or %low, %11
+  %23 = or %11, %high
+  %result = concat(%22, %23) : (reg<aie2p.er>, reg<aie2p.er>) -> reg<aie2p.er x2>
   return %result
 }
 

@@ -585,6 +585,37 @@ def _pair_unsigned_division_by_word_rule(
     )
 
 
+def _pair_word_shift_rule(source_op: Op) -> DescriptorRule:
+    """A whole-word shift selects one word and supplies only its fill."""
+    is_left = source_op is scalar_bitwise.scalar_shli
+    word = ValueRef.temporary("word")
+    program = ScalarProgram()
+    if source_op is scalar_bitwise.scalar_shrsi:
+        sign_count = program.constant("sign_count", -31)
+        fill = program.binary("sign_fill", "ashl.i32", word, sign_count)
+    else:
+        fill = program.constant("zero", 0)
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=program.emits[-1].descriptor,
+        priority=3,
+        guards=(
+            *_typed_guards(("lhs", "rhs", "result"), _I64),
+            Guard.value_i64_range("rhs", 32, 32),
+        ),
+        emit=(
+            EmitRegisterSlice(
+                source=ValueRef.operand("lhs"),
+                result=word,
+                unit_offset=0 if is_left else 1,
+                unit_count=1,
+            ),
+            *program.emits,
+            _concat_pair(fill, word) if is_left else _concat_pair(word, fill),
+        ),
+    )
+
+
 def _pair_bounded_left_shift_rule(word_index: int) -> DescriptorRule:
     """Uses retained count ranges to select one split-word shift regime."""
     lhs_emits, lhs_low, lhs_high = _split_pair(ValueRef.operand("lhs"), "lhs")
@@ -1320,6 +1351,14 @@ AIE2P_I64_RULES = (
         for divisor_maximum in (2**31, 2**32 - 1)
     ),
     _pair_multiply_rule(),
+    *(
+        _pair_word_shift_rule(source_op)
+        for source_op in (
+            scalar_bitwise.scalar_shli,
+            scalar_bitwise.scalar_shrui,
+            scalar_bitwise.scalar_shrsi,
+        )
+    ),
     *(_pair_bounded_left_shift_rule(word_index) for word_index in range(2)),
     _pair_left_shift_rule(),
     *(
