@@ -144,7 +144,8 @@ Text services can declare an independently versioned image projector:
 ```
 
 The component uses `text_image_prepare_v1`, `text_image_prepare_request_v1`,
-`text_image_prepare_batch_v1`, and `text_image_run_v1`. These exports may share
+`text_image_prepare_batch_v1`, `text_image_collect_batch_v1`, and
+`text_image_run_v1`. These exports may share
 one bytecode bundle with the primary text exports. Both use the card's selected
 providers and named parameter scopes. The server supports image component ABI 1
 and the unversioned `text_image_<role>` development contract. Other selected

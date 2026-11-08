@@ -1709,3 +1709,20 @@ loom_cc_test(
         "//runtime/src/iree/vm",
     ],
 )
+
+loom_cc_test(
+    name = "finite_continuation_test",
+    data = ["//loom/src/loom/service/finite/testdata:continuation.loom"],
+    env = {
+        "LOOM_FINITE_CONTINUATION_SOURCE": "$(rootpath //loom/src/loom/service/finite/testdata:continuation.loom)",
+    },
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/execute:x86_task_hal",
+    ]),
+    deps = [
+        ":test_compiler",
+        ":test_device",
+        "//loom/src/loom/service/finite:continuation_tests",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

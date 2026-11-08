@@ -210,6 +210,7 @@ typedef enum loom_serve_text_media_phase_e {
   MEDIA_SPECIALIZING,
   MEDIA_WAITING,
   MEDIA_RUNNING,
+  MEDIA_COLLECTING,
   MEDIA_FAILED,
 } loom_serve_text_media_phase_t;
 
@@ -578,6 +579,13 @@ static iree_status_t loom_serve_text_media_projector_batch(void* user_data) {
       projector->rows);
 }
 
+static iree_status_t loom_serve_text_media_projector_collect(void* user_data) {
+  loom_serve_text_media_projector_t* projector = user_data;
+  return loom_service_finite_model_collect_batch(
+      projector->model, projector->cohort_count, projector->prepared,
+      projector->result);
+}
+
 static void loom_serve_text_media_projector_select(
     loom_serve_text_media_projector_t* projector) {
   uint64_t remaining = loom_service_finite_model_batch_limit(projector->model);
@@ -629,22 +637,29 @@ static void loom_serve_text_media_projector_select(
   }
 }
 
-static void loom_serve_text_media_projector_complete(
+static void loom_serve_text_media_projector_retire_cohort(
     loom_serve_text_media_projector_t* projector) {
-  for (iree_host_size_t i = 0; i < projector->cohort_count; ++i) {
-    loom_serve_text_media_job_release(projector->cohort[i]);
-  }
   loom_service_finite_result_release(projector->result);
   projector->result = NULL;
   projector->cohort_count = 0;
   projector->phase = MEDIA_PREPARED;
 }
 
+static void loom_serve_text_media_projector_complete(
+    loom_serve_text_media_projector_t* projector) {
+  for (iree_host_size_t i = 0; i < projector->cohort_count; ++i) {
+    loom_serve_text_media_job_release(projector->cohort[i]);
+  }
+  loom_serve_text_media_projector_retire_cohort(projector);
+}
+
 static void loom_serve_text_media_projector_publish(
     loom_serve_text_media_projector_t* projector, bool completed) {
   for (iree_host_size_t i = 0; i < projector->cohort_count; ++i) {
     loom_serve_text_media_job_t* job = projector->cohort[i];
-    if (!job->request || (job->request->await_producer && !completed)) {
+    if (!job->request ||
+        !loom_service_finite_result_row_count(projector->result, i) ||
+        (job->request->await_producer && !completed)) {
       continue;
     }
     loom_serve_text_media_projection_result_t* projected =
@@ -674,7 +689,8 @@ bool loom_serve_text_media_projector_is_pending(
   return projector && (projector->phase == MEDIA_PREPARING ||
                        projector->phase == MEDIA_BATCHING ||
                        projector->phase == MEDIA_SPECIALIZING ||
-                       projector->phase == MEDIA_RUNNING);
+                       projector->phase == MEDIA_RUNNING ||
+                       projector->phase == MEDIA_COLLECTING);
 }
 
 void loom_serve_text_media_projector_set_observer(
@@ -692,8 +708,9 @@ const char* loom_serve_text_media_projector_phase(
     return NULL;
   }
   static const char* const phases[] = {
-      "image_gather",     "image_prepare", "image_prepared", "image_batch",
-      "image_specialize", "image_wait",    "image_execute",  "image_failed",
+      "image_gather",  "image_prepare",    "image_prepared",
+      "image_batch",   "image_specialize", "image_wait",
+      "image_execute", "image_collect",    "image_failed",
   };
   return phases[projector->phase];
 }
@@ -733,13 +750,27 @@ iree_status_t loom_serve_text_media_projector_advance(
       iree_any_bit_set(flags, LOOM_RUNTIME_SERVICE_FLAG_STOPPING);
   iree_status_t status = iree_ok_status();
   if (projector->phase == MEDIA_PREPARING ||
-      projector->phase == MEDIA_BATCHING) {
+      projector->phase == MEDIA_BATCHING ||
+      projector->phase == MEDIA_COLLECTING) {
     if (!loom_runtime_readiness_take(&projector->readiness,
                                      &projector->cpu_task.result, &status)) {
       return status;
     }
     *out_progress = true;
-    if (projector->phase == MEDIA_PREPARING) {
+    if (projector->phase == MEDIA_COLLECTING) {
+      if (iree_status_is_ok(status)) {
+        loom_service_finite_model_complete(projector->model);
+        loom_serve_text_media_projector_publish(projector, true);
+        for (iree_host_size_t i = 0; i < projector->cohort_count; ++i) {
+          loom_serve_text_media_job_t* job = projector->cohort[i];
+          job->prepared = projector->prepared[i];
+          if (!job->request || !job->prepared.units) {
+            loom_serve_text_media_job_release(job);
+          }
+        }
+        loom_serve_text_media_projector_retire_cohort(projector);
+      }
+    } else if (projector->phase == MEDIA_PREPARING) {
       for (iree_host_size_t i = 0; i < projector->count; ++i) {
         loom_serve_text_media_request_t* request = projector->jobs[i].request;
         if (request) {
@@ -778,9 +809,10 @@ iree_status_t loom_serve_text_media_projector_advance(
     }
     *out_progress = true;
     if (iree_status_is_ok(status)) {
-      loom_service_finite_model_complete(projector->model);
-      loom_serve_text_media_projector_publish(projector, true);
-      loom_serve_text_media_projector_complete(projector);
+      projector->phase = MEDIA_COLLECTING;
+      loom_runtime_readiness_schedule(&projector->readiness,
+                                      loom_serve_text_media_projector_collect,
+                                      projector, &projector->cpu_task);
     }
   }
   if (!iree_status_is_ok(status)) {

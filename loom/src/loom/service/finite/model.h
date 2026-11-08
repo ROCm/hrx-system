@@ -13,6 +13,7 @@
 #include "loom/runtime/program/compilation.h"
 #include "loom/runtime/program/sources.h"
 #include "loom/service/execution_reconfiguration.h"
+#include "loom/service/finite/generator.h"
 #include "loom/service/finite/result.h"
 #include "loom/service/prepared_request.h"
 
@@ -23,6 +24,11 @@ extern "C" {
 // One cached source program for finite vector-producing invocations. Calls are
 // serialized by its service; independent requests are data, not VM processes.
 typedef struct loom_service_finite_model_t loom_service_finite_model_t;
+
+// Borrows this source model's producer operations. The model outlives the
+// service and its accepted CPU/device captures.
+loom_service_finite_generator_t loom_service_finite_model_generator(
+    loom_service_finite_model_t* model);
 
 // Replaces command/direct execution over the same prepared parameters and VM
 // packet contract. A prepared batch retains the generation it captured;
@@ -98,9 +104,11 @@ iree_status_t loom_service_finite_load_free(loom_service_finite_load_t* load);
 //   (batch_units, upload_capacity, output_capacity, result_capacity: i64,
 //    tokenizer_asset, name, state: buffer).
 // control.loom:
-//   prepare_request(state, input: buffer) -> (bytes: buffer, units, tag: i64)
-//   prepare_batch(state, stage_tags, ranges, bytes: buffer) ->
+//   prepare_request(state, input: buffer) -> (request_state: buffer, units,
+//   tag: i64)
+//   prepare_batch(state, stage_tags: buffer, batch: ptr<finite.batch>) ->
 //     (stage: i32, payload, result_plan: buffer)
+//   collect_batch(state: buffer, batch: ptr<finite.batch>)
 //   run(stage: i32, input, output: hal.buffer)
 // Cold prepare imports declare command or direct-dispatch stages and their
 // configuration. Command stages can also declare checkpoint parameter domains.
@@ -109,28 +117,31 @@ iree_status_t loom_service_finite_load_free(loom_service_finite_load_t* load);
 // declarations reuse retained placement or prepare independent banks on demand;
 // omitted declarations preserve the cold checkpoint layout.
 // Tokenizer asset is relative to asset_root; empty omits tokenization support.
-// State is immutable across requests. Positive units bound cohort work/storage;
-// equal tags permit batching. Ranges contain [offset, length] i64 pairs into
-// bytes, in request order. The bytes buffer begins with a copy of ranges
-// followed by the concatenated prepared inputs; payload may forward this
-// allocation directly. Both stage kinds have two dynamic roots (input/output)
-// aligned to LOOM_SERVICE_FINITE_BUFFER_ALIGNMENT.
-// Commands may additionally have compiler-reflected private workspace; direct
-// stages use their compiled launch configuration without a command buffer or
-// runner workspace.
-// Command stages declared by one request share a parameter binding map;
-// retained request choices can bind different checkpoint banks.
-// Direct stages have no checkpoint parameters. Source run uses runner.execute_2
-// for both kinds and publishes device results. Native consumers choose whether
-// to compose device work or explicitly download a host snapshot.
-// Cold prepare may call prepare.memory_forecast(root) to select a synchronous
-// control entry with signature (state, ranges, descriptors: buffer) ->
-// (private_peak, retained, expanded: i64). It forecasts the complete descriptor
-// set across all producer cohorts, before pixel decoding or device work. The
-// consumer defines descriptor contents; ranges use the same offset/length
-// pairs as prepare_batch. Values are trusted byte estimates, not limits checked
-// against later compilation or allocation. Negative values are invalid.
-// The cold outer-application constructor drives the same asynchronous load and
+// Model state is shared across serialized calls; request state retains its
+// identity until that request ends. Positive units bound the next epoch; equal
+// tags permit batching. The finite module exposes stable members without
+// copying their state. Source may explicitly call finite.batch_pack for the
+// ordinary [offset, length] directory followed by concatenated states.
+// Successful device readiness authorizes collect_batch to commit progress and
+// publish next offers. Zero units finishes a member and requires complete
+// published rows; positive units require no rows. An empty output alone does
+// not finish work. Both stage kinds have two dynamic roots (input/output)
+// aligned to LOOM_SERVICE_FINITE_BUFFER_ALIGNMENT. Commands may additionally
+// have compiler-reflected private workspace; direct stages use their compiled
+// launch configuration without a command buffer or runner workspace. Command
+// stages declared by one request share a parameter binding map; retained
+// request choices can bind different checkpoint banks. Direct stages have no
+// checkpoint parameters. Source run uses runner.execute_2 for both kinds and
+// publishes device results. Native consumers choose whether to compose device
+// work or explicitly download a host snapshot. Cold prepare may call
+// prepare.memory_forecast(root) to select a synchronous control entry with
+// signature (state, ranges, descriptors: buffer) -> (private_peak, retained,
+// expanded: i64). It forecasts the complete descriptor set across all producer
+// cohorts, before pixel decoding or device work. The consumer defines
+// descriptor contents; ranges use the same offset/length pairs as
+// finite.batch_pack. Values are trusted byte estimates, not limits checked
+// against later compilation or allocation. Negative values are invalid. The
+// cold outer-application constructor drives the same asynchronous load and
 // joins it outside the shared worker pool. Creation indexes weights without
 // loading them. The shared device outlives this model. Failure releases partial
 // ownership and leaves *out_model NULL. Compilation evidence is available
@@ -242,8 +253,16 @@ iree_status_t loom_service_finite_model_prepare_request(
 // cohort.
 iree_status_t loom_service_finite_model_prepare_batch(
     loom_service_finite_model_t* model, iree_host_size_t count,
-    const loom_service_prepared_request_t* requests,
+    loom_service_prepared_request_t* requests,
     const iree_host_size_t* expected_rows);
+
+// CPU-only collection after successful device readiness, including cancelled
+// members in their original order. Commits source state and replaces next-work
+// offers. Failure retains the submitted payload for normal model retirement.
+iree_status_t loom_service_finite_model_collect_batch(
+    loom_service_finite_model_t* model, iree_host_size_t count,
+    loom_service_prepared_request_t* requests,
+    const loom_service_finite_result_t* result);
 
 // Observer used by request compilation only, installed before advance_batch.
 // Detachment follows terminal advance of every accepted compilation.

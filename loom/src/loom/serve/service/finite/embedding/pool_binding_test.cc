@@ -12,6 +12,7 @@
 #include "loom/serve/service/finite/http.h"
 #include "loom/serve/testing/model.h"
 #include "loom/service/finite/embedding/protocol.h"
+#include "loom/service/finite/model.h"
 
 namespace loom_serve::testing::embedding {
 
@@ -35,8 +36,9 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
     ASSERT_NO_FATAL_FAILURE(Load(package, device_, shared_, &peer_));
     ASSERT_NO_FATAL_FAILURE(Load(package, device_, isolated_, &model_));
     IREE_ASSERT_OK(loom_service_finite_service_allocate(
-        host_, model_, loom_service_embedding_protocol(), IREE_SV("fixture"),
-        16, 16, 0, nullptr, host_allocator_, &service_));
+        host_, loom_service_finite_model_generator(model_),
+        loom_service_embedding_protocol(), IREE_SV("fixture"), 16, 16, 0,
+        nullptr, host_allocator_, &service_));
     interface_ = loom_serve_finite_http_interface(service_);
     EXPECT_EQ(interface_.runtime.capacity_domain,
               loom_runtime_pool_residency_cache(isolated_));

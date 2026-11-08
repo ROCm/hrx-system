@@ -286,26 +286,52 @@ result capacities, an optional tokenizer asset, a source name and opaque state.
 Its control program exports:
 
 ```text
-prepare_request(state, input) -> (prepared_bytes, units, compatibility_tag)
-prepare_batch(state, stage_tags, ranges, prepared_bytes)
+prepare_request(state, input) -> (request_state, units, compatibility_tag)
+prepare_batch(state, stage_tags, batch: ptr<finite.batch>)
     -> (stage_index, upload_payload, result_plan)
 run(stage_index, input_buffer, output_buffer)
+collect_batch(state, batch: ptr<finite.batch>)
 ```
 
 The HTTP parser provides indexed protocol records, not a source-private JSON
 guess. `prepare_request` performs model framing and validation. `units` is a
 positive additive bound on real work/storage; it need not mean tokens. Equal
-compatibility tags mean requests can share a cohort. Source state is immutable
-across request preparation, and returned buffers retain any aliased input.
+compatibility tags mean requests can share a cohort. Each request retains its
+source buffer across epochs; the model shares one serialized control instance.
+Returned buffers retain any aliased input.
 
 The native scheduler starts with the oldest prepared request and fills the
 cohort from compatible waiting requests. It does not wait for hypothetical
-arrivals. Batch preparation receives stable request-order `[offset, length]` I64
-ranges into the packed buffer. The buffer starts with a copy of that directory,
-followed by the prepared request bytes. A program can upload this allocation
-directly and let device workers index requests through the directory, without
-copying the request data again. Batch preparation selects a declared stage and
-maps physical output back to requests.
+arrivals. The `finite` capability exposes the entire selected cohort to one
+preparation or collection call:
+
+| Import | Contract |
+| --- | --- |
+| `batch_count(batch) -> i64` | Number of selected members. |
+| `batch_state(batch, ordinal) -> buffer` | Retained request state at its original cohort ordinal. |
+| `batch_pack(batch) -> (ranges, packed)` | Explicitly copy states into an upload directory and payload. |
+| `batch_offer(batch, ordinal, units, tag)` | Publish the next work offer during successful collection. Zero units finishes the request. |
+| `batch_finish(batch)` | Finish every member of a one-shot cohort during collection. |
+
+The borrowed batch is valid only during that call. Cancellation preserves its
+original ordinals until collection retires. `batch_pack` produces request-order
+`[offset, length]` I64 ranges; the packed buffer contains the same directory
+followed by the states. A one-shot program can upload it directly. A continuing
+program can instead read each state and construct a compact control packet.
+Batch preparation selects a stage and maps physical output back to requests.
+
+After the accepted device frontier succeeds, `collect_batch` commits progress
+and publishes each member's next offer. It never runs for failed readiness.
+Unfinished members rejoin behind new arrivals, so compatible late requests can
+join the next epoch. Each member publishes either no rows or its complete
+result; collection must declare exactly the members with published rows
+finished. Empty output alone does not indicate completion. A one-shot source
+calls `finite.batch_finish` from collection and uses this same lifecycle.
+
+Request-state buffers are host control storage. Device intermediates need an
+explicit producer-owned lifetime across epochs: native generators own that
+storage and its retirement. Compiler workspace inside a source `run` invocation
+is scoped to that invocation.
 
 Finite `prepare_batch` can also declare stages with the `prepare` capability.
 It uses the same `stage`, `dispatch`, `config`, `config_i64`, and

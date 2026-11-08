@@ -1,3 +1,9 @@
+type.decl import("finite", "batch") @FiniteBatch
+
+func.decl import("finite", "batch_pack") @finite_batch_pack(%batch: ptr<@FiniteBatch>) -> (buffer, buffer)
+
+func.decl import("finite", "batch_finish") @finite_batch_finish(%batch: ptr<@FiniteBatch>)
+
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
 func.decl import("runner") @execute_2(%stage: i32, %input: hal.buffer, %output: hal.buffer) -> (i64)
@@ -100,7 +106,8 @@ func.def public @prepare_request(%state: buffer, %request: buffer) -> (buffer, i
 
 // One cohort includes all questions from all admitted requests. Reversed
 // physical rows force the host to consume the source's explicit result map.
-func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer) {
+func.def public @prepare_batch(%state: buffer, %tags: buffer, %batch: ptr<@FiniteBatch>) -> (i32, buffer, buffer) {
+  %ranges, %packed = func.call @finite_batch_pack(%batch) : (ptr<@FiniteBatch>) -> (buffer, buffer)
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -224,5 +231,10 @@ func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %
 
 func.def public @run(%stage: i32, %input: hal.buffer, %output: hal.buffer) {
   %work = func.call @execute_2(%stage, %input, %output) : (i32, hal.buffer, hal.buffer) -> (i64)
+  func.return
+}
+
+func.def public @collect_batch(%state: buffer, %batch: ptr<@FiniteBatch>) {
+  func.call @finite_batch_finish(%batch) : (ptr<@FiniteBatch>)
   func.return
 }

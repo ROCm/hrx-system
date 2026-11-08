@@ -73,6 +73,7 @@ void SourceTextServiceTest::TearDown() {
     loom_serve_http_server_request_stop(server_);
     IREE_EXPECT_OK(http_.Join());
   }
+  loom_runtime_device_group_set_observer(group_, {});
   IREE_EXPECT_OK(loom_serve_http_listener_free(listener_));
   loom_serve_http_server_free(server_);
   IREE_EXPECT_OK(loom_serve_text_model_free(model_));

@@ -11,7 +11,7 @@
 #include "loom/runtime/telemetry/stream.h"
 #include "loom/service/finite/call.h"
 #include "loom/service/finite/consumer.h"
-#include "loom/service/finite/model.h"
+#include "loom/service/finite/generator.h"
 #include "loom/service/finite/protocol.h"
 #include "loom/service/inspection.h"
 #include "loom/service/reconfiguration.h"
@@ -54,12 +54,14 @@ typedef struct loom_service_finite_service_interface_t {
   } telemetry;
 } loom_service_finite_service_interface_t;
 
-// Bounded finite-vector admission. The borrowed source model, protocol and
+// Bounded finite-vector admission. The borrowed generator, protocol and
 // route name outlive the service. CPU parsing, source preparation, batch
 // assembly and encoding share the host executor. Device ALL readiness uses the
 // proactor; workers never wait. Compatible requests already waiting fill the
 // oldest request's cohort up to its source-defined limit, without an arrival
-// delay. capacity bounds all outstanding host requests, including the live
+// delay. After successful collection, unfinished members rejoin behind late
+// arrivals. Accepted ordinals remain stable through cancellation and
+// collection. capacity bounds all outstanding host requests, including the live
 // cohort. variant_capacity bounds retained execution choices; zero disables
 // reconfiguration. A nonnegative heartbeat_interval controls periodic
 // snapshots; zero disables periodic samples, not counters or lifecycle events.
@@ -68,7 +70,7 @@ typedef struct loom_service_finite_service_interface_t {
 // shares the serialized owner's publication order. NULL creates a service-owned
 // stream.
 iree_status_t loom_service_finite_service_allocate(
-    loom_runtime_host_t* host, loom_service_finite_model_t* model,
+    loom_runtime_host_t* host, loom_service_finite_generator_t generator,
     const loom_service_finite_protocol_t* protocol, iree_string_view_t name,
     iree_host_size_t capacity, iree_host_size_t variant_capacity,
     iree_duration_t heartbeat_interval, loom_runtime_telemetry_stream_t* stream,

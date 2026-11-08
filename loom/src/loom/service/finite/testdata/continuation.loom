@@ -1,0 +1,257 @@
+type.decl import("finite", "batch") @FiniteBatch
+
+func.decl import("finite", "batch_count") @finite_batch_count(%batch: ptr<@FiniteBatch>) -> (i64)
+
+func.decl import("finite", "batch_state") @finite_batch_state(%batch: ptr<@FiniteBatch>, %ordinal: i64) -> (buffer)
+
+func.decl import("finite", "batch_offer") @finite_batch_offer(%batch: ptr<@FiniteBatch>, %ordinal: i64, %units: i64, %tag: i64)
+
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+// Request state owns its cursor and input. The native producer only assigns a
+// storage slot; the source chooses work, completion, and compatibility.
+func.def public @prepare_request(%input: buffer, %slot: i32) -> (buffer, i64, i64) {
+  %origin = index.constant 0 : offset
+  %header = buffer.view %input[%origin] : buffer -> view<5xi64>
+  %rows = view.load %header[1] : view<5xi64> -> i64
+  %kind = view.load %header[2] : view<5xi64> -> i64
+  %offset64 = view.load %header[3] : view<5xi64> -> i64
+  %bytes64 = view.load %header[4] : view<5xi64> -> i64
+  %c0_i64 = scalar.constant 0 : i64
+  %c1_i64 = scalar.constant 1 : i64
+  %epoch_units_i64 = scalar.constant 2 : i64
+  %c4_i64 = scalar.constant 4 : i64
+  %capacity_i64 = scalar.constant 8 : i64
+  %length = scalar.divui %bytes64, %c4_i64 : i64
+  %one_row = scalar.cmpi eq, %rows, %c1_i64 : i64
+  %tokens = scalar.cmpi eq, %kind, %c1_i64 : i64
+  %nonempty = scalar.cmpi ugt, %length, %c0_i64 : i64
+  %fits = scalar.cmpi ule, %length, %capacity_i64 : i64
+  %shape = scalar.andi %one_row, %tokens : i1
+  %extent = scalar.andi %nonempty, %fits : i1
+  %valid = scalar.andi %shape, %extent : i1
+  %valid32 = scalar.extui %valid : i1 to i32
+  %error = buffer.constant utf8("one sequence of 1-8 token IDs required") : buffer
+  func.call @require(%valid32, %error) : (i32, buffer)
+  %storage_bytes = index.constant 56 : offset
+  %state = buffer.alloca<private> align(8) %storage_bytes : buffer
+  %metadata = buffer.view %state[%origin] : buffer -> view<14xi32>
+  %c0 = scalar.constant 0 : i32
+  %begin = index.constant 0 : index
+  %end = index.constant 14 : index
+  %step = index.constant 1 : index
+  scf.for %i = [%begin to %end step %step] {
+    view.store %c0, %metadata[%i] : i32, view<14xi32>
+  }
+  %length32 = scalar.trunci %length : i64 to i32
+  view.store %slot, %metadata[0] : i32, view<14xi32>
+  view.store %length32, %metadata[1] : i32, view<14xi32>
+  %bounded_offset = scalar.assume %offset64 [range(%offset64, 0, 9223372036854775807)] : i64
+  %bounded_bytes = scalar.assume %bytes64 [range(%bytes64, 4, 32)] : i64
+  %offset = index.cast %bounded_offset : i64 to offset
+  %bytes = index.cast %bounded_bytes : i64 to offset
+  %payload = index.constant 16 : offset
+  buffer.copy %input[%offset], %state[%payload], %bytes
+  %units = scalar.minui %length, %epoch_units_i64 : i64
+  func.return %state, %units, %c0_i64 : buffer, i64, i64
+}
+
+func.def @prepare_work(%state: buffer, %packet: buffer, %ordinal32: i32) -> (i64, i64) {
+  %origin = index.constant 0 : offset
+  %metadata = buffer.view %state[%origin] : buffer -> view<14xi32>
+  %slot = view.load %metadata[0] : view<14xi32> -> i32
+  %length = view.load %metadata[1] : view<14xi32> -> i32
+  %position = view.load %metadata[2] : view<14xi32> -> i32
+  %epoch_units = scalar.constant 2 : i32
+  %proposed = scalar.addi %position, %epoch_units : i32
+  %end = scalar.minui %proposed, %length : i32
+  %complete = scalar.cmpi eq, %end, %length : i32
+  %complete32 = scalar.extui %complete : i1 to i32
+  %bounded_ordinal = scalar.assume %ordinal32 [range(%ordinal32, 0, 3)] : i32
+  %ordinal = index.cast %bounded_ordinal : i32 to index
+  %header_bytes = index.constant 4 : offset
+  %rows = buffer.view %packet[%header_bytes] : buffer -> view<4x4xi32>
+  view.store %slot, %rows[%ordinal, 0] : i32, view<4x4xi32>
+  view.store %position, %rows[%ordinal, 1] : i32, view<4x4xi32>
+  view.store %end, %rows[%ordinal, 2] : i32, view<4x4xi32>
+  view.store %complete32, %rows[%ordinal, 3] : i32, view<4x4xi32>
+  %consumed32 = scalar.subi %end, %position : i32
+  %consumed = scalar.extui %consumed32 : i32 to i64
+  %final = scalar.extui %complete : i1 to i64
+  func.return %final, %consumed : i64, i64
+}
+
+// Publication is consumed after the accepted device frontier succeeds. Planning
+// a cursor is not enough to commit it; unsuccessful epochs never call this.
+func.def @collect(%state: buffer, %packet: buffer, %ordinal32: i32) -> (i64, i64) {
+  %origin = index.constant 0 : offset
+  %metadata = buffer.view %state[%origin] : buffer -> view<14xi32>
+  %length = view.load %metadata[1] : view<14xi32> -> i32
+  %bounded_ordinal = scalar.assume %ordinal32 [range(%ordinal32, 0, 3)] : i32
+  %ordinal = index.cast %bounded_ordinal : i32 to index
+  %header_bytes = index.constant 4 : offset
+  %rows = buffer.view %packet[%header_bytes] : buffer -> view<4x4xi32>
+  %end = view.load %rows[%ordinal, 2] : view<4x4xi32> -> i32
+  view.store %end, %metadata[2] : i32, view<14xi32>
+  %remaining = scalar.subi %length, %end : i32
+  %epoch_units = scalar.constant 2 : i32
+  %phase_boundary = scalar.constant 4 : i32
+  %units32 = scalar.minui %remaining, %epoch_units : i32
+  %units = scalar.extui %units32 : i32 to i64
+  %next_phase = scalar.cmpi uge, %end, %phase_boundary : i32
+  %tag = scalar.extui %next_phase : i1 to i64
+  func.return %units, %tag : i64, i64
+}
+
+// One VM call plans the whole cohort. Original member ordinals also index the
+// device packet and result directory, including members cancelled after submit.
+func.def public @prepare_batch(%batch: ptr<@FiniteBatch>, %packet: buffer) -> (buffer) {
+  %count64 = func.call @finite_batch_count(%batch) : (ptr<@FiniteBatch>) -> (i64)
+  %bounded_count = scalar.assume %count64 [range(%count64, 1, 4)] : i64
+  %count = index.cast %bounded_count : i64 to index
+  %count32 = scalar.trunci %count64 : i64 to i32
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c0_i64 = scalar.constant 0 : i64
+  %c1_i64 = scalar.constant 1 : i64
+  %count_view = buffer.view %packet[%origin] : buffer -> view<1xi32>
+  view.store %count32, %count_view[0] : i32, view<1xi32>
+  %row_count = scf.for %i = [%c0 to %count step %c1](%total = %c0_i64 : i64) -> (i64) {
+    %ordinal = index.cast %i : index to i64
+    %ordinal32 = scalar.trunci %ordinal : i64 to i32
+    %request = func.call @finite_batch_state(%batch, %ordinal) : (ptr<@FiniteBatch>, i64) -> (buffer)
+    %final, %consumed = func.call @prepare_work(%request, %packet, %ordinal32) : (buffer, buffer, i32) -> (i64, i64)
+    %next = scalar.addi %total, %final : i64
+    scf.yield %next : i64
+  }
+  %bounded_rows = scalar.assume %row_count [range(%row_count, 0, 4)] : i64
+  %rows = index.cast %bounded_rows : i64 to index
+  %header_bytes = index.constant 32 : offset
+  %record_bytes = index.constant 24 : offset
+  %row_bytes = index.constant 16 : offset
+  %records_length = index.scale %count, %record_bytes : index, offset -> offset
+  %rows_offset = index.add %header_bytes, %records_length : offset
+  %rows_length = index.scale %rows, %row_bytes : index, offset -> offset
+  %length = index.add %rows_offset, %rows_length : offset
+  %plan = buffer.alloca<private> align(8) %length : buffer
+  %header = buffer.view %plan[%origin] : buffer -> view<4xi64>
+  %output_bytes = scalar.constant 16 : i64
+  view.store %output_bytes, %header[0] : i64, view<4xi64>
+  view.store %output_bytes, %header[1] : i64, view<4xi64>
+  view.store %count64, %header[2] : i64, view<4xi64>
+  view.store %row_count, %header[3] : i64, view<4xi64>
+  %records = buffer.view %plan[%header_bytes] : buffer -> view<[%count]x3xi64>
+  %vectors = buffer.view %plan[%rows_offset] : buffer -> view<[%rows]x2xi64>
+  %packet_offset = index.constant 4 : offset
+  %commands = buffer.view %packet[%packet_offset] : buffer -> view<4x4xi32>
+  %c4_i64 = scalar.constant 4 : i64
+  %unused = scf.for %i = [%c0 to %count step %c1](%first = %c0_i64 : i64) -> (i64) {
+    %begin32 = view.load %commands[%i, 1] : view<4x4xi32> -> i32
+    %end32 = view.load %commands[%i, 2] : view<4x4xi32> -> i32
+    %final32 = view.load %commands[%i, 3] : view<4x4xi32> -> i32
+    %consumed32 = scalar.subi %end32, %begin32 : i32
+    %consumed = scalar.extui %consumed32 : i32 to i64
+    %final = scalar.extui %final32 : i32 to i64
+    view.store %first, %records[%i, 0] : i64, view<[%count]x3xi64>
+    view.store %final, %records[%i, 1] : i64, view<[%count]x3xi64>
+    view.store %consumed, %records[%i, 2] : i64, view<[%count]x3xi64>
+    %publish = scalar.cmpi ne, %final, %c0_i64 : i64
+    scf.if %publish {
+      %bounded_first = scalar.assume %first [range(%first, 0, 3)] : i64
+      %row_index = index.cast %bounded_first : i64 to index
+      %maximum_row = index.sub %rows, %c1 : index
+      %row = index.assume %row_index [range(%row_index, 0, %maximum_row)] : index
+      %ordinal = index.cast %i : index to i64
+      %offset = scalar.muli %ordinal, %c4_i64 : i64
+      view.store %offset, %vectors[%row, 0] : i64, view<[%rows]x2xi64>
+      view.store %c1_i64, %vectors[%row, 1] : i64, view<[%rows]x2xi64>
+    }
+    %next = scalar.addi %first, %final : i64
+    scf.yield %next : i64
+  }
+  func.return %plan : buffer
+}
+
+func.def public @collect_batch(%batch: ptr<@FiniteBatch>, %packet: buffer) {
+  %count64 = func.call @finite_batch_count(%batch) : (ptr<@FiniteBatch>) -> (i64)
+  %bounded_count = scalar.assume %count64 [range(%count64, 1, 4)] : i64
+  %count = index.cast %bounded_count : i64 to index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  scf.for %i = [%c0 to %count step %c1] {
+    %ordinal = index.cast %i : index to i64
+    %ordinal32 = scalar.trunci %ordinal : i64 to i32
+    %request = func.call @finite_batch_state(%batch, %ordinal) : (ptr<@FiniteBatch>, i64) -> (buffer)
+    %units, %tag = func.call @collect(%request, %packet, %ordinal32) : (buffer, buffer, i32) -> (i64, i64)
+    func.call @finite_batch_offer(%batch, %ordinal, %units, %tag) : (ptr<@FiniteBatch>, i64, i64, i64)
+  }
+  func.return
+}
+
+target.decl @device
+
+kernel.def target(@device) @advance() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%input: buffer, %state: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c4_bytes = index.constant 4 : offset
+  %count_view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  %count32 = view.load %count_view[0] : view<1xi32> -> i32
+  %bounded_count = scalar.assume %count32 [range(%count32, 1, 4)] : i32
+  %count = index.cast %bounded_count : i32 to index
+  %packet = buffer.view %input[%c4_bytes] : buffer -> view<4x4xi32>
+  %states = buffer.view %state[%origin] : buffer -> view<4x10xi32>
+  %results = buffer.view %output[%origin] : buffer -> view<4xf32>
+  %c0_i32 = scalar.constant 0 : i32
+  scf.for %i = [%c0 to %count step %c1] {
+    %slot32 = view.load %packet[%i, 0] : view<4x4xi32> -> i32
+    %begin32 = view.load %packet[%i, 1] : view<4x4xi32> -> i32
+    %end32 = view.load %packet[%i, 2] : view<4x4xi32> -> i32
+    %final32 = view.load %packet[%i, 3] : view<4x4xi32> -> i32
+    %slot_bounded = scalar.assume %slot32 [range(%slot32, 0, 3)] : i32
+    %begin_bounded = scalar.assume %begin32 [range(%begin32, 0, 7)] : i32
+    %end_bounded = scalar.assume %end32 [range(%end32, 1, 8)] : i32
+    %slot = index.cast %slot_bounded : i32 to index
+    %begin = index.cast %begin_bounded : i32 to index
+    %end = index.cast %end_bounded : i32 to index
+    %old = view.load %states[%slot, 8] : view<4x10xi32> -> i32
+    %sum = scf.for %position = [%begin to %end step %c1](%value = %old : i32) -> (i32) {
+      %term = view.load %states[%slot, %position] : view<4x10xi32> -> i32
+      %next = scalar.addi %value, %term : i32
+      scf.yield %next : i32
+    }
+    view.store %sum, %states[%slot, 8] : i32, view<4x10xi32>
+    %final = scalar.cmpi ne, %final32, %c0_i32 : i32
+    scf.if %final {
+      %value = scalar.sitofp %sum : i32 to f32
+      view.store %value, %results[%i] : f32, view<4xf32>
+    }
+  }
+  kernel.return
+}
+
+// Invalid source policies exercise the same public binding used by real models.
+func.decl import("finite", "batch_finish") @finite_batch_finish(%batch: ptr<@FiniteBatch>)
+
+func.def public @collect_early_finish(%batch: ptr<@FiniteBatch>, %packet: buffer) {
+  func.call @finite_batch_finish(%batch) : (ptr<@FiniteBatch>)
+  func.return
+}
+
+func.def public @collect_continue_published(%batch: ptr<@FiniteBatch>, %packet: buffer) {
+  %ordinal = scalar.constant 0 : i64
+  %units = scalar.constant 1 : i64
+  func.call @finite_batch_offer(%batch, %ordinal, %units, %ordinal) : (ptr<@FiniteBatch>, i64, i64, i64)
+  func.return
+}
+
+func.def public @collect_over_capacity(%batch: ptr<@FiniteBatch>, %packet: buffer) {
+  %ordinal = scalar.constant 0 : i64
+  %units = scalar.constant 7 : i64
+  func.call @finite_batch_offer(%batch, %ordinal, %units, %ordinal) : (ptr<@FiniteBatch>, i64, i64, i64)
+  func.return
+}
