@@ -196,23 +196,3 @@ func.def target(@target) @exact_exp2(%input: f32) -> (f32) {
   %result = scalar.exp2f %input : f32
   func.return %result : f32
 }
-
-// ====
-
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @wide_exp2(%input: f64) -> (f64) {
-  // ERROR@+1: LOWERING/036 {op_name="scalar.exp2f", phase_name="legalize-math", policy_name="spirv-math", math_op="exp2f", lane_domain="scalar", element_type="f64", constraint_key="math.transcendental.f32"}
-  %result = scalar.exp2f<afn> %input : f64
-  func.return %result : f64
-}
-
-// ====
-
-spirv.target<vulkan1_3> @target
-
-func.def target(@target) @narrow_exp2(%input: f16) -> (f16) {
-  // ERROR@+1: LOWERING/036 {op_name="scalar.exp2f", phase_name="legalize-math", policy_name="spirv-math", math_op="exp2f", lane_domain="scalar", element_type="f16", constraint_key="math.transcendental.f32"}
-  %result = scalar.exp2f<afn> %input : f16
-  func.return %result : f16
-}

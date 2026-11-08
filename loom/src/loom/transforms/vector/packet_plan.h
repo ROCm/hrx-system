@@ -82,6 +82,8 @@ typedef enum loom_vector_packet_source_mode_e {
   LOOM_VECTOR_PACKET_SOURCE_MODE_SNAPSHOT = 2,
   // Reads static slices from an existing SSA value owned outside the graph.
   LOOM_VECTOR_PACKET_SOURCE_MODE_CAPTURED = 3,
+  // Streams a private snapshot created and consumed by this packet plan.
+  LOOM_VECTOR_PACKET_SOURCE_MODE_STAGED = 4,
 } loom_vector_packet_source_mode_t;
 
 typedef enum loom_vector_packet_selection_flag_bits_e {
@@ -107,12 +109,14 @@ typedef struct loom_vector_packetized_value_t {
   // One-based child indices for source-ID bits above the root directory bits.
   // Zero denotes an absent branch; indices survive record-array growth.
   uint32_t children[2];
+  // Immutable action used to rebuild streamed source packets.
+  loom_vector_packet_source_action_t source_action;
   // Original oversized source type.
   loom_type_t source_type;
   // Packet materialization mode for this source value.
   loom_vector_packet_source_mode_t source_mode;
-  // Immutable action used to rebuild streamed source packets.
-  loom_vector_packet_source_action_t source_action;
+  // Immutable private view owned by this plan when source_mode is STAGED.
+  loom_value_id_t staging_view;
   // Authored packet tuple retained for snapshot materialization.
   loom_value_fact_vector_partition_t source_partition;
   // Native packet materialized for the current physical loop iteration.

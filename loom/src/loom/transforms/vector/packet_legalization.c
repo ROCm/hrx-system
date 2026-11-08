@@ -1632,17 +1632,18 @@ iree_status_t loom_vector_packet_legalize_store(
     *out_rewritten = true;
     return iree_ok_status();
   }
+  if (has_captured_values || requires_static_slices) {
+    return iree_ok_status();
+  }
   if (has_snapshots) {
     if (!loom_vector_packet_private_staging_allowed(policy)) {
       return iree_ok_status();
     }
-    IREE_RETURN_IF_ERROR(loom_vector_packet_canonicalize_snapshots(
-        &packetization, &shape, /*dynamic_windows_only=*/false));
-    *out_rewritten = true;
-    return iree_ok_status();
-  }
-  if (has_captured_values || requires_static_slices) {
-    return iree_ok_status();
+    // This rewrite owns both the private snapshot and its consuming loop.
+    // Publishing oversized staging loads would let later legalization capture
+    // and stage them again without reducing the producer graph.
+    IREE_RETURN_IF_ERROR(
+        loom_vector_packet_stage_snapshots(&packetization, &shape));
   }
   if (!can_interleave) {
     if (!loom_vector_packet_private_staging_allowed(policy)) {
@@ -1899,17 +1900,18 @@ iree_status_t loom_vector_packet_legalize_reduce(
     *out_result = LOOM_VECTOR_PACKET_REDUCE_RESULT_REWRITTEN;
     return iree_ok_status();
   }
+  if (requires_static_slices) {
+    return iree_ok_status();
+  }
   if (has_snapshots) {
     if (!loom_vector_packet_private_staging_allowed(policy)) {
       return iree_ok_status();
     }
-    IREE_RETURN_IF_ERROR(loom_vector_packet_canonicalize_snapshots(
-        &packetization, &shape, /*dynamic_windows_only=*/false));
-    *out_result = LOOM_VECTOR_PACKET_REDUCE_RESULT_REWRITTEN;
-    return iree_ok_status();
-  }
-  if (requires_static_slices) {
-    return iree_ok_status();
+    // This rewrite owns both the private snapshot and its consuming loop.
+    // Publishing oversized staging loads would let later legalization capture
+    // and stage them again without reducing the producer graph.
+    IREE_RETURN_IF_ERROR(
+        loom_vector_packet_stage_snapshots(&packetization, &shape));
   }
   const loom_combining_kind_t kind = loom_vector_reduce_kind(op);
   const uint8_t fastmath_flags = loom_vector_reduce_fastmath(op);

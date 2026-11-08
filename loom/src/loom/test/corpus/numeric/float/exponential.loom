@@ -1,6 +1,7 @@
 // Exercises approximate exponential operations across directed IEEE-754
 // boundaries and deterministic full-width entropy. Exact power-of-two cases
-// separately preserve normal, subnormal, overflow, and underflow result bits.
+// preserve normal, overflow, and zero results exactly. AFN permits native
+// exp/exp2 to flush subnormal outputs; expm1 retains its near-zero accuracy.
 
 func.def @exponential_observations(%bits: i32, %output: buffer) {
   %input = scalar.bitcast %bits : i32 to f32
@@ -121,21 +122,22 @@ func.def @power_of_two_observations(%ordinal: index, %output: buffer) {
 check.scenario @exponential_values {
   check.trial[10](%trial: index, %entropy: check.entropy) {
     %output = check.generate.fill value(-1) : tensor<1xi32>
+    %floating_output = check.tensor.view %output offset(0) : tensor<1xi32> -> tensor<1xf32>
     check.compare<@power_of_two_observations>(%trial, %output) : (index, tensor<1xi32>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+      check.expect.approximate actual(%floating_output) expected(%floating_output) atol(0.0) rtol(0.0) nan(different) subnormal(flush) : tensor<1xf32>, tensor<1xf32>
     }
   }
   check.trial[12](%trial: index, %entropy: check.entropy) {
     %output = check.generate.fill value(0.0) : tensor<2xf32>
     check.compare<@exponential_boundary_observations>(%trial, %output) : (index, tensor<2xf32>) -> () {
-      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) : tensor<2xf32>, tensor<2xf32>
+      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) subnormal(flush) : tensor<2xf32>, tensor<2xf32>
     }
   }
   check.trial[256](%trial: index, %entropy: check.entropy) {
     %bits = check.entropy.read %entropy[%trial] : check.entropy -> i64
     %output = check.generate.fill value(0.0) : tensor<2xf32>
     check.compare<@exponential_entropy_observations>(%bits, %output) : (i64, tensor<2xf32>) -> () {
-      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) : tensor<2xf32>, tensor<2xf32>
+      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) subnormal(flush) : tensor<2xf32>, tensor<2xf32>
     }
   }
   check.return
@@ -326,7 +328,7 @@ check.scenario @exponential_f32_family_values {
     check.compare<@exponential_f32_family>(%input, %output) : (tensor<32xi32>, tensor<6x32xf32>) -> () {
       check.expect.bitwise actual(%vector_tiny) expected(%vector_tiny) : tensor<4xf32>
       check.expect.bitwise actual(%scalar_tiny) expected(%scalar_tiny) : tensor<4xf32>
-      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) : tensor<6x32xf32>, tensor<6x32xf32>
+      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) subnormal(flush) : tensor<6x32xf32>, tensor<6x32xf32>
       check.expect.approximate actual(%vector_difference) expected(%vector_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
       check.expect.approximate actual(%scalar_difference) expected(%scalar_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
     }
@@ -338,7 +340,7 @@ check.scenario @exponential_f32_family_values {
     %vector_difference = check.tensor.view %output offset(256) : tensor<6x32xf32> -> tensor<32xf32>
     %scalar_difference = check.tensor.view %output offset(640) : tensor<6x32xf32> -> tensor<32xf32>
     check.compare<@exponential_f32_family>(%input, %output) : (tensor<32xi32>, tensor<6x32xf32>) -> () {
-      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) : tensor<6x32xf32>, tensor<6x32xf32>
+      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) subnormal(flush) : tensor<6x32xf32>, tensor<6x32xf32>
       check.expect.approximate actual(%vector_difference) expected(%vector_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
       check.expect.approximate actual(%scalar_difference) expected(%scalar_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
     }
@@ -350,7 +352,7 @@ check.scenario @exponential_f32_family_values {
     %vector_difference = check.tensor.view %output offset(256) : tensor<6x32xf32> -> tensor<32xf32>
     %scalar_difference = check.tensor.view %output offset(640) : tensor<6x32xf32> -> tensor<32xf32>
     check.compare<@exponential_f32_family>(%input, %output) : (tensor<32xf32>, tensor<6x32xf32>) -> () {
-      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) : tensor<6x32xf32>, tensor<6x32xf32>
+      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) subnormal(flush) : tensor<6x32xf32>, tensor<6x32xf32>
       check.expect.approximate actual(%vector_difference) expected(%vector_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
       check.expect.approximate actual(%scalar_difference) expected(%scalar_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
     }
@@ -362,7 +364,7 @@ check.scenario @exponential_f32_family_values {
     %vector_difference = check.tensor.view %output offset(256) : tensor<6x32xf32> -> tensor<32xf32>
     %scalar_difference = check.tensor.view %output offset(640) : tensor<6x32xf32> -> tensor<32xf32>
     check.compare<@exponential_f32_family>(%input, %output) : (tensor<32xf32>, tensor<6x32xf32>) -> () {
-      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) : tensor<6x32xf32>, tensor<6x32xf32>
+      check.expect.approximate actual(%output) expected(%output) atol(1.4012984643248171e-45) rtol(1.0000000000000001e-05) nan(same) subnormal(flush) : tensor<6x32xf32>, tensor<6x32xf32>
       check.expect.approximate actual(%vector_difference) expected(%vector_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
       check.expect.approximate actual(%scalar_difference) expected(%scalar_difference) atol(1.4012984643248171e-45) rtol(5.9604644775390625e-07) nan(same) : tensor<32xf32>, tensor<32xf32>
     }
@@ -521,8 +523,12 @@ check.scenario @exponential_bf16_family_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %input = check.generate.iota offset(-32768) step(1) : tensor<65536xi16>
     %output = check.generate.fill value(0.0) : tensor<6x65536xbf16>
+    %vector_difference = check.tensor.view %output offset(262144) : tensor<6x65536xbf16> -> tensor<65536xbf16>
+    %scalar_difference = check.tensor.view %output offset(655360) : tensor<6x65536xbf16> -> tensor<65536xbf16>
     check.compare<@exponential_bf16_family>(%input, %output) : (tensor<65536xi16>, tensor<6x65536xbf16>) -> () {
-      check.expect.approximate actual(%output) expected(%output) atol(9.1835496157991212e-41) rtol(0.0078125) nan(same) : tensor<6x65536xbf16>, tensor<6x65536xbf16>
+      check.expect.approximate actual(%output) expected(%output) atol(9.1835496157991212e-41) rtol(0.0078125) nan(same) subnormal(flush) : tensor<6x65536xbf16>, tensor<6x65536xbf16>
+      check.expect.approximate actual(%vector_difference) expected(%vector_difference) atol(9.1835496157991212e-41) rtol(0.0078125) nan(same) : tensor<65536xbf16>, tensor<65536xbf16>
+      check.expect.approximate actual(%scalar_difference) expected(%scalar_difference) atol(9.1835496157991212e-41) rtol(0.0078125) nan(same) : tensor<65536xbf16>, tensor<65536xbf16>
     }
   }
   check.return

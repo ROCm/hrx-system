@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include <cmath>
 #include <limits>
 #include <string>
 
@@ -292,6 +293,80 @@ TEST_F(ExpectationTest, DoesNotNarrowFloatingPointReferenceValues) {
   };
   ExpectScalarComparison(LOOM_SCALAR_TYPE_BF16, LOOM_SCALAR_TYPE_F64,
                          expectation, actual, expected, false);
+}
+
+TEST_F(ExpectationTest, SubnormalFlushingUsesActualFormatAndKeepsNormalBounds) {
+  struct FloatFormat {
+    // Actual output format; the independent reference remains F64.
+    loom_scalar_type_t type;
+    // Smallest positive normal value.
+    double minimum_normal;
+    // Smallest positive subnormal value.
+    double minimum_subnormal;
+  };
+  const FloatFormat formats[] = {
+      {LOOM_SCALAR_TYPE_F8E4M3, 0x1p-6, 0x1p-9},
+      {LOOM_SCALAR_TYPE_F8E5M2, 0x1p-14, 0x1p-16},
+      {LOOM_SCALAR_TYPE_F16, 0x1p-14, 0x1p-24},
+      {LOOM_SCALAR_TYPE_BF16, 0x1p-126, 0x1p-133},
+      {LOOM_SCALAR_TYPE_F32, 0x1p-126, 0x1p-149},
+      {LOOM_SCALAR_TYPE_F64, 0x1p-1022, 0x1p-1074},
+  };
+  for (const auto& format : formats) {
+    SCOPED_TRACE(loom_scalar_type_name(format.type));
+    const auto* numeric_type =
+        loom_testbench_numeric_type_from_scalar_type(format.type);
+    auto actual_value = [&](bool negative, bool nonzero) {
+      const double value = std::copysign(
+          nonzero ? format.minimum_subnormal : 0.0, negative ? -1.0 : 1.0);
+      iree_tooling_value_t actual = {};
+      if (format.type == LOOM_SCALAR_TYPE_F64) {
+        actual.kind = IREE_TOOLING_VALUE_KIND_F64;
+        actual.storage.f64 = value;
+      } else if (format.type == LOOM_SCALAR_TYPE_F32) {
+        actual.kind = IREE_TOOLING_VALUE_KIND_F32;
+        actual.storage.f32 = static_cast<float>(value);
+      } else {
+        actual.kind = IREE_TOOLING_VALUE_KIND_RAW_U32;
+        actual.storage.u32 =
+            (negative ? 1u << (numeric_type->byte_count * 8 - 1) : 0u) |
+            (nonzero ? 1u : 0u);
+      }
+      return actual;
+    };
+    loom_testbench_expectation_plan_t expectation = {
+        .kind = LOOM_CHECK_EXPECTATION_APPROXIMATE,
+        .approximate =
+            {
+                .nan_policy = LOOM_CHECK_EXPECT_APPROXIMATE_NAN_DIFFERENT,
+                .actual_numeric_kind = static_cast<uint8_t>(numeric_type->kind),
+                .expected_numeric_kind = LOOM_TESTBENCH_NUMERIC_F64,
+            },
+    };
+    for (bool negative : {false, true}) {
+      const double sign = negative ? -1.0 : 1.0;
+      iree_tooling_value_t expected = {.kind = IREE_TOOLING_VALUE_KIND_F64};
+      expected.storage.f64 = sign * format.minimum_normal * 0.5;
+      expectation.approximate.flush_subnormals = false;
+      ExpectScalarComparison(format.type, LOOM_SCALAR_TYPE_F64, expectation,
+                             actual_value(negative, false), expected, false);
+      expectation.approximate.flush_subnormals = true;
+      ExpectScalarComparison(format.type, LOOM_SCALAR_TYPE_F64, expectation,
+                             actual_value(negative, false), expected, true);
+      ExpectScalarComparison(format.type, LOOM_SCALAR_TYPE_F64, expectation,
+                             actual_value(!negative, false), expected, false);
+      expected.storage.f64 = sign * format.minimum_normal;
+      ExpectScalarComparison(format.type, LOOM_SCALAR_TYPE_F64, expectation,
+                             actual_value(negative, false), expected, false);
+      // A nonzero subnormal still has to meet the authored error bounds.
+      expected.storage.f64 = sign * format.minimum_subnormal * 2.0;
+      ExpectScalarComparison(format.type, LOOM_SCALAR_TYPE_F64, expectation,
+                             actual_value(negative, true), expected, false);
+      expected.storage.f64 = sign * format.minimum_subnormal;
+      ExpectScalarComparison(format.type, LOOM_SCALAR_TYPE_F64, expectation,
+                             actual_value(negative, true), expected, true);
+    }
+  }
 }
 
 TEST_F(ExpectationTest, ComparesMixedFloatingPointExceptionalValues) {

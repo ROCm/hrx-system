@@ -30,7 +30,7 @@ static const loom_target_math_policy_feature_bits_t
 #define LOOM_AMDGPU_MATH_CONSTRAINTS(_)                                      \
   _(BASIC_KEEP, basic_keep, "math.basic.keep")                               \
   _(ELEMENT_F32, element_f32, "math.element.f32")                            \
-  _(EXP_EXACT_F32, exp_exact_f32, "math.exp.exact_f32")                      \
+  _(EXPONENTIAL_AFN, exponential_afn, "math.exponential.afn")                \
   _(INVERSE_HYPERBOLIC_AFN, inverse_hyperbolic_afn,                          \
     "math.inverse_hyperbolic.afn")                                           \
   _(INVERSE_HYPERBOLIC_F32_EVALUATION, inverse_hyperbolic_f32_evaluation,    \
@@ -48,6 +48,8 @@ static const loom_target_math_policy_feature_bits_t
   _(RECIPE_COS_TURNS_F32, recipe_cos_turns_f32, "math.recipe.cos_turns_f32") \
   _(RECIPE_ERF_RATIONAL_F32, recipe_erf_rational_f32,                        \
     "math.recipe.erf_rational_f32")                                          \
+  _(RECIPE_APPROXIMATE_EXPONENTIAL, recipe_approximate_exponential,          \
+    "math.recipe.approximate_exponential")                                   \
   _(RECIPE_EXP_EXP2_F32, recipe_exp_exp2_f32, "math.recipe.exp_exp2_f32")    \
   _(RECIPE_GELU_ERF_F32, recipe_gelu_erf_f32, "math.recipe.gelu_erf_f32")    \
   _(RECIPE_GELU_LOGISTIC_F32, recipe_gelu_logistic_f32,                      \
@@ -181,6 +183,12 @@ static const loom_target_math_evaluation_t kAmdgpuMathEvaluations[] = {
     UNKNOWN, NONE, NONE, NONE, OP_NATIVE_F64, NONE)                            \
   _(ROUND_REWRITE, LOOM_SCALAR_TYPE_SET_F32, ALL, ANY, 0, 0, NONE, NONE,       \
     ROUND_AWAY, NONE, AFN, NONE, RECIPE_ROUND_AWAY, NONE)                      \
+  _(EXPONENTIAL_F64, LOOM_SCALAR_TYPE_SET_F64, ALL, ANY, 0, 0, AFN, NONE,      \
+    APPROXIMATE_EXPONENTIAL, NONE, NONE, NONE, RECIPE_APPROXIMATE_EXPONENTIAL, \
+    EXPONENTIAL_AFN)                                                           \
+  _(EXPONENTIAL_NARROW, LOOM_SCALAR_TYPE_SET_FLOAT_LE16, ALL, ANY, 0, 0, AFN,  \
+    NONE, WIDEN_F32_ROUND, NONE, NONE, NONE, RECIPE_WIDEN_F32_ROUND,           \
+    EXPONENTIAL_AFN)                                                           \
   _(INVERSE_HYPERBOLIC_WIDENED_F32, LOOM_SCALAR_TYPE_SET_FLOAT_LE16, ALL, ANY, \
     0, 0, AFN, NONE, INVERSE_HYPERBOLIC_F32, NONE, NONE, WIDENED_F32,          \
     RECIPE_INVERSE_HYPERBOLIC_F32, INVERSE_HYPERBOLIC_AFN)
@@ -240,7 +248,10 @@ static const loom_target_math_policy_rule_t
   _(SOFTPLUSF, LOOM_SCALAR_TYPE_SET_F32, NONE, SOFTPLUS_EXP2_F32, ARCP_AFN,    \
     NONE, RECIPE_SOFTPLUS_EXP2_F32, NONE)                                      \
   _(EXPF, LOOM_SCALAR_TYPE_SET_F32, AFN, EXP_EXP2_F32, NONE, NONE,             \
-    RECIPE_EXP_EXP2_F32, EXP_EXACT_F32)                                        \
+    RECIPE_EXP_EXP2_F32, EXPONENTIAL_AFN)                                      \
+  _(EXPM1F, LOOM_SCALAR_TYPE_SET_F32 | LOOM_SCALAR_TYPE_SET_F64, AFN,          \
+    APPROXIMATE_EXPONENTIAL, NONE, NONE, RECIPE_APPROXIMATE_EXPONENTIAL,       \
+    EXPONENTIAL_AFN)                                                           \
   _(ERFF, LOOM_SCALAR_TYPE_SET_F32, NONE, ERF_RATIONAL_F32, ARCP, NONE,        \
     RECIPE_ERF_RATIONAL_F32, NONE)                                             \
   _(GELUF_ERF, LOOM_SCALAR_TYPE_SET_F32, NONE, GELU_ERF_F32, ARCP, NONE,       \
@@ -328,7 +339,7 @@ static const loom_target_math_policy_direct_rule_t
   _(LOGISTICF, 0, 0, ELEMENT_F32)                                            \
   _(SILUF, 0, 0, ELEMENT_F32)                                                \
   _(SOFTPLUSF, 0, 0, ELEMENT_F32)                                            \
-  _(EXPF, 0, 0, ELEMENT_F32)                                                 \
+  _(EXPF, LOOM_AMDGPU_MATH_RULE_EXPONENTIAL_F64, 2, EXPONENTIAL_AFN)         \
   _(ERFF, 0, 0, ELEMENT_F32)                                                 \
   _(GELUF_ERF, 0, 0, ELEMENT_F32)                                            \
   _(GELUF_TANH, 0, 0, ELEMENT_F32)                                           \
@@ -353,7 +364,8 @@ static const loom_target_math_policy_direct_rule_t
   _(SQRTF, LOOM_AMDGPU_MATH_RULE_SQRT_SCALAR_F64, 1, ROOT_F32_OR_SCALAR_F64) \
   _(RSQRTF, LOOM_AMDGPU_MATH_RULE_RSQRT_NATIVE_SCALAR_F64, 3,                \
     ROOT_F32_OR_SCALAR_F64)                                                  \
-  _(EXP2F, 0, 0, ELEMENT_F32)                                                \
+  _(EXP2F, LOOM_AMDGPU_MATH_RULE_EXPONENTIAL_F64, 2, EXPONENTIAL_AFN)        \
+  _(EXPM1F, LOOM_AMDGPU_MATH_RULE_EXPONENTIAL_NARROW, 1, EXPONENTIAL_AFN)    \
   _(ASINHF, LOOM_AMDGPU_MATH_RULE_INVERSE_HYPERBOLIC_WIDENED_F32, 1,         \
     INVERSE_HYPERBOLIC_F32_EVALUATION)                                       \
   _(ACOSHF, LOOM_AMDGPU_MATH_RULE_INVERSE_HYPERBOLIC_WIDENED_F32, 1,         \
