@@ -376,6 +376,7 @@ low.func.def target<test.low.core>(@target) @loop_register_constant(%again: reg<
 test.target<low_core> @target
 
 low.func.def target<test.low.core>(@target) @loop_register_constant(%again: reg<test.i32>, %block0: reg<test.explicit32>, %block1: reg<test.explicit32>, %block2: reg<test.explicit32>, %block3: reg<test.explicit32>) -> (reg<test.i32>) asm {
+  %literal = test.const.i32 7
   %value0 = copy %block0 : reg<test.explicit32> -> reg<test.i32>
   %value1 = copy %block1 : reg<test.explicit32> -> reg<test.i32>
   %value2 = copy %block2 : reg<test.explicit32> -> reg<test.i32>
@@ -385,8 +386,7 @@ low.func.def target<test.low.core>(@target) @loop_register_constant(%again: reg<
   %seed = test.add.i32 %pair0, %pair1
   low.br ^loop
 ^loop:
-  %literal_remat = test.const.i32 7
-  %transport_remat = test.rematerialize.spillable.explicit32 %literal_remat
+  %transport_remat = test.rematerialize.spillable.explicit32 %literal
   %mapped = copy %transport_remat : reg<test.spillable.explicit32> -> reg<test.i32>
   %sum = test.add.i32 %seed, %mapped
   low.cond_br %again, ^loop, ^exit : reg<test.i32>

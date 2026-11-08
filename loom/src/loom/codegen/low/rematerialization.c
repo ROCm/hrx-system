@@ -766,15 +766,6 @@ static iree_status_t loom_low_rematerialization_prepare_value(
                           loom_low_rematerialization_use_shortens_live_range(
                               defining_op, observed_uses[i]);
   }
-  // Replaying the selected packet across a repeated execution boundary is
-  // already disallowed, independent of any producer ancestry that may enrich
-  // its recipe. Reject it before constructing and indexing that ancestry.
-  if (!facts->reconstruct_constants &&
-      !loom_low_rematerialization_uses_share_execution_domain(
-          spill_allocation, defining_op, observed_uses, use_count)) {
-    return iree_ok_status();
-  }
-
   loom_low_rematerialization_recipe_t recipe = {0};
   IREE_RETURN_IF_ERROR(loom_low_rematerialization_plan_recipe(
       facts, value_id, rebuild_composition, /*follow_explicit_sources=*/true,
@@ -838,8 +829,9 @@ static iree_status_t loom_low_rematerialization_prepare_value(
     if (!loom_low_capture_source_is_stable(module, value_id)) {
       return iree_ok_status();
     }
-    // Predicted-spill rematerialization is optional. Do not replace one reload
-    // with a multi-packet recipe in a different repeated execution domain.
+    // A reload executes at its user, so one recreatable packet can replace it
+    // across a repeated execution boundary. Larger recipes retain their
+    // original execution domain instead of multiplying work inside a loop.
     // Cloning also multiplies external input uses; register-required values
     // cannot spill to repair that pressure. An optional authored source may
     // enrich the recipe only when it preserves both properties, otherwise the
@@ -848,7 +840,8 @@ static iree_status_t loom_low_rematerialization_prepare_value(
         loom_low_rematerialization_preserves_execution_domain(
             module, spill_allocation, &recipe, observed_uses, use_count);
     if (recipe.followed_explicit_source &&
-        (!preserves_execution_domain || recipe.has_required_external_input)) {
+        ((!preserves_execution_domain && recipe.packet_count != 1) ||
+         recipe.has_required_external_input)) {
       IREE_RETURN_IF_ERROR(loom_low_rematerialization_plan_recipe(
           facts, value_id, rebuild_composition,
           /*follow_explicit_sources=*/false, state->required_register_values,
@@ -857,7 +850,8 @@ static iree_status_t loom_low_rematerialization_prepare_value(
           loom_low_rematerialization_preserves_execution_domain(
               module, spill_allocation, &recipe, observed_uses, use_count);
     }
-    if (recipe.packet_count == 0 || !preserves_execution_domain ||
+    if (recipe.packet_count == 0 ||
+        (!preserves_execution_domain && recipe.packet_count != 1) ||
         recipe.has_required_external_input) {
       return iree_ok_status();
     }
