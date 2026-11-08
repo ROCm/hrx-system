@@ -1513,6 +1513,43 @@ iree_status_t loom_low_allocation_rematerialize_failure(
   return status;
 }
 
+// A completed allocation can keep inexpensive cross-block producers in
+// registers while selecting other values for storage. Release that retained
+// pressure in the same repair batch instead of discovering another spill set
+// after each allocation. The allocator's remarks retain the effective budgets,
+// including caller overrides; descriptor capacities alone are insufficient.
+static iree_status_t loom_low_rematerialization_build_spill_pressure(
+    const loom_low_allocation_table_t* table, iree_arena_allocator_t* arena,
+    bool** out_pressure_classes) {
+  const uint32_t class_count = table->target.descriptor_set->reg_class_count;
+  uint32_t* budgets = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      arena, class_count, sizeof(*budgets), (void**)&budgets));
+  memset(budgets, 0xFF, class_count * sizeof(*budgets));
+  for (iree_host_size_t i = 0; i < table->remark_count; ++i) {
+    const loom_low_allocation_remark_t* remark = &table->remarks[i];
+    const uint16_t class_id =
+        table->assignments[remark->assignment_index].descriptor_reg_class_id;
+    budgets[class_id] = iree_min(budgets[class_id], remark->budget_units);
+  }
+  bool* pressure_classes = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, class_count,
+                                                 sizeof(*pressure_classes),
+                                                 (void**)&pressure_classes));
+  memset(pressure_classes, 0, class_count * sizeof(*pressure_classes));
+  for (iree_host_size_t i = 0; i < table->liveness.pressure_summary_count;
+       ++i) {
+    const loom_liveness_pressure_summary_t* summary =
+        &table->liveness.pressure_summaries[i];
+    if (summary->value_class.type_kind == LOOM_TYPE_REGISTER) {
+      const uint16_t class_id = summary->value_class.register_class_id;
+      pressure_classes[class_id] = summary->peak_live_units > budgets[class_id];
+    }
+  }
+  *out_pressure_classes = pressure_classes;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_allocation_rematerialize_spill_plans_impl(
     loom_module_t* module, const loom_low_allocation_table_t* table,
     bool reconstruct_constants, loom_low_rematerialization_state_t* state,
@@ -1523,6 +1560,11 @@ static iree_status_t loom_low_allocation_rematerialize_spill_plans_impl(
     return iree_ok_status();
   }
   const loom_liveness_analysis_t* liveness = &table->liveness;
+  bool* pressure_classes = NULL;
+  if (!reconstruct_constants) {
+    IREE_RETURN_IF_ERROR(loom_low_rematerialization_build_spill_pressure(
+        table, arena, &pressure_classes));
+  }
   loom_low_rematerialization_candidate_t* candidates = NULL;
   iree_host_size_t count = 0;
   iree_host_size_t capacity = 0;
@@ -1531,14 +1573,24 @@ static iree_status_t loom_low_allocation_rematerialize_spill_plans_impl(
     const uint32_t assignment_index =
         table->assignment_indices_by_value_ordinal[ordinal];
     if (assignment_index == UINT32_MAX ||
-        table->assignments[assignment_index].location_kind !=
-            LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT) {
+        !iree_any_bit_set(table->rematerialization_flags[ordinal],
+                          LOOM_LOW_REMATERIALIZATION_VALUE_ELIGIBLE)) {
       continue;
     }
     const loom_liveness_interval_t* interval =
         &liveness->intervals[liveness->value_interval_indices[ordinal]];
-    if (!iree_any_bit_set(table->rematerialization_flags[ordinal],
-                          LOOM_LOW_REMATERIALIZATION_VALUE_ELIGIBLE)) {
+    // Additional roots have no input lifetimes to extend. Selected spill
+    // roots retain their complete replay recipes and consumer-first order;
+    // splitting them into a later tier can amplify pressure in the interim.
+    const bool releases_cross_block_pressure =
+        pressure_classes != NULL &&
+        pressure_classes[interval->value_class.register_class_id] &&
+        interval->block_count >= 2 &&
+        loom_value_def_op(loom_module_value(module, interval->value_id))
+                ->operand_count == 0;
+    if (table->assignments[assignment_index].location_kind !=
+            LOOM_LOW_ALLOCATION_LOCATION_SPILL_SLOT &&
+        !releases_cross_block_pressure) {
       continue;
     }
     const uint16_t block_index = loom_liveness_block_index_at_point(

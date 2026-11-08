@@ -336,7 +336,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @bounded_padding(%input: reg<a
 
 aie2p.target<core> @target
 
-// REMARK@+1: BACKEND/045 {function_name="retained_scalar_stream", trigger_kind="spill-plan", repaired_value_count="1", cloned_packet_count="7", rewritten_operand_count="7", retained_placement_count="0"}
+// REMARK@+1: BACKEND/045 {function_name="retained_scalar_stream", trigger_kind="spill-plan", repaired_value_count="8", cloned_packet_count="14", rewritten_operand_count="14", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core>(@target) @retained_scalar_stream(%record_input: reg<aie2p.ep>, %stream_input: reg<aie2p.ep>, %stream_output: reg<aie2p.ep>, %record_output: reg<aie2p.ep>) asm {
   %retained0, %read1 = lda.i32.post %record_input, 4
   %retained1, %read2 = lda.i32.post %read1, 4
@@ -458,8 +458,8 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @retained_scalar_stream(%recor
 %retained21 -> st.i32.post operand=0 (%retained21, %write21)
 %retained22 -> st.i32.post operand=0 (%retained22, %write22)
 %retained23 -> st.i32.post operand=0 (%retained23, %write23)
-%retained24 -> st.stack operand=0 (%retained24)
-%retained25 -> st.stack operand=0 (%retained25)
+%retained24 -> st.i32.post operand=0 (%retained24, %write24)
+%retained25 -> st.i32.post operand=0 (%retained25, %write25)
 %value0 -> lshl operand=0 (%value0, %scale_shift_remat)
 %value1 -> lshl operand=0 (%value1, %scale_shift_remat)
 %value2 -> lshl operand=0 (%value2, %scale_shift_remat)
@@ -732,10 +732,10 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @retained_scale_select(%record
 }
 
 // ----
-issue cycles: 159
-code bytes: 728
+issue cycles: 164
+code bytes: 752
 coissued bundles: 40
-coissued components: 81
+coissued components: 80
 
 // ====
 
@@ -770,15 +770,15 @@ low.func.def target<amd.xdna.aie2p.core>(@target) @literal_address_pressure(%pay
 }
 
 // ----
-code: 44 00 c0 00 07 00 44 80 c0 02 07 00 44 00 c1 04 07 00 44 80 c1 06 07 00 44 00 c2 08 07 00 44 80 c2 0a 07 00 44 00 c3 0c 07 00 44 80 c3 0e 07 00 3a 11 00 31 c0 01 00 30 82 00 98 11 04 09 98 11 04 0a 98 11 04 0b 98 11 04 0c 98 11 04 0d 5c 00 50 30 82 c0 98 11 04 0f 98 11 04 08 00 00 00 00 00 00
-%payload -> st operand=0 (%payload, %endpoint0)
-%payload -> st operand=0 (%payload, %endpoint1)
-%payload -> st operand=0 (%payload, %endpoint2)
-%payload -> st operand=0 (%payload, %endpoint3)
-%payload -> st operand=0 (%payload, %endpoint4)
-%payload -> st operand=0 (%payload, %endpoint5)
-%payload -> st operand=0 (%payload, %endpoint6)
-%payload -> st operand=0 (%payload, %endpoint7)
+code: 44 00 c0 00 07 00 3a 11 20 30 c0 01 00 30 82 00 3a 11 40 30 c0 01 00 30 82 00 3a 11 60 30 c0 01 00 30 82 00 3a 11 80 30 c0 01 00 30 82 00 3a 11 a0 30 c0 01 00 30 82 00 3a 11 c0 30 c0 01 00 30 82 00 3a 11 e0 30 c0 01 00 30 82 00 3a 11 00 31 c0 01 00 30 82 00 5c 00 50 30 82 00 00 00 00 00 00 00 00 00 00 00
+%payload -> st operand=0 (%payload, %endpoint0_remat)
+%payload -> st operand=0 (%payload, %endpoint1_remat)
+%payload -> st operand=0 (%payload, %endpoint2_remat)
+%payload -> st operand=0 (%payload, %endpoint3_remat)
+%payload -> st operand=0 (%payload, %endpoint4_remat)
+%payload -> st operand=0 (%payload, %endpoint5_remat)
+%payload -> st operand=0 (%payload, %endpoint6_remat)
+%payload -> st operand=0 (%payload, %endpoint7_remat)
 %payload -> st operand=0 (%payload, %endpoint8_remat)
 
 // ====
@@ -871,9 +871,9 @@ low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @read_coeff
 
 // ----
 .text.read_coefficients: address=0x00000000 bytes=250 initialized
-  4480c04007004488c04207004490c04407004498c046070044a0c04807004400c04a070044a8c04c070044b0c04e0700981604000000000000000000000000009811040d981604010000000000000000000000009811140d981604020000000000000000000000009811240d981604030000000000000000000000009811340d981604040000000000000000000000009811440d981604060000000000000000000000003a112e30d001003082aa981604070000000000000000000000009811640dba103030d00100d082000000000000000000000000000c23e8fa8ca39816040000000000000000001800281000009811840d000000000000
+  4400c04007004480c0420700ba1022b0d00100d0822000000000000000000000000098110408ba1024b0d00100d0822000000000000000000000000098111408ba1026b0d00100d0822000000000000000000000000098112408ba1028b0d00100d0822000000000000000000000000098113408ba102ab0d00100d0822000000000000000000000000098114408ba102cb0d00100d0822000000000000000000000000098115408ba102eb0d00100d0822000000000000000000000000098116408ba1030b0d00100d082200000000000000000000000000c23e8f08c0398160401000000000000000018002810000098118408000000000000
 .text.read_coefficients: address=0x00000000 bytes=250 initialized
-  4480c00007004488c00207004490c00407004498c006070044a0c00807004400c00a070044a8c00c070044b0c00e0700981604000000000000000000000000009811040d981604010000000000000000000000009811140d981604020000000000000000000000009811240d981604030000000000000000000000009811340d981604040000000000000000000000009811440d981604060000000000000000000000003a112e30c001003082aa981604070000000000000000000000009811640dba103030c00100d082000000000000000000000000000c23e8fa8ca39816040000000000000000001800281000009811840d000000000000
+  4400c00007004480c0020700ba1022b0c00100d0822000000000000000000000000098110408ba1024b0c00100d0822000000000000000000000000098111408ba1026b0c00100d0822000000000000000000000000098112408ba1028b0c00100d0822000000000000000000000000098113408ba102ab0c00100d0822000000000000000000000000098114408ba102cb0c00100d0822000000000000000000000000098115408ba102eb0c00100d0822000000000000000000000000098116408ba1030b0c00100d082200000000000000000000000000c23e8f08c0398160401000000000000000018002810000098118408000000000000
 .rodata.coefficient0: address=0x00074040 bytes=4 initialized
   01000000
 .rodata.coefficient1: address=0x00074044 bytes=4 initialized

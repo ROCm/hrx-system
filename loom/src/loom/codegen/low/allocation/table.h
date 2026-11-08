@@ -68,7 +68,7 @@ typedef enum loom_low_allocation_value_scratch_flag_bits_e {
 // Bitset of loom_low_allocation_value_scratch_flag_bits_t values.
 typedef uint16_t loom_low_allocation_value_scratch_flags_t;
 
-// Allocation remark for agent/tool feedback.
+// Allocation decision facts retained for pressure repair and reporting.
 typedef struct loom_low_allocation_remark_t {
   // Remark category.
   loom_low_allocation_remark_kind_t kind;
@@ -382,7 +382,7 @@ typedef struct loom_low_allocation_table_t {
   iree_host_size_t spill_plan_count;
   // Distinct retained-read blockers published by the accepted coloring.
   loom_low_allocation_retained_fixed_values_t retained_fixed_values;
-  // Allocation remarks in spill-decision order.
+  // Allocation decision facts in spill order, independent of diagnostics.
   const loom_low_allocation_remark_t* remarks;
   // Number of records in |remarks|.
   iree_host_size_t remark_count;
