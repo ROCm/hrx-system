@@ -12,6 +12,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
 from loom.dsl import ATTR_TYPE_ENUM, Op
+from loom.errors import ErrorDef
 from loom.target.contracts.descriptors import _require_immediate
 from loom.target.contracts.diagnostics import (
     DiagnosticParam,
@@ -162,6 +163,98 @@ from loom.target.contracts.source_memory import (
 )
 from loom.target.contracts.temporary_allocation import allocate_temporary_slots
 from loom.target.low_descriptors import ConstraintKind, Descriptor, ImmediateKind
+
+type _ErrorIdentity = tuple[int, int]
+type _AuthoredDiagnosticParamIdentity = tuple[
+    str,
+    str,
+    str,
+    str,
+    int,
+    int,
+    int,
+    int,
+    bool,
+]
+type _AuthoredDiagnosticIdentity = tuple[
+    _ErrorIdentity,
+    tuple[_AuthoredDiagnosticParamIdentity, ...],
+    int,
+]
+type _LowerDiagnosticParamIdentity = tuple[
+    str,
+    str,
+    str,
+    int,
+    int,
+    int,
+    int,
+    bool,
+]
+type _LowerDiagnosticIdentity = tuple[
+    _ErrorIdentity,
+    tuple[_LowerDiagnosticParamIdentity, ...],
+    int,
+]
+
+
+def _error_identity(error: ErrorDef) -> _ErrorIdentity:
+    """Returns the documented stable identity of an error definition."""
+
+    return (int(error.domain), error.code)
+
+
+def _authored_diagnostic_param_identity(
+    param: DiagnosticParam,
+) -> _AuthoredDiagnosticParamIdentity:
+    return (
+        param.name,
+        param.kind.value,
+        param.string_value,
+        param.field,
+        param.element,
+        param.i64_value,
+        param.u32_value,
+        param.u64_value,
+        param.bool_value,
+    )
+
+
+def _authored_diagnostic_identity(
+    diagnostic: DiagnosticRef,
+) -> _AuthoredDiagnosticIdentity:
+    return (
+        _error_identity(diagnostic.error),
+        tuple(
+            _authored_diagnostic_param_identity(param) for param in diagnostic.params
+        ),
+        diagnostic.target_context_param_count,
+    )
+
+
+def _lower_diagnostic_param_identity(
+    param: LowerDiagnosticParam,
+) -> _LowerDiagnosticParamIdentity:
+    return (
+        param.name,
+        param.kind.value,
+        param.string_value,
+        param.value_ref_index,
+        param.i64_value,
+        param.u32_value,
+        param.u64_value,
+        param.bool_value,
+    )
+
+
+def _lower_diagnostic_identity(
+    diagnostic: LowerDiagnostic,
+) -> _LowerDiagnosticIdentity:
+    return (
+        _error_identity(diagnostic.error),
+        tuple(_lower_diagnostic_param_identity(param) for param in diagnostic.params),
+        diagnostic.target_context_param_count,
+    )
 
 
 def _lower_literal_immediate(
@@ -334,9 +427,11 @@ class _LowerRuleSetCompiler:
         self._literal_data_offsets: dict[bytes, int] = {}
         self._authored_case_indices: list[int] = []
         self._type_pattern_ordinals: dict[TypePattern, int] = {}
-        self._diagnostic_ordinals: dict[LowerDiagnostic, int] = {}
+        self._diagnostic_ordinals: dict[_LowerDiagnosticIdentity, int] = {}
         # Literal and runtime-context projections have the same lowering in every rule.
-        self._source_independent_diagnostic_ordinals: dict[DiagnosticRef, int] = {}
+        self._source_independent_diagnostic_ordinals: dict[
+            _AuthoredDiagnosticIdentity, int
+        ] = {}
         self._value_ref_sequence_starts: dict[tuple[LowerValueRef, ...], int] = {(): 0}
         self._attr_copy_sequence_starts: dict[tuple[LowerAttrCopy, ...], int] = {(): 0}
         self._tied_result_sequence_starts: dict[tuple[LowerTiedResult, ...], int] = {
@@ -3005,23 +3100,25 @@ class _LowerRuleSetCompiler:
         )
 
     def _append_diagnostic(self, diagnostic: LowerDiagnostic) -> int:
-        ordinal = self._diagnostic_ordinals.get(diagnostic)
+        identity = _lower_diagnostic_identity(diagnostic)
+        ordinal = self._diagnostic_ordinals.get(identity)
         if ordinal is not None:
             return ordinal
         ordinal = len(self._diagnostics)
-        self._diagnostic_ordinals[diagnostic] = ordinal
+        self._diagnostic_ordinals[identity] = ordinal
         self._diagnostics.append(diagnostic)
         return ordinal
 
     def _append_diagnostic_ref(self, source_op: Op, ref: DiagnosticRef) -> int:
-        ordinal = self._source_independent_diagnostic_ordinals.get(ref)
+        identity = _authored_diagnostic_identity(ref)
+        ordinal = self._source_independent_diagnostic_ordinals.get(identity)
         if ordinal is not None:
             return ordinal
         ordinal = self._append_diagnostic(self._lower_diagnostic_ref(source_op, ref))
         # Value-type projections must resolve the current source op's fields and
         # validate variadic references against the current rule's arity guards.
         if all(param.kind != DiagnosticParamKind.VALUE_TYPE for param in ref.params):
-            self._source_independent_diagnostic_ordinals[ref] = ordinal
+            self._source_independent_diagnostic_ordinals[identity] = ordinal
         return ordinal
 
     def _lower_diagnostic_ref(
