@@ -541,6 +541,8 @@ static bool loom_callable_tail_can_append(const loom_module_t* module,
 // Each splice records its logical insertion directly; publishing that order
 // once avoids shifting the growing block table at every dependent call.
 typedef struct loom_callable_block_order_t {
+  // Scratch storage retained for the duration of the region batch.
+  iree_arena_allocator_t scratch_arena;
   // Logical successor for each physical index, or UINT16_MAX at the end.
   // Allocated only when a splice requires ordered insertion.
   uint16_t* next_blocks;
@@ -553,14 +555,13 @@ typedef struct loom_callable_block_order_t {
 } loom_callable_block_order_t;
 
 static iree_status_t loom_callable_initialize_block_order(
-    loom_rewriter_t* rewriter, const loom_region_t* region,
-    loom_callable_block_order_t* order) {
+    const loom_region_t* region, loom_callable_block_order_t* order) {
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      rewriter->arena, order->block_capacity, sizeof(*order->next_blocks),
+      &order->scratch_arena, order->block_capacity, sizeof(*order->next_blocks),
       (void**)&order->next_blocks));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      rewriter->arena, order->block_capacity, sizeof(*order->ordered_blocks),
-      (void**)&order->ordered_blocks));
+      &order->scratch_arena, order->block_capacity,
+      sizeof(*order->ordered_blocks), (void**)&order->ordered_blocks));
   for (uint16_t i = 0; i < region->block_count; ++i) {
     order->next_blocks[i] = i + 1;
   }
@@ -651,8 +652,8 @@ static iree_status_t loom_callable_inline_cfg_call(
   const bool append_blocks =
       loom_callable_tail_can_append(rewriter->module, call_op);
   if (block_order && !append_blocks && !block_order->next_blocks) {
-    IREE_RETURN_IF_ERROR(loom_callable_initialize_block_order(
-        rewriter, caller_region, block_order));
+    IREE_RETURN_IF_ERROR(
+        loom_callable_initialize_block_order(caller_region, block_order));
   }
   const uint16_t cloned_block_index = block_order || append_blocks
                                           ? caller_region->block_count
@@ -842,6 +843,7 @@ static iree_status_t loom_callable_inline_region_calls(
   IREE_RETURN_IF_ERROR(loom_region_reserve_block_capacity(
       rewriter->module, region, final_block_count));
 
+  iree_arena_initialize(scratch_arena->block_pool, &order.scratch_arena);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < site_count && iree_status_is_ok(status);
        ++i) {
@@ -865,6 +867,7 @@ static iree_status_t loom_callable_inline_region_calls(
         region->blocks, order.ordered_blocks,
         (iree_host_size_t)region->block_count * sizeof(*order.ordered_blocks));
   }
+  iree_arena_deinitialize(&order.scratch_arena);
   return status;
 }
 
