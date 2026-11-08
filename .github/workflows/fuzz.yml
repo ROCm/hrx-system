@@ -4,44 +4,23 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-name: Native fuzz campaign
+name: Loom / Fuzz
 
 on:
   workflow_dispatch:
   schedule:
     - cron: "23 9 * * *"
-  pull_request:
-    types:
-      - labeled
-      - synchronize
-    paths:
-      - ".bazelrc"
-      - ".github/scripts/fetch_rocm_toolchain.sh"
-      - ".github/workflows/fuzz.yml"
-      - "BUILD.bazel"
-      - "MODULE.*"
-      - "dev.py"
-      - "build_tools/**"
-      - "libamdf/**"
-      - "loom/**"
-      - "runtime/**"
-      - "third_party/**"
 
 concurrency:
-  group: native-fuzz-${{ github.event.pull_request.number || github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: loom-fuzz-${{ github.ref || github.run_id }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  campaign:
-    if: >-
-      github.event_name != 'pull_request' ||
-      ((github.event.action != 'labeled' ||
-        github.event.label.name == 'fuzz-presubmit') &&
-       contains(github.event.pull_request.labels.*.name, 'fuzz-presubmit'))
-    name: ASan / libFuzzer
+  linux_x86_64:
+    name: Linux x86-64
     runs-on: azure-linux-scale-rocm
     timeout-minutes: 45
     defaults:
@@ -111,11 +90,6 @@ jobs:
       - name: Run bounded fuzz campaign
         id: fuzz_campaign
         run: |
-          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-            campaign_seconds=60
-          else
-            campaign_seconds=120
-          fi
           campaign_targets=(
             --//build_tools/vulkan/config:enabled=false
             --//build_tools/d3d12/config:enabled=false
@@ -125,14 +99,13 @@ jobs:
           )
           python3 dev.py bazel fuzz \
             --workers=8 \
-            --mutation-time="$campaign_seconds" \
+            --mutation-time=120 \
             --quiet-output \
             --result="$IREE_FUZZ_RESULT" \
             "${campaign_targets[@]}" -- \
             -rss_limit_mb=1024 \
             -timeout=30
-          if [[ "$GITHUB_EVENT_NAME" != pull_request && \
-                "$GITHUB_REF" == refs/heads/main ]]; then
+          if [[ "$GITHUB_REF" == refs/heads/main ]]; then
             python3 dev.py bazel fuzz \
               --compact-corpus \
               --workers=8 \
@@ -163,7 +136,7 @@ jobs:
           retention-days: 14
 
       - name: Save trusted fuzz corpus
-        if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.fuzz_campaign.outcome == 'success' }}
+        if: ${{ github.ref == 'refs/heads/main' && steps.fuzz_campaign.outcome == 'success' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ env.IREE_FUZZ_CACHE }}/**/corpus
