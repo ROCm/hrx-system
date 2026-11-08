@@ -56,7 +56,8 @@ typedef struct loom_module_size_hints_t {
 // Creates a new empty module. Its arenas allocate from |block_pool| and own all
 // IR created through the module. Destruction releases arena storage, returning
 // pooled blocks in batches without individually freeing IR nodes. The module
-// struct itself is allocated with |allocator|.
+// struct is stored in its arena. |host_allocator| is retained for compiler
+// operations that derive modules or associated host objects.
 //
 // |hints| may be NULL for default capacities (text parsing, tests). When
 // non-NULL, hints size contiguous tables and intern buckets with growth
@@ -65,7 +66,7 @@ iree_status_t loom_module_allocate(loom_context_t* context,
                                    iree_string_view_t name,
                                    iree_arena_block_pool_t* block_pool,
                                    const loom_module_size_hints_t* hints,
-                                   iree_allocator_t allocator,
+                                   iree_allocator_t host_allocator,
                                    loom_module_t** out_module);
 
 // Destroys a module and releases its arena blocks to the shared pool.

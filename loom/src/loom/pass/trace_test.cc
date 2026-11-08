@@ -22,9 +22,9 @@ namespace {
 using ModulePtr = ::loom::testing::ModulePtr;
 
 struct CountingAllocatorState {
-  // Allocator receiving all commands after lifetime observation.
+  // Allocator servicing observed arena allocations.
   iree_allocator_t delegate = iree_allocator_system();
-  // Module allocation whose release is observed.
+  // Oversized allocation containing the projected module header.
   void* watched_allocation = nullptr;
   // True after the watched allocation is released.
   bool watched_allocation_freed = false;
@@ -51,6 +51,25 @@ static iree_allocator_t CountingAllocator(CountingAllocatorState* state) {
       .ctl = CountingAllocatorCtl,
   };
 }
+
+class ObservedProjectionStorage {
+ public:
+  ObservedProjectionStorage() {
+    // Force the module header through the oversized-allocation path so its
+    // release is immediately visible to the backing allocator.
+    iree_arena_block_pool_initialize(64, CountingAllocator(&allocator_state),
+                                     &block_pool);
+  }
+
+  ~ObservedProjectionStorage() {
+    iree_arena_block_pool_deinitialize(&block_pool);
+  }
+
+  // Allocator state observing the projected module header's lifetime.
+  CountingAllocatorState allocator_state;
+  // Block pool backing projected modules.
+  iree_arena_block_pool_t block_pool = {};
+};
 
 static iree_status_t BuildCounterModule(loom_context_t* context,
                                         iree_arena_block_pool_t* block_pool,
@@ -100,8 +119,10 @@ static iree_status_t ProjectCounterModule(
   ++state->invocation_count;
   IREE_RETURN_IF_ERROR(BuildCounterModule(
       state->context, state->block_pool, state->counter_value,
-      CountingAllocator(state->allocator_state), out_projected_module));
-  state->allocator_state->watched_allocation = *out_projected_module;
+      iree_allocator_system(), out_projected_module));
+  state->allocator_state->watched_allocation =
+      reinterpret_cast<uint8_t*>(*out_projected_module) -
+      sizeof(iree_arena_oversized_allocation_t);
   return iree_ok_status();
 }
 
@@ -231,12 +252,12 @@ class PassTraceTest : public ::testing::Test {
     return ModulePtr(module);
   }
 
-  ProjectionState MakeProjectionState(CountingAllocatorState* allocator_state,
+  ProjectionState MakeProjectionState(ObservedProjectionStorage* storage,
                                       int64_t counter_value = 2) {
     return ProjectionState{
         .context = &context_,
-        .block_pool = &block_pool_,
-        .allocator_state = allocator_state,
+        .block_pool = &storage->block_pool,
+        .allocator_state = &storage->allocator_state,
         .counter_value = counter_value,
     };
   }
@@ -278,8 +299,8 @@ TEST_F(PassTraceTest, ProjectsMatchedSnapshotAndReleasesIt) {
   ModulePtr source_module = BuildSourceModule(1);
   ASSERT_NE(source_module, nullptr);
 
-  CountingAllocatorState allocator_state;
-  ProjectionState projection_state = MakeProjectionState(&allocator_state);
+  ObservedProjectionStorage projection_storage;
+  ProjectionState projection_state = MakeProjectionState(&projection_storage);
   TraceOutput output;
   output.options.dump_after_all = true;
   output.BindProjector(ProjectCounterModule, &projection_state);
@@ -288,7 +309,7 @@ TEST_F(PassTraceTest, ProjectsMatchedSnapshotAndReleasesIt) {
   IREE_ASSERT_OK(loom_pass_trace_emit(&output.trace, &event));
 
   EXPECT_EQ(projection_state.invocation_count, 1);
-  EXPECT_TRUE(allocator_state.watched_allocation_freed);
+  EXPECT_TRUE(projection_storage.allocator_state.watched_allocation_freed);
   EXPECT_EQ(output.trace.next_event_ordinal, 1u);
   std::string output_string = output.text();
   EXPECT_NE(output_string.find("test.counter 2"), std::string::npos);
@@ -299,8 +320,8 @@ TEST_F(PassTraceTest, SkipsProjectionForUnmatchedEvent) {
   ModulePtr source_module = BuildSourceModule(1);
   ASSERT_NE(source_module, nullptr);
 
-  CountingAllocatorState allocator_state;
-  ProjectionState projection_state = MakeProjectionState(&allocator_state);
+  ObservedProjectionStorage projection_storage;
+  ProjectionState projection_state = MakeProjectionState(&projection_storage);
   TraceOutput output;
   output.options.dump_before_all = true;
   output.BindProjector(ProjectCounterModule, &projection_state);
@@ -309,7 +330,7 @@ TEST_F(PassTraceTest, SkipsProjectionForUnmatchedEvent) {
   IREE_ASSERT_OK(loom_pass_trace_emit(&output.trace, &event));
 
   EXPECT_EQ(projection_state.invocation_count, 0);
-  EXPECT_FALSE(allocator_state.watched_allocation_freed);
+  EXPECT_FALSE(projection_storage.allocator_state.watched_allocation_freed);
   EXPECT_EQ(output.trace.next_event_ordinal, 0u);
   EXPECT_TRUE(output.empty());
 }
@@ -360,8 +381,8 @@ TEST_F(PassTraceTest, ProjectionFailurePublishesNothingAndReleasesModule) {
   ModulePtr source_module = BuildSourceModule(1);
   ASSERT_NE(source_module, nullptr);
 
-  CountingAllocatorState allocator_state;
-  ProjectionState projection_state = MakeProjectionState(&allocator_state);
+  ObservedProjectionStorage projection_storage;
+  ProjectionState projection_state = MakeProjectionState(&projection_storage);
   TraceOutput output;
   output.options.dump_after_all = true;
   output.BindProjector(ProjectCounterModuleThenFail, &projection_state);
@@ -371,7 +392,7 @@ TEST_F(PassTraceTest, ProjectionFailurePublishesNothingAndReleasesModule) {
                         loom_pass_trace_emit(&output.trace, &event));
 
   EXPECT_EQ(projection_state.invocation_count, 1);
-  EXPECT_TRUE(allocator_state.watched_allocation_freed);
+  EXPECT_TRUE(projection_storage.allocator_state.watched_allocation_freed);
   EXPECT_EQ(output.trace.next_event_ordinal, 0u);
   EXPECT_TRUE(output.empty());
 }
@@ -380,8 +401,8 @@ TEST_F(PassTraceTest, ClosesArtifactAndReleasesProjectionAfterWriteFailure) {
   ModulePtr source_module = BuildSourceModule(1);
   ASSERT_NE(source_module, nullptr);
 
-  CountingAllocatorState allocator_state;
-  ProjectionState projection_state = MakeProjectionState(&allocator_state);
+  ObservedProjectionStorage projection_storage;
+  ProjectionState projection_state = MakeProjectionState(&projection_storage);
   ArtifactSinkState artifact_state = {
       .stream =
           {
@@ -405,7 +426,7 @@ TEST_F(PassTraceTest, ClosesArtifactAndReleasesProjectionAfterWriteFailure) {
 
   EXPECT_EQ(artifact_state.open_count, 1);
   EXPECT_EQ(artifact_state.close_count, 1);
-  EXPECT_TRUE(allocator_state.watched_allocation_freed);
+  EXPECT_TRUE(projection_storage.allocator_state.watched_allocation_freed);
   EXPECT_TRUE(output.empty());
 }
 

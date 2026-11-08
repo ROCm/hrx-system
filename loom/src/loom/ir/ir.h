@@ -2734,8 +2734,9 @@ typedef struct loom_module_t {
   // Owning context (provides vtables for op resolution).
   loom_context_t* context;
 
-  // Allocator used to allocate and free the module struct itself.
-  iree_allocator_t allocator;
+  // Host allocator inherited by compiler operations that derive modules or
+  // associated host objects from this module.
+  iree_allocator_t host_allocator;
 
   // Arena backing IR storage with bump-pointer allocation and batched return
   // of reusable workspace blocks.

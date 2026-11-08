@@ -40,6 +40,37 @@ struct ProjectionDeleter {
 using ProjectionPtr =
     std::unique_ptr<loom_link_func_contract_projection_t, ProjectionDeleter>;
 
+struct FailingBlockAllocatorState {
+  // Allocator servicing non-failing requests.
+  iree_allocator_t delegate = iree_allocator_system();
+  // Number of allocation requests observed.
+  iree_host_size_t allocation_count = 0;
+  // Allocation ordinal that returns RESOURCE_EXHAUSTED.
+  iree_host_size_t failure_index = IREE_HOST_SIZE_MAX;
+};
+
+static iree_status_t FailingBlockAllocatorCtl(void* self,
+                                              iree_allocator_command_t command,
+                                              const void* params,
+                                              void** inout_ptr) {
+  auto* state = static_cast<FailingBlockAllocatorState*>(self);
+  if ((command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+       command == IREE_ALLOCATOR_COMMAND_CALLOC ||
+       command == IREE_ALLOCATOR_COMMAND_REALLOC) &&
+      state->allocation_count++ == state->failure_index) {
+    return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+  }
+  return state->delegate.ctl(state->delegate.self, command, params, inout_ptr);
+}
+
+static iree_allocator_t FailingBlockAllocator(
+    FailingBlockAllocatorState* state) {
+  return iree_allocator_t{
+      .self = state,
+      .ctl = FailingBlockAllocatorCtl,
+  };
+}
+
 class LinkFuncContractProjectionTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -239,25 +270,36 @@ TEST_F(LinkFuncContractProjectionTest, CachesProjectedContractViews) {
 TEST_F(LinkFuncContractProjectionTest,
        RetainsOwningArenaAfterInitializationFailure) {
   IndexPtr index = CreateMixedIndex();
-  const iree_allocator_t failing_allocator = {
-      nullptr,
-      [](void*, iree_allocator_command_t, const void*, void**) {
-        return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
-      },
-  };
+
+  FailingBlockAllocatorState allocator_state;
+  iree_arena_block_pool_t failing_pool;
+  iree_arena_block_pool_initialize(
+      32 * 1024, FailingBlockAllocator(&allocator_state), &failing_pool);
+  iree_arena_allocator_t failing_arena;
+  iree_arena_initialize(&failing_pool, &failing_arena);
+
+  // Give the owner arena a block for the projection header, then fail the next
+  // block request made while initializing the child identity module.
+  void* owner_storage = nullptr;
+  IREE_ASSERT_OK(iree_arena_allocate(&failing_arena, 1, &owner_storage));
+  allocator_state.failure_index = allocator_state.allocation_count;
   auto* projection =
       reinterpret_cast<loom_link_func_contract_projection_t*>(0x1);
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
       loom_link_func_contract_projection_allocate(
-          index.get(), &comparison_arena_, failing_allocator, &projection));
+          index.get(), &failing_arena, iree_allocator_system(), &projection));
   EXPECT_EQ(projection, nullptr);
   loom_link_func_contract_projection_free(projection);
 
+  allocator_state.failure_index = IREE_HOST_SIZE_MAX;
   IREE_ASSERT_OK(loom_link_func_contract_projection_allocate(
-      index.get(), &comparison_arena_, iree_allocator_system(), &projection));
+      index.get(), &failing_arena, iree_allocator_system(), &projection));
   ASSERT_NE(projection, nullptr);
   loom_link_func_contract_projection_free(projection);
+
+  iree_arena_deinitialize(&failing_arena);
+  iree_arena_block_pool_deinitialize(&failing_pool);
 }
 
 }  // namespace

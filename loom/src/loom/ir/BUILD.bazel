@@ -190,6 +190,7 @@ loom_cc_instance_library(
         "location.c",
         "location_compaction.c",
         "module.c",
+        "module_lifecycle.c",
         "module_record.c",
         "module_source.c",
         "type_dependencies.c",
