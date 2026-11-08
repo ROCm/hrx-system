@@ -273,6 +273,28 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "hip_graph_memory_execution_test",
+    srcs = [
+        "graph_memory_execution_test.cpp",
+        "//libhrx/cts/core:amdgpu_executable_test_data.hpp",
+        "//libhrx/cts/core:amdgpu_test_data.hpp",
+    ],
+    data = [_HIP_RUNTIME],
+    env = _HIP_RUNTIME_ENV | {"HRX_GPU_DRIVER": "amdgpu"},
+    resource_group = AMD_GPU_CTS_RESOURCE_GROUP,
+    tags = AMD_GPU_CTS_TAGS,
+    target_compatible_with = ["@platforms//os:linux"] + select({
+        "//runtime/config/hal:driver_amd_gpu": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        "//build_tools/amdgpu:target_map_h",
+        "//libhrx/cts/tests/executable:amdgpu_executable_test_kernels",
+        "//libhrx/src/binding/hip:hip_dso_test_util",
+    ] + _HIP_TEST_DEPS,
+)
+
+hrx_cc_test(
     name = "hip_module_library_execution_test",
     srcs = [
         "module_library_execution_test.cpp",

@@ -576,8 +576,7 @@ iree_status_t iree_hal_streaming_event_record(
     status = iree_hal_queue_flush(submission.queue);
   }
   iree_slim_mutex_unlock(&stream->mutex);
-  // The last captured-graph reference can synchronize every context and relock
-  // this stream, so it is dropped outside the stream mutex.
+  // Graph destruction releases owned resources outside submission locks.
   iree_hal_streaming_graph_release(dropped_capture_graph);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 

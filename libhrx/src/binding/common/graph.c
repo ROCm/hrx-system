@@ -9,6 +9,7 @@
 #include "common/context.h"
 #include "common/device.h"
 #include "common/event.h"
+#include "common/graph_memory.h"
 #include "common/kernel_arguments.h"
 #include "common/memory.h"
 #include "common/module.h"
@@ -42,17 +43,14 @@ static void iree_hal_streaming_graph_node_deinitialize_attrs(
       node->attrs.event.event = NULL;
       break;
     case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC:
-      if (node->attrs.mem_alloc.owns_device_allocation &&
-          node->attrs.mem_alloc.dptr) {
-        iree_status_ignore(iree_hal_streaming_memory_free_device(
-            node->graph->context,
-            (iree_hal_streaming_deviceptr_t)node->attrs.mem_alloc.dptr));
-      }
-      node->attrs.mem_alloc.params = NULL;
-      node->attrs.mem_alloc.params_size = 0;
-      node->attrs.mem_alloc.dptr = NULL;
-      node->attrs.mem_alloc.bytesize = 0;
-      node->attrs.mem_alloc.owns_device_allocation = false;
+      iree_hal_streaming_graph_allocation_release(
+          node->attrs.mem_alloc.allocation);
+      node->attrs.mem_alloc.allocation = NULL;
+      break;
+    case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE:
+      iree_hal_streaming_graph_allocation_release(
+          node->attrs.mem_free.allocation);
+      node->attrs.mem_free.allocation = NULL;
       break;
     case IREE_HAL_STREAMING_GRAPH_NODE_TYPE_BATCH_MEM_OP:
       for (iree_host_size_t i = 0; i < node->attrs.batch_mem_op.operation_count;
@@ -923,10 +921,15 @@ iree_status_t iree_hal_streaming_graph_clone(
       } else if (source_node->type ==
                  IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC) {
         // The retained source owns the actual allocation and query payload.
-        clone_node->attrs.mem_alloc.owns_device_allocation = false;
+        iree_hal_streaming_graph_allocation_retain(
+            clone_node->attrs.mem_alloc.allocation);
         if (!clone_node->attrs.mem_alloc.allocation_owner) {
           clone_node->attrs.mem_alloc.allocation_owner = source_graph;
         }
+      } else if (source_node->type ==
+                 IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE) {
+        iree_hal_streaming_graph_allocation_retain(
+            clone_node->attrs.mem_free.allocation);
       } else if ((source_node->type ==
                       IREE_HAL_STREAMING_GRAPH_NODE_TYPE_EVENT_RECORD ||
                   source_node->type ==

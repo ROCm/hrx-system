@@ -1063,7 +1063,7 @@ hipError_t iree_hip_vmm_address_reserve(void** ptr, size_t size,
   }
   if (result == hipSuccess) {
     iree_status_t status = iree_hal_streaming_memory_wrap_virtual_reservation(
-        context, virtual_buffer, &streaming_buffer);
+        context, virtual_buffer, size, &streaming_buffer);
     if (!iree_status_is_ok(status)) {
       iree_status_ignore(status);
       result = hipErrorOutOfMemory;

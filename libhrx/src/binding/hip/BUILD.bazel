@@ -35,6 +35,11 @@ _HIP_GPU_COMPATIBILITY = _LINUX_COMPATIBILITY + select({
     "//conditions:default": ["@platforms//:incompatible"],
 })
 
+_HIP_NATIVE_GPU_COMPATIBILITY = _LINUX_COMPATIBILITY + select({
+    "//runtime/config/hal:driver_amd_gpu": [],
+    "//conditions:default": ["@platforms//:incompatible"],
+})
+
 hrx_cc_library(
     name = "array_lifetime",
     srcs = ["array_lifetime.c"],
@@ -725,6 +730,7 @@ hrx_cc_test(
     ],
     data = [":amdhip64"],
     env = {
+        "HRX_GPU_DRIVER": "amdgpu",
         "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
     },
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
@@ -733,7 +739,7 @@ hrx_cc_test(
         "iree-run-requirement=runtime.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    target_compatible_with = _HIP_NATIVE_GPU_COMPATIBILITY,
     deps = [
         ":hip_dso_test_util",
         "//runtime/src/iree/testing:gtest",
@@ -949,6 +955,7 @@ hrx_cc_test(
     # device-backed allocation and graph teardown.
     data = [":amdhip64"],
     env = {
+        "HRX_GPU_DRIVER": "amdgpu",
         "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
     },
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
@@ -957,7 +964,7 @@ hrx_cc_test(
         "iree-run-requirement=runtime.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    target_compatible_with = _HIP_NATIVE_GPU_COMPATIBILITY,
     deps = [
         ":hip_dso_test_util",
         ":launch_params",

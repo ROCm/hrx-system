@@ -229,10 +229,9 @@ void iree_hal_streaming_event_release_recorded_point(
 //
 // A submitted record ends the event's association with any graph a capture-time
 // record left on it, in the same transition, so no reader can see the new point
-// while the event still reads as captured. Returns that graph reference;
-// releasing it can free the allocations the graph owns, which synchronizes
-// every context and relocks the stream, so callers holding a stream or graph
-// executable mutex must release it after unlocking.
+// while the event still reads as captured. Returns that graph reference for
+// release outside the caller's stream or graph executable mutex, keeping
+// destruction of graph-owned resources outside submission locks.
 // Synchronization: event (event mutex held while replacing the point).
 IREE_MUST_USE_RESULT iree_hal_streaming_graph_t*
 iree_hal_streaming_event_commit_recorded_point(
@@ -243,10 +242,8 @@ iree_hal_streaming_event_commit_recorded_point(
 // An event names none once its last record has been submitted, and none before
 // any record has been made.
 //
-// Answers from the association alone, taking no reference to the graph: a
-// caller deciding only whether the event names a capture never holds a
-// reference whose release could free the graph's allocations, which
-// synchronizes every context.
+// Answers from the association alone without acquiring ownership or running
+// graph destruction when the caller only needs to query capture state.
 // Synchronization: event (event mutex held while reading).
 bool iree_hal_streaming_event_has_capture_graph(
     iree_hal_streaming_event_t* event);
@@ -254,9 +251,8 @@ bool iree_hal_streaming_event_has_capture_graph(
 // Returns a retained reference to the graph and exact session a capture-time
 // record last associated |event| with, or NULL/zero when the event names no
 // capture. Both outputs are acquired atomically under the event mutex.
-// Releasing the returned graph can free the allocations it owns, which
-// synchronizes every context and relocks streams, so callers holding a stream
-// mutex must release it after unlocking.
+// Release the returned reference outside the caller's stream mutex so graph
+// destruction runs outside submission locks.
 // Synchronization: event (event mutex held while retaining).
 IREE_MUST_USE_RESULT iree_hal_streaming_graph_t*
 iree_hal_streaming_event_acquire_capture_graph(

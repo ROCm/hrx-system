@@ -11,6 +11,7 @@
 #include "common/amdgpu_architecture.h"
 #include "common/context.h"
 #include "common/device.h"
+#include "common/graph_memory.h"
 #include "common/hrx_bridge.h"
 #include "libhrx/src/libhrx/device.h"
 #include "libhrx/src/libhrx/runtime.h"
@@ -293,7 +294,7 @@ static iree_status_t iree_hal_streaming_initialize_device(
   out_device->graph_memory_used_high = 0;
   out_device->graph_memory_reserved_current = 0;
   out_device->graph_memory_reserved_high = 0;
-  out_device->graph_memory_reusable_size_entries = NULL;
+  out_device->graph_memory_blocks = NULL;
 
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_execution_resource_table_initialize(
@@ -346,15 +347,7 @@ static void iree_hal_streaming_deinitialize_device(
   iree_hal_streaming_execution_resource_table_deinitialize(
       &device->execution_resource_table);
 
-  iree_hal_streaming_graph_memory_size_entry_t* graph_memory_entry =
-      device->graph_memory_reusable_size_entries;
-  device->graph_memory_reusable_size_entries = NULL;
-  while (graph_memory_entry) {
-    iree_hal_streaming_graph_memory_size_entry_t* next_entry =
-        graph_memory_entry->next;
-    iree_allocator_free(host_allocator, graph_memory_entry);
-    graph_memory_entry = next_entry;
-  }
+  iree_hal_streaming_graph_memory_deinitialize(device);
   iree_slim_mutex_deinitialize(&device->graph_memory_mutex);
 
   // Deinitialize primary context mutex.

@@ -121,6 +121,9 @@ typedef struct iree_hal_streaming_buffer_t {
   // True while this pool-backed buffer contributes to logical pool usage.
   bool is_pool_allocation_live;
 
+  // Borrowed graph-address owner; NULL for ordinary HIP allocations.
+  struct iree_hal_streaming_graph_allocation_t* graph_allocation;
+
   // Actual HAL memory capabilities; unified memory may be host and device
   // local.
   int memory_type;
@@ -525,12 +528,12 @@ iree_status_t iree_hal_streaming_memcpy_device_to_device_2d(
     iree_host_size_t height, iree_hal_streaming_stream_t* stream);
 
 // Registers an HRX virtual-address reservation in the streaming pointer table.
-// The wrapper retains both |context| and |virtual_buffer|. The reservation
-// remains owned by the caller and must be released through the VMM allocator
-// after the wrapper is removed.
+// Exposes |logical_size| bytes, excluding any native page-alignment padding.
+// The wrapper retains both |context| and |virtual_buffer|; the caller retains
+// ownership of its original reservation reference.
 iree_status_t iree_hal_streaming_memory_wrap_virtual_reservation(
     iree_hal_streaming_context_t* context, hrx_buffer_t virtual_buffer,
-    iree_hal_streaming_buffer_t** out_buffer);
+    iree_device_size_t logical_size, iree_hal_streaming_buffer_t** out_buffer);
 
 // Removes and releases an externally owned buffer wrapper.
 void iree_hal_streaming_memory_release_wrapped_buffer(

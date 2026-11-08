@@ -305,14 +305,15 @@ typedef struct iree_hal_streaming_graph_mem_alloc_node_attrs_t {
   // Original allocation owner for a cloned node, borrowed through the retained
   // template chain. NULL means this node's graph owns the allocation.
   iree_hal_streaming_graph_t* allocation_owner;
-  // True when |dptr| is owned by this graph template and must be released with
-  // the node.
-  bool owns_device_allocation;
+  // Retained stable address and its independent physical allocation lifetime.
+  struct iree_hal_streaming_graph_allocation_t* allocation;
 } iree_hal_streaming_graph_mem_alloc_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_mem_free_node_attrs_t {
   // Device pointer associated with the memory free node.
   void* dptr;
+  // Retained address owner, including frees of allocations from another graph.
+  struct iree_hal_streaming_graph_allocation_t* allocation;
 } iree_hal_streaming_graph_mem_free_node_attrs_t;
 
 typedef struct iree_hal_streaming_graph_batch_mem_op_node_attrs_t {
@@ -604,20 +605,6 @@ iree_status_t iree_hal_streaming_graph_exec_update(
     iree_hal_streaming_graph_exec_t* exec, iree_hal_streaming_graph_t* graph,
     iree_hal_streaming_graph_node_t** out_error_node,
     iree_hal_streaming_graph_exec_update_result_t* out_result);
-
-uint64_t iree_hal_streaming_graph_memory_used_current(
-    iree_hal_streaming_device_t* device);
-uint64_t iree_hal_streaming_graph_memory_used_high(
-    iree_hal_streaming_device_t* device);
-uint64_t iree_hal_streaming_graph_memory_reserved_current(
-    iree_hal_streaming_device_t* device);
-uint64_t iree_hal_streaming_graph_memory_reserved_high(
-    iree_hal_streaming_device_t* device);
-void iree_hal_streaming_graph_memory_reset_used_high(
-    iree_hal_streaming_device_t* device);
-void iree_hal_streaming_graph_memory_reset_reserved_high(
-    iree_hal_streaming_device_t* device);
-void iree_hal_streaming_graph_memory_trim(iree_hal_streaming_device_t* device);
 
 //===----------------------------------------------------------------------===//
 // Stream capture
