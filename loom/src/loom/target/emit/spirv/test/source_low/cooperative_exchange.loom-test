@@ -1,0 +1,231 @@
+// RUN: emit spirv-dis input=source-low control-flow=structured-low target=spirv:vulkan1.3+bda+hal features=FLOAT16,STORAGE_BUFFER_16BIT_ACCESS,COOPERATIVE_MATRIX_KHR limits=SUBGROUP_SIZE:32 validate
+// REQUIRES: spirv-dis, spirv-val
+
+// Opaque matrix values acquire ordinary element coordinates only through the
+// explicit workgroup exchange. Every participant updates eight disjoint cells
+// before the next collective load reconstructs the accumulator.
+kernel.def @matrix_exchange() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%left_buffer: buffer, %right_buffer: buffer, %output_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %left_aligned = buffer.assume.alignment %left_buffer {minimum_alignment = 16} : buffer
+  %right_aligned = buffer.assume.alignment %right_buffer {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output_buffer {minimum_alignment = 16} : buffer
+  %left = buffer.view %left_aligned[%base] : buffer -> view<16x16xf16>
+  %right = buffer.view %right_aligned[%base] : buffer -> view<16x16xf16>
+  %output = buffer.view %output_aligned[%base] : buffer -> view<16x16xf32>
+  %byte_length = index.constant 1024 : offset
+  %scratch = buffer.alloca<workgroup> align(16) %byte_length : buffer
+  %matrix = buffer.view %scratch[%base] : buffer -> view<16x16xf32>
+  %elements = buffer.view %scratch[%base] : buffer -> view<256xf32>
+  %seed_values = vector.splatf 0.0 : vector<1xf32>
+  %seed = vector.fragment<init> %seed_values shape [%tile, %tile] : vector<1xf32>
+  %lhs = vector.fragment.load<lhs> %left[0, 0] shape [%tile, %tile] : view<16x16xf16> -> vector<1xf16>
+  %rhs = vector.fragment.load<rhs> %right[0, 0] shape [%tile, %tile] : view<16x16xf16> -> vector<1xf16>
+  %product = vector.mma %lhs, %rhs, %seed : vector<1xf16>, vector<1xf16>, vector<1xf32>
+  vector.fragment.store<result> %product, %matrix[0, 0] shape [%tile, %tile] : vector<1xf32>, view<16x16xf32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %thread = kernel.workitem.id<x> : index
+  %begin = index.constant 0 : index
+  %rounds = index.constant 8 : index
+  %step = index.constant 1 : index
+  %threads = index.constant 32 : index
+  %scale = scalar.constant 2.0 : f32
+  scf.for %round = [%begin to %rounds step %step] {
+    %row_base = index.mul %round, %threads : index
+    %position = index.add %row_base, %thread : index
+    %value = view.load %elements[%position] : view<256xf32> -> f32
+    %scaled = scalar.mulf %value, %scale : f32
+    view.store %scaled, %elements[%position] : f32, view<256xf32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %accumulator = vector.fragment.load<init> %matrix[0, 0] shape [%tile, %tile] : view<16x16xf32> -> vector<1xf32>
+  %result = vector.mma %lhs, %rhs, %accumulator : vector<1xf16>, vector<1xf16>, vector<1xf32>
+  vector.fragment.store<result> %result, %output[0, 0] shape [%tile, %tile] : vector<1xf32>, view<16x16xf32>
+  kernel.return
+}
+
+// ----
+               OpCapability Shader
+               OpCapability VulkanMemoryModel
+               OpCapability PhysicalStorageBufferAddresses
+               OpCapability Int64
+               OpCapability Float16
+               OpCapability StorageBuffer16BitAccess
+               OpCapability CooperativeMatrixKHR
+               OpExtension "SPV_KHR_vulkan_memory_model"
+               OpExtension "SPV_KHR_physical_storage_buffer"
+               OpExtension "SPV_KHR_16bit_storage"
+               OpExtension "SPV_KHR_cooperative_matrix"
+               OpMemoryModel PhysicalStorageBuffer64 Vulkan
+               OpEntryPoint GLCompute %matrix_exchange "matrix_exchange" %local_invocation_id
+               OpExecutionMode %matrix_exchange LocalSize 32 1 1
+               OpName %matrix_exchange "matrix_exchange"
+               OpName %left_aligned "left_aligned"
+               OpName %right_aligned "right_aligned"
+               OpName %output_aligned "output_aligned"
+               OpName %matrix "matrix"
+               OpName %seed "seed"
+               OpName %lhs "lhs"
+               OpName %rhs "rhs"
+               OpName %product "product"
+               OpName %local_invocation_id "local_invocation_id"
+               OpName %thread "thread"
+               OpName %begin "begin"
+               OpName %rounds "rounds"
+               OpName %step "step"
+               OpName %threads "threads"
+               OpName %scale "scale"
+               OpName %round "round"
+               OpName %position "position"
+               OpName %value "value"
+               OpName %scaled "scaled"
+               OpName %accumulator "accumulator"
+               OpName %result "result"
+               OpModuleProcessed "iree.vulkan.bda.v1[matrix_exchange].subgroup_size=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[matrix_exchange].root=0,32"
+               OpModuleProcessed "iree.vulkan.bda.v1[matrix_exchange].constant_offset=32"
+               OpModuleProcessed "iree.vulkan.bda.v1[matrix_exchange].constant_length=0"
+               OpModuleProcessed "iree.vulkan.bda.v1[matrix_exchange].bindings=3"
+               OpModuleProcessed "iree.vulkan.bda.parameters.v1[matrix_exchange]=b0;b1;b2"
+               OpDecorate %_runtimearr_ulong ArrayStride 8
+               OpDecorate %_struct_11 Block
+               OpMemberDecorate %_struct_11 0 Offset 0
+               OpDecorate %_ptr_PhysicalStorageBuffer_half ArrayStride 2
+               OpDecorate %local_invocation_id BuiltIn LocalInvocationId
+               OpDecorate %scaled NoContraction
+               OpDecorate %_ptr_PhysicalStorageBuffer_float ArrayStride 4
+               OpDecorate %_struct_111 Block
+               OpMemberDecorate %_struct_111 0 Offset 0
+               OpMemberDecorate %_struct_111 1 Offset 8
+               OpMemberDecorate %_struct_111 2 Offset 16
+               OpMemberDecorate %_struct_111 3 Offset 20
+               OpMemberDecorate %_struct_111 4 Offset 24
+               OpMemberDecorate %_struct_111 5 Offset 28
+       %void = OpTypeVoid
+          %4 = OpTypeFunction %void
+      %ulong = OpTypeInt 64 0
+       %uint = OpTypeInt 32 0
+%_ptr_PushConstant_ulong = OpTypePointer PushConstant %ulong
+%_ptr_PushConstant_uint = OpTypePointer PushConstant %uint
+%_runtimearr_ulong = OpTypeRuntimeArray %ulong
+ %_struct_11 = OpTypeStruct %_runtimearr_ulong
+%_ptr_PhysicalStorageBuffer__struct_11 = OpTypePointer PhysicalStorageBuffer %_struct_11
+        %int = OpTypeInt 32 1
+      %int_0 = OpConstant %int 0
+      %int_2 = OpConstant %int 2
+%_ptr_PhysicalStorageBuffer_ulong = OpTypePointer PhysicalStorageBuffer %ulong
+     %uint_1 = OpConstant %uint 1
+     %uint_2 = OpConstant %uint 2
+      %float = OpTypeFloat 32
+   %uint_256 = OpConstant %uint 256
+%_arr_float_uint_256 = OpTypeArray %float %uint_256
+%_ptr_Workgroup__arr_float_uint_256 = OpTypePointer Workgroup %_arr_float_uint_256
+     %matrix = OpVariable %_ptr_Workgroup__arr_float_uint_256 Workgroup
+    %float_0 = OpConstant %float 0
+     %uint_3 = OpConstant %uint 3
+    %uint_16 = OpConstant %uint 16
+         %40 = OpTypeCooperativeMatrixKHR %float %uint_3 %uint_16 %uint_16 %uint_2
+   %ulong_16 = OpConstant %ulong 16
+    %ulong_0 = OpConstant %ulong 0
+       %half = OpTypeFloat 16
+%_ptr_PhysicalStorageBuffer_half = OpTypePointer PhysicalStorageBuffer %half
+     %uint_0 = OpConstant %uint 0
+         %50 = OpTypeCooperativeMatrixKHR %half %uint_3 %uint_16 %uint_16 %uint_0
+ %ulong_16_0 = OpConstant %ulong 16
+  %ulong_0_0 = OpConstant %ulong 0
+         %57 = OpTypeCooperativeMatrixKHR %half %uint_3 %uint_16 %uint_16 %uint_1
+ %ulong_16_1 = OpConstant %ulong 16
+  %ulong_0_1 = OpConstant %ulong 0
+    %ulong_2 = OpConstant %ulong 2
+%_ptr_Workgroup_float = OpTypePointer Workgroup %float
+   %uint_264 = OpConstant %uint 264
+     %v3uint = OpTypeVector %uint 3
+%_ptr_Input_v3uint = OpTypePointer Input %v3uint
+%local_invocation_id = OpVariable %_ptr_Input_v3uint Input
+      %begin = OpConstant %int 0
+     %rounds = OpConstant %int 8
+       %step = OpConstant %int 1
+    %threads = OpConstant %int 32
+      %scale = OpConstant %float 2
+       %bool = OpTypeBool
+ %ulong_16_2 = OpConstant %ulong 16
+  %ulong_0_2 = OpConstant %ulong 0
+ %ulong_16_3 = OpConstant %ulong 16
+  %ulong_0_3 = OpConstant %ulong 0
+%_ptr_PhysicalStorageBuffer_float = OpTypePointer PhysicalStorageBuffer %float
+%_struct_111 = OpTypeStruct %ulong %ulong %uint %uint %uint %uint
+%_ptr_PushConstant__struct_111 = OpTypePointer PushConstant %_struct_111
+          %2 = OpVariable %_ptr_PushConstant__struct_111 PushConstant
+%matrix_exchange = OpFunction %void None %4
+          %5 = OpLabel
+         %16 = OpAccessChain %_ptr_PushConstant_ulong %2 %int_0
+         %17 = OpLoad %ulong %16 Aligned 8
+         %18 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer__struct_11 %17
+         %19 = OpAccessChain %_ptr_PushConstant_uint %2 %int_2
+         %20 = OpLoad %uint %19 Aligned 4
+         %22 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %18 %int_0 %20
+%left_aligned = OpLoad %ulong %22 Aligned 8
+         %25 = OpIAdd %uint %20 %uint_1
+         %26 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %18 %int_0 %25
+%right_aligned = OpLoad %ulong %26 Aligned 8
+         %29 = OpIAdd %uint %20 %uint_2
+         %30 = OpAccessChain %_ptr_PhysicalStorageBuffer_ulong %18 %int_0 %29
+%output_aligned = OpLoad %ulong %30 Aligned 8
+       %seed = OpCompositeConstruct %40 %float_0
+         %43 = OpUConvert %uint %ulong_16
+         %45 = OpIAdd %ulong %left_aligned %ulong_0
+         %48 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %45
+        %lhs = OpCooperativeMatrixLoadKHR %50 %48 %uint_0 %43 Aligned 16
+         %53 = OpUConvert %uint %ulong_16_0
+         %55 = OpIAdd %ulong %right_aligned %ulong_0_0
+         %56 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_half %55
+        %rhs = OpCooperativeMatrixLoadKHR %57 %56 %uint_0 %53 Aligned 16
+    %product = OpCooperativeMatrixMulAddKHR %40 %lhs %rhs %seed
+         %61 = OpUConvert %uint %ulong_16_1
+         %64 = OpShiftRightLogical %ulong %ulong_0_1 %ulong_2
+         %66 = OpAccessChain %_ptr_Workgroup_float %matrix %64
+               OpCooperativeMatrixStoreKHR %66 %product %uint_0 %61 Aligned 16
+               OpControlBarrier %uint_2 %uint_2 %uint_264
+         %71 = OpLoad %v3uint %local_invocation_id
+         %72 = OpCompositeExtract %uint %71 0
+     %thread = OpBitcast %int %72
+         %80 = OpSLessThan %bool %begin %rounds
+         %81 = OpISub %int %rounds %begin
+         %82 = OpULessThan %bool %step %81
+         %83 = OpISub %int %rounds %step
+         %84 = OpSelect %int %82 %83 %begin
+               OpBranch %85
+         %85 = OpLabel
+      %round = OpPhi %int %begin %5 %89 %88
+         %92 = OpPhi %bool %80 %5 %90 %88
+               OpLoopMerge %87 %88 None
+               OpBranchConditional %92 %86 %87
+         %86 = OpLabel
+         %93 = OpIMul %int %round %threads
+   %position = OpIAdd %int %93 %thread
+         %95 = OpAccessChain %_ptr_Workgroup_float %matrix %position
+      %value = OpLoad %float %95 Aligned 4
+     %scaled = OpFMul %float %value %scale
+               OpStore %95 %scaled Aligned 4
+               OpBranch %88
+         %88 = OpLabel
+         %90 = OpSLessThan %bool %round %84
+         %89 = OpIAdd %int %round %step
+               OpBranch %85
+         %87 = OpLabel
+               OpControlBarrier %uint_2 %uint_2 %uint_264
+         %99 = OpUConvert %uint %ulong_16_2
+        %101 = OpShiftRightLogical %ulong %ulong_0_2 %ulong_2
+        %102 = OpAccessChain %_ptr_Workgroup_float %matrix %101
+%accumulator = OpCooperativeMatrixLoadKHR %40 %102 %uint_0 %99 Aligned 16
+     %result = OpCooperativeMatrixMulAddKHR %40 %lhs %rhs %accumulator
+        %106 = OpUConvert %uint %ulong_16_3
+        %108 = OpIAdd %ulong %output_aligned %ulong_0_3
+        %110 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_float %108
+               OpCooperativeMatrixStoreKHR %110 %result %uint_0 %106 Aligned 16
+               OpReturn
+               OpFunctionEnd
