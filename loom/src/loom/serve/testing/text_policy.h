@@ -21,10 +21,11 @@ typedef struct loom_serve_test_text_policy_t loom_serve_test_text_policy_t;
 // Resolves the requested control program or model card, compiles its chat
 // roots, and binds the supplied tokenizer and deployment options. Owns the
 // resolved sources through policy destruction. Compilation evidence survives
-// failure; the tokenizer path follows the process's working directory.
+// failure. The tokenizer locator shares the resolved source namespace: package
+// members use relative locators and local files use the namespace's base.
 iree_status_t loom_serve_test_text_policy_allocate(
     const loom_runtime_sources_t* requested_sources,
-    iree_string_view_t tokenizer_path, iree_string_view_t options,
+    iree_string_view_t tokenizer_locator, iree_string_view_t options,
     loom_runtime_compilation_report_t* report, iree_allocator_t host_allocator,
     loom_serve_test_text_policy_t** out_policy);
 

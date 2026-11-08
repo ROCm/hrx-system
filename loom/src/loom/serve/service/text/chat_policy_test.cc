@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -14,8 +13,10 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/test_allocator.h"
+#include "loom/runtime/program/package.h"
 #include "loom/serve/media/image_codec.h"
 #include "loom/serve/service/text/chat.h"
+#include "loom/serve/service/text/chat_policy_data.h"
 #include "loom/serve/service/text/input.h"
 #include "loom/serve/testing/text_policy.h"
 
@@ -24,17 +25,26 @@ namespace {
 class SourceChatPolicyTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {
-    const char* control = std::getenv("LOOM_SERVE_TEST_CHAT_CONTROL");
-    const char* tokenizer = std::getenv("LOOM_SERVE_TEST_CHAT_TOKENIZER");
-    ASSERT_NE(control, nullptr);
-    ASSERT_NE(tokenizer, nullptr);
+    const iree_file_toc_t* entries = loom_chat_policy_data_create();
+    std::vector<loom_runtime_package_file_t> files;
+    files.reserve(loom_chat_policy_data_size());
+    for (size_t i = 0; i < loom_chat_policy_data_size(); ++i) {
+      files.push_back({
+          .path = iree_make_cstring_view(entries[i].name),
+          .contents =
+              iree_make_const_byte_span(entries[i].data, entries[i].size),
+      });
+    }
+    IREE_ASSERT_OK(loom_runtime_package_create(
+        IREE_SV("model.json"), files.size(), files.data(),
+        iree_allocator_system(), &package_));
     const loom_runtime_sources_t sources = {
-        .base_directory = IREE_SV("."),
-        .control = iree_make_cstring_view(control),
+        .control = IREE_SV("control.loom"),
+        .package = package_,
     };
     loom_runtime_compilation_report_t report = {};
     auto status = loom_serve_test_text_policy_allocate(
-        &sources, iree_make_cstring_view(tokenizer), IREE_SV("{}"), &report,
+        &sources, IREE_SV("tokenizer.json"), IREE_SV("{}"), &report,
         iree_allocator_system(), &policy_owner_);
     loom_output_stream_t diagnostics;
     loom_output_stream_for_file(stderr, &diagnostics);
@@ -45,6 +55,8 @@ class SourceChatPolicyTest : public ::testing::Test {
   static void TearDownTestSuite() {
     loom_serve_test_text_policy_free(policy_owner_);
     policy_owner_ = nullptr;
+    loom_runtime_package_release(package_);
+    package_ = nullptr;
   }
 
   void SetUp() override {
@@ -108,6 +120,8 @@ class SourceChatPolicyTest : public ::testing::Test {
 
   // One source program/tokenizer, shared across serialized policy callers.
   inline static loom_serve_test_text_policy_t* policy_owner_ = nullptr;
+  // Embedded source namespace retained through policy construction and use.
+  inline static loom_runtime_package_t* package_ = nullptr;
   // Ordinary owner allocator; individual tests inject scratch allocation
   // errors.
   const iree_allocator_t host_allocator_ = iree_allocator_system();

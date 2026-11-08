@@ -13,7 +13,7 @@
 // - Token ID patterns that stress decoder state
 // - Rapid switching between valid/invalid IDs
 //
-// Uses fuzzing_util for tokenizer loading (dummy or real via --tokenizer_json).
+// Uses fuzzing_util for configured real-tokenizer or dummy-tokenizer loading.
 //
 // See https://iree.dev/developers/debugging/fuzzing/ for build and run info.
 
@@ -29,8 +29,10 @@ static iree_tokenizer_t* g_tokenizer = NULL;
 static int32_t g_vocab_size = 0;
 
 extern "C" int LLVMFuzzerInitialize(int* argc, char*** argv) {
-  iree_status_t status = iree_tokenizer_fuzz_load_or_build(
-      argc, argv, &g_tokenizer, &g_vocab_size);
+  (void)argc;
+  (void)argv;
+  iree_status_t status =
+      iree_tokenizer_fuzz_load_or_build(&g_tokenizer, &g_vocab_size);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

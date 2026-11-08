@@ -7,7 +7,7 @@
 #include "iree/tokenizer/testing/fuzzing_util.h"
 
 #include <stdio.h>
-#include <string.h>
+#include <stdlib.h>
 
 #include "iree/tokenizer/decoder/byte_level.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
@@ -16,43 +16,10 @@
 #include "iree/tokenizer/vocab/vocab.h"
 #include "iree/tokenizer/vocab/vocab_builder.h"
 
-// Global flag state, set during iree_tokenizer_fuzz_load_or_build.
+// Process configuration captured during iree_tokenizer_fuzz_load_or_build.
 static bool g_track_offsets = false;
 
 bool iree_tokenizer_fuzz_track_offsets(void) { return g_track_offsets; }
-
-//===----------------------------------------------------------------------===//
-// argv Flag Parsing
-//===----------------------------------------------------------------------===//
-
-// Removes argv[index] by shifting subsequent entries down and decrementing
-// *argc. This ensures libfuzzer never sees our custom flags.
-static void iree_fuzz_remove_argv(int* argc, char*** argv, int index) {
-  for (int i = index; i < *argc - 1; ++i) {
-    (*argv)[i] = (*argv)[i + 1];
-  }
-  --(*argc);
-}
-
-// Scans argv for custom flags, extracts their values, and removes them.
-// Returns the --tokenizer_json path (or NULL if absent).
-static const char* iree_fuzz_parse_and_remove_flags(int* argc, char*** argv) {
-  const char* tokenizer_json_path = NULL;
-
-  for (int i = 1; i < *argc; /* incremented conditionally */) {
-    if (strncmp((*argv)[i], "--tokenizer_json=", 17) == 0) {
-      tokenizer_json_path = (*argv)[i] + 17;
-      iree_fuzz_remove_argv(argc, argv, i);
-    } else if (strcmp((*argv)[i], "--track_offsets") == 0) {
-      g_track_offsets = true;
-      iree_fuzz_remove_argv(argc, argv, i);
-    } else {
-      ++i;
-    }
-  }
-
-  return tokenizer_json_path;
-}
 
 //===----------------------------------------------------------------------===//
 // Real Tokenizer Loading
@@ -243,12 +210,13 @@ static iree_status_t iree_fuzz_build_dummy_tokenizer(
 //===----------------------------------------------------------------------===//
 
 iree_status_t iree_tokenizer_fuzz_load_or_build(
-    int* argc, char*** argv, iree_tokenizer_t** out_tokenizer,
-    int32_t* out_vocab_size) {
+    iree_tokenizer_t** out_tokenizer, int32_t* out_vocab_size) {
   const char* tokenizer_json_path =
-      iree_fuzz_parse_and_remove_flags(argc, argv);
+      getenv("IREE_TOKENIZER_FUZZ_TOKENIZER_JSON");
+  const char* track_offsets = getenv("IREE_TOKENIZER_FUZZ_TRACK_OFFSETS");
+  g_track_offsets = track_offsets && track_offsets[0];
 
-  if (tokenizer_json_path) {
+  if (tokenizer_json_path && tokenizer_json_path[0]) {
     fprintf(stderr, "fuzzing_util: loading tokenizer from %s\n",
             tokenizer_json_path);
     return iree_fuzz_load_tokenizer_from_file(tokenizer_json_path,
