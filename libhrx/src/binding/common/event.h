@@ -164,21 +164,14 @@ typedef enum iree_hal_streaming_event_timing_e {
   IREE_HAL_STREAMING_EVENT_TIMING_UNSUPPORTED,
 } iree_hal_streaming_event_timing_t;
 
-// Reads the facts converting the ticks of the device |spec| describes, or a
-// zeroed domain when it advertises none whose ticks records made on that device
-// can be differenced. A NULL |spec| is a device publishing no facts at all.
-//
-// The facts belong to the queue family a capture resolves to, so this accepts
-// only a device reporting a single family covering a single physical device:
-// there is then one domain, and two records made anywhere on the device are
-// comparable however the implementation resolves their queue affinity. The
-// device-scope summary carries the DEVICE_TIMESTAMPS flag, which no family spec
-// repeats, and may aggregate families that differ, so the flag is read there
-// and the numbers from the family itself; a summary that disagrees with the one
-// family it stands for describes no domain either can be converted with.
+// Reads the clock of the queue family used by a context's event records.
+// All context queues, including independently acquired record and stream-wait
+// queues, belong to this family. Other families do not affect comparability.
+// Returns a zeroed domain if the family has no timestamp clock or covers more
+// than one physical device. A NULL family publishes no facts.
 // Synchronization: none (reads immutable device facts).
 iree_hal_streaming_timestamp_domain_t iree_hal_streaming_query_timestamp_domain(
-    const iree_hal_device_spec_t* spec);
+    const iree_hal_queue_family_spec_t* family);
 
 // Creates an event owned by |context|.
 // Synchronization: none (creates new event).

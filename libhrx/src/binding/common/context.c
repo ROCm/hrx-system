@@ -88,8 +88,6 @@ iree_status_t iree_hal_streaming_context_create(
   context->queue = NULL;
   context->device_allocator =
       iree_hal_device_allocator(device_entry->hal_device);
-  context->timestamp_domain = iree_hal_streaming_query_timestamp_domain(
-      iree_hal_device_spec(device_entry->hal_device));
   iree_hal_streaming_context_set_flags(context, flags);
   context->default_stream = NULL;
   context->next_capture_id = 1;
@@ -153,6 +151,10 @@ iree_status_t iree_hal_streaming_context_create(
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_device_acquire_primary_queue(device_entry,
                                                              &context->queue);
+  }
+  if (iree_status_is_ok(status)) {
+    context->timestamp_domain = iree_hal_streaming_query_timestamp_domain(
+        iree_hal_queue_family_spec(iree_hal_queue_family(context->queue)));
   }
 
   // Create the context-wide event record timeline. Resource-partitioned
