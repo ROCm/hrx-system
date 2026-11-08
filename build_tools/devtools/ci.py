@@ -1861,6 +1861,16 @@ def steps_from_args(args: argparse.Namespace) -> list[CiStep]:
                 # CI CMake configurations use Ninja. Pass native build options
                 # after CMake's argument separator.
                 steps[index] = replace(step, argv=step.argv + ("--", "-k", "0"))
+    else:
+        for index, step in enumerate(steps):
+            if step.argv[1:4] == ("dev.py", "bazel", "test"):
+                # Bazel continues after test failures independently of its
+                # build keep-going policy. End the phase so its owner can
+                # preserve diagnostics before starting more work.
+                steps[index] = replace(
+                    step,
+                    argv=step.argv[:4] + ("--notest_keep_going",) + step.argv[4:],
+                )
     if profile_dir is not None:
         steps = add_bazel_profiles(steps, profile_dir)
     if test_results_dir is not None:
