@@ -235,47 +235,90 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @shaped_c
   %32 = vlda.acc %input_aligned, 64
   %33 = vlda.acc %input_aligned, 128
   %34 = vlda.acc %input_aligned, 192
-  %35 = concat(%31, %32, %33, %34) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %36 = slice %35[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  %38 = vmov.accumulator512.to.vector512 %31
+  %40 = vmov.accumulator512.to.vector512 %32
+  %41 = mov.i32 2147483647
+  %42 = vbcst.32 %41
+  %43 = mov.i32 2139095040
+  %44 = vbcst.32 %43
+  %45 = mov.i32 32704
+  %46 = vbcst.16 %45
   set.rounding 12
-  %37 = vconv.bf16.fp32 %36
-  %38 = slice %35[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
-  %39 = vconv.bf16.fp32 %38
-  %43 = mova.i32 52
-  %44 = vshuffle %37, %39, %43
-  %45 = mova.i32 53
-  %46 = vshuffle %37, %39, %45
-  %89 = slice %44[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  vst.128.bf16x8 %89, %output_aligned, 0
-  %52 = mova.i32 16
-  %53 = vshift %44, %46, %52
-  %54 = slice %53[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %55 = mov.static-address-index 256
-  vst.128.bf16x8.index %54, %output_aligned, %55
-  %58 = mova.i32 32
-  %59 = vshift %44, %46, %58
-  %60 = slice %59[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %61 = mov.static-address-index 512
-  vst.128.bf16x8.index %60, %output_aligned, %61
-  %64 = mova.i32 48
-  %65 = vshift %44, %46, %64
-  %66 = slice %65[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %67 = mov.static-address-index 768
-  vst.128.bf16x8.index %66, %output_aligned, %67
-  %87 = slice %46[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %70 = mov.static-address-index 1024
-  vst.128.bf16x8.index %87, %output_aligned, %70
-  %73 = vshift %46, %46, %52
-  %74 = slice %73[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %75 = mov.static-address-index 1280
-  vst.128.bf16x8.index %74, %output_aligned, %75
-  %78 = vshift %46, %46, %58
-  %79 = slice %78[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %80 = mov.static-address-index 1536
-  vst.128.bf16x8.index %79, %output_aligned, %80
-  %83 = vshift %46, %46, %64
-  %84 = slice %83[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %85 = mov.static-address-index 1792
-  vst.128.bf16x8.index %84, %output_aligned, %85
+  %47 = slice %38[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %48 = vmov.vector512.to.accumulator512 %38
+  %49 = vconv.bf16.fp32x16 %48
+  %50 = concat(%49, %47) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %51 = vband %38, %42
+  %52 = vlt.u32x16.el.low32 %44, %51
+  %53 = predicate.complete.zero.high32 %52, 0
+  %54 = vsel.16.mask64 %50, %46, %53
+  %55 = slice %40[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %56 = vmov.vector512.to.accumulator512 %40
+  %57 = vconv.bf16.fp32x16 %56
+  %58 = concat(%57, %55) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %59 = vband %40, %42
+  %60 = vlt.u32x16.el.low32 %44, %59
+  %61 = predicate.complete.zero.high32 %60, 0
+  %62 = vsel.16.mask64 %58, %46, %61
+  %63 = slice %54[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %64 = slice %62[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %65 = concat(%63, %64) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %68 = vmov.accumulator512.to.vector512 %33
+  %70 = vmov.accumulator512.to.vector512 %34
+  %77 = slice %68[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %78 = vmov.vector512.to.accumulator512 %68
+  %79 = vconv.bf16.fp32x16 %78
+  %80 = concat(%79, %77) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %81 = vband %68, %42
+  %82 = vlt.u32x16.el.low32 %44, %81
+  %83 = predicate.complete.zero.high32 %82, 0
+  %84 = vsel.16.mask64 %80, %46, %83
+  %85 = slice %70[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %86 = vmov.vector512.to.accumulator512 %70
+  %87 = vconv.bf16.fp32x16 %86
+  %88 = concat(%87, %85) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %89 = vband %70, %42
+  %90 = vlt.u32x16.el.low32 %44, %89
+  %91 = predicate.complete.zero.high32 %90, 0
+  %92 = vsel.16.mask64 %88, %46, %91
+  %93 = slice %84[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %94 = slice %92[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %95 = concat(%93, %94) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %99 = mova.i32 52
+  %100 = vshuffle %65, %95, %99
+  %101 = mova.i32 53
+  %102 = vshuffle %65, %95, %101
+  %145 = slice %100[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  vst.128.bf16x8 %145, %output_aligned, 0
+  %108 = mova.i32 16
+  %109 = vshift %100, %102, %108
+  %110 = slice %109[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %111 = mov.static-address-index 256
+  vst.128.bf16x8.index %110, %output_aligned, %111
+  %114 = mova.i32 32
+  %115 = vshift %100, %102, %114
+  %116 = slice %115[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %117 = mov.static-address-index 512
+  vst.128.bf16x8.index %116, %output_aligned, %117
+  %120 = mova.i32 48
+  %121 = vshift %100, %102, %120
+  %122 = slice %121[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %123 = mov.static-address-index 768
+  vst.128.bf16x8.index %122, %output_aligned, %123
+  %143 = slice %102[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %126 = mov.static-address-index 1024
+  vst.128.bf16x8.index %143, %output_aligned, %126
+  %129 = vshift %102, %102, %108
+  %130 = slice %129[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %131 = mov.static-address-index 1280
+  vst.128.bf16x8.index %130, %output_aligned, %131
+  %134 = vshift %102, %102, %114
+  %135 = slice %134[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %136 = mov.static-address-index 1536
+  vst.128.bf16x8.index %135, %output_aligned, %136
+  %139 = vshift %102, %102, %120
+  %140 = slice %139[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %141 = mov.static-address-index 1792
+  vst.128.bf16x8.index %140, %output_aligned, %141
   return
 }

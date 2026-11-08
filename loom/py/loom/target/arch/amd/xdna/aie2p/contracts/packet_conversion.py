@@ -1628,6 +1628,7 @@ def _f32_to_bf16_vector_rule(
         guards=(
             Guard.value_type("input", source_type),
             Guard.value_type("result", result_type),
+            Guard.value_not_nan("input"),
             Guard.value_not_subnormal_or_instance_flags_has_all(
                 "input", "subnormal", "daz"
             ),
@@ -3413,6 +3414,105 @@ def _exact_f32_chunk_to_bf16(
     )
 
 
+def _bind_bf16_narrowing_results(
+    program: PacketProgram, results: tuple[ValueRef, ...]
+) -> None:
+    """Packs converted chunks after their inactive upper halves are discarded."""
+
+    if len(results) == 1:
+        return
+    result_words = []
+    for index, result in enumerate(results):
+        result_word = program.temporary(f"chunk_{index}_packed_w")
+        program.emits.append(
+            EmitRegisterSlice(source=result, result=result_word, unit_count=1)
+        )
+        result_words.append(result_word)
+    program.emits.append(
+        EmitRegisterConcat(
+            sources=tuple(result_words), result=ValueRef.result("result")
+        )
+    )
+
+
+def _f32_to_bf16_nan_preserving_vector_rule(
+    rule_shape: FloatPacketRuleShape, *, input_in_accumulator: bool = False
+) -> DescriptorRule:
+    """Restores NaN lanes that native BF16 conversion maps to infinity."""
+
+    program = PacketProgram(32, "bf16_native_narrow_")
+    source = ValueRef.operand("input")
+    if input_in_accumulator:
+        source = program.operation(
+            "source_vector",
+            "move.accumulator512.to.vector512",
+            "dst",
+            src=source,
+            copy_operands=("src",),
+        )
+    chunks = _float_source_i32_chunks(
+        program, _F32_PACKET_FORMAT, rule_shape, source=source
+    )
+    nonsign_mask = program.splat("nonsign_mask", 0x7FFFFFFF)
+    infinity = program.splat("infinity", 0x7F800000)
+    quiet_nan = program.splat("quiet_nan", 0x7FC0, element_bits=16)
+    program.state("rounding", BF16_CONVERSION_ROUNDING)
+    results = []
+    for index, chunk in enumerate(chunks):
+        prefix = f"chunk_{index}"
+        accumulator, filler = _i32_packet_accumulator(program, prefix, chunk)
+        converted = program.operation(
+            f"{prefix}_converted", "convert.f32x16.to.bf16x16", "dst", src=accumulator
+        )
+        converted_vector = program.temporary(f"{prefix}_converted_vector")
+        program.emits.append(
+            EmitRegisterConcat(
+                sources=(converted, filler),
+                result=converted_vector,
+                result_type=Vector("bf16", lanes=32),
+            )
+        )
+        magnitude = program.binary(
+            f"{prefix}_magnitude", "and.bits512", chunk, nonsign_mask
+        )
+        is_nan = program.compare_unsigned_less_than(
+            f"{prefix}_is_nan", infinity, magnitude
+        )
+        results.append(
+            program.select(
+                None if len(chunks) == 1 else f"{prefix}_result",
+                quiet_nan,
+                converted_vector,
+                is_nan,
+                element_bits=16,
+            )
+        )
+    _bind_bf16_narrowing_results(program, tuple(results))
+    return DescriptorRule(
+        source_op=vector.vector_fptrunc,
+        descriptor=_descriptor("amd.xdna.aie2p.convert.f32x16.to.bf16x16"),
+        guards=(
+            Guard.value_type("input", rule_shape.vector_type("f32")),
+            Guard.value_type("result", rule_shape.vector_type("bf16")),
+            Guard.value_not_subnormal_or_instance_flags_has_all(
+                "input", "subnormal", "daz"
+            ),
+            *(
+                (
+                    Guard.low_value_register_class(
+                        "input",
+                        "aie2p.ebmll" if input_in_accumulator else "aie2p.vec256",
+                    ),
+                )
+                if rule_shape.native_lane_count == 16
+                else ()
+            ),
+        ),
+        emit=tuple(program.emits),
+        report_key="native_binary32_to_bfloat16_packet_preserve_nan",
+    )
+
+
 def _exact_f32_to_bf16_emits(
     rule_shape: FloatPacketRuleShape,
     *,
@@ -3458,19 +3558,7 @@ def _exact_f32_to_bf16_emits(
         )
         for index, chunk in enumerate(chunks)
     )
-    if not direct_result:
-        result_words = []
-        for index, result in enumerate(results):
-            result_word = program.temporary(f"chunk_{index}_packed_w")
-            program.emits.append(
-                EmitRegisterSlice(source=result, result=result_word, unit_count=1)
-            )
-            result_words.append(result_word)
-        program.emits.append(
-            EmitRegisterConcat(
-                sources=tuple(result_words), result=ValueRef.result("result")
-            )
-        )
+    _bind_bf16_narrowing_results(program, results)
     return tuple(program.emits)
 
 
@@ -4157,6 +4245,17 @@ AIE2P_PACKET_CONVERSION_RULES = (
             (False, True)
             if rule_shape.minimum_lane_count == 16
             and rule_shape.maximum_lane_count == 16
+            else (False,)
+        )
+    ),
+    *(
+        _f32_to_bf16_nan_preserving_vector_rule(
+            rule_shape, input_in_accumulator=input_in_accumulator
+        )
+        for rule_shape in FLOAT_PACKET_RULE_SHAPES
+        for input_in_accumulator in (
+            (False, True)
+            if rule_shape.minimum_lane_count == rule_shape.maximum_lane_count == 16
             else (False,)
         )
     ),
