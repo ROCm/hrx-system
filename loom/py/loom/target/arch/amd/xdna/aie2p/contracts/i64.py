@@ -134,6 +134,33 @@ def _pair_bitwise_rule(source_op: Op, operation: str) -> DescriptorRule:
     )
 
 
+def _pair_word_join_rule(source_op: Op, low: str, high: str) -> DescriptorRule:
+    """Disjoint bitwise word fields need only register composition."""
+    low_word = ValueRef.temporary("low_word")
+    high_word = ValueRef.temporary("high_word")
+    return DescriptorRule(
+        source_op=source_op,
+        priority=1,
+        guards=(
+            *_typed_guards(("lhs", "rhs", "result"), _I64),
+            Guard.value_i64_range(low, 0, 2**32 - 1),
+            Guard.value_divisible_by(high, 2**32),
+        ),
+        emit=(
+            EmitRegisterSlice(
+                source=ValueRef.operand(low), result=low_word, unit_count=1
+            ),
+            EmitRegisterSlice(
+                source=ValueRef.operand(high),
+                result=high_word,
+                unit_offset=1,
+                unit_count=1,
+            ),
+            _concat_pair(low_word, high_word),
+        ),
+    )
+
+
 def _pair_vector_binary_rule(source_op: Op, descriptor_key: str) -> DescriptorRule:
     descriptor = _descriptor(descriptor_key)
     return DescriptorRule(
@@ -582,6 +609,37 @@ def _pair_unsigned_division_by_word_rule(
             Guard.value_i64_range("rhs", 1, divisor_maximum),
         ),
         emit=tuple(emits),
+    )
+
+
+def _pair_word_shift_rule(source_op: Op) -> DescriptorRule:
+    """A whole-word shift selects one word and supplies only its fill."""
+    is_left = source_op is scalar_bitwise.scalar_shli
+    word = ValueRef.temporary("word")
+    program = ScalarProgram()
+    if source_op is scalar_bitwise.scalar_shrsi:
+        sign_count = program.constant("sign_count", -31)
+        fill = program.binary("sign_fill", "ashl.i32", word, sign_count)
+    else:
+        fill = program.constant("zero", 0)
+    return DescriptorRule(
+        source_op=source_op,
+        descriptor=program.emits[-1].descriptor,
+        priority=3,
+        guards=(
+            *_typed_guards(("lhs", "rhs", "result"), _I64),
+            Guard.value_i64_range("rhs", 32, 32),
+        ),
+        emit=(
+            EmitRegisterSlice(
+                source=ValueRef.operand("lhs"),
+                result=word,
+                unit_offset=0 if is_left else 1,
+                unit_count=1,
+            ),
+            *program.emits,
+            _concat_pair(fill, word) if is_left else _concat_pair(word, fill),
+        ),
     )
 
 
@@ -1298,6 +1356,11 @@ AIE2P_I64_RULES = (
     _pair_bitwise_rule(scalar_bitwise.scalar_andi, "and.i32"),
     _pair_bitwise_rule(scalar_bitwise.scalar_ori, "or.i32"),
     _pair_bitwise_rule(scalar_bitwise.scalar_xori, "xor.i32"),
+    *(
+        _pair_word_join_rule(source_op, low, high)
+        for source_op in (scalar_bitwise.scalar_ori, scalar_bitwise.scalar_xori)
+        for low, high in (("lhs", "rhs"), ("rhs", "lhs"))
+    ),
     _pair_add_sub_rule(
         scalar_arithmetic.scalar_addi,
         "add.carry_out.i32",
@@ -1320,6 +1383,14 @@ AIE2P_I64_RULES = (
         for divisor_maximum in (2**31, 2**32 - 1)
     ),
     _pair_multiply_rule(),
+    *(
+        _pair_word_shift_rule(source_op)
+        for source_op in (
+            scalar_bitwise.scalar_shli,
+            scalar_bitwise.scalar_shrui,
+            scalar_bitwise.scalar_shrsi,
+        )
+    ),
     *(_pair_bounded_left_shift_rule(word_index) for word_index in range(2)),
     _pair_left_shift_rule(),
     *(

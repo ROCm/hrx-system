@@ -89,15 +89,6 @@ typedef struct loom_low_schedule_state_read_record_t {
   uint32_t next_record;
 } loom_low_schedule_state_read_record_t;
 
-typedef struct loom_low_schedule_state_chain_read_record_t {
-  // Architectural-state read of the value produced by the key node.
-  loom_low_schedule_state_access_t access;
-  // Next state-chain read record for the same producer node.
-  uint32_t next_record;
-  // Packet operand carrying the explicit state value, or LOOM_LOW_ID_NONE.
-  uint16_t value_operand_index;
-} loom_low_schedule_state_chain_read_record_t;
-
 typedef struct loom_low_schedule_pair_affinity_record_t {
   // Descriptor-set ordinal that can be the first visible packet.
   uint32_t first_descriptor_ordinal;
@@ -429,10 +420,6 @@ typedef struct loom_low_schedule_build_state_t {
   uint32_t* state_read_heads;
   // Outstanding state-read records used by state_read_heads.
   loom_low_schedule_state_read_record_t* state_read_records;
-  // Source-order state readers keyed by same-block state producer node.
-  uint32_t* state_chain_read_heads;
-  // State-chain read records used by state_chain_read_heads.
-  loom_low_schedule_state_chain_read_record_t* state_chain_read_records;
   // Pair-affinity record heads, dense by first descriptor ordinal.
   uint32_t* pair_affinity_heads;
   // Pair-affinity record heads by second descriptor ordinal when pair setup is
@@ -518,8 +505,6 @@ typedef struct loom_low_schedule_build_state_t {
   iree_host_size_t state_read_record_count;
   // Allocated outstanding state-read record capacity.
   iree_host_size_t state_read_record_capacity;
-  // Number of populated state-chain read records.
-  iree_host_size_t state_chain_read_record_count;
   // Number of populated pair-affinity records.
   iree_host_size_t pair_affinity_record_count;
   // Number of consumers published to final-producer unlock summaries.
@@ -529,8 +514,6 @@ typedef struct loom_low_schedule_build_state_t {
   iree_host_size_t detached_transfer_node_count;
   // Number of populated placement-pair use records.
   iree_host_size_t placement_pair_use_count;
-  // Allocated state-chain read record capacity.
-  iree_host_size_t state_chain_read_record_capacity;
   // Allocated effect-frontier read scratch capacity.
   iree_host_size_t effect_read_capacity;
   // Allocated effect-frontier write scratch capacity.

@@ -326,7 +326,9 @@ def _rule(source_op, *, predicate: str | None = None) -> DescriptorRule:
     candidates = [
         rule
         for rule in AIE2P_I64_RULES
-        if isinstance(rule, DescriptorRule) and rule.source_op is source_op
+        if isinstance(rule, DescriptorRule)
+        and rule.source_op is source_op
+        and rule.priority == 0
     ]
     if predicate is not None:
         candidates = [
@@ -488,6 +490,31 @@ def test_i64_binary_recipes_are_exact() -> None:
     for lhs, rhs in _i64_samples():
         for rule, reference in binary_rules:
             assert _evaluate_rule(rule, lhs, rhs) == reference(lhs, rhs) & _U64_MASK
+
+
+@pytest.mark.parametrize(
+    "source_op", [scalar_bitwise.scalar_ori, scalar_bitwise.scalar_xori]
+)
+@pytest.mark.parametrize("low_field", ["lhs", "rhs"])
+def test_i64_word_join_recipes_are_exact(source_op, low_field: str) -> None:
+    rule = next(
+        rule
+        for rule in AIE2P_I64_RULES
+        if isinstance(rule, DescriptorRule)
+        and rule.source_op is source_op
+        and any(
+            guard.kind is GuardKind.VALUE_I64_RANGE and guard.field == low_field
+            for guard in rule.guards
+        )
+    )
+    samples = _i64_samples()
+    samples.extend((value, value) for value in _i64_shift_basis())
+    for low, high in samples:
+        low &= _U32_MASK
+        high &= _U64_MASK ^ _U32_MASK
+        lhs, rhs = (low, high) if low_field == "lhs" else (high, low)
+        reference = lhs | rhs if source_op is scalar_bitwise.scalar_ori else lhs ^ rhs
+        assert _evaluate_rule(rule, lhs, rhs) == reference
 
 
 def test_i64_carry_and_borrow_recipes_are_exact() -> None:

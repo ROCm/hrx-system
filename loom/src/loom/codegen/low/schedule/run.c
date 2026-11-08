@@ -191,12 +191,6 @@ static iree_status_t loom_low_schedule_initialize_storage(
       memset(state->preferred_pair_nodes, 0xFF,
              node_count * sizeof(*state->preferred_pair_nodes));
     }
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(state->scratch_arena, node_count,
-                                  sizeof(*state->state_chain_read_heads),
-                                  (void**)&state->state_chain_read_heads));
-    memset(state->state_chain_read_heads, 0xFF,
-           node_count * sizeof(*state->state_chain_read_heads));
     if (loom_low_schedule_strategy_uses_pressure(state->options->strategy) &&
         iree_any_bit_set(state->options->flags,
                          LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS)) {
