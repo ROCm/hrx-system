@@ -101,6 +101,8 @@ struct HipGraphApi {
   decltype(&hipGraphAddDependencies) add_dependencies = nullptr;
   // Begins recording operations issued through the streaming copy API.
   decltype(&hipStreamBeginCapture) begin_capture = nullptr;
+  // Begins a capture that extends an existing graph frontier.
+  decltype(&hipStreamBeginCaptureToGraph) begin_capture_to_graph = nullptr;
   // Returns the graph built from stream operations.
   decltype(&hipStreamEndCapture) end_capture = nullptr;
   // Borrows the graph under construction during stream capture.
@@ -177,6 +179,7 @@ class HipGraphMemoryApiTest : public ::testing::Test {
     RESOLVE(destroy_node, "hipGraphDestroyNode");
     RESOLVE(add_dependencies, "hipGraphAddDependencies");
     RESOLVE(begin_capture, "hipStreamBeginCapture");
+    RESOLVE(begin_capture_to_graph, "hipStreamBeginCaptureToGraph");
     RESOLVE(end_capture, "hipStreamEndCapture");
     RESOLVE(capture_info, "hipStreamGetCaptureInfo_v2");
     RESOLVE(copy_async, "hipMemcpyAsync");
@@ -749,6 +752,25 @@ TEST_F(HipGraphMemoryApiTest, CaptureTransfersItsExposedBorrowedGraph) {
   Replay();
   ASSERT_FALSE(HasFatalFailure());
   EXPECT_EQ(callbacks_[0], 1);
+}
+
+TEST_F(HipGraphMemoryApiTest, CaptureRejectsUnsupportedDependencyData) {
+  hipGraphNode_t root = nullptr;
+  ASSERT_EQ(hipSuccess, api_.add_empty(&root, graph_, nullptr, 0));
+  const uint64_t dependency_data = 1;
+  EXPECT_EQ(hipErrorNotSupported, api_.begin_capture_to_graph(
+                                      stream_, graph_, &root, &dependency_data,
+                                      1, hipStreamCaptureModeGlobal));
+  hipStreamCaptureStatus status = hipStreamCaptureStatusActive;
+  ASSERT_EQ(hipSuccess, api_.capture_info(stream_, &status, nullptr, nullptr,
+                                          nullptr, nullptr));
+  EXPECT_EQ(hipStreamCaptureStatusNone, status);
+  ASSERT_EQ(hipSuccess,
+            api_.begin_capture_to_graph(stream_, graph_, &root, nullptr, 1,
+                                        hipStreamCaptureModeGlobal));
+  hipGraph_t captured = nullptr;
+  ASSERT_EQ(hipSuccess, api_.end_capture(stream_, &captured));
+  EXPECT_EQ(graph_, captured);
 }
 
 TEST_F(HipGraphMemoryApiTest, NestedAllocationsKeepTheirOriginalAdmission) {

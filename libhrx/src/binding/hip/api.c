@@ -14515,9 +14515,8 @@ static void iree_hip_invalidate_event_capture(
 //
 // Synchronization: Never waits for a record to complete; an event whose record
 // is still outstanding is reported as hipErrorNotReady. Refusing a captured
-// pair invalidates that capture, and dropping the last reference to the graph
-// it was building frees the host allocations the graph owns, which
-// synchronizes every context.
+// pair invalidates that capture. Releasing the captured graph drops its owned
+// resources without synchronizing unrelated contexts.
 //
 // Timing behavior:
 // - Stop event must be recorded after start event.
@@ -25945,11 +25944,14 @@ HIPAPI hipError_t hipStreamBeginCaptureToGraph(
     const void* dependencyData, size_t numDependencies,
     hipStreamCaptureMode mode) {
   HIP_API_BEGIN();
-  (void)dependencyData;
   IREE_TRACE_ZONE_BEGIN(z0);
   if (!stream || !graph || (numDependencies > 0 && !dependencies)) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (dependencyData) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorNotSupported);
   }
   if (stream == hipStreamLegacy) {
     IREE_TRACE_ZONE_END(z0);

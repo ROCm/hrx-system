@@ -457,6 +457,12 @@ static iree_status_t iree_hal_streaming_graph_validate_dependencies(
                               " does not belong to the target graph",
                               i);
     }
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      if (dependencies[j] == dependencies[i]) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "duplicate dependency at index %" PRIhsz, i);
+      }
+    }
   }
   return iree_ok_status();
 }
@@ -2149,24 +2155,29 @@ iree_status_t iree_hal_streaming_graph_add_dependencies(
     }
   }
 
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    // Allocate edge from arena.
-    iree_hal_streaming_graph_edge_t* edge = NULL;
-    IREE_RETURN_AND_END_ZONE_IF_ERROR(
-        z0, iree_allocator_malloc(graph->arena_allocator,
-                                  sizeof(iree_hal_streaming_graph_edge_t),
-                                  (void**)&edge));
-
-    edge->from = from_nodes[i];
-    edge->to = to_nodes[i];
-    edge->next = graph->additional_edges;
-    graph->additional_edges = edge;
-    ++graph->additional_edge_count;
-
-    // If 'to' node was a root (no dependencies), it's no longer a root.
-    // We need to remove it from the root blocks.
-    // For simplicity, we'll handle this during graph analysis instead.
+  iree_host_size_t new_edge_count = 0;
+  iree_host_size_t allocation_size = 0;
+  if (!iree_host_size_checked_add(graph->additional_edge_count, count,
+                                  &new_edge_count) ||
+      !iree_host_size_checked_mul(
+          count, sizeof(iree_hal_streaming_graph_edge_t), &allocation_size)) {
+    IREE_TRACE_ZONE_END(z0);
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "graph dependency batch size overflow");
   }
+  // Publish only after the complete batch has storage. A failed allocation
+  // leaves the graph's topology unchanged and the request can be retried.
+  iree_hal_streaming_graph_edge_t* edges = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_allocator_malloc(graph->arena_allocator, allocation_size,
+                                (void**)&edges));
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    edges[i].from = from_nodes[i];
+    edges[i].to = to_nodes[i];
+    edges[i].next = i == 0 ? graph->additional_edges : &edges[i - 1];
+  }
+  graph->additional_edges = &edges[count - 1];
+  graph->additional_edge_count = new_edge_count;
 
   IREE_TRACE_ZONE_END(z0);
   return iree_ok_status();
@@ -2299,6 +2310,51 @@ static iree_status_t iree_hal_streaming_grow_capture_dependencies(
 
   IREE_TRACE_ZONE_END(z0);
   return status;
+}
+
+static bool iree_hal_streaming_capture_dependency_contains(
+    iree_hal_streaming_graph_node_t* const* dependencies,
+    iree_host_size_t count, const iree_hal_streaming_graph_node_t* node) {
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    if (dependencies[i] == node) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The existing frontier is unique. Callers check the sum of both input counts
+// before computing this smaller union, so no overflow is possible here.
+static iree_host_size_t iree_hal_streaming_capture_dependency_union_count(
+    iree_hal_streaming_graph_node_t* const* frontier,
+    iree_host_size_t frontier_count,
+    iree_hal_streaming_graph_node_t* const* dependencies,
+    iree_host_size_t dependency_count) {
+  iree_host_size_t count = frontier_count;
+  for (iree_host_size_t i = 0; i < dependency_count; ++i) {
+    if (!iree_hal_streaming_capture_dependency_contains(
+            frontier, frontier_count, dependencies[i]) &&
+        !iree_hal_streaming_capture_dependency_contains(dependencies, i,
+                                                        dependencies[i])) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+// Preserves first-seen order. SET can compact the input in place; ADD can take
+// a slice of the existing frontier without growing it or invalidating input.
+static iree_host_size_t iree_hal_streaming_capture_dependency_append(
+    iree_hal_streaming_graph_node_t** frontier, iree_host_size_t frontier_count,
+    iree_hal_streaming_graph_node_t* const* dependencies,
+    iree_host_size_t dependency_count) {
+  for (iree_host_size_t i = 0; i < dependency_count; ++i) {
+    if (!iree_hal_streaming_capture_dependency_contains(
+            frontier, frontier_count, dependencies[i])) {
+      frontier[frontier_count++] = dependencies[i];
+    }
+  }
+  return frontier_count;
 }
 
 typedef struct iree_hal_streaming_capture_transaction_t {
@@ -2651,6 +2707,12 @@ iree_status_t iree_hal_streaming_capture_join_graph(
     status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "capture dependency count overflow");
   }
+  if (iree_status_is_ok(status)) {
+    total_count = iree_hal_streaming_capture_dependency_union_count(
+        stream->capture_dependencies,
+        adopt_graph ? 0 : stream->capture_dependency_count, dependencies,
+        dependency_count);
+  }
   if (iree_status_is_ok(status) &&
       total_count > stream->capture_dependency_capacity) {
     status = iree_hal_streaming_grow_capture_dependencies(stream, total_count);
@@ -2672,11 +2734,10 @@ iree_status_t iree_hal_streaming_capture_join_graph(
       iree_hal_streaming_stream_set_capture_status(
           stream, IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE);
     }
-    if (dependency_count > 0) {
-      memcpy(stream->capture_dependencies + stream->capture_dependency_count,
-             dependencies, dependency_count * sizeof(*dependencies));
-    }
-    stream->capture_dependency_count = total_count;
+    stream->capture_dependency_count =
+        iree_hal_streaming_capture_dependency_append(
+            stream->capture_dependencies, stream->capture_dependency_count,
+            dependencies, dependency_count);
   }
 
   iree_slim_mutex_unlock(&stream->mutex);
@@ -2723,14 +2784,13 @@ static iree_status_t iree_hal_streaming_capture_publish_begin(
                                 i);
     }
   }
-  if (iree_status_is_ok(status) &&
-      dependency_count > stream->capture_dependency_capacity) {
-    status =
-        iree_hal_streaming_grow_capture_dependencies(stream, dependency_count);
-  }
-  if (iree_status_is_ok(status) && dependency_count > 0) {
-    memcpy(stream->capture_dependencies, dependencies,
-           dependency_count * sizeof(*dependencies));
+  if (iree_status_is_ok(status)) {
+    const iree_host_size_t count =
+        iree_hal_streaming_capture_dependency_union_count(NULL, 0, dependencies,
+                                                          dependency_count);
+    if (count > stream->capture_dependency_capacity) {
+      status = iree_hal_streaming_grow_capture_dependencies(stream, count);
+    }
   }
 
   // Flushing while the stream lock is held makes prior submission and capture
@@ -2754,7 +2814,9 @@ static iree_status_t iree_hal_streaming_capture_publish_begin(
     stream->capture_origin = true;
     stream->capture_id = capture_id;
     stream->capture_owner_thread_id = owner_thread_id;
-    stream->capture_dependency_count = dependency_count;
+    stream->capture_dependency_count =
+        iree_hal_streaming_capture_dependency_append(
+            stream->capture_dependencies, 0, dependencies, dependency_count);
     iree_hal_streaming_stream_set_capture_status(
         stream, IREE_HAL_STREAMING_CAPTURE_STATUS_ACTIVE);
   }
@@ -3492,6 +3554,10 @@ iree_status_t iree_hal_streaming_update_capture_dependencies(
     }
   }
 
+  const iree_host_size_t preserved_count =
+      mode == IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_ADD
+          ? stream->capture_dependency_count
+          : 0;
   iree_host_size_t total_count = dependency_count;
   if (iree_status_is_ok(status) &&
       mode == IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_ADD &&
@@ -3499,6 +3565,11 @@ iree_status_t iree_hal_streaming_update_capture_dependencies(
           stream->capture_dependency_count, dependency_count, &total_count))) {
     status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "capture dependency count overflow");
+  }
+  if (iree_status_is_ok(status)) {
+    total_count = iree_hal_streaming_capture_dependency_union_count(
+        stream->capture_dependencies, preserved_count, dependencies,
+        dependency_count);
   }
   if (iree_status_is_ok(status) &&
       total_count > stream->capture_dependency_capacity) {
@@ -3514,14 +3585,10 @@ iree_status_t iree_hal_streaming_update_capture_dependencies(
         stream, IREE_HAL_STREAMING_CAPTURE_STATUS_INVALIDATED);
   }
   if (iree_status_is_ok(status)) {
-    if (dependency_count > 0) {
-      void* dest =
-          mode == IREE_HAL_STREAMING_CAPTURE_DEPENDENCIES_ADD
-              ? stream->capture_dependencies + stream->capture_dependency_count
-              : stream->capture_dependencies;
-      memcpy(dest, dependencies, dependency_count * sizeof(*dependencies));
-    }
-    stream->capture_dependency_count = total_count;
+    stream->capture_dependency_count =
+        iree_hal_streaming_capture_dependency_append(
+            stream->capture_dependencies, preserved_count, dependencies,
+            dependency_count);
   }
 
   iree_hal_streaming_capture_transaction_unlock(&transaction);
