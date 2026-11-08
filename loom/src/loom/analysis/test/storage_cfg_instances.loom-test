@@ -1,0 +1,341 @@
+// RUN: emit storage-interference @test
+
+// Reconverged conditional readers finish before the loop's rendezvous.
+kernel.def @test() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%limit0: index, %output: buffer) {
+  %limit = index.assume %limit0 [range(%limit0, 1, 32)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %value = scalar.constant 7 : i32
+  %lane = kernel.workitem.id<x> : index
+  %leader = index.cmp eq, %lane, %c0 : index
+  %output_view = buffer.view %output[%origin] : buffer -> view<32xi32>
+  cfg.br ^header(%c0: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %limit : index
+  cfg.cond_br %more, ^allocate, ^exit
+^allocate:
+  %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+  view.store %value, %slot[%lane] : i32, view<32xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  cfg.cond_br %leader, ^read, ^join
+^read:
+  %loaded = view.load %slot[0] : view<32xi32> -> i32
+  view.store %loaded, %output_view[%lane] : i32, view<32xi32>
+  cfg.br ^join
+^join:
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  cfg.br ^latch
+^latch:
+  %next = index.add %iteration, %c1 : index
+  cfg.br ^header(%next: index)
+^exit:
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=yes
+
+// ====
+
+// A block can cut one root's lifetime while another root remains live across
+// every barrier. Only the second rendezvous in ^read cuts %finished_storage.
+kernel.def @test() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%limit0: index, %output: buffer) {
+  %limit = index.assume %limit0 [range(%limit0, 1, 32)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %value = scalar.constant 7 : i32
+  %lane = kernel.workitem.id<x> : index
+  %output_view = buffer.view %output[%origin] : buffer -> view<32xi32>
+  cfg.br ^header(%c0: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %limit : index
+  cfg.cond_br %more, ^allocate, ^exit
+^allocate:
+  %finished_storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %live_storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %finished_slot = buffer.view %finished_storage[%origin] : buffer -> view<32xi32>
+  %live_slot = buffer.view %live_storage[%origin] : buffer -> view<32xi32>
+  view.store %value, %finished_slot[%lane] : i32, view<32xi32>
+  view.store %value, %live_slot[%lane] : i32, view<32xi32>
+  cfg.br ^read
+^read:
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %finished_value = view.load %finished_slot[0] : view<32xi32> -> i32
+  view.store %finished_value, %output_view[%lane] : i32, view<32xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %live_value = view.load %live_slot[0] : view<32xi32> -> i32
+  view.store %live_value, %output_view[%lane] : i32, view<32xi32>
+  %next = index.add %iteration, %c1 : index
+  cfg.br ^header(%next: index)
+^exit:
+  kernel.return
+}
+
+// ----
+finished_storage: accessed=yes single_instance=yes
+live_storage: accessed=yes single_instance=unproven
+finished_storage / live_storage: workgroup_nonoverlap=unproven
+
+// ====
+
+// A uniform branch can bypass the only quiescent rendezvous.
+kernel.def @test() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%limit0: index, %condition: i1, %output: buffer) {
+  %limit = index.assume %limit0 [range(%limit0, 1, 32)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %value = scalar.constant 7 : i32
+  %lane = kernel.workitem.id<x> : index
+  %output_view = buffer.view %output[%origin] : buffer -> view<32xi32>
+  cfg.br ^header(%c0: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %limit : index
+  cfg.cond_br %more, ^allocate, ^exit
+^allocate:
+  %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+  view.store %value, %slot[%lane] : i32, view<32xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = view.load %slot[0] : view<32xi32> -> i32
+  view.store %loaded, %output_view[%lane] : i32, view<32xi32>
+  cfg.cond_br %condition, ^join, ^latch
+^join:
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  cfg.br ^latch
+^latch:
+  %next = index.add %iteration, %c1 : index
+  cfg.br ^header(%next: index)
+^exit:
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=unproven
+
+// ====
+
+// Alternative uniform rendezvous collectively cut all reentry paths.
+kernel.def @test() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%limit0: index, %condition: i1, %output: buffer) {
+  %limit = index.assume %limit0 [range(%limit0, 1, 32)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %value = scalar.constant 7 : i32
+  %lane = kernel.workitem.id<x> : index
+  %output_view = buffer.view %output[%origin] : buffer -> view<32xi32>
+  cfg.br ^header(%c0: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %limit : index
+  cfg.cond_br %more, ^allocate, ^exit
+^allocate:
+  %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+  view.store %value, %slot[%lane] : i32, view<32xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = view.load %slot[0] : view<32xi32> -> i32
+  view.store %loaded, %output_view[%lane] : i32, view<32xi32>
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  cfg.br ^latch
+^right:
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  cfg.br ^latch
+^latch:
+  %next = index.add %iteration, %c1 : index
+  cfg.br ^header(%next: index)
+^exit:
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=yes
+
+// ====
+
+// Postdominance cannot exclude an earlier cycle that recreates storage.
+kernel.def @test() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%limit0: index, %condition: i1, %output: buffer) {
+  %limit = index.assume %limit0 [range(%limit0, 1, 32)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %value = scalar.constant 7 : i32
+  %lane = kernel.workitem.id<x> : index
+  %output_view = buffer.view %output[%origin] : buffer -> view<32xi32>
+  cfg.br ^header(%c0: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %limit : index
+  cfg.cond_br %more, ^allocate, ^exit
+^allocate:
+  %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+  view.store %value, %slot[%lane] : i32, view<32xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = view.load %slot[0] : view<32xi32> -> i32
+  view.store %loaded, %output_view[%lane] : i32, view<32xi32>
+  cfg.cond_br %condition, ^allocate, ^join
+^join:
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  cfg.br ^latch
+^latch:
+  %next = index.add %iteration, %c1 : index
+  cfg.br ^header(%next: index)
+^exit:
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=unproven
+
+// ====
+
+// A barrier followed by a live alias access is not a lifetime cut.
+kernel.def @test() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%limit0: index, %output: buffer) {
+  %limit = index.assume %limit0 [range(%limit0, 1, 32)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %value = scalar.constant 7 : i32
+  %lane = kernel.workitem.id<x> : index
+  %output_view = buffer.view %output[%origin] : buffer -> view<32xi32>
+  cfg.br ^header(%c0: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %limit : index
+  cfg.cond_br %more, ^allocate, ^exit
+^allocate:
+  %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+  view.store %value, %slot[%lane] : i32, view<32xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  cfg.br ^join
+^join:
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = view.load %slot[0] : view<32xi32> -> i32
+  view.store %loaded, %output_view[%lane] : i32, view<32xi32>
+  cfg.br ^latch
+^latch:
+  %next = index.add %iteration, %c1 : index
+  cfg.br ^header(%next: index)
+^exit:
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=unproven
+
+// ====
+
+// Different barriers reached by divergent lanes cannot rendezvous a workgroup.
+kernel.def @test() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%limit0: index, %output: buffer) {
+  %limit = index.assume %limit0 [range(%limit0, 1, 32)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %value = scalar.constant 7 : i32
+  %lane = kernel.workitem.id<x> : index
+  %leader = index.cmp eq, %lane, %c0 : index
+  %output_view = buffer.view %output[%origin] : buffer -> view<32xi32>
+  cfg.br ^header(%c0: index)
+^header(%iteration: index):
+  %more = index.cmp ult, %iteration, %limit : index
+  cfg.cond_br %more, ^allocate, ^exit
+^allocate:
+  %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+  view.store %value, %slot[%lane] : i32, view<32xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = view.load %slot[0] : view<32xi32> -> i32
+  view.store %loaded, %output_view[%lane] : i32, view<32xi32>
+  cfg.cond_br %leader, ^left, ^right
+^left:
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  cfg.br ^latch
+^right:
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  cfg.br ^latch
+^latch:
+  %next = index.add %iteration, %c1 : index
+  cfg.br ^header(%next: index)
+^exit:
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=unproven
+
+// ====
+
+// The next iteration may rendezvous before recreating the allocation.
+kernel.def @test() {
+  %c1 = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%threads, %c1, %c1) : index
+} launch(%limit0: index, %output: buffer) {
+  %limit = index.assume %limit0 [range(%limit0, 1, 32)] : index
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %value = scalar.constant 7 : i32
+  %lane = kernel.workitem.id<x> : index
+  %output_view = buffer.view %output[%origin] : buffer -> view<32xi32>
+  cfg.br ^header(%c0: index)
+^header(%iteration: index):
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %more = index.cmp ult, %iteration, %limit : index
+  cfg.cond_br %more, ^allocate, ^exit
+^allocate:
+  %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %slot = buffer.view %storage[%origin] : buffer -> view<32xi32>
+  view.store %value, %slot[%lane] : i32, view<32xi32>
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %loaded = view.load %slot[0] : view<32xi32> -> i32
+  view.store %loaded, %output_view[%lane] : i32, view<32xi32>
+  cfg.br ^latch
+^latch:
+  %next = index.add %iteration, %c1 : index
+  cfg.br ^header(%next: index)
+^exit:
+  kernel.return
+}
+
+// ----
+storage: accessed=yes single_instance=yes

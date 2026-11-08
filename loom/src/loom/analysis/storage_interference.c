@@ -15,6 +15,7 @@
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/kernel/launch_config.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/util/cfg_graph.h"
 #include "loom/util/cfg_postdominance.h"
 #include "loom/util/fact_cfg.h"
 
@@ -32,6 +33,15 @@ typedef struct loom_storage_interference_barrier_t {
   // Retained proof that all workgroup invocations reach the rendezvous.
   bool uniform;
 } loom_storage_interference_barrier_t;
+
+typedef struct loom_storage_interference_live_barrier_t {
+  // CFG block containing rendezvous crossed by live root accesses.
+  uint16_t block_index;
+  // Number of uniform rendezvous in this block with live root accesses.
+  uint32_t count;
+  // Next nonquiescent block for the same allocation root.
+  struct loom_storage_interference_live_barrier_t* next;
+} loom_storage_interference_live_barrier_t;
 
 typedef struct loom_storage_interference_async_access_t {
   // Buffer or view whose allocation instance is accessed asynchronously.
@@ -463,6 +473,85 @@ static iree_status_t loom_storage_interference_append_async_events(
   return iree_ok_status();
 }
 
+static iree_status_t loom_storage_interference_prove_cfg_reuse_cuts(
+    loom_storage_interference_t* analysis, const loom_cfg_graph_t* graph,
+    const loom_value_ordinal_t* roots, iree_host_size_t root_count,
+    loom_storage_interference_live_barrier_t* const* live_barriers,
+    uint32_t* barrier_counts, iree_arena_allocator_t* arena) {
+  uint32_t* visited_marks = NULL;
+  uint16_t* worklist = NULL;
+  for (iree_host_size_t i = 0; i < root_count; ++i) {
+    if (!iree_any_bit_set(analysis->entries[roots[i]].flags,
+                          LOOM_STORAGE_INTERFERENCE_ENTRY_SINGLE_INSTANCE) ||
+        iree_any_bit_set(analysis->entries[roots[i]].flags,
+                         LOOM_STORAGE_INTERFERENCE_ENTRY_WORKGROUP_CUT)) {
+      continue;
+    }
+    const loom_value_t* root = loom_module_value(
+        analysis->module, analysis->value_domain->value_ids[roots[i]]);
+    const loom_block_t* allocation = loom_value_def_op(root)->parent_block;
+    if (allocation->parent_region != graph->region ||
+        !graph->blocks[allocation->region_index].component_is_cyclic) {
+      continue;
+    }
+    if (!visited_marks) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, graph->block_count,
+                                                     sizeof(*visited_marks),
+                                                     (void**)&visited_marks));
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          arena, graph->block_count, sizeof(*worklist), (void**)&worklist));
+      memset(visited_marks, 0xFF, graph->block_count * sizeof(*visited_marks));
+    }
+    const uint32_t mark = (uint32_t)i;
+    // Most roots are dead at most barriers. Store only live exceptions and
+    // reuse the shared counts, avoiding a roots-by-barriers relation table.
+    for (const loom_storage_interference_live_barrier_t* live =
+             live_barriers[i];
+         live; live = live->next) {
+      barrier_counts[live->block_index] -= live->count;
+    }
+    const uint16_t allocation_block = allocation->region_index;
+    const uint16_t component = graph->blocks[allocation_block].component;
+    iree_host_size_t worklist_count = 1;
+    worklist[0] = allocation_block;
+    visited_marks[allocation_block] = mark;
+    bool cut_all_reentries = true;
+    // Every reentry path stays in the allocation's retained CFG component.
+    // Quiescent rendezvous cut those paths. Postdominance alone cannot prove
+    // this: an inner cycle may recreate storage before reaching its postdom.
+    while (worklist_count && cut_all_reentries) {
+      const uint16_t block = worklist[--worklist_count];
+      const loom_cfg_block_index_span_t predecessors =
+          loom_cfg_graph_predecessors(graph, block);
+      for (iree_host_size_t j = 0; j < predecessors.count; ++j) {
+        const uint16_t predecessor = predecessors.values[j];
+        if (graph->blocks[predecessor].component != component ||
+            barrier_counts[predecessor] != 0) {
+          continue;
+        }
+        if (predecessor == allocation_block) {
+          cut_all_reentries = false;
+          break;
+        }
+        if (visited_marks[predecessor] != mark) {
+          visited_marks[predecessor] = mark;
+          worklist[worklist_count++] = predecessor;
+        }
+      }
+    }
+    for (const loom_storage_interference_live_barrier_t* live =
+             live_barriers[i];
+         live; live = live->next) {
+      barrier_counts[live->block_index] += live->count;
+    }
+    if (cut_all_reentries) {
+      analysis->entries[roots[i]].flags |=
+          LOOM_STORAGE_INTERFERENCE_ENTRY_WORKGROUP_CUT;
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_storage_interference_prove_single_instances(
     loom_storage_interference_t* analysis,
     loom_storage_interference_lifetime_scratch_t* lifetime) {
@@ -510,6 +599,24 @@ static iree_status_t loom_storage_interference_prove_single_instances(
         entry->footprint.operation_count != 0) {
       workgroup_roots[root_index++] = i;
     }
+  }
+  const loom_value_fact_cfg_region_t* cfg =
+      workgroup_root_count != 0
+          ? loom_value_fact_table_lookup_cfg_region(
+                analysis->fact_table, analysis->value_domain->region)
+          : NULL;
+  loom_storage_interference_live_barrier_t** live_barriers = NULL;
+  uint32_t* barrier_counts = NULL;
+  bool has_cfg_barriers = false;
+  if (cfg && cfg->graph.has_cycles) {
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        &lifetime->arena, workgroup_root_count, sizeof(*live_barriers),
+        (void**)&live_barriers));
+    memset(live_barriers, 0, workgroup_root_count * sizeof(*live_barriers));
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        &lifetime->arena, cfg->graph.block_count, sizeof(*barrier_counts),
+        (void**)&barrier_counts));
+    memset(barrier_counts, 0, cfg->graph.block_count * sizeof(*barrier_counts));
   }
 
   loom_liveness_analysis_t liveness;
@@ -596,19 +703,50 @@ static iree_status_t loom_storage_interference_prove_single_instances(
       if (!barrier->uniform) {
         continue;
       }
+      const loom_block_t* barrier_block = point->op->parent_block;
+      const bool is_cfg_barrier =
+          live_barriers && barrier_block->parent_region == cfg->graph.region;
+      if (is_cfg_barrier) {
+        ++barrier_counts[barrier_block->region_index];
+        has_cfg_barriers = true;
+      }
       for (iree_host_size_t j = 0; j < workgroup_root_count; ++j) {
         const loom_value_ordinal_t root = workgroup_roots[j];
         const loom_value_t* value = loom_module_value(
             analysis->module, analysis->value_domain->value_ids[root]);
-        if (loom_value_def_op(value)->parent_block == point->op->parent_block &&
-            live_counts[root] == 0) {
-          analysis->entries[root].flags |=
-              LOOM_STORAGE_INTERFERENCE_ENTRY_WORKGROUP_CUT;
+        const loom_block_t* allocation_block =
+            loom_value_def_op(value)->parent_block;
+        if (live_counts[root] == 0) {
+          if (allocation_block == barrier_block) {
+            analysis->entries[root].flags |=
+                LOOM_STORAGE_INTERFERENCE_ENTRY_WORKGROUP_CUT;
+          }
+        } else if (is_cfg_barrier &&
+                   allocation_block->parent_region == cfg->graph.region &&
+                   cfg->graph.blocks[allocation_block->region_index]
+                       .component_is_cyclic) {
+          if (!live_barriers[j] ||
+              live_barriers[j]->block_index != barrier_block->region_index) {
+            loom_storage_interference_live_barrier_t* live = NULL;
+            IREE_RETURN_IF_ERROR(iree_arena_allocate(
+                &lifetime->arena, sizeof(*live), (void**)&live));
+            *live = (loom_storage_interference_live_barrier_t){
+                .block_index = barrier_block->region_index,
+                .next = live_barriers[j],
+            };
+            live_barriers[j] = live;
+          }
+          ++live_barriers[j]->count;
         }
       }
     }
   }
   IREE_ASSERT_EQ(barrier_index, analysis->workgroup_barrier_count);
+  if (has_cfg_barriers) {
+    IREE_RETURN_IF_ERROR(loom_storage_interference_prove_cfg_reuse_cuts(
+        analysis, &cfg->graph, workgroup_roots, workgroup_root_count,
+        live_barriers, barrier_counts, &lifetime->arena));
+  }
   for (iree_host_size_t i = 0; i < workgroup_root_count; ++i) {
     loom_storage_interference_entry_t* entry =
         &analysis->entries[workgroup_roots[i]];
