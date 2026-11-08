@@ -67,7 +67,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_ma
   %aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %41 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
   %42 = mov.modifier.immediate 512
-  %43 = padda.modifier %41, %42
+  %43 = paddb.modifier %41, %42
   %44 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
   vst.acc %44, %43, 0
   %45 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
@@ -83,7 +83,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_dy
   %aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %51 = copy %aligned : reg<aie2p.ep> -> reg<aie2p.ep>
   %52 = mov.modifier %base
-  %53 = padda.modifier %51, %52
+  %53 = paddb.modifier %51, %52
   %54 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
   vst.acc %54, %53, 0
   %55 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
@@ -101,7 +101,7 @@ low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @store_ne
   %62 = mov.static-byte-offset 256
   %63 = add.nc %base, %62
   %64 = mov.modifier %63
-  %65 = padda.modifier %61, %64
+  %65 = paddb.modifier %61, %64
   %66 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
   vst.acc %66, %65, 0
   %67 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>

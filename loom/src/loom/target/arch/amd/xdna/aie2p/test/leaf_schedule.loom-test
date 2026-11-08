@@ -22,6 +22,48 @@ node 4 issue-cycle: 10
 
 // ====
 
+// Both load lanes are occupied, so the independent pointer update selects S.
+// RUN: emit low-schedule-query @pointer_update_beside_loads strategy=resource-stall issue=* descriptor=2
+
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @pointer_update_beside_loads(%accumulator_pointer: reg<aie2p.ep>, %vector_pointer: reg<aie2p.ep>, %cursor: reg<aie2p.ep>) -> (reg<aie2p.mbms>, reg<aie2p.vec256 x2>, reg<aie2p.ep>) asm {
+  %accumulator = vlda.acc %accumulator_pointer, 0
+  %vector = vldb.512.i32x16 %vector_pointer, 0
+  %next_cursor = paddb %cursor, 64
+  return %accumulator, %vector, %next_cursor
+}
+
+// ----
+node 0 issue-cycle: 0
+node 1 issue-cycle: 0
+node 2 issue-cycle: 0
+node 3 issue-cycle: 7
+node 2 descriptor: amd.xdna.aie2p.address.add.s.immediate
+
+// ====
+
+// Independent S updates can share a packet by selecting B for the second one,
+// without changing either consuming pointer tie or completion timing.
+// RUN: emit low-schedule-query @parallel_pointer_updates strategy=resource-stall issue=* descriptor=0,1
+
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @parallel_pointer_updates(%first: reg<aie2p.ep>, %second: reg<aie2p.ep>) -> (reg<aie2p.ep>, reg<aie2p.ep>) asm {
+  %next_first = padds %first, 64
+  %next_second = padds %second, 128
+  return %next_first, %next_second
+}
+
+// ----
+node 0 issue-cycle: 0
+node 1 issue-cycle: 0
+node 2 issue-cycle: 1
+node 0 descriptor: amd.xdna.aie2p.address.add.s.immediate
+node 1 descriptor: amd.xdna.aie2p.address.add.b.immediate
+
+// ====
+
 // Lock acquires and the following load observe four-cycle memory separation.
 // RUN: emit low-schedule-query @lock_then_load strategy=source order=* issue=*
 

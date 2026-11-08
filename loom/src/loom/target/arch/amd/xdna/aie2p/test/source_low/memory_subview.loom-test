@@ -256,7 +256,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @carry_static_orig
   %storage = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %6 = copy %storage : reg<aie2p.ep> -> reg<aie2p.ep>
   %7 = mova.modifier 1023
-  %view = padda.modifier %6, %7
+  %view = paddb.modifier %6, %7
   return %view
 }
 
@@ -273,6 +273,6 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @carry_static_orig
   %storage = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %6 = copy %storage : reg<aie2p.ep> -> reg<aie2p.ep>
   %7 = mov.modifier.immediate 1024
-  %view = padda.modifier %6, %7
+  %view = paddb.modifier %6, %7
   return %view
 }

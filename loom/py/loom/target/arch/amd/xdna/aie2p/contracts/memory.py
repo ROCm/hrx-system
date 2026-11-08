@@ -330,7 +330,7 @@ def _view_carrier_zero_rule(source_op: Op) -> DescriptorRule:
 
 
 def _view_carrier_immediate_rule(source_op: Op) -> DescriptorRule:
-    descriptor = _descriptor("amd.xdna.aie2p.address.add.a.immediate")
+    descriptor = _descriptor("amd.xdna.aie2p.address.add.b.immediate")
     (immediate,) = descriptor.immediates
     source_memory = _view_carrier_constraint(
         static_byte_offset_minimum=immediate.signed_min,
@@ -419,7 +419,7 @@ def _pointer_offset_emits(
                 form=DescriptorEmitForm.CONST,
             )
         )
-    descriptor = _descriptor("amd.xdna.aie2p.address.add.a.register")
+    descriptor = _descriptor("amd.xdna.aie2p.address.add.b.register")
     emits.append(
         EmitDescriptorOp(
             descriptor=descriptor,
@@ -450,7 +450,7 @@ def _view_carrier_register_rule(
     )
     return DescriptorRule(
         source_op=source_op,
-        descriptor=_descriptor("amd.xdna.aie2p.address.add.a.register"),
+        descriptor=_descriptor("amd.xdna.aie2p.address.add.b.register"),
         guards=(Guard.value_type("result", _VIEW_TYPE),),
         emit=_pointer_address_emits(
             source_memory,

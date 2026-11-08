@@ -220,10 +220,10 @@ def test_view_carriers_materialize_every_supported_view_as_one_address() -> None
     view_type = View(AIE2P_VIEW_ELEMENT_TYPES)
     expected_descriptor_keys = (
         None,
-        "amd.xdna.aie2p.address.add.a.immediate",
-        "amd.xdna.aie2p.address.add.a.register",
-        "amd.xdna.aie2p.address.add.a.register",
-        "amd.xdna.aie2p.address.add.a.register",
+        "amd.xdna.aie2p.address.add.b.immediate",
+        "amd.xdna.aie2p.address.add.b.register",
+        "amd.xdna.aie2p.address.add.b.register",
+        "amd.xdna.aie2p.address.add.b.register",
     )
     expected_shapes = (
         (0, 0, 0, 0, False, False, 0),
@@ -302,7 +302,7 @@ def test_view_carriers_materialize_every_supported_view_as_one_address() -> None
                 if isinstance(emit, EmitDescriptorOp)
             ] == [
                 f"amd.xdna.aie2p.constant.modifier.{form}",
-                "amd.xdna.aie2p.address.add.a.register",
+                "amd.xdna.aie2p.address.add.b.register",
             ]
             modifier = rule.emit[1]
             assert modifier.immediates == {
@@ -318,7 +318,7 @@ def test_view_carriers_materialize_every_supported_view_as_one_address() -> None
             if isinstance(emit, EmitDescriptorOp)
         ] == [
             "amd.xdna.aie2p.move.er.to.em",
-            "amd.xdna.aie2p.address.add.a.register",
+            "amd.xdna.aie2p.address.add.b.register",
         ]
         dynamic_offset = dynamic_register.emit[1]
         assert dynamic_offset.operands["src"].kind is (

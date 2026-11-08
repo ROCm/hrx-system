@@ -518,14 +518,14 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exchange_f32_zero
   %destination_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %16 = copy %source_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
   %17 = mov.modifier %base
-  %18 = padda.modifier %16, %17
+  %18 = paddb.modifier %16, %17
   %19 = vlda.acc %18, 0
   %20 = vlda.acc %18, 64
   %21 = vlda.acc %18, 128
   %22 = vlda.acc %18, 192
   %previous = concat(%19, %20, %21, %22) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
   %24 = copy %destination_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
-  %26 = padda.modifier %24, %17
+  %26 = paddb.modifier %24, %17
   %27 = slice %replacement[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
   vst.acc %27, %26, 0
   %28 = slice %replacement[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
@@ -536,6 +536,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exchange_f32_zero
   vst.acc %30, %26, 192
   return %previous
 }
+
 // ====
 
 // A full-width modifier covers the final aligned signed displacement.
@@ -555,14 +556,14 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exchange_i64_accu
   %destination_aligned = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
   %14 = copy %source_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
   %15 = mov.modifier.immediate 2147483392
-  %16 = padda.modifier %14, %15
+  %16 = paddb.modifier %14, %15
   %17 = vlda.acc %16, 0
   %18 = vlda.acc %16, 64
   %19 = vlda.acc %16, 128
   %20 = vlda.acc %16, 192
   %previous = concat(%17, %18, %19, %20) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
   %22 = copy %destination_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
-  %24 = padda.modifier %22, %15
+  %24 = paddb.modifier %22, %15
   %25 = slice %replacement[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
   vst.acc %25, %24, 0
   %26 = slice %replacement[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
@@ -597,14 +598,14 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @exchange_i64_accu
   %19 = mov.static-byte-offset 512
   %20 = add.nc %base, %19
   %21 = mov.modifier %20
-  %22 = padda.modifier %18, %21
+  %22 = paddb.modifier %18, %21
   %23 = vlda.acc.volatile<volatile> %22, 0
   %24 = vlda.acc.volatile<volatile> %22, 64
   %25 = vlda.acc.volatile<volatile> %22, 128
   %26 = vlda.acc.volatile<volatile> %22, 192
   %previous = concat(%23, %24, %25, %26) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
   %28 = copy %destination_aligned : reg<aie2p.ep> -> reg<aie2p.ep>
-  %30 = padda.modifier %28, %21
+  %30 = paddb.modifier %28, %21
   %31 = slice %replacement[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
   vst.acc.volatile<volatile> %31, %30, 0
   %32 = slice %replacement[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
