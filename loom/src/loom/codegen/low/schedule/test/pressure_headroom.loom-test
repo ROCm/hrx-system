@@ -196,3 +196,81 @@ low.func.def target<test.low.core>(@target) @late_read_overlap(%held: reg<test.p
   %released = copy %held : reg<test.phys x31> -> reg<test.i32 x31>
   return %result, %released
 }
+
+// ====
+
+// Seventeen consumers share the constant. The first sixteen retire seventeen
+// input units and produce sixteen results, paying for the constant without
+// retiring it. The bounded proof survives the extra unretained consumer.
+// A physical materialization reaches the four-register bank limit and puts
+// selection into pressure recovery; the independent read opens no storage.
+// RUN: emit low-schedule-query @bounded_frontier_retires_subset strategy=resource-stall order=0,1,3 scheduled-pressure=test.explicit32
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @bounded_frontier_retires_subset(%held: reg<test.explicit32 x3>, %seed: reg<test.i32>, %tail0: reg<test.i32>, %tail1: reg<test.i32>, %tail2: reg<test.i32>, %tail3: reg<test.i32>, %tail4: reg<test.i32>, %tail5: reg<test.i32>, %tail6: reg<test.i32>, %tail7: reg<test.i32>, %tail8: reg<test.i32>, %tail9: reg<test.i32>, %tail10: reg<test.i32>, %tail11: reg<test.i32>, %tail12: reg<test.i32>, %tail13: reg<test.i32>, %tail14: reg<test.i32>, %tail15: reg<test.i32>, %tail16: reg<test.i32>, %tail17: reg<test.i32>) -> (reg<test.explicit32 x3>, reg<test.explicit32>, reg<test.i32 x17>, reg<test.i32>) asm {
+  test.event.memory.read.i32 %seed
+  %increment = test.const.i32 1
+  %physical = test.rematerialize.explicit32 %seed
+  %first = test.add_mul.i32 %tail0, %tail1, %increment
+  %result1 = test.add.i32 %tail2, %increment
+  %result2 = test.add.i32 %tail3, %increment
+  %result3 = test.add.i32 %tail4, %increment
+  %result4 = test.add.i32 %tail5, %increment
+  %result5 = test.add.i32 %tail6, %increment
+  %result6 = test.add.i32 %tail7, %increment
+  %result7 = test.add.i32 %tail8, %increment
+  %result8 = test.add.i32 %tail9, %increment
+  %result9 = test.add.i32 %tail10, %increment
+  %result10 = test.add.i32 %tail11, %increment
+  %result11 = test.add.i32 %tail12, %increment
+  %result12 = test.add.i32 %tail13, %increment
+  %result13 = test.add.i32 %tail14, %increment
+  %result14 = test.add.i32 %tail15, %increment
+  %result15 = test.add.i32 %tail16, %increment
+  %result16 = test.add.i32 %tail17, %increment
+  %results = concat(%first, %result1, %result2, %result3, %result4, %result5, %result6, %result7, %result8, %result9, %result10, %result11, %result12, %result13, %result14, %result15, %result16) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x17>
+  return %held, %physical, %results, %seed
+}
+
+// ----
+block 0 order: 1, 3, 0
+scheduled pressure test.explicit32: peak-live-units=4 peak-live-values=2
+
+// ====
+
+// The seventeenth consumer also reads a tail used by the retained subset.
+// That tail cannot be retired by the subset, so it no longer proves neutral
+// growth. Keep the independent read, which opens no storage, ahead of it.
+// RUN: emit low-schedule-query @bounded_frontier_keeps_shared_input strategy=resource-stall order=0,1,3 scheduled-pressure=test.explicit32
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @bounded_frontier_keeps_shared_input(%held: reg<test.explicit32 x3>, %seed: reg<test.i32>, %tail0: reg<test.i32>, %tail1: reg<test.i32>, %tail2: reg<test.i32>, %tail3: reg<test.i32>, %tail4: reg<test.i32>, %tail5: reg<test.i32>, %tail6: reg<test.i32>, %tail7: reg<test.i32>, %tail8: reg<test.i32>, %tail9: reg<test.i32>, %tail10: reg<test.i32>, %tail11: reg<test.i32>, %tail12: reg<test.i32>, %tail13: reg<test.i32>, %tail14: reg<test.i32>, %tail15: reg<test.i32>, %tail16: reg<test.i32>) -> (reg<test.explicit32 x3>, reg<test.explicit32>, reg<test.i32 x17>, reg<test.i32>) asm {
+  test.event.memory.read.i32 %seed
+  %increment = test.const.i32 1
+  %physical = test.rematerialize.explicit32 %seed
+  %first = test.add_mul.i32 %tail0, %tail1, %increment
+  %result1 = test.add.i32 %tail2, %increment
+  %result2 = test.add.i32 %tail3, %increment
+  %result3 = test.add.i32 %tail4, %increment
+  %result4 = test.add.i32 %tail5, %increment
+  %result5 = test.add.i32 %tail6, %increment
+  %result6 = test.add.i32 %tail7, %increment
+  %result7 = test.add.i32 %tail8, %increment
+  %result8 = test.add.i32 %tail9, %increment
+  %result9 = test.add.i32 %tail10, %increment
+  %result10 = test.add.i32 %tail11, %increment
+  %result11 = test.add.i32 %tail12, %increment
+  %result12 = test.add.i32 %tail13, %increment
+  %result13 = test.add.i32 %tail14, %increment
+  %result14 = test.add.i32 %tail15, %increment
+  %result15 = test.add.i32 %tail16, %increment
+  %result16 = test.add.i32 %tail1, %increment
+  %results = concat(%first, %result1, %result2, %result3, %result4, %result5, %result6, %result7, %result8, %result9, %result10, %result11, %result12, %result13, %result14, %result15, %result16) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x17>
+  return %held, %physical, %results, %seed
+}
+
+// ----
+block 0 order: 0, 1, 3
+scheduled pressure test.explicit32: peak-live-units=4 peak-live-values=2
