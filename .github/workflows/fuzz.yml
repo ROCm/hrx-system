@@ -38,8 +38,8 @@ jobs:
       HRX_PYTHON: ${{ github.workspace }}/build/fuzz/python/bin/python3
       HRX_RELEASE_TYPE: nightly
       HRX_ROCM_ROOT: ${{ github.workspace }}/build/fuzz/rocm-root
-      IREE_FUZZ_CACHE: ${{ github.workspace }}/build/iree-fuzz-cache
-      IREE_FUZZ_RESULT: ${{ github.workspace }}/build/iree-fuzz-campaign-${{ github.run_id }}-${{ github.run_attempt }}.json
+      IREE_FUZZ_CACHE: build/iree-fuzz-cache
+      IREE_FUZZ_RESULT: build/iree-fuzz-campaign-${{ github.run_id }}-${{ github.run_attempt }}.json
       PIP_CACHE_DIR: ${{ github.workspace }}/build/fuzz/caches/pip
     steps:
       - name: Checkout repository

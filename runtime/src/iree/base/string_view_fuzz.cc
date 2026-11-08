@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <charconv>
+
 #include "iree/base/api.h"
 
 // Sample bitfield mapping table for fuzzing iree_bitfield_parse.
@@ -28,6 +30,57 @@ static const iree_bitfield_string_mapping_t kTestBitfieldMappings[] = {
     {0x10, IREE_SVL("MAPPABLE")},  // Bit 4.
     {0x20, IREE_SVL("COHERENT")},  // Bit 5.
 };
+
+template <typename Float>
+static void iree_string_view_fuzz_check_hex_float_reference(
+    const char* text, size_t text_length, const char* reference_text,
+    size_t reference_text_length, Float actual, uint64_t sign_mask,
+    uint64_t infinity_bits) {
+  Float reference = 0.0;
+  const std::from_chars_result result =
+      std::from_chars(reference_text, reference_text + reference_text_length,
+                      reference, std::chars_format::hex);
+  if (result.ptr != reference_text + reference_text_length) {
+    fprintf(stderr, "hex float reference consumed %td of %zu bytes for %.*s\n",
+            result.ptr - reference_text, reference_text_length,
+            (int)text_length, text);
+    abort();
+  }
+
+  uint64_t actual_bits = 0;
+  memcpy(&actual_bits, &actual, sizeof(actual));
+  if (result.ec == std::errc()) {
+    uint64_t reference_bits = 0;
+    memcpy(&reference_bits, &reference, sizeof(reference));
+    if (actual_bits != reference_bits) {
+      fprintf(stderr,
+              "hex float %zu-bit mismatch for %.*s: actual=0x%016llx "
+              "reference=0x%016llx\n",
+              sizeof(Float) * 8, (int)text_length, text,
+              (unsigned long long)actual_bits,
+              (unsigned long long)reference_bits);
+      abort();
+    }
+    return;
+  }
+
+  // std::from_chars leaves the output unchanged when the exact value is out
+  // of range. Valid hexadecimal inputs can only round to signed zero or
+  // infinity in that case.
+  if (result.ec == std::errc::result_out_of_range) {
+    const bool expected_negative = reference_text[0] == '-';
+    const bool actual_negative = (actual_bits & sign_mask) != 0;
+    const uint64_t magnitude_bits = actual_bits & ~sign_mask;
+    if (actual_negative == expected_negative &&
+        (magnitude_bits == 0 || magnitude_bits == infinity_bits)) {
+      return;
+    }
+  }
+
+  fprintf(stderr, "hex float reference rejected %.*s: error=%d\n",
+          (int)text_length, text, (int)result.ec);
+  abort();
+}
 
 static void iree_string_view_fuzz_structured_hex_float(const uint8_t* data,
                                                        size_t size) {
@@ -78,18 +131,21 @@ static void iree_string_view_fuzz_structured_hex_float(const uint8_t* data,
     abort();
   }
 
-  char* reference_end = NULL;
-  const float reference_f32 = strtof(text, &reference_end);
-  if (reference_end == text + text_length &&
-      memcmp(&actual_f32, &reference_f32, sizeof(actual_f32)) != 0) {
-    abort();
-  }
-  reference_end = NULL;
-  const double reference_f64 = strtod(text, &reference_end);
-  if (reference_end == text + text_length &&
-      memcmp(&actual_f64, &reference_f64, sizeof(actual_f64)) != 0) {
-    abort();
-  }
+  // std::from_chars intentionally omits the 0x prefix for hexadecimal input.
+  // Keep the sign, remove the prefix, and use its locale-independent parser as
+  // an oracle instead of inheriting platform libc subnormal-rounding defects.
+  char reference_text[sizeof(text)];
+  const size_t sign_length = text[0] == '-' ? 1 : 0;
+  memcpy(reference_text, text, sign_length);
+  memcpy(reference_text + sign_length, text + sign_length + 2,
+         text_length - sign_length - 2);
+  const size_t reference_text_length = text_length - 2;
+  iree_string_view_fuzz_check_hex_float_reference(
+      text, text_length, reference_text, reference_text_length, actual_f32,
+      UINT64_C(0x80000000), UINT64_C(0x7F800000));
+  iree_string_view_fuzz_check_hex_float_reference(
+      text, text_length, reference_text, reference_text_length, actual_f64,
+      UINT64_C(0x8000000000000000), UINT64_C(0x7FF0000000000000));
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
