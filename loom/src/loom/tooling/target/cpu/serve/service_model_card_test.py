@@ -230,9 +230,22 @@ def check_sequence(client, model):
         ), events
 
 
-def check_service(server, kind, deployment, model):
+def check_services(server, kind, deployments):
     server = str(Path(server).absolute())
-    deployment = str(Path(deployment).absolute())
+    deployments = tuple(
+        (str(Path(deployment).absolute()), model) for deployment, model in deployments
+    )
+    check = {
+        "image": check_image,
+        "embedding": check_embedding,
+        "decision": check_decision,
+        "speech": check_speech,
+        "speech_voice": check_speech_voice,
+        "speech_stock_voice": lambda client, model: check_speech_voice(
+            client, model, stock=True
+        ),
+        "sequence": check_sequence,
+    }[kind]
     with tempfile.TemporaryDirectory() as temporary:
         directory = Path(temporary)
         log = directory / "server.log"
@@ -243,35 +256,27 @@ def check_service(server, kind, deployment, model):
                 "--workers=4",
                 "--pool_backing=fixed",
                 "--listen=127.0.0.1:0",
-                "--model=" + deployment,
+                *("--model=" + deployment for deployment, _ in deployments),
             ],
             log,
             cwd=directory,
         ) as (process, address):
             assert address is not None, log.read_text()
             client = Client(address)
-            try:
-                {
-                    "image": check_image,
-                    "embedding": check_embedding,
-                    "decision": check_decision,
-                    "speech": check_speech,
-                    "speech_voice": check_speech_voice,
-                    "speech_stock_voice": lambda client, model: check_speech_voice(
-                        client, model, stock=True
-                    ),
-                    "sequence": check_sequence,
-                }[kind](client, model)
-            except (AssertionError, RuntimeError) as error:
-                status = client.request("/v1/status")
-                raise AssertionError(
-                    f"{error}\nmodel status: {status}\n{log.read_text()}"
-                ) from error
+            for _, model in deployments:
+                try:
+                    check(client, model)
+                except (AssertionError, RuntimeError) as error:
+                    status = client.request("/v1/status")
+                    raise AssertionError(
+                        f"{error}\nmodel status: {status}\n{log.read_text()}"
+                    ) from error
         assert process.returncode == 0, log.read_text()
 
 
 def main(server, kind, deployment, fetch=None):
     deployment = Path(deployment).absolute()
+    models = []
     for path in (deployment, deployment.parent / "model.json"):
         document = json.loads(path.read_text())
         model = (
@@ -279,7 +284,8 @@ def main(server, kind, deployment, fetch=None):
             if "schema_version" in document
             else document["name"]
         )
-        check_service(server, kind, str(path), model)
+        models.append((path, model))
+    check_services(server, kind, models)
 
     if fetch:
         with tempfile.TemporaryDirectory() as temporary:
@@ -296,7 +302,7 @@ def main(server, kind, deployment, fetch=None):
                 ],
                 check=True,
             )
-            check_service(server, kind, str(output / "model.json"), model)
+            check_services(server, kind, ((output / "model.json", model),))
 
 
 if __name__ == "__main__":
