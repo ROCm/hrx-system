@@ -87,7 +87,7 @@ endforeach()
             configure_project(source, build)
             if (build / "unsupported.txt").exists():
                 self.skipTest((build / "unsupported.txt").read_text())
-            build_project(build)
+            build_project(build, "subject", "spirv-as", "spirv-dis", "spirv-val")
             test_project(build)
 
 
