@@ -10,7 +10,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/emit/artifact.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/program_compile.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/xdna_product.h"
-#include "loom/target/arch/amd/xdna/aie2p/program_source.h"
+#include "loom/target/arch/amd/xdna/aie2p/program_clone.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,9 +20,10 @@ extern "C" {
 typedef struct loom_aie2p_configuration_plan_t loom_aie2p_configuration_plan_t;
 
 // Artifact-scoped native workers shared by every configuration plan.
-// Zero-initialize once before materializing the artifact's plans. The request
-// arena owns the lazily allocated symbol index and its contributions.
+// The request arena owns the symbol projection and native contributions.
 typedef struct loom_aie2p_configuration_worker_set_t {
+  // Private worker/helper definitions and translated source analysis products.
+  loom_aie2p_program_clone_t clone;
   // Compiled complete workers indexed by module-local source symbol ID.
   loom_aie2p_leaf_contribution_t** contributions_by_symbol;
 } loom_aie2p_configuration_worker_set_t;
@@ -125,12 +126,22 @@ iree_status_t loom_aie2p_configuration_plan_build(
     loom_aie2p_configuration_plan_t** out_plan,
     loom_aie2p_xdna_entry_t* out_entry, bool* out_valid);
 
+// Clones the admitted worker/helper inventories into |module| without changing
+// the prepared source. All plans share one projection, including immutable data
+// and its bank constraints. NULL plan entries belong to other artifact routes.
+// Initialize before allocating the native compiler against |module|.
+iree_status_t loom_aie2p_configuration_workers_initialize(
+    const loom_module_t* source_module, loom_module_t* module,
+    loom_aie2p_configuration_plan_t* const* plans, iree_host_size_t plan_count,
+    iree_arena_allocator_t* arena,
+    loom_aie2p_configuration_worker_set_t* out_workers);
+
 // Compiles and links every resident worker named by |plan|.
 //
 // Product-wide source-known limits must be admitted before this call. On
 // success the product entry produced with |plan| owns a complete tile array.
 // Authored native code or storage overflow leaves |out_materialized| false.
-// |compiler| owns the native helpers shared by all plans in the request module;
+// |compiler| owns the native helpers shared by all plans in the private module;
 // |worker_set| owns their complete entry programs across those plans. Status
 // reports infrastructure failures.
 iree_status_t loom_aie2p_configuration_plan_materialize(

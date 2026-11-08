@@ -103,12 +103,23 @@ static iree_status_t loom_aie2p_configuration_check_run(loom_pass_t* pass,
   iree_status_t status = loom_aie2p_configuration_plan_build(
       &request, &versions, &program_sources, entry_op,
       entry_facts->device_profile, &plan, &entry, &accepted);
+  loom_module_t* private_module = NULL;
   if (iree_status_is_ok(status) && accepted) {
+    status = loom_module_allocate(
+        module->context, IREE_SV("configuration.check"),
+        pass->arena->block_pool,
+        /*hints=*/NULL, iree_allocator_system(), &private_module);
+  }
+  if (iree_status_is_ok(status) && accepted) {
+    loom_aie2p_configuration_worker_set_t worker_set;
+    status = loom_aie2p_configuration_workers_initialize(
+        module, private_module, &plan, 1, pass->arena, &worker_set);
     loom_aie2p_program_compiler_t* compiler = NULL;
-    status = loom_aie2p_program_compiler_allocate(
-        module, pass->arena, &configuration_report, &compiler);
     if (iree_status_is_ok(status)) {
-      loom_aie2p_configuration_worker_set_t worker_set = {0};
+      status = loom_aie2p_program_compiler_allocate(
+          private_module, pass->arena, &configuration_report, &compiler);
+    }
+    if (iree_status_is_ok(status)) {
       status = loom_aie2p_configuration_plan_materialize(
           plan, compiler, &worker_set, &accepted);
     }
@@ -142,6 +153,7 @@ static iree_status_t loom_aie2p_configuration_check_run(loom_pass_t* pass,
   }
   loom_target_compile_report_deinitialize(&worker_report);
   loom_target_compile_report_deinitialize(&configuration_report);
+  loom_module_free(private_module);
   return status;
 }
 

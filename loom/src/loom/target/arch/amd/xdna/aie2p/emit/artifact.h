@@ -21,8 +21,9 @@ extern "C" {
 #endif
 
 typedef struct loom_aie2p_xdna_artifact_request_t {
-  // Prepared AIE2P target-low IR. Complete workers participate in shared
-  // allocation repair during native compilation.
+  // Prepared AIE2P target-low IR. Configuration scheduling borrows module
+  // scratch; native allocation repair changes only private worker/helper
+  // clones.
   loom_module_t* module;
 
   // Concrete compiler function versions participating in compilation.
@@ -42,7 +43,7 @@ typedef struct loom_aie2p_xdna_artifact_request_t {
   // Invocation-local scratch arena.
   iree_arena_allocator_t* scratch_arena;
 
-  // Host allocator owning the returned byte sequence.
+  // Host allocator owning private modules and the returned byte sequence.
   iree_allocator_t allocator;
 } loom_aie2p_xdna_artifact_request_t;
 

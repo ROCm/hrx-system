@@ -384,6 +384,7 @@ loom_cc_library(
         "//loom/src/loom/target:function_version",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target/arch/amd/xdna:error_defs",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:program_clone",
         "//loom/src/loom/target/arch/amd/xdna/aie2p:program_source",
         "//loom/src/loom/target/arch/amd/xdna/aie2p:provider",
         "//loom/src/loom/target/arch/amd/xdna/aie2p:target_facts",

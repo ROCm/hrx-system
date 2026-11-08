@@ -515,7 +515,7 @@ TEST_F(XdnaArtifactTest, DiagnosesUnrepresentableStackFrameBeforeEncoding) {
       .low_descriptor_registry = &low_registry_.registry,
       .diagnostic_emitter = capture.emitter(),
       .scratch_arena = &scratch_arena_,
-      .allocator = iree_allocator_null(),
+      .allocator = iree_allocator_system(),
   };
   bool emitted = false;
   IREE_ASSERT_OK(

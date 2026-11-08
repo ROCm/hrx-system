@@ -14,22 +14,11 @@
 #include "loom/codegen/low/read_only_data.h"
 #include "loom/ir/ir.h"
 #include "loom/target/arch/amd/xdna/aie2p/array/plan.h"
+#include "loom/target/arch/amd/xdna/aie2p/program_clone.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// One module-internal native helper cloned into the resident module.
-typedef struct loom_aie2p_array_resident_helper_t {
-  // Module-local symbol naming the cloned helper definition.
-  loom_symbol_ref_t entry;
-  // Invocation target facts borrowed from the source helper version.
-  const loom_target_facts_t* function_target_facts;
-  // Module-owned memory proofs translated to cloned helper operations.
-  loom_low_memory_access_map_t* memory_accesses;
-  // Module-owned loop facts translated to cloned helper controls.
-  loom_low_loop_execution_map_t* loop_execution;
-} loom_aie2p_array_resident_helper_t;
 
 // One materialized resident worker program shared by compatible instances.
 typedef struct loom_aie2p_array_resident_program_t {
@@ -49,7 +38,7 @@ typedef struct loom_aie2p_array_resident_program_t {
   // symbols in physical-plan order. Empty when there are no direct helpers.
   loom_low_read_only_data_set_t program_data;
   // Direct helpers remapped into the resident module in source call order.
-  const loom_aie2p_array_resident_helper_t* direct_helpers;
+  const loom_aie2p_program_clone_function_t* direct_helpers;
   // Number of records in |direct_helpers|.
   iree_host_size_t direct_helper_count;
 } loom_aie2p_array_resident_program_t;

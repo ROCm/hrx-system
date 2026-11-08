@@ -400,7 +400,7 @@ static iree_status_t loom_aie2p_xdna_compile_resident_tiles(
           sizeof(*direct_helpers), (void**)&direct_helpers));
       for (iree_host_size_t helper_index = 0;
            helper_index < resident->direct_helper_count; ++helper_index) {
-        const loom_aie2p_array_resident_helper_t* resident_helper =
+        const loom_aie2p_program_clone_function_t* resident_helper =
             &resident->direct_helpers[helper_index];
         direct_helpers[helper_index] = (loom_aie2p_program_helper_t){
             .function = resident_helper->entry,
@@ -595,6 +595,32 @@ static iree_status_t loom_aie2p_xdna_compile_resident_entries(
   return iree_ok_status();
 }
 
+static iree_status_t loom_aie2p_xdna_compile_configuration_entries(
+    const loom_aie2p_xdna_artifact_request_t* request, loom_module_t* module,
+    loom_aie2p_configuration_plan_t* const* plans, iree_host_size_t entry_count,
+    bool* out_compiled) {
+  *out_compiled = false;
+  loom_aie2p_configuration_worker_set_t workers;
+  IREE_RETURN_IF_ERROR(loom_aie2p_configuration_workers_initialize(
+      request->module, module, plans, entry_count, request->scratch_arena,
+      &workers));
+  loom_aie2p_program_compiler_t* compiler = NULL;
+  IREE_RETURN_IF_ERROR(loom_aie2p_program_compiler_allocate(
+      module, request->scratch_arena, request->compile_report, &compiler));
+  iree_status_t status = iree_ok_status();
+  bool materialized = true;
+  for (iree_host_size_t i = 0;
+       i < entry_count && iree_status_is_ok(status) && materialized; ++i) {
+    if (plans[i] == NULL) {
+      continue;
+    }
+    status = loom_aie2p_configuration_plan_materialize(plans[i], compiler,
+                                                       &workers, &materialized);
+  }
+  *out_compiled = iree_status_is_ok(status) && materialized;
+  return status;
+}
+
 typedef struct loom_aie2p_xdna_resident_storage_t {
   // Host allocator owning this storage record and the resident module.
   iree_allocator_t allocator;
@@ -633,6 +659,29 @@ static iree_status_t loom_aie2p_xdna_allocate_resident_storage(
     loom_aie2p_xdna_release_resident_storage(storage);
   }
   return status;
+}
+
+// Reports retain native schedule/allocation evidence that references private
+// IR. Without reports the invocation pool supplies all module storage and the
+// caller releases the module after native contributions have been materialized.
+static iree_status_t loom_aie2p_xdna_allocate_private_module(
+    const loom_aie2p_xdna_artifact_request_t* request,
+    loom_module_t** out_module) {
+  *out_module = NULL;
+  if (request->compile_report != NULL) {
+    loom_aie2p_xdna_resident_storage_t* storage = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_xdna_allocate_resident_storage(request, &storage));
+    *out_module = storage->module;
+    loom_target_compile_report_take_storage(
+        request->compile_report, storage,
+        loom_aie2p_xdna_release_resident_storage);
+    return iree_ok_status();
+  }
+  return loom_module_allocate(request->module->context,
+                              IREE_SV("aie2p.xdna.resident"),
+                              request->scratch_arena->block_pool,
+                              /*hints=*/NULL, request->allocator, out_module);
 }
 
 iree_status_t loom_aie2p_xdna_compile_artifact(
@@ -715,6 +764,8 @@ iree_status_t loom_aie2p_xdna_compile_artifact(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       request->scratch_arena, entry_count, sizeof(*product_entries),
       (void**)&product_entries));
+  iree_host_size_t configuration_count = 0;
+  iree_host_size_t array_count = 0;
   for (iree_host_size_t i = 0; i < entry_count; ++i) {
     const loom_aie2p_xdna_source_entry_t* source_entry = &source_entries[i];
     if (loom_aie2p_xdna_has_contract(request->module, source_entry->function_op,
@@ -727,6 +778,7 @@ iree_status_t loom_aie2p_xdna_compile_artifact(
       if (!valid) {
         return iree_ok_status();
       }
+      ++configuration_count;
       continue;
     }
     if (request->compile_report != NULL) {
@@ -757,6 +809,7 @@ iree_status_t loom_aie2p_xdna_compile_artifact(
         .array_program = &array_programs[i],
         .tile_count = array_plans[i].worker_plan_count,
     };
+    ++array_count;
   }
 
   const loom_aie2p_xdna_product_t product = {
@@ -775,54 +828,35 @@ iree_status_t loom_aie2p_xdna_compile_artifact(
                                               entry_count, &product_issue);
   }
 
-  loom_aie2p_program_compiler_t* compiler = NULL;
-  IREE_RETURN_IF_ERROR(loom_aie2p_program_compiler_allocate(
-      request->module, request->scratch_arena, request->compile_report,
-      &compiler));
-  loom_aie2p_configuration_worker_set_t configuration_workers = {0};
-  for (iree_host_size_t i = 0; i < entry_count; ++i) {
-    if (configuration_plans[i] == NULL) {
-      continue;
+  if (configuration_count != 0) {
+    loom_module_t* module = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_xdna_allocate_private_module(request, &module));
+    bool compiled = false;
+    iree_status_t status = loom_aie2p_xdna_compile_configuration_entries(
+        request, module, configuration_plans, entry_count, &compiled);
+    if (request->compile_report == NULL) {
+      loom_module_free(module);
     }
-    bool materialized = false;
-    IREE_RETURN_IF_ERROR(loom_aie2p_configuration_plan_materialize(
-        configuration_plans[i], compiler, &configuration_workers,
-        &materialized));
-    if (!materialized) {
+    IREE_RETURN_IF_ERROR(status);
+    if (!compiled) {
       return iree_ok_status();
     }
   }
-
-  loom_module_t* resident_module = NULL;
-  iree_status_t status = iree_ok_status();
-  if (request->compile_report != NULL) {
-    loom_aie2p_xdna_resident_storage_t* resident_storage = NULL;
-    status =
-        loom_aie2p_xdna_allocate_resident_storage(request, &resident_storage);
-    if (iree_status_is_ok(status)) {
-      resident_module = resident_storage->module;
-      loom_target_compile_report_take_storage(
-          request->compile_report, resident_storage,
-          loom_aie2p_xdna_release_resident_storage);
+  if (array_count != 0) {
+    loom_module_t* module = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_xdna_allocate_private_module(request, &module));
+    bool compiled = false;
+    iree_status_t status = loom_aie2p_xdna_compile_resident_entries(
+        request, module, array_plans, entry_count, product_entries, &compiled);
+    if (request->compile_report == NULL) {
+      loom_module_free(module);
     }
-  } else {
-    status = loom_module_allocate(
-        request->module->context, IREE_SV("aie2p.xdna.resident"),
-        request->scratch_arena->block_pool, /*hints=*/NULL, request->allocator,
-        &resident_module);
-  }
-  bool resident_entries_compiled = false;
-  if (iree_status_is_ok(status)) {
-    status = loom_aie2p_xdna_compile_resident_entries(
-        request, resident_module, array_plans, entry_count, product_entries,
-        &resident_entries_compiled);
-  }
-  if (request->compile_report == NULL) {
-    loom_module_free(resident_module);
-  }
-  IREE_RETURN_IF_ERROR(status);
-  if (!resident_entries_compiled) {
-    return iree_ok_status();
+    IREE_RETURN_IF_ERROR(status);
+    if (!compiled) {
+      return iree_ok_status();
+    }
   }
 
   loom_aie2p_xdna_product_image_t* product_image = NULL;
@@ -845,10 +879,10 @@ iree_status_t loom_aie2p_xdna_compile_artifact(
   }
 
   iree_io_stream_t* stream = NULL;
-  status = iree_io_vec_stream_create(IREE_IO_STREAM_MODE_READABLE |
-                                         IREE_IO_STREAM_MODE_WRITABLE |
-                                         IREE_IO_STREAM_MODE_SEEKABLE,
-                                     4096, request->allocator, &stream);
+  iree_status_t status = iree_io_vec_stream_create(
+      IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE |
+          IREE_IO_STREAM_MODE_SEEKABLE,
+      4096, request->allocator, &stream);
   if (iree_status_is_ok(status)) {
     status = loom_aie2p_xdna_product_write(product_image, stream);
   }

@@ -1,0 +1,122 @@
+// Two configurations share a worker and a retained helper. Native allocation
+// changes must stay private to each emission, including immutable data placement.
+global.rodata.def @left = align(4) conflicts([@right]) bytes("01000000")
+
+global.rodata.def @right = align(4) conflicts([@left]) bytes("02000000")
+
+aie2p.target<configuration> @configuration {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+aie2p.target<core> @core {device_profile = "amd.xdna.strix_halo.17f0_11"}
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) @configure() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def public retain target<amd.xdna.aie2p.configuration>(@configuration) abi(array_program) @configure_again() asm {
+  %columns = constant 1 : reg<aie2p.config.scalar : i64>
+  entry %columns, @initialize, @invoke
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @initialize() asm {
+  %column = constant 0 : reg<aie2p.config.scalar : i64>
+  %row = constant 2 : reg<aie2p.config.scalar : i64>
+  program.load %column, %row, @worker
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.configuration>(@configuration) @invoke() asm {
+  return
+}
+
+low.func.def target<amd.xdna.aie2p.core>(@core) abi(object_function) @worker() asm {
+  %pointer = mov.local-address 458752
+  %left = mov.local-address @left
+  %right = mov.local-address @right
+  %first = lda %left, 0
+  %second = lda %right, 0
+  %operand = xor %first, %second
+  low.func.call @xor_words(%pointer, %operand) : (reg<aie2p.ep>, reg<aie2p.er>)
+  return
+}
+
+low.func.def noinline target<amd.xdna.aie2p.core>(@core) @xor_words(%buffer: reg<aie2p.ep>, %operand: reg<aie2p.er>) asm {
+  %address0 = padda %buffer, 0
+  %word0 = lda %address0, 0
+  %word1 = lda %address0, 4
+  %word2 = lda %address0, 8
+  %word3 = lda %address0, 12
+  %word4 = lda %address0, 16
+  %word5 = lda %address0, 20
+  %word6 = lda %address0, 24
+  %word7 = lda %address0, 28
+  %base1 = copy %address0 : reg<aie2p.ep> -> reg<aie2p.ep>
+  %address1 = padda %base1, 64
+  %word8 = lda %address1, -32
+  %word9 = lda %address1, -28
+  %word10 = lda %address1, -24
+  %word11 = lda %address1, -20
+  %word12 = lda %address1, -16
+  %word13 = lda %address1, -12
+  %word14 = lda %address1, -8
+  %word15 = lda %address1, -4
+  %word16 = lda %address1, 0
+  %word17 = lda %address1, 4
+  %word18 = lda %address1, 8
+  %word19 = lda %address1, 12
+  %word20 = lda %address1, 16
+  %word21 = lda %address1, 20
+  %word22 = lda %address1, 24
+  %word23 = lda %address1, 28
+  %result23 = xor %word23, %operand
+  st %result23, %address1, 28
+  %result22 = xor %word22, %operand
+  st %result22, %address1, 24
+  %result21 = xor %word21, %operand
+  st %result21, %address1, 20
+  %result20 = xor %word20, %operand
+  st %result20, %address1, 16
+  %result19 = xor %word19, %operand
+  st %result19, %address1, 12
+  %result18 = xor %word18, %operand
+  st %result18, %address1, 8
+  %result17 = xor %word17, %operand
+  st %result17, %address1, 4
+  %result16 = xor %word16, %operand
+  st %result16, %address1, 0
+  %result15 = xor %word15, %operand
+  st %result15, %address1, -4
+  %result14 = xor %word14, %operand
+  st %result14, %address1, -8
+  %result13 = xor %word13, %operand
+  st %result13, %address1, -12
+  %result12 = xor %word12, %operand
+  st %result12, %address1, -16
+  %result11 = xor %word11, %operand
+  st %result11, %address1, -20
+  %result10 = xor %word10, %operand
+  st %result10, %address1, -24
+  %result9 = xor %word9, %operand
+  st %result9, %address1, -28
+  %result8 = xor %word8, %operand
+  st %result8, %address1, -32
+  %result7 = xor %word7, %operand
+  st %result7, %address0, 28
+  %result6 = xor %word6, %operand
+  st %result6, %address0, 24
+  %result5 = xor %word5, %operand
+  st %result5, %address0, 20
+  %result4 = xor %word4, %operand
+  st %result4, %address0, 16
+  %result3 = xor %word3, %operand
+  st %result3, %address0, 12
+  %result2 = xor %word2, %operand
+  st %result2, %address0, 8
+  %result1 = xor %word1, %operand
+  st %result1, %address0, 4
+  %result0 = xor %word0, %operand
+  st %result0, %address0, 0
+  return
+}

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "iree/testing/gtest.h"
+#include "loom/binding/c/test/target/amd/xdna/testdata/configuration_testdata.h"
 #include "loomc/loomc.h"
 #include "loomc/target/cmd/program.h"
 #include "test/util.h"
@@ -127,6 +128,9 @@ class XdnaTest : public ::testing::Test {
         loomc_allocator_system(), &environment));
     environment_.reset(environment);
   }
+
+  void CheckRepeatedEmission(loomc_byte_span_t source_contents,
+                             bool prepare_module);
 
   // Shared immutable compiler capability package.
   HandlePtr<loomc_target_environment_t, loomc_target_environment_release>
@@ -579,7 +583,8 @@ command.def public @dispatch() launch(%buffer: buffer) {
   }
 }
 
-TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
+void XdnaTest::CheckRepeatedEmission(loomc_byte_span_t source_contents,
+                                     bool prepare_module) {
   loomc_target_profile_t* raw_profile = nullptr;
   LOOMC_ASSERT_OK(loomc_target_profile_create_xdna(
       environment_.get(),
@@ -622,7 +627,7 @@ TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
       .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
       .format = LOOMC_SOURCE_FORMAT_TEXT,
       .identifier = loomc_make_cstring_view("xdna.loom"),
-      .contents = loomc_make_byte_span(kSource, sizeof(kSource) - 1),
+      .contents = source_contents,
       .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* raw_source = nullptr;
@@ -631,6 +636,7 @@ TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
   HandlePtr<loomc_source_t, loomc_source_release> source(raw_source);
 
   SequencePtr retained;
+  SequencePtr retained_report;
   std::string first_bytes;
   std::string first_report;
   for (int invocation = 0; invocation < 2; ++invocation) {
@@ -653,11 +659,13 @@ TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
         .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
         .next = &specialization_options,
     };
-    LOOMC_ASSERT_OK(loomc_compile_module(
-        compiler.get(), workspace.get(), program.get(), module.get(),
-        &compile_options, loomc_allocator_system(), &raw_result));
-    result.reset(raw_result);
-    ASSERT_TRUE(Succeeded(result.get()));
+    if (prepare_module) {
+      LOOMC_ASSERT_OK(loomc_compile_module(
+          compiler.get(), workspace.get(), program.get(), module.get(),
+          &compile_options, loomc_allocator_system(), &raw_result));
+      result.reset(raw_result);
+      ASSERT_TRUE(Succeeded(result.get()));
+    }
     const std::string prepared_text = SerializeModuleToText(module.get());
     ASSERT_FALSE(prepared_text.empty());
 
@@ -693,6 +701,12 @@ TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
     for (int emission = 0; emission < 2; ++emission) {
       const bool report_requested = emission != 0;
       emit_options.next = report_requested ? &report_options : nullptr;
+      if (report_requested) {
+        // Host allocation counters depend on cached scratch blocks. Compare
+        // reports from the same cold-pool state while also exercising trimming
+        // between emissions of the same prepared module.
+        loomc_workspace_trim(workspace.get());
+      }
       LOOMC_ASSERT_OK(loomc_emit_module(environment_.get(), workspace.get(),
                                         module.get(), &emit_options,
                                         loomc_allocator_system(), &raw_result));
@@ -722,8 +736,18 @@ TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
         ASSERT_FALSE(report_bytes.empty());
         if (first_report.empty()) {
           first_report = report_bytes;
+          loomc_byte_sequence_retain(report->contents);
+          retained_report.reset(report->contents);
         } else {
-          EXPECT_EQ(report_bytes, first_report);
+          size_t offset = 0;
+          while (offset < report_bytes.size() && offset < first_report.size() &&
+                 report_bytes[offset] == first_report[offset]) {
+            ++offset;
+          }
+          EXPECT_TRUE(report_bytes == first_report)
+              << "Report first differs at " << offset << ": "
+              << report_bytes.substr(offset, 180) << " versus "
+              << first_report.substr(offset, 180);
         }
       }
       EXPECT_EQ(SerializeModuleToText(module.get()), prepared_text);
@@ -738,6 +762,18 @@ TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
   profile.reset();
   environment_.reset();
   EXPECT_EQ(SequenceText(retained.get()), first_bytes);
+  EXPECT_TRUE(SequenceText(retained_report.get()) == first_report);
+}
+
+TEST_F(XdnaTest, PreservesPreparedArrayAcrossRepeatedEmission) {
+  CheckRepeatedEmission(loomc_make_byte_span(kSource, sizeof(kSource) - 1),
+                        /*prepare_module=*/true);
+}
+
+TEST_F(XdnaTest, PreservesPreparedConfigurationAcrossRepeatedEmission) {
+  const auto* source = loomc_xdna_configuration_testdata_create();
+  CheckRepeatedEmission(loomc_make_byte_span(source[0].data, source[0].size),
+                        /*prepare_module=*/false);
 }
 
 }  // namespace
