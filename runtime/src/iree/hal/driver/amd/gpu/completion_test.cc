@@ -777,6 +777,78 @@ TEST_F(CompletionTest, ReturnedSourceWakesBeforeEnteringAnotherCallout) {
   IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
 }
 
+class CompletionCalloutReturnTest : public CompletionTest,
+                                    public ::testing::WithParamInterface<bool> {
+};
+
+TEST_P(CompletionCalloutReturnTest,
+       SkippedHelperWakesAfterNativeEventWasConsumed) {
+  std::atomic<bool> helper_ready{false}, worker_ready{false},
+      native_done{false};
+  std::binary_semaphore helper_entered{0}, worker_entered{0};
+  std::binary_semaphore helper_resume{0}, worker_resume{0}, retired{0};
+  Callout helper_callout = [&](iree_hal_amd_gpu_completion_scope_t* scope) {
+    if (helper_ready.exchange(false)) {
+      // The native predicate was still pending at this helper's observation.
+      iree_hal_amd_gpu_completion_scope_unlock(scope);
+      helper_entered.release();
+      helper_resume.acquire();
+    } else if (native_done.exchange(false)) {
+      retired.release();
+    }
+    return false;
+  };
+  Callout worker_callout = [&](iree_hal_amd_gpu_completion_scope_t* scope) {
+    if (worker_ready.exchange(false)) {
+      iree_hal_amd_gpu_completion_scope_unlock(scope);
+      worker_entered.release();
+      worker_resume.acquire();
+    }
+    return false;
+  };
+  iree_hal_amd_gpu_completion_source_t sources[] = {Source(helper_callout),
+                                                    Source(worker_callout)};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, IREE_ARRAYSIZE(sources), sources, 0, {},
+      iree_allocator_system(), &completion_));
+  event_.AwaitWaitCount(1);
+  helper_ready.store(true);
+  std::thread helper([&] {
+    EXPECT_FALSE(iree_hal_amd_gpu_completion_try_drain(&completion_));
+  });
+  helper_entered.acquire();
+  native_done.store(true);
+  worker_ready.store(true);
+  EXPECT_EQ(NativeEvent::Signal(event_.handle()), AMDF_STATUS_OK);
+  worker_entered.acquire();
+  const bool helper_returns_first = GetParam();
+  if (!helper_returns_first) {
+    // Returning from the worker's own callback must leave the skipped
+    // helper's enrollment intact and park, without repeatedly rescanning.
+    worker_resume.release();
+    event_.AwaitWaitCount(2);
+  }
+  helper_resume.release();
+  helper.join();
+  const uint32_t signal_count = event_.signal_count();
+  EXPECT_EQ(signal_count, 2u);
+  if (helper_returns_first) {
+    // The helper returns while the worker is still inside its later source,
+    // before the end-of-round check for any remaining callouts.
+    worker_resume.release();
+  }
+  if (signal_count == 2) {
+    retired.acquire();
+  }
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_deinitialize(&completion_));
+}
+
+INSTANTIATE_TEST_SUITE_P(ReturnOrder, CompletionCalloutReturnTest,
+                         ::testing::Bool(),
+                         [](const ::testing::TestParamInfo<bool>& info) {
+                           return info.param ? "HelperFirst" : "WorkerFirst";
+                         });
+
 TEST_F(CompletionTest, CoherentChangeProgressesWithoutNativeWake) {
   iree_atomic_int32_t word = IREE_ATOMIC_VAR_INIT(0);
   std::binary_semaphore armed{0};
@@ -869,6 +941,44 @@ struct StagingCopy {
     };
   }
 };
+
+TEST_F(CompletionTest, WorkerCopyDoesNotEnrollForItsOwnReturn) {
+  StagingCopy copy;
+  iree_atomic_int32_t word = IREE_ATOMIC_VAR_INIT(0);
+  std::binary_semaphore armed{0};
+  uint32_t calls = 0;
+  WaitCallback callback = [&](amdf_status_t,
+                              iree_hal_amd_gpu_completion_wait_t* out_wait) {
+    ++calls;
+    if (iree_atomic_load(&word, iree_memory_order_acquire)) {
+      EXPECT_EQ(iree_hal_amd_gpu_completion_request_stop(&completion_),
+                AMDF_STATUS_OK);
+      return false;
+    }
+    *out_wait = {.address = &word, .value = 0};
+    if (calls == 3) {
+      armed.release();
+    }
+    // The copy round continues before applying its observation budget. The
+    // next round retires the copy, then observes without another native wake.
+    return calls <= 2;
+  };
+  iree_hal_amd_gpu_completion_source_t sources[] = {
+      copy.source(), {}, Source(callback)};
+  IREE_ASSERT_OK(iree_hal_amd_gpu_completion_initialize(
+      &context_, IREE_ARRAYSIZE(sources), sources, IREE_DURATION_INFINITE, {},
+      iree_allocator_system(), &completion_));
+  copy.entered.acquire();
+  copy.resume.release();
+  armed.acquire();
+  iree_atomic_store(&word, 1, iree_memory_order_release);
+  iree_thread_release(completion_.thread);
+  completion_.thread = nullptr;
+  iree_notification_deinitialize(&completion_.callout_joined);
+  iree_slim_mutex_deinitialize(&completion_.drain_mutex);
+  EXPECT_EQ(calls, 4u);
+  EXPECT_EQ(event_.signal_count(), 1u);
+}
 
 TEST_F(CompletionTest, CpuCopyExcludesOnlyItsOwnSource) {
   StagingCopy copy;

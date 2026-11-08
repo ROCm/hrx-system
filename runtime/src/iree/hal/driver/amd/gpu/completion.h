@@ -157,6 +157,8 @@ struct iree_hal_amd_gpu_completion_scope_t {
   bool unlocked;
   // Whether replacement changed this round's table, including address reuse.
   bool relocated;
+  // Whether this invocation belongs to the worker that consumes native wakes.
+  bool is_worker;
 };
 
 // Leaves metadata exclusion before native work, releases, or callouts. Repeated
@@ -170,8 +172,9 @@ void iree_hal_amd_gpu_completion_scope_lock(
     iree_hal_amd_gpu_completion_scope_t* scope);
 
 // Rejoins metadata exclusion and ends the source borrow. Returns whether a
-// parked worker enrolled for an active callout; the caller wakes it after
-// releasing drain_mutex and finishing all table access.
+// worker enrolled for this helper's return; the caller wakes it after releasing
+// drain_mutex and finishing all table access. Worker-owned scopes never consume
+// another helper's wake enrollment.
 bool iree_hal_amd_gpu_completion_scope_finish(
     iree_hal_amd_gpu_completion_scope_t* scope);
 
