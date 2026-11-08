@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import collections
 import json
+import math
 import os
 import re
 import secrets
@@ -22,6 +23,7 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 from build_tools.bazel import compile_commands_merge
@@ -113,6 +115,12 @@ class BazelRunCommand(BazelTargetCommand):
     run_cwd: Path = field(default_factory=Path.cwd)
 
 
+class BazelFuzzMode(Enum):
+    CAMPAIGN = "campaign"
+    COMPILE = "compile"
+    COMPACT = "compact"
+
+
 @dataclass(frozen=True)
 class BazelFuzzCommand:
     targets: list[str]
@@ -123,8 +131,9 @@ class BazelFuzzCommand:
     shard_count: int = 1
     result_path: Path | None = None
     ignored_directories: list[Path] = field(default_factory=list)
-    compile_only: bool = False
+    mode: BazelFuzzMode = BazelFuzzMode.CAMPAIGN
     stream_output: bool = True
+    mutation_time_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -213,10 +222,17 @@ class BazelFuzzerProcess:
     executable: fuzz_campaign.ExecutableIdentity
     corpus_dir: Path
     artifact_dir: Path
+    stop_path: Path | None = None
 
     @property
     def target(self) -> str:
         return self.process.target
+
+
+@dataclass(frozen=True)
+class BazelCorpusCompaction:
+    fuzzer: BazelFuzzerProcess
+    compacted_dir: Path
 
 
 @dataclass(frozen=True)
@@ -253,6 +269,7 @@ class ActiveBazelFuzzer:
     output_thread: threading.Thread
     output_errors: list[Exception]
     start_ns: int
+    stop_requested: bool = False
 
 
 def split_program_args(arguments: list[str]) -> tuple[list[str], list[str]]:
@@ -357,11 +374,18 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
     shard_count = 1
     result_path = None
     ignored_directories = []
-    compile_only = False
+    mode = BazelFuzzMode.CAMPAIGN
     stream_output = True
+    mutation_time_seconds = None
     for arg in tool_args:
         if arg in ("--compile-only", "--compile_only"):
-            compile_only = True
+            if mode != BazelFuzzMode.CAMPAIGN:
+                raise ValueError("Fuzz operation modes are mutually exclusive")
+            mode = BazelFuzzMode.COMPILE
+        elif arg in ("--compact-corpus", "--compact_corpus"):
+            if mode != BazelFuzzMode.CAMPAIGN:
+                raise ValueError("Fuzz operation modes are mutually exclusive")
+            mode = BazelFuzzMode.COMPACT
         elif arg in ("--quiet-output", "--quiet_output"):
             stream_output = False
         elif arg.startswith("--workers="):
@@ -375,6 +399,17 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
             shard_index, shard_count = parse_bazel_fuzz_shard(arg.split("=", 1)[1])
         elif arg.startswith("--result="):
             result_path = Path(arg.split("=", 1)[1])
+        elif arg.startswith(("--mutation-time=", "--mutation_time=")):
+            try:
+                mutation_time_seconds = float(arg.split("=", 1)[1])
+            except ValueError as exc:
+                raise ValueError(
+                    "--mutation-time requires a positive duration in seconds"
+                ) from exc
+            if not math.isfinite(mutation_time_seconds) or mutation_time_seconds <= 0:
+                raise ValueError(
+                    "--mutation-time requires a positive duration in seconds"
+                )
         elif arg.startswith("--ignore-directory="):
             ignored_directories.append(
                 parse_bazel_fuzz_ignored_directory(arg.split("=", 1)[1])
@@ -394,14 +429,72 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
         )
     if ignored_directories and not recursive_targets:
         raise ValueError("--ignore-directory requires a recursive target pattern")
-    if compile_only and worker_count != 1:
+    if mode == BazelFuzzMode.COMPILE and worker_count != 1:
         raise ValueError("--workers cannot be used with --compile-only")
-    if compile_only and result_path is not None:
-        raise ValueError("--result cannot be used with --compile-only")
-    if compile_only and fuzzer_args:
+    if mode != BazelFuzzMode.CAMPAIGN and result_path is not None:
+        operation = (
+            "--compile-only" if mode == BazelFuzzMode.COMPILE else "--compact-corpus"
+        )
+        raise ValueError(f"--result cannot be used with {operation}")
+    if mode == BazelFuzzMode.COMPILE and fuzzer_args:
         raise ValueError("fuzzer arguments cannot be used with --compile-only")
-    if compile_only and not stream_output:
+    if mode == BazelFuzzMode.COMPILE and not stream_output:
         raise ValueError("--quiet-output cannot be used with --compile-only")
+    if mode == BazelFuzzMode.COMPILE and mutation_time_seconds is not None:
+        raise ValueError("--mutation-time cannot be used with --compile-only")
+    if mode == BazelFuzzMode.COMPACT and mutation_time_seconds is not None:
+        raise ValueError("--mutation-time cannot be used with --compact-corpus")
+    if mode == BazelFuzzMode.COMPACT:
+        conflicting_arguments = (
+            "-cleanse_crash",
+            "-fork",
+            "-jobs",
+            "-max_total_time",
+            "-merge",
+            "-merge_control_file",
+            "-merge_inner",
+            "-minimize_crash",
+            "-runs",
+            "-stop_file",
+            "-workers",
+        )
+        for argument in fuzzer_args:
+            if not argument.startswith("-"):
+                raise ValueError("corpus paths cannot be used with --compact-corpus")
+            if any(
+                argument == name or argument.startswith(f"{name}=")
+                for name in conflicting_arguments
+            ):
+                raise ValueError(
+                    f"{argument.split('=', 1)[0]} cannot be used with --compact-corpus"
+                )
+    if mutation_time_seconds is not None:
+        conflicting_arguments = (
+            "-cleanse_crash",
+            "-fork",
+            "-jobs",
+            "-max_total_time",
+            "-merge",
+            "-merge_control_file",
+            "-merge_inner",
+            "-minimize_crash",
+            "-runs",
+            "-stop_file",
+            "-workers",
+        )
+        for argument in fuzzer_args:
+            if any(
+                argument == name or argument.startswith(f"{name}=")
+                for name in conflicting_arguments
+            ):
+                raise ValueError(
+                    f"{argument.split('=', 1)[0]} cannot be used with --mutation-time"
+                )
+            if argument == "-verbosity=0":
+                raise ValueError(
+                    "-verbosity=0 cannot be used with --mutation-time because "
+                    "libFuzzer must report INITED"
+                )
     return BazelFuzzCommand(
         targets=sorted(targets),
         bazel_args=bazel_args,
@@ -411,8 +504,9 @@ def parse_bazel_fuzz_args(arguments: list[str]) -> BazelFuzzCommand:
         shard_count=shard_count,
         result_path=result_path,
         ignored_directories=ignored_directories,
-        compile_only=compile_only,
+        mode=mode,
         stream_output=stream_output,
+        mutation_time_seconds=mutation_time_seconds,
     )
 
 
@@ -1324,9 +1418,20 @@ def run_fuzzers(
     worker_count: int,
     *,
     stream_output: bool = True,
+    mutation_time_seconds: float | None = None,
 ) -> BazelFuzzRunResult:
     if worker_count <= 0:
         raise ValueError("Fuzzer worker count must be positive")
+    if mutation_time_seconds is not None:
+        if not math.isfinite(mutation_time_seconds) or mutation_time_seconds <= 0:
+            raise ValueError("Fuzzer mutation time must be positive")
+        if any(fuzzer.stop_path is None for fuzzer in fuzzer_processes):
+            raise ValueError("Timed fuzzers require a stop path")
+    mutation_time_ns = (
+        int(mutation_time_seconds * 1_000_000_000)
+        if mutation_time_seconds is not None
+        else None
+    )
     order = {fuzzer.target: index for index, fuzzer in enumerate(fuzzer_processes)}
     pending = list(fuzzer_processes)
     active: list[ActiveBazelFuzzer] = []
@@ -1343,6 +1448,8 @@ def run_fuzzers(
         process_launch = fuzzer.process
         if process_launch.script_path is not None:
             bazel_launcher.remove_launch_script(process_launch.script_path)
+        if fuzzer.stop_path is not None:
+            fuzzer.stop_path.unlink(missing_ok=True)
 
     def stop_active_processes(signum: int) -> None:
         for active_fuzzer in active:
@@ -1447,7 +1554,7 @@ def run_fuzzers(
                     result_code = 127
                     stop_active_processes(signal.SIGINT)
                     break
-                observer = fuzz_campaign.FuzzerOutputObserver()
+                observer = fuzz_campaign.FuzzerOutputObserver(start_ns=start_ns)
                 output_errors: list[Exception] = []
                 destination = sys.stderr if stream_output else None
 
@@ -1486,6 +1593,20 @@ def run_fuzzers(
             for active_fuzzer in list(active):
                 process_result = active_fuzzer.process.poll()
                 if process_result is None:
+                    initialized_ns = (
+                        active_fuzzer.observer.initialized_ns
+                        if active_fuzzer.observer.initialized.is_set()
+                        else None
+                    )
+                    if (
+                        mutation_time_ns is not None
+                        and initialized_ns is not None
+                        and active_fuzzer.fuzzer.stop_path is not None
+                        and not active_fuzzer.stop_requested
+                        and time.monotonic_ns() - initialized_ns >= mutation_time_ns
+                    ):
+                        fuzz_campaign.write_stop_request(active_fuzzer.fuzzer.stop_path)
+                        active_fuzzer.stop_requested = True
                     continue
                 made_progress = True
                 active.remove(active_fuzzer)
@@ -1625,6 +1746,7 @@ def write_fuzz_campaign_result(
         "selected_targets": [result.target for result in run_result.targets],
         "shard": {"index": command.shard_index, "count": command.shard_count},
         "worker_count": command.worker_count,
+        "mutation_time_seconds": command.mutation_time_seconds,
         "stream_output": command.stream_output,
         "bazel_args": command.bazel_args,
         "fuzzer_args": fuzz_campaign.telemetry_arguments(command.program_args),
@@ -1802,7 +1924,7 @@ class BazelFuzzStep:
         # campaign coverage throughout every dependency. Reuse the ordinary
         # ASAN configuration so a preceding sanitizer build supplies the
         # dependency objects; the fuzz target itself supplies libFuzzer's main.
-        config = "asan" if self.command.compile_only else "fuzzer"
+        config = "asan" if self.command.mode == BazelFuzzMode.COMPILE else "fuzzer"
         return [f"--config={config}", *self.command.bazel_args]
 
     @property
@@ -1831,13 +1953,23 @@ class BazelFuzzStep:
         lines.append(
             quote_command([self.bazel, "build", *self.bazel_args, *selected_targets])
         )
-        if self.command.compile_only:
+        if self.command.mode == BazelFuzzMode.COMPILE:
             return "\n".join(lines)
         lines.append("# generate one canonical Bazel launch script per fuzzer")
         lines.append(
             f"run at most {self.command.worker_count} launch scripts concurrently "
             "without the Bazel lock"
         )
+        if self.command.mode == BazelFuzzMode.COMPACT:
+            lines.append(
+                "merge each persistent corpus into isolated storage, then install "
+                "the complete retained set before removing redundant inputs"
+            )
+        elif self.command.mutation_time_seconds is not None:
+            lines.append(
+                "start each mutation window after libFuzzer reports INITED and "
+                f"stop it after {self.command.mutation_time_seconds:g} second(s)"
+            )
         if not self.command.stream_output:
             lines.append("discard successful output after collecting bounded telemetry")
         return "\n".join(lines)
@@ -1847,10 +1979,10 @@ class BazelFuzzStep:
             return self.run_target_pattern(self.recursive_pattern, verbose=verbose)
         targets = self.select_shard(self.command.targets)
         if not targets:
-            if self.command.compile_only:
+            if self.command.mode != BazelFuzzMode.CAMPAIGN:
                 return 0
             return self.run_fuzzer_processes([], [])
-        if self.command.compile_only:
+        if self.command.mode == BazelFuzzMode.COMPILE:
             return self.build_targets(targets, verbose=verbose)
         return self.run_targets(targets, verbose=verbose, skip_incompatible=False)
 
@@ -1890,7 +2022,7 @@ class BazelFuzzStep:
                 f"{len(discovered_targets)} targets"
             )
         if not targets:
-            if self.command.compile_only:
+            if self.command.mode != BazelFuzzMode.CAMPAIGN:
                 return 0
             return self.run_fuzzer_processes([], [])
         return self.run_targets(targets, verbose=verbose, skip_incompatible=True)
@@ -1930,13 +2062,13 @@ class BazelFuzzStep:
                 "target(s) for this configuration"
             )
         if not targets:
-            if self.command.compile_only:
+            if self.command.mode != BazelFuzzMode.CAMPAIGN:
                 return 0
             return self.run_fuzzer_processes([], incompatible_targets)
         build_result = self.build_targets(targets, verbose=verbose)
         if build_result != 0:
             return build_result
-        if self.command.compile_only:
+        if self.command.mode == BazelFuzzMode.COMPILE:
             return 0
         executable_identities = {}
         for target in targets:
@@ -1950,12 +2082,26 @@ class BazelFuzzStep:
                     file=sys.stderr,
                 )
                 return 1
+        if self.command.mode == BazelFuzzMode.COMPACT:
+            return self.compact_corpora(
+                targets,
+                metadata_by_target,
+                executable_identities,
+                verbose=verbose,
+            )
         fuzzer_launches = []
+        stop_paths = {}
         for target in targets:
+            stop_path = None
+            if self.command.mutation_time_seconds is not None:
+                target_dir = fuzz.bazel_fuzz_target_dir(target)
+                stop_path = target_dir / (f".stop-{os.getpid()}-{secrets.token_hex(4)}")
+                stop_paths[target] = stop_path
             launch_result, launch = self.generate_fuzzer_launch(
                 target,
                 verbose=verbose,
                 metadata=metadata_by_target[target],
+                stop_path=stop_path,
             )
             if launch_result != 0 or launch is None:
                 for pending_launch in fuzzer_launches:
@@ -1979,9 +2125,145 @@ class BazelFuzzStep:
                     executable=executable_identities[launch.target],
                     corpus_dir=target_dir / "corpus",
                     artifact_dir=target_dir / "artifacts",
+                    stop_path=stop_paths.get(launch.target),
                 )
             )
         return self.run_fuzzer_processes(fuzzer_processes, incompatible_targets)
+
+    def compact_corpora(
+        self,
+        targets: list[str],
+        metadata_by_target: dict[str, BazelLaunchMetadata],
+        executable_identities: dict[str, fuzz_campaign.ExecutableIdentity],
+        *,
+        verbose: bool,
+    ) -> int:
+        compactions = []
+        launch_scripts = []
+        staging_directories = []
+        skipped_empty_count = 0
+        result_code = 1
+        try:
+            for target in targets:
+                target_dir = fuzz.bazel_fuzz_target_dir(target)
+                corpus_dir = target_dir / "corpus"
+                artifact_dir = target_dir / "artifacts"
+                corpus_dir.mkdir(parents=True, exist_ok=True)
+                artifact_dir.mkdir(parents=True, exist_ok=True)
+                if fuzz_campaign.snapshot_directory(corpus_dir).file_count == 0:
+                    skipped_empty_count += 1
+                    continue
+
+                staging_dir = Path(
+                    tempfile.mkdtemp(prefix=".corpus-compaction-", dir=target_dir)
+                )
+                staging_directories.append(staging_dir)
+                compacted_dir = staging_dir / "corpus"
+                compacted_dir.mkdir()
+                program_args = [
+                    "-merge=1",
+                    str(compacted_dir),
+                    str(corpus_dir),
+                    f"-artifact_prefix={artifact_dir}/",
+                    *fuzz_campaign.telemetry_arguments(self.command.program_args),
+                ]
+                launch_result, launch = generate_bazel_launch(
+                    bazel=self.bazel,
+                    target=target,
+                    bazel_args=self.bazel_args,
+                    program_args=program_args,
+                    run_cwd=REPO_ROOT,
+                    env=self.env,
+                    verbose=verbose,
+                    metadata=metadata_by_target[target],
+                )
+                if launch_result != 0 or launch is None:
+                    result_code = launch_result or 1
+                    break
+                launch_scripts.append(launch.script_path)
+                process_result, process_launch = prepare_bazel_process(
+                    launch,
+                    env=self.env,
+                )
+                if process_result != 0 or process_launch is None:
+                    result_code = process_result or 1
+                    break
+                compactions.append(
+                    BazelCorpusCompaction(
+                        fuzzer=BazelFuzzerProcess(
+                            process=process_launch,
+                            executable=executable_identities[target],
+                            corpus_dir=corpus_dir,
+                            artifact_dir=artifact_dir,
+                        ),
+                        compacted_dir=compacted_dir,
+                    )
+                )
+            else:
+                if not compactions:
+                    print(
+                        "dev.py: fuzz corpus compaction: no nonempty corpora "
+                        f"({skipped_empty_count} empty target(s))"
+                    )
+                    result_code = 0
+                else:
+                    run_result = run_fuzzers(
+                        [compaction.fuzzer for compaction in compactions],
+                        self.command.worker_count,
+                        stream_output=self.command.stream_output,
+                    )
+                    result_code = run_result.exit_code
+                    if result_code == 0:
+                        before = [
+                            fuzz_campaign.snapshot_directory(
+                                compaction.fuzzer.corpus_dir
+                            )
+                            for compaction in compactions
+                        ]
+                        for compaction in compactions:
+                            fuzz_campaign.install_compacted_corpus(
+                                compaction.fuzzer.corpus_dir,
+                                compaction.compacted_dir,
+                            )
+                        after = [
+                            fuzz_campaign.snapshot_directory(
+                                compaction.fuzzer.corpus_dir
+                            )
+                            for compaction in compactions
+                        ]
+                        print(
+                            "dev.py: fuzz corpus compaction: "
+                            f"{len(compactions)} target(s), "
+                            f"{sum(item.file_count for item in before):,} -> "
+                            f"{sum(item.file_count for item in after):,} inputs, "
+                            f"{sum(item.byte_count for item in before):,} -> "
+                            f"{sum(item.byte_count for item in after):,} bytes, "
+                            f"{run_result.duration_ns / 1_000_000_000:.1f}s"
+                        )
+                        if skipped_empty_count:
+                            print(
+                                "dev.py: fuzz corpus compaction: skipped "
+                                f"{skipped_empty_count} empty target(s)"
+                            )
+        except (OSError, ValueError) as exc:
+            print(f"dev.py: fuzz corpus compaction failed: {exc}", file=sys.stderr)
+            result_code = 1
+        finally:
+            for script_path in launch_scripts:
+                bazel_launcher.remove_launch_script(script_path)
+            for staging_dir in staging_directories:
+                try:
+                    shutil.rmtree(staging_dir)
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    print(
+                        f"dev.py: could not remove fuzz corpus staging directory "
+                        f"{staging_dir}: {exc}",
+                        file=sys.stderr,
+                    )
+                    result_code = 1
+        return result_code
 
     def build_targets(self, targets: list[str], *, verbose: bool) -> int:
         build_result = run_quietly(
@@ -1990,7 +2272,7 @@ class BazelFuzzStep:
             env=self.env,
             verbose=verbose,
         )
-        if build_result == 0 and self.command.compile_only:
+        if build_result == 0 and self.command.mode == BazelFuzzMode.COMPILE:
             print(f"dev.py: built {len(targets)} fuzz target(s)")
         return build_result
 
@@ -2003,6 +2285,8 @@ class BazelFuzzStep:
             for fuzzer in processes:
                 if fuzzer.process.script_path is not None:
                     bazel_launcher.remove_launch_script(fuzzer.process.script_path)
+                if fuzzer.stop_path is not None:
+                    fuzzer.stop_path.unlink(missing_ok=True)
             print(f"dev.py: could not identify campaign source: {exc}", file=sys.stderr)
             return 1
         try:
@@ -2010,6 +2294,7 @@ class BazelFuzzStep:
                 processes,
                 self.command.worker_count,
                 stream_output=self.command.stream_output,
+                mutation_time_seconds=self.command.mutation_time_seconds,
             )
         except OSError as exc:
             print(
@@ -2042,27 +2327,35 @@ class BazelFuzzStep:
         *,
         verbose: bool,
         metadata: BazelLaunchMetadata | None = None,
+        stop_path: Path | None = None,
     ) -> tuple[int, BazelLaunch | None]:
         return generate_bazel_launch(
             bazel=self.bazel,
             target=target,
             bazel_args=self.bazel_args,
-            program_args=self.fuzzer_program_args(target),
+            program_args=self.fuzzer_program_args(target, stop_path=stop_path),
             run_cwd=REPO_ROOT,
             env=self.env,
             verbose=verbose,
             metadata=metadata,
         )
 
-    def fuzzer_program_args(self, target: str) -> list[str]:
+    def fuzzer_program_args(
+        self, target: str, *, stop_path: Path | None = None
+    ) -> list[str]:
         target_dir = fuzz.bazel_fuzz_target_dir(target)
         corpus_dir = target_dir / "corpus"
         artifact_dir = target_dir / "artifacts"
         corpus_dir.mkdir(parents=True, exist_ok=True)
         artifact_dir.mkdir(parents=True, exist_ok=True)
-        return [
+        program_args = [
             str(corpus_dir),
             f"-artifact_prefix={artifact_dir}/",
+        ]
+        if stop_path is not None:
+            program_args.append(f"-stop_file={stop_path}")
+        return [
+            *program_args,
             *fuzz_campaign.telemetry_arguments(self.command.program_args),
         ]
 

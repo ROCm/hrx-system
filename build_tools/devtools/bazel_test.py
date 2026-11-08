@@ -24,7 +24,10 @@ from build_tools.devtools import bazel as bazel_dev
 
 
 def make_test_fuzzer(
-    process: bazel_dev.BazelProcess, root: Path
+    process: bazel_dev.BazelProcess,
+    root: Path,
+    *,
+    stop_path: Path | None = None,
 ) -> bazel_dev.BazelFuzzerProcess:
     target_name = process.target.rsplit(":", 1)[-1]
     target_dir = root / target_name
@@ -40,6 +43,7 @@ def make_test_fuzzer(
         ),
         corpus_dir=corpus_dir,
         artifact_dir=artifact_dir,
+        stop_path=stop_path,
     )
 
 
@@ -114,14 +118,46 @@ class BazelTest(unittest.TestCase):
         self.assertEqual(command.worker_count, 2)
         self.assertEqual(command.program_args, ["-max_total_time=60"])
 
+    def test_bazel_fuzz_parses_post_initialization_mutation_time(self):
+        command = bazel_dev.parse_bazel_fuzz_args(
+            [
+                "--mutation-time=120",
+                "//pkg:parser_fuzz",
+                "--",
+                "-rss_limit_mb=1024",
+                "-timeout=30",
+            ]
+        )
+
+        self.assertEqual(command.mutation_time_seconds, 120)
+        self.assertEqual(command.program_args, ["-rss_limit_mb=1024", "-timeout=30"])
+
     def test_bazel_fuzz_parses_compile_only(self):
         command = bazel_dev.parse_bazel_fuzz_args(
             ["--compile-only", "--shard=1/3", "//..."]
         )
 
-        self.assertTrue(command.compile_only)
+        self.assertEqual(command.mode, bazel_dev.BazelFuzzMode.COMPILE)
         self.assertEqual(command.shard_index, 1)
         self.assertEqual(command.shard_count, 3)
+
+    def test_bazel_fuzz_parses_corpus_compaction(self):
+        command = bazel_dev.parse_bazel_fuzz_args(
+            [
+                "--compact-corpus",
+                "--workers=8",
+                "--quiet-output",
+                "//...",
+                "--",
+                "-rss_limit_mb=1024",
+                "-timeout=30",
+            ]
+        )
+
+        self.assertEqual(command.mode, bazel_dev.BazelFuzzMode.COMPACT)
+        self.assertEqual(command.worker_count, 8)
+        self.assertFalse(command.stream_output)
+        self.assertEqual(command.program_args, ["-rss_limit_mb=1024", "-timeout=30"])
 
     def test_bazel_fuzz_rejects_invalid_campaign_options(self):
         invalid_arguments = [
@@ -140,6 +176,30 @@ class BazelTest(unittest.TestCase):
             ["--compile-only", "--result=result.json", "//..."],
             ["--compile-only", "--quiet-output", "//..."],
             ["--compile-only", "//...", "--", "-runs=1"],
+            ["--compile-only", "--compact-corpus", "//..."],
+            ["--compact-corpus", "--compile-only", "//..."],
+            ["--compact-corpus", "--result=result.json", "//..."],
+            ["--compact-corpus", "--mutation-time=1", "//..."],
+            ["--compact-corpus", "//...", "--", "/external/corpus"],
+            ["--compact-corpus", "//...", "--", "-cleanse_crash=crash"],
+            ["--compact-corpus", "//...", "--", "-fork=2"],
+            ["--compact-corpus", "//...", "--", "-merge=1"],
+            ["--compact-corpus", "//...", "--", "-merge_control_file=state"],
+            ["--compact-corpus", "//...", "--", "-minimize_crash=1"],
+            ["--compact-corpus", "//...", "--", "-runs=2"],
+            ["--mutation-time=0", "//..."],
+            ["--mutation-time=nan", "//..."],
+            ["--mutation-time=soon", "//..."],
+            ["--compile-only", "--mutation-time=1", "//..."],
+            ["--mutation-time=1", "//...", "--", "-cleanse_crash=crash"],
+            ["--mutation-time=1", "//...", "--", "-fork=2"],
+            ["--mutation-time=1", "//...", "--", "-max_total_time=2"],
+            ["--mutation-time=1", "//...", "--", "-runs=2"],
+            ["--mutation-time=1", "//...", "--", "-merge=1"],
+            ["--mutation-time=1", "//...", "--", "-merge_control_file=state"],
+            ["--mutation-time=1", "//...", "--", "-minimize_crash=1"],
+            ["--mutation-time=1", "//...", "--", "-stop_file=stop"],
+            ["--mutation-time=1", "//...", "--", "-verbosity=0"],
         ]
         for arguments in invalid_arguments:
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
@@ -1563,13 +1623,20 @@ class BazelTest(unittest.TestCase):
                 events.append(("prepare", launch.target, env))
                 return 0, processes[launch.target]
 
-            def run_many(generated_processes, worker_count, *, stream_output):
+            def run_many(
+                generated_processes,
+                worker_count,
+                *,
+                stream_output,
+                mutation_time_seconds,
+            ):
                 events.append(
                     (
                         "run",
                         [process.target for process in generated_processes],
                         worker_count,
                         stream_output,
+                        mutation_time_seconds,
                     )
                 )
                 return bazel_dev.BazelFuzzRunResult(
@@ -1662,7 +1729,7 @@ class BazelTest(unittest.TestCase):
             self.assertEqual(
                 events[4:6], [("prepare", target, None) for target in targets]
             )
-            self.assertEqual(events[6], ("run", targets, 2, True))
+            self.assertEqual(events[6], ("run", targets, 2, True, None))
             campaign = json.loads(
                 (temporary_path / "result.json").read_text(encoding="utf-8")
             )
@@ -1678,7 +1745,7 @@ class BazelTest(unittest.TestCase):
             targets=["//..."],
             bazel_args=["--keep_going"],
             ignored_directories=[Path("local-experiments")],
-            compile_only=True,
+            mode=bazel_dev.BazelFuzzMode.COMPILE,
         )
         step = bazel_dev.BazelFuzzStep("bazel", command)
         discovered = subprocess.CompletedProcess(
@@ -1756,7 +1823,7 @@ class BazelTest(unittest.TestCase):
             "bazel",
             bazel_dev.BazelFuzzCommand(
                 targets=["//pkg:decoder_fuzz", "//pkg:parser_fuzz"],
-                compile_only=True,
+                mode=bazel_dev.BazelFuzzMode.COMPILE,
             ),
         )
         with mock.patch.object(bazel_dev, "run_quietly", return_value=0) as build:
@@ -1774,6 +1841,174 @@ class BazelTest(unittest.TestCase):
             env=None,
             verbose=False,
         )
+
+    def test_bazel_fuzz_compacts_nonempty_corpora_after_successful_merge(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            populated_target = "//pkg:populated_fuzz"
+            empty_target = "//pkg:empty_fuzz"
+            populated_dir = root / "populated"
+            corpus_dir = populated_dir / "corpus"
+            corpus_dir.mkdir(parents=True)
+            (corpus_dir / "retained").write_bytes(b"retained")
+            (corpus_dir / "redundant").write_bytes(b"redundant")
+            command = bazel_dev.BazelFuzzCommand(
+                targets=[empty_target, populated_target],
+                mode=bazel_dev.BazelFuzzMode.COMPACT,
+                worker_count=2,
+                stream_output=False,
+                program_args=["-rss_limit_mb=1024"],
+            )
+            step = bazel_dev.BazelFuzzStep("bazel", command)
+            generated_arguments = []
+
+            def target_dir(target):
+                return root / target.rsplit(":", 1)[1].removesuffix("_fuzz")
+
+            def generate(**kwargs):
+                generated_arguments.append(kwargs["program_args"])
+                return 0, bazel_dev.BazelLaunch(
+                    target=kwargs["target"],
+                    script_path=root / "launch.sh",
+                    run_cwd=root,
+                    argument_separator="separator",
+                )
+
+            def prepare(launch, *, env):
+                return 0, bazel_dev.BazelProcess(
+                    target=launch.target,
+                    argv=["fuzzer"],
+                    cwd=root,
+                    env={} if env is None else env,
+                    script_path=launch.script_path,
+                )
+
+            def merge(processes, worker_count, *, stream_output):
+                self.assertEqual(worker_count, 2)
+                self.assertFalse(stream_output)
+                self.assertEqual(
+                    [process.target for process in processes], [populated_target]
+                )
+                compacted_dir = Path(generated_arguments[0][1])
+                (compacted_dir / "retained").write_bytes(b"retained")
+                return bazel_dev.BazelFuzzRunResult(
+                    exit_code=0,
+                    targets=(),
+                    start_unix_ns=1,
+                    duration_ns=2,
+                )
+
+            with (
+                mock.patch.object(
+                    bazel_dev.fuzz, "bazel_fuzz_target_dir", side_effect=target_dir
+                ),
+                mock.patch.object(
+                    bazel_dev, "generate_bazel_launch", side_effect=generate
+                ),
+                mock.patch.object(
+                    bazel_dev, "prepare_bazel_process", side_effect=prepare
+                ),
+                mock.patch.object(bazel_dev, "run_fuzzers", side_effect=merge),
+                contextlib.redirect_stdout(io.StringIO()) as stdout,
+            ):
+                result = step.compact_corpora(
+                    [empty_target, populated_target],
+                    {
+                        empty_target: mock.sentinel.empty_metadata,
+                        populated_target: mock.sentinel.populated_metadata,
+                    },
+                    {
+                        empty_target: mock.sentinel.empty_identity,
+                        populated_target: mock.sentinel.populated_identity,
+                    },
+                    verbose=False,
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(
+                generated_arguments[0],
+                [
+                    "-merge=1",
+                    mock.ANY,
+                    str(corpus_dir),
+                    f"-artifact_prefix={populated_dir / 'artifacts'}/",
+                    "-rss_limit_mb=1024",
+                    "-print_final_stats=1",
+                ],
+            )
+            self.assertEqual(
+                {path.read_bytes() for path in corpus_dir.iterdir()},
+                {b"retained"},
+            )
+            self.assertEqual(list(populated_dir.glob(".corpus-compaction-*")), [])
+            self.assertIn("2 -> 1 inputs", stdout.getvalue())
+
+    def test_bazel_fuzz_failed_merge_never_installs_staged_corpus(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = "//pkg:parser_fuzz"
+            target_dir = root / "parser"
+            corpus_dir = target_dir / "corpus"
+            corpus_dir.mkdir(parents=True)
+            (corpus_dir / "original").write_bytes(b"original")
+            step = bazel_dev.BazelFuzzStep(
+                "bazel",
+                bazel_dev.BazelFuzzCommand(
+                    targets=[target], mode=bazel_dev.BazelFuzzMode.COMPACT
+                ),
+            )
+            launch = bazel_dev.BazelLaunch(
+                target=target,
+                script_path=root / "launch.sh",
+                run_cwd=root,
+                argument_separator="separator",
+            )
+            process = bazel_dev.BazelProcess(
+                target=target,
+                argv=["fuzzer"],
+                cwd=root,
+                env={},
+                script_path=launch.script_path,
+            )
+            failed_merge = bazel_dev.BazelFuzzRunResult(
+                exit_code=1,
+                targets=(),
+                start_unix_ns=1,
+                duration_ns=2,
+            )
+
+            with (
+                mock.patch.object(
+                    bazel_dev.fuzz,
+                    "bazel_fuzz_target_dir",
+                    return_value=target_dir,
+                ),
+                mock.patch.object(
+                    bazel_dev,
+                    "generate_bazel_launch",
+                    return_value=(0, launch),
+                ),
+                mock.patch.object(
+                    bazel_dev,
+                    "prepare_bazel_process",
+                    return_value=(0, process),
+                ),
+                mock.patch.object(bazel_dev, "run_fuzzers", return_value=failed_merge),
+                mock.patch.object(
+                    bazel_dev.fuzz_campaign, "install_compacted_corpus"
+                ) as install,
+            ):
+                result = step.compact_corpora(
+                    [target],
+                    {target: mock.sentinel.metadata},
+                    {target: mock.sentinel.identity},
+                    verbose=False,
+                )
+
+            self.assertEqual(result, 1)
+            install.assert_not_called()
+            self.assertEqual((corpus_dir / "original").read_bytes(), b"original")
+            self.assertEqual(list(target_dir.glob(".corpus-compaction-*")), [])
 
     def test_bazel_fuzz_stops_remaining_launches_after_a_failure(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
@@ -1896,6 +2131,42 @@ class BazelTest(unittest.TestCase):
                 [target.state for target in result.targets],
                 ["passed"] * len(launches),
             )
+
+    def test_bazel_fuzz_starts_mutation_deadline_after_initialization(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            stop_path = root / "stop"
+            script = (
+                "import pathlib, sys, time; "
+                "stop = pathlib.Path(sys.argv[1]); "
+                "sys.stderr.write('#1 INITED cov: 2 ft: 3 corp: 1/1b\\n'); "
+                "sys.stderr.flush(); "
+                'exec("while not stop.exists() or not stop.read_bytes():\\n'
+                ' time.sleep(0.005)"); '
+                "sys.stderr.write('stat::number_of_executed_units: 7\\n')"
+            )
+            launch = bazel_dev.BazelProcess(
+                target="//pkg:timed_fuzz",
+                argv=[sys.executable, "-c", script, str(stop_path)],
+                cwd=root,
+                env=os.environ.copy(),
+            )
+            fuzzer = make_test_fuzzer(launch, root, stop_path=stop_path)
+
+            result = bazel_dev.run_fuzzers(
+                [fuzzer],
+                worker_count=1,
+                stream_output=False,
+                mutation_time_seconds=0.01,
+            )
+
+            self.assertEqual(result.exit_code, 0)
+            self.assertEqual(result.targets[0].state, "passed")
+            self.assertEqual(result.targets[0].statistics.executed_units, 7)
+            self.assertIsNotNone(
+                result.targets[0].statistics.initialization_duration_ns
+            )
+            self.assertFalse(stop_path.exists())
 
     def test_bazel_fuzz_forwards_termination_and_restores_handlers(self):
         temporary = tempfile.TemporaryDirectory()

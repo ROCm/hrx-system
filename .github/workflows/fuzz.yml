@@ -111,23 +111,36 @@ jobs:
       - name: Run bounded fuzz campaign
         id: fuzz_campaign
         run: |
-          if [[ "${{ github.event_name }}" == pull_request ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
             campaign_seconds=60
           else
             campaign_seconds=120
           fi
+          campaign_targets=(
+            --//build_tools/vulkan/config:enabled=false
+            --//build_tools/d3d12/config:enabled=false
+            --//loom/config/serve:image_codecs=png,jpeg,gif,webp
+            --//loom/config/serve:audio_codecs=wav,mp3,flac
+            //...
+          )
           python3 dev.py bazel fuzz \
             --workers=8 \
+            --mutation-time="$campaign_seconds" \
             --quiet-output \
             --result="$IREE_FUZZ_RESULT" \
-            --//build_tools/vulkan/config:enabled=false \
-            --//build_tools/d3d12/config:enabled=false \
-            --//loom/config/serve:image_codecs=png,jpeg,gif,webp \
-            --//loom/config/serve:audio_codecs=wav,mp3,flac \
-            //... -- \
-            -max_total_time="$campaign_seconds" \
+            "${campaign_targets[@]}" -- \
             -rss_limit_mb=1024 \
             -timeout=30
+          if [[ "$GITHUB_EVENT_NAME" != pull_request && \
+                "$GITHUB_REF" == refs/heads/main ]]; then
+            python3 dev.py bazel fuzz \
+              --compact-corpus \
+              --workers=8 \
+              --quiet-output \
+              "${campaign_targets[@]}" -- \
+              -rss_limit_mb=1024 \
+              -timeout=30
+          fi
 
       - name: Report fuzz failure
         if: ${{ always() && steps.fuzz_campaign.outcome == 'failure' }}

@@ -14,6 +14,7 @@ import re
 import stat
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, TextIO
@@ -100,6 +101,7 @@ class LibFuzzerStatistics:
     new_units_added: int | None = None
     slowest_unit_seconds: float | None = None
     peak_rss_mb: int | None = None
+    initialization_duration_ns: int | None = None
     initial_coverage_points: int | None = None
     coverage_points: int | None = None
     initial_features: int | None = None
@@ -116,6 +118,7 @@ class LibFuzzerStatistics:
             "new_units_added": self.new_units_added,
             "slowest_unit_seconds": self.slowest_unit_seconds,
             "peak_rss_mb": self.peak_rss_mb,
+            "initialization_duration_ns": self.initialization_duration_ns,
             "initial_coverage_points": self.initial_coverage_points,
             "coverage_points": self.coverage_points,
             "coverage_points_added": _difference(
@@ -134,7 +137,12 @@ class LibFuzzerStatistics:
 class FuzzerOutputObserver:
     """Parses libFuzzer progress while retaining only a bounded output tail."""
 
-    def __init__(self, tail_limit: int = FAILURE_OUTPUT_LIMIT):
+    def __init__(
+        self,
+        tail_limit: int = FAILURE_OUTPUT_LIMIT,
+        *,
+        start_ns: int | None = None,
+    ):
         if tail_limit <= 0:
             raise ValueError("Fuzzer output tail limit must be positive")
         self.statistics = LibFuzzerStatistics()
@@ -143,6 +151,9 @@ class FuzzerOutputObserver:
         self._tail = bytearray()
         self._line = bytearray()
         self._finalized = False
+        self._start_ns = start_ns
+        self.initialized_ns: int | None = None
+        self.initialized = threading.Event()
 
     @property
     def tail(self) -> bytes:
@@ -195,6 +206,13 @@ class FuzzerOutputObserver:
             return
         self.statistics.executed_units = int(progress_match.group(1))
         initial_progress = progress_match.group(2).upper() == b"INITED"
+        if initial_progress and not self.initialized.is_set():
+            self.initialized_ns = time.monotonic_ns()
+            if self._start_ns is not None:
+                self.statistics.initialization_duration_ns = max(
+                    0, self.initialized_ns - self._start_ns
+                )
+            self.initialized.set()
         for label, field_name in _PROGRESS_INTEGER_FIELDS.items():
             match = re.search(rb"(?:^|\s)" + re.escape(label) + rb":\s*(\d+)", line)
             if match:
@@ -254,11 +272,15 @@ def _difference(initial_value: int | None, final_value: int | None) -> int | Non
 
 
 def executable_identity(path: Path) -> ExecutableIdentity:
+    return ExecutableIdentity(byte_count=path.stat().st_size, sha256=_file_sha256(path))
+
+
+def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as executable_file:
-        while data := executable_file.read(_HASH_CHUNK_SIZE):
+    with path.open("rb") as source_file:
+        while data := source_file.read(_HASH_CHUNK_SIZE):
             digest.update(data)
-    return ExecutableIdentity(byte_count=path.stat().st_size, sha256=digest.hexdigest())
+    return digest.hexdigest()
 
 
 def source_identity(repository_root: Path) -> SourceIdentity:
@@ -310,7 +332,11 @@ def observe_stream(
 ) -> None:
     """Streams child output to the terminal while collecting bounded telemetry."""
     try:
-        while data := stream.read(_STREAM_CHUNK_SIZE):
+        # Buffered pipe reads may wait for the full requested size, withholding
+        # progress until process exit. read1 returns currently available bytes
+        # so campaign control can react to INITED and failures while live.
+        read_chunk = getattr(stream, "read1", stream.read)
+        while data := read_chunk(_STREAM_CHUNK_SIZE):
             observer.consume(data)
             if destination is None:
                 continue
@@ -339,6 +365,60 @@ def write_failure_output(path: Path, observer: FuzzerOutputObserver) -> None:
     finally:
         if temporary_path.exists():
             temporary_path.unlink()
+
+
+def write_stop_request(path: Path) -> None:
+    """Atomically asks libFuzzer to stop after its current input."""
+    temporary_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        # libFuzzer ignores an existing but empty stop file. Publish a nonempty
+        # file atomically so it can never observe that transient state.
+        temporary_path.write_bytes(b"stop\n")
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+
+
+def install_compacted_corpus(corpus_dir: Path, compacted_dir: Path) -> None:
+    """Installs a successful libFuzzer merge without risking the live corpus."""
+
+    def regular_files(directory: Path) -> list[Path]:
+        files = []
+        for path in directory.iterdir():
+            if path.is_symlink() or not path.is_file():
+                raise ValueError(f"fuzz corpus contains a non-regular file: {path}")
+            files.append(path)
+        return sorted(files)
+
+    corpus_files = regular_files(corpus_dir)
+    compacted_files = regular_files(compacted_dir)
+    if corpus_files and not compacted_files:
+        raise ValueError("libFuzzer produced an empty compacted corpus")
+
+    # Install every selected input before removing anything. Preserve the merge
+    # output names so replay order remains stable. Hard links publish complete
+    # files without overwriting an old input, even if a corpus uses adversarial
+    # names. If the process is interrupted or a filesystem operation fails, the
+    # live corpus is either the original set plus some selected inputs or the
+    # complete selected set plus redundant inputs. Both preserve the full code
+    # coverage established by the successful merge.
+    retained_paths = set()
+    for source_path in compacted_files:
+        digest = _file_sha256(source_path)
+        destination_path = corpus_dir / source_path.name
+        suffix = 0
+        while destination_path.exists():
+            if _file_sha256(destination_path) == digest:
+                break
+            suffix += 1
+            destination_path = corpus_dir / f"{source_path.name}-{digest}-{suffix}"
+        else:
+            os.link(source_path, destination_path)
+        retained_paths.add(destination_path)
+    for corpus_path in corpus_files:
+        if corpus_path not in retained_paths:
+            corpus_path.unlink()
 
 
 def _run_git(repository_root: Path, arguments: list[str]) -> bytes:

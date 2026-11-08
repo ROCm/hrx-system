@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from build_tools.devtools import fuzz_campaign
 
@@ -47,6 +48,7 @@ class FuzzCampaignTest(unittest.TestCase):
                 "new_units_added": 6,
                 "slowest_unit_seconds": 0.125,
                 "peak_rss_mb": 31,
+                "initialization_duration_ns": None,
                 "initial_coverage_points": 100,
                 "coverage_points": 103,
                 "coverage_points_added": 3,
@@ -59,6 +61,15 @@ class FuzzCampaignTest(unittest.TestCase):
                 "corpus_bytes": 1536,
             },
         )
+
+    def test_observer_records_initialization_duration(self):
+        observer = fuzz_campaign.FuzzerOutputObserver(start_ns=100)
+        with mock.patch.object(fuzz_campaign.time, "monotonic_ns", return_value=375):
+            observer.consume(b"#1 INITED cov: 2 ft: 3 corp: 1/1b\n")
+
+        self.assertTrue(observer.initialized.is_set())
+        self.assertEqual(observer.initialized_ns, 375)
+        self.assertEqual(observer.statistics.initialization_duration_ns, 275)
 
     def test_observer_retains_only_bounded_tail(self):
         observer = fuzz_campaign.FuzzerOutputObserver(tail_limit=16)
@@ -86,6 +97,28 @@ class FuzzCampaignTest(unittest.TestCase):
 
         self.assertEqual(observer.tail, b"fuzzer output\n")
 
+    def test_observe_stream_reads_available_pipe_bytes(self):
+        class AvailableStream:
+            def __init__(self):
+                self.chunks = [b"#1 INITED cov: 2 ft: 3 corp: 1/1b\n", b""]
+                self.closed = False
+
+            def read(self, _size):
+                raise AssertionError("buffered read must not gate live progress")
+
+            def read1(self, _size):
+                return self.chunks.pop(0)
+
+            def close(self):
+                self.closed = True
+
+        stream = AvailableStream()
+        observer = fuzz_campaign.FuzzerOutputObserver()
+        fuzz_campaign.observe_stream(stream, observer, None)
+
+        self.assertTrue(observer.initialized.is_set())
+        self.assertTrue(stream.closed)
+
     def test_failure_output_is_bounded_and_marks_truncation(self):
         observer = fuzz_campaign.FuzzerOutputObserver(tail_limit=8)
         observer.consume(b"0123456789")
@@ -96,6 +129,96 @@ class FuzzCampaignTest(unittest.TestCase):
             output = output_path.read_bytes()
 
         self.assertEqual(output, b"... earlier output truncated ...\n23456789")
+
+    def test_stop_request_is_published_nonempty(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            stop_path = Path(temporary) / "stop"
+            fuzz_campaign.write_stop_request(stop_path)
+
+            self.assertEqual(stop_path.read_bytes(), b"stop\n")
+            self.assertEqual(list(stop_path.parent.glob(".stop.*.tmp")), [])
+
+    def test_compacted_corpus_is_installed_before_redundant_inputs_are_removed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            corpus_dir = root / "corpus"
+            compacted_dir = root / "compacted"
+            corpus_dir.mkdir()
+            compacted_dir.mkdir()
+            (corpus_dir / "redundant").write_bytes(b"redundant")
+            (corpus_dir / "retained").write_bytes(b"selected")
+            (compacted_dir / "retained").write_bytes(b"selected")
+            (compacted_dir / "new").write_bytes(b"new")
+
+            fuzz_campaign.install_compacted_corpus(corpus_dir, compacted_dir)
+
+            self.assertEqual(
+                {path.name: path.read_bytes() for path in corpus_dir.iterdir()},
+                {"new": b"new", "retained": b"selected"},
+            )
+
+    def test_failed_compacted_corpus_install_preserves_original_inputs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            corpus_dir = root / "corpus"
+            compacted_dir = root / "compacted"
+            corpus_dir.mkdir()
+            compacted_dir.mkdir()
+            (corpus_dir / "first").write_bytes(b"first")
+            (corpus_dir / "second").write_bytes(b"second")
+            (compacted_dir / "selected-a").write_bytes(b"a")
+            (compacted_dir / "selected-b").write_bytes(b"b")
+            real_link = fuzz_campaign.os.link
+            link_count = 0
+
+            def fail_second_link(source, destination):
+                nonlocal link_count
+                link_count += 1
+                if link_count == 2:
+                    raise OSError("injected install failure")
+                real_link(source, destination)
+
+            with (
+                mock.patch.object(
+                    fuzz_campaign.os, "link", side_effect=fail_second_link
+                ),
+                self.assertRaisesRegex(OSError, "injected install failure"),
+            ):
+                fuzz_campaign.install_compacted_corpus(corpus_dir, compacted_dir)
+
+            self.assertEqual((corpus_dir / "first").read_bytes(), b"first")
+            self.assertEqual((corpus_dir / "second").read_bytes(), b"second")
+            self.assertIn(b"a", {path.read_bytes() for path in corpus_dir.iterdir()})
+
+    def test_compacted_corpus_does_not_overwrite_same_name_with_other_content(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            corpus_dir = root / "corpus"
+            compacted_dir = root / "compacted"
+            corpus_dir.mkdir()
+            compacted_dir.mkdir()
+            (corpus_dir / "collision").write_bytes(b"old")
+            (compacted_dir / "collision").write_bytes(b"selected")
+
+            fuzz_campaign.install_compacted_corpus(corpus_dir, compacted_dir)
+
+            self.assertEqual(
+                {path.read_bytes() for path in corpus_dir.iterdir()}, {b"selected"}
+            )
+
+    def test_nonempty_corpus_rejects_empty_compaction(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            corpus_dir = root / "corpus"
+            compacted_dir = root / "compacted"
+            corpus_dir.mkdir()
+            compacted_dir.mkdir()
+            (corpus_dir / "input").write_bytes(b"input")
+
+            with self.assertRaisesRegex(ValueError, "empty compacted corpus"):
+                fuzz_campaign.install_compacted_corpus(corpus_dir, compacted_dir)
+
+            self.assertEqual((corpus_dir / "input").read_bytes(), b"input")
 
     def test_directory_snapshot_and_change_are_recursive(self):
         with tempfile.TemporaryDirectory() as temporary:
