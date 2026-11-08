@@ -761,14 +761,15 @@ static iree_status_t loom_aie2p_native_select(
                 ? iree_max(cursor->maximum_admissions,
                            source->completion.actions[j].maximum_admissions)
                 : source->completion.actions[j].maximum_admissions;
+        const bool imported =
+            realization->invocations.channels[channel - context->channels]
+                .invocation != realization->invocations.workers[i].invocation;
         *cursor = (loom_aie2p_native_cursor_t){
             .worker = (uint32_t)i,
             .maximum_admissions = maximum_admissions,
             .shared = shared,
-            .advances =
-                channel->source->capacity > 1 &&
-                (maximum_admissions > 1 || shared ||
-                 realization->invocations.workers[i].invocation->ordinal != 0)};
+            .advances = channel->source->capacity > 1 &&
+                        (maximum_admissions > 1 || shared || imported)};
       }
     }
   }

@@ -35,7 +35,8 @@ typedef struct loom_aie2p_native_cursor_t {
   // engine with disjoint lifetimes; single-owner completion proofs do not
   // apply.
   bool shared;
-  // Multiple admissions can select different physical slots.
+  // Admissions within the channel's lifetime can select different slots,
+  // including admissions from prior invocations of an importing worker.
   bool advances;
 } loom_aie2p_native_cursor_t;
 

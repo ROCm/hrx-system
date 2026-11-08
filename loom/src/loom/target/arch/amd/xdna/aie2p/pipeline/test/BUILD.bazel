@@ -18,6 +18,7 @@ package(
 loom_check_test_suite(
     name = "lowering_test",
     srcs = [
+        "borrowed_dma_cursors.loom-test",
         "child_cursor_lifetimes.loom-test",
         "child_distribution.loom-test",
         "external_metadata.loom-test",
