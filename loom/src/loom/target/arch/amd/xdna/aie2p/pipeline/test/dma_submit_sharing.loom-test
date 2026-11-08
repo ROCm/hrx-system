@@ -1,6 +1,6 @@
 // RUN: with-checks emit source-low output=low
 
-// Four static submissions share one two-descriptor patch body. Each caller
+// Three static submissions share one two-descriptor patch body. Each caller
 // supplies its own offsets and relocation/descriptor words.
 aie2p.target<array> @npu {device_profile = "amd.xdna.strix.17f0_10"}
 
@@ -20,7 +20,7 @@ pipeline.def<kernel> public retain target(@npu) @copy_groups() run(%output_arg: 
     channel.publish %write : write<tile<32xi32>>
     %read, %source = channel.acquire %channel : channel<tile<32xi32>> -> (read<tile<32xi32>>, view<32xi32>)
     %begin = index.constant 0 : index
-    %end = index.constant 4 : index
+    %end = index.constant 3 : index
     %step = index.constant 1 : index
     %stride = index.constant 32 : index
     scf.for %position = [%begin to %end step %step] unroll {
@@ -45,6 +45,52 @@ pipeline.def<kernel> public retain target(@npu) @copy_groups() run(%output_arg: 
       kernel.async.wait %group {newer_groups = 0} : kernel.async.group
     }
     channel.release %read : read<tile<32xi32>>
+  }
+}
+
+// ----
+CHECK-COUNT-1: low.func.def noinline target<amd.xdna.aie2p.core> *
+CHECK-COUNT-3: low.func.call @__aie2p_worker_helper_*
+
+// ====
+
+// RUN: with-checks emit source-low output=low
+
+// Ordered child occurrences reuse the same physical descriptor and code bank.
+// Their four distinct external bindings share one submission body even though
+// no individual child has enough sites to justify a retained helper.
+aie2p.target<array> @npu {device_profile = "amd.xdna.strix.17f0_10"}
+
+pipeline.def @copy_phase() run(%channel: channel<tile<32xi32>>, %output_arg: buffer) {
+  %output = buffer.assume.alignment %output_arg {minimum_alignment = 4} : buffer
+  %origin = index.constant 0 : offset
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %write, %destination = channel.reserve %channel : channel<tile<32xi32>> -> (write<tile<32xi32>>, view<32xi32>)
+    %values = vector.splati 17 : vector<32xi32>
+    vector.store %values, %destination[0] : vector<32xi32>, view<32xi32>
+    channel.publish %write : write<tile<32xi32>>
+    %read, %source = channel.acquire %channel : channel<tile<32xi32>> -> (read<tile<32xi32>>, view<32xi32>)
+    %external = buffer.view %output[%origin] : buffer -> view<32xi32>
+    %copy = kernel.async.copy %source to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<32xi32> to view<32xi32> -> kernel.async.token
+    %completion = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %completion {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<32xi32>>
+  }
+}
+
+pipeline.def<kernel> public retain target(@npu) @ordered_copies() run(%first: buffer, %second: buffer, %third: buffer, %fourth: buffer) {
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %origin = index.constant 0 : offset
+  %bytes = index.constant 128 : offset
+  %capacity = index.constant 1 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(4) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x32xi32>
+  %channel = channel.bind<fifo> %slots, %capacity : view<1x32xi32>, index -> channel<tile<32xi32>>
+  pipeline.serial {
+    pipeline.compose @copy_phase(%channel, %first) : (channel<tile<32xi32>>, buffer)
+    pipeline.compose @copy_phase(%channel, %second) : (channel<tile<32xi32>>, buffer)
+    pipeline.compose @copy_phase(%channel, %third) : (channel<tile<32xi32>>, buffer)
+    pipeline.compose @copy_phase(%channel, %fourth) : (channel<tile<32xi32>>, buffer)
   }
 }
 

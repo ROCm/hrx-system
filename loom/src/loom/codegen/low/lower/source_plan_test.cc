@@ -750,6 +750,78 @@ TEST_F(LowLowerSourcePlanTest, ExecutesExpandedControlAfterFactStorageRetires) {
             loom_region_const_block(body, 3));
 }
 
+TEST_F(LowLowerSourcePlanTest, RetainsPhysicalOrderAfterAnalysisRetires) {
+  AddForwardingBlock();
+  policy_.prepare_branch = {};
+  loom_region_t* source_body = loom_func_like_body(function_);
+  loom_block_t* entry = loom_region_entry_block(source_body);
+  loom_block_t* exit = loom_region_block(source_body, 1);
+  loom_block_t* dead = nullptr;
+  loom_block_t* forwarding = nullptr;
+  IREE_ASSERT_OK(loom_region_append_block(module_, source_body, &dead));
+  IREE_ASSERT_OK(loom_region_append_block(module_, source_body, &forwarding));
+
+  // Source storage is entry, exit, dead, forwarding. Reachable control is
+  // entry -> forwarding -> exit; dead must remain after that chain.
+  loom_builder_t builder;
+  loom_builder_initialize(module_, &module_->arena, entry, &builder);
+  loom_op_t* original_branch = entry->last_op;
+  const loom_value_id_t result = loom_cfg_br_args(original_branch).values[0];
+  const loom_type_t type = loom_module_value_type(module_, result);
+  loom_value_id_t argument = LOOM_VALUE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_builder_define_block_arg(&builder, forwarding, type, &argument));
+  IREE_ASSERT_OK(loom_op_erase(module_, original_branch));
+  loom_op_t* branch = nullptr;
+  IREE_ASSERT_OK(loom_cfg_br_build(&builder, forwarding, &result, 1,
+                                   LOOM_LOCATION_UNKNOWN, &branch));
+  loom_builder_set_block(&builder, forwarding);
+  IREE_ASSERT_OK(loom_cfg_br_build(&builder, exit, &argument, 1,
+                                   LOOM_LOCATION_UNKNOWN, &branch));
+  loom_builder_set_block(&builder, dead);
+  const loom_value_id_t input = loom_block_arg_id(entry, 0);
+  loom_op_t* return_op = nullptr;
+  IREE_ASSERT_OK(loom_func_return_build(&builder, &input, 1,
+                                        LOOM_LOCATION_UNKNOWN, &return_op));
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(
+      &fact_table_, &analysis_arena_, module_->values.count));
+  fact_table_.context.target_facts = &target_facts_;
+  IREE_ASSERT_OK(
+      loom_value_fact_table_compute(&fact_table_, module_, function_));
+  observer_.retire_analysis_arena = &analysis_arena_;
+
+  IREE_ASSERT_OK(
+      loom_low_lower_function(module_, function_, &options_, &result_));
+  ASSERT_EQ(result_.error_count, 0u);
+  ASSERT_NE(result_.low_func_op, nullptr);
+  const loom_region_t* body =
+      loom_func_like_body(loom_func_like_cast(module_, result_.low_func_op));
+  ASSERT_EQ(body->block_count, 4u);
+  for (uint16_t i = 0; i < 2; ++i) {
+    const loom_block_t* block = loom_region_const_block(body, i);
+    const loom_block_t* next = loom_region_const_block(body, i + 1);
+    const loom_op_t* terminator = loom_block_const_last_op(block);
+    ASSERT_TRUE(loom_low_br_isa(terminator));
+    EXPECT_EQ(loom_low_br_dest(terminator), next);
+    ASSERT_EQ(loom_low_br_args(terminator).count, 1u);
+    ASSERT_EQ(next->arg_count, 1u);
+    if (i != 0) {
+      EXPECT_EQ(loom_low_br_args(terminator).values[0],
+                loom_block_arg_id(block, 0));
+    }
+  }
+  const loom_block_t* low_exit = loom_region_const_block(body, 2);
+  const loom_op_t* low_return = loom_block_const_last_op(low_exit);
+  ASSERT_TRUE(loom_low_return_isa(low_return));
+  EXPECT_EQ(loom_low_return_values(low_return).values[0],
+            loom_block_arg_id(low_exit, 0));
+  const loom_op_t* dead_return =
+      loom_block_const_last_op(loom_region_const_block(body, 3));
+  ASSERT_TRUE(loom_low_return_isa(dead_return));
+  EXPECT_EQ(loom_low_return_values(dead_return).values[0],
+            loom_block_arg_id(loom_region_const_entry_block(body), 0));
+}
+
 TEST_F(LowLowerSourcePlanTest, RejectsControlPlanWithoutPublishingBlocks) {
   AddForwardingBlock();
   observer_.control.reject = true;

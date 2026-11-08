@@ -359,7 +359,7 @@ iree_status_t loom_aie2p_native_emit_transfers(
        task = task->next) {
     // Short and rarely repeated bodies keep ordinary constant propagation and
     // avoid the call/return, argument moves, and helper alignment overhead.
-    if (task->submit_group && task->submit_group->use_count >= 4) {
+    if (task->submit_group && task->submit_group->use_count >= 3) {
       if (!loom_symbol_ref_is_valid(task->submit_group->function)) {
         IREE_RETURN_IF_ERROR(loom_aie2p_native_dma_submit_helper(
             context, task, true, &task->submit_group->function));

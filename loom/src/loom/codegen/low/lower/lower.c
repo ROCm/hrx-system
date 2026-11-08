@@ -144,7 +144,11 @@ static iree_status_t loom_low_lower_map_blocks(
       (void**)&context->block_map));
   memset(context->block_map, 0, block_count * sizeof(*context->block_map));
 
-  for (uint16_t i = 0; i < source_body->block_count; ++i) {
+  // Keep appended dominators before their consumers in native layout as well
+  // as emission. The retained order preserves source order among siblings.
+  const uint16_t* block_order = context->lowering->source_plan.block_order;
+  for (uint16_t position = 0; position < source_body->block_count; ++position) {
+    const uint16_t i = block_order ? block_order[position] : position;
     loom_block_t* source_block = loom_region_block(source_body, i);
     loom_block_t* low_block = NULL;
     if (i == 0) {

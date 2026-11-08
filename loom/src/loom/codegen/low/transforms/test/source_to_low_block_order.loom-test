@@ -26,13 +26,13 @@ func.def public target(@target) @late_dominator(%input: i32) -> (i32) {
 test.target<low_core> @target
 
 low.func.def public target<test.low.core>(@target) abi(object_function) @late_dominator(%input: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.br ^_bb1
+^_bb1:
   low.br ^_bb2
 ^_bb2:
-  low.br ^_bb3
-^_bb3:
   %value$16 = test.mul.i32 %input, %input
-  low.br ^_bb4(%value$16: reg<test.i32>)
-^_bb4(%value$15: reg<test.i32>):
+  low.br ^_bb3(%value$16: reg<test.i32>)
+^_bb3(%value$15: reg<test.i32>):
   %first = test.const.i32 5
   %factor = test.add.i32 %value$15, %first
   low.br ^consumer(%factor: reg<test.i32>)

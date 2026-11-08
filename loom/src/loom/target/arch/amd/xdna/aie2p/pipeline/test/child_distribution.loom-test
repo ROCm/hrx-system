@@ -116,7 +116,7 @@ low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_25() asm {
   low.br ^_bb1(%begin: reg<aie2p.er>)
 ^_bb1(%phase: reg<aie2p.er>):
   %509 = lt %phase, %count
-  low.cond_br %509, ^_bb2, ^_bb3 : reg<aie2p.er>
+  low.cond_br %509, ^_bb2, ^_bb6 : reg<aie2p.er>
 ^_bb2:
   %input_offset = mul %phase, %bytes
   %output_offset = mul %phase, %output_stride
@@ -166,8 +166,45 @@ low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_25() asm {
   mov.ms %403
   mov.ms %243
   mov.ms.last %capacity
-  low.br ^_bb4(%begin: reg<aie2p.er>)
-^_bb3:
+  low.br ^_bb3(%begin: reg<aie2p.er>)
+^_bb3(%record$502: reg<aie2p.er>):
+  %516 = lt %record$502, %400
+  low.cond_br %516, ^_bb4, ^_bb5 : reg<aie2p.er>
+^_bb4:
+  acq %234, 49
+  %value$517 = lda %194, 0
+  %result$518 = add.nc %value$517, %capacity
+  st %result$518, %194, 0
+  %relative$519 = mul %record$502, %bytes
+  %offset = add.nc %output_offset, %relative$519
+  %215 = mov.local-address 458768
+  %216 = lda %215, 0
+  %217 = lda %215, 4
+  %218 = add.rr %216, %offset
+  %219 = ltu %218, %216
+  %220 = add.rr %217, %219
+  mov.ms %capacity
+  mov.ms %203
+  mov.ms %218
+  mov.ms.last %220
+  %226 = mov.i32 -2147364348
+  mov.ms %capacity
+  mov.ms %226
+  mov.ms.last %403
+  %228 = mov.i32 122388
+  mov.ms %400
+  mov.ms %228
+  mov.ms.last %capacity
+  %229 = mov.ss
+  rel %capacity, 48
+  %521 = add.nc %record$502, %capacity
+  low.br ^_bb3(%521: reg<aie2p.er>)
+^_bb5:
+  low.func.call @__aie2p_worker_helper_20() : ()
+  low.func.call @__aie2p_worker_helper_21() : ()
+  %522 = add.nc %phase, %capacity
+  low.br ^_bb1(%522: reg<aie2p.er>)
+^_bb6:
   %374 = mov.i32 65536
   %375 = mov.short 2
   %376 = mov.i32 -2147361276
@@ -215,43 +252,6 @@ low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_25() asm {
   mov.ms %303
   mov.ms.last %capacity
   low.br ^_bb7(%begin: reg<aie2p.er>)
-^_bb4(%record$502: reg<aie2p.er>):
-  %516 = lt %record$502, %400
-  low.cond_br %516, ^_bb5, ^_bb6 : reg<aie2p.er>
-^_bb5:
-  acq %234, 49
-  %value$517 = lda %194, 0
-  %result$518 = add.nc %value$517, %capacity
-  st %result$518, %194, 0
-  %relative$519 = mul %record$502, %bytes
-  %offset = add.nc %output_offset, %relative$519
-  %215 = mov.local-address 458768
-  %216 = lda %215, 0
-  %217 = lda %215, 4
-  %218 = add.rr %216, %offset
-  %219 = ltu %218, %216
-  %220 = add.rr %217, %219
-  mov.ms %capacity
-  mov.ms %203
-  mov.ms %218
-  mov.ms.last %220
-  %226 = mov.i32 -2147364348
-  mov.ms %capacity
-  mov.ms %226
-  mov.ms.last %403
-  %228 = mov.i32 122388
-  mov.ms %400
-  mov.ms %228
-  mov.ms.last %capacity
-  %229 = mov.ss
-  rel %capacity, 48
-  %521 = add.nc %record$502, %capacity
-  low.br ^_bb4(%521: reg<aie2p.er>)
-^_bb6:
-  low.func.call @__aie2p_worker_helper_20() : ()
-  low.func.call @__aie2p_worker_helper_21() : ()
-  %522 = add.nc %phase, %capacity
-  low.br ^_bb1(%522: reg<aie2p.er>)
 ^_bb7(%record$503: reg<aie2p.er>):
   %528 = lt %record$503, %375
   low.cond_br %528, ^_bb8, ^_bb9 : reg<aie2p.er>

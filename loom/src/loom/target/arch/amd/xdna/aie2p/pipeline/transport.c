@@ -1197,8 +1197,8 @@ static iree_status_t loom_aie2p_native_reserve_transfer_bindings(
 
 // Final descriptor policies define the submission signature. A local
 // descriptor already proves matching routes, geometry, and local patch words.
-// Retain each source worker's sharing group once; different worker occurrences
-// may borrow the descriptor but do not prove repeated code in one body.
+// Its physical core owns the complete program, including ordered occurrences
+// that reuse the endpoint after the preceding phase has retired.
 static iree_status_t loom_aie2p_native_group_submissions(
     loom_aie2p_native_context_t* context, iree_host_size_t worker_count) {
   iree_status_t status = iree_ok_status();
@@ -1227,12 +1227,12 @@ static iree_status_t loom_aie2p_native_group_submissions(
       }
       loom_aie2p_native_dma_submit_t* group =
           task->local_descriptor->submit_group;
-      if (!group || group->worker != i) {
+      if (!group) {
         status = iree_arena_allocate(context->pass->arena, sizeof(*group),
                                      (void**)&group);
         if (iree_status_is_ok(status)) {
-          *group = (loom_aie2p_native_dma_submit_t){
-              .worker = i, .function = loom_symbol_ref_null()};
+          *group = (loom_aie2p_native_dma_submit_t){.function =
+                                                        loom_symbol_ref_null()};
           task->local_descriptor->submit_group = group;
         }
       }
