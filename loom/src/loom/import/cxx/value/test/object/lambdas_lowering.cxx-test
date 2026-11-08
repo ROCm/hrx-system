@@ -1,0 +1,70 @@
+// RUN: pass inline-callables,promote-private-fragments,canonicalize,cse,dce
+// Built-in pointer uses and a by-value overload become value reads only after
+// the generic call operator's dependent operands have concrete types.
+template<class Index>
+[[loom::inline]] static int read_value(const int* input, Index index) { return input[index]; }
+
+int dependent_operations(const int* input, int index) {
+  auto read = [&](auto step) {
+    const int* next = input + step;
+    const int* previous = input - step;
+    return step[input] + *next + *previous + read_value(input, step);
+  };
+  return read(index) + read(static_cast<long>(index));
+}
+
+// ----
+func.def public @dependent_operations(%input: buffer, %input_byte_offset: offset, %index: i32) -> (i32) {
+  %12 = scalar.extsi %index : i32 to i64
+  %114 = scalar.constant 2 : i64
+  %115 = scalar.shli %12, %114 : i64
+  %15 = index.cast %input_byte_offset : offset to i64
+  %16 = scalar.addi %15, %115 : i64
+  %17 = scalar.assume %16 [range(%16, 0, 9223372036854775807)] : i64
+  %next_byte_offset = index.cast %17 : i64 to offset
+  %23 = scalar.subi %15, %115 : i64
+  %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
+  %previous_byte_offset = index.cast %24 : i64 to offset
+  %33 = buffer.view %input[%next_byte_offset] : buffer -> view<1xi32>
+  %34 = view.load %33[0] : view<1xi32> -> i32
+  %37 = scalar.addi %34, %34 : i32
+  %38 = buffer.view %input[%previous_byte_offset] : buffer -> view<1xi32>
+  %39 = view.load %38[0] : view<1xi32> -> i32
+  %40 = scalar.addi %37, %39 : i32
+  %42 = scalar.addi %40, %34 : i32
+  %7 = scalar.addi %42, %42 : i32
+  func.return %7 : i32
+}
+
+// ====
+// Discarded identity uses do not constrain the instantiated operator. Copying
+// or forwarding the closure preserves the same selected capture fields.
+template<bool Mutates> struct Mode { static constexpr bool mutates = Mutates; };
+template<class Function>
+[[loom::inline]] static int copied_call(Function function, int index) { return function(index); }
+
+int discarded_mutation(const int* input, int index) {
+  auto selected = [&](auto mode) {
+    if constexpr (decltype(mode)::mutates) { ++input; }
+    return input[index];
+  };
+  auto read = [&](auto step) {
+    return [input, step] { return input[step]; }();
+  };
+  return selected(Mode<false>{}) + copied_call(read, index);
+}
+
+// ----
+func.def public @discarded_mutation(%input: buffer, %input_byte_offset: offset, %index: i32) -> (i32) {
+  %19 = scalar.extsi %index : i32 to i64
+  %53 = scalar.constant 2 : i64
+  %54 = scalar.shli %19, %53 : i64
+  %22 = index.cast %input_byte_offset : offset to i64
+  %23 = scalar.addi %22, %54 : i64
+  %24 = scalar.assume %23 [range(%23, 0, 9223372036854775807)] : i64
+  %25 = index.cast %24 : i64 to offset
+  %26 = buffer.view %input[%25] : buffer -> view<1xi32>
+  %27 = view.load %26[0] : view<1xi32> -> i32
+  %11 = scalar.addi %27, %27 : i32
+  func.return %11 : i32
+}

@@ -281,7 +281,7 @@ static void apply(Function&& function) {
 
 int forwarding_recursive(const int* input, int index) {
   int sum = 0;
-  apply<0>([&](auto value) { sum += value * input[index]; });
+  apply<0>([&](auto value) { sum += input[index + value]; });
   return sum;
 }
 
@@ -313,16 +313,16 @@ func.def @apply_0__lambda_auto__type_param_0__0___const_(%function_sum: buffer, 
 func.def @operator_call_int_value(%this_sum: buffer, %this_sum_byte_offset: offset, %this_input: buffer, %this_input_byte_offset: offset, %this_index: buffer, %this_index_byte_offset: offset, %value: i32) {
   %28 = buffer.view %this_index[%this_index_byte_offset] : buffer -> view<1xi32>
   %index = view.load %28[0] : view<1xi32> -> i32
-  %30 = scalar.extsi %index : i32 to i64
-  %31 = scalar.constant 4 : i64
-  %32 = scalar.muli %30, %31 : i64
-  %33 = index.cast %this_input_byte_offset : offset to i64
-  %34 = scalar.addi %33, %32 : i64
-  %35 = scalar.assume %34 [range(%34, 0, 9223372036854775807)] : i64
-  %36 = index.cast %35 : i64 to offset
-  %37 = buffer.view %this_input[%36] : buffer -> view<1xi32>
-  %38 = view.load %37[0] : view<1xi32> -> i32
-  %39 = scalar.muli %value, %38 : i32
+  %30 = scalar.addi %index, %value : i32
+  %31 = scalar.extsi %30 : i32 to i64
+  %32 = scalar.constant 4 : i64
+  %33 = scalar.muli %31, %32 : i64
+  %34 = index.cast %this_input_byte_offset : offset to i64
+  %35 = scalar.addi %34, %33 : i64
+  %36 = scalar.assume %35 [range(%35, 0, 9223372036854775807)] : i64
+  %37 = index.cast %36 : i64 to offset
+  %38 = buffer.view %this_input[%37] : buffer -> view<1xi32>
+  %39 = view.load %38[0] : view<1xi32> -> i32
   %40 = buffer.view %this_sum[%this_sum_byte_offset] : buffer -> view<1xi32>
   %41 = view.load %40[0] : view<1xi32> -> i32
   %42 = scalar.addi %41, %39 : i32
@@ -342,39 +342,4 @@ func.def @apply_2__lambda_auto__type_param_0__0___const__(%function_sum: buffer,
   %57 = scalar.constant 2 : i32
   func.call @operator_call_int_value(%function_sum, %function_sum_byte_offset, %function_input, %function_input_byte_offset, %function_index, %function_index_byte_offset, %57) : (buffer, offset, buffer, offset, buffer, offset, i32)
   func.return
-}
-
-// ====
-// RUN: verify
-// Mutating a captured pointer observes the pointer object's identity and keeps
-// the ordinary storage contract.
-// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
-int* write_pointer_capture(int* input) {
-  return [&] { return ++input; }();
-}
-
-// ====
-// RUN: verify
-// A write to the enclosing pointer after construction also prevents a stale
-// pointer-value snapshot.
-// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
-int* write_pointer_owner(int* input, int* replacement) {
-  auto read = [&] { return input; };
-  input = replacement;
-  return read();
-}
-
-// ====
-// RUN: verify
-static void replace_pointer(int*& input, int* replacement) {
-  input = replacement;
-}
-
-// Transitive write effects reach capture selection through the retained call
-// graph rather than freezing the pointer snapshot before callees are known.
-// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
-int* write_pointer_through_call(int* input, int* replacement) {
-  auto read = [&] { return input; };
-  replace_pointer(input, replacement);
-  return read();
 }

@@ -362,6 +362,14 @@ void Functions::analyze(Types& types) {
                      analyzed_calls);
   }
 
+  // Every reached specialization contributes its resolved capture uses once.
+  // The primary generic body does not yet contain the conversions that
+  // distinguish a pointer-value read from a reference to the pointer object.
+  std::unordered_set<cxx::FieldSymbol*> capture_identities;
+  for (const auto& analyzed : analyzed_functions) {
+    analyzed.second->collect_pointer_capture_identities(capture_identities);
+  }
+
   std::unordered_map<ControlFlow*, std::vector<size_t>> incident_calls;
   std::deque<size_t> pending_calls;
   std::vector<bool> queued(analyzed_calls.size(), true);
@@ -411,7 +419,7 @@ void Functions::analyze(Types& types) {
     bool changed = false;
     for (const auto& analyzed : analyzed_functions) {
       auto* analysis = analyzed.second;
-      if (analysis->resolve_pointer_reference_captures()) {
+      if (analysis->resolve_pointer_reference_captures(capture_identities)) {
         changed = true;
         enqueue_incident(analysis);
       }
