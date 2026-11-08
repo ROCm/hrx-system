@@ -767,7 +767,7 @@ typedef struct loom_runtime_weight_stream_window_t {
 } loom_runtime_weight_stream_window_t;
 
 static void loom_runtime_weight_stream_fail(loom_runtime_weight_stream_t* job,
-                                          iree_status_t status) {
+                                            iree_status_t status) {
   // Failed readiness stops refills. Accepted I/O still owns its tracked views
   // until actual retirement, independently of these terminal notifications.
   for (iree_host_size_t i = 0; i < job->lane_count; ++i) {
@@ -780,7 +780,8 @@ static void loom_runtime_weight_stream_fail(loom_runtime_weight_stream_t* job,
   }
 }
 
-static void loom_runtime_weight_stream_release(loom_runtime_weight_stream_t* job) {
+static void loom_runtime_weight_stream_release(
+    loom_runtime_weight_stream_t* job) {
   if (!job) {
     return;
   }
@@ -821,8 +822,8 @@ static iree_status_t loom_runtime_weight_stream_flush(
 }
 
 static iree_status_t loom_runtime_weight_stream_source(
-    loom_runtime_weight_stream_t* job, loom_runtime_weight_stream_window_t* window,
-    uint32_t source) {
+    loom_runtime_weight_stream_t* job,
+    loom_runtime_weight_stream_window_t* window, uint32_t source) {
   if (window->source != source) {
     IREE_RETURN_IF_ERROR(loom_runtime_weight_stream_flush(job, window));
     window->source = source;
@@ -866,7 +867,8 @@ static iree_status_t loom_runtime_weight_stream_direct(
   read->wait_values[0] += lane->fragment_index / WEIGHT_STREAM_WINDOW;
   read->signal_value = read->wait_values[0] + 1;
   window->gathers[index] = (iree_io_parameter_gather_t){
-      .target_buffer = group->target ? group->target : job->views[group->storage_index],
+      .target_buffer =
+          group->target ? group->target : job->views[group->storage_index],
       .count = count,
       .enumerator = {loom_runtime_weight_enumerate, read},
       .wait_semaphore_list = {read->waits[1] ? 2 : 1, read->waits,
@@ -1090,7 +1092,7 @@ static void loom_runtime_weight_stream_ready(
   loom_runtime_weight_stream_lane_t* lane = user_data;
   lane->status = status;
   lane->windows[0] = lane->windows[1];
-  lane->window_count = 1;
+  --lane->window_count;
   loomc_task_initialize(&weight_stream_vtable, &lane->task);
   status = iree_status_from_loomc(
       loomc_task_sink_submit(lane->stream->weights->sink, &lane->task));
@@ -1217,7 +1219,9 @@ static iree_status_t loom_runtime_weight_stream(
                                "physical pool cannot back model parameters");
         }
         if (iree_status_is_ok(status)) {
-          group->operation = weights->activation.backing[weights->activation.backing_count - 1];
+          group->operation =
+              weights->activation
+                  .backing[weights->activation.backing_count - 1];
         }
       }
     }
@@ -1233,7 +1237,9 @@ static iree_status_t loom_runtime_weight_stream(
           weights->pool ? group->mapped : weights->activation.backing_ready;
       for (iree_host_size_t r = group->read_begin; r < group->read_end; ++r) {
         loom_runtime_weight_direct_read_t* read = &plan->reads[r];
-        read->target_offset = weights->pool ? plan->groups[group->mapping_group].backing.offset : 0;
+        read->target_offset =
+            weights->pool ? plan->groups[group->mapping_group].backing.offset
+                          : 0;
         read->waits[0] = lanes[lane];
         read->wait_values[0] = frontiers[lane];
         read->waits[1] = mapped;

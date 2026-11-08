@@ -268,12 +268,6 @@ typedef struct iree_hal_virtual_buffer_t {
   uint64_t source_native_type_mask;
   // Scope-indexed native projections; INVALID for excluded sites and ANY.
   const uint32_t* projections;
-  // Additional immutable native qualification at one contributing source
-  // site. NULL when the common source contract describes every requirement.
-  // Called only during cold admission, never to inspect installed mappings.
-  bool (*source_is_compatible)(const struct iree_hal_virtual_buffer_t* target,
-                               const iree_hal_memory_contract_t* source,
-                               uint32_t scope_id);
 } iree_hal_virtual_buffer_t;
 
 // Borrowed mapping target after a view's allocation prerequisites complete.

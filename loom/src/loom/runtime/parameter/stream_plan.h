@@ -6,9 +6,9 @@
 #ifndef LOOM_RUNTIME_PARAMETER_STREAM_PLAN_H_
 #define LOOM_RUNTIME_PARAMETER_STREAM_PLAN_H_
 
+#include "loom/runtime/command/program.h"
 #include "loom/runtime/parameter/inputs.h"
 #include "loom/runtime/storage/memory.h"
-#include "loom/runtime/command/program.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -122,7 +122,8 @@ typedef struct loom_runtime_weight_storage_t {
 // allocation failure. No device operations are submitted by this planner.
 iree_status_t loom_runtime_weight_stream_plan_initialize(
     iree_host_size_t span_count, const loom_runtime_weight_span_t* spans,
-    iree_host_size_t storage_count, const loom_runtime_weight_storage_t* storages,
+    iree_host_size_t storage_count,
+    const loom_runtime_weight_storage_t* storages,
     const loom_runtime_weight_inputs_t* inputs, bool elastic,
     iree_allocator_t allocator, loom_runtime_weight_stream_plan_t* out_plan);
 

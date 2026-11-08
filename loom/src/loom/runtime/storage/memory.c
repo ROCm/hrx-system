@@ -1461,11 +1461,14 @@ static void loom_runtime_memory_operation_enqueue(
         .operation = operation->releasing
                          ? IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND
                          : IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
-        .previous_source = operation->releasing
-            ? loom_runtime_backing_pages_buffer((loom_runtime_backing_slot_t){
-                  edit->result.physical, edit->result.physical_offset})
-            : NULL,
-        .previous_source_offset = operation->releasing ? edit->result.physical_offset : 0,
+        .previous_source =
+            operation->releasing
+                ? loom_runtime_backing_pages_buffer(
+                      (loom_runtime_backing_slot_t){
+                          edit->result.physical, edit->result.physical_offset})
+                : NULL,
+        .previous_source_offset =
+            operation->releasing ? edit->result.physical_offset : 0,
     };
     if (operation->growing) {
       operation->mappings[i].source =
@@ -1515,7 +1518,8 @@ static void loom_runtime_memory_operation_enqueue(
     for (iree_host_size_t i = 0; i < operation->count; ++i) {
       operation->mappings[i].target = operation->growing->previous_handle;
       operation->mappings[i].previous_source = operation->mappings[i].source;
-      operation->mappings[i].previous_source_offset = operation->mappings[i].source_offset;
+      operation->mappings[i].previous_source_offset =
+          operation->mappings[i].source_offset;
       operation->mappings[i].source = NULL;
       operation->mappings[i].source_offset = 0;
       operation->mappings[i].access = IREE_HAL_MEMORY_ACCESS_NONE;

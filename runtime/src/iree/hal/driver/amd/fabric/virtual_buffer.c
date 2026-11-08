@@ -51,101 +51,6 @@ typedef struct iree_hal_amd_fabric_virtual_buffer_t {
   iree_hal_buffer_backing_facts_t backing;
 } iree_hal_amd_fabric_virtual_buffer_t;
 
-// Copy execution needs the common protocol of the declared source classes,
-// independent of which source allocations happen to be installed now.
-static iree_status_t iree_hal_amd_fabric_virtual_buffer_copy_protocols(
-    iree_hal_virtual_buffer_sources_t sources,
-    iree_hal_memory_contract_t* contract) {
-  contract->backend_type = IREE_HAL_MEMORY_BACKEND_AMDF;
-  bool has_copy = false;
-  for (iree_host_size_t i = 0; i < sources.pool_count; ++i) {
-    const iree_hal_memory_contract_t* source =
-        sources.pools[i]->memory_contract;
-    has_copy |= source->backend_type == IREE_HAL_MEMORY_BACKEND_AMDF &&
-                source->backend_data;
-  }
-  if (!has_copy) {
-    return iree_ok_status();
-  }
-  iree_hal_amd_fabric_memory_copy_protocol_t* protocols = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array_uninitialized(
-      contract->host_allocator, contract->scope_count, sizeof(*protocols),
-      (void**)&protocols));
-  contract->backend_data = protocols;
-  const iree_hal_memory_effects_t unsupported = {
-      IREE_HAL_MEMORY_EFFECT_UNSUPPORTED};
-  for (uint32_t id = 0; id < contract->scope_count; ++id) {
-    iree_hal_amd_fabric_memory_copy_protocol_t result = {0};
-    bool contributed = false;
-    for (iree_host_size_t i = 0; i < sources.pool_count; ++i) {
-      const iree_hal_memory_contract_t* source =
-          sources.pools[i]->memory_contract;
-      if (!iree_any_bit_set(source->scopes[id].interfaces,
-                            1u << IREE_HAL_BUFFER_INTERFACE_MAPPING_SOURCE)) {
-        continue;
-      }
-      contributed = true;
-      if (source->backend_type != IREE_HAL_MEMORY_BACKEND_AMDF ||
-          !source->backend_data) {
-        result = (iree_hal_amd_fabric_memory_copy_protocol_t){
-            .begin = {unsupported, unsupported},
-            .end = {unsupported, unsupported}};
-        break;
-      }
-      const iree_hal_amd_fabric_memory_copy_protocol_t* value =
-          (const iree_hal_amd_fabric_memory_copy_protocol_t*)
-              source->backend_data +
-          id;
-      result.begin.release.bits |= value->begin.release.bits;
-      result.begin.acquire.bits |= value->begin.acquire.bits;
-      result.end.release.bits |= value->end.release.bits;
-      result.end.acquire.bits |= value->end.acquire.bits;
-    }
-    protocols[id] = contributed ? result
-                                : (iree_hal_amd_fabric_memory_copy_protocol_t){
-                                      .begin = {unsupported, unsupported},
-                                      .end = {unsupported, unsupported}};
-  }
-  return iree_ok_status();
-}
-
-static bool iree_hal_amd_fabric_virtual_buffer_source_is_compatible(
-    const iree_hal_virtual_buffer_t* target,
-    const iree_hal_memory_contract_t* source, uint32_t id) {
-  const iree_hal_memory_contract_t* contract = target->buffer.memory.contract;
-  if (!contract->backend_data) {
-    return true;
-  }
-  const iree_hal_amd_fabric_memory_copy_protocol_t* required =
-      (const iree_hal_amd_fabric_memory_copy_protocol_t*)
-          contract->backend_data +
-      id;
-  const iree_hal_memory_effects_t unsupported = {
-      IREE_HAL_MEMORY_EFFECT_UNSUPPORTED};
-  const iree_hal_amd_fabric_memory_copy_protocol_t absent = {
-      .begin = {unsupported, unsupported}, .end = {unsupported, unsupported}};
-  const iree_hal_amd_fabric_memory_copy_protocol_t* candidate =
-      source->backend_type == IREE_HAL_MEMORY_BACKEND_AMDF &&
-              source->backend_data
-          ? (const iree_hal_amd_fabric_memory_copy_protocol_t*)
-                    source->backend_data +
-                id
-          : &absent;
-  const iree_hal_memory_effects_t requirements[] = {
-      required->begin.release, required->begin.acquire, required->end.release,
-      required->end.acquire};
-  const iree_hal_memory_effects_t candidates[] = {
-      candidate->begin.release, candidate->begin.acquire,
-      candidate->end.release, candidate->end.acquire};
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(requirements); ++i) {
-    if (iree_hal_memory_effects_is_supported(requirements[i]) &&
-        (candidates[i].bits & ~requirements[i].bits)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 static void iree_hal_amd_fabric_virtual_buffer_destroy(
     iree_hal_buffer_t* base) {
   IREE_TRACE_ZONE_BEGIN(z0);
@@ -636,10 +541,6 @@ static iree_status_t iree_hal_amd_fabric_virtual_buffer_prepare(
     status = iree_hal_virtual_buffer_initialize_contract(
         scope, sources, IREE_HAL_MEMORY_BACKEND_AMDF, 0, contract,
         &capabilities);
-    if (iree_status_is_ok(status) && capabilities.max_byte_length) {
-      status =
-          iree_hal_amd_fabric_virtual_buffer_copy_protocols(sources, contract);
-    }
     // A replaceable range has no single physical CP recipe. GPU queues use
     // their fixed shader recipe, which must cover every declared source even
     // when different sources offer additional CP-only queue operations.
@@ -842,8 +743,6 @@ iree_status_t iree_hal_amd_fabric_virtual_buffer_create(
         &reservation->base);
     reservation->base.projection_count = projection_count;
     reservation->base.projections = reservation->projections;
-    reservation->base.source_is_compatible =
-        iree_hal_amd_fabric_virtual_buffer_source_is_compatible;
     *out_buffer = &reservation->base.buffer;
   } else {
     if (reservation->host_mapping) {

@@ -2244,5 +2244,4 @@ TEST_F(MemoryTest, FailedArenaEditRequiresOwnerDetachBeforeRangeRelease) {
   EXPECT_EQ(statistics[1].committed_bytes, 0u);
 }
 
-
 }  // namespace

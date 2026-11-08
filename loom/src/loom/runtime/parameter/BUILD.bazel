@@ -202,8 +202,8 @@ loom_cc_library(
     hdrs = ["stream_plan.h"],
     deps = [
         ":inputs",
-        "//loom/src/loom/runtime/storage:memory",
         "//loom/src/loom/runtime/command:program",
+        "//loom/src/loom/runtime/storage:memory",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:parameter_provider",

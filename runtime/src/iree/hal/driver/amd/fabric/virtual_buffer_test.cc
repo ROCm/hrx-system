@@ -66,68 +66,6 @@ class VirtualBufferContractTest : public MemoryBackendTest {
   std::array<iree_hal_pool_family_access_t, 3> accesses_ = {};
 };
 
-TEST_F(VirtualBufferContractTest,
-       CopyProtocolSurvivesSourcesAndConstrainsAdmission) {
-  constexpr uint32_t kCopyFamily = 97;
-  native_families_[0].copy_family_ordinal = kCopyFamily;
-  native_.copy_family_ordinals[0] = kCopyFamily;
-  iree_hal_pool_t* coherent = nullptr;
-  IREE_ASSERT_OK(CreateSource(&coherent));
-  const iree_hal_virtual_buffer_options_t options = {.byte_length = 4096};
-  iree_hal_buffer_t* target = nullptr;
-  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(group_, Scope(), {1, &coherent},
-                                                &options, allocator_, &target));
-  const auto gpu = ResolveScope(IREE_HAL_MEMORY_SITE_QUEUE, families_[0]);
-  const auto* protocols =
-      static_cast<const iree_hal_amd_fabric_memory_copy_protocol_t*>(
-          target->memory.contract->backend_data);
-  ASSERT_NE(protocols, nullptr);
-  EXPECT_EQ(protocols[gpu.id].begin.release.bits, 0u);
-  EXPECT_EQ(protocols[gpu.id].end.acquire.bits, 0u);
-  native_.api.memory_scope_query_pair_info =
-      [](amdf_memory_scope_t* scope,
-         const amdf_memory_profile_pair_query_t* query,
-         amdf_memory_pair_info_t* info) -> amdf_status_t {
-    const auto status =
-        FakeNative::MemoryScopeQueryPairInfo(scope, query, info);
-    if (amdf_status_is_ok(status) &&
-        query->producer.kind == AMDF_MEMORY_SITE_KIND_DEVICE &&
-        query->consumer.kind == AMDF_MEMORY_SITE_KIND_DEVICE &&
-        query->consumer.value.device.queue_family_ordinal == kCopyFamily) {
-      info->release = {
-          .kind = AMDF_CACHE_TRANSITION_KIND_GLOBAL,
-          .executor = AMDF_CACHE_TRANSITION_EXECUTOR_QUEUE,
-          .operation = AMDF_CACHE_OPERATION_RELEASE_TO_SYSTEM,
-      };
-    }
-    return status;
-  };
-  iree_hal_pool_t* cached = nullptr;
-  IREE_ASSERT_OK(CreateSource(&cached));
-  EXPECT_FALSE(
-      iree_hal_virtual_buffer_query_pool_compatibility(target, gpu, cached));
-  iree_hal_pool_t* sources[] = {coherent, cached};
-  iree_hal_buffer_t* joined = nullptr;
-  IREE_ASSERT_OK(iree_hal_virtual_buffer_create(group_, Scope(), {2, sources},
-                                                &options, allocator_, &joined));
-  for (auto* source : sources) {
-    EXPECT_TRUE(
-        iree_hal_virtual_buffer_query_pool_compatibility(joined, gpu, source));
-    iree_hal_pool_release(source);
-  }
-  const int queries = native_.pair_query_count;
-  const auto* joined_protocols =
-      static_cast<const iree_hal_amd_fabric_memory_copy_protocol_t*>(
-          joined->memory.contract->backend_data);
-  EXPECT_EQ(joined_protocols[gpu.id].begin.release.bits,
-            IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM);
-  EXPECT_EQ(protocols[gpu.id].begin.release.bits, 0u);
-  EXPECT_EQ(native_.pair_query_count, queries);
-  EXPECT_EQ(native_.create_count, 0);
-  iree_hal_buffer_release(joined);
-  iree_hal_buffer_release(target);
-}
-
 TEST_F(VirtualBufferContractTest, AtomicsIntersectSourcesAtEachExecutionSite) {
   std::array<iree_hal_pool_t*, 2> sources = {};
   IREE_ASSERT_OK(CreateSource(&sources[0]));

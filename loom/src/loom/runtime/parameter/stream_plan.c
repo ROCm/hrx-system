@@ -36,8 +36,8 @@ static iree_host_size_t loom_runtime_weight_plan_fragments(
         const loom_runtime_weight_input_t* input =
             loom_runtime_weight_inputs_at(inputs, span->inputs.first + p);
         fragment = (loom_runtime_weight_fragment_t){.key = input->entry->key,
-                                                  .range = input->span,
-                                                  .source = input->source};
+                                                    .range = input->span,
+                                                    .source = input->source};
         fragment.range.buffer_offset += span->parameter.byte_offset;
       }
       iree_host_size_t begin = plan->spans[i].begin;
@@ -81,7 +81,7 @@ static iree_host_size_t loom_runtime_weight_plan_fragments(
 }
 
 static int loom_runtime_weight_compare_fragments(const void* lhs,
-                                               const void* rhs) {
+                                                 const void* rhs) {
   const loom_runtime_weight_fragment_t* a = lhs;
   const loom_runtime_weight_fragment_t* b = rhs;
   if (a->source != b->source) {
@@ -97,7 +97,8 @@ static int loom_runtime_weight_compare_fragments(const void* lhs,
 // rescanning.
 iree_status_t loom_runtime_weight_stream_plan_initialize(
     iree_host_size_t span_count, const loom_runtime_weight_span_t* spans,
-    iree_host_size_t storage_count, const loom_runtime_weight_storage_t* storages,
+    iree_host_size_t storage_count,
+    const loom_runtime_weight_storage_t* storages,
     const loom_runtime_weight_inputs_t* inputs, bool elastic,
     iree_allocator_t allocator, loom_runtime_weight_stream_plan_t* plan) {
   *plan = (loom_runtime_weight_stream_plan_t){0};
@@ -116,7 +117,8 @@ iree_status_t loom_runtime_weight_stream_plan_initialize(
         const iree_device_size_t length = iree_hal_buffer_byte_length(
             loom_runtime_virtual_buffer_handle(reservation));
         plan->group_count +=
-            (length - 1) / loom_runtime_weight_read_window_size(reservation) + 1;
+            (length - 1) / loom_runtime_weight_read_window_size(reservation) +
+            1;
         plan->backing_count +=
             loom_runtime_virtual_buffer_slab_count(reservation);
       }
@@ -201,7 +203,7 @@ iree_status_t loom_runtime_weight_stream_plan_initialize(
       plan->groups[i].count = 0;
     }
     loom_runtime_weight_plan_fragments(span_count, spans, storages, inputs,
-                                     elastic, plan);
+                                       elastic, plan);
     for (iree_host_size_t i = 0; i < plan->group_count; ++i) {
       loom_runtime_weight_group_t* group = &plan->groups[i];
       if (group->count > 1) {

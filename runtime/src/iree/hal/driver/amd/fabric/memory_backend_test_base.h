@@ -291,10 +291,8 @@ struct FakeNative {
     if (site.kind == AMDF_MEMORY_SITE_KIND_DEVICE) {
       const auto* device =
           reinterpret_cast<const Device*>(query->accesses[ordinal].device);
-      EXPECT_TRUE(site.value.device.queue_family_ordinal ==
-                      device->owner->queue_family_ordinals[device->ordinal] ||
-                  site.value.device.queue_family_ordinal ==
-                      device->owner->copy_family_ordinals[device->ordinal]);
+      EXPECT_EQ(site.value.device.queue_family_ordinal,
+                device->owner->queue_family_ordinals[device->ordinal]);
     }
   }
 
@@ -929,8 +927,6 @@ struct FakeNative {
   bool attachment_atomics_supported = true;
   // Exact native family ordinal for each canonical device.
   std::array<uint32_t, 2> queue_family_ordinals = {11, 22};
-  // Optional native copy families, separate from ordinary queue controls.
-  std::array<uint32_t, 2> copy_family_ordinals = {UINT32_MAX, UINT32_MAX};
   // Exact interface required by each engine for the shared backing.
   std::array<amdf_memory_address_kinds_t, 2> address_kinds = {
       UINT64_C(1) << AMDF_MEMORY_ADDRESS_XDNA_DMA,
@@ -1050,7 +1046,6 @@ class MemoryBackendTest : public ::testing::Test {
       native_families_[i].minimum_access =
           AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
       native_families_[i].host_usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
-      native_families_[i].copy_family_ordinal = UINT32_MAX;
       native_families_[i].binding_count = 1;
       native_families_[i].bindings = &binding_descriptions_[i];
       storage_[i][0] = {
