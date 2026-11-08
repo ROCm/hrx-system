@@ -15,6 +15,7 @@
 #include <windows.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -29,7 +30,7 @@ using Microsoft::WRL::ComPtr;
 #include "util/wait.h"
 
 namespace {
-constexpr uint64_t kByteLength = 65536;
+constexpr uint64_t kMinimumByteLength = 65536;
 constexpr uint64_t kSourceOffset = 4096;
 constexpr uint64_t kDestinationOffset = 8192;
 constexpr uint32_t kWordCount = 128;
@@ -150,7 +151,7 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     heap.VisibleNodeMask = 1;
     D3D12_RESOURCE_DESC buffer = {};
     buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    buffer.Width = kByteLength;
+    buffer.Width = byte_length_;
     buffer.Height = 1;
     buffer.DepthOrArraySize = 1;
     buffer.MipLevels = 1;
@@ -187,7 +188,7 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     ASSERT_EQ(api_->memory_query_info(imported_memory_, &info), AMDF_STATUS_OK);
     ASSERT_EQ(info.source_byte_offset, source_byte_offset);
     ASSERT_EQ(info.byte_length, byte_length);
-    ASSERT_GE(info.native_allocation_byte_length, kByteLength);
+    ASSERT_GE(info.native_allocation_byte_length, byte_length_);
     ASSERT_EQ(api_->memory_query_address(imported_memory_, 0,
                                          AMDF_MEMORY_ADDRESS_GPU, &address_),
               AMDF_STATUS_OK);
@@ -221,7 +222,7 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
                                         ? D3D12_RESOURCE_STATE_COPY_SOURCE
                                         : D3D12_RESOURCE_STATE_COPY_DEST;
     commands->ResourceBarrier(1, &barrier);
-    commands->CopyBufferRegion(destination, 0, source, 0, kByteLength);
+    commands->CopyBufferRegion(destination, 0, source, 0, byte_length_);
     std::swap(barrier.Transition.StateBefore, barrier.Transition.StateAfter);
     commands->ResourceBarrier(1, &barrier);
     ASSERT_TRUE(SUCCEEDED(commands->Close()));
@@ -437,7 +438,7 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     ASSERT_TRUE(SUCCEEDED(opened)) << std::hex << opened;
     const auto description = buffer_->GetDesc();
     ASSERT_EQ(description.Dimension, D3D12_RESOURCE_DIMENSION_BUFFER);
-    ASSERT_EQ(description.Width, kByteLength);
+    ASSERT_EQ(description.Width, byte_length_);
   }
 
   void RunRoundTrip(uint32_t family_ordinal) {
@@ -450,7 +451,7 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     ComPtr<ID3D12Resource> readback;
     ASSERT_NO_FATAL_FAILURE(CreateStaging(D3D12_HEAP_TYPE_UPLOAD, &upload));
     ASSERT_NO_FATAL_FAILURE(CreateStaging(D3D12_HEAP_TYPE_READBACK, &readback));
-    std::vector<uint32_t> expected(kByteLength / 4);
+    std::vector<uint32_t> expected(byte_length_ / 4);
     for (uint32_t generation = 1; generation <= 8; ++generation) {
       for (size_t i = 0; i < expected.size(); ++i) {
         expected[i] = (generation * 0x13579bdu) ^
@@ -459,8 +460,8 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
       void* pointer = nullptr;
       const D3D12_RANGE no_read = {0, 0};
       ASSERT_TRUE(SUCCEEDED(upload->Map(0, &no_read, &pointer)));
-      std::memcpy(pointer, expected.data(), kByteLength);
-      const D3D12_RANGE written = {0, kByteLength};
+      std::memcpy(pointer, expected.data(), byte_length_);
+      const D3D12_RANGE written = {0, byte_length_};
       upload->Unmap(0, &written);
       ASSERT_NO_FATAL_FAILURE(CopyD3D12(upload.Get(), buffer_.Get()));
       ASSERT_NO_FATAL_FAILURE(ExecuteNativeCopy());
@@ -489,9 +490,9 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     ASSERT_NO_FATAL_FAILURE(ReexportAndDetach());
     ASSERT_NO_FATAL_FAILURE(CopyD3D12(buffer_.Get(), readback.Get()));
     void* pointer = nullptr;
-    const D3D12_RANGE read = {0, kByteLength};
+    const D3D12_RANGE read = {0, byte_length_};
     ASSERT_TRUE(SUCCEEDED(readback->Map(0, &read, &pointer)));
-    const int difference = std::memcmp(pointer, expected.data(), kByteLength);
+    const int difference = std::memcmp(pointer, expected.data(), byte_length_);
     const D3D12_RANGE no_write = {0, 0};
     readback->Unmap(0, &no_write);
     ASSERT_EQ(difference, 0);
@@ -527,22 +528,29 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     ASSERT_NE(import_info_.memory_profile_ordinal,
               AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
     const uint64_t granularity = capabilities.mapping_granularity;
+    ASSERT_NE(capabilities.reservation_granularity, 0u);
     ASSERT_GE(granularity, kWordCount * 4u);
-    ASSERT_LE(granularity, kByteLength / 5);
+    ASSERT_GE(granularity, kMinimumByteLength);
+    ASSERT_LE(granularity, UINT64_MAX / 5);
+    byte_length_ = 5 * granularity;
+    ASSERT_NO_FATAL_FAILURE(CreateSharedBuffer());
     // An unaligned logical prefix combined with a nonzero logical source
     // offset must select the native page once, not omit or repeat the prefix.
     const uint64_t prefix = granularity / 2;
-    ASSERT_NO_FATAL_FAILURE(OpenSharedBuffer(prefix, kByteLength - prefix));
+    ASSERT_NO_FATAL_FAILURE(OpenSharedBuffer(prefix, byte_length_ - prefix));
     const amdf_memory_reservation_access_t access = {
         device_, 0, memory_access_.requirements.access};
+    const uint64_t reservation_byte_length =
+        std::max(capabilities.reservation_granularity, 2 * granularity);
+    ASSERT_EQ(reservation_byte_length % capabilities.reservation_granularity,
+              0u);
     const amdf_memory_reservation_create_info_t create = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO,
         .structure_size = sizeof(create),
-        .byte_length = capabilities.reservation_granularity,
+        .byte_length = reservation_byte_length,
         .access_count = 1,
         .accesses = &access,
     };
-    ASSERT_GE(create.byte_length, 2 * granularity);
     ASSERT_EQ(
         api_->memory_reservation_create(instance_, &create, &reservation_),
         AMDF_STATUS_OK);
@@ -569,15 +577,15 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     ComPtr<ID3D12Resource> readback;
     ASSERT_NO_FATAL_FAILURE(CreateStaging(D3D12_HEAP_TYPE_UPLOAD, &upload));
     ASSERT_NO_FATAL_FAILURE(CreateStaging(D3D12_HEAP_TYPE_READBACK, &readback));
-    std::vector<uint32_t> expected(kByteLength / 4);
+    std::vector<uint32_t> expected(byte_length_ / 4);
     for (uint32_t i = 0; i < expected.size(); ++i) {
       expected[i] = 0x5a13b87du ^ (i * 0x9e3779b9u);
     }
     void* pointer = nullptr;
     const D3D12_RANGE no_read = {0, 0};
     ASSERT_TRUE(SUCCEEDED(upload->Map(0, &no_read, &pointer)));
-    std::memcpy(pointer, expected.data(), kByteLength);
-    const D3D12_RANGE full_range = {0, kByteLength};
+    std::memcpy(pointer, expected.data(), byte_length_);
+    const D3D12_RANGE full_range = {0, byte_length_};
     upload->Unmap(0, &full_range);
     ASSERT_NO_FATAL_FAILURE(CopyD3D12(upload.Get(), buffer_.Get()));
 
@@ -625,7 +633,8 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
       }
       ASSERT_NO_FATAL_FAILURE(CopyD3D12(buffer_.Get(), readback.Get()));
       ASSERT_TRUE(SUCCEEDED(readback->Map(0, &full_range, &pointer)));
-      const int difference = std::memcmp(pointer, expected.data(), kByteLength);
+      const int difference =
+          std::memcmp(pointer, expected.data(), byte_length_);
       readback->Unmap(0, &no_read);
       ASSERT_EQ(difference, 0) << "generation=" << generation;
     }
@@ -634,7 +643,7 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
     // The foreign owner remains usable after checked removal and native close.
     ASSERT_NO_FATAL_FAILURE(CopyD3D12(buffer_.Get(), readback.Get()));
     ASSERT_TRUE(SUCCEEDED(readback->Map(0, &full_range, &pointer)));
-    const int difference = std::memcmp(pointer, expected.data(), kByteLength);
+    const int difference = std::memcmp(pointer, expected.data(), byte_length_);
     readback->Unmap(0, &no_read);
     ASSERT_EQ(difference, 0);
   }
@@ -659,6 +668,8 @@ class D3D12MemoryInteropTest : public GpuDeviceFixture {
   ComPtr<ID3D12Device> d3d_;
   // Shared committed buffer used for generation and verification.
   ComPtr<ID3D12Resource> buffer_;
+  // Logical shared-buffer size selected for the active witness.
+  uint64_t byte_length_ = kMinimumByteLength;
   // Source sharing handle until consumed by import or fixture teardown.
   HANDLE shared_ = nullptr;
   // Prepared native address translated to resource-relative byte zero.
@@ -757,7 +768,7 @@ TEST_F(D3D12MemoryInteropTest, ImportOwnsBackingAfterSourceRelease) {
 
 TEST_F(D3D12MemoryInteropTest, RejectsPhysicalPaddingOutsideLogicalBuffer) {
   amdf_external_memory_t source = Transport();
-  source.source_byte_offset = kByteLength - 1;
+  source.source_byte_offset = byte_length_ - 1;
   source.byte_length = 2;
   ASSERT_NO_FATAL_FAILURE(ExpectRejected(source));
   ASSERT_NO_FATAL_FAILURE(OpenSharedBuffer());
@@ -779,7 +790,7 @@ TEST_F(D3D12MemoryInteropTest, RejectsIncompatiblePayloads) {
   EXPECT_TRUE(CloseHandle(event));
 
   D3D12_HEAP_DESC heap_info = {};
-  heap_info.SizeInBytes = kByteLength;
+  heap_info.SizeInBytes = byte_length_;
   heap_info.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
   heap_info.Properties.CreationNodeMask = 1;
   heap_info.Properties.VisibleNodeMask = 1;
