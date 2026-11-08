@@ -44,8 +44,8 @@ func.def public @value_capture(%value: i32) -> (i32) {
 }
 
 func.def public @mutable_capture(%value: i32) -> (i32) {
-  %9, %increment_value$10 = func.call pure @operator_call_value_2(%value) : (i32) -> (i32, %value as i32)
-  %11, %increment_value$12 = func.call pure @operator_call_value_2(%increment_value$10) : (i32) -> (i32, %increment_value$10 as i32)
+  %9, %increment_value$10 = func.call pure @operator_call_value_2(%value) : (i32) -> (i32, i32)
+  %11, %increment_value$12 = func.call pure @operator_call_value_2(%increment_value$10) : (i32) -> (i32, i32)
   %13 = scalar.addi %9, %11 : i32
   func.return %13 : i32
 }
@@ -87,7 +87,7 @@ func.def @operator_call_value_1(%this_value: i32, %input: i32) -> (i32) {
   func.return %39 : i32
 }
 
-func.def @operator_call_value_2(%this_value: i32) -> (i32, %this_value as i32) {
+func.def @operator_call_value_2(%this_value: i32) -> (i32, i32) {
   %43 = scalar.constant 1 : i32
   %value = scalar.addi %this_value, %43 : i32
   func.return %value, %value : i32, i32

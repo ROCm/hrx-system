@@ -36,26 +36,11 @@ loom_cc_test(
 
 loom_cc_library(
     name = "bindings",
-    srcs = ["bindings.cc"],
     hdrs = ["bindings.h"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
     deps = [
         ":representation",
-        "//third_party:cxx_parser",
-    ],
-)
-
-loom_cc_test(
-    name = "bindings_test",
-    srcs = ["bindings_test.cc"],
-    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
-    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
-    deps = [
-        ":bindings",
-        "//loom/src/loom/import/cxx/source",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
         "//third_party:cxx_parser",
     ],
 )
@@ -88,61 +73,6 @@ loom_cc_library(
         ":types",
         "//loom/src/loom/import/cxx/source:error",
         "//loom/src/loom/ops:op_defs",
-        "//third_party:cxx_parser",
-    ],
-)
-
-loom_cc_library(
-    name = "duplication",
-    srcs = ["duplication.cc"],
-    hdrs = ["duplication.h"],
-    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
-    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
-    deps = [
-        ":representation",
-        ":signature",
-        ":types",
-        "//loom/src/loom/import/cxx/source:error",
-        "//loom/src/loom/import/cxx/source:locations",
-        "//loom/src/loom/ops/buffer",
-        "//loom/src/loom/ops/encoding",
-        "//loom/src/loom/ops/index",
-        "//loom/src/loom/ops/pool",
-        "//loom/src/loom/ops/scalar",
-        "//loom/src/loom/ops/tensor",
-        "//loom/src/loom/ops/tile",
-        "//loom/src/loom/ops/vector",
-        "//loom/src/loom/ops/view",
-        "//third_party:cxx_parser",
-    ],
-)
-
-loom_cc_library(
-    name = "ownership",
-    srcs = ["ownership.cc"],
-    hdrs = ["ownership.h"],
-    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
-    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
-    deps = [
-        ":duplication",
-        ":representation",
-        "//loom/src/loom/ir",
-    ],
-)
-
-loom_cc_test(
-    name = "ownership_test",
-    srcs = ["ownership_test.cc"],
-    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
-    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
-    deps = [
-        ":builder_test",
-        ":duplication",
-        ":ownership",
-        ":scalar",
-        "//loom/src/loom/ops/scalar",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
         "//third_party:cxx_parser",
     ],
 )

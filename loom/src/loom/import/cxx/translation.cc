@@ -59,10 +59,8 @@
 #include "loom/import/cxx/symbol/immutable_objects.h"
 #include "loom/import/cxx/value/bindings.h"
 #include "loom/import/cxx/value/bitcast.h"
-#include "loom/import/cxx/value/duplication.h"
 #include "loom/import/cxx/value/initialization.h"
 #include "loom/import/cxx/value/objects.h"
-#include "loom/import/cxx/value/ownership.h"
 #include "loom/import/cxx/value/representation.h"
 #include "loom/import/cxx/value/scalar.h"
 #include "loom/import/cxx/value/signature.h"
@@ -1057,9 +1055,9 @@ class Translator final : private Initialization::Evaluation {
     return false;
   }
 
-  // Carries a tied mutable receiver result into its pending temporary
-  // destruction. The call consumes the prior SSA identity, so both the object
-  // and its transferable identity advance together.
+  // Carries a mutable receiver result into its pending temporary
+  // destruction. Cleanup must observe the updated source object and its
+  // current transferable identity.
   void update_temporary(Value previous, Value updated) {
     IREE_ASSERT(full_expression_mark_);
     auto mark = *full_expression_mark_;
@@ -2737,27 +2735,15 @@ class Translator final : private Initialization::Evaluation {
           update_vector_component(vector, value, component.selection), owner);
   }
 
-  struct ReferenceOrigin {
-    // Automatic object that owns this flattened component interval.
-    cxx::Symbol* binding;
-    // Inclusive first flattened component within the owning object.
-    size_t begin;
-    // Exclusive end of the flattened component interval.
-    size_t end;
-  };
-
   struct ReferenceWriteback {
     // Once-evaluated lvalue receiving the mutable result, absent for a prvalue
     // temporary whose current value is retained by |source|.
     std::optional<Lvalue> target;
-    // Source value transported through the tied call operand.
+    // Source value transported through the call operand.
     Value source;
-    // Exact automatic owner slice replaced by the tied result, absent for a
-    // prvalue temporary with no external alias.
-    std::optional<ReferenceOrigin> origin;
     // Admitted value representation transported through the call.
     const Partition* partition;
-    // Unqualified source value type used to bind the tied result.
+    // Unqualified source value type used to bind the returned value.
     const cxx::Type* value_type;
     // First flattened call operand for this source parameter.
     size_t argument_offset;
@@ -2777,7 +2763,7 @@ class Translator final : private Initialization::Evaluation {
 
   // One source argument evaluated exactly once, before its components are
   // arranged in callable ABI order. A mutable value reference retains its
-  // destination until the tied call results are available.
+  // destination until the call results are available.
   struct EvaluatedCallArgument {
     // Completed value or storage pointer. An SSA lvalue reference is read from
     // |target| only after all argument evaluations have finished.
@@ -2791,32 +2777,6 @@ class Translator final : private Initialization::Evaluation {
     // Unqualified value type of a mutable value reference.
     const cxx::Type* writeback_type = nullptr;
   };
-
-  ReferenceOrigin reference_origin(const Lvalue& target, const Value& value,
-                                   cxx::AST* owner) {
-    const ObjectLvalue* object = std::get_if<ObjectLvalue>(&target.projection);
-    size_t component_count = value.partition().component_count;
-    if (!object) {
-      auto* lane = std::get_if<VectorLaneLvalue>(&target.projection);
-      if (!lane) {
-        fail(owner, "extended-vector components are not addressable");
-      }
-      object = &lane->destination;
-      component_count =
-          types_.partition(lane->destination.type, owner).component_count;
-    }
-    auto* destination = std::get_if<Destination>(&object->location);
-    if (!destination) {
-      fail(owner,
-           "runtime value-reference arguments require an automatic SSA "
-           "object");
-    }
-    return {
-        destination->binding,
-        destination->component_offset,
-        destination->component_offset + component_count,
-    };
-  }
 
   EvaluatedCallArgument evaluate_call_argument(
       cxx::ExpressionAST* argument, cxx::ParameterSymbol* parameter,
@@ -2876,19 +2836,13 @@ class Translator final : private Initialization::Evaluation {
   void append_call_argument(EvaluatedCallArgument argument,
                             size_t receiver_argument_count,
                             std::vector<loom_value_id_t>& arguments,
-                            std::vector<ReferenceWriteback>& writebacks,
-                            cxx::AST* owner) {
+                            std::vector<ReferenceWriteback>& writebacks) {
     const size_t argument_offset = receiver_argument_count + arguments.size();
     argument.value->append_to(arguments);
     if (argument.writeback_type) {
-      auto origin = argument.target
-                        ? std::optional(reference_origin(
-                              *argument.target, *argument.value, owner))
-                        : std::nullopt;
       writebacks.push_back({
           .target = std::move(argument.target),
           .source = *argument.value,
-          .origin = origin,
           .partition = argument.reference_partition,
           .value_type = argument.writeback_type,
           .argument_offset = argument_offset,
@@ -2901,7 +2855,7 @@ class Translator final : private Initialization::Evaluation {
     ImplicitObjectABI abi;
     // Prvalue record or resolved storage pointer, when evaluated eagerly.
     std::optional<Value> value;
-    // Value structure used by a tied mutable receiver result.
+    // Value structure used by a mutable receiver result.
     const RecordPartition* record;
     // Once-evaluated external lvalue, absent for temporaries/current object.
     std::optional<Lvalue> target;
@@ -2909,8 +2863,6 @@ class Translator final : private Initialization::Evaluation {
     bool current;
     // Exact top-level fields returned by a value receiver call.
     std::span<cxx::FieldSymbol* const> written_fields;
-    // Automatic receiver slices participating in reference overlap checks.
-    std::vector<ReferenceOrigin> origins;
   };
 
   ReceiverArgument current_receiver_argument(
@@ -2927,8 +2879,7 @@ class Translator final : private Initialization::Evaluation {
               &record,
               std::nullopt,
               true,
-              written_fields,
-              {}};
+              written_fields};
     }
     if (requires_storage) {
       fail(owner, "member function requires a storage-backed receiver");
@@ -2938,8 +2889,7 @@ class Translator final : private Initialization::Evaluation {
             &record,
             std::nullopt,
             true,
-            written_fields,
-            {}};
+            written_fields};
   }
 
   std::optional<EvaluatedCallResult> reference_call(
@@ -3024,13 +2974,8 @@ class Translator final : private Initialization::Evaluation {
     }
     if (access_op == cxx::TokenKind::T_MINUS_GREATER) {
       auto projection = pointer_expression(receiver);
-      return admit({ImplicitObjectABI::Storage,
-                    Value(projection.pointer),
-                    record,
-                    std::nullopt,
-                    false,
-                    written_fields,
-                    {}});
+      return admit({ImplicitObjectABI::Storage, Value(projection.pointer),
+                    record, std::nullopt, false, written_fields});
     }
     if (access_op != cxx::TokenKind::T_DOT) {
       fail(owner, "member call requires a dot or arrow receiver");
@@ -3041,13 +2986,8 @@ class Translator final : private Initialization::Evaluation {
         fail(receiver, "void function cannot supply an implicit object");
       }
       if (called->value->is_pointer()) {
-        return admit({ImplicitObjectABI::Storage,
-                      *called->value,
-                      record,
-                      std::nullopt,
-                      false,
-                      written_fields,
-                      {}});
+        return admit({ImplicitObjectABI::Storage, *called->value, record,
+                      std::nullopt, false, written_fields});
       }
       if (&called->value->partition() != record) {
         fail(receiver,
@@ -3057,11 +2997,8 @@ class Translator final : private Initialization::Evaluation {
                     called->reference_target || called->current_receiver
                         ? std::nullopt
                         : called->value,
-                    record,
-                    std::move(called->reference_target),
-                    called->current_receiver,
-                    written_fields,
-                    {}});
+                    record, std::move(called->reference_target),
+                    called->current_receiver, written_fields});
     }
 
     bool direct_prvalue =
@@ -3090,16 +3027,10 @@ class Translator final : private Initialization::Evaluation {
                 record,
                 std::nullopt,
                 false,
-                written_fields,
-                {}};
+                written_fields};
       }
-      return admit({ImplicitObjectABI::Value,
-                    value,
-                    record,
-                    std::nullopt,
-                    false,
-                    written_fields,
-                    {}});
+      return admit({ImplicitObjectABI::Value, value, record, std::nullopt,
+                    false, written_fields});
     }
 
     auto target =
@@ -3110,21 +3041,11 @@ class Translator final : private Initialization::Evaluation {
       fail(receiver, "member call receiver requires a complete object");
     }
     if (auto* storage = std::get_if<StorageProjection>(&object->location)) {
-      return admit({ImplicitObjectABI::Storage,
-                    Value(storage->pointer),
-                    record,
-                    std::nullopt,
-                    false,
-                    written_fields,
-                    {}});
+      return admit({ImplicitObjectABI::Storage, Value(storage->pointer), record,
+                    std::nullopt, false, written_fields});
     }
-    return admit({ImplicitObjectABI::Value,
-                  std::nullopt,
-                  record,
-                  std::move(target),
-                  false,
-                  written_fields,
-                  {}});
+    return admit({ImplicitObjectABI::Value, std::nullopt, record,
+                  std::move(target), false, written_fields});
   }
 
   ReceiverArgument receiver_argument(cxx::CallExpressionAST* call,
@@ -3156,17 +3077,6 @@ class Translator final : private Initialization::Evaluation {
       fail(owner,
            "member call receiver must preserve its admitted record type");
     }
-    if (receiver.current) {
-      receiver.origins.reserve(receiver.written_fields.size());
-      for (auto* field : receiver.written_fields) {
-        const auto& member = types_.member(field, owner);
-        receiver.origins.push_back(
-            {field, 0, member.partition->component_count});
-      }
-    } else if (receiver.target) {
-      receiver.origins.push_back(
-          reference_origin(*receiver.target, value, owner));
-    }
     return value;
   }
 
@@ -3180,119 +3090,6 @@ class Translator final : private Initialization::Evaluation {
       IREE_ASSERT(receiver.value);
       update_temporary(*receiver.value, value);
     }
-  }
-
-  // Preserves source-level value copies before call results consume their tied
-  // operand identities. Only mutable value calls enter this path; ordinary
-  // calls retain their allocation-free argument emission.
-  void preserve_call_value_owners(
-      const std::optional<ReceiverArgument>& receiver,
-      std::span<const ReferenceWriteback> writebacks,
-      std::vector<loom_value_id_t>& arguments, cxx::AST* owner) {
-    const bool receiver_writeback = receiver &&
-                                    receiver->abi == ImplicitObjectABI::Value &&
-                                    !receiver->written_fields.empty();
-    if (!receiver_writeback && writebacks.empty()) {
-      return;
-    }
-
-    ValueDuplication duplication(unit_, diagnostics_, types_, value_arena_,
-                                 locations_, builder_);
-    ValueOwnership ownership(duplication);
-    std::vector<TiedValueConsumption> consumptions;
-    std::vector<std::optional<ReferenceOrigin>> consumption_origins;
-    consumptions.reserve(
-        (receiver_writeback ? receiver->written_fields.size() : 0) +
-        writebacks.size());
-    consumption_origins.reserve(consumptions.capacity());
-    if (receiver_writeback) {
-      const bool prvalue = !receiver->current && !receiver->target;
-      std::optional<ReferenceOrigin> receiver_origin;
-      if (!prvalue && !receiver->current) {
-        IREE_ASSERT_EQ(receiver->origins.size(), 1u);
-        receiver_origin = receiver->origins.front();
-      }
-      for (auto* field : receiver->written_fields) {
-        const auto& member = types_.member(field, owner);
-        consumptions.push_back({
-            .value = receiver->value->project(*member.partition,
-                                              member.component_offset),
-            .source_type = types_.unqualified_value(field->type()),
-            .argument_offset = member.component_offset,
-        });
-        if (prvalue) {
-          consumption_origins.push_back(std::nullopt);
-        } else if (receiver->current) {
-          consumption_origins.push_back(
-              ReferenceOrigin{field, 0, member.partition->component_count});
-        } else {
-          consumption_origins.push_back(
-              ReferenceOrigin{receiver_origin->binding,
-                              receiver_origin->begin + member.component_offset,
-                              receiver_origin->begin + member.component_offset +
-                                  member.partition->component_count});
-        }
-      }
-    }
-    for (const auto& writeback : writebacks) {
-      consumptions.push_back({
-          .value = writeback.source,
-          .source_type = writeback.value_type,
-          .argument_offset = writeback.argument_offset,
-      });
-      consumption_origins.push_back(writeback.origin);
-    }
-
-    std::unordered_map<cxx::Symbol*,
-                       std::unordered_map<loom_value_id_t, size_t>>
-        consumed_owner_counts;
-    for (size_t index = 0; index < consumptions.size(); ++index) {
-      ownership.add_owner(consumptions[index].value);
-      if (!consumption_origins[index]) {
-        continue;
-      }
-      auto origin = *consumption_origins[index];
-      auto components = consumptions[index].value.components();
-      IREE_ASSERT_EQ(origin.end - origin.begin, components.size());
-      for (auto component : components) {
-        ++consumed_owner_counts[origin.binding][component];
-      }
-    }
-
-    // Query only bindings carrying identities consumed by this call. Tied
-    // destination slices are replaced by results; another component or source
-    // binding carrying that identity remains an owner only if it is observed
-    // later in the source.
-    std::unordered_set<loom_value_id_t> queried_components;
-    for (const auto& consumption : consumptions) {
-      for (auto component : consumption.value.components()) {
-        if (!queried_components.insert(component).second) {
-          continue;
-        }
-        const auto* component_owners = values_.owners(component);
-        if (!component_owners) {
-          continue;
-        }
-        for (const auto& [binding, count] : *component_owners) {
-          if (!control_->value_has_later_lexical_use(binding, owner)) {
-            continue;
-          }
-          size_t consumed_count = 0;
-          if (auto consumed_binding = consumed_owner_counts.find(binding);
-              consumed_binding != consumed_owner_counts.end()) {
-            auto consumed_component = consumed_binding->second.find(component);
-            if (consumed_component != consumed_binding->second.end()) {
-              consumed_count = consumed_component->second;
-            }
-          }
-          if (count > consumed_count) {
-            ownership.add_owner_components({&component, 1});
-            break;
-          }
-        }
-      }
-    }
-    ownership.separate(consumptions, arguments, owner);
   }
 
   EvaluatedCallResult ordinary_call(cxx::CallExpressionAST* call,
@@ -3781,7 +3578,6 @@ class Translator final : private Initialization::Evaluation {
         std::nullopt,
         false,
         functions_.receiver_writes(constructor),
-        {},
     };
     auto result =
         emit_ordinary_call(owner, constructor, std::move(arguments),
@@ -3835,7 +3631,6 @@ class Translator final : private Initialization::Evaluation {
       arguments.insert(arguments.begin(), receiver_components.begin(),
                        receiver_components.end());
     }
-    preserve_call_value_owners(receiver, writebacks, arguments, call);
 
     const bool returns_void =
         unit_.typeTraits().is_void(signature->returnType());
@@ -3876,58 +3671,12 @@ class Translator final : private Initialization::Evaluation {
     if (!result_sources.empty()) {
       results = bind_signature(types_, result_sources, call, &builder_);
     }
-    std::vector<loom_tied_result_t> tied_results;
-    size_t result_offset = ordinary_result_count;
-    if (receiver_writeback) {
-      for (auto* field : receiver->written_fields) {
-        const auto& member = types_.member(field, call);
-        const size_t component_count = member.partition->component_count;
-        if (member.component_offset + component_count > UINT16_MAX ||
-            result_offset + component_count > UINT16_MAX) {
-          fail(call,
-               "implicit object call exceeds native operand or result limits");
-        }
-        for (size_t component = 0; component < component_count; ++component) {
-          const size_t operand = member.component_offset + component;
-          tied_results.push_back({
-              .result_index = static_cast<uint16_t>(result_offset + component),
-              .operand_index = static_cast<uint16_t>(operand),
-              .has_type_change = !loom_type_equal(
-                  loom_module_value_type(module_, arguments[operand]),
-                  results.types[result_offset + component]),
-          });
-        }
-        result_offset += component_count;
-      }
-    }
-    for (const auto& writeback : writebacks) {
-      const size_t component_count = writeback.partition->component_count;
-      if (writeback.argument_offset + component_count > UINT16_MAX ||
-          result_offset + component_count > UINT16_MAX) {
-        fail(call,
-             "value-reference call exceeds native operand or result limits");
-      }
-      for (size_t component = 0; component < component_count; ++component) {
-        tied_results.push_back({
-            .result_index = static_cast<uint16_t>(result_offset + component),
-            .operand_index =
-                static_cast<uint16_t>(writeback.argument_offset + component),
-            .has_type_change = !loom_type_equal(
-                loom_module_value_type(
-                    module_, arguments[writeback.argument_offset + component]),
-                results.types[result_offset + component]),
-        });
-      }
-      result_offset += component_count;
-    }
-
     loom_op_t* op;
     check(loom_func_call_build(&builder_, 0, 0, 0, 0, callee, arguments.data(),
                                arguments.size(), results.types.data(),
-                               results.types.size(), tied_results.data(),
-                               tied_results.size(), source, &op));
+                               results.types.size(), nullptr, 0, source, &op));
 
-    result_offset = ordinary_result_count;
+    size_t result_offset = ordinary_result_count;
     std::optional<Value> receiver_result;
     if (receiver_writeback) {
       auto updated = *receiver->value;
@@ -4063,7 +3812,7 @@ class Translator final : private Initialization::Evaluation {
                                   receiver_argument_count + arguments.size()};
       }
       append_call_argument(std::move(evaluated), receiver_argument_count,
-                           arguments, writebacks, call);
+                           arguments, writebacks);
     }
     arguments.insert(arguments.end(), variadic_arguments.begin(),
                      variadic_arguments.end());
@@ -4176,7 +3925,7 @@ class Translator final : private Initialization::Evaluation {
                                   receiver_argument_count + arguments.size()};
       }
       append_call_argument(std::move(evaluated), receiver_argument_count,
-                           arguments, writebacks, expression);
+                           arguments, writebacks);
     }
     return emit_evaluated_call(
         expression, function, callee, std::move(receiver), std::move(arguments),

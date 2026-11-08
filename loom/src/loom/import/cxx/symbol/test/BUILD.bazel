@@ -61,8 +61,8 @@ loom_check_test(
 )
 
 loom_check_test(
-    name = "function_ties_roundtrip_test",
-    src = "function_ties_roundtrip.cxx-test",
+    name = "value_writebacks_roundtrip_test",
+    src = "value_writebacks_roundtrip.cxx-test",
     data = ["//loom/py/loom/tools:loom-export-cxx"],
     env = {
         "LOOM_EXPORT_CXX": "$(rootpath //loom/py/loom/tools:loom-export-cxx)",

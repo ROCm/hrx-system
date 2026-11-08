@@ -180,12 +180,6 @@ class CxxRenderContext:
         self.uses: dict[int, list[tuple[Operation, int]]] = collections.defaultdict(
             list
         )
-        # Values consumed through a tied call need named writable C++ carriers.
-        self.mutable_carriers: set[int] = set()
-        # Function calls whose tied operands require source-parameter grouping.
-        self.tied_calls: list[Operation] = []
-        # Counted-loop induction values are C++ control variables, not state.
-        self.counted_loop_inductions: set[int] = set()
         self.parent_operations: dict[int, Operation] = {}
         # Dynamic view type identities become constructor arguments in C++.
         # Record those uses because they are not ordinary operation operands.
@@ -201,12 +195,6 @@ class CxxRenderContext:
                 self.use_blocks[operand].append(block)
                 self.users[operand].append(operation)
                 self.uses[operand].append((operation, operand_index))
-            if operation.name == "func.call" and operation.tied_results:
-                self.tied_calls.append(operation)
-            if operation.name == "scf.for":
-                self.counted_loop_inductions.add(
-                    operation.regions[0].blocks[0].arg_ids[0]
-                )
             for result in operation.results:
                 self.definitions[result] = operation
                 self.definition_blocks[result] = block
@@ -1325,7 +1313,6 @@ class CxxRenderContext:
             inlineable
             and statement_attribute is None
             and result_id not in self.assignment_targets
-            and result_id not in self.mutable_carriers
             and self.use_counts[result_id] == 1
             and result_id not in self.assumption_inputs
             and (

@@ -73,6 +73,15 @@ loom_check_test(
 )
 
 loom_check_test(
+    name = "value_evaluation_test",
+    src = "value_evaluation.cxx-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/emit:vm_binary",
+    ]),
+)
+
+loom_check_test(
     name = "special_members_test",
     src = "special_members.cxx-test",
     target_compatible_with = loom_config_compatible_with([
@@ -82,17 +91,19 @@ loom_check_test(
 )
 
 iree_py_test(
-    name = "special_members_roundtrip_test",
+    name = "source_roundtrip_test",
     size = "small",
-    srcs = ["special_members_roundtrip_test.py"],
+    srcs = ["source_roundtrip_test.py"],
     args = [
         "--importer=$(rootpath //loom/src/loom/tools/loom-import-cxx)",
         "--exporter=$(rootpath //loom/py/loom/tools:loom-export-cxx)",
         "--checker=$(rootpath //loom/src/loom/tools/loom-check:loom-check-test)",
         "--source=$(rootpath special_members.cxx-test)",
+        "--source=$(rootpath value_evaluation.cxx-test)",
     ],
     data = [
         "special_members.cxx-test",
+        "value_evaluation.cxx-test",
         "//loom/py/loom/tools:loom-export-cxx",
         "//loom/src/loom/tools/loom-check:loom-check-test",
         "//loom/src/loom/tools/loom-import-cxx",

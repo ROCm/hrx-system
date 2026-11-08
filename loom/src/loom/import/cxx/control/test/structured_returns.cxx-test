@@ -352,7 +352,7 @@ unsigned advance_entry(unsigned value, unsigned limit) {
 
 // ----
 func.def public @advance_entry(%value$0: i32, %limit: i32) -> (i32) {
-  %stopped, %value$4 = func.call @advance(%value$0, %limit) : (i32, i32) -> (i1, %value$0 as i32)
+  %stopped, %value$4 = func.call @advance(%value$0, %limit) : (i32, i32) -> (i1, i32)
   %5 = scf.if %stopped -> (i32) {
     %6 = scalar.constant 100 : i32
     scf.yield %6 : i32
@@ -364,7 +364,7 @@ func.def public @advance_entry(%value$0: i32, %limit: i32) -> (i32) {
   func.return %8 : i32
 }
 
-func.def @advance(%value$9: i32, %limit: i32) -> (i1, %value$9 as i32) {
+func.def @advance(%value$9: i32, %limit: i32) -> (i1, i32) {
   %value$15 = scf.while(%value = %value$9 : i32) -> (i32) {
     %16 = scalar.cmpi ult, %value, %limit : i32
     scf.condition %16, %value : i1, i32

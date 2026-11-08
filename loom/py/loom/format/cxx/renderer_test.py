@@ -1824,191 +1824,30 @@ func.def inline @math.pair(%input: i32) -> (i32, i32) {
     assert "return {input, next};" in result
 
 
-def test_projects_tied_function_results_as_mutable_references() -> None:
-    source = """\
-func.def public @entry(%input: i32, %amount: i32) -> (i32) {
-  %observed, %next = func.call pure @adjust(%input, %amount) : (i32, i32) -> (i32, %input as i32)
-  %final = func.call pure @bump(%next, %amount) : (i32, i32) -> (%next as i32)
-  %total = scalar.addi %observed, %final : i32
-  func.return %total : i32
-}
-
-func.def @bump(%state: i32, %amount: i32) -> (%state as i32) {
-  %next = scalar.addi %state, %amount : i32
+@pytest.mark.parametrize(
+    "source",
+    [
+        "func.decl @external(%value: i32) -> (%value as i32)",
+        """\
+func.def @update(%value: i32) -> (%value as i32) {
+  %one = scalar.constant 1 : i32
+  %next = scalar.addi %value, %one : i32
   func.return %next : i32
 }
-
-func.def @adjust(%state: i32, %amount: i32) -> (i32, %state as i32) {
-  %next = scalar.addi %state, %amount : i32
-  %observed = scalar.addi %next, %amount : i32
-  func.return %observed, %next : i32, i32
-}
-"""
-
-    result = render_module(load_module(source.encode()))
-
-    assert (
-        result
-        == """
-[[loom::symbol("entry")]]
-unsigned entry(unsigned input, unsigned amount);
-
-[[loom::symbol("bump")]]
-static void bump(unsigned& state, unsigned amount);
-
-[[loom::symbol("adjust")]]
-static unsigned adjust(unsigned& state, unsigned amount);
-
-[[loom::symbol("entry")]]
-unsigned entry(unsigned input, unsigned amount) {
-  unsigned observed = adjust(input, amount);
-  bump(input, amount);
-  unsigned total = observed + input;
-  return total;
-}
-
-[[loom::symbol("bump")]]
-static void bump(unsigned& state, unsigned amount) {
-  state = state + amount;
-  return;
-}
-
-[[loom::symbol("adjust")]]
-static unsigned adjust(unsigned& state, unsigned amount) {
-  unsigned next = state + amount;
-  unsigned observed = next + amount;
-  state = next;
-  return observed;
-}
-"""
-    )
-
-
-def test_preserves_identity_vector_ties_with_an_explicit_reference_write() -> None:
-    source = """\
-func.def @identity(%value: vector<4xi32>) -> (%value as vector<4xi32>) {
+""",
+        """\
+func.def public @identity(%value: vector<4xi32>) -> (%value as vector<4xi32>) {
   func.return %value : vector<4xi32>
 }
-"""
-
-    result = render_module(load_module(source.encode()))
-
-    assert "void identity(UInt32x4& value)" in result
-    assert "  value = value;\n  return;" in result
-
-
-def test_projects_dynamic_view_ties_as_one_reference_parameter() -> None:
-    source = """\
-func.def public @entry(%extent: index, %layout: encoding<layout>, %value: view<[%extent]x4xf32, %layout>) -> (%result_extent: index, %result_layout: encoding<layout>, view<[%result_extent]x4xf32, %result_layout>) {
-  %next_extent, %next_layout, %next = func.call pure @identity(%extent, %layout, %value) : (index, encoding<layout>, view<[%extent]x4xf32, %layout>) -> (%extent as index, %layout as encoding<layout>, %value as view<[%next_extent]x4xf32, %next_layout>)
-  func.return %next_extent, %next_layout, %next : index, encoding<layout>, view<[%next_extent]x4xf32, %next_layout>
-}
-
-func.def @identity(%extent: index, %layout: encoding<layout>, %value: view<[%extent]x4xf32, %layout>) -> (%result_extent: %extent as index, %result_layout: %layout as encoding<layout>, %value as view<[%result_extent]x4xf32, %result_layout>) {
-  func.return %extent, %layout, %value : index, encoding<layout>, view<[%extent]x4xf32, %layout>
-}
-"""
-
-    result = render_module(load_module(source.encode()))
-
-    assert (
-        "void identity(loom::type::view<loom::type::shape<loom::type::dynamic, "
-        "4>, const float, "
-        "loom::type::encoding<loom::encoding::role::layout, 2>>& value)" in result
-    )
-    assert "  identity(value);\n  return value;" in result
-    assert "  value = value;\n  return;" in result
-
-
-def test_preserves_parallel_tied_updates_without_sequentializing_values() -> None:
-    source = """\
-func.def @swap(%left: i32, %right: i32) -> (%left as i32, %right as i32) {
-  func.return %right, %left : i32, i32
-}
-"""
-
-    result = render_module(load_module(source.encode()))
-
-    assert "void swap(unsigned& left, unsigned& right)" in result
-    assert (
-        "  auto next_left = right;\n"
-        "  auto next_right = left;\n"
-        "  left = next_left;\n"
-        "  right = next_right;"
-    ) in result
-
-
-@pytest.mark.parametrize(
-    ("source", "message"),
-    [
-        (
-            "func.decl @external(%value: i32) -> (%value as i32)",
-            "a tied external declaration has no exact C++ projection",
-        ),
-        (
-            """\
-func.def public @external(%value: i32) -> (%value as i32) {
-  func.return %value : i32
-}
 """,
-            "a public tied function has no exact C++ projection",
-        ),
-        (
-            """\
-func.def @reordered(%left: i32, %right: i32) -> (%right as i32, %left as i32) {
-  func.return %right, %left : i32, i32
-}
-""",
-            "tied result order differs from C++ mutable parameter order",
-        ),
-        (
-            """\
-func.def @changed(%value: i32) -> (%value as i64) {
-  %wide = scalar.extui %value : i32 to i64
-  func.return %wide : i64
-}
-""",
-            "a source-type-changing tied result has no exact C++ reference projection",
-        ),
-        (
-            """\
-func.def public @entry(%upper: index) {
-  %lower = index.constant 0 : index
-  %step = index.constant 1 : index
-  scf.for %i = [%lower to %upper step %step] {
-    %next = func.call pure @bump(%i) : (index) -> (%i as index)
-    scf.yield
-  }
-  func.return
-}
-
-func.def @bump(%value: index) -> (%value as index) {
-  func.return %value : index
-}
-""",
-            "a tied counted-loop induction would mutate C++ loop control",
-        ),
-        (
-            """\
-func.def public @entry(%input: i32) -> (i32) {
-  %next = func.call pure @consume(%input, %input) : (i32, i32) -> (%input as i32)
-  func.return %next : i32
-}
-
-func.def @consume(%state: i32, %snapshot: i32) -> (%state as i32) {
-  func.return %state : i32
-}
-""",
-            "a tied source parameter aliases another C++ call argument",
-        ),
     ],
 )
-def test_rejects_function_ties_without_exact_reference_projection(
-    source: str, message: str
+def test_rejects_destructive_function_ties_without_source_equivalent(
+    source: str,
 ) -> None:
     with pytest.raises(CxxRenderError) as error:
         render_module(load_module(source.encode()))
-    assert message in str(error.value)
+    assert "destructive function ties have no exact C++ projection" in str(error.value)
 
 
 def test_projects_nonfinite_float_constants_as_exact_bit_patterns() -> None:

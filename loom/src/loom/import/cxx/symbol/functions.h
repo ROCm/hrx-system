@@ -250,7 +250,6 @@ class Functions {
       FunctionInstance instance, cxx::AST* source, Types& types,
       loom_builder_t* builder, std::vector<loom_type_t>& arguments,
       std::vector<loom_type_t>& results,
-      std::vector<loom_tied_result_t>& tied_results,
       std::vector<loom_predicate_t>& predicates);
   void collect(cxx::List<cxx::DeclarationAST*>* declarations,
                DeclarationScope scope,
