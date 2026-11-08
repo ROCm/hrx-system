@@ -65,7 +65,7 @@ typedef struct loom_aie2p_native_refill_t {
 // replay, nonuniform batches and cyclic transport do not imply equal ordinals.
 iree_status_t loom_aie2p_native_select_progress(
     loom_aie2p_native_context_t* context,
-    const loom_pipeline_realization_t* realization);
+    const loom_pipeline_realization_t* realization, bool* out_valid);
 
 // Returns an admitted bulk window for an ordered prefix/bulk queue, or zero
 // when its progress, ring rotation, or task capacity requires separate queues.

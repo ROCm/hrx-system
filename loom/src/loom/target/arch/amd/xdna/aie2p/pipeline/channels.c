@@ -12,6 +12,8 @@
 #include "loom/ops/type_registry.h"
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sram.h"
@@ -72,6 +74,8 @@ typedef struct loom_aie2p_native_channel_emitter_t {
   const loom_pipeline_worker_t* worker;
   // Projected actions in the same ordinal order as source completion deltas.
   const loom_channel_plan_action_t* actions;
+  // Phased sources admitted by this worker's retained read actions.
+  const loom_aie2p_native_input_t* inputs;
   // Initial byte displacement for every channel cursor.
   loom_value_id_t origin;
   // Invocation-private scalar views in the channel materializer's state order.
@@ -222,6 +226,13 @@ static iree_status_t loom_aie2p_native_channel_action(
                   : endpoint->access->locks.ready,
             acquire));
       }
+      if (!write) {
+        for (const loom_aie2p_native_input_t* input = emitter->inputs; input;
+             input = input->next) {
+          IREE_RETURN_IF_ERROR(loom_aie2p_native_emit_input(
+              builder, input, action - emitter->actions, false, state));
+        }
+      }
       if (endpoint->access->window) {
         IREE_RETURN_IF_ERROR(loom_aie2p_native_invoke(
             builder, *acquire, &emitter->acquire_delta, 1, NULL, NULL));
@@ -237,6 +248,11 @@ static iree_status_t loom_aie2p_native_channel_action(
             loom_aie2p_native_invoke(builder, *acquire, NULL, 0, NULL, NULL));
       }
       if (!write) {
+        for (const loom_aie2p_native_input_t* input = emitter->inputs; input;
+             input = input->next) {
+          IREE_RETURN_IF_ERROR(loom_aie2p_native_emit_input(
+              builder, input, action - emitter->actions, true, state));
+        }
         for (const loom_aie2p_native_refill_t* refill = endpoint->refills;
              refill; refill = refill->next_reader) {
           IREE_RETURN_IF_ERROR(
@@ -429,6 +445,7 @@ iree_status_t loom_aie2p_native_emit_worker(
       .invocations = &realization->invocations,
       .worker = source,
       .actions = channels->plan.actions,
+      .inputs = worker->inputs,
       .indices = worker->channels.indices};
   const iree_host_size_t endpoint_count = worker->channels.count;
   bool has_sram = false;
@@ -442,6 +459,12 @@ iree_status_t loom_aie2p_native_emit_worker(
   for (iree_host_size_t i = 0; i < endpoint_count; ++i) {
     IREE_RETURN_IF_ERROR(loom_aie2p_native_endpoint(
         context, &worker->channels.accesses[i], &emitter.endpoints[i]));
+  }
+  iree_host_size_t input_count = 0;
+  for (loom_aie2p_native_input_t* input = worker->inputs; input;
+       input = input->next) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_prepare_input(context, input));
+    ++input_count;
   }
   iree_host_size_t refill_count = 0;
   for (loom_aie2p_native_refill_t* refill = worker->refills; refill;
@@ -531,7 +554,7 @@ iree_status_t loom_aie2p_native_emit_worker(
   // A granted singleton uses one counter instead of advancing cursors;
   // batch publication and cursor state remain disjoint from that counter.
   const iree_host_size_t state_capacity =
-      endpoint_count * (has_sram ? 3 : 2) + refill_count * 2;
+      endpoint_count * (has_sram ? 3 : 2) + refill_count * 2 + input_count;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, state_capacity, sizeof(*state), (void**)&state));
   loom_value_id_t* state_views = NULL;
@@ -639,6 +662,16 @@ iree_status_t loom_aie2p_native_emit_worker(
       state_views[state_count] = LOOM_VALUE_ID_INVALID;
       state[state_count++] = loom_scalar_constant_result(value);
     }
+  }
+  for (loom_aie2p_native_input_t* input = worker->inputs; input;
+       input = input->next) {
+    input->state_index = state_count;
+    loom_op_t* value;
+    IREE_RETURN_IF_ERROR(
+        loom_scalar_constant_build(&rewriter->builder, loom_attr_i64(0),
+                                   delta_type, LOOM_LOCATION_UNKNOWN, &value));
+    state_views[state_count] = LOOM_VALUE_ID_INVALID;
+    state[state_count++] = loom_scalar_constant_result(value);
   }
   loom_type_t* carriers = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(

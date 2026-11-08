@@ -10,6 +10,7 @@
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/credits.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/distribution.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_resources.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
@@ -1118,6 +1119,12 @@ iree_status_t loom_aie2p_native_select_transfers(
        ++i) {
     if (context->workers[i].execution ==
         LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION) {
+      continue;
+    }
+    if (context->workers[i].input) {
+      status = loom_aie2p_native_route_input(
+          context, realization, context->workers[i].input, &next_source,
+          next_controller, &valid);
       continue;
     }
     loom_pipeline_worker_t* worker = &realization->workers[i];

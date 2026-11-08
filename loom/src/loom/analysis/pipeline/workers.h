@@ -33,6 +33,9 @@ typedef struct loom_pipeline_transport_step_t {
   const loom_op_t* op;
   // Which retained communication plan supplies this step's operands.
   loom_pipeline_transport_step_kind_t kind;
+  // Innermost natural loop containing this site, or LOOP_NEST_NONE.
+  // Exact execution counts are retained separately by the worker CFG owner.
+  uint16_t scope;
   // Canonical action or movement, borrowed through physical selection.
   union {
     // Channel obligation established by membership analysis.
@@ -125,39 +128,62 @@ typedef struct loom_pipeline_transport_batch_t {
   uint64_t replays;
 } loom_pipeline_transport_batch_t;
 
-// One uniform input sequence feeding independently published records. The
-// address proof describes visits without expanding the dynamic transfer list.
-// Source stability and physical transport support remain separate gates.
-typedef struct loom_pipeline_transport_input_t {
+// One independently completed transfer pattern within a source lifetime.
+// Structural order and loop scopes retain repeated phase order without
+// expanding dynamic visits into a transfer list.
+typedef struct loom_pipeline_transport_input_phase_t {
   // Destination reservation made once for each transfer.
   const loom_channel_plan_action_t* reservation;
+  // Destination publication after the corresponding transfer completes.
+  const loom_channel_plan_action_t* publication;
   // Canonical movement site executed throughout this sequence.
   const loom_kernel_async_transfer_t* transfer;
-  // Transfer count before the source address repeats, dividing repetitions.
+  // Number of this phase's completed transfers within each source lifetime.
+  uint64_t transfers;
+  // Transfer count before the source address repeats, dividing transfers.
   uint64_t period;
-  // First byte relative to the enclosing storage root.
+  // First byte relative to the acquired payload or enclosing storage root.
   int64_t source_byte_offset;
   // Byte displacement per transfer within each source address period.
   int64_t source_byte_stride;
   // Constant byte displacement within every reserved destination record.
   int64_t destination_byte_offset;
+  // Innermost natural loop containing this phase, or LOOP_NEST_NONE.
+  uint16_t scope;
+} loom_pipeline_transport_input_phase_t;
+
+// One source lifetime feeding independently published records in ordered
+// phases. Source stability and physical transport support are separate gates.
+typedef struct loom_pipeline_transport_input_t {
+  // Acquired source record, or NULL for views with enclosing storage lifetime.
+  const loom_channel_plan_action_t* acquisition;
+  // Final source release after every phase in that acquisition, or NULL.
+  const loom_channel_plan_action_t* release;
+  // Number of source acquisitions; one for enclosing storage lifetimes.
+  uint64_t admissions;
+  // Complete transfer patterns in structural execution order. Loop scopes
+  // distinguish repeated interleaving from consecutive phase loops.
+  const loom_pipeline_transport_input_phase_t* phases;
+  // Number of structural phases, independent of dynamic visits.
+  iree_host_size_t phase_count;
 } loom_pipeline_transport_input_t;
 
 typedef struct loom_pipeline_transport_t {
   // All observable sites in structural execution order, visiting loop bodies
-  // before their continuations; NULL when ordinary execution is required. For
-  // borrowed movement, admission proves one straight-line sequence or repeated
-  // body. Record-batch lifetime and replay order are retained separately below.
+  // before their continuations; NULL when ordinary execution is required.
+  // Borrowed movement retains each site's execution scope, including admission
+  // and release outside inner transfer loops. Record-batch lifetime and replay
+  // order are retained separately below.
   const loom_pipeline_transport_step_t* steps;
-  // Number of steps in the complete invocation.
+  // Number of structural communication sites, independent of dynamic visits.
   iree_host_size_t count;
   // Borrowed movement streams in CFG execution order, independent of block
   // storage order. Each stream completes its groups before the next block.
   const loom_kernel_async_stream_t* const* streams;
   // Number of movement-bearing blocks on the execution chain.
   iree_host_size_t stream_count;
-  // Uniform borrowed-input address proof, or NULL for ordinary instruction
-  // execution. Borrowed from the worker analysis arena.
+  // Complete borrowed-input lifetime and address proof, or NULL when the
+  // sequence needs more general instruction execution. Borrowed from arena.
   const loom_pipeline_transport_input_t* input;
   // Source-record cohorts whose complete ownership is transferred through
   // channel.copy. Empty for ordinary instruction-executing channel use.
@@ -176,12 +202,14 @@ typedef struct loom_pipeline_transport_t {
   const loom_pipeline_transport_loop_t* copy_loops;
   // Number of copy-loop spans; zero when uniform replay or straight-line.
   iree_host_size_t copy_loop_count;
-  // Number of executions of the borrowed-movement sequence. A straight-line
-  // invocation has one; a regular loop has its proven exact trip count.
+  // Number of uniform repetitions of the whole borrowed-movement sequence, or
+  // zero when sites have different loop scopes or execution counts. A
+  // straight-line invocation has one; a single body has its exact trip count.
   // Channel-copy batches instead retain their own admission and replay counts.
   uint64_t repetitions;
-  // Controlling recurrence for repeated execution, or NULL for straight-line
-  // execution. Borrowed from the worker's retained CFG snapshot.
+  // Controlling recurrence when all borrowed-movement sites belong to one
+  // repeated body; NULL for straight-line or nonuniform scoped execution.
+  // Borrowed from the worker's retained CFG snapshot.
   const loom_value_fact_induction_t* induction;
   // External source roots cannot change during this closed execution. This
   // proof includes every strand's effects and scoped alias contracts.
@@ -249,6 +277,11 @@ typedef struct loom_pipeline_worker_t {
   loom_pipeline_transport_t transport;
   // CFG topology retained for scheduling and handoff analysis.
   const loom_cfg_graph_t* graph;
+  // Structural block order, with loop bodies before their continuations.
+  // Conditional alternatives retain structural order, not a promise of visits;
+  // execution_counts qualifies which sites have an exact dynamic frequency.
+  // NULL when cyclic control has no bounded loop structure.
+  const uint16_t* block_order;
   // Exact invocation execution counts per CFG block, or NULL when conditional
   // control or unknown recurrence prevents a complete count proof.
   const uint64_t* block_execution_counts;

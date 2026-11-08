@@ -298,6 +298,103 @@ TEST(Aie2pRouteTest, MemoryMulticastBranchesInTheReceivingComputeRow) {
   }
 }
 
+TEST(Aie2pRouteTest, ShimDmaSharesPayloadAndQueryRoutesWithCoreCreditReturn) {
+  iree_arena_block_pool_t blocks;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);
+  iree_arena_allocator_t arena;
+  iree_arena_initialize(&blocks, &arena);
+  const auto* family = loom_xdna_npu2_array_family();
+  const auto* shim_facts =
+      loom_xdna_array_tile_kind_facts(family, LOOM_XDNA_TILE_KIND_SHIM_NOC);
+  const auto* core_facts =
+      loom_xdna_array_tile_kind_facts(family, LOOM_XDNA_TILE_KIND_COMPUTE);
+  for (uint16_t column = 0; column < family->column_count; ++column) {
+    const loom_xdna_tile_coordinate_t shim = {column, 0};
+    for (uint16_t destination = 0; destination < family->column_count;
+         ++destination) {
+      for (uint16_t row = 1; row < family->row_count; ++row) {
+        const loom_xdna_tile_coordinate_t payload = {destination, row};
+        const loom_xdna_tile_coordinate_t core = {
+            destination, static_cast<uint16_t>(row < core_facts->first_row
+                                                   ? core_facts->first_row
+                                                   : row)};
+        for (uint8_t engine = 0;
+             engine < shim_facts->dma.channel_count_per_direction; ++engine) {
+          SCOPED_TRACE(::testing::Message()
+                       << column << ":" << unsigned(engine) << " -> "
+                       << destination << "," << row);
+          iree_arena_reset(&arena);
+          loom_aie2p_array_route_builder_t routing;
+          IREE_ASSERT_OK(loom_aie2p_array_route_builder_initialize(
+              family, 3, 3 * (family->column_count + family->row_count + 2),
+              &arena, &routing));
+          ASSERT_TRUE(loom_aie2p_array_route_stream(
+              &routing, 0, 0, shim, LOOM_XDNA_STREAM_PORT_DMA, engine, payload,
+              LOOM_XDNA_STREAM_PORT_DMA, 0, true));
+          const auto& source_mux = routing.routes[0];
+          EXPECT_EQ(source_mux.switch_kind,
+                    LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX);
+          EXPECT_EQ(source_mux.source_port, LOOM_XDNA_STREAM_PORT_DMA);
+          EXPECT_EQ(source_mux.source_channel, engine);
+          EXPECT_EQ(source_mux.destination_port, LOOM_XDNA_STREAM_PORT_NORTH);
+          EXPECT_EQ(source_mux.destination_channel,
+                    shim_facts->dma.memory_to_stream_port_base +
+                        engine * shim_facts->dma.memory_to_stream_port_stride);
+          const size_t query_begin = routing.route_count;
+          ASSERT_TRUE(loom_aie2p_array_route_stream(
+              &routing, 1, 0, shim, LOOM_XDNA_STREAM_PORT_DMA, engine, core,
+              LOOM_XDNA_STREAM_PORT_CORE, 0, true));
+          // A second packet class retains the full switch path but reuses the
+          // physical mux and the same source lane.
+          EXPECT_EQ(routing.routes[query_begin].source_port,
+                    LOOM_XDNA_STREAM_PORT_SOUTH);
+          EXPECT_EQ(routing.routes[query_begin].source_channel,
+                    source_mux.destination_channel);
+          EXPECT_EQ(routing.routes[routing.route_count - 1].destination_port,
+                    LOOM_XDNA_STREAM_PORT_CORE);
+          ASSERT_TRUE(loom_aie2p_array_route_stream(
+              &routing, 2, 2, core, LOOM_XDNA_STREAM_PORT_CORE, 0, shim,
+              LOOM_XDNA_STREAM_PORT_DMA, engine, true));
+          const auto& credit_mux = routing.routes[routing.route_count - 1];
+          const auto& credit_switch = routing.routes[routing.route_count - 2];
+          EXPECT_EQ(credit_mux.switch_kind,
+                    LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX);
+          EXPECT_EQ(credit_mux.source_port, LOOM_XDNA_STREAM_PORT_NORTH);
+          EXPECT_EQ(credit_mux.destination_port, LOOM_XDNA_STREAM_PORT_DMA);
+          EXPECT_EQ(credit_mux.destination_channel, engine);
+          EXPECT_EQ(credit_switch.destination_port,
+                    LOOM_XDNA_STREAM_PORT_SOUTH);
+          EXPECT_EQ(credit_switch.destination_channel,
+                    credit_mux.source_channel);
+          EXPECT_EQ(credit_mux.source_channel,
+                    shim_facts->dma.stream_to_memory_port_base +
+                        engine * shim_facts->dma.stream_to_memory_port_stride);
+          for (size_t i = 0; i < routing.route_count; ++i) {
+            const auto& edge = routing.routes[i];
+            if (edge.switch_kind == LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX) {
+              continue;
+            }
+            const auto* tile =
+                loom_xdna_array_tile_facts(family, edge.coordinate);
+            const auto* input = loom_xdna_array_stream_port_range(
+                family, tile->kind, LOOM_XDNA_STREAM_DIRECTION_SLAVE,
+                edge.source_port);
+            const auto* output = loom_xdna_array_stream_port_range(
+                family, tile->kind, LOOM_XDNA_STREAM_DIRECTION_MASTER,
+                edge.destination_port);
+            EXPECT_NE(loom_xdna_array_stream_destination_channels(
+                          family, input, edge.source_channel, output) &
+                          (UINT32_C(1) << edge.destination_channel),
+                      0u);
+          }
+        }
+      }
+    }
+  }
+  iree_arena_deinitialize(&arena);
+  iree_arena_block_pool_deinitialize(&blocks);
+}
+
 TEST(Aie2pRouteTest, ReceiverGrantSharesOnlyItsPayloadSuffix) {
   iree_arena_block_pool_t blocks;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks);

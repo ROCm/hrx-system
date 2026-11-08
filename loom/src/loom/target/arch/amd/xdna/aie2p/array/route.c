@@ -398,11 +398,10 @@ static bool loom_aie2p_array_plan_route(
   return true;
 }
 
-bool loom_aie2p_array_route_ingress(
+static iree_host_size_t loom_aie2p_array_route_shim_source(
     loom_aie2p_array_route_builder_t* builder, uint32_t channel_index,
     uint32_t source_channel_index, loom_xdna_tile_coordinate_t shim_coordinate,
-    uint8_t shim_dma_channel, loom_xdna_tile_coordinate_t worker_coordinate,
-    uint8_t worker_dma_channel) {
+    uint8_t shim_dma_channel) {
   iree_host_size_t* root = &builder->prefixes.roots[source_channel_index];
   if (*root == IREE_HOST_SIZE_MAX) {
     const uint8_t current_channel = loom_aie2p_array_dma_stream_channel(
@@ -415,8 +414,19 @@ bool loom_aie2p_array_route_ingress(
     *root = loom_aie2p_array_create_route_node(
         builder, shim_coordinate, LOOM_XDNA_STREAM_PORT_SOUTH, current_channel);
   }
+  return *root;
+}
+
+bool loom_aie2p_array_route_ingress(
+    loom_aie2p_array_route_builder_t* builder, uint32_t channel_index,
+    uint32_t source_channel_index, loom_xdna_tile_coordinate_t shim_coordinate,
+    uint8_t shim_dma_channel, loom_xdna_tile_coordinate_t worker_coordinate,
+    uint8_t worker_dma_channel) {
+  const iree_host_size_t root = loom_aie2p_array_route_shim_source(
+      builder, channel_index, source_channel_index, shim_coordinate,
+      shim_dma_channel);
   return loom_aie2p_array_plan_route(
-      builder, channel_index, *root, worker_coordinate,
+      builder, channel_index, root, worker_coordinate,
       LOOM_XDNA_STREAM_PORT_DMA, worker_dma_channel, shim_coordinate.row, false,
       NULL);
 }
@@ -467,8 +477,16 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
                                    loom_xdna_tile_coordinate_t destination,
                                    loom_xdna_stream_port_t destination_port,
                                    uint8_t destination_channel, bool packet) {
+  const loom_xdna_tile_kind_t source_kind =
+      loom_xdna_array_tile_facts(builder->family, source)->kind;
+  const loom_xdna_tile_kind_t destination_kind =
+      loom_xdna_array_tile_facts(builder->family, destination)->kind;
   iree_host_size_t* root = &builder->prefixes.roots[source_channel_index];
-  if (*root == IREE_HOST_SIZE_MAX) {
+  if (source_kind == LOOM_XDNA_TILE_KIND_SHIM_NOC &&
+      source_port == LOOM_XDNA_STREAM_PORT_DMA) {
+    loom_aie2p_array_route_shim_source(
+        builder, channel_index, source_channel_index, source, source_channel);
+  } else if (*root == IREE_HOST_SIZE_MAX) {
     *root = loom_aie2p_array_create_route_node(builder, source, source_port,
                                                source_channel);
   }
@@ -487,9 +505,28 @@ bool loom_aie2p_array_route_stream(loom_aie2p_array_route_builder_t* builder,
                   ->first_row
             : destination.row;
   }
-  return loom_aie2p_array_plan_route(builder, channel_index, *root, destination,
-                                     destination_port, destination_channel,
-                                     horizontal_row, packet, NULL);
+  const bool shim_dma = destination_kind == LOOM_XDNA_TILE_KIND_SHIM_NOC &&
+                        destination_port == LOOM_XDNA_STREAM_PORT_DMA;
+  const uint8_t shim_channel =
+      shim_dma
+          ? loom_aie2p_array_dma_stream_channel(
+                builder, destination, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
+                destination_channel)
+          : 0;
+  if (!loom_aie2p_array_plan_route(
+          builder, channel_index, *root, destination,
+          shim_dma ? LOOM_XDNA_STREAM_PORT_SOUTH : destination_port,
+          shim_dma ? shim_channel : destination_channel, horizontal_row, packet,
+          NULL)) {
+    return false;
+  }
+  if (shim_dma) {
+    loom_aie2p_array_append_route(
+        builder, channel_index, destination,
+        LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX, LOOM_XDNA_STREAM_PORT_NORTH,
+        shim_channel, LOOM_XDNA_STREAM_PORT_DMA, destination_channel);
+  }
+  return true;
 }
 
 iree_status_t loom_aie2p_array_route_sharing_initialize(

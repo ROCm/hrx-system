@@ -466,17 +466,22 @@ const loom_pipeline_transport_copy_t* loom_pipeline_transport_copy_cursor_next(
 // A complete address period restarts at the same offset; partial or rotated
 // periods require a more general sequencer than this compact representation.
 static bool loom_pipeline_transport_input_address(
-    const loom_pipeline_worker_t* worker, const loom_symbolic_expr_t* offset,
-    loom_pipeline_transport_input_t* input) {
-  input->source_byte_offset = offset->constant;
-  input->period = worker->transport.repetitions;
+    const loom_pipeline_worker_t* worker,
+    const loom_value_fact_cfg_region_t* structure, uint16_t scope,
+    const loom_symbolic_expr_t* offset,
+    loom_pipeline_transport_input_phase_t* phase) {
+  phase->source_byte_offset = offset->constant;
+  phase->period = phase->transfers;
   if (!offset->term_count) {
     return loom_symbolic_expr_is_constant(offset);
   }
-  if (!loom_symbolic_expr_is_linear(offset) || offset->term_count != 1) {
+  if (scope == LOOM_CFG_LOOP_NEST_NONE ||
+      !loom_symbolic_expr_is_linear(offset) || offset->term_count != 1 ||
+      phase->transfers % worker->loop_trip_counts[scope]) {
     return false;
   }
-  const loom_value_fact_induction_t* induction = worker->transport.induction;
+  phase->period = worker->loop_trip_counts[scope];
+  const loom_value_fact_induction_t* induction = &structure->inductions[scope];
   int64_t initial, increment, displacement;
   if (!loom_value_facts_as_exact_i64(
           loom_value_fact_recurrence_operand_facts(&worker->facts,
@@ -509,53 +514,78 @@ static bool loom_pipeline_transport_input_address(
       initial %= projection->modulus;
       increment %= projection->modulus;
       if (increment &&
-          input->period - 1 >
+          phase->period - 1 >
               (uint64_t)((projection->modulus - 1 - initial) / increment)) {
         if (initial >= increment || projection->modulus % increment) {
           return false;
         }
         const uint64_t period = (uint64_t)(projection->modulus / increment);
-        if (input->period % period) {
+        if (phase->period % period) {
           return false;
         }
-        input->period = period;
+        phase->period = period;
       }
     }
   }
   return iree_checked_mul_i64(offset->terms[0].coefficient, initial,
                               &displacement) &&
-         iree_checked_add_i64(input->source_byte_offset, displacement,
-                              &input->source_byte_offset) &&
+         iree_checked_add_i64(phase->source_byte_offset, displacement,
+                              &phase->source_byte_offset) &&
          iree_checked_mul_i64(offset->terms[0].coefficient, increment,
-                              &input->source_byte_stride);
+                              &phase->source_byte_stride);
 }
 
-static bool loom_pipeline_transport_input(
+// Each phase completes its copy before publishing the destination. The source
+// lease remains independent of the phase's repetition and address period.
+static bool loom_pipeline_transport_input_phase(
     const loom_pipeline_worker_t* worker,
-    loom_pipeline_transport_input_t* input) {
-  const loom_pipeline_transport_t* transport = &worker->transport;
-  if (!transport->induction || !transport->repetitions ||
-      transport->count != 4 || transport->stream_count != 1 ||
-      transport->streams[0]->transfer_count != 1 ||
-      worker->completion.requirement !=
-          LOOM_CHANNEL_COMPLETION_REQUIREMENT_NONE) {
+    const loom_value_fact_cfg_region_t* structure,
+    const loom_pipeline_transport_block_t* blocks,
+    const loom_pipeline_transport_step_t* body,
+    const loom_pipeline_transport_input_t* input,
+    loom_pipeline_transport_input_phase_t* phase) {
+  if (!loom_channel_reserve_isa(body[0].op) ||
+      body[1].kind != LOOM_PIPELINE_TRANSPORT_STEP_TRANSFER ||
+      body[2].kind != LOOM_PIPELINE_TRANSPORT_STEP_WAIT ||
+      !loom_channel_publish_isa(body[3].op) ||
+      loom_channel_publish_write(body[3].op) !=
+          loom_channel_reserve_write(body[0].op)) {
     return false;
   }
-  const loom_pipeline_transport_step_t* steps = transport->steps;
-  if (!loom_channel_reserve_isa(steps[0].op) ||
-      steps[1].kind != LOOM_PIPELINE_TRANSPORT_STEP_TRANSFER ||
-      steps[2].kind != LOOM_PIPELINE_TRANSPORT_STEP_WAIT ||
-      !loom_channel_publish_isa(steps[3].op) ||
-      loom_channel_publish_write(steps[3].op) !=
-          loom_channel_reserve_write(steps[0].op)) {
-    return false;
-  }
-  const loom_kernel_async_stream_t* stream = transport->streams[0];
-  const loom_kernel_async_transfer_t* transfer = steps[1].source.transfer;
+  const uint16_t block = body[1].op->parent_block->region_index;
+  const loom_kernel_async_stream_t* stream = blocks[block].stream;
+  const loom_kernel_async_transfer_t* transfer = body[1].source.transfer;
   if (transfer->request.kind != LOOM_MOVEMENT_KIND_KERNEL_ASYNC_COPY ||
-      stream->groups[transfer->group_index].completion != steps[2].op) {
+      stream->groups[transfer->group_index].completion != body[2].op) {
     return false;
   }
+  const uint64_t executions = worker->block_execution_counts[block];
+  if (!executions || executions % input->admissions) {
+    return false;
+  }
+  for (iree_host_size_t i = 0; i < 4; ++i) {
+    if (body[i].scope != body[1].scope ||
+        worker->block_execution_counts[body[i]
+                                           .op->parent_block->region_index] !=
+            executions) {
+      return false;
+    }
+  }
+  if (input->acquisition) {
+    const uint16_t admission_scope = loom_cfg_loop_nest_innermost(
+        &structure->loops, input->acquisition->op->parent_block->region_index);
+    if (admission_scope != LOOM_CFG_LOOP_NEST_NONE &&
+        !loom_cfg_loop_nest_contains(&structure->loops, admission_scope,
+                                     block)) {
+      return false;
+    }
+  }
+  *phase = (loom_pipeline_transport_input_phase_t){
+      .reservation = body[0].source.channel,
+      .publication = body[3].source.channel,
+      .transfer = transfer,
+      .transfers = executions / input->admissions,
+      .scope = body[1].scope};
   const loom_view_region_t *source, *destination;
   loom_view_region_table_try_lookup(&worker->asynchronous.movement.view_regions,
                                     transfer->request.source.value_id, &source);
@@ -563,16 +593,83 @@ static bool loom_pipeline_transport_input(
                                     transfer->request.dest.value_id,
                                     &destination);
   if (destination->base_view_value_id !=
-          loom_channel_reserve_view(steps[0].op) ||
+          loom_channel_reserve_view(body[0].op) ||
       !loom_symbolic_expr_is_constant(&destination->projection_byte_offset)) {
     return false;
   }
-  *input = (loom_pipeline_transport_input_t){
-      .reservation = steps[0].source.channel,
-      .transfer = transfer,
-      .destination_byte_offset = destination->projection_byte_offset.constant};
-  return loom_pipeline_transport_input_address(
-      worker, &source->begin_byte_offset, input);
+  phase->destination_byte_offset = destination->projection_byte_offset.constant;
+  const loom_symbolic_expr_t* offset = &source->begin_byte_offset;
+  if (input->acquisition) {
+    if (source->base_view_value_id !=
+        loom_channel_acquire_view(input->acquisition->op)) {
+      return false;
+    }
+    offset = &source->projection_byte_offset;
+  }
+  return loom_pipeline_transport_input_address(worker, structure, phase->scope,
+                                               offset, phase);
+}
+
+static iree_status_t loom_pipeline_transport_input(
+    iree_arena_allocator_t* arena,
+    const loom_value_fact_cfg_region_t* structure,
+    const loom_pipeline_transport_block_t* blocks,
+    loom_pipeline_worker_t* worker) {
+  const loom_pipeline_transport_t* transport = &worker->transport;
+  if (transport->count < 4 || worker->completion.requirement !=
+                                  LOOM_CHANNEL_COMPLETION_REQUIREMENT_NONE) {
+    return iree_ok_status();
+  }
+  const loom_pipeline_transport_step_t* steps = transport->steps;
+  const bool acquired = loom_channel_acquire_isa(steps[0].op);
+  const iree_host_size_t phase_sites = transport->count - (acquired ? 2 : 0);
+  if (!phase_sites || phase_sites % 4) {
+    return iree_ok_status();
+  }
+  loom_pipeline_transport_input_t input = {.admissions = 1,
+                                           .phase_count = phase_sites / 4};
+  if (acquired) {
+    const loom_pipeline_transport_step_t* final = &steps[transport->count - 1];
+    if (!loom_channel_release_isa(final->op) ||
+        steps[0].scope != final->scope ||
+        loom_channel_plan_admission(&worker->channels,
+                                    loom_channel_release_read(final->op)) !=
+            loom_channel_acquire_read(steps[0].op)) {
+      return iree_ok_status();
+    }
+    input.admissions =
+        worker->block_execution_counts[steps[0].op->parent_block->region_index];
+    if (!input.admissions ||
+        worker->block_execution_counts[final->op->parent_block->region_index] !=
+            input.admissions) {
+      return iree_ok_status();
+    }
+    input.acquisition = steps[0].source.channel;
+    input.release = final->source.channel;
+  }
+  const loom_pipeline_transport_step_t* body = steps + acquired;
+  loom_pipeline_transport_input_phase_t first;
+  if (!loom_pipeline_transport_input_phase(worker, structure, blocks, body,
+                                           &input, &first)) {
+    return iree_ok_status();
+  }
+  loom_pipeline_transport_input_t* retained;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate(
+      arena, sizeof(*retained) + input.phase_count * sizeof(first),
+      (void**)&retained));
+  loom_pipeline_transport_input_phase_t* phases =
+      (loom_pipeline_transport_input_phase_t*)(retained + 1);
+  phases[0] = first;
+  for (iree_host_size_t i = 1; i < input.phase_count; ++i) {
+    if (!loom_pipeline_transport_input_phase(
+            worker, structure, blocks, &body[i * 4], &input, &phases[i])) {
+      return iree_ok_status();
+    }
+  }
+  input.phases = phases;
+  *retained = input;
+  worker->transport.input = retained;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_pipeline_worker_transport(
@@ -617,18 +714,12 @@ static iree_status_t loom_pipeline_worker_transport(
       arena, capacity, sizeof(*steps), (void**)&steps));
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, graph->block_count, sizeof(*streams), (void**)&streams));
-  const uint16_t* order = graph->reverse_postorder.values;
-  if (graph->has_cycles) {
-    uint16_t* loop_order;
-    IREE_RETURN_IF_ERROR(
-        iree_arena_allocate_array(arena, graph->reverse_postorder.count,
-                                  sizeof(*loop_order), (void**)&loop_order));
-    loom_cfg_loop_nest_order_blocks(&structure->loops, loop_order);
-    order = loop_order;
-  }
+  const uint16_t* order = worker->block_order;
   iree_host_size_t count = 0, stream_count = 0;
   for (iree_host_size_t b = 0; b < graph->reverse_postorder.count; ++b) {
     const uint16_t block_index = order[b];
+    const uint16_t scope =
+        loom_cfg_loop_nest_innermost(&structure->loops, block_index);
     const loom_pipeline_transport_block_t* block = &blocks[block_index];
     const loom_kernel_async_stream_t* stream = block->stream;
     if (stream) {
@@ -642,17 +733,21 @@ static iree_status_t loom_pipeline_worker_transport(
         steps[count++] = (loom_pipeline_transport_step_t){
             .op = op,
             .kind = LOOM_PIPELINE_TRANSPORT_STEP_CHANNEL,
+            .scope = scope,
             .source.channel = &worker->channels.actions[channel++]};
       } else if (stream && transfer < stream->transfer_count &&
                  stream->transfers[transfer].request.op == op) {
         steps[count++] = (loom_pipeline_transport_step_t){
             .op = op,
             .kind = LOOM_PIPELINE_TRANSPORT_STEP_TRANSFER,
+            .scope = scope,
             .source.transfer = &stream->transfers[transfer++]};
       } else if (stream && wait < stream->wait_count &&
                  stream->waits[wait] == op) {
         steps[count++] = (loom_pipeline_transport_step_t){
-            .op = op, .kind = LOOM_PIPELINE_TRANSPORT_STEP_WAIT};
+            .op = op,
+            .kind = LOOM_PIPELINE_TRANSPORT_STEP_WAIT,
+            .scope = scope};
         ++wait;
       } else if (!iree_any_bit_set(op->traits, LOOM_TRAIT_TERMINATOR) &&
                  !loom_kernel_async_group_isa(op)) {
@@ -669,22 +764,21 @@ static iree_status_t loom_pipeline_worker_transport(
   const loom_value_fact_induction_t* induction = NULL;
   uint64_t repetitions = 1;
   if (graph->has_cycles && stream_count) {
-    if (structure->loops.loop_count != 1) {
-      return iree_ok_status();
-    }
-    induction = &structure->inductions[0];
-    if (induction->update != LOOM_VALUE_FACT_INDUCTION_UPDATE_ADDITIVE) {
-      return iree_ok_status();
-    }
-    for (iree_host_size_t i = 0; i < count; ++i) {
-      const uint16_t block = steps[i].op->parent_block->region_index;
-      if (!loom_cfg_loop_nest_contains(&structure->loops, 0, block) ||
-          block == structure->loops.loops[0].header_index) {
-        return iree_ok_status();
+    repetitions = 0;
+    if (structure->loops.loop_count == 1) {
+      bool uniform = true;
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        const uint16_t block = steps[i].op->parent_block->region_index;
+        uniform &= steps[i].scope == 0 &&
+                   block != structure->loops.loops[0].header_index;
+      }
+      if (uniform && structure->inductions[0].update ==
+                         LOOM_VALUE_FACT_INDUCTION_UPDATE_ADDITIVE) {
+        induction = &structure->inductions[0];
+        const uint16_t block = steps[0].op->parent_block->region_index;
+        repetitions = worker->block_execution_counts[block];
       }
     }
-    repetitions =
-        worker->block_execution_counts[steps[0].op->parent_block->region_index];
   }
   const loom_pipeline_transport_cohort_t* cohorts = NULL;
   iree_host_size_t cohort_count = 0;
@@ -734,13 +828,9 @@ static iree_status_t loom_pipeline_worker_transport(
       .copy_loop_count = copy_loop_count,
       .repetitions = repetitions,
       .induction = induction};
-  loom_pipeline_transport_input_t input;
-  if (stream_count && loom_pipeline_transport_input(worker, &input)) {
-    loom_pipeline_transport_input_t* retained;
+  if (stream_count) {
     IREE_RETURN_IF_ERROR(
-        iree_arena_allocate(arena, sizeof(*retained), (void**)&retained));
-    *retained = input;
-    worker->transport.input = retained;
+        loom_pipeline_transport_input(arena, structure, blocks, worker));
   }
   return iree_ok_status();
 }
@@ -875,6 +965,23 @@ static iree_status_t loom_pipeline_worker_build(
     status = loom_channel_completion_analyze(&worker->channels, worker->graph,
                                              view_regions, execution_bounds,
                                              arena, &worker->completion);
+  }
+  if (iree_status_is_ok(status) &&
+      rejection.kind == LOOM_CHANNEL_PLAN_REJECTION_NONE &&
+      worker->asynchronous.error_count == 0) {
+    if (!worker->graph->has_cycles) {
+      worker->block_order = worker->graph->reverse_postorder.values;
+    } else if (worker->execution_counts.values) {
+      uint16_t* order = NULL;
+      status = iree_arena_allocate_array(arena,
+                                         worker->graph->reverse_postorder.count,
+                                         sizeof(*order), (void**)&order);
+      if (iree_status_is_ok(status)) {
+        status =
+            loom_cfg_loop_nest_order_blocks(&structure->loops, arena, order);
+        worker->block_order = order;
+      }
+    }
   }
   if (iree_status_is_ok(status) &&
       rejection.kind == LOOM_CHANNEL_PLAN_REJECTION_NONE &&
@@ -1018,7 +1125,8 @@ iree_status_t loom_pipeline_workers_prove_sources(
   iree_arena_allocator_t* arena = storage_access->arena;
   bool repeated_transport = false;
   for (iree_host_size_t i = 0; i < worker_count; ++i) {
-    repeated_transport |= workers[i].transport.induction != NULL;
+    repeated_transport |=
+        workers[i].transport.stream_count && workers[i].graph->has_cycles;
   }
   if (!repeated_transport) {
     return iree_ok_status();
@@ -1106,7 +1214,7 @@ iree_status_t loom_pipeline_workers_prove_sources(
   // exclude disjoint storage without implying purity.
   for (iree_host_size_t i = 0; i < worker_count; ++i) {
     loom_pipeline_worker_t* worker = &workers[i];
-    if (!worker->transport.induction) {
+    if (!worker->transport.stream_count || !worker->graph->has_cycles) {
       continue;
     }
     bool stable = true;

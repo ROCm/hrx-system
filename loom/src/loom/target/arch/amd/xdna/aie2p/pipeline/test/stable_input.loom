@@ -1,0 +1,131 @@
+// Caller storage stays stable for the invocation. The coefficient prefix and
+// repeated strided panels share one shim source engine; the consuming core
+// sequences those phases without another worker or a shared ready/free protocol.
+// Conditional arithmetic must not reorder the prefix admission after its read.
+aie2p.target<array> @device
+
+pipeline.def<kernel> public retain target(@device) @phased_input() run(%coefficients_arg: buffer, %panels_arg: buffer, %output_arg: buffer) {
+  %coefficients_unique, %panels_unique, %output_unique = buffer.assume.noalias %coefficients_arg, %panels_arg, %output_arg : buffer, buffer, buffer
+  %coefficients, %panels, %output = buffer.assume.alignment %coefficients_unique, %panels_unique, %output_unique {minimum_alignment = 64} : buffer, buffer, buffer
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %origin = index.constant 0 : offset
+  %storage_bytes = index.constant 192 : offset
+  %panel_offset = index.constant 64 : offset
+  %record_bytes = index.constant 64 : offset
+  %source_stride = index.constant 128 : offset
+  %prefix_capacity = index.constant 1 : index
+  %panel_capacity = index.constant 2 : index
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %records = index.constant 65536 : index
+  %period = index.constant 16 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %storage_bytes : buffer
+  %prefix_slots = buffer.view %storage[%origin] : buffer -> view<1x4xi32>
+  %panel_slots = buffer.view %storage[%panel_offset] : buffer -> view<2x16xi32>
+  %prefix = channel.bind<fifo> %prefix_slots, %prefix_capacity : view<1x4xi32>, index -> channel<tile<4xi32>>
+  %bulk = channel.bind<fifo> %panel_slots, %panel_capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %coefficients_view = buffer.view %coefficients[%origin] : buffer -> view<4xi32>
+    %write, %destination = channel.reserve %prefix : channel<tile<4xi32>> -> (write<tile<4xi32>>, view<4xi32>)
+    %copy = kernel.async.copy %coefficients_view to %destination {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4xi32> to view<4xi32> -> kernel.async.token
+    %arrival = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %arrival {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<4xi32>>
+    scf.for %record = [%begin to %records step %step] {
+      %panel = index.rem %record, %period : index
+      %offset = index.scale %panel, %source_stride : index, offset -> offset
+      %source = buffer.view %panels[%offset] : buffer -> view<4x4xi32, #encoding.layout.strided<strides=[8, 1]>>
+      %write, %destination = channel.reserve %bulk : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      %target = view.bitcast %destination : view<16xi32> -> view<4x4xi32>
+      %copy = kernel.async.copy %source to %target {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<4x4xi32, #encoding.layout.strided<strides=[8, 1]>> to view<4x4xi32> -> kernel.async.token
+      %arrival = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %arrival {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %prefix_read, %coefficients_view = channel.acquire %prefix : channel<tile<4xi32>> -> (read<tile<4xi32>>, view<4xi32>)
+    %coefficient = view.load %coefficients_view[0] : view<4xi32> -> i32
+    %bias = vector.splat %coefficient : vector<16xi32>
+    scf.for %record = [%begin to %records step %step] {
+      %read, %payload = channel.acquire<mutable> %bulk : channel<tile<16xi32>> -> (read<tile<16xi32>, mutable>, view<16xi32>)
+      %values = vector.load %payload[0] : view<16xi32> -> vector<16xi32>
+      %first = index.cmp eq, %record, %begin : index
+      %result = scf.if %first -> (vector<16xi32>) {
+        %added = vector.addi %values, %bias : vector<16xi32>
+        scf.yield %added : vector<16xi32>
+      } else {
+        %subtracted = vector.subi %values, %bias : vector<16xi32>
+        scf.yield %subtracted : vector<16xi32>
+      }
+      vector.store %result, %payload[0] : vector<16xi32>, view<16xi32>
+      %offset = index.scale %record, %record_bytes : index, offset -> offset
+      %destination = buffer.view %output[%offset] : buffer -> view<16xi32>
+      %copy = kernel.async.copy %payload to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %departure = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %departure {newer_groups = 0} : kernel.async.group
+      channel.release %read : read<tile<16xi32>, mutable>
+    }
+    channel.release %prefix_read : read<tile<4xi32>>
+  }
+}
+
+// The oracle addresses scalar logical coordinates directly. Input padding and
+// surrounding guards remain part of each complete-buffer comparison.
+func.def @phased_input_reference(%coefficients: buffer, %panels: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %records = index.constant 65536 : index
+  %period = index.constant 16 : index
+  %axis = index.constant 4 : index
+  %row_stride = index.constant 8 : index
+  %panel_stride = index.constant 32 : index
+  %record_stride = index.constant 16 : index
+  %coefficient_view = buffer.view %coefficients[%origin] : buffer -> view<4xi32>
+  %panel_view = buffer.view %panels[%origin] : buffer -> view<512xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1048576xi32>
+  %coefficient = view.load %coefficient_view[0] : view<4xi32> -> i32
+  scf.for %record = [%begin to %records step %step] {
+    %panel = index.rem %record, %period : index
+    %source_base = index.mul %panel, %panel_stride : index
+    %destination_base = index.mul %record, %record_stride : index
+    %first = index.cmp eq, %record, %begin : index
+    scf.for %row = [%begin to %axis step %step] {
+      %source_row = index.madd %row, %row_stride, %source_base : index
+      %destination_row = index.madd %row, %axis, %destination_base : index
+      scf.for %column = [%begin to %axis step %step] {
+        %source = index.add %source_row, %column : index
+        %destination = index.add %destination_row, %column : index
+        %value = view.load %panel_view[%source] : view<512xi32> -> i32
+        %result = scf.if %first -> (i32) {
+          %added = scalar.addi %value, %coefficient : i32
+          scf.yield %added : i32
+        } else {
+          %subtracted = scalar.subi %value, %coefficient : i32
+          scf.yield %subtracted : i32
+        }
+        view.store %result, %output_view[%destination] : i32, view<1048576xi32>
+      }
+    }
+  }
+  func.return
+}
+
+check.scenario public @stable_phases_reentry {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %coefficient_storage = check.generate.random.uniform seed(%seed) range(-31 to 31) : tensor<36xi32>
+    %coefficients = check.tensor.view %coefficient_storage offset(64) : tensor<36xi32> -> tensor<4xi32>
+    %panel_storage = check.generate.random.uniform seed(%seed) range(-1000 to 1000) : tensor<544xi32>
+    %panels = check.tensor.view %panel_storage offset(64) : tensor<544xi32> -> tensor<512xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<1048608xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<1048608xi32> -> tensor<1048576xi32>
+    check.compare<@phased_input, @phased_input_reference>(%coefficients, %panels, %output) : (tensor<4xi32>, tensor<512xi32>, tensor<1048576xi32>) -> () {
+      check.expect.equal actual(%coefficient_storage) expected(%coefficient_storage) : tensor<36xi32>
+      check.expect.equal actual(%panel_storage) expected(%panel_storage) : tensor<544xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<1048608xi32>
+    }
+  }
+  check.return
+}

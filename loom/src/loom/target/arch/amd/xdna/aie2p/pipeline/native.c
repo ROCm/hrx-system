@@ -9,6 +9,7 @@
 #include "loom/ops/func/ops.h"
 #include "loom/ops/pipeline/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/input.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/semaphores.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/storage.h"
@@ -468,10 +469,13 @@ static bool loom_aie2p_native_can_repeat(
     const loom_pipeline_realization_t* realization,
     const loom_pipeline_worker_t* source, loom_aie2p_native_worker_t* worker) {
   const loom_pipeline_transport_t* transport = &source->transport;
-  const loom_pipeline_transport_input_t* input = transport->input;
-  if (!input || !transport->sources_stable || transport->repetitions < 2) {
+  if (!transport->input || transport->input->phase_count != 1 ||
+      transport->input->acquisition || !transport->sources_stable ||
+      transport->repetitions < 2) {
     return false;
   }
+  const loom_pipeline_transport_input_phase_t* input =
+      &transport->input->phases[0];
   const loom_movement_request_t* request = &input->transfer->request;
   if (request->source.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL ||
       request->dest.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
@@ -751,6 +755,13 @@ static iree_status_t loom_aie2p_native_select(
             IREE_SV("a completed FIFO prefix within semaphore credit range"));
       }
     }
+    bool input = false;
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_native_select_input(context, realization, i, &input));
+    if (input) {
+      worker->execution = LOOM_AIE2P_NATIVE_EXECUTION_INPUT;
+      continue;
+    }
     bool configure = false;
     bool repeat = false;
     if (source->transport.steps) {
@@ -902,7 +913,11 @@ static iree_status_t loom_aie2p_native_select(
           IREE_SV("a DMA-owned ingress for retained FIFO replay"));
     }
   }
-  IREE_RETURN_IF_ERROR(loom_aie2p_native_select_progress(context, realization));
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_select_progress(context, realization, out_valid));
+  if (!*out_valid) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(
       loom_aie2p_native_select_collectives(context, realization, out_valid));
   if (!*out_valid) {

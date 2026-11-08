@@ -6,6 +6,7 @@
 
 #include "loom/util/cfg_loop_nest.h"
 
+#include <algorithm>
 #include <random>
 #include <vector>
 
@@ -44,6 +45,42 @@ class CfgLoopNestTest : public ::testing::Test {
     CfgGraph fixture(successors);
     const auto nest = Build(fixture);
     IREE_ASSERT_OK(testing::CheckLoopNest(nest));
+    if (!nest.reducible) {
+      return;
+    }
+    const auto* graph = fixture.get();
+    std::vector<uint16_t> order(graph->reverse_postorder.count, UINT16_MAX);
+    IREE_ASSERT_OK(
+        loom_cfg_loop_nest_order_blocks(&nest, &arena_, order.data()));
+    std::vector<uint16_t> positions(successors.size(), UINT16_MAX);
+    for (size_t i = 0; i < order.size(); ++i) {
+      ASSERT_LT(order[i], successors.size());
+      ASSERT_EQ(positions[order[i]], UINT16_MAX);
+      ASSERT_TRUE(graph->blocks[order[i]].reachable);
+      positions[order[i]] = i;
+    }
+    for (uint16_t block : order) {
+      for (uint16_t target : successors[block]) {
+        const uint16_t loop = loom_cfg_loop_nest_innermost(&nest, target);
+        if (loop != LOOM_CFG_LOOP_NEST_NONE &&
+            nest.loops[loop].header_index == target &&
+            loom_cfg_loop_nest_contains(&nest, loop, block)) {
+          continue;
+        }
+        EXPECT_LT(positions[block], positions[target]);
+      }
+    }
+    for (uint16_t loop = 0; loop < nest.loop_count; ++loop) {
+      const size_t begin = positions[nest.loops[loop].header_index];
+      size_t count = 0;
+      for (uint16_t block : order) {
+        count += loom_cfg_loop_nest_contains(&nest, loop, block);
+      }
+      ASSERT_LE(begin + count, order.size());
+      for (size_t i = begin; i < begin + count; ++i) {
+        EXPECT_TRUE(loom_cfg_loop_nest_contains(&nest, loop, order[i]));
+      }
+    }
   }
 
   // Pool shared by successive independent immutable snapshots.
@@ -243,7 +280,8 @@ TEST_F(CfgLoopNestTest, StructuralOrderVisitsBodiesBeforeContinuations) {
     ASSERT_TRUE(loom_cfg_loop_nest_calculate_block_execution_counts(
         &nest, trips.data(), counts.data()));
     std::vector<uint16_t> order(fixture.get()->reverse_postorder.count);
-    loom_cfg_loop_nest_order_blocks(&nest, order.data());
+    IREE_ASSERT_OK(
+        loom_cfg_loop_nest_order_blocks(&nest, &arena_, order.data()));
     EXPECT_EQ(order, test.expected);
   }
 }
@@ -263,9 +301,29 @@ TEST_F(CfgLoopNestTest, StructuralOrderClosesDeepSharedLatchesIteratively) {
   ASSERT_TRUE(loom_cfg_loop_nest_calculate_block_execution_counts(
       &nest, trips.data(), counts.data()));
   std::vector<uint16_t> order(successors.size());
-  loom_cfg_loop_nest_order_blocks(&nest, order.data());
+  IREE_ASSERT_OK(loom_cfg_loop_nest_order_blocks(&nest, &arena_, order.data()));
   for (uint16_t i = 0; i < order.size(); ++i) {
     EXPECT_EQ(order[i], i);
+  }
+}
+
+TEST_F(CfgLoopNestTest, StructuralOrderPreservesConditionalAlternatives) {
+  // Diamonds before, within, and after a loop, including a body with nested
+  // sibling loops. Reverse successor order to exercise both DFS choices.
+  const std::vector<std::vector<std::vector<uint16_t>>> cases = {
+      {{1, 2}, {3}, {3}, {4, 5}, {3}, {}},
+      {{1}, {2, 6}, {3, 4}, {5}, {5}, {1}, {}},
+      {{1}, {2, 3}, {1}, {4, 5}, {6}, {6}, {}},
+      {{1}, {2, 9}, {3, 6}, {4, 5}, {3}, {8}, {7, 8}, {6}, {1}, {}},
+      // A disconnected branch and self-cycle never enter the order.
+      {{4}, {3}, {}, {4}, {1, 2}, {6, 7}, {5}, {7}},
+  };
+  for (auto successors : cases) {
+    CheckOracle(successors);
+    for (auto& outgoing : successors) {
+      std::reverse(outgoing.begin(), outgoing.end());
+    }
+    CheckOracle(successors);
   }
 }
 
