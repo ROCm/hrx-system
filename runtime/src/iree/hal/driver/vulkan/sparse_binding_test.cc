@@ -5,7 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <array>
+#include <atomic>
 #include <cstring>
+#include <semaphore>
 #include <vector>
 
 #include "iree/base/internal/math.h"
@@ -447,6 +449,75 @@ TEST_P(VulkanSparseBindingTest, CoarseMappingUnitsPreserveExactTail) {
   ExpectPage(target, 0, input[0]);
   ExpectPage(target, unit, input[0]);
   IREE_ASSERT_OK(iree_hal_virtual_buffer_detach(target, all));
+}
+
+TEST_P(VulkanSparseBindingTest, QueueMapReleasesViewsBeforeTerminalSignal) {
+  iree_hal_buffer_t* target = nullptr;
+  IREE_ASSERT_OK(Reserve(capabilities_.mapping_granularity, &target));
+  iree_hal_memory_scope_t scope;
+  const iree_hal_memory_site_t site = {
+      .kind = IREE_HAL_MEMORY_SITE_QUEUE,
+      .family = family_.family,
+  };
+  IREE_ASSERT_OK(
+      iree_hal_device_group_resolve_memory_scope(device_group_, site, &scope));
+  struct State {
+    // Whether the original mapping view has released its pool obligation.
+    std::atomic<bool> released{false};
+    // Joins the release callback before its stack-owned state is destroyed.
+    std::binary_semaphore release_finished{0};
+    // Joins the terminal observer independently of semaphore wait completion.
+    std::binary_semaphore terminal_finished{0};
+  } state;
+  const iree_hal_buffer_release_callback_t release = {
+      .fn =
+          [](void* user_data, iree_hal_buffer_t*) {
+            auto* state = static_cast<State*>(user_data);
+            state->released = true;
+            state->release_finished.release();
+          },
+      .user_data = &state,
+  };
+  Ref<iree_hal_buffer_t> view;
+  IREE_ASSERT_OK(iree_hal_subspan_buffer_create_with_callback(
+      target, 0, capabilities_.mapping_granularity, release,
+      iree_allocator_system(), view.out()));
+  const iree_hal_memory_mapping_t mapping = {
+      .target = view,
+      .scope = scope,
+      .target_range = {.byte_length = capabilities_.mapping_granularity},
+      .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE,
+  };
+  SemaphoreList gate(device_, {0}, {1});
+  SemaphoreList done(device_, {0}, {1});
+  IREE_ASSERT_OK(iree_hal_queue_map(&sparse_queue_->base, gate, done, 1,
+                                    &mapping, IREE_HAL_QUEUE_MAP_FLAG_NONE));
+  view.reset();
+  EXPECT_FALSE(state.released.load());
+  iree_async_semaphore_timepoint_t timepoint = {
+      .callback =
+          [](void* user_data, iree_async_semaphore_timepoint_t*,
+             iree_status_t status) {
+            auto* state = static_cast<State*>(user_data);
+            IREE_EXPECT_OK(status);
+            // A terminal observer may immediately destroy the view's pool
+            // owner.
+            EXPECT_TRUE(state->released.load());
+            state->terminal_finished.release();
+          },
+      .user_data = &state,
+  };
+  Status registration(iree_async_semaphore_acquire_timepoint(
+      reinterpret_cast<iree_async_semaphore_t*>(done.semaphores[0]), 1,
+      &timepoint));
+  IREE_EXPECT_OK(iree_hal_semaphore_list_signal(gate, nullptr));
+  IREE_EXPECT_OK(iree_hal_semaphore_list_wait(done, iree_infinite_timeout(),
+                                              IREE_ASYNC_WAIT_FLAG_NONE));
+  state.release_finished.acquire();
+  if (registration.ok()) {
+    state.terminal_finished.acquire();
+  }
+  IREE_EXPECT_OK(registration.release());
 }
 
 TEST_P(VulkanSparseBindingTest, QueueMapCapturesPendingAllocations) {

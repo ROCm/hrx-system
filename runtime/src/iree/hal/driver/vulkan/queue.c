@@ -4690,6 +4690,7 @@ static void iree_hal_vulkan_queue_complete_submission(
   }
 
   switch (submission->kind) {
+    case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_SPARSE_BIND:
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_FILL:
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_UPDATE:
     case IREE_HAL_VULKAN_QUEUE_SUBMISSION_KIND_COPY:
