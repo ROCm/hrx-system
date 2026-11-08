@@ -88,8 +88,6 @@ iree_status_t iree_hal_streaming_context_create(
   context->queue = NULL;
   context->device_allocator =
       iree_hal_device_allocator(device_entry->hal_device);
-  context->timestamp_domain = iree_hal_streaming_query_timestamp_domain(
-      iree_hal_device_spec(device_entry->hal_device));
   iree_hal_streaming_context_set_flags(context, flags);
   context->default_stream = NULL;
   context->next_capture_id = 1;
@@ -153,6 +151,10 @@ iree_status_t iree_hal_streaming_context_create(
   if (iree_status_is_ok(status)) {
     status = iree_hal_streaming_device_acquire_primary_queue(device_entry,
                                                              &context->queue);
+  }
+  if (iree_status_is_ok(status)) {
+    context->timestamp_domain = iree_hal_streaming_query_timestamp_domain(
+        iree_hal_queue_family_spec(iree_hal_queue_family(context->queue)));
   }
 
   // Create the context-wide event record timeline. Resource-partitioned
@@ -400,12 +402,12 @@ void iree_hal_streaming_context_set_flags(
 iree_async_wait_flags_t iree_hal_streaming_context_wait_flags(
     iree_hal_streaming_context_t* context) {
   switch (iree_hal_streaming_context_flags(context).scheduling_mode) {
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO:
     case IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN:
       return IREE_ASYNC_WAIT_FLAG_ACTIVE;
     case IREE_HAL_STREAMING_SCHEDULING_MODE_BLOCKING_SYNC:
       return IREE_ASYNC_WAIT_FLAG_NONE;
     case IREE_HAL_STREAMING_SCHEDULING_MODE_YIELD:
-    case IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO:
     default:
       return IREE_ASYNC_WAIT_FLAG_YIELD;
   }

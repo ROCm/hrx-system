@@ -12,6 +12,7 @@
 #include "common/device.h"
 #include "common/direct_transfer.h"
 #include "common/graph.h"
+#include "common/graph_memory.h"
 #include "common/hrx_bridge.h"
 #include "common/peer.h"
 #include "common/stream.h"
@@ -378,8 +379,9 @@ static void iree_hal_streaming_buffer_release_context(
 // Wraps an HRX buffer in a stream buffer and caches exported pointer metadata.
 static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
     iree_hal_streaming_context_t* context, hrx_buffer_t hrx_buf,
-    int memory_type, iree_hal_streaming_memory_kind_t memory_kind,
-    void* imported_host_ptr, hrx_mem_pool_t allocation_pool,
+    iree_device_size_t logical_size, int memory_type,
+    iree_hal_streaming_memory_kind_t memory_kind, void* imported_host_ptr,
+    hrx_mem_pool_t allocation_pool,
     iree_hal_streaming_buffer_context_ownership_t context_ownership,
     iree_hal_streaming_buffer_t** out_wrapper) {
   IREE_ASSERT_ARGUMENT(context);
@@ -422,7 +424,7 @@ static iree_status_t iree_hal_streaming_buffer_wrap_hrx_buffer(
   iree_slim_mutex_initialize(&wrapper->context_import_mutex);
   wrapper->context_imports = NULL;
   wrapper->ipc_handle = NULL;
-  wrapper->size = hrx_buf->size;
+  wrapper->size = logical_size;
   wrapper->logical_size = wrapper->size;
   iree_hal_streaming_buffer_activate_pool_allocation(wrapper);
 
@@ -500,8 +502,8 @@ static iree_status_t iree_hal_streaming_buffer_wrap(
               (size_t)iree_hal_buffer_byte_length(buffer), NULL, &hrx_buf));
 
   iree_status_t status = iree_hal_streaming_buffer_wrap_hrx_buffer(
-      context, hrx_buf, memory_type, memory_kind, imported_host_ptr,
-      allocation_pool, context_ownership, out_wrapper);
+      context, hrx_buf, hrx_buf->size, memory_type, memory_kind,
+      imported_host_ptr, allocation_pool, context_ownership, out_wrapper);
   hrx_buffer_release(hrx_buf);
 
   IREE_TRACE_ZONE_END(z0);
@@ -583,13 +585,13 @@ iree_status_t iree_hal_streaming_memory_wrap_buffer(
 
 iree_status_t iree_hal_streaming_memory_wrap_virtual_reservation(
     iree_hal_streaming_context_t* context, hrx_buffer_t virtual_buffer,
-    iree_hal_streaming_buffer_t** out_buffer) {
+    iree_device_size_t logical_size, iree_hal_streaming_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(context);
   IREE_ASSERT_ARGUMENT(virtual_buffer);
   IREE_ASSERT_ARGUMENT(out_buffer);
   *out_buffer = NULL;
   return iree_hal_streaming_buffer_wrap_hrx_buffer(
-      context, virtual_buffer, HRX_MEMORY_TYPE_DEVICE_LOCAL,
+      context, virtual_buffer, logical_size, HRX_MEMORY_TYPE_DEVICE_LOCAL,
       IREE_HAL_STREAMING_MEMORY_KIND_DEVICE,
       /*imported_host_ptr=*/NULL, /*allocation_pool=*/NULL,
       IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED, out_buffer);
@@ -1349,7 +1351,7 @@ iree_status_t iree_hal_streaming_memory_allocate_device_from_pool(
 
   iree_hal_streaming_buffer_t* wrapper = NULL;
   iree_status_t status = iree_hal_streaming_buffer_wrap_hrx_buffer(
-      context, hrx_buffer, (int)hrx_buffer->mem_type,
+      context, hrx_buffer, size, (int)hrx_buffer->mem_type,
       IREE_HAL_STREAMING_MEMORY_KIND_DEVICE,
       /*imported_host_ptr=*/NULL, pool,
       IREE_HAL_STREAMING_BUFFER_CONTEXT_RETAINED, &wrapper);
@@ -1862,6 +1864,18 @@ iree_status_t iree_hal_streaming_memory_free_device(
   }
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_hal_streaming_graph_allocation_t* graph_allocation = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_graph_allocation_lookup(context, ptr,
+                                                     &graph_allocation));
+  if (graph_allocation) {
+    iree_status_t graph_status =
+        iree_hal_streaming_graph_allocation_free(graph_allocation, NULL);
+    iree_hal_streaming_graph_allocation_release(graph_allocation);
+    IREE_TRACE_ZONE_END(z0);
+    return graph_status;
+  }
+
   iree_hal_streaming_context_t* owner_context = NULL;
   iree_hal_streaming_buffer_t* wrapper = NULL;
   iree_status_t status = iree_hal_streaming_memory_take_allocation_context(
@@ -2034,6 +2048,18 @@ iree_status_t iree_hal_streaming_memory_free_device_async(
   }
   IREE_ASSERT_ARGUMENT(stream);
   IREE_TRACE_ZONE_BEGIN(z0);
+
+  iree_hal_streaming_graph_allocation_t* graph_allocation = NULL;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_streaming_graph_allocation_lookup(context, ptr,
+                                                     &graph_allocation));
+  if (graph_allocation) {
+    iree_status_t graph_status =
+        iree_hal_streaming_graph_allocation_free(graph_allocation, stream);
+    iree_hal_streaming_graph_allocation_release(graph_allocation);
+    IREE_TRACE_ZONE_END(z0);
+    return graph_status;
+  }
 
   iree_hal_streaming_context_t* owner_context = NULL;
   iree_hal_streaming_buffer_t* wrapper = NULL;

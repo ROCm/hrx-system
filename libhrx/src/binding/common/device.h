@@ -24,15 +24,6 @@ extern "C" {
 // Device types
 //===----------------------------------------------------------------------===//
 
-typedef struct iree_hal_streaming_graph_memory_size_entry_t {
-  // Next size class tracked in the device graph-memory accounting table.
-  struct iree_hal_streaming_graph_memory_size_entry_t* next;
-  // Exact allocation size represented by this reusable graph-memory class.
-  iree_device_size_t size;
-  // Number of live executable graphs actively using this reusable size class.
-  uint32_t reference_count;
-} iree_hal_streaming_graph_memory_size_entry_t;
-
 // Maximum number of devices supported by the stream HAL.
 // This avoids dynamic enumeration overhead during initialization.
 #define IREE_HAL_STREAMING_MAX_DEVICES 64
@@ -113,21 +104,19 @@ typedef struct iree_hal_streaming_device_t {
   // Current device allocation pool, protected by primary_context_mutex.
   hrx_mem_pool_t current_mem_pool;
 
-  // Guards graph-memory accounting fields.
+  // Guards graph-memory accounting and cached physical blocks.
   iree_slim_mutex_t graph_memory_mutex;
-  // Current graph-memory bytes visible via hipGraphMemAttrUsedMemCurrent.
+  // Logical bytes in accepted live graph allocations.
   uint64_t graph_memory_used_current;
   // High-water graph-memory bytes visible via hipGraphMemAttrUsedMemHigh.
   uint64_t graph_memory_used_high;
-  // Current graph-memory reservation visible via
-  // hipGraphMemAttrReservedMemCurrent.
+  // Physical extents retained for accepted allocations and cached reuse.
   uint64_t graph_memory_reserved_current;
   // High-water graph-memory reservation visible via
   // hipGraphMemAttrReservedMemHigh.
   uint64_t graph_memory_reserved_high;
-  // Reusable graph-memory size classes retained by this device graph pool.
-  iree_hal_streaming_graph_memory_size_entry_t*
-      graph_memory_reusable_size_entries;
+  // Unmapped physical graph blocks, reusable after their captured timepoints.
+  struct iree_hal_streaming_graph_memory_block_t* graph_memory_blocks;
 } iree_hal_streaming_device_t;
 
 // Global device registry for multi-device management.

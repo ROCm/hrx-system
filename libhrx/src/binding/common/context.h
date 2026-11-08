@@ -41,7 +41,8 @@ typedef iree_host_size_t iree_hal_streaming_device_ordinal_t;
 
 // Scheduling policy.
 typedef enum iree_hal_streaming_scheduling_mode_e {
-  // Bounded active progress before yielding to the backend's blocking wait.
+  // Favor active progress for low-latency stream synchronization. Callers that
+  // prefer to release the CPU select YIELD or BLOCKING_SYNC explicitly.
   IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO = 0,
   // Spin wait (busy wait).
   IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN,

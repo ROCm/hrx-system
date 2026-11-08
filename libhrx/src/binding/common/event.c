@@ -17,34 +17,15 @@
 //===----------------------------------------------------------------------===//
 
 iree_hal_streaming_timestamp_domain_t iree_hal_streaming_query_timestamp_domain(
-    const iree_hal_device_spec_t* spec) {
+    const iree_hal_queue_family_spec_t* family) {
   const iree_hal_streaming_timestamp_domain_t none = {0};
-  if (!spec) {
+  if (!family) {
     return none;
   }
-  const iree_hal_device_timing_spec_t* timing =
-      iree_hal_device_spec_timing(spec);
-  if (!iree_all_bits_set(timing->flags,
-                         IREE_HAL_DEVICE_TIMING_SPEC_FLAG_DEVICE_TIMESTAMPS)) {
-    return none;
-  }
-  const iree_hal_device_queue_spec_t* queues =
-      iree_hal_device_spec_queues(spec);
-  if (queues->family_count != 1) {
-    return none;
-  }
-  const iree_hal_queue_family_spec_t* family = &queues->families[0];
-  // Exactly one physical device: the header guarantees a single comparable
-  // domain only for one family covering one physical device.
+  // Every context record uses a queue from this family. Unrelated compute or
+  // transfer families need not share its clock, but this family must identify
+  // one physical device so all of its records can be compared.
   if (iree_math_count_ones_u64(family->physical_device_affinity) != 1) {
-    return none;
-  }
-  // The flag comes from the device-scope summary and the numbers from the
-  // family, which is sound only while the two describe the same domain. On a
-  // single-family device they must, so facets that disagree contradict the
-  // device's own facts and name no domain to convert with.
-  if (timing->timestamp_frequency_hz != family->timestamp_frequency_hz ||
-      timing->timestamp_valid_bits != family->timestamp_valid_bits) {
     return none;
   }
   if (family->timestamp_frequency_hz == 0 ||
@@ -576,8 +557,7 @@ iree_status_t iree_hal_streaming_event_record(
     status = iree_hal_queue_flush(submission.queue);
   }
   iree_slim_mutex_unlock(&stream->mutex);
-  // The last captured-graph reference can synchronize every context and relock
-  // this stream, so it is dropped outside the stream mutex.
+  // Graph destruction releases owned resources outside submission locks.
   iree_hal_streaming_graph_release(dropped_capture_graph);
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
 

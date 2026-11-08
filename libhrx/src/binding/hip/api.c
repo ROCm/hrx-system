@@ -50,6 +50,7 @@
 #include "common/direct_transfer.h"
 #include "common/event.h"
 #include "common/graph.h"
+#include "common/graph_memory.h"
 #include "common/hrx_bridge.h"
 #include "common/init.h"
 #include "common/kernel_arguments.h"
@@ -4052,7 +4053,8 @@ HIPAPI hipError_t hipDeviceGraphMemTrim(int device) {
   if (device_result != hipSuccess) {
     HIP_RETURN_ERROR(device_result);
   }
-  iree_hal_streaming_graph_memory_trim(device_entry);
+  HIP_RETURN_STATUS(iree_hal_streaming_graph_memory_trim(device_entry),
+                    hipErrorUnknown);
   HIP_RETURN_ERROR(hipSuccess);
 }
 
@@ -14513,9 +14515,8 @@ static void iree_hip_invalidate_event_capture(
 //
 // Synchronization: Never waits for a record to complete; an event whose record
 // is still outstanding is reported as hipErrorNotReady. Refusing a captured
-// pair invalidates that capture, and dropping the last reference to the graph
-// it was building frees the host allocations the graph owns, which
-// synchronizes every context.
+// pair invalidates that capture. Releasing the captured graph drops its owned
+// resources without synchronizing unrelated contexts.
 //
 // Timing behavior:
 // - Stop event must be recorded after start event.
@@ -22595,23 +22596,39 @@ HIPAPI hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode,
     HIP_RETURN_STATUS(metadata_status, hipErrorOutOfMemory);
   }
 
-  hrx_mem_pool_t pool = NULL;
-  hipError_t pool_result =
-      iree_hip_current_mem_pool(stream_graph->context, &pool);
-  if (pool_result != hipSuccess) {
-    iree_status_ignore(iree_hal_streaming_graph_destroy_node(node));
-    HIP_RETURN_ERROR(pool_result);
+  hrx_device_t devices[IREE_HAL_STREAMING_MAX_DEVICES];
+  iree_hal_memory_access_t accesses[IREE_HAL_STREAMING_MAX_DEVICES];
+  iree_status_t allocation_status =
+      HRX_CALL(hrx_gpu_device_get(params->poolProps.location.id, &devices[0]));
+  accesses[0] = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE;
+  iree_host_size_t participant_count = 1;
+  for (size_t i = 0;
+       i < params->accessDescCount && iree_status_is_ok(allocation_status);
+       ++i) {
+    hrx_device_t device = NULL;
+    allocation_status = HRX_CALL(
+        hrx_gpu_device_get(params->accessDescs[i].location.id, &device));
+    if (!iree_status_is_ok(allocation_status)) {
+      break;
+    }
+    iree_host_size_t ordinal = 0;
+    for (; ordinal < participant_count && devices[ordinal] != device;
+         ++ordinal) {
+    }
+    if (ordinal == participant_count) {
+      devices[participant_count++] = device;
+    }
+    accesses[ordinal] = (iree_hal_memory_access_t)params->accessDescs[i].flags;
   }
-  // This graph-memory implementation allocates backing storage when the graph
-  // template is built. Graph exec launch serialization prevents concurrent
-  // launches from sharing the same backing allocation.
-  hipError_t alloc_result =
-      iree_hip_malloc_from_pool(stream_graph->context, pool, params->bytesize,
-                                /*stream=*/NULL, &params->dptr);
-  hrx_mem_pool_release(pool);
-  if (alloc_result != hipSuccess) {
+  iree_hal_streaming_graph_allocation_t* allocation = NULL;
+  if (iree_status_is_ok(allocation_status)) {
+    allocation_status = iree_hal_streaming_graph_allocation_create(
+        stream_graph->context, params->bytesize, participant_count, devices,
+        accesses, &allocation, &params->dptr);
+  }
+  if (!iree_status_is_ok(allocation_status)) {
     iree_status_ignore(iree_hal_streaming_graph_destroy_node(node));
-    HIP_RETURN_ERROR(alloc_result);
+    HIP_RETURN_STATUS(allocation_status, hipErrorOutOfMemory);
   }
 
   hipMemAllocNodeParams* stored_params =
@@ -22629,25 +22646,10 @@ HIPAPI hipError_t hipGraphAddMemAllocNode(hipGraphNode_t* pGraphNode,
   node->attrs.mem_alloc.params_size = metadata_size;
   node->attrs.mem_alloc.dptr = params->dptr;
   node->attrs.mem_alloc.bytesize = params->bytesize;
-  node->attrs.mem_alloc.owns_device_allocation = true;
+  node->attrs.mem_alloc.allocation = allocation;
   stream_graph->has_graph_memory_nodes = true;
   *pGraphNode = (hipGraphNode_t)node;
   HIP_RETURN_ERROR(hipSuccess);
-}
-
-static bool iree_hip_graph_has_mem_alloc_node_for_pointer(
-    iree_hal_streaming_graph_t* graph, void* dptr) {
-  for (iree_hal_streaming_node_block_t* block = graph->node_blocks; block;
-       block = block->next) {
-    for (iree_host_size_t i = 0; i < block->count; ++i) {
-      iree_hal_streaming_graph_node_t* node = block->nodes[i];
-      if (node->type == IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_ALLOC &&
-          node->attrs.mem_alloc.dptr == dptr) {
-        return true;
-      }
-    }
-  }
-  return false;
 }
 
 HIPAPI hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode,
@@ -22665,25 +22667,26 @@ HIPAPI hipError_t hipGraphAddMemFreeNode(hipGraphNode_t* pGraphNode,
   *pGraphNode = NULL;
 
   iree_hal_streaming_graph_t* stream_graph = (iree_hal_streaming_graph_t*)graph;
-  iree_hal_streaming_buffer_ref_t ref;
-  iree_status_t lookup_status = iree_hal_streaming_memory_lookup(
-      stream_graph->context, (iree_hal_streaming_deviceptr_t)dptr, &ref);
-  if (!iree_status_is_ok(lookup_status)) {
-    iree_status_free(lookup_status);
-    HIP_RETURN_ERROR(hipErrorInvalidValue);
-  }
-  if (!iree_hip_graph_has_mem_alloc_node_for_pointer(stream_graph, dptr)) {
+  iree_hal_streaming_graph_allocation_t* allocation = NULL;
+  HIP_RETURN_STATUS(
+      iree_hal_streaming_graph_allocation_lookup(
+          stream_graph->context, (uint64_t)(uintptr_t)dptr, &allocation),
+      hipErrorInvalidValue);
+  if (!allocation) {
     HIP_RETURN_ERROR(hipErrorInvalidValue);
   }
 
   iree_hal_streaming_graph_node_t* node = NULL;
-  HIP_RETURN_STATUS(
-      iree_hal_streaming_graph_add_empty_node(
-          stream_graph, (iree_hal_streaming_graph_node_t**)pDependencies,
-          numDependencies, &node),
-      hipErrorInvalidValue);
+  iree_status_t status = iree_hal_streaming_graph_add_empty_node(
+      stream_graph, (iree_hal_streaming_graph_node_t**)pDependencies,
+      numDependencies, &node);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_streaming_graph_allocation_release(allocation);
+    HIP_RETURN_STATUS(status, hipErrorInvalidValue);
+  }
   node->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE;
   node->attrs.mem_free.dptr = dptr;
+  node->attrs.mem_free.allocation = allocation;
   stream_graph->has_graph_memory_nodes = true;
   *pGraphNode = (hipGraphNode_t)node;
   HIP_RETURN_ERROR(hipSuccess);
@@ -25941,11 +25944,14 @@ HIPAPI hipError_t hipStreamBeginCaptureToGraph(
     const void* dependencyData, size_t numDependencies,
     hipStreamCaptureMode mode) {
   HIP_API_BEGIN();
-  (void)dependencyData;
   IREE_TRACE_ZONE_BEGIN(z0);
   if (!stream || !graph || (numDependencies > 0 && !dependencies)) {
     IREE_TRACE_ZONE_END(z0);
     HIP_RETURN_ERROR(hipErrorInvalidValue);
+  }
+  if (dependencyData) {
+    IREE_TRACE_ZONE_END(z0);
+    HIP_RETURN_ERROR(hipErrorNotSupported);
   }
   if (stream == hipStreamLegacy) {
     IREE_TRACE_ZONE_END(z0);
@@ -27424,8 +27430,12 @@ static hipError_t iree_hip_consume_capture_record_status(iree_status_t status) {
 }
 
 typedef struct iree_hip_capture_mem_alloc_t {
+  // Captured public allocation parameters.
   hipMemAllocNodeParams params;
+  // Prepared address transferred to the capture's allocation node.
   void* dptr;
+  // Retained until the recorder accepts or discards this preparation.
+  iree_hal_streaming_graph_allocation_t* allocation;
 } iree_hip_capture_mem_alloc_t;
 
 static iree_status_t iree_hip_capture_record_mem_alloc(
@@ -27450,7 +27460,8 @@ static iree_status_t iree_hip_capture_record_mem_alloc(
   node->attrs.mem_alloc.params_size = sizeof(*stored_params);
   node->attrs.mem_alloc.dptr = capture->dptr;
   node->attrs.mem_alloc.bytesize = capture->params.bytesize;
-  node->attrs.mem_alloc.owns_device_allocation = true;
+  node->attrs.mem_alloc.allocation = capture->allocation;
+  iree_hal_streaming_graph_allocation_retain(capture->allocation);
   graph->has_graph_memory_nodes = true;
   *out_terminal_node = node;
   return iree_ok_status();
@@ -27470,29 +27481,26 @@ static iree_status_t iree_hip_capture_record_mem_free(
       (iree_hip_capture_mem_free_t*)user_data;
   capture->result = hipSuccess;
 
-  iree_hal_streaming_buffer_ref_t ref;
-  iree_status_t status = iree_hal_streaming_memory_lookup(
-      graph->context, (iree_hal_streaming_deviceptr_t)capture->dptr, &ref);
-  if (!iree_status_is_ok(status)) {
-    iree_status_free(status);
-    capture->result = hipErrorInvalidValue;
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "captured free pointer is not allocated");
+  iree_hal_streaming_graph_allocation_t* allocation = NULL;
+  iree_status_t status = iree_hal_streaming_graph_allocation_lookup(
+      graph->context, (uint64_t)(uintptr_t)capture->dptr, &allocation);
+  if (iree_status_is_ok(status) && !allocation) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "captured free requires a graph allocation");
   }
-  if (!iree_hip_graph_has_mem_alloc_node_for_pointer(graph, capture->dptr)) {
-    capture->result = hipErrorInvalidValue;
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "captured free pointer has no allocation node");
-  }
-
   iree_hal_streaming_graph_node_t* node = NULL;
-  status = iree_hal_streaming_graph_add_empty_node(graph, dependencies,
-                                                   dependency_count, &node);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_streaming_graph_add_empty_node(graph, dependencies,
+                                                     dependency_count, &node);
+  }
   if (!iree_status_is_ok(status)) {
+    capture->result = hipErrorInvalidValue;
+    iree_hal_streaming_graph_allocation_release(allocation);
     return status;
   }
   node->type = IREE_HAL_STREAMING_GRAPH_NODE_TYPE_MEM_FREE;
   node->attrs.mem_free.dptr = capture->dptr;
+  node->attrs.mem_free.allocation = allocation;
   graph->has_graph_memory_nodes = true;
   *out_terminal_node = node;
   return iree_ok_status();
@@ -27550,42 +27558,40 @@ HIPAPI hipError_t hipMallocAsync(void** ptr, size_t size, hipStream_t stream) {
                                                           &was_capturing);
       result = iree_hip_consume_capture_record_status(status);
     } else {
-      // Allocate backing without capture locks. The recorder below atomically
-      // adopts it into the graph; until then no caller or queue can name it.
-      hrx_mem_pool_t pool = NULL;
-      result = iree_hip_current_mem_pool(resolved_stream.context, &pool);
-      void* prepared_ptr = NULL;
-      if (result == hipSuccess) {
-        result = iree_hip_malloc_from_pool(resolved_stream.context, pool, size,
-                                           /*stream=*/NULL, &prepared_ptr);
-      }
-      hrx_mem_pool_release(pool);
-
-      if (result == hipSuccess) {
-        iree_hip_capture_mem_alloc_t capture;
-        memset(&capture, 0, sizeof(capture));
-        capture.params.bytesize = size;
-        capture.params.poolProps.allocType = hipMemAllocationTypePinned;
-        capture.params.poolProps.location.type = hipMemLocationTypeDevice;
-        capture.params.poolProps.location.id =
-            (int)resolved_stream.context->device_ordinal;
-        capture.dptr = prepared_ptr;
-        bool was_capturing = false;
+      hrx_device_t device = resolved_stream.context->device_entry->hrx_device;
+      const iree_hal_memory_access_t access =
+          IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE;
+      iree_hip_capture_mem_alloc_t capture = {0};
+      capture.params.bytesize = size;
+      capture.params.poolProps.allocType = hipMemAllocationTypePinned;
+      capture.params.poolProps.location.type = hipMemLocationTypeDevice;
+      capture.params.poolProps.location.id =
+          (int)resolved_stream.context->device_ordinal;
+      // Native address reservation occurs outside capture admission locks.
+      status = iree_hal_streaming_graph_allocation_create(
+          resolved_stream.context, size, 1, &device, &access,
+          &capture.allocation, &capture.dptr);
+      bool was_capturing = false;
+      if (iree_status_is_ok(status)) {
         status = iree_hal_streaming_capture_try_record_node(
             stream_obj, iree_hip_capture_record_mem_alloc, &capture,
             &was_capturing);
-        if (iree_status_is_ok(status)) {
-          // If end-capture won while backing was prepared, the eager
-          // allocation is still a valid ordinary async-allocation result.
-          *ptr = prepared_ptr;
-          result = hipSuccess;
-        } else {
-          status = iree_status_join(
-              status, iree_hal_streaming_memory_discard_unpublished_device(
-                          resolved_stream.context,
-                          (iree_hal_streaming_deviceptr_t)prepared_ptr));
-          result = iree_hip_consume_capture_record_status(status);
+      }
+      if (iree_status_is_ok(status) && was_capturing) {
+        *ptr = capture.dptr;
+      }
+      iree_hal_streaming_graph_allocation_release(capture.allocation);
+      result = iree_hip_consume_capture_record_status(status);
+      if (result == hipSuccess && !was_capturing) {
+        // End-capture can win while the address is being prepared. The
+        // operation then follows the ordinary stream allocation path.
+        hrx_mem_pool_t pool = NULL;
+        result = iree_hip_current_mem_pool(resolved_stream.context, &pool);
+        if (result == hipSuccess) {
+          result = iree_hip_malloc_from_pool(resolved_stream.context, pool,
+                                             size, stream_obj, ptr);
         }
+        hrx_mem_pool_release(pool);
       }
     }
     iree_hip_resolved_stream_release(&resolved_stream);

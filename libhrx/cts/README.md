@@ -46,9 +46,9 @@ frontend and do not use `HRX_CTS_DEVICE`.
 
 | Value | Implementation |
 |-------|----------------|
-| `amdgpu` | Native AMD GPU HAL, with RDNA and CDNA enumeration |
+| `amdgpu` | Default: native AMD GPU HAL, with RDNA and CDNA enumeration |
 | `rdna` / `cdna` | Native AMD GPU HAL, restricted to that architecture family |
-| `legacy-amdgpu` | Legacy ROCr-based HAL; currently the HRX default |
+| `legacy-amdgpu` | Explicit opt-in to the legacy ROCr-based HAL |
 
 The requested driver must be compiled into the library. Backend selection is
 explicit in comparisons so that a default change cannot silently change the

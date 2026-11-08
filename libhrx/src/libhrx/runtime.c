@@ -554,7 +554,7 @@ static hrx_status_t hrx_create_task_device(int group_count,
 
 static const char* hrx_get_gpu_driver_name(void) {
   const char* value = getenv("HRX_GPU_DRIVER");
-  return (value && value[0]) ? value : "legacy-amdgpu";
+  return (value && value[0]) ? value : "amdgpu";
 }
 
 static bool hrx_getenv_enabled(const char* name) {

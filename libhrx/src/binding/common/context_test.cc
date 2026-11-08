@@ -17,7 +17,7 @@ namespace {
 TEST(ContextFlagsTest, PreservesSchedulingAndMemoryFlags) {
   iree_hal_streaming_context_t context = {};
   const std::array<iree_async_wait_flags_t, 4> expected_wait_flags = {
-      IREE_ASYNC_WAIT_FLAG_YIELD, IREE_ASYNC_WAIT_FLAG_ACTIVE,
+      IREE_ASYNC_WAIT_FLAG_ACTIVE, IREE_ASYNC_WAIT_FLAG_ACTIVE,
       IREE_ASYNC_WAIT_FLAG_YIELD, IREE_ASYNC_WAIT_FLAG_NONE};
   for (uint32_t mode = 0; mode < expected_wait_flags.size(); ++mode) {
     for (uint32_t memory_flags = 0; memory_flags < 4; ++memory_flags) {
