@@ -20,6 +20,7 @@
 #include "loom/codegen/low/allocation/packet_move.h"
 #include "loom/codegen/low/allocation/physical_domains.h"
 #include "loom/codegen/low/allocation/placement.h"
+#include "loom/codegen/low/allocation/spill_plan.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/allocation/unit_liveness_builder.h"
@@ -1121,6 +1122,13 @@ static iree_status_t loom_low_allocate_function_impl(
       state.target_constraints.error_count == 0 &&
       state.interval_assignment.spill_plan_count != 0) {
     status = loom_liveness_retain_operation_index(&state.liveness, arena);
+    if (iree_status_is_ok(status)) {
+      status = loom_low_allocation_spill_plan_define_parts(
+          value_domain, state.target.descriptor_set,
+          state.interval_assignment.assignments,
+          state.interval_assignment.spill_plans,
+          state.interval_assignment.spill_plan_count, &decision_arena);
+    }
   }
   iree_arena_deinitialize(&decision_arena);
   // Retain only the compact immutable facts after every assignment rollback is

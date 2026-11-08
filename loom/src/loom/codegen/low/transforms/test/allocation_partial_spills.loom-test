@@ -1,0 +1,20 @@
+// Whole-value storage cannot transport partial definitions. Diagnose the
+// selected value before mutation instead of constructing an undefined read.
+// RUN: pass low-materialize-allocation{budgets=test.i32=2}
+
+test.target<low_core> @target
+
+low.func.def schedule(locked) target<test.low.core>(@target) @partial_spill(%address: reg<test.ptr>) -> (reg<test.i32>) asm {
+  %first = test.write.low16.i32 %address
+  %second = test.write.low16.i32 %address
+  // ERROR@+1: BACKEND/058 {value_name="third", defined_parts="1"}
+  %third = test.write.low16.i32 %address
+  low.br ^consume
+^consume:
+  %low0 = test.read.low16.i32 %first
+  %low1 = test.read.low16.i32 %second
+  %low2 = test.read.low16.i32 %third
+  %sum = test.add.i32 %low0, %low1
+  %result = test.add.i32 %sum, %low2
+  return %result
+}

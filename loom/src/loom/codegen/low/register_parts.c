@@ -6,6 +6,10 @@
 
 #include "loom/codegen/low/register_parts.h"
 
+#include <string.h>
+
+#include "loom/codegen/low/representation_binding.h"
+#include "loom/target/registers.h"
 #include "loom/util/adaptive_sort.h"
 
 typedef enum loom_low_register_part_resolution_e {
@@ -145,5 +149,78 @@ iree_status_t loom_low_register_parts_resolve(
       continuation->resolution = LOOM_LOW_REGISTER_PART_RESOLVED;
     }
   }
+  return iree_ok_status();
+}
+
+iree_status_t loom_low_register_parts_analyze(
+    const loom_local_value_domain_t* value_domain,
+    const loom_low_descriptor_set_t* descriptor_set,
+    iree_arena_allocator_t* arena, uint32_t** out_masks) {
+  *out_masks = NULL;
+  loom_low_register_parts_t parts = {
+      .value_domain = value_domain,
+      .arena = arena,
+  };
+  const loom_module_t* module = value_domain->module;
+  for (loom_value_ordinal_t ordinal = 0; ordinal < value_domain->value_count;
+       ++ordinal) {
+    if (parts.local_masks != NULL) {
+      parts.local_masks[ordinal] = UINT32_MAX;
+    }
+    const loom_value_id_t value_id = value_domain->value_ids[ordinal];
+    const loom_type_t type = loom_module_value_type(module, value_id);
+    if (!loom_type_is_register(type)) {
+      continue;
+    }
+    const uint16_t class_id = loom_low_register_type_class_id(type);
+    const uint32_t full_mask =
+        descriptor_set->reg_classes[class_id].full_register_part_mask;
+    if (full_mask == 0) {
+      continue;
+    }
+    const loom_value_t* value = loom_module_value(module, value_id);
+    if (loom_value_is_block_arg(value)) {
+      continue;
+    }
+    const loom_op_t* op = loom_value_def_op(value);
+    loom_low_descriptor_packet_t packet;
+    loom_low_descriptor_packet_initialize(descriptor_set, op, &packet);
+    if (packet.descriptor == NULL) {
+      continue;
+    }
+    const uint16_t result_index = loom_value_def_index(value);
+    const loom_low_operand_t* result = loom_low_descriptor_operand(
+        descriptor_set, packet.descriptor, result_index);
+    const uint32_t written_mask =
+        loom_low_register_parts_operand_mask(descriptor_set, result, class_id);
+    if (written_mask == full_mask) {
+      continue;
+    }
+    const loom_tied_result_t* tie = loom_op_find_tied_result(op, result_index);
+    const loom_value_id_t source =
+        tie != NULL ? loom_op_const_operands(op)[tie->operand_index]
+                    : LOOM_VALUE_ID_INVALID;
+    if (parts.local_masks == NULL) {
+      // All preceding values are complete until the first partial definition.
+      if (tie != NULL &&
+          loom_local_value_domain_ordinal(value_domain, source) < ordinal) {
+        continue;
+      }
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          arena, value_domain->value_count, sizeof(*parts.local_masks),
+          (void**)&parts.local_masks));
+      memset(parts.local_masks, 0,
+             value_domain->value_count * sizeof(*parts.local_masks));
+      memset(parts.local_masks, 0xFF, ordinal * sizeof(*parts.local_masks));
+    }
+    if (tie != NULL) {
+      IREE_RETURN_IF_ERROR(loom_low_register_parts_continue(
+          &parts, value_id, source, written_mask, full_mask));
+    } else {
+      loom_low_register_parts_define(&parts, value_id, written_mask);
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_low_register_parts_resolve(&parts));
+  *out_masks = parts.local_masks;
   return iree_ok_status();
 }

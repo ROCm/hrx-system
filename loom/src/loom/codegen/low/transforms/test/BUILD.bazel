@@ -18,6 +18,7 @@ loom_check_test_suite(
         "allocation_failure_repair.loom-test",
         "allocation_materialization.loom-test",
         "allocation_ordinal_spills.loom-test",
+        "allocation_partial_spills.loom-test",
         "allocation_storage_prefix.loom-test",
         "attr_projection.loom-test",
         "borrow_lifetime.loom-test",

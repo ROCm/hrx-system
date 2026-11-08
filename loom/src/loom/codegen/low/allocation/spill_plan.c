@@ -12,11 +12,44 @@
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/spill_storage.h"
 #include "loom/codegen/low/function.h"
+#include "loom/codegen/low/register_parts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/registers.h"
 #include "loom/util/adaptive_sort.h"
 #include "loom/util/cfg_graph.h"
+
+iree_status_t loom_low_allocation_spill_plan_define_parts(
+    const loom_local_value_domain_t* value_domain,
+    const loom_low_descriptor_set_t* descriptors,
+    const loom_low_allocation_assignment_t* assignments,
+    loom_low_allocation_spill_plan_t* spill_plans,
+    iree_host_size_t spill_plan_count, iree_arena_allocator_t* scratch_arena) {
+  bool analyzed = false;
+  uint32_t* masks = NULL;
+  for (iree_host_size_t i = 0; i < spill_plan_count; ++i) {
+    loom_low_allocation_spill_plan_t* plan = &spill_plans[i];
+    const uint16_t class_id =
+        assignments[plan->assignment_index].descriptor_reg_class_id;
+    const uint32_t full_mask =
+        descriptors->reg_classes[class_id].full_register_part_mask;
+    if (full_mask == 0) {
+      continue;
+    }
+    if (!analyzed) {
+      IREE_RETURN_IF_ERROR(loom_low_register_parts_analyze(
+          value_domain, descriptors, scratch_arena, &masks));
+      analyzed = true;
+    }
+    if (masks != NULL) {
+      const uint32_t mask =
+          masks[loom_local_value_domain_ordinal(value_domain, plan->value_id)] &
+          full_mask;
+      plan->defined_parts = mask == full_mask ? 0 : mask;
+    }
+  }
+  return iree_ok_status();
+}
 
 // Operand spilling does not rewrite attributes or dependent types. Their
 // referenced argument retains its definition and incoming payloads, with a
@@ -231,15 +264,17 @@ bool loom_low_spill_materialization_plan_query_traffic(
       &plan->actions[action_index];
   const loom_low_allocation_spill_plan_t* spill_plan =
       &spill_plans[action->spill_plan_index];
+  const loom_type_t slot_type =
+      loom_module_value_type(module, spill_plan->value_id);
   *out_traffic = (loom_low_spill_materialization_traffic_t){
       .moves_source = action->moves_source,
-      .value_type = loom_type_none(),
+      .defined_parts = spill_plan->defined_parts,
+      .value_type = slot_type,
+      .slot_unit_count = loom_low_register_type_unit_count(slot_type),
   };
   switch (action->kind) {
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_DEFINITION_STORE:
       out_traffic->kind = LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_STORE;
-      out_traffic->value_type =
-          loom_module_value_type(module, spill_plan->value_id);
       return true;
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_EDGE_STORE: {
       out_traffic->kind = LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_STORE;
@@ -255,15 +290,13 @@ bool loom_low_spill_materialization_plan_query_traffic(
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_OPERAND_RELOAD:
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_SHARED_SLICE_RELOAD:
       out_traffic->kind = LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_RELOAD;
-      out_traffic->value_type =
-          loom_module_value_type(module, spill_plan->value_id);
       return true;
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_NARROW_SLICE_RELOAD:
       out_traffic->kind = LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_RELOAD;
       out_traffic->value_type =
           loom_low_spill_materialization_action_result_type(
               module, spill_plans, plan, (uint32_t)action_index);
-      out_traffic->byte_offset = action->value.narrow_slice_reload.byte_offset;
+      out_traffic->unit_offset = action->value.narrow_slice_reload.unit_offset;
       return true;
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_REMOVE_BRANCH_ARGUMENT:
     case LOOM_LOW_SPILL_MATERIALIZATION_ACTION_REMOVE_BLOCK_ARGUMENT:
@@ -746,8 +779,6 @@ static void loom_low_spill_materialization_append_reloads(
     }
   }
 
-  const uint32_t unit_byte_size =
-      can_slice ? spill_plan->byte_size / assignment->unit_count : 0;
   const loom_value_id_t value_id = spill_plan->value_id;
   const loom_value_t* value =
       loom_module_value(builder->table->module, value_id);
@@ -780,8 +811,6 @@ static void loom_low_spill_materialization_append_reloads(
     }
 
     if (group_index != UINT32_MAX) {
-      const int64_t byte_offset =
-          loom_low_slice_offset(slice_op) * (int64_t)unit_byte_size;
       const uint32_t action_index =
           loom_low_spill_materialization_append_action(
               builder,
@@ -792,7 +821,8 @@ static void loom_low_spill_materialization_append_reloads(
                   .value.narrow_slice_reload =
                       {
                           .slice_op = slice_op,
-                          .byte_offset = byte_offset,
+                          .unit_offset =
+                              (uint32_t)loom_low_slice_offset(slice_op),
                       },
               });
       const loom_value_id_t slice_result = loom_low_slice_result(slice_op);
@@ -802,10 +832,7 @@ static void loom_low_spill_materialization_append_reloads(
           builder->value_index, slice_result,
           LOOM_LOW_SPILL_MATERIALIZATION_REPLACEMENT_BIT | action_index);
       ++record->reload_count;
-      record->reload_bytes +=
-          (uint64_t)unit_byte_size *
-          loom_low_register_type_unit_count(
-              loom_module_value_type(builder->table->module, slice_result));
+      record->reload_bytes += reload_byte_size;
       continue;
     }
 

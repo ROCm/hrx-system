@@ -1807,6 +1807,26 @@ TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.SIDE_EFFECTING,),
 )
 
+TEST_LOW_STORAGE_WRITE_DESCRIPTORS = tuple(
+    replace(
+        descriptor,
+        key=f"test.write.{half}.continue.i32",
+        mnemonic=f"test.write.{half}.continue.i32",
+        operands=(
+            descriptor.operands[0],
+            replace(
+                _i32_operand("src"),
+                flags=(OperandFlag.IMPLICIT, OperandFlag.STORAGE_CONTINUATION),
+            ),
+            descriptor.operands[2],
+        ),
+    )
+    for half, descriptor in (
+        ("low16", TEST_LOW_TIED_WRITE_LOW16_I32_DESCRIPTOR),
+        ("high16", TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR),
+    )
+)
+
 TEST_LOW_SPV_OP_IADD_I32_DESCRIPTOR = Descriptor(
     key="test.spv.op_iadd.i32",
     mnemonic="OpIAdd",
@@ -3245,6 +3265,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_WRITE_LOW16_I32_DESCRIPTOR,
         TEST_LOW_TIED_WRITE_LOW16_I32_DESCRIPTOR,
         TEST_LOW_WRITE_HIGH16_I32_DESCRIPTOR,
+        *TEST_LOW_STORAGE_WRITE_DESCRIPTORS,
         TEST_LOW_SPV_OP_IADD_I32_DESCRIPTOR,
         TEST_LOW_CMP_EQ_I32_DESCRIPTOR,
         TEST_LOW_CMP_SLT_I32_DESCRIPTOR,

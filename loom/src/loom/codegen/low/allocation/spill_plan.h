@@ -14,6 +14,7 @@
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/ir/ir.h"
+#include "loom/ir/local_value_domain.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -123,8 +124,8 @@ typedef struct loom_low_spill_materialization_action_t {
     struct {
       // Slice operation replaced and erased by this reload.
       loom_op_t* slice_op;
-      // Byte offset within the spill slot.
-      int64_t byte_offset;
+      // First logical register unit within the complete spilled value.
+      uint32_t unit_offset;
     } narrow_slice_reload;
     struct {
       // Earliest slice operation anchoring the shared reload.
@@ -221,10 +222,11 @@ typedef struct loom_low_spill_materialization_plan_t {
   const uint32_t* slot_representatives;
 } loom_low_spill_materialization_plan_t;
 
-typedef enum loom_low_spill_materialization_traffic_kind_e {
+enum loom_low_spill_materialization_traffic_kind_e {
   LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_STORE = 0,
   LOOM_LOW_SPILL_MATERIALIZATION_TRAFFIC_RELOAD = 1,
-} loom_low_spill_materialization_traffic_kind_t;
+};
+typedef uint8_t loom_low_spill_materialization_traffic_kind_t;
 
 // Target-independent access shape for one materialization action. This is a
 // transient query result; the ordered action remains the retained source of
@@ -234,11 +236,35 @@ typedef struct loom_low_spill_materialization_traffic_t {
   loom_low_spill_materialization_traffic_kind_t kind;
   // True when the retained plan transfers rather than copies the carrier.
   bool moves_source;
+  // Defined register parts for a partial value; zero denotes a complete value.
+  uint32_t defined_parts;
   // Complete register value transferred by the action.
   loom_type_t value_type;
-  // Byte offset within the action's spill slot.
-  int64_t byte_offset;
+  // Number of logical register units in the complete spilled value. A target
+  // may store the components of these units in separate contiguous planes.
+  uint32_t slot_unit_count;
+  // First logical register unit transferred within the complete spilled value.
+  uint32_t unit_offset;
 } loom_low_spill_materialization_traffic_t;
+
+// Retains partial-value masks while allocation still owns the immutable domain.
+// Full-value classes and spill-free functions require no additional analysis.
+// Temporary mask/continuation storage belongs to |scratch_arena|.
+iree_status_t loom_low_allocation_spill_plan_define_parts(
+    const loom_local_value_domain_t* value_domain,
+    const loom_low_descriptor_set_t* descriptors,
+    const loom_low_allocation_assignment_t* assignments,
+    loom_low_allocation_spill_plan_t* spill_plans,
+    iree_host_size_t spill_plan_count, iree_arena_allocator_t* scratch_arena);
+
+// Projects a logical transfer onto a slot with uniformly strided units.
+// Targets with component planes consume the logical range directly instead.
+static inline int64_t loom_low_spill_materialization_traffic_byte_offset(
+    const loom_low_spill_materialization_traffic_t* traffic,
+    uint32_t slot_byte_size) {
+  return (int64_t)traffic->unit_offset *
+         (slot_byte_size / traffic->slot_unit_count);
+}
 
 enum {
   // Equal-byte full reloads are only worthwhile after removing enough reload

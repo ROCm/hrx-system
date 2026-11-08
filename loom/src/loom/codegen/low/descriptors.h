@@ -154,6 +154,8 @@ typedef uint16_t loom_low_operand_flags_t;
 // disjoint register parts supplied by the tied input without reading them for
 // execution, and writes only the result's declared register part. The source
 // establishes issue order and storage identity but not completion dependence.
+// A named source part must be defined. An unnamed source part preserves the
+// available unwritten parts without requiring any of them to be defined.
 #define LOOM_LOW_OPERAND_FLAG_STORAGE_CONTINUATION ((uint16_t)1u << 8)
 // Operand row describes zero or more trailing packet operands. Variadic rows
 // are explicit packet operands and must terminate the descriptor operand list.

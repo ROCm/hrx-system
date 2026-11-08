@@ -1096,6 +1096,15 @@ TEST(LowDescriptorsTest, RejectsUnprojectedStorageContinuationConstraint) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest, AcceptsStorageContinuationOfAvailableParts) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  ConfigureAddStorageContinuation(&tables);
+  tables.reg_class_alts[2].register_part_id = LOOM_LOW_REGISTER_PART_NONE;
+
+  IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsOverlappingStorageContinuationParts) {
   TestTables tables;
   InitializeTestTables(&tables);

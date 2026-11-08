@@ -100,6 +100,9 @@ typedef struct loom_low_allocation_spill_plan_t {
   // Predicted operand-use reloads in the current synthetic spill plan. Actual
   // materialization may differ after earlier spill rewrites in the same frame.
   uint32_t reload_count;
+  // Defined register parts for a partial value; zero denotes a complete value.
+  // Native transport preserves exactly these parts without reading other bits.
+  uint32_t defined_parts;
 } loom_low_allocation_spill_plan_t;
 
 // Distinct fixed retained-read blockers encountered by spilled assignments, in

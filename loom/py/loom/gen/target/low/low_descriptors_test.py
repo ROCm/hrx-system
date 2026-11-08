@@ -1340,6 +1340,23 @@ def test_compiler_rejects_authored_storage_continuation_result_projection() -> N
         compiler.compile_descriptor_set(descriptor_set)
 
 
+def test_compiler_accepts_storage_continuation_of_available_parts() -> None:
+    descriptor = _storage_continuation_descriptor()
+    operands = list(descriptor.operands)
+    operands[1] = replace(
+        operands[1],
+        reg_alts=(replace(operands[1].reg_alts[0], register_part=None),),
+    )
+    compiled = compiler.compile_descriptor_set(
+        replace(
+            TEST_LOW_CORE_DESCRIPTOR_SET,
+            descriptors=(replace(descriptor, operands=tuple(operands)),),
+        )
+    )
+    assert OperandFlag.STORAGE_CONTINUATION in compiled.descriptors[0].operands[1].flags
+    assert compiled.descriptors[0].operands[1].reg_alts[0].register_part is None
+
+
 def test_compiler_rejects_overlapping_storage_continuation_parts() -> None:
     descriptor = _storage_continuation_descriptor()
     operands = list(descriptor.operands)

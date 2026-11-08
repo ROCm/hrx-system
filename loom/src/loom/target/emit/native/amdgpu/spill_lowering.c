@@ -839,7 +839,10 @@ iree_status_t loom_amdgpu_plan_spill_materialization_traffic(
     };
     IREE_RETURN_IF_ERROR(loom_amdgpu_spill_recipe_build(
         table->target.descriptor_set, recipe_kind, traffic.value_type,
-        &storage_reference, traffic.byte_offset, arena, &recipes[i]));
+        &storage_reference,
+        loom_low_spill_materialization_traffic_byte_offset(
+            &traffic, spill_plans[action->spill_plan_index].byte_size),
+        arena, &recipes[i]));
     // Every AMDGPU register class outside SGPR, VGPR, and AGPR is unspillable.
     // Allocation-generated traffic must therefore have a complete recipe.
     IREE_ASSERT_NE(recipes[i].register_kind,
