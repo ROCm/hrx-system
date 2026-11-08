@@ -7,9 +7,9 @@
 // Shared utility for tokenizer fuzz targets.
 //
 // Provides common infrastructure for all tokenizer fuzz targets:
-// - Loading a real tokenizer from HuggingFace JSON (--tokenizer_json=<path>)
+// - Loading a real tokenizer from HuggingFace JSON
 // - Building a complete dummy tokenizer when no JSON is specified
-// - Parsing custom flags (--track_offsets) and removing them from argv
+// - Selecting offset tracking for encode fuzzers
 //
 // Usage from LLVMFuzzerInitialize:
 //
@@ -17,8 +17,10 @@
 //   static int32_t g_vocab_size = 0;
 //
 //   extern "C" int LLVMFuzzerInitialize(int* argc, char*** argv) {
+//     (void)argc;
+//     (void)argv;
 //     iree_status_t status = iree_tokenizer_fuzz_load_or_build(
-//         argc, argv, &g_tokenizer, &g_vocab_size);
+//         &g_tokenizer, &g_vocab_size);
 //     if (!iree_status_is_ok(status)) {
 //       iree_status_fprint(stderr, status);
 //       iree_status_ignore(status);
@@ -27,9 +29,10 @@
 //     return 0;
 //   }
 //
-// Invoked via iree-bazel-fuzz with optional flags:
-//   iree-bazel-fuzz //path:target -- --tokenizer_json=llama3.json
-//   iree-bazel-fuzz //path:target -- --track_offsets -max_total_time=120
+// Set IREE_TOKENIZER_FUZZ_TOKENIZER_JSON and
+// IREE_TOKENIZER_FUZZ_TRACK_OFFSETS in the fuzzer process environment before
+// invoking iree-bazel-fuzz. Every worker and crash-resistant merge subprocess
+// inherits that configuration.
 
 #ifndef IREE_TOKENIZER_TESTING_FUZZING_UTIL_H_
 #define IREE_TOKENIZER_TESTING_FUZZING_UTIL_H_
@@ -41,15 +44,15 @@
 extern "C" {
 #endif
 
-// Loads a tokenizer for fuzzing, either from a JSON file or by building a
-// dummy. Scans |*argv| for custom flags, parses them, and removes them so
-// libfuzzer never sees them.
+// Loads a tokenizer for fuzzing, either from a configured JSON file or by
+// building a dummy.
 //
-// Custom flags:
-//   --tokenizer_json=<path>  Load HuggingFace tokenizer.json from file.
-//   --track_offsets           Enable offset tracking during encode.
+// Environment:
+//   IREE_TOKENIZER_FUZZ_TOKENIZER_JSON  HuggingFace tokenizer.json path.
+//   IREE_TOKENIZER_FUZZ_TRACK_OFFSETS   Nonempty enables encode offsets.
 //
-// When --tokenizer_json is absent, builds a complete dummy tokenizer with:
+// When IREE_TOKENIZER_FUZZ_TOKENIZER_JSON is absent, builds a complete dummy
+// tokenizer with:
 //   - 256 byte-level tokens (IDs 0-255)
 //   - 8 multi-character tokens (IDs 256-263)
 //   - Special tokens: UNK=0, BOS=1, EOS=2
@@ -61,10 +64,9 @@ extern "C" {
 // |out_vocab_size| receives the vocab capacity (max_token_id + 1). May be NULL
 // if the caller doesn't need it.
 iree_status_t iree_tokenizer_fuzz_load_or_build(
-    int* argc, char*** argv, iree_tokenizer_t** out_tokenizer,
-    int32_t* out_vocab_size);
+    iree_tokenizer_t** out_tokenizer, int32_t* out_vocab_size);
 
-// Returns true if --track_offsets was passed. Only valid after
+// Returns true if offset tracking was configured. Only valid after
 // iree_tokenizer_fuzz_load_or_build has been called.
 bool iree_tokenizer_fuzz_track_offsets(void);
 
