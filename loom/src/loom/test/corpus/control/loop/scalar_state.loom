@@ -188,3 +188,49 @@ check.scenario @wide_stored_loop_state_values {
   }
   check.return
 }
+
+// An independent predicate reaches the first condition evaluation unchanged.
+// The constant false backedge terminates the loop after at most one update; it
+// cannot determine whether that update occurs.
+func.def @one_shot_loop(%again: i1, %initial: i32, %replacement: i32, %output: buffer) {
+  %result = scf.while(%condition = %again : i1, %value = %initial : i32) -> (i32) {
+    scf.condition %condition, %value : i1, i32
+  } do(%current: i32) {
+    %false = scalar.constant false : i1
+    scf.yield %false, %replacement : i1, i32
+  }
+  %base = index.constant 0 : offset
+  %result_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %result, %result_view[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @one_shot_loop_oracle(%again: i1, %initial: i32, %replacement: i32, %output: buffer) {
+  %result = scf.select %again, %replacement, %initial : i32
+  %base = index.constant 0 : offset
+  %result_view = buffer.view %output[%base] : buffer -> view<1xi32>
+  view.store %result, %result_view[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @one_shot_loop_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %again = check.literal value(false) : i1
+    %initial = check.literal value(22) : i32
+    %replacement = check.literal value(11) : i32
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@one_shot_loop, @one_shot_loop_oracle>(%again, %initial, %replacement, %output) : (i1, i32, i32, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %again = check.literal value(true) : i1
+    %initial = check.literal value(22) : i32
+    %replacement = check.literal value(11) : i32
+    %output = check.generate.fill value(-1) : tensor<1xi32>
+    check.compare<@one_shot_loop, @one_shot_loop_oracle>(%again, %initial, %replacement, %output) : (i1, i32, i32, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<1xi32>
+    }
+  }
+  check.return
+}

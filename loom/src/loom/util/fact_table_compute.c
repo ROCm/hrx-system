@@ -170,14 +170,17 @@ static loom_value_facts_t loom_value_fact_table_clamp_extent_domain(
       type, loom_value_facts_non_negative_extent(facts));
 }
 
-static iree_status_t loom_value_fact_table_seed_scalar_arg(
+static iree_status_t loom_value_fact_table_seed_value_arg(
     loom_value_fact_table_t* table, const loom_module_t* module,
     loom_value_id_t value_id, const loom_target_facts_t* parameter_target) {
   loom_type_t type = loom_module_value_type(module, value_id);
-  if (!loom_type_is_scalar(type)) {
-    return iree_ok_status();
-  }
   loom_value_facts_t facts = loom_value_fact_table_lookup(table, value_id);
+  if (!loom_type_is_scalar(type)) {
+    // Independent inputs are available even without a scalar type domain.
+    // Leaving them undefined would let a CFG join ignore the incoming value
+    // as though it were feedback whose producer had not executed yet.
+    return loom_value_fact_table_define(table, value_id, facts);
+  }
   if (loom_value_facts_is_unknown(facts) && parameter_target &&
       loom_type_element_type(type) == LOOM_SCALAR_TYPE_INDEX) {
     facts = loom_value_facts_make_signed_bit_count_range(
@@ -407,7 +410,7 @@ static iree_status_t loom_value_fact_table_seed_block_args(
         IREE_RETURN_IF_ERROR(
             loom_value_fact_table_seed_view_arg(table, value_id, type, origin));
       } else if (!has_entry || parameter_target) {
-        IREE_RETURN_IF_ERROR(loom_value_fact_table_seed_scalar_arg(
+        IREE_RETURN_IF_ERROR(loom_value_fact_table_seed_value_arg(
             table, module, value_id, parameter_target));
       }
     }
