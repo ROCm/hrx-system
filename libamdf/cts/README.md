@@ -98,10 +98,10 @@ hardware resource group.
 Their runner reserves two distinct physical GPUs; a single-GPU CI profile
 does not admit that resource. Missing peer selection skips before activation.
 
-A host-only invocation without the ROCr-backed AMDGPU HAL is:
+A host-only invocation with the AMD HAL drivers disabled is:
 
 ```sh
-iree-bazel-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMDGPU=OFF
+iree-bazel-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF
 iree-bazel-test --config=asan \
   --test_tag_filters=-iree-run-requirement=libamdf.resource.amd_gpu,-iree-run-requirement=libamdf.resource.xdna \
   //libamdf/...
@@ -110,7 +110,7 @@ iree-bazel-test --config=asan \
 The corresponding CMake selection is:
 
 ```sh
-iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMDGPU=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
+iree-cmake-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_AMD=OFF -DLIBHRX_BUILD=OFF -DLOOM_BUILD=OFF
 iree-cmake-test -R '^libamdf/' -LE 'manual|runtime-resource='
 ```
 
