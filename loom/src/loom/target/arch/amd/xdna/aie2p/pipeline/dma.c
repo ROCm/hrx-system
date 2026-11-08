@@ -8,7 +8,6 @@
 #include "loom/ops/scalar/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
-#include "loom/transforms/view/offset_expression.h"
 
 loom_aie2p_native_queue_status_t loom_aie2p_native_queue_status(
     const loom_aie2p_native_context_t* context,
@@ -59,8 +58,9 @@ static uint32_t loom_aie2p_native_register_offset(
 }
 
 static iree_status_t loom_aie2p_native_dma_local_word(
-    const loom_aie2p_native_transfer_t* transfer, loom_builder_t* builder,
-    loom_value_id_t* out_word) {
+    const loom_aie2p_native_transfer_t* transfer,
+    const loom_pipeline_worker_materialization_t* instance,
+    loom_builder_t* builder, loom_value_id_t* out_word) {
   const loom_aie2p_native_dma_path_t* path = transfer->local_descriptor->path;
   const loom_aie2p_native_memory_layout_t* layout = path->local->memory_layout;
   const loom_location_id_t location = transfer->source->request.op->location;
@@ -68,10 +68,11 @@ static iree_status_t loom_aie2p_native_dma_local_word(
   const loom_type_t word_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   const uint8_t encoding_shift = path->local->facts->dma.address_encoding_shift;
   loom_value_id_t projection;
-  IREE_RETURN_IF_ERROR(loom_view_materialize_offset_expression(
-      builder, &transfer->local_view->projection_byte_offset,
-      LOOM_VALUE_ID_INVALID, transfer->local_view->view_value_id, &projection));
-  loom_builder_set_before(builder, transfer->source->request.op);
+  IREE_RETURN_IF_ERROR(loom_pipeline_worker_materialization_offset(
+      instance, builder, &transfer->local_view->projection_byte_offset,
+      transfer->local_view->view_value_id, &projection));
+  loom_builder_set_before(builder, loom_pipeline_worker_materialization_op(
+                                       instance, transfer->source->request.op));
   loom_op_t *base, *address;
   IREE_RETURN_IF_ERROR(loom_index_constant_build(
       builder,
@@ -84,9 +85,11 @@ static iree_status_t loom_aie2p_native_dma_local_word(
   if (transfer->record_dynamic) {
     // The consuming channel rewrite substitutes the record's byte offset in
     // this expression before any source analysis resumes.
-    IREE_RETURN_IF_ERROR(loom_index_add_build(
-        builder, loom_index_add_result(address), transfer->local_record,
-        offset_type, location, &address));
+    IREE_RETURN_IF_ERROR(
+        loom_index_add_build(builder, loom_index_add_result(address),
+                             loom_pipeline_worker_materialization_value(
+                                 instance, transfer->local_record),
+                             offset_type, location, &address));
   }
   const loom_xdna_register_field_info_t address_field =
       loom_xdna_register_field_info(layout->address);
@@ -401,6 +404,8 @@ iree_status_t loom_aie2p_native_emit_transfers(
     iree_host_size_t worker_index) {
   loom_aie2p_native_worker_t* worker = &context->workers[worker_index];
   const loom_pipeline_worker_t* source = &realization->workers[worker_index];
+  const loom_pipeline_worker_materialization_t* instance =
+      &realization->instances[worker_index];
   loom_builder_t* builder = &rewriter->builder;
   for (loom_aie2p_native_transfer_task_t* task = worker->transfer_tasks; task;
        task = task->next) {
@@ -428,16 +433,18 @@ iree_status_t loom_aie2p_native_emit_transfers(
     for (loom_aie2p_native_transfer_t* transfer = task->first_transfer;
          transfer; transfer = transfer->task_next) {
       if (task->shim_descriptor->address_dynamic) {
-        loom_value_id_t offset = transfer->external_view->begin_value_id;
-        // Keep the authored address-domain arithmetic and its guarantees when
-        // the view analysis retained a complete offset value.
-        if (offset == LOOM_VALUE_ID_INVALID) {
-          IREE_RETURN_IF_ERROR(loom_view_materialize_offset_expression(
-              builder, &transfer->external_view->begin_byte_offset,
-              LOOM_VALUE_ID_INVALID, transfer->external_view->view_value_id,
-              &offset));
+        loom_value_id_t offset;
+        if (transfer->external_view->begin_value_id != LOOM_VALUE_ID_INVALID) {
+          offset = loom_pipeline_worker_materialization_value(
+              instance, transfer->external_view->begin_value_id);
+        } else {
+          IREE_RETURN_IF_ERROR(loom_pipeline_worker_materialization_offset(
+              instance, builder, &transfer->external_view->begin_byte_offset,
+              transfer->external_view->view_value_id, &offset));
         }
-        loom_builder_set_before(builder, transfer->source->request.op);
+        loom_builder_set_before(builder,
+                                loom_pipeline_worker_materialization_op(
+                                    instance, transfer->source->request.op));
         loom_op_t *integer, *narrowed;
         IREE_RETURN_IF_ERROR(loom_index_cast_build(
             builder, offset, loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET),
@@ -452,15 +459,19 @@ iree_status_t loom_aie2p_native_emit_transfers(
       }
       if (task->local_descriptor->address_dynamic) {
         IREE_RETURN_IF_ERROR(loom_aie2p_native_dma_local_word(
-            transfer, builder, &arguments[argument_count++]));
+            transfer, instance, builder, &arguments[argument_count++]));
       }
     }
-    loom_builder_set_before(builder, task->last_transfer->source->request.op);
+    loom_builder_set_before(
+        builder, loom_pipeline_worker_materialization_op(
+                     instance, task->last_transfer->source->request.op));
     loom_op_t* invoke;
     IREE_RETURN_IF_ERROR(loom_low_invoke_build(
         builder, 0, 0, 0, 0, task->submit, arguments, argument_count, NULL, 0,
         NULL, 0, LOOM_LOCATION_UNKNOWN, &invoke));
-    loom_builder_set_before(builder, task->first_transfer->completion);
+    loom_builder_set_before(builder,
+                            loom_pipeline_worker_materialization_op(
+                                instance, task->first_transfer->completion));
     IREE_RETURN_IF_ERROR(loom_low_invoke_build(builder, 0, 0, 0, 0, task->wait,
                                                NULL, 0, NULL, 0, NULL, 0,
                                                LOOM_LOCATION_UNKNOWN, &invoke));
@@ -470,15 +481,19 @@ iree_status_t loom_aie2p_native_emit_transfers(
   for (const loom_kernel_async_stream_t* stream = source->asynchronous.streams;
        stream; stream = stream->next) {
     for (iree_host_size_t i = 0; i < stream->wait_count; ++i) {
-      IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, stream->waits[i]));
+      IREE_RETURN_IF_ERROR(loom_rewriter_erase(
+          rewriter,
+          loom_pipeline_worker_materialization_op(instance, stream->waits[i])));
     }
     for (iree_host_size_t i = 0; i < stream->group_count; ++i) {
       IREE_RETURN_IF_ERROR(
-          loom_rewriter_erase(rewriter, (loom_op_t*)stream->groups[i].op));
+          loom_rewriter_erase(rewriter, loom_pipeline_worker_materialization_op(
+                                            instance, stream->groups[i].op)));
     }
     for (iree_host_size_t i = 0; i < stream->transfer_count; ++i) {
       IREE_RETURN_IF_ERROR(loom_rewriter_erase(
-          rewriter, (loom_op_t*)stream->transfers[i].request.op));
+          rewriter, loom_pipeline_worker_materialization_op(
+                        instance, stream->transfers[i].request.op)));
     }
   }
   return iree_ok_status();

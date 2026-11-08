@@ -73,6 +73,7 @@ loom_cc_library(
     srcs = ["realization.c"],
     hdrs = ["realization.h"],
     deps = [
+        ":worker_materialization",
         "//loom/src/loom/analysis/pipeline:invocations",
         "//loom/src/loom/analysis/pipeline:resources",
         "//loom/src/loom/analysis/pipeline:workers",
@@ -98,6 +99,23 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "worker_materialization",
+    srcs = ["worker_materialization.c"],
+    hdrs = ["worker_materialization.h"],
+    deps = [
+        ":channel_materialization",
+        "//loom/src/loom/analysis:symbolic_expr",
+        "//loom/src/loom/analysis/pipeline:workers",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/rewrite:remap",
+        "//loom/src/loom/rewrite:rewriter",
+        "//loom/src/loom/transforms/view:offset_expression",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "channel_materialization",
     srcs = ["channel_materialization.c"],
     hdrs = ["channel_materialization.h"],
@@ -107,6 +125,7 @@ loom_cc_library(
         "//loom/src/loom/ops/cfg",
         "//loom/src/loom/ops/func",
         "//loom/src/loom/rewrite:callable",
+        "//loom/src/loom/rewrite:remap",
         "//loom/src/loom/rewrite:rewriter",
         "//loom/src/loom/util:cfg_graph",
         "//runtime/src/iree/base",

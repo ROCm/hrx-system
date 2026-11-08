@@ -1101,8 +1101,8 @@ iree_status_t loom_aie2p_native_emit_configuration(
   IREE_RETURN_IF_ERROR(loom_rewriter_erase(rewriter, realization->function.op));
   for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
     if (context->workers[i].execution != LOOM_AIE2P_NATIVE_EXECUTION_CORE) {
-      IREE_RETURN_IF_ERROR(
-          loom_rewriter_erase(rewriter, realization->workers[i].function.op));
+      IREE_RETURN_IF_ERROR(loom_rewriter_erase(
+          rewriter, realization->instances[i].channels.function.op));
     }
   }
   loom_op_t* entry;

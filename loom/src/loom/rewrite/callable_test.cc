@@ -988,9 +988,11 @@ TEST_F(CallableInlineTest, CloneDefinitionRemapsOnlySelfReferences) {
   loom_symbol_ref_t target_ref = MakeSymbol(IREE_SV("target"));
   loom_ir_remap_op_projection_t calls[] = {{source_self_call, nullptr},
                                            {source_helper_call, nullptr}};
+  loom_ir_remap_t retained_remap;
   const loom_callable_clone_options_t options = {
       .observer = {},
       .op_projection = {calls, IREE_ARRAYSIZE(calls)},
+      .retained_remap = &retained_remap,
   };
   loom_func_like_t cloned = {};
   IREE_ASSERT_OK(loom_callable_clone_definition(&module_builder_, source,
@@ -1015,6 +1017,15 @@ TEST_F(CallableInlineTest, CloneDefinitionRemapsOnlySelfReferences) {
   loom_op_t* cloned_helper_call = loom_block_op(cloned_block, 1);
   EXPECT_EQ(calls[0].target_op, cloned_self_call);
   EXPECT_EQ(calls[1].target_op, cloned_helper_call);
+  loom_value_id_t cloned_argument;
+  ASSERT_TRUE(loom_ir_remap_try_lookup_value(&retained_remap, args[0],
+                                             &cloned_argument));
+  EXPECT_EQ(cloned_argument, cloned_block->arg_ids[0]);
+  loom_attribute_t projected_symbol;
+  IREE_ASSERT_OK(loom_ir_remap_attribute(
+      &retained_remap, loom_attr_symbol(source_ref), &projected_symbol));
+  EXPECT_EQ(loom_attr_as_symbol(projected_symbol).symbol_id,
+            target_ref.symbol_id);
   ASSERT_TRUE(loom_func_call_isa(cloned_self_call));
   ASSERT_TRUE(loom_func_call_isa(cloned_helper_call));
   EXPECT_EQ(loom_func_call_callee(cloned_self_call).symbol_id,

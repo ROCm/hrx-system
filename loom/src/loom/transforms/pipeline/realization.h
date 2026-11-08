@@ -12,6 +12,7 @@
 #include "loom/pass/types.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/target/function_version.h"
+#include "loom/transforms/pipeline/worker_materialization.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,10 +35,10 @@ typedef struct loom_pipeline_realization_inventory_t {
   iree_host_size_t binding_count;
 } loom_pipeline_realization_inventory_t;
 
-// Complete source occurrence presented to physical selection. Definitions are
-// independent clones, so consuming one worker cannot alter another occurrence.
-// Facts, channel identity and movement plans are established exactly once for
-// these definitions and remain live through selection and materialization.
+// Complete immutable source occurrence presented to physical selection.
+// Facts, channel identity and movement plans are established exactly once.
+// Selection observes the source; emission consumes independent instances with
+// their retained identities projected by the common cloning machinery.
 typedef struct loom_pipeline_realization_t {
   // Construction whose public invocation contract is being implemented.
   loom_func_like_t function;
@@ -49,6 +50,8 @@ typedef struct loom_pipeline_realization_t {
   loom_pipeline_invocations_t invocations;
   // Bound worker instances, in complete invocations.workers order.
   loom_pipeline_worker_t* workers;
+  // Independent consuming bodies, created only after selection succeeds.
+  loom_pipeline_worker_materialization_t* instances;
   // Compilation owner receiving workers and their generated helper versions.
   loom_function_version_owner_t* version_owner;
   // Exact execution contexts retained at cloning, in the same worker order.
@@ -64,9 +67,12 @@ typedef struct loom_pipeline_realization_callback_t {
   iree_status_t (*select)(void* user_data, loom_module_t* module,
                           const loom_pipeline_realization_t* realization,
                           bool* out_valid);
-  // Consumes one admitted worker. Its retained ordinal domain is acquired.
+  // Consumes one admitted worker instance. Its ordinal domain is acquired;
+  // the immutable source worker's domain remains released.
   // The callback consumes channel/movement plans and emits ordinary executable
   // operations; it does not rediscover the worker body or compile it privately.
+  // Original entry arguments remain in order until common capture realization
+  // and pruning; mechanics may append invocation operands to that signature.
   iree_status_t (*worker)(void* user_data, loom_rewriter_t* rewriter,
                           const loom_pipeline_realization_t* realization,
                           iree_host_size_t worker_index);
@@ -87,6 +93,20 @@ iree_status_t loom_pipeline_realization_register_helper(
     loom_module_t* module, const loom_pipeline_realization_t* realization,
     iree_host_size_t worker_index, loom_func_like_t helper,
     iree_diagnostic_emitter_t diagnostic_emitter);
+
+// Consumes an already analyzed occurrence within its enclosing execution.
+// The caller has closed source-stability proofs over all concurrent children.
+// Source definitions stay immutable during selection and worker emission;
+// entry emission owns replacing the admitted execution boundary. No resource,
+// channel, movement, or source-stability analysis is repeated here.
+// versions is the source snapshot already used to bind this occurrence's
+// execution environment; generated definitions are registered with its owner.
+iree_status_t loom_pipeline_realize_invocations(
+    loom_pass_t* pass, loom_module_t* module,
+    const loom_pipeline_invocations_t* invocations,
+    loom_pipeline_worker_t* workers,
+    const loom_target_function_version_snapshot_t* versions,
+    const loom_pipeline_realization_callback_t* callback);
 
 // Realizes one specialized pipeline after lexical loop preparation/outlining
 // and before ordinary target memory legalization. Common code owns resource

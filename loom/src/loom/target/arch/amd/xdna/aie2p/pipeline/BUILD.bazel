@@ -171,6 +171,7 @@ loom_cc_library(
         "//loom/src/loom/transforms/pipeline:channel_materialization",
         "//loom/src/loom/transforms/pipeline:control",
         "//loom/src/loom/transforms/pipeline:realization",
+        "//loom/src/loom/transforms/pipeline:worker_materialization",
         "//loom/src/loom/transforms/view:offset_expression",
         "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",

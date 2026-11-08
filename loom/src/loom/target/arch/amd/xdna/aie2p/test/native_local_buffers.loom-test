@@ -30,61 +30,61 @@ pipeline.def<kernel> public retain target(@device) @local_capture() run() {
 
 // ----
 low.func.def target<amd.xdna.aie2p.core> @__aie2p_worker_helper_5() asm {
-  %32 = mov.local-address 327680
-  %36 = mov.local-address 458752
-  %40 = mov.local-address 393216
-  %44 = mov.local-address 262144
-  %80 = mov.short 42
-  %value = vbcst.32 %80
-  vst.512.i32x16 %value, %36, 0
-  vst.512.i32x16 %value, %44, 0
-  vst.512.i32x16 %value, %32, 0
-  vst.512.i32x16 %value, %40, 0
-  %59 = mov.short 1
-  rel %59, 48
+  %43 = mov.local-address 327680
+  %47 = mov.local-address 458752
+  %51 = mov.local-address 393216
+  %55 = mov.local-address 262144
+  %92 = mov.short 42
+  %value = vbcst.32 %92
+  vst.512.i32x16 %value, %47, 0
+  vst.512.i32x16 %value, %55, 0
+  vst.512.i32x16 %value, %43, 0
+  vst.512.i32x16 %value, %51, 0
+  %71 = mov.short 1
+  rel %71, 48
   low.br ^_bb1
 ^_bb1:
-  %60 = mov.ss
+  %72 = mov.ss
   low.br ^_bb1
 }
 
 low.func.def target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_6) @__aie2p_worker_helper_7() asm {
-  %61 = constant 36904960 : reg<aie2p.config.scalar : i64>
-  %62 = constant 3 : reg<aie2p.config.scalar : i64>
-  %63 = constant 2 : reg<aie2p.config.scalar : i64>
-  write.mask32 %61, %62, %63
-  %64 = constant 1 : reg<aie2p.config.scalar : i64>
-  program.load %64, %62, @__aie2p_worker_helper_5
-  %65 = constant 0 : reg<aie2p.config.scalar : i64>
-  %66 = constant 64 : reg<aie2p.config.scalar : i64>
-  data.reserve %65, %62, %65, %66
-  data.reserve %64, %63, %65, %66
-  data.reserve %64, %62, %65, %66
-  %67 = constant 4 : reg<aie2p.config.scalar : i64>
-  data.reserve %64, %67, %65, %66
+  %73 = constant 36904960 : reg<aie2p.config.scalar : i64>
+  %74 = constant 3 : reg<aie2p.config.scalar : i64>
+  %75 = constant 2 : reg<aie2p.config.scalar : i64>
+  write.mask32 %73, %74, %75
+  %76 = constant 1 : reg<aie2p.config.scalar : i64>
+  program.load %76, %74, @__aie2p_worker_helper_5
+  %77 = constant 0 : reg<aie2p.config.scalar : i64>
+  %78 = constant 64 : reg<aie2p.config.scalar : i64>
+  data.reserve %77, %74, %77, %78
+  data.reserve %76, %75, %77, %78
+  data.reserve %76, %74, %77, %78
+  %79 = constant 4 : reg<aie2p.config.scalar : i64>
+  data.reserve %76, %79, %77, %78
   return
 }
 
 low.func.def target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_6) @__aie2p_worker_helper_8() asm {
-  %68 = constant 36827136 : reg<aie2p.config.scalar : i64>
-  %69 = constant 0 : reg<aie2p.config.scalar : i64>
-  write32 %68, %69
+  %80 = constant 36827136 : reg<aie2p.config.scalar : i64>
+  %81 = constant 0 : reg<aie2p.config.scalar : i64>
+  write32 %80, %81
   measure.begin
-  %70 = constant 36904960 : reg<aie2p.config.scalar : i64>
-  %71 = constant 2 : reg<aie2p.config.scalar : i64>
-  write.mask32 %70, %71, %69
-  %72 = constant 1 : reg<aie2p.config.scalar : i64>
-  write.mask32 %70, %72, %72
-  %73 = constant 63 : reg<aie2p.config.scalar : i64>
-  wait.mask32 %68, %73, %72
+  %82 = constant 36904960 : reg<aie2p.config.scalar : i64>
+  %83 = constant 2 : reg<aie2p.config.scalar : i64>
+  write.mask32 %82, %83, %81
+  %84 = constant 1 : reg<aie2p.config.scalar : i64>
+  write.mask32 %82, %84, %84
+  %85 = constant 63 : reg<aie2p.config.scalar : i64>
+  wait.mask32 %80, %85, %84
   measure.end
-  %74 = constant 3 : reg<aie2p.config.scalar : i64>
-  write.mask32 %70, %74, %71
+  %86 = constant 3 : reg<aie2p.config.scalar : i64>
+  write.mask32 %82, %86, %83
   return
 }
 
 low.func.def public retain target<amd.xdna.aie2p.configuration>(@__aie2p_worker_helper_6) abi(array_program) @local_capture() asm {
-  %75 = constant 2 : reg<aie2p.config.scalar : i64>
-  entry %75, @__aie2p_worker_helper_7, @__aie2p_worker_helper_8
+  %87 = constant 2 : reg<aie2p.config.scalar : i64>
+  entry %87, @__aie2p_worker_helper_7, @__aie2p_worker_helper_8
   return
 }
