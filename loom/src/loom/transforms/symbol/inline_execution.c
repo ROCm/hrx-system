@@ -472,7 +472,7 @@ static iree_status_t loom_inline_refine_source_closure(
 // before calls carried by that body execute, but its caller must continue to
 // observe the transfer as an outstanding edge until those calls complete.
 static iree_status_t loom_inline_complete_execution_entry(
-    loom_inline_callables_plan_t* state,
+    loom_inline_callables_plan_t* state, loom_rewriter_t* rewriter,
     loom_inline_execution_symbol_t* execution_symbols,
     loom_inline_execution_entry_t* execution_entries, uint32_t entry_index,
     loom_inline_ready_entries_t* ready, bool* availability_valid) {
@@ -496,6 +496,16 @@ static iree_status_t loom_inline_complete_execution_entry(
       if (!loom_low_func_def_isa(function.op)) {
         IREE_RETURN_IF_ERROR(
             loom_inline_refine_source_closure(state, function));
+        const loom_inline_plan_entry_t* first_clone =
+            &state->entries[source->first_clone_entry];
+        if (loom_call_like_kind(first_clone->call) ==
+            LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM) {
+          // Cleanup may flatten the serial scope while the body is still
+          // nested under its serial command definition. Restore that scope
+          // before the completed closure crosses into its clone callers.
+          IREE_RETURN_IF_ERROR(loom_inline_materialize_command_schedule(
+              state, first_clone, rewriter));
+        }
         *availability_valid = false;
       }
     }
@@ -520,7 +530,7 @@ static iree_status_t loom_inline_complete_execution_entry(
 // completes. A batch publishes every region's lexical order before any
 // completed caller becomes another clone's source.
 static iree_status_t loom_inline_finish_clone(
-    loom_inline_callables_plan_t* state,
+    loom_inline_callables_plan_t* state, loom_rewriter_t* rewriter,
     loom_inline_execution_symbol_t* execution_symbols,
     loom_inline_execution_entry_t* execution_entries, uint32_t entry_index,
     loom_inline_ready_entries_t* ready, bool* availability_valid) {
@@ -528,7 +538,7 @@ static iree_status_t loom_inline_finish_clone(
   loom_inline_execution_symbol_t* target =
       &execution_symbols[entry->target_symbol_id];
   IREE_RETURN_IF_ERROR(loom_inline_complete_execution_entry(
-      state, execution_symbols, execution_entries, entry_index, ready,
+      state, rewriter, execution_symbols, execution_entries, entry_index, ready,
       availability_valid));
   IREE_ASSERT_GT(target->remaining_clone_count, 0u);
   if (--target->remaining_clone_count == 0 &&
@@ -734,7 +744,7 @@ iree_status_t loom_inline_execute_plan(loom_inline_callables_plan_t* state) {
            clone_index != LOOM_INLINE_PLAN_ENTRY_INVALID &&
            iree_status_is_ok(status);
            clone_index = execution_entries[clone_index].next_clone_entry) {
-        status = loom_inline_finish_clone(state, execution_symbols,
+        status = loom_inline_finish_clone(state, &rewriter, execution_symbols,
                                           execution_entries, clone_index,
                                           &ready, &transfer_availability_valid);
       }
@@ -780,7 +790,7 @@ iree_status_t loom_inline_execute_plan(loom_inline_callables_plan_t* state) {
     }
 
     if (entry->action == LOOM_INLINE_PLAN_ACTION_CLONE) {
-      status = loom_inline_finish_clone(state, execution_symbols,
+      status = loom_inline_finish_clone(state, &rewriter, execution_symbols,
                                         execution_entries, entry_index, &ready,
                                         &transfer_availability_valid);
     } else {
@@ -790,8 +800,8 @@ iree_status_t loom_inline_execute_plan(loom_inline_callables_plan_t* state) {
       target->transfer_executed = true;
       if (target->remaining_outgoing_count == 0) {
         status = loom_inline_complete_execution_entry(
-            state, execution_symbols, execution_entries, entry_index, &ready,
-            &transfer_availability_valid);
+            state, &rewriter, execution_symbols, execution_entries, entry_index,
+            &ready, &transfer_availability_valid);
       }
     }
   }
