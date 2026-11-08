@@ -46,15 +46,17 @@ def test_initializers_cover_constants_origins_schemas_and_both_accumulator_roles
     None
 ):
     signatures = set()
+    native_signatures = set()
     for rule in COOPERATIVE_MATRIX_INITIALIZER_RULES:
         assert rule.source_op is vector.vector_fragment
         if isinstance(rule, ValueAliasRule):
             continue
         assert isinstance(rule, DescriptorRule)
-        role = next(
-            guard.enum_keyword
-            for guard in rule.guards
-            if guard.kind == GuardKind.ENUM_ATTR_EQUALS
+        role_guard = next(guard for guard in rule.guards if guard.field == "role")
+        roles = (
+            role_guard.enum_keywords
+            if role_guard.kind == GuardKind.ENUM_ATTR_IN
+            else (role_guard.enum_keyword,)
         )
         payload = next(
             guard.type_pattern
@@ -79,9 +81,12 @@ def test_initializers_cover_constants_origins_schemas_and_both_accumulator_roles
         ]
         assert len(uniformity) == 1
         assert uniformity[0].materializer == COOPERATIVE_INITIALIZER_MATERIALIZER.name
-        signature = (rule.descriptor.key, role, schema, constant)
-        assert signature not in signatures
-        signatures.add(signature)
+        native_signature = (rule.descriptor.key, schema, constant)
+        assert native_signature not in native_signatures
+        native_signatures.add(native_signature)
+        signatures.update(
+            (rule.descriptor.key, role, schema, constant) for role in roles
+        )
         constructor = rule.emit[-1]
         assert constructor.descriptor is rule.descriptor
         assert tuple(constructor.operands) == ("component",)

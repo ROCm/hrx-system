@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from loom.target.arch.spirv.features import feature_bits_expression, feature_bits_value
 from loom.target.arch.spirv.scalar_memory import (
@@ -317,10 +318,11 @@ class CooperativeMatrixType:
             f"{self.rows}x{self.columns}.{self.role}"
         )
 
-    def memory_key(self, role: str, memory: CooperativeMatrixMemory) -> str:
-        operation = "store" if role == "result" else "load"
+    def memory_key(
+        self, operation: Literal["load", "store"], memory: CooperativeMatrixMemory
+    ) -> str:
         return (
-            f"spirv.op_cooperative_matrix_{operation}_khr.{role}."
+            f"spirv.op_cooperative_matrix_{operation}_khr.{self.role}."
             f"{self.scalar.suffix}.{self.rows}x{self.columns}.subgroup."
             f"{memory.descriptor_suffix}"
         )

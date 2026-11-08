@@ -793,14 +793,14 @@ def _cooperative_matrix_rows() -> list[_PacketRow]:
             for operation in COOPERATIVE_MATRIX_ARITHMETIC
             if operation.supports(matrix_type)
         )
-        for role in matrix_type.source_roles:
-            is_load = role != "result"
+        for operation in ("load", "store"):
+            is_load = operation == "load"
             for memory in cooperative_matrix_memory_variants(matrix_type.scalar):
                 pointer_type = _workgroup_pointer_value if memory.space == "workgroup" else _physical_storage_buffer_pointer_value
                 pointer = pointer_type(memory.carrier)
                 rows.append(
                     _PacketRow(
-                        matrix_type.memory_key(role, memory),
+                        matrix_type.memory_key(operation, memory),
                         opcode="LOOM_SPIRV_OP_COOPERATIVE_MATRIX_LOAD_KHR" if is_load else "LOOM_SPIRV_OP_COOPERATIVE_MATRIX_STORE_KHR",
                         form="LOOM_SPIRV_PACKET_FORM_COOPERATIVE_MATRIX_LOAD" if is_load else "LOOM_SPIRV_PACKET_FORM_COOPERATIVE_MATRIX_STORE",
                         result_type=value if is_load else None,

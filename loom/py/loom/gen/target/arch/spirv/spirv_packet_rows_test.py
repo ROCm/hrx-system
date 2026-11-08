@@ -362,10 +362,11 @@ def test_cooperative_matrix_memory_packets_preserve_runtime_stride() -> None:
     rows = {row.descriptor_key: row for row in _packet_rows()}
     for matrix_type in COOPERATIVE_MATRIX_TYPES:
         scalar = matrix_type.scalar
-        for role in matrix_type.source_roles:
+        for operation in ("load", "store"):
             for memory in cooperative_matrix_memory_variants(scalar):
-                is_load = role != "result"
-                row = rows[matrix_type.memory_key(role, memory)]
+                is_load = operation == "load"
+                row = rows[matrix_type.memory_key(operation, memory)]
+                assert row.opcode == ("LOOM_SPIRV_OP_COOPERATIVE_MATRIX_LOAD_KHR" if is_load else "LOOM_SPIRV_OP_COOPERATIVE_MATRIX_STORE_KHR")
                 assert row.form == ("LOOM_SPIRV_PACKET_FORM_COOPERATIVE_MATRIX_LOAD" if is_load else "LOOM_SPIRV_PACKET_FORM_COOPERATIVE_MATRIX_STORE")
                 assert len(row.operand_types) == (2 if is_load else 3)
                 pointer_class = "PTR_WORKGROUP" if memory.space == "workgroup" else "PTR_PHYSICAL_STORAGE_BUFFER"
