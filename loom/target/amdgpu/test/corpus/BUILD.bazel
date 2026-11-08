@@ -152,7 +152,6 @@ loom_corpus_build(
     xfails = {
         "//loom/target/amdgpu:all": {
             "kernel/subgroup/transport.loom:@subgroup_transport_address_5": "TARGET/002,AMDGPU/023",
-            "memory/storage/load_snapshot.loom:@capture_partial_byte_vectors": "AMDGPU/023",
         },
         "//loom/target/amdgpu:without_bf16_fma": {
             "numeric/vector/broadcast_arithmetic.loom:@broadcast_arithmetic_bf16": "TARGET/003",
@@ -175,6 +174,7 @@ loom_corpus_test(
     profile_sources = {
         AMD_GPU_ACCESS_PROFILE.name: [
             "control/loop/queued_routes.loom",
+            "memory/storage/load_snapshot.loom",
             "numeric/vector/dynamic_windows.loom",
         ],
     },
@@ -192,7 +192,6 @@ loom_corpus_test(
             "function/template/library.loom:@template_dead_library_values": "LOWERING/045",
             "kernel/subgroup/transport.loom:@subgroup_transport_address_5_values": "TARGET/002,AMDGPU/023",
             "memory/buffer/buffers.loom:@buffer_values": "TARGET/092",
-            "memory/storage/load_snapshot.loom:@captured_partial_vector_values": "AMDGPU/023",
             "memory/view/offset_recurrence.loom:@window_recurrence_values": "SUBRANGE/026",
             "numeric/float/activations.loom:@ordinary_activation_values": "LOWERING/036",
             "numeric/float/error_functions.loom:@ordinary_error_functions": "LOWERING/036",
