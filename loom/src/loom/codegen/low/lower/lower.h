@@ -184,6 +184,9 @@ typedef struct loom_low_lower_abi_argument_t {
   int64_t resource_index;
   union {
     // Selected body carrier for a direct argument requiring entry adaptation.
+    // Source planning publishes this carrier. Entry setup reads the physical
+    // argument from the mapped entry block and binds the adapted source value;
+    // the ABI carrier never occupies the source value's binding.
     // None means that the ABI carrier is consumed directly or adapted per use.
     loom_type_t body_type;
     // Semantic source type recorded on low.resource. None defaults to the
@@ -1614,8 +1617,10 @@ typedef struct loom_low_lower_entry_interposition_t {
 // entry block remains the function entry and must be terminated by the caller.
 // Source body emission will continue in the returned body_block, which receives
 // the original physical entry block arguments followed by target-owned
-// arguments of |target_arg_types|. Direct source entry arguments are rebound to
-// the forwarded body_block arguments.
+// arguments of |target_arg_types|. Unadapted direct source arguments are
+// rebound to the forwarded arguments. Arguments with a selected body_type
+// retain their planned type until entry setup binds the adapted value. Their
+// ABI carriers occupy the same direct-argument positions in body_block.
 iree_status_t loom_low_lower_interpose_entry_block(
     loom_low_lower_context_t* context, const loom_type_t* target_arg_types,
     uint16_t target_arg_count,

@@ -153,6 +153,9 @@ iree_status_t loom_low_lower_replace_value_binding(
       loom_low_lowering_frame_value_ordinal(context->lowering, source_value_id);
   IREE_ASSERT(
       loom_low_lower_source_value_has_low_mapping(context, source_value_id));
+  IREE_ASSERT(loom_type_equal(
+      loom_low_lower_value_binding_type(context, source_value_id),
+      loom_module_value_type(context->module, low_value_id)));
   context->lowering->value_bindings[ordinal].value = low_value_id;
   return loom_low_lower_copy_value_name(context, source_value_id, low_value_id);
 }

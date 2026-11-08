@@ -465,6 +465,8 @@ loom_cc_test(
         ":lower",
         "//loom/src/loom/codegen/low/lower",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops/index",
+        "//loom/src/loom/ops/kernel",
         "//loom/src/loom/ops/test",
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
         "//loom/src/loom/util:fact_table",

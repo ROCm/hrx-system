@@ -8,8 +8,11 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/lower/context.h"
 #include "loom/ir/context.h"
+#include "loom/ops/index/ops.h"
+#include "loom/ops/kernel/ops.h"
 #include "loom/ops/test/ops.h"
 #include "loom/target/arch/amdgpu/descriptors/low_registry.h"
+#include "loom/target/arch/amdgpu/lower/abi.h"
 #include "loom/target/arch/amdgpu/lower/lower.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/util/fact_table.h"
@@ -35,6 +38,12 @@ class AmdgpuSourceTypeMappingTest : public ::testing::Test {
     iree_host_size_t count = 0;
     const loom_op_vtable_t* const* vtables = loom_test_dialect_vtables(&count);
     IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_TEST,
+                                                 vtables, (uint16_t)count));
+    vtables = loom_index_dialect_vtables(&count);
+    IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_INDEX,
+                                                 vtables, (uint16_t)count));
+    vtables = loom_kernel_dialect_vtables(&count);
+    IREE_ASSERT_OK(loom_context_register_dialect(&context_, LOOM_DIALECT_KERNEL,
                                                  vtables, (uint16_t)count));
     IREE_ASSERT_OK(loom_context_finalize(&context_));
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("mapping"), &pool_,
@@ -185,6 +194,64 @@ class AmdgpuSourceTypeMappingTest : public ::testing::Test {
   // Return operation consuming the source value.
   loom_op_t* user_ = nullptr;
 };
+
+TEST_F(AmdgpuSourceTypeMappingTest, PredicateArgumentTransportAndBodyWidths) {
+  // Every supported width includes both sides of each four-byte ABI packing
+  // boundary. The body has one two-word lane mask per predicate element.
+  loom_type_t types[32];
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(types); ++i) {
+    types[i] = VectorType(LOOM_SCALAR_TYPE_I1, i + 1);
+  }
+  loom_builder_t builder;
+  loom_builder_initialize(module_, &module_->arena, loom_module_block(module_),
+                          &builder);
+  loom_string_id_t name;
+  loom_symbol_id_t symbol;
+  IREE_ASSERT_OK(loom_module_intern_string(
+      module_, IREE_SV("predicate_arguments"), &name));
+  IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol));
+  loom_op_t* kernel = nullptr;
+  IREE_ASSERT_OK(loom_kernel_def_build(
+      &builder, 0, 0, 0, loom_symbol_ref_null(), LOOM_STRING_ID_INVALID, 0,
+      {0, symbol}, nullptr, 0, types, IREE_ARRAYSIZE(types), nullptr, 0,
+      LOOM_LOCATION_UNKNOWN, &kernel));
+  loom_builder_enter_region(&builder, kernel, loom_kernel_def_config(kernel));
+  loom_op_t* unit = nullptr;
+  IREE_ASSERT_OK(loom_index_constant_build(
+      &builder, loom_attr_i64(1), loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
+      LOOM_LOCATION_UNKNOWN, &unit));
+  const auto one = loom_index_constant_result(unit);
+  loom_op_t* config = nullptr;
+  IREE_ASSERT_OK(loom_kernel_launch_config_build(
+      &builder, 0, one, one, one, one, one, one, LOOM_VALUE_ID_INVALID,
+      LOOM_VALUE_ID_INVALID, LOOM_VALUE_ID_INVALID, LOOM_LOCATION_UNKNOWN,
+      &config));
+  loom_builder_enter_region(&builder, kernel, loom_kernel_def_body(kernel));
+  loom_op_t* return_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_kernel_return_build(&builder, LOOM_LOCATION_UNKNOWN, &return_op));
+  mapping_.source_function = loom_func_like_cast(module_, kernel);
+  loom_target_facts_t target_facts = {};
+  target_facts.storage.export_plan.abi_kind = LOOM_TARGET_ABI_HAL_KERNEL;
+  loom_target_bundle_storage_rebind(&target_facts.storage);
+  options_.target_facts = &target_facts;
+  const auto* entry = loom_region_entry_block(loom_kernel_def_body(kernel));
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(types); ++i) {
+    SCOPED_TRACE(i + 1);
+    loom_low_lower_abi_argument_t argument = {};
+    IREE_ASSERT_OK(loom_amdgpu_map_argument(
+        nullptr, &mapping_, kernel, i, loom_block_arg_id(entry, i), &argument));
+    EXPECT_EQ(argument.kind, LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT);
+    EXPECT_EQ(loom_low_register_type_class_id(argument.abi_type),
+              LOOM_AMDGPU_REG_CLASS_ID_SGPR);
+    EXPECT_EQ(loom_low_register_type_unit_count(argument.abi_type),
+              (i + 4) / 4);
+    EXPECT_EQ(loom_low_register_type_class_id(argument.body_type),
+              LOOM_AMDGPU_REG_CLASS_ID_SGPR);
+    EXPECT_EQ(loom_low_register_type_unit_count(argument.body_type),
+              2 * (i + 1));
+  }
+}
 
 struct MappingCase {
   // Source representation being mapped.
