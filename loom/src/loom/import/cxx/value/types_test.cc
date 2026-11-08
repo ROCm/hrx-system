@@ -342,7 +342,8 @@ TEST(TypesTest, RecordPartitionsRetainNominalMembersAndStaticTransport) {
   EXPECT_EQ(packet->members[1].component_offset, 0u);
   EXPECT_EQ(packet->members[2].component_offset, 2u);
   EXPECT_EQ(packet->members[3].component_offset, 4u);
-  EXPECT_EQ(types.member(packet->members[2].field, owner).component_offset, 2u);
+  EXPECT_EQ(types.member(packet->members[2].source, owner).component_offset,
+            2u);
   EXPECT_EQ(packet->component_names,
             (std::vector<std::string>{"pair_a", "pair_b", "pointer",
                                       "pointer_byte_offset", "valid"}));
@@ -351,8 +352,7 @@ TEST(TypesTest, RecordPartitionsRetainNominalMembersAndStaticTransport) {
   EXPECT_EQ(types.partition(source_type("Pair"), owner).kind,
             ValueKind::Record);
   EXPECT_EQ(packet->members[2].partition->kind, ValueKind::Pointer);
-  EXPECT_TRUE(
-      source.unit().typeTraits().is_const(packet->members[3].field->type()));
+  EXPECT_TRUE(source.unit().typeTraits().is_const(packet->members[3].type()));
   EXPECT_EQ(types.record(source_type("Empty"), owner)->source->sizeInBytes(),
             1);
   std::vector<loom_type_t> signature;
@@ -399,7 +399,7 @@ TEST(TypesTest, RecordMemoryUsesSourceLayoutIndependentlyOfValuePartitions) {
   auto* partition = types.record(padded, owner);
   ASSERT_NE(partition, nullptr);
   ASSERT_EQ(partition->members.size(), 3u);
-  EXPECT_EQ(partition->members[1].field->offsetInClass(), 4u);
+  EXPECT_EQ(partition->members[1].byte_offset(), 4u);
   EXPECT_EQ(partition->members[1].component_offset, 1u);
   EXPECT_EQ(types.storage_size(padded, owner), 12);
   auto* observed = source_type("Observed");
@@ -1199,6 +1199,32 @@ TEST(TypesTest, VectorProjectionSeparatesLogicalLanesFromObjectLayout) {
                 lane_count != object_lane_count);
     }
   }
+}
+
+TEST(TypesTest, RetainsSelectedSubobjectPositionsIndependentlyOfByteLayout) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Leaf { double value; };
+    struct Middle { char tag; Leaf leaf; };
+    struct Outer { unsigned count; Middle first, second; };
+  )"),
+                IREE_SV("subobjects.cxx"), options);
+  Types types(source.unit(), source.diagnostics());
+  auto* owner = source.unit().ast();
+  auto* outer = types.record(
+      (*source.unit().globalScope()->find("Outer").begin())->type(), owner);
+  const auto& second = outer->members[2];
+  const auto& middle = static_cast<const RecordPartition&>(*second.partition);
+  auto* path = cxx::make_list_node(source.unit().arena(), second.source);
+  path->next =
+      cxx::make_list_node(source.unit().arena(), middle.members[1].source);
+  const auto& selected = types.projection(path, owner);
+  EXPECT_EQ(selected.root->source, second.source);
+  EXPECT_EQ(selected.partition, middle.members[1].partition);
+  EXPECT_EQ(selected.component_offset, 4u);
+  EXPECT_EQ(selected.byte_offset, 32u);
+  EXPECT_EQ(&types.projection(path, owner), &selected);
 }
 
 TEST(TypesTest, MutationUsesTheObjectQualifierInsteadOfItsPointee) {

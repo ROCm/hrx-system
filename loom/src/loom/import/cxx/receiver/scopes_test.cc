@@ -35,8 +35,8 @@ class ReceiverScopesTest : public ::testing::Test {
     record_ = types_.record((*symbols.begin())->type(), nullptr);
     ASSERT_NE(record_, nullptr);
     ASSERT_EQ(record_->members.size(), 2u);
-    first_ = record_->members[0].field;
-    second_ = record_->members[1].field;
+    first_ = record_->members[0].source;
+    second_ = record_->members[1].source;
   }
 
   // Real source declarations shared by nested receiver instances.
@@ -50,9 +50,9 @@ class ReceiverScopesTest : public ::testing::Test {
   // Admitted complete record used for value and addressable receivers.
   const RecordPartition* record_ = nullptr;
   // First direct subobject declaration, reused by recursive current objects.
-  cxx::FieldSymbol* first_ = nullptr;
+  cxx::Symbol* first_ = nullptr;
   // Second direct subobject, used to retain partial initialization state.
-  cxx::FieldSymbol* second_ = nullptr;
+  cxx::Symbol* second_ = nullptr;
 };
 
 TEST_F(ReceiverScopesTest, NestedObjectsRestoreValuesAndCompletion) {

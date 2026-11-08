@@ -304,13 +304,11 @@ std::optional<ChannelIntrinsic> ChannelIntrinsic::resolve(
           require_record(unit, diagnostics, types, signature->returnType(), 2,
                          operation_name, owner);
       result.result_handle_ = require_handle(
-          unit, diagnostics, types,
-          result.result_record_->members[0].field->type(),
+          unit, diagnostics, types, result.result_record_->members[0].type(),
           ChannelHandleKind::Write, operation_name, "first result", owner);
-      result.result_view_ =
-          require_view(unit, diagnostics, types,
-                       result.result_record_->members[1].field->type(),
-                       operation_name, "second-result", owner);
+      result.result_view_ = require_view(
+          unit, diagnostics, types, result.result_record_->members[1].type(),
+          operation_name, "second-result", owner);
       if (result.result_handle_->payload != result.source_handle_->payload ||
           !payload_view_matches(*result.source_handle_->payload,
                                 *result.result_view_) ||
@@ -363,13 +361,11 @@ std::optional<ChannelIntrinsic> ChannelIntrinsic::resolve(
           require_record(unit, diagnostics, types, signature->returnType(), 2,
                          operation_name, owner);
       result.result_handle_ = require_handle(
-          unit, diagnostics, types,
-          result.result_record_->members[0].field->type(),
+          unit, diagnostics, types, result.result_record_->members[0].type(),
           ChannelHandleKind::Read, operation_name, "first result", owner);
-      result.result_view_ =
-          require_view(unit, diagnostics, types,
-                       result.result_record_->members[1].field->type(),
-                       operation_name, "second-result", owner);
+      result.result_view_ = require_view(
+          unit, diagnostics, types, result.result_record_->members[1].type(),
+          operation_name, "second-result", owner);
       if (result.result_handle_->payload != result.source_handle_->payload ||
           !payload_view_matches(*result.source_handle_->payload,
                                 *result.result_view_) ||
@@ -439,10 +435,9 @@ std::optional<ChannelIntrinsic> ChannelIntrinsic::resolve(
           require_record(unit, diagnostics, types, signature->returnType(), 2,
                          operation_name, owner);
       result.result_handle_ = require_handle(
-          unit, diagnostics, types,
-          result.result_record_->members[1].field->type(),
+          unit, diagnostics, types, result.result_record_->members[1].type(),
           ChannelHandleKind::Read, operation_name, "second result", owner);
-      if (types.address_domain(result.result_record_->members[0].field->type(),
+      if (types.address_domain(result.result_record_->members[0].type(),
                                owner) != LOOM_SCALAR_TYPE_INDEX ||
           result.result_handle_->mutable_read ||
           result.result_handle_->payload != result.source_handle_->payload) {

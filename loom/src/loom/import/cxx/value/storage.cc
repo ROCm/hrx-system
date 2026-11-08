@@ -17,6 +17,7 @@
 
 #include "loom/import/cxx/source/constants.h"
 #include "loom/import/cxx/source/error.h"
+#include "loom/import/cxx/source/objects.h"
 #include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/index/ops.h"
@@ -162,9 +163,9 @@ StorageProjection Storage::advance(StorageProjection base,
           true};
 }
 
-StorageProjection Storage::member(StorageProjection base,
-                                  cxx::FieldSymbol* field, cxx::AST* owner) {
-  return subobject(base, *field->offsetInClass(), owner);
+StorageProjection Storage::member(StorageProjection base, cxx::Symbol* field,
+                                  cxx::AST* owner) {
+  return subobject(base, source_subobject_offset(field), owner);
 }
 
 StorageProjection Storage::element(StorageProjection base,

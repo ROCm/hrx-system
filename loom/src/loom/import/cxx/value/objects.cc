@@ -9,13 +9,16 @@
 #include <cxx/symbols.h>
 #include <cxx/types.h>
 
+#include "loom/import/cxx/source/objects.h"
+
 namespace loom::cxx_import {
 
 const cxx::Type* Objects::member_type(const cxx::Type* object_type,
-                                      cxx::FieldSymbol* field) const {
+                                      cxx::Symbol* field) const {
   auto traits = unit_.typeTraits();
-  return traits.is_volatile(object_type) ? traits.add_volatile(field->type())
-                                         : field->type();
+  return traits.is_volatile(object_type)
+             ? traits.add_volatile(source_object_type(field))
+             : source_object_type(field);
 }
 
 void Objects::load_components(StorageProjection object, const cxx::Type* type,
@@ -24,9 +27,9 @@ void Objects::load_components(StorageProjection object, const cxx::Type* type,
   if (partition.kind == ValueKind::Record) {
     const auto& record = static_cast<const RecordPartition&>(partition);
     for (const auto& member : record.members) {
-      load_components(storage_.member(object, member.field, owner),
-                      member_type(type, member.field), *member.partition, owner,
-                      components);
+      load_components(storage_.member(object, member.source, owner),
+                      member_type(type, member.source), *member.partition,
+                      owner, components);
     }
   } else if (partition.kind == ValueKind::Array) {
     const auto& array = static_cast<const ArrayPartition&>(partition);
@@ -60,9 +63,9 @@ void Objects::store(StorageProjection object, Value value,
   if (partition.kind == ValueKind::Record) {
     const auto& record = static_cast<const RecordPartition&>(partition);
     for (const auto& member : record.members) {
-      store(storage_.member(object, member.field, owner),
+      store(storage_.member(object, member.source, owner),
             value.project(*member.partition, member.component_offset),
-            member_type(type, member.field), owner);
+            member_type(type, member.source), owner);
     }
   } else if (partition.kind == ValueKind::Array) {
     const auto& array = static_cast<const ArrayPartition&>(partition);

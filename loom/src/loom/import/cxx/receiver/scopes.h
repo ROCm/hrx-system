@@ -29,7 +29,7 @@ struct ReceiverState {
 };
 
 // Owns lexical current-object scopes and subobject completion. Nested receivers
-// may reuse the same field declarations; entering one hides the enclosing
+// may reuse the same subobject declarations; entering one hides the enclosing
 // bindings until it leaves. Explicit aggregate clauses suspend construction
 // state while evaluating against the lexical receiver, preserving writes to
 // that receiver when construction resumes. All values remain in the shared
@@ -53,15 +53,15 @@ class ReceiverScopes {
   const ReceiverState* current() const {
     return frames_.empty() ? nullptr : &frames_.back().receiver;
   }
-  const ReceiverState* find(cxx::FieldSymbol* field) const;
-  // Field queries and updates use declarations owned by an active receiver.
-  bool is_complete(cxx::FieldSymbol* field) const {
-    return owners_.at(field).complete;
+  const ReceiverState* find(cxx::Symbol* subobject) const;
+  // Subobject queries and updates use declarations owned by an active receiver.
+  bool is_complete(cxx::Symbol* subobject) const {
+    return owners_.at(subobject).complete;
   }
   // Publishes a completed value subobject into the common binding environment.
-  void publish(cxx::FieldSymbol* field, Value value);
+  void publish(cxx::Symbol* subobject, Value value);
   // Completes an addressable subobject after its in-place initialization.
-  void mark_complete(cxx::FieldSymbol* field);
+  void mark_complete(cxx::Symbol* subobject);
 
  private:
   struct Owner {
@@ -73,7 +73,7 @@ class ReceiverScopes {
 
   struct Binding {
     // Member identity owned by this source current-object scope.
-    cxx::FieldSymbol* field;
+    cxx::Symbol* subobject;
     // Enclosing receiver for the same declaration, when recursively active.
     std::optional<Owner> previous_owner;
     // Enclosing value binding hidden while this receiver is current.
@@ -108,7 +108,7 @@ class ReceiverScopes {
   // Nested current objects in source evaluation order.
   std::vector<Frame> frames_;
   // Direct declaration lookup avoids searching the stack on each access.
-  std::unordered_map<cxx::FieldSymbol*, Owner> owners_;
+  std::unordered_map<cxx::Symbol*, Owner> owners_;
   // Temporarily hidden construction receivers, restored in reverse order.
   std::vector<SuspendedFrame> suspended_;
 };

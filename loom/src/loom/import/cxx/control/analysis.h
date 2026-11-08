@@ -34,7 +34,7 @@ struct DirectOperatorCall;
 // emits them in reverse.
 struct SubobjectDestruction {
   // Non-static member identity in the complete current object.
-  cxx::FieldSymbol* field;
+  cxx::Symbol* field;
   // Frontend-selected complete destruction for the member object.
   Destruction destruction;
 };
@@ -300,7 +300,7 @@ class ControlFlow final : private cxx::ASTVisitor {
     return storage_call_results_.contains(call);
   }
   // Exact top-level current-object fields whose values may be replaced.
-  std::span<cxx::FieldSymbol* const> receiver_writes() const {
+  std::span<cxx::Symbol* const> receiver_writes() const {
     return receiver_writes_;
   }
   // Propagates reference and receiver facts in both directions across one
@@ -402,18 +402,18 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool record_callable_write(cxx::Symbol* binding);
   bool record_scoped_write(cxx::Symbol* binding,
                            std::span<cxx::AST* const> owners);
-  bool record_argument_write(
-      const CallArgument& argument, std::span<cxx::AST* const> owners,
-      std::span<cxx::FieldSymbol* const> receiver_fields);
+  bool record_argument_write(const CallArgument& argument,
+                             std::span<cxx::AST* const> owners,
+                             std::span<cxx::Symbol* const> receiver_fields);
   bool record_reference_result_write(
       cxx::AST* call, std::span<cxx::AST* const> owners,
-      std::span<cxx::FieldSymbol* const> receiver_fields);
+      std::span<cxx::Symbol* const> receiver_fields);
   bool require_reference_storage(cxx::Symbol* parameter);
   bool require_address(cxx::Symbol* binding);
   void retain_automatic_storage(cxx::VariableSymbol* variable,
                                 cxx::ExpressionAST* initializer,
                                 bool record_constructor_call);
-  bool add_receiver_write(cxx::FieldSymbol* field);
+  bool add_receiver_write(cxx::Symbol* field);
   void retain_reference_receiver_write(const DirectCall& call);
   CallArgument retain_call_argument(cxx::ExpressionAST* expression);
   // Reference operands retain their source destinations and write effects
@@ -501,7 +501,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Reference parameters whose referents may be modified.
   std::unordered_set<cxx::Symbol*> written_references_;
   // Exact current-object field replacements in declaration encounter order.
-  std::vector<cxx::FieldSymbol*> receiver_writes_;
+  std::vector<cxx::Symbol*> receiver_writes_;
   // Lazily allocated capture and write facts. Ordinary callables carry only
   // this pointer and never allocate or scan their bodies for this analysis.
   std::unique_ptr<PointerReferenceFacts> pointer_reference_facts_;

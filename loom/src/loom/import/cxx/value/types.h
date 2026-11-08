@@ -27,11 +27,15 @@
 
 namespace loom::cxx_import {
 
-// One source member's retained position in an admitted record value. Component
+// One direct subobject's position in an admitted record value. Component
 // slices describe High value transport, independently of C++ object offsets.
-struct MemberPartition {
-  // Declaration identity and cv-qualified source type, borrowed from Source.
-  cxx::FieldSymbol* field;
+struct SubobjectPartition {
+  // Source properties remain owned by the frontend's direct declaration.
+  const cxx::Type* type() const;
+  uint64_t byte_offset() const;
+
+  // Direct field or nonvirtual base declaration identity, borrowed from Source.
+  cxx::Symbol* source;
   // Admitted member structure, owned by Types or a static leaf partition.
   const Partition* partition;
   // First component of this member in its containing record binding.
@@ -45,11 +49,25 @@ struct RecordPartition final : Partition {
   // Canonical definition retaining nominal identity and source object layout.
   cxx::ClassSymbol* source;
   // Declaration-order members, including zero-component empty records.
-  std::vector<MemberPartition> members;
+  std::vector<SubobjectPartition> members;
   // Retained member paths used to name newly bound High components.
   std::vector<std::string> component_names;
   // Whether any component needs destination identities to bind its High type.
   bool requires_binding = false;
+};
+
+// One frontend-selected subobject path, retained once for shared use by source
+// ownership analysis and emission. The path is relative to a complete record;
+// its root distinguishes repeated instances of the same inherited declaration.
+struct SubobjectProjection {
+  // Direct subobject selected from the complete source record.
+  const SubobjectPartition* root;
+  // Structure of the final selected subobject, before an optional leaf field.
+  const Partition* partition;
+  // First component of the selected subobject in the complete record.
+  size_t component_offset;
+  // Physical displacement from the complete object, excluding its own origin.
+  uint64_t byte_offset;
 };
 
 // A fixed source array transported as immutable element components inside an
@@ -373,7 +391,11 @@ class Types {
   // Returns a fixed array's value schema, or null for a non-array type.
   const ArrayPartition* array(const cxx::Type* input, cxx::AST* owner);
   // Direct lookup of a member slice retained by its owning record's admission.
-  const MemberPartition& member(cxx::FieldSymbol* field, cxx::AST* owner);
+  const SubobjectPartition& member(cxx::Symbol* subobject, cxx::AST* owner);
+  // Projects a nonempty immutable path already selected by source semantics.
+  // Direct fields use member() and require no independently retained path.
+  const SubobjectProjection& projection(cxx::List<cxx::Symbol*>* path,
+                                        cxx::AST* owner);
   // Selects snapshot value transport for a pointer reference field whose
   // object identity is proven unobservable by whole-function analysis. The
   // source reference and pointer value share the same two-component partition;
@@ -505,7 +527,11 @@ class Types {
   std::unordered_map<cxx::ClassSymbol*, std::unique_ptr<TensorPartition>>
       tensors_;
   // Member identity indexes the slice established by record admission.
-  std::unordered_map<cxx::FieldSymbol*, MemberPartition> members_;
+  std::unordered_map<cxx::Symbol*, SubobjectPartition> members_;
+  using ProjectionMap =
+      std::unordered_map<cxx::List<cxx::Symbol*>*, SubobjectProjection>;
+  // Present only when source access selects a nested class subobject path.
+  std::unique_ptr<ProjectionMap> projections_;
   // Pointer reference fields whose source object identity is unobservable.
   std::unordered_set<cxx::FieldSymbol*> pointer_reference_snapshots_;
   // Completed memory admission; layouts remain owned by the source symbols.

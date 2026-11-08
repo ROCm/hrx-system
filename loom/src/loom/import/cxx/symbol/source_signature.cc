@@ -228,8 +228,8 @@ class CSourceSignatureBuilder {
     std::vector<loom_attribute_t> fields;
     fields.reserve(record->members.size());
     for (const auto& member : record->members) {
-      auto* field = member.field;
-      if (!field->name() || field->isNoUniqueAddress() ||
+      auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member.source);
+      if (!field || !field->name() || field->isNoUniqueAddress() ||
           unit_.typeTraits().is_reference(field->type())) {
         diagnostics_.reject(
             unit_, source_,

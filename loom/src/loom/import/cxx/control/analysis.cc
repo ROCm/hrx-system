@@ -53,7 +53,7 @@ struct ControlFlow::ReferenceWriteFacts {
     // Structured source constructs whose carried binding must be updated.
     std::vector<cxx::AST*> owners;
     // Exact current-object fields changed through the returned alias.
-    std::vector<cxx::FieldSymbol*> receiver_fields;
+    std::vector<cxx::Symbol*> receiver_fields;
   };
 
   // Lexical scopes for calls whose receiver is a reference-returning call.
@@ -1210,7 +1210,7 @@ void ControlFlow::retain_call(const DirectOperatorCall& call,
                         "object");
   }
   for (const auto& member : receiver->members) {
-    record(member.field);
+    record(member.source);
   }
 }
 
@@ -1562,7 +1562,7 @@ void ControlFlow::publish_pointer_reference_snapshots(Types& types) const {
 
 bool ControlFlow::record_argument_write(
     const CallArgument& argument, std::span<cxx::AST* const> owners,
-    std::span<cxx::FieldSymbol* const> receiver_fields) {
+    std::span<cxx::Symbol* const> receiver_fields) {
   bool changed = false;
   if (argument.write_binding) {
     changed = record_scoped_write(argument.write_binding, owners) || changed;
@@ -1582,7 +1582,7 @@ bool ControlFlow::record_argument_write(
 
 bool ControlFlow::record_reference_result_write(
     cxx::AST* call, std::span<cxx::AST* const> owners,
-    std::span<cxx::FieldSymbol* const> receiver_fields) {
+    std::span<cxx::Symbol* const> receiver_fields) {
   if (!reference_write_facts_) {
     reference_write_facts_ = std::make_unique<ReferenceWriteFacts>();
   }
@@ -1615,7 +1615,7 @@ void ControlFlow::retain_reference_receiver_write(const DirectCall& call) {
   reference_write_facts_->receiver_owners.emplace(call.source, owners_);
 }
 
-bool ControlFlow::add_receiver_write(cxx::FieldSymbol* field) {
+bool ControlFlow::add_receiver_write(cxx::Symbol* field) {
   if (std::ranges::find(receiver_writes_, field) != receiver_writes_.end()) {
     return false;
   }
@@ -1763,11 +1763,11 @@ void ControlFlow::retain_subobject_destructions() {
                         "destructor requires an admitted record object");
   }
   for (const auto& member : partition->members) {
-    auto selected = destruction_for(unit_, member.field->type());
+    auto selected = destruction_for(unit_, member.type());
     if (!selected) {
       continue;
     }
-    subobject_destructions_.push_back({member.field, *selected});
+    subobject_destructions_.push_back({member.source, *selected});
     retain_destructor_call(*selected, std::nullopt,
                            /*current_receiver=*/true, owner);
   }
@@ -1792,8 +1792,7 @@ void ControlFlow::retain_reference_initializers(cxx::VariableSymbol* variable,
   }
   const size_t count = std::min(arguments.size(), record->members.size());
   for (size_t index = 0; index < count; ++index) {
-    if (unit_.typeTraits().is_lvalue_reference(
-            record->members[index].field->type())) {
+    if (unit_.typeTraits().is_lvalue_reference(record->members[index].type())) {
       require_identity(arguments[index]);
     }
   }
@@ -1952,7 +1951,7 @@ bool ControlFlow::retain_reference_result_identity(const DirectCall& call,
       if (record) {
         for (const auto& member : record->members) {
           append_interval(result_intervals,
-                          {member.field, 0, ObjectInterval::kWholeObjectEnd});
+                          {member.source, 0, ObjectInterval::kWholeObjectEnd});
         }
       }
     } else if (call.receiver) {
@@ -2170,7 +2169,7 @@ void ControlFlow::finalize_callable_effects() {
   if (!record || receiver_writes_.size() < 2) {
     return;
   }
-  std::vector<cxx::FieldSymbol*> ordered;
+  std::vector<cxx::Symbol*> ordered;
   ordered.reserve(receiver_writes_.size());
   for (auto* member : record->members()) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(member);
@@ -2470,7 +2469,7 @@ void ControlFlow::record_implicit_object_call(cxx::CallExpressionAST* call,
                         "object");
   }
   for (const auto& member : receiver->members) {
-    record(member.field);
+    record(member.source);
   }
 }
 

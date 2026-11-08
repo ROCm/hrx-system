@@ -55,6 +55,7 @@
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
 #include "loom/import/cxx/source/locations.h"
+#include "loom/import/cxx/source/objects.h"
 #include "loom/import/cxx/source/source.h"
 #include "loom/import/cxx/symbol/functions.h"
 #include "loom/import/cxx/symbol/immutable_objects.h"
@@ -212,7 +213,7 @@ class Translator final : private Initialization::Evaluation {
     receivers_.enter(record, std::nullopt, record.source->type());
     for (const auto& member : record.members) {
       publish_receiver_member(
-          member.field,
+          member.source,
           value.project(*member.partition, member.component_offset));
     }
   }
@@ -222,7 +223,7 @@ class Translator final : private Initialization::Evaluation {
                              const cxx::Type* object_type) {
     receivers_.enter(record, destination, object_type);
     for (const auto& member : record.members) {
-      complete_storage_receiver_member(member.field);
+      complete_storage_receiver_member(member.source);
     }
   }
 
@@ -233,7 +234,7 @@ class Translator final : private Initialization::Evaluation {
     std::vector<loom_value_id_t> components;
     components.reserve(active.record->component_count);
     for (const auto& member : active.record->members) {
-      receiver_member(member.field, owner).append_to(components);
+      receiver_member(member.source, owner).append_to(components);
     }
     return value_arena_.capture(*active.record, components);
   }
@@ -244,7 +245,7 @@ class Translator final : private Initialization::Evaluation {
     IREE_ASSERT(!active.storage && &value.partition() == active.record);
     for (const auto& member : active.record->members) {
       publish_receiver_member(
-          member.field,
+          member.source,
           value.project(*member.partition, member.component_offset));
     }
   }
@@ -282,7 +283,7 @@ class Translator final : private Initialization::Evaluation {
         field, owner);
   }
 
-  std::optional<StorageProjection> receiver_storage(cxx::FieldSymbol* field,
+  std::optional<StorageProjection> receiver_storage(cxx::Symbol* field,
                                                     cxx::AST* owner) {
     auto* active = receivers_.find(field);
     if (!active || !active->storage) {
@@ -291,15 +292,15 @@ class Translator final : private Initialization::Evaluation {
     return storage_.member(*active->storage, field, owner);
   }
 
-  void publish_receiver_member(cxx::FieldSymbol* field, Value value) override {
+  void publish_receiver_member(cxx::Symbol* field, Value value) override {
     receivers_.publish(field, value);
   }
 
-  void complete_storage_receiver_member(cxx::FieldSymbol* field) override {
+  void complete_storage_receiver_member(cxx::Symbol* field) override {
     receivers_.mark_complete(field);
   }
 
-  Value receiver_member(cxx::FieldSymbol* field, cxx::AST* owner) override {
+  Value receiver_member(cxx::Symbol* field, cxx::AST* owner) override {
     auto* active = receivers_.find(field);
     if (!active) {
       fail(owner, "member expression requires a current source object");
@@ -584,7 +585,7 @@ class Translator final : private Initialization::Evaluation {
     cxx::Symbol* binding = nullptr;
     // Current receiver subobject, mutually exclusive with |binding|, |value|
     // and |storage|.
-    cxx::FieldSymbol* field = nullptr;
+    cxx::Symbol* field = nullptr;
     // Complete source object type, including any bounded array extents.
     const cxx::Type* object_type = nullptr;
     // Direct SSA object retained by an unmaterialized temporary.
@@ -655,8 +656,8 @@ class Translator final : private Initialization::Evaluation {
     }
     if (active.field) {
       if (auto storage = receiver_storage(active.field, active.source)) {
-        destroy_storage(*storage, active.field->type(), active.destruction,
-                        active.source);
+        destroy_storage(*storage, source_object_type(active.field),
+                        active.destruction, active.source);
       } else {
         destroy_value(receiver_member(active.field, active.source),
                       active.destruction, active.source);
@@ -765,7 +766,7 @@ class Translator final : private Initialization::Evaluation {
       active_destructions_.push_back({
           .destruction = subobject.destruction,
           .field = subobject.field,
-          .object_type = subobject.field->type(),
+          .object_type = source_object_type(subobject.field),
           .source = source,
       });
     }
@@ -2696,12 +2697,12 @@ class Translator final : private Initialization::Evaluation {
     // Whether mutable results replace the active value receiver.
     bool current;
     // Exact top-level fields returned by a value receiver call.
-    std::span<cxx::FieldSymbol* const> written_fields;
+    std::span<cxx::Symbol* const> written_fields;
   };
 
   ReceiverArgument current_receiver_argument(
       const RecordPartition& record, bool requires_storage,
-      std::span<cxx::FieldSymbol* const> written_fields, cxx::AST* owner) {
+      std::span<cxx::Symbol* const> written_fields, cxx::AST* owner) {
     if (!receivers_.current() || receivers_.current()->record != &record) {
       fail(owner,
            "implicit member call requires a matching current source object");

@@ -92,7 +92,7 @@ class Storage {
   // Projects an admitted record field using its retained C++ byte offset.
   // The allocation identity is preserved, including for nested records.
   // Packing changes the origin, without asserting natural field alignment.
-  StorageProjection member(StorageProjection base, cxx::FieldSymbol* field,
+  StorageProjection member(StorageProjection base, cxx::Symbol* field,
                            cxx::AST* owner);
   // Projects an in-bounds constant element of an admitted fixed array. Source
   // subobject offsets need no signed pointer-arithmetic conversion chain.

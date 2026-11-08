@@ -6,6 +6,7 @@
 
 #include "loom/import/cxx/value/types.h"
 
+#include <cxx/ast.h>
 #include <cxx/ast_interpreter.h>
 #include <cxx/attributes.h>
 #include <cxx/control.h>
@@ -21,6 +22,7 @@
 
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
+#include "loom/import/cxx/source/objects.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/type_registry.h"
@@ -1098,6 +1100,14 @@ const TensorPartition* Types::tensor(const cxx::ClassType* input,
   return admitted;
 }
 
+const cxx::Type* SubobjectPartition::type() const {
+  return source_object_type(source);
+}
+
+uint64_t SubobjectPartition::byte_offset() const {
+  return source_subobject_offset(source);
+}
+
 const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
   if (!input) {
     return nullptr;
@@ -1150,7 +1160,8 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
     const auto& member_partition = traits.is_lvalue_reference(field->type())
                                        ? kPointerPartition
                                        : partition(field->type(), owner);
-    MemberPartition member{field, &member_partition, result->component_count};
+    SubobjectPartition member{field, &member_partition,
+                              result->component_count};
     result->members.push_back(member);
     members_.emplace(field, member);
     auto name = cxx::to_string(field->name());
@@ -1285,12 +1296,33 @@ void Types::append_component_names(const Partition& partition,
   }
 }
 
-const MemberPartition& Types::member(cxx::FieldSymbol* field, cxx::AST* owner) {
-  if (auto found = members_.find(field); found != members_.end()) {
+const SubobjectPartition& Types::member(cxx::Symbol* subobject,
+                                        cxx::AST* owner) {
+  if (auto found = members_.find(subobject); found != members_.end()) {
     return found->second;
   }
-  record(field->parent()->type(), owner);
-  return members_.at(field);
+  record(subobject->parent()->type(), owner);
+  return members_.at(subobject);
+}
+
+const SubobjectProjection& Types::projection(cxx::List<cxx::Symbol*>* path,
+                                             cxx::AST* owner) {
+  if (!projections_) {
+    projections_ = std::make_unique<ProjectionMap>();
+  }
+  if (auto found = projections_->find(path); found != projections_->end()) {
+    return found->second;
+  }
+  const auto& root = member(path->value, owner);
+  SubobjectProjection result{&root, root.partition, root.component_offset,
+                             root.byte_offset()};
+  for (auto* step : cxx::ListView{path->next}) {
+    const auto& selected = member(step, owner);
+    result.partition = selected.partition;
+    result.component_offset += selected.component_offset;
+    result.byte_offset += selected.byte_offset();
+  }
+  return projections_->emplace(path, result).first->second;
 }
 
 void Types::select_pointer_reference_snapshot(cxx::FieldSymbol* field,
@@ -1725,10 +1757,11 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
                 ? std::span<const loom_value_id_t>{}
                 : identities.subspan(member.component_offset,
                                      member.partition->component_count);
-        auto* member_type = member.field->type();
+        auto* member_type = member.type();
         if (unit_.typeTraits().is_lvalue_reference(member_type)) {
           auto* referent = unit_.typeTraits().remove_reference(member_type);
-          member_type = pointer_reference_is_snapshot(member.field)
+          member_type = pointer_reference_is_snapshot(
+                            static_cast<cxx::FieldSymbol*>(member.source))
                             ? referent
                             : unit_.typeTraits().add_pointer(referent);
         }

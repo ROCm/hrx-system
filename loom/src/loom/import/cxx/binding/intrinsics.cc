@@ -383,7 +383,7 @@ Intrinsics::ScalarBinding Intrinsics::resolve_scalar(
                             "intrinsic result members must be scalar values");
       }
     }
-    return_type = types_.unqualified(record->members.front().field->type());
+    return_type = types_.unqualified(record->members.front().type());
   }
   if (operation.scalar->category == LOOM_CXX_SCALAR_CATEGORY_INTEGER) {
     if (!traits.is_integral(return_type) ||
@@ -424,7 +424,7 @@ Intrinsics::ScalarBinding Intrinsics::resolve_scalar(
   }
   if (record) {
     for (const auto& member : record->members) {
-      check_field(member.field->type(), index++,
+      check_field(member.type(), index++,
                   "intrinsic result members must share the primary type");
     }
   }

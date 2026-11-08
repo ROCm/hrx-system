@@ -225,7 +225,7 @@ Value Initialization::closure(cxx::LambdaExpressionAST* expression) {
                         "lambda expression requires an admitted closure type");
   }
 
-  std::unordered_map<cxx::FieldSymbol*, Value> captures;
+  std::unordered_map<cxx::Symbol*, Value> captures;
   captures.reserve(record->members.size());
   for (auto* capture : cxx::ListView{expression->captureList}) {
     if (cxx::is_pack_capture(capture)) {
@@ -279,7 +279,7 @@ Value Initialization::closure(cxx::LambdaExpressionAST* expression) {
   std::vector<loom_value_id_t> components;
   components.reserve(record->component_count);
   for (const auto& member : record->members) {
-    auto found = captures.find(member.field);
+    auto found = captures.find(member.source);
     if (found == captures.end()) {
       diagnostics_.reject(unit_, expression,
                           "lambda closure field has no capture initializer");
@@ -377,7 +377,7 @@ Value Initialization::materialize_constant(const cxx::ConstValue& value,
                           "constant record type does not match its source "
                           "type");
     }
-    std::unordered_map<const cxx::FieldSymbol*, const cxx::ConstValue*>
+    std::unordered_map<const cxx::Symbol*, const cxx::ConstValue*>
         retained_members;
     retained_members.reserve((*retained)->members().size());
     for (const auto& member : (*retained)->members()) {
@@ -398,12 +398,12 @@ Value Initialization::materialize_constant(const cxx::ConstValue& value,
     std::vector<loom_value_id_t> components;
     components.reserve(record->component_count);
     for (const auto& member : record->members) {
-      auto found = retained_members.find(member.field);
+      auto found = retained_members.find(member.source);
       if (found == retained_members.end()) {
         diagnostics_.reject(unit_, owner,
                             "constant record is missing an admitted member");
       }
-      materialize_constant(*found->second, member.field->type(), owner)
+      materialize_constant(*found->second, member.type(), owner)
           .append_to(components);
       retained_members.erase(found);
     }
@@ -449,11 +449,11 @@ Value Initialization::zero(const cxx::Type* type, cxx::AST* owner) {
     std::vector<loom_value_id_t> components;
     components.reserve(record->component_count);
     for (const auto& member : record->members) {
-      if (unit_.typeTraits().is_reference(member.field->type())) {
+      if (unit_.typeTraits().is_reference(member.type())) {
         diagnostics_.reject(unit_, owner,
                             "reference members require an initializer");
       }
-      zero(member.field->type(), owner).append_to(components);
+      zero(member.type(), owner).append_to(components);
     }
     return arena_.capture(*record, components);
   }
@@ -626,7 +626,7 @@ Value Initialization::finish_value_receiver(const RecordPartition& record,
   std::vector<loom_value_id_t> components;
   components.reserve(record.component_count);
   for (const auto& member : record.members) {
-    evaluation_.receiver_member(member.field, owner).append_to(components);
+    evaluation_.receiver_member(member.source, owner).append_to(components);
   }
   return arena_.capture(record, components);
 }
@@ -639,16 +639,16 @@ Value Initialization::default_record(const RecordPartition& record,
   if (retained && !zero_initialize) {
     for (const auto& member : record.members) {
       evaluation_.publish_receiver_member(
-          member.field,
+          member.source,
           retained->project(*member.partition, member.component_offset));
     }
   } else if (zero_initialize) {
     for (const auto& member : record.members) {
-      if (unit_.typeTraits().is_lvalue_reference(member.field->type())) {
+      if (unit_.typeTraits().is_lvalue_reference(member.type())) {
         continue;
       }
-      evaluation_.publish_receiver_member(member.field,
-                                          zero(member.field->type(), owner));
+      evaluation_.publish_receiver_member(member.source,
+                                          zero(member.type(), owner));
     }
   }
 
@@ -746,21 +746,20 @@ Value Initialization::from_elements(const cxx::Type* type,
         if (elements && !default_clause) {
           lexical_receiver.emplace(evaluation_);
         }
-        if (unit_.typeTraits().is_lvalue_reference(member.field->type())) {
+        if (unit_.typeTraits().is_lvalue_reference(member.type())) {
           if (!elements) {
             diagnostics_.reject(unit_, owner,
                                 "reference members require an initializer");
           }
           initialized = evaluation_.reference(elements->value, owner);
         } else {
-          initialized = elements
-                            ? evaluation_.convert(elements->value,
-                                                  member.field->type(), owner)
-                            : zero(member.field->type(), owner);
+          initialized = elements ? evaluation_.convert(elements->value,
+                                                       member.type(), owner)
+                                 : zero(member.type(), owner);
         }
       }
       evaluation_.adopt(initializing_expression, initialized);
-      evaluation_.publish_receiver_member(member.field, initialized);
+      evaluation_.publish_receiver_member(member.source, initialized);
       if (elements) {
         elements = elements->next;
       }
@@ -818,14 +817,14 @@ void Initialization::default_storage_record(StorageProjection destination,
   ReceiverScope receiver(evaluation_, record, destination, object_type);
   if (zero_initialize) {
     for (const auto& member : record.members) {
-      auto member_type = objects_.member_type(object_type, member.field);
-      objects_.store(storage_.member(destination, member.field, owner),
+      auto member_type = objects_.member_type(object_type, member.source);
+      objects_.store(storage_.member(destination, member.source, owner),
                      zero(member_type, owner), member_type, owner);
-      evaluation_.complete_storage_receiver_member(member.field);
+      evaluation_.complete_storage_receiver_member(member.source);
     }
   } else if (retained) {
     for (const auto& member : record.members) {
-      evaluation_.complete_storage_receiver_member(member.field);
+      evaluation_.complete_storage_receiver_member(member.source);
     }
   }
 
@@ -1018,11 +1017,11 @@ void Initialization::object(StorageProjection destination,
           if (initializer && !default_clause) {
             lexical_receiver.emplace(evaluation_);
           }
-          object(storage_.member(destination, member.field, owner),
-                 objects_.member_type(object_type, member.field), initializer,
+          object(storage_.member(destination, member.source, owner),
+                 objects_.member_type(object_type, member.source), initializer,
                  nullptr, owner, false);
         }
-        evaluation_.complete_storage_receiver_member(member.field);
+        evaluation_.complete_storage_receiver_member(member.source);
       }
       return;
     }
@@ -1069,7 +1068,7 @@ void Initialization::constructor_receiver(StorageProjection destination,
     object(destination, object_type, source, delegate, initializer);
     evaluation_.finish_full_expression(mark);
     for (const auto& member : record.members) {
-      evaluation_.complete_storage_receiver_member(member.field);
+      evaluation_.complete_storage_receiver_member(member.source);
     }
     return;
   }

@@ -21,16 +21,16 @@ void ReceiverScopes::enter(const RecordPartition& record,
   frame.bindings.reserve(record.members.size());
   const size_t index = frames_.size();
   for (const auto& member : record.members) {
-    auto owner = owners_.find(member.field);
-    auto value = values_.find(member.field);
+    auto owner = owners_.find(member.source);
+    auto value = values_.find(member.source);
     frame.bindings.push_back(
-        {member.field,
+        {member.source,
          owner == owners_.end() ? std::nullopt
                                 : std::optional<Owner>{owner->second},
          value == values_.end() ? std::nullopt
                                 : std::optional<Value>{value->second}});
-    owners_[member.field] = {index, false};
-    values_.erase(member.field);
+    owners_[member.source] = {index, false};
+    values_.erase(member.source);
   }
   frames_.push_back(std::move(frame));
 }
@@ -40,7 +40,7 @@ void ReceiverScopes::leave() {
   auto frame = std::move(frames_.back());
   frames_.pop_back();
   for (const auto& binding : frame.bindings) {
-    auto found = owners_.find(binding.field);
+    auto found = owners_.find(binding.subobject);
     IREE_ASSERT(found != owners_.end() && found->second.index == index);
     if (binding.previous_owner) {
       found->second = *binding.previous_owner;
@@ -48,9 +48,9 @@ void ReceiverScopes::leave() {
       owners_.erase(found);
     }
     if (binding.previous_value) {
-      values_.set(binding.field, *binding.previous_value);
+      values_.set(binding.subobject, *binding.previous_value);
     } else {
-      values_.erase(binding.field);
+      values_.erase(binding.subobject);
     }
   }
 }
@@ -64,9 +64,9 @@ bool ReceiverScopes::suspend() {
   frames_.pop_back();
   suspended.bindings.reserve(suspended.frame.bindings.size());
   for (const auto& binding : suspended.frame.bindings) {
-    auto owner = owners_.find(binding.field);
+    auto owner = owners_.find(binding.subobject);
     IREE_ASSERT(owner != owners_.end() && owner->second.index == index);
-    auto value = values_.find(binding.field);
+    auto value = values_.find(binding.subobject);
     suspended.bindings.push_back(
         {owner->second, value == values_.end()
                             ? std::nullopt
@@ -77,9 +77,9 @@ bool ReceiverScopes::suspend() {
       owners_.erase(owner);
     }
     if (binding.previous_value) {
-      values_.set(binding.field, *binding.previous_value);
+      values_.set(binding.subobject, *binding.previous_value);
     } else {
-      values_.erase(binding.field);
+      values_.erase(binding.subobject);
     }
   }
   suspended_.push_back(std::move(suspended));
@@ -93,19 +93,19 @@ void ReceiverScopes::resume() {
   for (size_t index = 0; index < suspended.frame.bindings.size(); ++index) {
     auto& binding = suspended.frame.bindings[index];
     const auto& hidden = suspended.bindings[index];
-    auto lexical_owner = owners_.find(binding.field);
+    auto lexical_owner = owners_.find(binding.subobject);
     binding.previous_owner = lexical_owner == owners_.end()
                                  ? std::nullopt
                                  : std::optional<Owner>{lexical_owner->second};
-    auto lexical_value = values_.find(binding.field);
+    auto lexical_value = values_.find(binding.subobject);
     binding.previous_value = lexical_value == values_.end()
                                  ? std::nullopt
                                  : std::optional<Value>{lexical_value->second};
-    owners_.insert_or_assign(binding.field, hidden.owner);
+    owners_.insert_or_assign(binding.subobject, hidden.owner);
     if (hidden.value) {
-      values_.set(binding.field, *hidden.value);
+      values_.set(binding.subobject, *hidden.value);
     } else {
-      values_.erase(binding.field);
+      values_.erase(binding.subobject);
     }
   }
   frames_.push_back(std::move(suspended.frame));
@@ -117,21 +117,21 @@ void ReceiverScopes::clear() {
   suspended_.clear();
 }
 
-const ReceiverState* ReceiverScopes::find(cxx::FieldSymbol* field) const {
-  auto found = owners_.find(field);
+const ReceiverState* ReceiverScopes::find(cxx::Symbol* subobject) const {
+  auto found = owners_.find(subobject);
   return found == owners_.end() ? nullptr
                                 : &frames_[found->second.index].receiver;
 }
 
-void ReceiverScopes::publish(cxx::FieldSymbol* field, Value value) {
-  auto& owner = owners_.at(field);
+void ReceiverScopes::publish(cxx::Symbol* subobject, Value value) {
+  auto& owner = owners_.at(subobject);
   IREE_ASSERT(!frames_[owner.index].receiver.storage);
-  values_.set(field, value);
+  values_.set(subobject, value);
   owner.complete = true;
 }
 
-void ReceiverScopes::mark_complete(cxx::FieldSymbol* field) {
-  auto& owner = owners_.at(field);
+void ReceiverScopes::mark_complete(cxx::Symbol* subobject) {
+  auto& owner = owners_.at(subobject);
   IREE_ASSERT(frames_[owner.index].receiver.storage);
   owner.complete = true;
 }
