@@ -698,6 +698,77 @@ TEST_F(CandidatePolicyTest, RecoveryPreservesSourceOrderWithoutProgress) {
   ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT, later, older);
 }
 
+TEST_F(CandidatePolicyTest, RecoveryPrioritizesEquivalentMaterializations) {
+  auto base = MakeCandidate(0, 0);
+  base.projected_live_units = 4;
+  base.produced_live_units = 1;
+  base.produced_live_value_count = 1;
+  base.critical_path_cycles = 2;
+  base.selected_descriptor_ordinal = 7;
+  base.flags = LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_REMATERIALIZABLE_LEAF |
+               LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR;
+
+  for (const auto mode :
+       {LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+        LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION}) {
+    SCOPED_TRACE(mode);
+    for (bool reaches_unspillable : {false, true}) {
+      SCOPED_TRACE(reaches_unspillable);
+      auto earlier = base;
+      if (reaches_unspillable) {
+        earlier.flags |=
+            LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION;
+      }
+      auto critical = earlier;
+      critical.source_ordinal = 1;
+      critical.critical_path_cycles = 4;
+      ExpectPreferred(mode, critical, earlier);
+
+      // Different native storage or non-leaf setup keeps the age policy.
+      auto different = critical;
+      different.selected_descriptor_ordinal = 8;
+      ExpectPreferred(mode, earlier, different);
+      auto non_leaf = critical;
+      non_leaf.flags &= ~LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_REMATERIALIZABLE_LEAF;
+      ExpectPreferred(mode, earlier, non_leaf);
+
+      // Equal immediate occupancy does not prove equal aggregate packing.
+      // A later leaf must not open another ownership chain in shared storage.
+      auto packed_earlier = earlier;
+      auto packed_critical = critical;
+      packed_earlier.flags |=
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_GROWS_PACKING_RESOURCE;
+      packed_critical.flags |=
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_GROWS_PACKING_RESOURCE;
+      ExpectPreferred(mode, packed_earlier, packed_critical);
+      ExpectPreferred(mode, packed_earlier, critical);
+      ExpectPreferred(mode, earlier, packed_critical);
+
+      // Criticality cannot buy extra issue delay, live storage, or a cliff.
+      auto delayed = critical;
+      delayed.data_ready_stall_cycles = 1;
+      delayed.effective_stall_cycles = 1;
+      ExpectPreferred(mode, earlier, delayed);
+      auto growing = critical;
+      ++growing.produced_live_units;
+      ++growing.projected_live_units;
+      ExpectPreferred(mode, earlier, growing);
+      auto constrained = critical;
+      constrained.pressure_cliff_penalty = 1;
+      ExpectPreferred(mode, earlier, constrained);
+      auto infeasible = critical;
+      infeasible.flags |=
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXCEEDS_UNSPILLABLE_CAPACITY;
+      ExpectPreferred(mode, earlier, infeasible);
+
+      // The source ordinal remains the stable tie-break for equal paths.
+      auto tied = critical;
+      tied.critical_path_cycles = earlier.critical_path_cycles;
+      ExpectPreferred(mode, earlier, tied);
+    }
+  }
+}
+
 TEST_F(CandidatePolicyTest, RecoveryAdvancesNeutralStorageWithoutIdleCycles) {
   const uint16_t storage_modes[] = {
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE,

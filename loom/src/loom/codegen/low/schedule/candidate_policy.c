@@ -719,10 +719,11 @@ bool loom_low_schedule_candidate_score_less(
     if (lhs->effective_stall_cycles != rhs->effective_stall_cycles) {
       return lhs->effective_stall_cycles < rhs->effective_stall_cycles;
     }
-    // Pressure-equivalent candidates that cannot yet retire storage have no
-    // recovery benefit to justify opening a later live range. Preserve source
-    // order once their actual issue delay also ties; the split between data
-    // and resource stalls does not change when either candidate can issue.
+    // Pressure-equivalent candidates that cannot yet retire storage normally
+    // retain source order instead of opening later live ranges. Equivalent
+    // leaf materializations outside shared packing resources can distinguish
+    // useful latency without opening a new aggregate ownership chain. The
+    // split between data and resource stalls does not change issue readiness.
     if (compare_mode != LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_DEFAULT &&
         lhs->pressure_progress_kind ==
             LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE &&
@@ -730,6 +731,20 @@ bool loom_low_schedule_candidate_score_less(
             LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_NONE &&
         pressure_efficiency_order == 0 && pressure_order == 0 &&
         lhs->source_ordinal != rhs->source_ordinal) {
+      // Growing shared packing state can fragment a later wide value even
+      // when immediate occupancy ties. Preserve its source-order recovery;
+      // independent setup leaves can use the retained consumer critical path.
+      if (!iree_any_bit_set(
+              lhs->flags | rhs->flags,
+              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_GROWS_PACKING_RESOURCE) &&
+          iree_all_bits_set(
+              lhs->flags & rhs->flags,
+              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_REMATERIALIZABLE_LEAF) &&
+          lhs->selected_descriptor_ordinal ==
+              rhs->selected_descriptor_ordinal &&
+          lhs->critical_path_cycles != rhs->critical_path_cycles) {
+        return lhs->critical_path_cycles > rhs->critical_path_cycles;
+      }
       return lhs->source_ordinal < rhs->source_ordinal;
     }
     // When candidates reach the same issue cycle, keep work on the longer

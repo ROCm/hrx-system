@@ -63,3 +63,59 @@ low.func.def target<test.low.core>(@target) @physical_completion_leaves(%initial
 
 // ----
 block 0 order: 0, 2, 3, 4, 5, 6, 1, 7
+
+// ====
+
+// Three of four physical registers remain live. Both constants need the last
+// register and release it through a scalar copy. Their pressure and issue costs
+// tie, so start the longer consumer path first instead of selecting by age.
+// RUN: emit low-schedule-query @critical_materialization strategy=resource-stall order=* issue=* scheduled-pressure=test.explicit32
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @critical_materialization(%held: reg<test.explicit32 x3>, %seed: reg<test.i32>) -> (reg<test.explicit32 x3>, reg<test.i32>, reg<test.i32>) asm {
+  %earlier = test.const.explicit32 1
+  %critical = test.const.explicit32 2
+  %earlier_scalar = copy %earlier : reg<test.explicit32> -> reg<test.i32>
+  %critical_scalar = copy %critical : reg<test.explicit32> -> reg<test.i32>
+  %sum = test.add.i32 %earlier_scalar, %seed
+  %product = test.mul.i32 %critical_scalar, %seed
+  %result = test.mul.i32 %product, %seed
+  return %held, %sum, %result
+}
+
+// ----
+block 0 order: 1, 3, 5, 6, 0, 2, 4, 7
+node 0 issue-cycle: 1
+node 1 issue-cycle: 0
+node 2 issue-cycle: 1
+node 3 issue-cycle: 0
+node 4 issue-cycle: 2
+node 5 issue-cycle: 0
+node 6 issue-cycle: 1
+node 7 issue-cycle: 3
+scheduled pressure test.explicit32: peak-live-units=4 peak-live-values=2
+
+// ====
+
+// In a shared packing bank, constant setup also opens aggregate ownership.
+// Preserve source order even with the same immediate occupancy and unequal
+// consumer paths; that tie cannot prove interchangeable later packing.
+// RUN: emit low-schedule-query @packed_materialization strategy=resource-stall order=* scheduled-pressure=test.packed.narrow
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @packed_materialization(%held: reg<test.packed.narrow>, %seed: reg<test.i32>) -> (reg<test.packed.narrow>, reg<test.i32>, reg<test.i32>) asm {
+  %earlier = test.const.packed.narrow 1
+  %critical = test.const.packed.narrow 2
+  %earlier_scalar = copy %earlier : reg<test.packed.narrow> -> reg<test.i32>
+  %critical_scalar = copy %critical : reg<test.packed.narrow> -> reg<test.i32>
+  %sum = test.add.i32 %earlier_scalar, %seed
+  %product = test.mul.i32 %critical_scalar, %seed
+  %result = test.mul.i32 %product, %seed
+  return %held, %sum, %result
+}
+
+// ----
+block 0 order: 0, 2, 4, 1, 3, 5, 6, 7
+scheduled pressure test.packed.narrow: peak-live-units=2 peak-live-values=2
