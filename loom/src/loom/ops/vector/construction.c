@@ -1877,6 +1877,56 @@ iree_status_t loom_vector_normalize_coordinates(loom_op_t* op,
   return loom_vector_apply_coordinates(op, rewriter, coordinates);
 }
 
+static iree_status_t loom_vector_flatten_constructor(loom_op_t* op,
+                                                     loom_rewriter_t* rewriter,
+                                                     bool* out_changed) {
+  *out_changed = false;
+  const loom_value_id_t input = loom_vector_bitcast_input(op);
+  const loom_type_t input_type =
+      loom_module_value_type(rewriter->module, input);
+  const loom_type_t result_type =
+      loom_module_value_type(rewriter->module, loom_vector_bitcast_result(op));
+  // Keep construction flat and shape restoration explicit. Folding in the
+  // opposite direction would recreate multidimensional constructors after
+  // target legalization linearizes them.
+  if (loom_type_rank(result_type) != 1 ||
+      loom_type_element_type(input_type) !=
+          loom_type_element_type(result_type) ||
+      !loom_type_encoding_equals(input_type, result_type) ||
+      !loom_type_is_all_static(result_type)) {
+    return iree_ok_status();
+  }
+  loom_op_t* producer = loom_rewriter_value_defining_op(rewriter, input);
+  if (!producer || !loom_vector_from_elements_isa(producer)) {
+    return iree_ok_status();
+  }
+  const loom_value_t* value = loom_module_value(rewriter->module, input);
+  if (loom_value_has_single_use(value) &&
+      !loom_value_has_attribute_uses(value) &&
+      !loom_module_value_has_type_uses(rewriter->module, input)) {
+    // Flattening preserves the ordered scalar operands. Retyping an
+    // exclusively owned constructor avoids copying its entire operand list.
+    IREE_RETURN_IF_ERROR(
+        loom_rewriter_set_value_type(rewriter, input, result_type));
+    IREE_RETURN_IF_ERROR(
+        loom_vector_replace_single_result_with_value(op, rewriter, input));
+  } else {
+    // Other users retain their original shape and SSA identity.
+    const loom_value_slice_t elements =
+        loom_vector_from_elements_elements(producer);
+    loom_builder_set_before(&rewriter->builder, op);
+    const loom_value_id_t checkpoint = loom_rewriter_value_checkpoint(rewriter);
+    loom_op_t* replacement = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_from_elements_build(
+        &rewriter->builder, elements.values, elements.count, result_type,
+        op->location, &replacement));
+    IREE_RETURN_IF_ERROR(loom_vector_replace_single_result_with_new_op(
+        op, rewriter, replacement, checkpoint));
+  }
+  *out_changed = true;
+  return iree_ok_status();
+}
+
 iree_status_t loom_vector_project_structure(loom_op_t* op,
                                             loom_rewriter_t* rewriter,
                                             bool* out_changed) {
@@ -1885,6 +1935,9 @@ iree_status_t loom_vector_project_structure(loom_op_t* op,
   }
   if (loom_vector_slice_isa(op)) {
     return loom_vector_project_slice_structure(op, rewriter, out_changed);
+  }
+  if (loom_vector_bitcast_isa(op)) {
+    return loom_vector_flatten_constructor(op, rewriter, out_changed);
   }
   *out_changed = false;
   const loom_value_id_t source = loom_vector_extract_source(op);
