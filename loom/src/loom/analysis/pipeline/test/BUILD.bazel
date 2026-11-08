@@ -20,6 +20,7 @@ loom_check_test_suite(
         "transport_call_spaces.loom-test",
         "transport_control.loom-test",
         "transport_replay.loom-test",
+        "transport_source_partitions.loom-test",
         "transport_stability.loom-test",
     ],
 )

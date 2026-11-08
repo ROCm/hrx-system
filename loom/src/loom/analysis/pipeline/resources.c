@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "loom/analysis/storage_geometry.h"
 #include "loom/error/error_catalog.h"
 #include "loom/error/parameter.h"
 #include "loom/ops/buffer/ops.h"
@@ -27,6 +28,26 @@ static iree_status_t loom_pipeline_resources_reject(
       .param_count = IREE_ARRAYSIZE(params),
   };
   return iree_diagnostic_emit(diagnostic_emitter, &emission);
+}
+
+static bool loom_pipeline_resources_channel_geometry(
+    const loom_fact_context_t* facts, const loom_module_t* module,
+    loom_type_t storage_type, loom_pipeline_channel_geometry_t* out_geometry) {
+  loom_storage_geometry_t storage;
+  loom_storage_geometry_span_t record;
+  if (!loom_storage_geometry_query(facts, module, storage_type, &storage) ||
+      !loom_storage_geometry_measure(&storage, 1, &record) ||
+      !iree_checked_mul_u64(storage.axes[0].element_stride,
+                            storage.element_bit_count,
+                            &out_geometry->slot_bit_stride) ||
+      !iree_checked_mul_u64(record.element_span, storage.element_bit_count,
+                            &out_geometry->record_bit_span)) {
+    return false;
+  }
+  out_geometry->record_element_count = record.element_count;
+  out_geometry->element_bit_count = storage.element_bit_count;
+  out_geometry->record_dense = record.dense;
+  return true;
 }
 
 static int loom_pipeline_resources_compare_root(const void* lhs,
@@ -262,6 +283,17 @@ iree_status_t loom_pipeline_resources_build(
             diagnostic_emitter);
       }
       channel.capacity = (uint64_t)capacity;
+      loom_pipeline_channel_geometry_t geometry;
+      if (loom_pipeline_resources_channel_geometry(
+              &facts->context, module,
+              loom_module_value_type(module, loom_channel_bind_storage(op)),
+              &geometry)) {
+        loom_pipeline_channel_geometry_t* retained = NULL;
+        IREE_RETURN_IF_ERROR(
+            iree_arena_allocate(arena, sizeof(*retained), (void**)&retained));
+        *retained = geometry;
+        channel.geometry = retained;
+      }
       if (resources.channel_count == channel_capacity) {
         IREE_RETURN_IF_ERROR(iree_arena_grow_array(
             arena, resources.channel_count, resources.channel_count + 1,

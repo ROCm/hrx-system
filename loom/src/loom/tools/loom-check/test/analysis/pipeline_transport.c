@@ -451,14 +451,20 @@ static iree_status_t loom_check_test_pipeline_transport_execute(
     return loom_check_test_pipeline_invocation_print(&state,
                                                      invocations.entries[0]);
   }
+  loom_storage_access_scope_t storage_access;
+  loom_storage_access_scope_initialize(module, arena, &storage_access);
   loom_pipeline_worker_t* workers = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, resources.strand_count, sizeof(*workers), (void**)&workers));
   IREE_RETURN_IF_ERROR(loom_pipeline_workers_build(
-      module, &resources, &facts, NULL, 0, /*is_root=*/true, NULL, NULL,
-      emitter, arena, workers, &valid));
+      module, &resources, &facts, NULL, 0, NULL, NULL, &storage_access, emitter,
+      arena, workers, &valid));
   if (!valid) {
     return iree_ok_status();
+  }
+  if (!resources.schedule_count && !resources.composition_count) {
+    IREE_RETURN_IF_ERROR(loom_pipeline_workers_prove_sources(
+        &storage_access, workers, resources.strand_count));
   }
   if (resources.schedule_count) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
