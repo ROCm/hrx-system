@@ -202,6 +202,13 @@ loom_check_test_suite(
 )
 
 loom_check_test_suite(
+    name = "integer_dot_tests",
+    srcs = ["integer_dot_test.loom-test"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with(["//loom/config/emit:spirv_binary"]),
+)
+
+loom_check_test_suite(
     name = "matrix_tests",
     srcs = ["matrix_test.loom-test"],
     tags = ["hostonly"],

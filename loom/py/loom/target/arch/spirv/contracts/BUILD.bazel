@@ -26,6 +26,7 @@ iree_py_library(
         "float_width.py",
         "index.py",
         "integer_bits.py",
+        "integer_dot.py",
         "logical_core.py",
         "memory.py",
         "ordinary_vector.py",
