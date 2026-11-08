@@ -183,13 +183,11 @@ typedef struct loom_aie2p_native_dma_completion_t {
   uint16_t selector;
 } loom_aie2p_native_dma_completion_t;
 
-// Repeated external-address patch bodies within one source worker occurrence.
+// Repeated external-address patch bodies for one physical local descriptor.
 // The local descriptor fixes the routes, chain geometry, and local patch
 // policy; relocation bases, shim commands, and shim queue words remain call
-// arguments.
+// arguments. Ordered worker occurrences on the same core share this body.
 typedef struct loom_aie2p_native_dma_submit_t {
-  // Worker occurrence owning these static submission sites.
-  iree_host_size_t worker;
   // Number of static sites, independent of runtime loop trip counts.
   iree_host_size_t use_count;
   // One native leaf materialized on first use, or null before emission.
@@ -215,8 +213,7 @@ typedef struct loom_aie2p_native_dma_descriptor_t {
   // Each issue patches this endpoint's address. Shared descriptors also patch
   // fixed offsets when their copies address different storage or record slots.
   bool address_dynamic;
-  // Most recent core worker's external-patch group. Earlier workers' tasks
-  // retain their own group after the descriptor moves to another occurrence.
+  // External-patch group shared by ordered uses of this physical endpoint.
   loom_aie2p_native_dma_submit_t* submit_group;
 } loom_aie2p_native_dma_descriptor_t;
 
