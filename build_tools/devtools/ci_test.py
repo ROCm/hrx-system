@@ -450,6 +450,9 @@ class CiTest(unittest.TestCase):
                     if keep_going:
                         self.assertEqual(phase.argv[4], "--keep_going")
                         self.assertEqual(phase.argv[5:], original.argv[4:])
+                    elif original.argv[1:4] == ("dev.py", "bazel", "test"):
+                        self.assertEqual(phase.argv[4], "--notest_keep_going")
+                        self.assertEqual(phase.argv[5:], original.argv[4:])
                     else:
                         self.assertEqual(phase, original)
 
@@ -772,6 +775,63 @@ class CiTest(unittest.TestCase):
             self.assertEqual(
                 sorted(path.read_text() for path in result_dir.rglob("test.xml")),
                 ["first result", "second result"],
+            )
+
+    def test_failed_test_stages_results_before_stopping_later_phases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "testlogs" / "example" / "test.log"
+            source.parent.mkdir(parents=True)
+            events = root / "events.json"
+            output = root / "artifacts"
+            later = root / "later"
+            event = (
+                json.dumps(
+                    {
+                        "testResult": {
+                            "testActionOutput": [
+                                {"name": "test.log", "uri": source.as_uri()}
+                            ]
+                        }
+                    }
+                )
+                + "\n"
+            )
+            script = (
+                "from pathlib import Path; "
+                f"Path({str(source)!r}).write_text('first native failure'); "
+                f"Path({str(events)!r}).write_text({event!r}); "
+                "raise SystemExit(17)"
+            )
+            steps = [
+                ci.CiStep(
+                    "Failing test",
+                    (sys.executable, "-c", script),
+                    test_results=ci.bazel_test_results.BazelTestResultsCapture(
+                        events, output
+                    ),
+                ),
+                ci.CiStep(
+                    "Later phase",
+                    (
+                        sys.executable,
+                        "-c",
+                        f"from pathlib import Path; Path({str(later)!r}).touch()",
+                    ),
+                ),
+            ]
+            with (
+                mock.patch.dict(os.environ, {}, clear=True),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                returncode = ci.run_steps(
+                    steps, dry_run=False, keep_going=False, verbose=False
+                )
+            self.assertEqual(returncode, 17)
+            self.assertFalse(later.exists())
+            self.assertEqual(
+                (output / "bazel-testlogs/example/test.log").read_text(),
+                "first native failure",
             )
 
     def test_native_gpu_ci_requires_explicit_windows_target(self):

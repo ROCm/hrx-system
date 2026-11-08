@@ -387,12 +387,16 @@ jobs:
           elif [[ "$IREE_CI_COMMAND" != iree-bazel-repository-build ]]; then
             result_args=(--bazel-test-results-dir "${RUNNER_TEMP}/repository-test-results-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")
           fi
+          failure_args=()
+          if [[ "$IREE_CI_KIND" == cpu ]]; then
+            failure_args=(--keep-going)
+          fi
           python3 build_tools/devtools/ci.py "$IREE_CI_COMMAND" \
             "${target_args[@]}" "${importer_args[@]}" "${scope_args[@]}" "${result_args[@]}" "${compilation_args[@]}" \
-            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" --keep-going
+            --bazel-profile-dir "${RUNNER_TEMP}/bazel-profiles" "${failure_args[@]}"
 
       - name: Capture accelerator kernel errors
-        if: ${{ always() && matrix.kind != 'cpu' && steps.iree_bazel_ci.outcome == 'failure' }}
+        if: ${{ always() && matrix.kind != 'cpu' && (steps.iree_bazel_ci.outcome == 'failure' || steps.iree_bazel_ci.outcome == 'cancelled') }}
         run: |
           date -u
           uname -a

@@ -69,8 +69,12 @@ python build_tools/devtools/ci.py iree-cmake-cpu-ubsan
 
 `--target` can narrow profiles that accept Bazel target patterns. CMake profiles
 select their tests through CTest names and labels. `--verbose` prints the
-underlying commands; `--keep-going` runs independent phases after a failure and
-reports the failed phases at the end.
+underlying commands. Bazel CI commands stop at the first failed test by default.
+`--keep-going` continues independent build actions, tests, and phases after a
+failure and reports the failed phases at the end. Linux accelerator jobs use
+the default so a native failure reaches artifact and kernel-log collection
+before further tests can obscure the initiating failure. CPU jobs retain
+`--keep-going` to report independent failures together.
 
 The native Windows GPU profile accepts an explicit GPU target or family selector:
 
