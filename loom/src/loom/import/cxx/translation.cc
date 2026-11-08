@@ -2779,18 +2779,17 @@ class Translator final : private Initialization::Evaluation {
   // arranged in callable ABI order. A mutable value reference retains its
   // destination until the tied call results are available.
   struct EvaluatedCallArgument {
-    // Source value or storage pointer transported through the call.
-    Value value;
+    // Completed value or storage pointer. An SSA lvalue reference is read from
+    // |target| only after all argument evaluations have finished.
+    std::optional<Value> value;
     // Automatic lvalue named by a value-reference argument. Read-only
     // parameters retain it because an exact reference result can be mutated by
     // a later call.
     std::optional<Lvalue> target;
-    // Admitted value structure of a mutable value reference.
-    const Partition* writeback_partition = nullptr;
+    // Admitted value structure of a value reference, including read-only ones.
+    const Partition* reference_partition = nullptr;
     // Unqualified value type of a mutable value reference.
     const cxx::Type* writeback_type = nullptr;
-    // Automatic component interval participating in alias admission.
-    std::optional<ReferenceOrigin> origin;
   };
 
   ReferenceOrigin reference_origin(const Lvalue& target, const Value& value,
@@ -2836,53 +2835,61 @@ class Translator final : private Initialization::Evaluation {
       return {.value = reference_value(argument, argument)};
     }
     std::optional<Lvalue> target;
-    Value value;
-    std::optional<ReferenceOrigin> origin;
+    std::optional<Value> value;
     if (argument->valueCategory != cxx::ValueCategory::kPrValue) {
       if (auto called = reference_call(argument)) {
         IREE_ASSERT(called->value && !called->value->is_pointer());
         IREE_ASSERT(!called->current_receiver);
-        value = *called->value;
         target = std::move(called->reference_target);
+        if (!target) {
+          value = *called->value;
+        }
       } else {
         target = destination(argument, owner,
                              reference->mutable_access ? LvalueAccess::Write
                                                        : LvalueAccess::Read);
-        value = read(*target, argument);
-      }
-      if (reference->mutable_access && target) {
-        origin = reference_origin(*target, value, argument);
       }
     } else {
       value = expression(argument);
     }
-    if (&value.partition() != &expected_partition) {
-      fail(argument,
-           "runtime value-reference binding must preserve the admitted "
-           "source value type");
-    }
     return {
         .value = value,
         .target = std::move(target),
-        .writeback_partition =
-            reference->mutable_access ? &expected_partition : nullptr,
+        .reference_partition = &expected_partition,
         .writeback_type = reference->mutable_access ? expected_type : nullptr,
-        .origin = origin,
     };
+  }
+
+  void materialize_call_argument(EvaluatedCallArgument& argument,
+                                 cxx::AST* owner) {
+    if (!argument.value) {
+      argument.value = read(*argument.target, owner);
+    }
+    if (argument.reference_partition &&
+        &argument.value->partition() != argument.reference_partition) {
+      fail(owner,
+           "runtime value-reference binding must preserve the admitted "
+           "source value type");
+    }
   }
 
   void append_call_argument(EvaluatedCallArgument argument,
                             size_t receiver_argument_count,
                             std::vector<loom_value_id_t>& arguments,
-                            std::vector<ReferenceWriteback>& writebacks) {
+                            std::vector<ReferenceWriteback>& writebacks,
+                            cxx::AST* owner) {
     const size_t argument_offset = receiver_argument_count + arguments.size();
-    argument.value.append_to(arguments);
-    if (argument.writeback_partition) {
+    argument.value->append_to(arguments);
+    if (argument.writeback_type) {
+      auto origin = argument.target
+                        ? std::optional(reference_origin(
+                              *argument.target, *argument.value, owner))
+                        : std::nullopt;
       writebacks.push_back({
           .target = std::move(argument.target),
-          .source = argument.value,
-          .origin = argument.origin,
-          .partition = argument.writeback_partition,
+          .source = *argument.value,
+          .origin = origin,
+          .partition = argument.reference_partition,
           .value_type = argument.writeback_type,
           .argument_offset = argument_offset,
       });
@@ -3047,7 +3054,9 @@ class Translator final : private Initialization::Evaluation {
              "member call receiver must preserve its admitted record type");
       }
       return admit({ImplicitObjectABI::Value,
-                    *called->value,
+                    called->reference_target || called->current_receiver
+                        ? std::nullopt
+                        : called->value,
                     record,
                     std::move(called->reference_target),
                     called->current_receiver,
@@ -3985,7 +3994,7 @@ class Translator final : private Initialization::Evaluation {
     auto receiver_abi = receiver ? receiver->abi : ImplicitObjectABI::None;
     auto callee = functions_.declare(function, call, receiver_abi);
     auto references = functions_.reference_parameters(function);
-    if (references.empty() && !receiver) {
+    if (references.empty()) {
       std::vector<loom_value_id_t> arguments;
       for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
         auto* argument = source_arguments.next();
@@ -3996,6 +4005,11 @@ class Translator final : private Initialization::Evaluation {
       }
       while (auto* variadic_argument = source_arguments.next()) {
         expression(variadic_argument).append_to(arguments);
+      }
+      if (receiver) {
+        return emit_evaluated_call(call, function, callee, std::move(receiver),
+                                   std::move(arguments), {}, std::nullopt,
+                                   source);
       }
       return {
           .value = emit_simple_call(call, function, callee,
@@ -4016,6 +4030,8 @@ class Translator final : private Initialization::Evaluation {
             ? receiver->record->component_count
             : kPointerPartition.component_count;
 
+    std::vector<EvaluatedCallArgument> evaluated_arguments;
+    evaluated_arguments.reserve(parameters.size());
     size_t reference_index = 0;
     for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
       const ReferenceParameter* reference = nullptr;
@@ -4033,16 +4049,24 @@ class Translator final : private Initialization::Evaluation {
         evaluated = evaluate_call_argument(argument, parameters[ordinal],
                                            reference, call);
       }
+      evaluated_arguments.push_back(std::move(evaluated));
+    }
+    std::vector<loom_value_id_t> variadic_arguments;
+    while (auto* argument = source_arguments.next()) {
+      expression(argument).append_to(variadic_arguments);
+    }
+    for (size_t ordinal = 0; ordinal < evaluated_arguments.size(); ++ordinal) {
+      auto& evaluated = evaluated_arguments[ordinal];
+      materialize_call_argument(evaluated, call);
       if (return_parameter == ordinal) {
-        reference_result_alias = {evaluated.value, evaluated.target,
+        reference_result_alias = {*evaluated.value, evaluated.target,
                                   receiver_argument_count + arguments.size()};
       }
       append_call_argument(std::move(evaluated), receiver_argument_count,
-                           arguments, writebacks);
+                           arguments, writebacks, call);
     }
-    while (auto* argument = source_arguments.next()) {
-      expression(argument).append_to(arguments);
-    }
+    arguments.insert(arguments.end(), variadic_arguments.begin(),
+                     variadic_arguments.end());
     return emit_evaluated_call(call, function, callee, std::move(receiver),
                                std::move(arguments), std::move(writebacks),
                                std::move(reference_result_alias), source);
@@ -4121,7 +4145,7 @@ class Translator final : private Initialization::Evaluation {
       std::vector<loom_value_id_t> arguments;
       for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
         IREE_ASSERT(evaluated_arguments[ordinal]);
-        evaluated_arguments[ordinal]->value.append_to(arguments);
+        evaluated_arguments[ordinal]->value->append_to(arguments);
       }
       return {
           .value = emit_simple_call(expression, function, callee,
@@ -4146,12 +4170,13 @@ class Translator final : private Initialization::Evaluation {
     for (size_t ordinal = 0; ordinal < parameter_count; ++ordinal) {
       IREE_ASSERT(evaluated_arguments[ordinal]);
       auto evaluated = std::move(*evaluated_arguments[ordinal]);
+      materialize_call_argument(evaluated, expression);
       if (return_parameter == ordinal) {
-        reference_result_alias = {evaluated.value, evaluated.target,
+        reference_result_alias = {*evaluated.value, evaluated.target,
                                   receiver_argument_count + arguments.size()};
       }
       append_call_argument(std::move(evaluated), receiver_argument_count,
-                           arguments, writebacks);
+                           arguments, writebacks, expression);
     }
     return emit_evaluated_call(
         expression, function, callee, std::move(receiver), std::move(arguments),

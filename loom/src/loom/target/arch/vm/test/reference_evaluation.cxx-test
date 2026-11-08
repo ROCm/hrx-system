@@ -1,0 +1,125 @@
+// RUN: emit vm-object-lifetime
+// INPUT: cxx root=run
+// Reference arguments name the current object, including through an accessor
+// and when the callee returns that reference to its caller.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+static unsigned replace(unsigned& owner) { owner = 22; return 0; }
+static void observe(const unsigned& value, unsigned) { event(value); }
+static void increment(unsigned& value, unsigned) { ++value; event(value); }
+static const unsigned& alias(const unsigned& value) { return value; }
+static unsigned& identity(unsigned& value, unsigned) { return value; }
+
+void run() {
+  unsigned owner = 11;
+  observe(owner, replace(owner));
+  owner = 11;
+  increment(owner, replace(owner));
+  event(owner);
+  owner = 11;
+  observe(alias(owner), replace(owner));
+  owner = 11;
+  ++identity(owner, replace(owner));
+  event(owner);
+  owner = 11;
+  observe(owner + 1u, replace(owner));
+  event(owner);
+}
+
+// ----
+event 22
+event 23
+event 23
+event 22
+event 23
+event 12
+event 22
+OK 0
+retired 0
+
+// ====
+// Direct and reference-returning receivers both read the completed argument
+// updates. Receiver evaluation is sequenced before the explicit argument.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Current payload observed after argument evaluation.
+  unsigned value;
+  Owner& self() { event(1); return *this; }
+  unsigned replace() { event(2); value = 22; return 0; }
+  void observe(unsigned) const { event(value); }
+  void increment(unsigned) { ++value; event(value); }
+};
+
+void run() {
+  Owner owner{11};
+  owner.observe(owner.replace());
+  owner.value = 11;
+  owner.self().observe(owner.replace());
+  owner.value = 11;
+  owner.self().increment(owner.replace());
+  event(owner.value);
+}
+
+// ----
+event 2
+event 22
+event 1
+event 2
+event 22
+event 1
+event 2
+event 23
+event 23
+OK 0
+retired 0
+
+// ====
+// Operator notation preserves reference identity through operand evaluation.
+// Shift operands are sequenced left to right in ordinary C++ as well.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+struct Owner {
+  // Current payload observed by the operator body.
+  unsigned value;
+};
+static unsigned replace(Owner& owner) { owner.value = 22; return 0; }
+static void operator<<(const Owner& owner, unsigned) { event(owner.value); }
+static void operator>>(Owner& owner, unsigned) { ++owner.value; }
+
+void run() {
+  Owner owner{11};
+  owner << replace(owner);
+  owner.value = 11;
+  owner >> replace(owner);
+  event(owner.value);
+}
+
+// ----
+event 22
+event 23
+OK 0
+retired 0
+
+// ====
+// Storage-backed references retain the once-evaluated address, and later
+// argument evaluation may mutate the pointee before the callee reads it.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+
+static unsigned replace(unsigned& owner) { owner = 22; return 0; }
+static void observe(const unsigned& value, unsigned) { event(value); }
+static unsigned& at(unsigned* values) { return values[1]; }
+
+void run() {
+  unsigned values[2]{11, 33};
+  observe(at(values), replace(values[1]));
+  event(values[0]);
+  event(values[1]);
+}
+
+// ----
+event 22
+event 11
+event 22
+OK 0
+retired 0
