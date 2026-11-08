@@ -132,6 +132,7 @@ TEST_P(AmdgpuVirtualBufferTest, QueuedBackingMapsAndProducesBytesAcrossHoles) {
                                                 IREE_ASYNC_WAIT_FLAG_NONE));
     ExpectPattern(target, 2 * i * granularity_, pattern);
     ExpectPattern(sources[i], 0, pattern);
+    mappings[i].previous_source = mappings[i].source;
     mappings[i].source = nullptr;
     mappings[i].access = IREE_HAL_MEMORY_ACCESS_NONE;
     mappings[i].operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
@@ -233,6 +234,8 @@ TEST_P(AmdgpuVirtualBufferTest, ChildProtectionAndCompleteUnbind) {
   IREE_ASSERT_OK(iree_hal_queue_map(transfer_queue_, protected_reads,
                                     protected_writes, 1, &mapping, 0));
   mapping.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
+  mapping.previous_source = mapping.source;
+  mapping.previous_source_offset = mapping.source_offset;
   mapping.source = nullptr;
   mapping.source_offset = 0;
   mapping.access = IREE_HAL_MEMORY_ACCESS_NONE;

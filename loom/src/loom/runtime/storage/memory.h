@@ -240,6 +240,12 @@ iree_device_size_t loom_runtime_virtual_buffer_mapping_size(
 iree_host_size_t loom_runtime_virtual_buffer_slab_count(
     const loom_runtime_virtual_buffer_t* buffer);
 
+// Borrows the published physical source of one committed slab. The serialized
+// owner has joined that slab's commitment and prevents trim until consumers
+// retire. The borrowed parent span begins at the slab's first logical byte.
+iree_hal_buffer_binding_t loom_runtime_virtual_buffer_backing(
+    const loom_runtime_virtual_buffer_t* buffer, iree_host_size_t slab_index);
+
 // Missing backing in the serialized owner's root state, excluding accepted
 // commitments, in constant time. Does not collect operations or establish
 // readiness. The caller resolves prior detaches or failed commitments on this
@@ -382,6 +388,15 @@ iree_status_t loom_runtime_memory_pool_trim_async(
 void loom_runtime_memory_operation_set_observer(
     loom_runtime_memory_operation_t* operation, void (*wake)(void* user_data),
     void* user_data);
+
+// Borrows the prepared parent span of one commitment edit after successful
+// readiness. The operation or its published directory reservation keeps the
+// source live. The caller excludes trim until consumers retire and keeps the
+// operation alive while querying it. Only successful readiness permits this
+// query; failure is distinct from operation retirement.
+iree_hal_buffer_binding_t loom_runtime_memory_operation_backing(
+    const loom_runtime_memory_operation_t* operation,
+    iree_host_size_t edit_index);
 
 // Publishes completed native results and accounting on the serialized owner.
 // True joins captured queue ownership and the publisher's final callback

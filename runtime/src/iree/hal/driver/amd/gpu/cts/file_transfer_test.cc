@@ -246,6 +246,12 @@ class GpuNativeFileTest : public GpuNativeTest,
            backing_kind() == FileBacking::kVirtualMixedRegistered;
   }
 
+  bool uses_direct_file_access() const {
+    // An execution-only virtual alias exposes no host or registered-I/O view,
+    // even when its separately owned physical sources provide those views.
+    return is_physical() && file_io_capable_;
+  }
+
   virtual SharedFileDeviceCache& device_cache() const {
     return file_device_caches->process();
   }
@@ -586,6 +592,15 @@ class GpuNativeFileTest : public GpuNativeTest,
     return count == 1 ? frontier.entries[0].epoch : 0;
   }
 
+  uint64_t FilePublications(size_t length) const {
+    // The production device uses 2 MiB staging lanes. Each operation publishes
+    // its release and acquire, plus one copy per lane-sized chunk when staged.
+    constexpr size_t kStagingCapacity = 2 * 1024 * 1024;
+    return 2 + (uses_direct_file_access()
+                    ? 0
+                    : iree_host_size_ceil_div(length, kStagingCapacity));
+  }
+
   void BufferedRoundTrip(size_t length);
 
   // Logical range begins inside the allocation, independently of file offset.
@@ -662,9 +677,7 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
                                      kBufferOffset, length, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(three));
   RecordProperty("read_queue_publications", Publications() - before_read);
-  if (file_io_capable_) {
-    EXPECT_EQ(Publications() - before_read, 2u);
-  }
+  EXPECT_EQ(Publications() - before_read, FilePublications(length));
   ASSERT_NO_FATAL_FAILURE(
       Accumulate(buffer, three, four, 19, accumulate_offset));
   ASSERT_NO_FATAL_FAILURE(Wait(four));
@@ -675,9 +688,7 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
       kBufferOffset, file, 64, length, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(five));
   RecordProperty("write_queue_publications", Publications() - before_write);
-  if (file_io_capable_) {
-    EXPECT_EQ(Publications() - before_write, 2u);
-  }
+  EXPECT_EQ(Publications() - before_write, FilePublications(length));
   ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
 
   // Check both allocation guards through the public GPU transfer path.
@@ -699,6 +710,8 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
     // the old slabs while this shader and write-back use the new page tables.
     uint64_t seven = 7, eight = 8, nine = 9, ten = 10, eleven = 11, twelve = 12;
     for (size_t i = 0; i < mappings_.size(); ++i) {
+      mappings_[i].previous_source = mappings_[i].source;
+      mappings_[i].previous_source_offset = mappings_[i].source_offset;
       mappings_[i].source = sources_[(i + 1) % sources_.size()];
       mappings_[i].source_offset *= 2;
       mappings_[i].operation = IREE_HAL_MEMORY_MAPPING_OPERATION_REPLACE;
@@ -718,10 +731,12 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
     expected[accumulated_index] += 11;
     ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
 
-    // An unmapped middle range rejects the whole operation during preparation,
-    // before an earlier readable prefix can alter the destination file.
+    // File operations obey the same mapped-range precondition as dispatches.
+    // An unrelated hole does not prevent I/O over the surviving mapped prefix.
     if (mappings_.size() > 1) {
       auto hole = mappings_[1];
+      hole.previous_source = hole.source;
+      hole.previous_source_offset = hole.source_offset;
       hole.source = nullptr;
       hole.source_offset = 0;
       hole.access = 0;
@@ -730,10 +745,9 @@ void GpuNativeFileTest::BufferedRoundTrip(size_t length) {
                                         {1, &semaphore, &eleven}, 1, &hole, 0));
       IREE_ASSERT_OK(iree_hal_queue_write(
           queues_[0], {1, &semaphore, &eleven}, {1, &semaphore, &twelve},
-          buffer, kBufferOffset, file, 64, length, &barriers_, 0));
-      IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                            iree_hal_semaphore_wait(
-                                timeline_, twelve, iree_infinite_timeout(), 0));
+          buffer, kBufferOffset, file, 64,
+          hole.target_range.byte_offset - kBufferOffset, &barriers_, 0));
+      ASSERT_NO_FATAL_FAILURE(Wait(twelve));
       ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
     }
   }
@@ -942,7 +956,8 @@ void GpuNativeFileAccessTest::RoundTrip(bool direct) {
   const size_t buffer_offset = kAlignment - (is_nested() ? 256 : 0);
   Ref<iree_hal_buffer_t> buffer;
   ASSERT_NO_FATAL_FAILURE(Allocate(kBytes + 2 * kAlignment, buffer.out()));
-  const bool file_io_available = file_io_capable_ || direct_staging_available_;
+  const bool file_io_available =
+      uses_direct_file_access() || direct_staging_available_;
   RecordProperty("file_io_available", file_io_available);
   std::vector<uint32_t> expected(kBytes / 4 + 2 * kAlignment / 4);
   for (size_t i = 0; i < expected.size(); ++i) {
@@ -1001,9 +1016,7 @@ void GpuNativeFileAccessTest::RoundTrip(bool direct) {
     return;
   }
   ASSERT_NO_FATAL_FAILURE(Wait(two));
-  if (file_io_capable_) {
-    EXPECT_EQ(Publications() - before_read, 2u);
-  }
+  EXPECT_EQ(Publications() - before_read, FilePublications(kBytes));
   ASSERT_NO_FATAL_FAILURE(Accumulate(buffer, two, three, 19, buffer_offset));
   expected[kAlignment / sizeof(uint32_t)] += 19;
   std::vector<uint32_t> observed(kBytes / 4);
@@ -1018,9 +1031,7 @@ void GpuNativeFileAccessTest::RoundTrip(bool direct) {
       queues_[0], {1, &semaphore, &four}, {1, &semaphore, &five}, buffer,
       buffer_offset, file, 0, kBytes, &barriers_, 0));
   ASSERT_NO_FATAL_FAILURE(Wait(five));
-  if (file_io_capable_) {
-    EXPECT_EQ(Publications() - before_write, 2u);
-  }
+  EXPECT_EQ(Publications() - before_write, FilePublications(kBytes));
   std::copy(observed.begin(), observed.end(), expected.begin());
   ASSERT_NO_FATAL_FAILURE(ExpectFile(expected));
 }
@@ -1053,7 +1064,7 @@ TEST_P(GpuNativeFileProgressTest,
   Ref<iree_hal_buffer_t> buffer;
   ASSERT_NO_FATAL_FAILURE(
       Allocate(kBufferOffset + kSmall + kLarge, buffer.out()));
-  if (file_io_capable_) {
+  if (uses_direct_file_access()) {
     GTEST_SKIP() << "This backing uses direct file access and needs no staging";
   }
   std::vector<uint32_t> expected((kLarge + kSmall) / 4);
@@ -1501,7 +1512,7 @@ TEST_P(GpuSharedFileStagingTest,
   constexpr uint64_t kTotal = 2 * kSmall + kLarge;
   Ref<iree_hal_buffer_t> buffer;
   ASSERT_NO_FATAL_FAILURE(Allocate(kBufferOffset + kTotal, buffer.out()));
-  if (file_io_capable_) {
+  if (uses_direct_file_access()) {
     GTEST_SKIP() << "Direct host ranges do not require physical staging";
   }
   std::vector<uint32_t> expected(kTotal / 4);
@@ -1656,7 +1667,7 @@ TEST_P(GpuSharedVirtualFileStagingTest,
   constexpr uint64_t kSmall = 1024 * 1024;
   Ref<iree_hal_buffer_t> buffer;
   ASSERT_NO_FATAL_FAILURE(Allocate(kLimitedBackingLength + 256, buffer.out()));
-  if (file_io_capable_) {
+  if (uses_direct_file_access()) {
     GTEST_SKIP() << "Direct host ranges do not require physical staging";
   }
   ASSERT_GE(mappings_.size(), 2u);
@@ -1747,6 +1758,8 @@ TEST_P(GpuNativeRegisteredFileProgressTest,
   uint64_t one = 1, two = 2, three = 3, four = 4;
   auto unmaps = mappings_;
   for (auto& mapping : unmaps) {
+    mapping.previous_source = mapping.source;
+    mapping.previous_source_offset = mapping.source_offset;
     mapping.source = nullptr;
     mapping.source_offset = 0;
     mapping.access = 0;

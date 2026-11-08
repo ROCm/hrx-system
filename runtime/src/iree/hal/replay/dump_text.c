@@ -304,6 +304,8 @@ static iree_status_t iree_hal_replay_dump_append_text_payload(
             mapping.access));
         IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_buffer_ref(
             builder, "source", &mapping.source_ref));
+        IREE_RETURN_IF_ERROR(iree_hal_replay_dump_append_text_buffer_ref(
+            builder, "previous_source", &mapping.previous_source_ref));
         IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "}"));
       }
       return iree_string_builder_append_cstring(builder, "]");

@@ -552,7 +552,7 @@ static iree_status_t iree_hal_amd_gpu_file_staging_query_effects(
 iree_status_t iree_hal_amd_gpu_file_staging_prepare(
     iree_hal_amd_gpu_file_staging_t* staging,
     const iree_hal_amd_fabric_file_transfer_t* transfer) {
-  if (!staging || !transfer->sources.count) {
+  if (!staging) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "file copy requires file-capable native staging");
   }

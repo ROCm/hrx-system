@@ -32,6 +32,8 @@ typedef struct amdf_gpu_dxg_memory_reservation_device_t {
   uint32_t physical_adapter_index;
   // Native GPU virtual-address width in bits.
   uint32_t virtual_address_bit_count;
+  // Provider-supported unit for independently replaceable GPU address ranges.
+  uint64_t mapping_granularity;
   // Nonzero when GPU mappings can deny device writes.
   uint32_t read_only_memory_supported;
   // Nonzero when GPU mappings can deny instruction fetches.

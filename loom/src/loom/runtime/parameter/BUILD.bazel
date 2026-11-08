@@ -197,6 +197,20 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "stream_plan",
+    srcs = ["stream_plan.c"],
+    hdrs = ["stream_plan.h"],
+    deps = [
+        ":inputs",
+        "//loom/src/loom/runtime/command:program",
+        "//loom/src/loom/runtime/storage:memory",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_provider",
+    ],
+)
+
+loom_cc_library(
     name = "weights",
     srcs = ["weights.c"],
     hdrs = ["weights.h"],
@@ -204,6 +218,7 @@ loom_cc_library(
     deps = [
         ":inputs",
         ":sources",
+        ":stream_plan",
         "//loom/binding/c:loomc",
         "//loom/src/loom/runtime/execution",
         "//loom/src/loom/runtime/execution:retirement",

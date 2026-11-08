@@ -5,7 +5,6 @@
 
 #include "loom/runtime/parameter/weights.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 #include "iree/async/semaphore.h"
@@ -13,6 +12,7 @@
 #include "iree/vm/sync.h"
 #include "loom/runtime/execution/retirement.h"
 #include "loom/runtime/parameter/inputs.h"
+#include "loom/runtime/parameter/stream_plan.h"
 #include "loom/runtime/program/input.h"
 #include "loom/runtime/program/json.h"
 #include "loom/runtime/program/preparation.h"
@@ -20,94 +20,6 @@
 #include "loomc/iree.h"
 
 enum { WEIGHT_LANES = 4, WEIGHT_COMPLETIONS = 2 * WEIGHT_LANES };
-
-typedef struct loom_runtime_weight_span_t {
-  // Final placement with a key borrowed from the plan's owned key storage.
-  loom_cmd_program_parameter_t parameter;
-  // Unique final storage index, resolved once before any queue work.
-  iree_host_size_t storage_index;
-  // Owned cached preparation command, or null for unchanged bytes.
-  iree_hal_command_buffer_t* prepare;
-  // Captured source ranges; a command consumes them through input staging.
-  loom_runtime_weight_input_recipe_t inputs;
-} loom_runtime_weight_span_t;
-
-typedef struct loom_runtime_weight_fragment_t {
-  // Borrowed checkpoint identity from the retained parameter plan.
-  iree_string_view_t key;
-  // File and target byte extents, possibly only part of a tensor.
-  iree_io_parameter_span_t range;
-  // Resolved checkpoint or captured-host source owning the key.
-  uint32_t source;
-} loom_runtime_weight_fragment_t;
-
-typedef struct loom_runtime_weight_direct_read_t {
-  // Borrowed consecutive fragments from one source in a mapped window.
-  const loom_runtime_weight_fragment_t* fragments;
-  // Number of fragments captured by this gather.
-  iree_host_size_t count;
-  // Payload bytes contributed by these fragments, excluding storage padding.
-  uint64_t byte_length;
-  // Previous read on the lane and this window's mapping readiness.
-  iree_hal_semaphore_t* waits[2];
-  // Values paired with waits, retained through provider submission.
-  uint64_t wait_values[2];
-  // Completion point on the window's existing read lane.
-  uint64_t signal_value;
-} loom_runtime_weight_direct_read_t;
-
-typedef struct loom_runtime_weight_group_t {
-  // Borrowed fragments in this group's mapped storage range.
-  loom_runtime_weight_fragment_t* fragments;
-  // Unique storage containing every fragment in this group.
-  iree_host_size_t storage_index;
-  // Number of fragments exposed to the parameter provider.
-  iree_host_size_t count;
-  // First source run in the plan's direct read array.
-  iree_host_size_t read_begin;
-  // Exclusive end of the source runs in this window.
-  iree_host_size_t read_end;
-  // Read window within one physical slab; empty for fixed backing.
-  loom_runtime_memory_range_t backing;
-  // First read group sharing this physical slab's mapping readiness.
-  iree_host_size_t mapping_group;
-  // Owned mapping readiness, released after accepted reads capture it.
-  iree_hal_semaphore_t* mapped;
-  // Read frontier established by this group.
-  uint64_t signal_value;
-} loom_runtime_weight_group_t;
-
-typedef struct loom_runtime_weight_tensor_plan_t {
-  // First read group contributing bytes to a tensor.
-  iree_host_size_t begin;
-  // Exclusive last read group contributing bytes to that tensor.
-  iree_host_size_t end;
-  // Previous preparation on the lane owning this tensor's input staging.
-  uint64_t prepare_wait;
-  // Completion of this tensor's preparation, including its staging reads.
-  uint64_t prepare_signal;
-  // Last captured-input read needed by this tensor's preparation.
-  uint64_t input_signal;
-} loom_runtime_weight_tensor_plan_t;
-
-typedef struct loom_runtime_weight_stream_plan_t {
-  // Owned read groups, in physical mapping order for elastic backing.
-  loom_runtime_weight_group_t* groups;
-  // Number of initialized groups, including padding-only read windows.
-  iree_host_size_t group_count;
-  // Number of distinct physical slabs backing all read groups.
-  iree_host_size_t backing_count;
-  // Owned contiguous gather fragments borrowed by groups.
-  loom_runtime_weight_fragment_t* fragments;
-  // Owned source runs carrying each window's provider captures.
-  loom_runtime_weight_direct_read_t* reads;
-  // Number of nonempty source runs across all windows.
-  iree_host_size_t read_count;
-  // Owned tensor-to-group intervals consumed by preparation submission.
-  loom_runtime_weight_tensor_plan_t* spans;
-  // At least one tensor requires a preparation dispatch.
-  bool has_preparation;
-} loom_runtime_weight_stream_plan_t;
 
 typedef struct loom_runtime_weight_read_t {
   // Captured source range retained by the input plan.
@@ -121,22 +33,6 @@ typedef struct loom_runtime_weight_read_t {
   // Completed captured-input read on its staging lane.
   uint64_t signal_value;
 } loom_runtime_weight_read_t;
-
-typedef struct loom_runtime_weight_source_batch_t {
-  // First gather in the source's contiguous batch.
-  iree_host_size_t first;
-  // Number of populated gathers for this source.
-  iree_host_size_t count;
-  // Payload bytes accepted if this provider publishes its complete batch.
-  uint64_t byte_length;
-} loom_runtime_weight_source_batch_t;
-
-typedef struct loom_runtime_weight_storage_t {
-  // Owned unique root retained independently of the caller's output views.
-  iree_hal_buffer_t* buffer;
-  // Owned virtual reservation, or NULL for explicitly fixed backing.
-  loom_runtime_virtual_buffer_t* reservation;
-} loom_runtime_weight_storage_t;
 
 struct loom_runtime_weights_t {
   // Allocator owning the plan and cold activation metadata.
@@ -200,7 +96,8 @@ struct loom_runtime_weights_t {
   loom_runtime_weight_storage_t* storages;
   // Number of initialized unique roots, including partial creation.
   iree_host_size_t storage_count;
-  // Backing and all file/preparation work were submitted for this activation.
+  // Backing and bounded file/preparation producers were accepted for
+  // activation.
   bool active;
   // Owned terminal producer failure, replayed to later consumers without I/O.
   iree_status_t activation_status;
@@ -737,244 +634,13 @@ iree_status_t loom_runtime_weights_prepare(
   return status;
 }
 
-static iree_device_size_t loom_runtime_weight_read_window_size(
-    const loom_runtime_virtual_buffer_t* reservation) {
-  const iree_device_size_t slab_size =
-      loom_runtime_virtual_buffer_mapping_size(reservation);
-  return iree_min(slab_size, 64 * 1024 * 1024);
-}
-
-// Counts fragments before allocation, then scatters them into each group's
-// assigned slice. Each source range visits only the windows it intersects.
-static iree_host_size_t loom_runtime_weight_plan_fragments(
-    const loom_runtime_weights_t* weights,
-    loom_runtime_weight_stream_plan_t* plan) {
-  iree_host_size_t count = 0;
-  for (iree_host_size_t i = 0; i < weights->span_count; ++i) {
-    const loom_runtime_weight_span_t* span = &weights->spans[i];
-    if (span->inputs.count && span->prepare) {
-      continue;
-    }
-    for (uint32_t p = 0; p < iree_max(1, span->inputs.count); ++p) {
-      loom_runtime_weight_fragment_t fragment = {
-          .key = span->parameter.key,
-          .range = {.buffer_offset = span->parameter.byte_offset,
-                    .length = span->parameter.byte_length}};
-      if (span->inputs.count) {
-        const loom_runtime_weight_input_t* input =
-            loom_runtime_weight_inputs_at(weights->inputs,
-                                          span->inputs.first + p);
-        fragment = (loom_runtime_weight_fragment_t){.key = input->entry->key,
-                                                    .range = input->span,
-                                                    .source = input->source};
-        fragment.range.buffer_offset += span->parameter.byte_offset;
-      }
-      iree_host_size_t begin = plan->spans[i].begin;
-      iree_host_size_t end = plan->spans[i].end;
-      if (weights->pool && span->inputs.count) {
-        const iree_device_size_t window_size =
-            loom_runtime_weight_read_window_size(
-                weights->storages[span->storage_index].reservation);
-        const iree_host_size_t base =
-            begin - span->parameter.byte_offset / window_size;
-        begin = base + fragment.range.buffer_offset / window_size;
-        end = base +
-              (fragment.range.buffer_offset + fragment.range.length - 1) /
-                  window_size +
-              1;
-      }
-      for (iree_host_size_t j = begin; j < end; ++j) {
-        loom_runtime_weight_group_t* group = &plan->groups[j];
-        group->storage_index = span->storage_index;
-        if (group->fragments) {
-          loom_runtime_weight_fragment_t clipped = fragment;
-          if (weights->pool) {
-            const iree_device_size_t first =
-                iree_max(fragment.range.buffer_offset, group->backing.offset);
-            const iree_device_size_t last =
-                iree_min(fragment.range.buffer_offset + fragment.range.length,
-                         group->backing.offset + group->backing.length);
-            clipped.range.parameter_offset +=
-                first - fragment.range.buffer_offset;
-            clipped.range.buffer_offset = first;
-            clipped.range.length = last - first;
-          }
-          group->fragments[group->count] = clipped;
-        }
-        ++group->count;
-        ++count;
-      }
-    }
-  }
-  return count;
-}
-
-static int loom_runtime_weight_compare_fragments(const void* lhs,
-                                                 const void* rhs) {
-  const loom_runtime_weight_fragment_t* a = lhs;
-  const loom_runtime_weight_fragment_t* b = rhs;
-  if (a->source != b->source) {
-    return a->source < b->source ? -1 : 1;
-  }
-  return (a->range.buffer_offset > b->range.buffer_offset) -
-         (a->range.buffer_offset < b->range.buffer_offset);
-}
-
-// Builds only cold activation metadata. Elastic groups are read windows
-// within physical slabs; fixed groups preserve canonical tensors and individual
-// preparers. Tensor-to-group intervals are recorded here and consumed without
-// rescanning.
-static iree_status_t loom_runtime_weight_stream_plan(
-    loom_runtime_weights_t* weights, loom_runtime_weight_stream_plan_t* plan) {
-  const iree_allocator_t allocator = weights->host_allocator;
-  iree_host_size_t* storage_groups = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      allocator, weights->storage_count, sizeof(*storage_groups),
-      (void**)&storage_groups));
-  iree_status_t status =
-      iree_allocator_malloc_array(allocator, weights->span_count,
-                                  sizeof(*plan->spans), (void**)&plan->spans);
-  if (iree_status_is_ok(status)) {
-    if (weights->pool) {
-      for (iree_host_size_t i = 0; i < weights->storage_count; ++i) {
-        storage_groups[i] = plan->group_count;
-        const loom_runtime_virtual_buffer_t* reservation =
-            weights->storages[i].reservation;
-        const iree_device_size_t length = iree_hal_buffer_byte_length(
-            loom_runtime_virtual_buffer_handle(reservation));
-        plan->group_count +=
-            (length - 1) / loom_runtime_weight_read_window_size(reservation) +
-            1;
-        plan->backing_count +=
-            loom_runtime_virtual_buffer_slab_count(reservation);
-      }
-    }
-    for (iree_host_size_t i = 0; i < weights->span_count; ++i) {
-      const loom_runtime_weight_span_t* span = &weights->spans[i];
-      plan->has_preparation |= span->prepare != NULL;
-      if (weights->pool) {
-        const loom_runtime_virtual_buffer_t* reservation =
-            weights->storages[span->storage_index].reservation;
-        const iree_device_size_t window_size =
-            loom_runtime_weight_read_window_size(reservation);
-        const iree_host_size_t base = storage_groups[span->storage_index];
-        plan->spans[i] = (loom_runtime_weight_tensor_plan_t){
-            base + span->parameter.byte_offset / window_size,
-            base + (span->parameter.byte_offset + span->parameter.byte_length +
-                    window_size - 1) /
-                       window_size};
-        if (!span->parameter.byte_length) {
-          // Empty tensors still resolve their checkpoint key. At the end of a
-          // root, the zero-byte read belongs to its final mapped window.
-          plan->spans[i].begin =
-              base +
-              iree_min(span->parameter.byte_offset / window_size,
-                       (iree_hal_buffer_byte_length(
-                            loom_runtime_virtual_buffer_handle(reservation)) -
-                        1) /
-                           window_size);
-          plan->spans[i].end = plan->spans[i].begin + 1;
-        }
-      } else {
-        if (!i || span->prepare || weights->spans[i - 1].prepare ||
-            span->storage_index != weights->spans[i - 1].storage_index) {
-          ++plan->group_count;
-        }
-        plan->spans[i] = (loom_runtime_weight_tensor_plan_t){
-            plan->group_count - 1, plan->group_count};
-      }
-    }
-    status = iree_allocator_malloc_array(allocator, plan->group_count,
-                                         sizeof(*plan->groups),
-                                         (void**)&plan->groups);
-  }
-  iree_host_size_t fragment_count = 0;
-  if (iree_status_is_ok(status)) {
-    if (weights->pool) {
-      for (iree_host_size_t i = 0; i < weights->storage_count; ++i) {
-        loom_runtime_virtual_buffer_t* reservation =
-            weights->storages[i].reservation;
-        const iree_device_size_t window_size =
-            loom_runtime_weight_read_window_size(reservation);
-        const iree_device_size_t length = iree_hal_buffer_byte_length(
-            loom_runtime_virtual_buffer_handle(reservation));
-        const iree_host_size_t count = (length - 1) / window_size + 1;
-        const iree_host_size_t windows_per_slab =
-            loom_runtime_virtual_buffer_mapping_size(reservation) / window_size;
-        for (iree_host_size_t j = 0; j < count; ++j) {
-          loom_runtime_weight_group_t* group =
-              &plan->groups[storage_groups[i] + j];
-          group->storage_index = i;
-          group->backing = (loom_runtime_memory_range_t){
-              reservation, j * window_size,
-              iree_min(window_size, length - j * window_size)};
-          group->mapping_group =
-              storage_groups[i] + j / windows_per_slab * windows_per_slab;
-        }
-      }
-    }
-    fragment_count = loom_runtime_weight_plan_fragments(weights, plan);
-    if (fragment_count) {
-      status = iree_allocator_malloc_array(allocator, fragment_count,
-                                           sizeof(*plan->fragments),
-                                           (void**)&plan->fragments);
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    iree_host_size_t cursor = 0;
-    for (iree_host_size_t i = 0; i < plan->group_count; ++i) {
-      plan->groups[i].fragments =
-          plan->fragments ? plan->fragments + cursor : NULL;
-      cursor += plan->groups[i].count;
-      plan->groups[i].count = 0;
-    }
-    loom_runtime_weight_plan_fragments(weights, plan);
-    for (iree_host_size_t i = 0; i < plan->group_count; ++i) {
-      loom_runtime_weight_group_t* group = &plan->groups[i];
-      if (group->count > 1) {
-        qsort(group->fragments, group->count, sizeof(*group->fragments),
-              loom_runtime_weight_compare_fragments);
-      }
-      group->read_begin = plan->read_count;
-      for (iree_host_size_t j = 0; j < group->count; ++j) {
-        plan->read_count +=
-            !j || group->fragments[j].source != group->fragments[j - 1].source;
-      }
-      group->read_end = plan->read_count;
-    }
-    if (plan->read_count) {
-      status = iree_allocator_malloc_array(allocator, plan->read_count,
-                                           sizeof(*plan->reads),
-                                           (void**)&plan->reads);
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < plan->group_count; ++i) {
-      const loom_runtime_weight_group_t* group = &plan->groups[i];
-      iree_host_size_t ordinal = group->read_begin;
-      for (iree_host_size_t j = 0; j < group->count; ++j) {
-        if (j && group->fragments[j].source != group->fragments[j - 1].source) {
-          ++ordinal;
-        }
-        loom_runtime_weight_direct_read_t* read = &plan->reads[ordinal];
-        if (!read->count) {
-          read->fragments = &group->fragments[j];
-        }
-        ++read->count;
-        read->byte_length += group->fragments[j].range.length;
-      }
-    }
-  }
-  iree_allocator_free(allocator, storage_groups);
-  return status;
-}
-
 static iree_status_t loom_runtime_weight_enumerate(
     void* user_data, iree_host_size_t i, iree_string_view_t* out_key,
     iree_io_parameter_span_t* out_span) {
   const loom_runtime_weight_direct_read_t* read = user_data;
   *out_key = read->fragments[i].key;
   *out_span = read->fragments[i].range;
+  out_span->buffer_offset -= read->target_offset;
   return iree_ok_status();
 }
 
@@ -1020,25 +686,53 @@ static iree_status_t loom_runtime_weight_allocate_staging(
   return status;
 }
 
-// The owner constructs the exact GPU graph and submits one cold gather job.
-// Enumerators and semaphore-list storage remain live until every provider has
-// captured them; the retirement claim also protects the immutable weight plan.
-typedef struct loom_runtime_weight_stream_t {
-  // Shared host task; no private thread or worker join.
+// Each lane keeps two bounded submission windows ahead of execution. The older
+// window's completion schedules a refill while the newer window can progress.
+// The immutable plan and all lane tasks share one activation ownership claim.
+enum { WEIGHT_STREAM_WINDOW = 64 };
+
+typedef struct loom_runtime_weight_stream_t loom_runtime_weight_stream_t;
+
+typedef struct loom_runtime_weight_stream_point_t {
+  // Borrowed lane timeline retained by the stream owner.
+  iree_hal_semaphore_t* semaphore;
+  // Last accepted operation in one submission window.
+  uint64_t value;
+} loom_runtime_weight_stream_point_t;
+
+typedef struct loom_runtime_weight_stream_lane_t {
+  // Reused only after its prior execute/destroy ownership has ended.
   loomc_task_t task;
-  // Borrowed plan protected through destruction by activation retirement.
+  // Owned reference protecting the immutable plan and tracked buffer views.
+  loom_runtime_weight_stream_t* stream;
+  // Direct-read lane first, followed by preparation lanes.
+  iree_host_size_t ordinal;
+  // Next mapping group or tensor in this lane's strided plan traversal.
+  iree_host_size_t cursor;
+  // Next source run within a direct-read group.
+  iree_host_size_t read_index;
+  // Next fragment within that source run, or input within a tensor recipe.
+  iree_host_size_t fragment_index;
+  // Accepted window endpoints, oldest first.
+  loom_runtime_weight_stream_point_t windows[2];
+  // Initialized endpoints awaiting replenishment.
+  iree_host_size_t window_count;
+  // Reused completion registration; never overlaps its submitting task.
+  iree_async_semaphore_timepoint_t timepoint;
+  // Owned submission or predecessor failure, consumed at task destruction.
+  iree_status_t status;
+} loom_runtime_weight_stream_lane_t;
+
+struct loom_runtime_weight_stream_t {
+  // Construction ownership plus one reference for each accepted lane producer.
+  iree_atomic_ref_count_t ref_count;
+  // Borrowed plan protected by this stream's activation retirement claim.
   loom_runtime_weights_t* weights;
   // Owned mapped read windows and their gather fragments.
   loom_runtime_weight_stream_plan_t plan;
-  // Owned source-ordered provider batches.
-  loom_runtime_weight_source_batch_t* batches;
   // Owned release-tracked final-storage views captured by reads and preparers.
   iree_hal_buffer_t** views;
-  // Owned gather requests borrowing this task's descriptor storage.
-  iree_io_parameter_gather_t* gathers;
-  // Owned captured-input enumerators borrowing the retained input recipes.
-  loom_runtime_weight_read_t* input_reads;
-  // Owned release-tracked staging view retained until read submission finishes.
+  // Owned release-tracked staging view until every producer has stopped.
   iree_hal_buffer_t* staging;
   // Owned staging allocation readiness captured by input reads.
   iree_hal_semaphore_t* staging_ready;
@@ -1046,14 +740,36 @@ typedef struct loom_runtime_weight_stream_t {
   iree_hal_semaphore_t* lanes[WEIGHT_COMPLETIONS];
   // Initialized timelines, including partially constructed activations.
   iree_host_size_t lane_count;
-  // Owned captured-input timelines, with stable slots for gather signals.
+  // Owned captured-input timelines shared by each staging lane's reads.
   iree_hal_semaphore_t* input_lanes[WEIGHT_LANES];
-} loom_runtime_weight_stream_t;
+  // Reusable bounded producers, independent of model parameter count.
+  loom_runtime_weight_stream_lane_t producers[WEIGHT_COMPLETIONS];
+};
+
+typedef struct loom_runtime_weight_stream_window_t {
+  // Current provider, shared by every pending gather in this window.
+  uint32_t source;
+  // Number of pending gathers borrowing the descriptor slots below.
+  iree_host_size_t gather_count;
+  // Input fragments, mapping barriers, and preparation dispatches admitted.
+  iree_host_size_t operation_count;
+  // Last submitted or pending operation's lane completion.
+  loom_runtime_weight_stream_point_t frontier;
+  // Bounded capture descriptors, borrowed only until provider submission ends.
+  iree_io_parameter_gather_t gathers[WEIGHT_STREAM_WINDOW];
+  // Stable enumerator and timepoint storage for each pending gather.
+  union {
+    // A bounded consecutive slice of one direct-read source run.
+    loom_runtime_weight_direct_read_t direct;
+    // One captured input placed in its preparation lane's staging allocation.
+    loom_runtime_weight_read_t input;
+  } reads[WEIGHT_STREAM_WINDOW];
+} loom_runtime_weight_stream_window_t;
 
 static void loom_runtime_weight_stream_fail(loom_runtime_weight_stream_t* job,
                                             iree_status_t status) {
-  // Readiness failure releases unsubmitted dependencies; accepted I/O and
-  // mapping ownership still retire independently before the plan can die.
+  // Failed readiness stops refills. Accepted I/O still owns its tracked views
+  // until actual retirement, independently of these terminal notifications.
   for (iree_host_size_t i = 0; i < job->lane_count; ++i) {
     iree_hal_semaphore_fail(job->lanes[i], iree_status_clone(status));
   }
@@ -1064,30 +780,14 @@ static void loom_runtime_weight_stream_fail(loom_runtime_weight_stream_t* job,
   }
 }
 
-static void loom_runtime_weight_stream_execute(
-    loomc_task_t* task, loomc_host_size_t worker_ordinal) {
-  loom_runtime_weight_stream_t* job = (loom_runtime_weight_stream_t*)task;
-  loom_runtime_weights_t* weights = job->weights;
-  const uint32_t source_count =
-      loom_runtime_weight_inputs_source_count(weights->inputs);
-  iree_status_t status = iree_ok_status();
-  for (uint32_t s = 0; s < source_count && iree_status_is_ok(status); ++s) {
-    const loom_runtime_weight_source_batch_t batch = job->batches[s];
-    if (batch.count) {
-      status = iree_io_parameter_provider_gather_batch(
-          loom_runtime_weight_inputs_provider(weights->inputs, s),
-          weights->device, weights->transfer, batch.count,
-          job->gathers + batch.first);
-    }
+static void loom_runtime_weight_stream_release(
+    loom_runtime_weight_stream_t* job) {
+  if (!job) {
+    return;
   }
-  if (!iree_status_is_ok(status)) {
-    loom_runtime_weight_stream_fail(job, status);
-    iree_status_free(status);
+  if (iree_atomic_ref_count_dec(&job->ref_count) != 1) {
+    return;
   }
-}
-
-static void loom_runtime_weight_stream_destroy(loomc_task_t* task) {
-  loom_runtime_weight_stream_t* job = (loom_runtime_weight_stream_t*)task;
   loom_runtime_weights_t* weights = job->weights;
   const iree_allocator_t allocator = weights->host_allocator;
   for (iree_host_size_t i = 0; i < WEIGHT_LANES; ++i) {
@@ -1098,26 +798,335 @@ static void loom_runtime_weight_stream_destroy(loomc_task_t* task) {
   }
   iree_hal_semaphore_release(job->staging_ready);
   iree_hal_buffer_release(job->staging);
-  if (job->views) {
-    for (iree_host_size_t i = 0; i < weights->storage_count; ++i) {
-      iree_hal_buffer_release(job->views[i]);
-    }
-  }
-  if (job->plan.groups) {
-    for (iree_host_size_t i = 0; i < job->plan.group_count; ++i) {
-      iree_hal_semaphore_release(job->plan.groups[i].mapped);
-    }
+  for (iree_host_size_t i = 0; job->views && i < weights->storage_count; ++i) {
+    iree_hal_buffer_release(job->views[i]);
   }
   iree_allocator_free(allocator, job->views);
-  iree_allocator_free(allocator, job->gathers);
-  iree_allocator_free(allocator, job->input_reads);
-  iree_allocator_free(allocator, job->batches);
-  iree_allocator_free(allocator, job->plan.reads);
-  iree_allocator_free(allocator, job->plan.fragments);
-  iree_allocator_free(allocator, job->plan.spans);
-  iree_allocator_free(allocator, job->plan.groups);
+  loom_runtime_weight_stream_plan_deinitialize(&job->plan, allocator);
   iree_allocator_free(allocator, job);
   loom_runtime_retirement_release(&weights->activation.retirement);
+}
+
+static iree_status_t loom_runtime_weight_stream_flush(
+    loom_runtime_weight_stream_t* job,
+    loom_runtime_weight_stream_window_t* window) {
+  if (!window->gather_count) {
+    return iree_ok_status();
+  }
+  iree_status_t status = iree_io_parameter_provider_gather_batch(
+      loom_runtime_weight_inputs_provider(job->weights->inputs, window->source),
+      job->weights->device, job->weights->transfer, window->gather_count,
+      window->gathers);
+  window->gather_count = 0;
+  return status;
+}
+
+static iree_status_t loom_runtime_weight_stream_source(
+    loom_runtime_weight_stream_t* job,
+    loom_runtime_weight_stream_window_t* window, uint32_t source) {
+  if (window->source != source) {
+    IREE_RETURN_IF_ERROR(loom_runtime_weight_stream_flush(job, window));
+    window->source = source;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_runtime_weight_stream_direct(
+    loom_runtime_weight_stream_lane_t* lane,
+    loom_runtime_weight_stream_window_t* window, iree_host_size_t count) {
+  loom_runtime_weight_stream_t* job = lane->stream;
+  const loom_runtime_weight_group_t* group = &job->plan.groups[lane->cursor];
+  iree_hal_semaphore_t** signal = &job->lanes[lane->ordinal];
+  if (!group->count) {
+    iree_hal_semaphore_t* mapped = job->weights->pool
+                                       ? group->mapped
+                                       : job->weights->activation.backing_ready;
+    iree_hal_semaphore_t* waits[] = {*signal, mapped};
+    uint64_t values[] = {group->signal_value - 1, 1};
+    uint64_t signal_value = group->signal_value;
+    IREE_RETURN_IF_ERROR(iree_hal_queue_barrier(
+        job->weights->transfer,
+        (iree_hal_semaphore_list_t){mapped ? 2 : 1, waits, values},
+        (iree_hal_semaphore_list_t){1, signal, &signal_value}, NULL,
+        IREE_HAL_QUEUE_BARRIER_FLAG_NONE));
+    window->frontier =
+        (loom_runtime_weight_stream_point_t){*signal, group->signal_value};
+    ++window->operation_count;
+    lane->cursor += WEIGHT_LANES;
+    return iree_ok_status();
+  }
+  const loom_runtime_weight_direct_read_t* planned =
+      &job->plan.reads[group->read_begin + lane->read_index];
+  IREE_RETURN_IF_ERROR(loom_runtime_weight_stream_source(
+      job, window, planned->fragments[0].source));
+  const iree_host_size_t index = window->gather_count++;
+  loom_runtime_weight_direct_read_t* read = &window->reads[index].direct;
+  *read = *planned;
+  read->fragments += lane->fragment_index;
+  read->count = count;
+  read->wait_values[0] += lane->fragment_index / WEIGHT_STREAM_WINDOW;
+  read->signal_value = read->wait_values[0] + 1;
+  window->gathers[index] = (iree_io_parameter_gather_t){
+      .target_buffer =
+          group->target ? group->target : job->views[group->storage_index],
+      .count = count,
+      .enumerator = {loom_runtime_weight_enumerate, read},
+      .wait_semaphore_list = {read->waits[1] ? 2 : 1, read->waits,
+                              read->wait_values},
+      .signal_semaphore_list = {1, signal, &read->signal_value},
+  };
+  window->frontier =
+      (loom_runtime_weight_stream_point_t){*signal, read->signal_value};
+  window->operation_count += count;
+  lane->fragment_index += count;
+  if (lane->fragment_index == planned->count) {
+    lane->fragment_index = 0;
+    if (++lane->read_index == group->read_end - group->read_begin) {
+      lane->read_index = 0;
+      lane->cursor += WEIGHT_LANES;
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_runtime_weight_stream_input(
+    loom_runtime_weight_stream_lane_t* lane,
+    loom_runtime_weight_stream_window_t* window) {
+  loom_runtime_weight_stream_t* job = lane->stream;
+  const loom_runtime_weight_span_t* span = &job->weights->spans[lane->cursor];
+  loom_runtime_weight_tensor_plan_t tensor = job->plan.spans[lane->cursor];
+  const iree_host_size_t ordinal = lane->ordinal - WEIGHT_LANES;
+  const loom_runtime_weight_input_t* input = loom_runtime_weight_inputs_at(
+      job->weights->inputs, span->inputs.first + lane->fragment_index);
+  IREE_RETURN_IF_ERROR(
+      loom_runtime_weight_stream_source(job, window, input->source));
+  const iree_host_size_t index = window->gather_count++;
+  loom_runtime_weight_read_t* read = &window->reads[index].input;
+  const uint64_t prior_input =
+      tensor.input_signal - span->inputs.count + lane->fragment_index;
+  *read = (loom_runtime_weight_read_t){
+      .input = input,
+      .staging_offset = ordinal * loom_runtime_weight_inputs_staging_length(
+                                      job->weights->inputs),
+      .waits = {lane->fragment_index ? job->input_lanes[ordinal]
+                                     : job->lanes[lane->ordinal],
+                job->staging_ready},
+      .wait_values = {lane->fragment_index ? prior_input : tensor.prepare_wait,
+                      1},
+      .signal_value = prior_input + 1,
+  };
+  window->gathers[index] = (iree_io_parameter_gather_t){
+      .target_buffer = job->staging,
+      .count = 1,
+      .enumerator = {loom_runtime_weight_input_enumerate, read},
+      .wait_semaphore_list = {2, read->waits, read->wait_values},
+      .signal_semaphore_list = {1, &job->input_lanes[ordinal],
+                                &read->signal_value},
+  };
+  window->frontier = (loom_runtime_weight_stream_point_t){
+      job->input_lanes[ordinal], read->signal_value};
+  ++window->operation_count;
+  ++lane->fragment_index;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_runtime_weight_stream_prepare(
+    loom_runtime_weight_stream_lane_t* lane,
+    loom_runtime_weight_stream_window_t* window) {
+  loom_runtime_weight_stream_t* job = lane->stream;
+  loom_runtime_weights_t* weights = job->weights;
+  const loom_runtime_weight_span_t* span = &weights->spans[lane->cursor];
+  loom_runtime_weight_tensor_plan_t tensor = job->plan.spans[lane->cursor];
+  iree_hal_semaphore_t* waits[WEIGHT_LANES + 2];
+  uint64_t values[WEIGHT_LANES + 2];
+  iree_host_size_t wait_count = 0;
+  // The last contributing window on a read lane proves all earlier windows.
+  for (iree_host_size_t i = 0; i < WEIGHT_LANES; ++i) {
+    if (tensor.begin == tensor.end) {
+      continue;
+    }
+    const iree_host_size_t last = tensor.end - 1;
+    const iree_host_size_t distance =
+        (last % WEIGHT_LANES + WEIGHT_LANES - i) % WEIGHT_LANES;
+    if (last - tensor.begin >= distance) {
+      waits[wait_count] = job->lanes[i];
+      values[wait_count++] = job->plan.groups[last - distance].signal_value;
+    }
+  }
+  const iree_host_size_t ordinal = lane->ordinal - WEIGHT_LANES;
+  if (span->inputs.count) {
+    waits[wait_count] = job->input_lanes[ordinal];
+    values[wait_count++] = tensor.input_signal;
+  }
+  waits[wait_count] = job->lanes[lane->ordinal];
+  values[wait_count++] = tensor.prepare_wait;
+  const iree_hal_buffer_binding_t bindings[] = {
+      {job->views[span->storage_index], span->parameter.byte_offset,
+       span->parameter.byte_length},
+      {job->staging,
+       ordinal * loom_runtime_weight_inputs_staging_length(weights->inputs),
+       span->inputs.byte_length}};
+  IREE_RETURN_IF_ERROR(iree_hal_queue_execute(
+      weights->dispatch, (iree_hal_semaphore_list_t){wait_count, waits, values},
+      (iree_hal_semaphore_list_t){1, &job->lanes[lane->ordinal],
+                                  &tensor.prepare_signal},
+      span->prepare,
+      (iree_hal_buffer_binding_table_t){span->inputs.count ? 2 : 1, bindings},
+      IREE_HAL_QUEUE_EXECUTE_FLAG_NONE));
+  window->frontier = (loom_runtime_weight_stream_point_t){
+      job->lanes[lane->ordinal], tensor.prepare_signal};
+  ++window->operation_count;
+  lane->cursor += WEIGHT_LANES;
+  lane->fragment_index = 0;
+  return iree_ok_status();
+}
+
+static bool loom_runtime_weight_stream_lane_finished(
+    loom_runtime_weight_stream_lane_t* lane) {
+  if (lane->ordinal < WEIGHT_LANES) {
+    return lane->cursor >= lane->stream->plan.group_count;
+  }
+  const loom_runtime_weights_t* weights = lane->stream->weights;
+  while (lane->cursor < weights->span_count &&
+         !weights->spans[lane->cursor].prepare) {
+    lane->cursor += WEIGHT_LANES;
+  }
+  return lane->cursor >= weights->span_count;
+}
+
+static iree_status_t loom_runtime_weight_stream_target(
+    loom_runtime_weight_stream_lane_t* lane, bool* out_ready) {
+  *out_ready = true;
+  loom_runtime_weight_stream_t* job = lane->stream;
+  loom_runtime_weight_group_t* group = &job->plan.groups[lane->cursor];
+  if (!job->weights->pool || group->target || !group->count) {
+    return iree_ok_status();
+  }
+  uint64_t value = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_semaphore_query(group->mapped, &value));
+  if (value < 1) {
+    *out_ready = false;
+    return iree_ok_status();
+  }
+  const loom_runtime_weight_group_t* mapping =
+      &job->plan.groups[group->mapping_group];
+  const iree_host_size_t slab_index =
+      mapping->backing.offset /
+      loom_runtime_virtual_buffer_mapping_size(mapping->backing.buffer);
+  const iree_hal_buffer_binding_t span =
+      mapping->operation
+          ? loom_runtime_memory_operation_backing(mapping->operation, 0)
+          : loom_runtime_virtual_buffer_backing(mapping->backing.buffer,
+                                                slab_index);
+  // File requests retain this coarse I/O view independently of readiness
+  // failure. Page ownership itself remains the directory's reservation value.
+  IREE_RETURN_IF_ERROR(
+      iree_hal_buffer_subspan(span.buffer, span.offset, span.length,
+                              job->weights->host_allocator, &group->target));
+  return loom_runtime_retirement_track(&job->weights->activation.retirement,
+                                       &group->target,
+                                       job->weights->host_allocator);
+}
+
+static void loom_runtime_weight_stream_execute(
+    loomc_task_t* task, loomc_host_size_t worker_ordinal) {
+  IREE_TRACE_ZONE_BEGIN(z0);
+  loom_runtime_weight_stream_lane_t* lane = (void*)task;
+  bool waiting_for_mapping = false;
+  while (iree_status_is_ok(lane->status) && lane->window_count < 2 &&
+         !waiting_for_mapping &&
+         !loom_runtime_weight_stream_lane_finished(lane)) {
+    loom_runtime_weight_stream_window_t window = {0};
+    while (iree_status_is_ok(lane->status) &&
+           window.operation_count < WEIGHT_STREAM_WINDOW &&
+           !loom_runtime_weight_stream_lane_finished(lane)) {
+      if (lane->ordinal < WEIGHT_LANES) {
+        bool ready = false;
+        lane->status = loom_runtime_weight_stream_target(lane, &ready);
+        if (!iree_status_is_ok(lane->status) || !ready) {
+          waiting_for_mapping = !ready;
+          break;
+        }
+        const loom_runtime_weight_group_t* group =
+            &lane->stream->plan.groups[lane->cursor];
+        const iree_host_size_t count =
+            group->count
+                ? iree_min(WEIGHT_STREAM_WINDOW,
+                           lane->stream->plan
+                                   .reads[group->read_begin + lane->read_index]
+                                   .count -
+                               lane->fragment_index)
+                : 0;
+        if (iree_max(1, count) >
+            WEIGHT_STREAM_WINDOW - window.operation_count) {
+          break;
+        }
+        lane->status = loom_runtime_weight_stream_direct(lane, &window, count);
+      } else if (lane->fragment_index <
+                 lane->stream->weights->spans[lane->cursor].inputs.count) {
+        lane->status = loom_runtime_weight_stream_input(lane, &window);
+      } else {
+        lane->status = loom_runtime_weight_stream_prepare(lane, &window);
+      }
+    }
+    if (iree_status_is_ok(lane->status)) {
+      lane->status = loom_runtime_weight_stream_flush(lane->stream, &window);
+    }
+    if (window.operation_count) {
+      lane->windows[lane->window_count++] = window.frontier;
+    }
+  }
+  if (iree_status_is_ok(lane->status) && waiting_for_mapping &&
+      !lane->window_count) {
+    lane->windows[lane->window_count++] = (loom_runtime_weight_stream_point_t){
+        lane->stream->plan.groups[lane->cursor].mapped, 1};
+  }
+  IREE_TRACE_ZONE_END(z0);
+}
+
+static const loomc_task_vtable_t weight_stream_vtable;
+
+static void loom_runtime_weight_stream_ready(
+    void* user_data, iree_async_semaphore_timepoint_t* timepoint,
+    iree_status_t status) {
+  loom_runtime_weight_stream_lane_t* lane = user_data;
+  lane->status = status;
+  lane->windows[0] = lane->windows[1];
+  --lane->window_count;
+  loomc_task_initialize(&weight_stream_vtable, &lane->task);
+  status = iree_status_from_loomc(
+      loomc_task_sink_submit(lane->stream->weights->sink, &lane->task));
+  // Acceptance may already have executed and destroyed the lane.
+  if (!iree_status_is_ok(status)) {
+    lane->status = iree_status_join(lane->status, status);
+    loomc_task_destroy(&lane->task);
+  }
+}
+
+static void loom_runtime_weight_stream_destroy(loomc_task_t* task) {
+  loom_runtime_weight_stream_lane_t* lane = (void*)task;
+  if (!iree_status_is_ok(lane->status)) {
+    loom_runtime_weight_stream_fail(lane->stream, lane->status);
+    iree_status_free(lane->status);
+    loom_runtime_weight_stream_release(lane->stream);
+    return;
+  }
+  if (loom_runtime_weight_stream_lane_finished(lane)) {
+    loom_runtime_weight_stream_release(lane->stream);
+    return;
+  }
+  const loom_runtime_weight_stream_point_t point = lane->windows[0];
+  lane->timepoint.callback = loom_runtime_weight_stream_ready;
+  lane->timepoint.user_data = lane;
+  // The submission stack has retired. An immediate callback can safely reuse
+  // the task/timepoint or release the whole stream before registration returns.
+  iree_status_t status = iree_async_semaphore_acquire_timepoint(
+      (iree_async_semaphore_t*)point.semaphore, point.value, &lane->timepoint);
+  if (!iree_status_is_ok(status)) {
+    loom_runtime_weight_stream_fail(lane->stream, status);
+    iree_status_free(status);
+    loom_runtime_weight_stream_release(lane->stream);
+  }
 }
 
 static const loomc_task_vtable_t weight_stream_vtable = {
@@ -1131,18 +1140,15 @@ static iree_status_t loom_runtime_weight_stream(
   loom_runtime_weight_stream_t* job = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(allocator, sizeof(*job), (void**)&job));
-  loomc_task_initialize(&weight_stream_vtable, &job->task);
+  iree_atomic_ref_count_init(&job->ref_count);
   job->weights = weights;
   loom_runtime_retirement_acquire(&weights->activation.retirement);
   IREE_TRACE_ZONE_BEGIN(z0);
   loom_runtime_weight_stream_plan_t* plan = &job->plan;
-  iree_status_t status = loom_runtime_weight_stream_plan(weights, plan);
-  const uint32_t source_count =
-      loom_runtime_weight_inputs_source_count(weights->inputs);
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(
-        allocator, source_count, sizeof(*job->batches), (void**)&job->batches);
-  }
+  iree_status_t status = loom_runtime_weight_stream_plan_initialize(
+      weights->span_count, weights->spans, weights->storage_count,
+      weights->storages, weights->inputs, weights->pool != NULL, allocator,
+      plan);
   if (iree_status_is_ok(status)) {
     status =
         iree_allocator_malloc_array(allocator, weights->storage_count,
@@ -1166,7 +1172,6 @@ static iree_status_t loom_runtime_weight_stream(
       plan->has_preparation ? WEIGHT_COMPLETIONS : WEIGHT_LANES;
   iree_hal_semaphore_t** lanes = job->lanes;
   uint64_t* frontiers = weights->activation.values;
-  iree_hal_semaphore_t** input_lanes = job->input_lanes;
   for (iree_host_size_t i = 0; i < lane_count && iree_status_is_ok(status);
        ++i) {
     status = iree_hal_semaphore_create(
@@ -1183,48 +1188,7 @@ static iree_status_t loom_runtime_weight_stream(
        staging_stride && i < WEIGHT_LANES && iree_status_is_ok(status); ++i) {
     status = iree_hal_semaphore_create(
         weights->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &input_lanes[i]);
-  }
-  iree_host_size_t read_count = 0;
-  iree_host_size_t input_read_count = 0;
-  if (iree_status_is_ok(status)) {
-    // Source prefix offsets preserve one provider batch without rescanning the
-    // tensor plan for each checkpoint. Mapping-only windows issue barriers.
-    for (iree_host_size_t i = 0; i < plan->read_count; ++i) {
-      const loom_runtime_weight_direct_read_t* read = &plan->reads[i];
-      loom_runtime_weight_source_batch_t* batch =
-          &job->batches[read->fragments[0].source];
-      ++batch->count;
-      batch->byte_length += read->byte_length;
-    }
-    for (iree_host_size_t i = 0; i < weights->span_count; ++i) {
-      if (!weights->spans[i].prepare) {
-        continue;
-      }
-      const loom_runtime_weight_input_recipe_t recipe =
-          weights->spans[i].inputs;
-      input_read_count += recipe.count;
-      for (uint32_t p = 0; p < recipe.count; ++p) {
-        const loom_runtime_weight_input_t* input =
-            loom_runtime_weight_inputs_at(weights->inputs, recipe.first + p);
-        ++job->batches[input->source].count;
-        job->batches[input->source].byte_length += input->span.length;
-      }
-    }
-    for (uint32_t s = 0; s < source_count; ++s) {
-      job->batches[s].first = read_count;
-      read_count += job->batches[s].count;
-      job->batches[s].count = 0;
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_allocator_malloc_array(
-        allocator, read_count, sizeof(*job->gathers), (void**)&job->gathers);
-  }
-  if (iree_status_is_ok(status) && input_read_count) {
-    status = iree_allocator_malloc_array(allocator, input_read_count,
-                                         sizeof(*job->input_reads),
-                                         (void**)&job->input_reads);
+        IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &job->input_lanes[i]);
   }
   if (iree_status_is_ok(status) && weights->pool) {
     status = iree_allocator_malloc_array(allocator, plan->backing_count,
@@ -1236,6 +1200,7 @@ static iree_status_t loom_runtime_weight_stream(
       if (group->mapping_group != i) {
         group->mapped = plan->groups[group->mapping_group].mapped;
         iree_hal_semaphore_retain(group->mapped);
+        group->operation = plan->groups[group->mapping_group].operation;
         continue;
       }
       status = iree_hal_semaphore_create(
@@ -1253,51 +1218,45 @@ static iree_status_t loom_runtime_weight_stream(
               iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                "physical pool cannot back model parameters");
         }
+        if (iree_status_is_ok(status)) {
+          group->operation =
+              weights->activation
+                  .backing[weights->activation.backing_count - 1];
+        }
       }
     }
   }
-  for (iree_host_size_t i = 0;
-       i < plan->group_count && iree_status_is_ok(status); ++i) {
-    loom_runtime_weight_group_t* group = &plan->groups[i];
-    const iree_host_size_t lane = i % WEIGHT_LANES;
-    iree_hal_semaphore_t* mapped =
-        weights->pool ? group->mapped : weights->activation.backing_ready;
-    for (iree_host_size_t r = group->read_begin; r < group->read_end; ++r) {
-      loom_runtime_weight_direct_read_t* read = &plan->reads[r];
-      read->waits[0] = lanes[lane];
-      read->wait_values[0] = frontiers[lane];
-      read->waits[1] = mapped;
-      read->wait_values[1] = 1;
-      read->signal_value = ++frontiers[lane];
-      loom_runtime_weight_source_batch_t* batch =
-          &job->batches[read->fragments[0].source];
-      job->gathers[batch->first + batch->count++] =
-          (iree_io_parameter_gather_t){
-              .target_buffer = job->views[group->storage_index],
-              .count = read->count,
-              .enumerator = {loom_runtime_weight_enumerate, read},
-              .wait_semaphore_list = {mapped ? 2 : 1, read->waits,
-                                      read->wait_values},
-              .signal_semaphore_list = {1, &lanes[lane], &read->signal_value},
-          };
-    }
-    if (!group->count) {
-      // Captured inputs do not touch the final root until preparation. Its
-      // mapping still participates in the same ordered window frontiers.
-      iree_hal_semaphore_t* waits[] = {lanes[lane], mapped};
-      uint64_t wait_values[] = {frontiers[lane], 1};
-      ++frontiers[lane];
-      status = iree_hal_queue_barrier(
-          weights->transfer,
-          (iree_hal_semaphore_list_t){mapped ? 2 : 1, waits, wait_values},
-          (iree_hal_semaphore_list_t){1, &lanes[lane], &frontiers[lane]}, NULL,
-          IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
-    }
-    group->signal_value = frontiers[lane];
-  }
+  uint64_t read_bytes = 0, read_count = 0, prepared_bytes = 0;
   if (iree_status_is_ok(status)) {
+    // Final readiness is known before any lane starts, without materializing
+    // its future queue captures. The plan records exact chunk boundaries.
+    for (iree_host_size_t i = 0; i < plan->group_count; ++i) {
+      loom_runtime_weight_group_t* group = &plan->groups[i];
+      const iree_host_size_t lane = i % WEIGHT_LANES;
+      iree_hal_semaphore_t* mapped =
+          weights->pool ? group->mapped : weights->activation.backing_ready;
+      for (iree_host_size_t r = group->read_begin; r < group->read_end; ++r) {
+        loom_runtime_weight_direct_read_t* read = &plan->reads[r];
+        read->target_offset =
+            weights->pool ? plan->groups[group->mapping_group].backing.offset
+                          : 0;
+        read->waits[0] = lanes[lane];
+        read->wait_values[0] = frontiers[lane];
+        read->waits[1] = mapped;
+        read->wait_values[1] = 1;
+        const iree_host_size_t chunks =
+            (read->count - 1) / WEIGHT_STREAM_WINDOW + 1;
+        frontiers[lane] += chunks;
+        read->signal_value = frontiers[lane];
+        read_bytes += read->byte_length;
+        read_count += chunks;
+      }
+      if (!group->count) {
+        ++frontiers[lane];
+      }
+      group->signal_value = frontiers[lane];
+    }
     uint64_t input_values[WEIGHT_LANES] = {0};
-    iree_host_size_t input_read_index = 0;
     for (iree_host_size_t i = 0; i < weights->span_count; ++i) {
       const loom_runtime_weight_span_t* span = &weights->spans[i];
       if (!span->prepare) {
@@ -1307,79 +1266,11 @@ static iree_status_t loom_runtime_weight_stream(
       loom_runtime_weight_tensor_plan_t* tensor = &plan->spans[i];
       tensor->prepare_wait = frontiers[WEIGHT_LANES + lane];
       tensor->prepare_signal = ++frontiers[WEIGHT_LANES + lane];
-      for (uint32_t p = 0; p < span->inputs.count; ++p) {
-        const loom_runtime_weight_input_t* input =
-            loom_runtime_weight_inputs_at(weights->inputs,
-                                          span->inputs.first + p);
-        loom_runtime_weight_source_batch_t* batch =
-            &job->batches[input->source];
-        const iree_host_size_t ordinal = batch->first + batch->count++;
-        loom_runtime_weight_read_t* read =
-            &job->input_reads[input_read_index++];
-        read->input = input;
-        read->staging_offset = lane * staging_stride;
-        read->waits[0] = p ? input_lanes[lane] : lanes[WEIGHT_LANES + lane];
-        read->wait_values[0] = p ? input_values[lane] : tensor->prepare_wait;
-        read->waits[1] = job->staging_ready;
-        read->wait_values[1] = 1;
-        read->signal_value = ++input_values[lane];
-        job->gathers[ordinal] = (iree_io_parameter_gather_t){
-            .target_buffer = job->staging,
-            .count = 1,
-            .enumerator = {loom_runtime_weight_input_enumerate, read},
-            .wait_semaphore_list = {2, read->waits, read->wait_values},
-            .signal_semaphore_list = {1, &input_lanes[lane],
-                                      &read->signal_value},
-        };
-      }
+      input_values[lane] += span->inputs.count;
       tensor->input_signal = input_values[lane];
-    }
-  }
-  for (iree_host_size_t i = 0;
-       i < weights->span_count && iree_status_is_ok(status); ++i) {
-    const loom_runtime_weight_span_t* span = &weights->spans[i];
-    if (!span->prepare) {
-      continue;
-    }
-    // The last window on each ordered lane proves every earlier contributing
-    // read and mapping on that lane. Staging input completion is independent.
-    loom_runtime_weight_tensor_plan_t tensor = plan->spans[i];
-    iree_hal_semaphore_t* waits[WEIGHT_LANES + 2];
-    uint64_t values[WEIGHT_LANES + 2];
-    iree_host_size_t wait_count = 0;
-    for (iree_host_size_t lane = 0; lane < WEIGHT_LANES; ++lane) {
-      if (tensor.begin == tensor.end) {
-        continue;
-      }
-      const iree_host_size_t last = tensor.end - 1;
-      const iree_host_size_t distance =
-          (last % WEIGHT_LANES + WEIGHT_LANES - lane) % WEIGHT_LANES;
-      if (last - tensor.begin >= distance) {
-        waits[wait_count] = lanes[lane];
-        values[wait_count++] = plan->groups[last - distance].signal_value;
-      }
-    }
-    const iree_host_size_t lane = i % WEIGHT_LANES;
-    if (span->inputs.count) {
-      waits[wait_count] = input_lanes[lane];
-      values[wait_count++] = tensor.input_signal;
-    }
-    waits[wait_count] = lanes[WEIGHT_LANES + lane];
-    values[wait_count++] = tensor.prepare_wait;
-    const iree_hal_buffer_binding_t bindings[] = {
-        {job->views[span->storage_index], span->parameter.byte_offset,
-         span->parameter.byte_length},
-        {job->staging, lane * staging_stride, span->inputs.byte_length}};
-    status = iree_hal_queue_execute(
-        weights->dispatch,
-        (iree_hal_semaphore_list_t){wait_count, waits, values},
-        (iree_hal_semaphore_list_t){1, &lanes[WEIGHT_LANES + lane],
-                                    &tensor.prepare_signal},
-        span->prepare,
-        (iree_hal_buffer_binding_table_t){span->inputs.count ? 2 : 1, bindings},
-        IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
-    if (iree_status_is_ok(status)) {
-      weights->activity.prepared_bytes += span->parameter.byte_length;
+      read_count += span->inputs.count;
+      read_bytes += span->inputs.payload_length;
+      prepared_bytes += span->parameter.byte_length;
     }
   }
   if (job->staging && iree_status_is_ok(status)) {
@@ -1395,24 +1286,30 @@ static iree_status_t loom_runtime_weight_stream(
     }
   }
   loom_runtime_workspace_scope_retire(scope);
-  if (iree_status_is_ok(status)) {
-    uint64_t read_bytes = 0;
-    for (uint32_t s = 0; s < source_count; ++s) {
-      read_bytes += job->batches[s].byte_length;
-    }
-    // The owner publishes this activation's complete graph before its cold
-    // read task runs. Acceptance may execute and destroy job before returning.
+  for (iree_host_size_t i = 0; i < lane_count && iree_status_is_ok(status);
+       ++i) {
+    loom_runtime_weight_stream_lane_t* lane = &job->producers[i];
+    lane->stream = job;
+    lane->ordinal = i;
+    lane->cursor = i % WEIGHT_LANES;
+    loomc_task_initialize(&weight_stream_vtable, &lane->task);
+    iree_atomic_ref_count_inc(&job->ref_count);
     status = iree_status_from_loomc(
-        loomc_task_sink_submit(weights->sink, &job->task));
-    if (iree_status_is_ok(status)) {
-      weights->activity.read_bytes += read_bytes;
-      weights->activity.groups += read_count;
+        loomc_task_sink_submit(weights->sink, &lane->task));
+    if (!iree_status_is_ok(status)) {
+      lane->status = iree_status_clone(status);
+      loomc_task_destroy(&lane->task);
     }
   }
-  if (!iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status)) {
+    weights->activity.read_bytes += read_bytes;
+    weights->activity.groups += read_count;
+    weights->activity.prepared_bytes += prepared_bytes;
+  } else {
     loom_runtime_weight_stream_fail(job, status);
-    loomc_task_destroy(&job->task);
   }
+  // Construction protects the plan while independently accepted lanes start.
+  loom_runtime_weight_stream_release(job);
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
@@ -1421,6 +1318,11 @@ static iree_status_t loom_runtime_weight_stream(
 // accounting and retirement queries become constant-time after activation.
 static bool loom_runtime_weights_collect_backing(
     loom_runtime_weights_t* weights) {
+  // Active read lanes borrow immutable completed operation spans. They and
+  // their captured I/O views must retire before those results are released.
+  if (!loom_runtime_retirement_is_idle(&weights->activation.retirement)) {
+    return false;
+  }
   while (weights->activation.backing_retired <
          weights->activation.backing_count) {
     loom_runtime_memory_operation_t** operation =

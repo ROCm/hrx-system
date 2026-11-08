@@ -30,6 +30,8 @@ struct DeferredBackingPool : iree_hal_pool_t {
   iree_hal_pool_t* backing = nullptr;
   // Whether subsequent acquisitions wait for the test's explicit completion.
   bool defer = false;
+  // Rejects one acquisition before retaining arrays or accepting completion.
+  bool reject_next_acquisition = false;
   // Whether the dependency exposes its optional physical-capacity fact.
   bool report_physical_capacity = true;
   // Owner-installed observation boundary for completing a held dependency
@@ -105,6 +107,10 @@ struct DeferredBackingPool : iree_hal_pool_t {
                iree_hal_pool_reservation_t* reservations,
                iree_hal_pool_acquire_info_t* infos) -> iree_status_t {
           auto* self = static_cast<DeferredBackingPool*>(base);
+          if (self->reject_next_acquisition) {
+            self->reject_next_acquisition = false;
+            return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+          }
           Pending pending = {
               .count = count,
               .requests = requests,
@@ -183,6 +189,10 @@ struct DeferredBackingPool : iree_hal_pool_t {
                iree_hal_pool_reservation_t* reservations,
                iree_hal_pool_acquire_info_t* infos) {
               auto* self = static_cast<DeferredBackingPool*>(base);
+              if (self->reject_next_acquisition) {
+                self->reject_next_acquisition = false;
+                return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+              }
               Pending call = {.count = count,
                               .requests = requests,
                               .reservations = reservations,

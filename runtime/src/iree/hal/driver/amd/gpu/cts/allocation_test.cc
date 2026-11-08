@@ -1312,6 +1312,7 @@ TEST_F(GpuNativeMemoryProgressTest,
       .scope = program_scope,
       .target_range = {0, unit},
       .operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND,
+      .previous_source = backing,
   };
   IREE_ASSERT_OK(iree_hal_queue_map(queues_[0], {}, {1, &semaphores_[0], &two},
                                     1, &unmap, 0));

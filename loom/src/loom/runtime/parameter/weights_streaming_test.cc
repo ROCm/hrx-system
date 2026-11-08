@@ -3,6 +3,8 @@
 // Licensed under the Apache License v2.0 WITH LLVM Exceptions.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <atomic>
+
 #include "loom/runtime/parameter/telemetry.h"
 #include "loom/runtime/parameter/weights_test_base.h"
 #include "loom/runtime/testing/worker_gate.h"
@@ -193,7 +195,9 @@ TEST_P(WindowedWeightsTest, DirectSourcesAndHostSnapshotsNeedNoStaging) {
   const auto activity = loom_runtime_weights_activity(plans_[0]);
   EXPECT_EQ(activity.read_bytes, 2097248u);
   EXPECT_EQ(activity.prepared_bytes, 0u);
-  EXPECT_EQ(activity.groups, GetParam() ? 4u : 3u);
+  // Each captured half spans five bounded gathers. The host snapshot adds
+  // another; canonical input shares the first source's partially filled gather.
+  EXPECT_EQ(activity.groups, 11u);
   if (GetParam()) {
     ASSERT_NO_FATAL_FAILURE(Reload());
     ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage(true));
@@ -249,50 +253,81 @@ class RejectedReadWeightsTest : public WindowedWeightsTest {
         .features = transfer_->features,
         .execution_resources = transfer_->execution_resources,
     };
+    rejected_transfer_.target = transfer_;
     static const iree_hal_queue_vtable_t vtable = {
         .destroy = [](iree_hal_queue_t*) {},
+        .barrier =
+            [](iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+               iree_hal_semaphore_list_t signals,
+               const iree_hal_queue_barriers_t* barriers,
+               iree_hal_queue_barrier_flags_t flags) {
+              auto* self = reinterpret_cast<ReadQueue*>(queue);
+              return iree_hal_queue_barrier(self->target, waits, signals,
+                                            barriers, flags);
+            },
         .read =
-            [](iree_hal_queue_t*, iree_hal_semaphore_list_t,
-               iree_hal_semaphore_list_t, iree_hal_file_t*, uint64_t,
-               iree_hal_buffer_t*, iree_device_size_t, iree_device_size_t,
-               const iree_hal_queue_barriers_t*, iree_hal_read_flags_t) {
-              return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+            [](iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+               iree_hal_semaphore_list_t signals, iree_hal_file_t* file,
+               uint64_t offset, iree_hal_buffer_t* buffer,
+               iree_device_size_t buffer_offset, iree_device_size_t length,
+               const iree_hal_queue_barriers_t* barriers,
+               iree_hal_read_flags_t flags) {
+              auto* self = reinterpret_cast<ReadQueue*>(queue);
+              if (++self->count == self->reject_ordinal) {
+                return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+              }
+              return iree_hal_queue_read(self->target, waits, signals, file,
+                                         offset, buffer, buffer_offset, length,
+                                         barriers, flags);
             },
     };
     iree_hal_queue_initialize(iree_hal_queue_family(transfer_), &params,
-                              &vtable, &rejected_transfer_);
+                              &vtable, &rejected_transfer_.base);
     initialized_ = true;
   }
 
   void TearDown() override {
     WindowedWeightsTest::TearDown();
     if (initialized_) {
-      iree_hal_queue_release(&rejected_transfer_);
+      iree_hal_queue_release(&rejected_transfer_.base);
     }
   }
 
-  // Native file submission rejects after the cold host task was accepted.
-  iree_hal_queue_t rejected_transfer_ = {};
+  void VerifyRejectedRead(const char* policy, size_t reject_ordinal);
+
+  struct ReadQueue {
+    // Queue prefix for callbacks forwarding to the real transfer
+    // implementation.
+    iree_hal_queue_t base = {};
+    // Borrowed fixture-owned queue, valid until every read has retired.
+    iree_hal_queue_t* target = nullptr;
+    // Observed read submissions from independently progressing lane tasks.
+    std::atomic<size_t> count = 0;
+    // One native submission to reject; all earlier reads execute normally.
+    size_t reject_ordinal = 1;
+  };
+  // File-submission dependency with an injected native rejection.
+  ReadQueue rejected_transfer_;
   // The queue is released only after successful fixture initialization.
   bool initialized_ = false;
 };
 
-TEST_P(RejectedReadWeightsTest,
-       FailedReadRetiresTheAcceptedProducerWithoutReplay) {
+void RejectedReadWeightsTest::VerifyRejectedRead(const char* policy,
+                                                 size_t reject_ordinal) {
+  rejected_transfer_.reject_ordinal = reject_ordinal;
   ASSERT_NO_FATAL_FAILURE(WriteWindowedCheckpoint(path_.path()));
   ASSERT_NO_FATAL_FAILURE(
       WriteWindowedCheckpoint(adapter_path_.path(), 100000));
   IREE_ASSERT_OK(Compile(0, "windowed"));
   const auto root = Root(0, 0);
   IREE_ASSERT_OK(loom_runtime_weights_allocate(
-      device_, &rejected_transfer_, dispatch_,
+      device_, &rejected_transfer_.base, dispatch_,
       loom_runtime_pool_storage(storage_owner_), pool_,
       loom_runtime_pool_weight_geometry(storage_owner_), nullptr,
       loom_runtime_pool_workspace(storage_owner_), 0, 1, &root, host_allocator_,
       &plans_[0]));
-  IREE_ASSERT_OK(PrepareSources(plans_[0],
-                                {{path_.path()}, {adapter_path_.path()}},
-                                "direct_policy.loom"));
+  IREE_ASSERT_OK(PrepareSources(
+      plans_[0], {{path_.path()}, {adapter_path_.path()}}, policy));
   {
     WorkerGate gate(
         loom_runtime_host_executor(loom_runtime_device_host(device_owner_)));
@@ -305,6 +340,7 @@ TEST_P(RejectedReadWeightsTest,
                         loom_runtime_weights_await(plans_[0]));
   IREE_ASSERT_OK(loom_runtime_weights_await_retirement(plans_[0]));
   EXPECT_TRUE(loom_runtime_weights_is_retired(plans_[0]));
+  EXPECT_GE(rejected_transfer_.count.load(), reject_ordinal);
   const auto activity = loom_runtime_weights_activity(plans_[0]);
   EXPECT_EQ(activity.activations, 1u);
   EXPECT_EQ(activity.read_bytes, 2097248u);
@@ -315,6 +351,16 @@ TEST_P(RejectedReadWeightsTest,
             activity.activations);
   EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).read_bytes,
             activity.read_bytes);
+}
+
+TEST_P(RejectedReadWeightsTest,
+       FailedReadRetiresTheAcceptedProducerWithoutReplay) {
+  ASSERT_NO_FATAL_FAILURE(VerifyRejectedRead("direct_policy.loom", 1));
+}
+
+TEST_P(RejectedReadWeightsTest,
+       RefillFailureRetiresAcceptedInputWindowsWithoutReplay) {
+  ASSERT_NO_FATAL_FAILURE(VerifyRejectedRead("streaming_policy.loom", 257));
 }
 
 class CoarseWindowWeightsTest : public WindowedWeightsTest {

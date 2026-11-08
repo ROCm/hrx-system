@@ -412,10 +412,13 @@ static iree_status_t iree_hal_replay_executor_queue_map(
        i < payload.mapping_count && iree_status_is_ok(status); ++i) {
     iree_hal_replay_memory_mapping_payload_t mapping;
     memcpy(&mapping, mapping_data.data + i * sizeof(mapping), sizeof(mapping));
-    if (IREE_UNLIKELY(mapping.reserved0 || mapping.access > UINT16_MAX ||
-                      mapping.source_ref.reserved0 ||
-                      mapping.source_ref.buffer_slot ||
-                      mapping.source_ref.length != mapping.byte_length)) {
+    if (IREE_UNLIKELY(
+            mapping.reserved0 || mapping.access > UINT16_MAX ||
+            mapping.source_ref.reserved0 || mapping.source_ref.buffer_slot ||
+            mapping.source_ref.length != mapping.byte_length ||
+            mapping.previous_source_ref.reserved0 ||
+            mapping.previous_source_ref.buffer_slot ||
+            mapping.previous_source_ref.length != mapping.byte_length)) {
       status = iree_make_status(IREE_STATUS_DATA_LOSS,
                                 "replay mapping descriptor is invalid");
     }
@@ -430,6 +433,12 @@ static iree_status_t iree_hal_replay_executor_queue_map(
       status = iree_hal_replay_executor_lookup(
           executor, mapping.source_ref.buffer_id,
           IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER, &source_entry);
+    }
+    iree_hal_replay_object_entry_t* previous_source_entry = NULL;
+    if (iree_status_is_ok(status) && mapping.previous_source_ref.buffer_id) {
+      status = iree_hal_replay_executor_lookup(
+          executor, mapping.previous_source_ref.buffer_id,
+          IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER, &previous_source_entry);
     }
     if (iree_status_is_ok(status)) {
       mappings[i] = (iree_hal_memory_mapping_t){
@@ -446,6 +455,10 @@ static iree_status_t iree_hal_replay_executor_queue_map(
           .source_offset = mapping.source_ref.offset,
           .access = (iree_hal_memory_access_t)mapping.access,
           .operation = (iree_hal_memory_mapping_operation_t)mapping.operation,
+          .previous_source = previous_source_entry
+                                 ? previous_source_entry->value.buffer
+                                 : NULL,
+          .previous_source_offset = mapping.previous_source_ref.offset,
       };
     }
   }

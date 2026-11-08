@@ -1459,6 +1459,10 @@ TEST_P(TaskSlabPoolTest, BatchedMappingOrdersOldAndNewUsersAcrossReservations) {
   IREE_EXPECT_OK(iree_hal_queue_download(queues_[0], gate, old_done,
                                          first_child, 0, old_values.data(),
                                          sizeof(old_values), nullptr));
+  for (auto& mapping : mappings) {
+    mapping.previous_source = mapping.source;
+    mapping.previous_source_offset = mapping.source_offset;
+  }
   mappings[0].source = nested;
   mappings[1].source = backing;
   for (auto& mapping : mappings) {
@@ -1504,6 +1508,8 @@ TEST_P(TaskSlabPoolTest, BatchedMappingOrdersOldAndNewUsersAcrossReservations) {
 
   for (auto& mapping : mappings) {
     mapping.operation = IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND;
+    mapping.previous_source = mapping.source;
+    mapping.previous_source_offset = mapping.source_offset;
     mapping.source = nullptr;
     mapping.source_offset = 0;
     mapping.access = IREE_HAL_MEMORY_ACCESS_NONE;
@@ -1515,6 +1521,8 @@ TEST_P(TaskSlabPoolTest, BatchedMappingOrdersOldAndNewUsersAcrossReservations) {
   IREE_ASSERT_OK(Wait(detached));
   // Detached storage can immediately be mapped at another virtual range.
   mappings[1].operation = IREE_HAL_MEMORY_MAPPING_OPERATION_BIND;
+  mappings[1].previous_source = nullptr;
+  mappings[1].previous_source_offset = 0;
   mappings[1].source = nested;
   mappings[1].access = IREE_HAL_MEMORY_ACCESS_READ;
   SemaphoreList reused(devices_[0], {0}, {1});

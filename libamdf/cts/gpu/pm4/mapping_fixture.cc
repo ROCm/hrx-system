@@ -405,10 +405,16 @@ void Pm4MappingFixture::RunRetainedSparse(
       };
   const auto original_batch = make_batch(original);
   const auto replacement_batch = make_batch(replacement);
-  const auto direct_batch = make_batch(direct);
+  auto direct_batch = make_batch(direct);
+  for (size_t i = 0; i < direct_batch.size(); ++i) {
+    for (size_t j = 0; j < direct_batch[i].size(); ++j) {
+      direct_batch[i][j].previous_memory = replacement_batch[i][j].memory;
+    }
+  }
   auto detach_batch = original_batch;
   for (auto& projection : detach_batch) {
     for (auto& entry : projection) {
+      entry.previous_memory = entry.memory;
       entry.memory = nullptr;
       entry.access = 0;
     }

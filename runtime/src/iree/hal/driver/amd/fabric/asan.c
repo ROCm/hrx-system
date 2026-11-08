@@ -844,13 +844,16 @@ iree_status_t iree_hal_amd_fabric_asan_map_application(
 
 bool iree_hal_amd_fabric_asan_unmap_application(
     iree_hal_amd_fabric_asan_t* state,
-    iree_hal_amd_fabric_asan_application_range_t* range) {
+    iree_hal_amd_fabric_asan_application_range_t* range, amdf_memory_t* memory,
+    uint32_t memory_access_ordinal) {
   if (!range) {
     return true;
   }
   const amdf_memory_mapping_update_t update = {
       .target_byte_offset = range->address - state->application_info.address,
       .byte_length = range->length,
+      .previous_memory = memory,
+      .previous_memory_access_ordinal = memory_access_ordinal,
   };
   iree_slim_mutex_lock(&state->application_mutex);
   amdf_status_t status = 0;

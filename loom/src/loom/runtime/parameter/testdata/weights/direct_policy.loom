@@ -2,6 +2,29 @@ func.decl import("weights") @input(%source: i32, %key: buffer, %key_offset: i64,
 
 func.decl import("weights") @input_buffer(%data: buffer, %alignment: i64) -> (i64)
 
+// Capture a half as many independent ranges so activation must refill its
+// bounded submission windows before all destination bytes become ready.
+func.def @capture_half(%source: i32, %key: buffer, %key_length: i64, %base: i64, %alignment: i64) -> (i64) {
+  %c0 = scalar.constant 0 : i64
+  %chunk = scalar.constant 4096 : i64
+  %first = func.call @input(%source, %key, %c0, %key_length, %base, %chunk, %alignment) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
+  %begin = index.constant 1 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %word_alignment = scalar.constant 4 : i64
+  scf.for %i = [%begin to %end step %step] {
+    %ordinal = index.cast %i : index to i64
+    %relative = scalar.muli %ordinal, %chunk : i64
+    %offset = scalar.addi %base, %relative : i64
+    %ignored = func.call @input(%source, %key, %c0, %key_length, %offset, %chunk, %word_alignment) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
+  }
+  %tail_offset = scalar.constant 1048576 : i64
+  %tail_length = scalar.constant 16 : i64
+  %offset = scalar.addi %base, %tail_offset : i64
+  %ignored = func.call @input(%source, %key, %c0, %key_length, %offset, %tail_length, %word_alignment) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
+  func.return %first : i64
+}
+
 func.def public @prepare_weight(%key: buffer) -> (i64) {
   %origin = index.constant 0 : offset
   %letter = buffer.load.i8.u %key[%origin]
@@ -17,8 +40,8 @@ func.def public @prepare_weight(%key: buffer) -> (i64) {
     %second_source = scalar.constant 1 : i32
     %half = scalar.constant 1048592 : i64
     %alignment = scalar.constant 16 : i64
-    %first = func.call @input(%first_source, %key, %c0, %key_length, %c0, %half, %alignment) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
-    %second = func.call @input(%second_source, %key, %c0, %key_length, %half, %half, %alignment) : (i32, buffer, i64, i64, i64, i64, i64) -> (i64)
+    %first = func.call @capture_half(%first_source, %key, %key_length, %c0, %alignment) : (i32, buffer, i64, i64, i64) -> (i64)
+    %second = func.call @capture_half(%second_source, %key, %key_length, %half, %alignment) : (i32, buffer, i64, i64, i64) -> (i64)
     %bytes = scalar.constant 2097184 : i64
     scf.yield %bytes : i64
   } else {

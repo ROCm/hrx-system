@@ -1021,6 +1021,17 @@ iree_host_size_t loom_runtime_virtual_buffer_slab_count(
   return buffer->slab_count;
 }
 
+iree_hal_buffer_binding_t loom_runtime_virtual_buffer_backing(
+    const loom_runtime_virtual_buffer_t* buffer, iree_host_size_t slab_index) {
+  const loom_runtime_backing_entry_t* entry =
+      loom_runtime_backing_directory_find_const(&buffer->backing, slab_index);
+  return (iree_hal_buffer_binding_t){
+      loom_runtime_backing_pages_buffer((loom_runtime_backing_slot_t){
+          entry->physical, entry->physical_offset}),
+      entry->physical_offset,
+      loom_runtime_memory_slab_length(buffer, slab_index)};
+}
+
 loom_runtime_memory_demand_t loom_runtime_virtual_buffer_missing_demand(
     const loom_runtime_virtual_buffer_t* buffer) {
   loom_runtime_memory_demand_t demand = {0};
@@ -1450,6 +1461,14 @@ static void loom_runtime_memory_operation_enqueue(
         .operation = operation->releasing
                          ? IREE_HAL_MEMORY_MAPPING_OPERATION_UNBIND
                          : IREE_HAL_MEMORY_MAPPING_OPERATION_BIND,
+        .previous_source =
+            operation->releasing
+                ? loom_runtime_backing_pages_buffer(
+                      (loom_runtime_backing_slot_t){
+                          edit->result.physical, edit->result.physical_offset})
+                : NULL,
+        .previous_source_offset =
+            operation->releasing ? edit->result.physical_offset : 0,
     };
     if (operation->growing) {
       operation->mappings[i].source =
@@ -1498,6 +1517,9 @@ static void loom_runtime_memory_operation_enqueue(
   } else if (operation->growing) {
     for (iree_host_size_t i = 0; i < operation->count; ++i) {
       operation->mappings[i].target = operation->growing->previous_handle;
+      operation->mappings[i].previous_source = operation->mappings[i].source;
+      operation->mappings[i].previous_source_offset =
+          operation->mappings[i].source_offset;
       operation->mappings[i].source = NULL;
       operation->mappings[i].source_offset = 0;
       operation->mappings[i].access = IREE_HAL_MEMORY_ACCESS_NONE;
@@ -1835,6 +1857,19 @@ void loom_runtime_memory_operation_await(
 iree_status_t loom_runtime_memory_operation_query_status(
     const loom_runtime_memory_operation_t* operation) {
   return operation ? iree_status_clone(operation->status) : iree_ok_status();
+}
+
+iree_hal_buffer_binding_t loom_runtime_memory_operation_backing(
+    const loom_runtime_memory_operation_t* operation,
+    iree_host_size_t edit_index) {
+  const loom_runtime_backing_entry_t* entry =
+      &operation->edits[edit_index].result;
+  const loom_runtime_memory_edit_t* edit = &operation->edits[edit_index];
+  return (iree_hal_buffer_binding_t){
+      loom_runtime_backing_pages_buffer((loom_runtime_backing_slot_t){
+          entry->physical, entry->physical_offset}),
+      entry->physical_offset,
+      loom_runtime_memory_slab_length(edit->buffer, edit->index)};
 }
 
 void loom_runtime_memory_operation_free(

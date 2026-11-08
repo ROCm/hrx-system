@@ -176,10 +176,12 @@ bool loom_runtime_weights_query_activation_workspace(
 // Commits storage and streams directly into final roots through four read
 // lanes. Four preparation lanes join each tensor's reads and captured inputs.
 // An already active plan does not reload or prepare again. Success means
-// producer submission, not completion or consumer ordering. Native backing
+// producer acceptance, not completion or consumer ordering. Native backing
 // runs on the shared cold-memory executor and gates file loading with each
-// slab's readiness. Provider submission runs on the host preparation task pool;
-// its accepted ownership retires independently of readiness failure.
+// slab's readiness. Reusable tasks on the host preparation pool admit bounded
+// read/preparation windows, replenished by earlier completion while later work
+// remains queued. Final readiness is published before those producers start;
+// their ownership retires independently of readiness failure.
 // Neither native preparation nor device completion blocks the submitting
 // owner. The caller pins backing until every
 // consuming domain retires. A failed load is terminal: later consumers receive

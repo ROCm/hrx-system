@@ -17,10 +17,6 @@
 namespace {
 
 constexpr uint32_t kGenerationCount = 8;
-constexpr uint64_t kPageLength = 4096;
-constexpr uint64_t kBackingLength = 65536;
-constexpr uint64_t kMinimumReservationLength =
-    (UINT64_C(5) << 30) + kBackingLength;
 // The host projection precedes the GPU; caller and native GPU ordinals differ.
 constexpr uint32_t kGpuAccessOrdinal = 1;
 constexpr auto kReadWrite = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
@@ -102,7 +98,6 @@ class Pm4QueuedMappingTest : public Pm4DispatchTest,
     ASSERT_EQ(api_->device_query_memory_reservation_capabilities(device_, 0,
                                                                  &capabilities),
               AMDF_STATUS_OK);
-    ASSERT_EQ(kPageLength % capabilities.mapping_granularity, 0u);
     access_ = kReadWrite | capabilities.required_access;
     amdf_memory_reservation_capabilities_t host_capabilities = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES,
@@ -111,18 +106,24 @@ class Pm4QueuedMappingTest : public Pm4DispatchTest,
     ASSERT_EQ(api_->instance_query_host_memory_reservation_capabilities(
                   instance_, &host_capabilities),
               AMDF_STATUS_OK);
-    ASSERT_EQ(kPageLength % host_capabilities.mapping_granularity, 0u);
+    page_length_ = std::max(capabilities.mapping_granularity,
+                            host_capabilities.mapping_granularity);
+    // Four source offsets participate in replacement; retain a distinct tail
+    // for the pending predecessor even at the provider's largest mapping unit.
+    backing_length_ = std::max(UINT64_C(65536), 8 * page_length_);
     const amdf_memory_reservation_access_t consumers[] = {
         {nullptr, host_capabilities.address_domain_ordinal,
-         kReadWrite | host_capabilities.required_access, kPageLength},
+         kReadWrite | host_capabilities.required_access, page_length_},
         {device_, capabilities.address_domain_ordinal, access_, 0},
     };
     const uint64_t granularity =
         std::max(capabilities.reservation_granularity,
                  host_capabilities.reservation_granularity);
+    const uint64_t minimum_reservation_length =
+        (UINT64_C(5) << 30) + backing_length_;
     const uint64_t reservation_length =
-        (kMinimumReservationLength + granularity - 1) & ~(granularity - 1);
-    target_offset_ = reservation_length - kPageLength;
+        (minimum_reservation_length + granularity - 1) & ~(granularity - 1);
+    target_offset_ = reservation_length - page_length_;
     const amdf_memory_reservation_create_info_t create = {
         .type = AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO,
         .structure_size = sizeof(create),
@@ -187,21 +188,21 @@ class Pm4QueuedMappingTest : public Pm4DispatchTest,
           .memory_profile_ordinal = ordinal,
       };
       source.required_flags = flags;
-      source.byte_length = kBackingLength;
-      source.minimum_alignment = kBackingLength;
+      source.byte_length = backing_length_;
+      source.minimum_alignment = backing_length_;
       source.access_count = 1;
       source.accesses = &attachment;
       if (registered) {
         ASSERT_LE(profile.registration.registered_host_pointer_alignment,
-                  kBackingLength);
-        ASSERT_EQ(kBackingLength %
+                  backing_length_);
+        ASSERT_EQ(backing_length_ %
                       profile.registration.native_byte_length_granularity,
                   0u);
-        void* storage = std::malloc(2 * kBackingLength);
+        void* storage = std::malloc(2 * backing_length_);
         ASSERT_NE(storage, nullptr);
         const auto address =
-            (reinterpret_cast<uintptr_t>(storage) + kBackingLength - 1) &
-            ~(kBackingLength - 1);
+            (reinterpret_cast<uintptr_t>(storage) + backing_length_ - 1) &
+            ~(backing_length_ - 1);
         source.registered_host_pointer = reinterpret_cast<void*>(address);
         source.registered_host_properties =
             (AMDF_HOST_MEMORY_PROPERTY_READ_CACHED |
@@ -215,9 +216,9 @@ class Pm4QueuedMappingTest : public Pm4DispatchTest,
 
     ASSERT_NO_FATAL_FAILURE(CreateMemory(kReadWrite, 4096, &control_));
     ASSERT_NO_FATAL_FAILURE(CreateMemory(
-        AMDF_MEMORY_ACCESS_READ, kGenerationCount * kPageLength, &upload_));
+        AMDF_MEMORY_ACCESS_READ, kGenerationCount * page_length_, &upload_));
     ASSERT_NO_FATAL_FAILURE(CreateMemory(
-        kReadWrite, (2 * kGenerationCount + 1) * kPageLength, &capture_));
+        kReadWrite, (2 * kGenerationCount + 1) * page_length_, &capture_));
     ASSERT_NO_FATAL_FAILURE(
         CreateMemory(AMDF_MEMORY_ACCESS_READ, 4096, &arguments_));
     ASSERT_NO_FATAL_FAILURE(
@@ -266,7 +267,7 @@ class Pm4QueuedMappingTest : public Pm4DispatchTest,
       if ((profile.roles & AMDF_MEMORY_PROFILE_ROLE_CREATE) != 0 &&
           (kFlags & ~profile.supported_flags) == 0) {
         ASSERT_EQ(
-            kBackingLength % profile.allocation.native_byte_length_granularity,
+            backing_length_ % profile.allocation.native_byte_length_granularity,
             0u);
         profile_ordinal = ordinal;
         break;
@@ -278,7 +279,7 @@ class Pm4QueuedMappingTest : public Pm4DispatchTest,
         .structure_size = sizeof(source),
         .memory_profile_ordinal = profile_ordinal,
         .required_flags = kFlags,
-        .byte_length = kBackingLength,
+        .byte_length = backing_length_,
     };
     ASSERT_EQ(
         api_->memory_create(system_scope_, &source, &host_backing_, nullptr),
@@ -287,7 +288,7 @@ class Pm4QueuedMappingTest : public Pm4DispatchTest,
         .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
         .structure_size = sizeof(map),
         .byte_offset = target_offset_,
-        .byte_length = kPageLength,
+        .byte_length = page_length_,
         .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
     };
     ASSERT_EQ(api_->memory_reservation_map(reservation_, 0, &map, &host_view_),
@@ -299,7 +300,7 @@ class Pm4QueuedMappingTest : public Pm4DispatchTest,
     ASSERT_EQ(api_->host_mapping_query_info(host_view_, &view), AMDF_STATUS_OK);
     host_pointer_ = static_cast<uint32_t*>(view.pointer);
     ASSERT_NO_FATAL_FAILURE(InstallHostBacking());
-    for (uint32_t word = 0; word < kPageLength / 4; ++word) {
+    for (uint32_t word = 0; word < page_length_ / 4; ++word) {
       host_pointer_[word] = GenerationWord(kGenerationCount, word);
     }
   }
@@ -307,10 +308,10 @@ class Pm4QueuedMappingTest : public Pm4DispatchTest,
   void InstallHostBacking() {
     const amdf_memory_mapping_update_t update = {
         .target_byte_offset = target_offset_,
-        .byte_length = kPageLength,
+        .byte_length = page_length_,
         .memory = host_backing_,
         .access = kReadWrite,
-        .source_byte_offset = kBackingLength - kPageLength,
+        .source_byte_offset = backing_length_ - page_length_,
     };
     ASSERT_EQ(api_->memory_reservation_update(reservation_, 0, 1, &update),
               AMDF_STATUS_OK);
@@ -320,7 +321,7 @@ class Pm4QueuedMappingTest : public Pm4DispatchTest,
                 uint64_t destination) {
     const uint64_t offset = argument_count_++ * 64;
     const kernels::byte_copy_unaligned::Arguments arguments = {
-        source, destination, kPageLength, 1024, 1, program_.workgroup_size[0]};
+        source, destination, page_length_, 1024, 1, program_.workgroup_size[0]};
     std::memcpy(
         static_cast<uint8_t*>(arguments_->host.pointer) + offset, &arguments,
         offsetof(kernels::byte_copy_unaligned::Arguments, workgroup_size_x) +
@@ -360,6 +361,10 @@ class Pm4QueuedMappingTest : public Pm4DispatchTest,
   amdf_host_mapping_t* host_view_ = nullptr;
   // CPU sentinel at the same logical offset as the GPU replacement workload.
   uint32_t* host_pointer_ = nullptr;
+  // Common host/GPU replacement unit selected from their capabilities.
+  uint64_t page_length_ = 0;
+  // Physical source extent containing every replacement offset and the tail.
+  uint64_t backing_length_ = 0;
   // Last mapping-sized page within the native reservation extent, in bytes.
   uint64_t target_offset_ = 0;
   // Address beyond four GiB in the reserved interval.
@@ -399,30 +404,30 @@ TEST_P(Pm4QueuedMappingTest, PendingUseThenReplacementThenComputeAndDetach) {
   // This pending predecessor really uses the old mapping: it writes a
   // distinct source page and captures through that page's independent alias.
   EmitCopy(predecessor,
-           upload_->device_address + (kGenerationCount - 1) * kPageLength,
+           upload_->device_address + (kGenerationCount - 1) * page_length_,
            target_address_);
   EmitCopy(predecessor,
-           backing_[1].device_address + kBackingLength - kPageLength,
-           capture_->device_address + 2 * kGenerationCount * kPageLength);
+           backing_[1].device_address + backing_length_ - page_length_,
+           capture_->device_address + 2 * kGenerationCount * page_length_);
   predecessor.PadToEightWords();
   ASSERT_LE(predecessor.word_count(), 1024u);
   std::array<uint64_t, kGenerationCount> lengths = {};
   for (uint32_t generation = 0; generation < kGenerationCount; ++generation) {
     auto* source = reinterpret_cast<uint32_t*>(
         static_cast<uint8_t*>(upload_->host.pointer) +
-        generation * kPageLength);
-    for (uint32_t word = 0; word < kPageLength / 4; ++word) {
+        generation * page_length_);
+    for (uint32_t word = 0; word < page_length_ / 4; ++word) {
       source[word] = GenerationWord(generation, word);
     }
     Pm4CommandWriter writer(words + (generation + 1) * 1024, *pm4_profile_);
-    EmitCopy(writer, upload_->device_address + generation * kPageLength,
+    EmitCopy(writer, upload_->device_address + generation * page_length_,
              target_address_);
     EmitCopy(writer, target_address_,
-             capture_->device_address + 2 * generation * kPageLength);
+             capture_->device_address + 2 * generation * page_length_);
     EmitCopy(writer,
              backing_[generation % 2].device_address +
-                 (generation % 4) * kPageLength,
-             capture_->device_address + (2 * generation + 1) * kPageLength);
+                 (generation % 4) * page_length_,
+             capture_->device_address + (2 * generation + 1) * page_length_);
     writer.WriteData32(control_->device_address + 64 + generation * 4,
                        generation + 1);
     writer.PadToEightWords();
@@ -435,11 +440,19 @@ TEST_P(Pm4QueuedMappingTest, PendingUseThenReplacementThenComputeAndDetach) {
             AMDF_STATUS_OK);
   const amdf_memory_mapping_update_t initial = {
       .target_byte_offset = target_offset_,
-      .byte_length = kPageLength,
+      .byte_length = page_length_,
       .memory = backing_[1].memory,
       .access = access_,
-      .source_byte_offset = kBackingLength - kPageLength,
+      .source_byte_offset = backing_length_ - page_length_,
   };
+  auto invalid = initial;
+  invalid.byte_length = page_length_ / 2;
+  uint64_t rejected_submission = UINT64_MAX;
+  ASSERT_EQ(
+      api_->kernel_queue_update_memory(queue_, reservation_, kGpuAccessOrdinal,
+                                       1, &invalid, &rejected_submission),
+      amdf_make_api_status(AMDF_STATUS_CODE_OUT_OF_RANGE));
+  EXPECT_EQ(rejected_submission, UINT64_MAX);
   ASSERT_EQ(api_->memory_reservation_update(reservation_, kGpuAccessOrdinal, 1,
                                             &initial),
             AMDF_STATUS_OK);
@@ -451,10 +464,14 @@ TEST_P(Pm4QueuedMappingTest, PendingUseThenReplacementThenComputeAndDetach) {
   for (uint32_t generation = 0; generation < kGenerationCount; ++generation) {
     const amdf_memory_mapping_update_t update = {
         .target_byte_offset = target_offset_,
-        .byte_length = kPageLength,
+        .byte_length = page_length_,
         .memory = backing_[generation % 2].memory,
         .access = access_,
-        .source_byte_offset = (generation % 4) * kPageLength,
+        .source_byte_offset = (generation % 4) * page_length_,
+        .previous_memory = backing_[(generation + 1) % 2].memory,
+        .previous_source_byte_offset =
+            generation ? ((generation - 1) % 4) * page_length_
+                       : backing_length_ - page_length_,
     };
     ASSERT_EQ(api_->kernel_queue_update_memory(queue_, reservation_,
                                                kGpuAccessOrdinal, 1, &update,
@@ -481,7 +498,10 @@ TEST_P(Pm4QueuedMappingTest, PendingUseThenReplacementThenComputeAndDetach) {
   }
   const amdf_memory_mapping_update_t detach = {
       .target_byte_offset = target_offset_,
-      .byte_length = kPageLength,
+      .byte_length = page_length_,
+      .previous_memory = backing_[(kGenerationCount - 1) % 2].memory,
+      .previous_source_byte_offset =
+          ((kGenerationCount - 1) % 4) * page_length_,
   };
   ASSERT_EQ(
       api_->kernel_queue_update_memory(queue_, reservation_, kGpuAccessOrdinal,
@@ -495,20 +515,20 @@ TEST_P(Pm4QueuedMappingTest, PendingUseThenReplacementThenComputeAndDetach) {
             AMDF_STATUS_OK);
   // Both queued range removal and checked full GPU detach leave the CPU
   // group's bytes accessible through the original stable view.
-  for (uint32_t word = 0; word < kPageLength / 4; ++word) {
+  for (uint32_t word = 0; word < page_length_ / 4; ++word) {
     ASSERT_EQ(host_pointer_[word], GenerationWord(kGenerationCount, word));
   }
   ASSERT_EQ(api_->memory_reservation_detach(reservation_, 0), AMDF_STATUS_OK);
   const auto* captured = static_cast<const uint32_t*>(capture_->host.pointer);
-  for (uint32_t word = 0; word < kPageLength / 4; ++word) {
-    ASSERT_EQ(captured[2 * kGenerationCount * kPageLength / 4 + word],
+  for (uint32_t word = 0; word < page_length_ / 4; ++word) {
+    ASSERT_EQ(captured[2 * kGenerationCount * page_length_ / 4 + word],
               GenerationWord(kGenerationCount - 1, word))
         << "pending predecessor word=" << word;
   }
   for (uint32_t generation = 0; generation < kGenerationCount; ++generation) {
     for (uint32_t alias = 0; alias < 2; ++alias) {
-      for (uint32_t word = 0; word < kPageLength / 4; ++word) {
-        ASSERT_EQ(captured[(2 * generation + alias) * kPageLength / 4 + word],
+      for (uint32_t word = 0; word < page_length_ / 4; ++word) {
+        ASSERT_EQ(captured[(2 * generation + alias) * page_length_ / 4 + word],
                   GenerationWord(generation, word))
             << "generation=" << generation << " alias=" << alias
             << " word=" << word;
