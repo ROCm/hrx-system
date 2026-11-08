@@ -199,3 +199,102 @@ check.scenario @near_index_limit_boundary {
   }
   check.return
 }
+
+// The last reachable IV is 8 or 9, leaving room for the two-position shift.
+// All three schedules must retain that source domain across their partial tile.
+func.def @shifted_unroll_domains(%start_input: index, %linear_buffer: buffer, %interleaved_buffer: buffer, %recurrence_buffer: buffer, %result_buffer: buffer) {
+  %start = index.assume %start_input [range(%start_input, 0, 1)] : index
+  %end = index.constant 12 : index
+  %step = index.constant 4 : index
+  %shift = index.constant 2 : index
+  %factor = index.constant 2 : index
+  %base = index.constant 0 : offset
+  %initial_state = scalar.constant 0 : i32
+  %radix = scalar.constant 3 : i32
+  %linear = buffer.view %linear_buffer[%base] : buffer -> view<12xi32>
+  %interleaved = buffer.view %interleaved_buffer[%base] : buffer -> view<12xi32>
+  %recurrence = buffer.view %recurrence_buffer[%base] : buffer -> view<12xi32>
+  %results = buffer.view %result_buffer[%base] : buffer -> view<3xi32>
+  %linear_result = scf.for %i = [%start to %end step %step](%state = %initial_state : i32) -> (i32) unroll(%factor) {
+    %position = index.add %i, %shift : index
+    %value = index.cast %position : index to i32
+    view.store %value, %linear[%position] : i32, view<12xi32>
+    %scaled = scalar.muli %state, %radix : i32
+    %next = scalar.addi %scaled, %value : i32
+    scf.yield %next : i32
+  }
+  %interleaved_result = scf.for %i = [%start to %end step %step](%state = %initial_state : i32) -> (i32) unroll(%factor) schedule(interleaved) {
+    %position = index.add %i, %shift : index
+    %value = index.cast %position : index to i32
+    view.store %value, %interleaved[%position] : i32, view<12xi32>
+    %scaled = scalar.muli %state, %radix : i32
+    %next = scalar.addi %scaled, %value : i32
+    scf.yield %next : i32
+  }
+  %recurrence_result = scf.for %i = [%start to %end step %step](%state = %initial_state : i32) -> (i32) unroll(%factor) schedule(recurrence) {
+    %position = index.add %i, %shift : index
+    %value = index.cast %position : index to i32
+    view.store %value, %recurrence[%position] : i32, view<12xi32>
+    %scaled = scalar.muli %state, %radix : i32
+    %next = scalar.addi %scaled, %value : i32
+    scf.yield %next : i32
+  }
+  view.store %linear_result, %results[0] : i32, view<3xi32>
+  view.store %interleaved_result, %results[1] : i32, view<3xi32>
+  view.store %recurrence_result, %results[2] : i32, view<3xi32>
+  func.return
+}
+
+// Independent closed-form oracle: positions are start + {2, 6, 10}, and
+// the ordered radix-three recurrence is 13 * start + 46.
+func.def @shifted_unroll_oracle(%start_input: index, %linear_buffer: buffer, %interleaved_buffer: buffer, %recurrence_buffer: buffer, %result_buffer: buffer) {
+  %start = index.assume %start_input [range(%start_input, 0, 1)] : index
+  %base = index.constant 0 : offset
+  %first_shift = index.constant 2 : index
+  %second_shift = index.constant 6 : index
+  %third_shift = index.constant 10 : index
+  %first = index.add %start, %first_shift : index
+  %second = index.add %start, %second_shift : index
+  %third = index.add %start, %third_shift : index
+  %first_value = index.cast %first : index to i32
+  %second_value = index.cast %second : index to i32
+  %third_value = index.cast %third : index to i32
+  %start_value = index.cast %start : index to i32
+  %start_coefficient = scalar.constant 13 : i32
+  %constant_term = scalar.constant 46 : i32
+  %scaled = scalar.muli %start_value, %start_coefficient : i32
+  %result = scalar.addi %scaled, %constant_term : i32
+  %linear = buffer.view %linear_buffer[%base] : buffer -> view<12xi32>
+  %interleaved = buffer.view %interleaved_buffer[%base] : buffer -> view<12xi32>
+  %recurrence = buffer.view %recurrence_buffer[%base] : buffer -> view<12xi32>
+  %results = buffer.view %result_buffer[%base] : buffer -> view<3xi32>
+  view.store %first_value, %linear[%first] : i32, view<12xi32>
+  view.store %second_value, %linear[%second] : i32, view<12xi32>
+  view.store %third_value, %linear[%third] : i32, view<12xi32>
+  view.store %first_value, %interleaved[%first] : i32, view<12xi32>
+  view.store %second_value, %interleaved[%second] : i32, view<12xi32>
+  view.store %third_value, %interleaved[%third] : i32, view<12xi32>
+  view.store %first_value, %recurrence[%first] : i32, view<12xi32>
+  view.store %second_value, %recurrence[%second] : i32, view<12xi32>
+  view.store %third_value, %recurrence[%third] : i32, view<12xi32>
+  view.store %result, %results[0] : i32, view<3xi32>
+  view.store %result, %results[1] : i32, view<3xi32>
+  view.store %result, %results[2] : i32, view<3xi32>
+  func.return
+}
+
+check.scenario @shifted_unroll_source_domains {
+  check.trial[2](%start: index, %entropy: check.entropy) {
+    %linear = check.generate.fill value(-1) : tensor<12xi32>
+    %interleaved = check.generate.fill value(-1) : tensor<12xi32>
+    %recurrence = check.generate.fill value(-1) : tensor<12xi32>
+    %results = check.generate.fill value(-1) : tensor<3xi32>
+    check.compare<@shifted_unroll_domains, @shifted_unroll_oracle>(%start, %linear, %interleaved, %recurrence, %results) : (index, tensor<12xi32>, tensor<12xi32>, tensor<12xi32>, tensor<3xi32>) -> () {
+      check.expect.equal actual(%linear) expected(%linear) : tensor<12xi32>
+      check.expect.equal actual(%interleaved) expected(%interleaved) : tensor<12xi32>
+      check.expect.equal actual(%recurrence) expected(%recurrence) : tensor<12xi32>
+      check.expect.equal actual(%results) expected(%results) : tensor<3xi32>
+    }
+  }
+  check.return
+}

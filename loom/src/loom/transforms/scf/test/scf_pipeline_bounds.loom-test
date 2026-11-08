@@ -187,25 +187,27 @@ config.def @schedule.depth = 3 : index
 
 func.def @late_depth_with_independent_unroll(%input: view<9xf32>, %initial: f32) -> (f32) {
   %begin = index.constant 0 : index
+  %end = index.constant 9 : index
   %14 = index.constant 2 : index
   %value$17 = view.load %input[%begin] : view<9xf32> -> f32
-  %77 = index.constant 1 : index
-  %value$20 = view.load %input[%77] : view<9xf32> -> f32
+  %81 = index.constant 1 : index
+  %value$20 = view.load %input[%81] : view<9xf32> -> f32
   %38 = index.constant 8 : index
   %39, %40, %41 = scf.for %42 = [%14 to %38 step %14](%43 = %initial : f32, %44 = %value$17 : f32, %45 = %value$20 : f32) -> (f32, f32, f32) {
-    %47 = index.add %42, %77 : index
-    %value = view.load %input[%42] : view<9xf32> -> f32
-    %value_1 = view.load %input[%47] : view<9xf32> -> f32
+    %47 = index.add %42, %81 : index
+    %48, %49 = index.assume %42, %47 [range(%42, 2, 8), ge(%42, %14), lt(%42, %end), range(%47, 2, 8), ge(%47, %14), lt(%47, %end)] : index, index
+    %value = view.load %input[%48] : view<9xf32> -> f32
+    %value_1 = view.load %input[%49] : view<9xf32> -> f32
     scf.schedule.fence
     %next = scalar.addf %43, %44 : f32
     scf.schedule.fence
     %next_1 = scalar.addf %next, %45 : f32
     scf.yield %next_1, %value, %value_1 : f32, f32, f32
   }
-  %value$59 = view.load %input[%38] : view<9xf32> -> f32
-  %next$60 = scalar.addf %39, %40 : f32
-  %next$30 = scalar.addf %next$60, %41 : f32
-  %next$31 = scalar.addf %next$30, %value$59 : f32
+  %value$61 = view.load %input[%38] : view<9xf32> -> f32
+  %next$62 = scalar.addf %39, %40 : f32
+  %next$30 = scalar.addf %next$62, %41 : f32
+  %next$31 = scalar.addf %next$30, %value$61 : f32
   func.return %next$31 : f32
 }
 

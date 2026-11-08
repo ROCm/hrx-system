@@ -47,5 +47,6 @@ loom_check_test_suite(
         "scf_unroll_regions.loom-test",
         "scf_unroll_report.loom-test",
         "scf_unroll_scope.loom-test",
+        "scf_unroll_source_domain.loom-test",
     ],
 )
