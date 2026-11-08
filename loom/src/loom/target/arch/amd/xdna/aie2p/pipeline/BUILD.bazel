@@ -216,6 +216,7 @@ loom_cc_test(
         "//loom/src/loom/pass:types",
         "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
         "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//loom/src/loom/target/arch/amd/xdna/array:registers",
         "//loom/src/loom/testing:diagnostic_matchers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

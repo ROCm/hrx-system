@@ -625,9 +625,11 @@ typedef struct loom_aie2p_native_context_t {
   loom_aie2p_array_route_builder_t routing;
   // Packet identity for every physical route edge.
   loom_aie2p_native_route_t* routes;
-  // Canonical packet source tree per tile's core and tile-control output.
-  // UINT32_MAX marks an unused output; destinations share its physical links.
-  uint32_t* control_sources;
+  // Complete source ownership per tile's core and tile-control output.
+  loom_aie2p_native_control_source_t* control_sources;
+  // Unique control source per core/tile-control endpoint. UINT32_MAX is
+  // unused; UINT32_MAX - 1 marks an endpoint shared by different sources.
+  uint32_t* control_destination_sources;
   // Optional receiver-granted payload path per destination tile. Allocated
   // only when resident task refill needs control routes.
   struct loom_aie2p_native_delivery_t** deliveries;
@@ -752,9 +754,11 @@ iree_status_t loom_aie2p_native_select_sequence(
     loom_aie2p_native_dma_sequence_t* out_sequence,
     iree_string_view_t* out_reason, bool* out_valid);
 
-// Attaches one packet identity to newly allocated route edges.
+// Attaches packet identity and retained control ownership to route edges.
+// Payload callers use UINT32_MAX for |control_source|.
 void loom_aie2p_native_route_label(loom_aie2p_native_context_t* context,
-                                   iree_host_size_t first, uint8_t packet);
+                                   iree_host_size_t first, uint8_t packet,
+                                   uint32_t control_source);
 
 // Adds a packet route between admitted endpoints and labels its new edges.
 bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,

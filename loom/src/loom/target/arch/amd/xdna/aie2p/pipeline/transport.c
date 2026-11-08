@@ -90,10 +90,13 @@ bool loom_aie2p_native_select_ingress_descriptor(
 // Distinct packet classes share one physical source tree and carry their own
 // filter identity along its complete path.
 void loom_aie2p_native_route_label(loom_aie2p_native_context_t* context,
-                                   iree_host_size_t first, uint8_t packet) {
+                                   iree_host_size_t first, uint8_t packet,
+                                   uint32_t control_source) {
   for (iree_host_size_t i = first; i < context->routing.route_count; ++i) {
-    context->routes[i] = (loom_aie2p_native_route_t){
-        .edge = &context->routing.routes[i], .packet = packet};
+    context->routes[i] =
+        (loom_aie2p_native_route_t){.edge = &context->routing.routes[i],
+                                    .packet = packet,
+                                    .control_source = control_source};
   }
 }
 
@@ -108,31 +111,55 @@ bool loom_aie2p_native_packet_route(loom_aie2p_native_context_t* context,
   const uint32_t index = (*next_source)++;
   const iree_host_size_t tile =
       source.column * context->family->row_count + source.row;
-  uint32_t* canonical =
-      &context
-           ->control_sources[tile * 2 + (source_port ==
-                                         LOOM_XDNA_STREAM_PORT_TILE_CONTROL)];
-  if (*canonical == UINT32_MAX) {
-    *canonical = index;
+  const uint32_t source_index =
+      tile * 2 + (source_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL);
+  loom_aie2p_native_control_source_t* control =
+      &context->control_sources[source_index];
+  const uint32_t destination_index =
+      destination_port == LOOM_XDNA_STREAM_PORT_CORE ||
+              destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL
+          ? (destination.column * context->family->row_count +
+             destination.row) *
+                    2 +
+                (destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL)
+          : UINT32_MAX;
+  if (control->route == UINT32_MAX) {
+    control->route = index;
+    control->destination = destination_index;
+  } else if (control->destination != destination_index) {
+    control->destination = UINT32_MAX;
   }
-  const iree_host_size_t destination_index =
+  if (destination_index != UINT32_MAX) {
+    uint32_t* owner = &context->control_destination_sources[destination_index];
+    if (*owner == UINT32_MAX) {
+      *owner = source_index;
+    } else if (*owner != source_index) {
+      *owner = UINT32_MAX - 1;
+    }
+  }
+  const iree_host_size_t destination_tile =
       destination.column * context->family->row_count + destination.row;
   loom_aie2p_native_delivery_t* delivery =
       context->deliveries && source_port == LOOM_XDNA_STREAM_PORT_CORE &&
               destination_port == LOOM_XDNA_STREAM_PORT_TILE_CONTROL
-          ? context->deliveries[destination_index]
+          ? context->deliveries[destination_tile]
           : NULL;
   const bool routed =
-      delivery
-          ? loom_aie2p_array_route_control(&context->routing, index, *canonical,
-                                           source, &delivery->sharing)
-          : loom_aie2p_array_route_stream(&context->routing, index, *canonical,
-                                          source, source_port, 0, destination,
-                                          destination_port, 0, true);
+      delivery ? loom_aie2p_array_route_control(&context->routing, index,
+                                                control->route, source,
+                                                &delivery->sharing)
+               : loom_aie2p_array_route_stream(
+                     &context->routing, index, control->route, source,
+                     source_port, 0, destination, destination_port, 0, true);
   if (!routed) {
     return false;
   }
-  loom_aie2p_native_route_label(context, first, packet);
+  if (delivery && delivery->sharing.used) {
+    // A private endpoint still needs packet filtering when any path to it
+    // borrows payload lanes. Retain that exclusion for the entire source tree.
+    control->destination = UINT32_MAX;
+  }
+  loom_aie2p_native_route_label(context, first, packet, source_index);
   return true;
 }
 
@@ -761,7 +788,8 @@ static iree_status_t loom_aie2p_native_select_worker_transfers(
           return loom_aie2p_native_reject(
               context, request->op, IREE_SV("available payload stream links"));
         }
-        loom_aie2p_native_route_label(context, route_first, UINT8_MAX);
+        loom_aie2p_native_route_label(context, route_first, UINT8_MAX,
+                                      UINT32_MAX);
         loom_aie2p_native_tile_t* destinations[] = {local_tile, shim};
         uint8_t* packets[] = {&queue->path->control.local,
                               &queue->path->control.shim};
@@ -1174,6 +1202,12 @@ iree_status_t loom_aie2p_native_select_transfers(
       (void**)&context->control_sources));
   memset(context->control_sources, 0xff,
          control_source_count * sizeof(*context->control_sources));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(arena, control_source_count,
+                                sizeof(*context->control_destination_sources),
+                                (void**)&context->control_destination_sources));
+  memset(context->control_destination_sources, 0xff,
+         control_source_count * sizeof(*context->control_destination_sources));
   uint32_t next_source = 0;
   uint8_t* next_controller;
   IREE_RETURN_IF_ERROR(iree_arena_allocate(arena, context->family->column_count,

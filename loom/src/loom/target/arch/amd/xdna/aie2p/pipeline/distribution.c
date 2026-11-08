@@ -428,7 +428,7 @@ static iree_status_t loom_aie2p_native_select_packet_distribution(
             context, destination->copy,
             IREE_SV("available on-die packet multicast links"));
       }
-      loom_aie2p_native_route_label(context, route_first, i);
+      loom_aie2p_native_route_label(context, route_first, i, UINT32_MAX);
     }
   }
   loom_aie2p_native_dma_sequence_t* sequence = &distribution->sender.sequence;
@@ -706,7 +706,8 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
                 context, destination->copy,
                 IREE_SV("available on-die multicast payload links"));
           }
-          loom_aie2p_native_route_label(context, route_first, UINT8_MAX);
+          loom_aie2p_native_route_label(context, route_first, UINT8_MAX,
+                                        UINT32_MAX);
         }
         distribution->routes.count =
             context->routing.route_count - distribution->routes.first;

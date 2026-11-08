@@ -62,7 +62,7 @@ class Aie2pSharingTest
         tiles_[receiver_index_].coordinate, 0, false));
     distribution_.routes.count = context_.routing.route_count;
     for (size_t i = 0; i < context_.routing.route_count; ++i) {
-      routes_.push_back({&context_.routing.routes[i], UINT8_MAX});
+      routes_.push_back({&context_.routing.routes[i], UINT8_MAX, UINT32_MAX});
     }
     context_.routes = routes_.data();
   }
