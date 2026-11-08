@@ -924,6 +924,7 @@ loom_cc_test(
     srcs = ["interval_assignment_test.cc"],
     deps = [
         ":interval_assignment",
+        ":physical_domains",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/ops/test",

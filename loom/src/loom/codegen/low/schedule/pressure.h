@@ -100,7 +100,9 @@ struct loom_low_schedule_pressure_state_t {
   // unspillable completion domain.
   uint32_t* candidate_unspillable_activation_units;
   // Earliest unscheduled completion sink retaining live storage in each
-  // register-packing resource.
+  // register-packing resource. NODE_NONE remains empty until live-value
+  // insertion nominates a sink; retiring the active sink triggers selection of
+  // its successor.
   uint32_t* active_register_packing_completion_sinks;
   // Number of live storage values retaining each active packing completion.
   uint32_t* active_register_packing_completion_value_counts;

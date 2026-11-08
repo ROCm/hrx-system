@@ -21,7 +21,8 @@
 extern "C" {
 #endif
 
-// Immutable preferences for one allocation attempt. Full scalar affinities
+// Immutable preferences shared by allocation attempts over the same input
+// liveness, placement, target budgets, and reservations. Full scalar affinities
 // carry their common physical domain and storage horizon. Atomic storage
 // coverage relates classes whose named physical candidates differ. When broad
 // demand exceeds general capacity, disjoint lifetimes reuse idle narrower

@@ -847,6 +847,7 @@ loom_cc_library(
     hdrs = ["cfg_execution.h"],
     deps = [
         ":cfg_control",
+        ":cfg_loop_nest",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
     ],
@@ -921,8 +922,10 @@ loom_cc_test(
     srcs = ["cfg_execution_test.cc"],
     deps = [
         ":cfg_control",
+        ":cfg_dominance",
         ":cfg_execution",
         ":cfg_graph_test_util",
+        ":cfg_loop_nest",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

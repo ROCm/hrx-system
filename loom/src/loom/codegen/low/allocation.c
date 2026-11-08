@@ -18,6 +18,7 @@
 #include "loom/codegen/low/allocation/loop_edge_relocation.h"
 #include "loom/codegen/low/allocation/numbering.h"
 #include "loom/codegen/low/allocation/packet_move.h"
+#include "loom/codegen/low/allocation/physical_domains.h"
 #include "loom/codegen/low/allocation/placement.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
@@ -53,6 +54,8 @@ typedef struct loom_low_allocation_build_state_t {
   loom_low_placement_preference_index_t preferences;
   // Unique concat-chain preferences shared by assignment attempts.
   loom_low_allocation_concat_affinity_t* concat_affinity;
+  // Immutable physical candidate preferences shared by assignment attempts.
+  loom_low_allocation_physical_domains_t physical_domains;
   // Mutable per-allocation-unit live end points.
   loom_low_allocation_unit_liveness_t unit_liveness;
   // Structural content identity shared by all assignment attempts.
@@ -161,6 +164,7 @@ loom_low_allocation_make_interval_assignment_context(
       .placement = &state->placement,
       .preferences = &state->preferences,
       .concat_affinity = state->concat_affinity,
+      .physical_domains = &state->physical_domains,
       .target_constraints = target_constraints,
       .entry_locations = state->options->entry_locations,
       .entry_location_count = state->options->entry_location_count,
@@ -914,6 +918,11 @@ static iree_status_t loom_low_allocate_function_impl(
         state.unit_liveness.write_interference, &state.liveness,
         &model->cfg_graph, &state.placement, &state.unit_liveness,
         &decision_arena, arena);
+  }
+  if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
+    status = loom_low_allocation_physical_domains_build(
+        &state.target_constraints, &state.liveness, &state.unit_liveness,
+        &state.placement, &decision_arena, &state.physical_domains);
   }
   const iree_arena_checkpoint_t interval_assignment_checkpoint =
       iree_arena_checkpoint_save(arena);

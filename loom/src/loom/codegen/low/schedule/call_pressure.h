@@ -33,8 +33,9 @@ typedef struct loom_low_schedule_call_pressure_limit_t {
 
 // Builds the capacities reduced by one call from the state's resolved target,
 // allocation constraints, and ordinary pressure limits. No IR or provider
-// lookup is performed. Returns the number of rows; a NULL |limits| counts the
-// storage required by the subsequent fill call.
+// lookup is performed. |limits| provides space for the descriptor set's
+// register classes plus register-packing resources. Returns the populated
+// prefix length; only reduced capacities have rows.
 iree_host_size_t loom_low_schedule_call_pressure_build_limits(
     const loom_low_schedule_build_state_t* state,
     const loom_low_call_contract_t* contract,

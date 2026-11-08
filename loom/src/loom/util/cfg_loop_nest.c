@@ -338,9 +338,10 @@ static uint64_t loom_cfg_loop_nest_bound_product(uint64_t lhs, uint64_t rhs) {
   return iree_checked_mul_u64(lhs, rhs, &product) ? product : UINT64_MAX;
 }
 
-static bool loom_cfg_loop_nest_calculate_bounds(
-    const loom_cfg_loop_nest_t* nest, const uint64_t* trip_bounds,
-    uint64_t* out_block_bounds, bool* out_exact) {
+bool loom_cfg_loop_nest_calculate_bounds(const loom_cfg_loop_nest_t* nest,
+                                         const uint64_t* trip_bounds,
+                                         uint64_t* out_block_bounds,
+                                         bool* out_exact) {
   const loom_cfg_graph_t* graph = nest->graph;
   bool bounded = nest->reducible;
   *out_exact = true;

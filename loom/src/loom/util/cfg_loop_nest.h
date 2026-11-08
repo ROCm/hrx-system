@@ -110,6 +110,15 @@ bool loom_cfg_loop_nest_calculate_block_execution_counts(
     const loom_cfg_loop_nest_t* nest, const uint64_t* trip_counts,
     uint64_t* out_block_counts);
 
+// Computes bounds and reports single-path structure in one retained-graph pass.
+// Returns whether all bounds are finite. out_exact distinguishes modeled loop
+// headers from conditional paths independently of boundedness. Output storage
+// is initialized even for partially bounded or irreducible control.
+bool loom_cfg_loop_nest_calculate_bounds(const loom_cfg_loop_nest_t* nest,
+                                         const uint64_t* trip_bounds,
+                                         uint64_t* out_block_bounds,
+                                         bool* out_exact);
+
 // Retains an upper bound for each block even when another path has an unknown
 // count. UINT64_MAX denotes an unknown or overflowing trip/block bound.
 // Conditional paths receive their enclosing loop multiplier; unreachable

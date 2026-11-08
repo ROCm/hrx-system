@@ -15,6 +15,7 @@
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/assignment_map.h"
+#include "loom/codegen/low/allocation/physical_domains.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/table.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
@@ -73,6 +74,9 @@ typedef struct loom_low_allocation_interval_assignment_context_t {
   const loom_low_placement_preference_index_t* preferences;
   // Unique concat-chain spans retained after optional alias refinement.
   const struct loom_low_allocation_concat_affinity_t* concat_affinity;
+  // Physical candidate preferences built from the original liveness,
+  // placement, budgets, and reservations; shared across assignment strategies.
+  const loom_low_allocation_physical_domains_t* physical_domains;
   // Mutable target storage budgets, fixed values, and reserved ranges.
   loom_low_allocation_target_constraints_t* target_constraints;
   // Borrowed incoming locations indexed by formal-argument ordinal.
