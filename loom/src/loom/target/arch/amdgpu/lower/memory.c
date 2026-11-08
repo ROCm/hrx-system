@@ -108,7 +108,8 @@ static bool loom_amdgpu_memory_access_register_footprint(
 
   loom_amdgpu_vector_storage_t storage = {0};
   if (loom_type_rank(vector_type) != 1 ||
-      !loom_amdgpu_type_vector_storage(vector_type, &storage)) {
+      !loom_amdgpu_type_vector_register_storage(vector_type, &storage) ||
+      storage.register_count > LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES) {
     diagnostic->rejection_bits |=
         LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_VECTOR_TYPE;
     return false;
@@ -1025,8 +1026,12 @@ bool loom_amdgpu_memory_access_plan_select(
         return false;
       }
     }
-    IREE_ASSERT_LE(selected_source->vector_lane_count,
-                   IREE_ARRAYSIZE(out_selection->packets));
+    if (selected_source->vector_lane_count >
+        IREE_ARRAYSIZE(out_selection->packets)) {
+      out_diagnostic->rejection_bits |=
+          LOOM_AMDGPU_MEMORY_ACCESS_REJECTION_VECTOR_TYPE;
+      return false;
+    }
     uint32_t lane_index = 0;
     while (lane_index < selected_source->vector_lane_count) {
       const uint32_t remaining_lane_count =

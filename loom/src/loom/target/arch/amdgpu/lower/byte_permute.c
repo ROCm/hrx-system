@@ -93,3 +93,44 @@ iree_status_t loom_amdgpu_byte_permute_emitter_emit(
       IREE_BUILTIN_UNREACHABLE();
   }
 }
+
+iree_status_t loom_amdgpu_byte_permute_emitter_gather(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_byte_permute_emitter_t* emitter,
+    const loom_value_id_t sources[4], uint32_t source_count,
+    const uint8_t selectors[4], loom_type_t result_type,
+    loom_value_id_t* out_value) {
+  if (source_count == 1 && selectors[0] == 0 && selectors[1] == 1 &&
+      selectors[2] == 2 && selectors[3] == 3) {
+    *out_value = sources[0];
+    return iree_ok_status();
+  }
+  // Gather the first pair, then overlay each remaining source. Unselected
+  // bytes in the first pair are temporary and replaced by their owning word.
+  uint32_t selector = 0;
+  for (uint32_t byte = 0; byte < 4; ++byte) {
+    const uint32_t source = selectors[byte] / 4u;
+    const uint32_t source_byte = selectors[byte] % 4u;
+    selector |= (source == 0   ? source_byte + 4u
+                 : source == 1 ? source_byte
+                               : 4u)
+                << (byte * 8u);
+  }
+  loom_value_id_t result = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_amdgpu_byte_permute_emitter_emit(
+      context, source_op, emitter, sources[0],
+      sources[source_count == 1 ? 0 : 1], selector, result_type, &result));
+  for (uint32_t source = 2; source < source_count; ++source) {
+    selector = 0;
+    for (uint32_t byte = 0; byte < 4; ++byte) {
+      selector |=
+          (selectors[byte] / 4u == source ? selectors[byte] % 4u : byte + 4u)
+          << (byte * 8u);
+    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_byte_permute_emitter_emit(
+        context, source_op, emitter, result, sources[source], selector,
+        result_type, &result));
+  }
+  *out_value = result;
+  return iree_ok_status();
+}

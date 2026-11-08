@@ -1281,6 +1281,103 @@ def _vector_iota_recipe_rules() -> tuple[RecipeRule, ...]:
     )
 
 
+def _vector_bitcast_recipe_rules() -> tuple[RecipeRule, ...]:
+    # Verification establishes equal logical payloads. Ordinary data uses a
+    # packed 32-bit register tuple; predicate lanes instead occupy two SGPRs.
+    # Only predicate-to-predicate casts preserve that separate physical layout.
+    data_types = (
+        Vector(
+            ("i8", "i16", "i32", "f8E4M3", "f8E5M2", "f16", "bf16", "f32"),
+            minimum_static_elements=1,
+            maximum_static_elements="UINT32_MAX",
+        ),
+        Vector(
+            ("i64", "f64"),
+            minimum_static_elements=1,
+            maximum_static_elements="(UINT32_MAX / 2u)",
+        ),
+    )
+    predicate_type = Vector(
+        "i1", minimum_static_elements=1, maximum_static_elements="(UINT32_MAX / 2u)"
+    )
+    return tuple(
+        RecipeRule(
+            source_op=vector.vector_bitcast,
+            guards=(
+                _value_type("input", source_type),
+                _value_type("result", result_type),
+            ),
+        )
+        for source_type, result_type in (
+            *((source, result) for source in data_types for result in data_types),
+            (predicate_type, predicate_type),
+        )
+    )
+
+
+def _vector_permutation_recipe_rules() -> tuple[RecipeRule, ...]:
+    # Verification owns the lane map and interleaved shapes. Shared routes use
+    # 16-bit byte extents; shuffle maps instead use 16-bit element counts.
+    rules = []
+    for elements, physical_bytes in (
+        (("i8", "f8E4M3", "f8E5M2"), 1),
+        (("i16", "f16", "bf16"), 2),
+        (("i32", "f32"), 4),
+        (("i1", "i64", "f64"), 8),
+    ):
+        descriptor_guards = (
+            (Guard.descriptor_available(_descriptor("amdgpu.v_perm_b32")),)
+            if physical_bytes < 4
+            else ()
+        )
+        combined_type = Vector(
+            elements,
+            minimum_static_elements=1,
+            maximum_static_elements=f"(UINT16_MAX / {physical_bytes}u)",
+        )
+        for source_op, field in (
+            (vector.vector_interleave, "result"),
+            (vector.vector_deinterleave, "source"),
+        ):
+            rules.append(
+                RecipeRule(
+                    source_op=source_op,
+                    guards=(_value_type(field, combined_type), *descriptor_guards),
+                )
+            )
+        rules.append(
+            RecipeRule(
+                source_op=vector.vector_shuffle,
+                guards=(
+                    _value_type(
+                        "source",
+                        Vector(elements, minimum_lanes=1, maximum_lanes="UINT16_MAX"),
+                    ),
+                    *descriptor_guards,
+                ),
+            )
+        )
+    return tuple(rules)
+
+
+def _vector_select_recipe_rules() -> tuple[RecipeRule, ...]:
+    # The native data selector consumes one wave mask per logical element.
+    # Publishing its complete storage family lets the shared component planner
+    # choose a legal packet for wider and multidimensional selects.
+    return tuple(
+        RecipeRule(
+            source_op=vector.vector_select,
+            guards=(
+                _value_type("condition", _VEC_I1_STATIC),
+                _value_type("result", result_type),
+                Guard.descriptor_available(_descriptor("amdgpu.v_cndmask_b32")),
+            ),
+        )
+        for result_type in _vector_storage_construct_recipe_types()
+        if result_type != _VEC_I1_STATIC
+    )
+
+
 def _vector_insert_recipe_rules() -> tuple[RecipeRule, ...]:
     return tuple(
         RecipeRule(
@@ -5374,6 +5471,9 @@ def _rules() -> tuple[ContractCase, ...]:
                 ),
             ),
             *_vector_iota_recipe_rules(),
+            *_vector_bitcast_recipe_rules(),
+            *_vector_permutation_recipe_rules(),
+            *_vector_select_recipe_rules(),
             *_vector_insert_recipe_rules(),
             *_vector_uniform_construct_recipe_rules(
                 vector.vector_splat,

@@ -21,6 +21,7 @@
 #include "loom/ir/ir.h"
 #include "loom/ir/scalar_type.h"
 #include "loom/ops/kernel/ops.h"
+#include "loom/ops/vector/interleave.h"
 #include "loom/target/arch/amdgpu/lower/byte_permute.h"
 #include "loom/target/arch/amdgpu/lower/collective_plan.h"
 #include "loom/target/arch/amdgpu/lower/compare.h"
@@ -861,37 +862,14 @@ typedef struct loom_amdgpu_vector_register_map_plan_t {
   uint32_t source_register_indices[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
 } loom_amdgpu_vector_register_map_plan_t;
 
-typedef uint8_t loom_amdgpu_vector_even_odd_kind_t;
-enum loom_amdgpu_vector_even_odd_kind_e {
-  LOOM_AMDGPU_VECTOR_EVEN_ODD_KIND_NONE = 0,
-  LOOM_AMDGPU_VECTOR_EVEN_ODD_KIND_REGISTER_UNITS = 1,
-  LOOM_AMDGPU_VECTOR_EVEN_ODD_KIND_PACKED_BYTES = 2,
-};
-
 typedef struct loom_amdgpu_vector_even_odd_layout_t {
-  // Best available V_PERM_B32 form for packed sub-dword payloads.
+  // Shared row-major byte route across the selected physical register words.
+  loom_vector_interleave_packet_plan_t route;
+  // V_PERM_B32 form for subword routes; NONE for whole-register aliases.
   loom_amdgpu_byte_permute_plan_t byte_permute;
-  // Storage-level lowering strategy selected for this layout.
-  loom_amdgpu_vector_even_odd_kind_t kind;
-  // Product of dimensions preceding the interleave axis.
-  uint8_t outer_group_count;
-  // Extent of the smaller input/result along the interleave axis.
-  uint8_t axis_group_count;
-  // Product of dimensions following the interleave axis.
-  uint8_t inner_group_count;
-  // Number of 32-bit register units occupied by one logical element.
-  uint8_t element_register_count;
-  // Number of payload bits occupied by one logical element.
-  uint8_t element_bit_count;
-  // Number of backing registers in each smaller input/result.
-  uint8_t half_register_count;
-  // Number of backing registers in the combined input/result.
-  uint8_t combined_register_count;
 } loom_amdgpu_vector_even_odd_layout_t;
-static_assert(sizeof(loom_amdgpu_vector_even_odd_layout_t) == 12,
+static_assert(sizeof(loom_amdgpu_vector_even_odd_layout_t) == 16,
               "AMDGPU even/odd layouts must stay cache dense");
-static_assert(LOOM_AMDGPU_MAX_VECTOR_STORAGE_REGISTER_UNITS <= UINT8_MAX,
-              "AMDGPU even/odd storage counts must fit compact plans");
 
 typedef struct loom_amdgpu_vector_deinterleave_plan_t {
   // Source vector value split into even and odd lane payloads.
@@ -910,9 +888,9 @@ typedef struct loom_amdgpu_vector_interleave_plan_t {
   // Static storage layout shared by sources and result.
   loom_amdgpu_vector_even_odd_layout_t layout;
 } loom_amdgpu_vector_interleave_plan_t;
-static_assert(sizeof(loom_amdgpu_vector_deinterleave_plan_t) == 24,
+static_assert(sizeof(loom_amdgpu_vector_deinterleave_plan_t) == 28,
               "AMDGPU vector deinterleave plans must stay cache dense");
-static_assert(sizeof(loom_amdgpu_vector_interleave_plan_t) == 24,
+static_assert(sizeof(loom_amdgpu_vector_interleave_plan_t) == 28,
               "AMDGPU vector interleave plans must stay cache dense");
 
 enum loom_amdgpu_vector_extract_flag_bits_e {

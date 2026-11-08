@@ -391,16 +391,25 @@ check.scenario @bfloat_transpose_all_bits {
 
 // Rectangular byte and predicate transposes exercise the same lane map through
 // distinct representations. Seven input patterns encode every lane ordinal.
+func.def @transpose_bytes(%input: buffer, %output: buffer) {
+  %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %source[%origin] : buffer -> view<8x16xi8>
+  %output_view = buffer.view %destination[%origin] : buffer -> view<16x8xi8>
+  %values = vector.load %input_view[0, 0] : view<8x16xi8> -> vector<8x16xi8>
+  %transposed = vector.transpose<[1, 0]> %values : vector<8x16xi8> -> vector<16x8xi8>
+  vector.store %transposed, %output_view[0, 0] : vector<16x8xi8>, view<16x8xi8>
+  func.return
+}
+
 func.def @transpose_byte_predicates(%input: buffer, %output: buffer) {
+  func.call @transpose_bytes(%input, %output) : (buffer, buffer)
   %source, %destination = buffer.assume.alignment %input, %output {minimum_alignment = 64} : buffer, buffer
   %origin = index.constant 0 : offset
   %predicate_origin = index.constant 128 : offset
   %input_view = buffer.view %source[%origin] : buffer -> view<8x16xi8>
-  %ordinary_output = buffer.view %destination[%origin] : buffer -> view<16x8xi8>
   %predicate_output = buffer.view %destination[%predicate_origin] : buffer -> view<16x8xi8>
   %values = vector.load %input_view[0, 0] : view<8x16xi8> -> vector<8x16xi8>
-  %ordinary = vector.transpose<[1, 0]> %values : vector<8x16xi8> -> vector<16x8xi8>
-  vector.store %ordinary, %ordinary_output[0, 0] : vector<16x8xi8>, view<16x8xi8>
   %c0 = vector.splati 0 : vector<8x16xi8>
   %predicates = vector.cmpi ne, %values, %c0 : vector<8x16xi8> -> vector<8x16xi1>
   %transposed = vector.transpose<[1, 0]> %predicates : vector<8x16xi1> -> vector<16x8xi1>
@@ -434,11 +443,28 @@ func.def @generate_transpose_lane_bits(%trial: index, %input: buffer) {
   func.return
 }
 
+func.def @transpose_bytes_reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<8x16xi8>
+  %destination = buffer.view %output[%origin] : buffer -> view<16x8xi8>
+  %begin = index.constant 0 : index
+  %rows = index.constant 8 : index
+  %columns = index.constant 16 : index
+  %step = index.constant 1 : index
+  scf.for %row = [%begin to %rows step %step] {
+    scf.for %column = [%begin to %columns step %step] {
+      %value = view.load %source[%row, %column] : view<8x16xi8> -> i8
+      view.store %value, %destination[%column, %row] : i8, view<16x8xi8>
+    }
+  }
+  func.return
+}
+
 func.def @transpose_byte_predicates_reference(%input: buffer, %output: buffer) {
+  func.call @transpose_bytes_reference(%input, %output) : (buffer, buffer)
   %origin = index.constant 0 : offset
   %predicate_origin = index.constant 128 : offset
   %source = buffer.view %input[%origin] : buffer -> view<8x16xi8>
-  %ordinary = buffer.view %output[%origin] : buffer -> view<16x8xi8>
   %predicates = buffer.view %output[%predicate_origin] : buffer -> view<16x8xi8>
   %begin = index.constant 0 : index
   %rows = index.constant 8 : index
@@ -450,11 +476,25 @@ func.def @transpose_byte_predicates_reference(%input: buffer, %output: buffer) {
       %value = view.load %source[%row, %column] : view<8x16xi8> -> i8
       %predicate = scalar.cmpi ne, %value, %c0 : i8
       %byte = scalar.extui %predicate : i1 to i8
-      view.store %value, %ordinary[%column, %row] : i8, view<16x8xi8>
       view.store %byte, %predicates[%column, %row] : i8, view<16x8xi8>
     }
   }
   func.return
+}
+
+check.scenario @byte_transpose_values {
+  check.trial[7](%trial: index, %entropy: check.entropy) {
+    %input_storage = check.generate.fill value(-113) : tensor<256xi8>
+    %input = check.tensor.view %input_storage offset(64) : tensor<256xi8> -> tensor<128xi8>
+    check.generate<@generate_transpose_lane_bits>(%trial, %input) : (index, tensor<128xi8>) -> ()
+    %output_storage = check.generate.fill value(90) : tensor<256xi8>
+    %output = check.tensor.view %output_storage offset(64) : tensor<256xi8> -> tensor<128xi8>
+    check.compare<@transpose_bytes, @transpose_bytes_reference>(%input, %output) : (tensor<128xi8>, tensor<128xi8>) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<256xi8>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<256xi8>
+    }
+  }
+  check.return
 }
 
 check.scenario @byte_predicate_transpose_values {

@@ -289,3 +289,49 @@ check.scenario @vector_64bit_transport_values {
   }
   check.return
 }
+
+// A packed payload occupies seventeen words, while its strided load and store
+// each require sixty-five independent element accesses. Packet capacity must
+// follow the access layout rather than the number of payload registers.
+func.def @strided_byte_packets(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_layout = encoding.layout.strided [2] : encoding<layout>
+  %output_layout = encoding.layout.strided [3] : encoding<layout>
+  %source = buffer.view %input[%base] : buffer -> view<65xi8, %input_layout>
+  %destination = buffer.view %output[%base] : buffer -> view<65xi8, %output_layout>
+  %value = vector.load %source[0] : view<65xi8, %input_layout> -> vector<65xi8>
+  vector.store %value, %destination[0] : vector<65xi8>, view<65xi8, %output_layout>
+  func.return
+}
+
+func.def @strided_byte_packets_reference(%input: buffer, %output: buffer) {
+  %begin = index.constant 0 : index
+  %end = index.constant 65 : index
+  %step = index.constant 1 : index
+  %input_stride = index.constant 2 : index
+  %output_stride = index.constant 3 : index
+  scf.for %i = [%begin to %end step %step] {
+    %source_index = index.mul %i, %input_stride : index
+    %destination_index = index.mul %i, %output_stride : index
+    %source = index.cast %source_index : index to offset
+    %destination = index.cast %destination_index : index to offset
+    %value = buffer.load.i8.u %input[%source]
+    buffer.store.i8 %value, %output[%destination]
+  }
+  func.return
+}
+
+check.scenario @strided_byte_packet_values {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<137xi8>
+    %input = check.tensor.view %input_storage offset(4) : tensor<137xi8> -> tensor<129xi8>
+    %output_storage = check.generate.fill value(-91) : tensor<209xi8>
+    %output = check.tensor.view %output_storage offset(8) : tensor<209xi8> -> tensor<193xi8>
+    check.compare<@strided_byte_packets, @strided_byte_packets_reference>(%input, %output) : (tensor<129xi8>, tensor<193xi8>) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<137xi8>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<209xi8>
+    }
+  }
+  check.return
+}
