@@ -33,9 +33,6 @@ struct iree_hal_replay_recorder_buffer_t {
   iree_hal_replay_object_id_t device_id;
   // Session-local object id assigned to this buffer.
   iree_hal_replay_object_id_t buffer_id;
-  // Recorder allocator ID for virtual reservations, or NONE for ordinary
-  // buffers.
-  iree_hal_replay_object_id_t virtual_memory_allocator_id;
   // One scoped host mapping owned by this proxy, or zero for an ordinary view.
   struct {
     // Session-local identity independent from the original buffer's lifetime.
@@ -147,10 +144,9 @@ void iree_hal_replay_recorder_buffer_ref_make_payload(
 
 iree_status_t iree_hal_replay_recorder_buffer_create_proxy(
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
-    iree_hal_replay_object_id_t buffer_id,
-    iree_hal_replay_object_id_t virtual_memory_allocator_id,
-    iree_hal_device_t* placement_device, iree_hal_buffer_t* base_buffer,
-    iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer) {
+    iree_hal_replay_object_id_t buffer_id, iree_hal_device_t* placement_device,
+    iree_hal_buffer_t* base_buffer, iree_allocator_t host_allocator,
+    iree_hal_buffer_t** out_buffer) {
   IREE_ASSERT_ARGUMENT(recorder);
   IREE_ASSERT_ARGUMENT(base_buffer);
   IREE_ASSERT_ARGUMENT(out_buffer);
@@ -165,8 +161,8 @@ iree_status_t iree_hal_replay_recorder_buffer_create_proxy(
   IREE_RETURN_IF_ERROR(
       iree_hal_replay_recorder_buffer_allocate_proxy(host_allocator, &buffer));
   *out_buffer = iree_hal_replay_recorder_buffer_initialize_proxy(
-      recorder, device_id, buffer_id, virtual_memory_allocator_id,
-      placement_device, base_buffer, host_allocator, buffer);
+      recorder, device_id, buffer_id, placement_device, base_buffer,
+      host_allocator, buffer);
   return iree_ok_status();
 }
 
@@ -190,10 +186,8 @@ void iree_hal_replay_recorder_buffer_free_proxy(
 
 iree_hal_buffer_t* iree_hal_replay_recorder_buffer_initialize_proxy(
     iree_hal_replay_recorder_t* recorder, iree_hal_replay_object_id_t device_id,
-    iree_hal_replay_object_id_t buffer_id,
-    iree_hal_replay_object_id_t virtual_memory_allocator_id,
-    iree_hal_device_t* placement_device, iree_hal_buffer_t* base_buffer,
-    iree_allocator_t host_allocator,
+    iree_hal_replay_object_id_t buffer_id, iree_hal_device_t* placement_device,
+    iree_hal_buffer_t* base_buffer, iree_allocator_t host_allocator,
     iree_hal_replay_recorder_buffer_t* buffer) {
   IREE_ASSERT_ARGUMENT(recorder);
   IREE_ASSERT_ARGUMENT(base_buffer);
@@ -225,40 +219,8 @@ iree_hal_buffer_t* iree_hal_replay_recorder_buffer_initialize_proxy(
   iree_hal_buffer_retain(buffer->base_buffer);
   buffer->device_id = device_id;
   buffer->buffer_id = buffer_id;
-  buffer->virtual_memory_allocator_id = virtual_memory_allocator_id;
 
   return &buffer->base;
-}
-
-iree_status_t iree_hal_replay_recorder_buffer_resolve_virtual_memory(
-    iree_hal_buffer_t* buffer, iree_hal_replay_recorder_t* expected_recorder,
-    iree_hal_replay_object_id_t expected_allocator_id,
-    iree_hal_replay_object_id_t* out_buffer_id,
-    iree_hal_buffer_t** out_base_buffer) {
-  IREE_ASSERT_ARGUMENT(out_buffer_id);
-  IREE_ASSERT_ARGUMENT(out_base_buffer);
-  *out_buffer_id = IREE_HAL_REPLAY_OBJECT_ID_NONE;
-  *out_base_buffer = NULL;
-  if (IREE_UNLIKELY(!buffer || !iree_hal_replay_recorder_buffer_isa(buffer))) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "virtual memory reservation was not created by this replay recorder "
-        "allocator");
-  }
-  iree_hal_replay_recorder_buffer_t* replay_buffer =
-      iree_hal_replay_recorder_buffer_cast(buffer);
-  if (IREE_UNLIKELY(replay_buffer->recorder != expected_recorder ||
-                    replay_buffer->virtual_memory_allocator_id !=
-                        expected_allocator_id ||
-                    !replay_buffer->base_buffer)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "virtual memory reservation belongs to another replay recorder "
-        "allocator or was already released");
-  }
-  *out_buffer_id = replay_buffer->buffer_id;
-  *out_base_buffer = replay_buffer->base_buffer;
-  return iree_ok_status();
 }
 
 iree_hal_buffer_t* iree_hal_replay_recorder_buffer_base_or_self(
@@ -282,14 +244,6 @@ iree_hal_replay_recorder_buffer_unwrap_allocated_buffer(
         iree_hal_buffer_allocated_buffer(replay_buffer->base_buffer);
   }
   return allocated_buffer;
-}
-
-void iree_hal_replay_recorder_buffer_consume_virtual_memory(
-    iree_hal_buffer_t* buffer) {
-  iree_hal_replay_recorder_buffer_t* replay_buffer =
-      iree_hal_replay_recorder_buffer_cast(buffer);
-  replay_buffer->base_buffer = NULL;
-  iree_hal_buffer_release(buffer);
 }
 
 iree_status_t iree_hal_replay_recorder_buffer_unwrap_for_call(
@@ -512,9 +466,8 @@ static iree_status_t iree_hal_replay_recorder_buffer_map_range(
         retained_buffer == original_mapping_buffer ? buffer->base_buffer
                                                    : retained_buffer;
     mapping->buffer = iree_hal_replay_recorder_buffer_initialize_proxy(
-        buffer->recorder, buffer->device_id, buffer->buffer_id,
-        IREE_HAL_REPLAY_OBJECT_ID_NONE, NULL, native_mapped_buffer,
-        buffer->host_allocator, mapped_proxy);
+        buffer->recorder, buffer->device_id, buffer->buffer_id, NULL,
+        native_mapped_buffer, buffer->host_allocator, mapped_proxy);
     mapped_proxy->mapping.id = mapping_id;
     mapped_proxy->mapping.value = mapping;
     mapped_proxy->mapping.recorded_origin = payload.byte_offset;

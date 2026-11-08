@@ -68,9 +68,8 @@ TEST_F(ReplayRecorderBufferTest, ExportsNestedSubspansOfANativeView) {
       native_buffer_, 32, 64, iree_allocator_system(), &native_view));
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_recorder_buffer_create_proxy(
-      recorder_, /*device_id=*/1, /*buffer_id=*/2,
-      IREE_HAL_REPLAY_OBJECT_ID_NONE, /*placement_device=*/nullptr, native_view,
-      iree_allocator_system(), &buffer));
+      recorder_, /*device_id=*/1, /*buffer_id=*/2, /*placement_device=*/nullptr,
+      native_view, iree_allocator_system(), &buffer));
   iree_hal_buffer_release(native_view);
 
   iree_hal_external_storage_t external_buffer = {};
@@ -138,8 +137,7 @@ TEST_F(ReplayRecorderBufferTest, ScopedMappingsCaptureViewRelativeIdentity) {
       native_buffer_, 32, 64, iree_allocator_system(), &native_view));
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_recorder_buffer_create_proxy(
-      recorder_, /*device_id=*/98, /*buffer_id=*/99,
-      IREE_HAL_REPLAY_OBJECT_ID_NONE, nullptr, native_view,
+      recorder_, /*device_id=*/98, /*buffer_id=*/99, nullptr, native_view,
       iree_allocator_system(), &buffer));
   iree_hal_buffer_release(native_view);
   std::array<iree_hal_buffer_mapping_t, 2> mappings;
@@ -210,8 +208,7 @@ TEST_F(ReplayRecorderBufferTest, ScopedMappingsCaptureViewRelativeIdentity) {
 TEST_F(ReplayRecorderBufferTest, ScopedMappingUnmapsAfterCaptureCloses) {
   iree_hal_buffer_t* buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_replay_recorder_buffer_create_proxy(
-      recorder_, /*device_id=*/98, /*buffer_id=*/99,
-      IREE_HAL_REPLAY_OBJECT_ID_NONE, nullptr, native_buffer_,
+      recorder_, /*device_id=*/98, /*buffer_id=*/99, nullptr, native_buffer_,
       iree_allocator_system(), &buffer));
   iree_hal_buffer_mapping_t mapping;
   IREE_ASSERT_OK(iree_hal_buffer_map_range(
@@ -304,8 +301,7 @@ class ReplayRecorderBufferUnmapTest
     iree_hal_buffer_t* buffer = nullptr;
     IREE_ASSERT_OK(iree_hal_replay_recorder_buffer_create_proxy(
         recorder_, /*device_id=*/1, /*buffer_id=*/2,
-        IREE_HAL_REPLAY_OBJECT_ID_NONE, /*placement_device=*/nullptr,
-        &native.base, allocator, &buffer));
+        /*placement_device=*/nullptr, &native.base, allocator, &buffer));
     iree_hal_buffer_release(&native.base);
     iree_hal_buffer_mapping_t mapping;
     IREE_ASSERT_OK(iree_hal_buffer_map_range(

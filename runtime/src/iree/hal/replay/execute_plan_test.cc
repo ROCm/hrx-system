@@ -397,87 +397,6 @@ static void AppendVirtualBufferDetachRecord(
                      {iree_make_const_byte_span(&payload, sizeof(payload))});
 }
 
-static void AppendVmmProtectRecord(iree_hal_replay_file_writer_t* writer,
-                                   uint64_t sequence_ordinal,
-                                   iree_hal_replay_object_id_t device_id) {
-  constexpr iree_hal_replay_object_id_t kAllocatorId = 20;
-  constexpr iree_hal_replay_object_id_t kVirtualBufferId = 21;
-  const iree_hal_replay_allocator_virtual_memory_protect_payload_t payload = {
-      .virtual_buffer_id = kVirtualBufferId,
-      .virtual_offset = 0,
-      .size = 4096,
-      .queue_family_affinity = iree_hal_make_queue_family_affinity(0),
-      .access_scope = IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
-      .reserved0 = 0,
-      .protection = IREE_HAL_MEMORY_PROTECTION_READ,
-  };
-  const iree_hal_replay_file_record_metadata_t metadata = {
-      .sequence_ordinal = sequence_ordinal,
-      .thread_id = 0,
-      .device_id = device_id,
-      .object_id = kAllocatorId,
-      .related_object_id = kVirtualBufferId,
-      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      .payload_type =
-          IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT,
-      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_ALLOCATOR,
-      .operation_code =
-          IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT,
-      .status_code = IREE_STATUS_OK,
-  };
-  AppendReplayRecord(writer, metadata,
-                     {iree_make_const_byte_span(&payload, sizeof(payload))});
-}
-
-static void AppendVmmUnmapRecord(iree_hal_replay_file_writer_t* writer,
-                                 uint64_t sequence_ordinal,
-                                 iree_hal_replay_object_id_t device_id) {
-  constexpr iree_hal_replay_object_id_t kAllocatorId = 20;
-  constexpr iree_hal_replay_object_id_t kVirtualBufferId = 21;
-  const iree_hal_replay_allocator_virtual_memory_unmap_payload_t payload = {
-      .virtual_buffer_id = kVirtualBufferId,
-      .virtual_offset = 0,
-      .size = 4096,
-  };
-  const iree_hal_replay_file_record_metadata_t metadata = {
-      .sequence_ordinal = sequence_ordinal,
-      .thread_id = 0,
-      .device_id = device_id,
-      .object_id = kAllocatorId,
-      .related_object_id = kVirtualBufferId,
-      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      .payload_type =
-          IREE_HAL_REPLAY_PAYLOAD_TYPE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP,
-      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_ALLOCATOR,
-      .operation_code =
-          IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP,
-      .status_code = IREE_STATUS_OK,
-  };
-  AppendReplayRecord(writer, metadata,
-                     {iree_make_const_byte_span(&payload, sizeof(payload))});
-}
-
-static void AppendMemoryBoundaryRecord(
-    iree_hal_replay_file_writer_t* writer, uint64_t sequence_ordinal,
-    iree_hal_replay_object_id_t device_id,
-    iree_hal_replay_operation_code_t operation_code) {
-  switch (operation_code) {
-    case IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT:
-      AppendVmmProtectRecord(writer, sequence_ordinal, device_id);
-      break;
-    case IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP:
-      AppendVmmUnmapRecord(writer, sequence_ordinal, device_id);
-      break;
-    case IREE_HAL_REPLAY_OPERATION_CODE_VIRTUAL_BUFFER_DETACH:
-      AppendVirtualBufferDetachRecord(writer, sequence_ordinal, device_id);
-      break;
-    default:
-      FAIL() << "Unexpected memory completion boundary " << operation_code;
-  }
-}
-
 static void AppendScopeBeginRecord(iree_hal_replay_file_writer_t* writer,
                                    uint64_t sequence_ordinal) {
   const iree_hal_replay_scope_payload_t payload = {
@@ -514,9 +433,7 @@ typedef enum QueueDependencyReplayShape {
 } QueueDependencyReplayShape;
 
 static std::vector<uint8_t> MakeQueueDependencyReplay(
-    QueueDependencyReplayShape shape,
-    iree_hal_replay_operation_code_t boundary_operation =
-        IREE_HAL_REPLAY_OPERATION_CODE_VIRTUAL_BUFFER_DETACH) {
+    QueueDependencyReplayShape shape) {
   constexpr iree_hal_replay_object_id_t kDeviceId = 1;
   constexpr iree_hal_replay_object_id_t kConsumerQueueId = 2;
   constexpr iree_hal_replay_object_id_t kProducerQueueId = 3;
@@ -572,8 +489,7 @@ static std::vector<uint8_t> MakeQueueDependencyReplay(
     AppendVirtualBufferDetachRecord(writer, sequence_ordinal++, kDeviceId,
                                     IREE_STATUS_INTERNAL);
   } else {
-    AppendMemoryBoundaryRecord(writer, sequence_ordinal++, kDeviceId,
-                               boundary_operation);
+    AppendVirtualBufferDetachRecord(writer, sequence_ordinal++, kDeviceId);
   }
   if (shape == kForwardDependencyAcrossMemoryBoundary ||
       shape == kForwardDependencyAcrossFailedDetach ||
@@ -595,9 +511,7 @@ typedef enum OpaqueDispatchReplayShape {
 } OpaqueDispatchReplayShape;
 
 static std::vector<uint8_t> MakeOpaqueDispatchReplay(
-    OpaqueDispatchReplayShape shape,
-    iree_hal_replay_operation_code_t boundary_operation =
-        IREE_HAL_REPLAY_OPERATION_CODE_VIRTUAL_BUFFER_DETACH) {
+    OpaqueDispatchReplayShape shape) {
   constexpr iree_hal_replay_object_id_t kDeviceId = 1;
   constexpr iree_hal_replay_object_id_t kQueueId = 2;
   constexpr iree_hal_replay_object_id_t kCommandBufferId = 3;
@@ -622,8 +536,7 @@ static std::vector<uint8_t> MakeOpaqueDispatchReplay(
     AppendDispatchRecord(writer, sequence_ordinal++, kDeviceId, kQueueId,
                          kExecutableId,
                          IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_DISPATCH);
-    AppendMemoryBoundaryRecord(writer, sequence_ordinal++, kDeviceId,
-                               boundary_operation);
+    AppendVirtualBufferDetachRecord(writer, sequence_ordinal++, kDeviceId);
   } else {
     AppendCommandBufferCreateRecords(writer, &sequence_ordinal, kDeviceId,
                                      kCommandBufferId);
@@ -654,20 +567,10 @@ static IREE_ALLOCATOR_INLINE_STORAGE(g_callback_failure_host_storage,
                                      64 * 1024);
 static iree_hal_device_group_t* g_callback_failure_device_group = nullptr;
 
-class ReplayMemoryBoundaryTest
-    : public ::testing::TestWithParam<iree_hal_replay_operation_code_t> {};
-
-INSTANTIATE_TEST_SUITE_P(
-    MemoryOperations, ReplayMemoryBoundaryTest,
-    ::testing::Values(
-        IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_PROTECT,
-        IREE_HAL_REPLAY_OPERATION_CODE_ALLOCATOR_VIRTUAL_MEMORY_UNMAP,
-        IREE_HAL_REPLAY_OPERATION_CODE_VIRTUAL_BUFFER_DETACH));
-
-TEST_P(ReplayMemoryBoundaryTest,
-       RejectsForwardQueueDependencyAcrossMemoryBoundaryBeforeExecution) {
-  std::vector<uint8_t> storage = MakeQueueDependencyReplay(
-      kForwardDependencyAcrossMemoryBoundary, GetParam());
+TEST(ReplayExecuteTest,
+     RejectsForwardQueueDependencyAcrossMemoryBoundaryBeforeExecution) {
+  std::vector<uint8_t> storage =
+      MakeQueueDependencyReplay(kForwardDependencyAcrossMemoryBoundary);
   iree_hal_replay_plan_t* plan = nullptr;
 
   iree::Status status =
@@ -693,10 +596,9 @@ TEST(ReplayExecuteTest, FailedDetachDoesNotIntroduceCompletionBoundary) {
   iree_hal_replay_plan_free(plan);
 }
 
-TEST_P(ReplayMemoryBoundaryTest,
-       AllowsSatisfiedQueueDependencyBeforeMemoryBoundary) {
-  std::vector<uint8_t> storage = MakeQueueDependencyReplay(
-      kSatisfiedDependencyBeforeMemoryBoundary, GetParam());
+TEST(ReplayExecuteTest, AllowsSatisfiedQueueDependencyBeforeMemoryBoundary) {
+  std::vector<uint8_t> storage =
+      MakeQueueDependencyReplay(kSatisfiedDependencyBeforeMemoryBoundary);
   iree_hal_replay_plan_t* plan = nullptr;
 
   IREE_ASSERT_OK(iree_hal_replay_plan_allocate(GetCapturedFileContents(storage),
@@ -705,10 +607,10 @@ TEST_P(ReplayMemoryBoundaryTest,
   iree_hal_replay_plan_free(plan);
 }
 
-TEST_P(ReplayMemoryBoundaryTest,
-       RejectsDeviceMemoryQueueDependencyAcrossMemoryBoundaryBeforeExecution) {
-  std::vector<uint8_t> storage = MakeQueueDependencyReplay(
-      kDeviceMemoryDependencyAcrossMemoryBoundary, GetParam());
+TEST(ReplayExecuteTest,
+     RejectsDeviceMemoryQueueDependencyAcrossMemoryBoundaryBeforeExecution) {
+  std::vector<uint8_t> storage =
+      MakeQueueDependencyReplay(kDeviceMemoryDependencyAcrossMemoryBoundary);
   iree_hal_replay_plan_t* plan = nullptr;
 
   iree::Status status =
@@ -725,10 +627,9 @@ TEST_P(ReplayMemoryBoundaryTest,
   EXPECT_EQ(plan, nullptr);
 }
 
-TEST_P(ReplayMemoryBoundaryTest,
-       RejectsOpaqueDirectQueueDispatchBeforeMemoryBoundary) {
+TEST(ReplayExecuteTest, RejectsOpaqueDirectQueueDispatchBeforeMemoryBoundary) {
   std::vector<uint8_t> storage =
-      MakeOpaqueDispatchReplay(kDirectDispatchBeforeMemoryBoundary, GetParam());
+      MakeOpaqueDispatchReplay(kDirectDispatchBeforeMemoryBoundary);
   iree_hal_replay_plan_t* plan = nullptr;
 
   iree::Status status =
