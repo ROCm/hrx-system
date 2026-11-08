@@ -375,3 +375,81 @@ check.scenario @constructed_numeric_lanes {
   }
   check.return
 }
+
+// Each shape carries 264 bytes, crossing both arithmetic packet boundaries and
+// a 64-word register tuple. The four cases cover packed bytes, packed halves,
+// single-word elements, and register pairs without doing floating arithmetic.
+func.def @wide_lane_transposes(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %half_base = index.constant 264 : offset
+  %word_base = index.constant 528 : offset
+  %pair_base = index.constant 792 : offset
+  %bytes = buffer.view %input[%base] : buffer -> view<3x88xi8>
+  %halves = buffer.view %input[%base] : buffer -> view<3x44xbf16>
+  %words = buffer.view %input[%base] : buffer -> view<3x22xf32>
+  %pairs = buffer.view %input[%base] : buffer -> view<3x11xi64>
+  %byte_output = buffer.view %output[%base] : buffer -> view<88x3xi8>
+  %half_output = buffer.view %output[%half_base] : buffer -> view<44x3xbf16>
+  %word_output = buffer.view %output[%word_base] : buffer -> view<22x3xf32>
+  %pair_output = buffer.view %output[%pair_base] : buffer -> view<11x3xi64>
+  %byte_packet = vector.load %bytes[0, 0] : view<3x88xi8> -> vector<3x88xi8>
+  %half_packet = vector.load %halves[0, 0] : view<3x44xbf16> -> vector<3x44xbf16>
+  %word_packet = vector.load %words[0, 0] : view<3x22xf32> -> vector<3x22xf32>
+  %pair_packet = vector.load %pairs[0, 0] : view<3x11xi64> -> vector<3x11xi64>
+  %byte_transposed = vector.transpose<[1, 0]> %byte_packet : vector<3x88xi8> -> vector<88x3xi8>
+  %half_transposed = vector.transpose<[1, 0]> %half_packet : vector<3x44xbf16> -> vector<44x3xbf16>
+  %word_transposed = vector.transpose<[1, 0]> %word_packet : vector<3x22xf32> -> vector<22x3xf32>
+  %pair_transposed = vector.transpose<[1, 0]> %pair_packet : vector<3x11xi64> -> vector<11x3xi64>
+  vector.store %byte_transposed, %byte_output[0, 0] : vector<88x3xi8>, view<88x3xi8>
+  vector.store %half_transposed, %half_output[0, 0] : vector<44x3xbf16>, view<44x3xbf16>
+  vector.store %word_transposed, %word_output[0, 0] : vector<22x3xf32>, view<22x3xf32>
+  vector.store %pair_transposed, %pair_output[0, 0] : vector<11x3xi64>, view<11x3xi64>
+  func.return
+}
+
+// The oracle copies individual bytes using row/column arithmetic. In
+// particular, the two words in each 64-bit element must retain their order.
+func.def @wide_lane_transposes_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %row_count = index.constant 3 : index
+  %kind_count = index.constant 4 : index
+  %row_bytes = index.constant 88 : index
+  %total_bytes = index.constant 264 : index
+  %source = buffer.view %input[%base] : buffer -> view<264xi8>
+  %destination = buffer.view %output[%base] : buffer -> view<1056xi8>
+  scf.for %kind = [%begin to %kind_count step %step] unroll(%kind_count) {
+    %element_bytes = index.shli %step, %kind : index
+    %columns = index.div %row_bytes, %element_bytes : index
+    %output_base = index.mul %kind, %total_bytes : index
+    scf.for %i = [%begin to %total_bytes step %step] {
+      %element = index.div %i, %element_bytes : index
+      %byte = index.rem %i, %element_bytes : index
+      %row = index.rem %element, %row_count : index
+      %column = index.div %element, %row_count : index
+      %source_row = index.mul %row, %columns : index
+      %source_element = index.add %source_row, %column : index
+      %source_base = index.mul %source_element, %element_bytes : index
+      %source_byte = index.add %source_base, %byte : index
+      %output_byte = index.add %output_base, %i : index
+      %value = view.load %source[%source_byte] : view<264xi8> -> i8
+      view.store %value, %destination[%output_byte] : i8, view<1056xi8>
+    }
+  }
+  func.return
+}
+
+check.scenario @wide_lane_transpose_bits {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<264xi8>
+    %storage = check.generate.fill value(91) : tensor<1072xi8>
+    %output = check.tensor.view %storage offset(8) : tensor<1072xi8> -> tensor<1056xi8>
+    check.compare<@wide_lane_transposes, @wide_lane_transposes_oracle>(%input, %output) : (tensor<264xi8>, tensor<1056xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<264xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<1072xi8>
+    }
+  }
+  check.return
+}

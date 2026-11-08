@@ -654,17 +654,6 @@ iree_status_t loom_amdgpu_select_vector_deinterleave_plan(
   return iree_ok_status();
 }
 
-static loom_type_t loom_amdgpu_vector_register_unit_type(
-    loom_low_lower_context_t* context, loom_value_id_t low_value,
-    uint32_t expected_register_count) {
-  const loom_module_t* module = loom_low_lower_context_module(context);
-  const loom_type_t low_type = loom_module_value_type(module, low_value);
-  IREE_ASSERT(loom_low_type_is_register(low_type));
-  IREE_ASSERT_EQ(loom_low_register_type_unit_count(low_type),
-                 expected_register_count);
-  return loom_low_register_carrier_type_with_unit_count(low_type, 1);
-}
-
 static iree_status_t loom_amdgpu_lower_vector_even_odd(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_vector_even_odd_layout_t* layout,
@@ -802,35 +791,34 @@ static bool loom_amdgpu_vector_shuffle_is_source_alias(
 static iree_status_t loom_amdgpu_lower_vector_shuffle_register_units(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     const loom_amdgpu_vector_shuffle_plan_t* plan) {
-  const uint32_t register_count =
-      plan->element_count * plan->element_register_count;
   loom_value_id_t low_source =
       loom_low_lower_lookup_value(context, plan->source);
-  const loom_type_t register_type = loom_amdgpu_vector_register_unit_type(
-      context, low_source, register_count);
+  const loom_type_t source_type = loom_module_value_type(
+      loom_low_lower_context_module(context), low_source);
+  const loom_type_t element_type =
+      loom_low_register_carrier_type_with_unit_count(
+          source_type, plan->element_register_count);
 
   loom_value_id_t
       inline_registers[LOOM_AMDGPU_MAX_VECTOR_STORAGE_REGISTER_UNITS];
   loom_value_id_t* registers = inline_registers;
-  if (register_count > IREE_ARRAYSIZE(inline_registers)) {
+  if (plan->element_count > IREE_ARRAYSIZE(inline_registers)) {
     IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
-        context, register_count, sizeof(*registers), (void**)&registers));
+        context, plan->element_count, sizeof(*registers), (void**)&registers));
   }
-  uint32_t result_register = 0;
+  // Preserve multiword elements as ranges. Besides keeping their words
+  // together, this bounds concat arity by the source shuffle's lane map.
   for (uint32_t result_element = 0; result_element < plan->element_count;
        ++result_element) {
     const uint32_t source_element =
         plan->source_element_indices[result_element];
-    for (uint32_t unit = 0; unit < plan->element_register_count; ++unit) {
-      IREE_RETURN_IF_ERROR(loom_amdgpu_extract_low_register_unit(
-          context, source_op, low_source, register_count,
-          source_element * plan->element_register_count + unit, register_type,
-          &registers[result_register++]));
-    }
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_low_slice(
+        context, source_op, low_source,
+        source_element * plan->element_register_count, element_type,
+        &registers[result_element]));
   }
-  IREE_ASSERT_EQ(result_register, register_count);
   return loom_amdgpu_bind_low_register_range(context, source_op, plan->result,
-                                             registers, register_count);
+                                             registers, plan->element_count);
 }
 
 static iree_status_t loom_amdgpu_lower_vector_shuffle_packed_bytes(
