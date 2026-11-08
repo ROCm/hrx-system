@@ -83,6 +83,7 @@ loom_test(
         "retained_lifetime.loom",
         "retained_replay.loom",
         "reusable_sram.loom",
+        "semaphore_lifetimes.loom",
         "single_slot.loom",
         "storage_captures.loom",
     ],

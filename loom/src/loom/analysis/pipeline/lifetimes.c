@@ -22,6 +22,8 @@ typedef struct loom_pipeline_lifetime_builder_t {
   iree_arena_allocator_t* arena;
   // Nodes already discovered, in parent-before-child order.
   loom_pipeline_lifetime_t* nodes;
+  // OWNER node indexed by the original construction ordinal.
+  iree_host_size_t* owners;
   // Number of discovered nodes.
   iree_host_size_t count;
   // Allocated node capacity.
@@ -54,6 +56,9 @@ static iree_status_t loom_pipeline_lifetime_append(
                                  .parent = parent,
                                  .first_child = IREE_HOST_SIZE_MAX,
                                  .next_sibling = IREE_HOST_SIZE_MAX};
+  if (kind == LOOM_PIPELINE_LIFETIME_OWNER) {
+    builder->owners[invocation->ordinal] = index;
+  }
   if (parent != IREE_HOST_SIZE_MAX) {
     if (*last_child == IREE_HOST_SIZE_MAX) {
       builder->nodes[parent].first_child = index;
@@ -79,6 +84,9 @@ iree_status_t loom_pipeline_lifetimes_build(
     const loom_pipeline_invocations_t* invocations,
     iree_arena_allocator_t* arena, loom_pipeline_lifetimes_t* out_lifetimes) {
   loom_pipeline_lifetime_builder_t builder = {.arena = arena};
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, invocations->count,
+                                                 sizeof(*builder.owners),
+                                                 (void**)&builder.owners));
   IREE_RETURN_IF_ERROR(loom_pipeline_lifetime_append(
       &builder, IREE_HOST_SIZE_MAX, NULL, LOOM_PIPELINE_LIFETIME_CONCURRENT,
       invocations->entries[0], NULL));
@@ -128,6 +136,7 @@ iree_status_t loom_pipeline_lifetimes_build(
   *out_lifetimes =
       (loom_pipeline_lifetimes_t){.nodes = builder.nodes,
                                   .count = builder.count,
+                                  .owners = builder.owners,
                                   .has_serial = builder.has_serial};
   return iree_ok_status();
 }

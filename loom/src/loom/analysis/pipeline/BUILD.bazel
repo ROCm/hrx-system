@@ -123,11 +123,13 @@ loom_cc_library(
     srcs = [
         "construction_storage.c",
         "invocations.c",
+        "lifetime_layout.c",
         "lifetimes.c",
     ],
     hdrs = [
         "construction_storage.h",
         "invocations.h",
+        "lifetime_layout.h",
         "lifetimes.h",
     ],
     deps = [
@@ -147,6 +149,16 @@ loom_cc_library(
         "//loom/src/loom/util:fact_table",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "lifetime_layout_test",
+    srcs = ["lifetime_layout_test.cc"],
+    deps = [
+        ":invocations",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

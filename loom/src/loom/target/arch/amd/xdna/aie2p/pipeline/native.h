@@ -65,6 +65,9 @@ typedef struct loom_aie2p_native_channel_t {
   uint16_t free_lock;
   // Semaphore containing published record credits.
   uint16_t ready_lock;
+  // First logical user of the physical pair, responsible for startup seeds.
+  // Compatible serial users reuse the restored pair without reseeding it.
+  bool initializes_locks;
   // Single cursor owner and slot movement in each direction.
   struct {
     // Strand advancing the read cursor.

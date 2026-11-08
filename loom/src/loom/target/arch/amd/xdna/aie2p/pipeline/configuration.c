@@ -958,6 +958,9 @@ iree_status_t loom_aie2p_native_emit_configuration(
   for (iree_host_size_t i = 0; i < realization->invocations.channel_count;
        ++i) {
     const loom_aie2p_native_channel_t* channel = &context->channels[i];
+    if (!channel->initializes_locks) {
+      continue;
+    }
     const loom_xdna_tile_coordinate_t tile =
         context->pool_tiles[channel->pool_index]->coordinate;
     IREE_RETURN_IF_ERROR(loom_aie2p_native_config_set_lock(
