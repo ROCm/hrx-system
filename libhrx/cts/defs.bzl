@@ -15,9 +15,8 @@ AMD_GPU_CTS_TAGS = [
     "runtime-resource=amd-gpu",
 ]
 
-# Native kernel fixtures require the AMDGPU backend and its device toolchain.
+# GPU consumer tests use the native AMD GPU backend and its device toolchain.
 AMDGPU_CTS_COMPATIBILITY_CONDITIONS = {
     "//runtime/config/hal:driver_amd_gpu": [],
-    "//runtime/config/hal:driver_amdgpu": [],
     "//conditions:default": ["@platforms//:incompatible"],
 }

@@ -40,9 +40,8 @@ and install libraries under `lib`.
 The blessed local command path uses `dev.py` to keep setup, hook configuration,
 and build-lane selection consistent:
 
-The native AMD GPU and XDNA HAL engines are enabled by default. The public HRX
-compatibility distribution below additionally enables the legacy ROCr HAL
-because LibHRX GPU execution currently depends on it.
+The native AMD GPU and XDNA HAL engines are enabled by default. LibHRX and its
+HIP frontend use the native AMD GPU driver for both RDNA and CDNA devices.
 
 ```bash
 python dev.py cmake setup
@@ -59,7 +58,6 @@ python dev.py cmake configure \
   -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld" \
   -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld" \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DIREE_HAL_DRIVER_AMDGPU=ON \
   -DIREE_HAL_AMDGPU_TARGETS='gfx942;gfx1151;gfx1201'
 
 python dev.py cmake build
@@ -84,7 +82,6 @@ cmake -S . -B build/hrx-system -GNinja \
   -DCMAKE_SHARED_LINKER_FLAGS="-fuse-ld=lld" \
   -DCMAKE_MODULE_LINKER_FLAGS="-fuse-ld=lld" \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DIREE_HAL_DRIVER_AMDGPU=ON \
   -DIREE_HAL_AMDGPU_TARGETS='gfx942;gfx1151;gfx1201'
 
 cmake --build build/hrx-system
@@ -102,7 +99,8 @@ Useful options:
 | `LIBHRX_BUILD_HIP_BINDING` | ON | Build the HIP runtime API compatibility DLL. |
 | `LIBHRX_BUILD_PASSTHROUGH` | `ON` on Linux, `OFF` elsewhere | Build HIP passthrough/interception tools. |
 | `IREE_BUILD_TESTS` | ON | Build IREE runtime tests and CTS targets. |
-| `IREE_HAL_DRIVER_AMDGPU` | OFF | Build the legacy ROCr HAL driver used by LibHRX GPU compatibility. |
+| `IREE_HAL_DRIVER_AMD_GPU` | ON | Build the native AMD GPU HAL used by LibHRX GPU execution. |
+| `IREE_HAL_DRIVER_AMD_XDNA` | ON | Build the native AMD XDNA HAL. |
 | `IREE_ROCM_DEPENDENCY_MODE` | empty | Overrides ROCm header dependency resolution: `pinned`, `package`, or `auto`; empty selects package mode when `IREE_ROCM_PATH` is set. |
 | `IREE_ROCM_PATH` | empty | ROCm or TheRock SDK root used for package-mode ROCm headers and device tooling. |
 | `IREE_HAL_AMDGPU_TARGETS` | checked-in AMDGPU generic set | AMDGPU target selectors supported by the runtime build. |
@@ -226,12 +224,20 @@ application:
 ```bash
 export HRX_ROOT=/tmp/hrx-root
 export LD_LIBRARY_PATH="${HRX_ROOT}/lib:${HRX_ROOT}/lib/rocm_sysdeps/lib:${LD_LIBRARY_PATH:-}"
-export HRX_GPU_DRIVER=legacy-amdgpu
 
 LD_PRELOAD="${HRX_ROOT}/lib/libamdhip64.so" ./my_hip_application
 ```
 
-This path is for running HIP-based applications on the HRX compatibility layer.
+This path uses the native AMD GPU HAL. `HRX_GPU_DRIVER=rdna` or
+`HRX_GPU_DRIVER=cdna` restricts enumeration to one architecture family.
+
+HIP's automatic scheduling mode favors active waiting for low-latency stream
+synchronization. Applications that prefer to release the CPU can select
+`hipDeviceScheduleYield` for a bounded observation period followed by blocking,
+or `hipDeviceScheduleBlockingSync` to block directly. These flags govern host
+synchronization; asynchronous submissions retain their device-side ordering.
+Event synchronization independently follows `hipEventBlockingSync`.
+
 The passthrough/debug libraries under `libhrx/src/passthrough/` are separate
 developer tools for comparing behavior against the real ROCm HIP runtime.
 

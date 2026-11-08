@@ -1026,7 +1026,7 @@ tree. Bazel project availability is currently expressed by target selection.
 
 | Option | Default | Build system | Meaning |
 | --- | --- | --- | --- |
-| `LIBHRX_BUILD` | `ON` | CMake | Builds libhrx and HRX compatibility targets. GPU execution currently requires the explicitly enabled legacy backend (`IREE_HAL_DRIVER_AMDGPU=ON`); CPU execution does not. |
+| `LIBHRX_BUILD` | `ON` | CMake | Builds libhrx and HRX compatibility targets. GPU execution uses the native AMD GPU backend (`IREE_HAL_DRIVER_AMD_GPU=ON`, enabled by default). |
 | `LIBHRX_BUILD_CTS` | `ON` when libhrx and tests are enabled | CMake | Builds libhrx CTS binaries. |
 | `LIBHRX_BUILD_PASSTHROUGH` | `ON` on Linux, `OFF` elsewhere | CMake | Builds HIP passthrough and interception developer tools. |
 | `LOOM_BUILD` | `ON` | CMake | Builds Loom libraries, tools, bindings, and tests. |

@@ -27,15 +27,9 @@ package(
 # its loader and symbol-export mechanisms before relaxing this constraint.
 _LINUX_COMPATIBILITY = ["@platforms//os:linux"]
 
-# HIP GPU tests require a compiled AMDGPU backend before runtime device
+# HIP GPU tests require the native AMD GPU backend before runtime device
 # discovery.
 _HIP_GPU_COMPATIBILITY = _LINUX_COMPATIBILITY + select({
-    "//runtime/config/hal:driver_amd_gpu": [],
-    "//runtime/config/hal:driver_amdgpu": [],
-    "//conditions:default": ["@platforms//:incompatible"],
-})
-
-_HIP_NATIVE_GPU_COMPATIBILITY = _LINUX_COMPATIBILITY + select({
     "//runtime/config/hal:driver_amd_gpu": [],
     "//conditions:default": ["@platforms//:incompatible"],
 })
@@ -739,7 +733,7 @@ hrx_cc_test(
         "iree-run-requirement=runtime.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    target_compatible_with = _HIP_NATIVE_GPU_COMPATIBILITY,
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
         ":hip_dso_test_util",
         "//runtime/src/iree/testing:gtest",
@@ -964,7 +958,7 @@ hrx_cc_test(
         "iree-run-requirement=runtime.resource.amd_gpu",
         "runtime-resource=amd-gpu",
     ],
-    target_compatible_with = _HIP_NATIVE_GPU_COMPATIBILITY,
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
     deps = [
         ":hip_dso_test_util",
         ":launch_params",

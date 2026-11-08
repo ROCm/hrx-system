@@ -402,12 +402,12 @@ void iree_hal_streaming_context_set_flags(
 iree_async_wait_flags_t iree_hal_streaming_context_wait_flags(
     iree_hal_streaming_context_t* context) {
   switch (iree_hal_streaming_context_flags(context).scheduling_mode) {
+    case IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO:
     case IREE_HAL_STREAMING_SCHEDULING_MODE_SPIN:
       return IREE_ASYNC_WAIT_FLAG_ACTIVE;
     case IREE_HAL_STREAMING_SCHEDULING_MODE_BLOCKING_SYNC:
       return IREE_ASYNC_WAIT_FLAG_NONE;
     case IREE_HAL_STREAMING_SCHEDULING_MODE_YIELD:
-    case IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO:
     default:
       return IREE_ASYNC_WAIT_FLAG_YIELD;
   }

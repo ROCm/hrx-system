@@ -226,7 +226,7 @@ jobs:
       HRX_PACKAGE: "false"
       HRX_PACKAGE_SMOKE: "false"
       HRX_TEST_GPU: "true"
-      HRX_TEST_EXPECT_STREAM_VALUE_WAITS: "0"
+      HRX_TEST_EXPECT_STREAM_VALUE_WAITS: "1"
       HRX_CTS_DEVICE: gpu:0
       HRX_CTEST_REGEX: ""
       HRX_CTEST_EXCLUDE_REGEX: ""
@@ -314,9 +314,8 @@ jobs:
       HRX_PACKAGE: "false"
       HRX_PACKAGE_SMOKE: "false"
       HRX_TEST_GPU: "true"
-      # libhrx selects legacy-amdgpu, whose backing contracts do not qualify
-      # waits that guarantee zero compute occupancy.
-      HRX_TEST_EXPECT_STREAM_VALUE_WAITS: "0"
+      # Native AMD queues support waits with zero compute occupancy.
+      HRX_TEST_EXPECT_STREAM_VALUE_WAITS: "1"
       HRX_CTS_DEVICE: gpu:0
       HRX_CTEST_REGEX: ""
       HRX_CTEST_EXCLUDE_REGEX: ""
@@ -583,9 +582,10 @@ jobs:
       - name: Configure LibHRX Bazel
         run: |
           python3 dev.py bazel configure \
-            -DIREE_HAL_DRIVER_AMDGPU=ON \
-            -DIREE_HAL_DRIVER_AMD=OFF \
-            -DAMDF_BUILD=OFF \
+            -DIREE_HAL_DRIVER_AMDGPU=OFF \
+            -DIREE_HAL_DRIVER_AMD_GPU=ON \
+            -DIREE_HAL_DRIVER_AMD_XDNA=OFF \
+            -DAMDF_BUILD=ON \
             -DIREE_ROCM_PATH="${HRX_ROCM_ROOT}" \
             -DIREE_ROCM_DEPENDENCY_MODE=package
 
