@@ -16,6 +16,12 @@ const cxx::Type* source_object_type(cxx::Symbol* symbol) {
   return base ? base->symbol()->type() : symbol->type();
 }
 
+bool is_direct_subobject(cxx::Symbol* symbol) {
+  return symbol && (symbol->kind() == cxx::SymbolKind::kBaseClass ||
+                    (symbol->kind() == cxx::SymbolKind::kField &&
+                     !static_cast<cxx::FieldSymbol*>(symbol)->isStatic()));
+}
+
 uint64_t source_subobject_offset(cxx::Symbol* symbol) {
   if (auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol)) {
     return *field->offsetInClass();

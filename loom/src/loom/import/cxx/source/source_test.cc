@@ -409,10 +409,11 @@ TEST(SourceTest, ExplicitXvalueRetainsItsTypeIdAndObjectIdentity) {
   EXPECT_EQ(xvalue->valueCategory, cxx::ValueCategory::kXValue);
   EXPECT_TRUE(
       source.unit().typeTraits().is_rvalue_reference(xvalue->typeId->type));
-  EXPECT_EQ(explicit_xvalue_operand(source.unit(), xvalue), xvalue->expression);
+  EXPECT_EQ(explicit_reference_operand(source.unit(), xvalue),
+            xvalue->expression);
   EXPECT_TRUE(cxx::ast_cast<cxx::IdExpressionAST>(
       unwrap_object_identity(source.unit(), xvalue)));
-  EXPECT_EQ(explicit_xvalue_operand(source.unit(), casts.expressions[1]),
+  EXPECT_EQ(explicit_reference_operand(source.unit(), casts.expressions[1]),
             nullptr);
 }
 

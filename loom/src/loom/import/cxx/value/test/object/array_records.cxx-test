@@ -781,3 +781,33 @@ func.def @change(%value_words_0: i32, %value_words_1: i32, %index: i32) -> (i32)
   %209 = view.load %195[0] : view<1xi32> -> i32
   func.return %209 : i32
 }
+
+// ====
+// Inherited array storage promotes exactly as the same composed object does.
+struct Base { double a[3]; };
+struct Grad : Base { double scale; };
+struct Composed { Base base; double scale; };
+double inherited(double input) {
+  Grad value{{{input, 2.0, 3.0}}, 4.0};
+  return value.a[0] * value.scale + value.a[1];
+}
+double composed(double input) {
+  Composed value{{{input, 2.0, 3.0}}, 4.0};
+  return value.base.a[0] * value.scale + value.base.a[1];
+}
+// ----
+func.def public @inherited(%input: f64) -> (f64) {
+  %14 = scalar.constant 2.0 : f64
+  %24 = scalar.constant 4.0 : f64
+  %45 = scalar.mulf %input, %24 : f64
+  %59 = scalar.addf %45, %14 : f64
+  func.return %59 : f64
+}
+
+func.def public @composed(%input: f64) -> (f64) {
+  %74 = scalar.constant 2.0 : f64
+  %84 = scalar.constant 4.0 : f64
+  %107 = scalar.mulf %input, %84 : f64
+  %123 = scalar.addf %107, %74 : f64
+  func.return %123 : f64
+}

@@ -1219,12 +1219,78 @@ TEST(TypesTest, RetainsSelectedSubobjectPositionsIndependentlyOfByteLayout) {
   auto* path = cxx::make_list_node(source.unit().arena(), second.source);
   path->next =
       cxx::make_list_node(source.unit().arena(), middle.members[1].source);
+  EXPECT_EQ(types.subobject_offset(path), 32u);
   const auto& selected = types.projection(path, owner);
   EXPECT_EQ(selected.root->source, second.source);
   EXPECT_EQ(selected.partition, middle.members[1].partition);
   EXPECT_EQ(selected.component_offset, 4u);
   EXPECT_EQ(selected.byte_offset, 32u);
   EXPECT_EQ(&types.projection(path, owner), &selected);
+  EXPECT_EQ(types.subobject_offset(path), selected.byte_offset);
+}
+
+TEST(TypesTest, BasePartitionsPreserveRepeatedIdentityAndOverlappingPadding) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Empty {};
+    struct Left : Empty {};
+    struct Right : Empty {};
+    struct Both : Left, Right { unsigned value; };
+    struct Tail {
+      unsigned value;
+      unsigned char tag;
+      Tail() : value(0), tag(0) {}
+    };
+    struct Derived : Tail { unsigned char extra; };
+  )"),
+                IREE_SV("base_layout.cxx"), options);
+  Types types(source.unit(), source.diagnostics());
+  auto* owner = source.unit().ast();
+  auto source_type = [&](const char* name) {
+    return (*source.unit().globalScope()->find(name).begin())->type();
+  };
+  auto* both = types.record(source_type("Both"), owner);
+  ASSERT_EQ(both->members.size(), 3u);
+  EXPECT_EQ(both->component_count, 1u);
+  EXPECT_NE(both->members[0].source, both->members[1].source);
+  EXPECT_EQ(both->members[0].byte_offset(), 0u);
+  EXPECT_EQ(both->members[1].byte_offset(), 1u);
+  EXPECT_EQ(both->members[2].byte_offset(), 0u);
+  EXPECT_EQ(both->members[0].partition->component_count, 0u);
+  EXPECT_EQ(both->members[1].partition->component_count, 0u);
+  EXPECT_EQ(types.storage_size(source_type("Both"), owner), 4);
+
+  auto* derived = types.record(source_type("Derived"), owner);
+  ASSERT_EQ(derived->members.size(), 2u);
+  EXPECT_EQ(derived->component_count, 3u);
+  EXPECT_EQ(derived->members[1].component_offset, 2u);
+  EXPECT_EQ(derived->members[1].byte_offset(), 5u);
+  EXPECT_EQ(types.storage_size(source_type("Tail"), owner), 8);
+  EXPECT_EQ(types.storage_size(source_type("Derived"), owner), 8);
+}
+
+TEST(TypesTest, RetainsMutableSubobjectsThroughBasesAndArrays) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    struct Leaf { mutable unsigned value; };
+    struct Plain { unsigned value; };
+    struct Derived : Leaf { Plain plain; };
+    struct Nested { Leaf leaves[2][3]; };
+    struct Borrowed { const Leaf* pointer; };
+  )"),
+                IREE_SV("mutable_subobjects.cxx"), options);
+  Types types(source.unit(), source.diagnostics());
+  auto* owner = source.unit().ast();
+  auto record = [&](const char* name) {
+    return types.record(
+        (*source.unit().globalScope()->find(name).begin())->type(), owner);
+  };
+  EXPECT_TRUE(record("Derived")->has_mutable_subobject);
+  EXPECT_TRUE(record("Nested")->has_mutable_subobject);
+  EXPECT_FALSE(record("Plain")->has_mutable_subobject);
+  EXPECT_FALSE(record("Borrowed")->has_mutable_subobject);
 }
 
 TEST(TypesTest, MutationUsesTheObjectQualifierInsteadOfItsPointee) {

@@ -149,3 +149,18 @@ func.def public @assume_bounded(%value$0: i32) {
   %value$1 = scalar.assume %value$0 [range(%value$0, 1, 8)] : i32
   func.return
 }
+
+// ====
+// The selected base path keeps same-named fields distinct in callable facts.
+#include <loomcxx/predicate.h>
+struct Base { unsigned count; };
+struct Left : Base {};
+struct Right : Base {};
+struct Shape : Left, Right {};
+unsigned base_count(Shape value) [[loom::where(loom::predicate::ule(value.Left::count, value.Right::count))]] {
+  return value.Left::count;
+}
+// ----
+func.def public @base_count(%value_Left_Base_count: i32, %value_Right_Base_count: i32) -> (i32) where [ule(%value_Left_Base_count, %value_Right_Base_count)] {
+  func.return %value_Left_Base_count : i32
+}

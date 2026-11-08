@@ -19,6 +19,9 @@ namespace loom::cxx_import {
 // retain their class through symbol(), independently of Symbol::type().
 const cxx::Type* source_object_type(cxx::Symbol* symbol);
 
+// Whether a declaration denotes a direct piece of a class object.
+bool is_direct_subobject(cxx::Symbol* symbol);
+
 // Physical position of one admitted direct field or nonvirtual base. Complete
 // class layout is owned by the frontend; no inheritance lookup is performed.
 uint64_t source_subobject_offset(cxx::Symbol* symbol);

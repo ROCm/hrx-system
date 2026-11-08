@@ -48,12 +48,14 @@ struct SubobjectPartition {
 struct RecordPartition final : Partition {
   // Canonical definition retaining nominal identity and source object layout.
   cxx::ClassSymbol* source;
-  // Declaration-order members, including zero-component empty records.
+  // Direct bases followed by fields, including zero-component empty records.
   std::vector<SubobjectPartition> members;
   // Retained member paths used to name newly bound High components.
   std::vector<std::string> component_names;
   // Whether any component needs destination identities to bind its High type.
   bool requires_binding = false;
+  // Whether a const receiver may write a mutable field, including subobjects.
+  bool has_mutable_subobject = false;
 };
 
 // One frontend-selected subobject path, retained once for shared use by source
@@ -80,6 +82,8 @@ struct ArrayPartition final : Partition {
   const Partition* element;
   // Whether element types depend on destination SSA identities.
   bool requires_binding;
+  // Whether an element contains a field that remains writable through const.
+  bool has_mutable_subobject;
 };
 
 // Canonical typed source handle projected to one zero-origin High buffer. The
@@ -379,6 +383,10 @@ class Types {
   bool requires_binding(const cxx::Type* input, cxx::AST* owner);
   // Returns a record's admitted source schema, or null for a non-record type.
   const RecordPartition* record(const cxx::Type* input, cxx::AST* owner);
+  // Whether a member call may replace value components of its receiver. Const
+  // calls consume the record's retained transitive mutable-subobject fact.
+  bool implicit_object_may_mutate(cxx::FunctionSymbol* function,
+                                  cxx::AST* owner);
   // Whether this constructor executes an ordinary admitted record body. Loom
   // source wrapper constructors retain their intrinsic projection paths.
   bool record_constructor_requires_call(const cxx::Type* type,
@@ -396,6 +404,12 @@ class Types {
   // Direct fields use member() and require no independently retained path.
   const SubobjectProjection& projection(cxx::List<cxx::Symbol*>* path,
                                         cxx::AST* owner);
+  // Physical-only access does not admit an SSA record partition: volatile
+  // fields may be accessed in memory while never forming a by-value record.
+  uint64_t subobject_offset(cxx::List<cxx::Symbol*>* path);
+  // Includes the leaf field after a possibly empty frontend-selected path.
+  SubobjectProjection selection(cxx::Symbol* field,
+                                cxx::List<cxx::Symbol*>* path, cxx::AST* owner);
   // Selects snapshot value transport for a pointer reference field whose
   // object identity is proven unobservable by whole-function analysis. The
   // source reference and pointer value share the same two-component partition;
@@ -531,6 +545,8 @@ class Types {
   using ProjectionMap =
       std::unordered_map<cxx::List<cxx::Symbol*>*, SubobjectProjection>;
   // Present only when source access selects a nested class subobject path.
+  // A null partition retains a physical-only path; projection() completes the
+  // value facts before exposing the entry to its SSA consumers.
   std::unique_ptr<ProjectionMap> projections_;
   // Pointer reference fields whose source object identity is unobservable.
   std::unordered_set<cxx::FieldSymbol*> pointer_reference_snapshots_;

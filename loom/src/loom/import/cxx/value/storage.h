@@ -94,6 +94,14 @@ class Storage {
   // Packing changes the origin, without asserting natural field alignment.
   StorageProjection member(StorageProjection base, cxx::Symbol* field,
                            cxx::AST* owner);
+  // Projects a source-selected subobject from a live complete object. The
+  // displacement is retained by Types from the frontend's selected path.
+  StorageProjection subobject(StorageProjection base, uint64_t byte_offset,
+                              cxx::AST* owner);
+  // Reverses a nonvirtual base projection. The source reference cast requires
+  // an enclosing live object; this operation never adjusts a nullable pointer.
+  StorageProjection enclosing(StorageProjection base, uint64_t byte_offset,
+                              cxx::AST* owner);
   // Projects an in-bounds constant element of an admitted fixed array. Source
   // subobject offsets need no signed pointer-arithmetic conversion chain.
   StorageProjection element(StorageProjection base,
@@ -184,8 +192,6 @@ class Storage {
       cxx::AST* owner);
 
  private:
-  StorageProjection subobject(StorageProjection base, uint64_t byte_offset,
-                              cxx::AST* owner);
   // Publishes the defined-source dereference range for a compiler-owned
   // allocation. External buffer roots have no importer-owned extent and pass
   // through unchanged.

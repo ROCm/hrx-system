@@ -100,7 +100,8 @@ std::vector<loom_string_id_t> require_named_operands(
     const cxx::Type* type, bool permits_schema, loom_module_t* module,
     cxx::AST* owner) {
   auto* record = types.record(type, owner);
-  if (!record || record->component_count != record->members.size()) {
+  if (!record || !record->source->baseClasses().empty() ||
+      record->component_count != record->members.size()) {
     diagnostics.reject(unit, owner,
                        "fragment named operands must be a flat record");
   }
@@ -176,7 +177,8 @@ FragmentIntrinsic::Shape FragmentIntrinsic::require_shape(
     cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
     const cxx::Type* type, cxx::AST* owner) {
   auto* record = types.record(type, owner);
-  if (!record || (record->members.size() != 2 && record->members.size() != 3) ||
+  if (!record || !record->source->baseClasses().empty() ||
+      (record->members.size() != 2 && record->members.size() != 3) ||
       record->component_count != record->members.size()) {
     diagnostics.reject(unit, owner,
                        "fragment shape requires flat {rows, columns} or "

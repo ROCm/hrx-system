@@ -30,6 +30,16 @@
 namespace loom::cxx_import {
 namespace {
 
+bool has_mutable_subobject(const Partition& partition) {
+  return partition.kind == ValueKind::Record
+             ? static_cast<const RecordPartition&>(partition)
+                   .has_mutable_subobject
+         : partition.kind == ValueKind::Array
+             ? static_cast<const ArrayPartition&>(partition)
+                   .has_mutable_subobject
+             : false;
+}
+
 const cxx::Attribute* type_binding(cxx::ClassSymbol* source) {
   auto find = [](cxx::ClassSymbol* symbol) -> const cxx::Attribute* {
     if (!symbol || !symbol->attributes()) {
@@ -372,6 +382,7 @@ const ArrayPartition* Types::array(const cxx::Type* input, cxx::AST* owner) {
   result->source = source;
   result->element = &element;
   result->requires_binding = requires_binding(source->elementType(), owner);
+  result->has_mutable_subobject = has_mutable_subobject(element);
   auto* admitted = result.get();
   arrays_.emplace(source, std::move(result));
   return admitted;
@@ -1133,16 +1144,47 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
     source = type->definition();
   }
   if (!source || !source->isComplete() || source->isUnion() ||
-      !source->baseClasses().empty() || source->isPolymorphic()) {
+      source->isPolymorphic()) {
     diagnostics_.reject(
         unit_, owner,
-        "record values require a complete baseless non-union type without "
+        "record values require a complete non-union type without "
         "virtual members");
   }
   auto result = std::make_unique<RecordPartition>();
   result->kind = ValueKind::Record;
   result->component_count = 0;
   result->source = source;
+  auto append = [&](cxx::Symbol* symbol) {
+    auto* type = source_object_type(symbol);
+    const auto& member_partition = traits.is_lvalue_reference(type)
+                                       ? kPointerPartition
+                                       : partition(type, owner);
+    if (symbol->kind() == cxx::SymbolKind::kBaseClass &&
+        member_partition.kind != ValueKind::Record) {
+      diagnostics_.reject(unit_, owner,
+                          "Loom semantic handles cannot be base subobjects");
+    }
+    SubobjectPartition member{symbol, &member_partition,
+                              result->component_count};
+    result->members.push_back(member);
+    members_.emplace(symbol, member);
+    append_component_names(member_partition, cxx::to_string(symbol->name()),
+                           result->component_names);
+    result->component_count += member_partition.component_count;
+    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
+    result->has_mutable_subobject |= (field && field->isMutable()) ||
+                                     has_mutable_subobject(member_partition);
+    if (!traits.is_reference(type)) {
+      result->requires_binding |= requires_binding(type, owner);
+    }
+  };
+  for (auto* base : source->baseClasses()) {
+    if (base->isVirtual()) {
+      diagnostics_.reject(
+          unit_, owner, "virtual base objects require a dynamic object layout");
+    }
+    append(base);
+  }
   for (auto* symbol : source->members()) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);
     if (!field || field->isStatic()) {
@@ -1157,23 +1199,24 @@ const RecordPartition* Types::record(const cxx::Type* input, cxx::AST* owner) {
           unit_, owner,
           "rvalue-reference fields require consuming object identity");
     }
-    const auto& member_partition = traits.is_lvalue_reference(field->type())
-                                       ? kPointerPartition
-                                       : partition(field->type(), owner);
-    SubobjectPartition member{field, &member_partition,
-                              result->component_count};
-    result->members.push_back(member);
-    members_.emplace(field, member);
-    auto name = cxx::to_string(field->name());
-    append_component_names(member_partition, name, result->component_names);
-    result->component_count += member_partition.component_count;
-    if (!traits.is_reference(field->type())) {
-      result->requires_binding |= requires_binding(field->type(), owner);
-    }
+    append(field);
   }
   auto* admitted = result.get();
   records_.emplace(source, std::move(result));
   return admitted;
+}
+
+bool Types::implicit_object_may_mutate(cxx::FunctionSymbol* function,
+                                       cxx::AST* owner) {
+  if (!function || !function->isImplicitObjectMemberFunction()) {
+    return false;
+  }
+  auto* signature = static_cast<const cxx::FunctionType*>(function->type());
+  if (!cxx::has_const(signature->cvQualifiers())) {
+    return true;
+  }
+  const auto* admitted = record(function->parent()->type(), owner);
+  return admitted && admitted->has_mutable_subobject;
 }
 
 bool Types::record_constructor_requires_call(const cxx::Type* type,
@@ -1310,19 +1353,50 @@ const SubobjectProjection& Types::projection(cxx::List<cxx::Symbol*>* path,
   if (!projections_) {
     projections_ = std::make_unique<ProjectionMap>();
   }
-  if (auto found = projections_->find(path); found != projections_->end()) {
-    return found->second;
+  auto [entry, inserted] = projections_->try_emplace(path);
+  if (entry->second.partition) {
+    return entry->second;
   }
   const auto& root = member(path->value, owner);
-  SubobjectProjection result{&root, root.partition, root.component_offset,
-                             root.byte_offset()};
+  SubobjectProjection result{
+      &root, root.partition, root.component_offset,
+      inserted ? root.byte_offset() : entry->second.byte_offset};
   for (auto* step : cxx::ListView{path->next}) {
     const auto& selected = member(step, owner);
     result.partition = selected.partition;
     result.component_offset += selected.component_offset;
-    result.byte_offset += selected.byte_offset();
+    if (inserted) {
+      result.byte_offset += selected.byte_offset();
+    }
   }
-  return projections_->emplace(path, result).first->second;
+  return entry->second = result;
+}
+
+uint64_t Types::subobject_offset(cxx::List<cxx::Symbol*>* path) {
+  if (!projections_) {
+    projections_ = std::make_unique<ProjectionMap>();
+  }
+  auto [entry, inserted] = projections_->try_emplace(path);
+  if (inserted) {
+    for (auto* step : cxx::ListView{path}) {
+      entry->second.byte_offset += source_subobject_offset(step);
+    }
+  }
+  return entry->second.byte_offset;
+}
+
+SubobjectProjection Types::selection(cxx::Symbol* field,
+                                     cxx::List<cxx::Symbol*>* path,
+                                     cxx::AST* owner) {
+  const auto& leaf = member(field, owner);
+  if (!path) {
+    return {&leaf, leaf.partition, leaf.component_offset, leaf.byte_offset()};
+  }
+  auto result = projection(path, owner);
+  result.partition = leaf.partition;
+  result.component_offset += leaf.component_offset;
+  result.byte_offset += leaf.byte_offset();
+  return result;
 }
 
 void Types::select_pointer_reference_snapshot(cxx::FieldSymbol* field,
@@ -1504,11 +1578,18 @@ void Types::require_record_storage(const cxx::ClassType* input,
                         "Loom source types require SSA value transport");
   }
   if (!source || !source->isComplete() || source->isUnion() ||
-      !source->baseClasses().empty() || source->isPolymorphic()) {
+      source->isPolymorphic()) {
     diagnostics_.reject(
         unit_, owner,
-        "record storage requires a complete baseless non-union type without "
+        "record storage requires a complete non-union type without "
         "virtual members");
+  }
+  for (auto* base : source->baseClasses()) {
+    if (base->isVirtual()) {
+      diagnostics_.reject(
+          unit_, owner, "virtual base objects require a dynamic object layout");
+    }
+    storage_size(source_object_type(base), owner);
   }
   for (auto* symbol : source->members()) {
     auto* field = cxx::symbol_cast<cxx::FieldSymbol>(symbol);

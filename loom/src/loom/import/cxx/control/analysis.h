@@ -416,6 +416,9 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool add_receiver_write(cxx::Symbol* field);
   void retain_reference_receiver_write(const DirectCall& call);
   CallArgument retain_call_argument(cxx::ExpressionAST* expression);
+  CallArgument retain_member_receiver(cxx::ExpressionAST* expression,
+                                      cxx::List<cxx::Symbol*>* path,
+                                      cxx::AST* owner);
   // Reference operands retain their source destinations and write effects
   // regardless of whether call syntax is ordinary, operator, or constructor.
   void retain_reference_arguments(const DirectCall& call);
@@ -458,7 +461,7 @@ class ControlFlow final : private cxx::ASTVisitor {
   std::optional<Destination> classify_destination(
       cxx::ExpressionAST* expression);
   bool classify_storage(cxx::ExpressionAST* expression) const;
-  bool is_captured_object_field(cxx::FieldSymbol* field) const;
+  bool is_captured_object_field(cxx::Symbol* field) const;
   cxx::Symbol* object_owner(cxx::ExpressionAST* expression) const;
   std::optional<CountedLoop> classify(cxx::ForStatementAST* loop);
   std::optional<CountedLoop> classify_unsigned(

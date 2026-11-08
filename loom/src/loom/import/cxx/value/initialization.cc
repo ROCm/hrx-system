@@ -22,6 +22,7 @@
 
 #include "loom/import/cxx/source/error.h"
 #include "loom/import/cxx/source/expressions.h"
+#include "loom/import/cxx/source/objects.h"
 #include "loom/ops/buffer/ops.h"
 #include "loom/ops/scalar/ops.h"
 
@@ -100,10 +101,10 @@ bool vector_literal_can_encode(const cxx::ConstValue& value) {
 // only the destination policy; constructor synthesis, omitted members, and
 // default-member clauses remain source semantic facts.
 template <typename Callback>
-void for_each_field_initializer(cxx::TranslationUnit& unit,
-                                Diagnostics& diagnostics,
-                                cxx::FunctionSymbol* constructor,
-                                cxx::AST* owner, Callback&& callback) {
+void for_each_subobject_initializer(cxx::TranslationUnit& unit,
+                                    Diagnostics& diagnostics,
+                                    cxx::FunctionSymbol* constructor,
+                                    cxx::AST* owner, Callback&& callback) {
   cxx::ASTRewriter::requireFunctionDefinition(&unit, constructor);
   auto* definition = constructor->resolvedDefinition()->declaration();
   auto* body = definition ? definition->functionBody : nullptr;
@@ -113,12 +114,7 @@ void for_each_field_initializer(cxx::TranslationUnit& unit,
                        "initialization plan");
   }
   for (auto* initializer : cxx::ListView{cxx::ctor_initializers(body)}) {
-    auto* field = cxx::symbol_cast<cxx::FieldSymbol>(initializer->symbol);
-    if (!field) {
-      diagnostics.reject(
-          unit, initializer,
-          "record value constructors cannot initialize base classes");
-    }
+    auto* field = initializer->symbol;
     auto* source = cxx::memInitializerClause(unit.arena(), initializer);
     callback(field, source, initializer);
   }
@@ -381,14 +377,7 @@ Value Initialization::materialize_constant(const cxx::ConstValue& value,
         retained_members;
     retained_members.reserve((*retained)->members().size());
     for (const auto& member : (*retained)->members()) {
-      auto* field =
-          member.symbol && member.symbol->kind() == cxx::SymbolKind::kField
-              ? static_cast<const cxx::FieldSymbol*>(member.symbol)
-              : nullptr;
-      if (!field) {
-        diagnostics_.reject(unit_, owner,
-                            "constant record contains a non-field member");
-      }
+      auto* field = member.symbol;
       if (!retained_members.emplace(field, &member.value).second) {
         diagnostics_.reject(unit_, owner,
                             "constant record contains a duplicate member");
@@ -652,12 +641,12 @@ Value Initialization::default_record(const RecordPartition& record,
     }
   }
 
-  for_each_field_initializer(
+  for_each_subobject_initializer(
       unit_, diagnostics_, constructor, owner,
-      [&](cxx::FieldSymbol* field, cxx::ExpressionAST* source,
+      [&](cxx::Symbol* field, cxx::ExpressionAST* source,
           cxx::MemInitializerAST* initializer) {
         const bool is_reference =
-            unit_.typeTraits().is_lvalue_reference(field->type());
+            unit_.typeTraits().is_lvalue_reference(source_object_type(field));
         std::optional<Value> prior;
         if (!is_reference && (retained || zero_initialize)) {
           prior = evaluation_.receiver_member(field, initializer);
@@ -674,8 +663,8 @@ Value Initialization::default_record(const RecordPartition& record,
         }
         auto initialized =
             referent ? evaluation_.reference(referent, initializer)
-                     : value(field->type(), source, initializer->constructor,
-                             initializer, prior);
+                     : value(source_object_type(field), source,
+                             initializer->constructor, initializer, prior);
         if (!referent) {
           evaluation_.adopt(source, initialized);
         }
@@ -828,9 +817,9 @@ void Initialization::default_storage_record(StorageProjection destination,
     }
   }
 
-  for_each_field_initializer(
+  for_each_subobject_initializer(
       unit_, diagnostics_, constructor, owner,
-      [&](cxx::FieldSymbol* field, cxx::ExpressionAST* source,
+      [&](cxx::Symbol* field, cxx::ExpressionAST* source,
           cxx::MemInitializerAST* initializer) {
         auto mark = evaluation_.begin_full_expression();
         auto field_type = objects_.member_type(object_type, field);

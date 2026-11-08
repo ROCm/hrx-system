@@ -22,7 +22,7 @@ void store(void* storage, unsigned* value) {
 union Payload { unsigned integer; float real; };
 unsigned load(const void* storage) {
   auto* payload = static_cast<const Payload*>(storage);
-  // ERROR@+1: LOWERING/059 "record storage requires a complete baseless non-union type without virtual members"
+  // ERROR@+1: LOWERING/059 "record storage requires a complete non-union type without virtual members"
   return payload->integer;
 }
 
@@ -49,7 +49,7 @@ const void* advance(const void* storage) {
 // ====
 struct Opaque;
 Opaque* advance(Opaque* storage) {
-  // ERROR@+1: LOWERING/059 "record storage requires a complete baseless non-union type without virtual members"
+  // ERROR@+1: LOWERING/059 "record storage requires a complete non-union type without virtual members"
   return storage + 1;
 }
 

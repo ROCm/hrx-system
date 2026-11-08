@@ -1,7 +1,7 @@
 // RUN: verify
 // Unions do not have an unconditional component partition.
 union Value { unsigned integer; float real; };
-// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type without virtual members"
+// ERROR@+1: LOWERING/059 "record values require a complete non-union type without virtual members"
 Value entry(Value value) { return value; }
 
 // ====
@@ -11,16 +11,16 @@ struct Value { unsigned first = second; unsigned second = 9u; };
 Value entry() { return Value{}; }
 
 // ====
-// Base subobjects need an explicit source-object contract.
+// Virtual bases require a dynamic object-layout contract.
 struct Base { unsigned base; };
-struct Value : Base { unsigned member; };
-// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type without virtual members"
+struct Value : virtual Base { unsigned member; };
+// ERROR@+1: LOWERING/059 "virtual base objects require a dynamic object layout"
 Value entry(Value value) { return value; }
 
 // ====
 // Virtual members require an explicit dynamic-object representation.
 struct Value { unsigned member; virtual unsigned read() { return member; } };
-// ERROR@+1: LOWERING/059 "record values require a complete baseless non-union type without virtual members"
+// ERROR@+1: LOWERING/059 "record values require a complete non-union type without virtual members"
 Value entry(Value value) { return value; }
 
 // ====
@@ -57,3 +57,10 @@ Value entry() {
   // ERROR@+1: LOWERING/059 "constant addresses require an addressable source object"
   return value;
 }
+
+// ====
+// A semantic handle has its own dialect representation, not a base layout.
+template<class T> struct [[loom::type("buffer")]] Buffer { T* data; };
+struct Value : Buffer<unsigned> { unsigned tag; };
+// ERROR@+1: LOWERING/059 "Loom semantic handles cannot be base subobjects"
+Value entry(Value value) { return value; }

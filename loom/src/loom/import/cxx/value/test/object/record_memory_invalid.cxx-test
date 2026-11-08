@@ -1,12 +1,12 @@
 // RUN: verify
 union Record { unsigned integer; float real; };
-// ERROR@+1: LOWERING/059 "record storage requires a complete baseless non-union type without virtual members"
+// ERROR@+1: LOWERING/059 "record storage requires a complete non-union type without virtual members"
 unsigned read(const Record* record) { return record->integer; }
 
 // ====
 struct Base { unsigned first; };
-struct Record : Base { unsigned second; };
-// ERROR@+1: LOWERING/059 "record storage requires a complete baseless non-union type without virtual members"
+struct Record : virtual Base { unsigned second; };
+// ERROR@+1: LOWERING/059 "virtual base objects require a dynamic object layout"
 unsigned read(const Record* record) { return record->second; }
 
 // ====

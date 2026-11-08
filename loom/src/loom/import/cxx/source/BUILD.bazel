@@ -270,7 +270,10 @@ loom_cc_library(
     hdrs = ["expressions.h"],
     cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
     cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
-    deps = ["//third_party:cxx_parser"],
+    deps = [
+        ":objects",
+        "//third_party:cxx_parser",
+    ],
 )
 
 loom_cc_test(

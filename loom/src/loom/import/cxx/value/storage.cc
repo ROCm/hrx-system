@@ -192,6 +192,20 @@ StorageProjection Storage::subobject(StorageProjection base,
   return {pointer, std::gcd(base.alignment, byte_offset), true};
 }
 
+StorageProjection Storage::enclosing(StorageProjection base,
+                                     uint64_t byte_offset, cxx::AST* owner) {
+  auto source = locations_.get(owner);
+  auto displacement =
+      scalars_.integer(byte_offset, LOOM_SCALAR_TYPE_OFFSET, source);
+  loom_op_t* op;
+  check(loom_index_sub_build(&builder_, base.pointer.byte_offset, displacement,
+                             loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET), source,
+                             &op));
+  auto pointer =
+      constrain_origin({base.pointer.root, loom_op_results(op)[0]}, owner);
+  return {pointer, std::gcd(base.alignment, byte_offset), true};
+}
+
 StorageAccess Storage::dereference(StorageProjection base,
                                    const cxx::Type* element_type,
                                    cxx::AST* owner) {

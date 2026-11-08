@@ -872,3 +872,227 @@ event 209
 event 9
 OK 0
 retired 0
+
+// ====
+// Repeated base instances retain separate identities through construction,
+// inherited method calls, defaulted copying, and reverse-order destruction.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Base {
+  unsigned value;
+  Base(unsigned value) : value(value) { event(100 + value); }
+  Base(const Base& other) : value(other.value) { event(200 + value); }
+  void add(unsigned delta) { value += delta; }
+  ~Base() { event(300 + value); }
+};
+struct Left : Base { using Base::Base; };
+struct Right : Base { using Base::Base; };
+struct Both : Left, Right {
+  Base member;
+  Both(unsigned value) : Left(value), Right(value + 1), member(value + 2) {}
+  ~Both() { event(9); }
+};
+void run() {
+  Both first(1);
+  Both second(first);
+  second.Right::add(5);
+  event(first.Right::value);
+  event(second.Right::value);
+}
+// ----
+event 101
+event 102
+event 103
+event 201
+event 202
+event 203
+event 2
+event 7
+event 9
+event 303
+event 307
+event 301
+event 9
+event 303
+event 302
+event 301
+OK 0
+retired 0
+
+// ====
+// A base snapshot leaves a derived byte in reused tail padding untouched.
+// Downcasting a base reference retains the enclosing object's exact origin.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Prefix { unsigned value; };
+struct Tail {
+  unsigned word;
+  unsigned char tag;
+  Tail() : word(11), tag(13) {}
+};
+struct Derived : Prefix, Tail { unsigned char extra; };
+static void replace(Tail& base) {
+  auto& complete = static_cast<Derived&>(base);
+  complete.value += 3;
+  base = Tail{};
+  event(complete.extra);
+}
+void run() {
+  Derived value{{7}, {}, 17};
+  value.word = 19;
+  value.tag = 23;
+  replace(value);
+  event(value.value);
+  event(value.word);
+  event(value.tag);
+  event(value.extra);
+}
+// ----
+event 17
+event 10
+event 11
+event 13
+event 17
+OK 0
+retired 0
+
+// ====
+// Empty repeated bases still have separate lifetimes despite transporting no
+// SSA components. A nonempty field is constructed after both bases.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Empty {
+  Empty() { event(1); }
+  ~Empty() { event(2); }
+};
+struct Left : Empty {};
+struct Right : Empty {};
+struct Both : Left, Right {
+  unsigned value;
+  ~Both() { event(value); }
+};
+void run() {
+  Both value{{}, {}, 7};
+  event(value.value);
+}
+// ----
+event 1
+event 1
+event 7
+event 7
+event 2
+event 2
+OK 0
+retired 0
+
+// ====
+// Distinct base references stay independent; overlapping references and a
+// receiver alias share one live object for sequenced reads and writes.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Base {
+  unsigned value;
+  unsigned mix(const Base& other) { ++value; return other.value; }
+};
+struct Left : Base {};
+struct Right : Base {};
+struct Both : Left, Right {
+  unsigned same() { return Right::mix(static_cast<Right&>(*this)); }
+};
+static unsigned update(Base& destination, const Base& source) {
+  ++destination.value;
+  return source.value;
+}
+void run() {
+  Both value{{{3}}, {{7}}};
+  event(update(static_cast<Left&>(value), static_cast<Right&>(value)));
+  event(value.Left::value);
+  event(update(static_cast<Left&>(value), static_cast<Left&>(value)));
+  event(value.Left::mix(static_cast<Right&>(value)));
+  event(value.same());
+  event(value.Left::value);
+  event(value.Right::value);
+}
+// ----
+event 7
+event 4
+event 5
+event 7
+event 8
+event 6
+event 8
+OK 0
+retired 0
+
+// ====
+// Inherited operators update the selected base through returned references.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Prefix { unsigned tag; };
+struct Base {
+  unsigned value;
+  unsigned& operator[](unsigned delta) { value += delta; return value; }
+  unsigned operator()(unsigned delta) { value += delta; return value; }
+  Base& operator++() { ++value; return *this; }
+};
+struct Derived : Prefix, Base { unsigned extra; };
+void run() {
+  Derived value{{99}, {5}, 7};
+  value[2] += 3;
+  event(value(4));
+  ++value;
+  event(value.value);
+  event(value.tag);
+  event(value.extra);
+}
+// ----
+event 14
+event 15
+event 99
+event 7
+OK 0
+retired 0
+
+// ====
+// Moving a derived object transfers its base payload; arrays and early returns
+// destroy complete objects in reverse order, including moved-from bases.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Base {
+  unsigned value;
+  Base(unsigned value) : value(value) { event(100 + value); }
+  Base(Base&& other) : value(other.value) { other.value = 0; event(200 + value); }
+  ~Base() { event(300 + value); }
+};
+struct Derived : Base {
+  using Base::Base;
+  Derived(Derived&&) = default;
+};
+static void visit(bool stop) {
+  Derived values[2] = {Derived(1), Derived(2)};
+  Derived moved(static_cast<Derived&&>(values[0]));
+  if (stop) return;
+  event(999);
+}
+void run() { visit(true); }
+// ----
+event 101
+event 102
+event 201
+event 301
+event 302
+event 300
+OK 0
+retired 0
+
+// ====
+// A const receiver can still change mutable fields inherited from a base.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Base { mutable unsigned value; };
+struct Derived : Base { unsigned next() const { return ++value; } };
+void run() {
+  Derived value{{7}};
+  for (unsigned i = 0; i < 3; ++i) event(value.next());
+  event(value.value);
+}
+// ----
+event 8
+event 9
+event 10
+event 10
+OK 0
+retired 0

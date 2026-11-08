@@ -47,19 +47,6 @@ unsigned compact_lookup(unsigned index) {
 }
 
 // ====
-struct Base {
-  unsigned value;
-};
-struct Derived : Base {
-  unsigned other;
-};
-static constexpr Derived base_table[1] = {{{7}, 9}};
-unsigned base_lookup(unsigned index) {
-  // ERROR@+1: LOWERING/059 "record storage requires a complete baseless non-union type without virtual members"
-  return base_table[index % 1u].other;
-}
-
-// ====
 template <unsigned Value>
 inline constexpr unsigned templated_table[1] = {Value};
 

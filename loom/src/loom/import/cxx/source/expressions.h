@@ -19,20 +19,21 @@
 
 namespace loom::cxx_import {
 
-// Returns the source expression beneath any implicit conversion sequence.
+// Returns the source expression beneath implicit conversions that preserve
+// its selected subobject.
 cxx::ExpressionAST* strip_implicit_casts(cxx::ExpressionAST* expression);
 
 // Returns the semantic expression beneath implicit conversions, redundant
 // parentheses, and frontend wrappers around selected member initializers.
 cxx::ExpressionAST* unwrap_expression(cxx::ExpressionAST* expression);
 
-// Returns the operand of an explicit static cast to an rvalue reference, or
+// Returns the operand of an explicit static cast to a reference, or
 // null when the expression is not that source category projection.
-cxx::ExpressionAST* explicit_xvalue_operand(cxx::TranslationUnit& unit,
-                                            cxx::ExpressionAST* expression);
+cxx::ExpressionAST* explicit_reference_operand(cxx::TranslationUnit& unit,
+                                               cxx::ExpressionAST* expression);
 
 // Returns the object beneath transparent source wrappers and any explicit
-// xvalue category projections. Identity-preserving conversions are unwrapped;
+// reference category projections. Subobject adjustments remain visible;
 // a prvalue conversion remains as the producer of its temporary object.
 // Callers retain the original expression for cv and category rules selected by
 // the frontend.
@@ -94,8 +95,7 @@ struct CapturedObjectMember {
 // Returns the captured object contract when |closure| captures this and
 // |member| belongs to that object. Static fields never use object identity.
 std::optional<CapturedObjectMember> captured_object_member(
-    cxx::TranslationUnit& unit, cxx::ClassSymbol* closure,
-    cxx::FieldSymbol* member);
+    cxx::TranslationUnit& unit, cxx::ClassSymbol* closure, cxx::Symbol* member);
 
 // Returns the directly named function called by |call|, or null for indirect
 // calls and other callable expressions.
@@ -143,10 +143,6 @@ std::optional<DirectOperatorCall> direct_operator_call(
 // function, or null when the function has no implicit object parameter.
 const cxx::Type* implicit_object_type(cxx::TranslationUnit& unit,
                                       cxx::FunctionSymbol* function);
-
-// Whether a call may replace value components of its implicit object. Const
-// functions only qualify when their record declares mutable fields.
-bool implicit_object_may_mutate(cxx::FunctionSymbol* function);
 
 // Returns the declaration syntax beneath a condition's contextual conversion,
 // or null when the condition is an ordinary expression.
