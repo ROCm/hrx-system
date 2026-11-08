@@ -15,6 +15,12 @@ iree_status_t loom_serve_maintenance_initialize(
   *out_maintenance =
       (loom_serve_maintenance_t){.group = group, .policies = policies};
   loom_runtime_timer_initialize(&out_maintenance->timer);
+  loom_runtime_host_t* host =
+      group && loom_runtime_device_group_count(group)
+          ? loom_runtime_device_host(loom_runtime_device_group_at(group, 0))
+          : NULL;
+  IREE_RETURN_IF_ERROR(loom_runtime_reclamation_initialize(
+      host, iree_make_duration_ms(1000), &out_maintenance->compiler));
   if (!policy_count) {
     return iree_ok_status();
   }
@@ -42,8 +48,6 @@ iree_status_t loom_serve_maintenance_initialize(
     return iree_ok_status();
   }
   interval = iree_min(interval, iree_make_duration_ms(1000));
-  loom_runtime_host_t* host =
-      loom_runtime_device_host(loom_runtime_device_group_at(group, 0));
   iree_async_proactor_t* proactor = NULL;
   IREE_RETURN_IF_ERROR(iree_async_proactor_pool_get(
       loom_runtime_host_proactor_pool(host), 0, &proactor));
@@ -55,17 +59,18 @@ void loom_serve_maintenance_set_observer(
     loom_serve_maintenance_t* maintenance,
     loom_runtime_wake_callback_t observer) {
   loom_runtime_timer_set_observer(&maintenance->timer, observer);
+  loom_runtime_reclamation_set_observer(&maintenance->compiler, observer);
 }
 
 iree_status_t loom_serve_maintenance_advance(
     loom_serve_maintenance_t* maintenance, bool stopping, bool* out_progress) {
-  *out_progress = false;
+  iree_status_t status = loom_runtime_reclamation_advance(
+      &maintenance->compiler, stopping, out_progress);
   if (!maintenance->timer.interval) {
-    return iree_ok_status();
+    return status;
   }
   bool pending = false;
-  iree_status_t status = iree_ok_status();
-  if (!stopping) {
+  if (!stopping && iree_status_is_ok(status)) {
     IREE_TRACE_ZONE_BEGIN(z0);
     const iree_time_t now = iree_time_now();
     const iree_host_size_t count =
@@ -80,18 +85,23 @@ iree_status_t loom_serve_maintenance_advance(
     IREE_TRACE_ZONE_END(z0);
   }
   bool tick = false;
-  return iree_status_join(
-      status, loom_runtime_timer_advance(&maintenance->timer,
-                                         stopping || !iree_status_is_ok(status),
-                                         pending, out_progress, &tick));
+  bool timer_progress = false;
+  iree_status_t timer_status = loom_runtime_timer_advance(
+      &maintenance->timer, stopping || !iree_status_is_ok(status), pending,
+      &timer_progress, &tick);
+  status = iree_status_join(status, timer_status);
+  *out_progress |= timer_progress;
+  return status;
 }
 
 bool loom_serve_maintenance_is_pending(loom_serve_maintenance_t* maintenance) {
-  return maintenance->timer.interval &&
-         loom_runtime_timer_is_pending(&maintenance->timer);
+  return loom_runtime_reclamation_is_pending(&maintenance->compiler) ||
+         (maintenance->timer.interval &&
+          loom_runtime_timer_is_pending(&maintenance->timer));
 }
 
 void loom_serve_maintenance_deinitialize(
     loom_serve_maintenance_t* maintenance) {
+  loom_runtime_reclamation_deinitialize(&maintenance->compiler);
   loom_runtime_timer_deinitialize(&maintenance->timer);
 }

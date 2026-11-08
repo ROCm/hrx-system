@@ -249,6 +249,13 @@ INSTANTIATE_TEST_SUITE_P(SharedWorkers, JitConcurrentTest,
 
 TEST_P(JitTest, MixedArgumentsSurviveRecordingScratchReuseAndTrim) {
   IREE_ASSERT_OK(Compile("3", 0, IREE_SV("mixed_arguments")));
+  auto* host = loom_runtime_device_host(device_owner_);
+  EXPECT_NE(loom_runtime_host_compiler_idle_deadline(host, 0),
+            IREE_TIME_INFINITE_FUTURE);
+  IREE_ASSERT_OK(
+      loom_runtime_host_trim_compiler_idle(host, 0, iree_time_now()));
+  EXPECT_EQ(loom_runtime_host_compiler_idle_deadline(host, 0),
+            IREE_TIME_INFINITE_FUTURE);
   IREE_ASSERT_OK(Compile("5", 1, IREE_SV("mixed_arguments")));
   // Recordings retain their own arguments. Reuse the last returned arena block
   // for different host work, then release its backing before either executes.
@@ -875,6 +882,11 @@ TEST_P(JitReadinessTest, IndependentCompletionDoesNotWaitForEarlierProduct) {
   loom_runtime_compilation_report_t snapshot = {};
   loom_runtime_jit_report_snapshot(jit_, &snapshot);
   EXPECT_EQ(snapshot.commands, 1u);
+  auto* host = loom_runtime_device_host(device_owner_);
+  EXPECT_EQ(loom_runtime_host_compiler_idle_deadline(host, 0),
+            IREE_TIME_INFINITE_FUTURE);
+  IREE_EXPECT_OK(
+      loom_runtime_host_trim_compiler_idle(host, 0, iree_time_now()));
   {
     std::lock_guard<std::mutex> lock(first.mutex);
     EXPECT_FALSE(first.complete);
@@ -903,6 +915,8 @@ TEST_P(JitReadinessTest, IndependentCompletionDoesNotWaitForEarlierProduct) {
   loom_runtime_jit_stage_free(second.stage);
   IREE_ASSERT_OK(iree_status_join(status, first.status));
   EXPECT_EQ(compilation_.commands, 2u);
+  EXPECT_NE(loom_runtime_host_compiler_idle_deadline(host, 0),
+            IREE_TIME_INFINITE_FUTURE);
 }
 
 INSTANTIATE_TEST_SUITE_P(SharedWorkers, JitReadinessTest, ::testing::Values(1));

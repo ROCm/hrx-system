@@ -54,6 +54,8 @@ struct loom_serve_text_load_t {
   loomc_task_t task;
   // Allocation policy for this operation, independent of its model.
   iree_allocator_t host_allocator;
+  // Shared preparation intent through terminal producer retirement.
+  loom_runtime_host_t* host;
   // Partial model, transferred on every terminal outcome including failure.
   loom_serve_text_model_t* model;
   // Borrowed source paths and shapes, retained through terminal advance.
@@ -458,6 +460,8 @@ iree_status_t loom_serve_text_load_allocate(
     model->draft_depth = options->draft_depth;
     model->command_mode = loom_runtime_device_command_mode(device);
     loom_serve_text_state_initialize(options, host_allocator, &model->state);
+    load->host = loom_runtime_device_host(device);
+    loom_runtime_host_preparation_begin(load->host);
     *out_load = load;
   } else {
     iree_slim_mutex_deinitialize(&load->event.mutex);
@@ -631,7 +635,6 @@ iree_status_t loom_serve_text_load_advance(loom_serve_text_load_t* load,
     // of the load catalog. Every preparation producer has retired by here.
     loom_runtime_jit_release(model->jit);
     model->jit = NULL;
-    status = iree_status_join(status, loom_runtime_host_trim_compiler(host));
   }
   if (!iree_status_is_ok(status)) {
     // Binding may already have queued backing allocation. Failure of a later
@@ -665,8 +668,10 @@ void loom_serve_text_load_free(loom_serve_text_load_t* load) {
     return;
   }
   IREE_ASSERT(!load->model);
+  loom_runtime_host_t* host = load->host;
   iree_slim_mutex_deinitialize(&load->event.mutex);
   iree_allocator_free(load->host_allocator, load);
+  loom_runtime_host_preparation_end(host);
 }
 
 static void loom_serve_text_load_notify(void* user_data) {

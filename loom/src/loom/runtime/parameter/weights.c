@@ -204,6 +204,8 @@ typedef struct loom_runtime_weight_preparation_t {
   loomc_task_t task;
   // Shared preparation scheduling domain, carried through native children.
   loomc_task_sink_t sink;
+  // Borrowed host across policy evaluation, native compilation, and backing.
+  loom_runtime_host_t* host;
   // Exclusively borrowed unactivated plan through terminal completion.
   loom_runtime_weights_t* weights;
   // Borrowed source catalog through terminal completion; other jobs may
@@ -435,7 +437,9 @@ static void loom_runtime_weight_preparation_finish(
   iree_allocator_free(host_allocator, job->span_preparers);
   const loom_runtime_weights_completion_fn_t completion = job->completion;
   void* user_data = job->user_data;
+  loom_runtime_host_t* host = job->host;
   iree_allocator_free(host_allocator, job);
+  loom_runtime_host_preparation_end(host);
   completion(user_data, status);
 }
 
@@ -566,6 +570,8 @@ iree_status_t loom_runtime_weights_prepare_async(
   loomc_task_initialize(&weight_preparation_vtable, &job->task);
   weights->sink = loom_runtime_host_preparation_sink(host);
   job->sink = weights->sink;
+  job->host = host;
+  loom_runtime_host_preparation_begin(host);
   job->weights = weights;
   job->jit = jit;
   job->command_mode = command_mode;
@@ -578,6 +584,7 @@ iree_status_t loom_runtime_weights_prepare_async(
       iree_status_from_loomc(loomc_task_sink_submit(job->sink, &job->task));
   if (!iree_status_is_ok(status)) {
     iree_allocator_free(weights->host_allocator, job);
+    loom_runtime_host_preparation_end(host);
   }
   return status;
 }

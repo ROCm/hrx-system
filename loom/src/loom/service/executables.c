@@ -1032,7 +1032,10 @@ struct loom_service_choice_job_t {
 
 static void loom_service_choice_job_free(loom_service_choice_job_t* job) {
   iree_slim_mutex_deinitialize(&job->mutex);
+  loom_runtime_host_t* host =
+      loom_runtime_device_host(job->choice->owner->options.device);
   iree_allocator_free(job->choice->owner->host_allocator, job);
+  loom_runtime_host_preparation_end(host);
 }
 
 static void loom_service_choice_prepared(void* user_data,
@@ -1633,6 +1636,8 @@ static iree_status_t loom_service_choice_begin(
   if (iree_status_is_ok(status)) {
     iree_slim_mutex_initialize(&job->mutex);
     job->choice = choice;
+    loom_runtime_host_preparation_begin(
+        loom_runtime_device_host(executables->options.device));
     const loom_runtime_preparation_stage_t* selected =
         count ? loom_runtime_preparation_stage(choice->preparation, 0) : NULL;
     const loom_runtime_preparation_stage_t* retained =
@@ -1770,7 +1775,10 @@ static void loom_service_generation_complete(loom_service_generation_job_t* job,
   loom_service_generation_t* generation = job->generation;
   const loom_runtime_variant_completion_fn_t completion = job->completion;
   void* user_data = job->user_data;
+  loom_runtime_host_t* host =
+      loom_runtime_device_host(job->executables->options.device);
   iree_allocator_free(generation->host_allocator, job);
+  loom_runtime_host_preparation_end(host);
   completion(user_data, status, generation, generation->report);
 }
 
@@ -1847,13 +1855,19 @@ static iree_status_t loom_service_generation_compile(
     job->completion = completion;
     job->user_data = user_data;
     loomc_task_initialize(&executable_generation_task_vtable, &job->task);
+    loom_runtime_host_preparation_begin(
+        loom_runtime_device_host(executables->options.device));
     status = iree_status_from_loomc(loomc_task_sink_submit(
         loom_runtime_host_compiler_sink(
             loom_runtime_device_host(executables->options.device)),
         &job->task));
   }
   if (!iree_status_is_ok(status)) {
-    iree_allocator_free(executables->host_allocator, job);
+    if (job) {
+      iree_allocator_free(executables->host_allocator, job);
+      loom_runtime_host_preparation_end(
+          loom_runtime_device_host(executables->options.device));
+    }
     loom_service_generation_release(generation);
   }
   return status;

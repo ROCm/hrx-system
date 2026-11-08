@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "iree/async/util/proactor_thread.h"
+#include "iree/base/threading/mutex.h"
 #include "iree/base/threading/numa.h"
 #include "iree/hal/driver/task/driver.h"
 #include "iree/hal/driver/task/executable/loaders/registration/init.h"
@@ -47,6 +48,21 @@ struct loom_runtime_host_t {
   const struct loomc_iree_hal_target_provider_t** target_providers;
   // Number of entries in target_providers.
   iree_host_size_t target_provider_count;
+  // Compiler reuse eligibility shared by workflows and accepted jobs.
+  struct {
+    // Protects short activity transitions and observer attachment.
+    iree_slim_mutex_t mutex;
+    // Workflow intent plus compiler jobs not yet fully retired.
+    iree_host_size_t count;
+    // Monotonic time when the final preparation ended.
+    iree_time_t idle_since;
+    // Preparation has occurred since the last claimed reclamation.
+    bool dirty;
+    // One caller is trimming outside the activity lock.
+    bool trimming;
+    // Stable caller-owned wake targets; no model or compiler ownership.
+    loom_runtime_host_preparation_observer_t* observers;
+  } preparation;
   // NUMA-local I/O services outliving every attached device.
   iree_async_proactor_pool_t* proactor_pool;
 };
@@ -157,6 +173,7 @@ iree_status_t loom_runtime_host_create(
       iree_allocator_malloc(host_allocator, sizeof(*host), (void**)&host));
   host->host_allocator = host_allocator;
   iree_atomic_ref_count_init(&host->ref_count);
+  iree_slim_mutex_initialize(&host->preparation.mutex);
   iree_arena_block_pool_initialize(64 * 1024, host_allocator,
                                    &host->block_pool);
   iree_status_t status = iree_ok_status();
@@ -248,6 +265,9 @@ void loom_runtime_host_retain(loom_runtime_host_t* host) {
 
 void loom_runtime_host_release(loom_runtime_host_t* host) {
   if (IREE_LIKELY(host) && iree_atomic_ref_count_dec(&host->ref_count) == 1) {
+    // Preparation scopes and observers borrow the host through final
+    // retirement.
+    IREE_ASSERT(!host->preparation.count && !host->preparation.observers);
     iree_async_proactor_pool_release(host->proactor_pool);
     loomc_task_queue_free(host->compiler_queue);
     loomc_task_queue_free(host->preparation_queue);
@@ -262,6 +282,7 @@ void loom_runtime_host_release(loom_runtime_host_t* host) {
     loomc_target_environment_release(host->target_environment);
     iree_allocator_free(host->host_allocator, host->target_providers);
     iree_arena_block_pool_deinitialize(&host->block_pool);
+    iree_slim_mutex_deinitialize(&host->preparation.mutex);
     iree_allocator_free(host->host_allocator, host);
   }
 }
@@ -288,6 +309,100 @@ iree_status_t loom_runtime_host_trim_compiler(loom_runtime_host_t* host) {
   }
   iree_status_t status = iree_allocator_trim(host->host_allocator);
   IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+static void loom_runtime_host_preparation_notify_locked(
+    loom_runtime_host_t* host) {
+  for (loom_runtime_host_preparation_observer_t* observer =
+           host->preparation.observers;
+       observer; observer = observer->next) {
+    observer->callback.wake(observer->callback.user_data);
+  }
+}
+
+void loom_runtime_host_preparation_begin(loom_runtime_host_t* host) {
+  iree_slim_mutex_lock(&host->preparation.mutex);
+  ++host->preparation.count;
+  host->preparation.dirty = true;
+  iree_slim_mutex_unlock(&host->preparation.mutex);
+}
+
+void loom_runtime_host_preparation_end(loom_runtime_host_t* host) {
+  iree_slim_mutex_lock(&host->preparation.mutex);
+  if (!--host->preparation.count) {
+    host->preparation.idle_since = iree_time_now();
+    loom_runtime_host_preparation_notify_locked(host);
+  }
+  iree_slim_mutex_unlock(&host->preparation.mutex);
+}
+
+void loom_runtime_host_observe_preparation(
+    loom_runtime_host_t* host,
+    loom_runtime_host_preparation_observer_t* observer) {
+  iree_slim_mutex_lock(&host->preparation.mutex);
+  observer->next = host->preparation.observers;
+  host->preparation.observers = observer;
+  iree_slim_mutex_unlock(&host->preparation.mutex);
+}
+
+void loom_runtime_host_unobserve_preparation(
+    loom_runtime_host_t* host,
+    loom_runtime_host_preparation_observer_t* observer) {
+  iree_slim_mutex_lock(&host->preparation.mutex);
+  loom_runtime_host_preparation_observer_t** link =
+      &host->preparation.observers;
+  while (*link != observer) {
+    link = &(*link)->next;
+  }
+  *link = observer->next;
+  observer->next = NULL;
+  iree_slim_mutex_unlock(&host->preparation.mutex);
+}
+
+static iree_time_t loom_runtime_host_compiler_idle_deadline_locked(
+    loom_runtime_host_t* host, iree_duration_t timeout) {
+  if (host->preparation.count || !host->preparation.dirty ||
+      host->preparation.trimming || timeout == IREE_DURATION_INFINITE) {
+    return IREE_TIME_INFINITE_FUTURE;
+  }
+  return host->preparation.idle_since +
+         iree_min(timeout,
+                  IREE_TIME_INFINITE_FUTURE - 1 - host->preparation.idle_since);
+}
+
+iree_time_t loom_runtime_host_compiler_idle_deadline(loom_runtime_host_t* host,
+                                                     iree_duration_t timeout) {
+  iree_slim_mutex_lock(&host->preparation.mutex);
+  const iree_time_t deadline =
+      loom_runtime_host_compiler_idle_deadline_locked(host, timeout);
+  iree_slim_mutex_unlock(&host->preparation.mutex);
+  return deadline;
+}
+
+iree_status_t loom_runtime_host_trim_compiler_idle(loom_runtime_host_t* host,
+                                                   iree_duration_t timeout,
+                                                   iree_time_t now) {
+  iree_slim_mutex_lock(&host->preparation.mutex);
+  const iree_time_t deadline =
+      loom_runtime_host_compiler_idle_deadline_locked(host, timeout);
+  const bool eligible =
+      deadline != IREE_TIME_INFINITE_FUTURE && deadline <= now;
+  if (eligible) {
+    host->preparation.dirty = false;
+    host->preparation.trimming = true;
+  }
+  iree_slim_mutex_unlock(&host->preparation.mutex);
+  if (!eligible) {
+    return iree_ok_status();
+  }
+  iree_status_t status = loom_runtime_host_trim_compiler(host);
+  iree_slim_mutex_lock(&host->preparation.mutex);
+  host->preparation.trimming = false;
+  if (!host->preparation.count && host->preparation.dirty) {
+    loom_runtime_host_preparation_notify_locked(host);
+  }
+  iree_slim_mutex_unlock(&host->preparation.mutex);
   return status;
 }
 

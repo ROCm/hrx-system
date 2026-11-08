@@ -124,14 +124,22 @@ TEST_F(TimerTest, DeadlineProducesPeriodicTicks) {
 }
 
 TEST_F(TimerTest, FarFutureTimerStopsWithoutWaitingForItsDeadline) {
-  Configure(iree_make_duration_ms(3600000));
-  bool progress = false;
-  bool tick = false;
-  IREE_ASSERT_OK(
-      loom_runtime_timer_advance(&timer_, false, true, &progress, &tick));
-  EXPECT_TRUE(loom_runtime_timer_is_pending(&timer_));
-  IREE_ASSERT_OK(Stop());
-  EXPECT_FALSE(loom_runtime_timer_is_pending(&timer_));
+  for (const auto interval :
+       {iree_make_duration_ms(3600000), IREE_DURATION_INFINITE - 1,
+        IREE_DURATION_INFINITE}) {
+    SCOPED_TRACE(interval);
+    Configure(interval);
+    bool progress = false;
+    bool tick = false;
+    IREE_ASSERT_OK(
+        loom_runtime_timer_advance(&timer_, false, true, &progress, &tick));
+    EXPECT_GT(timer_.operation.deadline_ns, iree_time_now());
+    EXPECT_TRUE(loom_runtime_timer_is_pending(&timer_));
+    IREE_ASSERT_OK(Stop());
+    EXPECT_FALSE(loom_runtime_timer_is_pending(&timer_));
+    loom_runtime_timer_deinitialize(&timer_);
+    Initialize();
+  }
 }
 
 TEST_F(TimerTest, IneligibleTimerParksAndResumesWithoutStopping) {

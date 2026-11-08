@@ -9,6 +9,7 @@
 
 #include "loom/runtime/execution/workspace.h"
 #include "loom/runtime/host/host.h"
+#include "loom/runtime/host/reclamation.h"
 #include "loom/runtime/testing/application.h"
 #include "loom/runtime/testing/compiler.h"
 #include "loom/runtime/testing/device.h"
@@ -108,11 +109,12 @@ TEST_F(SourceTextServiceTest, PreparationActivatesWeightsOnlyWithDemand) {
   }
 }
 
-TEST_F(SourceTextServiceTest, AllocatorTrimFailureRetiresAcceptedLoad) {
+TEST_F(SourceTextServiceTest,
+       PreparedModelRemainsUsableAfterAllocatorTrimFailure) {
   struct TrimAllocator {
     // Storage provider that outlives this test's host and device group.
     iree_allocator_t backing = iree_allocator_system();
-    // Reclamation calls made by the serialized load owner.
+    // Explicit reclamation calls after terminal preparation.
     iree_host_size_t calls = 0;
     // External control failure injected independently of allocation/free.
     bool reject = true;
@@ -200,25 +202,27 @@ TEST_F(SourceTextServiceTest, AllocatorTrimFailureRetiresAcceptedLoad) {
         &wait);
     status = iree_status_join(status, wait.status);
     EXPECT_TRUE(wait.complete);
-    EXPECT_EQ(state.calls, trim_count + 1);
+    EXPECT_EQ(state.calls, trim_count);
     auto* model = loom_serve_text_load_take_model(load);
     loom_serve_text_load_free(load);
     EXPECT_EQ(loom_serve_text_model_parameter_activity(model).activations, 1u);
+    IREE_ASSERT_OK(status);
+    status = loom_runtime_host_trim_compiler_idle(host, 0, iree_time_now());
     if (reject) {
       IREE_EXPECT_STATUS_IS(IREE_STATUS_UNAVAILABLE, status);
-      ASSERT_TRUE(loom_serve_text_model_is_retired(model));
-      IREE_ASSERT_OK(loom_serve_text_model_free_retired(model));
     } else {
       IREE_ASSERT_OK(status);
-      // Compiled images and executables outlive the released load catalog.
-      auto* row = loom_serve_text_model_row(model, 0);
-      const int32_t token = Oracle::Id('a');
-      IREE_ASSERT_OK(loom_serve_text_row_prefill(row, 1, &token));
-      Oracle reference;
-      reference.Consume("a");
-      EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
-      IREE_ASSERT_OK(loom_serve_text_model_free(model));
     }
+    EXPECT_EQ(state.calls, trim_count + 1);
+    // Reclamation is independent of the successfully prepared model. Its
+    // executable owners survive both a successful and failed allocator hint.
+    auto* row = loom_serve_text_model_row(model, 0);
+    const int32_t token = Oracle::Id('a');
+    IREE_ASSERT_OK(loom_serve_text_row_prefill(row, 1, &token));
+    Oracle reference;
+    reference.Consume("a");
+    EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
+    IREE_ASSERT_OK(loom_serve_text_model_free(model));
     if (auto* memory = loom_runtime_pool_memory(pool)) {
       IREE_ASSERT_OK(loom_runtime_memory_pool_await(memory));
     }
@@ -226,6 +230,84 @@ TEST_F(SourceTextServiceTest, AllocatorTrimFailureRetiresAcceptedLoad) {
     EXPECT_FALSE(loom_runtime_pool_is_in_use(pool));
   }
   iree_notification_deinitialize(&notification);
+}
+
+TEST_F(SourceTextServiceTest,
+       GroupedPreparationReclaimsAndRetainsNativeOutput) {
+  loom_runtime_reclamation_t reclamation;
+  IREE_ASSERT_OK(loom_runtime_reclamation_initialize(host_, 0, &reclamation));
+  iree_notification_t notification;
+  iree_notification_initialize(&notification);
+  loom_runtime_reclamation_set_observer(
+      &reclamation, {[](void* payload) {
+                       iree_notification_post(
+                           static_cast<iree_notification_t*>(payload),
+                           IREE_ALL_WAITERS);
+                     },
+                     &notification});
+  loom_serve_text_model_t* models[4] = {};
+  loom_runtime_host_preparation_begin(host_);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(models) && iree_status_is_ok(status); ++i) {
+    const loom_serve_packing_shape_t shape = {4 * (i + 1), i + 1};
+    auto options = ModelOptions();
+    options.prefill_capacity = shape.token_capacity;
+    options.epoch_count = 1;
+    options.epoch_shapes = &shape;
+    status = loom_serve_text_model_allocate(device_, storage_owner_, &options,
+                                            host_allocator_, &models[i]);
+    bool progress = false;
+    status = iree_status_join(status, loom_runtime_reclamation_advance(
+                                          &reclamation, false, &progress));
+    // A gap between complete models is still inside the caller's preparation
+    // workflow. It cannot arm idle reclamation or submit a trimming task.
+    EXPECT_FALSE(loom_runtime_reclamation_is_pending(&reclamation));
+    EXPECT_EQ(loom_runtime_host_compiler_idle_deadline(host_, 0),
+              IREE_TIME_INFINITE_FUTURE);
+  }
+  loom_runtime_host_preparation_end(host_);
+  EXPECT_NE(loom_runtime_host_compiler_idle_deadline(host_, 0),
+            IREE_TIME_INFINITE_FUTURE);
+  for (;;) {
+    const auto ticket = iree_notification_prepare_wait(&notification);
+    bool progress = false;
+    iree_status_t advance_status = loom_runtime_reclamation_advance(
+        &reclamation, !iree_status_is_ok(status), &progress);
+    status = iree_status_join(status, advance_status);
+    if (!loom_runtime_reclamation_is_pending(&reclamation)) {
+      iree_notification_cancel_wait(&notification);
+      break;
+    }
+    if (progress) {
+      iree_notification_cancel_wait(&notification);
+    } else {
+      iree_notification_commit_wait(&notification, ticket, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    }
+  }
+  EXPECT_EQ(loom_runtime_host_compiler_idle_deadline(host_, 0),
+            IREE_TIME_INFINITE_FUTURE);
+  bool progress = false;
+  status = iree_status_join(
+      status, loom_runtime_reclamation_advance(&reclamation, true, &progress));
+  loom_runtime_reclamation_set_observer(&reclamation, {});
+  loom_runtime_reclamation_deinitialize(&reclamation);
+  iree_notification_deinitialize(&notification);
+  for (auto* model : models) {
+    if (model && iree_status_is_ok(status)) {
+      auto* row = loom_serve_text_model_row(model, 0);
+      const int32_t token = Oracle::Id('a');
+      status = loom_serve_text_row_prefill(row, 1, &token);
+      if (iree_status_is_ok(status)) {
+        Oracle reference;
+        reference.Consume("a");
+        EXPECT_EQ(loom_serve_text_row_token(row), reference.Predict());
+      }
+    }
+    status = iree_status_join(status, loom_serve_text_model_free(model));
+  }
+  IREE_ASSERT_OK(status);
 }
 
 TEST_F(SourceTextServiceTest, IndependentParameterPreparationJoinsAllDomains) {

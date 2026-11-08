@@ -10,6 +10,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/hal/api.h"
 #include "iree/task/executor.h"
+#include "loom/runtime/wake.h"
 #include "loomc/target.h"
 #include "loomc/task.h"
 #include "loomc/task_pool.h"
@@ -87,6 +88,44 @@ loomc_workspace_t* loom_runtime_host_compiler_workspace(
 // This is cold-path reclamation and propagates allocator control failures.
 // Device-only hosts forward the allocator hint without compiler scratch.
 iree_status_t loom_runtime_host_trim_compiler(loom_runtime_host_t* host);
+
+// One caller-owned preparation observer. Registration and final detachment
+// serialize with callbacks; the observer only schedules its consumer.
+typedef struct loom_runtime_host_preparation_observer_t {
+  // Borrowed wake target through unobserve.
+  loom_runtime_wake_callback_t callback;
+  // Host-owned intrusive linkage while registered.
+  struct loom_runtime_host_preparation_observer_t* next;
+} loom_runtime_host_preparation_observer_t;
+
+// Nested preparation intent, shared by workflows and accepted compiler jobs.
+// The caller keeps host alive and ends only after its last actual borrower.
+void loom_runtime_host_preparation_begin(loom_runtime_host_t* host);
+void loom_runtime_host_preparation_end(loom_runtime_host_t* host);
+
+// Observers are stable while registered. Detachment joins the last callback.
+void loom_runtime_host_observe_preparation(
+    loom_runtime_host_t* host,
+    loom_runtime_host_preparation_observer_t* observer);
+void loom_runtime_host_unobserve_preparation(
+    loom_runtime_host_t* host,
+    loom_runtime_host_preparation_observer_t* observer);
+
+// Earliest reclamation time after the last preparation ends. Infinite means
+// preparation is active, another trim owns reclamation, or no new work
+// occurred. timeout is nonnegative and selected by the owner's idle policy;
+// an infinite duration disables automatic reclamation.
+iree_time_t loom_runtime_host_compiler_idle_deadline(loom_runtime_host_t* host,
+                                                     iree_duration_t timeout);
+
+// Rechecks current host activity at execution time and claims eligible scratch
+// once across independent observers. Allocation control runs outside the host
+// lock. A new arrival never waits for reclamation; any later-returned scratch
+// becomes eligible after that activity ends. Allocator failures return to the
+// invoking owner, and are not retried until another preparation occurs.
+iree_status_t loom_runtime_host_trim_compiler_idle(loom_runtime_host_t* host,
+                                                   iree_duration_t timeout,
+                                                   iree_time_t now);
 
 // Shared backing for short-lived CPU work arenas. Each invocation owns its
 // arena and returns its blocks after all borrowers retire. The thread-safe pool

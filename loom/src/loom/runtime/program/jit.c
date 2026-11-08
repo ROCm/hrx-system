@@ -426,6 +426,7 @@ static iree_status_t loom_runtime_jit_create_impl(
         IREE_STATUS_FAILED_PRECONDITION,
         "serving host has no compiler target configuration");
   }
+  loom_runtime_host_preparation_begin(host);
   loomc_target_environment_retain(jit->kernel.environment);
   loom_runtime_native_cache_t* native_cache =
       loom_runtime_host_native_cache(host);
@@ -502,6 +503,7 @@ static iree_status_t loom_runtime_jit_create_impl(
   } else {
     loom_runtime_jit_release(jit);
   }
+  loom_runtime_host_preparation_end(host);
   return status;
 }
 
@@ -1020,6 +1022,7 @@ static iree_status_t loom_runtime_jit_job_bind(loom_runtime_jit_job_t* job) {
 // across the callback.
 static void loom_runtime_jit_job_complete(loom_runtime_jit_job_t* job) {
   loom_runtime_jit_t* jit = job->jit;
+  loom_runtime_host_t* host = jit->compilation.host;
   loom_runtime_jit_publication_t* publication = job->publication;
   const loom_runtime_jit_completion_fn_t completion = job->completion;
   void* user_data = job->user_data;
@@ -1027,6 +1030,7 @@ static void loom_runtime_jit_job_complete(loom_runtime_jit_job_t* job) {
   loom_runtime_jit_stage_t* stage = job->stage;
   iree_allocator_free(publication->host_allocator, job);
   loom_runtime_jit_release(jit);
+  loom_runtime_host_preparation_end(host);
   if (completion) {
     completion(user_data, status, stage);
   }
@@ -1638,6 +1642,7 @@ static iree_status_t loom_runtime_jit_enqueue(
   job->start = iree_time_now();
   loom_runtime_jit_retain(jit);
   loom_runtime_jit_publication_retain(job->publication);
+  loom_runtime_host_preparation_begin(jit->compilation.host);
   iree_status_t status =
       iree_status_from_loomc(loomc_task_sink_submit(sink, &job->base));
   if (!iree_status_is_ok(status)) {
@@ -1937,6 +1942,7 @@ iree_status_t loom_runtime_jit_compile_vm_cached(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "VM program requires at least one source root");
   }
+  loom_runtime_host_preparation_begin(jit->compilation.host);
   loomc_source_t* source = NULL;
   iree_status_t status = iree_ok_status();
   if (source_path.size) {
@@ -1970,5 +1976,6 @@ iree_status_t loom_runtime_jit_compile_vm_cached(
   }
   loom_runtime_jit_report_merge(jit, &report);
   loomc_source_release(source);
+  loom_runtime_host_preparation_end(jit->compilation.host);
   return status;
 }
