@@ -64,6 +64,15 @@ loom_check_test_suite(
 )
 
 loom_check_test(
+    name = "reference_evaluation_test",
+    src = "reference_evaluation.cxx-test",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/import:cxx",
+        "//loom/config/emit:vm_binary",
+    ]),
+)
+
+loom_check_test(
     name = "special_members_test",
     src = "special_members.cxx-test",
     target_compatible_with = loom_config_compatible_with([
