@@ -11,15 +11,9 @@
           "--output={tmp}/duplicate.loombc"
         ]
       },
-      "exit": {
-        "nonzero": true
-      },
-      "stdout": {
-        "empty": true
-      },
-      "stderr": {
-        "non_empty": true
-      },
+      "exit": {"nonzero": true},
+      "stdout": {"empty": true},
+      "stderr": {"non_empty": true},
       "files": [{"path": "{tmp}/duplicate.loombc", "exists": false}]
     },
     {
@@ -28,51 +22,51 @@
         "tool": "loom-format",
         "args": ["--agents_md"]
       },
-      "stdout": {
-        "non_empty": true
-      }
+      "stdout": {"non_empty": true}
     },
     {
-      "name": "accepts canonical text in check mode",
-      "run": {
-        "tool": "loom-format",
-        "args": ["--check"]
-      },
-      "stdin": {
-        "text": "func.def @identity(%value: index) -> (index) {\n  func.return %value : index\n}\n"
-      },
-      "stdout": {
-        "empty": true
-      }
-    },
-    {
-      "name": "keeps separated license and overview paragraphs canonical",
-      "run": {
-        "tool": "loom-format",
-        "args": ["--check"]
-      },
-      "stdin": {
-        "text": "// Copyright Example Authors\n// SPDX-License-Identifier: MIT\n\n// File-level overview.\n\nfunc.def @identity(%value: index) -> (index) {\n  func.return %value : index\n}\n"
-      },
-      "stdout": {
-        "empty": true
-      }
-    },
-    {
-      "name": "checks multiple canonical text files",
+      "name": "checks every batch input and reports failures",
       "steps": [
         {
-          "name": "write-first-source",
+          "name": "write-canonical-source",
           "write": {
-            "path": "{tmp}/first.loom",
-            "text": "func.def @first(%value: index) -> (index) {\n  func.return %value : index\n}\n"
+            "path": "{tmp}/canonical.loom",
+            "text": "// Copyright Example Authors\n// SPDX-License-Identifier: MIT\n\n// File-level overview.\n\nfunc.def @identity(%value: index) -> (index) {\n  func.return %value : index\n}\n"
           }
         },
         {
-          "name": "write-second-source",
+          "name": "write-portable-command-source",
           "write": {
-            "path": "{tmp}/second.loom",
-            "text": "func.def @second(%value: i32) -> (i32) {\n  func.return %value : i32\n}\n"
+            "path": "{tmp}/portable.loom",
+            "text": "low.func.def target<cmd.core> abi(command_program) @empty() asm {\n  return\n}\n"
+          }
+        },
+        {
+          "name": "write-target-test-container",
+          "write": {
+            "path": "{tmp}/target.loom-test",
+            "text": "// RUN: verify\n\ntest.target<low_core> @test_target\n\nlow.func.def target<test.low.core>(@test_target) @add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {\n  %sum = test.add.i32 %lhs, %rhs\n  return %sum\n}\n"
+          }
+        },
+        {
+          "name": "write-annotated-invalid-test-container",
+          "write": {
+            "path": "{tmp}/annotated-invalid.loom-test",
+            "text": "// RUN: verify\n\n// ERROR@+1: TYPE/003 {operand_name=\"predicates[0].arg[0]\", actual_type=\"f32\", expected_constraint=\"integer, index, or offset scalar\"}\nfunc.def @invalid(%value: f32) where [eq(%value, 4)] {\n  func.return\n}\n"
+          }
+        },
+        {
+          "name": "write-noncanonical-source",
+          "write": {
+            "path": "{tmp}/noncanonical.loom",
+            "text": "\nfunc.def @noncanonical(%value: index) -> (index) {\n  func.return %value : index\n}\n"
+          }
+        },
+        {
+          "name": "write-invalid-source",
+          "write": {
+            "path": "{tmp}/invalid.loom",
+            "text": "func.def @invalid(%value: index) -> (index) {\n  %result = func.call @missing(%value) : (index) -> (index)\n  func.return %result : index\n}\n"
           }
         },
         {
@@ -81,27 +75,62 @@
             "tool": "loom-format",
             "args": [
               "--check",
-              "{tmp}/first.loom",
-              "{tmp}/second.loom"
+              "{tmp}/canonical.loom",
+              "{tmp}/portable.loom",
+              "{tmp}/target.loom-test",
+              "{tmp}/annotated-invalid.loom-test",
+              "{tmp}/noncanonical.loom",
+              "{tmp}/invalid.loom"
             ]
           },
-          "stdout": {
-            "contains": ["loom-format: PASS (2 checked, 0 failed)"]
-          },
+          "exit": {"nonzero": true},
+          "stdout": {"empty": true},
           "stderr": {
-            "empty": true
+            "contains": [
+              "noncanonical.loom' is not canonically formatted",
+              "invalid.loom",
+              "loom-format: FAIL (6 checked, 2 failed)"
+            ]
           }
         }
       ]
     },
     {
-      "name": "formats multiple verified text files in place",
+      "name": "formats files and preserves rejected inputs",
       "steps": [
+        {
+          "name": "write-expected-target-source",
+          "write": {
+            "path": "{tmp}/expected-target.loom",
+            "text": "test.target<low_core> @target\n\nlow.func.def target<test.low.core>(@target) @identity(%value: reg<test.i32>) -> (reg<test.i32>) asm {\n  return %value\n}\n"
+          }
+        },
+        {
+          "name": "encode-target-source",
+          "run": {
+            "tool": "loom-format",
+            "args": [
+              "--from=text",
+              "--to=bc",
+              "--output={tmp}/target.loombc"
+            ]
+          },
+          "stdin": {"file": "{tmp}/expected-target.loom"},
+          "stdout": {"empty": true},
+          "stderr": {"empty": true}
+        },
         {
           "name": "write-noncanonical-source",
           "write": {
             "path": "{tmp}/noncanonical.loom",
             "text": "\nfunc.def @noncanonical(%value: index) -> (index) {\n  func.return %value : index\n}\n"
+          }
+        },
+        {
+          "name": "write-expected-canonical-source",
+          "write": {
+            "path": "{tmp}/expected-canonical.loom",
+            "text": "func.def @noncanonical(%value: index) -> (index) {\n  func.return %value : index\n}\n"
           }
         },
         {
@@ -112,48 +141,6 @@
           }
         },
         {
-          "name": "format",
-          "run": {
-            "tool": "loom-format",
-            "args": [
-              "--in-place",
-              "{tmp}/noncanonical.loom",
-              "{tmp}/canonical.loom"
-            ]
-          },
-          "stdout": {
-            "contains": [
-              "loom-format: formatted",
-              "loom-format: 1 formatted, 1 unchanged, 0 failed"
-            ]
-          },
-          "stderr": {
-            "empty": true
-          }
-        },
-        {
-          "name": "check",
-          "run": {
-            "tool": "loom-format",
-            "args": [
-              "--check",
-              "{tmp}/noncanonical.loom",
-              "{tmp}/canonical.loom"
-            ]
-          },
-          "stdout": {
-            "contains": ["loom-format: PASS (2 checked, 0 failed)"]
-          },
-          "stderr": {
-            "empty": true
-          }
-        }
-      ]
-    },
-    {
-      "name": "formats loom test inputs and preserves container sections",
-      "steps": [
-        {
           "name": "write-test-container",
           "write": {
             "path": "{tmp}/source.loom-test",
@@ -161,135 +148,10 @@
           }
         },
         {
-          "name": "format",
-          "run": {
-            "tool": "loom-format",
-            "args": ["--in-place", "{tmp}/source.loom-test"]
-          },
-          "stdout": {
-            "contains": ["loom-format: 1 formatted, 0 unchanged, 0 failed"]
-          },
-          "stderr": {
-            "empty": true
-          }
-        },
-        {
-          "name": "check",
-          "run": {
-            "tool": "loom-format",
-            "args": ["--check", "{tmp}/source.loom-test"]
-          },
-          "stdout": {
-            "empty": true
-          },
-          "stderr": {
-            "empty": true
-          }
-        }
-      ]
-    },
-    {
-      "name": "checks synthetic target loom test inputs",
-      "steps": [
-        {
-          "name": "write-test-container",
+          "name": "write-expected-test-container",
           "write": {
-            "path": "{tmp}/target.loom-test",
-            "text": "// RUN: verify\n\ntest.target<low_core> @test_target\n\nlow.func.def target<test.low.core>(@test_target) @add(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {\n  %sum = test.add.i32 %lhs, %rhs\n  return %sum\n}\n"
-          }
-        },
-        {
-          "name": "check",
-          "run": {
-            "tool": "loom-format",
-            "args": ["--check", "{tmp}/target.loom-test"]
-          },
-          "stdout": {
-            "empty": true
-          },
-          "stderr": {
-            "empty": true
-          }
-        }
-      ]
-    },
-    {
-      "name": "preserves annotated invalid fixtures through compiler results",
-      "steps": [
-        {
-          "name": "write-test-container",
-          "write": {
-            "path": "{tmp}/invalid.loom-test",
-            "text": "// RUN: verify\n\n// ERROR@+1: TYPE/003 {operand_name=\"predicates[0].arg[0]\", actual_type=\"f32\", expected_constraint=\"integer, index, or offset scalar\"}\nfunc.def @invalid(%value: f32) where [eq(%value, 4)] {\n  func.return\n}\n"
-          }
-        },
-        {
-          "name": "check",
-          "run": {
-            "tool": "loom-format",
-            "args": ["--check", "{tmp}/invalid.loom-test"]
-          },
-          "stdout": {"empty": true},
-          "stderr": {"empty": true}
-        }
-      ]
-    },
-    {
-      "name": "round trips synthetic target assembly through bytecode",
-      "steps": [
-        {
-          "name": "write-expected",
-          "write": {
-            "path": "{tmp}/expected.loom",
-            "text": "test.target<low_core> @target\n\nlow.func.def target<test.low.core>(@target) @identity(%value: reg<test.i32>) -> (reg<test.i32>) asm {\n  return %value\n}\n"
-          }
-        },
-        {
-          "name": "encode",
-          "run": {
-            "tool": "loom-format",
-            "args": ["--to=bc", "--output={tmp}/target.loombc"]
-          },
-          "stdin": {
-            "text": "test.target<low_core> @target\n\nlow.func.def target<test.low.core>(@target) @identity(%value: reg<test.i32>) -> (reg<test.i32>) asm {\n  return %value\n}\n"
-          }
-        },
-        {
-          "name": "decode",
-          "run": {
-            "tool": "loom-format",
-            "args": ["--to=text", "{tmp}/target.loombc"]
-          },
-          "stdout": {"save": "{tmp}/actual.loom"},
-          "stderr": {"empty": true},
-          "files": [{"path": "{tmp}/actual.loom", "equals": "{tmp}/expected.loom"}]
-        }
-      ]
-    },
-    {
-      "name": "checks portable command low IR",
-      "run": {
-        "tool": "loom-format",
-        "args": ["--check"]
-      },
-      "stdin": {
-        "text": "low.func.def target<cmd.core> abi(command_program) @empty() asm {\n  return\n}\n"
-      },
-      "stdout": {
-        "empty": true
-      },
-      "stderr": {
-        "empty": true
-      }
-    },
-    {
-      "name": "reports every batch check failure",
-      "steps": [
-        {
-          "name": "write-noncanonical-source",
-          "write": {
-            "path": "{tmp}/noncanonical.loom",
-            "text": "\nfunc.def @noncanonical(%value: index) -> (index) {\n  func.return %value : index\n}\n"
+            "path": "{tmp}/expected-source.loom-test",
+            "text": "// RUN: verify\n\nfunc.def @identity(%value: index) -> (index) {\n  func.return %value : index\n}\n\n// Input commentary remains attached to the container.\n\n// ----\npurposefully  noncanonical expected output\n"
           }
         },
         {
@@ -300,66 +162,75 @@
           }
         },
         {
-          "name": "check",
+          "name": "write-expected-invalid-source",
+          "write": {
+            "path": "{tmp}/expected-invalid.loom",
+            "text": "func.def @invalid(%value: index) -> (index) {\n  %result = func.call @missing(%value) : (index) -> (index)\n  func.return %result : index\n}\n"
+          }
+        },
+        {
+          "name": "format",
           "run": {
             "tool": "loom-format",
             "args": [
-              "--check",
+              "--in-place",
               "{tmp}/noncanonical.loom",
-              "{tmp}/invalid.loom"
+              "{tmp}/canonical.loom",
+              "{tmp}/source.loom-test",
+              "{tmp}/invalid.loom",
+              "{tmp}/target.loombc"
             ]
           },
-          "exit": {
-            "nonzero": true
+          "exit": {"nonzero": true},
+          "stdout": {
+            "contains": [
+              "loom-format: formatted",
+              "noncanonical.loom",
+              "loom-format: formatted",
+              "source.loom-test"
+            ]
           },
           "stderr": {
             "contains": [
-              "noncanonical.loom' is not canonically formatted",
-              "loom-format: FAIL (2 checked, 2 failed)"
+              "invalid.loom",
+              "target.loombc' contains bc",
+              "loom-format: 2 formatted, 1 unchanged, 2 failed"
             ]
-          }
-        }
-      ]
-    },
-    {
-      "name": "does not rewrite an invalid in-place input",
-      "steps": [
-        {
-          "name": "write-invalid-source",
-          "write": {
-            "path": "{tmp}/invalid.loom",
-            "text": "func.def @invalid(%value: index) -> (index) {\n  %result = func.call @missing(%value) : (index) -> (index)\n  func.return %result : index\n}\n"
-          }
+          },
+          "files": [
+            {
+              "path": "{tmp}/noncanonical.loom",
+              "equals": "{tmp}/expected-canonical.loom"
+            },
+            {
+              "path": "{tmp}/source.loom-test",
+              "equals": "{tmp}/expected-source.loom-test"
+            },
+            {
+              "path": "{tmp}/invalid.loom",
+              "equals": "{tmp}/expected-invalid.loom"
+            },
+            {"path": "{tmp}/target.loombc", "non_empty": true}
+          ]
         },
         {
-          "name": "format",
+          "name": "decode-target-source",
           "run": {
             "tool": "loom-format",
-            "args": ["--in-place", "{tmp}/invalid.loom"]
-          },
-          "exit": {
-            "nonzero": true
-          },
-          "stderr": {
-            "contains": [
-              "loom-format: 0 formatted, 0 unchanged, 1 failed"
+            "args": [
+              "--from=bc",
+              "--to=text",
+              "{tmp}/target.loombc"
             ]
-          }
-        },
-        {
-          "name": "format-again",
-          "run": {
-            "tool": "loom-format",
-            "args": ["--in-place", "{tmp}/invalid.loom"]
           },
-          "exit": {
-            "nonzero": true
-          },
-          "stderr": {
-            "contains": [
-              "loom-format: 0 formatted, 0 unchanged, 1 failed"
-            ]
-          }
+          "stdout": {"save": "{tmp}/actual-target.loom"},
+          "stderr": {"empty": true},
+          "files": [
+            {
+              "path": "{tmp}/actual-target.loom",
+              "equals": "{tmp}/expected-target.loom"
+            }
+          ]
         }
       ]
     },
@@ -369,9 +240,7 @@
         "tool": "loom-format",
         "args": ["--in-place"]
       },
-      "exit": {
-        "nonzero": true
-      },
+      "exit": {"nonzero": true},
       "stderr": {
         "contains": ["--in-place requires at least one input file"]
       }
@@ -382,82 +251,9 @@
         "tool": "loom-format",
         "args": ["--check", "--in-place"]
       },
-      "exit": {
-        "nonzero": true
-      },
+      "exit": {"nonzero": true},
       "stderr": {
         "contains": ["--check and --in-place are mutually exclusive"]
-      }
-    },
-    {
-      "name": "does not rewrite bytecode in place",
-      "steps": [
-        {
-          "name": "write-source",
-          "write": {
-            "path": "{tmp}/source.loom",
-            "text": "func.def @identity(%value: index) -> (index) {\n  func.return %value : index\n}\n"
-          }
-        },
-        {
-          "name": "encode",
-          "run": {
-            "tool": "loom-format",
-            "args": [
-              "--from=text",
-              "--to=bc",
-              "--output={tmp}/source.loombc",
-              "{tmp}/source.loom"
-            ]
-          }
-        },
-        {
-          "name": "format",
-          "run": {
-            "tool": "loom-format",
-            "args": ["--in-place", "{tmp}/source.loombc"]
-          },
-          "exit": {
-            "nonzero": true
-          },
-          "stderr": {
-            "contains": [
-              "--in-place requires text input",
-              "contains bc",
-              "loom-format: 0 formatted, 0 unchanged, 1 failed"
-            ]
-          }
-        },
-        {
-          "name": "decode",
-          "run": {
-            "tool": "loom-format",
-            "args": [
-              "--from=bc",
-              "--to=text",
-              "{tmp}/source.loombc"
-            ]
-          },
-          "stdout": {
-            "non_empty": true
-          }
-        }
-      ]
-    },
-    {
-      "name": "rejects noncanonical text in check mode",
-      "run": {
-        "tool": "loom-format",
-        "args": ["--check"]
-      },
-      "stdin": {
-        "text": "\nfunc.def @identity(%value: index) -> (index) {\n  func.return %value : index\n}\n"
-      },
-      "exit": {
-        "nonzero": true
-      },
-      "stderr": {
-        "contains": ["is not canonically formatted"]
       }
     }
   ]
