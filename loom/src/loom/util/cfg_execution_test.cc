@@ -11,7 +11,9 @@
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/util/cfg_dominance.h"
 #include "loom/util/cfg_graph_test_util.h"
+#include "loom/util/cfg_loop_nest.h"
 
 namespace loom {
 namespace {
@@ -85,6 +87,36 @@ TEST_F(CfgExecutionTest, ModeledLoopSelectorPreservesBodyCounts) {
   // body controls blocks 3 and 4, then reconverges at the latch in block 5.
   EXPECT_EQ(Classify({{1}, {2, 6}, {3, 4}, {5}, {5}, {1}, {}}, {1}),
             (std::vector<bool>{false, false, false, true, true, false, false}));
+}
+
+TEST_F(CfgExecutionTest, FixedLoopCountsSurviveConditionalPrefetch) {
+  testing::CfgGraph fixture({{1}, {2, 6}, {3, 4}, {5}, {5}, {1}, {}});
+  loom_cfg_dominance_t dominance;
+  IREE_ASSERT_OK(loom_cfg_dominance_build(fixture.get(), &arena_, &dominance));
+  loom_cfg_loop_nest_t loops;
+  IREE_ASSERT_OK(
+      loom_cfg_loop_nest_build(fixture.get(), &dominance, &arena_, &loops));
+  ASSERT_EQ(loops.loop_count, 1u);
+  loom_cfg_control_t control;
+  IREE_ASSERT_OK(loom_cfg_control_build(fixture.get(), &arena_, &control));
+  const uint64_t trips[] = {88};
+  uint64_t storage[7];
+  loom_cfg_execution_counts_t counts;
+
+  // A whole-function transport path still requires modeled successors only.
+  IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
+      &loops, trips, nullptr, &arena_, storage, &counts));
+  EXPECT_EQ(counts.values, nullptr);
+
+  IREE_ASSERT_OK(loom_cfg_execution_counts_calculate(
+      &loops, trips, &control, &arena_, storage, &counts));
+  ASSERT_NE(counts.values, nullptr);
+  const bool exact[] = {true, true, true, false, false, true, true};
+  const uint64_t expected[] = {1, 89, 88, 88, 88, 88, 1};
+  for (uint16_t i = 0; i < 7; ++i) {
+    EXPECT_EQ(loom_cfg_execution_count_is_exact(&counts, i), exact[i]);
+    EXPECT_EQ(counts.values[i], expected[i]);
+  }
 }
 
 TEST_F(CfgExecutionTest, UnavailableControlKeepsReachableBlocksConservative) {
