@@ -5,7 +5,6 @@
 
 #include "loom/serve/testing/text_policy.h"
 
-#include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "loom/model/card.h"
 #include "loom/runtime/program/input.h"
@@ -43,7 +42,7 @@ void loom_serve_test_text_policy_free(loom_serve_test_text_policy_t* policy) {
 
 iree_status_t loom_serve_test_text_policy_allocate(
     const loom_runtime_sources_t* requested_sources,
-    iree_string_view_t tokenizer_path, iree_string_view_t options,
+    iree_string_view_t tokenizer_locator, iree_string_view_t options,
     loom_runtime_compilation_report_t* report, iree_allocator_t host_allocator,
     loom_serve_test_text_policy_t** out_policy) {
   *out_policy = NULL;
@@ -66,19 +65,20 @@ iree_status_t loom_serve_test_text_policy_allocate(
   if (iree_status_is_ok(status)) {
     status = iree_vm_environment_allocate(host_allocator, &policy->environment);
   }
-  iree_io_file_contents_t* tokenizer_contents = NULL;
+  loomc_source_t* tokenizer_source = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_io_file_contents_read(tokenizer_path, host_allocator,
-                                        &tokenizer_contents);
+    status = loom_runtime_sources_open(policy->sources, tokenizer_locator,
+                                       host_allocator, &tokenizer_source);
   }
   if (iree_status_is_ok(status)) {
+    const loomc_byte_span_t tokenizer_contents =
+        loomc_source_contents(tokenizer_source);
     status = iree_tokenizer_from_huggingface_json(
-        iree_make_string_view(
-            (const char*)tokenizer_contents->const_buffer.data,
-            tokenizer_contents->const_buffer.data_length),
+        iree_make_string_view((const char*)tokenizer_contents.data,
+                              tokenizer_contents.data_length),
         host_allocator, &policy->tokenizer);
   }
-  iree_io_file_contents_free(tokenizer_contents);
+  loomc_source_release(tokenizer_source);
   iree_vm_module_t* libraries[3] = {0};
   if (iree_status_is_ok(status)) {
     status = loom_runtime_input_module_create(

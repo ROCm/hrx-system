@@ -4,6 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_fuzz", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:python.bzl", "loom_py_test")
 load("//loom/src/loom/serve/fixture/text:sources.bzl", TEXT_SOURCES = "SOURCES")
@@ -538,18 +539,12 @@ loom_cc_test(
 loom_cc_test(
     name = "chat_policy_test",
     srcs = ["chat_policy_test.cc"],
-    data = [
-        "//loom/src/loom/serve/fixture/text:control.loom",
-        "//loom/src/loom/serve/fixture/text:tokenizer.json",
-    ],
-    env = {
-        "LOOM_SERVE_TEST_CHAT_CONTROL": "$(rootpath //loom/src/loom/serve/fixture/text:control.loom)",
-        "LOOM_SERVE_TEST_CHAT_TOKENIZER": "$(rootpath //loom/src/loom/serve/fixture/text:tokenizer.json)",
-    },
     deps = [
         ":chat",
+        ":chat_policy_data",
         ":input",
         "//loom/src/loom/runtime/program:compilation",
+        "//loom/src/loom/runtime/program:package",
         "//loom/src/loom/serve/media:image_codec",
         "//loom/src/loom/serve/media:image_codecs",
         "//loom/src/loom/serve/testing:text_policy",
@@ -562,27 +557,36 @@ loom_cc_test(
     ],
 )
 
+iree_c_embed_data(
+    name = "chat_policy_data",
+    testonly = True,
+    srcs = [
+        "//loom/src/loom/serve/fixture/text:control.loom",
+        "//loom/src/loom/serve/fixture/text:portable_chat.loom",
+        "//loom/src/loom/serve/fixture/text:tokenizer.json",
+    ],
+    c_file_output = "chat_policy_data.c",
+    flatten = True,
+    h_file_output = "chat_policy_data.h",
+    identifier = "loom_chat_policy_data",
+)
+
 loom_cc_fuzz(
     name = "chat_fuzz",
     srcs = ["chat_fuzz.cc"],
     args = [
-        "--loom_control=$(rootpath //loom/src/loom/serve/fixture/text:portable_chat.loom)",
-        "--loom_media_control=$(rootpath //loom/src/loom/serve/fixture/text:control.loom)",
-        "--loom_tokenizer=$(rootpath //loom/src/loom/serve/fixture/text:tokenizer.json)",
         "-seed_inputs=" + ",".join([
             "$(rootpath %s)" % seed
             for seed in CHAT_FUZZ_SEEDS
         ]),
     ],
-    data = CHAT_FUZZ_SEEDS + [
-        "//loom/src/loom/serve/fixture/text:control.loom",
-        "//loom/src/loom/serve/fixture/text:portable_chat.loom",
-        "//loom/src/loom/serve/fixture/text:tokenizer.json",
-    ],
+    data = CHAT_FUZZ_SEEDS,
     target_compatible_with = loom_config_compatible_with(["//loom/config/serve:image_input_enabled"]),
     deps = [
         ":chat",
+        ":chat_policy_data",
         "//loom/src/loom/runtime/program:compilation",
+        "//loom/src/loom/runtime/program:package",
         "//loom/src/loom/runtime/program:sources",
         "//loom/src/loom/serve/testing:text_policy",
         "//loom/src/loom/util:json",

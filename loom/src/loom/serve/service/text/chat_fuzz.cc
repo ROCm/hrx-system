@@ -8,14 +8,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <string_view>
+#include <vector>
 
 #include "iree/base/api.h"
 #include "iree/base/internal/base64.h"
 #include "iree/base/string_builder.h"
 #include "loom/runtime/program/compilation.h"
+#include "loom/runtime/program/package.h"
 #include "loom/runtime/program/sources.h"
 #include "loom/serve/service/text/chat.h"
+#include "loom/serve/service/text/chat_policy_data.h"
 #include "loom/serve/testing/text_policy.h"
 #include "loom/util/json.h"
 
@@ -25,32 +27,46 @@ constexpr size_t kMaximumBodyLength = 8 * 1024 * 1024;
 constexpr size_t kMaximumStructuredInputLength =
     (kMaximumBodyLength - 4096) / 6;
 constexpr size_t kMaximumImageInputLength = 1024 * 1024 - 4096;
-std::string control_path;
-std::string media_control_path;
-std::string tokenizer_path;
 
-void CheckSourcePaths() {
-  IREE_CHECK_OK(
-      !control_path.empty() && !media_control_path.empty() &&
-              !tokenizer_path.empty()
-          ? iree_ok_status()
-          : iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                             "chat fuzzer source paths are required"));
-}
+class Package {
+ public:
+  Package() {
+    const iree_file_toc_t* entries = loom_chat_policy_data_create();
+    std::vector<loom_runtime_package_file_t> files;
+    files.reserve(loom_chat_policy_data_size());
+    for (size_t i = 0; i < loom_chat_policy_data_size(); ++i) {
+      files.push_back({
+          .path = iree_make_cstring_view(entries[i].name),
+          .contents =
+              iree_make_const_byte_span(entries[i].data, entries[i].size),
+      });
+    }
+    IREE_CHECK_OK(loom_runtime_package_create(
+        IREE_SV("model.json"), files.size(), files.data(),
+        iree_allocator_system(), &value_));
+  }
+
+  ~Package() { loom_runtime_package_release(value_); }
+
+  loom_runtime_package_t* get() const { return value_; }
+
+ private:
+  // Immutable embedded policy programs and tokenizer retained by environments.
+  loom_runtime_package_t* value_ = nullptr;
+};
 
 class Environment {
  public:
-  explicit Environment(const std::string& source_path) {
+  Environment(loom_runtime_package_t* package,
+              iree_string_view_t control_locator) {
     const loom_runtime_sources_t sources = {
-        .base_directory = IREE_SV("."),
-        .control =
-            iree_make_string_view(source_path.data(), source_path.size()),
+        .control = control_locator,
+        .package = package,
     };
     loom_runtime_compilation_report_t report = {};
     IREE_CHECK_OK(loom_serve_test_text_policy_allocate(
-        &sources,
-        iree_make_string_view(tokenizer_path.data(), tokenizer_path.size()),
-        IREE_SV("{}"), &report, iree_allocator_system(), &owner_));
+        &sources, IREE_SV("tokenizer.json"), IREE_SV("{}"), &report,
+        iree_allocator_system(), &owner_));
   }
 
   ~Environment() { loom_serve_test_text_policy_free(owner_); }
@@ -66,8 +82,12 @@ class Environment {
 
 class Environments {
  public:
-  Environments() : chat(control_path), media(media_control_path) {}
+  Environments()
+      : chat(package.get(), IREE_SV("portable_chat.loom")),
+        media(package.get(), IREE_SV("control.loom")) {}
 
+  // Embedded immutable namespace retained before either compiled policy.
+  Package package;
   // Tool-capable independent source used for arbitrary text requests.
   Environment chat;
   // Image-capable source used for PAM-backed media requests.
@@ -200,26 +220,8 @@ void Exercise(const loom_serve_text_chat_policy_t* policy,
 }  // namespace
 
 extern "C" int LLVMFuzzerInitialize(int* argc, char*** argv) {
-  constexpr std::string_view kControlPrefix = "--loom_control=";
-  constexpr std::string_view kMediaControlPrefix = "--loom_media_control=";
-  constexpr std::string_view kTokenizerPrefix = "--loom_tokenizer=";
-  int retained = 1;
-  for (int i = 1; i < *argc; ++i) {
-    const std::string_view argument((*argv)[i]);
-    if (argument.compare(0, kControlPrefix.size(), kControlPrefix) == 0) {
-      control_path.assign(argument.substr(kControlPrefix.size()));
-    } else if (argument.compare(0, kMediaControlPrefix.size(),
-                                kMediaControlPrefix) == 0) {
-      media_control_path.assign(argument.substr(kMediaControlPrefix.size()));
-    } else if (argument.compare(0, kTokenizerPrefix.size(), kTokenizerPrefix) ==
-               0) {
-      tokenizer_path.assign(argument.substr(kTokenizerPrefix.size()));
-    } else {
-      (*argv)[retained++] = (*argv)[i];
-    }
-  }
-  *argc = retained;
-  CheckSourcePaths();
+  (void)argc;
+  (void)argv;
   (void)GetEnvironments();
   return 0;
 }
