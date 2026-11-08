@@ -146,6 +146,22 @@ iree_status_t loom_low_lower_bind_value(loom_low_lower_context_t* context,
   return loom_low_lower_copy_value_name(context, source_value_id, low_value_id);
 }
 
+iree_status_t loom_low_lower_bind_argument_transport(
+    loom_low_lower_context_t* context, loom_value_id_t source_value_id,
+    loom_value_id_t low_value_id, loom_type_t abi_type) {
+  const loom_value_ordinal_t ordinal =
+      loom_low_lowering_frame_value_ordinal(context->lowering, source_value_id);
+  IREE_ASSERT(!iree_any_bit_set(
+      context->lowering->source_plan.value_flags[ordinal],
+      LOOM_LOW_LOWER_VALUE_MATERIALIZED));
+  IREE_ASSERT(loom_type_equal(
+      abi_type, loom_module_value_type(context->module, low_value_id)));
+  context->lowering->value_bindings[ordinal].value = low_value_id;
+  context->lowering->source_plan.value_flags[ordinal] |=
+      LOOM_LOW_LOWER_VALUE_MATERIALIZED;
+  return loom_low_lower_copy_value_name(context, source_value_id, low_value_id);
+}
+
 iree_status_t loom_low_lower_replace_value_binding(
     loom_low_lower_context_t* context, loom_value_id_t source_value_id,
     loom_value_id_t low_value_id) {

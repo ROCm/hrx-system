@@ -665,9 +665,17 @@ iree_status_t loom_low_lower_function_boundary_bind_entry_arguments(
         LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT) {
       continue;
     }
-    IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(
-        context, source_entry_block->arg_ids[argument_index],
-        low_entry_block->arg_ids[direct_argument_index]));
+    const loom_low_lower_abi_argument_t* argument =
+        &context->lowering->boundary.argument_map[argument_index];
+    if (!loom_low_lower_type_is_none(argument->body_type)) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_bind_argument_transport(
+          context, source_entry_block->arg_ids[argument_index],
+          low_entry_block->arg_ids[direct_argument_index], argument->abi_type));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_low_lower_bind_value(
+          context, source_entry_block->arg_ids[argument_index],
+          low_entry_block->arg_ids[direct_argument_index]));
+    }
     ++direct_argument_index;
   }
   return iree_ok_status();

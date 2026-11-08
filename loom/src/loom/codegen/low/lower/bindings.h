@@ -86,6 +86,13 @@ iree_status_t loom_low_lower_bind_value(loom_low_lower_context_t* context,
                                         loom_value_id_t source_value_id,
                                         loom_value_id_t low_value_id);
 
+// Binds the incoming direct argument carrier before the boundary's selected
+// entry adaptation. Planning consumers retain the body type; entry setup must
+// replace this temporary transport binding before body emission.
+iree_status_t loom_low_lower_bind_argument_transport(
+    loom_low_lower_context_t* context, loom_value_id_t source_value_id,
+    loom_value_id_t low_value_id, loom_type_t abi_type);
+
 // Replaces an emitted binding when entry interposition remaps its SSA identity
 // or adapts a physical ABI carrier to its body representation. Subsequent
 // queries observe the replacement value's actual type.

@@ -2460,9 +2460,15 @@ iree_status_t loom_low_lower_source_plan_build(
   const loom_value_id_t* arguments =
       loom_func_like_arg_ids(context->source_function, &argument_count);
   for (uint16_t i = 0; i < argument_count; ++i) {
+    const loom_low_lower_abi_argument_t* argument =
+        &context->lowering->boundary.argument_map[i];
+    const loom_type_t body_type =
+        argument->kind == LOOM_LOW_LOWER_ABI_ARGUMENT_DIRECT &&
+                loom_type_kind(argument->body_type) != LOOM_TYPE_NONE
+            ? argument->body_type
+            : argument->abi_type;
     IREE_RETURN_IF_ERROR(loom_low_lower_plan_value_type(
-        context, arguments[i],
-        context->lowering->boundary.argument_map[i].abi_type));
+        context, arguments[i], body_type));
   }
 
   iree_arena_initialize(context->module->arena.block_pool,
