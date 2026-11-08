@@ -1,3 +1,23 @@
+// Carry consumption orders the next carry clobber, while ordinary consumers
+// of the low word remain independent of the high-word borrow operation.
+// RUN: emit low-schedule-query @carry_and_data kind=state strategy=resource-stall consumer=*
+
+aie2p.target<core> @target
+
+low.func.def target<amd.xdna.aie2p.core>(@target) @carry_and_data(%lhs: reg<aie2p.er>, %rhs: reg<aie2p.er>, %high: reg<aie2p.er>) -> (reg<aie2p.er>, reg<aie2p.er>, reg<aie2p.er>) asm {
+  %low, %borrow = sub.borrow %lhs, %rhs
+  %upper, %unused = sbc %high, %rhs, %borrow
+  %data = xor %low, %rhs
+  %next = sub %high, %lhs
+  return %data, %upper, %next
+}
+
+// ----
+node 1 <- 0
+node 3 <- 1
+
+// ====
+
 // A read-only fence orders observations without completing earlier reads.
 // The load observes saturation at stage 7, the store at stage 1. A later
 // saturation write must retain the load's six-cycle read-to-write separation.

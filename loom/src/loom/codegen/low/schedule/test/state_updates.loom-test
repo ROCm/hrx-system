@@ -356,9 +356,9 @@ node 6 <- none
 
 // ====
 
-// Convergent readers of one explicit state snapshot retain source order. The
-// reader-to-reader dependency is an exact zero-cycle event-pair constraint.
-// RUN: emit low-schedule-query @convergent_state_readers kind=state strategy=resource-stall order=1,2 consumer=1,2 timing=1:2
+// Convergent readers of one explicit state snapshot retain source order through
+// the ordering frontier. Reading the same snapshot adds no state conflict.
+// RUN: emit low-schedule-query @convergent_state_readers kind=state strategy=resource-stall order=1,2 consumer=1,2 edge=order:1:2,state:1:2
 test.target<low_core> @target
 
 low.func.def target<test.low.core>(@target) @convergent_state_readers(%state_lhs: reg<test.schedule_state>, %state_rhs: reg<test.schedule_state>, %value0: reg<test.i32>, %value1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
@@ -371,8 +371,49 @@ low.func.def target<test.low.core>(@target) @convergent_state_readers(%state_lhs
 // ----
 block 0 order: 1, 2
 node 1 <- 0
-node 2 <- 0, 1
-timing 1 -> 2: separation=0 source=event-pair quality=exact
+node 2 <- 0
+edge order 1 -> 2: separation=0 source=structural quality=unknown producer-event=test.state.read consumer-event=test.state.read
+edge state 1 -> 2: none
+
+// ====
+
+// A producer's ordinary result does not depend on observations of its state
+// output. The next state writer still waits for the reader.
+// RUN: emit low-schedule-query @independent_state_and_data kind=state strategy=resource-stall consumer=1,2,3
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @independent_state_and_data(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %value = test.state.update.i32 %lhs
+  %observed = test.state.read.i32 %rhs
+  %data = test.add.i32 %value, %rhs
+  %next = test.state.update.i32 %lhs
+  return %data, %observed, %next
+}
+
+// ----
+node 1 <- 0
+node 2 <- none
+node 3 <- 0, 1
+
+// ====
+
+// Ordinary reads of one explicit snapshot are independent. Both observations
+// must still precede its first clobber, including structural copies.
+// RUN: emit low-schedule-query @independent_snapshot_readers kind=state strategy=resource-stall consumer=1,2,3
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @independent_snapshot_readers(%lhs: reg<test.schedule_state>, %rhs: reg<test.schedule_state>, %value: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %snapshot = test.add.schedule_state %lhs, %rhs
+  %first = copy %snapshot : reg<test.schedule_state> -> reg<test.i32>
+  %second = copy %snapshot : reg<test.schedule_state> -> reg<test.i32>
+  %clobber = test.schedule_state.update.i32 %value
+  return %first, %second, %clobber
+}
+
+// ----
+node 1 <- none
+node 2 <- none
+node 3 <- 1, 2
 
 // ====
 
