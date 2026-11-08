@@ -13,6 +13,11 @@
 extern "C" {
 #endif
 
+// Preserves the previous worker's balanced read/write proof before replacing
+// either representative cursor. Called once for each new admission owner.
+void loom_aie2p_native_begin_cursor_owner(loom_aie2p_native_channel_t* channel,
+                                          uint32_t worker);
+
 // Accumulates core admission bounds and ownership for one read/write cursor.
 // Imported channels preserve their position beyond the current worker call.
 // site_exact describes this admission site's execution count; every site must

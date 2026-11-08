@@ -133,6 +133,7 @@ static iree_status_t loom_aie2p_native_select_channels(
         .byte_stride = (uint32_t)(geometry->slot_bit_stride / 8),
         .record_byte_length = (uint32_t)(geometry->record_bit_span / 8),
         .record_dense = geometry->record_dense,
+        .balanced_predecessors = true,
         .free_lock = owner->next_lock++,
         .ready_lock = owner->next_lock++,
         .cursor = {.reader = {.worker = UINT32_MAX},
@@ -253,6 +254,7 @@ static iree_status_t loom_aie2p_native_claim_transport_cursor(
   *out_valid = false;
   loom_aie2p_native_channel_t* channel =
       loom_aie2p_native_channel(context, realization, identity);
+  loom_aie2p_native_begin_cursor_owner(channel, worker_index);
   loom_aie2p_native_cursor_t* cursor =
       reader ? &channel->cursor.reader : &channel->cursor.writer;
   if (!admissions || admissions > UINT32_MAX) {
@@ -685,6 +687,7 @@ static iree_status_t loom_aie2p_native_select(
           action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_RESERVE) {
         loom_aie2p_native_channel_t* channel =
             loom_aie2p_native_channel(context, realization, action->channel);
+        loom_aie2p_native_begin_cursor_owner(channel, (uint32_t)i);
         loom_aie2p_native_cursor_t* cursor =
             action->kind == LOOM_CHANNEL_PLAN_ACTION_KIND_ACQUIRE
                 ? &channel->cursor.reader

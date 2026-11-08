@@ -58,6 +58,9 @@ typedef struct loom_aie2p_native_channel_t {
   uint32_t record_byte_length;
   // Logical payload elements occupy one contiguous byte range in order.
   bool record_dense;
+  // All cursor owners preceding the current representative independently
+  // balanced exact reads and writes. Retained before replacing an owner.
+  bool balanced_predecessors;
   // Semaphore containing reusable slot credits.
   uint16_t free_lock;
   // Semaphore containing published record credits.
@@ -648,6 +651,9 @@ typedef struct loom_aie2p_native_context_t {
   // Invocation-major per-engine descriptor initialization. NULL when every
   // endpoint finishes a complete ring turn or belongs to root configuration.
   const loom_aie2p_native_endpoint_initialization_t** endpoint_initializers;
+  // Private protocol restoration by construction boundary, allocated only when
+  // retained endpoint counts cannot prove that every credit returns naturally.
+  struct loom_aie2p_native_credit_scope_t* credit_scopes;
   // Physical join selected for each canonical execution schedule row.
   loom_aie2p_native_join_t** joins;
   // Distinct join trees; equal participant sets share one initialized instance.

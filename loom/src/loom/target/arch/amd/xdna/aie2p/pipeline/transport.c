@@ -7,6 +7,7 @@
 #include "loom/analysis/storage_geometry.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/credits.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/distribution.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_resources.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
@@ -953,6 +954,9 @@ iree_status_t loom_aie2p_native_select_transfers(
   iree_host_size_t transfer_count = 0;
   iree_host_size_t cohort_count = 0;
   iree_host_size_t destination_count = 0;
+  iree_host_size_t credit_control_count = 0;
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_select_credits(context, realization,
+                                                        &credit_control_count));
   iree_host_size_t child_control_count = 0;
   iree_host_size_t remote_control_count = 0;
   for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
@@ -979,7 +983,7 @@ iree_status_t loom_aie2p_native_select_transfers(
   }
   iree_host_size_t source_count =
       transfer_count * 4 + cohort_count + destination_count +
-      child_control_count + remote_control_count +
+      child_control_count + remote_control_count + credit_control_count +
       context->collective_count * context->execution.engine_count;
   for (iree_host_size_t i = 0; i < realization->invocations.channel_count;
        ++i) {
@@ -1151,6 +1155,10 @@ iree_status_t loom_aie2p_native_select_transfers(
   if (iree_status_is_ok(status) && valid) {
     status = loom_aie2p_native_route_refills(context, realization, &next_source,
                                              &valid);
+  }
+  if (iree_status_is_ok(status) && valid) {
+    status = loom_aie2p_native_route_credits(context, realization, &next_source,
+                                             next_controller, &valid);
   }
   if (iree_status_is_ok(status) && valid) {
     status = loom_aie2p_native_group_submissions(

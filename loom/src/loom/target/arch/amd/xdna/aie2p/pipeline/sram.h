@@ -29,6 +29,13 @@ iree_status_t loom_aie2p_native_sram_lock_helper(
     const loom_aie2p_native_channel_t* channel, uint16_t lock, bool acquire,
     uint32_t credits, loom_symbol_ref_t* out_symbol);
 
+// Emits the same atomic credit request into an existing function, leaving the
+// builder at its completion block so a compound retirement can continue.
+iree_status_t loom_aie2p_native_sram_lock(
+    loom_aie2p_native_context_t* context, loom_builder_t* builder,
+    loom_region_t* region, const loom_aie2p_native_channel_t* channel,
+    uint16_t lock, bool acquire, uint32_t credits);
+
 // Finds the first SRAM request inside a pending DMA response interval, or NULL
 // when the retained schedule keeps their shared reply stream disjoint. Both
 // sequences have producer-established block/source order; the merge advances

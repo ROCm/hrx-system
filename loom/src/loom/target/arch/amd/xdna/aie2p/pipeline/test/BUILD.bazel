@@ -79,6 +79,7 @@ loom_test(
         "packet_iterator_lifetimes.loom",
         "partial_record.loom",
         "phased_queues.loom",
+        "private_credit_lifetimes.loom",
         "retained_lifetime.loom",
         "retained_replay.loom",
         "reusable_sram.loom",

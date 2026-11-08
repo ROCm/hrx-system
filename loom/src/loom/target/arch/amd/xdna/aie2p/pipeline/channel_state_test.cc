@@ -21,6 +21,37 @@
 
 namespace {
 
+TEST(ChannelCursorTest, RetainsEveryPreviousWorkersBalance) {
+  for (bool first_exact : {false, true}) {
+    for (uint32_t reads : {0u, 1u}) {
+      loom_aie2p_native_channel_t channel = {
+          .balanced_predecessors = true,
+          .cursor = {.reader = {.worker = UINT32_MAX},
+                     .writer = {.worker = UINT32_MAX}},
+      };
+      loom_aie2p_native_begin_cursor_owner(&channel, 0);
+      loom_aie2p_native_cursor_bind(&channel.cursor.writer, 2, 0, 1,
+                                    first_exact, false);
+      if (reads) {
+        loom_aie2p_native_begin_cursor_owner(&channel, 0);
+        loom_aie2p_native_cursor_bind(&channel.cursor.reader, 2, 0, reads,
+                                      first_exact, false);
+      }
+      // Each later worker is balanced. Replacing the representative must
+      // retain any uncertainty or unread tail from the first worker.
+      for (uint32_t worker : {1u, 2u}) {
+        loom_aie2p_native_begin_cursor_owner(&channel, worker);
+        loom_aie2p_native_cursor_bind(&channel.cursor.reader, 2, worker, 2,
+                                      true, true);
+        loom_aie2p_native_begin_cursor_owner(&channel, worker);
+        loom_aie2p_native_cursor_bind(&channel.cursor.writer, 2, worker, 2,
+                                      true, true);
+        EXPECT_EQ(channel.balanced_predecessors, first_exact && reads == 1);
+      }
+    }
+  }
+}
+
 TEST(ChannelCursorTest, AdmissionUsesConstructionLifetime) {
   for (uint32_t capacity : {1u, 3u}) {
     for (bool imported : {false, true}) {

@@ -1,0 +1,420 @@
+// Fresh child constructions reclaim private credits while preserving imported
+// rings until their owner finishes. Visible DMA outputs and full backing guards
+// exercise local residuals, remote SRAM, and quiescent shared populations.
+aie2p.target<array> @device
+
+// Completion may leave a published private record unread. Each fresh child
+// must regain its free credit after the visible DMA completes.
+pipeline.def @unread_tail_publish_once() run(%output: buffer, %epoch: index) {
+  %capacity = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 64 : offset
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %record_bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x16xi32>
+  %channel = channel.bind<fifo> %slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %value = index.cast %epoch : index to i32
+    %values = vector.splat %value : vector<16xi32>
+    %write, %payload = channel.reserve %channel : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+    %offset = index.scale %epoch, %record_bytes : index, offset -> offset
+    %destination = buffer.view %output[%offset] : buffer -> view<16xi32>
+    %copy = kernel.async.copy %payload to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<16xi32>>
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @unread_tail() run(%output_arg: buffer) {
+  %output = buffer.assume.alignment %output_arg {minimum_alignment = 64} : buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 2 : index
+  pipeline.serial {
+    scf.for %epoch = [%begin to %epochs step %step] {
+      pipeline.compose @unread_tail_publish_once(%output, %epoch) : (buffer, index)
+    }
+  }
+}
+
+// The writer publishes two records and the reader consumes one. Retiring the
+// one unread record may overlap that real reader; the existing join must keep
+// the next construction behind the reader's DMA completion and release.
+pipeline.def @partial_reader_partial_read() run(%output: buffer, %epoch: index) {
+  %capacity = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  %storage_bytes = index.constant 128 : offset
+  %record_bytes = index.constant 64 : offset
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %storage_bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x16xi32>
+  %channel = channel.bind<fifo> %slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %begin = index.constant 0 : index
+    %step = index.constant 1 : index
+    scf.for %record = [%begin to %capacity step %step] {
+      %sequence = index.add %epoch, %record : index
+      %value = index.cast %sequence : index to i32
+      %values = vector.splat %value : vector<16xi32>
+      %write, %payload = channel.reserve %channel : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+      channel.publish %write : write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %read, %payload = channel.acquire<mutable> %channel : channel<tile<16xi32>> -> (read<tile<16xi32>, mutable>, view<16xi32>)
+    %values = vector.load %payload[0] : view<16xi32> -> vector<16xi32>
+    %bias = scalar.constant 7 : i32
+    %biases = vector.splat %bias : vector<16xi32>
+    %adjusted = vector.addi %values, %biases : vector<16xi32>
+    vector.store %adjusted, %payload[0] : vector<16xi32>, view<16xi32>
+    %offset = index.scale %epoch, %record_bytes : index, offset -> offset
+    %destination = buffer.view %output[%offset] : buffer -> view<16xi32>
+    %copy = kernel.async.copy %payload to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<16xi32>, mutable>
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @partial_reader() run(%output_arg: buffer) {
+  %output = buffer.assume.alignment %output_arg {minimum_alignment = 64} : buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 2 : index
+  pipeline.serial {
+    scf.for %epoch = [%begin to %epochs step %step] {
+      pipeline.compose @partial_reader_partial_read(%output, %epoch) : (buffer, index)
+    }
+  }
+}
+
+// A concurrent descendant owns the private ring. Its enclosing serial child
+// supplies the completion boundary at which the residual can be retired.
+pipeline.def @concurrent_owner_concurrent_epoch() run(%output: buffer, %epoch: index) {
+  pipeline.compose @unread_tail_publish_once(%output, %epoch) : (buffer, index)
+}
+
+pipeline.def<kernel> public retain target(@device) @concurrent_owner() run(%output_arg: buffer) {
+  %output = buffer.assume.alignment %output_arg {minimum_alignment = 64} : buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 2 : index
+  pipeline.serial {
+    scf.for %epoch = [%begin to %epochs step %step] {
+      pipeline.compose @concurrent_owner_concurrent_epoch(%output, %epoch) : (buffer, index)
+    }
+  }
+}
+
+// A core performs arithmetic while also archiving an input in private SRAM.
+// The archive has no reader. Its exact residual uses the remote lock protocol
+// after DMA completion, without clearing or copying either payload.
+pipeline.def @sram_archive_epoch() run(%input: buffer, %output: buffer, %epoch: index) {
+  %capacity = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 64 : offset
+  %sram = pipeline.memory<workgroup>[0, 1] : pool
+  %archive_storage = buffer.alloca<workgroup> pool(%sram) align(64) %record_bytes : buffer
+  %archive_slots = buffer.view %archive_storage[%origin] : buffer -> view<1x16xi32>
+  %archive = channel.bind<fifo> %archive_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %core = pipeline.memory<workgroup>[0, 2] : pool
+  %result_storage = buffer.alloca<workgroup> pool(%core) align(64) %record_bytes : buffer
+  %result_slots = buffer.view %result_storage[%origin] : buffer -> view<1x16xi32>
+  %results = channel.bind<fifo> %result_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %offset = index.scale %epoch, %record_bytes : index, offset -> offset
+    %external = buffer.view %input[%offset] : buffer -> view<16xi32>
+    %archive_write, %archive_payload = channel.reserve %archive : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %ingress = kernel.async.copy %external to %archive_payload {cache_scope = workgroup, cache_temporal = regular, direction = global_to_workgroup} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %write, %payload = channel.reserve %results : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    %value = index.cast %epoch : index to i32
+    %values = vector.splat %value : vector<16xi32>
+    vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+    channel.publish %write : write<tile<16xi32>>
+    %read, %ready = channel.acquire %results : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    %destination = buffer.view %output[%offset] : buffer -> view<16xi32>
+    %egress = kernel.async.copy %ready to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %output_group = kernel.async.group %ingress, %egress : kernel.async.token, kernel.async.token -> kernel.async.group
+    kernel.async.wait %output_group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<16xi32>>
+    channel.publish %archive_write : write<tile<16xi32>>
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @sram_archive() run(%input_arg: buffer, %output_arg: buffer) {
+  %input_unique, %output_unique = buffer.assume.noalias %input_arg, %output_arg : buffer, buffer
+  %input, %output = buffer.assume.alignment %input_unique, %output_unique {minimum_alignment = 64} : buffer, buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 2 : index
+  pipeline.serial {
+    scf.for %epoch = [%begin to %epochs step %step] {
+      pipeline.compose @sram_archive_epoch(%input, %output, %epoch) : (buffer, buffer, index)
+    }
+  }
+}
+
+// Two different child calls publish once each, followed by one read. The last
+// writer's count equals the reader's count, but it is not the complete private
+// lifetime. Restoration belongs to the owner after both imported writer calls.
+pipeline.def @nested_writers_produce() run(%channel: channel<tile<16xi32>>, %epoch: index) {
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %value = index.cast %epoch : index to i32
+    %values = vector.splat %value : vector<16xi32>
+    %write, %payload = channel.reserve %channel : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+    channel.publish %write : write<tile<16xi32>>
+  }
+}
+
+pipeline.def @nested_writers_consume() run(%channel: channel<tile<16xi32>>, %output: buffer, %epoch: index) {
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %record_bytes = index.constant 64 : offset
+    %read, %payload = channel.acquire<mutable> %channel : channel<tile<16xi32>> -> (read<tile<16xi32>, mutable>, view<16xi32>)
+    %value = index.cast %epoch : index to i32
+    %biases = vector.splat %value : vector<16xi32>
+    %values = vector.load %payload[0] : view<16xi32> -> vector<16xi32>
+    %adjusted = vector.addi %values, %biases : vector<16xi32>
+    vector.store %adjusted, %payload[0] : vector<16xi32>, view<16xi32>
+    %offset = index.scale %epoch, %record_bytes : index, offset -> offset
+    %destination = buffer.view %output[%offset] : buffer -> view<16xi32>
+    %copy = kernel.async.copy %payload to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.release %read : read<tile<16xi32>, mutable>
+  }
+}
+
+pipeline.def @nested_writers_epoch() run(%output: buffer, %epoch: index) {
+  %capacity = index.constant 2 : index
+  %origin = index.constant 0 : offset
+  %storage_bytes = index.constant 128 : offset
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %storage_bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<2x16xi32>
+  %channel = channel.bind<fifo> %slots, %capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.serial {
+    pipeline.compose @nested_writers_produce(%channel, %epoch) : (channel<tile<16xi32>>, index)
+    pipeline.compose @nested_writers_produce(%channel, %epoch) : (channel<tile<16xi32>>, index)
+    pipeline.compose @nested_writers_consume(%channel, %output, %epoch) : (channel<tile<16xi32>>, buffer, index)
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @nested_writers() run(%output_arg: buffer) {
+  %output = buffer.assume.alignment %output_arg {minimum_alignment = 64} : buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 2 : index
+  pipeline.serial {
+    scf.for %epoch = [%begin to %epochs step %step] {
+      pipeline.compose @nested_writers_epoch(%output, %epoch) : (buffer, index)
+    }
+  }
+}
+
+// A runtime choice leaves either zero or one published private record. Both
+// cores first retire the child, the controller restores and acknowledges the
+// lock state, and both join again before either starts another lifetime.
+pipeline.def @conditional_owner_conditional() run(%output: buffer, %epoch: index) {
+  %capacity = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 64 : offset
+  %memory = pipeline.memory<workgroup>[0, 2] : pool
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %record_bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<1x16xi32>
+  %channel = channel.bind<fifo> %slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  %peer_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %peer_storage = buffer.alloca<workgroup> pool(%peer_memory) align(64) %record_bytes : buffer
+  %peer_slots = buffer.view %peer_storage[%origin] : buffer -> view<1x16xi32>
+  %peer_channel = channel.bind<fifo> %peer_slots, %capacity : view<1x16xi32>, index -> channel<tile<16xi32>>
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    %begin = index.constant 0 : index
+    %emit = index.cmp ne, %epoch, %begin : index
+    scf.if %emit {
+      %value = index.cast %epoch : index to i32
+      %values = vector.splat %value : vector<16xi32>
+      %write, %payload = channel.reserve %channel : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+      %offset = index.scale %epoch, %record_bytes : index, offset -> offset
+      %destination = buffer.view %output[%offset] : buffer -> view<16xi32>
+      %copy = kernel.async.copy %payload to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+      channel.publish %write : write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %value = scalar.constant 17 : i32
+    %values = vector.splat %value : vector<16xi32>
+    %write, %payload = channel.reserve %peer_channel : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+    vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+    %peer_base = index.constant 192 : offset
+    %relative = index.scale %epoch, %record_bytes : index, offset -> offset
+    %offset = index.add %peer_base, %relative : offset
+    %destination = buffer.view %output[%offset] : buffer -> view<16xi32>
+    %copy = kernel.async.copy %payload to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+    %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+    kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+    channel.publish %write : write<tile<16xi32>>
+    %read, %completed = channel.acquire %peer_channel : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+    channel.release %read : read<tile<16xi32>>
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @conditional_owner() run(%output_arg: buffer) {
+  %output = buffer.assume.alignment %output_arg {minimum_alignment = 64} : buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 3 : index
+  pipeline.serial {
+    scf.for %epoch = [%begin to %epochs step %step] {
+      pipeline.compose @conditional_owner_conditional(%output, %epoch) : (buffer, index)
+    }
+  }
+}
+
+// Scalar oracle for the visible two-epoch outputs; untouched storage retains
+// its input values so the same comparison checks guards and skipped writes.
+func.def inline @reference_panels(%output: buffer, %bias: i32, %scale: i32) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 2 : index
+  %width = index.constant 16 : index
+  %values = buffer.view %output[%origin] : buffer -> view<2x16xi32>
+  scf.for %epoch = [%begin to %epochs step %step] {
+    %value = index.cast %epoch : index to i32
+    %scaled = scalar.muli %value, %scale : i32
+    %adjusted = scalar.addi %scaled, %bias : i32
+    scf.for %lane = [%begin to %width step %step] {
+      view.store %adjusted, %values[%epoch, %lane] : i32, view<2x16xi32>
+    }
+  }
+  func.return
+}
+
+func.def @reference_epoch(%output: buffer) {
+  %bias = scalar.constant 0 : i32
+  %scale = scalar.constant 1 : i32
+  func.call @reference_panels(%output, %bias, %scale) : (buffer, i32, i32)
+  func.return
+}
+
+func.def @reference_partial(%output: buffer) {
+  %bias = scalar.constant 7 : i32
+  %scale = scalar.constant 1 : i32
+  func.call @reference_panels(%output, %bias, %scale) : (buffer, i32, i32)
+  func.return
+}
+
+func.def @reference_nested(%output: buffer) {
+  %bias = scalar.constant 0 : i32
+  %scale = scalar.constant 2 : i32
+  func.call @reference_panels(%output, %bias, %scale) : (buffer, i32, i32)
+  func.return
+}
+
+func.def @reference_archive(%input: buffer, %output: buffer) {
+  func.call @reference_epoch(%output) : (buffer)
+  func.return
+}
+
+func.def @reference_conditional(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 3 : index
+  %width = index.constant 16 : index
+  %peer_value = scalar.constant 17 : i32
+  %values = buffer.view %output[%origin] : buffer -> view<6x16xi32>
+  scf.for %epoch = [%begin to %epochs step %step] {
+    %value = index.cast %epoch : index to i32
+    %peer = index.add %epochs, %epoch : index
+    %emit = index.cmp ne, %epoch, %begin : index
+    scf.for %lane = [%begin to %width step %step] {
+      scf.if %emit {
+        view.store %value, %values[%epoch, %lane] : i32, view<6x16xi32>
+      }
+      view.store %peer_value, %values[%peer, %lane] : i32, view<6x16xi32>
+    }
+  }
+  func.return
+}
+
+check.scenario public @unread_tail_credits {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %output_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<64xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<64xi32> -> tensor<32xi32>
+    check.compare<@unread_tail, @reference_epoch>(%output) : (tensor<32xi32>) -> () {
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<64xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @partial_reader_credits {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %output_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<64xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<64xi32> -> tensor<32xi32>
+    check.compare<@partial_reader, @reference_partial>(%output) : (tensor<32xi32>) -> () {
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<64xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @concurrent_owner_credits {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %output_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<64xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<64xi32> -> tensor<32xi32>
+    check.compare<@concurrent_owner, @reference_epoch>(%output) : (tensor<32xi32>) -> () {
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<64xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @sram_archive_credits {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %output_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<64xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<64xi32> -> tensor<32xi32>
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<64xi32>
+    %input = check.tensor.view %input_storage offset(64) : tensor<64xi32> -> tensor<32xi32>
+    check.compare<@sram_archive, @reference_archive>(%input, %output) : (tensor<32xi32>, tensor<32xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<64xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<64xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @nested_writers_credits {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %output_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<64xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<64xi32> -> tensor<32xi32>
+    check.compare<@nested_writers, @reference_nested>(%output) : (tensor<32xi32>) -> () {
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<64xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @conditional_owner_credits {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %output_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<128xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<128xi32> -> tensor<96xi32>
+    check.compare<@conditional_owner, @reference_conditional>(%output) : (tensor<96xi32>) -> () {
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<128xi32>
+    }
+  }
+  check.return
+}

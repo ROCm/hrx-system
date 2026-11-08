@@ -117,6 +117,7 @@ loom_cc_library(
         "channels.c",
         "collective.c",
         "configuration.c",
+        "credits.c",
         "distribution.c",
         "dma.c",
         "dma_resources.c",
@@ -133,6 +134,7 @@ loom_cc_library(
     ],
     hdrs = [
         "channel_state.h",
+        "credits.h",
         "distribution.h",
         "dma_resources.h",
         "dma_submission.h",
@@ -278,6 +280,17 @@ loom_cc_test(
         ":native",
         "//loom/src/loom/pass:types",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "credits_test",
+    srcs = ["credits_test.cc"],
+    deps = [
+        ":native",
+        "//loom/src/loom/pass:types",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

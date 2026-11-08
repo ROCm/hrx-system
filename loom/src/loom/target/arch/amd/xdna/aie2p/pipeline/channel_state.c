@@ -12,6 +12,23 @@
 #include "loom/ops/type_registry.h"
 #include "loom/ops/view/ops.h"
 
+// A channel can visit many independently balanced workers. Preserve that
+// proof before replacing their endpoint counts with the next representative;
+// its final representative alone cannot describe the complete population.
+void loom_aie2p_native_begin_cursor_owner(loom_aie2p_native_channel_t* channel,
+                                          uint32_t worker) {
+  const loom_aie2p_native_cursor_t* reader = &channel->cursor.reader;
+  const loom_aie2p_native_cursor_t* writer = &channel->cursor.writer;
+  if (reader->worker == worker || writer->worker == worker ||
+      (reader->worker == UINT32_MAX && writer->worker == UINT32_MAX)) {
+    return;
+  }
+  channel->balanced_predecessors &=
+      reader->worker == writer->worker && reader->exact_admissions &&
+      writer->exact_admissions &&
+      reader->maximum_admissions == writer->maximum_admissions;
+}
+
 void loom_aie2p_native_cursor_bind(loom_aie2p_native_cursor_t* cursor,
                                    uint64_t capacity, uint32_t worker,
                                    uint32_t maximum_admissions, bool site_exact,
