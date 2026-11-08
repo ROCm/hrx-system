@@ -1493,7 +1493,9 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
     uint32_t spill_byte_size, const loom_value_t* value,
     const loom_region_t* body,
     loom_low_allocation_spill_plan_traffic_workspace_t* workspace,
-    uint32_t* out_reload_count, uint64_t* out_reload_bytes) {
+    uint32_t* out_reload_count, uint64_t* out_reload_bytes,
+    bool* out_has_narrow_uses) {
+  *out_has_narrow_uses = false;
   uint16_t first_touched_block_index = UINT16_MAX;
 
   const loom_block_t* block = NULL;
@@ -1519,6 +1521,12 @@ static void loom_low_allocation_spill_plan_value_reload_traffic(
     const bool is_slice_reload =
         loom_low_allocation_spill_plan_slice_reload_byte_size(
             module, assignment, spill_byte_size, user_op, &reload_byte_size);
+    if (loom_low_slice_isa(user_op)) {
+      const loom_type_t result_type =
+          loom_module_value_type(module, loom_low_slice_result(user_op));
+      *out_has_narrow_uses |= loom_low_register_type_unit_count(result_type) <
+                              assignment->unit_count;
+    }
 
     uint16_t use_block_index = 0;
     if (!is_slice_reload || !can_group_slices ||
@@ -1608,14 +1616,16 @@ static iree_status_t loom_low_allocation_spill_plan_traffic_for_layout(
   const loom_value_t* value = loom_module_value(module, value_id);
   uint32_t reload_count = 0;
   uint64_t reload_bytes = 0;
+  bool has_narrow_uses = false;
   loom_low_allocation_spill_plan_value_reload_traffic(
       module, assignment, byte_size, value, cfg_graph->region, workspace,
-      &reload_count, &reload_bytes);
+      &reload_count, &reload_bytes, &has_narrow_uses);
   uint32_t store_count = 0;
   IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_value_store_count(
       module, cfg_graph, value_id, value, reload_count, &store_count));
   *out_traffic = (loom_low_allocation_spill_plan_traffic_t){
       .store_count = store_count,
+      .has_narrow_uses = has_narrow_uses,
       .store_bytes = (uint64_t)store_count * byte_size,
       .reload_count = reload_count,
       .reload_bytes = reload_bytes,

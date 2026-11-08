@@ -12,6 +12,7 @@
 #include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/storage.h"
 #include "loom/codegen/low/allocation/write_interference.h"
+#include "loom/codegen/low/rematerialization_facts.h"
 #include "loom/ir/module.h"
 #include "loom/target/residency.h"
 
@@ -1358,22 +1359,23 @@ static iree_status_t loom_low_allocation_search_assignment_spill_traffic_cost(
     const loom_low_allocation_assignment_t* assignment,
     const loom_low_allocation_class_capacity_t* capacity, uint64_t* out_cost) {
   *out_cost = 0;
-  loom_low_allocation_spill_plan_traffic_t traffic = {0};
-  loom_value_ordinal_t value_ordinal = LOOM_VALUE_ORDINAL_INVALID;
-  const bool has_cached_traffic =
-      context->spill_traffic_by_value_ordinal &&
-      loom_low_allocation_assignment_map_value_ordinal_for_value(
-          context->assignment_map, assignment->value_id, &value_ordinal);
-  if (has_cached_traffic) {
-    traffic = context->spill_traffic_by_value_ordinal[value_ordinal];
-  }
-  if (!has_cached_traffic || traffic.store_count == UINT32_MAX) {
+  const loom_value_ordinal_t value_ordinal =
+      loom_module_value_ordinal_scratch_lookup(context->module,
+                                               assignment->value_id);
+  loom_low_allocation_spill_plan_traffic_t traffic =
+      context->spill_traffic_by_value_ordinal[value_ordinal];
+  if (traffic.store_count == UINT32_MAX) {
     IREE_RETURN_IF_ERROR(loom_low_allocation_spill_plan_traffic(
         context->module, context->cfg_graph, assignment,
         capacity->spill_unit_bits, context->spill_traffic_workspace, &traffic));
-    if (has_cached_traffic) {
-      context->spill_traffic_by_value_ordinal[value_ordinal] = traffic;
-    }
+    context->spill_traffic_by_value_ordinal[value_ordinal] = traffic;
+  }
+  if (!traffic.has_narrow_uses &&
+      iree_any_bit_set(context->rematerialization_flags[value_ordinal],
+                       LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED)) {
+    // Whole-value users can initialize a closed recipe without memory traffic.
+    // Narrow users retain their wide producer instead of rebuilding every unit.
+    return iree_ok_status();
   }
   *out_cost =
       iree_math_saturating_add_u64(traffic.store_bytes, traffic.reload_bytes);

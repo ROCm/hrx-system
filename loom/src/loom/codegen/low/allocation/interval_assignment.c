@@ -22,6 +22,7 @@
 #include "loom/codegen/low/allocation/write_interference.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/diagnostics.h"
+#include "loom/codegen/low/rematerialization_facts.h"
 #include "loom/ir/local_value_domain.h"
 
 typedef struct loom_low_allocation_spill_decision_t {
@@ -139,6 +140,7 @@ loom_low_allocation_interval_assignment_search_context(
                                 : NULL,
       .storage_leases = state->context->storage_leases,
       .expanded_execution_values = state->context->expanded_execution_values,
+      .rematerialization_flags = state->context->reconstruction->value_flags,
       .spill_traffic_by_value_ordinal = state->spill_traffic_by_value_ordinal,
       .spill_traffic_workspace = &state->spill_traffic_workspace,
       .use_pressure_efficiency =
@@ -1742,6 +1744,21 @@ loom_low_allocation_interval_assignment_initialize_spill_traffic_cache(
   const iree_host_size_t value_count = state->context->liveness->value_count;
   if (value_count == 0) {
     return iree_ok_status();
+  }
+  loom_low_allocation_reconstruction_t* reconstruction =
+      state->context->reconstruction;
+  if (reconstruction->value_flags == NULL) {
+    const loom_low_rematerialization_scope_t scope = {
+        .module = state->context->module,
+        .target = state->context->target,
+        .value_ids = state->context->liveness->value_ids,
+        .value_count = value_count,
+        .liveness = state->context->liveness,
+        .region = state->context->body,
+    };
+    IREE_RETURN_IF_ERROR(loom_low_rematerialization_facts_build(
+        &scope, /*reconstruct_constants=*/true, &reconstruction->arena,
+        &reconstruction->value_flags));
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       state->scratch_arena, value_count,

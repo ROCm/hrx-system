@@ -219,3 +219,81 @@ low.func.def target<test.low.core>(@target) @narrow_consumers_keep_wide_capture(
   low.spill %part7, %storage {offset = 28} : reg<test.i32>, low.storage<private>
   return
 }
+
+// ====
+
+// Recreating a shared literal avoids spilling an observed machine-state value.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.i32=2}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @shared_literal() -> (reg<test.f32>, reg<test.f32>, reg<test.f32>, reg<test.f32>) asm {
+  %literal = test.const.i32 7
+  %retained = test.state.sample.i32
+  low.br ^use
+^use:
+  %other = test.state.sample.i32
+  %other_result = copy %other : reg<test.i32> -> reg<test.f32>
+  %first = copy %literal : reg<test.i32> -> reg<test.f32>
+  %saved = copy %retained : reg<test.i32> -> reg<test.f32>
+  %second = copy %literal : reg<test.i32> -> reg<test.f32>
+  return %other_result, %first, %saved, %second
+}
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @shared_literal() -> (reg<test.f32>, reg<test.f32>, reg<test.f32>, reg<test.f32>) asm {
+  %retained = test.state.sample.i32
+  low.br ^use
+^use:
+  %other = test.state.sample.i32
+  %other_result = copy %other : reg<test.i32> -> reg<test.f32>
+  %literal_remat$11 = test.const.i32 7
+  %first = copy %literal_remat$11 : reg<test.i32> -> reg<test.f32>
+  %saved = copy %retained : reg<test.i32> -> reg<test.f32>
+  %literal_remat$12 = test.const.i32 7
+  %second = copy %literal_remat$12 : reg<test.i32> -> reg<test.f32>
+  return %other_result, %first, %saved, %second
+}
+
+// ====
+
+// The same choice applies to composed constants, not only literal packets.
+// RUN: with-low-asm pass low-materialize-allocation{budgets=test.i32=3}
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @composed_literal() -> (reg<test.f32>, reg<test.f32 x2>, reg<test.f32>, reg<test.f32 x2>) asm {
+  %literal0 = test.const.i32 7
+  %literal1 = test.const.i32 9
+  %pair = concat(%literal0, %literal1) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %retained = test.state.sample.i32
+  low.br ^use
+^use:
+  %other = test.state.sample.i32
+  %other_result = copy %other : reg<test.i32> -> reg<test.f32>
+  %first = copy %pair : reg<test.i32 x2> -> reg<test.f32 x2>
+  %saved = copy %retained : reg<test.i32> -> reg<test.f32>
+  %second = copy %pair : reg<test.i32 x2> -> reg<test.f32 x2>
+  return %other_result, %first, %saved, %second
+}
+// ----
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @composed_literal() -> (reg<test.f32>, reg<test.f32 x2>, reg<test.f32>, reg<test.f32 x2>) asm {
+  %retained = test.state.sample.i32
+  low.br ^use
+^use:
+  %other = test.state.sample.i32
+  %other_result = copy %other : reg<test.i32> -> reg<test.f32>
+  %literal0_remat$13 = test.const.i32 7
+  %literal1_remat$14 = test.const.i32 9
+  %pair_remat$15 = concat(%literal0_remat$13, %literal1_remat$14) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %first = copy %pair_remat$15 : reg<test.i32 x2> -> reg<test.f32 x2>
+  %saved = copy %retained : reg<test.i32> -> reg<test.f32>
+  %literal0_remat$16 = test.const.i32 7
+  %literal1_remat$17 = test.const.i32 9
+  %pair_remat$18 = concat(%literal0_remat$16, %literal1_remat$17) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  %second = copy %pair_remat$18 : reg<test.i32 x2> -> reg<test.f32 x2>
+  return %other_result, %first, %saved, %second
+}

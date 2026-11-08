@@ -332,6 +332,9 @@ typedef struct loom_low_allocation_table_t {
   // Borrowed structural register requirements in the liveness value domain.
   // NULL when the function snapshot has no structural requirements.
   const loom_low_register_requirement_t* register_requirements;
+  // Producer reconstruction flags in the liveness value domain, retained when
+  // pressure required victim ranking. NULL if no ranking needed the analysis.
+  const uint8_t* rematerialization_flags;
   // Arena-owned physical reservations indexed by assignment segment ranges.
   // Borrows |liveness.segments| when no tied-source refinement is required.
   const loom_liveness_segment_t* storage_segments;

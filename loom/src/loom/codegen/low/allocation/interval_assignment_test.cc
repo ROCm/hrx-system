@@ -32,6 +32,7 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
                                      &block_pool_);
     iree_arena_initialize(&block_pool_, &arena_);
     iree_arena_initialize(&block_pool_, &decision_arena_);
+    iree_arena_initialize(&block_pool_, &reconstruction_.arena);
     loom_context_initialize(iree_allocator_system(), &context_);
     iree_host_size_t vtable_count = 0;
     const loom_op_vtable_t* const* vtables =
@@ -75,6 +76,7 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    iree_arena_deinitialize(&reconstruction_.arena);
     iree_arena_deinitialize(&decision_arena_);
     iree_arena_deinitialize(&arena_);
     loom_module_free(module_);
@@ -108,6 +110,8 @@ class LowAllocationIntervalAssignmentTest : public ::testing::Test {
   iree_arena_allocator_t arena_;
   // Owns allocation decisions and checkpoint-scoped assignment scratch.
   iree_arena_allocator_t decision_arena_;
+  // Shared snapshot facts survive scratch rollback across assignment attempts.
+  loom_low_allocation_reconstruction_t reconstruction_ = {};
   // Context for the module-local value domain.
   loom_context_t context_;
   // Owns value identities and the function used for diagnostics.
@@ -249,6 +253,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .unit_liveness = &unit_liveness,
       .storage_leases = &storage_leases,
       .arena = &arena_,
+      .reconstruction = &reconstruction_,
       .function_cfg_graph = &function_cfg_graph,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
@@ -284,6 +289,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   EXPECT_EQ(result.spill_plans, nullptr);
   EXPECT_EQ(result.remarks, nullptr);
   EXPECT_TRUE(result.has_packable_aggregates);
+  EXPECT_EQ(reconstruction_.value_flags, nullptr);
+  EXPECT_EQ(reconstruction_.arena.used_allocation_size, 0u);
 
   // Replaying a retained location bypasses first-fit search while rebuilding
   // the assignment's current lifetime and indexes.
@@ -332,6 +339,10 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   EXPECT_EQ(result.spill_traffic_bytes, spill_traffic_exclusive_limit);
   EXPECT_EQ(result.spill_plan_count, 0u);
   EXPECT_EQ(result.remark_count, 0u);
+  ASSERT_NE(reconstruction_.value_flags, nullptr);
+  const uint8_t* reconstruction_flags = reconstruction_.value_flags;
+  const iree_host_size_t reconstruction_bytes =
+      reconstruction_.arena.used_allocation_size;
 
   ++spill_traffic_exclusive_limit;
   result = {};
@@ -339,6 +350,8 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       &bounded_context, &decision_arena_, &result));
   iree_arena_reset(&decision_arena_);
   iree_arena_block_pool_trim(&block_pool_);
+  EXPECT_EQ(reconstruction_.value_flags, reconstruction_flags);
+  EXPECT_EQ(reconstruction_.arena.used_allocation_size, reconstruction_bytes);
   EXPECT_FALSE(result.reached_spill_traffic_limit);
   ASSERT_EQ(result.assignment_count, 1u);
   EXPECT_EQ(result.assignments[0].location_kind,
@@ -590,6 +603,7 @@ TEST_F(LowAllocationIntervalAssignmentTest,
       .unit_liveness = &unit_liveness,
       .storage_leases = &storage_leases,
       .arena = &arena_,
+      .reconstruction = &reconstruction_,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
@@ -832,6 +846,7 @@ TEST_P(LowFixedSubrangeAssignmentTest, PreservesOffsetAndTiedOwner) {
       .unit_liveness = &unit_liveness,
       .storage_leases = &storage_leases,
       .arena = &arena_,
+      .reconstruction = &reconstruction_,
   };
   loom_low_allocation_interval_assignment_result_t result = {};
   IREE_ASSERT_OK(loom_low_allocation_interval_assignment_build(
@@ -1013,6 +1028,7 @@ class LowRequiredRegisterRelocationTest
         .unit_liveness = &unit_liveness,
         .storage_leases = &leases,
         .arena = &arena_,
+        .reconstruction = &reconstruction_,
         .function_cfg_graph = &function_cfg_graph,
         .required_register_values = {module->values.count, &required_bits},
     };
@@ -1296,6 +1312,7 @@ void LowEntryPlacementTest::CheckPlacement(
       .unit_liveness = &unit_liveness,
       .storage_leases = &leases,
       .arena = &arena_,
+      .reconstruction = &reconstruction_,
       .function_cfg_graph = &graph,
       .search_strategy = test_case.strategy,
   };

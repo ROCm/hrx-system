@@ -329,6 +329,7 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
       {.store_count = 1, .store_bytes = 8},
       {.store_count = 1, .store_bytes = 8},
   };
+  const uint8_t rematerialization_flags[IREE_ARRAYSIZE(spill_traffic)] = {};
   loom_low_allocation_search_context_t context = {
       .module = module,
       .descriptor_set = &descriptor_set,
@@ -339,6 +340,7 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
       .placement = &placement,
       .active_set = &active_set,
       .storage_leases = &empty_storage_leases,
+      .rematerialization_flags = rematerialization_flags,
       .spill_traffic_by_value_ordinal = spill_traffic,
   };
   assignments[0].flags |= LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER;

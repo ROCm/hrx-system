@@ -23,6 +23,10 @@ extern "C" {
 typedef struct loom_low_allocation_spill_plan_traffic_t {
   // Predicted stores needed by the current synthetic spill plan.
   uint32_t store_count;
+  // At least one use reads a proper subrange of the value, even if several
+  // such reads share a full-width reload. Rebuilding the whole producer at
+  // each narrow use would multiply materialization work.
+  bool has_narrow_uses;
   // Predicted bytes stored by the current synthetic spill plan.
   uint64_t store_bytes;
   // Predicted operand-use reloads in the current synthetic spill plan.

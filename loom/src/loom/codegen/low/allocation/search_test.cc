@@ -11,6 +11,7 @@
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "loom/codegen/low/rematerialization_facts.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/target/registers.h"
@@ -1628,6 +1629,8 @@ TEST_F(LowAllocationSearchTest,
   context.assignment_map = &assignment_map;
   context.active_set = &active_set;
   context.storage_leases = &storage_leases;
+  const uint8_t rematerialization_flags[IREE_ARRAYSIZE(spill_traffic)] = {};
+  context.rematerialization_flags = rematerialization_flags;
   context.spill_traffic_by_value_ordinal = spill_traffic;
 
   const loom_low_allocation_class_capacity_t capacity = Capacity(
@@ -1781,6 +1784,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   context.assignment_map = &assignment_map;
   context.active_set = &active_set;
   context.storage_leases = &storage_leases;
+  uint8_t rematerialization_flags[IREE_ARRAYSIZE(spill_traffic)] = {};
+  context.rematerialization_flags = rematerialization_flags;
   context.spill_traffic_by_value_ordinal = spill_traffic;
 
   const loom_low_allocation_class_capacity_t capacity = Capacity(
@@ -1794,6 +1799,26 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
   EXPECT_EQ(victim_set.location_base, 2u);
   ASSERT_EQ(victim_set.assignment_count, 1u);
   EXPECT_EQ(victim_set.assignment_indices[0], 1u);
+
+  // A closed producer can avoid its predicted memory traffic. Partial users
+  // preserve the wide producer even when their reloads coalesce to full width.
+  rematerialization_flags[1] = LOOM_LOW_REMATERIALIZATION_VALUE_CLASSIFIED |
+                               LOOM_LOW_REMATERIALIZATION_VALUE_ELIGIBLE |
+                               LOOM_LOW_REMATERIALIZATION_VALUE_CLOSED;
+  for (bool has_narrow_uses : {false, true}) {
+    spill_traffic[1].has_narrow_uses = has_narrow_uses;
+    IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+        &context, &intervals[0], &capacity,
+        /*interval_requires_register=*/false, &workspace, &arena_,
+        &victim_set));
+    ASSERT_TRUE(victim_set.found);
+    ASSERT_EQ(victim_set.assignment_count, 1u);
+    EXPECT_EQ(victim_set.assignment_indices[0], has_narrow_uses ? 1u : 0u);
+    EXPECT_EQ(spill_traffic[1].store_bytes, 8u);
+    EXPECT_EQ(spill_traffic[1].reload_bytes, 64u);
+  }
+  rematerialization_flags[1] = 0;
+  spill_traffic[1].has_narrow_uses = false;
 
   // Traffic wins independently of candidate order. Equal traffic retains the
   // longer remaining lifetime even when that candidate is visited second.
@@ -2015,6 +2040,8 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
   context.assignment_map = &assignment_map;
   context.active_set = &active_set;
   context.storage_leases = &storage_leases;
+  const uint8_t rematerialization_flags[IREE_ARRAYSIZE(spill_traffic)] = {};
+  context.rematerialization_flags = rematerialization_flags;
   context.spill_traffic_by_value_ordinal = spill_traffic;
 
   // Begin with one active assignment occupying a two-unit budget. Then grow

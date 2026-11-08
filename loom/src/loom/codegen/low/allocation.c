@@ -60,6 +60,8 @@ typedef struct loom_low_allocation_build_state_t {
   loom_low_allocation_unit_liveness_t unit_liveness;
   // Structural content identity shared by all assignment attempts.
   loom_low_allocation_content_identity_t content_identity;
+  // Lazy producer classification preserved across alternative assignments.
+  loom_low_allocation_reconstruction_t reconstruction;
   // Completed interval assignment, spill plan, and remark rows.
   loom_low_allocation_interval_assignment_result_t interval_assignment;
   // Mutable low.copy decision plan being built.
@@ -177,6 +179,7 @@ loom_low_allocation_make_interval_assignment_context(
       .residency = state->options->residency,
       .storage_leases = storage_leases,
       .arena = arena,
+      .reconstruction = &state->reconstruction,
       .function_cfg_graph = &model->cfg_graph,
       .spill_traffic_exclusive_limit = spill_traffic_exclusive_limit,
       .fragmentation_repair_reg_classes = fragmentation_repair_reg_classes,
@@ -829,6 +832,7 @@ static iree_status_t loom_low_allocate_function_impl(
       .function_op = model->context.function_op,
       .target = model->context.target,
   };
+  iree_arena_initialize(arena->block_pool, &state.reconstruction.arena);
   if (iree_status_is_ok(status) && retained_location_table != NULL) {
     status = loom_low_allocation_index_retained_assignments(
         model, retained_location_table, &decision_arena, &state);
@@ -1119,6 +1123,19 @@ static iree_status_t loom_low_allocate_function_impl(
     status = loom_liveness_retain_operation_index(&state.liveness, arena);
   }
   iree_arena_deinitialize(&decision_arena);
+  // Retain only the compact immutable facts after every assignment rollback is
+  // complete. The classification arena's pool block is immediately reusable.
+  uint8_t* rematerialization_flags = NULL;
+  if (iree_status_is_ok(status) && state.reconstruction.value_flags != NULL) {
+    status = iree_arena_allocate_array(arena, value_domain->value_count,
+                                       sizeof(*rematerialization_flags),
+                                       (void**)&rematerialization_flags);
+    if (iree_status_is_ok(status)) {
+      memcpy(rematerialization_flags, state.reconstruction.value_flags,
+             value_domain->value_count);
+    }
+  }
+  iree_arena_deinitialize(&state.reconstruction.arena);
 
   uint32_t* first_storage_release_action_by_node = NULL;
   if (locations_replayed && iree_status_is_ok(status) &&
@@ -1145,6 +1162,7 @@ static iree_status_t loom_low_allocate_function_impl(
         .storage_layout = model->context.requirements.storage_layout,
         .liveness = state.liveness,
         .register_requirements = model->register_requirements,
+        .rematerialization_flags = rematerialization_flags,
         .storage_segments = state.unit_liveness.storage_segments.entries,
         .placement = state.placement,
         .fixed_values = state.target_constraints.fixed_values,

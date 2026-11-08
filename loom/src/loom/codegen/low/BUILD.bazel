@@ -810,6 +810,23 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "rematerialization_facts",
+    srcs = ["rematerialization_facts.c"],
+    hdrs = ["rematerialization_facts.h"],
+    deps = [
+        ":descriptor_traits",
+        ":representation_binding",
+        ":target_binding",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "rematerialization",
     srcs = ["rematerialization.c"],
     hdrs = ["rematerialization.h"],
@@ -818,6 +835,7 @@ loom_cc_library(
         ":descriptor_traits",
         ":diagnostics",
         ":register_requirements",
+        ":rematerialization_facts",
         ":representation_binding",
         ":storage_relation",
         ":target_binding",
