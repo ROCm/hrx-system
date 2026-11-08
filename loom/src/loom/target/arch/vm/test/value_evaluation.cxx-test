@@ -200,7 +200,7 @@ retired 0
 namespace loomt = loom::type;
 using Rows = loomt::view<loomt::shape<loomt::dynamic>, const unsigned char,
                         loomt::encoding<loom::encoding::role::layout, 1>>;
-[[loom::inline]] static unsigned trim(Rows& rows) {
+[[loom::noinline]] static unsigned trim(Rows& rows) {
   rows = loom::view::subview(rows, {1}, {1});
   return 0;
 }

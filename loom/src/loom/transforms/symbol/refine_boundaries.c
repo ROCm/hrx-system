@@ -836,6 +836,13 @@ static iree_status_t loom_refine_boundaries_materialize_exact_value(
   if (!loom_value_facts_can_materialize_constant(facts, type)) {
     return iree_ok_status();
   }
+  // A body constant cannot replace an identity needed by a dependent type at
+  // the function boundary. Refinement may eliminate those type uses in a
+  // later round; until then the argument continues to carry the exact facts.
+  if (predicate_owner.op &&
+      loom_module_value_has_type_uses(module, old_value)) {
+    return iree_ok_status();
+  }
 
   loom_value_id_t replacement = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(
@@ -1419,8 +1426,17 @@ static iree_status_t loom_refine_boundaries_collect_function(
         (loom_walk_callback_t){loom_refine_boundaries_collect_op, &collect},
         &walk_result));
   }
-  // Recursive calls encountered during collection cannot consume a partial
-  // summary containing only the returns visited before that call.
+  // Publish the complete return summary to the signature identities as well as
+  // callers so dependent result types refine with the same facts. Recursive
+  // calls encountered during collection cannot consume a partial summary.
+  const loom_value_id_t* results =
+      loom_op_const_results(function_info->function.op);
+  for (uint16_t i = 0; i < function_info->result_count; ++i) {
+    if (function_info->return_fact_defined[i]) {
+      IREE_RETURN_IF_ERROR(loom_value_fact_table_define(
+          next_boundary_facts, results[i], function_info->return_facts[i]));
+    }
+  }
   function_info->has_return_facts = true;
   return iree_ok_status();
 }

@@ -39,7 +39,8 @@ iree_status_t loom_type_refine_with_value_facts(
 
 // Specializes only the encoding attachment using exact facts and canonical
 // module encodings. Dynamic dimensions retain their SSA identities even when
-// their values are exact in |fact_table|.
+// their values are exact in |fact_table|. Narrowed types use the module's
+// canonical representation, including implicit shaped encoding attachments.
 iree_status_t loom_type_specialize_encoding_with_value_facts(
     loom_module_t* module, loom_type_t current_type,
     const loom_value_fact_table_t* fact_table, iree_arena_allocator_t* arena,
@@ -49,8 +50,9 @@ iree_status_t loom_type_specialize_encoding_with_value_facts(
 //
 // This includes ordinary dimension/static-spec refinement and additionally
 // interns a lossless static representation for exact composed encodings such
-// as dynamic strided physical storage. Callers must own a module rewrite or
-// transformation boundary because the module encoding table may grow.
+// as dynamic strided physical storage. Narrowed types use the module's
+// canonical representation. Callers must own a module rewrite or transformation
+// boundary because the module type and encoding tables may grow.
 iree_status_t loom_type_specialize_with_value_facts(
     loom_module_t* module, loom_type_t current_type,
     const loom_value_fact_table_t* fact_table, iree_arena_allocator_t* arena,
