@@ -122,7 +122,7 @@ static iree_status_t loom_low_allocation_ordinal_components_build_impl(
       (void**)&indices_by_value_ordinal));
   memset(indices_by_value_ordinal, 0xFF,
          value_count * sizeof(*indices_by_value_ordinal));
-  loom_low_placement_value_range_t* ranges = NULL;
+  loom_low_placement_ordinal_component_range_t* ranges = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, component_count, sizeof(*ranges), (void**)&ranges));
   memset(ranges, 0, component_count * sizeof(*ranges));
@@ -140,6 +140,7 @@ static iree_status_t loom_low_allocation_ordinal_components_build_impl(
     const uint32_t component_index = indices_by_root[root];
     indices_by_value_ordinal[i] = component_index;
     ++ranges[component_index].count;
+    ranges[component_index].origin_count += origin == i;
     ++member_count;
   }
 
@@ -153,14 +154,20 @@ static iree_status_t loom_low_allocation_ordinal_components_build_impl(
       arena, member_count, sizeof(*members), (void**)&members));
   uint32_t* cursors = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      scratch_arena, component_count, sizeof(*cursors), (void**)&cursors));
+      scratch_arena, component_count, 2 * sizeof(*cursors), (void**)&cursors));
   for (uint32_t i = 0; i < component_count; ++i) {
     cursors[i] = ranges[i].start;
+    cursors[component_count + i] = ranges[i].start + ranges[i].origin_count;
   }
   for (loom_value_ordinal_t i = 0; i < value_count; ++i) {
     const uint32_t component_index = indices_by_value_ordinal[i];
     if (component_index != UINT32_MAX) {
-      members[cursors[component_index]++] = i;
+      const loom_value_ordinal_t origin =
+          loom_low_allocation_ordinal_component_origin(
+              tied_storage_origins_by_value_ordinal, i);
+      const uint32_t cursor =
+          component_index + (origin == i ? 0 : component_count);
+      members[cursors[cursor]++] = i;
     }
   }
   *out_components = (loom_low_allocation_ordinal_components_t){

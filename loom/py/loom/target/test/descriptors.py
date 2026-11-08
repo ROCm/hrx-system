@@ -93,6 +93,8 @@ _REG_FIXED_R2 = "test.fixed.r2"
 _REG_PACKED_NARROW = "test.packed.narrow"
 _REG_PACKED_WIDE = "test.packed.wide"
 _REG_COINDEXED_PARTNER = "test.coindexed.partner"
+_REG_SPILLABLE_PRIMARY = "test.spillable.primary"
+_REG_SPILLABLE_PARTNER = "test.spillable.partner"
 _REG_ATOMIC_NARROW = "test.atomic.narrow"
 _REG_ALIAS_NARROW = "test.alias.narrow"
 
@@ -1229,6 +1231,55 @@ TEST_LOW_COINDEXED_OPERANDS_DESCRIPTOR = Descriptor(
     effects=(_STORE_EFFECT,),
     schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.SIDE_EFFECTING,),
+)
+
+TEST_LOW_SPILLABLE_COINDEXED_DESCRIPTORS = (
+    *(
+        replace(
+            descriptor,
+            key=descriptor.key + ".spillable",
+            mnemonic=descriptor.mnemonic + ".spillable",
+            semantic_tag=descriptor.semantic_tag + ".spillable",
+            operands=tuple(
+                replace(operand, reg_alts=(RegClassAlt(register_class),))
+                for operand, register_class in zip(
+                    descriptor.operands,
+                    (_REG_SPILLABLE_PRIMARY, _REG_SPILLABLE_PARTNER),
+                    strict=True,
+                )
+            ),
+        )
+        for descriptor in (
+            TEST_LOW_COINDEXED_RESULTS_DESCRIPTOR,
+            TEST_LOW_COINDEXED_OPERANDS_DESCRIPTOR,
+        )
+    ),
+    Descriptor(
+        key="test.coindexed.update.spillable",
+        mnemonic="test.coindexed.update.spillable",
+        semantic_tag="test.coindexed.update.spillable",
+        operands=tuple(
+            Operand(name, role, (RegClassAlt(register_class),))
+            for role, prefix in (
+                (OperandRole.RESULT, "next_"),
+                (OperandRole.OPERAND, ""),
+            )
+            for name, register_class in (
+                (prefix + "primary", _REG_SPILLABLE_PRIMARY),
+                (prefix + "partner", _REG_SPILLABLE_PARTNER),
+            )
+        ),
+        constraints=(
+            Constraint(ConstraintKind.SAME_REGISTER_ORDINAL, 2, 3),
+            Constraint(ConstraintKind.TIED, 0, 2),
+            Constraint(ConstraintKind.TIED, 1, 3),
+        ),
+        asm_forms=_asm(
+            results=("next_primary", "next_partner"), operands=("primary", "partner")
+        ),
+        schedule_class=_SCHEDULE_SCALAR_ALU,
+        flags=(DescriptorFlag.DEAD_REMOVABLE,),
+    ),
 )
 
 TEST_LOW_ADD_F32_DESCRIPTOR = Descriptor(
@@ -2779,6 +2830,19 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
             ),
             physical_registers=("test.r2", "test.r3"),
         ),
+        *(
+            RegClass(
+                name,
+                32,
+                SpillSlotSpace.STACK,
+                flags=(RegClassFlag.PHYSICAL, RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS),
+                physical_registers=registers,
+            )
+            for name, registers in (
+                (_REG_SPILLABLE_PRIMARY, ("test.r0", "test.r1")),
+                (_REG_SPILLABLE_PARTNER, ("test.r2", "test.r3")),
+            )
+        ),
         RegClass(
             _REG_ATOMIC_NARROW,
             32,
@@ -3175,6 +3239,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_SAME_REGISTER_VALUE_TYPES_DESCRIPTOR,
         TEST_LOW_COINDEXED_RESULTS_DESCRIPTOR,
         TEST_LOW_COINDEXED_OPERANDS_DESCRIPTOR,
+        *TEST_LOW_SPILLABLE_COINDEXED_DESCRIPTORS,
         TEST_LOW_READ_LOW16_I32_DESCRIPTOR,
         TEST_LOW_READ_HIGH16_I32_DESCRIPTOR,
         TEST_LOW_WRITE_LOW16_I32_DESCRIPTOR,

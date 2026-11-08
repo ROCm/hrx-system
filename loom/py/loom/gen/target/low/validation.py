@@ -410,7 +410,6 @@ def _validate_same_register_ordinal_components(
             register_class = register_classes[operand.reg_alts[0].reg_class]
             required_flags = {
                 RegClassFlag.PHYSICAL,
-                RegClassFlag.UNSPILLABLE,
                 RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
             }
             missing_flags = required_flags.difference(register_class.flags)

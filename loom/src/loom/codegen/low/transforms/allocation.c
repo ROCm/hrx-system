@@ -552,7 +552,6 @@ static iree_status_t loom_low_materialize_allocation_run_attempts(
         .supported_storage_spaces = state ? state->spill_storage_spaces
                                           : LOOM_LOW_STORAGE_SPACE_SET_ALL,
         .emit_spill_diagnostics = state && state->emit_spill_diagnostics,
-        .max_spill_plan_count = 1,
         .per_user_placement_values = rematerialization.per_user_values,
         .emitter = pass->diagnostic_emitter,
     };

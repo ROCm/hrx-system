@@ -9,6 +9,7 @@
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/allocation/content_identity.h"
 #include "loom/codegen/low/allocation/search.h"
+#include "loom/codegen/low/allocation/spill_search.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/ir/context.h"
 #include "loom/ir/local_value_domain.h"
@@ -348,9 +349,9 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
                   /*bit_index=*/1);
 
   const loom_low_allocation_class_capacity_t capacity = Capacity(4);
-  loom_low_allocation_search_workspace_t workspace = {};
-  loom_low_allocation_search_spill_victim_set_t victim_set = {};
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  loom_low_allocation_spill_search_workspace_t workspace = {};
+  loom_low_allocation_spill_search_victim_set_t victim_set = {};
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   ASSERT_TRUE(victim_set.found);
@@ -380,7 +381,7 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
   }
   const loom_low_allocation_class_capacity_t comparison_capacity = Capacity(8);
   for (int repetition = 0; repetition < 2; ++repetition) {
-    IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+    IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
         &context, &intervals[0], &comparison_capacity,
         /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
     ASSERT_TRUE(victim_set.found);
@@ -483,26 +484,26 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
       /*assignment_index=*/1, /*value_ordinal=*/2);
   context.storage_leases = &storage_leases;
 
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_TRUE(victim_set.found);
 
   lease_records[0].flags &= ~LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE;
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);
   lease_records[0].flags |= LOOM_LOW_STORAGE_LEASE_FLAG_RELEASE_FOR_PRESSURE;
 
   schedule_blocks[0].scheduled_node_count = 8;
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);
   schedule_blocks[0].scheduled_node_count = kScheduleNodeCount;
 
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   ASSERT_TRUE(victim_set.found);
@@ -530,7 +531,7 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
   // physical observation can be shortened by materializing the result.
   iree_bitmap_reset(unit_liveness.values_with_incomplete_storage_segments,
                     /*bit_index=*/1);
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);
@@ -540,7 +541,7 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
   // A concrete decomposed observation, rather than a generic incomplete
   // storage fact alone, establishes what materializing the result discharges.
   observation_value_links[1] = 0;
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);
@@ -550,7 +551,7 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
   // survive materialization and independently forbid shortening the source.
   iree_bitmap_set(unit_liveness.values_with_independent_storage_extensions,
                   /*bit_index=*/1);
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);
@@ -560,19 +561,19 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
   // Partial, captured, and still-semantically-live sources do not transfer
   // their complete remaining storage obligation to the result.
   relations[0].unit_count = 1;
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);
   relations[0].unit_count = 2;
   relations[0].flags |= LOOM_LOW_PLACEMENT_RELATION_FLAG_CAPTURED_PART;
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);
   relations[0].flags &= ~LOOM_LOW_PLACEMENT_RELATION_FLAG_CAPTURED_PART;
   intervals[1].end_point = 3;
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);
@@ -581,7 +582,7 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
   // A second still-live forwarded result keeps the source observable after
   // spilling either result alone.
   relations[1].cause = LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT;
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);
@@ -592,7 +593,7 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
   const loom_value_ordinal_t tied_origins[] = {0, 1, 2, 1};
   placement.tied_storage_origins_by_value_ordinal = tied_origins;
   relations[1].cause = LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT;
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);
@@ -600,7 +601,7 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
   placement.tied_storage_origins_by_value_ordinal = nullptr;
 
   assignments[1].flags |= LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REQUIRES_REGISTER;
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);
@@ -612,7 +613,7 @@ TEST_F(LowAllocationCoveringSpillSearchTest,
   loom_low_allocation_active_set_remove(&active_set, assignments,
                                         IREE_ARRAYSIZE(assignments),
                                         /*assignment_index=*/1);
-  IREE_ASSERT_OK(loom_low_allocation_search_find_active_spill_victim_set(
+  IREE_ASSERT_OK(loom_low_allocation_spill_search_find_victims(
       &context, &intervals[0], &capacity,
       /*interval_requires_register=*/true, &workspace, &arena_, &victim_set));
   EXPECT_FALSE(victim_set.found);

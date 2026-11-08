@@ -1035,13 +1035,6 @@ iree_status_t loom_low_allocation_materialize_spills(
       options ? options->emitter : (iree_diagnostic_emitter_t){0};
   const iree_bitmap_t per_user_placement_values =
       options ? options->per_user_placement_values : (iree_bitmap_t){0};
-  if (options && options->max_spill_plan_count > 0 &&
-      options->max_spill_plan_count < spill_plan_count) {
-    spill_plan_count = options->max_spill_plan_count;
-  }
-  if (spill_plan_count == 0) {
-    return iree_ok_status();
-  }
   if (spill_plan_count > UINT32_MAX) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "materialized storage count overflow");
