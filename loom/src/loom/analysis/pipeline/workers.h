@@ -19,18 +19,6 @@
 extern "C" {
 #endif
 
-// Specialized authored worker geometry. This is a domain of execution units,
-// not a count of records and not a request to repeat the strand body per
-// record.
-typedef struct loom_pipeline_worker_axis_t {
-  // First worker coordinate along this axis.
-  uint64_t origin;
-  // Number of workers along this axis.
-  uint64_t count;
-  // Coordinate increment between workers along this axis.
-  uint64_t stride;
-} loom_pipeline_worker_axis_t;
-
 typedef enum loom_pipeline_transport_step_kind_e {
   LOOM_PIPELINE_TRANSPORT_STEP_CHANNEL,
   LOOM_PIPELINE_TRANSPORT_STEP_TRANSFER,
@@ -206,7 +194,7 @@ typedef struct loom_pipeline_worker_t {
   // Visible body bound by the call's actual captures. Shared definitions remain
   // immutable until the materialization owner has assigned distinct instances.
   loom_func_like_t function;
-  // Arena-owned worker geometry in source axis order.
+  // Borrowed construction-owned geometry in source axis order.
   const loom_pipeline_worker_axis_t* axes;
   // Number of worker axes.
   iree_host_size_t rank;

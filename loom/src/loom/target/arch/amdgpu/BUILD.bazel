@@ -503,6 +503,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/amdgpu/lower:component_api",
         "//loom/src/loom/target/arch/amdgpu/lower:kinds",
         "//loom/src/loom/target/arch/amdgpu/ops",
+        "//loom/src/loom/transforms/pipeline:workgroup",
         "//loom/src/loom/transforms/scalar:wide_division_legalization",
         "//runtime/src/iree/base",
     ],

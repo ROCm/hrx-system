@@ -5817,7 +5817,7 @@ class Translator final : private Initialization::Evaluation {
         loom_symbol_ref_is_valid(target)
             ? LOOM_PIPELINE_STRAND_BUILD_FLAG_HAS_TARGET
             : 0,
-        target, origins.data(), origins.size(),
+        0, target, origins.data(), origins.size(),
         strand.origins.static_values().data(),
         strand.origins.static_values().size(), counts.data(), counts.size(),
         strand.counts.static_values().data(),

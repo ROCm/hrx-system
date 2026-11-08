@@ -373,13 +373,6 @@ static iree_status_t loom_target_environment_append_emitters(
   return iree_ok_status();
 }
 
-static const loom_target_fact_type_t* loom_target_provider_fact_type(
-    const loom_target_provider_t* provider) {
-  return provider->target_fact_type != NULL ? provider->target_fact_type
-         : provider->profile_type != NULL   ? provider->profile_type->fact_type
-                                            : NULL;
-}
-
 static iree_status_t loom_target_environment_append_canonical_emitter_fact(
     const loom_target_provider_t* provider,
     const loom_target_emitter_t* emitter,

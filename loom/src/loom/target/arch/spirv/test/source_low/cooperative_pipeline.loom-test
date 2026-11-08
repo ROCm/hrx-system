@@ -1,0 +1,39 @@
+// RUN: emit source-low output=low control-flow=structured-low
+
+spirv.target<vulkan1_3> @target {subgroup_size = 32}
+
+// The same common realization retains the source loop for a structured target.
+pipeline.def<kernel> public target(@target) @stream() run(%input: view<1024xi32>, %output: view<1024xi32>) {
+  pipeline.strand<cooperative> workers([0], [4], [1]) {
+    %thread = kernel.workitem.id<x> : index
+    %width = kernel.workgroup.size<x> : index
+    %end = index.constant 1024 : index
+    %increment = index.cast %width : index to i32
+    scf.for %item = [%thread to %end step %width] {
+      %value = view.load %input[%item] : view<1024xi32> -> i32
+      %result = scalar.addi %value, %increment : i32
+      view.store %result, %output[%item] : i32, view<1024xi32>
+    }
+  }
+}
+
+// ----
+low.kernel.def target<spirv.logical.core>(@target) abi_layout({signature = (buffer, buffer) -> ()}) export("stream") workgroup_size(128, 1, 1) workgroup_count(1, 1, 1) @stream() asm {
+  %input = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %output = resource<hal_binding> {index = 1, source_type = hal.buffer} : reg<spirv.ptr.storage_buffer>
+  %thread = OpLoadBuiltin.local_invocation_id.x
+  %width = OpConstant.i32 128 : reg<spirv.id : index>
+  %end = OpConstant.i32 1024 : reg<spirv.id : index>
+  %increment = OpConstant.i32 128
+  low.scf.for signed [%thread to %end step %width] do(%item: reg<spirv.id : index>) {
+    %30 = OpSConvert.i32.offset64 %item
+    %31 = OpConstant.offset64 4
+    %32 = OpIMul.offset64 %30, %31
+    %33 = OpPtrAccessChain.storage_buffer.i32.byte_offset %input, %32
+    %value = OpLoad.storage_buffer.i32 %33
+    %result = OpIAdd %value, %increment
+    %39 = OpPtrAccessChain.storage_buffer.i32.byte_offset %output, %32
+    OpStore.storage_buffer.i32 %39, %result
+  }
+  return
+}

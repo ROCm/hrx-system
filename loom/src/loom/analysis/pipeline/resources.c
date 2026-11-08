@@ -50,6 +50,61 @@ static bool loom_pipeline_resources_channel_geometry(
   return true;
 }
 
+static bool loom_pipeline_resources_coordinate(
+    int64_t literal, loom_value_slice_t values, uint16_t* dynamic_index,
+    const loom_value_fact_table_t* facts, uint64_t* out_value) {
+  int64_t value = literal;
+  if (literal == INT64_MIN && !loom_value_facts_as_exact_i64(
+                                  loom_value_fact_table_lookup(
+                                      facts, values.values[(*dynamic_index)++]),
+                                  &value)) {
+    return false;
+  }
+  if (value < 0) {
+    return false;
+  }
+  *out_value = (uint64_t)value;
+  return true;
+}
+
+static iree_status_t loom_pipeline_resources_geometry(
+    loom_op_t* declaration, const loom_value_fact_table_t* facts,
+    iree_diagnostic_emitter_t diagnostic_emitter, iree_arena_allocator_t* arena,
+    loom_pipeline_resource_strand_t* strand, bool* out_valid) {
+  *out_valid = false;
+  const loom_attribute_t origins =
+      loom_pipeline_strand_static_origins(declaration);
+  const loom_attribute_t counts =
+      loom_pipeline_strand_static_counts(declaration);
+  const loom_attribute_t strides =
+      loom_pipeline_strand_static_strides(declaration);
+  loom_pipeline_worker_axis_t* axes = NULL;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, origins.count,
+                                                 sizeof(*axes), (void**)&axes));
+  uint16_t origin_index = 0, count_index = 0, stride_index = 0;
+  for (uint32_t i = 0; i < origins.count; ++i) {
+    if (!loom_pipeline_resources_coordinate(
+            origins.i64_array[i], loom_pipeline_strand_origins(declaration),
+            &origin_index, facts, &axes[i].origin) ||
+        !loom_pipeline_resources_coordinate(
+            counts.i64_array[i], loom_pipeline_strand_counts(declaration),
+            &count_index, facts, &axes[i].count) ||
+        !loom_pipeline_resources_coordinate(
+            strides.i64_array[i], loom_pipeline_strand_strides(declaration),
+            &stride_index, facts, &axes[i].stride) ||
+        axes[i].stride == 0) {
+      IREE_RETURN_IF_ERROR(loom_pipeline_resources_reject(
+          declaration, IREE_SV("specialized finite worker geometry"),
+          diagnostic_emitter));
+      return iree_ok_status();
+    }
+  }
+  strand->axes = axes;
+  strand->rank = origins.count;
+  *out_valid = true;
+  return iree_ok_status();
+}
+
 static int loom_pipeline_resources_compare_root(const void* lhs,
                                                 const void* rhs) {
   const loom_value_id_t lhs_root =
@@ -221,10 +276,17 @@ iree_status_t loom_pipeline_resources_build(
             arena, resources.strand_count, resources.strand_count + 1,
             sizeof(*strands), &strand_capacity, (void**)&strands));
       }
-      strands[resources.strand_count++] = (loom_pipeline_resource_strand_t){
+      loom_pipeline_resource_strand_t strand = {
           .declaration = op,
           .call = call,
       };
+      bool geometry_valid = false;
+      IREE_RETURN_IF_ERROR(loom_pipeline_resources_geometry(
+          op, facts, diagnostic_emitter, arena, &strand, &geometry_valid));
+      if (!geometry_valid) {
+        return iree_ok_status();
+      }
+      strands[resources.strand_count++] = strand;
       continue;
     }
     if (loom_pipeline_compose_isa(op)) {

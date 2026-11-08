@@ -347,8 +347,20 @@ static iree_status_t loom_target_pipeline_contribute_phase(
     loom_builder_t* builder,
     const loom_target_pipeline_build_context_t* context,
     loom_target_pipeline_phase_t phase) {
-  return loom_target_environment_contribute_pipeline(
+  // A phase is one change boundary even when several providers contribute.
+  // Otherwise a trailing provider's no-op hides earlier mutations from the
+  // following `if changed` cleanup.
+  loom_pass_ir_scope_t scope;
+  IREE_RETURN_IF_ERROR(
+      loom_pass_ir_begin_repeat(builder, LOOM_PASS_REPEAT_BUILD_FLAG_HAS_COUNT,
+                                LOOM_PASS_REPEAT_MODE_FIXED, 1, 0, &scope));
+  iree_status_t status = loom_target_environment_contribute_pipeline(
       context->target_environment, phase, context->pass_environment, builder);
+  if (!iree_status_is_ok(status)) {
+    loom_pass_ir_abandon_scope(builder, &scope);
+    return status;
+  }
+  return loom_pass_ir_end_scope(builder, &scope);
 }
 
 static iree_status_t loom_target_pipeline_build_cleanup(
@@ -712,6 +724,29 @@ static iree_status_t loom_target_pipeline_build_lexical_worker_body(
   return loom_target_pipeline_build_cleanup(builder);
 }
 
+static iree_status_t loom_target_pipeline_build_required_lexical_workers(
+    loom_builder_t* builder, void* user_data) {
+  const loom_target_pipeline_build_context_t* context = user_data;
+  const loom_target_provider_set_t* providers =
+      context->target_environment->provider_set;
+  for (iree_host_size_t i = 0; i < providers->provider_count; ++i) {
+    const loom_target_provider_t* provider = providers->providers[i];
+    if (!provider->requires_lexical_worker_preparation) {
+      continue;
+    }
+    loom_named_attr_t family_attr;
+    IREE_RETURN_IF_ERROR(loom_target_pipeline_build_string_attr(
+        builder, IREE_SV("family"),
+        loom_target_provider_fact_type(provider)->name, &family_attr));
+    loom_op_t* where_op;
+    IREE_RETURN_IF_ERROR(loom_pass_ir_build_where(
+        builder, LOOM_PASS_WHERE_BUILD_FLAG_HAS_ATTRS, IREE_SV("target"),
+        loom_make_named_attr_slice(&family_attr, 1),
+        loom_target_pipeline_build_lexical_worker_body, user_data, &where_op));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_target_pipeline_build_lexical_workers(
     loom_builder_t* builder, void* user_data) {
   loom_named_attr_t name_attr = {0};
@@ -721,7 +756,8 @@ static iree_status_t loom_target_pipeline_build_lexical_workers(
   return loom_pass_ir_build_where(
       builder, LOOM_PASS_WHERE_BUILD_FLAG_HAS_ATTRS, IREE_SV("op"),
       loom_make_named_attr_slice(&name_attr, 1),
-      loom_target_pipeline_build_lexical_worker_body, user_data, &where_op);
+      loom_target_pipeline_build_required_lexical_workers, user_data,
+      &where_op);
 }
 
 static iree_status_t loom_target_pipeline_build_execution_cleanup(

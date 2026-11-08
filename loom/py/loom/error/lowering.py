@@ -735,6 +735,15 @@ ERR_LOWERING_071 = ErrorDef(
     params=(ErrorParam("requirement", ParamKind.STRING),),
 )
 
+ERR_LOWERING_072 = ErrorDef(
+    domain=ErrorDomain.LOWERING,
+    code=72,
+    severity=Severity.ERROR,
+    summary="Pipeline cannot be realized as one workgroup.",
+    message="pipeline workgroup realization requires {requirement}",
+    params=(ErrorParam("requirement", ParamKind.STRING),),
+)
+
 
 ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_022,
@@ -776,4 +785,5 @@ ALL_LOWERING_ERRORS: tuple[ErrorDef, ...] = (
     ERR_LOWERING_069,
     ERR_LOWERING_070,
     ERR_LOWERING_071,
+    ERR_LOWERING_072,
 )

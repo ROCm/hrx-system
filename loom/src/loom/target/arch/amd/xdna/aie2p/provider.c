@@ -212,6 +212,7 @@ const loom_target_provider_t loom_aie2p_target_provider = {
         },
     .pass_registry = &loom_aie2p_pipeline_pass_registry,
     .contribute_pipeline = loom_aie2p_provider_contribute_pipeline,
+    .requires_lexical_worker_preparation = true,
     .select_profile = loom_aie2p_target_provider_select_profile,
     .target_fact_type = &loom_aie2p_target_fact_type,
 };

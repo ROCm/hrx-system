@@ -852,9 +852,9 @@ static iree_status_t loom_aie2p_kernel_build_dma_strand(
   const int64_t strides[] = {1, 1};
   loom_op_t* strand_op = NULL;
   IREE_RETURN_IF_ERROR(loom_pipeline_strand_build(
-      ir, 0, loom_symbol_ref_null(), NULL, 0, origins, IREE_ARRAYSIZE(origins),
-      NULL, 0, counts, IREE_ARRAYSIZE(counts), NULL, 0, strides,
-      IREE_ARRAYSIZE(strides), builder->location, &strand_op));
+      ir, 0, 0, loom_symbol_ref_null(), NULL, 0, origins,
+      IREE_ARRAYSIZE(origins), NULL, 0, counts, IREE_ARRAYSIZE(counts), NULL, 0,
+      strides, IREE_ARRAYSIZE(strides), builder->location, &strand_op));
   const loom_builder_ip_t pipeline_ip = loom_builder_enter_region(
       ir, strand_op, loom_pipeline_strand_body(strand_op));
 
@@ -955,9 +955,9 @@ static iree_status_t loom_aie2p_kernel_build_compute_strand(
   const int64_t strides[] = {1, 1};
   loom_op_t* strand_op = NULL;
   IREE_RETURN_IF_ERROR(loom_pipeline_strand_build(
-      ir, 0, loom_symbol_ref_null(), NULL, 0, origins, IREE_ARRAYSIZE(origins),
-      NULL, 0, counts, IREE_ARRAYSIZE(counts), NULL, 0, strides,
-      IREE_ARRAYSIZE(strides), builder->location, &strand_op));
+      ir, 0, 0, loom_symbol_ref_null(), NULL, 0, origins,
+      IREE_ARRAYSIZE(origins), NULL, 0, counts, IREE_ARRAYSIZE(counts), NULL, 0,
+      strides, IREE_ARRAYSIZE(strides), builder->location, &strand_op));
   const loom_builder_ip_t pipeline_ip = loom_builder_enter_region(
       ir, strand_op, loom_pipeline_strand_body(strand_op));
 
@@ -1021,9 +1021,9 @@ static iree_status_t loom_aie2p_kernel_build_coherent_strand(
   const int64_t strides[] = {1, 1};
   loom_op_t* strand_op = NULL;
   IREE_RETURN_IF_ERROR(loom_pipeline_strand_build(
-      ir, 0, loom_symbol_ref_null(), NULL, 0, origins, IREE_ARRAYSIZE(origins),
-      NULL, 0, counts, IREE_ARRAYSIZE(counts), NULL, 0, strides,
-      IREE_ARRAYSIZE(strides), builder->location, &strand_op));
+      ir, 0, 0, loom_symbol_ref_null(), NULL, 0, origins,
+      IREE_ARRAYSIZE(origins), NULL, 0, counts, IREE_ARRAYSIZE(counts), NULL, 0,
+      strides, IREE_ARRAYSIZE(strides), builder->location, &strand_op));
   const loom_builder_ip_t pipeline_ip = loom_builder_enter_region(
       ir, strand_op, loom_pipeline_strand_body(strand_op));
 

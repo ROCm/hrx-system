@@ -223,7 +223,7 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
   const int64_t worker_extent = 1;
   loom_op_t* child_strand;
   IREE_ASSERT_OK(loom_pipeline_strand_build(
-      &builder_, 0, loom_symbol_ref_null(), child_arguments_ids + 1, 1,
+      &builder_, 0, 0, loom_symbol_ref_null(), child_arguments_ids + 1, 1,
       &dynamic_origin, 1, nullptr, 0, &worker_extent, 1, nullptr, 0,
       &worker_extent, 1, LOOM_LOCATION_UNKNOWN, &child_strand));
   loom_builder_enter_region(&builder_, child_strand,
@@ -279,7 +279,7 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
     const int64_t one = 1;
     loom_op_t* strand;
     IREE_ASSERT_OK(loom_pipeline_strand_build(
-        &builder_, 0, loom_symbol_ref_null(), nullptr, 0, &worker_origin, 1,
+        &builder_, 0, 0, loom_symbol_ref_null(), nullptr, 0, &worker_origin, 1,
         nullptr, 0, &one, 1, nullptr, 0, &one, 1, LOOM_LOCATION_UNKNOWN,
         &strand));
     loom_builder_enter_region(&builder_, strand,
@@ -416,6 +416,8 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
     for (size_t i : {1u, 0u}) {
       auto& selected = workers[occurrence][i];
       EXPECT_EQ(selected.function.op, worker);
+      EXPECT_EQ(selected.axes, selected.source->axes);
+      EXPECT_EQ(selected.rank, selected.source->rank);
       ASSERT_EQ(selected.rank, 1u);
       EXPECT_EQ(selected.axes[0].origin, i);
       EXPECT_EQ(selected.axes[0].count, 1u);

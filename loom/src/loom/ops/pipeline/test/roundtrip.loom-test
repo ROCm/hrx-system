@@ -19,6 +19,17 @@ pipeline.def @ordered() run(%state: buffer, %count: index) {
 
 // ====
 
+// Participation is part of the source contract across text and bytecode.
+// Selected workers collectively own one record in the cooperative instance.
+pipeline.def<kernel> @cooperative_stream(%waves: index) run(%input: channel<tile<1024xi32>>) {
+  pipeline.strand<cooperative> workers([0], [%waves], [1]) {
+    %read, %panel = channel.acquire %input : channel<tile<1024xi32>> -> (read<tile<1024xi32>>, view<1024xi32>)
+    channel.release %read : read<tile<1024xi32>>
+  }
+}
+
+// ====
+
 target.decl @npu
 
 pipeline.decl<kernel> public retain target(@npu) @resident(%width: index) run(%input: view<[%width]xi32>, %output: buffer) where [multiple_of(%width, 16)]
