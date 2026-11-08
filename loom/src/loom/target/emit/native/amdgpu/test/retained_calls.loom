@@ -73,3 +73,201 @@ check.scenario @retained_leaf_call_again_executes {
   }
   check.return
 }
+
+// A void call observes the active lanes even though it has no state operands
+// or results. Both the full-wave call and the selected-lane call keep their
+// authored execution masks when independent state operations are scheduled.
+func.def noinline @store_index(%storage: buffer, %element: index) where [range(%element, 0, 127)] {
+  %origin = index.constant 0 : offset
+  %output = buffer.view %storage[%origin] : buffer -> view<128xi32>
+  %index = index.cast %element : index to i32
+  %c1 = scalar.constant 1 : i32
+  %value = scalar.addi %index, %c1 : i32
+  view.store %value, %output[%element] : i32, view<128xi32>
+  func.return
+}
+
+kernel.def target(@target) @retained_void_call_masks() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%storage: buffer) {
+  %thread = kernel.workitem.id<x> : index
+  %selected_count = index.constant 16 : index
+  %selected = index.cmp ult, %thread, %selected_count : index
+  func.call @store_index(%storage, %thread) : (buffer, index)
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  scf.if %selected {
+    %offset = index.constant 64 : index
+    %element = index.add %thread, %offset : index
+    func.call @store_index(%storage, %element) : (buffer, index)
+  }
+  kernel.return
+}
+
+func.def @retained_void_call_masks_oracle(%storage: buffer) {
+  %origin = index.constant 0 : offset
+  %output = buffer.view %storage[%origin] : buffer -> view<128xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 80 : index
+  %step = index.constant 1 : index
+  %c1 = scalar.constant 1 : i32
+  scf.for %element = [%begin to %end step %step] {
+    %index = index.cast %element : index to i32
+    %value = scalar.addi %index, %c1 : i32
+    view.store %value, %output[%element] : i32, view<128xi32>
+  }
+  func.return
+}
+
+check.scenario @retained_void_call_masks_execute {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %output = check.generate.fill value(-1) : tensor<128xi32>
+    check.compare<@retained_void_call_masks, @retained_void_call_masks_oracle>(%output) : (tensor<128xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<128xi32>
+    }
+  }
+  check.return
+}
+
+func.def noinline @advance_offset(%value: offset) -> (i64) {
+  %increment = index.constant 8 : offset
+  %next = index.add %value, %increment : offset
+  %bits = index.cast %next : offset to i64
+  func.return %bits : i64
+}
+
+func.def noinline @advance_index(%value: index) -> (i64) {
+  %increment = index.constant 8 : index
+  %next = index.add %value, %increment : index
+  %bits = index.cast %next : index to i64
+  func.return %bits : i64
+}
+
+// Narrow and wide arguments share each helper's complete signature. Returned
+// values are data only: every memory address comes from the bounded workitem ID.
+kernel.def target(@target) @retained_address_calls() {
+  %groups = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %groups, %groups) workgroup_size(%threads, %groups, %groups) : index
+} launch(%wide: i64, %storage: buffer) where [range(%wide, 4294967296, 8589934591)] {
+  %thread = kernel.workitem.id<x> : index
+  %offset = index.cast %thread : index to offset
+  %bias = index.constant 32 : index
+  %signed = index.sub %thread, %bias : index
+  %wide_offset = index.cast %wide : i64 to offset
+  %wide_index = index.cast %wide : i64 to index
+  %small_offset = index.constant 16 : offset
+  %small_index = index.constant -16 : index
+  %offset_constant = func.call @advance_offset(%small_offset) : (offset) -> (i64)
+  %offset_varying = func.call @advance_offset(%offset) : (offset) -> (i64)
+  %offset_wide = func.call @advance_offset(%wide_offset) : (offset) -> (i64)
+  %index_constant = func.call @advance_index(%small_index) : (index) -> (i64)
+  %index_varying = func.call @advance_index(%signed) : (index) -> (i64)
+  %index_wide = func.call @advance_index(%wide_index) : (index) -> (i64)
+  %origin = index.constant 0 : offset
+  %output = buffer.view %storage[%origin] : buffer -> view<64x6xi64>
+  view.store %offset_constant, %output[%thread, 0] : i64, view<64x6xi64>
+  view.store %offset_varying, %output[%thread, 1] : i64, view<64x6xi64>
+  view.store %offset_wide, %output[%thread, 2] : i64, view<64x6xi64>
+  view.store %index_constant, %output[%thread, 3] : i64, view<64x6xi64>
+  view.store %index_varying, %output[%thread, 4] : i64, view<64x6xi64>
+  view.store %index_wide, %output[%thread, 5] : i64, view<64x6xi64>
+  kernel.return
+}
+
+func.def @retained_address_calls_oracle(%wide: i64, %storage: buffer) {
+  %origin = index.constant 0 : offset
+  %output = buffer.view %storage[%origin] : buffer -> view<64x6xi64>
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %increment = scalar.constant 8 : i64
+  %bias = scalar.constant 24 : i64
+  %offset_constant = scalar.constant 24 : i64
+  %index_constant = scalar.constant -8 : i64
+  %wide_result = scalar.addi %wide, %increment : i64
+  scf.for %thread = [%begin to %end step %step] {
+    %ordinal = index.cast %thread : index to i64
+    %offset_result = scalar.addi %ordinal, %increment : i64
+    %index_result = scalar.subi %ordinal, %bias : i64
+    view.store %offset_constant, %output[%thread, 0] : i64, view<64x6xi64>
+    view.store %offset_result, %output[%thread, 1] : i64, view<64x6xi64>
+    view.store %wide_result, %output[%thread, 2] : i64, view<64x6xi64>
+    view.store %index_constant, %output[%thread, 3] : i64, view<64x6xi64>
+    view.store %index_result, %output[%thread, 4] : i64, view<64x6xi64>
+    view.store %wide_result, %output[%thread, 5] : i64, view<64x6xi64>
+  }
+  func.return
+}
+
+check.scenario @retained_address_calls_execute {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %wide = check.literal value(4294967303) : i64
+    %output = check.generate.fill value(-1) : tensor<64x6xi64>
+    check.compare<@retained_address_calls, @retained_address_calls_oracle>(%wide, %output) : (i64, tensor<64x6xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64x6xi64>
+    }
+  }
+  check.return
+}
+
+func.def noinline @return_offset(%value: offset) -> (offset) {
+  %increment = index.constant 8 : offset
+  %next = index.add %value, %increment : offset
+  func.return %next : offset
+}
+
+func.def noinline @return_index(%value: index) -> (index) {
+  %increment = index.constant 8 : index
+  %next = index.add %value, %increment : index
+  func.return %next : index
+}
+
+// The caller consumes address results through their retained full-width carriers.
+kernel.def target(@target) @retained_address_results() {
+  %groups = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%groups, %groups, %groups) workgroup_size(%threads, %groups, %groups) : index
+} launch(%wide: i64, %storage: buffer) where [range(%wide, 4294967296, 8589934591)] {
+  %thread = kernel.workitem.id<x> : index
+  %offset = index.cast %thread : index to offset
+  %bias = index.constant 32 : index
+  %signed = index.sub %thread, %bias : index
+  %wide_offset = index.cast %wide : i64 to offset
+  %wide_index = index.cast %wide : i64 to index
+  %small_offset = index.constant 16 : offset
+  %small_index = index.constant -16 : index
+  %offset_constant_address = func.call @return_offset(%small_offset) : (offset) -> (offset)
+  %offset_constant = index.cast %offset_constant_address : offset to i64
+  %offset_varying_address = func.call @return_offset(%offset) : (offset) -> (offset)
+  %offset_varying = index.cast %offset_varying_address : offset to i64
+  %offset_wide_address = func.call @return_offset(%wide_offset) : (offset) -> (offset)
+  %offset_wide = index.cast %offset_wide_address : offset to i64
+  %index_constant_address = func.call @return_index(%small_index) : (index) -> (index)
+  %index_constant = index.cast %index_constant_address : index to i64
+  %index_varying_address = func.call @return_index(%signed) : (index) -> (index)
+  %index_varying = index.cast %index_varying_address : index to i64
+  %index_wide_address = func.call @return_index(%wide_index) : (index) -> (index)
+  %index_wide = index.cast %index_wide_address : index to i64
+  %origin = index.constant 0 : offset
+  %output = buffer.view %storage[%origin] : buffer -> view<64x6xi64>
+  view.store %offset_constant, %output[%thread, 0] : i64, view<64x6xi64>
+  view.store %offset_varying, %output[%thread, 1] : i64, view<64x6xi64>
+  view.store %offset_wide, %output[%thread, 2] : i64, view<64x6xi64>
+  view.store %index_constant, %output[%thread, 3] : i64, view<64x6xi64>
+  view.store %index_varying, %output[%thread, 4] : i64, view<64x6xi64>
+  view.store %index_wide, %output[%thread, 5] : i64, view<64x6xi64>
+  kernel.return
+}
+
+check.scenario @retained_address_results_execute {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %wide = check.literal value(4294967303) : i64
+    %output = check.generate.fill value(-1) : tensor<64x6xi64>
+    check.compare<@retained_address_results, @retained_address_calls_oracle>(%wide, %output) : (i64, tensor<64x6xi64>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64x6xi64>
+    }
+  }
+  check.return
+}
