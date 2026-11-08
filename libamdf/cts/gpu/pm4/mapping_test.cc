@@ -173,6 +173,11 @@ class Pm4MappingTest : public Pm4MappingFixture {
       ASSERT_NO_FATAL_FAILURE(
           write_page(offset, original->device_address + offset, 400));
     }
+    // Observe the replacement after neighboring accesses, before another
+    // mapping edit can change the translation state being checked.
+    EXPECT_NO_FATAL_FAILURE(
+        Verify(address + kSlabByteLength + page, page, 300));
+    EXPECT_NO_FATAL_FAILURE(Verify(replacement->device_address, page, 300));
     const amdf_memory_mapping_update_t ends[] = {
         {
             .target_byte_offset = kPlacementByteOffset,
