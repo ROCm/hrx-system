@@ -84,6 +84,9 @@ use_repo(python, "python_3_12", "python_3_12_host")
 # it is a dependency. Python extension overrides only apply to the root module.
 python_repository = use_repo_rule("@rules_python//python:repositories.bzl", "python_repository")
 
+_PYTHON_BUILD_STANDALONE_GITHUB_ROOT = "https://github.com/astral-sh/python-build-standalone/releases/download/20260414"
+_PYTHON_BUILD_STANDALONE_ASTRAL_ROOT = "https://releases.astral.sh/github/python-build-standalone/releases/download/20260414"
+
 python_repository(
     name = "hrx_python_linux_x86_64_debug",
     platform = "x86_64-unknown-linux-gnu",
@@ -91,7 +94,10 @@ python_repository(
     release_filename = "cpython-3.12.13+20260414-x86_64-unknown-linux-gnu-install_only.tar.gz",
     sha256 = "cdcf8724d46e4857f8db5ee9f4252dc2f5da34f7940294ec6b312389dd3f41e0",
     strip_prefix = "python",
-    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13+20260414-x86_64-unknown-linux-gnu-install_only.tar.gz"],
+    urls = [
+        _PYTHON_BUILD_STANDALONE_GITHUB_ROOT + "/cpython-3.12.13+20260414-x86_64-unknown-linux-gnu-install_only.tar.gz",
+        _PYTHON_BUILD_STANDALONE_ASTRAL_ROOT + "/cpython-3.12.13+20260414-x86_64-unknown-linux-gnu-install_only.tar.gz",
+    ],
 )
 
 python_repository(
@@ -101,7 +107,10 @@ python_repository(
     release_filename = "cpython-3.12.13+20260414-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
     sha256 = "3c3427e5628648478da2aa227472c350475a68bc58109f1b43849636a4aecb89",
     strip_prefix = "python",
-    urls = ["https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13+20260414-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"],
+    urls = [
+        _PYTHON_BUILD_STANDALONE_GITHUB_ROOT + "/cpython-3.12.13+20260414-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+        _PYTHON_BUILD_STANDALONE_ASTRAL_ROOT + "/cpython-3.12.13+20260414-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+    ],
 )
 
 compact_windows_python_repository = use_repo_rule(
@@ -115,8 +124,8 @@ compact_windows_python_repository(
     sha256 = "c5a9e011e284c49c48106ca177342f3e3f64e95b4c6652d4a382cc7c9bb1cc46",
     strip_prefix = "python",
     urls = [
-        "https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13+20260414-x86_64-pc-windows-msvc-install_only.tar.gz",
-        "https://releases.astral.sh/github/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13+20260414-x86_64-pc-windows-msvc-install_only.tar.gz",
+        _PYTHON_BUILD_STANDALONE_GITHUB_ROOT + "/cpython-3.12.13+20260414-x86_64-pc-windows-msvc-install_only.tar.gz",
+        _PYTHON_BUILD_STANDALONE_ASTRAL_ROOT + "/cpython-3.12.13+20260414-x86_64-pc-windows-msvc-install_only.tar.gz",
     ],
 )
 
