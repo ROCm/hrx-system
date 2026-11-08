@@ -24,12 +24,20 @@ namespace loom::cxx_import {
 namespace {
 
 struct SubobjectPathCollector final : cxx::ASTVisitor {
+  // Paths retained by resolved implicit-object member expressions.
+  std::vector<std::vector<cxx::Symbol*>> implicit_paths;
   // Paths retained by resolved member expressions.
   std::vector<std::vector<cxx::Symbol*>> member_paths;
   // Paths retained by resolved derived-to-base conversions.
   std::vector<std::vector<cxx::Symbol*>> cast_paths;
 
   bool preVisit(cxx::AST* ast) override {
+    if (auto* identifier = cxx::ast_cast<cxx::IdExpressionAST>(ast);
+        identifier && identifier->subobjectPath) {
+      implicit_paths.emplace_back(
+          cxx::ListView(identifier->subobjectPath).begin(),
+          cxx::ListView(identifier->subobjectPath).end());
+    }
     if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast);
         member && member->subobjectPath) {
       member_paths.emplace_back(cxx::ListView(member->subobjectPath).begin(),
@@ -710,7 +718,11 @@ TEST(ConstantArchiveTest, PreservesSelectedSubobjectPaths) {
   {
     Source source(IREE_SV("struct Base { unsigned value; };"
                           "struct Left : Base {}; struct Right : Base {};"
-                          "struct Both : Left, Right {};"
+                          "struct Both : Left, Right {"
+                          "  constexpr unsigned sum() const {"
+                          "    return Left::value + Right::value;"
+                          "  }"
+                          "};"
                           "extern Both object;"
                           "template<const unsigned&> struct Ref {};"
                           "using Member = Ref<object.Left::value>;"
@@ -741,19 +753,27 @@ TEST(ConstantArchiveTest, PreservesSelectedSubobjectPaths) {
   ASSERT_FALSE(base_symbols.begin() == base_symbols.end());
   auto left_symbols = restored.globalScope->find("Left");
   ASSERT_FALSE(left_symbols.begin() == left_symbols.end());
+  auto right_symbols = restored.globalScope->find("Right");
+  ASSERT_FALSE(right_symbols.begin() == right_symbols.end());
   auto* base = cxx::symbol_cast<cxx::ClassSymbol>(*base_symbols.begin());
   auto* left = cxx::symbol_cast<cxx::ClassSymbol>(*left_symbols.begin());
+  auto* right = cxx::symbol_cast<cxx::ClassSymbol>(*right_symbols.begin());
   ASSERT_NE(base, nullptr);
   ASSERT_NE(left, nullptr);
+  ASSERT_NE(right, nullptr);
 
   SubobjectPathCollector restored_paths;
   restored_paths.accept(restored.ast);
+  EXPECT_TRUE(hasBasePath(restored_paths.implicit_paths, {left, base}));
+  EXPECT_TRUE(hasBasePath(restored_paths.implicit_paths, {right, base}));
   EXPECT_TRUE(hasBasePath(restored_paths.member_paths, {left, base}));
   EXPECT_TRUE(hasBasePath(restored_paths.cast_paths, {left}));
 
   auto* cloned = restored.ast->clone(destination.unit().arena());
   SubobjectPathCollector cloned_paths;
   cloned_paths.accept(cloned);
+  EXPECT_TRUE(hasBasePath(cloned_paths.implicit_paths, {left, base}));
+  EXPECT_TRUE(hasBasePath(cloned_paths.implicit_paths, {right, base}));
   EXPECT_TRUE(hasBasePath(cloned_paths.member_paths, {left, base}));
   EXPECT_TRUE(hasBasePath(cloned_paths.cast_paths, {left}));
 }
