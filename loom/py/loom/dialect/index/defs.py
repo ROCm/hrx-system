@@ -297,6 +297,8 @@ index_div = binary_op(
         "divided with this op; use an explicit layout or storage mapping "
         "before deriving physical address pieces."
     ),
+    execution_condition=ExecutionCondition.INDEX_DIVISION,
+    eager_execution_cost=0,
     canonicalize="loom_index_div_canonicalize",
     facts="loom_index_div_facts",
     facts_from_operands=True,
@@ -315,6 +317,8 @@ index_rem = binary_op(
         "remainder with this op; use an explicit layout or storage mapping "
         "before deriving physical address pieces."
     ),
+    execution_condition=ExecutionCondition.INDEX_DIVISION,
+    eager_execution_cost=0,
     canonicalize="loom_index_rem_canonicalize",
     facts="loom_index_rem_facts",
     facts_from_operands=True,
@@ -330,6 +334,8 @@ index_divrem = Op(
     operands=[Operand("lhs", INDEX), Operand("rhs", INDEX)],
     results=[Result("quotient", INDEX), Result("remainder", INDEX)],
     constraints=[SameType("lhs", "rhs", "quotient", "remainder")],
+    execution_condition=ExecutionCondition.INDEX_DIVISION,
+    eager_execution_cost=0,
     canonicalize="loom_index_divrem_canonicalize",
     facts="loom_index_divrem_facts",
     facts_from_operands=True,

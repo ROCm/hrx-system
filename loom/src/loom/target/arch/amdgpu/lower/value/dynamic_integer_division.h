@@ -7,7 +7,7 @@
 #ifndef LOOM_TARGET_ARCH_AMDGPU_LOWER_VALUE_DYNAMIC_INTEGER_DIVISION_H_
 #define LOOM_TARGET_ARCH_AMDGPU_LOWER_VALUE_DYNAMIC_INTEGER_DIVISION_H_
 
-#include "loom/codegen/low/lower/lower.h"
+#include "loom/codegen/low/lower/realization.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,6 +26,9 @@ typedef struct loom_amdgpu_dynamic_u32_division_plan_t {
   loom_value_id_t remainder;
   // Selected SGPR or VGPR carrier for the computation.
   uint16_t register_class_id;
+  // Shared reciprocal placed outside a loop, or NULL when the divisor or
+  // source control domain requires direct preparation at the division.
+  const loom_low_lower_realization_t* reciprocal;
 } loom_amdgpu_dynamic_u32_division_plan_t;
 
 // Selects exact signed or unsigned runtime-u32 division.
@@ -33,10 +36,10 @@ iree_status_t loom_amdgpu_select_dynamic_u32_division_plan(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_dynamic_u32_division_plan_t* out_plan, bool* out_selected);
 
-// Publishes each result carrier selected by the retained plan.
+// Publishes result carriers and requests the divisor's pure preparation.
 iree_status_t loom_amdgpu_finalize_dynamic_u32_division_plan(
-    loom_low_lower_context_t* context,
-    const loom_amdgpu_dynamic_u32_division_plan_t* plan);
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_amdgpu_dynamic_u32_division_plan_t* plan);
 
 // Marks the dividend and runtime divisor consumed during emission.
 void loom_amdgpu_mark_dynamic_u32_division_plan_storage_demands(

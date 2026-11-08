@@ -181,6 +181,9 @@ typedef struct loom_low_lower_source_plan_t {
   loom_low_representation_plan_t* representation_plan;
   // Shared pure-value placement, initialization and supplemental CFG payloads.
   loom_low_lower_realizations_t* realizations;
+  // Borrowed construction storage through selected-plan finalization. Memory
+  // or arithmetic preparation creates the placement owner lazily.
+  iree_arena_allocator_t* realization_construction_arena;
   // Storage demands and binding states indexed by source value ordinal.
   loom_low_lower_value_flags_t* value_flags;
   // Policy rule sets requiring per-rule primary descriptor feature queries,

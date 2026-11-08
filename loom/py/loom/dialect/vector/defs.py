@@ -3090,6 +3090,8 @@ vector_divsi = _lanewise_binary(
     phase=OpPhase.EXECUTABLE,
     result_constraint=INTEGER_ELEMENT,
     doc="Lanewise signed integer division of same-typed vector operands; each lane rounds toward zero.",
+    execution_condition=ExecutionCondition.INTEGER_SIGNED_QUOTIENT,
+    eager_execution_cost=0,
     facts="loom_vector_divsi_facts",
     facts_from_operands=True,
     canonicalize="loom_vector_uniform_result_canonicalize",
@@ -3100,6 +3102,8 @@ vector_divui = _lanewise_binary(
     phase=OpPhase.EXECUTABLE,
     result_constraint=INTEGER_ELEMENT,
     doc="Lanewise unsigned integer division of same-typed vector operands.",
+    execution_condition=ExecutionCondition.INTEGER_NONZERO_DIVISOR,
+    eager_execution_cost=0,
     facts="loom_vector_divui_facts",
     facts_from_operands=True,
     canonicalize="loom_vector_uniform_result_canonicalize",
@@ -3122,6 +3126,8 @@ vector_divremsi = Op(
         HasIntegerElement("remainder"),
         SameType("lhs", "rhs", "quotient", "remainder"),
     ],
+    execution_condition=ExecutionCondition.INTEGER_SIGNED_QUOTIENT,
+    eager_execution_cost=0,
     facts="loom_vector_divremsi_facts",
     facts_from_operands=True,
     canonicalize="loom_vector_divremsi_canonicalize",
@@ -3142,6 +3148,8 @@ vector_divremui = Op(
         HasIntegerElement("remainder"),
         SameType("lhs", "rhs", "quotient", "remainder"),
     ],
+    execution_condition=ExecutionCondition.INTEGER_NONZERO_DIVISOR,
+    eager_execution_cost=0,
     facts="loom_vector_divremui_facts",
     facts_from_operands=True,
     canonicalize="loom_vector_divremui_canonicalize",
@@ -3155,6 +3163,8 @@ vector_remsi = _lanewise_binary(
     phase=OpPhase.EXECUTABLE,
     result_constraint=INTEGER_ELEMENT,
     doc="Lanewise signed integer remainder of same-typed vector operands.",
+    execution_condition=ExecutionCondition.INTEGER_NONZERO_DIVISOR,
+    eager_execution_cost=0,
     facts="loom_vector_remsi_facts",
     facts_from_operands=True,
     canonicalize="loom_vector_uniform_result_canonicalize",
@@ -3165,6 +3175,8 @@ vector_remui = _lanewise_binary(
     phase=OpPhase.EXECUTABLE,
     result_constraint=INTEGER_ELEMENT,
     doc="Lanewise unsigned integer remainder of same-typed vector operands.",
+    execution_condition=ExecutionCondition.INTEGER_NONZERO_DIVISOR,
+    eager_execution_cost=0,
     facts="loom_vector_remui_facts",
     facts_from_operands=True,
     canonicalize="loom_vector_binary_identity_canonicalize",
@@ -3174,18 +3186,24 @@ vector_ceildivsi = _lanewise_binary(
     "vector.ceildivsi",
     result_constraint=INTEGER_ELEMENT,
     doc="Lanewise signed integer division rounding toward positive infinity.",
+    execution_condition=ExecutionCondition.INTEGER_SIGNED_QUOTIENT,
+    eager_execution_cost=0,
 )
 
 vector_ceildivui = _lanewise_binary(
     "vector.ceildivui",
     result_constraint=INTEGER_ELEMENT,
     doc="Lanewise unsigned integer division rounding toward positive infinity.",
+    execution_condition=ExecutionCondition.INTEGER_NONZERO_DIVISOR,
+    eager_execution_cost=0,
 )
 
 vector_floordivsi = _lanewise_binary(
     "vector.floordivsi",
     result_constraint=INTEGER_ELEMENT,
     doc="Lanewise signed integer division rounding toward negative infinity.",
+    execution_condition=ExecutionCondition.INTEGER_SIGNED_QUOTIENT,
+    eager_execution_cost=0,
 )
 
 vector_negi = _lanewise_unary(

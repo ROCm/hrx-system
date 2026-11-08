@@ -481,8 +481,7 @@ static iree_status_t loom_low_lower_visit_region_plan_ops(
 
 static iree_status_t loom_low_lower_prepare_plan(
     loom_low_lower_context_t* context, loom_region_t* source_body,
-    loom_low_lower_source_candidate_plan_t* candidate_plan,
-    iree_arena_allocator_t* realization_construction_arena) {
+    loom_low_lower_source_candidate_plan_t* candidate_plan) {
   const loom_low_lower_source_plan_observer_t* observer =
       context->policy->source_plan_observer;
   void* observer_state = NULL;
@@ -511,8 +510,7 @@ static iree_status_t loom_low_lower_prepare_plan(
     IREE_RETURN_IF_ERROR(observer->end(observer_state, context));
   }
   if (!loom_low_lower_context_diagnostic_limit_reached(context)) {
-    IREE_RETURN_IF_ERROR(loom_low_lower_source_memory_prepare(
-        context, realization_construction_arena));
+    IREE_RETURN_IF_ERROR(loom_low_lower_source_memory_prepare(context));
   }
   if (context->result->error_count == 0) {
     IREE_RETURN_IF_ERROR(loom_low_lower_function_boundary_finalize(context));
@@ -716,8 +714,8 @@ static iree_status_t loom_low_lower_finalize_selected_plans(
   }
   bool storage_refinement_required = false;
   if (iree_status_is_ok(status) && context->result->error_count == 0) {
-    status = loom_low_lower_realizations_finalize(context,
-                                                  &storage_refinement_required);
+    status = loom_low_lower_realizations_select(context,
+                                                &storage_refinement_required);
   }
   if (iree_status_is_ok(status) && context->result->error_count == 0 &&
       storage_refinement_required) {
@@ -727,6 +725,9 @@ static iree_status_t loom_low_lower_finalize_selected_plans(
     status = loom_low_lower_finalize_selected_plan_phase(
         context, &source_memory_builder, /*finalize_rules_only=*/false,
         /*skip_elided_rules=*/prepare_rule_recurrences);
+  }
+  if (iree_status_is_ok(status) && context->result->error_count == 0) {
+    status = loom_low_lower_realizations_finalize(context);
   }
   iree_arena_deinitialize(&construction_arena);
   return status;
@@ -2469,6 +2470,7 @@ iree_status_t loom_low_lower_source_plan_build(
   iree_arena_allocator_t realization_construction_arena;
   iree_arena_initialize(context->module->arena.block_pool,
                         &realization_construction_arena);
+  source_plan->realization_construction_arena = &realization_construction_arena;
   loom_low_lower_source_candidate_plan_t candidate_plan;
   loom_low_lower_source_candidate_plan_t* active_candidate_plan = NULL;
   bool candidate_plan_initialized = false;
@@ -2482,9 +2484,8 @@ iree_status_t loom_low_lower_source_plan_build(
     }
   }
   if (iree_status_is_ok(status)) {
-    status =
-        loom_low_lower_prepare_plan(context, source_body, active_candidate_plan,
-                                    &realization_construction_arena);
+    status = loom_low_lower_prepare_plan(context, source_body,
+                                         active_candidate_plan);
   }
   if (iree_status_is_ok(status) && active_candidate_plan != NULL) {
     status =
@@ -2577,6 +2578,7 @@ iree_status_t loom_low_lower_source_plan_build(
     loom_low_lower_planning_scope_end(context);
   }
   iree_arena_deinitialize(&realization_construction_arena);
+  source_plan->realization_construction_arena = NULL;
   iree_arena_deinitialize(&context->planning_arena);
   return status;
 }

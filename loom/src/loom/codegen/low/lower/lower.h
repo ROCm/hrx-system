@@ -860,6 +860,8 @@ typedef struct loom_low_lower_finalize_plan_callback_t {
   // The shared planner calls this in definition order before Low creation;
   // source bindings contain actual producer carriers, and facts remain live.
   // The callback consumes its retained plan without traversing source IR.
+  // It may request pure realizations of already-demanded source operands;
+  // the shared owner freezes their emission schedule after finalization.
   loom_low_lower_finalize_plan_fn_t fn;
   // Caller-owned payload passed to |fn|.
   void* user_data;

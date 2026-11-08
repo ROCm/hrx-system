@@ -38,12 +38,22 @@ static bool loom_execution_query_integer_facts(
     return true;
   }
 
+  const loom_value_facts_t facts =
+      loom_value_fact_table_lookup(fact_table, value_id);
+  loom_value_fact_uniform_element_t uniform;
+  if (loom_value_facts_query_uniform_element(&fact_table->context, facts,
+                                             &uniform)) {
+    // A nonzero element can span both signs. Keep its predicates instead of
+    // flattening them to an interval that includes zero.
+    out_facts->bounds = uniform.element;
+    return true;
+  }
+
   int64_t lower_bound = 0;
   int64_t upper_bound = 0;
   if (!loom_value_facts_query_vector_integer_bounds(
-          &fact_table->context,
-          loom_value_fact_table_lookup(fact_table, value_id),
-          maximum_element_count, &lower_bound, &upper_bound)) {
+          &fact_table->context, facts, maximum_element_count, &lower_bound,
+          &upper_bound)) {
     return false;
   }
   if (lower_bound > upper_bound) {
@@ -53,6 +63,59 @@ static bool loom_execution_query_integer_facts(
   out_facts->bounds =
       loom_value_facts_make(lower_bound, upper_bound, /*known_divisor=*/1);
   return true;
+}
+
+static bool loom_execution_integer_excludes_literal(
+    const loom_value_fact_table_t* fact_table, loom_type_t type,
+    loom_value_id_t value, int64_t literal) {
+  if (loom_type_is_scalar(type)) {
+    return !(loom_value_fact_table_query_signed_integer_literal_order(
+                 fact_table, value, literal) &
+             LOOM_INTEGER_ORDER_OUTCOME_BIT_EQUAL);
+  }
+  loom_execution_integer_facts_t facts;
+  if (!loom_execution_query_integer_facts(fact_table, type, value, &facts)) {
+    return false;
+  }
+  return facts.empty || literal < facts.bounds.range_lo ||
+         literal > facts.bounds.range_hi ||
+         (literal == 0 && loom_value_facts_is_non_zero(facts.bounds));
+}
+
+static bool loom_execution_integer_division_is_safe(
+    const loom_module_t* module, const loom_op_t* op,
+    const loom_value_fact_table_t* fact_table,
+    loom_execution_condition_t condition) {
+  const loom_value_id_t* operands = loom_op_const_operands(op);
+  const loom_type_t type = loom_module_value_type(module, operands[0]);
+  if (condition == LOOM_EXECUTION_CONDITION_INDEX_DIVISION) {
+    const loom_value_facts_t lhs =
+        loom_value_fact_table_lookup(fact_table, operands[0]);
+    const loom_value_facts_t rhs =
+        loom_value_fact_table_lookup(fact_table, operands[1]);
+    return lhs.range_lo >= 0 && rhs.range_lo >= 0 &&
+           loom_value_facts_is_non_zero(rhs);
+  }
+  if (!loom_execution_integer_excludes_literal(fact_table, type, operands[1],
+                                               0)) {
+    return false;
+  }
+  if (condition == LOOM_EXECUTION_CONDITION_INTEGER_NONZERO_DIVISOR) {
+    return true;
+  }
+
+  const uint32_t bit_count =
+      loom_scalar_type_bitwidth(loom_type_element_type(type));
+  // Boolean facts describe raw one-bit payloads as [0, 1]. Both signed MIN
+  // and -1 have the raw value 1 in that domain.
+  const int64_t minimum = bit_count == 1    ? 1
+                          : bit_count == 64 ? INT64_MIN
+                                            : -(INT64_C(1) << (bit_count - 1));
+  const int64_t minus_one = bit_count == 1 ? 1 : -1;
+  return loom_execution_integer_excludes_literal(fact_table, type, operands[0],
+                                                 minimum) ||
+         loom_execution_integer_excludes_literal(fact_table, type, operands[1],
+                                                 minus_one);
 }
 
 static bool loom_execution_integer_shift_is_safe(
@@ -379,6 +442,11 @@ bool loom_execution_condition_is_satisfied(
     case LOOM_EXECUTION_CONDITION_INTEGER_MULTIPLY_ADD:
       return loom_execution_integer_arithmetic_is_safe(module, op, fact_table,
                                                        condition);
+    case LOOM_EXECUTION_CONDITION_INTEGER_NONZERO_DIVISOR:
+    case LOOM_EXECUTION_CONDITION_INTEGER_SIGNED_QUOTIENT:
+    case LOOM_EXECUTION_CONDITION_INDEX_DIVISION:
+      return loom_execution_integer_division_is_safe(module, op, fact_table,
+                                                     condition);
     default:
       IREE_ASSERT_UNREACHABLE("unimplemented execution condition");
       return false;
