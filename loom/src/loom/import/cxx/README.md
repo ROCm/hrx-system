@@ -2090,18 +2090,25 @@ Repository-authored C++ programs use `.cxx`; compiler expectation fixtures use
 `.cxx-test`. Kernels, helpers, check cases and benchmarks can share one `.cxx`
 translation unit.
 
-`loom-link`, `loom-test`, `loom-benchmark`, and `loom-run` share
-the optional input provider used by `loom-check`. Enabled binaries recognize
-`.c`, `.cc`, `.cpp`, and `.cxx`; explicit `--input-format=cxx` handles another
-filename or stdin. `--input-options='cxx:std=c++23 D=COUNT=8 I=include'` applies
-options to C++ inputs, including `--library` sources. Include directories are
+`loom-import-cxx`, `loom-test`, `loom-benchmark`, and `loom-run` share the
+optional input provider used by `loom-check`. Enabled source-consuming binaries
+recognize `.c`, `.cc`, `.cpp`, and `.cxx`; explicit `--input-format=cxx`
+handles another filename or stdin. Multi-input tools accept
+`--input-options='cxx:std=c++23 D=COUNT=8 I=include'`. Include directories are
 relative to the source file. A `.c` suffix selects the provider; use `std=c11`
 or another supported C standard to select C language semantics.
+
+`loom-link` consumes only Loom text and bytecode modules. Bazel and CMake source
+rules run `loom-import-cxx` for each C/C++ translation unit, then pass those
+modules and any authored Loom inputs to the single linker action. Importer
+options belong to that frontend action and never expand the linker's dependency
+graph.
 
 Source inputs can also be linked once and executed as bytecode:
 
 ```sh
-loom-link checks.cxx --mode=link --include-input-tests \
+loom-import-cxx checks.cxx --to=bc --output=checks.imported.loombc
+loom-link checks.imported.loombc --mode=link --include-input-tests \
   --to=bc --output=checks.loombc
 loom-test checks.loombc
 ```
@@ -2115,9 +2122,9 @@ include resolution.
 
 The input provider changes admission, not execution semantics. `loom-run`
 accepts C++ kernel programs for its HAL workflow; scalar check cases use
-`loom-test`. Building without the C++ importer removes C++ input support
-from these tools. Other importers can participate through the same optional
-provider contract.
+`loom-test`. Building without the C++ importer removes C++ input support from
+source-consuming tools and rules. Other frontends can produce Loom modules at
+the same boundary without becoming linker dependencies.
 
 ## Source constructs
 

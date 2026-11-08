@@ -8,7 +8,9 @@
 #include <string.h>
 
 #include "iree/base/api.h"
+#include "iree/base/internal/arena.h"
 #include "iree/base/tooling/flags.h"
+#include "loom/import/cxx/tooling/options.h"
 #include "loom/tooling/cli/help.h"
 #include "loom/tooling/cli/loomc_result.h"
 #include "loom/tooling/io/file.h"
@@ -37,6 +39,10 @@ IREE_FLAG(bool, cleanup, true,
           "Canonicalize, eliminate common expressions, and remove dead IR.");
 IREE_FLAG_NAMED(bool, builtin_includes, "builtin-includes", true,
                 "Search embedded Loom/HIP source headers when available.");
+IREE_FLAG(string, options, "",
+          "Provider option string used by build-system source declarations. "
+          "When present, it replaces the individual source configuration "
+          "flags.");
 
 static void loom_cxx_cli_copy_strings(iree_flag_string_list_t list,
                                       loomc_string_view_t* output) {
@@ -68,6 +74,82 @@ static iree_status_t loom_cxx_cli_write_module(const loomc_module_t* module,
   return status;
 }
 
+static iree_status_t loom_cxx_cli_options_from_flags(
+    iree_allocator_t allocator, loomc_cxx_import_options_t* out_options,
+    loomc_string_view_t** out_strings, loomc_cxx_define_t** out_defines) {
+  *out_options = (loomc_cxx_import_options_t){
+      .type = LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS,
+      .structure_size = sizeof(*out_options),
+      .standard = loomc_make_cstring_view(FLAG_std),
+      .triple = loomc_make_cstring_view(FLAG_triple),
+  };
+  *out_strings = NULL;
+  *out_defines = NULL;
+  if (strcmp(FLAG_data_model, "lp64") == 0) {
+    out_options->data_model = LOOMC_CXX_DATA_MODEL_LP64;
+  } else if (strcmp(FLAG_data_model, "llp64") == 0) {
+    out_options->data_model = LOOMC_CXX_DATA_MODEL_LLP64;
+  } else if (strcmp(FLAG_data_model, "ilp32") == 0) {
+    out_options->data_model = LOOMC_CXX_DATA_MODEL_ILP32;
+  } else {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unknown source data model '%s'", FLAG_data_model);
+  }
+  if (strcmp(FLAG_fp_model, "precise") == 0) {
+    out_options->fp_model = LOOMC_CXX_FP_MODEL_PRECISE;
+  } else if (strcmp(FLAG_fp_model, "fast") == 0) {
+    out_options->fp_model = LOOMC_CXX_FP_MODEL_FAST;
+  } else {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unknown floating-point model '%s'", FLAG_fp_model);
+  }
+  if (!FLAG_builtin_includes) {
+    out_options->flags |= LOOMC_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES;
+  }
+
+  const iree_flag_string_list_t includes = FLAG_include_path_list();
+  const iree_flag_string_list_t system_includes =
+      FLAG_system_include_path_list();
+  const iree_flag_string_list_t roots = FLAG_root_list();
+  const iree_host_size_t string_count =
+      includes.count + system_includes.count + roots.count;
+  if (string_count != 0) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        allocator, string_count, sizeof(**out_strings), (void**)out_strings));
+    loom_cxx_cli_copy_strings(includes, *out_strings);
+    loom_cxx_cli_copy_strings(system_includes, *out_strings + includes.count);
+    loom_cxx_cli_copy_strings(
+        roots, *out_strings + includes.count + system_includes.count);
+    out_options->include_paths = *out_strings;
+    out_options->include_path_count = includes.count;
+    out_options->system_include_paths = *out_strings + includes.count;
+    out_options->system_include_path_count = system_includes.count;
+    out_options->roots = *out_strings + includes.count + system_includes.count;
+    out_options->root_count = roots.count;
+  }
+
+  const iree_flag_string_list_t definitions = FLAG_define_list();
+  if (definitions.count != 0) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        allocator, definitions.count, sizeof(**out_defines),
+        (void**)out_defines));
+    for (iree_host_size_t i = 0; i < definitions.count; ++i) {
+      const iree_string_view_t value = definitions.values[i];
+      const iree_host_size_t equal = iree_string_view_find_char(value, '=', 0);
+      (*out_defines)[i].name =
+          loomc_string_view_from_iree(iree_string_view_substr(value, 0, equal));
+      (*out_defines)[i].value =
+          equal == IREE_STRING_VIEW_NPOS
+              ? loomc_make_cstring_view("1")
+              : loomc_string_view_from_iree(iree_string_view_substr(
+                    value, equal + 1, IREE_HOST_SIZE_MAX));
+    }
+  }
+  out_options->defines = *out_defines;
+  out_options->define_count = definitions.count;
+  return iree_ok_status();
+}
+
 // Sets *out_succeeded only after importing and writing the module. Diagnosed
 // source rejection returns OK with *out_succeeded=false; infrastructure and
 // option failures return a non-OK status for main to report.
@@ -78,79 +160,28 @@ static iree_status_t loom_cxx_cli_import(iree_string_view_t filename,
                                          bool* out_succeeded) {
   *out_succeeded = false;
   const loomc_allocator_t host_allocator = loomc_allocator_from_iree(allocator);
-  loomc_cxx_import_options_t options = {
-      .type = LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS,
-      .structure_size = sizeof(options),
-      .standard = loomc_make_cstring_view(FLAG_std),
-      .triple = loomc_make_cstring_view(FLAG_triple),
-  };
-  if (strcmp(FLAG_data_model, "lp64") == 0) {
-    options.data_model = LOOMC_CXX_DATA_MODEL_LP64;
-  } else if (strcmp(FLAG_data_model, "llp64") == 0) {
-    options.data_model = LOOMC_CXX_DATA_MODEL_LLP64;
-  } else if (strcmp(FLAG_data_model, "ilp32") == 0) {
-    options.data_model = LOOMC_CXX_DATA_MODEL_ILP32;
-  } else {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unknown source data model '%s'", FLAG_data_model);
-  }
-  if (strcmp(FLAG_fp_model, "precise") == 0) {
-    options.fp_model = LOOMC_CXX_FP_MODEL_PRECISE;
-  } else if (strcmp(FLAG_fp_model, "fast") == 0) {
-    options.fp_model = LOOMC_CXX_FP_MODEL_FAST;
-  } else {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unknown floating-point model '%s'", FLAG_fp_model);
-  }
-  if (strcmp(FLAG_to, "text") != 0 && strcmp(FLAG_to, "bc") != 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unknown output format '%s'", FLAG_to);
-  }
-  if (!FLAG_builtin_includes) {
-    options.flags |= LOOMC_CXX_IMPORT_FLAG_NO_BUILTIN_INCLUDES;
-  }
-  const iree_flag_string_list_t includes = FLAG_include_path_list();
-  const iree_flag_string_list_t system_includes =
-      FLAG_system_include_path_list();
-  const iree_flag_string_list_t roots = FLAG_root_list();
-  const iree_flag_string_list_t definitions = FLAG_define_list();
-  const iree_host_size_t string_count =
-      includes.count + system_includes.count + roots.count;
+  iree_arena_block_pool_t options_block_pool;
+  iree_arena_block_pool_initialize(4096, allocator, &options_block_pool);
+  iree_arena_allocator_t options_arena;
+  iree_arena_initialize(&options_block_pool, &options_arena);
+  loomc_cxx_import_options_t options;
   loomc_string_view_t* strings = NULL;
-  if (string_count != 0) {
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-        allocator, string_count, sizeof(*strings), (void**)&strings));
-    loom_cxx_cli_copy_strings(includes, strings);
-    loom_cxx_cli_copy_strings(system_includes, strings + includes.count);
-    loom_cxx_cli_copy_strings(roots,
-                              strings + includes.count + system_includes.count);
-    options.include_paths = strings;
-    options.include_path_count = includes.count;
-    options.system_include_paths = strings + includes.count;
-    options.system_include_path_count = system_includes.count;
-    options.roots = strings + includes.count + system_includes.count;
-    options.root_count = roots.count;
-  }
   loomc_cxx_define_t* defines = NULL;
-  iree_status_t status = iree_ok_status();
-  if (definitions.count != 0) {
-    status = iree_allocator_malloc_array(allocator, definitions.count,
-                                         sizeof(*defines), (void**)&defines);
-    for (iree_host_size_t i = 0;
-         iree_status_is_ok(status) && i < definitions.count; ++i) {
-      const iree_string_view_t value = definitions.values[i];
-      const iree_host_size_t equal = iree_string_view_find_char(value, '=', 0);
-      defines[i].name =
-          loomc_string_view_from_iree(iree_string_view_substr(value, 0, equal));
-      defines[i].value =
-          equal == IREE_STRING_VIEW_NPOS
-              ? loomc_make_cstring_view("1")
-              : loomc_string_view_from_iree(iree_string_view_substr(
-                    value, equal + 1, IREE_HOST_SIZE_MAX));
-    }
+  iree_status_t status =
+      strcmp(FLAG_to, "text") == 0 || strcmp(FLAG_to, "bc") == 0
+          ? iree_ok_status()
+          : iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "unknown output format '%s'", FLAG_to);
+  if (iree_status_is_ok(status)) {
+    const iree_string_view_t provider_options =
+        iree_make_cstring_view(FLAG_options);
+    status =
+        iree_string_view_is_empty(provider_options)
+            ? loom_cxx_cli_options_from_flags(allocator, &options, &strings,
+                                              &defines)
+            : loom_cxx_input_parse_options(filename, provider_options,
+                                           &options_arena, allocator, &options);
   }
-  options.defines = defines;
-  options.define_count = definitions.count;
   iree_io_file_contents_t* contents = NULL;
   loomc_source_t* source = NULL;
   loomc_module_t* module = NULL;
@@ -219,6 +250,8 @@ static iree_status_t loom_cxx_cli_import(iree_string_view_t filename,
   iree_io_file_contents_free(contents);
   iree_allocator_free(allocator, defines);
   iree_allocator_free(allocator, strings);
+  iree_arena_deinitialize(&options_arena);
+  iree_arena_block_pool_deinitialize(&options_block_pool);
   return status;
 }
 

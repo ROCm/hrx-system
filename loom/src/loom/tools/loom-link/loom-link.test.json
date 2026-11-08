@@ -2,6 +2,25 @@
   "version": 1,
   "cases": [
     {
+      "name": "rejects source-language input",
+      "run": {
+        "tool": "loom-link",
+        "args": [
+          "{srcdir}/testdata/source_main.loom",
+          "--input-format=cxx"
+        ]
+      },
+      "exit": {
+        "nonzero": true
+      },
+      "stdout": {
+        "empty": true
+      },
+      "stderr": {
+        "contains": ["input format 'cxx' is not linked into this tool"]
+      }
+    },
+    {
       "name": "rejects duplicate definitions before merge projection",
       "run": {
         "tool": "loom-link",

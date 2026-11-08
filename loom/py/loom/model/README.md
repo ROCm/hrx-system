@@ -156,11 +156,13 @@ overlapping, and conflicting declarations fail. Runtime assets omitted from
 Full model checkpoints belong to `loom-fetch`, outside Bazel's repository,
 action, remote execution, and output caches.
 
-The rule performs no acquisition. With `encoding="text"` or `encoding="bc"`, it
-normalizes each provider through the configured public `loom-link` toolchain,
-preserving provider order and roles. With `encoding="preserve"`, it links each
-declared provider into the package unchanged, retaining mixed formats and
-importer options without running `loom-link`.
+The rule performs no acquisition. With `encoding="text"` or `encoding="bc"`,
+source-language providers are first imported by their owning `loom_library`
+frontend action. The model action normalizes those resulting Loom modules
+through the public `loom-link` toolchain, preserving provider order and roles;
+the linker never imports the original language. With `encoding="preserve"`, it
+stages each declared provider unchanged, retaining mixed formats and importer
+options without running either normalization action.
 It does not choose service roots or specialize model geometry. Providers and
 auxiliary data enter compilation under the card's relative namespace. Supplied
 runtime fixtures appear as symlink artifacts and test runfiles; their bytes

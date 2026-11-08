@@ -41,7 +41,12 @@ def _program_composition(ctx):
         declarations = ctx.attr.files | ctx.attr.data | ctx.attr.assets
         if len(declarations) != len(ctx.attr.files) + len(ctx.attr.data) + len(ctx.attr.assets):
             fail("files, data, and assets must have disjoint targets")
-        return struct(files = _mapped_artifacts(ctx.attr.files), data = _mapped_artifacts(ctx.attr.data), programs = {})
+        return struct(
+            files = _mapped_artifacts(ctx.attr.files),
+            data = _mapped_artifacts(ctx.attr.data),
+            normalization_formats = {},
+            programs = {},
+        )
     if ctx.attr.files or ctx.attr.data:
         fail("provider inputs/libraries and explicit files/data are separate composition modes")
     if not ctx.attr.programs:
@@ -60,6 +65,7 @@ def _program_composition(ctx):
     ]
     program = {"inputs": [], "libraries": []}
     files = {}
+    normalization_formats = {}
     data = {}
     providers = {}
     for role, components in groups:
@@ -73,7 +79,8 @@ def _program_composition(ctx):
                     fail("conflicting model auxiliary file: %s" % path)
                 data[path] = file
                 auxiliary.append(path)
-            for file in component.sources if ctx.attr.form == "sources" else [component.module]:
+            source_records = zip(component.sources, component.normalized_sources, component.normalized_formats) if ctx.attr.form == "sources" else [(component.module, component.module, "loombc")]
+            for file, normalized_file, normalized_format in source_records:
                 path = _repository_path(ctx, file)
                 provider = {"path": path}
                 if ctx.attr.form == "module":
@@ -87,20 +94,24 @@ def _program_composition(ctx):
                         provider["options"] = list(component.inputopts)
                 if auxiliary:
                     provider["data"] = auxiliary
+                selected_file = file if ctx.attr.encoding == "preserve" else normalized_file
                 if path in providers:
-                    if providers[path] != provider or files[path] != file:
+                    if providers[path] != provider or files[path] != selected_file:
                         fail("conflicting model provider: %s" % path)
                     continue
                 providers[path] = provider
-                files[path] = file
+                files[path] = selected_file
+                if ctx.attr.encoding != "preserve":
+                    normalization_formats[path] = normalized_format
                 program[role].append(provider if len(provider) > 1 else path)
     return struct(
         files = files,
         data = {path: file for path, file in data.items() if path not in files},
+        normalization_formats = normalization_formats,
         programs = {ctx.attr.programs: program},
     )
 
-def _loom_model_impl(ctx):
+def _loom_model_impl(ctx, link_tool = None):
     composition = _program_composition(ctx)
     preserve = ctx.attr.encoding == "preserve"
     card = ctx.actions.declare_file(ctx.label.name + "/model.json")
@@ -121,8 +132,8 @@ def _loom_model_impl(ctx):
         if name.split("/")[0] in ["model.json", "serve.json"]:
             fail("conflicting model path: %s" % name)
 
-        # Importers resolve auxiliary inputs relative to the provider's physical
-        # path. Staging preserves the card namespace without copying input bytes.
+        # Normalization retains the card's logical provider path even when an
+        # upstream importer produced the bytes under a generated module path.
         staged = artifact
         if not preserve and name not in asset_files:
             staged = ctx.actions.declare_file(ctx.label.name + ".input/" + name)
@@ -132,6 +143,8 @@ def _loom_model_impl(ctx):
         runfiles.append(output)
         if name in composition.files:
             files[name] = {"input": staged.path, "output": output.path}
+            if name in composition.normalization_formats:
+                files[name]["format"] = composition.normalization_formats[name]
             if preserve:
                 ctx.actions.symlink(output = output, target_file = artifact)
             else:
@@ -161,9 +174,10 @@ def _loom_model_impl(ctx):
     arguments = ["--plan", plan.path]
     tools = []
     if not preserve:
-        linker = ctx.toolchains[_LINK_TOOLCHAIN].tool
-        arguments += ["--linker", linker.files_to_run.executable.path]
-        tools.append(linker.files_to_run)
+        if link_tool == None:
+            fail("provider normalization requires the Loom linker toolchain")
+        arguments += ["--linker", link_tool.files_to_run.executable.path]
+        tools.append(link_tool.files_to_run)
     ctx.actions.run(
         executable = ctx.executable._builder,
         arguments = arguments,
@@ -185,28 +199,35 @@ def _loom_model_impl(ctx):
         OutputGroupInfo(model_card = depset([card]), model_files = depset(runfiles)),
     ]
 
-loom_model = rule(
-    implementation = _loom_model_impl,
-    doc = """Packages one model-card selection from declared compiler providers.
+def _loom_preserved_model_impl(ctx):
+    return _loom_model_impl(ctx)
 
-    Provider composition uses inputs and libraries of loom_library targets. Each
-    provider owns its sources, data, importer settings, and direct dependencies;
-    analysis derives the complete ordered closure with repository-relative paths.
-    form selects original sources or merged modules for the complete composition.
-    Sources may themselves be bytecode. Primary providers reached again as
-    dependencies retain their primary role and appear only once.
+def _loom_normalized_model_impl(ctx):
+    return _loom_model_impl(ctx, ctx.toolchains[_LINK_TOOLCHAIN].tool)
 
-    LoomModelInfo exposes the generated inputs/libraries for card synchronization
-    through cquery without executing any build action. The package action checks
-    that the authored card matches that same composition. Origins, presets,
-    execution directories, variants, and runtime assets remain card-owned.
+_LOOM_MODEL_DOC = """Packages one model-card selection from declared compiler providers.
 
-    Provider composition accepts local repository files and literal importer
-    options. External repositories and location-expanded importer options fail
-    explicitly rather than exporting execroot paths. Explicit files/data mappings
-    remain available as a separate input mode for independently authored cards.
-    """,
-    attrs = {
+Provider composition uses inputs and libraries of loom_library targets. Each
+provider owns its sources, data, importer settings, and direct dependencies;
+analysis derives the complete ordered closure with repository-relative paths.
+form selects original sources or merged modules for the complete composition.
+Sources may themselves be bytecode. Primary providers reached again as
+dependencies retain their primary role and appear only once.
+
+LoomModelInfo exposes the generated inputs/libraries for card synchronization
+through cquery without executing any build action. The package action checks
+that the authored card matches that same composition. Origins, presets,
+execution directories, variants, and runtime assets remain card-owned.
+
+Provider composition accepts local repository files and literal importer
+options. External repositories and location-expanded importer options fail
+explicitly rather than exporting execroot paths. Explicit files/data mappings
+remain available as a separate input mode for independently authored cards;
+normalized explicit files must already be Loom modules.
+"""
+
+def _loom_model_attrs():
+    return {
         "assets": attr.label_keyed_string_dict(allow_files = True, doc = "Optional runtime assets, such as small fixture parameters or tokenizers, mapped to card paths. Omitted assets retain their acquisition descriptors for loom-fetch. Supplied assets are runfiles, never linker inputs."),
         "card": attr.label(mandatory = True, allow_single_file = [".json"]),
         "data": attr.label_keyed_string_dict(allow_files = True, doc = "Exactly the selected providers' auxiliary files, mapped to card paths. These are compiler inputs and runtime runfiles, separate from parameter/tokenizer acquisition."),
@@ -221,9 +242,25 @@ loom_model = rule(
         "preset": attr.string(mandatory = True),
         "programs": attr.string(),
         "_builder": attr.label(default = Label("//loom/py/loom/model:build"), executable = True, cfg = "exec"),
-    },
+    }
+
+_loom_preserved_model = rule(
+    implementation = _loom_preserved_model_impl,
+    attrs = _loom_model_attrs(),
+    doc = _LOOM_MODEL_DOC,
+)
+
+_loom_normalized_model = rule(
+    implementation = _loom_normalized_model_impl,
+    attrs = _loom_model_attrs(),
+    doc = _LOOM_MODEL_DOC,
     toolchains = [_LINK_TOOLCHAIN],
 )
+
+def loom_model(name, encoding = "bc", **kwargs):
+    """Packages one model-card selection from declared compiler providers."""
+    model_rule = _loom_preserved_model if encoding == "preserve" else _loom_normalized_model
+    model_rule(name = name, encoding = encoding, **kwargs)
 
 def _loom_model_documentation_impl(ctx):
     output = ctx.actions.declare_file(ctx.label.name + ".md")

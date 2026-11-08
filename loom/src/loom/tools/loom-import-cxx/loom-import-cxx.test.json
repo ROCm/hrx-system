@@ -29,6 +29,30 @@
       }
     },
     {
+      "name": "applies build-system provider options",
+      "run": {
+        "tool": "loom-import-cxx",
+        "args": [
+          "--options=std=c++17 fp-model=fast D='BIAS=1.0f' root=second",
+          "-"
+        ]
+      },
+      "stdin": {
+        "text": "#if __cplusplus != 201703L\n#error wrong standard\n#endif\nstatic float twice(float value) { return value * 2.0f; }\nfloat first(float value) { return value; }\nfloat second(float value) { return twice(value) + BIAS; }\n"
+      },
+      "stdout": {
+        "contains": {
+          "unordered": [
+            "func.def public @second",
+            "func.def @twice",
+            "scalar.mulf<reassoc|nnan|ninf|nsz|arcp|contract|afn>",
+            "scalar.constant 1.0"
+          ]
+        },
+        "not_contains": ["@first"]
+      }
+    },
+    {
       "name": "reports syntax errors without an internal failure or output file",
       "run": {
         "tool": "loom-import-cxx",

@@ -47,6 +47,7 @@ def _declare_binary_linked_module(ctx, target_profile):
             output_stem = ctx.label.name + ".sources",
             mnemonic = "LoomBinarySources",
             progress_message = "Assembling direct sources for %s" % ctx.label,
+            tool = ctx.toolchains[_LOOM_LINK_TOOLCHAIN_TYPE].tool,
         )
         direct_modules.append(source_library.module)
         dependency_reports.append(source_library.dependency_report)

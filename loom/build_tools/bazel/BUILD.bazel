@@ -46,6 +46,8 @@ toolchain_type(name = "benchmark_toolchain_type")
 
 toolchain_type(name = "compile_toolchain_type")
 
+toolchain_type(name = "cxx_import_toolchain_type")
+
 toolchain_type(name = "format_toolchain_type")
 
 toolchain_type(name = "lint_toolchain_type")
@@ -58,6 +60,7 @@ loom_tools_toolchains(
     name = "source_tools",
     benchmark_tool = "//loom/src/loom/tools/loom-benchmark",
     compile_tool = "//loom/src/loom/tools/loom-compile",
+    cxx_import_tool = "//loom/src/loom/tools/loom-import-cxx",
     format_tool = "//loom/src/loom/tools/loom-format",
     link_tool = "//loom/src/loom/tools/loom-link",
     lint_tool = "//loom/py/loom/tools:loom-lint",

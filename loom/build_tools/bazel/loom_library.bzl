@@ -29,9 +29,14 @@ load(
 )
 
 _LOOM_BENCHMARK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:benchmark_toolchain_type")
+_LOOM_CXX_IMPORT_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:cxx_import_toolchain_type")
 _LOOM_FORMAT_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:format_toolchain_type")
 _LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type")
 _LOOM_TEST_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:test_toolchain_type")
+
+_CXX_SOURCE_SUFFIXES = [".c", ".cc", ".cpp", ".cxx", ".cxx-test"]
+_LOOM_SOURCE_SUFFIXES = [".loom", ".loom-test", ".loombc"]
+_SOURCE_FORMATS = ["cxx", "loom", "loombc"]
 
 _LOOM_BENCHMARK_SMOKE_ARGS = [
     "--iterations=1",
@@ -156,23 +161,98 @@ def loom_execution_profile(
         target_family = target_family,
     )
 
-def _loom_library_impl(ctx):
+def _source_format(file, input_format):
+    if input_format:
+        if input_format not in _SOURCE_FORMATS:
+            fail("%s has unsupported source format %r; import it to Loom before linking" % (file.path, input_format))
+        return input_format
+    for suffix in _CXX_SOURCE_SUFFIXES:
+        if file.path.endswith(suffix):
+            return "cxx"
+    for suffix in _LOOM_SOURCE_SUFFIXES:
+        if file.path.endswith(suffix):
+            return "loombc" if suffix == ".loombc" else "loom"
+    if not file.extension:
+        return "loom"
+    fail("%s has no Loom module or C/C++ source format" % file.path)
+
+def _cxx_input_options(ctx):
+    cxx_options = None
+    for value in ctx.attr.inputopts:
+        expanded = ctx.expand_location(value, targets = ctx.attr.srcs + ctx.attr.data)
+        separator = expanded.find(":")
+        if separator < 0:
+            fail("input options require 'format:options', got %r" % value)
+        name = expanded[:separator]
+        options = expanded[separator + 1:]
+        if name != "cxx":
+            fail("source format %r has no importer options" % name)
+        if cxx_options != None:
+            fail("duplicate input options for 'cxx'")
+        cxx_options = options
+    return cxx_options
+
+def _declare_cxx_import(ctx, source, ordinal, options, tool):
+    output = ctx.actions.declare_file(
+        "%s.imports/%d-%s.loombc" % (ctx.label.name, ordinal, source.basename),
+    )
+    args = ctx.actions.args()
+    args.add(source)
+    args.add("--to=bc")
+    args.add("--output=%s" % output.path)
+    if options != None:
+        args.add("--options=%s" % options)
+    ctx.actions.run(
+        arguments = [args],
+        executable = tool.files_to_run,
+        inputs = depset(direct = [source] + ctx.files.data),
+        mnemonic = "LoomCxxImport",
+        outputs = [output],
+        progress_message = "Importing C/C++ source %s" % source.path,
+    )
+    return output
+
+def _loom_library_impl(ctx, cxx_import_tool = None):
     if not ctx.files.srcs and not ctx.attr.deps:
         fail("%s requires at least one source across srcs and deps" % ctx.label)
+    if ctx.attr.input_format and ctx.attr.input_format not in _SOURCE_FORMATS:
+        fail("unsupported source format %r; import it to Loom before linking" % ctx.attr.input_format)
     dependency_infos = [dep[LoomLibraryInfo] for dep in ctx.attr.deps]
+    cxx_options = _cxx_input_options(ctx)
+    source_formats = [
+        _source_format(source, ctx.attr.input_format)
+        for source in ctx.files.srcs
+    ]
+    if cxx_options != None and "cxx" not in source_formats:
+        fail("C/C++ input options require at least one C/C++ source")
+    normalized_sources = []
+    normalized_formats = []
+    for ordinal, source in enumerate(ctx.files.srcs):
+        if source_formats[ordinal] == "cxx":
+            if cxx_import_tool == None:
+                fail("%s requires the C/C++ importer" % source.path)
+            normalized_sources.append(_declare_cxx_import(
+                ctx,
+                source,
+                ordinal,
+                cxx_options,
+                cxx_import_tool,
+            ))
+            normalized_formats.append("loombc")
+        else:
+            normalized_sources.append(source)
+            normalized_formats.append(source_formats[ordinal])
+    link_input_format = ctx.attr.input_format if ctx.attr.input_format in ["loom", "loombc"] else ""
+    link_tool = ctx.toolchains[_LOOM_LINK_TOOLCHAIN_TYPE].tool
     artifacts = loom_linking.declare_relocatable_module(
         ctx = ctx,
-        sources = ctx.files.srcs,
-        data = ctx.files.data,
-        input_format = ctx.attr.input_format,
-        inputopts = [
-            ctx.expand_location(option, targets = ctx.attr.srcs + ctx.attr.data)
-            for option in ctx.attr.inputopts
-        ],
+        sources = normalized_sources,
+        input_format = link_input_format,
         dependency_infos = dependency_infos,
         output_stem = ctx.label.name,
         mnemonic = "LoomLibrary",
         progress_message = "Linking Loom library %s" % ctx.label,
+        tool = link_tool,
     )
 
     return [
@@ -184,6 +264,8 @@ def _loom_library_impl(ctx):
             component = struct(
                 label = ctx.label,
                 sources = tuple(ctx.files.srcs),
+                normalized_sources = tuple(normalized_sources),
+                normalized_formats = tuple(normalized_formats),
                 data = tuple(ctx.files.data),
                 input_format = ctx.attr.input_format,
                 inputopts = tuple(ctx.attr.inputopts),
@@ -199,9 +281,14 @@ def _loom_library_impl(ctx):
         ),
     ]
 
-_loom_library = rule(
-    implementation = _loom_library_impl,
-    attrs = {
+def _loom_module_library_impl(ctx):
+    return _loom_library_impl(ctx)
+
+def _loom_cxx_library_impl(ctx):
+    return _loom_library_impl(ctx, ctx.toolchains[_LOOM_CXX_IMPORT_TOOLCHAIN_TYPE].tool)
+
+def _loom_library_attrs():
+    return {
         "data": attr.label_list(
             allow_files = True,
             doc = "Declared source-admission inputs, such as included headers.",
@@ -211,19 +298,47 @@ _loom_library = rule(
             doc = "Direct Loom library dependencies kept as separate modules.",
         ),
         "input_format": attr.string(
-            doc = "Source provider override; empty selects each source by filename.",
+            doc = "Source provider override; empty selects each source by filename. Generated or configurable C/C++ sources require cxx so analysis resolves the importer toolchain.",
         ),
         "inputopts": attr.string_list(
             doc = "Provider-scoped options (format:options), with location expansion.",
         ),
         "srcs": attr.label_list(
             allow_files = True,
-            doc = "Ordered source modules accepted by the configured input providers, or bytecode.",
+            doc = "Ordered Loom modules or C/C++ translation units. C/C++ is imported before linking.",
         ),
-    },
-    doc = "Merges direct sources into one relocatable Loom bytecode module.",
+    }
+
+_loom_module_library = rule(
+    implementation = _loom_module_library_impl,
+    attrs = _loom_library_attrs(),
+    doc = "Merges Loom text or bytecode into one relocatable module.",
     toolchains = [_LOOM_LINK_TOOLCHAIN_TYPE],
 )
+
+_loom_cxx_library = rule(
+    implementation = _loom_cxx_library_impl,
+    attrs = _loom_library_attrs(),
+    doc = "Imports C/C++ sources and merges all resulting Loom modules.",
+    toolchains = [
+        _LOOM_CXX_IMPORT_TOOLCHAIN_TYPE,
+        _LOOM_LINK_TOOLCHAIN_TYPE,
+    ],
+)
+
+def _label_has_suffix(label, suffixes):
+    value = str(label)
+    return any([value.endswith(suffix) for suffix in suffixes])
+
+def _select_library_rule(srcs, input_format):
+    if input_format:
+        return _loom_cxx_library if input_format == "cxx" else _loom_module_library
+    if type(srcs) not in ["list", "tuple"]:
+        return _loom_module_library
+    for source in srcs:
+        if _label_has_suffix(source, _CXX_SOURCE_SUFFIXES):
+            return _loom_cxx_library
+    return _loom_module_library
 
 def _loom_test_module_impl(ctx):
     root_library = ctx.attr.root_library[LoomLibraryInfo]
@@ -763,7 +878,8 @@ def _declare_library(
         tags,
         visibility,
         target_compatible_with = []):
-    _loom_library(
+    library_rule = _select_library_rule(srcs, input_format)
+    library_rule(
         name = name,
         srcs = srcs,
         deps = deps,
@@ -940,7 +1056,8 @@ def _declare_test_module(
     if not srcs:
         fail("%s requires at least one authored test source" % name)
     library_name = name + "_library"
-    _loom_library(
+    library_rule = _select_library_rule(srcs, input_format)
+    library_rule(
         name = library_name,
         srcs = srcs,
         deps = deps,

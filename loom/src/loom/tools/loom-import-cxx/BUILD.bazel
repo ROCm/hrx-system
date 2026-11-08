@@ -17,10 +17,12 @@ loomc_cc_binary(
         "//loom/binding/c:loomc",
         "//loom/binding/c/import/cxx",
         "//loom/binding/c/target/configured:ir",
+        "//loom/src/loom/import/cxx/tooling:options",
         "//loom/src/loom/tooling/cli:help",
         "//loom/src/loom/tooling/cli:loomc_result",
         "//loom/src/loom/tooling/io:file",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/base/tooling:flags",
     ],
 )
