@@ -115,6 +115,40 @@ TEST_F(ModuleTest, AllocateAndFree) {
   loom_module_free(module);
 }
 
+TEST_F(ModuleTest, HeaderUsesArenaStorageIncludingOversizedAllocation) {
+  iree_arena_block_pool_t small_pool;
+  iree_arena_block_pool_initialize(1024, iree_allocator_system(), &small_pool);
+
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &small_pool,
+                                      NULL, iree_allocator_null(), &module));
+  EXPECT_TRUE(iree_allocator_is_null(module->host_allocator));
+  loom_module_free(module);
+
+  iree_arena_block_pool_deinitialize(&small_pool);
+}
+
+TEST_F(ModuleTest, HeaderUsesRemainingActiveBlockCapacity) {
+  iree_arena_block_pool_t small_pool;
+  iree_arena_block_pool_initialize(4096, iree_allocator_system(), &small_pool);
+
+  loom_module_t* module = NULL;
+  IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &small_pool,
+                                      NULL, iree_allocator_system(), &module));
+  const uintptr_t block_begin =
+      (uintptr_t)iree_arena_block_ptr(&small_pool, module->arena.block_head);
+  const uintptr_t block_end = block_begin + small_pool.usable_block_size;
+  const uintptr_t module_begin = (uintptr_t)module;
+  const uintptr_t module_end = module_begin + sizeof(*module);
+  EXPECT_GE(module_begin, block_begin);
+  EXPECT_LE(module_end, block_end);
+  EXPECT_EQ(module->arena.total_allocation_size,
+            4 * small_pool.total_block_size);
+  loom_module_free(module);
+
+  iree_arena_block_pool_deinitialize(&small_pool);
+}
+
 TEST_F(ModuleTest, FreeNull) { loom_module_free(NULL); }
 
 TEST_F(ModuleTest, ModuleName) {

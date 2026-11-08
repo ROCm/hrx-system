@@ -1153,7 +1153,7 @@ static iree_status_t loom_cmd_launch_count_build_kernel(
           .root_symbols = {.values = &kernel_name, .count = 1},
           .root_target_symbols = {.values = &product_kernel, .count = 1},
       },
-      block_pool, module->allocator, &product_module));
+      block_pool, module->host_allocator, &product_module));
   *out_kernel_op = kernel_op;
   *out_product = (loom_kernel_class_product_t){
       .module = product_module,

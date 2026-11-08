@@ -178,7 +178,7 @@ static iree_status_t loom_cmd_program_plan_normalize_roots(
   loom_module_t* pipeline_module = NULL;
   IREE_RETURN_IF_ERROR(loom_module_allocate(
       module->context, IREE_SV("__command_program_normalization"), block_pool,
-      NULL, module->allocator, &pipeline_module));
+      NULL, module->host_allocator, &pipeline_module));
 
   loom_op_t* pipeline_op = NULL;
   iree_status_t status = loom_pass_ir_build_pipeline(
