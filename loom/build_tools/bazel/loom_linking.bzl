@@ -11,7 +11,7 @@ _LOOM_LINK_TOOLCHAIN_TYPE = Label("//loom/build_tools/bazel:link_toolchain_type"
 LoomLibraryInfo = provider(
     doc = "One relocatable Loom module and its independent dependencies.",
     fields = {
-        "component": "Owned module, ordered original sources, auxiliary files, and importer settings.",
+        "component": "Owned module, ordered original and normalized sources and formats, and auxiliary files.",
         "module": "Relocatable Loom bytecode module owned by this library.",
         "transitive_components": "Preorder depset of dependency components, excluding this library.",
         "transitive_dependencies": "Depset of separate dependency modules, excluding module.",
@@ -41,9 +41,8 @@ def _declare_relocatable_module(
         output_stem,
         mnemonic,
         progress_message,
-        data = [],
-        input_format = "",
-        inputopts = []):
+        tool,
+        input_format = ""):
     dependencies = _collect_dependency_modules(dependency_infos)
     transitive_dependencies = depset(
         direct = dependencies.direct,
@@ -62,7 +61,6 @@ def _declare_relocatable_module(
     args.add("--output=%s" % module.path)
     if input_format:
         args.add("--input-format=%s" % input_format)
-    args.add_all(inputopts, format_each = "--input-options=%s")
     args.add_all(sources)
     args.add_all(dependencies.direct, format_each = "--library=%s")
     args.add_all(
@@ -70,12 +68,11 @@ def _declare_relocatable_module(
         format_each = "--transitive-library=%s",
     )
 
-    tool = ctx.toolchains[_LOOM_LINK_TOOLCHAIN_TYPE].tool
     ctx.actions.run(
         arguments = [args],
         executable = tool.files_to_run,
         inputs = depset(
-            direct = sources + data + dependencies.direct + dependencies.transitive,
+            direct = sources + dependencies.direct + dependencies.transitive,
         ),
         mnemonic = mnemonic,
         outputs = [module, dependency_report],

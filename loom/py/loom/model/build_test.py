@@ -84,6 +84,18 @@ def test_analysis_composition_rejects_stale_provider_contract(change):
         build(plan, "unavailable-linker")
 
 
+def test_normalization_rejects_unimported_source_language(tmp_path):
+    plan = _plan()
+    document = json.loads(Path(plan["card"]).read_text())
+    provider = document["programs"]["source"]["inputs"][0]
+    provider["format"] = "cxx"
+    card = tmp_path / "input.json"
+    card.write_text(json.dumps(document))
+    plan["card"] = str(card)
+    with pytest.raises(ManifestError, match="import source languages"):
+        build(plan, "unavailable-linker")
+
+
 def test_output_documents_have_reserved_paths(tmp_path):
     plan = _plan()
     document = json.loads(Path(plan["card"]).read_text())

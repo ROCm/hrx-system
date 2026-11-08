@@ -32,6 +32,19 @@ def _provider_declaration(value):
     return result if len(result) > 1 else result["path"]
 
 
+def _provider_format(value) -> str:
+    record = {"path": value} if isinstance(value, str) else value
+    format_name = record.get("format")
+    if format_name:
+        return format_name
+    path = record["path"]
+    if path.endswith(".loombc"):
+        return "loombc"
+    if path.endswith((".loom", ".loom-test")) or "." not in path.rsplit("/", 1)[-1]:
+        return "loom"
+    raise ManifestError(f"provider {path!r} has no declared or inferable format")
+
+
 def build(plan: dict, linker: str | None = None) -> None:
     selection = ModelCard.parse(Path(plan["card"]).read_text(encoding="utf-8")).select(
         plan["preset"],
@@ -127,18 +140,17 @@ def build(plan: dict, linker: str | None = None) -> None:
                 continue
             binding = plan["files"][name]
             arguments = [linker, "--mode=merge", binding["input"]]
-            format_name = provider.get("format")
-            if format_name in ("loom", "loombc"):
-                arguments.extend(
-                    [
-                        "--input-format=loom",
-                        "--from=" + ("bc" if format_name == "loombc" else "text"),
-                    ]
+            format_name = binding.get("format") or _provider_format(provider)
+            if format_name not in ("loom", "loombc"):
+                raise ManifestError(
+                    f"provider {name!r} uses {format_name!r}; import source "
+                    "languages to a Loom module before model normalization"
                 )
-            elif format_name:
-                arguments.append("--input-format=" + format_name)
             arguments.extend(
-                "--input-options=" + option for option in provider.get("options", [])
+                [
+                    "--input-format=loom",
+                    "--from=" + ("bc" if format_name == "loombc" else "text"),
+                ]
             )
             arguments.extend(
                 [

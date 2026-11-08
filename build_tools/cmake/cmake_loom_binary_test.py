@@ -27,6 +27,8 @@ class CMakeLoomBinaryTest(unittest.TestCase):
             shutil.copytree(FIXTURE, source)
             for name in ("direct", "library", "leaf"):
                 (source / f"{name}.loom").write_text(f"{name} original\n")
+            (source / "support.cxx").write_text("support original\n")
+            (source / "support.h").write_text("support header original\n")
             configure_project(source, build)
             build_project(build, "kernel_consumer", "fixture_exported")
             output = build / "explicit.xdna"
@@ -44,6 +46,23 @@ class CMakeLoomBinaryTest(unittest.TestCase):
             ):
                 self.assertIn(argument, text)
             self.assertNotIn("--product=", text)
+            cxx = (build / "cxx_library.loombc").read_text()
+            imported_path = (
+                build / "cxx_library.import-0-support.cxx.loombc"
+            ).as_posix()
+            source_path = (source / "support.cxx").as_posix()
+            self.assertIn(imported_path, cxx)
+            self.assertIn("--options=fp-model=fast", cxx)
+            self.assertIn("support original", cxx)
+            self.assertNotIn("--input-format=cxx", cxx)
+            self.assertLess(cxx.index(imported_path), cxx.index(source_path))
+            cxx_timestamp = (build / "cxx_library.loombc").stat().st_mtime_ns
+            (source / "support.h").write_text("support header changed\n")
+            build_project(build, "kernel_consumer")
+            self.assertGreater(
+                (build / "cxx_library.loombc").stat().st_mtime_ns,
+                cxx_timestamp,
+            )
             self.assertLess(text.index("--root=@second"), text.index("--root=@first"))
             exported = (build / "exported.xdna").read_text()
             self.assertIn(f"--root-library={build.as_posix()}/library.loombc", exported)
@@ -75,7 +94,11 @@ class CMakeLoomBinaryTest(unittest.TestCase):
             host_tools.mkdir()
             suffix = ".exe" if os.name == "nt" else ""
             tools = (build / f"tools-{CONFIGURATION}.txt").read_text().splitlines()
-            for name, tool in zip(("loom-link", "loom-compile"), tools, strict=True):
+            for name, tool in zip(
+                ("loom-import-cxx", "loom-link", "loom-compile"),
+                tools,
+                strict=True,
+            ):
                 shutil.copy2(tool, host_tools / (name + suffix))
             cross = root / "cross build"
             configure_project(

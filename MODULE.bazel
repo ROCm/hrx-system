@@ -23,6 +23,7 @@ include("//loom/build_tools/bazel:deps.MODULE.bazel")
 register_toolchains(
     "//loom/build_tools/bazel:source_tools_benchmark_toolchain",
     "//loom/build_tools/bazel:source_tools_compile_toolchain",
+    "//loom/build_tools/bazel:source_tools_cxx_import_toolchain",
     "//loom/build_tools/bazel:source_tools_format_toolchain",
     "//loom/build_tools/bazel:source_tools_lint_toolchain",
     "//loom/build_tools/bazel:source_tools_link_toolchain",

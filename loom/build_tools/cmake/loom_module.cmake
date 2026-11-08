@@ -90,6 +90,42 @@ function(_loom_link_input_paths OUTPUT_PATHS OUTPUT_TARGETS)
   set(${OUTPUT_TARGETS} ${_TARGETS} PARENT_SCOPE)
 endfunction()
 
+function(_loom_source_format OUTPUT_FORMAT SOURCE INPUT_FORMAT)
+  if(INPUT_FORMAT)
+    if(NOT INPUT_FORMAT STREQUAL "cxx" AND
+       NOT INPUT_FORMAT STREQUAL "loom" AND
+       NOT INPUT_FORMAT STREQUAL "loombc")
+      message(FATAL_ERROR
+        "Unsupported Loom source format ${INPUT_FORMAT}; import it to a Loom module before linking")
+    endif()
+    set(${OUTPUT_FORMAT} "${INPUT_FORMAT}" PARENT_SCOPE)
+  elseif(SOURCE MATCHES "\\.(c|cc|cpp|cxx|cxx-test)$")
+    set(${OUTPUT_FORMAT} cxx PARENT_SCOPE)
+  elseif(SOURCE MATCHES "\\.loombc$")
+    set(${OUTPUT_FORMAT} loombc PARENT_SCOPE)
+  else()
+    set(${OUTPUT_FORMAT} loom PARENT_SCOPE)
+  endif()
+endfunction()
+
+function(_loom_cxx_input_options OUTPUT_OPTIONS OUTPUT_SET)
+  set(_CXX_OPTIONS)
+  set(_CXX_OPTIONS_SET FALSE)
+  foreach(_OPTIONS IN LISTS ARGN)
+    if(NOT _OPTIONS MATCHES "^cxx:")
+      message(FATAL_ERROR
+        "Source format options require the cxx: provider prefix, got ${_OPTIONS}")
+    endif()
+    if(_CXX_OPTIONS_SET)
+      message(FATAL_ERROR "Duplicate C/C++ source options")
+    endif()
+    string(REGEX REPLACE "^cxx:" "" _CXX_OPTIONS "${_OPTIONS}")
+    set(_CXX_OPTIONS_SET TRUE)
+  endforeach()
+  set(${OUTPUT_OPTIONS} "${_CXX_OPTIONS}" PARENT_SCOPE)
+  set(${OUTPUT_SET} "${_CXX_OPTIONS_SET}" PARENT_SCOPE)
+endfunction()
+
 function(loom_module)
   iree_package_binary_dir(_IREE_PACKAGE_BINARY_DIR)
   # Tools, sources, and direct/transitive libraries are explicit inputs. Avoid
@@ -152,10 +188,52 @@ function(loom_module)
   set(_TARGET "${_PACKAGE_NAME}_${_RULE_NAME}")
   set(_TRANSITIVE_LIBRARIES "$<TARGET_GENEX_EVAL:${_TARGET},$<TARGET_PROPERTY:${_TARGET},LOOM_MODULE_TRANSITIVE_LIBRARIES>>")
   set(_OUTPUT "${_IREE_PACKAGE_BINARY_DIR}/${_RULE_OUTPUT}")
+  if(_RULE_INPUT_FORMAT AND
+     NOT _RULE_INPUT_FORMAT STREQUAL "cxx" AND
+     NOT _RULE_INPUT_FORMAT STREQUAL "loom" AND
+     NOT _RULE_INPUT_FORMAT STREQUAL "loombc")
+    message(FATAL_ERROR
+      "Unsupported Loom source format ${_RULE_INPUT_FORMAT}; import it to a Loom module before linking")
+  endif()
+  _loom_cxx_input_options(_CXX_OPTIONS _CXX_OPTIONS_SET ${_RULE_INPUTOPTS})
+  set(_LINK_SOURCES)
+  set(_IMPORT_OUTPUTS)
+  set(_SOURCE_ORDINAL 0)
+  foreach(_SOURCE IN LISTS _SOURCES)
+    _loom_source_format(_SOURCE_FORMAT "${_SOURCE}" "${_RULE_INPUT_FORMAT}")
+    if(_SOURCE_FORMAT STREQUAL "cxx")
+      if(NOT DEFINED _IMPORT_CXX_TOOL)
+        _loom_host_tool(_IMPORT_CXX_TOOL loom-import-cxx)
+      endif()
+      cmake_path(GET _SOURCE FILENAME _SOURCE_NAME)
+      set(_IMPORTED "${_IREE_PACKAGE_BINARY_DIR}/${_RULE_NAME}.import-${_SOURCE_ORDINAL}-${_SOURCE_NAME}.loombc")
+      set(_IMPORT_ARGS "${_SOURCE}" "--to=bc" "--output=${_IMPORTED}")
+      if(_CXX_OPTIONS_SET)
+        list(APPEND _IMPORT_ARGS "--options=${_CXX_OPTIONS}")
+      endif()
+      add_custom_command(
+        OUTPUT "${_IMPORTED}"
+        COMMAND "${_IMPORT_CXX_TOOL}" ${_IMPORT_ARGS}
+        DEPENDS "${_IMPORT_CXX_TOOL}" "${_SOURCE}" ${_RULE_DATA}
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+        COMMENT "Importing C/C++ source ${_SOURCE_NAME}"
+        VERBATIM
+        COMMAND_EXPAND_LISTS
+      )
+      list(APPEND _LINK_SOURCES "${_IMPORTED}")
+      list(APPEND _IMPORT_OUTPUTS "${_IMPORTED}")
+    else()
+      list(APPEND _LINK_SOURCES "${_SOURCE}")
+    endif()
+    math(EXPR _SOURCE_ORDINAL "${_SOURCE_ORDINAL} + 1")
+  endforeach()
+  if(_CXX_OPTIONS_SET AND NOT _IMPORT_OUTPUTS)
+    message(FATAL_ERROR "C/C++ source options require at least one C/C++ source")
+  endif()
   set(_ARGS
     "--mode=${_RULE_MODE}"
     "--to=${_RULE_OUTPUT_FORMAT}"
-    ${_SOURCES}
+    ${_LINK_SOURCES}
   )
   foreach(_LIBRARY IN LISTS _LIBRARIES)
     list(APPEND _ARGS "--library=${_LIBRARY}")
@@ -174,12 +252,9 @@ function(loom_module)
   if(_RULE_INCLUDE_INPUT_TESTS)
     list(APPEND _ARGS "--include-input-tests")
   endif()
-  if(_RULE_INPUT_FORMAT)
+  if(_RULE_INPUT_FORMAT AND NOT _RULE_INPUT_FORMAT STREQUAL "cxx")
     list(APPEND _ARGS "--input-format=${_RULE_INPUT_FORMAT}")
   endif()
-  foreach(_OPTIONS IN LISTS _RULE_INPUTOPTS)
-    list(APPEND _ARGS "--input-options=${_OPTIONS}")
-  endforeach()
   if(_RULE_STRIP_CHECK)
     list(APPEND _ARGS "--strip-check=true")
   endif()
@@ -199,10 +274,9 @@ function(loom_module)
       "${_LINK_TOOL}" "${_ARGS}"
     DEPENDS
       "${_LINK_TOOL}"
-      ${_SOURCES}
+      ${_LINK_SOURCES}
       "${_LIBRARIES}"
       "${_TRANSITIVE_LIBRARIES}"
-      ${_RULE_DATA}
     WORKING_DIRECTORY
       "${PROJECT_SOURCE_DIR}"
     COMMENT
@@ -213,6 +287,7 @@ function(loom_module)
   set_source_files_properties(
     "${_RULE_OUTPUT}"
     "${_OUTPUT}"
+    ${_IMPORT_OUTPUTS}
     PROPERTIES GENERATED TRUE
   )
 

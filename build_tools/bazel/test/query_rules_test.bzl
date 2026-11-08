@@ -14,6 +14,14 @@ load(
     "iree_assert_no_dependency",
 )
 
+def _dynamic_dependency_root_impl(_ctx):
+    return []
+
+_dynamic_dependency_root = rule(
+    implementation = _dynamic_dependency_root_impl,
+    attrs = {"dynamic_deps": attr.label_list()},
+)
+
 def _expect_boundary_failure_impl(env, target):
     result = target[AnalysisTestResultInfo]
     env.expect.that_bool(result.success).equals(False)
@@ -44,9 +52,17 @@ def query_rules_test_suite(name):
     allowlisted_test_name = name + "_allows_exact_subtree_exception"
     boundary_assertion_name = name + "_rejects_forbidden_subtree_assertion"
     boundary_test_name = name + "_rejects_forbidden_subtree"
+    dynamic_assertion_name = name + "_rejects_forbidden_dynamic_dependency_assertion"
+    dynamic_root_name = name + "_dynamic_root"
+    dynamic_test_name = name + "_rejects_forbidden_dynamic_dependency"
 
     iree_cc_library(
         name = leaf_name,
+        tags = ["manual"],
+    )
+    _dynamic_dependency_root(
+        name = dynamic_root_name,
+        dynamic_deps = ["//build_tools/bazel/test/query_fixture/child:child_leaf"],
         tags = ["manual"],
     )
     iree_cc_library(
@@ -96,12 +112,24 @@ def query_rules_test_suite(name):
         target = ":" + boundary_assertion_name,
     )
 
+    iree_assert_dependency_boundary(
+        name = dynamic_assertion_name,
+        forbidden_subtrees = ["//build_tools/bazel/test/query_fixture/..."],
+        tags = ["manual"],
+        target = ":" + dynamic_root_name,
+    )
+    _expect_boundary_failure(
+        name = dynamic_test_name,
+        target = ":" + dynamic_assertion_name,
+    )
+
     native.test_suite(
         name = name,
         tests = [
             ":" + absent_test_name,
             ":" + allowlisted_test_name,
             ":" + boundary_test_name,
+            ":" + dynamic_test_name,
             ":" + missing_test_name,
         ],
     )
