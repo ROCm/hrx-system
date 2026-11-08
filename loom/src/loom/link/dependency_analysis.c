@@ -814,8 +814,7 @@ static void loom_link_dependency_classify_template_candidates(
 }
 
 static iree_status_t loom_link_dependency_classify_requirements(
-    loom_link_dependency_builder_t* builder,
-    iree_arena_block_pool_t* block_pool, iree_allocator_t allocator) {
+    loom_link_dependency_builder_t* builder, iree_allocator_t allocator) {
   loom_link_dependency_requirement_t* requirements =
       (loom_link_dependency_requirement_t*)
           builder->analysis.requirements.values;
@@ -829,7 +828,7 @@ static iree_status_t loom_link_dependency_classify_requirements(
 
   loom_link_func_contract_projection_t* projection = NULL;
   IREE_RETURN_IF_ERROR(loom_link_func_contract_projection_allocate(
-      builder->index, block_pool, allocator, &projection));
+      builder->index, builder->scratch_arena, allocator, &projection));
   iree_status_t status =
       loom_link_dependency_project_exact_contracts(builder, projection);
   loom_ir_remap_t comparison_remap = {0};
@@ -919,8 +918,7 @@ iree_status_t loom_link_dependency_analyze(
     status = loom_link_dependency_allocate_candidates(&builder);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_link_dependency_classify_requirements(&builder, block_pool,
-                                                        allocator);
+    status = loom_link_dependency_classify_requirements(&builder, allocator);
   }
   if (iree_status_is_ok(status)) {
     loom_link_dependency_finish_provider_usage(&builder);

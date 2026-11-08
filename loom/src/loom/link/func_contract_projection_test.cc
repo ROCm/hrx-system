@@ -156,7 +156,8 @@ TEST_F(LinkFuncContractProjectionTest,
 
   loom_link_func_contract_projection_t* raw_projection = nullptr;
   IREE_ASSERT_OK(loom_link_func_contract_projection_allocate(
-      index.get(), &block_pool_, iree_allocator_system(), &raw_projection));
+      index.get(), &comparison_arena_, iree_allocator_system(),
+      &raw_projection));
   ProjectionPtr projection(raw_projection);
   EXPECT_EQ(loom_link_func_contract_projection_module(projection.get())
                 ->symbols.count,
@@ -192,7 +193,8 @@ TEST_F(LinkFuncContractProjectionTest, PreservesProjectedTypeDifferences) {
 
   loom_link_func_contract_projection_t* raw_projection = nullptr;
   IREE_ASSERT_OK(loom_link_func_contract_projection_allocate(
-      index.get(), &block_pool_, iree_allocator_system(), &raw_projection));
+      index.get(), &comparison_arena_, iree_allocator_system(),
+      &raw_projection));
   ProjectionPtr projection(raw_projection);
   const loom_link_func_contract_t* source_contract = nullptr;
   const loom_link_func_contract_t* selected_contract = nullptr;
@@ -222,7 +224,8 @@ TEST_F(LinkFuncContractProjectionTest, CachesProjectedContractViews) {
 
   loom_link_func_contract_projection_t* raw_projection = nullptr;
   IREE_ASSERT_OK(loom_link_func_contract_projection_allocate(
-      index.get(), &block_pool_, iree_allocator_system(), &raw_projection));
+      index.get(), &comparison_arena_, iree_allocator_system(),
+      &raw_projection));
   ProjectionPtr projection(raw_projection);
   const loom_link_func_contract_t* first = nullptr;
   const loom_link_func_contract_t* second = nullptr;
@@ -231,6 +234,30 @@ TEST_F(LinkFuncContractProjectionTest, CachesProjectedContractViews) {
   IREE_ASSERT_OK(loom_link_func_contract_projection_load(projection.get(),
                                                          declaration, &second));
   EXPECT_EQ(first, second);
+}
+
+TEST_F(LinkFuncContractProjectionTest,
+       RetainsOwningArenaAfterInitializationFailure) {
+  IndexPtr index = CreateMixedIndex();
+  const iree_allocator_t failing_allocator = {
+      nullptr,
+      [](void*, iree_allocator_command_t, const void*, void**) {
+        return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
+      },
+  };
+  auto* projection =
+      reinterpret_cast<loom_link_func_contract_projection_t*>(0x1);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_link_func_contract_projection_allocate(
+          index.get(), &comparison_arena_, failing_allocator, &projection));
+  EXPECT_EQ(projection, nullptr);
+  loom_link_func_contract_projection_free(projection);
+
+  IREE_ASSERT_OK(loom_link_func_contract_projection_allocate(
+      index.get(), &comparison_arena_, iree_allocator_system(), &projection));
+  ASSERT_NE(projection, nullptr);
+  loom_link_func_contract_projection_free(projection);
 }
 
 }  // namespace
