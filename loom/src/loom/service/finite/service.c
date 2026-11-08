@@ -93,6 +93,17 @@ struct loom_service_finite_service_t {
   iree_host_size_t cohort_count;
   // CPU-produced selection size, consumed only after preparation releases.
   iree_host_size_t prepared_count;
+  // Capacity-empty selection snapshots, invalidated by arrivals or releases.
+  struct {
+    // Last selection admitted no numerical member.
+    bool blocked;
+    // Owner-only count of accepted arrivals.
+    uint64_t arrivals;
+    // Arrival generation captured before lending the CPU preparation snapshot.
+    uint64_t selected_arrivals;
+    // Capacity generation captured before probing source requests.
+    uint64_t selected_capacity;
+  } admission;
   // Contiguous source request arguments captured for batch preparation.
   loom_service_prepared_request_t* prepared;
   // Protocol result row counts captured alongside the cohort.
@@ -338,6 +349,11 @@ static iree_status_t loom_service_finite_cpu_run(void* user_data) {
     job->body = iree_string_view_empty();
   }
   service->prepared_count = 0;
+  service->admission.selected_capacity =
+      service->generator.vtable->capacity_generation
+          ? service->generator.vtable->capacity_generation(
+                service->generator.self)
+          : 0;
   uint64_t remaining =
       service->generator.vtable->batch_limit(service->generator.self);
   uint64_t tag = 0;
@@ -352,6 +368,14 @@ static iree_status_t loom_service_finite_cpu_run(void* user_data) {
       tag = job->prepared.tag;
     }
     if (job->prepared.tag == tag && job->prepared.units <= remaining) {
+      bool acquired = true;
+      if (service->generator.vtable->try_admit_request) {
+        status = service->generator.vtable->try_admit_request(
+            service->generator.self, &job->prepared, &acquired);
+      }
+      if (!iree_status_is_ok(status) || !acquired) {
+        continue;
+      }
       remaining -= job->prepared.units;
       const iree_host_size_t index = service->prepared_count++;
       job->selected = true;
@@ -453,6 +477,7 @@ static void loom_service_finite_prepared(
           service->pending_count * sizeof(*service->pending));
   service->pending_count += retained;
   service->cohort_count = selected;
+  service->admission.blocked = selected == 0;
   service->phase = selected ? FINITE_SPECIALIZING : FINITE_IDLE;
 }
 
@@ -705,7 +730,14 @@ static iree_status_t loom_service_finite_advance(
     }
   }
   if (iree_status_is_ok(status) && !service->stopping &&
-      service->phase == FINITE_IDLE && service->pending_count) {
+      service->phase == FINITE_IDLE && service->pending_count &&
+      (!service->admission.blocked ||
+       service->admission.arrivals != service->admission.selected_arrivals ||
+       (service->generator.vtable->capacity_generation &&
+        service->generator.vtable->capacity_generation(
+            service->generator.self) !=
+            service->admission.selected_capacity))) {
+    service->admission.selected_arrivals = service->admission.arrivals;
     memcpy(service->cohort, service->pending,
            service->pending_count * sizeof(*service->cohort));
     service->cohort_count = service->pending_count;
@@ -761,6 +793,7 @@ static void loom_service_finite_job_admit(
   job->body = body;
   service->pending[service->pending_count++] = job;
   ++service->count;
+  ++service->admission.arrivals;
 }
 
 iree_status_t loom_service_finite_service_try_accept(

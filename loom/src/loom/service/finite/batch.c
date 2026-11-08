@@ -6,7 +6,9 @@
 
 #include "loom/service/finite/batch.h"
 
+#include "iree/hal/vm/types.h"
 #include "iree/vm/reflection.h"
+#include "loom/runtime/storage/ranges.h"
 
 typedef struct loom_service_finite_batch_module_t {
   // Module and batch handles share the same intrusive owner-count prefix.
@@ -16,7 +18,9 @@ typedef struct loom_service_finite_batch_module_t {
   // Allocator owning this instance and explicitly requested packed uploads.
   iree_allocator_t host_allocator;
   // Canonical buffer and finite.batch identities.
-  iree_vm_ref_type_t types[2];
+  iree_vm_ref_type_t types[3];
+  // Source invocation authority; device views are available only at submit.
+  loom_service_finite_batch_phase_t phase;
   // Source-declared maximum additive work per epoch.
   uint64_t batch_limit;
   // Borrowed stable members, present only during one synchronous invocation.
@@ -53,11 +57,12 @@ iree_status_t loom_service_finite_batch_register_types(
 iree_vm_ref_type_t loom_service_finite_batch_type(void) { return &batch_type; }
 
 iree_vm_variant_t loom_service_finite_batch_begin(
-    iree_vm_module_t* base, iree_host_size_t count,
-    loom_service_prepared_request_t* requests,
+    iree_vm_module_t* base, loom_service_finite_batch_phase_t phase,
+    iree_host_size_t count, loom_service_prepared_request_t* requests,
     const loom_service_finite_result_t* result) {
   loom_service_finite_batch_module_t* module =
       (loom_service_finite_batch_module_t*)base;
+  module->phase = phase;
   module->requests = requests;
   module->count = count;
   module->result = result;
@@ -90,7 +95,10 @@ enum loom_service_finite_batch_function_e {
   BATCH_FINISH,
   BATCH_COUNT,
   BATCH_PACK,
+  BATCH_RELEASE,
+  BATCH_ORIGIN,
   BATCH_STATE,
+  BATCH_BUFFER,
   BATCH_OFFER,
 };
 
@@ -107,9 +115,16 @@ static iree_status_t loom_service_finite_batch_start(
                             "finite batch is not active");
   }
   const iree_host_size_t function = params->function_ordinal;
-  if ((function == BATCH_OFFER || function == BATCH_FINISH) && !batch->result) {
+  if ((function == BATCH_OFFER || function == BATCH_FINISH ||
+       function == BATCH_RELEASE) &&
+      batch->phase != LOOM_SERVICE_FINITE_BATCH_COLLECT) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "finite offers require successful collection");
+  }
+  if (function == BATCH_BUFFER &&
+      batch->phase != LOOM_SERVICE_FINITE_BATCH_SUBMIT) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "finite device views require submission");
   }
   if (function == BATCH_COUNT) {
     iree_vm_call_value_result_store(call, 0, batch->count);
@@ -140,6 +155,28 @@ static iree_status_t loom_service_finite_batch_start(
       iree_vm_ref_t state =
           iree_vm_ref_from_ptr_retained(request->bytes, batch->types[0]);
       iree_vm_call_ref_result_store_move(call, 0, &state);
+    } else if (function == BATCH_RELEASE) {
+      loom_runtime_range_reset(request->resource);
+    } else if (function == BATCH_ORIGIN || function == BATCH_BUFFER) {
+      if (!loom_runtime_range_is_active(request->resource)) {
+        return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                                "finite member has no retained interval");
+      }
+      if (function == BATCH_ORIGIN) {
+        iree_vm_call_value_result_store(
+            call, 0, loom_runtime_range_begin(request->resource));
+      } else {
+        const uint32_t root =
+            (uint32_t)iree_vm_call_value_argument_load(call, 1);
+        if (root >= loom_runtime_range_buffer_count(request->resource)) {
+          return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                  "finite root exceeds declared storage");
+        }
+        iree_vm_ref_t view = iree_vm_ref_from_ptr_retained(
+            loom_runtime_range_buffer(request->resource, root),
+            batch->types[2]);
+        iree_vm_call_ref_result_store_move(call, 0, &view);
+      }
     } else {
       const uint64_t units = iree_vm_call_value_argument_load(call, 1);
       if (units > batch->batch_limit) {
@@ -158,6 +195,12 @@ static const iree_vm_module_signature_type_t batch_argument[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 1}};
 static const iree_vm_module_signature_type_t member_arguments[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 1}, {IREE_VM_SCALAR_TYPE_I64, 0}};
+static const iree_vm_module_signature_type_t root_arguments[] = {
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 1},
+    {IREE_VM_SCALAR_TYPE_I64, 0},
+    {IREE_VM_SCALAR_TYPE_I32, 0}};
+static const iree_vm_module_signature_type_t root_result[] = {
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 2}};
 static const iree_vm_module_signature_type_t offer_arguments[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_PTR, 1},
     {IREE_VM_SCALAR_TYPE_I64, 0},
@@ -176,12 +219,20 @@ static const iree_vm_module_callable_type_declaration_t batch_callables[] = {
                    .results = {count_result, 1, 1, 0, 0}}},
     {.signature = {.arguments = {batch_argument, 1, 0, 1, 0},
                    .results = {buffer_results, 2, 0, 2, 0}}},
+    {.signature = {.arguments = {member_arguments, 2, 1, 1, 0}}},
+    {.signature = {.arguments = {member_arguments, 2, 1, 1, 0},
+                   .results = {count_result, 1, 1, 0, 0}}},
     {.signature = {.arguments = {member_arguments, 2, 1, 1, 0},
                    .results = {buffer_results, 1, 0, 1, 0}}},
+    {.signature = {.arguments = {root_arguments, 3, 2, 1, 0},
+                   .results = {root_result, 1, 0, 1, 0}}},
     {.signature = {.arguments = {offer_arguments, 4, 3, 1, 0}}},
 };
 
 static const iree_vm_module_export_declaration_t batch_exports[] = {
+    {.export_name = IREE_SVL("batch_buffer"),
+     .callable_type_ordinal = BATCH_BUFFER,
+     .function_ordinal = BATCH_BUFFER},
     {.export_name = IREE_SVL("batch_count"),
      .callable_type_ordinal = BATCH_COUNT,
      .function_ordinal = BATCH_COUNT},
@@ -191,9 +242,15 @@ static const iree_vm_module_export_declaration_t batch_exports[] = {
     {.export_name = IREE_SVL("batch_offer"),
      .callable_type_ordinal = BATCH_OFFER,
      .function_ordinal = BATCH_OFFER},
+    {.export_name = IREE_SVL("batch_origin"),
+     .callable_type_ordinal = BATCH_ORIGIN,
+     .function_ordinal = BATCH_ORIGIN},
     {.export_name = IREE_SVL("batch_pack"),
      .callable_type_ordinal = BATCH_PACK,
      .function_ordinal = BATCH_PACK},
+    {.export_name = IREE_SVL("batch_release"),
+     .callable_type_ordinal = BATCH_RELEASE,
+     .function_ordinal = BATCH_RELEASE},
     {.export_name = IREE_SVL("batch_state"),
      .callable_type_ordinal = BATCH_STATE,
      .function_ordinal = BATCH_STATE},
@@ -238,8 +295,9 @@ static const iree_vm_module_vtable_t batch_vtable = {
 };
 
 iree_status_t loom_service_finite_batch_module_create(
-    iree_vm_environment_t* environment, uint64_t batch_limit,
-    iree_allocator_t host_allocator, iree_vm_module_t** out_module) {
+    iree_vm_environment_t* environment, const iree_hal_vm_types_t* hal_types,
+    uint64_t batch_limit, iree_allocator_t host_allocator,
+    iree_vm_module_t** out_module) {
   *out_module = NULL;
   iree_vm_ref_types_t types = {0};
   IREE_RETURN_IF_ERROR(iree_vm_ref_types_resolve(
@@ -252,6 +310,7 @@ iree_status_t loom_service_finite_batch_module_create(
   module->batch_limit = batch_limit;
   module->types[0] = types.buffer;
   module->types[1] = &batch_type;
+  module->types[2] = hal_types->buffer;
   module->descriptor = (iree_vm_module_descriptor_t){
       .name = IREE_SVL("finite"),
       .flags = IREE_VM_MODULE_FLAG_LINKABLE,
@@ -259,7 +318,7 @@ iree_status_t loom_service_finite_batch_module_create(
       .counts = {.function_count = IREE_ARRAYSIZE(batch_exports),
                  .callable_type_count = IREE_ARRAYSIZE(batch_callables),
                  .export_count = IREE_ARRAYSIZE(batch_exports),
-                 .callable_fields = {.value_count = 5, .ref_count = 8}},
+                 .callable_fields = {.value_count = 10, .ref_count = 12}},
   };
   iree_status_t status = iree_vm_module_initialize(
       &batch_vtable, &module->descriptor, &module->base);

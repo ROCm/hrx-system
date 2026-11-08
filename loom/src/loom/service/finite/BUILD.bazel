@@ -192,8 +192,10 @@ loom_cc_library(
     hdrs = ["batch.h"],
     deps = [
         ":result",
+        "//loom/src/loom/runtime/storage:ranges",
         "//loom/src/loom/service:prepared_request",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/hal/vm:types",
         "//runtime/src/iree/vm",
     ],
 )
@@ -230,6 +232,7 @@ loom_cc_library(
         "//loom/src/loom/runtime/program:tokenizer_cache",
         "//loom/src/loom/runtime/program:tokenizer_load",
         "//loom/src/loom/runtime/program:variant_pool",
+        "//loom/src/loom/runtime/storage:ranges",
         "//loom/src/loom/service:executables",
         "//loom/src/loom/service:execution_reconfiguration",
         "//loom/src/loom/service:prepared_request",

@@ -86,6 +86,20 @@ typedef struct loom_runtime_preparation_storage_t {
   uint64_t alignment;
 } loom_runtime_preparation_storage_t;
 
+// One source-defined retained-capacity axis across mutable roots. The policy
+// receives model/request bytes and returns the next cohort's positive demand.
+// No declaration means the source needs no retained per-request ranges.
+typedef struct loom_runtime_preparation_request_storage_t {
+  // Positive count of logical units; byte geometry remains source-owned.
+  uint64_t capacity;
+  // Owned host demand entry, empty when per-request ranges are not declared.
+  iree_string_view_t root;
+} loom_runtime_preparation_request_storage_t;
+
+loom_runtime_preparation_request_storage_t
+loom_runtime_preparation_request_storage(
+    const loom_runtime_preparation_t* preparation);
+
 // Cold declarations in source ordinal order. NULL has no declarations.
 iree_host_size_t loom_runtime_preparation_storage_count(
     const loom_runtime_preparation_t* preparation);
@@ -176,22 +190,25 @@ void loom_runtime_preparation_module_recycle(
 //   memory_forecast(buffer root)
 //   storage(i64 bytes, i64 alignment) -> i32 buffer
 //   feedback(i64 bytes) -> i32 slot
-// storage and feedback are cold-only declarations. Their ordinals address the
-// hosting service's retained roots and completed-feedback destinations; neither
-// declaration allocates storage or grants access to uncompleted device writes.
-// All string buffers exclude NUL bytes. Config values use the public loomc
-// textual value syntax; config_i64 formats signed decimal values. Parameter
-// sources join directory and path in the server filesystem namespace. source
-// declares the first shard of an independent index; source_append adds shards
-// in order during the declaring capture. Card-backed programs use source_scope
-// to select one named parameter scope's complete typed shard list. Explicit
-// deployment inputs, such as request-selectable adapters, use source and
-// source_append alongside card scopes. Neither a card scope nor an inherited
-// cold source can be extended. Sources need no resident binding and may contain
-// identical keys.
-// parameter maps a dense policy-local input ordinal to a declared source. Each
-// input is bound once; all inputs for a binding name one policy. Several stages
-// and bindings may share a source. Policy paths resolve through the source
+//   request_storage(i64 capacity, buffer demand_root)
+// request_storage declares logical range ownership; demand_root selects a host
+// entry in the control program. Its caller owns the signature and admission.
+// storage, feedback, and request_storage are cold-only declarations. Their
+// ordinals address the hosting service's retained roots and completed-feedback
+// destinations; no declaration allocates storage or grants access to
+// uncompleted device writes. All string buffers exclude NUL bytes. Config
+// values use the public loomc textual value syntax; config_i64 formats signed
+// decimal values. Parameter sources join directory and path in the server
+// filesystem namespace. source declares the first shard of an independent
+// index; source_append adds shards in order during the declaring capture.
+// Card-backed programs use source_scope to select one named parameter scope's
+// complete typed shard list. Explicit deployment inputs, such as
+// request-selectable adapters, use source and source_append alongside card
+// scopes. Neither a card scope nor an inherited cold source can be extended.
+// Sources need no resident binding and may contain identical keys. parameter
+// maps a dense policy-local input ordinal to a declared source. Each input is
+// bound once; all inputs for a binding name one policy. Several stages and
+// bindings may share a source. Policy paths resolve through the source
 // environment, under programs.directory for cards. A card supplies stage config
 // defaults; explicit declarations override individual keys. Declarations copy
 // their strings and retain no references to arguments, source mappings,

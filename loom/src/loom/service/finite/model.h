@@ -244,6 +244,14 @@ iree_status_t loom_service_finite_model_prepare_request(
     loom_service_finite_model_t* model, iree_vm_buffer_t* input,
     loom_service_prepared_request_t* out_prepared);
 
+// Reserves source-requested retained capacity before cohort selection. A
+// capacity miss leaves the request pending while admitted continuations run.
+iree_status_t loom_service_finite_model_try_admit_request(
+    loom_service_finite_model_t* model,
+    loom_service_prepared_request_t* request, bool* out_acquired);
+uint64_t loom_service_finite_model_capacity_generation(
+    loom_service_finite_model_t* model);
+
 // Builds one retained cohort from prepared requests in stable client order.
 // expected_rows is protocol-derived, one count per request. The source result
 // plan is checked once at this boundary: header [device_output_bytes,
@@ -265,8 +273,8 @@ iree_status_t loom_service_finite_model_collect_batch(
     loom_service_prepared_request_t* requests,
     const loom_service_finite_result_t* result);
 
-// Observer used by request compilation only, installed before advance_batch.
-// Detachment follows terminal advance of every accepted compilation.
+// Wake-only observer for request compilation and retained-capacity return.
+// Installed before advance_batch or admission; detachment joins callbacks.
 void loom_service_finite_model_set_observer(
     loom_service_finite_model_t* model, loom_runtime_wake_callback_t observer);
 

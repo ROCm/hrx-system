@@ -26,6 +26,7 @@
 #include "loom/runtime/program/stage_set.h"
 #include "loom/runtime/program/storage.h"
 #include "loom/runtime/program/tokenizer_load.h"
+#include "loom/runtime/storage/ranges.h"
 #include "loom/service/executables.h"
 #include "loom/service/finite/batch.h"
 #include "loomc/iree.h"
@@ -54,6 +55,8 @@ struct loom_service_finite_model_t {
     // Owned stable roots released before draining accepted native captures.
     iree_hal_buffer_t** buffers;
   } storage;
+  // Optional logical range owner, outliving final captures of stable roots.
+  loom_runtime_ranges_t* ranges;
   // Completed device replies retained through source collection and teardown.
   struct {
     // Number of initialized destination slots.
@@ -85,6 +88,15 @@ struct loom_service_finite_model_t {
     // Source-selected retained command ordinal.
     uint32_t stage;
   } invocation;
+  // Owned member captures used by source submission after preparation returns.
+  struct {
+    // Number of live retained descriptors.
+    iree_host_size_t count;
+    // Reusable descriptor capacity, grown only for a larger cohort.
+    iree_host_size_t capacity;
+    // Owned bytes/resource references in stable source ordinal order.
+    loom_service_prepared_request_t* values;
+  } requests;
   // Cold live-source compiler borrowing the shared host task pool.
   loom_runtime_jit_t* jit;
   // Owned source declarations, independent of the bootstrap VM and arguments.
@@ -136,6 +148,8 @@ struct loom_service_finite_model_t {
     iree_vm_function_t collect_batch;
     // Optional source-selected request memory forecast, resolved at cold link.
     iree_vm_function_t memory_forecast;
+    // Optional pure source demand for the next retained cohort.
+    iree_vm_function_t request_storage;
     // Cold-resolved device command submission function.
     iree_vm_function_t run;
   } control;
@@ -143,12 +157,21 @@ struct loom_service_finite_model_t {
   iree_hal_buffer_t* buffers[2];
 };
 
+static void loom_service_finite_model_release_requests(
+    loom_service_finite_model_t* model) {
+  for (iree_host_size_t i = 0; i < model->requests.count; ++i) {
+    loom_service_prepared_request_release(&model->requests.values[i]);
+  }
+  model->requests.count = 0;
+}
+
 // Releases model-owned consumers, not borrowed upload payloads or the
 // storage protection those consumers still require. Partial loads use this same
 // sequence and may still own accepted backing allocations.
 static void loom_service_finite_model_release_consumers(
     loom_service_finite_model_t* model) {
   loom_service_executables_retire(model->executables);
+  loom_service_finite_model_release_requests(model);
   loom_runtime_program_free(model->control.program);
   model->control.program = NULL;
   iree_vm_module_release(model->control.runner);
@@ -176,6 +199,10 @@ static void loom_service_finite_model_release_consumers(
 void loom_service_finite_model_retire(loom_service_finite_model_t* model,
                                       void (*wake)(void* user_data),
                                       void* user_data) {
+  if (model->ranges) {
+    loom_runtime_ranges_set_observer(
+        model->ranges, (loom_runtime_wake_callback_t){wake, user_data});
+  }
   loom_runtime_retirement_set_observer(&model->storage.retirement, wake,
                                        user_data);
   if (model->executables) {
@@ -226,6 +253,11 @@ static iree_status_t loom_service_finite_model_destroy_resources(
     }
     iree_allocator_free(model->host_allocator, model->feedback.buffers);
     iree_allocator_free(model->host_allocator, model->feedback.destinations);
+    if (model->ranges) {
+      loom_runtime_ranges_deinitialize(model->ranges);
+      iree_allocator_free(model->host_allocator, model->ranges);
+    }
+    iree_allocator_free(model->host_allocator, model->requests.values);
     iree_allocator_free(model->host_allocator, model->storage.buffers);
     for (uint32_t i = 0; i < model->stages.count; ++i) {
       loom_runtime_jit_stage_free(model->stages.values[i]);
@@ -485,8 +517,8 @@ static iree_status_t loom_service_finite_create_control(
   }
   if (iree_status_is_ok(status)) {
     status = loom_service_finite_batch_module_create(
-        model->control.environment, model->batch_limit, host_allocator,
-        &native_modules[5]);
+        model->control.environment, &model->control.hal_types,
+        model->batch_limit, host_allocator, &native_modules[5]);
     model->control.batch = native_modules[5];
     iree_vm_module_retain(model->control.batch);
   }
@@ -538,7 +570,7 @@ static iree_status_t loom_service_finite_create_control(
   const iree_vm_signature_type_t collect_arguments[] = {buffer, batch};
   const iree_vm_signature_type_t batch_results[] = {i32, buffer, buffer};
   const iree_vm_signature_type_t run_arguments[] = {buffer, i32, device_buffer,
-                                                    device_buffer};
+                                                    device_buffer, batch};
   const loom_runtime_program_binding_t bindings[] = {
       {IREE_SVL("prepare_request"),
        {request_arguments, IREE_ARRAYSIZE(request_arguments)},
@@ -559,6 +591,17 @@ static iree_status_t loom_service_finite_create_control(
   };
   IREE_RETURN_IF_ERROR(loom_runtime_program_bind_service(
       model->control.program, IREE_ARRAYSIZE(bindings), bindings));
+  const loom_runtime_preparation_request_storage_t request_storage =
+      loom_runtime_preparation_request_storage(model->preparation);
+  if (request_storage.capacity) {
+    const loom_runtime_program_binding_t binding = {
+        request_storage.root,
+        {request_arguments, IREE_ARRAYSIZE(request_arguments)},
+        {&i64, 1},
+        &model->control.request_storage};
+    IREE_RETURN_IF_ERROR(
+        loom_runtime_program_bind(model->control.program, 1, &binding));
+  }
   const iree_string_view_t forecast_root =
       loom_runtime_preparation_memory_forecast(model->preparation);
   if (!iree_string_view_is_empty(forecast_root)) {
@@ -604,6 +647,19 @@ static iree_status_t loom_service_finite_model_allocate_storage(
     }
     iree_allocator_free(allocator, requests);
     IREE_RETURN_IF_ERROR(status);
+  }
+  const loom_runtime_preparation_request_storage_t request_storage =
+      loom_runtime_preparation_request_storage(model->preparation);
+  if (request_storage.capacity) {
+    if (!count) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "request ranges require retained storage roots");
+    }
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+        allocator, sizeof(*model->ranges), (void**)&model->ranges));
+    IREE_RETURN_IF_ERROR(loom_runtime_ranges_initialize(
+        request_storage.capacity, count, model->storage.buffers, allocator,
+        model->ranges));
   }
   const iree_host_size_t feedback_count =
       loom_runtime_preparation_feedback_count(model->preparation);
@@ -786,8 +842,17 @@ static iree_status_t loom_service_finite_load_prepare(
       IREE_SVL("collect_batch"), IREE_SVL("run")};
   const iree_string_view_t forecast =
       loom_runtime_preparation_memory_forecast(model->preparation);
-  const iree_string_view_list_t additional_roots = {
-      !iree_string_view_is_empty(forecast), &forecast};
+  const iree_string_view_t demand =
+      loom_runtime_preparation_request_storage(model->preparation).root;
+  iree_string_view_t roots[2];
+  iree_host_size_t root_count = 0;
+  if (!iree_string_view_is_empty(forecast)) {
+    roots[root_count++] = forecast;
+  }
+  if (!iree_string_view_is_empty(demand)) {
+    roots[root_count++] = demand;
+  }
+  const iree_string_view_list_t additional_roots = {root_count, roots};
   iree_status_t status = loom_runtime_program_compile_service_cached(
       model->jit, model->control.environment, &load->options.sources,
       load->options.sources.control, IREE_ARRAYSIZE(roles), roles,
@@ -1167,16 +1232,60 @@ iree_status_t loom_service_finite_model_prepare_request(
   }
   if (iree_status_is_ok(status)) {
     iree_vm_buffer_retain(bytes);
-    *out_prepared = (loom_service_prepared_request_t){bytes, (uint64_t)units,
-                                                      (uint64_t)tag};
+    *out_prepared = (loom_service_prepared_request_t){
+        .bytes = bytes, .units = (uint64_t)units, .tag = (uint64_t)tag};
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   return status;
 }
 
+iree_status_t loom_service_finite_model_try_admit_request(
+    loom_service_finite_model_t* model,
+    loom_service_prepared_request_t* request, bool* out_acquired) {
+  *out_acquired =
+      !model->ranges || loom_runtime_range_is_active(request->resource);
+  if (*out_acquired) {
+    return iree_ok_status();
+  }
+  iree_vm_variant_t arguments[] = {
+      iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
+                                               model->control.state),
+      iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
+                                               request->bytes)};
+  iree_vm_variant_t result = {0};
+  iree_status_t status =
+      iree_vm_invoke(loom_runtime_program_invocation(model->control.program),
+                     model->control.request_storage,
+                     iree_vm_variant_span_from_array(arguments),
+                     (iree_vm_variant_span_t){&result, 1});
+  int64_t demand = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_i64_from_variant(result, &demand);
+  }
+  if (iree_status_is_ok(status) &&
+      (demand <= 0 || (uint64_t)demand > model->ranges->occupied.bit_count)) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "source cohort demand exceeds retained capacity");
+  }
+  if (iree_status_is_ok(status)) {
+    status =
+        loom_runtime_ranges_try_acquire(model->ranges, (iree_host_size_t)demand,
+                                        &request->resource, out_acquired);
+  }
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  iree_vm_variant_span_reset((iree_vm_variant_span_t){&result, 1});
+  return status;
+}
+
+uint64_t loom_service_finite_model_capacity_generation(
+    loom_service_finite_model_t* model) {
+  return model->ranges ? loom_runtime_ranges_generation(model->ranges) : 0;
+}
+
 void loom_service_finite_model_release_batch(
     loom_service_finite_model_t* model) {
+  loom_service_finite_model_release_requests(model);
   loom_service_executables_release(model->executables);
   iree_vm_buffer_release(model->invocation.payload);
   loom_service_finite_result_release(model->invocation.result);
@@ -1187,6 +1296,19 @@ iree_status_t loom_service_finite_model_prepare_batch(
     loom_service_finite_model_t* model, iree_host_size_t count,
     loom_service_prepared_request_t* requests,
     const iree_host_size_t* expected_rows) {
+  if (count > model->requests.capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_realloc(
+        model->host_allocator, count * sizeof(*model->requests.values),
+        (void**)&model->requests.values));
+    model->requests.capacity = count;
+  }
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    model->requests.values[i] = requests[i];
+    iree_vm_buffer_retain(requests[i].bytes);
+    model->requests.values[i].resource =
+        iree_vm_ref_retain(requests[i].resource);
+  }
+  model->requests.count = count;
   loom_service_executables_capture(model->executables);
   loom_runtime_preparation_module_begin(
       model->control.preparation, model->stages.count, model->preparation,
@@ -1196,8 +1318,9 @@ iree_status_t loom_service_finite_model_prepare_batch(
                                                model->control.state),
       iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
                                                model->control.tags),
-      loom_service_finite_batch_begin(model->control.batch, count, requests,
-                                      NULL)};
+      loom_service_finite_batch_begin(model->control.batch,
+                                      LOOM_SERVICE_FINITE_BATCH_PREPARE, count,
+                                      requests, NULL)};
   iree_vm_variant_t results[3] = {0};
   iree_vm_buffer_t* plan = NULL;
   iree_status_t status = iree_vm_invoke(
@@ -1257,8 +1380,9 @@ iree_status_t loom_service_finite_model_collect_batch(
   iree_vm_variant_t arguments[] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
                                                model->control.state),
-      loom_service_finite_batch_begin(model->control.batch, count, requests,
-                                      result)};
+      loom_service_finite_batch_begin(model->control.batch,
+                                      LOOM_SERVICE_FINITE_BATCH_COLLECT, count,
+                                      requests, result)};
   if (model->control.storage) {
     loom_runtime_storage_module_set_access(model->control.storage,
                                            LOOM_RUNTIME_STORAGE_ACCESS_COLLECT);
@@ -1279,6 +1403,9 @@ iree_status_t loom_service_finite_model_collect_batch(
 void loom_service_finite_model_set_observer(
     loom_service_finite_model_t* model, loom_runtime_wake_callback_t observer) {
   loom_service_executables_set_observer(model->executables, observer);
+  if (model->ranges) {
+    loom_runtime_ranges_set_observer(model->ranges, observer);
+  }
 }
 
 iree_status_t loom_service_finite_model_advance_batch(
@@ -1346,7 +1473,10 @@ iree_status_t loom_service_finite_model_submit(
         iree_hal_buffer_variant_from_ptr_borrowed(&model->control.hal_types,
                                                   model->buffers[0]),
         iree_hal_buffer_variant_from_ptr_borrowed(&model->control.hal_types,
-                                                  model->buffers[1])};
+                                                  model->buffers[1]),
+        loom_service_finite_batch_begin(
+            model->control.batch, LOOM_SERVICE_FINITE_BATCH_SUBMIT,
+            model->requests.count, model->requests.values, NULL)};
     if (model->control.storage) {
       loom_runtime_storage_module_set_access(
           model->control.storage, LOOM_RUNTIME_STORAGE_ACCESS_SUBMIT);
@@ -1359,6 +1489,7 @@ iree_status_t loom_service_finite_model_submit(
       loom_runtime_storage_module_set_access(model->control.storage,
                                              LOOM_RUNTIME_STORAGE_ACCESS_NONE);
     }
+    status = loom_service_finite_batch_end(model->control.batch, status);
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   }
   if (iree_status_is_ok(status)) {
@@ -1428,8 +1559,14 @@ static iree_status_t loom_service_finite_generator_prepare_request(
 }
 static void loom_service_finite_generator_release_request(
     void* self, loom_service_prepared_request_t* work) {
-  iree_vm_buffer_release(work->bytes);
-  memset(work, 0, sizeof(*work));
+  loom_service_prepared_request_release(work);
+}
+static iree_status_t loom_service_finite_generator_try_admit_request(
+    void* self, loom_service_prepared_request_t* work, bool* acquired) {
+  return loom_service_finite_model_try_admit_request(self, work, acquired);
+}
+static uint64_t loom_service_finite_generator_capacity_generation(void* self) {
+  return loom_service_finite_model_capacity_generation(self);
 }
 static iree_status_t loom_service_finite_generator_prepare_batch(
     void* self, iree_host_size_t count, loom_service_prepared_request_t* work,
@@ -1469,6 +1606,8 @@ loom_service_finite_generator_t loom_service_finite_model_generator(
       .query_status = loom_service_finite_generator_query_status,
       .prepare_request = loom_service_finite_generator_prepare_request,
       .release_request = loom_service_finite_generator_release_request,
+      .try_admit_request = loom_service_finite_generator_try_admit_request,
+      .capacity_generation = loom_service_finite_generator_capacity_generation,
       .prepare_batch = loom_service_finite_generator_prepare_batch,
       .advance_batch = loom_service_finite_generator_advance_batch,
       .submit = loom_service_finite_generator_submit,

@@ -37,6 +37,7 @@ typedef enum loom_runtime_preparation_function_e {
   LOOM_RUNTIME_PREPARATION_FUNCTION_SOURCE_SCOPE,
   LOOM_RUNTIME_PREPARATION_FUNCTION_STORAGE,
   LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK,
+  LOOM_RUNTIME_PREPARATION_FUNCTION_REQUEST_STORAGE,
   LOOM_RUNTIME_PREPARATION_FUNCTION_COUNT,
 } loom_runtime_preparation_function_t;
 
@@ -77,6 +78,8 @@ struct loom_runtime_preparation_t {
   iree_string_view_t memory_forecast;
   // Owned cold-selected host entry for binding resolved invocation parameters.
   iree_string_view_t bind_parameters;
+  // Optional logical retained-capacity axis and source demand entry.
+  loom_runtime_preparation_request_storage_t request_storage;
   // Cold mutable root geometry, independent of checkpoint placement.
   struct {
     // Number of initialized source-visible root declarations.
@@ -226,6 +229,8 @@ void loom_runtime_preparation_module_recycle(
   }
   preparation->memory_forecast = iree_string_view_empty();
   preparation->bind_parameters = iree_string_view_empty();
+  preparation->request_storage =
+      (loom_runtime_preparation_request_storage_t){0};
   preparation->storage.count = 0;
   preparation->storage.capacity = 0;
   preparation->storage.values = NULL;
@@ -802,7 +807,8 @@ static iree_status_t loom_runtime_preparation_module_start(
       (loom_runtime_preparation_function_t)params->function_ordinal;
   const bool declares_storage =
       function == LOOM_RUNTIME_PREPARATION_FUNCTION_STORAGE ||
-      function == LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK;
+      function == LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK ||
+      function == LOOM_RUNTIME_PREPARATION_FUNCTION_REQUEST_STORAGE;
   iree_status_t status = iree_ok_status();
   if (declares_storage &&
       (module->capture.base ||
@@ -870,7 +876,27 @@ static iree_status_t loom_runtime_preparation_module_start(
           loom_runtime_preparation_source_count(module->capture.base);
       module->capture.preparation = preparation;
     }
-    if (declares_storage) {
+    if (function == LOOM_RUNTIME_PREPARATION_FUNCTION_REQUEST_STORAGE) {
+      const uint64_t capacity = iree_vm_call_value_argument_load(call, 0);
+      iree_string_view_t root = iree_string_view_empty();
+      IREE_RETURN_IF_ERROR(
+          loom_runtime_preparation_string_argument(call, 0, &root));
+      if (!capacity || capacity > INT64_MAX || capacity > SIZE_MAX ||
+          iree_string_view_is_empty(root)) {
+        return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "request storage requires positive capacity "
+                                "and a demand entry");
+      }
+      if (preparation->request_storage.capacity) {
+        return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                                "request storage declared twice");
+      }
+      status = loom_runtime_preparation_copy_string(
+          preparation, root, &preparation->request_storage.root);
+      if (iree_status_is_ok(status)) {
+        preparation->request_storage.capacity = capacity;
+      }
+    } else if (declares_storage) {
       status = loom_runtime_preparation_add_storage(
           preparation, call,
           function == LOOM_RUNTIME_PREPARATION_FUNCTION_FEEDBACK);
@@ -978,6 +1004,10 @@ static const iree_vm_module_signature_type_t preparation_source_arguments[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}};
 static const iree_vm_module_signature_type_t preparation_arena_arguments[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0}};
+static const iree_vm_module_signature_type_t
+    preparation_request_storage_arguments[] = {
+        {IREE_VM_SCALAR_TYPE_I64, 0},
+        {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}};
 static const iree_vm_module_signature_type_t preparation_storage_arguments[] = {
     {IREE_VM_SCALAR_TYPE_I64, 0}, {IREE_VM_SCALAR_TYPE_I64, 0}};
 static const iree_vm_module_signature_type_t preparation_bank_arguments[] = {
@@ -1002,6 +1032,8 @@ static const iree_vm_module_callable_type_declaration_t
                                      2, 0, 0}}},
         {.signature = {.arguments = {preparation_storage_arguments, 2, 2, 0, 0},
                        .results = {preparation_stage_results, 1, 1, 0, 0}}},
+        {.signature = {.arguments = {preparation_request_storage_arguments, 2,
+                                     1, 1, 0}}},
         {.signature = {.arguments = {preparation_stage_arguments, 2, 1, 1, 0},
                        .results = {preparation_stage_results, 1, 1, 0, 0}}},
         {.signature = {.arguments = {preparation_source_arguments, 2, 0, 2, 0},
@@ -1021,13 +1053,13 @@ static const iree_vm_module_export_declaration_t preparation_exports[] = {
      .callable_type_ordinal = 1,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_BIND_PARAMETERS},
     {.export_name = IREE_SVL("config"),
-     .callable_type_ordinal = 8,
+     .callable_type_ordinal = 9,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_CONFIG},
     {.export_name = IREE_SVL("config_i64"),
-     .callable_type_ordinal = 7,
+     .callable_type_ordinal = 8,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_CONFIG_I64},
     {.export_name = IREE_SVL("dispatch"),
-     .callable_type_ordinal = 5,
+     .callable_type_ordinal = 6,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_DISPATCH},
     {.export_name = IREE_SVL("feedback"),
      .callable_type_ordinal = 0,
@@ -1036,25 +1068,28 @@ static const iree_vm_module_export_declaration_t preparation_exports[] = {
      .callable_type_ordinal = 1,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_MEMORY_FORECAST},
     {.export_name = IREE_SVL("parameter"),
-     .callable_type_ordinal = 9,
+     .callable_type_ordinal = 10,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_PARAMETER},
     {.export_name = IREE_SVL("parameter_arena"),
      .callable_type_ordinal = 0,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_PARAMETER_ARENA},
     {.export_name = IREE_SVL("parameter_bank"),
-     .callable_type_ordinal = 10,
+     .callable_type_ordinal = 11,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_PARAMETER_BANK},
+    {.export_name = IREE_SVL("request_storage"),
+     .callable_type_ordinal = 5,
+     .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_REQUEST_STORAGE},
     {.export_name = IREE_SVL("source"),
-     .callable_type_ordinal = 6,
+     .callable_type_ordinal = 7,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_SOURCE},
     {.export_name = IREE_SVL("source_append"),
-     .callable_type_ordinal = 8,
+     .callable_type_ordinal = 9,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_SOURCE_APPEND},
     {.export_name = IREE_SVL("source_scope"),
      .callable_type_ordinal = 2,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_SOURCE_SCOPE},
     {.export_name = IREE_SVL("stage"),
-     .callable_type_ordinal = 5,
+     .callable_type_ordinal = 6,
      .function_ordinal = LOOM_RUNTIME_PREPARATION_FUNCTION_STAGE},
     {.export_name = IREE_SVL("storage"),
      .callable_type_ordinal = 4,
@@ -1135,7 +1170,7 @@ iree_status_t loom_runtime_preparation_module_create(
       .counts = {.function_count = LOOM_RUNTIME_PREPARATION_FUNCTION_COUNT,
                  .callable_type_count = IREE_ARRAYSIZE(preparation_callables),
                  .export_count = IREE_ARRAYSIZE(preparation_exports),
-                 .callable_fields = {.value_count = 22, .ref_count = 11}},
+                 .callable_fields = {.value_count = 23, .ref_count = 12}},
   };
   iree_status_t status = iree_vm_module_initialize(
       &preparation_module_vtable, &module->descriptor, &module->base);
@@ -1371,6 +1406,9 @@ bool loom_runtime_preparation_equal(const loom_runtime_preparation_t* lhs,
       loom_runtime_preparation_arena_count(lhs) !=
           loom_runtime_preparation_arena_count(rhs) ||
       lhs->banks.count != rhs->banks.count ||
+      lhs->request_storage.capacity != rhs->request_storage.capacity ||
+      !iree_string_view_equal(lhs->request_storage.root,
+                              rhs->request_storage.root) ||
       lhs->storage.count != rhs->storage.count ||
       lhs->feedback.count != rhs->feedback.count) {
     return false;
@@ -1515,4 +1553,11 @@ iree_host_size_t loom_runtime_preparation_feedback_count(
 uint64_t loom_runtime_preparation_feedback_capacity(
     const loom_runtime_preparation_t* preparation, iree_host_size_t ordinal) {
   return preparation->feedback.values[ordinal];
+}
+
+loom_runtime_preparation_request_storage_t
+loom_runtime_preparation_request_storage(
+    const loom_runtime_preparation_t* preparation) {
+  return preparation ? preparation->request_storage
+                     : (loom_runtime_preparation_request_storage_t){0};
 }

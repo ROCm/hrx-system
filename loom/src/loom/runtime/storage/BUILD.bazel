@@ -89,6 +89,33 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "ranges",
+    srcs = ["ranges.c"],
+    hdrs = ["ranges.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//loom/src/loom/runtime:wake",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "ranges_test",
+    srcs = ["ranges_test.cc"],
+    deps = [
+        ":ranges",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
     name = "rows",
     srcs = ["rows.c"],
     hdrs = ["rows.h"],

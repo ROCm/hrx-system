@@ -243,6 +243,35 @@ class FiniteComponentTest : public ::testing::Test {
         &component_));
   }
 
+  void RunRetainedEpoch(loom_service_finite_model_t* model,
+                        loom_service_prepared_request_t* request,
+                        size_t ordinal) {
+    const iree_host_size_t rows = 1;
+    IREE_ASSERT_OK(
+        loom_service_finite_model_prepare_batch(model, 1, request, &rows));
+    loom_service_finite_model_set_observer(model, owner_.observer());
+    IREE_ASSERT_OK(owner_.Run(device_, storage_owner_, [&](bool* complete) {
+      return loom_service_finite_model_advance_batch(model, false, complete);
+    }));
+    ASSERT_NO_FATAL_FAILURE(Admit(model));
+    loom_runtime_execution_frontier_t ready;
+    IREE_ASSERT_OK(
+        loom_service_finite_model_submit(model, &results_[ordinal], &ready));
+    EXPECT_GT(ready.values[1], 0u);
+    for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
+      IREE_ASSERT_OK(loom_runtime_workspace_wait(
+          loom_runtime_pool_workspace(storage_owner_), ready.semaphores[i],
+          ready.values[i]));
+    }
+    IREE_ASSERT_OK(loom_service_finite_model_collect_batch(model, 1, request,
+                                                           results_[ordinal]));
+    loom_service_finite_model_complete(model);
+    if (request->units) {
+      loom_service_finite_result_release(
+          std::exchange(results_[ordinal], nullptr));
+    }
+  }
+
   void RunRetainedEpochs(loom_service_finite_model_t* model, size_t ordinal,
                          uint32_t epochs) {
     iree_vm_buffer_t* input = nullptr;
@@ -258,37 +287,21 @@ class FiniteComponentTest : public ::testing::Test {
     IREE_ASSERT_OK(
         loom_service_finite_model_prepare_request(model, input, &request));
     iree_vm_buffer_release(input);
-    const std::unique_ptr<iree_vm_buffer_t, decltype(&iree_vm_buffer_release)>
-        request_owner(request.bytes, iree_vm_buffer_release);
-    const iree_host_size_t rows = 1;
+    const std::unique_ptr<loom_service_prepared_request_t,
+                          decltype(&loom_service_prepared_request_release)>
+        request_owner(&request, loom_service_prepared_request_release);
+    bool acquired = false;
+    IREE_ASSERT_OK(loom_service_finite_model_try_admit_request(model, &request,
+                                                               &acquired));
+    ASSERT_TRUE(acquired);
     for (uint32_t epoch = 0; epoch <= epochs; ++epoch) {
       ASSERT_EQ(request.units, 1u);
-      IREE_ASSERT_OK(
-          loom_service_finite_model_prepare_batch(model, 1, &request, &rows));
-      loom_service_finite_model_set_observer(model, owner_.observer());
-      IREE_ASSERT_OK(owner_.Run(device_, storage_owner_, [&](bool* complete) {
-        return loom_service_finite_model_advance_batch(model, false, complete);
-      }));
-      ASSERT_NO_FATAL_FAILURE(Admit(model));
-      loom_runtime_execution_frontier_t ready;
-      IREE_ASSERT_OK(
-          loom_service_finite_model_submit(model, &results_[ordinal], &ready));
-      EXPECT_GT(ready.values[1], 0u);
-      for (size_t i = 0; i < IREE_ARRAYSIZE(ready.semaphores); ++i) {
-        IREE_ASSERT_OK(loom_runtime_workspace_wait(
-            loom_runtime_pool_workspace(storage_owner_), ready.semaphores[i],
-            ready.values[i]));
-      }
-      IREE_ASSERT_OK(loom_service_finite_model_collect_batch(
-          model, 1, &request, results_[ordinal]));
-      loom_service_finite_model_complete(model);
+      ASSERT_NO_FATAL_FAILURE(RunRetainedEpoch(model, &request, ordinal));
       if (epoch < epochs) {
         EXPECT_EQ(request.units, 1u);
         iree_const_byte_span_t state;
         IREE_ASSERT_OK(iree_vm_buffer_map_read(request.bytes, 20, 4, &state));
         EXPECT_EQ(iree_unaligned_load_le_u32(state.data), epoch + 1);
-        loom_service_finite_result_release(
-            std::exchange(results_[ordinal], nullptr));
       }
     }
     EXPECT_EQ(request.units, 0u);
@@ -322,6 +335,10 @@ class FiniteComponentTest : public ::testing::Test {
     loom_service_prepared_request_t prepared = {};
     IREE_ASSERT_OK(
         loom_service_finite_model_prepare_request(model, input, &prepared));
+    bool acquired = false;
+    IREE_ASSERT_OK(loom_service_finite_model_try_admit_request(model, &prepared,
+                                                               &acquired));
+    ASSERT_TRUE(acquired);
     const iree_host_size_t rows = 1;
     IREE_ASSERT_OK(
         loom_service_finite_model_prepare_batch(model, 1, &prepared, &rows));
@@ -329,7 +346,7 @@ class FiniteComponentTest : public ::testing::Test {
     IREE_ASSERT_OK(owner_.Run(device_, storage_owner_, [&](bool* complete) {
       return loom_service_finite_model_advance_batch(model, false, complete);
     }));
-    iree_vm_buffer_release(prepared.bytes);
+    loom_service_prepared_request_release(&prepared);
     iree_vm_buffer_release(input);
   }
 
@@ -718,6 +735,63 @@ TEST_F(FiniteComponentTest, DeviceStateSurvivesEpochsAndResultsSurviveReuse) {
   loom_service_finite_component_free(std::exchange(component_, nullptr));
   ASSERT_NO_FATAL_FAILURE(CheckResult(0, 8.0f));
   ASSERT_NO_FATAL_FAILURE(CheckResult(1, 4.0f));
+}
+
+TEST_F(FiniteComponentTest, IndependentRangesPreserveContinuingDeviceState) {
+  ASSERT_NO_FATAL_FAILURE(UseRetainedSources());
+  loom_service_finite_model_t* model = nullptr;
+  IREE_ASSERT_OK(Prepare(component_, &model));
+  std::array<loom_service_prepared_request_t, 3> requests = {};
+  const auto release_requests = [](decltype(requests)* values) {
+    for (auto& value : *values) {
+      loom_service_prepared_request_release(&value);
+    }
+  };
+  const std::unique_ptr<decltype(requests), decltype(release_requests)>
+      request_owners(&requests, release_requests);
+  for (size_t i = 0; i < requests.size(); ++i) {
+    iree_vm_buffer_t* input = nullptr;
+    IREE_ASSERT_OK(iree_vm_buffer_create(20, 16, host_allocator_, &input));
+    auto* bytes = static_cast<uint8_t*>(iree_vm_buffer_data(input));
+    for (size_t element = 0; element < 4; ++element) {
+      iree_unaligned_store_le_f32(
+          bytes + element * 4, static_cast<float>(element + 1 + (i % 2) * 4));
+    }
+    iree_unaligned_store_le_u32(bytes + 16, i == 0 ? 3 : 1);
+    auto status =
+        loom_service_finite_model_prepare_request(model, input, &requests[i]);
+    iree_vm_buffer_release(input);
+    IREE_ASSERT_OK(status);
+  }
+  for (size_t i = 0; i < requests.size(); ++i) {
+    bool acquired = false;
+    IREE_ASSERT_OK(loom_service_finite_model_try_admit_request(
+        model, &requests[i], &acquired));
+    EXPECT_EQ(acquired, i < 2);
+  }
+  ASSERT_NO_FATAL_FAILURE(RunRetainedEpoch(model, &requests[0], 0));
+  ASSERT_NO_FATAL_FAILURE(RunRetainedEpoch(model, &requests[1], 1));
+  ASSERT_NO_FATAL_FAILURE(RunRetainedEpoch(model, &requests[1], 1));
+  EXPECT_EQ(requests[0].units, 1u);
+  EXPECT_EQ(requests[1].units, 0u);
+  ASSERT_NO_FATAL_FAILURE(CheckResult(1, 2.0f));
+  IREE_ASSERT_OK(owner_.Run(device_, storage_owner_, [&](bool* complete) {
+    loom_service_prepared_request_release(&requests[1]);
+    return loom_service_finite_model_try_admit_request(model, &requests[2],
+                                                       complete);
+  }));
+  // Reusing the short peer's interval cannot disturb the continuing long peer
+  // or the separately owned output already returned to its consumer.
+  for (size_t epoch = 0; epoch < 3; ++epoch) {
+    ASSERT_NO_FATAL_FAILURE(RunRetainedEpoch(model, &requests[0], 0));
+  }
+  ASSERT_NO_FATAL_FAILURE(CheckResult(0, 8.0f));
+  ASSERT_NO_FATAL_FAILURE(CheckResult(1, 2.0f));
+  loom_service_finite_result_release(std::exchange(results_[0], nullptr));
+  ASSERT_NO_FATAL_FAILURE(RunRetainedEpoch(model, &requests[2], 0));
+  ASSERT_NO_FATAL_FAILURE(RunRetainedEpoch(model, &requests[2], 0));
+  ASSERT_NO_FATAL_FAILURE(CheckResult(0, 2.0f));
+  ASSERT_NO_FATAL_FAILURE(CheckResult(1, 2.0f));
 }
 
 TEST_F(FiniteComponentTest,

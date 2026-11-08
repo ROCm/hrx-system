@@ -6,9 +6,11 @@
 
 #include "loom/runtime/program/preparation.h"
 
+#include <cstring>
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -310,7 +312,8 @@ class PreparationCaptureTest : public PreparationTest {
                                         IREE_SV("declare_parameter_binding"),
                                         IREE_SV("declare_banks"),
                                         IREE_SV("declare_storage"),
-                                        IREE_SV("declare_feedback")};
+                                        IREE_SV("declare_feedback"),
+                                        IREE_SV("declare_request_storage")};
     IREE_ASSERT_OK(loom_runtime_program_allocate(
         target_environment, environment, &sources,
         iree_make_cstring_view(FLAG_boundary_source), IREE_ARRAYSIZE(roots),
@@ -457,6 +460,57 @@ TEST_F(PreparationCaptureTest, NamedSourcesRequireASelectedCard) {
       DeclareSource(IREE_SV("scoped_source"), IREE_SV("model"), &ordinal));
   preparation = loom_runtime_preparation_module_take(module);
   EXPECT_EQ(loom_runtime_preparation_source_count(preparation), 0u);
+}
+
+TEST_F(PreparationCaptureTest, RequestStorageIsColdOwnedAndPartOfIdentity) {
+  iree_vm_ref_types_t types = {};
+  IREE_ASSERT_OK(iree_vm_ref_types_resolve(
+      iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
+      &types));
+  auto declare = [&](int64_t capacity, const char* root) {
+    iree_vm_buffer_t* name = nullptr;
+    IREE_RETURN_IF_ERROR(
+        iree_vm_buffer_clone(IREE_VM_BUFFER_ACCESS_FLAG_READ,
+                             iree_make_const_byte_span(root, strlen(root)), 1,
+                             host_allocator, &name));
+    iree_vm_variant_t arguments[] = {
+        iree_vm_variant_from_i64(capacity),
+        iree_vm_buffer_variant_from_ptr_move(&types, &name)};
+    auto status = Invoke(IREE_SV("declare_request_storage"),
+                         iree_vm_variant_span_from_array(arguments));
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+    return status;
+  };
+  loom_runtime_preparation_module_begin(module, 0, nullptr,
+                                        LOOM_RUNTIME_PREPARATION_FLAG_STORAGE);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, declare(0, "demand"));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, declare(-1, "demand"));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, declare(512, ""));
+  IREE_ASSERT_OK(declare(512, "demand"));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS, declare(512, "demand"));
+  preparation = loom_runtime_preparation_module_take(module);
+  const auto declaration =
+      loom_runtime_preparation_request_storage(preparation);
+  EXPECT_EQ(declaration.capacity, 512u);
+  EXPECT_EQ(std::string(declaration.root.data, declaration.root.size),
+            "demand");
+  for (auto item : {std::pair<int64_t, const char*>{256, "demand"},
+                    {512, "another_demand"}}) {
+    loom_runtime_preparation_module_begin(
+        module, 0, nullptr, LOOM_RUNTIME_PREPARATION_FLAG_STORAGE);
+    IREE_ASSERT_OK(declare(item.first, item.second));
+    second = loom_runtime_preparation_module_take(module);
+    EXPECT_FALSE(loom_runtime_preparation_equal(preparation, second));
+    loom_runtime_preparation_free(second);
+    second = nullptr;
+  }
+  for (bool has_prefix : {false, true}) {
+    loom_runtime_preparation_module_begin(
+        module, 0, has_prefix ? preparation : nullptr,
+        has_prefix ? LOOM_RUNTIME_PREPARATION_FLAG_STORAGE : 0);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, declare(512, "demand"));
+    EXPECT_EQ(loom_runtime_preparation_module_take(module), nullptr);
+  }
 }
 
 TEST_F(PreparationCaptureTest, ColdStorageOwnsIndependentGeometryAndFeedback) {

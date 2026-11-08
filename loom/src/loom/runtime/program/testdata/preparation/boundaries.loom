@@ -411,3 +411,10 @@ func.def public @duplicate_input() {
   func.call @parameter(%c0, %c0, %c0, %source, %policy) : (i32, i32, i32, i32, buffer)
   func.return
 }
+
+func.decl import("prepare") @request_storage(%capacity: i64, %root: buffer)
+
+func.def public @declare_request_storage(%capacity: i64, %root: buffer) {
+  func.call @request_storage(%capacity, %root) : (i64, buffer)
+  func.return
+}

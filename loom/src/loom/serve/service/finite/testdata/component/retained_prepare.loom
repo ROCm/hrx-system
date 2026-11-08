@@ -4,20 +4,25 @@ func.decl import("prepare") @storage(%bytes: i64, %alignment: i64) -> (i32)
 
 func.decl import("prepare") @feedback(%bytes: i64) -> (i32)
 
+func.decl import("prepare") @request_storage(%capacity: i64, %root: buffer)
+
 func.def public @prepare(%directory: buffer, %options: buffer) -> (i64, i64, i64, i64, buffer, buffer, buffer) {
   %c0 = scalar.constant 0 : i64
   %c1 = scalar.constant 1 : i64
   %c4 = scalar.constant 4 : i64
   %c16 = scalar.constant 16 : i64
-  %c20 = scalar.constant 20 : i64
-  %c24 = scalar.constant 24 : i64
+  %c2 = scalar.constant 2 : i64
+  %c28 = scalar.constant 28 : i64
+  %c40 = scalar.constant 40 : i64
   %root = buffer.constant utf8("advance") : buffer
   %stage = func.call @dispatch(%root, %c0) : (buffer, i64) -> (i32)
-  %storage = func.call @storage(%c20, %c16) : (i64, i64) -> (i32)
+  %storage = func.call @storage(%c40, %c16) : (i64, i64) -> (i32)
   %feedback = func.call @feedback(%c4) : (i64) -> (i32)
-  %state_bytes = index.constant 12 : offset
+  %demand = buffer.constant utf8("request_storage") : buffer
+  func.call @request_storage(%c2, %demand) : (i64, buffer)
+  %state_bytes = index.constant 16 : offset
   %state = buffer.alloca<private> align(4) %state_bytes : buffer
   %empty = buffer.constant utf8("") : buffer
   %name = buffer.constant utf8("retained-epochs") : buffer
-  func.return %c1, %c24, %c16, %c16, %empty, %name, %state : i64, i64, i64, i64, buffer, buffer, buffer
+  func.return %c1, %c28, %c16, %c16, %empty, %name, %state : i64, i64, i64, i64, buffer, buffer, buffer
 }

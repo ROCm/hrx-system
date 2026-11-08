@@ -973,8 +973,8 @@ iree_status_t loom_serve_image_model_prepare_request(
   }
   if (iree_status_is_ok(status)) {
     iree_vm_buffer_retain(bytes);
-    *out_prepared = (loom_service_prepared_request_t){bytes, (uint64_t)units,
-                                                      (uint64_t)tag};
+    *out_prepared = (loom_service_prepared_request_t){
+        .bytes = bytes, .units = (uint64_t)units, .tag = (uint64_t)tag};
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));

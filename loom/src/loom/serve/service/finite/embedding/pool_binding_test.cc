@@ -98,7 +98,7 @@ class PoolBindingTest : public SourceEmbeddingServiceTest {
       status = loom_service_finite_model_prepare_batch(model, 1, &prepared,
                                                        &request.base.count);
     }
-    iree_vm_buffer_release(prepared.bytes);
+    loom_service_prepared_request_release(&prepared);
     loom_service_embedding_request_deinitialize(&request);
     IREE_ASSERT_OK(status);
     bool complete = false;

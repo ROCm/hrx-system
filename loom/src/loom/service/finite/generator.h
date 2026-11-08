@@ -41,6 +41,16 @@ typedef struct loom_service_finite_generator_vtable_t {
   // Releases service ownership after its CPU borrowers retire. Accepted device
   // work retains its own source captures, including through failure retirement.
   void (*release_request)(void* self, loom_service_prepared_request_t* work);
+  // Optional request-capacity admission before selection. A miss leaves this
+  // request pending and permits other candidates, including continuations.
+  // The source owner retains acquired capacity across epochs and releases it
+  // with the request. NULL means no retained request-capacity requirement.
+  iree_status_t (*try_admit_request)(void* self,
+                                     loom_service_prepared_request_t* work,
+                                     bool* out_acquired);
+  // Required with try_admit_request: changes when previously denied capacity
+  // can be acquired. Its observer wakes the owner after each such change.
+  uint64_t (*capacity_generation)(void* self);
   // CPU preparation borrows stable original ordinals until release_batch or
   // complete. Output rows are either absent or the complete requested result.
   iree_status_t (*prepare_batch)(void* self, iree_host_size_t count,

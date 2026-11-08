@@ -23,7 +23,14 @@ typedef struct loom_service_prepared_request_t {
   uint64_t units;
   // Source-defined compatibility class; no native geometry interpretation.
   uint64_t tag;
+  // Optional owned source resource, shared by borrowed work descriptors.
+  // Its mutable owner keeps captures independent of continuing source bytes.
+  iree_vm_ref_t resource;
 } loom_service_prepared_request_t;
+
+// Releases the owned source bytes and optional resource, then clears the work.
+void loom_service_prepared_request_release(
+    loom_service_prepared_request_t* request);
 
 // Packs a little-endian [byte_offset, byte_length] i64 directory followed by
 // prepared bytes in stable request order. Offsets are relative to packed;
