@@ -473,17 +473,11 @@ loom_low_lower_selected_plan_view_t loom_low_lower_context_selected_plan_view(
       &context->lowering->source_plan.selected_plans[index];
   return (loom_low_lower_selected_plan_view_t){
       .source_op = selected_plan->source_op,
-      .plan =
-          selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_RULE ||
-                  selected_plan->kind ==
-                      LOOM_LOW_LOWER_SELECTED_PLAN_FUNCTION_STORAGE ||
-                  selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALL ||
-                  selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_INVOKE ||
-                  selected_plan->kind ==
-                      LOOM_LOW_LOWER_SELECTED_PLAN_PROJECTED_CALL ||
-                  selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_STRUCTURAL
-              ? loom_low_lower_plan_empty()
-              : selected_plan->data.target_plan,
+      .plan = selected_plan->kind == LOOM_LOW_LOWER_SELECTED_PLAN_CALLBACK ||
+                      selected_plan->kind ==
+                          LOOM_LOW_LOWER_SELECTED_PLAN_DESCRIPTOR_MATRIX
+                  ? selected_plan->data.target_plan
+                  : loom_low_lower_plan_empty(),
       .elided = iree_any_bit_set(selected_plan->flags,
                                  LOOM_LOW_LOWER_SELECTED_PLAN_ELIDED |
                                      LOOM_LOW_LOWER_SELECTED_PLAN_CLAIMED),
