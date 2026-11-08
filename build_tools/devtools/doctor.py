@@ -53,7 +53,7 @@ OPTIONAL_COMMON_TOOLS = (
 )
 LANE_TOOLS = {
     "bazel": (
-        ("bazel", "--version", r"\b9\.2\.0\b"),
+        ("bazel", "--version", r"\b9\.3\.2\b"),
         ("buildifier", "--version", r"\b8\.5\.1\b"),
         ("buildozer", "--version", r"\b8\.5\.1\b"),
     ),
