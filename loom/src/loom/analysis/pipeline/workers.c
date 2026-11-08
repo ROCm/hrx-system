@@ -736,12 +736,20 @@ static iree_status_t loom_pipeline_worker_execution_counts(
   uint64_t* counts;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, structure->graph.block_count, sizeof(*counts), (void**)&counts));
-  exact &= loom_cfg_loop_nest_calculate_block_execution_bounds(
-      &structure->loops, trip_counts, counts);
-  *out_execution_bounds = counts;
   if (exact) {
-    worker->block_execution_counts = counts;
+    IREE_RETURN_IF_ERROR(loom_cfg_execution_counts_calculate(
+        &structure->loops, trip_counts, &structure->control_structure, arena,
+        counts, &worker->execution_counts));
+  } else {
+    loom_cfg_loop_nest_calculate_block_execution_bounds(&structure->loops,
+                                                        trip_counts, counts);
+  }
+  *out_execution_bounds = counts;
+  if (worker->execution_counts.values) {
     worker->loop_trip_counts = trip_counts;
+  }
+  if (worker->execution_counts.single_path) {
+    worker->block_execution_counts = counts;
   }
   return iree_ok_status();
 }

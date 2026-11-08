@@ -25,24 +25,61 @@ TEST(ChannelCursorTest, AdmissionUsesConstructionLifetime) {
   for (uint32_t capacity : {1u, 3u}) {
     for (bool imported : {false, true}) {
       loom_aie2p_native_cursor_t cursor = {.worker = UINT32_MAX};
-      loom_aie2p_native_cursor_bind(&cursor, capacity, 0, 1, imported);
+      loom_aie2p_native_cursor_bind(&cursor, capacity, 0, 1, true, imported);
       EXPECT_EQ(cursor.worker, 0u);
       EXPECT_EQ(cursor.maximum_admissions, 1u);
       EXPECT_FALSE(cursor.shared);
       EXPECT_EQ(cursor.advances, capacity > 1 && imported);
       // Repeated sites of one worker retain its bound, rather than summing it.
-      loom_aie2p_native_cursor_bind(&cursor, capacity, 0, 4, imported);
-      loom_aie2p_native_cursor_bind(&cursor, capacity, 0, 2, imported);
+      loom_aie2p_native_cursor_bind(&cursor, capacity, 0, 4, true, imported);
+      loom_aie2p_native_cursor_bind(&cursor, capacity, 0, 2, true, imported);
       EXPECT_EQ(cursor.maximum_admissions, 4u);
       EXPECT_FALSE(cursor.shared);
       EXPECT_EQ(cursor.advances, capacity > 1);
       // Another serial worker shares the cursor even with one local admission.
-      loom_aie2p_native_cursor_bind(&cursor, capacity, 1, 1, imported);
+      loom_aie2p_native_cursor_bind(&cursor, capacity, 1, 1, true, imported);
       EXPECT_EQ(cursor.worker, 1u);
       EXPECT_EQ(cursor.maximum_admissions, 1u);
       EXPECT_TRUE(cursor.shared);
       EXPECT_EQ(cursor.advances, capacity > 1);
     }
+  }
+}
+
+TEST(ChannelCursorTest, ExactCountRequiresEveryAdmissionSite) {
+  for (bool first_exact : {false, true}) {
+    for (bool second_exact : {false, true}) {
+      loom_aie2p_native_cursor_t cursor = {.worker = UINT32_MAX};
+      EXPECT_FALSE(loom_aie2p_native_cursor_has_exact_admissions(&cursor, 64));
+      // Completion analysis supplies the endpoint total to both sites. Binding
+      // the second site must neither add that total again nor erase
+      // uncertainty.
+      loom_aie2p_native_cursor_bind(&cursor, 2, 0, 64, first_exact, false);
+      loom_aie2p_native_cursor_bind(&cursor, 2, 0, 64, second_exact, false);
+      EXPECT_EQ(cursor.maximum_admissions, 64u);
+      EXPECT_EQ(loom_aie2p_native_cursor_has_exact_admissions(&cursor, 64),
+                first_exact && second_exact);
+      EXPECT_FALSE(loom_aie2p_native_cursor_has_exact_admissions(&cursor, 63));
+      EXPECT_FALSE(loom_aie2p_native_cursor_has_exact_admissions(&cursor, 65));
+    }
+  }
+}
+
+TEST(ChannelCursorTest, SaturatedAndSharedBoundsCannotProveCompletion) {
+  for (uint32_t count : {UINT32_MAX - 1, UINT32_MAX}) {
+    loom_aie2p_native_cursor_t cursor = {.worker = UINT32_MAX};
+    loom_aie2p_native_cursor_bind(&cursor, 2, 0, count, true, false);
+    EXPECT_EQ(loom_aie2p_native_cursor_has_exact_admissions(&cursor, count),
+              count != UINT32_MAX);
+    // Binding a later exact site does not repair a saturated aggregate.
+    loom_aie2p_native_cursor_bind(&cursor, 2, 0, count, true, false);
+    EXPECT_EQ(loom_aie2p_native_cursor_has_exact_admissions(&cursor, count),
+              count != UINT32_MAX);
+    // The new representative's exact local count is not the shared total.
+    loom_aie2p_native_cursor_bind(&cursor, 2, 1, 64, true, true);
+    EXPECT_TRUE(cursor.exact_admissions);
+    EXPECT_TRUE(cursor.shared);
+    EXPECT_FALSE(loom_aie2p_native_cursor_has_exact_admissions(&cursor, 64));
   }
 }
 
@@ -202,12 +239,18 @@ class ChannelStateTest : public ::testing::Test {
 };
 
 TEST_F(ChannelStateTest, EntryResetsOnlyOwnedFrameCellsOnTheirEngine) {
-  loom_aie2p_native_cursor_bind(&channels_[0].cursor.reader, 3, 0, 1, true);
-  loom_aie2p_native_cursor_bind(&channels_[1].cursor.reader, 3, 0, 1, true);
-  loom_aie2p_native_cursor_bind(&channels_[1].cursor.writer, 3, 1, 2, false);
-  loom_aie2p_native_cursor_bind(&channels_[2].cursor.reader, 3, 1, 2, false);
-  loom_aie2p_native_cursor_bind(&channels_[2].cursor.writer, 3, 0, 1, true);
-  loom_aie2p_native_cursor_bind(&channels_[3].cursor.reader, 3, 0, 2, false);
+  loom_aie2p_native_cursor_bind(&channels_[0].cursor.reader, 3, 0, 1, true,
+                                true);
+  loom_aie2p_native_cursor_bind(&channels_[1].cursor.reader, 3, 0, 1, true,
+                                true);
+  loom_aie2p_native_cursor_bind(&channels_[1].cursor.writer, 3, 1, 2, true,
+                                false);
+  loom_aie2p_native_cursor_bind(&channels_[2].cursor.reader, 3, 1, 2, true,
+                                false);
+  loom_aie2p_native_cursor_bind(&channels_[2].cursor.writer, 3, 0, 1, true,
+                                true);
+  loom_aie2p_native_cursor_bind(&channels_[3].cursor.reader, 3, 0, 2, true,
+                                false);
   EXPECT_EQ(ResetOffsets(0, 1), (std::vector<int64_t>{0}));
   EXPECT_EQ(ResetOffsets(1, 1), (std::vector<int64_t>{8, 20}));
   EXPECT_TRUE(ResetOffsets(1, 0).empty());
@@ -218,10 +261,10 @@ TEST_F(ChannelStateTest, EntryResetsOnlyOwnedFrameCellsOnTheirEngine) {
 
 TEST_F(ChannelStateTest, SharedLocalCursorSurvivesWorkerReturns) {
   auto* cursor = &channels_[3].cursor.reader;
-  loom_aie2p_native_cursor_bind(cursor, 3, 0, 1, false);
+  loom_aie2p_native_cursor_bind(cursor, 3, 0, 1, true, false);
   EXPECT_FALSE(loom_aie2p_native_cursor_persistent(&realization_.invocations, 3,
                                                    cursor));
-  loom_aie2p_native_cursor_bind(cursor, 3, 2, 1, false);
+  loom_aie2p_native_cursor_bind(cursor, 3, 2, 1, true, false);
   EXPECT_TRUE(loom_aie2p_native_cursor_persistent(&realization_.invocations, 3,
                                                   cursor));
   EXPECT_EQ(ResetOffsets(2, 1), (std::vector<int64_t>{24}));

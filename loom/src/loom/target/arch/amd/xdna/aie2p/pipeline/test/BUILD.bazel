@@ -72,6 +72,7 @@ loom_test(
         "child_cursors.loom",
         "collective_cursors.loom",
         "concurrent_distribution.loom",
+        "conditional_admission.loom",
         "finite_ingress.loom",
         "ordered_prefix.loom",
         "ordered_replay.loom",

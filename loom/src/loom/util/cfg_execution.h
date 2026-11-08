@@ -55,6 +55,9 @@ typedef struct loom_cfg_execution_counts_t {
   // Blocks controlled by an unmodeled selector. An empty bitmap means every
   // retained count is exact; unreachable blocks have exact count zero.
   iree_bitmap_t unmodeled_blocks;
+  // The complete bounded CFG follows one modeled control path. Transport
+  // ordering needs this stronger proof even when some block counts are exact.
+  bool single_path;
 } loom_cfg_execution_counts_t;
 
 // Combines exact loop trip counts with retained control dependence. storage

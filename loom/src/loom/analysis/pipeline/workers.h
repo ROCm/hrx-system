@@ -12,6 +12,7 @@
 #include "loom/analysis/pipeline/arguments.h"
 #include "loom/analysis/pipeline/resources.h"
 #include "loom/analysis/storage_access.h"
+#include "loom/util/cfg_execution.h"
 #include "loom/util/cfg_graph.h"
 #include "loom/util/fact_cfg.h"
 
@@ -247,7 +248,11 @@ typedef struct loom_pipeline_worker_t {
   // Exact invocation execution counts per CFG block, or NULL when conditional
   // control or unknown recurrence prevents a complete count proof.
   const uint64_t* block_execution_counts;
-  // Exact loop trip counts retained with block counts, or NULL when unproven.
+  // Retained block multiplicity, including exact reconverged blocks when a
+  // conditional path prevents the complete single-path proof above.
+  loom_cfg_execution_counts_t execution_counts;
+  // Exact loop trip counts retained with execution_counts, or NULL when that
+  // result cannot establish enclosing multipliers.
   const uint64_t* loop_trip_counts;
 } loom_pipeline_worker_t;
 

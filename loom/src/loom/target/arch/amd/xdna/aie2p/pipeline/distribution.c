@@ -7,6 +7,7 @@
 #include "iree/base/internal/math.h"
 #include "loom/analysis/storage_geometry.h"
 #include "loom/ops/channel/ops.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/native.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
@@ -678,9 +679,9 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
           const loom_aie2p_native_cursor_t* reader =
               &destination_channel->cursor.reader;
           receiver->wait_for_idle =
-              ordered || reader->worker == UINT32_MAX ||
-              reader->maximum_admissions != distribution->repetitions ||
-              !realization->workers[reader->worker].block_execution_counts ||
+              ordered ||
+              !loom_aie2p_native_cursor_has_exact_admissions(
+                  reader, distribution->repetitions) ||
               context->workers[reader->worker].execution ==
                   LOOM_AIE2P_NATIVE_EXECUTION_DISTRIBUTION;
           distribution->sender.wait_for_idle |= receiver->wait_for_idle;

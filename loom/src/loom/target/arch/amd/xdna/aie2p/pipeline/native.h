@@ -31,6 +31,9 @@ typedef struct loom_aie2p_native_cursor_t {
   // Last claiming transport batch; each phase owns this cursor at most once.
   // Unused for instruction-executing cursor owners.
   uint32_t transport_batch;
+  // Every admission site has an exact execution count, and the aggregate
+  // bound is unsaturated. Other conditional work does not change this count.
+  bool exact_admissions;
   // Several worker occurrences use this cursor. They require one physical
   // engine with disjoint lifetimes; single-owner completion proofs do not
   // apply.
