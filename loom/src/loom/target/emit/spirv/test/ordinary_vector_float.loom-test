@@ -158,22 +158,24 @@ kernel.def target(@target) @vector_float_rounding_snapshot() {
          %76 = OpULessThan %bool %step %75
          %77 = OpISub %int %count %step
          %78 = OpSelect %int %76 %77 %begin
-               OpBranch %79
+               OpSelectionMerge %83 None
+               OpBranchConditional %74 %79 %83
          %79 = OpLabel
-  %iteration = OpPhi %int %begin %5 %83 %82
+  %iteration = OpPhi %int %begin %5 %84 %82
 %accumulator = OpPhi %v4float %initial %5 %next %82
-         %88 = OpPhi %bool %74 %5 %84 %82
                OpLoopMerge %81 %82 None
-               OpBranchConditional %88 %80 %81
+               OpBranch %80
          %80 = OpLabel
        %next = OpFAdd %v4float %product %accumulator
                OpBranch %82
          %82 = OpLabel
-         %84 = OpSLessThan %bool %iteration %78
-         %83 = OpIAdd %int %iteration %step
-               OpBranch %79
+         %85 = OpSLessThan %bool %iteration %78
+         %84 = OpIAdd %int %iteration %step
+               OpBranchConditional %85 %79 %81
          %81 = OpLabel
-      %total = OpPhi %v4float %accumulator %79
+               OpBranch %83
+         %83 = OpLabel
+      %total = OpPhi %v4float %initial %5 %next %81
          %90 = OpCompositeExtract %float %total 0
          %91 = OpCompositeExtract %float %total 1
          %92 = OpCompositeExtract %float %total 2

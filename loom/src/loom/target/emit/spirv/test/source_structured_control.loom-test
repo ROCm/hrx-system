@@ -158,22 +158,24 @@ func.def target(@target) @source_for(%start: index, %limit: index, %step: index,
          %26 = OpULessThan %bool %step %25
          %27 = OpISub %int %limit %step
          %28 = OpSelect %int %26 %27 %start
-               OpBranch %29
+               OpSelectionMerge %33 None
+               OpBranchConditional %24 %29 %33
          %29 = OpLabel
-          %i = OpPhi %int %start %14 %33 %32
+          %i = OpPhi %int %start %14 %34 %32
         %acc = OpPhi %int %seed %14 %next %32
-         %38 = OpPhi %bool %24 %14 %34 %32
                OpLoopMerge %31 %32 None
-               OpBranchConditional %38 %30 %31
+               OpBranch %30
          %30 = OpLabel
        %next = OpIAdd %int %acc %i
                OpBranch %32
          %32 = OpLabel
-         %34 = OpSLessThan %bool %i %28
-         %33 = OpIAdd %int %i %step
-               OpBranch %29
+         %35 = OpSLessThan %bool %i %28
+         %34 = OpIAdd %int %i %step
+               OpBranchConditional %35 %29 %31
          %31 = OpLabel
-     %result = OpPhi %int %acc %29
+               OpBranch %33
+         %33 = OpLabel
+     %result = OpPhi %int %seed %14 %next %31
          %40 = OpAccessChain %_ptr_StorageBuffer_int %11 %int_0
                OpStore %40 %result Aligned 4
                OpReturn
@@ -269,13 +271,13 @@ func.def target(@target) @source_for_if(%start: index, %limit: index, %step: ind
          %29 = OpULessThan %bool %step %28
          %30 = OpISub %int %limit %step
          %31 = OpSelect %int %29 %30 %start
-               OpBranch %32
+               OpSelectionMerge %36 None
+               OpBranchConditional %27 %32 %36
          %32 = OpLabel
-          %i = OpPhi %int %start %15 %36 %35
+          %i = OpPhi %int %start %15 %37 %35
         %acc = OpPhi %int %seed %15 %next %35
-         %41 = OpPhi %bool %27 %15 %37 %35
                OpLoopMerge %34 %35 None
-               OpBranchConditional %41 %33 %34
+               OpBranch %33
          %33 = OpLabel
      %before = OpSLessThan %bool %i %pivot
                OpSelectionMerge %44 None
@@ -290,11 +292,13 @@ func.def target(@target) @source_for_if(%start: index, %limit: index, %step: ind
        %next = OpPhi %int %sum %43 %difference %45
                OpBranch %35
          %35 = OpLabel
-         %37 = OpSLessThan %bool %i %31
-         %36 = OpIAdd %int %i %step
-               OpBranch %32
+         %38 = OpSLessThan %bool %i %31
+         %37 = OpIAdd %int %i %step
+               OpBranchConditional %38 %32 %34
          %34 = OpLabel
-     %result = OpPhi %int %acc %32
+               OpBranch %36
+         %36 = OpLabel
+     %result = OpPhi %int %seed %15 %next %34
          %49 = OpAccessChain %_ptr_StorageBuffer_int %12 %int_0
                OpStore %49 %result Aligned 4
                OpReturn
