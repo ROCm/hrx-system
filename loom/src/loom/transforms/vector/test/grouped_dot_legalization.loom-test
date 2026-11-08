@@ -1,0 +1,114 @@
+// RUN: pass target-legalize{mode=eager},canonicalize,dce
+
+amdgpu.target<gfx950> @target
+
+func.def target(@target) @half_pairs(%lhs: vector<4xbf16>, %rhs: vector<4xbf16>, %accumulator: vector<2xf32>) -> (vector<2xf32>) {
+  %left = vector.bitcast %lhs : vector<4xbf16> to vector<2x2xbf16>
+  %right = vector.bitcast %rhs : vector<4xbf16> to vector<2x2xbf16>
+  %acc = vector.bitcast %accumulator : vector<2xf32> to vector<2x1xf32>
+  %dot = vector.dot2f %left, %right, %acc : vector<2x2xbf16>, vector<2x2xbf16>, vector<2x1xf32>
+  %result = vector.bitcast %dot : vector<2x1xf32> to vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ----
+amdgpu.target<gfx950> @target
+
+func.def target(@target) @half_pairs(%lhs: vector<4xbf16>, %rhs: vector<4xbf16>, %accumulator: vector<2xf32>) -> (vector<2xf32>) {
+  %12 = vector.dot2f %lhs, %rhs, %accumulator : vector<4xbf16>, vector<4xbf16>, vector<2xf32>
+  func.return %12 : vector<2xf32>
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager},canonicalize,dce
+
+amdgpu.target<gfx950> @target
+
+func.def target(@target) @byte_groups(%lhs: vector<8xi8>, %rhs: vector<8xi8>, %accumulator: vector<2xi32>) -> (vector<2xi32>) {
+  %left = vector.bitcast %lhs : vector<8xi8> to vector<2x4xi8>
+  %right = vector.bitcast %rhs : vector<8xi8> to vector<2x4xi8>
+  %acc = vector.bitcast %accumulator : vector<2xi32> to vector<2x1xi32>
+  %dot = vector.dot4i<u8s8> %left, %right, %acc : vector<2x4xi8>, vector<2x4xi8>, vector<2x1xi32>
+  %result = vector.bitcast %dot : vector<2x1xi32> to vector<2xi32>
+  func.return %result : vector<2xi32>
+}
+
+// ----
+amdgpu.target<gfx950> @target
+
+func.def target(@target) @byte_groups(%lhs: vector<8xi8>, %rhs: vector<8xi8>, %accumulator: vector<2xi32>) -> (vector<2xi32>) {
+  %12 = vector.dot4i<u8s8> %lhs, %rhs, %accumulator : vector<8xi8>, vector<8xi8>, vector<2xi32>
+  func.return %12 : vector<2xi32>
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager},canonicalize,dce
+
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @nibble_groups(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %accumulator: vector<2xi32>) -> (vector<2xi32>) {
+  %left = vector.bitcast %lhs : vector<2xi32> to vector<2x1xi32>
+  %right = vector.bitcast %rhs : vector<2xi32> to vector<2x1xi32>
+  %acc = vector.bitcast %accumulator : vector<2xi32> to vector<2x1xi32>
+  %dot = vector.dot8i4<s4u4> %left, %right, %acc : vector<2x1xi32>
+  %result = vector.bitcast %dot : vector<2x1xi32> to vector<2xi32>
+  func.return %result : vector<2xi32>
+}
+
+// ----
+amdgpu.target<gfx1100> @target
+
+func.def target(@target) @nibble_groups(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %accumulator: vector<2xi32>) -> (vector<2xi32>) {
+  %12 = vector.dot8i4<s4u4> %lhs, %rhs, %accumulator : vector<2xi32>
+  func.return %12 : vector<2xi32>
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager},canonicalize,dce
+
+amdgpu.target<gfx1201> @target
+
+func.def target(@target) @float_byte_groups(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %accumulator: vector<2xf32>) -> (vector<2xf32>) {
+  %left = vector.bitcast %lhs : vector<2xi32> to vector<2x1xi32>
+  %right = vector.bitcast %rhs : vector<2xi32> to vector<2x1xi32>
+  %acc = vector.bitcast %accumulator : vector<2xf32> to vector<2x1xf32>
+  %dot = vector.dot4f8<bf8fp8> %left, %right, %acc : vector<2x1xi32>, vector<2x1xf32>
+  %result = vector.bitcast %dot : vector<2x1xf32> to vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ----
+amdgpu.target<gfx1201> @target
+
+func.def target(@target) @float_byte_groups(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %accumulator: vector<2xf32>) -> (vector<2xf32>) {
+  %12 = vector.dot4f8<bf8fp8> %lhs, %rhs, %accumulator : vector<2xi32>, vector<2xf32>
+  func.return %12 : vector<2xf32>
+}
+
+// ====
+// RUN: pass target-legalize{mode=eager},canonicalize,dce
+
+x86.target<avx512> @target {features = [avx512vnni]}
+
+func.def target(@target) @byte_dot_with_tail(%left_head: vector<64xi8>, %left_tail: vector<32xi8>, %right_head: vector<64xi8>, %right_tail: vector<32xi8>, %head_acc: vector<16xi32>, %tail_acc: vector<8xi32>) -> (i32) {
+  %left = vector.concat<0> %left_head, %left_tail : vector<64xi8>, vector<32xi8> -> vector<96xi8>
+  %right = vector.concat<0> %right_head, %right_tail : vector<64xi8>, vector<32xi8> -> vector<96xi8>
+  %acc = vector.concat<0> %head_acc, %tail_acc : vector<16xi32>, vector<8xi32> -> vector<24xi32>
+  %dot = vector.dot4i<u8s8> %left, %right, %acc : vector<96xi8>, vector<96xi8>, vector<24xi32>
+  %first = vector.extract %dot[0] : vector<24xi32> -> i32
+  %last = vector.extract %dot[23] : vector<24xi32> -> i32
+  %result = scalar.subi %first, %last : i32
+  func.return %result : i32
+}
+
+// ----
+x86.target<avx512> @target {features = [avx512vnni]}
+
+func.def target(@target) @byte_dot_with_tail(%left_head: vector<64xi8>, %left_tail: vector<32xi8>, %right_head: vector<64xi8>, %right_tail: vector<32xi8>, %head_acc: vector<16xi32>, %tail_acc: vector<8xi32>) -> (i32) {
+  %17 = vector.dot4i<u8s8> %left_head, %right_head, %head_acc : vector<64xi8>, vector<64xi8>, vector<16xi32>
+  %21 = vector.dot4i<u8s8> %left_tail, %right_tail, %tail_acc : vector<32xi8>, vector<32xi8>, vector<8xi32>
+  %first = vector.extract %17[0] : vector<16xi32> -> i32
+  %last = vector.extract %21[7] : vector<8xi32> -> i32
+  %result = scalar.subi %first, %last : i32
+  func.return %result : i32
+}

@@ -327,12 +327,14 @@ loom_cc_library(
     srcs = [
         "bitwise_legalization.c",
         "bitwise_legalization.h",
+        "grouped_dot_legalization.c",
         "memory_legalization.c",
         "signed_unary_legalization.c",
         "signed_unary_legalization.h",
         "target_legalization.c",
     ],
     hdrs = [
+        "grouped_dot_legalization.h",
         "memory_legalization.h",
         "target_legalization.h",
     ],
@@ -353,6 +355,7 @@ loom_cc_library(
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:numeric_format",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
     ],
 )
 
