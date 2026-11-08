@@ -128,6 +128,7 @@ pipeline.def<kernel> public @test() run(%source_storage: buffer, %other_storage:
 
 // ----
 worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
+  prefix_cycles=0
   batch 0: records=1 replays=1
     record 0: admission=%a source=%source admissions=1 transfers=1 final_release=no destinations=%left
   batch 1: records=1 replays=1
@@ -170,6 +171,7 @@ pipeline.def<kernel> public @test() run(%source_storage: buffer, %left_storage: 
 
 // ----
 worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
+  prefix_cycles=0
   batch 0: records=1 replays=1
     record 0: admission=%a source=%source admissions=1 transfers=1 final_release=no destinations=%left,%right
   batch 1: records=1 replays=1
@@ -207,6 +209,7 @@ pipeline.def<kernel> public @test() run(%source_storage: buffer, %left_storage: 
 
 // ----
 worker 0: transport=channel-copy execution_counts=exact batches=2 streams=0
+  prefix_cycles=0
   batch 0: records=1 replays=1
     record 0: admission=%a source=%source admissions=1 transfers=1 final_release=no destinations=%left
   batch 1: records=1 replays=1

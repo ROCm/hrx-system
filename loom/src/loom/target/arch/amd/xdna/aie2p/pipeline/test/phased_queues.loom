@@ -1,0 +1,164 @@
+// Two scalar prefixes and a two-slot panel ring share one DMA queue at each
+// endpoint. Three logical channels exceed the two physical compute-tile DMA
+// engines. Each prefix stays borrowed for its complete 2,880-panel cycle.
+// A 240-record window divides both the cycle and the ring; 256 does not.
+
+aie2p.target<array> @device
+
+func.def inline @channels(%memory: pool) -> (channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<16xi32>>) {
+  %origin = index.constant 0 : offset
+  %second_prefix_offset = index.constant 64 : offset
+  %panel_offset = index.constant 128 : offset
+  %storage_bytes = index.constant 256 : offset
+  %prefix_capacity = index.constant 1 : index
+  %panel_capacity = index.constant 2 : index
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %storage_bytes : buffer
+  %prefix_slots = buffer.view %storage[%origin] : buffer -> view<1x1xi32>
+  %second_prefix_slots = buffer.view %storage[%second_prefix_offset] : buffer -> view<1x1xi32>
+  %panel_slots = buffer.view %storage[%panel_offset] : buffer -> view<2x16xi32>
+  %prefix = channel.bind<fifo> %prefix_slots, %prefix_capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %second_prefix = channel.bind<fifo> %second_prefix_slots, %prefix_capacity : view<1x1xi32>, index -> channel<tile<1xi32>>
+  %bulk = channel.bind<fifo> %panel_slots, %panel_capacity : view<2x16xi32>, index -> channel<tile<16xi32>>
+  func.return %prefix, %second_prefix, %bulk : channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<16xi32>>
+}
+
+func.def inline @consume(%prefix: channel<tile<1xi32>>, %second_prefix: channel<tile<1xi32>>, %bulk: channel<tile<16xi32>>, %output: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %cycles = index.constant 2 : index
+  %records = index.constant 2880 : index
+  %record_bytes = index.constant 64 : offset
+  scf.for %cycle = [%begin to %cycles step %step] {
+    %prefix_read, %coefficient_view = channel.acquire %prefix : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+    %coefficient = view.load %coefficient_view[0] : view<1xi32> -> i32
+    %second_read, %second_view = channel.acquire %second_prefix : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+    %second_coefficient = view.load %second_view[0] : view<1xi32> -> i32
+    %sum = scalar.addi %coefficient, %second_coefficient : i32
+    %bias = vector.splat %sum : vector<16xi32>
+    scf.for %record = [%begin to %records step %step] {
+      %read, %payload = channel.acquire<mutable> %bulk : channel<tile<16xi32>> -> (read<tile<16xi32>, mutable>, view<16xi32>)
+      %values = vector.load %payload[0] : view<16xi32> -> vector<16xi32>
+      %result = vector.addi %values, %bias : vector<16xi32>
+      vector.store %result, %payload[0] : vector<16xi32>, view<16xi32>
+      %position = index.madd %cycle, %records, %record : index
+      %offset = index.scale %position, %record_bytes : index, offset -> offset
+      %destination = buffer.view %output[%offset] : buffer -> view<16xi32>
+      %copy = kernel.async.copy %payload to %destination {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+      %departure = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+      kernel.async.wait %departure {newer_groups = 0} : kernel.async.group
+      channel.release %read : read<tile<16xi32>, mutable>
+    }
+    channel.release %second_read : read<tile<1xi32>>
+    channel.release %prefix_read : read<tile<1xi32>>
+  }
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@device) @phased_multicast() run(%left_arg: buffer, %right_arg: buffer) {
+  %left_unique, %right_unique = buffer.assume.noalias %left_arg, %right_arg : buffer, buffer
+  %left, %right = buffer.assume.alignment %left_unique, %right_unique {minimum_alignment = 64} : buffer, buffer
+  %source_memory = pipeline.memory<workgroup>[0, 4] : pool
+  %left_memory = pipeline.memory<workgroup>[0, 2] : pool
+  %right_memory = pipeline.memory<workgroup>[0, 3] : pool
+  %source_prefix, %source_second_prefix, %source_bulk = func.call @channels(%source_memory) : (pool) -> (channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<16xi32>>)
+  %left_prefix, %left_second_prefix, %left_bulk = func.call @channels(%left_memory) : (pool) -> (channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<16xi32>>)
+  %right_prefix, %right_second_prefix, %right_bulk = func.call @channels(%right_memory) : (pool) -> (channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<16xi32>>)
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %cycles = index.constant 2 : index
+  %records = index.constant 2880 : index
+  pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
+    scf.for %cycle = [%begin to %cycles step %step] {
+      %write, %payload = channel.reserve %source_prefix : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+      %coefficient = index.cast %cycle : index to i32
+      view.store %coefficient, %payload[0] : i32, view<1xi32>
+      channel.publish %write : write<tile<1xi32>>
+      %second_write, %second_payload = channel.reserve %source_second_prefix : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+      %bias_offset = scalar.constant 7 : i32
+      %second_coefficient = scalar.addi %coefficient, %bias_offset : i32
+      view.store %second_coefficient, %second_payload[0] : i32, view<1xi32>
+      channel.publish %second_write : write<tile<1xi32>>
+      scf.for %record = [%begin to %records step %step] {
+        %write, %payload = channel.reserve %source_bulk : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+        %value = index.cast %record : index to i32
+        %values = vector.splat %value : vector<16xi32>
+        vector.store %values, %payload[0] : vector<16xi32>, view<16xi32>
+        channel.publish %write : write<tile<16xi32>>
+      }
+    }
+  }
+  pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
+    scf.for %cycle = [%begin to %cycles step %step] {
+      %read, %payload = channel.acquire %source_prefix : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+      %first_read, %second_read = channel.fanout %read : read<tile<1xi32>> -> (read<tile<1xi32>>, read<tile<1xi32>>)
+      %first_write, %first_payload = channel.reserve %left_prefix : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+      %second_write, %second_payload = channel.reserve %right_prefix : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+      channel.copy %first_read -> %first_write : read<tile<1xi32>>, write<tile<1xi32>>
+      channel.copy %second_read -> %second_write : read<tile<1xi32>>, write<tile<1xi32>>
+      %next_read, %next_payload = channel.acquire %source_second_prefix : channel<tile<1xi32>> -> (read<tile<1xi32>>, view<1xi32>)
+      %next_first_read, %next_second_read = channel.fanout %next_read : read<tile<1xi32>> -> (read<tile<1xi32>>, read<tile<1xi32>>)
+      %next_first_write, %next_first_payload = channel.reserve %left_second_prefix : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+      %next_second_write, %next_second_payload = channel.reserve %right_second_prefix : channel<tile<1xi32>> -> (write<tile<1xi32>>, view<1xi32>)
+      channel.copy %next_first_read -> %next_first_write : read<tile<1xi32>>, write<tile<1xi32>>
+      channel.copy %next_second_read -> %next_second_write : read<tile<1xi32>>, write<tile<1xi32>>
+      scf.for %record = [%begin to %records step %step] {
+        %read, %payload = channel.acquire %source_bulk : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+        %first_read, %second_read = channel.fanout %read : read<tile<16xi32>> -> (read<tile<16xi32>>, read<tile<16xi32>>)
+        %first_write, %first_payload = channel.reserve %left_bulk : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+        %second_write, %second_payload = channel.reserve %right_bulk : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+        channel.copy %first_read -> %first_write : read<tile<16xi32>>, write<tile<16xi32>>
+        channel.copy %second_read -> %second_write : read<tile<16xi32>>, write<tile<16xi32>>
+      }
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    func.call @consume(%left_prefix, %left_second_prefix, %left_bulk, %left) : (channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<16xi32>>, buffer)
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    func.call @consume(%right_prefix, %right_second_prefix, %right_bulk, %right) : (channel<tile<1xi32>>, channel<tile<1xi32>>, channel<tile<16xi32>>, buffer)
+  }
+}
+
+// Scalar coordinates supply the oracle independently of queues and credits.
+func.def @phased_multicast_reference(%left: buffer, %right: buffer) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %cycles = index.constant 2 : index
+  %records = index.constant 2880 : index
+  %lanes = index.constant 16 : index
+  %record_bytes = index.constant 64 : offset
+  %bias_offset = scalar.constant 7 : i32
+  scf.for %cycle = [%begin to %cycles step %step] {
+    %cycle_value = index.cast %cycle : index to i32
+    %twice = scalar.addi %cycle_value, %cycle_value : i32
+    %bias = scalar.addi %twice, %bias_offset : i32
+    scf.for %record = [%begin to %records step %step] {
+      %position = index.madd %cycle, %records, %record : index
+      %offset = index.scale %position, %record_bytes : index, offset -> offset
+      %left_record = buffer.view %left[%offset] : buffer -> view<16xi32>
+      %right_record = buffer.view %right[%offset] : buffer -> view<16xi32>
+      %record_value = index.cast %record : index to i32
+      %value = scalar.addi %record_value, %bias : i32
+      scf.for %lane = [%begin to %lanes step %step] {
+        view.store %value, %left_record[%lane] : i32, view<16xi32>
+        view.store %value, %right_record[%lane] : i32, view<16xi32>
+      }
+    }
+  }
+  func.return
+}
+
+check.scenario public @phased_multicast_replay {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %left_storage = check.generate.random.uniform seed(%seed) range(-1000 to -1) : tensor<92192xi32>
+    %right_storage = check.generate.fill value(-9999) : tensor<92192xi32>
+    %left = check.tensor.view %left_storage offset(64) : tensor<92192xi32> -> tensor<92160xi32>
+    %right = check.tensor.view %right_storage offset(64) : tensor<92192xi32> -> tensor<92160xi32>
+    check.compare<@phased_multicast, @phased_multicast_reference>(%left, %right) : (tensor<92160xi32>, tensor<92160xi32>) -> () {
+      check.expect.equal actual(%left_storage) expected(%left_storage) : tensor<92192xi32>
+      check.expect.equal actual(%right_storage) expected(%right_storage) : tensor<92192xi32>
+    }
+  }
+  check.return
+}

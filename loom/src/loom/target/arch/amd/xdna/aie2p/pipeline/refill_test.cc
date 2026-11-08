@@ -28,12 +28,14 @@ class Aie2pRefillTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
     context_.pass = &pass_;
     context_.family = loom_xdna_npu2_array_family();
     context_.workers = &worker_;
+    context_.pool_tiles = pool_tiles_;
     tile_.facts = loom_xdna_array_tile_kind_facts(context_.family, GetParam());
     tile_.coordinate = {1, tile_.facts->first_row};
     tile_.memory_layout = GetParam() == LOOM_XDNA_TILE_KIND_MEMORY
                               ? &loom_aie2p_sram_memory
                               : &loom_aie2p_compute_memory;
     source_.progress = &reader_;
+    source_.source = &binding_;
     // The existing reader is the continuation owner, not a new service core.
     reader_.cursor.reader.worker = 0;
     reader_.cursor.reader.maximum_admissions = 65539;
@@ -83,6 +85,13 @@ class Aie2pRefillTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
     // Count the actual queued windows, including startup and the exact tail.
     EXPECT_EQ(255u * refill.remaining_tasks + final_records, records);
   }
+  uint32_t PhasedWindow(uint32_t records, uint32_t capacity = 2,
+                        uint32_t cycles = 2, size_t prefixes = 2) {
+    binding_.capacity = capacity;
+    reader_.cursor.reader.maximum_admissions = uint64_t{cycles} * records;
+    return loom_aie2p_native_phased_window(&context_, &source_, prefixes,
+                                           cycles, records);
+  }
   // Lifetime of the planner's retained descriptor and continuation results.
   iree_arena_block_pool_t pool_ = {};
   // Shared allocation arena for one native plan.
@@ -93,6 +102,10 @@ class Aie2pRefillTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
   loom_aie2p_native_context_t context_ = {};
   // Real module facts and current descriptor-bank consumption.
   loom_aie2p_native_tile_t tile_ = {};
+  // Physical endpoint selected for the source's storage pool.
+  loom_aie2p_native_tile_t* pool_tiles_[1] = {&tile_};
+  // Authored bulk-ring capacity, retained by resource analysis.
+  loom_pipeline_resource_channel_t binding_ = {};
   // Existing arithmetic worker receiving refill continuations.
   loom_aie2p_native_worker_t worker_ = {};
   // Source protocol with a previously selected equal-record observer.
@@ -181,6 +194,50 @@ TEST_P(Aie2pRefillTest, BatchCreditsCannotStandInForRecordProgress) {
   Select(65538, 3, LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM, 3);
   EXPECT_FALSE(valid_);
   EXPECT_EQ(worker_.refills, nullptr);
+}
+
+TEST_P(Aie2pRefillTest, PhasedWindowDividesTheCycleAndCompleteRingTurns) {
+  EXPECT_EQ(PhasedWindow(2880), 240u);
+  EXPECT_EQ(PhasedWindow(512), 256u);
+  EXPECT_EQ(PhasedWindow(514), 2u);
+  EXPECT_EQ(PhasedWindow(2880, 3), 240u);
+  EXPECT_EQ(PhasedWindow(510, 3), 255u);
+  EXPECT_EQ(PhasedWindow(6, 3), 6u);
+  // Selection itself neither allocates descriptors nor adds a continuation.
+  EXPECT_EQ(tile_.descriptor_counts[0], 0u);
+  EXPECT_EQ(worker_.refills, nullptr);
+}
+
+TEST_P(Aie2pRefillTest, SingleCycleAllowsTheOrdinaryPartialWindowTail) {
+  EXPECT_EQ(PhasedWindow(513, 2, 1), 256u);
+  EXPECT_EQ(PhasedWindow(513, 2, 2), 0u);
+  EXPECT_EQ(PhasedWindow(1, 2, 1), 1u);
+  EXPECT_EQ(PhasedWindow(1, 2, 2), 0u);
+}
+
+TEST_P(Aie2pRefillTest, PhasedQueueBudgetIncludesActiveAndNextBulkTasks) {
+  const size_t depth = tile_.facts->dma.task_queue_depth;
+  EXPECT_NE(PhasedWindow(2880, 2, 2, depth - 2), 0u);
+  EXPECT_EQ(PhasedWindow(2880, 2, 2, depth - 1), 0u);
+}
+
+TEST_P(Aie2pRefillTest, CompleteRingMustFitOneImmutableTask) {
+  const uint32_t limit = tile_.facts->dma.maximum_task_repeat_count;
+  EXPECT_EQ(PhasedWindow(2 * limit, limit), limit);
+  EXPECT_EQ(PhasedWindow(2 * (limit + 1), limit + 1), 0u);
+}
+
+TEST_P(Aie2pRefillTest, PhasedQueueNeedsAnExactBulkProgressObserver) {
+  binding_.capacity = 2;
+  source_.progress = nullptr;
+  EXPECT_EQ(loom_aie2p_native_phased_window(&context_, &source_, 2, 2, 2880),
+            0u);
+  source_.progress = &reader_;
+  for (uint64_t admissions : {5759u, 5760u, 5761u}) {
+    reader_.cursor.reader.maximum_admissions = admissions;
+    EXPECT_EQ(loom_aie2p_native_phased_window(&context_, &source_, 2, 2, 2880),
+              admissions == 5760 ? 240u : 0u);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(OnChipMemory, Aie2pRefillTest,

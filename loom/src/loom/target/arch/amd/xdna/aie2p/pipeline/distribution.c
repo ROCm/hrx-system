@@ -10,6 +10,7 @@
 #include "loom/analysis/storage_geometry.h"
 #include "loom/ops/channel/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/switch.h"
 #include "loom/target/arch/amd/xdna/array/registers.h"
 
@@ -539,6 +540,99 @@ loom_aie2p_native_distribution_t* loom_aie2p_native_reusable_distribution(
   return NULL;
 }
 
+static const loom_aie2p_native_channel_t*
+loom_aie2p_native_distribution_phase_channel(
+    const loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    const loom_pipeline_transport_cohort_t* cohort, iree_host_size_t endpoint) {
+  return loom_aie2p_native_channel(
+      context, realization,
+      endpoint ? cohort->destinations[endpoint - 1].channel
+               : cohort->admission->channel);
+}
+
+static iree_status_t loom_aie2p_native_distribution_windows(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    const loom_pipeline_transport_t* transport, uint32_t** out_windows) {
+  *out_windows = NULL;
+  if (!transport->prefix_cycles) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t tail = transport->batch_count - 1;
+  const loom_pipeline_transport_cohort_t* bulk =
+      transport->batches[tail].records;
+  for (iree_host_size_t i = 0; i < tail; ++i) {
+    if (transport->batches[i].records->destination_count !=
+        bulk->destination_count) {
+      return iree_ok_status();
+    }
+  }
+  uint32_t* windows;
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      context->pass->arena, bulk->destination_count + 1, sizeof(*windows),
+      (void**)&windows));
+  for (iree_host_size_t i = 0; i <= bulk->destination_count; ++i) {
+    const loom_aie2p_native_channel_t* channel =
+        loom_aie2p_native_distribution_phase_channel(context, realization, bulk,
+                                                     i);
+    windows[i] = loom_aie2p_native_phased_window(
+        context, channel, tail, (uint32_t)transport->prefix_cycles,
+        (uint32_t)(bulk->admissions / transport->prefix_cycles));
+    if (!windows[i]) {
+      return iree_ok_status();
+    }
+    for (iree_host_size_t j = 0; j < tail; ++j) {
+      if (loom_aie2p_native_distribution_phase_channel(
+              context, realization, transport->batches[j].records, i)
+              ->pool_index != channel->pool_index) {
+        return iree_ok_status();
+      }
+    }
+  }
+  *out_windows = windows;
+  return iree_ok_status();
+}
+
+static iree_status_t loom_aie2p_native_distribution_refills(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_transport_t* transport, const uint32_t* windows,
+    const loom_aie2p_native_distribution_t* first,
+    const loom_aie2p_native_distribution_t* bulk) {
+  for (iree_host_size_t i = 0; i <= bulk->receiver_count; ++i) {
+    if (bulk->repetitions <= windows[i]) {
+      continue;
+    }
+    const loom_aie2p_native_distribution_endpoint_t* endpoint =
+        i ? &bulk->receivers[i - 1] : &bulk->sender;
+    loom_aie2p_native_refill_queue_t* queue;
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_add_refill(
+        context, endpoint->tile, endpoint->engine,
+        i ? LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY
+          : LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
+        endpoint->channel, bulk->repetitions, windows[i], &endpoint->sequence,
+        &queue));
+    if (transport->prefix_cycles == 1) {
+      continue;
+    }
+    const iree_host_size_t count = transport->batch_count - 1;
+    uint32_t* prefixes;
+    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+        context->pass->arena, count, sizeof(*prefixes), (void**)&prefixes));
+    const loom_aie2p_native_distribution_t* phase = first;
+    for (iree_host_size_t j = 0; j < count; ++j, phase = phase->next) {
+      const loom_aie2p_native_distribution_endpoint_t* prefix =
+          i ? &phase->receivers[i - 1] : &phase->sender;
+      prefixes[j] = prefix->sequence.tasks[0];
+    }
+    queue->prefixes = prefixes;
+    queue->prefix_count = (uint32_t)count;
+    queue->cycle_windows =
+        (uint32_t)(bulk->repetitions / transport->prefix_cycles) / windows[i];
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_aie2p_native_select_worker_distributions(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,
@@ -583,6 +677,12 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
                  cohort->transfers * batch->record_count;
     }
   }
+  uint32_t* windows = NULL;
+  if (!ordered && !packet_program) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_distribution_windows(
+        context, realization, &source->transport, &windows));
+  }
+  loom_aie2p_native_distribution_t* first_phase = NULL;
   for (iree_host_size_t i = 0; i < source->transport.batch_count; ++i) {
     const loom_pipeline_transport_batch_t* batch =
         &source->transport.batches[i];
@@ -592,8 +692,9 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
                                   cohort->admission->channel);
     const uint32_t repetitions =
         (uint32_t)(cohort->transfers * batch->record_count);
-    loom_aie2p_native_distribution_t* path =
-        ordered ? owner->distributions : NULL;
+    loom_aie2p_native_distribution_t* path = ordered   ? owner->distributions
+                                             : windows ? first_phase
+                                                       : NULL;
     if (ordered) {
       const uint32_t producer = source_channel->cursor.writer.worker;
       if (producer == UINT32_MAX ||
@@ -653,9 +754,10 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
             (void**)&distribution->receivers));
         iree_string_view_t reason;
         bool valid = false;
+        const bool bulk = i + 1 == source->transport.batch_count;
         IREE_RETURN_IF_ERROR(loom_aie2p_native_select_distribution_endpoint(
             context, source_channel, LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
-            distribution->repetitions,
+            windows ? (bulk ? windows[0] : 1) : distribution->repetitions,
             (uint32_t)(cohort->admissions == 1 ? batch->replays : 1),
             path ? &path->sender : NULL, &distribution->sender, &reason,
             &valid));
@@ -687,8 +789,9 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
           IREE_RETURN_IF_ERROR(loom_aie2p_native_select_distribution_endpoint(
               context, destination_channel,
               LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
-              distribution->repetitions, 1, path ? &path->receivers[j] : NULL,
-              &distribution->receivers[j], &reason, &valid));
+              windows ? (bulk ? windows[j + 1] : 1) : distribution->repetitions,
+              1, path ? &path->receivers[j] : NULL, &distribution->receivers[j],
+              &reason, &valid));
           if (!valid) {
             return loom_aie2p_native_reject(context, destination->copy, reason);
           }
@@ -704,7 +807,7 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
           const loom_aie2p_native_cursor_t* reader =
               &destination_channel->cursor.reader;
           receiver->wait_for_idle =
-              ordered ||
+              ordered || windows ||
               !loom_aie2p_native_cursor_has_exact_admissions(
                   reader, distribution->repetitions) ||
               context->workers[reader->worker].execution ==
@@ -742,6 +845,15 @@ iree_status_t loom_aie2p_native_select_worker_distributions(
       }
       *tail = distribution;
       tail = &distribution->next;
+    }
+    if (windows) {
+      if (!first_phase) {
+        first_phase = distribution;
+      }
+      if (i + 1 == source->transport.batch_count) {
+        IREE_RETURN_IF_ERROR(loom_aie2p_native_distribution_refills(
+            context, &source->transport, windows, first_phase, distribution));
+      }
     }
     if (ordered) {
       loom_aie2p_native_distribution_phase_t* phase;

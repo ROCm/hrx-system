@@ -350,6 +350,34 @@ static iree_status_t loom_pipeline_transport_batches(
   return iree_ok_status();
 }
 
+static uint64_t loom_pipeline_transport_prefix_cycles(
+    const loom_cfg_loop_nest_t* loops,
+    const loom_pipeline_transport_batch_t* batches, iree_host_size_t count) {
+  if (count < 2) {
+    return 0;
+  }
+  const loom_pipeline_transport_cohort_t* first = batches[0].records;
+  const loom_pipeline_transport_cohort_t* bulk = batches[count - 1].records;
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const loom_pipeline_transport_cohort_t* cohort = batches[i].records;
+    if (batches[i].record_count != 1 || batches[i].replays != 1 ||
+        !loom_channel_acquire_isa(cohort->admission->op) || cohort->release ||
+        cohort->copy_scope != cohort->admission_scope ||
+        (i + 1 < count && (cohort->admission_scope != first->admission_scope ||
+                           cohort->admissions != first->admissions))) {
+      return 0;
+    }
+  }
+  if (bulk->admissions % first->admissions ||
+      (first->admission_scope != LOOM_CFG_LOOP_NEST_NONE &&
+       !loom_cfg_loop_nest_contains(
+           loops, first->admission_scope,
+           bulk->admission->op->parent_block->region_index))) {
+    return 0;
+  }
+  return first->admissions;
+}
+
 // Retains inclusive copy spans in the CFG owner's child-before-parent order.
 // Each copy and each natural loop contributes once; no target walks the CFG.
 static iree_status_t loom_pipeline_transport_copy_loops(
@@ -691,19 +719,21 @@ static iree_status_t loom_pipeline_worker_transport(
       break;
     }
   }
-  worker->transport =
-      (loom_pipeline_transport_t){.steps = steps,
-                                  .count = count,
-                                  .streams = streams,
-                                  .stream_count = stream_count,
-                                  .cohorts = cohorts,
-                                  .cohort_count = cohort_count,
-                                  .batches = batches,
-                                  .batch_count = batch_count,
-                                  .copy_loops = copy_loops,
-                                  .copy_loop_count = copy_loop_count,
-                                  .repetitions = repetitions,
-                                  .induction = induction};
+  worker->transport = (loom_pipeline_transport_t){
+      .steps = steps,
+      .count = count,
+      .streams = streams,
+      .stream_count = stream_count,
+      .cohorts = cohorts,
+      .cohort_count = cohort_count,
+      .batches = batches,
+      .batch_count = batch_count,
+      .prefix_cycles = loom_pipeline_transport_prefix_cycles(
+          &structure->loops, batches, batch_count),
+      .copy_loops = copy_loops,
+      .copy_loop_count = copy_loop_count,
+      .repetitions = repetitions,
+      .induction = induction};
   loom_pipeline_transport_input_t input;
   if (stream_count && loom_pipeline_transport_input(worker, &input)) {
     loom_pipeline_transport_input_t* retained;

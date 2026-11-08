@@ -30,6 +30,9 @@ iree_status_t loom_aie2p_native_select_progress(
     const loom_pipeline_realization_t* realization) {
   const iree_host_size_t count = realization->invocations.channel_count;
   bool needs_progress = false;
+  for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
+    needs_progress |= realization->workers[i].transport.prefix_cycles != 0;
+  }
   for (iree_host_size_t i = 0; i < count; ++i) {
     const loom_aie2p_native_channel_t* channel = &context->channels[i];
     const loom_xdna_dma_facts_t* dma =
@@ -76,6 +79,37 @@ iree_status_t loom_aie2p_native_select_progress(
   return iree_ok_status();
 }
 
+uint32_t loom_aie2p_native_phased_window(
+    const loom_aie2p_native_context_t* context,
+    const loom_aie2p_native_channel_t* channel, iree_host_size_t prefix_count,
+    uint32_t cycles, uint32_t records) {
+  const loom_xdna_dma_facts_t* dma =
+      &context->pool_tiles[channel->pool_index]->facts->dma;
+  const uint32_t capacity = channel->source->capacity;
+  if (!channel->progress || prefix_count + 2 > dma->task_queue_depth ||
+      capacity > dma->maximum_task_repeat_count ||
+      channel->progress->cursor.reader.maximum_admissions !=
+          (uint64_t)cycles * records) {
+    return 0;
+  }
+  uint32_t window =
+      iree_min(records, dma->maximum_task_repeat_count / capacity * capacity);
+  // Repeated cycles end on a complete bulk window and ring turn. A single
+  // enclosing lifetime can retain the ordinary final partial-window task.
+  if (cycles > 1) {
+    if (records % capacity) {
+      return 0;
+    }
+    // The largest hardware window need not divide the cycle. Search complete
+    // ring turns within that fixed task-repeat bound, keeping the largest
+    // divisor to minimize continuation traffic.
+    while (records % window) {
+      window -= capacity;
+    }
+  }
+  return window;
+}
+
 iree_status_t loom_aie2p_native_select_refill(
     loom_aie2p_native_context_t* context, loom_aie2p_native_tile_t* tile,
     uint8_t engine, loom_xdna_dma_direction_t direction,
@@ -101,6 +135,18 @@ iree_status_t loom_aie2p_native_select_refill(
     return iree_ok_status();
   }
   sequence->rewind_iteration = repetitions % capacity != 0;
+  loom_aie2p_native_refill_queue_t* queue;
+  return loom_aie2p_native_add_refill(context, tile, engine, direction, channel,
+                                      repetitions, window, sequence, &queue);
+}
+
+iree_status_t loom_aie2p_native_add_refill(
+    loom_aie2p_native_context_t* context, loom_aie2p_native_tile_t* tile,
+    uint8_t engine, loom_xdna_dma_direction_t direction,
+    const loom_aie2p_native_channel_t* channel, uint32_t repetitions,
+    uint32_t window, const loom_aie2p_native_dma_sequence_t* sequence,
+    loom_aie2p_native_refill_queue_t** out_queue) {
+  const loom_aie2p_native_memory_layout_t* layout = tile->memory_layout;
   loom_aie2p_native_worker_t* worker =
       &context->workers[channel->progress->cursor.reader.worker];
   loom_aie2p_native_refill_t* group = worker->refills;
@@ -144,6 +190,7 @@ iree_status_t loom_aie2p_native_select_refill(
                                               .task = sequence->tasks[0],
                                               .final_task = final_task};
   group->queues = queue;
+  *out_queue = queue;
   return iree_ok_status();
 }
 
@@ -206,6 +253,41 @@ static iree_status_t loom_aie2p_native_refill_constant(
   return iree_ok_status();
 }
 
+static iree_status_t loom_aie2p_native_refill_prefixes(
+    loom_builder_t* builder, const loom_aie2p_native_refill_queue_t* queue,
+    loom_value_id_t remaining, loom_value_id_t zero) {
+  const loom_type_t type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
+  loom_value_id_t period;
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_refill_constant(
+      builder, queue->cycle_windows, &period));
+  loom_op_t *position, *boundary, *prefix;
+  IREE_RETURN_IF_ERROR(loom_scalar_remui_build(
+      builder, remaining, period, type, LOOM_LOCATION_UNKNOWN, &position));
+  IREE_RETURN_IF_ERROR(
+      loom_scalar_cmpi_build(builder, LOOM_SCALAR_CMPI_PREDICATE_EQ,
+                             loom_scalar_remui_result(position), zero,
+                             LOOM_LOCATION_UNKNOWN, &boundary));
+  IREE_RETURN_IF_ERROR(
+      loom_scf_if_build(builder, 0, loom_scalar_cmpi_result(boundary), NULL, 0,
+                        NULL, 0, LOOM_LOCATION_UNKNOWN, &prefix));
+  const loom_builder_ip_t outer = loom_builder_enter_region(
+      builder, prefix, loom_scf_if_then_region(prefix));
+  for (uint32_t i = 0; i < queue->prefix_count; ++i) {
+    loom_value_id_t task;
+    IREE_RETURN_IF_ERROR(
+        loom_aie2p_native_refill_constant(builder, queue->prefixes[i], &task));
+    loom_op_t* call;
+    IREE_RETURN_IF_ERROR(
+        loom_low_invoke_build(builder, 0, 0, 0, 0, queue->submit, &task, 1,
+                              NULL, 0, NULL, 0, LOOM_LOCATION_UNKNOWN, &call));
+  }
+  loom_op_t* yield;
+  IREE_RETURN_IF_ERROR(
+      loom_scf_yield_build(builder, NULL, 0, LOOM_LOCATION_UNKNOWN, &yield));
+  loom_builder_restore(builder, outer);
+  return iree_ok_status();
+}
+
 iree_status_t loom_aie2p_native_emit_refill(
     loom_builder_t* builder, const loom_aie2p_native_refill_t* refill,
     loom_value_id_t* state) {
@@ -244,6 +326,10 @@ iree_status_t loom_aie2p_native_emit_refill(
                              one, LOOM_LOCATION_UNKNOWN, &last));
   for (const loom_aie2p_native_refill_queue_t* queue = refill->queues; queue;
        queue = queue->next) {
+    if (queue->prefix_count) {
+      IREE_RETURN_IF_ERROR(
+          loom_aie2p_native_refill_prefixes(builder, queue, remaining, zero));
+    }
     loom_value_id_t full, tail;
     IREE_RETURN_IF_ERROR(
         loom_aie2p_native_refill_constant(builder, queue->task, &full));

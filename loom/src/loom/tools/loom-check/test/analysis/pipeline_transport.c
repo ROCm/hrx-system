@@ -130,6 +130,10 @@ static iree_status_t loom_check_test_pipeline_transport_print(
                               : "unproven",
       worker->block_execution_counts ? "exact" : "unknown",
       transport->batch_count, transport->stream_count));
+  if (transport->batch_count > 1) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output, "  prefix_cycles=%" PRIu64 "\n", transport->prefix_cycles));
+  }
   if (transport->induction) {
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         output, "  repetitions=%" PRIu64 " sources_stable=%s\n",
