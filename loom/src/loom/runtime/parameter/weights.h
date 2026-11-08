@@ -205,11 +205,27 @@ iree_status_t loom_runtime_weights_await(loom_runtime_weights_t* weights);
 // Advances native backing release, preserving parameter roots and replay plans.
 // Includes backing accepted by an activation whose later submission failed.
 // The caller first retires all consuming work and excludes new submission.
-// Retained mutable state is independent. The pool owner receives a completion
-// wake; repeated calls join the accepted operation without submitting it again.
-// Reactivation requires terminal completion. Retirement joins pending release.
+// Activation retirement wakes its observer before native release can begin;
+// the pool owner receives native completion. Repeated calls advance this
+// release without resubmitting accepted work. Retained mutable state is
+// independent. Reactivation requires terminal completion. Retirement joins
+// pending release.
 iree_status_t loom_runtime_weights_deactivate(loom_runtime_weights_t* weights,
                                               bool* out_complete);
+
+// Cold outer-thread deactivation, including activation ownership and native
+// unmapping. Producer readiness errors belong to their consumers and do not
+// prevent releasing that model's backing. Shared task workers use deactivate
+// and the owner wake instead of waiting here.
+iree_status_t loom_runtime_weights_deactivate_wait(
+    loom_runtime_weights_t* weights);
+
+// Observes activation ownership independently of final model retirement. The
+// exclusive residency owner attaches before activation and keeps the observer
+// through every accepted release. NULL wake detaches and joins payload access.
+// The callback only schedules an owner turn and must not reenter the plan.
+void loom_runtime_weights_set_activation_observer(
+    loom_runtime_weights_t* weights, loom_runtime_wake_callback_t observer);
 
 // Collects completed native activation records on the serialized owner and
 // reports parameter accounting, separate from state sharing the physical pool.

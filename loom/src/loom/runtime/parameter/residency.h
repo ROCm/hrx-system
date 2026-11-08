@@ -45,8 +45,8 @@ void loom_runtime_residency_cache_free(loom_runtime_residency_cache_t* cache);
 bool loom_runtime_residency_cache_is_empty(
     loom_runtime_residency_cache_t* cache);
 
-// Final output retirement wakes the serialized admission owner. Detachment
-// joins callback access; observers never wait or reenter the cache.
+// Output and activation retirement wake the serialized admission owner.
+// Detachment joins callback access; observers never wait or reenter the cache.
 void loom_runtime_residency_cache_set_observer(
     loom_runtime_residency_cache_t* cache,
     loom_runtime_wake_callback_t observer);

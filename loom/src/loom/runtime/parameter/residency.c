@@ -20,11 +20,11 @@ struct loom_runtime_residency_cache_t {
   // Borrowed permanent virtual source, distinct from reclaimable model history.
   // NULL when permanent allocations do not share this physical budget.
   iree_hal_pool_t* permanent_source;
-  // Serializes final output-credit returns with owner observation/detachment.
-  iree_slim_mutex_t output_mutex;
+  // Serializes credit returns and activation wakes with observer detachment.
+  iree_slim_mutex_t observer_mutex;
   // Accepted output bounds, including independent downstream queue captures.
   uint64_t output_bytes;
-  // Nonblocking owner wake after final output retirement, under output_mutex.
+  // Nonblocking capacity-progress wake, protected by observer_mutex.
   loom_runtime_wake_callback_t observer;
   // Least recently used model history owner, independent of shared weights.
   loom_runtime_residency_t* oldest;
@@ -159,16 +159,25 @@ struct loom_runtime_residency_t {
 void loom_runtime_residency_cache_set_observer(
     loom_runtime_residency_cache_t* cache,
     loom_runtime_wake_callback_t observer) {
-  iree_slim_mutex_lock(&cache->output_mutex);
+  iree_slim_mutex_lock(&cache->observer_mutex);
   cache->observer = observer;
-  iree_slim_mutex_unlock(&cache->output_mutex);
+  iree_slim_mutex_unlock(&cache->observer_mutex);
+}
+
+static void loom_runtime_residency_cache_wake(void* user_data) {
+  loom_runtime_residency_cache_t* cache = user_data;
+  iree_slim_mutex_lock(&cache->observer_mutex);
+  if (cache->observer.wake) {
+    cache->observer.wake(cache->observer.user_data);
+  }
+  iree_slim_mutex_unlock(&cache->observer_mutex);
 }
 
 bool loom_runtime_residency_cache_is_pending(
     loom_runtime_residency_cache_t* cache) {
-  iree_slim_mutex_lock(&cache->output_mutex);
+  iree_slim_mutex_lock(&cache->observer_mutex);
   const bool pending = cache->output_bytes != 0;
-  iree_slim_mutex_unlock(&cache->output_mutex);
+  iree_slim_mutex_unlock(&cache->observer_mutex);
   return pending;
 }
 
@@ -178,12 +187,12 @@ static void loom_runtime_residency_output_release(
     loom_runtime_residency_cache_t* cache = output->cache;
     const uint64_t bytes = output->bytes;
     iree_allocator_free(cache->host_allocator, output);
-    iree_slim_mutex_lock(&cache->output_mutex);
+    iree_slim_mutex_lock(&cache->observer_mutex);
     cache->output_bytes -= bytes;
     if (cache->observer.wake) {
       cache->observer.wake(cache->observer.user_data);
     }
-    iree_slim_mutex_unlock(&cache->output_mutex);
+    iree_slim_mutex_unlock(&cache->observer_mutex);
   }
 }
 
@@ -591,20 +600,46 @@ iree_status_t loom_runtime_residency_cache_trim(
   // Release decisions consume the logical owner ledger. A native allocation
   // and its pending mapping are the same bytes; physical statistics cannot be
   // added to pending logical demand without counting that allocation twice.
-  iree_status_t status = iree_ok_status();
-  for (loom_runtime_residency_group_t* entry = cache->groups.oldest;
-       entry && iree_status_is_ok(status); entry = entry->next) {
-    const loom_runtime_storage_statistics_t memory =
-        loom_runtime_memory_pool_snapshot(cache->pool);
-    const uint64_t remaining = memory.committed_bytes + memory.pending_bytes -
-                               memory.releasing_bytes + memory.abandoned_bytes;
-    if (remaining <= target_bytes) {
-      break;
+  const loom_runtime_storage_statistics_t memory =
+      loom_runtime_memory_pool_snapshot(cache->pool);
+  uint64_t remaining = memory.committed_bytes + memory.pending_bytes -
+                       memory.releasing_bytes + memory.abandoned_bytes;
+  if (cache->releasing_count) {
+    for (loom_runtime_residency_group_t* entry = cache->groups.oldest; entry;
+         entry = entry->next) {
+      if (entry->releasing) {
+        // Release interest also covers activation captures that have not yet
+        // allowed native unmapping. This is victim selection, not free credit.
+        remaining -= loom_runtime_residency_group_live_bytes(entry);
+      }
     }
+  }
+  // Select before submitting: an inline completion can publish backing changes
+  // across several groups, invalidating the accounting epoch being inspected.
+  loom_runtime_residency_group_t* last = NULL;
+  for (loom_runtime_residency_group_t* entry = cache->groups.oldest;
+       entry && remaining > target_bytes; entry = entry->next) {
+    if (entry->active && !loom_runtime_residency_group_is_pinned(entry) &&
+        !entry->releasing) {
+      const uint64_t live_bytes =
+          loom_runtime_residency_group_live_bytes(entry);
+      if (live_bytes) {
+        remaining -= live_bytes;
+        last = entry;
+      }
+    }
+  }
+  iree_status_t status = iree_ok_status();
+  for (loom_runtime_residency_group_t* entry = last ? cache->groups.oldest
+                                                    : NULL;
+       entry && iree_status_is_ok(status); entry = entry->next) {
     if (entry->active && !loom_runtime_residency_group_is_pinned(entry) &&
         !entry->releasing && loom_runtime_residency_group_live_bytes(entry)) {
       bool complete = false;
       status = loom_runtime_residency_group_deactivate(entry, &complete);
+    }
+    if (entry == last) {
+      break;
     }
   }
   return status;
@@ -688,7 +723,8 @@ static iree_status_t loom_runtime_residency_reclaim(void* user_data,
   for (loom_runtime_residency_group_t* entry = cache->groups.oldest;
        entry && remaining > target_bytes; entry = entry->next) {
     const uint64_t live_bytes = loom_runtime_residency_group_live_bytes(entry);
-    if (loom_runtime_residency_group_is_pinned(entry) || !entry->active) {
+    if (!entry->releasing &&
+        (loom_runtime_residency_group_is_pinned(entry) || !entry->active)) {
       pinned_bytes += live_bytes;
     } else {
       remaining -= live_bytes;
@@ -766,7 +802,7 @@ iree_status_t loom_runtime_residency_cache_allocate(
   cache->pool = pool;
   cache->workspace = workspace;
   cache->permanent_source = permanent_source;
-  iree_slim_mutex_initialize(&cache->output_mutex);
+  iree_slim_mutex_initialize(&cache->observer_mutex);
   if (pool) {
     loom_runtime_memory_pool_set_reclaimer(
         pool, (loom_runtime_memory_reclaimer_t){
@@ -787,7 +823,7 @@ void loom_runtime_residency_cache_free(loom_runtime_residency_cache_t* cache) {
     return;
   }
   IREE_ASSERT(loom_runtime_residency_cache_is_empty(cache));
-  iree_slim_mutex_deinitialize(&cache->output_mutex);
+  iree_slim_mutex_deinitialize(&cache->observer_mutex);
   if (cache->pool) {
     loom_runtime_memory_pool_set_reclaimer(
         cache->pool, (loom_runtime_memory_reclaimer_t){0});
@@ -810,6 +846,11 @@ iree_status_t loom_runtime_residency_group_allocate(
   group->weight_count = weight_count;
   for (iree_host_size_t i = 0; i < weight_count; ++i) {
     group->weights[i] = weights[i];
+    if (cache->pool) {
+      loom_runtime_weights_set_activation_observer(
+          weights[i], (loom_runtime_wake_callback_t){
+                          loom_runtime_residency_cache_wake, cache});
+    }
   }
   loom_runtime_residency_group_append(group);
   *out_group = group;
@@ -824,6 +865,12 @@ void loom_runtime_residency_group_free(loom_runtime_residency_group_t* group) {
   loom_runtime_residency_group_unlink_activation(group);
   if (group->releasing) {
     --group->cache->releasing_count;
+  }
+  if (group->cache->pool) {
+    for (iree_host_size_t i = 0; i < group->weight_count; ++i) {
+      loom_runtime_weights_set_activation_observer(
+          group->weights[i], (loom_runtime_wake_callback_t){0});
+    }
   }
   iree_allocator_free(group->host_allocator, group);
 }
@@ -1107,9 +1154,9 @@ static bool loom_runtime_residency_state_budget(
   *out_resident_bytes =
       loom_runtime_residency_mutable_bytes(cache, parameter_bytes);
   const uint64_t workspace_capacity = remaining;
-  iree_slim_mutex_lock(&cache->output_mutex);
+  iree_slim_mutex_lock(&cache->observer_mutex);
   const uint64_t output_bytes = cache->output_bytes;
-  iree_slim_mutex_unlock(&cache->output_mutex);
+  iree_slim_mutex_unlock(&cache->observer_mutex);
   if (output_bytes > remaining) {
     return false;
   }
@@ -1323,9 +1370,9 @@ static iree_status_t loom_runtime_residency_acquire_parameters(
     iree_atomic_ref_count_init(&output->ref_count);
     output->cache = residency->cache;
     output->bytes = residency->output_bytes;
-    iree_slim_mutex_lock(&output->cache->output_mutex);
+    iree_slim_mutex_lock(&output->cache->observer_mutex);
     output->cache->output_bytes += output->bytes;
-    iree_slim_mutex_unlock(&output->cache->output_mutex);
+    iree_slim_mutex_unlock(&output->cache->observer_mutex);
     residency->output = output;
   }
   ++residency->pin_count;
@@ -1489,7 +1536,22 @@ iree_status_t loom_runtime_residency_acquire_wait(
         !residency->cache->releasing_count) {
       break;
     }
-    status = loom_runtime_memory_pool_await(pool);
+    // Eviction can still be joining loader captures before it submits native
+    // unmapping. A physical-pool wait alone would return immediately then.
+    for (loom_runtime_residency_group_t* group =
+             residency->cache->groups.oldest;
+         group && iree_status_is_ok(status); group = group->next) {
+      if (!group->releasing) {
+        continue;
+      }
+      for (iree_host_size_t i = 0;
+           i < group->weight_count && iree_status_is_ok(status); ++i) {
+        status = loom_runtime_weights_deactivate_wait(group->weights[i]);
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_runtime_memory_pool_await(pool);
+    }
     if (iree_status_is_ok(status)) {
       status = loom_runtime_residency_try_acquire(residency, &admitted);
     }

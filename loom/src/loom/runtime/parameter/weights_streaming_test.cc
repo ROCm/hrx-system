@@ -244,7 +244,7 @@ TEST_P(WindowedWeightsTest, CapturedInputSubmissionReturnsWithTheWorkerHeld) {
   ASSERT_NO_FATAL_FAILURE(VerifyWindowedStorage(true));
 }
 
-class RejectedReadWeightsTest : public WindowedWeightsTest {
+class ReadQueueWeightsTest : public WindowedWeightsTest {
  protected:
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(WindowedWeightsTest::SetUp());
@@ -253,7 +253,7 @@ class RejectedReadWeightsTest : public WindowedWeightsTest {
         .features = transfer_->features,
         .execution_resources = transfer_->execution_resources,
     };
-    rejected_transfer_.target = transfer_;
+    read_queue_.target = transfer_;
     static const iree_hal_queue_vtable_t vtable = {
         .destroy = [](iree_hal_queue_t*) {},
         .barrier =
@@ -264,6 +264,17 @@ class RejectedReadWeightsTest : public WindowedWeightsTest {
               auto* self = reinterpret_cast<ReadQueue*>(queue);
               return iree_hal_queue_barrier(self->target, waits, signals,
                                             barriers, flags);
+            },
+        .transfer =
+            [](iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
+               iree_hal_semaphore_list_t signals,
+               iree_host_size_t operation_count,
+               const iree_hal_transfer_operation_t* operations,
+               const iree_hal_queue_barriers_t* barriers) {
+              auto* self = reinterpret_cast<ReadQueue*>(queue);
+              return iree_hal_queue_transfer(self->target, waits, signals,
+                                             operation_count, operations,
+                                             barriers);
             },
         .read =
             [](iree_hal_queue_t* queue, iree_hal_semaphore_list_t waits,
@@ -276,24 +287,48 @@ class RejectedReadWeightsTest : public WindowedWeightsTest {
               if (++self->count == self->reject_ordinal) {
                 return iree_status_from_code(IREE_STATUS_RESOURCE_EXHAUSTED);
               }
+              {
+                std::lock_guard<std::mutex> lock(self->mutex);
+                if (self->retain_read && !self->retained) {
+                  iree_hal_buffer_retain(buffer);
+                  self->retained = buffer;
+                }
+              }
               return iree_hal_queue_read(self->target, waits, signals, file,
                                          offset, buffer, buffer_offset, length,
                                          barriers, flags);
             },
     };
     iree_hal_queue_initialize(iree_hal_queue_family(transfer_), &params,
-                              &vtable, &rejected_transfer_.base);
+                              &vtable, &read_queue_.base);
     initialized_ = true;
   }
 
   void TearDown() override {
+    ReleaseRead();
+    if (storage_owner_) {
+      loom_runtime_residency_cache_set_observer(ResidencyCache(), {});
+      loom_runtime_weights_set_retirement_observer(plans_[0], nullptr, nullptr);
+    }
     WindowedWeightsTest::TearDown();
     if (initialized_) {
-      iree_hal_queue_release(&rejected_transfer_.base);
+      iree_hal_queue_release(&read_queue_.base);
     }
   }
 
   void VerifyRejectedRead(const char* policy, size_t reject_ordinal);
+  void PrepareRetainedRead();
+
+  void ReleaseRead() {
+    iree_hal_buffer_t* retained = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(read_queue_.mutex);
+      read_queue_.retain_read = false;
+      retained = read_queue_.retained;
+      read_queue_.retained = nullptr;
+    }
+    iree_hal_buffer_release(retained);
+  }
 
   struct ReadQueue {
     // Queue prefix for callbacks forwarding to the real transfer
@@ -304,24 +339,34 @@ class RejectedReadWeightsTest : public WindowedWeightsTest {
     // Observed read submissions from independently progressing lane tasks.
     std::atomic<size_t> count = 0;
     // One native submission to reject; all earlier reads execute normally.
-    size_t reject_ordinal = 1;
+    size_t reject_ordinal = 0;
+    // Serializes final capture release with concurrent read submission.
+    std::mutex mutex;
+    // Retains one native read capture beyond successful device readiness.
+    bool retain_read = false;
+    // Owned read view, released explicitly or during fixture cleanup.
+    iree_hal_buffer_t* retained = nullptr;
   };
-  // File-submission dependency with an injected native rejection.
-  ReadQueue rejected_transfer_;
+  // Real file-submission dependency with controlled rejection or retirement.
+  ReadQueue read_queue_;
+  // Admission-owner notification, independent of final model removal.
+  loom_runtime_test_weight_activation_wake_t capacity_wake_;
+  // Model-owner notification whose detachment must preserve capacity wakes.
+  loom_runtime_test_weight_activation_wake_t retirement_wake_;
   // The queue is released only after successful fixture initialization.
   bool initialized_ = false;
 };
 
-void RejectedReadWeightsTest::VerifyRejectedRead(const char* policy,
-                                                 size_t reject_ordinal) {
-  rejected_transfer_.reject_ordinal = reject_ordinal;
+void ReadQueueWeightsTest::VerifyRejectedRead(const char* policy,
+                                              size_t reject_ordinal) {
+  read_queue_.reject_ordinal = reject_ordinal;
   ASSERT_NO_FATAL_FAILURE(WriteWindowedCheckpoint(path_.path()));
   ASSERT_NO_FATAL_FAILURE(
       WriteWindowedCheckpoint(adapter_path_.path(), 100000));
   IREE_ASSERT_OK(Compile(0, "windowed"));
   const auto root = Root(0, 0);
   IREE_ASSERT_OK(loom_runtime_weights_allocate(
-      device_, &rejected_transfer_.base, dispatch_,
+      device_, &read_queue_.base, dispatch_,
       loom_runtime_pool_storage(storage_owner_), pool_,
       loom_runtime_pool_weight_geometry(storage_owner_), nullptr,
       loom_runtime_pool_workspace(storage_owner_), 0, 1, &root, host_allocator_,
@@ -340,7 +385,7 @@ void RejectedReadWeightsTest::VerifyRejectedRead(const char* policy,
                         loom_runtime_weights_await(plans_[0]));
   IREE_ASSERT_OK(loom_runtime_weights_await_retirement(plans_[0]));
   EXPECT_TRUE(loom_runtime_weights_is_retired(plans_[0]));
-  EXPECT_GE(rejected_transfer_.count.load(), reject_ordinal);
+  EXPECT_GE(read_queue_.count.load(), reject_ordinal);
   const auto activity = loom_runtime_weights_activity(plans_[0]);
   EXPECT_EQ(activity.activations, 1u);
   EXPECT_EQ(activity.read_bytes, 2097248u);
@@ -351,16 +396,154 @@ void RejectedReadWeightsTest::VerifyRejectedRead(const char* policy,
             activity.activations);
   EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).read_bytes,
             activity.read_bytes);
+  IREE_ASSERT_OK(loom_runtime_weights_deactivate_wait(plans_[0]));
+  EXPECT_EQ(loom_runtime_weights_memory_usage(plans_[0]).committed_bytes, 0u);
 }
 
-TEST_P(RejectedReadWeightsTest,
+TEST_P(ReadQueueWeightsTest,
        FailedReadRetiresTheAcceptedProducerWithoutReplay) {
   ASSERT_NO_FATAL_FAILURE(VerifyRejectedRead("direct_policy.loom", 1));
 }
 
-TEST_P(RejectedReadWeightsTest,
+TEST_P(ReadQueueWeightsTest,
        RefillFailureRetiresAcceptedInputWindowsWithoutReplay) {
   ASSERT_NO_FATAL_FAILURE(VerifyRejectedRead("streaming_policy.loom", 257));
+}
+
+void ReadQueueWeightsTest::PrepareRetainedRead() {
+  ASSERT_NO_FATAL_FAILURE(WriteWindowedCheckpoint(path_.path()));
+  IREE_ASSERT_OK(Compile(0, "windowed"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(loom_runtime_weights_allocate(
+      device_, &read_queue_.base, dispatch_,
+      loom_runtime_pool_storage(storage_owner_), pool_,
+      loom_runtime_pool_weight_geometry(storage_owner_), nullptr,
+      loom_runtime_pool_workspace(storage_owner_), 0, 1, &root, host_allocator_,
+      &plans_[0]));
+  IREE_ASSERT_OK(Prepare(plans_[0], {path_.path()}));
+  plan_count_ = 1;
+  IREE_ASSERT_OK(Register(0, 0, 1));
+}
+
+TEST_P(ReadQueueWeightsTest, ReadinessDoesNotReleaseActivationCaptures) {
+  ASSERT_NO_FATAL_FAILURE(PrepareRetainedRead());
+  loom_runtime_residency_cache_set_observer(
+      ResidencyCache(),
+      {loom_runtime_test_weight_activation_wake_t::Notify, &capacity_wake_});
+  for (bool observe_model : {true, false}) {
+    SCOPED_TRACE(observe_model);
+    {
+      std::lock_guard<std::mutex> lock(read_queue_.mutex);
+      read_queue_.retain_read = true;
+    }
+    IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[0]));
+    ASSERT_NO_FATAL_FAILURE(Run(0, 525331));
+    loom_runtime_residency_release(residencies_[0]);
+    if (observe_model) {
+      loom_runtime_weights_set_retirement_observer(
+          plans_[0], loom_runtime_test_weight_activation_wake_t::Notify,
+          &retirement_wake_);
+    }
+    const auto before = loom_runtime_weights_memory_usage(plans_[0]);
+    const auto activity = loom_runtime_weights_activity(plans_[0]);
+    bool complete = true;
+    IREE_ASSERT_OK(
+        loom_runtime_residency_deactivate(residencies_[0], &complete));
+    EXPECT_FALSE(complete);
+    EXPECT_EQ(loom_runtime_weights_activity(plans_[0]).deactivations,
+              activity.deactivations);
+    const auto pending = loom_runtime_weights_memory_usage(plans_[0]);
+    EXPECT_EQ(pending.committed_bytes + pending.pending_bytes,
+              before.committed_bytes + before.pending_bytes);
+    EXPECT_EQ(pending.releasing_bytes, 0u);
+    loom_runtime_residency_admission_t admission;
+    IREE_ASSERT_OK(
+        loom_runtime_residency_try_admit(residencies_[0], &admission));
+    EXPECT_EQ(admission, LOOM_RUNTIME_RESIDENCY_ADMISSION_DEFERRED);
+    ReleaseRead();
+    capacity_wake_.Await();
+    if (observe_model) {
+      retirement_wake_.Await();
+      loom_runtime_weights_set_retirement_observer(plans_[0], nullptr, nullptr);
+    }
+    // The wake advances the existing release interest without a loader wait.
+    IREE_ASSERT_OK(loom_runtime_residency_cache_query_status(ResidencyCache()));
+    IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+    IREE_ASSERT_OK(
+        loom_runtime_residency_deactivate(residencies_[0], &complete));
+    ASSERT_TRUE(complete);
+    EXPECT_EQ(loom_runtime_weights_memory_usage(plans_[0]).committed_bytes, 0u);
+  }
+  // Cached roots and command recordings survived both evictions.
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 525331));
+}
+
+TEST_P(ReadQueueWeightsTest, ModelRemovalPreservesPendingEvictionWake) {
+  ASSERT_NO_FATAL_FAILURE(PrepareRetainedRead());
+  read_queue_.retain_read = true;
+  loom_runtime_residency_cache_set_observer(
+      ResidencyCache(),
+      {loom_runtime_test_weight_activation_wake_t::Notify, &capacity_wake_});
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[0]));
+  ASSERT_NO_FATAL_FAILURE(Run(0, 525331));
+  loom_runtime_residency_release(residencies_[0]);
+  bool complete = true;
+  IREE_ASSERT_OK(loom_runtime_residency_deactivate(residencies_[0], &complete));
+  EXPECT_FALSE(complete);
+  loom_runtime_weights_set_retirement_observer(
+      plans_[0], loom_runtime_test_weight_activation_wake_t::Notify,
+      &retirement_wake_);
+  iree_hal_command_buffer_release(commands_[0]);
+  commands_[0] = nullptr;
+  iree_hal_buffer_release(buffers_[0][0]);
+  buffers_[0][0] = nullptr;
+  EXPECT_FALSE(loom_runtime_weights_is_retired(plans_[0]));
+  ReleaseRead();
+  capacity_wake_.Await();
+  while (!loom_runtime_weights_is_retired(plans_[0])) {
+    retirement_wake_.Await();
+  }
+  IREE_ASSERT_OK(loom_runtime_residency_cache_query_status(ResidencyCache()));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_runtime_residency_deactivate(residencies_[0], &complete));
+  ASSERT_TRUE(complete);
+  EXPECT_TRUE(loom_runtime_weights_is_retired(plans_[0]));
+}
+
+TEST_P(ReadQueueWeightsTest, PendingActivationReleasePreservesResidentPeer) {
+  ASSERT_NO_FATAL_FAILURE(PrepareRetainedRead());
+  IREE_ASSERT_OK(Compile(1, "windowed"));
+  const auto root = Root(1, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, {path_.path()}));
+  IREE_ASSERT_OK(Register(1, 1, 1));
+  read_queue_.retain_read = true;
+  loom_runtime_residency_cache_set_observer(
+      ResidencyCache(),
+      {loom_runtime_test_weight_activation_wake_t::Notify, &capacity_wake_});
+  IREE_ASSERT_OK(loom_runtime_residency_acquire(residencies_[0]));
+  ASSERT_NO_FATAL_FAILURE(Run(0, 525331));
+  loom_runtime_residency_release(residencies_[0]);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 525331));
+  const auto peer = loom_runtime_weights_memory_usage(plans_[1]);
+  const auto memory = loom_runtime_memory_pool_statistics(pool_);
+  const auto first = loom_runtime_weights_memory_usage(plans_[0]);
+  const uint64_t target = memory.committed_bytes + memory.pending_bytes -
+                          first.committed_bytes - first.pending_bytes;
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(ResidencyCache(), target));
+  // The first requested release covers the target even before native unmapping
+  // can begin. A second observation must not select another useful model.
+  IREE_ASSERT_OK(loom_runtime_residency_cache_trim(ResidencyCache(), target));
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[1]).deactivations, 0u);
+  EXPECT_EQ(loom_runtime_weights_memory_usage(plans_[1]).committed_bytes,
+            peer.committed_bytes);
+  ReleaseRead();
+  capacity_wake_.Await();
+  IREE_ASSERT_OK(loom_runtime_residency_cache_query_status(ResidencyCache()));
+  IREE_ASSERT_OK(loom_runtime_memory_pool_await(pool_));
+  IREE_ASSERT_OK(loom_runtime_residency_cache_query_status(ResidencyCache()));
+  EXPECT_EQ(loom_runtime_weights_memory_usage(plans_[0]).committed_bytes, 0u);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 525331));
+  EXPECT_EQ(loom_runtime_weights_activity(plans_[1]).activations, 1u);
 }
 
 class CoarseWindowWeightsTest : public WindowedWeightsTest {
@@ -427,7 +610,7 @@ INSTANTIATE_TEST_SUITE_P(Streaming, WindowedWeightsTest,
                          ::testing::Values(false, true));
 INSTANTIATE_TEST_SUITE_P(Streaming, CoarseWindowWeightsTest,
                          ::testing::Values(true));
-INSTANTIATE_TEST_SUITE_P(Streaming, RejectedReadWeightsTest,
+INSTANTIATE_TEST_SUITE_P(Streaming, ReadQueueWeightsTest,
                          ::testing::Values(true));
 
 }  // namespace loom_runtime::testing

@@ -73,6 +73,9 @@ struct loom_runtime_weights_t {
     iree_async_semaphore_timepoint_t backing_timepoint;
     // Accepted I/O/preparation views, including after failed readiness.
     loom_runtime_retirement_t retirement;
+    // Residency owner awaiting activation retirement before releasing backing.
+    // Final-model observation reuses the plan retirement observer below.
+    loom_runtime_wake_callback_t observer;
     // Owned lane readiness handles imported into the consuming model timeline.
     iree_hal_semaphore_t* semaphores[WEIGHT_COMPLETIONS];
     // Last submitted preparation or canonical read on each initialized lane.
@@ -1365,6 +1368,28 @@ static void loom_runtime_weights_backing_completed(
   loom_runtime_retirement_release(&weights->activation.retirement);
 }
 
+static void loom_runtime_weights_activation_retired(void* user_data) {
+  loom_runtime_weights_t* weights = user_data;
+  // The final-retirement mutex joins both callback payloads. The activation
+  // retirement mutex already joins this wrapper with plan destruction.
+  iree_slim_mutex_lock(&weights->retirement.mutex);
+  const loom_runtime_wake_callback_t observer = weights->activation.observer;
+  if (observer.wake) {
+    observer.wake(observer.user_data);
+  }
+  if (weights->retirement.wake) {
+    weights->retirement.wake(weights->retirement.user_data);
+  }
+  iree_slim_mutex_unlock(&weights->retirement.mutex);
+}
+
+void loom_runtime_weights_set_activation_observer(
+    loom_runtime_weights_t* weights, loom_runtime_wake_callback_t observer) {
+  iree_slim_mutex_lock(&weights->retirement.mutex);
+  weights->activation.observer = observer;
+  iree_slim_mutex_unlock(&weights->retirement.mutex);
+}
+
 iree_status_t loom_runtime_weights_allocate(
     iree_hal_device_t* device, iree_hal_queue_t* transfer,
     iree_hal_queue_t* dispatch, iree_hal_pool_t* storage_pool,
@@ -1386,6 +1411,9 @@ iree_status_t loom_runtime_weights_allocate(
   weights->workspace = workspace;
   loom_runtime_retirement_initialize(&weights->retirement);
   loom_runtime_retirement_initialize(&weights->activation.retirement);
+  loom_runtime_retirement_set_observer(&weights->activation.retirement,
+                                       loom_runtime_weights_activation_retired,
+                                       weights);
   *out_weights = weights;
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_host_size_t capacity =
@@ -1666,11 +1694,15 @@ iree_status_t loom_runtime_weights_deactivate(loom_runtime_weights_t* weights,
     *out_complete = true;
     return iree_ok_status();
   }
+  // Readiness permits device consumers to run before the loader and its queue
+  // captures release ownership. Those borrowers still use the mapped backing
+  // and immutable operation results; their final release wakes the owner.
+  if (!loom_runtime_weights_collect_backing(weights)) {
+    return iree_ok_status();
+  }
   IREE_TRACE_ZONE_BEGIN(z0);
   IREE_TRACE_ZONE_APPEND_VALUE_I64(
       z0, (int64_t)weights->statistics.committed_bytes);
-  const bool backing_complete = loom_runtime_weights_collect_backing(weights);
-  IREE_ASSERT(backing_complete);
   loom_runtime_virtual_buffer_t** reservations = NULL;
   iree_status_t status = iree_allocator_malloc_array(
       weights->host_allocator, weights->storage_count, sizeof(*reservations),
@@ -1709,6 +1741,22 @@ iree_status_t loom_runtime_weights_deactivate(loom_runtime_weights_t* weights,
   return status;
 }
 
+iree_status_t loom_runtime_weights_deactivate_wait(
+    loom_runtime_weights_t* weights) {
+  // Producer readiness belongs to the consuming model. Eviction joins its
+  // actual ownership even when that producer failed, then releases backing.
+  IREE_RETURN_IF_ERROR(loom_runtime_workspace_await_retirement(
+      weights->workspace, &weights->activation.retirement));
+  loom_runtime_weights_await_backing(weights);
+  bool complete = false;
+  IREE_RETURN_IF_ERROR(loom_runtime_weights_deactivate(weights, &complete));
+  if (!complete) {
+    loom_runtime_memory_operation_await(weights->deactivation);
+    IREE_RETURN_IF_ERROR(loom_runtime_weights_deactivate(weights, &complete));
+  }
+  return iree_ok_status();
+}
+
 loom_runtime_storage_statistics_t loom_runtime_weights_statistics(
     loom_runtime_weights_t* weights) {
   // Accounting is published by the serialized owner, never the cold executor.
@@ -1745,8 +1793,6 @@ void loom_runtime_weights_set_retirement_observer(
     loom_runtime_memory_operation_set_observer(weights->deactivation, wake,
                                                user_data);
     loom_runtime_retirement_set_observer(&weights->retirement, wake, user_data);
-    loom_runtime_retirement_set_observer(&weights->activation.retirement, wake,
-                                         user_data);
   }
 }
 
