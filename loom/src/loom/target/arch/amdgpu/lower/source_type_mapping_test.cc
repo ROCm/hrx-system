@@ -181,6 +181,8 @@ class AmdgpuSourceTypeMappingTest : public ::testing::Test {
   loom_target_low_descriptor_registry_t registry_ = {};
   // Facts supplied by the mapping caller.
   loom_value_fact_table_t facts_ = {};
+  // Target capabilities borrowed by the lowering options.
+  loom_target_facts_t target_facts_ = {};
   // Active policy and fact-table binding.
   loom_low_lower_options_t options_ = {};
   // Function-local lowering and analysis owner.
@@ -231,10 +233,9 @@ TEST_F(AmdgpuSourceTypeMappingTest, PredicateArgumentTransportAndBodyWidths) {
   IREE_ASSERT_OK(
       loom_kernel_return_build(&builder, LOOM_LOCATION_UNKNOWN, &return_op));
   mapping_.source_function = loom_func_like_cast(module_, kernel);
-  loom_target_facts_t target_facts = {};
-  target_facts.storage.export_plan.abi_kind = LOOM_TARGET_ABI_HAL_KERNEL;
-  loom_target_bundle_storage_rebind(&target_facts.storage);
-  options_.target_facts = &target_facts;
+  target_facts_.storage.export_plan.abi_kind = LOOM_TARGET_ABI_HAL_KERNEL;
+  loom_target_bundle_storage_rebind(&target_facts_.storage);
+  options_.target_facts = &target_facts_;
   const auto* entry = loom_region_entry_block(loom_kernel_def_body(kernel));
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(types); ++i) {
     SCOPED_TRACE(i + 1);
