@@ -24,10 +24,12 @@ extern "C" {
 // target definition and function target reference.
 //
 // Equal producer-owned target context ordinals share one definition. An exact
-// authored target definition is projected directly into the clone; a context
-// without an exact authored witness is materialized from its resolved target
-// facts through the owning provider. Semantically equivalent but independently
-// produced contexts remain distinct.
+// authored target definition is projected directly into the clone; when
+// distinct exact authored definitions witness the same context, one is used by
+// all its versions so Low call target identity survives serialization. A
+// context without an exact authored witness is materialized from its resolved
+// target facts through the owning provider. Semantically equivalent but
+// independently produced contexts remain distinct.
 //
 // Source IDs are preserved by the complete module clone.
 // The source module and function versions remain unchanged. A non-target

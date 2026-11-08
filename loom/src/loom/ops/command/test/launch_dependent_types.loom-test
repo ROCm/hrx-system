@@ -1,0 +1,33 @@
+// RUN: verify
+
+// A staged channel contract and runtime storage retain different roles while
+// dependent dimensions are instantiated through one formal argument slice.
+command.decl @declared_stream(%rows: index, %columns: index, %records: channel<tile<[%rows]x[%columns]xi32>>) launch(%input: view<[%rows]x[%columns]xi32>, %output: buffer)
+
+func.def @launch_declared_stream(%m: index, %n: index, %records: channel<tile<[%m]x[%n]xi32>>, %input: view<[%m]x[%n]xi32>, %output: buffer) {
+  command.launch @declared_stream[%m, %n, %records](%input, %output) : [index, index, channel<tile<[%m]x[%n]xi32>>](view<[%m]x[%n]xi32>, buffer)
+  func.return
+}
+
+// ====
+
+command.def @defined_stream(%rows: index, %columns: index, %records: channel<tile<[%rows]x[%columns]xi32>>) launch(%input: view<[%rows]x[%columns]xi32>, %output: buffer) {
+  command.return
+}
+
+func.def @launch_defined_stream(%m: index, %n: index, %records: channel<tile<[%m]x[%n]xi32>>, %input: view<[%m]x[%n]xi32>, %output: buffer) {
+  command.launch @defined_stream[%m, %n, %records](%input, %output) : [index, index, channel<tile<[%m]x[%n]xi32>>](view<[%m]x[%n]xi32>, buffer)
+  func.return
+}
+
+func.def @wrong_channel_shape(%m: index, %n: index, %records: channel<tile<[%n]x[%m]xi32>>, %input: view<[%m]x[%n]xi32>, %output: buffer) {
+  // ERROR@+1: TYPE/001 "specialization 2" "program specialization argument 2"
+  command.launch @defined_stream[%m, %n, %records](%input, %output) : [index, index, channel<tile<[%n]x[%m]xi32>>](view<[%m]x[%n]xi32>, buffer)
+  func.return
+}
+
+func.def @wrong_storage_shape(%m: index, %n: index, %records: channel<tile<[%m]x[%n]xi32>>, %input: view<[%n]x[%m]xi32>, %output: buffer) {
+  // ERROR@+1: TYPE/001 "binding 0" "program launch binding 0"
+  command.launch @defined_stream[%m, %n, %records](%input, %output) : [index, index, channel<tile<[%m]x[%n]xi32>>](view<[%n]x[%m]xi32>, buffer)
+  func.return
+}

@@ -556,8 +556,9 @@ iree_status_t loom_low_lower_descriptor_matrix_reject(
 typedef struct loom_low_lower_selected_plan_view_t {
   // Source op this selected plan lowers.
   const loom_op_t* source_op;
-  // Target-owned plan selected during planning. Shared rules and function
-  // storage return an empty plan because their data is owned by core lowering.
+  // Target callback or descriptor-matrix plan selected during planning.
+  // All other selections return an empty plan; their payloads belong to core
+  // lowering and cannot be interpreted as target plan IDs or data.
   loom_low_lower_plan_t plan;
   // True when demand analysis proved the source op has no required low storage.
   bool elided;

@@ -238,6 +238,9 @@ static iree_status_t loom_kernel_verify_entry_operand_group(
       .source_values = expected_values,
       .target_values = actual_values.values,
       .count = actual_values.count,
+      .flags = actual_values.count > 2
+                   ? LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE
+                   : 0,
       .next = enclosing_remap,
   };
   for (uint16_t i = 0; i < actual_values.count; ++i) {
@@ -1098,6 +1101,9 @@ iree_status_t loom_kernel_launch_verify(const loom_module_t* module,
       .source_values = workload_arg_ids,
       .target_values = workloads.values,
       .count = iree_min(workloads.count, workload_arg_count),
+      .flags = workload_arg_count > 2
+                   ? LOOM_TYPE_VALUE_REMAP_FLAG_SOURCE_DEFINITION_SLICE
+                   : 0,
   };
   const loom_value_slice_t arguments = loom_kernel_launch_arguments(op);
   return loom_kernel_verify_entry_operand_group(

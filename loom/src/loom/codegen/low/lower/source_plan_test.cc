@@ -42,6 +42,8 @@ class LowLowerSourcePlanTest : public ::testing::Test {
     loom_op_kind_t source_op_kind = {};
     bool source_order_matches = false;
     bool elided = false;
+    // Whether the target-facing view exposes a target-owned lowering recipe.
+    bool has_target_plan = false;
   };
 
   struct SourcePlanObservation {
@@ -266,6 +268,8 @@ class LowLowerSourcePlanTest : public ::testing::Test {
       observer->plans[i].source_order_matches =
           plan.source_op == observer->expected_source_ops[i];
       observer->plans[i].elided = plan.elided;
+      observer->plans[i].has_target_plan =
+          !loom_low_lower_plan_is_empty(plan.plan);
     }
     if (observer->control.first) {
       loom_builder_t* builder = loom_low_lower_context_builder(context);
@@ -1328,6 +1332,7 @@ TEST_F(LowLowerSourcePlanTest,
   loom_op_t* exit_op = nullptr;
   IREE_ASSERT_OK(loom_test_yield_build(&body_builder, &invoke_result, 1,
                                        LOOM_LOCATION_UNKNOWN, &exit_op));
+  observer_.expected_source_ops[0] = invoke_op;
 
   IREE_ASSERT_OK(loom_value_fact_table_initialize(
       &fact_table_, &analysis_arena_, module_->values.count));
@@ -1342,6 +1347,9 @@ TEST_F(LowLowerSourcePlanTest,
   ASSERT_NE(result_.low_func_op, nullptr);
   EXPECT_GT(observer_.type_mapping.planning_queries, 0u);
   EXPECT_EQ(observer_.type_mapping.emission_queries, 0u);
+  ASSERT_EQ(observer_.plan_count, 1u);
+  EXPECT_TRUE(observer_.plans[0].source_order_matches);
+  EXPECT_FALSE(observer_.plans[0].has_target_plan);
   loom_region_t* low_body =
       loom_func_like_body(loom_func_like_cast(module_, result_.low_func_op));
   ASSERT_NE(low_body, nullptr);

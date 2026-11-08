@@ -1,0 +1,88 @@
+// RUN: verify
+
+// A resident entry can receive more than two independently owned channels.
+pipeline.def<kernel> @resident_inputs() run(%first: channel<tile<16xi32>>, %second: channel<tile<16xi32>>, %third: channel<tile<16xi32>>, %fourth: channel<tile<16xi32>>, %weights: buffer, %output: buffer) {
+}
+
+func.def @launch_resident(%first: channel<tile<16xi32>>, %second: channel<tile<16xi32>>, %third: channel<tile<16xi32>>, %fourth: channel<tile<16xi32>>, %weights: buffer, %output: buffer) {
+  kernel.launch @resident_inputs(%first, %second, %third, %fourth, %weights, %output) : (channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, channel<tile<16xi32>>, buffer, buffer)
+  func.return
+}
+
+// ====
+
+// Run types can reference both the leading specialization slice and the
+// nonzero-origin run slice of the same declaration's formal arguments.
+pipeline.decl<kernel> @dependent_channels(%batch: index, %rows: index, %columns: index) run(%length: index, %records: channel<tile<[%rows]x[%columns]xi32>>, %scratch: channel<tile<[%length]xi32>>)
+
+func.def @launch_declared_channels(%b: index, %m: index, %n: index, %size: index, %records: channel<tile<[%m]x[%n]xi32>>, %scratch: channel<tile<[%size]xi32>>) {
+  kernel.launch @dependent_channels[%b, %m, %n](%size, %records, %scratch) : [index, index, index](index, channel<tile<[%m]x[%n]xi32>>, channel<tile<[%size]xi32>>)
+  func.return
+}
+
+// ====
+
+pipeline.def<kernel> @defined_channels(%batch: index, %rows: index, %columns: index) run(%length: index, %records: channel<tile<[%rows]x[%columns]xi32>>, %scratch: channel<tile<[%length]xi32>>) {
+}
+
+func.def @launch_defined_channels(%b: index, %m: index, %n: index, %size: index, %records: channel<tile<[%m]x[%n]xi32>>, %scratch: channel<tile<[%size]xi32>>) {
+  kernel.launch @defined_channels[%b, %m, %n](%size, %records, %scratch) : [index, index, index](index, channel<tile<[%m]x[%n]xi32>>, channel<tile<[%size]xi32>>)
+  func.return
+}
+
+func.def @wrong_specialized_shape(%b: index, %m: index, %n: index, %size: index, %records: channel<tile<[%n]x[%m]xi32>>, %scratch: channel<tile<[%size]xi32>>) {
+  // ERROR@+1: TYPE/001 "argument 1" "pipeline launch binding 1"
+  kernel.launch @defined_channels[%b, %m, %n](%size, %records, %scratch) : [index, index, index](index, channel<tile<[%n]x[%m]xi32>>, channel<tile<[%size]xi32>>)
+  func.return
+}
+
+func.def @wrong_run_shape(%b: index, %m: index, %n: index, %size: index, %records: channel<tile<[%m]x[%n]xi32>>, %scratch: channel<tile<[%m]xi32>>) {
+  // ERROR@+1: TYPE/001 "argument 2" "pipeline launch binding 2"
+  kernel.launch @defined_channels[%b, %m, %n](%size, %records, %scratch) : [index, index, index](index, channel<tile<[%m]x[%n]xi32>>, channel<tile<[%m]xi32>>)
+  func.return
+}
+
+// ====
+
+// Configured kernels have independent workload and body definition slices.
+kernel.decl @configured_channels(%rows: index, %columns: index, %host_records: channel<tile<[%rows]x[%columns]xi32>>) launch(%width: index, %height: index, %device_records: channel<tile<[%width]x[%height]xi32>>)
+
+func.def @launch_configured_channels(%m: index, %n: index, %records: channel<tile<[%m]x[%n]xi32>>) {
+  kernel.launch @configured_channels[%m, %n, %records](%m, %n, %records) : [index, index, channel<tile<[%m]x[%n]xi32>>](index, index, channel<tile<[%m]x[%n]xi32>>)
+  func.return
+}
+
+// ====
+
+kernel.def @configured_definition(%rows: index, %columns: index, %host_records: channel<tile<[%rows]x[%columns]xi32>>) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%width: index, %height: index, %device_records: channel<tile<[%width]x[%height]xi32>>) {
+  kernel.return
+}
+
+func.def @launch_configured_definition(%m: index, %n: index, %records: channel<tile<[%m]x[%n]xi32>>) {
+  kernel.launch @configured_definition[%m, %n, %records](%m, %n, %records) : [index, index, channel<tile<[%m]x[%n]xi32>>](index, index, channel<tile<[%m]x[%n]xi32>>)
+  func.return
+}
+
+func.def @wrong_configured_shape(%m: index, %n: index, %records: channel<tile<[%n]x[%m]xi32>>) {
+  // ERROR@+1: TYPE/001 "workload 2" "kernel workload 2"
+  kernel.launch @configured_definition[%m, %n, %records](%n, %m, %records) : [index, index, channel<tile<[%n]x[%m]xi32>>](index, index, channel<tile<[%n]x[%m]xi32>>)
+  func.return
+}
+
+// ====
+
+kernel.entry.decl @resolved_channels(%rows: index, %columns: index, %records: channel<tile<[%rows]x[%columns]xi32>>)
+
+func.def @dispatch_resolved_channels(%groups: index, %m: index, %n: index, %records: channel<tile<[%m]x[%n]xi32>>) {
+  kernel.dispatch @resolved_channels[%groups](%m, %n, %records) : [index](index, index, channel<tile<[%m]x[%n]xi32>>)
+  func.return
+}
+
+func.def @wrong_dispatch_shape(%groups: index, %m: index, %n: index, %records: channel<tile<[%n]x[%m]xi32>>) {
+  // ERROR@+1: TYPE/001 "argument 2" "kernel entry ABI argument 2"
+  kernel.dispatch @resolved_channels[%groups](%m, %n, %records) : [index](index, index, channel<tile<[%n]x[%m]xi32>>)
+  func.return
+}
