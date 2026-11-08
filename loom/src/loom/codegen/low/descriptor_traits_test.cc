@@ -280,7 +280,7 @@ TEST(LowDescriptorTraitsTest, UniqueIdentityIsNotPureAndCannotBeCse) {
   EXPECT_FALSE(loom_traits_has_side_effects(traits));
 }
 
-TEST(LowDescriptorTraitsTest, ImplicitStateResultIsNonDeterministic) {
+TEST(LowDescriptorTraitsTest, ImplicitStateResultOwnsLocalRegisterLifetime) {
   const loom_low_descriptor_layout_t layout = {};
   loom_low_operand_t operand = {
       .role = LOOM_LOW_OPERAND_ROLE_RESULT,
@@ -304,7 +304,12 @@ TEST(LowDescriptorTraitsTest, ImplicitStateResultIsNonDeterministic) {
   const loom_trait_flags_t traits = loom_low_descriptor_effective_traits(
       &descriptor_set, &descriptor, nullptr);
 
-  EXPECT_TRUE(iree_all_bits_set(traits, LOOM_TRAIT_NON_DETERMINISTIC));
+  EXPECT_TRUE(loom_traits_has_unique_identity(traits));
+  EXPECT_TRUE(loom_traits_have_storage_relation(traits));
+  EXPECT_FALSE(loom_traits_has_resource_identity(traits));
+  EXPECT_FALSE(loom_traits_may_read(traits));
+  EXPECT_FALSE(loom_traits_may_write(traits));
+  EXPECT_FALSE(iree_any_bit_set(traits, LOOM_TRAIT_NON_DETERMINISTIC));
   EXPECT_FALSE(iree_any_bit_set(traits, LOOM_TRAIT_PURE));
 }
 

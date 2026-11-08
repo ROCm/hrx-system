@@ -13,6 +13,7 @@
 #include "loom/ops/low/ops.h"
 #include "loom/target/arch/amdgpu/abi/call_abi.h"
 #include "loom/target/arch/amdgpu/encoding/encoding.h"
+#include "loom/target/arch/amdgpu/planning/descriptor_semantics.h"
 #include "loom/target/arch/amdgpu/planning/packet_plan.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info.h"
@@ -3061,9 +3062,48 @@ static iree_status_t loom_amdgpu_try_append_effect_route_dispatch_packet(
       context, loom_amdgpu_descriptor_packet_route_flags(context), out_matched);
 }
 
+static iree_status_t loom_amdgpu_append_symbol_address(
+    const loom_native_assembly_packet_context_t* context) {
+  const loom_low_allocation_assignment_t* result =
+      loom_low_packet_result_assignment(context->allocation, context->packet,
+                                        0);
+  const uint32_t base = result->location_base;
+  const loom_named_attr_slice_t attributes = loom_amdgpu_packet_attrs(context);
+  const loom_named_attr_t* symbol = loom_native_assembly_find_attr(
+      context->schedule->module, attributes, IREE_SV("symbol"));
+  const loom_named_attr_t* offset = loom_native_assembly_find_attr(
+      context->schedule->module, attributes, IREE_SV("byte_offset"));
+  const int64_t byte_offset = offset ? loom_attr_as_i64(offset->value) : 0;
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      context->builder, "s_getpc_b64 s[%" PRIu32 ":%" PRIu32 "]", base,
+      base + 1u));
+  const char* mnemonics[] = {"s_add_u32", "s_addc_u32"};
+  const char* suffixes[] = {"@rel32_lo", "@rel32_hi"};
+  for (uint32_t i = 0; i < 2; ++i) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        context->builder, "\n  %s s%" PRIu32 ", s%" PRIu32 ", ", mnemonics[i],
+        base + i, base + i));
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_append_symbol_ref(context, symbol->value.symbol));
+    if (byte_offset != 0) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          context->builder, "+%" PRId64, byte_offset));
+    }
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(context->builder, suffixes[i]));
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_amdgpu_append_descriptor_packet(
     void* user_data, const loom_native_assembly_packet_context_t* context) {
   (void)user_data;
+  if (context->packet->descriptor ==
+      loom_amdgpu_descriptor_ref_descriptor(
+          context->schedule->target.descriptor_set,
+          LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B64_SYMBOL)) {
+    return loom_amdgpu_append_symbol_address(context);
+  }
   bool matched = false;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_try_append_mnemonic_dispatch_packet(context, &matched));
@@ -3133,7 +3173,11 @@ static iree_status_t loom_amdgpu_append_stateful_descriptor_packet(
   IREE_RETURN_IF_ERROR(loom_amdgpu_append_descriptor_packet(NULL, context));
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_update_vgpr_msb_mode_after_descriptor(state, context));
-  return loom_amdgpu_append_wait_states_after_instruction(state, context, 1);
+  return loom_amdgpu_append_wait_states_after_instruction(
+      state, context,
+      loom_amdgpu_descriptor_instruction_count(
+          context->schedule->target.descriptor_set,
+          context->packet->descriptor));
 }
 
 static iree_status_t loom_amdgpu_append_vopd_or_descriptor_packet(

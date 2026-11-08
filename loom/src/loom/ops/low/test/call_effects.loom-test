@@ -164,3 +164,35 @@ low.func.def target<test.low.core>(@target) @native_effects(%address: reg<test.p
   %observed = low.func.call @observe(%value) : (reg<test.i32>) -> (reg<test.i32>)
   return
 }
+
+// ====
+
+// A condition-code definition owns a local register lifetime. The enclosing
+// value-returning helper remains pure, so its unused call can disappear.
+// RUN: pass canonicalize,dce
+
+test.target<low_core> @target
+
+low.func.def pure noinline target<test.low.core>(@target) @compare(%left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.schedule_state>) asm {
+  %condition = test.compare.schedule_state %left, %right
+  return %condition
+}
+
+low.func.def target<test.low.core>(@target) @compare_caller(%left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.schedule_state>) asm {
+  %unused = low.func.call pure noinline @compare(%left, %right) : (reg<test.i32>, reg<test.i32>) -> (reg<test.schedule_state>)
+  %result = low.func.call pure noinline @compare(%left, %right) : (reg<test.i32>, reg<test.i32>) -> (reg<test.schedule_state>)
+  return %result
+}
+
+// ----
+test.target<low_core> @target
+
+low.func.def pure noinline target<test.low.core>(@target) @compare(%left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.schedule_state>) asm {
+  %condition = test.compare.schedule_state %left, %right
+  return %condition
+}
+
+low.func.def target<test.low.core>(@target) @compare_caller(%left: reg<test.i32>, %right: reg<test.i32>) -> (reg<test.schedule_state>) asm {
+  %result = low.func.call pure noinline @compare(%left, %right) : (reg<test.i32>, reg<test.i32>) -> (reg<test.schedule_state>)
+  return %result
+}

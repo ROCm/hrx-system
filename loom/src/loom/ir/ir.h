@@ -852,10 +852,11 @@ enum loom_trait_bits_e {
   LOOM_TRAIT_CONVERGENT = 1u << 21,
   // Op fact inference defines target-independent result distribution facts.
   LOOM_TRAIT_DISTRIBUTION_TRANSFER = 1u << 22,
-  // Op creates storage relations between SSA values. Passes use this as a
-  // hot-path guard before asking a dialect-owned helper for exact source/result
-  // ranges. Fresh identities on these relations own local register contents,
-  // rather than separately addressable resources crossing callable boundaries.
+  // Op owns local register storage or relates storage between SSA values.
+  // Passes use this as a hot-path guard before asking a dialect-owned helper
+  // for exact source/result ranges. Fresh identities on these relations own
+  // local register contents rather than separately addressable resources
+  // crossing callable boundaries.
   LOOM_TRAIT_STORAGE_RELATION = 1u << 23,
   // Op orders memory accesses without directly reading or writing a resource.
   // Generic effect queries treat fences as read/write barriers so existing

@@ -13,118 +13,113 @@ func.def target(@target) @sanitizer_repeated_dense_access_read(%input: buffer) {
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @sanitizer_repeated_dense_access_read() asm {
   %input_view = resource<hal_binding> {extent = 8, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %5 = s_getpc_b64
-  %6 = slice %5[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %7 = slice %5[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %8, %9 = s_add_u32_rhs_symbol_rel32_lo %6 {symbol = @iree_asan_config}
-  %10, %11 = s_addc_u32_rhs_symbol_rel32_hi %7, %9 {symbol = @iree_asan_config}
-  %12 = concat(%8, %10) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %13 = s_load_dwordx2_offset_only %12 {offset = 16}
-  %14 = v_mov_b32 0
-  %15 = v_mov_b32 128
-  %16 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %17 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %18 = v_mov_b32_copy %16
-  %19 = v_mov_b32_copy %17
-  %21 = slice %13[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %22 = v_mov_b32_copy %21
-  %23 = slice %13[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %24 = v_mov_b32_copy %23
-  %28 = v_lshrrev_b32_lit %18, 3
-  %29 = v_lshlrev_b32_lit %19, 29
-  %30 = v_or_b32 %28, %29
-  %31 = v_lshrrev_b32_lit %19, 3
-  %37, %38 = v_add_co_u32 %22, %30
-  %39, %40 = v_add_co_ci_u32 %24, %31, %38
-  %41 = concat(%37, %39) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %42 = flat_load_u8 %41 {glc = 1}
+  %5 = s_mov_b64_symbol {symbol = @iree_asan_config}
+  %6 = s_load_dwordx2_offset_only %5 {offset = 16}
+  %7 = v_mov_b32 0
+  %8 = v_mov_b32 128
+  %9 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %10 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %11 = v_mov_b32_copy %9
+  %12 = v_mov_b32_copy %10
+  %14 = slice %6[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %15 = v_mov_b32_copy %14
+  %16 = slice %6[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %17 = v_mov_b32_copy %16
+  %21 = v_lshrrev_b32_lit %11, 3
+  %22 = v_lshlrev_b32_lit %12, 29
+  %23 = v_or_b32 %21, %22
+  %24 = v_lshrrev_b32_lit %12, 3
+  %30, %31 = v_add_co_u32 %15, %23
+  %32, %33 = v_add_co_ci_u32 %17, %24, %31
+  %34 = concat(%30, %32) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %35 = flat_load_u8 %34 {glc = 1}
   s_waitcnt {vmcnt = 0}
-  %44 = v_and_b32_lit %18, 7
-  %45 = v_add_u32_lit %44, 3
-  %46 = v_cmp_ne_i32 %42, %14
-  %47 = v_cmp_ge_u32 %42, %15
-  %48 = v_cmp_ge_u32 %45, %42
-  %49 = s_and_b64 %46, %48
-  %50 = s_or_b64 %47, %49
-  %51 = v_mov_b32 3
-  %58, %59 = v_add_co_u32 %18, %51
-  %60, %61 = v_add_co_ci_u32 %19, %14, %59
-  %70 = v_lshrrev_b32_lit %58, 3
-  %71 = v_lshlrev_b32_lit %60, 29
-  %72 = v_or_b32 %70, %71
-  %73 = v_lshrrev_b32_lit %60, 3
-  %79, %80 = v_add_co_u32 %22, %72
-  %81, %82 = v_add_co_ci_u32 %24, %73, %80
-  %83 = concat(%79, %81) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %84 = flat_load_u8 %83 {glc = 1}
+  %37 = v_and_b32_lit %11, 7
+  %38 = v_add_u32_lit %37, 3
+  %39 = v_cmp_ne_i32 %35, %7
+  %40 = v_cmp_ge_u32 %35, %8
+  %41 = v_cmp_ge_u32 %38, %35
+  %42 = s_and_b64 %39, %41
+  %43 = s_or_b64 %40, %42
+  %44 = v_mov_b32 3
+  %51, %52 = v_add_co_u32 %11, %44
+  %53, %54 = v_add_co_ci_u32 %12, %7, %52
+  %63 = v_lshrrev_b32_lit %51, 3
+  %64 = v_lshlrev_b32_lit %53, 29
+  %65 = v_or_b32 %63, %64
+  %66 = v_lshrrev_b32_lit %53, 3
+  %72, %73 = v_add_co_u32 %15, %65
+  %74, %75 = v_add_co_ci_u32 %17, %66, %73
+  %76 = concat(%72, %74) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %77 = flat_load_u8 %76 {glc = 1}
   s_waitcnt {vmcnt = 0}
-  %86 = v_and_b32_lit %58, 7
-  %87 = v_cmp_ne_i32 %84, %14
-  %88 = v_cmp_ge_u32 %84, %15
-  %89 = v_cmp_ge_u32 %86, %84
-  %90 = s_and_b64 %87, %89
-  %91 = s_or_b64 %88, %90
-  %92 = s_or_b64 %50, %91
-  %93 = slice %92[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %94 = s_mov_b32 0
-  %95 = concat(%93, %94) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %96 = s_mov_b32 4
-  %103, %104 = s_add_co_u32 %16, %96
-  %105, %106 = s_addc_u32 %17, %94, %104
-  %110 = v_mov_b32_copy %103
-  %111 = v_mov_b32_copy %105
-  %120 = v_lshrrev_b32_lit %110, 3
-  %121 = v_lshlrev_b32_lit %111, 29
-  %122 = v_or_b32 %120, %121
-  %123 = v_lshrrev_b32_lit %111, 3
-  %129, %130 = v_add_co_u32 %22, %122
-  %131, %132 = v_add_co_ci_u32 %24, %123, %130
-  %133 = concat(%129, %131) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %134 = flat_load_u8 %133 {glc = 1}
+  %79 = v_and_b32_lit %51, 7
+  %80 = v_cmp_ne_i32 %77, %7
+  %81 = v_cmp_ge_u32 %77, %8
+  %82 = v_cmp_ge_u32 %79, %77
+  %83 = s_and_b64 %80, %82
+  %84 = s_or_b64 %81, %83
+  %85 = s_or_b64 %43, %84
+  %86 = slice %85[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %87 = s_mov_b32 0
+  %88 = concat(%86, %87) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %89 = s_mov_b32 4
+  %96, %97 = s_add_co_u32 %9, %89
+  %98, %99 = s_addc_u32 %10, %87, %97
+  %103 = v_mov_b32_copy %96
+  %104 = v_mov_b32_copy %98
+  %113 = v_lshrrev_b32_lit %103, 3
+  %114 = v_lshlrev_b32_lit %104, 29
+  %115 = v_or_b32 %113, %114
+  %116 = v_lshrrev_b32_lit %104, 3
+  %122, %123 = v_add_co_u32 %15, %115
+  %124, %125 = v_add_co_ci_u32 %17, %116, %123
+  %126 = concat(%122, %124) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %127 = flat_load_u8 %126 {glc = 1}
   s_waitcnt {vmcnt = 0}
-  %136 = v_and_b32_lit %110, 7
-  %137 = v_add_u32_lit %136, 3
-  %138 = v_cmp_ne_i32 %134, %14
-  %139 = v_cmp_ge_u32 %134, %15
-  %140 = v_cmp_ge_u32 %137, %134
-  %141 = s_and_b64 %138, %140
-  %142 = s_or_b64 %139, %141
-  %150, %151 = v_add_co_u32 %110, %51
-  %152, %153 = v_add_co_ci_u32 %111, %14, %151
-  %162 = v_lshrrev_b32_lit %150, 3
-  %163 = v_lshlrev_b32_lit %152, 29
-  %164 = v_or_b32 %162, %163
-  %165 = v_lshrrev_b32_lit %152, 3
-  %171, %172 = v_add_co_u32 %22, %164
-  %173, %174 = v_add_co_ci_u32 %24, %165, %172
-  %175 = concat(%171, %173) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %176 = flat_load_u8 %175 {glc = 1}
+  %129 = v_and_b32_lit %103, 7
+  %130 = v_add_u32_lit %129, 3
+  %131 = v_cmp_ne_i32 %127, %7
+  %132 = v_cmp_ge_u32 %127, %8
+  %133 = v_cmp_ge_u32 %130, %127
+  %134 = s_and_b64 %131, %133
+  %135 = s_or_b64 %132, %134
+  %143, %144 = v_add_co_u32 %103, %44
+  %145, %146 = v_add_co_ci_u32 %104, %7, %144
+  %155 = v_lshrrev_b32_lit %143, 3
+  %156 = v_lshlrev_b32_lit %145, 29
+  %157 = v_or_b32 %155, %156
+  %158 = v_lshrrev_b32_lit %145, 3
+  %164, %165 = v_add_co_u32 %15, %157
+  %166, %167 = v_add_co_ci_u32 %17, %158, %165
+  %168 = concat(%164, %166) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %169 = flat_load_u8 %168 {glc = 1}
   s_waitcnt {vmcnt = 0}
-  %178 = v_and_b32_lit %150, 7
-  %179 = v_cmp_ne_i32 %176, %14
-  %180 = v_cmp_ge_u32 %176, %15
-  %181 = v_cmp_ge_u32 %178, %176
-  %182 = s_and_b64 %179, %181
-  %183 = s_or_b64 %180, %182
-  %184 = s_or_b64 %142, %183
-  %185 = slice %184[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %187 = concat(%185, %94) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %188 = s_or_b64 %95, %187
-  %197 = concat(%94, %94) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %198 = s_cmp_lg_u64 %188, %197
-  low.cond_br %198, ^_bb2, ^_bb1 : reg<amdgpu.scc>
+  %171 = v_and_b32_lit %143, 7
+  %172 = v_cmp_ne_i32 %169, %7
+  %173 = v_cmp_ge_u32 %169, %8
+  %174 = v_cmp_ge_u32 %171, %169
+  %175 = s_and_b64 %172, %174
+  %176 = s_or_b64 %173, %175
+  %177 = s_or_b64 %135, %176
+  %178 = slice %177[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %180 = concat(%178, %87) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %181 = s_or_b64 %88, %180
+  %190 = concat(%87, %87) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %191 = s_cmp_lg_u64 %181, %190
+  low.cond_br %191, ^_bb2, ^_bb1 : reg<amdgpu.scc>
 ^_bb1:
   return
 ^_bb2:
-  %199, %200 = s_and_saveexec_b64 %188
+  %192, %193 = s_and_saveexec_b64 %181
   s_trap {trapid = 2}
-  %189 = s_sendmsg_rtn_b32 {message = 128}
-  %190 = s_mov_b32 1023
-  %191 = s_and_b32 %189, %190
-  %192 = s_mov_b32 1024
-  %193 = s_or_b32 %191, %192
-  %194 = s_mov_b32_m0 %193
-  s_sendmsg %194 {message = 1}
+  %182 = s_sendmsg_rtn_b32 {message = 128}
+  %183 = s_mov_b32 1023
+  %184 = s_and_b32 %182, %183
+  %185 = s_mov_b32 1024
+  %186 = s_or_b32 %184, %185
+  %187 = s_mov_b32_m0 %186
+  s_sendmsg %187 {message = 1}
   low.br ^_bb3
 ^_bb3:
   s_sethalt {reason = 5}
@@ -147,68 +142,63 @@ func.def target(@target) @sanitizer_repeated_aligned_rows_read(%input: buffer) {
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @sanitizer_repeated_aligned_rows_read() asm {
   %input_view = resource<hal_binding> {extent = 64, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %6 = s_getpc_b64
-  %7 = slice %6[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %8 = slice %6[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %9, %10 = s_add_u32_rhs_symbol_rel32_lo %7 {symbol = @iree_asan_config}
-  %11, %12 = s_addc_u32_rhs_symbol_rel32_hi %8, %10 {symbol = @iree_asan_config}
-  %13 = concat(%9, %11) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %14 = s_load_dwordx2_offset_only %13 {offset = 16}
-  %15 = v_mov_b32 0
-  %17 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %18 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %19 = v_mov_b32_copy %17
-  %20 = v_mov_b32_copy %18
-  %22 = slice %14[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %23 = v_mov_b32_copy %22
-  %24 = slice %14[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %25 = v_mov_b32_copy %24
-  %29 = v_lshrrev_b32_lit %19, 3
-  %30 = v_lshlrev_b32_lit %20, 29
-  %31 = v_or_b32 %29, %30
-  %32 = v_lshrrev_b32_lit %20, 3
-  %38, %39 = v_add_co_u32 %23, %31
-  %40, %41 = v_add_co_ci_u32 %25, %32, %39
-  %42 = concat(%38, %40) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %43 = flat_load_dword %42 {glc = 1}
+  %6 = s_mov_b64_symbol {symbol = @iree_asan_config}
+  %7 = s_load_dwordx2_offset_only %6 {offset = 16}
+  %8 = v_mov_b32 0
+  %10 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %11 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %12 = v_mov_b32_copy %10
+  %13 = v_mov_b32_copy %11
+  %15 = slice %7[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = v_mov_b32_copy %15
+  %17 = slice %7[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = v_mov_b32_copy %17
+  %22 = v_lshrrev_b32_lit %12, 3
+  %23 = v_lshlrev_b32_lit %13, 29
+  %24 = v_or_b32 %22, %23
+  %25 = v_lshrrev_b32_lit %13, 3
+  %31, %32 = v_add_co_u32 %16, %24
+  %33, %34 = v_add_co_ci_u32 %18, %25, %32
+  %35 = concat(%31, %33) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %36 = flat_load_dword %35 {glc = 1}
   s_waitcnt {vmcnt = 0}
-  %44 = v_cmp_ne_i32 %43, %15
-  %45 = slice %44[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %46 = s_mov_b32 0
-  %47 = concat(%45, %46) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %48 = s_mov_b32 32
-  %55, %56 = s_add_co_u32 %17, %48
-  %57, %58 = s_addc_u32 %18, %46, %56
-  %62 = v_mov_b32_copy %55
-  %63 = v_mov_b32_copy %57
-  %72 = v_lshrrev_b32_lit %62, 3
-  %73 = v_lshlrev_b32_lit %63, 29
-  %74 = v_or_b32 %72, %73
-  %75 = v_lshrrev_b32_lit %63, 3
-  %81, %82 = v_add_co_u32 %23, %74
-  %83, %84 = v_add_co_ci_u32 %25, %75, %82
-  %85 = concat(%81, %83) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %86 = flat_load_dword %85 {glc = 1}
+  %37 = v_cmp_ne_i32 %36, %8
+  %38 = slice %37[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = s_mov_b32 0
+  %40 = concat(%38, %39) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %41 = s_mov_b32 32
+  %48, %49 = s_add_co_u32 %10, %41
+  %50, %51 = s_addc_u32 %11, %39, %49
+  %55 = v_mov_b32_copy %48
+  %56 = v_mov_b32_copy %50
+  %65 = v_lshrrev_b32_lit %55, 3
+  %66 = v_lshlrev_b32_lit %56, 29
+  %67 = v_or_b32 %65, %66
+  %68 = v_lshrrev_b32_lit %56, 3
+  %74, %75 = v_add_co_u32 %16, %67
+  %76, %77 = v_add_co_ci_u32 %18, %68, %75
+  %78 = concat(%74, %76) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %79 = flat_load_dword %78 {glc = 1}
   s_waitcnt {vmcnt = 0}
-  %87 = v_cmp_ne_i32 %86, %15
-  %88 = slice %87[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %90 = concat(%88, %46) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %91 = s_or_b64 %47, %90
-  %100 = concat(%46, %46) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %101 = s_cmp_lg_u64 %91, %100
-  low.cond_br %101, ^_bb2, ^_bb1 : reg<amdgpu.scc>
+  %80 = v_cmp_ne_i32 %79, %8
+  %81 = slice %80[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %83 = concat(%81, %39) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %84 = s_or_b64 %40, %83
+  %93 = concat(%39, %39) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %94 = s_cmp_lg_u64 %84, %93
+  low.cond_br %94, ^_bb2, ^_bb1 : reg<amdgpu.scc>
 ^_bb1:
   return
 ^_bb2:
-  %102, %103 = s_and_saveexec_b64 %91
+  %95, %96 = s_and_saveexec_b64 %84
   s_trap {trapid = 2}
-  %92 = s_sendmsg_rtn_b32 {message = 128}
-  %93 = s_mov_b32 1023
-  %94 = s_and_b32 %92, %93
-  %95 = s_mov_b32 1024
-  %96 = s_or_b32 %94, %95
-  %97 = s_mov_b32_m0 %96
-  s_sendmsg %97 {message = 1}
+  %85 = s_sendmsg_rtn_b32 {message = 128}
+  %86 = s_mov_b32 1023
+  %87 = s_and_b32 %85, %86
+  %88 = s_mov_b32 1024
+  %89 = s_or_b32 %87, %88
+  %90 = s_mov_b32_m0 %89
+  s_sendmsg %90 {message = 1}
   low.br ^_bb3
 ^_bb3:
   s_sethalt {reason = 5}
@@ -231,54 +221,49 @@ func.def target(@target) @sanitizer_aligned_granule_access_read(%input: buffer) 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @sanitizer_aligned_granule_access_read() asm {
   %input_view = resource<hal_binding> {extent = 64, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %6 = s_getpc_b64
-  %7 = slice %6[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %8 = slice %6[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %9, %10 = s_add_u32_rhs_symbol_rel32_lo %7 {symbol = @iree_asan_config}
-  %11, %12 = s_addc_u32_rhs_symbol_rel32_hi %8, %10 {symbol = @iree_asan_config}
-  %13 = concat(%9, %11) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %14 = s_load_dwordx2_offset_only %13 {offset = 16}
-  %15 = v_mov_b32 0
-  %17 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %18 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %19 = v_mov_b32_copy %17
-  %20 = v_mov_b32_copy %18
-  %22 = slice %14[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %23 = v_mov_b32_copy %22
-  %24 = slice %14[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %25 = v_mov_b32_copy %24
-  %29 = v_lshrrev_b32_lit %19, 3
-  %30 = v_lshlrev_b32_lit %20, 29
-  %31 = v_or_b32 %29, %30
-  %32 = v_lshrrev_b32_lit %20, 3
-  %38, %39 = v_add_co_u32 %23, %31
-  %40, %41 = v_add_co_ci_u32 %25, %32, %39
-  %42 = concat(%38, %40) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %43 = flat_load_dwordx2 %42 {glc = 1}
+  %6 = s_mov_b64_symbol {symbol = @iree_asan_config}
+  %7 = s_load_dwordx2_offset_only %6 {offset = 16}
+  %8 = v_mov_b32 0
+  %10 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %11 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %12 = v_mov_b32_copy %10
+  %13 = v_mov_b32_copy %11
+  %15 = slice %7[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = v_mov_b32_copy %15
+  %17 = slice %7[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = v_mov_b32_copy %17
+  %22 = v_lshrrev_b32_lit %12, 3
+  %23 = v_lshlrev_b32_lit %13, 29
+  %24 = v_or_b32 %22, %23
+  %25 = v_lshrrev_b32_lit %13, 3
+  %31, %32 = v_add_co_u32 %16, %24
+  %33, %34 = v_add_co_ci_u32 %18, %25, %32
+  %35 = concat(%31, %33) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %36 = flat_load_dwordx2 %35 {glc = 1}
   s_waitcnt {vmcnt = 0}
-  %44 = slice %43[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %45 = slice %43[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %46 = v_cmp_ne_i32 %44, %15
-  %47 = v_cmp_ne_i32 %45, %15
-  %48 = s_or_b64 %46, %47
-  %49 = slice %48[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %50 = s_mov_b32 0
-  %51 = concat(%49, %50) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %60 = concat(%50, %50) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %61 = s_cmp_lg_u64 %51, %60
-  low.cond_br %61, ^_bb2, ^_bb1 : reg<amdgpu.scc>
+  %37 = slice %36[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %38 = slice %36[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %39 = v_cmp_ne_i32 %37, %8
+  %40 = v_cmp_ne_i32 %38, %8
+  %41 = s_or_b64 %39, %40
+  %42 = slice %41[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %43 = s_mov_b32 0
+  %44 = concat(%42, %43) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %53 = concat(%43, %43) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %54 = s_cmp_lg_u64 %44, %53
+  low.cond_br %54, ^_bb2, ^_bb1 : reg<amdgpu.scc>
 ^_bb1:
   return
 ^_bb2:
-  %62, %63 = s_and_saveexec_b64 %51
+  %55, %56 = s_and_saveexec_b64 %44
   s_trap {trapid = 2}
-  %52 = s_sendmsg_rtn_b32 {message = 128}
-  %53 = s_mov_b32 1023
-  %54 = s_and_b32 %52, %53
-  %55 = s_mov_b32 1024
-  %56 = s_or_b32 %54, %55
-  %57 = s_mov_b32_m0 %56
-  s_sendmsg %57 {message = 1}
+  %45 = s_sendmsg_rtn_b32 {message = 128}
+  %46 = s_mov_b32 1023
+  %47 = s_and_b32 %45, %46
+  %48 = s_mov_b32 1024
+  %49 = s_or_b32 %47, %48
+  %50 = s_mov_b32_m0 %49
+  s_sendmsg %50 {message = 1}
   low.br ^_bb3
 ^_bb3:
   s_sethalt {reason = 5}
@@ -301,40 +286,35 @@ func.def target(@target) @sanitizer_cdna3_aligned_vector_read(%input: buffer) {
 // ----
 low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @sanitizer_cdna3_aligned_vector_read() asm {
   %input_view = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %6 = s_getpc_b64
-  %7 = slice %6[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %8 = slice %6[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %9, %10 = s_add_u32_rhs_symbol_rel32_lo %7 {symbol = @iree_asan_config}
-  %11, %12 = s_addc_u32_rhs_symbol_rel32_hi %8, %10 {symbol = @iree_asan_config}
-  %13 = concat(%9, %11) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %14 = s_load_dwordx2_offset_only %13 {offset = 16}
-  %15 = v_mov_b32 0
-  %17 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %18 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %19 = v_mov_b32_copy %17
-  %20 = v_mov_b32_copy %18
-  %22 = slice %14[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %23 = v_mov_b32_copy %22
-  %24 = slice %14[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %25 = v_mov_b32_copy %24
-  %29 = v_lshrrev_b32_lit %19, 3
-  %30 = v_lshlrev_b32_lit %20, 29
-  %31 = v_or_b32 %29, %30
-  %32 = v_lshrrev_b32_lit %20, 3
-  %38, %39 = v_add_co_u32 %23, %31
-  %40, %41 = v_addc_co_u32 %25, %32, %39
-  %42 = concat(%38, %40) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %43 = flat_load_dword %42 {sc0 = 1, sc1 = 1} : reg<amdgpu.vgpr>
+  %6 = s_mov_b64_symbol {symbol = @iree_asan_config}
+  %7 = s_load_dwordx2_offset_only %6 {offset = 16}
+  %8 = v_mov_b32 0
+  %10 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %11 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %12 = v_mov_b32_copy %10
+  %13 = v_mov_b32_copy %11
+  %15 = slice %7[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = v_mov_b32_copy %15
+  %17 = slice %7[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = v_mov_b32_copy %17
+  %22 = v_lshrrev_b32_lit %12, 3
+  %23 = v_lshlrev_b32_lit %13, 29
+  %24 = v_or_b32 %22, %23
+  %25 = v_lshrrev_b32_lit %13, 3
+  %31, %32 = v_add_co_u32 %16, %24
+  %33, %34 = v_addc_co_u32 %18, %25, %32
+  %35 = concat(%31, %33) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %36 = flat_load_dword %35 {sc0 = 1, sc1 = 1} : reg<amdgpu.vgpr>
   s_waitcnt {vmcnt = 0}
-  %44 = v_cmp_ne_i32 %43, %15
-  %45 = s_mov_b32 0
-  %47 = concat(%45, %45) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %48 = s_cmp_lg_u64 %44, %47
-  low.cond_br %48, ^_bb2, ^_bb1 : reg<amdgpu.scc>
+  %37 = v_cmp_ne_i32 %36, %8
+  %38 = s_mov_b32 0
+  %40 = concat(%38, %38) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %41 = s_cmp_lg_u64 %37, %40
+  low.cond_br %41, ^_bb2, ^_bb1 : reg<amdgpu.scc>
 ^_bb1:
   return
 ^_bb2:
-  %49, %50 = s_and_saveexec_b64 %44
+  %42, %43 = s_and_saveexec_b64 %37
   s_trap {trapid = 2}
   low.br ^_bb3
 ^_bb3:
@@ -358,50 +338,45 @@ func.def target(@target) @sanitizer_rdna4_aligned_vector_read(%input: buffer) {
 // ----
 low.func.def target<amdgpu.rdna4.core>(@target) abi(hal_kernel) @sanitizer_rdna4_aligned_vector_read() asm {
   %input_view = resource<hal_binding> {extent = 32, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %6 = s_getpc_b64
-  %7 = slice %6[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %8 = slice %6[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %9, %10 = s_add_u32_rhs_symbol_rel32_lo %7 {symbol = @iree_asan_config}
-  %11, %12 = s_addc_u32_rhs_symbol_rel32_hi %8, %10 {symbol = @iree_asan_config}
-  %13 = concat(%9, %11) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %14 = s_load_dwordx2_offset_only %13 {offset = 16}
-  %15 = v_mov_b32 0
-  %17 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %18 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %19 = v_mov_b32_copy %17
-  %20 = v_mov_b32_copy %18
-  %22 = slice %14[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %23 = v_mov_b32_copy %22
-  %24 = slice %14[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %25 = v_mov_b32_copy %24
-  %29 = v_lshrrev_b32_lit %19, 3
-  %30 = v_lshlrev_b32_lit %20, 29
-  %31 = v_or_b32 %29, %30
-  %32 = v_lshrrev_b32_lit %20, 3
-  %38, %39 = v_add_co_u32 %23, %31
-  %40, %41 = v_add_co_ci_u32 %25, %32, %39
-  %42 = concat(%38, %40) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %43 = flat_load_dword %42 {scope = 3}
+  %6 = s_mov_b64_symbol {symbol = @iree_asan_config}
+  %7 = s_load_dwordx2_offset_only %6 {offset = 16}
+  %8 = v_mov_b32 0
+  %10 = slice %input_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %11 = slice %input_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %12 = v_mov_b32_copy %10
+  %13 = v_mov_b32_copy %11
+  %15 = slice %7[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %16 = v_mov_b32_copy %15
+  %17 = slice %7[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %18 = v_mov_b32_copy %17
+  %22 = v_lshrrev_b32_lit %12, 3
+  %23 = v_lshlrev_b32_lit %13, 29
+  %24 = v_or_b32 %22, %23
+  %25 = v_lshrrev_b32_lit %13, 3
+  %31, %32 = v_add_co_u32 %16, %24
+  %33, %34 = v_add_co_ci_u32 %18, %25, %32
+  %35 = concat(%31, %33) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %36 = flat_load_dword %35 {scope = 3}
   s_wait_loadcnt {loadcnt = 0}
-  %44 = v_cmp_ne_i32 %43, %15
-  %45 = slice %44[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %46 = s_mov_b32 0
-  %47 = concat(%45, %46) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %56 = concat(%46, %46) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  %57 = s_cmp_lg_u64 %47, %56
-  low.cond_br %57, ^_bb2, ^_bb1 : reg<amdgpu.scc>
+  %37 = v_cmp_ne_i32 %36, %8
+  %38 = slice %37[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = s_mov_b32 0
+  %40 = concat(%38, %39) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %49 = concat(%39, %39) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %50 = s_cmp_lg_u64 %40, %49
+  low.cond_br %50, ^_bb2, ^_bb1 : reg<amdgpu.scc>
 ^_bb1:
   return
 ^_bb2:
-  %58, %59 = s_and_saveexec_b64 %47
+  %51, %52 = s_and_saveexec_b64 %40
   s_trap {trapid = 2}
-  %48 = s_sendmsg_rtn_b32 {message = 128}
-  %49 = s_mov_b32 1023
-  %50 = s_and_b32 %48, %49
-  %51 = s_mov_b32 1024
-  %52 = s_or_b32 %50, %51
-  %53 = s_mov_b32_m0 %52
-  s_sendmsg %53 {message = 1}
+  %41 = s_sendmsg_rtn_b32 {message = 128}
+  %42 = s_mov_b32 1023
+  %43 = s_and_b32 %41, %42
+  %44 = s_mov_b32 1024
+  %45 = s_or_b32 %43, %44
+  %46 = s_mov_b32_m0 %45
+  s_sendmsg %46 {message = 1}
   low.br ^_bb3
 ^_bb3:
   s_sethalt {reason = 5}

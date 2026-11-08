@@ -58,6 +58,11 @@ static uint32_t loom_low_storage_low_relation_count(const loom_op_t* op) {
       return 1;
     case LOOM_OP_LOW_CONCAT:
       return loom_low_concat_sources(op).count;
+    // Descriptor results may own fresh architectural storage without a source
+    // relation. Descriptor ties are enumerated by the value-relation iterator.
+    case LOOM_OP_LOW_CONST:
+    case LOOM_OP_LOW_OP:
+    case LOOM_OP_LOW_OP_COND_BR:
     case LOOM_OP_LOW_ASSUME:
     case LOOM_OP_LOW_BR:
     case LOOM_OP_LOW_BR_IDENTITY:

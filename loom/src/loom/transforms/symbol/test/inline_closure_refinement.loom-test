@@ -153,3 +153,54 @@ func.def target(@subgroup64) abi(object_function) @caller64() -> (index) {
   %width = index.constant 64 : index
   func.return %width : index
 }
+
+// ====
+
+// Refining a reusable command closure must preserve its serial scheduling
+// boundary before the closure is cloned into a concurrent caller.
+// RUN: pass inline-callables
+
+kernel.entry.decl @first(%storage: buffer)
+
+kernel.entry.decl @second(%storage: buffer)
+
+command.def @sequence() launch(%storage: buffer) {
+  %c1 = index.constant 1 : index
+  kernel.dispatch @first[%c1](%storage) : [index](buffer)
+  kernel.dispatch @second[%c1](%storage) : [index](buffer)
+  command.return
+}
+
+command.def @shared() launch(%storage: buffer) {
+  command.launch @sequence(%storage) : (buffer)
+  command.return
+}
+
+command.def public @entry() launch(%left: buffer, %right: buffer) {
+  command.concurrent {
+    command.launch @shared(%left) : (buffer)
+    command.launch @shared(%right) : (buffer)
+  }
+  command.return
+}
+
+// ----
+kernel.entry.decl @first(%storage: buffer)
+
+kernel.entry.decl @second(%storage: buffer)
+
+command.def public @entry() launch(%left: buffer, %right: buffer) {
+  command.concurrent {
+    command.serial {
+      %c1 = index.constant 1 : index
+      kernel.dispatch @first[%c1](%left) : [index](buffer)
+      kernel.dispatch @second[%c1](%left) : [index](buffer)
+    }
+    command.serial {
+      %c1 = index.constant 1 : index
+      kernel.dispatch @first[%c1](%right) : [index](buffer)
+      kernel.dispatch @second[%c1](%right) : [index](buffer)
+    }
+  }
+  command.return
+}

@@ -859,3 +859,28 @@ low.func.def public target<test.low.core>(@target) @inlined_observations(%addres
   %observed$2 = test.load.v4i32<volatile> %address
   return %observed$8, %observed$2
 }
+
+// ====
+
+// Equal comparisons retain separate fixed-register lifetimes across an
+// intervening comparison, while calls returning their values can remain pure.
+// RUN: with-low-asm pass canonicalize,cse,low-cse
+
+test.target<low_core> @test_target
+
+low.func.def pure target<test.low.core>(@test_target) @local_state_lifetimes(%left: reg<test.i32>, %right: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.schedule_state>, reg<test.schedule_state>, reg<test.schedule_state>) asm {
+  %first = test.compare.schedule_state %left, %right
+  %middle = test.compare.schedule_state %left, %other
+  %last = test.compare.schedule_state %left, %right
+  return %first, %middle, %last
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def pure target<test.low.core>(@test_target) @local_state_lifetimes(%left: reg<test.i32>, %right: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.schedule_state>, reg<test.schedule_state>, reg<test.schedule_state>) asm {
+  %first = test.compare.schedule_state %left, %right
+  %middle = test.compare.schedule_state %left, %other
+  %last = test.compare.schedule_state %left, %right
+  return %first, %middle, %last
+}
