@@ -28,8 +28,24 @@ from loom.target.contracts.diagnostics import (
     target_diagnostic,
     value_type_param,
 )
-from loom.target.contracts.lower_rule_diagnostics import _source_memory_diagnostics
+from loom.target.contracts.lower_rule_diagnostics import (
+    _named_constraint_diagnostic,
+    _source_memory_diagnostics,
+    _value_type_diagnostic,
+)
 from loom.target.test.descriptors import TEST_LOW_CORE_DESCRIPTOR_SET
+
+
+def test_canonical_diagnostic_constructors_reuse_equal_values() -> None:
+    named = _named_constraint_diagnostic("field", "value", "test.constraint")
+    assert named is _named_constraint_diagnostic("field", "value", "test.constraint")
+    assert named is not _named_constraint_diagnostic(
+        "field", "value", "test.other_constraint"
+    )
+
+    value_type = _value_type_diagnostic("view", View("i32"))
+    assert value_type is _value_type_diagnostic("view", View("i32"))
+    assert value_type is not _value_type_diagnostic("source", View("i32"))
 
 
 def test_value_type_diagnostics_bind_each_source_op() -> None:
