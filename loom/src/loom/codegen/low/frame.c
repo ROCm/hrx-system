@@ -1134,7 +1134,11 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
 
     if (frame.allocation.spill_plan_count != 0 &&
         value_repair_iteration_count < value_repair_iteration_limit) {
-      if (frame.allocation.spill_plan_count <
+      // Recreating a value can extend an input's lifetime and exchange one
+      // planned spill for another. Let repair advance through that plateau;
+      // growing spill demand still stops replay, and the value budget bounds
+      // chains whose later captures invalidate earlier private placements.
+      if (frame.allocation.spill_plan_count <=
           last_rematerialized_spill_plan_count) {
         loom_low_rematerialization_batch_result_t rematerialization_result = {
             0};
