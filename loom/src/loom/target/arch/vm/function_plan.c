@@ -1025,6 +1025,9 @@ iree_status_t loom_vm_function_plan_write(
           frame.schedule
               .scheduled_node_indices[block->scheduled_node_start + i];
       const loom_low_schedule_node_t* node = &frame.schedule.nodes[node_index];
+      if (loom_traits_are_compile_time_only(node->traits)) {
+        continue;
+      }
       if (node->descriptor) {
         status = loom_vm_function_packet(&frame, node, functions, stream);
       } else {

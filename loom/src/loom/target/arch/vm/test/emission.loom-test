@@ -430,3 +430,47 @@ vm.module core(0.0) {
   }
 
 }
+
+// ====
+
+vm.target<core> @vm
+
+// Scheduling constraints survive through packet planning but emit no bytecode.
+func.def public target(@vm) @fenced_arithmetic(%left: i32, %right: i32) -> (i32) {
+  scf.schedule.fence
+  %sum = scalar.addi %left, %right : i32
+  scf.schedule.fence
+  %result = scalar.muli %sum, %right : i32
+  scf.schedule.fence
+  func.return %result : i32
+}
+
+// ----
+vm.module core(0.0) {
+  section strings alignment(8) {
+    string @string0 = "fenced_arithmetic"
+  }
+
+  section signatures alignment(8) {
+    signature @signature0 (i32, i32) -> (i32)
+  }
+
+  section callable_types alignment(8) {
+    callable @callable0 flags([]) depth(0) : @signature0
+  }
+
+  section exports alignment(8) {
+    export @export0 name(@string0) : @callable0 = @function0
+  }
+
+  section functions alignment(8) {
+    func @function0 : @callable0 flags([]) frame(local_bytes = 0, value_registers = 2, ref_registers = 0, function_registers = 0, local_refs = 0, local_functions = 0) {
+    ^bb0:
+      control.block
+      %v0 = integer.add.i32 %v0, %v1
+      %v0 = integer.mul.i32 %v0, %v1
+      control.return
+    }
+  }
+
+}
