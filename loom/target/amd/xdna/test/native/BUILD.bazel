@@ -55,6 +55,7 @@ _VM_REFERENCE_COMPATIBLE_WITH = loom_config_compatible_with([
         "dma_wrap",
         "grouped_dma",
         "hardware_loop",
+        "helper_results",
         "packed_matrix_groups",
         "radian_trigonometry",
         "source_owned_accumulation",

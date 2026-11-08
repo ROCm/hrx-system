@@ -374,6 +374,134 @@ class Aie2pProgramCompileTest : public ::testing::Test {
   loom_target_low_descriptor_registry_t low_registry_ = {};
 };
 
+// Both native result banks need a parallel permutation, including a repeated
+// source. Decode the emitted register moves and apply each packet atomically:
+// presence alone would also accept a destructive or reversed move sequence.
+TEST_F(Aie2pProgramCompileTest, TransportsParallelScalarAndPointerResults) {
+  const struct {
+    // Low carrier type selected by the native scalar/pointer ABI.
+    const char* type;
+    // Physical register class containing every transport endpoint.
+    uint16_t register_class;
+    // First incoming value and second outgoing result.
+    const char* first;
+    // Second incoming value and first outgoing result.
+    const char* second;
+    // Additional outgoing result repeating the first incoming value.
+    const char* repeated;
+  } cases[] = {
+      {"aie2p.er", AIE2P_CORE_REG_CLASS_ID_AIE2P_ER, "r0", "r1", "r2"},
+      {"aie2p.ep", AIE2P_CORE_REG_CLASS_ID_AIE2P_EP, "p2", "p3", "p4"},
+  };
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_aie2p_core_descriptor_set();
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.type);
+    const std::string type = "reg<" + std::string(test_case.type) + ">";
+    const std::string source =
+        "aie2p.target<core> @target\n"
+        "low.func.def target<amd.xdna.aie2p.core>(@target) "
+        "abi(object_function) @entry(%first: " +
+        type + ", %second: " + type + ") -> (" + type + ", " + type + ", " +
+        type +
+        ") asm {\n"
+        "  return %first, %second, %first\n}\n";
+    ModulePtr module =
+        ParseModule(iree_make_string_view(source.data(), source.size()));
+    loom_op_t* entry = FindFunction(module.get(), IREE_SV("entry"));
+    ASSERT_NE(entry, nullptr);
+    uint16_t argument_count = 0;
+    const loom_value_id_t* arguments = loom_func_like_arg_ids(
+        loom_func_like_cast(module.get(), entry), &argument_count);
+    ASSERT_EQ(argument_count, 2u);
+    const loom_aie2p_physical_register_id_t registers[] = {
+        loom_aie2p_machine_find_physical_register(
+            iree_make_cstring_view(test_case.first)),
+        loom_aie2p_machine_find_physical_register(
+            iree_make_cstring_view(test_case.second)),
+        loom_aie2p_machine_find_physical_register(
+            iree_make_cstring_view(test_case.repeated)),
+    };
+    loom_low_allocation_fixed_value_t fixed_values[2] = {};
+    for (uint16_t i = 0; i < 2; ++i) {
+      fixed_values[i] = {
+          .value_id = arguments[i],
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_base = registers[i],
+          .location_count = 1,
+      };
+    }
+    loom_low_allocation_abi_location_t exits[3] = {};
+    const uint16_t destinations[] = {1, 0, 2};
+    for (uint16_t i = 0; i < 3; ++i) {
+      exits[i] = {
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .descriptor_reg_class_id = test_case.register_class,
+          .location_base = registers[destinations[i]],
+      };
+    }
+    const loom_aie2p_leaf_compile_options_t options = {
+        .descriptor_registry = &low_registry_.registry,
+        .allocation_fixed_values = fixed_values,
+        .allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values),
+        .allocation_exit_locations = exits,
+        .allocation_exit_location_count = IREE_ARRAYSIZE(exits),
+    };
+    bool compiled = false;
+    loom_aie2p_leaf_contribution_t contribution = {};
+    IREE_ASSERT_OK(CompileProgram(module.get(), entry, &options, &compiled,
+                                  &contribution));
+    ASSERT_TRUE(compiled);
+    const auto& symbol =
+        contribution.object
+            .symbols[contribution.realization.entry_symbol_index];
+    std::vector<DecodedProgramBundle> bundles;
+    IREE_ASSERT_OK(DecodeProgram(
+        contribution.object.sections[symbol.section_contribution_index]
+            .contents,
+        &bundles));
+
+    const uint16_t register_count =
+        descriptor_set->reg_classes[test_case.register_class].allocatable_count;
+    std::vector<loom_aie2p_physical_register_id_t> candidates(register_count);
+    std::vector<uint32_t> values(register_count);
+    for (uint16_t i = 0; i < register_count; ++i) {
+      candidates[i] = loom_low_descriptor_set_physical_register_candidate(
+          descriptor_set, test_case.register_class, i);
+      values[i] = 100 + i;
+      if (candidates[i] == registers[0]) {
+        values[i] = 7;
+      }
+      if (candidates[i] == registers[1]) {
+        values[i] = 9;
+      }
+    }
+    for (const auto& bundle : bundles) {
+      auto next = values;
+      for (uint16_t from = 0; from < register_count; ++from) {
+        for (uint16_t to = 0; to < register_count; ++to) {
+          if (from == to) {
+            continue;
+          }
+          if (BundleHasEncodedSlot(bundle,
+                                   EncodeMove(descriptor_set, candidates[from],
+                                              candidates[to]))) {
+            next[to] = values[from];
+          }
+        }
+      }
+      values = std::move(next);
+    }
+    const uint32_t expected[] = {9, 7, 7};
+    for (uint16_t i = 0; i < 3; ++i) {
+      auto position =
+          std::find(candidates.begin(), candidates.end(), registers[i]);
+      ASSERT_NE(position, candidates.end());
+      EXPECT_EQ(values[position - candidates.begin()], expected[i]);
+    }
+  }
+}
+
 TEST_F(Aie2pProgramCompileTest, RetainsHelperObjectsAcrossProgramCompilations) {
   const iree_string_view_t sources[] = {
       IREE_SV(kDirectHelperSource),
