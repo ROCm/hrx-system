@@ -14,6 +14,7 @@ import re
 import stat
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, TextIO
@@ -100,6 +101,7 @@ class LibFuzzerStatistics:
     new_units_added: int | None = None
     slowest_unit_seconds: float | None = None
     peak_rss_mb: int | None = None
+    initialization_duration_ns: int | None = None
     initial_coverage_points: int | None = None
     coverage_points: int | None = None
     initial_features: int | None = None
@@ -116,6 +118,7 @@ class LibFuzzerStatistics:
             "new_units_added": self.new_units_added,
             "slowest_unit_seconds": self.slowest_unit_seconds,
             "peak_rss_mb": self.peak_rss_mb,
+            "initialization_duration_ns": self.initialization_duration_ns,
             "initial_coverage_points": self.initial_coverage_points,
             "coverage_points": self.coverage_points,
             "coverage_points_added": _difference(
@@ -134,7 +137,12 @@ class LibFuzzerStatistics:
 class FuzzerOutputObserver:
     """Parses libFuzzer progress while retaining only a bounded output tail."""
 
-    def __init__(self, tail_limit: int = FAILURE_OUTPUT_LIMIT):
+    def __init__(
+        self,
+        tail_limit: int = FAILURE_OUTPUT_LIMIT,
+        *,
+        start_ns: int | None = None,
+    ):
         if tail_limit <= 0:
             raise ValueError("Fuzzer output tail limit must be positive")
         self.statistics = LibFuzzerStatistics()
@@ -143,6 +151,9 @@ class FuzzerOutputObserver:
         self._tail = bytearray()
         self._line = bytearray()
         self._finalized = False
+        self._start_ns = start_ns
+        self.initialized_ns: int | None = None
+        self.initialized = threading.Event()
 
     @property
     def tail(self) -> bytes:
@@ -195,6 +206,13 @@ class FuzzerOutputObserver:
             return
         self.statistics.executed_units = int(progress_match.group(1))
         initial_progress = progress_match.group(2).upper() == b"INITED"
+        if initial_progress and not self.initialized.is_set():
+            self.initialized_ns = time.monotonic_ns()
+            if self._start_ns is not None:
+                self.statistics.initialization_duration_ns = max(
+                    0, self.initialized_ns - self._start_ns
+                )
+            self.initialized.set()
         for label, field_name in _PROGRESS_INTEGER_FIELDS.items():
             match = re.search(rb"(?:^|\s)" + re.escape(label) + rb":\s*(\d+)", line)
             if match:
@@ -310,7 +328,11 @@ def observe_stream(
 ) -> None:
     """Streams child output to the terminal while collecting bounded telemetry."""
     try:
-        while data := stream.read(_STREAM_CHUNK_SIZE):
+        # Buffered pipe reads may wait for the full requested size, withholding
+        # progress until process exit. read1 returns currently available bytes
+        # so campaign control can react to INITED and failures while live.
+        read_chunk = getattr(stream, "read1", stream.read)
+        while data := read_chunk(_STREAM_CHUNK_SIZE):
             observer.consume(data)
             if destination is None:
                 continue
@@ -335,6 +357,19 @@ def write_failure_output(path: Path, observer: FuzzerOutputObserver) -> None:
     temporary_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
         temporary_path.write_bytes(payload)
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+
+
+def write_stop_request(path: Path) -> None:
+    """Atomically asks libFuzzer to stop after its current input."""
+    temporary_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        # libFuzzer ignores an existing but empty stop file. Publish a nonempty
+        # file atomically so it can never observe that transient state.
+        temporary_path.write_bytes(b"stop\n")
         os.replace(temporary_path, path)
     finally:
         if temporary_path.exists():

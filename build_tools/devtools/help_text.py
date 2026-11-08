@@ -931,10 +931,10 @@ fuzzer processes at once. The default is one worker.
 
 ```bash
 iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz
-iree-bazel-fuzz //runtime/src/iree/tokenizer:special_tokens_fuzz -- -max_total_time=60
-iree-bazel-fuzz --workers=2 //path:parser_fuzz //path:schema_fuzz -- -max_total_time=60
-iree-bazel-fuzz --workers=4 --shard=0/4 //runtime/... -- -max_total_time=3600
-iree-bazel-fuzz --workers=2 --quiet-output //loom/... -- -max_total_time=3600
+iree-bazel-fuzz --mutation-time=60 //runtime/src/iree/tokenizer:special_tokens_fuzz
+iree-bazel-fuzz --workers=2 --mutation-time=60 //path:parser_fuzz //path:schema_fuzz
+iree-bazel-fuzz --workers=4 --mutation-time=3600 --shard=0/4 //runtime/...
+iree-bazel-fuzz --workers=2 --mutation-time=3600 --quiet-output //loom/...
 iree-bazel-fuzz --compile-only //...
 ```
 
@@ -942,6 +942,13 @@ Several exact labels form one target set. The launcher analyzes and builds the
 set in one Bazel invocation, generates every launch script, then starts fuzzer
 processes under the shared worker bound. This keeps Bazel work serialized while
 the binaries fuzz concurrently with independent corpus and artifact directories.
+
+`--mutation-time=SECONDS` starts each target's budget after libFuzzer reports
+`INITED`, so restoring and replaying a persistent corpus cannot consume the
+mutation window. The runner publishes a unique nonempty `-stop_file` when the
+window expires; libFuzzer completes its current input, writes final statistics,
+and exits successfully. Raw `-max_total_time`, `-runs`, merge, inner worker, and
+stop-file arguments are mutually exclusive with this campaign-level budget.
 
 Interactive campaigns stream each fuzzer's output directly. Scheduled campaigns
 use `--quiet-output`: the runner still parses the stream and retains a bounded

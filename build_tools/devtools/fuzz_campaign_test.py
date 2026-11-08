@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from build_tools.devtools import fuzz_campaign
 
@@ -47,6 +48,7 @@ class FuzzCampaignTest(unittest.TestCase):
                 "new_units_added": 6,
                 "slowest_unit_seconds": 0.125,
                 "peak_rss_mb": 31,
+                "initialization_duration_ns": None,
                 "initial_coverage_points": 100,
                 "coverage_points": 103,
                 "coverage_points_added": 3,
@@ -59,6 +61,15 @@ class FuzzCampaignTest(unittest.TestCase):
                 "corpus_bytes": 1536,
             },
         )
+
+    def test_observer_records_initialization_duration(self):
+        observer = fuzz_campaign.FuzzerOutputObserver(start_ns=100)
+        with mock.patch.object(fuzz_campaign.time, "monotonic_ns", return_value=375):
+            observer.consume(b"#1 INITED cov: 2 ft: 3 corp: 1/1b\n")
+
+        self.assertTrue(observer.initialized.is_set())
+        self.assertEqual(observer.initialized_ns, 375)
+        self.assertEqual(observer.statistics.initialization_duration_ns, 275)
 
     def test_observer_retains_only_bounded_tail(self):
         observer = fuzz_campaign.FuzzerOutputObserver(tail_limit=16)
@@ -86,6 +97,28 @@ class FuzzCampaignTest(unittest.TestCase):
 
         self.assertEqual(observer.tail, b"fuzzer output\n")
 
+    def test_observe_stream_reads_available_pipe_bytes(self):
+        class AvailableStream:
+            def __init__(self):
+                self.chunks = [b"#1 INITED cov: 2 ft: 3 corp: 1/1b\n", b""]
+                self.closed = False
+
+            def read(self, _size):
+                raise AssertionError("buffered read must not gate live progress")
+
+            def read1(self, _size):
+                return self.chunks.pop(0)
+
+            def close(self):
+                self.closed = True
+
+        stream = AvailableStream()
+        observer = fuzz_campaign.FuzzerOutputObserver()
+        fuzz_campaign.observe_stream(stream, observer, None)
+
+        self.assertTrue(observer.initialized.is_set())
+        self.assertTrue(stream.closed)
+
     def test_failure_output_is_bounded_and_marks_truncation(self):
         observer = fuzz_campaign.FuzzerOutputObserver(tail_limit=8)
         observer.consume(b"0123456789")
@@ -96,6 +129,14 @@ class FuzzCampaignTest(unittest.TestCase):
             output = output_path.read_bytes()
 
         self.assertEqual(output, b"... earlier output truncated ...\n23456789")
+
+    def test_stop_request_is_published_nonempty(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            stop_path = Path(temporary) / "stop"
+            fuzz_campaign.write_stop_request(stop_path)
+
+            self.assertEqual(stop_path.read_bytes(), b"stop\n")
+            self.assertEqual(list(stop_path.parent.glob(".stop.*.tmp")), [])
 
     def test_directory_snapshot_and_change_are_recursive(self):
         with tempfile.TemporaryDirectory() as temporary:

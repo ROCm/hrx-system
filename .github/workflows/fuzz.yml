@@ -118,6 +118,7 @@ jobs:
           fi
           python3 dev.py bazel fuzz \
             --workers=8 \
+            --mutation-time="$campaign_seconds" \
             --quiet-output \
             --result="$IREE_FUZZ_RESULT" \
             --//build_tools/vulkan/config:enabled=false \
@@ -125,7 +126,6 @@ jobs:
             --//loom/config/serve:image_codecs=png,jpeg,gif,webp \
             --//loom/config/serve:audio_codecs=wav,mp3,flac \
             //... -- \
-            -max_total_time="$campaign_seconds" \
             -rss_limit_mb=1024 \
             -timeout=30
 

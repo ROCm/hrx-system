@@ -24,7 +24,10 @@ from build_tools.devtools import bazel as bazel_dev
 
 
 def make_test_fuzzer(
-    process: bazel_dev.BazelProcess, root: Path
+    process: bazel_dev.BazelProcess,
+    root: Path,
+    *,
+    stop_path: Path | None = None,
 ) -> bazel_dev.BazelFuzzerProcess:
     target_name = process.target.rsplit(":", 1)[-1]
     target_dir = root / target_name
@@ -40,6 +43,7 @@ def make_test_fuzzer(
         ),
         corpus_dir=corpus_dir,
         artifact_dir=artifact_dir,
+        stop_path=stop_path,
     )
 
 
@@ -114,6 +118,20 @@ class BazelTest(unittest.TestCase):
         self.assertEqual(command.worker_count, 2)
         self.assertEqual(command.program_args, ["-max_total_time=60"])
 
+    def test_bazel_fuzz_parses_post_initialization_mutation_time(self):
+        command = bazel_dev.parse_bazel_fuzz_args(
+            [
+                "--mutation-time=120",
+                "//pkg:parser_fuzz",
+                "--",
+                "-rss_limit_mb=1024",
+                "-timeout=30",
+            ]
+        )
+
+        self.assertEqual(command.mutation_time_seconds, 120)
+        self.assertEqual(command.program_args, ["-rss_limit_mb=1024", "-timeout=30"])
+
     def test_bazel_fuzz_parses_compile_only(self):
         command = bazel_dev.parse_bazel_fuzz_args(
             ["--compile-only", "--shard=1/3", "//..."]
@@ -140,6 +158,15 @@ class BazelTest(unittest.TestCase):
             ["--compile-only", "--result=result.json", "//..."],
             ["--compile-only", "--quiet-output", "//..."],
             ["--compile-only", "//...", "--", "-runs=1"],
+            ["--mutation-time=0", "//..."],
+            ["--mutation-time=nan", "//..."],
+            ["--mutation-time=soon", "//..."],
+            ["--compile-only", "--mutation-time=1", "//..."],
+            ["--mutation-time=1", "//...", "--", "-max_total_time=2"],
+            ["--mutation-time=1", "//...", "--", "-runs=2"],
+            ["--mutation-time=1", "//...", "--", "-merge=1"],
+            ["--mutation-time=1", "//...", "--", "-stop_file=stop"],
+            ["--mutation-time=1", "//...", "--", "-verbosity=0"],
         ]
         for arguments in invalid_arguments:
             with self.subTest(arguments=arguments), self.assertRaises(ValueError):
@@ -1563,13 +1590,20 @@ class BazelTest(unittest.TestCase):
                 events.append(("prepare", launch.target, env))
                 return 0, processes[launch.target]
 
-            def run_many(generated_processes, worker_count, *, stream_output):
+            def run_many(
+                generated_processes,
+                worker_count,
+                *,
+                stream_output,
+                mutation_time_seconds,
+            ):
                 events.append(
                     (
                         "run",
                         [process.target for process in generated_processes],
                         worker_count,
                         stream_output,
+                        mutation_time_seconds,
                     )
                 )
                 return bazel_dev.BazelFuzzRunResult(
@@ -1662,7 +1696,7 @@ class BazelTest(unittest.TestCase):
             self.assertEqual(
                 events[4:6], [("prepare", target, None) for target in targets]
             )
-            self.assertEqual(events[6], ("run", targets, 2, True))
+            self.assertEqual(events[6], ("run", targets, 2, True, None))
             campaign = json.loads(
                 (temporary_path / "result.json").read_text(encoding="utf-8")
             )
@@ -1896,6 +1930,42 @@ class BazelTest(unittest.TestCase):
                 [target.state for target in result.targets],
                 ["passed"] * len(launches),
             )
+
+    def test_bazel_fuzz_starts_mutation_deadline_after_initialization(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            stop_path = root / "stop"
+            script = (
+                "import pathlib, sys, time; "
+                "stop = pathlib.Path(sys.argv[1]); "
+                "sys.stderr.write('#1 INITED cov: 2 ft: 3 corp: 1/1b\\n'); "
+                "sys.stderr.flush(); "
+                'exec("while not stop.exists() or not stop.read_bytes():\\n'
+                ' time.sleep(0.005)"); '
+                "sys.stderr.write('stat::number_of_executed_units: 7\\n')"
+            )
+            launch = bazel_dev.BazelProcess(
+                target="//pkg:timed_fuzz",
+                argv=[sys.executable, "-c", script, str(stop_path)],
+                cwd=root,
+                env=os.environ.copy(),
+            )
+            fuzzer = make_test_fuzzer(launch, root, stop_path=stop_path)
+
+            result = bazel_dev.run_fuzzers(
+                [fuzzer],
+                worker_count=1,
+                stream_output=False,
+                mutation_time_seconds=0.01,
+            )
+
+            self.assertEqual(result.exit_code, 0)
+            self.assertEqual(result.targets[0].state, "passed")
+            self.assertEqual(result.targets[0].statistics.executed_units, 7)
+            self.assertIsNotNone(
+                result.targets[0].statistics.initialization_duration_ns
+            )
+            self.assertFalse(stop_path.exists())
 
     def test_bazel_fuzz_forwards_termination_and_restores_handlers(self):
         temporary = tempfile.TemporaryDirectory()
