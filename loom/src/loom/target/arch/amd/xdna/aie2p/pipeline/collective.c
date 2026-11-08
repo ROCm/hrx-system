@@ -10,6 +10,7 @@
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/call_abi.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 #include "loom/util/adaptive_sort.h"
 
 static bool loom_aie2p_native_collective_less(
@@ -149,11 +150,6 @@ iree_status_t loom_aie2p_native_route_collectives(
     return iree_ok_status();
   }
   const loom_pipeline_execution_t* execution = &context->execution;
-  uint8_t* packets = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_arena_allocate_array(context->pass->arena, execution->engine_count,
-                                sizeof(*packets), (void**)&packets));
-  memset(packets, 32, execution->engine_count);
   for (iree_host_size_t i = 0; i < context->collective_count; ++i) {
     loom_aie2p_native_collective_t* collective = &context->collectives[i];
     if (!collective->source->result_count || !collective->peer_count) {
@@ -163,19 +159,22 @@ iree_status_t loom_aie2p_native_route_collectives(
         loom_pipeline_execution_schedule(execution, collective->scope);
     const iree_host_size_t reader = collective->reader;
     const iree_host_size_t relay = collective->relay;
-    const loom_aie2p_native_worker_t* reader_worker =
+    loom_aie2p_native_worker_t* reader_worker =
         &context->workers[execution->workers[reader]];
-    const loom_aie2p_native_worker_t* relay_worker =
+    loom_aie2p_native_worker_t* relay_worker =
         &context->workers[execution->workers[relay]];
-    if (packets[reader] <= reader_worker->control_packet_count ||
-        packets[relay] <= relay_worker->control_packet_count) {
+    collective->reader_packet =
+        loom_aie2p_native_collective_packet(&reader_worker->packet_mask);
+    collective->relay_packet =
+        relay == reader
+            ? collective->reader_packet
+            : loom_aie2p_native_collective_packet(&relay_worker->packet_mask);
+    if (collective->reader_packet == UINT8_MAX ||
+        collective->relay_packet == UINT8_MAX) {
       return loom_aie2p_native_reject(
           context, collective->source->operations[0],
           IREE_SV("available collective packet identities"));
     }
-    collective->reader_packet = --packets[reader];
-    collective->relay_packet =
-        relay == reader ? collective->reader_packet : --packets[relay];
     for (iree_host_size_t e = 0; e < execution->engine_count; ++e) {
       if (e == reader || participants->workers[e] == IREE_HOST_SIZE_MAX) {
         continue;
@@ -186,9 +185,9 @@ iree_status_t loom_aie2p_native_route_collectives(
               (first_hop ? reader_worker : relay_worker)->tile->coordinate,
               LOOM_XDNA_STREAM_PORT_CORE,
               context->workers[participants->workers[e]].tile->coordinate,
-              LOOM_XDNA_STREAM_PORT_CORE,
-              first_hop ? collective->reader_packet
-                        : collective->relay_packet)) {
+              LOOM_XDNA_STREAM_PORT_CORE, 0,
+              first_hop ? collective->reader_packet : collective->relay_packet,
+              NULL)) {
         return loom_aie2p_native_reject(
             context, collective->source->operations[0],
             IREE_SV(

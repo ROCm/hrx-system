@@ -13,6 +13,8 @@
 extern "C" {
 #endif
 
+enum { LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID = 16 };
+
 // A complete destination record is granted before its sender task is queued.
 // Such payloads cannot block control traffic behind an unavailable receiver.
 typedef struct loom_aie2p_native_delivery_t {
@@ -20,22 +22,57 @@ typedef struct loom_aie2p_native_delivery_t {
   loom_aie2p_native_distribution_t* distribution;
   // Directed lanes and actual-use result owned by route admission.
   loom_aie2p_array_route_sharing_t sharing;
+  // Terminal identity of each packet class crossing this shared path. Empty
+  // entries have a NULL tile. Distinct core sources may reuse an ID only for
+  // the same terminal, since their packets become indistinguishable on merge.
+  struct {
+    // Physical terminal tile, or NULL for an unassigned packet ID.
+    const loom_aie2p_native_tile_t* tile;
+    // Terminal stream port on that tile.
+    loom_xdna_stream_port_t port;
+    // Channel within the terminal port.
+    uint8_t channel;
+  } packets[32];
   // Absolute sender task register, used by the receiver's continuation.
   uint32_t address;
   // One complete record task with no repeat, used for every receiver grant.
   uint32_t task;
+  // Unique compute receiver, or UINT32_MAX for configuration-owned returns.
+  uint32_t reader_worker;
+  // Compute receiver's control packet to the sender task register.
+  uint8_t packet;
 } loom_aie2p_native_delivery_t;
 
+// Selects a core packet ID outside its occupied set and the payload identity.
+// When a delivery path is available, records the terminal before another core
+// can assign that ID. Returns UINT8_MAX when no compatible identity remains.
+uint8_t loom_aie2p_native_delivery_packet(
+    loom_aie2p_native_delivery_t* delivery, uint32_t occupied,
+    const loom_aie2p_native_tile_t* tile, loom_xdna_stream_port_t port,
+    uint8_t channel);
+
+// Reserves a scalar collective ID in the core's outgoing occupied set. Selects
+// high IDs first; control routing reserves any shared payload identity there.
+// Returns UINT8_MAX without changing the set when no identity remains.
+uint8_t loom_aie2p_native_collective_packet(uint32_t* occupied);
+
 // Selects at most one eligible payload path per control destination from the
-// retained physical distributions and exact configuration credit returns.
+// retained physical distributions and exact receiver credit returns.
 // No payload framing or task policy changes until a route actually borrows it.
 iree_status_t loom_aie2p_native_prepare_sharing(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization);
 
 // Commits framing and receiver-granted admission for actually borrowed paths.
-// Configuration emission consumes the receiver channel's retained delivery.
+// Receiver emission consumes the channel's retained delivery.
 void loom_aie2p_native_commit_sharing(loom_aie2p_native_context_t* context);
+
+// Emits the resident receiver's next-record task submission helper. The caller
+// invokes it only after returning credit and before the last record retires.
+iree_status_t loom_aie2p_native_prepare_grant(
+    loom_aie2p_native_context_t* context,
+    const loom_aie2p_native_delivery_t* delivery,
+    loom_symbol_ref_t* out_symbol);
 
 #ifdef __cplusplus
 }  // extern "C"

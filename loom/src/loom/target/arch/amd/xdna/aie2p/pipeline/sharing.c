@@ -6,14 +6,53 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/sharing.h"
 
+#include "iree/base/internal/math.h"
+
+uint8_t loom_aie2p_native_delivery_packet(
+    loom_aie2p_native_delivery_t* delivery, uint32_t occupied,
+    const loom_aie2p_native_tile_t* tile, loom_xdna_stream_port_t port,
+    uint8_t channel) {
+  uint32_t available =
+      ~(occupied | (UINT32_C(1) << LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID));
+  while (available) {
+    const uint8_t packet = iree_math_count_trailing_zeros_u32(available);
+    available &= available - 1;
+    if (delivery && delivery->packets[packet].tile) {
+      if (delivery->packets[packet].tile != tile ||
+          delivery->packets[packet].port != port ||
+          delivery->packets[packet].channel != channel) {
+        continue;
+      }
+    }
+    if (delivery) {
+      delivery->packets[packet].tile = tile;
+      delivery->packets[packet].port = port;
+      delivery->packets[packet].channel = channel;
+    }
+    return packet;
+  }
+  return UINT8_MAX;
+}
+
+uint8_t loom_aie2p_native_collective_packet(uint32_t* occupied) {
+  const uint32_t available = ~*occupied;
+  if (!available) {
+    return UINT8_MAX;
+  }
+  const uint8_t packet = 31 - iree_math_count_leading_zeros_u32(available);
+  *occupied |= UINT32_C(1) << packet;
+  return packet;
+}
+
 iree_status_t loom_aie2p_native_prepare_sharing(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization) {
-  bool has_refills = false;
+  bool has_controls = false;
   for (iree_host_size_t i = 0; i < realization->invocations.worker_count; ++i) {
-    has_refills |= context->workers[i].refills != NULL;
+    has_controls |= context->workers[i].refills != NULL ||
+                    context->workers[i].channels.remote_count != 0;
   }
-  if (!has_refills) {
+  if (!has_controls) {
     return iree_ok_status();
   }
   iree_arena_allocator_t* arena = context->pass->arena;
@@ -44,8 +83,17 @@ iree_status_t loom_aie2p_native_prepare_sharing(
       const loom_aie2p_native_distribution_endpoint_t* receiver =
           &distribution->receivers[0];
       const loom_aie2p_native_channel_t* channel = receiver->channel;
+      const loom_aie2p_native_cursor_t* reader = &channel->cursor.reader;
+      const bool core_receiver =
+          reader->worker != UINT32_MAX && !reader->shared &&
+          reader->exact_admissions &&
+          reader->maximum_admissions == distribution->repetitions &&
+          realization->invocations.workers[reader->worker].invocation ==
+              realization->invocations.workers[i].invocation &&
+          context->workers[reader->worker].execution ==
+              LOOM_AIE2P_NATIVE_EXECUTION_CORE;
       if (channel->source->capacity != 1 || channel->replay.record_count ||
-          (distribution->repetitions > 1 &&
+          (distribution->repetitions > 1 && !core_receiver &&
            channel->configuration_returns.count != distribution->repetitions) ||
           distribution->sender.tile == receiver->tile) {
         continue;
@@ -58,11 +106,14 @@ iree_status_t loom_aie2p_native_prepare_sharing(
       if (!*selected) {
         IREE_RETURN_IF_ERROR(
             iree_arena_allocate(arena, sizeof(**selected), (void**)selected));
-        **selected =
-            (loom_aie2p_native_delivery_t){.distribution = distribution};
+        **selected = (loom_aie2p_native_delivery_t){
+            .distribution = distribution,
+            .reader_worker = core_receiver ? reader->worker : UINT32_MAX};
       } else if (distribution->routes.count <
                  (*selected)->distribution->routes.count) {
         (*selected)->distribution = distribution;
+        (*selected)->reader_worker =
+            core_receiver ? reader->worker : UINT32_MAX;
       }
     }
   }
@@ -88,9 +139,9 @@ void loom_aie2p_native_commit_sharing(loom_aie2p_native_context_t* context) {
   const iree_host_size_t tile_count =
       (iree_host_size_t)context->family->column_count *
       context->family->row_count;
-  // Core control streams use IDs 0..3. Each sharing domain contains only this
-  // unicast payload and controls terminating at its receiver tile.
-  const uint8_t payload_packet = 16;
+  // Control selection reserves this payload identity across every shared
+  // domain; the remaining IDs name distinct control or credit destinations.
+  const uint8_t payload_packet = LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID;
   for (iree_host_size_t i = 0; i < tile_count; ++i) {
     loom_aie2p_native_delivery_t* delivery = context->deliveries[i];
     if (!delivery || !delivery->sharing.used) {
@@ -126,4 +177,25 @@ void loom_aie2p_native_commit_sharing(loom_aie2p_native_context_t* context) {
         distribution->receivers[0].channel - context->channels;
     context->channels[channel_index].delivery = delivery;
   }
+}
+
+iree_status_t loom_aie2p_native_prepare_grant(
+    loom_aie2p_native_context_t* context,
+    const loom_aie2p_native_delivery_t* delivery,
+    loom_symbol_ref_t* out_symbol) {
+  loom_aie2p_worker_builder_t* code = &context->code;
+  loom_builder_t builder;
+  loom_op_t* function;
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_helper(
+      code, NULL, 0, NULL, 0, &builder, out_symbol, &function));
+  const loom_xdna_tile_coordinate_t sender =
+      delivery->distribution->sender.tile->coordinate;
+  const uint32_t origin = sender.column << context->family->column_shift |
+                          sender.row << context->family->row_shift;
+  loom_value_id_t task;
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_worker_constant(code, &builder, delivery->task, &task));
+  IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_write(
+      code, &builder, delivery->packet, delivery->address - origin, &task, 1));
+  return loom_aie2p_worker_return(&builder, NULL, 0);
 }

@@ -170,10 +170,12 @@ class Aie2pControlSwitchTest : public Aie2pSwitchTest {
   void AddControl(loom_xdna_tile_coordinate_t source,
                   loom_xdna_stream_port_t source_port,
                   loom_xdna_tile_coordinate_t destination,
-                  loom_xdna_stream_port_t destination_port, uint8_t packet) {
+                  loom_xdna_stream_port_t destination_port, uint8_t packet,
+                  loom_aie2p_native_delivery_t* delivery = nullptr) {
     ASSERT_TRUE(loom_aie2p_native_packet_route(&context_, &next_source_, source,
                                                source_port, destination,
-                                               destination_port, packet));
+                                               destination_port, 0, packet,
+                                               delivery));
   }
 
   void AddPayloads(uint32_t count, loom_aie2p_native_delivery_t* delivery) {
@@ -370,7 +372,7 @@ TEST_F(Aie2pControlSwitchTest, AvailableLaneKeepsControlPrivateBesidePayload) {
   loom_aie2p_native_delivery_t delivery = {};
   ASSERT_NO_FATAL_FAILURE(AddPayloads(1, &delivery));
   AddControl({0, 3}, LOOM_XDNA_STREAM_PORT_CORE, {0, 1},
-             LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0);
+             LOOM_XDNA_STREAM_PORT_TILE_CONTROL, 0, &delivery);
   EXPECT_FALSE(delivery.sharing.used);
   ASSERT_NO_FATAL_FAILURE(Build(true, 3));
   EXPECT_EQ(PortWord({0, 1}, LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS,
@@ -384,7 +386,7 @@ TEST_F(Aie2pControlSwitchTest, BorrowedPayloadLaneKeepsControlPacketFiltering) {
   ASSERT_NO_FATAL_FAILURE(AddPayloads(4, &delivery));
   for (uint8_t packet : {0, 1}) {
     AddControl({0, 4}, LOOM_XDNA_STREAM_PORT_CORE, {0, 1},
-               LOOM_XDNA_STREAM_PORT_TILE_CONTROL, packet);
+               LOOM_XDNA_STREAM_PORT_TILE_CONTROL, packet, &delivery);
   }
   EXPECT_TRUE(delivery.sharing.used);
   ASSERT_NO_FATAL_FAILURE(Build(true, 5));
