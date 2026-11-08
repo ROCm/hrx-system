@@ -20,16 +20,14 @@ using iree_hal_streaming_deviceptr_t = uint64_t;
 using iree_hal_streaming_any_ptr_t = uint64_t;
 using iree_hal_streaming_buffer_table_t = hrx_buffer_table_t;
 
-// Dummy buffer structure for testing.
-//
-// NOTE: this is not the layout of the real structure, but in this isolated
-// test that does not even initialize a HAL device we can't use the real
-// structure without partially populating it. I figure it's more confusing to
-// have the partially populated structure than to have one that's totally
-// different. At least we have tests!
+// Opaque allocation identities for index-only benchmarks. The table does not
+// retain or dereference the handles used by these scenarios.
 struct iree_hal_streaming_buffer_t {
+  // Device address inserted into the table.
   iree_hal_streaming_deviceptr_t device_ptr;
+  // Optional host alias inserted with the device address.
   void* host_ptr;
+  // Allocation length exposed by each registered alias.
   size_t size;
   // Padding to make allocation pattern and cache impacts a bit more realistic.
   uint64_t padding[5];
@@ -386,7 +384,7 @@ IREE_BENCHMARK_FN(BM_LookupExactHit) {
 IREE_BENCHMARK_REGISTER(BM_LookupExactHit);
 
 // Measures lookup performance for non-existent addresses.
-// Tests worst-case search through entire table without finding target.
+// Includes status construction for an unsuccessful indexed lookup.
 IREE_BENCHMARK_FN(BM_LookupExactMiss) {
   iree_allocator_t allocator = iree_allocator_system();
   const size_t count = 1000;
@@ -486,124 +484,6 @@ IREE_BENCHMARK_FN(BM_LookupAfterManyInserts) {
   return iree_ok_status();
 }
 IREE_BENCHMARK_REGISTER(BM_LookupAfterManyInserts);
-
-//===----------------------------------------------------------------------===//
-// Removal benchmarks
-//===----------------------------------------------------------------------===//
-
-// Measures removal in insertion order (first-in-first-out).
-// Best case for structures that maintain insertion order.
-IREE_BENCHMARK_FN(BM_RemoveFIFO) {
-  iree_allocator_t allocator = iree_allocator_system();
-  const size_t count = 1000;
-  auto addresses = GenerateRandomAddresses(count);
-  auto buffers = CreateDummyBuffers(addresses, allocator);
-
-  while (iree_benchmark_keep_running(benchmark_state, count)) {
-    iree_benchmark_pause_timing(benchmark_state);
-    iree_hal_streaming_buffer_table_t* table = nullptr;
-    IREE_CHECK_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
-
-    // Insert all (not timed).
-    for (size_t i = 0; i < count; ++i) {
-      IREE_CHECK_OK(iree_hal_streaming_buffer_table_insert(table, buffers[i]));
-    }
-
-    iree_benchmark_resume_timing(benchmark_state);
-
-    // Remove in same order (FIFO).
-    for (size_t i = 0; i < count; ++i) {
-      IREE_CHECK_OK(
-          iree_hal_streaming_buffer_table_remove(table, addresses[i]));
-    }
-
-    iree_benchmark_pause_timing(benchmark_state);
-    iree_hal_streaming_buffer_table_free(table);
-    iree_benchmark_resume_timing(benchmark_state);
-  }
-
-  FreeDummyBuffers(buffers, allocator);
-  return iree_ok_status();
-}
-IREE_BENCHMARK_REGISTER(BM_RemoveFIFO);
-
-// Measures removal in reverse insertion order (last-in-first-out).
-// Optimal for stack-like removal from end of array.
-IREE_BENCHMARK_FN(BM_RemoveLIFO) {
-  iree_allocator_t allocator = iree_allocator_system();
-  const size_t count = 1000;
-  auto addresses = GenerateRandomAddresses(count);
-  auto buffers = CreateDummyBuffers(addresses, allocator);
-
-  while (iree_benchmark_keep_running(benchmark_state, count)) {
-    iree_benchmark_pause_timing(benchmark_state);
-    iree_hal_streaming_buffer_table_t* table = nullptr;
-    IREE_CHECK_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
-
-    // Insert all (not timed).
-    for (size_t i = 0; i < count; ++i) {
-      IREE_CHECK_OK(iree_hal_streaming_buffer_table_insert(table, buffers[i]));
-    }
-
-    iree_benchmark_resume_timing(benchmark_state);
-
-    // Remove in reverse order (LIFO).
-    for (size_t i = count; i > 0; --i) {
-      IREE_CHECK_OK(
-          iree_hal_streaming_buffer_table_remove(table, addresses[i - 1]));
-    }
-
-    iree_benchmark_pause_timing(benchmark_state);
-    iree_hal_streaming_buffer_table_free(table);
-    iree_benchmark_resume_timing(benchmark_state);
-  }
-
-  FreeDummyBuffers(buffers, allocator);
-  return iree_ok_status();
-}
-IREE_BENCHMARK_REGISTER(BM_RemoveLIFO);
-
-// Measures removal in random order.
-// Tests performance with unpredictable removal patterns and shifting.
-IREE_BENCHMARK_FN(BM_RemoveRandom) {
-  iree_allocator_t allocator = iree_allocator_system();
-  const size_t count = 1000;
-  auto addresses = GenerateRandomAddresses(count);
-  auto buffers = CreateDummyBuffers(addresses, allocator);
-
-  // Create random removal order.
-  std::vector<size_t> removal_order(count);
-  std::iota(removal_order.begin(), removal_order.end(), 0);
-  std::mt19937 gen(0xABCDEF);
-  std::shuffle(removal_order.begin(), removal_order.end(), gen);
-
-  while (iree_benchmark_keep_running(benchmark_state, count)) {
-    iree_benchmark_pause_timing(benchmark_state);
-    iree_hal_streaming_buffer_table_t* table = nullptr;
-    IREE_CHECK_OK(iree_hal_streaming_buffer_table_allocate(allocator, &table));
-
-    // Insert all (not timed).
-    for (size_t i = 0; i < count; ++i) {
-      IREE_CHECK_OK(iree_hal_streaming_buffer_table_insert(table, buffers[i]));
-    }
-
-    iree_benchmark_resume_timing(benchmark_state);
-
-    // Remove in random order.
-    for (size_t i = 0; i < count; ++i) {
-      IREE_CHECK_OK(iree_hal_streaming_buffer_table_remove(
-          table, addresses[removal_order[i]]));
-    }
-
-    iree_benchmark_pause_timing(benchmark_state);
-    iree_hal_streaming_buffer_table_free(table);
-    iree_benchmark_resume_timing(benchmark_state);
-  }
-
-  FreeDummyBuffers(buffers, allocator);
-  return iree_ok_status();
-}
-IREE_BENCHMARK_REGISTER(BM_RemoveRandom);
 
 //===----------------------------------------------------------------------===//
 // Mixed operation benchmarks

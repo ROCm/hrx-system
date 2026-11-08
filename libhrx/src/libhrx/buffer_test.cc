@@ -1,6 +1,7 @@
 // Copyright 2026 The HRX Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include <array>
 #include <cstring>
 #include <vector>
 
@@ -192,6 +193,46 @@ TEST_F(CpuBufferTest, PublicConstructionPreservesNativePointerAccess) {
       hrx_buffer_release(buffer);
       for (uint8_t value : storage) {
         EXPECT_EQ(0x5A, value);
+      }
+    }
+  }
+}
+
+TEST_F(CpuBufferTest, HostUnregisterPreservesRegistrationsAcrossIndexGrowth) {
+  constexpr size_t kRegistrationCount = 257;
+  std::array<std::array<uint8_t, 64>, kRegistrationCount> storage = {};
+  std::array<hrx_buffer_t, kRegistrationCount> handles = {};
+  std::array<bool, kRegistrationCount> registered = {};
+  for (size_t ordinal = 0; ordinal < kRegistrationCount; ++ordinal) {
+    // The prime-sized permutation separates registration order from address
+    // order while growing past the table's initial allocation capacity.
+    const size_t index = (ordinal * 37) % kRegistrationCount;
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_host_memory_register(
+        device_, storage[index].data(), storage[index].size(), 0)));
+    IREE_ASSERT_OK(hrx_status_to_iree(hrx_buffer_lookup(
+        device_, storage[index].data(), &handles[index], nullptr)));
+    registered[index] = true;
+  }
+
+  for (size_t ordinal = 0; ordinal < kRegistrationCount; ++ordinal) {
+    const size_t index =
+        ((kRegistrationCount - ordinal - 1) * 37) % kRegistrationCount;
+    IREE_ASSERT_OK(hrx_status_to_iree(
+        hrx_host_memory_unregister(device_, storage[index].data())));
+    registered[index] = false;
+    for (size_t probe = 0; probe < kRegistrationCount; ++probe) {
+      hrx_buffer_t buffer = nullptr;
+      size_t offset = SIZE_MAX;
+      iree_status_t status = hrx_status_to_iree(hrx_buffer_lookup(
+          device_, storage[probe].data() + 13, &buffer, &offset));
+      if (registered[probe]) {
+        IREE_ASSERT_OK(status);
+        EXPECT_EQ(handles[probe], buffer);
+        EXPECT_EQ(13u, offset);
+      } else {
+        IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND, status);
+        EXPECT_EQ(nullptr, buffer);
+        EXPECT_EQ(0u, offset);
       }
     }
   }

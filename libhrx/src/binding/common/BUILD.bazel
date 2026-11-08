@@ -468,7 +468,10 @@ hrx_cc_test(
 
 hrx_cc_benchmark(
     name = "buffer_table_benchmark",
-    srcs = ["buffer_table_benchmark.cc"],
+    srcs = [
+        "buffer_table_benchmark.cc",
+        "buffer_table_removal_benchmark.cc",
+    ],
     deps = [
         ":common",
         "//libhrx/src/libhrx:hrx_static",
