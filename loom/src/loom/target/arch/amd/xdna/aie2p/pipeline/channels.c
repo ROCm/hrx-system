@@ -13,6 +13,7 @@
 #include "loom/ops/view/ops.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/channel_state.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/storage.h"
 #include "loom/transforms/pipeline/channel_materialization.h"
 
 typedef struct loom_aie2p_native_endpoint_t {
@@ -90,31 +91,6 @@ static iree_status_t loom_aie2p_native_invoke(loom_builder_t* builder,
   return iree_ok_status();
 }
 
-static iree_status_t loom_aie2p_native_address(
-    loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
-    uint32_t address, loom_value_id_t* out_value) {
-  const loom_named_attr_t attribute = {.name_id = context->integer_name,
-                                       .value = loom_attr_i64(address)};
-  return loom_aie2p_worker_op(
-      context, builder, AIE2P_CORE_DESCRIPTOR_REF_MATERIALIZE_LOCAL_ADDRESS_I32,
-      NULL, 0, loom_make_named_attr_slice(&attribute, 1),
-      &context->address_type, out_value);
-}
-
-static iree_status_t loom_aie2p_native_address_helper(
-    loom_aie2p_native_context_t* context, uint32_t address,
-    loom_symbol_ref_t* out_symbol) {
-  loom_builder_t builder;
-  loom_op_t* function;
-  IREE_RETURN_IF_ERROR(loom_aie2p_worker_helper(
-      &context->code, NULL, 0, &context->code.address_type, 1, &builder,
-      out_symbol, &function));
-  loom_value_id_t result;
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_native_address(&context->code, &builder, address, &result));
-  return loom_aie2p_worker_return(&builder, &result, 1);
-}
-
 static iree_status_t loom_aie2p_native_lock_helper(
     loom_aie2p_worker_builder_t* context, uint32_t descriptor,
     uint16_t selector, loom_symbol_ref_t* out_symbol) {
@@ -190,33 +166,6 @@ static iree_status_t loom_aie2p_native_sram_publish_helper(
         code, &builder, packet, (uint32_t)(address - origin), &value, 1));
   }
   return loom_aie2p_worker_return(&builder, NULL, 0);
-}
-
-static iree_status_t loom_aie2p_native_materialize_buffer_accesses(
-    loom_aie2p_native_context_t* context, loom_rewriter_t* rewriter,
-    const loom_aie2p_native_worker_t* worker,
-    const loom_pipeline_worker_materialization_t* instance) {
-  const loom_type_t buffer_type = loom_type_buffer();
-  for (iree_host_size_t i = 0; i < worker->buffers.count; ++i) {
-    const loom_aie2p_native_buffer_access_t* access =
-        &worker->buffers.accesses[i];
-    loom_symbol_ref_t helper;
-    IREE_RETURN_IF_ERROR(
-        loom_aie2p_native_address_helper(context, access->address, &helper));
-
-    loom_value_id_t buffer;
-    IREE_RETURN_IF_ERROR(loom_aie2p_native_invoke(
-        &rewriter->builder, helper, NULL, 0, &buffer_type, &buffer));
-    loom_op_t* aligned;
-    IREE_RETURN_IF_ERROR(loom_buffer_assume_alignment_build(
-        &rewriter->builder, &buffer, 1, access->alignment, &buffer_type, 1,
-        LOOM_LOCATION_UNKNOWN, &aligned));
-    IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_with(
-        rewriter,
-        loom_pipeline_worker_materialization_value(instance, access->argument),
-        loom_op_results(aligned)[0]));
-  }
-  return iree_ok_status();
 }
 
 iree_status_t loom_aie2p_native_cursor_advance(
@@ -517,7 +466,7 @@ iree_status_t loom_aie2p_native_emit_worker(
   loom_block_t* entry =
       loom_region_entry_block(loom_func_like_body(channels->function));
   loom_builder_set_before(&rewriter->builder, entry->first_op);
-  IREE_RETURN_IF_ERROR(loom_aie2p_native_materialize_buffer_accesses(
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_materialize_storage_accesses(
       context, rewriter, worker, instance));
   const loom_type_t delta_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32);
   // Establish one canonical +/-1 pair in every channel-bearing worker. Both
