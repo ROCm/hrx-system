@@ -15,11 +15,13 @@ extern "C" {
 
 enum { LOOM_AIE2P_NATIVE_DELIVERY_PACKET_ID = 16 };
 
-// A complete destination record is granted before its sender task is queued.
-// Such payloads cannot block control traffic behind an unavailable receiver.
+// A physical payload path eligible to carry control packets. Every geometry
+// on this path grants a complete destination record before queuing its sender.
 typedef struct loom_aie2p_native_delivery_t {
-  // Uniform unicast source whose selected path can carry control packets.
-  loom_aie2p_native_distribution_t* distribution;
+  // Uniform unicast path shared by all selected child geometries.
+  loom_aie2p_native_distribution_path_t* path;
+  // Independent task/reader continuations for the path's geometry variants.
+  struct loom_aie2p_native_grant_t* grants;
   // Directed lanes and actual-use result owned by route admission.
   loom_aie2p_array_route_sharing_t sharing;
   // Terminal identity of each packet class crossing this shared path. Empty
@@ -33,15 +35,21 @@ typedef struct loom_aie2p_native_delivery_t {
     // Channel within the terminal port.
     uint8_t channel;
   } packets[32];
-  // Absolute sender task register, used by the receiver's continuation.
+} loom_aie2p_native_delivery_t;
+
+// One child's complete-record admission on a shared payload/control path.
+typedef struct loom_aie2p_native_grant_t {
+  // Next geometry's grant on the same physical path.
+  struct loom_aie2p_native_grant_t* next;
+  // Geometry retaining this child's exact receiver and repetition count.
+  loom_aie2p_native_distribution_t* distribution;
+  // Absolute sender task register, used by this receiver's continuation.
   uint32_t address;
   // One complete record task with no repeat, used for every receiver grant.
   uint32_t task;
-  // Unique compute receiver, or UINT32_MAX for configuration-owned returns.
-  uint32_t reader_worker;
   // Compute receiver's control packet to the sender task register.
   uint8_t packet;
-} loom_aie2p_native_delivery_t;
+} loom_aie2p_native_grant_t;
 
 // Selects a core packet ID outside its occupied set and the payload identity.
 // When a delivery path is available, records the terminal before another core
@@ -64,15 +72,14 @@ iree_status_t loom_aie2p_native_prepare_sharing(
     const loom_pipeline_realization_t* realization);
 
 // Commits framing and receiver-granted admission for actually borrowed paths.
-// Receiver emission consumes the channel's retained delivery.
+// Receiver emission consumes the channel's retained grant.
 void loom_aie2p_native_commit_sharing(loom_aie2p_native_context_t* context);
 
 // Emits the resident receiver's next-record task submission helper. The caller
 // invokes it only after returning credit and before the last record retires.
 iree_status_t loom_aie2p_native_prepare_grant(
     loom_aie2p_native_context_t* context,
-    const loom_aie2p_native_delivery_t* delivery,
-    loom_symbol_ref_t* out_symbol);
+    const loom_aie2p_native_grant_t* grant, loom_symbol_ref_t* out_symbol);
 
 #ifdef __cplusplus
 }  // extern "C"

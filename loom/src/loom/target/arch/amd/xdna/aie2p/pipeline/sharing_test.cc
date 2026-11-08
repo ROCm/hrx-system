@@ -45,6 +45,8 @@ class Aie2pSharingTest
     batch_.records = &records_;
     batch_.record_count = 1;
     distribution_.source = &batch_;
+    distribution_.path = &path_;
+    path_.first = path_.geometries = &distribution_;
     distribution_.repetitions = 2;
     distribution_.sender.channel = &channels_[0];
     distribution_.sender.tile = &tiles_[sender_index_];
@@ -61,7 +63,7 @@ class Aie2pSharingTest
     ASSERT_TRUE(loom_aie2p_array_route_workers(
         &context_.routing, 0, 0, tiles_[sender_index_].coordinate, 0,
         tiles_[receiver_index_].coordinate, 0, false));
-    distribution_.routes.count = context_.routing.route_count;
+    path_.routes.count = context_.routing.route_count;
     for (size_t i = 0; i < context_.routing.route_count; ++i) {
       routes_.push_back({&context_.routing.routes[i], UINT8_MAX, UINT32_MAX});
     }
@@ -105,6 +107,8 @@ class Aie2pSharingTest
   loom_pipeline_transport_batch_t batch_ = {};
   // Source DMA plan and its receiver.
   loom_aie2p_native_distribution_t distribution_ = {};
+  // Physical route retained independently of child geometry.
+  loom_aie2p_native_distribution_path_t path_ = {};
   // Independently publishing destination.
   loom_aie2p_native_distribution_endpoint_t receiver_ = {};
   // Existing compute reader needing refill control traffic.
@@ -137,6 +141,7 @@ TEST_P(Aie2pSharingTest, OneDeliveryUsesTheInitiallyFreeSlot) {
 TEST_P(Aie2pSharingTest, ResidentReceiverRequiresExactSameInvocationReturns) {
   loom_pipeline_invocation_t parent = {};
   loom_pipeline_invocation_t child = {.parent = &parent};
+  distribution_.invocation = &parent;
   loom_pipeline_invocation_worker_t invocations[] = {{.invocation = &parent},
                                                      {.invocation = &parent}};
   loom_aie2p_native_worker_t workers[] = {
@@ -150,7 +155,7 @@ TEST_P(Aie2pSharingTest, ResidentReceiverRequiresExactSameInvocationReturns) {
   loom_aie2p_native_cursor_bind(&reader, 1, 1, 2, true, false);
   ASSERT_NO_FATAL_FAILURE(Prepare(true));
   ASSERT_NE(context_.deliveries[receiver_index_], nullptr);
-  EXPECT_EQ(context_.deliveries[receiver_index_]->reader_worker, 1u);
+  EXPECT_EQ(distribution_.grant_reader, 1u);
 
   // A representative worker's count does not cover other readers, nor does
   // an upper bound prove that every read actually returns its credit.
@@ -194,7 +199,7 @@ TEST_P(Aie2pSharingTest, UnusedCandidateDoesNotChangePacketOrQueuePolicy) {
   ASSERT_NO_FATAL_FAILURE(Prepare(true));
   loom_aie2p_native_commit_sharing(&context_);
   EXPECT_FALSE(distribution_.sender.wait_for_idle);
-  EXPECT_EQ(channels_[1].delivery, nullptr);
+  EXPECT_EQ(channels_[1].grant, nullptr);
   for (const auto& route : routes_) {
     EXPECT_EQ(route.packet, UINT8_MAX);
   }
@@ -227,7 +232,7 @@ TEST_P(Aie2pSharingTest, UsedPathAdmitsExactlyOneRecordPerReceiverGrant) {
   EXPECT_EQ(sender.sequence.descriptor_count, 1u);
   EXPECT_EQ(sender.sequence.task_count, 1u);
   EXPECT_EQ(tasks[0], 2u);
-  EXPECT_EQ(delivery->task, tasks[0]);
+  EXPECT_EQ(delivery->grants->task, tasks[0]);
   EXPECT_EQ(words[0][layout.chain.word] &
                 loom_xdna_register_field_encode(layout.chain.enable, 1),
             0u);
@@ -236,7 +241,7 @@ TEST_P(Aie2pSharingTest, UsedPathAdmitsExactlyOneRecordPerReceiverGrant) {
                 (UINT32_MAX >> (32 - length.bit_width)),
             16u);
   EXPECT_TRUE(sender.wait_for_idle);
-  EXPECT_EQ(channels_[1].delivery, delivery);
+  EXPECT_EQ(channels_[1].grant, delivery->grants);
   for (const auto& route : routes_) {
     EXPECT_EQ(route.packet, 16u);
   }
@@ -244,7 +249,7 @@ TEST_P(Aie2pSharingTest, UsedPathAdmitsExactlyOneRecordPerReceiverGrant) {
                 loom_xdna_register_field_encode(layout.packet.enable, 1),
             0u);
   const uint16_t engine = sender.engine;
-  EXPECT_EQ(delivery->address, loom_xdna_register_field_address(
+  EXPECT_EQ(delivery->grants->address, loom_xdna_register_field_address(
                                    context_.family, layout.directions[0].start,
                                    sender.tile->coordinate, &engine));
 }

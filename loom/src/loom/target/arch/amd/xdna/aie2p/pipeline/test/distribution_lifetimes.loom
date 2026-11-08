@@ -156,3 +156,70 @@ check.scenario public @finite_child_completion {
   }
   check.return
 }
+
+// Three private constructions change widths and then revisit the first width.
+// Their two streams must reuse finite physical paths after each complete join.
+pipeline.def<kernel> public retain target(@device) @serial_children() run(%input_arg: buffer, %output_arg: buffer) {
+  %input, %output = buffer.assume.alignment %input_arg, %output_arg {minimum_alignment = 4} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %second_base = index.constant 48 : offset
+  %third_base = index.constant 64 : offset
+  %full_width = index.constant 4 : index
+  %tail_width = index.constant 2 : index
+  %first_count = index.constant 3 : index
+  %later_count = index.constant 2 : index
+  pipeline.serial {
+    pipeline.compose @phase[%full_width, %first_count](%input, %output, %origin) : [index, index](buffer, buffer, offset)
+    pipeline.compose @phase[%tail_width, %later_count](%input, %output, %second_base) : [index, index](buffer, buffer, offset)
+    pipeline.compose @phase[%full_width, %later_count](%input, %output, %third_base) : [index, index](buffer, buffer, offset)
+  }
+}
+
+func.def @reference_block(%width: index, %count: index, %seed: i32, %output: buffer, %offset: offset) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %factor = scalar.constant 3 : i32
+  %destination = buffer.view %output[%offset] : buffer -> view<[%count]x[%width]xi32>
+  scf.for %record = [%begin to %count step %step] {
+    %record_value = index.cast %record : index to i32
+    scf.for %lane = [%begin to %width step %step] {
+      %lane_value = index.cast %lane : index to i32
+      %position = scalar.addi %record_value, %lane_value : i32
+      %value = scalar.addi %seed, %position : i32
+      %result = scalar.muli %value, %factor : i32
+      view.store %result, %destination[%record, %lane] : i32, view<[%count]x[%width]xi32>
+    }
+  }
+  func.return
+}
+
+func.def @serial_reference(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %second_base = index.constant 48 : offset
+  %third_base = index.constant 64 : offset
+  %full_width = index.constant 4 : index
+  %tail_width = index.constant 2 : index
+  %first_count = index.constant 3 : index
+  %later_count = index.constant 2 : index
+  %source = buffer.view %input[%origin] : buffer -> view<1xi32>
+  %seed = view.load %source[0] : view<1xi32> -> i32
+  func.call @reference_block(%full_width, %first_count, %seed, %output, %origin) : (index, index, i32, buffer, offset)
+  func.call @reference_block(%tail_width, %later_count, %seed, %output, %second_base) : (index, index, i32, buffer, offset)
+  func.call @reference_block(%full_width, %later_count, %seed, %output, %third_base) : (index, index, i32, buffer, offset)
+  func.return
+}
+
+check.scenario public @serial_geometry_reentry {
+  check.trial[3](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-1000000 to 1000000) : tensor<17xi32>
+    %input = check.tensor.view %input_storage offset(32) : tensor<17xi32> -> tensor<1xi32>
+    %output_storage = check.generate.fill value(-9999) : tensor<40xi32>
+    %output = check.tensor.view %output_storage offset(32) : tensor<40xi32> -> tensor<24xi32>
+    check.compare<@serial_children, @serial_reference>(%input, %output) : (tensor<1xi32>, tensor<24xi32>) -> () {
+      check.expect.equal actual(%input_storage) expected(%input_storage) : tensor<17xi32>
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<40xi32>
+    }
+  }
+  check.return
+}

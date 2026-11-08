@@ -12,6 +12,20 @@ package(
     licenses = ["notice"],
 )
 
+loom_cc_test(
+    name = "endpoints_test",
+    srcs = ["endpoints_test.cc"],
+    deps = [
+        ":dma_plan",
+        ":native",
+        "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//loom/src/loom/target/arch/amd/xdna/array:registers",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "worker",
     srcs = ["worker.c"],
@@ -215,6 +229,10 @@ loom_cc_test(
     srcs = ["distribution_test.cc"],
     deps = [
         ":native",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p/array:plan",
+        "//loom/src/loom/target/arch/amd/xdna/array:facts",
+        "//loom/src/loom/target/arch/amd/xdna/array:registers",
+        "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

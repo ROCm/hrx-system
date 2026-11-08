@@ -925,6 +925,9 @@ static iree_status_t loom_aie2p_native_select(
           IREE_SV("resident child transport start and retirement"));
     }
   }
+  if (realization->invocations.lifetimes.has_serial) {
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_finalize_endpoints(context));
+  }
   IREE_RETURN_IF_ERROR(
       loom_aie2p_native_select_initializers(context, realization, out_valid));
   if (!*out_valid) {

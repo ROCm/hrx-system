@@ -13,6 +13,20 @@
 extern "C" {
 #endif
 
+// Selects a distribution endpoint from the channel storage and credit plan.
+// A private child can reuse descriptor capacity controlled by the same admitted
+// core engine in an earlier construction. Imported state remains resident.
+iree_status_t loom_aie2p_native_select_channel_endpoint(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_invocations_t* invocations,
+    const loom_pipeline_invocation_t* invocation,
+    const loom_aie2p_native_channel_t* channel,
+    loom_xdna_dma_direction_t direction, uint32_t repetitions,
+    uint32_t credit_interval,
+    const loom_aie2p_native_distribution_endpoint_t* shared,
+    loom_aie2p_native_distribution_endpoint_t* out_endpoint,
+    iree_string_view_t* out_reason, bool* out_valid);
+
 // Finds immutable descriptors for an ordered phase on an already admitted
 // path. The caller establishes retirement between phases. Source and
 // destination channel identities include storage and semaphore ownership; equal

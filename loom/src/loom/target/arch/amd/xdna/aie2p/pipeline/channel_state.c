@@ -169,6 +169,69 @@ iree_status_t loom_aie2p_native_initialize_cursors(
   return iree_ok_status();
 }
 
+// Every entry restores the union, including a return to the initial geometry.
+// Comparing only adjacent variants would lose changes made by another visit.
+static iree_status_t loom_aie2p_native_endpoint_changes(
+    loom_aie2p_native_context_t* context,
+    const loom_aie2p_native_distribution_endpoint_t* endpoint) {
+  loom_aie2p_native_endpoint_storage_t* storage = endpoint->storage;
+  const loom_aie2p_native_dma_sequence_t* first = &storage->first->sequence;
+  const loom_aie2p_native_dma_sequence_t* sequence = &endpoint->sequence;
+  const loom_aie2p_native_memory_layout_t* layout =
+      endpoint->tile->memory_layout;
+  const uint32_t wrap_mask =
+      loom_xdna_register_field_encode(layout->iteration.wrap, -1);
+  for (uint16_t i = 0; i < sequence->descriptor_count; ++i) {
+    uint8_t changed = 0;
+    for (uint8_t word = 0; word < layout->descriptor_word_count; ++word) {
+      const uint32_t current = sequence->words[i][word];
+      const uint32_t previous =
+          i < first->descriptor_count ? first->words[i][word] : current;
+      if (i >= first->descriptor_count || previous != current ||
+          (word == layout->iteration_word &&
+           ((previous | current) & wrap_mask))) {
+        changed |= 1u << word;
+      }
+    }
+    if (changed && !storage->changed_words) {
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          context->pass->arena, storage->descriptor_count, sizeof(uint8_t),
+          (void**)&storage->changed_words));
+      memset(storage->changed_words, 0, storage->descriptor_count);
+    }
+    if (changed) {
+      storage->changed_words[i] |= changed;
+    }
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_aie2p_native_finalize_endpoints(
+    loom_aie2p_native_context_t* context) {
+  // Receiver-granted framing may shorten a selected sequence. Finalize the
+  // word union only after that producer has committed the physical geometry.
+  const iree_host_size_t tile_count =
+      context->family->column_count * context->family->row_count;
+  for (iree_host_size_t t = 0; t < tile_count; ++t) {
+    for (iree_host_size_t bank = 0; bank < 2; ++bank) {
+      for (const loom_aie2p_native_endpoint_storage_t* storage =
+               context->tiles[t].descriptor_storage[bank];
+           storage; storage = storage->next) {
+        if (!storage->geometries->next_geometry) {
+          continue;
+        }
+        for (const loom_aie2p_native_distribution_endpoint_t* endpoint =
+                 storage->geometries;
+             endpoint; endpoint = endpoint->next_geometry) {
+          IREE_RETURN_IF_ERROR(
+              loom_aie2p_native_endpoint_changes(context, endpoint));
+        }
+      }
+    }
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_aie2p_native_bind_endpoint_initializer(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,
@@ -186,9 +249,11 @@ static iree_status_t loom_aie2p_native_bind_endpoint_initializer(
         context, endpoint->channel->source->binding,
         IREE_SV("a continuing DMA slot iterator for an imported partial ring"));
   }
-  // Root channel state is initialized by the entry configuration.
-  // A complete turn needs no restoration at any construction boundary.
-  if (!sequence->rewind_iteration || !owner->ordinal) {
+  // Root state comes from entry configuration. Reused geometry restores every
+  // word any variant can change, even when this turn ends at slot zero.
+  const bool replaces_geometry =
+      endpoint->storage && endpoint->storage->changed_words;
+  if ((!sequence->rewind_iteration && !replaces_geometry) || !owner->ordinal) {
     return iree_ok_status();
   }
   if (!context->endpoint_initializers) {
@@ -264,29 +329,63 @@ iree_status_t loom_aie2p_native_initialize_endpoints(
   loom_op_t* function;
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_helper(code, NULL, 0, NULL, 0, &helper,
                                                 &symbol, &function));
+  bool replaces_geometry = false;
   for (; initializer; initializer = initializer->next) {
     const loom_aie2p_native_distribution_endpoint_t* endpoint =
         initializer->endpoint;
+    replaces_geometry |= endpoint->storage && endpoint->storage->changed_words;
     const loom_aie2p_native_memory_layout_t* layout =
         endpoint->tile->memory_layout;
-    const loom_xdna_tile_coordinate_t tile = endpoint->tile->coordinate;
-    const uint64_t origin = (uint64_t)tile.column
-                                << context->family->column_shift |
-                            (uint64_t)tile.row << context->family->row_shift;
-    const uint16_t descriptor = endpoint->sequence.descriptor;
-    const uint32_t address =
-        (uint32_t)(loom_xdna_register_field_address(context->family,
-                                                    layout->iteration.current,
-                                                    tile, &descriptor) -
-                   origin);
-    loom_value_id_t word;
-    IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
-        code, &helper, endpoint->sequence.words[0][layout->iteration_word],
-        &word));
-    IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_write(
-        code, &helper,
-        controller->control_packets[endpoint->tile - context->tiles], address,
-        &word, 1));
+    const loom_aie2p_native_dma_sequence_t* sequence = &endpoint->sequence;
+    for (uint16_t descriptor = 0; descriptor < sequence->descriptor_count;
+         ++descriptor) {
+      uint8_t changed = endpoint->storage && endpoint->storage->changed_words
+                            ? endpoint->storage->changed_words[descriptor]
+                            : 0;
+      if (!descriptor && sequence->rewind_iteration) {
+        changed |= 1u << layout->iteration_word;
+      }
+      const loom_xdna_tile_coordinate_t tile = endpoint->tile->coordinate;
+      const uint64_t origin = (uint64_t)tile.column
+                                  << context->family->column_shift |
+                              (uint64_t)tile.row << context->family->row_shift;
+      const uint16_t index = sequence->descriptor + descriptor;
+      const uint32_t address =
+          (uint32_t)(loom_xdna_register_field_address(
+                         context->family, layout->descriptor_base, tile, &index) -
+                     origin);
+      for (uint8_t word = 0; word < layout->descriptor_word_count;) {
+        if (!(changed & (1u << word))) {
+          ++word;
+          continue;
+        }
+        // Native control packets carry at most four consecutive registers.
+        loom_value_id_t values[4];
+        uint8_t count = 0;
+        do {
+          IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(
+              code, &helper, sequence->words[descriptor][word + count],
+              &values[count]));
+          ++count;
+        } while (count < IREE_ARRAYSIZE(values) &&
+                 word + count < layout->descriptor_word_count &&
+                 (changed & (1u << (word + count))));
+        IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_write(
+            code, &helper,
+            controller->control_packets[endpoint->tile - context->tiles],
+            address + word * sizeof(uint32_t), values, count));
+        word += count;
+      }
+    }
+  }
+  if (replaces_geometry) {
+    // Geometry restoration runs at child entry. Its constant register writes
+    // have no values crossing into the arithmetic body's allocation scope.
+    // A simple iterator rewind remains inline.
+    const loom_func_like_t callable =
+        loom_func_like_cast(code->module, function);
+    loom_op_attrs(function)[callable.vtable->inline_policy_attr_index] =
+        loom_attr_enum(LOOM_INLINE_POLICY_NOINLINE);
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_worker_return(&helper, NULL, 0));
   loom_op_t* call;

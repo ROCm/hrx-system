@@ -1,0 +1,182 @@
+// Four compute rows saturate the southbound payload links. Control packets
+// share one receiver-granted output path across complete child invocations.
+// Epoch, record, row, and lane values expose missing or duplicate grants.
+aie2p.target<array> @device
+
+func.def inline @fifo(%memory: pool, %capacity: index) -> (channel<tile<16xi32>>) {
+  %origin = index.constant 0 : offset
+  %record_bytes = index.constant 64 : offset
+  %bytes = index.scale %capacity, %record_bytes : index, offset -> offset
+  %storage = buffer.alloca<workgroup> pool(%memory) align(64) %bytes : buffer
+  %slots = buffer.view %storage[%origin] : buffer -> view<[%capacity]x16xi32>
+  %channel = channel.bind<fifo> %slots, %capacity : view<[%capacity]x16xi32>, index -> channel<tile<16xi32>>
+  func.return %channel : channel<tile<16xi32>>
+}
+
+func.def inline @compute(%output: channel<tile<16xi32>>, %base: index, %row_bias: i32) {
+  %write, %destination = channel.reserve %output : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+  %base_value = index.cast %base : index to i32
+  %biased = scalar.addi %base_value, %row_bias : i32
+  %broadcast = vector.splat %biased : vector<16xi32>
+  %lanes = vector.constanti [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] : vector<16xi32>
+  %result = vector.addi %broadcast, %lanes : vector<16xi32>
+  vector.store %result, %destination[0] : vector<16xi32>, view<16xi32>
+  channel.publish %write : write<tile<16xi32>>
+  func.return
+}
+
+func.def inline @write_output(%input: channel<tile<16xi32>>, %output: buffer, %offset: offset) {
+  %external = buffer.view %output[%offset] : buffer -> view<16xi32>
+  %read, %source = channel.acquire %input : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+  %copy = kernel.async.copy %source to %external {cache_scope = workgroup, cache_temporal = regular, direction = workgroup_to_global} : view<16xi32> to view<16xi32> -> kernel.async.token
+  %group = kernel.async.group %copy : kernel.async.token -> kernel.async.group
+  kernel.async.wait %group {newer_groups = 0} : kernel.async.group
+  channel.release %read : read<tile<16xi32>>
+  func.return
+}
+
+pipeline.def @column() run(%output: buffer, %epoch: index) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %records = index.constant 64 : index
+  %words = index.constant 16 : index
+  %one_slot = index.constant 1 : index
+  %cohort_bytes = index.constant 256 : offset
+  %memory = pipeline.memory<workgroup>[0, 1] : pool
+  %tile0 = pipeline.memory<workgroup>[0, 2] : pool
+  %result0 = func.call @fifo(%tile0, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
+  %egress0 = func.call @fifo(%memory, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
+  %row_bias0 = scalar.constant 0 : i32
+  %row_bytes0 = index.constant 0 : offset
+  %tile1 = pipeline.memory<workgroup>[0, 3] : pool
+  %result1 = func.call @fifo(%tile1, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
+  %egress1 = func.call @fifo(%memory, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
+  %row_bias1 = scalar.constant 1048576 : i32
+  %row_bytes1 = index.constant 64 : offset
+  %tile2 = pipeline.memory<workgroup>[0, 4] : pool
+  %result2 = func.call @fifo(%tile2, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
+  %egress2 = func.call @fifo(%memory, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
+  %row_bias2 = scalar.constant 2097152 : i32
+  %row_bytes2 = index.constant 128 : offset
+  %tile3 = pipeline.memory<workgroup>[0, 5] : pool
+  %result3 = func.call @fifo(%tile3, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
+  %egress3 = func.call @fifo(%memory, %one_slot) : (pool, index) -> (channel<tile<16xi32>>)
+  %row_bias3 = scalar.constant 3145728 : i32
+  %row_bytes3 = index.constant 192 : offset
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %global_record = index.madd %epoch, %records, %record : index
+      %base = index.mul %global_record, %words : index
+      func.call @compute(%result0, %base, %row_bias0) : (channel<tile<16xi32>>, index, i32)
+      %cohort_offset = index.scale %global_record, %cohort_bytes : index, offset -> offset
+      %offset0 = index.add %cohort_offset, %row_bytes0 : offset
+      func.call @write_output(%egress0, %output, %offset0) : (channel<tile<16xi32>>, buffer, offset)
+      %offset2 = index.add %cohort_offset, %row_bytes2 : offset
+      func.call @write_output(%egress2, %output, %offset2) : (channel<tile<16xi32>>, buffer, offset)
+    }
+  }
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %read, %source = channel.acquire %result0 : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %write, %destination = channel.reserve %egress0 : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %global_record = index.madd %epoch, %records, %record : index
+      %base = index.mul %global_record, %words : index
+      func.call @compute(%result1, %base, %row_bias1) : (channel<tile<16xi32>>, index, i32)
+      %cohort_offset = index.scale %global_record, %cohort_bytes : index, offset -> offset
+      %offset1 = index.add %cohort_offset, %row_bytes1 : offset
+      func.call @write_output(%egress1, %output, %offset1) : (channel<tile<16xi32>>, buffer, offset)
+      %offset3 = index.add %cohort_offset, %row_bytes3 : offset
+      func.call @write_output(%egress3, %output, %offset3) : (channel<tile<16xi32>>, buffer, offset)
+    }
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %read, %source = channel.acquire %result1 : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %write, %destination = channel.reserve %egress1 : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %global_record = index.madd %epoch, %records, %record : index
+      %base = index.mul %global_record, %words : index
+      func.call @compute(%result2, %base, %row_bias2) : (channel<tile<16xi32>>, index, i32)
+    }
+  }
+  pipeline.strand workers([0, 4], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %read, %source = channel.acquire %result2 : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %write, %destination = channel.reserve %egress2 : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    }
+  }
+  pipeline.strand workers([0, 5], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %global_record = index.madd %epoch, %records, %record : index
+      %base = index.mul %global_record, %words : index
+      func.call @compute(%result3, %base, %row_bias3) : (channel<tile<16xi32>>, index, i32)
+    }
+  }
+  pipeline.strand workers([0, 5], [1, 1], [1, 1]) {
+    scf.for %record = [%begin to %records step %step] {
+      %read, %source = channel.acquire %result3 : channel<tile<16xi32>> -> (read<tile<16xi32>>, view<16xi32>)
+      %write, %destination = channel.reserve %egress3 : channel<tile<16xi32>> -> (write<tile<16xi32>>, view<16xi32>)
+      channel.copy %read -> %write : read<tile<16xi32>>, write<tile<16xi32>>
+    }
+  }
+}
+
+pipeline.def<kernel> public retain target(@device) @child_result_sharing() run(%output_arg: buffer) {
+  %output = buffer.assume.alignment %output_arg {minimum_alignment = 64} : buffer
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 3 : index
+  pipeline.serial {
+    scf.for %epoch = [%begin to %epochs step %step] {
+      pipeline.compose @column(%output, %epoch) : (buffer, index)
+    }
+  }
+}
+
+func.def @reference(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %epochs = index.constant 3 : index
+  %records = index.constant 64 : index
+  %rows = index.constant 4 : index
+  %words = index.constant 16 : index
+  %row_scale = index.constant 1048576 : index
+  %destination = buffer.view %output[%origin] : buffer -> view<3x64x4x16xi32>
+  scf.for %epoch = [%begin to %epochs step %step] {
+    scf.for %record = [%begin to %records step %step] {
+      %global_record = index.madd %epoch, %records, %record : index
+      %base = index.mul %global_record, %words : index
+      scf.for %row = [%begin to %rows step %step] {
+        %biased = index.madd %row, %row_scale, %base : index
+        scf.for %word = [%begin to %words step %step] {
+          %value = index.add %biased, %word : index
+          %result = index.cast %value : index to i32
+          view.store %result, %destination[%epoch, %record, %row, %word] : i32, view<3x64x4x16xi32>
+        }
+      }
+    }
+  }
+  func.return
+}
+
+check.scenario public @child_result_sharing_reentry {
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %output_storage = check.generate.fill value(-9999) : tensor<12320xi32>
+    %output = check.tensor.view %output_storage offset(64) : tensor<12320xi32> -> tensor<12288xi32>
+    check.compare<@child_result_sharing, @reference>(%output) : (tensor<12288xi32>) -> () {
+      check.expect.equal actual(%output_storage) expected(%output_storage) : tensor<12320xi32>
+    }
+  }
+  check.return
+}

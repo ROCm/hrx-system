@@ -558,19 +558,19 @@ iree_status_t loom_aie2p_native_emit_worker(
                                    &buffer_type, &endpoint->buffer));
     }
     const loom_aie2p_native_channel_t* channel = endpoint->access->channel;
-    const loom_aie2p_native_delivery_t* delivery = channel->delivery;
-    if (delivery && delivery->reader_worker == worker_index &&
-        delivery->distribution->repetitions > 1) {
+    const loom_aie2p_native_grant_t* grant = channel->grant;
+    if (grant && grant->distribution->grant_reader == worker_index &&
+        grant->distribution->repetitions > 1) {
       endpoint->remaining = state_count;
       state_views[state_count] = LOOM_VALUE_ID_INVALID;
       loom_op_t* remaining;
       IREE_RETURN_IF_ERROR(loom_scalar_constant_build(
           &rewriter->builder,
-          loom_attr_i64((int32_t)delivery->distribution->repetitions),
-          delta_type, LOOM_LOCATION_UNKNOWN, &remaining));
+          loom_attr_i64((int32_t)grant->distribution->repetitions), delta_type,
+          LOOM_LOCATION_UNKNOWN, &remaining));
       state[state_count++] = loom_scalar_constant_result(remaining);
       IREE_RETURN_IF_ERROR(
-          loom_aie2p_native_prepare_grant(context, delivery, &endpoint->grant));
+          loom_aie2p_native_prepare_grant(context, grant, &endpoint->grant));
     }
     if (endpoint->access->batch_publication) {
       endpoint->publication = state_count;
