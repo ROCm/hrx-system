@@ -54,7 +54,7 @@ func.def public @crop_for(%grid_dim0$0: index, %grid_dim1$1: index, %grid_layout
   %14 = index.constant 1 : offset
   %grid_dim0$15, %grid_dim1$16, %grid_layout$17, %grid$18, %rows$19, %columns$20 = scf.for %i = [%12 to %13 step %14](%grid_dim0$22 = %grid_dim0$0 : index, %grid_dim1$23 = %grid_dim1$1 : index, %grid_layout$24 = %grid_layout$2 : encoding<layout>, %grid$25 = %grid$3 : view<[%grid_dim0$0]x[%grid_dim1$1]xi32, %grid_layout$2>, %rows$26 = %rows$5 : i32, %columns$27 = %columns$6 : i32) -> (index, index, encoding<layout>, view<[%grid_dim0$15]x[%grid_dim1$16]xi32, %grid_layout$17>, i32, i32) {
     %28 = index.cast %i : offset to i32
-    %grid_dim0$29, %grid_dim1$30, %grid_layout$31, %grid$32, %rows$33, %columns$34 = func.call pure @crop_once(%grid_dim0$22, %grid_dim1$23, %grid_layout$24, %grid$25, %rows$26, %columns$27) : (index, index, encoding<layout>, view<[%grid_dim0$22]x[%grid_dim1$23]xi32, %grid_layout$24>, i32, i32) -> (index, index, encoding<layout>, view<[%grid_dim0$29]x[%grid_dim1$30]xi32, %grid_layout$31>, %rows$26 as i32, %columns$27 as i32)
+    %grid_dim0$29, %grid_dim1$30, %grid_layout$31, %grid$32, %rows$33, %columns$34 = func.call pure @crop_once(%grid_dim0$22, %grid_dim1$23, %grid_layout$24, %grid$25, %rows$26, %columns$27) : (index, index, encoding<layout>, view<[%grid_dim0$22]x[%grid_dim1$23]xi32, %grid_layout$24>, i32, i32) -> (index, index, encoding<layout>, view<[%grid_dim0$29]x[%grid_dim1$30]xi32, %grid_layout$31>, i32, i32)
     scf.yield %grid_dim0$29, %grid_dim1$30, %grid_layout$31, %grid$32, %rows$33, %columns$34 : index, index, encoding<layout>, view<[%grid_dim0$29]x[%grid_dim1$30]xi32, %grid_layout$31>, i32, i32
   }
   func.return %grid_dim0$15, %grid_dim1$16, %grid_layout$17, %grid$18 : index, index, encoding<layout>, view<[%grid_dim0$15]x[%grid_dim1$16]xi32, %grid_layout$17>
@@ -72,7 +72,7 @@ func.def public @crop_selected_for(%left_dim0: index, %left_dim1: index, %left_l
   %58 = index.constant 1 : offset
   %grid_dim0$59, %grid_dim1$60, %grid_layout$61, %grid$62, %rows$63, %columns$64 = scf.for %i = [%56 to %57 step %58](%grid_dim0$66 = %grid_dim0$51 : index, %grid_dim1$67 = %grid_dim1$52 : index, %grid_layout$68 = %grid_layout$53 : encoding<layout>, %grid$69 = %grid$54 : view<[%grid_dim0$51]x[%grid_dim1$52]xi32, %grid_layout$53>, %rows$70 = %rows$45 : i32, %columns$71 = %columns$46 : i32) -> (index, index, encoding<layout>, view<[%grid_dim0$59]x[%grid_dim1$60]xi32, %grid_layout$61>, i32, i32) {
     %72 = index.cast %i : offset to i32
-    %grid_dim0$73, %grid_dim1$74, %grid_layout$75, %grid$76, %rows$77, %columns$78 = func.call pure @crop_once(%grid_dim0$66, %grid_dim1$67, %grid_layout$68, %grid$69, %rows$70, %columns$71) : (index, index, encoding<layout>, view<[%grid_dim0$66]x[%grid_dim1$67]xi32, %grid_layout$68>, i32, i32) -> (index, index, encoding<layout>, view<[%grid_dim0$73]x[%grid_dim1$74]xi32, %grid_layout$75>, %rows$70 as i32, %columns$71 as i32)
+    %grid_dim0$73, %grid_dim1$74, %grid_layout$75, %grid$76, %rows$77, %columns$78 = func.call pure @crop_once(%grid_dim0$66, %grid_dim1$67, %grid_layout$68, %grid$69, %rows$70, %columns$71) : (index, index, encoding<layout>, view<[%grid_dim0$66]x[%grid_dim1$67]xi32, %grid_layout$68>, i32, i32) -> (index, index, encoding<layout>, view<[%grid_dim0$73]x[%grid_dim1$74]xi32, %grid_layout$75>, i32, i32)
     scf.yield %grid_dim0$73, %grid_dim1$74, %grid_layout$75, %grid$76, %rows$77, %columns$78 : index, index, encoding<layout>, view<[%grid_dim0$73]x[%grid_dim1$74]xi32, %grid_layout$75>, i32, i32
   }
   func.return %grid_dim0$59, %grid_dim1$60, %grid_layout$61, %grid$62 : index, index, encoding<layout>, view<[%grid_dim0$59]x[%grid_dim1$60]xi32, %grid_layout$61>
@@ -86,7 +86,7 @@ func.def public @crop_while(%grid_dim0$79: index, %grid_dim1$80: index, %grid_la
     %114 = scalar.cmpi ult, %i$91, %iterations : i32
     scf.condition %114, %i$113, %grid_dim0, %grid_dim1, %grid_layout, %grid, %rows, %columns : i1, i32, index, index, encoding<layout>, view<[%grid_dim0]x[%grid_dim1]xi32, %grid_layout>, i32, i32
   } do(%i: i32, %grid_dim0$106: index, %grid_dim1$107: index, %grid_layout$108: encoding<layout>, %grid$109: view<[%grid_dim0$106]x[%grid_dim1$107]xi32, %grid_layout$108>, %rows$110: i32, %columns$111: i32) {
-    %grid_dim0$115, %grid_dim1$116, %grid_layout$117, %grid$118, %rows$119, %columns$120 = func.call pure @crop_once(%grid_dim0$106, %grid_dim1$107, %grid_layout$108, %grid$109, %rows$110, %columns$111) : (index, index, encoding<layout>, view<[%grid_dim0$106]x[%grid_dim1$107]xi32, %grid_layout$108>, i32, i32) -> (index, index, encoding<layout>, view<[%grid_dim0$115]x[%grid_dim1$116]xi32, %grid_layout$117>, %rows$110 as i32, %columns$111 as i32)
+    %grid_dim0$115, %grid_dim1$116, %grid_layout$117, %grid$118, %rows$119, %columns$120 = func.call pure @crop_once(%grid_dim0$106, %grid_dim1$107, %grid_layout$108, %grid$109, %rows$110, %columns$111) : (index, index, encoding<layout>, view<[%grid_dim0$106]x[%grid_dim1$107]xi32, %grid_layout$108>, i32, i32) -> (index, index, encoding<layout>, view<[%grid_dim0$115]x[%grid_dim1$116]xi32, %grid_layout$117>, i32, i32)
     scf.yield %i, %grid_dim0$115, %grid_dim1$116, %grid_layout$117, %grid$118, %rows$119, %columns$120 : i32, index, index, encoding<layout>, view<[%grid_dim0$115]x[%grid_dim1$116]xi32, %grid_layout$117>, i32, i32
   }
   func.return %grid_dim0$99, %grid_dim1$100, %grid_layout$101, %grid$102 : index, index, encoding<layout>, view<[%grid_dim0$99]x[%grid_dim1$100]xi32, %grid_layout$101>
@@ -95,7 +95,7 @@ func.def public @crop_while(%grid_dim0$79: index, %grid_dim1$80: index, %grid_la
 func.def public @crop_do(%grid_dim0$121: index, %grid_dim1$122: index, %grid_layout$123: encoding<layout>, %grid$124: view<[%grid_dim0$121]x[%grid_dim1$122]xi32, %grid_layout$123>, %iterations: i32, %rows$126: i32, %columns$127: i32) -> (%128: index, %129: index, %130: encoding<layout>, view<[%128]x[%129]xi32, %130>) {
   %i$132 = scalar.constant 0 : i32
   %grid_dim0$140, %grid_dim1$141, %grid_layout$142, %grid$143, %rows$144, %columns$145, %i$146 = scf.while(%grid_dim0$133 = %grid_dim0$121 : index, %grid_dim1$134 = %grid_dim1$122 : index, %grid_layout$135 = %grid_layout$123 : encoding<layout>, %grid$136 = %grid$124 : view<[%grid_dim0$133]x[%grid_dim1$134]xi32, %grid_layout$135>, %rows$137 = %rows$126 : i32, %columns$138 = %columns$127 : i32, %i$139 = %i$132 : i32) -> (index, index, encoding<layout>, view<[%grid_dim0$140]x[%grid_dim1$141]xi32, %grid_layout$142>, i32, i32, i32) {
-    %grid_dim0$154, %grid_dim1$155, %grid_layout$156, %grid$157, %rows$158, %columns$159 = func.call pure @crop_once(%grid_dim0$133, %grid_dim1$134, %grid_layout$135, %grid$136, %rows$137, %columns$138) : (index, index, encoding<layout>, view<[%grid_dim0$133]x[%grid_dim1$134]xi32, %grid_layout$135>, i32, i32) -> (index, index, encoding<layout>, view<[%grid_dim0$154]x[%grid_dim1$155]xi32, %grid_layout$156>, %rows$137 as i32, %columns$138 as i32)
+    %grid_dim0$154, %grid_dim1$155, %grid_layout$156, %grid$157, %rows$158, %columns$159 = func.call pure @crop_once(%grid_dim0$133, %grid_dim1$134, %grid_layout$135, %grid$136, %rows$137, %columns$138) : (index, index, encoding<layout>, view<[%grid_dim0$133]x[%grid_dim1$134]xi32, %grid_layout$135>, i32, i32) -> (index, index, encoding<layout>, view<[%grid_dim0$154]x[%grid_dim1$155]xi32, %grid_layout$156>, i32, i32)
     %160 = scalar.constant 1 : i32
     %i$161 = scalar.addi %i$139, %160 : i32
     %162 = scalar.cmpi ult, %i$161, %iterations : i32
@@ -130,7 +130,7 @@ func.def public @crop_break(%grid_dim0$163: index, %grid_dim1$164: index, %grid_
         %229 = scalar.constant 1 : i1
         scf.yield %228, %229, %grid_dim0$193, %grid_dim1$194, %grid_layout$195, %grid$196, %rows$197, %columns$198 : i1, i1, index, index, encoding<layout>, view<[%grid_dim0$193]x[%grid_dim1$194]xi32, %grid_layout$195>, i32, i32
       } else {
-        %grid_dim0, %grid_dim1, %grid_layout, %grid, %rows, %columns = func.call pure @crop_once(%grid_dim0$193, %grid_dim1$194, %grid_layout$195, %grid$196, %rows$197, %columns$198) : (index, index, encoding<layout>, view<[%grid_dim0$193]x[%grid_dim1$194]xi32, %grid_layout$195>, i32, i32) -> (index, index, encoding<layout>, view<[%grid_dim0]x[%grid_dim1]xi32, %grid_layout>, %rows$197 as i32, %columns$198 as i32)
+        %grid_dim0, %grid_dim1, %grid_layout, %grid, %rows, %columns = func.call pure @crop_once(%grid_dim0$193, %grid_dim1$194, %grid_layout$195, %grid$196, %rows$197, %columns$198) : (index, index, encoding<layout>, view<[%grid_dim0$193]x[%grid_dim1$194]xi32, %grid_layout$195>, i32, i32) -> (index, index, encoding<layout>, view<[%grid_dim0]x[%grid_dim1]xi32, %grid_layout>, i32, i32)
         %236 = scalar.constant 1 : i1
         scf.yield %236, %236, %grid_dim0, %grid_dim1, %grid_layout, %grid, %rows, %columns : i1, i1, index, index, encoding<layout>, view<[%grid_dim0]x[%grid_dim1]xi32, %grid_layout>, i32, i32
       }
@@ -148,7 +148,7 @@ func.def public @crop_break(%grid_dim0$163: index, %grid_dim1$164: index, %grid_
   func.return %grid_dim0$186, %grid_dim1$187, %grid_layout$188, %grid$189 : index, index, encoding<layout>, view<[%grid_dim0$186]x[%grid_dim1$187]xi32, %grid_layout$188>
 }
 
-func.def @crop_once(%grid_dim0: index, %grid_dim1: index, %grid_layout: encoding<layout>, %grid: view<[%grid_dim0]x[%grid_dim1]xi32, %grid_layout>, %rows$250: i32, %columns$251: i32) -> (%252: index, %253: index, %254: encoding<layout>, view<[%252]x[%253]xi32, %254>, %rows$250 as i32, %columns$251 as i32) {
+func.def @crop_once(%grid_dim0: index, %grid_dim1: index, %grid_layout: encoding<layout>, %grid: view<[%grid_dim0]x[%grid_dim1]xi32, %grid_layout>, %rows$250: i32, %columns$251: i32) -> (%252: index, %253: index, %254: encoding<layout>, view<[%252]x[%253]xi32, %254>, i32, i32) {
   %258 = scalar.constant 1 : i32
   %rows$259 = scalar.subi %rows$250, %258 : i32
   %260 = scalar.constant 1 : i32

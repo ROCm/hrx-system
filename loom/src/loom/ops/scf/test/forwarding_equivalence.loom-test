@@ -179,10 +179,9 @@ func.def @nested_region_uses_duplicate_columns(%outer_count: index, %inner_count
 
 // ====
 
-// Fact-equivalent values with different structural types remain separate.
-// Replacing either column with the other would invalidate the carried view
-// contract even though both values denote the same underlying view.
-func.def @different_view_types_do_not_merge(%buffer: buffer, %offset: offset, %count: index) {
+// Proven dense layouts canonicalize to the same type before recurrence
+// equivalence is considered, so the two values share one carried column.
+func.def @equivalent_dense_views_merge(%buffer: buffer, %offset: offset, %count: index) {
   %layout = encoding.layout.dense : encoding<layout>
   %base = buffer.view %buffer[%offset] : buffer -> view<4xf32, %layout>
   %refined = view.refine %base : view<4xf32, %layout> -> view<4xf32>
@@ -193,5 +192,36 @@ func.def @different_view_types_do_not_merge(%buffer: buffer, %offset: offset, %c
     scf.yield %base, %refined : view<4xf32, %layout>, view<4xf32>
   }
   test.use %r0, %r1 : view<4xf32, %layout>, view<4xf32>
+  func.return
+}
+
+// ----
+func.def @equivalent_dense_views_merge(%buffer: buffer, %offset: offset, %count: index) {
+  %base = buffer.view %buffer[%offset] : buffer -> view<4xf32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %r0 = scf.for %i = [%begin to %count step %step](%a = %base : view<4xf32>) -> (view<4xf32>) {
+    test.use %a, %a : view<4xf32>, view<4xf32>
+    scf.yield %base : view<4xf32>
+  }
+  test.use %r0, %r0 : view<4xf32>, view<4xf32>
+  func.return
+}
+
+// ====
+
+// Fact-equivalent views with distinct access requirements remain separate.
+// Replacing either column with the other would change its access contract
+// even though both values denote the same storage root and byte base.
+func.def @different_view_access_types_do_not_merge(%buffer: buffer, %offset: offset, %count: index) {
+  %base = buffer.view %buffer[%offset] : buffer -> view<4xf32, align(1)>
+  %refined = view.refine %base : view<4xf32, align(1)> -> view<4xf32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %r0, %r1 = scf.for %i = [%begin to %count step %step](%a = %base : view<4xf32, align(1)>, %b = %refined : view<4xf32>) -> (view<4xf32, align(1)>, view<4xf32>) {
+    test.use %a, %b : view<4xf32, align(1)>, view<4xf32>
+    scf.yield %base, %refined : view<4xf32, align(1)>, view<4xf32>
+  }
+  test.use %r0, %r1 : view<4xf32, align(1)>, view<4xf32>
   func.return
 }

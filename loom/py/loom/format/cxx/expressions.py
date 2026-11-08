@@ -1176,6 +1176,19 @@ class CxxExpressionRenderer(CxxRenderContext):
         )
         return ("static_offsets",)
 
+    def _native_vector_lane(
+        self, operation: Operation, resolved: Any, indices: list[str]
+    ) -> str:
+        if len(indices) != 1:
+            raise CxxRenderError(
+                operation, "native vector access requires one lane index"
+            )
+        # Native vector subscripting requires a C++ integer. Loom's index
+        # wrapper exposes its full signed coordinate through this conversion.
+        if resolved.value_ids("indices"):
+            return f"static_cast<long long>({indices[0]})"
+        return indices[0]
+
     def _render_vector_insert(self, operation: Operation) -> tuple[str, ...]:
         resolved = self._resolved(operation)
         indices = self._mixed_indices(
@@ -1183,11 +1196,7 @@ class CxxExpressionRenderer(CxxRenderContext):
             dynamic_field="indices",
             static_field="static_indices",
         )
-        if len(indices) != 1:
-            raise CxxRenderError(
-                operation,
-                "native vector insertion requires one lane index",
-            )
+        lane = self._native_vector_lane(operation, resolved, indices)
 
         result = resolved.value_id("result")
         source = self.expression(resolved.value_id("dest"))
@@ -1208,7 +1217,7 @@ class CxxExpressionRenderer(CxxRenderContext):
                 f"auto {mutation_target} = {_strip_outer_parentheses(source)};"
             )
         self.writer.line(
-            f"{mutation_target}[{indices[0]}] = "
+            f"{mutation_target}[{lane}] = "
             f"{self.expression(resolved.value_id('value'))};"
         )
         if assignment_target_id is not None:
@@ -1410,13 +1419,10 @@ class CxxExpressionRenderer(CxxRenderContext):
                     )
                 self._declare(result, expression, inlineable=True)
                 return ("static_indices",)
-            if len(indices) != 1:
-                raise CxxRenderError(
-                    operation, "native vector extraction requires one lane index"
-                )
+            lane = self._native_vector_lane(operation, resolved, indices)
             self._declare(
                 operation.results[0],
-                f"{self.expression(operation.operands[0])}[{indices[0]}]",
+                f"{self.expression(operation.operands[0])}[{lane}]",
                 inlineable=True,
             )
             return ("static_indices",)

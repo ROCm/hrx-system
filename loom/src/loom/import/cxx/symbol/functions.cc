@@ -1286,7 +1286,6 @@ BoundSignature Functions::bind_callable_signature(
     FunctionInstance instance, cxx::AST* source, Types& types,
     loom_builder_t* builder, std::vector<loom_type_t>& arguments,
     std::vector<loom_type_t>& results,
-    std::vector<loom_tied_result_t>& tied_results,
     std::vector<loom_predicate_t>& predicates) {
   auto* symbol = instance.symbol;
   auto* signature = cxx::type_cast<cxx::FunctionType>(symbol->type());
@@ -1337,10 +1336,6 @@ BoundSignature Functions::bind_callable_signature(
         types.partition(receiver_type, source).component_count;
     argument_count = receiver_argument_count;
   }
-  std::vector<size_t> argument_offsets;
-  if (!references.empty()) {
-    argument_offsets.resize(parameters.size());
-  }
   size_t reference_index = 0;
   for (size_t ordinal = 0; ordinal < parameters.size(); ++ordinal) {
     auto* parameter = parameters[ordinal];
@@ -1352,9 +1347,6 @@ BoundSignature Functions::bind_callable_signature(
             ? unit_.typeTraits().add_pointer(
                   unit_.typeTraits().remove_reference(parameter->type()))
             : types.unqualified_value(parameter->type());
-    if (!references.empty()) {
-      argument_offsets[ordinal] = argument_count;
-    }
     sources.push_back(value_type);
     argument_count += types.partition(value_type, source).component_count;
     reference_index += is_reference;
@@ -1389,57 +1381,6 @@ BoundSignature Functions::bind_callable_signature(
   arguments.assign(callable.types.begin(),
                    callable.types.begin() + argument_count);
   results.assign(callable.types.begin() + argument_count, callable.types.end());
-  size_t result_offset = ordinary_result_count;
-  if (receiver && receiver->abi == ImplicitObjectABI::Value) {
-    for (auto* field : receiver->written_fields) {
-      const auto& member = types.member(field, source);
-      const size_t component_count = member.partition->component_count;
-      if (member.component_offset + component_count > UINT16_MAX ||
-          result_offset + component_count > UINT16_MAX) {
-        diagnostics_.reject(unit_, source,
-                            "implicit object signature exceeds native operand "
-                            "or result limits");
-      }
-      for (size_t component = 0; component < component_count; ++component) {
-        const size_t operand = member.component_offset + component;
-        tied_results.push_back({
-            .result_index = static_cast<uint16_t>(result_offset + component),
-            .operand_index = static_cast<uint16_t>(operand),
-            .has_type_change = !loom_type_equal(
-                arguments[operand], results[result_offset + component]),
-        });
-      }
-      result_offset += component_count;
-    }
-  }
-  for (const auto& reference : references) {
-    if (reference.abi != ReferenceABI::Value || !reference.mutable_access) {
-      continue;
-    }
-    const auto component_count =
-        types
-            .partition(
-                types.unqualified_value(parameters[reference.ordinal]->type()),
-                source)
-            .component_count;
-    const size_t argument_offset = argument_offsets[reference.ordinal];
-    if (argument_offset + component_count > UINT16_MAX ||
-        result_offset + component_count > UINT16_MAX) {
-      diagnostics_.reject(unit_, source,
-                          "value-reference signature exceeds native operand "
-                          "or result limits");
-    }
-    for (size_t component = 0; component < component_count; ++component) {
-      tied_results.push_back({
-          .result_index = static_cast<uint16_t>(result_offset + component),
-          .operand_index = static_cast<uint16_t>(argument_offset + component),
-          .has_type_change =
-              !loom_type_equal(arguments[argument_offset + component],
-                               results[result_offset + component]),
-      });
-    }
-    result_offset += component_count;
-  }
   auto predicate_identities = std::span(callable.identities);
   std::vector<loom_value_id_t> projected_predicate_identities;
   if (receiver && !predicate_identities.empty()) {
@@ -1550,13 +1491,12 @@ void Functions::build_declarations(Types& types, Locations& locations,
     }
     std::vector<loom_type_t> arguments;
     std::vector<loom_type_t> results;
-    std::vector<loom_tied_result_t> tied_results;
     std::vector<loom_predicate_t> predicates;
     // Dependent type payloads in this signature must outlive the declaration
     // builder call below.
     auto bound_signature = bind_callable_signature(
         {symbol->canonical(), ImplicitObjectABI::None}, source, types, builder,
-        arguments, results, tied_results, predicates);
+        arguments, results, predicates);
     const loom_attribute_t source_signature = build_c_source_signature(
         unit_, diagnostics_, module_, symbol, source, types);
     loom_func_decl_build_flags_t flags = 0;
@@ -1602,8 +1542,8 @@ void Functions::build_declarations(Types& types, Locations& locations,
         source_signature, /*abi=*/0, {}, LOOM_STRING_ID_INVALID, {},
         callees_.at({symbol->canonical(), ImplicitObjectABI::None}),
         arguments.data(), arguments.size(), results.data(), results.size(),
-        tied_results.data(), tied_results.size(), predicates.data(),
-        predicates.size(), locations.get(source), &op));
+        nullptr, 0, predicates.data(), predicates.size(), locations.get(source),
+        &op));
   }
 }
 
@@ -1648,7 +1588,6 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
   }
   std::vector<loom_type_t> arguments;
   std::vector<loom_type_t> results;
-  std::vector<loom_tied_result_t> tied_results;
   std::vector<loom_predicate_t> predicates;
   std::optional<LaunchConfiguration> launch_configuration;
   BoundSignature configuration_signature;
@@ -1690,9 +1629,8 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
         symbol, types, staged_signature.source_identities,
         FunctionContractSignature::Flattened, definition);
   } else if (!check_case && !check_scenario) {
-    callable_signature =
-        bind_callable_signature(instance, definition, types, builder, arguments,
-                                results, tied_results, predicates);
+    callable_signature = bind_callable_signature(
+        instance, definition, types, builder, arguments, results, predicates);
   }
   loom_op_t* op;
   if (check_case) {
@@ -1900,8 +1838,8 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
         template_definition->priority.value_or(0),
         callees_.at({symbol->canonical(), instance.receiver_abi}),
         arguments.data(), arguments.size(), results.data(), results.size(),
-        tied_results.data(), tied_results.size(), predicates.data(),
-        predicates.size(), locations.get(definition), &op));
+        nullptr, 0, predicates.data(), predicates.size(),
+        locations.get(definition), &op));
   } else {
     launches_.reject_ordinary_function(symbol);
     const auto target = target_definitions_.reference(symbol);
@@ -1941,8 +1879,8 @@ DefinedFunction Functions::define(FunctionInstance instance, Types& types,
         source_signature, 0, {}, 0, {},
         callees_.at({symbol->canonical(), instance.receiver_abi}),
         arguments.data(), arguments.size(), results.data(), results.size(),
-        tied_results.data(), tied_results.size(), predicates.data(),
-        predicates.size(), locations.get(definition), &op));
+        nullptr, 0, predicates.data(), predicates.size(),
+        locations.get(definition), &op));
   }
   auto* region = check_case            ? loom_check_case_body(op)
                  : check_scenario      ? loom_check_scenario_body(op)

@@ -299,12 +299,6 @@ class ControlFlow final : private cxx::ASTVisitor {
   bool call_result_requires_storage(cxx::AST* call) const {
     return storage_call_results_.contains(call);
   }
-  // Whether the binding's current source value may be observed after |owner|.
-  // Facts are built lazily on the first mutable value call, so functions that
-  // never require ownership separation pay no additional source walk or map.
-  // Structured loop edges already give written bindings new region identities,
-  // so only later lexical uses within the current region need this query.
-  bool value_has_later_lexical_use(cxx::Symbol* binding, cxx::AST* owner) const;
   // Exact top-level current-object fields whose values may be replaced.
   std::span<cxx::FieldSymbol* const> receiver_writes() const {
     return receiver_writes_;
@@ -325,7 +319,6 @@ class ControlFlow final : private cxx::ASTVisitor {
 
  private:
   struct TemporaryDestructionFacts;
-  struct ValueUseFacts;
   struct ReferenceIdentityFacts;
   struct ReferenceWriteFacts;
 
@@ -482,7 +475,6 @@ class ControlFlow final : private cxx::ASTVisitor {
   unsigned classify_paths(cxx::StatementAST* statement) const;
   bool classify_callable_exit(cxx::StatementAST* statement);
   ExitFlow exits(cxx::StatementAST* statement, unsigned selected_paths) const;
-  void analyze_value_uses() const;
 
   // Resolved source types and literal interpretation for loop admission.
   cxx::TranslationUnit& unit_;
@@ -580,9 +572,6 @@ class ControlFlow final : private cxx::ASTVisitor {
   // Synthesized default constructors with at least one retained member
   // initializer. Empty plans preserve uninitialized automatic storage.
   std::unordered_set<cxx::FunctionSymbol*> initializing_constructors_;
-  // Sparse source-use index allocated only if a mutable tied call needs to
-  // separate ownership. Ordinary functions retain one null pointer.
-  mutable std::unique_ptr<ValueUseFacts> value_uses_;
 };
 
 }  // namespace loom::cxx_import

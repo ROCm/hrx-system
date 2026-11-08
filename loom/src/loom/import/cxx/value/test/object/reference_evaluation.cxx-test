@@ -1,5 +1,5 @@
 // RUN: roundtrip
-// A semantic buffer reference reads the completed tied result rather than the
+// A semantic buffer reference reads the completed call result rather than the
 // earlier argument value. No byte storage or duplicated owner is needed.
 #include <loomcxx/buffer.h>
 using Buffer = loom::type::buffer<unsigned>;
@@ -12,7 +12,7 @@ void run(Buffer owner, Buffer next) { inspect(owner, replace(owner, next)); }
 
 // ----
 func.def public @run(%owner$0: buffer, %next: buffer) {
-  %2, %owner$3 = func.call pure @replace(%owner$0, %next) : (buffer, buffer) -> (i32, %owner$0 as buffer)
+  %2, %owner$3 = func.call pure @replace(%owner$0, %next) : (buffer, buffer) -> (i32, buffer)
   func.call @inspect(%owner$3, %2) : (buffer, i32)
   func.return
 }
@@ -22,7 +22,7 @@ func.def @inspect(%owner: buffer, %5: i32) {
   func.return
 }
 
-func.def @replace(%owner: buffer, %next: buffer) -> (i32, %owner as buffer) {
+func.def @replace(%owner: buffer, %next: buffer) -> (i32, buffer) {
   %10 = scalar.constant 0 : i32
   func.return %10, %next : i32, buffer
 }

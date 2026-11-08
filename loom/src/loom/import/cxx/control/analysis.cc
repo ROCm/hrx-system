@@ -39,11 +39,6 @@ struct ControlFlow::TemporaryDestructionFacts {
   std::unordered_set<cxx::FunctionSymbol*> candidates;
 };
 
-struct ControlFlow::ValueUseFacts {
-  // Final lexical source use for each automatic or current-field binding.
-  std::unordered_map<cxx::Symbol*, size_t> last_uses;
-};
-
 struct ControlFlow::ReferenceIdentityFacts {
   // Sparse member-slice vectors referenced directly by retained call edges.
   std::vector<std::unique_ptr<std::vector<ObjectInterval>>> argument_slices;
@@ -68,59 +63,6 @@ struct ControlFlow::ReferenceWriteFacts {
 };
 
 namespace {
-
-// Builds sparse future-use facts only for a function that reaches a mutable
-// tied call. The main control analysis stays unchanged for ordinary functions.
-class ValueUseAnalysis final : private cxx::ASTVisitor {
- public:
-  ValueUseAnalysis(cxx::TranslationUnit& unit, std::span<cxx::AST* const> roots,
-                   std::unordered_map<cxx::Symbol*, size_t>& last_uses)
-      : unit_(unit), last_uses_(last_uses) {
-    for (auto* root : roots) {
-      accept(root);
-    }
-  }
-
- private:
-  void visit(cxx::LambdaExpressionAST* ast) override {
-    for (auto* capture : cxx::ListView{ast->captureList}) {
-      accept(capture);
-    }
-  }
-
-  bool preVisit(cxx::AST* ast) override {
-    switch (ast->kind()) {
-      case cxx::ASTKind::ConstExpression:
-      case cxx::ASTKind::SizeofExpression:
-      case cxx::ASTKind::SizeofTypeExpression:
-      case cxx::ASTKind::AlignofTypeExpression:
-        return false;
-      default:
-        break;
-    }
-    if (auto* id = cxx::ast_cast<cxx::IdExpressionAST>(ast)) {
-      record(id->symbol, id);
-    } else if (auto* member = cxx::ast_cast<cxx::MemberExpressionAST>(ast);
-               member && is_current_object(unit_, member->baseExpression)) {
-      record(member->symbol, member);
-    }
-    return true;
-  }
-
-  void record(cxx::Symbol* symbol, cxx::AST* source) {
-    if (!symbol) {
-      return;
-    }
-    auto position = source->firstSourceLocation().index();
-    auto [found, inserted] = last_uses_.try_emplace(symbol, position);
-    if (!inserted) {
-      found->second = std::max(found->second, size_t{position});
-    }
-  }
-
-  cxx::TranslationUnit& unit_;
-  std::unordered_map<cxx::Symbol*, size_t>& last_uses_;
-};
 
 // Classifies reference-capture field uses without attributing the lambda body
 // to its enclosing callable. A direct lvalue-to-rvalue conversion observes the
@@ -381,37 +323,6 @@ const Destruction* ControlFlow::automatic_destruction(
 }
 
 ControlFlow::~ControlFlow() = default;
-
-void ControlFlow::analyze_value_uses() const {
-  if (value_uses_) {
-    return;
-  }
-  value_uses_ = std::make_unique<ValueUseFacts>();
-  std::vector<cxx::AST*> roots;
-  IREE_ASSERT(function_);
-  auto* definition = function_->declaration();
-  IREE_ASSERT(definition);
-  auto* function_body = definition->functionBody;
-  if (function_->isConstructor()) {
-    for (auto* initializer :
-         cxx::ListView{cxx::ctor_initializers(function_body)}) {
-      roots.push_back(initializer);
-    }
-  }
-  auto* body =
-      cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(function_body);
-  IREE_ASSERT(body);
-  roots.push_back(body->statement);
-  ValueUseAnalysis(unit_, roots, value_uses_->last_uses);
-}
-
-bool ControlFlow::value_has_later_lexical_use(cxx::Symbol* binding,
-                                              cxx::AST* owner) const {
-  analyze_value_uses();
-  auto found = value_uses_->last_uses.find(binding);
-  return found != value_uses_->last_uses.end() &&
-         found->second > owner->lastSourceLocation().index();
-}
 
 std::optional<Destination> ControlFlow::destination(
     cxx::ExpressionAST* expression) const {
@@ -1458,7 +1369,7 @@ void ControlFlow::collect_identity(cxx::ExpressionAST* expression,
           cxx::ast_cast<cxx::ConditionalExpressionAST>(expression)) {
     // A glvalue conditional has a runtime-selected identity. The existing
     // storage projection selects that identity once and preserves mutations;
-    // independent tied SSA writebacks cannot name only the selected arm.
+    // independent SSA writebacks cannot name only the selected arm.
     if (expression->valueCategory != cxx::ValueCategory::kPrValue) {
       argument.inherent_storage = true;
     }
@@ -2084,7 +1995,7 @@ CallPropagation ControlFlow::propagate_overlapping_references(
   };
 
   // A value-reference call represents each mutable parameter as an independent
-  // tied writeback. Overlapping source intervals require one shared storage
+  // result writeback. Overlapping source intervals require one shared storage
   // identity so reads and writes observe the source language's aliasing order.
   const size_t parameter_count =
       std::min(parameters.size(), call.arguments.size());

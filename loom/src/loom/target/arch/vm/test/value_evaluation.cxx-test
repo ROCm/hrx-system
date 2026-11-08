@@ -1,0 +1,359 @@
+// RUN: emit vm-object-lifetime
+// INPUT: cxx root=run
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned replace(unsigned& owner) { owner = 22; return 0; }
+void run() {
+  unsigned owner = 11;
+  event(owner << replace(owner));
+  event(owner);
+}
+
+// ----
+event 11
+event 22
+OK 0
+retired 0
+
+// ====
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned replace(unsigned& owner) { owner = 22; return 0; }
+struct Pair {
+  // Snapshot initialized before the second clause.
+  unsigned first;
+  // Result of the later mutation.
+  unsigned second;
+};
+void run() {
+  unsigned owner = 11;
+  Pair result{owner, replace(owner)};
+  event(result.first);
+  event(result.second);
+  event(owner);
+}
+
+// ----
+event 11
+event 0
+event 22
+OK 0
+retired 0
+
+// ====
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned replace(unsigned& owner) { owner = 22; return 0; }
+struct Pair {
+  // Current source subobject, changed by the following default initializer.
+  unsigned first;
+  // Mutation changes first rather than preserving its original value.
+  unsigned second = replace(first);
+};
+void run() {
+  unsigned owner = 11;
+  Pair result{owner};
+  event(result.first);
+  event(result.second);
+  event(owner);
+}
+
+// ----
+event 22
+event 0
+event 11
+OK 0
+retired 0
+
+// ====
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned replace(unsigned& owner) { owner = 22; return 0; }
+struct Owner {
+  // Current source payload; outer and constructed instances share a declaration.
+  unsigned value;
+  // Secondary component initialized after the saved payload.
+  unsigned second;
+  unsigned construct() {
+    Owner result{value, replace(value)};
+    event(result.value);
+    event(result.second);
+    return value;
+  }
+};
+void run() {
+  Owner owner{11, 33};
+  event(owner.construct());
+  event(owner.value);
+  event(owner.second);
+}
+
+// ----
+event 11
+event 0
+event 22
+event 22
+event 33
+OK 0
+retired 0
+
+// ====
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned replace(unsigned*& owner, unsigned* next) {
+  owner = next;
+  return 1;
+}
+void run() {
+  unsigned first[2]{11,22};
+  unsigned second[2]{33,44};
+  unsigned* owner = first;
+  event(owner[replace(owner, second)]);
+  event(owner[0]);
+}
+
+// ----
+event 22
+event 33
+OK 0
+retired 0
+// ====
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned increment(unsigned& value) { ++value; return 0; }
+[[loom::noinline]] static unsigned exclusive(bool choose, unsigned value) {
+  unsigned saved = value;
+  if (choose) { increment(value); return value; }
+  else { return saved; }
+}
+[[loom::noinline]] static unsigned exclusive_reversed(bool choose, unsigned value) {
+  unsigned saved = value;
+  if (choose) { return saved; }
+  else { increment(value); return value; }
+}
+[[loom::noinline]] static unsigned dead_copy(unsigned value) {
+  unsigned saved = value;
+  increment(value);
+  return value;
+}
+[[loom::noinline]] static unsigned last_read_before_update(unsigned value) {
+  event(value);
+  increment(value);
+  return value;
+}
+[[loom::noinline]] static unsigned loop(unsigned value, unsigned count) {
+  for (unsigned i = 0; i < count; ++i) increment(value);
+  return value;
+}
+[[loom::noinline]] static unsigned loop_snapshot(unsigned value, unsigned count) {
+  unsigned total = 0;
+  for (unsigned i = 0; i < count; ++i) total += value << increment(value);
+  return total + value;
+}
+[[loom::noinline]] static unsigned same_call(unsigned& value, unsigned saved) {
+  ++value;
+  return value + saved;
+}
+[[loom::noinline]] static void increment_pair(unsigned& first, unsigned& second) {
+  ++first;
+  second += 2u;
+}
+[[loom::noinline]] static unsigned independent_writebacks(unsigned value) {
+  unsigned first = value;
+  unsigned second = value;
+  increment_pair(first, second);
+  return first * 100u + second;
+}
+void run() {
+  event(exclusive(true, 11));
+  event(exclusive(false, 11));
+  event(exclusive_reversed(true, 11));
+  event(exclusive_reversed(false, 11));
+  event(dead_copy(11));
+  event(last_read_before_update(11));
+  event(loop(11, 0));
+  event(loop(11, 2));
+  event(loop_snapshot(11, 2));
+  unsigned value = 11;
+  event(same_call(value, value));
+  event(independent_writebacks(11));
+}
+
+// ----
+event 12
+event 11
+event 11
+event 12
+event 12
+event 11
+event 12
+event 11
+event 13
+event 36
+event 23
+event 1213
+OK 0
+retired 0
+// ====
+
+#include <loomcxx/view.h>
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+namespace loomt = loom::type;
+using Rows = loomt::view<loomt::shape<loomt::dynamic>, const unsigned char,
+                        loomt::encoding<loom::encoding::role::layout, 1>>;
+[[loom::noinline]] static unsigned trim(Rows& rows) {
+  rows = loom::view::subview(rows, {1}, {1});
+  return 0;
+}
+struct Pair {
+  // Earlier view keeps its complete shape and layout tuple.
+  Rows saved;
+  // Later call result after changing the original source view.
+  unsigned ignored;
+};
+void run() {
+  auto data = loom::buffer::constant("\x0b\x16");
+  auto layout = loom::encoding::layout::dense<1>();
+  auto source = loom::buffer::view<loomt::dynamic>(data, {2}, layout);
+  Pair result{source, trim(source)};
+  event(loom::view::load(result.saved, 0));
+  event(loom::view::load(source, 0));
+}
+
+// ----
+event 11
+event 22
+OK 0
+retired 0
+
+// ====
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+[[loom::noinline]] static unsigned replace(unsigned& value) { value = 22; return 0; }
+[[loom::noinline]] static unsigned increment(unsigned& value) { ++value; return 0; }
+[[loom::noinline]] static void conditional(bool choose) {
+  unsigned value = 11;
+  event(value << (choose ? replace(value) : 0u));
+  event(value);
+}
+[[loom::noinline]] static void captured_loop(unsigned value) {
+  for (unsigned i = 0; i < 2; ++i) {
+    unsigned local = value;
+    increment(local);
+    event(local);
+  }
+  event(value);
+}
+[[loom::noinline]] static unsigned early_exit(bool choose, unsigned value) {
+  for (unsigned i = 0; i < 2; ++i) {
+    if (choose) { increment(value); return value; }
+  }
+  return value;
+}
+[[loom::noinline]] static void closure_snapshot() {
+  unsigned value = 11;
+  auto closure = [saved = value, ignored = replace(value)] { return saved + ignored; };
+  event(closure());
+  event(value);
+}
+using Lanes = unsigned __attribute__((ext_vector_type(2)));
+[[loom::noinline]] static void vector_snapshot() {
+  unsigned value = 11;
+  Lanes lanes{value, replace(value)};
+  event(lanes[0]);
+  event(lanes[1]);
+  event(value);
+}
+[[loom::noinline]] static void multiple_copies(unsigned value) {
+  unsigned first = value;
+  unsigned second = value;
+  increment(first);
+  increment(second);
+  event(first);
+  event(second);
+  event(value);
+}
+void run() {
+  conditional(true);
+  conditional(false);
+  captured_loop(11);
+  event(early_exit(true, 11));
+  event(early_exit(false, 11));
+  closure_snapshot();
+  vector_snapshot();
+  multiple_copies(11);
+}
+// ----
+event 11
+event 22
+event 11
+event 11
+event 12
+event 12
+event 11
+event 12
+event 11
+event 11
+event 22
+event 11
+event 0
+event 22
+event 12
+event 12
+event 11
+OK 0
+retired 0
+
+// ====
+// An overloaded shift snapshots its by-value left operand, while the following
+// mutation updates the original record. Member/prvalue forms retain the same
+// rule when a later argument changes the source used to construct the receiver.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+struct Owner {
+  // Saved payload of this source instance.
+  unsigned value;
+  void observe(unsigned) const { event(value); }
+};
+[[loom::noinline]] static unsigned replace(Owner& owner) { owner.value = 22; return 0; }
+[[loom::noinline]] static void operator<<(Owner saved, unsigned) { event(saved.value); }
+void run() {
+  Owner owner{11};
+  owner << replace(owner);
+  event(owner.value);
+  owner.value = 11;
+  Owner{owner.value}.observe(replace(owner));
+  event(owner.value);
+}
+// ----
+event 11
+event 22
+event 11
+event 22
+OK 0
+retired 0
+
+// ====
+// A vector passed by value retains its lanes while an independent binding is
+// updated through a mutable reference. Runtime lane indices cover both source
+// subscripting and the exported C++ integer conversion.
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+using Lanes = unsigned __attribute__((ext_vector_type(2)));
+[[loom::noinline]] static void replace_lane(Lanes& lanes, unsigned index) {
+  lanes[index] = 33;
+}
+[[loom::noinline]] static unsigned read_lane(Lanes lanes, unsigned index) {
+  return lanes[index];
+}
+void run() {
+  Lanes lanes{11, 22};
+  Lanes saved = lanes;
+  replace_lane(lanes, 1);
+  event(read_lane(saved, 1));
+  event(read_lane(lanes, 1));
+  event(read_lane(lanes, 0));
+}
+// ----
+event 22
+event 33
+event 11
+OK 0
+retired 0

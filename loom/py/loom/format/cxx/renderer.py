@@ -1178,14 +1178,6 @@ class CxxRenderer(CxxFunctionRenderer):
         direct_assignments = self._direct_terminator_assignments(
             block, "scf.yield", yield_targets
         )
-        if self._current_function_projection is not None:
-            direct_assignments.update(
-                self._direct_terminator_assignments(
-                    block,
-                    "func.return",
-                    self._current_function_projection.return_targets,
-                )
-            )
         previous_assignments = self.assignment_targets
         self.assignment_targets = {**previous_assignments, **direct_assignments}
         try:
@@ -1207,6 +1199,10 @@ class CxxRenderer(CxxFunctionRenderer):
                 if operation.name == "func.return":
                     self._validate_projected_attributes(operation, ())
                     self._render_function_return(operation)
+                    continue
+                if operation.name == "func.exit":
+                    self._validate_projected_attributes(operation, ())
+                    self._render_function_exit(operation)
                     continue
                 if operation.name == "func.call":
                     projected = self._render_function_call(operation)

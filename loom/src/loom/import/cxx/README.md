@@ -2344,14 +2344,46 @@ The record components remain explicit at the call boundary:
 ```
 
 Binary and unary operators, compound assignments, and prefix and postfix
-increment or decrement support member and free definitions. Mutable reference
-arguments and receivers use tied callable results, so `value += bias` updates
-the caller's SSA value. A reference result that aliases `*this` reuses that tied
-result. When every return aliases one reference parameter, the result reuses the
-once-evaluated argument; this includes move-shaped templates instantiated from
-lvalue arguments. Using either form as an object identity materializes storage
-only where the source semantics require it. Source evaluation order, including
-the distinct compound-assignment and postfix rules, is retained.
+increment or decrement support member and free definitions. Reference arguments
+and receivers represented in SSA return ordinary results, so `value += bias`
+updates the caller's source binding without consuming its earlier value. A
+reference result that aliases `*this` reuses the updated binding. When every
+return aliases one reference parameter, the result reuses the once-evaluated
+argument; this includes move-shaped templates instantiated from lvalue
+arguments. Using either form as an object identity materializes storage only
+where the source semantics require it. Source evaluation order, including the
+distinct compound-assignment and postfix rules, is retained.
+
+Completed value evaluations keep their earlier value when a later operand
+mutates the source object. For example, shift operands are evaluated left to
+right:
+
+```cpp
+unsigned replace(unsigned& value) { value = 22; return 0; }
+unsigned saved(unsigned value) { return value << replace(value); }
+```
+
+Calling `saved(11)` returns 11. The original value remains available to the
+shift while `replace` returns the new source binding as another ordinary result:
+
+```loom
+%shift, %updated = func.call pure @replace(%original) : (i32) -> (i32, i32)
+%result = scalar.shli %original, %shift : i32
+```
+
+The same rule covers earlier aggregate members, closure captures, and complete
+pointer or shaped-value tuples. Dependent dimensions and layouts travel with
+their returned values. A reference argument instead names its current object
+and observes the completed argument updates. Ordinary SSA values require no
+extra duplicate operations or liveness repair to preserve these completed
+evaluations. Managed reference ownership continues to follow the native
+operation and type contracts.
+
+C++ export represents these internal helpers with value parameters and ordinary
+returns, using a result record when needed. Reimport preserves their behavior
+without reconstructing the original mutable reference signature. Authored
+destructive function ties have no equivalent C++ reference spelling and produce
+an export diagnostic instead of silently losing their contract.
 
 `[[loom::op]]` declarations continue to bind facade operations directly to a
 specific High operation and take precedence over an ordinary function body.

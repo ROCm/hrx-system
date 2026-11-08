@@ -239,7 +239,7 @@ TEST_F(ImportTest, PlainViewsPreserveFunctionSignaturesAndDenseSubviews) {
   EXPECT_EQ(diagnostic_count_, 0);
 }
 
-TEST_F(ImportTest, MutableViewReferencesRetainTypeChangingTies) {
+TEST_F(ImportTest, MutableViewReferencesReturnIndependentDependentTuples) {
   const auto source = IREE_SV(
       "#include <loomcxx/view.h>\n"
       "namespace loomt = loom::type;\n"
@@ -260,17 +260,23 @@ TEST_F(ImportTest, MutableViewReferencesRetainTypeChangingTies) {
   ASSERT_TRUE(loom_func_def_isa(entry));
   auto* call = loom_region_entry_block(loom_func_def_body(entry))->first_op;
   ASSERT_TRUE(loom_func_call_isa(call));
-  ASSERT_EQ(call->tied_result_count, 3u);
-  EXPECT_FALSE(loom_op_tied_results(call)[0].has_type_change);
-  EXPECT_FALSE(loom_op_tied_results(call)[1].has_type_change);
-  EXPECT_TRUE(loom_op_tied_results(call)[2].has_type_change);
+  EXPECT_EQ(call->tied_result_count, 0u);
+  ASSERT_EQ(call->result_count, 3u);
+  const auto* call_results = loom_op_results(call);
+  auto returned_view = loom_module_value_type(module_, call_results[2]);
+  EXPECT_EQ(loom_type_dim_value_id_at(returned_view, 0), call_results[0]);
+  EXPECT_TRUE(loom_type_has_ssa_encoding(returned_view));
+  EXPECT_EQ(loom_type_encoding_value_id(returned_view), call_results[1]);
 
   auto* replace = loom_block_op(loom_module_block(module_), 1);
   ASSERT_TRUE(loom_func_def_isa(replace));
-  ASSERT_EQ(replace->tied_result_count, 3u);
-  EXPECT_FALSE(loom_op_tied_results(replace)[0].has_type_change);
-  EXPECT_FALSE(loom_op_tied_results(replace)[1].has_type_change);
-  EXPECT_TRUE(loom_op_tied_results(replace)[2].has_type_change);
+  EXPECT_EQ(replace->tied_result_count, 0u);
+  ASSERT_EQ(replace->result_count, 3u);
+  const auto* signature_results = loom_op_results(replace);
+  auto signature_view = loom_module_value_type(module_, signature_results[2]);
+  EXPECT_EQ(loom_type_dim_value_id_at(signature_view, 0), signature_results[0]);
+  EXPECT_TRUE(loom_type_has_ssa_encoding(signature_view));
+  EXPECT_EQ(loom_type_encoding_value_id(signature_view), signature_results[1]);
   EXPECT_EQ(diagnostic_count_, 0);
 }
 

@@ -73,7 +73,6 @@ TEST(ControlFlowTest, LambdaConstructionVisitsCapturesButNotDeferredBody) {
   auto* lambda = FirstLambda::find(body);
   ASSERT_NE(lambda, nullptr);
   ASSERT_NE(lambda->captureList, nullptr);
-  auto* reference_capture = lambda->captureList->value;
   auto* value_capture = lambda->captureList->next->value;
   auto* initializer = cxx::capture_initializer(value_capture);
   ASSERT_NE(initializer, nullptr);
@@ -86,13 +85,6 @@ TEST(ControlFlowTest, LambdaConstructionVisitsCapturesButNotDeferredBody) {
   ASSERT_NE(calls[0].function, nullptr);
   EXPECT_EQ(cxx::to_string(calls[0].function->name()), "initialize");
   EXPECT_TRUE(analysis.written(body).empty());
-
-  auto* captured_field = cxx::capture_field(reference_capture);
-  ASSERT_NE(captured_field, nullptr);
-  auto* captured_initializer = cxx::capture_initializer(reference_capture);
-  ASSERT_NE(captured_initializer, nullptr);
-  EXPECT_FALSE(analysis.value_has_later_lexical_use(captured_field,
-                                                    captured_initializer));
 }
 
 TEST(ControlFlowTest,
@@ -1227,40 +1219,6 @@ TEST(ControlFlowTest, IterationExitsStopAtTheirLoopAndExcludeUnreachablePaths) {
     EXPECT_EQ(analysis.iteration_exits(body), ExitFlow::None);
     EXPECT_NE(analysis.counted(loop), nullptr);
   }
-}
-
-TEST(ControlFlowTest, ValueUseAnalysisRetainsLaterLexicalUses) {
-  loom_cxx_import_options_t options;
-  loom_cxx_import_options_initialize(&options);
-  Source source(IREE_SV(R"(
-    static void mutate(unsigned& value);
-    unsigned entry(unsigned value, unsigned count) {
-      mutate(value);
-      unsigned later = value;
-      mutate(value);
-      for (unsigned i = 0; i < count; ++i) {
-        later += value;
-        mutate(value);
-      }
-      return later;
-    }
-  )"),
-                IREE_SV("value_uses.cxx"), options);
-  auto* function = definition(source);
-  ASSERT_NE(function, nullptr);
-  auto* body = cxx::ast_cast<cxx::CompoundStatementFunctionBodyAST>(
-                   function->functionBody)
-                   ->statement;
-  Types types(source.unit(), source.diagnostics());
-  ControlFlow analysis(source.unit(), source.diagnostics(), types, body,
-                       function->symbol);
-  auto calls = analysis.calls();
-  ASSERT_EQ(calls.size(), 3u);
-  auto* value = function->symbol->parameters()[0];
-
-  EXPECT_TRUE(analysis.value_has_later_lexical_use(value, calls[0].source));
-  EXPECT_TRUE(analysis.value_has_later_lexical_use(value, calls[1].source));
-  EXPECT_FALSE(analysis.value_has_later_lexical_use(value, calls[2].source));
 }
 
 }  // namespace

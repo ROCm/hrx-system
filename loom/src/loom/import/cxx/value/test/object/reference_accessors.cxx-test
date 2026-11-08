@@ -157,7 +157,7 @@ func.def public @value_reference_results(%condition: i1, %value: i32) -> (i32) {
 }
 
 func.def public @mutable_reference_result(%value$8: i32) -> (i32) {
-  %value$10 = func.call pure @increment_alias(%value$8) : (i32) -> (%value$8 as i32)
+  %value$10 = func.call pure @increment_alias(%value$8) : (i32) -> (i32)
   func.return %value$10 : i32
 }
 
@@ -189,7 +189,7 @@ func.def @branch_alias(%condition: i1, %value: i32) {
   func.return
 }
 
-func.def @increment_alias(%value$30: i32) -> (%value$30 as i32) {
+func.def @increment_alias(%value$30: i32) -> (i32) {
   %32 = scalar.constant 1 : i32
   %value$33 = scalar.addi %value$30, %32 : i32
   func.return %value$33 : i32
@@ -660,12 +660,12 @@ unsigned storage_reference_receiver(unsigned input) {
 func.def public @reference_receiver(%condition: i1, %input: i32) -> (i32) {
   %value_member = scf.if %condition -> (i32) {
     func.call pure @move___ReceiverValue_(%input) : (i32)
-    %value_member$4 = func.call pure @ReceiverValue__operator_positive_value(%input) : (i32) -> (%input as i32)
+    %value_member$4 = func.call pure @ReceiverValue__operator_positive_value(%input) : (i32) -> (i32)
     %5 = scalar.constant 3 : i32
-    %value_member$6 = func.call pure @ReceiverValue__operator_subscript_value(%value_member$4, %5) : (i32, i32) -> (%value_member$4 as i32)
+    %value_member$6 = func.call pure @ReceiverValue__operator_subscript_value(%value_member$4, %5) : (i32, i32) -> (i32)
     %7 = scalar.constant 2 : i32
-    %value_member$8 = func.call pure @ReceiverValue__advance_value(%value_member$6, %7) : (i32, i32) -> (%value_member$6 as i32)
-    %value_member$9 = func.call pure @ReceiverValue__increment_value(%value_member$8) : (i32) -> (%value_member$8 as i32)
+    %value_member$8 = func.call pure @ReceiverValue__advance_value(%value_member$6, %7) : (i32, i32) -> (i32)
+    %value_member$9 = func.call pure @ReceiverValue__increment_value(%value_member$8) : (i32) -> (i32)
     scf.yield %value_member$9 : i32
   } else {
     scf.yield %input : i32
@@ -677,7 +677,7 @@ func.def public @reference_receiver(%condition: i1, %input: i32) -> (i32) {
 }
 
 func.def public @reference_parameter_receiver(%input: i32) -> (i32) {
-  %value_member = func.call pure @mutate_receiver(%input) : (i32) -> (%input as i32)
+  %value_member = func.call pure @mutate_receiver(%input) : (i32) -> (i32)
   func.return %value_member : i32
 }
 
@@ -729,23 +729,23 @@ func.def @move___ReceiverValue_(%value_member: i32) {
   func.return
 }
 
-func.def @ReceiverValue__operator_positive_value(%this_member: i32) -> (%this_member as i32) {
+func.def @ReceiverValue__operator_positive_value(%this_member: i32) -> (i32) {
   %54 = scalar.constant 4 : i32
   %member = scalar.addi %this_member, %54 : i32
   func.return %member : i32
 }
 
-func.def @ReceiverValue__operator_subscript_value(%this_member: i32, %amount: i32) -> (%this_member as i32) {
+func.def @ReceiverValue__operator_subscript_value(%this_member: i32, %amount: i32) -> (i32) {
   %member = scalar.addi %this_member, %amount : i32
   func.return %member : i32
 }
 
-func.def @ReceiverValue__advance_value(%this_member: i32, %amount: i32) -> (%this_member as i32) {
+func.def @ReceiverValue__advance_value(%this_member: i32, %amount: i32) -> (i32) {
   %member = scalar.addi %this_member, %amount : i32
   func.return %member : i32
 }
 
-func.def @ReceiverValue__increment_value(%this_member: i32) -> (%this_member as i32) {
+func.def @ReceiverValue__increment_value(%this_member: i32) -> (i32) {
   %66 = scalar.constant 1 : i32
   %member = scalar.addi %this_member, %66 : i32
   func.return %member : i32
@@ -755,9 +755,9 @@ func.def @ReceiverValue__observe_value(%this_member: i32) -> (i32) {
   func.return %this_member : i32
 }
 
-func.def @mutate_receiver(%value_member$70: i32) -> (%value_member$70 as i32) {
+func.def @mutate_receiver(%value_member$70: i32) -> (i32) {
   func.call pure @move___ReceiverValue_(%value_member$70) : (i32)
-  %value_member$72 = func.call pure @ReceiverValue__increment_value(%value_member$70) : (i32) -> (%value_member$70 as i32)
+  %value_member$72 = func.call pure @ReceiverValue__increment_value(%value_member$70) : (i32) -> (i32)
   func.return %value_member$72 : i32
 }
 

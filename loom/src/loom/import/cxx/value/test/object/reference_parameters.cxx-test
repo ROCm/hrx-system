@@ -11,12 +11,12 @@ unsigned scalar_reference(unsigned value, unsigned delta) {
 
 // ----
 func.def public @scalar_reference(%value$0: i32, %delta: i32) -> (i32) {
-  %doubled, %value$4 = func.call pure @adjust(%value$0, %delta) : (i32, i32) -> (i32, %value$0 as i32)
+  %doubled, %value$4 = func.call pure @adjust(%value$0, %delta) : (i32, i32) -> (i32, i32)
   %5 = scalar.addi %doubled, %value$4 : i32
   func.return %5 : i32
 }
 
-func.def @adjust(%value$6: i32, %delta: i32) -> (i32, %value$6 as i32) {
+func.def @adjust(%value$6: i32, %delta: i32) -> (i32, i32) {
   %value$10 = scalar.addi %value$6, %delta : i32
   %11 = scalar.constant 2 : i32
   %12 = scalar.muli %value$10, %11 : i32
@@ -34,16 +34,15 @@ unsigned stale_scalar_copy(unsigned value) {
 
 // ----
 func.def public @stale_scalar_copy(%value$0: i32) -> (i32) {
-  %2 = scalar.duplicate %value$0 : i32
-  %value$3 = func.call pure @increment_copy(%2) : (i32) -> (%2 as i32)
-  %4 = scalar.addi %value$0, %value$3 : i32
-  func.return %4 : i32
+  %value$2 = func.call pure @increment_copy(%value$0) : (i32) -> (i32)
+  %3 = scalar.addi %value$0, %value$2 : i32
+  func.return %3 : i32
 }
 
-func.def @increment_copy(%value$5: i32) -> (%value$5 as i32) {
-  %7 = scalar.constant 1 : i32
-  %value$8 = scalar.addi %value$5, %7 : i32
-  func.return %value$8 : i32
+func.def @increment_copy(%value$4: i32) -> (i32) {
+  %6 = scalar.constant 1 : i32
+  %value$7 = scalar.addi %value$4, %6 : i32
+  func.return %value$7 : i32
 }
 
 // ====
@@ -79,7 +78,7 @@ func.def public @loop_backedge_copy(%value$0: i32, %count: i32) -> (i32) {
   %total$11, %value$12 = scf.for %i = [%5 to %6 step %7](%total$9 = %total$3 : i32, %value$10 = %value$0 : i32) -> (i32, i32) {
     %13 = index.cast %i : offset to i32
     %total$14 = scalar.addi %total$9, %value$0 : i32
-    %value$15 = func.call pure @increment_loop_copy(%value$10) : (i32) -> (%value$10 as i32)
+    %value$15 = func.call pure @increment_loop_copy(%value$10) : (i32) -> (i32)
     scf.yield %total$14, %value$15 : i32, i32
   }
   %16 = scalar.addi %total$11, %value$12 : i32
@@ -95,14 +94,14 @@ func.def public @iteration_local_copy(%value$17: i32, %count: i32) -> (i32) {
   %total$28, %value$29 = scf.for %i = [%22 to %23 step %24](%total$26 = %total$20 : i32, %value$27 = %value$17 : i32) -> (i32, i32) {
     %30 = index.cast %i : offset to i32
     %total$31 = scalar.addi %total$26, %value$27 : i32
-    %value$32 = func.call pure @increment_loop_copy(%value$27) : (i32) -> (%value$27 as i32)
+    %value$32 = func.call pure @increment_loop_copy(%value$27) : (i32) -> (i32)
     scf.yield %total$31, %value$32 : i32, i32
   }
   %33 = scalar.addi %total$28, %value$29 : i32
   func.return %33 : i32
 }
 
-func.def @increment_loop_copy(%value$34: i32) -> (%value$34 as i32) {
+func.def @increment_loop_copy(%value$34: i32) -> (i32) {
   %36 = scalar.constant 1 : i32
   %value$37 = scalar.addi %value$34, %36 : i32
   func.return %value$37 : i32
@@ -123,18 +122,17 @@ unsigned repeated_tied_copies(unsigned value) {
 
 // ----
 func.def public @repeated_tied_copies(%value: i32) -> (i32) {
-  %2 = scalar.duplicate %value : i32
-  %left, %right = func.call pure @increment_copies(%2, %value) : (i32, i32) -> (%2 as i32, %value as i32)
-  %5 = scalar.addi %left, %right : i32
-  func.return %5 : i32
+  %left, %right = func.call pure @increment_copies(%value, %value) : (i32, i32) -> (i32, i32)
+  %4 = scalar.addi %left, %right : i32
+  func.return %4 : i32
 }
 
-func.def @increment_copies(%left$6: i32, %right$7: i32) -> (%left$6 as i32, %right$7 as i32) {
-  %10 = scalar.constant 1 : i32
-  %left$11 = scalar.addi %left$6, %10 : i32
-  %12 = scalar.constant 2 : i32
-  %right$13 = scalar.addi %right$7, %12 : i32
-  func.return %left$11, %right$13 : i32, i32
+func.def @increment_copies(%left$5: i32, %right$6: i32) -> (i32, i32) {
+  %9 = scalar.constant 1 : i32
+  %left$10 = scalar.addi %left$5, %9 : i32
+  %11 = scalar.constant 2 : i32
+  %right$12 = scalar.addi %right$6, %11 : i32
+  func.return %left$10, %right$12 : i32, i32
 }
 
 // ====
@@ -149,16 +147,15 @@ unsigned copied_call_argument(unsigned value) {
 
 // ----
 func.def public @copied_call_argument(%value$0: i32) -> (i32) {
-  %2 = scalar.duplicate %value$0 : i32
-  %3, %value$4 = func.call pure @increment_with_input(%2, %value$0) : (i32, i32) -> (i32, %2 as i32)
-  func.return %3 : i32
+  %2, %value$3 = func.call pure @increment_with_input(%value$0, %value$0) : (i32, i32) -> (i32, i32)
+  func.return %2 : i32
 }
 
-func.def @increment_with_input(%value$5: i32, %input: i32) -> (i32, %value$5 as i32) {
-  %9 = scalar.constant 1 : i32
-  %value$10 = scalar.addi %value$5, %9 : i32
-  %11 = scalar.addi %value$10, %input : i32
-  func.return %11, %value$10 : i32, i32
+func.def @increment_with_input(%value$4: i32, %input: i32) -> (i32, i32) {
+  %8 = scalar.constant 1 : i32
+  %value$9 = scalar.addi %value$4, %8 : i32
+  %10 = scalar.addi %value$9, %input : i32
+  func.return %10, %value$9 : i32, i32
 }
 
 // ====
@@ -172,27 +169,25 @@ unsigned stale_pointer_copy(unsigned* pointer) {
 
 // ----
 func.def public @stale_pointer_copy(%pointer$0: buffer, %pointer_byte_offset$1: offset) -> (i32) {
-  %3 = buffer.duplicate %pointer$0 : buffer
-  %4 = index.duplicate %pointer_byte_offset$1 : offset
-  %pointer$5, %pointer_byte_offset$6 = func.call pure @advance_pointer(%3, %4) : (buffer, offset) -> (%3 as buffer, %4 as offset)
-  %7 = buffer.view %pointer$0[%pointer_byte_offset$1] : buffer -> view<1xi32>
+  %pointer$3, %pointer_byte_offset$4 = func.call pure @advance_pointer(%pointer$0, %pointer_byte_offset$1) : (buffer, offset) -> (buffer, offset)
+  %5 = buffer.view %pointer$0[%pointer_byte_offset$1] : buffer -> view<1xi32>
+  %6 = view.load %5[0] : view<1xi32> -> i32
+  %7 = buffer.view %pointer$3[%pointer_byte_offset$4] : buffer -> view<1xi32>
   %8 = view.load %7[0] : view<1xi32> -> i32
-  %9 = buffer.view %pointer$5[%pointer_byte_offset$6] : buffer -> view<1xi32>
-  %10 = view.load %9[0] : view<1xi32> -> i32
-  %11 = scalar.addi %8, %10 : i32
-  func.return %11 : i32
+  %9 = scalar.addi %6, %8 : i32
+  func.return %9 : i32
 }
 
-func.def @advance_pointer(%pointer: buffer, %pointer_byte_offset$13: offset) -> (%pointer as buffer, %pointer_byte_offset$13 as offset) {
-  %16 = scalar.constant 1 : i32
-  %17 = scalar.extsi %16 : i32 to i64
-  %18 = scalar.constant 4 : i64
-  %19 = scalar.muli %17, %18 : i64
-  %20 = index.cast %pointer_byte_offset$13 : offset to i64
-  %21 = scalar.addi %20, %19 : i64
-  %22 = scalar.assume %21 [range(%21, 0, 9223372036854775807)] : i64
-  %pointer_byte_offset$23 = index.cast %22 : i64 to offset
-  func.return %pointer, %pointer_byte_offset$23 : buffer, offset
+func.def @advance_pointer(%pointer: buffer, %pointer_byte_offset$11: offset) -> (buffer, offset) {
+  %14 = scalar.constant 1 : i32
+  %15 = scalar.extsi %14 : i32 to i64
+  %16 = scalar.constant 4 : i64
+  %17 = scalar.muli %15, %16 : i64
+  %18 = index.cast %pointer_byte_offset$11 : offset to i64
+  %19 = scalar.addi %18, %17 : i64
+  %20 = scalar.assume %19 [range(%19, 0, 9223372036854775807)] : i64
+  %pointer_byte_offset$21 = index.cast %20 : i64 to offset
+  func.return %pointer, %pointer_byte_offset$21 : buffer, offset
 }
 
 // ====
@@ -214,21 +209,19 @@ unsigned stale_record_copy(CopiedPair value) {
 
 // ----
 func.def public @stale_record_copy(%value_first$0: i32, %value_second$1: i32) -> (i32) {
-  %3 = scalar.duplicate %value_first$0 : i32
-  %4 = scalar.duplicate %value_second$1 : i32
-  %value_first$5, %value_second$6 = func.call pure @increment_pair(%3, %4) : (i32, i32) -> (%3 as i32, %4 as i32)
-  %7 = scalar.addi %value_first$0, %value_second$1 : i32
-  %8 = scalar.addi %7, %value_first$5 : i32
-  %9 = scalar.addi %8, %value_second$6 : i32
-  func.return %9 : i32
+  %value_first$3, %value_second$4 = func.call pure @increment_pair(%value_first$0, %value_second$1) : (i32, i32) -> (i32, i32)
+  %5 = scalar.addi %value_first$0, %value_second$1 : i32
+  %6 = scalar.addi %5, %value_first$3 : i32
+  %7 = scalar.addi %6, %value_second$4 : i32
+  func.return %7 : i32
 }
 
-func.def @increment_pair(%value_first$10: i32, %value_second$11: i32) -> (%value_first$10 as i32, %value_second$11 as i32) {
-  %14 = scalar.constant 1 : i32
-  %value_first$15 = scalar.addi %value_first$10, %14 : i32
-  %16 = scalar.constant 2 : i32
-  %value_second$17 = scalar.addi %value_second$11, %16 : i32
-  func.return %value_first$15, %value_second$17 : i32, i32
+func.def @increment_pair(%value_first$8: i32, %value_second$9: i32) -> (i32, i32) {
+  %12 = scalar.constant 1 : i32
+  %value_first$13 = scalar.addi %value_first$8, %12 : i32
+  %14 = scalar.constant 2 : i32
+  %value_second$15 = scalar.addi %value_second$9, %14 : i32
+  func.return %value_first$13, %value_second$15 : i32, i32
 }
 
 // ====
@@ -318,11 +311,11 @@ UInt4 vector_reference(UInt4 values, unsigned lane, unsigned amount) {
 
 // ----
 func.def public @vector_reference(%values$0: vector<4xi32>, %lane: i32, %amount: i32) -> (vector<4xi32>) {
-  %values$4 = func.call pure @update_lane(%values$0, %lane, %amount) : (vector<4xi32>, i32, i32) -> (%values$0 as vector<4xi32>)
+  %values$4 = func.call pure @update_lane(%values$0, %lane, %amount) : (vector<4xi32>, i32, i32) -> (vector<4xi32>)
   func.return %values$4 : vector<4xi32>
 }
 
-func.def @update_lane(%values$5: vector<4xi32>, %lane: i32, %amount: i32) -> (%values$5 as vector<4xi32>) {
+func.def @update_lane(%values$5: vector<4xi32>, %lane: i32, %amount: i32) -> (vector<4xi32>) {
   %9 = index.cast %lane : i32 to index
   %10 = vector.extract %values$5[%9] : vector<4xi32> -> i32
   %11 = scalar.addi %10, %amount : i32
@@ -355,11 +348,11 @@ Cursor cursor_reference(Cursor cursor, Cursor limit, unsigned lane) {
 
 // ----
 func.def public @cursor_reference(%cursor_bit_offset$0: i32, %cursor_syntax_count$1: i32, %cursor_dc$2: vector<4xi32>, %cursor_cached_word$3: i32, %limit_bit_offset: i32, %limit_syntax_count: i32, %limit_dc: vector<4xi32>, %limit_cached_word: i32, %lane: i32) -> (i32, i32, vector<4xi32>, i32) {
-  %cursor_cached_word$13, %cursor_bit_offset$14, %cursor_syntax_count$15, %cursor_dc$16, %cursor_cached_word$17 = func.call pure @consume(%cursor_bit_offset$0, %cursor_syntax_count$1, %cursor_dc$2, %cursor_cached_word$3, %limit_bit_offset, %limit_syntax_count, %limit_dc, %limit_cached_word, %lane) : (i32, i32, vector<4xi32>, i32, i32, i32, vector<4xi32>, i32, i32) -> (i32, %cursor_bit_offset$0 as i32, %cursor_syntax_count$1 as i32, %cursor_dc$2 as vector<4xi32>, %cursor_cached_word$3 as i32)
+  %cursor_cached_word$13, %cursor_bit_offset$14, %cursor_syntax_count$15, %cursor_dc$16, %cursor_cached_word$17 = func.call pure @consume(%cursor_bit_offset$0, %cursor_syntax_count$1, %cursor_dc$2, %cursor_cached_word$3, %limit_bit_offset, %limit_syntax_count, %limit_dc, %limit_cached_word, %lane) : (i32, i32, vector<4xi32>, i32, i32, i32, vector<4xi32>, i32, i32) -> (i32, i32, i32, vector<4xi32>, i32)
   func.return %cursor_bit_offset$14, %cursor_syntax_count$15, %cursor_dc$16, %cursor_cached_word$13 : i32, i32, vector<4xi32>, i32
 }
 
-func.def @consume(%cursor_bit_offset$18: i32, %cursor_syntax_count$19: i32, %cursor_dc$20: vector<4xi32>, %cursor_cached_word$21: i32, %limit_bit_offset: i32, %limit_syntax_count: i32, %limit_dc: vector<4xi32>, %limit_cached_word: i32, %lane: i32) -> (i32, %cursor_bit_offset$18 as i32, %cursor_syntax_count$19 as i32, %cursor_dc$20 as vector<4xi32>, %cursor_cached_word$21 as i32) {
+func.def @consume(%cursor_bit_offset$18: i32, %cursor_syntax_count$19: i32, %cursor_dc$20: vector<4xi32>, %cursor_cached_word$21: i32, %limit_bit_offset: i32, %limit_syntax_count: i32, %limit_dc: vector<4xi32>, %limit_cached_word: i32, %lane: i32) -> (i32, i32, i32, vector<4xi32>, i32) {
   %32 = scalar.constant 3 : i32
   %cursor_bit_offset$33 = scalar.addi %cursor_bit_offset$18, %32 : i32
   %34 = scalar.cmpi ult, %cursor_syntax_count$19, %limit_syntax_count : i32
@@ -401,11 +394,11 @@ Pair member_references(Pair value) {
 
 // ----
 func.def public @member_references(%value_left_low: i32, %value_left_high$1: i32, %value_right_low$2: i32, %value_right_high: i32) -> (i32, i32, i32, i32) {
-  %value_left_high$8, %value_right_low$9 = func.call pure @update_members(%value_left_high$1, %value_right_low$2) : (i32, i32) -> (%value_left_high$1 as i32, %value_right_low$2 as i32)
+  %value_left_high$8, %value_right_low$9 = func.call pure @update_members(%value_left_high$1, %value_right_low$2) : (i32, i32) -> (i32, i32)
   func.return %value_left_low, %value_left_high$8, %value_right_low$9, %value_right_high : i32, i32, i32, i32
 }
 
-func.def @update_members(%first$10: i32, %second$11: i32) -> (%first$10 as i32, %second$11 as i32) {
+func.def @update_members(%first$10: i32, %second$11: i32) -> (i32, i32) {
   %14 = scalar.constant 1 : i32
   %first$15 = scalar.addi %first$10, %14 : i32
   %second$16 = scalar.addi %second$11, %first$15 : i32
@@ -462,13 +455,13 @@ unsigned pointer_reference(unsigned* pointer, unsigned amount) {
 
 // ----
 func.def public @pointer_reference(%pointer$0: buffer, %pointer_byte_offset$1: offset, %amount: i32) -> (i32) {
-  %pointer$4, %pointer_byte_offset$5 = func.call pure @advance(%pointer$0, %pointer_byte_offset$1, %amount) : (buffer, offset, i32) -> (%pointer$0 as buffer, %pointer_byte_offset$1 as offset)
+  %pointer$4, %pointer_byte_offset$5 = func.call pure @advance(%pointer$0, %pointer_byte_offset$1, %amount) : (buffer, offset, i32) -> (buffer, offset)
   %6 = buffer.view %pointer$4[%pointer_byte_offset$5] : buffer -> view<1xi32>
   %7 = view.load %6[0] : view<1xi32> -> i32
   func.return %7 : i32
 }
 
-func.def @advance(%pointer: buffer, %pointer_byte_offset$9: offset, %amount: i32) -> (%pointer as buffer, %pointer_byte_offset$9 as offset) {
+func.def @advance(%pointer: buffer, %pointer_byte_offset$9: offset, %amount: i32) -> (buffer, offset) {
   %13 = scalar.extui %amount : i32 to i64
   %14 = scalar.constant 4 : i64
   %15 = scalar.muli %13, %14 : i64
@@ -490,11 +483,11 @@ unsigned template_reference(unsigned value) {
 
 // ----
 func.def public @template_reference(%value$0: i32) -> (i32) {
-  %value$2 = func.call pure @increment_unsigned_int(%value$0) : (i32) -> (%value$0 as i32)
+  %value$2 = func.call pure @increment_unsigned_int(%value$0) : (i32) -> (i32)
   func.return %value$2 : i32
 }
 
-func.def @increment_unsigned_int(%value$3: i32) -> (%value$3 as i32) {
+func.def @increment_unsigned_int(%value$3: i32) -> (i32) {
   %5 = scalar.constant 1 : i32
   %value$6 = scalar.addi %value$3, %5 : i32
   func.return %value$6 : i32
@@ -517,12 +510,12 @@ unsigned returning_reference_update(unsigned value, bool choose) {
 
 // ----
 func.def public @returning_reference_update(%value$0: i32, %choose: i1) -> (i32) {
-  %result, %value$4 = func.call pure @choose_update(%value$0, %choose) : (i32, i1) -> (i32, %value$0 as i32)
+  %result, %value$4 = func.call pure @choose_update(%value$0, %choose) : (i32, i1) -> (i32, i32)
   %5 = scalar.addi %result, %value$4 : i32
   func.return %5 : i32
 }
 
-func.def @choose_update(%value$6: i32, %choose: i1) -> (i32, %value$6 as i32) {
+func.def @choose_update(%value$6: i32, %choose: i1) -> (i32, i32) {
   %10, %11 = scf.if %choose -> (i32, i32) {
     %12 = scalar.constant 1 : i32
     %value = scalar.addi %value$6, %12 : i32
@@ -553,13 +546,13 @@ func.def public @loop_reference(%value$0: i32, %count: i32) -> (i32) {
   %6 = index.constant 1 : offset
   %value$9 = scf.for %i = [%4 to %5 step %6](%value$8 = %value$0 : i32) -> (i32) {
     %10 = index.cast %i : offset to i32
-    %value$11 = func.call pure @bump(%value$8) : (i32) -> (%value$8 as i32)
+    %value$11 = func.call pure @bump(%value$8) : (i32) -> (i32)
     scf.yield %value$11 : i32
   }
   func.return %value$9 : i32
 }
 
-func.def @bump(%value$12: i32) -> (%value$12 as i32) {
+func.def @bump(%value$12: i32) -> (i32) {
   %14 = scalar.constant 1 : i32
   %value$15 = scalar.addi %value$12, %14 : i32
   func.return %value$15 : i32
@@ -580,11 +573,11 @@ unsigned predicate_reference(unsigned value, unsigned limit) {
 
 // ----
 func.def public @predicate_reference(%value$0: i32, %limit: i32) -> (i32) {
-  %value$3 = func.call pure @constrained_increment(%value$0, %limit) : (i32, i32) -> (%value$0 as i32)
+  %value$3 = func.call pure @constrained_increment(%value$0, %limit) : (i32, i32) -> (i32)
   func.return %value$3 : i32
 }
 
-func.def @constrained_increment(%value$4: i32, %limit: i32) -> (%value$4 as i32) where [ult(%value$4, %limit)] {
+func.def @constrained_increment(%value$4: i32, %limit: i32) -> (i32) where [ult(%value$4, %limit)] {
   %7 = scalar.constant 1 : i32
   %value$8 = scalar.addi %value$4, %7 : i32
   func.return %value$8 : i32
@@ -630,7 +623,7 @@ kernel.def @dynamic_view_reference() {
   %15 = scalar.constant 1 : i32
   %16 = scalar.constant 1 : i32
   %17 = scalar.subi %rows, %16 : i32
-  %source_dim0$18, %source_layout, %source$20 = func.call pure @trim(%source_dim0$13, %layout, %source$14, %15, %17) : (index, encoding<layout>, view<[%source_dim0$13]x4xf32, %layout>, i32, i32) -> (%source_dim0$13 as index, %layout as encoding<layout>, %source$14 as view<[%source_dim0$18]x4xf32, %source_layout>)
+  %source_dim0$18, %source_layout, %source$20 = func.call pure @trim(%source_dim0$13, %layout, %source$14, %15, %17) : (index, encoding<layout>, view<[%source_dim0$13]x4xf32, %layout>, i32, i32) -> (index, encoding<layout>, view<[%source_dim0$18]x4xf32, %source_layout>)
   %21 = scalar.constant 0 : i32
   %22 = scalar.constant 0 : i32
   %23 = index.cast %21 : i32 to index
@@ -649,7 +642,7 @@ kernel.def @dynamic_view_reference() {
   kernel.return
 }
 
-func.def @trim(%rows_dim0$35: index, %rows_layout: encoding<layout>, %rows$37: view<[%rows_dim0$35]x4xf32, %rows_layout>, %first: i32, %remaining: i32) -> (%40: %rows_dim0$35 as index, %41: %rows_layout as encoding<layout>, %rows$37 as view<[%40]x4xf32, %41>) {
+func.def @trim(%rows_dim0$35: index, %rows_layout: encoding<layout>, %rows$37: view<[%rows_dim0$35]x4xf32, %rows_layout>, %first: i32, %remaining: i32) -> (%40: index, %41: encoding<layout>, view<[%40]x4xf32, %41>) {
   %43 = scalar.extui %first : i32 to i64
   %44 = scalar.constant 0 : i32
   %45 = scalar.extsi %44 : i32 to i64
@@ -699,43 +692,42 @@ kernel.def @dynamic_view_copy() {
   %source$14 = buffer.view %input[%input_byte_offset] : buffer -> view<[%source_dim0$13]x4xf32, %layout>
   %15 = scalar.constant 1 : i32
   %16 = scalar.subi %rows, %15 : i32
-  %17, %18, %19 = view.duplicate %source_dim0$13, %layout, %source$14 : index, encoding<layout>, view<[%17]x4xf32, %18>
-  %source_dim0$20, %source_layout, %source$22 = func.call pure @trim_copy(%17, %18, %19, %16) : (index, encoding<layout>, view<[%17]x4xf32, %18>, i32) -> (%17 as index, %18 as encoding<layout>, %19 as view<[%source_dim0$20]x4xf32, %source_layout>)
-  %23 = scalar.constant 0 : i32
-  %24 = scalar.constant 0 : i32
-  %25 = index.cast %23 : i32 to index
-  %26 = index.cast %24 : i32 to index
-  %27 = view.load %source$14[%25, %26] : view<[%source_dim0$13]x4xf32, %layout> -> f32
-  %28 = scalar.constant 0 : i32
-  %29 = scalar.constant 0 : i32
-  %30 = index.cast %28 : i32 to index
-  %31 = index.cast %29 : i32 to index
-  %32 = view.load %source$22[%30, %31] : view<[%source_dim0$20]x4xf32, %source_layout> -> f32
-  %33 = scalar.addf %27, %32 : f32
-  %34 = scalar.constant 0 : i32
-  %35 = scalar.extsi %34 : i32 to i64
-  %36 = scalar.constant 4 : i64
-  %37 = scalar.muli %35, %36 : i64
-  %38 = index.cast %output_byte_offset : offset to i64
-  %39 = scalar.addi %38, %37 : i64
-  %40 = scalar.assume %39 [range(%39, 0, 9223372036854775807)] : i64
-  %41 = index.cast %40 : i64 to offset
-  %42 = buffer.view %output[%41] : buffer -> view<1xf32>
-  view.store %33, %42[0] : f32, view<1xf32>
+  %source_dim0$17, %source_layout, %source$19 = func.call pure @trim_copy(%source_dim0$13, %layout, %source$14, %16) : (index, encoding<layout>, view<[%source_dim0$13]x4xf32, %layout>, i32) -> (index, encoding<layout>, view<[%source_dim0$17]x4xf32, %source_layout>)
+  %20 = scalar.constant 0 : i32
+  %21 = scalar.constant 0 : i32
+  %22 = index.cast %20 : i32 to index
+  %23 = index.cast %21 : i32 to index
+  %24 = view.load %source$14[%22, %23] : view<[%source_dim0$13]x4xf32, %layout> -> f32
+  %25 = scalar.constant 0 : i32
+  %26 = scalar.constant 0 : i32
+  %27 = index.cast %25 : i32 to index
+  %28 = index.cast %26 : i32 to index
+  %29 = view.load %source$19[%27, %28] : view<[%source_dim0$17]x4xf32, %source_layout> -> f32
+  %30 = scalar.addf %24, %29 : f32
+  %31 = scalar.constant 0 : i32
+  %32 = scalar.extsi %31 : i32 to i64
+  %33 = scalar.constant 4 : i64
+  %34 = scalar.muli %32, %33 : i64
+  %35 = index.cast %output_byte_offset : offset to i64
+  %36 = scalar.addi %35, %34 : i64
+  %37 = scalar.assume %36 [range(%36, 0, 9223372036854775807)] : i64
+  %38 = index.cast %37 : i64 to offset
+  %39 = buffer.view %output[%38] : buffer -> view<1xf32>
+  view.store %30, %39[0] : f32, view<1xf32>
   kernel.return
 }
 
-func.def @trim_copy(%rows_dim0$43: index, %rows_layout: encoding<layout>, %rows$45: view<[%rows_dim0$43]x4xf32, %rows_layout>, %remaining: i32) -> (%47: %rows_dim0$43 as index, %48: %rows_layout as encoding<layout>, %rows$45 as view<[%47]x4xf32, %48>) {
-  %50 = scalar.constant 1 : i32
-  %51 = scalar.extsi %50 : i32 to i64
-  %52 = scalar.constant 0 : i32
-  %53 = scalar.extsi %52 : i32 to i64
-  %54 = scalar.extui %remaining : i32 to i64
-  %rows_dim0$55 = index.cast %54 : i64 to index
-  %56 = index.cast %51 : i64 to index
-  %57 = index.cast %53 : i64 to index
-  %rows$58 = view.subview %rows$45[%56, %57] : view<[%rows_dim0$43]x4xf32, %rows_layout> -> view<[%rows_dim0$55]x4xf32, %rows_layout>
-  func.return %rows_dim0$55, %rows_layout, %rows$58 : index, encoding<layout>, view<[%rows_dim0$55]x4xf32, %rows_layout>
+func.def @trim_copy(%rows_dim0$40: index, %rows_layout: encoding<layout>, %rows$42: view<[%rows_dim0$40]x4xf32, %rows_layout>, %remaining: i32) -> (%44: index, %45: encoding<layout>, view<[%44]x4xf32, %45>) {
+  %47 = scalar.constant 1 : i32
+  %48 = scalar.extsi %47 : i32 to i64
+  %49 = scalar.constant 0 : i32
+  %50 = scalar.extsi %49 : i32 to i64
+  %51 = scalar.extui %remaining : i32 to i64
+  %rows_dim0$52 = index.cast %51 : i64 to index
+  %53 = index.cast %48 : i64 to index
+  %54 = index.cast %50 : i64 to index
+  %rows$55 = view.subview %rows$42[%53, %54] : view<[%rows_dim0$40]x4xf32, %rows_layout> -> view<[%rows_dim0$52]x4xf32, %rows_layout>
+  func.return %rows_dim0$52, %rows_layout, %rows$55 : index, encoding<layout>, view<[%rows_dim0$52]x4xf32, %rows_layout>
 }
 
 // ====
@@ -1045,11 +1037,11 @@ SeparatePair nonoverlapping_member_references(SeparatePair value) {
 
 // ----
 func.def public @nonoverlapping_member_references(%value_first$0: i32, %value_second$1: i32) -> (i32, i32) {
-  %value_first$4, %value_second$5 = func.call pure @update_separate(%value_first$0, %value_second$1) : (i32, i32) -> (%value_first$0 as i32, %value_second$1 as i32)
+  %value_first$4, %value_second$5 = func.call pure @update_separate(%value_first$0, %value_second$1) : (i32, i32) -> (i32, i32)
   func.return %value_first$4, %value_second$5 : i32, i32
 }
 
-func.def @update_separate(%first$6: i32, %second$7: i32) -> (%first$6 as i32, %second$7 as i32) {
+func.def @update_separate(%first$6: i32, %second$7: i32) -> (i32, i32) {
   %10 = scalar.constant 1 : i32
   %first$11 = scalar.addi %first$6, %10 : i32
   %12 = scalar.constant 2 : i32
@@ -1165,7 +1157,7 @@ func.def @exact_alias(%value: buffer, %value_byte_offset: offset) {
 // ====
 // Rvalue references share the analysis-selected value/storage ABI with lvalue
 // references. Named xvalues update their automatic owner, mutable prvalues
-// carry a tied result with no external destination, exact returned aliases stay
+// carry an updated value with no external destination, exact returned aliases stay
 // in SSA, and runtime-selected conditional identities use durable storage.
 struct RvalueState {
   int value;
@@ -1243,13 +1235,13 @@ int mutate_conditional_xvalue(bool choose, int left_value, int right_value) {
 
 // ----
 func.def public @mutate_named_xvalue(%input: i32) -> (i32) {
-  %state_value = func.call pure @increment_rvalue(%input) : (i32) -> (%input as i32)
+  %state_value = func.call pure @increment_rvalue(%input) : (i32) -> (i32)
   func.return %state_value : i32
 }
 
 func.def public @mutate_prvalue_closure() -> (i32) {
   %4 = scalar.constant 4 : i32
-  %5, %6 = func.call pure @invoke_rvalue__lambda_int____(%4) : (i32) -> (i32, %4 as i32)
+  %5, %6 = func.call pure @invoke_rvalue__lambda_int____(%4) : (i32) -> (i32, i32)
   func.return %5 : i32
 }
 
@@ -1309,7 +1301,7 @@ func.def public @read_returned_prvalue() -> (i32) {
 
 func.def public @mutate_chained_xvalue(%input: i32) -> (i32) {
   func.call pure @identity_value_rvalue(%input) : (i32)
-  %state_value = func.call pure @increment_chained_rvalue(%input) : (i32) -> (%input as i32)
+  %state_value = func.call pure @increment_chained_rvalue(%input) : (i32) -> (i32)
   func.return %state_value : i32
 }
 
@@ -1352,14 +1344,14 @@ func.def public @mutate_conditional_xvalue(%choose: i1, %left_value: i32, %right
   func.return %80 : i32
 }
 
-func.def @increment_rvalue(%state_value$81: i32) -> (%state_value$81 as i32) {
+func.def @increment_rvalue(%state_value$81: i32) -> (i32) {
   %83 = scalar.constant 1 : i32
   %state_value$84 = scalar.addi %state_value$81, %83 : i32
   func.return %state_value$84 : i32
 }
 
-func.def @invoke_rvalue__lambda_int____(%function_value$85: i32) -> (i32, %function_value$85 as i32) {
-  %88, %function_value$89 = func.call pure @operator_call_value(%function_value$85) : (i32) -> (i32, %function_value$85 as i32)
+func.def @invoke_rvalue__lambda_int____(%function_value$85: i32) -> (i32, i32) {
+  %88, %function_value$89 = func.call pure @operator_call_value(%function_value$85) : (i32) -> (i32, i32)
   func.return %88, %function_value$89 : i32, i32
 }
 
@@ -1383,7 +1375,7 @@ func.def @identity_value_rvalue(%state_value: i32) {
   func.return
 }
 
-func.def @increment_chained_rvalue(%state_value$102: i32) -> (%state_value$102 as i32) {
+func.def @increment_chained_rvalue(%state_value$102: i32) -> (i32) {
   %104 = scalar.constant 2 : i32
   %state_value$105 = scalar.addi %state_value$102, %104 : i32
   func.return %state_value$105 : i32
@@ -1400,7 +1392,7 @@ func.def @increment_conditional_rvalue(%state: buffer, %state_byte_offset: offse
   func.return
 }
 
-func.def @operator_call_value(%this_value: i32) -> (i32, %this_value as i32) {
+func.def @operator_call_value(%this_value: i32) -> (i32, i32) {
   %117 = scalar.constant 1 : i32
   %value = scalar.addi %this_value, %117 : i32
   func.return %value, %value : i32, i32
@@ -1561,16 +1553,15 @@ unsigned stale_value_copy(unsigned value) {
 
 // ----
 func.def public @stale_value_copy(%value$0: i32) -> (i32) {
-  %2 = scalar.duplicate %value$0 : i32
-  %value$3 = func.call pure @increment_alias(%2) : (i32) -> (%2 as i32)
-  %4 = scalar.constant 100 : i32
-  %5 = scalar.muli %value$0, %4 : i32
-  %6 = scalar.addi %5, %value$3 : i32
-  func.return %6 : i32
+  %value$2 = func.call pure @increment_alias(%value$0) : (i32) -> (i32)
+  %3 = scalar.constant 100 : i32
+  %4 = scalar.muli %value$0, %3 : i32
+  %5 = scalar.addi %4, %value$2 : i32
+  func.return %5 : i32
 }
 
-func.def @increment_alias(%value$7: i32) -> (%value$7 as i32) {
-  %9 = scalar.constant 1 : i32
-  %value$10 = scalar.addi %value$7, %9 : i32
-  func.return %value$10 : i32
+func.def @increment_alias(%value$6: i32) -> (i32) {
+  %8 = scalar.constant 1 : i32
+  %value$9 = scalar.addi %value$6, %8 : i32
+  func.return %value$9 : i32
 }

@@ -45,6 +45,7 @@ loom_check_test_suite(
         "special_members_invalid.cxx-test",
         "structured_bindings.cxx-test",
         "value_initialization.cxx-test",
+        "value_writebacks.cxx-test",
     ],
     data = [
         "aligned_layout.h",
