@@ -77,7 +77,9 @@ endforeach()
 set(FETCHCONTENT_SOURCE_DIR_SPIRV_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/headers")
 set(FETCHCONTENT_SOURCE_DIR_SPIRV_TOOLS "${CMAKE_CURRENT_SOURCE_DIR}/tools")
 iree_configure_spirv_tools()
-add_executable(subject subject.c)
+# Compile the instrumented subject without requiring an MSAN runtime package
+# in the outer CMake toolchain. The external tools must link and execute.
+add_library(subject OBJECT subject.c)
 foreach(tool spirv_as spirv_dis spirv_val)
   add_test(NAME ${tool} COMMAND iree::third_party::${tool})
 endforeach()
