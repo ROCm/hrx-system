@@ -306,3 +306,50 @@ event 11
 event 22
 OK 0
 retired 0
+
+// ====
+// RUN: emit vm-object-lifetime
+#include <loomcxx/view.h>
+
+[[loom::import("lifetime", "event")]] void event(unsigned value);
+using Index = loom::type::index;
+using View = loom::type::view<loom::type::shape<loom::type::dynamic>,
+                              const unsigned char>;
+struct SizedView {
+  // Independently observed size before the complete view group.
+  Index before;
+  // Payload whose implicit dimension repeats the same source size.
+  View value;
+  // Independently observed size after the complete view group.
+  Index after;
+};
+
+[[loom::inline]] static SizedView make(bool condition) {
+  Index length{3u};
+  if (condition) length = Index{2u};
+  auto value = loom::buffer::view<loom::type::dynamic>(
+      loom::buffer::constant("\x0b\x0c\x0d"), {length});
+  return {length, value, length};
+}
+
+[[loom::noinline]] static void trial(bool condition) {
+  auto result = make(condition);
+  event(loom::index::cast<unsigned>(result.before));
+  event(loom::view::load(result.value, 1u));
+  event(loom::index::cast<unsigned>(result.after));
+}
+
+void run() {
+  trial(true);
+  trial(false);
+}
+
+// ----
+event 2
+event 12
+event 2
+event 3
+event 12
+event 3
+OK 0
+retired 0
