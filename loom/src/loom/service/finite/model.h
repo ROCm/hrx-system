@@ -120,30 +120,30 @@ iree_status_t loom_service_finite_load_free(loom_service_finite_load_t* load);
 // Model state is shared across serialized calls; request state retains its
 // identity until that request ends. Positive units bound the next epoch; equal
 // tags permit batching. The finite module exposes stable members without
-// copying their state. Source may explicitly call finite.pack for the ordinary
-// [offset, length] directory followed by concatenated states. Successful device
-// readiness authorizes collect_batch to commit progress and publish next
-// offers. Zero units finishes a member and requires complete published rows;
-// positive units require no rows. An empty output alone does not finish work.
-// Both stage kinds have two dynamic roots (input/output) aligned to
-// LOOM_SERVICE_FINITE_BUFFER_ALIGNMENT. Commands may additionally have
-// compiler-reflected private workspace; direct stages use their compiled launch
-// configuration without a command buffer or runner workspace. Command stages
-// declared by one request share a parameter binding map; retained request
-// choices can bind different checkpoint banks. Direct stages have no checkpoint
-// parameters. Source run uses runner.execute_2 for both kinds and publishes
-// device results. Native consumers choose whether to compose device work or
-// explicitly download a host snapshot. Cold prepare may call
+// copying their state. Source may explicitly call finite.batch_pack for the
+// ordinary [offset, length] directory followed by concatenated states.
+// Successful device readiness authorizes collect_batch to commit progress and
+// publish next offers. Zero units finishes a member and requires complete
+// published rows; positive units require no rows. An empty output alone does
+// not finish work. Both stage kinds have two dynamic roots (input/output)
+// aligned to LOOM_SERVICE_FINITE_BUFFER_ALIGNMENT. Commands may additionally
+// have compiler-reflected private workspace; direct stages use their compiled
+// launch configuration without a command buffer or runner workspace. Command
+// stages declared by one request share a parameter binding map; retained
+// request choices can bind different checkpoint banks. Direct stages have no
+// checkpoint parameters. Source run uses runner.execute_2 for both kinds and
+// publishes device results. Native consumers choose whether to compose device
+// work or explicitly download a host snapshot. Cold prepare may call
 // prepare.memory_forecast(root) to select a synchronous control entry with
 // signature (state, ranges, descriptors: buffer) -> (private_peak, retained,
 // expanded: i64). It forecasts the complete descriptor set across all producer
 // cohorts, before pixel decoding or device work. The consumer defines
-// descriptor contents; ranges use the same offset/length pairs as finite.pack.
-// Values are trusted byte estimates, not limits checked against later
-// compilation or allocation. Negative values are invalid. The cold
-// outer-application constructor drives the same asynchronous load and joins it
-// outside the shared worker pool. Creation indexes weights without loading
-// them. The shared device outlives this model. Failure releases partial
+// descriptor contents; ranges use the same offset/length pairs as
+// finite.batch_pack. Values are trusted byte estimates, not limits checked
+// against later compilation or allocation. Negative values are invalid. The
+// cold outer-application constructor drives the same asynchronous load and
+// joins it outside the shared worker pool. Creation indexes weights without
+// loading them. The shared device outlives this model. Failure releases partial
 // ownership and leaves *out_model NULL. Compilation evidence is available
 // through load_report; this wrapper performs no process-global output. Live
 // owners use load_advance instead.

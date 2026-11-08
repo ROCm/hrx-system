@@ -1,8 +1,8 @@
 type.decl import("finite", "batch") @FiniteBatch
 
-func.decl import("finite", "pack") @finite_pack(%batch: ptr<@FiniteBatch>) -> (buffer, buffer)
+func.decl import("finite", "batch_pack") @finite_batch_pack(%batch: ptr<@FiniteBatch>) -> (buffer, buffer)
 
-func.decl import("finite", "finish") @finite_finish(%batch: ptr<@FiniteBatch>)
+func.decl import("finite", "batch_finish") @finite_batch_finish(%batch: ptr<@FiniteBatch>)
 
 func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
 
@@ -110,7 +110,7 @@ func.def public @prepare_request(%state: buffer, %request: buffer) -> (buffer, i
 // Result rows are physically reversed to exercise the native indexed plan.
 // There is no per-input command loop: both kernels process the entire cohort.
 func.def public @prepare_batch(%state: buffer, %tags: buffer, %batch: ptr<@FiniteBatch>) -> (i32, buffer, buffer) {
-  %ranges, %packed = func.call @finite_pack(%batch) : (ptr<@FiniteBatch>) -> (buffer, buffer)
+  %ranges, %packed = func.call @finite_batch_pack(%batch) : (ptr<@FiniteBatch>) -> (buffer, buffer)
   %origin = index.constant 0 : offset
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -247,6 +247,6 @@ func.def public @run(%stage: i32, %input: hal.buffer, %output: hal.buffer) {
 }
 
 func.def public @collect_batch(%state: buffer, %batch: ptr<@FiniteBatch>) {
-  func.call @finite_finish(%batch) : (ptr<@FiniteBatch>)
+  func.call @finite_batch_finish(%batch) : (ptr<@FiniteBatch>)
   func.return
 }

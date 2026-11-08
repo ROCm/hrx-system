@@ -23,16 +23,17 @@ iree_status_t loom_service_finite_batch_register_types(
 iree_vm_ref_type_t loom_service_finite_batch_type(void);
 
 // One reusable, serialized cohort capability. The "finite" module exports:
-//   count(ptr<batch>) -> i64
-//   state(ptr<batch>, i64 ordinal) -> buffer
-//   pack(ptr<batch>) -> (buffer ranges, buffer packed)
-//   offer(ptr<batch>, i64 ordinal, i64 units, i64 tag)
-//   finish(ptr<batch>)
-// State buffers retain their identity across epochs. pack explicitly copies
-// them into the ordinary upload directory; continuing sources can instead
-// construct only the next epoch's control packet. offer and finish are valid
-// only during successful collection. Zero units finishes a member; positive
-// units describe its next epoch, with equal tags permitting batching.
+//   batch_count(ptr<batch>) -> i64
+//   batch_state(ptr<batch>, i64 ordinal) -> buffer
+//   batch_pack(ptr<batch>) -> (buffer ranges, buffer packed)
+//   batch_offer(ptr<batch>, i64 ordinal, i64 units, i64 tag)
+//   batch_finish(ptr<batch>)
+// State buffers retain their identity across epochs. batch_pack explicitly
+// copies them into the ordinary upload directory; continuing sources can
+// instead construct only the next epoch's control packet. batch_offer and
+// batch_finish are valid only during successful collection. Zero units finishes
+// a member; positive units describe its next epoch, with equal tags permitting
+// batching.
 iree_status_t loom_service_finite_batch_module_create(
     iree_vm_environment_t* environment, uint64_t batch_limit,
     iree_allocator_t host_allocator, iree_vm_module_t** out_module);

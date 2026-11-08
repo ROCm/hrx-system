@@ -182,19 +182,19 @@ static const iree_vm_module_callable_type_declaration_t batch_callables[] = {
 };
 
 static const iree_vm_module_export_declaration_t batch_exports[] = {
-    {.export_name = IREE_SVL("count"),
+    {.export_name = IREE_SVL("batch_count"),
      .callable_type_ordinal = BATCH_COUNT,
      .function_ordinal = BATCH_COUNT},
-    {.export_name = IREE_SVL("finish"),
+    {.export_name = IREE_SVL("batch_finish"),
      .callable_type_ordinal = BATCH_FINISH,
      .function_ordinal = BATCH_FINISH},
-    {.export_name = IREE_SVL("offer"),
+    {.export_name = IREE_SVL("batch_offer"),
      .callable_type_ordinal = BATCH_OFFER,
      .function_ordinal = BATCH_OFFER},
-    {.export_name = IREE_SVL("pack"),
+    {.export_name = IREE_SVL("batch_pack"),
      .callable_type_ordinal = BATCH_PACK,
      .function_ordinal = BATCH_PACK},
-    {.export_name = IREE_SVL("state"),
+    {.export_name = IREE_SVL("batch_state"),
      .callable_type_ordinal = BATCH_STATE,
      .function_ordinal = BATCH_STATE},
 };

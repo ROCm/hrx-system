@@ -1,10 +1,10 @@
 type.decl import("finite", "batch") @FiniteBatch
 
-func.decl import("finite", "count") @count(%batch: ptr<@FiniteBatch>) -> (i64)
+func.decl import("finite", "batch_count") @finite_batch_count(%batch: ptr<@FiniteBatch>) -> (i64)
 
-func.decl import("finite", "state") @state(%batch: ptr<@FiniteBatch>, %ordinal: i64) -> (buffer)
+func.decl import("finite", "batch_state") @finite_batch_state(%batch: ptr<@FiniteBatch>, %ordinal: i64) -> (buffer)
 
-func.decl import("finite", "offer") @offer(%batch: ptr<@FiniteBatch>, %ordinal: i64, %units: i64, %tag: i64)
+func.decl import("finite", "batch_offer") @finite_batch_offer(%batch: ptr<@FiniteBatch>, %ordinal: i64, %units: i64, %tag: i64)
 
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
@@ -106,7 +106,7 @@ func.def @collect(%state: buffer, %packet: buffer, %ordinal32: i32) -> (i64, i64
 // One VM call plans the whole cohort. Original member ordinals also index the
 // device packet and result directory, including members cancelled after submit.
 func.def public @prepare_batch(%batch: ptr<@FiniteBatch>, %packet: buffer) -> (buffer) {
-  %count64 = func.call @count(%batch) : (ptr<@FiniteBatch>) -> (i64)
+  %count64 = func.call @finite_batch_count(%batch) : (ptr<@FiniteBatch>) -> (i64)
   %bounded_count = scalar.assume %count64 [range(%count64, 1, 4)] : i64
   %count = index.cast %bounded_count : i64 to index
   %count32 = scalar.trunci %count64 : i64 to i32
@@ -120,7 +120,7 @@ func.def public @prepare_batch(%batch: ptr<@FiniteBatch>, %packet: buffer) -> (b
   %row_count = scf.for %i = [%c0 to %count step %c1](%total = %c0_i64 : i64) -> (i64) {
     %ordinal = index.cast %i : index to i64
     %ordinal32 = scalar.trunci %ordinal : i64 to i32
-    %request = func.call @state(%batch, %ordinal) : (ptr<@FiniteBatch>, i64) -> (buffer)
+    %request = func.call @finite_batch_state(%batch, %ordinal) : (ptr<@FiniteBatch>, i64) -> (buffer)
     %final, %consumed = func.call @prepare_work(%request, %packet, %ordinal32) : (buffer, buffer, i32) -> (i64, i64)
     %next = scalar.addi %total, %final : i64
     scf.yield %next : i64
@@ -174,7 +174,7 @@ func.def public @prepare_batch(%batch: ptr<@FiniteBatch>, %packet: buffer) -> (b
 }
 
 func.def public @collect_batch(%batch: ptr<@FiniteBatch>, %packet: buffer) {
-  %count64 = func.call @count(%batch) : (ptr<@FiniteBatch>) -> (i64)
+  %count64 = func.call @finite_batch_count(%batch) : (ptr<@FiniteBatch>) -> (i64)
   %bounded_count = scalar.assume %count64 [range(%count64, 1, 4)] : i64
   %count = index.cast %bounded_count : i64 to index
   %c0 = index.constant 0 : index
@@ -182,9 +182,9 @@ func.def public @collect_batch(%batch: ptr<@FiniteBatch>, %packet: buffer) {
   scf.for %i = [%c0 to %count step %c1] {
     %ordinal = index.cast %i : index to i64
     %ordinal32 = scalar.trunci %ordinal : i64 to i32
-    %request = func.call @state(%batch, %ordinal) : (ptr<@FiniteBatch>, i64) -> (buffer)
+    %request = func.call @finite_batch_state(%batch, %ordinal) : (ptr<@FiniteBatch>, i64) -> (buffer)
     %units, %tag = func.call @collect(%request, %packet, %ordinal32) : (buffer, buffer, i32) -> (i64, i64)
-    func.call @offer(%batch, %ordinal, %units, %tag) : (ptr<@FiniteBatch>, i64, i64, i64)
+    func.call @finite_batch_offer(%batch, %ordinal, %units, %tag) : (ptr<@FiniteBatch>, i64, i64, i64)
   }
   func.return
 }
@@ -235,23 +235,23 @@ kernel.def target(@device) @advance() {
 }
 
 // Invalid source policies exercise the same public binding used by real models.
-func.decl import("finite", "finish") @finish(%batch: ptr<@FiniteBatch>)
+func.decl import("finite", "batch_finish") @finite_batch_finish(%batch: ptr<@FiniteBatch>)
 
 func.def public @collect_early_finish(%batch: ptr<@FiniteBatch>, %packet: buffer) {
-  func.call @finish(%batch) : (ptr<@FiniteBatch>)
+  func.call @finite_batch_finish(%batch) : (ptr<@FiniteBatch>)
   func.return
 }
 
 func.def public @collect_continue_published(%batch: ptr<@FiniteBatch>, %packet: buffer) {
   %ordinal = scalar.constant 0 : i64
   %units = scalar.constant 1 : i64
-  func.call @offer(%batch, %ordinal, %units, %ordinal) : (ptr<@FiniteBatch>, i64, i64, i64)
+  func.call @finite_batch_offer(%batch, %ordinal, %units, %ordinal) : (ptr<@FiniteBatch>, i64, i64, i64)
   func.return
 }
 
 func.def public @collect_over_capacity(%batch: ptr<@FiniteBatch>, %packet: buffer) {
   %ordinal = scalar.constant 0 : i64
   %units = scalar.constant 7 : i64
-  func.call @offer(%batch, %ordinal, %units, %ordinal) : (ptr<@FiniteBatch>, i64, i64, i64)
+  func.call @finite_batch_offer(%batch, %ordinal, %units, %ordinal) : (ptr<@FiniteBatch>, i64, i64, i64)
   func.return
 }

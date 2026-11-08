@@ -307,14 +307,14 @@ preparation or collection call:
 
 | Import | Contract |
 | --- | --- |
-| `count(batch) -> i64` | Number of selected members. |
-| `state(batch, ordinal) -> buffer` | Retained request state at its original cohort ordinal. |
-| `pack(batch) -> (ranges, packed)` | Explicitly copy states into an upload directory and payload. |
-| `offer(batch, ordinal, units, tag)` | Publish the next work offer during successful collection. Zero units finishes the request. |
-| `finish(batch)` | Finish every member of a one-shot cohort during collection. |
+| `batch_count(batch) -> i64` | Number of selected members. |
+| `batch_state(batch, ordinal) -> buffer` | Retained request state at its original cohort ordinal. |
+| `batch_pack(batch) -> (ranges, packed)` | Explicitly copy states into an upload directory and payload. |
+| `batch_offer(batch, ordinal, units, tag)` | Publish the next work offer during successful collection. Zero units finishes the request. |
+| `batch_finish(batch)` | Finish every member of a one-shot cohort during collection. |
 
 The borrowed batch is valid only during that call. Cancellation preserves its
-original ordinals until collection retires. `pack` produces request-order
+original ordinals until collection retires. `batch_pack` produces request-order
 `[offset, length]` I64 ranges; the packed buffer contains the same directory
 followed by the states. A one-shot program can upload it directly. A continuing
 program can instead read each state and construct a compact control packet.
@@ -326,7 +326,7 @@ Unfinished members rejoin behind new arrivals, so compatible late requests can
 join the next epoch. Each member publishes either no rows or its complete
 result; collection must declare exactly the members with published rows
 finished. Empty output alone does not indicate completion. A one-shot source
-calls `finite.finish` from collection and uses this same lifecycle.
+calls `finite.batch_finish` from collection and uses this same lifecycle.
 
 Request-state buffers are host control storage. Device intermediates need an
 explicit producer-owned lifetime across epochs: native generators own that

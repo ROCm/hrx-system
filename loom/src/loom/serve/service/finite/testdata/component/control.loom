@@ -1,8 +1,8 @@
 type.decl import("finite", "batch") @FiniteBatch
 
-func.decl import("finite", "pack") @finite_pack(%batch: ptr<@FiniteBatch>) -> (buffer, buffer)
+func.decl import("finite", "batch_pack") @finite_batch_pack(%batch: ptr<@FiniteBatch>) -> (buffer, buffer)
 
-func.decl import("finite", "finish") @finite_finish(%batch: ptr<@FiniteBatch>)
+func.decl import("finite", "batch_finish") @finite_batch_finish(%batch: ptr<@FiniteBatch>)
 
 func.decl import("runner") @execute_2(%stage: i32, %input: hal.buffer, %output: hal.buffer) -> (i64)
 
@@ -26,7 +26,7 @@ func.def public @prepare_request(%state: buffer, %input: buffer) -> (buffer, i64
 }
 
 func.def public @prepare_batch(%state: buffer, %tags: buffer, %batch: ptr<@FiniteBatch>) -> (i32, buffer, buffer) {
-  %ranges, %input = func.call @finite_pack(%batch) : (ptr<@FiniteBatch>) -> (buffer, buffer)
+  %ranges, %input = func.call @finite_batch_pack(%batch) : (ptr<@FiniteBatch>) -> (buffer, buffer)
   %origin = index.constant 0 : offset
   %range = buffer.view %ranges[%origin] : buffer -> view<1x2xi64>
   %first = view.load %range[0, 0] : view<1x2xi64> -> i64
@@ -61,6 +61,6 @@ func.def public @run(%stage: i32, %input: hal.buffer, %output: hal.buffer) {
 }
 
 func.def public @collect_batch(%state: buffer, %batch: ptr<@FiniteBatch>) {
-  func.call @finite_finish(%batch) : (ptr<@FiniteBatch>)
+  func.call @finite_batch_finish(%batch) : (ptr<@FiniteBatch>)
   func.return
 }
