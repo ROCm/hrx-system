@@ -14,34 +14,110 @@ typedef struct loom_decision_program_conjunction_result_t {
   loom_decision_program_constraint_ref_t decisive_constraint;
 } loom_decision_program_conjunction_result_t;
 
-IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_decision_predicate_operand_t
-loom_decision_program_resolve_operand(
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+loom_decision_program_resolve_table_operand(
     const loom_decision_program_t* program,
     const loom_decision_program_binding_t* binding,
-    loom_decision_program_operand_ref_t ref) {
+    loom_decision_program_operand_ref_t ref,
+    loom_decision_predicate_operand_t* out_operand) {
   if (loom_decision_program_operand_is_constant(ref)) {
     const int64_t value =
         program->constants[loom_decision_program_operand_ordinal(ref)];
-    return (loom_decision_predicate_operand_t){
+    *out_operand = (loom_decision_predicate_operand_t){
         .facts = loom_value_facts_exact_i64(value),
         .identity = LOOM_DECISION_OPERAND_IDENTITY_NONE,
     };
+    return;
   }
   const uint32_t ordinal = loom_decision_program_operand_ordinal(ref);
   const loom_value_id_t value_id = loom_decision_program_operand_is_result(ref)
                                        ? binding->result_values[ordinal]
                                        : binding->argument_values[ordinal];
-  return (loom_decision_predicate_operand_t){
+  *out_operand = (loom_decision_predicate_operand_t){
       .facts = loom_value_fact_table_lookup(binding->facts, value_id),
       .identity =
           loom_value_fact_table_query_identity(binding->facts, value_id),
   };
 }
 
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+loom_decision_program_resolve_indexed_operand(
+    const loom_decision_program_t* program,
+    const loom_decision_program_indexed_binding_t* binding,
+    loom_decision_program_operand_ref_t ref,
+    loom_decision_predicate_operand_t* out_operand) {
+  if (loom_decision_program_operand_is_constant(ref)) {
+    const int64_t value =
+        program->constants[loom_decision_program_operand_ordinal(ref)];
+    *out_operand = (loom_decision_predicate_operand_t){
+        .facts = loom_value_facts_exact_i64(value),
+        .identity = LOOM_DECISION_OPERAND_IDENTITY_NONE,
+    };
+    return;
+  }
+  const uint32_t ordinal = loom_decision_program_operand_ordinal(ref);
+  const loom_value_id_t value_id = loom_decision_program_operand_is_result(ref)
+                                       ? binding->result_values[ordinal]
+                                       : binding->argument_values[ordinal];
+  *out_operand = (loom_decision_predicate_operand_t){
+      .facts = binding->facts[value_id],
+      .identity = value_id,
+  };
+}
+
 IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_decision_truth_t
-loom_decision_program_evaluate_predicate(
+loom_decision_program_finish_predicate(
+    const loom_decision_predicate_operand_t operands[3],
+    loom_decision_program_predicate_refiner_t predicate_refiner,
+    uint8_t predicate_kind) {
+  loom_decision_truth_t truth =
+      loom_decision_predicate_evaluate(predicate_kind, operands);
+  if (truth == LOOM_DECISION_TRUTH_UNKNOWN && predicate_refiner.fn != NULL) {
+    truth = predicate_refiner.fn(predicate_refiner.user_data, predicate_kind,
+                                 operands);
+  }
+  return truth;
+}
+
+IREE_ATTRIBUTE_NOINLINE static loom_decision_truth_t
+loom_decision_program_evaluate_table_predicate(
     const loom_decision_program_t* program,
     const loom_decision_program_binding_t* binding,
+    loom_decision_program_predicate_refiner_t predicate_refiner,
+    const loom_decision_program_predicate_t* predicate) {
+  loom_decision_predicate_operand_t operands[3];
+  switch (predicate->operand_count) {
+    case 3:
+      loom_decision_program_resolve_table_operand(
+          program, binding, predicate->operands[0], &operands[0]);
+      loom_decision_program_resolve_table_operand(
+          program, binding, predicate->operands[1], &operands[1]);
+      loom_decision_program_resolve_table_operand(
+          program, binding, predicate->operands[2], &operands[2]);
+      break;
+    case 2:
+      loom_decision_program_resolve_table_operand(
+          program, binding, predicate->operands[0], &operands[0]);
+      loom_decision_program_resolve_table_operand(
+          program, binding, predicate->operands[1], &operands[1]);
+      break;
+    case 1:
+      loom_decision_program_resolve_table_operand(
+          program, binding, predicate->operands[0], &operands[0]);
+      break;
+    default:
+      IREE_ASSERT_UNREACHABLE("invalid decision predicate operand count");
+      IREE_BUILTIN_UNREACHABLE();
+  }
+
+  return loom_decision_program_finish_predicate(operands, predicate_refiner,
+                                                predicate->kind);
+}
+
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_decision_truth_t
+loom_decision_program_evaluate_indexed_predicate(
+    const loom_decision_program_t* program,
+    const loom_decision_program_indexed_binding_t* binding,
     loom_decision_program_predicate_refiner_t predicate_refiner,
     uint32_t predicate_ordinal) {
   const loom_decision_program_predicate_t* predicate =
@@ -49,41 +125,37 @@ loom_decision_program_evaluate_predicate(
   loom_decision_predicate_operand_t operands[3];
   switch (predicate->operand_count) {
     case 3:
-      operands[0] = loom_decision_program_resolve_operand(
-          program, binding, predicate->operands[0]);
-      operands[1] = loom_decision_program_resolve_operand(
-          program, binding, predicate->operands[1]);
-      operands[2] = loom_decision_program_resolve_operand(
-          program, binding, predicate->operands[2]);
+      loom_decision_program_resolve_indexed_operand(
+          program, binding, predicate->operands[0], &operands[0]);
+      loom_decision_program_resolve_indexed_operand(
+          program, binding, predicate->operands[1], &operands[1]);
+      loom_decision_program_resolve_indexed_operand(
+          program, binding, predicate->operands[2], &operands[2]);
       break;
     case 2:
-      operands[0] = loom_decision_program_resolve_operand(
-          program, binding, predicate->operands[0]);
-      operands[1] = loom_decision_program_resolve_operand(
-          program, binding, predicate->operands[1]);
+      loom_decision_program_resolve_indexed_operand(
+          program, binding, predicate->operands[0], &operands[0]);
+      loom_decision_program_resolve_indexed_operand(
+          program, binding, predicate->operands[1], &operands[1]);
       break;
     case 1:
-      operands[0] = loom_decision_program_resolve_operand(
-          program, binding, predicate->operands[0]);
+      loom_decision_program_resolve_indexed_operand(
+          program, binding, predicate->operands[0], &operands[0]);
       break;
     default:
       IREE_ASSERT_UNREACHABLE("invalid decision predicate operand count");
       IREE_BUILTIN_UNREACHABLE();
   }
-
-  loom_decision_truth_t truth =
-      loom_decision_predicate_evaluate(predicate->kind, operands);
-  if (truth == LOOM_DECISION_TRUTH_UNKNOWN && predicate_refiner.fn != NULL) {
-    truth = predicate_refiner.fn(predicate_refiner.user_data, predicate->kind,
-                                 operands);
-  }
-  return truth;
+  return loom_decision_program_finish_predicate(operands, predicate_refiner,
+                                                predicate->kind);
 }
 
 IREE_ATTRIBUTE_ALWAYS_INLINE static inline loom_decision_program_conjunction_result_t
 loom_decision_program_evaluate_conjunction(
     const loom_decision_program_t* program,
-    const loom_decision_program_binding_t* binding,
+    const loom_decision_program_binding_t* table_binding,
+    const loom_decision_program_indexed_binding_t* indexed_binding,
+    bool use_indexed_binding,
     loom_decision_program_feature_evaluator_t feature_evaluator,
     loom_decision_program_predicate_refiner_t predicate_refiner,
     loom_decision_program_conjunction_t conjunction) {
@@ -114,8 +186,12 @@ loom_decision_program_evaluate_conjunction(
   for (uint16_t i = 0; i < conjunction.predicate_count; ++i) {
     const uint32_t predicate_ordinal = conjunction.first_predicate + i;
     const loom_decision_truth_t truth =
-        loom_decision_program_evaluate_predicate(
-            program, binding, predicate_refiner, predicate_ordinal);
+        use_indexed_binding ? loom_decision_program_evaluate_indexed_predicate(
+                                  program, indexed_binding, predicate_refiner,
+                                  predicate_ordinal)
+                            : loom_decision_program_evaluate_table_predicate(
+                                  program, table_binding, predicate_refiner,
+                                  &program->predicates[predicate_ordinal]);
     if (truth == LOOM_DECISION_TRUTH_FALSE) {
       return (loom_decision_program_conjunction_result_t){
           .feasibility = LOOM_DECISION_TRUTH_FALSE,
@@ -165,9 +241,12 @@ static void loom_decision_program_preserve_all_choices(
   }
 }
 
-void loom_decision_program_evaluate(
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline void
+loom_decision_program_evaluate_impl(
     const loom_decision_program_t* program,
-    const loom_decision_program_binding_t* binding,
+    const loom_decision_program_binding_t* table_binding,
+    const loom_decision_program_indexed_binding_t* indexed_binding,
+    bool use_indexed_binding,
     loom_decision_program_feature_evaluator_t feature_evaluator,
     loom_decision_program_predicate_refiner_t predicate_refiner,
     loom_decision_program_resolution_policy_t resolution_policy,
@@ -178,8 +257,8 @@ void loom_decision_program_evaluate(
 
   const loom_decision_program_conjunction_result_t hard_requirements =
       loom_decision_program_evaluate_conjunction(
-          program, binding, feature_evaluator, predicate_refiner,
-          program->hard_requirements);
+          program, table_binding, indexed_binding, use_indexed_binding,
+          feature_evaluator, predicate_refiner, program->hard_requirements);
   if (hard_requirements.feasibility == LOOM_DECISION_TRUTH_FALSE) {
     out_result->kind = LOOM_DECISION_PROGRAM_RESULT_HARD_REJECT;
     return;
@@ -192,8 +271,8 @@ void loom_decision_program_evaluate(
         const loom_decision_program_choice_t* choice = &program->choices[i];
         const loom_decision_program_conjunction_result_t choice_result =
             loom_decision_program_evaluate_conjunction(
-                program, binding, feature_evaluator, predicate_refiner,
-                choice->conjunction);
+                program, table_binding, indexed_binding, use_indexed_binding,
+                feature_evaluator, predicate_refiner, choice->conjunction);
         if (choice_result.feasibility != LOOM_DECISION_TRUTH_FALSE) {
           loom_decision_program_append_live(choice->action_ordinal,
                                             live_action_ordinals,
@@ -221,8 +300,8 @@ void loom_decision_program_evaluate(
           &program->choices[first_choice + i];
       const loom_decision_program_conjunction_result_t choice_result =
           loom_decision_program_evaluate_conjunction(
-              program, binding, feature_evaluator, predicate_refiner,
-              choice->conjunction);
+              program, table_binding, indexed_binding, use_indexed_binding,
+              feature_evaluator, predicate_refiner, choice->conjunction);
       if (choice_result.feasibility == LOOM_DECISION_TRUTH_UNKNOWN) {
         group_has_maybe = true;
         if (highest_maybe_action == LOOM_DECISION_PROGRAM_ACTION_INVALID) {
@@ -289,6 +368,36 @@ void loom_decision_program_evaluate(
   } else {
     *out_live_action_count = 0;
   }
+}
+
+void loom_decision_program_evaluate(
+    const loom_decision_program_t* program,
+    const loom_decision_program_binding_t* binding,
+    loom_decision_program_feature_evaluator_t feature_evaluator,
+    loom_decision_program_predicate_refiner_t predicate_refiner,
+    loom_decision_program_resolution_policy_t resolution_policy,
+    uint32_t* live_action_ordinals, uint32_t* out_live_action_count,
+    loom_decision_program_result_t* out_result) {
+  loom_decision_program_evaluate_impl(
+      program, binding, /*indexed_binding=*/NULL,
+      /*use_indexed_binding=*/false, feature_evaluator, predicate_refiner,
+      resolution_policy, live_action_ordinals, out_live_action_count,
+      out_result);
+}
+
+void loom_decision_program_evaluate_indexed(
+    const loom_decision_program_t* program,
+    const loom_decision_program_indexed_binding_t* binding,
+    loom_decision_program_feature_evaluator_t feature_evaluator,
+    loom_decision_program_predicate_refiner_t predicate_refiner,
+    loom_decision_program_resolution_policy_t resolution_policy,
+    uint32_t* live_action_ordinals, uint32_t* out_live_action_count,
+    loom_decision_program_result_t* out_result) {
+  loom_decision_program_evaluate_impl(program, /*table_binding=*/NULL, binding,
+                                      /*use_indexed_binding=*/true,
+                                      feature_evaluator, predicate_refiner,
+                                      resolution_policy, live_action_ordinals,
+                                      out_live_action_count, out_result);
 }
 
 static void loom_decision_program_reduce_evidence(
@@ -394,7 +503,8 @@ void loom_decision_program_evaluate_all(
 
   const loom_decision_program_conjunction_result_t hard_requirements =
       loom_decision_program_evaluate_conjunction(
-          program, binding, feature_evaluator, predicate_refiner,
+          program, binding, /*indexed_binding=*/NULL,
+          /*use_indexed_binding=*/false, feature_evaluator, predicate_refiner,
           program->hard_requirements);
   if (hard_requirements.feasibility == LOOM_DECISION_TRUTH_FALSE) {
     out_result->kind = LOOM_DECISION_PROGRAM_RESULT_HARD_REJECT;
@@ -410,8 +520,9 @@ void loom_decision_program_evaluate_all(
       const loom_decision_program_choice_t* choice = &program->choices[i];
       const loom_decision_program_conjunction_result_t choice_result =
           loom_decision_program_evaluate_conjunction(
-              program, binding, feature_evaluator, predicate_refiner,
-              choice->conjunction);
+              program, binding, /*indexed_binding=*/NULL,
+              /*use_indexed_binding=*/false, feature_evaluator,
+              predicate_refiner, choice->conjunction);
       choice_evidence[i] = (loom_decision_program_choice_evidence_t){
           .feasibility = choice_result.feasibility,
           .decisive_constraint = choice_result.decisive_constraint,
@@ -428,7 +539,8 @@ void loom_decision_program_evaluate_all(
   for (uint32_t i = 0; i < program->choice_count; ++i) {
     const loom_decision_program_conjunction_result_t choice_result =
         loom_decision_program_evaluate_conjunction(
-            program, binding, feature_evaluator, predicate_refiner,
+            program, binding, /*indexed_binding=*/NULL,
+            /*use_indexed_binding=*/false, feature_evaluator, predicate_refiner,
             program->choices[i].conjunction);
     choice_evidence[i] = (loom_decision_program_choice_evidence_t){
         .feasibility = choice_result.feasibility,

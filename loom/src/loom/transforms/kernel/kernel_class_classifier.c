@@ -1101,7 +1101,6 @@ iree_status_t loom_kernel_class_classifier_collect(
   loom_kernel_class_decision_result_t* decision_results = NULL;
   loom_kernel_class_trace_id_t* current_trace_ids = NULL;
   loom_kernel_class_trace_id_t* candidate_trace_ids = NULL;
-  loom_value_facts_t* projection_facts = NULL;
   IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
       arena, classifier->decision_count, sizeof(*decision_results),
       (void**)&decision_results));
@@ -1111,9 +1110,6 @@ iree_status_t loom_kernel_class_classifier_collect(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(arena, options->class_limit,
                                                  sizeof(*candidate_trace_ids),
                                                  (void**)&candidate_trace_ids));
-  IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
-      arena, classifier->projection_count, sizeof(*projection_facts),
-      (void**)&projection_facts));
   memset(current_trace_ids, 0xFF,
          options->class_limit * sizeof(*current_trace_ids));
   if (classifier->decision_count > 0) {
@@ -1121,11 +1117,10 @@ iree_status_t loom_kernel_class_classifier_collect(
            classifier->decision_count * sizeof(*decision_results));
   }
 
-  loom_value_fact_table_t decision_facts = {
-      .entries = projection_facts,
-      .count = classifier->projection_count,
-      .capacity = classifier->projection_count,
-  };
+  loom_value_facts_t* projection_facts = NULL;
+  IREE_RETURN_IF_ERROR(loom_kernel_class_allocate_array(
+      arena, classifier->projection_count, sizeof(*projection_facts),
+      (void**)&projection_facts));
   loom_kernel_class_trace_t* traces = NULL;
   iree_host_size_t trace_capacity = 0;
   uint32_t trace_count = 0;
@@ -1164,14 +1159,14 @@ iree_status_t loom_kernel_class_classifier_collect(
                 options->ranged_transfer_term_limit);
       }
 
-      const loom_decision_program_binding_t binding = {
-          .facts = &decision_facts,
+      const loom_decision_program_indexed_binding_t binding = {
+          .facts = projection_facts,
           .argument_values = decision->argument_values,
           .result_values = decision->result_values,
       };
       loom_decision_program_result_t result;
       uint32_t live_provider_count = 0;
-      loom_decision_program_evaluate(
+      loom_decision_program_evaluate_indexed(
           &decision->model->program, &binding,
           loom_kernel_class_feature_evaluator(decision),
           loom_decision_program_predicate_refiner_empty(),
