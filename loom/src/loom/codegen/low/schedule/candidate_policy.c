@@ -672,18 +672,20 @@ bool loom_low_schedule_candidate_score_less(
       }
       // Pressure relief is not a license to leave an issue slot empty.
       // Spillable work that remains below every bounded pressure horizon can
-      // run while recovery waits for its inputs. Unspillable activation stays
-      // under the completion policy above: its downstream ownership cannot be
-      // recovered after an optimistic setup choice. Preserve pair-placement
-      // opportunities here because neither component's standalone stall
-      // represents their combined issue cost.
+      // run while recovery waits for its inputs. Candidates creating no live
+      // units can also fill the gap under the same completion guards. Growing
+      // unspillable paths retain their completion ordering because later
+      // ownership cannot be recovered. Preserve pair-placement opportunities
+      // because neither component's standalone stall represents their combined
+      // issue cost.
       if (compare_mode == LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF &&
           lhs->pressure_risk == LOOM_LOW_SCHEDULE_PRESSURE_RISK_NONE &&
           rhs->pressure_risk == LOOM_LOW_SCHEDULE_PRESSURE_RISK_NONE &&
           lhs->pressure_cliff_penalty == rhs->pressure_cliff_penalty &&
-          !iree_any_bit_set(
-              lhs->flags | rhs->flags,
-              LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION) &&
+          (!iree_any_bit_set(
+               lhs->flags | rhs->flags,
+               LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION) ||
+           (lhs->produced_live_units == 0 && rhs->produced_live_units == 0)) &&
           !loom_low_schedule_candidate_pair_affinity_differs(lhs, rhs) &&
           lhs->effective_stall_cycles != rhs->effective_stall_cycles) {
         return lhs->effective_stall_cycles < rhs->effective_stall_cycles;

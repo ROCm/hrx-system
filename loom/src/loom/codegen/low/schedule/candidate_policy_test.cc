@@ -669,6 +669,57 @@ TEST_F(CandidatePolicyTest, PressureRecoveryFillsSafeIssueGaps) {
                   independent, recovery);
 }
 
+TEST_F(CandidatePolicyTest, PressureRecoveryFillsGapsWithoutCreatingStorage) {
+  for (uint32_t activation_mask : {1u, 2u, 3u}) {
+    SCOPED_TRACE(activation_mask);
+    auto recovery = MakeCandidate(1, 0);
+    recovery.projected_live_units = 4;
+    recovery.killed_live_units = 4;
+    recovery.killed_live_value_count = 1;
+    recovery.pressure_progress_kind =
+        LOOM_LOW_SCHEDULE_PRESSURE_PROGRESS_REDUCTION;
+    if (activation_mask & 1) {
+      recovery.flags |=
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION;
+    }
+    auto independent = MakeCandidate(0, 1);
+    independent.projected_live_units = 8;
+    if (activation_mask & 2) {
+      independent.flags |=
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_HAS_UNSPILLABLE_ACTIVATION;
+    }
+
+    // Neither operation creates storage. Transitive unspillable activation
+    // cannot alone justify waiting for a retiring operation to become ready.
+    ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+                    independent, recovery);
+    ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PACKING_COMPLETION,
+                    recovery, independent);
+
+    // Ready work still cannot start another physical lifetime or approach
+    // its downstream pressure horizon while the retirement is pending.
+    auto growing = independent;
+    growing.produced_live_units = 1;
+    growing.produced_live_value_count = 1;
+    ++growing.projected_live_units;
+    ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+                    recovery, growing);
+    auto constrained = independent;
+    constrained.units_until_pressure_cliff = 1;
+    constrained.activation_reserve_units = 1;
+    constrained.pressure_risk = LOOM_LOW_SCHEDULE_PRESSURE_RISK_NEAR_CLIFF;
+    ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+                    recovery, constrained);
+
+    // A ready retirement keeps its progress priority; the exception fills
+    // idle issue time rather than favoring zero-result work unconditionally.
+    recovery.data_ready_stall_cycles = 0;
+    recovery.effective_stall_cycles = 0;
+    ExpectPreferred(LOOM_LOW_SCHEDULE_CANDIDATE_COMPARE_PRESSURE_RELIEF,
+                    recovery, independent);
+  }
+}
+
 TEST_F(CandidatePolicyTest, RecoveryPreservesSourceOrderWithoutProgress) {
   auto older = MakeCandidate(1, 0);
   older.data_ready_stall_cycles = 0;
