@@ -466,8 +466,8 @@ typedef struct loom_aie2p_native_worker_t {
   loom_aie2p_native_tile_t* tile;
   // Engine implementing the strand; only CORE occupies instruction memory.
   loom_aie2p_native_execution_t execution;
-  // Generated private cursor-frame formal, or invalid if the worker has no
-  // advancing endpoint. The physical entry initializes this state once.
+  // Generated private cursor-frame formal, or invalid when all cursors are
+  // worker-local SSA state. Each channel construction initializes its cells.
   loom_value_id_t cursor_state_argument;
   // Configuration channel turns indexed by the source channel action table.
   loom_aie2p_native_configuration_action_t* configuration_actions;
