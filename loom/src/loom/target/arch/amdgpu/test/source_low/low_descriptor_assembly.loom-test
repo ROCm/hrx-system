@@ -118,3 +118,35 @@ low.func.def target<amdgpu.cdna4.core>(@lane_target) @wave64_physical_lane_id() 
   v_mbcnt_lo_u32_b32 v0, -1, 0
   v_mbcnt_hi_u32_b32 v0, -1, v0
   s_endpgm
+
+// ====
+
+// The half-wave exchange snapshots its input and permits in-place allocation.
+// RUN: emit amdgpu-assembly @exchange_halves
+
+amdgpu.target<gfx1100> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna3.core>(@target) @exchange_halves(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %exchanged = v_permlane64_b32 %value
+  return %exchanged
+}
+
+// ----
+  v_permlane64_b32 v0, v0
+  s_endpgm
+
+// ====
+
+// The half-wave exchange snapshots its input and permits in-place allocation.
+// RUN: emit amdgpu-native-words @exchange_halves
+
+amdgpu.target<gfx1200> @target {subgroup_size = 64}
+
+low.func.def target<amdgpu.rdna4.core>(@target) @exchange_halves(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %exchanged = v_permlane64_b32 %value
+  return %exchanged
+}
+
+// ----
+0x7E00CF00
+0xBFB00000

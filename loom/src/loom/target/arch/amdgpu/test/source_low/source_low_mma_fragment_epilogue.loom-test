@@ -886,36 +886,55 @@ low.kernel.def target<amdgpu.rdna3.core>(@wave64_target) abi_layout({constant_co
   %103 = v_lshlrev_b32_src0_inline %102, 6
   %104 = v_lshlrev_b32_src0_inline %101, 3
   %105 = v_add_u32 %103, %104
-  %106 = v_cvt_pk_u16_u32_dpp16 %78, %78 {dpp_ctrl = 177}
-  %107 = v_cvt_pk_u16_u32_dpp16 %85, %85 {dpp_ctrl = 177}
-  %108 = v_cvt_pk_u16_u32_dpp16 %92, %92 {dpp_ctrl = 177}
-  %109 = v_cvt_pk_u16_u32_dpp16 %99, %99 {dpp_ctrl = 177}
-  %110 = v_and_b32_src0_inline %100, 2
-  %111 = v_and_b32_src0_inline %100, 4
-  %112 = v_cmp_eq_i32_src0_inline_vcc %110 {lhs = 0}
-  %113 = v_cndmask_b32_dpp16 %107, %106, %112 {dpp_ctrl = 78}
-  %114 = v_cndmask_b32_dpp16 %109, %108, %112 {dpp_ctrl = 78}
-  %115 = v_cmp_ne_i32_src0_inline_vcc %110 {lhs = 0}
-  %116 = v_cndmask_b32_dpp16 %106, %107, %115 {dpp_ctrl = 78}
-  %117 = v_cndmask_b32_dpp16 %108, %109, %115 {dpp_ctrl = 78}
-  %118 = v_cmp_eq_i32_src0_inline_vcc %111 {lhs = 0}
-  %119 = v_cndmask_b32_dpp16 %114, %113, %118 {dpp_ctrl = 356}
-  %120 = v_cndmask_b32_dpp16 %117, %116, %118 {dpp_ctrl = 356}
-  %121 = v_mov_b32_dpp16_masked %114, %113 {dpp_ctrl = 356, bank_mask = 5}
-  %122 = v_mov_b32_dpp16_masked %117, %116 {dpp_ctrl = 356, bank_mask = 5}
-  %123 = ds_bpermute_b32 %105, %119 {offset = 4}
-  %124 = ds_bpermute_b32 %105, %120 {offset = 4}
-  %125 = ds_bpermute_b32 %105, %121 {offset = 4}
+  %106 = s_mov_b32 3435973836
+  %107 = s_mov_b32 858993459
+  %108 = concat(%106, %107) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %109 = v_cvt_pk_u16_u32_dpp16 %78, %78 {dpp_ctrl = 177}
+  %110 = v_cvt_pk_u16_u32_dpp16 %85, %85 {dpp_ctrl = 177}
+  %111 = v_cvt_pk_u16_u32_dpp16 %92, %92 {dpp_ctrl = 177}
+  %112 = v_cvt_pk_u16_u32_dpp16 %99, %99 {dpp_ctrl = 177}
+  %113 = v_and_b32_src0_inline %100, 2
+  %114 = v_and_b32_src0_inline %100, 4
+  %115 = v_cmp_eq_i32_src0_inline_vcc %113 {lhs = 0}
+  %116 = v_cndmask_b32_dpp16 %110, %109, %115 {dpp_ctrl = 78}
+  %117 = v_cndmask_b32_dpp16 %112, %111, %115 {dpp_ctrl = 78}
+  %118 = v_cmp_ne_i32_src0_inline_vcc %113 {lhs = 0}
+  %119 = v_cndmask_b32_dpp16 %109, %110, %118 {dpp_ctrl = 78}
+  %120 = v_cndmask_b32_dpp16 %111, %112, %118 {dpp_ctrl = 78}
+  %121 = v_cmp_eq_i32_src0_inline_vcc %114 {lhs = 0}
+  %122 = v_cndmask_b32_dpp16 %117, %116, %121 {dpp_ctrl = 356}
+  %123 = v_cndmask_b32_dpp16 %120, %119, %121 {dpp_ctrl = 356}
+  %124 = v_mov_b32_dpp16_masked %117, %116 {dpp_ctrl = 356, bank_mask = 5}
+  %125 = v_mov_b32_dpp16_masked %120, %119 {dpp_ctrl = 356, bank_mask = 5}
   %126 = ds_bpermute_b32 %105, %122 {offset = 4}
-  %127 = ds_bpermute_b32 %105, %119 {offset = 36}
-  %128 = ds_bpermute_b32 %105, %120 {offset = 36}
-  %129 = ds_bpermute_b32 %105, %121 {offset = 36}
-  %130 = ds_bpermute_b32 %105, %122 {offset = 36}
-  %132 = v_lshlrev_b32_src0_inline %100, 5
-  %136 = concat(%123, %124, %125, %126) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %132, %136, %output_view
-  %135 = concat(%127, %128, %129, %130) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  global_store_b128_saddr %132, %135, %output_view {offset = 16}
+  %127 = v_permlane64_b32 %126
+  %128 = v_cndmask_b32 %126, %127, %108
+  %129 = ds_bpermute_b32 %105, %123 {offset = 4}
+  %130 = v_permlane64_b32 %129
+  %131 = v_cndmask_b32 %129, %130, %108
+  %132 = ds_bpermute_b32 %105, %124 {offset = 4}
+  %133 = v_permlane64_b32 %132
+  %134 = v_cndmask_b32 %132, %133, %108
+  %135 = ds_bpermute_b32 %105, %125 {offset = 4}
+  %136 = v_permlane64_b32 %135
+  %137 = v_cndmask_b32 %135, %136, %108
+  %138 = ds_bpermute_b32 %105, %122 {offset = 36}
+  %139 = v_permlane64_b32 %138
+  %140 = v_cndmask_b32 %138, %139, %108
+  %141 = ds_bpermute_b32 %105, %123 {offset = 36}
+  %142 = v_permlane64_b32 %141
+  %143 = v_cndmask_b32 %141, %142, %108
+  %144 = ds_bpermute_b32 %105, %124 {offset = 36}
+  %145 = v_permlane64_b32 %144
+  %146 = v_cndmask_b32 %144, %145, %108
+  %147 = ds_bpermute_b32 %105, %125 {offset = 36}
+  %148 = v_permlane64_b32 %147
+  %149 = v_cndmask_b32 %147, %148, %108
+  %151 = v_lshlrev_b32_src0_inline %100, 5
+  %155 = concat(%128, %131, %134, %137) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %151, %155, %output_view
+  %154 = concat(%140, %143, %146, %149) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  global_store_b128_saddr %151, %154, %output_view {offset = 16}
   return
 }
 

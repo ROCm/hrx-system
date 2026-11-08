@@ -170,6 +170,7 @@ iree_py_test(
     main = "pytest_style_runner.py",
     deps = [
         ":matrix_fragment_layouts",
+        "//loom/py/loom/target:native_contraction_layout",
         "//loom/py/loom/target:native_layout_facts",
     ],
 )

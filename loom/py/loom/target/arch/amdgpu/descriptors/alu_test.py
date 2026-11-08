@@ -12,7 +12,35 @@ from loom.target.arch.amdgpu.descriptors import _REG_SGPR, _REG_VGPR
 from loom.target.arch.amdgpu.descriptors.api import (
     _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS,
 )
-from loom.target.low_descriptors import OperandAddressMapKind, OperandRole, RegClassAlt
+from loom.target.low_descriptors import (
+    EffectKind,
+    OperandAddressMapKind,
+    OperandRole,
+    RegClassAlt,
+)
+
+
+@pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)
+def test_half_wave_exchange_has_a_convergent_vgpr_contract(target: str) -> None:
+    overlays = {
+        overlay.descriptor_key: overlay
+        for overlay in _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS[target].overlay_rows()
+    }
+    exchange = overlays.get("amdgpu.v_permlane64_b32")
+    if target.startswith(("cdna", "gfx9_4")):
+        assert exchange is None
+        return
+    assert exchange is not None
+    assert exchange.instruction_name == "V_PERMLANE64_B32"
+    assert exchange.encoding_name == "ENC_VOP1"
+    result, source = (row.descriptor_operand for row in exchange.operands)
+    assert result.role is OperandRole.RESULT
+    assert source.role is OperandRole.OPERAND
+    assert result.reg_alts == source.reg_alts == (RegClassAlt(_REG_VGPR),)
+    assert result.unit_count == source.unit_count == 1
+    # The ISA snapshots both halves before writing, including when D == S0.
+    assert exchange.constraints == ()
+    assert tuple(effect.kind for effect in exchange.effects) == (EffectKind.CONVERGENT,)
 
 
 @pytest.mark.parametrize("target", _AMDGPU_CORE_DESCRIPTOR_SET_BUILDERS)

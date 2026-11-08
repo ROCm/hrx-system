@@ -1499,6 +1499,15 @@ typedef struct loom_amdgpu_fragment_repack_transpose_stage_t {
   uint8_t lane_bit_set_bank_mask;
 } loom_amdgpu_fragment_repack_transpose_stage_t;
 
+typedef enum loom_amdgpu_fragment_repack_gather_kind_e {
+  // DS permutation reaches every requested source owner directly.
+  LOOM_AMDGPU_FRAGMENT_REPACK_GATHER_DIRECT = 0,
+  // Paired destinations share a local request; exchange the gathered result.
+  LOOM_AMDGPU_FRAGMENT_REPACK_GATHER_EXCHANGE_RESULT = 1,
+  // Paired requests differ; gather both source halves before selecting.
+  LOOM_AMDGPU_FRAGMENT_REPACK_GATHER_EXCHANGE_SOURCE = 2,
+} loom_amdgpu_fragment_repack_gather_kind_t;
+
 typedef struct loom_amdgpu_fragment_repack_plan_t {
   // Source fragment value being repacked.
   loom_value_id_t source;
@@ -1516,6 +1525,8 @@ typedef struct loom_amdgpu_fragment_repack_plan_t {
   const loom_native_contraction_facts_t* native_contraction_facts;
   // Generated source-owner movement selected with the target strategy.
   const loom_native_transition_facts_t* native_transition_facts;
+  // Destination lanes selecting a source from the other DS partition.
+  uint64_t cross_half_lane_mask;
   // Number of 32-bit source registers consumed by the selected strategy.
   uint16_t source_register_count;
   // Number of 32-bit result registers produced by the selected strategy.
@@ -1530,6 +1541,8 @@ typedef struct loom_amdgpu_fragment_repack_plan_t {
   uint16_t source_lane_group_byte_shift;
   // Log2 byte spacing contributed by the target LHS lane-div reduction group.
   uint16_t result_lane_div_byte_shift;
+  // Selected register-only transport across the target's DS partitions.
+  uint16_t gather_kind;
   // Recipe selecting a source payload register from lane_mod.
   loom_amdgpu_fragment_repack_lane_recipe_t source_register_selector;
   // Recipe selecting the source lane group from lane_mod.
