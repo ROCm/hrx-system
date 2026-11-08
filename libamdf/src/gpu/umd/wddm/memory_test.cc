@@ -523,6 +523,11 @@ TEST_F(WindowsGpuMemoryTest, BorrowsHostViewsAcrossNativeAllocationChunks) {
 }
 
 TEST_F(WindowsGpuMemoryTest, ReservationBorrowsTheExactCommonProcessAddress) {
+  amdf_memory_reservation_capabilities_t capabilities = {};
+  ASSERT_EQ(amdf_gpu_umd_query_memory_reservation_capabilities(&device_, 0,
+                                                               &capabilities),
+            AMDF_STATUS_OK);
+  EXPECT_EQ(capabilities.mapping_granularity, 65536u);
   constexpr uint64_t alignment = 2 * 1024 * 1024;
   void* process_address =
       VirtualAlloc(nullptr, 2 * alignment, MEM_RESERVE, PAGE_NOACCESS);
@@ -564,6 +569,7 @@ TEST_F(WindowsGpuMemoryTest, ReservationBorrowsTheExactCommonProcessAddress) {
   amdf_gpu_umd_memory_reservation_query_access(reservation, 0, &address, &owner,
                                                &granularity, &required_access);
   EXPECT_EQ(address, common_address);
+  EXPECT_EQ(granularity, capabilities.mapping_granularity);
   EXPECT_EQ(amdf_gpu_umd_memory_reservation_destroy(reservation),
             AMDF_STATUS_OK);
   MEMORY_BASIC_INFORMATION information = {};
@@ -611,10 +617,10 @@ TEST_F(WindowsGpuMemoryTest,
             AMDF_STATUS_OK);
   state_.operations.clear();
   const amdf_gpu_umd_mapping_update_t update = {
-      .target_byte_offset = 8192,
-      .byte_length = 8192,
+      .target_byte_offset = 0,
+      .byte_length = 65536,
       .memory = memory,
-      .source_byte_offset = 28672,
+      .source_byte_offset = 0,
       .access = AMDF_MEMORY_ACCESS_READ,
   };
   bool mutated = false;
@@ -624,13 +630,13 @@ TEST_F(WindowsGpuMemoryTest,
   ASSERT_TRUE(mutated);
   ASSERT_EQ(state_.mappings.size(), 2u);
   EXPECT_EQ(state_.mappings[0].hAllocation, 0x20u);
-  EXPECT_EQ(state_.mappings[0].BaseAddress, UINT64_C(0x202000));
-  EXPECT_EQ(state_.mappings[0].OffsetInPages, 7u);
-  EXPECT_EQ(state_.mappings[0].SizeInPages, 1u);
+  EXPECT_EQ(state_.mappings[0].BaseAddress, UINT64_C(0x200000));
+  EXPECT_EQ(state_.mappings[0].OffsetInPages, 0u);
+  EXPECT_EQ(state_.mappings[0].SizeInPages, 8u);
   EXPECT_EQ(state_.mappings[1].hAllocation, 0x21u);
-  EXPECT_EQ(state_.mappings[1].BaseAddress, UINT64_C(0x203000));
+  EXPECT_EQ(state_.mappings[1].BaseAddress, UINT64_C(0x208000));
   EXPECT_EQ(state_.mappings[1].OffsetInPages, 0u);
-  EXPECT_EQ(state_.mappings[1].SizeInPages, 1u);
+  EXPECT_EQ(state_.mappings[1].SizeInPages, 8u);
   EXPECT_EQ(state_.mappings[0].Protection.Write, 0u);
   EXPECT_EQ(state_.operations,
             (std::vector<Operation>{Operation::kMap, Operation::kMap,
@@ -667,10 +673,9 @@ TEST_F(WindowsGpuMemoryTest,
                     D3DDDI_UPDATEGPUVIRTUALADDRESS_MAP_PROTECT);
           EXPECT_EQ(operation.MapProtect.hAllocation, 0x20u + i);
           EXPECT_EQ(operation.MapProtect.BaseAddress,
-                    UINT64_C(0x202000) + i * 4096);
-          EXPECT_EQ(operation.MapProtect.SizeInBytes, 4096u);
-          EXPECT_EQ(operation.MapProtect.AllocationOffsetInBytes,
-                    i == 0 ? 28672u : 0u);
+                    UINT64_C(0x200000) + i * 32768);
+          EXPECT_EQ(operation.MapProtect.SizeInBytes, 32768u);
+          EXPECT_EQ(operation.MapProtect.AllocationOffsetInBytes, 0u);
           EXPECT_EQ(operation.MapProtect.Protection.Write, 0u);
           EXPECT_EQ(operation.MapProtect.Protection.Execute, 0u);
         }
@@ -708,13 +713,15 @@ TEST_F(WindowsGpuMemoryTest,
 
 TEST_F(WindowsGpuMemoryTest,
        DetachThroughAnotherAliasFollowsPartialUpdatesOnTheirPagingQueue) {
+  state_.reservation_byte_length = 3 * 65536;
   auto second = device_;
   second.device = 0x11;
   second.paging_queue = 0x31;
   amdf_gpu_umd_device_t* devices[] = {&device_, &second};
   amdf_gpu_umd_memory_reservation_t* reservation = nullptr;
   ASSERT_EQ(amdf_gpu_umd_memory_reservation_create(
-                device_.host_allocator, 2, devices, 65536, 0, 0, &reservation),
+                device_.host_allocator, 2, devices,
+                state_.reservation_byte_length, 0, 0, &reservation),
             AMDF_STATUS_OK);
   kmt_.map_gpu_virtual_address = [](D3DDDI_MAPGPUVIRTUALADDRESS* map) {
     current_state->operations.push_back(Operation::kMap);
@@ -737,8 +744,8 @@ TEST_F(WindowsGpuMemoryTest,
         return static_cast<NTSTATUS>(0);
       };
   const amdf_gpu_umd_mapping_update_t updates[] = {
-      {.target_byte_offset = 0, .byte_length = 4096},
-      {.target_byte_offset = 8192, .byte_length = 4096},
+      {.target_byte_offset = 0, .byte_length = 65536},
+      {.target_byte_offset = 2 * 65536, .byte_length = 65536},
   };
   bool mutated = false;
   EXPECT_EQ(amdf_gpu_umd_memory_reservation_update(reservation, 1, 2, updates,
@@ -751,7 +758,7 @@ TEST_F(WindowsGpuMemoryTest,
   EXPECT_EQ(amdf_gpu_umd_memory_reservation_detach(reservation, 0),
             AMDF_STATUS_OK);
   EXPECT_EQ(state_.mappings.back().Protection.NoAccess, 1u);
-  EXPECT_EQ(state_.mappings.back().SizeInPages, 16u);
+  EXPECT_EQ(state_.mappings.back().SizeInPages, 48u);
   EXPECT_EQ(state_.operations,
             (std::vector<Operation>{Operation::kReserveAddress, Operation::kMap,
                                     Operation::kMap, Operation::kMap,

@@ -523,6 +523,14 @@ honors the strongest requested unit among its consumers. The unit is distinct
 from both backing allocation size and requested base alignment. Every mapping
 offset and length must satisfy the returned geometry.
 
+Native Windows AMD GPU reservations expose a 64 KiB minimum mapping unit.
+Target ranges and prior and replacement source offsets use this unit; smaller
+edits fail admission instead of being rounded to affect neighboring mappings.
+Linux/WSL DXG retains its 4 KiB mapping unit. These are independently replaceable
+virtual ranges, not physical allocation sizes or a promise about hardware PTE
+size. Native Windows mapping descriptors still encode offsets and lengths in
+the DDI's 4 KiB units. Larger physical slabs can supply many mapping units.
+
 Backing uses the existing scope-taking construction operations. Each consumer
 that will supply replacement mappings requests
 `AMDF_MEMORY_FLAG_MAPPING_SOURCE` in its access requirements. Profile queries

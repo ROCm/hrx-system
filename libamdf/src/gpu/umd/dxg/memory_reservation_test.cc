@@ -240,6 +240,7 @@ class DxgMemoryReservationTest : public ::testing::Test {
         .physical_adapter_index = 3,
         .virtual_address_bit_count =
             memory_capabilities_.virtual_address_bit_count,
+        .mapping_granularity = AMDF_GPU_DXG_PAGE_SIZE,
         .read_only_memory_supported =
             memory_capabilities_.read_only_memory_supported,
         .no_execute_memory_supported =
@@ -339,6 +340,31 @@ TEST_F(DxgMemoryReservationTest,
             amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED));
   EXPECT_EQ(sentinel, reinterpret_cast<void*>(1));
   EXPECT_TRUE(state_.operations.empty());
+}
+
+TEST_F(DxgMemoryReservationTest,
+       PreservesProviderGranularityThroughReservationCreation) {
+  for (const uint64_t granularity : {UINT64_C(4096), UINT64_C(65536)}) {
+    SCOPED_TRACE(granularity);
+    reservation_device_.mapping_granularity = granularity;
+    amdf_memory_reservation_capabilities_t capabilities = {};
+    ASSERT_EQ(amdf_gpu_dxg_query_memory_reservation_capabilities(
+                  &reservation_device_, 0, &capabilities),
+              AMDF_STATUS_OK);
+    EXPECT_EQ(capabilities.mapping_granularity, granularity);
+    auto* reservation = CreateReservation();
+    ASSERT_NE(reservation, nullptr);
+    uint64_t address = 0;
+    uint32_t mapping_access_ordinal = UINT32_MAX;
+    uint64_t mapping_granularity = 0;
+    amdf_memory_access_t required_access = 0;
+    amdf_gpu_dxg_memory_reservation_query_access(
+        reservation, 0, &address, &mapping_access_ordinal, &mapping_granularity,
+        &required_access);
+    EXPECT_EQ(mapping_granularity, capabilities.mapping_granularity);
+    EXPECT_EQ(amdf_gpu_dxg_memory_reservation_destroy(reservation),
+              AMDF_STATUS_OK);
+  }
 }
 
 TEST_F(DxgMemoryReservationTest,

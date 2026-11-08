@@ -129,6 +129,30 @@ class Pm4MappingTest : public Pm4MappingFixture {
         kPlacementByteOffset, length - kPayloadByteOffset, 100, *original));
 
     const uint64_t address = reservation_info_.address + kPlacementByteOffset;
+    // Public admission rejects sub-unit edits and source offsets without
+    // changing any of the installed mapping or its independently owned bytes.
+    std::array<amdf_memory_mapping_update_t, 4> invalid;
+    invalid.fill(initial);
+    for (auto& update : invalid) {
+      update.byte_length = page;
+      update.previous_memory = original->memory;
+    }
+    invalid[0].target_byte_offset += page / 2;
+    invalid[1].byte_length = page / 2;
+    invalid[2].source_byte_offset = page / 2;
+    invalid[3].previous_source_byte_offset = page / 2;
+    for (size_t i = 0; i < invalid.size(); ++i) {
+      ASSERT_EQ(
+          api_->memory_reservation_update(reservation_, 0, 1, &invalid[i]),
+          amdf_make_api_status(i < 2 ? AMDF_STATUS_CODE_OUT_OF_RANGE
+                                     : AMDF_STATUS_CODE_UNSUPPORTED));
+    }
+    ASSERT_NO_FATAL_FAILURE(
+        Verify(address + kPayloadByteOffset, length - kPayloadByteOffset, 100));
+    ASSERT_NO_FATAL_FAILURE(
+        Verify(original->device_address + kPayloadByteOffset,
+               length - kPayloadByteOffset, 100));
+
     auto write_page = [&](uint64_t offset, uint64_t source, uint32_t tag) {
       auto* input = static_cast<uint32_t*>(upload_->host.pointer);
       for (uint64_t i = 0; i < page / sizeof(uint32_t); ++i) {

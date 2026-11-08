@@ -36,6 +36,8 @@ struct amdf_gpu_dxg_memory_reservation_t {
   uint64_t address;
   // Application-visible extent shared by every admitted device.
   uint64_t byte_length;
+  // Provider-supported replacement unit shared by this mapping domain.
+  uint64_t mapping_granularity;
   // Access that every mapping must include on this physical adapter.
   amdf_memory_access_t required_access;
   // Device whose paging timeline owns the latest mutation.
@@ -84,7 +86,7 @@ amdf_status_t amdf_gpu_dxg_query_memory_reservation_capabilities(
       .maximum_byte_length = maximum_length,
       .reservation_granularity = AMDF_GPU_DXG_RESERVATION_GRANULARITY,
       .maximum_alignment = maximum_alignment,
-      .mapping_granularity = AMDF_GPU_DXG_PAGE_SIZE,
+      .mapping_granularity = device->mapping_granularity,
       .minimum_address = AMDF_GPU_DXG_RESERVATION_GRANULARITY,
       .maximum_address = maximum_address,
   };
@@ -115,6 +117,7 @@ amdf_status_t amdf_gpu_dxg_memory_reservation_create(
       first_device = device;
       reservation->required_access =
           amdf_gpu_dxg_required_mapping_access(&device);
+      reservation->mapping_granularity = device.mapping_granularity;
     } else if (!amdf_gpu_dxg_devices_share_mapping_domain(&first_device,
                                                           &device)) {
       amdf_free(host_allocator, reservation);
@@ -167,7 +170,7 @@ void amdf_gpu_dxg_memory_reservation_query_access(
     amdf_memory_access_t* out_required_access) {
   *out_address = reservation->address;
   *out_mapping_access_ordinal = 0;
-  *out_mapping_granularity = AMDF_GPU_DXG_PAGE_SIZE;
+  *out_mapping_granularity = reservation->mapping_granularity;
   *out_required_access = reservation->required_access;
   (void)access_ordinal;
 }

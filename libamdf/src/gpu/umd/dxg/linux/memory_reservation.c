@@ -24,6 +24,7 @@ amdf_gpu_linux_dxg_reservation_device(amdf_gpu_umd_device_t* device) {
       .physical_adapter_index = device->physical_adapter_index,
       .virtual_address_bit_count =
           device->memory_capabilities.virtual_address_bit_count,
+      .mapping_granularity = AMDF_GPU_DXG_PAGE_SIZE,
       .read_only_memory_supported =
           device->memory_capabilities.read_only_memory_supported,
       .no_execute_memory_supported =
