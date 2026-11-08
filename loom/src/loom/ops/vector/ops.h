@@ -2287,7 +2287,7 @@ iree_status_t loom_vector_frexpf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_EXPF: Lanewise natural exponential e^x.
+// LOOM_OP_VECTOR_EXPF: Lanewise natural exponential e^x. AFN permits target-native approximation that flushes subnormal outputs to zero.
 // vector.expf
 LOOM_DEFINE_ISA(loom_vector_expf_isa, LOOM_OP_VECTOR_EXPF)
 LOOM_DEFINE_OPERAND(loom_vector_expf_input, 0)
@@ -2303,7 +2303,7 @@ iree_status_t loom_vector_expf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_VECTOR_EXP2F: Lanewise base-2 exponential 2^x.
+// LOOM_OP_VECTOR_EXP2F: Lanewise base-2 exponential 2^x. AFN permits target-native approximation that flushes subnormal outputs to zero.
 // vector.exp2f
 LOOM_DEFINE_ISA(loom_vector_exp2f_isa, LOOM_OP_VECTOR_EXP2F)
 LOOM_DEFINE_OPERAND(loom_vector_exp2f_input, 0)

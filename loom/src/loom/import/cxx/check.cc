@@ -1170,10 +1170,10 @@ class CheckBody {
                       .tensor_value(expected.components())
                 : expected.ssa();
         check(loom_check_expect_approximate_build(
-            &builder_, actual_value, expected_value, absolute_tolerance,
-            relative_tolerance,
+            &builder_, /*build_flags=*/0, actual_value, expected_value,
+            absolute_tolerance, relative_tolerance,
             (loom_check_expect_approximate_nan_t)loom_attr_as_enum(nan),
-            location, &op));
+            /*subnormal=*/0, location, &op));
         break;
       }
       case Operation::CloseSigned:

@@ -105,11 +105,13 @@ template <class Float> requires (__is_floating_point(Float))
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.erff")]] Float erff(Float input);
 
-// Base-2 exponential: 2^x.
+// Base-2 exponential: 2^x. AFN permits target-native approximation that
+// flushes subnormal outputs to zero.
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.exp2f")]] Float exp2f(Float input);
 
-// Exponential: e^x.
+// Exponential: e^x. AFN permits target-native approximation that flushes
+// subnormal outputs to zero.
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.expf")]] Float expf(Float input);
 
@@ -338,11 +340,13 @@ template <class Float> requires (__is_floating_point(Float))
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.erff", "afn")]] Float erff(Float input);
 
-// Base-2 exponential: 2^x.
+// Base-2 exponential: 2^x. AFN permits target-native approximation that
+// flushes subnormal outputs to zero.
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.exp2f", "afn")]] Float exp2f(Float input);
 
-// Exponential: e^x.
+// Exponential: e^x. AFN permits target-native approximation that flushes
+// subnormal outputs to zero.
 template <class Float> requires (__is_floating_point(Float))
 [[loom::op("scalar.expf", "afn")]] Float expf(Float input);
 

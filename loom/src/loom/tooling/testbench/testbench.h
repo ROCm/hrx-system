@@ -385,6 +385,8 @@ typedef struct loom_testbench_approximate_expectation_plan_t {
   uint8_t actual_numeric_kind;
   // Numeric descriptor kind used to decode the expected operand.
   uint8_t expected_numeric_kind;
+  // Accept signed-zero actual results below the actual type's normal range.
+  bool flush_subnormals;
 } loom_testbench_approximate_expectation_plan_t;
 
 static_assert(sizeof(loom_testbench_approximate_expectation_plan_t) == 24,

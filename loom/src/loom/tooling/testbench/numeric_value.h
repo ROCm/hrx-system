@@ -90,6 +90,8 @@ typedef struct loom_testbench_numeric_type_t {
   int64_t minimum_i64;
   // Largest signed i64 accepted by integer reference generation.
   int64_t maximum_i64;
+  // Smallest positive normal value for floating-point types, or zero otherwise.
+  double minimum_normal_f64;
 } loom_testbench_numeric_type_t;
 
 // Returns the descriptor for |kind|, or NULL for an invalid/unset kind.

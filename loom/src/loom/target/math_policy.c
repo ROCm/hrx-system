@@ -439,7 +439,9 @@ bool loom_target_math_policy_prefers_fma(
   _(PRESERVE_TRIGONOMETRIC_ZEROS, recipe_preserve_trigonometric_zeros,         \
     "preserve-trigonometric-zeros")                                            \
   _(APPROXIMATE_LOGARITHM, recipe_approximate_logarithm,                       \
-    "approximate-logarithm")
+    "approximate-logarithm")                                                   \
+  _(APPROXIMATE_EXPONENTIAL, recipe_approximate_exponential,                   \
+    "approximate-exponential")
 
 typedef struct loom_target_math_name_strings_t {
 #define LOOM_TARGET_MATH_NAME_FIELD(name, field, value) \

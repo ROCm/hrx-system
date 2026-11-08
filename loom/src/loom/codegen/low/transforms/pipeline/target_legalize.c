@@ -1325,11 +1325,11 @@ static iree_status_t loom_low_target_legalize_rewrite_op(
     ++state->statistics->ops_deferred;
     return iree_ok_status();
   }
-  // Packet materialization earlier in this worklist can create a
-  // shape-preserving vector operation after the iteration's component plan has
-  // run. Give the next plan first claim when the target admits a multi-lane
-  // packet width. Ordinary target and reference rewrites never enter this
-  // handoff and consume their generated operations in the current worklist.
+  // Packet materialization earlier in this worklist can create a vector
+  // operation or memory input after the iteration's component plan has run.
+  // Give the next plan first claim when the target admits a multi-lane packet
+  // width. Ordinary target and reference rewrites never enter this handoff and
+  // consume their generated operations in the current worklist.
   if (!state->legalization_context
            .source_function_has_unsupported_vector_carrier &&
       state->legalization_context.vector_packet_policy != NULL &&

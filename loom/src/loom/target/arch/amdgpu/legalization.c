@@ -556,15 +556,16 @@ static iree_status_t loom_amdgpu_legalize_vector_load(
     IREE_RETURN_IF_ERROR(
         loom_vector_static_shape_memory_rewrite_op(context, op, &rewritten));
   }
-  if (!rewritten && context->boundary_representation ==
-                        LOOM_TARGET_BOUNDARY_REPRESENTATION_PROJECTED) {
+  if (!rewritten && (context->boundary_representation ==
+                         LOOM_TARGET_BOUNDARY_REPRESENTATION_PROJECTED ||
+                     context->mode == LOOM_TARGET_LEGALIZATION_MODE_FINAL)) {
     IREE_RETURN_IF_ERROR(loom_vector_packet_legalize_load(
         context, op, context->vector_packet_policy, &rewritten));
   }
-  // Store-root packet legalization owns connected load/arithmetic components
-  // while boundaries retain logical carriers, so that one plan can retain
-  // shared producers or stage fanout. Once boundary carriers are physical,
-  // preserve the load as a packet snapshot for the component planner to reuse.
+  // Eager legalization lets store-root plans retain shared producers or stage
+  // fanout. Final legalization must also complete loads feeding structural
+  // consumers whose stores cannot own the entire producer graph. Preserve
+  // those reads as packet snapshots at their original observation points.
   out_result->action = rewritten ? LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN
                                  : LOOM_TARGET_LEGALIZER_ACTION_DEFER;
   return iree_ok_status();
@@ -1250,7 +1251,7 @@ static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
         .root_kind = LOOM_OP_VECTOR_CLAMPF,
         .first_operand_element_types = LOOM_SCALAR_TYPE_SET_F32,
         .match = loom_amdgpu_match_f32_clamp_decomposition,
-        .legalize = loom_vector_legalize_f32_extrema,
+        .legalize = loom_vector_legalize_float_extrema,
     },
     {
         .flags = LOOM_TARGET_LEGALIZER_ENTRY_FLAG_REQUIRE_CONTRACT_REJECTION,

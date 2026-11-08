@@ -490,7 +490,7 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @vector_
 amdgpu.target<gfx11-generic> @target
 
 func.def target(@target) @rejects_strict_exp(%input: f32) -> (f32) {
-  // ERROR@+1: LOWERING/036 {op_name="scalar.expf", phase_name="legalize-math", policy_name="amdgpu-math", math_op="expf", lane_domain="scalar", element_type="f32", constraint_key="math.exp.exact_f32"}
+  // ERROR@+1: LOWERING/036 {op_name="scalar.expf", phase_name="legalize-math", policy_name="amdgpu-math", math_op="expf", lane_domain="scalar", element_type="f32", constraint_key="math.exponential.afn"}
   %result = scalar.expf %input : f32
   func.return %result : f32
 }

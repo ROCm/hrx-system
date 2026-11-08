@@ -21,6 +21,8 @@ loom_cc_library(
         "evaluation.h",
         "exponent.c",
         "exponent.h",
+        "exponential.c",
+        "exponential.h",
         "inverse_hyperbolic.c",
         "inverse_hyperbolic.h",
         "legalize.c",

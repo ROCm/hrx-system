@@ -3450,7 +3450,7 @@ vector_ctpopi = _lanewise_unary(
 vector_expf = _lanewise_unary(
     "vector.expf",
     result_constraint=FLOAT_ELEMENT,
-    doc=("Lanewise natural exponential e^x."),
+    doc=("Lanewise natural exponential e^x. AFN permits target-native approximation that flushes subnormal outputs to zero."),
     flags=_VF,
     facts="loom_vector_expf_facts",
     facts_from_operands=True,
@@ -3520,7 +3520,7 @@ vector_frexpf = Op(
 vector_exp2f = _lanewise_unary(
     "vector.exp2f",
     result_constraint=FLOAT_ELEMENT,
-    doc=("Lanewise base-2 exponential 2^x."),
+    doc=("Lanewise base-2 exponential 2^x. AFN permits target-native approximation that flushes subnormal outputs to zero."),
     flags=_VF,
     facts="loom_vector_exp2f_facts",
     facts_from_operands=True,

@@ -863,7 +863,7 @@ iree_status_t loom_scalar_frexpf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_EXPF: Exponential: e^x.
+// LOOM_OP_SCALAR_EXPF: Exponential: e^x. AFN permits target-native approximation that flushes subnormal outputs to zero.
 // %result = scalar.expf %input : f32
 LOOM_DEFINE_ISA(loom_scalar_expf_isa, LOOM_OP_SCALAR_EXPF)
 LOOM_DEFINE_OPERAND(loom_scalar_expf_input, 0)
@@ -879,7 +879,7 @@ iree_status_t loom_scalar_expf_facts(
     const loom_value_facts_t* operand_facts,
     loom_value_facts_t* result_facts);
 
-// LOOM_OP_SCALAR_EXP2F: Base-2 exponential: 2^x.
+// LOOM_OP_SCALAR_EXP2F: Base-2 exponential: 2^x. AFN permits target-native approximation that flushes subnormal outputs to zero.
 // %result = scalar.exp2f %input : f32
 LOOM_DEFINE_ISA(loom_scalar_exp2f_isa, LOOM_OP_SCALAR_EXP2F)
 LOOM_DEFINE_OPERAND(loom_scalar_exp2f_input, 0)

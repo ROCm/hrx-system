@@ -146,6 +146,7 @@ static const loom_testbench_numeric_type_t kLoomTestbenchNumericTypes[] = {
             .domain = LOOM_TESTBENCH_NUMERIC_DOMAIN_FLOAT,
             .load_f64 = loom_testbench_numeric_load_f8e4m3_f64,
             .load_i64 = NULL,
+            .minimum_normal_f64 = 0x1p-6,
         },
     [LOOM_TESTBENCH_NUMERIC_F8E5M2] =
         {
@@ -156,6 +157,7 @@ static const loom_testbench_numeric_type_t kLoomTestbenchNumericTypes[] = {
             .domain = LOOM_TESTBENCH_NUMERIC_DOMAIN_FLOAT,
             .load_f64 = loom_testbench_numeric_load_f8e5m2_f64,
             .load_i64 = NULL,
+            .minimum_normal_f64 = 0x1p-14,
         },
     [LOOM_TESTBENCH_NUMERIC_F16] =
         {
@@ -166,6 +168,7 @@ static const loom_testbench_numeric_type_t kLoomTestbenchNumericTypes[] = {
             .domain = LOOM_TESTBENCH_NUMERIC_DOMAIN_FLOAT,
             .load_f64 = loom_testbench_numeric_load_f16_f64,
             .load_i64 = NULL,
+            .minimum_normal_f64 = 0x1p-14,
         },
     [LOOM_TESTBENCH_NUMERIC_BF16] =
         {
@@ -176,6 +179,7 @@ static const loom_testbench_numeric_type_t kLoomTestbenchNumericTypes[] = {
             .domain = LOOM_TESTBENCH_NUMERIC_DOMAIN_FLOAT,
             .load_f64 = loom_testbench_numeric_load_bf16_f64,
             .load_i64 = NULL,
+            .minimum_normal_f64 = 0x1p-126,
         },
     [LOOM_TESTBENCH_NUMERIC_F32] =
         {
@@ -186,6 +190,7 @@ static const loom_testbench_numeric_type_t kLoomTestbenchNumericTypes[] = {
             .domain = LOOM_TESTBENCH_NUMERIC_DOMAIN_FLOAT,
             .load_f64 = loom_testbench_numeric_load_f32_f64,
             .load_i64 = NULL,
+            .minimum_normal_f64 = 0x1p-126,
         },
     [LOOM_TESTBENCH_NUMERIC_F64] =
         {
@@ -196,6 +201,7 @@ static const loom_testbench_numeric_type_t kLoomTestbenchNumericTypes[] = {
             .domain = LOOM_TESTBENCH_NUMERIC_DOMAIN_FLOAT,
             .load_f64 = loom_testbench_numeric_load_f64_f64,
             .load_i64 = NULL,
+            .minimum_normal_f64 = 0x1p-1022,
         },
     [LOOM_TESTBENCH_NUMERIC_I8] =
         {

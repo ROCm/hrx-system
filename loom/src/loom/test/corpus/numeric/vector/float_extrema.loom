@@ -3,7 +3,7 @@
 // subnormals, infinities, and NaNs survive the callable boundary. Finite trials
 // compare exact output bits; special-value trials permit unspecified NaN
 // payloads while requiring the same lanes to remain NaNs. Float8 results widen
-// exactly to F32 because close expectations do not consume Float8 buffers.
+// exactly to F32 at the output boundary.
 
 func.def @vector_float_extrema_f8e4m3(%value_buffer: buffer, %lhs_buffer: buffer, %rhs_buffer: buffer, %output_buffer: buffer) {
   %base = index.constant 0 : offset

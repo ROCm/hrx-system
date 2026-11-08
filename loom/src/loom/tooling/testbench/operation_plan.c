@@ -198,6 +198,9 @@ bool loom_testbench_plan_expectation(
           loom_check_expect_approximate_rtol(op);
       out_expectation->approximate.nan_policy =
           loom_check_expect_approximate_nan(op);
+      out_expectation->approximate.flush_subnormals =
+          loom_check_expect_approximate_subnormal(op) ==
+          LOOM_CHECK_EXPECT_APPROXIMATE_SUBNORMAL_FLUSH;
       break;
     case LOOM_CHECK_EXPECTATION_CLOSE_SIGNED:
     case LOOM_CHECK_EXPECTATION_CLOSE_UNSIGNED: {
