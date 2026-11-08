@@ -187,6 +187,7 @@ _RESOURCE_TENSOR = "amdgpu.tensor"
 _RESOURCE_CONTROL = "amdgpu.control"
 
 _SCHEDULE_SALU = "amdgpu.salu"
+_SCHEDULE_SYMBOL_ADDRESS = "amdgpu.salu.symbol_address"
 _SCHEDULE_SALU_COMPARE = "amdgpu.salu.compare"
 _SCHEDULE_VALU = "amdgpu.valu"
 _SCHEDULE_TRANS = "amdgpu.trans"
@@ -974,6 +975,13 @@ def _common_scalar_vector_memory_schedule_classes(
             latency_kind=LatencyKind.ESTIMATE,
             latency_cycles=1,
             issue_uses=(IssueUse(_RESOURCE_SALU, cycles=1, units=1),),
+            model_quality=ModelQuality.ESTIMATED,
+        ),
+        ScheduleClass(
+            _SCHEDULE_SYMBOL_ADDRESS,
+            latency_kind=LatencyKind.ESTIMATE,
+            latency_cycles=3,
+            issue_uses=(IssueUse(_RESOURCE_SALU, cycles=3, units=1),),
             model_quality=ModelQuality.ESTIMATED,
         ),
         ScheduleClass(
@@ -1883,6 +1891,7 @@ _HAL_BUFFER_DESCRIPTOR_CACHE_SWIZZLE_STRIDE_IMMEDIATE = Immediate(
 
 
 _MANUAL_SCALAR_DESCRIPTOR_KEYS = (
+    "amdgpu.s_mov_b64.symbol",
     "amdgpu.s_mov_b32",
     "amdgpu.s_mov_b32_vcc.imm",
     "amdgpu.s_getpc_b64",
@@ -2011,6 +2020,39 @@ def _manual_scalar_descriptors(
             encoding_format_id=AMDGPU_ENCODING_FORMAT_SOP1,
             encoding_id=s_getpc_b64_opcode,
             effects=(_PC_RELATIVE_EFFECT,),
+            flags=(DescriptorFlag.DEAD_REMOVABLE,),
+        ),
+        Descriptor(
+            key="amdgpu.s_mov_b64.symbol",
+            mnemonic="s_mov_b64_symbol",
+            semantic_tag="address.symbol.u64",
+            operands=(
+                Operand("address", OperandRole.RESULT, _SGPR_ALT, unit_count=2),
+                _scc_clobber(),
+            ),
+            immediates=(
+                Immediate(
+                    "symbol",
+                    ImmediateKind.ORDINAL,
+                    flags=(ImmediateFlag.SYMBOLIC, ImmediateFlag.DATA_SYMBOL),
+                    bit_width=32,
+                    unsigned_max=(2**32) - 1,
+                ),
+                Immediate(
+                    "byte_offset",
+                    ImmediateKind.UNSIGNED,
+                    flags=(ImmediateFlag.DEFAULT_VALUE,),
+                    bit_width=64,
+                    unsigned_max=(2**63) - 1,
+                    default_value=0,
+                ),
+            ),
+            asm_forms=_asm(
+                results=("address",),
+                immediates=("symbol", "byte_offset"),
+                named_immediates=True,
+            ),
+            schedule_class=_SCHEDULE_SYMBOL_ADDRESS,
             flags=(DescriptorFlag.DEAD_REMOVABLE,),
         ),
         Descriptor(

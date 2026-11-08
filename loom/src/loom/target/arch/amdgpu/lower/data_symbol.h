@@ -38,9 +38,9 @@ typedef struct loom_amdgpu_data_symbol_address_t {
 
 // Emits target-low IR that materializes |target| as a 64-bit scalar address.
 //
-// The result is a reg<amdgpu.sgpr x2> value formed from the canonical
-// s_getpc_b64 + rel32 symbolic add sequence. The selected descriptor set must
-// expose the AMDGPU symbolic-relocation descriptors used by native emission.
+// The result is a reg<amdgpu.sgpr x2> value. Native emission expands its
+// symbolic materialization after allocation so intermediate PC components
+// cannot spill independently of the relocation they anchor.
 iree_status_t loom_amdgpu_build_data_symbol_address(
     loom_builder_t* builder, const loom_low_descriptor_set_t* descriptor_set,
     loom_amdgpu_data_symbol_address_t target, loom_location_id_t location,

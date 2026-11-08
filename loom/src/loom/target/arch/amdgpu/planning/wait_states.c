@@ -1293,9 +1293,10 @@ static iree_status_t loom_amdgpu_wait_state_packet_analyze(
   }
 
   out_info->flags |= LOOM_AMDGPU_WAIT_STATE_PACKET_FLAG_DESCRIPTOR;
-  out_info->instruction_count = 1;
   const loom_low_descriptor_t* descriptor = packet->descriptor;
   const loom_low_descriptor_set_t* descriptor_set = builder->descriptor_set;
+  out_info->instruction_count =
+      loom_amdgpu_descriptor_instruction_count(descriptor_set, descriptor);
   const loom_amdgpu_descriptor_traits_t descriptor_traits =
       loom_amdgpu_descriptor_traits(descriptor_set, descriptor);
   out_info->descriptor_traits = descriptor_traits;
@@ -2032,7 +2033,7 @@ static iree_status_t loom_amdgpu_wait_state_apply_packet(
     loom_amdgpu_matrix_result_wait_advance(
         builder->matrix_results,
         packet->descriptor != NULL
-            ? 1
+            ? info.instruction_count
             : loom_amdgpu_structural_packet_minimum_instruction_count(
                   &info.structural));
     loom_amdgpu_matrix_result_wait_commit(builder->matrix_results,

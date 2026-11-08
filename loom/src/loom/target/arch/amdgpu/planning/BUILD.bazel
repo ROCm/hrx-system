@@ -401,6 +401,7 @@ loom_cc_library(
     srcs = ["wait_classification.c"],
     hdrs = ["wait_classification.h"],
     deps = [
+        ":descriptor_semantics",
         ":storage_lease",
         ":structural_packet",
         ":wait_completion",
