@@ -1,4 +1,4 @@
-// RUN: pass target-legalize{mode=eager},canonicalize,dce
+// RUN: pass target-legalize{mode=eager,policy=require-native},canonicalize,dce
 
 amdgpu.target<gfx950> @target
 
@@ -111,4 +111,105 @@ func.def target(@target) @byte_dot_with_tail(%left_head: vector<64xi8>, %left_ta
   %last = vector.extract %21[7] : vector<8xi32> -> i32
   %result = scalar.subi %first, %last : i32
   func.return %result : i32
+}
+
+// ====
+// RUN: pass target-legalize{mode=final},canonicalize,dce
+
+x86.target<avx2> @target
+
+func.def target(@target) @reference_pair(%lhs: i32, %rhs: i32, %accumulator: f32) -> (f32) {
+  %left_word = vector.from_elements %lhs : vector<1xi32>
+  %right_word = vector.from_elements %rhs : vector<1xi32>
+  %left = vector.bitcast %left_word : vector<1xi32> to vector<2xbf16>
+  %right = vector.bitcast %right_word : vector<1xi32> to vector<2xbf16>
+  %acc = vector.from_elements %accumulator : vector<1xf32>
+  %dot = vector.dot2f %left, %right, %acc : vector<2xbf16>, vector<2xbf16>, vector<1xf32>
+  %result = vector.extract %dot[0] : vector<1xf32> -> f32
+  func.return %result : f32
+}
+
+// ----
+x86.target<avx2> @target
+
+func.def target(@target) @reference_pair(%lhs: i32, %rhs: i32, %accumulator: f32) -> (f32) {
+  %36 = scalar.constant 65535 : i32
+  %37 = scalar.andi %lhs, %36 : i32
+  %12 = scalar.trunci %37 : i32 to i16
+  %13 = scalar.bitcast %12 : i16 to bf16
+  %34 = scalar.constant 65535 : i32
+  %35 = scalar.andi %rhs, %34 : i32
+  %15 = scalar.trunci %35 : i32 to i16
+  %16 = scalar.bitcast %15 : i16 to bf16
+  %17 = scalar.extf %13 : bf16 to f32
+  %18 = scalar.extf %16 : bf16 to f32
+  %19 = scalar.fmaf %17, %18, %accumulator : f32
+  %32 = scalar.constant 16 : i32
+  %33 = scalar.shrui %lhs, %32 : i32
+  %21 = scalar.trunci %33 : i32 to i16
+  %22 = scalar.bitcast %21 : i16 to bf16
+  %30 = scalar.constant 16 : i32
+  %31 = scalar.shrui %rhs, %30 : i32
+  %24 = scalar.trunci %31 : i32 to i16
+  %25 = scalar.bitcast %24 : i16 to bf16
+  %26 = scalar.extf %22 : bf16 to f32
+  %27 = scalar.extf %25 : bf16 to f32
+  %28 = scalar.fmaf %26, %27, %19 : f32
+  func.return %28 : f32
+}
+
+// ====
+// RUN: pass target-legalize{mode=final,policy=reference-only},canonicalize,dce
+
+amdgpu.target<gfx950> @target
+
+func.def target(@target) @reference_pair(%lhs: i32, %rhs: i32, %accumulator: f32) -> (f32) {
+  %left_word = vector.from_elements %lhs : vector<1xi32>
+  %right_word = vector.from_elements %rhs : vector<1xi32>
+  %left = vector.bitcast %left_word : vector<1xi32> to vector<2xbf16>
+  %right = vector.bitcast %right_word : vector<1xi32> to vector<2xbf16>
+  %acc = vector.from_elements %accumulator : vector<1xf32>
+  %dot = vector.dot2f %left, %right, %acc : vector<2xbf16>, vector<2xbf16>, vector<1xf32>
+  %result = vector.extract %dot[0] : vector<1xf32> -> f32
+  func.return %result : f32
+}
+
+// ----
+amdgpu.target<gfx950> @target
+
+func.def target(@target) @reference_pair(%lhs: i32, %rhs: i32, %accumulator: f32) -> (f32) {
+  %36 = scalar.constant 65535 : i32
+  %37 = scalar.andi %lhs, %36 : i32
+  %12 = scalar.trunci %37 : i32 to i16
+  %13 = scalar.bitcast %12 : i16 to bf16
+  %34 = scalar.constant 65535 : i32
+  %35 = scalar.andi %rhs, %34 : i32
+  %15 = scalar.trunci %35 : i32 to i16
+  %16 = scalar.bitcast %15 : i16 to bf16
+  %17 = scalar.extf %13 : bf16 to f32
+  %18 = scalar.extf %16 : bf16 to f32
+  %19 = scalar.fmaf %17, %18, %accumulator : f32
+  %32 = scalar.constant 16 : i32
+  %33 = scalar.shrui %lhs, %32 : i32
+  %21 = scalar.trunci %33 : i32 to i16
+  %22 = scalar.bitcast %21 : i16 to bf16
+  %30 = scalar.constant 16 : i32
+  %31 = scalar.shrui %rhs, %30 : i32
+  %24 = scalar.trunci %31 : i32 to i16
+  %25 = scalar.bitcast %24 : i16 to bf16
+  %26 = scalar.extf %22 : bf16 to f32
+  %27 = scalar.extf %25 : bf16 to f32
+  %28 = scalar.fmaf %26, %27, %19 : f32
+  func.return %28 : f32
+}
+
+// ====
+// RUN: pass target-legalize{mode=final,policy=require-native}
+
+x86.target<avx2> @target
+
+func.def target(@target) @native_pair_required(%lhs: vector<16xbf16>, %rhs: vector<16xbf16>, %accumulator: vector<8xf32>) -> (vector<8xf32>) {
+  // ERROR@+1: TARGET/039 {source_contract="target.reference", matrix_constraint="reference.policy"}
+  %dot = vector.dot2f %lhs, %rhs, %accumulator : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  func.return %dot : vector<8xf32>
 }

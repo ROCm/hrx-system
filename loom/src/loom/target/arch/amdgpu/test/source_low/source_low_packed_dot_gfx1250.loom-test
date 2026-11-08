@@ -62,6 +62,8 @@ low.func.def target<amdgpu.rdna4.gfx125x.core> abi(hal_kernel) @gfx1250_bf16_dot
 }
 
 // ====
+// RUN: pass target=amdgpu:gfx1250 source-to-low
+
 
 func.def @gfx1250_f16_dot2f(%lhs: vector<2xf16>, %rhs: vector<2xf16>, %acc: vector<1xf32>) -> (vector<1xf32>) {
   // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="amdgpu.v_dot2_f32_f16", constraint_key="amdgpu.dot2f.f16_descriptor"}
@@ -70,6 +72,8 @@ func.def @gfx1250_f16_dot2f(%lhs: vector<2xf16>, %rhs: vector<2xf16>, %acc: vect
 }
 
 // ====
+// RUN: pass target=amdgpu:gfx1250 source-to-low
+
 
 func.def @gfx1250_dot4f8_fp8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
   // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="amdgpu.v_dot4_f32", constraint_key="amdgpu.dot4f8.descriptor"}
@@ -78,6 +82,8 @@ func.def @gfx1250_dot4f8_fp8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: 
 }
 
 // ====
+// RUN: pass target=amdgpu:gfx1250 source-to-low
+
 
 func.def @gfx1250_dot4f8_bf8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
   // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="amdgpu.v_dot4_f32", constraint_key="amdgpu.dot4f8.descriptor"}
@@ -86,6 +92,8 @@ func.def @gfx1250_dot4f8_bf8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: 
 }
 
 // ====
+// RUN: pass target=amdgpu:gfx1250 source-to-low
+
 
 func.def @gfx1250_dot4f8_fp8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
   // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="amdgpu.v_dot4_f32", constraint_key="amdgpu.dot4f8.descriptor"}
@@ -94,6 +102,8 @@ func.def @gfx1250_dot4f8_fp8fp8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: 
 }
 
 // ====
+// RUN: pass target=amdgpu:gfx1250 source-to-low
+
 
 func.def @gfx1250_dot4f8_bf8bf8(%lhs: vector<1xi32>, %rhs: vector<1xi32>, %acc: vector<1xf32>) -> (vector<1xf32>) {
   // ERROR@+1: TARGET/003 {subject_role="descriptor", subject_name="amdgpu.v_dot4_f32", constraint_key="amdgpu.dot4f8.descriptor"}

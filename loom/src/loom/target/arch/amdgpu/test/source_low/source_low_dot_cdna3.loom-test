@@ -228,6 +228,8 @@ low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @dot8i4_s4s4(%lh
 }
 
 // ====
+// RUN: pass source-to-low
+
 
 amdgpu.target<gfx942> @target
 

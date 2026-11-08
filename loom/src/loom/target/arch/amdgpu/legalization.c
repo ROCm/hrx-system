@@ -41,7 +41,6 @@
 #include "loom/transforms/kernel/target_legalization.h"
 #include "loom/transforms/scalar/target_legalization.h"
 #include "loom/transforms/vector/cast_packet_legalization.h"
-#include "loom/transforms/vector/grouped_dot_legalization.h"
 #include "loom/transforms/vector/packet_insert_legalization.h"
 #include "loom/transforms/vector/packet_legalization.h"
 #include "loom/transforms/vector/shape_legalization.h"
@@ -626,26 +625,6 @@ static iree_status_t loom_amdgpu_legalize_oversized_vector_reduce(
   if (rewritten) {
     out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
   }
-  return iree_ok_status();
-}
-
-static iree_status_t loom_amdgpu_legalize_grouped_dot(
-    const loom_target_legalizer_entry_t* entry,
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result) {
-  (void)entry;
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
-  };
-  if (!loom_amdgpu_legalizer_descriptor_set_is_amdgpu(
-          context->descriptor_set)) {
-    return iree_ok_status();
-  }
-  bool rewritten = false;
-  IREE_RETURN_IF_ERROR(
-      loom_vector_grouped_dot_packetize(context, op, &rewritten));
-  out_result->action = rewritten ? LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN
-                                 : LOOM_TARGET_LEGALIZER_ACTION_DEFER;
   return iree_ok_status();
 }
 
@@ -1416,22 +1395,6 @@ static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_TRANSFORM,
         .legalize = loom_amdgpu_legalize_vector_transform,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT2F,
-        .legalize = loom_amdgpu_legalize_grouped_dot,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT4I,
-        .legalize = loom_amdgpu_legalize_grouped_dot,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT8I4,
-        .legalize = loom_amdgpu_legalize_grouped_dot,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT4F8,
-        .legalize = loom_amdgpu_legalize_grouped_dot,
     },
     {
         .root_kind = LOOM_OP_VECTOR_DECODE,

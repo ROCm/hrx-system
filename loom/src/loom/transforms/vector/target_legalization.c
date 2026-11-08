@@ -25,7 +25,6 @@
 #include "loom/transforms/vector/bitwise_legalization.h"
 #include "loom/transforms/vector/cast_packet_legalization.h"
 #include "loom/transforms/vector/combine_patterns.h"
-#include "loom/transforms/vector/grouped_dot_legalization.h"
 #include "loom/transforms/vector/memory_legalization.h"
 #include "loom/transforms/vector/packet_legalization.h"
 #include "loom/transforms/vector/packet_plan.h"
@@ -173,22 +172,6 @@ static iree_status_t loom_vector_legalize_descriptor(
     };
   }
   return iree_ok_status();
-}
-
-static iree_status_t loom_vector_legalize_grouped_dot(
-    const loom_target_legalizer_entry_t* entry,
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result) {
-  bool rewritten = false;
-  IREE_RETURN_IF_ERROR(
-      loom_vector_grouped_dot_packetize(context, op, &rewritten));
-  if (rewritten) {
-    *out_result = (loom_target_legalizer_result_t){
-        .action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN,
-    };
-    return iree_ok_status();
-  }
-  return loom_vector_legalize_descriptor(entry, context, op, out_result);
 }
 
 // Native carry/borrow contracts retain first claim. The reference form
@@ -2202,19 +2185,19 @@ static const loom_target_legalizer_rule_t kVectorLegalizerRules[] = {
     },
     {
         .root_kind = LOOM_OP_VECTOR_DOT2F,
-        .legalize = loom_vector_legalize_grouped_dot,
+        .legalize = loom_vector_legalize_descriptor,
     },
     {
         .root_kind = LOOM_OP_VECTOR_DOT4I,
-        .legalize = loom_vector_legalize_grouped_dot,
+        .legalize = loom_vector_legalize_descriptor,
     },
     {
         .root_kind = LOOM_OP_VECTOR_DOT8I4,
-        .legalize = loom_vector_legalize_grouped_dot,
+        .legalize = loom_vector_legalize_descriptor,
     },
     {
         .root_kind = LOOM_OP_VECTOR_DOT4F8,
-        .legalize = loom_vector_legalize_grouped_dot,
+        .legalize = loom_vector_legalize_descriptor,
     },
     {
         .root_kind = LOOM_OP_VECTOR_DECODE,

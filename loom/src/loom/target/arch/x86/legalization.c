@@ -13,7 +13,6 @@
 #include "loom/target/arch/x86/records/target_records.h"
 #include "loom/target/arch/x86/vector_insert.h"
 #include "loom/transforms/scalar/target_legalization.h"
-#include "loom/transforms/vector/grouped_dot_legalization.h"
 #include "loom/transforms/vector/packet_legalization.h"
 #include "loom/transforms/vector/target_legalization.h"
 #include "loom/transforms/vector/to_scalar.h"
@@ -41,25 +40,6 @@ static bool loom_x86_descriptor_features_available(
     }
   }
   return true;
-}
-
-static iree_status_t loom_x86_legalize_grouped_dot(
-    const loom_target_legalizer_entry_t* entry,
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    loom_target_legalizer_result_t* out_result) {
-  (void)entry;
-  *out_result = (loom_target_legalizer_result_t){
-      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
-  };
-  if (!loom_x86_legalizer_descriptor_set_is_x86(context->descriptor_set)) {
-    return iree_ok_status();
-  }
-  bool rewritten = false;
-  IREE_RETURN_IF_ERROR(
-      loom_vector_grouped_dot_packetize(context, op, &rewritten));
-  out_result->action = rewritten ? LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN
-                                 : LOOM_TARGET_LEGALIZER_ACTION_DEFER;
-  return iree_ok_status();
 }
 
 // Expand literals independently from their patch users so x86 construction
@@ -286,18 +266,6 @@ static const loom_target_legalizer_rule_t kX86LegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_DIVREMUI,
         .legalize = loom_x86_legalize_vector_divrem,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT2F,
-        .legalize = loom_x86_legalize_grouped_dot,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT4I,
-        .legalize = loom_x86_legalize_grouped_dot,
-    },
-    {
-        .root_kind = LOOM_OP_VECTOR_DOT8I4,
-        .legalize = loom_x86_legalize_grouped_dot,
     },
 };
 

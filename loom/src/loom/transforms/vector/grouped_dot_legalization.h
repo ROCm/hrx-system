@@ -19,9 +19,11 @@ extern "C" {
 // values, including any captured memory reads. Dynamic shapes and operations
 // without a complete bounded native partition remain with ordinary
 // legalization.
-iree_status_t loom_vector_grouped_dot_packetize(
-    loom_target_legalization_context_t* context, loom_op_t* op,
-    bool* out_rewritten);
+//
+// This provider performs native-target rewrites and precedes the reference
+// provider so the caller's legalization policy governs any decomposition.
+const loom_target_legalizer_provider_t*
+loom_vector_grouped_dot_legalizer_provider(void);
 
 #ifdef __cplusplus
 }  // extern "C"

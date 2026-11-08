@@ -15,6 +15,8 @@ low.func.def target<x86.avx2_features.core>(@target) abi(object_function) abi_la
 }
 
 // ====
+// RUN: pass source-to-low
+
 
 x86.target<avx2> @target {features = [avxvnniint8]}
 
