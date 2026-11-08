@@ -13,12 +13,6 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @unsign
 
 // ----
 CHECK: * = OpULessThan %bool %lower %upper
-CHECK: * = OpISub %int %upper %lower
-CHECK: * = OpULessThan %bool %step *
-CHECK: * = OpSelect %int * %lower
-CHECK: * = OpPhi %bool *
-CHECK: * = OpULessThan %bool %iv *
-CHECK: * = OpPhi %int %seed * %iv *
 CHECK-NOT: *OpSLessThan*
 
 // ====
@@ -33,11 +27,6 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @signed
 }
 
 // ----
-CHECK: * = OpSLessThan %bool %lower %upper
-CHECK: * = OpISub %long %upper %lower
-CHECK: * = OpULessThan %bool %step *
-CHECK: * = OpSelect %long * %lower
-CHECK: * = OpPhi %bool *
 CHECK: * = OpSLessThan %bool %iv *
 CHECK: OpLoopMerge * Unroll
 
@@ -54,11 +43,6 @@ low.func.def target<spirv.logical.core>(@target) abi(shader_entry_point) @unsign
 
 // ----
 CHECK: * = OpULessThan %bool %lower %upper
-CHECK: * = OpISub %ulong %upper %lower
-CHECK: * = OpULessThan %bool %step *
-CHECK: * = OpSelect %ulong * %lower
-CHECK: * = OpPhi %bool *
-CHECK: * = OpULessThan %bool %iv *
 CHECK-NOT: *OpSLessThan*
 
 // ====

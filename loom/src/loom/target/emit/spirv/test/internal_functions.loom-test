@@ -112,14 +112,14 @@ func.def inline target(@target) @find_pair(%condition: i1, %lower: index, %upper
          %15 = OpULessThan %bool %step %14
          %16 = OpISub %int %upper %step
          %17 = OpSelect %int %15 %16 %lower
-               OpBranch %18
+               OpSelectionMerge %22 None
+               OpBranchConditional %13 %18 %22
          %18 = OpLabel
-      %index = OpPhi %int %lower %12 %22 %21
+      %index = OpPhi %int %lower %12 %23 %21
     %current = OpPhi %int %fallback %12 %current %21
 %current_position = OpPhi %int %upper %12 %current_position %21
-         %27 = OpPhi %bool %13 %12 %23 %21
                OpLoopMerge %20 %21 None
-               OpBranchConditional %27 %19 %20
+               OpBranch %19
          %19 = OpLabel
                OpSelectionMerge %29 None
                OpBranchConditional %condition %28 %29
@@ -129,12 +129,14 @@ func.def inline target(@target) @find_pair(%condition: i1, %lower: index, %upper
          %29 = OpLabel
                OpBranch %21
          %21 = OpLabel
-         %23 = OpSLessThan %bool %index %17
-         %22 = OpIAdd %int %index %step
-               OpBranch %18
+         %24 = OpSLessThan %bool %index %17
+         %23 = OpIAdd %int %index %step
+               OpBranchConditional %24 %18 %20
          %20 = OpLabel
-   %selected = OpPhi %int %current %18
-   %position = OpPhi %int %current_position %18
+               OpBranch %22
+         %22 = OpLabel
+   %selected = OpPhi %int %fallback %12 %current %20
+   %position = OpPhi %int %upper %12 %current_position %20
          %33 = OpCompositeConstruct %_struct_4 %selected %position
                OpReturnValue %33
                OpFunctionEnd
