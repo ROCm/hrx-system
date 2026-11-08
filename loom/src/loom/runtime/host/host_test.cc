@@ -5,7 +5,11 @@
 
 #include "loom/runtime/host/host.h"
 
+#include <atomic>
+#include <condition_variable>
 #include <cstring>
+#include <mutex>
+#include <thread>
 
 #include "iree/base/internal/arena.h"
 #include "iree/base/threading/numa.h"
@@ -142,6 +146,153 @@ TEST(HostTest, BatchArenasShareAndReturnScratchBlocks) {
   std::memset(second_bytes, 0x5a, 256);
   iree_arena_deinitialize(&second);
   loom_runtime_host_release(host);
+}
+
+class HostReclamationTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    const iree_allocator_t allocator = {this, Allocate};
+    IREE_ASSERT_OK(loom_runtime_host_create(2, nullptr, allocator, &host_));
+  }
+  void TearDown() override { loom_runtime_host_release(host_); }
+  static iree_status_t Allocate(void* payload, iree_allocator_command_t command,
+                                const void* parameters, void** pointer) {
+    auto* self = static_cast<HostReclamationTest*>(payload);
+    if (command == IREE_ALLOCATOR_COMMAND_TRIM) {
+      ++self->trims_;
+      std::unique_lock<std::mutex> lock(self->mutex_);
+      if (self->blocked_) {
+        self->entered_ = true;
+        self->condition_.notify_one();
+        self->condition_.wait(lock, [&] { return !self->blocked_; });
+      }
+      if (self->failure_ != IREE_STATUS_OK) {
+        return iree_status_from_code(self->failure_);
+      }
+    }
+    const auto backing = iree_allocator_system();
+    return backing.ctl(backing.self, command, parameters, pointer);
+  }
+  // Host shared by all independently held preparation scopes.
+  loom_runtime_host_t* host_ = nullptr;
+  // Actual configured allocator controls, counted independently of policy.
+  std::atomic<unsigned> trims_{0};
+  // Injected allocator-control failure; normal allocation remains usable.
+  iree_status_code_t failure_ = IREE_STATUS_OK;
+  // Joins the allocator dependency gate, not the code under test.
+  std::mutex mutex_;
+  // Explicit dependency arrival and release.
+  std::condition_variable condition_;
+  // The allocator has entered its trim operation.
+  bool entered_ = false;
+  // The test dependency is intentionally holding that operation.
+  bool blocked_ = false;
+};
+
+TEST_F(HostReclamationTest, NestedIntentNotifiesAndCoalescesAcrossOwners) {
+  unsigned first_wakes = 0, second_wakes = 0;
+  const auto wake = [](void* payload) { ++*static_cast<unsigned*>(payload); };
+  loom_runtime_host_preparation_observer_t first{{wake, &first_wakes}};
+  loom_runtime_host_preparation_observer_t second{{wake, &second_wakes}};
+  loom_runtime_host_observe_preparation(host_, &first);
+  loom_runtime_host_observe_preparation(host_, &second);
+  EXPECT_EQ(loom_runtime_host_compiler_idle_deadline(host_, 0),
+            IREE_TIME_INFINITE_FUTURE);
+  loom_runtime_host_preparation_begin(host_);
+  for (int i = 0; i < 4; ++i) {
+    loom_runtime_host_preparation_begin(host_);
+    loom_runtime_host_preparation_end(host_);
+    IREE_ASSERT_OK(
+        loom_runtime_host_trim_compiler_idle(host_, 0, iree_time_now()));
+    EXPECT_EQ(trims_.load(), 0u);
+  }
+  EXPECT_EQ(first_wakes, 0u);
+  EXPECT_EQ(second_wakes, 0u);
+  loom_runtime_host_preparation_end(host_);
+  EXPECT_EQ(first_wakes, 1u);
+  EXPECT_EQ(second_wakes, 1u);
+  const auto delay = iree_make_duration_ms(1000);
+  const auto deadline = loom_runtime_host_compiler_idle_deadline(host_, delay);
+  ASSERT_NE(deadline, IREE_TIME_INFINITE_FUTURE);
+  IREE_ASSERT_OK(
+      loom_runtime_host_trim_compiler_idle(host_, delay, deadline - 1));
+  EXPECT_EQ(trims_.load(), 0u);
+  IREE_ASSERT_OK(loom_runtime_host_trim_compiler_idle(host_, delay, deadline));
+  IREE_ASSERT_OK(loom_runtime_host_trim_compiler_idle(host_, delay, deadline));
+  EXPECT_EQ(trims_.load(), 1u);
+  loom_runtime_host_unobserve_preparation(host_, &first);
+  loom_runtime_host_preparation_begin(host_);
+  loom_runtime_host_preparation_end(host_);
+  EXPECT_EQ(first_wakes, 1u);
+  EXPECT_EQ(second_wakes, 2u);
+  loom_runtime_host_unobserve_preparation(host_, &second);
+}
+
+TEST_F(HostReclamationTest, QueuedIdleObservationIsRecheckedAfterArrival) {
+  loom_runtime_host_preparation_begin(host_);
+  loom_runtime_host_preparation_end(host_);
+  const auto old_deadline = loom_runtime_host_compiler_idle_deadline(host_, 0);
+  loom_runtime_host_preparation_begin(host_);
+  IREE_ASSERT_OK(loom_runtime_host_trim_compiler_idle(host_, 0, old_deadline));
+  EXPECT_EQ(trims_.load(), 0u);
+  loom_runtime_host_preparation_end(host_);
+  const auto deadline = loom_runtime_host_compiler_idle_deadline(host_, 1);
+  IREE_ASSERT_OK(loom_runtime_host_trim_compiler_idle(host_, 1, deadline - 1));
+  EXPECT_EQ(trims_.load(), 0u);
+  IREE_ASSERT_OK(loom_runtime_host_trim_compiler_idle(host_, 1, deadline));
+  EXPECT_EQ(trims_.load(), 1u);
+}
+
+TEST_F(HostReclamationTest, NewWorkDoesNotWaitForAllocatorAndGetsLaterTrim) {
+  loom_runtime_host_preparation_begin(host_);
+  loom_runtime_host_preparation_end(host_);
+  blocked_ = true;
+  struct {
+    // Worker-owned result transferred to the test owner by thread join.
+    iree_status_t status = iree_ok_status();
+  } outcome;
+  std::thread worker([&] {
+    outcome.status =
+        loom_runtime_host_trim_compiler_idle(host_, 0, iree_time_now());
+  });
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    condition_.wait(lock, [&] { return entered_; });
+  }
+  loom_runtime_host_preparation_begin(host_);
+  loom_runtime_host_preparation_end(host_);
+  IREE_EXPECT_OK(
+      loom_runtime_host_trim_compiler_idle(host_, 0, iree_time_now()));
+  EXPECT_EQ(trims_.load(), 1u);
+  {
+    std::unique_lock<std::mutex> lock(mutex_);
+    blocked_ = false;
+    condition_.notify_one();
+  }
+  worker.join();
+  IREE_ASSERT_OK(outcome.status);
+  IREE_ASSERT_OK(
+      loom_runtime_host_trim_compiler_idle(host_, 0, iree_time_now()));
+  EXPECT_EQ(trims_.load(), 2u);
+}
+
+TEST_F(HostReclamationTest,
+       FailureReturnsOnceAndDoesNotPoisonLaterPreparation) {
+  loom_runtime_host_preparation_begin(host_);
+  loom_runtime_host_preparation_end(host_);
+  failure_ = IREE_STATUS_UNAVAILABLE;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_UNAVAILABLE,
+      loom_runtime_host_trim_compiler_idle(host_, 0, iree_time_now()));
+  IREE_ASSERT_OK(
+      loom_runtime_host_trim_compiler_idle(host_, 0, iree_time_now()));
+  EXPECT_EQ(trims_.load(), 1u);
+  failure_ = IREE_STATUS_OK;
+  loom_runtime_host_preparation_begin(host_);
+  loom_runtime_host_preparation_end(host_);
+  IREE_ASSERT_OK(
+      loom_runtime_host_trim_compiler_idle(host_, 0, iree_time_now()));
+  EXPECT_EQ(trims_.load(), 2u);
 }
 
 }  // namespace

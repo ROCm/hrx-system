@@ -586,6 +586,8 @@ struct loom_service_finite_load_t {
   loomc_task_t task;
   // Allocator owning this operation, independent of the transferred model.
   iree_allocator_t host_allocator;
+  // Shared preparation intent through final producer retirement.
+  loom_runtime_host_t* host;
   // Owned partial model, transferred only after successful terminal advance.
   loom_service_finite_model_t* model;
   // Borrowed immutable package inputs, retained by the registration owner.
@@ -719,6 +721,8 @@ iree_status_t loom_service_finite_load_allocate(
     load->model->host_allocator = host_allocator;
     load->model->owner = device;
     load->model->pool = pool;
+    load->host = loom_runtime_device_host(device);
+    loom_runtime_host_preparation_begin(load->host);
     *out_load = load;
   } else {
     iree_slim_mutex_deinitialize(&load->event.mutex);
@@ -859,7 +863,9 @@ iree_status_t loom_service_finite_load_free(loom_service_finite_load_t* load) {
   if (iree_status_is_ok(status)) {
     iree_vm_module_release(load->module);
     iree_slim_mutex_deinitialize(&load->event.mutex);
+    loom_runtime_host_t* host = load->host;
     iree_allocator_free(load->host_allocator, load);
+    loom_runtime_host_preparation_end(host);
   }
   return status;
 }

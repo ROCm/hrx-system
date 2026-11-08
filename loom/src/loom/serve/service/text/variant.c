@@ -110,7 +110,9 @@ static void loom_serve_text_variant_recorded(void* user_data,
   loom_runtime_jit_release(job->jit);
   const loom_runtime_variant_completion_fn_t completion = job->completion;
   void* completion_user_data = job->user_data;
+  loom_runtime_host_t* host = loom_runtime_device_host(job->device);
   iree_allocator_free(variant->host_allocator, job);
+  loom_runtime_host_preparation_end(host);
   completion(completion_user_data, status, variant, &variant->compilation);
 }
 
@@ -213,12 +215,16 @@ iree_status_t loom_serve_text_variant_compile_async(
     job->sanitizer = sanitizer;
     job->completion = completion;
     job->user_data = user_data;
+    loom_runtime_host_preparation_begin(loom_runtime_device_host(device));
     status = iree_status_from_loomc(loomc_task_sink_submit(
         loom_runtime_host_compiler_sink(loom_runtime_device_host(device)),
         &job->task));
   }
   if (!iree_status_is_ok(status)) {
-    iree_allocator_free(host_allocator, job);
+    if (job) {
+      iree_allocator_free(host_allocator, job);
+      loom_runtime_host_preparation_end(loom_runtime_device_host(device));
+    }
     loom_serve_text_variant_free(variant);
   }
   return status;

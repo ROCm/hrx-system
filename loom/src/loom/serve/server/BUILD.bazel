@@ -149,6 +149,7 @@ loom_cc_library(
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/host",
+        "//loom/src/loom/runtime/host:reclamation",
         "//loom/src/loom/runtime/host:timer",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",

@@ -143,7 +143,8 @@ iree_status_t loom_runtime_timer_advance(loom_runtime_timer_t* timer,
         &operation->base, IREE_ASYNC_OPERATION_TYPE_TIMER,
         IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
         loom_runtime_timer_deadline_completed, timer);
-    operation->deadline_ns = iree_time_now() + timer->interval;
+    operation->deadline_ns =
+        iree_relative_timeout_to_deadline_ns(timer->interval);
     iree_slim_mutex_lock(&timer->mutex);
     timer->events.pending |= TIMER_DEADLINE;
     iree_slim_mutex_unlock(&timer->mutex);
