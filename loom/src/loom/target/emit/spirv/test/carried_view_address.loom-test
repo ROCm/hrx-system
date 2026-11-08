@@ -83,13 +83,13 @@ func.def @advance(%input: view<1xi32>, %position_value: i32, %count: index) -> (
          %29 = OpULessThan %bool %step %28
          %30 = OpISub %int %count %step
          %31 = OpSelect %int %29 %30 %begin
-               OpBranch %32
+               OpSelectionMerge %36 None
+               OpBranchConditional %27 %32 %36
          %32 = OpLabel
-  %iteration = OpPhi %int %begin %17 %36 %35
+  %iteration = OpPhi %int %begin %17 %37 %35
      %window = OpPhi %ulong %input %17 %next %35
-         %41 = OpPhi %bool %27 %17 %37 %35
                OpLoopMerge %34 %35 None
-               OpBranchConditional %41 %33 %34
+               OpBranch %33
          %33 = OpLabel
          %42 = OpSConvert %ulong %position_value
          %44 = OpIMul %ulong %42 %ulong_4
@@ -97,11 +97,13 @@ func.def @advance(%input: view<1xi32>, %position_value: i32, %count: index) -> (
        %next = OpCopyObject %ulong %45
                OpBranch %35
          %35 = OpLabel
-         %37 = OpSLessThan %bool %iteration %31
-         %36 = OpIAdd %int %iteration %step
-               OpBranch %32
+         %38 = OpSLessThan %bool %iteration %31
+         %37 = OpIAdd %int %iteration %step
+               OpBranchConditional %38 %32 %34
          %34 = OpLabel
-       %last = OpPhi %ulong %window %32
+               OpBranch %36
+         %36 = OpLabel
+       %last = OpPhi %ulong %input %17 %next %34
          %48 = OpIAdd %ulong %last %ulong_0
          %50 = OpConvertUToPtr %_ptr_PhysicalStorageBuffer_int %48
       %value = OpLoad %int %50 Aligned 4
