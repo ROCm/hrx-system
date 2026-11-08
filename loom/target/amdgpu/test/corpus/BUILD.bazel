@@ -176,6 +176,7 @@ loom_corpus_test(
             "control/loop/queued_routes.loom",
             "memory/storage/load_snapshot.loom",
             "numeric/vector/dynamic_windows.loom",
+            "numeric/vector/packed/arithmetic.loom",
         ],
     },
     xfails = {
@@ -245,7 +246,6 @@ loom_corpus_test(
             "numeric/vector/float_extrema.loom:@vector_float_extrema_f8e5m2_values": "TARGET/002,TARGET/003",
             "numeric/vector/float_extrema.loom:@vector_float_extrema_finite_f16_values": "TARGET/002,TARGET/003",
             "numeric/vector/float_extrema.loom:@vector_float_extrema_finite_f64_values": "TARGET/002",
-            "numeric/vector/packed/arithmetic.loom:@byte_predicate_transpose_values": "TARGET/002",
         },
     },
 )

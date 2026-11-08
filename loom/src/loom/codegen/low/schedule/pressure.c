@@ -22,20 +22,6 @@
 
 #define LOOM_LOW_SCHEDULE_DESCRIPTOR_FRONTIER_CAPACITY 16u
 
-// Incremental pressure summary for consumers unlocked by one producer.
-struct loom_low_schedule_unlock_record_t {
-  // Sum of downstream pressure demand across unlocked consumers.
-  uint32_t demand_units;
-  // Maximum downstream activation width across unlocked consumers.
-  uint32_t activation_units;
-  // Maximum latency among descriptor consumers unlocked by the producer.
-  uint16_t descriptor_latency_cycles;
-  // Number of retained descriptor consumers, capped at capacity + 1.
-  uint8_t descriptor_count;
-  // Candidate facts published by final unscheduled consumers.
-  uint8_t candidate_flags;
-};
-
 typedef enum loom_low_schedule_resource_high_water_mode_e {
   LOOM_LOW_SCHEDULE_RESOURCE_HIGH_WATER_SOURCE_BASELINE = 0,
   LOOM_LOW_SCHEDULE_RESOURCE_HIGH_WATER_SCHEDULED = 1,
@@ -1380,7 +1366,8 @@ static bool loom_low_schedule_descriptor_frontier_is_non_growing(
 
 void loom_low_schedule_pressure_publish_unlock_consumer(
     loom_low_schedule_build_state_t* state,
-    loom_low_schedule_pressure_state_t* pressure_state, uint32_t group_index) {
+    loom_low_schedule_pressure_state_t* pressure_state,
+    loom_low_schedule_ready_policy_t* ready_policy, uint32_t group_index) {
   const loom_low_schedule_dependency_group_t* group =
       loom_low_schedule_dependency_index_group_at(&state->dependency_index,
                                                   group_index);
@@ -1444,6 +1431,10 @@ void loom_low_schedule_pressure_publish_unlock_consumer(
                      state->nodes[consumer_node].schedule_class));
     record->candidate_flags |=
         LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR;
+    if (record->descriptor_count == 0) {
+      loom_low_schedule_pressure_promote_ready_producer(
+          state, pressure_state, ready_policy, producer_node);
+    }
     if (pressure_state->unlocks.descriptor_heads != NULL &&
         record->descriptor_count <
             LOOM_LOW_SCHEDULE_DESCRIPTOR_FRONTIER_CAPACITY) {
@@ -1599,14 +1590,18 @@ loom_low_schedule_score_candidate_pressure_demand(
   }
   demand.candidate_flags |= unlock_record->candidate_flags;
   if (pressure_state->unlocks.descriptor_heads != NULL &&
-      unlock_record->descriptor_count != 0 &&
-      unlock_record->descriptor_count <=
-          LOOM_LOW_SCHEDULE_DESCRIPTOR_FRONTIER_CAPACITY) {
+      unlock_record->descriptor_count != 0) {
+    // The retained subset can prove progress even when more consumers exist.
+    // Retirement uses the complete remaining-use counts, so omitted consumers
+    // keep their inputs live. Scoring remains bounded by the retained capacity.
+    const uint8_t consumer_count =
+        iree_min(unlock_record->descriptor_count,
+                 LOOM_LOW_SCHEDULE_DESCRIPTOR_FRONTIER_CAPACITY);
     uint32_t
         descriptor_consumers[LOOM_LOW_SCHEDULE_DESCRIPTOR_FRONTIER_CAPACITY];
     uint32_t consumer_node =
         pressure_state->unlocks.descriptor_heads[node_index];
-    for (uint8_t i = 0; i < unlock_record->descriptor_count; ++i) {
+    for (uint8_t i = 0; i < consumer_count; ++i) {
       IREE_ASSERT_NE(consumer_node, LOOM_LOW_SCHEDULE_NODE_NONE);
       descriptor_consumers[i] = consumer_node;
       consumer_node =
@@ -1615,8 +1610,7 @@ loom_low_schedule_score_candidate_pressure_demand(
     if (loom_low_schedule_descriptor_frontier_is_non_growing(
             state, pressure_state, node_index, storage_relation_count,
             killed_live_units, produced_live_units, descriptor_consumers,
-            unlock_record->descriptor_count,
-            &demand.opened_constrained_completion_capacity)) {
+            consumer_count, &demand.opened_constrained_completion_capacity)) {
       demand.candidate_flags |=
           LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_NON_GROWING_DESCRIPTOR;
       demand.non_growing_descriptor_latency_cycles =

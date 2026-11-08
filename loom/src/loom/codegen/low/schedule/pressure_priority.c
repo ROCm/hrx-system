@@ -85,8 +85,20 @@ uint64_t loom_low_schedule_pressure_ready_key(
       produced_units += value->unit_count;
     }
   }
-  const uint32_t growth = loom_low_schedule_saturate_u64_to_u32(
+  uint32_t growth = loom_low_schedule_saturate_u64_to_u32(
       produced_units > killed_units ? produced_units - killed_units : 0);
+  // A ready rematerializable leaf can retire other live inputs through its
+  // unlocked consumers. Expose it to pressure recovery alongside immediately
+  // neutral work; exact frontier scoring proves whether that progress exists.
+  // Ordinary schedule and graph ranking retain their materialization delay.
+  if (growth != 0 &&
+      iree_any_bit_set(
+          pressure_state->unlocks.records[node_index].candidate_flags,
+          LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR) &&
+      loom_low_schedule_node_materialization_key(state, node) ==
+          (UINT64_C(1) << 62)) {
+    growth = 0;
+  }
   const uint32_t relief = loom_low_schedule_saturate_u64_to_u32(
       killed_units > produced_units ? killed_units - produced_units : 0);
   return ((uint64_t)growth << 32) | (uint64_t)(UINT32_MAX - relief);
@@ -191,6 +203,22 @@ loom_low_schedule_ready_keys_t loom_low_schedule_pressure_ready_keys(
                       : 0,
           },
   };
+}
+
+void loom_low_schedule_pressure_promote_ready_producer(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_state_t* pressure_state,
+    loom_low_schedule_ready_policy_t* ready_policy, uint32_t node_index) {
+  if (loom_low_schedule_node_materialization_key(
+          state, &state->nodes[node_index]) != (UINT64_C(1) << 62) ||
+      !loom_low_schedule_ready_frontier_contains(&ready_policy->frontier,
+                                                 node_index)) {
+    return;
+  }
+  loom_low_schedule_ready_frontier_update_key(
+      &ready_policy->frontier, LOOM_LOW_SCHEDULE_READY_VIEW_PRESSURE,
+      node_index,
+      loom_low_schedule_pressure_ready_key(state, pressure_state, node_index));
 }
 
 static uint64_t loom_low_schedule_compute_register_packing_result_units(

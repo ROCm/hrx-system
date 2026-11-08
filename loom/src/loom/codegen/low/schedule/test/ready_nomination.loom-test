@@ -224,3 +224,58 @@ low.func.def target<test.low.core>(@target) @setup_unlocks_admitted_consumer(%rh
 
 // ----
 block 0 order: 0, 1, 3, 2, 4
+
+// ====
+
+// Three physical units are live. A shared constant beyond the source window
+// unlocks a consumer that retires one held input. Pressure recovery must see
+// that setup before independent materializations occupy the last register.
+// RUN: emit low-schedule-query @ready_constant_releases_held_input strategy=resource-stall order=0,17,18,19 scheduled-pressure=test.explicit32
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @ready_constant_releases_held_input(%held: reg<test.explicit32 x2>, %tail: reg<test.explicit32>, %seed: reg<test.i32>) -> (reg<test.explicit32 x2>, reg<test.i32 x17>, reg<test.i32>) asm {
+  %independent0 = test.rematerialize.explicit32 %seed
+  %independent1 = test.rematerialize.explicit32 %seed
+  %independent2 = test.rematerialize.explicit32 %seed
+  %independent3 = test.rematerialize.explicit32 %seed
+  %independent4 = test.rematerialize.explicit32 %seed
+  %independent5 = test.rematerialize.explicit32 %seed
+  %independent6 = test.rematerialize.explicit32 %seed
+  %independent7 = test.rematerialize.explicit32 %seed
+  %independent8 = test.rematerialize.explicit32 %seed
+  %independent9 = test.rematerialize.explicit32 %seed
+  %independent10 = test.rematerialize.explicit32 %seed
+  %independent11 = test.rematerialize.explicit32 %seed
+  %independent12 = test.rematerialize.explicit32 %seed
+  %independent13 = test.rematerialize.explicit32 %seed
+  %independent14 = test.rematerialize.explicit32 %seed
+  %independent15 = test.rematerialize.explicit32 %seed
+  %independent16 = test.rematerialize.explicit32 %seed
+  %increment = test.const.explicit32 1
+  %result = test.rematerialize.pair.explicit32 %tail, %increment
+  %finished = copy %result : reg<test.explicit32> -> reg<test.i32>
+  %scalar0 = copy %independent0 : reg<test.explicit32> -> reg<test.i32>
+  %scalar1 = copy %independent1 : reg<test.explicit32> -> reg<test.i32>
+  %scalar2 = copy %independent2 : reg<test.explicit32> -> reg<test.i32>
+  %scalar3 = copy %independent3 : reg<test.explicit32> -> reg<test.i32>
+  %scalar4 = copy %independent4 : reg<test.explicit32> -> reg<test.i32>
+  %scalar5 = copy %independent5 : reg<test.explicit32> -> reg<test.i32>
+  %scalar6 = copy %independent6 : reg<test.explicit32> -> reg<test.i32>
+  %scalar7 = copy %independent7 : reg<test.explicit32> -> reg<test.i32>
+  %scalar8 = copy %independent8 : reg<test.explicit32> -> reg<test.i32>
+  %scalar9 = copy %independent9 : reg<test.explicit32> -> reg<test.i32>
+  %scalar10 = copy %independent10 : reg<test.explicit32> -> reg<test.i32>
+  %scalar11 = copy %independent11 : reg<test.explicit32> -> reg<test.i32>
+  %scalar12 = copy %independent12 : reg<test.explicit32> -> reg<test.i32>
+  %scalar13 = copy %independent13 : reg<test.explicit32> -> reg<test.i32>
+  %scalar14 = copy %independent14 : reg<test.explicit32> -> reg<test.i32>
+  %scalar15 = copy %independent15 : reg<test.explicit32> -> reg<test.i32>
+  %scalar16 = copy %independent16 : reg<test.explicit32> -> reg<test.i32>
+  %other_results = concat(%scalar0, %scalar1, %scalar2, %scalar3, %scalar4, %scalar5, %scalar6, %scalar7, %scalar8, %scalar9, %scalar10, %scalar11, %scalar12, %scalar13, %scalar14, %scalar15, %scalar16) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x17>
+  return %held, %other_results, %finished
+}
+
+// ----
+block 0 order: 17, 18, 19, 0
+scheduled pressure test.explicit32: peak-live-units=4 peak-live-values=3

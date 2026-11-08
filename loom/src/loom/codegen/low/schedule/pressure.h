@@ -23,10 +23,22 @@ typedef struct loom_low_schedule_pressure_set_record_t
     loom_low_schedule_pressure_set_record_t;
 typedef struct loom_low_schedule_resource_pressure_record_t
     loom_low_schedule_resource_pressure_record_t;
-typedef struct loom_low_schedule_unlock_record_t
-    loom_low_schedule_unlock_record_t;
 typedef struct loom_low_schedule_completion_pressure_t
     loom_low_schedule_completion_pressure_t;
+
+// Incremental pressure summary for consumers unlocked by one producer.
+typedef struct loom_low_schedule_unlock_record_t {
+  // Sum of downstream pressure demand across unlocked consumers.
+  uint32_t demand_units;
+  // Maximum downstream activation width across unlocked consumers.
+  uint32_t activation_units;
+  // Maximum latency among descriptor consumers unlocked by the producer.
+  uint16_t descriptor_latency_cycles;
+  // Number of descriptor consumers, capped at retained capacity + 1.
+  uint8_t descriptor_count;
+  // Candidate facts published by final unscheduled consumers.
+  uint8_t candidate_flags;
+} loom_low_schedule_unlock_record_t;
 
 // Mutable pressure simulation state for one scheduling run.
 struct loom_low_schedule_pressure_state_t {
@@ -452,6 +464,13 @@ loom_low_schedule_ready_keys_t loom_low_schedule_pressure_ready_keys(
     const loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state, uint32_t node_index);
 
+// Refreshes pressure-recovery nomination after the first descriptor consumer
+// becomes unlockable. Each producer makes this transition at most once.
+void loom_low_schedule_pressure_promote_ready_producer(
+    const loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_state_t* pressure_state,
+    loom_low_schedule_ready_policy_t* ready_policy, uint32_t node_index);
+
 // Computes the pressure-view key for one ready node.
 uint64_t loom_low_schedule_pressure_ready_key(
     const loom_low_schedule_build_state_t* state,
@@ -492,7 +511,8 @@ iree_status_t loom_low_schedule_pressure_initialize_unlock_summaries(
 // list scheduler; dependency readiness alone cannot cross a source boundary.
 void loom_low_schedule_pressure_publish_unlock_consumer(
     loom_low_schedule_build_state_t* state,
-    loom_low_schedule_pressure_state_t* pressure_state, uint32_t group_index);
+    loom_low_schedule_pressure_state_t* pressure_state,
+    loom_low_schedule_ready_policy_t* ready_policy, uint32_t group_index);
 
 // Queries the retained descriptor frontier for a consumer made ready by
 // |candidate_node| that is the final local consumer of another live operand in

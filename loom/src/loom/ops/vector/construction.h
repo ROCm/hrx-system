@@ -37,8 +37,9 @@ iree_status_t loom_vector_normalize_coordinates(loom_op_t* op,
                                                 loom_rewriter_t* rewriter,
                                                 bool* out_changed);
 
-// Folds extract/insert/slice through their direct structural producers without
-// querying facts. Suitable both for observing rewrites and unpublished batches.
+// Folds extract/insert/slice and flattening bitcasts through their direct
+// structural producers without querying facts. Suitable both for observing
+// rewrites and unpublished batches.
 iree_status_t loom_vector_project_structure(loom_op_t* op,
                                             loom_rewriter_t* rewriter,
                                             bool* out_changed);

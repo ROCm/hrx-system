@@ -896,7 +896,7 @@ static void loom_low_schedule_initialize_source_range_ready_frontier(
               &pressure_state->unlocks.frontier, node_index);
       if (group_index != LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_NONE) {
         loom_low_schedule_pressure_publish_unlock_consumer(
-            state, pressure_state, group_index);
+            state, pressure_state, ready_policy, group_index);
       }
     }
     if (indegrees[node_index] == 0) {
@@ -1514,7 +1514,7 @@ static iree_status_t loom_low_schedule_run_list_scheduler(
           if (remaining_group != LOOM_LOW_SCHEDULE_DEPENDENCY_GROUP_NONE &&
               consumer_node >= range_start && consumer_node < range_end) {
             loom_low_schedule_pressure_publish_unlock_consumer(
-                state, &pressure_state, remaining_group);
+                state, &pressure_state, &ready_policy, remaining_group);
           }
         }
         uint32_t consumer_ready_issue_cycle =

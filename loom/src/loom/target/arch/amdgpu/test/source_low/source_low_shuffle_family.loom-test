@@ -9,13 +9,10 @@ func.def target(@target) @i1_complete_mask_groups(%values: vector<3xi1>) -> (vec
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i1_complete_mask_groups(%values: reg<amdgpu.sgpr x6>) -> (reg<amdgpu.sgpr x6>) asm {
-  %5 = slice %values[4] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr>
-  %6 = slice %values[5] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr>
-  %7 = slice %values[0] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr>
-  %8 = slice %values[1] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr>
-  %9 = slice %values[2] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr>
-  %10 = slice %values[3] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr>
-  %result = concat(%5, %6, %7, %8, %9, %10) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x6>
+  %5 = slice %values[4] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
+  %6 = slice %values[0] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
+  %7 = slice %values[2] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr x2>
+  %result = concat(%5, %6, %7) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr x2>) -> reg<amdgpu.sgpr x6>
   return %result
 }
 
@@ -30,13 +27,10 @@ func.def target(@target) @i64_complete_register_pairs(%values: vector<3xi64>) ->
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i64_complete_register_pairs(%values: reg<amdgpu.vgpr x6>) -> (reg<amdgpu.vgpr x6>) asm {
-  %5 = slice %values[4] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
-  %6 = slice %values[5] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
-  %7 = slice %values[0] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
-  %8 = slice %values[1] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
-  %9 = slice %values[2] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
-  %10 = slice %values[3] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
-  %result = concat(%5, %6, %7, %8, %9, %10) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x6>
+  %5 = slice %values[4] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr x2>
+  %6 = slice %values[0] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr x2>
+  %7 = slice %values[2] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr x2>
+  %result = concat(%5, %6, %7) : (reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>, reg<amdgpu.vgpr x2>) -> reg<amdgpu.vgpr x6>
   return %result
 }
 

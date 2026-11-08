@@ -2109,6 +2109,9 @@ static iree_status_t loom_vector_canonicalize_bitcast(loom_op_t* op,
   }
 
   loom_op_t* input_def = loom_rewriter_value_defining_op(rewriter, input);
+  if (input_def && loom_vector_from_elements_isa(input_def)) {
+    return loom_vector_project_structure(op, rewriter, out_changed);
+  }
   if (!input_def || !loom_vector_bitcast_isa(input_def)) {
     return iree_ok_status();
   }

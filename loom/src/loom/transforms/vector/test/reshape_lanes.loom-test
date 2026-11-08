@@ -301,3 +301,30 @@ func.def @static_shape(%values: vector<2x2xi64>) -> (f64) {
   %result = scalar.bitcast %4 : i64 to f64
   func.return %result : f64
 }
+
+// ====
+
+// Reference legalization and canonicalization agree on the constructor's
+// shape. Shared consumers preserve the original tuple and the permuted lanes.
+// RUN: pass canonicalize,target-legalize{mode=eager,policy=reference-only},canonicalize,dce
+
+test.target<low_core> @target
+
+func.def target(@target) @reshaped_shared_predicates(%first: i1, %second: i1, %third: i1, %fourth: i1) -> (vector<2x2xi1>, vector<4xi1>) {
+  %matrix = vector.from_elements %first, %second, %third, %fourth : vector<2x2xi1>
+  %transposed = vector.transpose<[1, 0]> %matrix : vector<2x2xi1> -> vector<2x2xi1>
+  %flat = vector.bitcast %transposed : vector<2x2xi1> to vector<4xi1>
+  func.return %matrix, %flat : vector<2x2xi1>, vector<4xi1>
+}
+
+// ----
+test.target<low_core> @target
+
+func.def target(@target) @reshaped_shared_predicates(%first: i1, %second: i1, %third: i1, %fourth: i1) -> (vector<2x2xi1>, vector<4xi1>) {
+  %matrix = vector.from_elements %first, %second, %third, %fourth : vector<2x2xi1>
+  %10 = vector.splat %first : vector<4xi1>
+  %11 = vector.insert %third into %10[1] : i1, vector<4xi1>
+  %12 = vector.insert %second into %11[2] : i1, vector<4xi1>
+  %flat = vector.insert %fourth into %12[3] : i1, vector<4xi1>
+  func.return %matrix, %flat : vector<2x2xi1>, vector<4xi1>
+}
