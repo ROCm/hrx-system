@@ -1,5 +1,6 @@
-// Text-owned projector ABI. Providers and scoped parameters share the parent card.
+type.decl import("finite", "batch") @FiniteBatch
 
+// Text-owned projector ABI. Providers and scoped parameters share the parent card.
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 
 func.decl import("prepare") @source_scope(%scope: buffer) -> (i32)
@@ -36,10 +37,10 @@ func.def public @text_image_prepare_request_v1(%state: buffer, %request: buffer)
   func.return %prepared, %units, %tag : buffer, i64, i64
 }
 
-func.decl @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer)
+func.decl @prepare_batch(%state: buffer, %tags: buffer, %batch: ptr<@FiniteBatch>) -> (i32, buffer, buffer)
 
-func.def public @text_image_prepare_batch_v1(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer) {
-  %stage, %input, %plan = func.call @prepare_batch(%state, %tags, %ranges, %packed) : (buffer, buffer, buffer, buffer) -> (i32, buffer, buffer)
+func.def public @text_image_prepare_batch_v1(%state: buffer, %tags: buffer, %batch: ptr<@FiniteBatch>) -> (i32, buffer, buffer) {
+  %stage, %input, %plan = func.call @prepare_batch(%state, %tags, %batch) : (buffer, buffer, ptr<@FiniteBatch>) -> (i32, buffer, buffer)
   func.return %stage, %input, %plan : i32, buffer, buffer
 }
 
@@ -47,5 +48,12 @@ func.decl @run(%stage: i32, %input: hal.buffer, %output: hal.buffer)
 
 func.def public @text_image_run_v1(%stage: i32, %input: hal.buffer, %output: hal.buffer) {
   func.call @run(%stage, %input, %output) : (i32, hal.buffer, hal.buffer)
+  func.return
+}
+
+func.decl @collect_batch(%state: buffer, %batch: ptr<@FiniteBatch>)
+
+func.def public @text_image_collect_batch_v1(%state: buffer, %batch: ptr<@FiniteBatch>) {
+  func.call @collect_batch(%state, %batch) : (buffer, ptr<@FiniteBatch>)
   func.return
 }

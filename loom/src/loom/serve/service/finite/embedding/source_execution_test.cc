@@ -414,6 +414,12 @@ class DeviceResultTest : public SourceEmbeddingServiceTest {
           loom_runtime_pool_workspace(storage_owner_), ready.semaphores[i],
           ready.values[i]));
     }
+    IREE_ASSERT_OK(loom_service_finite_model_collect_batch(
+        model_, prepared_.size(), prepared_.data()));
+    for (const auto& prepared : prepared_) {
+      EXPECT_EQ(prepared.units, 0u);
+      EXPECT_NE(prepared.bytes, nullptr);
+    }
     loom_service_finite_model_complete(model_);
     ReleaseInputs();
   }
@@ -451,7 +457,7 @@ class GenerationSelectionTest : public DeviceResultTest,
                                 public ::testing::WithParamInterface<bool> {
  protected:
   void SetUp() override {
-    DeviceResultTest::SetUp();
+    ASSERT_NO_FATAL_FAILURE(DeviceResultTest::SetUp());
     if (GetParam()) {
       ASSERT_NO_FATAL_FAILURE(UseDirectPackage());
     }
@@ -586,7 +592,7 @@ INSTANTIATE_TEST_SUITE_P(CommandAndDirect, GenerationSelectionTest,
 class RequestChoiceTest : public GenerationSelectionTest {
  protected:
   void SetUp() override {
-    DeviceResultTest::SetUp();
+    ASSERT_NO_FATAL_FAILURE(DeviceResultTest::SetUp());
     if (HasFatalFailure()) {
       return;
     }

@@ -25,6 +25,7 @@
 #include "loom/runtime/program/stage_set.h"
 #include "loom/runtime/program/tokenizer_load.h"
 #include "loom/service/executables.h"
+#include "loom/service/finite/batch.h"
 #include "loomc/iree.h"
 
 struct loom_service_finite_model_t {
@@ -101,12 +102,16 @@ struct loom_service_finite_model_t {
     iree_vm_module_t* preparation;
     // Retained demand-read capability, rebound with each request's sources.
     iree_vm_module_t* parameters;
+    // Retained, reusable member view for batched source control.
+    iree_vm_module_t* batch;
     // Opaque source-owned state, retained across serialized requests.
     iree_vm_buffer_t* state;
     // Cold-resolved request preparation function.
     iree_vm_function_t prepare_request;
     // Cold-resolved cohort construction function.
     iree_vm_function_t prepare_batch;
+    // Cold-resolved successful epoch collection function.
+    iree_vm_function_t collect_batch;
     // Optional source-selected request memory forecast, resolved at cold link.
     iree_vm_function_t memory_forecast;
     // Cold-resolved device command submission function.
@@ -129,6 +134,8 @@ static void loom_service_finite_model_release_consumers(
   model->control.preparation = NULL;
   iree_vm_module_release(model->control.parameters);
   model->control.parameters = NULL;
+  iree_vm_module_release(model->control.batch);
+  model->control.batch = NULL;
   model->control.runner = NULL;
   loom_runtime_stage_table_free(model->stages.table);
   model->stages.table = NULL;
@@ -385,7 +392,7 @@ static iree_status_t loom_service_finite_create_control(
       .binding_capacity = 2,
       .stages = {model->stages.table->part_count, model->stages.table->parts},
   };
-  iree_vm_module_t* native_modules[5] = {0};
+  iree_vm_module_t* native_modules[6] = {0};
   iree_vm_buffer_t* read_only_tags = NULL;
   iree_status_t status = iree_vm_buffer_subspan(
       model->control.tags, 0, tags.data_length, IREE_VM_BUFFER_ACCESS_FLAG_READ,
@@ -429,17 +436,25 @@ static iree_status_t loom_service_finite_create_control(
     iree_vm_module_retain(model->control.parameters);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_service_finite_batch_module_create(
+        model->control.environment, model->batch_limit, host_allocator,
+        &native_modules[5]);
+    model->control.batch = native_modules[5];
+    iree_vm_module_retain(model->control.batch);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_runtime_program_link_service(
         module, loom_runtime_preparation_card(model->preparation),
         loom_runtime_preparation_component(model->preparation),
-        (iree_vm_module_span_t){native_modules, 5}, host_allocator,
-        &model->control.program);
+        (iree_vm_module_span_t){native_modules, IREE_ARRAYSIZE(native_modules)},
+        host_allocator, &model->control.program);
   }
   iree_vm_module_release(native_modules[0]);
   iree_vm_module_release(native_modules[1]);
   iree_vm_module_release(native_modules[2]);
   iree_vm_module_release(native_modules[3]);
   iree_vm_module_release(native_modules[4]);
+  iree_vm_module_release(native_modules[5]);
   IREE_RETURN_IF_ERROR(status);
   const iree_vm_signature_type_t buffer = {
       .kind = IREE_VM_SIGNATURE_TYPE_KIND_REF,
@@ -455,8 +470,11 @@ static iree_status_t loom_service_finite_create_control(
       .value.scalar = IREE_VM_SCALAR_TYPE_I64};
   const iree_vm_signature_type_t request_arguments[] = {buffer, buffer};
   const iree_vm_signature_type_t request_results[] = {buffer, i64, i64};
-  const iree_vm_signature_type_t batch_arguments[] = {buffer, buffer, buffer,
-                                                      buffer};
+  const iree_vm_signature_type_t batch = {
+      .kind = IREE_VM_SIGNATURE_TYPE_KIND_PTR,
+      .value.ref = loom_service_finite_batch_type()};
+  const iree_vm_signature_type_t batch_arguments[] = {buffer, buffer, batch};
+  const iree_vm_signature_type_t collect_arguments[] = {buffer, batch};
   const iree_vm_signature_type_t batch_results[] = {i32, buffer, buffer};
   const iree_vm_signature_type_t run_arguments[] = {i32, device_buffer,
                                                     device_buffer};
@@ -469,6 +487,10 @@ static iree_status_t loom_service_finite_create_control(
        {batch_arguments, IREE_ARRAYSIZE(batch_arguments)},
        {batch_results, IREE_ARRAYSIZE(batch_results)},
        &model->control.prepare_batch},
+      {IREE_SVL("collect_batch"),
+       {collect_arguments, IREE_ARRAYSIZE(collect_arguments)},
+       {NULL, 0},
+       &model->control.collect_batch},
       {IREE_SVL("run"),
        {run_arguments, IREE_ARRAYSIZE(run_arguments)},
        {NULL, 0},
@@ -631,8 +653,11 @@ static iree_status_t loom_service_finite_load_prepare(
       iree_hal_vm_register_types(model->control.environment, &table));
   IREE_RETURN_IF_ERROR(
       iree_hal_vm_types_resolve(table, &model->control.hal_types));
+  IREE_RETURN_IF_ERROR(
+      loom_service_finite_batch_register_types(model->control.environment));
   const iree_string_view_t roles[] = {
-      IREE_SVL("prepare_request"), IREE_SVL("prepare_batch"), IREE_SVL("run")};
+      IREE_SVL("prepare_request"), IREE_SVL("prepare_batch"),
+      IREE_SVL("collect_batch"), IREE_SVL("run")};
   const iree_string_view_t forecast =
       loom_runtime_preparation_memory_forecast(model->preparation);
   const iree_string_view_list_t additional_roots = {
@@ -1029,12 +1054,8 @@ void loom_service_finite_model_release_batch(
 
 iree_status_t loom_service_finite_model_prepare_batch(
     loom_service_finite_model_t* model, iree_host_size_t count,
-    const loom_service_prepared_request_t* requests,
+    loom_service_prepared_request_t* requests,
     const iree_host_size_t* expected_rows) {
-  iree_vm_buffer_t* ranges = NULL;
-  iree_vm_buffer_t* packed = NULL;
-  IREE_RETURN_IF_ERROR(loom_service_prepared_requests_pack(
-      count, requests, model->host_allocator, &ranges, &packed));
   loom_service_executables_capture(model->executables);
   loom_runtime_preparation_module_begin(
       model->control.preparation, model->stages.count, model->preparation,
@@ -1044,14 +1065,15 @@ iree_status_t loom_service_finite_model_prepare_batch(
                                                model->control.state),
       iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
                                                model->control.tags),
-      iree_vm_buffer_variant_from_ptr_move(&model->control.vm_types, &ranges),
-      iree_vm_buffer_variant_from_ptr_move(&model->control.vm_types, &packed)};
+      loom_service_finite_batch_begin(model->control.batch, count, requests,
+                                      false)};
   iree_vm_variant_t results[3] = {0};
   iree_vm_buffer_t* plan = NULL;
   iree_status_t status = iree_vm_invoke(
       loom_runtime_program_invocation(model->control.program),
       model->control.prepare_batch, iree_vm_variant_span_from_array(arguments),
       iree_vm_variant_span_from_array(results));
+  loom_service_finite_batch_end(model->control.batch);
   int32_t stage = 0;
   loom_runtime_preparation_t* declarations =
       loom_runtime_preparation_module_take(model->control.preparation);
@@ -1094,6 +1116,23 @@ iree_status_t loom_service_finite_model_prepare_batch(
   if (!iree_status_is_ok(status)) {
     loom_service_finite_model_release_batch(model);
   }
+  return status;
+}
+
+iree_status_t loom_service_finite_model_collect_batch(
+    loom_service_finite_model_t* model, iree_host_size_t count,
+    loom_service_prepared_request_t* requests) {
+  iree_vm_variant_t arguments[] = {
+      iree_vm_buffer_variant_from_ptr_borrowed(&model->control.vm_types,
+                                               model->control.state),
+      loom_service_finite_batch_begin(model->control.batch, count, requests,
+                                      true)};
+  iree_status_t status = iree_vm_invoke(
+      loom_runtime_program_invocation(model->control.program),
+      model->control.collect_batch, iree_vm_variant_span_from_array(arguments),
+      iree_vm_variant_span_empty());
+  loom_service_finite_batch_end(model->control.batch);
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   return status;
 }
 

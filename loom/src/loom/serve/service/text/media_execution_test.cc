@@ -99,6 +99,8 @@ class MediaExecutionTest : public SourceTextServiceTest {
 
   void RemoveProducer() {
     ASSERT_NO_FATAL_FAILURE(Wait(loom_service_finite_result_ready(result_)));
+    IREE_ASSERT_OK(loom_service_finite_model_collect_batch(
+        producer_, prepared_.size(), prepared_.data()));
     loom_service_finite_model_complete(producer_);
     IREE_ASSERT_OK(
         loom_service_finite_model_free(std::exchange(producer_, nullptr)));

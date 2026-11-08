@@ -171,11 +171,23 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "batch",
+    srcs = ["batch.c"],
+    hdrs = ["batch.h"],
+    deps = [
+        "//loom/src/loom/service:prepared_request",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
     name = "model",
     srcs = ["model.c"],
     hdrs = ["model.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":batch",
         "//loom/binding/c:loomc",
         "//loom/src/loom/runtime/device",
         "//loom/src/loom/runtime/execution",
