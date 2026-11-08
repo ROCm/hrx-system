@@ -226,7 +226,7 @@ TEST(TargetSpirvVulkaninfoTest, ImportsGpuinfoProfileWrapper) {
             "shaderBufferInt64Atomics": true,
             "shaderSharedInt64Atomics": true
           },
-          "VkPhysicalDevice16BitStorageFeatures": {
+          "VkPhysicalDeviceVulkan11Features": {
             "storageBuffer16BitAccess": true
           },
           "VkPhysicalDeviceCooperativeMatrixFeaturesKHR": {
@@ -534,6 +534,35 @@ TEST(TargetSpirvVulkaninfoTest, ImportsComputeSubgroupSizeControlFamily) {
                          control && compute ? LOOMC_TARGET_FACT_STATE_TRUE
                                             : LOOMC_TARGET_FACT_STATE_UNKNOWN,
                          control && compute ? 16 : 0);
+      }
+    }
+  }
+}
+
+TEST(TargetSpirvVulkaninfoTest, ImportsStorageFeatureStructFamily) {
+  TargetEnvironmentPtr environment = CreateSpirvTargetEnvironment();
+  for (const std::string spelling : {"Vulkan11", "16BitStorage"}) {
+    for (const std::string container : {"features", "extended_features"}) {
+      for (const std::string value : {"true", "false", "null", ""}) {
+        SCOPED_TRACE(spelling);
+        SCOPED_TRACE(container);
+        SCOPED_TRACE(value);
+        const std::string field =
+            value.empty() ? "" : "\"storageBuffer16BitAccess\":" + value;
+        const std::string json =
+            "{\"devices\":[{\"properties\":{\"apiVersion\":4206592},\"" +
+            container + "\":{\"VkPhysicalDevice" + spelling + "Features\":{" +
+            field + "}}}]}";
+        SourcePtr source = CreateJsonSource("storage.json", json.c_str());
+        TargetProfilePtr profile =
+            ImportVulkaninfoProfile(environment.get(), source.get(), nullptr);
+        const loomc_target_fact_state_t expected =
+            value == "true"    ? LOOMC_TARGET_FACT_STATE_TRUE
+            : value == "false" ? LOOMC_TARGET_FACT_STATE_FALSE
+                               : LOOMC_TARGET_FACT_STATE_UNKNOWN;
+        ExpectFeatureState(profile.get(),
+                           LOOMC_SPIRV_FEATURE_STORAGE_BUFFER_16BIT_ACCESS,
+                           expected);
       }
     }
   }
