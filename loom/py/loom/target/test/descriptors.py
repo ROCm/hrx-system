@@ -1866,6 +1866,23 @@ TEST_LOW_MOVE_FROM_PRESSURE_ALIAS32_X5_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_COMPARE_SCHEDULE_STATE_DESCRIPTOR = Descriptor(
+    key="test.compare.schedule_state",
+    mnemonic="test.compare.schedule_state",
+    semantic_tag="test.schedule_state.compare",
+    operands=(
+        replace(
+            _schedule_state_result(),
+            flags=(OperandFlag.IMPLICIT, OperandFlag.STATE_WRITE),
+        ),
+        _i32_operand("lhs"),
+        _i32_operand("rhs"),
+    ),
+    asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
+    schedule_class=_SCHEDULE_SCALAR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_ADD_SCHEDULE_STATE_DESCRIPTOR = Descriptor(
     key="test.add.schedule_state",
     mnemonic="test.add.schedule_state",
@@ -3195,6 +3212,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_PACKING_RETIRE_DESCRIPTOR,
         TEST_LOW_MOVE_TO_PRESSURE_ALIAS32_DESCRIPTOR,
         TEST_LOW_MOVE_FROM_PRESSURE_ALIAS32_X5_DESCRIPTOR,
+        TEST_LOW_COMPARE_SCHEDULE_STATE_DESCRIPTOR,
         TEST_LOW_ADD_SCHEDULE_STATE_DESCRIPTOR,
         TEST_LOW_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,
         TEST_LOW_EXPLICIT_STATE_ADD_SCHEDULE_STATE_DESCRIPTOR,

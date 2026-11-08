@@ -107,11 +107,11 @@ loom_trait_flags_t loom_low_descriptor_effective_traits(
   }
   if (loom_low_descriptor_defines_implicit_state_result(descriptor_set,
                                                         descriptor)) {
-    // Implicit state results define target-owned architectural state outside
-    // ordinary SSA identity. The low scheduler models clobbers, but generic
-    // transforms must not treat state values such as SCC as freely
-    // rematerializable SSA.
-    traits |= LOOM_TRAIT_NON_DETERMINISTIC;
+    // Each definition owns a distinct architectural-register lifetime. Its
+    // value is deterministic, but merging it with another definition would
+    // extend that lifetime through intervening clobbers. This is local register
+    // storage, not an observation of external state or a callable resource.
+    traits |= LOOM_TRAIT_UNIQUE_IDENTITY | LOOM_TRAIT_STORAGE_RELATION;
   }
   if (out_intrinsic_write_spaces) {
     *out_intrinsic_write_spaces = write_spaces;
