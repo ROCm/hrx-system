@@ -152,15 +152,15 @@ static uint32_t loom_aie2p_native_endpoint_register(
                     origin);
 }
 
-static iree_status_t loom_aie2p_native_endpoint_start(
+iree_status_t loom_aie2p_native_endpoint_start(
     loom_aie2p_native_context_t* context, loom_builder_t* builder,
-    const loom_aie2p_native_distribution_command_t* command, uint8_t packet) {
-  const loom_aie2p_native_distribution_endpoint_t* endpoint = command->endpoint;
+    const loom_aie2p_native_distribution_endpoint_t* endpoint,
+    loom_xdna_dma_direction_t direction, uint8_t packet) {
   const loom_aie2p_native_memory_layout_t* layout =
       endpoint->tile->memory_layout;
   const loom_aie2p_native_dma_sequence_t* sequence = &endpoint->sequence;
   const uint32_t address = loom_aie2p_native_endpoint_register(
-      context, endpoint, layout->directions[command->direction - 1].start,
+      context, endpoint, layout->directions[direction - 1].start,
       endpoint->engine);
   for (uint8_t i = 0; i < sequence->task_count; ++i) {
     loom_value_id_t task;
@@ -172,22 +172,30 @@ static iree_status_t loom_aie2p_native_endpoint_start(
   return iree_ok_status();
 }
 
+iree_status_t loom_aie2p_native_queue_retire(
+    loom_aie2p_native_context_t* context, loom_builder_t* builder,
+    loom_region_t* region, const loom_aie2p_native_tile_t* tile,
+    uint16_t engine, loom_xdna_dma_direction_t direction, uint8_t packet,
+    uint8_t reply) {
+  const loom_aie2p_native_queue_status_t status =
+      loom_aie2p_native_queue_status(context, tile, engine, direction);
+  const uint64_t origin =
+      (uint64_t)tile->coordinate.column << context->family->column_shift |
+      (uint64_t)tile->coordinate.row << context->family->row_shift;
+  return loom_aie2p_worker_control_wait_clear(
+      &context->code, builder, region, packet, reply,
+      (uint32_t)(status.address - origin), status.pending_mask);
+}
+
 static iree_status_t loom_aie2p_native_endpoint_retire_body(
     loom_aie2p_native_context_t* context, loom_builder_t* builder,
     loom_region_t* region,
     const loom_aie2p_native_distribution_command_t* command, uint8_t packet,
     uint8_t reply) {
   const loom_aie2p_native_distribution_endpoint_t* endpoint = command->endpoint;
-  const loom_aie2p_native_queue_status_t status =
-      loom_aie2p_native_queue_status(context, endpoint->tile, endpoint->engine,
-                                     command->direction);
-  const uint64_t origin = (uint64_t)endpoint->tile->coordinate.column
-                              << context->family->column_shift |
-                          (uint64_t)endpoint->tile->coordinate.row
-                              << context->family->row_shift;
-  return loom_aie2p_worker_control_wait_clear(
-      &context->code, builder, region, packet, reply,
-      (uint32_t)(status.address - origin), status.pending_mask);
+  return loom_aie2p_native_queue_retire(context, builder, region,
+                                        endpoint->tile, endpoint->engine,
+                                        command->direction, packet, reply);
 }
 
 static iree_status_t loom_aie2p_native_endpoint_retire(
@@ -248,8 +256,9 @@ iree_status_t loom_aie2p_native_distribution_boundary(
     const iree_host_size_t tile = command->endpoint->tile - context->tiles;
     if (before) {
       IREE_RETURN_IF_ERROR(loom_aie2p_native_endpoint_start(
-          context, &helper, command, owner->control_packets[tile]));
-    } else {
+          context, &helper, command->endpoint, command->direction,
+          owner->control_packets[tile]));
+    } else if (command->retire) {
       // All async groups in the child have retired before its return. No
       // distribution task emits tokens, so only this explicit register-read
       // response can reach the scalar stream until the next child starts.

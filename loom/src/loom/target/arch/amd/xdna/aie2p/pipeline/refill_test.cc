@@ -58,8 +58,8 @@ class Aie2pRefillTest : public ::testing::TestWithParam<loom_xdna_tile_kind_t> {
     valid_ = false;
     IREE_ASSERT_OK(loom_aie2p_native_select_sequence(
         &context_, &tile_, 0, direction, &source_, records, capacity, 128,
-        capacity == 1 ? 0 : 64, credit_interval, words_, &sequence_, &reason_,
-        &valid_));
+        capacity == 1 ? 0 : 64, credit_interval, 0, words_, &sequence_,
+        &reason_, &valid_));
   }
   void ExpectWindow(uint32_t records, uint32_t final_records, bool rewind) {
     reader_.cursor.reader.maximum_admissions = records;
@@ -168,7 +168,7 @@ TEST_P(Aie2pRefillTest, DifferentRingWindowsNeedIndependentContinuations) {
   loom_aie2p_native_channel_t second_source = {.progress = &reader_};
   IREE_ASSERT_OK(loom_aie2p_native_select_sequence(
       &context_, &second_tile, 0, LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
-      &second_source, 65539, 2, 128, 64, 1, words_, &sequence_, &reason_,
+      &second_source, 65539, 2, 128, 64, 1, 0, words_, &sequence_, &reason_,
       &valid_));
   ASSERT_TRUE(valid_);
   ASSERT_NE(worker_.refills, first);

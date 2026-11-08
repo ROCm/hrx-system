@@ -8,6 +8,7 @@
 
 #include "loom/analysis/storage_geometry.h"
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/distribution.h"
+#include "loom/target/arch/amd/xdna/aie2p/pipeline/refill.h"
 
 iree_status_t loom_aie2p_native_select_input(
     loom_aie2p_native_context_t* context,
@@ -20,10 +21,9 @@ iree_status_t loom_aie2p_native_select_input(
     return iree_ok_status();
   }
   if (plan->acquisition || !source->transport.sources_stable ||
-      plan->phase_count == 1 ||
-      realization->invocations.workers[worker].invocation->ordinal != 0) {
-    // One stable phase retains autonomous repetition. Finite child inputs
-    // require invocation-owned queue startup and retirement.
+      plan->phase_count == 1) {
+    // One stable phase retains autonomous repetition. Phased input admission
+    // belongs to an existing instruction worker.
     return iree_ok_status();
   }
   // Prefixes fit independently before the first bulk demand, even if the
@@ -57,7 +57,11 @@ iree_status_t loom_aie2p_native_select_input(
                                            (void**)&input));
   *input = (loom_aie2p_native_input_t){
       .worker = (uint32_t)worker,
+      .invocation = realization->invocations.workers[worker].invocation,
+      .controller = UINT32_MAX,
       .begin = loom_symbol_ref_null(),
+      .start = loom_symbol_ref_null(),
+      .retire = loom_symbol_ref_null(),
       .source = plan,
   };
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -113,6 +117,95 @@ static bool loom_aie2p_native_input_route(
   return true;
 }
 
+// The input proof supplies prefixes followed by a bulk phase in each source
+// lifetime. A bulk arrival proves those prefixes have left the shared queue.
+// Counting the active task, the next prefixes and window require P+2 slots.
+static uint32_t loom_aie2p_native_input_receive_window(
+    const loom_aie2p_native_context_t* context,
+    const loom_aie2p_native_input_t* input) {
+  const iree_host_size_t tail = input->source->phase_count - 1;
+  const loom_aie2p_native_input_phase_t* bulk = &input->phases[tail];
+  const loom_aie2p_native_channel_t* channel = bulk->destination;
+  for (iree_host_size_t i = 0; i < tail; ++i) {
+    if (input->phases[i].destination->pool_index != channel->pool_index) {
+      return 0;
+    }
+  }
+  if (channel->replay.record_count) {
+    // The finite retained batch coalesces into one receive task. Its prefix
+    // tasks and complete payload fit together without per-record refills.
+    const loom_xdna_dma_facts_t* dma =
+        &context->pool_tiles[channel->pool_index]->facts->dma;
+    return input->source->phase_count <= dma->task_queue_depth
+               ? (uint32_t)bulk->source->transfers
+               : 0;
+  }
+  return loom_aie2p_native_phased_window(context, channel, tail,
+                                         (uint32_t)input->source->admissions,
+                                         (uint32_t)bulk->source->transfers);
+}
+
+static iree_status_t loom_aie2p_native_input_receivers(
+    loom_aie2p_native_context_t* context,
+    const loom_pipeline_realization_t* realization,
+    loom_aie2p_native_input_t* input, iree_string_view_t* reason,
+    bool* out_valid) {
+  const uint32_t window =
+      loom_aie2p_native_input_receive_window(context, input);
+  input->shared_receiver = window != 0;
+  const iree_host_size_t tail = input->source->phase_count - 1;
+  for (iree_host_size_t i = 0; i <= tail; ++i) {
+    loom_aie2p_native_input_phase_t* phase = &input->phases[i];
+    if (phase->destination->replay.record_count &&
+        (input->source->admissions != 1 ||
+         phase->source->transfers != phase->destination->replay.record_count ||
+         phase->source->period != phase->source->transfers)) {
+      *reason =
+          IREE_SV("one complete retained input batch per source lifetime");
+      *out_valid = false;
+      return iree_ok_status();
+    }
+    const uint32_t repetitions =
+        window
+            ? (i == tail ? window : (uint32_t)phase->source->transfers)
+            : (uint32_t)(input->source->admissions * phase->source->transfers);
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channel_endpoint(
+        context, &realization->invocations, input->invocation,
+        phase->destination, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
+        repetitions, 1, 0, window && i ? &input->phases[0].receiver : NULL,
+        &phase->receiver, reason, out_valid));
+    if (!*out_valid) {
+      return iree_ok_status();
+    }
+    phase->receiver.wait_for_idle = true;
+    phase->receiver.controller_engine =
+        context->core_engines[input->controller];
+  }
+  const loom_aie2p_native_input_phase_t* bulk = &input->phases[tail];
+  const uint32_t repetitions =
+      (uint32_t)(input->source->admissions * bulk->source->transfers);
+  if (window && repetitions > window) {
+    loom_aie2p_native_refill_queue_t* queue;
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_add_refill(
+        context, context->pool_tiles[bulk->destination->pool_index],
+        bulk->receiver.engine, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
+        bulk->destination, repetitions, window, &bulk->receiver.sequence,
+        &queue));
+    if (input->source->admissions > 1) {
+      uint32_t* prefixes;
+      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+          context->pass->arena, tail, sizeof(*prefixes), (void**)&prefixes));
+      for (iree_host_size_t i = 0; i < tail; ++i) {
+        prefixes[i] = input->phases[i].receiver.sequence.tasks[0];
+      }
+      queue->prefixes = prefixes;
+      queue->prefix_count = (uint32_t)tail;
+      queue->cycle_windows = (uint32_t)bulk->source->transfers / window;
+    }
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_aie2p_native_route_input(
     loom_aie2p_native_context_t* context,
     const loom_pipeline_realization_t* realization,
@@ -147,6 +240,13 @@ iree_status_t loom_aie2p_native_route_input(
                      LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_CHANNEL_MM2S_TASK_QUEUE_START_BD_ID,
                      shim->coordinate, &engine) -
                  origin);
+  iree_string_view_t reason;
+  bool receivers_valid = false;
+  IREE_RETURN_IF_ERROR(loom_aie2p_native_input_receivers(
+      context, realization, input, &reason, &receivers_valid));
+  if (!receivers_valid) {
+    return loom_aie2p_native_reject(context, declaration, reason);
+  }
   const uint32_t canonical = *next_source;
   for (iree_host_size_t i = 0; i < input->source->phase_count; ++i) {
     loom_aie2p_native_input_phase_t* phase = &input->phases[i];
@@ -157,18 +257,6 @@ iree_status_t loom_aie2p_native_route_input(
           context, plan->transfer->request.op,
           IREE_SV("aligned phased input DMA sources"));
     }
-    iree_string_view_t reason;
-    bool valid = false;
-    IREE_RETURN_IF_ERROR(loom_aie2p_native_select_channel_endpoint(
-        context, &realization->invocations,
-        realization->invocations.workers[input->worker].invocation,
-        phase->destination, LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY,
-        (uint32_t)(input->source->admissions * plan->transfers), 1, NULL,
-        &phase->receiver, &reason, &valid));
-    if (!valid) {
-      return loom_aie2p_native_reject(context, declaration, reason);
-    }
-    phase->receiver.wait_for_idle = true;
     loom_storage_geometry_t geometry;
     if (!loom_storage_geometry_query(
             &source->facts.context, context->code.module,
@@ -188,7 +276,8 @@ iree_status_t loom_aie2p_native_route_input(
         loom_xdna_register_field_encode(
             LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD2_ENABLE_PACKET, 1) |
         loom_xdna_register_field_encode(
-            LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD2_PACKET_ID, i);
+            LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD2_PACKET_ID,
+            input->shared_receiver ? 0 : i);
     phase->descriptor = descriptor_base + *used;
     ++*used;
     const uint64_t span =
@@ -213,7 +302,8 @@ iree_status_t loom_aie2p_native_route_input(
     context->bindings[binding].access |= LOOM_AIE2P_ARRAY_BINDING_ACCESS_READ;
     IREE_RETURN_IF_ERROR(loom_aie2p_native_input_descriptor(
         context, shim, phase->descriptor, binding, offset, span, phase->words));
-    if (!loom_aie2p_native_input_route(
+    if ((!input->shared_receiver || !i) &&
+        !loom_aie2p_native_input_route(
             context, next_source, canonical, shim->coordinate,
             LOOM_XDNA_STREAM_PORT_DMA, input->input_engine,
             phase->receiver.tile->coordinate, LOOM_XDNA_STREAM_PORT_DMA,
@@ -225,15 +315,25 @@ iree_status_t loom_aie2p_native_route_input(
   }
   bool valid = false;
   IREE_RETURN_IF_ERROR(loom_aie2p_native_select_control_route(
-      context, realization, input->continuation.worker, shim, false,
-      next_source, next_controller, &valid));
+      context, realization, input->controller, shim,
+      input->invocation->ordinal != 0, next_source, next_controller, &valid));
   if (!valid) {
     return iree_ok_status();
   }
+  if (input->invocation->ordinal) {
+    for (iree_host_size_t i = 0; i < input->source->phase_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_select_control_route(
+          context, realization, input->controller,
+          input->phases[i].receiver.tile, true, next_source, next_controller,
+          &valid));
+      if (!valid) {
+        return iree_ok_status();
+      }
+    }
+  }
   loom_aie2p_native_worker_t* owner =
-      &context
-           ->workers[context->execution.workers
-                         [context->core_engines[input->continuation.worker]]];
+      &context->workers[context->execution
+                            .workers[context->core_engines[input->controller]]];
   input->control_packet = owner->control_packets[shim - context->tiles];
   *out_valid = true;
   return iree_ok_status();

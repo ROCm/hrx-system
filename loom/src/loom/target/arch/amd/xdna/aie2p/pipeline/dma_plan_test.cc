@@ -380,6 +380,51 @@ TEST_P(Aie2pDmaSequenceTest, SingleSlotDoesNotEncodeTheLogicalRecordStride) {
   }
 }
 
+TEST_P(Aie2pDmaSequenceTest, BulkSequenceReservesThePrefixTask) {
+  // A child queues the prefix and all bulk tasks before its reader starts.
+  // The bulk must fit the remaining queue, not the entire physical queue.
+  loom_xdna_dma_facts_t available = *dma();
+  --available.task_queue_depth;
+  for (auto direction : {LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM,
+                         LOOM_XDNA_DMA_DIRECTION_STREAM_TO_MEMORY}) {
+    loom_aie2p_native_dma_sequence_t sequence = {};
+    iree_string_view_t reason;
+    bool valid = false;
+    const auto words = descriptor_template();
+    const uint32_t capacity = layout() ? 2 : 1;
+    IREE_ASSERT_OK(loom_aie2p_native_build_sequence(
+        &available, layout(), first_descriptor(), bank_size() - 2, direction,
+        6144, capacity, 128, 64, 1, words.data(), &arena_, &sequence, &reason,
+        &valid));
+    ASSERT_TRUE(valid);
+    EXPECT_LE(sequence.task_count, available.task_queue_depth);
+    ExpectExecution(sequence, direction, 6144, capacity);
+  }
+}
+
+TEST_P(Aie2pDmaSequenceTest, RetainedLifetimeNeedsBothBoundaryTasks) {
+  if (!layout()) {
+    return;
+  }
+  const auto words = descriptor_template();
+  for (uint8_t available_tasks : {1, 2, 3}) {
+    loom_xdna_dma_facts_t available = *dma();
+    available.task_queue_depth = available_tasks;
+    loom_aie2p_native_dma_sequence_t sequence = {};
+    iree_string_view_t reason;
+    bool valid = false;
+    IREE_ASSERT_OK(loom_aie2p_native_build_sequence(
+        &available, layout(), first_descriptor(), bank_size() - 2,
+        LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM, 64, 1, 128, 64, 64,
+        words.data(), &arena_, &sequence, &reason, &valid));
+    EXPECT_EQ(valid, available_tasks == 3);
+    if (valid) {
+      ExpectExecution(sequence, LOOM_XDNA_DMA_DIRECTION_MEMORY_TO_STREAM, 64, 1,
+                      64);
+    }
+  }
+}
+
 TEST_P(Aie2pDmaSequenceTest, RetainedRingCreditsBracketEveryCompleteReplay) {
   if (!layout()) {
     return;

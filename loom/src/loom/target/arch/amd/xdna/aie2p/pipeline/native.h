@@ -528,7 +528,10 @@ typedef struct loom_aie2p_native_distribution_command_t {
   const loom_aie2p_native_distribution_endpoint_t* endpoint;
   // Direction of the endpoint's DMA channel.
   loom_xdna_dma_direction_t direction;
-  // Selected reuse group for this controller's status observation.
+  // This command ends the ordered lifetime on its physical endpoint queue.
+  bool retire;
+  // Selected reuse group for a terminal command's status observation; NULL for
+  // commands that only publish tasks.
   loom_aie2p_native_retirement_t* retirement;
 } loom_aie2p_native_distribution_command_t;
 
@@ -839,6 +842,21 @@ iree_status_t loom_aie2p_native_distribution_boundary(
     iree_host_size_t worker_index, const loom_pipeline_invocation_t* invocation,
     bool before);
 
+// Publishes the selected endpoint's ordered tasks after its owner initialized
+// any partial-ring iterator state.
+iree_status_t loom_aie2p_native_endpoint_start(
+    loom_aie2p_native_context_t* context, loom_builder_t* builder,
+    const loom_aie2p_native_distribution_endpoint_t* endpoint,
+    loom_xdna_dma_direction_t direction, uint8_t packet);
+
+// Observes complete native queue retirement through the selected controller's
+// exclusive scalar reply stream and leaves builder in the completion block.
+iree_status_t loom_aie2p_native_queue_retire(
+    loom_aie2p_native_context_t* context, loom_builder_t* builder,
+    loom_region_t* region, const loom_aie2p_native_tile_t* tile,
+    uint16_t engine, loom_xdna_dma_direction_t direction, uint8_t packet,
+    uint8_t reply);
+
 // Shared physical descriptor allocation for external and on-chip transport.
 uint16_t* loom_aie2p_native_descriptor_bank(loom_aie2p_native_tile_t* tile,
                                             uint8_t engine, uint16_t* out_base,
@@ -866,7 +884,8 @@ iree_status_t loom_aie2p_native_select_sequence(
     uint8_t engine, loom_xdna_dma_direction_t direction,
     const loom_aie2p_native_channel_t* progress_channel, uint32_t repetitions,
     uint32_t capacity, uint32_t byte_offset, uint32_t byte_stride,
-    uint32_t credit_interval, const uint32_t template_words[8],
+    uint32_t credit_interval, uint32_t reserved_tasks,
+    const uint32_t template_words[8],
     loom_aie2p_native_dma_sequence_t* out_sequence,
     iree_string_view_t* out_reason, bool* out_valid);
 
