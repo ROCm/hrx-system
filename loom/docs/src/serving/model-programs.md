@@ -289,7 +289,7 @@ Its control program exports:
 prepare_request(state, input) -> (request_state, units, compatibility_tag)
 prepare_batch(state, stage_tags, batch: ptr<finite.batch>)
     -> (stage_index, upload_payload, result_plan)
-run(stage_index, input_buffer, output_buffer)
+run(state, stage_index, input_buffer, output_buffer, batch: ptr<finite.batch>)
 collect_batch(state, batch: ptr<finite.batch>)
 ```
 
@@ -310,6 +310,9 @@ preparation or collection call:
 | `batch_count(batch) -> i64` | Number of selected members. |
 | `batch_state(batch, ordinal) -> buffer` | Retained request state at its original cohort ordinal. |
 | `batch_pack(batch) -> (ranges, packed)` | Explicitly copy states into an upload directory and payload. |
+| `batch_origin(batch, ordinal) -> i64` | Reserved cohort origin in source-defined storage units. |
+| `batch_buffer(batch, ordinal, root) -> hal.buffer` | Stable device root whose capture protects the cohort until queue retirement. Submission only. |
+| `batch_release(batch, ordinal)` | Relinquish a completed cohort's storage during collection while its logical request continues. |
 | `batch_offer(batch, ordinal, units, tag)` | Publish the next work offer during successful collection. Zero units finishes the request. |
 | `batch_finish(batch)` | Finish every member of a one-shot cohort during collection. |
 
@@ -323,9 +326,11 @@ Batch preparation selects a stage and maps physical output back to requests.
 After the accepted device frontier succeeds, `collect_batch` commits progress
 and publishes each member's next offer. It never runs for failed readiness.
 Unfinished members rejoin behind new arrivals, so compatible late requests can
-join the next epoch. Each member publishes either no rows or its complete
-result; collection must declare exactly the members with published rows
-finished. Empty output alone does not indicate completion. A one-shot source
+join the next epoch. Each member can publish an ordered prefix of its remaining
+result rows. Collection finishes a member exactly when that prefix exhausts its
+remaining rows. Earlier rows retain their independent output storage while the
+source releases and reuses numerical cohort scratch. Empty output alone does
+not indicate completion. A one-shot source
 calls `finite.batch_finish` from collection and uses this same lifecycle.
 
 Request-state buffers are host control storage. Device intermediates need an
@@ -351,9 +356,11 @@ nor image-to-text composition requires downloading hidden features to the host.
 
 The result plan describes physical output bytes separately from the live result
 prefix, then each request's rows and each row's offset/width. Results retain
-their device storage independently of the producing model. Device consumers
-import the producer's readiness and read those rows without a host roundtrip.
-HTTP consumers explicitly download a compact snapshot for encoding; device
+their device storage independently of the producing model. A logical request
+spanning cohorts keeps its rows in the original buffers and publishes one final
+result in input order. Device consumers import the producer's readiness and read
+those rows without a consolidation copy or host roundtrip. HTTP consumers
+explicitly download and retain compact snapshots until final encoding; device
 padding and activation storage need not be downloaded. Projection and
 normalization happen in the numerical program. Decision encoding similarly
 consumes final probabilities, not hidden activations.

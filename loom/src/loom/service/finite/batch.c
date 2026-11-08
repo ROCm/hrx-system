@@ -76,9 +76,9 @@ iree_status_t loom_service_finite_batch_end(iree_vm_module_t* base,
   if (module->result) {
     for (iree_host_size_t i = 0; i < module->count && iree_status_is_ok(status);
          ++i) {
-      const bool published =
-          loom_service_finite_result_row_count(module->result, i) != 0;
-      if (published != (module->requests[i].units == 0)) {
+      const bool complete =
+          loom_service_finite_result_completes_request(module->result, i);
+      if (complete != (module->requests[i].units == 0)) {
         status = iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,
             "finite completion must agree with published result rows");

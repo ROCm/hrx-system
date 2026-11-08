@@ -67,7 +67,7 @@ its cohort from compatible requests already waiting. It never delays a cohort
 to collect hypothetical arrivals.
 
 The batch capability exposes retained request states in stable original order.
-`finite.pack` explicitly constructs LE i64 `[offset, length]` pairs and
+`finite.batch_pack` explicitly constructs LE i64 `[offset, length]` pairs and
 concatenated bytes when the source wants a packed upload. Preparation also
 receives stage tags from cold declarations, so stage selection stays in source.
 A denied parameter admission retains the prepared cohort without repeating
@@ -81,18 +81,24 @@ range and retains it across epochs. Capacity-blocked arrivals remain pending
 while admitted requests continue; an empty selection waits for capacity or new
 arrivals instead of running empty epochs.
 
-`finite.origin(batch, ordinal)` gives the reserved origin. Source owns byte
-strides and native request metadata. During submission, `finite.buffer` returns
+`finite.batch_origin(batch, ordinal)` gives the reserved origin. Source owns byte
+strides and native request metadata. During submission, `finite.batch_buffer` returns
 the corresponding stable root with a capture that protects the interval until
-actual queue retirement. Successful collection can call `finite.release` to
+actual queue retirement. Successful collection can call `finite.batch_release` to
 relinquish a completed cohort while its logical request continues. Cancellation
 uses the same lifetime boundary. Neither operation returns capacity while an
 accepted buffer capture remains alive.
 
-Collection updates the next-work offer with `finite.offer`, or completes all
-selected members with `finite.finish`. A positive offer requeues the request;
+Collection updates the next-work offer with `finite.batch_offer`, or completes all
+selected members with `finite.batch_finish`. A positive offer requeues the request;
 zero completes it. Cold `prepare.feedback` declarations provide completed
 device replies to collection, so native progress can drive continuation.
+Each epoch may publish an ordered prefix of the request's remaining result
+rows. A zero offer requires all remaining rows, and a positive offer requires
+at least one row still outstanding. The service retains completed rows across
+cohorts, so source can release numerical scratch without losing earlier output.
+Device consumers receive one final result referencing those original buffers;
+HTTP consumers encode retained snapshots in input order after the final epoch.
 
 During `prepare_batch`, the same `prepare` capability can declare additional
 command/direct stages and bind their configuration or workspace limit. Its

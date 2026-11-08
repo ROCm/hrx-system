@@ -124,6 +124,7 @@ loom_cc_library(
     hdrs = ["service.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":accumulation",
         "//loom/src/loom/runtime:service",
         "//loom/src/loom/runtime:wake",
         "//loom/src/loom/runtime/execution",
@@ -170,6 +171,17 @@ loom_cc_library(
         "//loom/src/loom/service/finite:protocol",
         "//loom/src/loom/service/finite:service",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "accumulation",
+    srcs = ["accumulation.c"],
+    hdrs = ["accumulation.h"],
+    deps = [
+        ":result",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
     ],
 )
 

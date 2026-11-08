@@ -26,9 +26,10 @@ typedef struct loom_service_finite_result_t loom_service_finite_result_t;
 // header is [physical output bytes, result bytes, request count, row count],
 // followed by [first row, row count, input tokens] per request, then
 // [byte offset, F32 count] per row. Rows lie within the result prefix of
-// output. Each request has either zero published rows or its complete protocol
-// result, given by expected_rows. Zero rows permit nonterminal progress and do
-// not indicate completion; only source collection determines that. A newly
+// output. Each request publishes an ordered prefix of its remaining protocol
+// rows, given by expected_rows. Zero rows permit nonterminal progress. The
+// checked result retains whether each prefix exhausts those remaining rows;
+// source collection must agree with that completion fact. A newly
 // created result has no device storage until the producer calls bind.
 // Copying separates retained rows from source buffers reused by a later
 // invocation.
@@ -37,6 +38,17 @@ iree_status_t loom_service_finite_result_create(
     iree_host_size_t result_capacity, iree_host_size_t request_count,
     const iree_host_size_t* expected_rows, iree_allocator_t host_allocator,
     loom_service_finite_result_t** out_result);
+
+// Creates one logical request's immutable result from independently owned rows.
+// The caller establishes that frontier covers every row: they come from earlier
+// epochs on its execution timeline. Retains the row buffers and execution;
+// neither the model nor any intermediate result remains borrowed. This copies
+// metadata only. Device consumers use the original buffers, while an explicit
+// host snapshot gathers their bytes directly into the final host allocation.
+iree_status_t loom_service_finite_result_create_rows(
+    const loom_service_finite_result_t* frontier, iree_host_size_t row_count,
+    const iree_hal_buffer_ref_t* rows, uint64_t input_tokens,
+    iree_allocator_t host_allocator, loom_service_finite_result_t** out_result);
 
 // Captures the accepted producer frontier and retains the exact output view,
 // including its offset and storage-release obligations. The caller supplies
@@ -58,7 +70,8 @@ void loom_service_finite_result_retain(loom_service_finite_result_t* result);
 // in this layer.
 void loom_service_finite_result_release(loom_service_finite_result_t* result);
 
-// Source-declared output extent, including padding, not allocator overhead.
+// Source output extent including padding, or compact bytes for gathered rows.
+// Allocator overhead is excluded.
 iree_host_size_t loom_service_finite_result_output_length(
     const loom_service_finite_result_t* result);
 
@@ -76,6 +89,9 @@ loom_runtime_execution_frontier_t loom_service_finite_result_ready(
 // Number of published rows; zero is an unpublished result, not completion.
 iree_host_size_t loom_service_finite_result_row_count(
     const loom_service_finite_result_t* result, iree_host_size_t request);
+// Source-boundary fact: this epoch exhausts the supplied remaining row count.
+bool loom_service_finite_result_completes_request(
+    const loom_service_finite_result_t* result, iree_host_size_t request);
 uint64_t loom_service_finite_result_input_tokens(
     const loom_service_finite_result_t* result, iree_host_size_t request);
 iree_hal_buffer_ref_t loom_service_finite_result_row(
@@ -87,7 +103,7 @@ iree_hal_buffer_ref_t loom_service_finite_result_row(
 typedef struct loom_service_finite_snapshot_t loom_service_finite_snapshot_t;
 
 // Copies checked row metadata, allocates exact host result storage, and submits
-// one download on the producer's feedback branch. Called by the serialized
+// a download batch on the producer's feedback branch. Called by the serialized
 // owner immediately after submission when host output is required. Queue
 // capture protects the destination even after failed readiness or early caller
 // release. On success the caller owns the snapshot; its rows become readable
@@ -98,6 +114,9 @@ iree_status_t loom_service_finite_result_download(
     loom_service_finite_snapshot_t** out_snapshot,
     loom_runtime_execution_frontier_t* out_frontier);
 
+// Retains immutable metadata and its independent host row storage.
+void loom_service_finite_snapshot_retain(
+    loom_service_finite_snapshot_t* snapshot);
 // Releases caller ownership, independently of any accepted download capture.
 // NULL is accepted. Row borrowers must have retired first.
 void loom_service_finite_snapshot_release(

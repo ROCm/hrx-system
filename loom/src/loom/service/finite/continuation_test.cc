@@ -645,30 +645,36 @@ class FiniteContinuation : public ::testing::Test {
     iree_string_builder_deinitialize(&body);
     ASSERT_NE(calls_[index], nullptr);
   }
-  float Read(size_t index) {
-    loom_service_finite_result_t* result = nullptr;
-    size_t ordinal = 0, rows = 0;
+  std::vector<float> ReadRows(size_t index) {
     const auto* output = loom_service_finite_call_output(calls_[index]);
     EXPECT_NE(output, nullptr);
     if (!output) {
-      return 0;
+      return {};
     }
-    result = output->result;
-    ordinal = output->request_index;
-    rows = output->row_count;
-    EXPECT_EQ(rows, 1u);
     loom_service_finite_snapshot_t* snapshot = nullptr;
     loom_runtime_execution_frontier_t frontier = {};
-    IREE_EXPECT_OK(
-        loom_service_finite_result_download(result, &snapshot, &frontier));
+    IREE_EXPECT_OK(loom_service_finite_result_download(output->result,
+                                                       &snapshot, &frontier));
+    if (!snapshot) {
+      return {};
+    }
     IREE_EXPECT_OK(iree_hal_semaphore_list_wait(
         {2, frontier.semaphores, frontier.values}, iree_infinite_timeout(),
         IREE_ASYNC_WAIT_FLAG_NONE));
-    const auto bytes = loom_service_finite_snapshot_row(snapshot, ordinal, 0);
-    float value = 0;
-    std::memcpy(&value, bytes.data, 4);
+    std::vector<float> values;
+    for (size_t i = 0; i < output->row_count; ++i) {
+      const auto bytes =
+          loom_service_finite_snapshot_row(snapshot, output->request_index, i);
+      EXPECT_EQ(bytes.data_length, sizeof(float));
+      values.push_back(iree_unaligned_load_le_f32(bytes.data));
+    }
     loom_service_finite_snapshot_release(snapshot);
-    return value;
+    return values;
+  }
+  float Read(size_t index) {
+    const auto values = ReadRows(index);
+    EXPECT_EQ(values.size(), 1u);
+    return values.empty() ? 0 : values[0];
   }
   // Wake publication for the fixture owner, without polling sleeps.
   iree_notification_t notification_ = {};
@@ -802,8 +808,74 @@ TEST_F(FiniteContinuation, MixedJsonAndDeviceWithSourceRejection) {
   EXPECT_EQ(source_.released, 2u);
 }
 
+TEST_F(FiniteContinuation, LogicalRowsSurviveCohortsCancellationAndRemoval) {
+  Open(0, R"({"model":"sum","input":[[1,2],[3,4],[5,6],[7,8]]})");
+  ASSERT_NO_FATAL_FAILURE(Drain([&] { return source_.submissions == 1; }));
+  EXPECT_EQ(loom_service_finite_call_output(calls_[0]), nullptr);
+  Open(2, R"({"model":"sum","input":[[40,41],[42,43],[44,45]]})",
+       LOOM_SERVICE_FINITE_OUTPUT_JSON);
+  Open(1, R"({"model":"sum","input":[[20,21],[22,23]]})");
+  ASSERT_NO_FATAL_FAILURE(Drain([&] { return source_.submissions == 2; }));
+  EXPECT_EQ(source_.cohorts[1], (std::vector<uint32_t>{40, 20, 1}));
+  EXPECT_EQ(loom_service_finite_call_output(calls_[0]), nullptr);
+  EXPECT_EQ(loom_service_finite_call_output(calls_[1]), nullptr);
+  loom_service_finite_call_close(std::exchange(calls_[2], nullptr));
+  ASSERT_NO_FATAL_FAILURE(ReleaseGate());
+  ASSERT_NO_FATAL_FAILURE(
+      Drain([&] { return loom_service_finite_call_is_complete(calls_[1]); }));
+  EXPECT_FALSE(loom_service_finite_call_is_complete(calls_[0]));
+  ASSERT_NO_FATAL_FAILURE(
+      Drain([&] { return loom_service_finite_call_is_complete(calls_[0]); }));
+  IREE_ASSERT_OK(loom_service_finite_call_status(calls_[0]));
+  IREE_ASSERT_OK(loom_service_finite_call_status(calls_[1]));
+  EXPECT_EQ(source_.prepared, 3u);
+  EXPECT_EQ(source_.released, 3u);
+  const auto* long_output = loom_service_finite_call_output(calls_[0]);
+  ASSERT_NE(long_output, nullptr);
+  EXPECT_EQ(loom_service_finite_result_input_tokens(long_output->result,
+                                                    long_output->request_index),
+            8u);
+  const auto* short_output = loom_service_finite_call_output(calls_[1]);
+  ASSERT_NE(short_output, nullptr);
+  EXPECT_EQ(loom_service_finite_result_input_tokens(
+                short_output->result, short_output->request_index),
+            4u);
+  ASSERT_NO_FATAL_FAILURE(RemoveService());
+  IREE_ASSERT_OK(source_.Retire());
+  EXPECT_EQ(ReadRows(0), (std::vector<float>{3, 10, 21, 36}));
+  EXPECT_EQ(ReadRows(1), (std::vector<float>{41, 86}));
+}
+
+TEST_F(FiniteContinuation, LogicalRowsEncodeInOrderWithTotalUsage) {
+  ASSERT_NO_FATAL_FAILURE(ReleaseGate());
+  Open(0, R"({"model":"sum","input":[[1,2],[3,4],[5,6],[7,8]]})");
+  Open(1, R"({"model":"sum","input":[[20,21],[22,23],[24,25]],"dimensions":1})",
+       LOOM_SERVICE_FINITE_OUTPUT_JSON);
+  Open(2, R"({"model":"sum","input":[[1,2,3],[4,5]]})");
+  ASSERT_NO_FATAL_FAILURE(Drain([&] {
+    return loom_service_finite_call_is_complete(calls_[0]) &&
+           loom_service_finite_call_is_complete(calls_[1]) &&
+           loom_service_finite_call_is_complete(calls_[2]);
+  }));
+  IREE_ASSERT_OK(loom_service_finite_call_status(calls_[0]));
+  IREE_ASSERT_OK(loom_service_finite_call_status(calls_[1]));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_service_finite_call_status(calls_[2]));
+  EXPECT_EQ(ReadRows(0), (std::vector<float>{3, 10, 21, 36}));
+  const auto response = loom_service_finite_call_response(calls_[1]);
+  EXPECT_EQ(std::string(response.data, response.size),
+            R"({"object":"list","model":"sum","data":[)"
+            R"({"object":"embedding","index":0,"embedding":[41]},)"
+            R"({"object":"embedding","index":1,"embedding":[86]},)"
+            R"({"object":"embedding","index":2,"embedding":[135]}],)"
+            R"("usage":{"prompt_tokens":6,"total_tokens":6}})");
+  EXPECT_EQ(interface_.telemetry.counters->input_tokens, 14u);
+  EXPECT_EQ(interface_.telemetry.counters->completed, 2u);
+  EXPECT_EQ(interface_.telemetry.counters->rejected, 1u);
+}
+
 TEST_F(FiniteContinuation, FailedReadinessDoesNotCommitPlannedProgress) {
-  Open(0, R"({"model":"sum","input":[1,2,3,4,5,6,7,8]})");
+  Open(0, R"({"model":"sum","input":[[1,2],[3,4],[5,6],[7,8]]})");
   ASSERT_NO_FATAL_FAILURE(Drain([&] { return source_.submissions == 1; }));
   Open(1, R"({"model":"sum","input":[20,21]})");
   ASSERT_NO_FATAL_FAILURE(Drain([&] { return source_.submissions == 2; }));

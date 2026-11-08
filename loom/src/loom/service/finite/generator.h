@@ -52,7 +52,8 @@ typedef struct loom_service_finite_generator_vtable_t {
   // can be acquired. Its observer wakes the owner after each such change.
   uint64_t (*capacity_generation)(void* self);
   // CPU preparation borrows stable original ordinals until release_batch or
-  // complete. Output rows are either absent or the complete requested result.
+  // complete. expected_rows is the remaining protocol result count; an epoch
+  // can publish an ordered prefix while retaining a positive next-work offer.
   iree_status_t (*prepare_batch)(void* self, iree_host_size_t count,
                                  loom_service_prepared_request_t* work,
                                  const iree_host_size_t* expected_rows);

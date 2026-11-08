@@ -13,6 +13,7 @@
 #include "loom/runtime/host/timer.h"
 #include "loom/runtime/wake.h"
 #include "loom/service/execution_reconfiguration.h"
+#include "loom/service/finite/accumulation.h"
 #include "loom/service/finite/result.h"
 #include "loom/service/kind.h"
 #include "loom/service/telemetry/record.h"
@@ -44,6 +45,8 @@ typedef struct loom_service_finite_job_t {
   iree_status_t status;
   // Borrowed row views populated only during result encoding.
   iree_const_byte_span_t* rows;
+  // Independently retained output rows from preceding numerical cohorts.
+  loom_service_finite_accumulation_t output;
   // Owned encoded response, transferred to the consumer before job retirement.
   iree_string_builder_t response;
 } loom_service_finite_job_t;
@@ -248,6 +251,7 @@ static void loom_service_finite_job_destroy(
   iree_status_free(status);
   iree_status_free(job->status);
   iree_string_builder_deinitialize(&job->response);
+  loom_service_finite_accumulation_deinitialize(&job->output);
   iree_allocator_free(service->host_allocator, job->rows);
   iree_allocator_free(service->host_allocator, job);
   --service->count;
@@ -302,13 +306,17 @@ static iree_status_t loom_service_finite_cpu_run(void* user_data) {
       if (service->prepared[i].units || !job->encode_output) {
         continue;
       }
-      for (iree_host_size_t row = 0; row < job->request->count; ++row) {
-        job->rows[row] =
-            loom_service_finite_snapshot_row(service->snapshot, i, row);
+      const iree_const_byte_span_t* rows = job->output.host_rows;
+      if (!rows) {
+        for (iree_host_size_t row = 0; row < job->request->count; ++row) {
+          job->rows[row] =
+              loom_service_finite_snapshot_row(service->snapshot, i, row);
+        }
+        rows = job->rows;
       }
       status = job->consumer.vtable->encode(
           job->consumer.self, service->protocol, job->request, service->name,
-          job->rows,
+          rows,
           job->input_tokens +
               loom_service_finite_result_input_tokens(service->result, i),
           &job->response);
@@ -380,7 +388,7 @@ static iree_status_t loom_service_finite_cpu_run(void* user_data) {
       const iree_host_size_t index = service->prepared_count++;
       job->selected = true;
       service->prepared[index] = job->prepared;
-      service->rows[index] = job->request->count;
+      service->rows[index] = job->request->count - job->output.count;
     }
   }
   if (iree_status_is_ok(status) && service->prepared_count) {
@@ -425,20 +433,53 @@ static iree_status_t loom_service_finite_submit(
     status = loom_service_finite_result_download(result, &service->snapshot,
                                                  &frontier);
   }
+  for (iree_host_size_t i = 0;
+       i < service->cohort_count && iree_status_is_ok(status); ++i) {
+    loom_service_finite_job_t* job = service->cohort[i];
+    const iree_host_size_t rows =
+        loom_service_finite_result_row_count(result, i);
+    if (rows && (job->output.count || rows < job->request->count) &&
+        job->consumer.vtable->is_open(job->consumer.self)) {
+      const loom_service_finite_output_flags_t flags =
+          (job->consumer.vtable->publish
+               ? LOOM_SERVICE_FINITE_OUTPUT_FLAG_DEVICE
+               : 0) |
+          (job->consumer.vtable->encode ? LOOM_SERVICE_FINITE_OUTPUT_FLAG_HOST
+                                        : 0);
+      status = loom_service_finite_accumulation_append(
+          &job->output, job->request->count, flags, result, service->snapshot,
+          i, service->host_allocator);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0;
+         i < service->cohort_count && iree_status_is_ok(status); ++i) {
+      loom_service_finite_job_t* job = service->cohort[i];
+      if (loom_service_finite_result_completes_request(result, i) &&
+          job->consumer.vtable->publish &&
+          job->consumer.vtable->is_open(job->consumer.self)) {
+        if (job->output.count) {
+          loom_service_finite_result_t* combined = NULL;
+          status = loom_service_finite_accumulation_result(
+              &job->output,
+              job->input_tokens +
+                  loom_service_finite_result_input_tokens(result, i),
+              &combined);
+          if (iree_status_is_ok(status)) {
+            job->consumer.vtable->publish(job->consumer.self, combined, 0,
+                                          job->request->count);
+          }
+          loom_service_finite_result_release(combined);
+        } else {
+          job->consumer.vtable->publish(job->consumer.self, result, i,
+                                        job->request->count);
+        }
+      }
+    }
+  }
   if (iree_status_is_ok(status)) {
     status = loom_runtime_execution_await(&service->readiness, &frontier,
                                           &service->device.wait);
-  }
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
-      loom_service_finite_job_t* job = service->cohort[i];
-      if (loom_service_finite_result_row_count(result, i) &&
-          job->consumer.vtable->publish &&
-          job->consumer.vtable->is_open(job->consumer.self)) {
-        job->consumer.vtable->publish(job->consumer.self, result, i,
-                                      job->request->count);
-      }
-    }
   }
   IREE_RETURN_AND_END_ZONE_IF_ERROR(z0, status);
   service->phase = FINITE_RUNNING;
