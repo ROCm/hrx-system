@@ -45,6 +45,14 @@ def test_constant_storage_is_readable_across_storage_memory_contracts() -> None:
     }
 
 
+def _memory_roles(rule: DescriptorRule) -> tuple[str, ...]:
+    guard = next(guard for guard in rule.guards if guard.field == "role")
+    if guard.kind == GuardKind.ENUM_ATTR_EQUALS:
+        return (guard.enum_keyword,)
+    assert guard.kind == GuardKind.ENUM_ATTR_IN
+    return guard.enum_keywords
+
+
 def test_cooperative_memory_uses_logical_shapes_without_carrier_widths() -> None:
     signatures = set()
     for rule in SPIRV_LOGICAL_CORE_CONTRACT_FRAGMENT.cases:
@@ -53,12 +61,8 @@ def test_cooperative_memory_uses_logical_shapes_without_carrier_widths() -> None
             "vector.fragment.store",
         ):
             continue
-        role = next(
-            guard.enum_keyword
-            for guard in rule.guards
-            if guard.kind == GuardKind.ENUM_ATTR_EQUALS and guard.field == "role"
-        )
-        payload = "value" if role == "result" else "result"
+        operation = rule.source_op.name.removeprefix("vector.fragment.")
+        payload = "result" if operation == "load" else "value"
         payload_type = next(
             guard.type_pattern
             for guard in rule.guards
@@ -82,9 +86,11 @@ def test_cooperative_memory_uses_logical_shapes_without_carrier_widths() -> None
         )
         memory = rule.emit[-1].source_memory
         assert memory is not None
-        signatures.add(
+        assert memory.operation.value == operation
+        signatures.update(
             (
                 rule.descriptor.key.split(".")[3],
+                operation,
                 role,
                 payload_type.element,
                 rows,
@@ -92,9 +98,10 @@ def test_cooperative_memory_uses_logical_shapes_without_carrier_widths() -> None
                 "workgroup" in memory.memory_spaces,
                 rule.emit[-1].immediates["memory_layout"],
             )
+            for role in _memory_roles(rule)
         )
     expected = {
-        (scalar, role, element, rows, columns, workgroup, layout)
+        (scalar, operation, role, element, rows, columns, workgroup, layout)
         for scalar, element, rows, columns, roles in (
             ("f16", "f16", 16, 16, ("lhs", "rhs", "init", "result")),
             ("bf16", "bf16", 16, 16, ("lhs", "rhs")),
@@ -108,6 +115,7 @@ def test_cooperative_memory_uses_logical_shapes_without_carrier_widths() -> None
             ("i32", "i32", 16, 16, ("init", "result")),
             ("u32", "i32", 16, 16, ("init", "result")),
         )
+        for operation in ("load", "store")
         for role in roles
         for workgroup in (False, True)
         for layout in (0, 1)
@@ -121,11 +129,7 @@ def test_cooperative_memory_uses_the_retained_allocation_carrier() -> None:
         memory = rule.emit[-1].source_memory
         if "workgroup" not in memory.memory_spaces:
             continue
-        role = next(
-            guard.enum_keyword
-            for guard in rule.guards
-            if guard.kind == GuardKind.ENUM_ATTR_EQUALS
-        )
+        roles = _memory_roles(rule)
         carrier_guard = next(
             guard
             for guard in rule.guards
@@ -138,7 +142,8 @@ def test_cooperative_memory_uses_the_retained_allocation_carrier() -> None:
         signature = (
             rule.descriptor.key.split(".")[3],
             rule.descriptor.key.split(".")[4],
-            role,
+            memory.operation.value,
+            roles,
             carrier,
             layout,
         )
@@ -163,19 +168,20 @@ def test_cooperative_memory_uses_the_retained_allocation_carrier() -> None:
             }[carrier]
         )
     expected = {
-        (scalar, shape, role, carrier, layout)
-        for scalar, roles, carriers in (
-            ("f16", ("lhs", "rhs", "init", "result"), ("f16", "i16")),
-            ("bf16", ("lhs", "rhs"), ("bf16", "i16")),
-            ("i8", ("lhs", "rhs"), ("i8",)),
-            ("u8", ("lhs", "rhs"), ("u8", "i8")),
-            ("f32", ("init", "result"), ("f32", "i32")),
-            ("i32", ("init", "result"), ("i32",)),
-            ("u32", ("init", "result"), ("u32", "i32")),
+        (scalar, shape, operation, roles, carrier, layout)
+        for scalar, role_groups, carriers in (
+            ("f16", (("lhs",), ("rhs",), ("init", "result")), ("f16", "i16")),
+            ("bf16", (("lhs",), ("rhs",)), ("bf16", "i16")),
+            ("i8", (("lhs",), ("rhs",)), ("i8",)),
+            ("u8", (("lhs",), ("rhs",)), ("u8", "i8")),
+            ("f32", (("init", "result"),), ("f32", "i32")),
+            ("i32", (("init", "result"),), ("i32",)),
+            ("u32", (("init", "result"),), ("u32", "i32")),
         )
-        for role in roles
+        for roles in role_groups
+        for operation in ("load", "store")
         for shape in (
-            ("16x16", "16x32" if role == "lhs" else "32x16")
+            ("16x16", "16x32" if roles == ("lhs",) else "32x16")
             if scalar in ("i8", "u8")
             else ("16x16",)
         )

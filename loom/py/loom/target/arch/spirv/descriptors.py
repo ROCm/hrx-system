@@ -1452,11 +1452,10 @@ _COOPERATIVE_MATRIX_LAYOUT_IMMEDIATE = Immediate(
 
 def _cooperative_matrix_load_descriptor(
     *,
-    role: str,
     matrix_type: CooperativeMatrixType,
     memory: CooperativeMatrixMemory,
 ) -> Descriptor:
-    key = matrix_type.memory_key(role, memory)
+    key = matrix_type.memory_key("load", memory)
     feature_bits = matrix_type.feature_bits | memory.feature_bits
     pointer = (
         _ptr_workgroup_scalar_operand(memory.carrier, "ptr")
@@ -1489,7 +1488,7 @@ def _cooperative_matrix_store_descriptor(
     matrix_type: CooperativeMatrixType,
     memory: CooperativeMatrixMemory,
 ) -> Descriptor:
-    key = matrix_type.memory_key("result", memory)
+    key = matrix_type.memory_key("store", memory)
     feature_bits = matrix_type.feature_bits | memory.feature_bits
     pointer = (
         _ptr_workgroup_scalar_operand(memory.carrier, "ptr")
@@ -1600,14 +1599,15 @@ def _cooperative_matrix_descriptors() -> tuple[Descriptor, ...]:
         if operation.supports(matrix_type)
     )
     descriptors.extend(
-        _cooperative_matrix_store_descriptor(matrix_type=matrix_type, memory=memory)
-        if role == "result"
-        else _cooperative_matrix_load_descriptor(
-            role=role, matrix_type=matrix_type, memory=memory
-        )
+        descriptor
         for matrix_type in COOPERATIVE_MATRIX_TYPES
-        for role in matrix_type.source_roles
         for memory in cooperative_matrix_memory_variants(matrix_type.scalar)
+        for descriptor in (
+            _cooperative_matrix_load_descriptor(matrix_type=matrix_type, memory=memory),
+            _cooperative_matrix_store_descriptor(
+                matrix_type=matrix_type, memory=memory
+            ),
+        )
     )
     descriptors.extend(
         _cooperative_matrix_mul_add_descriptor(case=case)

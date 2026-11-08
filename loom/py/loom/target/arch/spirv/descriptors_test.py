@@ -408,10 +408,8 @@ def _cooperative_matrix_result_keys() -> list[str]:
         if operation.supports(matrix_type)
     )
     keys.extend(
-        matrix_type.memory_key(role, memory)
+        matrix_type.memory_key("load", memory)
         for matrix_type in COOPERATIVE_MATRIX_TYPES
-        for role in matrix_type.source_roles
-        if role != "result"
         for memory in cooperative_matrix_memory_variants(matrix_type.scalar)
     )
     keys.extend(
@@ -672,11 +670,11 @@ def test_workgroup_matrix_memory_needs_no_storage_buffer_features() -> None:
     )
     for matrix_type in COOPERATIVE_MATRIX_TYPES:
         scalar = matrix_type.scalar
-        for role in matrix_type.source_roles:
+        for operation in ("load", "store"):
             for memory in cooperative_matrix_memory_variants(scalar):
                 if memory.space != "workgroup":
                     continue
-                descriptor = descriptors[matrix_type.memory_key(role, memory)]
+                descriptor = descriptors[matrix_type.memory_key(operation, memory)]
                 features = descriptor.feature_mask_words[0]
                 assert features == matrix_type.feature_bits | memory.feature_bits
                 assert not features & storage_bits
@@ -702,3 +700,6 @@ def test_workgroup_matrix_memory_needs_no_storage_buffer_features() -> None:
                 )
                 assert memory_effect.memory_space == MemorySpace.WORKGROUP
                 assert memory_effect.width_bits == 0
+                assert memory_effect.kind == (
+                    EffectKind.READ if operation == "load" else EffectKind.WRITE
+                )

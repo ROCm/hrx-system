@@ -121,7 +121,7 @@ kernel.def @rejects_missing_cooperative_matrix_feature() {
   %init = vector.fragment<init> %init_data shape [%m, %n] : vector<8xf32>
   // ERROR@+1: TARGET/039 {source_contract="spirv.cooperative_matrix", matrix_constraint="spirv.cooperative_matrix.khr"}
   %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
-  // ERROR@+1: TARGET/003 {constraint_key="descriptor_available", subject_name="spirv.op_cooperative_matrix_store_khr.result.f32.16x16.subgroup.storage_buffer"}
+  // ERROR@+1: TARGET/003 {constraint_key="descriptor_available", subject_name="spirv.op_cooperative_matrix_store_khr.accumulator.f32.16x16.subgroup.storage_buffer"}
   vector.fragment.store<result> %result, %destination[0, 0] shape [%m, %n] : vector<8xf32>, view<16x16xf32>
   kernel.return
 }
@@ -218,7 +218,7 @@ low.kernel.def target<spirv.logical.core> abi_layout({signature = (buffer, f16, 
   %28 = OpUConvert.offset64.u32 %27
   %29 = OpConstant.offset64 0
   %30 = OpPtrAccessChain.storage_buffer.f32.byte_offset %aligned, %29
-  OpCooperativeMatrixStoreKHR.result.f32.16x16.subgroup.storage_buffer %30, %result, %28, 0
+  OpCooperativeMatrixStoreKHR.accumulator.f32.16x16.subgroup.storage_buffer %30, %result, %28, 0
   return
 }
 

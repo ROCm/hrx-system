@@ -60,14 +60,24 @@ COOPERATIVE_INITIALIZER_MATERIALIZER = ValueMaterializer(
 )
 
 
+def _role_guard(matrix_type: CooperativeMatrixType) -> Guard:
+    # Init and result share one native accumulator representation.
+    roles = matrix_type.source_roles
+    return (
+        Guard.enum_attr_equals("role", roles[0])
+        if len(roles) == 1
+        else Guard.enum_attr_in("role", roles)
+    )
+
+
 def _initializer_rule(
-    matrix_type: CooperativeMatrixType, role: str, *, constant: bool, schema: bool
+    matrix_type: CooperativeMatrixType, *, constant: bool, schema: bool
 ) -> DescriptorRule:
     scalar = matrix_type.scalar
     construct = logical_core_descriptor(matrix_type.constructor_key)
     descriptors = [construct]
     guards = [
-        Guard.enum_attr_equals("role", role),
+        _role_guard(matrix_type),
         Guard.value_type(
             "data",
             Vector(
@@ -163,9 +173,8 @@ def _initializer_rule(
 
 COOPERATIVE_MATRIX_INITIALIZER_RULES = (
     *(
-        _initializer_rule(matrix_type, role, constant=constant, schema=schema)
+        _initializer_rule(matrix_type, constant=constant, schema=schema)
         for matrix_type in COOPERATIVE_MATRIX_TYPES
-        for role in matrix_type.source_roles
         for schema in (
             (True,) if matrix_type.scalar.suffix.startswith("u") else (False, True)
         )
@@ -183,14 +192,15 @@ COOPERATIVE_MATRIX_INITIALIZER_RULES = (
 
 def _memory_rule(
     matrix_type: CooperativeMatrixType,
-    role: str,
+    operation: SourceMemoryOperation,
     memory: CooperativeMatrixMemory,
     leading_axis: int,
 ) -> DescriptorRule:
     scalar = memory.component
-    is_load = role != "result"
-    operation = SourceMemoryOperation.LOAD if is_load else SourceMemoryOperation.STORE
-    descriptor = logical_core_descriptor(matrix_type.memory_key(role, memory))
+    is_load = operation is SourceMemoryOperation.LOAD
+    descriptor = logical_core_descriptor(
+        matrix_type.memory_key(operation.value, memory)
+    )
     is_workgroup = memory.space == "workgroup"
     address_materializer = (
         workgroup_address_materializer(
@@ -239,7 +249,7 @@ def _memory_rule(
         else vector.vector_fragment_store,
         descriptor=descriptor,
         guards=(
-            Guard.enum_attr_equals("role", role),
+            _role_guard(matrix_type),
             Guard.value_type("view", View(scalar.source_type)),
             *storage_element_format_guards("view", scalar),
             # The opaque cooperative type owns component distribution. Source
@@ -286,9 +296,9 @@ def _memory_rule(
 
 
 COOPERATIVE_MATRIX_MEMORY_RULES = tuple(
-    _memory_rule(matrix_type, role, memory, leading_axis)
+    _memory_rule(matrix_type, operation, memory, leading_axis)
     for matrix_type in COOPERATIVE_MATRIX_TYPES
-    for role in matrix_type.source_roles
+    for operation in (SourceMemoryOperation.LOAD, SourceMemoryOperation.STORE)
     for memory in cooperative_matrix_memory_variants(matrix_type.scalar)
     for leading_axis in (0, 1)
 )

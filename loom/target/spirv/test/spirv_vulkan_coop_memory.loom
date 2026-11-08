@@ -76,7 +76,7 @@ template.def<@staged_matrix> @staged_matrix_impl(%lhs_buffer: buffer, %rhs_buffe
   %origin = index.assume %origin_id [range(%origin_id, 0, 16), multiple_of(%origin_id, 16)] : index
   %lhs = vector.fragment.load<lhs> %lhs_staged[%origin, %c0] shape [%tile_size, %tile_size] : view<32x16xf16, %row_layout> -> vector<4xf16>
   %rhs = vector.fragment.load<rhs> %rhs_staged[%origin, %c0] shape [%tile_size, %tile_size] : view<32x16xf16, %column_layout> -> vector<4xf16>
-  %init = vector.fragment.load<init> %result_staged[%origin, %c0] shape [%tile_size, %tile_size] : view<32x16xf32, %row_layout> -> vector<4xf32>
+  %init = vector.fragment.load<result> %result_staged[%origin, %c0] shape [%tile_size, %tile_size] : view<32x16xf32, %row_layout> -> vector<4xf32>
   %result = vector.mma %lhs, %rhs, %init : vector<4xf16>, vector<4xf16>, vector<4xf32>
   vector.fragment.store<result> %result, %result_staged[%origin, %c0] shape [%tile_size, %tile_size] : vector<4xf32>, view<32x16xf32, %row_layout>
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
@@ -172,9 +172,9 @@ template.def<@half_accumulator> @half_accumulator_impl(%lhs_buffer: buffer, %rhs
   %stage = buffer.alloca<workgroup> align(16) %bytes : buffer
   %layout = encoding.layout.strided [1, %size] : encoding<layout>
   %stage_view = buffer.view %stage[%base] : buffer -> view<16x16xf16, %layout>
-  vector.fragment.store<result> %result, %stage_view[0, 0] shape [%size, %size] : vector<1xf16>, view<16x16xf16, %layout>
+  vector.fragment.store<init> %result, %stage_view[0, 0] shape [%size, %size] : vector<1xf16>, view<16x16xf16, %layout>
   kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
-  %loaded = vector.fragment.load<init> %stage_view[0, 0] shape [%size, %size] : view<16x16xf16, %layout> -> vector<1xf16>
+  %loaded = vector.fragment.load<result> %stage_view[0, 0] shape [%size, %size] : view<16x16xf16, %layout> -> vector<1xf16>
   vector.fragment.store<result> %loaded, %output_view[0, 0] shape [%size, %size] : vector<1xf16>, view<16x16xf16>
   %bits_view = buffer.view %stage[%base] : buffer -> view<256xi16>
   %thread = kernel.workitem.id<x> : index
@@ -240,5 +240,61 @@ check.case @half_accumulator64_case {
   %expected = check.oracle.call<reference.matmul> {accumulator = "f64", lhs = "f16", result = "f16", rhs = "f16"} callee(@half_accumulator64) inputs(%lhs, %rhs, %init) : (tensor<16x16xf16>, tensor<16x16xf16>, tensor<16x16xf16>) -> (tensor<16x16xf16>)
   check.expect.approximate actual(%output) expected(%expected) atol(0.0) rtol(0.001) nan(different) : tensor<16x16xf16>, tensor<16x16xf16>
   check.expect.bitwise actual(%audit) expected(%output) : tensor<16x16xf16>
+  check.return
+}
+
+// A column-major shared-memory handoff changes the operand role without
+// assuming anything about either opaque per-invocation distribution.
+kernel.def target(@wave32) @operand_memory() {
+  %unit = index.constant 1 : index
+  %width = target.subgroup.size : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %bytes = index.constant 512 : offset
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %storage = buffer.alloca<workgroup> align(16) %bytes : buffer
+  %column_layout = encoding.layout.strided [1, %tile] : encoding<layout>
+  %source = buffer.view %input_aligned[%base] : buffer -> view<16x16xf16>
+  %stage = buffer.view %storage[%base] : buffer -> view<16x16xf16, %column_layout>
+  %destination = buffer.view %output_aligned[%base] : buffer -> view<16x16xf16>
+  %lhs = vector.fragment.load<lhs> %source[0, 0] shape [%tile, %tile] : view<16x16xf16> -> vector<1xf16>
+  vector.fragment.store<lhs> %lhs, %stage[0, 0] shape [%tile, %tile] : vector<1xf16>, view<16x16xf16, %column_layout>
+  kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+  %rhs = vector.fragment.load<rhs> %stage[0, 0] shape [%tile, %tile] : view<16x16xf16, %column_layout> -> vector<1xf16>
+  vector.fragment.store<rhs> %rhs, %destination[0, 0] shape [%tile, %tile] : vector<1xf16>, view<16x16xf16>
+  kernel.return
+}
+
+func.def @copy_matrix(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %source = buffer.view %input[%base] : buffer -> view<256xf16>
+  %destination = buffer.view %output[%base] : buffer -> view<256xf16>
+  scf.for %position = [%begin to %end step %step] {
+    %value = view.load %source[%position] : view<256xf16> -> f16
+    view.store %value, %destination[%position] : f16, view<256xf16>
+  }
+  func.return
+}
+
+check.scenario @operand_memory_roundtrip {
+  check.requires<hal.vulkan.feature> {feature = "cooperative_matrix_khr"}
+  check.requires<hal.vulkan.feature> {feature = "shader_float16"}
+  check.requires<hal.vulkan.feature> {feature = "storage_buffer_16bit_access"}
+  check.requires<hal.spirv.cooperative_matrix> {row = "khr.cooperative_matrix.f16.16x16x16.f32.subgroup"}
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[0] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-8.0 to 8.0) : tensor<16x16xf16>
+    %output = check.generate.fill value(19.0) : tensor<16x16xf16>
+    check.compare<@operand_memory, @copy_matrix>(%input, %output) : (tensor<16x16xf16>, tensor<16x16xf16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<16x16xf16>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16x16xf16>
+    }
+  }
   check.return
 }
