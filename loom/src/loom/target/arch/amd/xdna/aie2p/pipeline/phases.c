@@ -188,41 +188,16 @@ static iree_status_t loom_aie2p_native_endpoint_retire_body(
     const loom_aie2p_native_distribution_command_t* command, uint8_t packet,
     uint8_t reply) {
   const loom_aie2p_native_distribution_endpoint_t* endpoint = command->endpoint;
-  const loom_xdna_register_field_id_t* fields =
-      endpoint->tile->memory_layout->directions[command->direction - 1].status;
-  uint32_t mask = loom_xdna_register_field_encode(fields[0], 7);
-  for (iree_host_size_t i = 1; i < 6; ++i) {
-    mask |= loom_xdna_register_field_encode(fields[i], 1);
-  }
-  loom_aie2p_worker_builder_t* code = &context->code;
-  loom_value_id_t mask_value, zero;
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_worker_constant(code, builder, mask, &mask_value));
-  IREE_RETURN_IF_ERROR(loom_aie2p_worker_constant(code, builder, 0, &zero));
-  loom_block_t *poll = NULL, *complete = NULL;
-  IREE_RETURN_IF_ERROR(loom_region_append_block(code->module, region, &poll));
-  IREE_RETURN_IF_ERROR(
-      loom_region_append_block(code->module, region, &complete));
-  loom_op_t* branch = NULL;
-  IREE_RETURN_IF_ERROR(loom_low_br_build(builder, poll, NULL, 0,
-                                         LOOM_LOCATION_UNKNOWN, &branch));
-  loom_builder_set_block(builder, poll);
-  const uint32_t address = loom_aie2p_native_endpoint_register(
-      context, endpoint, fields[0], endpoint->engine);
-  const uint32_t word = (address & 15u) / sizeof(uint32_t);
-  loom_value_id_t status[4], pending, active;
-  IREE_RETURN_IF_ERROR(loom_aie2p_worker_control_read(
-      code, builder, packet, reply, address & ~15u, word + 1, status));
-  IREE_RETURN_IF_ERROR(
-      loom_aie2p_worker_binary(code, builder, AIE2P_CORE_DESCRIPTOR_REF_AND_I32,
-                               status[word], mask_value, &pending));
-  IREE_RETURN_IF_ERROR(loom_aie2p_worker_binary(
-      code, builder, AIE2P_CORE_DESCRIPTOR_REF_CMP_NE_I32, pending, zero,
-      &active));
-  IREE_RETURN_IF_ERROR(loom_low_cond_br_build(builder, active, poll, complete,
-                                              LOOM_LOCATION_UNKNOWN, &branch));
-  loom_builder_set_block(builder, complete);
-  return iree_ok_status();
+  const loom_aie2p_native_queue_status_t status =
+      loom_aie2p_native_queue_status(context, endpoint->tile, endpoint->engine,
+                                     command->direction);
+  const uint64_t origin = (uint64_t)endpoint->tile->coordinate.column
+                              << context->family->column_shift |
+                          (uint64_t)endpoint->tile->coordinate.row
+                              << context->family->row_shift;
+  return loom_aie2p_worker_control_wait_clear(
+      &context->code, builder, region, packet, reply,
+      (uint32_t)(status.address - origin), status.pending_mask);
 }
 
 static iree_status_t loom_aie2p_native_endpoint_retire(

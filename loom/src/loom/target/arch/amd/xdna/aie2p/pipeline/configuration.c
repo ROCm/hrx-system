@@ -661,17 +661,10 @@ static iree_status_t loom_aie2p_native_config_wait_distribution_endpoint(
   if (!endpoint->wait_for_idle) {
     return iree_ok_status();
   }
-  const loom_xdna_register_field_id_t* fields =
-      endpoint->tile->memory_layout->directions[direction - 1].status;
-  uint32_t mask = loom_xdna_register_field_encode(fields[0], 7);
-  for (iree_host_size_t i = 1; i < 6; ++i) {
-    mask |= loom_xdna_register_field_encode(fields[i], 1);
-  }
-  const uint16_t engine = endpoint->engine;
-  const uint64_t values[] = {
-      loom_xdna_register_field_address(config->context->family, fields[0],
-                                       endpoint->tile->coordinate, &engine),
-      mask, 0};
+  const loom_aie2p_native_queue_status_t status =
+      loom_aie2p_native_queue_status(config->context, endpoint->tile,
+                                     endpoint->engine, direction);
+  const uint64_t values[] = {status.address, status.pending_mask, 0};
   return loom_aie2p_native_config_op(
       config, AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WAIT_MASK32,
       values, IREE_ARRAYSIZE(values), loom_named_attr_slice_empty());
