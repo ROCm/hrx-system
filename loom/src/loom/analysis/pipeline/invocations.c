@@ -34,7 +34,7 @@ typedef struct loom_pipeline_invocation_scope_t {
   struct loom_pipeline_invocation_scope_t* next;
 } loom_pipeline_invocation_scope_t;
 
-const loom_pipeline_resource_allocation_t*
+const loom_pipeline_storage_allocation_t*
 loom_pipeline_invocation_lookup_allocation(
     const loom_pipeline_invocation_t* invocation, loom_value_id_t root) {
   iree_host_size_t begin = 0, end = invocation->allocation_count;
@@ -76,10 +76,11 @@ static iree_status_t loom_pipeline_invocations_bind_allocations(
              resources->allocations[local].root_value_id)) {
       allocations[i] = parent->allocations[imported++];
     } else {
-      const loom_pipeline_resource_allocation_t* allocation =
-          &resources->allocations[local++];
+      const loom_pipeline_storage_allocation_t* allocation =
+          &invocation->storage[local++];
       allocations[i] = (loom_pipeline_invocation_allocation_t){
-          .root_value_id = allocation->root_value_id, .allocation = allocation};
+          .root_value_id = allocation->source->root_value_id,
+          .allocation = allocation};
     }
   }
   return iree_ok_status();
@@ -118,7 +119,7 @@ iree_host_size_t loom_pipeline_invocations_channel_index(
 }
 
 static iree_status_t loom_pipeline_invocations_finish(
-    const loom_pipeline_invocation_frame_t* root, iree_arena_allocator_t* arena,
+    loom_pipeline_invocation_frame_t* root, iree_arena_allocator_t* arena,
     loom_pipeline_invocations_t* invocations) {
   const loom_pipeline_invocation_t** entries = NULL;
   loom_pipeline_invocation_worker_t* workers = NULL;
@@ -137,12 +138,23 @@ static iree_status_t loom_pipeline_invocations_finish(
   invocations->workers = workers;
   invocations->channels = channels;
   invocations->channel_order = channel_order;
-  iree_host_size_t worker_index = 0, channel_index = 0;
   for (const loom_pipeline_invocation_frame_t* frame = root; frame;
        frame = frame->ordered_next) {
-    const loom_pipeline_invocation_t* invocation = &frame->invocation;
+    entries[frame->invocation.ordinal] = &frame->invocation;
+  }
+  IREE_RETURN_IF_ERROR(loom_pipeline_lifetimes_build(invocations, arena,
+                                                     &invocations->lifetimes));
+  const loom_pipeline_storage_allocation_t** storage = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_pipeline_construction_storage_build(invocations, arena, &storage));
+  iree_host_size_t worker_index = 0, channel_index = 0;
+  for (loom_pipeline_invocation_frame_t* frame = root; frame;
+       frame = frame->ordered_next) {
+    loom_pipeline_invocation_t* invocation = &frame->invocation;
+    invocation->storage = storage[invocation->ordinal];
+    IREE_RETURN_IF_ERROR(
+        loom_pipeline_invocations_bind_allocations(invocation, arena));
     const loom_pipeline_resources_t* resources = invocation->resources;
-    entries[invocation->ordinal] = invocation;
     for (iree_host_size_t i = 0; i < resources->strand_count; ++i) {
       workers[worker_index++] = (loom_pipeline_invocation_worker_t){
           .invocation = invocation, .strand = &resources->strands[i]};
@@ -330,8 +342,6 @@ iree_status_t loom_pipeline_invocations_build(
                      .facts = root_facts,
                      .resources = root_resources},
   };
-  IREE_RETURN_IF_ERROR(
-      loom_pipeline_invocations_bind_allocations(&root->invocation, arena));
   if (!root_resources->composition_count && !root_resources->schedule_count) {
     IREE_RETURN_IF_ERROR(
         loom_pipeline_invocations_finish(root, arena, out_invocations));
@@ -414,8 +424,6 @@ iree_status_t loom_pipeline_invocations_build(
     if (!valid) {
       return iree_ok_status();
     }
-    IREE_RETURN_IF_ERROR(
-        loom_pipeline_invocations_bind_allocations(invocation, arena));
     invocation->first_worker = out_invocations->worker_count;
     invocation->ordinal = out_invocations->count++;
     out_invocations->worker_count += resources->strand_count;

@@ -458,8 +458,9 @@ static iree_status_t loom_check_test_pipeline_transport_execute(
       if (channel->allocation) {
         IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
             state.output, " pool=%u offset=%" PRIu64 " bytes=%" PRIu64 "\n",
-            channel->allocation->pool_index, channel->allocation->byte_offset,
-            channel->allocation->byte_length));
+            channel->allocation->source->pool_index,
+            channel->allocation->byte_offset,
+            channel->allocation->source->byte_length));
       } else {
         IREE_RETURN_IF_ERROR(
             iree_string_builder_append_cstring(state.output, " external\n"));

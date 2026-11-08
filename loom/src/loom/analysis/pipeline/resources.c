@@ -418,12 +418,10 @@ iree_status_t loom_pipeline_resources_build(
         .root_value_id = root_value_id,
         .pool_value_id = pool_value_id,
         .pool_index = pool_index,
+        .construction_order = resources.allocation_count,
         .byte_length = (uint64_t)byte_length,
         .byte_alignment = reference.minimum_alignment,
     };
-    IREE_RETURN_IF_ERROR(loom_source_storage_packing_reserve(
-        pools[pool_index].packing, allocation.byte_length,
-        allocation.byte_alignment, NULL, 0, &allocation.byte_offset));
     allocations[resources.allocation_count++] = allocation;
   }
   if (resources.allocation_count > 1) {

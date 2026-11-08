@@ -370,7 +370,6 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
     ASSERT_NE(backing, nullptr);
     EXPECT_EQ(backing->root_value_id, root);
     EXPECT_EQ(backing->pool_index, 0u);
-    EXPECT_EQ(backing->byte_offset, 0u);
     EXPECT_EQ(backing->byte_length, 128u);
     int64_t offset = -1;
     ASSERT_TRUE(loom_value_facts_as_exact_i64(channel->storage.base_byte_offset,
@@ -379,7 +378,7 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
   }
 
   // A child or repeated invocation has its own pool bindings but borrows the
-  // same backing's packing. Source roots repeat; physical ranges must not.
+  // same backing's packing. Discovery alone must not occupy that backing.
   const loom_pipeline_resource_pool_t repeated_pools[] = {pools[0]};
   loom_pipeline_resources_t repeated;
   IREE_ASSERT_OK(loom_pipeline_resources_build(
@@ -568,10 +567,15 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
     loom_local_value_domain_release(&selected.value_domain);
   }
   EXPECT_EQ(loom_channel_accept_channel(accept), worker_arguments[0]);
+  loom_pipeline_invocations_t repeated_invocations;
+  IREE_ASSERT_OK(loom_pipeline_invocations_build(
+      module_, function, &facts, &repeated, nullptr, 0, {}, {}, &arena_,
+      &repeated_invocations, &valid));
+  ASSERT_TRUE(valid);
   const auto* first_allocation =
-      loom_pipeline_resources_lookup_allocation(&resources, root);
-  const auto* second_allocation =
-      loom_pipeline_resources_lookup_allocation(&repeated, root);
+      loom_pipeline_invocation_lookup_allocation(invocations.entries[0], root);
+  const auto* second_allocation = loom_pipeline_invocation_lookup_allocation(
+      repeated_invocations.entries[0], root);
   ASSERT_NE(first_allocation, nullptr);
   ASSERT_NE(second_allocation, nullptr);
   EXPECT_EQ(first_allocation->byte_offset, 0u);
@@ -661,6 +665,17 @@ TEST_F(PipelineConstructionTest, MemorySelectionsShareBackingNotAllocations) {
   ASSERT_TRUE(valid);
   ASSERT_EQ(resources.allocation_count, 4u);
   ASSERT_EQ(resources.pool_binding_count, 5u);
+  EXPECT_EQ(
+      loom_source_storage_packing_requirement(pools[0].packing).byte_length,
+      0u);
+  EXPECT_EQ(
+      loom_source_storage_packing_requirement(pools[1].packing).byte_length,
+      0u);
+  loom_pipeline_invocations_t invocations;
+  IREE_ASSERT_OK(loom_pipeline_invocations_build(
+      module_, function, &facts, &resources, memories, IREE_ARRAYSIZE(memories),
+      {}, {}, &arena_, &invocations, &valid));
+  ASSERT_TRUE(valid);
   const auto* incoming =
       loom_pipeline_resources_lookup_pool(&resources, incoming_pool);
   ASSERT_NE(incoming, nullptr);
@@ -674,7 +689,11 @@ TEST_F(PipelineConstructionTest, MemorySelectionsShareBackingNotAllocations) {
         loom_pipeline_resources_lookup_allocation(&resources, roots[i]);
     ASSERT_NE(allocation, nullptr);
     EXPECT_EQ(allocation->pool_index, selection->pool_index);
-    EXPECT_EQ(allocation->byte_offset, i == 3 ? 0u : i * 64u);
+    const auto* placement = loom_pipeline_invocation_lookup_allocation(
+        invocations.entries[0], roots[i]);
+    ASSERT_NE(placement, nullptr);
+    EXPECT_EQ(placement->source, allocation);
+    EXPECT_EQ(placement->byte_offset, i == 3 ? 0u : i * 64u);
     EXPECT_EQ(allocation->byte_length, 48u);
   }
 
