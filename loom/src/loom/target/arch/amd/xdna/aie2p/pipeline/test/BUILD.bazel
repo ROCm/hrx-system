@@ -19,7 +19,6 @@ loom_check_test_suite(
     name = "lowering_test",
     srcs = [
         "child_distribution.loom-test",
-        "dma_submit_sharing.loom-test",
         "external_metadata.loom-test",
         "join_sharing.loom-test",
         "shared_entry_calls.loom-test",

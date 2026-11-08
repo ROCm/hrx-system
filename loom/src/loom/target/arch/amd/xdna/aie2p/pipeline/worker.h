@@ -13,6 +13,10 @@
 #include "loom/target/arch/amd/xdna/aie2p/descriptors/core_descriptors.h"
 #include "loom/transforms/pipeline/realization.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Typed emitter shared by the selected channel and DMA helper bodies. Helpers
 // remain ordinary Low callables and use the normal inlining and codegen path.
 typedef struct loom_aie2p_worker_builder_t {
@@ -122,5 +126,9 @@ iree_status_t loom_aie2p_worker_control_wait_clear(
     loom_aie2p_worker_builder_t* context, loom_builder_t* builder,
     loom_region_t* region, uint8_t packet_id, uint8_t reply_id,
     uint32_t register_offset, uint32_t mask);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif  // LOOM_TARGET_ARCH_AMD_XDNA_AIE2P_PIPELINE_WORKER_H_

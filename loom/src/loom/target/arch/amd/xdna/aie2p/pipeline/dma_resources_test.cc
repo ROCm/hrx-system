@@ -6,7 +6,13 @@
 
 #include "loom/target/arch/amd/xdna/aie2p/pipeline/dma_resources.h"
 
+#include <deque>
+#include <tuple>
+
+#include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
+#include "iree/testing/status_matchers.h"
+#include "loom/pass/types.h"
 
 namespace {
 
@@ -217,5 +223,317 @@ TEST_P(DmaResourcesTest, LinkedSequencesCannotBeReusedAsSingletons) {
 
 INSTANTIATE_TEST_SUITE_P(MemoryLayouts, DmaResourcesTest,
                          ::testing::Values(false, true));
+
+// Required geometry admission and optional address refinement use the actual
+// resource owner on compute and SRAM descriptor banks, in both directions.
+class DmaAddressVariantsTest
+    : public ::testing::TestWithParam<std::tuple<bool, bool>> {
+ protected:
+  struct Task {
+    // Issue operations ordered before this task's completion.
+    loom_op_t issues[5] = {};
+    // Retained source movements for this task's descriptor chain.
+    loom_kernel_async_transfer_t sources[5] = {};
+    // Explicit completion before the next task may reuse its resources.
+    loom_op_t completion = {};
+    // Caller-relative external offsets, one per chain segment.
+    loom_view_region_t external[5] = {};
+    // Physical transfers carrying immutable descriptor templates.
+    loom_aie2p_native_transfer_t transfers[5] = {};
+    // Complete chain selected by the production admission owner.
+    loom_aie2p_native_transfer_task_t task = {};
+  };
+
+  void SetUp() override {
+    iree_arena_block_pool_initialize(4096, iree_allocator_system(), &blocks_);
+    iree_arena_initialize(&blocks_, &arena_);
+    pass_.arena = &arena_;
+    context_.pass = &pass_;
+    context_.family = loom_xdna_npu2_array_family();
+    const bool memory = std::get<0>(GetParam());
+    local_.coordinate = {0, static_cast<uint8_t>(memory ? 1 : 2)};
+    local_.facts =
+        loom_xdna_array_tile_facts(context_.family, local_.coordinate);
+    local_.memory_layout =
+        memory ? &loom_aie2p_sram_memory : &loom_aie2p_compute_memory;
+    shim_.coordinate = {0, 0};
+    shim_.facts = loom_xdna_array_tile_facts(context_.family, shim_.coordinate);
+    path_.local = &local_;
+    path_.shim = &shim_;
+    path_.local_engine = memory ? 1 : 0;
+    path_.ingress = std::get<1>(GetParam());
+    path_.completion_tokens = memory ? 2 : path_.ingress ? 0 : 1;
+    worker_.execution = LOOM_AIE2P_NATIVE_EXECUTION_CORE;
+    worker_.channels.indices = &channel_index_;
+    worker_.channels.accesses = &access_;
+    worker_.channels.count = 1;
+    access_.channel = &channel_;
+    access_.window = &window_;
+    context_.channels = &channel_;
+    context_.workers = &worker_;
+    context_.core_engines = &engine_;
+    context_.execution.workers = &owner_;
+    descriptor_tail_ = &worker_.descriptors;
+    completion_tail_ = &worker_.dma_completions;
+    task_tail_ = &worker_.transfer_tasks;
+  }
+
+  void TearDown() override {
+    iree_arena_deinitialize(&arena_);
+    iree_arena_block_pool_deinitialize(&blocks_);
+  }
+
+  void AddTask(uint32_t address, uint32_t count = 1, bool local_dynamic = false,
+               bool external_dynamic = false, uint32_t binding = 0) {
+    tasks_.emplace_back();
+    auto& record = tasks_.back();
+    const uint32_t position = static_cast<uint32_t>(tasks_.size() - 1) * 8;
+    record.completion.parent_block = &block_;
+    record.completion.block_ordinal = position + count;
+    record.task.path = &path_;
+    record.task.first_transfer = record.transfers;
+    record.task.last_transfer = &record.transfers[count - 1];
+    record.task.transfer_count = count;
+    record.task.local_address_dynamic = local_dynamic;
+    record.task.shim_address_dynamic = external_dynamic;
+    for (uint32_t i = 0; i < count; ++i) {
+      record.issues[i].parent_block = &block_;
+      record.issues[i].block_ordinal = position + i;
+      record.sources[i].request.op = &record.issues[i];
+      record.external[i].begin_byte_offset.constant = address + i * 4;
+      auto& transfer = record.transfers[i];
+      transfer.source = &record.sources[i];
+      transfer.completion = &record.completion;
+      transfer.external_view = &record.external[i];
+      transfer.binding = binding;
+      transfer.local_channel = &channel_;
+      transfer.task = &record.task;
+      transfer.descriptor_ordinal = i;
+      transfer.task_next = i + 1 == count ? nullptr : &record.transfers[i + 1];
+      transfer.local_words[0] = transfer.shim_words[0] = 1;
+      transfer.local_words[local_.memory_layout->address_word] |=
+          loom_xdna_register_field_encode(local_.memory_layout->address,
+                                          address + i * 4);
+      transfer.local_words[local_.memory_layout->lock_word] |=
+          loom_xdna_register_field_encode(local_.memory_layout->locks.valid, 1);
+      transfer.shim_words[7] = loom_xdna_register_field_encode(
+          LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD7_VALID_BD, 1);
+    }
+    bool valid = false;
+    IREE_ASSERT_OK(loom_aie2p_native_select_task_descriptors(
+        &context_, &worker_, &worker_, &record.task, false, &descriptor_tail_,
+        &completion_tail_, &valid));
+    ASSERT_TRUE(valid);
+    *task_tail_ = &record.task;
+    task_tail_ = &record.task.next;
+  }
+
+  void Refine() {
+    IREE_ASSERT_OK(loom_aie2p_native_refine_transfer_addresses(&context_, 1));
+    IREE_ASSERT_OK(loom_aie2p_native_group_submissions(&context_, 1));
+  }
+
+  uint16_t Used(bool shim) {
+    uint16_t base, count;
+    return *loom_aie2p_native_descriptor_bank(
+        shim ? &shim_ : &local_, shim ? path_.shim_engine : path_.local_engine,
+        &base, &count);
+  }
+
+  // Arena retains the admitted and refined resource inventories.
+  iree_arena_block_pool_t blocks_;
+  // Compiler scratch for descriptor images and shared submission signatures.
+  iree_arena_allocator_t arena_;
+  // Production allocation and diagnostic context.
+  loom_pass_t pass_ = {};
+  // Selected physical execution and resource inventories.
+  loom_aie2p_native_context_t context_ = {};
+  // Common straight-line control scope with explicit retirement edges.
+  loom_block_t block_ = {};
+  // On-chip descriptor bank, selected from the actual family facts.
+  loom_aie2p_native_tile_t local_ = {};
+  // External descriptor bank, shared by both directions.
+  loom_aie2p_native_tile_t shim_ = {};
+  // One admitted route and engine pair shared by the ordered copies.
+  loom_aie2p_native_dma_path_t path_ = {};
+  // Resident core owning descriptors, completion credits, and submissions.
+  loom_aie2p_native_worker_t worker_ = {};
+  // Canonical physical execution owner for this worker.
+  iree_host_size_t owner_ = 0;
+  // Physical engine selected for the worker.
+  iree_host_size_t engine_ = 0;
+  // Channel inventory index used for core-local arrival selectors.
+  uint32_t channel_index_ = 0;
+  // Local channel identity whose completion credit is reused.
+  loom_aie2p_native_channel_t channel_ = {};
+  // Core-visible channel access with the admitted lock aperture.
+  loom_aie2p_native_channel_access_t access_ = {};
+  // Existing aperture for completion selectors.
+  loom_xdna_address_window_t window_ = {};
+  // Next append location in the required descriptor inventory.
+  loom_aie2p_native_dma_descriptor_t** descriptor_tail_ = nullptr;
+  // Next append location in the required completion-credit inventory.
+  loom_aie2p_native_dma_completion_t** completion_tail_ = nullptr;
+  // Next append location in the complete ordered task list.
+  loom_aie2p_native_transfer_task_t** task_tail_ = nullptr;
+  // Stable task/transfer addresses retained by the production planner.
+  std::deque<Task> tasks_;
+};
+
+TEST_P(DmaAddressVariantsTest, RequiredChainsWinBeforeOptionalFixedAddresses) {
+  for (uint32_t i = 0; i < 32; ++i) {
+    AddTask(i * 4);
+  }
+  AddTask(128, 2);
+  AddTask(4);
+  EXPECT_EQ(Used(false), 3u);
+  EXPECT_EQ(Used(true), 3u);
+  const uint16_t locks = local_.next_lock;
+  const auto* chain_local = tasks_[32].task.local_descriptor;
+  const auto* chain_shim = tasks_[32].task.shim_descriptor;
+  Refine();
+  EXPECT_EQ(Used(false), local_.facts->dma.buffer_descriptor_count /
+                             (std::get<0>(GetParam()) ? 2 : 1));
+  EXPECT_EQ(Used(true), shim_.facts->dma.buffer_descriptor_count);
+  EXPECT_EQ(local_.next_lock, locks);
+  EXPECT_EQ(tasks_[32].task.local_descriptor, chain_local);
+  EXPECT_EQ(tasks_[32].task.shim_descriptor, chain_shim);
+  EXPECT_EQ(chain_local->sequence.descriptor_count, 2u);
+  EXPECT_EQ(chain_shim->sequence.descriptor_count, 2u);
+  for (bool shim : {false, true}) {
+    const auto* first =
+        shim ? tasks_[0].task.shim_descriptor : tasks_[0].task.local_descriptor;
+    const auto* repeated = shim ? tasks_[33].task.shim_descriptor
+                                : tasks_[33].task.local_descriptor;
+    EXPECT_TRUE(first->address_dynamic);
+    EXPECT_TRUE(first->address_required);
+    EXPECT_FALSE(repeated->address_dynamic);
+    EXPECT_EQ(repeated, shim ? tasks_[1].task.shim_descriptor
+                             : tasks_[1].task.local_descriptor);
+    EXPECT_EQ(repeated->address_origin, first);
+    EXPECT_EQ(repeated->completion, first->completion);
+    EXPECT_EQ(repeated->path, first->path);
+  }
+}
+
+TEST_P(DmaAddressVariantsTest, FixedChainsRestoreTheirImmutableAddressWords) {
+  for (uint32_t i = 0; i < 4; ++i) {
+    AddTask(i * 8, 2);
+  }
+  EXPECT_TRUE(tasks_[0].task.local_descriptor->address_dynamic);
+  EXPECT_TRUE(tasks_[0].task.shim_descriptor->address_dynamic);
+  Refine();
+  EXPECT_EQ(Used(false), 8u);
+  EXPECT_EQ(Used(true), 8u);
+  for (auto& record : tasks_) {
+    for (bool shim : {false, true}) {
+      const auto* descriptor =
+          shim ? record.task.shim_descriptor : record.task.local_descriptor;
+      EXPECT_FALSE(descriptor->address_dynamic);
+      for (uint32_t i = 0; i < 2; ++i) {
+        const auto& transfer = record.transfers[i];
+        EXPECT_EQ(shim ? transfer.shim_descriptor : transfer.local_descriptor,
+                  descriptor);
+        const auto& layout = *local_.memory_layout;
+        const uint8_t chain_word = shim ? 7 : layout.chain.word;
+        for (uint8_t word = 0; word < 8; ++word) {
+          uint32_t expected =
+              shim ? transfer.shim_words[word] : transfer.local_words[word];
+          if (word == chain_word && i == 0) {
+            expected |= loom_xdna_register_field_encode(
+                shim ? LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD7_NEXT_BD
+                     : layout.chain.next,
+                descriptor->sequence.descriptor + 1);
+            expected |= loom_xdna_register_field_encode(
+                shim
+                    ? LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DMA_BD_WORD7_USE_NEXT_BD
+                    : layout.chain.enable,
+                1);
+          }
+          EXPECT_EQ(descriptor->sequence.words[i][word], expected);
+        }
+      }
+    }
+  }
+}
+
+TEST_P(DmaAddressVariantsTest, FixedVariantsShareTheExternalPatchBody) {
+  for (uint32_t i = 0; i < 4; ++i) {
+    AddTask(i * 8, 2, false, true);
+  }
+  Refine();
+  auto* group = tasks_[0].task.submit_group;
+  ASSERT_NE(group, nullptr);
+  EXPECT_EQ(group->use_count, 4u);
+  EXPECT_TRUE(group->local_queue_argument);
+  EXPECT_EQ(Used(false), 8u);
+  EXPECT_EQ(Used(true), 2u);
+  for (auto& record : tasks_) {
+    EXPECT_EQ(record.task.submit_group, group);
+    EXPECT_FALSE(record.task.local_descriptor->address_dynamic);
+    EXPECT_TRUE(record.task.shim_descriptor->address_required);
+  }
+}
+
+TEST_P(DmaAddressVariantsTest, DynamicLocalPatchesKeepTheirOwnSubmissionBody) {
+  for (uint32_t i = 0; i < 4; ++i) {
+    AddTask(i * 4, 1, false, true);
+  }
+  for (uint32_t i = 0; i < 3; ++i) {
+    AddTask(0, 1, true, true);
+  }
+  Refine();
+  auto* fixed = tasks_[0].task.submit_group;
+  auto* dynamic = tasks_[4].task.submit_group;
+  ASSERT_NE(fixed, nullptr);
+  ASSERT_NE(dynamic, nullptr);
+  EXPECT_NE(fixed, dynamic);
+  EXPECT_EQ(fixed->use_count, 4u);
+  EXPECT_EQ(dynamic->use_count, 3u);
+  EXPECT_TRUE(fixed->local_queue_argument);
+  EXPECT_FALSE(dynamic->local_queue_argument);
+  for (size_t i = 0; i < tasks_.size(); ++i) {
+    EXPECT_EQ(tasks_[i].task.submit_group, i < 4 ? fixed : dynamic);
+    EXPECT_EQ(tasks_[i].task.local_descriptor->address_dynamic, i >= 4);
+  }
+}
+
+TEST_P(DmaAddressVariantsTest, SubmissionGroupsRespectTheNativeRegisterABI) {
+  for (uint32_t i = 0; i < 3; ++i) {
+    AddTask(0, 4, true, true);
+  }
+  for (uint32_t i = 0; i < 3; ++i) {
+    AddTask(0, 5, true, true);
+  }
+  Refine();
+  // Four dynamic segments use 13 scalar arguments; five require 16, while
+  // the native ABI admits only 15. The larger tasks still have descriptors.
+  ASSERT_NE(tasks_[0].task.submit_group, nullptr);
+  EXPECT_EQ(tasks_[0].task.submit_group->use_count, 3u);
+  for (size_t i = 3; i < tasks_.size(); ++i) {
+    EXPECT_EQ(tasks_[i].task.submit_group, nullptr);
+    EXPECT_EQ(tasks_[i].task.local_descriptor->sequence.descriptor_count, 5u);
+    EXPECT_TRUE(tasks_[i].task.local_descriptor->address_dynamic);
+  }
+  EXPECT_EQ(Used(false), 9u);
+  EXPECT_EQ(Used(true), 9u);
+}
+
+TEST_P(DmaAddressVariantsTest,
+       ExternalBindingIdentityDistinguishesFixedAddresses) {
+  AddTask(0, 1, false, false, 0);
+  AddTask(0, 1, false, false, 1);
+  Refine();
+  EXPECT_EQ(tasks_[0].task.local_descriptor, tasks_[1].task.local_descriptor);
+  EXPECT_NE(tasks_[0].task.shim_descriptor, tasks_[1].task.shim_descriptor);
+  EXPECT_FALSE(tasks_[0].task.shim_descriptor->address_dynamic);
+  EXPECT_FALSE(tasks_[1].task.shim_descriptor->address_dynamic);
+  EXPECT_EQ(Used(false), 1u);
+  EXPECT_EQ(Used(true), 2u);
+}
+
+INSTANTIATE_TEST_SUITE_P(Endpoints, DmaAddressVariantsTest,
+                         ::testing::Combine(::testing::Bool(),
+                                            ::testing::Bool()));
 
 }  // namespace
