@@ -18,12 +18,41 @@ from loom.ir import BufferType, Operation
 class CxxFunctionRenderer(CxxConfigRenderer):
     """Projects ordinary Func values through parameters and return values."""
 
+    def _buffer_element(self, value_id: int, element: str = "unsigned char") -> str:
+        if self.buffer_access.is_immutable(value_id, self.buffer_projection):
+            return f"const {element}"
+        return element
+
+    def _plan_function_projections(self) -> None:
+        used_symbols = set(self.function_names)
+        for symbol, projections in self.buffer_access.projections.items():
+            for index, projection in enumerate(projections):
+                if index == 0:
+                    name = self.function_names[symbol]
+                    projected_symbol = symbol
+                else:
+                    ordinal = index
+                    projected_symbol = f"{symbol}.buffer{ordinal}"
+                    name = clean_identifier(projected_symbol, "function")
+                    while (
+                        projected_symbol in used_symbols
+                        or name in self.translation_unit_names
+                    ):
+                        ordinal += 1
+                        projected_symbol = f"{symbol}.buffer{ordinal}"
+                        name = clean_identifier(projected_symbol, "function")
+                used_symbols.add(projected_symbol)
+                self.translation_unit_names.add(name)
+                self.function_projection_names[projection] = name
+                self.function_projection_symbols[projection] = projected_symbol
+
     def _source_parameter_type(self, value_id: int) -> str:
         """Returns the complete C++ type transporting one source parameter."""
 
         value_type = self.module.values[value_id].type
         if isinstance(value_type, BufferType):
-            return f"loom::type::buffer<{self._parameter_element(value_id)}>"
+            element = self._buffer_element(value_id, self._parameter_element(value_id))
+            return f"loom::type::buffer<{element}>"
         return self.cpp_type(value_id)
 
     def _function_result_type(self, function: Operation) -> str:
@@ -43,7 +72,7 @@ class CxxFunctionRenderer(CxxConfigRenderer):
             return "void"
         if len(results) == 1:
             return self._function_result_component_type(results[0])
-        symbol = str(self._resolved(function).attr("callee"))
+        symbol = self.function_projection_symbols[self.buffer_projection]
         fields = tuple(
             (f"value{index}", self._function_result_component_type(result))
             for index, result in enumerate(results)
@@ -56,7 +85,7 @@ class CxxFunctionRenderer(CxxConfigRenderer):
         # A buffer result carries one root, independently of any adjacent byte
         # offset. A C++ pointer would introduce another offset on reimport.
         if isinstance(self.module.values[value_id].type, BufferType):
-            return "loom::type::buffer<unsigned char>"
+            return f"loom::type::buffer<{self._buffer_element(value_id)}>"
         return self.cpp_type(value_id)
 
     def _buffer_argument(self, value_id: int, element: str) -> str:
@@ -71,21 +100,40 @@ class CxxFunctionRenderer(CxxConfigRenderer):
             return expression
         return f"loom::buffer::cast<{element}>({expression})"
 
+    def _declare_loop_carrier(self, result: int, source: int) -> None:
+        if isinstance(self.module.values[result].type, BufferType):
+            element = self._buffer_element(result)
+            self._declare(
+                result,
+                self._buffer_argument(source, element),
+                expression_type=f"loom::type::buffer<{element}>",
+            )
+        else:
+            self._declare(result, self._loop_initializer(source))
+
     def _render_function_call(self, operation: Operation) -> tuple[str, ...]:
         resolved = self._resolved(operation)
         symbol = str(resolved.attr("callee"))
-        callee = self.function_names.get(symbol)
-        if callee is None:
+        if symbol not in self.function_names:
             raise CxxRenderError(
                 operation, f"called function {symbol!r} is not present in the module"
             )
+        bindings = (
+            self.buffer_projection.calls
+            if self.buffer_projection is not None
+            else self.buffer_access.calls
+        )
+        projection = bindings[id(operation)]
+        callee = self.function_projection_names[projection]
+        if callee in self.temporary_names:
+            callee = f"::{callee}"
         if operation.tied_results:
             raise CxxRenderError(
                 operation,
                 "destructive call ties have no exact C++ projection; "
                 "source references return ordinary SSA values",
             )
-        expected_buffers = self.function_buffer_elements.get(symbol)
+        expected_buffers = self.function_buffer_elements[projection]
         source_operands = self._flat_source_parameters(
             operation, list(operation.operands)
         )
@@ -93,12 +141,16 @@ class CxxFunctionRenderer(CxxConfigRenderer):
         for index, parameter in enumerate(source_operands):
             operand = parameter.value_id
             expression = self.expression(operand)
-            expected_element = (
-                expected_buffers[index]
-                if expected_buffers is not None and index < len(expected_buffers)
-                else None
-            )
+            expected_element = expected_buffers[index]
             if expected_element is not None:
+                if self.buffer_access.is_immutable(
+                    operand, self.buffer_projection
+                ) and not expected_element.startswith("const "):
+                    raise CxxRenderError(
+                        operation,
+                        "immutable buffer argument has no access-qualified "
+                        "external declaration",
+                    )
                 expression = self._buffer_argument(operand, expected_element)
             arguments_list.append(expression)
         arguments = ", ".join(arguments_list)
@@ -121,7 +173,11 @@ class CxxFunctionRenderer(CxxConfigRenderer):
                 for index, result in enumerate(source_results)
             )
             record_type = self._record_type(
-                clean_identifier(symbol, "function") + "_result", fields
+                clean_identifier(
+                    self.function_projection_symbols[projection], "function"
+                )
+                + "_result",
+                fields,
             )
             record_name = self._temporary_name("call_result")
             self.writer.line(f"{record_type} {record_name} = {call};")
@@ -148,7 +204,7 @@ class CxxFunctionRenderer(CxxConfigRenderer):
 
     def _function_attributes(self, function: Operation) -> list[str]:
         resolved = self._resolved(function)
-        symbol = str(resolved.attr("callee"))
+        symbol = self.function_projection_symbols[self.buffer_projection]
         attributes = [f'loom::symbol("{symbol}")']
         if (
             function.name == "func.decl"
@@ -203,7 +259,7 @@ class CxxFunctionRenderer(CxxConfigRenderer):
             value_type = self.module.values[argument].type
             type_name = self._source_parameter_type(argument)
             buffer_elements.append(
-                self._parameter_element(argument)
+                self._buffer_element(argument, self._parameter_element(argument))
                 if isinstance(value_type, BufferType)
                 else None
             )
@@ -213,15 +269,20 @@ class CxxFunctionRenderer(CxxConfigRenderer):
                 self.expressions[argument] = name
                 self.expression_types[argument] = type_name
 
-        symbol = str(resolved.attr("callee"))
-        self.function_buffer_elements[symbol] = tuple(buffer_elements)
+        self.function_buffer_elements[self.buffer_projection] = tuple(buffer_elements)
         visibility = resolved.attr("visibility")
+        original = str(resolved.attr("callee"))
+        primary = self.buffer_access.projections[original][0] is self.buffer_projection
         storage = (
-            "" if function.name == "func.decl" or visibility == "public" else "static "
+            ""
+            if function.name == "func.decl" or (visibility == "public" and primary)
+            else "static "
         )
         return (
             f"{storage}{self._function_result_type(function)} "
-            f"{self.function_names[symbol]}(" + ", ".join(parameters) + ")"
+            f"{self.function_projection_names[self.buffer_projection]}("
+            + ", ".join(parameters)
+            + ")"
         )
 
     def _render_function_declaration(self, function: Operation) -> None:
@@ -246,11 +307,17 @@ class CxxFunctionRenderer(CxxConfigRenderer):
 
     def _render_function_return(self, operation: Operation) -> None:
         results = self._flat_source_parameters(operation, list(operation.operands))
+        signature = self._flat_source_parameters(
+            self.buffer_projection.function,
+            list(self.buffer_projection.function.results),
+        )
         expressions = [
-            self._buffer_argument(result.value_id, "unsigned char")
+            self._buffer_argument(
+                result.value_id, self._buffer_element(formal.value_id)
+            )
             if isinstance(self.module.values[result.value_id].type, BufferType)
             else self.expression(result.value_id)
-            for result in results
+            for result, formal in zip(results, signature, strict=True)
         ]
         if not results:
             self.writer.line("return;")

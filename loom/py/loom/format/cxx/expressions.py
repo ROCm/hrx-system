@@ -19,6 +19,7 @@ from loom.format.cxx.context import (
 from loom.format.cxx.errors import CxxRenderError
 from loom.format.cxx.types import KERNEL_COORDINATE_CPP_TYPE
 from loom.ir import (
+    BufferType,
     EncodingInstance,
     Operation,
     Predicate,
@@ -1544,15 +1545,27 @@ class CxxExpressionRenderer(CxxRenderContext):
             return ("value",)
         if name == "scf.select":
             resolved = self._resolved(operation)
+            result = resolved.value_id("result")
             condition = _strip_outer_parentheses(
                 self.expression(resolved.value_id("condition"))
             )
-            expression = (
-                f"({condition} ? "
-                f"{self.expression(resolved.value_id('true_value'))} : "
-                f"{self.expression(resolved.value_id('false_value'))})"
+            if isinstance(self.module.values[result].type, BufferType):
+                element = self._buffer_element(result)
+                values = [
+                    self._buffer_argument(resolved.value_id(field), element)
+                    for field in ("true_value", "false_value")
+                ]
+                expression_type = f"loom::type::buffer<{element}>"
+            else:
+                values = [
+                    self.expression(resolved.value_id(field))
+                    for field in ("true_value", "false_value")
+                ]
+                expression_type = None
+            expression = f"({condition} ? {values[0]} : {values[1]})"
+            self._declare(
+                result, expression, expression_type=expression_type, inlineable=True
             )
-            self._declare(resolved.value_id("result"), expression, inlineable=True)
             return ()
         if name in {"scalar.assume", "index.assume"}:
             self._render_assume(operation)

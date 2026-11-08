@@ -35,9 +35,9 @@ loom-import-cxx specialized.cxx --to=bc --output=edited.loombc
 ```
 
 Without `--root`, every top-level definition must have a C++ projection so the
-tool cannot silently omit program semantics. Repeated `--root=@kernel` options
-select kernels from a mixed module and retain only their referenced target
-definitions. Selected kernels remain in module order.
+tool cannot silently omit program semantics. Repeated `--root=@symbol` options
+select callable definitions from a mixed module and retain their referenced
+helpers and target definitions. Selected definitions remain in module order.
 
 The projection reconstructs ordinary C++ expressions, mutable loop-carried
 state, views, launch contracts, target records, and Loom scheduling attributes.
@@ -71,6 +71,27 @@ identity when its C++ identifier needs a different spelling. Reimport therefore
 keeps both the external binding and calls to that declaration. Opaque signature
 types without a validated C++ carrier produce a diagnostic; they are never
 replaced with `auto`, which would change the function's type and template status.
+
+Ordinary function buffers use `loom::type::buffer<T>` to transport one storage
+root. Immutable storage retains `const` through helper arguments, returned
+roots, selections, and loop-carried values. A helper called with both immutable
+and writable storage can produce separate concrete C++ signatures. Only the
+qualifier combinations reached by calls are emitted, while public linkage
+entries retain their original externally callable signature. Multiple results
+keep each root's qualification independently:
+
+```cpp
+struct pair_result {
+  loom::type::buffer<const unsigned char> value0;
+  loom::type::buffer<unsigned char> value1;
+};
+```
+
+A result selecting between immutable and writable storage is const; the
+original writable input remains writable. These source types neither copy the
+storage nor add a pointer offset to the IR buffer value. Writes through an
+immutable result and immutable arguments to an opaque external declaration
+without a compatible access contract produce diagnostics.
 
 ## Resident pipelines and ordered phases
 
