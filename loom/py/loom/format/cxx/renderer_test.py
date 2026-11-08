@@ -1347,6 +1347,25 @@ def test_preserves_unsigned_extension_when_folding_address_constants() -> None:
     assert "loom::type::index{-1}" not in result
 
 
+@pytest.mark.parametrize("width", [8, 16])
+@pytest.mark.parametrize("signed", [False, True])
+def test_narrow_scalar_literals_retain_their_cpp_type(width: int, signed: bool) -> None:
+    extension = "extsi" if signed else "extui"
+    source = f"""func.def public @literal() -> (i32) {{
+  %value = scalar.constant 7 : i{width}
+  %extended = scalar.{extension} %value : i{width} to i32
+  func.return %extended : i32
+}}
+"""
+    result = render_module(load_module(source.encode()))
+    element = (
+        {8: "signed char", 16: "short"}[width]
+        if signed
+        else {8: "unsigned char", 16: "unsigned short"}[width]
+    )
+    assert f"static_cast<{element}>(7)" in result
+
+
 def test_preserves_unsigned_extension_of_a_signed_runtime_value() -> None:
     source = SOURCE_MODULE.replace(
         "} launch(%input: buffer, %output: buffer) {",

@@ -16,6 +16,7 @@ iree_py_library(
     name = "cxx",
     srcs = [
         "__init__.py",
+        "buffer_access.py",
         "commands.py",
         "configs.py",
         "context.py",
@@ -54,6 +55,7 @@ iree_py_library(
 iree_py_test(
     name = "cxx_test",
     srcs = [
+        "buffer_access_test.py",
         "naming_test.py",
         "printer_test.py",
         "registry_test.py",
@@ -62,6 +64,7 @@ iree_py_test(
         "//loom/py/loom/tools:pytest_style_runner.py",
     ],
     args = [
+        "loom.format.cxx.buffer_access_test",
         "loom.format.cxx.naming_test",
         "loom.format.cxx.registry_test",
         "loom.format.cxx.renderer_test",

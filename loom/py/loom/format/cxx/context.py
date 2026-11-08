@@ -17,6 +17,7 @@ from typing import Any
 
 from loom.dsl import Op, TargetLikeInterface
 from loom.fields import compute_layout, resolve_fields
+from loom.format.cxx.buffer_access import BufferAccessPlan, BufferProjection
 from loom.format.cxx.errors import CxxRenderError
 from loom.format.cxx.naming import clean_identifier
 from loom.format.cxx.printer import CxxWriter
@@ -233,6 +234,10 @@ class CxxRenderContext:
         self.signed_values = self._analyze_signed_values()
         self.types = CxxTypes(module, self.signed_values)
         self.view_access: ViewAccessPlan | None = None
+        self.buffer_access: BufferAccessPlan | None = None
+        self.buffer_projection: BufferProjection | None = None
+        self.function_projection_names: dict[BufferProjection, str] = {}
+        self.function_projection_symbols: dict[BufferProjection, str] = {}
         self.unsigned_upper_bounds: dict[int, int | None] = {}
         self.assumption_inputs = {
             operand
@@ -256,7 +261,9 @@ class CxxRenderContext:
         self.target_type_names: dict[str, str] = {}
         self.function_names: dict[str, str] = {}
         self.kernel_names: dict[str, str] = {}
-        self.function_buffer_elements: dict[str, tuple[str | None, ...]] = {}
+        self.function_buffer_elements: dict[
+            BufferProjection, tuple[str | None, ...]
+        ] = {}
         self.command_names: dict[str, str] = {}
         self.pipeline_names: dict[str, str] = {}
         self.pipeline_callables: dict[str, Operation] = {}
@@ -1044,6 +1051,11 @@ class CxxRenderContext:
                     return f"loom::type::index{{{value}}}"
                 if name == "offset":
                     return f"loom::type::offset{{{value}}}"
+                if name in {"i8", "i16"} and isinstance(value_type, ScalarType):
+                    element = self.types.scalar(
+                        literal_type, result_id in self.signed_values
+                    )
+                    return f"static_cast<{element}>({value})"
                 if name == "i64" and value >= 0:
                     return f"{value}ull"
                 if (

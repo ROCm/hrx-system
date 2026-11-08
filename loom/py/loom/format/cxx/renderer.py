@@ -12,6 +12,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import replace
 
+from loom.format.cxx.buffer_access import BufferAccessPlan
 from loom.format.cxx.context import (
     _memory_space,
     _strip_outer_parentheses,
@@ -108,6 +109,8 @@ class CxxRenderer(CxxFunctionRenderer):
 
         lhs_type = self.module.values[lhs].type
         rhs_type = self.module.values[rhs].type
+        if isinstance(lhs_type, BufferType) and isinstance(rhs_type, BufferType):
+            return self._buffer_element(lhs) == self._buffer_element(rhs)
         if repr(lhs_type) == repr(rhs_type):
             return True
         if not (
@@ -358,6 +361,10 @@ class CxxRenderer(CxxFunctionRenderer):
                 if self.view_access is not None
                 else root is not None and not self.buffer_info[root].mutable
             )
+            if not is_const and self.buffer_access.is_immutable(
+                buffer_id, self.buffer_projection
+            ):
+                raise CxxRenderError(operation, "immutable buffer storage is written")
             element = self.types.scalar(
                 result_type.element_type, result in self.view_signed
             )
@@ -691,11 +698,11 @@ class CxxRenderer(CxxFunctionRenderer):
                 and source_users
                 and all(user is operation for user in source_users)
             )
-            if can_reuse_source:
+            if can_reuse_source and self._compatible_cxx_carrier(result, source):
                 self.expressions[result] = source_expression
                 self.expression_types[result] = self.expression_type(source)
             else:
-                self._declare(result, self._loop_initializer(source))
+                self._declare_loop_carrier(result, source)
 
         attributes: list[str] = []
         unroll = resolved.value_ids("unroll_factor")
@@ -810,11 +817,22 @@ class CxxRenderer(CxxFunctionRenderer):
         self.writer.close()
 
     def _while_result_initializer(self, result: int, initial: list[int]) -> str:
-        result_type = repr(self.module.values[result].type)
+        value_type = self.module.values[result].type
+        result_type = repr(value_type)
         for source in initial:
+            if (
+                isinstance(value_type, BufferType)
+                and isinstance(self.module.values[source].type, BufferType)
+                and (
+                    self.buffer_access.is_immutable(result, self.buffer_projection)
+                    or not self.buffer_access.is_immutable(
+                        source, self.buffer_projection
+                    )
+                )
+            ):
+                return self._buffer_argument(source, self._buffer_element(result))
             if self._compatible_cxx_carrier(result, source):
                 return self._loop_initializer(source)
-        value_type = self.module.values[result].type
         if isinstance(value_type, ScalarType):
             if result_type in {"index", "offset"}:
                 return self._literal(0, result)
@@ -833,7 +851,12 @@ class CxxRenderer(CxxFunctionRenderer):
         self, targets: Sequence[int | None], sources: Sequence[int]
     ) -> None:
         assignments = [
-            (self.expression(target), self.expression(source))
+            (
+                self.expression(target),
+                self._buffer_argument(source, self._buffer_element(target))
+                if isinstance(self.module.values[target].type, BufferType)
+                else self.expression(source),
+            )
             for target, source in zip(targets, sources, strict=True)
             if target is not None and self.expression(target) != self.expression(source)
         ]
@@ -1018,7 +1041,7 @@ class CxxRenderer(CxxFunctionRenderer):
             ):
                 if index in forward_only:
                     continue
-                self._declare(result, self._loop_initializer(source))
+                self._declare_loop_carrier(result, source)
                 self.expressions[argument] = self.expression(result)
                 self.expression_types[argument] = self.expression_type(result)
             header_targets: list[int | None] = [
@@ -1031,11 +1054,19 @@ class CxxRenderer(CxxFunctionRenderer):
             ):
                 if index in forward_only:
                     continue
-                self._declare(argument, self._loop_initializer(source))
+                self._declare_loop_carrier(argument, source)
             for index, result in enumerate(results):
                 if index in forward_only:
                     continue
-                self._declare(result, self._while_result_initializer(result, initial))
+                self._declare(
+                    result,
+                    self._while_result_initializer(result, initial),
+                    expression_type=(
+                        self._function_result_component_type(result)
+                        if isinstance(self.module.values[result].type, BufferType)
+                        else None
+                    ),
+                )
             header_targets = [
                 None if index in forward_only else argument
                 for index, argument in enumerate(before.arg_ids)
@@ -1147,6 +1178,7 @@ class CxxRenderer(CxxFunctionRenderer):
             target_expression = self.expression(target)
             if (
                 definition is None
+                or isinstance(self.module.values[source].type, BufferType)
                 or self.definition_blocks.get(source) is not block
                 or self.use_counts[source] != 1
                 or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", target_expression) is None
@@ -1524,6 +1556,8 @@ class CxxRenderer(CxxFunctionRenderer):
                 "a top-level definition would be omitted from the C++ projection",
             )
         self._plan_callable_names(kernels, functions, commands, pipelines)
+        self.buffer_access = BufferAccessPlan(self.module, self._resolved)
+        self._plan_function_projections()
         self.view_access = plan_view_access(
             self.module, self._resolved, self._flat_source_parameters
         )
@@ -1534,7 +1568,11 @@ class CxxRenderer(CxxFunctionRenderer):
         for index, function in enumerate(functions):
             if index:
                 self.writer.line()
-            self._render_function_declaration(function)
+            symbol = str(self._resolved(function).attr("callee"))
+            for projection in self.buffer_access.projections[symbol]:
+                self.buffer_projection = projection
+                self._render_function_declaration(function)
+        self.buffer_projection = None
         if functions:
             self.writer.line()
         for index, pipeline in enumerate(pipelines):
@@ -1581,7 +1619,11 @@ class CxxRenderer(CxxFunctionRenderer):
             if index:
                 self.writer.line()
             if callable_operation.name == "func.def":
-                self._render_function(callable_operation)
+                symbol = str(self._resolved(callable_operation).attr("callee"))
+                for projection in self.buffer_access.projections[symbol]:
+                    self.buffer_projection = projection
+                    self._render_function(callable_operation)
+                self.buffer_projection = None
             elif callable_operation.name == "command.def":
                 self._render_command_program(callable_operation)
             elif callable_operation.name == "pipeline.def":

@@ -35,6 +35,7 @@ loom_check_test_suite(
     name = "artifact_test",
     srcs = [
         "buffer_packets.loom-test",
+        "buffer_projection.loom-test",
         "call_overflow.loom-test",
         "calls.loom-test",
         "emission.loom-test",
@@ -99,8 +100,10 @@ iree_py_test(
         "--checker=$(rootpath //loom/src/loom/tools/loom-check:loom-check-test)",
         "--source=$(rootpath special_members.cxx-test)",
         "--source=$(rootpath value_evaluation.cxx-test)",
+        "--source=$(rootpath buffer_projection.loom-test)",
     ],
     data = [
+        "buffer_projection.loom-test",
         "special_members.cxx-test",
         "value_evaluation.cxx-test",
         "//loom/src/loom/tools/loom-check:loom-check-test",

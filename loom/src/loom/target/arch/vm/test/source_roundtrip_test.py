@@ -31,13 +31,13 @@ def invoke(tool: str, arguments: list[str], source: bytes) -> bytes:
     return result.stdout
 
 
-def export(bytecode: bytes) -> bytes:
+def export(module: bytes) -> bytes:
     output = io.BytesIO()
     error = io.StringIO()
     exit_code = export_cxx.run(
         "-",
         "-",
-        stdin=io.BytesIO(bytecode),
+        stdin=io.BytesIO(module),
         stdout=output,
         stderr=error,
     )
@@ -62,14 +62,16 @@ def main() -> None:
         for ordinal, case in enumerate(cases, 1):
             source, expected = case.split("// ----\n")
             try:
-                bytecode = invoke(
-                    args.importer,
-                    ["--root=run", "--cleanup=false", "--to=bc", "-"],
-                    source.encode("utf-8"),
-                )
+                module = source.encode("utf-8")
+                if source_path.endswith(".cxx-test"):
+                    module = invoke(
+                        args.importer,
+                        ["--root=run", "--cleanup=false", "--to=bc", "-"],
+                        module,
+                    )
                 fixtures.append(
                     b"// RUN: emit vm-object-lifetime\n// INPUT: cxx root=run\n"
-                    + export(bytecode)
+                    + export(module)
                     + b"\n// ----\n"
                     + expected.encode("utf-8")
                 )
