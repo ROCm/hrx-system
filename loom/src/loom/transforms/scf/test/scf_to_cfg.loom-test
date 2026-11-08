@@ -487,3 +487,54 @@ func.def @rejects_unknown_for_step(%n: index, %step: index) {
   }
   func.return
 }
+
+// ====
+
+// Residual runtime control cannot become CFG inside a construction region
+// whose owner requires one block.
+pipeline.def @rejects_single_block_if(%condition: i1) run() {
+  pipeline.concurrent {
+    // ERROR@+1: STRUCTURE/066 {op_name="scf.if", pass_name="scf-to-cfg"}
+    scf.if %condition {
+    }
+  }
+}
+
+// ====
+
+pipeline.def @rejects_single_block_for(%limit: index) run() {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  pipeline.concurrent {
+    // ERROR@+1: STRUCTURE/066 {op_name="scf.for", pass_name="scf-to-cfg"}
+    scf.for %index = [%begin to %limit step %step] {
+    }
+  }
+}
+
+// ====
+
+pipeline.def @rejects_single_block_while(%initial: i1) run() {
+  pipeline.concurrent {
+    // ERROR@+1: STRUCTURE/066 {op_name="scf.while", pass_name="scf-to-cfg"}
+    %finished = scf.while(%active = %initial : i1) -> (i1) {
+      scf.condition %active, %active : i1, i1
+    } do(%next: i1) {
+      scf.yield %next : i1
+    }
+  }
+}
+
+// ====
+
+pipeline.def @rejects_single_block_switch(%selector: index) run() {
+  pipeline.concurrent {
+    // ERROR@+1: STRUCTURE/066 {op_name="scf.switch", pass_name="scf-to-cfg"}
+    scf.switch %selector {
+      case 0 {
+      }
+      default {
+      }
+    }
+  }
+}
