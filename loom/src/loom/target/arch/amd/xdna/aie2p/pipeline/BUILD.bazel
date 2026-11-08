@@ -133,6 +133,7 @@ loom_cc_library(
     ],
     hdrs = [
         "channel_state.h",
+        "distribution.h",
         "dma_resources.h",
         "dma_submission.h",
         "native.h",
@@ -188,6 +189,16 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "distribution_test",
+    srcs = ["distribution_test.cc"],
+    deps = [
+        ":native",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

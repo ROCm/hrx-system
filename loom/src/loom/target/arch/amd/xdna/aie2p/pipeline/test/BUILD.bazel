@@ -94,6 +94,7 @@ loom_test(
     srcs = [
         "channel_fanout.loom",
         "joined_phases.loom",
+        "ordered_geometry.loom",
         "packet_phases.loom",
         "retained_handoff.loom",
     ],
